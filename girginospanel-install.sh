@@ -49,7 +49,7 @@ dnf install -y nginx httpd mariadb-server valkey certbot python3-certbot-nginx \
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
-BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-redis6"
+BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6"
 dnf install -y $BASE_PKGS >/dev/null 2>&1 && ok "base php + php-redis"
 for v in $PHP_VERS; do
   pkgs=""; for e in $PHP_EXT; do pkgs="$pkgs php$v-php-$e"; done
