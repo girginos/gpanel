@@ -43,8 +43,9 @@ dnf config-manager --set-enabled crb >/dev/null 2>&1 && ok "CRB"
 step "2) Temel paketler"
 dnf install -y nginx mariadb-server valkey certbot python3-certbot-nginx \
   clamav clamav-update httpd-tools tar openssl policycoreutils-python-utils \
-  setools-console jq bind bind-utils rsync git curl >/dev/null 2>&1 \
-  && ok "nginx, mariadb, valkey, certbot, clamav, bind, araçlar" || die "temel paket kurulumu"
+  setools-console jq bind bind-utils nftables unzip zip cronie xfsprogs sudo \
+  rsync git curl >/dev/null 2>&1 \
+  && ok "nginx, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, araçlar" || die "temel paket kurulumu"
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
@@ -196,6 +197,17 @@ else
   warn "named-checkconf hata — DNS elle kontrol edilmeli"
 fi
 
+# ---- acme.sh (Let's Encrypt SSL) — panel /root/.acme.sh/acme.sh çağırır ----
+if [ ! -x /root/.acme.sh/acme.sh ]; then
+  curl -fsSL https://get.acme.sh 2>/dev/null | sh -s email="$ADMIN_EPOSTA" >/dev/null 2>&1 || true
+fi
+if [ -x /root/.acme.sh/acme.sh ]; then
+  /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt >/dev/null 2>&1
+  ok "acme.sh (Let's Encrypt default CA + oto-yenileme cron)"
+else
+  warn "acme.sh kurulamadı — Let's Encrypt SSL için elle: curl https://get.acme.sh | sh"
+fi
+
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
@@ -236,6 +248,7 @@ CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/nu
 API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
 echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel | tr '\n' ' ')"
 echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
+echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
