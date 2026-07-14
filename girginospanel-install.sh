@@ -243,7 +243,10 @@ SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 0 3 * * * root /usr/local/bin/girginospanel-backup-all
 CRON
-ok "günlük yedek cron (03:00 UTC)"
+# crond'u ŞİMDİ başlat + enable et (AlmaLinux preset yalnız enable eder, reboot'a kadar
+# başlatmaz → yedek cron'u ilk reboot'a kadar çalışmazdı). enable --now idempotent.
+systemctl enable --now crond >/dev/null 2>&1
+systemctl is-active --quiet crond && ok "günlük yedek cron + crond ACTIVE (03:00 UTC)" || warn "crond başlatılamadı — yedek cron çalışmayabilir"
 
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
@@ -290,7 +293,7 @@ step "15) Doğrulama"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/null)
 API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
-echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel | tr '\n' ' ')"
+echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel crond | tr '\n' ' ')"
 echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
 echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)   ·   composer $(command -v composer >/dev/null && echo ✓ || echo ✗)   ·   apache/httpd $(systemctl is-active httpd)"
 echo
