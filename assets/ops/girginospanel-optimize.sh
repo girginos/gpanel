@@ -178,6 +178,19 @@ server_names_hash_bucket_size 128;
 fastcgi_buffers 16 16k;
 fastcgi_buffer_size 32k;
 fastcgi_busy_buffers_size 32k;
+# gzip — GLOBAL (http): TÜM siteler (panel + müşteri vhostları) sıkıştırılır.
+# text/html nginx tarafından zaten sıkıştırılır (listelenmez). comp_level 5 = iyi denge.
+gzip on;
+gzip_vary on;
+gzip_comp_level 5;
+gzip_min_length 256;
+gzip_proxied any;
+gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml application/xml+rss application/rss+xml application/atom+xml application/wasm application/vnd.ms-fontobject application/x-font-ttf font/ttf font/otf font/woff font/woff2 image/svg+xml image/x-icon;
+# statik dosya deskriptör cache — açık dosya sayısını azaltır, I/O düşürür
+open_file_cache max=10000 inactive=60s;
+open_file_cache_valid 120s;
+open_file_cache_min_uses 2;
+open_file_cache_errors on;
 NGX
 
 # 3) doğrula → başarısızsa geri al
