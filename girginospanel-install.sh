@@ -43,8 +43,8 @@ dnf config-manager --set-enabled crb >/dev/null 2>&1 && ok "CRB"
 step "2) Temel paketler"
 dnf install -y nginx mariadb-server valkey certbot python3-certbot-nginx \
   clamav clamav-update httpd-tools tar openssl policycoreutils-python-utils \
-  setools-console jq bind-utils rsync git curl >/dev/null 2>&1 \
-  && ok "nginx, mariadb, valkey, certbot, clamav, araçlar" || die "temel paket kurulumu"
+  setools-console jq bind bind-utils rsync git curl >/dev/null 2>&1 \
+  && ok "nginx, mariadb, valkey, certbot, clamav, bind, araçlar" || die "temel paket kurulumu"
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
@@ -169,6 +169,33 @@ systemctl enable --now php-fpm >/dev/null 2>&1
 for v in $PHP_VERS; do systemctl enable --now php$v-php-fpm >/dev/null 2>&1; done
 ok "php-fpm (base + 5 sürüm)"
 
+# ---- named (DNS sunucusu) — domainlerin ad sunucusu ----
+NC=/etc/named.conf
+if [ -f "$NC" ]; then
+  cp -a "$NC" "$NC.gosp-bak" 2>/dev/null || true
+  # dışarıdan sorgulanabilsin: tüm arayüzleri dinle (varsayılan yalnız 127.0.0.1)
+  sed -i -E 's/listen-on port 53 \{[^}]*\}/listen-on port 53 { any; }/' "$NC"
+  sed -i -E 's/listen-on-v6 port 53 \{[^}]*\}/listen-on-v6 port 53 { any; }/' "$NC"
+  # açık-çözücü (open resolver / DNS amplification) olmasın — yalnızca yetkili DNS
+  sed -i -E 's/recursion yes/recursion no/' "$NC"
+  # panel zone include'u (WriteZone bunu doldurur) — idempotent
+  grep -q 'girginospanel-zones.conf' "$NC" || \
+    echo 'include "/etc/named/girginospanel-zones.conf";' >> "$NC"
+fi
+# panel zone include dosyası (boş başlar; panel domain ekledikçe dolar)
+mkdir -p /etc/named
+[ -f /etc/named/girginospanel-zones.conf ] || \
+  printf '// girginospanel — otomatik üretildi\n' > /etc/named/girginospanel-zones.conf
+chown root:named /etc/named/girginospanel-zones.conf 2>/dev/null || true
+chmod 640 /etc/named/girginospanel-zones.conf 2>/dev/null || true
+# zone dosyaları /var/named altında (SELinux named_zone_t context ŞART)
+restorecon -R /var/named /etc/named >/dev/null 2>&1 || true
+if named-checkconf >/dev/null 2>&1; then
+  systemctl enable --now named >/dev/null 2>&1 && ok "named (DNS authoritative, :53 açık, recursion kapalı)" || warn "named başlatılamadı"
+else
+  warn "named-checkconf hata — DNS elle kontrol edilmeli"
+fi
+
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
@@ -206,8 +233,8 @@ step "15) Doğrulama"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/null)
 API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
-echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm girginospanel | tr '\n' ' ')"
-echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API"
+echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named girginospanel | tr '\n' ' ')"
+echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
