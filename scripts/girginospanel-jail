@@ -1,0 +1,116 @@
+#!/bin/bash
+# girginospanel-jail: per-user chroot jail (cPanel "jailed shell" benzeri).
+# Paylaşılan şablon (hardlink -> disk paylaşımı) + gerçek home bind-mount.
+# FTP/nginx/php gerçek /home/<user>'ı kullanmaya devam eder — jail sadece SSH oturumunu sınırlar.
+set -o pipefail
+JAILROOT=/home/jails
+TEMPLATE=/opt/girginospanel/jail-template
+
+BINS="/usr/bin/bash /usr/bin/ls /usr/bin/cat /usr/bin/cp /usr/bin/mv /usr/bin/rm \
+/usr/bin/mkdir /usr/bin/rmdir /usr/bin/pwd /usr/bin/chmod /usr/bin/touch /usr/bin/ln \
+/usr/bin/find /usr/bin/grep /usr/bin/head /usr/bin/tail /usr/bin/less /usr/bin/nano \
+/usr/bin/tar /usr/bin/gzip /usr/bin/gunzip /usr/bin/unzip /usr/bin/curl /usr/bin/wget \
+/usr/bin/git /usr/bin/id /usr/bin/whoami /usr/bin/env /usr/bin/du /usr/bin/clear \
+/usr/bin/date /usr/bin/sed /usr/bin/awk /usr/bin/sort /usr/bin/wc /usr/bin/stat /usr/bin/file \
+/usr/bin/tr /usr/bin/cut /usr/bin/tee /usr/bin/sleep /usr/bin/seq /usr/bin/xargs /usr/bin/uniq \
+/usr/bin/comm /usr/bin/mktemp /usr/bin/readlink /usr/bin/dirname /usr/bin/basename /usr/bin/which \
+/usr/bin/diff /usr/bin/vi /usr/bin/chown /usr/bin/chgrp /usr/bin/df /usr/bin/free /usr/bin/md5sum \
+/usr/bin/sha256sum /usr/bin/realpath /usr/bin/dos2unix /usr/bin/rsync"
+
+copy_with_libs() {
+  local bin="$1" jd="$2" real
+  real=$(readlink -f "$bin" 2>/dev/null || echo "$bin")
+  [ -e "$real" ] || return 0
+  mkdir -p "$jd$(dirname "$real")"
+  cp -f "$real" "$jd$real"
+  # orijinal yolu da (symlink ise) koru
+  if [ "$real" != "$bin" ]; then mkdir -p "$jd$(dirname "$bin")"; ln -sf "$real" "$jd$bin" 2>/dev/null || cp -f "$real" "$jd$bin"; fi
+  ldd "$real" 2>/dev/null | grep -oE '/[^ ]+\.so[^ ]*' | while read -r lib; do
+    [ -e "$lib" ] || continue
+    mkdir -p "$jd$(dirname "$lib")"
+    cp -f "$lib" "$jd$lib" 2>/dev/null || true
+  done
+}
+
+build_template() {
+  rm -rf "$TEMPLATE"; mkdir -p "$TEMPLATE"/{bin,usr/bin,lib64,lib,etc,dev,tmp,home,usr/share/terminfo}
+  chmod 1777 "$TEMPLATE/tmp"
+  for b in $BINS; do copy_with_libs "$b" "$TEMPLATE"; done
+  # dinamik linker + NSS (getpwnam/host çözümü)
+  for f in /lib64/ld-linux-x86-64.so.2 /lib64/libnss_files.so.2 /lib64/libnss_dns.so.2 \
+           /lib64/libresolv.so.2 /lib64/libnsl.so.1 /lib64/libnss_compat.so.2; do
+    [ -e "$f" ] && { mkdir -p "$TEMPLATE$(dirname "$f")"; cp -f "$f" "$TEMPLATE$f"; }
+  done
+  # /bin -> /usr/bin uyumu
+  ( cd "$TEMPLATE"; [ -e bin/bash ] || cp usr/bin/bash bin/bash 2>/dev/null; ln -sf bash bin/sh 2>/dev/null )
+  cp -f "$TEMPLATE/usr/bin/"* "$TEMPLATE/bin/" 2>/dev/null || true
+  # terminfo (nano/less/clear için)
+  for d in x l v s; do cp -a "/usr/share/terminfo/$d" "$TEMPLATE/usr/share/terminfo/" 2>/dev/null || true; done
+  # etc
+  printf 'passwd: files\ngroup: files\nhosts: files dns\n' > "$TEMPLATE/etc/nsswitch.conf"
+  cp -f /etc/resolv.conf "$TEMPLATE/etc/" 2>/dev/null || true
+  echo "root:x:0:0:root:/root:/bin/bash" > "$TEMPLATE/etc/passwd"
+  echo "root:x:0:" > "$TEMPLATE/etc/group"
+  echo "127.0.0.1 localhost" > "$TEMPLATE/etc/hosts"
+  printf 'export PS1="[\\u@%s \\W]\\$ "\nexport PATH=/bin:/usr/bin\nexport TERM=${TERM:-xterm}\numask 022\n' "girginos-jail" > "$TEMPLATE/etc/profile"
+  chown -R root:root "$TEMPLATE"
+  echo "template OK: $TEMPLATE ($(du -sh "$TEMPLATE" 2>/dev/null | cut -f1))"
+}
+
+setup() {
+  local sk="$1"
+  [[ "$sk" == c_* ]] || { echo "HATA: c_ olmayan kullanıcı"; exit 1; }
+  local home="/home/$sk" jd="$JAILROOT/$sk"
+  [ -d "$home" ] || { echo "HATA: home yok: $home"; exit 1; }
+  [ -d "$TEMPLATE" ] || build_template
+  mkdir -p "$JAILROOT"; chown root:root "$JAILROOT"; chmod 755 "$JAILROOT"
+  # önceki bind'i çöz
+  mountpoint -q "$jd/home/$sk" && { umount "$jd/home/$sk" 2>/dev/null || umount -l "$jd/home/$sk"; }
+  rm -rf "$jd"; mkdir -p "$jd"
+  # şablonu hardlink ile kopyala (disk paylaşımı, aynı fs)
+  cp -al "$TEMPLATE/." "$jd/" 2>/dev/null || cp -a "$TEMPLATE/." "$jd/"
+  chown root:root "$jd"; chmod 755 "$jd"
+  # dev düğümleri
+  mkdir -p "$jd/dev"
+  [ -e "$jd/dev/null" ]    || mknod -m 666 "$jd/dev/null" c 1 3
+  [ -e "$jd/dev/zero" ]    || mknod -m 666 "$jd/dev/zero" c 1 5
+  [ -e "$jd/dev/random" ]  || mknod -m 666 "$jd/dev/random" c 1 8
+  [ -e "$jd/dev/urandom" ] || mknod -m 666 "$jd/dev/urandom" c 1 9
+  [ -e "$jd/dev/tty" ]     || mknod -m 666 "$jd/dev/tty" c 5 0
+  # jail passwd/group: root + kullanıcı
+  echo "root:x:0:0:root:/root:/bin/bash" > "$jd/etc/passwd"
+  getent passwd "$sk" | awk -F: -v OFS=: '{$7="/bin/bash"; print}' >> "$jd/etc/passwd"
+  echo "root:x:0:" > "$jd/etc/group"
+  getent group "$sk" >> "$jd/etc/group"
+  # gerçek home'u jail içine bind-mount
+  mkdir -p "$jd/home/$sk"
+  mount --bind "$home" "$jd/home/$sk"
+  # reboot kalıcılığı (fstab) — nofail: hedef yoksa boot ASKIYA ALINMASIN
+  local line="$home $jd/home/$sk none bind,nofail,x-systemd.requires-mounts-for=$home 0 0"
+  grep -qF "$jd/home/$sk none bind" /etc/fstab || echo "$line" >> /etc/fstab
+  restorecon -R "$jd" 2>/dev/null || true
+  echo "setup OK: $jd"
+}
+
+teardown() {
+  local sk="$1"
+  [[ "$sk" == c_* ]] || { echo "HATA: c_ olmayan kullanıcı — teardown iptal"; exit 1; }
+  local jd="$JAILROOT/$sk"
+  local bp="$jd/home/$sk"
+  [ -d "$jd" ] || { echo "teardown: jail yok ($sk)"; return 0; }
+  # bind'i çöz — ASLA fuser -km KULLANMA (bind-mount ana fs'i işaret eder,
+  # tüm sistem process'lerini öldürür). Aktif oturum varsa lazy-umount yeter.
+  if mountpoint -q "$bp"; then umount "$bp" 2>/dev/null || umount -l "$bp" 2>/dev/null || true; fi
+  sed -i "\|$bp none bind|d" /etc/fstab
+  # ek güvenlik: hâlâ mount ise SİLME (gerçek home'a inmeyi önle)
+  if mountpoint -q "$bp"; then echo "UYARI: bind çözülemedi, jail dizini korundu: $jd"; return 0; fi
+  rm -rf "$jd"
+  echo "teardown OK: $sk"
+}
+
+case "${1:-}" in
+  template) build_template ;;
+  setup)    setup "${2:?c_user gerek}" ;;
+  teardown) teardown "${2:?c_user gerek}" ;;
+  *) echo "kullanım: $0 {template|setup <c_user>|teardown <c_user>}"; exit 1 ;;
+esac

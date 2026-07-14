@@ -1,0 +1,37 @@
+# --- Frontend ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# --- Go build çıktıları (kök seviyede yerel derleme) ---
+/girginospanel-server
+/girginospanel-seed-admin
+/server
+*.exe
+*.test
+*.out
+
+# --- Ortam / gizli ---
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# --- Çalışma zamanı verisi (repoya girmemeli) ---
+*.log
+*.sqlite
+*.db
+/data/
+/logs/
+/backups/
+
+# --- Editör / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+__pycache__/

@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# girginospanel-repair — dizin / sahiplik / izin / SELinux onarım aracı
+# Idempotent + TAHRİBATSIZ: yalnızca chown/chmod/mkdir/restorecon/semanage yapar.
+# Asla silmez, fuser çağırmaz, çalışan servisi bozmaz. Tekrar tekrar güvenle çalışır.
+#
+# Kullanım:
+#   girginospanel-repair [--dry-run] [--deep] [--only <bölümler>] [--quiet]
+#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon  (varsayılan: hepsi)
+#   --dry-run : değişiklikleri UYGULAMADAN neyin düzeltileceğini göster
+#   --deep    : domain ev dizinlerinde RECURSIVE sahiplik onarımı (yavaş, büyük siteler)
+set -uo pipefail
+
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --deep)    DEEP=1 ;;
+    --quiet)   QUIET=1 ;;
+    --only)    shift; ONLY="$1" ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "bilinmeyen argüman: $1" >&2; exit 2 ;;
+  esac; shift
+done
+
+CHK=0; FIXN=0; ERRN=0
+c_g="\033[32m"; c_y="\033[33m"; c_r="\033[31m"; c_b="\033[34m"; c_0="\033[0m"
+[ -t 1 ] || { c_g=; c_y=; c_r=; c_b=; c_0=; }
+say()   { [ $QUIET -eq 1 ] || echo -e "$*"; }
+head_() { say "\n${c_b}== $* ==${c_0}"; }
+ok()    { CHK=$((CHK+1)); [ $QUIET -eq 1 ] || echo -e "  ${c_g}✓${c_0} $*"; }
+act()   { CHK=$((CHK+1)); FIXN=$((FIXN+1)); echo -e "  ${c_y}$([ $DRY -eq 1 ] && echo '→ (dry) ' || echo '✔ DÜZELTİLDİ ')${c_0}$*"; }
+warn()  { echo -e "  ${c_y}!${c_0} $*"; }
+err()   { ERRN=$((ERRN+1)); echo -e "  ${c_r}✗${c_0} $*"; }
+
+SEL=0; command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ] && SEL=1
+HAVE_SEMANAGE=0; command -v semanage >/dev/null 2>&1 && HAVE_SEMANAGE=1
+
+# ---- yardımcılar (hepsi idempotent + dry-run duyarlı) ----
+ensure_owner() { # path  user:group  [recursive]
+  local p=$1 o=$2 r=${3:-}; [ -e "$p" ] || return 0
+  local cur; cur=$(stat -c '%U:%G' "$p" 2>/dev/null) || return 0
+  if [ "$cur" != "$o" ]; then
+    act "chown ${r:+-R }$o  $p  (şu an: $cur)"
+    [ $DRY -eq 0 ] && chown $r "$o" "$p" 2>/dev/null || true
+  else
+    ok "sahiplik $o  $p"
+  fi
+}
+ensure_mode() { # path  mode
+  local p=$1 m=$2; [ -e "$p" ] || return 0
+  local cur; cur=$(stat -c '%a' "$p" 2>/dev/null) || return 0
+  # baştaki 0'ı normalize et
+  if [ "$((8#$cur))" != "$((8#$m))" ]; then
+    act "chmod $m  $p  (şu an: $cur)"
+    [ $DRY -eq 0 ] && chmod "$m" "$p" 2>/dev/null || true
+  else
+    ok "izin $m  $p"
+  fi
+}
+ensure_dir() { # path  mode  owner
+  local p=$1 m=$2 o=$3
+  if [ ! -d "$p" ]; then
+    act "mkdir -p $p (mod $m, sahip $o)"
+    [ $DRY -eq 0 ] && { mkdir -p "$p"; chmod "$m" "$p"; chown "$o" "$p"; }
+  else
+    ensure_mode "$p" "$m"; ensure_owner "$p" "$o"
+  fi
+}
+# SELinux fcontext'i KALICI kaydet + uygula (restorecon-safe). semanage yoksa chcon fallback.
+ensure_context() { # path  type  [recursive]
+  [ $SEL -eq 1 ] || return 0
+  local p=$1 t=$2 r=${3:-}
+  [ -e "$p" ] || return 0
+  if [ $HAVE_SEMANAGE -eq 1 ]; then
+    local spec="${p}(/.*)?" _lst
+    _lst=$(semanage fcontext -l 2>/dev/null)          # önce yakala (pipefail+grep -q SIGPIPE tuzağından kaçın)
+    if ! grep -qF "${spec}" <<<"$_lst"; then
+      act "semanage fcontext +$t  $spec  (kalıcı kural)"
+      [ $DRY -eq 0 ] && semanage fcontext -a -t "$t" "$spec" 2>/dev/null || true
+    fi
+    if [ $DRY -eq 0 ]; then
+      local n; n=$(restorecon -R${r:+} -v "$p" 2>/dev/null | wc -l)
+      [ "${n:-0}" -gt 0 ] && act "restorecon $p  ($n bağlam düzeltildi)" || ok "SELinux bağlam $t  $p"
+    else
+      say "  → (dry) restorecon -R $p"
+    fi
+  else
+    local cur; cur=$(stat -c '%C' "$p" 2>/dev/null | cut -d: -f3)
+    if [ "$cur" != "$t" ]; then
+      act "chcon -t $t  $p  (semanage yok — geçici)"
+      [ $DRY -eq 0 ] && chcon ${r:+-R} -t "$t" "$p" 2>/dev/null || true
+    else
+      ok "SELinux bağlam $t  $p"
+    fi
+  fi
+}
+want() { echo ",$ONLY," | grep -q ",$1,"; }
+
+# ================= BÖLÜMLER =================
+sec_phpmyadmin() {
+  want phpmyadmin || return 0
+  head_ "phpMyAdmin"
+  local PMA=/opt/phpmyadmin
+  [ -d "$PMA" ] || { warn "$PMA yok, atlanıyor"; return 0; }
+  local PG; PG=$(awk -F= '/^[[:space:]]*group/{gsub(/ /,"",$2);print $2}' /etc/php-fpm.d/phpmyadmin.conf 2>/dev/null); PG=${PG:-apache}
+  ensure_context "$PMA" httpd_sys_content_t -R
+  if [ -f "$PMA/config.inc.php" ]; then
+    # pool kullanıcısı (apache) okuyabilmeli; secret içerdiği için world-readable OLMAMALI
+    ensure_owner "$PMA/config.inc.php" "root:$PG"
+    ensure_mode  "$PMA/config.inc.php" 640
+    if ! runuser -u "$PG" -- test -r "$PMA/config.inc.php" 2>/dev/null; then
+      err "config.inc.php $PG tarafından HÂLÂ okunamıyor!"
+    else
+      ok "config.inc.php $PG tarafından okunabilir"
+    fi
+  else
+    warn "config.inc.php yok"
+  fi
+  # TempDir + sessions: php-fpm (apache) yazabilmeli
+  ensure_dir "/var/lib/phpmyadmin"          755 "$PG:$PG"
+  ensure_dir "/var/lib/phpmyadmin/tmp"      755 "$PG:$PG"
+  ensure_dir "/var/lib/phpmyadmin/sessions" 700 "$PG:$PG"
+  ensure_context "/var/lib/phpmyadmin" httpd_sys_rw_content_t -R
+}
+
+sec_signon() {
+  want signon || return 0
+  head_ "pma-signon"
+  local S=/opt/girginospanel/pma-signon
+  [ -d "$S" ] || { warn "$S yok"; return 0; }
+  ensure_context "$S" httpd_sys_content_t -R
+}
+
+sec_frontend() {
+  want frontend || return 0
+  head_ "frontend-dist"
+  local F=/opt/girginospanel/frontend-dist
+  [ -d "$F" ] || { warn "$F yok"; return 0; }
+  ensure_owner "$F" "root:root"
+  ensure_context "$F" httpd_sys_content_t -R
+}
+
+sec_binary() {
+  want binary || return 0
+  head_ "sunucu binary"
+  local B=/opt/girginospanel/bin/girginospanel-server
+  [ -f "$B" ] || { warn "$B yok"; return 0; }
+  ensure_mode "$B" 755
+  # systemd exec bağlamı (203/EXEC hatası buradan) — restorecon varsayılana döndürür
+  if [ $SEL -eq 1 ] && [ $DRY -eq 0 ]; then
+    local n; n=$(restorecon -v "$B" 2>/dev/null | wc -l)
+    [ "${n:-0}" -gt 0 ] && act "restorecon $B (exec bağlamı düzeltildi)" || ok "SELinux exec bağlamı OK  $B"
+  fi
+}
+
+sec_htpasswd() {
+  want htpasswd || return 0
+  head_ "nginx htpasswd (şifre korumalı dizinler)"
+  local D=/etc/nginx/htpasswd
+  [ -d "$D" ] || { ok "htpasswd dizini yok (koruma tanımlı değil)"; return 0; }
+  ensure_mode "$D" 755
+  local f
+  for f in "$D"/*; do
+    [ -f "$f" ] || continue
+    ensure_mode "$f" 644
+  done
+  ensure_context "$D" httpd_config_t -R   # /etc/nginx fcontext → nginx okuyabilir
+}
+
+sec_clamav() {
+  want clamav || return 0
+  head_ "ClamAV imza veritabanı"
+  local C=/var/lib/clamav
+  [ -d "$C" ] || { ok "clamav yok"; return 0; }
+  local OWN; OWN=$(getent passwd 992 | cut -d: -f1); OWN=${OWN:-clamupdate}
+  # freshclam bu dizine yazamazsa imza güncellenemez
+  ensure_owner "$C" "$OWN:$OWN" -R
+  ensure_mode  "$C" 755
+}
+
+sec_domains() {
+  want domains || return 0
+  head_ "domain ev dizinleri (/home/c_*)"
+  local home sk
+  for home in /home/c_*; do
+    [ -d "$home" ] || continue
+    sk=$(basename "$home")
+    if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
+    ensure_owner "$home" "$sk:$sk"
+    ensure_mode  "$home" 711
+    # ÖNEMLİ: .karantina root'a ait KALMALI (müşteri zararlıya erişmesin) → hariç tut
+    local child bn
+    while IFS= read -r child; do
+      [ -z "$child" ] && continue
+      bn=$(basename "$child")
+      [ "$bn" = ".karantina" ] && continue
+      ensure_owner "$child" "$sk:$sk" -R
+    done < <(find "$home" -maxdepth 1 -mindepth 1 ! -user "$sk" 2>/dev/null)
+    [ -d "$home/public_html" ] && ensure_mode "$home/public_html" 755
+    [ -d "$home/.ssh" ]        && ensure_mode "$home/.ssh" 700
+    # karantina: root-owned + kilitli
+    if [ -d "$home/.karantina" ]; then ensure_owner "$home/.karantina" "root:root"; ensure_mode "$home/.karantina" 700; fi
+    if [ $DEEP -eq 1 ]; then
+      local n; n=$(find "$home" -path "$home/.karantina" -prune -o ! -user "$sk" -print 2>/dev/null | wc -l)
+      if [ "${n:-0}" -gt 0 ]; then
+        act "DEEP chown -R $sk:$sk $home ($n yanlış-sahipli dosya, .karantina hariç)"
+        [ $DRY -eq 0 ] && find "$home" -path "$home/.karantina" -prune -o ! -user "$sk" -exec chown "$sk:$sk" {} + 2>/dev/null
+      fi
+    fi
+    [ $SEL -eq 1 ] && [ $DRY -eq 0 ] && restorecon -R "$home" >/dev/null 2>&1
+  done
+}
+
+# ================= ÇALIŞTIR =================
+say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
+sec_phpmyadmin
+sec_domains
+sec_htpasswd
+sec_binary
+sec_clamav
+sec_frontend
+sec_signon
+
+# nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
+if want htpasswd && [ $DRY -eq 0 ]; then
+  if command -v nginx >/dev/null && nginx -t >/dev/null 2>&1; then :; else warn "nginx -t başarısız — kontrol edin"; fi
+fi
+
+say "\n${c_b}== Özet ==${c_0}"
+say "  kontrol: $CHK   düzeltme: $FIXN   hata: $ERRN"
+[ $DRY -eq 1 ] && say "  (dry-run: hiçbir değişiklik uygulanmadı — canlı için --dry-run'ı kaldırın)"
+exit $([ $ERRN -gt 0 ] && echo 1 || echo 0)

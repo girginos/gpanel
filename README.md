@@ -36,7 +36,7 @@ Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giri
 - Per-tenant **Redis object cache** (tek tıkla aç/kapa, WP'ye otomatik bağlama)
 - **Güvenlik duvarı** arayüzü (IP ban / whitelist / port kapatma + hazır şablonlar)
 - Backup yöneticisi, izleme/loglar, istatistikler
-- Müşteri / bayi yönetimi, hizmet planları
+- Hizmet planları ve kaynak limitleri (domain oluştururken varsayılan **Başlangıç**)
 
 ## Sistem gereksinimleri
 
@@ -59,3 +59,68 @@ girginospanel-repair        # izin / SELinux / sahiplik onarımı (idempotent)
 
 - Kurulum **idempotent** değildir; her çalıştırma yeni secret (JWT/DB parola) üretir. Yeniden çalıştırma yerine `girginospanel-repair` / `girginospanel-optimize` kullanın.
 - Panel HTTP/2 + self-signed SSL ile :8443'te yayınlanır; gerçek alan adı için Let's Encrypt panel üzerinden eklenebilir.
+
+---
+
+## Kaynaktan derleme ve geliştirme
+
+Bu proje **tamamen açık kaynaktır** (MIT). İstersen hazır binary'yi kurmak yerine kaynağı kendin derleyip geliştirebilirsin — katkılar açıktır.
+
+### Gereksinimler
+
+- **Go 1.23+** (backend)
+- **Node.js 20+** ve **npm** (frontend)
+- Çalıştırma için: MariaDB/MySQL erişimi (backend başlarken migration + admin seed uygular)
+
+### Backend (Go)
+
+```bash
+# tek statik binary derle
+go build -o girginospanel-server ./cmd/server
+
+# çalıştır (ortam değişkenleriyle)
+PANEL_JWT_SECRET="$(openssl rand -hex 32)" \
+PANEL_DB_DSN="root@unix(/var/lib/mysql/mysql.sock)/panel" \
+./girginospanel-server
+```
+
+Backend API `/api/v1` altında; sağlık kontrolü `/healthz`. Admin girişi işletim sistemi root'u üzerinden PAM ile doğrulanır (üretimde); geliştirmede `scripts/seed_admin.go` ile ayrı bir admin tohumlayabilirsin:
+
+```bash
+go run scripts/seed_admin.go -dsn '<DSN>' -kullanici admin -parola 'SECELECEGIN_PAROLA'
+# ya da: PANEL_SEED_PAROLA env değişkeni
+```
+
+### Frontend (React + Vite + TypeScript)
+
+```bash
+cd frontend
+npm install
+npm run dev        # geliştirme sunucusu :5185 (proxy /api → VITE_API_PROXY)
+npm run build      # üretim derlemesi → frontend/dist/
+```
+
+Dev sunucusunun backend'i nereye proxy'leyeceğini `VITE_API_PROXY` ile ayarla (varsayılan `http://localhost:8080`):
+
+```bash
+VITE_API_PROXY=http://localhost:8080 npm run dev
+```
+
+### Depo yapısı
+
+```
+cmd/server/       Go giriş noktası (main)
+internal/         Backend paketleri (domains, wordpress, dns, redis, guvenlikduvari, github, backups, ...)
+frontend/src/     React arayüzü (pages/, components/, lib/)
+migrations/       SQL şema migration'ları (başlangıçta uygulanır)
+scripts/          Ops yardımcıları (optimize, repair, redis-setup, seed_admin, ...)
+assets/           Kurulum için hazır (prebuilt) release çıktıları — installer bunları kullanır
+install.sh        Tek satır bootstrap (repoyu indirir → girginospanel-install.sh)
+```
+
+> `assets/` içindeki hazır binary + `frontend-dist.tar.gz`, `curl | bash` kurulumunun kaynağı derlemeden çalışması içindir. Kendi değişikliklerini yayınlarken bunları yukarıdaki `go build` / `npm run build` çıktısıyla güncelle.
+
+## Katkı & lisans
+
+- Katkılar (issue / PR) açıktır.
+- Lisans: **MIT** — bkz. [LICENSE](LICENSE). Kullanabilir, değiştirebilir, dağıtabilir ve kendi ürününde kullanabilirsin.
