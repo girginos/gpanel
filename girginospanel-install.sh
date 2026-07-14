@@ -276,6 +276,9 @@ if [ -x /opt/girginospanel/bin/girginospanel-seed-admin ]; then
     -parola "$(openssl rand -hex 16)" -eposta "$ADMIN_EPOSTA" >/dev/null 2>&1 \
     && ok "yönetici kaydı hazır" || warn "seed atlandı (kritik değil)"
 fi
+# root profili BOŞ gelsin — seed-admin'in sahte 'admin@local'/'Sistem Yöneticisi'
+# değerlerini temizle (kullanıcı Profil sayfasından doldurur)
+mysql panel -e "UPDATE users SET email='', full_name='' WHERE username='root' AND email='admin@local';" >/dev/null 2>&1 || true
 ok "Giriş: kullanıcı 'root' + bu sunucunun root parolası"
 
 # ============ 14) İzin onarımı ============
