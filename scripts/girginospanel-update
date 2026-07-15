@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# girginospanel-update — GirginOSPanel'i GitHub'dan güvenli in-place günceller.
+#
+#   girginospanel-update            # son sürümü çek → binary+frontend+migration değiştir → yeniden başlat
+#   girginospanel-update --dry-run  # sadece ne yapacağını göster, dokunma
+#   girginospanel-update --force    # binary aynı olsa bile yeniden uygula
+#   girginospanel-update --branch X # farklı dal (varsayılan: main)
+#
+# KORUR (asla dokunmaz): /etc/girginospanel/env (JWT/DB/Redis secret),
+# MariaDB `panel` DB + tüm müşteri verisi, /home/c_* siteleri.
+# Yeni migration'lar servis yeniden başlarken otomatik + idempotent uygulanır.
+# Yeni sürüm sağlıklı başlamazsa otomatik ESKİ binary'ye rollback yapar.
+set -euo pipefail
+
+REPO="${GOSP_REPO:-girginos/gpanel}"
+BRANCH="main"; DRY=0; FORCE=0
+PREFIX=/opt/girginospanel
+BIN="$PREFIX/bin/girginospanel-server"
+SEED="$PREFIX/bin/girginospanel-seed-admin"
+FDIST="$PREFIX/frontend-dist"
+MIGR="$PREFIX/src/migrations"
+SCRIPTS="$PREFIX/src/scripts"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --force) FORCE=1 ;;
+    --branch) BRANCH="$2"; shift ;;
+    --branch=*) BRANCH="${1#*=}" ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "bilinmeyen arg: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+c_b="\033[1;34m"; c_g="\033[32m"; c_r="\033[31m"; c_y="\033[33m"; c_0="\033[0m"
+[ -t 1 ] || { c_b=; c_g=; c_r=; c_y=; c_0=; }
+ok()   { echo -e "  ${c_g}✓${c_0} $*"; }
+warn() { echo -e "  ${c_y}!${c_0} $*"; }
+die()  { echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
+step() { echo -e "${c_b}══ $* ══${c_0}"; }
+
+# çalışan panelin /healthz'inden sürüm (binary'nin --version flag'i YOK, asla çalıştırmıyoruz)
+surum() { curl -fsS http://127.0.0.1:8080/healthz 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4; }
+
+[ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
+[ -x "$BIN" ] || die "GirginOSPanel kurulu değil ($BIN yok) — önce install.sh çalıştırın"
+command -v curl >/dev/null || die "curl gerekli"
+command -v tar  >/dev/null || die "tar gerekli"
+
+step "GirginOSPanel güncelleme (github.com/$REPO@$BRANCH)"
+
+# 1) indir
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+echo "  indiriliyor…"
+curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" | tar xz -C "$TMP" \
+  || die "indirme başarısız — repo public mi / '$BRANCH' dalı var mı?"
+SRC=$(find "$TMP" -maxdepth 1 -type d -name "*-$BRANCH" | head -1)
+A="$SRC/assets"
+NEWBIN="$A/girginospanel-server"
+[ -f "$NEWBIN" ] || die "$A/girginospanel-server yok (repo yapısı beklenenden farklı)"
+
+# 2) yeni binary'yi ÇALIŞTIRMADAN doğrula (ELF header) + değişiklik tespiti (sha256)
+head -c4 "$NEWBIN" | grep -q $'\x7fELF' || die "indirilen binary geçerli ELF değil — iptal"
+CURVER=$(surum); [ -n "$CURVER" ] || CURVER="?"
+CURSHA=$(sha256sum "$BIN"   | cut -d' ' -f1)
+NEWSHA=$(sha256sum "$NEWBIN" | cut -d' ' -f1)
+echo "  mevcut sürüm: $CURVER"
+if [ "$CURSHA" = "$NEWSHA" ] && [ "$FORCE" = 0 ]; then
+  ok "binary zaten en güncel (sha eşleşti) — yapılacak bir şey yok (--force ile zorla)"
+  exit 0
+fi
+
+if [ "$DRY" = 1 ]; then
+  step "DRY-RUN — değişecekler (uygulanmadı)"
+  [ "$CURSHA" = "$NEWSHA" ] && echo "  • binary AYNI (--force verildi)" || echo "  • $BIN  (yeni binary, yedek: $BIN.bak)"
+  echo "  • $FDIST/  (frontend-dist yeniden yazılır)"
+  echo "  • $MIGR/  (yeni .sql eklenir, mevcutlar korunur)"
+  echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
+  echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR)"
+  exit 0
+fi
+
+# 3) yedek (binary + seed)
+cp -f "$BIN" "$BIN.bak"
+[ -x "$SEED" ] && cp -f "$SEED" "$SEED.bak" 2>/dev/null || true
+ok "mevcut binary yedeklendi ($BIN.bak)"
+
+# 4) binary swap (install = atomik replace; çalışan process eski inode'u restart'a kadar tutar — cp -f KULLANMA)
+install -m 0755 "$NEWBIN" "$BIN"
+[ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
+ok "binary güncellendi"
+
+# 5) frontend-dist
+if [ -f "$A/frontend-dist.tar.gz" ]; then
+  rm -rf "${FDIST:?}/"* && tar xzf "$A/frontend-dist.tar.gz" -C "$FDIST"
+  ok "frontend-dist güncellendi"
+fi
+
+# 6) migration'lar (idempotent — startup'ta uygulanır)
+if [ -f "$A/migrations.tar.gz" ]; then
+  mkdir -p "$MIGR"; tar xzf "$A/migrations.tar.gz" -C "$MIGR"
+  ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
+fi
+
+# 7) ops-tool'lar (updater kendini de günceller)
+if [ -d "$A/ops" ]; then
+  for t in "$A"/ops/*; do bn=$(basename "$t"); install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" 2>/dev/null || true; done
+  mkdir -p "$SCRIPTS"; cp "$A"/ops/* "$SCRIPTS/" 2>/dev/null || true
+  ok "ops-tool'lar güncellendi"
+fi
+
+# 8) SELinux context
+command -v restorecon >/dev/null && restorecon -R "$PREFIX/bin" "$FDIST" >/dev/null 2>&1 || true
+
+# 9) yeniden başlat + sağlık kontrolü (başarısızsa rollback)
+step "Yeniden başlatılıyor"
+systemctl restart girginospanel
+HEALTHY=0
+for i in 1 2 3 4 5 6; do
+  sleep 2
+  if systemctl is-active --quiet girginospanel && curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then HEALTHY=1; break; fi
+done
+
+if [ "$HEALTHY" = 1 ]; then
+  systemctl reload nginx >/dev/null 2>&1 || true
+  NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
+  ok "panel ACTIVE + /healthz OK"
+  echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
+else
+  warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye dönülüyor"
+  install -m 0755 "$BIN.bak" "$BIN"
+  [ -f "$SEED.bak" ] && install -m 0755 "$SEED.bak" "$SEED" 2>/dev/null || true
+  command -v restorecon >/dev/null && restorecon "$BIN" >/dev/null 2>&1 || true
+  systemctl restart girginospanel; sleep 3
+  if systemctl is-active --quiet girginospanel; then
+    die "rollback yapıldı — panel ESKİ sürümle ayakta. Yeni sürüm hatası: journalctl -u girginospanel -n 40"
+  else
+    die "KRİTİK: rollback sonrası da panel kalkmadı — journalctl -u girginospanel -n 40"
+  fi
+fi

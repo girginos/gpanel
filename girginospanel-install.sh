@@ -102,7 +102,7 @@ for t in "$A"/ops/*; do
   install -m 0755 "$t" "/usr/local/bin/$nm" 2>/dev/null
 done
 cp "$A/ops/"* /opt/girginospanel/src/scripts/ 2>/dev/null
-ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
+ok "ops-tool'lar (/usr/local/bin: update, optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
 
 # ============ 7) PANEL SSL (self-signed) ============
 step "7) Panel SSL (:8443 self-signed)"

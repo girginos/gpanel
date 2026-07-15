@@ -49,11 +49,30 @@ Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giri
 Kurulumla birlikte `/usr/local/bin`'e şu araçlar gelir:
 
 ```bash
+girginospanel-update        # paneli GitHub'dan güvenli güncelle (aşağıya bak)
 girginospanel-optimize      # MariaDB/nginx/PHP'yi sunucu kaynaklarına göre yeniden ayarla
 girginospanel-redis-setup   # Valkey (Redis) altyapısını kur/onar
 girginospanel-wp-redis <sk> # bir domainin WordPress'ine Redis cache bağla/çöz
 girginospanel-repair        # izin / SELinux / sahiplik onarımı (idempotent)
 ```
+
+## Güncelleme (SSH / CLI)
+
+Kurulu bir panelde, SSH ile root olarak tek komut:
+
+```bash
+girginospanel-update            # son sürümü GitHub'dan çek → binary+frontend+migration değiştir → yeniden başlat
+girginospanel-update --dry-run  # önce ne yapacağını göster (dokunmadan)
+girginospanel-update --force    # binary aynı olsa bile yeniden uygula
+girginospanel-update --branch X # farklı dal
+```
+
+- **Güvenli & veri-korumalı:** `/etc/girginospanel/env` (JWT/DB/Redis secret), MariaDB `panel` veritabanı ve `/home/c_*` müşteri siteleri **asla silinmez**. `install.sh`'in aksine yeni secret üretmez.
+- Yeni migration'lar servis yeniden başlarken **otomatik + idempotent** uygulanır.
+- Binary değişmemişse (sha eşleşir) hiçbir şey yapmaz.
+- Yeni sürüm sağlıklı başlamazsa **otomatik olarak eski binary'ye geri döner** (rollback).
+
+> Kendi fork'unu deploy ediyorsan: kaynağı derle (`go build` + `npm run build`), `assets/girginospanel-server` + `assets/frontend-dist.tar.gz`'i güncelle, repona push et — sunucularda `girginospanel-update` yeni sürümü çeker.
 
 ## Notlar
 
