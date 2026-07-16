@@ -279,7 +279,7 @@ function KayitModal({ mevcut, domainId, ipv4, onKapat, onKayit }: {
     tip: mevcut.tip || 'A',
     deger: mevcut.deger || ipv4,
     ttl: mevcut.ttl || 3600,
-    oncelik: mevcut.oncelik || 10,
+    oncelik: mevcut.oncelik || 0,
     aktif: mevcut.aktif !== false,
     olusturma: '',
   })
@@ -312,7 +312,7 @@ function KayitModal({ mevcut, domainId, ipv4, onKapat, onKayit }: {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Tip</label>
-            <select value={form.tip} onChange={e => setForm({ ...form, tip: e.target.value })}
+            <select value={form.tip} onChange={e => { const t = e.target.value; setForm(f => ({ ...f, tip: t, oncelik: (t === 'MX' || t === 'SRV') ? (f.oncelik || 10) : 0 })) }}
               className="w-full px-2 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-slate-800">
               {TIPLER.map(t => <option key={t} value={t}>{t}</option>)}
             </select>

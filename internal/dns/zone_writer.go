@@ -41,7 +41,7 @@ var zoneTmpl = template.Must(template.New("z").Funcs(template.FuncMap{
     1209600      ; expire
     3600         ; minimum
 )
-{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if .Oncelik}}{{.Oncelik}} {{end}}{{fqdn .Tip .Deger}}
+{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if and .Oncelik (or (eq .Tip "MX") (eq .Tip "SRV"))}}{{.Oncelik}} {{end}}{{fqdn .Tip .Deger}}
 {{end}}`))
 
 type zoneCtx struct {
@@ -86,20 +86,44 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 
 	_ = os.MkdirAll(ZoneDir, 0750)
 	zonePath := filepath.Join(ZoneDir, alanAdi+".zone")
-	if err := os.WriteFile(zonePath, buf.Bytes(), 0640); err != nil {
+
+	// Önce GEÇİCİ dosyaya yaz + named-checkzone ile doğrula; SADECE geçerliyse
+	// canlı zone dosyasının üzerine taşı. Böylece hatalı bir kayıt (ör. A kaydına
+	// yanlışlıkla öncelik) asla çalışan zone'u bozmaz ve SSH'tan elle düzeltme gerektirmez.
+	tmpPath := zonePath + ".tmp"
+	if err := os.WriteFile(tmpPath, buf.Bytes(), 0640); err != nil {
+		return err
+	}
+	if out, err := exec.Command("named-checkzone", alanAdi, tmpPath).CombinedOutput(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("zone geçersiz (%s): %s", alanAdi, strings.TrimSpace(string(out)))
+	}
+	if err := os.Rename(tmpPath, zonePath); err != nil {
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	_, _ = exec.Command("chown", "named:named", zonePath).CombinedOutput()
 	_, _ = exec.Command("restorecon", zonePath).CombinedOutput()
 
-	if out, err := exec.Command("named-checkzone", alanAdi, zonePath).CombinedOutput(); err != nil {
-		return fmt.Errorf("named-checkzone: %s: %w", strings.TrimSpace(string(out)), err)
-	}
 	if err := updateZoneIncludes(ctx, db); err != nil {
 		return err
 	}
-	_, _ = exec.Command("rndc", "reload").CombinedOutput()
+	reloadNamed()
 	return nil
+}
+
+// reloadNamed: zone'ları yeniden yükle. Önce rndc reload dener; bazı kurulumlarda
+// rndc anahtarı yok/başarısız olur → o zaman systemctl reload, o da olmazsa restart named.
+// (Eskiden sadece "rndc reload" vardı; başarısızsa değişiklik etki etmiyordu ve
+// operatör elle "systemctl restart named" yapmak zorunda kalıyordu.)
+func reloadNamed() {
+	if err := exec.Command("rndc", "reload").Run(); err == nil {
+		return
+	}
+	if err := exec.Command("systemctl", "reload", "named").Run(); err == nil {
+		return
+	}
+	_ = exec.Command("systemctl", "restart", "named").Run()
 }
 
 func updateZoneIncludes(ctx context.Context, db *sql.DB) error {
@@ -124,6 +148,6 @@ func updateZoneIncludes(ctx context.Context, db *sql.DB) error {
 func DeleteZone(ctx context.Context, db *sql.DB, alanAdi string) error {
 	_ = os.Remove(filepath.Join(ZoneDir, alanAdi+".zone"))
 	_ = updateZoneIncludes(ctx, db)
-	_, _ = exec.Command("rndc", "reload").CombinedOutput()
+	reloadNamed()
 	return nil
 }

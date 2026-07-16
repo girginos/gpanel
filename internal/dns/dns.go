@@ -109,6 +109,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	if !k.Aktif && k.Aktif != true {
 		// JSON'da aktif false ise 0 yaz, default true (yeni eklemede çoğunlukla aktif)
 	}
+	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO dns_records(domain_id, ad, tip, deger, ttl, oncelik, aktif)
 		 VALUES(?,?,?,?,?,?,?)`,
@@ -120,7 +121,9 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	nid, _ := res.LastInsertId()
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", nid)
 	saved, _ := scan(row)
-	_ = WriteZone(r.Context(), h.DB, id)
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusCreated, saved)
 }
 
@@ -150,6 +153,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	if k.Aktif {
 		ak = 1
 	}
+	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE dns_records SET ad=?, tip=?, deger=?, ttl=?, oncelik=?, aktif=?
 		 WHERE id=? AND domain_id=?`,
@@ -159,7 +163,9 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", rid)
 	saved, _ := scan(row)
-	_ = WriteZone(r.Context(), h.DB, id)
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, saved)
 }
 
@@ -221,7 +227,9 @@ func (h *Handlers) TopluSil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, _ := res.RowsAffected()
-	_ = WriteZone(r.Context(), h.DB, id)
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": n})
 }
 
@@ -269,7 +277,9 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, _ := res.RowsAffected()
-	_ = WriteZone(r.Context(), h.DB, id)
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "guncellenen": n})
 }
 
@@ -292,7 +302,9 @@ func (h *Handlers) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = WriteZone(r.Context(), h.DB, id)
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "eklenen": n})
 }
 
@@ -345,4 +357,14 @@ func gecerliTip(t string) bool {
 		}
 	}
 	return false
+}
+
+// oncelikNormalize: öncelik yalnızca MX ve SRV kayıtlarında anlamlıdır.
+// Diğer tiplerde 0'a çekilir; aksi halde zone dosyasında "A 10 1.2.3.4" gibi
+// GEÇERSİZ bir satır oluşur ve named-checkzone tüm zone'u reddeder.
+func oncelikNormalize(tip string, oncelik int) int {
+	if tip == "MX" || tip == "SRV" {
+		return oncelik
+	}
+	return 0
 }
