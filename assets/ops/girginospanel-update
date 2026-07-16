@@ -60,20 +60,24 @@ A="$SRC/assets"
 NEWBIN="$A/girginospanel-server"
 [ -f "$NEWBIN" ] || die "$A/girginospanel-server yok (repo yapısı beklenenden farklı)"
 
-# 2) yeni binary'yi ÇALIŞTIRMADAN doğrula (ELF header) + değişiklik tespiti (sha256)
+# 2) yeni binary'yi ÇALIŞTIRMADAN doğrula (ELF header) + değişiklik tespiti.
+# ÖNEMLİ: sadece binary'yi değil TÜM release'i (binary + frontend-dist + migrations)
+# hash'le. Aksi halde frontend-only / migration-only bir güncellemede binary sha
+# aynı kaldığı için güncelleme yanlışlıkla ATLANIRDI.
 head -c4 "$NEWBIN" | grep -q $'\x7fELF' || die "indirilen binary geçerli ELF değil — iptal"
 CURVER=$(surum); [ -n "$CURVER" ] || CURVER="?"
-CURSHA=$(sha256sum "$BIN"   | cut -d' ' -f1)
-NEWSHA=$(sha256sum "$NEWBIN" | cut -d' ' -f1)
 echo "  mevcut sürüm: $CURVER"
-if [ "$CURSHA" = "$NEWSHA" ] && [ "$FORCE" = 0 ]; then
-  ok "binary zaten en güncel (sha eşleşti) — yapılacak bir şey yok (--force ile zorla)"
+RELHASH=$( { sha256sum "$NEWBIN"; [ -f "$A/frontend-dist.tar.gz" ] && sha256sum "$A/frontend-dist.tar.gz"; [ -f "$A/migrations.tar.gz" ] && sha256sum "$A/migrations.tar.gz"; } | sha256sum | cut -d' ' -f1)
+MARKER="$PREFIX/.release_hash"
+CURREL=$(cat "$MARKER" 2>/dev/null || echo yok)
+if [ "$RELHASH" = "$CURREL" ] && [ "$FORCE" = 0 ]; then
+  ok "zaten en güncel (release hash eşleşti) — yapılacak bir şey yok (--force ile zorla)"
   exit 0
 fi
 
 if [ "$DRY" = 1 ]; then
   step "DRY-RUN — değişecekler (uygulanmadı)"
-  [ "$CURSHA" = "$NEWSHA" ] && echo "  • binary AYNI (--force verildi)" || echo "  • $BIN  (yeni binary, yedek: $BIN.bak)"
+  echo "  • $BIN  (binary değişmişse swap + yedek $BIN.bak)"
   echo "  • $FDIST/  (frontend-dist yeniden yazılır)"
   echo "  • $MIGR/  (yeni .sql eklenir, mevcutlar korunur)"
   echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
@@ -124,6 +128,7 @@ done
 
 if [ "$HEALTHY" = 1 ]; then
   systemctl reload nginx >/dev/null 2>&1 || true
+  echo "$RELHASH" > "$MARKER" 2>/dev/null || true   # bu release'i uygulandı olarak işaretle
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK"
   echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"

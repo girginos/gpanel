@@ -250,7 +250,8 @@ export default function DomainsPage() {
                       }`}>{d.durum}</span>
                     </td>
                     <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 whitespace-nowrap">{d.olusturulma || '-'}</td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      <Link to={`/abonelikler/${d.id}/subdomainler`} className="text-xs text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 mr-3">+ Subdomain</Link>
                       <Link to={`/abonelikler/${d.id}`} className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">Yönet →</Link>
                     </td>
                   </tr>
