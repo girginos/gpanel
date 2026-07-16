@@ -148,6 +148,8 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/domains", domainsH.List)
 			r.With(middleware.MusteriScope).Get("/domains/{id}", domainsH.Get)
 			r.With(middleware.AdminOnly).Get("/system/usage", system.Handler)
+			r.With(middleware.AdminOnly).Get("/system/servisler", system.ServisDurumlar)
+			r.With(middleware.AdminOnly).Post("/system/servis-islem", system.ServisIslem)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
 			r.With(middleware.AdminOnly).Get("/admin/system/loglar", monitorH.SunucuLog)

@@ -31,6 +31,8 @@ const GRUPLAR: { ad: string; aciklar: Arac[] }[] = [
         href: '/araclar/paketler', ikon: '📦', renk: 'orange', hazir: true },
       { baslik: 'Hizmet Planları', aciklama: 'Barındırma paketleri, disk + DB + FTP kotaları.',
         href: '/hizmet-planlari', ikon: '📋', renk: 'sky', hazir: true },
+      { baslik: 'Servisler', aciklama: 'Nginx / Apache / MariaDB / DNS / PHP-FPM servislerini yeniden başlat.',
+        href: '/araclar/servisler', ikon: '🔁', renk: 'rose', hazir: true },
     ],
   },
   {

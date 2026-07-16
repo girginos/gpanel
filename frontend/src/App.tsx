@@ -34,6 +34,7 @@ import PaketlerPage from '@/pages/PaketlerPage'
 import PaketDetayPage from '@/pages/PaketDetayPage'
 import PHPSurumleriPage from '@/pages/PHPSurumleriPage'
 import AraclarAyarlarPage from '@/pages/AraclarAyarlarPage'
+import ServislerPage from '@/pages/ServislerPage'
 import WordPressPage from '@/pages/WordPressPage'
 import FirewallPage from '@/pages/FirewallPage'
 import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
@@ -94,6 +95,7 @@ export default function App() {
         <Route path="araclar/paketler"               element={<PaketlerPage />} />
         <Route path="araclar/paketler/:id"           element={<PaketDetayPage />} />
         <Route path="araclar/php-surumler"           element={<PHPSurumleriPage />} />
+        <Route path="araclar/servisler"              element={<ServislerPage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
 
