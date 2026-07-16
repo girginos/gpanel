@@ -13,22 +13,23 @@ import (
 // Güvenlik: SADECE allowlist'teki birimler; keyfi systemctl çalıştırılamaz.
 
 type servisTanim struct {
-	Birim   string `json:"birim"`   // systemd unit adı
-	Etiket  string `json:"etiket"`  // UI etiketi
-	Reload  bool   `json:"reload"`  // reload destekliyor mu
+	Birim  string `json:"birim"`  // systemd unit adı
+	Etiket string `json:"etiket"` // UI etiketi
+	Grup   string `json:"grup"`   // UI kategorisi
+	Reload bool   `json:"reload"` // reload destekliyor mu
 }
 
 var servisAllow = []servisTanim{
-	{"nginx", "Nginx (Web)", true},
-	{"httpd", "Apache (Backend)", true},
-	{"mariadb", "MariaDB (Veritabanı)", false},
-	{"named", "BIND (DNS)", true},
-	{"valkey", "Valkey (Redis)", false},
-	{"php-fpm", "PHP-FPM 8.3", true},
-	{"php82-php-fpm", "PHP-FPM 8.2", true},
-	{"php74-php-fpm", "PHP-FPM 7.4", true},
-	{"pure-ftpd", "Pure-FTPd (FTP)", false},
-	{"crond", "Cron", false},
+	{"nginx", "Nginx", "Web Sunucusu", true},
+	{"httpd", "Apache (Backend)", "Web Sunucusu", true},
+	{"mariadb", "MariaDB", "Veritabanı & Önbellek", false},
+	{"valkey", "Valkey (Redis)", "Veritabanı & Önbellek", false},
+	{"named", "BIND", "DNS", true},
+	{"php-fpm", "PHP-FPM 8.3", "PHP-FPM", true},
+	{"php82-php-fpm", "PHP-FPM 8.2", "PHP-FPM", true},
+	{"php74-php-fpm", "PHP-FPM 7.4", "PHP-FPM", true},
+	{"pure-ftpd", "Pure-FTPd (FTP)", "Diğer", false},
+	{"crond", "Cron (Zamanlayıcı)", "Diğer", false},
 }
 
 func tanimBul(birim string) (servisTanim, bool) {
