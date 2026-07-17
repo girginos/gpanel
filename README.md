@@ -121,7 +121,7 @@ girginospanel-update --branch X # farklı dal
 - **Fail-closed:** dump alınamazsa güncelleme **hiç başlamaz** — binary'ye, frontend'e ve migration'lara dokunulmaz. Yedeksiz migration kabul edilmez.
 - Yeni sürüm sağlıklı başlamazsa **otomatik olarak eski binary'ye _ve_ güncelleme öncesi DB'ye geri döner** (rollback). Panel o sırada zaten durmuş olduğu için yazma kaybı olmaz.
 
-> Kendi fork'unu deploy ediyorsan: kaynağı derle (`go build` + `npm run build`), `assets/girginospanel-server` + `assets/frontend-dist.tar.gz`'i güncelle, repona push et — sunucularda `girginospanel-update` yeni sürümü çeker.
+> Kendi fork'unu deploy ediyorsan: kaynağı derle (`GOAMD64=v1 go build` + `npm run build`), `assets/girginospanel-server` + `assets/frontend-dist.tar.gz`'i güncelle, repona push et — sunucularda `girginospanel-update` yeni sürümü çeker. **Binary'yi mutlaka `GOAMD64=v1` ile derle** (bkz. "Backend (Go)" altındaki uyarı) — aksi halde eski CPU'lu müşteri sunucularında panel açılmaz.
 
 ## Notlar
 
@@ -142,9 +142,13 @@ Bu proje **tamamen açık kaynaktır** (MIT). İstersen hazır binary'yi kurmak 
 
 ### Backend (Go)
 
+> ⚠️ **Yayınlanacak binary `GOAMD64=v1` ile derlenmelidir.** AlmaLinux 10 (go1.26+) varsayılan olarak `GOAMD64=v3` üretir; v3 ile derlenen binary eski/yaygın müşteri CPU'larında
+> `"This program can only be run on AMD64 processors with v3 microarchitecture support"` verip **çalışmaz**. `assets/girginospanel-server` daima `GOAMD64=v1` ile derlenmelidir
+> (kolaylık için `scripts/build-assets.sh` kullan — bunu zaten sabitler).
+
 ```bash
-# tek statik binary derle
-go build -o girginospanel-server ./cmd/server
+# tek statik binary derle (eski CPU uyumu için GOAMD64=v1 ZORUNLU)
+CGO_ENABLED=0 GOAMD64=v1 go build -o girginospanel-server ./cmd/server
 
 # çalıştır (ortam değişkenleriyle)
 PANEL_JWT_SECRET="$(openssl rand -hex 32)" \
