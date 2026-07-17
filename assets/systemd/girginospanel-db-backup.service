@@ -1,0 +1,6 @@
+[Unit]
+Description=GirginOSPanel panel DB yedegi
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/girginospanel-db-backup

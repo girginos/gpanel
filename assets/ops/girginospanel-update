@@ -9,7 +9,12 @@
 # KORUR (asla dokunmaz): /etc/girginospanel/env (JWT/DB/Redis secret),
 # MariaDB `panel` DB + tüm müşteri verisi, /home/c_* siteleri.
 # Yeni migration'lar servis yeniden başlarken otomatik + idempotent uygulanır.
-# Yeni sürüm sağlıklı başlamazsa otomatik ESKİ binary'ye rollback yapar.
+#
+# DB DAYANIKLILIĞI:
+#  • Migration'lardan ÖNCE panel DB'sinin tam dump'ı alınır (/var/backups/girginospanel/db).
+#  • FAIL-CLOSED: dump alınamazsa güncelleme HİÇ BAŞLAMAZ (yedeksiz migration reddedilir).
+#  • Yeni sürüm sağlıklı başlamazsa ESKİ binary'ye + güncelleme öncesi DB'ye rollback yapar.
+#  • Günlük 03:30 yedek timer'ı (girginospanel-db-backup.timer) kurulur + enable edilir.
 set -euo pipefail
 
 REPO="${GOSP_REPO:-girginos/gpanel}"
@@ -20,6 +25,9 @@ SEED="$PREFIX/bin/girginospanel-seed-admin"
 FDIST="$PREFIX/frontend-dist"
 MIGR="$PREFIX/src/migrations"
 SCRIPTS="$PREFIX/src/scripts"
+DBBK=/usr/local/bin/girginospanel-db-backup   # panel DB dump aracı (assets/ops'tan kurulur)
+DBDIR=/var/backups/girginospanel/db           # dump'ların yeri (kardeş dizinler = domain yedeği)
+PREDUMP=""                                    # güncelleme öncesi dump yolu (rollback'te geri yüklenir)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -72,6 +80,12 @@ echo "  mevcut sürüm: $CURVER"
 RELHASH=$( { sha256sum "$NEWBIN" | cut -d' ' -f1
   [ -f "$A/frontend-dist.tar.gz" ] && sha256sum "$A/frontend-dist.tar.gz" | cut -d' ' -f1
   [ -f "$A/migrations.tar.gz" ] && sha256sum "$A/migrations.tar.gz" | cut -d' ' -f1
+  # ops/ + systemd/ de hash'e DAHİL: aksi halde yalnızca script/unit değişen bir sürümde
+  # (ör. DB yedek aracı + timer'ın eklenmesi) RELHASH sabit kalır ve güncelleme "zaten
+  # en güncel" deyip sessizce ATLANIRDI — düzeltme sunucuya hiç ulaşmazdı.
+  # LC_ALL=C sort: dosya sırası deterministik olmalı, yoksa hash her çalıştırmada oynar.
+  find "$A/ops" "$A/systemd" -type f 2>/dev/null | LC_ALL=C sort \
+    | xargs -r sha256sum 2>/dev/null | cut -d' ' -f1
   true; } | sha256sum | cut -d' ' -f1)
 MARKER="$PREFIX/.release_hash"
 CURREL=$(cat "$MARKER" 2>/dev/null || echo yok)
@@ -86,43 +100,81 @@ if [ "$DRY" = 1 ]; then
   echo "  • $FDIST/  (frontend-dist yeniden yazılır)"
   echo "  • $MIGR/  (yeni .sql eklenir, mevcutlar korunur)"
   echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
+  echo "  • $DBBK + /etc/systemd/system/girginospanel-db-backup.{service,timer} (timer enable --now)"
+  echo "  • migration'lardan ÖNCE panel DB dump'ı → $DBDIR  (DRY-RUN'da dump ALINMAZ)"
   echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR)"
   exit 0
 fi
 
-# 3) yedek (binary + seed)
+# 3) DB yedek aracı + günlük timer'ı kur.
+# SIRA ÖNEMLİ: dump'ı adım 4'te alacağız, aracın o an KURULU olması şart. Adım 9'daki
+# genel ops döngüsü çok geç kalıyor (migration'lar adım 6'da çoktan açılmış olurdu) ve
+# aracı hiç olmayan eski kurulumlarda dump imkânsız olurdu. Burada yalnızca db-backup'ı
+# kuruyoruz — çalışan updater'ın kendi dosyasını bu noktada ezmiyoruz (bash script'i
+# satır satır okur; kendini ortasından değiştirmek tehlikeli), o iş adım 9'da kalıyor.
+if [ -f "$A/ops/girginospanel-db-backup" ]; then
+  install -m 0755 "$A/ops/girginospanel-db-backup" "$DBBK"
+  ok "DB yedek aracı kuruldu ($DBBK)"
+fi
+# systemd unit'leri: dosyayı kopyalamak YETMEZ — daemon-reload + enable --now olmadan
+# timer asla ateşlenmez (kurulumda unutulursa günlük yedek sessizce hiç çalışmaz).
+UNITS=0
+for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
+  if [ -f "$A/systemd/$u" ]; then install -m 0644 "$A/systemd/$u" "/etc/systemd/system/$u"; UNITS=1; fi
+done
+if [ "$UNITS" = 1 ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now girginospanel-db-backup.timer >/dev/null 2>&1 || true
+  if systemctl is-active --quiet girginospanel-db-backup.timer; then
+    ok "günlük DB yedek timer'ı ACTIVE ($(systemctl show -p TimersCalendar --value girginospanel-db-backup.timer 2>/dev/null | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1))"
+  else
+    warn "DB yedek timer'ı başlatılamadı — günlük yedek çalışmayabilir"
+  fi
+fi
+
+# 4) GÜNCELLEME ÖNCESİ DB DUMP — FAIL-CLOSED.
+# Migration'lar geri alınamaz; yedeksiz migration kabul edilemez. Dump alınamıyorsa
+# güncellemeye HİÇ BAŞLAMA (binary'ye, frontend'e, migration'lara dokunmadan çık).
+step "Güncelleme öncesi DB yedeği"
+[ -x "$DBBK" ] || die "DB yedek aracı yok/çalıştırılamıyor ($DBBK) — yedeksiz migration REDDEDİLDİ, güncelleme başlatılmadı"
+PREDUMP=$("$DBBK") || die "güncelleme öncesi DB yedeği BAŞARISIZ — güncelleme başlatılmadı (DB'ye/binary'ye dokunulmadı)"
+[ -n "$PREDUMP" ] && [ -f "$PREDUMP" ] \
+  || die "güncelleme öncesi DB yedeği doğrulanamadı (dönen yol boş veya dosya yok) — güncelleme başlatılmadı"
+ok "pre-update dump: $PREDUMP ($(du -h "$PREDUMP" 2>/dev/null | cut -f1))"
+
+# 5) yedek (binary + seed)
 cp -f "$BIN" "$BIN.bak"
 [ -x "$SEED" ] && cp -f "$SEED" "$SEED.bak" 2>/dev/null || true
 ok "mevcut binary yedeklendi ($BIN.bak)"
 
-# 4) binary swap (install = atomik replace; çalışan process eski inode'u restart'a kadar tutar — cp -f KULLANMA)
+# 6) binary swap (install = atomik replace; çalışan process eski inode'u restart'a kadar tutar — cp -f KULLANMA)
 install -m 0755 "$NEWBIN" "$BIN"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
 ok "binary güncellendi"
 
-# 5) frontend-dist
+# 7) frontend-dist
 if [ -f "$A/frontend-dist.tar.gz" ]; then
   rm -rf "${FDIST:?}/"* && tar xzf "$A/frontend-dist.tar.gz" -C "$FDIST"
   ok "frontend-dist güncellendi"
 fi
 
-# 6) migration'lar (idempotent — startup'ta uygulanır)
+# 8) migration'lar (idempotent — startup'ta uygulanır). Adım 4'te dump'ı ALDIK.
 if [ -f "$A/migrations.tar.gz" ]; then
   mkdir -p "$MIGR"; tar xzf "$A/migrations.tar.gz" -C "$MIGR"
   ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
 fi
 
-# 7) ops-tool'lar (updater kendini de günceller)
+# 9) ops-tool'lar (updater kendini de günceller; db-backup adım 3'te zaten kuruldu — tekrar idempotent)
 if [ -d "$A/ops" ]; then
   for t in "$A"/ops/*; do bn=$(basename "$t"); install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" 2>/dev/null || true; done
   mkdir -p "$SCRIPTS"; cp "$A"/ops/* "$SCRIPTS/" 2>/dev/null || true
   ok "ops-tool'lar güncellendi"
 fi
 
-# 8) SELinux context
+# 10) SELinux context
 command -v restorecon >/dev/null && restorecon -R "$PREFIX/bin" "$FDIST" >/dev/null 2>&1 || true
 
-# 9) yeniden başlat + sağlık kontrolü (başarısızsa rollback)
+# 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
 step "Yeniden başlatılıyor"
 systemctl restart girginospanel
 HEALTHY=0
@@ -138,14 +190,32 @@ if [ "$HEALTHY" = 1 ]; then
   ok "panel ACTIVE + /healthz OK"
   echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
 else
-  warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye dönülüyor"
+  warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye + güncelleme öncesi DB'ye dönülüyor"
   install -m 0755 "$BIN.bak" "$BIN"
   [ -f "$SEED.bak" ] && install -m 0755 "$SEED.bak" "$SEED" 2>/dev/null || true
   command -v restorecon >/dev/null && restorecon "$BIN" >/dev/null 2>&1 || true
+
+  # DB'yi de geri yükle: yeni sürümün migration'ı şemayı değiştirmiş olabilir ve ESKİ
+  # binary o şemayla çalışamaz → binary-only rollback yetmez. Panel şu an DURMUŞ
+  # (restart sağlıksız kaldı) → geri yükleme sırasında yazma kaybı yok.
+  # NOT: dump `--databases panel` ile alındı → her tablo için DROP+CREATE içerir; yeni
+  # migration'ın EKLEDİĞİ tablolar dump'ta olmadığı için kalır (eski binary onları
+  # görmez, zararsız). Kolon/veri değişiklikleri geri alınır.
+  systemctl stop girginospanel >/dev/null 2>&1 || true
+  if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
+    if zcat "$PREDUMP" | mysql; then
+      ok "DB güncelleme öncesi yedeğe geri yüklendi ($PREDUMP)"
+    else
+      warn "DB geri yükleme BAŞARISIZ — dump duruyor, elle: zcat '$PREDUMP' | mysql"
+    fi
+  else
+    warn "güncelleme öncesi dump bulunamadı — yalnızca binary geri alındı"
+  fi
+
   systemctl restart girginospanel; sleep 3
   if systemctl is-active --quiet girginospanel; then
-    die "rollback yapıldı — panel ESKİ sürümle ayakta. Yeni sürüm hatası: journalctl -u girginospanel -n 40"
+    die "rollback yapıldı — panel ESKİ sürüm + ESKİ DB ile ayakta. Yeni sürüm hatası: journalctl -u girginospanel -n 40"
   else
-    die "KRİTİK: rollback sonrası da panel kalkmadı — journalctl -u girginospanel -n 40"
+    die "KRİTİK: rollback sonrası da panel kalkmadı — journalctl -u girginospanel -n 40 (DB yedeği: $PREDUMP)"
   fi
 fi

@@ -1,0 +1,28 @@
+#!/bin/bash
+# GirginOSPanel — panel DB yedeği (günlük timer + update öncesi çağrılır).
+# Kimlik: root unix-socket (parolasız). Çıktı: üretilen dump yolunu stdout'a basar.
+set -euo pipefail
+
+DIR=/var/backups/girginospanel/db      # SADECE burası; kardeş dizinler domain yedeği → DOKUNMA
+TUT_GUN=14
+mkdir -p "$DIR"; chmod 700 "$DIR"
+
+ts=$(date +%F-%H%M%S)
+tmp="$DIR/.panel-$ts.sql.gz.tmp"
+son="$DIR/panel-$ts.sql.gz"
+
+# --single-transaction: InnoDB'de kilitsiz tutarlı anlık görüntü
+mysqldump --single-transaction --routines --triggers --events \
+  --databases panel | gzip -c > "$tmp"
+
+# fail-closed: gzip sağlam mı + boş değil mi. Bozuksa dump BIRAKMA.
+gzip -t "$tmp"
+[ "$(stat -c%s "$tmp")" -gt 1000 ] || { rm -f "$tmp"; echo "HATA: dump şüpheli derecede küçük" >&2; exit 1; }
+
+mv -f "$tmp" "$son"       # atomik: yarım dump asla geçerli isim almaz
+chmod 600 "$son"
+
+# retention — YALNIZCA bu dizin, YALNIZCA kendi ürettiğimiz desen
+find "$DIR" -maxdepth 1 -type f -name 'panel-*.sql.gz' -mtime +$TUT_GUN -delete
+
+echo "$son"

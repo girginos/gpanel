@@ -165,7 +165,18 @@ ok "phpMyAdmin pool + config + izinler"
 # ============ 10) systemd + servisler ============
 step "10) systemd + servisler"
 cp "$A/systemd/girginospanel.service" /etc/systemd/system/girginospanel.service
+# panel DB'sinin günlük yedeği (03:30) — dosyayı kopyalamak YETMEZ, aşağıda enable --now
+# edilir; aksi halde timer hiç ateşlenmez ve kurulum sessizce YEDEKSİZ kalırdı.
+for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
+  [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
+done
 systemctl daemon-reload
+if [ -f /etc/systemd/system/girginospanel-db-backup.timer ]; then
+  systemctl enable --now girginospanel-db-backup.timer >/dev/null 2>&1
+  systemctl is-active --quiet girginospanel-db-backup.timer \
+    && ok "günlük panel DB yedeği ACTIVE (03:30 → /var/backups/girginospanel/db, 14 gün)" \
+    || warn "DB yedek timer'ı başlatılamadı — günlük panel DB yedeği çalışmayabilir"
+fi
 systemctl enable --now php-fpm >/dev/null 2>&1
 for v in $PHP_VERS; do systemctl enable --now php$v-php-fpm >/dev/null 2>&1; done
 ok "php-fpm (base + 5 sürüm)"

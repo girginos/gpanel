@@ -54,7 +54,54 @@ girginospanel-optimize      # MariaDB/nginx/PHP'yi sunucu kaynaklarına göre ye
 girginospanel-redis-setup   # Valkey (Redis) altyapısını kur/onar
 girginospanel-wp-redis <sk> # bir domainin WordPress'ine Redis cache bağla/çöz
 girginospanel-repair        # izin / SELinux / sahiplik onarımı (idempotent)
+girginospanel-db-backup     # panel DB'sinin sıkıştırılmış dump'ını al (aşağıya bak)
 ```
+
+## Yedekleme
+
+### Panel veritabanı (`panel`)
+
+Kurulumla birlikte **günlük otomatik yedek** gelir — ayrı bir şey yapmanız gerekmez:
+
+| | |
+|---|---|
+| **Ne zaman** | Her gün **03:30** (`girginospanel-db-backup.timer`, ±5 dk rastgele gecikme) |
+| **Nereye** | `/var/backups/girginospanel/db/panel-<TARİH>.sql.gz` (dizin `0700`, dump `0600`) |
+| **Saklama** | **14 gün** — daha eskiler otomatik silinir |
+| **Kapsam** | `panel` şeması + routine/trigger/event'ler (`mysqldump --single-transaction` → kilitsiz tutarlı anlık görüntü) |
+
+Elle yedek almak için (üretilen dosyanın yolunu ekrana basar):
+
+```bash
+girginospanel-db-backup
+# /var/backups/girginospanel/db/panel-2026-07-17-143052.sql.gz
+```
+
+Timer'ın durumunu görmek / bir sonraki çalışmayı öğrenmek için:
+
+```bash
+systemctl list-timers girginospanel-db-backup.timer
+systemctl status girginospanel-db-backup.timer
+journalctl -u girginospanel-db-backup -n 20    # son yedeklerin logu
+```
+
+Bir yedeği geri yüklemek için:
+
+```bash
+systemctl stop girginospanel
+zcat /var/backups/girginospanel/db/panel-2026-07-17-143052.sql.gz | mysql
+systemctl start girginospanel
+```
+
+> Yedek **fail-closed**'dır: gzip bütünlüğü doğrulanmadan veya dosya şüpheli derecede küçükse dump `panel-*.sql.gz` adını **almaz** — yarım bir dump asla geçerli yedek gibi görünmez.
+
+### Güncelleme öncesi otomatik yedek
+
+`girginospanel-update`, **migration'ları uygulamadan önce** panel DB'sinin tam dump'ını alır. Dump alınamazsa **güncelleme hiç başlamaz** (yedeksiz migration reddedilir). Ayrıntı için aşağıdaki "Güncelleme" bölümüne bakın.
+
+### Müşteri siteleri
+
+Müşteri siteleri + veritabanları ayrı bir işle yedeklenir: `girginospanel-backup-all` (cron, her gün 03:00 UTC, `/var/backups/girginospanel/<sistem_kullanıcı>/`, 14 gün saklama). Panel DB yedeği bu dizinlere **dokunmaz**.
 
 ## Güncelleme (SSH / CLI)
 
@@ -70,7 +117,9 @@ girginospanel-update --branch X # farklı dal
 - **Güvenli & veri-korumalı:** `/etc/girginospanel/env` (JWT/DB/Redis secret), MariaDB `panel` veritabanı ve `/home/c_*` müşteri siteleri **asla silinmez**. `install.sh`'in aksine yeni secret üretmez.
 - Yeni migration'lar servis yeniden başlarken **otomatik + idempotent** uygulanır.
 - Binary değişmemişse (sha eşleşir) hiçbir şey yapmaz.
-- Yeni sürüm sağlıklı başlamazsa **otomatik olarak eski binary'ye geri döner** (rollback).
+- **Migration'lardan önce panel DB'sinin tam dump'ı alınır** → `/var/backups/girginospanel/db/`.
+- **Fail-closed:** dump alınamazsa güncelleme **hiç başlamaz** — binary'ye, frontend'e ve migration'lara dokunulmaz. Yedeksiz migration kabul edilmez.
+- Yeni sürüm sağlıklı başlamazsa **otomatik olarak eski binary'ye _ve_ güncelleme öncesi DB'ye geri döner** (rollback). Panel o sırada zaten durmuş olduğu için yazma kaybı olmaz.
 
 > Kendi fork'unu deploy ediyorsan: kaynağı derle (`go build` + `npm run build`), `assets/girginospanel-server` + `assets/frontend-dist.tar.gz`'i güncelle, repona push et — sunucularda `girginospanel-update` yeni sürümü çeker.
 
@@ -157,7 +206,9 @@ girginospanel-update --force      # aynı sürüm olsa bile yeniden uygula
 
 Panel içinden de güncelleyebilirsiniz: **Araçlar ve Ayarlar → Panel Güncellemesi → "Güncellemeleri denetle ve kur"**.
 
-Güncelleme **korur** (asla dokunmaz): `/etc/girginospanel/env` (JWT/DB/Redis secret), MariaDB `panel` veritabanı + tüm müşteri verisi, `/home/c_*` siteleri. Yeni sürüm sağlıklı başlamazsa otomatik olarak **eski binary'ye geri döner**.
+Güncelleme **korur** (asla dokunmaz): `/etc/girginospanel/env` (JWT/DB/Redis secret), MariaDB `panel` veritabanı + tüm müşteri verisi, `/home/c_*` siteleri.
+
+Güncelleme, **migration'ları uygulamadan önce** panel DB'sinin tam dump'ını `/var/backups/girginospanel/db/` altına alır. Dump alınamazsa güncelleme **hiç başlamaz** (yedeksiz migration reddedilir). Yeni sürüm sağlıklı başlamazsa otomatik olarak **eski binary'ye + güncelleme öncesi DB'ye geri döner**.
 
 ### "girginospanel-update: command not found" alıyorsanız
 
