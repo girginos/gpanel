@@ -143,3 +143,33 @@ install.sh        Tek satır bootstrap (repoyu indirir → girginospanel-install
 
 - Katkılar (issue / PR) açıktır.
 - Lisans: **MIT** — bkz. [LICENSE](LICENSE). Kullanabilir, değiştirebilir, dağıtabilir ve kendi ürününde kullanabilirsin.
+
+
+## Güncelleme
+
+Paneli son sürüme güncellemek için sunucuda:
+
+```bash
+girginospanel-update              # son sürümü kur
+girginospanel-update --dry-run    # sadece ne yapacağını göster
+girginospanel-update --force      # aynı sürüm olsa bile yeniden uygula
+```
+
+Panel içinden de güncelleyebilirsiniz: **Araçlar ve Ayarlar → Panel Güncellemesi → "Güncellemeleri denetle ve kur"**.
+
+Güncelleme **korur** (asla dokunmaz): `/etc/girginospanel/env` (JWT/DB/Redis secret), MariaDB `panel` veritabanı + tüm müşteri verisi, `/home/c_*` siteleri. Yeni sürüm sağlıklı başlamazsa otomatik olarak **eski binary'ye geri döner**.
+
+### "girginospanel-update: command not found" alıyorsanız
+
+Panelinizi, güncelleme aracı dağıtıma eklenmeden **önce** kurmuşsanız bu komut sunucunuzda bulunmaz. Aracı almanın tek yolu yine kendisi olduğu için kısır döngüye girersiniz. Tek seferlik şu komutla kurun:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/girginos/gpanel/main/assets/ops/girginospanel-update \
+  -o /usr/local/bin/girginospanel-update && chmod +x /usr/local/bin/girginospanel-update
+
+girginospanel-update
+```
+
+Bunu **bir kez** yapmanız yeterlidir: `girginospanel-update` her çalıştığında `assets/ops/` altındaki tüm araçları `/usr/local/bin`'e yeniden kurar, dolayısıyla kendini de güncel tutar. Bundan sonra panel içindeki **Panel Güncellemesi** butonunu da kullanabilirsiniz.
+
+> Panel içi güncelleme butonu, aracı eksikse **otomatik indirir** — yani butona basmanız da yeterlidir; yukarıdaki komut yalnızca panele hiç erişemediğiniz durumlar için.

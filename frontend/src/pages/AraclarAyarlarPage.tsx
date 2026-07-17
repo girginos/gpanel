@@ -2,6 +2,7 @@
 // gosp-dark-swept-v2
 import { Link } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
+import PanelGuncelleme from '@/components/PanelGuncelleme'
 
 type Arac = {
   baslik: string
@@ -79,6 +80,8 @@ export default function AraclarAyarlarPage() {
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
         Sunucu genelinde yönetim araçları. Sistem paketleri, PHP sürümleri, güvenlik ve bakım araçları.
       </p>
+
+      <PanelGuncelleme />
 
       {GRUPLAR.map(g => (
         <div key={g.ad} className="mb-7">

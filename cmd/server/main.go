@@ -23,6 +23,7 @@ import (
 	"girginospanel/internal/db"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/domains"
+	"girginospanel/internal/eklenti"
 	"girginospanel/internal/files"
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
@@ -99,6 +100,8 @@ func main() {
 	phpH := &php.Handlers{DB: d}
 	kaynakH := &kaynak.Handlers{DB: d}
 	monitorH := &monitor.Handlers{DB: d}
+	eklentiH := &eklenti.Handlers{DB: d}
+	go eklentiH.SaglikDongusu(context.Background())
 	nginxsetH := &nginxset.Handlers{DB: d}
 	sshH := &sshaccess.Handlers{DB: d, IPv4: ipv4}
 	statH := &istatistik.Handlers{DB: d}
@@ -133,6 +136,9 @@ func main() {
 		})
 	})
 
+	// eklenti frontend bundle: nginx yalnizca /api/ proxyler + <script src> JWT tasiyamaz => auth disi
+	r.Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", authH.Login)
 		r.Post("/musteri/login", musteriH.Login)
@@ -150,6 +156,10 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/usage", system.Handler)
 			r.With(middleware.AdminOnly).Get("/system/servisler", system.ServisDurumlar)
 			r.With(middleware.AdminOnly).Post("/system/servis-islem", system.ServisIslem)
+			r.With(middleware.AdminOnly).Get("/system/guncelleme", system.GuncellemeDurum)
+			r.With(middleware.AdminOnly).Post("/system/guncelleme/baslat", system.GuncellemeBaslat)
+			r.With(middleware.AdminOnly).Get("/system/guncelleme/log", system.GuncellemeLog)
+			eklentiH.Routes(r)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
 			r.With(middleware.AdminOnly).Get("/admin/system/loglar", monitorH.SunucuLog)
