@@ -11,6 +11,12 @@ ts=$(date +%F-%H%M%S)
 tmp="$DIR/.panel-$ts.sql.gz.tmp"
 son="$DIR/panel-$ts.sql.gz"
 
+# Başarısız dump yarım .tmp BIRAKMASIN: mysqldump/gzip patlarsa `set -e` aşağıdaki
+# rm'lere hiç ulaşmadan çıkar; retention deseni (panel-*.sql.gz) .tmp'leri YAKALAMAZ,
+# dolayısıyla sonsuza dek birikirlerdi (disk dolu senaryosunda üstüne tuz biber).
+# mv başarılı olursa $tmp zaten yok → rm -f no-op.
+trap 'rm -f "$tmp"' EXIT
+
 # --single-transaction: InnoDB'de kilitsiz tutarlı anlık görüntü
 mysqldump --single-transaction --routines --triggers --events \
   --databases panel | gzip -c > "$tmp"
@@ -24,5 +30,8 @@ chmod 600 "$son"
 
 # retention — YALNIZCA bu dizin, YALNIZCA kendi ürettiğimiz desen
 find "$DIR" -maxdepth 1 -type f -name 'panel-*.sql.gz' -mtime +$TUT_GUN -delete
+# trap'ten önceki sürümlerden kalmış yarım .tmp'leri de süpür (1 günden eski =
+# kesin ölü; çalışan bir dump'ın tmp'si asla bu kadar eski olamaz)
+find "$DIR" -maxdepth 1 -type f -name '.panel-*.sql.gz.tmp' -mtime +1 -delete
 
 echo "$son"
