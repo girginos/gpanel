@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -26,8 +27,133 @@ var (
 // askıdaki bir domain'i sessizce yeniden yayına almaz.
 var pkgDB *sql.DB
 
-// Init: paket DB handle'ını ayarlar (askıya-alma tutarlılığı için).
-func Init(d *sql.DB) { pkgDB = d }
+// Init: paket DB handle'ını ayarlar (askıya-alma tutarlılığı için) ve açılışta
+// (her boot) fastcgi_cache "girgincache" zone tanımını GARANTİ EDİP nginx'i
+// reload eder. Böylece "kullanım var, tanım yok" durumundaki MEVCUT sunucular
+// yalnızca güncelleme + panel restart ile ELLE müdahale olmadan kendiliğinden
+// onarılır (heal-on-startup).
+func Init(d *sql.DB) {
+	pkgDB = d
+	HealCacheZoneOnStartup()
+}
+
+// cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
+// http-context'e (conf.d nginx.conf http{} içine include edilir) yazılır.
+const cacheZoneConf = "/etc/nginx/conf.d/girgincache.conf"
+
+// cacheZoneTempConf: elle eklenmiş GEÇİCİ mitigasyon dosyası (aynı zone'u tanımlar).
+// Panel kendi yönetilen dosyasını yazmadan ÖNCE bunu kaldırır; aksi halde iki
+// "keys_zone=girgincache" tanımı → nginx "duplicate zone" ile patlar.
+const cacheZoneTempConf = "/etc/nginx/conf.d/00-girgincache-gecici.conf"
+
+// cacheZoneName: vhost template'inde kullanılan zone adı ile AYNI olmalı.
+const cacheZoneName = "girgincache"
+
+// cacheZoneDir: fastcgi_cache_path disk dizini.
+const cacheZoneDir = "/var/cache/nginx/girgincache"
+
+// cacheZoneBody: girgincache.conf içeriği (idempotent — sabit yol + sabit içerik).
+const cacheZoneBody = `# GirginOSPanel tarafından otomatik yönetilir — ELLE DÜZENLEMEYİN.
+# vhost'lar "fastcgi_cache girgincache" kullanır; zone tanımı burada garanti edilir.
+# Her vhost render'ında ve panel açılışında yeniden yazılır (idempotent).
+fastcgi_cache_path ` + cacheZoneDir + ` levels=1:2 keys_zone=` + cacheZoneName + `:100m max_size=1g inactive=60m use_temp_path=off;
+`
+
+// zoneDefinedElsewhereRe: nginx.conf veya başka bir conf.d dosyasında elle
+// tanımlanmış girgincache zone'unu tespit eder (çift tanım = nginx -t hatası).
+var zoneDefinedElsewhereRe = regexp.MustCompile(`keys_zone\s*=\s*` + regexp.QuoteMeta(cacheZoneName) + `\s*:`)
+
+// HealCacheZoneOnStartup: açılışta girgincache zone tanımını garanti eder ve
+// (yalnızca bir değişiklik yapıldıysa ve config geçerliyse) nginx'i reload eder.
+// Bu, güncelleme sonrası restart'ta "tanım yok" sunucuların canlı olarak onarılmasını
+// sağlar. nginx -t hâlâ başarısızsa reload ATLANIR (çalışan nginx'i bozmayız).
+func HealCacheZoneOnStartup() {
+	changed, err := ensureCacheZone()
+	if err != nil {
+		log.Printf("girgincache heal: zone conf yazılamadı: %v", err)
+		return
+	}
+	if !changed {
+		return // config zaten tutarlı, gereksiz reload yok
+	}
+	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
+		log.Printf("girgincache heal: nginx -t hâlâ başarısız, reload atlandı: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	if out, err := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); err != nil {
+		log.Printf("girgincache heal: nginx reload: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	log.Printf("girgincache heal: zone tanımı garanti edildi + nginx reload OK")
+}
+
+// ensureCacheZone: "girgincache" fastcgi_cache zone tanımının nginx http-context'te
+// TAM OLARAK BİR KEZ mevcut olmasını garanti eder. Kendi yönettiğimiz conf dosyasını
+// idempotent yazar. Duplicate zone'u (nginx -t "zone is already defined") önlemek için:
+//   - Bilinen geçici mitigasyon dosyasını (00-girgincache-gecici.conf) kaldırır.
+//   - Zone BAŞKA bir dosyada (nginx.conf / elle eklenmiş conf) zaten tanımlıysa kendi
+//     dosyasını yazmaz/kaldırır (dış tanıma saygı gösterir).
+// Bu fonksiyon her nginx -t ÖNCESİ çağrılır → self-heal / fail-safe.
+// Dönüş: config'te bir değişiklik yapıldıysa changed=true.
+func ensureCacheZone() (changed bool, err error) {
+	// cache disk dizinini garanti et (nginx worker yazabilsin diye nginx sahipliği).
+	_ = os.MkdirAll(cacheZoneDir, 0700)
+	if uid, gid, e := uidGid("nginx"); e == nil {
+		_ = os.Chown(cacheZoneDir, uid, gid)
+	}
+	_, _ = exec.Command("restorecon", "-R", cacheZoneDir).CombinedOutput()
+
+	// Geçici mitigasyon dosyasını (varsa) kaldır — DUPLICATE zone riskini yok et.
+	// Panel tek yönetilen dosyayı (girgincache.conf) kullanır.
+	if _, e := os.Stat(cacheZoneTempConf); e == nil {
+		if os.Remove(cacheZoneTempConf) == nil {
+			changed = true
+		}
+	}
+
+	// Zone başka bir yerde (bizim dosyamız hariç) tanımlı mı?
+	if zoneDefinedElsewhere() {
+		// Dışarıda tanım var → bizim dosyamız DUP yaratmasın; varsa kaldır.
+		if _, e := os.Stat(cacheZoneConf); e == nil {
+			if os.Remove(cacheZoneConf) == nil {
+				changed = true
+			}
+		}
+		return changed, nil
+	}
+
+	// İdempotent yaz: içerik zaten aynıysa dokunma.
+	if cur, e := os.ReadFile(cacheZoneConf); e == nil && string(cur) == cacheZoneBody {
+		return changed, nil
+	}
+	if e := os.WriteFile(cacheZoneConf, []byte(cacheZoneBody), 0644); e != nil {
+		return changed, fmt.Errorf("girgincache zone conf yaz: %w", e)
+	}
+	_, _ = exec.Command("restorecon", cacheZoneConf).CombinedOutput()
+	return true, nil
+}
+
+// zoneDefinedElsewhere: girgincache zone'unun bizim yönettiğimiz dosya DIŞINDA
+// (nginx.conf veya başka bir conf.d/*.conf) tanımlı olup olmadığını döner.
+func zoneDefinedElsewhere() bool {
+	files := []string{"/etc/nginx/nginx.conf"}
+	if extra, err := filepath.Glob("/etc/nginx/conf.d/*.conf"); err == nil {
+		files = append(files, extra...)
+	}
+	for _, f := range files {
+		if f == cacheZoneConf {
+			continue // kendi dosyamızı sayma
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if zoneDefinedElsewhereRe.Match(b) {
+			return true
+		}
+	}
+	return false
+}
 
 type phpAyar struct {
 	PoolDir string
@@ -420,6 +546,14 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	if err := os.WriteFile(cfgPath, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("vhost yaz: %w", err)
+	}
+	// Fail-safe: vhost "fastcgi_cache girgincache" kullanabilir; zone tanımının
+	// http-context'te mevcut olduğunu nginx -t ÖNCESİ garanti et. Aksi halde
+	// "zone girgincache is unknown" → nginx -t patlar → suspend/unsuspend takılır.
+	// (Sadece bu domain değil, cache etkin BAŞKA bir domain'in vhost'u da global
+	// nginx -t'yi kırabildiği için her render'da garanti ediyoruz.)
+	if _, err := ensureCacheZone(); err != nil {
+		return err
 	}
 	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
 		return fmt.Errorf("nginx -t başarısız: %s: %w", strings.TrimSpace(string(out)), err)
