@@ -328,45 +328,77 @@ func dbGovernorUserAtlanir(user string) bool {
 // uygular. 0 = sınırsız (MariaDB'de 0 = limit yok). Yalnız o tenant'ın db_accounts
 // kullanıcılarına dokunur; root/panel/sistem kullanıcılarına ASLA (allowlist + regex → SQLi yok).
 func MySQLLimitUygula(ctx context.Context, db *sql.DB, domainID int64, l Limitler) error {
-	rows, err := db.QueryContext(ctx,
-		`SELECT db_user, COALESCE(db_host,'localhost') FROM db_accounts WHERE domain_id=?`, domainID)
+	rows, err := db.QueryContext(ctx, `SELECT db_user FROM db_accounts WHERE domain_id=?`, domainID)
 	if err != nil {
 		return err
 	}
-	type acct struct{ user, host string }
-	var accts []acct
+	var users []string
 	for rows.Next() {
-		var a acct
-		if e := rows.Scan(&a.user, &a.host); e == nil {
-			accts = append(accts, a)
+		var u string
+		if e := rows.Scan(&u); e == nil {
+			users = append(users, u)
 		}
 	}
 	rows.Close()
 
-	var stmts []string
-	for _, a := range accts {
-		if dbGovernorUserAtlanir(a.user) {
-			log.Printf("governor: DB kullanıcısı atlandı (allowlist dışı): %q", a.user)
+	var uygulandi int
+	for _, user := range users {
+		if dbGovernorUserAtlanir(user) {
+			log.Printf("governor: DB kullanıcısı atlandı (allowlist dışı): %q", user)
 			continue
 		}
-		host := a.host
-		if !reGovernorHost.MatchString(host) {
-			host = "localhost" // güvenli varsayılan (enjeksiyon engeli)
+		// 🔴 db_accounts.db_host'a GÜVENME — WordPress alt-kullanıcıları (wpu_*) mysql.user'da
+		// @'%' host'ta kayıtlı olabilir; db_host='localhost' ile ALTER eşleşmez → limit alamaz
+		// (bypass). Kullanıcının mysql.user'daki GERÇEK host(lar)ının HEPSİNE uygula.
+		hosts := mysqlUserHosts(ctx, user)
+		if len(hosts) == 0 {
+			log.Printf("governor: %s mysql.user'da host kaydı yok — atlandı", user)
+			continue
 		}
-		stmts = append(stmts, fmt.Sprintf(
-			"ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d MAX_QUERIES_PER_HOUR %d MAX_UPDATES_PER_HOUR %d;",
-			a.user, host,
-			nonNeg(l.MySQLMaxBaglanti), nonNeg(l.DBMaxQueriesPerHr), nonNeg(l.DBMaxUpdatesPerHr)))
+		for _, host := range hosts {
+			if !reGovernorHost.MatchString(host) {
+				log.Printf("governor: %s@%q geçersiz host biçimi — atlandı", user, host)
+				continue
+			}
+			stmt := fmt.Sprintf(
+				"ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d MAX_QUERIES_PER_HOUR %d MAX_UPDATES_PER_HOUR %d;",
+				user, host,
+				nonNeg(l.MySQLMaxBaglanti), nonNeg(l.DBMaxQueriesPerHr), nonNeg(l.DBMaxUpdatesPerHr))
+			if out, e := exec.CommandContext(ctx, "mysql", "-uroot", "-e", stmt).CombinedOutput(); e != nil {
+				log.Printf("governor ALTER %s@%s başarısız: %s: %v", user, host, strings.TrimSpace(string(out)), e)
+			} else {
+				uygulandi++
+			}
+		}
 	}
-	if len(stmts) == 0 {
-		return nil
-	}
-	stmts = append(stmts, "FLUSH USER_RESOURCES;")
-	cmd := exec.CommandContext(ctx, "mysql", "-uroot", "-e", strings.Join(stmts, ""))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql governor: %s: %w", strings.TrimSpace(string(out)), err)
+	if uygulandi > 0 {
+		if out, e := exec.CommandContext(ctx, "mysql", "-uroot", "-e", "FLUSH USER_RESOURCES;").CombinedOutput(); e != nil {
+			log.Printf("governor FLUSH USER_RESOURCES: %s: %v", strings.TrimSpace(string(out)), e)
+		}
 	}
 	return nil
+}
+
+// mysqlUserHosts: mysql.user'da verilen kullanıcı adına kayıtlı TÜM host'ları döner
+// (root ile okunur; panel DB-kullanıcısı mysql.user'a erişemeyebilir). user allowlist
+// regex'inden geçmiş olmalı (SQLi yok).
+func mysqlUserHosts(ctx context.Context, user string) []string {
+	if dbGovernorUserAtlanir(user) {
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, "mysql", "-uroot", "-N", "-B", "-e",
+		fmt.Sprintf("SELECT Host FROM mysql.user WHERE User='%s'", user)).Output()
+	if err != nil {
+		return nil
+	}
+	var hosts []string
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		h := strings.TrimSpace(ln)
+		if h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 func nonNeg(v int) int {
