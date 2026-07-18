@@ -106,6 +106,24 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 	}
 }
 
+// DomainSahibiMi: verilen domain ID cagirana ait mi? Merkezi sahiplik denetimi.
+//   - Admin token   => her zaman true (tum domainlere erisir).
+//   - Musteri token => yalniz kendi DomainID'siyle eslesiyorsa true.
+//   - Kimlik yoksa   => false.
+//
+// MusteriScope middleware'inin handler-ici eslenigi: URL'de {id} domain param'i
+// bulunmayan (or. {dbId} gibi turev kaynak) uclarda, kaynagin domain_id'si DB'den
+// cozuldukten sonra bu fonksiyonla sahiplik dogrulanir.
+func DomainSahibiMi(r *http.Request, domainID int64) bool {
+	if ClaimsFrom(r) != nil {
+		return true // admin: tum domainlere erisir
+	}
+	if mc := MusteriClaimsFrom(r); mc != nil {
+		return mc.DomainID == domainID
+	}
+	return false
+}
+
 func ClaimsFrom(r *http.Request) *auth.Claims {
 	v := r.Context().Value(claimsKey)
 	if v == nil {

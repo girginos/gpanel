@@ -161,7 +161,9 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", rid)
+	// Sahiplik: UPDATE domain_id ile scope'lu; read-back'i de domain_id ile sinirla
+	// ki baska domain'in kaydi (0-satir guncellemede) yanitla sizmasin.
+	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=? AND domain_id=?", rid, id)
 	saved, _ := scan(row)
 	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)

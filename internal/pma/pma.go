@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -57,6 +58,13 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// IDOR korumasi (OWASP A01): cagiran bu veritabaninin sahibi mi?
+	// Admin her db'ye erisir; musteri yalniz kendi domain'inin db'sine.
+	// Degilse varligi sizdirmadan 404 (var-olmayan db ile AYNI yanit).
+	if !middleware.DomainSahibiMi(r, domainID) {
+		httpx.WriteError(w, http.StatusNotFound, "veritabanı bulunamadı")
 		return
 	}
 	if demo == 1 {
