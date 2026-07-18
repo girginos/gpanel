@@ -15,18 +15,36 @@ import (
 const ApacheUpstream = "127.0.0.1:10080"
 
 var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — GirginOSPanel Apache backend (nginx ön proxy)
+# Guvenlik notu: yanit guvenlik header'lari EDGE'de (nginx) uygulanir (cift-header
+# olmamasi icin). Apache katmani YURUTME/ERISIM politikasini uygular: CGI kapali,
+# betik dosyalari + yedek/dump dosyalari reddedilir, symlink yalniz sahip-eslesirse.
 <VirtualHost 127.0.0.1:10080>
     ServerName {{.AlanAdi}}
     ServerAlias www.{{.AlanAdi}}
     DocumentRoot {{.WebRoot}}
 
     <Directory {{.WebRoot}}>
-        Options Indexes FollowSymLinks
-        AllowOverride All
+        # CGI calistirma KAPALI; dizin listeleme KAPALI; symlink yalniz sahip-eslesirse.
+        # .htaccess bu Options'lari GERI ACAMAZ (AllowOverride yalniz Indexes,MultiViews izin verir).
+        Options -ExecCGI -Indexes -Includes -FollowSymLinks +SymLinksIfOwnerMatch
+        AllowOverride AuthConfig FileInfo Indexes Limit Options=Indexes,MultiViews
         Require all granted
+
+        # CGI / betik yorumlayici handler'larini kaldir + dogrudan erisimi engelle (403)
+        RemoveHandler .cgi .pl .py .sh .rb .lua .fcgi .fpl
+        <FilesMatch "\.(cgi|pl|py|sh|rb|lua|fcgi)$">
+            Require all denied
+        </FilesMatch>
+        # Yedek / dump / hassas dosya erisimini engelle (403)
+        <FilesMatch "\.(sql|bak|old|orig|save|swp|dump|tar|tgz|gz|zip|rar|7z|log|inc)$">
+            Require all denied
+        </FilesMatch>
+        <FilesMatch "\.php\.bak$">
+            Require all denied
+        </FilesMatch>
     </Directory>
 
-    <FilesMatch \.php$>
+    <FilesMatch "\.php$">
         SetHandler "proxy:unix:{{.PHPSocket}}|fcgi://localhost"
     </FilesMatch>
 

@@ -35,6 +35,11 @@ var pkgDB *sql.DB
 func Init(d *sql.DB) {
 	pkgDB = d
 	HealCacheZoneOnStartup()
+	// Batch2 sertlestirme: panel vhost guvenlik header'lari + mevcut tenant
+	// vhost/pool'larinin (retroaktif) guvenli yeniden-render'i. Her ikisi de
+	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
+	HealPanelVhostHeadersOnStartup()
+	HealVhostsOnStartup()
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -160,14 +165,15 @@ type phpAyar struct {
 	PoolDir string
 	SockDir string
 	Service string
+	FpmBin  string // "php-fpm -t" ile pool config'ini reload ONCESI dogrulamak icin
 }
 
 var phpMap = map[string]phpAyar{
-	"7.4": {PoolDir: "/etc/opt/remi/php74/php-fpm.d", SockDir: "/var/opt/remi/php74/run/php-fpm", Service: "php74-php-fpm"},
-	"8.2": {PoolDir: "/etc/opt/remi/php82/php-fpm.d", SockDir: "/var/opt/remi/php82/run/php-fpm", Service: "php82-php-fpm"},
-	"8.3": {PoolDir: "/etc/php-fpm.d", SockDir: "/run/php-fpm", Service: "php-fpm"},
-	"8.4": {PoolDir: "/etc/opt/remi/php84/php-fpm.d", SockDir: "/var/opt/remi/php84/run/php-fpm", Service: "php84-php-fpm"},
-	"8.5": {PoolDir: "/etc/opt/remi/php85/php-fpm.d", SockDir: "/var/opt/remi/php85/run/php-fpm", Service: "php85-php-fpm"},
+	"7.4": {PoolDir: "/etc/opt/remi/php74/php-fpm.d", SockDir: "/var/opt/remi/php74/run/php-fpm", Service: "php74-php-fpm", FpmBin: "/opt/remi/php74/root/usr/sbin/php-fpm"},
+	"8.2": {PoolDir: "/etc/opt/remi/php82/php-fpm.d", SockDir: "/var/opt/remi/php82/run/php-fpm", Service: "php82-php-fpm", FpmBin: "/opt/remi/php82/root/usr/sbin/php-fpm"},
+	"8.3": {PoolDir: "/etc/php-fpm.d", SockDir: "/run/php-fpm", Service: "php-fpm", FpmBin: "/usr/sbin/php-fpm"},
+	"8.4": {PoolDir: "/etc/opt/remi/php84/php-fpm.d", SockDir: "/var/opt/remi/php84/run/php-fpm", Service: "php84-php-fpm", FpmBin: "/opt/remi/php84/root/usr/sbin/php-fpm"},
+	"8.5": {PoolDir: "/etc/opt/remi/php85/php-fpm.d", SockDir: "/var/opt/remi/php85/run/php-fpm", Service: "php85-php-fpm", FpmBin: "/opt/remi/php85/root/usr/sbin/php-fpm"},
 }
 
 func ValidateDomain(d string) error {
@@ -202,7 +208,14 @@ func normalizePHP(v string) string {
 	return v
 }
 
-// vhost template — SSL var/yok her durumu kapsar
+// vhost template — SSL var/yok her durumu kapsar.
+//
+// 🔴 GUVENLIK HEADER MIRAS SORUNU: nginx'te bir location KENDI add_header'ini
+// tanimlarsa ust (server) seviyesindeki TUM add_header'lari DUSURUR (miras almaz).
+// Bu yuzden guvenlik header blogu ({{.SecHeaders}}) server seviyesine EK OLARAK
+// kendi add_header'i olan HER location'a (php, browser-cache) tekrar enjekte edilir.
+// {{.DenyBlocks}} = CGI/betik yorumlayici + yedek/dump/hassas dosya erisim engeli.
+// Her ikisi de renderAndReload icinde hesaplanip opts'a yazilir (DB'de tutulmaz).
 var vhostTmpl = template.Must(template.New("v").Parse(`{{- if .SSL -}}
 # {{.AlanAdi}} — 80 üzerinde HTTP-01 challenge için açık; geri kalan trafik 443'e yönlendirilir
 server {
@@ -235,20 +248,17 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
-    # ---- Güvenlik header'ları (panel'den yönetilir) ----
-{{if .HdrXContentType}}    add_header X-Content-Type-Options "nosniff" always;
-{{end}}{{if .HdrXXSS}}    add_header X-XSS-Protection "1; mode=block" always;
-{{end}}{{if .HdrReferrer}}    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-{{end}}{{if .HdrPermissions}}    add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=()" always;
-{{end}}{{if .HdrCSPUpgrade}}    add_header Content-Security-Policy "upgrade-insecure-requests" always;
-{{end}}{{if .HdrHSTS}}    add_header Strict-Transport-Security "max-age={{.HSTSMaxAge}}{{if .HSTSSubdomains}}; includeSubDomains{{end}}{{if .HSTSPreload}}; preload{{end}}" always;
-{{end}}
     root {{.WebRoot}};
     index index.php index.html index.htm;
+    # Sembolik baglanti saldirisi engeli: dosya, sahibi-farkli bir symlink uzerinden sunulmaz.
+    disable_symlinks if_not_owner;
 
     access_log /var/log/nginx/{{.AlanAdi}}.access.log;
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
 
+    # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
+{{.SecHeaders}}
+{{.DenyBlocks}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -280,7 +290,8 @@ server {
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_param HTTPS on;
         fastcgi_read_timeout 60s;
-{{if .FastCgiCache}}        fastcgi_cache girgincache;
+        # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache girgincache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -291,12 +302,13 @@ server {
         add_header X-Cache-Status $upstream_cache_status always;
 {{end}}    }
 {{end}}
-{{if .BrowserCache}}    # ---- Browser cache (statik dosyalar) ----
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf|zip|gz)$ {
+{{if .BrowserCache}}    # ---- Browser cache (statik dosyalar) — arsiv (zip/gz) DENY blogunda tutuluyor ----
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf)$ {
         expires {{.BrowserCacheGun}}d;
         access_log off;
         add_header Cache-Control "public, immutable" always;
-    }
+        # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
+{{.SecHeaders}}    }
 {{end}}
 
     location ~ /\.(?!well-known) { deny all; }
@@ -313,23 +325,21 @@ server {
 
     root {{.WebRoot}};
     index index.php index.html index.htm;
+    # Sembolik baglanti saldirisi engeli: dosya, sahibi-farkli bir symlink uzerinden sunulmaz.
+    disable_symlinks if_not_owner;
 
     access_log /var/log/nginx/{{.AlanAdi}}.access.log;
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
 
-    # ---- Güvenlik header'ları (panel'den yönetilir) ----
-{{if .HdrXContentType}}    add_header X-Content-Type-Options "nosniff" always;
-{{end}}{{if .HdrXXSS}}    add_header X-XSS-Protection "1; mode=block" always;
-{{end}}{{if .HdrReferrer}}    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-{{end}}{{if .HdrPermissions}}    add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=()" always;
-{{end}}{{if .HdrCSPUpgrade}}    add_header Content-Security-Policy "upgrade-insecure-requests" always;
-{{end}}
+    # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
+{{.SecHeaders}}
     location /.well-known/acme-challenge/ {
         root /var/www/_acme;
         auth_basic off;
         try_files $uri =404;
     }
 
+{{.DenyBlocks}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -360,7 +370,8 @@ server {
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_read_timeout 60s;
-{{if .FastCgiCache}}        fastcgi_cache girgincache;
+        # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
+{{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache girgincache;
         fastcgi_cache_valid 200 301 302 {{.FastCgiCacheDakika}}m;
         fastcgi_cache_valid 404 1m;
         fastcgi_cache_bypass $skip_cache;
@@ -371,11 +382,13 @@ server {
         add_header X-Cache-Status $upstream_cache_status always;
 {{end}}    }
 {{end}}
-{{if .BrowserCache}}    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf|zip|gz)$ {
+{{if .BrowserCache}}    # ---- Browser cache (statik dosyalar) — arsiv (zip/gz) DENY blogunda tutuluyor ----
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|mp4|webm|pdf)$ {
         expires {{.BrowserCacheGun}}d;
         access_log off;
         add_header Cache-Control "public, immutable" always;
-    }
+        # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
+{{.SecHeaders}}    }
 {{end}}
 
     location ~ /\.(?!well-known) { deny all; }
@@ -386,6 +399,54 @@ server {
 }
 {{- end -}}
 `))
+
+// denyBlocksNginx: backend'den bagimsiz erisim engelleri. Regex location'lar
+// tanim SIRASIYLA denenir; bu blok browser-cache/php location'larindan ONCE
+// yerlestirilir (arsiv uzantilari onceligi burada kazanir).
+const denyBlocksNginx = `    # ---- Yurutme engeli: CGI / betik yorumlayicilari ----
+    location ~* \.(cgi|pl|py|sh|rb|lua|fcgi)$ { deny all; }
+    # ---- Yedek / dump / hassas dosya engeli ----
+    location ~* \.(sql|sql\.gz|bak|old|orig|save|swp|dump|tar|tgz|gz|zip|rar|7z|log|inc|php\.bak)$ { deny all; }
+`
+
+// buildSecurityHeaders: opts toggle'larina + SSL durumuna gore guvenlik add_header
+// bloklarini uretir (her satir "always"). X-Frame-Options ve CSP-Report-Only DAIMA
+// eklenir (yeni koruma, DB kolonu yok). HSTS + CSP-upgrade YALNIZ HTTPS'te uygulanir.
+func buildSecurityHeaders(o VhostOpts) string {
+	var b strings.Builder
+	if o.HdrXContentType {
+		b.WriteString("    add_header X-Content-Type-Options \"nosniff\" always;\n")
+	}
+	// Clickjacking korumasi — daima (SAMEORIGIN: ayni-kaynak cerceveleme serbest).
+	b.WriteString("    add_header X-Frame-Options \"SAMEORIGIN\" always;\n")
+	if o.HdrXXSS {
+		b.WriteString("    add_header X-XSS-Protection \"1; mode=block\" always;\n")
+	}
+	if o.HdrReferrer {
+		b.WriteString("    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n")
+	}
+	if o.HdrPermissions {
+		b.WriteString("    add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n")
+	}
+	// Tenant CSP: GEVSEK Report-Only — musteri sitesini KIRMAZ (yalniz raporlar), her
+	// kaynaga izin verir; sadece frame-ancestors 'self' ile gozlem/sinyal saglar.
+	b.WriteString("    add_header Content-Security-Policy-Report-Only \"default-src 'self' https: http: data: blob: 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'self';\" always;\n")
+	if o.SSL() && o.HdrCSPUpgrade {
+		b.WriteString("    add_header Content-Security-Policy \"upgrade-insecure-requests\" always;\n")
+	}
+	if o.SSL() && o.HdrHSTS {
+		sd := ""
+		if o.HSTSSubdomains {
+			sd = "; includeSubDomains"
+		}
+		pl := ""
+		if o.HSTSPreload {
+			pl = "; preload"
+		}
+		fmt.Fprintf(&b, "    add_header Strict-Transport-Security \"max-age=%d%s%s\" always;\n", o.HSTSMaxAge, sd, pl)
+	}
+	return b.String()
+}
 
 // suspendedVhostTmpl — "Hesabı Askıya Al" için: acme-challenge hariç TÜM istekler 503.
 // SSL sertifikası varsa 443'te de servis edilir (böylece askıdayken bile cert yenilenebilir).
@@ -441,6 +502,11 @@ server {
 }
 {{end}}`))
 
+// phpPoolTmpl: per-tenant php-fpm pool. Guvenlik degerleri php_admin_value ile
+// verilir → kullanici PHP kodu ini_set/php_value ile EZEMEZ. open_basedir dosya
+// erisimini tenant home + /tmp ile sinirlar (baska tenant/sistem dosyalarini okuyamaz).
+// disable_functions komut yurutme + surec kontrol + symlink fonksiyonlarini kapatir
+// (mail acik birakilir; wp_mail vb. bozulmaz).
 var phpPoolTmpl = template.Must(template.New("p").Parse(`[{{.User}}]
 user = {{.User}}
 group = {{.User}}
@@ -452,7 +518,9 @@ pm = ondemand
 pm.max_children = 8
 pm.process_idle_timeout = 30s
 pm.max_requests = 500
-php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen
+; ---- Guvenlik sertlestirmesi (php_admin_* → kullanici ini_set ile EZEMEZ) ----
+php_admin_value[open_basedir] = /home/{{.User}}/:/tmp/
+php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid
 php_admin_value[upload_tmp_dir] = /home/{{.User}}/tmp
 php_admin_value[sys_temp_dir] = /home/{{.User}}/tmp
 php_admin_value[session.save_path] = /home/{{.User}}/tmp
@@ -494,6 +562,10 @@ type VhostOpts struct {
 
 	// Askida true ise normal vhost yerine 503 "askıya alındı" vhost'u render edilir.
 	Askida bool
+
+	// Render-time hesaplanan alanlar (DB'de TUTULMAZ). renderAndReload icinde set edilir.
+	SecHeaders string // guvenlik add_header blogu (her location'a enjekte edilir)
+	DenyBlocks string // CGI/betik + yedek/dump dosya deny location'lari
 }
 
 func (o VhostOpts) SSL() bool {
@@ -516,6 +588,46 @@ func phpPoolPath(sk, phpSurum string) (string, string, string) {
 		ay.Service
 }
 
+// writePoolValidated: tenant php-fpm pool dosyasini (sertlestirilmis template ile)
+// yazar, reload ONCESI `php-fpm -t` ile dogrular; gecersizse eski icerige GERI DONER
+// (nginx/DNS'teki backup-rollback deseni). Basariliysa ilgili php-fpm servisini reload eder.
+// Doner: aktif socket yolu + servis adi.
+func writePoolValidated(sk, phpSurum string) (socket, service string, err error) {
+	v := normalizePHP(phpSurum)
+	ay := phpMap[v]
+	poolPath, sock, svc := phpPoolPath(sk, v)
+
+	_ = os.MkdirAll(filepath.Dir(poolPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(sock), 0755)
+
+	var poolBuf bytes.Buffer
+	if e := phpPoolTmpl.Execute(&poolBuf, map[string]string{"User": sk, "Socket": sock}); e != nil {
+		return "", "", fmt.Errorf("pool template: %w", e)
+	}
+
+	// Fail-safe: eski icerigi yedekle; php-fpm -t patlarsa geri yukle (bu surumun
+	// TUM pool'larini bozmayalim → diger tenant'lar da etkilenirdi).
+	yedek, rerr := os.ReadFile(poolPath)
+	yedekVar := rerr == nil
+	if e := os.WriteFile(poolPath, poolBuf.Bytes(), 0644); e != nil {
+		return "", "", fmt.Errorf("php pool yaz: %w", e)
+	}
+	if ay.FpmBin != "" {
+		if out, e := exec.Command(ay.FpmBin, "-t").CombinedOutput(); e != nil {
+			if yedekVar {
+				_ = os.WriteFile(poolPath, yedek, 0644)
+			} else {
+				_ = os.Remove(poolPath)
+			}
+			return "", "", fmt.Errorf("php-fpm -t (%s) başarısız, pool geri alındı: %s: %w", v, strings.TrimSpace(string(out)), e)
+		}
+	}
+	if out, e := exec.Command("systemctl", "reload-or-restart", svc).CombinedOutput(); e != nil {
+		return "", "", fmt.Errorf("php-fpm (%s) reload: %s: %w", svc, strings.TrimSpace(string(out)), e)
+	}
+	return sock, svc, nil
+}
+
 // renderAndReload: vhost'u yaz + nginx -t + reload (SSL var/yok aynı yol)
 // Backend "apache" ise per-domain Apache vhost'unu da yazıp httpd'yi yeniden yükler.
 // Backend değiştirildiyse eski Apache vhost dosyası temizlenir.
@@ -535,6 +647,10 @@ func renderAndReload(opts VhostOpts, sk string) error {
 			opts.Askida = true
 		}
 	}
+
+	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
+	opts.SecHeaders = buildSecurityHeaders(opts)
+	opts.DenyBlocks = denyBlocksNginx
 
 	var buf bytes.Buffer
 	tmpl := vhostTmpl
@@ -636,17 +752,10 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 
 	_, _ = exec.Command("restorecon", "-R", home).CombinedOutput()
 
-	// PHP-FPM pool
-	poolPath, socket, service := phpPoolPath(u, phpSurum)
-	_ = os.MkdirAll(filepath.Dir(poolPath), 0755)
-	_ = os.MkdirAll(filepath.Dir(socket), 0755)
-	var poolBuf bytes.Buffer
-	_ = phpPoolTmpl.Execute(&poolBuf, map[string]string{"User": u, "Socket": socket})
-	if err := os.WriteFile(poolPath, poolBuf.Bytes(), 0644); err != nil {
-		return nil, fmt.Errorf("php pool yaz: %w", err)
-	}
-	if out, err := exec.Command("systemctl", "reload-or-restart", service).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("php-fpm (%s) reload: %s: %w", service, strings.TrimSpace(string(out)), err)
+	// PHP-FPM pool (php-fpm -t dogrulama + rollback ile)
+	socket, _, perr := writePoolValidated(u, phpSurum)
+	if perr != nil {
+		return nil, perr
 	}
 
 	// vhost (SSL yok başlangıçta)
@@ -707,16 +816,9 @@ func SetPHPVersion(alanAdi, sk, yeniSurum, certPath, keyPath, sslKaynak, backend
 		}
 	}
 
-	poolPath, socket, service := phpPoolPath(sk, yeniSurum)
-	_ = os.MkdirAll(filepath.Dir(poolPath), 0755)
-	_ = os.MkdirAll(filepath.Dir(socket), 0755)
-	var poolBuf bytes.Buffer
-	_ = phpPoolTmpl.Execute(&poolBuf, map[string]string{"User": sk, "Socket": socket})
-	if err := os.WriteFile(poolPath, poolBuf.Bytes(), 0644); err != nil {
-		return "", fmt.Errorf("yeni pool yaz: %w", err)
-	}
-	if out, err := exec.Command("systemctl", "reload-or-restart", service).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("php-fpm (%s) reload: %s: %w", service, strings.TrimSpace(string(out)), err)
+	socket, _, perr := writePoolValidated(sk, yeniSurum)
+	if perr != nil {
+		return "", perr
 	}
 
 	home := "/home/" + sk
@@ -1049,4 +1151,135 @@ func buildProtectedBlocks(db *sql.DB, domainID int64, socket string) string {
 	}
 	_ = rows.Err()
 	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// Batch2 sertlestirme heal'leri (retroaktif) — Init'ten cagrilir.
+// ---------------------------------------------------------------------------
+
+// vhostHardenSentinel: retroaktif vhost/pool re-render'inin YALNIZ BIR KEZ
+// calismasini garanti eden isaret dosyasi. Silinirse bir sonraki panel restart'inda
+// re-render tekrar calisir (elle yeniden tetikleme).
+const vhostHardenSentinel = "/var/lib/girginospanel/.vhost_hardening_v2_done"
+
+// HealVhostsOnStartup: MEVCUT tum domainlerin php-fpm pool + nginx vhost'unu YENI
+// (sertlestirilmis) template ile bir kez yeniden render eder. Template degisikligi
+// yalniz yeni-render'i etkiledigi icin, eski domainler bu heal olmadan sertlesmezdi.
+//
+// Guvenlik/kirilmazlik:
+//   - Her pool writePoolValidated ile (php-fpm -t + rollback) yazilir.
+//   - Her vhost ApplyVhostForDomain → renderAndReload ile (nginx -t + rollback) yazilir.
+//   - Tek bir domain hata verse bile digerlerine DEVAM edilir; hatali domain ESKI
+//     (calisan) haline birakilir → tum nginx asla kirilmaz.
+//   - Sentinel ile idempotent (tekrar tekrar tum filoyu render etmez).
+func HealVhostsOnStartup() {
+	if pkgDB == nil {
+		return
+	}
+	if _, err := os.Stat(vhostHardenSentinel); err == nil {
+		return // zaten calisti
+	}
+
+	rows, err := pkgDB.Query(`SELECT id, sistem_kullanici, php_surum FROM domains`)
+	if err != nil {
+		log.Printf("vhost heal: domain listesi okunamadi (atlandi): %v", err)
+		return
+	}
+	type dom struct {
+		id  int64
+		sk  string
+		php string
+	}
+	var list []dom
+	for rows.Next() {
+		var d dom
+		if scanErr := rows.Scan(&d.id, &d.sk, &d.php); scanErr == nil {
+			list = append(list, d)
+		}
+	}
+	rows.Close()
+
+	var ok, fail int
+	for _, d := range list {
+		// 1) pool'u yeni template ile yeniden yaz (php-fpm -t + rollback iceride).
+		socket, _, perr := writePoolValidated(d.sk, d.php)
+		if perr != nil {
+			log.Printf("vhost heal: %s pool yeniden yazilamadi (vhost yine denenecek): %v", d.sk, perr)
+			if s, e := PHPSocketFor(d.sk, d.php); e == nil {
+				socket = s
+			}
+		}
+		if socket == "" {
+			socket = "/run/php-fpm/" + d.sk + ".sock"
+		}
+		// 2) vhost'u yeni template ile yeniden render et (nginx -t + rollback iceride).
+		if aerr := ApplyVhostForDomain(pkgDB, d.id, socket, d.php); aerr != nil {
+			log.Printf("vhost heal: %s vhost yeniden render HATA (eski hali korundu): %v", d.sk, aerr)
+			fail++
+			continue
+		}
+		ok++
+	}
+	log.Printf("vhost heal: retroaktif sertlestirme tamam — %d ok / %d hata (toplam %d domain)", ok, fail, len(list))
+
+	_ = os.MkdirAll(filepath.Dir(vhostHardenSentinel), 0755)
+	if e := os.WriteFile(vhostHardenSentinel, []byte("done\n"), 0644); e != nil {
+		log.Printf("vhost heal: sentinel yazilamadi (bir sonraki boot'ta tekrar calisir): %v", e)
+	}
+}
+
+// panelVhostPath: kurulu panel nginx vhost'u (installer tarafindan yazilir).
+const panelVhostPath = "/etc/nginx/conf.d/_panel.conf"
+
+// panelSecSentinel: panel vhost'una guvenlik header'lari enjekte edildiginde eklenen
+// isaret satiri. Idempotency icin (iki kez eklemeyi onler).
+const panelSecSentinel = "# GOSP-PANEL-SEC v2"
+
+// HealPanelVhostHeadersOnStartup: kurulu panel vhost'una (yoksa sessiz gecer)
+// guvenlik header'larini SERVER seviyesinde ekler. Panel React SPA (location /) ve
+// phpMyAdmin PHP location'lari kendi add_header'i olmadigi icin bu server-seviyesi
+// header'lari MIRAS ALIR. Enjeksiyon SADECE add_header satirlaridir (istek yonlendirmesini
+// degistirmez) ve nginx -t + rollback ile korunur → admin kilitlenmesi riski minimum.
+func HealPanelVhostHeadersOnStartup() {
+	orig, err := os.ReadFile(panelVhostPath)
+	if err != nil {
+		return // panel vhost yok (bu host'ta panel kurulu degil) — sessiz gec
+	}
+	s := string(orig)
+	if strings.Contains(s, panelSecSentinel) {
+		return // zaten sertlestirilmis
+	}
+	anchor := "server_name _;"
+	idx := strings.Index(s, anchor)
+	if idx < 0 {
+		log.Printf("panel sec heal: '%s' capasi bulunamadi, atlandi", anchor)
+		return
+	}
+	// Panel CSP: SIKI ama kendini-barindiran SPA + phpMyAdmin icin uyumlu
+	// (script/style 'unsafe-inline'/'unsafe-eval' — pma satir-ici script kullanir).
+	hdrs := "\n    " + panelSecSentinel + "\n" +
+		"    add_header X-Content-Type-Options \"nosniff\" always;\n" +
+		"    add_header X-Frame-Options \"SAMEORIGIN\" always;\n" +
+		"    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n" +
+		"    add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n" +
+		"    add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
+		"    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n"
+
+	insertAt := idx + len(anchor)
+	newS := s[:insertAt] + hdrs + s[insertAt:]
+
+	if e := os.WriteFile(panelVhostPath, []byte(newS), 0644); e != nil {
+		log.Printf("panel sec heal: yazilamadi: %v", e)
+		return
+	}
+	if out, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
+		_ = os.WriteFile(panelVhostPath, orig, 0644) // GERI YUKLE
+		log.Printf("panel sec heal: nginx -t basarisiz, geri alindi: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	if out, e := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); e != nil {
+		log.Printf("panel sec heal: nginx reload: %s", strings.TrimSpace(string(out)))
+		return
+	}
+	log.Printf("panel sec heal: guvenlik header'lari eklendi + nginx reload OK")
 }
