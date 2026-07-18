@@ -261,6 +261,10 @@ systemctl is-active --quiet crond && ok "günlük yedek cron + crond ACTIVE (03:
 
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
+# Batch5A: nginx(httpd_t) tenant home içeriğini (public_html) okuyabilsin — bu boolean'lar
+# KAPALI iken try_files dosyayı "yok" sanar → tüm siteler 404. (Panel açılışında
+# ensureHTTPDHomeBooleans ile de garanti edilir; bu satır ilk-boot için.)
+setsebool -P httpd_enable_homedirs=on httpd_read_user_content=on >/dev/null 2>&1 && ok "SELinux httpd home okuma (homedirs + user_content)"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
 # Batch5A: per-tenant php-fpm socket dizinleri /run/php-fpm-<sk>/ için fcontext (httpd_var_run_t).
 # Mevcut /run/php-fpm(/.*)? kuralı tireli yolu kapsamaz → nginx→FPM 500. Idempotent.

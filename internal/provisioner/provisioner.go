@@ -40,9 +40,11 @@ func Init(d *sql.DB) {
 	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
 	HealPanelVhostHeadersOnStartup()
 	HealVhostsOnStartup()
-	HealHomePerms()            // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
-	ensureFPMSELinuxFcontext() // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
-	EnsureTenantFPMOnStartup() // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
+	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
+	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
+	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
+	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
+	EnsureTenantFPMOnStartup()  // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -812,6 +814,11 @@ func Deprovision(alanAdi, sk string) error {
 	}
 	// Per-tenant FPM (Seçenek A) izlerini kaldır (servis + unit + config + run dizini + .bak).
 	TeardownTenantFPM(sk)
+	// Sistem SSL cert dizinini temizle (/etc/pki/girginospanel/<domain>) — userdel home'u siler
+	// ama cert artık sistemde; orphan kalmasın.
+	if alanAdi != "" && ValidateDomain(alanAdi) == nil {
+		_ = os.RemoveAll(certSystemDir(alanAdi))
+	}
 	for _, ay := range phpMap {
 		p := filepath.Join(ay.PoolDir, sk+".conf")
 		if _, err := os.Stat(p); err == nil {
@@ -861,11 +868,43 @@ func SetPHPVersion(alanAdi, sk, yeniSurum, certPath, keyPath, sslKaynak, backend
 	return socket, nil
 }
 
-// EnableSelfSigned: openssl ile self-signed cert üret, vhost SSL-li yeniden render
+// certSystemBaseDir: SSL cert/key'lerin yazıldığı SİSTEM kökü (SELinux cert_t; nginx
+// httpd_t okur). Home (user_home_t) DEĞİL.
+const certSystemBaseDir = "/etc/pki/girginospanel"
+
+// certSystemDir: bir domain'in SSL cert/key sistem dizini. 🔴 Home'a değil buraya yazarız:
+// Enforcing'de nginx(httpd_t) home'daki cert'i (user_home_t) okuyamaz → "cannot load
+// certificate ... Permission denied" → reload fail → site down. Sistem dizini cert_t
+// bağlamındadır (nginx okur) + root-owned (müşteri kendi key'ini kurcalayamaz — cPanel/Plesk modeli).
+func certSystemDir(alanAdi string) string {
+	return filepath.Join(certSystemBaseDir, alanAdi)
+}
+
+// yazCertKurulumu: cert+key'e sistem izinleri/bağlamı uygular (cert 0644, key 0600, root-owned,
+// restorecon → cert_t).
+func yazCertKurulumu(sslDir, certPath, keyPath string) {
+	_ = os.Chmod(certPath, 0644)
+	_ = os.Chmod(keyPath, 0600)
+	_ = os.Chown(certPath, 0, 0)
+	_ = os.Chown(keyPath, 0, 0)
+	_, _ = exec.Command("restorecon", "-R", sslDir).CombinedOutput()
+}
+
+// removeHomeCert: eski home SSL cert/key artıklarını temizler (sistem dizinine taşındıktan sonra).
+func removeHomeCert(sk, alanAdi string) {
+	old := filepath.Join("/home/"+sk, "ssl")
+	_ = os.Remove(filepath.Join(old, alanAdi+".crt"))
+	_ = os.Remove(filepath.Join(old, alanAdi+".key"))
+}
+
+// EnableSelfSigned: openssl ile self-signed cert üret (SİSTEM dizinine), vhost SSL-li yeniden render
 func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
+	if verr := ValidateDomain(alanAdi); verr != nil {
+		return "", "", verr // path güvenliği: alanAdi'da / veya .. yok
+	}
 	phpSurum = normalizePHP(phpSurum)
 	home := "/home/" + sk
-	sslDir := filepath.Join(home, "ssl")
+	sslDir := certSystemDir(alanAdi)
 	_ = os.MkdirAll(sslDir, 0755)
 
 	certPath = filepath.Join(sslDir, alanAdi+".crt")
@@ -884,12 +923,7 @@ func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath 
 	if out, err := exec.Command("openssl", args...).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("openssl: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	_ = os.Chmod(keyPath, 0640)
-
-	uid, gid, _ := uidGid(sk)
-	_ = os.Chown(certPath, uid, gid)
-	_ = os.Chown(keyPath, uid, gid)
-	_, _ = exec.Command("restorecon", "-R", sslDir).CombinedOutput()
+	yazCertKurulumu(sslDir, certPath, keyPath)
 
 	_, socket, _ := phpPoolPath(sk, phpSurum)
 	if err := renderAndReload(VhostOpts{
@@ -904,11 +938,15 @@ func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath 
 	}, sk); err != nil {
 		return "", "", err
 	}
+	removeHomeCert(sk, alanAdi) // varsa eski home cert artığını temizle
 	return certPath, keyPath, nil
 }
 
-// EnableLetsEncrypt: acme.sh ile cert al, vhost SSL-li yeniden render
+// EnableLetsEncrypt: acme.sh ile cert al (SİSTEM dizinine), vhost SSL-li yeniden render
 func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
+	if verr := ValidateDomain(alanAdi); verr != nil {
+		return "", "", verr // path güvenliği
+	}
 	phpSurum = normalizePHP(phpSurum)
 	home := "/home/" + sk
 
@@ -916,7 +954,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	_ = os.MkdirAll("/var/www/_acme", 0755)
 	_, _ = exec.Command("restorecon", "-R", "/var/www/_acme").CombinedOutput()
 
-	sslDir := filepath.Join(home, "ssl")
+	sslDir := certSystemDir(alanAdi)
 	_ = os.MkdirAll(sslDir, 0755)
 	certPath = filepath.Join(sslDir, alanAdi+".crt")
 	keyPath = filepath.Join(sslDir, alanAdi+".key")
@@ -947,10 +985,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 		return "", "", fmt.Errorf("acme.sh install-cert: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	uid, gid, _ := uidGid(sk)
-	_ = os.Chown(certPath, uid, gid)
-	_ = os.Chown(keyPath, uid, gid)
-	_, _ = exec.Command("restorecon", "-R", sslDir).CombinedOutput()
+	yazCertKurulumu(sslDir, certPath, keyPath) // root-owned, cert 0644 / key 0600, cert_t
 
 	_, socket, _ := phpPoolPath(sk, phpSurum)
 	if err := renderAndReload(VhostOpts{
@@ -965,6 +1000,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	}, sk); err != nil {
 		return "", "", err
 	}
+	removeHomeCert(sk, alanAdi)
 	return certPath, keyPath, nil
 }
 
@@ -980,6 +1016,83 @@ func DisableSSL(alanAdi, sk, phpSurum, backend string) error {
 		PHPSurum:  phpSurum,
 		Backend:   backend,
 	}, sk)
+}
+
+// copyFile: src'yi dst'ye kopyalar, root-owned + verilen perm. Başarı → true.
+func copyFile(src, dst string, perm os.FileMode) bool {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	if err := os.WriteFile(dst, data, perm); err != nil {
+		return false
+	}
+	_ = os.Chown(dst, 0, 0)
+	_ = os.Chmod(dst, perm)
+	return true
+}
+
+// HealSSLCertPathsOnStartup: SSL'li domain'lerin cert'i HOME'daysa (user_home_t → nginx
+// httpd_t okuyamaz, Enforcing'de "cannot load certificate ... Permission denied" → reload
+// fail → site down) /etc/pki/girginospanel/<domain>/'ye TAŞIR: kopyala + restorecon (cert_t)
+// + DB cert_path/key_path repoint + vhost re-render + home artığını temizle. İdempotent
+// (cert zaten sistemdeyse WHERE ile hiç seçilmez). Init'ten her boot çağrılır → mevcut
+// bozuk kurulumlar update'te self-heal olur.
+func HealSSLCertPathsOnStartup() {
+	if pkgDB == nil {
+		return
+	}
+	rows, err := pkgDB.Query(`SELECT id, alan_adi, sistem_kullanici, COALESCE(php_surum,'8.3'), cert_path, key_path
+		FROM domains WHERE ssl_aktif=1 AND cert_path LIKE '/home/%'`)
+	if err != nil {
+		return
+	}
+	type dom struct {
+		id                          int64
+		alanAdi, sk, php, cert, key string
+	}
+	var list []dom
+	for rows.Next() {
+		var x dom
+		if e := rows.Scan(&x.id, &x.alanAdi, &x.sk, &x.php, &x.cert, &x.key); e == nil {
+			list = append(list, x)
+		}
+	}
+	rows.Close()
+	if len(list) == 0 {
+		return
+	}
+	var ok, fail int
+	for _, x := range list {
+		if x.alanAdi == "" || ValidateDomain(x.alanAdi) != nil {
+			continue // path güvenliği
+		}
+		sysDir := certSystemDir(x.alanAdi)
+		_ = os.MkdirAll(sysDir, 0755)
+		newCert := filepath.Join(sysDir, x.alanAdi+".crt")
+		newKey := filepath.Join(sysDir, x.alanAdi+".key")
+		if !copyFile(x.cert, newCert, 0644) || !copyFile(x.key, newKey, 0600) {
+			log.Printf("ssl cert heal: %s kaynak cert kopyalanamadı (%s) — atlandı", x.alanAdi, x.cert)
+			fail++
+			continue
+		}
+		_, _ = exec.Command("restorecon", "-R", sysDir).CombinedOutput()
+		if _, e := pkgDB.Exec(`UPDATE domains SET cert_path=?, key_path=? WHERE id=?`, newCert, newKey, x.id); e != nil {
+			log.Printf("ssl cert heal: %s DB repoint hata: %v", x.alanAdi, e)
+			fail++
+			continue
+		}
+		socket, _ := PHPSocketFor(x.sk, x.php)
+		if e := ApplyVhostForDomain(pkgDB, x.id, socket, x.php); e != nil {
+			log.Printf("ssl cert heal: %s vhost re-render hata (sistem cert hazır, sonraki render kullanır): %v", x.alanAdi, e)
+			fail++
+			continue
+		}
+		removeHomeCert(x.sk, x.alanAdi)
+		ok++
+		log.Printf("ssl cert heal: %s home→sistem taşındı (%s)", x.alanAdi, sysDir)
+	}
+	log.Printf("ssl cert heal: %d taşındı / %d hata (toplam %d home-cert domain)", ok, fail, len(list))
 }
 
 func userExists(u string) bool {

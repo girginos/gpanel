@@ -19,6 +19,7 @@ package provisioner
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +94,58 @@ func selinuxAktif() bool {
 	}
 	s := strings.TrimSpace(string(out))
 	return s == "Enforcing" || s == "Permissive"
+}
+
+var (
+	httpdBoolMu   sync.Mutex
+	httpdBoolDone bool
+)
+
+// ensureHTTPDHomeBooleans: SELinux httpd_enable_homedirs + httpd_read_user_content
+// boolean'larını açar. 🔴 KAPALI iken nginx(httpd_t) tenant home içeriğini (public_html)
+// OKUYAMAZ → try_files dosyayı "yok" sanar → 404. Taze AlmaLinux 10 Enforcing kurulumda
+// varsayılan KAPALI → tüm siteler 404. İdempotent, süreç-başına-bir-kez; SELinux Disabled
+// veya getsebool/setsebool yoksa sessiz atlar. (Desen: ensureFPMSELinuxFcontext.)
+func ensureHTTPDHomeBooleans() {
+	httpdBoolMu.Lock()
+	defer httpdBoolMu.Unlock()
+	if httpdBoolDone {
+		return
+	}
+	if !selinuxAktif() {
+		httpdBoolDone = true // SELinux yok → tekrar deneme
+		return
+	}
+	if _, err := exec.LookPath("setsebool"); err != nil {
+		httpdBoolDone = true
+		return
+	}
+	gerekli := []string{"httpd_enable_homedirs", "httpd_read_user_content"}
+	var kapali []string
+	for _, b := range gerekli {
+		out, err := exec.Command("getsebool", b).Output()
+		if err != nil {
+			continue // getsebool yok/hatalı → bu boolean'ı atla
+		}
+		if !strings.Contains(string(out), "--> on") {
+			kapali = append(kapali, b)
+		}
+	}
+	if len(kapali) == 0 {
+		httpdBoolDone = true // zaten hepsi açık
+		return
+	}
+	args := []string{"-P"} // -P = kalıcı
+	for _, b := range kapali {
+		args = append(args, b+"=on")
+	}
+	if out, err := exec.Command("setsebool", args...).CombinedOutput(); err == nil {
+		httpdBoolDone = true
+		log.Printf("SELinux: httpd home boolean'ları açıldı (%v) — home'dan site sunumu için", kapali)
+	} else {
+		log.Printf("SELinux setsebool httpd home: %s: %v", strings.TrimSpace(string(out)), err)
+		// hata → httpdBoolDone=false; sonraki boot yeniden dener.
+	}
 }
 
 // TenantFPMActive: bu tenant için per-tenant FPM servisi kurulu mu (unit dosyası var mı).
