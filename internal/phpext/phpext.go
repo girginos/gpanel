@@ -136,9 +136,9 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(exts, func(i, j int) bool { return exts[i].Adi < exts[j].Adi })
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"surum":   surum,
-		"toplam":  len(exts),
-		"icerik":  exts,
+		"surum":    surum,
+		"toplam":   len(exts),
+		"icerik":   exts,
 		"surumler": Surumler(),
 	})
 }
@@ -205,10 +205,10 @@ func (h *Handlers) Toggle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"surum":  req.Surum,
-		"dosya":  filepath.Base(yeni),
-		"aktif":  req.Aktif,
+		"ok":    true,
+		"surum": req.Surum,
+		"dosya": filepath.Base(yeni),
+		"aktif": req.Aktif,
 	})
 }
 
@@ -242,7 +242,7 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 
 	// Olası paket adı varyantları
 	adaylar := []string{
-		prefix + "-php-pecl-" + req.Paket,         // 1) base ad
+		prefix + "-php-pecl-" + req.Paket,          // 1) base ad
 		prefix + "-php-pecl-" + req.Paket + "-im7", // 2) imagick için im7 suffix
 		prefix + "-php-pecl-" + req.Paket + "6",    // 3) redis6 / mongodb1 vb. (versiyon suffix)
 		prefix + "-php-pecl-" + req.Paket + "5",    // 4) redis5 (eski sürüm)
@@ -278,12 +278,12 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		// FPM reload
 		_, _ = exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
 		httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-			"ok":     true,
-			"paket":  req.Paket,
-			"surum":  req.Surum,
-			"yontem": "dnf",
+			"ok":      true,
+			"paket":   req.Paket,
+			"surum":   req.Surum,
+			"yontem":  "dnf",
 			"dnf_pkg": dnfPkg,
-			"output": string(out),
+			"output":  string(out),
 		})
 		return
 	}
@@ -295,7 +295,12 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := exec.Command(s.PECLBin, "install", "-f", req.Paket)
-	cmd.Env = append(os.Environ(), "PHP_PEAR_PHP_BIN="+s.PHPBin)
+	// Guvenlik: panel sirlarini alt-surece verme (allowlist env)
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/root",
+		"PHP_PEAR_PHP_BIN=" + s.PHPBin,
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError,

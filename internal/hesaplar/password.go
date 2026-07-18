@@ -16,8 +16,11 @@ func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
 		return fmt.Errorf("güvenlik: c_ prefix'siz user reddedildi")
 	}
 	// MariaDB user'ın varlığını doğrula
+	if !GecerliDBKimlik(dbUser) {
+		return fmt.Errorf("güvenlik: geçersiz kullanıcı adı")
+	}
 	stmts := []string{
-		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, yeniPw),
+		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(yeniPw)),
 		"FLUSH PRIVILEGES;",
 	}
 	out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput()

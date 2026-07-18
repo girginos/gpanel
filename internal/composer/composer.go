@@ -44,7 +44,11 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	var surum string
 	kurulu := false
 	vc := exec.Command(composerBin, "--version", "--no-ansi")
-	vc.Env = append(os.Environ(), "COMPOSER_HOME=/tmp", "HOME=/tmp")
+	vc.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/tmp",
+		"COMPOSER_HOME=/tmp",
+	}
 	if out, err := vc.Output(); err == nil { // stdout-only: stderr plugin-uyarısını dışla
 		kurulu = true
 		surum = strings.TrimSpace(string(out))
@@ -94,6 +98,11 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 	dizin := "/home/" + sk + "/public_html"
 	// argv EXPLICIT (shell yok → enjeksiyon yok)
 	args := []string{"-u", sk, "--", composerBin, req.Komut, "--no-interaction", "--no-ansi", "-d", dizin}
+	// Guvenlik: script/plugin calistirmayi engelle (rasgele kod + env-sizinti vektoru)
+	switch req.Komut {
+	case "install", "update", "require", "remove", "dump-autoload":
+		args = append(args, "--no-scripts", "--no-plugins")
+	}
 	if req.Komut == "require" || req.Komut == "remove" {
 		pkg := strings.TrimSpace(req.Paket)
 		if !rePkg.MatchString(pkg) {
@@ -103,11 +112,13 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		args = append(args, pkg)
 	}
 	cmd := exec.Command("runuser", args...)
-	cmd.Env = append(os.Environ(),
-		"COMPOSER_HOME=/home/"+sk+"/.composer",
-		"HOME=/home/"+sk,
+	// Guvenlik: panel sirlarini (PANEL_JWT_SECRET, PANEL_DB_DSN, ...) alt-surece VERME
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/home/" + sk,
+		"COMPOSER_HOME=/home/" + sk + "/.composer",
 		"COMPOSER_ALLOW_SUPERUSER=0",
-	)
+	}
 	out, err := cmd.CombinedOutput()
 	cikti := string(out)
 	if len(cikti) > 20000 {

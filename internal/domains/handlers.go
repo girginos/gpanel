@@ -515,6 +515,15 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
 	}
+	// Guvenlik: musteri-verdigi ad SQL-guvenli VE domain kullanicisiyla namespaced olmali
+	if req.DBAdi != "" && !hesaplar.MusteriDBKimlikGecerli(sk, req.DBAdi) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı adı (yalnız harf/rakam/alt-çizgi; '"+sk+"_' önekiyle)")
+		return
+	}
+	if req.DBKullanici != "" && !hesaplar.MusteriDBKimlikGecerli(sk, req.DBKullanici) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı kullanıcısı (yalnız harf/rakam/alt-çizgi; '"+sk+"_' önekiyle)")
+		return
+	}
 	if req.DBAdi == "" {
 		req.DBAdi = sk + "_ek" + strconv.FormatInt(id, 10)
 	}

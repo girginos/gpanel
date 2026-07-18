@@ -4,13 +4,13 @@ package files
 // (jailJoin orijinali files.go'da; bu dosya ek handler'lar + sıkılastirma)
 
 import (
-	"io"
-	"os/exec"
-	"fmt"
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -190,8 +190,8 @@ var _ = errors.New // keep import
 // ----- Extract (ZIP / TAR / TAR.GZ aç) -----
 
 type extractReq struct {
-	Yol    string `json:"yol"`     // arşivin yolu
-	Hedef  string `json:"hedef"`   // çıkarılacak dizin (opsiyonel; boşsa arşivin dizini)
+	Yol   string `json:"yol"`   // arşivin yolu
+	Hedef string `json:"hedef"` // çıkarılacak dizin (opsiyonel; boşsa arşivin dizini)
 }
 
 func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
@@ -245,13 +245,30 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		cmd = exec.Command("tar", "-xf", abs, "-C", hedefAbs)
 	case strings.HasSuffix(low, ".gz"):
 		// tek dosya gunzip
-		cmd = exec.Command("bash", "-lc", fmt.Sprintf("gunzip -k -c %q > %q", abs, filepath.Join(hedefAbs, strings.TrimSuffix(filepath.Base(abs), ".gz"))))
+		gzHedef := filepath.Join(hedefAbs, strings.TrimSuffix(filepath.Base(abs), ".gz"))
+		gzOut, gzErr := os.Create(gzHedef)
+		if gzErr != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "gz hedef: "+gzErr.Error())
+			return
+		}
+		defer gzOut.Close()
+		gzc := exec.Command("gunzip", "-k", "-c", abs)
+		gzc.Stdout = gzOut
+		cmd = gzc
 	default:
 		httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz)")
 		return
 	}
 
-	out, err := cmd.CombinedOutput()
+	var out []byte
+	if cmd.Stdout != nil {
+		var eb bytes.Buffer
+		cmd.Stderr = &eb
+		err = cmd.Run()
+		out = eb.Bytes()
+	} else {
+		out, err = cmd.CombinedOutput()
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "extract: "+strings.TrimSpace(string(out)))
 		return
@@ -612,4 +629,3 @@ func (h *Handlers) Ara(w http.ResponseWriter, r *http.Request) {
 		"icerik": results, "toplam": len(results), "q": q,
 	})
 }
-

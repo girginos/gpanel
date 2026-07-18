@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,28 @@ func RandomParola(n int) string {
 		b[i] = harf[int(b[i])%len(harf)]
 	}
 	return string(b)
+}
+
+var reDBKimlik = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+
+// GecerliDBKimlik: MySQL identifier (db/kullanici adi) guvenli mi? backtick/tirnak/bosluk yok => SQLi kapali
+func GecerliDBKimlik(s string) bool {
+	return reDBKimlik.MatchString(s)
+}
+
+// MusteriDBKimlikGecerli: musteri-verdigi ad guvenli VE domain kullanicisiyla namespaced mi?
+func MusteriDBKimlikGecerli(sk, s string) bool {
+	if !GecerliDBKimlik(s) {
+		return false
+	}
+	return s == sk || strings.HasPrefix(s, sk+"_")
+}
+
+// sqlKac: MySQL string-literal ('...') icin kacis (ters-bolu + tek-tirnak)
+func sqlKac(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	return s
 }
 
 // FTPCreate: ftp_accounts tablosuna kayit ekler, parolayi cleartext olarak tutar (Pure-FTPd MYSQLCrypt cleartext)
@@ -50,11 +73,14 @@ func FTPDelete(db *sql.DB, sistemKullanici string) error {
 
 // MySQLCreateDB: MariaDB'de yeni veritabani + kullanici olustur + GRANT, sonra db_accounts'a kaydet
 func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) error {
+	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
+	}
 	// 1) MariaDB'de DB + user create (root socket auth ile)
 	stmts := []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
-		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, dbPass),
-		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, dbPass),
+		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
+		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
 		"FLUSH PRIVILEGES;",
 	}
@@ -73,6 +99,9 @@ func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) er
 
 // MySQLDropDB: DB ve user kaldir + metadata sil
 func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
+	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
+	}
 	stmts := []string{
 		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName),
 		fmt.Sprintf("DROP USER IF EXISTS '%s'@'localhost';", dbUser),

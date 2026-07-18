@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// badURLChars: repo URL'de yasak shell/enjeksiyon metakarakterleri
+const badURLChars = "\"'`$();|&<>\\"
 
 type Repo struct {
 	ID            int64  `json:"id"`
@@ -110,35 +114,104 @@ func generateDeployKey(sk string) (pubKey string, err error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// runAsUser: komutu sk kullanıcısı olarak çalıştır
-func runAsUser(sk, cwd, cmd string) (string, error) {
-	args := []string{"-u", sk, "-H", "bash", "-lc", "cd " + cwd + " && " + cmd}
-	out, err := exec.Command("sudo", args...).CombinedOutput()
+var (
+	reTargetDir = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+	reBranch    = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+)
+
+// gecerliTargetDir: komut-enjeksiyon + path-traversal engelle
+func gecerliTargetDir(td string) bool {
+	td = strings.TrimSpace(td)
+	if td == "" || len(td) > 128 {
+		return false
+	}
+	if strings.HasPrefix(td, "/") || strings.Contains(td, "..") {
+		return false
+	}
+	return reTargetDir.MatchString(td)
+}
+
+// gecerliBranch: git branch/ref adi dogrulama
+func gecerliBranch(b string) bool {
+	b = strings.TrimSpace(b)
+	if b == "" || len(b) > 128 || strings.Contains(b, "..") {
+		return false
+	}
+	return reBranch.MatchString(b)
+}
+
+// gecerliRepoURL: sema zorunlu + shell/enjeksiyon metakarakterleri reddet
+func gecerliRepoURL(u string) bool {
+	u = strings.TrimSpace(u)
+	if u == "" || len(u) > 512 {
+		return false
+	}
+	for _, c := range u {
+		if c <= ' ' || strings.ContainsRune(badURLChars, c) {
+			return false
+		}
+	}
+	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "git@") || strings.HasPrefix(u, "ssh://")
+}
+
+// temizleDizinIcerigi: dizin icerigini SHELL OLMADAN sil (dotfile dahil)
+func temizleDizinIcerigi(dst string) {
+	entries, err := os.ReadDir(dst)
 	if err != nil {
-		// sudo yoksa runuser dene
-		args2 := []string{"-u", sk, "--", "bash", "-lc", "cd " + cwd + " && " + cmd}
-		out, err = exec.Command("runuser", args2...).CombinedOutput()
+		return
+	}
+	for _, e := range entries {
+		_ = os.RemoveAll(filepath.Join(dst, e.Name()))
+	}
+}
+
+// runAsUserArgs: komutu sk kullanicisi olarak SHELL OLMADAN (argv) calistir; panel env verilmez
+func runAsUserArgs(sk, cwd string, argv ...string) (string, error) {
+	sudoArgs := append([]string{"-u", sk, "-H", "--"}, argv...)
+	cmd := exec.Command("sudo", sudoArgs...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		ruArgs := append([]string{"-u", sk, "--"}, argv...)
+		cmd2 := exec.Command("runuser", ruArgs...)
+		if cwd != "" {
+			cmd2.Dir = cwd
+		}
+		cmd2.Env = []string{
+			"HOME=/home/" + sk,
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		}
+		out, err = cmd2.CombinedOutput()
 	}
 	return string(out), err
 }
 
 // gitClone: ilk kez klonla (target_dir varsa silinir)
 func gitClone(sk, repoURL, branch, targetDir string) (sha string, log string, err error) {
+	if !gecerliTargetDir(targetDir) {
+		return "", "", errors.New("geçersiz hedef dizin")
+	}
+	if !gecerliBranch(branch) {
+		return "", "", errors.New("geçersiz branch adı")
+	}
+	if !gecerliRepoURL(repoURL) {
+		return "", "", errors.New("geçersiz repo URL")
+	}
 	home := "/home/" + sk
 	dst := filepath.Join(home, targetDir)
 	// hedef temizle (ama public_html varsa içerik kaybolur — uyarı UI'da)
-	_, _ = exec.Command("bash", "-c",
-		fmt.Sprintf("rm -rf %q/{*,.*} 2>/dev/null; true", dst)).CombinedOutput()
+	temizleDizinIcerigi(dst)
 	_ = os.MkdirAll(dst, 0755)
 	_, _ = exec.Command("chown", sk+":"+sk, dst).CombinedOutput()
 
-	out, err := runAsUser(sk, home,
-		fmt.Sprintf("git clone --depth 1 --branch %s %s %s 2>&1", branch, repoURL, dst))
+	out, err := runAsUserArgs(sk, home, "git", "clone", "--depth", "1", "--branch", branch, "--", repoURL, dst)
 	log = out
 	if err != nil {
 		return "", out, err
 	}
-	shaOut, _ := runAsUser(sk, dst, "git rev-parse HEAD 2>&1")
+	shaOut, _ := runAsUserArgs(sk, dst, "git", "-C", dst, "rev-parse", "HEAD")
 	sha = strings.TrimSpace(shaOut)
 	_, _ = exec.Command("restorecon", "-R", dst).CombinedOutput()
 	return sha, log, nil
@@ -146,18 +219,27 @@ func gitClone(sk, repoURL, branch, targetDir string) (sha string, log string, er
 
 // gitPull: mevcut repo'da pull yap
 func gitPull(sk, targetDir, branch string) (sha string, log string, err error) {
+	if !gecerliTargetDir(targetDir) {
+		return "", "", errors.New("geçersiz hedef dizin")
+	}
+	if !gecerliBranch(branch) {
+		return "", "", errors.New("geçersiz branch adı")
+	}
 	home := "/home/" + sk
 	dst := filepath.Join(home, targetDir)
 	if _, err := os.Stat(filepath.Join(dst, ".git")); err != nil {
 		return "", "", errors.New("hedef dizin git deposu değil; önce 'klonla' kullanın")
 	}
-	out, err := runAsUser(sk, dst,
-		fmt.Sprintf("git fetch origin %s && git reset --hard origin/%s 2>&1", branch, branch))
+	out, err := runAsUserArgs(sk, dst, "git", "-C", dst, "fetch", "origin", branch)
+	if err == nil {
+		o2, e2 := runAsUserArgs(sk, dst, "git", "-C", dst, "reset", "--hard", "origin/"+branch)
+		out, err = out+o2, e2
+	}
 	log = out
 	if err != nil {
 		return "", out, err
 	}
-	shaOut, _ := runAsUser(sk, dst, "git rev-parse HEAD 2>&1")
+	shaOut, _ := runAsUserArgs(sk, dst, "git", "-C", dst, "rev-parse", "HEAD")
 	sha = strings.TrimSpace(shaOut)
 	_, _ = exec.Command("restorecon", "-R", dst).CombinedOutput()
 	return sha, log, nil
@@ -215,6 +297,19 @@ func (h *Handlers) Bagla(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TargetDir == "" {
 		req.TargetDir = "public_html"
+	}
+	// Guvenlik: repo_url / branch / target_dir dogrula (fail-fast; komut-enjeksiyon + traversal)
+	if !gecerliRepoURL(req.RepoURL) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz repo URL (https://, git@ veya ssh:// olmalı)")
+		return
+	}
+	if !gecerliBranch(req.Branch) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz branch adı")
+		return
+	}
+	if !gecerliTargetDir(req.TargetDir) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz hedef dizin")
+		return
 	}
 	pub, err := generateDeployKey(sk)
 	if err != nil {
