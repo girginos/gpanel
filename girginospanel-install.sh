@@ -262,6 +262,14 @@ systemctl is-active --quiet crond && ok "günlük yedek cron + crond ACTIVE (03:
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
+# Batch5A: per-tenant php-fpm socket dizinleri /run/php-fpm-<sk>/ için fcontext (httpd_var_run_t).
+# Mevcut /run/php-fpm(/.*)? kuralı tireli yolu kapsamaz → nginx→FPM 500. Idempotent.
+# (Panel açılışında da ensureFPMSELinuxFcontext ile garanti edilir; bu satır ilk boot öncesi içindir.)
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ] && command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -l 2>/dev/null | grep -q "/run/php-fpm-\[" || \
+    semanage fcontext -a -t httpd_var_run_t "/run/php-fpm-[^/]+(/.*)?" 2>/dev/null || true
+  ok "SELinux fcontext: per-tenant php-fpm socket (httpd_var_run_t)"
+fi
 
 # ============ 11) Valkey + optimize ============
 step "11) Valkey (Redis) + performans tuning"

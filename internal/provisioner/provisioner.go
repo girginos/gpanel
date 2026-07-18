@@ -41,6 +41,7 @@ func Init(d *sql.DB) {
 	HealPanelVhostHeadersOnStartup()
 	HealVhostsOnStartup()
 	HealHomePerms()            // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
+	ensureFPMSELinuxFcontext() // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
 	EnsureTenantFPMOnStartup() // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
 }
 

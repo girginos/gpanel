@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +38,62 @@ func tenantUnitPath(sk string) string { return filepath.Join(tenantUnitDir, tena
 func tenantRunDir(sk string) string   { return "/run/php-fpm-" + sk }
 func tenantSocket(sk string) string   { return filepath.Join(tenantRunDir(sk), sk+".sock") }
 func tenantCfgDir(sk string) string   { return filepath.Join(tenantCfgRoot, sk) }
+
+var (
+	fcontextMu   sync.Mutex
+	fcontextDone bool
+)
+
+// fpmSocketFcontextSpec: per-tenant socket dizinleri /run/php-fpm-<sk>/ için SELinux
+// dosya-bağlamı regex'i. 🔴 Mevcut /run/php-fpm(/.*)? kuralı TİRELİ per-tenant yolu
+// (php-fpm-<sk>) KAPSAMAZ → bu kural olmadan restorecon yanlış tip (tmpfs/var_run_t)
+// etiketler ve nginx (httpd_t) socket'e bağlanamaz → Enforcing'de site 500. Doğru tip
+// httpd_var_run_t (paylaşılan socket'ler bunu kullanır, nginx bağlanır). 181 Permissive'de
+// görünmez; 177 Enforcing'de kritik. (create-default-on CANLI → taze kurulumda yeni
+// domain 500 vermemeli.)
+const fpmSocketFcontextSpec = "/run/php-fpm-[^/]+(/.*)?"
+
+// ensureFPMSELinuxFcontext: yukarıdaki fcontext kuralını (httpd_var_run_t) semanage ile
+// KALICI + idempotent kaydeder. Süreç başına en fazla bir kez (başarılı olunca) çalışır;
+// semanage fcontext -l yavaş olduğu için tekrar tekrar çağrılmaz. SELinux Disabled /
+// semanage yok ise sessiz atlar. Kuralın YALNIZ VARLIĞINI garanti eder — asıl etiketleme
+// (restorecon) EnableTenantFPM içinde socket oluştuktan sonra AYRI yapılır.
+// (Desen: girginospanel-repair ensure_context.)
+func ensureFPMSELinuxFcontext() {
+	fcontextMu.Lock()
+	defer fcontextMu.Unlock()
+	if fcontextDone {
+		return
+	}
+	if !selinuxAktif() {
+		fcontextDone = true // SELinux yok → tekrar deneme
+		return
+	}
+	if _, err := exec.LookPath("semanage"); err != nil {
+		fcontextDone = true // semanage yok → restorecon default'a bırakılır, tekrar deneme
+		return
+	}
+	// Kural zaten var mı? (repair ile aynı: -l yakala, sonra ara.)
+	out, _ := exec.Command("semanage", "fcontext", "-l").CombinedOutput()
+	if strings.Contains(string(out), "/run/php-fpm-[") {
+		fcontextDone = true
+		return
+	}
+	if _, err := exec.Command("semanage", "fcontext", "-a", "-t", "httpd_var_run_t", fpmSocketFcontextSpec).CombinedOutput(); err == nil {
+		fcontextDone = true
+	}
+	// hata → fcontextDone=false; sonraki EnableTenantFPM / panel boot yeniden dener.
+}
+
+// selinuxAktif: SELinux Enforcing/Permissive mi (Disabled değil ve getenforce mevcut).
+func selinuxAktif() bool {
+	out, err := exec.Command("getenforce").Output()
+	if err != nil {
+		return false
+	}
+	s := strings.TrimSpace(string(out))
+	return s == "Enforcing" || s == "Permissive"
+}
 
 // TenantFPMActive: bu tenant için per-tenant FPM servisi kurulu mu (unit dosyası var mı).
 func TenantFPMActive(sk string) bool {
@@ -324,7 +381,10 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 		return "", fmt.Errorf("tenant fpm restart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	// SELinux: yeni socket dizinini bağlamla (Permissive'de no-op; Enforcing'de nginx→FPM için ŞART)
+	// SELinux: ÖNCE per-tenant socket yolu için fcontext kuralını garanti et (idempotent),
+	// SONRA restorecon ile etiketle. Kural olmadan restorecon yanlış tip verir → Enforcing'de
+	// nginx→FPM Permission denied (site 500). 181 Permissive'de no-op.
+	ensureFPMSELinuxFcontext()
 	_, _ = exec.Command("restorecon", "-R", tenantRunDir(sk)).CombinedOutput()
 	_, _ = exec.Command("restorecon", "-R", cfgDir).CombinedOutput()
 
