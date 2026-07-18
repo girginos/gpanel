@@ -536,6 +536,48 @@ func nonzero(v, def int) int {
 	return v
 }
 
+// LimitleriReAssert: ZATEN migrate-edilmiş (per-tenant FPM aktif) tenant için limitleri
+// SÜREÇ ÖLDÜRMEDEN idempotent yeniden uygular — slice (set-property canlı) + pm.max_children
+// (php_settings/DB) + xfs + MySQL Governor (TÜM db_accounts kullanıcıları, gerçek host'lar).
+// FPM cutover/restart YAPMAZ → site kesintiye uğramaz. HealTenantFPM her panel restart'ında
+// bunu çağırır → kod-iyileştirmeleri (ör. DB coverage fix) + plan drift'i mevcut tenant'lara
+// da otomatik iner.
+func LimitleriReAssert(ctx context.Context, db *sql.DB, domainID int64) error {
+	var sk string
+	if err := db.QueryRowContext(ctx,
+		`SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
+		return err
+	}
+	if sk == "" {
+		return fmt.Errorf("sistem_kullanici boş")
+	}
+	l, err := PlanLimitleriGetir(ctx, db, domainID)
+	if err != nil {
+		return err
+	}
+	if l.CPUYuzde == 0 && l.RAMMB == 0 && l.MaxProcess == 0 {
+		return nil // plan yok → dokunma
+	}
+	// slice: SystemdSliceYaz aktif slice'a set-property --runtime ile CANLI uygular (öldürmez).
+	if e := SystemdSliceYaz(sk, l); e != nil {
+		log.Printf("re-assert slice %s: %v", sk, e)
+	}
+	// pm.max_children'ı plandan php_settings'e sür (sonraki doğal reload'da pool alır).
+	if _, e := db.ExecContext(ctx,
+		`UPDATE php_settings SET pm_max_children=? WHERE domain_id=?`, hesaplaPMMaxChildren(l), domainID); e != nil {
+		log.Printf("re-assert pm_max_children %s: %v", sk, e)
+	}
+	if e := XFSKotaUygula(sk, l); e != nil {
+		log.Printf("re-assert xfs %s: %v", sk, e)
+	}
+	// 🔴 MySQL Governor: domain'in TÜM db_accounts kullanıcılarına (ana + wpu_ + alt) gerçek
+	// host'lardan native limit. Coverage fix'i mevcut tenant'lara da böyle iner.
+	if e := MySQLLimitUygula(ctx, db, domainID, l); e != nil {
+		log.Printf("re-assert mysql governor %s: %v", sk, e)
+	}
+	return nil
+}
+
 // planProbeHTTPS: domain'in nginx :443 üzerinden sağlık kodu (Host header, cert
 // doğrulamasız). 0 = ulaşılamadı. Cutover öncesi/sonrası regresyon karşılaştırması için.
 func planProbeHTTPS(alanAdi string) int {
@@ -605,7 +647,15 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 			continue
 		}
 		if provisioner.TenantFPMActive(d.sk) {
-			zaten++ // zaten migrate; provisioner.EnsureTenantFPMOnStartup ayakta tutar
+			// Zaten migrate — servisi provisioner.EnsureTenantFPMOnStartup ayakta tutar.
+			// 🔴 Limitleri SÜREÇ ÖLDÜRMEDEN idempotent RE-ASSERT et: DB Governor coverage,
+			// slice cpu/mem/io, xfs drift'i mevcut tenant'lara da insin (her update'te).
+			if e := LimitleriReAssert(ctx, db, d.id); e != nil {
+				log.Printf("HealTenantFPM: %s re-assert hata: %v", d.sk, e)
+			} else {
+				log.Printf("HealTenantFPM: %s zaten-aktif — limitler re-assert edildi (süreç öldürmeden)", d.sk)
+			}
+			zaten++
 			continue
 		}
 		baseline := planProbeHTTPS(d.alanAdi)
@@ -636,6 +686,6 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 		log.Printf("HealTenantFPM: %s cutover OK (baseline=%d post=%d)", d.sk, baseline, post)
 		migrated++
 	}
-	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif / %d rollback (toplam %d planlı domain)",
+	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif(re-assert) / %d rollback (toplam %d planlı domain)",
 		migrated, zaten, rollback, len(list))
 }
