@@ -151,6 +151,15 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
+	// Guvenlik: tenant ek_direktifler LFD/SSRF/RCE denylist + nginx -t sozdizim dogrulama
+	if bad := provisioner.TehlikeliNginxDirektifi(req.Ayarlar.EkDirektifler); bad != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+bad+"' direktifine izin verilmiyor")
+		return
+	}
+	if err := provisioner.ValidateNginxDirectives(req.Ayarlar.EkDirektifler); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz nginx direktifi: "+err.Error())
+		return
+	}
 	if err := Save(r.Context(), h.DB, id, req.Ayarlar); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kaydet: "+err.Error())
 		return

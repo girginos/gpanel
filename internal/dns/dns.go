@@ -78,6 +78,20 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// gecerliKayitAlanlari: zone satir-enjeksiyonu (newline) + $ yonerge enjeksiyonu engelle
+func gecerliKayitAlanlari(ad, deger string) error {
+	if strings.ContainsAny(ad, " \t\r\n") {
+		return errors.New("kayıt adı boşluk veya satır sonu içeremez")
+	}
+	if strings.ContainsAny(deger, "\r\n") {
+		return errors.New("kayıt değeri satır sonu içeremez")
+	}
+	if strings.HasPrefix(strings.TrimSpace(ad), "$") || strings.HasPrefix(strings.TrimSpace(deger), "$") {
+		return errors.New("kayıt '$' ile başlayamaz")
+	}
+	return nil
+}
+
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	_, isDemo, err := h.lookup(r)
@@ -110,6 +124,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		// JSON'da aktif false ise 0 yaz, default true (yeni eklemede çoğunlukla aktif)
 	}
 	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
+	if err := gecerliKayitAlanlari(k.Ad, k.Deger); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO dns_records(domain_id, ad, tip, deger, ttl, oncelik, aktif)
 		 VALUES(?,?,?,?,?,?,?)`,
@@ -154,6 +172,10 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		ak = 1
 	}
 	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
+	if err := gecerliKayitAlanlari(k.Ad, k.Deger); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE dns_records SET ad=?, tip=?, deger=?, ttl=?, oncelik=?, aktif=?
 		 WHERE id=? AND domain_id=?`,

@@ -46,6 +46,11 @@ func sqlKac(s string) string {
 	return s
 }
 
+// ParolaGecerli: parola tek-satir mi? chpasswd/mysql satir-enjeksiyonunu engeller.
+func ParolaGecerli(pw string) bool {
+	return !strings.ContainsAny(pw, "\r\n\x00")
+}
+
 // FTPCreate: ftp_accounts tablosuna kayit ekler, parolayi cleartext olarak tutar (Pure-FTPd MYSQLCrypt cleartext)
 func FTPCreate(db *sql.DB, domainID int64, sistemKullanici, parola string, uidN, gidN int) error {
 	home := "/home/" + sistemKullanici
@@ -146,6 +151,9 @@ func SyncSSHPassword(db *sql.DB, sistemKullanici string) error {
 	}
 	if strings.TrimSpace(pw) == "" {
 		return fmt.Errorf("ftp parolası boş")
+	}
+	if !ParolaGecerli(pw) {
+		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
 	}
 	cmd := exec.Command("chpasswd")
 	cmd.Stdin = strings.NewReader(sistemKullanici + ":" + pw)

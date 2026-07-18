@@ -93,6 +93,7 @@ func HealCacheZoneOnStartup() {
 //   - Bilinen geçici mitigasyon dosyasını (00-girgincache-gecici.conf) kaldırır.
 //   - Zone BAŞKA bir dosyada (nginx.conf / elle eklenmiş conf) zaten tanımlıysa kendi
 //     dosyasını yazmaz/kaldırır (dış tanıma saygı gösterir).
+//
 // Bu fonksiyon her nginx -t ÖNCESİ çağrılır → self-heal / fail-safe.
 // Dönüş: config'te bir değişiklik yapıldıysa changed=true.
 func ensureCacheZone() (changed bool, err error) {
@@ -544,6 +545,10 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		return fmt.Errorf("template render: %w", err)
 	}
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
+	// Fail-safe: bozuk config diske kalirsa sonraki nginx -t/reload TUM nginx'i dusurur.
+	// Eski icerigi yedekle; nginx -t patlarsa geri yukle.
+	yedek, rerr := os.ReadFile(cfgPath)
+	yedekVar := rerr == nil
 	if err := os.WriteFile(cfgPath, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("vhost yaz: %w", err)
 	}
@@ -556,6 +561,11 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		return err
 	}
 	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
+		if yedekVar {
+			_ = os.WriteFile(cfgPath, yedek, 0644)
+		} else {
+			_ = os.Remove(cfgPath)
+		}
 		return fmt.Errorf("nginx -t başarısız: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	if out, err := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); err != nil {

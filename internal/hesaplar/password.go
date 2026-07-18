@@ -16,6 +16,9 @@ func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
 		return fmt.Errorf("güvenlik: c_ prefix'siz user reddedildi")
 	}
 	// MariaDB user'ın varlığını doğrula
+	if !ParolaGecerli(yeniPw) {
+		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
+	}
 	if !GecerliDBKimlik(dbUser) {
 		return fmt.Errorf("güvenlik: geçersiz kullanıcı adı")
 	}

@@ -31,6 +31,11 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 			tokenRaw := raw[len(p):]
+			// CVE-2025-30204 savunma: dogrulama ONCESI asiri-uzun token reddedilir (pre-auth DoS yuzeyi kucultulur)
+			if len(tokenRaw) > 8192 {
+				httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
+				return
+			}
 
 			// Önce admin claims dene
 			if c, err := auth.Parse(secret, tokenRaw); err == nil {

@@ -426,6 +426,10 @@ func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
 	if req.Parola == "" {
 		req.Parola = hesaplar.RandomParola(20)
 	}
+	if !hesaplar.ParolaGecerli(req.Parola) {
+		httpx.WriteError(w, http.StatusBadRequest, "parola geçersiz karakter (satır sonu) içeriyor")
+		return
+	}
 	var sk string
 	var isDemo int
 	err := h.DB.QueryRowContext(r.Context(),
