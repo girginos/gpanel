@@ -51,6 +51,7 @@ func Init(d *sql.DB) {
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
+	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
 	EnsureTenantFPMOnStartup()  // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
 }
 
@@ -917,73 +918,68 @@ func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath 
 		return "", "", verr // path güvenliği: alanAdi'da / veya .. yok
 	}
 	phpSurum = normalizePHP(phpSurum)
-	home := "/home/" + sk
-	sslDir := certSystemDir(alanAdi)
-	_ = os.MkdirAll(sslDir, 0755)
-
-	certPath = filepath.Join(sslDir, alanAdi+".crt")
-	keyPath = filepath.Join(sslDir, alanAdi+".key")
-
-	subj := fmt.Sprintf("/C=TR/ST=Local/L=GirginOSPanel/O=%s/CN=%s", alanAdi, alanAdi)
-	args := []string{
-		"req", "-x509", "-nodes",
-		"-newkey", "rsa:2048",
-		"-keyout", keyPath,
-		"-out", certPath,
-		"-days", "365",
-		"-subj", subj,
-		"-addext", "subjectAltName=DNS:" + alanAdi + ",DNS:www." + alanAdi,
+	certPath, keyPath, err = selfSignedUret(alanAdi) // /etc/pki'ye üret + cert_t
+	if err != nil {
+		return "", "", err
 	}
-	if out, err := exec.Command("openssl", args...).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("openssl: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	yazCertKurulumu(sslDir, certPath, keyPath)
-
-	_, socket, _ := phpPoolPath(sk, phpSurum)
-	if err := renderAndReload(VhostOpts{
-		AlanAdi:   alanAdi,
-		WebRoot:   filepath.Join(home, "public_html"),
-		PHPSocket: socket,
-		PHPSurum:  phpSurum,
-		CertPath:  certPath,
-		KeyPath:   keyPath,
-		SSLKaynak: "self-signed",
-		Backend:   backend,
-	}, sk); err != nil {
+	if err := sslVhostYaz(alanAdi, sk, phpSurum, backend, certPath, keyPath, "self-signed"); err != nil {
 		return "", "", err
 	}
 	removeHomeCert(sk, alanAdi) // varsa eski home cert artığını temizle
 	return certPath, keyPath, nil
 }
 
-// EnableLetsEncrypt: acme.sh ile cert al (SİSTEM dizinine), vhost SSL-li yeniden render
+// EnableLetsEncrypt: acme.sh ile cert al (SİSTEM dizinine), vhost SSL-li yeniden render.
+//
+// 🔴 Rate-limit dayanıklılığı (teardown fix — ssl_heal.go):
+//  1. REUSE-BEFORE-ISSUE: geçerli bir cert (notAfter > now+30g, domain+www kapsar,
+//     key eşleşir) acme store'da veya /etc/pki'de varsa → onu deploy et, YENİ ÇEKME.
+//     Bu, aynı SAN setiyle tekrar-çekimi (LE 429 rate-limit) HİÇ tetiklemez.
+//  2. FAIL-SAFE: acme çekimi başarısız olursa (429 dahil) → sslFailSafe mevcut/self-
+//     signed cert ile 443'ü KORUR. Hiçbir durumda vhost HTTP-only'ye DÜŞMEZ.
 func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
 	if verr := ValidateDomain(alanAdi); verr != nil {
 		return "", "", verr // path güvenliği
 	}
 	phpSurum = normalizePHP(phpSurum)
-	home := "/home/" + sk
-
-	// acme webroot
-	_ = os.MkdirAll("/var/www/_acme", 0755)
-	_, _ = exec.Command("restorecon", "-R", "/var/www/_acme").CombinedOutput()
 
 	sslDir := certSystemDir(alanAdi)
 	_ = os.MkdirAll(sslDir, 0755)
 	certPath = filepath.Join(sslDir, alanAdi+".crt")
 	keyPath = filepath.Join(sslDir, alanAdi+".key")
 
-	// acme.sh issue (HTTP-01 webroot)
+	// (1) Reuse-before-issue: geçerli cert varsa yeni çekimi ATLA.
+	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" {
+		if cp, kp, e := certiPkiyeKur(alanAdi, src, srcKey); e == nil {
+			kaynak := "self-signed"
+			if real {
+				kaynak = "letsencrypt"
+			}
+			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, kaynak); e != nil {
+				return "", "", e
+			}
+			removeHomeCert(sk, alanAdi)
+			log.Printf("ssl reuse: %s geçerli %s cert bulundu — yeni LE çekimi ATLANDI (rate-limit korumasi)", alanAdi, kaynak)
+			return cp, kp, nil
+		}
+	}
+
+	// (2) Gerçek çekim/yenileme (yalnız <30 gün kalınca veya hiç cert yoksa buraya gelir).
+	_ = os.MkdirAll("/var/www/_acme", 0755)
+	_, _ = exec.Command("restorecon", "-R", "/var/www/_acme").CombinedOutput()
+
+	// 🔴 --force KALDIRILDI: acme kendi geçerli cert'i varsa gereksiz yere yeniden
+	// çekmez (rate-limit koruması). Yenileme penceresindeyse yine de yeniler.
 	args := []string{
 		"--issue",
 		"--webroot", "/var/www/_acme",
 		"-d", alanAdi,
 		"-d", "www." + alanAdi,
 		"--keylength", "2048",
-		"--force",
 	}
-	if out, err := exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("acme.sh issue: %s: %w", strings.TrimSpace(string(out)), err)
+	if out, e := exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput(); e != nil {
+		// FAIL-SAFE (teardown YOK): mevcut/self-signed cert ile 443'ü KORU.
+		return sslFailSafe(alanAdi, sk, phpSurum, backend, "acme issue: "+strings.TrimSpace(string(out)))
 	}
 
 	// acme.sh install-cert ile target path'lere yerleştir
@@ -995,24 +991,13 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 		"--fullchain-file", certPath,
 		"--reloadcmd", "systemctl reload nginx",
 	}
-	if out, err := exec.Command("/root/.acme.sh/acme.sh", insArgs...).CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("acme.sh install-cert: %s: %w", strings.TrimSpace(string(out)), err)
+	if out, e := exec.Command("/root/.acme.sh/acme.sh", insArgs...).CombinedOutput(); e != nil {
+		return sslFailSafe(alanAdi, sk, phpSurum, backend, "acme install-cert: "+strings.TrimSpace(string(out)))
 	}
 
 	yazCertKurulumu(sslDir, certPath, keyPath) // root-owned, cert 0644 / key 0600, cert_t
-
-	_, socket, _ := phpPoolPath(sk, phpSurum)
-	if err := renderAndReload(VhostOpts{
-		AlanAdi:   alanAdi,
-		WebRoot:   filepath.Join(home, "public_html"),
-		PHPSocket: socket,
-		PHPSurum:  phpSurum,
-		CertPath:  certPath,
-		KeyPath:   keyPath,
-		SSLKaynak: "letsencrypt",
-		Backend:   backend,
-	}, sk); err != nil {
-		return "", "", err
+	if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, certPath, keyPath, "letsencrypt"); e != nil {
+		return "", "", e
 	}
 	removeHomeCert(sk, alanAdi)
 	return certPath, keyPath, nil
