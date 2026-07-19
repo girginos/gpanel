@@ -51,7 +51,7 @@ export default function SettingsPage() {
   const [mevcut, setMevcut] = useState(''); const [yeni, setYeni] = useState(''); const [yeni2, setYeni2] = useState('')
   const [paOk, setPaOk] = useState(''); const [paErr, setPaErr] = useState(''); const [paYuk, setPaYuk] = useState(false)
 
-  const [f2Kur, setF2Kur] = useState<{ secret: string; otpauth: string } | null>(null)
+  const [f2Kur, setF2Kur] = useState<{ secret: string; otpauth: string; otpauth_uri?: string; qr_data_uri?: string } | null>(null)
   const [f2Kod, setF2Kod] = useState(''); const [f2Err, setF2Err] = useState(''); const [f2Yuk, setF2Yuk] = useState(false)
   const [f2Kapat, setF2Kapat] = useState(false); const [kapatKod, setKapatKod] = useState('')
 
@@ -89,7 +89,7 @@ export default function SettingsPage() {
 
   async function f2Baslat() {
     setF2Err(''); setF2Kod('')
-    try { const r = await api.get<{ secret: string; otpauth: string }>('/me/2fa/setup'); setF2Kur(r.data) }
+    try { const r = await api.get<{ secret: string; otpauth: string; otpauth_uri?: string; qr_data_uri?: string }>('/me/2fa/setup'); setF2Kur(r.data) }
     catch (e) { setF2Err(apiHata(e)) }
   }
   async function f2Etkinlestir(e: React.FormEvent) {
@@ -184,7 +184,15 @@ export default function SettingsPage() {
 
               {!ben?.iki_fa && f2Kur && (
                 <form onSubmit={f2Etkinlestir} className="space-y-3 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900">
-                  <p className="text-sm text-slate-700 dark:text-slate-300">1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) bu anahtarı ekleyin:</p>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:</p>
+                  {f2Kur.qr_data_uri && (
+                    <div className="flex flex-col items-center gap-2 py-1">
+                      <img src={f2Kur.qr_data_uri} alt="2FA QR kodu" width={256} height={256}
+                        className="w-64 h-64 rounded-2xl bg-white p-3 border border-slate-200 dark:border-slate-700 shadow-sm" />
+                      <p className="text-xs text-slate-500 dark:text-slate-500">Authenticator uygulamanızla tarayın</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500 dark:text-slate-500">Tarayamıyorsanız, elle giriş için gizli anahtar:</p>
                   <div className="flex items-center gap-2 flex-wrap">
                     <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
                     <button type="button" onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }} className="text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Kopyala</button>

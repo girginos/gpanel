@@ -101,10 +101,17 @@ func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret := TOTPGenerateSecret()
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"secret":  secret,
-		"otpauth": TOTPURI(secret, "root", "GirginOSPanel"),
-	})
+	uri := TOTPURI(secret, "root", "GirginOSPanel")
+	resp := map[string]any{
+		"secret":      secret,
+		"otpauth":     uri, // geriye dönük uyum (elle giriş fallback)
+		"otpauth_uri": uri,
+	}
+	// QR PNG data-URI (authenticator ile taransın). Üretilemezse elle giriş fallback kalır.
+	if dataURI, err := TOTPQRDataURI(uri); err == nil {
+		resp["qr_data_uri"] = dataURI
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // POST /me/2fa/enable — {secret, kod}: kod secret ile doğrulanırsa 2FA açılır
