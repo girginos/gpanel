@@ -180,6 +180,7 @@ export default function DomainFilesPage() {
     fd.append('dosya', f)
     try {
       await api.post(`/domains/${id}/files/upload`, fd, {
+        timeout: 0, // buyuk upload: client tarafinda iptal etme (backend 30dk sinir)
         params: { yol },
       })
       tara()
@@ -197,6 +198,7 @@ export default function DomainFilesPage() {
     fd.append('dosya', f)
     try {
       await api.post(`/domains/${id}/files/upload`, fd, {
+        timeout: 0, // buyuk upload: client tarafinda iptal etme (backend 30dk sinir)
         params: { yol },
         onUploadProgress: (e: any) => {
           if (onProgress && typeof e.loaded === 'number') {
