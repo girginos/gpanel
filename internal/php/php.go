@@ -94,6 +94,9 @@ type Settings struct {
 
 	// Additional
 	EkDirektifler string `json:"ek_direktifler"`
+
+	// Debug Modu — saglam fatal-gorunurluk (register_shutdown_function shim).
+	DebugMode bool `json:"debug_mode"`
 }
 
 func Defaults() Settings {
@@ -121,6 +124,7 @@ func Defaults() Settings {
 		PMMinSpareServers: 1,
 		PMMaxSpareServers: 3,
 		EkDirektifler:     "",
+		DebugMode:         false,
 	}
 }
 
@@ -131,13 +135,13 @@ func Get(ctx context.Context, db *sql.DB, domainID int64) (Settings, error) {
 		display_errors, log_errors, allow_url_fopen, file_uploads, short_open_tag,
 		error_reporting, include_path, open_basedir, session_save_path, mail_force_extra_parameters,
 		pm_strategy, pm_max_children, pm_max_requests, pm_start_servers, pm_min_spare_servers, pm_max_spare_servers,
-		ek_direktifler FROM php_settings WHERE domain_id=?`, domainID)
+		ek_direktifler, debug_mode FROM php_settings WHERE domain_id=?`, domainID)
 	err := row.Scan(&s.MemoryLimit, &s.MaxExecutionTime, &s.MaxInputTime, &s.PostMaxSize,
 		&s.UploadMaxFilesize, &s.OpcacheEnable, &s.DisableFunctions,
 		&s.DisplayErrors, &s.LogErrors, &s.AllowURLFopen, &s.FileUploads, &s.ShortOpenTag,
 		&s.ErrorReporting, &s.IncludePath, &s.OpenBasedir, &s.SessionSavePath, &s.MailForceExtraParameters,
 		&s.PMStrategy, &s.PMMaxChildren, &s.PMMaxRequests, &s.PMStartServers, &s.PMMinSpareServers, &s.PMMaxSpareServers,
-		&s.EkDirektifler)
+		&s.EkDirektifler, &s.DebugMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, nil // default
 	}
@@ -151,8 +155,8 @@ func Save(ctx context.Context, db *sql.DB, domainID int64, s Settings) error {
 			display_errors, log_errors, allow_url_fopen, file_uploads, short_open_tag,
 			error_reporting, include_path, open_basedir, session_save_path, mail_force_extra_parameters,
 			pm_strategy, pm_max_children, pm_max_requests, pm_start_servers, pm_min_spare_servers, pm_max_spare_servers,
-			ek_direktifler)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ek_direktifler, debug_mode)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE
 			memory_limit=VALUES(memory_limit),
 			max_execution_time=VALUES(max_execution_time),
@@ -177,13 +181,14 @@ func Save(ctx context.Context, db *sql.DB, domainID int64, s Settings) error {
 			pm_start_servers=VALUES(pm_start_servers),
 			pm_min_spare_servers=VALUES(pm_min_spare_servers),
 			pm_max_spare_servers=VALUES(pm_max_spare_servers),
-			ek_direktifler=VALUES(ek_direktifler)`,
+			ek_direktifler=VALUES(ek_direktifler),
+			debug_mode=VALUES(debug_mode)`,
 		domainID, s.MemoryLimit, s.MaxExecutionTime, s.MaxInputTime, s.PostMaxSize,
 		s.UploadMaxFilesize, b2i(s.OpcacheEnable), s.DisableFunctions,
 		b2i(s.DisplayErrors), b2i(s.LogErrors), b2i(s.AllowURLFopen), b2i(s.FileUploads), b2i(s.ShortOpenTag),
 		s.ErrorReporting, s.IncludePath, s.OpenBasedir, s.SessionSavePath, s.MailForceExtraParameters,
 		s.PMStrategy, s.PMMaxChildren, s.PMMaxRequests, s.PMStartServers, s.PMMinSpareServers, s.PMMaxSpareServers,
-		s.EkDirektifler)
+		s.EkDirektifler, b2i(s.DebugMode))
 	return err
 }
 
@@ -525,6 +530,68 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		"php_surum": surum,
 		"socket":    socket,
 	})
+}
+
+// debugLogPath: sk icin SABIT debug log yolu (path traversal yok — sk domain
+// kaydindan gelir + c_ prefix dogrulanir; disaridan gelen deger pathe girmez).
+func debugLogPath(sk string) (string, error) {
+	if sk == "" || !strings.HasPrefix(sk, "c_") {
+		return "", fmt.Errorf("geçersiz sistem kullanıcısı")
+	}
+	return "/home/" + sk + "/.gpanel/php_debug.log", nil
+}
+
+// GetDebugLog: GET /domains/{id}/php/debug-log — per-domain PHP debug log'un son 200 satiri.
+// DebugMode aciksa auto_prepend shim FATAL'lari bu dosyaya yazar (renderTenantPool).
+func (h *Handlers) GetDebugLog(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var sk string
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT sistem_kullanici FROM domains WHERE id=?`, id).Scan(&sk); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	p, perr := debugLogPath(sk)
+	if perr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	data, rerr := os.ReadFile(p)
+	if rerr != nil {
+		// dosya yok / okunamiyor → bos liste (debug hic tetiklenmemis olabilir)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": []string{}})
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = []string{}
+	}
+	const maxLines = 200
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": lines})
+}
+
+// ClearDebugLog: DELETE /domains/{id}/php/debug-log — debug log'u truncate eder.
+func (h *Handlers) ClearDebugLog(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var sk string
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT sistem_kullanici FROM domains WHERE id=?`, id).Scan(&sk); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	p, perr := debugLogPath(sk)
+	if perr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	// truncate (dosya yoksa sessiz — zaten bos)
+	if f, err := os.OpenFile(p, os.O_TRUNC|os.O_WRONLY, 0644); err == nil {
+		_ = f.Close()
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // surumModulleri: verilen sürüm icin php-fpm tarafindan yüklenen modülleri listele

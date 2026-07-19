@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -204,6 +205,11 @@ type tenantPoolSettings struct {
 	DisableFunctions  string
 	PMStrategy        string
 	PMMaxRequests     int
+	// Loglama / Debug Modu (php_settings) — saglam fatal-gorunurluk icin.
+	DisplayErrors     bool
+	LogErrors         bool
+	ErrorReporting    string
+	DebugMode         bool
 }
 
 const hardenedDisableFns = "exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid"
@@ -218,6 +224,10 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 		DisableFunctions:  hardenedDisableFns,
 		PMStrategy:        "ondemand",
 		PMMaxRequests:     500,
+		DisplayErrors:     false,
+		LogErrors:         true,
+		ErrorReporting:    "E_ALL & ~E_DEPRECATED & ~E_STRICT",
+		DebugMode:         false,
 	}
 	if db == nil || domainID <= 0 {
 		return s
@@ -250,6 +260,21 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	case "static", "dynamic", "ondemand":
 	default:
 		s.PMStrategy = "ondemand"
+	}
+	// display_errors/log_errors/error_reporting/debug_mode AYRI okunur (geriye-uyumlu:
+	// debug_mode kolonu yoksa bu sorgu hata verir -> default korunur, ana ayarlar
+	// etkilenmez). Satir yoksa da (ana select zaten erken donerdi) default gecerli.
+	var de, le, dm int
+	var er string
+	if derr := db.QueryRow(`SELECT COALESCE(display_errors,0), COALESCE(log_errors,1),
+	        COALESCE(error_reporting,''), COALESCE(debug_mode,0)
+	        FROM php_settings WHERE domain_id=?`, domainID).Scan(&de, &le, &er, &dm); derr == nil {
+		s.DisplayErrors = de != 0
+		s.LogErrors = le != 0
+		s.DebugMode = dm != 0
+		if strings.TrimSpace(er) != "" {
+			s.ErrorReporting = tenantSanitizeScalar(er, s.ErrorReporting)
+		}
 	}
 	return s
 }
@@ -303,8 +328,31 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	// PHP hatalari stderr'e gider, catch_workers_output ile master bunlari per-tenant
 	// error_log'a (tenant-<sk>.log) yazar. php_admin_value[error_log]=<yazilamaz/paylasimli
 	// yol> ANTI-PATTERN'i (fatal'lari sessizce yutar) bu sablonda ASLA uretilmez.
-	b.WriteString("php_admin_flag[log_errors] = on\n")
-	b.WriteString("php_admin_flag[display_errors] = off\n")
+	// log_errors (varsayilan on) — fatal'lar per-tenant error_log'a gitsin.
+	logFlag := "off"
+	if ps.LogErrors {
+		logFlag = "on"
+	}
+	fmt.Fprintf(&b, "php_admin_flag[log_errors] = %s\n", logFlag)
+	if ps.DebugMode {
+		// 🔴 SAGLAM DEBUG: app runtime'da error_reporting(0) cagirirsa pool'daki
+		// display_errors/error_reporting BUNU EZMEZ. Fatal'i gorunur kilmanin TEK
+		// guvenilir yolu error_get_last() kullanan register_shutdown_function
+		// (auto_prepend ile). Shim /home/<sk>/.gpanel/debug_prepend.php'ye yazilir.
+		b.WriteString("php_admin_flag[display_errors] = on\n")
+		b.WriteString("php_admin_value[error_reporting] = E_ALL\n")
+		fmt.Fprintf(&b, "php_admin_value[auto_prepend_file] = %s\n", tenantDebugPrependPath(sk))
+		writeDebugShim(db, sk, domainID)
+	} else {
+		// prod: display_errors kullanici ayarina gore; auto_prepend override YAZILMAZ
+		// (shim dosyasi kalsa da etkisiz). error_reporting sanitize edilir.
+		deFlag := "off"
+		if ps.DisplayErrors {
+			deFlag = "on"
+		}
+		fmt.Fprintf(&b, "php_admin_flag[display_errors] = %s\n", deFlag)
+		fmt.Fprintf(&b, "php_admin_value[error_reporting] = %s\n", sanitizeErrorReporting(ps.ErrorReporting))
+	}
 	b.WriteString("catch_workers_output = yes\n")
 	return b.String()
 }
@@ -615,4 +663,139 @@ func repairTenantPoolDrift(domainID int64, sk, surum string) {
 		log.Printf("repairTenantPoolDrift: %s reload uyarisi: %s", sk, strings.TrimSpace(string(out)))
 	}
 	log.Printf("repairTenantPoolDrift: %s pool.conf guncellendi (loglama sertlestirmesi + drift onarimi)", sk)
+}
+
+
+// ---- PHP Debug Modu (saglam fatal-gorunurluk) ----
+
+// tenantGpanelDir: tenant'in panel-yonetimli .gpanel dizini (root:root 0755).
+func tenantGpanelDir(sk string) string { return filepath.Join("/home", sk, ".gpanel") }
+
+// tenantDebugLogPath: per-domain debug log (tenant:tenant 0644 — worker append eder).
+func tenantDebugLogPath(sk string) string { return filepath.Join(tenantGpanelDir(sk), "php_debug.log") }
+
+// tenantDebugPrependPath: auto_prepend shim (root:root 0644 — tenant degistiremez).
+func tenantDebugPrependPath(sk string) string {
+	return filepath.Join(tenantGpanelDir(sk), "debug_prepend.php")
+}
+
+// errReportingRe: error_reporting degeri icin izinli karakter kumesi (E_* token + operator).
+var errReportingRe = regexp.MustCompile(`^[A-Za-z0-9_ &|~()]+$`)
+
+// sanitizeErrorReporting: yalniz [A-Za-z0-9_ &|~()] / E_* token'larina izin verir; aksi
+// halde guvenli varsayilan E_ALL. Pool'a satir/direktif enjeksiyonunu engeller.
+func sanitizeErrorReporting(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || !errReportingRe.MatchString(v) {
+		return "E_ALL"
+	}
+	return v
+}
+
+// tenantDocRoot: domain belge kokunu DB web_root'tan cozer; bos ise /home/<sk>/public_html.
+func tenantDocRoot(db *sql.DB, sk string, domainID int64) string {
+	if db != nil && domainID > 0 {
+		var wr string
+		if err := db.QueryRow(`SELECT COALESCE(web_root,'') FROM domains WHERE id=?`, domainID).Scan(&wr); err == nil {
+			if wr = strings.TrimSpace(wr); wr != "" {
+				return wr
+			}
+		}
+	}
+	return filepath.Join("/home", sk, "public_html")
+}
+
+// readUserIniAutoPrepend: docroot/.user.ini icindeki auto_prepend_file degerini okur (yoksa "").
+// Debug modunda pool'daki php_admin_value[auto_prepend_file] app'in .user.ini prepend'ini
+// EZER; shim icinde geri zincirlemek icin bu deger okunur.
+func readUserIniAutoPrepend(docroot string) string {
+	b, err := os.ReadFile(filepath.Join(docroot, ".user.ini"))
+	if err != nil {
+		return ""
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, ";") {
+			continue
+		}
+		i := strings.IndexByte(t, '=')
+		if i <= 0 {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(t[:i]), "auto_prepend_file") {
+			return strings.Trim(strings.TrimSpace(t[i+1:]), "\"'")
+		}
+	}
+	return ""
+}
+
+// renderDebugPrependPHP: auto_prepend shim icerigi. register_shutdown_function +
+// error_get_last() FATAL'lari yakalar (app error_reporting(0) yapsa bile), per-domain
+// debug log'a yazar + display_errors aciksa ekrana basar. orig (app'in kendi .user.ini
+// auto_prepend'i) render aninda gomulur → app'in kendi prepend'i BOZULMAZ (varsa require).
+func renderDebugPrependPHP(sk, orig string) string {
+	logPath := tenantDebugLogPath(sk)
+	var b strings.Builder
+	b.WriteString("<?php\n")
+	b.WriteString("// GirginOSPanel PHP Debug Modu — otomatik uretildi, ELLE DUZENLEMEYIN.\n")
+	b.WriteString("register_shutdown_function(function(){\n")
+	b.WriteString("  $e=error_get_last();\n")
+	b.WriteString("  if($e && in_array($e['type'],[E_ERROR,E_PARSE,E_CORE_ERROR,E_COMPILE_ERROR,E_RECOVERABLE_ERROR],true)){\n")
+	fmt.Fprintf(&b, "    @file_put_contents('%s',\n", logPath)
+	b.WriteString("      date('c').' ['.($_SERVER['REQUEST_URI']??'?').'] '.$e['message'].' @ '.$e['file'].':'.$e['line'].\"\\n\",\n")
+	b.WriteString("      FILE_APPEND|LOCK_EX);\n")
+	b.WriteString("    if(ini_get('display_errors')) echo \"\\n<pre style='background:#111;color:#f66;padding:8px'>PHP Fatal: \".htmlspecialchars($e['message']).\" @ \".$e['file'].':'.$e['line'].\"</pre>\";\n")
+	b.WriteString("  }\n")
+	b.WriteString("});\n")
+	if orig != "" {
+		esc := strings.ReplaceAll(orig, "\\", "\\\\")
+		esc = strings.ReplaceAll(esc, "'", "\\'")
+		fmt.Fprintf(&b, "@require_once '%s';\n", esc)
+	}
+	return b.String()
+}
+
+// writeDebugShim: DebugMode==true iken idempotent olarak .gpanel dizinini + debug log'u +
+// auto_prepend shim'ini olusturur.
+//   - /home/<sk>/.gpanel        root:root 0755 (tenant yazamaz → shim'i degistiremez)
+//   - .../php_debug.log         tenant:tenant 0644 (worker=tenant-uid append eder)
+//   - .../debug_prepend.php     root:root 0644 (tenant okur, root yazar)
+// Hepsi restorecon ile etiketlenir (Enforcing'de tenant home altinda dogru baglam).
+func writeDebugShim(db *sql.DB, sk string, domainID int64) {
+	if sk == "" || !strings.HasPrefix(sk, "c_") {
+		return
+	}
+	if _, err := os.Stat(filepath.Join("/home", sk)); err != nil {
+		return // tenant home yok
+	}
+	dir := tenantGpanelDir(sk)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	_ = os.Chown(dir, 0, 0)
+	_ = os.Chmod(dir, 0755)
+	_, _ = exec.Command("restorecon", "-R", dir).CombinedOutput()
+
+	// debug log: tenant:tenant 0644 (worker tenant-uid ile append eder)
+	logPath := tenantDebugLogPath(sk)
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+		_ = f.Close()
+	}
+	if uid, gid, err := uidGid(sk); err == nil {
+		_ = os.Chown(logPath, uid, gid)
+	}
+	_ = os.Chmod(logPath, 0644)
+	_, _ = exec.Command("restorecon", logPath).CombinedOutput()
+
+	// auto_prepend shim: app'in kendi .user.ini auto_prepend'ini zincirle (bozmadan)
+	orig := readUserIniAutoPrepend(tenantDocRoot(db, sk, domainID))
+	prePath := tenantDebugPrependPath(sk)
+	if orig == prePath {
+		orig = "" // kendini require etme
+	}
+	if err := os.WriteFile(prePath, []byte(renderDebugPrependPHP(sk, orig)), 0644); err == nil {
+		_ = os.Chown(prePath, 0, 0)
+		_ = os.Chmod(prePath, 0644)
+		_, _ = exec.Command("restorecon", prePath).CombinedOutput()
+	}
 }
