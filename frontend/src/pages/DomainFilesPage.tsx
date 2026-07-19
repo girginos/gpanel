@@ -1,6 +1,6 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -28,6 +28,13 @@ function docrootRel(yol: string): string | null {
   return null
 }
 
+// Bağlam menüsü öğe tipi (ayraç veya aksiyon)
+type CtxOge =
+  | { ayrac: true; key: string }
+  | { ayrac?: false; key: string; etiket: string; ikon: string; onTikla: () => void; tehlike?: boolean }
+
+const ARSIV_RX = /\.(zip|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i
+
 type ListResp = { yol: string; icerik: Entry[]; toplam: number }
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 
@@ -50,14 +57,15 @@ export default function DomainFilesPage() {
   const [topluSilOnay, setTopluSilOnay] = useState(false)
   const [extractAktif, setExtractAktif] = useState(false)
   const [yeniMenuAcik, setYeniMenuAcik] = useState(false)
-  const [arsivMenuAcik, setArsivMenuAcik] = useState(false)
-  const [daMenuAcik, setDaMenuAcik] = useState(false)
   const [aramaQ, setAramaQ] = useState('')
   const [aramaSonuc, setAramaSonuc] = useState<Entry[] | null>(null)
   const [kopyalaModal, setKopyalaModal] = useState<{ tip: 'kopyala' | 'tasi'; yollar: string[] } | null>(null)
   const [arsivModal, setArsivModal] = useState(false)
   const [yeniDosyaModal, setYeniDosyaModal] = useState(false)
   const [boyutSonuc, setBoyutSonuc] = useState<{ yol: string; boyut: number } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null)
+  const uzunBasRef = useRef<number | undefined>(undefined)
+  const uzunBasTetikRef = useRef(false)
   const [topluYukleme, setTopluYukleme] = useState<{
     tamam: number
     toplam: number
@@ -406,6 +414,69 @@ export default function DomainFilesPage() {
       .catch(err => alert('İndirme başarısız: ' + err.message))
   }
 
+  // ===== Bağlam (sağ-tık) menüsü =====
+  // Menüyü aç: satır seçili değilse onu tek seçim yap (cPanel benzeri davranış),
+  // seçili grubun parçasıysa çoklu seçimi koru.
+  function ctxAc(clientX: number, clientY: number, entry: Entry) {
+    setSeciliSet(prev => prev.has(entry.yol) ? prev : new Set([entry.yol]))
+    setCtxMenu({ x: clientX, y: clientY, entry })
+  }
+  function satirContext(ev: React.MouseEvent, entry: Entry) {
+    ev.preventDefault()
+    ctxAc(ev.clientX, ev.clientY, entry)
+  }
+  // Dokunmatik: uzun-basma ile menüyü aç
+  function dokunBasla(ev: React.TouchEvent, entry: Entry) {
+    if (ev.touches.length !== 1) return
+    const t = ev.touches[0]
+    const cx = t.clientX, cy = t.clientY
+    uzunBasTetikRef.current = false
+    uzunBasRef.current = window.setTimeout(() => {
+      uzunBasTetikRef.current = true
+      ctxAc(cx, cy, entry)
+    }, 500)
+  }
+  function dokunBitir(ev: React.TouchEvent) {
+    if (uzunBasRef.current !== undefined) { clearTimeout(uzunBasRef.current); uzunBasRef.current = undefined }
+    if (uzunBasTetikRef.current) { ev.preventDefault() } // uzun-basma sonrası "click"i iptal et
+  }
+  function dokunHareket() {
+    if (uzunBasRef.current !== undefined) { clearTimeout(uzunBasRef.current); uzunBasRef.current = undefined }
+  }
+
+  // Aktif bağlam öğesine göre menü aksiyonlarını üret
+  function ctxOgeler(): CtxOge[] {
+    if (!ctxMenu) return []
+    const e = ctxMenu.entry
+    const coklu = seciliSet.has(e.yol) && seciliSet.size > 1
+    const kapatSonra = (fn: () => void) => () => { setCtxMenu(null); fn() }
+    const ogeler: CtxOge[] = []
+    if (!coklu) {
+      if (e.tip === 'klasor') {
+        ogeler.push({ key: 'ac', etiket: 'Aç', ikon: '📂', onTikla: kapatSonra(() => git(e.yol)) })
+      } else {
+        if (docrootRel(e.yol) !== null)
+          ogeler.push({ key: 'brw', etiket: 'Tarayıcıda Aç', ikon: '🌐', onTikla: kapatSonra(() => tarayicidaAc(e)) })
+        ogeler.push({ key: 'edit', etiket: 'Düzenle', ikon: '✏️', onTikla: kapatSonra(() => editorAc(e)) })
+        ogeler.push({ key: 'dl', etiket: 'İndir', ikon: '⬇️', onTikla: kapatSonra(() => indir(e)) })
+        if (ARSIV_RX.test(e.adi))
+          ogeler.push({ key: 'ext', etiket: 'Arşivi Aç', ikon: '📦', onTikla: kapatSonra(() => extractEt(e)) })
+      }
+      ogeler.push({ key: 'rn', etiket: 'Yeniden Adlandır', ikon: '🔤', onTikla: kapatSonra(() => setRenameFor(e)) })
+      ogeler.push({ key: 'chmod', etiket: 'İzinler', ikon: '🔒', onTikla: kapatSonra(() => setChmodFor(e)) })
+      ogeler.push({ key: 'boyut', etiket: 'Boyut Hesapla', ikon: '📏', onTikla: kapatSonra(() => boyutHesapla(e.yol)) })
+      ogeler.push({ ayrac: true, key: 's1' })
+    }
+    const yollar = coklu ? Array.from(seciliSet) : [e.yol]
+    const ek = coklu ? ` (${yollar.length})` : ''
+    ogeler.push({ key: 'copy', etiket: 'Kopyala' + ek, ikon: '📋', onTikla: kapatSonra(() => setKopyalaModal({ tip: 'kopyala', yollar })) })
+    ogeler.push({ key: 'move', etiket: 'Taşı' + ek, ikon: '↔️', onTikla: kapatSonra(() => setKopyalaModal({ tip: 'tasi', yollar })) })
+    ogeler.push({ key: 'arch', etiket: 'Arşive Ekle' + ek, ikon: '🗜️', onTikla: kapatSonra(() => setArsivModal(true)) })
+    ogeler.push({ ayrac: true, key: 's2' })
+    ogeler.push({ key: 'del', etiket: 'Sil' + ek, ikon: '🗑️', tehlike: true, onTikla: kapatSonra(() => coklu ? setTopluSilOnay(true) : sil(e)) })
+    return ogeler
+  }
+
   const parcalar = yol.split('/').filter(Boolean)
 
   return (
@@ -426,12 +497,12 @@ export default function DomainFilesPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-12 gap-4">
-        <aside className="col-span-12 lg:col-span-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[13rem_minmax(0,1fr)] gap-4">
+        <aside>
           <DizinAgac domainId={id!} secili={yol} onSec={setYol} yenileme={agacYenileme} />
         </aside>
         <section
-          className={`col-span-12 lg:col-span-9 relative ${siruklemeSayaci > 0 ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-slate-50 rounded-lg" : ""}`}
+          className={`relative min-w-0 ${siruklemeSayaci > 0 ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-slate-50 rounded-lg" : ""}`}
           onDragEnter={siruklemeGiris}
           onDragLeave={siruklemeCikis}
           onDragOver={siruklemeUstunde}
@@ -451,6 +522,7 @@ export default function DomainFilesPage() {
       {seciliSet.size > 0 && (
         <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md flex items-center gap-3 flex-wrap">
           <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">{seciliSet.size} öğe seçili</span>
+          <span className="text-xs text-amber-700/80 dark:text-amber-300/80">Sağ tık ile işlemler</span>
           <button onClick={() => setTopluSilOnay(true)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">Sil ({seciliSet.size})</button>
           <button onClick={() => setSeciliSet(new Set())} className="text-xs px-3 py-1.5 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:bg-amber-900/30 rounded">Secimi temizle</button>
         </div>
@@ -487,7 +559,7 @@ export default function DomainFilesPage() {
           </div>
         </div>
       )}
-      {/* Toolbar — Plesk modeli */}
+      {/* Toolbar — sadeleştirildi: Yeni (+) · Yenile · Arama. Öğe işlemleri sağ-tık menüsünde. */}
       <div className="flex items-center gap-1.5 mb-3 flex-wrap relative">
         {/* + dropdown (Yeni Dosya / Klasör / Upload) */}
         <div className="relative">
@@ -496,6 +568,7 @@ export default function DomainFilesPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
+            <span>Yeni</span>
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path d="M5.516 7.548c.436-.446 1.043-.481 1.576 0L10 10.405l2.908-2.857c.533-.481 1.141-.446 1.576 0 .436.445.408 1.197 0 1.615-.406.418-3.695 3.629-3.695 3.629a1.105 1.105 0 01-1.576 0S5.924 9.581 5.516 9.163c-.409-.418-.436-1.17 0-1.615z" />
             </svg>
@@ -509,108 +582,13 @@ export default function DomainFilesPage() {
           )}
         </div>
 
-        {/* Copy */}
-        <button onClick={() => setKopyalaModal({ tip: 'kopyala', yollar: Array.from(seciliSet) })}
-          disabled={seciliSet.size === 0}
-          className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-sm rounded">
-          Kopyala
-        </button>
-
-        {/* Move */}
-        <button onClick={() => setKopyalaModal({ tip: 'tasi', yollar: Array.from(seciliSet) })}
-          disabled={seciliSet.size === 0}
-          className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-sm rounded">
-          Taşı
-        </button>
-
-        {/* Arşiv dropdown */}
-        <div className="relative">
-          <button onClick={() => setArsivMenuAcik(v => !v)}
-            className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
-            Arşiv
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M5.516 7.548c.436-.446 1.043-.481 1.576 0L10 10.405l2.908-2.857c.533-.481 1.141-.446 1.576 0 .436.445.408 1.197 0 1.615-.406.418-3.695 3.629-3.695 3.629a1.105 1.105 0 01-1.576 0S5.924 9.581 5.516 9.163c-.409-.418-.436-1.17 0-1.615z"/></svg>
-          </button>
-          {arsivMenuAcik && (
-            <div className="absolute z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
-              <button
-                onClick={() => {
-                  setArsivMenuAcik(false)
-                  if (seciliSet.size !== 1) { alert('Tek bir arşiv dosyası seçin'); return }
-                  const yol = Array.from(seciliSet)[0]
-                  const dosya = icerik.find(e => e.yol === yol)
-                  if (dosya) extractEt(dosya)
-                }}
-                disabled={seciliSet.size !== 1}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:text-slate-300">
-                📂 Arşivi Aç (Extract)
-              </button>
-              <button
-                onClick={() => { setArsivMenuAcik(false); setArsivModal(true) }}
-                disabled={seciliSet.size === 0}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:text-slate-300">
-                📦 Arşive Ekle (ZIP/TAR.GZ)
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Daha dropdown */}
-        <div className="relative">
-          <button onClick={() => setDaMenuAcik(v => !v)}
-            className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
-            Daha
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M5.516 7.548c.436-.446 1.043-.481 1.576 0L10 10.405l2.908-2.857c.533-.481 1.141-.446 1.576 0 .436.445.408 1.197 0 1.615-.406.418-3.695 3.629-3.695 3.629a1.105 1.105 0 01-1.576 0S5.924 9.581 5.516 9.163c-.409-.418-.436-1.17 0-1.615z"/></svg>
-          </button>
-          {daMenuAcik && (
-            <div className="absolute z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[200px] py-1">
-              <button
-                onClick={() => {
-                  setDaMenuAcik(false)
-                  if (seciliSet.size !== 1) { alert('Tek bir öğe seçin'); return }
-                  boyutHesapla(Array.from(seciliSet)[0])
-                }}
-                disabled={seciliSet.size !== 1}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:text-slate-300">
-                📏 Boyut Hesapla
-              </button>
-              <button
-                onClick={() => {
-                  setDaMenuAcik(false)
-                  if (seciliSet.size !== 1) { alert('Tek bir öğe seçin'); return }
-                  const yol = Array.from(seciliSet)[0]
-                  const dosya = icerik.find(e => e.yol === yol)
-                  if (dosya) setChmodFor(dosya)
-                }}
-                disabled={seciliSet.size !== 1}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:text-slate-300">
-                🔒 İzinleri Değiştir
-              </button>
-              <button
-                onClick={() => {
-                  setDaMenuAcik(false)
-                  if (seciliSet.size !== 1) { alert('Tek bir öğe seçin'); return }
-                  const yol = Array.from(seciliSet)[0]
-                  const dosya = icerik.find(e => e.yol === yol)
-                  if (dosya) setRenameFor(dosya)
-                }}
-                disabled={seciliSet.size !== 1}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:text-slate-300">
-                ✏ Yeniden Adlandır
-              </button>
-              <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
-              <button onClick={() => { setDaMenuAcik(false); tara() }}
-                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                ↻ Yenile
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Sil */}
-        <button onClick={() => setTopluSilOnay(true)}
-          disabled={seciliSet.size === 0}
-          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white text-sm rounded font-medium">
-          Sil{seciliSet.size > 0 ? ` (${seciliSet.size})` : ''}
+        {/* Yenile */}
+        <button onClick={() => tara()} title="Yenile"
+          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Yenile
         </button>
 
         <div className="flex-1" />
@@ -668,7 +646,7 @@ export default function DomainFilesPage() {
                 <th className="text-left px-4 py-2.5">Kullanıcı</th>
                 <th className="text-left px-4 py-2.5">Grup</th>
                 <th className="text-left px-4 py-2.5">Değişiklik</th>
-                <th className="text-right px-4 py-2.5">İşlemler</th>
+                <th className="px-3 py-2.5 w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -685,7 +663,14 @@ export default function DomainFilesPage() {
                 </tr>
               )}
               {(aramaSonuc ?? icerik).map((e) => (
-                <tr key={e.yol} className={`hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 transition ${seciliSet.has(e.yol) ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}>
+                <tr
+                  key={e.yol}
+                  onContextMenu={ev => satirContext(ev, e)}
+                  onTouchStart={ev => dokunBasla(ev, e)}
+                  onTouchEnd={dokunBitir}
+                  onTouchMove={dokunHareket}
+                  className={`hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 transition ${seciliSet.has(e.yol) ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}
+                >
                   <td className="px-3 py-2.5 text-center">
                     <input type="checkbox" checked={seciliSet.has(e.yol)}
                       onChange={() => secimTogga(e.yol)}
@@ -704,12 +689,15 @@ export default function DomainFilesPage() {
                         {e.adi}
                       </button>
                     ) : (
-                      <span className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
-                        <svg className="w-4 h-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
+                      <button
+                        onClick={() => e.tip === 'dosya' && editorAc(e)}
+                        className="flex items-center gap-2 text-slate-800 dark:text-slate-200 text-left hover:text-brand-600 dark:hover:text-brand-400"
+                      >
+                        <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <span>{e.adi}</span>
-                      </span>
+                      </button>
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">
@@ -719,54 +707,16 @@ export default function DomainFilesPage() {
                   <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.sahip || '—'}</td>
                   <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.grup || '—'}</td>
                   <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatTarih(e.degisme)}</td>
-                  <td className="px-4 py-2.5 text-right space-x-2">
-                    {e.tip !== 'klasor' && docrootRel(e.yol) !== null && (
-                      <button
-                        onClick={() => tarayicidaAc(e)}
-                        className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20 transition"
-                        title="Dosyayı canlı site adresinde (yeni sekme) aç"
-                      >
-                        Tarayıcıda Aç
-                      </button>
-                    )}
-                    {e.tip !== 'klasor' && (
-                      <button
-                        onClick={() => indir(e)}
-                        className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 transition"
-                      >
-                        İndir
-                      </button>
-                    )}
-                    {e.tip === "dosya" && /\.(zip|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i.test(e.adi) && (
-                      <button
-                        onClick={() => extractEt(e)}
-                        disabled={extractAktif}
-                        className="text-sm text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:text-violet-300 disabled:text-slate-300 px-2 py-1 rounded hover:bg-violet-50 dark:bg-violet-900/20 transition"
-                        title="Arşivi aç (extract)"
-                      >📦 Aç</button>
-                    )}
-                    {e.tip === "dosya" && (
-                      <button
-                        onClick={() => editorAc(e)}
-                        className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 transition"
-                        title="Duzenle"
-                      >Duzenle</button>
-                    )}
+                  <td className="px-2 py-2.5 text-right">
                     <button
-                      onClick={() => setRenameFor(e)}
-                      className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 transition"
-                      title="Yeniden adlandir"
-                    >Adlandir</button>
-                    <button
-                      onClick={() => setChmodFor(e)}
-                      className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 transition"
-                      title="Izinler"
-                    >Izinler</button>
-                    <button
-                      onClick={() => sil(e)}
-                      className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition"
+                      onClick={ev => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); ctxAc(r.right, r.bottom, e) }}
+                      className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
+                      title="İşlemler"
+                      aria-label={`${e.adi} işlemleri`}
                     >
-                      Sil
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
+                      </svg>
                     </button>
                   </td>
                 </tr>
@@ -852,6 +802,10 @@ export default function DomainFilesPage() {
 
         </section>
       </div>
+
+      {ctxMenu && (
+        <BaglamMenu x={ctxMenu.x} y={ctxMenu.y} ogeler={ctxOgeler()} onKapat={() => setCtxMenu(null)} />
+      )}
     </div>
   )
 }
@@ -872,6 +826,84 @@ function formatTarih(iso: string): string {
 }
 
 // ===== helper components =====
+
+// Sağ-tık bağlam menüsü: viewport'a göre konumlanır (taşma engellenir),
+// dışarı tıklama / Esc ile kapanır, ok tuşları ile gezinilir.
+function BaglamMenu({ x, y, ogeler, onKapat }: { x: number; y: number; ogeler: CtxOge[]; onKapat: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ x, y })
+  const [olculdu, setOlculdu] = useState(false)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const vw = window.innerWidth, vh = window.innerHeight
+    let nx = x, ny = y
+    if (x + r.width > vw - 8) nx = Math.max(8, vw - r.width - 8)
+    if (y + r.height > vh - 8) ny = Math.max(8, vh - r.height - 8)
+    setPos({ x: nx, y: ny })
+    setOlculdu(true)
+  }, [x, y])
+
+  useEffect(() => {
+    function onDown(ev: MouseEvent) { if (ref.current && !ref.current.contains(ev.target as Node)) onKapat() }
+    function onKey(ev: KeyboardEvent) { if (ev.key === 'Escape') onKapat() }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('contextmenu', onDown, true)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onKapat)
+    window.addEventListener('scroll', onKapat, true)
+    const t = window.setTimeout(() => {
+      ref.current?.querySelector<HTMLElement>('[data-mi]')?.focus()
+    }, 0)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('contextmenu', onDown, true)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onKapat)
+      window.removeEventListener('scroll', onKapat, true)
+      clearTimeout(t)
+    }
+  }, [onKapat])
+
+  function menuKey(ev: React.KeyboardEvent) {
+    const el = ref.current
+    if (!el) return
+    const mis = Array.from(el.querySelectorAll<HTMLElement>('[data-mi]'))
+    if (!mis.length) return
+    const idx = mis.indexOf(document.activeElement as HTMLElement)
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); mis[(idx + 1 + mis.length) % mis.length].focus() }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); mis[(idx - 1 + mis.length) % mis.length].focus() }
+    else if (ev.key === 'Home') { ev.preventDefault(); mis[0].focus() }
+    else if (ev.key === 'End') { ev.preventDefault(); mis[mis.length - 1].focus() }
+  }
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      onKeyDown={menuKey}
+      className={`fixed z-[60] min-w-[190px] py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl text-sm ${olculdu ? '' : 'opacity-0'}`}
+      style={{ left: pos.x, top: pos.y }}
+    >
+      {ogeler.map(it => it.ayrac
+        ? <div key={it.key} className="border-t border-slate-100 dark:border-slate-700 my-1" />
+        : <button
+            key={it.key}
+            data-mi
+            role="menuitem"
+            onClick={it.onTikla}
+            className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 outline-none focus:bg-slate-100 dark:focus:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 ${it.tehlike ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-200'}`}
+          >
+            <span className="w-4 text-center text-[13px]">{it.ikon}</span>
+            <span>{it.etiket}</span>
+          </button>
+      )}
+    </div>
+  )
+}
+
 function RenameModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (yeniAd: string) => void; onIptal: () => void }) {
   const [ad, setAd] = useState(entry.adi)
   return (
