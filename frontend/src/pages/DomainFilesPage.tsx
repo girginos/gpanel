@@ -395,10 +395,9 @@ export default function DomainFilesPage() {
   }
 
   // ===== Bağlam (sağ-tık) menüsü =====
-  // Menüyü aç: satır seçili değilse onu tek seçim yap (cPanel benzeri davranış),
-  // seçili grubun parçasıysa çoklu seçimi koru.
+  // Menüyü aç: sağ-tık SEÇİMİ DEĞİŞTİRMEZ. Tekil işlemler ctxMenu.entry üzerinden
+  // çalışır; kullanıcı checkbox ile çoklu seçim yaptıysa o seçim korunur.
   function ctxAc(clientX: number, clientY: number, entry: Entry) {
-    setSeciliSet(prev => prev.has(entry.yol) ? prev : new Set([entry.yol]))
     setCtxMenu({ x: clientX, y: clientY, entry })
   }
   function satirContext(ev: React.MouseEvent, entry: Entry) {
