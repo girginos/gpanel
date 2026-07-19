@@ -181,7 +181,6 @@ export default function DomainFilesPage() {
     try {
       await api.post(`/domains/${id}/files/upload`, fd, {
         params: { yol },
-        headers: { 'Content-Type': 'multipart/form-data' },
       })
       tara()
     } catch (err) {
@@ -199,7 +198,6 @@ export default function DomainFilesPage() {
     try {
       await api.post(`/domains/${id}/files/upload`, fd, {
         params: { yol },
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e: any) => {
           if (onProgress && typeof e.loaded === 'number') {
             onProgress(e.loaded, e.total || f.size)
