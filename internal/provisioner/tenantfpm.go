@@ -774,13 +774,19 @@ func writeDebugShim(db *sql.DB, sk string, domainID int64) {
 	if _, err := os.Stat(home); err != nil {
 		return // tenant home yok
 	}
+	orig := readUserIniAutoPrepend(tenantDocRoot(db, sk, domainID))
+	if orig == tenantDebugPrependPath(sk) {
+		orig = "" // kendini require etme
+	}
+	installDebugShim(home, sk, []byte(renderDebugPrependPHP(sk, orig)))
+}
 
-	// 🔴 SYMLINK/TOCTOU SERTLESTIRME: /home/<sk> tenant-SAHIPLI (0710) guvenilmez ust-dizin.
-	// /home root'a aittir → /home/<sk> DIZIN GIRDISI symlink'e takas EDILEMEZ; ama /home/<sk>
-	// ICERIGI tenant-kontrollu. Bu yuzden .gpanel'i ROOT:ROOT 0755 GERCEK dizin olarak
-	// dogrula/olustur (symlink/dosya/tenant-sahipli ise temizle+yeniden yarat), sonra TUM
-	// alt-dosya islemlerini dir-fd + *at-syscall + O_NOFOLLOW ile yap. 0755 root-dizin altinda
-	// tenant yazamaz/symlink koyamaz → cross-tenant chown DoS + keyfi root-yaz kapatilir.
+// installDebugShim: writeDebugShim'in FS-yazan cekirdegi (home test-icin enjekte edilebilir).
+// SYMLINK/TOCTOU-guvenli: /home/<sk> tenant-sahipli (0710) guvenilmez ust-dizin oldugundan
+// TUM islemler dir-fd + *at-syscall + O_NOFOLLOW ile yapilir. .gpanel ROOT:ROOT 0755 GERCEK
+// dizin olarak dogrulanir/olusturulur (symlink/dosya/tenant-sahipli ise symlink-guvenli
+// temizlenip yeniden yaratilir) -> cross-tenant chown DoS + keyfi root-yaz kapatilir.
+func installDebugShim(home, sk string, content []byte) {
 	homeFd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return
@@ -794,8 +800,7 @@ func writeDebugShim(db *sql.DB, sk string, domainID int64) {
 	defer unix.Close(gpFd)
 	restoreconFdPath(gpFd) // SELinux: pinlenmis fd-yolu uzerinden relabel (symlink -R yok)
 
-	// debug log: tenant:tenant 0644 (worker tenant-uid ile append eder). O_NOFOLLOW +
-	// fd-uzerinden Fchown/Fchmod → path-tabanli os.Chown'un symlink-takibi ortadan kalkar.
+	// debug log: tenant:tenant 0644. O_NOFOLLOW + fd-uzerinden Fchown/Fchmod.
 	if lf, e := unix.Openat(gpFd, "php_debug.log",
 		unix.O_WRONLY|unix.O_CREAT|unix.O_APPEND|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0644); e == nil {
 		if uid, gid, ue := uidGid(sk); ue == nil {
@@ -806,12 +811,7 @@ func writeDebugShim(db *sql.DB, sk string, domainID int64) {
 		unix.Close(lf)
 	}
 
-	// auto_prepend shim: app'in kendi .user.ini auto_prepend'ini zincirle (bozmadan)
-	orig := readUserIniAutoPrepend(tenantDocRoot(db, sk, domainID))
-	if orig == tenantDebugPrependPath(sk) {
-		orig = "" // kendini require etme
-	}
-	content := []byte(renderDebugPrependPHP(sk, orig))
+	// auto_prepend shim: root:root — tenant okur, degistiremez.
 	if pf, e := unix.Openat(gpFd, "debug_prepend.php",
 		unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0644); e == nil {
 		_, _ = unix.Write(pf, content)
