@@ -1711,7 +1711,7 @@ func HealPanelIndexNoCacheOnStartup() {
 		"        add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n" +
 		"        try_files $uri $uri/ /index.html;\n" +
 		"    }"
-	newS := panelIndexLocRe.ReplaceAllString(s, yeniBlok)
+	newS := panelIndexLocRe.ReplaceAllLiteralString(s, yeniBlok)
 	if newS == s {
 		return
 	}
