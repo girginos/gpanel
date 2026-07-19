@@ -245,6 +245,35 @@ func wpStdout(ctx context.Context, sk string, args ...string) ([]byte, error) {
 	return out.Bytes(), err
 }
 
+// wpKurulumKilit: eşzamanlı WordPress kurulumlarını hedef-yola göre serileştirir
+// (müşterinin çift-tık / hızlı-tekrar yarışı). Değer önemsiz; anahtar = mutlak hedef dizin.
+var wpKurulumKilit sync.Map
+
+// kurulumZatenVar: hedef dizinde zaten bir kurulum/içerik var mı? Varsa (mesaj, true)
+// döner ve kurulum DURDURULUR (mevcut içerik asla ezilmez). Boş ya da yalnız
+// placeholder/sistem dosyası içeren dizin "temiz" sayılır. wp-config.php = kesin
+// WordPress işareti.
+func kurulumZatenVar(hedef string) (string, bool) {
+	if _, err := os.Stat(filepath.Join(hedef, "wp-config.php")); err == nil {
+		return "bu dizinde zaten bir WordPress kurulu (mevcut kurulum korunuyor)", true
+	}
+	entries, err := os.ReadDir(hedef)
+	if err != nil {
+		return "", false // dizin yok = temiz
+	}
+	for _, e := range entries {
+		switch strings.ToLower(e.Name()) {
+		// zararsız placeholder / sistem dosyaları — "boş" say
+		case "index.html", "index.htm", "favicon.ico", "robots.txt",
+			"error_log", ".user.ini", ".well-known", "cgi-bin",
+			".ftpquota", ".htaccess", ".git", ".gitkeep":
+			continue
+		}
+		return "hedef dizin boş değil — mevcut içerik/kurulum korunuyor (üzerine yazılmaz). Boş bir alt dizin seçin", true
+	}
+	return "", false
+}
+
 // POST /domains/{id}/wordpress — kur
 func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	id, sk, alanAdi, ssl, demo, ok := h.domain(r)
@@ -295,8 +324,18 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	if req.AltDizin != "" {
 		hedef = filepath.Join(root, req.AltDizin)
 	}
-	if _, err := os.Stat(filepath.Join(hedef, "wp-config.php")); err == nil {
-		httpx.WriteError(w, http.StatusConflict, "bu dizinde zaten WordPress kurulu")
+	// ÇİFT-KURULUM KORUMASI (#369) — idempotent guard. Müşterinin aynı kurulumu
+	// 2. kez (çift-tık / hızlı tekrar) yapıp MEVCUT kurulumu EZMESİNİ engeller.
+	// (a) eşzamanlı kurulum kilidi: ilk istek bitmeden gelen 2. istek 409 alır —
+	//     wp-config.php henüz yazılmamışken bile yarış kapatılır.
+	if _, sur := wpKurulumKilit.LoadOrStore(hedef, struct{}{}); sur {
+		httpx.WriteError(w, http.StatusConflict, "bu dizine kurulum zaten sürüyor — lütfen bekleyin")
+		return
+	}
+	defer wpKurulumKilit.Delete(hedef)
+	// (b) hedef zaten kurulu / dolu mu → EZME, net hata dön.
+	if msg, kurulu := kurulumZatenVar(hedef); kurulu {
+		httpx.WriteError(w, http.StatusConflict, msg)
 		return
 	}
 	if err := os.MkdirAll(hedef, 0o755); err != nil {

@@ -3,6 +3,7 @@
 import { Link } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
 import PanelGuncelleme from '@/components/PanelGuncelleme'
+import SunucuOptimize from '@/components/SunucuOptimize'
 
 type Arac = {
   baslik: string
@@ -84,6 +85,7 @@ export default function AraclarAyarlarPage() {
       </p>
 
       <PanelGuncelleme />
+      <SunucuOptimize />
 
       {GRUPLAR.map(g => (
         <div key={g.ad} className="mb-7">
