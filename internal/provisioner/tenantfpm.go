@@ -27,6 +27,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -206,10 +208,10 @@ type tenantPoolSettings struct {
 	PMStrategy        string
 	PMMaxRequests     int
 	// Loglama / Debug Modu (php_settings) — saglam fatal-gorunurluk icin.
-	DisplayErrors     bool
-	LogErrors         bool
-	ErrorReporting    string
-	DebugMode         bool
+	DisplayErrors  bool
+	LogErrors      bool
+	ErrorReporting string
+	DebugMode      bool
 }
 
 const hardenedDisableFns = "exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid"
@@ -665,7 +667,6 @@ func repairTenantPoolDrift(domainID int64, sk, surum string) {
 	log.Printf("repairTenantPoolDrift: %s pool.conf guncellendi (loglama sertlestirmesi + drift onarimi)", sk)
 }
 
-
 // ---- PHP Debug Modu (saglam fatal-gorunurluk) ----
 
 // tenantGpanelDir: tenant'in panel-yonetimli .gpanel dizini (root:root 0755).
@@ -741,6 +742,9 @@ func renderDebugPrependPHP(sk, orig string) string {
 	b.WriteString("register_shutdown_function(function(){\n")
 	b.WriteString("  $e=error_get_last();\n")
 	b.WriteString("  if($e && in_array($e['type'],[E_ERROR,E_PARSE,E_CORE_ERROR,E_COMPILE_ERROR,E_RECOVERABLE_ERROR],true)){\n")
+	// DoS-guvenli log rotasyon: yazmadan ONCE dosya >2MB ise son ~1MB'i koru (basi kirp).
+	fmt.Fprintf(&b, "    $lf='%s';\n", logPath)
+	b.WriteString("    if(@filesize($lf)>2097152){$fp=@fopen($lf,'r');if($fp){@fseek($fp,-1048576,SEEK_END);$tl=@fread($fp,1048576);@fclose($fp);if($tl!==false){$nl=strpos($tl,\"\\n\");if($nl!==false)$tl=substr($tl,$nl+1);@file_put_contents($lf,$tl,LOCK_EX);}}}\n")
 	fmt.Fprintf(&b, "    @file_put_contents('%s',\n", logPath)
 	b.WriteString("      date('c').' ['.($_SERVER['REQUEST_URI']??'?').'] '.$e['message'].' @ '.$e['file'].':'.$e['line'].\"\\n\",\n")
 	b.WriteString("      FILE_APPEND|LOCK_EX);\n")
@@ -760,42 +764,149 @@ func renderDebugPrependPHP(sk, orig string) string {
 //   - /home/<sk>/.gpanel        root:root 0755 (tenant yazamaz → shim'i degistiremez)
 //   - .../php_debug.log         tenant:tenant 0644 (worker=tenant-uid append eder)
 //   - .../debug_prepend.php     root:root 0644 (tenant okur, root yazar)
+//
 // Hepsi restorecon ile etiketlenir (Enforcing'de tenant home altinda dogru baglam).
 func writeDebugShim(db *sql.DB, sk string, domainID int64) {
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
 		return
 	}
-	if _, err := os.Stat(filepath.Join("/home", sk)); err != nil {
+	home := filepath.Join("/home", sk)
+	if _, err := os.Stat(home); err != nil {
 		return // tenant home yok
 	}
-	dir := tenantGpanelDir(sk)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+
+	// 🔴 SYMLINK/TOCTOU SERTLESTIRME: /home/<sk> tenant-SAHIPLI (0710) guvenilmez ust-dizin.
+	// /home root'a aittir → /home/<sk> DIZIN GIRDISI symlink'e takas EDILEMEZ; ama /home/<sk>
+	// ICERIGI tenant-kontrollu. Bu yuzden .gpanel'i ROOT:ROOT 0755 GERCEK dizin olarak
+	// dogrula/olustur (symlink/dosya/tenant-sahipli ise temizle+yeniden yarat), sonra TUM
+	// alt-dosya islemlerini dir-fd + *at-syscall + O_NOFOLLOW ile yap. 0755 root-dizin altinda
+	// tenant yazamaz/symlink koyamaz → cross-tenant chown DoS + keyfi root-yaz kapatilir.
+	homeFd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
 		return
 	}
-	_ = os.Chown(dir, 0, 0)
-	_ = os.Chmod(dir, 0755)
-	_, _ = exec.Command("restorecon", "-R", dir).CombinedOutput()
+	defer unix.Close(homeFd)
 
-	// debug log: tenant:tenant 0644 (worker tenant-uid ile append eder)
-	logPath := tenantDebugLogPath(sk)
-	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-		_ = f.Close()
+	gpFd, ok := ensureRootDirAt(homeFd, ".gpanel")
+	if !ok {
+		return
 	}
-	if uid, gid, err := uidGid(sk); err == nil {
-		_ = os.Chown(logPath, uid, gid)
+	defer unix.Close(gpFd)
+	restoreconFdPath(gpFd) // SELinux: pinlenmis fd-yolu uzerinden relabel (symlink -R yok)
+
+	// debug log: tenant:tenant 0644 (worker tenant-uid ile append eder). O_NOFOLLOW +
+	// fd-uzerinden Fchown/Fchmod → path-tabanli os.Chown'un symlink-takibi ortadan kalkar.
+	if lf, e := unix.Openat(gpFd, "php_debug.log",
+		unix.O_WRONLY|unix.O_CREAT|unix.O_APPEND|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0644); e == nil {
+		if uid, gid, ue := uidGid(sk); ue == nil {
+			_ = unix.Fchown(lf, uid, gid)
+		}
+		_ = unix.Fchmod(lf, 0644)
+		restoreconFdPath(lf)
+		unix.Close(lf)
 	}
-	_ = os.Chmod(logPath, 0644)
-	_, _ = exec.Command("restorecon", logPath).CombinedOutput()
 
 	// auto_prepend shim: app'in kendi .user.ini auto_prepend'ini zincirle (bozmadan)
 	orig := readUserIniAutoPrepend(tenantDocRoot(db, sk, domainID))
-	prePath := tenantDebugPrependPath(sk)
-	if orig == prePath {
+	if orig == tenantDebugPrependPath(sk) {
 		orig = "" // kendini require etme
 	}
-	if err := os.WriteFile(prePath, []byte(renderDebugPrependPHP(sk, orig)), 0644); err == nil {
-		_ = os.Chown(prePath, 0, 0)
-		_ = os.Chmod(prePath, 0644)
-		_, _ = exec.Command("restorecon", prePath).CombinedOutput()
+	content := []byte(renderDebugPrependPHP(sk, orig))
+	if pf, e := unix.Openat(gpFd, "debug_prepend.php",
+		unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0644); e == nil {
+		_, _ = unix.Write(pf, content)
+		_ = unix.Fchown(pf, 0, 0) // root:root — tenant okur, degistiremez
+		_ = unix.Fchmod(pf, 0644)
+		restoreconFdPath(pf)
+		unix.Close(pf)
 	}
+}
+
+// ensureRootDirAt: parentFd altinda `name`i ROOT:ROOT 0755 GERCEK dizin olarak GARANTI eder.
+// Girdi symlink / dosya / tenant-sahipli-dizin ise guvensiz kabul edilir → symlink-guvenli
+// ozyinelemeli silinip yeniden yaratilir. Basarida dizinin O_NOFOLLOW dir-fd'sini doner
+// (cagiran Close etmeli). O_NOFOLLOW open + fd-uzerinden Fstat dogrulamasi TOCTOU-son-adim
+// yarisini kapatir (yaris = ELOOP/yanlis-sahip → temizle+retry). Idempotent.
+func ensureRootDirAt(parentFd int, name string) (int, bool) {
+	for attempt := 0; attempt < 3; attempt++ {
+		var st unix.Stat_t
+		serr := unix.Fstatat(parentFd, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if serr == nil {
+			if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != 0 || st.Gid != 0 {
+				// symlink / dosya / yanlis-sahip → guvensiz, kaldir
+				if removeAtRecursive(parentFd, name) != nil {
+					return -1, false
+				}
+				serr = unix.ENOENT
+			}
+		}
+		if serr == unix.ENOENT {
+			if e := unix.Mkdirat(parentFd, name, 0755); e != nil && e != unix.EEXIST {
+				return -1, false
+			}
+		} else if serr != nil {
+			return -1, false
+		}
+		fd, e := unix.Openat(parentFd, name,
+			unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if e != nil {
+			continue // symlink-swap yarisi vb → retry
+		}
+		var fst unix.Stat_t
+		if unix.Fstat(fd, &fst) != nil ||
+			fst.Mode&unix.S_IFMT != unix.S_IFDIR || fst.Uid != 0 || fst.Gid != 0 {
+			unix.Close(fd)
+			_ = removeAtRecursive(parentFd, name) // guvensizi temizle, retry
+			continue
+		}
+		_ = unix.Fchmod(fd, 0755)
+		return fd, true
+	}
+	return -1, false
+}
+
+// removeAtRecursive: dirfd'ye-goreli name'i symlink-guvenli sil. Once unlinkat(flag 0)
+// (dosya/symlink'i TAKIP ETMEDEN kaldirir); dizinse O_NOFOLLOW ile acip icini fd-ozyinelemeli
+// bosaltir, sonra AT_REMOVEDIR. Hicbir adimda symlink takip edilmez → jail-disi silme imkansiz.
+func removeAtRecursive(dirfd int, name string) error {
+	if err := unix.Unlinkat(dirfd, name, 0); err == nil {
+		return nil
+	}
+	fd, err := unix.Openat(dirfd, name,
+		unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		// dizin degil (symlink zaten unlink denendi) → son care
+		return unix.Unlinkat(dirfd, name, unix.AT_REMOVEDIR)
+	}
+	if names, e := readdirnamesRawFd(fd); e == nil {
+		for _, n := range names {
+			_ = removeAtRecursive(fd, n)
+		}
+	}
+	unix.Close(fd)
+	return unix.Unlinkat(dirfd, name, unix.AT_REMOVEDIR)
+}
+
+// readdirnamesRawFd: raw dir fd'yi (sahipligini ALMADAN) listeler — dup+os.File ile okur,
+// dup'i kapatir; asil fd cagirana kalir.
+func readdirnamesRawFd(dirfd int) ([]string, error) {
+	dup, err := unix.Dup(dirfd)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(dup), ".")
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
+// restoreconFdPath: fd'nin PINLENMIS gercek yolunu (/proc/self/fd/N → kernel cozer, saldirgan
+// symlink'ine bagisik) alip restorecon calistirir. Enforcing SELinux'ta root'un olusturdugu
+// dosya dogru context almazsa nginx/php-fpm erisemez; bu yuzden SART. Pinlenmis-yol → symlink
+// -R relabel riski yok.
+func restoreconFdPath(fd int) {
+	real, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
+	if err != nil {
+		return
+	}
+	_, _ = exec.Command("restorecon", real).CombinedOutput()
 }

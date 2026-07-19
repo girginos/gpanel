@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -556,11 +557,26 @@ func (h *Handlers) GetDebugLog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
-	data, rerr := os.ReadFile(p)
-	if rerr != nil {
+	f, ferr := os.Open(p)
+	if ferr != nil {
 		// dosya yok / okunamiyor → bos liste (debug hic tetiklenmemis olabilir)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": []string{}})
 		return
+	}
+	defer f.Close()
+	// DoS-guvenli: tum dosyayi belleğe okuma; sadece dosya SONUNDAN son ~64KB seek-oku.
+	const tailBytes = 64 * 1024
+	var data []byte
+	if st, serr := f.Stat(); serr == nil && st.Size() > tailBytes {
+		buf := make([]byte, tailBytes)
+		if _, e := f.ReadAt(buf, st.Size()-tailBytes); e == nil || e == io.EOF {
+			if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+				buf = buf[i+1:] // ilk kismi satiri at
+			}
+			data = buf
+		}
+	} else {
+		data, _ = io.ReadAll(f)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(lines) == 1 && lines[0] == "" {
