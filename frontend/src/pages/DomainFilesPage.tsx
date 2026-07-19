@@ -47,7 +47,6 @@ export default function DomainFilesPage() {
   const [icerik, setIcerik] = useState<Entry[]>([])
   const [yukleniyor, setYukleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
-  const [yukleneniDosya, setYukleneniDosya] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [editor, setEditor] = useState<{yol: string; icerik: string} | null>(null)
   const [chmodFor, setChmodFor] = useState<Entry | null>(null)
@@ -172,25 +171,6 @@ export default function DomainFilesPage() {
     }
   }
 
-  async function dosyaSec(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]
-    if (!f) return
-    setYukleneniDosya(f.name)
-    const fd = new FormData()
-    fd.append('dosya', f)
-    try {
-      await api.post(`/domains/${id}/files/upload`, fd, {
-        timeout: 0, // buyuk upload: client tarafinda iptal etme (backend 30dk sinir)
-        params: { yol },
-      })
-      tara()
-    } catch (err) {
-      alert(apiHata(err, 'Yükleme başarısız'))
-    } finally {
-      setYukleneniDosya(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
 
   // Tek bir File nesnesini yükle (drag&drop + input için ortak helper)
   async function dosyaYukleTekli(f: File, onProgress?: (loaded: number, total: number) => void): Promise<boolean> {
@@ -610,7 +590,7 @@ export default function DomainFilesPage() {
         </div>
 
         {/* Gizli upload input */}
-        <input ref={fileInputRef} type="file" multiple onChange={e => { const list = Array.from(e.target.files || []); if (list.length === 1) dosyaSec(e); else if (list.length > 1) dosyalariYukle(list); e.target.value = ""; }} className="hidden" />
+        <input ref={fileInputRef} type="file" multiple onChange={e => { const list = Array.from(e.target.files || []); if (list.length) dosyalariYukle(list); e.target.value = ""; }} className="hidden" />
 
         <div className="ml-auto text-sm text-slate-500 dark:text-slate-500">{icerik.length} öğe</div>
       </div>
