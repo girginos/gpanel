@@ -13,7 +13,7 @@ type LoginResp = {
 }
 
 export default function LoginPage() {
-  const [kullanici, setKullanici] = useState('root')
+  const [kullanici, setKullanici] = useState('')
   const [parola, setParola] = useState('')
   const [kod, setKod] = useState('')
   const [ikiFa, setIkiFa] = useState(false)
