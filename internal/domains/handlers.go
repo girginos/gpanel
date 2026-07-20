@@ -205,16 +205,28 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// Plan seçildiyse nginx web-sunucusu varsayılanlarını domain'e tohumla + vhost yenile
 	if req.PlanID != nil {
 		h.applyPlanNginxDefaults(r.Context(), id, *req.PlanID, pr.SistemKullanici, req.PHPSurum)
-		// Kaynak limitleri + per-tenant FPM (Seçenek A) — arka planda, kendi 5dk context'i
-		// (r.Context() HTTP request bitince iptal olur, cutover yarıda kalır). SetPlan ile aynı desen.
-		go func(did int64) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
-				log.Printf("kaynaklimit apply (create) domain=%d: %v", did, err)
-			}
-		}(id)
 	}
+	// 🔴🔴 A: IZOLASYON HERKESE — plan SECILMESE DE calisir.
+	//
+	// ESKI HAL (kapatilan delik): bu blok yukaridaki `if req.PlanID != nil` govdesinin
+	// ICINDEYDI. Plansiz olusturulan YENI bir domain UygulaHepsi'yi HIC cagirmiyordu →
+	// per-tenant CageFS FPM'e HIC gecmiyor, paylasilan master'da (izolasyonsuz) kaliyordu.
+	// Yani "izolasyon" sessizce bir plan ozelligi haline gelmisti.
+	//
+	// YENI HAL: kosulsuz cagrilir. UygulaHepsi plansiz tenant'ta yalnizca KAYNAK
+	// LIMITLERINI atlar (slice yazmaz, governor uygulamaz); izolasyonu (EnableTenantFPM)
+	// her durumda kurar. Boylece yeni domain unit'i dogrudan guncel sertlestirilmis
+	// sablonla (renderTenantUnit + damga) olusur.
+	//
+	// Arka plan + kendi 5dk context'i ZORUNLU: r.Context() HTTP istegi bitince iptal olur,
+	// cutover yarida kalirdi. SetPlan ile ayni desen.
+	go func(did int64) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
+			log.Printf("kaynaklimit apply (create) domain=%d: %v", did, err)
+		}
+	}(id)
 
 	// 3) FTP hesap (random parola)
 	ftpPass := hesaplar.RandomParola(20)

@@ -19,12 +19,14 @@ package provisioner
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -755,7 +757,7 @@ func guardPostStart(db *sql.DB, domainID int64, sk, surum string, window time.Du
 	if _, statErr := os.Stat(tenantUnitPath(sk)); os.IsNotExist(statErr) {
 		return fmt.Errorf("per-tenant FPM crash-loop (%s) — zaten paylasilan FPM'e alinmis", sebep)
 	}
-	rerr := RollbackToSharedFPM(db, domainID, sk, surum)
+	rerr := RollbackToSharedFPM(db, domainID, sk, surum, "K1 post-start crash-loop:", sebep)
 	// reset-failed olmazsa unit `systemctl --failed` listesinde asili kalir.
 	_, _ = exec.Command("systemctl", "reset-failed", unit).CombinedOutput()
 	if rerr != nil {
@@ -894,7 +896,7 @@ func fpmForceRollback(id int64, sk, php, sebep string) {
 	if _, statErr := os.Stat(tenantUnitPath(sk)); statErr != nil {
 		return
 	}
-	if rerr := RollbackToSharedFPM(pkgDB, id, sk, php); rerr != nil {
+	if rerr := RollbackToSharedFPM(pkgDB, id, sk, php, "K2 watchdog crash-loop:", sebep); rerr != nil {
 		log.Printf("fpmWatchdog rollback BASARISIZ %s: %v", sk, rerr)
 		return
 	}
@@ -912,6 +914,104 @@ func waitForSocket(path string, timeout time.Duration) bool {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// C: IZOLASYON KAYBI GORUNURLUGU (guvenlik olayi)
+// ---------------------------------------------------------------------------
+//
+// RollbackToSharedFPM bir tenant'i per-tenant (CageFS) FPM'den PAYLASILAN master'a
+// indirir. Bu bir performans olayi DEGIL, GUVENLIK REGRESYONUDUR: mount-namespace
+// izolasyonu (ProtectHome=tmpfs + BindPaths=/home/<sk> + per-tenant /dev/shm +
+// kernel-yuzey daraltma + cap-bounding) TAMAMEN kalkar; tenant komsularinin
+// home/tmp/shm yuzeyine yeniden acilir (exposure 4.5 -> 9.2 UNSAFE).
+//
+// ESKI DURUM: RollbackToSharedFPM govdesinde DB yazimi / audit_log / UI bildirimi
+// YOKTU. Operatorun gorebilecegi TEK iz journald'de bir satirdi; panelde hicbir yer
+// bir tenant'in korumasiz kaldigini SOYLEMIYORDU. Simdi UC yuzey birden:
+//   1) log  -> acik metin "IZOLASYON KAYBI" + neyin kaybedildigi,
+//   2) audit_log satiri (action=guvenlik.izolasyon_kaybi, ok=0, detail=JSON),
+//   3) sentinel dosyasi -> /system/usage ozetine duser -> panelde kirmizi banner.
+//
+// Sentinel, tenant yeniden per-tenant FPM'e alindiginda (EnableTenantFPM basarili)
+// veya domain silindiginde (TeardownTenantFPM) otomatik temizlenir -> bayat uyari yok.
+// audit_log satiri KALICIDIR (gecmis kanit), sentinel ANLIK DURUMDUR.
+
+const izolasyonSentinelDir = "/etc/girginospanel/izolasyon-kaybi"
+
+func izolasyonSentinelPath(sk string) string {
+	return filepath.Join(izolasyonSentinelDir, sk)
+}
+
+// IzolasyonKaybiListesi: su anda CageFS izolasyonu OLMAYAN (paylasilan FPM'e
+// indirilmis) tenant'larin sistem-kullanici listesi. UI banner'i bunu okur.
+// Kendi kendini duzeltir: tenant yeniden izole edilmisse bayat sentinel silinir.
+func IzolasyonKaybiListesi() []string {
+	ents, err := os.ReadDir(izolasyonSentinelDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		sk := e.Name()
+		if e.IsDir() || !strings.HasPrefix(sk, "c_") {
+			continue
+		}
+		if TenantFPMActive(sk) {
+			_ = os.Remove(izolasyonSentinelPath(sk)) // yeniden izole edilmis -> bayat
+			continue
+		}
+		out = append(out, sk)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// izolasyonKaybiIsaretle: anlik durum sentinel'i (icerik: zaman + sebep).
+func izolasyonKaybiIsaretle(sk, sebep string) {
+	if err := os.MkdirAll(izolasyonSentinelDir, 0755); err != nil {
+		log.Printf("izolasyon sentinel dizini olusturulamadi: %v", err)
+		return
+	}
+	body := fmt.Sprintf("%s\t%s\n", time.Now().UTC().Format(time.RFC3339), sebep)
+	if err := os.WriteFile(izolasyonSentinelPath(sk), []byte(body), 0644); err != nil {
+		log.Printf("izolasyon sentinel yazilamadi (%s): %v", sk, err)
+	}
+}
+
+// izolasyonKaybiTemizle: tenant yeniden izole edildi / silindi -> uyariyi kaldir.
+func izolasyonKaybiTemizle(sk string) {
+	_ = os.Remove(izolasyonSentinelPath(sk))
+}
+
+// auditIzolasyonKaybi: audit_log'a GUVENLIK satiri yazar (kalici kanit).
+// detail JSON olmak ZORUNDA (tabloda `json_valid(detail)` CHECK var) -> json.Marshal
+// ile uretiliyor, elle string birlestirme YOK. ok=0 (basarisiz/olumsuz olay).
+// db nil ise pkgDB'ye duser; ikisi de nil ise sessizce cikar (log yine yazilmistir).
+func auditIzolasyonKaybi(db *sql.DB, domainID int64, sk, sebep string) {
+	if db == nil {
+		db = pkgDB
+	}
+	if db == nil {
+		return
+	}
+	detay, merr := json.Marshal(map[string]any{
+		"sistem_kullanici": sk,
+		"domain_id":        domainID,
+		"sebep":            sebep,
+		"kaybedilen":       "CageFS mount-namespace izolasyonu (ProtectHome=tmpfs + BindPaths=/home/" + sk + " + per-tenant /dev/shm + kernel-yuzey daraltma + cap-bounding)",
+		"etki":             "tenant PAYLASILAN php-fpm master'a indirildi; komsu tenant'larin home/tmp/shm yuzeyine yeniden acildi",
+		"onarim":           "kok sebep giderildikten sonra plani yeniden uygula (veya domain kaydet) -> per-tenant FPM geri alinir",
+	})
+	if merr != nil {
+		return
+	}
+	if _, err := db.Exec(
+		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok)
+		 VALUES(NULL, 'sistem', '', 'guvenlik.izolasyon_kaybi', ?, ?, 0)`,
+		sk, string(detay)); err != nil {
+		log.Printf("audit izolasyon_kaybi yazilamadi (%s): %v", sk, err)
+	}
 }
 
 // EnableTenantFPM: bir tenant'ı Seçenek-A per-tenant php-fpm servisine geçirir (idempotent).
@@ -1003,11 +1103,11 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 
 	// 6) servisi enable + (re)start
 	if out, err := exec.Command("systemctl", "enable", tenantUnitName(sk)).CombinedOutput(); err != nil {
-		_ = RollbackToSharedFPM(db, domainID, sk, surum)
+		_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: systemctl enable basarisiz")
 		return "", fmt.Errorf("tenant fpm enable: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	if out, err := exec.Command("systemctl", "restart", tenantUnitName(sk)).CombinedOutput(); err != nil {
-		_ = RollbackToSharedFPM(db, domainID, sk, surum)
+		_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: systemctl restart basarisiz")
 		return "", fmt.Errorf("tenant fpm restart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
@@ -1020,7 +1120,7 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 
 	socket := tenantSocket(sk)
 	if !waitForSocket(socket, 6*time.Second) {
-		_ = RollbackToSharedFPM(db, domainID, sk, surum)
+		_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: FPM socket 6s icinde olusmadi")
 		return "", fmt.Errorf("tenant fpm socket oluşmadı: %s", socket)
 	}
 	// restorecon socket oluştuktan sonra bir kez daha (socket'in kendi bağlamı için)
@@ -1040,7 +1140,7 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	// geri render eder (RollbackToSharedFPM adim 4).
 	if db != nil && domainID > 0 {
 		if err := ApplyVhostForDomain(db, domainID, socket, surum); err != nil {
-			_ = RollbackToSharedFPM(db, domainID, sk, surum)
+			_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: nginx per-tenant vhost render basarisiz")
 			return "", fmt.Errorf("nginx per-tenant re-render: %w", err)
 		}
 	}
@@ -1052,6 +1152,8 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	if gerr := guardPostStart(db, domainID, sk, surum, fpmPostStartWindow); gerr != nil {
 		return "", gerr
 	}
+	// C: tenant (yeniden) izole edildi -> varsa bayat "izolasyon kaybi" uyarisini kaldir.
+	izolasyonKaybiTemizle(sk)
 	return socket, nil
 }
 
@@ -1061,10 +1163,23 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 //  2. paylaşılan pool'u .bak'tan geri getir (yoksa hardened pool'u yeniden yaz) + reload
 //  3. per-tenant config artıklarını temizle
 //  4. nginx vhost'u paylaşılan socket'e re-render
-func RollbackToSharedFPM(db *sql.DB, domainID int64, sk, surum string) error {
+func RollbackToSharedFPM(db *sql.DB, domainID int64, sk, surum string, sebep ...string) error {
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
 		return fmt.Errorf("geçersiz sistem kullanıcısı: %q", sk)
 	}
+	// 🔴 GUVENLIK OLAYI (C): bu cagri tenant'in CageFS izolasyonunu KALDIRIR.
+	// Log + audit_log + sentinel UCU BIRDEN, mutasyondan ONCE yazilir: adim 1
+	// (disable --now + unit sil) KOSULSUZ calisir, yani buraya girildiginde izolasyon
+	// kaybi ZATEN kesinlesmistir. Sonrasinda panik/hata olsa bile kanit kaybolmaz.
+	neden := strings.TrimSpace(strings.Join(sebep, " "))
+	if neden == "" {
+		neden = "sebep bildirilmedi"
+	}
+	log.Printf("🔴 IZOLASYON KAYBI: %s per-tenant CageFS FPM'den PAYLASILAN FPM'e indiriliyor — "+
+		"mount-namespace izolasyonu (kendi /home gorunumu + PrivateTmp + per-tenant /dev/shm + "+
+		"kernel-yuzey daraltma) KALKIYOR, tenant komsu yuzeyine yeniden aciliyor. Sebep: %s", sk, neden)
+	izolasyonKaybiIsaretle(sk, neden)
+	auditIzolasyonKaybi(db, domainID, sk, neden)
 	surum = normalizePHP(surum)
 	ay := phpMap[surum]
 
@@ -1119,17 +1234,56 @@ func TeardownTenantFPM(sk string) {
 	for _, ay := range phpMap {
 		_ = os.Remove(filepath.Join(ay.PoolDir, sk+".conf.bak"))
 	}
+	// C: domain silindi -> "izolasyon kaybi" uyarisi bayat kalmasin.
+	izolasyonKaybiTemizle(sk)
 }
 
 // EnsureTenantFPMOnStartup: açılışta kurulu tüm per-tenant FPM servislerinin ayakta
 // olduğunu garanti eder (unit dosyası var ama servis inaktifse başlatır). Başlatılamayan
 // tenant güvenli şekilde paylaşılan düzene indirilir.
+//
+// 🔴🔴 B: BLOKLAMAZ (SHIP-BLOCKER FIX). Bu fonksiyon provisioner.Init icinden,
+// yani srv.ListenAndServe'den ONCE cagriliyor. Sweep tenant'lari SERI donuyor ve her
+// DRIFTLI tenant icin guardPostStart(fpmPostStartWindowBoot=8s) senkron BLOKLUYORDU:
+// 181-dev'de OLCULDU -> 3 driftli tenant = panel HTTP 27.1s boyunca baglanti REDDETTI
+// (driftsiz baseline 0.3s). Prod'da ILK update'te HER tenant driftli olacagi icin panel
+// N x ~9s, yani dakikalarca kapali kalirdi. Operator karari: "siteler birkac saniye 503"
+// KABUL, "panel dakikalarca kapali" KABUL DEGIL.
+//
+// SECILEN COZUM: (i) arka plan goroutine. Neden digerleri degil:
+//
+//	(ii) fpmPostStartWindowBoot 8s->1s: kesintiyi kisaltir ama YOK ETMEZ (N tenant x
+//	     ~1s + restart/socket bekleme hala lineer buyur) ve crash-loop dedeksiyonunu
+//	     korlestirir (crash@3s profili 1s'lik pencerede YAPISAL olarak kacar).
+//	(iii) acilis drift-onarimini tamamen kaldirmak: FIX#1'in tum amacini (mevcut
+//	     musterilere sertlestirme indirme) iptal eder; plan-degisimi/yeni-domain
+//	     tetigi olmayan tenant sonsuza dek eski sablonda kalir.
+//
+// Arka planda calisinca panelin HTTP kapali suresi sweep'ten TAMAMEN bagimsizlasir,
+// koruma (guardPostStart 8s + K2 watchdog) AYNEN korunur, sadece "boot'u uzatma"
+// kisiti kalktigi icin pencereyi kisaltmak da gerekmez.
+//
+// Yaris guvenligi: sweep artik HTTP servisi ile es zamanli kosuyor. Ayni tenant'a
+// istek-tetikli EnableTenantFPM gelirse fpmSkLock + fpmInflight zaten koruyor; ayrica
+// kaynaklimit.HealTenantFPM de ZATEN bg goroutine olarak ayni yollari cagiriyordu,
+// yani es zamanlilik yeni bir sinif degil.
 func EnsureTenantFPMOnStartup() {
 	if pkgDB == nil {
 		return
 	}
 	// K2: panel omru boyunca crash-loop gozcusu (idempotent — tek goroutine).
+	// Bu UCUZ (sadece goroutine baslatir) -> senkron kalabilir.
 	StartFPMWatchdog()
+	go ensureTenantFPMSweep()
+}
+
+// ensureTenantFPMSweep: EnsureTenantFPMOnStartup'in ASIL isi — arka planda kosar.
+// Panelin dinlemeye baslamasini BEKLETMEZ.
+func ensureTenantFPMSweep() {
+	if pkgDB == nil {
+		return
+	}
+	basla := time.Now()
 	rows, err := pkgDB.Query(`SELECT id, sistem_kullanici, php_surum FROM domains`)
 	if err != nil {
 		return
@@ -1166,7 +1320,7 @@ func EnsureTenantFPMOnStartup() {
 		}
 		if out, err := exec.Command("systemctl", "start", tenantUnitName(d.sk)).CombinedOutput(); err != nil {
 			// başlatılamadı → paylaşılan düzene güvenli indir
-			_ = RollbackToSharedFPM(pkgDB, d.id, d.sk, d.php)
+			_ = RollbackToSharedFPM(pkgDB, d.id, d.sk, d.php, "acilis sweep: systemctl start basarisiz")
 			_ = out
 			continue
 		}
@@ -1177,6 +1331,8 @@ func EnsureTenantFPMOnStartup() {
 			log.Printf("EnsureTenantFPMOnStartup: %v", gerr)
 		}
 	}
+	log.Printf("ensureTenantFPMSweep: bitti (%d domain, %s) — arka planda kosuldu, panel acilisi bloklanmadi",
+		len(list), time.Since(basla).Round(time.Millisecond))
 }
 
 // RepairTenantUnitDrift: mevcut per-tenant systemd unit dosyasi guncel sablondan
@@ -1246,12 +1402,12 @@ func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 		if out, rerr := exec.Command("systemctl", "restart", tenantUnitName(sk)).CombinedOutput(); rerr != nil {
 			log.Printf("repairTenantUnitDrift: %s restart basarisiz (%s) → paylasilan FPM'e geri aliniyor",
 				sk, strings.TrimSpace(string(out)))
-			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum)
+			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum, "unit drift onarimi: restart basarisiz")
 			return false
 		}
 		if !waitForSocket(tenantSocket(sk), 6*time.Second) {
 			log.Printf("repairTenantUnitDrift: %s socket olusmadi → paylasilan FPM'e geri aliniyor", sk)
-			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum)
+			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum, "unit drift onarimi: socket olusmadi")
 			return false
 		}
 		// Yeni namespace/runtime dizini → SELinux etiketlerini tazele (Permissive'de no-op).

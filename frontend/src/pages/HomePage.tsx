@@ -18,6 +18,7 @@ type Sistem = {
   sistem: SistemInfo; cpu: CPU; bellek: Bellek; swap: Swap
   disk: Disk; diskler: Disk[]; ag: Ag; servisler: Servis[]; uptime_sn: number
   kota_reboot_gerekli?: boolean
+  izolasyon_kaybi?: string[]
 }
 type Domain = { id: number; alan_adi: string; ssl: boolean; durum: string }
 
@@ -53,6 +54,29 @@ export default function HomePage() {
           Canlı
         </div>
       </div>
+
+      {/* 🔴 GÜVENLİK: bir veya daha fazla tenant CageFS izolasyonunu kaybetti */}
+      {!!s?.izolasyon_kaybi?.length && (
+        <div className="mb-3 flex items-start gap-3 rounded-2xl border border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-900/15 px-4 py-3">
+          <svg className="w-5 h-5 shrink-0 text-rose-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.363 3.591 2.257 17.657a1.5 1.5 0 0 0 1.302 2.25h16.882a1.5 1.5 0 0 0 1.302-2.25L13.638 3.591a1.5 1.5 0 0 0-2.598 0Z" />
+          </svg>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-rose-800 dark:text-rose-200">Güvenlik: hesap izolasyonu kaybı</div>
+            <div className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+              Aşağıdaki hesaplar paylaşılan PHP-FPM düzenine indirildi; kendilerine özel dosya
+              sistemi izolasyonu (CageFS) şu anda <span className="font-semibold">etkin değil</span> —
+              komşu hesapların yüzeyine açıklar. Ayrıntı için denetim kaydına bakın
+              (<span className="font-mono">guvenlik.izolasyon_kaybi</span>).
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {s.izolasyon_kaybi!.map((sk) => (
+                <span key={sk} className="font-mono text-[11px] px-2 py-0.5 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200">{sk}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Disk kotası aktif değil — tek seferlik reboot gerekli (sadece bayrak true iken) */}
       {s?.kota_reboot_gerekli && (

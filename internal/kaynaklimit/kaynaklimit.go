@@ -226,6 +226,35 @@ func ioSetPropertyArgs(l Limitler) []string {
 	}
 }
 
+// SystemdSliceRuntimeSifirla: plan KALDIRILDIGINDA aktif slice'ta yasamaya devam eden
+// `systemctl set-property --runtime` override'larini gercekten temizler.
+//
+// 🔴 NEDEN GEREKLI (181-dev'de CANLI YAKALANDI): SystemdSliceSil YALNIZ .slice
+// DOSYASINI siler. Daha once uygulanmis runtime override'lar
+// /run/systemd/system.control/girginos-<sk>.slice.d/50-*.conf altinda KALIR ve tenant
+// "plansiz" gorundugu halde eski planin tavanlari altinda kosmaya devam eder.
+// Olculen ornek: c_cagea_local plan_id=NULL, .slice dosyasi YOK — ama
+// MemoryMax=256M, TasksMax=30, CPUQuota=500ms (Baslangic plani degerleri) HALA AKTIFTI.
+// "Plan yok = limit yok" sozunu bozan sessiz bir tutarsizlik.
+//
+// Bos atama (CPUQuota= / IOWeight=) systemd'nin dokumante ettigi sifirlama yoludur;
+// 181'de dogrulandi (500ms/256M/30 -> infinity/infinity/infinity). io.max icin ayrica
+// ioClearKernelLimits cagrilir cunku bos atama kernel'deki mevcut cihaz limitini
+// guvenilir sekilde temizlemiyor (bkz. SystemdSliceYaz'daki ayni not).
+func SystemdSliceRuntimeSifirla(sk string) {
+	out, _ := exec.Command("systemctl", "is-active", sliceName(sk)).CombinedOutput()
+	if strings.TrimSpace(string(out)) != "active" {
+		return // slice ayakta degil -> temizlenecek runtime override yok
+	}
+	args := []string{"set-property", "--runtime", sliceName(sk),
+		"CPUQuota=", "MemoryMax=infinity", "MemoryHigh=infinity", "TasksMax=infinity", "IOWeight="}
+	args = append(args, ioSetPropertyArgs(Limitler{})...)
+	if o, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
+		log.Printf("slice runtime sifirla %s: %s: %v", sk, strings.TrimSpace(string(o)), err)
+	}
+	ioClearKernelLimits(sk, Limitler{})
+}
+
 // SystemdSliceSil: kayıt varsa siler.
 func SystemdSliceSil(sk string) error {
 	p := slicePath(sk)
@@ -666,45 +695,67 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if err != nil {
 		return err
 	}
-	// Plan atanmamış? Per-tenant FPM'i geri al (paylaşılan düzene) + slice'ı sil.
-	if l.CPUYuzde == 0 && l.RAMMB == 0 && l.MaxProcess == 0 {
-		if provisioner.TenantFPMActive(sk) {
-			if err := provisioner.RollbackToSharedFPM(db, domainID, sk, surum); err != nil {
-				log.Printf("rollback shared fpm %s: %v", sk, err)
-			}
-		}
+	// 🔴🔴 A: IZOLASYON BIR PLAN OZELLIGI DEGIL, GUVENLIK TABANIDIR (operator karari).
+	// Plan SADECE limitleri (CPU/RAM/IO/Tasks/kota/governor) belirler.
+	//
+	// ESKI DAVRANIS (kapatilan delik): plan yoksa RollbackToSharedFPM cagrilip per-tenant
+	// FPM SOKULUYORDU. Yani plansiz tenant CageFS izolasyonunu HIC ALMIYOR, ustelik daha
+	// once almissa (plan silindiginde/planlar sifirlandiginda) AKTIF OLARAK KAYBEDIYORDU.
+	// Bir tenant'in komsusunun /home + /tmp + /dev/shm yuzeyini gormesi ile plan atanip
+	// atanmamasi arasinda hicbir guvenlik iliskisi yok.
+	//
+	// YENI DAVRANIS: EnableTenantFPM plansiz tenant icin de KOSULSUZ cagrilir (izolasyon
+	// herkese); yalnizca KAYNAK LIMITLERI atlanir.
+	plansiz := l.CPUYuzde == 0 && l.RAMMB == 0 && l.MaxProcess == 0
+	if plansiz {
+		// Kaynak limiti YOK -> slice dosyasini kaldir (varsa). Unit'in `Slice=girginos-<sk>.slice`
+		// satiri KALIR; systemd dosyasi olmayan slice'i ortuk olarak yaratir ve limitsiz
+		// (MemoryMax=infinity) calistirir. 181'de CANLI DOGRULANDI: c_cagea_local /
+		// c_cageb_local'in .slice dosyasi YOK, unit'leri active, Slice=girginos-c_cagea_local.slice,
+		// MemoryMax=infinity.
+		//
+		// NEDEN "genis degerlerle slice yaz" DEGIL: SystemdSliceYaz(Limitler{}) nonzero()
+		// varsayilanlariyla CPUQuota=100%% + MemoryMax=512M + TasksMax=50 yazardi. Bu GENIS
+		// DEGIL, DARALTMA olurdu: bugun limitsiz kosan plansiz bir tenant aniden 512M
+		// MemoryMax altina girer -> OOM-kill riski. Guvenlik kazanci yok (izolasyonu unit
+		// sagliyor, /dev/shm tavani da unit'te size=64M olarak zaten var), regresyon riski
+		// gercek. Dolayisiyla: plan yok = limit yok = varsayilan.
 		_ = SystemdSliceSil(sk)
-		// Plan yok olsa da tenant'a VARSAYILAN disk/inode kotası uygula (CloudLinux paritesi:
-		// sınırsız bırakma). fs noquota ise KotaUygula sessizce atlar (asla hata).
-		if err := DomainKotaUygula(ctx, db, domainID); err != nil {
-			log.Printf("kota (plansız) %s: %v", sk, err)
+		// Dosyayi silmek YETMEZ: daha once uygulanmis runtime overridelar aktif sliceta
+		// yasamaya devam eder (bkz. SystemdSliceRuntimeSifirla). "Plan yok = limit yok"
+		// ancak bununla GERCEK olur.
+		SystemdSliceRuntimeSifirla(sk)
+	} else {
+		// 1) slice (cgroup limitleri) — canlı, süreç-öldürmez.
+		if err := SystemdSliceYaz(sk, l); err != nil {
+			log.Printf("slice yaz %s: %v", sk, err)
 		}
-		return nil
+		// 2) pm.max_children'ı plandan php_settings'e sür (paylaşılan-mod tutarlılığı;
+		//    per-tenant pool'u renderTenantPool zaten plandan hesaplar).
+		pmc := hesaplaPMMaxChildren(l)
+		if _, err := db.ExecContext(ctx,
+			`UPDATE php_settings SET pm_max_children=? WHERE domain_id=?`, pmc, domainID); err != nil {
+			log.Printf("php_settings pm_max_children %s: %v", sk, err)
+		}
 	}
-	// 1) slice (cgroup limitleri) — canlı, süreç-öldürmez.
-	if err := SystemdSliceYaz(sk, l); err != nil {
-		log.Printf("slice yaz %s: %v", sk, err)
-	}
-	// 2) pm.max_children'ı plandan php_settings'e sür (paylaşılan-mod tutarlılığı;
-	//    per-tenant pool'u renderTenantPool zaten plandan hesaplar).
-	pmc := hesaplaPMMaxChildren(l)
-	if _, err := db.ExecContext(ctx,
-		`UPDATE php_settings SET pm_max_children=? WHERE domain_id=?`, pmc, domainID); err != nil {
-		log.Printf("php_settings pm_max_children %s: %v", sk, err)
-	}
-	// 3) 🔴 Seçenek A: per-tenant php-fpm servisi (slice üyeliği + CageFS sandbox).
-	//    Limitler ancak böyle GERÇEKTEN enforce edilir. Başarısızlıkta EnableTenantFPM
-	//    otomatik olarak paylaşılan düzene rollback eder → site asla düşmez.
+	// 3) 🔴 GUVENLIK TABANI — HERKESE: per-tenant php-fpm servisi (CageFS sandbox +
+	//    varsa slice uyeligi). Plansiz tenant da buradan gecer. Basarisizlikta
+	//    EnableTenantFPM otomatik RollbackToSharedFPM yapar → site asla dusmez
+	//    (ve C sayesinde bu artik audit_log + sentinel + panel banner'inda GORUNUR).
 	if _, err := provisioner.EnableTenantFPM(db, domainID, sk, surum); err != nil {
 		log.Printf("per-tenant fpm %s: %v (paylaşılan düzende kalındı)", sk, err)
 	}
-	// 4) disk kotası (XFS user quota) + MySQL Governor (domain'in TÜM db_accounts kullanıcılarına
-	//    native GRANT limitleri: bağlantı + sorgu/saat + güncelleme/saat).
+	// 4) disk kotası (XFS user quota): plansizda da VARSAYILAN kota uygulanir
+	//    (CloudLinux paritesi — sinirsiz birakma). fs noquota ise sessizce atlanir.
 	if err := DomainKotaUygula(ctx, db, domainID); err != nil {
 		log.Printf("xfs user-quota %s: %v", sk, err)
 	}
-	if err := MySQLLimitUygula(ctx, db, domainID, l); err != nil {
-		log.Printf("mysql governor %s: %v", sk, err)
+	// 5) MySQL Governor: plandan gelen native GRANT limitleri. Plan yoksa uygulanacak
+	//    limit de yok → atla (mevcut davranis korunur).
+	if !plansiz {
+		if err := MySQLLimitUygula(ctx, db, domainID, l); err != nil {
+			log.Printf("mysql governor %s: %v", sk, err)
+		}
 	}
 	return nil
 }
@@ -793,9 +844,15 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 	if db == nil {
 		return
 	}
+	// 🔴 A: eskiden `WHERE plan_id IS NOT NULL` idi — plansiz tenant migration
+	// yoluna HIC girmiyordu, yani paylasilan FPM'de kalmis plansiz bir musteri
+	// izolasyonu ASLA almiyordu. Izolasyon guvenlik tabani oldugu icin filtre
+	// kaldirildi; UygulaHepsi zaten plansizda yalnizca limitleri atliyor.
+	// Bu sweep ZATEN bg goroutine'de kosuyor (main.go) + baseline/post HTTP probe ve
+	// otomatik rollback korumasi var → kapsam genislemesi acilisi bloklamaz.
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, sistem_kullanici, COALESCE(php_surum,'8.3'), alan_adi
-		 FROM domains WHERE plan_id IS NOT NULL ORDER BY id`)
+		 FROM domains ORDER BY id`)
 	if err != nil {
 		log.Printf("HealTenantFPM: domain listesi okunamadı: %v", err)
 		return
@@ -864,7 +921,8 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 		if !aktif || regresyon {
 			log.Printf("HealTenantFPM: %s REGRESYON (aktif=%v baseline=%d post=%d) → RollbackToSharedFPM",
 				d.sk, aktif, baseline, post)
-			if e := provisioner.RollbackToSharedFPM(db, d.id, d.sk, d.php); e != nil {
+			if e := provisioner.RollbackToSharedFPM(db, d.id, d.sk, d.php,
+				fmt.Sprintf("HealTenantFPM cutover regresyonu (aktif=%v baseline=%d post=%d)", aktif, baseline, post)); e != nil {
 				log.Printf("HealTenantFPM: %s rollback HATA: %v", d.sk, e)
 			}
 			_ = SystemdSliceSil(d.sk)
@@ -874,7 +932,7 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 		log.Printf("HealTenantFPM: %s cutover OK (baseline=%d post=%d)", d.sk, baseline, post)
 		migrated++
 	}
-	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif(re-assert) / %d rollback (toplam %d planlı domain)",
+	log.Printf("HealTenantFPM tamam: %d migrate / %d zaten-aktif(re-assert) / %d rollback (toplam %d domain, plansiz DAHIL)",
 		migrated, zaten, rollback, len(list))
 }
 

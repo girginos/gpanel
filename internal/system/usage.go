@@ -17,6 +17,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/provisioner"
 )
 
 const PanelSurum = "GirginOSPanel 0.2.0"
@@ -90,6 +91,10 @@ type Usage struct {
 	// KotaRebootGerekli: disk kotası enforcement AKTİF DEĞİL (fs noquota / uqnoenforce) →
 	// tek seferlik reboot bekliyor. UI'da sarı uyarı banner'ı bunu okur.
 	KotaRebootGerekli bool `json:"kota_reboot_gerekli"`
+
+	// IzolasyonKaybi: 🔴 GUVENLIK — su anda CageFS (per-tenant FPM) izolasyonu OLMAYAN
+	// tenant'lar. Dolu ise UI'da KIRMIZI banner cikar. Bos slice = her sey yolunda.
+	IzolasyonKaybi []string `json:"izolasyon_kaybi"`
 }
 
 type cpuStat struct{ total, idle uint64 }
@@ -567,15 +572,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	var swap SwapUsage
 	var info SystemInfo
 	var kotaReboot bool
+	var izolasyonKaybi []string
 
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	go func() { defer wg.Done(); diskler = ReadDiskler() }()
 	go func() { defer wg.Done(); ag = ReadAg() }()
 	go func() { defer wg.Done(); servisler = ReadServisler() }()
 	go func() { defer wg.Done(); swap = ReadSwap() }()
 	go func() { defer wg.Done(); info = ReadInfo() }()
 	go func() { defer wg.Done(); kotaReboot = kaynaklimit.KotaRebootGerekli() }()
+	go func() { defer wg.Done(); izolasyonKaybi = provisioner.IzolasyonKaybiListesi() }()
 	wg.Wait()
 
 	httpx.WriteJSON(w, http.StatusOK, Usage{
@@ -583,5 +590,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		Disk: disk, Diskler: diskler, Ag: ag,
 		Servisler: servisler, UptimeSn: ReadUptime(),
 		KotaRebootGerekli: kotaReboot,
+		IzolasyonKaybi:    izolasyonKaybi,
 	})
 }
