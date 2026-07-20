@@ -37,11 +37,21 @@ const (
 	tenantLogDir  = "/var/log/php-fpm"
 )
 
-func tenantUnitName(sk string) string { return "php-fpm-" + sk + ".service" }
-func tenantUnitPath(sk string) string { return filepath.Join(tenantUnitDir, tenantUnitName(sk)) }
-func tenantRunDir(sk string) string   { return "/run/php-fpm-" + sk }
-func tenantSocket(sk string) string   { return filepath.Join(tenantRunDir(sk), sk+".sock") }
-func tenantCfgDir(sk string) string   { return filepath.Join(tenantCfgRoot, sk) }
+func tenantUnitName(sk string) string     { return "php-fpm-" + sk + ".service" }
+func tenantUnitPath(sk string) string     { return filepath.Join(tenantUnitDir, tenantUnitName(sk)) }
+func tenantRunDir(sk string) string       { return "/run/php-fpm-" + sk }
+func tenantSocket(sk string) string       { return filepath.Join(tenantRunDir(sk), sk+".sock") }
+func tenantCfgDir(sk string) string       { return filepath.Join(tenantCfgRoot, sk) }
+func tenantPerSkLogDir(sk string) string  { return "/var/log/php-fpm-" + sk }
+func tenantPerSkLogFile(sk string) string { return filepath.Join(tenantPerSkLogDir(sk), "tenant.log") }
+
+// postfixInstalled: MTA (sendmail wrapper) kurulu mu? PHP mail() fonksiyonunun namespace
+// içinden çalışabilmesi için gerekli. Kurulu değilse cage için bind eklenmez (skip).
+// 181-dev'de kurulu DEĞİL; prod 177'de kurulu olabilir — kosullu ekleniyor.
+func postfixInstalled() bool {
+	_, err := os.Stat("/usr/sbin/sendmail")
+	return err == nil
+}
 
 var (
 	fcontextMu   sync.Mutex
@@ -361,19 +371,59 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 
 // renderTenantGlobalCfg: per-tenant php-fpm master global config'i (yalnız bu tenant'ın
 // pool'unu include eder).
+//
+// error_log yolu /var/log/php-fpm-<sk>/tenant.log — bu dizin sistemd LogsDirectory ile
+// yaratılır ve mount-namespace izolasyonunda tenant için AÇIK olan TEK log dizinidir.
+// Eski /var/log/php-fpm/tenant-<sk>.log yolu, artık namespace altında BOS tmpfs olduğu
+// için yazılamaz (sibling log ad-sizintisini kapatan drop-in).
 func renderTenantGlobalCfg(sk string) string {
 	return fmt.Sprintf(`[global]
 pid = %s/php-fpm.pid
-error_log = %s/tenant-%s.log
+error_log = %s
 log_level = warning
 daemonize = no
 include=%s/pool.conf
-`, tenantRunDir(sk), tenantLogDir, sk, tenantCfgDir(sk))
+`, tenantRunDir(sk), tenantPerSkLogFile(sk), tenantCfgDir(sk))
 }
 
 // renderTenantUnit: per-tenant php-fpm systemd unit'i (slice + sandbox).
+//
+// CageFS-eşdeğeri mount-namespace sertleştirmesi (canli-dogrulandi 181-dev prototip):
+//
+//   - ProtectHome=tmpfs + BindPaths=/home/<sk>  → /home altında SADECE bu tenant görünür,
+//     komşu tenant home'ları GORUNMEZ (open_basedir bypass'larına ek katman).
+//   - TemporaryFileSystem=/etc/php-fpm-tenant:ro,mode=755 /var/log/php-fpm:ro,mode=755
+//     + BindReadOnlyPaths=/etc/php-fpm-tenant/<sk>
+//     → komşu tenant cfg/log dosya ADLARI dahi görünmez (bilgi ifsası kapatıldı).
+//   - LogsDirectory=php-fpm-<sk>  → /var/log/php-fpm-<sk>/ RW (izole namespace altında
+//     tek yazılabilir log dizini; sibling namespace'ler görmez).
+//   - CapabilityBoundingSet=9-cap  → CAP_SYS_ADMIN/CAP_SYS_MODULE/CAP_NET_ADMIN vs.
+//     tümü DUSTU (worker root→tenant-user setuid için CAP_SETUID/CAP_SETGID gerekli).
+//   - PrivateDevices + PrivateIPC + RemoveIPC + ProcSubset=pid + ProtectKernelModules/
+//     Logs/Clock/Hostname + LockPersonality + RestrictRealtime + KeyringMode=private
+//     → kernel-yüzey ve IPC daraltma.
+//   - RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK  → AF_PACKET raw
+//     paket sniff, netlink dışı özel yuvalar reddedilir.
+//
+// ASLA EKLENMEZ (canli-cikan zararlar 181-dev'de dogrulandi):
+//   - SystemCallFilter=* → php-fpm master @system-service dışı syscall çağrısı yapıyor,
+//     SIGSYS ile crash (status=31/SYS). TAMAMEN yasak.
+//   - PrivateNetwork=yes → outbound HTTP/DB/mail koparir.
+//   - PrivateUsers=yes → master root→tenant user setuid map'i çöker, worker c_<sk>'e
+//     inemiyor.
+//   - MemoryDenyWriteExecute=yes → PHP 8 opcache.jit ile W^X ihlali; jit=off olsa
+//     bile gelecek açıklık.
+//   - UMask=0077 → nginx tenant grubunda değil; WP media 403 riski.
+//   - BindReadOnlyPaths=/var/lib/mysql/mysql.sock → MariaDB restart'ta socket
+//     unlink+recreate; EBUSY riski. ProtectSystem=strict altında RO fs üzerinden
+//     unix CONNECT zaten çalışıyor (canli-dogrulandi: "Access denied" = socket
+//     ulasildi).
+//
+// Kosullu (MTA gate): postfix/sendmail kuruluysa /usr/sbin/sendmail + postfix spool
+// bind eklenir; 181-dev'de kurulu değil (skip); prod 177 gerekli olursa otomatik açılır.
 func renderTenantUnit(sk, fpmBin string) string {
-	return fmt.Sprintf(`[Unit]
+	var b strings.Builder
+	fmt.Fprintf(&b, `[Unit]
 Description=GirginOSPanel per-tenant PHP-FPM — %s
 After=network.target
 Before=nginx.service
@@ -384,28 +434,73 @@ NotifyAccess=all
 Slice=girginos-%s.slice
 ExecStart=%s --nodaemonize --fpm-config %s/php-fpm.conf
 ExecReload=/bin/kill -USR2 $MAINPID
+
+# ---- runtime + logs dir (systemd yaratir + temizler) ----
 RuntimeDirectory=php-fpm-%s
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
-# ---- CageFS eşdeğeri dosya sistemi izolasyonu ----
+LogsDirectory=php-fpm-%s
+LogsDirectoryMode=0750
+
+# ---- CageFS: mount-namespace tabani ----
 ProtectHome=tmpfs
 BindPaths=/home/%s
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=%s
 ProtectProc=invisible
+ProcSubset=pid
+
+# ---- cfg + log dizin sizintisini kapama (canli-dogrulandi 181) ----
+TemporaryFileSystem=/etc/php-fpm-tenant:ro,mode=755 /var/log/php-fpm:ro,mode=755
+BindReadOnlyPaths=/etc/php-fpm-tenant/%s
+
+# ---- cihaz + IPC izolasyonu ----
+PrivateDevices=yes
+PrivateIPC=yes
+RemoveIPC=yes
+
+# ---- kernel-yuzey daraltma ----
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+
+# ---- cap dusur: 9-cap (canli-dogrulandi CapBnd=00000000010005eb) ----
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_RESOURCE CAP_NET_BIND_SERVICE
+AmbientCapabilities=
+
+# ---- ayricalik ----
 NoNewPrivileges=yes
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes
-ProtectKernelTunables=yes
-ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+KeyringMode=private
+UMask=0022
+`, sk, sk, fpmBin, tenantCfgDir(sk), sk, sk, sk, sk)
+
+	// Kosullu MTA gate: sendmail/postfix kuruluysa PHP mail() cage icinden calisir.
+	if postfixInstalled() {
+		b.WriteString(`
+# ---- MTA (postfix/sendmail kurulu — mail() cage icinden calisir) ----
+BindReadOnlyPaths=/usr/sbin/sendmail
+BindPaths=/var/spool/postfix/public /var/spool/postfix/maildrop
+`)
+	}
+
+	b.WriteString(`
+# ---- lifecycle ----
 LimitCORE=0
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-`, sk, sk, fpmBin, tenantCfgDir(sk), sk, sk, tenantLogDir)
+`)
+	return b.String()
 }
 
 // waitForSocket: socket dosyası oluşana kadar (timeout) bekler.
@@ -446,6 +541,28 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	cfgDir := tenantCfgDir(sk)
 	_ = os.MkdirAll(cfgDir, 0755)
 	_ = os.MkdirAll(tenantLogDir, 0755)
+	// Per-sk log dizini (LogsDirectory ile hizali; systemd de yaratir ama sertlestirilmis
+	// unit'ten ONCE global cfg'nin error_log path'i icin bu path'in var olmasi gerek).
+	_ = os.MkdirAll(tenantPerSkLogDir(sk), 0750)
+
+	// 0) Eski log dosyasini yeni yola tasi (bir defalik migration; namespace altinda
+	// eski path artik BOS tmpfs — yazilamaz. Idempotent: yeni dosya varsa atla.)
+	{
+		eski := filepath.Join(tenantLogDir, "tenant-"+sk+".log")
+		yeni := tenantPerSkLogFile(sk)
+		if _, err := os.Stat(yeni); os.IsNotExist(err) {
+			if _, err := os.Stat(eski); err == nil {
+				if err := os.Rename(eski, yeni); err != nil {
+					// Rename fail-safe: kopyayla dene (cross-fs vs.); yeni dosya yoksa
+					// systemd/php-fpm zaten yaratacak — eski path'i silmiyoruz ki
+					// rollback sirasinda geri okunabilsin.
+					if data, rerr := os.ReadFile(eski); rerr == nil {
+						_ = os.WriteFile(yeni, data, 0640)
+					}
+				}
+			}
+		}
+	}
 
 	// 1) pool.conf (yedekle → rollback için)
 	poolPath := filepath.Join(cfgDir, "pool.conf")
