@@ -59,24 +59,53 @@ type Surum struct {
 // update dnf çalıştırırken) SANİYELERCE asılabilir. Eskiden paketMevcut() bunu İSTEK
 // PATH'inde (senkron, 20s timeout) yapıyordu → TumSurumler() çağıran her endpoint (özellikle
 // Domains sayfasının /php/versions'ı) takılıyordu. Artık dnf SADECE arka-plan sweeper'da
-// çağrılır; istek path'i yalnızca cache OKUR, ASLA bloklamaz.
+// (display için) ya da install-gate'te (canlı otoriter) çağrılır; DISPLAY istek path'i yalnızca
+// cache OKUR, ASLA bloklamaz.
+//
+// 🔴 YANLIŞ-NEGATİF FIX: dnf probe'u ARTIK ÜÇ DURUMLU (available, checked). "dnf kesin YOK dedi"
+// (checked=true, available=false) ile "dnf'e SORAMADIM" (checked=false: timeout/kilit/hata) AYRI.
+// Önceden ikisi de tek false'a düşüyordu → geçici bir dnf kilidi TÜM cache'i false'a çeviriyor,
+// kullanıcı kurulabilir bir sürümü kurmak isteyince YANLIŞ "EOL/yok" 409'u alıyordu.
 var (
-	availMu     sync.Mutex
-	availCache  = map[string]bool{} // pkg -> kurulabilir mi (arka-plan sweep doldurur)
-	availAt     time.Time           // son başarılı sweep zamanı
+	availMu    sync.Mutex
+	availCache = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız checked=true değerler yazılır)
+	availAt    time.Time           // son BAŞARILI (en az bir paket checked) sweep zamanı
 	sweeperOnce sync.Once
-	dnfProbe    = dnfPaketVar // test için enjekte edilebilir (varsayılan gerçek dnf)
+
+	// dnfProbe: arka-plan sweep sondası (display cache'i doldurur). Test için enjekte edilebilir.
+	// Dönüş: (available, checked). checked=false → dnf'e sorulamadı, önceki değeri KORU.
+	dnfProbe = func(pkg string) (available bool, checked bool) {
+		return dnfProbeCekirdek(pkg, dnfTimeout)
+	}
+	// dnfCanliProbe: install-gate'in CANLI OTORİTER sondası (uzun timeout). Test için enjekte edilebilir.
+	dnfCanliProbe = func(pkg string) (available bool, checked bool) {
+		return dnfProbeCekirdek(pkg, dnfAuthTimeout)
+	}
 )
 
 const (
-	availTTL   = 10 * time.Minute // arka-plan sweep periyodu
-	dnfTimeout = 3 * time.Second  // her dnf sorgusu için üst sınır (yalnızca sweeper)
+	availTTL       = 10 * time.Minute // arka-plan sweep periyodu
+	dnfTimeout     = 25 * time.Second // sweep sondası per-paket üst sınırı (3s→25s: dnf yavaş/metadata ilk yüklerken 3s çok kısaydı → sürekli yanlış-negatif)
+	dnfAuthTimeout = 30 * time.Second // install-gate canlı otoriter sondası üst sınırı
 )
 
 // StartAvailabilitySweeper: arka-plan dnf sweep döngüsünü (bir kez) başlatır. Sunucu
 // açılışında main'den çağrılır; idempotent. İlk sweep ile periyodik yenilemeyi goroutine'de yapar.
+// 🔴 Ayrıca açılışta ASENKRON `dnf makecache` çalıştırır (sweep'i aç bırakmasın) → ilk sweep
+// bayat/eksik metadata yüzünden timeout'a düşüp yanlış-negatif üretmesin.
 func StartAvailabilitySweeper() {
-	sweeperOnce.Do(func() { go sweepLoop() })
+	sweeperOnce.Do(func() {
+		go warmMetadata()
+		go sweepLoop()
+	})
+}
+
+// warmMetadata: açılışta bir kez `dnf makecache` — metadata'yı önden ısıt. Fire-and-forget;
+// sweep'ten BAĞIMSIZ goroutine olduğundan sweep'i açlığa düşürmez.
+func warmMetadata() {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "dnf", "-q", "makecache").Run()
 }
 
 // sweepLoop: açılışta bir kez + her availTTL'de bir tüm Remi paketlerinin kurulabilirliğini
@@ -90,44 +119,86 @@ func sweepLoop() {
 	}
 }
 
-// sweepOnce: tek bir dnf tarama turu. Sonucu availCache'e atomik yazar (kısmi güncelleme yok).
+// sweepOnce: tek bir dnf tarama turu.
+// 🔴 ATOMİK-WIPE YOK: yalnızca dnf'in KESİN yanıt verdiği (checked=true) paketleri günceller;
+// "sorulamadı" (checked=false: timeout/kilit) paketlerde ÖNCEKİ cache değerini KORUR. Böylece
+// geçici bir başarısız tur, önceki doğru true'ları false'a ÇEVİRMEZ (son-bilinen-iyi korunur).
 func sweepOnce() {
-	yeni := map[string]bool{}
+	// Mevcut cache'in kopyasıyla başla — checked=false olanlar bu değerlerinde kalır.
+	availMu.Lock()
+	yeni := make(map[string]bool, len(availCache))
+	for k, v := range availCache {
+		yeni[k] = v
+	}
+	availMu.Unlock()
+
+	seen := map[string]bool{}
+	anyChecked := false
 	for _, m := range DesteklenenSurumler {
 		if m.Kaynak != "remi" {
 			continue // appstream daima mevcut; dnf'e sormaya gerek yok
 		}
 		pkg := "php" + m.Kod + "-php-fpm"
-		if _, done := yeni[pkg]; done {
+		if seen[pkg] {
 			continue
 		}
-		yeni[pkg] = dnfProbe(pkg)
+		seen[pkg] = true
+		available, checked := dnfProbe(pkg)
+		if checked {
+			yeni[pkg] = available // kesin sonuç → yaz
+			anyChecked = true
+		}
+		// checked=false → yeni[pkg] önceki değerinde KALIR (varsa); yoksa yine bilinmiyor.
 	}
+
 	availMu.Lock()
 	availCache = yeni
-	availAt = time.Now()
+	if anyChecked {
+		availAt = time.Now()
+	}
 	availMu.Unlock()
 }
 
-// dnfPaketVar: TEK paket için dnf sorgusu (yalnızca arka-plan sweeper'dan çağrılır).
-// installed VEYA available → bulunursa dnf exit 0. Her sorgu dnfTimeout ile sınırlı; dnf
-// kilitli/yavaşsa 3sn'de vazgeçer (istek path'ini etkilemez, sadece sweep'i sınırlar).
-func dnfPaketVar(pkg string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), dnfTimeout)
+// dnfProbeCekirdek: TEK paket için ÜÇ DURUMLU dnf sondası. Dönüş (available, checked):
+//   - (true,  true)  → dnf çalıştı ve paketi listeledi (kurulu VEYA depoda mevcut) = KESİN VAR.
+//   - (false, true)  → dnf çalıştı ve "No match" dedi = KESİN YOK (EOL/kaldırılmış).
+//   - (false, false) → dnf'e SORULAMADI (timeout/kilit/metadata hatası) = BİLİNMİYOR.
+//
+// "Kesin yok" ile "sorulamadı"yı AYIRT ETMEK bu paketin ÖZÜ: timeout != unavailable.
+func dnfProbeCekirdek(pkg string, timeout time.Duration) (available bool, checked bool) {
+	// 1) Kurulu mu? (hızlı yol) — başarılıysa kesin mevcut.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if exec.CommandContext(ctx, "dnf", "-q", "list", "--installed", pkg).Run() == nil {
-		return true
+		return true, true
 	}
-	ctx2, cancel2 := context.WithTimeout(context.Background(), dnfTimeout)
+
+	// 2) Depoda mevcut mu? Çıktı + ctx ile "kesin yok" ile "sorulamadı"yı ayır.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout)
 	defer cancel2()
-	return exec.CommandContext(ctx2, "dnf", "-q", "list", "--available", pkg).Run() == nil
+	out, err := exec.CommandContext(ctx2, "dnf", "-q", "list", "--available", pkg).CombinedOutput()
+	if err == nil {
+		return true, true // dnf çalıştı ve paketi listeledi → kesin mevcut
+	}
+	// dnf sıfır-olmayan döndü / hata. Timeout/kilit mi yoksa gerçek "No match" mı?
+	if ctx2.Err() == context.DeadlineExceeded {
+		return false, false // zaman aşımı → sorulamadı
+	}
+	low := strings.ToLower(string(out))
+	if strings.Contains(low, "no match") || strings.Contains(low, "no matching") {
+		return false, true // dnf net konuştu: paket yok (EOL/kaldırılmış)
+	}
+	// Kilit ("waiting for process", "another app is currently holding"), metadata/ağ hatası vb.
+	// → emin değiliz. Yanlış-negatif basmamak için "sorulamadı" say.
+	return false, false
 }
 
-// paketMevcut: phpXX-php-fpm paketi bu OS'ta (Remi) kurulabilir/kurulu mu?
+// paketMevcut: phpXX-php-fpm paketi bu OS'ta (Remi) kurulabilir/kurulu mu? — DISPLAY hint'i.
 // 🔴 İSTEK PATH'i — ASLA dnf çağırmaz, yalnızca cache okur. AppStream daima var.
 // Cache boşsa (ilk boot, sweep henüz bitmemiş): makul varsayılan (false = "henüz bilinmiyor")
 // döner ve sweeper'ı garanti eder; istek ASLA saniyelerce beklemez. Sweep bitince gerçek
 // değer cache'e yazılır, sonraki istekler doğru sonucu anında alır.
+// ⚠️ Bu YALNIZ görüntüleme (Surum.Kurulabilir) içindir; KUR gate'i buna GÜVENMEZ — canlı dnf'e sorar.
 func paketMevcut(m SurumMeta) bool {
 	if m.Kaynak == "appstream" {
 		return true // sistem default her zaman mevcut
@@ -142,6 +213,19 @@ func paketMevcut(m SurumMeta) bool {
 	}
 	// Cache henüz dolmadı → istek bloklanmaz; varsayılan false. Sweep tamamlanınca düzelir.
 	return false
+}
+
+// kurulabilirlikDenetle: KUR gate'i için CANLI OTORİTER kurulabilirlik kontrolü (uzun timeout).
+// Cache DEĞİL — dnf'e o an sorar. Dönüş (available, checked):
+//   - checked=true,  available=false → dnf KESİN "No match" dedi → güvenle "EOL/yok" mesajı verilebilir.
+//   - checked=false                  → dnf'e sorulamadı (kilit/meşgul) → ASLA "EOL/yok" deme (yanlış-negatif!).
+// AppStream daima mevcut.
+func kurulabilirlikDenetle(m SurumMeta) (available bool, checked bool) {
+	if m.Kaynak == "appstream" {
+		return true, true
+	}
+	pkg := "php" + m.Kod + "-php-fpm"
+	return dnfCanliProbe(pkg)
 }
 
 // Yollar(meta): yuklenmis olsa olsa nerede olur
@@ -189,7 +273,8 @@ func Discover(m SurumMeta) Surum {
 	} else {
 		s.Aciklama = "Remi modular — geliştirme/test/legacy"
 	}
-	// Kurulabilirlik: yüklüyse zaten kurulabilir; değilse dnf'e sor (cache'li).
+	// Kurulabilirlik (DISPLAY): yüklüyse zaten kurulabilir; değilse cache'e bak (non-blocking).
+	// Not: cache "false" dese bile KUR gate'i canlı dnf ile doğrular (yanlış-negatif önleme).
 	s.Kurulabilir = s.Yuklu || paketMevcut(m)
 	return s
 }
@@ -312,11 +397,19 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Zarif ön-kontrol: sürüm bu OS'ta (Remi) gerçekten sağlanıyor mu? EOL/kalkmış sürümlerde
-	// ham "dnf No match for argument" dökümü yerine anlaşılır mesaj döneriz.
-	if !paketMevcut(m) {
+	// 🔴 Zarif ön-kontrol — CANLI OTORİTER dnf (cache DEĞİL). Amaç: yanlış-negatifi ÖNLEMEK.
+	// "EOL/yok" mesajını YALNIZCA dnf KESİN "No match" derse (checked && !available) veririz.
+	// dnf'e sorulamadıysa (kilit/meşgul) ASLA "yok" demeyiz — ayrı bir "doğrulanamadı" mesajı
+	// döneriz; kullanıcıyı yanıltmayız. Böylece geçici dnf kilidi artık yanlış 409 üretmez.
+	available, checked := kurulabilirlikDenetle(m)
+	if checked && !available {
 		httpx.WriteError(w, http.StatusConflict,
 			fmt.Sprintf("PHP %s bu işletim sisteminde sağlanmıyor (Remi deposunda yok — büyük olasılıkla EOL). Kurulabilir bir sürüm seçin.", req.Surum))
+		return
+	}
+	if !checked {
+		httpx.WriteError(w, http.StatusConflict,
+			fmt.Sprintf("PHP %s kurulabilirliği şu an doğrulanamadı (dnf meşgul/kilitli olabilir — ör. başka bir kurulum sürüyor). Lütfen birkaç dakika sonra tekrar deneyin.", req.Surum))
 		return
 	}
 
