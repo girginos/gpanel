@@ -17,6 +17,7 @@
 package provisioner
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"log"
@@ -524,7 +525,37 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 `)
-	return b.String()
+	// 🔴 SURUM DAMGASI (META KRITIK — PROD KAPSAMA DELIGI): unit dosyasi kodda
+	// SADECE EnableTenantFPM icinde yaziliyordu. Zaten per-tenant FPM'e gecmis bir
+	// tenant'ta unit ASLA yeniden render edilmiyordu (HealTenantFPM "zaten-aktif"
+	// dali yalniz limitleri re-assert eder; EnsureTenantFPMOnStartup yalniz pool.conf
+	// drift'ine bakar). Sonuc: sablona giren HER guvenlik sertlestirmesi (or. /dev/shm
+	// cross-tenant sizinti fix'i) MEVCUT musterilere HIC inmiyordu.
+	// Damga = sablon surumu + govdenin sha256 on-eki. RepairTenantUnitDrift bunu
+	// diskteki ile karsilastirip fark varsa yeniden render + kontrollu restart yapar.
+	body := b.String()
+	return tenantUnitStampLine(body) + body
+}
+
+// tenantUnitTemplateVersion: unit sablonunun elle yonetilen ana surumu. Sablonda
+// anlamli bir davranis degisikligi yapildiginda artir (damga zaten sha ile otomatik
+// degisir; surum insan-okunur teshis icin).
+const tenantUnitTemplateVersion = "v3"
+
+// tenantUnitStampLine: unit govdesinin basina konan surum damgasi satiri.
+func tenantUnitStampLine(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return fmt.Sprintf("# gpanel-unit-template: %s %x\n", tenantUnitTemplateVersion, sum[:6])
+}
+
+// unitStampOf: bir unit metninden damga satirini cikarir (teshis loglari icin).
+func unitStampOf(unit string) string {
+	line, _, _ := strings.Cut(unit, "\n")
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "# gpanel-unit-template:") {
+		return strings.TrimSpace(strings.TrimPrefix(line, "# gpanel-unit-template:"))
+	}
+	return "damgasiz(eski)"
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +595,8 @@ const (
 	fpmWatchdogWindow       = 10 * time.Minute       // kayan pencere
 	fpmWatchdogNRDelta      = 3                      // pencere icinde restart esigi
 	fpmWatchdogUnitNotFound = "not-found"
+	fpmDeadConfirmTries     = 3                       // clean-exit dogrulama ornek sayisi
+	fpmDeadConfirmWait      = 1500 * time.Millisecond // ornekler arasi bekleme
 )
 
 // fpmCrashLoopSubStates: systemd'nin crash→restart dongusunde gectigi ara durumlar.
@@ -659,8 +692,49 @@ func monitorPostStart(unit string, window time.Duration) (string, bool) {
 		if p["ActiveState"] == "failed" {
 			return "active_failed " + det, true
 		}
+		// 🔴 CLEAN-EXIT KOR NOKTASI (META KRITIK #3): master TEMIZ olurse
+		// (systemctl stop / operator pkill / SIGTERM/SIGQUIT) Restart=on-failure
+		// DEVREYE GIRMEZ -> Result=success, NRestarts SABIT, ActiveState=inactive,
+		// SubState=dead. Ustteki uc tetikleyicinin (nrestarts_delta / substate /
+		// active_failed) HICBIRI eslesmez -> tenant KALICI 502 kalir ve hicbir
+		// mekanizma yakalamaz. Unit dosyasi DISKTE VAR + servis OLU = OLUM.
+		if unitDeadConfirmed(unit) {
+			return "clean_exit " + det, true
+		}
 	}
 	return "", false
+}
+
+// unitDeadConfirmed: "unit dosyasi var ama servis olu" durumunu YARIS-GUVENLI dogrular.
+// Kontrollu restart penceresi (~1s) ve teardown/rollback yarisi yanlis pozitif
+// uretmesin diye arka arkaya fpmDeadConfirmTries kez ayni sonucu ister; herhangi bir
+// ornekte unit dosyasi kaybolmus ya da servis canlanmissa OLU DEGIL doner.
+func unitDeadConfirmed(unit string) bool {
+	path := filepath.Join(tenantUnitDir, unit)
+	for i := 0; i < fpmDeadConfirmTries; i++ {
+		if i > 0 {
+			time.Sleep(fpmDeadConfirmWait)
+		}
+		// Unit dosyasi yoksa tenant zaten paylasilan duzende (rollback/teardown) → olum degil.
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		p := unitProps(unit, "ActiveState", "SubState", "LoadState")
+		if p == nil || p["LoadState"] == fpmWatchdogUnitNotFound {
+			return false
+		}
+		if !fpmDeadActiveStates[p["ActiveState"]] {
+			return false
+		}
+	}
+	return true
+}
+
+// fpmDeadActiveStates: unit dosyasi varken "olu" sayilan ActiveState degerleri.
+// activating/deactivating/reloading GECICI → olum sayilmaz (yanlis pozitif olurdu).
+var fpmDeadActiveStates = map[string]bool{
+	"inactive": true,
+	"failed":   true,
 }
 
 // guardPostStart: enable/start/reload sonrasi crash-loop dedektoru + otomatik
@@ -762,8 +836,20 @@ func fpmWatchdogScan(hist map[string][]fpmSample) {
 		if _, busy := fpmInflight.Load(d.sk); busy {
 			continue // K1 senkron monitor calisiyor → karisma
 		}
-		p := unitProps(tenantUnitName(d.sk), "NRestarts", "LoadState")
+		p := unitProps(tenantUnitName(d.sk), "NRestarts", "LoadState", "ActiveState", "SubState")
 		if p == nil || p["LoadState"] == fpmWatchdogUnitNotFound {
+			continue
+		}
+		// 🔴 K2 CANLILIK YUKLEMI ARTIK GERCEK is-active (META KRITIK #3):
+		// TenantFPMActive yalnizca os.Stat(unit) bakar → "unit dosyasi var" =
+		// "tenant saglikli" SANILIYORDU. Master TEMIZ olurse (systemctl stop /
+		// pkill SIGTERM) Restart=on-failure tetiklenmez, NRestarts ARTMAZ →
+		// kayan-pencere kurali ASLA eslesmez → tenant KALICI 502 kalir.
+		// Unit dosyasi VAR + ActiveState inactive/failed = OLU → paylasilana indir.
+		if fpmDeadActiveStates[p["ActiveState"]] && unitDeadConfirmed(tenantUnitName(d.sk)) {
+			fpmForceRollback(d.id, d.sk, d.php, fmt.Sprintf("temiz-cikis/olu servis (ActiveState=%s SubState=%s)",
+				p["ActiveState"], p["SubState"]))
+			delete(hist, d.sk)
 			continue
 		}
 		nr := unitUint(p, "NRestarts")
@@ -784,19 +870,8 @@ func fpmWatchdogScan(hist map[string][]fpmSample) {
 		s = s[kes:]
 		hist[d.sk] = s
 		if len(s) >= 2 && nr-s[0].nr >= fpmWatchdogNRDelta {
-			log.Printf("🔴 fpmWatchdog: %s son %s icinde %d restart (NRestarts %d→%d) → paylasilan FPM'e geri aliniyor",
-				d.sk, fpmWatchdogWindow, nr-s[0].nr, s[0].nr, nr)
-			mu := fpmSkLock(d.sk)
-			mu.Lock()
-			if _, statErr := os.Stat(tenantUnitPath(d.sk)); statErr == nil {
-				if rerr := RollbackToSharedFPM(pkgDB, d.id, d.sk, d.php); rerr != nil {
-					log.Printf("fpmWatchdog rollback BASARISIZ %s: %v", d.sk, rerr)
-				} else {
-					_, _ = exec.Command("systemctl", "reset-failed", tenantUnitName(d.sk)).CombinedOutput()
-					log.Printf("✅ fpmWatchdog: %s paylasilan FPM'e geri alindi", d.sk)
-				}
-			}
-			mu.Unlock()
+			fpmForceRollback(d.id, d.sk, d.php, fmt.Sprintf("son %s icinde %d restart (NRestarts %d→%d)",
+				fpmWatchdogWindow, nr-s[0].nr, s[0].nr, nr))
 			delete(hist, d.sk)
 		}
 	}
@@ -806,6 +881,25 @@ func fpmWatchdogScan(hist map[string][]fpmSample) {
 			delete(hist, sk)
 		}
 	}
+}
+
+// fpmForceRollback: watchdog (K2) tespitinden sonra tenant'i paylasilan FPM'e indirir.
+// Kilidi beklerken baskasi (K1 / paralel Enable) zaten rollback etmis olabilir →
+// unit dosyasi yoksa sessizce cikar.
+func fpmForceRollback(id int64, sk, php, sebep string) {
+	log.Printf("🔴 fpmWatchdog: %s %s → paylasilan FPM'e geri aliniyor", sk, sebep)
+	mu := fpmSkLock(sk)
+	mu.Lock()
+	defer mu.Unlock()
+	if _, statErr := os.Stat(tenantUnitPath(sk)); statErr != nil {
+		return
+	}
+	if rerr := RollbackToSharedFPM(pkgDB, id, sk, php); rerr != nil {
+		log.Printf("fpmWatchdog rollback BASARISIZ %s: %v", sk, rerr)
+		return
+	}
+	_, _ = exec.Command("systemctl", "reset-failed", tenantUnitName(sk)).CombinedOutput()
+	log.Printf("✅ fpmWatchdog: %s paylasilan FPM'e geri alindi", sk)
 }
 
 // waitForSocket: socket dosyası oluşana kadar (timeout) bekler.
@@ -932,23 +1026,31 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	// restorecon socket oluştuktan sonra bir kez daha (socket'in kendi bağlamı için)
 	_, _ = exec.Command("restorecon", socket).CombinedOutput()
 
-	// 🔴 POST-START CRASH-LOOP GUARD (META KRITIK #2): ready-notify + socket GECER
-	// ama master BUNDAN SONRA olurse (SIGSYS vb.) Restart=on-failure sonsuz dongu
-	// kurar ve buraya kadar hicbir kontrol yakalamaz. 15s senkron izleme; tetiklenirse
-	// RollbackToSharedFPM ZATEN icerde calisti → cagirana hata donuyoruz.
-	// Vhost re-render'dan ONCE: ilk kurulumda vhost hala paylasilan socket'i gosterir,
-	// yani izleme suresince tenant zaten ayakta.
-	if gerr := guardPostStart(db, domainID, sk, surum, fpmPostStartWindow); gerr != nil {
-		return "", gerr
-	}
-
 	// 7) nginx vhost'u per-tenant socket'e re-render (unit zaten var → ApplyVhostForDomain
 	//    guard'ı socket'i tenantSocket olarak çözecek; yine de açıkça geçiyoruz).
+	//
+	// 🔴 CUTOVER ONCE, IZLEME SONRA (META KRITIK #2 duzeltmesi): guardPostStart eskiden
+	// BU ADIMDAN ONCE calisiyordu. Yorumdaki "ilk kurulumda vhost hala paylasilan
+	// socket'i gosterir, tenant ayakta" varsayimi YANLISTI: adim 5 paylasilan pool'u
+	// ZATEN .bak'a tasiyip shared master'i reload etmisti → paylasilan socket ARTIK YOK.
+	// Yani 15s'lik senkron izleme boyunca vhost OLU bir socket'e isaret ediyordu ve site
+	// ~17s boyunca 502 veriyordu (181-dev'de duyarli PHP probu ile olculdu: 17.26s).
+	// Cutover'i once yapmak kesintiyi ~2s'ye indirir; KORUMA AYNEN KALIR cunku
+	// guardPostStart crash-loop yakalarsa RollbackToSharedFPM vhost'u paylasilana
+	// geri render eder (RollbackToSharedFPM adim 4).
 	if db != nil && domainID > 0 {
 		if err := ApplyVhostForDomain(db, domainID, socket, surum); err != nil {
 			_ = RollbackToSharedFPM(db, domainID, sk, surum)
 			return "", fmt.Errorf("nginx per-tenant re-render: %w", err)
 		}
+	}
+
+	// 8) 🔴 POST-START CRASH-LOOP GUARD (META KRITIK #2): ready-notify + socket GECER
+	// ama master BUNDAN SONRA olurse (SIGSYS vb.) Restart=on-failure sonsuz dongu
+	// kurar ve buraya kadar hicbir kontrol yakalamaz. 15s senkron izleme; tetiklenirse
+	// RollbackToSharedFPM ZATEN icerde calisti → cagirana hata donuyoruz.
+	if gerr := guardPostStart(db, domainID, sk, surum, fpmPostStartWindow); gerr != nil {
+		return "", gerr
 	}
 	return socket, nil
 }
@@ -1054,6 +1156,11 @@ func EnsureTenantFPMOnStartup() {
 		// (or. yazilamaz www-error.log error_log override'i -> fatal'lari yutuyordu)
 		// guvenle duzeltir. php-fpm -t dogrular; bozuksa geri alir; graceful reload.
 		repairTenantPoolDrift(d.id, d.sk, d.php)
+		// 🔴 KAPSAMA (META KRITIK #1): unit sablonu drift onarimi. Bu cagri OLMADAN
+		// zaten-aktif tenant'in unit dosyasi HIC yeniden render edilmiyordu → sablona
+		// giren guvenlik sertlestirmeleri MEVCUT musterilere inmiyordu. Damga uyusmuyorsa
+		// yeniden render + daemon-reload + kontrollu restart + guardPostStart yapar.
+		RepairTenantUnitDrift(d.id, d.sk, d.php)
 		if out, _ := exec.Command("systemctl", "is-active", tenantUnitName(d.sk)).CombinedOutput(); strings.TrimSpace(string(out)) == "active" {
 			continue
 		}
@@ -1070,6 +1177,98 @@ func EnsureTenantFPMOnStartup() {
 			log.Printf("EnsureTenantFPMOnStartup: %v", gerr)
 		}
 	}
+}
+
+// RepairTenantUnitDrift: mevcut per-tenant systemd unit dosyasi guncel sablondan
+// (renderTenantUnit) sapmissa GUVENLE yeniden yazar + kontrollu restart eder.
+// true doner = unit degisti (restart yapildi veya rollback tetiklendi).
+//
+// 🔴🔴 NEDEN VAR (META KRITIK — PROD KAPSAMA DELIGI):
+// Unit dosyasi kodda TEK yerde yaziliyordu: EnableTenantFPM adim 4. ZATEN per-tenant
+// FPM'e gecmis bir tenant'ta bu fonksiyon bir daha CAGRILMIYORDU:
+//   - HealTenantFPM "zaten-aktif" dali → yalniz LimitleriReAssert + continue,
+//   - EnsureTenantFPMOnStartup → yalniz repairTenantPoolDrift (pool.conf), sonra
+//     is-active gorunce continue.
+//
+// 181-dev kaniti: unit'e "# COVERAGE_CANARY" yazilip panel restart edildi → canary
+// HAYATTA kaldi, md5 DEGISMEDI. Yani /dev/shm cross-tenant sizinti fix'i de dahil
+// sablondaki her sertlestirme mevcut musterilere HIC inmeyecekti.
+//
+// NEDEN reload DEGIL restart: mount-namespace / TemporaryFileSystem / cap-bounding
+// gibi unit-seviyesi ayarlar sadece SUREC BASLARKEN uygulanir; USR2 reload worker
+// tazeler ama master'in namespace'ini DEGISTIRMEZ. Operator yuvarlanan kesintiyi
+// (birkac saniye 503) ACIKCA KABUL ETTI → kontrollu restart serbest.
+//
+// GUVENLIK: restart basarisiz / socket olusmaz ise RollbackToSharedFPM; sonrasinda
+// guardPostStart (crash-loop dedektoru) calisir. Drift yoksa TAM no-op — restart YOK.
+func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
+	if pkgDB == nil || sk == "" || !strings.HasPrefix(sk, "c_") {
+		return false
+	}
+	unitPath := tenantUnitPath(sk)
+	cur, err := os.ReadFile(unitPath)
+	if err != nil {
+		return false // per-tenant FPM kurulu degil → dokunma (EnableTenantFPM ilgilenir)
+	}
+	ay := phpMap[normalizePHP(surum)]
+	if ay.FpmBin == "" {
+		return false
+	}
+	want := renderTenantUnit(sk, ay.FpmBin)
+	if string(cur) == want {
+		return false // drift yok → no-op (restart YOK, kesinti YOK)
+	}
+	log.Printf("repairTenantUnitDrift: %s unit sablonu eski (disk=%s istenen=%s) → yeniden render + kontrollu restart",
+		sk, unitStampOf(string(cur)), unitStampOf(want))
+
+	// K2 watchdog bu tenant'a dokunmasin: kisa restart penceresinde "olu" sanip
+	// gereksiz rollback etmesin (K1 sahibi biziz).
+	fpmInflight.Store(sk, struct{}{})
+	defer fpmInflight.Delete(sk)
+
+	// Kilitli bolum AYRI closure: guardPostStart kendi icinde fpmSkLock alir,
+	// sync.Mutex reentrant DEGIL → kilidi tutarken cagirmak deadlock olurdu.
+	devam := func() bool {
+		mu := fpmSkLock(sk)
+		mu.Lock()
+		defer mu.Unlock()
+		if werr := os.WriteFile(unitPath, []byte(want), 0644); werr != nil {
+			log.Printf("repairTenantUnitDrift: %s unit yazilamadi: %v", sk, werr)
+			return false
+		}
+		if out, derr := exec.Command("systemctl", "daemon-reload").CombinedOutput(); derr != nil {
+			_ = os.WriteFile(unitPath, cur, 0644) // eski unit'i geri koy
+			_, _ = exec.Command("systemctl", "daemon-reload").CombinedOutput()
+			log.Printf("repairTenantUnitDrift: %s daemon-reload basarisiz, geri alindi: %s",
+				sk, strings.TrimSpace(string(out)))
+			return false
+		}
+		if out, rerr := exec.Command("systemctl", "restart", tenantUnitName(sk)).CombinedOutput(); rerr != nil {
+			log.Printf("repairTenantUnitDrift: %s restart basarisiz (%s) → paylasilan FPM'e geri aliniyor",
+				sk, strings.TrimSpace(string(out)))
+			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum)
+			return false
+		}
+		if !waitForSocket(tenantSocket(sk), 6*time.Second) {
+			log.Printf("repairTenantUnitDrift: %s socket olusmadi → paylasilan FPM'e geri aliniyor", sk)
+			_ = RollbackToSharedFPM(pkgDB, domainID, sk, surum)
+			return false
+		}
+		// Yeni namespace/runtime dizini → SELinux etiketlerini tazele (Permissive'de no-op).
+		ensureFPMSELinuxFcontext()
+		_, _ = exec.Command("restorecon", "-R", tenantRunDir(sk)).CombinedOutput()
+		_, _ = exec.Command("restorecon", tenantSocket(sk)).CombinedOutput()
+		log.Printf("repairTenantUnitDrift: %s unit guncellendi + restart edildi (damga=%s)", sk, unitStampOf(want))
+		return true
+	}()
+	if !devam {
+		return true
+	}
+	// restart rc=0 + socket var demek YETMEZ: master bundan SONRA olebilir (crash-loop).
+	if gerr := guardPostStart(pkgDB, domainID, sk, surum, fpmPostStartWindowBoot); gerr != nil {
+		log.Printf("repairTenantUnitDrift: %v", gerr)
+	}
+	return true
 }
 
 // repairTenantPoolDrift: mevcut per-tenant pool.conf guncel sablondan (renderTenantPool)

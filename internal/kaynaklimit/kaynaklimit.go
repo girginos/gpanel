@@ -827,6 +827,14 @@ func HealTenantFPM(ctx context.Context, db *sql.DB) {
 			continue
 		}
 		if provisioner.TenantFPMActive(d.sk) {
+			// 🔴 KAPSAMA (META KRITIK #1): systemd unit sablonu drift onarimi. Bu dal
+			// eskiden unit'e HIC DOKUNMUYORDU → mevcut (zaten migrate) musterilerde
+			// unit sablonuna giren guvenlik sertlestirmeleri (or. /dev/shm cross-tenant
+			// sizinti fix'i) ASLA uygulanmiyordu. Drift yoksa tam no-op; varsa yeniden
+			// render + kontrollu restart (operator yuvarlanan kesintiyi kabul etti).
+			if provisioner.RepairTenantUnitDrift(d.id, d.sk, d.php) {
+				log.Printf("HealTenantFPM: %s unit sablonu guncellendi (kontrollu restart)", d.sk)
+			}
 			// Zaten migrate — servisi provisioner.EnsureTenantFPMOnStartup ayakta tutar.
 			// 🔴 Limitleri SÜREÇ ÖLDÜRMEDEN idempotent RE-ASSERT et: DB Governor coverage,
 			// slice cpu/mem/io, xfs drift'i mevcut tenant'lara da insin (her update'te).
