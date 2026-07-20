@@ -29,7 +29,7 @@ die(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
 [ -d "$A" ] || die "assets/ bulunamadı ($A)"
 grep -qiE "AlmaLinux|Rocky|Red Hat|CentOS" /etc/os-release || warn "AlmaLinux/RHEL10 bekleniyordu — devam ediliyor"
 
-PHP_VERS="74 82 83 84 85"
+PHP_VERS="74 80 81 82 83 84 85 86"
 PHP_EXT="fpm cli mysqlnd mbstring bcmath intl gd soap opcache pdo xml zip pgsql ldap"
 
 # ============ 1) REPO ============
@@ -94,6 +94,10 @@ fi
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
 BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6"
+# 🔴 PHP batch kurulumu ONCESI: dnf oto-kilit kaynaklarini kapat (dnf-automatic/makecache
+#    timer'i devredeyse toplu "dnf install" kilide takilir/yanlis-negatif uretir).
+#    Managed panel guncellemeleri kendi yonetir; oto-update KAPALI (kilit contention + surpriz-patch onlenir).
+systemctl disable --now dnf-automatic.timer dnf-makecache.timer >/dev/null 2>&1 || true
 dnf install -y $BASE_PKGS >/dev/null 2>&1 && ok "base php + php-redis"
 for v in $PHP_VERS; do
   pkgs=""; for e in $PHP_EXT; do pkgs="$pkgs php$v-php-$e"; done
