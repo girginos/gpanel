@@ -1,10 +1,11 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
+import { T } from '@/lib/tablo'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -58,6 +59,19 @@ export default function DomainsPage() {
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [])
+
+  // Mobil alt gezinme cubugundaki "Yeni" eylemi buraya ?yeni=1 ile gelir.
+  // Kipi acip parametreyi TEMIZLIYORUZ: aksi halde geri/yenilemede kip
+  // tekrar tekrar acilir ve kullanici sikisir.
+  const [aramaParam, setAramaParam] = useSearchParams()
+  useEffect(() => {
+    if (aramaParam.get('yeni') !== '1') return
+    olusturAc()
+    const kalan = new URLSearchParams(aramaParam)
+    kalan.delete('yeni')
+    setAramaParam(kalan, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aramaParam])
 
   // Modal için gereken plan + php sürümleri — listeyi bloklamayan ayrı yükleme.
   // Modal ilk açılışında lazy çekilir; bir kez geldiyse tekrar çekmez.
@@ -174,7 +188,7 @@ export default function DomainsPage() {
   }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler' }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">Domainler</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
@@ -228,62 +242,75 @@ export default function DomainsPage() {
           aciklama="İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL veritabanı ve DNS zone otomatik oluşturulur."
           buton={{ etiket: 'Domain Oluştur', onClick: olusturAc }} />
       ) : (
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+          <div className="lg:overflow-x-auto">
+            <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className="px-3 py-2.5 w-10 text-center">
+                <th className={`${T.baslik} w-10 text-center`}>
                   <input type="checkbox"
                     checked={filtreli.length > 0 && secili.size === filtreli.length}
                     ref={ref => { if (ref) ref.indeterminate = secili.size > 0 && secili.size < filtreli.length }}
                     onChange={e => tumunuSec(e.target.checked)}
+                    aria-label="Tümünü seç"
                     className="cursor-pointer" />
                 </th>
-                <th className="text-left px-4 py-2.5">Domain Adı</th>
-                <th className="text-left px-4 py-2.5">Sistem Kullanıcısı</th>
-                <th className="text-left px-4 py-2.5">Plan</th>
-                <th className="text-left px-4 py-2.5">PHP</th>
-                <th className="text-left px-4 py-2.5">Disk</th>
-                <th className="text-left px-4 py-2.5">Durum</th>
-                <th className="text-left px-4 py-2.5">Oluşturulma</th>
-                <th className="text-right px-4 py-2.5">İşlemler</th>
+                <th className={T.baslik}>Domain Adı</th>
+                <th className={T.baslik}>Sistem Kullanıcısı</th>
+                <th className={T.baslik}>Plan</th>
+                <th className={T.baslik}>PHP</th>
+                <th className={T.baslik}>Disk</th>
+                <th className={T.baslik}>Durum</th>
+                <th className={T.baslik}>Oluşturulma</th>
+                <th className={`${T.baslik} text-right`}>İşlemler</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className={T.govde}>
               {filtreli.map(d => {
                 return (
-                  <tr key={d.id} className={`hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 transition ${secili.has(d.id) ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}>
-                    <td className="px-3 py-2.5 text-center">
+                  <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${secili.has(d.id) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20' : ''}`}>
+                    <td className={T.hucreSecim}>
                       <input type="checkbox" checked={secili.has(d.id)}
-                        onChange={() => togga(d.id)} className="cursor-pointer" />
+                        onChange={() => togga(d.id)}
+                        aria-label={`${d.alan_adi} seç`}
+                        className="cursor-pointer" />
                     </td>
-                    <td className="px-4 py-2.5">
-                      <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">
+                    <td className={T.hucreBaslikSecimli}>
+                      <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">
                         {d.alan_adi}
                       </Link>
-                      {d.is_demo && <span className="ml-2 text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">DEMO</span>}
+                      {d.is_demo && <span className="ml-2 text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded align-middle">DEMO</span>}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.sistem_kullanici}</td>
-                    <td className="px-4 py-2.5 text-sm">
+                    <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.sistem_kullanici}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Plan">
                       {d.plan_ad ? <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span> : <span className="text-slate-400 dark:text-slate-500 italic">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.php_surum || '-'}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{fmtKB(d.boyut_kb)}</td>
-                    <td className="px-4 py-2.5">
+                    <td className={T.hucre} data-etiket="PHP">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.php_surum || '-'}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Disk">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(d.boyut_kb)}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Durum">
                       <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
-                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-500'
+                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                       }`}>{d.durum}</span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 whitespace-nowrap">{d.olusturulma || '-'}</td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      <Link to={`/abonelikler/${d.id}/subdomainler`} className="text-xs text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 mr-3">+ Subdomain</Link>
-                      <Link to={`/abonelikler/${d.id}`} className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">Yönet →</Link>
+                    <td className={T.hucre} data-etiket="Oluşturulma">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right`}>
+                      <Link to={`/abonelikler/${d.id}/subdomainler`} className="text-xs text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 lg:mr-3">+ Subdomain</Link>
+                      <Link to={`/abonelikler/${d.id}`} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 ml-auto lg:ml-0">Yönet →</Link>
                     </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

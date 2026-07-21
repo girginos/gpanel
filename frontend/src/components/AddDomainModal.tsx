@@ -99,7 +99,7 @@ export default function AddDomainModal({
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">Örnek: <code className="font-mono">site.com</code>, <code className="font-mono">musteri-1.org</code></p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Plan (Paket)</label>
             <select

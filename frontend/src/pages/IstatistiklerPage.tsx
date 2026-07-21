@@ -49,12 +49,12 @@ export default function IstatistiklerPage() {
   const yuk1 = n(u?.cpu?.yuk_1dk)
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'İstatistikler' },
       ]} />
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">İstatistikler</h1>
         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">● Canlı (10sn)</span>
       </div>

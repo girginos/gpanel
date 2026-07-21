@@ -106,7 +106,7 @@ export default function ServislerPage() {
                         <span className={`w-28 text-center text-xs px-2.5 py-1 rounded-full font-medium ${DURUM_STIL[s.durum] || DURUM_STIL.inactive}`}>
                           {DURUM_ETIKET[s.durum] || s.durum}
                         </span>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {/* Reload slotu her satırda yer kaplar → Restart hizalı kalır */}
                           <button disabled={!s.reload || absent || mesgul} onClick={() => islem(s, 'reload')}
                             className={`w-20 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition ${s.reload ? '' : 'invisible'}`}>

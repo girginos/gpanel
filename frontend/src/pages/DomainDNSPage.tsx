@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { T } from '@/lib/tablo'
 
 type Kayit = {
   id: number
@@ -160,7 +161,7 @@ export default function DomainDNSPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1300px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1300px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -219,7 +220,7 @@ export default function DomainDNSPage() {
         <div className="border border-slate-200 dark:border-slate-800 rounded-xl mb-4 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-2">
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-2">
                 🔐 DNSSEC
                 {dnssec.aktif ? (
                   dnssec.imzali
@@ -231,7 +232,7 @@ export default function DomainDNSPage() {
               </div>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Zone imzalama (BIND inline-signing). Açtıktan sonra oluşan DS kaydını alan adı operatörünüze girin.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {dnssec.aktif && (
                 <button onClick={dnssecDurumYenile} className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-md transition">↻ Durum</button>
               )}
@@ -267,10 +268,10 @@ export default function DomainDNSPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="grid grid-cols-2 gap-2 mb-4 sm:flex sm:flex-wrap sm:items-center">
         <button
           onClick={() => setDuzenle({} as Kayit)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-sm transition"
+          className="col-span-2 sm:col-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 whitespace-nowrap bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-sm transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -279,13 +280,14 @@ export default function DomainDNSPage() {
         </button>
         <button
           onClick={sablonUygula}
-          className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"
+          className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"
           title="A/MX/TXT/NS varsayılan kayıtlarını ekler (idempotent)"
         >
-          📋 Varsayılan Şablonu Uygula
+          <span className="sm:hidden">📋 Şablon Uygula</span>
+          <span className="hidden sm:inline">📋 Varsayılan Şablonu Uygula</span>
         </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">↻ Yenile</button>
-        <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{kayitlar.length} kayıt</span>
+        <button onClick={yukle} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">↻ Yenile</button>
+        <span className="col-span-2 text-right sm:col-auto sm:ml-auto sm:text-left text-sm text-slate-500 dark:text-slate-500">{kayitlar.length} kayıt</span>
       </div>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -303,7 +305,9 @@ export default function DomainDNSPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+      {/* Kapsayıcı çerçeve yalnız masaüstünde; mobilde satırlar kart olduğu için
+          ikinci bir çerçeve iç içe görünürdü. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yuk ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
         ) : kayitlar.length === 0 ? (
@@ -314,52 +318,61 @@ export default function DomainDNSPage() {
             </button>
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
-              <tr>
-                <th className="px-4 py-2.5 w-10">
-                  <input type="checkbox" aria-label="Tümünü seç" checked={kayitlar.length > 0 && secili.size === kayitlar.length}
-                    ref={el => { if (el) el.indeterminate = secili.size > 0 && secili.size < kayitlar.length }}
-                    onChange={hepsiniSec} className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
-                </th>
-                <th className="text-left px-4 py-2.5">Ad</th>
-                <th className="text-left px-4 py-2.5">Tip</th>
-                <th className="text-left px-4 py-2.5">Değer</th>
-                <th className="text-left px-4 py-2.5">TTL</th>
-                <th className="text-left px-4 py-2.5">Öncelik</th>
-                <th className="text-left px-4 py-2.5">Durum</th>
-                <th className="text-right px-4 py-2.5">İşlemler</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {kayitlar.map(k => (
-                <tr key={k.id} className={secili.has(k.id) ? 'bg-brand-50/60 dark:bg-brand-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}>
-                  <td className="px-4 py-2.5">
-                    <input type="checkbox" aria-label={`${k.ad} ${k.tip} seç`} checked={secili.has(k.id)} onChange={() => secimDegistir(k.id)}
-                      className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
-                  </td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{k.ad}</td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">{k.tip}</span>
-                  </td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-800 dark:text-slate-200 break-all">{k.deger}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.ttl}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{k.tip === 'MX' || k.tip === 'SRV' ? k.oncelik : '—'}</td>
-                  <td className="px-4 py-2.5">
-                    {k.aktif ? (
-                      <span className="text-xs text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Aktif</span>
-                    ) : (
-                      <span className="text-xs text-slate-500 dark:text-slate-500">Pasif</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right space-x-1">
-                    <button onClick={() => setDuzenle(k)} className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800">Düzenle</button>
-                    <button onClick={() => setSilinecek(k)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20">Sil</button>
-                  </td>
+          <div className="lg:overflow-x-auto">
+            <table className={T.tablo}>
+              <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+                <tr>
+                  <th className={`${T.baslik} w-10 text-center`}>
+                    <input type="checkbox" aria-label="Tümünü seç" checked={kayitlar.length > 0 && secili.size === kayitlar.length}
+                      ref={el => { if (el) el.indeterminate = secili.size > 0 && secili.size < kayitlar.length }}
+                      onChange={hepsiniSec} className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
+                  </th>
+                  <th className={T.baslik}>Ad</th>
+                  <th className={T.baslik}>Tip</th>
+                  <th className={T.baslik}>Değer</th>
+                  <th className={T.baslik}>TTL</th>
+                  <th className={T.baslik}>Öncelik</th>
+                  <th className={T.baslik}>Durum</th>
+                  <th className={`${T.baslik} text-right`}>İşlemler</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className={T.govde}>
+                {kayitlar.map(k => (
+                  <tr key={k.id} className={`${T.satir} ${secili.has(k.id) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50/60 dark:bg-brand-900/10' : 'lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60'}`}>
+                    <td className={T.hucreSecim}>
+                      <input type="checkbox" aria-label={`${k.ad} ${k.tip} seç`} checked={secili.has(k.id)} onChange={() => secimDegistir(k.id)}
+                        className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
+                    </td>
+                    {/* Birincil tanımlayıcı: kayıt adı — mobilde kart başlığı olur. */}
+                    <td className={`${T.hucreBaslik} font-mono break-all`}>{k.ad}</td>
+                    <td className={T.hucre} data-etiket="Tip">
+                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">{k.tip}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Değer">
+                      <span className="text-sm font-mono text-slate-800 dark:text-slate-200 break-all text-right lg:text-left">{k.deger}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="TTL">
+                      <span className="text-sm font-mono text-slate-600 dark:text-slate-400">{k.ttl}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Öncelik">
+                      <span className="text-sm font-mono text-slate-600 dark:text-slate-400">{k.tip === 'MX' || k.tip === 'SRV' ? k.oncelik : '—'}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Durum">
+                      {k.aktif ? (
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Aktif</span>
+                      ) : (
+                        <span className="text-xs text-slate-500 dark:text-slate-500">Pasif</span>
+                      )}
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
+                      <button onClick={() => setDuzenle(k)} className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">Düzenle</button>
+                      <button onClick={() => setSilinecek(k)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30">Sil</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -441,7 +454,7 @@ function KayitModal({ mevcut, domainId, ipv4, onKapat, onKayit }: {
   return (
     <Modal acik={true} baslik={yeni ? 'Yeni DNS Kaydı' : 'DNS Kaydını Düzenle'} onKapat={onKapat} genislik="md">
       <form onSubmit={gonder} className="space-y-3">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="col-span-2">
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Ad (alt-ad)</label>
             <input type="text" value={form.ad} onChange={e => setForm({ ...form, ad: e.target.value })} required
@@ -464,7 +477,7 @@ function KayitModal({ mevcut, domainId, ipv4, onKapat, onKayit }: {
           {DEGER_IPUCU[form.tip] && <p className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5">{DEGER_IPUCU[form.tip]}</p>}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">TTL (sn)</label>
             <input type="number" min={60} value={form.ttl} onChange={e => setForm({ ...form, ttl: parseInt(e.target.value) || 3600 })}

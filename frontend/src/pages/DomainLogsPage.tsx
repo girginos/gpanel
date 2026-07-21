@@ -112,7 +112,7 @@ export default function DomainLogsPage() {
   }, [satirlar, otoScroll, gorunum])
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -152,7 +152,7 @@ export default function DomainLogsPage() {
           </button>
         ))}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {/* Görünüm toggle */}
           <div className="flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden text-xs">
             <button
@@ -225,8 +225,7 @@ export default function DomainLogsPage() {
       {/* Log gövdesi */}
       <div
         ref={scrollRef}
-        className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto"
-        style={{ height: 540 }}
+        className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
       >
         {satirlar.length === 0 ? (
           <div className="p-6 text-sm text-slate-500 font-mono">{canli ? 'Bekleniyor… yeni satırlar geldikçe akacak.' : '(log dosyası boş veya henüz oluşmadı)'}</div>
@@ -283,7 +282,8 @@ function parseAccess(line: string): AccessSatir | null {
 function AccessTablosu({ satirlar }: { satirlar: string[] }) {
   const satirNesne = useMemo(() => satirlar.map(parseAccess), [satirlar])
   return (
-    <table className="w-full text-xs border-collapse">
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs border-collapse min-w-[640px]">
       <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Zaman</th>
@@ -327,6 +327,7 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
         })}
       </tbody>
     </table>
+    </div>
   )
 }
 
@@ -338,7 +339,8 @@ const CLIENT_RE = /client: (\S+?)[,\s]/
 
 function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
   return (
-    <table className="w-full text-xs border-collapse">
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs border-collapse min-w-[640px]">
       <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Zaman</th>
@@ -374,6 +376,7 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
         })}
       </tbody>
     </table>
+    </div>
   )
 }
 

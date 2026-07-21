@@ -303,7 +303,7 @@ export default function HomePage() {
           <Yukleniyor />
         ) : (
           <>
-            <div className="mb-3 grid grid-cols-3 gap-2.5">
+            <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               <MiniIstatistik deger={wpToplam} etiket="Kurulum" renk="slate" />
               <MiniIstatistik deger={wpEski} etiket="Güncelleme" renk={wpEski > 0 ? 'amber' : 'emerald'} />
               <MiniIstatistik deger={wpGuncel} etiket="Güncel" renk="emerald" />
@@ -455,7 +455,7 @@ export default function HomePage() {
     'domainler': (
       <Kart baslik="Domainler" alt="Barındırılan siteler ve SSL durumu" ikon={I.domain}
         sag={<Link to="/domainler" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
-        <div className="mb-4 grid grid-cols-3 gap-2.5">
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           <MiniIstatistik deger={domainler.length} etiket="Toplam" renk="slate" />
           <MiniIstatistik deger={aktif} etiket="Aktif" renk="emerald" />
           <MiniIstatistik deger={sslli} etiket="SSL" renk="sky" />
@@ -567,7 +567,7 @@ export default function HomePage() {
         {!s ? <Yukleniyor /> : !s.ag.arayuz ? (
           <div className="py-4 text-xs italic text-slate-400 dark:text-slate-500">Arayüz bulunamadı</div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 dark:border-emerald-800/40 dark:bg-emerald-900/15">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">↓ Gelen</div>
               <div className="mt-1 font-mono text-lg font-bold text-emerald-700 dark:text-emerald-300">{fmtRate(s.ag.rx_bytes_sn)}</div>

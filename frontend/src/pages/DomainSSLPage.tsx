@@ -58,7 +58,7 @@ export default function DomainSSLPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },

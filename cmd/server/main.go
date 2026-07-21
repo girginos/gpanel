@@ -219,6 +219,8 @@ func main() {
 			r.With(middleware.AdminOnly).Post("/system/optimize/baslat", system.OptimizeBaslat)
 			r.With(middleware.AdminOnly).Get("/system/optimize/log", system.OptimizeLog)
 			r.With(middleware.AdminOnly).Get("/system/cve", system.CveDurum)
+			r.With(middleware.AdminOnly).Get("/system/surum-kontrol", system.SurumKontrolDurum)
+			r.With(middleware.AdminOnly).Post("/system/surum-kontrol/yenile", system.SurumKontrolYenile)
 			r.With(middleware.AdminOnly).Post("/system/cve/guncelle", system.CveGuncelle)
 			r.With(middleware.AdminOnly).Get("/system/cve/log", system.CveLog)
 			r.With(middleware.AdminOnly).Get("/system/kernelcare", system.KernelcareDurumHandler)
@@ -420,6 +422,10 @@ func main() {
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
 	}
+
+	// Sürüm kontrolü + güvenlik duyuru kanalı. PANEL_SURUM_KONTROL=0 ile kapalı;
+	// kapalıyken hiç ağ isteği atılmaz (bkz. internal/system/surumkontrol.go).
+	system.SurumBaslat(version)
 
 	go func() {
 		log.Printf("girginospanel %s — %s üzerinde dinleniyor (env=%s)", version, cfg.ListenAddr, cfg.Env)

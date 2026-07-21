@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
+import { T } from '@/lib/tablo'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type DB = {
@@ -66,7 +67,7 @@ export default function DomainDatabasesPage() {
   )
 
   return (
-    <div className="px-6 py-5 max-w-[1300px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1300px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
@@ -76,7 +77,7 @@ export default function DomainDatabasesPage() {
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Veritabanları</h1>
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5"><Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link></p>}
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">+ Yeni Veritabanı</button>
         <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ Yenile</button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{dbler.length} veritabanı</span>
@@ -84,31 +85,39 @@ export default function DomainDatabasesPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+      {/* Kapsayıcı çerçeve yalnız masaüstünde: mobilde satırlar zaten kart olduğu
+          için ikinci bir çerçeve iç içe görünürdü. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> :
          dbler.length === 0 ? <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-500">Henüz veritabanı yok</div> :
-        <table className="w-full">
-          <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+        <div className="lg:overflow-x-auto">
+          <table className={T.tablo}>
+          <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700`}>
             <tr>
-              <th className="text-left px-4 py-2.5">Veritabanı</th>
-              <th className="text-left px-4 py-2.5">Kullanıcı</th>
-              <th className="text-left px-4 py-2.5">Sunucu</th>
-              <th className="text-left px-4 py-2.5">Parola</th>
-              <th className="text-left px-4 py-2.5">Oluşturulma</th>
-              <th className="text-right px-4 py-2.5">İşlemler</th>
+              <th className={T.baslik}>Veritabanı</th>
+              <th className={T.baslik}>Kullanıcı</th>
+              <th className={T.baslik}>Sunucu</th>
+              <th className={T.baslik}>Parola</th>
+              <th className={T.baslik}>Oluşturulma</th>
+              <th className={`${T.baslik} text-right`}>İşlemler</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {/* Satır ayracı artık T.satir'ın lg:border-b'si; divide-y gereksiz. */}
+          <tbody className={T.govde}>
             {dbler.map(d => (
-              <tr key={d.id} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-800 dark:text-slate-200">{d.db_adi}</td>
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_kullanici}</td>
-                <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.db_host}:3306</td>
-                <td className="px-4 py-2.5 text-sm">
-                  <div className="flex items-center gap-1">
+              <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                <td className={`${T.hucreBaslik} font-mono`}>{d.db_adi}</td>
+                <td className={T.hucre} data-etiket="Kullanıcı">
+                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.db_kullanici}</span>
+                </td>
+                <td className={T.hucre} data-etiket="Sunucu">
+                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.db_host}:3306</span>
+                </td>
+                <td className={T.hucre} data-etiket="Parola">
+                  <div className="flex flex-wrap items-center gap-1">
                     <button
                       onClick={() => setParolaGoster({ ...paroliGoster, [d.id]: !paroliGoster[d.id] })}
-                      className="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded"
+                      className="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded break-all text-left"
                       title={paroliGoster[d.id] ? 'Gizle' : 'Göster'}
                     >
                       {paroliGoster[d.id] ? d.db_parola : '••••••••'}
@@ -120,8 +129,10 @@ export default function DomainDatabasesPage() {
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{d.olusturulma}</td>
-                <td className="px-4 py-2.5 text-right space-x-1">
+                <td className={T.hucre} data-etiket="Oluşturulma">
+                  <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma}</span>
+                </td>
+                <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   <button onClick={() => pmaAc(d)} className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç">🔓 phpMyAdmin</button>
                   <button onClick={() => setPwResetFor(d)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">🔑 Parola Sıfırla</button>
                   <button onClick={() => setSilinecek(d)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">Sil</button>
@@ -129,7 +140,8 @@ export default function DomainDatabasesPage() {
               </tr>
             ))}
           </tbody>
-        </table>}
+        </table>
+        </div>}
       </div>
 
       {ekleAcik && domain && (
@@ -396,7 +408,7 @@ function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; o
           <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md p-4">
             <p className="text-sm text-emerald-800 dark:text-emerald-200 font-medium mb-2">✓ Parola güncellendi</p>
             <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-2">Bunu güvenli bir yere kaydedin. Sonra göremezsiniz:</p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <code className="flex-1 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{yeniPw}</code>
               <button onClick={() => navigator.clipboard.writeText(yeniPw)} className="px-3 py-2 bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs rounded">Kopyala</button>
             </div>

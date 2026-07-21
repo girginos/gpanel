@@ -101,7 +101,7 @@ export default function DomainPHPPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
         { etiket: yanit?.alan_adi || '...', href: `/abonelikler/${id}` },
@@ -243,7 +243,7 @@ export default function DomainPHPPage() {
 
           {/* Son Hatalar — debug log paneli */}
           <Kart baslik="Son Hatalar (Debug Log)">
-            <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <p className="text-xs text-slate-500 dark:text-slate-500 min-w-0 break-all">
                 En yeni fatal hatalar ustte. Kaynak: <code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code> (son 200 satir).
               </p>
@@ -449,7 +449,7 @@ function Kart({ baslik, children }: { baslik: string; children: any }) {
   )
 }
 function Grid({ children }: { children: any }) {
-  return <div className="grid grid-cols-2 gap-x-6 gap-y-3">{children}</div>
+  return <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">{children}</div>
 }
 function Etiket({ children }: { children: any }) {
   return <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">{children}</label>

@@ -40,3 +40,14 @@ html.dark ::-webkit-scrollbar {
 html.dark ::-webkit-scrollbar-track { background: #1e293b; }
 html.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
 html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* Duyarli tablo etiketleri (bkz. src/lib/tablo.ts).
+   Tailwind-in content-[attr(...)] yardimcisi calismaz: content-i
+   var(--tw-content) uzerinden verir, attr() ise custom property icinde
+   gecersizdir ve BOS hesaplanir. Bu yuzden content-i dogrudan yaziyoruz.
+   Yalniz lg altinda (kart gorunumu) uygulanir. */
+@media (max-width: 1023.98px) {
+  td[data-etiket]::before {
+    content: attr(data-etiket);
+  }
+}

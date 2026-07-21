@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import DizinAgac from '@/components/DizinAgac'
 import KodEditor from '@/components/KodEditor'
+import { T } from '@/lib/tablo'
 
 type Entry = {
   adi: string
@@ -459,7 +460,7 @@ export default function DomainFilesPage() {
   const parcalar = yol.split('/').filter(Boolean)
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -553,7 +554,7 @@ export default function DomainFilesPage() {
             </svg>
           </button>
           {yeniMenuAcik && (
-            <div className="absolute z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
+            <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
               <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📤 Dosya Yükle</button>
               <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📁 Yeni Klasör</button>
               <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📄 Yeni Dosya</button>
@@ -580,7 +581,7 @@ export default function DomainFilesPage() {
             onChange={e => setAramaQ(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && arama()}
             placeholder="🔍 Dosya ara…"
-            className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm w-56 focus:border-brand-500 outline-none"
+            className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm w-full sm:w-56 focus:border-brand-500 outline-none"
           />
           {aramaSonuc && (
             <button onClick={() => { setAramaQ(''); setAramaSonuc(null) }}
@@ -610,37 +611,44 @@ export default function DomainFilesPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      {/* Dosya tablosu */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+      {/* Dosya tablosu — mobilde kart dizilimi, >=lg gerçek tablo.
+          Kapsayıcı çerçeve/zemin yalnız masaüstünde; mobilde kartlar kendi
+          çerçevelerini taşır (iç içe çerçeve olmasın). */}
+      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yukleniyor ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+          <div className="lg:overflow-x-auto">
+            <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className="px-3 py-2.5 w-10 text-center"><input type="checkbox" checked={icerik.length > 0 && seciliSet.size === icerik.length} ref={ref => { if (ref) ref.indeterminate = seciliSet.size > 0 && seciliSet.size < icerik.length }} onChange={e => tumunuSec(e.target.checked)} className="cursor-pointer" /></th>
-                <th className="text-left px-4 py-2.5">Ad</th>
-                <th className="text-left px-4 py-2.5">Boyut</th>
-                <th className="text-left px-4 py-2.5">Yetkiler</th>
-                <th className="text-left px-4 py-2.5">Kullanıcı</th>
-                <th className="text-left px-4 py-2.5">Grup</th>
-                <th className="text-left px-4 py-2.5">Değişiklik</th>
-                <th className="px-3 py-2.5 w-10"></th>
+                <th className={`${T.baslik} w-10 text-center`}><input type="checkbox" checked={icerik.length > 0 && seciliSet.size === icerik.length} ref={ref => { if (ref) ref.indeterminate = seciliSet.size > 0 && seciliSet.size < icerik.length }} onChange={e => tumunuSec(e.target.checked)} className="cursor-pointer" /></th>
+                <th className={T.baslik}>Ad</th>
+                <th className={T.baslik}>Boyut</th>
+                <th className={T.baslik}>Yetkiler</th>
+                <th className={T.baslik}>Kullanıcı</th>
+                <th className={T.baslik}>Grup</th>
+                <th className={T.baslik}>Değişiklik</th>
+                <th className={`${T.baslik} w-10`}></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
               {yol !== '/' && (
-                <tr className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 cursor-pointer" onClick={geri}>
-                  <td className="px-4 py-2.5 text-sm" colSpan={8}>
+                <tr className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 cursor-pointer`} onClick={geri}>
+                  {/* Tek hücreli gezinme satırı: colSpan korundu, mobilde tek kart olur. */}
+                  <td className={`${T.hucreBaslik} lg:font-normal`} colSpan={8}>
                     <span className="text-slate-500 dark:text-slate-500">↑ üst klasör</span>
                   </td>
                 </tr>
               )}
               {icerik.length === 0 && !yukleniyor && (
-                <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400 dark:text-slate-500">Bu klasör boş</td>
+                <tr className={T.satir}>
+                  <td colSpan={8} className={T.hucreDurum}>Bu klasör boş</td>
                 </tr>
               )}
+              {/* Seçili satır: mobilde halka (ring), masaüstünde zemin rengi. T.satir'ın
+                  lg:bg-transparent kuralı öneksiz bg-brand-50'yi ezdiği için zemini
+                  lg:-önekli olarak geri veriyoruz — yoksa >=lg'de seçim hiç görünmezdi. */}
               {(aramaSonuc ?? icerik).map((e) => (
                 <tr
                   key={e.yol}
@@ -648,15 +656,16 @@ export default function DomainFilesPage() {
                   onTouchStart={ev => dokunBasla(ev, e)}
                   onTouchEnd={dokunBitir}
                   onTouchMove={dokunHareket}
-                  className={`hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 transition ${seciliSet.has(e.yol) ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}
+                  className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${seciliSet.has(e.yol) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20 lg:bg-brand-50 dark:lg:bg-brand-900/20' : ''}`}
                 >
-                  <td className="px-3 py-2.5 text-center">
+                  <td className={T.hucreSecim}>
                     <input type="checkbox" checked={seciliSet.has(e.yol)}
                       onChange={() => secimTogga(e.yol)}
                       onClick={ev => ev.stopPropagation()}
                       className="cursor-pointer" />
                   </td>
-                  <td className="px-4 py-2.5">
+                  {/* Birincil tanımlayıcı: dosya/klasör adı — mobilde kart başlığı. */}
+                  <td className={T.hucreBaslik}>
                     {e.tip === 'klasor' ? (
                       <button
                         onClick={() => git(e.yol)}
@@ -679,14 +688,22 @@ export default function DomainFilesPage() {
                       </button>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">
-                    {e.tip === 'klasor' ? '—' : formatBoyut(e.boyut_b)}
+                  <td className={T.hucre} data-etiket="Boyut">
+                    <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.tip === 'klasor' ? '—' : formatBoyut(e.boyut_b)}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500" title={e.mod}>{e.yetkiler || e.mod}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.sahip || '—'}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{e.grup || '—'}</td>
-                  <td className="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatTarih(e.degisme)}</td>
-                  <td className="px-2 py-2.5 text-right">
+                  <td className={T.hucre} data-etiket="Yetkiler">
+                    <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500" title={e.mod}>{e.yetkiler || e.mod}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Kullanıcı">
+                    <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500 break-all">{e.sahip || '—'}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Grup">
+                    <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500 break-all">{e.grup || '—'}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Değişiklik">
+                    <span className="text-slate-600 dark:text-slate-400 dark:text-slate-500 whitespace-nowrap">{formatTarih(e.degisme)}</span>
+                  </td>
+                  <td className={`${T.hucreAksiyon} lg:text-right`}>
                     <button
                       onClick={ev => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); ctxAc(r.right, r.bottom, e) }}
                       className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
@@ -702,6 +719,7 @@ export default function DomainFilesPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {editor && (
@@ -917,7 +935,7 @@ function ChmodModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (mod: 
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">İzinler</h3>
         <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{entry.yol}</code></p>
-        <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-3 text-center">
           <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Sahip</div>
           <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Grup</div>
           <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Diğer</div>

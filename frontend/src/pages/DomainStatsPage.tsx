@@ -28,14 +28,14 @@ export default function DomainStatsPage() {
   }
   useEffect(yukle, [id])
 
-  if (yuk) return <div className="px-6 py-5 text-slate-400">Yükleniyor…</div>
-  if (!o) return <div className="px-6 py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
+  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
   const maxGun = Math.max(1, ...o.gunluk.map(g => g.istek))
   const durumBar: Record<string, string> = { '2xx': 'bg-emerald-500', '3xx': 'bg-sky-500', '4xx': 'bg-amber-500', '5xx': 'bg-rose-500' }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
@@ -44,12 +44,12 @@ export default function DomainStatsPage() {
           { etiket: 'İstatistikler' },
         ]} />
 
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Trafik İstatistikleri</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> — nginx erişim günlüğü analizi.</p>
           </div>
-          <button onClick={yukle} className="text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800">↻ Yenile</button>
+          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800">↻ Yenile</button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (

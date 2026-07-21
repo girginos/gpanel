@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Domain = { id: number; alan_adi: string }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola: string; surum: string }
@@ -80,7 +81,7 @@ export default function WordPressPage() {
   const eskiler = useMemo(() => tum.filter(t => t.durum === 'eski'), [tum])
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'WordPress' }]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl">📝</span>
@@ -120,28 +121,30 @@ export default function WordPressPage() {
       )}
 
       {/* Geniş tablo: tüm kurulumlar */}
-      <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl overflow-hidden mb-6">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
+      {/* Kapsayıcı çerçeve yalnız masaüstünde; mobilde kartlar ikinci bir çerçeveye hapsolmasın. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden mb-6">
+        <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Kurulu WordPress Siteleri {!tumYuk && <span className="text-slate-400 font-normal">· {tum.length}</span>}</h3>
           <button onClick={tumListele} disabled={tumYuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900/50 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
+        {/* Mobilde yatay kaydırma yok — satırlar kart olur. */}
+        <div className="lg:overflow-x-auto pt-3 lg:pt-0">
+          <table className={`${T.tablo} text-sm`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Domain</th>
-                <th className="text-left font-medium px-4 py-2.5">Dizin</th>
-                <th className="text-left font-medium px-4 py-2.5">Sürüm</th>
-                <th className="text-left font-medium px-4 py-2.5">Durum</th>
-                <th className="text-left font-medium px-4 py-2.5 whitespace-nowrap">Kurulum</th>
-                <th className="text-right font-medium px-4 py-2.5">İşlemler</th>
+                <th className={T.baslik}>Domain</th>
+                <th className={T.baslik}>Dizin</th>
+                <th className={T.baslik}>Sürüm</th>
+                <th className={T.baslik}>Durum</th>
+                <th className={`${T.baslik} whitespace-nowrap`}>Kurulum</th>
+                <th className={`${T.baslik} text-right`}>İşlemler</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            <tbody className={T.govde}>
               {tumYuk ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Kurulumlar taranıyor… (sürüm + güncelleme kontrolü)</td></tr>
+                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>Kurulumlar taranıyor… (sürüm + güncelleme kontrolü)</td></tr>
               ) : tum.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center">
+                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
                   <div className="text-2xl mb-1">📝</div>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Sunucuda hiç WordPress kurulumu bulunamadı.</p>
                   <p className="text-xs text-slate-400 mt-1">Aşağıdaki formdan yeni bir kurulum yapabilirsiniz.</p>
@@ -150,19 +153,26 @@ export default function WordPressPage() {
                 tum.map(t => {
                   const key = t.domain_id + t.dizin
                   const eski = t.durum === 'eski'
+                  // "eski" vurgusu: T.satir masaüstünde lg:bg-transparent verdiği için
+                  // amber arka planın lg: önekli karşılığı da yazılmalı; yoksa masaüstünde
+                  // güvenlik uyarısı rengi kaybolur.
                   return (
-                    <tr key={key} className={eski ? 'bg-amber-50/50 dark:bg-amber-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}>
-                      <td className="px-4 py-2.5">
+                    <tr key={key} className={`${T.satir} ${eski ? 'bg-amber-50/50 dark:bg-amber-900/10 lg:bg-amber-50/50 dark:lg:bg-amber-900/10' : 'lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40'}`}>
+                      <td className={T.hucreBaslik}>
                         <a href={t.site_url} target="_blank" rel="noreferrer" className="font-medium text-slate-800 dark:text-slate-100 hover:text-brand-600 dark:hover:text-brand-400">{t.alan_adi}</a>
                       </td>
-                      <td className="px-4 py-2.5 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{t.dizin}</td>
-                      <td className="px-4 py-2.5">
+                      <td className={T.hucre} data-etiket="Dizin">
+                        <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{t.dizin}</span>
+                      </td>
+                      <td className={T.hucre} data-etiket="Sürüm">
                         <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-semibold">{t.surum ? `v${t.surum}` : '—'}</span>
                       </td>
-                      <td className="px-4 py-2.5"><DurumRozet t={t} /></td>
-                      <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 font-mono whitespace-nowrap">{t.kurulum_tarihi || '—'}</td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className={T.hucre} data-etiket="Durum"><DurumRozet t={t} /></td>
+                      <td className={T.hucre} data-etiket="Kurulum">
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono whitespace-nowrap">{t.kurulum_tarihi || '—'}</span>
+                      </td>
+                      <td className={T.hucreAksiyon}>
+                        <div className="flex flex-wrap items-center gap-1.5 w-full justify-start lg:justify-end">
                           <a href={t.admin_url} target="_blank" rel="noreferrer" className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Yönetim</a>
                           <button disabled={!!mesgul} onClick={() => guncelle(t)}
                             className={`text-xs px-2.5 py-1 rounded-md disabled:opacity-50 ${eski ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>

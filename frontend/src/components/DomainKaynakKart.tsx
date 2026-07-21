@@ -93,7 +93,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       {/* İlave Sayaclar */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Sayaçlar</h3>
-        <div className="grid grid-cols-2 gap-y-2 gap-x-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-3">
           <Mini etiket="DNS kayıt" deger={ozet.dns_kayit} />
           <Mini etiket="Cron işi" deger={ozet.cron_is} />
           <Mini etiket="Yedek" deger={ozet.yedek_sayisi} />

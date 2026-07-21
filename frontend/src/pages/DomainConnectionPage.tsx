@@ -65,7 +65,7 @@ export default function DomainConnectionPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -272,7 +272,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
         {yeni && (
           <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded">
             <div className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">✓ Yeni parola üretildi</div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <code className="font-mono text-sm text-slate-900 dark:text-slate-100 flex-1 break-all">{yeni}</code>
               <KopyaButton text={yeni} renk="emerald" />
             </div>

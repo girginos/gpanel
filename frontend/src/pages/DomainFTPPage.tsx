@@ -36,7 +36,7 @@ export default function DomainFTPPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[900px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[900px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
@@ -50,7 +50,7 @@ export default function DomainFTPPage() {
 
       {domain && (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
-          <div className="grid grid-cols-2 gap-y-3 mb-6 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 mb-6 text-sm">
             <span className="text-slate-500 dark:text-slate-500">Sunucu</span><span className="font-mono text-slate-800 dark:text-slate-200">{domain.ftp_host}</span>
             <span className="text-slate-500 dark:text-slate-500">Port</span><span className="font-mono text-slate-800 dark:text-slate-200">21 (FTP) / 22 (SFTP)</span>
             <span className="text-slate-500 dark:text-slate-500">Kullanıcı adı</span><span className="font-mono text-slate-800 dark:text-slate-200">{domain.ftp_user}</span>
@@ -59,7 +59,7 @@ export default function DomainFTPPage() {
 
           <div className="border-t border-slate-200 dark:border-slate-700 pt-5">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Parola Sıfırlama</h3>
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex flex-wrap items-center gap-2 mb-4">
               <input
                 type="text"
                 value={ozelPw}

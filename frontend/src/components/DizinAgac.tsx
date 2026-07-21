@@ -15,7 +15,7 @@ interface Props {
 
 export default function DizinAgac({ domainId, secili, onSec, yenileme }: Props) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-2 text-sm overflow-auto min-h-[400px]">
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-2 text-sm overflow-auto min-h-[220px] lg:min-h-[400px]">
       <TreeNode
         domainId={domainId}
         yol="/"

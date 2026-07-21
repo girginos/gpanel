@@ -129,6 +129,32 @@ girginospanel-update --branch X # farklı dal
 
 > Kendi fork'unu deploy ediyorsan: kaynağı derle (`GOAMD64=v1 go build` + `npm run build`), `assets/girginospanel-server` + `assets/frontend-dist.tar.gz`'i güncelle, repona push et — sunucularda `girginospanel-update` yeni sürümü çeker. **Binary'yi mutlaka `GOAMD64=v1` ile derle** (bkz. "Backend (Go)" altındaki uyarı) — aksi halde eski CPU'lu müşteri sunucularında panel açılmaz.
 
+## Sürüm kontrolü ve gizlilik
+
+Panel günde bir kez yayın manifestini okuyarak **yeni sürüm** ve **kritik güvenlik
+duyurusu** olup olmadığını kontrol eder. Amaç, kritik bir yama çıktığında bunu
+size duyurabilmektir.
+
+**Ne gönderilir:** Hiçbir şey. İstek düz bir `GET`'tir — sorgu dizesi yok, gövde
+yok. Yalnızca `User-Agent` başlığında panel sürümü bulunur.
+
+**Ne gönderilmez:** Domain adları, hostname, IP adresi, müşteri verisi, e-posta,
+veritabanı içeriği, lisans bilgisi. Hiçbiri.
+
+`/etc/girginospanel/kurulum-kimlik` dosyasında rastgele bir kurulum kimliği
+üretilir ancak **gönderilmez**; ileride isteğe bağlı bir kullanım istatistiği
+özelliği eklenirse kararlı bir kimlik hazır olsun diye tutulur.
+
+**Kapatmak için** `/etc/girginospanel/env` dosyasına ekleyin ve paneli yeniden
+başlatın — bu durumda panel hiçbir dış istek atmaz:
+
+```bash
+echo "PANEL_SURUM_KONTROL=0" >> /etc/girginospanel/env
+systemctl restart girginospanel
+```
+
+Farklı bir manifest adresi kullanmak için: `PANEL_SURUM_UC=https://...`
+
 ## Notlar
 
 - Kurulum **idempotent** değildir; her çalıştırma yeni secret (JWT/DB parola) üretir. Yeniden çalıştırma yerine `girginospanel-repair` / `girginospanel-optimize` kullanın.

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type OzetSatir = { domain_id: number; alan_adi: string; sayi: number; toplam_b: number; son_yedek: string }
 type Ozet = { domainler: OzetSatir[]; toplam_boyut_b: number; toplam_yedek: number; hedef_sayisi: number; zamanlama: string }
@@ -32,7 +33,7 @@ export default function BackupYonetimiPage() {
   }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
@@ -60,7 +61,7 @@ export default function BackupYonetimiPage() {
         <span className="text-sm text-slate-600 dark:text-slate-300">
           🕒 Otomatik yedekleme: <strong>{o?.zamanlama || 'Her gün 03:00'}</strong> · 7 günlük saklama
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button onClick={simdiYedekle} disabled={yedekliyor}
             className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
             {yedekliyor ? 'Tetikleniyor…' : '⏱ Tüm Domainleri Şimdi Yedekle'}
@@ -70,34 +71,44 @@ export default function BackupYonetimiPage() {
       </div>
 
       {/* Tablo */}
-      <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
+      {/* Kapsayıcı çerçeve yalnız masaüstünde; mobilde satırlar zaten kart olduğu için
+          ikinci bir çerçeve iç içe görünüm yaratırdı. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden">
+        <div className="py-3 lg:px-4 lg:border-b lg:border-slate-100 dark:lg:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Domain Yedekleri</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900/50 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
+        <div className="lg:overflow-x-auto">
+          <table className={`${T.tablo} text-sm`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Domain</th>
-                <th className="text-right font-medium px-4 py-2.5">Yedek Sayısı</th>
-                <th className="text-right font-medium px-4 py-2.5">Toplam Boyut</th>
-                <th className="text-left font-medium px-4 py-2.5">Son Yedek</th>
-                <th className="text-right font-medium px-4 py-2.5">İşlem</th>
+                <th className={T.baslik}>Domain</th>
+                <th className={`${T.baslik} text-right`}>Yedek Sayısı</th>
+                <th className={`${T.baslik} text-right`}>Toplam Boyut</th>
+                <th className={T.baslik}>Son Yedek</th>
+                <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            {/* Satır ayracını T.satir'in kendi `lg:border-b`si veriyor; mobilde
+                kart kenarlığı zaten ayırdığı için ayrı bir divide sınıfı gerekmiyor. */}
+            <tbody className={T.govde}>
               {yuk ? (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-400">Yükleniyor…</td></tr>
+                <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
               ) : !o || o.domainler.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">Domain yok.</td></tr>
+                <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Domain yok.</td></tr>
               ) : (
                 o.domainler.map(d => (
-                  <tr key={d.domain_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">{d.alan_adi}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi ? fmtByte(d.toplam_b) : '—'}</td>
-                    <td className="px-4 py-2.5 text-xs font-mono text-slate-500 dark:text-slate-400">{d.son_yedek || <span className="text-slate-400">hiç</span>}</td>
-                    <td className="px-4 py-2.5 text-right">
+                  <tr key={d.domain_id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40`}>
+                    <td className={T.hucreBaslik}>{d.alan_adi}</td>
+                    <td className={`${T.hucre} lg:text-right`} data-etiket="Yedek Sayısı">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi}</span>
+                    </td>
+                    <td className={`${T.hucre} lg:text-right`} data-etiket="Toplam Boyut">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi ? fmtByte(d.toplam_b) : '—'}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Son Yedek">
+                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{d.son_yedek || <span className="text-slate-400">hiç</span>}</span>
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right`}>
                       <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700">Yönet →</Link>
                     </td>
                   </tr>

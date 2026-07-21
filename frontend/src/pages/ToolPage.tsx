@@ -39,7 +39,7 @@ export default function ToolPage() {
   const meta = TOOL_META[slug || ''] || { etiket: slug || 'Araç', aciklama: 'Henüz uygulanmadı.' }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },

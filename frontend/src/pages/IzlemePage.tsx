@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type CPU = { yuzde: number; cekirdek: number; yuk_1dk: number; yuk_5dk: number; yuk_15dk: number }
 type Bellek = { toplam_kb: number; kullanilan_kb: number; bos_kb: number; yuzde: number }
@@ -36,9 +37,9 @@ const POLL_MS = 5000
 export default function IzlemePage() {
   const [tab, setTab] = useState<'sunucu' | 'domain' | 'loglar'>('sunucu')
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'İzleme' }]} />
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Uçtan Uca İzleme</h1>
         <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-500">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -46,7 +47,7 @@ export default function IzlemePage() {
         </span>
       </div>
 
-      <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-700">
+      <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-700 overflow-x-auto [&>*]:flex-shrink-0">
         <SekmeButon aktif={tab === 'sunucu'}  onClick={() => setTab('sunucu')}>Sunucu</SekmeButon>
         <SekmeButon aktif={tab === 'domain'} onClick={() => setTab('domain')}>Domain Bazlı</SekmeButon>
         <SekmeButon aktif={tab === 'loglar'} onClick={() => setTab('loglar')}>Sunucu Günlükleri</SekmeButon>
@@ -187,39 +188,56 @@ function SunucuIzleme() {
       <div className="h-5" />
 
       {/* Top processes */}
-      <Kart baslik="En Yoğun İşlemler" sag={
-        <div className="flex items-center gap-1">
+      <Kart baslik="En Yoğun İşlemler" tabloMod sag={
+        <div className="flex flex-wrap items-center gap-1">
           <button onClick={() => setProcSort('cpu')}
             className={`text-[11px] px-2 py-1 rounded ${procSort === 'cpu' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>CPU</button>
           <button onClick={() => setProcSort('mem')}
             className={`text-[11px] px-2 py-1 rounded ${procSort === 'mem' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>Bellek</button>
         </div>
       }>
-        <table className="w-full text-sm">
-          <thead className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+        {/* Mobilde her satır bir kart; >= lg gerçek tablo olarak kalır. */}
+        <div className="lg:overflow-x-auto">
+          <table className={`${T.tablo} text-sm`}>
+          <thead className={`${T.baslikGrubu} border-b border-slate-200 dark:border-slate-700`}>
             <tr>
-              <th className="text-left py-2 w-16">PID</th>
-              <th className="text-left py-2">Kullanıcı</th>
-              <th className="text-right py-2 w-16">CPU%</th>
-              <th className="text-right py-2 w-16">MEM%</th>
-              <th className="text-left py-2">Komut</th>
+              <th className={`${T.baslik} lg:w-16`}>PID</th>
+              <th className={T.baslik}>Kullanıcı</th>
+              <th className={`${T.baslik} text-right lg:w-16`}>CPU%</th>
+              <th className={`${T.baslik} text-right lg:w-16`}>MEM%</th>
+              <th className={T.baslik}>Komut</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
             {procs.length === 0 && (
-              <tr><td colSpan={5} className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">Yükleniyor…</td></tr>
+              <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
             )}
             {procs.map(p => (
-              <tr key={p.pid} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <td className="py-1.5 font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{p.pid}</td>
-                <td className="py-1.5 font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[120px]">{p.user}</td>
-                <td className={`py-1.5 text-right font-mono text-xs ${p.cpu_yuzde >= 50 ? 'text-red-600 dark:text-red-400 font-semibold' : p.cpu_yuzde >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.cpu_yuzde.toFixed(1)}</td>
-                <td className={`py-1.5 text-right font-mono text-xs ${p.mem_yuzde >= 30 ? 'text-red-600 dark:text-red-400 font-semibold' : p.mem_yuzde >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.mem_yuzde.toFixed(1)}</td>
-                <td className="py-1.5 font-mono text-xs text-slate-800 dark:text-slate-200 truncate max-w-md" title={p.komut}>{p.komut}</td>
+              <tr key={p.pid} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
+                {/* Birincil tanımlayıcı: PID — mobilde kart başlığı olur, etiket istemez. */}
+                <td className={`${T.hucreBaslik} font-mono lg:font-normal lg:text-slate-600 dark:lg:text-slate-400`}>
+                  {/* lg:text-xs td üzerinde işlemiyordu: T.hucreBaslik zaten lg:text-sm veriyor ve
+                      ikisi de aynı kırılımda olduğu için CSS sırasına göre text-sm kazanıyordu.
+                      Span'e taşındı — doğrudan sınıf, td'den gelen kalıtımı yener. */}
+                  <span className="lg:text-xs">{p.pid}</span>
+                </td>
+                <td className={`${T.hucre} lg:max-w-[120px] lg:truncate`} data-etiket="Kullanıcı">
+                  <span className="font-mono text-xs text-slate-700 dark:text-slate-300 text-right lg:text-left break-all">{p.user}</span>
+                </td>
+                <td className={`${T.hucre} lg:text-right`} data-etiket="CPU%">
+                  <span className={`font-mono text-xs ${p.cpu_yuzde >= 50 ? 'text-red-600 dark:text-red-400 font-semibold' : p.cpu_yuzde >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.cpu_yuzde.toFixed(1)}</span>
+                </td>
+                <td className={`${T.hucre} lg:text-right`} data-etiket="MEM%">
+                  <span className={`font-mono text-xs ${p.mem_yuzde >= 30 ? 'text-red-600 dark:text-red-400 font-semibold' : p.mem_yuzde >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.mem_yuzde.toFixed(1)}</span>
+                </td>
+                <td className={`${T.hucre} lg:max-w-md lg:truncate`} data-etiket="Komut" title={p.komut}>
+                  <span className="font-mono text-xs text-slate-800 dark:text-slate-200 text-right lg:text-left break-all lg:break-normal">{p.komut}</span>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </Kart>
     </>
   )
@@ -283,7 +301,7 @@ function DomainIzleme() {
       <Kart baslik="Domain Seçimi">
         <div className="flex items-center gap-3 flex-wrap">
           <select value={secili ?? ''} onChange={e => setSecili(Number(e.target.value))}
-            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-800 min-w-[280px] focus:border-brand-500 outline-none">
+            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-800 w-full sm:w-auto sm:min-w-[280px] focus:border-brand-500 outline-none">
             {domains.length === 0 && <option value="">Aktif domain yok</option>}
             {domains.map(d => <option key={d.id} value={d.id}>{d.alan_adi}</option>)}
           </select>
@@ -391,7 +409,7 @@ function SunucuLoglari() {
         </div>
       </div>
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      <div ref={scrollRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all" style={{ height: 560 }}>
+      <div ref={scrollRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all h-[min(60vh,320px)] sm:h-[420px] lg:h-[560px]">
         {yuk ? <div className="text-slate-500 py-4">Yükleniyor…</div>
           : gorunen.length === 0 ? <div className="text-slate-500 py-4">{arama ? `"${arama}" bulunamadı.` : '(kayıt yok)'}</div>
             : gorunen.map((s, i) => <div key={i} className={logRenk(s)}>{s}</div>)}
@@ -408,9 +426,14 @@ function logRenk(s: string): string {
   return 'text-slate-300'
 }
 
-function Kart({ baslik, children, sag }: { baslik: string; children: React.ReactNode; sag?: React.ReactNode }) {
+// tabloMod: içinde duyarlı tablo varsa kullanılır. Mobilde çerçeve/zemin/padding
+// kaldırılır — aksi halde satır kartları ikinci bir çerçeveye hapsolup iç içe görünür.
+// >= lg görünüm her iki modda da aynıdır.
+function Kart({ baslik, children, sag, tabloMod }: { baslik: string; children: React.ReactNode; sag?: React.ReactNode; tabloMod?: boolean }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+    <div className={tabloMod
+      ? 'lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5'
+      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5'}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{baslik}</h3>
         {sag && <div className="text-xs text-slate-500 dark:text-slate-500">{sag}</div>}

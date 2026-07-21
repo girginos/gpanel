@@ -58,13 +58,13 @@ export default function DomainSSHPage() {
     } finally { setIsleniyor(false) }
   }
 
-  if (yuk) return <div className="px-6 py-5 text-slate-400">Yükleniyor…</div>
-  if (!d) return <div className="px-6 py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
+  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
   const sshKomut = `ssh ${d.kullanici}@${d.ssh_host} -p ${d.ssh_port}`
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-3xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
@@ -93,7 +93,7 @@ export default function DomainSSHPage() {
 
         {/* Durum + toggle */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Kabuk Erişimi</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">

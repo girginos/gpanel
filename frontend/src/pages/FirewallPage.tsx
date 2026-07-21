@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Kural = {
   id: number; tip: 'ban' | 'whitelist' | 'kapat'; ip: string; port: number
@@ -112,7 +113,7 @@ export default function FirewallPage() {
   const kisitUyari = tip === 'whitelist' && port.trim() !== ''
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Güvenlik Duvarı' }]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl">🛡️</span>
@@ -153,7 +154,7 @@ export default function FirewallPage() {
       <form onSubmit={ekle} className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 mb-6">
         {/* 1) ne yapmak istiyorsun */}
         <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">1 · Ne yapmak istiyorsun?</div>
-        <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-3">
           {(['ban', 'whitelist', 'kapat'] as const).map(t => (
             <button key={t} type="button" onClick={() => setTip(t)}
               className={`px-3 py-3 text-sm font-medium rounded-lg border text-center transition ${
@@ -219,41 +220,53 @@ export default function FirewallPage() {
       </form>
 
       {/* ---------- AKTİF KURALLAR ---------- */}
-      <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
+      {/* Kapsayıcı çerçeve yalnız masaüstünde: mobilde satırlar zaten kart, ikinci çerçeve iç içe görünürdü. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden">
+        <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Aktif Kurallar {!yuk && <span className="text-slate-400 font-normal">· {kurallar.length}</span>}</h3>
           <button onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900/50 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
+        {/* Mobilde yatay kaydırma yok — satırlar kart olarak diziliyor. */}
+        <div className="lg:overflow-x-auto">
+          <table className={`${T.tablo} text-sm`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className="text-left font-medium px-4 py-2.5">Tür</th>
-                <th className="text-left font-medium px-4 py-2.5">IP / CIDR</th>
-                <th className="text-left font-medium px-4 py-2.5">Port</th>
-                <th className="text-left font-medium px-4 py-2.5">Proto</th>
-                <th className="text-left font-medium px-4 py-2.5 w-full">Not</th>
-                <th className="text-right font-medium px-4 py-2.5">İşlem</th>
+                <th className={T.baslik}>Tür</th>
+                <th className={T.baslik}>IP / CIDR</th>
+                <th className={T.baslik}>Port</th>
+                <th className={T.baslik}>Proto</th>
+                <th className={`${T.baslik} w-full`}>Not</th>
+                <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-700/60`}>
               {yuk ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Yükleniyor…</td></tr>
+                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>Yükleniyor…</td></tr>
               ) : kurallar.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center">
+                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
                   <div className="text-2xl mb-1">🛡️</div>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Henüz kural yok — sunucu tüm bağlantılara açık.</p>
                   <p className="text-xs text-slate-400 mt-1">Yukarıdan bir şablon uygulayarak başlayabilirsiniz.</p>
                 </td></tr>
               ) : (
                 kurallar.map(k => (
-                  <tr key={k.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-2.5"><TurRozet tip={k.tip} /></td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-700 dark:text-slate-200">{k.ip || <span className="text-slate-400">herkes</span>}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-300">{k.port || <span className="text-slate-400">tümü</span>}</td>
-                    <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500 uppercase">{k.protokol}</td>
-                    <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">{k.aciklama || '—'}</td>
-                    <td className="px-4 py-2.5 text-right">
+                  <tr key={k.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40`}>
+                    <td className={T.hucre} data-etiket="Tür"><TurRozet tip={k.tip} /></td>
+                    {/* Birincil tanımlayıcı: IP / CIDR — mobilde kart başlığı olur.
+                        Kolon sırası masaüstündeki <th> sırasıyla birebir aynı kalıyor. */}
+                    <td className={`${T.hucreBaslik} font-mono lg:font-normal lg:text-xs lg:text-slate-700 dark:lg:text-slate-200`}>
+                      {k.ip || <span className="text-slate-400">herkes</span>}
+                    </td>
+                    <td className={T.hucre} data-etiket="Port">
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{k.port || <span className="text-slate-400">tümü</span>}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Proto">
+                      <span className="font-mono text-[11px] text-slate-500 uppercase">{k.protokol}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Not">
+                      <span className="text-xs text-slate-500 dark:text-slate-400 text-right lg:text-left break-words">{k.aciklama || '—'}</span>
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right`}>
                       <button disabled={!!mesgul} onClick={() => sil(k)} className="text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50">{mesgul === 'sil:' + k.id ? '…' : 'Sil'}</button>
                     </td>
                   </tr>

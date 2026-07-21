@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
@@ -62,13 +63,13 @@ export default function DomainAntivirusPage() {
     finally { setImzaYuk(false) }
   }
 
-  if (yuk) return <div className="px-6 py-5 text-slate-400">Yükleniyor…</div>
-  if (!d) return <div className="px-6 py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
+  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
   const aktif = d.bulgular.filter(b => !b.karantina)
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-4xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
@@ -86,7 +87,7 @@ export default function DomainAntivirusPage() {
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm space-y-0.5">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${d.clamav ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 <span className="text-slate-700 dark:text-slate-200">Motor: <span className="font-medium">{d.clamav ? 'ClamAV + Heuristik' : 'Sadece Heuristik'}</span></span>
               </div>
@@ -113,7 +114,9 @@ export default function DomainAntivirusPage() {
         </div>
 
         {/* Bulgular */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+        {/* Mobilde kart çerçevesi kaldırılır: bulgu satırları zaten kart olur,
+            aksi hâlde kartlar ikinci bir çerçevenin içine hapsolurdu. */}
+        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">
             Bulgular {d.son_tarama && <span className="text-xs font-normal text-slate-400">— son taramadan</span>}
           </h3>
@@ -125,24 +128,30 @@ export default function DomainAntivirusPage() {
               <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Temiz — zararlı yazılım bulunmadı.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
+            <div className="lg:overflow-x-auto">
+              <table className={`${T.tablo} text-sm`}>
+                <thead className={T.baslikGrubu}>
                   <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className="py-2 pr-3">Dosya</th><th className="py-2 pr-3">İmza</th><th className="py-2 pr-3">Motor</th><th className="py-2 pr-3">Durum</th><th></th>
+                    <th className={T.baslik}>Dosya</th><th className={T.baslik}>İmza</th><th className={T.baslik}>Motor</th><th className={T.baslik}>Durum</th><th className={T.baslik}></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className={T.govde}>
                   {d.bulgular.map((b, i) => (
-                    <tr key={i} className="border-b border-slate-50 dark:border-slate-800">
-                      <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300 break-all max-w-xs">{b.dosya}</td>
-                      <td className="py-2 pr-3 text-slate-700 dark:text-slate-200">{b.imza}</td>
-                      <td className="py-2 pr-3"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
-                      <td className="py-2 pr-3">
+                    <tr key={i} className={T.satir}>
+                      {/* Birincil tanımlayıcı: dosya yolu — mobilde kart başlığı olur */}
+                      <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-xs`}>{b.dosya}</td>
+                      <td className={T.hucre} data-etiket="İmza">
+                        <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
+                      </td>
+                      <td className={T.hucre} data-etiket="Motor"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
+                      <td className={T.hucre} data-etiket="Durum">
                         {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
                           : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
                       </td>
-                      <td className="py-2 text-right">
+                      {/* Karantinadaki bulguda buton yok: mobilde boş hücre yalnızca
+                          asılı bir ayraç çizgisi bırakırdı, o yüzden gizlenir.
+                          Masaüstünde kolon hizası için lg:table-cell ile geri gelir. */}
+                      <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
                         {!b.karantina && <button onClick={() => karantina(b)} className="text-xs text-red-600 dark:text-red-400 hover:underline whitespace-nowrap">Karantinaya al</button>}
                       </td>
                     </tr>

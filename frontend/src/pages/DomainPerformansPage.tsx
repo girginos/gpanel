@@ -21,8 +21,8 @@ export default function DomainPerformansPage() {
       .then(r => setO(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
   }, [id])
 
-  if (yuk) return <div className="px-6 py-5 text-slate-400">Yükleniyor…</div>
-  if (!o) return <div className="px-6 py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
+  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
   const skorRenk = o.skor >= 80 ? 'emerald' : o.skor >= 60 ? 'amber' : 'rose'
   const skorHex: Record<string, string> = { emerald: '#10b981', amber: '#f59e0b', rose: '#f43f5e' }
@@ -30,7 +30,7 @@ export default function DomainPerformansPage() {
   const onemRenk: Record<string, string> = { yuksek: 'text-rose-500', orta: 'text-amber-500', bilgi: 'text-emerald-500' }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-4xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },

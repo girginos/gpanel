@@ -106,25 +106,25 @@ export default function PHPModuleriPage() {
   const pasifSayi = exts.length - aktifSayi
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Sistem Yönetimi' },
         { etiket: 'PHP Modülleri' },
       ]} />
 
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">PHP Modülleri</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
           <button onClick={() => {
               const ioncubeKurlu = exts.some(e => e.adi.toLowerCase().includes('ioncube'))
               if (ioncubeKurlu) ioncubeKaldir(); else ioncubeKur()
             }}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded-md">
+            className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap bg-amber-600 hover:bg-amber-700 text-white rounded-md">
             {exts.some(e => e.adi.toLowerCase().includes('ioncube')) ? '⊗ IonCube Kaldır' : '🔐 IonCube Yükle'}
           </button>
           <button onClick={() => setPeclModal(true)}
-            className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm rounded-md">
+            className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap bg-slate-700 hover:bg-slate-800 text-white rounded-md">
             📦 PECL'den Kur
           </button>
         </div>
@@ -134,7 +134,7 @@ export default function PHPModuleriPage() {
       </p>
 
       {/* Sürüm sekmesi */}
-      <div className="flex gap-2 mb-4 border-b border-slate-200 dark:border-slate-700">
+      <div className="flex gap-2 mb-4 border-b border-slate-200 dark:border-slate-700 overflow-x-auto [&>*]:flex-shrink-0">
         {surumler.map(s => (
           <button key={s.surum} onClick={() => setAktifSurum(s.surum)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${

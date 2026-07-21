@@ -5,6 +5,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
+import { T } from '@/lib/tablo'
 
 type Gorev = {
   idx: number
@@ -64,7 +65,7 @@ export default function DomainCronPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1300px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1300px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -81,7 +82,7 @@ export default function DomainCronPage() {
         </p>
       )}
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <button
           onClick={() => setModal(true)}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-sm transition"
@@ -97,7 +98,9 @@ export default function DomainCronPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+      {/* Çerçeve yalnız masaüstünde: mobilde satırlar zaten kart olduğundan
+          ikinci bir çerçeve iç içe görünüm yaratırdı. */}
+      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yukleniyor ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
         ) : gorevler.length === 0 ? (
@@ -110,37 +113,51 @@ export default function DomainCronPage() {
             <p className="text-sm text-slate-500 dark:text-slate-500">Henüz görev yok. Yukarıdan ekleyin.</p>
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+          // Yatay kaydırma yalnız masaüstünde; mobilde kart dizilimi gereksiz kılıyor.
+          <div className="lg:overflow-x-auto">
+            <table className={T.tablo}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className="text-left px-4 py-2.5">Dak</th>
-                <th className="text-left px-4 py-2.5">Saat</th>
-                <th className="text-left px-4 py-2.5">Gün</th>
-                <th className="text-left px-4 py-2.5">Ay</th>
-                <th className="text-left px-4 py-2.5">Hafta</th>
-                <th className="text-left px-4 py-2.5">Komut / Açıklama</th>
-                <th className="text-right px-4 py-2.5">İşlem</th>
+                <th className={T.baslik}>Dak</th>
+                <th className={T.baslik}>Saat</th>
+                <th className={T.baslik}>Gün</th>
+                <th className={T.baslik}>Ay</th>
+                <th className={T.baslik}>Hafta</th>
+                <th className={T.baslik}>Komut / Açıklama</th>
+                <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className={T.govde}>
               {gorevler.map((g) => (
-                <tr key={g.idx} className="hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.dakika}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.saat}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.gun}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.ay}</td>
-                  <td className="px-4 py-2.5 text-sm font-mono">{g.hafta}</td>
-                  <td className="px-4 py-2.5 text-sm">
-                    <div className="font-mono text-slate-800 dark:text-slate-200 truncate max-w-md" title={g.komut}>{g.komut}</div>
-                    {g.yorum && <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
+                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition`}>
+                  <td className={T.hucre} data-etiket="Dak">
+                    <span className="font-mono">{g.dakika}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className={T.hucre} data-etiket="Saat">
+                    <span className="font-mono">{g.saat}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Gün">
+                    <span className="font-mono">{g.gun}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Ay">
+                    <span className="font-mono">{g.ay}</span>
+                  </td>
+                  <td className={T.hucre} data-etiket="Hafta">
+                    <span className="font-mono">{g.hafta}</span>
+                  </td>
+                  {/* Birincil tanımlayıcı: görevi ayırt eden şey komutun kendisidir. */}
+                  <td className={T.hucreBaslik}>
+                    <div className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</div>
+                    {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
+                  </td>
+                  <td className={`${T.hucreAksiyon} lg:text-right`}>
                     <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -200,7 +217,7 @@ function CronEkleModal({ acik, onKapat, onEklendi, domainId }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           <Alan etiket="Dakika"   value={dakika} onChange={setDakika} />
           <Alan etiket="Saat"     value={saat}   onChange={setSaat} />
           <Alan etiket="Gün"      value={gun}    onChange={setGun} />

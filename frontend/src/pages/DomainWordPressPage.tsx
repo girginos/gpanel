@@ -65,7 +65,7 @@ export default function DomainWordPressPage() {
         </div>
         {!bosDurum && !formAcik && (
           <button onClick={() => { setFormAcik(true); setSonuc(null) }}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
             <span className="text-base leading-none">+</span> Yeni WordPress
           </button>
         )}
@@ -334,7 +334,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
           return (
             <div key={p.name} className="flex items-center justify-between gap-3 py-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</span>
                   <StatusPill t={aktif ? 'Etkin' : 'Devre dışı'} c={aktif ? 'green' : 'slate'} />
                 </div>
@@ -342,7 +342,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
                   Sürüm {p.version}{guncel && <span className="text-amber-600 dark:text-amber-400"> → {p.update_version} mevcut</span>}
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {guncel && <button disabled={!!mesgul} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-medium disabled:opacity-50 transition">{mesgul === `${tur}:${p.name}` ? '…' : 'Güncelle'}</button>}
                 {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? 'Devre dışı bırak' : 'Etkinleştir'}</button>}
                 {onAktif && !aktif && <button disabled={!!mesgul} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `tema:${p.name}` ? '…' : 'Etkinleştir'}</button>}
@@ -452,7 +452,7 @@ function ParolaModal({ s, kapat }: { s: { kullanici: string; parola: string }; k
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 max-w-sm w-full shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">Yeni parola oluşturuldu</div>
         <div className="text-xs text-slate-400 mb-4">Kullanıcı: <span className="font-mono text-slate-600 dark:text-slate-300">{s.kullanici}</span></div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <code className="flex-1 px-3.5 py-3 bg-slate-50 dark:bg-slate-900 rounded-xl text-sm font-mono text-slate-800 dark:text-slate-100 break-all border border-slate-100 dark:border-slate-700">{s.parola}</code>
           <button onClick={() => navigator.clipboard?.writeText(s.parola)} className="text-xs px-3.5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">Kopyala</button>
         </div>

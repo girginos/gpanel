@@ -73,7 +73,7 @@ export default function DomainWafPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
         { etiket: y?.alan_adi || '...', href: `/abonelikler/${id}` },
@@ -153,7 +153,7 @@ export default function DomainWafPage() {
               Daha yüksek seviye = daha çok kural + daha güçlü koruma, ancak yanlış-pozitif olasılığı artar.
               Yalnızca WAF <strong>Engelle</strong> veya <strong>Denetle</strong> modundayken etkilidir.
             </p>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <select
                 value={ayar.paranoya}
                 onChange={e => setAyar({ ...ayar, paranoya: parseInt(e.target.value) })}

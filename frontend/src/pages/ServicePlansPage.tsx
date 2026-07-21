@@ -59,7 +59,7 @@ export default function ServicePlansPage() {
   }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Hizmet Planları' }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">Hizmet Planları</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
@@ -97,7 +97,7 @@ export default function ServicePlansPage() {
                 {p.php_surum && <span className="shrink-0 text-[11px] font-mono font-semibold bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">PHP {p.php_surum}</span>}
               </div>
 
-              <dl className="grid grid-cols-2 gap-y-1.5 text-sm mt-4">
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-1.5 text-sm mt-4">
                 <Sat e="Disk" d={fmt(p.disk_kota_mb, 'MB')} />
                 <Sat e="Trafik" d={fmt(p.trafik_kota_mb, 'MB/ay')} />
                 <Sat e="Domain" d={fmt(p.max_domain, 'adet')} />
@@ -198,11 +198,11 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
   return (
     <Modal acik={true} baslik={yeni ? 'Yeni Plan' : 'Planı Düzenle'} onKapat={onKapat} genislik="lg">
       <form onSubmit={gonder} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Alan etiket="Plan adı" value={form.ad} setVal={v => setForm({ ...form, ad: v })} required />
           <Alan etiket="Açıklama" value={form.aciklama} setVal={v => setForm({ ...form, aciklama: v })} />
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Sayi etiket="Disk (MB)" value={form.disk_kota_mb} setVal={v => setForm({ ...form, disk_kota_mb: v })} />
           <Sayi etiket="Trafik (MB)" value={form.trafik_kota_mb} setVal={v => setForm({ ...form, trafik_kota_mb: v })} />
           <div>

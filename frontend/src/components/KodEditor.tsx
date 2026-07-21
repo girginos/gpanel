@@ -141,7 +141,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded">✓ Kaydedildi</span>}
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
             <select
               value={dil}
               onChange={e => setDil(e.target.value as Dil)}

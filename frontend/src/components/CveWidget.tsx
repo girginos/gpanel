@@ -242,7 +242,7 @@ export default function CveWidget() {
       ) : (
         <>
           {/* önem özeti */}
-          <div className="mb-3 grid grid-cols-3 gap-2.5">
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {(['kritik', 'onemli', 'orta'] as const).map((k) => (
               <div key={k} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-center dark:border-slate-800 dark:bg-slate-950/40">
                 <div className={`text-2xl font-bold tabular-nums ${ONEM[k].metin}`}>{veri[k]}</div>

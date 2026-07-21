@@ -61,7 +61,7 @@ export default function RedisPage() {
   }
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' }, { etiket: 'Redis Cache' }]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl">⚡</span>
@@ -144,7 +144,7 @@ function SatirKopya({ etiket, deger, gizli, onKopya, kopyalandi }: {
   const [goster, setGoster] = useState(false)
   const gorunen = gizli && !goster ? '•'.repeat(Math.min(deger.length, 20)) : deger
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
+    <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
       <span className="text-xs text-slate-500 dark:text-slate-400 w-28 shrink-0">{etiket}</span>
       <span className="flex-1 font-mono text-xs text-slate-800 dark:text-slate-200 truncate">{gorunen}</span>
       {gizli && (

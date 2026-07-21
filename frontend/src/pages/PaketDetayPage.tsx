@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { T } from '@/lib/tablo'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -82,8 +83,8 @@ export default function PaketDetayPage() {
     setPlan({ ...plan, [k]: v })
   }
 
-  if (yuk) return <div className="px-6 py-5 text-slate-400">Yükleniyor…</div>
-  if (!plan) return <div className="px-6 py-5"><div className="text-sm text-red-600">{hata || 'Plan bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
+  if (!plan) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Plan bulunamadı'}</div></div>
 
   // Kurulu PHP sürümleri + planın mevcut değeri (kurulu olmasa da görünsün)
   const phpOpts = Array.from(new Set([
@@ -93,7 +94,7 @@ export default function PaketDetayPage() {
   ].filter(Boolean)))
 
   return (
-    <div className="px-6 py-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
@@ -288,29 +289,37 @@ export default function PaketDetayPage() {
           {domainler.length === 0 ? (
             <div className="text-sm text-slate-400 py-6 text-center">Henüz bu plana atanmış domain yok.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+            // Mobilde yatay kaydırma yok — her satır kart olur (bkz. @/lib/tablo)
+            <div className="lg:overflow-x-auto">
+              <table className={`${T.tablo} text-sm`}>
+                <thead className={`${T.baslikGrubu} text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700`}>
                   <tr>
-                    <th className="text-left py-2">Domain</th>
-                    <th className="text-left">Sistem Kullanıcısı</th>
-                    <th className="text-left">Durum</th>
-                    <th className="text-left">Oluşturma</th>
-                    <th className="text-right">İşlem</th>
+                    <th className={T.baslik}>Domain</th>
+                    <th className={T.baslik}>Sistem Kullanıcısı</th>
+                    <th className={T.baslik}>Durum</th>
+                    <th className={T.baslik}>Oluşturma</th>
+                    <th className={`${T.baslik} text-right`}>İşlem</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className={T.govde}>
                   {domainler.map(d => (
-                    <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                      <td className="py-2"><Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 font-medium">{d.alan_adi}</Link></td>
-                      <td className="font-mono text-xs">{d.sistem_kullanici}</td>
-                      <td>
+                    <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60`}>
+                      {/* Birincil tanımlayıcı: mobilde kart başlığı olur, etiket istemez */}
+                      <td className={T.hucreBaslik}>
+                        <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 font-medium">{d.alan_adi}</Link>
+                      </td>
+                      <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
+                        <span className="font-mono text-xs break-all">{d.sistem_kullanici}</span>
+                      </td>
+                      <td className={T.hucre} data-etiket="Durum">
                         <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
                           d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
                         }`}>{d.durum}</span>
                       </td>
-                      <td className="font-mono text-xs text-slate-500">{d.olusturulma}</td>
-                      <td className="text-right">
+                      <td className={T.hucre} data-etiket="Oluşturma">
+                        <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{d.olusturulma}</span>
+                      </td>
+                      <td className={`${T.hucreAksiyon} lg:text-right`}>
                         <button onClick={() => domainicinYenidenUygula(d.id)} disabled={isleniyor}
                           className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800">
                           Yeniden Uygula

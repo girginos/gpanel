@@ -72,7 +72,7 @@ export default function SunucuOptimize() {
           {hata && <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">{hata}</div>}
 
           {calisiyor && (
-            <div className="mt-2 inline-flex items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
+            <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
               <span className="w-3 h-3 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
               Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder).
             </div>
@@ -82,7 +82,7 @@ export default function SunucuOptimize() {
             <pre ref={logRef} className="mt-2 text-[11px] font-mono bg-slate-900 text-slate-300 rounded-lg p-2.5 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{log}</pre>
           )}
 
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {!onay ? (
               <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
                 className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">

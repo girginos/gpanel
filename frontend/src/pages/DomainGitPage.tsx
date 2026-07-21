@@ -188,7 +188,7 @@ export default function DomainGitPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
@@ -313,7 +313,7 @@ export default function DomainGitPage() {
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">Private repo için SSH URL kullanın; HTTPS ile auth çalışmaz.</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Branch</label>
                   <input type="text" value={branch} onChange={e => setBranch(e.target.value)}
@@ -378,7 +378,7 @@ export default function DomainGitPage() {
               {/* Durum */}
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
                 <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Sync Durumu</h3>
-                <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
                   <Stat e="Son sync" d={repo.son_sync || '— (henüz yok)'} />
                   <Stat e="Son commit" d={repo.son_commit ? repo.son_commit.slice(0, 8) : '—'} mono />
                   <Stat e="Durum"
