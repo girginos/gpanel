@@ -68,6 +68,19 @@ else ok "wp-cli (mevcut)"; fi
 step "4) MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1; sleep 2
 systemctl is-active --quiet mariadb || die "MariaDB başlamadı"
+
+# my.cnf güvenlik sertleştirmesi: MySQL dışa KAPALI (yalnız loopback) + LOCAL INFILE kapalı.
+# Panel ve müşteri siteleri 127.0.0.1 üzerinden bağlanır; 3306 internete AÇILMAZ.
+cat > /etc/my.cnf.d/zz-girginospanel-security.cnf <<'MYCNF'
+# GirginOSPanel güvenlik sertleştirmesi (installer)
+[mysqld]
+bind-address = 127.0.0.1
+local-infile = 0
+MYCNF
+systemctl restart mariadb >/dev/null 2>&1; sleep 2
+systemctl is-active --quiet mariadb || die "MariaDB (güvenlik sertleştirmesi sonrası) başlamadı"
+ok "MariaDB güvenlik: 3306 dışa kapalı (bind 127.0.0.1) + local-infile kapalı"
+
 DBPASS=$(openssl rand -hex 16)
 mysql -u root <<SQL
 CREATE DATABASE IF NOT EXISTS panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
