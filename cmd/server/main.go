@@ -68,7 +68,17 @@ func main() {
 	}
 	d, err := db.Open(cfg.DBDsn)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		// Reboot/MariaDB gecikmesinde ANINDA log.Fatalf ile olmek yerine bekle+tekrar dene.
+		// StartLimitBurst tuzagini onler; systemd Restart=always ile panel DB gelene kadar ayakta kalir.
+		basla := time.Now()
+		for err != nil {
+			if time.Since(basla) >= 5*time.Minute {
+				log.Fatalf("db: 5dk boyunca baglanilamadi (systemd yeniden baslatacak): %v", err)
+			}
+			log.Printf("db: baglanilamadi, 3sn sonra tekrar denenecek: %v", err)
+			time.Sleep(3 * time.Second)
+			d, err = db.Open(cfg.DBDsn)
+		}
 	}
 	defer d.Close()
 
@@ -161,7 +171,10 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	// NOT: chimw.RealIP KULLANILMIYOR — spoof-edilebilir X-Forwarded-For / X-Real-IP /
+	// True-Client-IP basliklarini guvenilir-vekil kontrolu OLMADAN r.RemoteAddr'a yazip
+	// giris hiz-sinirini atlatilabilir kilardi. Gercek istemci IP'si httpx.ClientIP ile
+	// alinir (yalniz loopback/nginx peer'dan gelen X-Real-IP'ye guvenir).
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(300 * time.Second))
 
@@ -180,13 +193,16 @@ func main() {
 	r.Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/login", authH.Login)
-		r.Post("/musteri/login", musteriH.Login)
+		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
+		r.With(middleware.GirisLimiti).Post("/auth/login", authH.Login)
+		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
 			r.With(middleware.AdminOnly).Put("/me", authH.ProfilGuncelle)
+			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
+			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
 			r.With(middleware.AdminOnly).Post("/me/parola", authH.ParolaDegistir)
 			r.With(middleware.AdminOnly).Get("/me/2fa/setup", authH.TwoFASetup)
 			r.With(middleware.AdminOnly).Post("/me/2fa/enable", authH.TwoFAEnable)
@@ -202,6 +218,11 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/optimize", system.OptimizeDurum)
 			r.With(middleware.AdminOnly).Post("/system/optimize/baslat", system.OptimizeBaslat)
 			r.With(middleware.AdminOnly).Get("/system/optimize/log", system.OptimizeLog)
+			r.With(middleware.AdminOnly).Get("/system/cve", system.CveDurum)
+			r.With(middleware.AdminOnly).Post("/system/cve/guncelle", system.CveGuncelle)
+			r.With(middleware.AdminOnly).Get("/system/cve/log", system.CveLog)
+			r.With(middleware.AdminOnly).Get("/system/kernelcare", system.KernelcareDurumHandler)
+			r.With(middleware.AdminOnly).Post("/system/kernelcare/yamala", system.KernelcareYamala)
 			eklentiH.Routes(r)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
@@ -378,6 +399,8 @@ func main() {
 				r.With(middleware.AdminOnly).Get("/php-surumler", phpSurumH.Liste)
 				r.With(middleware.AdminOnly).Post("/php-surumler/kur", phpSurumH.Kur)
 				r.With(middleware.AdminOnly).Post("/php-surumler/kaldir", phpSurumH.Kaldir)
+				r.With(middleware.AdminOnly).Get("/php-surumler/durum", phpSurumH.OpDurum)
+				r.With(middleware.AdminOnly).Get("/php-surumler/log", phpSurumH.OpLog)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/git", gitH.Sil)
 			})
 		})

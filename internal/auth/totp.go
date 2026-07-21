@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
@@ -15,10 +16,14 @@ import (
 // RFC 6238 TOTP (HMAC-SHA1, 6 hane, 30sn period) — harici bağımlılık YOK.
 
 // TOTPGenerateSecret: 160-bit rastgele base32 secret üretir (padding'siz).
-func TOTPGenerateSecret() string {
+// rand.Read hatasında ("", error) döner — hatayı yutup tahmin edilebilir (all-zero)
+// bir secret üretmek 2FA'yı komple çökertirdi.
+func TOTPGenerateSecret() (string, error) {
 	b := make([]byte, 20)
-	_, _ = rand.Read(b)
-	return strings.TrimRight(base32.StdEncoding.EncodeToString(b), "=")
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(base32.StdEncoding.EncodeToString(b), "="), nil
 }
 
 func hotp(secret string, counter uint64) (string, bool) {
@@ -43,19 +48,36 @@ func hotp(secret string, counter uint64) (string, bool) {
 	return fmt.Sprintf("%06d", val%1000000), true
 }
 
-// TOTPVerify: ±1 pencere (30sn saat kayması) toleransıyla kodu doğrular.
-func TOTPVerify(secret, code string) bool {
+// gecerliAdim: kodu ±1 pencerede SABİT ZAMANLI doğrular ve kabul edilen 30sn
+// zaman-adımını döndürür. minAdim'dan küçük/eşit adımlar REDDEDİLİR (replay koruması:
+// aynı kodun tekrar kullanımını engeller). ok=false ise adım=0.
+func gecerliAdim(secret, code string, minAdim int64) (int64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != 6 || secret == "" {
-		return false
+		return 0, false
 	}
-	t := uint64(time.Now().Unix()) / 30
-	for _, c := range []uint64{t - 1, t, t + 1} {
-		if v, ok := hotp(secret, c); ok && v == code {
-			return true
+	t := time.Now().Unix() / 30
+	for _, c := range []int64{t - 1, t, t + 1} {
+		if c <= minAdim {
+			continue
+		}
+		if v, ok := hotp(secret, uint64(c)); ok && subtle.ConstantTimeCompare([]byte(v), []byte(code)) == 1 {
+			return c, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+// TOTPVerify: geriye-uyumlu, replay-korumasız doğrulama (2FA kapatma için).
+func TOTPVerify(secret, code string) bool {
+	_, ok := gecerliAdim(secret, code, -1)
+	return ok
+}
+
+// TOTPVerifyAdim: login/enable için replay-korumalı doğrulama; sonAdim'dan SONRAKİ
+// bir adımda eşleşen kodu kabul eder ve o adımı döndürür (çağıran DB'ye yazmalı).
+func TOTPVerifyAdim(secret, code string, sonAdim int64) (int64, bool) {
+	return gecerliAdim(secret, code, sonAdim)
 }
 
 // TOTPURI: authenticator uygulamalarının okuduğu otpauth:// URI'si (QR için).

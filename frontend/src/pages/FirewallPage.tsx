@@ -141,7 +141,7 @@ export default function FirewallPage() {
               <div className="text-[11px] font-mono text-slate-400 mt-1">Port: {s.portlar}</div>
             </div>
             <button onClick={() => sablonUygula(s)} disabled={!!mesgul}
-              className="shrink-0 self-center px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-lg disabled:opacity-50">
+              className="shrink-0 self-center px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
               {mesgul === 'sablon:' + s.key ? '…' : 'Uygula'}
             </button>
           </div>
@@ -213,7 +213,7 @@ export default function FirewallPage() {
           </div>
         )}
 
-        <button disabled={mesgul === 'manuel'} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+        <button disabled={mesgul === 'manuel'} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
           {mesgul === 'manuel' ? 'Uygulanıyor…' : 'Kuralı Ekle ve Uygula'}
         </button>
       </form>

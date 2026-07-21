@@ -114,7 +114,7 @@ export default function SettingsPage() {
     } catch { setTOk('') } finally { setTYuk(false) }
   }
 
-  const btn = 'px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-50 inline-flex items-center gap-2'
+  const btn = 'px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 inline-flex items-center gap-2'
   const secretGruplu = f2Kur ? (f2Kur.secret.match(/.{1,4}/g) || []).join(' ') : ''
 
   return (

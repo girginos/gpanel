@@ -223,7 +223,7 @@ export default function PHPModuleriPage() {
               <button onClick={() => {
                 const v = (document.getElementById('peclPaketAdi') as HTMLInputElement)?.value?.trim()
                 if (v) peclKur(v)
-              }} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded">Kur</button>
+              }} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">Kur</button>
             </div>
           </div>
         </div>

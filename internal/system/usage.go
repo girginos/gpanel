@@ -549,7 +549,9 @@ func ReadServisler() []ServiceStat {
 	}
 	for i, s := range servisListesi {
 		aktif := mat[i]
-		if !aktif && (s.ad == "pure-ftpd" || strings.HasPrefix(s.ad, "php")) {
+		// Kurulu DEGILSE (unit-file yok) servis absent'tir; "kapali" gosterip operatoru YANILTMA.
+		// Yalniz kurulu-ama-duruk (unit var, inactive) gercek sorun olarak gorunur.
+		if !aktif {
 			cmd := exec.Command("systemctl", "list-unit-files", s.ad+".service", "--no-legend")
 			b, _ := cmd.Output()
 			if len(strings.TrimSpace(string(b))) == 0 {

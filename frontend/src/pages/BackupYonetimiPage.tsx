@@ -62,7 +62,7 @@ export default function BackupYonetimiPage() {
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={simdiYedekle} disabled={yedekliyor}
-            className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-lg disabled:opacity-50">
+            className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
             {yedekliyor ? 'Tetikleniyor…' : '⏱ Tüm Domainleri Şimdi Yedekle'}
           </button>
           <button onClick={yukle} disabled={yuk} className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>

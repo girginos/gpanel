@@ -12,5 +12,6 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/openwall/yescrypt-go v1.0.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 )

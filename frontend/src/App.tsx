@@ -37,6 +37,8 @@ import PHPSurumleriPage from '@/pages/PHPSurumleriPage'
 import AraclarAyarlarPage from '@/pages/AraclarAyarlarPage'
 import DNSSablonuPage from '@/pages/DNSSablonuPage'
 import ServislerPage from '@/pages/ServislerPage'
+import PanelGuncellemePage from '@/pages/PanelGuncellemePage'
+import SunucuOptimizePage from '@/pages/SunucuOptimizePage'
 import WordPressPage from '@/pages/WordPressPage'
 import FirewallPage from '@/pages/FirewallPage'
 import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
@@ -100,6 +102,8 @@ export default function App() {
         <Route path="araclar/php-surumler"           element={<PHPSurumleriPage />} />
         <Route path="araclar/servisler"              element={<ServislerPage />} />
         <Route path="araclar/dns-sablonu"            element={<DNSSablonuPage />} />
+        <Route path="araclar/guncelleme" element={<PanelGuncellemePage />} />
+        <Route path="araclar/optimize" element={<SunucuOptimizePage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
 

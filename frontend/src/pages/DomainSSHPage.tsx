@@ -108,7 +108,7 @@ export default function DomainSSHPage() {
               </button>
             ) : (
               <button onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-lg">
+                className="shrink-0 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
                 SSH'i Aç
               </button>
             )}
@@ -153,7 +153,7 @@ export default function DomainSSHPage() {
           <div className="mt-3 flex items-center justify-between">
             <p className="text-xs text-slate-400">Boş bırakıp kaydederseniz tüm anahtarlar silinir.</p>
             <button onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-lg">
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
               Anahtarı Kaydet
             </button>
           </div>

@@ -106,7 +106,7 @@ export default function ServicePlansPage() {
               </dl>
 
               <div className="mt-4 flex gap-2">
-                <Link to={`/araclar/paketler/${p.id}`} className="flex-1 text-center text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-md">
+                <Link to={`/araclar/paketler/${p.id}`} className="flex-1 text-center text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md">
                   Detay & Kaynak Limitleri
                 </Link>
                 <button onClick={() => setSilinecek(p)} className="text-sm px-3 py-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 rounded-md">Sil</button>
@@ -226,7 +226,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onKapat} className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm">İptal</button>
-          <button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded-md">{isleniyor ? 'Kaydediliyor…' : (yeni ? 'Ekle' : 'Güncelle')}</button>
+          <button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded-md">{isleniyor ? 'Kaydediliyor…' : (yeni ? 'Ekle' : 'Güncelle')}</button>
         </div>
       </form>
     </Modal>

@@ -74,7 +74,7 @@ export default function DomainSubdomainlerPage() {
             <input value={altAd} onChange={e => setAltAd(e.target.value.toLowerCase())} required placeholder="blog"
               className="mt-1 w-48 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </label>
-          <button disabled={kaydediyor || !altAd.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+          <button disabled={kaydediyor || !altAd.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
             {kaydediyor ? 'Oluşturuluyor…' : 'Subdomain Ekle'}
           </button>
         </div>

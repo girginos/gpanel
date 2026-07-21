@@ -148,7 +148,7 @@ export default function AddDomainModal({
           <button
             type="submit"
             disabled={yukleniyor || !alanAdi.trim()}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 rounded-md text-sm font-medium transition"
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded-md text-sm font-medium transition"
           >
             {yukleniyor ? 'Sağlanıyor…' : 'Domain Ekle'}
           </button>

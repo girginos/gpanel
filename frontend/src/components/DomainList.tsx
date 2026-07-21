@@ -39,7 +39,7 @@ export default function DomainList({
         </h3>
         <button
           type="button"
-          className="text-xs px-2 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded font-medium shadow-sm transition"
+          className="text-xs px-2 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium shadow-sm transition"
           title="F2'de aktif olacak"
           disabled
         >

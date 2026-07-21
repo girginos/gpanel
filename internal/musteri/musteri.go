@@ -27,6 +27,7 @@ type loginReq struct {
 
 // Login: FTP user/password ile, FTP hesabının bağlı olduğu domain için JWT döner
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64KB üstü login gövdesi = kötüye kullanım (DoS)
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")

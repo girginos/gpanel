@@ -425,7 +425,7 @@ export default function DomainPHPPage() {
           {/* Kaydet */}
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">
+              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
               {isleniyor ? 'Kaydediliyor…' : '💾 Kaydet ve Uygula'}
             </button>
             <button onClick={yukle} disabled={isleniyor}

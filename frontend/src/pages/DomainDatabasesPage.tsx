@@ -77,7 +77,7 @@ export default function DomainDatabasesPage() {
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5"><Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link></p>}
 
       <div className="flex items-center gap-2 mb-4">
-        <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-md">+ Yeni Veritabanı</button>
+        <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">+ Yeni Veritabanı</button>
         <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ Yenile</button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{dbler.length} veritabanı</span>
       </div>
@@ -253,7 +253,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
             <SonucSatir e="Parola" v={sonuc.db_parola} />
           </div>
           <div className="flex justify-end">
-            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded-md">Tamam</button>
+            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">Tamam</button>
           </div>
         </div>
       ) : (
@@ -325,7 +325,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md text-sm">İptal</button>
-            <button onClick={olustur} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? 'Oluşturuluyor…' : 'Oluştur'}</button>
+            <button onClick={olustur} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? 'Oluşturuluyor…' : 'Oluştur'}</button>
           </div>
         </div>
       )}
@@ -388,7 +388,7 @@ function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; o
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm">İptal</button>
             <button onClick={() => sifirla(false)} disabled={isleniyor || !ozelPw} className="px-4 py-2 bg-white dark:bg-slate-800 border border-brand-600 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 disabled:opacity-50 rounded-md text-sm">Bunu Ayarla</button>
-            <button onClick={() => sifirla(true)} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? 'Sıfırlanıyor…' : 'Rastgele Üret'}</button>
+            <button onClick={() => sifirla(true)} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? 'Sıfırlanıyor…' : 'Rastgele Üret'}</button>
           </div>
         </div>
       ) : (
@@ -402,7 +402,7 @@ function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; o
             </div>
           </div>
           <div className="flex justify-end">
-            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded-md">Tamam</button>
+            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">Tamam</button>
           </div>
         </div>
       )}

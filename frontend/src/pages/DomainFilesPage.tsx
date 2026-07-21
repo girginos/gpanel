@@ -543,7 +543,7 @@ export default function DomainFilesPage() {
         {/* + dropdown (Yeni Dosya / Klasör / Upload) */}
         <div className="relative">
           <button onClick={() => setYeniMenuAcik(v => !v)}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded shadow-sm">
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded shadow-sm">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
@@ -755,7 +755,7 @@ export default function DomainFilesPage() {
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-500 font-mono">{boyutSonuc.boyut.toLocaleString('tr-TR')} bayt</div>
             <div className="mt-4 flex justify-end">
-              <button onClick={() => setBoyutSonuc(null)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded">Tamam</button>
+              <button onClick={() => setBoyutSonuc(null)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">Tamam</button>
             </div>
           </div>
         </div>
@@ -895,7 +895,7 @@ function RenameModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (yeni
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
           <button onClick={() => onTamam(ad)} disabled={!ad || ad === entry.adi}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded">Adlandır</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Adlandır</button>
         </div>
       </div>
     </div>
@@ -928,7 +928,7 @@ function ChmodModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (mod: 
         <div className="text-xs text-slate-500 dark:text-slate-500 mb-3">Octal: <input value={mod} onChange={e => setMod(e.target.value)} className="font-mono ml-1 px-2 py-0.5 border border-slate-300 dark:border-slate-600 rounded w-20" /></div>
         <div className="flex justify-end gap-2">
           <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
-          <button onClick={() => onTamam(mod)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded">Uygula</button>
+          <button onClick={() => onTamam(mod)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">Uygula</button>
         </div>
       </div>
     </div>
@@ -971,7 +971,7 @@ function KopyaTasiModal({ tip, yollar, domainId, onTamam, onIptal }:
         <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">Hedefin var olması gerekir. {tip === 'kopyala' ? 'Klasörler içerikleriyle kopyalanır.' : 'Aynı diskte taşıma anlık.'}</p>
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
-          <button onClick={() => onTamam(hedef)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded">{baslik}</button>
+          <button onClick={() => onTamam(hedef)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{baslik}</button>
         </div>
       </div>
     </div>
@@ -1003,7 +1003,7 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
           <button onClick={() => onTamam(ad, format)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded">Arşivle</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Arşivle</button>
         </div>
       </div>
     </div>
@@ -1023,7 +1023,7 @@ function YeniDosyaModal({ onTamam, onIptal }: { onTamam: (ad: string) => void; o
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
           <button onClick={() => onTamam(ad)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded">Oluştur ve Düzenle</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Oluştur ve Düzenle</button>
         </div>
       </div>
     </div>

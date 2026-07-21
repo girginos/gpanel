@@ -65,7 +65,7 @@ export default function DomainWordPressPage() {
         </div>
         {!bosDurum && !formAcik && (
           <button onClick={() => { setFormAcik(true); setSonuc(null) }}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-100 transition">
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
             <span className="text-base leading-none">+</span> Yeni WordPress
           </button>
         )}
@@ -198,7 +198,7 @@ function Toolkit({ id, kurulum, onDegisti }: { id: string; kurulum: Kurulum; onD
         <div className="flex items-center gap-2 shrink-0">
           {kurulum.admin_url && (
             <a href={kurulum.admin_url} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-medium hover:bg-slate-800 dark:hover:bg-slate-100 transition">
+              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-xs font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
               Yönetim paneli <span className="opacity-70">↗</span>
             </a>
           )}
@@ -293,7 +293,7 @@ function StatusPill({ t, c }: { t: string; c: 'green' | 'amber' | 'red' | 'slate
 
 function Btn({ onClick, bekle, children, tur }: { onClick: () => void; bekle: boolean; children: React.ReactNode; tur?: 'primary' | 'outline' }) {
   const cls = tur === 'primary'
-    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 border-transparent'
+    ? 'bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:bg-slate-800 dark:hover:bg-slate-600 border-transparent'
     : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
   return (
     <button onClick={onClick} disabled={bekle} className={`text-sm px-4 py-2 rounded-full border font-medium disabled:opacity-50 transition ${cls}`}>
@@ -324,7 +324,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
       {guncellenebilir > 0 && (
         <div className="flex items-center justify-between mb-4 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/15 border border-amber-100 dark:border-amber-800/50">
           <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">{guncellenebilir} güncelleme mevcut</span>
-          <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-medium hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : 'Tümünü güncelle'}</button>
+          <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : 'Tümünü güncelle'}</button>
         </div>
       )}
       <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -401,7 +401,7 @@ function KurulumFormu(p: {
         <Girdi et="Admin kullanıcı" v={p.adminK} set={p.setAdminK} zorunlu mono />
         <Girdi et="Admin e-posta" v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
       </div>
-      <button disabled={p.kuruyor} className="mt-5 px-5 py-2.5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition">
+      <button disabled={p.kuruyor} className="mt-5 px-5 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">
         {p.kuruyor ? 'Kuruluyor… (~30 sn)' : 'WordPress kur'}
       </button>
     </form>
@@ -457,7 +457,7 @@ function ParolaModal({ s, kapat }: { s: { kullanici: string; parola: string }; k
           <button onClick={() => navigator.clipboard?.writeText(s.parola)} className="text-xs px-3.5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">Kopyala</button>
         </div>
         <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">Bu parola tekrar gösterilmez — şimdi kaydedin.</p>
-        <button onClick={kapat} className="mt-5 w-full py-2.5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-100 transition">Tamam</button>
+        <button onClick={kapat} className="mt-5 w-full py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">Tamam</button>
       </div>
     </div>
   )

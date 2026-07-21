@@ -111,7 +111,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={yukleniyor}
-              className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 font-medium py-2.5 rounded-lg transition shadow-lg shadow-brand-600/20 disabled:shadow-none"
+              className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 font-medium py-2.5 rounded-lg transition shadow-lg shadow-brand-600/20 disabled:shadow-none"
             >
               {yukleniyor ? 'Giriş yapılıyor…' : ikiFa ? 'Doğrula ve giriş yap' : 'Giriş yap'}
             </button>

@@ -89,7 +89,7 @@ export default function RedisPage() {
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">Bu domain için Redis cache kapalı.</p>
           <p className="text-xs text-slate-400 mb-4">Etkinleştirince izole bir ACL kullanıcısı + bağlantı bilgisi oluşturulur.</p>
           <button onClick={ac} disabled={mesgul}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
             {mesgul ? 'Etkinleştiriliyor…' : 'Redis Cache Etkinleştir'}
           </button>
         </div>
@@ -118,7 +118,7 @@ export default function RedisPage() {
               <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">WordPress kurulumu</h3>
                 <button onClick={() => kopyala(d.wp_snippet!, 'wp')}
-                  className="text-xs px-2.5 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-md">
+                  className="text-xs px-2.5 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md">
                   {kopyalandi === 'wp' ? 'Kopyalandı ✓' : 'Kopyala'}
                 </button>
               </div>

@@ -1,13 +1,14 @@
 [Unit]
 Description=GirginOSPanel backend
 After=network-online.target mariadb.service
-Wants=network-online.target
+Wants=network-online.target mariadb.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/girginospanel/env
 ExecStart=/opt/girginospanel/bin/girginospanel-server
-Restart=on-failure
+Restart=always
 RestartSec=3
 User=root
 StandardOutput=journal

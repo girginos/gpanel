@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -362,6 +361,213 @@ func dnfHataOzet(out string) string {
 	return son
 }
 
+// ============================================================================
+// Detached kurulum/kaldırma — systemd-run transient unit (PID 1 altında).
+//
+// 🔴 NEDEN: Eskiden Kur/Kaldir, `dnf install`i HTTP isteğinin goroutine'inde
+// r.Context()'e BAĞLI çalıştırıyordu. Kullanıcı sekmeyi kapatınca r.Context()
+// iptal olup dnf'i İŞLEM ORTASINDA SIGKILL ediyordu → yarım kurulum + dnf/rpm
+// kilidi asılı kalabiliyordu. Artık iş, panelin systemd cgroup'unda DEĞİL,
+// `systemd-run` ile PID 1 altında AYRI transient unit'te koşar (istekten
+// BAĞIMSIZ). İstemci bağlantısı kopsa da iş tamamlanır. guncelleme.go /
+// optimize.go ile AYNI desen; endpoint 202 döner, durum/log ile izlenir.
+//
+// 🔴 KİLİT GÜVENLİĞİ: wrapper devam eden GERÇEK dnf/rpm transaction'ını ASLA
+// öldürmez / kilidi ZORLA kaldırmaz (rpmdb bozulması = sunucu çöker). Yalnızca
+// güvenli dnf zamanlayıcılarını (makecache/automatic) durdurur ve gerçek işlem
+// varsa BİTMESİNİ bekler; dnf zaten kilit beklemesini kendi yapar.
+// ============================================================================
+
+const (
+	phpOpLogDir         = "/opt/girginospanel/logs"
+	phpOpMarker         = "/opt/girginospanel/logs/php-op.json"
+	phpKurUnitPrefix    = "girginospanel-php-kur-"
+	phpKaldirUnitPrefix = "girginospanel-php-kaldir-"
+)
+
+// phpOpMark: o an aktif olan TEK PHP işini işaretler (resume-on-reopen + tek-iş
+// serileştirmesi için — dnf tek transaction'a izin verir).
+type phpOpMark struct {
+	Islem  string `json:"islem"` // "kur" | "kaldir"
+	Surum  string `json:"surum"`
+	Kaynak string `json:"kaynak"`
+	Unit   string `json:"unit"`
+	Log    string `json:"log"`
+	Bas    string `json:"bas"`
+}
+
+// phpOpKey: sürüm+kaynak için benzersiz, systemd-güvenli birim/dosya anahtarı.
+// remi 8.3 → "83-remi", appstream 8.3 → "83-appstream".
+func phpOpKey(m SurumMeta) string {
+	kod := m.Kod
+	if kod == "" {
+		kod = strings.ReplaceAll(m.Surum, ".", "")
+	}
+	return kod + "-" + m.Kaynak
+}
+
+func phpSystemctlActive(unit string) string {
+	b, _ := exec.Command("systemctl", "is-active", unit).CombinedOutput()
+	return strings.TrimSpace(string(b))
+}
+
+// phpOpOku: marker'ı oku ve unit hâlâ çalışıyor mu döndür. Marker yoksa/bozuksa
+// (mark boş, aktif=false).
+func phpOpOku() (mark phpOpMark, aktif bool) {
+	b, err := os.ReadFile(phpOpMarker)
+	if err != nil {
+		return phpOpMark{}, false
+	}
+	if json.Unmarshal(b, &mark) != nil || mark.Unit == "" {
+		return phpOpMark{}, false
+	}
+	d := phpSystemctlActive(mark.Unit)
+	aktif = d == "active" || d == "activating"
+	return mark, aktif
+}
+
+func phpOpMarkerYaz(mark phpOpMark) error {
+	b, _ := json.Marshal(mark)
+	tmp := phpOpMarker + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o640); err != nil {
+		return err
+	}
+	return os.Rename(tmp, phpOpMarker) // atomik
+}
+
+// wrapperYaz: SABİT wrapper scriptini atomik yazar (0700, panel-özel).
+func wrapperYaz(yol, icerik string) error {
+	tmp := yol + ".tmp"
+	if err := os.WriteFile(tmp, []byte(icerik), 0o700); err != nil {
+		return err
+	}
+	return os.Rename(tmp, yol)
+}
+
+// phpKilitBekleSnippet: SABİT bash — (a) dnf zamanlayıcılarını durdur (kilit
+// kaynakları, SADECE PHP kurulum yolunda), (b) devam eden GERÇEK dnf/rpm işlemini
+// ÖLDÜRMEDEN bekle. Kullanıcı girdisi İÇERMEZ. Kilidi ASLA zorla kaldırmaz.
+const phpKilitBekleSnippet = `echo "▶ dnf otomatik görevleri durduruluyor (kilit kaynakları — sadece PHP kurulum yolu)"
+systemctl disable --now dnf-makecache.timer dnf-automatic.timer dnf-automatic-install.timer >/dev/null 2>&1 || true
+echo "  ✓ zamanlayıcılar durduruldu (mevcut olmayanlar atlandı)"
+echo
+echo "▶ Devam eden dnf/rpm işlemi kontrol ediliyor (varsa BEKLENİR — ASLA öldürülmez)"
+paket_mesgul() {
+  pgrep -x dnf-3       >/dev/null 2>&1 && return 0
+  pgrep -x dnf         >/dev/null 2>&1 && return 0
+  pgrep -x dnf5        >/dev/null 2>&1 && return 0
+  pgrep -x packagekitd >/dev/null 2>&1 && return 0
+  if command -v fuser >/dev/null 2>&1 && fuser /var/lib/rpm/.rpm.lock >/dev/null 2>&1; then return 0; fi
+  return 1
+}
+bekle=0; max=600
+while [ "$bekle" -lt "$max" ]; do
+  if paket_mesgul; then
+    echo "  ⏳ Aktif paket işlemi var — bitmesi bekleniyor (öldürülmüyor) ${bekle}s…"
+    sleep 5; bekle=$((bekle+5))
+  else
+    break
+  fi
+done
+if [ "$bekle" -ge "$max" ]; then
+  echo "  ⚠ ${max}s doldu — dnf kendi kilit beklemesiyle sürdürecek (kilit ZORLA kaldırılmadı)"
+fi
+echo "  ✓ devam ediliyor"
+echo
+`
+
+// phpKurWrapper: bir sürüm için SABİT kurulum scripti. Değerler (paket listesi,
+// pool/php.d dizini, servis adı) DesteklenenSurumler allowlist'inden türetilir —
+// ham kullanıcı girdisi argümana geçmez. Adım sırası: timer-durdur → kilit-bekle
+// → dnf install → mevcut Kur'un TÜM kurulum-sonrası yapılandırması.
+func phpKurWrapper(m SurumMeta) string {
+	pd, _, svc, _ := yollar(m)
+	phpdDir := "/etc/php.d"
+	if m.Kaynak == "remi" {
+		phpdDir = "/etc/opt/remi/php" + m.Kod + "/php.d"
+	}
+	pkgs := strings.Join(PaketAdlari(m), " ")
+
+	remiWww := ""
+	if m.Kaynak == "remi" {
+		// Mevcut davranış: www.conf.disabled varsa ve www.conf yoksa aktive et.
+		remiWww = fmt.Sprintf(`# Remi: www.conf.disabled → www.conf (yoksa)
+if [ -f '%[1]s/www.conf.disabled' ] && [ ! -f '%[1]s/www.conf' ]; then
+  mv '%[1]s/www.conf.disabled' '%[1]s/www.conf' && echo "  ✓ www.conf etkinleştirildi" || true
+fi
+`, pd)
+	}
+
+	return fmt.Sprintf(`#!/usr/bin/env bash
+set -uo pipefail
+echo "════════ PHP %[1]s (%[2]s) kurulumu — $(date "+%%Y-%%m-%%d %%H:%%M:%%S") ════════"
+echo
+%[3]secho "▶ Paketler kuruluyor:"
+echo "    %[4]s"
+if ! dnf install -y %[4]s; then
+  echo
+  echo "✗ HATA: dnf install başarısız — kurulum durduruldu."
+  exit 1
+fi
+echo "  ✓ paketler kuruldu"
+echo
+echo "▶ GirginOSPanel yapılandırması"
+mkdir -p '%[5]s' 2>/dev/null || true
+%[6]smkdir -p '%[7]s' 2>/dev/null || true
+cat > '%[7]s/99-girginospanel-input.ini' <<'GOSPINI'
+; GirginOSPanel: buyuk form/import (phpMyAdmin, WordPress) - takilma onler
+max_input_vars = 10000
+GOSPINI
+echo "  ✓ max_input_vars ayarı yazıldı"
+if systemctl enable --now '%[8]s'; then
+  echo "  ✓ %[8]s etkin ve başlatıldı"
+else
+  echo "  ⚠ %[8]s başlatılamadı (paketler kuruldu; servis elle kontrol edilebilir)"
+fi
+echo
+echo "════════ ✓ PHP %[1]s kurulumu tamamlandı ════════"
+`,
+		m.Surum,              // 1
+		m.Kaynak,             // 2
+		phpKilitBekleSnippet, // 3
+		pkgs,                 // 4
+		pd,                   // 5
+		remiWww,              // 6
+		phpdDir,              // 7
+		svc,                  // 8
+	)
+}
+
+// phpKaldirWrapper: bir Remi sürümü için SABİT kaldırma scripti. FPM'i durdur →
+// timer-durdur/kilit-bekle → dnf remove. Glob dnf'e (bash değil) çözdürülür.
+func phpKaldirWrapper(m SurumMeta) string {
+	_, _, svc, _ := yollar(m)
+	glob := "php" + m.Kod + "-*"
+	return fmt.Sprintf(`#!/usr/bin/env bash
+set -uo pipefail
+echo "════════ PHP %[1]s (remi) kaldırılıyor — $(date "+%%Y-%%m-%%d %%H:%%M:%%S") ════════"
+echo
+echo "▶ FPM servisi durduruluyor: %[2]s"
+systemctl disable --now '%[2]s' >/dev/null 2>&1 || true
+echo "  ✓ servis durduruldu"
+echo
+%[3]secho "▶ Paketler kaldırılıyor: %[4]s"
+if ! dnf remove -y '%[4]s'; then
+  echo
+  echo "✗ HATA: dnf remove başarısız."
+  exit 1
+fi
+echo "  ✓ paketler kaldırıldı"
+echo
+echo "════════ ✓ PHP %[1]s kaldırıldı ════════"
+`,
+		m.Surum,              // 1
+		svc,                  // 2
+		phpKilitBekleSnippet, // 3
+		glob,                 // 4
+	)
+}
+
 // ----- HTTP -----
 
 type Handlers struct {
@@ -413,49 +619,55 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
-	defer cancel()
-	args := append([]string{"install", "-y"}, PaketAdlari(m)...)
-	cmd := exec.CommandContext(ctx, "dnf", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"PHP "+req.Surum+" kurulamadı: "+dnfHataOzet(string(out)))
+	// Tek PHP işi (dnf tek transaction). Devam eden varsa reddet.
+	if mark, aktif := phpOpOku(); aktif {
+		httpx.WriteError(w, http.StatusConflict,
+			fmt.Sprintf("Başka bir PHP işlemi sürüyor (PHP %s — %s). Bitince tekrar deneyin.", mark.Surum, mark.Islem))
 		return
 	}
 
-	// Pool dizini yoksa olustur + default www.conf
-	pd, _, svc, _ := yollar(m)
-	_ = os.MkdirAll(pd, 0755)
-	// Remi'de www.conf.disabled varsa aktive et
-	if m.Kaynak == "remi" {
-		dis := filepath.Join(pd, "www.conf.disabled")
-		main := filepath.Join(pd, "www.conf")
-		if _, err := os.Stat(dis); err == nil {
-			_, _ = os.Stat(main) // varsa atla
-			if _, err := os.Stat(main); err != nil {
-				_ = os.Rename(dis, main)
-			}
-		}
-	}
-	// GirginOSPanel default: buyuk form/import (phpMyAdmin, WordPress) icin max_input_vars
-	phpdDir := "/etc/php.d"
-	if m.Kaynak == "remi" {
-		phpdDir = "/etc/opt/remi/php" + m.Kod + "/php.d"
-	}
-	if err := os.MkdirAll(phpdDir, 0755); err == nil {
-		_ = os.WriteFile(filepath.Join(phpdDir, "99-girginospanel-input.ini"),
-			[]byte("; GirginOSPanel: buyuk form/import (phpMyAdmin, WordPress) - takilma onler\nmax_input_vars = 10000\n"), 0644)
-	}
+	// 🔴 DETACHED: dnf install artık istekte DEĞİL, systemd-run ile PID 1 altında
+	// ayrı transient unit'te koşar → sekme kapansa (r.Context iptal olsa) bile iş
+	// tamamlanır. Wrapper: timer-durdur → kilit-bekle → dnf install → kurulum-sonrası.
+	key := phpOpKey(m)
+	unit := phpKurUnitPrefix + key
+	logYol := phpOpLogDir + "/php-kur-" + key + ".log"
+	wrapperYol := "/opt/girginospanel/php-kur-" + key + ".sh"
 
-	// FPM servis enable + start
-	_, _ = exec.Command("systemctl", "enable", "--now", svc).CombinedOutput()
-
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"ok":     true,
-		"surum":  req.Surum,
-		"kaynak": req.Kaynak,
-		"output": string(out),
+	_ = os.MkdirAll(phpOpLogDir, 0o750)
+	if err := wrapperYaz(wrapperYol, phpKurWrapper(m)); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "hazırlanamadı: "+err.Error())
+		return
+	}
+	bas := fmt.Sprintf("=== PHP %s (%s) kurulumu başlatıldı: %s ===\n",
+		m.Surum, m.Kaynak, time.Now().Format("2006-01-02 15:04:05"))
+	if err := os.WriteFile(logYol, []byte(bas), 0o640); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "log açılamadı: "+err.Error())
+		return
+	}
+	// systemd-run: PID 1 altında transient unit; çıktı append: ile log dosyasına
+	// (shell string YOK — tüm argümanlar sabit, r.Context() KULLANILMAZ).
+	cmd := exec.Command("systemd-run",
+		"--collect",
+		"--unit", unit,
+		"--description", "GirginOSPanel PHP "+m.Surum+" kurulum",
+		"-p", "StandardOutput=append:"+logYol,
+		"-p", "StandardError=append:"+logYol,
+		wrapperYol)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "başlatılamadı: "+strings.TrimSpace(string(out)))
+		return
+	}
+	_ = phpOpMarkerYaz(phpOpMark{
+		Islem: "kur", Surum: m.Surum, Kaynak: m.Kaynak,
+		Unit: unit, Log: logYol, Bas: time.Now().Format("2006-01-02 15:04:05"),
+	})
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"baslatildi": true,
+		"surum":      m.Surum,
+		"kaynak":     m.Kaynak,
+		"islem":      "kur",
+		"unit":       unit,
 	})
 }
 
@@ -492,23 +704,89 @@ func (h *Handlers) Kaldir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FPM durdur
-	_, svc, _, _ := yollar(m)
-	_, _ = exec.Command("systemctl", "disable", "--now", svc).CombinedOutput()
-	_ = svc
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-	args := append([]string{"remove", "-y"}, "php"+m.Kod+"-*")
-	cmd := exec.CommandContext(ctx, "dnf", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"PHP "+req.Surum+" kaldırılamadı: "+dnfHataOzet(string(out)))
+	// Tek PHP işi (dnf tek transaction). Devam eden varsa reddet.
+	if mark, aktif := phpOpOku(); aktif {
+		httpx.WriteError(w, http.StatusConflict,
+			fmt.Sprintf("Başka bir PHP işlemi sürüyor (PHP %s — %s). Bitince tekrar deneyin.", mark.Surum, mark.Islem))
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"output": string(out),
+
+	// 🔴 DETACHED: FPM durdurma + dnf remove artık istekte DEĞİL, systemd-run ile
+	// PID 1 altında ayrı transient unit'te koşar → sekme kapansa bile iş tamamlanır.
+	key := phpOpKey(m)
+	unit := phpKaldirUnitPrefix + key
+	logYol := phpOpLogDir + "/php-kaldir-" + key + ".log"
+	wrapperYol := "/opt/girginospanel/php-kaldir-" + key + ".sh"
+
+	_ = os.MkdirAll(phpOpLogDir, 0o750)
+	if err := wrapperYaz(wrapperYol, phpKaldirWrapper(m)); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "hazırlanamadı: "+err.Error())
+		return
+	}
+	bas := fmt.Sprintf("=== PHP %s (remi) kaldırma başlatıldı: %s ===\n",
+		m.Surum, time.Now().Format("2006-01-02 15:04:05"))
+	if err := os.WriteFile(logYol, []byte(bas), 0o640); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "log açılamadı: "+err.Error())
+		return
+	}
+	cmd := exec.Command("systemd-run",
+		"--collect",
+		"--unit", unit,
+		"--description", "GirginOSPanel PHP "+m.Surum+" kaldırma",
+		"-p", "StandardOutput=append:"+logYol,
+		"-p", "StandardError=append:"+logYol,
+		wrapperYol)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "başlatılamadı: "+strings.TrimSpace(string(out)))
+		return
+	}
+	_ = phpOpMarkerYaz(phpOpMark{
+		Islem: "kaldir", Surum: m.Surum, Kaynak: m.Kaynak,
+		Unit: unit, Log: logYol, Bas: time.Now().Format("2006-01-02 15:04:05"),
 	})
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"baslatildi": true,
+		"surum":      m.Surum,
+		"kaynak":     m.Kaynak,
+		"islem":      "kaldir",
+		"unit":       unit,
+	})
+}
+
+// OpDurum: GET /php-surumler/durum — o an çalışan PHP işi (kur/kaldir) var mı,
+// hangi sürüm. Sayfa yeniden açılınca devam eden işi yakalamak (resume-on-reopen)
+// ve tek-iş serileştirmesi için. guncelleme/optimize durum endpoint'iyle aynı.
+func (h *Handlers) OpDurum(w http.ResponseWriter, r *http.Request) {
+	mark, aktif := phpOpOku()
+	resp := map[string]any{"calisiyor": aktif}
+	if mark.Unit != "" {
+		resp["surum"] = mark.Surum
+		resp["kaynak"] = mark.Kaynak
+		resp["islem"] = mark.Islem
+		resp["durum"] = phpSystemctlActive(mark.Unit)
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// OpLog: GET /php-surumler/log — aktif/son PHP işinin log kuyruğu + durum. Log
+// dosyası diskte kaldığı için, sekme kapanıp açılsa da kaldığı yerden okunur.
+func (h *Handlers) OpLog(w http.ResponseWriter, r *http.Request) {
+	mark, aktif := phpOpOku()
+	var logStr string
+	if mark.Log != "" {
+		if b, err := os.ReadFile(mark.Log); err == nil {
+			logStr = string(b)
+			if len(logStr) > 60000 { // son 60KB yeter
+				logStr = logStr[len(logStr)-60000:]
+			}
+		}
+	}
+	resp := map[string]any{"log": logStr, "calisiyor": aktif}
+	if mark.Unit != "" {
+		resp["surum"] = mark.Surum
+		resp["kaynak"] = mark.Kaynak
+		resp["islem"] = mark.Islem
+		resp["durum"] = phpSystemctlActive(mark.Unit)
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }

@@ -198,7 +198,7 @@ export default function WordPressPage() {
           <Alan et="Admin Kullanıcı" v={adminK} set={setAdminK} zorunlu mono />
           <Alan et="Admin E-posta" v={adminE} set={setAdminE} zorunlu type="email" ph="admin@site.com" />
         </div>
-        <button disabled={kuruyor || !domainId} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+        <button disabled={kuruyor || !domainId} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
           {kuruyor ? 'Kuruluyor… (~30 sn)' : `WordPress Kur${sel ? ` · ${sel.alan_adi}` : ''}`}
         </button>
       </form>

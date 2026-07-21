@@ -68,7 +68,7 @@ export default function DomainFTPPage() {
                 className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
               />
               <button onClick={() => parolaSifirla(false)} disabled={isleniyor || !ozelPw} className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:opacity-50 text-sm rounded-md">Bu Parolayı Ayarla</button>
-              <button onClick={() => parolaSifirla(true)} disabled={isleniyor} className="px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">Rastgele Üret</button>
+              <button onClick={() => parolaSifirla(true)} disabled={isleniyor} className="px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">Rastgele Üret</button>
             </div>
 
             {yeniPw && (

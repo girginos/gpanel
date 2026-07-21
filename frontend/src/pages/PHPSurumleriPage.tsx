@@ -1,6 +1,6 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 
@@ -11,36 +11,75 @@ type Surum = {
   gercek_surum?: string; modul_sayi?: number; aciklama?: string
 }
 
+// Detached iş (systemd-run transient unit) — kur/kaldir arka planda koşar; sekme
+// kapansa bile PID 1 altında devam eder. Durum + log poll ile izlenir.
+type AktifOp = { surum: string; kaynak: string; islem: 'kur' | 'kaldir' }
+type OpDurum = { calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir'; durum?: string }
+type LogYanit = { log: string; calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir' }
+
 export default function PHPSurumleriPage() {
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
-  const [isleniyor, setIsleniyor] = useState<string | null>(null)
-  const [output, setOutput] = useState<{ baslik: string; output: string } | null>(null)
+  const [aktifOp, setAktifOp] = useState<AktifOp | null>(null)
+  const [opLog, setOpLog] = useState('')
   const [filtre, setFiltre] = useState<'tumu' | 'yuklu' | 'yuklenebilir'>('tumu')
+  const logRef = useRef<HTMLPreElement>(null)
 
-  function yukle() {
+  const yukle = useCallback(() => {
     setYuk(true)
     api.get<{ surumler: Surum[] }>('/php-surumler')
       .then(r => setSurumler(r.data.surumler || []))
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
-  }
-  useEffect(yukle, [])
+  }, [])
+
+  // İlk açılış: sürüm listesi + devam eden işi yakala (resume-on-reopen).
+  useEffect(() => {
+    yukle()
+    api.get<OpDurum>('/php-surumler/durum')
+      .then(r => {
+        if (r.data.calisiyor && r.data.surum) {
+          setAktifOp({ surum: r.data.surum, kaynak: r.data.kaynak || 'remi', islem: r.data.islem || 'kur' })
+        }
+      })
+      .catch(() => { /* geçici — yut */ })
+  }, [yukle])
+
+  // Aktif işi 2sn'de bir poll et — log akar, bitince listeyi tazele.
+  useEffect(() => {
+    if (!aktifOp) return
+    let dur = false
+    const tik = async () => {
+      try {
+        const r = await api.get<LogYanit>('/php-surumler/log')
+        if (dur) return
+        setOpLog(r.data.log || '')
+        if (!r.data.calisiyor) {
+          setBasari(`✓ PHP ${aktifOp.surum} ${aktifOp.islem === 'kaldir' ? 'kaldırıldı' : 'kuruldu'}`)
+          setTimeout(() => setBasari(null), 6000)
+          setAktifOp(null)
+          yukle()
+        }
+      } catch { /* geçici bağlantı hatası — poll'e devam */ }
+    }
+    const id = window.setInterval(tik, 2000)
+    tik()
+    return () => { dur = true; window.clearInterval(id) }
+  }, [aktifOp, yukle])
+
+  useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [opLog])
 
   async function kur(s: Surum) {
+    if (aktifOp) { alert('Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.'); return }
     if (!confirm(`PHP ${s.surum} (${s.kaynak}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?`)) return
-    const key = s.surum + ':' + s.kaynak
-    setIsleniyor(key); setHata(null); setBasari(null)
+    setHata(null); setBasari(null); setOpLog('')
     try {
-      const r = await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
-      setBasari(`✓ PHP ${s.surum} kuruldu`)
-      setOutput({ baslik: `PHP ${s.surum} kurulum`, output: r.data.output || '' })
-      setTimeout(() => setBasari(null), 4000)
-      yukle()
-    } catch (e) { setHata(apiHata(e, 'Kurulum başarısız')) }
-    finally { setIsleniyor(null) }
+      await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
+      setOpLog(`PHP ${s.surum} kurulumu başlatıldı…\n`)
+      setAktifOp({ surum: s.surum, kaynak: s.kaynak, islem: 'kur' })
+    } catch (e) { setHata(apiHata(e, 'Kurulum başlatılamadı')) }
   }
 
   async function kaldir(s: Surum) {
@@ -48,17 +87,14 @@ export default function PHPSurumleriPage() {
       alert('AppStream PHP sistem default\'u, kaldırılamaz')
       return
     }
+    if (aktifOp) { alert('Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.'); return }
     if (!confirm(`PHP ${s.surum} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?`)) return
-    const key = s.surum + ':' + s.kaynak
-    setIsleniyor(key); setHata(null); setBasari(null)
+    setHata(null); setBasari(null); setOpLog('')
     try {
-      const r = await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })
-      setBasari(`✓ PHP ${s.surum} kaldırıldı`)
-      setOutput({ baslik: `PHP ${s.surum} kaldırma`, output: r.data.output || '' })
-      setTimeout(() => setBasari(null), 4000)
-      yukle()
-    } catch (e) { setHata(apiHata(e, 'Kaldırma başarısız')) }
-    finally { setIsleniyor(null) }
+      await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })
+      setOpLog(`PHP ${s.surum} kaldırma başlatıldı…\n`)
+      setAktifOp({ surum: s.surum, kaynak: s.kaynak, islem: 'kaldir' })
+    } catch (e) { setHata(apiHata(e, 'Kaldırma başlatılamadı')) }
   }
 
   const filtreli = surumler.filter(s => {
@@ -72,7 +108,7 @@ export default function PHPSurumleriPage() {
     <div className="px-6 py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Araçlar ve Ayarlar' },
+        { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
         { etiket: 'PHP Sürümleri' },
       ]} />
 
@@ -80,10 +116,27 @@ export default function PHPSurumleriPage() {
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         Sunucuya istediğiniz PHP sürümünü ekleyin veya kaldırın. Her sürüm bağımsız PHP-FPM havuzunda çalışır; domain bazında seçilebilir.
         Kurulum 14 paket içerir (fpm, cli, mysqlnd, mbstring, bcmath, intl, gd, soap, opcache, pdo, xml, zip, pgsql, ldap).
+        Kurulum/kaldırma <strong>arka planda</strong> çalışır — <strong>sayfayı kapatabilirsiniz, işlem devam eder</strong>.
       </p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
+
+      {/* Aktif iş bandı — canlı ilerleme + "sayfayı kapatabilirsiniz" güvencesi */}
+      {aktifOp && (
+        <div className="mb-4 p-4 border rounded-2xl bg-sky-50 dark:bg-sky-900/15 border-sky-200 dark:border-sky-800/50">
+          <div className="inline-flex items-center gap-2 text-sm font-medium text-sky-700 dark:text-sky-300">
+            <span className="w-3 h-3 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+            PHP {aktifOp.surum} {aktifOp.islem === 'kaldir' ? 'kaldırılıyor' : 'kuruluyor'} — bu işlem uzun sürebilir.
+          </div>
+          <div className="text-xs text-sky-700/80 dark:text-sky-300/80 mt-0.5">
+            İş arka planda (ayrı sistem servisi) çalışır. Sayfayı kapatabilirsiniz — işlem devam eder, tekrar açtığınızda ilerleme kaldığı yerden görünür.
+          </div>
+          {opLog && (
+            <pre ref={logRef} className="mt-2 text-[11px] font-mono bg-slate-900 text-slate-300 rounded-lg p-2.5 max-h-72 overflow-auto whitespace-pre-wrap leading-relaxed">{opLog}</pre>
+          )}
+        </div>
+      )}
 
       {/* Filtre */}
       <div className="flex items-center gap-2 mb-4">
@@ -100,10 +153,11 @@ export default function PHPSurumleriPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtreli.map(s => {
             const key = s.surum + ':' + s.kaynak
-            const meşgul = isleniyor === key
+            const buOp = aktifOp?.surum === s.surum && aktifOp?.kaynak === s.kaynak
+            const meşgul = aktifOp !== null // tek-iş: her işlemde tüm butonlar kilitlenir
             return (
               <div key={key}
-                className={`border rounded-2xl p-4 transition ${s.yuklu ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'}`}>
+                className={`border rounded-2xl p-4 transition ${buOp ? 'border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/20 ring-1 ring-sky-300 dark:ring-sky-700' : s.yuklu ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'}`}>
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <div className="text-lg font-mono font-bold text-slate-900 dark:text-slate-100">PHP {s.surum}</div>
@@ -115,6 +169,7 @@ export default function PHPSurumleriPage() {
                       }`}>{s.kaynak}</span>
                       {s.yuklu && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">YÜKLÜ</span>}
                       {parseInt(s.surum) < 8 && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">EOL</span>}
+                      {buOp && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300">{aktifOp?.islem === 'kaldir' ? 'KALDIRILIYOR' : 'KURULUYOR'}</span>}
                     </div>
                   </div>
                 </div>
@@ -136,35 +191,19 @@ export default function PHPSurumleriPage() {
                     </button>
                   ) : (
                     <button onClick={() => kaldir(s)} disabled={meşgul}
-                      className="w-full px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 text-white text-sm rounded">
-                      {meşgul ? 'Kaldırılıyor…' : '🗑 Kaldır'}
+                      className="w-full px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm rounded">
+                      {buOp && aktifOp?.islem === 'kaldir' ? '⏳ Kaldırılıyor…' : '🗑 Kaldır'}
                     </button>
                   )
                 ) : (
                   <button onClick={() => kur(s)} disabled={meşgul}
-                    className="w-full px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded">
-                    {meşgul ? '⏳ Kuruluyor…' : '⬇ Kur'}
+                    className="w-full px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium rounded">
+                    {buOp && aktifOp?.islem === 'kur' ? '⏳ Kuruluyor…' : '⬇ Kur'}
                   </button>
                 )}
               </div>
             )
           })}
-        </div>
-      )}
-
-      {output && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setOutput(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full shadow-xl flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{output.baslik}</h3>
-              <button onClick={() => setOutput(null)} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300">×</button>
-            </div>
-            <pre className="flex-1 overflow-auto p-3 bg-slate-900 text-slate-100 text-xs font-mono whitespace-pre-wrap">{output.output}</pre>
-            <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-700 text-right">
-              <button onClick={() => setOutput(null)}
-                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm rounded">Kapat</button>
-            </div>
-          </div>
         </div>
       )}
     </div>

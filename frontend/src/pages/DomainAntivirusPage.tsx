@@ -100,7 +100,7 @@ export default function DomainAntivirusPage() {
                 className="px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
                 {imzaYuk ? 'Güncelleniyor…' : 'İmzaları Güncelle'}</button>}
               <button onClick={tara} disabled={tarariyor}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-lg disabled:opacity-50">
+                className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
                 {tarariyor ? 'Taranıyor…' : 'Şimdi Tara'}</button>
             </div>
           </div>

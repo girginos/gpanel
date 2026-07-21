@@ -85,7 +85,7 @@ export default function SunucuOptimize() {
           <div className="mt-3 flex items-center gap-2">
             {!onay ? (
               <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
                 Paketleri güncelle ve optimize et
               </button>
             ) : (

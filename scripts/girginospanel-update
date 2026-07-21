@@ -118,8 +118,10 @@ if [ -f "$A/ops/girginospanel-db-backup" ]; then
 fi
 # systemd unit'leri: dosyayı kopyalamak YETMEZ — daemon-reload + enable --now olmadan
 # timer asla ateşlenmez (kurulumda unutulursa günlük yedek sessizce hiç çalışmaz).
+# journald kalici (reboot-dayaniklilik: panel crash/db-fatal izleri reboot'ta silinmesin)
+mkdir -p /var/log/journal 2>/dev/null; systemctl restart systemd-journald >/dev/null 2>&1 || true
 UNITS=0
-for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
+for u in girginospanel.service girginospanel-db-backup.service girginospanel-db-backup.timer; do
   if [ -f "$A/systemd/$u" ]; then install -m 0644 "$A/systemd/$u" "/etc/systemd/system/$u"; UNITS=1; fi
 done
 if [ "$UNITS" = 1 ]; then

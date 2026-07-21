@@ -193,7 +193,7 @@ export default function DomainsPage() {
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-500">{filtreli.length} / {items.length}</span>
         <button onClick={olusturAc}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-md font-medium shadow-sm">
+          className="ml-auto inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md font-medium shadow-sm">
           <span className="text-base leading-none">+</span> Yeni Domain
         </button>
       </div>
@@ -357,7 +357,7 @@ export default function DomainsPage() {
               <button type="button" onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}
                 className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
               <button type="submit" disabled={olusturuluyor || !fAlanAdi.trim()}
-                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded font-medium inline-flex items-center gap-2">
+                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium inline-flex items-center gap-2">
                 {olusturuluyor && (
                   <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
                     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.3"/>

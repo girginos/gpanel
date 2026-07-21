@@ -326,7 +326,7 @@ export default function DomainGitPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">
+                <button onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
                   {repo ? 'Güncelle' : 'Bağla'}
                 </button>
                 {repo && (

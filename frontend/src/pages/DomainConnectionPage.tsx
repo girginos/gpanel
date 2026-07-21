@@ -178,7 +178,7 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
       <dd className="text-right">
         <button
           onClick={onAc}
-          className="text-xs px-3 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded font-medium transition inline-flex items-center gap-1"
+          className="text-xs px-3 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
         >
           🔑 Şifreyi Göster / Yenile
         </button>
@@ -285,7 +285,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
             Kapat
           </button>
           <button onClick={olustur} disabled={isleniyor}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm rounded font-medium">
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
             {isleniyor ? 'Üretiliyor…' : (yeni ? '↻ Tekrar üret' : '⚡ Yeni parola üret')}
           </button>
         </div>

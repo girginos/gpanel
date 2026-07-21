@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
-import PanelGuncelleme from '@/components/PanelGuncelleme'
-import SunucuOptimize from '@/components/SunucuOptimize'
 
 /*
  * Araçlar ve Ayarlar — sunucu geneli yönetim merkezi.
@@ -195,9 +193,8 @@ export default function AraclarAyarlarPage() {
             Sunucu Bakımı
           </h2>
         </div>
-        <div className="space-y-3">
-          <PanelGuncelleme />
-          <SunucuOptimize />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <AracKart a={{ baslik: 'Panel Güncellemesi', href: '/araclar/guncelleme', ikon: I.refresh, rozet: 'Sunucu', aciklama: 'Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.' }} />
         </div>
       </section>
 

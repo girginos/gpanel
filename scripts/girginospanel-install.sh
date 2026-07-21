@@ -169,6 +169,8 @@ ok "phpMyAdmin pool + config + izinler"
 # ============ 10) systemd + servisler ============
 step "10) systemd + servisler"
 cp "$A/systemd/girginospanel.service" /etc/systemd/system/girginospanel.service
+# journald kalici: panel crash/db-fatal izleri reboot'ta silinmesin (reboot-dayaniklilik teshisi)
+mkdir -p /var/log/journal && systemctl restart systemd-journald >/dev/null 2>&1 || true
 systemctl daemon-reload
 systemctl enable --now php-fpm >/dev/null 2>&1
 for v in $PHP_VERS; do systemctl enable --now php$v-php-fpm >/dev/null 2>&1; done
@@ -273,12 +275,12 @@ sleep 2
 command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
 
 # ============ 13) Yönetici erişimi ============
-# 🔴 Panel admin girişi = sunucunun ROOT kullanıcısı (PAM/shadow doğrulaması).
+# 🔴 Panel admin girişi = sunucunun ROOT kullanıcısı (/etc/shadow hash doğrulaması).
 # Ayrı panel parolası YOKTUR. Giriş: kullanıcı 'root' + bu sunucunun root parolası.
-step "13) Yönetici erişimi (root + PAM)"
+step "13) Yönetici erişimi (root + /etc/shadow)"
 DSN="panel:${DBPASS}@tcp(127.0.0.1:3306)/panel?parseTime=true"
 if [ -x /opt/girginospanel/bin/girginospanel-seed-admin ]; then
-  # yardımcı users kaydı (ownership/audit); giriş yine root+PAM ile doğrulanır
+  # yardımcı users kaydı (ownership/audit); giriş yine sunucu root parolasıyla (/etc/shadow hash) doğrulanır
   /opt/girginospanel/bin/girginospanel-seed-admin -dsn "$DSN" -kullanici root \
     -parola "$(openssl rand -hex 16)" -eposta "$ADMIN_EPOSTA" >/dev/null 2>&1 \
     && ok "yönetici kaydı hazır" || warn "seed atlandı (kritik değil)"
@@ -305,5 +307,5 @@ echo -e "${c_g}═════════════════════�
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
 echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:8443${c_0}"
 echo -e "   Kullanıcı: ${c_b}root${c_0}   Parola: ${c_b}bu sunucunun root parolası${c_0}"
-echo -e "   (panel admin girişi sunucu root'unu PAM ile doğrular)"
+echo -e "   (panel admin girişi sunucu root parolasını /etc/shadow hash'i ile doğrular)"
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"

@@ -352,7 +352,7 @@ export default function DomainBackupsPage() {
               {destKayit ? 'Test ediliyor…' : 'Bağlantı Testi'}
             </button>
             <button type="button" onClick={destKaydet} disabled={destKayit || !destForm.host || !destForm.kullanici}
-              className="text-xs px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 rounded font-medium">
+              className="text-xs px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded font-medium">
               Kaydet
             </button>
             {!dest.yok && (
@@ -366,7 +366,7 @@ export default function DomainBackupsPage() {
       </div>
 
       <div className="flex items-center gap-2 mb-4">
-        <button onClick={olustur} disabled={isleniyor} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 text-sm font-medium rounded-md">
+        <button onClick={olustur} disabled={isleniyor} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
           {isleniyor ? 'Yedekleniyor…' : '+ Şimdi Yedekle'}
         </button>
         <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ Yenile</button>

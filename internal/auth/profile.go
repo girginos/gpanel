@@ -100,7 +100,11 @@ func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, "oturum yok")
 		return
 	}
-	secret := TOTPGenerateSecret()
+	secret, err := TOTPGenerateSecret()
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "secret üretilemedi")
+		return
+	}
 	uri := TOTPURI(secret, "root", "GirginOSPanel")
 	resp := map[string]any{
 		"secret":      secret,
@@ -127,11 +131,13 @@ func (h *Handlers) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	b.Secret = strings.TrimSpace(b.Secret)
-	if !TOTPVerify(b.Secret, b.Kod) {
+	adim, ok := TOTPVerifyAdim(b.Secret, b.Kod, -1)
+	if !ok {
 		httpx.WriteError(w, http.StatusBadRequest, "kod doğrulanamadı — uygulamadaki 6 haneli kodu girin")
 		return
 	}
-	if _, err := h.DB.Exec(`UPDATE users SET totp_secret=?, totp_enabled=1 WHERE id=?`, b.Secret, c.UserID); err != nil {
+	// Etkinleştirme kodunun login'de hemen replay edilmesini önle: kullanılan adımı kaydet
+	if _, err := h.DB.Exec(`UPDATE users SET totp_secret=?, totp_enabled=1, totp_last_step=? WHERE id=?`, b.Secret, adim, c.UserID); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi")
 		return
 	}

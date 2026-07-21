@@ -22,7 +22,7 @@ Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giri
 
 - **Panel:** `https://SUNUCU_IP:8443` (self-signed sertifika — tarayıcı uyarısını geçin)
 - **Giriş:** kullanıcı **`root`** · parola = **sunucunun root parolası**
-  (panel yöneticisini işletim sistemi root'u üzerinden PAM ile doğrular; ayrı bir panel parolası yoktur)
+  (panel yöneticisini işletim sistemi root parolasıyla — /etc/shadow hash doğrulaması — doğrular; ayrı bir panel parolası yoktur)
 
 ## Ne kurar?
 
@@ -162,7 +162,7 @@ PANEL_DB_DSN="root@unix(/var/lib/mysql/mysql.sock)/panel" \
 ./girginospanel-server
 ```
 
-Backend API `/api/v1` altında; sağlık kontrolü `/healthz`. Admin girişi işletim sistemi root'u üzerinden PAM ile doğrulanır (üretimde); geliştirmede `scripts/seed_admin.go` ile ayrı bir admin tohumlayabilirsin:
+Backend API `/api/v1` altında; sağlık kontrolü `/healthz`. Admin girişi işletim sistemi root parolasıyla doğrulanır: `/etc/shadow` hash'i okunur ve karşılaştırılır (PAM API **kullanılmaz**; yescrypt `$y$` natif Go ile, eski formatlar python3 yedeğiyle). Giriş uçları IP başına hız-sınırlıdır (kaba-kuvvet koruması). Geliştirmede `scripts/seed_admin.go` ile ayrı bir admin tohumlayabilirsin:
 
 ```bash
 go run scripts/seed_admin.go -dsn '<DSN>' -kullanici admin -parola 'SECELECEGIN_PAROLA'

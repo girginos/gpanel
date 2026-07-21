@@ -86,7 +86,7 @@ export default function DomainSifreKorumaPage() {
             </label>
           </div>
           <p className="text-[11px] text-slate-400 mt-2">Yol <span className="font-mono">/</span> ile başlamalı (örn. <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). Aynı yola birden fazla kullanıcı ekleyebilirsiniz.</p>
-          <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg disabled:opacity-50">
+          <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
             {kaydediyor ? 'Ekleniyor…' : 'Koruma Ekle'}
           </button>
         </form>

@@ -113,7 +113,7 @@ export default function ServislerPage() {
                             Reload
                           </button>
                           <button disabled={absent || mesgul} onClick={() => islem(s, 'restart')}
-                            className="w-20 px-3.5 py-1.5 text-sm rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                            className="w-20 px-3.5 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition">
                             {mesgul ? '…' : 'Restart'}
                           </button>
                         </div>

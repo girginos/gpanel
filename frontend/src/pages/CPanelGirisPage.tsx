@@ -57,7 +57,7 @@ export default function CPanelGirisPage() {
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm focus:border-brand-500 outline-none" />
           </div>
           <button type="submit" disabled={yuk || !kullanici || !parola}
-            className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 disabled:opacity-60 font-medium rounded-md">
+            className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 font-medium rounded-md">
             {yuk ? 'Giriş yapılıyor…' : 'Giriş'}
           </button>
         </form>
