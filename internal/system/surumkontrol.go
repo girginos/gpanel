@@ -7,13 +7,15 @@ package system
 // acil yama duyurusu yapacak HİÇBİR kanalımız yoktu — asıl kazanç bu.
 //
 // 🔒 GİZLİLİK — bilerek verilmiş kararlar:
-//   - İstek DÜZ bir GET'tir: sorgu dizesi YOK, gövde YOK, özel başlık YOK.
-//     Domain adı, hostname, IP, müşteri verisi, lisans — HİÇBİRİ gönderilmez.
-//   - Kurulum kimliği ÜRETİLİR (/etc/girginospanel/kurulum-kimlik) ama
-//     GÖNDERİLMEZ. Şu anki uç statik bir dosya; kimliği sayan kimse yok, dolayısıyla
-//     göndermek karşılıksız bir kimlik sızıntısı olurdu. Kimliği şimdiden üretiyoruz
-//     ki ileride sayım ucuna geçilirse kurulumların kararlı kimliği hazır olsun.
+//   - GÖNDERİLEN TEK ŞEY: anonim kurulum kimliği (?id=) + panel sürümü (?v=).
+//     Kimlik SAF RASTGELEDİR; hostname/IP/MAC'ten türetilmez, dolayısıyla geri
+//     çözülemez ve hangi müşteriye ait olduğu bilinemez.
+//   - GÖNDERİLMEYENLER: domain adları, hostname, IP, e-posta, müşteri verisi,
+//     veritabanı içeriği, lisans. Gövde ve özel başlık da yok.
+//   - Sunucu tarafı erişim logu IP KAYDETMEZ (bkz. surum.girginos.io nginx
+//     log_format surum_anonim) — sayım yalnız distinct kimlik üzerinden yapılır.
 //   - PANEL_SURUM_KONTROL=0 → hiç istek atılmaz (goroutine hiç başlamaz).
+//   - Bu davranış README'de açıkça belgelenmiştir.
 //
 // AĞ HATASI = SESSİZ. İnternet yoksa panel etkilenmez; durum "kontrol edilemedi"
 // olarak kalır, hiçbir yerde hata patlatmaz.
@@ -25,6 +27,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +38,7 @@ import (
 )
 
 const (
-	surumUCVarsayilan = "https://raw.githubusercontent.com/girginos/gpanel/main/surum.json"
+	surumUCVarsayilan = "https://surum.girginos.io/surum.json"
 	surumKimlikYol    = "/etc/girginospanel/kurulum-kimlik"
 	surumOnbellekYol  = "/opt/girginospanel/surum-onbellek.json"
 	surumPeriyot      = 24 * time.Hour
@@ -136,10 +139,27 @@ func surumRastgele(min, max time.Duration) time.Duration {
 	return min + time.Duration(n.Int64())
 }
 
-// surumGetir — manifesti çeker. DÜZ GET, sorgu dizesi yok.
+// surumIstekURL — uca anonim kurulum kimliği + sürümü ekler.
+// Uç zaten sorgu dizesi içeriyorsa (operatör kendi ucunu verdiyse) korunur.
+func surumIstekURL() string {
+	ham := surumUC()
+	u, err := url.Parse(ham)
+	if err != nil {
+		return ham // ayrıştırılamadı — olduğu gibi dene
+	}
+	q := u.Query()
+	if k := KurulumKimligi(); k != "" {
+		q.Set("id", k)
+	}
+	q.Set("v", surumMevcutOku())
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// surumGetir — manifesti çeker (anonim kimlik + sürüm ile).
 func surumGetir() {
 	cli := &http.Client{Timeout: 20 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, surumUC(), nil)
+	req, err := http.NewRequest(http.MethodGet, surumIstekURL(), nil)
 	if err != nil {
 		surumHataYaz("istek kurulamadı")
 		return
