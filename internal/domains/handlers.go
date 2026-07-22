@@ -445,6 +445,78 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── Belge koku (web_root) — Laravel vb. icin dinamik public_html/<alt> ──
+type setWebRootReq struct {
+	AltDizin string `json:"alt_dizin"`
+}
+
+// GET /domains/{id}/web-root → mevcut alt dizin + aday dizinler (dinamik secim)
+func (h *Handlers) GetWebRoot(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var sk, webRoot string
+	err := h.DB.QueryRowContext(r.Context(),
+		`SELECT sistem_kullanici, COALESCE(web_root,'') FROM domains WHERE id=?`, id).Scan(&sk, &webRoot)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "okuma hatası: "+err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"alt_dizin": provisioner.AltDizinCoz(sk, webRoot),
+		"adaylar":   provisioner.AdayKokler(sk),
+	})
+}
+
+// PUT /domains/{id}/web-root {"alt_dizin":"public"} → public_html/<alt>'i belge koku yap.
+// Bos alt_dizin = public_html koku. Dizin VAR OLMALI + public_html icinde OLMALI.
+func (h *Handlers) SetWebRoot(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var req setWebRootReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+		return
+	}
+	var sk string
+	var isDemo int
+	err := h.DB.QueryRowContext(r.Context(),
+		`SELECT sistem_kullanici, is_demo FROM domains WHERE id=?`, id).Scan(&sk, &isDemo)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "okuma hatası: "+err.Error())
+		return
+	}
+	if isDemo == 1 {
+		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin belge kökü değiştirilemez")
+		return
+	}
+	// doğrula + mutlak yol (traversal/cross-tenant/symlink kapalı, dizin var olmalı)
+	abs, verr := provisioner.WebRootMutlak(sk, req.AltDizin)
+	if verr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+	if _, err := h.DB.ExecContext(r.Context(),
+		`UPDATE domains SET web_root=? WHERE id=?`, abs, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
+		return
+	}
+	// vhost yeniden render (nginx -t + rollback İÇERİDE — bozuk config diske kalmaz)
+	if err := provisioner.RerenderVhost(h.DB, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"alt_dizin": provisioner.AltDizinCoz(sk, abs),
+	})
+}
+
 // FTP parola değiştir
 type setFTPPwReq struct {
 	Parola string `json:"parola"`

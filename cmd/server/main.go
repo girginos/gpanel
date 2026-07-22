@@ -32,6 +32,7 @@ import (
 	"girginospanel/internal/istatistik"
 	"girginospanel/internal/kaynak"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/laravel"
 	"girginospanel/internal/logs"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/monitor"
@@ -153,6 +154,7 @@ func main() {
 	statH := &istatistik.Handlers{DB: d}
 	perfH := &performans.Handlers{DB: d}
 	compH := &composer.Handlers{DB: d}
+	laravelH := &laravel.Handlers{DB: d}
 	korumaH := &sifrekoruma.Handlers{DB: d}
 	avH := &antivirus.Handlers{DB: d}
 	kopyaH := &sitekopya.Handlers{DB: d}
@@ -245,6 +247,23 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/performans", perfH.Goster)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/composer", compH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/composer", compH.Calistir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel", laravelH.Durum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/kur", laravelH.Kur)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/kur/durum", laravelH.KurDurum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/artisan", laravelH.Artisan)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/composer", laravelH.Composer)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/node", laravelH.NodeSurumler)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/npm", laravelH.Npm)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/env", laravelH.EnvOku)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/laravel/env", laravelH.EnvYaz)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/bakim", laravelH.Bakim)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/deploy", laravelH.Deploy)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/deploy/durum", laravelH.DeployDurum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/schedule", laravelH.Schedule)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/queue", laravelH.Queue)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/queue/durum", laravelH.QueueDurum)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/app-adaylar", laravelH.AppAdaylar)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/laravel/app-root", laravelH.SetAppRoot)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/redis", redisH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/redis", redisH.Ac)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/redis", redisH.Kapat)
@@ -287,6 +306,8 @@ func main() {
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKaldir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/web-backend", domainsH.GetWebBackend)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-backend", domainsH.SetWebBackend)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/web-root", domainsH.GetWebRoot)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/web-root", domainsH.SetWebRoot)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)

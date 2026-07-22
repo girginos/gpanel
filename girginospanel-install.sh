@@ -332,6 +332,18 @@ if [ ! -x /usr/local/bin/composer ]; then
 fi
 [ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer kurulamadı"
 
+# ---- Node.js (Laravel Toolkit: npm/vite build + çoklu sürüm 'n') ----
+if ! command -v node >/dev/null 2>&1; then
+  curl -fsSL https://rpm.nodesource.com/setup_22.x 2>/dev/null | bash - >/dev/null 2>&1 || true
+  dnf install -y nodejs >/dev/null 2>&1 || true
+fi
+if command -v npm >/dev/null 2>&1 && [ ! -d /usr/local/n/versions/node ]; then
+  npm install -g n >/dev/null 2>&1 || true
+  N_PREFIX=/usr/local n 20 >/dev/null 2>&1 || true
+  N_PREFIX=/usr/local n 22 >/dev/null 2>&1 || true
+fi
+if [ -d /usr/local/n/versions/node ]; then ok "node ($(ls /usr/local/n/versions/node 2>/dev/null | tr '\n' ' '))"; else warn "node kurulamadı (Laravel npm özellikleri devre dışı)"; fi
+
 # ---- günlük yedek cron (girginospanel-backup-all 03:00 UTC) ----
 cat > /etc/cron.d/girginospanel-backup <<'CRON'
 # girginospanel — günlük planlı yedek 03:00 UTC

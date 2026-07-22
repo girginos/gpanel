@@ -1362,13 +1362,129 @@ func welcomeHTML(domain string) string {
 
 // ApplyVhostForDomain: domainID'ye gore nginx vhost'unu yeniden render eder.
 // PHP versiyonu/socket degisikliklerinden sonra cagrilir; SSL bilgilerini DB'den okur.
+// ── Belge koku (web_root) guvenlik yardimcilari ──────────────────────────────
+// Domain basina belge koku public_html icindeki bir alt dizine (orn. Laravel
+// icin "public") ayarlanabilir. TUM dogrulama BURADA (tek kaynak); hem SetWebRoot
+// hem render (ApplyVhostForDomain) ayni fonksiyonlari kullanir → tutarli guvenlik.
+
+func publicHtml(sk string) string { return filepath.Join("/home/"+sk, "public_html") }
+
+var reAltDizin = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
+
+// GuvenliAltDizin: kullanicinin verdigi alt dizini dogrular. Bos = kok (public_html).
+// '..' segmenti, mutlak yol, garip karakter reddedilir → traversal/cross-tenant kapali.
+func GuvenliAltDizin(alt string) (string, bool) {
+	alt = strings.Trim(strings.TrimSpace(alt), "/")
+	if alt == "" {
+		return "", true
+	}
+	if strings.Contains(alt, "..") || !reAltDizin.MatchString(alt) {
+		return "", false
+	}
+	return alt, true
+}
+
+// WebRootMutlak: sk + altDizin → dogrulanmis MUTLAK belge koku. Dizin VAR OLMALI
+// ve public_html icinde OLMALI. GERCEK DEGISMEZ: EvalSymlinks ile TUM yol cozulur ve
+// cozulmus hedef public_html icinde kalmali — ara-bilesen symlink'i (a/b icinde a
+// symlink) ile ayni-sahipli kacis da kapali. Cross-tenant ayrica web-sunucu
+// disable_symlinks if_not_owner ile bloklu. Laravel-guvenli: public gercek dizindir.
+func WebRootMutlak(sk, altDizin string) (string, error) {
+	temiz, ok := GuvenliAltDizin(altDizin)
+	if !ok {
+		return "", fmt.Errorf("gecersiz dizin adi (yalniz harf/rakam/._- ve alt-klasor)")
+	}
+	base := publicHtml(sk)
+	abs := filepath.Clean(filepath.Join(base, temiz))
+	if abs != base && !strings.HasPrefix(abs, base+"/") {
+		return "", fmt.Errorf("dizin public_html disina cikamaz")
+	}
+	fi, err := os.Lstat(abs)
+	if err != nil {
+		return "", fmt.Errorf("dizin bulunamadi: %s", temiz)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("sembolik link belge koku olamaz")
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("bir dizin degil: %s", temiz)
+	}
+	// Ara-bilesen symlink savunmasi: leaf Lstat yalniz son bileseni korur. Tum yolu
+	// coz; cozulmus gercek hedef public_html icinde OLMALI (Laravel public gercek dizin).
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("dizin cozulemedi: %s", temiz)
+	}
+	if real != base && !strings.HasPrefix(real, base+"/") {
+		return "", fmt.Errorf("dizin (symlink dahil) public_html disina cikamaz")
+	}
+	return abs, nil
+}
+
+// GuvenliWebRoot: DB'de sakli mutlak web_root'u RENDER icin guvenli kilar. Bos/bozuk/
+// public_html disiysa public_html'e duser (tampered-DB savunmasi — bozuk bir DB
+// degeri asla /etc gibi keyfi bir yolu sunamaz).
+func GuvenliWebRoot(sk, stored string) string {
+	base := publicHtml(sk)
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
+		return base
+	}
+	abs := filepath.Clean(stored)
+	if abs != base && !strings.HasPrefix(abs, base+"/") {
+		log.Printf("web_root guvensiz (%q) → public_html'e dusuldu (sk=%s)", stored, sk)
+		return base
+	}
+	return abs
+}
+
+// AltDizinCoz: mutlak web_root'tan public_html'e gore relative alt dizini dondurur (UI).
+func AltDizinCoz(sk, stored string) string {
+	base := publicHtml(sk)
+	abs := GuvenliWebRoot(sk, stored)
+	if abs == base {
+		return ""
+	}
+	return strings.TrimPrefix(abs, base+"/")
+}
+
+// AdayKokler: public_html icindeki (1 seviye) index.php/html iceren dizinleri dondurur
+// → UI'da dinamik secim listesi (Laravel'de "public" burada otomatik gorunur).
+func AdayKokler(sk string) []string {
+	base := publicHtml(sk)
+	out := []string{}
+	ents, err := os.ReadDir(base)
+	if err != nil {
+		return out
+	}
+	examined := 0
+	for _, e := range ents {
+		if len(out) >= 50 || examined >= 1000 { // sinirsiz sayim DoS savunmasi
+			break
+		}
+		examined++
+		if !e.IsDir() {
+			continue
+		}
+		ad := e.Name()
+		for _, idx := range []string{"index.php", "index.html", "index.htm"} {
+			if _, err := os.Stat(filepath.Join(base, ad, idx)); err == nil {
+				out = append(out, ad)
+				break
+			}
+		}
+	}
+	return out
+}
+
 func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error {
 	var alanAdi, sk, certPath, keyPath, sslKaynak, backend string
 	var askida int
+	var webRootDB string
 	if err := db.QueryRow(
-		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm'), COALESCE(askida,0)
+		`SELECT alan_adi, sistem_kullanici, COALESCE(cert_path,''), COALESCE(key_path,''), COALESCE(ssl_kaynak,''), COALESCE(web_backend,'php-fpm'), COALESCE(askida,0), COALESCE(web_root,'')
 		 FROM domains WHERE id=?`, domainID).
-		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida); err != nil {
+		Scan(&alanAdi, &sk, &certPath, &keyPath, &sslKaynak, &backend, &askida, &webRootDB); err != nil {
 		return fmt.Errorf("domain bilgi cek: %w", err)
 	}
 	// 🔴 Per-tenant FPM (Seçenek A) aktifse socket'i DAİMA per-tenant socket'e zorla —
@@ -1378,12 +1494,10 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 	if TenantFPMActive(sk) {
 		socket = tenantSocket(sk)
 	}
-	home := "/home/" + sk
-
 	// nginx_settings (yoksa default true)
 	opts := VhostOpts{
 		AlanAdi:         alanAdi,
-		WebRoot:         filepath.Join(home, "public_html"),
+		WebRoot:         GuvenliWebRoot(sk, webRootDB),
 		PHPSocket:       socket,
 		PHPSurum:        surum,
 		CertPath:        certPath,

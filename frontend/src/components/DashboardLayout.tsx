@@ -90,6 +90,7 @@ export default function DashboardLayout() {
       { to: `/abonelikler/${musteriDomainID}/ftp`, etiket: 'FTP Hesapları', ikon: ICONS.bayi },
       { to: `/abonelikler/${musteriDomainID}/php`, etiket: 'PHP Ayarları', ikon: ICONS.araclar },
       { to: `/abonelikler/${musteriDomainID}/web-sunucu`, etiket: 'Apache & nginx', ikon: ICONS.araclar },
+      { to: `/abonelikler/${musteriDomainID}/laravel`, etiket: 'Laravel', ikon: ICONS.eklenti },
       { to: `/abonelikler/${musteriDomainID}/dns`, etiket: 'DNS Ayarları', ikon: ICONS.domain },
       { to: `/abonelikler/${musteriDomainID}/ssl`, etiket: 'SSL/TLS', ikon: ICONS.kilit },
       { to: `/abonelikler/${musteriDomainID}/cron`, etiket: 'Zamanlanmış Görevler', ikon: ICONS.izleme },

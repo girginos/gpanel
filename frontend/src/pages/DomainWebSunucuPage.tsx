@@ -70,15 +70,23 @@ export default function DomainWebSunucuPage() {
   const [backend, setBackend] = useState<string>('php-fpm')
   const [backendDegistiriliyor, setBackendDegistiriliyor] = useState(false)
 
+  const [webRoot, setWebRoot] = useState('')
+  const [webRootKayitli, setWebRootKayitli] = useState('')
+  const [webRootAdaylar, setWebRootAdaylar] = useState<string[]>([])
+  const [webRootKaydediliyor, setWebRootKaydediliyor] = useState(false)
+
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
     Promise.all([
       api.get<Yanit>(`/domains/${id}/nginx-settings`),
       api.get<{backend: string}>(`/domains/${id}/web-backend`),
-    ]).then(([y, b]) => {
+      api.get<{alt_dizin: string; adaylar: string[]}>(`/domains/${id}/web-root`),
+    ]).then(([y, b, w]) => {
       setYanit(y.data); setA(y.data.ayarlar)
       setBackend(b.data.backend)
+      setWebRoot(w.data.alt_dizin); setWebRootKayitli(w.data.alt_dizin)
+      setWebRootAdaylar(w.data.adaylar || [])
     }).catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
   }
@@ -96,6 +104,23 @@ export default function DomainWebSunucuPage() {
       setHata(apiHata(e, 'Backend değişimi başarısız'))
     } finally {
       setBackendDegistiriliyor(false)
+    }
+  }
+
+  async function webRootKaydet() {
+    if (webRoot.trim() === webRootKayitli || webRootKaydediliyor) return
+    setWebRootKaydediliyor(true); setHata(null); setBasari(null)
+    try {
+      const r = await api.put<{ alt_dizin: string }>(`/domains/${id}/web-root`, { alt_dizin: webRoot.trim() })
+      setWebRoot(r.data.alt_dizin); setWebRootKayitli(r.data.alt_dizin)
+      setBasari(r.data.alt_dizin
+        ? `✓ Belge kökü "public_html/${r.data.alt_dizin}" olarak ayarlandı`
+        : '✓ Belge kökü public_html köküne ayarlandı')
+      setTimeout(() => setBasari(null), 4000)
+    } catch (e) {
+      setHata(apiHata(e, 'Belge kökü değiştirilemedi'))
+    } finally {
+      setWebRootKaydediliyor(false)
     }
   }
 
@@ -170,6 +195,64 @@ export default function DomainWebSunucuPage() {
               </button>
             )
           })}
+        </div>
+      </div>
+
+      {/* Belge Kök Dizini (Laravel vb. için dinamik alt klasör) */}
+      <div className="mb-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Belge Kök Dizini</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
+            Sitenin açılış (index) dizini. Varsayılan <code className="font-mono">public_html</code>. Laravel, Symfony gibi
+            çatılar <code className="font-mono">index.php</code>'yi bir alt klasörde tutar — o klasörü buraya yazın.
+          </p>
+        </div>
+
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">public_html içindeki alt klasör</label>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex items-stretch flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500/30">
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-slate-700 select-none whitespace-nowrap">public_html/</span>
+            <input
+              list="webroot-adaylar"
+              value={webRoot}
+              onChange={e => setWebRoot(e.target.value.replace(/^\/+/, ''))}
+              onKeyDown={e => { if (e.key === 'Enter') webRootKaydet() }}
+              placeholder="(boş = public_html kökü)"
+              spellCheck={false} autoCapitalize="off" autoCorrect="off"
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none"
+            />
+          </div>
+          <button type="button" onClick={webRootKaydet}
+            disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli}
+            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            {webRootKaydediliyor ? 'Uygulanıyor…' : 'Belge Kökünü Kaydet'}
+          </button>
+        </div>
+        <datalist id="webroot-adaylar">
+          {webRootAdaylar.map(x => <option key={x} value={x} />)}
+        </datalist>
+
+        {webRootAdaylar.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 dark:text-slate-500">Algılanan klasörler:</span>
+            {webRootAdaylar.map(x => (
+              <button key={x} type="button" onClick={() => setWebRoot(x)}
+                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
+                {x}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 flex items-start gap-2 px-2.5 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-md">
+          <span className="text-xs text-slate-400 dark:text-slate-500 mt-px">↳</span>
+          <div className="text-xs text-slate-600 dark:text-slate-400 min-w-0">
+            <span className="text-slate-400 dark:text-slate-500">Etkin kök: </span>
+            <code className="font-mono break-all text-slate-700 dark:text-slate-300">public_html{webRoot.trim() ? '/' + webRoot.trim().replace(/^\/+|\/+$/g, '') : ''}</code>
+            <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+              Klasör önceden var olmalı. <span className="font-medium text-slate-500 dark:text-slate-400">Laravel için: <code className="font-mono">public</code></span> · Kaydedince nginx vhost anında yeniden render edilir.
+            </div>
+          </div>
         </div>
       </div>
 

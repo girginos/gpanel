@@ -67,6 +67,7 @@ export default function DomainPano({ domain }: { domain: Domain }) {
         <ToolCard etiket="Zamanlanmış Görevler"  aciklama="Cron"            ikon={ICONS.cron}     renk="teal"   faz="F8"  onClick={git('cron')} />
         <ToolCard etiket="Git"                   aciklama="Depo entegrasyonu" ikon={ICONS.git}    renk="orange" faz="F9"  onClick={git('git')} />
         <ToolCard etiket="PHP Composer"          aciklama="Paket yöneticisi"  ikon={ICONS.composer} renk="amber" faz="F3"  onClick={git('composer')} />
+        <ToolCard etiket="Laravel Toolkit" aciklama="Kurulum · Artisan · Deploy · Kuyruk" ikon={ICONS.composer} renk="rose" onClick={git('laravel')} />
         <ToolCard etiket="Performans"            aciklama="Hızlandırıcılar"   ikon={ICONS.hizmet} renk="emerald" onClick={git('performans')} />
         <ToolCard etiket="Redis Cache"           aciklama="İzole nesne cache · hızlandırıcı" ikon={ICONS.redis} renk="rose" onClick={git('redis')} />
       </Grup>
