@@ -5,7 +5,7 @@
 #
 # Kullanım:
 #   girginospanel-repair [--dry-run] [--deep] [--only <bölümler>] [--quiet]
-#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon  (varsayılan: hepsi)
+#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,firewall  (varsayılan: hepsi)
 #   --dry-run : değişiklikleri UYGULAMADAN neyin düzeltileceğini göster
 #   --deep    : domain ev dizinlerinde RECURSIVE sahiplik onarımı (yavaş, büyük siteler)
 #
@@ -25,7 +25,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon"
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,firewall"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -146,6 +146,30 @@ sec_signon() {
   ensure_context "$S" httpd_sys_content_t -R
 }
 
+sec_firewall() {
+  want firewall || return 0
+  head_ "firewall (firewalld → panel devralır)"
+  # Panel firewall'ı kendi nftables tablosunu (girginos_fw) yönetir. AlmaLinux
+  # varsayılan firewalld ile ÇAKIŞIR: nftables'ta bir tablonun base chain'inde
+  # 'drop' KESİNDİR → firewalld panelin portlarını (8443/80/443/53/21) düşürür,
+  # panelin 'accept' politikası bunu EZEMEZ → panel UI erişilemez, siteler açılmaz.
+  # Tek otorite panel olsun diye firewalld'yi durdur+kapat+mask ediyoruz.
+  # firewalld durunca kendi nft tablosunu ANINDA temizler → reboot GEREKMEZ.
+  if ! systemctl cat firewalld.service >/dev/null 2>&1; then
+    ok "firewalld kurulu değil — panel nftables zaten tek firewall"
+    return 0
+  fi
+  if [ "$(systemctl is-enabled firewalld 2>/dev/null)" = "masked" ]; then
+    ok "firewalld zaten mask'li (panel devralmış)"
+    return 0
+  fi
+  act "firewalld aktif/etkin → durdur + mask (panel devralır)"
+  if [ $DRY -eq 0 ]; then
+    systemctl disable --now firewalld >/dev/null 2>&1 || true
+    systemctl mask firewalld >/dev/null 2>&1 || true
+  fi
+}
+
 sec_frontend() {
   want frontend || return 0
   head_ "frontend-dist"
@@ -235,6 +259,7 @@ sec_binary
 sec_clamav
 sec_frontend
 sec_signon
+sec_firewall
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then
