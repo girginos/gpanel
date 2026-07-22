@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -346,6 +347,31 @@ func (h *Handlers) rebuild() error {
 func Reapply(db *sql.DB) error {
 	h := &Handlers{DB: db}
 	return h.rebuild()
+}
+
+// FirewalldDevral: AlmaLinux/RHEL varsayılan firewalld'sini devre dışı bırakır.
+//
+// 🔴 NEDEN: GirginOSPanel firewall'ı kendi nftables tablosunu (girginos_fw)
+// yönetir. firewalld ile AYNI ANDA çalışırsa çakışır — nftables'ta bir tablonun
+// base chain'inde 'drop' KESİNDİR (terminal) → firewalld panelin portlarını
+// (8443/80/443/53/21) düşürür ve panelin 'accept' politikası bunu EZEMEZ.
+// Sonuç: panel UI erişilemez, siteler açılmaz, Cloudflare "origin unreachable".
+// Bu yüzden tek firewall otoritesi panel olsun diye firewalld'yi durdur+kapat+
+// mask ediyoruz. firewalld durunca kendi nftables tablosunu ANINDA temizler →
+// reboot GEREKMEZ. Açılışta her seferinde çağrılır; idempotent (kurulu değilse
+// veya zaten mask'liyse hiçbir şey yapmaz), dolayısıyla self-healing.
+func FirewalldDevral() {
+	// Kurulu mu? systemctl cat sıfır dönerse unit vardır.
+	if exec.Command("systemctl", "cat", "firewalld.service").Run() != nil {
+		return // firewalld yok — panel zaten tek firewall
+	}
+	// Zaten devralınmış mı? is-enabled "masked" döner.
+	if out, _ := exec.Command("systemctl", "is-enabled", "firewalld").Output(); strings.TrimSpace(string(out)) == "masked" {
+		return
+	}
+	_ = exec.Command("systemctl", "disable", "--now", "firewalld").Run()
+	_ = exec.Command("systemctl", "mask", "firewalld").Run()
+	log.Printf("firewall: firewalld durduruldu+mask edildi — tek firewall = panel nftables (girginos_fw)")
 }
 
 // --- yardımcılar ---

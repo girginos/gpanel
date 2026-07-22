@@ -419,6 +419,7 @@ func main() {
 
 	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
 	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
+	guvenlikduvari.FirewalldDevral()                   // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
 	}

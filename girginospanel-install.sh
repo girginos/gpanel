@@ -92,6 +92,21 @@ else
 fi
 
 # ============ 3) PHP (5 sürüm + base + wp-cli) ============
+# ============ 2c) FIREWALL — firewalld KAPAT, panel devralır ============
+# 🔴 Panel firewall'ı kendi nftables tablosunu (girginos_fw) yönetir. AlmaLinux 10
+# varsayılan firewalld ile ÇAKIŞIR: nftables'ta 'drop' kesindir → firewalld panelin
+# portlarını (8443/80/443/53/21) düşürür, panelin 'accept'i bunu ezemez. Tek otorite
+# panel olsun diye firewalld'yi durdur+kapat+mask ediyoruz. (Panel binary'si açılışta
+# ayrıca FirewalldDevral ile bunu garanti eder — bu adım kurulumda erken kapatır.)
+step "2c) Firewall (firewalld kapat — panel devralır)"
+if systemctl cat firewalld.service >/dev/null 2>&1; then
+  systemctl disable --now firewalld >/dev/null 2>&1 || true
+  systemctl mask firewalld >/dev/null 2>&1 || true
+  ok "firewalld durduruldu + mask edildi (tek firewall = panel nftables)"
+else
+  ok "firewalld kurulu değil — panel nftables zaten tek firewall"
+fi
+
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
 BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6"
 # 🔴 PHP batch kurulumu ONCESI: dnf oto-kilit kaynaklarini kapat (dnf-automatic/makecache
