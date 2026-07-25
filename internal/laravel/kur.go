@@ -177,10 +177,10 @@ func kurScriptIskele(appDir, php, tmp string) string {
 		"if [ -z \"$(ls -A \"$DEST\" 2>/dev/null)\" ]; then\n" +
 		"  " + cp + " laravel/laravel \"$DEST\" || " + cp + " laravel/laravel:^11 \"$DEST\"\n" +
 		"else\n" +
-		"  echo '(dizin dolu — geçici dizine kurup birleştiriliyor)'\n" +
+		"  echo '(dizin dolu — geçici dizine kurup taşınıyor)'\n" +
 		"  rm -rf \"$TMP\"\n" +
 		"  " + cp + " laravel/laravel \"$TMP\" || " + cp + " laravel/laravel:^11 \"$TMP\"\n" +
-		"  cp -a \"$TMP\"/. \"$DEST\"/\n" +
+		"  cp -al \"$TMP\"/. \"$DEST\"/ 2>/dev/null || cp -a \"$TMP\"/. \"$DEST\"/\n" + // -al hardlink → inode kotası 2'ye katlanmaz
 		"  rm -rf \"$TMP\"\n" +
 		"fi\n" +
 		"cd \"$DEST\"\n" +
@@ -195,7 +195,7 @@ func kurScriptUzak(appDir, repoURL, branch, php, tmp string) string {
 		"DEST=" + shq(appDir) + "\nTMP=" + shq(tmp) + "\n" +
 		"rm -rf \"$TMP\"\n" +
 		"/usr/bin/git clone --depth 1 --branch " + shq(branch) + " -- " + shq(repoURL) + " \"$TMP\"\n" +
-		"cp -a \"$TMP\"/. \"$DEST\"/\n" +
+		"cp -al \"$TMP\"/. \"$DEST\"/ 2>/dev/null || cp -a \"$TMP\"/. \"$DEST\"/\n" + // -al hardlink → inode kotası korunur
 		"rm -rf \"$TMP\"\n" +
 		"cd \"$DEST\"\n" +
 		"[ -f .env ] || { [ -f .env.example ] && cp .env.example .env; }\n" +
@@ -234,6 +234,13 @@ func (h *Handlers) KurDurum(w http.ResponseWriter, r *http.Request) {
 		_ = exec.Command("systemctl", "reset-failed", unit).Run()
 		_ = os.Remove(setupScript(id))
 		k.SonDeployDurum = durum
+	}
+	// hata + log boşsa (create-project hiç çıktı üretmeden çöktü) sistem günlüğünü ekle
+	// → gerçek neden (disk/inode kotası, izin) yüzeye çıkar, "undefined" olmaz.
+	if !calisiyor && k.SonDeployDurum == "hata" && len(strings.TrimSpace(logTail)) < 40 {
+		if out, e := exec.Command("journalctl", "-u", unit, "-n", "30", "--no-pager").Output(); e == nil {
+			logTail += "\n\n[sistem günlüğü — kurulum süreci]\n" + ansiTemizle(string(out))
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"calisiyor": calisiyor, "durum": k.SonDeployDurum, "log": logTail,

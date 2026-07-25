@@ -82,7 +82,7 @@ export default function DomainLaravelPage() {
       ) : !d.kurulu && d.son_deploy_durum !== 'kuruluyor' ? (
         <KurulumSihirbazi id={id!} onKuruldu={() => { yukle(); bildir('✓ Laravel uygulaması kuruldu') }} onHata={setHata} />
       ) : d.son_deploy_durum === 'kuruluyor' ? (
-        <KurulumIlerleme id={id!} onBitti={(basarili, log) => { yukle(); basarili ? bildir('✓ Laravel uygulaması kuruldu') : setHata('Kurulum başarısız oldu:\n' + log) }} />
+        <KurulumIlerleme id={id!} onBitti={(basarili, log) => { yukle(); basarili ? bildir('✓ Laravel uygulaması kuruldu') : setHata('Kurulum başarısız oldu:\n' + (log || 'Ayrıntı yok — sunucuda disk veya dosya-sayısı (inode) kotası dolmuş olabilir. Dosya yöneticisinden alanı kontrol edin.')) }} />
       ) : (
         <>
           {/* Sekme çubuğu (mobilde yatay kaydırılır) */}
@@ -143,7 +143,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
   }
 
   if (asyncUnit) return <KurulumIlerleme id={id} onBitti={(basarili, log) => {
-    if (basarili) { onKuruldu() } else { onHata('Kurulum başarısız oldu:\n' + log); setAsyncUnit(false) }
+    if (basarili) { onKuruldu() } else { onHata('Kurulum başarısız oldu:\n' + (log || 'Ayrıntı yok — sunucuda disk veya dosya-sayısı (inode) kotası dolmuş olabilir. Dosya yöneticisinden alanı kontrol edin.')); setAsyncUnit(false) }
   }} />
 
   return (
@@ -219,7 +219,9 @@ function KurulumIlerleme({ id, onBitti }: { id: string; onBitti: (basarili: bool
         if (!r.data.calisiyor && r.data.durum !== 'kuruluyor' && !bitti.current) {
           bitti.current = true
           clearInterval(t)
-          setTimeout(onBitti, 1200)
+          const basarili = r.data.durum === 'hazir'
+          const sonLog = r.data.log || ''
+          setTimeout(() => onBitti(basarili, sonLog), 1200)
         }
       } catch { /* devam */ }
     }, 2500)
