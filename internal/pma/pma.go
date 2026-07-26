@@ -75,10 +75,13 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 	token := randomHex(24)
 	expires := time.Now().Add(2 * time.Minute) // 2 dakika kısa pencere
 
+	// son_kullanma'yi MySQL saatiyle yaz. Go time.Now() (UTC olabilir) ile MySQL yerel-tz
+	// NOW() karisirsa, yerel-saatli MySQL'de son_kullanma<NOW() olup taze token asagidaki
+	// temizlikte ANINDA silinir -> redeem 404 ("token bulunamadi"). DATE_ADD(NOW(),...) tek saat.
 	_, err = h.DB.ExecContext(r.Context(),
 		`INSERT INTO pma_tokens(token, domain_id, db_kullanici, db_parola, db_adi, son_kullanma)
-		 VALUES(?,?,?,?,?,?)`,
-		token, domainID, dbKul, dbPar, dbAdi, expires)
+		 VALUES(?,?,?,?,?, DATE_ADD(NOW(), INTERVAL 120 SECOND))`,
+		token, domainID, dbKul, dbPar, dbAdi)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -115,12 +118,13 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var dbKul, dbPar, dbAdi string
-	var sonKul time.Time
-	var kul int
+	var kul, suresiDoldu int
+	// Sure kontrolu SQL'de (MySQL saati) — Go time.Now() ile MySQL-yazilan zamani karsilastirma
+	// (TZ karisimi redeem'i yanlis reddedebilir). son_kullanma < NOW() => suresiDoldu.
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT db_kullanici, db_parola, db_adi, son_kullanma, kullanildi
+		`SELECT db_kullanici, db_parola, db_adi, kullanildi, (son_kullanma < NOW())
 		 FROM pma_tokens WHERE token=?`, req.Token).
-		Scan(&dbKul, &dbPar, &dbAdi, &sonKul, &kul)
+		Scan(&dbKul, &dbPar, &dbAdi, &kul, &suresiDoldu)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "token bulunamadı", http.StatusNotFound)
 		return
@@ -133,7 +137,7 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token zaten kullanılmış", http.StatusGone)
 		return
 	}
-	if time.Now().After(sonKul) {
+	if suresiDoldu == 1 {
 		http.Error(w, "token süresi doldu", http.StatusGone)
 		return
 	}
