@@ -13,6 +13,11 @@ type Domain = {
   php_surum?: string; is_demo?: boolean
   olusturulma?: string; plan_id?: number; plan_ad?: string
 }
+type SubGenel = {
+  id: number; alt_ad: string; tam_ad: string
+  parent_id: number; parent_ad: string
+  sistem_kullanici: string; php_surum: string; docroot: string; olusturulma: string
+}
 type Plan = { id: number; ad: string; disk_kota_mb?: number }
 type PHPVer = { surum: string; aciklama?: string }
 type OlusturmaSonuc = {
@@ -29,6 +34,7 @@ function fmtKB(kb: number) {
 
 export default function DomainsPage() {
   const [items, setItems] = useState<Domain[]>([])
+  const [subler, setSubler] = useState<SubGenel[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
@@ -57,6 +63,9 @@ export default function DomainsPage() {
       .then(r => setItems(r.data))
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
+    api.get<SubGenel[]>('/subdomains')
+      .then(r => setSubler(r.data))
+      .catch(() => setSubler([]))
   }
   useEffect(yukle, [])
 
@@ -149,8 +158,20 @@ export default function DomainsPage() {
   const filtreli = useMemo(() => {
     const s = q.trim().toLowerCase()
     if (!s) return items
-    return items.filter(d => d.alan_adi.toLowerCase().includes(s) || d.sistem_kullanici.toLowerCase().includes(s))
-  }, [items, q])
+    const subParents = new Set(subler.filter(sd => sd.tam_ad.toLowerCase().includes(s) || sd.sistem_kullanici.toLowerCase().includes(s)).map(sd => sd.parent_id))
+    return items.filter(d => d.alan_adi.toLowerCase().includes(s) || d.sistem_kullanici.toLowerCase().includes(s) || subParents.has(d.id))
+  }, [items, q, subler])
+
+  const sublerByParent = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    const m = new Map<number, SubGenel[]>()
+    for (const sd of subler) {
+      if (s && !sd.tam_ad.toLowerCase().includes(s) && !sd.sistem_kullanici.toLowerCase().includes(s)) continue
+      const arr = m.get(sd.parent_id) || []
+      arr.push(sd); m.set(sd.parent_id, arr)
+    }
+    return m
+  }, [subler, q])
 
   function togga(id: number) {
     setSecili(prev => {
@@ -266,8 +287,9 @@ export default function DomainsPage() {
               </tr>
             </thead>
             <tbody className={T.govde}>
-              {filtreli.map(d => {
-                return (
+              {filtreli.flatMap(d => {
+                const subs = sublerByParent.get(d.id) || []
+                const parentRow = (
                   <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${secili.has(d.id) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20' : ''}`}>
                     <td className={T.hucreSecim}>
                       <input type="checkbox" checked={secili.has(d.id)}
@@ -307,6 +329,40 @@ export default function DomainsPage() {
                     </td>
                   </tr>
                 )
+                const subRows = subs.map(sd => (
+                  <tr key={'sub-' + sd.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/50 transition bg-slate-50/40 dark:bg-slate-900/20`}>
+                    <td className={T.hucreSecim}></td>
+                    <td className={T.hucreBaslikSecimli}>
+                      <span className="inline-flex items-center gap-1.5 lg:pl-5">
+                        <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline">└─</span>
+                        <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{sd.tam_ad}</Link>
+                        <span className="text-[9px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded align-middle">alt alan</span>
+                      </span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 break-all">{sd.sistem_kullanici}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Plan">
+                      <span className="text-slate-400 dark:text-slate-500 italic">—</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="PHP">
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{sd.php_surum || '-'}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Disk">
+                      <span className="text-slate-300 dark:text-slate-600">—</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Durum">
+                      <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">aktif</span>
+                    </td>
+                    <td className={T.hucre} data-etiket="Oluşturulma">
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma || '-'}</span>
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right`}>
+                      <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">Yönet →</Link>
+                    </td>
+                  </tr>
+                ))
+                return [parentRow, ...subRows]
               })}
             </tbody>
           </table>

@@ -145,7 +145,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 
 	// nginx server bloğu
 	conf := confPath(sk, altAd)
-	if err := os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket)), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, "")), 0o644); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
 		return
 	}
@@ -210,7 +210,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func vhost(tamAd, docroot, socket string) string {
+func vhost(tamAd, docroot, socket, koruma string) string {
 	return `server {
     listen 80;
     listen [::]:80;
@@ -226,10 +226,12 @@ func vhost(tamAd, docroot, socket string) string {
     add_header X-XSS-Protection "1; mode=block" always;
 
     location /.well-known/acme-challenge/ {
+        auth_basic off;
         root /var/www/_acme;
         try_files $uri =404;
     }
 
+` + koruma + `
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
     location ~ \.php$ {

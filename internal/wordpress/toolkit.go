@@ -25,7 +25,8 @@ func (h *Handlers) dizinQP(r *http.Request, sk string) (string, error) {
 	if d == "" {
 		d = "/"
 	}
-	return cozDizin(sk, d)
+	root, _, _ := h.wpKapsam(r, sk)
+	return cozDizin(root, d)
 }
 
 // gonderJSON: wp-cli'nin JSON çıktısını (bir dizi) olduğu gibi ilet; hata/boşsa [] döndür.
@@ -174,7 +175,8 @@ func (h *Handlers) mutasyonHazir(w http.ResponseWriter, r *http.Request, dizin s
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğinde kullanılamaz")
 		return "", "", false
 	}
-	d, err := cozDizin(sk, dizin)
+	root, _, _ := h.wpKapsam(r, sk)
+	d, err := cozDizin(root, dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return "", "", false

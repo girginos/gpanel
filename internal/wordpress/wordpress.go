@@ -80,7 +80,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	root := "/home/" + sk + "/public_html"
+	root, _, _ := h.wpKapsam(r, sk)
 	out := []Kurulum{}
 	adaylar := []string{root}
 	if entries, err := os.ReadDir(root); err == nil {
@@ -319,7 +319,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz alt dizin (küçük harf/rakam/-)")
 		return
 	}
-	root := "/home/" + sk + "/public_html"
+	root, wpHost, wpAlt := h.wpKapsam(r, sk)
 	hedef := root
 	if req.AltDizin != "" {
 		hedef = filepath.Join(root, req.AltDizin)
@@ -376,7 +376,13 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		basarisiz("wp-config oluşturma", out)
 		return
 	}
-	url := h.scheme(ssl) + alanAdi
+	siteHost := alanAdi
+	siteSSL := ssl
+	if wpAlt {
+		siteHost = wpHost
+		siteSSL = false
+	}
+	url := h.scheme(siteSSL) + siteHost
 	if req.AltDizin != "" {
 		url += "/" + req.AltDizin
 	}
@@ -416,7 +422,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		Dizin string `json:"dizin"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&greq)
-	dir, err := cozDizin(sk, greq.Dizin)
+	wpRoot, _, _ := h.wpKapsam(r, sk)
+	dir, err := cozDizin(wpRoot, greq.Dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -455,12 +462,13 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		DBSil bool   `json:"db_sil"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&sreq)
-	dir, err := cozDizin(sk, sreq.Dizin)
+	wpRoot, _, _ := h.wpKapsam(r, sk)
+	dir, err := cozDizin(wpRoot, sreq.Dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	root := "/home/" + sk + "/public_html"
+	root := wpRoot
 	// KÖK-SİTE KORUMASI: public_html'in kendisini silme (tüm site gider)
 	if dir == root {
 		httpx.WriteError(w, http.StatusBadRequest, "kök dizindeki WordPress panelden silinemez (tüm site gider); Dosya Yöneticisi'nden kaldırın")
@@ -492,8 +500,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 }
 
 // cozDizin: {dizin} değerini güvenli mutlak yola çevirir (public_html içinde + wp-config var).
-func cozDizin(sk, dizinStr string) (string, error) {
-	root := "/home/" + sk + "/public_html"
+func cozDizin(root, dizinStr string) (string, error) {
 	d := strings.TrimPrefix(strings.TrimSpace(dizinStr), "/ (kök)")
 	rel := strings.Trim(strings.TrimSpace(d), "/")
 	dir := root

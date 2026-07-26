@@ -1599,8 +1599,53 @@ func sharedSocketPath(sk, surum string) (string, error) {
 
 // buildProtectedBlocks: korumali_dizinler tablosundan nginx auth_basic location bloklari uretir.
 // Her korunan yol icin outer prefix location + PHP kaynak sizmasini engelleyen nested .php location.
+// ProtectedBlocksForSub: subdomain_id ile korumali_dizinler auth_basic bloklari (subdomain vhost icin).
+func ProtectedBlocksForSub(db *sql.DB, subID int64, socket string) string {
+	rows, err := db.Query(`SELECT DISTINCT yol, htpasswd_dosya FROM korumali_dizinler WHERE subdomain_id=? ORDER BY yol`, subID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	var b strings.Builder
+	for rows.Next() {
+		var yol, dosya string
+		if err := rows.Scan(&yol, &dosya); err != nil {
+			continue
+		}
+		if yol == "/" {
+			// Kök dizin: ayrı "location /" oluşturulamaz — mevcut zorunlu "location /"
+			// ile aynı prefix olur ve nginx "duplicate location" verir. Bunun yerine
+			// auth_basic'i SERVER seviyesinde tanımlarız; tüm location'lar (PHP dahil)
+			// bunu miras alır. acme-challenge location'ı "auth_basic off" ile muaf
+			// tutulduğu için Let's Encrypt sertifika alımı/yenilemesi etkilenmez.
+			fmt.Fprintf(&b, `    auth_basic "Kimlik Dogrulamasi Gerekli";
+    auth_basic_user_file %s;
+`, dosya)
+			continue
+		}
+		fmt.Fprintf(&b, `    location ^~ %s {
+        auth_basic "Kimlik Dogrulamasi Gerekli";
+        auth_basic_user_file %s;
+        location ~ \.php$ {
+            auth_basic "Kimlik Dogrulamasi Gerekli";
+            auth_basic_user_file %s;
+            try_files $uri =404;
+            fastcgi_split_path_info ^(.+\.php)(/.+)$;
+            fastcgi_pass unix:%s;
+            fastcgi_index index.php;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param HTTPS on;
+        }
+    }
+`, yol, dosya, dosya, socket)
+	}
+	_ = rows.Err()
+	return b.String()
+}
+
 func buildProtectedBlocks(db *sql.DB, domainID int64, socket string) string {
-	rows, err := db.Query(`SELECT DISTINCT yol, htpasswd_dosya FROM korumali_dizinler WHERE domain_id=? ORDER BY yol`, domainID)
+	rows, err := db.Query(`SELECT DISTINCT yol, htpasswd_dosya FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=0 ORDER BY yol`, domainID)
 	if err != nil {
 		return ""
 	}

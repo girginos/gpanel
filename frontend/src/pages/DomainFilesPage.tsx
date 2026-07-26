@@ -42,9 +42,18 @@ type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 const ROOT = '/'
 
 export default function DomainFilesPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
   const [yol, setYol] = useState<string>('/public_html')
+  useEffect(() => {
+    if (!sid) return
+    api.get<{ docroot: string }>(`/domains/${id}/subdomain/${sid}`).then(r => {
+      const rel = (r.data.docroot || '').replace(/^\/home\/[^/]+/, '')
+      if (rel) setYol(rel)
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, sid])
   const [icerik, setIcerik] = useState<Entry[]>([])
   const [yukleniyor, setYukleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
@@ -87,7 +96,7 @@ export default function DomainFilesPage() {
   function tara() {
     if (!id) return
     setYukleniyor(true); setHata(null)
-    api.get<ListResp>(`/domains/${id}/files`, { params: { yol } })
+    api.get<ListResp>(`${base}/files`, { params: { yol } })
       .then(r => setIcerik(r.data.icerik))
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYukleniyor(false))
@@ -109,7 +118,7 @@ export default function DomainFilesPage() {
   async function sil(e: Entry) {
     if (!confirm(`"${e.adi}" silinsin mi? Bu işlem geri alınamaz.`)) return
     try {
-      await api.delete(`/domains/${id}/files`, { params: { yol: e.yol } })
+      await api.delete(`${base}/files`, { params: { yol: e.yol } })
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
@@ -122,7 +131,7 @@ export default function DomainFilesPage() {
     if (!ad) return
     const hedef = (yol === '/' ? '' : yol) + '/' + ad
     try {
-      await api.post(`/domains/${id}/files/mkdir`, { yol: hedef })
+      await api.post(`${base}/files/mkdir`, { yol: hedef })
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
@@ -133,7 +142,7 @@ export default function DomainFilesPage() {
   async function editorAc(e: Entry) {
     if (e.tip !== 'dosya') return
     try {
-      const { data } = await api.get<{yol: string; icerik: string}>(`/domains/${id}/files/oku`, { params: { yol: e.yol } })
+      const { data } = await api.get<{yol: string; icerik: string}>(`${base}/files/oku`, { params: { yol: e.yol } })
       setEditor({ yol: e.yol, icerik: data.icerik })
     } catch (err) {
       alert(apiHata(err, 'Açılamadı'))
@@ -143,7 +152,7 @@ export default function DomainFilesPage() {
   async function editorKaydet() {
     if (!editor) return
     try {
-      await api.post(`/domains/${id}/files/yaz`, { yol: editor.yol, icerik: editor.icerik })
+      await api.post(`${base}/files/yaz`, { yol: editor.yol, icerik: editor.icerik })
       setEditor(null); tara()
     } catch (err) {
       alert(apiHata(err, 'Kaydedilemedi'))
@@ -156,7 +165,7 @@ export default function DomainFilesPage() {
     parca[parca.length - 1] = yeniAd
     const yeni = parca.join('/')
     try {
-      await api.post(`/domains/${id}/files/rename`, { eski: e.yol, yeni })
+      await api.post(`${base}/files/rename`, { eski: e.yol, yeni })
       setRenameFor(null); setAgacYenileme(x => x + 1); tara()
     } catch (err) {
       alert(apiHata(err, 'Yeniden adlandırılamadı'))
@@ -165,7 +174,7 @@ export default function DomainFilesPage() {
 
   async function izinDegistir(e: Entry, mod: string) {
     try {
-      await api.post(`/domains/${id}/files/chmod`, { yol: e.yol, mod })
+      await api.post(`${base}/files/chmod`, { yol: e.yol, mod })
       setChmodFor(null); tara()
     } catch (err) {
       alert(apiHata(err, 'İzin değiştirilemedi'))
@@ -178,7 +187,7 @@ export default function DomainFilesPage() {
     const fd = new FormData()
     fd.append('dosya', f)
     try {
-      await api.post(`/domains/${id}/files/upload`, fd, {
+      await api.post(`${base}/files/upload`, fd, {
         timeout: 0, // buyuk upload: client tarafinda iptal etme (backend 30dk sinir)
         params: { yol },
         onUploadProgress: (e: any) => {
@@ -263,7 +272,7 @@ export default function DomainFilesPage() {
     let basarili = 0
     for (const y of yollar) {
       try {
-        await api.delete(`/domains/${id}/files`, { params: { yol: y } })
+        await api.delete(`${base}/files`, { params: { yol: y } })
         basarili++
       } catch (err) {
         console.error('sil hata', y, err)
@@ -278,7 +287,7 @@ export default function DomainFilesPage() {
   async function extractEt(e: Entry) {
     setExtractAktif(true)
     try {
-      await api.post(`/domains/${id}/files/extract`, { yol: e.yol })
+      await api.post(`${base}/files/extract`, { yol: e.yol })
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
@@ -291,7 +300,7 @@ export default function DomainFilesPage() {
   async function arama() {
     if (!aramaQ.trim()) { setAramaSonuc(null); return }
     try {
-      const { data } = await api.get(`/domains/${id}/files/ara`, { params: { q: aramaQ, yol } })
+      const { data } = await api.get(`${base}/files/ara`, { params: { q: aramaQ, yol } })
       setAramaSonuc(data.icerik)
     } catch (err) {
       alert(apiHata(err, 'Arama başarısız'))
@@ -302,7 +311,7 @@ export default function DomainFilesPage() {
     if (!kopyalaModal) return
     const url = kopyalaModal.tip === 'kopyala' ? 'copy' : 'move'
     try {
-      const { data } = await api.post(`/domains/${id}/files/${url}`, {
+      const { data } = await api.post(`${base}/files/${url}`, {
         kaynaklar: kopyalaModal.yollar, hedef,
       })
       setKopyalaModal(null); setSeciliSet(new Set())
@@ -318,7 +327,7 @@ export default function DomainFilesPage() {
     if (yollar.length === 0) return
     const cikti = (yol === '/' ? '' : yol) + '/' + ciktiAd + (format === 'zip' ? '.zip' : '.tar.gz')
     try {
-      await api.post(`/domains/${id}/files/archive`, { kaynaklar: yollar, cikti_yol: cikti, format })
+      await api.post(`${base}/files/archive`, { kaynaklar: yollar, cikti_yol: cikti, format })
       setArsivModal(false); setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
     } catch (err) {
@@ -329,10 +338,10 @@ export default function DomainFilesPage() {
   async function yeniDosyaOlustur(ad: string) {
     const hedef = (yol === '/' ? '' : yol) + '/' + ad
     try {
-      const { data } = await api.post(`/domains/${id}/files/yeni-dosya`, { yol: hedef })
+      const { data } = await api.post(`${base}/files/yeni-dosya`, { yol: hedef })
       setYeniDosyaModal(false); tara()
       // Direkt editöre aç
-      const okuResp = await api.get(`/domains/${id}/files/oku`, { params: { yol: hedef } })
+      const okuResp = await api.get(`${base}/files/oku`, { params: { yol: hedef } })
       setEditor({ yol: hedef, icerik: okuResp.data.icerik })
     } catch (err) {
       alert(apiHata(err, 'Oluşturma hata'))
@@ -341,7 +350,7 @@ export default function DomainFilesPage() {
 
   async function boyutHesapla(yolu: string) {
     try {
-      const { data } = await api.get(`/domains/${id}/files/boyut`, { params: { yol: yolu } })
+      const { data } = await api.get(`${base}/files/boyut`, { params: { yol: yolu } })
       setBoyutSonuc({ yol: yolu, boyut: data.boyut_b })
     } catch (err) {
       alert(apiHata(err, 'Boyut hesabi hata'))
@@ -381,7 +390,7 @@ export default function DomainFilesPage() {
 
   function indir(e: Entry) {
     const tok = localStorage.getItem('gosp.token') || ''
-    const url = `/api/v1/domains/${id}/files/indir?yol=${encodeURIComponent(e.yol)}`
+    const url = `/api/v1${base}/files/indir?yol=${encodeURIComponent(e.yol)}`
     // Header'lı GET tarayıcıdan; en basit: ayrı fetch + blob
     fetch(url, { headers: { Authorization: `Bearer ${tok}` } })
       .then(r => r.blob())

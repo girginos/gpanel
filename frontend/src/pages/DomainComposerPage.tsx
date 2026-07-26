@@ -6,7 +6,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici: string; dizin: string }
 
 export default function DomainComposerPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -17,14 +18,14 @@ export default function DomainComposerPage() {
   function yukle() {
     if (!id) return
     setYuk(true)
-    api.get<Durum>(`/domains/${id}/composer`).then(r => setD(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    api.get<Durum>(`${base}/composer`).then(r => setD(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
 
   async function calistir(komut: string, pkt?: string) {
     setCalisan(komut); setHata(null); setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\nÇalışıyor…`)
     try {
-      const { data } = await api.post(`/domains/${id}/composer`, { komut, paket: pkt || '' })
+      const { data } = await api.post(`${base}/composer`, { komut, paket: pkt || '' })
       setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || '(çıktı yok)'}\n\n${data.ok ? '✓ Tamamlandı' : '✗ Hata ile bitti'}`)
       yukle()
     } catch (e) {

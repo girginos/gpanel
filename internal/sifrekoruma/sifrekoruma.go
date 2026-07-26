@@ -16,6 +16,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/provisioner"
+	"girginospanel/internal/subdomain"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -49,6 +50,28 @@ func (h *Handlers) domain(r *http.Request) (id int64, sk, surum string, demo, ok
 	return id, sk, surum, isDemo == 1, true
 }
 
+// hedefSub: {sid} varsa (subID, subSurum, true); yoksa (0, "", false).
+func (h *Handlers) hedefSub(r *http.Request, id int64) (int64, string, bool) {
+	sidStr := chi.URLParam(r, "sid")
+	if sidStr == "" {
+		return 0, "", false
+	}
+	sid, _ := strconv.ParseInt(sidStr, 10, 64)
+	var surum string
+	if err := h.DB.QueryRow(`SELECT COALESCE(php_surum,'8.3') FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&surum); err != nil {
+		return 0, "", false
+	}
+	return sid, surum, true
+}
+
+// korumaUygula: subdomain ise subdomain vhost'unu, degilse domain vhost'unu yeniden render eder.
+func (h *Handlers) korumaUygula(id int64, sk, surum string, subID int64) error {
+	if subID > 0 {
+		return subdomain.ReRenderKoruma(h.DB, subID)
+	}
+	return h.reRender(id, sk, surum)
+}
+
 // GET /domains/{id}/koruma
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	id, _, _, _, ok := h.domain(r)
@@ -56,8 +79,9 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
+	subID, _, _ := h.hedefSub(r, id)
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT id, yol, kullanici, created_at FROM korumali_dizinler WHERE domain_id=? ORDER BY yol, kullanici`, id)
+		`SELECT id, yol, kullanici, created_at FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=? ORDER BY yol, kullanici`, id, subID)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "listelenemedi")
 		return
@@ -88,6 +112,7 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğinde kullanılamaz")
 		return
 	}
+	subID, _, _ := h.hedefSub(r, id)
 	if !strings.HasPrefix(sk, "c_") {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı")
 		return
@@ -118,7 +143,11 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "htpasswd dizini oluşturulamadı")
 		return
 	}
-	dosya := htpasswdDir + "/d" + strconv.FormatInt(id, 10) + "_" + sanitize(yol)
+	ad := "d" + strconv.FormatInt(id, 10)
+	if subID > 0 {
+		ad += "_s" + strconv.FormatInt(subID, 10)
+	}
+	dosya := htpasswdDir + "/" + ad + "_" + sanitize(yol)
 	flag := "-bB"
 	if _, e := os.Stat(dosya); e != nil {
 		flag = "-cbB" // yeni dosya oluştur
@@ -132,21 +161,21 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 	_ = os.Chmod(dosya, 0o644)
 
 	if _, err := h.DB.Exec(
-		`INSERT INTO korumali_dizinler (domain_id, yol, kullanici, htpasswd_dosya) VALUES (?,?,?,?)
+		`INSERT INTO korumali_dizinler (domain_id, subdomain_id, yol, kullanici, htpasswd_dosya) VALUES (?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE htpasswd_dosya=VALUES(htpasswd_dosya)`,
-		id, yol, req.Kullanici, dosya); err != nil {
+		id, subID, yol, req.Kullanici, dosya); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kayıt eklenemedi")
 		return
 	}
 
-	if err := h.reRender(id, sk, surum); err != nil {
+	if err := h.korumaUygula(id, sk, surum, subID); err != nil {
 		// vhost doğrulanamadı → eklediğimizi geri al, htpasswd'den de kaldır, tekrar render
-		_, _ = h.DB.Exec(`DELETE FROM korumali_dizinler WHERE domain_id=? AND yol=? AND kullanici=?`, id, yol, req.Kullanici)
+		_, _ = h.DB.Exec(`DELETE FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=? AND yol=? AND kullanici=?`, id, subID, yol, req.Kullanici)
 		_ = exec.Command("htpasswd", "-D", dosya, req.Kullanici).Run()
-		if kalan := h.kullaniciSayisi(id, yol); kalan == 0 {
+		if kalan := h.kullaniciSayisi(id, subID, yol); kalan == 0 {
 			_ = os.Remove(dosya)
 		}
-		_ = h.reRender(id, sk, surum)
+		_ = h.korumaUygula(id, sk, surum, subID)
 		httpx.WriteError(w, http.StatusInternalServerError, "nginx yapılandırması doğrulanamadı: "+err.Error())
 		return
 	}
@@ -162,9 +191,10 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	}
 	kid, _ := strconv.ParseInt(chi.URLParam(r, "kid"), 10, 64)
 	var yol, kullanici, dosya string
+	var subID int64
 	if err := h.DB.QueryRowContext(r.Context(),
-		`SELECT yol, kullanici, htpasswd_dosya FROM korumali_dizinler WHERE id=? AND domain_id=?`, kid, id).
-		Scan(&yol, &kullanici, &dosya); err != nil {
+		`SELECT yol, kullanici, htpasswd_dosya, subdomain_id FROM korumali_dizinler WHERE id=? AND domain_id=?`, kid, id).
+		Scan(&yol, &kullanici, &dosya, &subID); err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "kayıt bulunamadı")
 		return
 	}
@@ -173,19 +203,19 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = exec.Command("htpasswd", "-D", dosya, kullanici).Run()
-	if h.kullaniciSayisi(id, yol) == 0 {
+	if h.kullaniciSayisi(id, subID, yol) == 0 {
 		_ = os.Remove(dosya) // bu yol için başka kullanıcı kalmadı → location bloğu da düşecek
 	}
-	if err := h.reRender(id, sk, surum); err != nil {
+	if err := h.korumaUygula(id, sk, surum, subID); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "nginx yeniden yüklenemedi: "+err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h *Handlers) kullaniciSayisi(id int64, yol string) int {
+func (h *Handlers) kullaniciSayisi(id, subID int64, yol string) int {
 	var n int
-	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM korumali_dizinler WHERE domain_id=? AND yol=?`, id, yol).Scan(&n)
+	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=? AND yol=?`, id, subID, yol).Scan(&n)
 	return n
 }
 

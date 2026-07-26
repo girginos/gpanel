@@ -12,7 +12,8 @@ type ReadResp = { dosya: string; yol: string; satirlar: string[]; mevcut: boolea
 const MAX_PENCERE = 1000
 
 export default function DomainLogsPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dosyalar, setDosyalar] = useState<LogDosya[]>([])
   const [aktif, setAktif] = useState<string>('access')
@@ -37,14 +38,14 @@ export default function DomainLogsPage() {
   useEffect(() => {
     if (!id) return
     api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
-    api.get<LogDosya[]>(`/domains/${id}/logs`).then(r => setDosyalar(r.data)).catch(e => setHata(apiHata(e)))
+    api.get<LogDosya[]>(`${base}/logs`).then(r => setDosyalar(r.data)).catch(e => setHata(apiHata(e)))
   }, [id])
 
   // Aktif dosya değişince son N satırı yükle
   async function ilkYukle() {
     if (!id || !aktif) return
     try {
-      const { data } = await api.get<ReadResp>(`/domains/${id}/logs/oku`, { params: { dosya: aktif, son: 200 } })
+      const { data } = await api.get<ReadResp>(`${base}/logs/oku`, { params: { dosya: aktif, son: 200 } })
       setSatirlar(data.satirlar || [])
       setHata(null)
     } catch (e) {
@@ -67,7 +68,7 @@ export default function DomainLogsPage() {
 
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/domains/${id}/logs/canli?dosya=${aktif}`, {
+        const res = await fetch(`/api/v1${base}/logs/canli?dosya=${aktif}`, {
           headers: { Authorization: `Bearer ${tok}` },
           signal: ctrl.signal,
         })

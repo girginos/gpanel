@@ -6,7 +6,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
 export default function DomainSifreKorumaPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [liste, setListe] = useState<Kayit[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -19,7 +20,7 @@ export default function DomainSifreKorumaPage() {
   function yukle() {
     if (!id) return
     setYuk(true)
-    api.get<Kayit[]>(`/domains/${id}/koruma`)
+    api.get<Kayit[]>(`${base}/koruma`)
       .then(r => setListe(r.data || [])).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -28,7 +29,7 @@ export default function DomainSifreKorumaPage() {
     e.preventDefault()
     setHata(null); setOk(null); setKaydediyor(true)
     try {
-      await api.post(`/domains/${id}/koruma`, { yol, kullanici, parola })
+      await api.post(`${base}/koruma`, { yol, kullanici, parola })
       setOk(`${yol} dizini "${kullanici}" ile korumaya alındı.`)
       setParola('')
       yukle()
@@ -41,7 +42,7 @@ export default function DomainSifreKorumaPage() {
     if (!confirm(`"${k.kullanici}" kullanıcısını ${k.yol} korumasından kaldır?`)) return
     setHata(null); setOk(null)
     try {
-      await api.delete(`/domains/${id}/koruma/${k.id}`)
+      await api.delete(`${base}/koruma/${k.id}`)
       yukle()
     } catch (err) { setHata(apiHata(err, 'Silinemedi')) }
   }

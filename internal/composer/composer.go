@@ -34,6 +34,19 @@ func (h *Handlers) load(r *http.Request) (id int64, sk string, demo bool, ok boo
 	return id, sk, isDemo == 1, true
 }
 
+// composerDir: {sid} varsa subdomain docroot, yoksa public_html.
+func (h *Handlers) composerDir(r *http.Request, sk string) string {
+	if sidStr := chi.URLParam(r, "sid"); sidStr != "" {
+		sid, _ := strconv.ParseInt(sidStr, 10, 64)
+		id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		var tamAd string
+		if err := h.DB.QueryRow(`SELECT tam_ad FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&tamAd); err == nil && tamAd != "" {
+			return "/home/" + sk + "/subdomains/" + tamAd
+		}
+	}
+	return "/home/" + sk + "/public_html"
+}
+
 // GET /domains/{id}/composer — durum (composer kurulu mu, composer.json var mı)
 func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	_, sk, _, ok := h.load(r)
@@ -53,13 +66,14 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		kurulu = true
 		surum = strings.TrimSpace(string(out))
 	}
-	_, jErr := os.Stat("/home/" + sk + "/public_html/composer.json")
+	dizin := h.composerDir(r, sk)
+	_, jErr := os.Stat(dizin + "/composer.json")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"kurulu":        kurulu,
 		"surum":         surum,
 		"composer_json": jErr == nil,
 		"kullanici":     sk,
-		"dizin":         "/home/" + sk + "/public_html",
+		"dizin":         dizin,
 	})
 }
 
@@ -95,7 +109,7 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "izin verilmeyen komut")
 		return
 	}
-	dizin := "/home/" + sk + "/public_html"
+	dizin := h.composerDir(r, sk)
 	// argv EXPLICIT (shell yok → enjeksiyon yok)
 	args := []string{"-u", sk, "--", composerBin, req.Komut, "--no-interaction", "--no-ansi", "-d", dizin}
 	// Guvenlik: script/plugin calistirmayi engelle (rasgele kod + env-sizinti vektoru)

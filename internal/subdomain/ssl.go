@@ -20,6 +20,8 @@ import (
 // (openssl / acme.sh --webroot /var/www/_acme) ama subdomain vhost'una (sub_*.conf) uygulanır.
 
 func sslDir(sk string) string      { return "/home/" + sk + "/ssl" }
+func sslSid(r *http.Request) int64 { v, _ := strconv.ParseInt(chi.URLParam(r, "sid"), 10, 64); return v }
+
 func certYolu(sk, tamAd string) (string, string) {
 	d := sslDir(sk)
 	return filepath.Join(d, tamAd+".crt"), filepath.Join(d, tamAd+".key")
@@ -120,14 +122,14 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 
 	// vhost'u SSL-li yeniden yaz
 	conf := confPath(sk, altAd)
-	if err := os.WriteFile(conf, []byte(vhostSSL(tamAd, docroot, socket, crt, key)), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte(vhostSSL(tamAd, docroot, socket, crt, key, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
 		return
 	}
 	_ = exec.Command("restorecon", conf).Run()
 	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
 		// rollback: HTTP vhost'a dön
-		_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket)), 0o644)
+		_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644)
 		_ = exec.Command("systemctl", "reload", "nginx").Run()
 		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+strings.TrimSpace(string(out)))
 		return
@@ -162,7 +164,7 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(crt)
 	_ = os.Remove(key)
 	conf := confPath(sk, altAd)
-	_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket)), 0o644)
+	_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644)
 	_ = exec.Command("restorecon", conf).Run()
 	_ = exec.Command("systemctl", "reload", "nginx").Run()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -170,7 +172,7 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 
 func dosyaVar(p string) bool { _, err := os.Stat(p); return err == nil }
 
-func vhostSSL(tamAd, docroot, socket, crt, key string) string {
+func vhostSSL(tamAd, docroot, socket, crt, key, koruma string) string {
 	return fmt.Sprintf(`server {
     listen 80;
     listen [::]:80;
@@ -197,6 +199,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
+%[6]s
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
     location ~ \.php$ {
@@ -217,5 +220,5 @@ server {
 
     location ~ /\.(?!well-known) { deny all; }
 }
-`, tamAd, docroot, socket, crt, key)
+`, tamAd, docroot, socket, crt, key, koruma)
 }

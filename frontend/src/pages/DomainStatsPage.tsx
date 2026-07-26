@@ -13,7 +13,8 @@ type Ozet = {
 }
 
 export default function DomainStatsPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [o, setO] = useState<Ozet | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -21,7 +22,7 @@ export default function DomainStatsPage() {
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
-    api.get<Ozet>(`/domains/${id}/istatistik`)
+    api.get<Ozet>(`${base}/istatistik`)
       .then(r => setO(r.data))
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))

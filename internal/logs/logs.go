@@ -48,6 +48,13 @@ func (h *Handlers) lookup(r *http.Request) (string, string, error) {
 	if isDemo == 1 {
 		return "", "", errors.New("demo aboneliğin logları yönetilemez")
 	}
+	if sidStr := chi.URLParam(r, "sid"); sidStr != "" {
+		sid, _ := strconv.ParseInt(sidStr, 10, 64)
+		var tamAd string
+		if e := h.DB.QueryRowContext(r.Context(), `SELECT tam_ad FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&tamAd); e == nil && tamAd != "" {
+			return tamAd, sk, nil
+		}
+	}
 	return alanAdi, sk, nil
 }
 

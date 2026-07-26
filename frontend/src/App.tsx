@@ -45,6 +45,7 @@ import FirewallPage from '@/pages/FirewallPage'
 import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
 import DomainWordPressPage from '@/pages/DomainWordPressPage'
 import DomainSubdomainlerPage from '@/pages/DomainSubdomainlerPage'
+import DomainSubdomainYonetPage from '@/pages/DomainSubdomainYonetPage'
 import CPanelGirisPage from '@/pages/CPanelGirisPage'
 import IstatistiklerPage from '@/pages/IstatistiklerPage'
 import IzlemePage from '@/pages/IzlemePage'
@@ -89,6 +90,13 @@ export default function App() {
         <Route path="abonelikler/:id/kopyala"       element={<DomainKopyaPage />} />
         <Route path="abonelikler/:id/wordpress"     element={<DomainWordPressPage />} />
         <Route path="abonelikler/:id/subdomainler"  element={<DomainSubdomainlerPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid" element={<DomainSubdomainYonetPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/wordpress" element={<DomainWordPressPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/composer" element={<DomainComposerPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/gunlukler" element={<DomainLogsPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/dosyalar" element={<DomainFilesPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/istatistik" element={<DomainStatsPage />} />
+        <Route path="abonelikler/:id/subdomainler/:sid/sifre-koruma" element={<DomainSifreKorumaPage />} />
         <Route path="abonelikler/:id/cron"          element={<DomainCronPage />} />
         <Route path="abonelikler/:id/gunlukler"     element={<DomainLogsPage />} />
         <Route path="abonelikler/:id/dns"           element={<DomainDNSPage />} />

@@ -10,7 +10,8 @@ type Paket = { name: string; status: string; version: string; update: string; up
 type Kullanici = { ID: number; user_login: string; user_email: string; display_name: string; roles: string }
 
 export default function DomainWordPressPage() {
-  const { id } = useParams()
+  const { id, sid } = useParams()
+  const base = sid ? `/domains/${id}/subdomain/${sid}/wordpress` : `/domains/${id}/wordpress`
   const [liste, setListe] = useState<Kurulum[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -32,7 +33,7 @@ export default function DomainWordPressPage() {
   const listele = useCallback(() => {
     if (!id) return
     setYuk(true)
-    api.get<Kurulum[]>(`/domains/${id}/wordpress`).then(r => setListe(r.data || [])).catch(() => setListe([])).finally(() => setYuk(false))
+    api.get<Kurulum[]>(`${base}`).then(r => setListe(r.data || [])).catch(() => setListe([])).finally(() => setYuk(false))
   }, [id])
   useEffect(() => { listele() }, [listele])
 
@@ -40,7 +41,7 @@ export default function DomainWordPressPage() {
     e.preventDefault()
     setHata(null); setSonuc(null); setKuruyor(true)
     try {
-      const { data } = await api.post<Sonuc>(`/domains/${id}/wordpress`, {
+      const { data } = await api.post<Sonuc>(`${base}`, {
         alt_dizin: altDizin.trim(), site_basligi: baslik.trim(), admin_kullanici: adminK.trim(), admin_email: adminE.trim(),
       })
       setSonuc(data); setBaslik(''); setAltDizin(''); setFormAcik(false)
@@ -85,7 +86,7 @@ export default function DomainWordPressPage() {
         </div>
       ) : (
         <div className="space-y-5">
-          {liste.map(k => <Toolkit key={k.dizin} id={id!} kurulum={k} onDegisti={listele} />)}
+          {liste.map(k => <Toolkit key={k.dizin} id={id!} base={base} kurulum={k} onDegisti={listele} />)}
         </div>
       )}
 
@@ -110,7 +111,7 @@ const TABLAR: { k: AltTab; ad: string }[] = [
   { k: 'temalar', ad: 'Temalar' }, { k: 'kullanicilar', ad: 'Kullanıcılar' },
 ]
 
-function Toolkit({ id, kurulum, onDegisti }: { id: string; kurulum: Kurulum; onDegisti: () => void }) {
+function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; kurulum: Kurulum; onDegisti: () => void }) {
   const dizin = kurulum.dizin
   const kok = dizin.includes('kök')
   const [tab, setTab] = useState<AltTab>('genel')
@@ -127,15 +128,15 @@ function Toolkit({ id, kurulum, onDegisti }: { id: string; kurulum: Kurulum; onD
   const qp = { params: { dizin } }
 
   const durumYukle = useCallback(() => {
-    api.get<Durum>(`/domains/${id}/wordpress/durum`, qp).then(r => setDurum(r.data)).catch(() => setDurum(null))
+    api.get<Durum>(`${base}/durum`, qp).then(r => setDurum(r.data)).catch(() => setDurum(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, dizin])
   useEffect(() => { durumYukle() }, [durumYukle])
 
   useEffect(() => {
-    if (tab === 'eklentiler' && eklentiler === null) api.get<Paket[]>(`/domains/${id}/wordpress/eklentiler`, qp).then(r => setEklentiler(r.data || [])).catch(() => setEklentiler([]))
-    if (tab === 'temalar' && temalar === null) api.get<Paket[]>(`/domains/${id}/wordpress/temalar`, qp).then(r => setTemalar(r.data || [])).catch(() => setTemalar([]))
-    if (tab === 'kullanicilar' && kullanicilar === null) api.get<Kullanici[]>(`/domains/${id}/wordpress/kullanicilar`, qp).then(r => setKullanicilar(r.data || [])).catch(() => setKullanicilar([]))
+    if (tab === 'eklentiler' && eklentiler === null) api.get<Paket[]>(`${base}/eklentiler`, qp).then(r => setEklentiler(r.data || [])).catch(() => setEklentiler([]))
+    if (tab === 'temalar' && temalar === null) api.get<Paket[]>(`${base}/temalar`, qp).then(r => setTemalar(r.data || [])).catch(() => setTemalar([]))
+    if (tab === 'kullanicilar' && kullanicilar === null) api.get<Kullanici[]>(`${base}/kullanicilar`, qp).then(r => setKullanicilar(r.data || [])).catch(() => setKullanicilar([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
@@ -150,22 +151,22 @@ function Toolkit({ id, kurulum, onDegisti }: { id: string; kurulum: Kurulum; onD
     finally { setMesgul(null) }
   }
 
-  const surumGuncelle = () => calistir('surum', async () => (await api.post(`/domains/${id}/wordpress/guncelle`, { dizin })).data, 'WordPress çekirdeği güncellendi.', () => { durumYukle(); onDegisti() })
-  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`/domains/${id}/wordpress/arac`, { dizin, islem: 'tumunu-guncelle' })).data, 'Çekirdek, eklenti ve temalar güncellendi.', () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
-  const bakimTogle = () => calistir('bakim', async () => (await api.post(`/domains/${id}/wordpress/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? 'Bakım modu kapatıldı.' : 'Bakım modu açıldı.', durumYukle)
-  const cacheTemizle = () => calistir('cache', async () => (await api.post(`/domains/${id}/wordpress/arac`, { dizin, islem: 'cache-temizle' })).data, 'Önbellek temizlendi.')
-  const onar = () => calistir('onar', async () => (await api.post(`/domains/${id}/wordpress/onar`, { dizin })).data, 'Çekirdek onarımı tamamlandı.', durumYukle)
+  const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin })).data, 'WordPress çekirdeği güncellendi.', () => { durumYukle(); onDegisti() })
+  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' })).data, 'Çekirdek, eklenti ve temalar güncellendi.', () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
+  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? 'Bakım modu kapatıldı.' : 'Bakım modu açıldı.', durumYukle)
+  const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, 'Önbellek temizlendi.')
+  const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, 'Çekirdek onarımı tamamlandı.', durumYukle)
 
-  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`/domains/${id}/wordpress/${tur}`, { dizin, islem: 'guncelle', ad })).data, `${ad} güncellendi.`, () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`/domains/${id}/wordpress/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, 'Tümü güncellendi.', () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`/domains/${id}/wordpress/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? 'devre dışı bırakıldı' : 'etkinleştirildi'}.`, () => setEklentiler(null))
-  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`/domains/${id}/wordpress/tema`, { dizin, islem: 'aktif', ad: p.name })).data, `${p.name} etkinleştirildi.`, () => setTemalar(null))
+  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, `${ad} güncellendi.`, () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
+  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, 'Tümü güncellendi.', () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
+  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? 'devre dışı bırakıldı' : 'etkinleştirildi'}.`, () => setEklentiler(null))
+  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, `${p.name} etkinleştirildi.`, () => setTemalar(null))
 
   async function parolaSifirla(u: Kullanici) {
     if (!confirm(`"${u.user_login}" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.`)) return
     setMesgul(`pw:${u.ID}`); setHata(null); setBasari(null)
     try {
-      const { data } = await api.post<{ parola: string; kullanici: string }>(`/domains/${id}/wordpress/kullanici-parola`, { dizin, user_id: u.ID })
+      const { data } = await api.post<{ parola: string; kullanici: string }>(`${base}/kullanici-parola`, { dizin, user_id: u.ID })
       setParolaSonuc({ kullanici: data.kullanici || u.user_login, parola: data.parola })
     } catch (err) { setHata(apiHata(err, 'Parola sıfırlanamadı')) }
     finally { setMesgul(null) }
@@ -175,7 +176,7 @@ function Toolkit({ id, kurulum, onDegisti }: { id: string; kurulum: Kurulum; onD
     if (kok) { alert('Kök dizindeki WordPress panelden silinemez.'); return }
     if (!confirm(`${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`)) return
     setMesgul('sil'); setHata(null)
-    try { await api.delete(`/domains/${id}/wordpress`, { data: { dizin, db_sil: true } }); onDegisti() }
+    try { await api.delete(`${base}`, { data: { dizin, db_sil: true } }); onDegisti() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }
     finally { setMesgul(null) }
   }
