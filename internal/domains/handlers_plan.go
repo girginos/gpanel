@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -149,6 +150,21 @@ func (h *Handlers) OzelPlan(w http.ResponseWriter, r *http.Request) {
 	sahip := domRid
 	if rid > 0 {
 		sahip = rid
+	}
+	// 🔴 Idempotent: aktif plan ZATEN bu hostinge ozel bir plansa (ve baska hosting
+	// kullanmiyorsa) yenisini URETME — kullanici butona ikinci kez bastiginda
+	// "<alan> — Özel 1234" cogaltmasi olusuyordu. Mevcut ozel plani dondur.
+	if kaynak.Valid && mevcutPlan.Valid && kaynak.Int64 == mevcutPlan.Int64 {
+		var mevcutAd string
+		var kullananAdet int
+		_ = h.DB.QueryRowContext(r.Context(), `SELECT ad FROM service_plans WHERE id=?`, kaynak.Int64).Scan(&mevcutAd)
+		_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM domains WHERE plan_id=?`, kaynak.Int64).Scan(&kullananAdet)
+		if strings.HasPrefix(mevcutAd, alanAdi+" — Özel") && kullananAdet <= 1 {
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{
+				"ok": true, "plan_id": kaynak.Int64, "ad": mevcutAd, "zaten_ozel": true,
+			})
+			return
+		}
 	}
 	ad := alanAdi + " — Özel"
 	// Ayni isim varsa sirala (idempotent olmayan cakisma engeli)
