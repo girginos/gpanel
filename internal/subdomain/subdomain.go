@@ -136,9 +136,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	// başlangıç sayfası
 	if _, e := os.Stat(filepath.Join(docroot, "index.html")); e != nil {
 		_ = os.WriteFile(filepath.Join(docroot, "index.html"),
-			[]byte("<!doctype html><meta charset=utf-8><title>"+tamAd+"</title>"+
-				"<body style='font-family:sans-serif;text-align:center;padding:60px'>"+
-				"<h1>"+tamAd+"</h1><p>Subdomain hazır. Dosyalarınızı bu dizine yükleyin.</p></body>"), 0o644)
+			[]byte(provisioner.WelcomeHTML(tamAd)), 0o644)
 	}
 	_ = exec.Command("chown", "-R", sk+":"+sk, "/home/"+sk+"/subdomains").Run()
 	_ = exec.Command("chcon", "-R", "-t", "httpd_sys_content_t", docroot).Run()
@@ -232,6 +230,20 @@ func vhost(tamAd, docroot, socket, koruma string) string {
     }
 
 ` + koruma + `
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
+
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
     location ~ \.php$ {

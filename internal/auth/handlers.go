@@ -13,6 +13,8 @@ import (
 	yescrypt "github.com/openwall/yescrypt-go"
 
 	"girginospanel/internal/httpx"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Handlers struct {
@@ -111,8 +113,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Kullanici != "root" {
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
-		httpx.WriteError(w, http.StatusUnauthorized, "yalnızca sunucu root kullanıcısı admin paneline giriş yapabilir")
+		h.resellerLogin(w, r, req)
 		return
 	}
 	if !rootParolaDogrula(req.Parola) {
@@ -166,6 +167,70 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	var adSoyad string
 	_ = h.DB.QueryRow(`SELECT full_name FROM users WHERE id=1`).Scan(&adSoyad)
 	resp.Kullanici.AdSoyad = adSoyad
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// resellerLogin: root disi kullanici adi -> users tablosunda role=reseller ara,
+// bcrypt parola dogrula, aktifse reseller token uret (ResellerID = kendi users.id).
+func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req loginReq) {
+	var id int64
+	var hash, fullName, status string
+	err := h.DB.QueryRow(`SELECT id, password_hash, COALESCE(full_name,''), status FROM users WHERE username=? AND role='reseller'`, req.Kullanici).Scan(&id, &hash, &fullName, &status)
+	if err != nil || hash == "" {
+		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Parola)) != nil {
+		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
+		return
+	}
+	if status != "active" {
+		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		httpx.WriteError(w, http.StatusForbidden, "hesabınız askıya alınmış")
+		return
+	}
+	// 2FA — bayi icin de zorunlu (admin ile AYNI desen). FAIL-CLOSED: durum
+	// okunamazsa giris REDDEDILIR (sessizce 2FA atlanmaz).
+	{
+		var en int
+		var sec string
+		var sonAdim int64
+		if err := h.DB.QueryRow(`SELECT totp_enabled, COALESCE(totp_secret,''), COALESCE(totp_last_step,0) FROM users WHERE id=?`, id).Scan(&en, &sec, &sonAdim); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "2FA durumu doğrulanamadı")
+			return
+		}
+		if en == 1 {
+			if strings.TrimSpace(sec) == "" {
+				httpx.WriteError(w, http.StatusInternalServerError, "2FA yapılandırması hatalı")
+				return
+			}
+			if strings.TrimSpace(req.Kod) == "" {
+				httpx.WriteJSON(w, http.StatusOK, map[string]any{"iki_fa_gerekli": true})
+				return
+			}
+			adim, ok := TOTPVerifyAdim(sec, req.Kod, sonAdim)
+			if !ok {
+				writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.2fa", req.Kullanici, false)
+				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
+				return
+			}
+			_, _ = h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=?`, adim, id)
+		}
+	}
+	tok, err := IssueReseller(h.Secret, h.LifetimeSec, id, req.Kullanici, id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
+		return
+	}
+	_, _ = h.DB.Exec(`UPDATE users SET last_login_at=NOW(), last_login_ip=? WHERE id=?`, httpx.ClientIP(r), id)
+	writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, true)
+	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
+	resp.Kullanici.ID = id
+	resp.Kullanici.Adi = req.Kullanici
+	resp.Kullanici.Rol = "reseller"
+	resp.Kullanici.AdSoyad = fullName
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 

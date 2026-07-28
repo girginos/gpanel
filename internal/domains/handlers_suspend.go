@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -83,6 +84,12 @@ func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida boo
 		provisioner.SuspendUserRuntime(sk, askida)
 	}
 
+	uid, kul := middleware.Aktor(r)
+	eylem := "hosting.askidan_al"
+	if askida {
+		eylem = "hosting.askiya_al"
+	}
+	httpx.Denetim(h.DB, r, uid, kul, eylem, alanAdi, "", true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "id": id, "alan_adi": alanAdi, "askida": askida,
 	})

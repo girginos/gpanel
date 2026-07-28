@@ -15,6 +15,7 @@ import { useAuth } from '@/store/auth'
 import LoadHistoryChart from '@/components/LoadHistoryChart'
 import MemoryHistoryChart from '@/components/MemoryHistoryChart'
 import CveWidget from '@/components/CveWidget'
+import BayiOzet from '@/components/BayiOzet'
 
 type SistemInfo = {
   hostname: string; ip: string; os_adi: string; kernel: string
@@ -60,6 +61,12 @@ const VARSAYILAN_DUZEN: Duzen = {
   ],
 }
 const WIDGET_IDS: string[] = VARSAYILAN_DUZEN.columns.flat()
+// Bayi yalnizca KENDI hesaplarina dair kartlari gorur; sunucu-geneli kartlar
+// (CVE, servisler, panel guncelleme, yedek, donanim...) yalniz yoneticiye aittir.
+const BAYI_WIDGET = new Set(['wordpress', 'domainler', 'abonelikler'])
+function bayiMi(): boolean {
+  try { return JSON.parse(localStorage.getItem('gosp.user') || '{}').rol === 'reseller' } catch { return false }
+}
 const WIDGET_SET = new Set(WIDGET_IDS)
 const VARSAYILAN_KOLON: Record<string, number> = (() => {
   const m: Record<string, number> = {}
@@ -113,6 +120,7 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export default function HomePage() {
+  const isBayi = bayiMi()
   const kullanici = useAuth((s) => s.kullanici)
   const [s, setS] = useState<Sistem | null>(null)
   const [domainler, setDomainler] = useState<Domain[]>([])
@@ -640,6 +648,8 @@ export default function HomePage() {
         </div>
       </header>
 
+      {isBayi && <BayiOzet />}
+
       {/* Kartlar köşedeki tutamaçtan sürüklenerek yeniden düzenlenir; değişiklik otomatik kaydedilir */}
 
       {/* GÜVENLİK: tenant CageFS izolasyon kaybı — tam genişlik, kolonların üstünde */}
@@ -690,7 +700,10 @@ export default function HomePage() {
         onDragCancel={() => setAktifId(null)}
       >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
-          {duzen.columns.map((colIds, ci) => (
+          {(isBayi
+            ? duzen.columns.map(c => c.filter(w => BAYI_WIDGET.has(w)))
+            : duzen.columns
+          ).map((colIds, ci) => (
             <SortableContext key={`col-${ci}`} items={colIds} strategy={verticalListSortingStrategy}>
               <DroppableKolon id={`col-${ci}`} dragging={aktifId != null}>
                 {colIds.map((wid, wi) => (

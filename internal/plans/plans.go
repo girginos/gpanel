@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -93,7 +94,14 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.DB.QueryContext(r.Context(), selectAll+" ORDER BY varsayilan DESC, id ASC")
+	// Reseller: kendi planlari + global (reseller_id=0). Admin: hepsi.
+	sorgu := selectAll + " ORDER BY varsayilan DESC, id ASC"
+	args := []any{}
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		sorgu = selectAll + " WHERE reseller_id IN (?,0) ORDER BY varsayilan DESC, id ASC"
+		args = append(args, rid)
+	}
+	rows, err := h.DB.QueryContext(r.Context(), sorgu, args...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -112,7 +120,13 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
+	sorguGet := selectAll + " WHERE id=?"
+	argsGet := []any{id}
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		sorguGet = selectAll + " WHERE id=? AND reseller_id IN (?,0)"
+		argsGet = append(argsGet, rid)
+	}
+	row := h.DB.QueryRowContext(r.Context(), sorguGet, argsGet...)
 	p, err := scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "plan bulunamadı")
@@ -186,10 +200,13 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())
 		return
 	}
+	ridC := middleware.ResellerIDFrom(r)
 	v := 0
 	if p.Varsayilan {
 		v = 1
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0`)
+		// KRITIK: varsayilan sifirlama KENDI kapsaminda (aksi halde bir bayi
+		// digerlerinin/globalin varsayilan planini sifirlar).
+		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE reseller_id=?`, ridC)
 	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
@@ -199,8 +216,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		   io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
 		   db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
 		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
-		   waf_enabled, waf_mode, waf_paranoia, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		   waf_enabled, waf_mode, waf_paranoia, varsayilan, reseller_id)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
 		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
@@ -208,7 +225,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
 		p.DBMaxQueriesPerHr, p.DBMaxUpdatesPerHr, p.DBMaxQuerySeconds,
 		p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB, p.NginxEkDirektifler,
-		b01(p.WafEnabled), p.WafMode, p.WafParanoia, v)
+		b01(p.WafEnabled), p.WafMode, p.WafParanoia, v, ridC)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -221,6 +238,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	ridU := middleware.ResellerIDFrom(r)
+	if ridU > 0 && !h.planSahibi(r, id, ridU) {
+		httpx.WriteError(w, http.StatusForbidden, "bu planı düzenleyemezsiniz")
+		return
+	}
 	var p Plan
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
@@ -239,7 +261,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	v := 0
 	if p.Varsayilan {
 		v = 1
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>?`, id)
+		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>? AND reseller_id=?`, id, ridU)
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE service_plans SET ad=?, aciklama=?, disk_kota_mb=?, trafik_kota_mb=?,
@@ -293,8 +315,21 @@ func (h *Handlers) wafPlanReapply(planID int64) {
 	}
 }
 
+// planSahibi: plan bu bayiye mi ait (global planlar bayi tarafindan DEGISTIRILEMEZ).
+func (h *Handlers) planSahibi(r *http.Request, planID, rid int64) bool {
+	var owner int64
+	if err := h.DB.QueryRowContext(r.Context(), `SELECT reseller_id FROM service_plans WHERE id=?`, planID).Scan(&owner); err != nil {
+		return false
+	}
+	return owner == rid
+}
+
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if rid := middleware.ResellerIDFrom(r); rid > 0 && !h.planSahibi(r, id, rid) {
+		httpx.WriteError(w, http.StatusForbidden, "bu planı silemezsiniz")
+		return
+	}
 	var n int
 	if err := h.DB.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM domains WHERE plan_id=?`, id).Scan(&n); err == nil && n > 0 {

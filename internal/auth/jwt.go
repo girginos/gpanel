@@ -8,9 +8,10 @@ import (
 )
 
 type Claims struct {
-	UserID   int64  `json:"uid"`
-	Username string `json:"usr"`
-	Role     string `json:"rol"`
+	UserID     int64  `json:"uid"`
+	Username   string `json:"usr"`
+	Role       string `json:"rol"`
+	ResellerID int64  `json:"rid,omitempty"` // reseller token'i icin sahiplik scope-anahtari (kendi users.id)
 	jwt.RegisteredClaims
 }
 
@@ -20,6 +21,24 @@ func Issue(secret []byte, lifetimeSec int, uid int64, username, role string) (st
 		UserID:   uid,
 		Username: username,
 		Role:     role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(lifetimeSec) * time.Second)),
+			Issuer:    "girginospanel",
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
+	return tok.SignedString(secret)
+}
+
+// IssueReseller: reseller token'i uretir (role=reseller, ResellerID=kendi uid).
+func IssueReseller(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64) (string, error) {
+	now := time.Now()
+	c := Claims{
+		UserID:     uid,
+		Username:   username,
+		Role:       "reseller",
+		ResellerID: resellerID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(lifetimeSec) * time.Second)),

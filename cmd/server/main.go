@@ -47,6 +47,7 @@ import (
 	"girginospanel/internal/pma"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
+	"girginospanel/internal/reseller"
 	"girginospanel/internal/sifrekoruma"
 	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
@@ -163,6 +164,7 @@ func main() {
 	wafH := &waf.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
+	resellerH := &reseller.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	phpExtH := &phpext.Handlers{DB: d}
 	paketlerH := &paketler.Handlers{DB: d}
@@ -209,8 +211,17 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/me/2fa/setup", authH.TwoFASetup)
 			r.With(middleware.AdminOnly).Post("/me/2fa/enable", authH.TwoFAEnable)
 			r.With(middleware.AdminOnly).Post("/me/2fa/disable", authH.TwoFADisable)
-			r.With(middleware.AdminOnly).Get("/domains", domainsH.List)
+			r.With(middleware.AdminVeyaReseller).Get("/domains", domainsH.List)
 			r.With(middleware.AdminOnly).Get("/subdomains", subH.TumListe)
+			r.With(middleware.AdminVeyaReseller).Get("/reseller/ozet", resellerH.Ozet)
+			r.With(middleware.AdminOnly).Get("/resellers", resellerH.Liste)
+			r.With(middleware.AdminOnly).Post("/resellers", resellerH.Olustur)
+			r.With(middleware.AdminOnly).Put("/resellers/{id}", resellerH.Guncelle)
+			r.With(middleware.AdminOnly).Delete("/resellers/{id}", resellerH.Sil)
+			r.With(middleware.AdminOnly).Get("/reseller-plans", resellerH.PaketListe)
+			r.With(middleware.AdminOnly).Post("/reseller-plans", resellerH.PaketOlustur)
+			r.With(middleware.AdminOnly).Put("/reseller-plans/{id}", resellerH.PaketGuncelle)
+			r.With(middleware.AdminOnly).Delete("/reseller-plans/{id}", resellerH.PaketSil)
 			r.With(middleware.MusteriScope).Get("/domains/{id}", domainsH.Get)
 			r.With(middleware.AdminOnly).Get("/system/usage", system.Handler)
 			r.With(middleware.AdminOnly).Get("/system/servisler", system.ServisDurumlar)
@@ -236,7 +247,7 @@ func main() {
 
 			// Yazma + müşteri-scope route'ları — per-route AdminOnly/MusteriScope ile yetkilendirilir
 			r.Group(func(r chi.Router) {
-				r.With(middleware.AdminOnly).Post("/domains", domainsH.Create)
+				r.With(middleware.AdminVeyaReseller).Post("/domains", domainsH.Create)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}", domainsH.Delete)
 				r.With(middleware.AdminOnly).Post("/domains/toplu/sahip", domainsH.TopluSahip)
 				r.With(middleware.AdminOnly).Post("/domains/toplu/durum", domainsH.TopluDurum)
@@ -382,13 +393,14 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/logs/oku", logsH.Read)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/logs/canli", logsH.Tail)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/disk-hesapla", domainsH.DiskHesapla)
-				r.With(middleware.AdminOnly).Get("/plans", plansH.List)
-				r.With(middleware.AdminOnly).Get("/plans/{id}", plansH.Get)
-				r.With(middleware.AdminOnly).Post("/plans", plansH.Create)
-				r.With(middleware.AdminOnly).Put("/plans/{id}", plansH.Update)
-				r.With(middleware.AdminOnly).Delete("/plans/{id}", plansH.Delete)
+				r.With(middleware.AdminVeyaReseller).Get("/plans", plansH.List)
+				r.With(middleware.AdminVeyaReseller).Get("/plans/{id}", plansH.Get)
+				r.With(middleware.AdminVeyaReseller).Post("/plans", plansH.Create)
+				r.With(middleware.AdminVeyaReseller).Put("/plans/{id}", plansH.Update)
+				r.With(middleware.AdminVeyaReseller).Delete("/plans/{id}", plansH.Delete)
 				r.With(middleware.AdminOnly).Get("/plans/{id}/domains", plansH.DomainlerAra)
-				r.With(middleware.AdminOnly).Put("/domains/{id}/plan", domainsH.SetPlan)
+				r.With(middleware.SahipYonetim).Put("/domains/{id}/plan", domainsH.SetPlan)
+				r.With(middleware.SahipYonetim).Post("/domains/{id}/ozel-plan", domainsH.OzelPlan)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns", dnsH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns", dnsH.Create)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/{rid}", dnsH.Update)
@@ -401,11 +413,11 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/dnssec", dnsH.GetDNSSEC)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/dnssec", dnsH.PostDNSSEC)
 				// Merkezi DNS şablonu (admin) — domain eklerken + "Şablonu Uygula" bunu okur
-				r.With(middleware.AdminOnly).Get("/dns-template", dnsH.GetTemplate)
-				r.With(middleware.AdminOnly).Put("/dns-template", dnsH.PutTemplate)
+				r.With(middleware.AdminVeyaReseller).Get("/dns-template", dnsH.GetTemplate)
+				r.With(middleware.AdminVeyaReseller).Put("/dns-template", dnsH.PutTemplate)
 				// Domain askıya al / geri al (suspend)
-				r.With(middleware.AdminOnly).Post("/domains/{id}/askiya-al", domainsH.AskiyaAl)
-				r.With(middleware.AdminOnly).Post("/domains/{id}/askidan-al", domainsH.AskidanAl)
+				r.With(middleware.SahipYonetim).Post("/domains/{id}/askiya-al", domainsH.AskiyaAl)
+				r.With(middleware.SahipYonetim).Post("/domains/{id}/askidan-al", domainsH.AskidanAl)
 				// Aylık trafik toplayıcıyı elle tetikle (test/anlık güncelleme)
 				r.With(middleware.AdminOnly).Post("/admin/trafik/tick", func(w http.ResponseWriter, req *http.Request) {
 					n := istatistik.AggregateAll(d)

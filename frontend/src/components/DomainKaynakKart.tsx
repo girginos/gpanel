@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 
 type Limit = { kullanim: number; limit: number }
@@ -53,9 +54,22 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           </button>
         </div>
 
-        <div className="mb-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-0.5">Hizmet Planı</div>
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{ozet.plan_adi}</div>
+        <div className="mb-3 pb-3 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-0.5">Hizmet Planı</div>
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{ozet.plan_adi}</div>
+          </div>
+          {/* Plan aksiyonu: yükseltme / düşürme / bu hostinge özel plan — hepsi plan sayfasında */}
+          <Link
+            to={`/abonelikler/${domainId}/plan`}
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            title="Planı yükselt, düşür veya bu hostinge özel plan oluştur"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L4 7m3-3l3 3m7 1v12m0 0l3-3m-3 3l-3-3" />
+            </svg>
+            Değiştir
+          </Link>
         </div>
 
         <Bar etiket="Disk" k={ozet.disk_mb.kullanim} l={ozet.disk_mb.limit} birim="MB" renk="indigo" />

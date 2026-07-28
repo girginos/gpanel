@@ -1230,9 +1230,18 @@ func TeardownTenantFPM(sk string) {
 	_, _ = exec.Command("systemctl", "daemon-reload").CombinedOutput()
 	_ = os.RemoveAll(tenantCfgDir(sk))
 	_ = os.RemoveAll(tenantRunDir(sk))
-	// paylaşılan .bak pool artığını da temizle
+	// Paylasilan havuz dosyasini VE .bak artigini temizle. 🔴 Canli havuz
+	// (<PoolDir>/<sk>.conf) birakilirsa kullanici userdel ile gittigi icin
+	// `php-fpm -t` o surumde KALICI hata verir ve YENI DOMAIN ACILAMAZ.
 	for _, ay := range phpMap {
+		aktif := filepath.Join(ay.PoolDir, sk+".conf")
+		_, varMi := os.Stat(aktif)
+		_ = os.Remove(aktif)
 		_ = os.Remove(filepath.Join(ay.PoolDir, sk+".conf.bak"))
+		if varMi == nil && ay.Service != "" {
+			// yalniz gercekten havuzu olan surumu yeniden yukle
+			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
+		}
 	}
 	// C: domain silindi -> "izolasyon kaybi" uyarisi bayat kalmasin.
 	izolasyonKaybiTemizle(sk)

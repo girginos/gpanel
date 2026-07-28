@@ -339,7 +339,10 @@ func SeedDefaults(ctx context.Context, db *sql.DB, domainID int64, alanAdi, ipv4
 	if ipv4 == "" {
 		ipv4 = "127.0.0.1"
 	}
-	rows, err := LoadTemplate(ctx, db)
+	// Domainin bayisinin (reseller) sablonu varsa ONU kullan; yoksa global.
+	var rid int64
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(reseller_id,0) FROM domains WHERE id=?`, domainID).Scan(&rid)
+	rows, err := LoadTemplateFor(ctx, db, rid)
 	if err != nil || len(rows) == 0 {
 		rows = builtinDefaults() // tablo bos/erisilemezse gomulu varsayilan
 	}

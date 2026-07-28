@@ -19,8 +19,11 @@ import (
 // Subdomain SSL: self-signed veya Let's Encrypt. Parent domain ile AYNI mantık
 // (openssl / acme.sh --webroot /var/www/_acme) ama subdomain vhost'una (sub_*.conf) uygulanır.
 
-func sslDir(sk string) string      { return "/home/" + sk + "/ssl" }
-func sslSid(r *http.Request) int64 { v, _ := strconv.ParseInt(chi.URLParam(r, "sid"), 10, 64); return v }
+func sslDir(sk string) string { return "/home/" + sk + "/ssl" }
+func sslSid(r *http.Request) int64 {
+	v, _ := strconv.ParseInt(chi.URLParam(r, "sid"), 10, 64)
+	return v
+}
 
 func certYolu(sk, tamAd string) (string, string) {
 	d := sslDir(sk)
@@ -200,6 +203,20 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
 %[6]s
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
+
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
     location ~ \.php$ {

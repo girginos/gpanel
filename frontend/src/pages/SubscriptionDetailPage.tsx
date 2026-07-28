@@ -326,6 +326,7 @@ function HostingTab({ domain }: { domain: Domain }) {
   return (
     <Grup baslik="Barınma Hizmetleri">
       <ToolCard etiket="Barındırma Ayarları" aciklama="Document root, options" ikon={ICONS.hizmet} renk="indigo" />
+      <ToolCard etiket="Hosting Planı" aciklama="Yükselt, düşür veya özel plan" ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
       <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
       <ToolCard etiket="DNS Ayarları"        aciklama="A, CNAME, MX"            ikon={ICONS.dns}    renk="emerald" />
     </Grup>

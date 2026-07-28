@@ -84,11 +84,52 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 // AdminOnly: yalnız admin token'ı geçer (müşteri olduğunda 403)
 func AdminOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ClaimsFrom(r) == nil {
+		c := ClaimsFrom(r)
+		if c == nil || c.Role != "admin" {
 			httpx.WriteError(w, http.StatusForbidden, "sadece yöneticiler için")
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// AdminVeyaReseller: admin VEYA reseller token'i gecer (musteri token'i gecmez).
+// Handler icinde RolFrom/ResellerIDFrom ile kapsam (scope) uygulanmalidir.
+func AdminVeyaReseller(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := ClaimsFrom(r)
+		if c == nil || (c.Role != "admin" && c.Role != "reseller") {
+			httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// SahipYonetim: YONETIMSEL islemler (askiya alma, plan degistirme, silme gibi).
+// Admin her zaman; reseller YALNIZ kendi hosting hesabinda; MUSTERI ASLA
+// (musteri kendi hesabini askiya alamaz / planini degistiremez).
+func SahipYonetim(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := ClaimsFrom(r)
+		if c == nil {
+			httpx.WriteError(w, http.StatusForbidden, "bu işlem için yetkiniz yok")
+			return
+		}
+		if c.Role == "admin" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if c.Role == "reseller" {
+			id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+			if !resellerDomainSahibi(r.Context(), id, c.ResellerID) {
+				httpx.WriteError(w, http.StatusForbidden, "bu hosting hesabına erişiminiz yok")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		httpx.WriteError(w, http.StatusForbidden, "bu işlem için yetkiniz yok")
 	})
 }
 
@@ -101,8 +142,21 @@ func MusteriScope(next http.Handler) http.Handler {
 func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ClaimsFrom(r) != nil {
-				next.ServeHTTP(w, r) // admin
+			if c := ClaimsFrom(r); c != nil {
+				if c.Role == "admin" {
+					next.ServeHTTP(w, r) // admin: full
+					return
+				}
+				if c.Role == "reseller" {
+					urlID, _ := strconv.ParseInt(chi.URLParam(r, param), 10, 64)
+					if !resellerDomainSahibi(r.Context(), urlID, c.ResellerID) {
+						httpx.WriteError(w, http.StatusForbidden, "bu domaine erisim yok")
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
+				httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 				return
 			}
 			mc := MusteriClaimsFrom(r)
@@ -140,13 +194,59 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 // bulunmayan (or. {dbId} gibi turev kaynak) uclarda, kaynagin domain_id'si DB'den
 // cozuldukten sonra bu fonksiyonla sahiplik dogrulanir.
 func DomainSahibiMi(r *http.Request, domainID int64) bool {
-	if ClaimsFrom(r) != nil {
-		return true // admin: tum domainlere erisir
+	if c := ClaimsFrom(r); c != nil {
+		if c.Role == "admin" {
+			return true // admin: tum domainlere erisir
+		}
+		if c.Role == "reseller" {
+			return resellerDomainSahibi(r.Context(), domainID, c.ResellerID)
+		}
+		return false
 	}
 	if mc := MusteriClaimsFrom(r); mc != nil {
 		return mc.DomainID == domainID
 	}
 	return false
+}
+
+// resellerDomainSahibi: domain bu reseller'a mi ait (domains.reseller_id == resellerID).
+func resellerDomainSahibi(ctx context.Context, domainID, resellerID int64) bool {
+	if scopeDB == nil || resellerID == 0 {
+		return false
+	}
+	var rid int64
+	if err := scopeDB.QueryRowContext(ctx, `SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&rid); err != nil {
+		return false
+	}
+	return rid == resellerID
+}
+
+// Aktor: denetim kaydi icin cagiran kimligi (uid, kullanici-adi). Musteri token'inda
+// uid 0, kullanici "musteri:<domain_id>" doner.
+func Aktor(r *http.Request) (int64, string) {
+	if c := ClaimsFrom(r); c != nil {
+		return c.UserID, c.Username
+	}
+	if mc := MusteriClaimsFrom(r); mc != nil {
+		return 0, "musteri:" + strconv.FormatInt(mc.DomainID, 10)
+	}
+	return 0, "anonim"
+}
+
+// RolFrom: admin/reseller token rol (yoksa "").
+func RolFrom(r *http.Request) string {
+	if c := ClaimsFrom(r); c != nil {
+		return c.Role
+	}
+	return ""
+}
+
+// ResellerIDFrom: reseller token ise sahiplik anahtari, degilse 0.
+func ResellerIDFrom(r *http.Request) int64 {
+	if c := ClaimsFrom(r); c != nil {
+		return c.ResellerID
+	}
+	return 0
 }
 
 func ClaimsFrom(r *http.Request) *auth.Claims {

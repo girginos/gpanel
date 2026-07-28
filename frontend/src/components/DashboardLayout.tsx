@@ -32,7 +32,11 @@ const NAV: NavGroup[] = [
   { items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
   { baslik: 'Barındırma Hizmetleri', items: [
     { to: '/domainler',           etiket: 'Domainler',        ikon: ICONS.domain },
-    { to: '/hizmet-planlari',     etiket: 'Hizmet Planları',  ikon: ICONS.plan },
+    { to: '/bayiler',             etiket: 'Bayiler',          ikon: ICONS.profil },
+  ]},
+  { baslik: 'Planlar', items: [
+    { to: '/hizmet-planlari', etiket: 'Hosting Planları', ikon: ICONS.plan },
+    { to: '/bayi-planlari',   etiket: 'Bayi Planları',    ikon: ICONS.plan },
   ]},
   { baslik: 'Sunucu Yönetimi', items: [
     { to: '/araclar-ayarlar',     etiket: 'Araçlar ve Ayarlar', ikon: ICONS.araclar },
@@ -48,12 +52,28 @@ const NAV: NavGroup[] = [
   ]},
 ]
 
+const RESELLER_NAV: NavGroup[] = [
+  { items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
+  { baslik: 'Barındırma Hizmetleri', items: [
+    { to: '/domainler',       etiket: 'Hosting Hesapları', ikon: ICONS.domain },
+    { to: '/hizmet-planlari', etiket: 'Hosting Planlarım', ikon: ICONS.plan },
+  ]},
+  { baslik: 'Ayarlar', items: [
+    { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonum',        ikon: ICONS.domain },
+    { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
+  ]},
+]
+
 export default function DashboardLayout() {
   const isMusteri = typeof window !== 'undefined' && localStorage.getItem('girginospanel.musteri') === '1'
+  let _rol = ''
+  try { _rol = JSON.parse(localStorage.getItem('gosp.user') || '{}').rol || '' } catch { /* okunamadi */ }
+  const isReseller = _rol === 'reseller'
   const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('girginospanel.musteri.domain_id') || '' : ''
 
   const [acikGruplar, setAcikGruplar] = useState<Record<string, boolean>>({
     'Barındırma Hizmetleri': true,
+    'Planlar': true,
     'Sunucu Yönetimi': true,
     'Profilim': true,
     'Domainim': true,
@@ -100,7 +120,7 @@ export default function DashboardLayout() {
     ]},
   ]
 
-  const aktifNav = isMusteri ? MUSTERI_NAV : NAV
+  const aktifNav = isMusteri ? MUSTERI_NAV : isReseller ? RESELLER_NAV : NAV
 
   function toggle(b: string) {
     setAcikGruplar((s) => ({ ...s, [b]: !s[b] }))

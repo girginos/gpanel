@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os/user"
@@ -17,6 +18,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/kota"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 
@@ -82,7 +84,14 @@ func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.DB.QueryContext(r.Context(), selectAll+" ORDER BY d.id DESC")
+	// Reseller kapsami: yalniz kendi hosting hesaplari. Admin: hepsi.
+	sorgu := selectAll + " ORDER BY d.id DESC"
+	args := []any{}
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		sorgu = selectAll + " WHERE d.reseller_id=? ORDER BY d.id DESC"
+		args = append(args, rid)
+	}
+	rows, err := h.DB.QueryContext(r.Context(), sorgu, args...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "veritabanı hatası: "+err.Error())
 		return
@@ -130,7 +139,65 @@ type createResp struct {
 	} `json:"olusturulan_parolalar"`
 }
 
+// resellerKotaKontrol: reseller'in toplam kotalarini (max_domain / max_disk_mb)
+// yeni hosting olusturmadan ONCE dogrular. 0 = limitsiz.
+// Disk: mevcut hosting'lerin PLAN disk kotalari toplami + yeni planin kotasi
+// (taahhut-bazli; asiri-satisi onler).
+func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *int64) error {
+	var maxDomain int
+	var maxDiskMB int64
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT max_domain, max_disk_mb FROM users WHERE id=? AND role='reseller'`, rid).
+		Scan(&maxDomain, &maxDiskMB); err != nil {
+		return fmt.Errorf("bayi kaydı bulunamadı")
+	}
+	if maxDomain > 0 {
+		var adet int
+		_ = h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM domains WHERE reseller_id=?`, rid).Scan(&adet)
+		if adet >= maxDomain {
+			return fmt.Errorf("hosting hesabı limitiniz dolu (%d/%d)", adet, maxDomain)
+		}
+	}
+	// Trafik havuzu (taahhut): mevcut planlarin trafik kotalari + yeni plan
+	if planID != nil {
+		var maxTrafikMB int64
+		_ = h.DB.QueryRowContext(ctx, `SELECT max_trafik_mb FROM users WHERE id=? AND role='reseller'`, rid).Scan(&maxTrafikMB)
+		if maxTrafikMB > 0 {
+			var yeniTr, mevcutTr int64
+			_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(trafik_kota_mb,0) FROM service_plans WHERE id=?`, *planID).Scan(&yeniTr)
+			_ = h.DB.QueryRowContext(ctx,
+				`SELECT COALESCE(SUM(COALESCE(p.trafik_kota_mb,0)),0) FROM domains d
+				   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcutTr)
+			if mevcutTr+yeniTr > maxTrafikMB {
+				return fmt.Errorf("trafik kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcutTr, yeniTr, maxTrafikMB)
+			}
+		}
+	}
+	// Gercek kullanim: bayinin hosting hesaplarinin FIILI disk toplami limiti astiysa
+	// yeni hesap acilamaz (taahhut kontrolunden bagimsiz ikinci kapi).
+	if maxDiskMB > 0 {
+		var kullanimKB int64
+		_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(boyut_kb),0) FROM domains WHERE reseller_id=?`, rid).Scan(&kullanimKB)
+		if kullanimKB/1024 >= maxDiskMB {
+			return fmt.Errorf("disk kullanımınız limitte (%d MB / %d MB)", kullanimKB/1024, maxDiskMB)
+		}
+	}
+	if maxDiskMB > 0 && planID != nil {
+		var yeniKota int64
+		_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0) FROM service_plans WHERE id=?`, *planID).Scan(&yeniKota)
+		var mevcut int64
+		_ = h.DB.QueryRowContext(ctx,
+			`SELECT COALESCE(SUM(COALESCE(p.disk_kota_mb,0)),0) FROM domains d
+			   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcut)
+		if mevcut+yeniKota > maxDiskMB {
+			return fmt.Errorf("disk kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcut, yeniKota, maxDiskMB)
+		}
+	}
+	return nil
+}
+
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
+	rid := middleware.ResellerIDFrom(r) // >0 ise reseller olusturuyor
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
@@ -141,9 +208,29 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// (plan-driven default). Varsayılan yoksa plansız devam eder (limit uygulanmaz).
 	if req.PlanID == nil {
 		var defID int64
+		// Reseller ise ONCE kendi varsayilan plani, yoksa global (reseller_id=0).
 		if e := h.DB.QueryRowContext(r.Context(),
-			`SELECT id FROM service_plans WHERE varsayilan=1 ORDER BY id LIMIT 1`).Scan(&defID); e == nil && defID > 0 {
+			`SELECT id FROM service_plans WHERE varsayilan=1 AND reseller_id IN (?,0) ORDER BY reseller_id DESC, id LIMIT 1`, rid).Scan(&defID); e == nil && defID > 0 {
 			req.PlanID = &defID
+		}
+	}
+	// Reseller kapsam denetimi: kota + plan sahipligi + musteri atamasi yasak.
+	if rid > 0 {
+		req.CustomerID = nil // reseller musteri atayamaz (Faz 2 kapsami)
+		if req.PlanID != nil {
+			var planRid int64
+			if e := h.DB.QueryRowContext(r.Context(), `SELECT reseller_id FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planRid); e != nil {
+				httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
+				return
+			}
+			if planRid != 0 && planRid != rid {
+				httpx.WriteError(w, http.StatusForbidden, "bu plana erişiminiz yok")
+				return
+			}
+		}
+		if err := h.resellerKotaKontrol(r.Context(), rid, req.PlanID); err != nil {
+			httpx.WriteError(w, http.StatusForbidden, err.Error())
+			return
 		}
 	}
 	if req.PHPSurum == "" {
@@ -186,10 +273,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// 2) domains satırı
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO domains(alan_adi, sistem_kullanici, php_surum, ssl_aktif, durum, ipv4,
-		   ftp_host, ftp_user, db_host, db_user, db_adi, web_root, is_demo)
-		 VALUES(?,?,?,0,'aktif',?,?,?, 'localhost',?,?,?, 0)`,
+		   ftp_host, ftp_user, db_host, db_user, db_adi, web_root, is_demo, reseller_id)
+		 VALUES(?,?,?,0,'aktif',?,?,?, 'localhost',?,?,?, 0, ?)`,
 		req.AlanAdi, pr.SistemKullanici, req.PHPSurum, h.IPv4,
-		h.IPv4, pr.SistemKullanici, dbUser, dbName, pr.WebRoot)
+		h.IPv4, pr.SistemKullanici, dbUser, dbName, pr.WebRoot, rid)
 	if err != nil {
 		_ = provisioner.Deprovision(req.AlanAdi, pr.SistemKullanici)
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kayıt başarısız: "+err.Error())
@@ -252,6 +339,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE d.id=?", id)
 	d, _ := scan(row)
 
+	uid, kul := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uid, kul, "hosting.olustur", req.AlanAdi, fmt.Sprintf("plan=%d reseller=%d", planNoLog(req.PlanID), rid), true)
 	resp := createResp{Domain: d}
 	resp.OluşturulanParolalar.FTP = ftpPass
 	resp.OluşturulanParolalar.DB = dbPass
@@ -903,4 +992,12 @@ func (h *Handlers) applyPlanNginxDefaults(ctx context.Context, domainID, planID 
 	if err := provisioner.ApplyVhostForDomain(h.DB, domainID, socket, php); err != nil {
 		log.Printf("plan vhost yeniden render (domain=%d): %v", domainID, err)
 	}
+}
+
+// planNoLog: denetim kaydinda plan kimligini yazdirmak icin — nil ise 0.
+func planNoLog(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

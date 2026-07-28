@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,7 +127,11 @@ func enIyiCertBul(domain string, minGun int) (certPath, keyPath string, gercekCA
 	var bestReal bool
 	var bestNotAfter time.Time
 	for _, a := range adaylar {
-		if !certGecerliMi(a.cert, a.key, minGun, domain, "www."+domain) {
+		hostlar := []string{domain}
+		if wwwSANUygun(domain) {
+			hostlar = append(hostlar, "www."+domain)
+		}
+		if !certGecerliMi(a.cert, a.key, minGun, hostlar...) {
 			continue
 		}
 		leaf, ok := leafOku(a.cert, a.key)
@@ -331,4 +336,30 @@ func HealSSLVhost443OnStartup() {
 	if onar > 0 || hata > 0 {
 		log.Printf("ssl 443 heal: %d onarildi / %d hata / %d saglikli (toplam %d SSL domain)", onar, hata, saglikli, len(list))
 	}
+}
+
+// wwwSANUygun: www.<domain> ACME dogrulamasina dahil edilebilir mi?
+// Kural: www DNS'te COZULMELI ve apex ile AYNI adres(ler)e gitmeli. Aksi halde
+// HTTP-01 dogrulamasi www icin baska sunucuya duser ve TUM siparis basarisiz olur.
+// DNS okunamiyorsa (gecici hata) www DISARIDA birakilir — apex-only cert her zaman
+// self-signed fail-safe'ten iyidir.
+func wwwSANUygun(domain string) bool {
+	apex, err := net.LookupHost(domain)
+	if err != nil || len(apex) == 0 {
+		return false
+	}
+	www, err := net.LookupHost("www." + domain)
+	if err != nil || len(www) == 0 {
+		return false
+	}
+	kume := make(map[string]bool, len(apex))
+	for _, ip := range apex {
+		kume[ip] = true
+	}
+	for _, ip := range www {
+		if !kume[ip] {
+			return false // www baska sunucuya gidiyor
+		}
+	}
+	return true
 }

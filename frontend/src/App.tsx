@@ -4,6 +4,8 @@ import LoginPage from '@/pages/LoginPage'
 import DashboardLayout from '@/components/DashboardLayout'
 import HomePage from '@/pages/HomePage'
 import DomainsPage from '@/pages/DomainsPage'
+import ResellerlarPage from '@/pages/ResellerlarPage'
+import BayiPlanlariPage from '@/pages/BayiPlanlariPage'
 import SubscriptionDetailPage from '@/pages/SubscriptionDetailPage'
 import ServicePlansPage from '@/pages/ServicePlansPage'
 import SettingsPage from '@/pages/SettingsPage'
@@ -26,6 +28,7 @@ import DomainConnectionPage from '@/pages/DomainConnectionPage'
 import DomainDatabasesPage from '@/pages/DomainDatabasesPage'
 import DomainFTPPage from '@/pages/DomainFTPPage'
 import DomainPHPPage from '@/pages/DomainPHPPage'
+import DomainPlanPage from '@/pages/DomainPlanPage'
 import DomainBackupsPage from '@/pages/DomainBackupsPage'
 import DomainGitPage from '@/pages/DomainGitPage'
 import DomainWebSunucuPage from '@/pages/DomainWebSunucuPage'
@@ -73,6 +76,7 @@ export default function App() {
       >
         <Route index                       element={<HomePage />} />
         <Route path="domainler"            element={<DomainsPage />} />
+        <Route path="bayiler"              element={<ResellerlarPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
         <Route path="abonelikler/:id"      element={<SubscriptionDetailPage />} />
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
@@ -80,6 +84,7 @@ export default function App() {
         <Route path="abonelikler/:id/veritabanlari" element={<DomainDatabasesPage />} />
         <Route path="abonelikler/:id/ftp"           element={<DomainFTPPage />} />
         <Route path="abonelikler/:id/php"           element={<DomainPHPPage />} />
+        <Route path="abonelikler/:id/plan"          element={<DomainPlanPage />} />
         <Route path="abonelikler/:id/ssl"           element={<DomainSSLPage />} />
         <Route path="abonelikler/:id/ssh-erisim"    element={<DomainSSHPage />} />
         <Route path="abonelikler/:id/istatistik"    element={<DomainStatsPage />} />
@@ -116,6 +121,7 @@ export default function App() {
         <Route path="araclar/optimize" element={<SunucuOptimizePage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
+        <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />
 
         <Route path="araclar-ayarlar" element={<AraclarAyarlarPage />} />
         <Route path="istatistikler" element={<IstatistiklerPage />} />

@@ -49,6 +49,8 @@ func Init(d *sql.DB) {
 	HealVhostsOnStartup()
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
+	Ensure404Page()             // marka 404 sayfasi (root-sahipli, tenant degistiremez)
+	EnsureMarkaAssets()         // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
@@ -292,8 +294,34 @@ server {
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik dosya (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
     location / { try_files $uri $uri/ =404; }
 {{else}}    # ---- Backend: nginx + PHP-FPM (default) ----
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
 {{if .FastCgiCache}}    set $skip_cache 0;
@@ -374,8 +402,34 @@ server {
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
     location / { try_files $uri $uri/ =404; }
 {{else}}    # ---- Backend: nginx + PHP-FPM (default) ----
+    error_page 404 /_gosp_404.html;
+    location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
     location / { try_files $uri $uri/ /index.php?$query_string; }
 
 {{if .FastCgiCache}}    set $skip_cache 0;
@@ -619,6 +673,13 @@ func phpPoolPath(sk, phpSurum string) (string, string, string) {
 // (nginx/DNS'teki backup-rollback deseni). Basariliysa ilgili php-fpm servisini reload eder.
 // Doner: aktif socket yolu + servis adi.
 func writePoolValidated(sk, phpSurum string) (socket, service string, err error) {
+	// 🔴 Silinmis tenant korumasi: kullanici yoksa havuz YAZILMAZ. Aksi halde
+	// (silme ile es zamanli calisan heal/downgrade yollari) sahipsiz bir havuz
+	// birakir, `php-fpm -t` o PHP surumunde kalici hata verir ve YENI DOMAIN
+	// OLUSTURULAMAZ hale gelir.
+	if !userExists(sk) {
+		return "", "", fmt.Errorf("php havuzu yazilmadi: sistem kullanicisi %q yok (silinmis tenant)", sk)
+	}
 	v := normalizePHP(phpSurum)
 	ay := phpMap[v]
 	poolPath, sock, svc := phpPoolPath(sk, v)
@@ -658,6 +719,12 @@ func writePoolValidated(sk, phpSurum string) (socket, service string, err error)
 // Backend "apache" ise per-domain Apache vhost'unu da yazıp httpd'yi yeniden yükler.
 // Backend değiştirildiyse eski Apache vhost dosyası temizlenir.
 func renderAndReload(opts VhostOpts, sk string) error {
+	// 🔴 Silinmis tenant korumasi (writePoolValidated ile ayni degismez kural):
+	// kullanici yoksa vhost YAZILMAZ — aksi halde silme ile es zamanli calisan
+	// heal/downgrade yollari sahipsiz bir vhost birakir.
+	if sk != "" && !userExists(sk) {
+		return fmt.Errorf("vhost yazilmadi: sistem kullanicisi %q yok (silinmis tenant)", sk)
+	}
 	// Default backend: php-fpm
 	if opts.Backend == "" {
 		opts.Backend = "php-fpm"
@@ -848,13 +915,6 @@ func Deprovision(alanAdi, sk string) error {
 	if alanAdi != "" && ValidateDomain(alanAdi) == nil {
 		_ = os.RemoveAll(certSystemDir(alanAdi))
 	}
-	for _, ay := range phpMap {
-		p := filepath.Join(ay.PoolDir, sk+".conf")
-		if _, err := os.Stat(p); err == nil {
-			_ = os.Remove(p)
-			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
-		}
-	}
 	_, _ = exec.Command("systemctl", "reload", "nginx").CombinedOutput()
 
 	if !strings.HasPrefix(sk, "c_") {
@@ -862,6 +922,16 @@ func Deprovision(alanAdi, sk string) error {
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
+	}
+	// 🔴 Havuz supurmesi userdel'den SONRA: kullanici artik yok, dolayisiyla
+	// writePoolValidated koruması devreye girer ve hicbir yol havuzu geri yazamaz.
+	for _, ay := range phpMap {
+		p := filepath.Join(ay.PoolDir, sk+".conf")
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Remove(p)
+			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
+		}
+		_ = os.Remove(filepath.Join(ay.PoolDir, sk+".conf.bak"))
 	}
 	return nil
 }
@@ -962,13 +1032,13 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	certPath = filepath.Join(sslDir, alanAdi+".crt")
 	keyPath = filepath.Join(sslDir, alanAdi+".key")
 
-	// (1) Reuse-before-issue: geçerli cert varsa yeni çekimi ATLA.
-	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" {
+	// (1) Reuse-before-issue: geçerli GERÇEK CA cert'i varsa yeni çekimi ATLA.
+	// 🔴 Self-signed reuse EDİLMEZ: fail-safe ile üretilen self-signed 1 yıl geçerli
+	// olduğu için, reuse edilirse gerçek cert bir daha ASLA çekilmezdi (tarayıcı
+	// kalıcı SSL hatası). Self-signed varken her denemede LE tekrar denenir.
+	if src, srcKey, real := enIyiCertBul(alanAdi, 30); src != "" && real {
 		if cp, kp, e := certiPkiyeKur(alanAdi, src, srcKey); e == nil {
-			kaynak := "self-signed"
-			if real {
-				kaynak = "letsencrypt"
-			}
+			kaynak := "letsencrypt"
 			if e := sslVhostYaz(alanAdi, sk, phpSurum, backend, cp, kp, kaynak); e != nil {
 				return "", "", e
 			}
@@ -984,14 +1054,30 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 
 	// 🔴 --force KALDIRILDI: acme kendi geçerli cert'i varsa gereksiz yere yeniden
 	// çekmez (rate-limit koruması). Yenileme penceresindeyse yine de yeniler.
+	// 🔴 www SAN'i KOSULLU: www.<domain> DNS'te yoksa (ya da apex'ten farkli bir
+	// adrese gidiyorsa) HTTP-01 dogrulamasi www icin duser ve TUM siparis basarisiz
+	// olur — sonuc self-signed fail-safe + tarayicida SSL hatasi. Bu yuzden www yalniz
+	// gercekten bize cozuluyorsa SAN'a eklenir.
+	wwwVar := wwwSANUygun(alanAdi)
 	args := []string{
 		"--issue",
 		"--webroot", "/var/www/_acme",
 		"-d", alanAdi,
-		"-d", "www." + alanAdi,
-		"--keylength", "2048",
 	}
-	if out, e := exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput(); e != nil {
+	if wwwVar {
+		args = append(args, "-d", "www."+alanAdi)
+	}
+	args = append(args, "--keylength", "2048")
+	out, e := exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput()
+	if e != nil && wwwVar {
+		// Ikinci deneme: www'yi dusur (DNS yeni yayilmis olabilir, kayit sonradan
+		// silinmis olabilir). Apex-only cert, self-signed'dan HER ZAMAN iyidir.
+		log.Printf("ssl: %s www SAN'li cekim basarisiz — apex-only tekrar deneniyor", alanAdi)
+		args = []string{"--issue", "--webroot", "/var/www/_acme", "-d", alanAdi, "--keylength", "2048"}
+		wwwVar = false
+		out, e = exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput()
+	}
+	if e != nil {
 		// FAIL-SAFE (teardown YOK): mevcut/self-signed cert ile 443'ü KORU.
 		return sslFailSafe(alanAdi, sk, phpSurum, backend, "acme issue: "+strings.TrimSpace(string(out)))
 	}
@@ -1328,36 +1414,6 @@ func SuspendUserRuntime(sk string, suspend bool) {
 		_ = os.Chmod(cronSpool, 0o600)
 		_, _ = exec.Command("restorecon", cronSpool).CombinedOutput()
 	}
-}
-
-func welcomeHTML(domain string) string {
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>%s</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Inter,system-ui,sans-serif;background:linear-gradient(135deg,#f8fafc,#fff7ed);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-  .card{max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,0.05)}
-  .logo{width:48px;height:48px;background:#ea580c;border-radius:10px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
-  h1{font-size:24px;color:#0f172a;margin-bottom:8px}
-  p{color:#64748b;line-height:1.6;margin-bottom:8px}
-  .muted{font-size:13px;color:#94a3b8;margin-top:24px}
-  code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:13px;color:#475569}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="logo">G</div>
-  <h1>%s</h1>
-  <p>Web sitesi başarıyla oluşturuldu.</p>
-  <p>İçerik yüklemek için FTP veya dosya yöneticisini kullanın.</p>
-  <p class="muted">Web kökü: <code>public_html/</code> · PHP destekli · GirginOSPanel ile yönetiliyor</p>
-</div>
-</body>
-</html>`, domain, domain)
 }
 
 // ApplyVhostForDomain: domainID'ye gore nginx vhost'unu yeniden render eder.

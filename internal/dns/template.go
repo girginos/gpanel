@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 )
 
 // TemplateRow: şablondaki tek kayıt satırı.
@@ -66,7 +67,7 @@ func builtinDefaults() []TemplateRow {
 // Boş değilse (admin düzenlemiş) DOKUNMAZ — her açılışta çağrılır, idempotenttir.
 func SeedTemplateIfEmpty(ctx context.Context, db *sql.DB) error {
 	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_template`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_template WHERE reseller_id=0`).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -78,18 +79,33 @@ func SeedTemplateIfEmpty(ctx context.Context, db *sql.DB) error {
 			ak = 1
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO dns_template(ad,tip,deger,ttl,oncelik,sira,aktif) VALUES(?,?,?,?,?,?,?)`,
-			t.Ad, t.Tip, t.Deger, t.TTL, t.Oncelik, t.Sira, ak); err != nil {
+			`INSERT INTO dns_template(ad,tip,deger,ttl,oncelik,sira,aktif, reseller_id)
+			 VALUES(?,?,?,?,?,?,?,?)`,
+			t.Ad, t.Tip, t.Deger, t.TTL, t.Oncelik, t.Sira, ak, 0); err != nil {
 			log.Printf("dns_template seed %s/%s: %v", t.Ad, t.Tip, err)
 		}
 	}
 	return nil
 }
 
-// LoadTemplate: tüm şablon satırları (aktif+pasif), sıraya göre.
+// LoadTemplate: global (reseller_id=0) şablon satırları. Geriye-uyum sarmalayıcı.
 func LoadTemplate(ctx context.Context, db *sql.DB) ([]TemplateRow, error) {
+	return LoadTemplateFor(ctx, db, 0)
+}
+
+// LoadTemplateFor: reseller'in KENDI sablonu varsa onu, yoksa global (reseller_id=0)
+// sablonu doner. Boylece her bayi kendi DNS sablonunu tanimlayabilir; tanimlamazsa
+// sunucu geneli sablon kullanilir.
+func LoadTemplateFor(ctx context.Context, db *sql.DB, resellerID int64) ([]TemplateRow, error) {
+	if resellerID > 0 {
+		var n int
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_template WHERE reseller_id=?`, resellerID).Scan(&n)
+		if n == 0 {
+			resellerID = 0 // bayinin sablonu yok -> global
+		}
+	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, ad, tip, deger, ttl, oncelik, sira, aktif FROM dns_template ORDER BY sira, id`)
+		`SELECT id, ad, tip, deger, ttl, oncelik, sira, aktif FROM dns_template WHERE reseller_id=? ORDER BY sira, id`, resellerID)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +242,8 @@ func appendUnique(path, line string) {
 
 // GetTemplate: GET /dns-template (admin) — şablon satırları + meta.
 func (h *Handlers) GetTemplate(w http.ResponseWriter, r *http.Request) {
-	rows, err := LoadTemplate(r.Context(), h.DB)
+	rid := middleware.ResellerIDFrom(r)
+	rows, err := LoadTemplateFor(r.Context(), h.DB, rid)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -253,7 +270,8 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM dns_template`); err != nil {
+	rid := middleware.ResellerIDFrom(r)
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM dns_template WHERE reseller_id=?`, rid); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -278,8 +296,8 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 			ak = 0
 		}
 		if _, err := tx.ExecContext(r.Context(),
-			`INSERT INTO dns_template(ad,tip,deger,ttl,oncelik,sira,aktif) VALUES(?,?,?,?,?,?,?)`,
-			t.Ad, t.Tip, t.Deger, t.TTL, t.Oncelik, t.Sira, ak); err != nil {
+			`INSERT INTO dns_template(ad,tip,deger,ttl,oncelik,sira,aktif,reseller_id) VALUES(?,?,?,?,?,?,?,?)`,
+			t.Ad, t.Tip, t.Deger, t.TTL, t.Oncelik, t.Sira, ak, rid); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
