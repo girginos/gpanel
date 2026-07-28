@@ -50,7 +50,11 @@ func Init(d *sql.DB) {
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
 	Ensure404Page()             // marka 404 sayfasi (root-sahipli, tenant degistiremez)
+	EnsureAskidaPage()          // marka "askiya alindi" sayfasi (ayni dizin)
 	EnsureMarkaAssets()         // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
+	EnsureDefault443()          // 443 catch-all: SSL'siz host, baglanti hatasi yerine uyari sayfasi gorur
+	TrafikArtikSupur(pkgDB)     // eski silmelerden kalan sahipsiz trafik satirlari
+	acmeCronHizala()            // acme.sh cron'u yeni config-home'u yenilesin
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
@@ -247,10 +251,11 @@ server {
     server_name {{.AlanAdi}} www.{{.AlanAdi}};
 
     location /.well-known/acme-challenge/ {
-        root /var/www/_acme;
+        root {{.WebRoot}};
         auth_basic off;
         try_files $uri =404;
     }
+
 
     location / {
         return 301 https://$host$request_uri;
@@ -384,10 +389,11 @@ server {
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
 {{.ModSec}}    location /.well-known/acme-challenge/ {
-        root /var/www/_acme;
+        root {{.WebRoot}};
         auth_basic off;
         try_files $uri =404;
     }
+
 
 {{.DenyBlocks}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
@@ -536,10 +542,21 @@ server {
     server_name {{.AlanAdi}} www.{{.AlanAdi}};
 
     location /.well-known/acme-challenge/ {
-        root /var/www/_acme;
+        root {{.WebRoot}};
         auth_basic off;
         try_files $uri =404;
     }
+
+    # Marka varliklari (askı sayfasinin animasyonu) 503'ten MUAF — yoksa sol
+    # sutun bos kalir. Paylasilan, root-sahipli, sir icermeyen statik dosyalar.
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
+
 
     access_log /var/log/nginx/{{.AlanAdi}}.access.log;
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
@@ -547,11 +564,11 @@ server {
     location / {
         return 503;
     }
-    error_page 503 /_askida.html;
-    location = /_askida.html {
+    error_page 503 /_gosp_askida.html;
+    location = /_gosp_askida.html {
         internal;
+        root /usr/share/girginospanel/errors;
         default_type text/html;
-        return 503 '<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Hesap Askıya Alındı</title><style>body{font-family:system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.k{max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center}.l{width:48px;height:48px;background:#ea580c;border-radius:10px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px}h1{font-size:22px;color:#0f172a;margin:0 0 8px}p{color:#64748b;line-height:1.6}</style></head><body><div class="k"><div class="l">!</div><h1>Hesap Askıya Alındı</h1><p>Bu web sitesi geçici olarak askıya alınmıştır. Lütfen hizmet sağlayıcınız ile iletişime geçin.</p></div></body></html>';
     }
 }
 {{if .SSL}}
@@ -566,17 +583,27 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
+    # Marka varliklari (askı sayfasinin animasyonu) 503'ten MUAF — yoksa sol
+    # sutun bos kalir. Paylasilan, root-sahipli, sir icermeyen statik dosyalar.
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
+        gzip on;
+        gzip_types application/json application/javascript;
+    }
+
     access_log /var/log/nginx/{{.AlanAdi}}.access.log;
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
 
     location / {
         return 503;
     }
-    error_page 503 /_askida.html;
-    location = /_askida.html {
+    error_page 503 /_gosp_askida.html;
+    location = /_gosp_askida.html {
         internal;
+        root /usr/share/girginospanel/errors;
         default_type text/html;
-        return 503 '<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Hesap Askıya Alındı</title><style>body{font-family:system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.k{max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px;text-align:center}.l{width:48px;height:48px;background:#ea580c;border-radius:10px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px}h1{font-size:22px;color:#0f172a;margin:0 0 8px}p{color:#64748b;line-height:1.6}</style></head><body><div class="k"><div class="l">!</div><h1>Hesap Askıya Alındı</h1><p>Bu web sitesi geçici olarak askıya alınmıştır. Lütfen hizmet sağlayıcınız ile iletişime geçin.</p></div></body></html>';
     }
 }
 {{end}}`))
@@ -893,6 +920,7 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 }
 
 func Deprovision(alanAdi, sk string) error {
+	IzolasyonSentinelSil(sk) // silinen hesap kalici 'izolasyon kaybi' uyarisi birakmasin
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	_ = os.Remove(cfgPath)
 	// Subdomain vhost'ları (sub_<sk>_*.conf) da temizle — domain silinince bunlar
@@ -914,6 +942,23 @@ func Deprovision(alanAdi, sk string) error {
 	// ama cert artık sistemde; orphan kalmasın.
 	if alanAdi != "" && ValidateDomain(alanAdi) == nil {
 		_ = os.RemoveAll(certSystemDir(alanAdi))
+	}
+	// 🔴 acme.sh yenileme kaydi + cert store: birakilirsa acme cron SILINMIS domain
+	// icin yenilemeye calisir (surekli hata) ve eski anahtarlar diskte kalir.
+	if alanAdi != "" && ValidateDomain(alanAdi) == nil {
+		_, _ = exec.Command("/root/.acme.sh/acme.sh", "--remove", "--config-home", acmeConfigHome, "-d", alanAdi).CombinedOutput()
+		_, _ = exec.Command("/root/.acme.sh/acme.sh", "--remove", "-d", alanAdi).CombinedOutput() // legacy
+		for _, b := range []string{acmeConfigHome, "/root/.acme.sh"} {
+			_ = os.RemoveAll(filepath.Join(b, alanAdi))
+			_ = os.RemoveAll(filepath.Join(b, alanAdi+"_ecc"))
+		}
+		// nginx erisim/hata loglari (logrotate arsivleri dahil) — silinen domainin
+		// loglari sonsuza dek birikmesin.
+		if eskiler, _ := filepath.Glob(filepath.Join("/var/log/nginx", alanAdi+".*")); len(eskiler) > 0 {
+			for _, f := range eskiler {
+				_ = os.Remove(f)
+			}
+		}
 	}
 	_, _ = exec.Command("systemctl", "reload", "nginx").CombinedOutput()
 
@@ -1021,6 +1066,34 @@ func EnableSelfSigned(alanAdi, sk, phpSurum, backend string) (certPath, keyPath 
 //     Bu, aynı SAN setiyle tekrar-çekimi (LE 429 rate-limit) HİÇ tetiklemez.
 //  2. FAIL-SAFE: acme çekimi başarısız olursa (429 dahil) → sslFailSafe mevcut/self-
 //     signed cert ile 443'ü KORUR. Hiçbir durumda vhost HTTP-only'ye DÜŞMEZ.
+//
+// AcmeConfigHome: acme.sh hesap + yenileme kayitlarinin tutuldugu dizin.
+// 🔴 /root/.acme.sh DEGIL — panelin kendi veri dizini, domain basina alt klasor:
+// domain silinince kayit da gider, root home kirlenmez. 0700 root (ACME hesap
+// anahtari icerir; kiraciya KAPALI).
+const acmeConfigHome = "/var/lib/girginospanel/acme"
+
+// AcmeConfigHome: disa acik okuyucu (subdomain paketi de ayni dizini kullanir).
+func AcmeConfigHome() string { return acmeConfigHome }
+
+// acmeHazirla: config-home + challenge dizinini olusturur (challenge domainin
+// KENDI public_html'inde), sahiplik + SELinux etiketini duzeltir. Webroot doner.
+func acmeHazirla(sk string) string {
+	_ = os.MkdirAll(acmeConfigHome, 0o700)
+	_ = os.Chmod(acmeConfigHome, 0o700)
+	wr := filepath.Join("/home", sk, "public_html")
+	ch := filepath.Join(wr, ".well-known", "acme-challenge")
+	_ = os.MkdirAll(ch, 0o755)
+	if u, err := user.Lookup(sk); err == nil {
+		uid, _ := strconv.Atoi(u.Uid)
+		gid, _ := strconv.Atoi(u.Gid)
+		_ = os.Chown(filepath.Join(wr, ".well-known"), uid, gid)
+		_ = os.Chown(ch, uid, gid)
+	}
+	_, _ = exec.Command("restorecon", "-R", filepath.Join(wr, ".well-known")).CombinedOutput()
+	return wr
+}
+
 func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
 	if verr := ValidateDomain(alanAdi); verr != nil {
 		return "", "", verr // path güvenliği
@@ -1049,8 +1122,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	}
 
 	// (2) Gerçek çekim/yenileme (yalnız <30 gün kalınca veya hiç cert yoksa buraya gelir).
-	_ = os.MkdirAll("/var/www/_acme", 0755)
-	_, _ = exec.Command("restorecon", "-R", "/var/www/_acme").CombinedOutput()
+	webroot := acmeHazirla(sk)
 
 	// 🔴 --force KALDIRILDI: acme kendi geçerli cert'i varsa gereksiz yere yeniden
 	// çekmez (rate-limit koruması). Yenileme penceresindeyse yine de yeniler.
@@ -1061,7 +1133,9 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	wwwVar := wwwSANUygun(alanAdi)
 	args := []string{
 		"--issue",
-		"--webroot", "/var/www/_acme",
+		"--server", "letsencrypt", // acme.sh varsayilani ZeroSSL (EAB ister) — sabitle
+		"--config-home", acmeConfigHome,
+		"--webroot", webroot,
 		"-d", alanAdi,
 	}
 	if wwwVar {
@@ -1073,7 +1147,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 		// Ikinci deneme: www'yi dusur (DNS yeni yayilmis olabilir, kayit sonradan
 		// silinmis olabilir). Apex-only cert, self-signed'dan HER ZAMAN iyidir.
 		log.Printf("ssl: %s www SAN'li cekim basarisiz — apex-only tekrar deneniyor", alanAdi)
-		args = []string{"--issue", "--webroot", "/var/www/_acme", "-d", alanAdi, "--keylength", "2048"}
+		args = []string{"--issue", "--server", "letsencrypt", "--config-home", acmeConfigHome, "--webroot", webroot, "-d", alanAdi, "--keylength", "2048"}
 		wwwVar = false
 		out, e = exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput()
 	}
@@ -1085,6 +1159,7 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 	// acme.sh install-cert ile target path'lere yerleştir
 	insArgs := []string{
 		"--install-cert",
+		"--config-home", acmeConfigHome,
 		"-d", alanAdi,
 		"--cert-file", certPath,
 		"--key-file", keyPath,
@@ -1612,6 +1687,8 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 func RerenderVhost(db *sql.DB, domainID int64) error {
 	var sk, php string
 	if err := db.QueryRow(`SELECT sistem_kullanici, php_surum FROM domains WHERE id=?`, domainID).Scan(&sk, &php); err != nil {
+		// Domain silinmisse vhost'u yeniden YAZMAK yetim server_name birakir
+		// (nginx silinmis alan adini dinlemeye devam eder). Hata don, yazma.
 		return err
 	}
 	socket, err := PHPSocketFor(sk, php)
@@ -1944,4 +2021,48 @@ func HealPanelIndexNoCacheOnStartup() {
 		return
 	}
 	log.Printf("panel no-cache heal: SPA index.html no-cache + guvenlik header'lari eklendi + nginx reload OK")
+}
+
+// TrafikArtikSupur: domains'te KARSILIGI OLMAYAN trafik satirlarini siler.
+// Eski surumlerde silme akisi bu tablolari temizlemiyordu; Init'te bir kez
+// calisip mevcut kurulumlari kendiliginden onarir (idempotent, ucuz).
+func TrafikArtikSupur(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	for _, t := range []string{"domain_trafik", "domain_trafik_imlec"} {
+		res, err := db.Exec("DELETE FROM " + t + " WHERE domain_id NOT IN (SELECT id FROM domains)")
+		if err != nil {
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("artik temizligi: %s tablosunda %d sahipsiz satir silindi", t, n)
+		}
+	}
+}
+
+// acmeCronHizala: acme.sh'in KENDI cron'u varsayilan config-home'u (/root/.acme.sh)
+// kullanir; sertifikalari baska dizine tasidik → account.conf'a CONFIG_HOME yazarak
+// cron'un da yeni dizindeki kayitlari yenilemesini garanti ederiz (idempotent).
+func acmeCronHizala() {
+	acc := "/root/.acme.sh/account.conf"
+	b, err := os.ReadFile(acc)
+	if err != nil {
+		return // acme.sh kurulu degil
+	}
+	satir := "CONFIG_HOME='" + acmeConfigHome + "'"
+	if strings.Contains(string(b), satir) {
+		return
+	}
+	temiz := []string{}
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "CONFIG_HOME=") {
+			continue
+		}
+		temiz = append(temiz, l)
+	}
+	yeni := strings.TrimRight(strings.Join(temiz, "\n"), "\n") + "\n" + satir + "\n"
+	if err := os.WriteFile(acc, []byte(yeni), 0o600); err == nil {
+		log.Printf("acme.sh CONFIG_HOME -> %s (cron yenilemesi yeni dizini kullanir)", acmeConfigHome)
+	}
 }

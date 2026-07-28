@@ -6,10 +6,13 @@ import (
 	"net/http"
 )
 
-// Denetim: panel islemlerini audit_log'a yazar (admin + bayi izlenebilirligi).
+// Denetim: panel islemlerini audit_log'a yazar (kok + bayi izlenebilirligi).
 // Hata YUTULUR — denetim kaydi asla asil islemi bozmaz.
-// actor: middleware.RolFrom/ClaimsFrom cagiran tarafta cozulur (import dongusu olmasin).
-func Denetim(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, detay string, basarili bool) {
+//
+// kapsam: kaydin ait oldugu kiraci (bayi users.id; 0 = kok/panel sahibi).
+// Bayi listede YALNIZ kendi kapsamini gorur; kok hepsini gorur.
+// actor: middleware.Aktor cagiran tarafta cozulur (import dongusu olmasin).
+func Denetim(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, detay string, kapsam int64, basarili bool) {
 	if db == nil {
 		return
 	}
@@ -30,7 +33,28 @@ func Denetim(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, de
 		ok = 1
 	}
 	_, _ = db.Exec(
-		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok)
-		 VALUES(?,?,?,?,?,?,?)`,
-		uidVal, kullanici, ClientIP(r), eylem, hedef, detayVal, ok)
+		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok, reseller_id)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		uidVal, kullanici, ClientIP(r), eylem, hedef, detayVal, ok, kapsam)
+}
+
+// DenetimDomain: kapsami domainin sahibinden (domains.reseller_id) cozer.
+// Hosting-bazli islemlerde tercih edilen yol — kaydi dogru kiraciya yazar.
+func DenetimDomain(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, detay string, domainID int64, basarili bool) {
+	Denetim(db, r, uid, kullanici, eylem, hedef, detay, DomainKapsam(db, domainID), basarili)
+}
+
+// DomainKapsam: domainin ait oldugu kiraci (0 = kok).
+func DomainKapsam(db *sql.DB, domainID int64) int64 {
+	if db == nil || domainID <= 0 {
+		return 0
+	}
+	var rid sql.NullInt64
+	if err := db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&rid); err != nil {
+		return 0
+	}
+	if rid.Valid {
+		return rid.Int64
+	}
+	return 0
 }

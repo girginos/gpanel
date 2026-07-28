@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 )
 
 // SubGenel: ana Domainler listesinde gösterilmek üzere zenginleştirilmiş subdomain kaydı.
@@ -22,11 +23,17 @@ type SubGenel struct {
 // TumListe: GET /subdomains — tüm subdomain'leri parent domain bilgisiyle listeler (AdminOnly).
 // Ana Domainler ekranı bunu çekip subdomain'leri parent'ının altında gösterir.
 func (h *Handlers) TumListe(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT s.id, s.alt_ad, s.tam_ad, s.domain_id, d.alan_adi, d.sistem_kullanici,
+	// Bayi: yalniz KENDI hosting hesaplarinin alt alanlari. Admin: hepsi.
+	sorgu := `SELECT s.id, s.alt_ad, s.tam_ad, s.domain_id, d.alan_adi, d.sistem_kullanici,
 		        s.php_surum, DATE_FORMAT(s.created_at,'%Y-%m-%d')
-		   FROM subdomanlar s JOIN domains d ON d.id = s.domain_id
-		  ORDER BY d.alan_adi, s.alt_ad`)
+		   FROM subdomanlar s JOIN domains d ON d.id = s.domain_id`
+	argl := []any{}
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		sorgu += ` WHERE d.reseller_id=?`
+		argl = append(argl, rid)
+	}
+	sorgu += ` ORDER BY d.alan_adi, s.alt_ad`
+	rows, err := h.DB.QueryContext(r.Context(), sorgu, argl...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "listelenemedi")
 		return

@@ -486,8 +486,8 @@ export default function DomainFilesPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[13rem_minmax(0,1fr)] gap-4">
-        <aside>
+      <div className="grid grid-cols-1 lg:grid-cols-[13rem_minmax(0,1fr)] gap-4 lg:items-start">
+        <aside className="lg:h-full">
           <DizinAgac domainId={id!} secili={yol} onSec={setYol} yenileme={agacYenileme} />
         </aside>
         <section

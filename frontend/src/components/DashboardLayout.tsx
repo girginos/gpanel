@@ -2,12 +2,16 @@
 // gosp-dark-swept-v2
 // gosp-mobil-v1
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
 
-type NavItem = { to: string; etiket: string; ikon: string }
+type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
+// Sayac anahtarlari GET /nav-sayaclar yanitindan gelir (Plesk deseni:
+// menu ogesinin sagindaki adet). Deger 0/yoksa rozet CIZILMEZ.
+type Sayaclar = Record<string, number>
 
 const ICONS = {
   home:        'M3 12l2-2 7-7 7 7 2 2v8a2 2 0 01-2 2h-3v-7H10v7H7a2 2 0 01-2-2v-8z',
@@ -31,12 +35,12 @@ const ICONS = {
 const NAV: NavGroup[] = [
   { items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
   { baslik: 'Barındırma Hizmetleri', items: [
-    { to: '/domainler',           etiket: 'Domainler',        ikon: ICONS.domain },
-    { to: '/bayiler',             etiket: 'Bayiler',          ikon: ICONS.profil },
+    { to: '/domainler',           etiket: 'Domainler',        ikon: ICONS.domain, sayac: 'domainler' },
+    { to: '/bayiler',             etiket: 'Bayiler',          ikon: ICONS.profil, sayac: 'bayiler' },
   ]},
   { baslik: 'Planlar', items: [
-    { to: '/hizmet-planlari', etiket: 'Hosting Planları', ikon: ICONS.plan },
-    { to: '/bayi-planlari',   etiket: 'Bayi Planları',    ikon: ICONS.plan },
+    { to: '/hizmet-planlari', etiket: 'Hosting Planları', ikon: ICONS.plan, sayac: 'hizmet_planlari' },
+    { to: '/bayi-planlari',   etiket: 'Bayi Planları',    ikon: ICONS.plan, sayac: 'bayi_planlari' },
   ]},
   { baslik: 'Sunucu Yönetimi', items: [
     { to: '/araclar-ayarlar',     etiket: 'Araçlar ve Ayarlar', ikon: ICONS.araclar },
@@ -46,6 +50,7 @@ const NAV: NavGroup[] = [
     { to: '/wordpress',           etiket: 'WordPress',          ikon: ICONS.wp },
     { to: '/firewall',            etiket: 'Güvenlik Duvarı',    ikon: ICONS.firewall },
     { to: '/izleme',              etiket: 'İzleme',             ikon: ICONS.izleme },
+    { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.kilit },
   ]},
   { baslik: 'Profilim', items: [
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
@@ -55,11 +60,12 @@ const NAV: NavGroup[] = [
 const RESELLER_NAV: NavGroup[] = [
   { items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
   { baslik: 'Barındırma Hizmetleri', items: [
-    { to: '/domainler',       etiket: 'Hosting Hesapları', ikon: ICONS.domain },
-    { to: '/hizmet-planlari', etiket: 'Hosting Planlarım', ikon: ICONS.plan },
+    { to: '/domainler',       etiket: 'Hosting Hesapları', ikon: ICONS.domain, sayac: 'domainler' },
+    { to: '/hizmet-planlari', etiket: 'Hosting Planlarım', ikon: ICONS.plan, sayac: 'hizmet_planlari' },
   ]},
   { baslik: 'Ayarlar', items: [
     { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonum',        ikon: ICONS.domain },
+    { to: '/denetim',             etiket: 'Denetim Kaydım',      ikon: ICONS.kilit },
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
   ]},
 ]
@@ -70,6 +76,18 @@ export default function DashboardLayout() {
   try { _rol = JSON.parse(localStorage.getItem('gosp.user') || '{}').rol || '' } catch { /* okunamadi */ }
   const isReseller = _rol === 'reseller'
   const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('girginospanel.musteri.domain_id') || '' : ''
+
+  const [sayac, setSayac] = useState<Sayaclar>({})
+  useEffect(() => {
+    if (isMusteri) return
+    let iptal = false
+    const cek = () => api.get<Sayaclar>('/nav-sayaclar')
+      .then(r => { if (!iptal) setSayac(r.data || {}) })
+      .catch(() => { /* sayac kritik degil, sessiz gec */ })
+    cek()
+    const t = setInterval(cek, 60000)          // menu sayilari 1 dk'da bir tazelenir
+    return () => { iptal = true; clearInterval(t) }
+  }, [isMusteri])
 
   const [acikGruplar, setAcikGruplar] = useState<Record<string, boolean>>({
     'Barındırma Hizmetleri': true,
@@ -213,6 +231,18 @@ export default function DashboardLayout() {
                               <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
                             </svg>
                             <span className="truncate">{it.etiket}</span>
+                            {it.sayac && sayac[it.sayac] ? (
+                              <span
+                                className={`ml-auto pl-2 shrink-0 text-xs tabular-nums transition ${
+                                  isActive
+                                    ? 'text-slate-700 dark:text-slate-200 font-medium'
+                                    : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+                                }`}
+                                aria-label={`${sayac[it.sayac]} adet`}
+                              >
+                                {sayac[it.sayac]}
+                              </span>
+                            ) : null}
                           </>
                         )}
                       </NavLink>

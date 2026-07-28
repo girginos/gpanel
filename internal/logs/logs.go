@@ -24,12 +24,12 @@ type Handlers struct {
 }
 
 type LogDosya struct {
-	Anahtar  string `json:"anahtar"`  // "access" | "error"
-	Etiket   string `json:"etiket"`
-	Yol      string `json:"yol"`
-	BoyutB   int64  `json:"boyut_b"`
-	Degisme  string `json:"degisme"`
-	Mevcut   bool   `json:"mevcut"`
+	Anahtar string `json:"anahtar"` // "access" | "error"
+	Etiket  string `json:"etiket"`
+	Yol     string `json:"yol"`
+	BoyutB  int64  `json:"boyut_b"`
+	Degisme string `json:"degisme"`
+	Mevcut  bool   `json:"mevcut"`
 }
 
 func (h *Handlers) lookup(r *http.Request) (string, string, error) {

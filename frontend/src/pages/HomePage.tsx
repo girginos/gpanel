@@ -182,11 +182,16 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
+    // Bayi sunucu-seviyesi verilere erisemez (AdminOnly uclar 403 doner). Istegi
+    // hic atmiyoruz: hem gereksiz 403 gurultusu olmuyor hem de gosterge sonsuza
+    // kadar "yukleniyor" durumunda takili kalmiyor.
     const cekKullanim = () => {
+      if (isBayi) return
       if (typeof document !== 'undefined' && document.hidden) return // sekme gizliyken poll'u duraklat
       api.get<Sistem>('/system/usage').then((r) => setS(r.data)).catch(() => {})
     }
     const cekBakim = () => {
+      if (isBayi) return
       if (typeof document !== 'undefined' && document.hidden) return
       api.get<Guncelleme>('/system/guncelleme').then((r) => setGuncelleme(r.data)).catch(() => {})
       api.get<Optimize>('/system/optimize').then((r) => setOptimize(r.data)).catch(() => {})
@@ -195,8 +200,12 @@ export default function HomePage() {
     cekBakim()
     // Bir kez okunanlar (dosya sistemi / DB / wp-cli ağırlıklı — poll edilmez)
     api.get<Domain[]>('/domains').then((r) => setDomainler(r.data || [])).catch(() => {})
-    api.get<YedekOzet>('/admin/backups/ozet').then((r) => setYedek(r.data)).catch(() => {})
-    api.get<WpKurulum[]>('/wordpress/tumu').then((r) => setWp(r.data || [])).catch(() => setWp([]))
+    if (!isBayi) {
+      api.get<YedekOzet>('/admin/backups/ozet').then((r) => setYedek(r.data)).catch(() => {})
+      api.get<WpKurulum[]>('/wordpress/tumu').then((r) => setWp(r.data || [])).catch(() => setWp([]))
+    } else {
+      setWp([])
+    }
 
     const idK = setInterval(cekKullanim, 5000)   // kaynak kullanımı — 5 sn
     const idB = setInterval(cekBakim, 20000)     // bakım durumu — 20 sn
@@ -614,7 +623,7 @@ export default function HomePage() {
                 <span className="mx-1.5 text-slate-300 dark:text-slate-600">·</span>
                 {formatUptime(s.uptime_sn)} kesintisiz çalışıyor
               </>
-            ) : 'Sistem verileri yükleniyor…'}
+            ) : isBayi ? 'Bayi paneliniz — hosting hesaplarınızı buradan yönetin.' : 'Sistem verileri yükleniyor…'}
           </p>
         </div>
 
@@ -637,14 +646,17 @@ export default function HomePage() {
             Varsayılan düzen
           </button>
 
-          <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-500
-                          dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
-            <span className="relative flex h-2 w-2">
-              {s && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
-              <span className={`relative inline-flex h-2 w-2 rounded-full ${s ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-            </span>
-            {s ? 'Canlı izleme' : 'Bekleniyor'}
-          </div>
+          {/* Canli izleme rozeti sunucu metrikleri icindir; bayide bu veri yok. */}
+          {!isBayi && (
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-500
+                            dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
+              <span className="relative flex h-2 w-2">
+                {s && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${s ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+              </span>
+              {s ? 'Canlı izleme' : 'Bekleniyor'}
+            </div>
+          )}
         </div>
       </header>
 

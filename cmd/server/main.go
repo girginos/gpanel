@@ -21,12 +21,14 @@ import (
 	"girginospanel/internal/config"
 	"girginospanel/internal/cron"
 	"girginospanel/internal/db"
+	"girginospanel/internal/denetim"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/domains"
 	"girginospanel/internal/eklenti"
 	"girginospanel/internal/files"
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/guvenlikduvari"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/istatistik"
@@ -86,6 +88,9 @@ func main() {
 
 	// migrations
 	runMigrations(d)
+	gizli.ParolalariSifrele(d)          // mevcut duz-metin DB parolalarini at-rest sifrele (idempotent)
+	gizli.SaglikKontrol(d)              // anahtar gercekten cozuyor mu (sessiz bozulma uyarisi)
+	gizli.PMATokenSupur(d, time.Minute) // suresi gecmis pma token satirlari birikmesin
 
 	provisioner.Init(d) // askıya-alma tutarlılığı için provisioner'a DB handle'ı ver
 	middleware.Init(d)  // musteri-scope askiya-alma kontrolu icin DB handle
@@ -134,6 +139,7 @@ func main() {
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
 	usersH := &users.Handlers{DB: d}
 	domainsH := &domains.Handlers{DB: d, IPv4: ipv4}
+	domains.KokDB = d // sahip kolonunda kok adini cozmek icin (onbellekli)
 	filesH := &files.Handlers{DB: d}
 	cronH := &cron.Handlers{DB: d}
 	logsH := &logs.Handlers{DB: d}
@@ -165,6 +171,7 @@ func main() {
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
 	resellerH := &reseller.Handlers{DB: d}
+	denetimH := &denetim.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	phpExtH := &phpext.Handlers{DB: d}
 	paketlerH := &paketler.Handlers{DB: d}
@@ -204,21 +211,24 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
-			r.With(middleware.AdminOnly).Put("/me", authH.ProfilGuncelle)
+			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
 			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
-			r.With(middleware.AdminOnly).Post("/me/parola", authH.ParolaDegistir)
-			r.With(middleware.AdminOnly).Get("/me/2fa/setup", authH.TwoFASetup)
-			r.With(middleware.AdminOnly).Post("/me/2fa/enable", authH.TwoFAEnable)
-			r.With(middleware.AdminOnly).Post("/me/2fa/disable", authH.TwoFADisable)
+			r.With(middleware.AdminVeyaReseller).Post("/me/parola", authH.ParolaDegistir)
+			r.With(middleware.AdminVeyaReseller).Get("/me/2fa/setup", authH.TwoFASetup)
+			r.With(middleware.AdminVeyaReseller).Post("/me/2fa/enable", authH.TwoFAEnable)
+			r.With(middleware.AdminVeyaReseller).Post("/me/2fa/disable", authH.TwoFADisable)
 			r.With(middleware.AdminVeyaReseller).Get("/domains", domainsH.List)
-			r.With(middleware.AdminOnly).Get("/subdomains", subH.TumListe)
+			r.With(middleware.AdminVeyaReseller).Get("/subdomains", subH.TumListe)
 			r.With(middleware.AdminVeyaReseller).Get("/reseller/ozet", resellerH.Ozet)
+			r.With(middleware.AdminVeyaReseller).Get("/denetim", denetimH.Liste)
+			r.With(middleware.AdminVeyaReseller).Get("/nav-sayaclar", domainsH.NavSayac)
 			r.With(middleware.AdminOnly).Get("/resellers", resellerH.Liste)
 			r.With(middleware.AdminOnly).Post("/resellers", resellerH.Olustur)
 			r.With(middleware.AdminOnly).Put("/resellers/{id}", resellerH.Guncelle)
 			r.With(middleware.AdminOnly).Delete("/resellers/{id}", resellerH.Sil)
 			r.With(middleware.AdminOnly).Get("/reseller-plans", resellerH.PaketListe)
+			r.With(middleware.AdminOnly).Get("/reseller-plans/{id}", resellerH.PaketDetay)
 			r.With(middleware.AdminOnly).Post("/reseller-plans", resellerH.PaketOlustur)
 			r.With(middleware.AdminOnly).Put("/reseller-plans/{id}", resellerH.PaketGuncelle)
 			r.With(middleware.AdminOnly).Delete("/reseller-plans/{id}", resellerH.PaketSil)
@@ -250,7 +260,7 @@ func main() {
 				r.With(middleware.AdminVeyaReseller).Post("/domains", domainsH.Create)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}", domainsH.Delete)
 				r.With(middleware.AdminOnly).Post("/domains/toplu/sahip", domainsH.TopluSahip)
-				r.With(middleware.AdminOnly).Post("/domains/toplu/durum", domainsH.TopluDurum)
+				r.With(middleware.AdminVeyaReseller).Post("/domains/toplu/durum", domainsH.TopluDurum)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/php", domainsH.SetPHP)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssh", sshH.Goster)
 				r.With(middleware.AdminOnly).Put("/domains/{id}/ssh", sshH.Ayarla)
@@ -345,8 +355,8 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)
-				r.With(middleware.AdminOnly).Delete("/databases/{dbid}", domainsH.DeleteDatabase)
-				r.With(middleware.AdminOnly).Put("/databases/{dbid}/password", domainsH.SetDatabasePassword)
+				r.With(middleware.DBSahipligi("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)
+				r.With(middleware.DBSahipligi("dbid")).Put("/databases/{dbid}/password", domainsH.SetDatabasePassword)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files", filesH.List)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/oku", filesH.Read)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/indir", filesH.Download)
@@ -398,7 +408,7 @@ func main() {
 				r.With(middleware.AdminVeyaReseller).Post("/plans", plansH.Create)
 				r.With(middleware.AdminVeyaReseller).Put("/plans/{id}", plansH.Update)
 				r.With(middleware.AdminVeyaReseller).Delete("/plans/{id}", plansH.Delete)
-				r.With(middleware.AdminOnly).Get("/plans/{id}/domains", plansH.DomainlerAra)
+				r.With(middleware.AdminVeyaReseller).Get("/plans/{id}/domains", plansH.DomainlerAra)
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/plan", domainsH.SetPlan)
 				r.With(middleware.SahipYonetim).Post("/domains/{id}/ozel-plan", domainsH.OzelPlan)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns", dnsH.List)
@@ -450,7 +460,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/github/repos", githubH.ListRepos)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/github/branches", githubH.ListBranches)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/github/use", githubH.Use)
-				r.Post("/databases/{dbId}/pma-token", pmaH.TokenIste)
+				r.With(middleware.DBSahipligiMusteri("dbId")).Post("/databases/{dbId}/pma-token", pmaH.TokenIste)
 				r.Get("/php/versions", phpH.Versions)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/php-settings", phpH.GetAyarlar)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/php-settings", phpH.PutAyarlar)

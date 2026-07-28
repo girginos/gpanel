@@ -153,7 +153,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const adminUID = int64(1)
-	tok, err := Issue(h.Secret, h.LifetimeSec, adminUID, "root", "admin")
+	tok, err := IssueAt(h.Secret, h.LifetimeSec, adminUID, "root", "admin", h.gecersizDamga(adminUID))
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
@@ -177,17 +177,17 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 	var hash, fullName, status string
 	err := h.DB.QueryRow(`SELECT id, password_hash, COALESCE(full_name,''), status FROM users WHERE username=? AND role='reseller'`, req.Kullanici).Scan(&id, &hash, &fullName, &status)
 	if err != nil || hash == "" {
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Parola)) != nil {
-		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
 	if status != "active" {
-		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusForbidden, "hesabınız askıya alınmış")
 		return
 	}
@@ -212,20 +212,20 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 			}
 			adim, ok := TOTPVerifyAdim(sec, req.Kod, sonAdim)
 			if !ok {
-				writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.2fa", req.Kullanici, false)
+				writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.2fa", req.Kullanici, false, id)
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
 				return
 			}
 			_, _ = h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=?`, adim, id)
 		}
 	}
-	tok, err := IssueReseller(h.Secret, h.LifetimeSec, id, req.Kullanici, id)
+	tok, err := IssueResellerAt(h.Secret, h.LifetimeSec, id, req.Kullanici, id, h.gecersizDamga(id))
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
 	}
 	_, _ = h.DB.Exec(`UPDATE users SET last_login_at=NOW(), last_login_ip=? WHERE id=?`, httpx.ClientIP(r), id)
-	writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, true)
+	writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, true, id)
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = id
 	resp.Kullanici.Adi = req.Kullanici
@@ -234,7 +234,19 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-func writeAudit(db *sql.DB, uid int64, username, ip, action, target string, ok bool) {
+// writeAudit: kimlik olaylari. kapsam = bayi ise kendi id'si, kok ise 0.
+// gecersizDamga: hesabin oturum-gecersizlestirme zaman damgasi (yoksa 0).
+func (h *Handlers) gecersizDamga(uid int64) int64 {
+	var ts int64
+	_ = h.DB.QueryRow(`SELECT COALESCE(token_gecersiz_ts,0) FROM users WHERE id=?`, uid).Scan(&ts)
+	return ts
+}
+
+func writeAudit(db *sql.DB, uid int64, username, ip, action, target string, ok bool, kapsam ...int64) {
+	var kap int64
+	if len(kapsam) > 0 {
+		kap = kapsam[0]
+	}
 	var uidVal any
 	if uid > 0 {
 		uidVal = uid
@@ -244,7 +256,7 @@ func writeAudit(db *sql.DB, uid int64, username, ip, action, target string, ok b
 		okv = 1
 	}
 	_, _ = db.Exec(
-		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, ok)
-		 VALUES(?,?,?,?,?,?)`,
-		uidVal, username, ip, action, target, okv)
+		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, ok, reseller_id)
+		 VALUES(?,?,?,?,?,?,?)`,
+		uidVal, username, ip, action, target, okv, kap)
 }

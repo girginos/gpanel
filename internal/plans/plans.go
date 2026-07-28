@@ -95,12 +95,24 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	// Reseller: kendi planlari + global (reseller_id=0). Admin: hepsi.
-	sorgu := selectAll + " ORDER BY varsayilan DESC, id ASC"
+	// 🔴 Domaine-OZEL planlar (domain_id dolu) katalogda LISTELENMEZ — yoksa her
+	// ozellestirilen hosting katalogu bir satir daha sisirirdi (100 domain = 100 plan).
+	// `?domain=<id>` ile yalniz O domainin ozel plani listeye dahil edilir.
+	ozelDomain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	kosul := " WHERE (domain_id IS NULL"
 	args := []any{}
+	if ozelDomain != "" {
+		if did, e := strconv.ParseInt(ozelDomain, 10, 64); e == nil && did > 0 {
+			kosul += " OR domain_id=?"
+			args = append(args, did)
+		}
+	}
+	kosul += ")"
 	if rid := middleware.ResellerIDFrom(r); rid > 0 {
-		sorgu = selectAll + " WHERE reseller_id IN (?,0) ORDER BY varsayilan DESC, id ASC"
+		kosul += " AND reseller_id IN (?,0)"
 		args = append(args, rid)
 	}
+	sorgu := selectAll + kosul + " ORDER BY varsayilan DESC, id ASC"
 	rows, err := h.DB.QueryContext(r.Context(), sorgu, args...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -201,6 +213,14 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ridC := middleware.ResellerIDFrom(r)
+	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut hesabina
+	// 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile kota=0 plan acip
+	// sinirsiz disk dagitabiliyordu. Kok icin 0 serbest (kendi sunucusu).
+	if ridC > 0 && (p.DiskKotaMB <= 0 || p.TrafikKotaMB <= 0) {
+		httpx.WriteError(w, http.StatusBadRequest,
+			"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
+		return
+	}
 	v := 0
 	if p.Varsayilan {
 		v = 1
@@ -254,6 +274,17 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut
+	// hesabina 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile
+	// kota=0 plan acip sinirsiz disk dagitabiliyordu. Kok icin 0 serbest
+	// (kendi sunucusu), bayi icin pozitif deger zorunlu.
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		if p.DiskKotaMB <= 0 || p.TrafikKotaMB <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest,
+				"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
+			return
+		}
+	}
 	if err := provisioner.ValidateNginxDirectives(p.NginxEkDirektifler); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())
 		return
@@ -290,6 +321,13 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	go h.wafPlanReapply(id)
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
 	saved, _ := scan(row)
+	// Kapsam: planin SAHIBI (kok global bir plani degistirdiginde de o plani
+	// kullanan bayiler degisikligi kendi kaydinda gorebilmeli degil — plan kokun,
+	// kayit kokun; ama bayi plani degisirse kayit bayinin kapsamina yazilir).
+	var planSahip int64
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT reseller_id FROM service_plans WHERE id=?`, id).Scan(&planSahip)
+	uidU, kulU := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uidU, kulU, "plan.guncelle", p.Ad, "", planSahip, true)
 	httpx.WriteJSON(w, http.StatusOK, saved)
 }
 
@@ -347,9 +385,23 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 // GET /plans/{id}/domains — bu plana bağlı domain listesi
 func (h *Handlers) DomainlerAra(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT id, alan_adi, sistem_kullanici, durum, DATE_FORMAT(olusturulma,'%Y-%m-%d')
-		 FROM domains WHERE plan_id=? ORDER BY id`, id)
+	// Bayi: yalniz KENDI planini sorgulayabilir ve yalniz KENDI domainlerini gorur
+	// (global bir plani baska kiracilarin da kullanmasi onu ilgilendirmez).
+	sorgu := `SELECT id, alan_adi, sistem_kullanici, durum, DATE_FORMAT(olusturulma,'%Y-%m-%d')
+		 FROM domains WHERE plan_id=? ORDER BY id`
+	argl := []any{id}
+	if rid := middleware.ResellerIDFrom(r); rid > 0 {
+		var sahip int64
+		if err := h.DB.QueryRowContext(r.Context(),
+			`SELECT reseller_id FROM service_plans WHERE id=?`, id).Scan(&sahip); err != nil || (sahip != rid && sahip != 0) {
+			httpx.WriteError(w, http.StatusForbidden, "bu plana erişiminiz yok")
+			return
+		}
+		sorgu = `SELECT id, alan_adi, sistem_kullanici, durum, DATE_FORMAT(olusturulma,'%Y-%m-%d')
+		 FROM domains WHERE plan_id=? AND reseller_id=? ORDER BY id`
+		argl = append(argl, rid)
+	}
+	rows, err := h.DB.QueryContext(r.Context(), sorgu, argl...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

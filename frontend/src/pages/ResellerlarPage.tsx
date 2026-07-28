@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { parolaUret, panoyaKopyala } from '@/lib/parola'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
@@ -23,6 +24,7 @@ function fmtKB(kb: number) {
 }
 
 type Paket = {
+  asim_ilkesi?: string; asim_bildirim?: boolean; fazla_satis?: boolean
   id: number; ad: string; aciklama: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
   fiyat_kurus: number; varsayilan: boolean; bayi_sayisi: number
@@ -36,6 +38,8 @@ export default function ResellerlarPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
   const [paketler, setPaketler] = useState<Paket[]>([])
+  const [parolaGoster, setParolaGoster] = useState(false)
+  const [kopyalandi, setKopyalandi] = useState(false)
   const [modal, setModal] = useState<'yeni' | Reseller | null>(null)
   const [form, setForm] = useState<any>(bos)
   const [kaydet, setKaydet] = useState(false)
@@ -51,7 +55,7 @@ export default function ResellerlarPage() {
   function duzenleAc(x: Reseller) {
     setForm({ kullanici: x.kullanici, parola: '', ad_soyad: x.ad_soyad, durum: x.durum, paket_id: x.paket_id || 0,
       max_domain: x.max_domain, max_disk_mb: x.max_disk_mb, max_trafik_mb: x.max_trafik_mb })
-    setModal(x); setHata(null); setOk(null)
+    setModal(x); setHata(null); setOk(null); setParolaGoster(false); setKopyalandi(false)
   }
 
   async function gonder(e: React.FormEvent) {
@@ -160,27 +164,100 @@ export default function ResellerlarPage() {
               )}
               <div><label className={lbl}>Ad Soyad</label>
                 <input className={inp} value={form.ad_soyad} onChange={e => setForm({ ...form, ad_soyad: e.target.value })} placeholder="Firma / Kişi" /></div>
-              {paketler.length > 0 && (
-                <div><label className={lbl}>Bayi paketi</label>
-                  <select className={inp} value={form.paket_id || 0} onChange={e => {
-                    const pid = Number(e.target.value)
-                    const pk = paketler.find(x => x.id === pid)
-                    setForm({ ...form, paket_id: pid, ...(pk ? { max_domain: pk.max_domain, max_disk_mb: pk.max_disk_mb, max_trafik_mb: pk.max_trafik_mb } : {}) })
-                  }}>
-                    <option value={0}>Paketsiz (özel limitler)</option>
-                    {paketler.map(pk => <option key={pk.id} value={pk.id}>{pk.ad} — {pk.max_domain > 0 ? pk.max_domain + ' hosting' : '∞'} / {fmtMB(pk.max_disk_mb)}</option>)}
-                  </select>
-                  <p className="text-[11px] text-slate-400 mt-1">Paket seçilirse aşağıdaki limitler paketten gelir.</p>
-                </div>
-              )}
-              <div><label className={lbl}>{modal === 'yeni' ? 'Parola' : 'Yeni parola (boş = değişmez)'}</label>
-                <input className={inp} type="password" value={form.parola} onChange={e => setForm({ ...form, parola: e.target.value })} placeholder="En az 8 karakter" required={modal === 'yeni'} /></div>
-              <div className="grid grid-cols-3 gap-2">
-                <div><label className={lbl}>Max hosting</label><input className={inp} type="number" min={0} value={form.max_domain} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
-                <div><label className={lbl}>Disk (MB)</label><input className={inp} type="number" min={0} value={form.max_disk_mb} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
-                <div><label className={lbl}>Trafik (MB)</label><input className={inp} type="number" min={0} value={form.max_trafik_mb} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
+              <div><label className={lbl}>Bayi paketi</label>
+                {paketler.length === 0 ? (
+                  // 🔴 Paket yokken alani GIZLEME: yonetici paket kavramindan
+                  // habersiz kaliyordu. Bos durumda dogrudan olusturma yolunu goster.
+                  <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-3 py-2.5 text-sm text-slate-500 dark:text-slate-400">
+                    Henüz bayi paketi yok — limitleri aşağıdan tek tek girebilir ya da{' '}
+                    <Link to="/bayi-planlari/yeni" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">bir paket oluşturabilirsiniz</Link>.
+                  </div>
+                ) : (
+                  <>
+                    <select className={inp} value={form.paket_id || 0} onChange={e => {
+                      const pid = Number(e.target.value)
+                      const pk = paketler.find(x => x.id === pid)
+                      setForm({ ...form, paket_id: pid, ...(pk ? { max_domain: pk.max_domain, max_disk_mb: pk.max_disk_mb, max_trafik_mb: pk.max_trafik_mb } : {}) })
+                    }}>
+                      <option value={0}>Paketsiz (özel limitler)</option>
+                      {paketler.map(pk => <option key={pk.id} value={pk.id}>{pk.ad} — {pk.max_domain > 0 ? pk.max_domain + ' hosting' : '∞'} / {fmtMB(pk.max_disk_mb)}</option>)}
+                    </select>
+                    {(() => {
+                      const pk = paketler.find(x => x.id === Number(form.paket_id))
+                      if (!pk) return <p className="text-[11px] text-slate-400 mt-1">Paketsiz: limitleri aşağıdan siz belirlersiniz.</p>
+                      const asim = pk.asim_ilkesi === 'yok' ? 'aşıma izin yok'
+                        : pk.asim_ilkesi === 'tumu' ? 'tüm kaynaklarda aşıma izin'
+                        : 'disk + trafik aşımına izin'
+                      return (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Limitler paketten gelir · {asim} · {pk.fazla_satis ? 'fazla satışa izin' : 'fazla satış kapalı'}
+                          {' · '}<Link to={`/bayi-planlari/${pk.id}`} className="text-brand-600 dark:text-brand-400 hover:underline">paketi düzenle</Link>
+                        </p>
+                      )
+                    })()}
+                  </>
+                )}
               </div>
-              <p className="text-[11px] text-slate-400">0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.</p>
+              <div>
+                <label className={lbl}>{modal === 'yeni' ? 'Parola' : 'Yeni parola (boş = değişmez)'}</label>
+                <div className="flex gap-2">
+                  <input
+                    className={inp + ' flex-1'}
+                    type={parolaGoster ? 'text' : 'password'}
+                    value={form.parola}
+                    onChange={e => { setForm({ ...form, parola: e.target.value }); setKopyalandi(false) }}
+                    placeholder="En az 8 karakter"
+                    autoComplete="new-password"
+                    required={modal === 'yeni'}
+                  />
+                  {/* Otomatik parola: kripto-rastgele 16 karakter; uretince ACIK gosterilir
+                      ki yonetici bayiye iletebilsin (karistirilan 0/O, 1/l harfleri yok). */}
+                  <button
+                    type="button"
+                    onClick={() => { const p = parolaUret(16); setForm({ ...form, parola: p }); setParolaGoster(true); setKopyalandi(false) }}
+                    className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-3 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    title="Güçlü parola oluştur"
+                  >
+                    Oluştur
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setParolaGoster(v => !v)}
+                    className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    aria-label={parolaGoster ? 'Parolayı gizle' : 'Parolayı göster'}
+                    title={parolaGoster ? 'Gizle' : 'Göster'}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
+                      {parolaGoster
+                        ? <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        : <><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>}
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!form.parola}
+                    onClick={async () => { if (await panoyaKopyala(form.parola)) { setKopyalandi(true); setTimeout(() => setKopyalandi(false), 2000) } }}
+                    className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    aria-label="Parolayı kopyala"
+                    title="Kopyala"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-[11px] mt-1 h-4 text-slate-400 dark:text-slate-500" aria-live="polite">
+                  {kopyalandi ? <span className="text-emerald-600 dark:text-emerald-400">✓ Parola panoya kopyalandı</span>
+                    : form.parola ? 'Bayiye iletmeyi unutmayın — kaydedildikten sonra bir daha görüntülenemez.'
+                    : '“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.'}
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div><label className={lbl}>Max hosting</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_domain} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
+                <div><label className={lbl}>Disk (MB)</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_disk_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
+                <div><label className={lbl}>Trafik (MB)</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_trafik_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
+              </div>
+              <p className="text-[11px] text-slate-400">{Number(form.paket_id) ? 'Limitler seçili paketten gelir — değiştirmek için paketi düzenleyin ya da “Paketsiz” seçin.' : '0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.'}</p>
               {modal !== 'yeni' && (
                 <div><label className={lbl}>Durum</label>
                   <select className={inp} value={form.durum} onChange={e => setForm({ ...form, durum: e.target.value })}>

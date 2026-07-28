@@ -20,6 +20,12 @@ const (
 	hataSayfaAd    = "_gosp_404.html"
 	// HataSayfaYolu: nginx location = /_gosp_404.html icin dosya adi (root ile birleşir).
 	HataSayfaYolu = "/" + hataSayfaAd
+
+	askidaSayfaAd = "_gosp_askida.html"
+	// AskidaSayfaYolu: askiya alinmis vhost'un 503 govdesi icin dosya adi.
+	AskidaSayfaYolu = "/" + askidaSayfaAd
+	// HataSayfaDizin: nginx `root` direktifi icin paylasilan hata sayfasi dizini.
+	HataSayfaDizin = hataSayfaDizin
 )
 
 // markaStil: iki sayfanin ortak CSS'i (tek kaynak → gorsel tutarlilik).
@@ -167,23 +173,40 @@ const markaAlt = `    <div class="cizgi"></div>
 // animScript: Lottie yukleyici. Basarisiz olursa (dosya yok / JS kapali /
 // hareket-azaltma tercihi) SVG yedegi ekranda kalir.
 func animScript(dosya string) string {
-	return fmt.Sprintf(`<script src="/_gosp/lottie.min.js" defer></script>
+	return `<script src="/_gosp/lottie.min.js" defer></script>
 <script>
-window.addEventListener('load', function () {
-  try {
-    var az = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (az || !window.lottie) return;               // yedek SVG kalsin
-    var kutu = document.getElementById('anim');
-    if (!kutu) return;
-    var a = window.lottie.loadAnimation({
-      container: kutu, renderer: 'svg', loop: true, autoplay: true, path: '/_gosp/%s'
-    });
-    a.addEventListener('DOMLoaded', function () {
-      document.documentElement.className += ' anim-var';   // yedegi gizle, animasyonu goster
-    });
-  } catch (e) { /* yedek SVG kalsin */ }
-});
-</script>`, dosya)
+(function () {
+  var YOL = '/_gosp/` + dosya + `';
+  function baslat() {
+    try {
+      if (!window.lottie) return false;                 // oynatici gelmedi → yedek SVG kalir
+      var kutu = document.getElementById('anim');
+      if (!kutu || kutu.dataset.hazir) return true;
+      // Hareket-azaltma tercihi: animasyonu YINE yukle ama OYNATMA — kullanici
+      // gorseli yine gorur, hareket rahatsizlik vermez.
+      var az = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var a = window.lottie.loadAnimation({
+        container: kutu, renderer: 'svg', loop: !az, autoplay: !az, path: YOL
+      });
+      kutu.dataset.hazir = '1';
+      a.addEventListener('DOMLoaded', function () {
+        document.documentElement.className += ' anim-var';  // yedegi gizle
+        if (az) { try { a.goToAndStop(0, true) } catch (e) {} }
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+  // 'load' olayi gecmis olabilir (onbellek/bfcache) → once DOGRUDAN dene,
+  // olmazsa hem DOMContentLoaded hem load'da tekrar dene, son care kisa yoklama.
+  if (!baslat()) {
+    document.addEventListener('DOMContentLoaded', baslat);
+    window.addEventListener('load', baslat);
+    var kalan = 40, t = setInterval(function () {   // ~4 sn: defer script gecikirse
+      if (baslat() || --kalan <= 0) clearInterval(t);
+    }, 100);
+  }
+})();
+</script>`
 }
 
 // welcomeHTML: yeni olusturulan domainin public_html/index.html karsilama sayfasi.
@@ -255,6 +278,92 @@ func error404HTML() string {
 %s
 </body>
 </html>`, markaStil, markaCizim, markaAlt, animScript("yok404.json"))
+}
+
+// askiyaAlindiHTML: askiya alinmis hesabin 503 sayfasi. Ziyaretciye "site kapali"
+// demek yetmez; site sahibine NE YAPACAGINI da soyler (sebep genelde odeme/kota).
+// Alan adi sunucu tarafinda bilinmiyor (sayfa tum askidaki siteler icin ORTAK) →
+// istemcide location.hostname ile textContent olarak yazilir (HTML enjeksiyonu yok).
+func askiyaAlindiHTML() string {
+	// 🔴 fmt.Sprintf KULLANMA: sayfa CSS'i '%' iceriyor (50%, @keyframes 0%,100%)
+	// ve Sprintf bunlari bicim belirteci sanip sayfayi bozuyordu. Duz birlestirme.
+	return `<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Hesap askıya alındı</title>
+<style>` + markaStil + askiStil + `</style>
+</head>
+<body>
+<div class="sayfa">
+  <aside class="gorsel">
+    <div class="anim" id="anim" aria-hidden="true"></div>
+` + markaCizim + `
+    <div class="dev">girginos</div>
+  </aside>
+  <main class="icerik">
+    <span class="rozet"><span class="nokta"></span>Geçici olarak kapalı</span>
+    <h1>Bu hesap askıya alındı</h1>
+    <p class="spot">Site şu anda yayında değil. İçerikleriniz, dosyalarınız ve veritabanınız silinmedi —
+       askı kaldırıldığı anda site aynen kaldığı yerden yayına döner.</p>
+    <ol class="adimlar">
+      <li><span class="no">1</span><span><b>Site sahibiyseniz</b> — hizmet sağlayıcınızla iletişime geçin; askı genellikle ödeme ya da kaynak kullanımı kaynaklıdır.</span></li>
+      <li><span class="no">2</span><span><b>Ziyaretçiyseniz</b> — yapmanız gereken bir şey yok, birazdan tekrar deneyebilirsiniz.</span></li>
+    </ol>
+    <div class="alanadi" id="alanadi"></div>
+` + markaAlt + `
+  </main>
+</div>
+<script>
+// Alan adini istemcide yaz: sayfa tum askidaki siteler icin ORTAK.
+try { document.getElementById('alanadi').textContent = location.hostname } catch (e) {}
+</script>
+` + animScript("askida.json") + `
+</body>
+</html>`
+}
+
+// askiStil: aski sayfasina ozel ek stiller. markaStil'in USTUNE binen degiskenler
+// vurgu rengini kehribara cevirir — karsilama sayfasiyla karistirilmasin diye.
+const askiStil = `
+  :root{--vurgu:#d97706;--vurgu2:#f59e0b;--panel1:#fdf4e7;--panel2:#f8e8cf}
+  @media (prefers-color-scheme: dark){
+    :root{--vurgu:#fbbf24;--vurgu2:#fcd34d;--panel1:#f3e6d2;--panel2:#e8d5b7}
+  }
+  .dugme{box-shadow:0 8px 22px rgba(217,119,6,.24)}
+  .dugme:hover{box-shadow:0 12px 26px rgba(217,119,6,.3)}
+  .rozet{
+    display:inline-flex;align-items:center;gap:9px;align-self:flex-start;
+    padding:6px 12px;border-radius:999px;margin-bottom:20px;
+    background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.28);
+    font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--vurgu);
+  }
+  .nokta{width:7px;height:7px;border-radius:50%;background:var(--vurgu);animation:nabiz 2.4s ease-in-out infinite}
+  .alanadi{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;
+    color:var(--baslik);background:var(--zemin2);border:1px solid var(--cizgi);
+    padding:3px 9px;border-radius:7px;display:inline-block;margin-top:14px;word-break:break-all;
+  }
+  .alanadi:empty{display:none}
+`
+
+// EnsureAskidaPage: askı sayfasini root-sahipli dizine yazar (idempotent).
+// Tenant bu dosyayi DEGISTIREMEZ — kendi home dizininde degil.
+func EnsureAskidaPage() {
+	if err := os.MkdirAll(hataSayfaDizin, 0o755); err != nil {
+		return
+	}
+	yol := filepath.Join(hataSayfaDizin, askidaSayfaAd)
+	yeni := []byte(askiyaAlindiHTML())
+	if mevcut, err := os.ReadFile(yol); err == nil && string(mevcut) == string(yeni) {
+		return // degismemis
+	}
+	if err := os.WriteFile(yol, yeni, 0o644); err != nil {
+		return
+	}
+	_ = os.Chmod(yol, 0o644)
 }
 
 // Ensure404Page: sunucu geneli 404 sayfasini root-sahipli dizine yazar (idempotent).

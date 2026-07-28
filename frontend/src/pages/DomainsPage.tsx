@@ -12,6 +12,8 @@ type Domain = {
   boyut_kb: number; trafik_kb: number; durum: string
   php_surum?: string; is_demo?: boolean
   olusturulma?: string; plan_id?: number; plan_ad?: string
+  sahip_ad?: string; sahip_tur?: string; reseller_id?: number
+  ssl?: boolean
 }
 type SubGenel = {
   id: number; alt_ad: string; tam_ad: string
@@ -26,6 +28,43 @@ type OlusturmaSonuc = {
   olusturulan_parolalar: { ftp: string; db: string }
 }
 
+// Panel sahibi mi? Bayi yalniz kendi domainlerini gordugu icin kolon ona kapali.
+function panelSahibiMi() {
+  try { return JSON.parse(localStorage.getItem('gosp.user') || '{}').rol === 'admin' } catch { return false }
+}
+
+// Domaini kimin actigini gosterir: ad soyad (yoksa kullanici adi) + rol rozeti.
+function SahipHucre({ ad, tur }: { ad?: string; tur?: string }) {
+  if (!ad) return <span className="text-slate-400 dark:text-slate-500 italic">—</span>
+  const bayi = tur === 'bayi'
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <span className="text-slate-700 dark:text-slate-300 truncate">{ad}</span>
+      <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold shrink-0 ${
+        bayi ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
+             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+        {bayi ? 'bayi' : 'yönetici'}
+      </span>
+    </span>
+  )
+}
+
+// Siteyi yeni sekmede acar. Sertifika varsa https, yoksa http denenir.
+function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
+  return (
+    <a href={`${ssl ? 'https' : 'http'}://${ad}`} target="_blank" rel="noopener noreferrer"
+       title={`${ad} sitesini yeni sekmede aç`} aria-label={`${ad} sitesini yeni sekmede aç`}
+       onClick={e => e.stopPropagation()}
+       className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+           strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden="true">
+        <path d="M14 4h6v6" /><path d="M20 4l-8.5 8.5" />
+        <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+      </svg>
+    </a>
+  )
+}
+
 function fmtKB(kb: number) {
   if (kb < 1024) return kb + ' KB'
   if (kb < 1024 * 1024) return (kb / 1024).toFixed(1) + ' MB'
@@ -33,6 +72,7 @@ function fmtKB(kb: number) {
 }
 
 export default function DomainsPage() {
+  const sahipKolonu = panelSahibiMi()
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
   const [yuk, setYuk] = useState(true)
@@ -159,7 +199,8 @@ export default function DomainsPage() {
     const s = q.trim().toLowerCase()
     if (!s) return items
     const subParents = new Set(subler.filter(sd => sd.tam_ad.toLowerCase().includes(s) || sd.sistem_kullanici.toLowerCase().includes(s)).map(sd => sd.parent_id))
-    return items.filter(d => d.alan_adi.toLowerCase().includes(s) || d.sistem_kullanici.toLowerCase().includes(s) || subParents.has(d.id))
+    return items.filter(d => d.alan_adi.toLowerCase().includes(s) || d.sistem_kullanici.toLowerCase().includes(s)
+      || (d.sahip_ad || '').toLowerCase().includes(s) || subParents.has(d.id))
   }, [items, q, subler])
 
   const sublerByParent = useMemo(() => {
@@ -278,6 +319,7 @@ export default function DomainsPage() {
                 </th>
                 <th className={T.baslik}>Domain Adı</th>
                 <th className={T.baslik}>Sistem Kullanıcısı</th>
+                {sahipKolonu && <th className={T.baslik}>Kullanıcı</th>}
                 <th className={T.baslik}>Plan</th>
                 <th className={T.baslik}>PHP</th>
                 <th className={T.baslik}>Disk</th>
@@ -298,14 +340,22 @@ export default function DomainsPage() {
                         className="cursor-pointer" />
                     </td>
                     <td className={T.hucreBaslikSecimli}>
+                      <span className="inline-flex items-center gap-1.5 min-w-0 align-middle">
                       <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">
                         {d.alan_adi}
                       </Link>
-                      {d.is_demo && <span className="ml-2 text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded align-middle">DEMO</span>}
+                      <SiteAc ad={d.alan_adi} ssl={d.ssl} />
+                      {d.is_demo && <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">DEMO</span>}
+                      </span>
                     </td>
                     <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.sistem_kullanici}</span>
                     </td>
+                    {sahipKolonu && (
+                      <td className={T.hucre} data-etiket="Kullanıcı">
+                        <SahipHucre ad={d.sahip_ad} tur={d.sahip_tur} />
+                      </td>
+                    )}
                     <td className={T.hucre} data-etiket="Plan">
                       {d.plan_ad ? <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span> : <span className="text-slate-400 dark:text-slate-500 italic">—</span>}
                     </td>
@@ -336,12 +386,18 @@ export default function DomainsPage() {
                       <span className="inline-flex items-center gap-1.5 lg:pl-5">
                         <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline">└─</span>
                         <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{sd.tam_ad}</Link>
+                        <SiteAc ad={sd.tam_ad} ssl={d.ssl} />
                         <span className="text-[9px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded align-middle">alt alan</span>
                       </span>
                     </td>
                     <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400 break-all">{sd.sistem_kullanici}</span>
                     </td>
+                    {sahipKolonu && (
+                      <td className={T.hucre} data-etiket="Kullanıcı">
+                        <span className="text-xs text-slate-400 dark:text-slate-500 truncate">{d.sahip_ad || '—'}</span>
+                      </td>
+                    )}
                     <td className={T.hucre} data-etiket="Plan">
                       <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                     </td>

@@ -225,7 +225,7 @@ func vhost(tamAd, docroot, socket, koruma string) string {
 
     location /.well-known/acme-challenge/ {
         auth_basic off;
-        root /var/www/_acme;
+        root ` + docroot + `;
         try_files $uri =404;
     }
 

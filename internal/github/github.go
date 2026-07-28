@@ -50,7 +50,7 @@ type ghUser struct {
 }
 
 type ghRepo struct {
-	FullName      string `json:"full_name"`   // owner/name
+	FullName      string `json:"full_name"` // owner/name
 	Name          string `json:"name"`
 	Description   string `json:"description"`
 	Private       bool   `json:"private"`
@@ -323,7 +323,7 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Repo       string `json:"repo"`        // owner/name
+		Repo       string `json:"repo"` // owner/name
 		Branch     string `json:"branch"`
 		TargetDir  string `json:"target_dir"`
 		AutoDeploy bool   `json:"auto_deploy"`

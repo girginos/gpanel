@@ -24,6 +24,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -957,6 +958,13 @@ func IzolasyonKaybiListesi() []string {
 		if e.IsDir() || !strings.HasPrefix(sk, "c_") {
 			continue
 		}
+		// 🔴 Hesap SILINMIS olabilir: Linux kullanicisi yoksa ortada izolasyonu
+		// kaybedilecek bir tenant da yoktur. Bayat sentinel'i temizle ve UYARMA —
+		// aksi halde silinen her test/musteri hesabi kalici kirmizi banner birakir.
+		if _, err := user.Lookup(sk); err != nil {
+			_ = os.Remove(izolasyonSentinelPath(sk))
+			continue
+		}
 		if TenantFPMActive(sk) {
 			_ = os.Remove(izolasyonSentinelPath(sk)) // yeniden izole edilmis -> bayat
 			continue
@@ -965,6 +973,15 @@ func IzolasyonKaybiListesi() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// IzolasyonSentinelSil: hesap silinirken bayat uyari kaydini kaldirir.
+// Deprovision'dan cagrilir — silinen hesap icin uyari gostermenin anlami yok.
+func IzolasyonSentinelSil(sk string) {
+	if sk == "" {
+		return
+	}
+	_ = os.Remove(izolasyonSentinelPath(sk))
 }
 
 // izolasyonKaybiIsaretle: anlik durum sentinel'i (icerik: zaman + sebep).
@@ -1006,10 +1023,14 @@ func auditIzolasyonKaybi(db *sql.DB, domainID int64, sk, sebep string) {
 	if merr != nil {
 		return
 	}
+	// Kapsam: hostingin sahibi (bayi) — kendi hesabinin guvenlik uyarisini
+	// denetim kaydinda gorebilmeli. Kok zaten hepsini gorur.
+	var kapsam int64
+	_ = db.QueryRow(`SELECT COALESCE(reseller_id,0) FROM domains WHERE id=?`, domainID).Scan(&kapsam)
 	if _, err := db.Exec(
-		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok)
-		 VALUES(NULL, 'sistem', '', 'guvenlik.izolasyon_kaybi', ?, ?, 0)`,
-		sk, string(detay)); err != nil {
+		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok, reseller_id)
+		 VALUES(NULL, 'sistem', '', 'guvenlik.izolasyon_kaybi', ?, ?, 0, ?)`,
+		sk, string(detay), kapsam); err != nil {
 		log.Printf("audit izolasyon_kaybi yazilamadi (%s): %v", sk, err)
 	}
 }

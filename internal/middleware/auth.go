@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +50,13 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 
 			// Önce admin claims dene
 			if c, err := auth.Parse(secret, tokenRaw); err == nil {
+				// 🔴 Imza gecerli olmasi YETMEZ: askiya alinan / silinen / parolasi
+				// degisen hesabin ACIK oturumu da dusmeli. Aksi halde askiya alinan
+				// bayi, token omru (8 saat) boyunca hosting acmaya devam ediyordu.
+				if kod, mesaj := oturumGecerli(r.Context(), c); kod != 0 {
+					httpx.WriteError(w, kod, mesaj)
+					return
+				}
 				ctx := context.WithValue(r.Context(), claimsKey, c)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -61,6 +70,58 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 			httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
 		})
 	}
+}
+
+// oturumGecerli: token imzasi disinda HESABIN hala gecerli olup olmadigini
+// dogrular. (0,"") = gecerli; aksi halde HTTP kodu + mesaj.
+//   - bayi : users satiri var olmali VE status='active' olmali
+//   - herkes: token, hesabin token_gecersiz_ts damgasindan SONRA uretilmis olmali
+//
+// scopeDB nil ise (test/erken acilis) kontrol atlanir — fail-open yalniz DB
+// baglanmadan once mumkun, o asamada zaten istek servis edilmiyor.
+func oturumGecerli(ctx context.Context, c *auth.Claims) (int, string) {
+	if scopeDB == nil || c == nil {
+		return 0, ""
+	}
+	if c.Role != "reseller" && c.Role != "admin" {
+		return 0, ""
+	}
+	var durum string
+	var gecersizTS int64
+	sorgu := `SELECT status, COALESCE(token_gecersiz_ts,0) FROM users WHERE id=?`
+	if err := scopeDB.QueryRowContext(ctx, sorgu, c.UserID).Scan(&durum, &gecersizTS); err != nil {
+		// 🔴 "Satir yok" ile "DB su an cevap vermiyor" AYNI SEY DEGIL. Bu kod
+		// kimlik-dogrulamali HER istekte calisiyor; MariaDB birkac saniye
+		// gecikirse (yeniden baslatma, baglanti havuzu dolmasi) ayrimsiz 403
+		// TUM bayileri "hesabiniz yok" diye disari atardi.
+		if errors.Is(err, sql.ErrNoRows) {
+			if c.Role == "reseller" {
+				return http.StatusForbidden, "hesap bulunamadı"
+			}
+			return 0, "" // kok icin users satiri sart degil (kurulum varyantlari)
+		}
+		log.Printf("oturum kontrolu (uid=%d) DB hatasi: %v — istek gecirildi", c.UserID, err)
+		return 0, "" // gecici hata kimseyi disari atmasin; imza zaten dogrulandi
+	}
+	if c.Role == "reseller" && durum != "active" {
+		return http.StatusForbidden, "hesabınız askıya alınmış"
+	}
+	if gecersizTS > 0 && c.IssuedAt != nil && c.IssuedAt.Unix() < gecersizTS {
+		return http.StatusUnauthorized, "oturum sonlandırıldı, tekrar giriş yapın"
+	}
+	return 0, ""
+}
+
+// OturumlariDusur: hesabin tum ACIK oturumlarini gecersiz kilar (askiya alma,
+// parola degisimi, silme). Bundan once uretilmis JWT'ler reddedilir.
+func OturumlariDusur(db *sql.DB, userID int64) {
+	if db == nil || userID <= 0 {
+		return
+	}
+	// +1 saniye: JWT 'iat' saniye cozunurlugunde. Damga tam SU AN olsaydi, ayni
+	// saniye icinde uretilmis bir token (iat == damga) karsilastirmayi geciyordu —
+	// E2E'de parola degisiminden hemen once alinan token boyle hayatta kaldi.
+	_, _ = db.Exec(`UPDATE users SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE id=?`, userID)
 }
 
 // RequireRole: sadece admin rol kontrolü
@@ -205,6 +266,68 @@ func DomainSahibiMi(r *http.Request, domainID int64) bool {
 	}
 	if mc := MusteriClaimsFrom(r); mc != nil {
 		return mc.DomainID == domainID
+	}
+	return false
+}
+
+// DBSahipligi: {dbid} gibi TUREV kaynak parametrelerinde sahipligi ROTA
+// seviyesinde zorlar. Bu uclarda URL'de {id} domain param'i olmadigi icin
+// MusteriScope uygulanamiyordu ve koruma tek bir handler-ici if satirina
+// baginliydi; ileride o satiri unutan bir handler sessizce cross-tenant IDOR
+// acardi. Handler-ici kontrol KALIYOR (iki katman).
+//
+// Yonetimsel uclar icin: musteri token'i GECMEZ (kendi DB'sini silemez).
+func DBSahipligi(param string) func(http.Handler) http.Handler {
+	return dbSahipligi(param, false)
+}
+
+// DBSahipligiMusteri: okuma/oturum uclari (phpMyAdmin SSO) — musteri de kendi
+// domaininin DB'si icin gecebilir.
+func DBSahipligiMusteri(param string) func(http.Handler) http.Handler {
+	return dbSahipligi(param, true)
+}
+
+func dbSahipligi(param string, musteriGecer bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if scopeDB == nil {
+				next.ServeHTTP(w, r) // acilis penceresi; handler-ici kontrol yine calisir
+				return
+			}
+			dbID, _ := strconv.ParseInt(chi.URLParam(r, param), 10, 64)
+			var domainID int64
+			if err := scopeDB.QueryRowContext(r.Context(),
+				`SELECT domain_id FROM db_accounts WHERE id=?`, dbID).Scan(&domainID); err != nil {
+				// Varlik sizdirma: yok da olabilir, baskasinin da olabilir → 404.
+				httpx.WriteError(w, http.StatusNotFound, "veritabanı bulunamadı")
+				return
+			}
+			izin := YonetimSahibi(r, domainID)
+			if !izin && musteriGecer {
+				izin = DomainSahibiMi(r, domainID)
+			}
+			if !izin {
+				httpx.WriteError(w, http.StatusNotFound, "veritabanı bulunamadı")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// YonetimSahibi: YONETIMSEL bir islemi (DB silme, parola sifirlama gibi) bu
+// domain uzerinde yapabilir mi? Admin evet; bayi YALNIZ kendi hosting hesabinda;
+// MUSTERI ASLA (kendi DB'sini silemez — bu bayinin/yoneticinin isi).
+func YonetimSahibi(r *http.Request, domainID int64) bool {
+	c := ClaimsFrom(r)
+	if c == nil {
+		return false
+	}
+	if c.Role == "admin" {
+		return true
+	}
+	if c.Role == "reseller" {
+		return resellerDomainSahibi(r.Context(), domainID, c.ResellerID)
 	}
 	return false
 }

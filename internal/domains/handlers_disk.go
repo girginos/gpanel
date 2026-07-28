@@ -1,8 +1,8 @@
 package domains
 
 import (
-	"errors"
 	"database/sql"
+	"errors"
 	"net/http"
 	"os/exec"
 	"strconv"

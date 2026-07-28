@@ -66,9 +66,9 @@ type Surum struct {
 // Önceden ikisi de tek false'a düşüyordu → geçici bir dnf kilidi TÜM cache'i false'a çeviriyor,
 // kullanıcı kurulabilir bir sürümü kurmak isteyince YANLIŞ "EOL/yok" 409'u alıyordu.
 var (
-	availMu    sync.Mutex
-	availCache = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız checked=true değerler yazılır)
-	availAt    time.Time           // son BAŞARILI (en az bir paket checked) sweep zamanı
+	availMu     sync.Mutex
+	availCache  = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız checked=true değerler yazılır)
+	availAt     time.Time           // son BAŞARILI (en az bir paket checked) sweep zamanı
 	sweeperOnce sync.Once
 
 	// dnfProbe: arka-plan sweep sondası (display cache'i doldurur). Test için enjekte edilebilir.
@@ -218,6 +218,7 @@ func paketMevcut(m SurumMeta) bool {
 // Cache DEĞİL — dnf'e o an sorar. Dönüş (available, checked):
 //   - checked=true,  available=false → dnf KESİN "No match" dedi → güvenle "EOL/yok" mesajı verilebilir.
 //   - checked=false                  → dnf'e sorulamadı (kilit/meşgul) → ASLA "EOL/yok" deme (yanlış-negatif!).
+//
 // AppStream daima mevcut.
 func kurulabilirlikDenetle(m SurumMeta) (available bool, checked bool) {
 	if m.Kaynak == "appstream" {

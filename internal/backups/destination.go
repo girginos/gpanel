@@ -15,7 +15,7 @@ import (
 type Destination struct {
 	ID         int64  `json:"id"`
 	DomainID   int64  `json:"domain_id"`
-	Tip        string `json:"tip"`    // "ftp" | "sftp"
+	Tip        string `json:"tip"` // "ftp" | "sftp"
 	Host       string `json:"host"`
 	Port       int    `json:"port"`
 	Kullanici  string `json:"kullanici"`

@@ -98,15 +98,17 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 
 	switch tip {
 	case "letsencrypt", "le":
-		_ = os.MkdirAll("/var/www/_acme", 0o755)
-		_, _ = exec.Command("restorecon", "-R", "/var/www/_acme").CombinedOutput()
-		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--issue", "--webroot", "/var/www/_acme",
+		// Challenge subdomainin KENDI docroot'unda; acme kaydi panel veri dizininde.
+		_ = os.MkdirAll(filepath.Join(docroot, ".well-known", "acme-challenge"), 0o755)
+		_, _ = exec.Command("restorecon", "-R", filepath.Join(docroot, ".well-known")).CombinedOutput()
+		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
+			"--config-home", provisioner.AcmeConfigHome(), "--webroot", docroot,
 			"-d", tamAd, "--keylength", "ec-256").CombinedOutput(); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest,
 				"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+strings.TrimSpace(string(out)))
 			return
 		}
-		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--install-cert", "-d", tamAd, "--ecc",
+		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--install-cert", "--config-home", provisioner.AcmeConfigHome(), "-d", tamAd, "--ecc",
 			"--key-file", key, "--fullchain-file", crt,
 			"--reloadcmd", "systemctl reload nginx").CombinedOutput(); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "cert yerleştirilemedi: "+strings.TrimSpace(string(out)))
@@ -180,7 +182,7 @@ func vhostSSL(tamAd, docroot, socket, crt, key, koruma string) string {
     listen 80;
     listen [::]:80;
     server_name %[1]s;
-    location /.well-known/acme-challenge/ { root /var/www/_acme; try_files $uri =404; }
+    location /.well-known/acme-challenge/ { root %[2]s; auth_basic off; try_files $uri =404; }
     location / { return 301 https://$host$request_uri; }
 }
 server {

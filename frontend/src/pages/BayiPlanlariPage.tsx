@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -24,6 +25,7 @@ function fmtFiyat(kurus: number) {
 }
 
 export default function BayiPlanlariPage() {
+  const nav = useNavigate()
   const [items, setItems] = useState<Paket[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -38,7 +40,7 @@ export default function BayiPlanlariPage() {
   }
   useEffect(yukle, [])
 
-  function yeniAc() { setForm(bos); setModal('yeni'); setHata(null); setOk(null) }
+  function yeniAc() { nav('/bayi-planlari/yeni') }   // modal yerine OZEL SAYFA (ilke ayarlari icin)
   function duzenleAc(p: Paket) {
     setForm({ ad: p.ad, aciklama: p.aciklama, max_domain: p.max_domain, max_disk_mb: p.max_disk_mb,
       max_trafik_mb: p.max_trafik_mb, fiyat_kurus: p.fiyat_kurus, varsayilan: p.varsayilan })
@@ -123,7 +125,7 @@ export default function BayiPlanlariPage() {
                     <td className={T.hucre} data-etiket="Fiyat"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtFiyat(p.fiyat_kurus)}</span></td>
                     <td className={T.hucre} data-etiket="Bayi"><span className="text-slate-700 dark:text-slate-300">{p.bayi_sayisi}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <button onClick={() => duzenleAc(p)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 lg:mr-3">Düzenle</button>
+                      <button onClick={() => nav(`/bayi-planlari/${p.id}`)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 lg:mr-3">Düzenle</button>
                       <button onClick={() => sil(p)} className="text-xs text-red-600 dark:text-red-400 hover:text-red-700">Sil</button>
                     </td>
                   </tr>

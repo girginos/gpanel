@@ -105,12 +105,12 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"id":     id,
-		"tip":    req.Tip,
-		"cert":   certYol,
-		"key":    keyYol,
-		"bitis":  bitis.Format("2006-01-02"),
+		"ok":    true,
+		"id":    id,
+		"tip":   req.Tip,
+		"cert":  certYol,
+		"key":   keyYol,
+		"bitis": bitis.Format("2006-01-02"),
 	})
 }
 

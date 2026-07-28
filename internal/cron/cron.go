@@ -20,20 +20,20 @@ import (
 )
 
 const (
-	maxGorev    = 100
-	maxKomut    = 1024
-	bannerLine  = "# girginospanel cron — bu dosya panel tarafindan yonetiliyor; elle duzenlemeyin"
+	maxGorev   = 100
+	maxKomut   = 1024
+	bannerLine = "# girginospanel cron — bu dosya panel tarafindan yonetiliyor; elle duzenlemeyin"
 )
 
 type Gorev struct {
-	Idx     int    `json:"idx"`
-	Dakika  string `json:"dakika"`
-	Saat    string `json:"saat"`
-	Gun     string `json:"gun"`
-	Ay      string `json:"ay"`
-	Hafta   string `json:"hafta"`
-	Komut   string `json:"komut"`
-	Yorum   string `json:"yorum,omitempty"`
+	Idx    int    `json:"idx"`
+	Dakika string `json:"dakika"`
+	Saat   string `json:"saat"`
+	Gun    string `json:"gun"`
+	Ay     string `json:"ay"`
+	Hafta  string `json:"hafta"`
+	Komut  string `json:"komut"`
+	Yorum  string `json:"yorum,omitempty"`
 }
 
 type Handlers struct {
@@ -108,9 +108,9 @@ func read(sk string) ([]Gorev, error) {
 		out = append(out, Gorev{
 			Idx:    idx,
 			Dakika: fields[0], Saat: fields[1], Gun: fields[2],
-			Ay:     fields[3], Hafta: fields[4],
-			Komut:  strings.Join(fields[5:], " "),
-			Yorum:  lastYorum,
+			Ay: fields[3], Hafta: fields[4],
+			Komut: strings.Join(fields[5:], " "),
+			Yorum: lastYorum,
 		})
 		idx++
 		lastYorum = ""

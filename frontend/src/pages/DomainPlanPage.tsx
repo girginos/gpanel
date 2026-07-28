@@ -44,7 +44,8 @@ export default function DomainPlanPage() {
     setYuk(true); setHata(null)
     Promise.all([
       api.get<Domain>(`/domains/${id}`),
-      api.get<Plan[]>('/plans'),
+      // ?domain= → katalog planlari + YALNIZ bu hostingin ozel plani
+      api.get<Plan[]>(`/plans?domain=${id}`),
       api.get<Surum[]>('/php/versions').catch(() => ({ data: [] as Surum[] })),
     ])
       .then(([d, p, s]) => { setDomain(d.data); setPlanlar(p.data || []); setSurumler(s.data || []) })

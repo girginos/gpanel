@@ -4,6 +4,7 @@ package hesaplar
 import (
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/gizli"
 	"os/exec"
 	"strings"
 )
@@ -33,7 +34,7 @@ func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
 	// panel metadata güncelle
 	if _, err := panelDB.Exec(
 		`UPDATE db_accounts SET db_pass_plain=? WHERE db_user=?`,
-		yeniPw, dbUser); err != nil {
+		gizli.SaklaBagli(yeniPw, dbUser), dbUser); err != nil {
 		return fmt.Errorf("metadata: %w", err)
 	}
 	return nil

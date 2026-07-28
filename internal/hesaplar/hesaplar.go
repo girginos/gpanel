@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/gizli"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -132,7 +133,7 @@ func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) er
 	_, err := db.Exec(
 		`INSERT INTO db_accounts(domain_id, db_name, db_user, db_pass_plain, db_host)
 		 VALUES(?,?,?,?, 'localhost')`,
-		domainID, dbName, dbUser, dbPass)
+		domainID, dbName, dbUser, gizli.SaklaBagli(dbPass, dbUser))
 	return err
 }
 
@@ -145,6 +146,8 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
 	}
 	// Mevcut kullanicinin parolasi (yeni db_accounts satiri icin — phpMyAdmin SSO).
+	// NOT: deger at-rest sifreli olabilir; asagida gizli.Sakla ile yeniden
+	// saklanir ve Sakla zaten-sifreli degere DOKUNMAZ → cift sifreleme olmaz.
 	var pass string
 	if err := db.QueryRow(
 		`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbUser).Scan(&pass); err != nil {
@@ -162,7 +165,7 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 	_, err := db.Exec(
 		`INSERT INTO db_accounts(domain_id, db_name, db_user, db_pass_plain, db_host)
 		 VALUES(?,?,?,?, 'localhost')`,
-		domainID, dbName, dbUser, pass)
+		domainID, dbName, dbUser, gizli.SaklaGecis(pass, dbUser))
 	return err
 }
 

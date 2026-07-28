@@ -42,7 +42,7 @@ type destPutReq struct {
 	Host      string `json:"host"`
 	Port      int    `json:"port"`
 	Kullanici string `json:"kullanici"`
-	Parola    string `json:"parola"`     // boş ise mevcut korunur
+	Parola    string `json:"parola"` // boş ise mevcut korunur
 	UzakDizin string `json:"uzak_dizin"`
 	Aktif     bool   `json:"aktif"`
 }

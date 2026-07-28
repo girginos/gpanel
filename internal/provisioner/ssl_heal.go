@@ -34,12 +34,13 @@ import (
 // ciftleri. RSA cekiminde "<domain>", ECC cekiminde "<domain>_ecc" dizini kullanilir;
 // her ikisini de aday olarak dondururuz.
 func acmeStoreCandidates(domain string) [][2]string {
-	base := "/root/.acme.sh"
 	var out [][2]string
-	for _, d := range []string{
-		filepath.Join(base, domain),
-		filepath.Join(base, domain+"_ecc"),
-	} {
+	var dizinler []string
+	// Yeni konum ONCE, sonra legacy /root/.acme.sh (gecis donemi).
+	for _, base := range []string{acmeConfigHome, "/root/.acme.sh"} {
+		dizinler = append(dizinler, filepath.Join(base, domain), filepath.Join(base, domain+"_ecc"))
+	}
+	for _, d := range dizinler {
 		out = append(out, [2]string{
 			filepath.Join(d, "fullchain.cer"),
 			filepath.Join(d, domain+".key"),

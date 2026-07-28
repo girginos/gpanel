@@ -11,17 +11,17 @@ import (
 
 func TestDbAdiWPGuard_KotucullReddedilir(t *testing.T) {
 	kotu := []string{
-		"",                             // boş
-		"mysql",                        // wp_ değil (sistem DB)
-		"information_schema",           // wp_ değil
-		"baskatenant",                  // wp_ değil
-		"wp-x",                         // tire → identifier değil
-		"wp_ x",                        // boşluk
-		"wp_x;",                        // ; ile ifade sonu
-		"wp_x`",                        // backtick (identifier kaçışı)
-		"`wp_x`",                       // backtick sarmalı
-		"wp_x'",                        // tek tırnak
-		"wp_x\" ",                      // çift tırnak + boşluk
+		"",                              // boş
+		"mysql",                         // wp_ değil (sistem DB)
+		"information_schema",            // wp_ değil
+		"baskatenant",                   // wp_ değil
+		"wp-x",                          // tire → identifier değil
+		"wp_ x",                         // boşluk
+		"wp_x;",                         // ; ile ifade sonu
+		"wp_x`",                         // backtick (identifier kaçışı)
+		"`wp_x`",                        // backtick sarmalı
+		"wp_x'",                         // tek tırnak
+		"wp_x\" ",                       // çift tırnak + boşluk
 		"wp_x`; DROP DATABASE mysql;--", // SQLi denemesi
 		"wp_" + strings.Repeat("a", 70), // 64 char sınırı aşıyor
 		"wp_x\n",                        // newline

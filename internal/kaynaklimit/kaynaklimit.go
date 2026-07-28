@@ -257,12 +257,22 @@ func SystemdSliceRuntimeSifirla(sk string) {
 
 // SystemdSliceSil: kayıt varsa siler.
 func SystemdSliceSil(sk string) error {
-	p := slicePath(sk)
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		return nil
+	if sk == "" || !strings.HasPrefix(sk, "c_") {
+		return nil // guvenlik: yalnizca tenant slice'lari
 	}
-	_ = os.Remove(p)
+	birim := "girginos-" + sk + ".slice"
+	// 🔴 ONCE slice'i DURDUR: yalnizca unit dosyasini silmek yetmiyordu — slice
+	// "loaded active" kalip cgroup'u (ve runtime drop-in'lerini) sunucuda tutuyordu.
+	_, _ = exec.Command("systemctl", "stop", birim).CombinedOutput()
+	// `systemctl set-property --runtime` ile yazilan gecici drop-in'ler:
+	_ = os.RemoveAll("/run/systemd/system.control/" + birim + ".d")
+	if p := slicePath(sk); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Remove(p)
+		}
+	}
 	_, _ = exec.Command("systemctl", "daemon-reload").CombinedOutput()
+	_, _ = exec.Command("systemctl", "reset-failed", birim).CombinedOutput()
 	return nil
 }
 

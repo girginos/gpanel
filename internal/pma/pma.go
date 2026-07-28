@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 
@@ -63,6 +64,7 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 	// IDOR korumasi (OWASP A01): cagiran bu veritabaninin sahibi mi?
 	// Admin her db'ye erisir; musteri yalniz kendi domain'inin db'sine.
 	// Degilse varligi sizdirmadan 404 (var-olmayan db ile AYNI yanit).
+	dbPar = gizli.CozBagli(dbPar, dbKul) // at-rest sifreli → phpMyAdmin ACIK deger ister
 	if !middleware.DomainSahibiMi(r, domainID) {
 		httpx.WriteError(w, http.StatusNotFound, "veritabanı bulunamadı")
 		return
@@ -81,7 +83,7 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 	_, err = h.DB.ExecContext(r.Context(),
 		`INSERT INTO pma_tokens(token, domain_id, db_kullanici, db_parola, db_adi, son_kullanma)
 		 VALUES(?,?,?,?,?, DATE_ADD(NOW(), INTERVAL 120 SECOND))`,
-		token, domainID, dbKul, dbPar, dbAdi)
+		token, domainID, dbKul, gizli.SaklaBagli(dbPar, dbKul), dbAdi)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -125,6 +127,7 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 		`SELECT db_kullanici, db_parola, db_adi, kullanildi, (son_kullanma < NOW())
 		 FROM pma_tokens WHERE token=?`, req.Token).
 		Scan(&dbKul, &dbPar, &dbAdi, &kul, &suresiDoldu)
+	dbPar = gizli.CozBagli(dbPar, dbKul) // token satirinda at-rest sifreli saklaniyor
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "token bulunamadı", http.StatusNotFound)
 		return

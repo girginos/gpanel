@@ -152,11 +152,11 @@ func wpCozdur(sk string) {
 }
 
 type durumResp struct {
-	Aktif     bool   `json:"aktif"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	Kullanici string `json:"kullanici"`
-	Parola    string `json:"parola,omitempty"`
+	Aktif      bool   `json:"aktif"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Kullanici  string `json:"kullanici"`
+	Parola     string `json:"parola,omitempty"`
 	Prefix     string `json:"prefix"`
 	WPSnippet  string `json:"wp_snippet,omitempty"`
 	WPBaglandi int    `json:"wp_baglandi,omitempty"`

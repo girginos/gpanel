@@ -281,4 +281,3 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, res)
 }
-

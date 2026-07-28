@@ -11,12 +11,15 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/dns"
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/kilit"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/provisioner"
@@ -49,6 +52,10 @@ type Domain struct {
 	PlanAd          string `json:"plan_ad,omitempty"`
 	SshErisim       bool   `json:"ssh_erisim"`
 	Askida          bool   `json:"askida"`
+	// Sahip: domaini kimin actigi. reseller_id=0 -> panel sahibi (admin), >0 -> bayi.
+	SahipAd    string `json:"sahip_ad,omitempty"`
+	SahipTur   string `json:"sahip_tur,omitempty"` // "admin" | "bayi"
+	ResellerID int64  `json:"reseller_id"`
 }
 
 type Handlers struct {
@@ -60,8 +67,30 @@ const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.s
   COALESCE(DATE_FORMAT(d.ssl_bitis,'%Y-%m-%d'),''), d.durum, d.ipv4, d.ftp_host, d.ftp_user,
   d.db_host, d.db_user, d.db_adi, d.web_root, d.boyut_kb, d.trafik_kb, d.is_demo,
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
-  d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0)
-  FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id`
+  d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0),
+  COALESCE(NULLIF(u.full_name,''), u.username, ''), COALESCE(d.reseller_id,0)
+  FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
+  LEFT JOIN users u ON u.id = d.reseller_id`
+
+// kokAdi: panel sahibinin gorunen adi (users'taki ilk admin). Onbellege alinir —
+// domain listesinde satir basina sorgu atmanin anlami yok.
+var (
+	kokAdiOnce sync.Once
+	kokAdiVal  string
+	KokDB      *sql.DB // main() tarafindan set edilir
+)
+
+func kokAdi() string {
+	kokAdiOnce.Do(func() {
+		if KokDB == nil {
+			return
+		}
+		_ = KokDB.QueryRow(
+			`SELECT COALESCE(NULLIF(full_name,''), username, '') FROM users WHERE role='admin' ORDER BY id LIMIT 1`).
+			Scan(&kokAdiVal)
+	})
+	return kokAdiVal
+}
 
 func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 	var d Domain
@@ -71,7 +100,19 @@ func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 		&d.SSLBitis, &d.Durum, &d.IPv4, &d.FTPHost, &d.FTPUser,
 		&d.DBHost, &d.DBUser, &d.DBAdi, &d.WebRoot, &d.BoyutKB, &d.TrafikKB, &demo,
 		&d.Notlar, &d.Olusturulma,
-		&planID, &d.PlanAd, &sshE, &askida)
+		&planID, &d.PlanAd, &sshE, &askida,
+		&d.SahipAd, &d.ResellerID)
+	// Kok (reseller_id=0): users tablosunda admin satiri OLMAYABILIR (kurulum
+	// varyanti) — sahip adini sorguya baglamak yerine burada cozuyoruz.
+	d.SahipTur = "admin"
+	if d.ResellerID > 0 {
+		d.SahipTur = "bayi"
+		if d.SahipAd == "" {
+			d.SahipAd = "#" + strconv.FormatInt(d.ResellerID, 10) // silinmis bayi
+		}
+	} else if d.SahipAd = kokAdi(); d.SahipAd == "" {
+		d.SahipAd = "Panel Sahibi"
+	}
 	d.SSL = ssl == 1
 	d.IsDemo = demo == 1
 	d.SshErisim = sshE == 1
@@ -143,13 +184,34 @@ type createResp struct {
 // yeni hosting olusturmadan ONCE dogrular. 0 = limitsiz.
 // Disk: mevcut hosting'lerin PLAN disk kotalari toplami + yeni planin kotasi
 // (taahhut-bazli; asiri-satisi onler).
+// bayiKilitleri: kota kontrolu ile INSERT arasindaki TOCTOU yarisini kapatir.
+// Iki paralel istek ayni bayide COUNT okuyup ikisi de gecerse limit asiliyordu
+// (max_domain=1 iken 2 hosting acildi). Panel tek-node oldugu icin surec-ici
+// kilit yeterli; kilit bayi BAZINDA, farkli bayiler birbirini beklemez.
+// bayiKilidi: ortak kilit paketine devreder (aski zinciri/plan degisimi/silme
+// ayni kilidi kullanir → islemler birbirini beklemek zorunda).
+func bayiKilidi(rid int64) *sync.Mutex { return kilit.Bayi(rid) }
+
 func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *int64) error {
 	var maxDomain int
 	var maxDiskMB int64
+	var durum string
 	if err := h.DB.QueryRowContext(ctx,
-		`SELECT max_domain, max_disk_mb FROM users WHERE id=? AND role='reseller'`, rid).
-		Scan(&maxDomain, &maxDiskMB); err != nil {
+		`SELECT max_domain, max_disk_mb, status FROM users WHERE id=? AND role='reseller'`, rid).
+		Scan(&maxDomain, &maxDiskMB, &durum); err != nil {
 		return fmt.Errorf("bayi kaydı bulunamadı")
+	}
+	// 🔴 Askiya alinmis bayi hosting ACAMAZ. Aksi halde aski islemiyle es zamanli
+	// gelen istek, askidan MUAF (askida=0) canli bir site dogurup kaliyordu.
+	if durum != "active" {
+		return fmt.Errorf("bayi hesabı askıda — yeni hosting açılamaz")
+	}
+	// Negatif limit "sinirsiz" sayilmasin (eski kayitlar/elle mudahale).
+	if maxDomain < 0 {
+		maxDomain = 0
+	}
+	if maxDiskMB < 0 {
+		maxDiskMB = 0
 	}
 	if maxDomain > 0 {
 		var adet int
@@ -158,8 +220,14 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 			return fmt.Errorf("hosting hesabı limitiniz dolu (%d/%d)", adet, maxDomain)
 		}
 	}
+	// 🔴 Fazla satma ilkesi: bayi "fazla satisa izinli" ise TAAHHUT (plan kotalari
+	// toplami) kontrolu ATLANIR — Plesk "oversell allowed" davranisi. Fiili kullanim
+	// kapisi (asagida) her durumda calisir; boylece sunucu yine korunur.
+	var fazlaSatis int
+	_ = h.DB.QueryRowContext(ctx, `SELECT fazla_satis FROM users WHERE id=? AND role='reseller'`, rid).Scan(&fazlaSatis)
+
 	// Trafik havuzu (taahhut): mevcut planlarin trafik kotalari + yeni plan
-	if planID != nil {
+	if planID != nil && fazlaSatis == 0 {
 		var maxTrafikMB int64
 		_ = h.DB.QueryRowContext(ctx, `SELECT max_trafik_mb FROM users WHERE id=? AND role='reseller'`, rid).Scan(&maxTrafikMB)
 		if maxTrafikMB > 0 {
@@ -168,7 +236,7 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 			_ = h.DB.QueryRowContext(ctx,
 				`SELECT COALESCE(SUM(COALESCE(p.trafik_kota_mb,0)),0) FROM domains d
 				   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcutTr)
-			if mevcutTr+yeniTr > maxTrafikMB {
+			if mevcutTr+yeniTr >= maxTrafikMB && yeniTr > 0 {
 				return fmt.Errorf("trafik kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcutTr, yeniTr, maxTrafikMB)
 			}
 		}
@@ -178,18 +246,18 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 	if maxDiskMB > 0 {
 		var kullanimKB int64
 		_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(boyut_kb),0) FROM domains WHERE reseller_id=?`, rid).Scan(&kullanimKB)
-		if kullanimKB/1024 >= maxDiskMB {
+		if kullanimKB/1024 >= maxDiskMB { // sinira ULASMAK doludur (tum kapilarda ayni kural)
 			return fmt.Errorf("disk kullanımınız limitte (%d MB / %d MB)", kullanimKB/1024, maxDiskMB)
 		}
 	}
-	if maxDiskMB > 0 && planID != nil {
+	if maxDiskMB > 0 && planID != nil && fazlaSatis == 0 {
 		var yeniKota int64
 		_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0) FROM service_plans WHERE id=?`, *planID).Scan(&yeniKota)
 		var mevcut int64
 		_ = h.DB.QueryRowContext(ctx,
 			`SELECT COALESCE(SUM(COALESCE(p.disk_kota_mb,0)),0) FROM domains d
 			   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcut)
-		if mevcut+yeniKota > maxDiskMB {
+		if mevcut+yeniKota >= maxDiskMB && yeniKota > 0 {
 			return fmt.Errorf("disk kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcut, yeniKota, maxDiskMB)
 		}
 	}
@@ -228,6 +296,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// 🔴 Kilit BURADA alinir ve istek bitene kadar tutulur: kota okumasi ile
+		// domains INSERT'i arasinda baska bir istek araya giremesin (TOCTOU).
+		kilit := bayiKilidi(rid)
+		kilit.Lock()
+		defer kilit.Unlock()
 		if err := h.resellerKotaKontrol(r.Context(), rid, req.PlanID); err != nil {
 			httpx.WriteError(w, http.StatusForbidden, err.Error())
 			return
@@ -328,6 +401,25 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		log.Printf("MySQL create %q hata: %v", dbName, err)
 	}
 
+	// 4.5) HTTPS-ZORUNLU uzanti (.app/.dev/.page...) → sertifikayi HEMEN dene.
+	// Tarayici bu TLD'lerde HSTS preload nedeniyle sertifika hatasini atlatmaya
+	// IZIN VERMEZ; sertifika olmadan site hic acilmaz. DNS henuz yayilmadiysa
+	// sessiz basarisiz olur (fail-safe self-signed 443'u ayakta tutar).
+	// Sertifikasiz kalirsa site TAMAMEN erisilemez olacaksa (HTTPS-zorunlu uzanti
+	// ya da CDN/proxy arkasi) sertifikayi kurulum aninda dene.
+	if gerek, _ := provisioner.SertifikaSartMi(req.AlanAdi); gerek {
+		go func(alan, sk, php, backend string, did int64) {
+			crt, key, gercek := provisioner.OtoSSLDene(alan, sk, php, backend)
+			if !gercek {
+				return // DNS yayilmamis olabilir; panelden elle kurulabilir
+			}
+			// Gercek CA cert'i kuruldu → panel "SSL var" gostersin.
+			_, _ = h.DB.Exec(`UPDATE domains SET ssl_aktif=1, ssl_kaynak='letsencrypt',
+			  cert_path=?, key_path=?, ssl_bitis=DATE_ADD(NOW(), INTERVAL 90 DAY) WHERE id=?`,
+				crt, key, did)
+		}(req.AlanAdi, pr.SistemKullanici, req.PHPSurum, "php-fpm", id)
+	}
+
 	// 5) DNS şablonu otomatik tohumla + BIND zone yaz + reload
 	if _, err := dns.SeedDefaults(r.Context(), h.DB, id, req.AlanAdi, h.IPv4); err != nil {
 		log.Printf("DNS SeedDefaults %q hata: %v", req.AlanAdi, err)
@@ -340,7 +432,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	d, _ := scan(row)
 
 	uid, kul := middleware.Aktor(r)
-	httpx.Denetim(h.DB, r, uid, kul, "hosting.olustur", req.AlanAdi, fmt.Sprintf("plan=%d reseller=%d", planNoLog(req.PlanID), rid), true)
+	httpx.Denetim(h.DB, r, uid, kul, "hosting.olustur", req.AlanAdi, fmt.Sprintf("plan=%d", planNoLog(req.PlanID)), rid, true)
 	resp := createResp{Domain: d}
 	resp.OluşturulanParolalar.FTP = ftpPass
 	resp.OluşturulanParolalar.DB = dbPass
@@ -349,6 +441,14 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	// 🔴 Silme ile aski zinciri ayni kilitte: zincir, Deprovision nginx conf'unu
+	// sildikten SONRA RerenderVhost ile geri yaziyordu → DB'de olmayan domain
+	// icin YETIM vhost kaliyordu (nginx silinmis alan adini dinlemeye devam).
+	if kap := httpx.DomainKapsam(h.DB, id); true {
+		k := kilit.Bayi(kap)
+		k.Lock()
+		defer k.Unlock()
+	}
 	var alanAdi, sk string
 	var isDemo int
 	err := h.DB.QueryRowContext(r.Context(),
@@ -382,14 +482,21 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// Orphan temizliği: bu tablolarda FK cascade yok (mevcut kurulumlar için),
 	// domain silinince satırlar orphan kalmasın diye açıkça sil.
+	// 🔴 Domaine-ÖZEL plan da gider: katalog planları (domain_id NULL) korunur.
+	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM service_plans WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM wp_bakim WHERE domain_id=?`, id)
 
+	// Denetim kaydi SILMEDEN once alinir: kapsam (domains.reseller_id) satir
+	// gittikten sonra cozulemez.
+	kapsamSil := httpx.DomainKapsam(h.DB, id)
+	uidSil, kulSil := middleware.Aktor(r)
 	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM domains WHERE id=?`, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+err.Error())
 		return
 	}
+	httpx.Denetim(h.DB, r, uidSil, kulSil, "hosting.sil", alanAdi, "sistem_kullanici="+sk, kapsamSil, true)
 
 	// BIND zone temizliği DELETE'ten SONRA: updateZoneIncludes zones.conf'u domains
 	// tablosundan yeniden üretir; domain hâlâ tabloda olsaydı (eski sıra) son silinen
@@ -680,6 +787,7 @@ func (h *Handlers) ListDatabases(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.DomainID, &d.DBAdi, &d.DBKullanici, &d.DBHost, &d.DBParola, &d.Olusturulma); err != nil {
 			continue
 		}
+		d.DBParola = gizli.CozBagli(d.DBParola, d.DBKullanici) // at-rest sifreli → sahibine ACIK gosterilir
 		out = append(out, d)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -818,6 +926,7 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		// Mevcut kullanıcının parolasını yanıtta göster (müşteri zaten sahibi).
 		_ = h.DB.QueryRowContext(r.Context(),
 			`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbKullanici).Scan(&parola)
+		parola = gizli.CozBagli(parola, dbKullanici) // yanitta ACIK deger doner (musteri baglanacak)
 	} else {
 		if err := hesaplar.MySQLCreateDB(h.DB, id, dbAdi, dbKullanici, parola); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "DB oluşturma: "+err.Error())
@@ -834,6 +943,8 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		}
 	}(id)
 
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "db.olustur", dbAdi, "kullanici="+dbKullanici, id, true)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "domain_id": id, "db_adi": dbAdi, "db_kullanici": dbKullanici, "db_parola": parola,
 	})
@@ -843,12 +954,18 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 	dbid, _ := strconv.ParseInt(chi.URLParam(r, "dbid"), 10, 64)
 	var dbName, dbUser string
 	var isDemo int
+	var domainID int64
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT db.db_name, db.db_user, d.is_demo
+		`SELECT db.db_name, db.db_user, d.is_demo, d.id
 		 FROM db_accounts db JOIN domains d ON d.id=db.domain_id
-		 WHERE db.id=?`, dbid).Scan(&dbName, &dbUser, &isDemo)
+		 WHERE db.id=?`, dbid).Scan(&dbName, &dbUser, &isDemo, &domainID)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "DB kaydı bulunamadı")
+		return
+	}
+	// Rota seviyesinde {id} domain param'i yok → sahiplik BURADA dogrulanir.
+	if !middleware.YonetimSahibi(r, domainID) {
+		httpx.WriteError(w, http.StatusForbidden, "bu veritabanına erişiminiz yok")
 		return
 	}
 	if isDemo == 1 {
@@ -869,6 +986,8 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
 		return
 	}
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "db.sil", dbName, "kullanici="+dbUser, domainID, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": dbName})
 }
 
@@ -929,31 +1048,53 @@ type topluDurumReq struct {
 func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 	var req topluDurumReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geÃ§ersiz gÃ¶vde")
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
 	if len(req.IDs) == 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "boÅŸ ids")
+		httpx.WriteError(w, http.StatusBadRequest, "boş ids")
 		return
 	}
 	if req.Durum != "aktif" && req.Durum != "pasif" {
-		httpx.WriteError(w, http.StatusBadRequest, "geÃ§ersiz durum")
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz durum")
 		return
 	}
-	placeholders := make([]string, len(req.IDs))
-	args := []any{req.Durum}
-	for i, id := range req.IDs {
-		placeholders[i] = "?"
-		args = append(args, id)
+	// 🔴 "Pasif" ARTIK GERCEKTEN KAPATIR: eskiden yalnizca durum kolonu degisiyor,
+	// site yayinda kaliyordu (kullanici "pasif yaptim ama bir sey olmadi" diyordu).
+	// Artik tekil askiya-alma ile AYNI makineden gecer.
+	askida := req.Durum == "pasif"
+	rid := middleware.ResellerIDFrom(r)
+	uid, kul := middleware.Aktor(r)
+
+	basarili, atlanan := 0, 0
+	for _, id := range req.IDs {
+		// Kapsam: bayi yalniz KENDI hosting hesabina dokunabilir.
+		if rid > 0 {
+			var sahip int64
+			if err := h.DB.QueryRowContext(r.Context(),
+				`SELECT COALESCE(reseller_id,0) FROM domains WHERE id=?`, id).Scan(&sahip); err != nil || sahip != rid {
+				atlanan++
+				continue
+			}
+		}
+		alanAdi, err := h.AskiUygula(r.Context(), id, askida, "manuel")
+		if err != nil {
+			log.Printf("toplu durum: domain %d: %v", id, err)
+			atlanan++
+			continue
+		}
+		eylem := "hosting.askidan_al"
+		if askida {
+			eylem = "hosting.askiya_al"
+		}
+		httpx.DenetimDomain(h.DB, r, uid, kul, eylem, alanAdi, "toplu işlem", id, true)
+		basarili++
 	}
-	sql := `UPDATE domains SET durum=? WHERE id IN (` + strings.Join(placeholders, ",") + `)`
-	res, err := h.DB.ExecContext(r.Context(), sql, args...)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "gÃ¼ncelleme: "+err.Error())
-		return
-	}
-	n, _ := res.RowsAffected()
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "guncellenen": n})
+	httpx.Denetim(h.DB, r, uid, kul, "hosting.toplu_durum", req.Durum,
+		fmt.Sprintf("istenen=%d uygulanan=%d atlanan=%d", len(req.IDs), basarili, atlanan), rid, atlanan == 0)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok": atlanan == 0, "guncellenen": basarili, "atlanan": atlanan,
+	})
 }
 
 // applyPlanNginxDefaults, yeni domain bir plana bağlandığında planın nginx

@@ -20,16 +20,20 @@ type Paket struct {
 	MaxDiskMB   int64  `json:"max_disk_mb"`
 	MaxTrafikMB int64  `json:"max_trafik_mb"`
 	FiyatKurus  int64  `json:"fiyat_kurus"`
-	Varsayilan  bool   `json:"varsayilan"`
-	BayiSayisi  int    `json:"bayi_sayisi"`
-	Olusturulma string `json:"olusturulma"`
+	// Ilkeler (Plesk: "Fazla kullanim" + "Fazla satma"):
+	AsimIlkesi   string `json:"asim_ilkesi"`   // yok | disk_trafik | tumu
+	AsimBildirim bool   `json:"asim_bildirim"` // asimda yoneticiye e-posta
+	FazlaSatis   bool   `json:"fazla_satis"`   // sahip oldugundan fazlasini satabilir mi
+	Varsayilan   bool   `json:"varsayilan"`
+	BayiSayisi   int    `json:"bayi_sayisi"`
+	Olusturulma  string `json:"olusturulma"`
 }
 
 // GET /reseller-plans — bayi paketleri (admin).
 func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT p.id, p.ad, p.aciklama, p.max_domain, p.max_disk_mb, p.max_trafik_mb,
-		        p.fiyat_kurus, p.varsayilan,
+		        p.fiyat_kurus, p.asim_ilkesi, p.asim_bildirim, p.fazla_satis, p.varsayilan,
 		        (SELECT COUNT(*) FROM users u WHERE u.reseller_plan_id=p.id AND u.role='reseller'),
 		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),'')
 		   FROM reseller_plans p ORDER BY p.varsayilan DESC, p.max_domain, p.id`)
@@ -41,10 +45,12 @@ func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 	out := []Paket{}
 	for rows.Next() {
 		var x Paket
-		var vars int
+		var vars, bild, fs int
 		if err := rows.Scan(&x.ID, &x.Ad, &x.Aciklama, &x.MaxDomain, &x.MaxDiskMB, &x.MaxTrafikMB,
-			&x.FiyatKurus, &vars, &x.BayiSayisi, &x.Olusturulma); err == nil {
+			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma); err == nil {
 			x.Varsayilan = vars == 1
+			x.AsimBildirim = bild == 1
+			x.FazlaSatis = fs == 1
 			out = append(out, x)
 		}
 	}
@@ -53,13 +59,16 @@ func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 }
 
 type paketReq struct {
-	Ad          string `json:"ad"`
-	Aciklama    string `json:"aciklama"`
-	MaxDomain   int    `json:"max_domain"`
-	MaxDiskMB   int64  `json:"max_disk_mb"`
-	MaxTrafikMB int64  `json:"max_trafik_mb"`
-	FiyatKurus  int64  `json:"fiyat_kurus"`
-	Varsayilan  bool   `json:"varsayilan"`
+	AsimIlkesi   string `json:"asim_ilkesi"`
+	AsimBildirim bool   `json:"asim_bildirim"`
+	FazlaSatis   bool   `json:"fazla_satis"`
+	Ad           string `json:"ad"`
+	Aciklama     string `json:"aciklama"`
+	MaxDomain    int    `json:"max_domain"`
+	MaxDiskMB    int64  `json:"max_disk_mb"`
+	MaxTrafikMB  int64  `json:"max_trafik_mb"`
+	FiyatKurus   int64  `json:"fiyat_kurus"`
+	Varsayilan   bool   `json:"varsayilan"`
 }
 
 func (q *paketReq) dogrula() string {
@@ -90,9 +99,11 @@ func (h *Handlers) PaketOlustur(w http.ResponseWriter, r *http.Request) {
 		_, _ = h.DB.ExecContext(r.Context(), `UPDATE reseller_plans SET varsayilan=0`)
 	}
 	res, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO reseller_plans(ad, aciklama, max_domain, max_disk_mb, max_trafik_mb, fiyat_kurus, varsayilan)
-		 VALUES(?,?,?,?,?,?,?)`,
-		req.Ad, strings.TrimSpace(req.Aciklama), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB, req.FiyatKurus, v)
+		`INSERT INTO reseller_plans(ad, aciklama, max_domain, max_disk_mb, max_trafik_mb, fiyat_kurus,
+		   asim_ilkesi, asim_bildirim, fazla_satis, varsayilan)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		req.Ad, strings.TrimSpace(req.Aciklama), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB, req.FiyatKurus,
+		asimNormalize(req.AsimIlkesi), b01(req.AsimBildirim), b01(req.FazlaSatis), v)
 	if err != nil {
 		if strings.Contains(err.Error(), "Duplicate") {
 			httpx.WriteError(w, http.StatusConflict, "bu isimde paket zaten var")
@@ -125,9 +136,10 @@ func (h *Handlers) PaketGuncelle(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE reseller_plans SET ad=?, aciklama=?, max_domain=?, max_disk_mb=?, max_trafik_mb=?,
-		   fiyat_kurus=?, varsayilan=? WHERE id=?`,
+		   fiyat_kurus=?, asim_ilkesi=?, asim_bildirim=?, fazla_satis=?, varsayilan=? WHERE id=?`,
 		req.Ad, strings.TrimSpace(req.Aciklama), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB,
-		req.FiyatKurus, v, id); err != nil {
+		req.FiyatKurus, asimNormalize(req.AsimIlkesi), b01(req.AsimBildirim), b01(req.FazlaSatis),
+		v, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "güncellenemedi: "+err.Error())
 		return
 	}
@@ -163,4 +175,42 @@ func (h *Handlers) paketLimitleri(r *http.Request, paketID int64) (maxDomain int
 		return 0, 0, 0, false
 	}
 	return maxDomain, diskMB, trafikMB, true
+}
+
+// asimNormalize: bilinmeyen/boş değerde güvenli varsayilan ('disk_trafik' —
+// Plesk'in de onerdigi orta yol: disk+trafik esnek, diger kaynaklar sert).
+func asimNormalize(v string) string {
+	switch strings.TrimSpace(v) {
+	case "yok", "tumu", "disk_trafik":
+		return strings.TrimSpace(v)
+	}
+	return "disk_trafik"
+}
+
+func b01(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// PaketDetay: GET /reseller-plans/{id} — ozel duzenleme sayfasi icin tek paket.
+func (h *Handlers) PaketDetay(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var x Paket
+	var vars, bild, fs int
+	err := h.DB.QueryRowContext(r.Context(),
+		`SELECT p.id, p.ad, p.aciklama, p.max_domain, p.max_disk_mb, p.max_trafik_mb,
+		        p.fiyat_kurus, p.asim_ilkesi, p.asim_bildirim, p.fazla_satis, p.varsayilan,
+		        (SELECT COUNT(*) FROM users u WHERE u.reseller_plan_id=p.id AND u.role='reseller'),
+		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),'')
+		   FROM reseller_plans p WHERE p.id=?`, id).
+		Scan(&x.ID, &x.Ad, &x.Aciklama, &x.MaxDomain, &x.MaxDiskMB, &x.MaxTrafikMB,
+			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "paket bulunamadı")
+		return
+	}
+	x.Varsayilan, x.AsimBildirim, x.FazlaSatis = vars == 1, bild == 1, fs == 1
+	httpx.WriteJSON(w, http.StatusOK, x)
 }

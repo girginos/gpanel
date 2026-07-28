@@ -16,7 +16,17 @@ type Claims struct {
 }
 
 func Issue(secret []byte, lifetimeSec int, uid int64, username, role string) (string, error) {
+	return IssueAt(secret, lifetimeSec, uid, username, role, 0)
+}
+
+// IssueAt: enErkenIat verilirse token'in "iat" degeri en az o degere cekilir.
+// Oturum-dusurme damgasiyla ayni saniyeye denk gelen YENI girislerin kendi
+// kendini gecersiz kilmasini onler (bkz. middleware.oturumGecerli).
+func IssueAt(secret []byte, lifetimeSec int, uid int64, username, role string, enErkenIat int64) (string, error) {
 	now := time.Now()
+	if enErkenIat > now.Unix() {
+		now = time.Unix(enErkenIat, 0)
+	}
 	c := Claims{
 		UserID:   uid,
 		Username: username,
@@ -33,7 +43,15 @@ func Issue(secret []byte, lifetimeSec int, uid int64, username, role string) (st
 
 // IssueReseller: reseller token'i uretir (role=reseller, ResellerID=kendi uid).
 func IssueReseller(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64) (string, error) {
+	return IssueResellerAt(secret, lifetimeSec, uid, username, resellerID, 0)
+}
+
+// IssueResellerAt: bkz. IssueAt — bayi tokeni icin ayni davranis.
+func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64) (string, error) {
 	now := time.Now()
+	if enErkenIat > now.Unix() {
+		now = time.Unix(enErkenIat, 0)
+	}
 	c := Claims{
 		UserID:     uid,
 		Username:   username,
@@ -109,4 +127,3 @@ func ParseMusteri(secret []byte, raw string) (*MusteriClaims, error) {
 	}
 	return c, nil
 }
-

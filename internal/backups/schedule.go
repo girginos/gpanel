@@ -16,10 +16,10 @@ import (
 )
 
 type Schedule struct {
-	Freq         string `json:"freq"`            // "none" | "daily" | "weekly"
-	Hour         int    `json:"hour"`            // 0-23
-	Retention    int    `json:"retention"`       // keep last N
-	LastBackupAt string `json:"last_backup_at"`  // RFC3339 or empty
+	Freq         string `json:"freq"`           // "none" | "daily" | "weekly"
+	Hour         int    `json:"hour"`           // 0-23
+	Retention    int    `json:"retention"`      // keep last N
+	LastBackupAt string `json:"last_backup_at"` // RFC3339 or empty
 }
 
 func gecerliFreq(f string) bool {
@@ -42,13 +42,13 @@ func StartScheduler(db *sql.DB) {
 }
 
 type dueDomain struct {
-	ID       int64
-	AlanAdi  string
-	SK       string
-	Freq     string
-	Hour     int
+	ID        int64
+	AlanAdi   string
+	SK        string
+	Freq      string
+	Hour      int
 	Retention int
-	IsDemo   int
+	IsDemo    int
 }
 
 // TickOnce: scheduler tick'i tek seferlik manuel çağrı (test + operatör force-run için).

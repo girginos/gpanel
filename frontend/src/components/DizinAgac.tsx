@@ -14,8 +14,12 @@ interface Props {
 }
 
 export default function DizinAgac({ domainId, secili, onSec, yenileme }: Props) {
+  // Yukseklik: mobilde makul bir kutu, lg+ ekranda GORUNUR ALANIN SONUNA kadar
+  // uzanir (sticky) — uzun dizin agaclari kutunun ICINDE kayar, sayfa kaymaz.
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-2 text-sm overflow-auto min-h-[220px] lg:min-h-[400px]">
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-2 text-sm
+                    overflow-auto overscroll-contain min-h-[220px] max-h-[60vh]
+                    lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100vh-6rem)] lg:min-h-[calc(100vh-6rem)]">
       <TreeNode
         domainId={domainId}
         yol="/"

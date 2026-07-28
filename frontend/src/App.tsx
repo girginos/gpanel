@@ -5,6 +5,8 @@ import DashboardLayout from '@/components/DashboardLayout'
 import HomePage from '@/pages/HomePage'
 import DomainsPage from '@/pages/DomainsPage'
 import ResellerlarPage from '@/pages/ResellerlarPage'
+import DenetimPage from '@/pages/DenetimPage'
+import BayiPlaniDuzenlePage from "@/pages/BayiPlaniDuzenlePage"
 import BayiPlanlariPage from '@/pages/BayiPlanlariPage'
 import SubscriptionDetailPage from '@/pages/SubscriptionDetailPage'
 import ServicePlansPage from '@/pages/ServicePlansPage'
@@ -77,6 +79,7 @@ export default function App() {
         <Route index                       element={<HomePage />} />
         <Route path="domainler"            element={<DomainsPage />} />
         <Route path="bayiler"              element={<ResellerlarPage />} />
+        <Route path="denetim"              element={<DenetimPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
         <Route path="abonelikler/:id"      element={<SubscriptionDetailPage />} />
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
@@ -122,6 +125,8 @@ export default function App() {
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
         <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />
+        <Route path="bayi-planlari/yeni"   element={<BayiPlaniDuzenlePage />} />
+        <Route path="bayi-planlari/:id"    element={<BayiPlaniDuzenlePage />} />
 
         <Route path="araclar-ayarlar" element={<AraclarAyarlarPage />} />
         <Route path="istatistikler" element={<IstatistiklerPage />} />
