@@ -3,6 +3,7 @@ package pma
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -106,7 +107,7 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 	auth := r.Header.Get("X-Internal-Auth")
 	expected := internalAuthToken()
-	if expected == "" || auth == "" || auth != expected {
+	if expected == "" || subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
 		http.Error(w, "yetki yok", http.StatusUnauthorized)
 		return
 	}

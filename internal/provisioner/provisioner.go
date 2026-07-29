@@ -45,6 +45,7 @@ func Init(d *sql.DB) {
 	// sentinel/rollback korumali → tekrar-guvenli ve kirilmaz.
 	HealPanelVhostHeadersOnStartup()
 	HealPanelIndexNoCacheOnStartup() // Cloud-fix: panel SPA (index.html) no-cache → bayat UI önlenir
+	HealPanelProxyTrustOnStartup()   // :8080 proxy-gizli + pma-redeem deny + slowloris timeout
 	ensurePMAStartup()               // Cloud-fix: phpMyAdmin GCP/socket (pma-signon.php + token + pool socket + config host=localhost)
 	HealVhostsOnStartup()
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
@@ -967,6 +968,9 @@ func Deprovision(alanAdi, sk string) error {
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
+		// Orphan temizlik: userdel home'u siler ama bunlar home DISINDA kaliyordu.
+		_ = os.RemoveAll(filepath.Join("/var/backups/girginospanel", sk)) // manuel/oto yedekler
+		_ = os.RemoveAll("/var/log/php-fpm-" + sk)                        // fpm log dizini
 	}
 	// 🔴 Havuz supurmesi userdel'den SONRA: kullanici artik yok, dolayisiyla
 	// writePoolValidated koruması devreye girer ve hicbir yol havuzu geri yazamaz.

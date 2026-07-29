@@ -258,7 +258,7 @@ func main() {
 			// Yazma + müşteri-scope route'ları — per-route AdminOnly/MusteriScope ile yetkilendirilir
 			r.Group(func(r chi.Router) {
 				r.With(middleware.AdminVeyaReseller).Post("/domains", domainsH.Create)
-				r.With(middleware.MusteriScope).Delete("/domains/{id}", domainsH.Delete)
+				r.With(middleware.SahipYonetim).Delete("/domains/{id}", domainsH.Delete)
 				r.With(middleware.AdminOnly).Post("/domains/toplu/sahip", domainsH.TopluSahip)
 				r.With(middleware.AdminVeyaReseller).Post("/domains/toplu/durum", domainsH.TopluDurum)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/php", domainsH.SetPHP)
@@ -422,6 +422,8 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/soa", dnsH.PutSOA)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/dnssec", dnsH.GetDNSSEC)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/dnssec", dnsH.PostDNSSEC)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/disa-aktar", dnsH.DisaAktar)   // BIND zone export
+				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/ice-aktar", dnsH.IceAktar)    // BIND zone import
 				// Merkezi DNS şablonu (admin) — domain eklerken + "Şablonu Uygula" bunu okur
 				r.With(middleware.AdminVeyaReseller).Get("/dns-template", dnsH.GetTemplate)
 				r.With(middleware.AdminVeyaReseller).Put("/dns-template", dnsH.PutTemplate)

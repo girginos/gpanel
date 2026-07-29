@@ -49,7 +49,7 @@ var zoneTmpl = template.Must(template.New("z").Funcs(template.FuncMap{
     {{.SOA.Expire}}  ; expire
     {{.SOA.Minimum}}  ; minimum
 )
-{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if and .Oncelik (or (eq .Tip "MX") (eq .Tip "SRV"))}}{{.Oncelik}} {{end}}{{rdata .Tip .Deger}}
+{{range .Kayitlar}}{{.Ad}}	{{.TTL}}	IN	{{.Tip}}	{{if or (eq .Tip "MX") (eq .Tip "SRV")}}{{.Oncelik}} {{end}}{{rdata .Tip .Deger}}
 {{end}}`))
 
 // rdata: kayit tipine gore zone rdata uretir. TXT icin tirnak/parcalama (255+ ise),

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -83,6 +85,11 @@ func (h *Handlers) PutDestination(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.UzakDizin == "" {
 		req.UzakDizin = "/"
+	}
+	// KRITIK: host/port/alanlar lftp scriptine ve ssh/curl argv'lerine gidiyor.
+	if msg := gecerliDestGirdi(&req); msg != "" {
+		httpx.WriteError(w, http.StatusBadRequest, msg)
+		return
 	}
 	// Parola boş gönderildi mi? Mevcut kaydı koru.
 	var mevcutParola string
@@ -174,6 +181,12 @@ func (h *Handlers) TestDestination(w http.ResponseWriter, r *http.Request) {
 		if dz == "" {
 			dz = "/"
 		}
+		ad.Port = port
+		ad.UzakDizin = dz
+		if msg := gecerliDestGirdi(&ad); msg != "" {
+			httpx.WriteError(w, http.StatusBadRequest, msg)
+			return
+		}
 		d = &Destination{
 			DomainID: id, Tip: ad.Tip, Host: ad.Host, Port: port,
 			Kullanici: ad.Kullanici, Parola: ad.Parola, UzakDizin: dz, Aktif: true,
@@ -200,4 +213,28 @@ func (h *Handlers) TestDestination(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// yedekHostRe: yedek hedefi host'u — yalniz FQDN/IP karakterleri. Bosluk, ";", "!",
+// "#", "/", ":" REDDEDILIR (lftp script enjeksiyonu + URL bozma onlenir; port ayri alan).
+var yedekHostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,251}[A-Za-z0-9])?$`)
+
+// gecerliDestGirdi: KRITIK — lftp/ssh/curl'e gidecek alanlari dogrular. Hata mesaji
+// (bos ise gecerli) doner. host allowlist; user/parola/uzak_dizin kontrol-karakter reddi.
+func gecerliDestGirdi(req *destPutReq) string {
+	if !yedekHostRe.MatchString(req.Host) {
+		return "host yalniz harf, rakam, nokta ve tire icerebilir (port ayri alandir)"
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		return "port 1-65535 araliginda olmali"
+	}
+	for _, v := range []string{req.Kullanici, req.Parola, req.UzakDizin} {
+		if len(v) > 1024 || strings.ContainsAny(v, "\r\n\x00") {
+			return "kullanici/parola/uzak dizin satir sonu veya kontrol karakteri iceremez"
+		}
+	}
+	if strings.HasPrefix(req.Kullanici, "-") {
+		return "kullanici adi tire ile baslayamaz (ssh opsiyon-enjeksiyonu)"
+	}
+	return ""
 }

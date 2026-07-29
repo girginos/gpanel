@@ -37,6 +37,13 @@ func ClientIP(r *http.Request) string {
 	if !yerelVekil(uzak) {
 		return uzak // doğrudan bağlantı — başlıklara güvenme
 	}
+	// Loopback: nginx VEYA ayni-kutu kiraci sureci olabilir (ikisi de 127.0.0.1).
+	// Gizli KURULMUSSA (normal durum) yalniz nginx'in ekledigi X-Gosp-Proxy'yi tasiyan
+	// istegin basliklarina guven; aksi halde uzak(127.0.0.1) — kiraci sahte X-Real-IP
+	// ile hiz-sinirini atlayamaz. Gizli yoksa (ilk boot/rollback) eski davranis korunur.
+	if sec := ProxySecret(); sec != "" && !gizliVekilBasligi(r, sec) {
+		return uzak
+	}
 	if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
 		return v
 	}

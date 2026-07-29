@@ -3,6 +3,7 @@
 package musteri
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -53,15 +54,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "sunucu hatası")
 		return
 	}
 	if status != "active" {
 		httpx.WriteError(w, http.StatusForbidden, "FTP hesabı askıya alınmış")
 		return
 	}
-	// Plain text karşılaştırma (Pure-FTPd MYSQLCrypt cleartext)
-	if req.Parola != passDB {
+	// Plain text karşılaştırma (Pure-FTPd MYSQLCrypt cleartext) — sabit-zamanlı
+	if subtle.ConstantTimeCompare([]byte(req.Parola), []byte(passDB)) != 1 {
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}

@@ -172,11 +172,16 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 // resellerLogin: root disi kullanici adi -> users tablosunda role=reseller ara,
 // bcrypt parola dogrula, aktifse reseller token uret (ResellerID = kendi users.id).
+// dummyBcryptHash: kullanici bulunamadiginda da bcrypt CALISTIRMAK icin — var-olan
+// ve olmayan bayi kullanici adi zamanlamayla (~180x) ayirt edilemesin.
+var dummyBcryptHash, _ = bcrypt.GenerateFromPassword([]byte("gosp-timing-guard-x9f2"), 12)
+
 func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req loginReq) {
 	var id int64
 	var hash, fullName, status string
 	err := h.DB.QueryRow(`SELECT id, password_hash, COALESCE(full_name,''), status FROM users WHERE username=? AND role='reseller'`, req.Kullanici).Scan(&id, &hash, &fullName, &status)
 	if err != nil || hash == "" {
+		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(req.Parola)) // sabit-zaman
 		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return

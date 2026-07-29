@@ -137,6 +137,10 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, "mevcut parola hatalı")
 		return
 	}
+	if strings.ContainsAny(b.Yeni, "\r\n\x00") {
+		httpx.WriteError(w, http.StatusBadRequest, "parola satır sonu veya kontrol karakteri içeremez")
+		return
+	}
 	cmd := exec.Command("chpasswd")
 	cmd.Stdin = strings.NewReader("root:" + b.Yeni)
 	if out, err := cmd.CombinedOutput(); err != nil {

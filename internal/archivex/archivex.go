@@ -202,13 +202,28 @@ func rarTara(archivePath string) error {
 	return nil
 }
 
+const (
+	maxArsivAcikBayt int64 = 20 * 1024 * 1024 * 1024 // 20 GiB toplam acilmis boyut tavani
+	maxArsivUye            = 200000                  // azami uye sayisi
+)
+
+// ErrArsivBomba: acilmis boyut/uye sayisi tavani asildi (olasi zip/tar bomba).
+var ErrArsivBomba = errors.New("arşiv çok büyük veya çok fazla dosya içeriyor (olası sıkıştırma bombası)")
+
 func zipTara(archivePath string) error {
 	zr, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("zip okuma: %w", err)
 	}
 	defer zr.Close()
+	var toplam int64
+	var uye int
 	for _, f := range zr.File {
+		toplam += int64(f.UncompressedSize64)
+		uye++
+		if toplam > maxArsivAcikBayt || uye > maxArsivUye {
+			return ErrArsivBomba
+		}
 		// Symlink üyesi (zip'te mod bitlerinden anlaşılır) → reddet.
 		if f.Mode()&os.ModeSymlink != 0 {
 			return ErrUyeSymlink
@@ -255,6 +270,8 @@ func tarTara(archivePath string, tur Tur) error {
 	}
 
 	tr := tar.NewReader(r)
+	var toplam int64
+	var uye int
 	for {
 		hdr, nerr := tr.Next()
 		if nerr == io.EOF {
@@ -262,6 +279,11 @@ func tarTara(archivePath string, tur Tur) error {
 		}
 		if nerr != nil {
 			return fmt.Errorf("tar okuma: %w", nerr)
+		}
+		toplam += hdr.Size
+		uye++
+		if toplam > maxArsivAcikBayt || uye > maxArsivUye {
+			return ErrArsivBomba
 		}
 		// Tehlikeli üye tipleri: symlink, hardlink, char/block aygıt, fifo → reddet.
 		switch hdr.Typeflag {

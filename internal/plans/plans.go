@@ -208,6 +208,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	if ad := provisioner.TehlikeliNginxDirektifi(p.NginxEkDirektifler); ad != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
+		return
+	}
 	if err := provisioner.ValidateNginxDirectives(p.NginxEkDirektifler); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())
 		return
@@ -284,6 +288,10 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 				"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
 			return
 		}
+	}
+	if ad := provisioner.TehlikeliNginxDirektifi(p.NginxEkDirektifler); ad != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
+		return
 	}
 	if err := provisioner.ValidateNginxDirectives(p.NginxEkDirektifler); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())

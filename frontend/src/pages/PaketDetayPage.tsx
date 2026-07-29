@@ -32,6 +32,8 @@ export default function PaketDetayPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
+  const [uygulananID, setUygulananID] = useState<number | null>(null)
+  const [sonucID, setSonucID] = useState<{ id: number; ok: boolean } | null>(null)
 
   function yukle() {
     if (!id) return
@@ -68,14 +70,16 @@ export default function PaketDetayPage() {
 
   async function domainicinYenidenUygula(domID: number) {
     if (!plan) return
-    setIsleniyor(true)
+    setUygulananID(domID); setSonucID(null); setHata(null)
     try {
       await api.put(`/domains/${domID}/plan`, { plan_id: plan.id })
-      setBasari(`✓ Kaynak limitler ${domainler.find(d => d.id === domID)?.alan_adi} için yeniden uygulandı`)
-      setTimeout(() => setBasari(null), 4000)
+      setSonucID({ id: domID, ok: true })
     } catch (e) {
-      setHata(apiHata(e))
-    } finally { setIsleniyor(false) }
+      setSonucID({ id: domID, ok: false }); setHata(apiHata(e))
+    } finally {
+      setUygulananID(null)
+      setTimeout(() => setSonucID(v => (v?.id === domID ? null : v)), 3500)
+    }
   }
 
   function P<K extends keyof Plan>(k: K, v: Plan[K]) {
@@ -320,9 +324,14 @@ export default function PaketDetayPage() {
                         <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{d.olusturulma}</span>
                       </td>
                       <td className={`${T.hucreAksiyon} lg:text-right`}>
-                        <button onClick={() => domainicinYenidenUygula(d.id)} disabled={isleniyor}
-                          className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800">
-                          Yeniden Uygula
+                        <button type="button" onClick={() => domainicinYenidenUygula(d.id)} disabled={uygulananID !== null}
+                          className={`text-xs px-2 py-1 border rounded-md disabled:opacity-60 transition ${
+                            sonucID?.id === d.id
+                              ? (sonucID.ok
+                                  ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20'
+                                  : 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20')
+                              : 'border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                          {uygulananID === d.id ? 'Uygulanıyor…' : sonucID?.id === d.id ? (sonucID.ok ? '✓ Uygulandı' : '✗ Başarısız') : 'Yeniden Uygula'}
                         </button>
                       </td>
                     </tr>

@@ -82,21 +82,57 @@ var nginxYasakDirektif = map[string]bool{
 // TehlikeliNginxDirektifi: tenant ek_direktifler icinde yasak (LFD/SSRF/RCE) bir
 // direktif varsa adini, yoksa "" doner. Direktif adi = ; { } sonrasi ilk token.
 func TehlikeliNginxDirektifi(direktifler string) string {
-	var nc strings.Builder
-	for _, line := range strings.Split(direktifler, "\n") {
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = line[:i]
+	// nginx-semantigi tokenizer: tirnak (" veya ') icindeki #, ;, {, } LITERALDIR.
+	// Yalniz tirnak DISINDA '#' yorum baslatir ve ;{} ifade ayirir. Boylece
+	// `add_header X-Pt "#"; alias /etc/;` iki ifadeye ayrilir ve alias yakalanir.
+	var cur strings.Builder
+	var quote byte // 0, '"' veya '\''
+	var stmts []string
+	flush := func() {
+		if t := strings.TrimSpace(cur.String()); t != "" {
+			stmts = append(stmts, t)
 		}
-		nc.WriteString(line)
-		nc.WriteByte('\n')
+		cur.Reset()
 	}
-	repl := strings.NewReplacer("{", "\n", "}", "\n", ";", "\n")
-	for _, stmt := range strings.Split(repl.Replace(nc.String()), "\n") {
+	b := []byte(direktifler)
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if quote != 0 {
+			if c == '\\' && i+1 < len(b) { // kacis: sonraki karakter aynen
+				cur.WriteByte(c)
+				cur.WriteByte(b[i+1])
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			quote = c
+			cur.WriteByte(c)
+		case '#': // yorum — satir sonuna kadar atla
+			for i < len(b) && b[i] != '\n' {
+				i++
+			}
+		case ';', '{', '}', '\n':
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	for _, stmt := range stmts {
 		f := strings.Fields(stmt)
 		if len(f) == 0 {
 			continue
 		}
-		name := strings.ToLower(f[0])
+		// Direktif adindaki tirnaklari da soy (nginx bunlari zaten reddeder ama
+		// denylist de gormeli): "alias" → alias.
+		name := strings.ToLower(strings.Trim(f[0], "\"'"))
 		if nginxYasakDirektif[name] ||
 			strings.Contains(name, "_by_lua") ||
 			strings.HasPrefix(name, "lua_") ||

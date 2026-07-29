@@ -104,6 +104,10 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 
 // lftpEscape: lftp komut satırı içinde çift tırnak içine konacak değerleri escape eder.
 func lftpEscape(s string) string {
+	// Kontrol karakterleri (satir enjeksiyonu) — girdi katmani da reddeder, burada da temizle.
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\x00", "")
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	return s
@@ -115,18 +119,20 @@ func testConnection(ctx context.Context, d *Destination) error {
 	if d.Tip == "sftp" {
 		// sshpass parola passwd, ssh BatchMode=no + PreferredAuthentications=password
 		// publickey by-pass — kullanıcı parolasının gerçekten geçerli olduğunu garanti eder.
-		host := fmt.Sprintf("%s@%s", d.Kullanici, d.Host)
+		// KRITIK: kullaniciyi `-l` ile, host'u `--`'den SONRA ver → ikisi de ssh
+		// opsiyonu olarak yorumlanamaz (ProxyCommand arg-injection kapali).
 		args := []string{
 			"-p", d.Parola,
 			"ssh",
 			"-p", fmt.Sprintf("%d", d.Port),
+			"-l", d.Kullanici,
 			"-o", "ConnectTimeout=10",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",
 			"-o", "PreferredAuthentications=password",
 			"-o", "PubkeyAuthentication=no",
 			"-o", "BatchMode=no",
-			host, "true",
+			"--", d.Host, "true",
 		}
 		cmd := exec.CommandContext(ctx, "sshpass", args...)
 		out, err := cmd.CombinedOutput()

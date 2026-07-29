@@ -61,6 +61,34 @@ export default function DomainDNSPage() {
   const [dnssecIsliyor, setDnssecIsliyor] = useState(false)
   const [dnssecKapatOnay, setDnssecKapatOnay] = useState(false)
   const [dsKopyalandi, setDsKopyalandi] = useState(false)
+  const [iceAcik, setIceAcik] = useState(false)
+  const [iceDosya, setIceDosya] = useState<File | null>(null)
+  const [iceDegistir, setIceDegistir] = useState(false)
+  const [iceYuk, setIceYuk] = useState(false)
+
+  async function disaAktar() {
+    try {
+      const r = await api.get(`/domains/${id}/dns/disa-aktar`, { responseType: 'blob' })
+      const url = URL.createObjectURL(r.data as Blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${domain?.alan_adi || 'zone'}.zone`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) { setHata(apiHata(e, 'Dışa aktarma başarısız')) }
+  }
+
+  async function iceAktar() {
+    if (!iceDosya) return
+    setIceYuk(true); setHata(null); setBasari(null)
+    try {
+      const fd = new FormData(); fd.append('dosya', iceDosya)
+      const mod = iceDegistir ? 'degistir' : 'birlestir'
+      const { data } = await api.post<{ eklenen: number; atlanan: number; mod: string; uyari?: string }>(`/domains/${id}/dns/ice-aktar?mod=${mod}`, fd)
+      setBasari(`İçe aktarma tamam — ${data.eklenen} eklendi, ${data.atlanan} atlandı (${data.mod})${data.uyari ? ' · ' + data.uyari : ''}`)
+      setIceAcik(false); setIceDosya(null); setIceDegistir(false)
+      yukle()
+    } catch (e) { setHata(apiHata(e, 'İçe aktarma başarısız')) } finally { setIceYuk(false) }
+  }
 
   function yukle() {
     if (!id) return
@@ -287,9 +315,29 @@ export default function DomainDNSPage() {
           <span className="hidden sm:inline">📋 Varsayılan Şablonu Uygula</span>
         </button>
         <button onClick={yukle} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">↻ Yenile</button>
+        <button onClick={disaAktar} title="DNS kayıtlarını BIND zone dosyası olarak indir" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">⬇ Dışa Aktar</button>
+        <button onClick={() => setIceAcik(true)} title="BIND zone dosyası yükle" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">⬆ İçe Aktar</button>
         <span className="col-span-2 text-right sm:col-auto sm:ml-auto sm:text-left text-sm text-slate-500 dark:text-slate-500">{kayitlar.length} kayıt</span>
       </div>
 
+      {iceAcik && (
+        <Modal acik={true} baslik="Zone Dosyası İçe Aktar" onKapat={() => setIceAcik(false)} genislik="md">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Standart BIND zone dosyası (.zone / .txt) yükleyin. Kayıtlar bu domaine aktarılır; sonra zone doğrulanıp yeniden yüklenir.</p>
+            <input type="file" accept=".zone,.txt,.db,.bind,text/plain" onChange={e => setIceDosya(e.target.files?.[0] || null)}
+              className="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-0 file:bg-slate-900 file:text-white dark:file:bg-slate-700 hover:file:bg-slate-800 file:cursor-pointer" />
+            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer">
+              <input type="checkbox" checked={iceDegistir} onChange={e => setIceDegistir(e.target.checked)} className="rounded" />
+              Mevcut kayıtların üzerine yaz — işaretlenmezse birleştirilir (yeni kayıtlar eklenir)
+            </label>
+            {iceDegistir && <p className="text-[11px] text-amber-600 dark:text-amber-400">⚠️ Bu domainin TÜM mevcut DNS kayıtları silinip dosyadakilerle değiştirilecek. Önce “Dışa Aktar” ile yedek almanız önerilir.</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setIceAcik(false)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition">İptal</button>
+              <button disabled={!iceDosya || iceYuk} onClick={iceAktar} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md transition disabled:opacity-50">{iceYuk ? 'Aktarılıyor…' : 'İçe Aktar'}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 

@@ -2,6 +2,7 @@
 package backups
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -164,6 +166,16 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DoS: kiraci sinirsiz-paralel backup tetikleyebiliyordu (mysqldump+gzip, CPU/IO agir).
+	// Domain basina TEK backup ayni anda; ikincisi 429. Uzun tar/dump timeout ile OLDURULUR.
+	if !yedekBasla(id) {
+		httpx.WriteError(w, http.StatusTooManyRequests, "bu domain için zaten bir yedekleme sürüyor, lütfen bekleyin")
+		return
+	}
+	defer yedekBitir(id)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
+	defer cancel()
+
 	stamp := time.Now().UTC().Format("20060102-150405")
 	dir := filepath.Join(BackupRoot, sk)
 	_ = os.MkdirAll(dir, 0700)
@@ -173,7 +185,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// DB dump
 	dbName := sk + "_main"
 	sqlDump := filepath.Join(dir, dosya+".sql")
-	if out, derr := exec.Command("bash", "-c",
+	if out, derr := exec.CommandContext(ctx, "bash", "-c",
 		fmt.Sprintf("mysqldump --single-transaction %s > %s 2>&1 || true", dbName, sqlDump)).CombinedOutput(); derr != nil {
 		_ = os.WriteFile(sqlDump+".err", out, 0600)
 	}
@@ -184,7 +196,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		"-C", "/home", sk,
 		"-C", dir, dosya + ".sql",
 	}
-	if out, terr := exec.Command("tar", args...).CombinedOutput(); terr != nil {
+	if out, terr := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); terr != nil {
 		_ = os.Remove(sqlDump)
 		httpx.WriteError(w, http.StatusInternalServerError,
 			"tar: "+strings.TrimSpace(string(out)))
@@ -206,6 +218,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	yid, _ := res.LastInsertId()
+	pruneManuelYedek(h.DB, id, sk) // manuel yedeklerde de adet siniri (kok disk birikimi DoS)
 	// Uzak hedef varsa arkaplanda yükle (API cevabını bloke etme)
 	pushToDestinationAsync(h.DB, id, abs, dosya)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
@@ -262,4 +275,53 @@ func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(st.Size(), 10))
 	}
 	_, _ = io.Copy(w, f)
+}
+
+// yedekBasla/yedekBitir: domain basina backup tek-ucus guard'i (eszamanli kaynak-tukenme DoS).
+var (
+	yedekMu    sync.Mutex
+	yedekAktif = map[int64]bool{}
+)
+
+func yedekBasla(id int64) bool {
+	yedekMu.Lock()
+	defer yedekMu.Unlock()
+	if yedekAktif[id] {
+		return false
+	}
+	yedekAktif[id] = true
+	return true
+}
+
+func yedekBitir(id int64) {
+	yedekMu.Lock()
+	delete(yedekAktif, id)
+	yedekMu.Unlock()
+}
+
+// pruneManuelYedek: domain basina en yeni 10 manuel ('tam') yedegi tutar; fazlasinin
+// dosyasini + DB kaydini siler. Eskiden retention YALNIZ 'oto' yedeklere vardi → manuel
+// yedekler kok diskte (tenant kotasi disinda) sinirsiz birikip diski dolduruyordu.
+func pruneManuelYedek(db *sql.DB, id int64, sk string) {
+	rows, err := db.Query(`SELECT id, dosya FROM backups WHERE domain_id=? AND tip='tam'
+	                       ORDER BY id DESC LIMIT 500 OFFSET 10`, id)
+	if err != nil {
+		return
+	}
+	type kayit struct {
+		bid   int64
+		dosya string
+	}
+	var eski []kayit
+	for rows.Next() {
+		var k kayit
+		if rows.Scan(&k.bid, &k.dosya) == nil {
+			eski = append(eski, k)
+		}
+	}
+	rows.Close()
+	for _, k := range eski {
+		_ = os.Remove(filepath.Join(BackupRoot, sk, k.dosya))
+		_, _ = db.Exec(`DELETE FROM backups WHERE id=?`, k.bid)
+	}
 }

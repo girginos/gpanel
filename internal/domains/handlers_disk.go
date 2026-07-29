@@ -1,12 +1,14 @@
 package domains
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 
@@ -38,7 +40,9 @@ func (h *Handlers) DiskHesapla(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := "/home/" + sk
-	out, err := exec.Command("du", "-sb", path).CombinedOutput()
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "du", "-sb", path).CombinedOutput()
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "du: "+strings.TrimSpace(string(out)))
 		return

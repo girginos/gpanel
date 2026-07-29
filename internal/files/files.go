@@ -24,7 +24,7 @@ import (
 
 // MaxUploadBytes: tek yükleme için üst sınır. Onceden 10 GiB idi ve ParseMultipartForm'a
 // maxMemory olarak veriliyordu → tek istekle 10 GiB RAM ayrilabiliyordu (DoS).
-const MaxUploadBytes = 10 * 1024 * 1024 * 1024 // 10 GiB
+const MaxUploadBytes = 2 * 1024 * 1024 * 1024 // 2 GiB — hata mesajlariyla ESIT; bos-disk sinirina uygun
 
 // maxMultipartMemory: multipart ayrıştırmada RAM'de tutulacak azami tampon. Fazlası
 // otomatik olarak geçici diske taşar → büyük yüklemelerde RAM patlamaz.
@@ -296,6 +296,41 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": rel})
 }
 
+// uploadRezMu/uploadRezerve: eszamanli upload'larda toplam gecici-disk kullanimini
+// sinirlar. Her upload MaxUploadBytes kadar "rezerve" eder; bos-disk - rezerve < gerekli
+// ise 507 doner. Kucuk bos-diskte ( or. 3.3GB) iki paralel 2GiB upload'in /tmp'i doldurup
+// tum servisleri dusurmesini onler (kaynak-tukenme DoS).
+var (
+	uploadRezMu   sync.Mutex
+	uploadRezerve int64
+)
+
+// diskRezerveEt: yer varsa rezerve eder (true), yoksa false. serbestBirak ile geri verilir.
+func diskRezerveEt() bool {
+	gerekli := int64(MaxUploadBytes) + 256*1024*1024 // 2GiB + 256MB emniyet payi
+	uploadRezMu.Lock()
+	defer uploadRezMu.Unlock()
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(os.TempDir(), &st); err != nil {
+		return true // statfs basarisizsa engelleme (mevcut davranis)
+	}
+	bos := int64(st.Bavail) * int64(st.Bsize)
+	if bos-uploadRezerve < gerekli {
+		return false
+	}
+	uploadRezerve += int64(MaxUploadBytes)
+	return true
+}
+
+func diskSerbestBirak() {
+	uploadRezMu.Lock()
+	uploadRezerve -= int64(MaxUploadBytes)
+	if uploadRezerve < 0 {
+		uploadRezerve = 0
+	}
+	uploadRezMu.Unlock()
+}
+
 func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	home, sk, err := h.home(r)
 	if err != nil {
@@ -306,6 +341,13 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	if rel == "" {
 		rel = "/"
 	}
+	// Eszamanli upload disk-tukenme koruması: yer yoksa 507 (diski doldurup servisleri
+	// dusurmek yerine reddet). Basarida rezervasyon her cikista serbest birakilir.
+	if !diskRezerveEt() {
+		httpx.WriteError(w, http.StatusInsufficientStorage, "sunucu disk alanı geçici olarak yetersiz, yükleme daha sonra deneyin")
+		return
+	}
+	defer diskSerbestBirak()
 	// DoS savunması: istek gövdesini üst sınırla kes. MaxBytesReader hem RAM'i hem
 	// diski korur; sınır aşılınca okuma *http.MaxBytesError döner.
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBytes)
@@ -319,6 +361,13 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "form parse: "+err.Error())
 		return
 	}
+	// DoS: 32MB ustu multipart geciciyi DISKE tasir; RemoveAll cagrilmazsa
+	// /tmp/multipart-* 201 sonrasi kalir → yavas disk doldurma. Her cikista temizle.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, fh, err := r.FormFile("dosya")
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya alanı bulunamadı: "+err.Error())
@@ -327,6 +376,12 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	if fh.Size > MaxUploadBytes {
 		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "dosya çok büyük (max 2 GiB)")
+		return
+	}
+	// Kiraci XFS disk kotasi: panel ROOT olarak yazip tenant'a chown'ladigindan kernel
+	// EDQUOT'u baypas oluyordu (plan kotasi asilabiliyordu). Yazmadan ONCE kotayi kontrol et.
+	if !uploadKotaYeterli(sk, fh.Size) {
+		httpx.WriteError(w, http.StatusInsufficientStorage, "disk kotanız dolu — bu yükleme plan kotanızı aşıyor")
 		return
 	}
 	// TOCTOU symlink-güvenli: hedefi openat2 ile aç (ara-bileşen/leaf symlink REDDEDİLİR),
@@ -381,4 +436,35 @@ func chown(path, sistemKullanici string) {
 		_ = osChown(path, uu.UID, uu.GID)
 	}
 	_, _ = exec.Command("restorecon", path).CombinedOutput()
+}
+
+// uploadKotaYeterli: tenant'in XFS kotasinda ekBayt icin yer var mi? xfs_quota'dan used/hard
+// (KB) okunur. Kota belirlenemezse (arac yok/parse hata) fail-open (true) → yuklemeyi bozma.
+// hard=0 → sinirsiz. Boylece root-yazim + tenant-chown yolundaki kota-baypasi kapanir.
+func uploadKotaYeterli(sk string, ekBayt int64) bool {
+	if !strings.HasPrefix(sk, "c_") {
+		return true
+	}
+	// XFS kota MOUNT'a baglidir: /home ayri mount ise orada, degilse rootfs / uzerinde
+	// (rootflags=uquota). Her ikisini de dene; ilk gecerli satiri kullan.
+	for _, mp := range []string{"/home", "/"} {
+		out, err := exec.Command("xfs_quota", "-x", "-c", "quota -u -b -N "+sk, mp).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		f := strings.Fields(string(out))
+		if len(f) < 4 {
+			continue
+		}
+		usedKB, e1 := strconv.ParseInt(f[1], 10, 64)
+		hardKB, e2 := strconv.ParseInt(f[3], 10, 64)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		if hardKB <= 0 {
+			return true // sinirsiz
+		}
+		return usedKB*1024+ekBayt <= hardKB*1024
+	}
+	return true // kota belirlenemedi -> fail-open (yuklemeyi bozma)
 }
