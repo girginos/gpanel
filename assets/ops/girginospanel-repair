@@ -226,7 +226,7 @@ sec_domains() {
     sk=$(basename "$home")
     if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
     ensure_owner "$home" "$sk:$sk"
-    ensure_mode  "$home" 711
+    ensure_mode  "$home" 710
     # ÖNEMLİ: .karantina root'a ait KALMALI (müşteri zararlıya erişmesin) → hariç tut
     local child bn
     while IFS= read -r child; do
@@ -235,7 +235,32 @@ sec_domains() {
       [ "$bn" = ".karantina" ] && continue
       ensure_owner "$child" "$sk:$sk" -R
     done < <(find "$home" -maxdepth 1 -mindepth 1 ! -user "$sk" 2>/dev/null)
-    [ -d "$home/public_html" ] && ensure_mode "$home/public_html" 755
+    # İZOLASYON: Plesk modeli home 710 / public_html 750 (other=none). nginx erişimi ÖNCE
+    # user-ACL (dosyalar c_X:c_X kalır); ACL etkisizse (acl-desteksiz FS) grup=nginx+setgid'e
+    # düş — izinler AYNI kalır (750), ASLA 711/755'e gevşetme.
+    local ph="$home/public_html"
+    if [ -d "$ph" ]; then
+      ensure_owner "$ph" "$sk:$sk"
+      ensure_mode  "$ph" 750                          # önce KATI: other=none
+      if [ $DRY -eq 0 ] && command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:nginx:--x "$home" 2>/dev/null
+        setfacl -m u:nginx:rX  "$ph"   2>/dev/null
+        setfacl -d -m u:nginx:rX "$ph" 2>/dev/null
+      fi
+      # other=none olduğuna göre nginx OKUYABİLİYORSA bu ACL sayesindedir; değilse grup modeli.
+      if command -v runuser >/dev/null 2>&1 && \
+         { runuser -u nginx -- /usr/bin/test -r "$ph/index.html" 2>/dev/null || \
+           runuser -u nginx -- /usr/bin/test -x "$ph" 2>/dev/null; }; then
+        ok "izolasyon $ph (ACL etkili, 710/750)"
+      else
+        act "ACL etkisiz → grup=nginx+setgid fail-safe: $ph (710/750 korunur, 711/755 DEĞİL)"
+        if [ $DRY -eq 0 ]; then
+          chown "$sk:nginx" "$home"   2>/dev/null    # home 710: nginx grup --x ile traverse
+          chown -R "$sk:nginx" "$ph"  2>/dev/null    # public_html içeriği grup=nginx (okuma)
+          chmod 2750 "$ph"            2>/dev/null    # setgid: yeni içerik grubu nginx miras alır
+        fi
+      fi
+    fi
     [ -d "$home/.ssh" ]        && ensure_mode "$home/.ssh" 700
     # karantina: root-owned + kilitli
     if [ -d "$home/.karantina" ]; then ensure_owner "$home/.karantina" "root:root"; ensure_mode "$home/.karantina" 700; fi

@@ -1361,32 +1361,58 @@ const permsACLSentinel = "/var/lib/girginospanel/.perms_acl_v1_done"
 // sentinel ile bir kez yapılır. acl yoksa fail-safe olarak eski grup=nginx modeline döner.
 func hardenHomePerms(home, sk string, uid, gid int) {
 	ph := filepath.Join(home, "public_html")
+	// Birincil model: per-user ACL. Dosyalar sitenin kendi kullanıcısında (c_X:c_X) kalır,
+	// nginx erişimi minimal user-ACL ile verilir. İzinler DAİMA home 0710 / public_html 0750
+	// (Plesk modeli; other=hiçbir zaman erişemez) — hangi yol seçilirse seçilsin bu DEĞİŞMEZ.
 	if aclVar() {
 		_ = os.Chown(home, uid, gid)
 		_ = os.Chmod(home, 0o710)
 		_ = os.Chown(ph, uid, gid)
 		_ = os.Chmod(ph, 0o750)
 		// home: nginx yalnız traverse edebilsin (list yok).
-		_, _ = exec.Command("setfacl", "-m", "u:nginx:--x", home).CombinedOutput()
+		o1, _ := exec.Command("setfacl", "-m", "u:nginx:--x", home).CombinedOutput()
 		// public_html: nginx oku+traverse (rX) + DEFAULT ACL (üst dizin) → yeni oluşturulan
 		// alt dizin/dosyalar u:nginx:rX'i miras alır. -R DEĞİL: mevcut içerik HealHomePerms
 		// (sentinel) tarafından tek seferde dönüştürülür; yeni site zaten boş.
-		_, _ = exec.Command("setfacl", "-m", "u:nginx:rX", ph).CombinedOutput()
+		o2, _ := exec.Command("setfacl", "-m", "u:nginx:rX", ph).CombinedOutput()
 		_, _ = exec.Command("setfacl", "-d", "-m", "u:nginx:rX", ph).CombinedOutput()
-		return
+		// 🔴 DOĞRULA: setfacl bazı dosya sistemlerinde (acl mount opsiyonu yok, vb.) hatayı
+		// SESSİZCE yutar → 0710/0750 kalır ama nginx okuyamaz → site 403 ("dosya sistemi
+		// bozuk" şikâyeti). ACL gerçekten etkili mi diye nginx olarak okuma testi yap; etkili
+		// değilse Plesk-tarzı grup=nginx modeline düş (izinler AYNI kalır: 710/750, other=none).
+		if nginxOkuyabilir(ph) {
+			return
+		}
+		log.Printf("hardenHomePerms: ACL etkisiz (setfacl çıktı=%q|%q) → grup=nginx fail-safe, 710/750 korunur (%s)",
+			strings.TrimSpace(string(o1)), strings.TrimSpace(string(o2)), home)
 	}
-	// Fail-safe (acl yok): eski grup=nginx modeli — servis asla kırılmaz.
+	// Fail-safe: grup=nginx + setgid. ACL desteklemeyen FS'te de çalışır; izinler DEĞİŞMEZ
+	// (home 0710, public_html 0750). setgid → public_html altında oluşan yeni dizin/dosyalar
+	// grubu (nginx) miras alır, böylece nginx onları da okuyabilir (default-ACL muadili).
 	if _, nginxGid, err := uidGid("nginx"); err == nil {
-		log.Printf("hardenHomePerms: 'acl' yok, fail-safe grup=nginx modeli (%s)", home)
 		_ = os.Chown(home, uid, nginxGid)
 		_ = os.Chmod(home, 0o710)
-		_ = os.Chown(ph, uid, nginxGid)
-		_ = os.Chmod(ph, 0o750)
+		// Mevcut içeriğin grubunu da nginx yap (yeni site: yalnız index.html) — grup okuması için.
+		_, _ = exec.Command("chown", "-R", fmt.Sprintf("%d:%d", uid, nginxGid), ph).CombinedOutput()
+		_ = os.Chmod(ph, 0o750|os.ModeSetgid)
 		return
 	}
-	log.Printf("hardenHomePerms: 'acl' ve 'nginx' grubu yok, fail-safe 0711/0755 (%s)", home)
+	// nginx grubu da yoksa (beklenmez): son çare dünya-servis.
+	log.Printf("hardenHomePerms: 'acl' ve 'nginx' grubu yok, son çare 0711/0755 (%s)", home)
 	_ = os.Chmod(home, 0o711)
 	_ = os.Chmod(ph, 0o755)
+}
+
+// nginxOkuyabilir: nginx public_html'i GERÇEKTEN okuyabiliyor mu? setfacl "başarılı" dönse
+// bile bazı dosya sistemleri ACL'i onurlandırmaz — tek güvenilir sinyal, nginx uid'iyle
+// yapılan gerçek okuma denemesidir. index.html henüz yazılmamış olabilir → dizinin kendisini
+// (traverse+read) test et. runuser bulunamazsa/nginx yoksa "false" döner → grup modeli devreye girer.
+func nginxOkuyabilir(ph string) bool {
+	hedef := filepath.Join(ph, "index.html")
+	if _, err := os.Stat(hedef); err != nil {
+		hedef = ph
+	}
+	return exec.Command("runuser", "-u", "nginx", "--", "/usr/bin/test", "-r", hedef).Run() == nil
 }
 
 // hardenHomePermsRecursive: MEVCUT public_html içeriğini per-user ACL modeline dönüştürür
