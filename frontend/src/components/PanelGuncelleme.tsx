@@ -3,8 +3,9 @@ import { api } from '@/lib/api'
 
 // Panel içi güncelleme kartı.
 // Güncelleme sırasında panel servisi yeniden başlar → API kısa süre kesilir.
-// Bu yüzden poll hataları YUTULUR (bağlantı kopması = normal), log dosyası
-// sunucuda kaldığı için servis dönünce kaldığı yerden okunur.
+// Poll hataları YUTULUR (bağlantı kopması = normal). Bitiş, `calisiyor` bayrağına
+// EK OLARAK log içeriğinden ("Güncelleme tamam" / hata) da algılanır — böylece
+// restart anında akış kopsa bile UI otomatik "tamamlandı"ya geçer (sonsuz spinner yok).
 
 type Durum = { arac_var: boolean; calisiyor: boolean; durum: string }
 type LogYanit = { log: string; calisiyor: boolean; durum: string }
@@ -13,15 +14,28 @@ type SurumDurum = {
   duyuru: string; kritik: boolean; son_kontrol?: string; hata: string
 }
 
+// Log metninden bitiş sonucunu çıkarır: 'tamam' | 'hata' | null (henüz bitmedi).
+function bitisSonucu(logMetin: string, calis: boolean): 'tamam' | 'hata' | null {
+  if (logMetin.includes('Güncelleme tamam')) return 'tamam'
+  if (/başarısız|geri al[ıi]nd[ıi]|rollback|✗|FATAL|HATA:/i.test(logMetin)) return 'hata'
+  if (!calis && logMetin.trim() !== '' && logMetin.includes('Güncelleme başlatıldı')) return 'tamam'
+  return null
+}
+
 export default function PanelGuncelleme() {
   const [durum, setDurum] = useState<Durum | null>(null)
   const [log, setLog] = useState('')
   const [calisiyor, setCalisiyor] = useState(false)
+  const [sonuc, setSonuc] = useState<'tamam' | 'hata' | null>(null)
   const [baslatiliyor, setBaslatiliyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [onay, setOnay] = useState(false)
   const logRef = useRef<HTMLPreElement>(null)
   const [surum, setSurum] = useState<SurumDurum | null>(null)
+
+  const surumYukle = useCallback(() => {
+    api.get<SurumDurum>('/system/surum-kontrol').then(r => setSurum(r.data)).catch(() => {})
+  }, [])
 
   const durumYukle = useCallback(async () => {
     try {
@@ -31,37 +45,45 @@ export default function PanelGuncelleme() {
     } catch { /* panel restart olabilir — yut */ }
   }, [])
 
-  useEffect(() => { durumYukle() }, [durumYukle])
+  // Log + bitiş değerlendirmesi (mount'ta ve poll'de kullanılır).
+  const logYukle = useCallback(async () => {
+    const r = await api.get<LogYanit>('/system/guncelleme/log')
+    setLog(r.data.log)
+    const s = bitisSonucu(r.data.log, r.data.calisiyor)
+    if (!r.data.calisiyor || s) {
+      setCalisiyor(false)
+      if (s) setSonuc(s)
+      surumYukle()
+    }
+    return r.data
+  }, [surumYukle])
 
-  // Sürüm durumu ayrı uçtan: panel arka planda günde bir yayın manifestini
-  // okur, burada yalnız SONUCU gösteriyoruz (bu istek dışarı çıkmaz).
+  // Mount: durum + son log (sayfa yenilenince son sonucu da gösterir).
   useEffect(() => {
-    api.get<SurumDurum>('/system/surum-kontrol')
-      .then(r => setSurum(r.data))
-      .catch(() => { /* eski sürüm panelde uç yok — yut */ })
-  }, [])
+    durumYukle()
+    logYukle().catch(() => {})
+    surumYukle()
+  }, [durumYukle, logYukle, surumYukle])
 
-  // çalışırken log poll — panel restart'ında hata yutulur, dönünce devam eder
+  // çalışırken log poll — restart'ta hata yutulur, dönünce devam; bitişte durur.
   useEffect(() => {
     if (!calisiyor) return
     let dur = false
     const tik = async () => {
       try {
-        const r = await api.get<LogYanit>('/system/guncelleme/log')
         if (dur) return
-        setLog(r.data.log)
-        if (!r.data.calisiyor) { setCalisiyor(false); durumYukle() }
+        await logYukle()
       } catch { /* servis yeniden başlıyor — normal, poll'e devam */ }
     }
     const id = window.setInterval(tik, 2000)
     tik()
     return () => { dur = true; window.clearInterval(id) }
-  }, [calisiyor, durumYukle])
+  }, [calisiyor, logYukle])
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [log])
 
   async function baslat() {
-    setHata(null); setBaslatiliyor(true); setOnay(false)
+    setHata(null); setBaslatiliyor(true); setOnay(false); setSonuc(null)
     try {
       await api.post('/system/guncelleme/baslat')
       setLog('Güncelleme başlatıldı…\n')
@@ -107,6 +129,20 @@ export default function PanelGuncelleme() {
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
               <span className="w-3 h-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
               Güncelleme çalışıyor — panel kısa süre yeniden başlayabilir, sayfayı kapatmayın.
+            </div>
+          )}
+
+          {!calisiyor && sonuc === 'tamam' && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 text-xs">
+              <span className="font-semibold">✓ Güncelleme tamamlandı</span>
+              <span className="opacity-80">— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.</span>
+              <button onClick={() => window.location.reload()}
+                className="ml-auto text-xs px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium">↻ Sayfayı yenile</button>
+            </div>
+          )}
+          {!calisiyor && sonuc === 'hata' && (
+            <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">
+              <span className="font-semibold">✗ Güncelleme başarısız</span> — aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).
             </div>
           )}
 
