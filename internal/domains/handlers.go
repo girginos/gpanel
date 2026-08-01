@@ -68,7 +68,7 @@ const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.s
   d.db_host, d.db_user, d.db_adi, d.web_root, d.boyut_kb, d.trafik_kb, d.is_demo,
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
   d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0),
-  COALESCE(NULLIF(u.full_name,''), u.username, ''), COALESCE(d.reseller_id,0)
+  CASE WHEN CHAR_LENGTH(TRIM(COALESCE(u.full_name,'')))>=2 THEN TRIM(u.full_name) ELSE COALESCE(NULLIF(u.username,''),'') END, COALESCE(d.reseller_id,0)
   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
   LEFT JOIN users u ON u.id = d.reseller_id`
 

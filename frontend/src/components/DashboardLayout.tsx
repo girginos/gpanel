@@ -45,6 +45,7 @@ const NAV: NavGroup[] = [
   { baslik: 'Sunucu Yönetimi', items: [
     { to: '/araclar-ayarlar',     etiket: 'Araçlar ve Ayarlar', ikon: ICONS.araclar },
     { to: '/araclar/optimize', etiket: 'Sunucu Optimize', ikon: ICONS.optimize },
+    { to: '/araclar/tasima', etiket: 'Site Taşıma', ikon: ICONS.araclar },
     { to: '/istatistikler',       etiket: 'İstatistikler',      ikon: ICONS.istatistik },
     { to: '/eklentiler',          etiket: 'Eklentiler',         ikon: ICONS.eklenti },
     { to: '/wordpress',           etiket: 'WordPress',          ikon: ICONS.wp },

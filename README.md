@@ -161,6 +161,51 @@ systemctl restart girginospanel
 
 Farklı bir manifest adresi kullanmak için: `PANEL_SURUM_UC=https://...`
 
+## Site Taşıma (cPanel / Plesk / DirectAdmin)
+
+Başka bir kontrol panelindeki siteleri **dosyaları, veritabanları, DNS kayıtları ve
+SSL ile birlikte** bu panele aktarır. Tek site veya toplu (çoklu) taşıma yapılabilir.
+
+**Nerede:** Araçlar ve Ayarlar → Site Taşıma (`/araclar/tasima`) — yalnız yönetici.
+
+**Akış**
+
+1. **Kaynak sunucu** — panel tipi, adres, SSH portu/kullanıcısı + parola *veya* SSH
+   anahtarı. "Bağlantıyı test et" uzak sunucuda kurulu paneli de saptar.
+2. **Keşif** — kaynaktaki tüm hesap/alan adları, PHP sürümü, veritabanları ve
+   docroot boyutu listelenir. Panelde zaten var olanlar işaretlenir.
+3. **Seçim + ayarlar** — hangi siteler taşınacak; dosya / veritabanı / DNS / SSL
+   adımları tek tek açılıp kapatılabilir; hedef PHP sürümü seçilebilir.
+4. **Taşıma** — arka planda çalışır, canlı kayıt (log) ve site-başına ilerleme
+   gösterilir. Sayfa kapatılabilir; tekrar açılınca durum sunucudan okunur.
+
+**Site başına yapılanlar:** sistem hesabı + docroot + php-fpm havuzu + nginx vhost →
+FTP hesabı → dosyalar (rsync) → veritabanları (uzak `mysqldump` → yerel import) →
+**yapılandırma dosyalarındaki DB bilgilerinin güncellenmesi** (`wp-config.php`, `.env`,
+`configuration.php` …) → DNS kayıtları → SSL.
+
+**Davranış notları**
+
+- Kaynaktaki PHP sürümü hedefte kurulu değilse en yakın kurulu sürüme düşer ve uyarır.
+- DNSte A kayıtları otomatik olarak bu sunucunun IPsine çevrilir; kaynak zone
+  okunamazsa varsayılan şablon kullanılır.
+- Panelde aynı alan adı varsa taşıma atlanır — üzerine yazmak için "Mevcut siteyi ez"
+  açılmalıdır (mevcut dosya ve veritabanlarını ezer, önce yedek alın).
+- Aynı anda yalnızca **tek** taşıma işi çalışır (ikinci istek `409` alır).
+- Bir site hata alırsa yalnız o site geri alınır (oluşturulan hesap silinir), toplu
+  taşımanın kalanı devam eder.
+
+**Güvenlik**
+
+- Uçlar yalnız yöneticiye açıktır; kimlik bilgileri `internal/gizli` (AES-256-GCM) ile
+  şifreli saklanır ve **iş bitince silinir**.
+- Parola komut satırına yazılmaz (`sshpass -e`, ortam değişkeni).
+- Uzak sunucudan dönen her değer (hesap, alan adı, DB adı) doğrulanır; komutlarda
+  kabuk kullanılmaz, uzak tarafa giden değerler tırnaklanır.
+- Yeniden yazılan yapılandırma dosyalarının yedeği **web kökünün dışına**
+  (`/var/lib/girginospanel/tasima-yedek`, 0600 root) alınır — eski DB parolası
+  içerdiği için web kökünde bırakılmaz.
+
 ## Notlar
 
 - Kurulum **idempotent** değildir; her çalıştırma yeni secret (JWT/DB parola) üretir. Yeniden çalıştırma yerine `girginospanel-repair` / `girginospanel-optimize` kullanın.

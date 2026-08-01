@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -182,32 +181,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	dosya := fmt.Sprintf("%s-%s.tar.gz", sk, stamp)
 	abs := filepath.Join(dir, dosya)
 
-	// DB dump
-	dbName := sk + "_main"
-	sqlDump := filepath.Join(dir, dosya+".sql")
-	if out, derr := exec.CommandContext(ctx, "bash", "-c",
-		fmt.Sprintf("mysqldump --single-transaction %s > %s 2>&1 || true", dbName, sqlDump)).CombinedOutput(); derr != nil {
-		_ = os.WriteFile(sqlDump+".err", out, 0600)
-	}
-
-	// tar + dump beraber
-	args := []string{
-		"czf", abs,
-		"-C", "/home", sk,
-		"-C", dir, dosya + ".sql",
-	}
-	if out, terr := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); terr != nil {
-		_ = os.Remove(sqlDump)
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"tar: "+strings.TrimSpace(string(out)))
+	// TÜM domain DB'lerini (ana + wp_* vb.) + home'u tek arşive paketle.
+	boyut, aerr := arsivOlustur(ctx, h.DB, id, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
+	if aerr != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, aerr.Error())
 		return
-	}
-	_ = os.Remove(sqlDump)
-
-	st, _ := os.Stat(abs)
-	var boyut int64
-	if st != nil {
-		boyut = st.Size()
 	}
 
 	res, err := h.DB.ExecContext(r.Context(),

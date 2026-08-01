@@ -195,6 +195,7 @@ export default function AraclarAyarlarPage() {
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <AracKart a={{ baslik: 'Panel Güncellemesi', href: '/araclar/guncelleme', ikon: I.refresh, rozet: 'Sunucu', aciklama: 'Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.' }} />
+          <AracKart a={{ baslik: 'Site Taşıma', href: '/araclar/tasima', ikon: I.server, rozet: 'Sunucu', anahtar: 'tasima migration cpanel plesk directadmin aktar transfer goc', aciklama: 'cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.' }} />
         </div>
       </section>
 

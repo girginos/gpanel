@@ -55,6 +55,7 @@ import (
 	"girginospanel/internal/sshaccess"
 	"girginospanel/internal/subdomain"
 	"girginospanel/internal/system"
+	"girginospanel/internal/tasima"
 	"girginospanel/internal/users"
 	"girginospanel/internal/waf"
 	"girginospanel/internal/wordpress"
@@ -143,6 +144,8 @@ func main() {
 	filesH := &files.Handlers{DB: d}
 	cronH := &cron.Handlers{DB: d}
 	logsH := &logs.Handlers{DB: d}
+	tasimaH := &tasima.Handlers{DB: d}
+	tasimaH.AcilistaTemizle()
 	plansH := &plans.Handlers{DB: d}
 	dnsH := &dns.Handlers{DB: d}
 	accountsH := &accounts.Handlers{DB: d}
@@ -173,6 +176,8 @@ func main() {
 	resellerH := &reseller.Handlers{DB: d}
 	denetimH := &denetim.Handlers{DB: d}
 	sshaccess.EnsureInfra()
+	provisioner.HealNginxLogPerms() // nginx log dizinini kiraciya kapat (cross-tenant log okuma)
+	redis.HealScanAcl()             // Valkey SCAN/RANDOMKEY komsu key-ismi sizintisini kapat
 	phpExtH := &phpext.Handlers{DB: d}
 	paketlerH := &paketler.Handlers{DB: d}
 	phpSurumH := &phpsurum.Handlers{DB: d}
@@ -242,6 +247,14 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/optimize", system.OptimizeDurum)
 			r.With(middleware.AdminOnly).Post("/system/optimize/baslat", system.OptimizeBaslat)
 			r.With(middleware.AdminOnly).Get("/system/optimize/log", system.OptimizeLog)
+			// Site tasima (cPanel / Plesk / DirectAdmin) — yalniz yonetici.
+			r.With(middleware.AdminOnly).Post("/system/tasima/test", tasimaH.Test)
+			r.With(middleware.AdminOnly).Post("/system/tasima/kesif", tasimaH.Kesif)
+			r.With(middleware.AdminOnly).Post("/system/tasima/baslat", tasimaH.Baslat)
+			r.With(middleware.AdminOnly).Get("/system/tasima", tasimaH.Durum)
+			r.With(middleware.AdminOnly).Get("/system/tasima/{id}", tasimaH.Detay)
+			r.With(middleware.AdminOnly).Get("/system/tasima/{id}/log", tasimaH.Log)
+			r.With(middleware.AdminOnly).Post("/system/tasima/{id}/iptal", tasimaH.Iptal)
 			r.With(middleware.AdminOnly).Get("/system/cve", system.CveDurum)
 			r.With(middleware.AdminOnly).Get("/system/surum-kontrol", system.SurumKontrolDurum)
 			r.With(middleware.AdminOnly).Post("/system/surum-kontrol/yenile", system.SurumKontrolYenile)
@@ -422,8 +435,8 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/soa", dnsH.PutSOA)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/dnssec", dnsH.GetDNSSEC)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/dnssec", dnsH.PostDNSSEC)
-				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/disa-aktar", dnsH.DisaAktar)   // BIND zone export
-				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/ice-aktar", dnsH.IceAktar)    // BIND zone import
+				r.With(middleware.MusteriScope).Get("/domains/{id}/dns/disa-aktar", dnsH.DisaAktar) // BIND zone export
+				r.With(middleware.MusteriScope).Post("/domains/{id}/dns/ice-aktar", dnsH.IceAktar)  // BIND zone import
 				// Merkezi DNS şablonu (admin) — domain eklerken + "Şablonu Uygula" bunu okur
 				r.With(middleware.AdminVeyaReseller).Get("/dns-template", dnsH.GetTemplate)
 				r.With(middleware.AdminVeyaReseller).Put("/dns-template", dnsH.PutTemplate)
@@ -444,10 +457,15 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backups/{bid}/indir", backupsH.Download)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/backups/{bid}", backupsH.Delete)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/backups/{bid}/geriyukle", backupsH.Restore)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/backups/{bid}/icerik", backupsH.Icerik)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backup-schedule", backupsH.GetSchedule)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/backup-schedule", backupsH.SetSchedule)
 				r.With(middleware.AdminOnly).Post("/admin/backups/tick", backupsH.TickNow)
 				r.With(middleware.AdminOnly).Get("/admin/backups/ozet", backupsH.Ozet)
+				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
+				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
+				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
+				r.With(middleware.AdminOnly).Post("/admin/backups/restore", backupsH.JobGeriBaslat)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backup-destination", backupsH.GetDestination)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/backup-destination", backupsH.PutDestination)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/backup-destination", backupsH.DeleteDestination)

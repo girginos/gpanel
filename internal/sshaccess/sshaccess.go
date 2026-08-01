@@ -235,6 +235,8 @@ func EnsureInfra() {
 		if e := os.WriteFile("/usr/local/bin/girginospanel-jail", data, 0o755); e == nil {
 			_ = os.Chmod("/usr/local/bin/girginospanel-jail", 0o755)
 		}
+	} else {
+		log.Printf("🔴 SSH IZOLASYON: girginospanel-jail betigi %s icinde YOK — jail kurulamaz (%v)", srcDir, err)
 	}
 	// 2) gosp-ssh grubu
 	_ = exec.Command("groupadd", "-f", "gosp-ssh").Run()
@@ -242,6 +244,10 @@ func EnsureInfra() {
 	dst := "/etc/ssh/sshd_config.d/50-gosp-jail.conf"
 	src, err := os.ReadFile(srcDir + "/50-gosp-jail.conf")
 	if err != nil {
+		// 🔴 KRITIK: bu dosya deploy paketinde (assets/ops) yoksa sshd chroot
+		// Match blogu HIC yazilmaz → SSH acilan kiracilar chroot'suz TAM kabuk
+		// alir. Eskiden burada sessizce return vardi ve kimse fark etmiyordu.
+		log.Printf("🔴 SSH IZOLASYON UYGULANMADI: %s/50-gosp-jail.conf YOK — SSH acilan kiraciyi chroot'a hapsedemem (%v). Deploy paketine (assets/ops) ekleyin.", srcDir, err)
 		return
 	}
 	cur, _ := os.ReadFile(dst)

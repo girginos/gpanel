@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -53,7 +54,7 @@ func genPass() string {
 func enableUser(sk, pass string) error {
 	if _, err := cli("ACL", "SETUSER", sk, "on", ">"+pass,
 		"resetkeys", "~"+sk+":*", "resetchannels", "&"+sk+":*",
-		"+@all", "-@dangerous", "-@admin",
+		"+@all", "-@dangerous", "-@admin", "-scan", "-randomkey",
 		"+info", "+dbsize", "+command", "+ping", "+echo", "+client|no-evict"); err != nil {
 		return err
 	}
@@ -255,4 +256,33 @@ func KapatDomain(db *sql.DB, id int64, sk string) {
 	wpCozdur(sk)
 	disableUser(sk)
 	_, _ = db.Exec(`DELETE FROM cp_domain_redis WHERE domain_id=?`, id)
+}
+
+// HealScanAcl: mevcut TUM kiraci ACL kullanicilarina "-scan -randomkey" ekler.
+// SETUSER birlestirmeli calisir → parola/anahtar deseni korunur, yalnizca bu iki
+// komut geri alinir. Panel acilisinda cagrilir; eski surumden gelen kiracilar da
+// komsu key-ismi enumerasyonuna karsi kapatilir.
+func HealScanAcl() {
+	out, err := cli("ACL", "LIST")
+	if err != nil {
+		return
+	}
+	n := 0
+	for _, satir := range strings.Split(out, "\n") {
+		f := strings.Fields(satir)
+		if len(f) < 2 || f[0] != "user" {
+			continue
+		}
+		kul := f[1]
+		if kul == "default" || !strings.HasPrefix(kul, "c_") {
+			continue
+		}
+		if _, e := cli("ACL", "SETUSER", kul, "-scan", "-randomkey"); e == nil {
+			n++
+		}
+	}
+	if n > 0 {
+		_, _ = cli("ACL", "SAVE")
+		log.Printf("redis: %d kiraci ACL kullanicisina -scan/-randomkey uygulandi", n)
+	}
 }

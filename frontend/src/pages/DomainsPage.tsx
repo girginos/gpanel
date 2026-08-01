@@ -349,7 +349,7 @@ export default function DomainsPage() {
                       </span>
                     </td>
                     <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.sistem_kullanici}</span>
+                      <span title={d.sistem_kullanici} className="font-mono text-xs text-slate-600 dark:text-slate-400 inline-block max-w-[8rem] truncate align-bottom lg:text-left">{d.sistem_kullanici}</span>
                     </td>
                     {sahipKolonu && (
                       <td className={T.hucre} data-etiket="Kullanıcı">
@@ -357,7 +357,11 @@ export default function DomainsPage() {
                       </td>
                     )}
                     <td className={T.hucre} data-etiket="Plan">
-                      {d.plan_ad ? <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span> : <span className="text-slate-400 dark:text-slate-500 italic">—</span>}
+                      {!d.plan_ad
+                        ? <span className="text-slate-400 dark:text-slate-500 italic">—</span>
+                        : (/—\s*Özel\s*$/.test(d.plan_ad) || d.plan_ad.trim() === 'Özel')
+                          ? <span title={d.plan_ad} className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">Özel</span>
+                          : <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span>}
                     </td>
                     <td className={T.hucre} data-etiket="PHP">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.php_surum || '-'}</span>
@@ -391,7 +395,7 @@ export default function DomainsPage() {
                       </span>
                     </td>
                     <td className={T.hucre} data-etiket="Sistem Kullanıcısı">
-                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 break-all">{sd.sistem_kullanici}</span>
+                      <span title={sd.sistem_kullanici} className="font-mono text-xs text-slate-500 dark:text-slate-400 inline-block max-w-[8rem] truncate align-bottom">{sd.sistem_kullanici}</span>
                     </td>
                     {sahipKolonu && (
                       <td className={T.hucre} data-etiket="Kullanıcı">

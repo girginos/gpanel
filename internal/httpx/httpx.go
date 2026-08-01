@@ -32,6 +32,18 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 //     EZİLİR → güvenilir kaynak budur.
 //   - X-Forwarded-For: nginx `$proxy_add_x_forwarded_for` ile istemci değerinin SONUNA
 //     ekler; bu yüzden İLK değil SON eleman güvenilirdir.
+//
+// DenetimIP: denetim kaydi icin istemci IP'si. Gercek kullanici (nginx uzerinden)
+// her zaman gercek IP'sini alir; baglanti GERCEKTEN ayni kutudan (loopback) gelmis
+// ic/otomatik islemlerde yaniltici 127.0.0.1 yerine 'sistem' yazilir.
+func DenetimIP(r *http.Request) string {
+	ip := ClientIP(r)
+	if (ip == "127.0.0.1" || ip == "::1") && yerelVekil(hostOnly(r.RemoteAddr)) {
+		return "sistem"
+	}
+	return ip
+}
+
 func ClientIP(r *http.Request) string {
 	uzak := hostOnly(r.RemoteAddr)
 	if !yerelVekil(uzak) {

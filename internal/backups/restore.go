@@ -2,27 +2,44 @@ package backups
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/archivex"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
 
+// restoreIstek: geri yükleme gövdesi (tüm alanlar opsiyonel; boş gövde = mod "tam").
+type restoreIstek struct {
+	Mod     string   `json:"mod"`      // tam | dosyalar | veritabani | dosya | db
+	Temiz   bool     `json:"temiz"`    // mod=tam/dosyalar: rsync --delete (ESKI ezme davranışı)
+	Yollar  []string `json:"yollar"`   // mod=dosya: arşiv-içi göreli yollar
+	Hedef   string   `json:"hedef"`    // mod=dosya: "klasor" (varsayılan) | "yerinde"
+	DB      string   `json:"db"`       // mod=db (zorunlu) / veritabani (opsiyonel filtre)
+	HedefDB string   `json:"hedef_db"` // mod=db: "" = üzerine yaz, dolu = yeni DB adı
+}
+
 // Restore: POST /api/v1/domains/:id/backups/:bid/geriyukle
-// tar -xzf .. + mysql import (eger dump.sql varsa).
-// Tehlikeli: mevcut public_html ezilir, DB tablolari yeniden olusur.
+// Granüler geri yükleme: tam / yalnız dosyalar / yalnız DB / seçili dosyalar / tek DB.
+// Varsayılanlar NON-DESTRUCTIVE: tam/dosyalar EZMEZ (temiz=false), dosya seçimi ayrı
+// klasöre açar, DB seçimi yeni ada geri yükleyebilir.
 func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	bid, _ := strconv.ParseInt(chi.URLParam(r, "bid"), 10, 64)
+
+	var req restoreIstek
+	_ = json.NewDecoder(r.Body).Decode(&req) // boş gövde tolere edilir
+	req.Mod = strings.TrimSpace(req.Mod)
+	if req.Mod == "" {
+		req.Mod = "tam"
+	}
 
 	var sk, dosya, alanAdi string
 	var isDemo int
@@ -53,59 +70,86 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Geçici extract dizini
-	tmpDir, _ := os.MkdirTemp("", "gosp-restore-*")
+	// Kota-dostu sahneleme: SADECE moda göre gereken üyeleri ROOT olarak /var/tmp'e
+	// çıkar (tenant home'unun tam kopyası tenant kotasını aşmadan). Güvenlik: üye
+	// ön-taraması arsivUyeCikarRoot içinde (archivex.Tara → jail-escape reddi).
+	uyeListesi, _ := arsivUyeListesi(abs)
+	uyeler := cikarUyeleri(req.Mod, sk, uyeListesi, req.Yollar)
+	if len(uyeler) == 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "bu mod için yedekte uygun içerik bulunamadı")
+		return
+	}
+	tmpDir, _ := os.MkdirTemp("/var/tmp", "gosp-restore-*")
 	defer os.RemoveAll(tmpDir)
-
-	// GÜVENLİK: yedek arşivi ROOT olarak açılırsa, içindeki symlink üyeleri /root
-	// veya başka tenant'a yazma (jail-escape) vektörüdür. ORTAK güvenli-extract
-	// helper'ı kullan: (1) çıkarma tenant kullanıcısı (sk) olarak DAC altında,
-	// (2) üye-yolları önceden taranır, symlink/hardlink/jail-dışı üyeler reddedilir.
-	// tmpDir'i tenant'a devret ki tenant tar yazabilsin (arşiv root'ta okunup
-	// stdin'den akıtılır; tenant'ın yedek deposunu okumasına gerek yok).
-	_, _ = exec.Command("chown", sk+":"+sk, tmpDir).CombinedOutput()
-	if out, err := archivex.GuvenliCikar(abs, tmpDir, sk); err != nil {
+	if out, err := arsivUyeCikarRoot(abs, tmpDir, uyeler); err != nil {
 		msg := err.Error()
 		if strings.TrimSpace(out) != "" {
 			msg += ": " + strings.TrimSpace(out)
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "tar extract: "+msg)
+		httpx.WriteError(w, http.StatusInternalServerError, "arşiv çıkarma: "+msg)
 		return
 	}
 
-	// Home replace (mevcut /home/c_<user> üstüne yaz)
-	// Güvenli: yedeğin içinde c_<sk> klasörü var, onu kopyala
-	extractedHome := filepath.Join(tmpDir, sk)
-	if _, err := os.Stat(extractedHome); err == nil {
-		out, err := exec.Command("rsync", "-a", "--delete", extractedHome+"/", "/home/"+sk+"/").CombinedOutput()
-		if err != nil {
-			// rsync yoksa cp -af
-			_, _ = exec.Command("cp", "-af", extractedHome+"/.", "/home/"+sk+"/").CombinedOutput()
-			_ = out
-		}
-		_, _ = exec.Command("chown", "-R", sk+":"+sk, "/home/"+sk).CombinedOutput()
-		_, _ = exec.Command("restorecon", "-R", "/home/"+sk).CombinedOutput()
-	}
+	sonuc := map[string]any{"ok": true, "mod": req.Mod, "alan_adi": alanAdi, "dosya": dosya}
 
-	// DB dump varsa import et
-	dumpPath := filepath.Join(tmpDir, "dump.sql")
-	dbName := sk + "_main"
-	var dbImport string
-	if _, err := os.Stat(dumpPath); err == nil {
-		cmd := fmt.Sprintf("mysql %s < %s 2>&1", dbName, dumpPath)
-		out, err := exec.Command("bash", "-c", cmd).CombinedOutput()
+	switch req.Mod {
+	case "tam":
+		homeGeriYukle(tmpDir, sk, req.Temiz)
+		sonuc["db"] = tumDBGeriYukle(h.DB, id, tmpDir, sk, "")
+		sonuc["uyari"] = ezmeUyari(req.Temiz)
+
+	case "dosyalar":
+		homeGeriYukle(tmpDir, sk, req.Temiz)
+		sonuc["uyari"] = ezmeUyari(req.Temiz)
+
+	case "veritabani":
+		sonuc["db"] = tumDBGeriYukle(h.DB, id, tmpDir, sk, strings.TrimSpace(req.DB))
+
+	case "dosya":
+		if len(req.Yollar) == 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "geri yüklenecek dosya seçilmedi")
+			return
+		}
+		n, klasor, err := secilenDosyalariGeriYukle(tmpDir, sk, req.Yollar, req.Hedef)
 		if err != nil {
-			dbImport = "DB import uyarı: " + strings.TrimSpace(string(out))
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sonuc["dosya_sayisi"] = n
+		if klasor != "" {
+			sonuc["hedef_klasor"] = klasor
+			sonuc["uyari"] = "Seçilen dosyalar ‘" + klasor + "/’ klasörüne açıldı — mevcut dosyalar korundu."
 		} else {
-			dbImport = "DB import OK (" + dbName + ")"
+			sonuc["uyari"] = "Seçilen dosyalar orijinal konumlarına yazıldı."
 		}
+
+	case "db":
+		if strings.TrimSpace(req.DB) == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "veritabanı seçilmedi")
+			return
+		}
+		msg, err := birDBGeriYukle(h.DB, id, tmpDir, sk, strings.TrimSpace(req.DB), strings.TrimSpace(req.HedefDB))
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		sonuc["db"] = msg
+
+	default:
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz geri yükleme modu: "+req.Mod)
+		return
 	}
 
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"alan_adi":  alanAdi,
-		"dosya":     dosya,
-		"db_import": dbImport,
-		"uyari":     "Mevcut dosyalar üzerine yazıldı, DB tabloları yeniden oluşturuldu.",
-	})
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.geriyukle",
+		alanAdi, "mod="+req.Mod+" dosya="+dosya, id, true)
+
+	httpx.WriteJSON(w, http.StatusOK, sonuc)
+}
+
+func ezmeUyari(temiz bool) string {
+	if temiz {
+		return "Temiz geri yükleme: yedekte olmayan dosyalar SİLİNDİ, DB tabloları yeniden oluşturuldu."
+	}
+	return "Yedekteki dosyalar üzerine yazıldı; yedekte olmayan aktif dosyalar korundu."
 }

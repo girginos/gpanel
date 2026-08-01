@@ -117,7 +117,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !rootParolaDogrula(req.Parola) {
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false)
+		writeAudit(h.DB, 0, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
@@ -144,7 +144,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 			}
 			adim, ok := TOTPVerifyAdim(sec, req.Kod, sonAdim)
 			if !ok {
-				writeAudit(h.DB, 1, "root", httpx.ClientIP(r), "auth.2fa", "root", false)
+				writeAudit(h.DB, 1, "root", httpx.DenetimIP(r), "auth.2fa", "root", false)
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
 				return
 			}
@@ -158,7 +158,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
 	}
-	writeAudit(h.DB, adminUID, "root", httpx.ClientIP(r), "auth.login", "root", true)
+	writeAudit(h.DB, adminUID, "root", httpx.DenetimIP(r), "auth.login", "root", true)
 
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = adminUID
@@ -182,17 +182,17 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 	err := h.DB.QueryRow(`SELECT id, password_hash, COALESCE(full_name,''), status FROM users WHERE username=? AND role='reseller'`, req.Kullanici).Scan(&id, &hash, &fullName, &status)
 	if err != nil || hash == "" {
 		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(req.Parola)) // sabit-zaman
-		writeAudit(h.DB, 0, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
+		writeAudit(h.DB, 0, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Parola)) != nil {
-		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
+		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
 	if status != "active" {
-		writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, false, id)
+		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusForbidden, "hesabınız askıya alınmış")
 		return
 	}
@@ -217,7 +217,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 			}
 			adim, ok := TOTPVerifyAdim(sec, req.Kod, sonAdim)
 			if !ok {
-				writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.2fa", req.Kullanici, false, id)
+				writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.2fa", req.Kullanici, false, id)
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
 				return
 			}
@@ -230,7 +230,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 		return
 	}
 	_, _ = h.DB.Exec(`UPDATE users SET last_login_at=NOW(), last_login_ip=? WHERE id=?`, httpx.ClientIP(r), id)
-	writeAudit(h.DB, id, req.Kullanici, httpx.ClientIP(r), "auth.login", req.Kullanici, true, id)
+	writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, true, id)
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = id
 	resp.Kullanici.Adi = req.Kullanici

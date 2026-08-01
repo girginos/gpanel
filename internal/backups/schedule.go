@@ -5,13 +5,10 @@ package backups
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -102,58 +99,44 @@ func tickOnce(db *sql.DB) {
 	}
 	log.Printf("backup scheduler: %d due domain bulundu", len(due))
 
-	for _, d := range due {
-		if err := runOneBackup(db, d); err != nil {
-			log.Printf("backup scheduler %s: %v", d.AlanAdi, err)
-			continue
-		}
-		if err := pruneOld(db, d.ID, d.SK, d.Retention); err != nil {
-			log.Printf("backup retention %s: %v", d.AlanAdi, err)
-		}
+	// Gecenin toplu yedeğini tek 'otomatik' iş olarak grupla (panelde tek satır + ilerleme).
+	var jid int64
+	if res, err := db.Exec(
+		`INSERT INTO backup_jobs(tur, islem, durum, toplam, baslatan) VALUES('otomatik','yedek','calisiyor',?, 'sistem')`,
+		len(due)); err == nil {
+		jid, _ = res.LastInsertId()
 	}
+	var toplamB int64
+	basari, hata := 0, 0
+	for _, d := range due {
+		db.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.AlanAdi, jid)
+		b, err := runOneBackup(db, d, jid)
+		if err != nil {
+			hata++
+			log.Printf("backup scheduler %s: %v", d.AlanAdi, err)
+		} else {
+			basari++
+			toplamB += b
+			if err := pruneOld(db, d.ID, d.SK, d.Retention); err != nil {
+				log.Printf("backup retention %s: %v", d.AlanAdi, err)
+			}
+		}
+		db.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`, basari+hata, basari, hata, toplamB, jid)
+	}
+	db.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, jobDurum(basari, hata), jid)
 }
 
-// runOneBackup: bir domain için backup üret + DB'ye kaydet + last_backup_at güncelle.
-func runOneBackup(db *sql.DB, d dueDomain) error {
-	if !strings.HasPrefix(d.SK, "c_") {
-		return fmt.Errorf("güvensiz sk: %s", d.SK)
+// runOneBackup: bir domain için backup üret (job_id ile) + last_backup_at. Boyut döner.
+func runOneBackup(db *sql.DB, d dueDomain, jobID int64) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+	boyut, _, err := birDomainYedekle(ctx, db, d.ID, d.SK, "oto", "Otomatik yedek ("+d.Freq+")", jobID)
+	if err != nil {
+		return 0, err
 	}
-	stamp := time.Now().UTC().Format("20060102-150405")
-	dir := filepath.Join(BackupRoot, d.SK)
-	_ = os.MkdirAll(dir, 0700)
-	dosya := fmt.Sprintf("%s-auto-%s.tar.gz", d.SK, stamp)
-	abs := filepath.Join(dir, dosya)
-	sqlDump := filepath.Join(dir, dosya+".sql")
-
-	dbName := d.SK + "_main"
-	_ = exec.Command("bash", "-c",
-		fmt.Sprintf("mysqldump --single-transaction %s > %s 2>&1 || true", dbName, sqlDump)).Run()
-
-	args := []string{"czf", abs, "-C", "/home", d.SK, "-C", dir, dosya + ".sql"}
-	if out, err := exec.Command("tar", args...).CombinedOutput(); err != nil {
-		_ = os.Remove(sqlDump)
-		return fmt.Errorf("tar: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	_ = os.Remove(sqlDump)
-
-	st, _ := os.Stat(abs)
-	var boyut int64
-	if st != nil {
-		boyut = st.Size()
-	}
-
-	if _, err := db.Exec(
-		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar) VALUES(?,?,?,?,?)`,
-		d.ID, "oto", dosya, boyut, "Otomatik yedek ("+d.Freq+")"); err != nil {
-		return fmt.Errorf("DB kayıt: %w", err)
-	}
-	if _, err := db.Exec(`UPDATE domains SET last_backup_at=NOW() WHERE id=?`, d.ID); err != nil {
-		log.Printf("last_backup_at güncellenemedi: %v", err)
-	}
-	// Uzak hedef varsa arkaplanda yükle
-	pushToDestinationAsync(db, d.ID, abs, dosya)
-	log.Printf("backup auto %s: dosya=%s boyut=%d", d.AlanAdi, dosya, boyut)
-	return nil
+	db.Exec(`UPDATE domains SET last_backup_at=NOW() WHERE id=?`, d.ID)
+	log.Printf("backup auto %s: boyut=%d", d.AlanAdi, boyut)
+	return boyut, nil
 }
 
 // pruneOld: en yeni N yedek kalsın, geri kalan tüm 'oto' tipli yedekleri sil (manuel yedek korunur).

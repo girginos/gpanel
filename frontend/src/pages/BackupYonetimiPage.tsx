@@ -1,34 +1,47 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
-import { T } from '@/lib/tablo'
 
 type OzetSatir = { domain_id: number; alan_adi: string; sayi: number; toplam_b: number; son_yedek: string }
 type Ozet = { domainler: OzetSatir[]; toplam_boyut_b: number; toplam_yedek: number; hedef_sayisi: number; zamanlama: string }
+export type Job = {
+  id: number; tur: string; islem: string; durum: string
+  toplam: number; tamamlanan: number; basari: number; hata: number
+  boyut_b: number; aktif_domain: string; mod: string; baslatan: string; baslangic: string; bitis: string
+}
 
 export default function BackupYonetimiPage() {
   const [o, setO] = useState<Ozet | null>(null)
-  const [yuk, setYuk] = useState(true)
+  const [jobs, setJobs] = useState<Job[]>([])
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [yedekliyor, setYedekliyor] = useState(false)
+  const timer = useRef<number | null>(null)
 
-  function yukle() {
-    setYuk(true)
-    api.get<Ozet>('/admin/backups/ozet')
-      .then(r => setO(r.data))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
-  }
-  useEffect(yukle, [])
+  function ozetYukle() { api.get<Ozet>('/admin/backups/ozet').then(r => setO(r.data)).catch(() => {}) }
+  function jobYukle() { api.get<Job[]>('/admin/backups/jobs').then(r => setJobs(r.data)).catch(e => setHata(apiHata(e))) }
 
-  async function simdiYedekle() {
+  useEffect(() => {
+    ozetYukle(); jobYukle()
+    timer.current = window.setInterval(jobYukle, 2500)
+    return () => { if (timer.current) window.clearInterval(timer.current) }
+  }, [])
+
+  const calisan = jobs.some(j => j.durum === 'calisiyor')
+  const oncekiCalisan = useRef(calisan)
+  useEffect(() => {
+    if (oncekiCalisan.current && !calisan) ozetYukle()
+    oncekiCalisan.current = calisan
+  }, [calisan])
+
+  async function tumunuYedekle() {
     setHata(null); setBasari(null); setYedekliyor(true)
     try {
-      await api.post('/admin/backups/tick')
-      setBasari('Planlı yedekleme tetiklendi — birkaç saniye içinde tamamlanır, sonra yenileyin.')
-    } catch (e) { setHata(apiHata(e, 'Yedekleme tetiklenemedi')) }
+      const { data } = await api.post('/admin/backups/jobs', {})
+      setBasari(`Yedekleme başladı — iş #${data.job_id} (${data.toplam} domain).`)
+      jobYukle()
+    } catch (e) { setHata(apiHata(e, 'Yedekleme başlatılamadı')) }
     finally { setYedekliyor(false) }
   }
 
@@ -43,12 +56,11 @@ export default function BackupYonetimiPage() {
         <span className="text-2xl">💾</span>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Backup Yöneticisi</h1>
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Tüm domainlerin yedeklerini tek yerden görün; günlük otomatik yedekleme çalışır, S3/SFTP hedefleri domain bazında ayarlanır.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Yedekleme ve geri yükleme işleri Plesk tarzı listelenir. Bir işe tıklayarak kendi sayfasında domainleri seçip tam / SQL / dosya bazında geri yükleyin.</p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
-      {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <Kpi et="Toplam Yedek Boyutu" v={o ? fmtByte(o.toplam_boyut_b) : '—'} renk="sky" ikon="💽" />
         <Kpi et="Toplam Yedek" v={o ? String(o.toplam_yedek) : '—'} renk="violet" ikon="📦" />
@@ -56,73 +68,92 @@ export default function BackupYonetimiPage() {
         <Kpi et="Aktif Uzak Hedef" v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon="☁️" alt="S3 / SFTP" />
       </div>
 
-      {/* Zamanlama + eylem */}
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
-        <span className="text-sm text-slate-600 dark:text-slate-300">
-          🕒 Otomatik yedekleme: <strong>{o?.zamanlama || 'Her gün 03:00'}</strong> · 7 günlük saklama
-        </span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button onClick={simdiYedekle} disabled={yedekliyor}
+        <span className="text-sm text-slate-600 dark:text-slate-300">🕒 Otomatik yedekleme: <strong>{o?.zamanlama || 'Her gün 03:00'}</strong></span>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={tumunuYedekle} disabled={yedekliyor || calisan}
             className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
-            {yedekliyor ? 'Tetikleniyor…' : '⏱ Tüm Domainleri Şimdi Yedekle'}
+            {yedekliyor ? 'Başlatılıyor…' : calisan ? 'Bir iş sürüyor…' : '⏱ Tüm Domainleri Şimdi Yedekle'}
           </button>
-          <button onClick={yukle} disabled={yuk} className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
         </div>
       </div>
 
-      {/* Tablo */}
-      {/* Kapsayıcı çerçeve yalnız masaüstünde; mobilde satırlar zaten kart olduğu için
-          ikinci bir çerçeve iç içe görünüm yaratırdı. */}
-      <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden">
-        <div className="py-3 lg:px-4 lg:border-b lg:border-slate-100 dark:lg:border-slate-700/60">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Domain Yedekleri</h3>
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Yedekleme / Geri Yükleme İşleri</h3>
+          {calisan && <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> çalışıyor</span>}
+          <span className="ml-auto text-[11px] text-slate-400">otomatik yenilenir</span>
         </div>
-        <div className="lg:overflow-x-auto">
-          <table className={`${T.tablo} text-sm`}>
-            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/60`}>
-              <tr>
-                <th className={T.baslik}>Domain</th>
-                <th className={`${T.baslik} text-right`}>Yedek Sayısı</th>
-                <th className={`${T.baslik} text-right`}>Toplam Boyut</th>
-                <th className={T.baslik}>Son Yedek</th>
-                <th className={`${T.baslik} text-right`}>İşlem</th>
-              </tr>
-            </thead>
-            {/* Satır ayracını T.satir'in kendi `lg:border-b`si veriyor; mobilde
-                kart kenarlığı zaten ayırdığı için ayrı bir divide sınıfı gerekmiyor. */}
-            <tbody className={T.govde}>
-              {yuk ? (
-                <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
-              ) : !o || o.domainler.length === 0 ? (
-                <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Domain yok.</td></tr>
-              ) : (
-                o.domainler.map(d => (
-                  <tr key={d.domain_id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40`}>
-                    <td className={T.hucreBaslik}>{d.alan_adi}</td>
-                    <td className={`${T.hucre} lg:text-right`} data-etiket="Yedek Sayısı">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi}</span>
-                    </td>
-                    <td className={`${T.hucre} lg:text-right`} data-etiket="Toplam Boyut">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{d.sayi ? fmtByte(d.toplam_b) : '—'}</span>
-                    </td>
-                    <td className={T.hucre} data-etiket="Son Yedek">
-                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{d.son_yedek || <span className="text-slate-400">hiç</span>}</span>
-                    </td>
-                    <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700">Yönet →</Link>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+          {jobs.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">Henüz iş yok. “Tüm Domainleri Şimdi Yedekle” ile başlayın.</div>}
+          {jobs.map(j => <JobSatir key={j.id} j={j} />)}
         </div>
       </div>
-      <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
-        ℹ️ Yedekler <span className="font-mono">/var/backups/girginospanel/&lt;domain&gt;/</span> altında tutulur. Domain silinse bile yedekleri korunur (yanlış silme kurtarma). Tekil yedek indirme/geri yükleme/hedef ayarı için "Yönet"e girin.
-      </p>
+
+      {o && o.domainler.length > 0 && (
+        <details className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
+          <summary className="px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none">Domain bazlı yedekler (granüler dosya/DB geri yükleme)</summary>
+          <div className="border-t border-slate-100 dark:border-slate-700/60 divide-y divide-slate-100 dark:divide-slate-700/60">
+            {o.domainler.map(d => (
+              <div key={d.domain_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="font-medium text-slate-800 dark:text-slate-200">{d.alan_adi}</span>
+                <span className="font-mono text-xs text-slate-400">{d.sayi} yedek · {d.sayi ? fmtByte(d.toplam_b) : '—'}</span>
+                <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="ml-auto text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700">Yönet →</Link>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   )
+}
+
+function JobSatir({ j }: { j: Job }) {
+  const pct = j.toplam ? Math.round((j.tamamlanan / j.toplam) * 100) : (j.durum === 'tamam' ? 100 : 0)
+  return (
+    <Link to={`/backup-yonetimi/is/${j.id}`} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+      <DurumIkon durum={j.durum} />
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-slate-800 dark:text-slate-200">İş #{j.id}</span>
+          <IslemRozet islem={j.islem} mod={j.mod} />
+          <TurRozet tur={j.tur} />
+        </div>
+        <div className="text-xs text-slate-400 mt-0.5 font-mono">{j.baslangic}{j.baslatan ? ' · ' + j.baslatan : ''}{j.durum === 'calisiyor' && j.aktif_domain ? ' · şu an: ' + j.aktif_domain : ''}</div>
+      </div>
+      <div className="ml-auto flex items-center gap-4 shrink-0">
+        {j.boyut_b > 0 && <span className="hidden sm:inline font-mono text-xs text-slate-500 dark:text-slate-400">{fmtByte(j.boyut_b)}</span>}
+        <div className="w-28 sm:w-40">
+          <div className="flex justify-between text-[11px] text-slate-400 mb-0.5"><span>{j.tamamlanan}/{j.toplam}</span><span>{pct}%</span></div>
+          <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-500 ${barRenk(j.durum)} ${j.durum === 'calisiyor' ? 'animate-pulse' : ''}`} style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        <span className="text-slate-300 dark:text-slate-600 text-xs">→</span>
+      </div>
+    </Link>
+  )
+}
+
+export function DurumIkon({ durum, kucuk }: { durum: string; kucuk?: boolean }) {
+  const s = kucuk ? 'w-4 h-4 text-xs' : 'w-6 h-6 text-sm'
+  if (durum === 'calisiyor') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 animate-pulse`}>◔</span>
+  if (durum === 'tamam') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400`}>✓</span>
+  if (durum === 'kismi') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400`}>!</span>
+  return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400`}>✕</span>
+}
+export function IslemRozet({ islem, mod }: { islem: string; mod: string }) {
+  const geri = islem === 'geri'
+  return <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${geri ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300'}`}>{geri ? 'geri' + (mod ? ' · ' + mod : '') : 'yedek'}</span>
+}
+export function TurRozet({ tur }: { tur: string }) {
+  return <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">{tur === 'otomatik' ? 'otomatik' : 'manuel'}</span>
+}
+export function barRenk(durum: string): string {
+  if (durum === 'calisiyor') return 'bg-amber-400'
+  if (durum === 'tamam') return 'bg-emerald-500'
+  if (durum === 'kismi') return 'bg-amber-500'
+  return 'bg-red-500'
 }
 
 function Kpi({ et, v, renk, ikon, alt }: { et: string; v: string; renk: string; ikon: string; alt?: string }) {
@@ -139,7 +170,7 @@ function Kpi({ et, v, renk, ikon, alt }: { et: string; v: string; renk: string; 
   )
 }
 
-function fmtByte(b: number): string {
+export function fmtByte(b: number): string {
   if (b < 1024) return `${b} B`
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
   if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`

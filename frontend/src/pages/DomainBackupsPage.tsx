@@ -149,20 +149,6 @@ export default function DomainBackupsPage() {
     }
   }
 
-  async function restore() {
-    if (!geriYukle) return
-    setIsleniyor(true); setHata(null); setBasari(null)
-    try {
-      const { data } = await api.post(`/domains/${id}/backups/${geriYukle.id}/geriyukle`)
-      setBasari(`Geri yüklendi: ${data.alan_adi} — ${data.db_import || ''}`)
-      setGeriYukle(null)
-    } catch (e) {
-      setHata(apiHata(e, 'Geri yükleme başarısız'))
-    } finally {
-      setIsleniyor(false)
-    }
-  }
-
   function indir(y: Yedek) {
     const tok = localStorage.getItem('gosp.token') || ''
     fetch(`/api/v1/domains/${id}/backups/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
@@ -431,14 +417,213 @@ export default function DomainBackupsPage() {
         onIptal={() => setSilinecek(null)}
       />
 
-      <ConfirmDialog
-        acik={!!geriYukle}
-        baslik="Yedekten geri yükle"
-        mesaj={`"${geriYukle?.dosya}" geri yüklensin mi?\n\nUYARI: Mevcut public_html dosyaları üzerine yazılır, MySQL tabloları yeniden oluşturulur. Bu işlem geri alınamaz.`}
-        tehlikeli onayMetni="Evet, geri yükle"
-        onOnay={restore}
-        onIptal={() => setGeriYukle(null)}
-      />
+      {geriYukle && id && (
+        <RestoreModal
+          yedek={geriYukle}
+          domainId={id}
+          onClose={() => setGeriYukle(null)}
+          onDone={(m) => { setBasari(m); setGeriYukle(null); yukle() }}
+          onErr={(m) => setHata(m)}
+        />
+      )}
+    </div>
+  )
+}
+
+// RestoreModal: granüler geri yükleme — tam / yalnız dosyalar / yalnız DB / dosya seç / DB seç.
+// Varsayılanlar non-destructive: tam/dosyalar EZMEZ, dosya seçimi ayrı klasöre, DB seçimi yeni ada.
+type Icerik = {
+  dosyalar: { yol: string; boyut: number; dizin: boolean }[]
+  veritabanlari: { ad: string; boyut: number }[]
+  kesildi: boolean
+}
+const MODLAR: { deger: RMod; etiket: string; aciklama: string }[] = [
+  { deger: 'tam', etiket: 'Tam', aciklama: 'Dosyalar + tüm veritabanları' },
+  { deger: 'dosyalar', etiket: 'Yalnız Dosyalar', aciklama: 'Veritabanına dokunma' },
+  { deger: 'veritabani', etiket: 'Yalnız Veritabanı', aciklama: 'Dosyalara dokunma' },
+  { deger: 'dosya', etiket: 'Dosya Seç', aciklama: 'Belirli dosya/klasörleri geri al' },
+  { deger: 'db', etiket: 'Veritabanı Seç', aciklama: 'Tek DB — üzerine yaz veya yeni ada' },
+]
+type RMod = 'tam' | 'dosyalar' | 'veritabani' | 'dosya' | 'db'
+
+function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
+  yedek: Yedek; domainId: string
+  onClose: () => void; onDone: (m: string) => void; onErr: (m: string) => void
+}) {
+  const [mod, setMod] = useState<RMod>('tam')
+  const [temiz, setTemiz] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [icerik, setIcerik] = useState<Icerik | null>(null)
+  const [icerikYuk, setIcerikYuk] = useState(false)
+  const [ara, setAra] = useState('')
+  const [secili, setSecili] = useState<Set<string>>(new Set())
+  const [hedef, setHedef] = useState<'klasor' | 'yerinde'>('klasor')
+  const [db, setDb] = useState('')
+  const [dbHedef, setDbHedef] = useState<'ustune' | 'yeni'>('yeni')
+  const [yeniDb, setYeniDb] = useState('')
+
+  const granuler = mod === 'dosya' || mod === 'db'
+  useEffect(() => {
+    if (granuler && !icerik && !icerikYuk) {
+      setIcerikYuk(true)
+      api.get<Icerik>(`/domains/${domainId}/backups/${yedek.id}/icerik`)
+        .then(r => setIcerik(r.data))
+        .catch(e => onErr(apiHata(e, 'Yedek içeriği okunamadı')))
+        .finally(() => setIcerikYuk(false))
+    }
+  }, [mod]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtreli = (() => {
+    if (!icerik) return []
+    const q = ara.trim().toLowerCase()
+    const list = q ? icerik.dosyalar.filter(d => d.yol.toLowerCase().includes(q)) : icerik.dosyalar
+    return list.slice(0, 400)
+  })()
+
+  function toggle(y: string) {
+    setSecili(prev => { const n = new Set(prev); n.has(y) ? n.delete(y) : n.add(y); return n })
+  }
+
+  async function gonder() {
+    const body: Record<string, unknown> = { mod }
+    if (mod === 'tam' || mod === 'dosyalar') body.temiz = temiz
+    if (mod === 'dosya') {
+      if (secili.size === 0) { onErr('En az bir dosya/klasör seçin'); return }
+      body.yollar = [...secili]; body.hedef = hedef
+    }
+    if (mod === 'db') {
+      if (!db) { onErr('Bir veritabanı seçin'); return }
+      body.db = db
+      if (dbHedef === 'yeni') {
+        if (!yeniDb.trim()) { onErr('Yeni veritabanı adı girin'); return }
+        body.hedef_db = yeniDb.trim()
+      }
+    }
+    setBusy(true)
+    try {
+      const { data } = await api.post(`/domains/${domainId}/backups/${yedek.id}/geriyukle`, body)
+      let msg = 'Geri yükleme tamam'
+      if (data.uyari) msg = data.uyari
+      else if (typeof data.db === 'string') msg = data.db
+      onDone(msg)
+    } catch (e) {
+      onErr(apiHata(e, 'Geri yükleme başarısız'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const secBtn = (aktif: boolean) =>
+    `text-left rounded-xl border px-3 py-2 transition ${aktif
+      ? 'border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
+      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-500'}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Yedekten geri yükle</h3>
+          <p className="mt-0.5 text-xs font-mono text-slate-500 dark:text-slate-400 break-all">{yedek.dosya}</p>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {MODLAR.map(m => (
+              <button key={m.deger} type="button" onClick={() => setMod(m.deger)} className={secBtn(mod === m.deger)}>
+                <div className="text-sm font-medium">{m.etiket}</div>
+                <div className={`text-[11px] mt-0.5 ${mod === m.deger ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400 dark:text-slate-500'}`}>{m.aciklama}</div>
+              </button>
+            ))}
+          </div>
+
+          {(mod === 'tam' || mod === 'dosyalar') && (
+            <label className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-3 cursor-pointer">
+              <input type="checkbox" checked={temiz} onChange={e => setTemiz(e.target.checked)} className="mt-0.5" />
+              <span className="text-xs text-amber-800 dark:text-amber-200">
+                <b>Temiz geri yükleme</b> — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.
+              </span>
+            </label>
+          )}
+
+          {mod === 'veritabani' && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
+              Domaine ait tüm veritabanları yedekteki haline döndürülür. Dosyalara dokunulmaz.
+            </p>
+          )}
+
+          {mod === 'dosya' && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input value={ara} onChange={e => setAra(e.target.value)} placeholder="Dosya ara…"
+                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm" />
+                <span className="text-xs text-slate-400 shrink-0">{secili.size} seçili</span>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                {icerikYuk && <div className="p-3 text-sm text-slate-400">Yükleniyor…</div>}
+                {!icerikYuk && filtreli.map(d => (
+                  <label key={d.yol} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <input type="checkbox" checked={secili.has(d.yol)} onChange={() => toggle(d.yol)} />
+                    <span className={`truncate ${d.dizin ? 'font-medium' : ''}`}>{d.dizin ? '📁 ' : ''}{d.yol}</span>
+                  </label>
+                ))}
+                {!icerikYuk && filtreli.length === 0 && <div className="p-3 text-sm text-slate-400">Eşleşme yok</div>}
+              </div>
+              {icerik?.kesildi && <p className="text-[11px] text-slate-400">Liste kısaltıldı — daha spesifik aramak için filtreleyin.</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setHedef('klasor')} className={`flex-1 ${secBtn(hedef === 'klasor')}`}>
+                  <div className="text-sm font-medium">Ayrı klasöre</div>
+                  <div className={`text-[11px] ${hedef === 'klasor' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>geri-yukleme-…/ (hiçbir şey ezilmez)</div>
+                </button>
+                <button type="button" onClick={() => setHedef('yerinde')} className={`flex-1 ${secBtn(hedef === 'yerinde')}`}>
+                  <div className="text-sm font-medium">Yerinde</div>
+                  <div className={`text-[11px] ${hedef === 'yerinde' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>orijinal konuma (üzerine yaz)</div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mod === 'db' && (
+            <div className="space-y-2">
+              {icerikYuk && <div className="text-sm text-slate-400">Yükleniyor…</div>}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                {icerik?.veritabanlari.map(x => (
+                  <label key={x.ad} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <input type="radio" name="db" checked={db === x.ad} onChange={() => { setDb(x.ad); setYeniDb(x.ad + '_geri') }} />
+                    <span className="font-mono">{x.ad}</span>
+                    <span className="ml-auto text-xs text-slate-400">{formatBoyut(x.boyut)}</span>
+                  </label>
+                ))}
+                {!icerikYuk && !icerik?.veritabanlari.length && <div className="p-3 text-sm text-slate-400">Yedekte veritabanı yok</div>}
+              </div>
+              {db && (
+                <div className="flex flex-col gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="dbh" checked={dbHedef === 'yeni'} onChange={() => setDbHedef('yeni')} />
+                    Yeni veritabanına (güvenli, orijinal korunur)
+                  </label>
+                  {dbHedef === 'yeni' && (
+                    <input value={yeniDb} onChange={e => setYeniDb(e.target.value)}
+                      className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-mono ml-6" />
+                  )}
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="dbh" checked={dbHedef === 'ustune'} onChange={() => setDbHedef('ustune')} />
+                    <span><b className="text-amber-700 dark:text-amber-300">Üzerine yaz</b> — mevcut ‘{db}’ silinip yüklenir</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy}
+            className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">İptal</button>
+          <button type="button" onClick={gonder} disabled={busy}
+            className="rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+            {busy ? 'Geri yükleniyor…' : 'Geri Yükle'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

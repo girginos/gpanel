@@ -35,7 +35,7 @@ func Denetim(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, de
 	_, _ = db.Exec(
 		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok, reseller_id)
 		 VALUES(?,?,?,?,?,?,?,?)`,
-		uidVal, kullanici, ClientIP(r), eylem, hedef, detayVal, ok, kapsam)
+		uidVal, kullanici, DenetimIP(r), eylem, hedef, detayVal, ok, kapsam)
 }
 
 // DenetimDomain: kapsami domainin sahibinden (domains.reseller_id) cozer.

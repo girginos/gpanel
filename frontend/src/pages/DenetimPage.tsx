@@ -74,7 +74,7 @@ export default function DenetimPage() {
   const sonSayfa = Math.max(0, Math.ceil(toplam / limit) - 1)
 
   return (
-    <div className="space-y-5">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 space-y-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Denetim Kaydı' }]} />
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Denetim Kaydı</h1>
@@ -91,14 +91,19 @@ export default function DenetimPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-3">
         <label className="sr-only" htmlFor="denetim-ara">Kayıtlarda ara</label>
-        <input id="denetim-ara" value={ara} onChange={e => { setSayfa(0); setAra(e.target.value) }}
-          placeholder="🔍 Kullanıcı, hedef, IP veya eylem ara…"
-          className="flex-1 min-w-[220px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400" />
+        <div className="relative min-w-[200px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          </span>
+          <input id="denetim-ara" value={ara} onChange={e => { setSayfa(0); setAra(e.target.value) }}
+            placeholder="Kullanıcı, hedef, IP veya eylem ara…"
+            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 pl-9 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15" />
+        </div>
         <label className="sr-only" htmlFor="denetim-eylem">Eylem türü</label>
         <select id="denetim-eylem" value={eylem} onChange={e => { setSayfa(0); setEylem(e.target.value) }}
-          className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+          className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
           <option value="">Tüm eylemler</option>
           {(veri?.eylemler || []).map(e => <option key={e} value={e}>{etiketle(e)}</option>)}
         </select>
@@ -106,14 +111,14 @@ export default function DenetimPage() {
           <>
             <label className="sr-only" htmlFor="denetim-kapsam">Kapsam</label>
             <select id="denetim-kapsam" value={kapsam} onChange={e => { setSayfa(0); setKapsam(e.target.value) }}
-              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+              className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
               <option value="">Tüm kapsamlar</option>
               <option value="kok">Yalnız kök (panel sahibi)</option>
               {bayiler.map(b => <option key={b.id} value={String(b.id)}>Bayi: {b.kullanici}</option>)}
             </select>
           </>
         )}
-        <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{toplam} kayıt</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">{toplam.toLocaleString('tr-TR')} kayıt</span>
       </div>
 
       {yuk && !veri ? (
@@ -145,7 +150,7 @@ export default function DenetimPage() {
                     <td className={T.hucre} data-etiket="Kullanıcı">
                       <span className="text-slate-700 dark:text-slate-300">{k.aktor || '—'}</span>
                       {k.aktor_rol && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
                           {k.aktor_rol === 'admin' ? 'yönetici' : k.aktor_rol === 'reseller' ? 'bayi' : k.aktor_rol}
                         </span>
                       )}
@@ -173,7 +178,7 @@ export default function DenetimPage() {
                         {k.kapsam_id === 0
                           ? <span className="text-xs text-slate-500 dark:text-slate-400">kök</span>
                           : <span title={k.kapsam_ad ? `Bayi: ${k.kapsam_ad}` : `Silinmiş bayi #${k.kapsam_id}`}
-                                  className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${
+                                  className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold ${
                                     k.kapsam_ad
                                       ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
                                       : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 line-through'}`}>
@@ -185,7 +190,7 @@ export default function DenetimPage() {
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{k.ip || '—'}</span>
                     </td>
                     <td className={T.hucre} data-etiket="Sonuç">
-                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
+                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold ${
                         k.basarili
                           ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
                           : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>

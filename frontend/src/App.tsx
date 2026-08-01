@@ -45,9 +45,11 @@ import DNSSablonuPage from '@/pages/DNSSablonuPage'
 import ServislerPage from '@/pages/ServislerPage'
 import PanelGuncellemePage from '@/pages/PanelGuncellemePage'
 import SunucuOptimizePage from '@/pages/SunucuOptimizePage'
+import SiteTasimaPage from '@/pages/SiteTasimaPage'
 import WordPressPage from '@/pages/WordPressPage'
 import FirewallPage from '@/pages/FirewallPage'
 import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
+import BackupJobDetayPage from '@/pages/BackupJobDetayPage'
 import DomainWordPressPage from '@/pages/DomainWordPressPage'
 import DomainSubdomainlerPage from '@/pages/DomainSubdomainlerPage'
 import DomainSubdomainYonetPage from '@/pages/DomainSubdomainYonetPage'
@@ -122,6 +124,7 @@ export default function App() {
         <Route path="araclar/dns-sablonu"            element={<DNSSablonuPage />} />
         <Route path="araclar/guncelleme" element={<PanelGuncellemePage />} />
         <Route path="araclar/optimize" element={<SunucuOptimizePage />} />
+        <Route path="araclar/tasima" element={<SiteTasimaPage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
         <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />
@@ -134,6 +137,7 @@ export default function App() {
         <Route path="wordpress" element={<WordPressPage />} />
         <Route path="firewall" element={<FirewallPage />} />
         <Route path="backup-yonetimi" element={<BackupYonetimiPage />} />
+        <Route path="backup-yonetimi/is/:jid" element={<BackupJobDetayPage />} />
         <Route path="izleme" element={<IzlemePage />} />
 
         <Route path="profil"          element={<SettingsPage />} />
