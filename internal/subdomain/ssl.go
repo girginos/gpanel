@@ -87,8 +87,7 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 		tip = "self-signed"
 	}
 
-	socket, err := provisioner.PHPSocketFor(sk, phpSurum)
-	if err != nil {
+	if _, err := provisioner.PHPSocketFor(sk, phpSurum); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü kurulu değil: "+phpSurum)
 		return
 	}
@@ -104,9 +103,15 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
 			"--config-home", provisioner.AcmeConfigHome(), "--webroot", docroot,
 			"-d", tamAd, "--keylength", "ec-256").CombinedOutput(); err != nil {
-			httpx.WriteError(w, http.StatusBadRequest,
-				"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+strings.TrimSpace(string(out)))
-			return
+			// 🔴 acme.sh çıkış kodu 2 = RENEW_SKIP: geçerli cert ZATEN var, yenileme gerekmiyor.
+			// Bu HATA DEĞİL — mevcut cert'i install-cert ile yerleştirmeye devam et. Aksi halde
+			// (eski hata) ikinci kurulumda "Let's Encrypt alınamadı" yanılgısı verip panel SSL'i
+			// hiç kurmuyordu. Yalnız DİĞER çıkış kodları (DNS/challenge hatası) gerçek başarısızlık.
+			if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 {
+				httpx.WriteError(w, http.StatusBadRequest,
+					"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+strings.TrimSpace(string(out)))
+				return
+			}
 		}
 		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--install-cert", "--config-home", provisioner.AcmeConfigHome(), "-d", tamAd, "--ecc",
 			"--key-file", key, "--fullchain-file", crt,
@@ -125,21 +130,12 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 	_ = exec.Command("chown", "-R", sk+":"+sk, sslDir(sk)).Run()
 	_ = exec.Command("restorecon", "-R", sslDir(sk)).Run()
 
-	// vhost'u SSL-li yeniden yaz
-	conf := confPath(sk, altAd)
-	if err := os.WriteFile(conf, []byte(vhostSSL(tamAd, docroot, socket, crt, key, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
+	// vhost'u yeniden yaz — cert artık var, rebuildVhost HTTPS bloğunu üretir;
+	// alt alanın özel PHP havuzu + nginx/backend ayarları KORUNUR.
+	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = exec.Command("restorecon", conf).Run()
-	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
-		// rollback: HTTP vhost'a dön
-		_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644)
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+strings.TrimSpace(string(out)))
-		return
-	}
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "tam_ad": tamAd, "tip": tip})
 }
 
@@ -159,19 +155,14 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "subdomain bulunamadı")
 		return
 	}
-	socket, err := provisioner.PHPSocketFor(sk, phpSurum)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü kurulu değil")
-		return
-	}
-	docroot := docrootOf(sk, tamAd)
 	crt, key := certYolu(sk, tamAd)
 	_ = os.Remove(crt)
 	_ = os.Remove(key)
-	conf := confPath(sk, altAd)
-	_ = os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, provisioner.ProtectedBlocksForSub(h.DB, sslSid(r), socket))), 0o644)
-	_ = exec.Command("restorecon", conf).Run()
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	// cert gitti → rebuildVhost HTTP bloğunu üretir; özel ayarlar KORUNUR.
+	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

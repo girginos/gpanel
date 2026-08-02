@@ -15,6 +15,7 @@ import (
 
 	"girginospanel/internal/dns"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/php"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -196,6 +197,9 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = os.Remove(confPath(sk, altAd))
 	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	// alt alanın kendi FPM havuzu varsa conf'unu tüm sürümlerden kaldır (DB satırları FK CASCADE)
+	php.RemoveNamedPool(php.SubPoolName(sk, sid))
+	subApacheSil(sk, altAd) // apache backend vhost'u (varsa) kaldır
 	// docroot sil (guard: subdomains altında + tam_ad eşleşmeli)
 	docroot := docrootOf(sk, tamAd)
 	base := "/home/" + sk + "/subdomains/"

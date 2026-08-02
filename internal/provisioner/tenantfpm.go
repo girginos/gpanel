@@ -50,12 +50,26 @@ func tenantCfgDir(sk string) string       { return filepath.Join(tenantCfgRoot, 
 func tenantPerSkLogDir(sk string) string  { return "/var/log/php-fpm-" + sk }
 func tenantPerSkLogFile(sk string) string { return filepath.Join(tenantPerSkLogDir(sk), "tenant.log") }
 
-// postfixInstalled: MTA (sendmail wrapper) kurulu mu? PHP mail() fonksiyonunun namespace
-// içinden çalışabilmesi için gerekli. Kurulu değilse cage için bind eklenmez (skip).
-// 181-dev'de kurulu DEĞİL; prod 177'de kurulu olabilir — kosullu ekleniyor.
-func postfixInstalled() bool {
-	_, err := os.Stat("/usr/sbin/sendmail")
-	return err == nil
+// mtaBindSatirlari: PHP mail() cage İÇİNDEN çalışsın diye MTA yollarını per-tenant systemd
+// unit'ine bind eden satırları üretir — AMA yalnız GERÇEKTEN VAR OLAN yolları.
+// 🔴 ESKİ BUG (postfixInstalled): sadece /usr/sbin/sendmail'e bakıyordu; ama exim de bu
+// wrapper'ı `alternatives` ile kurar → yanlış-pozitif → var olmayan
+// /var/spool/postfix/maildrop bind'i systemd NAMESPACE adımını patlatıp per-tenant FPM
+// unit'ini BAŞLATMIYORDU → EnableTenantFPM restart hatası → RollbackToSharedFPM (tenant
+// shared master'a düşer = izolasyon kaybı). Her yolu "varsa-ekle" yaparak exim'li/MTA'sız
+// AlmaLinux 10 makinelerinde unit TEMİZ açılır; postfix'li makinelerde tam bind kurulur.
+func mtaBindSatirlari() string {
+	var b strings.Builder
+	if _, err := os.Stat("/usr/sbin/sendmail"); err == nil {
+		b.WriteString("BindReadOnlyPaths=/usr/sbin/sendmail\n")
+	}
+	// postfix (public+maildrop) veya exim (spool) — hangisi VARSA onu bind et.
+	for _, p := range []string{"/var/spool/postfix/public", "/var/spool/postfix/maildrop", "/var/spool/exim"} {
+		if _, err := os.Stat(p); err == nil {
+			b.WriteString("BindPaths=" + p + "\n")
+		}
+	}
+	return b.String()
 }
 
 var (
@@ -71,6 +85,15 @@ var (
 // görünmez; 177 Enforcing'de kritik. (create-default-on CANLI → taze kurulumda yeni
 // domain 500 vermemeli.)
 const fpmSocketFcontextSpec = "/run/php-fpm-[^/]+(/.*)?"
+
+// fpmLogFcontextSpec: per-tenant FPM log dizinleri /var/log/php-fpm-<sk>/ → httpd_log_t.
+// 🔴🔴 Bu kural OLMADAN systemd `LogsDirectory=` dizini fcontext-DB varsayılanı var_log_t
+// ile etiketler → httpd_t (php-fpm master) error_log'a YAZAMAZ →
+// "failed to open error_log: Permission denied (13)" → FPM init FAIL → RollbackToSharedFPM
+// (izolasyon kaybı). Enforcing'de KRİTİK; denial base-policy'de dontaudit'li olduğundan AVC
+// bile görünmez (chcon geçici — systemd her start'ta fcontext-DB'den yeniden etiketler, o
+// yüzden KALICI semanage kuralı ŞART). 181-dev + Plesk Permissive'de bu hata gizli kalır.
+const fpmLogFcontextSpec = "/var/log/php-fpm-[^/]+(/.*)?"
 
 // ensureFPMSELinuxFcontext: yukarıdaki fcontext kuralını (httpd_var_run_t) semanage ile
 // KALICI + idempotent kaydeder. Süreç başına en fazla bir kez (başarılı olunca) çalışır;
@@ -92,13 +115,25 @@ func ensureFPMSELinuxFcontext() {
 		fcontextDone = true // semanage yok → restorecon default'a bırakılır, tekrar deneme
 		return
 	}
-	// Kural zaten var mı? (repair ile aynı: -l yakala, sonra ara.)
+	// Kurallar zaten var mı? (repair ile aynı: -l yakala, sonra ara.) İKİ kural bağımsız
+	// kontrol edilir — biri varken diğeri eksik kalmasın.
 	out, _ := exec.Command("semanage", "fcontext", "-l").CombinedOutput()
-	if strings.Contains(string(out), "/run/php-fpm-[") {
-		fcontextDone = true
-		return
+	mevcut := string(out)
+	tumOK := true
+	// (1) socket dizinleri → httpd_var_run_t (nginx httpd_t socket'e bağlanabilsin)
+	if !strings.Contains(mevcut, "/run/php-fpm-[") {
+		if _, err := exec.Command("semanage", "fcontext", "-a", "-t", "httpd_var_run_t", fpmSocketFcontextSpec).CombinedOutput(); err != nil {
+			tumOK = false
+		}
 	}
-	if _, err := exec.Command("semanage", "fcontext", "-a", "-t", "httpd_var_run_t", fpmSocketFcontextSpec).CombinedOutput(); err == nil {
+	// (2) log dizinleri → httpd_log_t (php-fpm error_log'a yazabilsin — Enforcing'de per-tenant
+	//     FPM'in BAŞLAMASININ ÖNKOŞULU; bkz fpmLogFcontextSpec yorumu).
+	if !strings.Contains(mevcut, "/var/log/php-fpm-[") {
+		if _, err := exec.Command("semanage", "fcontext", "-a", "-t", "httpd_log_t", fpmLogFcontextSpec).CombinedOutput(); err != nil {
+			tumOK = false
+		}
+	}
+	if tumOK {
 		fcontextDone = true
 	}
 	// hata → fcontextDone=false; sonraki EnableTenantFPM / panel boot yeniden dener.
@@ -510,13 +545,11 @@ KeyringMode=private
 UMask=0022
 `, sk, sk, fpmBin, tenantCfgDir(sk), sk, sk, sk, sk)
 
-	// Kosullu MTA gate: sendmail/postfix kuruluysa PHP mail() cage icinden calisir.
-	if postfixInstalled() {
-		b.WriteString(`
-# ---- MTA (postfix/sendmail kurulu — mail() cage icinden calisir) ----
-BindReadOnlyPaths=/usr/sbin/sendmail
-BindPaths=/var/spool/postfix/public /var/spool/postfix/maildrop
-`)
+	// MTA gate: mail() cage icinden calissin diye YALNIZ VAR OLAN MTA yollarini bind et.
+	// Hicbiri yoksa blok eklenmez → unit temiz acilir (exim/MTA'siz makine kirilmaz).
+	if mta := mtaBindSatirlari(); mta != "" {
+		b.WriteString("\n# ---- MTA (mail() cage icinden — yalniz var olan yollar) ----\n")
+		b.WriteString(mta)
 	}
 
 	b.WriteString(`
@@ -1068,6 +1101,15 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	// Per-sk log dizini (LogsDirectory ile hizali; systemd de yaratir ama sertlestirilmis
 	// unit'ten ONCE global cfg'nin error_log path'i icin bu path'in var olmasi gerek).
 	_ = os.MkdirAll(tenantPerSkLogDir(sk), 0750)
+	// 🔴🔴 SELinux: log dizinini per-tenant FPM systemctl restart'ından ÖNCE httpd_log_t
+	// etiketle. Bu OLMADAN systemd LogsDirectory dizini var_log_t (fcontext varsayılanı) ile
+	// etiketler → httpd_t (php-fpm) error_log'a YAZAMAZ → "Permission denied" → unit
+	// Enforcing'de BAŞLAMAZ → RollbackToSharedFPM (izolasyon kaybı). fcontext kuralını garanti
+	// et (Init boot'ta da ekler), sonra restorecon + chcon (chcon = anında; systemd start'ta
+	// commit'li kuraldan httpd_log_t'yi korur). SELinux yoksa hepsi sessiz no-op.
+	ensureFPMSELinuxFcontext()
+	_, _ = exec.Command("restorecon", "-R", tenantPerSkLogDir(sk)).CombinedOutput()
+	_, _ = exec.Command("chcon", "-R", "-t", "httpd_log_t", tenantPerSkLogDir(sk)).CombinedOutput()
 
 	// 0) Eski log dosyasini yeni yola tasi (bir defalik migration; namespace altinda
 	// eski path artik BOS tmpfs — yazilamaz. Idempotent: yeni dosya varsa atla.)
@@ -1138,6 +1180,8 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	ensureFPMSELinuxFcontext()
 	_, _ = exec.Command("restorecon", "-R", tenantRunDir(sk)).CombinedOutput()
 	_, _ = exec.Command("restorecon", "-R", cfgDir).CombinedOutput()
+	// (log dizini etiketlemesi YUKARIDA, systemctl restart'tan ÖNCE yapıldı — bkz MkdirAll
+	// sonrası httpd_log_t bloğu. Burada tekrar gerekmiyor.)
 
 	socket := tenantSocket(sk)
 	if !waitForSocket(socket, 6*time.Second) {

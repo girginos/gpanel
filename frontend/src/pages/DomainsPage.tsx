@@ -109,6 +109,13 @@ export default function DomainsPage() {
   }
   useEffect(yukle, [])
 
+  // Alt alanlar da toplu seçime dahil — sol kutucukla seçilir, "🗑 Sil" ile domainlerle
+  // birlikte silinir (kendi endpoint'i). Domain seçimiyle çakışmasın diye AYRI set.
+  const [subSecili, setSubSecili] = useState<Set<number>>(new Set())
+  function subTogga(id: number) {
+    setSubSecili(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
   // Mobil alt gezinme cubugundaki "Yeni" eylemi buraya ?yeni=1 ile gelir.
   // Kipi acip parametreyi TEMIZLIYORUZ: aksi halde geri/yenilemede kip
   // tekrar tekrar acilir ve kullanici sikisir.
@@ -232,7 +239,14 @@ export default function DomainsPage() {
     for (const id of ids) {
       try { await api.delete(`/domains/${id}`); basarili++ } catch {}
     }
-    setSecili(new Set()); setBasari(`✓ ${basarili}/${ids.length} domain silindi`)
+    // Seçili alt alanları da sil (kendi endpoint'i: parent üzerinden).
+    const subIds = Array.from(subSecili); let subBasarili = 0
+    for (const sid of subIds) {
+      const sd = subler.find(s => s.id === sid); if (!sd) continue
+      try { await api.delete(`/domains/${sd.parent_id}/subdomain/${sid}`); subBasarili++ } catch {}
+    }
+    setSecili(new Set()); setSubSecili(new Set())
+    setBasari(`✓ ${basarili + subBasarili}/${ids.length + subIds.length} kayıt silindi`)
     setTimeout(() => setBasari(null), 4000)
     setIsleniyor(false); yukle()
   }
@@ -275,22 +289,26 @@ export default function DomainsPage() {
       </div>
 
       {/* Toplu işlem barı */}
-      {secili.size > 0 && (
+      {(secili.size + subSecili.size) > 0 && (
         <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">{secili.size} seçili</span>
-          <button onClick={() => durumDegistir('aktif')} disabled={isleniyor}
-            className="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
-            ▶ Aktif Et
-          </button>
-          <button onClick={() => durumDegistir('pasif')} disabled={isleniyor}
-            className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded">
-            ⏸ Pasif Et
-          </button>
+          <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+            {secili.size + subSecili.size} seçili{subSecili.size > 0 ? ` (${subSecili.size} alt alan)` : ''}
+          </span>
+          {secili.size > 0 && <>
+            <button onClick={() => durumDegistir('aktif')} disabled={isleniyor}
+              className="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
+              ▶ Aktif Et
+            </button>
+            <button onClick={() => durumDegistir('pasif')} disabled={isleniyor}
+              className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded">
+              ⏸ Pasif Et
+            </button>
+          </>}
           <button onClick={() => setSilOnay(true)} disabled={isleniyor}
             className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">
-            🗑 Sil ({secili.size})
+            🗑 Sil ({secili.size + subSecili.size})
           </button>
-          <button onClick={() => setSecili(new Set())} disabled={isleniyor}
+          <button onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}
             className="text-xs px-3 py-1.5 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:bg-amber-900/30 rounded">
             Seçimi temizle
           </button>
@@ -385,7 +403,12 @@ export default function DomainsPage() {
                 )
                 const subRows = subs.map(sd => (
                   <tr key={'sub-' + sd.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/50 transition bg-slate-50/40 dark:bg-slate-900/20`}>
-                    <td className={T.hucreSecim}></td>
+                    <td className={T.hucreSecim}>
+                      <input type="checkbox" checked={subSecili.has(sd.id)}
+                        onChange={() => subTogga(sd.id)}
+                        aria-label={`${sd.tam_ad} seç`}
+                        className="cursor-pointer" />
+                    </td>
                     <td className={T.hucreBaslikSecimli}>
                       <span className="inline-flex items-center gap-1.5 lg:pl-5">
                         <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline">└─</span>
@@ -471,7 +494,7 @@ export default function DomainsPage() {
                   {phpSurumler.length === 0
                     ? <option value="8.3">PHP 8.3 (varsayılan)</option>
                     : phpSurumler.map(p => (
-                        <option key={p.surum} value={p.surum}>PHP {p.surum}{p.aciklama ? ` — ${p.aciklama}` : ''}</option>
+                        <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? ' (varsayılan)' : ''}</option>
                       ))
                   }
                 </select>
@@ -556,9 +579,9 @@ export default function DomainsPage() {
       {silOnay && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSilOnay(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">⚠ Toplu Domain Silme</h3>
+            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">⚠ Toplu Silme</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
-              <span className="font-semibold">{secili.size}</span> domain ve tüm bağımlı kaynakları (Linux kullanıcı, ev dizini, DB, FTP, vhost, DNS zone) <strong>geri dönüşsüz</strong> silinecek.
+              <span className="font-semibold">{secili.size}</span> domain{subSecili.size > 0 ? <> + <span className="font-semibold">{subSecili.size}</span> alt alan</> : ''} ve tüm bağımlı kaynakları (Linux kullanıcı, ev dizini, DB, FTP, vhost, DNS zone) <strong>geri dönüşsüz</strong> silinecek.
             </p>
             <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded p-2 max-h-40 overflow-auto mb-4">
               {Array.from(secili).slice(0, 8).map(id => {
@@ -566,6 +589,11 @@ export default function DomainsPage() {
                 return <li key={id} className="truncate">{d?.alan_adi || '?'}</li>
               })}
               {secili.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {secili.size - 8} daha…</li>}
+              {Array.from(subSecili).slice(0, 8).map(sid => {
+                const s = subler.find(x => x.id === sid)
+                return <li key={'s' + sid} className="truncate text-teal-600 dark:text-teal-400">{s?.tam_ad || '?'} <span className="text-[10px]">(alt alan)</span></li>
+              })}
+              {subSecili.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {subSecili.size - 8} alt alan daha…</li>}
             </ul>
             <div className="flex justify-end gap-2">
               <button onClick={() => setSilOnay(false)}

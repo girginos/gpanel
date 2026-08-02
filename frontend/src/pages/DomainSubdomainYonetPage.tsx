@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import SubPHPAyarlari from '@/components/SubPHPAyarlari'
+import SubWebAyarlari from '@/components/SubWebAyarlari'
 
 type Detay = {
   id: number; alt_ad: string; tam_ad: string; php_surum: string
@@ -178,7 +180,7 @@ export default function DomainSubdomainYonetPage() {
             <div className={kart}>
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Genel Bilgi</h2>
               <dl className="space-y-2.5 text-sm">
-                <div className="flex justify-between gap-3"><dt className={etiket}>Docroot</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right break-all">{d.docroot}</dd></div>
+                <div className="flex justify-between gap-3"><dt className={etiket}>Docroot</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right break-all">{d.docroot.replace(/^\/home\/[^/]+/, '~')}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>Disk</dt><dd className="font-mono text-slate-700 dark:text-slate-300">{fmtKB(d.disk_kb)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>DNS (A)</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.alt_ad} &rarr; {d.ipv4 || '-'}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>Olusturulma</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.created_at || '-'}</dd></div>
@@ -191,7 +193,7 @@ export default function DomainSubdomainYonetPage() {
               <div className="flex items-center gap-2">
                 <select value={yeniPHP} onChange={e => setYeniPHP(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm">
-                  {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{p.aciklama ? ` - ${p.aciklama}` : ''}</option>)}
+                  {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? ' (varsayılan)' : ''}</option>)}
                   {phpler.length === 0 && <option value={d.php_surum}>PHP {d.php_surum}</option>}
                 </select>
                 <button onClick={phpDegistir} disabled={phpKaydet || yeniPHP === d.php_surum}
@@ -201,6 +203,8 @@ export default function DomainSubdomainYonetPage() {
               </div>
               <p className="text-[11px] text-slate-400 mt-2">Aktif: PHP {d.php_surum}</p>
             </div>
+
+            <SubPHPAyarlari domainId={String(id)} sid={String(sid)} />
 
             <div className={`${kart} md:col-span-2`}>
               <div className="flex items-center justify-between mb-3">
@@ -227,6 +231,8 @@ export default function DomainSubdomainYonetPage() {
               </div>
               <p className="text-[11px] text-slate-400 mt-2">Let's Encrypt icin {d.tam_ad} A kaydinin bu sunucuya ({d.ipv4}) cozumlenmesi gerekir.</p>
             </div>
+
+            <SubWebAyarlari domainId={String(id)} sid={String(sid)} />
           </div>
         </>
       )}

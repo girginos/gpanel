@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -89,32 +88,18 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "subdomain bulunamadı")
 		return
 	}
-	socket, err := provisioner.PHPSocketFor(sk, php)
-	if err != nil {
+	// sürüm sunucuda kurulu mu? (doğrulama)
+	if _, err := provisioner.PHPSocketFor(sk, php); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü sunucuda kurulu değil: "+php)
 		return
 	}
-	// vhost'u yeni socket'le yeniden yaz (atomik: doğrula, hata olursa geri al)
-	conf := confPath(sk, altAd)
-	eskiB, _ := os.ReadFile(conf)
-	eski := string(eskiB)
-	koruma := provisioner.ProtectedBlocksForSub(h.DB, sid, socket)
-	if err := os.WriteFile(conf, []byte(vhost(tamAd, docrootOf(sk, tamAd), socket, koruma)), 0o644); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
-		return
-	}
-	_ = exec.Command("restorecon", conf).Run()
-	if out, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
-		if eski != "" {
-			_ = os.WriteFile(conf, []byte(eski), 0o644) // rollback
-			_ = exec.Command("nginx", "-t").Run()
-		}
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+strings.TrimSpace(string(out)))
-		return
-	}
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
 	if _, err := h.DB.Exec(`UPDATE subdomanlar SET php_surum=? WHERE id=? AND domain_id=?`, php, sid, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kayıt güncellenemedi")
+		return
+	}
+	// vhost'u yeniden yaz — alt alanın ayrı FPM havuzu varsa yeni sürüme taşınır.
+	if err := h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, php); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "php_surum": php})

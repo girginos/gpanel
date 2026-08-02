@@ -29,7 +29,9 @@ const ETIKET: Record<string, string> = {
   'bayi.olustur': 'Bayi oluşturuldu', 'bayi.guncelle': 'Bayi güncellendi', 'bayi.sil': 'Bayi silindi',
   'bayi.askiya_al': 'Bayi askıya alındı', 'bayi.askidan_al': 'Bayi askıdan alındı',
   'bayi.parola': 'Bayi parolası değişti',
-  'plan.olustur': 'Plan oluşturuldu',
+  'plan.olustur': 'Plan oluşturuldu', 'plan.guncelle': 'Plan güncellendi',
+  'yedek.geriyukle': 'Yedek geri yüklendi',
+  'tasima_baslat': 'Taşıma başlatıldı', 'tasima_iptal': 'Taşıma iptal edildi',
   'guvenlik.izolasyon_kaybi': 'İzolasyon uyarısı',
 }
 function etiketle(e: string) { return ETIKET[e] || e }
@@ -37,6 +39,37 @@ function etiketle(e: string) { return ETIKET[e] || e }
 // Yıkıcı işlemler listede göz ile ayrılsın (renk TEK başına anlam taşımasın diye
 // ayrıca "yıkıcı" ibaresi title'da verilir).
 const YIKICI = new Set(['hosting.sil', 'db.sil', 'bayi.sil', 'hosting.askiya_al', 'bayi.askiya_al'])
+
+// Eylem türüne göre ikon + renk — düz metin yerine görsel kategori ayrımı (tıpkı yıkıcı
+// "Hosting silindi" gibi ama her tür için). Kod DESENİNE göre kategori seçilir; böylece yeni
+// eylem kodları (ör. yeni bir *.sil / *.olustur) otomatik doğru kategoriye düşer. Renk TEK
+// sinyal değildir — ikon + etiket + title da anlam taşır (erişilebilirlik).
+function eylemStil(e: string): { ikon: string; renk: string } {
+  if (e === 'guvenlik.izolasyon_kaybi') return { ikon: '🛡️', renk: 'text-rose-700 dark:text-rose-300' }
+  if (/\.sil$/.test(e))                 return { ikon: '🗑️', renk: 'text-rose-700 dark:text-rose-300' }
+  if (/iptal$/.test(e))                 return { ikon: '🚫', renk: 'text-amber-700 dark:text-amber-300' }
+  if (/askiya_al$/.test(e))             return { ikon: '⏸️', renk: 'text-amber-700 dark:text-amber-300' }
+  if (/askidan_al$/.test(e))            return { ikon: '▶️', renk: 'text-emerald-700 dark:text-emerald-300' }
+  if (/\.olustur$/.test(e))             return { ikon: '➕', renk: 'text-emerald-700 dark:text-emerald-300' }
+  if (e.startsWith('yedek'))            return { ikon: '💾', renk: 'text-violet-700 dark:text-violet-300' }
+  if (e.startsWith('tasima'))           return { ikon: '🚚', renk: 'text-sky-700 dark:text-sky-300' }
+  if (e.startsWith('auth.'))            return { ikon: '🔑', renk: 'text-indigo-600 dark:text-indigo-300' }
+  // güncelleme/plan/parola/toplu-durum vb. — düzenleme kategorisi
+  return { ikon: '✏️', renk: 'text-sky-700 dark:text-sky-300' }
+}
+
+// EylemRozet: ikon + kategori-renkli etiket. Tüm eylem türlerini "Hosting silindi" gibi
+// makyajlar (düz metin yerine).
+function EylemRozet({ eylem }: { eylem: string }) {
+  const s = eylemStil(eylem)
+  return (
+    <span className={`inline-flex items-center gap-1.5 font-medium ${s.renk}`}
+      title={(YIKICI.has(eylem) ? 'Yıkıcı işlem — ' : '') + eylem}>
+      <span aria-hidden="true" className="text-[13px] leading-none">{s.ikon}</span>
+      {etiketle(eylem)}
+    </span>
+  )
+}
 
 export default function DenetimPage() {
   const bayiMi = useMemo(() => {
@@ -156,11 +189,7 @@ export default function DenetimPage() {
                       )}
                     </td>
                     <td className={T.hucre} data-etiket="Eylem">
-                      <span className={YIKICI.has(k.eylem) ? 'text-rose-700 dark:text-rose-300 font-medium' : 'text-slate-700 dark:text-slate-300'}
-                        title={YIKICI.has(k.eylem) ? 'Yıkıcı işlem — ' + k.eylem : k.eylem}>
-                        {YIKICI.has(k.eylem) && <span aria-hidden="true" className="mr-1">⚠</span>}
-                        {etiketle(k.eylem)}
-                      </span>
+                      <EylemRozet eylem={k.eylem} />
                       {k.detay && (
                         // Uzun sistem kayitlari satiri sismesin: iki satirda kirpilir,
                         // tamami title ile erisilebilir kalir.

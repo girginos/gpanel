@@ -1,10 +1,44 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 // gosp-mobil-v1
-import { useEffect, useState } from 'react'
+// gosp-global-arama-v1
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
+import { api } from '@/lib/api'
+
+type AramaDomain = { id: number; alan_adi: string; sistem_kullanici: string }
+type AramaSub = { id: number; tam_ad: string; parent_id: number; sistem_kullanici: string }
+type Sonuc = { tip: 'sayfa' | 'domain' | 'alt'; ad: string; alt: string; yol: string; key: string }
+type Rol = 'admin' | 'reseller' | 'user'
+
+// Panel sayfaları — global arama için statik dizin. `roller` yoksa yalnız admin görür.
+type SayfaTanim = { etiket: string; yol: string; anahtar: string[]; roller?: Rol[] }
+const HERKES: Rol[] = ['admin', 'reseller', 'user']
+const SAYFALAR: SayfaTanim[] = [
+  { etiket: 'Domainler', yol: '/domainler', roller: HERKES, anahtar: ['domain', 'hosting', 'hesap', 'site', 'alan adı', 'alan adi'] },
+  { etiket: 'Hosting Planları', yol: '/hizmet-planlari', roller: HERKES, anahtar: ['plan', 'paket', 'hosting plan', 'hizmet'] },
+  { etiket: 'DNS Şablonu', yol: '/araclar/dns-sablonu', roller: HERKES, anahtar: ['dns', 'şablon', 'sablon', 'template', 'zone'] },
+  { etiket: 'Denetim Kaydı', yol: '/denetim', roller: HERKES, anahtar: ['denetim', 'audit', 'log', 'kayıt', 'kayit', 'aktivite', 'işlem geçmişi'] },
+  { etiket: 'Profil ve Tercihler', yol: '/profil', roller: HERKES, anahtar: ['profil', 'ayar', 'settings', 'tercih', 'parola', 'şifre', 'sifre', 'hesap', 'tema'] },
+  { etiket: 'Bayiler', yol: '/bayiler', anahtar: ['bayi', 'reseller', 'bayiler'] },
+  { etiket: 'Bayi Planları', yol: '/bayi-planlari', anahtar: ['bayi plan', 'reseller plan', 'bayi planları'] },
+  { etiket: 'Yedek Yönetimi', yol: '/backup-yonetimi', anahtar: ['backup', 'yedek', 'yedekleme', 'restore', 'geri yükleme', 'geri yukleme', 'yedek yönetimi'] },
+  { etiket: 'Güvenlik Duvarı', yol: '/firewall', anahtar: ['firewall', 'güvenlik', 'guvenlik', 'security', 'iptables', 'ban', 'duvar', 'kara liste', 'ip engel'] },
+  { etiket: 'WordPress', yol: '/wordpress', anahtar: ['wordpress', 'wp', 'toolkit', 'wp toolkit'] },
+  { etiket: 'İzleme', yol: '/izleme', anahtar: ['izleme', 'monitoring', 'monitor', 'metrik', 'cpu', 'ram', 'yük', 'load', 'kaynak'] },
+  { etiket: 'İstatistikler', yol: '/istatistikler', anahtar: ['istatistik', 'statistics', 'trafik', 'kullanım', 'kullanim', 'grafik'] },
+  { etiket: 'Site Taşıma', yol: '/araclar/tasima', anahtar: ['taşıma', 'tasima', 'migration', 'transfer', 'göç', 'goc', 'cpanel', 'plesk', 'directadmin', 'aktar', 'import'] },
+  { etiket: 'Sunucu Optimize', yol: '/araclar/optimize', anahtar: ['optimize', 'optimizasyon', 'hızlandır', 'hizlandir', 'performans', 'performance', 'temizlik'] },
+  { etiket: 'Eklentiler', yol: '/eklentiler', anahtar: ['eklenti', 'plugin', 'addon', 'marketplace', 'eklentiler'] },
+  { etiket: 'Araçlar ve Ayarlar', yol: '/araclar-ayarlar', anahtar: ['araç', 'arac', 'ayar', 'tool', 'araçlar', 'ayarlar'] },
+  { etiket: 'Paketler', yol: '/araclar/paketler', anahtar: ['paket', 'package', 'rpm', 'dnf', 'yum', 'paketler'] },
+  { etiket: 'PHP Sürümleri', yol: '/araclar/php-surumler', anahtar: ['php sürüm', 'php surum', 'php version', 'php sürümleri'] },
+  { etiket: 'PHP Modülleri', yol: '/sistem/php-modulleri', anahtar: ['php modül', 'php modul', 'extension', 'php eklenti', 'php modülleri'] },
+  { etiket: 'Servisler', yol: '/araclar/servisler', anahtar: ['servis', 'service', 'systemd', 'daemon', 'servisler'] },
+  { etiket: 'Panel Güncelleme', yol: '/araclar/guncelleme', anahtar: ['güncelleme', 'guncelleme', 'update', 'panel güncelle', 'sürüm', 'surum'] },
+]
 
 export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; menuAcik?: boolean }) {
   const kullanici = useAuth((s) => s.kullanici)
@@ -13,11 +47,71 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())
 
+  // ── Global arama ──
+  const [q, setQ] = useState('')
+  const [acik, setAcik] = useState(false)
+  const [aktif, setAktif] = useState(0)
+  const veri = useRef<{ domains: AramaDomain[]; subler: AramaSub[] } | null>(null)
+  const [yuklendi, setYuklendi] = useState(false)
+  const kutuRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const h = (e: Event) => setTema((e as CustomEvent<Theme>).detail)
     window.addEventListener('gosp:theme-change', h)
     return () => window.removeEventListener('gosp:theme-change', h)
   }, [])
+
+  // dışarı tıklama → kapat
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) setAcik(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  function veriYukle() {
+    if (veri.current) return
+    Promise.all([
+      api.get<AramaDomain[]>('/domains').then(r => r.data).catch(() => []),
+      api.get<AramaSub[]>('/subdomains').then(r => r.data).catch(() => []),
+    ]).then(([domains, subler]) => { veri.current = { domains, subler }; setYuklendi(y => !y) })
+  }
+
+  const rol: Rol = (kullanici?.rol as Rol) || 'user'
+  const s = q.trim().toLowerCase()
+  const sonuclar: Sonuc[] = (() => {
+    if (!s) return []
+    // 1) Sayfalar (statik, veri yüklenmese de anında) — rol filtreli
+    const p = SAYFALAR
+      .filter(x => (x.roller ? x.roller.includes(rol) : rol === 'admin'))
+      .filter(x => x.etiket.toLowerCase().includes(s) || x.anahtar.some(k => k.includes(s)))
+      .slice(0, 5)
+      .map<Sonuc>(x => ({ tip: 'sayfa', ad: x.etiket, alt: x.yol, yol: x.yol, key: 'p' + x.yol }))
+    if (!veri.current) return p
+    const d = veri.current.domains
+      .filter(x => x.alan_adi.toLowerCase().includes(s) || (x.sistem_kullanici || '').toLowerCase().includes(s))
+      .slice(0, 6)
+      .map<Sonuc>(x => ({ tip: 'domain', ad: x.alan_adi, alt: x.sistem_kullanici, yol: `/abonelikler/${x.id}`, key: 'd' + x.id }))
+    const a = veri.current.subler
+      .filter(x => x.tam_ad.toLowerCase().includes(s) || (x.sistem_kullanici || '').toLowerCase().includes(s))
+      .slice(0, 6)
+      .map<Sonuc>(x => ({ tip: 'alt', ad: x.tam_ad, alt: x.sistem_kullanici, yol: `/abonelikler/${x.parent_id}/subdomainler/${x.id}`, key: 's' + x.id }))
+    return [...p, ...d, ...a]
+  })()
+
+  function git(yol: string) {
+    setAcik(false); setQ('')
+    navigate(yol)
+  }
+
+  function tusla(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') { setAcik(false); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setAktif(i => Math.min(i + 1, sonuclar.length - 1)); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setAktif(i => Math.max(i - 1, 0)); return }
+    if (e.key === 'Enter') {
+      if (sonuclar[aktif]) git(sonuclar[aktif].yol)
+      else if (s) navigate('/domainler')
+    }
+  }
 
   function temaDegistir() {
     const siradaki: Theme = tema === 'light' ? 'dark' : tema === 'dark' ? 'system' : 'light'
@@ -48,17 +142,55 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       {/* Dar ekranda ortalama boşluğu yok; lg'de eski ortalanmış arama korunur */}
       <div className="hidden lg:block flex-1" />
 
-      <div className="flex-1 lg:flex-none w-full lg:max-w-xl min-w-0">
+      <div className="flex-1 lg:flex-none w-full lg:max-w-xl min-w-0" ref={kutuRef}>
         <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
             type="text"
-            placeholder="Ara..."
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setAktif(0); setAcik(true); veriYukle() }}
+            onFocus={() => { veriYukle(); if (q) setAcik(true) }}
+            onKeyDown={tusla}
+            placeholder="Ara: domain, alt alan, sayfa (ör. yedek, firewall)…"
             aria-label="Ara"
+            role="combobox"
+            aria-expanded={acik && sonuclar.length > 0}
+            aria-controls="gosp-arama-sonuc"
+            autoComplete="off"
             className="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:bg-white dark:bg-slate-800 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/15 outline-none transition"
           />
+
+          {acik && s.length > 0 && (
+            <div id="gosp-arama-sonuc" role="listbox"
+              className="absolute left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-auto">
+              {sonuclar.length === 0 && !veri.current && (
+                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+              )}
+              {sonuclar.length === 0 && veri.current && (
+                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">"{q}" için sonuç yok</div>
+              )}
+              {sonuclar.map((r, i) => (
+                <button
+                  key={r.key}
+                  role="option"
+                  aria-selected={i === aktif}
+                  onMouseEnter={() => setAktif(i)}
+                  onClick={() => git(r.yol)}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition ${i === aktif ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                >
+                  <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${r.tip === 'sayfa' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : r.tip === 'domain' ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300'}`}>
+                    {r.tip === 'sayfa' ? 'sayfa' : r.tip === 'domain' ? 'domain' : 'alt alan'}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-800 dark:text-slate-200 truncate">{r.ad}</span>
+                    {r.alt && <span className="block text-[11px] font-mono text-slate-400 dark:text-slate-500 truncate">{r.alt}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

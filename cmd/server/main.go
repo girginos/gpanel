@@ -64,7 +64,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
-const version = "0.3.0-f2"
+const version = "0.3.0-f3"
 
 func main() {
 	cfg, err := config.Load()
@@ -344,6 +344,10 @@ func main() {
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}", subH.Sil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}", subH.Detay)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/php", subH.PHPDegistir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/php-settings", subH.PHPAyarGet)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/php-settings", subH.PHPAyarPut)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/web-sunucu", subH.WebGet)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/web-sunucu", subH.WebPut)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/ssl", subH.SSLDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKaldir)
