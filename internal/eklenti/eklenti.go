@@ -15,6 +15,7 @@ package eklenti
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -150,7 +151,24 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
-				return d.DialContext(ctx, "unix", e.soket)
+				// 🔴 Eklenti yeniden başlarken (kurulum/güncelleme) soket ~1-2sn YOK olur.
+				// Dial'ı kısa aralıklarla birkaç kez dene: istek yalnız dial BAŞARILI
+				// olunca gönderilir → retry METHOD-GÜVENLİ (POST çift işlenmez). Panel
+				// zaten ayakta; bu yalnız geçici pencereyi ŞEFFAF yapar.
+				var son error
+				for i := 0; i < 6; i++ {
+					c, err := d.DialContext(ctx, "unix", e.soket)
+					if err == nil {
+						return c, nil
+					}
+					son = err
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-time.After(250 * time.Millisecond):
+					}
+				}
+				return nil, son
 			},
 			ResponseHeaderTimeout: 0, // SSE: yanıt başlığı uzun sürebilir, sınırlama
 		},
@@ -183,8 +201,13 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 		},
 		FlushInterval: -1, // SSE: her yazımda anında flush
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			// eklenti ölü olabilir — panel ayakta kalır, kullanıcıya net hata
-			httpx.WriteError(w, http.StatusBadGateway, "eklentiye ulaşılamadı ("+ad+"): "+err.Error())
+			// eklenti ölü/yeniden başlıyor olabilir — panel AYAKTA kalır. Kullanıcıya
+			// ham teknik hata (dial unix ... connect ...) DEĞİL, nazik/eyleme dönük
+			// mesaj göster; gerçek hata yalnız log'a.
+			log.Printf("eklenti proxy [%s] ulaşılamadı: %v", ad, err)
+			w.Header().Set("Retry-After", "3")
+			httpx.WriteError(w, http.StatusServiceUnavailable,
+				"Bu modül şu an hazırlanıyor ya da yeniden başlatılıyor. Lütfen birkaç saniye sonra tekrar deneyin.")
 		},
 	}
 	rp.ServeHTTP(w, r)

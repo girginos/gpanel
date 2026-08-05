@@ -109,6 +109,10 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz tip (self-signed|letsencrypt)")
 		return
 	}
+	if SSLSuruyor(id) {
+		httpx.WriteError(w, http.StatusConflict, "Bu alan adı için SSL kurulumu zaten sürüyor.")
+		return
+	}
 	var alanAdi, sk, phpSurum, backend string
 	var isDemo int
 	err := h.DB.QueryRowContext(r.Context(),
@@ -118,10 +122,6 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	// 🔴 ErrNoRows DIŞI bir Scan hatası (ör. eksik kolon/DB arızası) EskiDEN
-	// YUTULUYORDU → alanAdi="" ile devam edilip openssl'e
-	// `-addext subjectAltName=DNS:,` gidiyor ("invalid null value") ya da yanlış
-	// vhost'a dokunuluyordu. Artık açıkça 500 döner.
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma: "+err.Error())
 		return
@@ -135,95 +135,16 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var certYol, keyYol string
-	switch req.Tip {
-	case "self-signed":
-		certYol, keyYol, err = provisioner.EnableSelfSigned(alanAdi, sk, phpSurum, backend)
-	case "letsencrypt":
-		certYol, keyYol, err = provisioner.EnableLetsEncrypt(alanAdi, sk, phpSurum, backend)
-	}
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "SSL kurulum: "+err.Error())
-		return
-	}
+	// ASENKRON: SSL çekimi (özellikle mail SSL — 7 SAN) uzun sürer; iş arka planda
+	// yürür (sekme kapansa da). İlerleme /domains/{id}/ssl/ilerleme'den izlenir.
+	mailSSL := req.MailSSL && req.Tip == "letsencrypt"
+	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, req.Tip, mailSSL)
 
-	// Varsayılan bitiş (cert okunamazsa): LE=90g, self-signed=365g.
-	varsayilan := time.Now().Add(365 * 24 * time.Hour)
-	if req.Tip == "letsencrypt" {
-		varsayilan = time.Now().Add(90 * 24 * time.Hour)
-	}
-	// 🔴 GERÇEĞİ diskteki cert'ten oku — istenen tipe DEĞİL. LE başarısız olup
-	// self-signed fail-safe'e düşülmüşse burada yakalanır ve DÜRÜST kaydedilir.
-	kaynak, bitis, gercekLE := sertifikaGercek(certYol, req.Tip, varsayilan)
-
-	// 🔴 KOPUK CONTEXT: LE+mail çekimi 30sn'yi aşabilir; tarayıcı (axios) o sırada
-	// isteği kesip bağlantıyı kapatırsa r.Context() İPTAL olur. Cert nginx'e kurulup
-	// yeniden yüklenmiş (site HTTPS) AMA bu UPDATE r.Context() ile yapılırsa
-	// "context canceled" ile DÜŞER → cert diskte ama panel "KORUMASIZ" der (durum
-	// diskle çelişir). Sonucu KALICI kılmak için ayrık context kullanılır.
-	dbCtx, iptal := context.WithTimeout(context.Background(), 15*time.Second)
-	defer iptal()
-	if _, err := h.DB.ExecContext(dbCtx,
-		`UPDATE domains SET ssl_aktif=1, ssl_kaynak=?, cert_path=?, key_path=?, ssl_bitis=?
-		 WHERE id=?`, kaynak, certYol, keyYol, bitis, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
-		return
-	}
-
-	yanit := map[string]any{
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"ok":    true,
-		"id":    id,
-		"tip":   kaynak, // GERÇEK kaynak (istenen değil)
-		"cert":  certYol,
-		"key":   keyYol,
-		"bitis": bitis.Format("2006-01-02"),
-	}
-	// LE istendi ama self-signed'a düşüldü → SESSİZ GEÇME, açıkça söyle
-	// (mail yolu gibi dürüst). Kullanıcı "KORUMALI/Let's Encrypt" sanmasın.
-	if req.Tip == "letsencrypt" && !gercekLE {
-		yanit["ssl_uyari"] = "Let's Encrypt sertifikası ALINAMADI; site geçici olarak " +
-			"kendinden imzalı (self-signed) sertifikayla ayakta tutuluyor — tarayıcı " +
-			"“güvenli değil” uyarısı verebilir. En sık sebep: alan adı bu sunucuya " +
-			"çözülmüyor ya da ACME challenge (/.well-known/acme-challenge/) doğrulanamıyor. " +
-			"DNS’i bu sunucuya yöneltip tekrar deneyin."
-	}
-
-	// Mail SSL — yalnız Let's Encrypt + mail eklentisi aktifse. mail.<d>+webmail.<d>
-	// için AYRI cert alınır, mail stack'e (eklenti /sertifika) kurulur ve
-	// webmail vhost'u GERÇEK sertifikaya geçirilir. Başarısızlık web SSL'i
-	// ETKİLEMEZ (uyarı döner — sessiz başarı yok).
-	//
-	// 🔴 SAN TUZAĞI provisioner'da çözülür: mail./webmail. adları SAN'a
-	// girmeden ÖNCE tek tek sınanır (DNS + challenge 200). Doğrulanamayan ad
-	// SAN'dan ÇIKARILIR ve burada 'mail_ssl_atlanan' olarak RAPORLANIR —
-	// aksi halde tek bir ad yüzünden TÜM LE siparişi düşerdi.
-	if req.MailSSL && req.Tip == "letsencrypt" {
-		if !h.mailEklentiAktif(r.Context()) {
-			yanit["mail_ssl_uyari"] = "mail eklentisi etkin değil — mail SSL atlandı"
-		} else if mc, mk, kapsam, atlanan, e := provisioner.MailSertifikaAl(alanAdi, sk); e != nil {
-			yanit["mail_ssl_uyari"] = "mail cert alınamadı: " + e.Error()
-			if len(atlanan) > 0 {
-				yanit["mail_ssl_atlanan"] = atlanan
-			}
-		} else {
-			yanit["mail_ssl"] = true
-			yanit["mail_kapsam"] = kapsam
-			if len(atlanan) > 0 {
-				yanit["mail_ssl_atlanan"] = atlanan
-			}
-			if e := provisioner.MailSertifikaGonder(alanAdi, mc, mk); e != nil {
-				yanit["mail_ssl_uyari"] = "mail cert alındı ama eklentiye gönderilemedi: " + e.Error()
-			}
-			// Webmail'i self-signed'dan GERÇEK sertifikaya geçir.
-			if e := provisioner.WebmailVhostDomainYaz(alanAdi, mc, mk); e != nil {
-				yanit["webmail_vhost_uyari"] = "webmail vhost'u güncellenemedi: " + e.Error()
-			} else {
-				yanit["webmail_https"] = "https://webmail." + alanAdi
-			}
-		}
-	}
-
-	httpx.WriteJSON(w, http.StatusOK, yanit)
+		"durum": "basladi",
+		"mesaj": "SSL kurulumu başladı — ilerleme aşağıda görünecek. Sayfayı kapatsanız bile kurulum arka planda sürer.",
+	})
 }
 
 func (h *Handlers) SSLDisable(w http.ResponseWriter, r *http.Request) {

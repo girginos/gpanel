@@ -14,6 +14,8 @@ type SSLDurum = {
   cert_yol?: string
   key_yol?: string
 }
+type SSLAdim = { ad: string; etiket: string; durum: string; mesaj?: string; sure?: string }
+type SSLIlerleme = { durum: string; adimlar?: SSLAdim[]; hata?: string }
 
 export default function DomainSSLPage() {
   const { id } = useParams()
@@ -25,6 +27,9 @@ export default function DomainSSLPage() {
   const [uyari, setUyari] = useState<string | null>(null)  // LE alınamadı → self-signed fail-safe vb.
   const [mailAktif, setMailAktif] = useState(false)  // mail eklentisi kurulu+etkin mi
   const [mailSSL, setMailSSL] = useState(true)       // "posta sunucusunu de güvenceye al"
+  // Asenkron kurulum ilerlemesi (adım-adım). isDurum: ''|calisiyor|tamam|hata.
+  const [adimlar, setAdimlar] = useState<SSLAdim[]>([])
+  const [isDurum, setIsDurum] = useState<string>('')
 
   function yukle() {
     if (!id) return
@@ -37,31 +42,63 @@ export default function DomainSSLPage() {
   }
   useEffect(yukle, [id])
 
+  // İlerlemeyi çek. Biten kurulumda (tamam/hata) sonucu banner'a yazar ve durum
+  // kartını yeniler. Sayfa yeniden açılırsa DEVAM EDEN iş kaldığı yerden görünür.
+  function ilerlemeCek(sonra?: () => void) {
+    if (!id) return
+    api.get<SSLIlerleme>(`/domains/${id}/ssl/ilerleme`).then(r => {
+      const d = r.data
+      if (!d || d.durum === 'yok') { sonra?.(); return }
+      setAdimlar(d.adimlar || [])
+      setIsDurum(d.durum)
+      if (d.durum !== 'calisiyor') {
+        // Bitti: cert durumunu yenile + sonucu özetle.
+        yukle()
+        const uyarili = (d.adimlar || []).filter(a => a.durum === 'uyari')
+        if (d.durum === 'hata') {
+          setHata('SSL kurulumu başarısız: ' + (d.hata || (d.adimlar || []).find(a => a.durum === 'hata')?.mesaj || ''))
+        } else if (uyarili.length) {
+          setUyari('SSL kuruldu, bazı adımlar uyarıyla tamamlandı: ' + uyarili.map(a => a.mesaj).filter(Boolean).join(' | '))
+        } else {
+          setBasari('SSL kurulumu tamamlandı — site artık HTTPS üzerinden çalışıyor.')
+        }
+      }
+      sonra?.()
+    }).catch(() => sonra?.())
+  }
+
+  // Devam eden iş varken 1.5 sn'de bir çek.
+  useEffect(() => {
+    if (isDurum !== 'calisiyor') return
+    const t = setInterval(() => ilerlemeCek(), 1500)
+    return () => clearInterval(t)
+  }, [isDurum, id])
+
+  // İlk açılışta: YALNIZ devam eden bir kurulum varsa göster (sekme kapanıp
+  // açıldıysa kaldığı yerden). Biten eski işi her açılışta gösterme.
+  useEffect(() => {
+    if (!id) return
+    api.get<SSLIlerleme>(`/domains/${id}/ssl/ilerleme`).then(r => {
+      if (r.data && r.data.durum === 'calisiyor') {
+        setAdimlar(r.data.adimlar || [])
+        setIsDurum('calisiyor')
+      }
+    }).catch(() => {})
+  }, [id])
+
   async function issue(tip: 'self-signed' | 'letsencrypt') {
     if (tip === 'letsencrypt' && !confirm('Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?')) return
-    setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
+    setIsleniyor(true); setHata(null); setBasari(null); setUyari(null); setAdimlar([])
     try {
       const govde: { tip: string; mail_ssl?: boolean } = { tip }
       if (tip === 'letsencrypt' && mailAktif && mailSSL) govde.mail_ssl = true
-      // 🔴 LE doğrulaması + (mail SSL'de) 5 alt-alan sertifikası 30sn'yi aşabilir;
-      // global 30sn timeout burada isteği erken keser → tarayıcı "timeout" der ve
-      // bağlantı kopunca sunucu tarafı DB UPDATE'i de düşerdi. Bu çağrıya özel geniş süre.
-      const { data } = await api.post(`/domains/${id}/ssl/issue`, govde, { timeout: 180_000 })
-      // 🔴 GERÇEK kaynağı sunucu döner (data.tip) — istenen 'tip'e GÜVENME:
-      // LE başarısız olup self-signed'a düşülmüşse data.tip='self-signed' olur.
-      const gercekTip = data.tip === 'letsencrypt' ? "Let's Encrypt" : 'öz-imzalı (self-signed)'
-      let mailNot = ''
-      if (data.mail_ssl) mailNot = ' Posta sunucusu da güvenceye alındı (mail. + webmail.).'
-      else if (data.mail_ssl_uyari) mailNot = ` Not: ${data.mail_ssl_uyari}`
-      if (data.ssl_uyari) {
-        // LE istendi ama alınamadı → başarı DEĞİL, uyarı olarak göster.
-        setUyari(data.ssl_uyari + mailNot)
-      } else {
-        setBasari(`Sertifika kuruldu (${gercekTip}). Bitiş: ${data.bitis}. Site artık HTTPS üzerinden çalışıyor.${mailNot}`)
-      }
-      yukle()
+      // 🔴 ASENKRON: istek HEMEN döner ("başladı"); SSL çekimi arka planda sürer
+      // (sayfa kapansa da). İlerleme aşağıda adım-adım gösterilir — poll başlar.
+      await api.post(`/domains/${id}/ssl/issue`, govde)
+      setIsDurum('calisiyor')   // poll useEffect'i tetikler
+      ilerlemeCek()             // ilk adımı hemen göster
     } catch (e) {
-      setHata(apiHata(e, 'SSL kurulumu başarısız'))
+      setHata(apiHata(e, 'SSL kurulumu başlatılamadı'))
     } finally {
       setIsleniyor(false)
     }
@@ -102,7 +139,41 @@ export default function DomainSSLPage() {
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {uyari && <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-800 dark:text-amber-300">{uyari}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-      {isleniyor && <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">İşlem sürüyor — Let's Encrypt doğrulaması (özellikle posta alt-alanlarıyla) 1–2 dakika sürebilir. Lütfen bu sayfada bekleyin.</div>}
+      {/* Adım-adım kurulum ilerlemesi (asenkron; sayfa kapansa da sürer) */}
+      {(isDurum === 'calisiyor' || (isDurum && adimlar.length > 0)) && (
+        <div className="mb-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-2">
+            {isDurum === 'calisiyor' && <span className="inline-block w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />}
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              {isDurum === 'calisiyor' ? 'SSL kuruluyor…' : isDurum === 'hata' ? 'SSL kurulumu — hata' : 'SSL kurulumu tamamlandı'}
+            </h2>
+          </div>
+          {isDurum === 'calisiyor' && (
+            <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">
+              Bu sayfayı kapatabilirsiniz; kurulum arka planda sürer. Posta SSL'inde 7 alt-alan (mail, webmail, smtp, imap, pop, autoconfig, autodiscover) tek tek doğrulandığı için 1–2 dakika sürebilir.
+            </p>
+          )}
+          <ol className="space-y-2.5">
+            {adimlar.map((a, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm">
+                <span className="mt-0.5 shrink-0 w-4 text-center">
+                  {a.durum === 'tamam' ? <span className="text-emerald-500 font-bold">✓</span>
+                    : a.durum === 'uyari' ? <span className="text-amber-500 font-bold">!</span>
+                    : a.durum === 'hata' ? <span className="text-red-500 font-bold">✗</span>
+                    : <span className="inline-block w-3.5 h-3.5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin align-middle" />}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-slate-800 dark:text-slate-200">
+                    {a.etiket}
+                    {a.sure && a.durum !== 'calisiyor' && <span className="text-slate-400 dark:text-slate-500"> ({a.sure})</span>}
+                  </div>
+                  {a.mesaj && <div className={'text-xs mt-0.5 break-words ' + (a.durum === 'hata' ? 'text-red-600 dark:text-red-400' : a.durum === 'uyari' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-500')}>{a.mesaj}</div>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       {/* Durum kartı */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5">
@@ -139,7 +210,7 @@ export default function DomainSSLPage() {
             <Sat e="Anahtar yolu" d={durum.key_yol || '—'} mono />
             <button
               onClick={disable}
-              disabled={isleniyor}
+              disabled={isleniyor || isDurum === 'calisiyor'}
               className="mt-4 px-4 py-2 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 disabled:opacity-50 rounded-md text-sm font-medium transition"
             >
               SSL'i Kaldır (HTTP'ye dön)
@@ -173,10 +244,10 @@ export default function DomainSSLPage() {
             </ul>
             <button
               onClick={() => issue('self-signed')}
-              disabled={isleniyor}
+              disabled={isleniyor || isDurum === 'calisiyor'}
               className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md transition"
             >
-              {isleniyor ? 'Kuruluyor…' : 'Self-Signed Kur'}
+              {(isleniyor || isDurum === 'calisiyor') ? 'Kuruluyor…' : 'Self-Signed Kur'}
             </button>
           </div>
 
@@ -206,10 +277,10 @@ export default function DomainSSLPage() {
             )}
             <button
               onClick={() => issue('letsencrypt')}
-              disabled={isleniyor}
+              disabled={isleniyor || isDurum === 'calisiyor'}
               className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-md transition"
             >
-              {isleniyor ? 'Kuruluyor…' : 'Let\'s Encrypt Sertifikası Al'}
+              {(isleniyor || isDurum === 'calisiyor') ? 'Kuruluyor…' : 'Let\'s Encrypt Sertifikası Al'}
             </button>
           </div>
         </div>

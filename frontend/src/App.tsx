@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import LoginPage from '@/pages/LoginPage'
 import DashboardLayout from '@/components/DashboardLayout'
@@ -66,7 +66,13 @@ import YakindaPage from '@/pages/YakindaPage'
 
 function GuardedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuth((s) => s.token)
-  if (!token) return <Navigate to="/giris" replace />
+  const loc = useLocation()
+  if (!token) {
+    // Gelmek istenen yolu koru; giriş sonrası oraya DÖN (login'de bırakma).
+    const hedef = loc.pathname + loc.search
+    const next = hedef && hedef !== '/' ? `?next=${encodeURIComponent(hedef)}` : ''
+    return <Navigate to={`/giris${next}`} replace />
+  }
   return <>{children}</>
 }
 

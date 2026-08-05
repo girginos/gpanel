@@ -1,7 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 
@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [yukleniyor, setYukleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const navigate = useNavigate()
+  const [sp] = useSearchParams()
   const giris = useAuth((s) => s.giris)
 
   async function onSubmit(e: React.FormEvent) {
@@ -32,7 +33,11 @@ export default function LoginPage() {
         return
       }
       giris(data.token!, data.kullanici!, data.bitis!)
-      navigate('/', { replace: true })
+      // returnTo: gelmek istenen iç yola dön. 🔴 Açık-yönlendirme koruması —
+      // yalnız '/' ile başlayan ama '//' (protokol-göreli) OLMAYAN yol kabul edilir.
+      const next = sp.get('next') || ''
+      const hedef = next.startsWith('/') && !next.startsWith('//') ? next : '/'
+      navigate(hedef, { replace: true })
     } catch (err) {
       setHata(apiHata(err, 'Giriş başarısız'))
     } finally {
