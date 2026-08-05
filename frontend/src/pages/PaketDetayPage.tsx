@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 
@@ -8,6 +9,7 @@ type Plan = {
   id: number; ad: string; aciklama: string
   disk_kota_mb: number; trafik_kota_mb: number
   max_domain: number; max_db: number; max_email: number; max_ftp: number
+  saatlik_mail_limiti: number; mail_kutu_kota_mb: number
   cpu_yuzde: number; ram_mb: number; max_process: number
   inode_kota: number; io_agirlik: number; mysql_max_baglanti: number
   pm_max_children: number
@@ -32,12 +34,19 @@ export default function PaketDetayPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
+  // Mail eklentisi aktif+odemeli ise posta limiti alanlari gorunur.
+  // DomainPlanPage ile AYNI kapi -- lisans kalkinca alanlar kendiliginden gizlenir.
+  const [mailAktif, setMailAktif] = useState(false)
   const [uygulananID, setUygulananID] = useState<number | null>(null)
   const [sonucID, setSonucID] = useState<{ id: number; ok: boolean } | null>(null)
 
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
+    // Mail eklentisi aktif mi? (posta limiti alanlarinin kapisi)
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
     Promise.all([
       api.get<GetResp>(`/plans/${id}`),
       api.get<Domain[]>(`/plans/${id}/domains`),
@@ -50,7 +59,7 @@ export default function PaketDetayPage() {
   }
   useEffect(yukle, [id])
   useEffect(() => {
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(() => {})
+    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala('PHP sürümleri alınamadı'))
   }, [])
 
   async function kaydet() {
@@ -216,7 +225,7 @@ export default function PaketDetayPage() {
           </div>
         </Kart>
 
-        {/* Sayısal Sınırlar (E-posta kaldırıldı) */}
+        {/* Sayısal Sınırlar — posta alanlari mail eklentisi aktifken eklenir */}
         <Kart baslik="Sayısal Sınırlar" ikon="🔢" alt="Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <Alan etiket="Domain">
@@ -228,6 +237,21 @@ export default function PaketDetayPage() {
             <Alan etiket="FTP Hesabı">
               <input type="number" min={0} value={plan.max_ftp} onChange={e => P('max_ftp', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
+            {/* Posta limitleri: YALNIZ mail eklentisi aktifken. Eklenti yokken
+                bu alanlari gostermek, olmayan bir ozelligi vaat etmek olurdu. */}
+            {mailAktif && (
+              <>
+                <Alan etiket="E-posta Kutusu" ipucu="Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz">
+                  <input type="number" min={0} value={plan.max_email} onChange={e => P('max_email', Number(e.target.value) || 0)} className={inpNum} />
+                </Alan>
+                <Alan etiket="Saatlik Gönderim" ipucu="Kutu basina giden mail/saat. 0 = sinirsiz">
+                  <input type="number" min={0} value={plan.saatlik_mail_limiti} onChange={e => P('saatlik_mail_limiti', Number(e.target.value) || 0)} className={inpNum} />
+                </Alan>
+                <Alan etiket="Kutu Depolama (MB)" ipucu="Posta kutusu basina disk kotasi. 0 = sinirsiz">
+                  <input type="number" min={0} value={plan.mail_kutu_kota_mb} onChange={e => P('mail_kutu_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+                </Alan>
+              </>
+            )}
           </div>
         </Kart>
 

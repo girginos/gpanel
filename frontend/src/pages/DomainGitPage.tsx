@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
@@ -48,7 +49,7 @@ export default function DomainGitPage() {
   function yukle() {
     if (!id) return
     setYuk(true)
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
     api.get<Repo | null>(`/domains/${id}/git`)
       .then(r => { setRepo(r.data); if (r.data) { setRepoUrl(r.data.repo_url); setBranch(r.data.branch); setTargetDir(r.data.target_dir) } })
       .catch(e => setHata(apiHata(e)))
@@ -60,7 +61,7 @@ export default function DomainGitPage() {
         if (r.data.secili_branch) setGhSelectedBranch(r.data.secili_branch)
         ghLoadRepos()
       }
-    }).catch(() => {})
+    }).catch(hataYakala('GitHub bağlantısı alınamadı'))
   }
   useEffect(yukle, [id])
 

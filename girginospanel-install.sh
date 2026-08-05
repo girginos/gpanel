@@ -140,7 +140,26 @@ systemctl restart mariadb >/dev/null 2>&1; sleep 2
 systemctl is-active --quiet mariadb || die "MariaDB (güvenlik sertleştirmesi sonrası) başlamadı"
 ok "MariaDB güvenlik: 3306 dışa kapalı (bind 127.0.0.1) + local-infile kapalı"
 
-DBPASS=$(openssl rand -hex 16)
+# 🔴 SIR ROTASYONU YOK — kurulum sır bakımından IDEMPOTENT olmalı.
+# Eski davranış: her çalıştırmada YENİ rastgele DBPASS üretilip canlı MySQL
+# kullanıcısına ALTER USER uygulanıyordu. Betik aynı sunucuda ikinci kez koştuğunda
+# (dev kanalı "güncelleme" akışı tam olarak budur) çalışan panel süreci hâlâ ESKİ
+# parolayı bellekte tutuyordu → bu adım ile adım 12'deki restart arasındaki TÜM
+# istekler `Error 1045 Access denied for user 'panel'@'127.0.0.1'` alıyordu; betik
+# o aralıkta herhangi bir nedenle die ederse panel KALICI bozuk kalıyordu.
+# (Oturum kontrolü DB hatasında fail-open olduğundan bu aynı zamanda bir güvenlik
+# penceresiydi — ayrı iş.)
+# Yeni davranış: sır YOKSA üretilir, VARSA env'deki değer aynen korunur ve MySQL
+# kullanıcısı ona hizalanır — sürüklenmiş bir parolayı da onarır. N'inci koşu
+# 1'inci koşuyla aynı sonucu verir.
+ENVF=/etc/girginospanel/env
+env_deger() { [ -f "$ENVF" ] && sed -n "s/^$1=//p" "$ENVF" | head -1; }
+
+# DSN biçimi: panel:<PAROLA>@tcp(127.0.0.1:3306)/panel?...  (parola hex → '@' içermez)
+DBPASS=$(env_deger PANEL_DB_DSN | sed -n 's/^panel:\(.*\)@tcp(.*/\1/p')
+if [ -n "$DBPASS" ]; then DBPASS_KAYNAK="mevcut env'den korundu"
+else DBPASS=$(openssl rand -hex 16); DBPASS_KAYNAK="yeni üretildi"; fi
+
 mysql -u root <<SQL
 CREATE DATABASE IF NOT EXISTS panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'panel'@'127.0.0.1' IDENTIFIED BY '$DBPASS';
@@ -148,23 +167,50 @@ ALTER USER 'panel'@'127.0.0.1' IDENTIFIED BY '$DBPASS';
 GRANT ALL PRIVILEGES ON panel.* TO 'panel'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
-ok "panel DB + kullanıcı (panel@127.0.0.1)"
+# Doğrula: "ALTER USER hata vermedi" YETMEZ — parolanın gerçekten çalıştığını panel
+# kullanıcısıyla bağlanarak kanıtla. Aksi halde bozukluk ancak adım 12'de görülürdü.
+mysql -u panel -p"$DBPASS" -h 127.0.0.1 -e 'SELECT 1' panel >/dev/null 2>&1 \
+  || die "panel DB kullanıcısı doğrulanamadı (parola env ile hizalanmadı) — kurulum durduruldu"
+ok "panel DB + kullanıcı (panel@127.0.0.1) — parola $DBPASS_KAYNAK, bağlantı DOĞRULANDI"
 
 # ============ 5) DİZİNLER + ENV ============
 step "5) Dizinler + env"
 mkdir -p /opt/girginospanel/bin /opt/girginospanel/frontend-dist /opt/girginospanel/src/migrations \
+         /opt/girginospanel/src/eklentiler /opt/girginospanel/eklentiler \
          /opt/girginospanel/pma-signon /etc/girginospanel /etc/ssl/girginospanel
-JWT=$(openssl rand -hex 32); RADMIN=$(openssl rand -hex 24)
-cat > /etc/girginospanel/env <<ENV
-PANEL_LISTEN=127.0.0.1:8080
+# Sırlar: DBPASS gibi JWT ve Redis admin parolası da YALNIZCA yoksa üretilir.
+# JWT rotasyonu tüm oturumları düşürür; Redis parolası rotasyonu redis-setup'ın
+# yazdığı değerle senkron kalmayabilir. Yeniden kurulumda ikisine de dokunma.
+JWT=$(env_deger PANEL_JWT_SECRET);           [ -n "$JWT" ]    || JWT=$(openssl rand -hex 32)
+RADMIN=$(env_deger PANEL_REDIS_ADMIN_PASS);  [ -n "$RADMIN" ] || RADMIN=$(openssl rand -hex 24)
+OMUR=$(env_deger PANEL_JWT_LIFETIME_SEC);    [ -n "$OMUR" ]   || OMUR=43200
+DINLE=$(env_deger PANEL_LISTEN);             [ -n "$DINLE" ]  || DINLE=127.0.0.1:8080
+
+# 🔴 Bizim yönetmediğimiz anahtarları KORU. Eski `cat > env` env'i komple eziyordu;
+# sonradan eklenen PANEL_LISANS_SUNUCU gibi satırlar her kurulumda siliniyor ve panel
+# lisans sunucusu için koddaki/DB'deki varsayılana geri düşüyordu.
+EKSTRA=""
+if [ -f "$ENVF" ]; then
+  EKSTRA=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENVF" \
+    | grep -vE '^(PANEL_LISTEN|PANEL_ENV|PANEL_DB_DSN|PANEL_JWT_SECRET|PANEL_JWT_LIFETIME_SEC|PANEL_REDIS_ADMIN_PASS)=')
+fi
+
+# Atomik yaz: yazma sırasında betik ölürse yarım/boş env kalmasın (env'siz panel açılmaz).
+ENVTMP=$(mktemp /etc/girginospanel/.env.XXXXXX)
+chmod 600 "$ENVTMP"
+cat > "$ENVTMP" <<ENV
+PANEL_LISTEN=${DINLE}
 PANEL_ENV=production
 PANEL_DB_DSN=panel:${DBPASS}@tcp(127.0.0.1:3306)/panel?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci
 PANEL_JWT_SECRET=${JWT}
-PANEL_JWT_LIFETIME_SEC=43200
+PANEL_JWT_LIFETIME_SEC=${OMUR}
 PANEL_REDIS_ADMIN_PASS=${RADMIN}
 ENV
-chmod 600 /etc/girginospanel/env
-ok "/etc/girginospanel/env (JWT + DB DSN + Redis admin üretildi)"
+if [ -n "$EKSTRA" ]; then printf '%s\n' "$EKSTRA" >> "$ENVTMP"; fi
+mv -f "$ENVTMP" "$ENVF"
+chmod 600 "$ENVF"
+EKSAY=0; [ -n "$EKSTRA" ] && EKSAY=$(printf '%s\n' "$EKSTRA" | wc -l)
+ok "$ENVF (DB DSN + JWT + Redis admin korundu/üretildi; $EKSAY ek anahtar korundu)"
 
 # ============ 6) ARTIFACT DEPLOY ============
 step "6) Panel binary + frontend + migration"
@@ -172,6 +218,13 @@ install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-s
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
 tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
 tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
+# Lisanslı eklenti payload'ları: ikili sunucuya gelir ama gate KAPALI (aktif=0).
+# Lisans girilene kadar çalıştırılmaz; lisans girilince kurulum bunu yerine koyar.
+if [ -d "$A/eklentiler" ]; then
+  cp -a "$A/eklentiler/." /opt/girginospanel/src/eklentiler/ 2>/dev/null
+  chmod -R 0755 /opt/girginospanel/src/eklentiler 2>/dev/null
+  ok "eklenti payload ($(find /opt/girginospanel/src/eklentiler -type f 2>/dev/null | wc -l) dosya)"
+fi
 # ops tool + signon
 for t in "$A"/ops/*; do
   bn=$(basename "$t"); nm="${bn%.sh}"

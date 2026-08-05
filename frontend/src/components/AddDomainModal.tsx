@@ -2,6 +2,7 @@
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Modal from './Modal'
 
 const PHP_FALLBACK = ['7.4', '8.1', '8.2', '8.3', '8.4']
@@ -37,8 +38,8 @@ export default function AddDomainModal({
         setPlanId(vars.id)
         if (vars.php_surum) setPhpSurum(vars.php_surum)
       }
-    }).catch(() => {})
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(() => {})
+    }).catch(hataYakala('Planlar yüklenemedi'))
+    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala('PHP sürümleri alınamadı'))
   }, [acik])
 
   function planDegis(v: string) {

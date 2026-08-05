@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import DizinAgac from '@/components/DizinAgac'
 import KodEditor from '@/components/KodEditor'
@@ -51,7 +52,7 @@ export default function DomainFilesPage() {
     api.get<{ docroot: string }>(`/domains/${id}/subdomain/${sid}`).then(r => {
       const rel = (r.data.docroot || '').replace(/^\/home\/[^/]+/, '')
       if (rel) setYol(rel)
-    }).catch(() => {})
+    }).catch(hataYakala('Alt alan belge kökü alınamadı'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, sid])
   const [icerik, setIcerik] = useState<Entry[]>([])
@@ -90,7 +91,7 @@ export default function DomainFilesPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
   }, [id])
 
   function tara() {

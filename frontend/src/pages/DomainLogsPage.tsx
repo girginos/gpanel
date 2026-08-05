@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
@@ -37,7 +38,7 @@ export default function DomainLogsPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
     api.get<LogDosya[]>(`${base}/logs`).then(r => setDosyalar(r.data)).catch(e => setHata(apiHata(e)))
   }, [id])
 

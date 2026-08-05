@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -130,9 +131,9 @@ export default function DomainDNSPage() {
   }
   useEffect(() => {
     if (id) {
-      api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
-      api.get<typeof soa>(`/domains/${id}/dns/soa`).then(r => setSoa(r.data)).catch(() => {})
-      api.get<DNSSEC>(`/domains/${id}/dns/dnssec`).then(r => setDnssec(r.data)).catch(() => {})
+      api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
+      api.get<typeof soa>(`/domains/${id}/dns/soa`).then(r => setSoa(r.data)).catch(hataYakala('SOA kaydı alınamadı'))
+      api.get<DNSSEC>(`/domains/${id}/dns/dnssec`).then(r => setDnssec(r.data)).catch(hataYakala('DNSSEC durumu alınamadı'))
     }
     yukle()
   }, [id])

@@ -52,6 +52,15 @@ func builtinDefaults() []TemplateRow {
 		{Ad: "@", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 10, Aktif: true},
 		{Ad: "www", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 20, Aktif: true},
 		{Ad: "mail", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 30, Aktif: true},
+		{Ad: "webmail", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 31, Aktif: true},
+		// Mail istemci otomatik yapılandırma host'ları (Thunderbird autoconfig / Outlook autodiscover).
+		{Ad: "autoconfig", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 32, Aktif: true},
+		{Ad: "autodiscover", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 34, Aktif: true},
+		// Outlook/istemci gelenek adları — kullanıcı smtp./imap./pop. girse de
+		// TLS geçerli olsun (SAN + SNI bu adları kapsar). Hepsi sunucuya A ile döner.
+		{Ad: "smtp", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 35, Aktif: true},
+		{Ad: "imap", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 36, Aktif: true},
+		{Ad: "pop", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 37, Aktif: true},
 		{Ad: "@", Tip: "MX", Deger: "mail.{DOMAIN}", TTL: 3600, Oncelik: 10, Sira: 40, Aktif: true},
 		{Ad: "@", Tip: "TXT", Deger: "v=spf1 a mx ip4:{IP} ~all", TTL: 3600, Oncelik: 0, Sira: 50, Aktif: true},
 		{Ad: "_dmarc", Tip: "TXT", Deger: "v=DMARC1; p=quarantine; rua=mailto:postmaster@{DOMAIN}; ruf=mailto:postmaster@{DOMAIN}; fo=1; adkim=r; aspf=r", TTL: 3600, Oncelik: 0, Sira: 60, Aktif: true},
@@ -60,6 +69,12 @@ func builtinDefaults() []TemplateRow {
 		{Ad: "ns2", Tip: "A", Deger: "{IP}", TTL: 3600, Oncelik: 0, Sira: 90, Aktif: true},
 		{Ad: "@", Tip: "NS", Deger: "ns1.{DOMAIN}", TTL: 86400, Oncelik: 0, Sira: 100, Aktif: true},
 		{Ad: "@", Tip: "NS", Deger: "ns2.{DOMAIN}", TTL: 86400, Oncelik: 0, Sira: 110, Aktif: true},
+		// Mail istemci keşif SRV kayıtları (Değer = "ağırlık port hedef"; öncelik ayrı kolonda).
+		// Outlook autodiscover (SRV yöntemi) + RFC 6186 IMAP/POP/submission.
+		{Ad: "_autodiscover._tcp", Tip: "SRV", Deger: "0 443 autodiscover.{DOMAIN}", TTL: 3600, Oncelik: 0, Sira: 120, Aktif: true},
+		{Ad: "_imaps._tcp", Tip: "SRV", Deger: "1 993 mail.{DOMAIN}", TTL: 3600, Oncelik: 0, Sira: 122, Aktif: true},
+		{Ad: "_submission._tcp", Tip: "SRV", Deger: "1 587 mail.{DOMAIN}", TTL: 3600, Oncelik: 0, Sira: 124, Aktif: true},
+		{Ad: "_pop3s._tcp", Tip: "SRV", Deger: "1 995 mail.{DOMAIN}", TTL: 3600, Oncelik: 0, Sira: 126, Aktif: true},
 	}
 }
 

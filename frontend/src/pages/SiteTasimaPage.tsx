@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Breadcrumb from '@/components/Breadcrumb'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import { T } from '@/lib/tablo'
 
 /*
@@ -225,9 +226,9 @@ export default function SiteTasimaPage() {
 
   // Plan + sahiplik hedefleri.
   useEffect(() => {
-    api.get<Plan[]>('/plans').then(r => { const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(() => {})
-    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(() => {})
-    api.get<Musteri[]>('/customers').then(r => setMusteriler(r.data || [])).catch(() => {})
+    api.get<Plan[]>('/plans').then(r => { const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(hataYakala('Planlar yüklenemedi'))
+    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(hataYakala('Bayiler yüklenemedi'))
+    api.get<Musteri[]>('/customers').then(r => setMusteriler(r.data || [])).catch(hataYakala('Müşteriler yüklenemedi'))
 
   }, [])
 

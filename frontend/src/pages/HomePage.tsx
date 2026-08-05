@@ -35,6 +35,30 @@ type Sistem = {
 }
 type Domain = { id: number; alan_adi: string; ssl: boolean; durum: string }
 
+/* ============ VERI CEKME DURUMU - "hazir degil" ile "HATA" AYRI ============
+   KRITIK: Bu ayrim olmadan taze kurulumda panel BOZUK gorunuyordu. Bir uc henuz
+   hazir olmadigi icin cevap veremedigi anda kart ya sonsuz "Yukleniyor..."da
+   takiliyor ya da DAHA KOTUSU veri yokken iyimser bir sey iddia ediyordu
+   (ornegin panel-guncelleme karti hicbir veri gelmeden yesil "Guncel" yaziyordu).
+   Ucun cevap vermemesi ile "her sey yolunda" AYNI SEY DEGILDIR.
+
+   yukleniyor   - ilk cevap henuz gelmedi (normal)
+   hazir        - veri geldi
+   hazirlaniyor - uc HENUZ hazir degil. NOTR gosterilir, kirmizi hata DEGIL.
+                  (402 = parali eklenti lisansi henuz dogrulanmadi / bilet yazilmadi,
+                   423 / 425 / 503 = servis ayaga kalkiyor)
+   hata         - GERCEK hata: 5xx, beklenmeyen kod veya ag kopmasi. Kirmizi.
+*/
+type Cekim = 'yukleniyor' | 'hazir' | 'hazirlaniyor' | 'hata'
+
+// cekimSinifi - HTTP kodundan siniflandirir. Yanit YOKSA (status yok) bu gercek
+// bir ag hatasidir; "hazirlaniyor" diye yumusatilmaz.
+function cekimSinifi(err: unknown): Cekim {
+  const kod = (err as { response?: { status?: number } })?.response?.status
+  if (kod === 402 || kod === 423 || kod === 425 || kod === 503) return 'hazirlaniyor'
+  return 'hata'
+}
+
 /* --- yeni uçlar --- */
 type Guncelleme = { arac_var: boolean; calisiyor: boolean; durum: string }
 type Optimize = { calisiyor: boolean; durum: string }
@@ -129,6 +153,15 @@ export default function HomePage() {
   const [yedek, setYedek] = useState<YedekOzet | null>(null)
   const [wp, setWp] = useState<WpKurulum[] | null>(null)
 
+  // Her veri kaynagi icin AYRI cekim durumu - bir ucun sessizce dusmesi baska
+  // bir karti "veri yok" gibi gostermesin.
+  const [cekim, setCekim] = useState<Record<string, Cekim>>({
+    sistem: 'yukleniyor', guncelleme: 'yukleniyor', optimize: 'yukleniyor',
+    domainler: 'yukleniyor', yedek: 'yukleniyor', wp: 'yukleniyor',
+  })
+  const cekimYaz = (k: string, v: Cekim) =>
+    setCekim((p) => (p[k] === v ? p : { ...p, [k]: v }))
+
   // --- pano düzeni durumu ---
   const [duzen, setDuzen] = useState<Duzen>(VARSAYILAN_DUZEN)
   const [aktifId, setAktifId] = useState<string | null>(null)
@@ -188,23 +221,39 @@ export default function HomePage() {
     const cekKullanim = () => {
       if (isBayi) return
       if (typeof document !== 'undefined' && document.hidden) return // sekme gizliyken poll'u duraklat
-      api.get<Sistem>('/system/usage').then((r) => setS(r.data)).catch(() => {})
+      api.get<Sistem>('/system/usage')
+        .then((r) => { setS(r.data); cekimYaz('sistem', 'hazir') })
+        .catch((e) => cekimYaz('sistem', cekimSinifi(e)))
     }
     const cekBakim = () => {
       if (isBayi) return
       if (typeof document !== 'undefined' && document.hidden) return
-      api.get<Guncelleme>('/system/guncelleme').then((r) => setGuncelleme(r.data)).catch(() => {})
-      api.get<Optimize>('/system/optimize').then((r) => setOptimize(r.data)).catch(() => {})
+      api.get<Guncelleme>('/system/guncelleme')
+        .then((r) => { setGuncelleme(r.data); cekimYaz('guncelleme', 'hazir') })
+        .catch((e) => cekimYaz('guncelleme', cekimSinifi(e)))
+      api.get<Optimize>('/system/optimize')
+        .then((r) => { setOptimize(r.data); cekimYaz('optimize', 'hazir') })
+        .catch((e) => cekimYaz('optimize', cekimSinifi(e)))
     }
     cekKullanim()
     cekBakim()
     // Bir kez okunanlar (dosya sistemi / DB / wp-cli ağırlıklı — poll edilmez)
-    api.get<Domain[]>('/domains').then((r) => setDomainler(r.data || [])).catch(() => {})
+    api.get<Domain[]>('/domains')
+      .then((r) => { setDomainler(r.data || []); cekimYaz('domainler', 'hazir') })
+      .catch((e) => cekimYaz('domainler', cekimSinifi(e)))
     if (!isBayi) {
-      api.get<YedekOzet>('/admin/backups/ozet').then((r) => setYedek(r.data)).catch(() => {})
-      api.get<WpKurulum[]>('/wordpress/tumu').then((r) => setWp(r.data || [])).catch(() => setWp([]))
+      api.get<YedekOzet>('/admin/backups/ozet')
+        .then((r) => { setYedek(r.data); cekimYaz('yedek', 'hazir') })
+        .catch((e) => cekimYaz('yedek', cekimSinifi(e)))
+      // ESKIDEN: hata dalinda setWp([]) yapiliyordu - BASARISIZ istek "hic
+      // WordPress yok" gibi cizilirdi. Bos liste ile olculememis liste ayni sey
+      // degildir; artik wp null kalir ve kart durumu soyler.
+      api.get<WpKurulum[]>('/wordpress/tumu')
+        .then((r) => { setWp(r.data || []); cekimYaz('wp', 'hazir') })
+        .catch((e) => cekimYaz('wp', cekimSinifi(e)))
     } else {
       setWp([])
+      cekimYaz('wp', 'hazir')
     }
 
     const idK = setInterval(cekKullanim, 5000)   // kaynak kullanımı — 5 sn
@@ -317,7 +366,7 @@ export default function HomePage() {
       <Kart baslik="WordPress Siteleri" alt="Tüm hesaplardaki kurulumlar" ikon={I.wp}
         sag={<Link to="/wordpress" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
         {wp === null ? (
-          <Yukleniyor />
+          <VeriYok durum={cekim.wp} />
         ) : (
           <>
             <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -374,23 +423,35 @@ export default function HomePage() {
       <Kart baslik="Panel Güncelleme" alt="Sürüm ve sistem paketleri" ikon={I.guncelle}
         sag={<Link to="/araclar/guncelleme" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
         <div className="flex items-center gap-3">
+          {/*
+            ESKIDEN: guncelleme null iken (istek DUSMUS olsa bile) kart yesil
+            "Panel guncel" yaziyordu - olculmemis bir sey basari gibi cizilirdi.
+            Artik veri yoksa notr (hazirlaniyor) veya kirmizi (hata) gosterilir.
+          */}
           <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${
-            guncelleme?.calisiyor ? 'bg-sky-50 text-sky-600 dark:bg-sky-900/25 dark:text-sky-300'
-              : guncelleme?.arac_var === false ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300'
-                : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-300'}`}>
+            !guncelleme ? (cekim.guncelleme === 'hata'
+              ? 'bg-rose-50 text-rose-600 dark:bg-rose-900/25 dark:text-rose-300'
+              : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')
+              : guncelleme.calisiyor ? 'bg-sky-50 text-sky-600 dark:bg-sky-900/25 dark:text-sky-300'
+                : guncelleme.arac_var === false ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300'
+                  : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-300'}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d={I.guncelle} /></svg>
           </span>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {guncelleme?.calisiyor ? 'Güncelleme çalışıyor' : guncelleme?.arac_var === false ? 'Güncelleme aracı yok' : 'Panel güncel'}
+              {!guncelleme ? durumBasligi(cekim.guncelleme, 'Güncelleme durumu')
+                : guncelleme.calisiyor ? 'Güncelleme çalışıyor'
+                  : guncelleme.arac_var === false ? 'Güncelleme aracı yok' : 'Panel güncel'}
             </div>
             <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" title={guncelleme?.durum}>
-              {guncelleme?.durum || (guncelleme ? 'Durum bilgisi yok' : 'Yükleniyor…')}
+              {guncelleme ? (guncelleme.durum || 'Durum bilgisi yok') : durumAciklamasi(cekim.guncelleme)}
             </div>
           </div>
           <span className="ml-auto shrink-0">
-            <Rozet renk={guncelleme?.calisiyor ? 'sky' : guncelleme?.arac_var === false ? 'amber' : 'emerald'}
-              metin={guncelleme?.calisiyor ? 'Çalışıyor' : guncelleme?.arac_var === false ? 'Araç yok' : 'Güncel'} />
+            <Rozet renk={!guncelleme ? (cekim.guncelleme === 'hata' ? 'rose' : 'slate')
+              : guncelleme.calisiyor ? 'sky' : guncelleme.arac_var === false ? 'amber' : 'emerald'}
+              metin={!guncelleme ? durumRozeti(cekim.guncelleme)
+                : guncelleme.calisiyor ? 'Çalışıyor' : guncelleme.arac_var === false ? 'Araç yok' : 'Güncel'} />
           </span>
         </div>
         <Link to="/araclar/paketler" className="-mx-2 mt-3 flex items-center justify-between rounded-xl border-t border-slate-100 px-2 pt-3 text-xs transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
@@ -407,7 +468,7 @@ export default function HomePage() {
       <Kart baslik="Son Sunucu Yedeklemesi" alt="Otomatik günlük yedek" ikon={I.yedek}
         sag={<Link to="/backup-yonetimi" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
         {!yedek ? (
-          <div className="py-6 text-center text-xs text-slate-400">Yedek özeti alınamadı</div>
+          <VeriYok durum={cekim.yedek} hataMetni="Yedek özeti alınamadı" />
         ) : (
           <>
             <div className="flex items-baseline gap-2">
@@ -434,14 +495,17 @@ export default function HomePage() {
           </span>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {optimize?.calisiyor ? 'Optimizasyon çalışıyor' : 'Optimizasyon hazır'}
+              {/* Veri gelmeden "hazir" DEMEYIZ - olculmemis durum iddia edilmez. */}
+              {!optimize ? durumBasligi(cekim.optimize, 'Optimizasyon durumu')
+                : optimize.calisiyor ? 'Optimizasyon çalışıyor' : 'Optimizasyon hazır'}
             </div>
             <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" title={optimize?.durum}>
-              {optimize?.durum || (optimize ? 'MariaDB · nginx · PHP ayarları' : 'Yükleniyor…')}
+              {optimize ? (optimize.durum || 'MariaDB · nginx · PHP ayarları') : durumAciklamasi(cekim.optimize)}
             </div>
           </div>
           <span className="ml-auto shrink-0">
-            <Rozet renk={optimize?.calisiyor ? 'sky' : 'slate'} metin={optimize?.calisiyor ? 'Çalışıyor' : 'Boşta'} />
+            <Rozet renk={!optimize ? (cekim.optimize === 'hata' ? 'rose' : 'slate') : optimize.calisiyor ? 'sky' : 'slate'}
+              metin={!optimize ? durumRozeti(cekim.optimize) : optimize.calisiyor ? 'Çalışıyor' : 'Boşta'} />
           </span>
         </div>
       </Kart>
@@ -450,7 +514,7 @@ export default function HomePage() {
     'servisler': (
       <Kart baslik="Servisler" alt={s ? `${servisAktif}/${servisToplam} servis çalışıyor` : 'servis durumu'} ikon={I.servis}
         sag={s ? <Rozet renk={servisDown === 0 ? 'emerald' : 'amber'} metin={servisDown === 0 ? 'Hepsi aktif' : `${servisDown} kapalı`} /> : undefined}>
-        {!s ? <Yukleniyor /> : (
+        {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="grid grid-cols-1 gap-x-5 gap-y-0.5 sm:grid-cols-2">
             {s.servisler.map((sv) => (
               <div key={sv.ad} title={sv.ad}
@@ -478,7 +542,10 @@ export default function HomePage() {
           <MiniIstatistik deger={sslli} etiket="SSL" renk="sky" />
         </div>
         {domainler.length === 0 ? (
-          <div className="py-6 text-center text-xs text-slate-400">Henüz domain yok</div>
+          // Liste GERCEKTEN bos mu, yoksa istek mi dustu? Ikisi ayni sey degil.
+          cekim.domainler === 'hazir'
+            ? <div className="py-6 text-center text-xs text-slate-400">Henüz domain yok</div>
+            : <VeriYok durum={cekim.domainler} hataMetni="Domain listesi alınamadı" />
         ) : (
           <div className="space-y-0.5">
             {domainler.slice(0, 7).map((d) => (
@@ -511,7 +578,7 @@ export default function HomePage() {
 
     'sunucu-bilgi': (
       <Kart baslik="Sunucu Bilgileri" alt="Donanım ve sistem" ikon={I.sunucu}>
-        {!s ? <Yukleniyor /> : (
+        {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="space-y-0">
             <KV etiket="Sunucu adı" deger={s.sistem.hostname} />
             <KV etiket="IP adresi" deger={s.sistem.ip || '—'} />
@@ -551,7 +618,7 @@ export default function HomePage() {
 
     'canli-kaynak': (
       <Kart baslik="Canlı Kaynaklar" alt="Anlık CPU · RAM · Disk" ikon={I.grafik}>
-        {!s ? <Yukleniyor /> : (
+        {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="space-y-3.5">
             <KaynakBar etiket="İşlemci" ikon={I.cpu} yuzde={s.cpu.yuzde} alt={`${s.cpu.cekirdek} çekirdek · yük ${s.cpu.yuk_1dk.toFixed(2)}`} />
             <KaynakBar etiket="Bellek" ikon={I.ram} yuzde={s.bellek.yuzde} alt={`${fmtGB(s.bellek.kullanilan_kb)} / ${fmtGB(s.bellek.toplam_kb)}`} />
@@ -581,7 +648,7 @@ export default function HomePage() {
 
     'ag': (
       <Kart baslik="Ağ Trafiği" alt={s?.ag.arayuz ? s.ag.arayuz : 'arayüz'} ikon={I.ag}>
-        {!s ? <Yukleniyor /> : !s.ag.arayuz ? (
+        {!s ? <VeriYok durum={cekim.sistem} /> : !s.ag.arayuz ? (
           <div className="py-4 text-xs italic text-slate-400 dark:text-slate-500">Arayüz bulunamadı</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -987,6 +1054,48 @@ function KV({ etiket, deger }: { etiket: string; deger: string }) {
 }
 
 function Yukleniyor() { return <div className="py-4 text-center text-xs text-slate-400">Yükleniyor…</div> }
+
+/* ---- "hazir degil" ile "HATA" ayrimi: ortak metin + govde yardimcilari ----
+   Musteri taze kurulumda paneli ILK KEZ aciyor. Henuz ayaga kalkmamis bir ucun
+   kirmizi hata gibi gorunmesi kuruluma "bozuk" dedirtiyordu. Notr bekleme ile
+   gercek hata artik AYRI okunur - ve hicbiri "her sey yolunda" gibi cizilmez. */
+function durumBasligi(d: Cekim, konu: string): string {
+  if (d === 'hata') return konu + ' alınamadı'
+  if (d === 'hazirlaniyor') return konu + ' hazırlanıyor'
+  return konu + ' yükleniyor'
+}
+function durumAciklamasi(d: Cekim): string {
+  if (d === 'hata') return 'Sunucuya ulaşılamadı — birazdan yeniden denenecek.'
+  // 402: parali eklentinin lisans bileti henuz yazilmadi (ilk nabizla gelir).
+  if (d === 'hazirlaniyor') return 'Lisans/servis doğrulanıyor — kurulum sonrası kısa sürer.'
+  return 'Yükleniyor…'
+}
+function durumRozeti(d: Cekim): string {
+  if (d === 'hata') return 'Alınamadı'
+  if (d === 'hazirlaniyor') return 'Hazırlanıyor'
+  return 'Yükleniyor'
+}
+
+// VeriYok - veri gelmemis bir kart govdesi. ASLA "bos / temiz" gibi cizmez.
+function VeriYok({ durum, hataMetni }: { durum: Cekim; hataMetni?: string }) {
+  if (durum === 'hata') {
+    return (
+      <div className="py-5 text-center text-xs text-rose-600 dark:text-rose-400">
+        {hataMetni || 'Veri alınamadı'}
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">Otomatik olarak yeniden denenecek.</div>
+      </div>
+    )
+  }
+  if (durum === 'hazirlaniyor') {
+    return (
+      <div className="py-5 text-center text-xs text-slate-500 dark:text-slate-400">
+        Hazırlanıyor…
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">Lisans/servis doğrulaması sürüyor.</div>
+      </div>
+    )
+  }
+  return <Yukleniyor />
+}
 
 function formatUptime(sn: number): string {
   const g = Math.floor(sn / 86400), sa = Math.floor((sn % 86400) / 3600), dk = Math.floor((sn % 3600) / 60)

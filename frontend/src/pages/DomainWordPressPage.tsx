@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string }
@@ -27,7 +28,7 @@ export default function DomainWordPressPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<{ alan_adi: string }>(`/domains/${id}`).then(r => setAlanAdi(r.data.alan_adi || '')).catch(() => {})
+    api.get<{ alan_adi: string }>(`/domains/${id}`).then(r => setAlanAdi(r.data.alan_adi || '')).catch(hataYakala('Alan adı bilgisi alınamadı'))
   }, [id])
 
   const listele = useCallback(() => {

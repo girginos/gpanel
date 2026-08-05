@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
 // AYRI bir PHP-FPM havuzu render edilir (bağımsız memory_limit/upload/pm.* vb.).
@@ -29,7 +30,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
   useEffect(() => {
     api.get<{ ayarlar: Ayar; ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`)
       .then(r => { setA(r.data.ayarlar); setOzel(r.data.ozel_havuz) })
-      .catch(() => {})
+      .catch(hataYakala('Alt alan PHP ayarları yüklenemedi'))
   }, [domainId, sid])
 
   function P<K extends keyof Ayar>(k: K, v: Ayar[K]) { setA(prev => prev ? { ...prev, [k]: v } : prev) }

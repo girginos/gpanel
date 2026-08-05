@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 // /system/usage GERÇEK şekli (iç içe) — IzlemePage ile aynı.
@@ -38,7 +39,7 @@ export default function IstatistiklerPage() {
         domain: domains.length,
         domain_aktif: domains.filter((d: any) => d.durum === 'aktif').length,
       })
-    }).catch(() => {})
+    }).catch(hataYakala('Alan adı istatistikleri alınamadı'))
   }
   useEffect(() => { yukle(); const t = setInterval(yukle, 10000); return () => clearInterval(t) }, [])
 

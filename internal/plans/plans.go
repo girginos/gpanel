@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,6 +28,8 @@ type Plan struct {
 	MaxDomain          int    `json:"max_domain"`
 	MaxDB              int    `json:"max_db"`
 	MaxEmail           int    `json:"max_email"`
+	SaatlikMailLimiti  int    `json:"saatlik_mail_limiti"` // plandaki her kutu için saatlik giden mail üst sınırı; 0 = sınırsız (yalnız mail eklentisi aktifken anlamlı)
+	MailKutuKotaMB     int    `json:"mail_kutu_kota_mb"`   // posta kutusu BAŞINA depolama kotası (MB); 0 = sınırsız. Adet değil DİSK sınırı — saatlik_mail_limiti'nden farklıdır.
 	MaxFTP             int    `json:"max_ftp"`
 	CPUYuzde           int    `json:"cpu_yuzde"`   // 100 = 1 core
 	RAMMB              int    `json:"ram_mb"`      // hard limit MB
@@ -59,7 +62,7 @@ type Handlers struct {
 }
 
 const selectAll = `SELECT id, ad, aciklama, disk_kota_mb, trafik_kota_mb,
-  max_domain, max_db, max_email, max_ftp,
+  max_domain, max_db, max_email, COALESCE(saatlik_mail_limiti,0), COALESCE(mail_kutu_kota_mb,0), max_ftp,
   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
   COALESCE(pm_max_children,0),
   COALESCE(io_read_mbps,0), COALESCE(io_write_mbps,0), COALESCE(io_read_iops,0), COALESCE(io_write_iops,0),
@@ -79,7 +82,7 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 	var p Plan
 	var vars, fc, wafEn int
 	err := rs.Scan(&p.ID, &p.Ad, &p.Aciklama, &p.DiskKotaMB, &p.TrafikKotaMB,
-		&p.MaxDomain, &p.MaxDB, &p.MaxEmail, &p.MaxFTP,
+		&p.MaxDomain, &p.MaxDB, &p.MaxEmail, &p.SaatlikMailLimiti, &p.MailKutuKotaMB, &p.MaxFTP,
 		&p.CPUYuzde, &p.RAMMB, &p.MaxProcess, &p.InodeKota, &p.IOAgirlik, &p.MySQLMaxBaglanti,
 		&p.PMMaxChildren,
 		&p.IOReadMBps, &p.IOWriteMBps, &p.IOReadIOPS, &p.IOWriteIOPS,
@@ -220,6 +223,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut hesabina
 	// 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile kota=0 plan acip
 	// sinirsiz disk dagitabiliyordu. Kok icin 0 serbest (kendi sunucusu).
+	if err := h.bayiTavanKontrol(r.Context(), ridC, &p); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if ridC > 0 && (p.DiskKotaMB <= 0 || p.TrafikKotaMB <= 0) {
 		httpx.WriteError(w, http.StatusBadRequest,
 			"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
@@ -234,16 +241,18 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
-		   max_domain, max_db, max_email, max_ftp,
+		   max_domain, max_db, max_email, saatlik_mail_limiti, mail_kutu_kota_mb, max_ftp,
 		   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
 		   pm_max_children,
 		   io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
 		   db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
 		   php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
 		   waf_enabled, waf_mode, waf_paranoia, varsayilan, reseller_id)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
-		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
+		// saatlik_mail_limiti BURADA EKSIKTI -> yeni planda deger sessizce
+		// dusuyordu (UPDATE yolu yaziyordu, INSERT yolu yazmiyordu).
+		p.MaxDomain, p.MaxDB, p.MaxEmail, p.SaatlikMailLimiti, p.MailKutuKotaMB, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
@@ -278,6 +287,11 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	// Bayi posta TAVANI kontrolu — govde parse edildikten SONRA calismali.
+	if err := h.bayiTavanKontrol(r.Context(), ridU, &p); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut
 	// hesabina 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile
 	// kota=0 plan acip sinirsiz disk dagitabiliyordu. Kok icin 0 serbest
@@ -304,7 +318,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE service_plans SET ad=?, aciklama=?, disk_kota_mb=?, trafik_kota_mb=?,
-		   max_domain=?, max_db=?, max_email=?, max_ftp=?,
+		   max_domain=?, max_db=?, max_email=?, saatlik_mail_limiti=?, mail_kutu_kota_mb=?, max_ftp=?,
 		   cpu_yuzde=?, ram_mb=?, max_process=?, inode_kota=?, io_agirlik=?, mysql_max_baglanti=?,
 		   pm_max_children=?,
 		   io_read_mbps=?, io_write_mbps=?, io_read_iops=?, io_write_iops=?,
@@ -313,7 +327,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		   waf_enabled=?, waf_mode=?, waf_paranoia=?, varsayilan=?
 		 WHERE id=?`,
 		p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
-		p.MaxDomain, p.MaxDB, p.MaxEmail, p.MaxFTP,
+		p.MaxDomain, p.MaxDB, p.MaxEmail, p.SaatlikMailLimiti, p.MailKutuKotaMB, p.MaxFTP,
 		p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
 		p.PMMaxChildren,
 		p.IOReadMBps, p.IOWriteMBps, p.IOReadIOPS, p.IOWriteIOPS,
@@ -498,6 +512,55 @@ func SeedSync(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			log.Printf("SeedSync plan %s: %v", p.Ad, err)
 		}
+	}
+	return nil
+}
+
+// bayiTavanKontrol — bayinin atadigi posta limitleri, bagli oldugu BAYI
+// PAKETININ tavanlarini asamaz. Admin (rid=0) kisitsizdir.
+//
+// 🔴 Neden burada: bayi kendi hosting planini olusturup duzenleyebiliyor
+// (Create/Update AdminVeyaReseller). Kapi burada durmazsa bayi kendine
+// sinirsiz posta kotasi yazip tavani ANLAMSIZ kilardi.
+//
+// 🔴 Neden users.max_* degil reseller_plans okunuyor: 0045'teki anlik-goruntu
+// deseni HAVUZ alanlari icindir (max_domain/disk/trafik). Tavanlar tukenen
+// kaynak degildir, bu yuzden kopyalanmaz — guncel paket degeri okunur.
+// 0 = sinirsiz (hem tavanda hem degerde).
+func (h *Handlers) bayiTavanKontrol(ctx context.Context, rid int64, p *Plan) error {
+	if rid <= 0 {
+		return nil // admin
+	}
+	var tEmail, tSaatlik, tKota int
+	err := h.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(rp.mail_max_email,0), COALESCE(rp.mail_saatlik_limit,0),
+		       COALESCE(rp.mail_kutu_kota_mb,0)
+		  FROM users u JOIN reseller_plans rp ON rp.id = u.reseller_plan_id
+		 WHERE u.id = ?`, rid).Scan(&tEmail, &tSaatlik, &tKota)
+	if err != nil {
+		// Bayi bir pakete bagli degil (reseller_plan_id=0 -> ozel/manuel limitler).
+		// Tavan tanimli degil => kisitlama YOK. Sessiz gecmiyoruz, ama reddetmek de
+		// yanlis olurdu: paketi olmayan bayiyi tamamen bloklardi.
+		return nil
+	}
+	asim := func(ad string, deger, tavan int, birim string) error {
+		if tavan > 0 && (deger == 0 || deger > tavan) {
+			if deger == 0 {
+				return fmt.Errorf("%s sınırsız yapılamaz — bayi paketinizin tavanı %d%s", ad, tavan, birim)
+			}
+			return fmt.Errorf("%s en fazla %d%s olabilir (bayi paketinizin tavanı); girilen: %d%s",
+				ad, tavan, birim, deger, birim)
+		}
+		return nil
+	}
+	if e := asim("posta kutusu sayısı", p.MaxEmail, tEmail, ""); e != nil {
+		return e
+	}
+	if e := asim("saatlik gönderim limiti", p.SaatlikMailLimiti, tSaatlik, "/saat"); e != nil {
+		return e
+	}
+	if e := asim("kutu depolama kotası", p.MailKutuKotaMB, tKota, " MB"); e != nil {
+		return e
 	}
 	return nil
 }

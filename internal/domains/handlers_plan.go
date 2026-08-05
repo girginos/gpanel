@@ -88,7 +88,7 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	// Kaynak limitlerini yeniden uygula — arkaplanda + kendi context'i
 	// (r.Context() HTTP request bitince iptal olur, cgroup yazımı yarıda kalır)
-	go func(did int64) {
+	go func(did int64, ad string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
@@ -99,7 +99,9 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 		if err := provisioner.WAFUygula(h.DB, did); err != nil {
 			log.Printf("waf apply (plan degisimi) domain=%d: %v", did, err)
 		}
-	}(id)
+		// Plan posta limitlerini (max_email + saatlik) mail eklentisine senkronla (best-effort).
+		mailKutuLimitSenkron(ctx, h.DB, did, ad)
+	}(id, alanAdi)
 	uid, kul := middleware.Aktor(r)
 	httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.plan", alanAdi,
 		fmt.Sprintf("yeni plan=%d", planNoLog(req.PlanID)), id, true)

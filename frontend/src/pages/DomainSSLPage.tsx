@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string; ssl: boolean; ssl_bitis?: string }
@@ -21,11 +22,17 @@ export default function DomainSSLPage() {
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
+  const [mailAktif, setMailAktif] = useState(false)  // mail eklentisi kurulu+etkin mi
+  const [mailSSL, setMailSSL] = useState(true)       // "posta sunucusunu de güvenceye al"
 
   function yukle() {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
     api.get<SSLDurum>(`/domains/${id}/ssl`).then(r => setDurum(r.data)).catch(e => setHata(apiHata(e)))
+    // Mail eklentisi aktifse SSL akışında mail seçeneğini göster.
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
   }
   useEffect(yukle, [id])
 
@@ -33,8 +40,13 @@ export default function DomainSSLPage() {
     if (tip === 'letsencrypt' && !confirm('Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?')) return
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
-      const { data } = await api.post(`/domains/${id}/ssl/issue`, { tip })
-      setBasari(`Sertifika kuruldu (${tip}). Bitiş: ${data.bitis}. Site artık HTTPS üzerinden çalışıyor.`)
+      const govde: { tip: string; mail_ssl?: boolean } = { tip }
+      if (tip === 'letsencrypt' && mailAktif && mailSSL) govde.mail_ssl = true
+      const { data } = await api.post(`/domains/${id}/ssl/issue`, govde)
+      let msg = `Sertifika kuruldu (${tip}). Bitiş: ${data.bitis}. Site artık HTTPS üzerinden çalışıyor.`
+      if (data.mail_ssl) msg += ' Posta sunucusu da güvenceye alındı (mail. + webmail.).'
+      else if (data.mail_ssl_uyari) msg += ` Not: ${data.mail_ssl_uyari}`
+      setBasari(msg)
       yukle()
     } catch (e) {
       setHata(apiHata(e, 'SSL kurulumu başarısız'))
@@ -162,6 +174,15 @@ export default function DomainSSLPage() {
               <li>✓ Otomatik yenileme (cron)</li>
               <li>⚠ Alan adı bu sunucuya DNS ile yönelmiş olmalı</li>
             </ul>
+            {mailAktif && (
+              <label className="flex items-start gap-2 mb-4 p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 cursor-pointer">
+                <input type="checkbox" checked={mailSSL} onChange={e => setMailSSL(e.target.checked)} className="mt-0.5 cursor-pointer" />
+                <span className="text-xs text-slate-700 dark:text-slate-300">
+                  <b>Posta sunucusunu da güvenceye al</b> — <span className="font-mono">mail.{domain?.alan_adi}</span> + <span className="font-mono">webmail.{domain?.alan_adi}</span> için ayrı sertifika alınıp IMAP/POP/SMTP + webmail'e kurulur.
+                  <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Bu alt alanların da sunucuya DNS A kaydı gerekir.</span>
+                </span>
+              </label>
+            )}
             <button
               onClick={() => issue('letsencrypt')}
               disabled={isleniyor}

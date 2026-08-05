@@ -3,8 +3,6 @@ package middleware
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,37 +77,12 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 //
 // scopeDB nil ise (test/erken acilis) kontrol atlanir — fail-open yalniz DB
 // baglanmadan once mumkun, o asamada zaten istek servis edilmiyor.
+// oturumGecerli: gövdesi oturum_cache.go'ya taşındı (retry + kısa-ömürlü durum
+// önbelleği + fail-CLOSED). Eski davranış geçici DB hatasında isteği sessizce
+// GEÇİRİYORDU (fail-open) → kesinti penceresinde askıya alınmış/geçersiz oturum
+// kabul edilebiliyordu.
 func oturumGecerli(ctx context.Context, c *auth.Claims) (int, string) {
-	if scopeDB == nil || c == nil {
-		return 0, ""
-	}
-	if c.Role != "reseller" && c.Role != "admin" {
-		return 0, ""
-	}
-	var durum string
-	var gecersizTS int64
-	sorgu := `SELECT status, COALESCE(token_gecersiz_ts,0) FROM users WHERE id=?`
-	if err := scopeDB.QueryRowContext(ctx, sorgu, c.UserID).Scan(&durum, &gecersizTS); err != nil {
-		// 🔴 "Satir yok" ile "DB su an cevap vermiyor" AYNI SEY DEGIL. Bu kod
-		// kimlik-dogrulamali HER istekte calisiyor; MariaDB birkac saniye
-		// gecikirse (yeniden baslatma, baglanti havuzu dolmasi) ayrimsiz 403
-		// TUM bayileri "hesabiniz yok" diye disari atardi.
-		if errors.Is(err, sql.ErrNoRows) {
-			if c.Role == "reseller" {
-				return http.StatusForbidden, "hesap bulunamadı"
-			}
-			return 0, "" // kok icin users satiri sart degil (kurulum varyantlari)
-		}
-		log.Printf("oturum kontrolu (uid=%d) DB hatasi: %v — istek gecirildi", c.UserID, err)
-		return 0, "" // gecici hata kimseyi disari atmasin; imza zaten dogrulandi
-	}
-	if c.Role == "reseller" && durum != "active" {
-		return http.StatusForbidden, "hesabınız askıya alınmış"
-	}
-	if gecersizTS > 0 && c.IssuedAt != nil && c.IssuedAt.Unix() < gecersizTS {
-		return http.StatusUnauthorized, "oturum sonlandırıldı, tekrar giriş yapın"
-	}
-	return 0, ""
+	return oturumGecerliImpl(ctx, c)
 }
 
 // OturumlariDusur: hesabin tum ACIK oturumlarini gecersiz kilar (askiya alma,
@@ -233,13 +206,13 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 			// Askıya-alma zorlaması: askıdaki domain için müşteri token'ı (önceden
 			// verilmiş/hâlâ geçerli olsa bile) TÜM işlemlerde 403 alır. Admin bu
 			// bloktan önce (ClaimsFrom != nil) zaten geçmiştir; yönetici askıyı kaldırabilir.
-			if scopeDB != nil {
-				var askida int
-				if err := scopeDB.QueryRowContext(r.Context(),
-					`SELECT COALESCE(askida,0) FROM domains WHERE id=?`, mc.DomainID).Scan(&askida); err == nil && askida == 1 {
-					httpx.WriteError(w, http.StatusForbidden, "hesap askıya alınmış")
-					return
-				}
+			// 🔴 Askı kontrolü artık oturumGecerli ile AYNI bounded fail-CLOSED
+			// desenini kullanır (retry + kısa-ömürlü önbellek). Eski hali geçici
+			// DB hatasında fail-OPEN idi → askıdaki müşteri kesinti penceresinde
+			// kendi domainine erişebiliyordu.
+			if kod, mesaj := domainAskidaKod(r.Context(), mc.DomainID); kod != 0 {
+				httpx.WriteError(w, kod, mesaj)
+				return
 			}
 			next.ServeHTTP(w, r)
 		})

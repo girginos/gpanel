@@ -7,6 +7,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 type Paket = {
   id?: number; ad: string; aciklama: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
+  // Posta TAVANLARI — domain basina ust sinir (havuz DEGIL). 0 = sinirsiz.
+  mail_max_email: number; mail_saatlik_limit: number; mail_kutu_kota_mb: number
   fiyat_kurus: number
   asim_ilkesi: 'yok' | 'disk_trafik' | 'tumu'
   asim_bildirim: boolean
@@ -18,6 +20,7 @@ type Paket = {
 const BOS: Paket = {
   ad: '', aciklama: '',
   max_domain: 10, max_disk_mb: 10240, max_trafik_mb: 102400, fiyat_kurus: 0,
+  mail_max_email: 0, mail_saatlik_limit: 0, mail_kutu_kota_mb: 0,
   asim_ilkesi: 'disk_trafik', asim_bildirim: true, fazla_satis: false, varsayilan: false,
 }
 
@@ -31,8 +34,17 @@ export default function BayiPlaniDuzenlePage() {
   const [yuk, setYuk] = useState(!yeni)
   const [hata, setHata] = useState<string | null>(null)
   const [kaydediyor, setKaydediyor] = useState(false)
+  // Mail eklentisi aktifse posta tavani alanlari gorunur (ayni kapi).
+  const [mailAktif, setMailAktif] = useState(false)
 
   useEffect(() => {
+    // 🔴 mailAktif YENİ planda da gerekli: eski kod `if (yeni) return`'i eklenti
+    // kontrolünden ÖNCE yapıyordu → yeni bayi planı oluştururken mail bölümü hiç
+    // görünmüyordu (mailAktif false kalıyordu). Eklenti kontrolü HER ZAMAN çalışır;
+    // yalnız mevcut planı yükleme (yeni değilken) atlanır.
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
     if (yeni) return
     api.get<Paket>(`/reseller-plans/${id}`)
       .then(r => setP(r.data))
@@ -107,6 +119,26 @@ export default function BayiPlaniDuzenlePage() {
               <input type="number" min={0} className={inp} value={p.max_trafik_mb}
                      onChange={e => S('max_trafik_mb', Number(e.target.value))} />
             </Alan>
+            {/* 🔴 Bu üç alan TAVAN'dır, havuz DEĞİL: yukarıdaki domain/disk/trafik
+                bayinin toplam kaynağıdır ve tükenir; aşağıdakiler ise bayinin
+                TEK BİR domaine atayabileceği en yüksek değerdir, tükenmez.
+                Aşan değer backend'de REDDEDİLİR (plans.go bayiTavanKontrol). */}
+            {mailAktif && (
+              <>
+            <Alan etiket="Posta kutusu tavanı" ipucu="Bayinin BİR domaine tanımlayabileceği en fazla kutu sayısı. 0 = sınırsız">
+              <input type="number" min={0} className={inp} value={p.mail_max_email}
+                     onChange={e => S('mail_max_email', Number(e.target.value))} />
+            </Alan>
+            <Alan etiket="Saatlik gönderim tavanı" ipucu="Domain başına en fazla giden mail/saat. 0 = sınırsız">
+              <input type="number" min={0} className={inp} value={p.mail_saatlik_limit}
+                     onChange={e => S('mail_saatlik_limit', Number(e.target.value))} />
+            </Alan>
+            <Alan etiket="Kutu depolama tavanı (MB)" ipucu={p.mail_kutu_kota_mb > 0 ? `kutu başına en fazla ${(p.mail_kutu_kota_mb / 1024).toFixed(1)} GB` : 'sınırsız'}>
+              <input type="number" min={0} className={inp} value={p.mail_kutu_kota_mb}
+                     onChange={e => S('mail_kutu_kota_mb', Number(e.target.value))} />
+            </Alan>
+              </>
+            )}
           </div>
         </Bolum>
 

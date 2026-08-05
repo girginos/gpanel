@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ResourceCard from '@/components/ResourceCard'
 import DomainKaynakKart from '@/components/DomainKaynakKart'
@@ -10,7 +11,7 @@ import DomainPano from "@/components/DomainPano"
 import ToolCard from '@/components/ToolCard'
 import type { Domain } from '@/components/DomainList'
 
-type Tab = 'dashboard' | 'hosting'
+type Tab = 'dashboard' | 'hosting' | 'mail'
 
 const ICONS = {
   baglanti:  'M13.828 10.172a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656-5.656m.172-5.172a4 4 0 00-5.656 5.656l-3 3a4 4 0 005.656 5.656',
@@ -44,6 +45,7 @@ export default function SubscriptionDetailPage() {
   const [menuAcik, setMenuAcik] = useState(false)
   const [isleniyor, setIsleniyor] = useState(false)
   const [bildirim, setBildirim] = useState<string | null>(null)
+  const [mailAktif, setMailAktif] = useState(false)
 
   function domainYukle() {
     if (!id) return
@@ -57,7 +59,11 @@ export default function SubscriptionDetailPage() {
     domainYukle()
     api.get<{ disk_mb: { kullanim: number } }>(`/domains/${id}/kaynak`)
       .then(r => setDiskMB(r.data.disk_mb.kullanim))
-      .catch(() => {})
+      .catch(hataYakala('Disk kullanımı alınamadı'))
+    // Mail eklentisi aktif+ödemeli ise Mail sekmesini göster.
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
   }, [id])
 
   async function askiToggle() {
@@ -161,6 +167,7 @@ export default function SubscriptionDetailPage() {
       <div className="flex items-center gap-5 border-b border-slate-200 dark:border-slate-700 mb-5">
         <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>Pano</TabBtn>
         <TabBtn aktif={tab === 'hosting'}   onClick={() => setTab('hosting')}>Barınma ve DNS</TabBtn>
+        {mailAktif && <TabBtn aktif={tab === 'mail'} onClick={() => setTab('mail')}>Mail</TabBtn>}
       </div>
 
       <div className="grid grid-cols-12 gap-5">
@@ -188,6 +195,7 @@ export default function SubscriptionDetailPage() {
         <section className="col-span-12 lg:col-span-6">
           {tab === 'dashboard' && <DomainPano domain={domain} />}
           {tab === 'hosting'   && <HostingTab domain={domain} />}
+          {tab === 'mail'      && <MailTab domain={domain} />}
 
           <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 flex-wrap gap-2">
             <div className="flex items-center gap-4">
@@ -325,6 +333,17 @@ function HostingTab({ domain }: { domain: Domain }) {
     <Grup baslik="Barınma Hizmetleri">
       <ToolCard etiket="Hosting Planı" aciklama="Yükselt, düşür veya özel plan" ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
       <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
+    </Grup>
+  )
+}
+
+function MailTab({ domain }: { domain: Domain }) {
+  return (
+    <Grup baslik="Posta Hizmetleri">
+      <ToolCard etiket="Mail Ayarları"            aciklama="Sağlık analizi, bağlantı bilgileri" ikon={ICONS.posta}      renk="emerald" to={`/abonelikler/${domain.id}/mail/ayarlar`} />
+      <ToolCard etiket="Mail Kutuları"            aciklama="Posta kutusu ekle/yönet"            ikon={ICONS.baglanti}   renk="sky"     to={`/abonelikler/${domain.id}/mail/kutular`} />
+      <ToolCard etiket="E-Posta Teslimat Takibi"  aciklama="Gönderim/teslimat günlüğü"          ikon={ICONS.istatistik} renk="indigo"  to={`/abonelikler/${domain.id}/mail/teslimat`} />
+      <ToolCard etiket="Takma Adlar & Yönlendirme" aciklama="Yönlendirme, catch-all"            ikon={ICONS.baglanti}   renk="amber"   to={`/abonelikler/${domain.id}/mail/takmaadlar`} />
     </Grup>
   )
 }

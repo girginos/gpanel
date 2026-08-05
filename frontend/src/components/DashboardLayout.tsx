@@ -3,9 +3,11 @@
 // gosp-mobil-v1
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { useEklentiAktif } from '@/lib/eklenti'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
+import HataYuzeyi from './HataYuzeyi'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -51,6 +53,7 @@ const NAV: NavGroup[] = [
     { to: '/wordpress',           etiket: 'WordPress',          ikon: ICONS.wp },
     { to: '/firewall',            etiket: 'Güvenlik Duvarı',    ikon: ICONS.firewall },
     { to: '/izleme',              etiket: 'İzleme',             ikon: ICONS.izleme },
+    { to: '/mail-sunucu',         etiket: 'Mail Sunucu',        ikon: ICONS.eklenti },
     { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.kilit },
   ]},
   { baslik: 'Profilim', items: [
@@ -139,7 +142,15 @@ export default function DashboardLayout() {
     ]},
   ]
 
-  const aktifNav = isMusteri ? MUSTERI_NAV : isReseller ? RESELLER_NAV : NAV
+  // 'Mail Sunucu' menusu YALNIZ mail eklentisi lisansli+etkinken cizilir.
+  // Lisans kaldirilinca (cp_eklentiler.aktif=0) menu KENDILIGINDEN kaybolur;
+  // yeniden derleme gerekmez. Deger bilinmiyorsa (null) oge GIZLENIR — 402
+  // donecek bir menu ogesini gostermek yaniltici olurdu.
+  const mailAktif = useEklentiAktif('mail', !isMusteri)
+  const temelNav = isMusteri ? MUSTERI_NAV : isReseller ? RESELLER_NAV : NAV
+  const aktifNav = mailAktif === true
+    ? temelNav
+    : temelNav.map(g => ({ ...g, items: g.items.filter(it => it.to !== '/mail-sunucu') }))
 
   function toggle(b: string) {
     setAcikGruplar((s) => ({ ...s, [b]: !s[b] }))
@@ -264,6 +275,7 @@ export default function DashboardLayout() {
       </div>
 
       <AltNavBar onMenuAc={() => setMobilAcik(true)} />
+      <HataYuzeyi />
     </div>
   )
 }

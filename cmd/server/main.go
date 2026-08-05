@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -25,6 +27,7 @@ import (
 	"girginospanel/internal/dns"
 	"girginospanel/internal/domains"
 	"girginospanel/internal/eklenti"
+	"girginospanel/internal/lisans"
 	"girginospanel/internal/files"
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
@@ -159,6 +162,14 @@ func main() {
 	monitorH := &monitor.Handlers{DB: d}
 	eklentiH := &eklenti.Handlers{DB: d}
 	go eklentiH.SaglikDongusu(context.Background())
+	// Lisansli eklenti pazaryeri + periyodik lisans nabzi.
+	// Nabiz AG HATASINDA FAIL-OPEN'dir (bkz. internal/lisans/nabiz.go).
+	lisansH := &lisans.Handlers{DB: d, Surum: version}
+	go lisansH.NabizDongusu(context.Background())
+	// Kurulu eklenti ikilisinin imzali paket basligiyla tutarliligi.
+	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
+	// sunucusuna ulasilamasa bile goruilmelidir.
+	go lisans.ButunlukIzleyici(d)
 	nginxsetH := &nginxset.Handlers{DB: d}
 	sshH := &sshaccess.Handlers{DB: d, IPv4: ipv4}
 	statH := &istatistik.Handlers{DB: d}
@@ -262,6 +273,7 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/cve/log", system.CveLog)
 			r.With(middleware.AdminOnly).Get("/system/kernelcare", system.KernelcareDurumHandler)
 			r.With(middleware.AdminOnly).Post("/system/kernelcare/yamala", system.KernelcareYamala)
+			lisansH.Routes(r)
 			eklentiH.Routes(r)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
@@ -538,6 +550,10 @@ func main() {
 	// kapalıyken hiç ağ isteği atılmaz (bkz. internal/system/surumkontrol.go).
 	system.SurumBaslat(version)
 
+	// Anasayfa Servisler widget'i, mail eklentisi servislerini gostermek icin
+	// cp_eklentiler kapisini okur (bkz. internal/system/usage.go).
+	system.DBAyarla(d)
+
 	go func() {
 		log.Printf("girginospanel %s — %s üzerinde dinleniyor (env=%s)", version, cfg.ListenAddr, cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -556,13 +572,66 @@ func main() {
 	}
 }
 
+// gocDefteriKur — `schema_migrations` defterini olusturur ve uygulanmis
+// goclerin (dosya adi -> sha256) haritasini dondurur.
+//
+// 🔴 NEDEN: defter YOKKEN her acilista 59 .sql dosyasinin TAMAMI yeniden
+// kosuyordu. Bu, her goc dosyasinin sonsuza dek idempotent kalmasina bel
+// bagliyor (tek bir "IF NOT EXISTS" unutmak her yeniden baslatmada hata
+// uretir) ve acilisi gereksiz uzatiyor. Ayrica "0011" gibi mukerrer numara
+// sorunlarini gorunmez kiliyordu.
+//
+// Ikinci donen deger false ise defter KURULAMADI; cagiran taraf eski
+// davranisa (her seyi yeniden kos) duser -- defter kurulamadi diye panel
+// acilmamazlik etmez.
+func gocDefteriKur(d *sql.DB) (map[string]string, bool) {
+	if _, err := d.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (\n" +
+		"  dosya     VARCHAR(190) NOT NULL PRIMARY KEY,\n" +
+		"  sha256    CHAR(64)     NOT NULL,\n" +
+		"  uygulandi TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP\n" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"); err != nil {
+		log.Printf("🔴 schema_migrations olusturulamadi: %v — goc defteri DEVRE DISI, "+
+			"tum gocler eskisi gibi her acilista yeniden kosacak", err)
+		return nil, false
+	}
+	rows, err := d.Query("SELECT dosya, sha256 FROM schema_migrations")
+	if err != nil {
+		log.Printf("🔴 schema_migrations okunamadi: %v — goc defteri DEVRE DISI", err)
+		return nil, false
+	}
+	defer rows.Close()
+	uygulanan := make(map[string]string)
+	for rows.Next() {
+		var dosya, ozet string
+		if err := rows.Scan(&dosya, &ozet); err != nil {
+			log.Printf("🔴 schema_migrations satiri okunamadi: %v — goc defteri DEVRE DISI", err)
+			return nil, false
+		}
+		uygulanan[dosya] = ozet
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("🔴 schema_migrations taramasi yarim kaldi: %v — goc defteri DEVRE DISI", err)
+		return nil, false
+	}
+	return uygulanan, true
+}
+
 func runMigrations(d *sql.DB) {
+	// Gercek (zararsiz olmayan) goc hatalarinin sayisi.
+	gercekHata := 0
 	dir := "/opt/girginospanel/src/migrations"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		log.Printf("migrations dir okunamadı: %v", err)
 		return
 	}
+
+	// Defter. Bos defterle acilan MEVCUT bir kurulumda ilk tur bugunku
+	// davranisin AYNISIDIR (her sey kosar, hepsi idempotent) -- fark sonraki
+	// aciliSlarda ortaya cikar. Yani gecis turu davranis degistirmez.
+	uygulanan, defterVar := gocDefteriKur(d)
+	kosuldu, atlandi := 0, 0
+
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
@@ -571,6 +640,27 @@ func runMigrations(d *sql.DB) {
 		if err != nil {
 			continue
 		}
+		ozet := fmt.Sprintf("%x", sha256.Sum256(body))
+		if defterVar {
+			if eski, ok := uygulanan[e.Name()]; ok {
+				// 🔴 Uygulanmis bir goc dosyasi SONRADAN degistirilmis. Otomatik
+				// yeniden kosmuyoruz: yikici bir duzenleme (DROP/UPDATE) sessizce
+				// canliya uygulanmis olurdu. Bunun yerine ACIKCA bagiriyoruz.
+				if eski != ozet {
+					log.Printf("🔴 GOC DEGISMIS (%s): defterdeki ozet tutmuyor — YENIDEN KOSULMADI. "+
+						"Uygulanmis goc dosyasi duzenlenmemelidir; degisiklik icin YENI numarali dosya ekleyin. "+
+						"Bilerek yeniden kosturmak icin: DELETE FROM schema_migrations WHERE dosya='%s';",
+						e.Name(), e.Name())
+				}
+				atlandi++
+				continue
+			}
+		}
+		kosuldu++
+		// Bu dosyaya ozel hata sayaci: deftere YALNIZCA temiz gecen dosya yazilir.
+		// Yarim uygulanmis bir goc "uygulandi" diye isaretlenirse bir daha ASLA
+		// denenmez ve sema kalici olarak eksik kalirdi.
+		dosyaHata := 0
 		log.Printf("migration: %s", e.Name())
 		// Önce yorum satırlarını çıkar
 		var cleaned []string
@@ -588,10 +678,81 @@ func runMigrations(d *sql.DB) {
 				continue
 			}
 			if _, err := d.Exec(s); err != nil {
-				log.Printf("  - hata (%s): %v", e.Name(), err)
+				// Zararsiz olanlar: goc takibi olmadigi icin her acilista tum
+				// dosyalar yeniden calisir; "zaten var" hatalari BEKLENIR.
+				msg := strings.ToLower(err.Error())
+				zararsiz := strings.Contains(msg, "duplicate column") ||
+					strings.Contains(msg, "duplicate key") ||
+					strings.Contains(msg, "already exists") ||
+					strings.Contains(msg, "duplicate entry")
+				if zararsiz {
+					continue
+				}
+				// 🔴 GERCEK hata: gurultuden AYRILIR ve sayilir.
+				dosyaHata++
+				gercekHata++
+				log.Printf("  🔴 GOC HATASI (%s): %v", e.Name(), err)
+			}
+		}
+		// Deftere yaz — SADECE tek bir gercek hata bile almadiysa.
+		if defterVar && dosyaHata == 0 {
+			if _, err := d.Exec(
+				"INSERT INTO schema_migrations (dosya, sha256) VALUES (?, ?) "+
+					"ON DUPLICATE KEY UPDATE sha256=VALUES(sha256), uygulandi=CURRENT_TIMESTAMP",
+				e.Name(), ozet); err != nil {
+				// Deftere yazamamak veri kaybi degil: bir sonraki aciliSta bu
+				// dosya yine kosar (bugunku davranis). Yalnizca gorunur olsun.
+				log.Printf("  ! goc defterine yazilamadi (%s): %v — sonraki aciliSta yeniden kosacak", e.Name(), err)
 			}
 		}
 	}
+	if defterVar {
+		log.Printf("goc defteri: %d kosuldu / %d atlandi (zaten uygulanmis) / toplam %d",
+			kosuldu, atlandi, kosuldu+atlandi)
+	}
+	if gercekHata > 0 {
+		log.Printf("🔴 %d goc ifadesi BASARISIZ oldu (yukariya bakin). "+
+			"Sema eksik kalmis olabilir.", gercekHata)
+	}
+	// 🔴 "Goc calisti" YETMEZ -- kodun bagimli oldugu kolonlar GERCEKTEN var mi?
+	semaDogrula(d)
+}
+
+// semaDogrula — kodun okudugu kritik kolonlarin varligini information_schema'dan
+// DOGRULAR. Goc dosyasinin calismis olmasi kolonun olustugunu KANITLAMAZ:
+// dosya okunmus ama ifade dusmus olabilir (ve eskiden bu sessizce geciyordu).
+// Eksik kolon panelde "alan hic gorunmuyor" seklinde ortaya cikar; sebebini
+// burada ACIKCA yazariz.
+func semaDogrula(d *sql.DB) {
+	beklenen := []struct{ tablo, kolon string }{
+		{"service_plans", "max_email"},
+		{"service_plans", "saatlik_mail_limiti"},
+		{"service_plans", "mail_kutu_kota_mb"},
+		{"cp_ayarlar", "anahtar"},
+		{"cp_eklentiler", "ad"},
+	}
+	var eksik []string
+	for _, b := range beklenen {
+		var n int
+		err := d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS
+		    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+			b.tablo, b.kolon).Scan(&n)
+		if err != nil {
+			log.Printf("sema dogrulama sorgusu basarisiz (%s.%s): %v", b.tablo, b.kolon, err)
+			continue
+		}
+		if n == 0 {
+			eksik = append(eksik, b.tablo+"."+b.kolon)
+		}
+	}
+	if len(eksik) > 0 {
+		log.Printf("🔴 SEMA EKSIK — su kolonlar YOK: %s", strings.Join(eksik, ", "))
+		log.Printf("🔴 Ilgili paneldeki alanlar GORUNMEYECEK. Goc dosyalari "+
+			"/opt/girginospanel/src/migrations altinda; hedef tabloyu ve "+
+			"yukaridaki GOC HATASI satirlarini kontrol edin.")
+		return
+	}
+	log.Printf("sema dogrulama: kritik kolonlarin tamami mevcut (%d kontrol)", len(beklenen))
 }
 
 func detectIPv4() string {

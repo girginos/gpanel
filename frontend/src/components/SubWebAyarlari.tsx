@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 
 // Alt alan web-sunucu ayarları — domain paritesi: backend (php-fpm/apache/static),
 // nginx fastcgi/browser cache, client_max_body, güvenlik başlıkları, ek direktifler.
@@ -32,7 +33,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
   useEffect(() => {
     api.get<{ backend: string; nginx: Nginx }>(`/domains/${domainId}/subdomain/${sid}/web-sunucu`)
       .then(r => { setN(r.data.nginx); setBackend(r.data.backend) })
-      .catch(() => {})
+      .catch(hataYakala('Alt alan web sunucu ayarları yüklenemedi'))
   }, [domainId, sid])
 
   function P<K extends keyof Nginx>(k: K, v: Nginx[K]) { setN(prev => prev ? { ...prev, [k]: v } : prev) }

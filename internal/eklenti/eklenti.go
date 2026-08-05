@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/lisans"
 	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
@@ -136,6 +137,14 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "eklenti soketi tanımsız")
 		return
 	}
+	// 🔴 Ücretli eklentiye giden TEK meşru yol burasıdır: kurulu ikili imzalı
+	// paket başlığıyla uyuşmuyorsa (yamalanmış) istek GEÇMEZ. Periyodik denetim
+	// servisi durdurur ama root onu geri başlatabilir; kapı burada durmazsa bir
+	// sonraki taramaya kadar ücretli yüzey açık kalırdı.
+	if izin, mesaj := lisans.ButunlukKapisi(ad); !izin {
+		httpx.WriteError(w, http.StatusPaymentRequired, mesaj)
+		return
+	}
 
 	rp := &httputil.ReverseProxy{
 		Transport: &http.Transport{
@@ -160,10 +169,16 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 			req.Header.Del("X-Gosp-Kullanici")
 			req.Header.Del("X-Gosp-Uid")
 			req.Header.Del("X-Gosp-Rol")
+			req.Header.Del("X-Gosp-Sahip") // spoof koruması
 			if c := middleware.ClaimsFrom(req); c != nil {
 				req.Header.Set("X-Gosp-Uid", strconv.FormatInt(c.UserID, 10))
 				req.Header.Set("X-Gosp-Kullanici", c.Username)
 				req.Header.Set("X-Gosp-Rol", c.Role)
+				// Reseller ise: eklenti sahiplik-scope'u uygulasın diye sahip olduğu
+				// domain adlarını güvenilir header ile geç (admin kısıtsız — header yok).
+				if c.Role == "reseller" {
+					req.Header.Set("X-Gosp-Sahip", h.resellerDomainAdlari(req.Context(), c.ResellerID))
+				}
 			}
 		},
 		FlushInterval: -1, // SSE: her yazımda anında flush
@@ -221,6 +236,30 @@ func (h *Handlers) SaglikDongusu(ctx context.Context) {
 
 // Routes — core'a bağlanan uçlar. Hepsi AdminOnly (eklentiler admin yüzeyi).
 func (h *Handlers) Routes(r chi.Router) {
-	r.With(middleware.AdminOnly).Get("/eklentiler", h.Liste)
-	r.With(middleware.AdminOnly).HandleFunc("/eklenti/{ad}/*", h.Proxy)
+	// Admin VE reseller: reseller kendi domainleri için mail vb. eklentiyi kullanır
+	// (sahiplik-scope'u eklenti tarafında X-Gosp-Sahip ile uygulanır).
+	r.With(middleware.AdminVeyaReseller).Get("/eklentiler", h.Liste)
+	r.With(middleware.AdminVeyaReseller).HandleFunc("/eklenti/{ad}/*", h.Proxy)
+}
+
+// resellerDomainAdlari — reseller'in sahip olduğu domain adlarını boşlukla ayrılmış
+// döndürür. Eklenti bu listeyi X-Gosp-Sahip'ten okuyup her uçta hedef-domain'in
+// listede olmasını şart koşar (yatay IDOR koruması). Admin'e header geçilmez → kısıtsız.
+func (h *Handlers) resellerDomainAdlari(ctx context.Context, rid int64) string {
+	if rid <= 0 {
+		return ""
+	}
+	rows, err := h.DB.QueryContext(ctx, `SELECT alan_adi FROM domains WHERE reseller_id=?`, rid)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if rows.Scan(&d) == nil && d != "" {
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, " ")
 }

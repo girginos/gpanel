@@ -2,6 +2,8 @@ package system
 
 import (
 	"bufio"
+	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -528,26 +530,106 @@ var servisListesi = []struct{ ad, etiket string }{
 	{"firewalld", "Firewalld"},
 }
 
+// mailServisListesi — MAIL EKLENTISI (parali) kurulu VE lisansi aktifken
+// cekirdek listeye EKLENEN posta servisleri. Kosulsuz eklenmez: eklentisiz bir
+// sunucuda bu satirlar "Kapali" diye kirmizi gorunur ve musteriye bozuk sistem
+// izlenimi verirdi.
+var mailServisListesi = []struct{ ad, etiket string }{
+	{"postfix", "SMTP (Postfix)"},
+	{"dovecot", "IMAP/POP3 (Dovecot)"},
+	{"opendkim", "OpenDKIM"},
+	{"girginospanel-eklenti-mail", "Mail Eklentisi"},
+}
+
+// usageDB — cp_eklentiler kapisini okumak icin panel DB'si. main.go acilista
+// DBAyarla ile verir.
+//
+// nil ise mail servisleri GOSTERILMEZ. Bu bilincli bir karardir: kapiyi
+// OKUYAMADIGIMIZ durumda "muhtemelen vardir" deyip listelemek, olcemedigimiz
+// bir seyi olculmus gibi gostermek olur.
+var (
+	usageDBMu sync.RWMutex
+	usageDB   *sql.DB
+)
+
+// DBAyarla — panel DB handle'ini system paketine verir (bkz. SurumBaslat deseni).
+func DBAyarla(db *sql.DB) {
+	usageDBMu.Lock()
+	usageDB = db
+	usageDBMu.Unlock()
+}
+
+// mailEklentiAktifMi — TEK kapi: cp_eklentiler.aktif (ad='mail').
+//
+// 🔴 NEDEN YENI KAPI YOK: bu sutun zaten hem "kurulu mu" hem "lisans gecerli mi"
+// bilgisini tasir. internal/lisans/nabiz.go lisans dogrulamasi basarisiz olunca
+// aktif=0, aski kalkinca aktif=1 yazar; internal/lisans/butunluk.go butunluk
+// ihlalinde aktif=0 yapar. Ayri bir kapi icat etmek bu tek dogruluk kaynagini
+// ikiye bolerdi.
+//
+// 🔴 ASKIYA ALINMIS LISANS KARARI — GIZLE:
+// Bu projede kasitli bir tasarim var: lisans askiya alininca panel yuzeyi ve
+// eklenti API'si kapanir ama postfix/dovecot CALISMAYA DEVAM EDER (musterinin
+// postasi kaybolmasin diye). Yani askidayken bu servisler gercekten ayaktadir.
+// Buna ragmen listeden GIZLIYORUZ, cunku:
+//   - "Aktif" gostermek, parasi odenmemis bir urunu calisiyor gibi sunar;
+//     panelin geri kalani (mail sayfalari, eklenti API'si) kapaliyken servis
+//     satirinin yesil yanmasi kullaniciya tutarsiz bir panel gosterir.
+//   - "Kapali" gostermek DAHA KOTU olurdu: dogrudan YALAN olur, servis ayakta.
+//   - Gizlemek tek durustur secenek: parali yuzey kapaliyken parali yuzeyin
+//     hicbir parcasi panelde iddia edilmez. Servisin gercek durumu askidayken
+//     de Araclar > Servisler ekranindan degil, sunucudan gorulur; panel askida
+//     olan bir urun hakkinda hicbir sey iddia etmez.
+// Karar degisirse: burada aktif=0 iken de listeleyip ayri bir "lisans askida"
+// rozeti eklemek gerekir — asla sessizce "Aktif" yazilmamalidir.
+func mailEklentiAktifMi() bool {
+	usageDBMu.RLock()
+	db := usageDB
+	usageDBMu.RUnlock()
+	if db == nil {
+		return false
+	}
+	ctx, iptal := context.WithTimeout(context.Background(), 2*time.Second)
+	defer iptal()
+	var aktif int
+	// Satir YOKSA (eklenti hic kurulmamis) sql.ErrNoRows doner → false.
+	if err := db.QueryRowContext(ctx,
+		`SELECT aktif FROM cp_eklentiler WHERE ad='mail'`).Scan(&aktif); err != nil {
+		return false
+	}
+	return aktif == 1
+}
+
 func ReadServisler() []ServiceStat {
-	out := make([]ServiceStat, 0, len(servisListesi))
+	// Cekirdek liste + (kosullu) mail eklentisi servisleri. Sayac dinamiktir:
+	// HomePage.tsx basligi donen satir sayisindan hesaplar, sabit "11/11" YOK.
+	liste := servisListesi
+	if mailEklentiAktifMi() {
+		liste = append(append(make([]struct{ ad, etiket string }, 0, len(servisListesi)+len(mailServisListesi)),
+			servisListesi...), mailServisListesi...)
+	}
+
+	out := make([]ServiceStat, 0, len(liste))
 	type res struct {
 		i     int
 		aktif bool
 	}
-	ch := make(chan res, len(servisListesi))
-	for i, s := range servisListesi {
+	ch := make(chan res, len(liste))
+	for i, s := range liste {
 		go func(i int, ad string) {
 			cmd := exec.Command("systemctl", "is-active", ad)
 			b, _ := cmd.Output()
+			// 🔴 GERCEK OLCUM: yalniz "active" aktif sayilir. Bos cikti / hata
+			// asla "Aktif" olarak yorumlanmaz.
 			ch <- res{i: i, aktif: strings.TrimSpace(string(b)) == "active"}
 		}(i, s.ad)
 	}
 	mat := make(map[int]bool)
-	for i := 0; i < len(servisListesi); i++ {
+	for i := 0; i < len(liste); i++ {
 		r := <-ch
 		mat[r.i] = r.aktif
 	}
-	for i, s := range servisListesi {
+	for i, s := range liste {
 		aktif := mat[i]
 		// Kurulu DEGILSE (unit-file yok) servis absent'tir; "kapali" gosterip operatoru YANILTMA.
 		// Yalniz kurulu-ama-duruk (unit var, inactive) gercek sorun olarak gorunur.

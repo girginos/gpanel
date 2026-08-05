@@ -2,6 +2,7 @@
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 
@@ -102,7 +103,7 @@ function SunucuIzleme() {
 
   useEffect(() => {
     function yukleProcs() {
-      api.get<Process[]>(`/system/processes?n=15&sirala=${procSort}`).then(r => setProcs(r.data)).catch(() => {})
+      api.get<Process[]>(`/system/processes?n=15&sirala=${procSort}`).then(r => setProcs(r.data)).catch(hataYakala('Süreç listesi alınamadı'))
     }
     yukleProcs()
     const t = setInterval(yukleProcs, POLL_MS * 2)
@@ -262,7 +263,7 @@ function DomainIzleme() {
       const aktif = r.data.filter(d => d.durum === 'aktif')
       setDomains(aktif)
       if (aktif.length > 0 && secili === null) setSecili(aktif[0].id)
-    }).catch(() => {})
+    }).catch(hataYakala('Alan adı listesi alınamadı'))
   }, [])
 
   function probet(id: number) {
@@ -283,7 +284,7 @@ function DomainIzleme() {
         .catch(e => setLogHata(apiHata(e)))
       api.get<{ satirlar: string[]; mevcut: boolean }>(`/domains/${secili}/logs/oku?dosya=error&son=40`)
         .then(r => setErrorLog(r.data.satirlar || []))
-        .catch(() => {})
+        .catch(hataYakala('Hata günlüğü alınamadı'))
     }
     logCek()
     const t = setInterval(logCek, POLL_MS)

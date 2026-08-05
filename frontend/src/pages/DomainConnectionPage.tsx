@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 function panoYaz(text: string): boolean {
   // 1) Modern API (HTTPS / localhost only) — kullanıcı gesture içindeyse async ok
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).catch(() => {})
+    navigator.clipboard.writeText(text).catch(hataYakala('Panoya kopyalanamadı'))
     return true
   }
   // 2) Fallback: textarea + execCommand

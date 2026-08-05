@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 
 // Panel içi güncelleme kartı.
 // Güncelleme sırasında panel servisi yeniden başlar → API kısa süre kesilir.
@@ -34,7 +35,7 @@ export default function PanelGuncelleme() {
   const [surum, setSurum] = useState<SurumDurum | null>(null)
 
   const surumYukle = useCallback(() => {
-    api.get<SurumDurum>('/system/surum-kontrol').then(r => setSurum(r.data)).catch(() => {})
+    api.get<SurumDurum>('/system/surum-kontrol').then(r => setSurum(r.data)).catch(hataYakala('Sürüm kontrolü yapılamadı'))
   }, [])
 
   const durumYukle = useCallback(async () => {
@@ -61,7 +62,7 @@ export default function PanelGuncelleme() {
   // Mount: durum + son log (sayfa yenilenince son sonucu da gösterir).
   useEffect(() => {
     durumYukle()
-    logYukle().catch(() => {})
+    logYukle().catch(hataYakala('Güncelleme günlüğü alınamadı'))
     surumYukle()
   }, [durumYukle, logYukle, surumYukle])
 

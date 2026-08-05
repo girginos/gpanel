@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 type OzetSatir = { domain_id: number; alan_adi: string; sayi: number; toplam_b: number; son_yedek: string }
@@ -19,7 +20,7 @@ export default function BackupYonetimiPage() {
   const [yedekliyor, setYedekliyor] = useState(false)
   const timer = useRef<number | null>(null)
 
-  function ozetYukle() { api.get<Ozet>('/admin/backups/ozet').then(r => setO(r.data)).catch(() => {}) }
+  function ozetYukle() { api.get<Ozet>('/admin/backups/ozet').then(r => setO(r.data)).catch(hataYakala('Yedek özeti alınamadı')) }
   function jobYukle() { api.get<Job[]>('/admin/backups/jobs').then(r => setJobs(r.data)).catch(e => setHata(apiHata(e))) }
 
   useEffect(() => {

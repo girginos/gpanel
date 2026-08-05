@@ -8,7 +8,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 type Plan = {
   id: number; ad: string; aciklama: string
   disk_kota_mb: number; trafik_kota_mb: number
-  max_db: number; max_ftp: number; max_email: number
+  max_db: number; max_ftp: number; max_email: number; saatlik_mail_limiti: number; mail_kutu_kota_mb: number
   cpu_yuzde: number; ram_mb: number; inode_kota: number; php_surum: string
   varsayilan: boolean
   [k: string]: unknown // PUT'ta bilinmeyen alanlar KAYBOLMASIN (waf, io, nginx…)
@@ -38,6 +38,8 @@ export default function DomainPlanPage() {
   const [isleniyor, setIsleniyor] = useState<number | 'ozel' | 'kaydet' | null>(null)
   // Satır-içi özelleştirme: yalnız bu hostinge ÖZEL plan düzenlenebilir.
   const [taslak, setTaslak] = useState<Plan | null>(null)
+  // Mail eklentisi aktif+ödemeli ise posta limiti alanları görünür.
+  const [mailAktif, setMailAktif] = useState(false)
 
   function yukle() {
     if (!id) return
@@ -51,6 +53,10 @@ export default function DomainPlanPage() {
       .then(([d, p, s]) => { setDomain(d.data); setPlanlar(p.data || []); setSurumler(s.data || []) })
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
+    // Mail eklentisi aktif mi? (posta limiti alanlarının gate'i)
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
   }
   useEffect(yukle, [id])
 
@@ -204,7 +210,13 @@ export default function DomainPlanPage() {
                 <Alan etiket="CPU (%)" ipucu="100 = 1 çekirdek"><input type="number" min={0} className={inp} value={taslak.cpu_yuzde} onChange={e => T('cpu_yuzde', Number(e.target.value))} /></Alan>
                 <Alan etiket="Veritabanı"><input type="number" min={0} className={inp} value={taslak.max_db} onChange={e => T('max_db', Number(e.target.value))} /></Alan>
                 <Alan etiket="FTP hesabı"><input type="number" min={0} className={inp} value={taslak.max_ftp} onChange={e => T('max_ftp', Number(e.target.value))} /></Alan>
-                <Alan etiket="E-posta kutusu"><input type="number" min={0} className={inp} value={taslak.max_email} onChange={e => T('max_email', Number(e.target.value))} /></Alan>
+                {mailAktif && (
+                  <>
+                    <Alan etiket="E-posta kutusu" ipucu="Mail eklentisi — posta kutusu sayısı"><input type="number" min={0} className={inp} value={taslak.max_email} onChange={e => T('max_email', Number(e.target.value))} /></Alan>
+                    <Alan etiket="Saatlik gönderim" ipucu="Kutu başına giden mail/saat"><input type="number" min={0} className={inp} value={taslak.saatlik_mail_limiti} onChange={e => T('saatlik_mail_limiti', Number(e.target.value))} /></Alan>
+                    <Alan etiket="Kutu depolama (MB)" ipucu="Posta kutusu başına disk kotası; 0 = sınırsız"><input type="number" min={0} className={inp} value={taslak.mail_kutu_kota_mb} onChange={e => T('mail_kutu_kota_mb', Number(e.target.value))} /></Alan>
+                  </>
+                )}
                 <Alan etiket="Inode (dosya sayısı)"><input type="number" min={0} className={inp} value={taslak.inode_kota} onChange={e => T('inode_kota', Number(e.target.value))} /></Alan>
                 <Alan etiket="PHP sürümü">
                   <select className={inp} value={taslak.php_surum} onChange={e => T('php_surum', e.target.value)}>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ListToolbar from '@/components/ListToolbar'
 import EmptyState from '@/components/EmptyState'
@@ -18,6 +19,8 @@ type Plan = {
   max_domain: number
   max_db: number
   max_email: number
+  saatlik_mail_limiti: number
+  mail_kutu_kota_mb: number
   max_ftp: number
   php_surum: string
   fastcgi_cache: boolean
@@ -45,7 +48,7 @@ export default function ServicePlansPage() {
   }
   useEffect(yukle, [])
   useEffect(() => {
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(() => {})
+    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala('PHP sürümleri alınamadı'))
   }, [])
 
   async function sil() {
@@ -164,6 +167,8 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
     max_domain: plan.max_domain || 1,
     max_db: plan.max_db || 1,
     max_email: plan.max_email || 0,
+    saatlik_mail_limiti: plan.saatlik_mail_limiti || 0,
+    mail_kutu_kota_mb: plan.mail_kutu_kota_mb || 0,
     max_ftp: plan.max_ftp || 2,
     php_surum: plan.php_surum || '8.3',
     fastcgi_cache: plan.fastcgi_cache || false,
@@ -174,6 +179,15 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
   })
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
+  // Mail eklentisi aktif+ödemeli ise plandaki mail kotası alanlarını göster.
+  // DomainPlanPage/PaketDetayPage ile AYNI kapı — lisans kalkınca alanlar
+  // kendiliğinden gizlenir; olmayan bir özelliği vaat etmeyiz.
+  const [mailAktif, setMailAktif] = useState(false)
+  useEffect(() => {
+    api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
+      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
+      .catch(() => setMailAktif(false))
+  }, [])
 
   const phpOpts = Array.from(new Set([
     ...surumler.map(s => s.surum),
@@ -216,6 +230,20 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
           <Sayi etiket="Max DB" value={form.max_db} setVal={v => setForm({ ...form, max_db: v })} />
           <Sayi etiket="Max FTP" value={form.max_ftp} setVal={v => setForm({ ...form, max_ftp: v })} />
         </div>
+
+        {/* Mail kotaları — yalnız mail eklentisi aktifken. Olmayan bir özelliği
+            plan formunda göstermek yanıltıcı olurdu (lisans kalkınca gizlenir). */}
+        {mailAktif && (
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">E-posta (Mail eklentisi)</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <Sayi etiket="E-posta kutusu" value={form.max_email} setVal={v => setForm({ ...form, max_email: v })} />
+              <Sayi etiket="Saatlik gönderim" value={form.saatlik_mail_limiti} setVal={v => setForm({ ...form, saatlik_mail_limiti: v })} />
+              <Sayi etiket="Kutu depolama (MB)" value={form.mail_kutu_kota_mb} setVal={v => setForm({ ...form, mail_kutu_kota_mb: v })} />
+            </div>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-500">Kutu = posta kutusu sayısı · Saatlik = kutu başına giden mail/saat · Depolama = kutu başına disk (MB). 0 = sınırsız.</p>
+          </div>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
           <input type="checkbox" checked={form.varsayilan} onChange={e => setForm({ ...form, varsayilan: e.target.checked })} className="rounded" />
           Yeni domainlerde varsayılan plan

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
 type Durum = {
@@ -261,7 +262,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
       .catch(() => setEnv(''))
     api.get<{ mevcut: string; adaylar: string[] }>(`/domains/${id}/laravel/app-adaylar`)
       .then(r => { setAppRoot(r.data.mevcut); setAppKayitli(r.data.mevcut); setAppAdaylar(r.data.adaylar || []) })
-      .catch(() => {})
+      .catch(hataYakala('Laravel uygulama adayları alınamadı'))
   }, [id])
 
   async function appRootKaydet() {
@@ -480,7 +481,7 @@ function NodeSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: stri
   useEffect(() => {
     api.get<{ surumler: string[] }>(`/domains/${id}/laravel/node`).then(r => {
       setSurumler(r.data.surumler || []); if (r.data.surumler?.length) setNodeSurum(r.data.surumler[0])
-    }).catch(() => {})
+    }).catch(hataYakala('Node sürümleri alınamadı'))
   }, [id])
   const runGerek = komut === 'run'
   return (
@@ -534,7 +535,7 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
   useEffect(() => {
     api.get<{ surumler: string[] }>(`/domains/${id}/laravel/node`).then(r => {
       setSurumler(r.data.surumler || []); if (r.data.surumler?.length) setNodeSurum(r.data.surumler[0])
-    }).catch(() => {})
+    }).catch(hataYakala('Node sürümleri alınamadı'))
     return () => { if (poll.current) clearInterval(poll.current) }
   }, [id])
 
@@ -614,7 +615,7 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
   const [durum, setDurum] = useState<{ active_state: string; sub_state: string; restarts: string } | null>(null)
 
   function durumYukle() {
-    api.get<any>(`/domains/${id}/laravel/queue/durum`).then(r => setDurum(r.data)).catch(() => {})
+    api.get<any>(`/domains/${id}/laravel/queue/durum`).then(r => setDurum(r.data)).catch(hataYakala('Kuyruk durumu alınamadı'))
   }
   useEffect(() => { if (d.queue_enabled) durumYukle() }, [id, d.queue_enabled])
 

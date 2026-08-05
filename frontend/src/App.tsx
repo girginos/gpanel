@@ -15,6 +15,11 @@ import PlaceholderPage from '@/pages/PlaceholderPage'
 import ToolPage from '@/pages/ToolPage'
 import DomainFilesPage from '@/pages/DomainFilesPage'
 import DomainSSLPage from '@/pages/DomainSSLPage'
+import DomainMailAyarlarPage from '@/pages/DomainMailAyarlarPage'
+import DomainMailKutularPage from '@/pages/DomainMailKutularPage'
+import DomainMailTeslimatPage from '@/pages/DomainMailTeslimatPage'
+import DomainMailAliasPage from '@/pages/DomainMailAliasPage'
+import MailSunucuPage from "@/pages/MailSunucuPage"
 import DomainSSHPage from '@/pages/DomainSSHPage'
 import DomainStatsPage from '@/pages/DomainStatsPage'
 import DomainPerformansPage from '@/pages/DomainPerformansPage'
@@ -46,6 +51,7 @@ import ServislerPage from '@/pages/ServislerPage'
 import PanelGuncellemePage from '@/pages/PanelGuncellemePage'
 import SunucuOptimizePage from '@/pages/SunucuOptimizePage'
 import SiteTasimaPage from '@/pages/SiteTasimaPage'
+import EklentilerPage from '@/pages/EklentilerPage'
 import WordPressPage from '@/pages/WordPressPage'
 import FirewallPage from '@/pages/FirewallPage'
 import BackupYonetimiPage from '@/pages/BackupYonetimiPage'
@@ -91,6 +97,10 @@ export default function App() {
         <Route path="abonelikler/:id/php"           element={<DomainPHPPage />} />
         <Route path="abonelikler/:id/plan"          element={<DomainPlanPage />} />
         <Route path="abonelikler/:id/ssl"           element={<DomainSSLPage />} />
+        <Route path="abonelikler/:id/mail/ayarlar"  element={<DomainMailAyarlarPage />} />
+        <Route path="abonelikler/:id/mail/kutular"  element={<DomainMailKutularPage />} />
+        <Route path="abonelikler/:id/mail/teslimat" element={<DomainMailTeslimatPage />} />
+        <Route path="abonelikler/:id/mail/takmaadlar" element={<DomainMailAliasPage />} />
         <Route path="abonelikler/:id/ssh-erisim"    element={<DomainSSHPage />} />
         <Route path="abonelikler/:id/istatistik"    element={<DomainStatsPage />} />
         <Route path="abonelikler/:id/performans"    element={<DomainPerformansPage />} />
@@ -133,12 +143,16 @@ export default function App() {
 
         <Route path="araclar-ayarlar" element={<AraclarAyarlarPage />} />
         <Route path="istatistikler" element={<IstatistiklerPage />} />
-        <Route path="eklentiler" element={<YakindaPage baslik="Eklentiler" ikon="🧩" aciklama="Panel için 3. parti eklenti yönetimi" ozellikler={["Marketplace gezinme","Tek tıkla kur/kaldır","Sürüm güncelleme","API entegrasyonu","Geliştirici SDK"]} />} />
+        <Route path="eklentiler" element={<EklentilerPage />} />
+        <Route path="eklentiler/:slug" element={<EklentilerPage />} />
         <Route path="wordpress" element={<WordPressPage />} />
         <Route path="firewall" element={<FirewallPage />} />
         <Route path="backup-yonetimi" element={<BackupYonetimiPage />} />
         <Route path="backup-yonetimi/is/:jid" element={<BackupJobDetayPage />} />
         <Route path="izleme" element={<IzlemePage />} />
+        <Route path="mail-sunucu" element={<MailSunucuPage />} />
+        <Route path="mail-sunucu-ayarlari" element={<Navigate to="/mail-sunucu?sekme=genel" replace />} />
+        <Route path="mail-ip-havuzu" element={<Navigate to="/mail-sunucu?sekme=ip-havuzu" replace />} />
 
         <Route path="profil"          element={<SettingsPage />} />
         <Route path="parola-degistir" element={<Navigate to="/profil" replace />} />
