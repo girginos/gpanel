@@ -229,9 +229,81 @@ server {
 	return nginxDosyaYazDogrula(webmailOrtakVhost, b.String())
 }
 
+// mailOtoYapilandirmaLokasyon — Outlook (autodiscover) + Thunderbird (autoconfig)
+// XML'ini DOĞRUDAN döndüren nginx location blokları.
+//
+// 🔴 Roundcube'dan ÖNCE gelmeli: yoksa autodiscover isteği webmail HTML login
+// sayfasına düşer, istemci oto-kurulumu ayrıştıramaz ve Outlook "sürekli parola
+// sorar" (canlı gözlendi). Ayarlar: mail.<d> IMAP993/POP995/SMTP587, kullanıcı =
+// tam e-posta. XML gövdesi girginospanel-autoconfig servisiyle BİREBİR
+// (Outlook + Thunderbird ile test edilmiş şema). XML'de '$' YOK → nginx değişken
+// genişletmesi riski yok; tek tırnak gövde, XML'de tek tırnak da yok.
+func mailOtoYapilandirmaLokasyon(alanAdi string) string {
+	tb := `<?xml version="1.0" encoding="UTF-8"?>
+<clientConfig version="1.1">
+  <emailProvider id="` + alanAdi + `">
+    <domain>` + alanAdi + `</domain>
+    <displayName>` + alanAdi + ` Mail</displayName>
+    <displayShortName>` + alanAdi + `</displayShortName>
+    <incomingServer type="imap">
+      <hostname>mail.` + alanAdi + `</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </incomingServer>
+    <incomingServer type="pop3">
+      <hostname>mail.` + alanAdi + `</hostname>
+      <port>995</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>mail.` + alanAdi + `</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>`
+	ol := `<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <Protocol>
+        <Type>IMAP</Type>
+        <Server>mail.` + alanAdi + `</Server>
+        <Port>993</Port>
+        <SSL>on</SSL>
+        <SPA>off</SPA>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+      <Protocol>
+        <Type>SMTP</Type>
+        <Server>mail.` + alanAdi + `</Server>
+        <Port>587</Port>
+        <SSL>on</SSL>
+        <SPA>off</SPA>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>`
+	return `    # Outlook/Thunderbird otomatik yapılandırma — XML DOĞRUDAN (Roundcube'dan ÖNCE).
+    location = /mail/config-v1.1.xml { default_type application/xml; return 200 '` + tb + `'; }
+    location = /.well-known/autoconfig/mail/config-v1.1.xml { default_type application/xml; return 200 '` + tb + `'; }
+    location ~* ^/autodiscover/autodiscover\.xml$ { default_type application/xml; return 200 '` + ol + `'; }
+`
+}
+
 // WebmailVhostDomainYaz — domaine özel (GERÇEK sertifikalı) webmail vhost'u.
 // Paylaşımlı regex bloğunu tam adla EZER; böylece webmail.<d> tarayıcı uyarısı
-// olmadan açılır.
+// olmadan açılır. autoconfig.<d>/autodiscover.<d> de bu bloktadır → LE cert o
+// adları kapsar ve XML doğrudan döner (Outlook oto-kurulumu çalışır).
 func WebmailVhostDomainYaz(alanAdi, certYol, keyYol string) error {
 	if err := ValidateDomain(alanAdi); err != nil {
 		return err
@@ -246,7 +318,7 @@ func WebmailVhostDomainYaz(alanAdi, certYol, keyYol string) error {
 server {
     listen 80;
     listen [::]:80;
-    server_name webmail.` + alanAdi + ` mail.` + alanAdi + `;
+    server_name webmail.` + alanAdi + ` mail.` + alanAdi + ` autoconfig.` + alanAdi + ` autodiscover.` + alanAdi + `;
 
 ` + acmeBlok() + `
     location / { return 301 https://$host$request_uri; }
@@ -256,7 +328,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name webmail.` + alanAdi + ` mail.` + alanAdi + `;
+    server_name webmail.` + alanAdi + ` mail.` + alanAdi + ` autoconfig.` + alanAdi + ` autodiscover.` + alanAdi + `;
 
     ssl_certificate     ` + certYol + `;
     ssl_certificate_key ` + keyYol + `;
@@ -267,7 +339,7 @@ server {
     ssl_session_timeout 1d;
 
 ` + acmeBlok() + `
-` + roundcubeGovde() + `
+` + mailOtoYapilandirmaLokasyon(alanAdi) + roundcubeGovde() + `
     access_log /var/log/nginx/webmail.` + alanAdi + `.access.log;
     error_log  /var/log/nginx/webmail.` + alanAdi + `.error.log warn;
 }
@@ -367,10 +439,15 @@ func MailSertifikaAl(alanAdi, sk string) (certPath, keyPath string, kapsam []str
 		return "", "", nil, nil, fmt.Errorf("webmail/ACME vhost'u hazırlanamadı: %w", e)
 	}
 	// 2) Ad başına ÖN SINAV (SAN tuzağı). mail./webmail. + Outlook/istemci
-	// gelenek adları smtp./imap./pop. — çözülmeyen ad SAN'dan çıkar (atlanan).
+	// gelenek adları smtp./imap./pop. + otomatik-yapılandırma adları
+	// autoconfig./autodiscover. — çözülmeyen ad SAN'dan çıkar (atlanan).
+	// 🔴 autoconfig./autodiscover. cert'e GİRMELİ: Outlook oto-kurulumda
+	// https://autodiscover.<d>'ye gider; cert o adı kapsamazsa tarayıcı/istemci
+	// GÜVENMEZ ve oto-kurulum başarısız olur (istemci "sürekli parola sorar").
 	for _, h := range []string{
 		"mail." + alanAdi, "webmail." + alanAdi,
 		"smtp." + alanAdi, "imap." + alanAdi, "pop." + alanAdi,
+		"autoconfig." + alanAdi, "autodiscover." + alanAdi,
 	} {
 		if !hostCozuluyorMu(alanAdi, h) {
 			atlanan = append(atlanan, h+": DNS bu sunucuya çözülmüyor (A kaydı gerekli)")

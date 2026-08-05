@@ -2,10 +2,13 @@ package domains
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -14,6 +17,37 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// sertifikaGercek — KURULAN cert dosyasını okuyup GERÇEK kaynağı ve bitişi döner.
+//
+// 🔴 NEDEN: EnableLetsEncrypt, LE çekimi başarısız olunca içeride SESSİZCE
+// self-signed fail-safe'e düşüp err=nil döner (443'ü ayakta tutmak için, bilinçli).
+// Handler istenen tipe (req.Tip) güvenip 'ssl_kaynak=letsencrypt' + 90 gün yazarsa,
+// panel kendinden imzalı sertifikayı "Let's Encrypt · KORUMALI · 90 gün" diye
+// YALAN raporlar (mail yolu dürüsttü, web yolu değildi — feedback_failure_renders_as_reassurance).
+// Tek doğru kaynak: diskteki cert'in KENDİSİ. issuer==subject → self-signed.
+// Ayrıştırılamazsa istenen tipe düşülür (davranış bozulmaz), bitiş varsayılan.
+func sertifikaGercek(certYol, istenenTip string, varsayilanBitis time.Time) (kaynak string, bitis time.Time, gercekLE bool) {
+	kaynak, bitis = istenenTip, varsayilanBitis
+	b, err := os.ReadFile(certYol)
+	if err != nil {
+		return
+	}
+	blk, _ := pem.Decode(b)
+	if blk == nil {
+		return
+	}
+	c, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		return
+	}
+	bitis = c.NotAfter
+	// Kendinden imzalı: issuer == subject. Gerçek CA (LE) böyle DEĞİLDİR.
+	if c.Issuer.String() == c.Subject.String() {
+		return "self-signed", bitis, false
+	}
+	return "letsencrypt", bitis, true
+}
 
 type sslIssueReq struct {
 	Tip     string `json:"tip"`                // "self-signed" | "letsencrypt"
@@ -113,14 +147,25 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bitis := time.Now().Add(365 * 24 * time.Hour)
+	// Varsayılan bitiş (cert okunamazsa): LE=90g, self-signed=365g.
+	varsayilan := time.Now().Add(365 * 24 * time.Hour)
 	if req.Tip == "letsencrypt" {
-		bitis = time.Now().Add(90 * 24 * time.Hour)
+		varsayilan = time.Now().Add(90 * 24 * time.Hour)
 	}
+	// 🔴 GERÇEĞİ diskteki cert'ten oku — istenen tipe DEĞİL. LE başarısız olup
+	// self-signed fail-safe'e düşülmüşse burada yakalanır ve DÜRÜST kaydedilir.
+	kaynak, bitis, gercekLE := sertifikaGercek(certYol, req.Tip, varsayilan)
 
-	if _, err := h.DB.ExecContext(r.Context(),
+	// 🔴 KOPUK CONTEXT: LE+mail çekimi 30sn'yi aşabilir; tarayıcı (axios) o sırada
+	// isteği kesip bağlantıyı kapatırsa r.Context() İPTAL olur. Cert nginx'e kurulup
+	// yeniden yüklenmiş (site HTTPS) AMA bu UPDATE r.Context() ile yapılırsa
+	// "context canceled" ile DÜŞER → cert diskte ama panel "KORUMASIZ" der (durum
+	// diskle çelişir). Sonucu KALICI kılmak için ayrık context kullanılır.
+	dbCtx, iptal := context.WithTimeout(context.Background(), 15*time.Second)
+	defer iptal()
+	if _, err := h.DB.ExecContext(dbCtx,
 		`UPDATE domains SET ssl_aktif=1, ssl_kaynak=?, cert_path=?, key_path=?, ssl_bitis=?
-		 WHERE id=?`, req.Tip, certYol, keyYol, bitis, id); err != nil {
+		 WHERE id=?`, kaynak, certYol, keyYol, bitis, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
 	}
@@ -128,10 +173,19 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	yanit := map[string]any{
 		"ok":    true,
 		"id":    id,
-		"tip":   req.Tip,
+		"tip":   kaynak, // GERÇEK kaynak (istenen değil)
 		"cert":  certYol,
 		"key":   keyYol,
 		"bitis": bitis.Format("2006-01-02"),
+	}
+	// LE istendi ama self-signed'a düşüldü → SESSİZ GEÇME, açıkça söyle
+	// (mail yolu gibi dürüst). Kullanıcı "KORUMALI/Let's Encrypt" sanmasın.
+	if req.Tip == "letsencrypt" && !gercekLE {
+		yanit["ssl_uyari"] = "Let's Encrypt sertifikası ALINAMADI; site geçici olarak " +
+			"kendinden imzalı (self-signed) sertifikayla ayakta tutuluyor — tarayıcı " +
+			"“güvenli değil” uyarısı verebilir. En sık sebep: alan adı bu sunucuya " +
+			"çözülmüyor ya da ACME challenge (/.well-known/acme-challenge/) doğrulanamıyor. " +
+			"DNS’i bu sunucuya yöneltip tekrar deneyin."
 	}
 
 	// Mail SSL — yalnız Let's Encrypt + mail eklentisi aktifse. mail.<d>+webmail.<d>

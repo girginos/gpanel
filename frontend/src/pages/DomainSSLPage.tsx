@@ -22,6 +22,7 @@ export default function DomainSSLPage() {
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
+  const [uyari, setUyari] = useState<string | null>(null)  // LE alınamadı → self-signed fail-safe vb.
   const [mailAktif, setMailAktif] = useState(false)  // mail eklentisi kurulu+etkin mi
   const [mailSSL, setMailSSL] = useState(true)       // "posta sunucusunu de güvenceye al"
 
@@ -38,15 +39,26 @@ export default function DomainSSLPage() {
 
   async function issue(tip: 'self-signed' | 'letsencrypt') {
     if (tip === 'letsencrypt' && !confirm('Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?')) return
-    setIsleniyor(true); setHata(null); setBasari(null)
+    setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
     try {
       const govde: { tip: string; mail_ssl?: boolean } = { tip }
       if (tip === 'letsencrypt' && mailAktif && mailSSL) govde.mail_ssl = true
-      const { data } = await api.post(`/domains/${id}/ssl/issue`, govde)
-      let msg = `Sertifika kuruldu (${tip}). Bitiş: ${data.bitis}. Site artık HTTPS üzerinden çalışıyor.`
-      if (data.mail_ssl) msg += ' Posta sunucusu da güvenceye alındı (mail. + webmail.).'
-      else if (data.mail_ssl_uyari) msg += ` Not: ${data.mail_ssl_uyari}`
-      setBasari(msg)
+      // 🔴 LE doğrulaması + (mail SSL'de) 5 alt-alan sertifikası 30sn'yi aşabilir;
+      // global 30sn timeout burada isteği erken keser → tarayıcı "timeout" der ve
+      // bağlantı kopunca sunucu tarafı DB UPDATE'i de düşerdi. Bu çağrıya özel geniş süre.
+      const { data } = await api.post(`/domains/${id}/ssl/issue`, govde, { timeout: 180_000 })
+      // 🔴 GERÇEK kaynağı sunucu döner (data.tip) — istenen 'tip'e GÜVENME:
+      // LE başarısız olup self-signed'a düşülmüşse data.tip='self-signed' olur.
+      const gercekTip = data.tip === 'letsencrypt' ? "Let's Encrypt" : 'öz-imzalı (self-signed)'
+      let mailNot = ''
+      if (data.mail_ssl) mailNot = ' Posta sunucusu da güvenceye alındı (mail. + webmail.).'
+      else if (data.mail_ssl_uyari) mailNot = ` Not: ${data.mail_ssl_uyari}`
+      if (data.ssl_uyari) {
+        // LE istendi ama alınamadı → başarı DEĞİL, uyarı olarak göster.
+        setUyari(data.ssl_uyari + mailNot)
+      } else {
+        setBasari(`Sertifika kuruldu (${gercekTip}). Bitiş: ${data.bitis}. Site artık HTTPS üzerinden çalışıyor.${mailNot}`)
+      }
       yukle()
     } catch (e) {
       setHata(apiHata(e, 'SSL kurulumu başarısız'))
@@ -57,7 +69,7 @@ export default function DomainSSLPage() {
 
   async function disable() {
     if (!confirm('SSL kaldırılsın mı? Site HTTP\'ye dönecek.')) return
-    setIsleniyor(true); setHata(null); setBasari(null)
+    setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
     try {
       await api.delete(`/domains/${id}/ssl`)
       setBasari('SSL kaldırıldı. Site HTTP olarak çalışıyor.')
@@ -88,17 +100,26 @@ export default function DomainSSLPage() {
       )}
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
+      {uyari && <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-800 dark:text-amber-300">{uyari}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
+      {isleniyor && <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">İşlem sürüyor — Let's Encrypt doğrulaması (özellikle posta alt-alanlarıyla) 1–2 dakika sürebilir. Lütfen bu sayfada bekleyin.</div>}
 
       {/* Durum kartı */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Mevcut Durum</h2>
           {durum && (
-            durum.aktif ? (
+            durum.aktif && durum.kaynak === 'letsencrypt' ? (
+              // Yalnız GERÇEK CA (Let's Encrypt) = tarayıcıda güvenilir → yeşil Korumalı.
               <span className="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                 Korumalı
+              </span>
+            ) : durum.aktif ? (
+              // Self-signed: şifreli AMA tarayıcı güvenmez → yeşil DEĞİL, amber "Öz-imzalı".
+              <span className="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                Öz-imzalı
               </span>
             ) : (
               <span className="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
