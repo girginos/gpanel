@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Paket = {
   adi: string; surum?: string; aciklama?: string;
@@ -67,6 +68,7 @@ function Ikon({ d, className = '' }: { d: string; className?: string }) {
 }
 
 export default function PaketlerPage() {
+  const { onay } = useDialog()
   const [sekme, setSekme] = useState<Sekme>('ara')
   const [q, setQ] = useState('')
   const [sonuc, setSonuc] = useState<Paket[]>([])
@@ -108,7 +110,7 @@ export default function PaketlerPage() {
     const onayMesaji = suankiKurulu
       ? `"${paket}" paketi KALDIRILACAK. Devam?`
       : `"${paket}" paketi sunucuya kurulacak. Devam?`
-    if (!confirm(onayMesaji)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: onayMesaji }))) return
 
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
@@ -142,7 +144,7 @@ export default function PaketlerPage() {
   }
 
   async function kur(paket: string) {
-    if (!confirm(`"${paket}" paketi sunucu genelinde kurulacak. Devam?`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${paket}" paketi sunucu genelinde kurulacak. Devam?` }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kur', { paket })
@@ -154,7 +156,7 @@ export default function PaketlerPage() {
     finally { setIsleniyor(null) }
   }
   async function kaldir(paket: string) {
-    if (!confirm(`"${paket}" paketi KALDIRILACAK. Devam?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${paket}" paketi KALDIRILACAK. Devam?`, tehlike: true }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kaldir', { paket })

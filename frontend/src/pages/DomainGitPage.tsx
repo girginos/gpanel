@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string }
 type Repo = {
@@ -21,6 +22,7 @@ type GHConn = {
 type GHRepo = { full_name: string; name: string; description?: string; private: boolean; default_branch: string; updated_at: string }
 
 export default function DomainGitPage() {
+  const { onay, bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [repo, setRepo] = useState<Repo | null>(null)
@@ -120,7 +122,7 @@ export default function DomainGitPage() {
   }
 
   async function ghDisconnect() {
-    if (!confirm('GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez.')) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: 'GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez.', tehlike: true }))) return
     try {
       await api.delete(`/domains/${id}/github`)
       setGhConn({ yok: true })
@@ -180,7 +182,7 @@ export default function DomainGitPage() {
       await api.delete(`/domains/${id}/git`)
       setRepo(null); setSilinecek(false); setBasari('Repo bağlantısı kaldırıldı')
     } catch (e) {
-      alert(apiHata(e))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e) }))
     }
   }
 

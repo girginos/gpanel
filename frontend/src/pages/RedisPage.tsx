@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Durum = {
   aktif: boolean
@@ -15,6 +16,7 @@ type Durum = {
 }
 
 export default function RedisPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -44,7 +46,7 @@ export default function RedisPage() {
     finally { setMesgul(false) }
   }
   async function kapat() {
-    if (!confirm('Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir.')) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: 'Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir.', tehlike: true }))) return
     setHata(null); setBasari(null); setMesgul(true)
     try {
       await api.delete(`/domains/${id}/redis`)

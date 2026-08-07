@@ -9,6 +9,7 @@ import ListToolbar from '@/components/ListToolbar'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { useDialog } from '@/components/Dialog'
 
 type Plan = {
   id: number
@@ -32,6 +33,7 @@ type Plan = {
 type Surum = { surum: string; aciklama?: string }
 
 export default function ServicePlansPage() {
+  const { bilgi } = useDialog()
   const [items, setItems] = useState<Plan[]>([])
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
@@ -57,7 +59,7 @@ export default function ServicePlansPage() {
       await api.delete(`/plans/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      alert(apiHata(e, 'Silme başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') }))
     }
   }
 

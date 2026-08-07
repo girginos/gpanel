@@ -72,7 +72,7 @@ export default function DomainMailAyarlarPage() {
   const g = monitor ? GENEL[monitor.genel_durum] : null
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },

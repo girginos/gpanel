@@ -3,12 +3,14 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
 type Durum = { clamav: boolean; imza_tarihi: string; kullanici: string; son_tarama: Tarama | null; bulgular: Bulgu[] }
 
 export default function DomainAntivirusPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -50,7 +52,7 @@ export default function DomainAntivirusPage() {
   }
 
   async function karantina(b: Bulgu) {
-    if (!confirm(`Dosya karantinaya alınsın mı?\n${b.dosya}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `Dosya karantinaya alınsın mı?\n${b.dosya}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)` }))) return
     setHata(null)
     try { await api.post(`/domains/${id}/antivirus/karantina`, { dosya: b.dosya }); yukle() }
     catch (e) { setHata(apiHata(e, 'Karantinaya alınamadı')) }

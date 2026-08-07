@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Kural = {
   id: number; tip: 'ban' | 'whitelist' | 'kapat'; ip: string; port: number
@@ -35,6 +36,7 @@ const MODLAR = {
 } as const
 
 export default function FirewallPage() {
+  const { onay } = useDialog()
   const [kurallar, setKurallar] = useState<Kural[]>([])
   const [korumali, setKorumali] = useState<number[]>([])
   const [yuk, setYuk] = useState(true)
@@ -58,7 +60,7 @@ export default function FirewallPage() {
   useEffect(yukle, [])
 
   async function sablonUygula(s: typeof SABLONLAR[number]) {
-    if (!confirm(`"${s.ad}" şablonu uygulansın mı?\nKapatılacak port(lar): ${s.portlar}\nBu portlara internetten erişim engellenir.`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${s.ad}" şablonu uygulansın mı?\nKapatılacak port(lar): ${s.portlar}\nBu portlara internetten erişim engellenir.`, tehlike: true }))) return
     setHata(null); setBasari(null); setMesgul('sablon:' + s.key)
     try {
       const { data } = await api.post('/firewall/sablon', { sablon: s.key })
@@ -85,7 +87,7 @@ export default function FirewallPage() {
 
   async function sil(k: Kural) {
     const ozet = k.tip === 'kapat' ? `port ${k.port} kapatma` : `${k.ip}${k.port ? ':' + k.port : ''} ${k.tip}`
-    if (!confirm(`"${ozet}" kuralı silinsin mi?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${ozet}" kuralı silinsin mi?`, tehlike: true }))) return
     setHata(null); setBasari(null); setMesgul('sil:' + k.id)
     try { await api.delete(`/firewall/${k.id}`); yukle() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }

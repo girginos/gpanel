@@ -6,6 +6,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -72,6 +73,7 @@ function fmtKB(kb: number) {
 }
 
 export default function DomainsPage() {
+  const { sor } = useDialog()
   const sahipKolonu = panelSahibiMi()
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
@@ -198,7 +200,7 @@ export default function DomainsPage() {
       document.body.appendChild(ta); ta.select(); document.execCommand('copy')
       document.body.removeChild(ta); return true
     } catch {}
-    try { window.prompt('Kopyalamak için Ctrl+C, sonra Enter:', metin); return true } catch {}
+    try { (await sor({ baslik: 'Kopyalamak için Ctrl+C, sonra Enter:', varsayilan: metin })); return true } catch {}
     return false
   }
 

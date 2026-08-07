@@ -7,6 +7,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Gorev = {
   idx: number
@@ -34,6 +35,7 @@ const ON_AYARLAR: Array<{ etiket: string; secim: { dakika: string; saat: string;
 ]
 
 export default function DomainCronPage() {
+  const { onay, bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [gorevler, setGorevler] = useState<Gorev[]>([])
@@ -56,12 +58,12 @@ export default function DomainCronPage() {
   }, [id])
 
   async function sil(g: Gorev) {
-    if (!confirm(`"${g.komut.slice(0, 60)}..." görevi silinsin mi?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${g.komut.slice(0, 60)}..." görevi silinsin mi?`, tehlike: true }))) return
     try {
       await api.delete(`/domains/${id}/cron/${g.idx}`)
       yukle()
     } catch (e) {
-      alert(apiHata(e, 'Silme başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') }))
     }
   }
 

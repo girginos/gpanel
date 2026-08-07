@@ -3,11 +3,13 @@ import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/DomainList'
+import { useDialog } from '@/components/Dialog'
 
 type MailDomain = { id: number; ad: string; kutu_sayisi: number }
 type Alias = { id: number; domain_id: number; kaynak: string; hedef: string }
 
 export default function DomainMailAliasPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [mailDomain, setMailDomain] = useState<MailDomain | null | undefined>(undefined)
@@ -58,7 +60,7 @@ export default function DomainMailAliasPage() {
   }
 
   async function sil(a: Alias) {
-    if (!window.confirm(`"${a.kaynak} → ${a.hedef}" yönlendirmesi silinecek. Emin misiniz?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${a.kaynak} → ${a.hedef}" yönlendirmesi silinecek. Emin misiniz?`, tehlike: true }))) return
     setIsleniyor(true); setHata(null)
     try {
       await api.delete(`/eklenti/mail/aliaslar/${a.id}`)
@@ -76,7 +78,7 @@ export default function DomainMailAliasPage() {
   )
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl mx-auto">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },

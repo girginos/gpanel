@@ -8,6 +8,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type DB = {
@@ -16,6 +17,7 @@ type DB = {
 }
 
 export default function DomainDatabasesPage() {
+  const { bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dbler, setDbler] = useState<DB[]>([])
@@ -40,7 +42,7 @@ export default function DomainDatabasesPage() {
       const { data } = await api.post<{ signon_url: string }>(`/databases/${d.id}/pma-token`)
       window.open(data.signon_url, '_blank', 'noopener')
     } catch (e) {
-      alert(apiHata(e, 'phpMyAdmin token alınamadı'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'phpMyAdmin token alınamadı') }))
     }
   }
 
@@ -52,7 +54,7 @@ export default function DomainDatabasesPage() {
   async function sil() {
     if (!silinecek) return
     try { await api.delete(`/databases/${silinecek.id}`); setSilinecek(null); yukle() }
-    catch (e) { alert(apiHata(e, 'Silme başarısız')) }
+    catch (e) { (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') })) }
   }
 
   function kopyala(d: DB) {

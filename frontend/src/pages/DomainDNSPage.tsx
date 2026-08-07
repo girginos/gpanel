@@ -8,6 +8,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Kayit = {
   id: number
@@ -45,6 +46,7 @@ const DEGER_IPUCU: Record<string, string> = {
 }
 
 export default function DomainDNSPage() {
+  const { bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [kayitlar, setKayitlar] = useState<Kayit[]>([])
@@ -185,7 +187,7 @@ export default function DomainDNSPage() {
       await api.delete(`/domains/${id}/dns/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      alert(apiHata(e, 'Silme başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') }))
     }
   }
 

@@ -5,6 +5,7 @@ import { parolaUret, panoyaKopyala } from '@/lib/parola'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Reseller = {
   id: number; kullanici: string; ad_soyad: string; durum: string
@@ -33,6 +34,7 @@ type Paket = {
 const bos = { kullanici: '', parola: '', ad_soyad: '', paket_id: 0, max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0 }
 
 export default function ResellerlarPage() {
+  const { onay } = useDialog()
   const [items, setItems] = useState<Reseller[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -82,7 +84,7 @@ export default function ResellerlarPage() {
   }
 
   async function sil(x: Reseller) {
-    if (!confirm(`"${x.kullanici}" bayisi silinsin mi?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${x.kullanici}" bayisi silinsin mi?`, tehlike: true }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/resellers/${x.id}`); setOk('Bayi silindi.'); yukle() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }

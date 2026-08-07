@@ -4,6 +4,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import SubPHPAyarlari from '@/components/SubPHPAyarlari'
 import SubWebAyarlari from '@/components/SubWebAyarlari'
+import { useDialog } from '@/components/Dialog'
 
 type Detay = {
   id: number; alt_ad: string; tam_ad: string; php_surum: string
@@ -20,6 +21,7 @@ function fmtKB(kb: number) {
 }
 
 export default function DomainSubdomainYonetPage() {
+  const { onay } = useDialog()
   const { id, sid } = useParams()
   const navigate = useNavigate()
   const [d, setD] = useState<Detay | null>(null)
@@ -70,7 +72,7 @@ export default function DomainSubdomainYonetPage() {
     finally { setSslMesgul(false) }
   }
   async function sslKaldir() {
-    if (!confirm('SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur.')) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur.' }))) return
     setHata(null); setOk(null); setSslMesgul(true)
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}/ssl`)
@@ -81,7 +83,7 @@ export default function DomainSubdomainYonetPage() {
 
   async function sil() {
     if (!d) return
-    if (!confirm(`${d.tam_ad} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz.`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${d.tam_ad} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz.`, tehlike: true }))) return
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}`)
       navigate(`/abonelikler/${id}/subdomainler`)

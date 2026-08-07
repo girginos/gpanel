@@ -5,6 +5,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string; ssl: boolean; ssl_bitis?: string }
 type SSLDurum = {
@@ -18,6 +19,7 @@ type SSLAdim = { ad: string; etiket: string; durum: string; mesaj?: string; sure
 type SSLIlerleme = { durum: string; adimlar?: SSLAdim[]; hata?: string }
 
 export default function DomainSSLPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [durum, setDurum] = useState<SSLDurum | null>(null)
@@ -87,7 +89,7 @@ export default function DomainSSLPage() {
   }, [id])
 
   async function issue(tip: 'self-signed' | 'letsencrypt') {
-    if (tip === 'letsencrypt' && !confirm('Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?')) return
+    if (tip === 'letsencrypt' && !(await onay({ baslik: 'Onay gerekiyor', mesaj: 'Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?' }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null); setAdimlar([])
     try {
       const govde: { tip: string; mail_ssl?: boolean } = { tip }
@@ -105,7 +107,7 @@ export default function DomainSSLPage() {
   }
 
   async function disable() {
-    if (!confirm('SSL kaldırılsın mı? Site HTTP\'ye dönecek.')) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'SSL kaldırılsın mı? Site HTTP\'ye dönecek.' }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
     try {
       await api.delete(`/domains/${id}/ssl`)

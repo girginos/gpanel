@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Surum = {
   surum: string; kod: string; kaynak: 'remi' | 'appstream'
@@ -18,6 +19,7 @@ type OpDurum = { calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'k
 type LogYanit = { log: string; calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir' }
 
 export default function PHPSurumleriPage() {
+  const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -72,8 +74,8 @@ export default function PHPSurumleriPage() {
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [opLog])
 
   async function kur(s: Surum) {
-    if (aktifOp) { alert('Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.'); return }
-    if (!confirm(`PHP ${s.surum} (${s.kaynak}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?`)) return
+    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.' })); return }
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `PHP ${s.surum} (${s.kaynak}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?` }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
@@ -84,11 +86,11 @@ export default function PHPSurumleriPage() {
 
   async function kaldir(s: Surum) {
     if (s.kaynak === 'appstream') {
-      alert('AppStream PHP sistem default\'u, kaldırılamaz')
+      (await bilgi({ baslik: 'Bilgi', mesaj: 'AppStream PHP sistem default\'u, kaldırılamaz' }))
       return
     }
-    if (aktifOp) { alert('Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.'); return }
-    if (!confirm(`PHP ${s.surum} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?`)) return
+    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.' })); return }
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `PHP ${s.surum} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?`, tehlike: true }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })

@@ -36,3 +36,11 @@ id_ed25519*
 *.swp
 __pycache__/
 frontend/tsconfig.tsbuildinfo
+
+# --- 🔴 ÖZEL/TESCİLLİ — public repoya ASLA girmez ---
+# Bunlar bugüne dek yalnızca "takipsiz" oldukları için dışarıda kaldı;
+# tek bir `git add -A` hepsini sızdırırdı. Artık açıkça yok sayılıyor.
+internal/lisans/
+assets/eklentiler/
+cmd/gosp-paketle/
+girginospanel-install.sh.oncesi

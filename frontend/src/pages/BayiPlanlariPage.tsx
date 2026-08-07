@@ -5,6 +5,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Paket = {
   id: number; ad: string; aciklama: string
@@ -25,6 +26,7 @@ function fmtFiyat(kurus: number) {
 }
 
 export default function BayiPlanlariPage() {
+  const { onay } = useDialog()
   const nav = useNavigate()
   const [items, setItems] = useState<Paket[]>([])
   const [yuk, setYuk] = useState(true)
@@ -64,7 +66,7 @@ export default function BayiPlanlariPage() {
   }
 
   async function sil(p: Paket) {
-    if (!confirm(`"${p.ad}" paketi silinsin mi?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${p.ad}" paketi silinsin mi?`, tehlike: true }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/reseller-plans/${p.id}`); setOk('Paket silindi.'); yukle() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
 export default function DomainSifreKorumaPage() {
+  const { onay } = useDialog()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [liste, setListe] = useState<Kayit[]>([])
@@ -39,7 +41,7 @@ export default function DomainSifreKorumaPage() {
   }
 
   async function sil(k: Kayit) {
-    if (!confirm(`"${k.kullanici}" kullanıcısını ${k.yol} korumasından kaldır?`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${k.kullanici}" kullanıcısını ${k.yol} korumasından kaldır?` }))) return
     setHata(null); setOk(null)
     try {
       await api.delete(`${base}/koruma/${k.id}`)

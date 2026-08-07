@@ -15,6 +15,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { eklentiDegisti } from '@/lib/eklenti'
+import { useDialog } from '@/components/Dialog'
 
 type Adim = { ad: string; etiket: string; durum: string; mesaj: string; sure: string }
 type KurulumDurum = {
@@ -71,6 +72,7 @@ function kurulumSuruyor(k: KatalogYanit | null): boolean {
 }
 
 export default function EklentilerPage() {
+  const { onay } = useDialog()
   const { slug } = useParams()
   // Panoya kopyalama izin/güvenli-bağlam nedeniyle başarısız olabilir — sessizce
   // "kopyalandı" DEMEZ; butonda gerçek sonucu gösterir.
@@ -178,10 +180,9 @@ export default function EklentilerPage() {
   }
 
   async function lisansKaldir(k: Kart) {
-    if (!confirm(
-      `"${k.ad}" lisansı kaldırılacak ve eklenti kapatılacak.\n\n` +
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${k.ad}" lisansı kaldırılacak ve eklenti kapatılacak.\n\n` +
       'Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar ' +
-      'girdiğinizde kaldığı yerden devam eder.\n\nDevam edilsin mi?')) return
+      'girdiğinizde kaldığı yerden devam eder.\n\nDevam edilsin mi?', tehlike: true }))) return
     setIslem(k.eklenti_ad); setIslemHata(null); setBasari(null)
     try {
       const { data } = await api.delete(`/eklenti/${k.eklenti_ad}/lisans`)

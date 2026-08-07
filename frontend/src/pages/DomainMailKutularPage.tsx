@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/DomainList'
+import { useDialog } from '@/components/Dialog'
 
 type MailDomain = { id: number; ad: string; kutu_sayisi: number }
 type Kutu = { id: number; email: string; domain_id: number; quota_bytes: number; kullanilan_bytes: number; aktif: boolean }
@@ -37,6 +38,28 @@ const Ikon = {
   duraklat: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   oynat: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   cevap: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>,
+  ayar: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+  kopya: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>,
+  onay: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
+}
+
+// panoyaYaz — HTTPS'te navigator.clipboard; erişilemezse execCommand ile yedek yol.
+// (Panel HTTPS ama iç ağda http:// ile açan olabilir — sessiz başarısızlık YASAK.)
+async function panoyaYaz(metin: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(metin); return true }
+  } catch { /* yedek yola düş */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = metin
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
 }
 
 // Kota kullanım barı — kullanılan / toplam (0 kota = sınırsız).
@@ -61,7 +84,9 @@ function KotaBar({ kullanilan, kota }: { kullanilan: number; kota: number }) {
 }
 
 export default function DomainMailKutularPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
+  const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [mailDomain, setMailDomain] = useState<MailDomain | null | undefined>(undefined) // undefined=yükleniyor, null=yok
   const [kutular, setKutular] = useState<Kutu[] | null>(null)
@@ -74,9 +99,8 @@ export default function DomainMailKutularPage() {
   const [isleniyor, setIsleniyor] = useState(false)
   const [uretilen, setUretilen] = useState<{ email: string; parola: string } | null>(null)
   const [kopyalandi, setKopyalandi] = useState(false)
-  const [otoKutu, setOtoKutu] = useState<Kutu | null>(null)
-  const [otoForm, setOtoForm] = useState({ aktif: false, konu: '', mesaj: '' })
-  const [otoYukleniyor, setOtoYukleniyor] = useState(false)
+  // Listede tek tıkla kopyalanan e-posta (kısa süreli "✓" geri bildirimi).
+  const [kopyalananEmail, setKopyalananEmail] = useState<string | null>(null)
 
   // Yeni kutu formu
   const [yeniKullanici, setYeniKullanici] = useState('')
@@ -131,31 +155,19 @@ export default function DomainMailKutularPage() {
     finally { setIsleniyor(false) }
   }
 
-  async function kutuSil(k: Kutu) {
-    if (!window.confirm(`"${k.email}" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?`)) return
-    setIsleniyor(true); setHata(null)
-    try {
-      await api.delete(`/eklenti/mail/hesaplar/${k.id}`)
-      setBildirim(`✓ ${k.email} silindi.`)
-      if (mailDomain) kutulariYukle(mailDomain.id)
-    } catch (e) { setHata(apiHata(e, 'Silinemedi')) }
-    finally { setIsleniyor(false) }
-  }
-
-  async function parolaDegistir(k: Kutu) {
-    const p = window.prompt(`${k.email} için yeni parola (min 6):`)
-    if (!p) return
-    setIsleniyor(true); setHata(null)
-    try {
-      await api.put(`/eklenti/mail/hesaplar/${k.id}/parola`, { parola: p })
-      setBildirim(`✓ ${k.email} parolası güncellendi.`)
-    } catch (e) { setHata(apiHata(e, 'Parola değiştirilemedi')) }
-    finally { setIsleniyor(false) }
+  // E-posta adresini tek tıkla panoya kopyala.
+  async function emailKopyala(email: string) {
+    if (await panoyaYaz(email)) {
+      setKopyalananEmail(email)
+      window.setTimeout(() => setKopyalananEmail(v => (v === email ? null : v)), 1500)
+    } else {
+      setHata('Panoya kopyalanamadı — adresi elle seçip kopyalayabilirsiniz.')
+    }
   }
 
   // Tek-tık güçlü parola üret (düz metin bir kez modalda gösterilir).
   async function parolaUret(k: Kutu) {
-    if (!window.confirm(`${k.email} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur.`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `${k.email} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur.` }))) return
     setIsleniyor(true); setHata(null)
     try {
       const r = await api.post<{ email: string; parola: string }>(`/eklenti/mail/hesaplar/${k.id}/parola-uret`)
@@ -183,51 +195,6 @@ export default function DomainMailKutularPage() {
     finally { setIsleniyor(false) }
   }
 
-  // Otomatik yanıt (tatil) modalını aç — mevcut ayarı yükle.
-  async function otoAc(k: Kutu) {
-    setOtoKutu(k); setOtoForm({ aktif: false, konu: '', mesaj: '' }); setOtoYukleniyor(true); setHata(null)
-    try {
-      const r = await api.get<{ aktif: boolean; konu: string; mesaj: string }>(`/eklenti/mail/hesaplar/${k.id}/otomatik-yanit`)
-      setOtoForm({ aktif: r.data.aktif, konu: r.data.konu || '', mesaj: r.data.mesaj || '' })
-    } catch (e) { setHata(apiHata(e, 'Otomatik yanıt yüklenemedi')) }
-    finally { setOtoYukleniyor(false) }
-  }
-  async function otoKaydet() {
-    if (!otoKutu) return
-    if (otoForm.aktif && !otoForm.mesaj.trim()) { setHata('Otomatik yanıt için mesaj boş olamaz'); return }
-    setOtoYukleniyor(true); setHata(null)
-    try {
-      await api.put(`/eklenti/mail/hesaplar/${otoKutu.id}/otomatik-yanit`, otoForm)
-      setBildirim(`✓ ${otoKutu.email} otomatik yanıtı ${otoForm.aktif ? 'açıldı' : 'kapatıldı'}.`)
-      setOtoKutu(null)
-    } catch (e) { setHata(apiHata(e, 'Otomatik yanıt kaydedilemedi')) }
-    finally { setOtoYukleniyor(false) }
-  }
-
-  // Posta kutusunu askıya al / aktifleştir (giriş engellenir / açılır).
-  async function aktifDegistir(k: Kutu) {
-    const yeni = !k.aktif
-    if (yeni === false && !window.confirm(`${k.email} askıya alınacak — kutu giriş yapamaz (postalar korunur). Emin misiniz?`)) return
-    setIsleniyor(true); setHata(null)
-    try {
-      await api.put(`/eklenti/mail/hesaplar/${k.id}/aktif`, { aktif: yeni })
-      setBildirim(`✓ ${k.email} ${yeni ? 'aktifleştirildi' : 'askıya alındı'}.`)
-      if (mailDomain) kutulariYukle(mailDomain.id)
-    } catch (e) { setHata(apiHata(e, 'Durum değiştirilemedi')) }
-    finally { setIsleniyor(false) }
-  }
-
-  // Tek-tık kota onarımı — doveadm force-resync + kullanımı yeniden hesapla.
-  async function kotaOnar(k: Kutu) {
-    setIsleniyor(true); setHata(null)
-    try {
-      await api.post(`/eklenti/mail/hesaplar/${k.id}/kota-onar`)
-      setBildirim(`✓ ${k.email} kotası onarıldı ve yeniden hesaplandı.`)
-      if (mailDomain) kutulariYukle(mailDomain.id)
-    } catch (e) { setHata(apiHata(e, 'Kota onarılamadı')) }
-    finally { setIsleniyor(false) }
-  }
-
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' }]} />
@@ -235,12 +202,11 @@ export default function DomainMailKutularPage() {
     </div>
   )
 
-  const btnSec = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/60 disabled:opacity-50 transition-colors'
-  const btnPri = 'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white shadow-sm shadow-brand-600/20 disabled:opacity-50 transition-colors'
-  const btnDan = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-800/70 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors'
+  const btnSec = 'inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/60 disabled:opacity-50 transition-colors'
+  const btnPri = 'inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white shadow-sm shadow-brand-600/20 disabled:opacity-50 transition-colors'
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl mx-auto">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -329,38 +295,43 @@ export default function DomainMailKutularPage() {
               <ul className="divide-y divide-slate-100 dark:divide-slate-700/70">
                 {kutular.map(k => (
                   <li key={k.id} className="px-4 sm:px-5 py-4 hover:bg-slate-50/70 dark:hover:bg-slate-700/20 transition-colors">
-                    <div className="flex items-start gap-3.5 flex-wrap">
-                      <div className="w-9 h-9 shrink-0 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300">
-                        <Ikon.zarf className="w-4.5 h-4.5" />
-                      </div>
-                      <div className="min-w-[180px] flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-mono text-sm font-medium truncate ${k.aktif ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500 line-through'}`}>{k.email}</span>
+                    {/* 3 sütun: kimlik · ORTADA kota barı · butonlar. Dar ekranda
+                        alt alta yığılır (mobilde sıkışmaz). */}
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+                      {/* Kimlik */}
+                      <div className="flex items-center gap-3 min-w-0 lg:w-[340px] lg:shrink-0">
+                        <div className="w-10 h-10 shrink-0 rounded-xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300">
+                          <Ikon.zarf className="w-5 h-5" />
+                        </div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Tek tık = e-postayı panoya kopyala (istemcilere yapıştırmak için). */}
+                          <button
+                            type="button"
+                            onClick={() => emailKopyala(k.email)}
+                            title={kopyalananEmail === k.email ? 'Kopyalandı' : 'Tıkla — e-posta adresini kopyala'}
+                            className={`group inline-flex items-center gap-1.5 min-w-0 rounded-md -mx-1 px-1 py-0.5 text-left transition-colors hover:bg-brand-50/70 dark:hover:bg-brand-900/20 ${k.aktif ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>
+                            <span className={`font-mono text-sm font-medium truncate ${k.aktif ? '' : 'line-through'}`}>{k.email}</span>
+                            {kopyalananEmail === k.email
+                              ? <Ikon.onay className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                              : <Ikon.kopya className="w-3.5 h-3.5 shrink-0 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                          </button>
                           {!k.aktif && <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 uppercase">Askıda</span>}
                         </div>
-                        <div className="mt-2"><KotaBar kullanilan={k.kullanilan_bytes} kota={k.quota_bytes} /></div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {/* Kota barı — satırın ortasında */}
+                      <div className="flex-1 min-w-0 flex lg:justify-center">
+                        <KotaBar kullanilan={k.kullanilan_bytes} kota={k.quota_bytes} />
+                      </div>
+                      {/* Aksiyonlar */}
+                      <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
                         <button onClick={() => webmailGiris(k)} disabled={isleniyor || !k.aktif || !!webmailKapali} title={webmailKapali ? 'Webmail kullanılamıyor: ' + webmailKapali : k.aktif ? "Webmail'e tek tıkla giriş" : 'Askıdaki kutuya giriş yapılamaz'} className={btnPri}>
-                          <Ikon.giris className="w-3.5 h-3.5" />Giriş
+                          <Ikon.giris className="w-4 h-4" />Giriş
                         </button>
-                        <button onClick={() => aktifDegistir(k)} disabled={isleniyor} title={k.aktif ? 'Askıya al (giriş engelle)' : 'Aktifleştir'} className={btnSec}>
-                          {k.aktif ? <><Ikon.duraklat className="w-3.5 h-3.5" />Askıya al</> : <><Ikon.oynat className="w-3.5 h-3.5" />Aktifleştir</>}
+                        <button onClick={() => parolaUret(k)} disabled={isleniyor} title="Yeni güçlü parola üret (şifre sıfırla)" className={btnSec}>
+                          <Ikon.anahtar className="w-4 h-4" />Şifre sıfırla
                         </button>
-                        <button onClick={() => parolaUret(k)} disabled={isleniyor} title="Güçlü parola üret" className={btnSec}>
-                          <Ikon.anahtar className="w-3.5 h-3.5" />Parola üret
-                        </button>
-                        <button onClick={() => parolaDegistir(k)} disabled={isleniyor} title="Parolayı elle değiştir" className={btnSec}>
-                          <Ikon.kalem className="w-3.5 h-3.5" />Parola
-                        </button>
-                        <button onClick={() => otoAc(k)} disabled={isleniyor} title="Otomatik yanıt (tatil)" className={btnSec}>
-                          <Ikon.cevap className="w-3.5 h-3.5" />Oto-yanıt
-                        </button>
-                        <button onClick={() => kotaOnar(k)} disabled={isleniyor} title="Kotayı onar / yeniden hesapla" className={btnSec}>
-                          <Ikon.yenile className="w-3.5 h-3.5" />Kotayı onar
-                        </button>
-                        <button onClick={() => kutuSil(k)} disabled={isleniyor} title="Posta kutusunu sil" className={btnDan}>
-                          <Ikon.cop className="w-3.5 h-3.5" />Sil
+                        <button onClick={() => navigate(`/abonelikler/${id}/mail/kutular/${k.id}`)} title="Kutu detayları: oto-yanıt, iletim, taşıma, entegrasyon, içe/dışa aktar" className={btnSec}>
+                          <Ikon.ayar className="w-4 h-4" />Detaylar
                         </button>
                       </div>
                     </div>
@@ -370,42 +341,6 @@ export default function DomainMailKutularPage() {
             )}
           </div>
         </>
-      )}
-
-      {/* Otomatik yanıt (tatil) modalı */}
-      {otoKutu && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setOtoKutu(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-9 h-9 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300"><Ikon.cevap className="w-5 h-5" /></div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Otomatik Yanıt (Tatil)</h3>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 font-mono">{otoKutu.email}</p>
-            <label className="flex items-center gap-2.5 mb-4 cursor-pointer">
-              <input type="checkbox" checked={otoForm.aktif} onChange={e => setOtoForm(f => ({ ...f, aktif: e.target.checked }))}
-                className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
-              <span className="text-sm text-slate-700 dark:text-slate-200">Otomatik yanıtı etkinleştir</span>
-            </label>
-            <div className={`space-y-3 transition-opacity ${otoForm.aktif ? '' : 'opacity-50 pointer-events-none'}`}>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Konu</label>
-                <input value={otoForm.konu} onChange={e => setOtoForm(f => ({ ...f, konu: e.target.value }))} maxLength={255} placeholder="Ofis dışındayım"
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Mesaj</label>
-                <textarea value={otoForm.mesaj} onChange={e => setOtoForm(f => ({ ...f, mesaj: e.target.value }))} rows={5} maxLength={8000}
-                  placeholder="Merhaba, şu an ofis dışındayım. En kısa sürede dönüş yapacağım."
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
-              </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">Aynı göndericiye günde en fazla bir kez yanıt gönderilir.</p>
-            </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setOtoKutu(null)} className="flex-1 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">İptal</button>
-              <button onClick={otoKaydet} disabled={otoYukleniyor} className="flex-1 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60">{otoYukleniyor ? 'Kaydediliyor…' : 'Kaydet'}</button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Üretilen parola modalı */}

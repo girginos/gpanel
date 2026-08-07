@@ -17,6 +17,7 @@ import DomainFilesPage from '@/pages/DomainFilesPage'
 import DomainSSLPage from '@/pages/DomainSSLPage'
 import DomainMailAyarlarPage from '@/pages/DomainMailAyarlarPage'
 import DomainMailKutularPage from '@/pages/DomainMailKutularPage'
+import MailKutuDetayPage from "@/pages/MailKutuDetayPage"
 import DomainMailTeslimatPage from '@/pages/DomainMailTeslimatPage'
 import DomainMailAliasPage from '@/pages/DomainMailAliasPage'
 import MailSunucuPage from "@/pages/MailSunucuPage"
@@ -105,6 +106,7 @@ export default function App() {
         <Route path="abonelikler/:id/ssl"           element={<DomainSSLPage />} />
         <Route path="abonelikler/:id/mail/ayarlar"  element={<DomainMailAyarlarPage />} />
         <Route path="abonelikler/:id/mail/kutular"  element={<DomainMailKutularPage />} />
+        <Route path="abonelikler/:id/mail/kutular/:kutuId" element={<MailKutuDetayPage />} />
         <Route path="abonelikler/:id/mail/teslimat" element={<DomainMailTeslimatPage />} />
         <Route path="abonelikler/:id/mail/takmaadlar" element={<DomainMailAliasPage />} />
         <Route path="abonelikler/:id/ssh-erisim"    element={<DomainSSHPage />} />

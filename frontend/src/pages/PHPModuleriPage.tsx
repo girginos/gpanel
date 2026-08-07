@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Surum = { surum: string; ini_dir: string; service: string }
 type Ext = { adi: string; aktif: boolean; ini_dosya: string }
@@ -14,6 +15,7 @@ const ZORUNLU = new Set([
 ])
 
 export default function PHPModuleriPage() {
+  const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [aktifSurum, setAktifSurum] = useState('8.3')
   const [exts, setExts] = useState<Ext[]>([])
@@ -37,7 +39,7 @@ export default function PHPModuleriPage() {
 
   async function toggle(e: Ext) {
     if (ZORUNLU.has(e.adi.toLowerCase())) {
-      alert('Bu modül PHP\'nin temel parçasıdır, kapatılamaz.')
+      (await bilgi({ baslik: 'Bilgi', mesaj: 'Bu modül PHP\'nin temel parçasıdır, kapatılamaz.' }))
       return
     }
     const yeniAktif = !e.aktif
@@ -56,7 +58,7 @@ export default function PHPModuleriPage() {
   }
 
   async function ioncubeKur() {
-    if (!confirm(`IonCube Loader PHP ${aktifSurum} için kurulacak.\n\nioncube.com'dan tar.gz indirilir → .so kopyalanır → zend_extension olarak yüklenir.\nDevam?`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `IonCube Loader PHP ${aktifSurum} için kurulacak.\n\nioncube.com'dan tar.gz indirilir → .so kopyalanır → zend_extension olarak yüklenir.\nDevam?` }))) return
     setYuk(true); setHata(null)
     try {
       const r = await api.post('/php-extensions/ioncube-kur', { surum: aktifSurum })
@@ -71,7 +73,7 @@ export default function PHPModuleriPage() {
   }
 
   async function ioncubeKaldir() {
-    if (!confirm(`IonCube Loader PHP ${aktifSurum}'ten kaldırılacak. Devam?`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `IonCube Loader PHP ${aktifSurum}'ten kaldırılacak. Devam?`, tehlike: true }))) return
     setYuk(true); setHata(null)
     try {
       await api.post('/php-extensions/ioncube-kaldir', { surum: aktifSurum })
@@ -86,9 +88,9 @@ export default function PHPModuleriPage() {
 
   async function peclKur(paket: string) {
     if (!paket.match(/^[a-zA-Z0-9_-]+$/)) {
-      alert('Geçersiz paket adı'); return
+      (await bilgi({ baslik: 'Bilgi', mesaj: 'Geçersiz paket adı' })); return
     }
-    if (!confirm(`PECL paketi "${paket}" PHP ${aktifSurum} için derlenip kurulacak. Devam?`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `PECL paketi "${paket}" PHP ${aktifSurum} için derlenip kurulacak. Devam?` }))) return
     setPeclModal(false); setYuk(true)
     try {
       const r = await api.post('/php-extensions/pecl-install', { surum: aktifSurum, paket })

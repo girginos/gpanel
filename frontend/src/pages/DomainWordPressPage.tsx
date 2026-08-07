@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola: string; surum: string }
@@ -11,6 +12,7 @@ type Paket = { name: string; status: string; version: string; update: string; up
 type Kullanici = { ID: number; user_login: string; user_email: string; display_name: string; roles: string }
 
 export default function DomainWordPressPage() {
+  const { onay, bilgi } = useDialog()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}/wordpress` : `/domains/${id}/wordpress`
   const [liste, setListe] = useState<Kurulum[]>([])
@@ -113,6 +115,7 @@ const TABLAR: { k: AltTab; ad: string }[] = [
 ]
 
 function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; kurulum: Kurulum; onDegisti: () => void }) {
+  const { onay, bilgi } = useDialog()
   const dizin = kurulum.dizin
   const kok = dizin.includes('kök')
   const [tab, setTab] = useState<AltTab>('genel')
@@ -164,7 +167,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
   const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, `${p.name} etkinleştirildi.`, () => setTemalar(null))
 
   async function parolaSifirla(u: Kullanici) {
-    if (!confirm(`"${u.user_login}" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.`)) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${u.user_login}" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.` }))) return
     setMesgul(`pw:${u.ID}`); setHata(null); setBasari(null)
     try {
       const { data } = await api.post<{ parola: string; kullanici: string }>(`${base}/kullanici-parola`, { dizin, user_id: u.ID })
@@ -174,8 +177,8 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
   }
 
   async function sil() {
-    if (kok) { alert('Kök dizindeki WordPress panelden silinemez.'); return }
-    if (!confirm(`${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`)) return
+    if (kok) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Kök dizindeki WordPress panelden silinemez.' })); return }
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`, tehlike: true }))) return
     setMesgul('sil'); setHata(null)
     try { await api.delete(`${base}`, { data: { dizin, db_sil: true } }); onDegisti() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Sub = { id: number; alt_ad: string; tam_ad: string; php_surum: string; docroot: string; created_at: string }
 
 export default function DomainSubdomainlerPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [liste, setListe] = useState<Sub[]>([])
   const [yuk, setYuk] = useState(true)
@@ -34,7 +36,7 @@ export default function DomainSubdomainlerPage() {
   }
 
   async function sil(s: Sub) {
-    if (!confirm(`${s.tam_ad} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz.`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${s.tam_ad} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz.`, tehlike: true }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/subdomain/${s.id}`); yukle() }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }

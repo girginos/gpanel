@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useDialog } from '@/components/Dialog'
 
 type Kopya = { ad: string; boyut_mb: number; tarih: string }
 
 export default function DomainKopyaPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const [liste, setListe] = useState<Kopya[]>([])
   const [yuk, setYuk] = useState(true)
@@ -30,7 +32,7 @@ export default function DomainKopyaPage() {
   }
 
   async function sil(k: Kopya) {
-    if (!confirm(`Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, tehlike: true }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/kopya/${k.ad}`); yukle() }
     catch (e) { setHata(apiHata(e, 'Silinemedi')) }

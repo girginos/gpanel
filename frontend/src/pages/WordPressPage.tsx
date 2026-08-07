@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola: string; surum: string }
@@ -12,6 +13,7 @@ type TumKurulum = {
 }
 
 export default function WordPressPage() {
+  const { onay, bilgi } = useDialog()
   const [domainler, setDomainler] = useState<Domain[]>([])
   const [domainId, setDomainId] = useState<number | null>(null)
   const [tum, setTum] = useState<TumKurulum[]>([])
@@ -66,8 +68,8 @@ export default function WordPressPage() {
   }
 
   async function sil(t: TumKurulum) {
-    if (t.dizin.includes('kök')) { alert('Kök dizindeki WordPress panelden silinemez.'); return }
-    if (!confirm(`${t.alan_adi}${t.dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`)) return
+    if (t.dizin.includes('kök')) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Kök dizindeki WordPress panelden silinemez.' })); return }
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${t.alan_adi}${t.dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`, tehlike: true }))) return
     const key = t.domain_id + t.dizin
     setMesgul(key); setHata(null)
     try {

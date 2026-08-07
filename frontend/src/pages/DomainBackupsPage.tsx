@@ -7,6 +7,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type Yedek = { id: number; domain_id: number; tip: string; dosya: string; boyut_b: number; notlar: string; olusturma: string }
@@ -19,6 +20,7 @@ type Destination = {
 }
 
 export default function DomainBackupsPage() {
+  const { onay, bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [yedekler, setYedekler] = useState<Yedek[]>([])
@@ -92,7 +94,7 @@ export default function DomainBackupsPage() {
   }
 
   async function destSil() {
-    if (!confirm('Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur.')) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: 'Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur.', tehlike: true }))) return
     setDestKayit(true)
     try {
       await api.delete(`/domains/${id}/backup-destination`)
@@ -146,7 +148,7 @@ export default function DomainBackupsPage() {
       await api.delete(`/domains/${id}/backups/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      alert(apiHata(e))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e) }))
     }
   }
 

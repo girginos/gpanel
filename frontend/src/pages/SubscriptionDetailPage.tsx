@@ -10,6 +10,7 @@ import DomainKaynakKart from '@/components/DomainKaynakKart'
 import DomainPano from "@/components/DomainPano"
 import ToolCard from '@/components/ToolCard'
 import type { Domain } from '@/components/DomainList'
+import { useDialog } from '@/components/Dialog'
 
 type Tab = 'dashboard' | 'hosting' | 'mail'
 
@@ -36,6 +37,7 @@ const ICONS = {
 }
 
 export default function SubscriptionDetailPage() {
+  const { onay } = useDialog()
   const { id } = useParams()
   const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -69,7 +71,7 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !window.confirm(`"${domain.alan_adi}" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?`)) return
+    if (askiyaAl && !(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${domain.alan_adi}" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?` }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)

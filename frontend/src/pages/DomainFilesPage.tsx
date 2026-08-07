@@ -8,6 +8,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import DizinAgac from '@/components/DizinAgac'
 import KodEditor from '@/components/KodEditor'
 import { T } from '@/lib/tablo'
+import { useDialog } from '@/components/Dialog'
 
 type Entry = {
   adi: string
@@ -43,6 +44,7 @@ type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 const ROOT = '/'
 
 export default function DomainFilesPage() {
+  const { onay, sor, bilgi } = useDialog()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -117,18 +119,18 @@ export default function DomainFilesPage() {
   }
 
   async function sil(e: Entry) {
-    if (!confirm(`"${e.adi}" silinsin mi? Bu işlem geri alınamaz.`)) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${e.adi}" silinsin mi? Bu işlem geri alınamaz.`, tehlike: true }))) return
     try {
       await api.delete(`${base}/files`, { params: { yol: e.yol } })
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
-      alert(apiHata(err, 'Silme başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Silme başarısız') }))
     }
   }
 
   async function klasorOlustur() {
-    const ad = prompt('Yeni klasör adı:')
+    const ad = (await sor({ baslik: 'Yeni klasör adı:' }))
     if (!ad) return
     const hedef = (yol === '/' ? '' : yol) + '/' + ad
     try {
@@ -136,7 +138,7 @@ export default function DomainFilesPage() {
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
-      alert(apiHata(err, 'Klasör oluşturma başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Klasör oluşturma başarısız') }))
     }
   }
 
@@ -146,7 +148,7 @@ export default function DomainFilesPage() {
       const { data } = await api.get<{yol: string; icerik: string}>(`${base}/files/oku`, { params: { yol: e.yol } })
       setEditor({ yol: e.yol, icerik: data.icerik })
     } catch (err) {
-      alert(apiHata(err, 'Açılamadı'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Açılamadı') }))
     }
   }
 
@@ -156,7 +158,7 @@ export default function DomainFilesPage() {
       await api.post(`${base}/files/yaz`, { yol: editor.yol, icerik: editor.icerik })
       setEditor(null); tara()
     } catch (err) {
-      alert(apiHata(err, 'Kaydedilemedi'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Kaydedilemedi') }))
     }
   }
 
@@ -169,7 +171,7 @@ export default function DomainFilesPage() {
       await api.post(`${base}/files/rename`, { eski: e.yol, yeni })
       setRenameFor(null); setAgacYenileme(x => x + 1); tara()
     } catch (err) {
-      alert(apiHata(err, 'Yeniden adlandırılamadı'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Yeniden adlandırılamadı') }))
     }
   }
 
@@ -178,7 +180,7 @@ export default function DomainFilesPage() {
       await api.post(`${base}/files/chmod`, { yol: e.yol, mod })
       setChmodFor(null); tara()
     } catch (err) {
-      alert(apiHata(err, 'İzin değiştirilemedi'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'İzin değiştirilemedi') }))
     }
   }
 
@@ -250,7 +252,7 @@ export default function DomainFilesPage() {
     setAgacYenileme(x => x + 1)
     tara()
     if (basarili < files.length) {
-      alert(`${basarili}/${files.length} dosya yüklendi, bazıları başarısız oldu.`)
+      (await bilgi({ baslik: 'Bilgi', mesaj: `${basarili}/${files.length} dosya yüklendi, bazıları başarısız oldu.` }))
     }
   }
 
@@ -282,7 +284,7 @@ export default function DomainFilesPage() {
     setSeciliSet(new Set())
     setAgacYenileme(x => x + 1)
     tara()
-    if (basarili < yollar.length) alert(`${basarili}/${yollar.length} silindi.`)
+    if (basarili < yollar.length) (await bilgi({ baslik: 'Bilgi', mesaj: `${basarili}/${yollar.length} silindi.` }))
   }
 
   async function extractEt(e: Entry) {
@@ -292,7 +294,7 @@ export default function DomainFilesPage() {
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
-      alert(apiHata(err, 'Açılamadı (zip/tar/rar destek vardır)'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Açılamadı (zip/tar/rar destek vardır)') }))
     } finally {
       setExtractAktif(false)
     }
@@ -304,7 +306,7 @@ export default function DomainFilesPage() {
       const { data } = await api.get(`${base}/files/ara`, { params: { q: aramaQ, yol } })
       setAramaSonuc(data.icerik)
     } catch (err) {
-      alert(apiHata(err, 'Arama başarısız'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Arama başarısız') }))
     }
   }
 
@@ -317,9 +319,9 @@ export default function DomainFilesPage() {
       })
       setKopyalaModal(null); setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
-      if (data.hatalar?.length) alert('Bazı hatalar: ' + data.hatalar.join('\n'))
+      if (data.hatalar?.length) (await bilgi({ baslik: 'Bilgi', mesaj: 'Bazı hatalar: ' + data.hatalar.join('\n') }))
     } catch (err) {
-      alert(apiHata(err, kopyalaModal.tip === 'kopyala' ? 'Kopyalama hata' : 'Taşıma hata'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, kopyalaModal.tip === 'kopyala' ? 'Kopyalama hata' : 'Taşıma hata') }))
     }
   }
 
@@ -332,7 +334,7 @@ export default function DomainFilesPage() {
       setArsivModal(false); setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
     } catch (err) {
-      alert(apiHata(err, 'Arşivleme hata'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Arşivleme hata') }))
     }
   }
 
@@ -345,7 +347,7 @@ export default function DomainFilesPage() {
       const okuResp = await api.get(`${base}/files/oku`, { params: { yol: hedef } })
       setEditor({ yol: hedef, icerik: okuResp.data.icerik })
     } catch (err) {
-      alert(apiHata(err, 'Oluşturma hata'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Oluşturma hata') }))
     }
   }
 
@@ -354,7 +356,7 @@ export default function DomainFilesPage() {
       const { data } = await api.get(`${base}/files/boyut`, { params: { yol: yolu } })
       setBoyutSonuc({ yol: yolu, boyut: data.boyut_b })
     } catch (err) {
-      alert(apiHata(err, 'Boyut hesabi hata'))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Boyut hesabi hata') }))
     }
   }
 
@@ -402,7 +404,7 @@ export default function DomainFilesPage() {
         a.click()
         setTimeout(() => URL.revokeObjectURL(a.href), 1000)
       })
-      .catch(err => alert('İndirme başarısız: ' + err.message))
+      .catch(async err => (await bilgi({ baslik: 'Bilgi', mesaj: 'İndirme başarısız: ' + err.message })))
   }
 
   // ===== Bağlam (sağ-tık) menüsü =====

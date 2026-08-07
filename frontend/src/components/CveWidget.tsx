@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { useDialog } from '@/components/Dialog'
 
 // Dashboard güvenlik-açığı (CVE) widget'ı.
 // Backend: GET /system/cve (cache'li dnf updateinfo özeti) · POST /system/cve/guncelle
@@ -41,6 +42,7 @@ const ONEM: Record<string, { ad: string; nokta: string; metin: string }> = {
 }
 
 export default function CveWidget() {
+  const { onay } = useDialog()
   const [veri, setVeri] = useState<CveOzet | null>(null)
   const [hata, setHata] = useState('')
   const [taraniyor, setTaraniyor] = useState(false)
@@ -94,10 +96,8 @@ export default function CveWidget() {
   }
 
   async function guncelle() {
-    if (!window.confirm(
-      'Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ' +
-      'Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?',
-    )) return
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ' +
+      'Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?', }))) return
     setHata('')
     setMesaj('')
     try {
