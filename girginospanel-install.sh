@@ -9,6 +9,18 @@
 #   migrations.tar.gz  nginx/*  php-fpm/*  phpmyadmin/*  systemd/*  ops/*
 set -uo pipefail
 
+# 🔴 PATH'İ KENDİMİZ KURUYORUZ — `sudo` /usr/local/bin'i ATAR.
+# AlmaLinux/RHEL varsayılanı:  Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin
+# Belgelenen kurulum/güncelleme komutu `curl ... | sudo bash` olduğu için bu
+# yol HER MÜŞTERİDE çalışır ve kendi araçlarımız (girginospanel-*, composer,
+# wp) bare-name çağrıldığında "command not found" verir. Ölçüldü: araç dosya
+# olarak VARDI, yalnızca PATH'te yoktu; kurulum yine de yeşil bitiyordu.
+case ":$PATH:" in
+  *:/usr/local/bin:*) : ;;
+  *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
+esac
+
+
 # --waf : ModSecurity v3 + OWASP CRS kur (KAYNAKTAN DERLER, ~10 dk).
 # Varsayilan KAPALI — her kurulumu yavaslatmamak icin. Sonradan da kurulur:
 #   girginospanel-waf-setup
@@ -137,8 +149,17 @@ dnf install -y $BASE_PKGS >/dev/null 2>&1 && ok "base php + php-redis"
 # 🔴 DOGRULAMA: yukaridaki dnf `2>/dev/null` ile sessiz; eklenti kurulmazsa
 # kurulum "basarili" gorunur ama phpMyAdmin/lisans dogrulama calismaz.
 php_eksik=""
+# 🔴 `grep -qix "$_m"` TAM SATIR eslesmesi ister. `php -m` opcache modulunu
+# "Zend OPcache" olarak listeler -> kosul ASLA tutmaz ve her kurulumda
+# "base PHP eklentileri EKSIK: opcache" yazilir, oysa modul YUKLUDUR
+# (olculdu: php -m | grep -ci zend.opcache = 2). Ayrica `php -m | grep -q`
+# SIGPIPE uretir; listeyi bir kez alip kabuk-ici substring testi yapiyoruz.
+PHP_MODLISTE=$(php -m 2>/dev/null | tr "A-Z" "a-z" | tr -d " ")
 for _m in gd bcmath intl soap ldap sodium opcache mysqlnd mbstring zip; do
-  php -m 2>/dev/null | grep -qix "$_m" || php_eksik="$php_eksik $_m"
+  case "$PHP_MODLISTE" in
+    *"$_m"*) : ;;
+    *) php_eksik="$php_eksik $_m" ;;
+  esac
 done
 if [ -n "$php_eksik" ]; then
   warn "base PHP eklentileri EKSIK:$php_eksik — phpMyAdmin/lisans dogrulama etkilenebilir"
@@ -325,6 +346,22 @@ for zorunlu in 50-gosp-jail.conf girginospanel-jail; do
 done
 ok "ops-tool'lar ($_ops_n dosya: /usr/local/bin + src/scripts)"
 
+# 🔴 COZULEBILIRLIK NOBETCISI: dosyayi kurmak YETMEZ, PATH ten
+# cagrilabildigi de kanitlanmali. `sudo` /usr/local/bin i PATH ten attigi
+# icin araclar kurulu oldugu halde "command not found" veriyor ve kurulum
+# yine YESIL bitiyordu (49.12.158.182 de tam olarak bu oldu: 6 adim sessizce
+# atlandi). Olcum URETIM yolunu (command -v) kullanir, kendi konusunu kurmaz.
+_coz_eksik=""
+for _t in girginospanel-wpcli-kur girginospanel-wp-onkosul girginospanel-repair \
+          girginospanel-optimize girginospanel-redis-setup girginospanel-ftp-setup; do
+  [ -x "/usr/local/bin/$_t" ] || continue
+  command -v "$_t" >/dev/null 2>&1 || _coz_eksik="$_coz_eksik $_t"
+done
+if [ -n "$_coz_eksik" ]; then
+  die "ops araclari kurulu ama PATH ten cagrilamiyor:$_coz_eksik  (PATH=$PATH)"
+fi
+ok "ops araclari PATH ten cozulebiliyor"
+
 # 🔴 port-swap helper OZEL YOL: panel bunu tam olarak
 # /usr/local/sbin/girginospanel-port-swap.sh yolunda arar
 # (internal/portyonetim/degistir.go: BackendHelperYolu). Ust taraftaki ops
@@ -362,7 +399,15 @@ grep -q "client_max_body_size 10240m" /etc/nginx/nginx.conf || \
 cp "$A/nginx/_panel.conf"    /etc/nginx/conf.d/_panel.conf
 cp "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf
 cp "$A/nginx/php-fpm.conf"    /etc/nginx/conf.d/php-fpm.conf 2>/dev/null
-nginx -t >/dev/null 2>&1 && ok "nginx -t OK" || { nginx -t; die "nginx config hatası"; }
+nginx -t >/dev/null 2>&1 && # 🔴 /var/cache/nginx UST DIZIN IZNI: RPM bunu 0700 root:root birakiyor.
+# Alt dizin (girgincache) dogru sahiplenmis olsa bile nginx worker UST dizini
+# TRAVERSE edemedigi icin cache loader sunu veriyor:
+#   [crit] opendir() "/var/cache/nginx/girgincache" failed (13: Permission denied)
+# Belirti sinsi: nginx AYAKTA kalir, yalnizca fastcgi_cache sessizce olur.
+if [ -d /var/cache/nginx ]; then
+  chmod 0755 /var/cache/nginx; chown root:root /var/cache/nginx
+fi
+ok "nginx -t OK" || { nginx -t; die "nginx config hatası"; }
 
 # ============ 9) phpMyAdmin ============
 step "9) phpMyAdmin"

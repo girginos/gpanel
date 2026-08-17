@@ -25,7 +25,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall"
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -365,6 +365,57 @@ sec_docroot_selinux() {
   else ok "$n dizinden $duzeltilen tanesi yazılabilir etikete geçirildi"; fi
 }
 
+sec_nginx_cache() {
+  want nginx_cache || return 0
+  head_ "nginx onbellek dizini (fastcgi_cache)"
+  # 🔴 /var/cache/nginx RPM tarafindan 0700 root:root birakiliyor.
+  # Alt dizin (girgincache) dogru sahiplenmis olsa BILE nginx worker ust
+  # dizini TRAVERSE edemiyor ve cache loader sunu veriyor:
+  #   [crit] opendir() "/var/cache/nginx/girgincache" failed (13: Permission denied)
+  # Belirti sinsi: nginx AYAKTA kalir, hicbir vhost patlamaz, hicbir istek
+  # hata vermez -- yalnizca sayfa onbellegi SESSIZCE devre disi kalir.
+  # Mevcut sunucular installer duzeltmesini almayacagi icin onarim burada.
+  [ -d /var/cache/nginx ] || { ok "/var/cache/nginx yok - onbellek yapilandirilmamis"; return 0; }
+  local izin; izin=$(stat -c%a /var/cache/nginx 2>/dev/null)
+  if [ "$izin" = "755" ]; then
+    ok "/var/cache/nginx izni dogru (755)"
+  else
+    act "chmod 0755 /var/cache/nginx  (su an: $izin)"
+    if [ $DRY -eq 0 ]; then
+      chmod 0755 /var/cache/nginx 2>/dev/null
+      chown root:root /var/cache/nginx 2>/dev/null
+      # SONUCU DOGRULA: chmod sessizce basarisiz olabilir (immutable bayrak,
+      # salt-okunur fs). "calistirdim" ile "oldu" ayni sey degil.
+      local y; y=$(stat -c%a /var/cache/nginx 2>/dev/null)
+      if [ "$y" = "755" ]; then
+        ok "izin $izin -> 755 (nginx artik traverse edebiliyor)"
+      else
+        err "izin degismedi (hala $y)"
+        return 0
+      fi
+    fi
+  fi
+  # Onbellek alt dizini nginx e ait olmali
+  local CD=/var/cache/nginx/girgincache
+  if [ -d "$CD" ]; then
+    local sah; sah=$(stat -c%U "$CD" 2>/dev/null)
+    if [ "$sah" != "nginx" ]; then
+      act "chown nginx:nginx $CD  (su an: $sah)"
+      [ $DRY -eq 0 ] && { chown -R nginx:nginx "$CD" 2>/dev/null || err "$CD sahiplenemedi"; }
+    else
+      ok "$CD sahibi dogru (nginx)"
+    fi
+  fi
+  # Gercekten acilabiliyor mu -- URETIM kullanicisiyla, izin bitine bakarak degil.
+  if [ $DRY -eq 0 ] && [ -d "$CD" ] && command -v runuser >/dev/null 2>&1; then
+    if runuser -u nginx -- test -r "$CD" 2>/dev/null; then
+      ok "nginx kullanicisi onbellek dizinini GERCEKTEN okuyabiliyor"
+    else
+      err "nginx kullanicisi $CD i hala okuyamiyor"
+    fi
+  fi
+}
+
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_phpmyadmin
@@ -377,6 +428,7 @@ sec_clamav
 sec_frontend
 sec_signon
 sec_firewall
+sec_nginx_cache
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then

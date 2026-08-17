@@ -53,6 +53,7 @@ func Init(d *sql.DB) {
 	Ensure404Page()             // marka 404 sayfasi (root-sahipli, tenant degistiremez)
 	EnsureAskidaPage()          // marka "askiya alindi" sayfasi (ayni dizin)
 	EnsureMarkaAssets()         // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
+	EnsureDefault80()           // 80 catch-all: belge kokunu de garanti eder (yoksa try_files donguye girip 500 verir)
 	EnsureDefault443()          // 443 catch-all: SSL'siz host, baglanti hatasi yerine uyari sayfasi gorur
 	TrafikArtikSupur(pkgDB)     // eski silmelerden kalan sahipsiz trafik satirlari
 	acmeCronHizala()            // acme.sh cron'u yeni config-home'u yenilesin

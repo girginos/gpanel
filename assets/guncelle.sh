@@ -16,6 +16,18 @@
 # tutmazsa hiçbir şey kurulmaz.
 set -uo pipefail
 
+# 🔴 PATH'İ KENDİMİZ KURUYORUZ — `sudo` /usr/local/bin'i ATAR.
+# AlmaLinux/RHEL varsayılanı:  Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin
+# Belgelenen kurulum/güncelleme komutu `curl ... | sudo bash` olduğu için bu
+# yol HER MÜŞTERİDE çalışır ve kendi araçlarımız (girginospanel-*, composer,
+# wp) bare-name çağrıldığında "command not found" verir. Ölçüldü: araç dosya
+# olarak VARDI, yalnızca PATH'te yoktu; kurulum yine de yeşil bitiyordu.
+case ":$PATH:" in
+  *:/usr/local/bin:*) : ;;
+  *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
+esac
+
+
 TABAN=${GOSP_TABAN:-https://surum.girginos.io/panel}
 c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_0=$'\e[0m'
 bilgi(){ echo "  $*"; }
