@@ -229,7 +229,10 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
 	}
-	_, _ = h.DB.Exec(`UPDATE users SET last_login_at=NOW(), last_login_ip=? WHERE id=?`, httpx.ClientIP(r), id)
+	_, _ = h.DB.Exec( // 🔴 last_activity_ts DE sifirlanmali: aksi halde bayat damgayla
+		// giris yapan kullanici ilk istekte "oturum bosta" 401'i alip
+		// login ekranina geri atiliyor ve donguden cikamiyor.
+		`UPDATE users SET last_login_at=NOW(), last_login_ip=?, last_activity_ts=UNIX_TIMESTAMP() WHERE id=?`, httpx.ClientIP(r), id)
 	writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, true, id)
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = id

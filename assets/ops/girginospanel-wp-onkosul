@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# girginospanel-wp-onkosul — WordPress'in DÜZGÜN çalışması için sunucu ön
+# koşulları. IDEMPOTENT: her şey yerindeyse saniyeler içinde çıkar.
+#
+#   girginospanel-wp-onkosul            # eksikleri tamamla
+#   girginospanel-wp-onkosul --dry-run  # ne yapacağını göster
+#
+# 🔴 NEDEN AYRI ARAÇ: bu iki eksik canlı müşteride ard arda patladı ve
+# ikisi de kurulumda SESSİZCE atlanmıştı. Araç installer ve updater
+# tarafından çağrılır; böylece hem yeni kurulumlar doğru başlar hem
+# mevcut sunucular kendini onarır.
+set -uo pipefail
+
+DRY=0
+for a in "$@"; do [ "$a" = "--dry-run" ] && DRY=1; done
+
+c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_0=$'\e[0m'
+ok(){   echo -e "  ${c_g}✓${c_0} $*"; }
+act(){  echo -e "  ${c_y}$([ $DRY -eq 1 ] && echo '→ (dry)' || echo '✔')${c_0} $*"; }
+uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
+hata(){ echo -e "  ${c_r}✗${c_0} $*" >&2; }
+
+HATA=0
+
+# ══════════════════════════════════════════════════════════════════
+# 1) SELinux — kiracı dizinleri PHP tarafından YAZILABİLİR olmalı
+#
+# 🔴 RHEL/AlmaLinux varsayılanı:
+#     /home/*/public_html(/.+)? → httpd_user_content_t  (SALT-OKUNUR)
+#     /home/*/tmp               → user_tmp_t            (httpd yazamaz)
+# Enforcing modda WordPress eklenti/tema kuramaz: önce "FTP bilgileri"
+# formu açar, o aşılınca "Failed to open stream: Permission denied" verir.
+# Belirti sinsidir: AVC kaydı DÜŞMEZ (access() denetimleri dontaudit'li).
+# NOT: `is_writable()` bu çekirdekte SELinux'u GÖRÜYOR (ölçüldü) — yine de
+# doğrulama gerçek fopen()+fwrite() ile yapılmalı, çünkü davranış çekirdek
+# ve politika sürümüne göre değişir.
+#
+# 🔴 TEK GENEL KURAL kullanıyoruz — kiracı başına ayrı kural yazmak
+# politikayı yüzlerce satırla şişirir ve yeni domainde unutulabilir.
+# ══════════════════════════════════════════════════════════════════
+echo "== 1/2 · SELinux kiracı dizin etiketleri =="
+# 🔴 `getenforce` YOKSA "Disabled" VARSAYMA. Sistem gerçekte Enforcing
+# olabilir; varsayarsak tüm bölümü atlayıp yeşil yakarız (sabotaj
+# testinde tam olarak bu oldu). Aracı YOKSA bunu bilmediğimizi söyle.
+if ! command -v getenforce >/dev/null 2>&1; then
+  hata "getenforce yok — SELinux durumu BİLİNMİYOR, etiketler denetlenemedi"
+  HATA=1
+  SELDURUM="Bilinmiyor"
+else
+  SELDURUM=$(getenforce 2>/dev/null)
+fi
+if [ "$SELDURUM" = "Bilinmiyor" ]; then
+  :
+elif [ "$SELDURUM" = "Disabled" ]; then
+  ok "SELinux kapalı — etiket gerekmiyor"
+elif ! command -v semanage >/dev/null 2>&1; then
+  uyar "semanage yok (policycoreutils-python-utils) — kalıcı kural yazılamıyor"
+  HATA=1
+else
+  SPEC='/home/c_[^/]+/(public_html|tmp)(/.*)?'
+  # 🔴 `semanage fcontext -l | grep -q` KULLANMA: grep ilk eşleşmede
+  # çıkıp boruyu kapatır, semanage (Python) BrokenPipeError ile 1 döner
+  # ve `set -o pipefail` yüzünden koşul ASLA doğru olmaz — "zaten
+  # tanımlı" hızlı yolu hiç çalışmaz, her koşuda politika boşuna
+  # yeniden yazılır. Listeyi bir kez değişkene al.
+  SEL_LISTE=$(semanage fcontext -l 2>/dev/null)
+  # 🔴 BORU KULLANMA. `grep -q` HANGİ komutun borusunu kapatırsa kapatsın
+  # (semanage, printf, echo — farketmez) SIGPIPE oluşur ve `pipefail`
+  # pipeline'ı hatalı sayar; koşul asla doğru olmaz. İlk denememde
+  # semanage'i değişkene aldım ama boruyu printf'e taşıdım: aynı tuzak,
+  # bir kat aşağıda. Kabuk-içi substring testi hiç boru kurmaz.
+  case "$SEL_LISTE" in
+    *"$SPEC"*)
+      ok "genel kural zaten tanımlı"
+      ;;
+    *)
+    act "semanage fcontext +httpd_user_rw_content_t  $SPEC"
+    if [ $DRY -eq 0 ]; then
+      semanage fcontext -a -t httpd_user_rw_content_t "$SPEC" 2>/dev/null \
+        || semanage fcontext -m -t httpd_user_rw_content_t "$SPEC" 2>/dev/null \
+        || { hata "kural yazılamadı"; HATA=1; }
+    fi
+      ;;
+  esac
+
+  # Mevcut dizinleri hizala. 🔴 `-F` ŞART: kural yeni eklendiğinde
+  # `restorecon -R` mevcut etiketi değiştirmiyor (canlıda yaşandı).
+  n=0; duzeltilen=0
+  for d in /home/c_*/public_html /home/c_*/tmp; do
+    [ -d "$d" ] || continue
+    n=$((n+1))
+    mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
+    case "$mevcut" in *httpd_user_rw_content_t*) continue ;; esac
+    act "restorecon -RF  $d  (şu an: ${mevcut##*:object_r:})"
+    if [ $DRY -eq 0 ]; then
+      restorecon -RF "$d" >/dev/null 2>&1
+      sonra=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
+      case "$sonra" in
+        *httpd_user_rw_content_t*) duzeltilen=$((duzeltilen+1)) ;;
+        *) hata "etiket değişmedi: $d"; HATA=1 ;;
+      esac
+    fi
+  done
+  [ "$n" -gt 0 ] && ok "$n kiracı dizini denetlendi ($duzeltilen düzeltildi)" \
+                 || ok "kiracı dizini yok"
+fi
+
+# ══════════════════════════════════════════════════════════════════
+# 2) imagick — WordPress Site Health'in istediği görüntü modülü
+#
+# 🔴 Kurulumda hiç kurulmuyordu; WordPress "önerilen modül eksik" diyor
+# ve WebP/AVIF küçük resim üretimi GD'ye düşüyor (daha düşük kalite,
+# bazı formatlar hiç üretilmiyor).
+# Paket adlari: base → php-pecl-imagick · remi → phpXX-php-pecl-imagick-im7
+# ══════════════════════════════════════════════════════════════════
+echo "== 2/2 · imagick modülü =="
+kur() { # $1 = paket adi
+  if rpm -q "$1" >/dev/null 2>&1; then return 0; fi
+  act "dnf install $1"
+  [ $DRY -eq 1 ] && return 0
+  dnf install -y "$1" >/dev/null 2>&1
+  KURULDU=$((${KURULDU:-0}+1))
+}
+
+# base PHP
+if command -v php >/dev/null 2>&1; then
+  if php -m 2>/dev/null | grep -qi '^imagick$'; then
+    ok "base PHP: imagick var"
+  else
+    kur php-pecl-imagick
+    if [ $DRY -eq 0 ]; then
+      php -m 2>/dev/null | grep -qi '^imagick$' && ok "base PHP: imagick kuruldu" \
+        || { uyar "base PHP: imagick kurulamadı"; HATA=1; }
+    fi
+  fi
+fi
+
+# remi sürümleri
+for dizin in /etc/opt/remi/php*; do
+  [ -d "$dizin" ] || continue
+  v=$(basename "$dizin")            # php83
+  bin="/usr/bin/$v"
+  [ -x "$bin" ] || bin="/opt/remi/$v/root/usr/bin/php"
+  [ -x "$bin" ] || continue
+  if "$bin" -m 2>/dev/null | grep -qi '^imagick$'; then
+    ok "$v: imagick var"
+    continue
+  fi
+  kur "${v}-php-pecl-imagick-im7"
+  if [ $DRY -eq 0 ]; then
+    "$bin" -m 2>/dev/null | grep -qi '^imagick$' && ok "$v: imagick kuruldu" \
+      || { uyar "$v: imagick kurulamadı (paket yok olabilir)"; HATA=1; }
+  fi
+done
+
+# FPM'leri yeniden yükle ki modül devreye girsin.
+# 🔴 Sadece GERÇEKTEN bir şey kurulduysa: koşulsuz reload, hiçbir şey
+# değişmese bile her çalıştırmada tüm havuzları USR2'liyordu (idempotent
+# değil; yoğun sunucuda gereksiz worker döngüsü).
+if [ $DRY -eq 0 ] && [ "${KURULDU:-0}" -gt 0 ]; then
+  systemctl reload php-fpm >/dev/null 2>&1
+  for u in $(systemctl list-units --no-legend 'php-fpm-c_*' 2>/dev/null | awk '{print $1}'); do
+    systemctl reload "$u" >/dev/null 2>&1
+  done
+fi
+
+echo
+# 🔴 `exit 0` KOŞULSUZ olamaz: installer ve updater bu aracı
+# `girginospanel-wp-onkosul || warn "..."` ile çağırıyor. Her koşulda 0
+# dönersek o `|| warn` dalı ÖLÜ olur ve başarısızlık hiç duyulmaz.
+if [ "$HATA" -eq 0 ]; then
+  ok "WordPress ön koşulları tamam"
+  exit 0
+fi
+uyar "bazı ön koşullar eksik kaldı (yukarı bak)"
+exit 1

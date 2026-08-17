@@ -68,12 +68,22 @@ export default function WordPressPage() {
   }
 
   async function sil(t: TumKurulum) {
-    if (t.dizin.includes('kök')) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Kök dizindeki WordPress panelden silinemez.' })); return }
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${t.alan_adi}${t.dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`, tehlike: true }))) return
+    // Kökte dizin SILINMEZ; yalniz WordPress'in kendi dosyalari kaldirilir.
+    // Yikici bir islemde yanlis uyari, uyari olmamasindan daha kotudur.
+    const _kok = t.dizin.includes('kök')
+    const _msj = _kok
+      ? `${t.alan_adi} kök dizinindeki WordPress kaldırılsın mı?\nWordPress dosyaları ve veritabanı silinir; dizin ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.`
+      : `${t.alan_adi}${t.dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: _msj, tehlike: true }))) return
     const key = t.domain_id + t.dizin
     setMesgul(key); setHata(null)
     try {
-      await api.delete(`/domains/${t.domain_id}/wordpress`, { data: { dizin: t.dizin, db_sil: true } })
+      const r = await api.delete<{ ok: boolean; db_uyari?: string }>(
+        `/domains/${t.domain_id}/wordpress`, { data: { dizin: t.dizin, db_sil: true } })
+      // Dosyalar gitse de veritabanı kalmış olabilir — sessizce geçme.
+      if (r?.data?.db_uyari) {
+        await bilgi({ baslik: 'Dosyalar silindi, veritabanı KALDI', mesaj: r.data.db_uyari })
+      }
       tumListele()
     } catch (err) { setHata(apiHata(err, 'Silinemedi')) }
     finally { setMesgul(null) }

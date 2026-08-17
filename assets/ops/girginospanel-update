@@ -56,17 +56,99 @@ surum() { curl -fsS http://127.0.0.1:8080/healthz 2>/dev/null | grep -oE '"surum
 command -v curl >/dev/null || die "curl gerekli"
 command -v tar  >/dev/null || die "tar gerekli"
 
-step "GirginOSPanel güncelleme (github.com/$REPO@$BRANCH)"
+step "GirginOSPanel güncelleme"
 
 # 1) indir
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-echo "  indiriliyor…"
-curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" | tar xz -C "$TMP" \
-  || die "indirme başarısız — repo public mi / '$BRANCH' dalı var mı?"
-SRC=$(find "$TMP" -maxdepth 1 -type d -name "*-$BRANCH" | head -1)
-A="$SRC/assets"
-NEWBIN="$A/girginospanel-server"
-[ -f "$NEWBIN" ] || die "$A/girginospanel-server yok (repo yapısı beklenenden farklı)"
+
+# Kendini guncelleyip yeniden calisan surum, ustteki surumun indirdigi
+# paketi devralir — ayni dosyayi iki kez indirmenin anlami yok.
+DEVRALINDI=0
+if [ -n "${GOSP_HAZIR_PAKET:-}" ] && [ -d "${GOSP_HAZIR_PAKET:-}" ]; then
+  rm -rf "$TMP"
+  TMP="$GOSP_HAZIR_PAKET"
+  trap 'rm -rf "$TMP"' EXIT
+  DEVRALINDI=1
+  echo "  paket devralındı (yeniden indirilmedi)"
+fi
+
+[ "$DEVRALINDI" = 1 ] || echo "  indiriliyor…"
+# 🔴 ONCE KENDI YAYIN SUNUCUMUZ, sonra GitHub.
+# GitHub codeload kimliksiz isteklere IP basina hiz siniri uygular ve
+# musteri sunuculari 429 aliyordu. Kendi sunucumuzda boyle bir sinir yok,
+# ustelik latest.txt sha256 tasidigi icin butunluk de dogrulanabiliyor.
+TABAN=${GOSP_TABAN:-https://surum.girginos.io/panel}
+
+indir_kendi() {
+  local latest paket bek ger
+  latest=$(curl -fsSL --max-time 60 "$TABAN/latest.txt" 2>/dev/null) || return 1
+  paket=$(printf '%s' "$latest" | awk -F': ' '/^paket:/{print $2}')
+  bek=$(printf '%s'  "$latest" | awk -F': ' '/^sha256:/{print $2}')
+  [ -n "$paket" ] && [ -n "$bek" ] || return 1
+  curl -fsSL --max-time 900 -o "$TMP/paket.tgz" "$TABAN/$paket" || return 1
+  ger=$(sha256sum "$TMP/paket.tgz" | cut -d' ' -f1)
+  if [ "$ger" != "$bek" ]; then
+    echo "  sha256 TUTMADI (beklenen $bek, gelen $ger) — bu kaynak atlanıyor"
+    return 1
+  fi
+  tar xzf "$TMP/paket.tgz" -C "$TMP" || return 1
+  echo "  kaynak: $TABAN ($paket, sha256 doğrulandı)"
+  return 0
+}
+
+indir_github() {
+  local kod
+  # 🔴 Hata mesaji GERCEGI soylemeli. Eskiden her basarisizlikta
+  # "repo public mi / dal var mi?" deniyordu; 429 (hiz siniri) alan
+  # operator repoyu kontrol edip durmadan bekliyordu.
+  kod=$(curl -sSL -w '%{http_code}' -o "$TMP/github.tgz" --max-time 900 \
+        "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" 2>/dev/null)
+  case "$kod" in
+    200) tar xzf "$TMP/github.tgz" -C "$TMP" 2>/dev/null || return 1
+         echo "  kaynak: github.com/$REPO@$BRANCH"; return 0 ;;
+    429) echo "  GitHub hız sınırı (429) — kimliksiz indirmeler IP başına sınırlı" ; return 1 ;;
+    404) echo "  GitHub 404 — repo public değil veya '$BRANCH' dalı yok" ; return 1 ;;
+    "")  echo "  GitHub'a ulaşılamadı (ağ/DNS)" ; return 1 ;;
+    *)   echo "  GitHub HTTP $kod" ; return 1 ;;
+  esac
+}
+
+if [ "$DEVRALINDI" = 0 ]; then
+  if ! indir_kendi; then
+    echo "  kendi yayın sunucusu kullanılamadı, GitHub deneniyor…"
+    indir_github || die "indirme başarısız — her iki kaynak da kullanılamadı"
+  fi
+fi
+
+# 🔴 Dizin adi kaynaga gore DEGISIR: GitHub tarball'i "gpanel-main/",
+# kendi paketimiz "gpanel-installer/" olarak acilir. Sabit isim yerine
+# assets/girginospanel-server'i ARAYARAK bul; iki duzen de calisir.
+NEWBIN=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-server -path '*/assets/*' 2>/dev/null | head -1)
+[ -n "$NEWBIN" ] || die "pakette assets/girginospanel-server yok (yapı beklenenden farklı)"
+A=$(dirname "$NEWBIN")
+SRC=$(dirname "$A")
+
+# ── Kendini ONCE guncelle ──────────────────────────────────────────
+# 🔴 Eskiden updater kendini adim 9'da, yani TUM isi bitirdikten SONRA
+# guncelliyordu. Sonuc: yeni surumdeki duzeltmeler ancak BIR SONRAKI
+# kosuda devreye giriyordu. Bu iki kez canimizi yakti — port-swap
+# helper'i ilk guncellemede hep eksik kaldi, ve GitHub 429 duzeltmesi
+# tam da onu indirmesi gereken updater'a ulasamadi (tavuk-yumurta).
+# Artik: paket dogrulandiktan HEMEN sonra kendini kurar ve YENI surumle
+# yeniden calisir; boylece guncellemeyi her zaman EN GUNCEL mantik yurutur.
+SELF_KURULU=/usr/local/bin/girginospanel-update
+SELF_YENI="$A/ops/girginospanel-update"
+if [ -z "${GOSP_SELF_GUNCEL:-}" ] && [ ! -f "$SELF_YENI" ]; then
+  warn "pakette ops/girginospanel-update yok — updater kendini guncelleyemiyor"
+fi
+if [ -z "${GOSP_SELF_GUNCEL:-}" ] && [ -f "$SELF_YENI" ] && [ -f "$SELF_KURULU" ] \
+   && ! cmp -s "$SELF_YENI" "$SELF_KURULU"; then
+  install -m 0755 "$SELF_YENI" "$SELF_KURULU" \
+    || die "updater kendini güncelleyemedi ($SELF_KURULU yazılamadı)"
+  ok "updater yeni sürüme geçti — güncelleme yeni mantıkla sürüyor"
+  trap - EXIT                       # paketi silme: yeni surum devralacak
+  GOSP_SELF_GUNCEL=1 GOSP_HAZIR_PAKET="$TMP" exec "$SELF_KURULU" "$@"
+fi
 
 # 2) yeni binary'yi ÇALIŞTIRMADAN doğrula (ELF header) + değişiklik tespiti.
 # ÖNEMLİ: sadece binary'yi değil TÜM release'i (binary + frontend-dist + migrations)
@@ -192,25 +274,59 @@ fi
 
 # 9) ops-tool'lar (updater kendini de günceller; db-backup adım 3'te zaten kuruldu — tekrar idempotent)
 if [ -d "$A/ops" ]; then
+  # 🔴 `.sh` uzantisi soyuldugu icin `X` ve `X.sh` AYNI hedefe kurulur ve
+  # glob sirasi geregi sonuncusu kazanir. Sessizce yanlis dosyanin
+  # kurulmasindansa durup soylemek dogrusu.
+  IKIZ=""
+  for t in "$A"/ops/*.sh; do
+    [ -f "$t" ] || continue
+    [ -f "${t%.sh}" ] && IKIZ="$IKIZ $(basename "${t%.sh}")"
+  done
+  [ -z "$IKIZ" ] || die "pakette .sh ikizi var, hangisinin kurulacagi belirsiz:$IKIZ"
+
+  # 🔴 Hatalari YUTMA. Eskiden `install ... 2>/dev/null || true` idi:
+  # disk dolu / salt-okunur / izin hatasinda arac kurulmuyor ama
+  # guncelleme yine "✓ ops-tool'lar guncellendi" diyordu.
+  OPS_HATA=""
   for t in "$A"/ops/*; do
+    [ -f "$t" ] || continue
     bn=$(basename "$t")
     case "$bn" in
       # Yapilandirma dosyalari /usr/local/bin'e 0755 ile KURULMAZ
-      *.conf|*.service|*.timer) : ;;
-      *) install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" 2>/dev/null || true ;;
+      *.conf|*.service|*.timer) continue ;;
     esac
+    install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" || OPS_HATA="$OPS_HATA ${bn%.sh}"
   done
-  mkdir -p "$SCRIPTS"; cp "$A"/ops/* "$SCRIPTS/" 2>/dev/null || true
+  [ -z "$OPS_HATA" ] || die "ops araclari kurulamadi:$OPS_HATA"
+
+  mkdir -p "$SCRIPTS" || die "$SCRIPTS olusturulamadi"
+  cp "$A"/ops/* "$SCRIPTS/" || die "ops dosyalari $SCRIPTS'e kopyalanamadi"
   # 🔴 Panel helper-i TAM olarak /usr/local/sbin/girginospanel-port-swap.sh
   # yolunda arar (internal/portyonetim/degistir.go: BackendHelperYolu).
   # Yukaridaki dongu ".sh" uzantisini soyup /usr/local/bin'e attigi icin
   # ESLESMIYOR -> guncellenen sunucularda helper bayat kalir veya hic olmaz.
   if [ -f "$A/ops/girginospanel-port-swap.sh" ]; then
     install -D -m 0700 "$A/ops/girginospanel-port-swap.sh" \
-      /usr/local/sbin/girginospanel-port-swap.sh 2>/dev/null \
-      && rm -f /usr/local/bin/girginospanel-port-swap 2>/dev/null || true
+      /usr/local/sbin/girginospanel-port-swap.sh \
+      || die "port-swap helper kurulamadi (/usr/local/sbin) — panel port degistiremez"
+    rm -f /usr/local/bin/girginospanel-port-swap 2>/dev/null || true
   fi
   ok "ops-tool'lar güncellendi"
+fi
+
+# 9a) wp-cli heal — 🔴 updater eskiden wp-cli'a HIC dokunmuyordu, dolayisiyla
+# kurulumda inmemis bir wp-cli'i olan sunucu kendini ASLA onaramiyordu
+# (musteride tam olarak bu oldu: WordPress sayfasi "Could not open input
+# file: /usr/local/bin/wp" veriyordu). Idempotent: calisan wp-cli'a dokunmaz.
+if command -v girginospanel-wpcli-kur >/dev/null 2>&1; then
+  girginospanel-wpcli-kur || warn "wp-cli onarilamadi — WordPress ozellikleri calismaz"
+fi
+
+# 9a2) WordPress on kosullari heal — SELinux kiraci dizin etiketleri +
+# imagick. 🔴 Ikisi de eski kurulumlarda EKSIK; updater dokunmazsa sunucu
+# kendini onaramaz (wp-cli ile birebir ayni arıza sinifi).
+if command -v girginospanel-wp-onkosul >/dev/null 2>&1; then
+  girginospanel-wp-onkosul || warn "WordPress on kosullari eksik kaldi"
 fi
 
 # 9b) WAF (ModSecurity + OWASP CRS) heal — IDEMPOTENT (her sey hazirsa saniyeler icinde ATLAR).

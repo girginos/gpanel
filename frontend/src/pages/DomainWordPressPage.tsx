@@ -177,10 +177,28 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
   }
 
   async function sil() {
-    if (kok) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Kök dizindeki WordPress panelden silinemez.' })); return }
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`, tehlike: true }))) return
+    const msj = kok
+      ? `Kök dizindeki WordPress kaldırılsın mı?\nWordPress dosyaları (wp-admin, wp-includes, wp-content, wp-*.php) ve veritabanı silinir.\nDizinin kendisi ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.`
+      : `${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: msj, tehlike: true }))) return
     setMesgul('sil'); setHata(null)
-    try { await api.delete(`${base}`, { data: { dizin, db_sil: true } }); onDegisti() }
+    try {
+      // 🔴 Yanıt ATILMAMALI. Dosyalar silinse bile veritabanı
+      // düşmemiş olabilir (yetki hatası, sahiplik reddi, wp-config
+      // okunamadı). Sunucu bunu `db_uyari` ile bildiriyor ama eskiden
+      // yanıt tamamen atılıyordu: HTTP 200 + ok:true olduğu için
+      // `catch` de tetiklenmiyor ve kullanıcı düz BAŞARI görüyordu —
+      // üstelik onay diyaloğu ona 'veritabanı silinir' demişti.
+      const r = await api.delete<{ ok: boolean; db_uyari?: string }>(
+        `${base}`, { data: { dizin, db_sil: true } })
+      if (r?.data?.db_uyari) {
+        await bilgi({
+          baslik: 'Dosyalar silindi, veritabanı KALDI',
+          mesaj: r.data.db_uyari + '\n\nVeritabanını Veritabanları sayfasından elle kaldırabilirsiniz.',
+        })
+      }
+      onDegisti()
+    }
     catch (err) { setHata(apiHata(err, 'Silinemedi')) }
     finally { setMesgul(null) }
   }
@@ -207,7 +225,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
               Yönetim paneli <span className="opacity-70">↗</span>
             </a>
           )}
-          {!kok && <button disabled={!!mesgul} onClick={sil} className="px-3 py-2 rounded-full border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 dark:hover:border-red-800 dark:hover:text-red-400 disabled:opacity-50 transition">{mesgul === 'sil' ? '…' : 'Kaldır'}</button>}
+          {<button disabled={!!mesgul} onClick={sil} className="px-3 py-2 rounded-full border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 dark:hover:border-red-800 dark:hover:text-red-400 disabled:opacity-50 transition">{mesgul === 'sil' ? '…' : 'Kaldır'}</button>}
         </div>
       </div>
 

@@ -25,7 +25,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall"
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -322,9 +322,53 @@ sec_domains() {
   done
 }
 
+sec_docroot_selinux() {
+  want docroot_selinux || return 0
+  head_ "kiracı belge kökü SELinux (WordPress yazma)"
+  if [ $SEL -ne 1 ]; then ok "SELinux kapalı — bu bölüm gereksiz"; return 0; fi
+
+  # 🔴 RHEL/AlmaLinux'un varsayılan kuralı:
+  #     /home/*/public_html(/.+)?  →  httpd_user_content_t   (SALT-OKUNUR)
+  # Enforcing modda PHP siteye YAZAMAZ. WordPress bunu görünce "FTP
+  # bilgileri" formu açar; eklenti/tema/güncelleme kurulamaz. Belirti
+  # sinsidir: AVC kaydı bile düşmez (is_writable → access() denetimleri
+  # dontaudit'li), log'a bakan sebebi bulamaz.
+  local n=0 duzeltilen=0
+  # public_html + tmp: ikisi de PHP tarafindan YAZILIR olmali.
+  # tmp varsayilan olarak user_tmp_t etiketlidir ve httpd domaini
+  # oraya yazamaz -> WordPress eklenti indiremez ("Permission denied").
+  for d in /home/c_*/public_html /home/c_*/tmp; do
+    [ -d "$d" ] || continue
+    n=$((n+1))
+    local mevcut; mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
+    case "$mevcut" in
+      *httpd_user_rw_content_t*) continue ;;   # zaten doğru
+    esac
+    act "SELinux yazılabilir etiket  $d  (şu an: ${mevcut##*:object_r:})"
+    if [ $DRY -eq 0 ]; then
+      if [ $HAVE_SEMANAGE -eq 1 ]; then
+        semanage fcontext -a -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null \
+          || semanage fcontext -m -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null || true
+      fi
+      # 🔴 -F ŞART: kural yeni eklendiğinde `restorecon -R` mevcut etiketi
+      # değiştirmeyebiliyor (canlıda birebir yaşandı).
+      restorecon -RF "$d" >/dev/null 2>&1 || true
+      local sonra; sonra=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
+      case "$sonra" in
+        *httpd_user_rw_content_t*) duzeltilen=$((duzeltilen+1)) ;;
+        *) err "etiket değişmedi: $d (şu an ${sonra##*:object_r:})" ;;
+      esac
+    fi
+  done
+  if [ "$n" -eq 0 ]; then ok "kiracı dizini yok"
+  elif [ $DRY -eq 1 ]; then say "  → (dry) $n dizin taranacak (belge kökü + tmp)"
+  else ok "$n dizinden $duzeltilen tanesi yazılabilir etikete geçirildi"; fi
+}
+
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_phpmyadmin
+sec_docroot_selinux
 sec_migrations
 sec_domains
 sec_htpasswd

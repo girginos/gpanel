@@ -43,12 +43,12 @@ const (
 )
 
 var (
-	ayarMu       sync.RWMutex
-	ayarCache    int
-	ayarZaman    time.Time
-	ayarBiliyor  bool
-	sonAktMu     sync.Mutex
-	sonAktKayit  = map[int64]time.Time{}
+	ayarMu      sync.RWMutex
+	ayarCache   int
+	ayarZaman   time.Time
+	ayarBiliyor bool
+	sonAktMu    sync.Mutex
+	sonAktKayit = map[int64]time.Time{}
 )
 
 // Ayar — session_idle_minutes değerini oku, cache'li. Kayıt yoksa 0 (=kapalı).
@@ -113,7 +113,16 @@ func AyarKaydet(db *sql.DB, dk int) error {
 // IdleMi — kullanıcının son_aktivite eşiği aştı mı? Middleware'den çağrılır.
 // Fail-OPEN: DB hatasında false (idle değil) döner ve mevcut isteği geçirir.
 // Ayar=0 ise kontrol tamamen atlanır (özellik kapalı).
-func IdleMi(db *sql.DB, uid int64) bool {
+// tokenIat: oturumu acan token'in uretim zamani (unix). TAZE bir token
+// tanimi geregi TAZE aktivitedir; bu yuzden damga ile token'in daha YENI
+// olani esas alinir.
+//
+// 🔴 Bu parametre olmadan su kilitlenme olusuyordu: IdleMi 401 verip
+// donuyor, aktivite damgasini guncelleyen satir cagirann altinda kaldigi
+// icin HIC calismiyor, ve Login de damgayi sifirlamiyordu. Damga bir kez
+// bayatlayinca kullanici giris yapsa bile her istekte 401 alip login
+// ekranina geri atiliyordu — kalici kilitlenme.
+func IdleMi(db *sql.DB, uid int64, tokenIat int64) bool {
 	esik := Ayar(db)
 	if esik <= 0 || uid <= 0 {
 		return false
@@ -122,6 +131,10 @@ func IdleMi(db *sql.DB, uid int64) bool {
 	err := db.QueryRow(`SELECT last_activity_ts FROM users WHERE id=?`, uid).Scan(&son)
 	if err != nil {
 		return false // fail-open (bkz. yorum)
+	}
+	// Token damgadan yeniyse onu kullan.
+	if tokenIat > son {
+		son = tokenIat
 	}
 	// İlk kez giren kullanıcı: last_activity=0. Bu, henüz aktivite kaydı yok
 	// demek — YENI oturumu idle SAYMAYIZ. Bir sonraki istekte guncellenecek.

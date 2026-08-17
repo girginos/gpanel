@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# girginospanel-wpcli-kur — wp-cli'ı kurar/onarır. IDEMPOTENT.
+#
+#   girginospanel-wpcli-kur          # yoksa/bozuksa kur, çalışıyorsa dokunma
+#   girginospanel-wpcli-kur --force  # her hâlükârda yeniden kur
+#
+# 🔴 NEDEN AYRI ARAÇ: installer wp-cli'ı `raw.githubusercontent.com`'dan
+# çekiyor, hatayı `2>/dev/null` ile gizliyor ve yalnızca `warn` basıp
+# kuruluma devam ediyordu. GitHub hız sınırı (429/503) verdiğinde dosya
+# hiç inmiyor, kurulum "başarılı" diyor ve WordPress sayfası çalışma
+# anında "Could not open input file: /usr/local/bin/wp" ile patlıyordu.
+# Üstelik updater wp-cli'a hiç dokunmadığı için sunucu kendini de
+# onaramıyordu. Bu araç üç sorunu birden çözer: kendi aynamızı önceler,
+# indirdiğini GERÇEKTEN ÇALIŞTIRARAK doğrular ve updater tarafından her
+# güncellemede çağrılır.
+set -uo pipefail
+
+HEDEF=/usr/local/bin/wp
+TABAN=${GOSP_TABAN:-https://surum.girginos.io/panel}
+FORCE=0
+for a in "$@"; do [ "$a" = "--force" ] && FORCE=1; done
+
+c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_0=$'\e[0m'
+ok(){   echo -e "  ${c_g}✓${c_0} $*"; }
+uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
+hata(){ echo -e "  ${c_r}✗${c_0} $*" >&2; }
+
+command -v php >/dev/null || { hata "php yok — wp-cli kurulamaz"; exit 1; }
+
+# Çalışıyor mu? "Dosya var" YETMEZ: 0 baytlık veya yarım inmiş bir phar da
+# dosya olarak vardır. Tek geçerli kanıt, gerçekten çalıştırmaktır.
+calisiyor() { [ -f "$1" ] && php "$1" --version --allow-root >/dev/null 2>&1; }
+
+if [ "$FORCE" = 0 ] && calisiyor "$HEDEF"; then
+  ok "wp-cli zaten çalışıyor ($(php "$HEDEF" --version --allow-root 2>/dev/null | head -1))"
+  exit 0
+fi
+
+GEC=$(mktemp -d /tmp/wpcli.XXXXXX) || { hata "geçici dizin açılamadı"; exit 1; }
+trap 'rm -rf "$GEC"' EXIT
+
+# ── Kaynak 1: kendi aynamız (sha256 doğrulamalı) ────────────────────
+aynadan() {
+  local bek ger
+  bek=$(curl -fsSL --max-time 30 "$TABAN/wp-cli.txt" 2>/dev/null \
+        | sed -n 's/^sha256: *//p' | head -1)
+  curl -fsSL --max-time 600 -o "$GEC/wp.phar" "$TABAN/wp-cli.phar" 2>/dev/null || return 1
+  if [ -n "$bek" ]; then
+    ger=$(sha256sum "$GEC/wp.phar" | cut -d' ' -f1)
+    if [ "$ger" != "$bek" ]; then
+      hata "ayna sha256 tutmadı (beklenen ${bek:0:16}…, gelen ${ger:0:16}…)"
+      return 1
+    fi
+  else
+    uyar "ayna sha256 bilgisi okunamadı — yalnız çalışma testine güveniliyor"
+  fi
+  return 0
+}
+
+# ── Kaynak 2/3: GitHub (ayna erişilemezse) ──────────────────────────
+# raw.githubusercontent ve github.com AYRI hostlar; biri sınırlıyken
+# diğeri çalışabiliyor (2026-08-18'de tam olarak bu oldu).
+githubdan() {
+  local u
+  for u in "https://github.com/wp-cli/wp-cli/releases/latest/download/wp-cli.phar" \
+           "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"; do
+    if curl -fsSL --max-time 600 -o "$GEC/wp.phar" "$u" 2>/dev/null; then
+      echo "  kaynak: $u"
+      return 0
+    fi
+  done
+  return 1
+}
+
+KAYNAK=""
+if aynadan; then KAYNAK="$TABAN"
+elif githubdan; then KAYNAK="github"
+else
+  hata "wp-cli hiçbir kaynaktan indirilemedi (ayna + GitHub denendi)"
+  hata "WordPress özellikleri ÇALIŞMAZ. Ağ/DNS kontrol edip tekrar deneyin:"
+  hata "  girginospanel-wpcli-kur"
+  exit 1
+fi
+
+# 🔴 İndirilen dosyayı ÇALIŞTIRARAK doğrula. Yarım inen veya HTML hata
+# sayfası kaydedilmiş bir dosya da "indirildi" görünür.
+if ! calisiyor "$GEC/wp.phar"; then
+  hata "indirilen dosya çalışmıyor — kurulmadı (mevcut $HEDEF korundu)"
+  hata "  $(php "$GEC/wp.phar" --version --allow-root 2>&1 | head -1)"
+  exit 1
+fi
+
+install -m 0755 "$GEC/wp.phar" "$HEDEF" || { hata "$HEDEF yazılamadı"; exit 1; }
+calisiyor "$HEDEF" || { hata "kurulum sonrası $HEDEF çalışmıyor"; exit 1; }
+ok "wp-cli kuruldu: $(php "$HEDEF" --version --allow-root 2>/dev/null | head -1)  [$KAYNAK]"

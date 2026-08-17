@@ -867,6 +867,17 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 	for _, d := range dirs {
 		_ = os.MkdirAll(filepath.Join(home, d), 0750)
 	}
+	// Belge kokunu PHP-nin YAZABILECEGI SELinux tipine etiketle. Varsayilan
+	// kural salt-okunur (httpd_user_content_t) oldugu icin Enforcing modda
+	// WordPress eklenti/tema kuramaz ve "FTP bilgileri" formu acar.
+	selinuxDocrootEtiketle(filepath.Join(home, "public_html"))
+	// 🔴 `tmp` DE yazılabilir olmalı: PHP'nin geçici dizini burasıdır
+	// (open_basedir ile sınırlı olduğu için /tmp kullanılamaz). Varsayılan
+	// etiketi `user_tmp_t` ve httpd domaini oraya YAZAMAZ → WordPress
+	// eklenti indirirken "Failed to open stream: Permission denied" verir.
+	// Sinsi tarafı: `is_writable()` DAC'a baktığı için TRUE döner; hata
+	// ancak gerçek fopen() anında ortaya çıkar.
+	selinuxDocrootEtiketle(filepath.Join(home, "tmp"))
 
 	uid, gid, err := uidGid(u)
 	if err == nil {
@@ -2186,5 +2197,43 @@ func acmeCronHizala() {
 	yeni := strings.TrimRight(strings.Join(temiz, "\n"), "\n") + "\n" + satir + "\n"
 	if err := os.WriteFile(acc, []byte(yeni), 0o600); err == nil {
 		log.Printf("acme.sh CONFIG_HOME -> %s (cron yenilemesi yeni dizini kullanir)", acmeConfigHome)
+	}
+}
+
+// selinuxDocrootEtiketle — kiracı belge kökünü PHP'nin YAZABİLECEĞİ tipe
+// etiketler ve kalıcı kural olarak kaydeder.
+//
+// 🔴 Neden: RHEL/AlmaLinux'un varsayılan kuralı
+// `/home/*/public_html(/.+)?` → `httpd_user_content_t` yani SALT-OKUNUR.
+// SELinux Enforcing'te PHP siteye yazamaz; WordPress bunu görünce
+// "FTP bilgileri" formu açar ve eklenti/tema/güncelleme kurulamaz.
+// Belirti sinsi: AVC kaydı bile düşmez (is_writable → access() denetimleri
+// dontaudit'lidir), o yüzden log'a bakan kimse sebebi bulamaz.
+//
+// 🔴 `restorecon -R` YETMEZ: kural yeni eklendiğinde mevcut etiketi
+// değiştirmeyebiliyor; `-F` (force) şart.
+func selinuxDocrootEtiketle(docRoot string) {
+	if docRoot == "" {
+		return
+	}
+	// SELinux kapalıysa sessizce geç (getenforce yoksa da).
+	out, err := exec.Command("getenforce").Output()
+	if err != nil || strings.TrimSpace(string(out)) == "Disabled" {
+		return
+	}
+	if _, err := exec.LookPath("semanage"); err == nil {
+		spec := docRoot + "(/.*)?"
+		// -a çakışırsa -m ile güncelle; ikisi de idempotent.
+		if o, e := exec.Command("semanage", "fcontext", "-a", "-t",
+			"httpd_user_rw_content_t", spec).CombinedOutput(); e != nil {
+			if o2, e2 := exec.Command("semanage", "fcontext", "-m", "-t",
+				"httpd_user_rw_content_t", spec).CombinedOutput(); e2 != nil {
+				log.Printf("selinux docroot kurali yazilamadi (%s): %s / %s",
+					docRoot, strings.TrimSpace(string(o)), strings.TrimSpace(string(o2)))
+			}
+		}
+	}
+	if o, e := exec.Command("restorecon", "-RF", docRoot).CombinedOutput(); e != nil {
+		log.Printf("selinux restorecon basarisiz (%s): %s", docRoot, strings.TrimSpace(string(o)))
 	}
 }

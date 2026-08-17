@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -443,6 +444,71 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /domains/{id}/wordpress  {dizin, db_sil}
+// wpKokGirdileri — WordPress'in kök kurulumda getirdiği kendi dosya/dizinleri.
+// Kökte dizinin TAMAMI silinemez (public_html giderdi), bu yüzden yalnız
+// bunlar kaldırılır. Listede olmayan hiçbir şeye dokunulmaz: kullanıcının
+// yedek klasörü, başka uygulaması veya kendi dosyaları yerinde kalır.
+var wpKokGirdileri = []string{
+	"wp-admin", "wp-includes", "wp-content",
+	"index.php", "xmlrpc.php", "readme.html", "license.txt", ".htaccess",
+}
+
+// wpKokTemizle — kökteki WordPress dosyalarını kaldırır, dizinin kendisini
+// KORUR. Sabit listeye ek olarak `wp-*.php` kalıbındaki dosyalar da silinir
+// (wp-config.php, wp-load.php, wp-settings.php … sürümden sürüme değişir).
+func wpKokTemizle(dir string) error {
+	for _, ad := range wpKokGirdileri {
+		if err := os.RemoveAll(filepath.Join(dir, ad)); err != nil {
+			return err
+		}
+	}
+	girdiler, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, g := range girdiler {
+		ad := g.Name()
+		if g.IsDir() || !strings.HasPrefix(ad, "wp-") || !strings.HasSuffix(ad, ".php") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, ad)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dbKullaniciAl — bu DB'ye ait MySQL kullanicisini PANELIN KENDI kaydindan
+// okur. 🔴 wp-config.php'den OKUNMAZ: o dosya musterinin kontrolunde ve
+// oraya baska bir tenant'in kullanici adi yazilabilir.
+func (h *Handlers) dbKullaniciAl(ctx context.Context, dbName string, domainID int64) string {
+	var u string
+	_ = h.DB.QueryRowContext(ctx,
+		`SELECT db_user FROM db_accounts WHERE db_name=? AND domain_id=?`,
+		dbName, domainID).Scan(&u)
+	return u
+}
+
+// wpDBDusur — WordPress'in veritabanini VE ona ait MySQL kullanicisini
+// kaldirir, db_accounts kaydini siler.
+//
+// 🔴 Eskiden `MySQLDropDBKeepUser` kullaniliyordu: veritabani gidiyor ama
+// `wpu_<slug>` kullanicisi ve GRANT'i KALIYORDU. db_accounts satiri da
+// silindigi icin panelin o kullanicidan haberi kalmiyor -> her kaldirmada
+// bir yetim birikiyor. Ayni adla yeni bir DB yaratilirsa eski kullanici
+// ona ANINDA tam yetkiyle erisir (gizli yetki).
+//
+// Kullanici adi belirlenemezse (eski kurulum, kayit yok) yalniz DB dusurulur
+// — tahmin ederek rastgele bir MySQL kullanicisi SILMEYIZ.
+func (h *Handlers) wpDBDusur(ctx context.Context, dbName string, domainID int64) error {
+	dbUser := h.dbKullaniciAl(ctx, dbName, domainID)
+	if dbUser == "" {
+		log.Printf("wordpress sil: %s icin db_accounts'ta kullanici yok — yalniz DB dusuruluyor", dbName)
+		return hesaplar.MySQLDropDBKeepUser(h.DB, dbName)
+	}
+	return hesaplar.MySQLDropDB(h.DB, dbName, dbUser)
+}
+
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	domID, sk, _, _, demo, ok := h.domain(r)
 	if !ok {
@@ -469,13 +535,19 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	root := wpRoot
-	// KÖK-SİTE KORUMASI: public_html'in kendisini silme (tüm site gider)
-	if dir == root {
-		httpx.WriteError(w, http.StatusBadRequest, "kök dizindeki WordPress panelden silinemez (tüm site gider); Dosya Yöneticisi'nden kaldırın")
-		return
-	}
+	// KÖK-SİTE KORUMASI: public_html'in KENDİSİ asla silinmez (tüm site gider).
+	// Ama kökteki WordPress'i kaldırmak meşru ve yaygın bir istek — bu yüzden
+	// kökte dizin yerine WordPress'in KENDİ dosyaları temizlenir; kullanıcının
+	// dizine koyduğu diğer şeyler (yedek klasörü, başka dosyalar) KORUNUR.
+	kokKurulum := dir == root
+	// 🔴 DB silme sonucu KULLANICIYA bildirilir. Eskiden DROP hatasi
+	// `_, _ = h.DB.Exec(...)` ile yok sayiliyordu: veritabani yerinde
+	// kaliyor ama panel "ok" diyordu. Kullanici sildigini saniyordu.
+	dbSonuc := ""
 	if sreq.DBSil {
+		dbSonuc = "wp-config.php okunamadı — veritabanı adı bulunamadı"
 		if b, err := os.ReadFile(filepath.Join(dir, "wp-config.php")); err == nil {
+			dbSonuc = "wp-config.php içinde DB_NAME bulunamadı"
 			if m := reDBName.FindSubmatch(b); len(m) == 2 {
 				dbName := string(m[1])
 				// GÜVENLİK (tenant-arası DROP koruması): dbName müşterinin KENDİ
@@ -486,17 +558,40 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 				//     müşteri wp-config'e "wp_baskatenant" yazsa bile o DB bu domaine kayıtlı
 				//     değilse DROP YAPILMAZ (başka tenant'ın DB'sini düşürme engellenir).
 				sahip := func(n string, d int64) (bool, error) { return h.dbSahipMi(r.Context(), n, d) }
-				if dropIzinli(dbName, domID, sahip) {
-					_, _ = h.DB.Exec("DROP DATABASE IF EXISTS `" + dbName + "`")
+				if !dropIzinli(dbName, domID, sahip) {
+					dbSonuc = "veritabanı '" + dbName + "' bu domaine kayıtlı değil — güvenlik gereği düşürülmedi"
+					// 🔴 `h.DB.Exec("DROP DATABASE ...")` CALISMIYOR: panelin MySQL
+					// kullanicisi tenant veritabanlarinda DROP yetkisine sahip degil
+					// (Error 1044). Panelin baska yerlerde kullandigi ve GERCEKTEN
+					// calisan yol `hesaplar.MySQLDropDBKeepUser`: root soketi
+					// uzerinden `mysql -e` calistirir VE `db_accounts` metadata
+					// satirini da siler (aksi halde yetim kayit kalirdi).
+				} else if derr := h.wpDBDusur(r.Context(), dbName, domID); derr != nil {
+					dbSonuc = "veritabanı '" + dbName + "' düşürülemedi: " + derr.Error()
+					log.Printf("wordpress sil: DROP DATABASE %s basarisiz: %v", dbName, derr)
+				} else {
+					dbSonuc = ""
+					log.Printf("wordpress sil: veritabani %s dusuruldu (domain=%d)", dbName, domID)
 				}
 			}
 		}
 	}
-	if err := os.RemoveAll(dir); err != nil { // alt dizin; kök değil (yukarıda korundu)
+	if kokKurulum {
+		if err := wpKokTemizle(dir); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "WordPress dosyaları temizlenemedi: "+err.Error())
+			return
+		}
+	} else if err := os.RemoveAll(dir); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi")
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// Dosyalar silindi; DB kismi basarisizsa bunu SAKLAMA — kullanici
+	// veritabaninin durdugunu bilmeli ki elle temizleyebilsin.
+	yanit := map[string]any{"ok": true}
+	if dbSonuc != "" {
+		yanit["db_uyari"] = dbSonuc
+	}
+	httpx.WriteJSON(w, http.StatusOK, yanit)
 }
 
 // cozDizin: {dizin} değerini güvenli mutlak yola çevirir (public_html içinde + wp-config var).

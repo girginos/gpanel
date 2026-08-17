@@ -192,7 +192,7 @@ export default function DomainDNSPage() {
   }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1300px]">
+    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1600px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: 'Domainler', href: '/domainler' },
@@ -378,12 +378,12 @@ export default function DomainDNSPage() {
                       ref={el => { if (el) el.indeterminate = secili.size > 0 && secili.size < kayitlar.length }}
                       onChange={hepsiniSec} className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
                   </th>
-                  <th className={T.baslik}>Ad</th>
-                  <th className={T.baslik}>Tip</th>
-                  <th className={T.baslik}>Değer</th>
-                  <th className={T.baslik}>TTL</th>
-                  <th className={T.baslik}>Öncelik</th>
-                  <th className={T.baslik}>Durum</th>
+                  <th className={`${T.baslik} lg:min-w-[190px] lg:whitespace-nowrap`}>Ad</th>
+                  <th className={`${T.baslik} lg:whitespace-nowrap`}>Tip</th>
+                  <th className={`${T.baslik} lg:w-full`}>Değer</th>
+                  <th className={`${T.baslik} lg:whitespace-nowrap`}>TTL</th>
+                  <th className={`${T.baslik} lg:whitespace-nowrap`}>Öncelik</th>
+                  <th className={`${T.baslik} lg:whitespace-nowrap`}>Durum</th>
                   <th className={`${T.baslik} text-right`}>İşlemler</th>
                 </tr>
               </thead>
@@ -395,7 +395,7 @@ export default function DomainDNSPage() {
                         className="rounded border-slate-300 dark:border-slate-600 cursor-pointer" />
                     </td>
                     {/* Birincil tanımlayıcı: kayıt adı — mobilde kart başlığı olur. */}
-                    <td className={`${T.hucreBaslik} font-mono break-all`}>{k.ad}</td>
+                    <td className={`${T.hucreBaslik} font-mono break-all lg:break-normal lg:whitespace-nowrap`}>{k.ad}</td>
                     <td className={T.hucre} data-etiket="Tip">
                       <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">{k.tip}</span>
                     </td>

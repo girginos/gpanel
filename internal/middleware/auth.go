@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"girginospanel/internal/auth"
-	"girginospanel/internal/oturumbosta"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/oturumbosta"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -59,7 +59,11 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				// 🔴 Oturum boşta süresi (kayıt-tabanlı). Ayar=0 iken kontrol
 				// atlanır (özellik kapalı). Fail-OPEN: DB blip'inde IdleMi
 				// false döner, oturum kesintiye uğramaz.
-				if oturumbosta.IdleMi(scopeDB, c.UserID) {
+				iat := int64(0)
+				if c.IssuedAt != nil {
+					iat = c.IssuedAt.Unix()
+				}
+				if oturumbosta.IdleMi(scopeDB, c.UserID, iat) {
 					httpx.WriteError(w, http.StatusUnauthorized, "oturum boşta süresi doldu, tekrar giriş yapın")
 					return
 				}

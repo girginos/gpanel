@@ -149,10 +149,36 @@ for v in $PHP_VERS; do
   pkgs=""; for e in $PHP_EXT; do pkgs="$pkgs php$v-php-$e"; done
   dnf install -y $pkgs php$v-php-pecl-redis6 >/dev/null 2>&1 && ok "php$v (+redis)" || warn "php$v bazı paketler atlandı"
 done
-if [ ! -x /usr/local/bin/wp ]; then
-  curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar 2>/dev/null \
-    && chmod +x /usr/local/bin/wp && ok "wp-cli" || warn "wp-cli indirilemedi (WordPress özellikleri için gerekli)"
-else ok "wp-cli (mevcut)"; fi
+# 🔴 wp-cli kurulumu ARACA devredildi. Eskiden burada satır içi bir curl
+# vardı; hatayı `2>/dev/null` ile gizliyor, yalnızca `warn` basıp kuruluma
+# devam ediyordu. GitHub hız sınırı (429/503) verdiğinde dosya hiç inmiyor,
+# kurulum "başarılı" diyor ve WordPress sayfası çalışma anında
+# "Could not open input file: /usr/local/bin/wp" ile patlıyordu.
+# Araç: kendi aynamızı önceler, indirdiğini ÇALIŞTIRARAK doğrular, ve
+# updater tarafından her güncellemede tekrar çağrılır (self-heal).
+if [ -f "$A/ops/girginospanel-wpcli-kur" ]; then
+  install -m 0755 "$A/ops/girginospanel-wpcli-kur" /usr/local/bin/girginospanel-wpcli-kur
+  if girginospanel-wpcli-kur; then
+    WPCLI_DURUM="OK"
+  else
+    WPCLI_DURUM="YOK"
+    warn "wp-cli kurulamadı — WordPress özellikleri çalışmaz. Sonra: girginospanel-wpcli-kur"
+  fi
+else
+  WPCLI_DURUM="ARAC-YOK"
+  warn "ops/girginospanel-wpcli-kur pakette yok — wp-cli kurulmadı"
+fi
+
+# WordPress ön koşulları: SELinux kiracı dizin etiketleri + imagick.
+# 🔴 İkisi de kurulumda SESSİZCE atlanıyordu ve canlı müşteride ard arda
+# patladı: Enforcing'te WordPress eklenti kuramıyor ("FTP bilgileri"
+# formu, sonra "Permission denied"), imagick yok diye Site Health uyarıyor.
+if [ -f "$A/ops/girginospanel-wp-onkosul" ]; then
+  install -m 0755 "$A/ops/girginospanel-wp-onkosul" /usr/local/bin/girginospanel-wp-onkosul
+  girginospanel-wp-onkosul || warn "WordPress ön koşulları eksik kaldı — sonra: girginospanel-wp-onkosul"
+else
+  warn "ops/girginospanel-wp-onkosul pakette yok — SELinux etiketi + imagick atlandı"
+fi
 
 # ============ 4) MARIADB ============
 step "4) MariaDB"
@@ -632,6 +658,7 @@ JAIL_D=X; [ -e /opt/girginospanel/src/scripts/50-gosp-jail.conf ] && [ -e /opt/g
 PSW_D=X; [ -x /usr/local/sbin/girginospanel-port-swap.sh ] && PSW_D=OK
 echo -e "  antivirüs: $AV_D   ·   freshclam $(systemctl is-active clamav-freshclam 2>/dev/null)   ·   WAF: $WAF_D"
 echo -e "  ssh izolasyon(jail): $JAIL_D   ·   backend port helper: $PSW_D"
+echo -e "  wp-cli (WordPress): ${WPCLI_DURUM:-?}"
 echo -e "  izolasyon: plan-driven kaynak limitleri (cgroup slice) + per-tenant PHP-FPM (CageFS eşdeğeri) HAZIR   ·   bubblewrap $(command -v bwrap >/dev/null && echo ✓ || echo ✗)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
