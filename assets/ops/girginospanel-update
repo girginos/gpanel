@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# girginospanel-update — GirginOSPanel'i GitHub'dan güvenli in-place günceller.
+# girginospanel-update — GirginOSPanel'i KENDI YAYIN ALTYAPIMIZDAN güvenli
+# in-place günceller (sha256 doğrulamalı). GitHub varsayılan yolda DEĞİL.
 #
 #   girginospanel-update            # son sürümü çek → binary+frontend+migration değiştir → yeniden başlat
 #   girginospanel-update --dry-run  # sadece ne yapacağını göster, dokunma
@@ -73,50 +74,75 @@ if [ -n "${GOSP_HAZIR_PAKET:-}" ] && [ -d "${GOSP_HAZIR_PAKET:-}" ]; then
 fi
 
 [ "$DEVRALINDI" = 1 ] || echo "  indiriliyor…"
-# 🔴 ONCE KENDI YAYIN SUNUCUMUZ, sonra GitHub.
-# GitHub codeload kimliksiz isteklere IP basina hiz siniri uygular ve
-# musteri sunuculari 429 aliyordu. Kendi sunucumuzda boyle bir sinir yok,
-# ustelik latest.txt sha256 tasidigi icin butunluk de dogrulanabiliyor.
-TABAN=${GOSP_TABAN:-https://surum.girginos.io/panel}
+# ══════════════════════════════════════════════════════════════════
+# KAYNAK: YALNIZ KENDI ALTYAPIMIZ
+#
+# 🔴 GitHub artik varsayilan yolda DEGIL. Iki kez musteri sunucusu
+# kilitledi: codeload 429 (panel guncellemesi hic inmedi) ve
+# raw.githubusercontent 429/503 (wp-cli inmedi, WordPress calisma
+# aninda patladi). Kimliksiz GitHub indirmeleri IP basina hiz sinirli
+# ve bunu bizim kontrol edebilecegimiz bir yani yok.
+#
+# AYNALAR: bosluklu liste, SIRAYLA denenir. Yeni bir ayna eklemek tek
+# satir; boylece tek sunucuya bagimlilik ileride kolayca kirilir.
+# surum.girginos.io Cloudflare arkasinda oldugu icin origin blip'lerini
+# CDN katmani zaten yutuyor.
+#
+# GitHub yalnizca ACIKCA istenirse denenir:  GOSP_GITHUB_YEDEK=1
+# ══════════════════════════════════════════════════════════════════
+AYNALAR=${GOSP_AYNALAR:-${GOSP_TABAN:-https://surum.girginos.io/panel}}
 
-indir_kendi() {
-  local latest paket bek ger
-  latest=$(curl -fsSL --max-time 60 "$TABAN/latest.txt" 2>/dev/null) || return 1
+indir_aynadan() {   # $1 = taban URL
+  local taban="$1" latest paket bek ger
+  latest=$(curl -fsSL --max-time 60 "$taban/latest.txt" 2>/dev/null) || {
+    echo "  $taban → sürüm bilgisi alınamadı"; return 1; }
   paket=$(printf '%s' "$latest" | awk -F': ' '/^paket:/{print $2}')
   bek=$(printf '%s'  "$latest" | awk -F': ' '/^sha256:/{print $2}')
-  [ -n "$paket" ] && [ -n "$bek" ] || return 1
-  curl -fsSL --max-time 900 -o "$TMP/paket.tgz" "$TABAN/$paket" || return 1
+  if [ -z "$paket" ] || [ -z "$bek" ]; then
+    echo "  $taban → latest.txt eksik (paket/sha256 yok)"; return 1; fi
+  curl -fsSL --max-time 900 -o "$TMP/paket.tgz" "$taban/$paket" 2>/dev/null || {
+    echo "  $taban → paket indirilemedi"; return 1; }
   ger=$(sha256sum "$TMP/paket.tgz" | cut -d' ' -f1)
   if [ "$ger" != "$bek" ]; then
-    echo "  sha256 TUTMADI (beklenen $bek, gelen $ger) — bu kaynak atlanıyor"
+    echo "  $taban → sha256 TUTMADI (beklenen ${bek:0:16}…, gelen ${ger:0:16}…)"
     return 1
   fi
-  tar xzf "$TMP/paket.tgz" -C "$TMP" || return 1
-  echo "  kaynak: $TABAN ($paket, sha256 doğrulandı)"
+  tar xzf "$TMP/paket.tgz" -C "$TMP" 2>/dev/null || {
+    echo "  $taban → arşiv açılamadı"; return 1; }
+  echo "  kaynak: $taban ($paket, sha256 doğrulandı)"
   return 0
 }
 
+# Opsiyonel acil yedek — VARSAYILAN OLARAK KAPALI.
 indir_github() {
   local kod
-  # 🔴 Hata mesaji GERCEGI soylemeli. Eskiden her basarisizlikta
-  # "repo public mi / dal var mi?" deniyordu; 429 (hiz siniri) alan
-  # operator repoyu kontrol edip durmadan bekliyordu.
   kod=$(curl -sSL -w '%{http_code}' -o "$TMP/github.tgz" --max-time 900 \
         "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" 2>/dev/null)
   case "$kod" in
     200) tar xzf "$TMP/github.tgz" -C "$TMP" 2>/dev/null || return 1
-         echo "  kaynak: github.com/$REPO@$BRANCH"; return 0 ;;
-    429) echo "  GitHub hız sınırı (429) — kimliksiz indirmeler IP başına sınırlı" ; return 1 ;;
-    404) echo "  GitHub 404 — repo public değil veya '$BRANCH' dalı yok" ; return 1 ;;
-    "")  echo "  GitHub'a ulaşılamadı (ağ/DNS)" ; return 1 ;;
-    *)   echo "  GitHub HTTP $kod" ; return 1 ;;
+         echo "  kaynak: github.com/$REPO@$BRANCH (acil yedek)"; return 0 ;;
+    429) echo "  GitHub hız sınırı (429)"; return 1 ;;
+    404) echo "  GitHub 404 — repo/dal yok"; return 1 ;;
+    "")  echo "  GitHub'a ulaşılamadı (ağ/DNS)"; return 1 ;;
+    *)   echo "  GitHub HTTP $kod"; return 1 ;;
   esac
 }
 
 if [ "$DEVRALINDI" = 0 ]; then
-  if ! indir_kendi; then
-    echo "  kendi yayın sunucusu kullanılamadı, GitHub deneniyor…"
-    indir_github || die "indirme başarısız — her iki kaynak da kullanılamadı"
+  INDI=0
+  for _ayna in $AYNALAR; do
+    if indir_aynadan "$_ayna"; then INDI=1; break; fi
+  done
+  if [ "$INDI" = 0 ] && [ "${GOSP_GITHUB_YEDEK:-0}" = "1" ]; then
+    echo "  aynalar kullanılamadı, GitHub acil yedeği deneniyor…"
+    indir_github && INDI=1
+  fi
+  if [ "$INDI" = 0 ]; then
+    die "güncelleme indirilemedi — denenen aynalar: $AYNALAR
+     Ağ/DNS kontrol edip tekrar deneyin. Acil durumda GitHub yedeği:
+       GOSP_GITHUB_YEDEK=1 girginospanel-update
+     Başka bir ayna kullanmak için:
+       GOSP_AYNALAR='https://ayna2.example/panel' girginospanel-update"
   fi
 fi
 
@@ -136,6 +162,14 @@ SRC=$(dirname "$A")
 # tam da onu indirmesi gereken updater'a ulasamadi (tavuk-yumurta).
 # Artik: paket dogrulandiktan HEMEN sonra kendini kurar ve YENI surumle
 # yeniden calisir; boylece guncellemeyi her zaman EN GUNCEL mantik yurutur.
+# 🔴 DERLEME MAKINESI KORUMASI: kaynak agaci varsa burasi gelistirme
+# makinesidir ve /usr/local/bin'deki surum YAYINDAKINDEN YENI olabilir.
+# Kendini guncellersek yerel degisiklik sessizce geri alinir (iki kez
+# yasandi: AYNALAR yamasi boyle kayboldu).
+if [ -f /root/gpanel-temiz/assets/ops/girginospanel-update ]; then
+  echo "  derleme makinesi — updater kendini guncellemiyor (yerel surum korunur)"
+  GOSP_SELF_GUNCEL=1
+fi
 SELF_KURULU=/usr/local/bin/girginospanel-update
 SELF_YENI="$A/ops/girginospanel-update"
 if [ -z "${GOSP_SELF_GUNCEL:-}" ] && [ ! -f "$SELF_YENI" ]; then
