@@ -77,6 +77,27 @@ const GRUPLAR: Grup[] = [
     ],
   },
   {
+    ad: 'Genel Ayarlar',
+    ikon: I.tune,
+    araclar: [
+      { baslik: 'Port Değiştirme', href: '/araclar/port-degistirme', ikon: I.tune,
+        anahtar: 'port değiştir 8443 8080 backend dış ssl nginx listen kilit',
+        aciklama: 'Panelin backend ve dış SSL portunu değiştir. Kilitlenme koruması ile otomatik geri alma.' },
+      { baslik: 'IP Yönetimi', href: '/araclar/ip-yonetimi', ikon: I.globe,
+        anahtar: 'ip adres ekle sil sunucu network arayüz iface secondary alias',
+        aciklama: 'Sunucuya ek IP adresi ekle, panel-yönetimli IP\'leri sil. Reboot sonrası otomatik geri yüklenir. Kullanıcı IP\'leri korunur.' },
+      { baslik: 'Panel Hostname & SSL', href: '/araclar/panel-hostname', ikon: I.globe,
+        anahtar: 'hostname panel ssl lets encrypt le dns cert sertifika',
+        aciklama: 'Panele özel bir alan adı bağla ve Let\'s Encrypt sertifikası kur. Kilitlenme koruması + otomatik geri alma.' },
+      { baslik: 'Oturum Güvenliği', href: '/araclar/oturum-guvenligi', ikon: I.shield,
+        anahtar: 'oturum idle timeout bosta sure session guvenlik',
+        aciklama: 'Kullanıcı hareketsiz kaldığında oturumu otomatik kapat. Dakika bazlı; 0 = kapalı.' },
+      { baslik: 'Yasaklı Alan Adları', href: '/araclar/yasakli-domain', ikon: I.shield, rozet: 'Phishing',
+        anahtar: 'domain phishing yasak engel banned marka sahibinden brand',
+        aciklama: 'sahibinden.com gibi marka domainlerini engelleyerek phishing için panele eklenmesini önleyin. Alt-domain kapsamı seçilebilir; mevcut siteler etkilenmez.' },
+    ],
+  },
+  {
     ad: 'Güvenlik ve Yedekleme',
     ikon: I.shield,
     araclar: [

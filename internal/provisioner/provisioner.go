@@ -215,6 +215,14 @@ func ValidateDomain(d string) error {
 	if !alanAdiRe.MatchString(d) {
 		return fmt.Errorf("geçersiz alan adı biçimi (örnek: example.com)")
 	}
+	// 🔴 Yasaklı domain kontrolü (phishing koruması). Callback yalnız main.go
+	// tarafından set edildiği zaman kontrol çalışır (nil = herşey serbest).
+	// Bkz. tld_kontrol.go ve internal/domainyasak/.
+	if yasakliKontrol != nil {
+		if yasak, esles := yasakliKontrol(d); yasak {
+			return fmt.Errorf("bu alan adı (%s) sunucu yöneticisi tarafından yasaklandı (marka koruması)", esles)
+		}
+	}
 	return nil
 }
 
@@ -1939,8 +1947,61 @@ func HealVhostsOnStartup() {
 const panelVhostPath = "/etc/nginx/conf.d/_panel.conf"
 
 // panelSecSentinel: panel vhost'una guvenlik header'lari enjekte edildiginde eklenen
-// isaret satiri. Idempotency icin (iki kez eklemeyi onler).
-const panelSecSentinel = "# GOSP-PANEL-SEC v2"
+// isaret satiri.
+//
+// 🔴 SURUM NUMARASI ONEMLI. Eskiden kod sadece "sentinel VAR MI" diye bakip
+// varsa geri donuyordu. Sonuc: header setini (ornegin CSP'yi) degistirdigimizde
+// DAHA ONCE KURULMUS hicbir panele ulasmiyordu — `girginospanel-update` de
+// `_panel.conf`'a dokunmadigi icin duzeltme sonsuza dek yalniz TAZE kurulumlara
+// gidiyordu. Header seti her degistiginde bu surumu ARTIR; asagidaki onarim
+// eski surumlu blogu SOKUP yenisini koyar.
+const panelSecSentinel = "# GOSP-PANEL-SEC v3"
+
+// panelSecBlokRe: HERHANGI bir surumlu guvenlik blogunu (isaret satiri + hemen
+// ardindan gelen add_header satirlari) butun halinde yakalar. Eski blogu
+// SOKMEK icin sart: sadece yeni blogu eklersek nginx IKI CSP basligi gonderir,
+// tarayici da en KISITLAYICI olani uygular -> eski (bozuk) CSP yine kazanir.
+// panelSecSonu: blogun BITIS isareti. Acik-uclu "sentinel + ardindan gelen
+// add_header'lar" kalibi iki ayri sekilde yanlisti:
+//
+//	K1 — sablonda sentinel ile ilk add_header ARASINDA yorum satirlari var;
+//	     kalip eslesmiyordu, blok sokulemiyor, heal IKINCI bir blok ekliyordu
+//	     -> her yeni kurulum cift CSP/HSTS/X-Frame-Options ile aciliyordu.
+//	K2 — blogun altinda bosluk yoksa, bize AIT OLMAYAN add_header satirlari
+//	     da yutuluyordu (operatorun kendi basligi sessizce siliniyor).
+//	     `nginx -t` bunu yakalamaz: silme sozdizimsel olarak gecerlidir.
+//
+// Cozum: blok acik isaretlerle sinirlanir; eski (isaretsiz) bloklar icin
+// yalnizca BIZIM urettigimiz baslik adlari sokulur, rastgele add_header degil.
+const panelSecSonu = "# GOSP-PANEL-SEC-END"
+
+// Isaretli blok: bas isaretinden bitis isaretine kadar (yorumlar dahil).
+var panelSecBlokRe = regexp.MustCompile(`(?ms)^[ \t]*# GOSP-PANEL-SEC v\d+[ \t]*\n.*?^[ \t]*` + panelSecSonu + `[ \t]*\n`)
+
+// Eski (isaretsiz) blok: sentinel + yorumlar + YALNIZCA bizim basliklarimiz.
+var panelSecEskiBlokRe = regexp.MustCompile(`(?m)^[ \t]*# GOSP-PANEL-SEC v\d+[ \t]*\n(?:[ \t]*#[^\n]*\n|[ \t]*add_header[ \t]+(?:X-Content-Type-Options|X-Frame-Options|Referrer-Policy|Permissions-Policy|Content-Security-Policy|Strict-Transport-Security)[ \t]+[^\n]*\n)+`)
+
+// panelCSPSatirRe: vhost'ta NEREDE olursa olsun bir CSP satirini yakalar.
+// `location /` blogunun kendi add_header'lari oldugu icin server seviyesindeki
+// header'lari MIRAS ALMAZ -> orada AYRI bir CSP satiri daha vardir. Yalniz
+// isaretli blogu tazelemek yetmez, o satir da hizalanmali.
+// 🔴 K3: baslik adindan sonra BOSLUK+TIRNAK sart. Aksi halde
+// `Content-Security-Policy-Report-Only` de eslesiyordu ve yalnizca-raporlama
+// politikasi ZORLAYICI CSP'ye ceviriliyordu.
+var panelCSPSatirRe = regexp.MustCompile(`(?m)^([ \t]*)add_header[ \t]+Content-Security-Policy[ \t]+"[^\n]*\n`)
+
+// panelCSP: panelin TEK dogru CSP degeri. Hem enjekte edilen blok hem de
+// vhost'un baska yerlerindeki CSP satirlari buna hizalanir.
+// img-src'de cdn.simpleicons.org: uygulama katalogu logolari oradan geliyor.
+const panelCSP = `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; ` +
+	`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
+	`img-src 'self' data: blob: https://cdn.simpleicons.org; ` +
+	`font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; ` +
+	`frame-ancestors 'self'; base-uri 'self'; form-action 'self'`
+
+// panelServerNameRe: panel vhost'undaki server_name satirini ICERIGINDEN BAGIMSIZ
+// yakalar (`server_name _;` da, `server_name panel.x.com localhost 127.0.0.1;` de).
+var panelServerNameRe = regexp.MustCompile(`(?m)^\s*server_name\s+[^;]+;`)
 
 // HealPanelVhostHeadersOnStartup: kurulu panel vhost'una (yoksa sessiz gecer)
 // guvenlik header'larini SERVER seviyesinde ekler. Panel React SPA (location /) ve
@@ -1953,29 +2014,60 @@ func HealPanelVhostHeadersOnStartup() {
 		return // panel vhost yok (bu host'ta panel kurulu degil) — sessiz gec
 	}
 	s := string(orig)
-	if strings.Contains(s, panelSecSentinel) {
-		return // zaten sertlestirilmis
-	}
-	anchor := "server_name _;"
-	idx := strings.Index(s, anchor)
-	if idx < 0 {
-		log.Printf("panel sec heal: '%s' capasi bulunamadi, atlandi", anchor)
+
+	// 🔴 CAPA SABIT METIN OLAMAZ. Eskiden `server_name _;` araniyordu; oysa
+	// operator `girginospanel-panelhost` ile paneli belirli isimlere baglayinca
+	// o satir `server_name panel.x.com localhost 127.0.0.1;` olur ve capa
+	// BULUNAMAZ → guvenlik basliklari SESSIZCE hic eklenmez. Artik
+	// server_name'in ICERIGINDEN bagimsiz eslesiyoruz.
+	kapaKonum := panelServerNameRe.FindStringIndex(s)
+	if kapaKonum == nil {
+		log.Printf("panel sec heal: server_name capasi bulunamadi, atlandi")
 		return
 	}
+
 	// Panel CSP: SIKI ama kendini-barindiran SPA + phpMyAdmin icin uyumlu
 	// (script/style 'unsafe-inline'/'unsafe-eval' — pma satir-ici script kullanir).
-	hdrs := "\n    " + panelSecSentinel + "\n" +
+	hdrs := "    " + panelSecSentinel + "\n" +
 		"    add_header X-Content-Type-Options \"nosniff\" always;\n" +
 		"    add_header X-Frame-Options \"SAMEORIGIN\" always;\n" +
 		"    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n" +
 		"    add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n" +
-		"    add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
-		"    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n"
+		"    add_header Content-Security-Policy \"" + panelCSP + "\" always;\n" +
+		"    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n" +
+		"    " + panelSecSonu + "\n"
 
-	insertAt := idx + len(anchor)
-	newS := s[:insertAt] + hdrs + s[insertAt:]
+	// 1) HERHANGI surumdeki eski guvenlik blogunu sok (yenisini eklemeden ONCE:
+	//    yoksa iki CSP basligi gider ve tarayici en kisitlayiciyi uygular).
+	// Once isaretli bloklari, sonra eski (isaretsiz) bloklari sok.
+	yeniS := panelSecBlokRe.ReplaceAllString(s, "")
+	yeniS = panelSecEskiBlokRe.ReplaceAllString(yeniS, "")
+	// 2) Capayi SOKUM SONRASI metinde yeniden bul — konumlar kaydi.
+	kapaKonum = panelServerNameRe.FindStringIndex(yeniS)
+	if kapaKonum == nil {
+		log.Printf("panel sec heal: sokum sonrasi capa kayboldu, dokunulmadi")
+		return
+	}
+	// server_name satirinin SONUNDAKI yeni-satirdan SONRAYA ekle. Satir
+	// sonuna eklersek hdrs'in kendi \n'i ile mevcut \n ust uste biner ve her
+	// kosuda bir bos satir daha birikir -> yakinsama YOK, sonsuz reload.
+	insertAt := kapaKonum[1]
+	if nl := strings.IndexByte(yeniS[insertAt:], '\n'); nl >= 0 {
+		insertAt += nl + 1
+	}
+	yeniS = yeniS[:insertAt] + hdrs + yeniS[insertAt:]
+	// 3) Blogun DISINDA kalan CSP satirlarini (ornegin `location /` icindeki)
+	//    dogru degere hizala — girintilerini koruyarak.
+	yeniS = panelCSPSatirRe.ReplaceAllString(yeniS,
+		"${1}add_header Content-Security-Policy \""+panelCSP+"\" always;\n")
 
-	if e := os.WriteFile(panelVhostPath, []byte(newS), 0644); e != nil {
+	// Yakinsama kontrolu: hicbir sey degismediyse yazma/reload YOK. Bu olmazsa
+	// panel her acilista nginx'i bosuna reload eder.
+	if yeniS == s {
+		return
+	}
+
+	if e := os.WriteFile(panelVhostPath, []byte(yeniS), 0644); e != nil {
 		log.Printf("panel sec heal: yazilamadi: %v", e)
 		return
 	}
@@ -1988,7 +2080,7 @@ func HealPanelVhostHeadersOnStartup() {
 		log.Printf("panel sec heal: nginx reload: %s", strings.TrimSpace(string(out)))
 		return
 	}
-	log.Printf("panel sec heal: guvenlik header'lari eklendi + nginx reload OK")
+	log.Printf("panel sec heal: guvenlik header'lari %s seviyesine getirildi + nginx reload OK", panelSecSentinel)
 }
 
 // panelIndexNoCacheSentinel: panel `location /` (SPA/index.html) bloguna no-cache
@@ -2029,7 +2121,7 @@ func HealPanelIndexNoCacheOnStartup() {
 		"        add_header X-Frame-Options \"SAMEORIGIN\" always;\n" +
 		"        add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n" +
 		"        add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n" +
-		"        add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
+		"        add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://cdn.simpleicons.org; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
 		"        add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n" +
 		"        try_files $uri $uri/ /index.html;\n" +
 		"    }"

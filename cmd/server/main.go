@@ -26,30 +26,38 @@ import (
 	"girginospanel/internal/denetim"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/domains"
+	"girginospanel/internal/domainyasak"
 	"girginospanel/internal/eklenti"
-	"girginospanel/internal/lisans"
 	"girginospanel/internal/files"
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/guvenlikduvari"
+	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/hostuyg"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/ipyonetim"
 	"girginospanel/internal/istatistik"
 	"girginospanel/internal/kaynak"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/laravel"
+	"girginospanel/internal/lisans"
 	"girginospanel/internal/logs"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/monitor"
 	"girginospanel/internal/musteri"
 	"girginospanel/internal/nginxset"
+	"girginospanel/internal/optimize"
+	"girginospanel/internal/oturumbosta"
 	"girginospanel/internal/paketler"
+	"girginospanel/internal/panelhost"
 	"girginospanel/internal/performans"
 	"girginospanel/internal/php"
 	"girginospanel/internal/phpext"
 	"girginospanel/internal/phpsurum"
 	"girginospanel/internal/plans"
 	"girginospanel/internal/pma"
+	"girginospanel/internal/portyonetim"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 	"girginospanel/internal/reseller"
@@ -60,7 +68,9 @@ import (
 	"girginospanel/internal/system"
 	"girginospanel/internal/tasima"
 	"girginospanel/internal/users"
+	"girginospanel/internal/uygulama"
 	"girginospanel/internal/waf"
+	"girginospanel/internal/websec"
 	"girginospanel/internal/wordpress"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +78,13 @@ import (
 )
 
 const version = "0.3.0-f3"
+
+// 🔴 Host Uygulamalari GECICI olarak kapali (kullanici talebi 2026-08-17).
+// Paket ve sayfalar duruyor; geri acmak icin bunu true yapmak + frontend'de
+// menu/rota satirlarini geri koymak yeterli. Kapaliyken hicbir /hostuyg
+// rotasi kaydedilmez ve arka plan gorevleri (cron, orphan temizleyici)
+// hic baslatilmaz.
+var hostUygulamalariAcik = false
 
 func main() {
 	cfg, err := config.Load()
@@ -144,6 +161,95 @@ func main() {
 	usersH := &users.Handlers{DB: d}
 	domainsH := &domains.Handlers{DB: d, IPv4: ipv4}
 	domains.KokDB = d // sahip kolonunda kok adini cozmek icin (onbellekli)
+	// Yasaklı domain (phishing koruması): cache init + provisioner
+	// ValidateDomain'a bağla. Init fail-open (DB blip'inde panel açılsın).
+	if err := domainyasak.Init(d); err != nil {
+		log.Printf("domainyasak: init hatası (fail-open devam): %v", err)
+	}
+	provisioner.SetYasakliKontrolu(domainyasak.Yasakli)
+	oturumbostaH := &oturumbosta.Handler{DB: d}
+	websecH := &websec.Handler{DB: d}
+	panelhost.DB = d
+	panelhost.IsRestartTemizle() // yarım kalan işleri temizle
+	panelhostH := &panelhost.Handler{}
+	ipYonetimH := &ipyonetim.Handler{
+		DB: d,
+		Aktor: func(r *http.Request) (int64, bool) {
+			uid, _ := middleware.Aktor(r)
+			return uid, uid > 0
+		},
+	}
+	// Panel açılışta IP persist unit'ini güncelle (idempotent)
+	if hostUygulamalariAcik {
+		hostuyg.DB = d
+		hostuyg.PanelListenPortGetir = portyonetim.DisPortOku
+		portyonetim.DisPortDegistiSonrasi = hostuyg.SubdomainVhostlariPortGuncelle
+		hostuyg.SubdomainCronKontrol() // hostuyg subdomain cert auto-renew
+		hostuyg.IsRestartTemizle()
+		hostuyg.OrphanTemizle(d) // I1: disk artıkları temizle
+	}
+	uygulamaH := &uygulama.Handler{
+		DB: d,
+		// 🔴 Bunlar bagli DEGILDI (nil) -> DBGerek=true olan Joomla/Drupal/
+		// PrestaShop/MediaWiki/Nextcloud/Matomo kurulumlari SESSIZCE DB'siz
+		// tamamlaniyor, db_adi='' kaydediliyordu: sihirbaz elle DB istiyor,
+		// silme de hicbir DB'yi drop etmiyordu.
+		MySQLOlustur: func(domainID int64, dbAd, dbUser, dbSifre string) error {
+			return hesaplar.MySQLCreateDB(d, domainID, dbAd, dbUser, dbSifre)
+		},
+		MySQLDrop: func(_ int64, dbAd, dbUser string) error {
+			return hesaplar.MySQLDropDB(d, dbAd, dbUser)
+		},
+		DomainAl: func(r *http.Request) (uygulama.Domain, error) {
+			idStr := chi.URLParam(r, "id")
+			var id int64
+			fmt.Sscanf(idStr, "%d", &id)
+			if id <= 0 {
+				return uygulama.Domain{}, fmt.Errorf("geçersiz domain id")
+			}
+			var alanAdi, sk string
+			err := d.QueryRowContext(r.Context(), "SELECT alan_adi, sistem_kullanici FROM domains WHERE id=?", id).Scan(&alanAdi, &sk)
+			if err != nil {
+				return uygulama.Domain{}, err
+			}
+			return uygulama.Domain{
+				ID: id, AlanAdi: alanAdi, SK: sk,
+				DocRoot: "/home/" + sk + "/public_html",
+			}, nil
+		},
+	}
+	hostuygH := &hostuyg.Handler{
+		DB: d,
+		Aktor: func(r *http.Request) (int64, bool) {
+			uid, _ := middleware.Aktor(r)
+			return uid, uid > 0
+		},
+	}
+	optimizeH := &optimize.Handler{
+		DB: d,
+		Aktor: func(r *http.Request) (int64, bool) {
+			uid, _ := middleware.Aktor(r)
+			return uid, uid > 0
+		},
+	}
+	portYonetimH := &portyonetim.Handler{
+		DB: d,
+		Aktor: func(r *http.Request) (int64, bool) {
+			uid, _ := middleware.Aktor(r)
+			return uid, uid > 0
+		},
+	}
+	go func() { _ = ipyonetim.PersistYaz(context.Background(), d) }()
+	go panelhost.TemizleLoop() // async iş kayıtları temizleyici
+	// Website Security Monitor — 6 saatlik arka plan tarama.
+	go websec.Dongusu(context.Background(), d)
+	domainyasakH := &domainyasak.Handler{
+		DB: d,
+		Aktor: func(r *http.Request) (int64, bool) {
+			uid, _ := middleware.Aktor(r)
+			return uid, uid > 0
+		},
+	}
 	filesH := &files.Handlers{DB: d}
 	cronH := &cron.Handlers{DB: d}
 	logsH := &logs.Handlers{DB: d}
@@ -248,8 +354,70 @@ func main() {
 			r.With(middleware.AdminOnly).Post("/reseller-plans", resellerH.PaketOlustur)
 			r.With(middleware.AdminOnly).Put("/reseller-plans/{id}", resellerH.PaketGuncelle)
 			r.With(middleware.AdminOnly).Delete("/reseller-plans/{id}", resellerH.PaketSil)
+			// Yasaklı alan adları (phishing koruması, admin only).
+			r.With(middleware.AdminOnly).Get("/banned-domains", domainyasakH.List)
+			r.With(middleware.AdminOnly).Post("/banned-domains", domainyasakH.Create)
+			r.With(middleware.AdminOnly).Post("/banned-domains/bulk", domainyasakH.BulkCreate)
+			r.With(middleware.AdminOnly).Post("/banned-domains/bulk-delete", domainyasakH.BulkDelete)
+			r.With(middleware.AdminOnly).Delete("/banned-domains/{domain}", domainyasakH.Delete)
+			// Oturum boşta süresi
+			r.Get("/settings/session-idle", oturumbostaH.Get) // herkes okur
+			r.With(middleware.AdminOnly).Put("/settings/session-idle", oturumbostaH.Put)
+			// Website Security Monitor
+			r.With(middleware.AdminOnly).Get("/websec/status", websecH.Status)
+			r.With(middleware.AdminOnly).Get("/websec/findings", websecH.Findings)
+			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
+			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
+			// Panel Hostname & SSL (admin only)
+			r.With(middleware.AdminOnly).Get("/panel-host", panelhostH.Durum)
+			r.With(middleware.AdminOnly).Post("/panel-host/dns", panelhostH.DNS)
+			r.With(middleware.AdminOnly).Post("/panel-host/apply", panelhostH.Ayarla)
+			r.With(middleware.AdminOnly).Post("/panel-host/ssl", panelhostH.SslKur)
+			r.With(middleware.AdminOnly).Get("/panel-host/is", panelhostH.IsDurum)
+			r.With(middleware.AdminOnly).Get("/panel-host/gecmis", panelhostH.Gecmis)
+			// IP Yönetimi (admin only)
+			r.With(middleware.AdminOnly).Get("/ipler", ipYonetimH.Liste)
+			r.With(middleware.AdminOnly).Post("/ipler", ipYonetimH.Ekle)
+			r.With(middleware.AdminOnly).Delete("/ipler/{ip}", ipYonetimH.Sil)
+			r.With(middleware.AdminOnly).Put("/domains/{id}/ipv4", ipYonetimH.DomainIPGuncelle)
+			// Port Değiştirme (Feature 6)
+			r.With(middleware.AdminOnly).Get("/portlar", portYonetimH.Durum)
+			r.With(middleware.AdminOnly).Get("/portlar/is", portYonetimH.IsDurum)
+			r.With(middleware.AdminOnly).Get("/portlar/yasakli", portYonetimH.YasakliListele)
+			r.With(middleware.AdminOnly).Get("/portlar/gecmis", portYonetimH.Gecmis)
+			r.With(middleware.AdminOnly).Post("/portlar/backend", portYonetimH.BackendDegistir)
+			r.With(middleware.AdminOnly).Post("/portlar/dis", portYonetimH.DisDegistir)
+			// Host uygulamaları — GEÇİCİ KAPALI (hostUygulamalariAcik)
+			if hostUygulamalariAcik {
+				r.With(middleware.AdminOnly).Get("/hostuyg/katalog", hostuygH.Katalog)
+				r.With(middleware.AdminOnly).Get("/hostuyg", hostuygH.Liste)
+				r.With(middleware.AdminOnly).Get("/hostuyg/is/{is_id}", hostuygH.IsDurum)
+				r.With(middleware.AdminOnly).Get("/hostuyg/tumu/metrik", hostuygH.MetriklerTumu)
+				r.With(middleware.AdminOnly).Get("/hostuyg/{id}/metrik", hostuygH.Metrik)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/yedek", hostuygH.YedekAl)
+				r.With(middleware.AdminOnly).Get("/hostuyg/{id}/yedekler", hostuygH.YedekListe)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/yedek/geriyukle", hostuygH.YedekGeriYukle)
+				r.With(middleware.AdminOnly).Delete("/hostuyg/yedek/{yedek_id}", hostuygH.YedekSil)
+				r.With(middleware.AdminOnly).Get("/hostuyg/{id}", hostuygH.Detay)
+				r.With(middleware.AdminOnly).Get("/hostuyg/{id}/log", hostuygH.Log)
+				r.With(middleware.AdminOnly).Post("/hostuyg", hostuygH.Kur)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/baslat", hostuygH.Baslat)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/restart", hostuygH.Restart)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/eylem", hostuygH.Eylem)
+				r.With(middleware.AdminOnly).Post("/hostuyg/{id}/durdur", hostuygH.Durdur)
+				r.With(middleware.AdminOnly).Delete("/hostuyg/{id}", hostuygH.Kaldir)
+			}
+			// Tenant-level uygulama installer (Faz 1 yeniden)
+			r.With(middleware.MusteriScope).Get("/domains/{id}/uygulamalar", uygulamaH.Liste)
+			r.With(middleware.MusteriScope).Post("/domains/{id}/uygulamalar", uygulamaH.Kur)
+			r.With(middleware.MusteriScope).Delete("/domains/{id}/uygulamalar/{kayit_id}", uygulamaH.Sil)
+			r.Get("/uygulamalar/katalog", uygulamaH.Katalog)
 			r.With(middleware.MusteriScope).Get("/domains/{id}", domainsH.Get)
 			r.With(middleware.AdminOnly).Get("/system/usage", system.Handler)
+			r.With(middleware.AdminOnly).Get("/optimize/analiz", optimizeH.Analiz)
+			r.With(middleware.AdminOnly).Post("/optimize/uygula", optimizeH.Uygula)
+			r.With(middleware.AdminOnly).Get("/optimize/yedekler", optimizeH.Yedekler)
+			r.With(middleware.AdminOnly).Post("/optimize/rollback", optimizeH.Rollback)
 			r.With(middleware.AdminOnly).Get("/system/servisler", system.ServisDurumlar)
 			r.With(middleware.AdminOnly).Post("/system/servis-islem", system.ServisIslem)
 			r.With(middleware.AdminOnly).Get("/system/guncelleme", system.GuncellemeDurum)
@@ -748,8 +916,8 @@ func semaDogrula(d *sql.DB) {
 	}
 	if len(eksik) > 0 {
 		log.Printf("🔴 SEMA EKSIK — su kolonlar YOK: %s", strings.Join(eksik, ", "))
-		log.Printf("🔴 Ilgili paneldeki alanlar GORUNMEYECEK. Goc dosyalari "+
-			"/opt/girginospanel/src/migrations altinda; hedef tabloyu ve "+
+		log.Printf("🔴 Ilgili paneldeki alanlar GORUNMEYECEK. Goc dosyalari " +
+			"/opt/girginospanel/src/migrations altinda; hedef tabloyu ve " +
 			"yukaridaki GOC HATASI satirlarini kontrol edin.")
 		return
 	}

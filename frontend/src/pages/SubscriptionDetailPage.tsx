@@ -1,3 +1,4 @@
+import React from "react"
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -12,7 +13,7 @@ import ToolCard from '@/components/ToolCard'
 import type { Domain } from '@/components/DomainList'
 import { useDialog } from '@/components/Dialog'
 
-type Tab = 'dashboard' | 'hosting' | 'mail'
+type Tab = 'dashboard' | 'hosting' | 'apps' | 'mail'
 
 const ICONS = {
   baglanti:  'M13.828 10.172a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656-5.656m.172-5.172a4 4 0 00-5.656 5.656l-3 3a4 4 0 005.656 5.656',
@@ -169,6 +170,7 @@ export default function SubscriptionDetailPage() {
       <div className="flex items-center gap-5 border-b border-slate-200 dark:border-slate-700 mb-5">
         <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>Pano</TabBtn>
         <TabBtn aktif={tab === 'hosting'}   onClick={() => setTab('hosting')}>Barınma ve DNS</TabBtn>
+        <TabBtn aktif={tab === 'apps'} onClick={() => setTab('apps')}>Uygulamalar</TabBtn>
         {mailAktif && <TabBtn aktif={tab === 'mail'} onClick={() => setTab('mail')}>Mail</TabBtn>}
       </div>
 
@@ -197,6 +199,7 @@ export default function SubscriptionDetailPage() {
         <section className="col-span-12 lg:col-span-6">
           {tab === 'dashboard' && <DomainPano domain={domain} />}
           {tab === 'hosting'   && <HostingTab domain={domain} />}
+          {tab === 'apps'      && <AppTab domain={domain} />}
           {tab === 'mail'      && <MailTab domain={domain} />}
 
           <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 flex-wrap gap-2">
@@ -336,6 +339,147 @@ function HostingTab({ domain }: { domain: Domain }) {
       <ToolCard etiket="Hosting Planı" aciklama="Yükselt, düşür veya özel plan" ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
       <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
     </Grup>
+  )
+}
+
+function AppTab({ domain }: { domain: Domain }) {
+  const [katalog, setKatalog] = React.useState<any[]>([])
+  const [kurulu, setKurulu] = React.useState<any[]>([])
+  const [yukleniyor, setYukleniyor] = React.useState(true)
+  const [kurTaslak, setKurTaslak] = React.useState<{kod: string; ad: string; ikon: string; alt_dizin: string} | null>(null)
+  const [gonderiliyor, setGonderiliyor] = React.useState(false)
+  const [hata, setHata] = React.useState<string | null>(null)
+
+  const yukle = async () => {
+    setYukleniyor(true); setHata(null)
+    try {
+      const [k, l] = await Promise.all([
+        api.get<{items: any[]}>(`/uygulamalar/katalog`),
+        api.get<{items: any[]}>(`/domains/${domain.id}/uygulamalar`),
+      ])
+      setKatalog(k.data.items || [])
+      setKurulu(l.data.items || [])
+    } catch (e: any) { setHata(e?.response?.data?.error || 'Yüklenemedi') }
+    finally { setYukleniyor(false) }
+  }
+  React.useEffect(() => { void yukle() }, [])
+
+  const kur = async () => {
+    if (!kurTaslak) return
+    setGonderiliyor(true); setHata(null)
+    try {
+      await api.post(`/domains/${domain.id}/uygulamalar`, {
+        kod: kurTaslak.kod, alt_dizin: kurTaslak.alt_dizin
+      })
+      setKurTaslak(null)
+      await yukle()
+    } catch (e: any) {
+      setHata(e?.response?.data?.error || 'Kurulum başarısız')
+    } finally { setGonderiliyor(false) }
+  }
+  const sil = async (kayitID: number, ad: string) => {
+    if (!confirm(`${ad} silinsin mi? Dosyalar + DB kaybolur.`)) return
+    try {
+      await api.delete(`/domains/${domain.id}/uygulamalar/${kayitID}`)
+      await yukle()
+    } catch (e: any) { alert(e?.response?.data?.error || 'Silinemedi') }
+  }
+
+  if (yukleniyor) return <div className="py-8 text-center text-slate-500">Yükleniyor…</div>
+  return (
+    <div className="space-y-6">
+      {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded text-sm text-red-700">{hata}</div>}
+
+      <section>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+          Kurulu Uygulamalar ({kurulu.length})
+        </h3>
+        {kurulu.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500">
+            Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {kurulu.map((u) => (
+              <div key={u.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white dark:bg-slate-900 p-3">
+                <div className="flex-1">
+                  <div className="font-medium">{u.ad} <span className="text-xs text-slate-500">v{u.surum}</span></div>
+                  <div className="text-xs text-slate-500 font-mono">/{u.alt_dizin || ''} · DB: {u.db_adi || '—'}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a href={u.yonetim_url} target="_blank" rel="noreferrer"
+                    className="rounded-md bg-slate-900 text-white text-xs px-3 py-1.5 hover:bg-slate-800">
+                    Yönetim Paneli →
+                  </a>
+                  <button onClick={() => sil(u.id, u.ad)}
+                    className="text-xs text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-md">Sil</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+          Katalog ({katalog.length})
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {katalog.map((t) => (
+            <div key={t.Kod} className="rounded-lg border border-slate-200 bg-white dark:bg-slate-900 p-3">
+              <div className="flex items-start gap-2 mb-2">
+                {t.LogoURL ? (
+                  <img src={t.LogoURL} alt={t.Ad} className="w-8 h-8 object-contain shrink-0"
+                    onError={(e) => { (e.currentTarget as any).style.display = 'none' }} />
+                ) : (
+                  <span className="text-2xl">{t.Ikon}</span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{t.Ad}</div>
+                  <div className="text-[10px] text-slate-500">v{t.Surum} · {t.Kategori}</div>
+                </div>
+                {t.NativeApp && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 whitespace-nowrap">yakında</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 mb-3">{t.Aciklama}</p>
+              <button
+                onClick={() => t.NativeApp
+                  ? alert(t.Ad + ' host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.')
+                  : setKurTaslak({kod: t.Kod, ad: t.Ad, ikon: t.Ikon, alt_dizin: t.Kod})}
+                disabled={t.NativeApp}
+                className="w-full rounded-md bg-slate-900 text-white text-xs py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-400">
+                {t.NativeApp ? 'Admin\'den kurulur' : 'Kur'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {kurTaslak && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setKurTaslak(null) }}>
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xl">
+            <h3 className="text-lg font-semibold mb-4">{kurTaslak.ikon} {kurTaslak.ad} Kur</h3>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Alt dizin (public_html/... altına)</label>
+            <input value={kurTaslak.alt_dizin} onChange={(e) => setKurTaslak({...kurTaslak, alt_dizin: e.target.value})}
+              placeholder="boş = kök, blog, shop vb."
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-slate-950 dark:border-slate-700" />
+            <p className="text-xs text-slate-500 mb-4">
+              Site: <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setKurTaslak(null)}
+                className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Vazgeç</button>
+              <button onClick={kur} disabled={gonderiliyor}
+                className="px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+                {gonderiliyor ? 'Kuruluyor…' : 'Kur'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

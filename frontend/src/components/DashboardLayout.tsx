@@ -25,12 +25,16 @@ const ICONS = {
   araclar:     'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.827 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.99.601 2.295.247 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z',
   istatistik:  'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
   eklenti:     'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
-  wp:          'M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 110-16 8 8 0 010 16z',
+  wp:          'M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zM3.98 8.14a8 8 0 013.28-3.11L4.06 17.12A7.99 7.99 0 013.98 8.14zm14.08.03a8 8 0 01-3.19 8.87l3.19-8.87zM7.19 5.03h4.02l1.31 5.51-2.22 6.66L7.19 5.03zm5.24 6.74l2.15-5.97a8.04 8.04 0 014.34.01l-2.15 5.96h-4.34z',
   izleme:      'M3 12l3-3 3 6 4-9 3 6h5',
   profil:      'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
   kilit:       'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
   firewall:    'M9 12l2 2 4-4m3 2c0 6-8 10-8 10S4 18 4 12V5l8-3 8 3v7z',
   guncelleme:  'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+  denetim:         'M9 12h6m-6 4h6M7 8h10M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z',
+  mail:         'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+  tasima:         'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4',
+  websec:         'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   optimize:    'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
 }
 
@@ -47,14 +51,15 @@ const NAV: NavGroup[] = [
   { baslik: 'Sunucu Yönetimi', items: [
     { to: '/araclar-ayarlar',     etiket: 'Araçlar ve Ayarlar', ikon: ICONS.araclar },
     { to: '/araclar/optimize', etiket: 'Sunucu Optimize', ikon: ICONS.optimize },
-    { to: '/araclar/tasima', etiket: 'Site Taşıma', ikon: ICONS.araclar },
+    { to: '/araclar/tasima', etiket: 'Site Taşıma', ikon: ICONS.tasima },
     { to: '/istatistikler',       etiket: 'İstatistikler',      ikon: ICONS.istatistik },
     { to: '/eklentiler',          etiket: 'Eklentiler',         ikon: ICONS.eklenti },
     { to: '/wordpress',           etiket: 'WordPress',          ikon: ICONS.wp },
     { to: '/firewall',            etiket: 'Güvenlik Duvarı',    ikon: ICONS.firewall },
     { to: '/izleme',              etiket: 'İzleme',             ikon: ICONS.izleme },
-    { to: '/mail-sunucu',         etiket: 'Mail Sunucu',        ikon: ICONS.eklenti },
-    { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.kilit },
+    { to: '/mail-sunucu',         etiket: 'Mail Sunucu',        ikon: ICONS.mail },
+    { to: '/website-security',     etiket: 'Website Security Monitor', ikon: ICONS.websec },
+    { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.denetim },
   ]},
   { baslik: 'Profilim', items: [
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
@@ -69,7 +74,7 @@ const RESELLER_NAV: NavGroup[] = [
   ]},
   { baslik: 'Ayarlar', items: [
     { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonum',        ikon: ICONS.domain },
-    { to: '/denetim',             etiket: 'Denetim Kaydım',      ikon: ICONS.kilit },
+    { to: '/denetim',             etiket: 'Denetim Kaydım',      ikon: ICONS.denetim },
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
   ]},
 ]
@@ -173,9 +178,9 @@ export default function DashboardLayout() {
       */}
       <aside
         id="gosp-kenar-cubugu"
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col flex-shrink-0 h-screen transform transition-transform duration-200 ease-out ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col flex-shrink-0 h-screen transform transition-transform duration-200 ease-out ${
           mobilAcik ? 'translate-x-0' : '-translate-x-full'
-        } lg:sticky lg:top-0 lg:bottom-auto lg:left-auto lg:z-20 lg:w-56 lg:translate-x-0 lg:self-start`}
+        } lg:sticky lg:top-0 lg:bottom-auto lg:left-auto lg:z-20 lg:w-fit lg:min-w-[17rem] lg:max-w-[21rem] lg:translate-x-0 lg:self-start`}
       >
         <div className="h-14 flex items-center px-5 border-b border-slate-200 dark:border-slate-800">
           <div className="w-8 h-8 rounded-md bg-brand-600 flex items-center justify-center mr-2.5 shadow-sm shadow-brand-600/40">
@@ -183,7 +188,7 @@ export default function DashboardLayout() {
               <path d="M9 10h14v3H9zM9 15h14v3H9zM9 20h9v3H9z" />
             </svg>
           </div>
-          <span className="text-base font-semibold text-slate-900 dark:text-slate-100">GirginOSPanel</span>
+          <span className="text-[17px] font-semibold text-slate-900 dark:text-slate-100">GirginOSPanel</span>
           <button
             onClick={() => setMobilAcik(false)}
             className="ml-auto -mr-2 p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md transition lg:hidden"
@@ -201,7 +206,7 @@ export default function DashboardLayout() {
               {grup.baslik && (
                 <button
                   onClick={() => toggle(grup.baslik!)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition"
+                  className="w-full flex items-center justify-between px-3 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition"
                 >
                   <span>{grup.baslik}</span>
                   <svg
@@ -225,7 +230,7 @@ export default function DashboardLayout() {
                         end={it.to === '/' || ustPath}
                         onClick={() => setMobilAcik(false)}
                         className={({ isActive }) =>
-                          `group relative flex items-center px-3 py-2 lg:py-1.5 rounded-lg text-sm transition-all duration-150 ${
+                          `group relative flex items-center px-3 py-2.5 lg:py-2 rounded-lg text-[15px] transition-all duration-150 ${
                             isActive
                               ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium shadow-sm dark:shadow-none'
                               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100'
@@ -237,15 +242,15 @@ export default function DashboardLayout() {
                             {isActive && (
                               <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-slate-900 dark:bg-white" aria-hidden />
                             )}
-                            <svg className={`w-4 h-4 mr-2.5 flex-shrink-0 transition ${
+                            <svg className={`w-[18px] h-[18px] mr-3 flex-shrink-0 transition ${
                               isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
                             }`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
                               <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
                             </svg>
-                            <span className="truncate">{it.etiket}</span>
+                            <span className="whitespace-nowrap">{it.etiket}</span>
                             {it.sayac && sayac[it.sayac] ? (
                               <span
-                                className={`ml-auto pl-2 shrink-0 text-xs tabular-nums transition ${
+                                className={`ml-auto pl-2 shrink-0 text-[13px] tabular-nums transition ${
                                   isActive
                                     ? 'text-slate-700 dark:text-slate-200 font-medium'
                                     : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'

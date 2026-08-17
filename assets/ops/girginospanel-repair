@@ -25,7 +25,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,firewall"
+DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -217,6 +217,78 @@ sec_clamav() {
   ensure_mode  "$C" 755
 }
 
+# ---- veritabani gocleri (schema drift) ----
+# 🔴 GERCEK ARIZA: panel gocleri /opt/girginospanel/src/migrations dizininden
+# okur. Yayin sirasinda YALNIZ ikili guncellenip bu dizin senkronlanmazsa yeni
+# .sql dosyalari sunucuya HIC gelmez; kolonlar eksik kalir ve sayfalar
+# "Unknown column ..." ile coker (orn. Bayi Planlari / reseller_plans.mail_*).
+# Burada kaynak dizin ile calisan dizin karsilastirilir, eksikler kopyalanir.
+sec_migrations() {
+  want migrations || return 0
+  head_ "veritabani gocleri (schema drift)"
+
+  local RUN=/opt/girginospanel/src/migrations
+  local SRC=""
+  local aday
+  for aday in /opt/girginospanel/src/migrations /root/gpanel-temiz/migrations /opt/girginospanel/migrations; do
+    [ -d "$aday" ] && [ "$aday" != "$RUN" ] && SRC="$aday" && break
+  done
+
+  if [ ! -d "$RUN" ]; then
+    err "goc dizini yok: $RUN"
+    return 0
+  fi
+
+  # 1) Kaynak dizin varsa eksik dosyalari tasi
+  if [ -n "$SRC" ]; then
+    local eksik=0 f
+    for f in "$SRC"/*.sql; do
+      [ -e "$f" ] || continue
+      if [ ! -f "$RUN/$(basename "$f")" ]; then
+        eksik=$((eksik+1))
+        act "eksik goc kopyalaniyor: $(basename "$f")"
+        [ $DRY -eq 0 ] && cp -n "$f" "$RUN/"
+      fi
+    done
+    [ "$eksik" -eq 0 ] && ok "goc dosyalari guncel ($SRC -> $RUN)"
+  else
+    ok "ayri kaynak goc dizini yok — yalniz $RUN kullaniliyor"
+  fi
+
+  # 2) Defterde olmayan (hic kosmamis) goc var mi?
+  if command -v mysql >/dev/null 2>&1; then
+    local bekleyen=0 dosya ad
+    while IFS= read -r dosya; do
+      ad=$(basename "$dosya")
+      if ! mysql -N panel -e "SELECT 1 FROM schema_migrations WHERE dosya='$ad'" 2>/dev/null | grep -q 1; then
+        bekleyen=$((bekleyen+1))
+        warn "defterde yok (acilista kosacak): $ad"
+      fi
+    done < <(ls "$RUN"/*.sql 2>/dev/null)
+    if [ "$bekleyen" -gt 0 ]; then
+      act "$bekleyen bekleyen goc var -> panel yeniden baslatiliyor (gocler acilista kosar)"
+      [ $DRY -eq 0 ] && systemctl restart girginospanel && sleep 6
+    else
+      ok "tum gocler defterde kayitli"
+    fi
+
+    # 3) Bilinen kritik kolonlar gercekten var mi? (goc kostu ama sessiz basarisiz olabilir)
+    local kayip=0
+    kolon_var() { # tablo kolon
+      mysql -N panel -e "SHOW COLUMNS FROM $1 LIKE '$2'" 2>/dev/null | grep -q "$2"
+    }
+    for ck in "reseller_plans:mail_max_email" "reseller_plans:mail_saatlik_limit" \
+              "reseller_plans:mail_kutu_kota_mb" "cp_eklenti_lisans:uyari"; do
+      local t="${ck%%:*}" k="${ck##*:}"
+      mysql -N panel -e "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA='panel' AND TABLE_NAME='$t'" 2>/dev/null | grep -q 1 || continue
+      if kolon_var "$t" "$k"; then :; else kayip=$((kayip+1)); err "EKSIK KOLON: $t.$k — ilgili goc kosmamis"; fi
+    done
+    [ "$kayip" -eq 0 ] && ok "kritik sema kolonlari yerinde"
+  else
+    warn "mysql istemcisi yok — defter/kolon kontrolu atlandi"
+  fi
+}
+
 sec_domains() {
   want domains || return 0
   head_ "domain ev dizinleri (/home/c_*)"
@@ -226,7 +298,7 @@ sec_domains() {
     sk=$(basename "$home")
     if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
     ensure_owner "$home" "$sk:$sk"
-    ensure_mode  "$home" 710
+    ensure_mode  "$home" 711
     # ÖNEMLİ: .karantina root'a ait KALMALI (müşteri zararlıya erişmesin) → hariç tut
     local child bn
     while IFS= read -r child; do
@@ -235,32 +307,7 @@ sec_domains() {
       [ "$bn" = ".karantina" ] && continue
       ensure_owner "$child" "$sk:$sk" -R
     done < <(find "$home" -maxdepth 1 -mindepth 1 ! -user "$sk" 2>/dev/null)
-    # İZOLASYON: Plesk modeli home 710 / public_html 750 (other=none). nginx erişimi ÖNCE
-    # user-ACL (dosyalar c_X:c_X kalır); ACL etkisizse (acl-desteksiz FS) grup=nginx+setgid'e
-    # düş — izinler AYNI kalır (750), ASLA 711/755'e gevşetme.
-    local ph="$home/public_html"
-    if [ -d "$ph" ]; then
-      ensure_owner "$ph" "$sk:$sk"
-      ensure_mode  "$ph" 750                          # önce KATI: other=none
-      if [ $DRY -eq 0 ] && command -v setfacl >/dev/null 2>&1; then
-        setfacl -m u:nginx:--x "$home" 2>/dev/null
-        setfacl -m u:nginx:rX  "$ph"   2>/dev/null
-        setfacl -d -m u:nginx:rX "$ph" 2>/dev/null
-      fi
-      # other=none olduğuna göre nginx OKUYABİLİYORSA bu ACL sayesindedir; değilse grup modeli.
-      if command -v runuser >/dev/null 2>&1 && \
-         { runuser -u nginx -- /usr/bin/test -r "$ph/index.html" 2>/dev/null || \
-           runuser -u nginx -- /usr/bin/test -x "$ph" 2>/dev/null; }; then
-        ok "izolasyon $ph (ACL etkili, 710/750)"
-      else
-        act "ACL etkisiz → grup=nginx+setgid fail-safe: $ph (710/750 korunur, 711/755 DEĞİL)"
-        if [ $DRY -eq 0 ]; then
-          chown "$sk:nginx" "$home"   2>/dev/null    # home 710: nginx grup --x ile traverse
-          chown -R "$sk:nginx" "$ph"  2>/dev/null    # public_html içeriği grup=nginx (okuma)
-          chmod 2750 "$ph"            2>/dev/null    # setgid: yeni içerik grubu nginx miras alır
-        fi
-      fi
-    fi
+    [ -d "$home/public_html" ] && ensure_mode "$home/public_html" 755
     [ -d "$home/.ssh" ]        && ensure_mode "$home/.ssh" 700
     # karantina: root-owned + kilitli
     if [ -d "$home/.karantina" ]; then ensure_owner "$home/.karantina" "root:root"; ensure_mode "$home/.karantina" 700; fi
@@ -278,6 +325,7 @@ sec_domains() {
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_phpmyadmin
+sec_migrations
 sec_domains
 sec_htpasswd
 sec_binary

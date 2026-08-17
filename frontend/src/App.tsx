@@ -6,6 +6,12 @@ import HomePage from '@/pages/HomePage'
 import DomainsPage from '@/pages/DomainsPage'
 import ResellerlarPage from '@/pages/ResellerlarPage'
 import DenetimPage from '@/pages/DenetimPage'
+import YasakliDomainPage from '@/pages/YasakliDomainPage'
+import OturumAyarPage from '@/pages/OturumAyarPage'
+import PanelHostPage from '@/pages/PanelHostPage'
+import IPYonetimPage from '@/pages/IPYonetimPage'
+import PortYonetimPage from '@/pages/PortYonetimPage'
+import WebsiteSecurityPage from '@/pages/WebsiteSecurityPage'
 import BayiPlaniDuzenlePage from "@/pages/BayiPlaniDuzenlePage"
 import BayiPlanlariPage from '@/pages/BayiPlanlariPage'
 import SubscriptionDetailPage from '@/pages/SubscriptionDetailPage'
@@ -143,6 +149,12 @@ export default function App() {
         <Route path="araclar/guncelleme" element={<PanelGuncellemePage />} />
         <Route path="araclar/optimize" element={<SunucuOptimizePage />} />
         <Route path="araclar/tasima" element={<SiteTasimaPage />} />
+        <Route path="araclar/yasakli-domain" element={<YasakliDomainPage />} />
+        <Route path="araclar/oturum-guvenligi" element={<OturumAyarPage />} />
+        <Route path="araclar/panel-hostname" element={<PanelHostPage />} />
+        <Route path="araclar/ip-yonetimi" element={<IPYonetimPage />} />
+        <Route path="araclar/port-degistirme" element={<PortYonetimPage />} />
+        <Route path="website-security" element={<WebsiteSecurityPage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
         <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />

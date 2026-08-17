@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# girginospanel-panelhost — panel vhost'unun HANGİ İSİMLERE cevap vereceğini yönetir.
+#
+# 🔴 NEDEN: panel vhost'u `listen 8443 default_server; server_name _;` idi —
+# yani ÇIPLAK IP dâhil her isimde cevap veriyordu. Bir saldırganın paneli
+# bulması için IP taraması yetiyordu. Bu araç:
+#   • bilinmeyen isimlere 444 (bağlantıyı sessizce kapat) döndüren bir
+#     yakala-hepsi bloğu kurar,
+#   • panel bloğunu YALNIZ izin verilen isimlere bağlar.
+#
+# 🔴 KİLİTLENME KORUMASI: `localhost` ve `127.0.0.1` HER ZAMAN listede kalır.
+# Böylece isim yanlış ayarlansa bile `ssh -L 8443:127.0.0.1:8443` ile panele
+# girip düzeltebilirsin. Ayrıca isim ayarlarken DNS'in BU sunucuya çözüldüğü
+# doğrulanır; çözülmüyorsa değişiklik UYGULANMAZ.
+set -uo pipefail
+
+PANEL_CONF=/etc/nginx/conf.d/_panel.conf
+CATCH_CONF=/etc/nginx/conf.d/_panel_catchall.conf
+CERT=/etc/ssl/girginospanel/panel.crt
+KEY=/etc/ssl/girginospanel/panel.key
+
+c_g="\033[32m"; c_y="\033[33m"; c_r="\033[31m"; c_0="\033[0m"
+[ -t 1 ] || { c_g=; c_y=; c_r=; c_0=; }
+ok(){ echo -e "  ${c_g}✓${c_0} $*"; }
+uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
+dur(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
+
+[ "$(id -u)" = 0 ] || dur "root gerekli"
+[ -f "$PANEL_CONF" ] || dur "$PANEL_CONF yok"
+
+sunucu_ipleri() {
+  # Genel (public) IPv4/IPv6 — loopback ve link-local hariç.
+  ip -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+}
+
+mevcut_isimler() {
+  grep -oP '^\s*server_name\s+\K[^;]+' "$PANEL_CONF" | head -1
+}
+
+durum() {
+  echo "Panel vhost isim yapılandırması"
+  echo "──────────────────────────────────"
+  echo "  server_name : $(mevcut_isimler)"
+  if grep -q "default_server" "$PANEL_CONF"; then
+    uyar "panel bloğu HÂLÂ default_server — bilinmeyen isimlere de cevap veriyor"
+  else
+    ok "panel bloğu default_server DEĞİL"
+  fi
+  if [ -f "$CATCH_CONF" ]; then
+    ok "yakala-hepsi bloğu kurulu (bilinmeyen isim → 444)"
+  else
+    uyar "yakala-hepsi bloğu YOK"
+  fi
+  echo "  sunucu IP'leri: $(sunucu_ipleri | tr '\n' ' ')"
+  echo
+  echo "  Test:"
+  echo "    curl -sk -o /dev/null -w '%{http_code}\\n' https://127.0.0.1:8443/ --resolve panel.test:8443:127.0.0.1"
+}
+
+# yakala_hepsi_kur — bilinmeyen isimleri 444 ile kapatan blok.
+yakala_hepsi_kur() {
+  cat > "$CATCH_CONF" <<EOF
+# OTOMATİK ÜRETİLDİ — girginospanel-panelhost
+#
+# 🔴 Bilinmeyen Host başlığıyla gelen istekleri SESSİZCE kapatır (444).
+# Panel bloğu artık default_server değil; buraya düşen her istek, panelin
+# varlığını bile öğrenemeden bağlantıyı kaybeder. IP taraması yapan botlar
+# ve Host-başlığı karıştırma denemeleri buraya düşer.
+server {
+    listen 8443 ssl default_server;
+    listen [::]:8443 ssl default_server;
+    server_name _;
+
+    ssl_certificate     $CERT;
+    ssl_certificate_key $KEY;
+
+    access_log off;
+    return 444;
+}
+EOF
+}
+
+ayarla() {
+  local istenen="${1:-}"
+  local izinli="localhost 127.0.0.1"   # 🔴 tünel için HER ZAMAN
+
+  if [ -n "$istenen" ]; then
+    # DNS bu sunucuya mı çözülüyor? Değilse kilitlenirsin.
+    local coz; coz=$(getent ahosts "$istenen" 2>/dev/null | awk '{print $1}' | sort -u)
+    [ -n "$coz" ] || dur "'$istenen' DNS'te çözülmüyor — ayarlanmadı (kilitlenme riski)"
+    local eslesme=0
+    for ip in $(sunucu_ipleri); do echo "$coz" | grep -qx "$ip" && eslesme=1; done
+    if [ "$eslesme" = 0 ]; then
+      dur "'$istenen' bu sunucuya çözülmüyor (çözülen: $(echo $coz | tr '\n' ' ')) — ayarlanmadı"
+    fi
+    # Fix: hostname + IP birlikte — IP ile yedek erişim (DNS sorunu recovery)
+    izinli="$istenen $(sunucu_ipleri | tr "
+" " ")$izinli"
+    ok "'$istenen' bu sunucuya çözülüyor"
+  else
+    # İsim verilmediyse IP'lerle çalış (panel IP ile erişilebilir kalır).
+    izinli="$(sunucu_ipleri | tr '\n' ' ')$izinli"
+    uyar "panel hostname verilmedi — IP ile erişim AÇIK kalıyor (tarayan botlar paneli görebilir)"
+    uyar "kapatmak için: girginospanel-panelhost ayarla panel.alanadiniz.com"
+  fi
+
+  local yedek="$PANEL_CONF.yedek.$(date +%s)"
+  cp -a "$PANEL_CONF" "$yedek"
+  ok "yedek: $yedek"
+
+  # 1) panel bloğundan default_server'ı kaldır, 2) server_name'i yaz.
+  sed -i 's/\(listen[^;]*8443[^;]*\) default_server;/\1;/' "$PANEL_CONF"
+  sed -i "0,/^\s*server_name\s\+[^;]*;/s//    server_name $izinli;/" "$PANEL_CONF"
+  yakala_hepsi_kur
+
+  if ! nginx -t >/tmp/nginx-test.log 2>&1; then
+    cat /tmp/nginx-test.log
+    cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"
+    dur "nginx -t başarısız — DEĞİŞİKLİK GERİ ALINDI"
+  fi
+  ok "nginx -t geçti"
+  systemctl reload nginx || { cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"; nginx -t && systemctl reload nginx; dur "reload başarısız — geri alındı"; }
+
+  # 🔴 DOĞRULA, İDDİA ETME. reload sonrası eski işçiler bir süre daha
+  # yanıt verebiliyor; "uygulandı" demek yeterli değil, DAVRANIŞI ölç.
+  sleep 1
+  local bilinmeyen izinli_kod
+  bilinmeyen=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8       --resolve gosp-dogrulama.invalid:8443:127.0.0.1 https://gosp-dogrulama.invalid:8443/ 2>/dev/null)
+  izinli_kod=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 https://127.0.0.1:8443/ 2>/dev/null)
+
+  if [ "$izinli_kod" != "200" ]; then
+    cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    dur "panel ERİŞİLEMEZ oldu (localhost=$izinli_kod) — GERİ ALINDI"
+  fi
+  if [ "$bilinmeyen" = "200" ]; then
+    uyar "bilinmeyen isim hâlâ 200 dönüyor — beklenen 000/444. Yapılandırmayı kontrol et."
+  else
+    ok "doğrulandı: bilinmeyen isim kapanıyor (kod=$bilinmeyen), panel açık (200)"
+  fi
+  ok "uygulandı → server_name: $izinli"
+}
+
+sifirla() {
+  local son; son=$(ls -t "$PANEL_CONF".yedek.* 2>/dev/null | head -1)
+  [ -n "$son" ] || dur "geri alınacak yedek yok"
+  cp -a "$son" "$PANEL_CONF"; rm -f "$CATCH_CONF"
+  nginx -t >/dev/null 2>&1 || dur "nginx -t başarısız"
+  systemctl reload nginx && ok "eski yapılandırmaya dönüldü ($son)"
+}
+
+case "${1:-durum}" in
+  durum)   durum ;;
+  ayarla)  ayarla "${2:-}" ;;
+  sifirla) sifirla ;;
+  *) echo "Kullanım: girginospanel-panelhost {durum|ayarla [hostname]|sifirla}"; exit 1 ;;
+esac

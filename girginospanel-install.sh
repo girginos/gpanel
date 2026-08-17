@@ -9,12 +9,22 @@
 #   migrations.tar.gz  nginx/*  php-fpm/*  phpmyadmin/*  systemd/*  ops/*
 set -uo pipefail
 
+# --waf : ModSecurity v3 + OWASP CRS kur (KAYNAKTAN DERLER, ~10 dk).
+# Varsayilan KAPALI — her kurulumu yavaslatmamak icin. Sonradan da kurulur:
+#   girginospanel-waf-setup
+KUR_WAF=0
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 A="$HERE/assets"
 ADMIN_PAROLA=""; ADMIN_EPOSTA="admin@local"
 while [ $# -gt 0 ]; do case "$1" in
   --admin-parola) shift; ADMIN_PAROLA="$1" ;;
   --admin-eposta) shift; ADMIN_EPOSTA="$1" ;;
+  --waf) KUR_WAF=1 ;;
+  -h|--help)
+    echo "kullanim: $0 [--admin-parola P] [--admin-eposta E] [--waf]"
+    echo "  --waf : ModSecurity v3 + OWASP CRS kur (kaynaktan derler, ~10 dk)"
+    exit 0 ;;
   *) echo "bilinmeyen: $1"; exit 2 ;;
 esac; shift; done
 
@@ -29,12 +39,20 @@ die(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
 [ -d "$A" ] || die "assets/ bulunamadı ($A)"
 grep -qiE "AlmaLinux|Rocky|Red Hat|CentOS" /etc/os-release || warn "AlmaLinux/RHEL10 bekleniyordu — devam ediliyor"
 
-PHP_VERS="74 80 81 82 83 84 85 86"
+# 🔴 php86 remi'de HENUZ YAYINLANMADI. Listede kalirsa her kurulumda
+# sessiz basarisizlik olur: paket kurulmaz, /etc/opt/remi/php86 hic
+# olusmaz, `systemctl enable php86-php-fpm` ciktisi yutulur.
+PHP_VERS="74 80 81 82 83 84 85"
 PHP_EXT="fpm cli mysqlnd mbstring bcmath intl gd soap opcache pdo xml zip pgsql ldap"
 
 # ============ 1) REPO ============
 step "1) Depolar (EPEL + Remi + CRB)"
 dnf install -y epel-release >/dev/null 2>&1 && ok "EPEL"
+# 🔴 EPEL SART: unrar, clamav-freshclam, sshpass EPEL'den geliyor. Eklenemezse
+# asagidaki TEK `dnf install` komple non-zero doner, hicbir paket kurulmaz ve
+# "temel paket kurulumu" hatasinin KOK NEDENI gorunmez.
+rpm -q epel-release >/dev/null 2>&1 || dnf repolist enabled 2>/dev/null | grep -qi epel \
+  || die "EPEL deposu eklenemedi — unrar/clamav-freshclam/sshpass kurulamaz"
 rpm -q remi-release >/dev/null 2>&1 || dnf install -y https://rpms.remirepo.net/enterprise/remi-release-10.rpm >/dev/null 2>&1
 rpm -q remi-release >/dev/null 2>&1 && ok "Remi" || die "Remi eklenemedi"
 dnf config-manager --set-enabled crb >/dev/null 2>&1 && ok "CRB"
@@ -42,10 +60,11 @@ dnf config-manager --set-enabled crb >/dev/null 2>&1 && ok "CRB"
 # ============ 2) TEMEL PAKETLER ============
 step "2) Temel paketler"
 dnf install -y nginx httpd mariadb-server valkey certbot python3-certbot-nginx \
-  clamav clamav-update httpd-tools mod_proxy_html tar openssl policycoreutils-python-utils \
+  clamav clamav-freshclam httpd-tools mod_proxy_html tar openssl policycoreutils-python-utils \
   setools-console jq bind bind-utils nftables unzip zip cronie xfsprogs sudo \
-  bubblewrap rsync git curl acl >/dev/null 2>&1 \
-  && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip, bubblewrap, acl, araçlar" || die "temel paket kurulumu"
+  bubblewrap rsync git curl acl \
+  bzip2 lftp sshpass unrar bsdtar >/dev/null 2>&1 \
+  && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip/bzip2, bubblewrap, acl, araçlar" || die "temel paket kurulumu"
 
 # RAR açıcı (dosya yöneticisi .rar extract) — PRİMER: bsdtar (libarchive, appstream base'de
 # GÜVENİLİR RAR/RAR5 okur; kendisi de path-traversal reddeder). 🔴 NOT: AlmaLinux 10 default
@@ -108,12 +127,24 @@ else
 fi
 
 step "3) PHP sürümleri (5 remi + base) + wp-cli"
-BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6"
+BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6 php-gd php-bcmath php-intl php-soap php-ldap php-sodium php-opcache"
 # 🔴 PHP batch kurulumu ONCESI: dnf oto-kilit kaynaklarini kapat (dnf-automatic/makecache
 #    timer'i devredeyse toplu "dnf install" kilide takilir/yanlis-negatif uretir).
 #    Managed panel guncellemeleri kendi yonetir; oto-update KAPALI (kilit contention + surpriz-patch onlenir).
 systemctl disable --now dnf-automatic.timer dnf-makecache.timer >/dev/null 2>&1 || true
 dnf install -y $BASE_PKGS >/dev/null 2>&1 && ok "base php + php-redis"
+
+# 🔴 DOGRULAMA: yukaridaki dnf `2>/dev/null` ile sessiz; eklenti kurulmazsa
+# kurulum "basarili" gorunur ama phpMyAdmin/lisans dogrulama calismaz.
+php_eksik=""
+for _m in gd bcmath intl soap ldap sodium opcache mysqlnd mbstring zip; do
+  php -m 2>/dev/null | grep -qix "$_m" || php_eksik="$php_eksik $_m"
+done
+if [ -n "$php_eksik" ]; then
+  warn "base PHP eklentileri EKSIK:$php_eksik — phpMyAdmin/lisans dogrulama etkilenebilir"
+else
+  ok "base PHP eklentileri dogrulandi (gd, bcmath, intl, soap, ldap, sodium, opcache)"
+fi
 for v in $PHP_VERS; do
   pkgs=""; for e in $PHP_EXT; do pkgs="$pkgs php$v-php-$e"; done
   dnf install -y $pkgs php$v-php-pecl-redis6 >/dev/null 2>&1 && ok "php$v (+redis)" || warn "php$v bazı paketler atlandı"
@@ -175,7 +206,12 @@ ok "panel DB + kullanıcı (panel@127.0.0.1) — parola $DBPASS_KAYNAK, bağlant
 
 # ============ 5) DİZİNLER + ENV ============
 step "5) Dizinler + env"
-mkdir -p /opt/girginospanel/bin /opt/girginospanel/frontend-dist /opt/girginospanel/src/migrations \
+# 🔴 src/scripts SART: assets/ops dosyalari buraya kopyalanir ve SSH
+# chroot jail config-i (50-gosp-jail.conf) buradan okunur. Dizin yoksa
+# `cp ... 2>/dev/null` SESSIZCE basarisiz olur; panel her acilista
+# 'SSH IZOLASYON UYGULANMADI' loglar ve kiraci CHROOTSUZ tam kabuk alir.
+mkdir -p /opt/girginospanel/src/scripts \
+  /opt/girginospanel/bin /opt/girginospanel/frontend-dist /opt/girginospanel/src/migrations \
          /opt/girginospanel/src/eklentiler /opt/girginospanel/eklentiler \
          /opt/girginospanel/pma-signon /etc/girginospanel /etc/ssl/girginospanel
 # Sırlar: DBPASS gibi JWT ve Redis admin parolası da YALNIZCA yoksa üretilir.
@@ -226,12 +262,59 @@ if [ -d "$A/eklentiler" ]; then
   ok "eklenti payload ($(find /opt/girginospanel/src/eklentiler -type f 2>/dev/null | wc -l) dosya)"
 fi
 # ops tool + signon
+# 🔴 Iki ayri hedef, iki ayri anlam:
+#   /usr/local/bin        -> operatorun elle calistirdigi KOMUTLAR
+#   src/scripts           -> panelin RUNTIME'da okudugu kaynak dosyalar
+#                            (SSH chroot jail betigi + sshd config sablonu)
+# Eskiden `.conf` dosyalari da /usr/local/bin'e 0755 ile kuruluyordu (yanlis
+# yer, yanlis izin) ve src/scripts kopyalamasi `2>/dev/null` ile YUTULUYORDU:
+# dizin olmadigi icin sessizce basarisiz oluyor, panel her acilista
+# "SSH IZOLASYON UYGULANMADI" logluyor ve kiraci CHROOTSUZ tam kabuk aliyordu.
+mkdir -p /opt/girginospanel/src/scripts
+_ops_n=0
 for t in "$A"/ops/*; do
-  bn=$(basename "$t"); nm="${bn%.sh}"
-  install -m 0755 "$t" "/usr/local/bin/$nm" 2>/dev/null
+  [ -f "$t" ] || continue
+  bn=$(basename "$t")
+  case "$bn" in
+    *.conf|*.service|*.timer)
+      # Yapilandirma: yalnizca kaynak dizinine, calistirilabilir DEGIL
+      install -m 0644 "$t" "/opt/girginospanel/src/scripts/$bn" || die "ops config: $bn"
+      ;;
+    *)
+      nm="${bn%.sh}"
+      install -m 0755 "$t" "/usr/local/bin/$nm" || die "ops tool: $nm"
+      # Panel bazi betikleri runtime'da buradan okur (jail vb.)
+      install -m 0755 "$t" "/opt/girginospanel/src/scripts/$nm" || die "ops kaynak: $nm"
+      ;;
+  esac
+  _ops_n=$((_ops_n+1))
 done
-cp "$A/ops/"* /opt/girginospanel/src/scripts/ 2>/dev/null
-ok "ops-tool'lar (/usr/local/bin: update, optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
+# Dogrula: SSH izolasyonu icin sart olan iki dosya gercekten yerinde mi?
+for zorunlu in 50-gosp-jail.conf girginospanel-jail; do
+  # 🔴 die, warn DEGIL: bu dosyalar olmadan SSH acilan kiraci chroot'a
+  # HAPSEDILEMEZ ve sunucudaki her seyi gorur. Guvenlik arizasiyla
+  # "kurulum tamamlandi" demek, sessizce savunmasiz birakmak olur.
+  [ -e "/opt/girginospanel/src/scripts/$zorunlu" ] \
+    || die "ops: $zorunlu src/scripts icinde YOK — SSH chroot izolasyonu KURULAMAZ (pakette eksik)"
+done
+ok "ops-tool'lar ($_ops_n dosya: /usr/local/bin + src/scripts)"
+
+# 🔴 port-swap helper OZEL YOL: panel bunu tam olarak
+# /usr/local/sbin/girginospanel-port-swap.sh yolunda arar
+# (internal/portyonetim/degistir.go: BackendHelperYolu). Ust taraftaki ops
+# dongusu ".sh" uzantisini soyup /usr/local/bin'e attigi icin ESLESMIYORDU
+# -> backend port degistirme her taze kurulumda "bash helper yok" ile oluydu.
+if [ -f "$A/ops/girginospanel-port-swap.sh" ]; then
+  install -D -m 0700 "$A/ops/girginospanel-port-swap.sh" \
+    /usr/local/sbin/girginospanel-port-swap.sh \
+    && ok "port-swap helper (/usr/local/sbin)" \
+    || die "port-swap helper kurulamadi"
+  # Yanlis yere dusmus kopyayi temizle (karisiklik olmasin)
+  rm -f /usr/local/bin/girginospanel-port-swap 2>/dev/null
+else
+  warn "port-swap helper pakette YOK — backend port degistirme calismaz"
+fi
+
 
 # ============ 7) PANEL SSL (self-signed) ============
 step "7) Panel SSL (:8443 self-signed)"
@@ -293,8 +376,42 @@ if [ ! -s /etc/girginospanel/pma-internal.token ]; then
 fi
 cp "$A/php-fpm/phpmyadmin.conf" /etc/php-fpm.d/phpmyadmin.conf
 mkdir -p /var/lib/phpmyadmin/{tmp,sessions}
-chown -R nginx:nginx /opt/phpmyadmin /var/lib/phpmyadmin 2>/dev/null
-restorecon -R /opt/phpmyadmin /var/lib/phpmyadmin >/dev/null 2>&1
+# ── PMA IZINLERI ────────────────────────────────────────────────────
+# 🔴 Eskiden hepsi `nginx:nginx` yapiliyordu — ama phpMyAdmin FPM havuzu
+# (assets/php-fpm/phpmyadmin.conf) `user = apache` olarak calisiyor.
+# PMA yalnizca dosyalar 644/755 (dunyaya okunur) oldugu icin calisiyordu.
+# Sonuc: `config.inc.php` 0644 ve icinde `blowfish_secret` + kontrol
+# kullanicisi PAROLASI var -> sunucudaki HERHANGI bir yerel kullanici
+# (tenant dahil) okuyabiliyordu. `sessions` dizini de 0755 idi, yani
+# baskasinin PMA oturum dosyalari okunabiliyordu.
+#
+# Dogru model: PHP'yi apache calistirir, nginx yalnizca statik dosyalari
+# okur. Bu yuzden /opt/phpmyadmin DIZINI 755 kalir (nginx statik okusun),
+# ama config.inc.php root:apache 640 olur (nginx PHP kaynagini okumaz,
+# FPM'e devreder). /var/lib/phpmyadmin'e nginx'in hic isi yoktur.
+chown -R root:apache /opt/phpmyadmin 2>/dev/null
+chmod 755 /opt/phpmyadmin 2>/dev/null
+[ -f /opt/phpmyadmin/config.inc.php ] && chmod 640 /opt/phpmyadmin/config.inc.php
+chown -R apache:apache /var/lib/phpmyadmin 2>/dev/null
+chmod 750 /var/lib/phpmyadmin 2>/dev/null
+chmod 700 /var/lib/phpmyadmin/tmp /var/lib/phpmyadmin/sessions 2>/dev/null
+# SELinux etiketleri KALICI kural olarak yazilir. restorecon tek basina
+# yetmez: kural yoksa bir sonraki `restorecon -R /` etiketi geri alir ve
+# SELinux Enforcing'e alinirsa PMA + panel 403 doner.
+if command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -a -t httpd_sys_content_t '/opt/phpmyadmin(/.*)?' 2>/dev/null
+  semanage fcontext -a -t httpd_sys_rw_content_t '/var/lib/phpmyadmin(/.*)?' 2>/dev/null
+  semanage fcontext -a -t httpd_sys_content_t '/opt/girginospanel/frontend-dist(/.*)?' 2>/dev/null
+  semanage fcontext -a -t httpd_sys_content_t '/opt/girginospanel/pma-signon(/.*)?' 2>/dev/null
+fi
+restorecon -R /opt/phpmyadmin /var/lib/phpmyadmin /opt/girginospanel/frontend-dist /opt/girginospanel/pma-signon >/dev/null 2>&1
+# Dogrulama: sir tasiyan dosya dunyaya okunur KALMAMALI.
+if [ -f /opt/phpmyadmin/config.inc.php ]; then
+  _m=$(stat -c%a /opt/phpmyadmin/config.inc.php)
+  case "$_m" in
+    *[2367]) echo "  UYARI: config.inc.php izni $_m — dünyaya okunur, sır sızıyor" ;;
+  esac
+fi
 setsebool -P httpd_can_network_connect_db 1 >/dev/null 2>&1
 ok "phpMyAdmin pool + config + izinler"
 
@@ -457,6 +574,43 @@ fi
 mysql panel -e "UPDATE users SET email='', full_name='' WHERE username='root' AND email='admin@local';" >/dev/null 2>&1 || true
 ok "Giriş: kullanıcı 'root' + bu sunucunun root parolası"
 
+# ============ 13b) Antivirüs imzaları + WAF (opt-in) ============
+# 🔴 SIRA ONEMLI: bu bloklar eskiden 'kurulum tamamlandi' bannerinin ALTINDAYDI.
+# Oradaki `warn` satirlari basari mesajinin ardinda kaliyor ve operator temiz
+# kurulum sandigi icin fark etmiyordu. Artik banner'dan ONCE kosuyorlar ve
+# adim 15 dogrulamasi bunlarin sonucunu da olcuyor.
+# === FRESHCLAM: imza veritabani ===
+# 🔴 Bu adim OLMADAN antivirus PLACEBO: clamscan imza dizini bosken
+# "No supported database files found" der ama EXIT 0 doner; panel bunu
+# "temiz" olarak raporlar. Enfekte site temiz gorunur.
+mkdir -p /var/lib/clamav && chown clamupdate:clamupdate /var/lib/clamav 2>/dev/null || true
+sed -i 's/^Example/#Example/' /etc/freshclam.conf 2>/dev/null || true
+freshclam --quiet >/dev/null 2>&1 || freshclam >/dev/null 2>&1 || true
+if ls /var/lib/clamav/*.c[vl]d >/dev/null 2>&1; then
+  ok "clamav imza veritabani indirildi ($(ls /var/lib/clamav/*.c[vl]d | wc -l) dosya)"
+else
+  warn "clamav imza veritabani indirilemedi — antivirus taramasi imzasiz calisir"
+fi
+systemctl enable --now clamav-freshclam >/dev/null 2>&1 \
+  && ok "clamav-freshclam (otomatik imza guncelleme) aktif" \
+  || warn "clamav-freshclam servisi baslatilamadi"
+
+# ============ WAF (opt-in) ============
+if [ "$KUR_WAF" = "1" ]; then
+  echo
+  echo "== ModSecurity + OWASP CRS kuruluyor (kaynaktan derleme, birkac dakika) =="
+  if girginospanel-waf-setup; then
+    ok "WAF kuruldu — panelde domain bazinda acilabilir"
+  else
+    warn "WAF kurulumu basarisiz — panel calismaya devam eder, WAF kapali"
+  fi
+else
+  echo
+  echo "  NOT: WAF (ModSecurity) KURULMADI."
+  echo "       Paneldeki WAF anahtari, modul kurulmadan etkisizdir."
+  echo "       Kurmak icin:  girginospanel-waf-setup"
+fi
+
 # ============ 14) İzin onarımı ============
 step "14) İzin/SELinux onarımı"
 command -v girginospanel-repair >/dev/null 2>&1 && girginospanel-repair --quiet >/dev/null 2>&1 && ok "girginospanel-repair" || warn "repair atlandı"
@@ -469,6 +623,15 @@ API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/doma
 echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel crond | tr '\n' ' ')"
 echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
 echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)   ·   composer $(command -v composer >/dev/null && echo ✓ || echo ✗)   ·   apache/httpd $(systemctl is-active httpd)"
+# Bugun eklenen guvenlik bilesenleri BASARI BANNERINDAN once ozetlenir:
+# eksik biri varsa operator "kurulum tamamlandi" yazisini gormeden fark etsin.
+AV_N=$(ls /var/lib/clamav/*.c[vl]d 2>/dev/null | wc -l)
+if [ "$AV_N" -gt 0 ]; then AV_D="OK ($AV_N imza)"; else AV_D="YOK - tarama imzasiz calisir"; fi
+if [ "$KUR_WAF" = "1" ]; then WAF_D="kuruldu"; else WAF_D="kurulmadi (girginospanel-waf-setup)"; fi
+JAIL_D=X; [ -e /opt/girginospanel/src/scripts/50-gosp-jail.conf ] && [ -e /opt/girginospanel/src/scripts/girginospanel-jail ] && JAIL_D=OK
+PSW_D=X; [ -x /usr/local/sbin/girginospanel-port-swap.sh ] && PSW_D=OK
+echo -e "  antivirüs: $AV_D   ·   freshclam $(systemctl is-active clamav-freshclam 2>/dev/null)   ·   WAF: $WAF_D"
+echo -e "  ssh izolasyon(jail): $JAIL_D   ·   backend port helper: $PSW_D"
 echo -e "  izolasyon: plan-driven kaynak limitleri (cgroup slice) + per-tenant PHP-FPM (CageFS eşdeğeri) HAZIR   ·   bubblewrap $(command -v bwrap >/dev/null && echo ✓ || echo ✗)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
@@ -480,3 +643,4 @@ if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ] && ! findmnt -no OPTIONS / 
   echo -e "   ${c_y}Disk kotası: GRUB'a rootflags=uquota yazıldı — TEK SEFERLİK reboot sonrası aktif olur.${c_0}"
 fi
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
+

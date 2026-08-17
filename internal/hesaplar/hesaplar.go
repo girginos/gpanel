@@ -18,7 +18,12 @@ func RandomParola(n int) string {
 	}
 	const harf = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
+	// 🔴 Hata YUTULMAZ: crypto/rand okunamazsa b tamamen sifir kalir ve
+	// uretilen "parola" AAAA... olur. Bos donup cagirani durdurmak,
+	// tahmin edilebilir parola vermekten iyidir.
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
 	for i := range b {
 		b[i] = harf[int(b[i])%len(harf)]
 	}
@@ -255,4 +260,19 @@ func LockSSHPassword(sistemKullanici string) error {
 		return fmt.Errorf("passwd -l: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// DBVarMi — MariaDB'de bu adda bir veritabani var mi?
+// "IF NOT EXISTS" sessizce no-op oldugu icin, MEVCUT bir DB'yi devralmayi
+// onlemek adina kurulum oncesi acikca kontrol edilir.
+func DBVarMi(dbName string) bool {
+	if !GecerliDBKimlik(dbName) {
+		return false
+	}
+	out, err := exec.Command("mysql", "-N", "-e",
+		"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='"+sqlKac(dbName)+"'").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
 }

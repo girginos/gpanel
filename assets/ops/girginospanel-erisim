@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# girginospanel-erisim — panel erişim modunu SSH'tan yönet.
+#
+# Panele iki türlü girilir:
+#   web       : panel portu (varsayılan 9443) firewall'da DIŞARI AÇIK.
+#               Herhangi bir tarayıcıdan girilir.
+#   masaustu  : panel portu dışarı KAPALI. Panele yalnız GirginOS AI masaüstü
+#               uygulaması, SSH (22) üzerinden kurduğu tünelle erişir.
+#               En sıkı kurulum: panel arayüzü internete hiç açılmaz.
+#
+# Kullanım:
+#   girginospanel-erisim durum
+#   girginospanel-erisim web
+#   girginospanel-erisim desktop      (masaustu = ayni komut)
+#   girginospanel-erisim baglanti-linki [host]     # panel için girginospanel:// linki üret
+#
+# Not: nft/firewalld/iptables otomatik seçilir. Panelin kendi tablosu
+# `inet girginos_fw` tercih edilir (bkz. internal/hostuyg/firewall.go).
+set -uo pipefail
+
+c_g=$'\e[32m'; c_y=$'\e[33m'; c_r=$'\e[31m'; c_b=$'\e[1m'; c_0=$'\e[0m'
+say()  { echo -e "$*"; }
+ok()   { echo -e "  ${c_g}✓${c_0} $*"; }
+warn() { echo -e "  ${c_y}!${c_0} $*"; }
+err()  { echo -e "  ${c_r}✗${c_0} $*" >&2; }
+
+DURUM_DOSYA=/etc/girginospanel/erisim-modu
+
+# ---- panel portunu bul (nginx listen satırından) ----
+panel_portu() {
+  local p
+  p=$(grep -hoE '^\s*listen\s+([0-9]+)\s+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null \
+      | grep -oE '[0-9]+' | head -1)
+  echo "${p:-8443}"
+}
+
+# ---- firewall arka ucu ----
+fw_backend() {
+  if command -v nft >/dev/null 2>&1; then
+    if nft list chain inet girginos_fw input >/dev/null 2>&1; then echo "nft:girginos_fw"; return; fi
+    if nft list chain inet filter input     >/dev/null 2>&1; then echo "nft:filter";      return; fi
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+    echo "firewalld"; return
+  fi
+  command -v iptables >/dev/null 2>&1 && { echo "iptables"; return; }
+  echo "yok"
+}
+
+YORUM_ONEK="gpanel-erisim kapali"
+
+# 🔴 ZİNCİR POLİTİKASI BELİRLEYİCİ.
+# Panelin nft zinciri `policy accept` ile geliyor: bu durumda AÇIK olmak için
+# kural GEREKMEZ — kapatmak için AÇIK BİR DROP kuralı gerekir. Politikayı
+# yok sayıp "accept kuralı var mı" diye bakmak yanlış sonuç verir
+# (port aslında erişilebilirken "kapalı" görünürdü).
+nft_tablo() { local be; be=$(fw_backend); echo "${be#nft:}"; }
+
+nft_politika() { # -> accept | drop
+  local t; t=$(nft_tablo)
+  nft list chain inet "$t" input 2>/dev/null \
+    | grep -oE 'policy [a-z]+' | awk '{print $2}' | head -1
+}
+
+drop_kurali_var() { # port
+  local t; t=$(nft_tablo)
+  nft list chain inet "$t" input 2>/dev/null | grep -qE "dport $1 (drop|reject)"
+}
+
+port_acik_mi() { # port
+  local be pol; be=$(fw_backend)
+  case "$be" in
+    nft:*)
+      pol=$(nft_politika)
+      if [ "$pol" = "accept" ]; then
+        # Politika accept: açık DROP kuralı yoksa port AÇIK
+        drop_kurali_var "$1" && return 1 || return 0
+      else
+        # Politika drop: açık ACCEPT kuralı gerekir
+        nft list chain inet "$(nft_tablo)" input 2>/dev/null | grep -q "dport $1 accept"
+      fi ;;
+    firewalld) firewall-cmd --list-ports 2>/dev/null | grep -qw "$1/tcp" ;;
+    iptables)
+      iptables -L INPUT -n 2>/dev/null | grep -qE "DROP.*dpt:$1" && return 1
+      if iptables -L INPUT -n 2>/dev/null | head -2 | grep -q "policy ACCEPT"; then return 0; fi
+      iptables -L INPUT -n 2>/dev/null | grep -qE "ACCEPT.*dpt:$1" ;;
+    *) return 1 ;;
+  esac
+}
+
+port_ac() { # port  -> DROP kuralını kaldır (ve gerekirse accept ekle)
+  local be pol t h; be=$(fw_backend)
+  case "$be" in
+    nft:*)
+      t=$(nft_tablo); pol=$(nft_politika)
+      # Bu porta ait drop/reject kurallarını sil
+      while :; do
+        h=$(nft -a list chain inet "$t" input 2>/dev/null \
+            | awk -v p="dport $1 (drop|reject)" '$0 ~ p {for(i=1;i<=NF;i++) if($i=="handle"){print $(i+1); exit}}')
+        [ -z "$h" ] && break
+        nft delete rule inet "$t" input handle "$h" 2>/dev/null || break
+      done
+      # Politika drop ise ayrıca accept gerekir
+      if [ "$pol" != "accept" ]; then
+        nft list chain inet "$t" input 2>/dev/null | grep -q "dport $1 accept" || \
+          printf 'add rule inet %s input tcp dport %s accept comment "gpanel-erisim acik %s"\n' "$t" "$1" "$1" | nft -f -
+      fi ;;
+    firewalld) firewall-cmd --permanent --add-port="$1/tcp" >/dev/null && firewall-cmd --reload >/dev/null ;;
+    iptables)
+      while iptables -D INPUT -p tcp --dport "$1" -j DROP 2>/dev/null; do :; done
+      iptables -C INPUT -p tcp --dport "$1" -j ACCEPT 2>/dev/null || \
+        iptables -I INPUT -p tcp --dport "$1" -j ACCEPT ;;
+    *) return 1 ;;
+  esac
+}
+
+port_kapat() { # port -> accept kurallarını sil + DROP ekle
+  local be t h; be=$(fw_backend)
+  case "$be" in
+    nft:*)
+      t=$(nft_tablo)
+      # Önce bu porta ait accept kurallarını temizle
+      while :; do
+        h=$(nft -a list chain inet "$t" input 2>/dev/null \
+            | awk -v p="dport $1 accept" '$0 ~ p {for(i=1;i<=NF;i++) if($i=="handle"){print $(i+1); exit}}')
+        [ -z "$h" ] && break
+        nft delete rule inet "$t" input handle "$h" 2>/dev/null || break
+      done
+      # Sonra AÇIK drop kuralı ekle (politika accept olsa bile kapansın).
+      # 🔴 `iif lo` HARİÇ: SSH tüneli sunucunun İÇİNDEN 127.0.0.1'e bağlanır,
+      # onu kapatırsak masaüstü uygulaması da giremez.
+      drop_kurali_var "$1" || \
+        printf 'add rule inet %s input iif != "lo" tcp dport %s drop comment "%s %s"\n' \
+          "$t" "$1" "$YORUM_ONEK" "$1" | nft -f - ;;
+    firewalld) firewall-cmd --permanent --remove-port="$1/tcp" >/dev/null; firewall-cmd --reload >/dev/null ;;
+    iptables)
+      while iptables -D INPUT -p tcp --dport "$1" -j ACCEPT 2>/dev/null; do :; done
+      iptables -C INPUT ! -i lo -p tcp --dport "$1" -j DROP 2>/dev/null || \
+        iptables -I INPUT ! -i lo -p tcp --dport "$1" -j DROP ;;
+    *) return 1 ;;
+  esac
+}
+
+# ================= nginx DİNLEME ADRESİ =================
+# 🔴 Firewall'dan DAHA GÜÇLÜ katman: nginx'i 127.0.0.1'e bağlarsak port hiçbir
+# dış arayüzde dinlenmez — TCP el sıkışması bile olmaz, API dahil hiçbir şeye
+# dışarıdan ulaşılamaz. SSH tüneli sunucunun İÇİNDEN 127.0.0.1'e bağlandığı
+# için masaüstü uygulaması çalışmaya devam eder.
+PANEL_CONF=/etc/nginx/conf.d/_panel.conf
+CATCHALL_CONF=/etc/nginx/conf.d/_panel_catchall.conf
+
+nginx_loopback_mi() { # port
+  grep -qE "^\s*listen\s+127\.0\.0\.1:$1\s+ssl" "$PANEL_CONF" 2>/dev/null
+}
+
+nginx_yedekle() {
+  local ts; ts=$(date +%s)
+  cp -a "$PANEL_CONF" "${PANEL_CONF}.erisim.${ts}" 2>/dev/null
+  [ -f "$CATCHALL_CONF" ] && cp -a "$CATCHALL_CONF" "${CATCHALL_CONF}.erisim.${ts}" 2>/dev/null
+  echo "$ts"
+}
+
+nginx_geri_al() { # ts
+  [ -f "${PANEL_CONF}.erisim.$1" ] && cp -a "${PANEL_CONF}.erisim.$1" "$PANEL_CONF"
+  [ -f "${CATCHALL_CONF}.erisim.$1" ] && cp -a "${CATCHALL_CONF}.erisim.$1" "$CATCHALL_CONF"
+  systemctl restart nginx >/dev/null 2>&1 || nginx -s reload >/dev/null 2>&1
+}
+
+# Dinleme adresini değiştir. mod=loopback | genel
+nginx_listen_ayarla() { # port mod
+  local port="$1" mod="$2" ts f
+  ts=$(nginx_yedekle)
+  for f in "$PANEL_CONF" "$CATCHALL_CONF"; do
+    [ -f "$f" ] || continue
+    if [ "$mod" = "loopback" ]; then
+      # IPv6 dinleyicisini KAPAT (yorum satırı yap) — dışarı sızmasın
+      sed -i -E "s|^(\s*)listen\s+\[::\]:$port\s+ssl(.*)$|\1# [erisim:masaustu] listen [::]:$port ssl\2|" "$f"
+      sed -i -E "s|^(\s*)listen\s+$port\s+ssl(.*)$|\1listen 127.0.0.1:$port ssl\2|" "$f"
+    else
+      sed -i -E "s|^(\s*)listen\s+127\.0\.0\.1:$port\s+ssl(.*)$|\1listen $port ssl\2|" "$f"
+      sed -i -E "s|^(\s*)# \[erisim:masaustu\] listen \[::\]:$port ssl(.*)$|\1listen [::]:$port ssl\2|" "$f"
+    fi
+  done
+  if ! nginx -t >/dev/null 2>&1; then
+    err "nginx -t BAŞARISIZ — değişiklik geri alınıyor"
+    nginx -t 2>&1 | tail -3 >&2
+    nginx_geri_al "$ts"
+    return 1
+  fi
+  # 🔴 RELOAD YETMEZ: `nginx -s reload` DİNLEME SOKETLERİNİ DEĞİŞTİRMEZ —
+  # yeni worker'lar master'ın açtığı eski soketleri miras alır. `listen`
+  # direktifi değiştiyse soketin yeniden açılması için TAM RESTART gerekir.
+  # (Belirti: config'te 127.0.0.1:9443 yazar ama `ss -tlnp` hâlâ 0.0.0.0:9443
+  #  gösterir ve port dışarıdan yanıt vermeye devam eder.)
+  if ! systemctl restart nginx >/dev/null 2>&1; then
+    err "nginx restart başarısız — geri alınıyor"; nginx_geri_al "$ts"
+    systemctl restart nginx >/dev/null 2>&1
+    return 1
+  fi
+  sleep 1
+  # Soket gerçekten istenen adrese bağlandı mı? Bağlanmadıysa geri al.
+  local beklenen
+  if [ "$mod" = "loopback" ]; then beklenen="127.0.0.1:$port"; else beklenen="0.0.0.0:$port"; fi
+  if ! ss -tln 2>/dev/null | grep -q "$beklenen"; then
+    err "soket beklenen adrese ($beklenen) bağlanmadı — geri alınıyor"
+    nginx_geri_al "$ts"; systemctl restart nginx >/dev/null 2>&1
+    return 1
+  fi
+  return 0
+}
+
+# Dışarıdan gerçekten erişilebiliyor mu? (loopback DEĞİL, dış IP üzerinden)
+dis_erisim_var_mi() { # port
+  local ip; ip=$(dis_ip)
+  [ -z "$ip" ] && return 1
+  curl -sk -m 4 -o /dev/null "https://$ip:$1/" 2>/dev/null
+}
+
+ssh_portu() {
+  local p
+  p=$(grep -hoE '^\s*Port\s+[0-9]+' /etc/ssh/sshd_config 2>/dev/null | grep -oE '[0-9]+' | head -1)
+  echo "${p:-22}"
+}
+
+kayitli_mod() { [ -f "$DURUM_DOSYA" ] && cat "$DURUM_DOSYA" || echo "bilinmiyor"; }
+mod_yaz() { mkdir -p "$(dirname "$DURUM_DOSYA")"; echo "$1" > "$DURUM_DOSYA"; }
+
+dis_ip() {
+  local ip
+  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}')
+  echo "${ip:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+}
+
+cmd_durum() {
+  local port sshp be
+  port=$(panel_portu); sshp=$(ssh_portu); be=$(fw_backend)
+  say "${c_b}GirginOSPanel erişim durumu${c_0}"
+  say "  panel portu     : $port"
+  say "  SSH portu       : $sshp"
+  say "  firewall arka uç: $be"
+  # 1) nginx dinleme adresi (en belirleyici katman)
+  if nginx_loopback_mi "$port"; then
+    ok "nginx dinleme : ${c_b}127.0.0.1:$port${c_0} — servis dışarıda HİÇ dinlemiyor"
+  else
+    warn "nginx dinleme : 0.0.0.0:$port — servis tüm arayüzlerde dinliyor"
+  fi
+  # 2) firewall
+  if [ "$be" = "yok" ]; then
+    warn "firewall      : yok"
+  elif port_acik_mi "$port"; then
+    warn "firewall      : port $port DIŞARI AÇIK"
+  else
+    ok "firewall      : port $port DIŞARI KAPALI"
+  fi
+  # 3) gerçek sonuç
+  if nginx_loopback_mi "$port" || ! port_acik_mi "$port"; then
+    ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+  else
+    ok "SONUÇ → mod: ${c_b}web${c_0} (tarayıcıdan girilebilir)"
+  fi
+  say "  kayıtlı mod     : $(kayitli_mod)"
+  say ""
+  say "  Değiştirmek için:  girginospanel-erisim web   |   girginospanel-erisim desktop"
+}
+
+cmd_web() {
+  local port; port=$(panel_portu)
+  say "${c_b}Mod: web${c_0} — panel portu dışarı açılıyor"
+  if nginx_loopback_mi "$port"; then
+    if nginx_listen_ayarla "$port" genel; then ok "nginx tüm arayüzlerde dinliyor (0.0.0.0:$port)"; else exit 1; fi
+  else
+    ok "nginx zaten tüm arayüzlerde dinliyor"
+  fi
+  if port_ac "$port"; then ok "firewall: port $port/tcp açıldı"; else err "port açılamadı (firewall arka uç: $(fw_backend))"; exit 1; fi
+  mod_yaz web
+  ok "panel adresi: https://$(dis_ip):$port"
+  warn "Panel arayüzü artık internete açık. Sadece masaüstü uygulamasından yönetmek istersen: girginospanel-erisim desktop"
+}
+
+cmd_masaustu() {
+  local port sshp; port=$(panel_portu); sshp=$(ssh_portu)
+  say "${c_b}Mod: masaustu${c_0} — panel portu dışarı kapatılıyor"
+  # 🔴 SSH kapalıysa kapatma: panele HİÇBİR yoldan erişilemez hale gelir.
+  if ! port_acik_mi "$sshp"; then
+    if [ "$(fw_backend)" = "yok" ]; then
+      warn "firewall yok — SSH kontrolü atlandı"
+    else
+      err "SSH portu ($sshp) firewall'da açık GÖRÜNMÜYOR."
+      err "Panel portunu kapatırsam sunucuya erişim tamamen kesilebilir — İŞLEM DURDURULDU."
+      err "Önce SSH erişimini doğrula, sonra tekrar dene."
+      exit 1
+    fi
+  fi
+  # 1) KATMAN: nginx'i loopback'e bağla — port dışarıda HİÇ dinlenmez.
+  #    API de aynı vhost'ta olduğu için ona da dışarıdan erişilemez.
+  if nginx_listen_ayarla "$port" loopback; then
+    ok "nginx artık yalnız 127.0.0.1:$port dinliyor (dış arayüzlerde kapalı)"
+  else
+    err "nginx dinleme adresi değiştirilemedi — İŞLEM DURDURULDU"; exit 1
+  fi
+  # 2) KATMAN: firewall (derinlemesine savunma)
+  if port_kapat "$port"; then ok "firewall: port $port/tcp kapatıldı"; else warn "firewall kuralı eklenemedi (nginx katmanı yeterli)"; fi
+  mod_yaz masaustu
+  # 3) DOĞRULA: dışarıdan gerçekten kapalı mı, içeriden hâlâ açık mı?
+  # Soket adresi TEK GÜVENİLİR ölçü: sunucudan kendi dış IP'sine yapılan
+  # istek `lo` üzerinden gider, firewall kuralı atlanır (yanlış-pozitif).
+  if ss -tln 2>/dev/null | grep -qE "(0\\.0\\.0\\.0|\\[::\\]):$port "; then
+    err "UYARI: nginx hâlâ TÜM arayüzlerde dinliyor — elle kontrol et!"
+    ss -tlnp 2>/dev/null | grep ":$port " >&2
+  else
+    ok "doğrulandı: soket yalnız 127.0.0.1:$port — dış arayüzlerde dinleme YOK"
+  fi
+  if dis_erisim_var_mi "$port"; then
+    warn "not: sunucunun kendi içinden dış IP'ye erişim var (lo üzerinden — normal)"
+  fi
+  if curl -sk -m 4 -o /dev/null "https://127.0.0.1:$port/" 2>/dev/null; then
+    ok "doğrulandı: sunucu içinden (SSH tüneli yolu) erişim VAR"
+  else
+    err "UYARI: panel içeriden de yanıt vermiyor — SSH tüneli çalışmayabilir!"
+  fi
+  ok "Panele artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
+  say ""
+  say "  Masaüstü uygulamasında:  gPanel → +  → 'SSH tüneli ile bağlan' işaretle"
+  say "  Sunucu: $(dis_ip)   Panel portu: $port   SSH portu: $sshp"
+}
+
+cmd_link() {
+  local host="${1:-$(dis_ip)}" port; port=$(panel_portu)
+  say "girginospanel://ac?host=${host}&port=${port}&ad=${host}"
+}
+
+case "${1:-durum}" in
+  durum|status)          cmd_durum ;;
+  web|acik)              cmd_web ;;
+  masaustu|desktop|kapali) cmd_masaustu ;;
+  baglanti-linki|link)   shift || true; cmd_link "${1:-}" ;;
+  -h|--help|yardim)
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) err "bilinmeyen komut: $1"; say "  girginospanel-erisim [durum|web|desktop|baglanti-linki]"; exit 1 ;;
+esac

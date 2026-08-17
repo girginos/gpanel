@@ -192,8 +192,24 @@ fi
 
 # 9) ops-tool'lar (updater kendini de günceller; db-backup adım 3'te zaten kuruldu — tekrar idempotent)
 if [ -d "$A/ops" ]; then
-  for t in "$A"/ops/*; do bn=$(basename "$t"); install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" 2>/dev/null || true; done
+  for t in "$A"/ops/*; do
+    bn=$(basename "$t")
+    case "$bn" in
+      # Yapilandirma dosyalari /usr/local/bin'e 0755 ile KURULMAZ
+      *.conf|*.service|*.timer) : ;;
+      *) install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" 2>/dev/null || true ;;
+    esac
+  done
   mkdir -p "$SCRIPTS"; cp "$A"/ops/* "$SCRIPTS/" 2>/dev/null || true
+  # 🔴 Panel helper-i TAM olarak /usr/local/sbin/girginospanel-port-swap.sh
+  # yolunda arar (internal/portyonetim/degistir.go: BackendHelperYolu).
+  # Yukaridaki dongu ".sh" uzantisini soyup /usr/local/bin'e attigi icin
+  # ESLESMIYOR -> guncellenen sunucularda helper bayat kalir veya hic olmaz.
+  if [ -f "$A/ops/girginospanel-port-swap.sh" ]; then
+    install -D -m 0700 "$A/ops/girginospanel-port-swap.sh" \
+      /usr/local/sbin/girginospanel-port-swap.sh 2>/dev/null \
+      && rm -f /usr/local/bin/girginospanel-port-swap 2>/dev/null || true
+  fi
   ok "ops-tool'lar güncellendi"
 fi
 

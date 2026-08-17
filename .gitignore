@@ -44,3 +44,16 @@ internal/lisans/
 assets/eklentiler/
 cmd/gosp-paketle/
 girginospanel-install.sh.oncesi
+
+# --- yedek/geçici dosyalar (asla commit edilmez) ---
+# Onarım/optimize araçları ve elle müdahaleler *.bak.<epoch>, *.yedek.<epoch>
+# gibi dosyalar bırakıyor. 2026-08-17'de ağaçta 56 tanesi vardı ve tek bir
+# `git add -A` hepsini sessizce commit'e sokabilirdi.
+*.bak
+*.bak[0-9]*
+*.bak.*
+*.eski
+*.yedek
+*.yedek.*
+*.testyedek
+*~
