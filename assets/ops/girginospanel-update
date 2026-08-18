@@ -375,6 +375,31 @@ if command -v girginospanel-wp-onkosul >/dev/null 2>&1; then
   girginospanel-wp-onkosul || warn "WordPress on kosullari eksik kaldi"
 fi
 
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 HEDEFLI ONARIM — mevcut sunucularin KENDINI ONARMASI
+# Installer adim 14'te `girginospanel-repair` calistiriyordu ama UPDATER
+# CALISTIRMIYORDU. Sonuc: repair'e eklenen onarimlar yalnizca YENI kurulumlara
+# gidiyor, mevcut filo hic almiyordu. Uc canli sunucuda birebir goruldu:
+# guncelleme "tamam" dedi, kritik kontroller gecti, ama /var/cache/nginx 0700
+# kaldi ve fastcgi_cache olu kalmaya devam etti.
+#
+# 🔴 CIPLAK `girginospanel-repair` CALISTIRMIYORUZ: o, kiraci izinlerini
+# GEVSETMEK ister (chmod 711 /home/c_*, 755 public_html) oysa sertlestirilmis
+# model 710/750. Yalnizca kiraci izin bitlerine DOKUNMAYAN bolumler:
+#   nginx_cache      -> /var/cache/nginx ust dizin izni
+#   docroot_selinux  -> yalnizca SELinux ETIKETI degistirir (canli sunucuda
+#                       dogrulandi: 710/750 korundu, sadece etiket degisti)
+# ══════════════════════════════════════════════════════════════════════
+if command -v girginospanel-repair >/dev/null 2>&1; then
+  if girginospanel-repair --only nginx_cache,docroot_selinux >/dev/null 2>&1; then
+    ok "hedefli onarim (nginx onbellek + docroot SELinux)"
+  else
+    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux"
+  fi
+else
+  warn "girginospanel-repair yok — onbellek/SELinux onarimi atlandi"
+fi
+
 # 9b) WAF (ModSecurity + OWASP CRS) heal — IDEMPOTENT (her sey hazirsa saniyeler icinde ATLAR).
 # nginx sürümü değişmişse connector'ı ABI için yeniden derler. nginx -t GATE + rollback icerir →
 # ana nginx'i asla bozmaz. Modül yüklü değilse panel WAF'ı graceful atlar (site etkilenmez).
