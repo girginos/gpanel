@@ -191,7 +191,11 @@ func (a *ajan) dosyaIsle(yol string) {
 		wpKok = wpKokBul(yol)
 	}
 	b, tespit := a.motor.TaraDosya(yol, wpKok, a.saglama)
-	if !tespit || b.Puan < a.ayar.EsikKritik {
+	// YALNIZ KRITIK raporlanir. SUPHELI (50-99) raporlamak gercek WordPress'te
+	// FP firtinasi uretti (ID3 medya kutuphanesinde hex, php-cs-fixer gizli
+	// dosya). Bu kurallar IKINCIL sinyal (tek baslarina degil). version.php
+	// korleme (SAGLAMA-KOR) 100=KRITIK oldugu icin gorunur.
+	if !tespit || b.Seviye != avmotor.SeviyeKritik || b.Puan < a.ayar.EsikKritik {
 		return
 	}
 	a.mu.Lock()
@@ -199,11 +203,20 @@ func (a *ajan) dosyaIsle(yol string) {
 	a.bulgular = append(a.bulgular, b)
 	a.mu.Unlock()
 
-	if a.ayar.OtoKarantina {
+	// OTO-KARANTINA: cekirdek dosyalari (wp-includes/wp-admin) ASLA karantinaya
+	// alinmaz -- silmek/tasimak siteyi bozar. Cekirdek tespiti RAPORLANIR;
+	// operator `wp core verify-checksums` ile onarir.
+	if a.ayar.OtoKarantina && !cekirdekDosya(yol) {
 		if err := karantinaAl(yol); err != nil {
-			log.Printf("karantina başarısız %s: %v", yol, err)
+			log.Printf("karantina basarisiz %s: %v", yol, err)
 		}
 	}
+}
+
+// cekirdekDosya — WordPress cekirdek agacinda mi (karantina istisnasi).
+func cekirdekDosya(yol string) bool {
+	y := filepath.ToSlash(yol)
+	return strings.Contains(y, "/wp-includes/") || strings.Contains(y, "/wp-admin/")
 }
 
 func (a *ajan) ozetYaz(basla time.Time, kokler []string) {

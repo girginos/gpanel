@@ -83,10 +83,19 @@ func (k *Kaynak) Saglamalar(wpKok string) (map[string]string, bool) {
 	}
 	k.mu.RUnlock()
 
-	t := k.surumYukle(surum, locale)
+	t, kesinYok := k.surumYukle(surum, locale)
 
 	k.mu.Lock()
-	k.bellek[anahtar] = t // t nil olabilir → negatif önbellek (tekrar denemeyi önler)
+	// 🔴 C.4: NEGATIF ONBELLEK YALNIZ KESIN YOKLUK icin. Gecici hata
+	// (WP.org timeout, transport, non-200) ASLA onbellege girmemeli: --izle
+	// uzun omurlu tek Kaynak kullanir; baslangictaki tek bir ag hickirigi
+	// yuzunden nil onbellege girerse o kurulumun cekirdegi ajan yeniden
+	// baslayana kadar HIC denetlenmez. Sadece 'WP.org 200 + checksums:false'.
+	if t != nil {
+		k.bellek[anahtar] = t
+	} else if kesinYok {
+		k.bellek[anahtar] = nil // negatif onbellek: bu surum gercekten yok
+	}
 	k.mu.Unlock()
 
 	if t == nil {
@@ -127,9 +136,11 @@ func (k *Kaynak) localeOku(wpKok string) string {
 }
 
 // surumYukle — 3 katman: disk → ayna → WP.org (locale duyarli).
-func (k *Kaynak) surumYukle(surum, locale string) map[string]string {
+// Doner: (tablo, kesinYok). kesinYok=true YALNIZCA WP.org 'surum yok' derse
+// (200 + checksums:false); gecici hatada kesinYok=false -> negatif onbellege girmez.
+func (k *Kaynak) surumYukle(surum, locale string) (map[string]string, bool) {
 	if !gecerliSurum(surum) {
-		return nil
+		return nil, false
 	}
 	// Onbellek/URL anahtari: surum + locale (locale bossa yalniz surum = en_US).
 	etiket := surum
@@ -137,36 +148,37 @@ func (k *Kaynak) surumYukle(surum, locale string) map[string]string {
 		etiket = surum + "-" + locale
 	}
 
-	// 1) Disk önbelleği
+	// 1) Disk onbellegi
 	if t := diskOku(etiket); t != nil {
-		return t
+		return t, false
 	}
 	if k.kapali {
-		return nil // yalnız-disk modunda ağ denenmez
+		return nil, false // yalniz-disk: ag denenmez (gecici say)
 	}
 
-	// 2) Kendi aynamız
+	// 2) Kendi aynamiz
 	if t := k.jsonCek(aynaTaban + "/" + etiket + ".json"); t != nil {
 		diskYaz(etiket, t)
-		return t
+		return t, false
 	}
 
-	// 3) WP.org API (locale duyarli)
-	if t := k.wporgCek(surum, locale); t != nil {
+	// 3) WP.org API (locale duyarli). kesin: 200+checksums:false.
+	if t, kesin := k.wporgCekK(surum, locale); t != nil {
 		diskYaz(etiket, t)
-		return t
+		return t, false
+	} else if kesin && (locale == "" || locale == "en_US") {
+		return nil, true
 	}
-	// 🔴 locale saglamasi gelmezse en_US'e DUS — ama version.php gibi
-	// locale-degisken dosyalar FP verebilir; bu kabul edilebilir cunku
-	// en_US temel dosyalarin cogu icin dogru kalir. Yine de locale varken
-	// once onu denedik.
+	// locale saglamasi gelmezse en_US'e DUS (A.2: dogru anahtara yaz).
 	if locale != "" && locale != "en_US" {
-		if t := k.wporgCek(surum, ""); t != nil {
-			diskYaz(surum, t)
-			return t
+		if t, kesin := k.wporgCekK(surum, ""); t != nil {
+			diskYaz(etiket, t)
+			return t, false
+		} else if kesin {
+			return nil, true
 		}
 	}
-	return nil
+	return nil, false // gecici hata -> onbellege girmesin
 }
 
 // jsonCek — {yol:md5} biçiminde düz bir JSON çeker (aynamızın biçimi).
@@ -189,29 +201,35 @@ func (k *Kaynak) jsonCek(url string) map[string]string {
 	return t
 }
 
-// wporgCek — WP.org checksum API: {"checksums":{yol:md5}}.
-func (k *Kaynak) wporgCek(surum, locale string) map[string]string {
+// wporgCekK — (tablo, kesinYok). kesinYok=true YALNIZCA HTTP 200 + gecerli
+// JSON ama checksums bos/false ise (surum gercekten yok). Ag/timeout/non-200
+// -> (nil, false) = gecici, onbellege girmez.
+func (k *Kaynak) wporgCekK(surum, locale string) (map[string]string, bool) {
 	if locale == "" {
 		locale = "en_US"
 	}
 	resp, err := k.http.Get(wporgAPI + "?version=" + surum + "&locale=" + locale)
 	if err != nil {
-		return nil
+		return nil, false // gecici (transport)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil
+		return nil, false // gecici (5xx/429)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, false
 	}
 	var sarma struct {
 		Checksums map[string]string `json:"checksums"`
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&sarma) != nil {
-		return nil
+	if json.Unmarshal(body, &sarma) != nil {
+		return nil, false // bozuk yanit -> gecici say
 	}
 	if len(sarma.Checksums) == 0 {
-		return nil
+		return nil, true // 200 + gecerli JSON ama checksums yok = KESIN yok
 	}
-	return sarma.Checksums
+	return sarma.Checksums, false
 }
 
 func gecerliSurum(s string) bool {

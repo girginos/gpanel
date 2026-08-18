@@ -42,52 +42,59 @@ type SaglamaKaynagi interface {
 //
 // Dönüş: (kuralID, puan, tespitEdildi)
 func wpButunlukKontrol(yol, wpKok string, kaynak SaglamaKaynagi) (string, int, bool) {
-	tablo, ok := kaynak.Saglamalar(wpKok)
-	if !ok || len(tablo) == 0 {
-		// 🔴 Ölçüm YAPILAMADI. Bu bir tespit DEĞİLDİR — sessizce geçiyoruz
-		// ama "temiz" de demiyoruz; karar diğer katmanlara kalır.
-		return "", 0, false
-	}
-
 	bagil, err := filepath.Rel(wpKok, yol)
 	if err != nil || strings.HasPrefix(bagil, "..") {
-		return "", 0, false // kurulum dışında
+		return "", 0, false
 	}
 	bagil = filepath.ToSlash(bagil)
 
-	// Yalnız çekirdek ağaçları. wp-content kapsam dışı (yukarıdaki not).
-	if !strings.HasPrefix(bagil, "wp-includes/") && !strings.HasPrefix(bagil, "wp-admin/") {
-		// Kökteki wp-*.php dosyaları da çekirdektir (wp-login.php, wp-config
-		// HARİÇ — o kuruluma özeldir ve sağlamada yer almaz).
-		taban := filepath.Base(bagil)
-		if !strings.Contains(bagil, "/") && strings.HasPrefix(taban, "wp-") &&
-			strings.HasSuffix(taban, ".php") && taban != "wp-config.php" {
-			// devam
-		} else {
-			return "", 0, false
+	tablo, ok := kaynak.Saglamalar(wpKok)
+	if !ok || len(tablo) == 0 {
+		// A.1: kurulum VAR ama sağlama YOK -> körleme şüphesi. version.php
+		// üzerinden OLAY (kurulum başına bir dosya). Puan 60 = şüpheli
+		// (ağ kesintisinde de tetiklenir, kritik değil).
+		if bagil == "wp-includes/version.php" {
+			// 100 = KRITIK (gorunur). Korleme (var-olmayan surum/bozuk
+			// version.php) buradan gecer. Ag kesintisinde de tetiklenir ama
+			// nadir, C.4 ile tekrar denenir ve version.php ASLA oto-karantinaya
+			// girmez (ajan cekirdek istisnasi) -> zararsiz.
+			return "GOSP-WP-SAGLAMA-KOR", 100, true
 		}
+		return "", 0, false
 	}
 
 	beklenen, kayitli := tablo[bagil]
-	if !kayitli {
-		// 🔴 Çekirdek ağacında OLMAMASI GEREKEN bir dosya. Saldırganlar arka
-		// kapıyı sıklıkla wp-includes altına, meşru görünen bir adla atar
-		// (örn. wp-includes/js/jquery/jquery.min.php). Resmî listede yoksa
-		// oraya ait değildir.
-		return "GOSP-WP-YABANCI-DOSYA", 100, true
+	if kayitli {
+		// Kapsam TABLODAN: tabloda anahtarı olan HER yol (670 wp-content
+		// çekirdek dosyası dahil), yalnız wp-includes/wp-admin değil.
+		f, err := os.Open(yol)
+		if err != nil {
+			return "", 0, false
+		}
+		defer f.Close()
+		h := md5.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return "", 0, false
+		}
+		if hex.EncodeToString(h.Sum(nil)) == beklenen {
+			return "", 0, false
+		}
+		return "GOSP-WP-CEKIRDEK-DEGISMIS", 100, true
 	}
 
-	f, err := os.Open(yol)
-	if err != nil {
-		return "", 0, false
+	// Tabloda yok: yalnız ÇEKİRDEK AĞACINDA olmaması gereken dosya "yabancı".
+	// wp-content'te tabloda olmayan dosya meşru eklenti/tema -> kural motoruna.
+	cekirdekAgac := strings.HasPrefix(bagil, "wp-includes/") ||
+		strings.HasPrefix(bagil, "wp-admin/")
+	if !cekirdekAgac {
+		taban := filepath.Base(bagil)
+		if !strings.Contains(bagil, "/") && strings.HasPrefix(taban, "wp-") &&
+			strings.HasSuffix(taban, ".php") && taban != "wp-config.php" {
+			cekirdekAgac = true
+		}
 	}
-	defer f.Close()
-	h := md5.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", 0, false
+	if cekirdekAgac {
+		return "GOSP-WP-YABANCI-DOSYA", 100, true
 	}
-	if hex.EncodeToString(h.Sum(nil)) == beklenen {
-		return "", 0, false // temiz
-	}
-	return "GOSP-WP-CEKIRDEK-DEGISMIS", 100, true
+	return "", 0, false
 }

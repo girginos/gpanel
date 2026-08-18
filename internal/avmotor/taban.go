@@ -135,19 +135,16 @@ func TabanSet() KuralSeti {
 				Desen: `(?i)(preg_replace_callback|array_map|array_filter|usort)\s*\([^;\[]{0,80}['"](assert|system|exec|eval|shell_exec|passthru|create_function|proc_open)['"]`,
 				Puan:  100, Uzanti: php},
 
-			// ── C-3: SUPER-GLOBAL AYRISTIRMA (decoupling) ──
-			// 🔴 `$d=$_POST['x']; $c($d);` — girdiyi bir ara degiskene atayinca
-			// TUM sink-bitisiklik kurallari koru kaliyor (adversaryel denetimde
-			// 12/14 teknik boyle kacti). Regex taint yapamaz; iki ZAYIF sinyali
-			// topluyoruz: girdi->degisken (40) + dinamik/kabuk-cagri-degiskenle (40)
-			// = 80 -> SeviyeSupheli (kritik DEGIL). Meşru kodda ikisi ayni dosyada
-			// nadir; ustelik 80 puan oto-karantina tetiklemez, operator onayina duser.
-			{ID: "GOSP-PHP-GIRDI-DEGISKENE", Ad: "super-global degiskene ataniyor",
-				Desen: `(?i)\$[a-z_]\w*\s*=\s*\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[`,
-				Puan:  40, Uzanti: php},
-			{ID: "GOSP-PHP-DINAMIK-SINK-DEGISKEN", Ad: "degisken fonksiyon/kabuk cagri degisken argumanla",
-				Desen: `(?i)(\$[a-z_]\w*\s*\(\s*\$)|(\b(system|exec|shell_exec|passthru|assert|eval|popen|proc_open)\s*\(\s*\$[a-z_])`,
-				Puan:  40, Uzanti: php},
+			// 🔴 C-3 DECOUPLING KURALLARI KALDIRILDI. `$d=$_POST[..]; $c($d);`
+			// desenini yakalamak icin iki zayif kural (girdi->degisken +
+			// dinamik-sink) eklemistim ama GERCEK WordPress + eklenti kodunda
+			// 21 YANLIS POZITIF urettiler (olculdu): `$x=$_POST[..]` ve
+			// `$callback($data)` mesru kodda cok yaygin. Regex ile taint-akis
+			// analizi GUVENILIR yapilamaz; alarm yorgunlugu gercek tespitleri
+			// bogar. BILINEN SINIRLAMA: super-global ayristirma (decoupling)
+			// kacisidir; dogru cozum AST tabanli analizdir (gelecek faz).
+			// Not: konum sezgisi (uploads/*.php) bu shell'lerin cogunu yine
+			// yakalar cunku webshell nadiren mesru bir konumda durur.
 
 			// ── JavaScript enjeksiyonu (tema/eklenti dosyalarına) ──
 			{ID: "GOSP-JS-DOC-WRITE-UNESCAPE", Ad: "document.write(unescape(...))",

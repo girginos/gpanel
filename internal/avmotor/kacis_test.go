@@ -14,9 +14,9 @@ func TestDenetimKacislariKapandi(t *testing.T) {
 		ad, dosya, icerik string
 		enAz              int
 	}{
-		// C-3 decoupling — girdi degiskene, sonra dinamik cagri
-		{"decoupling-degisken-fn", "a.php", `<?php $d=$_POST['x']; $c=$_GET['f']; $c($d);`, EsikSupheli},
-		{"decoupling-eval", "b.php", `<?php $p=$_POST['x']; eval($p);`, EsikSupheli},
+		// NOT: C-3 decoupling (`$d=$_POST; $c($d)`) BILINEN SINIRLAMA — regex
+		// taint yapamaz, kurallari 21 FP urettigi icin kaldirildi. Konum
+		// sezgisi (uploads/*.php) bu shell'lerin cogunu yine yakalar.
 		// C-6 call_user_func
 		{"call_user_func", "c.php", `<?php call_user_func($_GET['f'], $_GET['a']);`, EsikKritik},
 		{"call_user_func_array", "d.php", `<?php call_user_func_array($_POST['f'], $_POST['a']);`, EsikKritik},
