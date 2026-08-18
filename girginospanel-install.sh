@@ -349,6 +349,11 @@ if [ -d "$A/eklentiler" ]; then
   chmod -R 0755 /opt/girginospanel/src/eklentiler 2>/dev/null
   ok "eklenti payload ($(find /opt/girginospanel/src/eklentiler -type f 2>/dev/null | wc -l) dosya)"
 fi
+
+# Antivirus ajani binary'si pakette varsa kur (gercek zamanli izleyici + tarayici).
+if [ -f "$A/girginospanel-avajan" ]; then
+  install -m 0755 "$A/girginospanel-avajan" /usr/local/bin/girginospanel-avajan || die "avajan kurulamadi"
+fi
 # ops tool + signon
 # 🔴 Iki ayri hedef, iki ayri anlam:
 #   /usr/local/bin        -> operatorun elle calistirdigi KOMUTLAR

@@ -20,6 +20,11 @@ package avmotor
 //
 // 🔴 Meşru eklentiler `base64_decode`, `eval`, `system` KULLANIR. Bu yüzden
 // tek fonksiyon adı asla 100 almaz — ZİNCİR aranır (girdi → çözme → yürütme).
+// BacktickDeseni — backtick YURUTME operatoru + istek verisi. Ham string
+// (backtick ile sarilamaz cunku desen backtick iceriyor) — cift tirnakla
+// ama Go raw yerine acik yaziliyor.
+var BacktickDeseni = "(?:=|\\(|\\breturn\\b|\\becho\\b|\\bprint\\b|\\.)\\s*`[^`]*[$]_(GET|POST|REQUEST)\\s*\\[[^`]*`"
+
 func TabanSet() KuralSeti {
 	php := []string{"php", "phar", "phtml", "php5", "php7", "php8", "inc"}
 	return KuralSeti{
@@ -47,9 +52,14 @@ func TabanSet() KuralSeti {
 			{ID: "GOSP-PHP-SHELL-SUPERGLOBAL", Ad: "kabuk çağrısı istek verisiyle",
 				Desen: `(?i)(system|shell_exec|passthru|popen|proc_open|exec)\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)\s*\[`,
 				Puan:  100, Uzanti: php},
-			{ID: "GOSP-PHP-BACKTICK-SUPERGLOBAL", Ad: "backtick operatörü istek verisiyle",
-				Desen: "`[^`]*\\$_(GET|POST|REQUEST)\\s*\\[",
-				Puan:  100, Uzanti: php},
+			// 🔴 Backtick operatoru yanlis pozitife cok acik: gercek WordPress
+			// cekirdeginde 92 dosyada eslesti (WP PHPDoc yorumlarinda backtick
+			// kullaniyor: `$wpdb->prepare()`). Yalniz OPERATOR baglaminda
+			// (atama/return/echo/nokta sonrasi) ve ayni backtick cifti icinde
+			// superglobal; puan 60 -> tek basina KRITIK degil, ikinci kanit gerekir.
+			{ID: "GOSP-PHP-BACKTICK-YURUTME", Ad: "backtick yurutme istek verisiyle",
+				Desen: BacktickDeseni,
+				Puan:  60, Uzanti: php},
 
 			// ── Değişken fonksiyon çağrısı (klasik webshell gizleme) ──
 			{ID: "GOSP-PHP-DEGISKEN-FONKSIYON", Ad: "$degisken(...) dinamik çağrı",

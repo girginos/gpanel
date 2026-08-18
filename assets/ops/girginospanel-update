@@ -303,6 +303,13 @@ install -m 0755 "$NEWBIN" "$BIN"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
 ok "binary güncellendi"
 
+# Antivirus ajani — server ile ayni turden binary. Pakette varsa atomik kur.
+NEWAV=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-avajan -path '*/assets/*' 2>/dev/null | head -1)
+if [ -n "$NEWAV" ]; then
+  install -m 0755 "$NEWAV" /usr/local/bin/girginospanel-avajan || warn "avajan guncellenemedi"
+  ok "antivirus ajani guncellendi"
+fi
+
 # 7) frontend-dist — ATOMİK + DOĞRULANMIŞ swap.
 # Eski hata: `rm -rf "${FDIST:?}/"* && tar xzf ...` ÖNCE çalışan frontend'i siliyordu; extraction
 # kesilir ya da flush olmadan reboot olursa → 0-byte dosyalar → BEYAZ EKRAN outage (geri dönüş YOK).
