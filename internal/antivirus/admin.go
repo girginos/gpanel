@@ -243,3 +243,37 @@ func servisAktif(birim string) bool {
 	out, _ := exec.Command("systemctl", "is-active", birim).Output()
 	return strings.TrimSpace(string(out)) == "active"
 }
+
+// AdminGecmis — GET /antivirus/gecmis (tüm bulgular zaman çizelgesi/olay günlüğü)
+func (h *Handlers) AdminGecmis(w http.ResponseWriter, r *http.Request) {
+	type g struct {
+		ID       int64  `json:"id"`
+		Alan     string `json:"alan_adi"`
+		DomainID int64  `json:"domain_id"`
+		Dosya    string `json:"dosya"`
+		Imza     string `json:"imza"`
+		Motor    string `json:"motor"`
+		Seviye   string `json:"seviye"`
+		Puan     int    `json:"puan"`
+		Durum    string `json:"durum"`
+		Tarih    string `json:"tarih"`
+	}
+	out := []g{}
+	rows, err := h.DB.QueryContext(r.Context(),
+		`SELECT b.id, COALESCE(d.alan_adi,''), b.domain_id, b.dosya, b.imza, COALESCE(b.motor,''),
+		        b.seviye, b.puan, b.durum, COALESCE(DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i:%s'),'')
+		   FROM av_bulgular b LEFT JOIN domains d ON d.id=b.domain_id
+		  ORDER BY b.created_at DESC, b.id DESC LIMIT 500`)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var x g
+		if rows.Scan(&x.ID, &x.Alan, &x.DomainID, &x.Dosya, &x.Imza, &x.Motor, &x.Seviye, &x.Puan, &x.Durum, &x.Tarih) == nil {
+			out = append(out, x)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kayitlar": out})
+}

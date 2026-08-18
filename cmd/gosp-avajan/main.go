@@ -33,9 +33,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"strings"
 	"sync"
-	"syscall"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -122,6 +122,10 @@ type ajan struct {
 	kaynak   string // panel | ajan-zamanli | ajan-izle
 
 	mu           sync.Mutex
+	atlanan      int // RapidScan: degismedigi icin atlanan dosya
+	eskiOnb      map[string]string
+	yeniOnb      map[string]string
+	onbMu        sync.Mutex
 	taranan      int
 	analizEdilen int
 	bulunan      int
@@ -168,6 +172,13 @@ func (a *ajan) tamTarama(kokler []string) {
 		}()
 	}
 
+	// 🔴 RapidScan: onceki taramada TEMIZ bulunan ve o zamandan beri boyut+
+	// mtime+ctime'i degismeyen dosyalar atlanir (Imunify RapidScan muadili).
+	// ctime forge edilemez (her metadata/icerik degisiminde cekirdek gunceller),
+	// bu yuzden timestomping ile gizlenmis zararli yine yeniden taranir.
+	a.eskiOnb = a.rapidYukle()
+	a.yeniOnb = map[string]string{}
+
 	// 🔴 Tarama kaydı aç: bulgular buna bağlanır, panel görsün.
 	// DURUMSUZ (--json) mod: panel kendi tarama satırını sahiplenir ve bulguları
 	// JSON'dan yazar. Ajan burada İKİNCİ bir satır açmamalı — yoksa panel scan
@@ -193,6 +204,19 @@ func (a *ajan) tamTarama(kokler []string) {
 			if d.IsDir() || !d.Type().IsRegular() {
 				return nil
 			}
+			// RapidScan atlama
+			if fi, e := d.Info(); e == nil {
+				if ak := dosyaAnahtar(fi); ak != "" && a.eskiOnb[yol] == ak {
+					a.mu.Lock()
+					a.taranan++
+					a.atlanan++
+					a.mu.Unlock()
+					a.onbMu.Lock()
+					a.yeniOnb[yol] = ak
+					a.onbMu.Unlock()
+					return nil
+				}
+			}
 			is <- yol
 			return nil
 		})
@@ -203,8 +227,50 @@ func (a *ajan) tamTarama(kokler []string) {
 
 	if !a.json {
 		taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
+		a.rapidYaz()
 	}
 	a.ozetYaz(basla, kokler)
+}
+
+const rapidYol = "/var/lib/girginospanel/av/rapidscan.json"
+
+// dosyaAnahtar — boyut:mtime:ctime (ns). ctime forge edilemez.
+func dosyaAnahtar(fi os.FileInfo) string {
+	var ct int64
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		ct = st.Ctim.Sec*1_000_000_000 + st.Ctim.Nsec
+	}
+	return fmt.Sprintf("%d:%d:%d", fi.Size(), fi.ModTime().UnixNano(), ct)
+}
+
+func (a *ajan) rapidYukle() map[string]string {
+	m := map[string]string{}
+	if b, err := os.ReadFile(rapidYol); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	// 🔴 Kural seti degistiyse onbellek GECERSIZ: yeni imzalar degismemis
+	// dosyalara da uygulanmali; yoksa yeni kural eski "temiz" dosyayi sonsuza
+	// dek atlar (nobetci bayatlamasi). Tam yeniden tarama zorla.
+	if m["__kural_surum__"] != strconv.Itoa(a.motor.Surum()) {
+		return map[string]string{}
+	}
+	delete(m, "__kural_surum__")
+	return m
+}
+
+func (a *ajan) rapidYaz() {
+	a.onbMu.Lock()
+	a.yeniOnb["__kural_surum__"] = strconv.Itoa(a.motor.Surum())
+	b, _ := json.Marshal(a.yeniOnb)
+	a.onbMu.Unlock()
+	if len(b) == 0 {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(rapidYol), 0o700)
+	tmp := rapidYol + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, rapidYol) // atomik
+	}
 }
 
 // yukIzle — /proc/loadavg'i 2sn'de bir okur, load1×100'u atomik saklar.
@@ -262,6 +328,16 @@ func (a *ajan) dosyaIsle(yol string) {
 	// dosya). Bu kurallar IKINCIL sinyal (tek baslarina degil). version.php
 	// korleme (SAGLAMA-KOR) 100=KRITIK oldugu icin gorunur.
 	if !tespit || b.Seviye != avmotor.SeviyeKritik || b.Puan < a.ayar.EsikKritik {
+		// RapidScan: analiz edilip TEMIZ cikan dosyayi onbellege al.
+		if a.yeniOnb != nil {
+			if fi, e := os.Stat(yol); e == nil {
+				if ak := dosyaAnahtar(fi); ak != "" {
+					a.onbMu.Lock()
+					a.yeniOnb[yol] = ak
+					a.onbMu.Unlock()
+				}
+			}
+		}
 		return
 	}
 	a.mu.Lock()
@@ -320,13 +396,13 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 	sure := time.Since(basla)
 	if a.json {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"kokler": kokler, "taranan": a.taranan, "analiz_edilen": a.analizEdilen, "bulunan": a.bulunan,
+			"kokler": kokler, "taranan": a.taranan, "analiz_edilen": a.analizEdilen, "atlanan": a.atlanan, "bulunan": a.bulunan,
 			"sure_ms": sure.Milliseconds(), "bulgular": a.bulgular,
 		})
 		return
 	}
-	fmt.Printf("tarandı: %d dosya (analiz: %d) · bulgu: %d · süre: %s · kapsam: %s\n",
-		a.taranan, a.analizEdilen, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
+	fmt.Printf("tarandı: %d dosya (analiz: %d · rapidscan atlanan: %d) · bulgu: %d · süre: %s · kapsam: %s\n",
+		a.taranan, a.analizEdilen, a.atlanan, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
 	for _, b := range a.bulgular {
 		fmt.Printf("  [%s puan=%d] %s\n      %s\n", b.Seviye, b.Puan, b.Dosya, b.Aciklama)
 	}

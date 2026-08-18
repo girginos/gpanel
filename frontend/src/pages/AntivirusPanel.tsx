@@ -13,6 +13,7 @@ type Durum = {
   son_taramalar: Tarama[]
 }
 type Kar = { id: number; alan_adi: string; domain_id: number; orijinal_yol: string; imza: string; seviye: string; puan: number; durum: string; tarih: string; mevcut: boolean }
+type Gecmis = { id: number; alan_adi: string; domain_id: number; dosya: string; imza: string; motor: string; seviye: string; puan: number; durum: string; tarih: string }
 type Ayar = {
   gercek_zamanli: boolean; zamanli_tarama: boolean; wp_butunluk: boolean; kural_motoru: boolean
   konum_sezgileri: boolean; oto_karantina: boolean; esik_kritik: number; kapsam: string
@@ -39,6 +40,8 @@ export default function AntivirusPanel() {
   const { onay } = useDialog()
   const [d, setD] = useState<Durum | null>(null)
   const [kliste, setKliste] = useState<Kar[]>([])
+  const [gecmis, setGecmis] = useState<Gecmis[]>([])
+  const [gecmisAcik, setGecmisAcik] = useState(false)
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [kap, setKap] = useState<AyarYanit['kapasite'] | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -52,6 +55,7 @@ export default function AntivirusPanel() {
   function durumYukle() {
     api.get<Durum>('/antivirus/durum').then(r => setD(r.data)).catch(e => setHata(apiHata(e)))
     api.get<{ kayitlar: Kar[] }>('/antivirus/karantina').then(r => setKliste(r.data.kayitlar || [])).catch(() => { /* sessiz */ })
+    api.get<{ kayitlar: Gecmis[] }>('/antivirus/gecmis').then(r => setGecmis(r.data.kayitlar || [])).catch(() => { /* sessiz */ })
   }
   function ayarYukle() {
     api.get<AyarYanit>('/antivirus/ayarlar').then(r => { setAyar(r.data.ayarlar); setKap(r.data.kapasite) }).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
@@ -117,7 +121,7 @@ export default function AntivirusPanel() {
             className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
             {tarariyor ? 'Başlatılıyor…' : 'Tüm Sunucuyu Tara'}</button>
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Sunucu geneli zararlı yazılım tespiti, karantina yönetimi ve gerçek zamanlı proaktif izleme.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Sunucu geneli zararlı yazılım tespiti, karantina yönetimi ve gerçek zamanlı proaktif izleme. Taramalar RapidScan ile hızlandırılır (değişmemiş dosyalar atlanır).</p>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
         {bilgi && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bilgi}</div>}
@@ -291,6 +295,45 @@ export default function AntivirusPanel() {
             </div>
           </div>
         )}
+
+        {/* Geçmiş / olay günlüğü */}
+        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm mt-4">
+          <button onClick={() => setGecmisAcik(a => !a)} className="w-full flex items-center justify-between text-left">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Geçmiş — olay günlüğü {gecmis.length > 0 && <span className="text-xs font-normal text-slate-400">({gecmis.length} kayıt)</span>}</h3>
+            <span className="text-slate-400 text-sm">{gecmisAcik ? '▾' : '▸'}</span>
+          </button>
+          {gecmisAcik && (
+            gecmis.length === 0 ? (
+              <div className="text-center py-6 text-sm text-slate-500 dark:text-slate-400 mt-2">Kayıt yok.</div>
+            ) : (
+              <div className="lg:overflow-x-auto mt-3">
+                <table className={`${T.tablo} text-sm`}>
+                  <thead className={T.baslikGrubu}>
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                      <th className={T.baslik}>Tarih</th><th className={T.baslik}>Domain</th><th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>Durum</th>
+                    </tr>
+                  </thead>
+                  <tbody className={T.govde}>
+                    {gecmis.map(g => (
+                      <tr key={g.id} className={T.satir}>
+                        <td className={T.hucreBaslik}><span className="text-xs text-slate-500">{g.tarih}</span></td>
+                        <td className={T.hucre} data-etiket="Domain">{g.alan_adi || `#${g.domain_id}`}</td>
+                        <td className={T.hucre} data-etiket="Dosya"><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{g.dosya}</span></td>
+                        <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{g.imza} <span className="text-slate-400">({g.puan})</span></span></td>
+                        <td className={T.hucre} data-etiket="Durum">
+                          {g.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantina</span>
+                            : g.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
+                            : g.durum === 'silindi' ? <span className="text-xs text-slate-400">🗑 Silindi</span>
+                            : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </div>
 
         {/* İnceleme modalı — dosya ÇALIŞTIRILMADAN düz metin */}
         {inceleModal && (

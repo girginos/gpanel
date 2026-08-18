@@ -378,6 +378,7 @@ func main() {
 			// Sunucu-geneli antivirüs paneli (sol menü)
 			r.With(middleware.AdminOnly).Get("/antivirus/durum", avH.AdminDurum)
 			r.With(middleware.AdminOnly).Get("/antivirus/karantina", avH.AdminKarantinaListe)
+			r.With(middleware.AdminOnly).Get("/antivirus/gecmis", avH.AdminGecmis)
 			r.With(middleware.AdminOnly).Post("/antivirus/karantina/{bid}/geri-yukle", avH.AdminKarantinaGeriYukle)
 			r.With(middleware.AdminOnly).Post("/antivirus/karantina/{bid}/sil", avH.AdminKarantinaSil)
 			r.With(middleware.AdminOnly).Get("/antivirus/karantina/{bid}/incele", avH.AdminKarantinaIncele)
