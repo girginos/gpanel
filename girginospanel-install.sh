@@ -527,6 +527,13 @@ for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
   [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
 done
 systemctl daemon-reload
+# 🔴 Yedek kok dizini KURULUMDA olusturulur. Yedek betigi zaten `mkdir -p`
+# yapiyor ama o ancak ILK KOSUDA (03:30) calisir; o ana kadar dizin YOKTUR ve
+# kurulum sonrasi denetimde eksik gorunur. Deterministik durum daha iyi.
+# NOT: bu satiri once cok satirli bir `&&` zincirinin ORTASINA koydum ve betigi
+# sozdizimi hatasiyla kirdim. Devam satiriyla (ters bolu) baglanan zincirlerin
+# arasina ASLA satir sokma.
+install -d -m 0755 /var/backups/girginospanel 2>/dev/null || true
 if [ -f /etc/systemd/system/girginospanel-db-backup.timer ]; then
   systemctl enable --now girginospanel-db-backup.timer >/dev/null 2>&1
   systemctl is-active --quiet girginospanel-db-backup.timer \

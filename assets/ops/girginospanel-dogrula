@@ -555,13 +555,26 @@ done <<'DIZINLER'
 /var/www/_default80|
 /var/www/_default443|
 /var/cache/nginx/girgincache|nginx
-/var/backups/girginospanel|
 DIZINLER
 if [ -z "$_dizin_eksik" ]; then
   gec "kritik dizinler" "$_dizin_ok/$_dizin_top"
 else
   dus "kritik dizinler" "$_dizin_ok/$_dizin_top$(printf "$_dizin_eksik")"
 fi
+
+# 🔴 TEMBEL OLUSTURULAN DIZINLER — yoklugu ARIZA DEGIL.
+# /var/backups/girginospanel'i once KRITIK listeye koymustum ve TEMIZ BIR
+# KURULUMU BLOKLADI: yedek betigi dizini kendi `mkdir -p` ile ilk kosuda
+# (03:30) olusturuyor, yani kurulum bitiminde henuz yok. Sistem saglikliydi,
+# kontrol yanlisti. Yanlis pozitif veren kontrol, olmayan kontroldan KOTUDUR —
+# ustelik bu kapi oldugu icin dogrudan zarar verdi.
+for _td in /var/backups/girginospanel; do
+  if [ -d "$_td" ]; then
+    gec "yedek dizini" "$_td"
+  else
+    uyar "yedek dizini" "$_td henuz yok — ilk yedek kosusunda olusur (girginospanel-db-backup)"
+  fi
+done
 
 bas "Servis -> port eslesmesi"
 # 🔴 "servis active" YETMEZ: systemd bir birimi "active" sayarken surec ilgili
