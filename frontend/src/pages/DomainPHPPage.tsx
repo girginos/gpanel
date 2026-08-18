@@ -27,7 +27,6 @@ type Yanit = {
   moduller?: string[]
 }
 
-const MEM_DEGER = ['64M', '128M', '256M', '384M', '512M', '768M', '1024M', '2048M']
 const PMS = [
   { v: 'ondemand', t: 'ondemand (önerilen — boşken sıfır işlemci)' },
   { v: 'dynamic',  t: 'dynamic (yüke göre)' },
@@ -167,15 +166,15 @@ export default function DomainPHPPage() {
           <Kart baslik="Performans ve Güvenlik">
             <Grid>
               <Sec etiket="memory_limit" yardim="Bir scriptin ayırabileceği maksimum bellek (byte). Örn: 256M.">
-                <SecveOzel value={a.memory_limit} options={MEM_DEGER} onChange={v => P('memory_limit', v)} />
+                <Boyut value={a.memory_limit} onChange={v => P('memory_limit', v)} />
               </Sec>
               <Saytec etiket="max_execution_time" suffix="sn" yardim="Maks. çalışma süresi (saniye)" value={a.max_execution_time} onChange={v => P('max_execution_time', v)} />
               <Saytec etiket="max_input_time" suffix="sn" yardim="POST/GET verisini ayrıştırma süresi (saniye)" value={a.max_input_time} onChange={v => P('max_input_time', v)} />
               <Sec etiket="post_max_size" yardim="POST verisi maksimum büyüklük. upload_max'tan büyük olmalı.">
-                <SecveOzel value={a.post_max_size} options={MEM_DEGER} onChange={v => P('post_max_size', v)} />
+                <Boyut value={a.post_max_size} onChange={v => P('post_max_size', v)} />
               </Sec>
               <Sec etiket="upload_max_filesize" yardim="Tek dosya yükleme limiti">
-                <SecveOzel value={a.upload_max_filesize} options={MEM_DEGER} onChange={v => P('upload_max_filesize', v)} />
+                <Boyut value={a.upload_max_filesize} onChange={v => P('upload_max_filesize', v)} />
               </Sec>
               <Bayrak etiket="opcache.enable" yardim="OPcache opcode cache (önerilen: AÇIK)" value={a.opcache_enable} onChange={v => P('opcache_enable', v)} />
             </Grid>
@@ -500,19 +499,29 @@ function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: s
     </Sec>
   )
 }
-function SecveOzel({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
-  const ozelMi = !options.includes(value)
+// Boyut — memory_limit / post_max_size / upload_max_filesize icin SERBEST METIN.
+//
+// 🔴 Onceki `SecveOzel` bileseni acilir menu + "Ozel…" secenegi sunuyordu
+// ama OZEL SECENEK HIC CALISMIYORDU:
+//     if (e.target.value === '__ozel') return   // <- hicbir sey yapmadan cikar
+// "Ozel…" secilince deger DEGISMIYOR; deger hala listede oldugu icin `ozelMi`
+// false kaliyor ve yanindaki metin kutusu ACILMIYOR. Kullanici listede olmayan
+// bir deger giremiyordu. (Listede olmayan bir deger DB'den gelirse kutu
+// aciliyordu — bu yuzden hata "bazen calisiyor" gibi gorunuyordu.)
+//
+// Sabit liste ayrica bakim yuku: her yeni varsayilanda listeyi guncellemek
+// gerekiyor, unutulursa operatorun KENDI ayari "Ozel…" diye gorunuyor.
+// Cozum: menuyu kaldir, operator ne isterse yazsin.
+function Boyut({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex gap-2">
-      <select value={ozelMi ? '__ozel' : value} onChange={e => {
-        if (e.target.value === '__ozel') return
-        onChange(e.target.value)
-      }} className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono">
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-        <option value="__ozel">Özel…</option>
-      </select>
-      {ozelMi && <input type="text" value={value} onChange={e => onChange(e.target.value)}
-        className="w-24 px-2 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono" />}
-    </div>
+    <input
+      type="text"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder="orn: 2048M, 8G, -1 (sinirsiz)"
+      spellCheck={false}
+      autoComplete="off"
+      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono"
+    />
   )
 }

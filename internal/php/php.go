@@ -102,11 +102,14 @@ type Settings struct {
 
 func Defaults() Settings {
 	return Settings{
-		MemoryLimit:       "256M",
-		MaxExecutionTime:  30,
-		MaxInputTime:      60,
-		PostMaxSize:       "64M",
-		UploadMaxFilesize: "32M",
+		// 🔴 Bu degerler DB kolon varsayilanlariyla (0077 gocu) AYNI kalmali.
+		// Ikisi ayrisirsa "kayit yok" yolundan gelen domain ile "kayit var"
+		// yolundan gelen domain FARKLI limitler alir ve sebebi anlasilmaz.
+		MemoryLimit:       "2048M",
+		MaxExecutionTime:  3000,
+		MaxInputTime:      6000,
+		PostMaxSize:       "8000M",
+		UploadMaxFilesize: "2000M",
 		OpcacheEnable:     true,
 		DisableFunctions:  "exec,passthru,shell_exec,system,proc_open,popen",
 		DisplayErrors:     false,

@@ -50,7 +50,11 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	var opcache, fileUploads int
 	var memLimit, pmStrateji string
 	var pmMaxChildren, maxExec int
-	opcache, memLimit, pmStrateji, pmMaxChildren, maxExec = 1, "256M", "ondemand", 8, 30
+	// 🔴 DORDUNCU varsayilan kaynagi (bkz tenantfpm.go yorumu). Ayni
+	// degerler dort yerde: migrations · php.Defaults() · tenantfpm · burasi.
+	// Birini degistiren DORDUNU de degistirmeli, yoksa panel bir sey gosterip
+	// PHP baska sey calistirir.
+	opcache, memLimit, pmStrateji, pmMaxChildren, maxExec = 1, "2048M", "ondemand", 8, 3000
 	_ = h.DB.QueryRowContext(r.Context(),
 		`SELECT opcache_enable, memory_limit, pm_strategy, pm_max_children, max_execution_time
 		   FROM php_settings WHERE domain_id=?`, id).

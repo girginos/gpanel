@@ -267,12 +267,23 @@ type tenantPoolSettings struct {
 const hardenedDisableFns = "exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid"
 
 func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
+	// 🔴 UCUNCU VARSAYILAN KAYNAGI. Ayni degerler uc yerde tanimli:
+	//   1) migrations  -> php_settings kolon DEFAULT'lari
+	//   2) internal/php/php.go Defaults()   -> panel arayuzunun gosterdigi deger
+	//   3) BURASI                            -> FPM havuzunu GERCEKTEN render eden
+	// Bunlar ayrisirsa panel bir sey gosterir, PHP baska sey calistirir. Birebir
+	// yasandi: 1 ve 2 yukseltildi, burasi unutuldu; panel 2048M gosterirken
+	// calisan PHP 256M raporladi (php_settings satiri olmayan domainlerde).
+	//
+	// Import dongusu yuzunden php.Defaults() BURADAN CAGRILAMAZ (internal/php
+	// zaten provisioner'i import ediyor). O yuzden degerler elle eslenmeli —
+	// birini degistiren UCUNU de degistirmeli.
 	s := tenantPoolSettings{
-		MemoryLimit:       "256M",
-		MaxExecutionTime:  30,
-		MaxInputTime:      60,
-		PostMaxSize:       "64M",
-		UploadMaxFilesize: "32M",
+		MemoryLimit:       "2048M",
+		MaxExecutionTime:  3000,
+		MaxInputTime:      6000,
+		PostMaxSize:       "8000M",
+		UploadMaxFilesize: "2000M",
 		DisableFunctions:  hardenedDisableFns,
 		PMStrategy:        "ondemand",
 		PMMaxRequests:     500,
