@@ -383,6 +383,8 @@ func main() {
 			r.With(middleware.AdminOnly).Post("/antivirus/karantina/{bid}/sil", avH.AdminKarantinaSil)
 			r.With(middleware.AdminOnly).Get("/antivirus/karantina/{bid}/incele", avH.AdminKarantinaIncele)
 			r.With(middleware.AdminOnly).Post("/antivirus/tara-tumu", avH.AdminTaraTumu)
+			r.With(middleware.AdminOnly).Post("/antivirus/db-tara", avH.AdminDBTara)
+			r.With(middleware.AdminOnly).Get("/antivirus/kara-liste", avH.AdminKaraListe)
 			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
 			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
 			// Panel Hostname & SSL (admin only)
