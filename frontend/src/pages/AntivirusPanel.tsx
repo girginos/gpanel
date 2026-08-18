@@ -99,6 +99,28 @@ function ModulIkon({ ad }: { ad: string }) {
   )
 }
 
+const IKON_SVG: Record<string, string> = {
+  bolt: 'M13 2L3 14h7l-1 8 10-12h-7l1-8z',
+  db: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM20 6v6c0 1.7-3.6 3-8 3s-8-1.3-8-3V6M20 12v6c0 1.7-3.6 3-8 3s-8-1.3-8-3v-6',
+  lock: 'M7 10V7a5 5 0 0110 0v3M6 10h12a1 1 0 011 1v8a1 1 0 01-1 1H6a1 1 0 01-1-1v-8a1 1 0 011-1z',
+  undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3',
+  trash: 'M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13',
+  warn: 'M12 4l9 16H3L12 4zM12 10v4M12 17h.01',
+  check: 'M4 12l5 5L20 6',
+  ban: 'M5.6 5.6l12.8 12.8M12 3a9 9 0 100 18 9 9 0 000-18z',
+  dash: 'M5 12h14',
+}
+function Ikon({ ad, className }: { ad: string; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className || 'w-4 h-4'} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d={IKON_SVG[ad] || ''} />
+    </svg>
+  )
+}
+function Rozet({ ad, renk, metin }: { ad: string; renk: string; metin: string }) {
+  return <span className={`inline-flex items-center gap-1 text-xs ${renk}`}><Ikon ad={ad} className="w-3.5 h-3.5" />{metin}</span>
+}
+
 export default function AntivirusPanel() {
   const { onay } = useDialog()
   const [d, setD] = useState<Durum | null>(null)
@@ -107,7 +129,11 @@ export default function AntivirusPanel() {
   const [kara, setKara] = useState<Kara[]>([])
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [kap, setKap] = useState<AyarYanit['kapasite'] | null>(null)
-  const [sekme, setSekme] = useState<Sekme>('genel')
+  const [sekme, setSekme] = useState<Sekme>(() => {
+    try { const v = localStorage.getItem('gosp.av.sekme') as Sekme
+      return (['genel','karantina','gecmis','itibar','ayarlar'] as Sekme[]).includes(v) ? v : 'genel' } catch { return 'genel' }
+  })
+  function sekmeSec(k: Sekme) { setSekme(k); try { localStorage.setItem('gosp.av.sekme', k) } catch { /* yoksay */ } }
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [bilgi, setBilgi] = useState<string | null>(null)
@@ -213,11 +239,11 @@ export default function AntivirusPanel() {
             </div>
             <div className="flex gap-3">
               <button onClick={taraTumu} disabled={!!mesgul}
-                className="px-4 py-2.5 text-sm font-medium bg-white text-slate-900 rounded-xl hover:bg-slate-100 disabled:opacity-50">
-                {mesgul === 'tara' ? 'Başlatılıyor…' : '⚡ Tüm Sunucuyu Tara'}</button>
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white text-slate-900 rounded-xl hover:bg-slate-100 disabled:opacity-50">
+                <Ikon ad="bolt" />{mesgul === 'tara' ? 'Başlatılıyor…' : 'Tüm Sunucuyu Tara'}</button>
               <button onClick={dbTara} disabled={!!mesgul}
-                className="px-4 py-2.5 text-sm font-medium bg-white/10 text-white rounded-xl hover:bg-white/20 disabled:opacity-50 backdrop-blur">
-                {mesgul === 'db' ? 'Taranıyor…' : '🗄 Veritabanı Tara'}</button>
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white/10 text-white rounded-xl hover:bg-white/20 disabled:opacity-50 backdrop-blur">
+                <Ikon ad="db" />{mesgul === 'db' ? 'Taranıyor…' : 'Veritabanı Tara'}</button>
             </div>
           </div>
           {(mesgul === 'tara' || mesgul === 'db') && (
@@ -247,7 +273,7 @@ export default function AntivirusPanel() {
         {/* ══ Sekme çubuğu ══ */}
         <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl mb-5 overflow-x-auto">
           {sekmeler.map(t => (
-            <button key={t.k} onClick={() => setSekme(t.k)}
+            <button key={t.k} onClick={() => sekmeSec(t.k)}
               className={`px-4 py-2 text-sm font-medium rounded-xl whitespace-nowrap transition ${sekme === t.k ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
               {t.e}{t.s ? <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${sekme === t.k ? 'bg-slate-100 dark:bg-slate-600' : 'bg-slate-200 dark:bg-slate-700'}`}>{t.s}</span> : null}
             </button>
@@ -303,7 +329,7 @@ export default function AntivirusPanel() {
         {/* ══ KARANTİNA ══ */}
         {sekme === 'karantina' && (
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">🔒 Karantina — tüm sunucu</h3>
+            <h3 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3"><Ikon ad="lock" className="w-4 h-4" /> Karantina — tüm sunucu</h3>
             {kliste.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Karantinada dosya yok.</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
@@ -316,9 +342,9 @@ export default function AntivirusPanel() {
                       <td className={T.hucre} data-etiket="Dosya"><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{k.orijinal_yol}</span></td>
                       <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                       <td className={T.hucre} data-etiket="Durum">
-                        {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
-                          : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
-                          : <span className="text-xs text-slate-400">🗑 Silindi</span>}
+                        {k.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin="Karantinada" />
+                          : k.durum === 'geri_yuklendi' ? <Rozet ad="undo" renk="text-emerald-600 dark:text-emerald-400" metin="Geri yüklendi" />
+                          : <Rozet ad="trash" renk="text-slate-400" metin="Silindi" />}
                       </td>
                       <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
                       <td className={`${T.hucreAksiyon} lg:text-right`}>
@@ -355,10 +381,10 @@ export default function AntivirusPanel() {
                       <td className={T.hucre} data-etiket="Dosya"><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{g.dosya}</span></td>
                       <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{g.imza} <span className="text-slate-400">({g.puan})</span></span></td>
                       <td className={T.hucre} data-etiket="Durum">
-                        {g.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantina</span>
-                          : g.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
-                          : g.durum === 'silindi' ? <span className="text-xs text-slate-400">🗑 Silindi</span>
-                          : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
+                        {g.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin="Karantina" />
+                          : g.durum === 'geri_yuklendi' ? <Rozet ad="undo" renk="text-emerald-600 dark:text-emerald-400" metin="Geri yüklendi" />
+                          : g.durum === 'silindi' ? <Rozet ad="trash" renk="text-slate-400" metin="Silindi" />
+                          : <Rozet ad="warn" renk="text-red-600 dark:text-red-400" metin="Aktif" />}
                       </td>
                     </tr>
                   ))}</tbody>
@@ -385,9 +411,9 @@ export default function AntivirusPanel() {
                     <tr key={k.domain_id} className={T.satir}>
                       <td className={T.hucreBaslik}>{k.alan_adi}</td>
                       <td className={T.hucre} data-etiket="Durum">
-                        {k.durum === 'listeli' ? <span className="text-xs text-red-600 dark:text-red-400 font-medium">⛔ Kara listede</span>
-                          : k.durum === 'kontrol_edilemedi' ? <span className="text-xs text-slate-400">— kontrol edilemedi</span>
-                          : <span className="text-xs text-emerald-600 dark:text-emerald-400">✓ Temiz</span>}
+                        {k.durum === 'listeli' ? <Rozet ad="ban" renk="text-red-600 dark:text-red-400 font-medium" metin="Kara listede" />
+                          : k.durum === 'kontrol_edilemedi' ? <Rozet ad="dash" renk="text-slate-400" metin="kontrol edilemedi" />
+                          : <Rozet ad="check" renk="text-emerald-600 dark:text-emerald-400" metin="Temiz" />}
                       </td>
                       <td className={T.hucre} data-etiket="Kaynak"><span className="text-xs text-slate-400">{k.kaynak}</span></td>
                     </tr>
