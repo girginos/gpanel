@@ -35,6 +35,7 @@ const ICONS = {
   mail:         'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
   tasima:         'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4',
   websec:         'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+  imunify:     'M8 7a4 4 0 018 0M6 11h12M7 11v3a5 5 0 0010 0v-3M4 13h3m10 0h3M12 8v11',
   optimize:    'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
 }
 
@@ -59,6 +60,7 @@ const NAV: NavGroup[] = [
     { to: '/izleme',              etiket: 'İzleme',             ikon: ICONS.izleme },
     { to: '/mail-sunucu',         etiket: 'Mail Sunucu',        ikon: ICONS.mail },
     { to: '/website-security',     etiket: 'Website Security Monitor', ikon: ICONS.websec },
+    { to: '/antivirus',           etiket: 'Antivirüs',          ikon: ICONS.imunify },
     { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.denetim },
   ]},
   { baslik: 'Profilim', items: [

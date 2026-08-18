@@ -33,6 +33,7 @@ import DomainPerformansPage from '@/pages/DomainPerformansPage'
 import DomainComposerPage from '@/pages/DomainComposerPage'
 import DomainSifreKorumaPage from '@/pages/DomainSifreKorumaPage'
 import DomainAntivirusPage from '@/pages/DomainAntivirusPage'
+import AntivirusPanel from '@/pages/AntivirusPanel'
 import DomainKopyaPage from '@/pages/DomainKopyaPage'
 import DomainCronPage from '@/pages/DomainCronPage'
 import DomainLogsPage from '@/pages/DomainLogsPage'
@@ -155,6 +156,7 @@ export default function App() {
         <Route path="araclar/ip-yonetimi" element={<IPYonetimPage />} />
         <Route path="araclar/port-degistirme" element={<PortYonetimPage />} />
         <Route path="website-security" element={<WebsiteSecurityPage />} />
+        <Route path="antivirus" element={<AntivirusPanel />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
         <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />
