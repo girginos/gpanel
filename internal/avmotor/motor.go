@@ -115,6 +115,7 @@ func Yeni(set KuralSeti, maxBoyut int64) (*Motor, int) {
 
 func (m *Motor) KuralSayisi() int { return len(m.set.Kurallar) }
 func (m *Motor) Surum() int       { return m.set.Surum }
+func (m *Motor) Uretim() string   { return m.set.Uretim }
 
 // TaraDosya — tek dosyayı üç katmanla değerlendirir.
 //

@@ -39,26 +39,60 @@ var kuralPubKey = mustHexPK("7e6942943305bd76c79c2ace4155aa837f563e7a15d63060aed
 // aginenKapali=true ise yalnız disk + taban (izole sunucu).
 func GuncelSet(tabanSurum int, aginenKapali bool) KuralSeti {
 	taban := TabanSet()
-	enIyi := taban
-	if taban.Surum < tabanSurum {
-		enIyi.Surum = tabanSurum
-	}
+	// enUzak: en yüksek sürümlü DOĞRULANMIŞ uzak/disk set (varsa).
+	enUzak := KuralSeti{Surum: -1}
 
 	// 1) Disk önbelleği (en son doğrulanmış)
-	if set, ok := diskSetOku(); ok && set.Surum > enIyi.Surum {
-		enIyi = set
-	}
-
-	if aginenKapali {
-		return enIyi
+	if set, ok := diskSetOku(); ok && set.Surum > enUzak.Surum {
+		enUzak = set
 	}
 
 	// 2) Uzak imzalı paket
-	if set, ham, ok := uzakSetCek(); ok && set.Surum > enIyi.Surum {
-		diskSetYaz(ham) // yalnız DOĞRULANMIŞ paketi diske yaz
-		enIyi = set
+	if !aginenKapali {
+		if set, ham, ok := uzakSetCek(); ok && set.Surum > enUzak.Surum {
+			diskSetYaz(ham) // yalnız DOĞRULANMIŞ paketi diske yaz
+			enUzak = set
+		}
 	}
-	return enIyi
+
+	if enUzak.Surum < 0 {
+		// Uzak/disk yok → yalnız gömülü taban.
+		if taban.Surum < tabanSurum {
+			taban.Surum = tabanSurum
+		}
+		return taban
+	}
+	// 🔴 B.1b (security-auditor): uzak seti tabanla BİRLEŞTİR, EZME. Taban
+	// kuralları FLOOR'dur — asla kaldırılamaz. İmza anahtarı/pipeline ele
+	// geçirilse bile, ince bir uzak set backdoor yakalayan taban kurallarını
+	// (GOSP-PHP-EVAL-B64 gibi) SESSİZCE KALDIRAMAZ; yalnız yeni kural ekler
+	// veya aynı ID'yi override eder. "Başarısızlık güven olarak render"
+	// sınıfının kapatılması.
+	return tabanFloorBirlestir(taban, enUzak)
+}
+
+// tabanFloorBirlestir — taban ∪ uzak. Taban her kuralı KALIR; uzak aynı ID'yi
+// override edebilir veya yeni ID ekleyebilir ama taban ID'sini silemez.
+func tabanFloorBirlestir(taban, uzak KuralSeti) KuralSeti {
+	sira := []string{}
+	m := map[string]Kural{}
+	for _, k := range taban.Kurallar {
+		if _, v := m[k.ID]; !v {
+			sira = append(sira, k.ID)
+		}
+		m[k.ID] = k
+	}
+	for _, k := range uzak.Kurallar {
+		if _, v := m[k.ID]; !v {
+			sira = append(sira, k.ID)
+		}
+		m[k.ID] = k // override veya ekle — ama taban ID'si listede kalır
+	}
+	out := KuralSeti{Surum: uzak.Surum, Uretim: uzak.Uretim}
+	for _, id := range sira {
+		out.Kurallar = append(out.Kurallar, m[id])
+	}
+	return out
 }
 
 func uzakSetCek() (KuralSeti, []byte, bool) {

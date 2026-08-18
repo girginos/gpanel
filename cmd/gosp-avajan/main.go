@@ -239,6 +239,12 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 	if a.bulunan == 0 {
 		fmt.Println("  temiz — eşiği aşan dosya yok")
 	}
+	// Kural seti kaynagi + surum: operator gomulu taban mi guncel mi gorsun.
+	kaynak := "gomulu taban"
+	if u := a.motor.Uretim(); u != "" && u != "gomulu" && u != "gömülü" {
+		kaynak = "imzali set uretim " + u
+	}
+	fmt.Printf("kural seti: surum %d · %s · %d kural\n", a.motor.Surum(), kaynak, a.motor.KuralSayisi())
 }
 
 // ── gerçek zamanlı izleme (fanotify) ───────────────────────────────────────
