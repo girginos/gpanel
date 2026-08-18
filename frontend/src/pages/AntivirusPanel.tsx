@@ -449,7 +449,7 @@ export default function AntivirusPanel() {
                 <Anahtar acik={ayar.wp_butunluk} ayarla={v => set('wp_butunluk', v)} etiket="WordPress çekirdek bütünlüğü" aciklama="Resmî md5 ile değişmiş/yabancı çekirdek dosyası." />
               </div>
             </div>
-            <div className="grid gap-4 sm:grid-cols-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <div className="grid gap-4 sm:grid-cols-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
               <label className="block"><span className="block text-xs text-slate-400 mb-1">Kapsam</span>
                 <select value={ayar.kapsam} onChange={e => set('kapsam', e.target.value)} className={alan}>
                   <option value="host">host (/home — müşteri siteleri)</option>
@@ -457,9 +457,11 @@ export default function AntivirusPanel() {
                 </select></label>
               <label className="block"><span className="block text-xs text-slate-400 mb-1">Kritik eşik (≥20)</span>
                 <input type="number" min={20} value={ayar.esik_kritik} onChange={e => set('esik_kritik', Number(e.target.value))} className={alan} /></label>
-              <label className="block"><span className="block text-xs text-slate-400 mb-1">Hariç yollar (virgülle)</span>
-                <input type="text" value={ayar.haric_yollar} onChange={e => set('haric_yollar', e.target.value)} className={alan} /></label>
             </div>
+            <label className="block mt-4"><span className="block text-xs text-slate-400 mb-1">Hariç yollar (virgülle — tarama dışı tutulacak yollar)</span>
+              <textarea value={ayar.haric_yollar} onChange={e => set('haric_yollar', e.target.value)} rows={3} spellCheck={false}
+                className={`${alan} font-mono text-xs leading-relaxed resize-y min-h-[80px]`}
+                placeholder="/proc,/sys,/var/lib/mysql,node_modules,.git" /></label>
             <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
               <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Tarama yoğunluğu (dinamik kaynak)</div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -472,14 +474,39 @@ export default function AntivirusPanel() {
                 <input type="number" min={0} max={400} value={ayar.yuk_esigi} onChange={e => set('yuk_esigi', Number(e.target.value))} className={`${alan} w-24`} />
                 <span className="text-xs text-slate-400">% çekirdek · 0 = kapalı. Sistem 1-dk yükü bu değeri (ör. 80 = ×0.8 çekirdek) aşarsa tarama kendini duraklatır.</span>
               </label>
+
+              {/* CPU + RAM limitleri — görünür ve dinamik (cgroup slice'a uygulanır) */}
+              <div className="grid gap-5 sm:grid-cols-2 mt-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-slate-700 dark:text-slate-200">CPU limiti</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.cpu_yuzde === 0 ? `otomatik${kap ? ` (~${kap.oneri_cpu_yuzde}%)` : ''}` : `${ayar.cpu_yuzde}%`}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input type="range" min={0} max={100} step={5} value={ayar.cpu_yuzde} onChange={e => set('cpu_yuzde', Number(e.target.value))} className="flex-1 accent-brand-600" />
+                    <input type="number" min={0} max={100} value={ayar.cpu_yuzde} onChange={e => set('cpu_yuzde', Number(e.target.value))} className={`${alan} w-20`} />
+                  </div>
+                  <span className="text-xs text-slate-400">0 = otomatik · {kap ? `${kap.cpu_cekirdek} çekirdek` : 'çekirdek sayısına göre'}. %100 = tam bir çekirdek.</span>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-slate-700 dark:text-slate-200">RAM limiti</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.ram_mb === 0 ? `otomatik${kap ? ` (~${kap.oneri_ram_mb} MB)` : ''}` : `${ayar.ram_mb} MB`}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input type="range" min={0} max={kap ? kap.ram_toplam_mb : 4096} step={64} value={ayar.ram_mb} onChange={e => set('ram_mb', Number(e.target.value))} className="flex-1 accent-brand-600" />
+                    <input type="number" min={0} value={ayar.ram_mb} onChange={e => set('ram_mb', Number(e.target.value))} className={`${alan} w-24`} />
+                  </div>
+                  <span className="text-xs text-slate-400">0 = otomatik · {kap ? `toplam ${kap.ram_toplam_mb} MB` : 'toplam RAM /8'}. Aşılırsa tarayıcı OOM ile durdurulur (site etkilenmez).</span>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setGelismis(g => !g)} className="text-xs text-brand-600 dark:text-brand-400 mt-4">{gelismis ? '▾ Kaynak limitleri' : '▸ Kaynak limitleri (cgroup)'}</button>
+            <button onClick={() => setGelismis(g => !g)} className="text-xs text-brand-600 dark:text-brand-400 mt-4">{gelismis ? '▾ Gelişmiş limitler' : '▸ Gelişmiş limitler (iş parçacığı, hız)'}</button>
             {gelismis && (
-              <div className="grid gap-4 sm:grid-cols-4 mt-2">
-                <label className="block"><span className="block text-xs text-slate-400 mb-1">CPU %{kap ? ` (öneri ${kap.oneri_cpu_yuzde})` : ''}</span><input type="number" min={0} value={ayar.cpu_yuzde} onChange={e => set('cpu_yuzde', Number(e.target.value))} className={alan} /></label>
-                <label className="block"><span className="block text-xs text-slate-400 mb-1">RAM MB{kap ? ` (öneri ${kap.oneri_ram_mb})` : ''}</span><input type="number" min={0} value={ayar.ram_mb} onChange={e => set('ram_mb', Number(e.target.value))} className={alan} /></label>
-                <label className="block"><span className="block text-xs text-slate-400 mb-1">İş parçacığı</span><input type="number" min={0} value={ayar.is_parcacigi} onChange={e => set('is_parcacigi', Number(e.target.value))} className={alan} /></label>
+              <div className="grid gap-4 sm:grid-cols-3 mt-2">
+                <label className="block"><span className="block text-xs text-slate-400 mb-1">İş parçacığı (0=otomatik)</span><input type="number" min={0} value={ayar.is_parcacigi} onChange={e => set('is_parcacigi', Number(e.target.value))} className={alan} /></label>
                 <label className="block"><span className="block text-xs text-slate-400 mb-1">Dosya hız/sn (0=sınırsız)</span><input type="number" min={0} value={ayar.dosya_hiz_sn} onChange={e => set('dosya_hiz_sn', Number(e.target.value))} className={alan} /></label>
+                <label className="block"><span className="block text-xs text-slate-400 mb-1">IO ağırlığı (1-10000)</span><input type="number" min={1} max={10000} value={ayar.io_agirlik} onChange={e => set('io_agirlik', Number(e.target.value))} className={alan} /></label>
               </div>
             )}
           </div>
