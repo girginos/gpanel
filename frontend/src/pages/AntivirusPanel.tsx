@@ -130,6 +130,9 @@ export default function AntivirusPanel() {
   const [kara, setKara] = useState<Kara[]>([])
   const [domainler, setDomainler] = useState<Domain[]>([])
   const [tarananDom, setTarananDom] = useState<Set<number>>(new Set())
+  const [secili, setSecili] = useState<Set<number>>(new Set())
+  const [filtreMetin, setFiltreMetin] = useState('')
+  const [filtreDurum, setFiltreDurum] = useState<'hepsi' | 'enfekte' | 'karantina' | 'temiz'>('hepsi')
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [kap, setKap] = useState<AyarYanit['kapasite'] | null>(null)
   const [sekme, setSekme] = useState<Sekme>(() => {
@@ -159,20 +162,42 @@ export default function AntivirusPanel() {
   function domainlerYukle() {
     api.get<{ kayitlar: Domain[] }>('/antivirus/domainler').then(r => setDomainler(r.data.kayitlar || [])).catch(e => setHata(apiHata(e)))
   }
+  // taraVeBekle — bir domaini tarar ve BİTENE kadar bekler (Promise). Toplu
+  // tarama bunları SIRAYLA çağırır: sunucuda tek-tarama kilidi var, paralel
+  // gönderilse 409 alırdı.
+  function taraVeBekle(id: number): Promise<void> {
+    return new Promise(async (resolve) => {
+      try {
+        const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${id}/tara`, {})
+        const sid = data.scan_id
+        const poll = setInterval(async () => {
+          try {
+            const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${id}/tara/${sid}`)
+            if (st.durum !== 'calisiyor') { clearInterval(poll); resolve() }
+          } catch { clearInterval(poll); resolve() }
+        }, 2500)
+      } catch (e) { setHata(apiHata(e, 'Tarama başlatılamadı (başka tarama sürüyor olabilir)')); resolve() }
+    })
+  }
   async function domainTara(dm: Domain) {
     setHata(null); setTarananDom(s => new Set(s).add(dm.id))
-    const bitir = () => setTarananDom(s => { const n = new Set(s); n.delete(dm.id); return n })
-    try {
-      const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${dm.id}/tara`, {})
-      const sid = data.scan_id
-      const poll = setInterval(async () => {
-        try {
-          const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${dm.id}/tara/${sid}`)
-          if (st.durum !== 'calisiyor') { clearInterval(poll); bitir(); domainlerYukle(); durumYukle() }
-        } catch { clearInterval(poll); bitir() }
-      }, 2500)
-    } catch (e) { setHata(apiHata(e, 'Tarama başlatılamadı (başka tarama sürüyor olabilir)')); bitir() }
+    await taraVeBekle(dm.id)
+    setTarananDom(s => { const n = new Set(s); n.delete(dm.id); return n })
+    domainlerYukle(); durumYukle()
   }
+  async function topluTara() {
+    const idler = [...secili]
+    if (idler.length === 0) return
+    setHata(null)
+    for (const id of idler) {
+      setTarananDom(s => new Set(s).add(id))
+      await taraVeBekle(id)
+      setTarananDom(s => { const n = new Set(s); n.delete(id); return n })
+      domainlerYukle()
+    }
+    setSecili(new Set()); durumYukle()
+  }
+  function secToggle(id: number) { setSecili(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n }) }
   useEffect(() => { durumYukle(); ayarYukle() }, [])
   useEffect(() => {
     if (sekme === 'itibar' && kara.length === 0) itibarYukle()
@@ -229,6 +254,15 @@ export default function AntivirusPanel() {
       : { renk: 'amber', metin: 'Kısmi koruma', ikon: '🛡' }
 
   const alan = 'w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
+  const dfiltre = domainler.filter(dm => {
+    const q = filtreMetin.trim().toLowerCase()
+    const eslesme = q === '' || dm.alan_adi.toLowerCase().includes(q) || dm.sistem_kullanici.toLowerCase().includes(q)
+    const durumOk = filtreDurum === 'hepsi'
+      || (filtreDurum === 'enfekte' && dm.aktif_bulgu > 0)
+      || (filtreDurum === 'karantina' && dm.karantina > 0)
+      || (filtreDurum === 'temiz' && dm.aktif_bulgu === 0 && dm.karantina === 0)
+    return eslesme && durumOk
+  })
   const sekmeler: { k: Sekme; e: string; s?: number }[] = [
     { k: 'genel', e: 'Genel Bakış' },
     { k: 'domainler', e: 'Domainler', s: domainler.length },
@@ -307,21 +341,46 @@ export default function AntivirusPanel() {
         {/* ══ DOMAINLER: domain-bazlı tarama ══ */}
         {sekme === 'domainler' && (
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Domain-bazlı tarama {domainler.length > 0 && <span className="text-xs font-normal text-slate-400">({domainler.length})</span>}</h3>
-              <button onClick={domainlerYukle} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">Yenile</button>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Domain-bazlı tarama {domainler.length > 0 && <span className="text-xs font-normal text-slate-400">({dfiltre.length}/{domainler.length})</span>}</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="search" value={filtreMetin} onChange={e => setFiltreMetin(e.target.value)} placeholder="Domain / kullanıcı ara…"
+                  className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-48" />
+                <select value={filtreDurum} onChange={e => setFiltreDurum(e.target.value as any)}
+                  className="px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+                  <option value="hepsi">Tümü</option>
+                  <option value="enfekte">Enfekte</option>
+                  <option value="karantina">Karantinalı</option>
+                  <option value="temiz">Temiz</option>
+                </select>
+                <button onClick={domainlerYukle} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">Yenile</button>
+              </div>
             </div>
-            {domainler.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Domain yok.</div> : (
+            {secili.size > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg">
+                <span className="text-sm text-brand-700 dark:text-brand-300">{secili.size} domain seçili</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setSecili(new Set())} className="text-xs text-slate-500 hover:underline">Seçimi temizle</button>
+                  <button onClick={topluTara} disabled={tarananDom.size > 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">
+                    {tarananDom.size > 0 ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> Taranıyor…</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> Seçilenleri Tara ({secili.size})</>}
+                  </button>
+                </div>
+              </div>
+            )}
+            {dfiltre.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{domainler.length === 0 ? 'Domain yok.' : 'Eşleşen domain yok.'}</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}>
                     <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                      <th className={`${T.baslik} w-8`}><input type="checkbox" aria-label="Tümünü seç" className="accent-brand-600 align-middle" checked={dfiltre.length > 0 && dfiltre.every(x => secili.has(x.id))} onChange={e => setSecili(e.target.checked ? new Set(dfiltre.map(x => x.id)) : new Set())} /></th>
                       <th className={T.baslik}>Domain</th><th className={T.baslik}>Kullanıcı</th><th className={T.baslik}>Son tarama</th><th className={T.baslik}>Aktif bulgu</th><th className={T.baslik}>Karantina</th><th className={T.baslik}></th>
                     </tr>
                   </thead>
                   <tbody className={T.govde}>
-                    {domainler.map(dm => (
-                      <tr key={dm.id} className={T.satir}>
+                    {dfiltre.map(dm => (
+                      <tr key={dm.id} className={`${T.satir} ${secili.has(dm.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
+                        <td className={T.hucre}><input type="checkbox" aria-label={`${dm.alan_adi} seç`} className="accent-brand-600 align-middle" checked={secili.has(dm.id)} onChange={() => secToggle(dm.id)} /></td>
                         <td className={T.hucreBaslik}>{dm.alan_adi}</td>
                         <td className={T.hucre} data-etiket="Kullanıcı"><span className="font-mono text-xs text-slate-500">{dm.sistem_kullanici}</span></td>
                         <td className={T.hucre} data-etiket="Son tarama"><span className="text-xs text-slate-500">{dm.son_tarama || '—'}{dm.son_taranan > 0 ? ` · ${dm.son_taranan} dosya` : ''}</span></td>
