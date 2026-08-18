@@ -144,9 +144,20 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 	}
 
 	// ── Katman 1: kural motoru (dosya içeriği) ──
-	if fi.Size() <= m.maxBoyut {
+	// 🔴 C-5: BOYUT GECIDI KALDIRILDI. Onceden `fi.Size() <= maxBoyut` sarti
+	// vardi; saldirgan shell'i 2 MiB'in uzerine doldurunca icerik katmani
+	// KOMPLE atlaniyordu (adversaryel denetimde kanitlandi). okuSinirli zaten
+	// LimitReader ile ilk maxBoyut bayti okur — buyuk dosyada da ucuz. Boyuta
+	// bakmadan hep tarariz; cok buyuk dosyada sona eklenen yuk icin kuyruk da okunur.
+	{
 		icerik, err := okuSinirli(yol, m.maxBoyut)
 		if err == nil {
+			// Buyuk dosyada son 256 KiB'i da tara (append tipi enjeksiyon).
+			if fi.Size() > m.maxBoyut {
+				if kuyruk, e := okuKuyruk(yol, 256<<10); e == nil {
+					icerik = append(icerik, kuyruk...)
+				}
+			}
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(yol), "."))
 			for _, k := range m.set.Kurallar {
 				if len(k.Uzanti) > 0 && !icerirStr(k.Uzanti, ext) {
@@ -237,6 +248,27 @@ func icerirStr(l []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// okuKuyruk — dosyanın SON n baytını okur (append tipi enjeksiyon için).
+func okuKuyruk(yol string, n int64) ([]byte, error) {
+	f, err := os.Open(yol)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	off := fi.Size() - n
+	if off < 0 {
+		off = 0
+	}
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(f)
 }
 
 // okuSinirli — en fazla n bayt okur. Büyük dosyada belleği patlatmamak için.

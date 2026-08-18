@@ -715,6 +715,15 @@ func main() {
 
 	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
 	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
+	// 🔴 Antivirüs kaynak dilimini açılışta kapasiteye göre YENİDEN YAZ.
+	// Installer taban slice'ı sabit 50% CPUQuota içerir; kapasite-hesaplı
+	// değer (çekirdek×100/4) ancak LimitleriUygula ile gelir. Bu çağrı olmadan
+	// 4 çekirdekli bir sunucuda slice yarım çekirdekte kalır (adversaryel
+	// denetimde ölçüldü). Ayrıca gercek_zamanli ayarıyla izleyiciyi senkronlar.
+	if avAyar, e := avayar.Oku(context.Background(), d); e == nil {
+		_ = avayar.LimitleriUygula(avAyar)
+		avayar.IzleyiciSenkron(avAyar)
+	}
 	guvenlikduvari.FirewalldDevral()                   // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)

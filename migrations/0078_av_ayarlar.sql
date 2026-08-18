@@ -51,5 +51,5 @@ CREATE TABLE IF NOT EXISTS av_ayarlar (
 -- diye satır burada oluşturulur. Aksi halde panel bir şey gösterir, ajan
 -- başka bir şey okur (bu oturumda PHP varsayılanlarında birebir yaşandı).
 INSERT INTO av_ayarlar (id, haric_yollar) VALUES (1,
-  '/proc\n/sys\n/dev\n/run\n/var/lib/mysql\n/var/lib/containers\n/var/cache\n/var/backups\n/opt/girginospanel/frontend-dist\n.git/\nnode_modules/\n/wp-content/cache/\n/wp-content/uploads/cache/'
+  '/proc\n/sys\n/dev\n/run\n/var/lib/mysql\n/var/lib/containers\n/var/cache\n/var/backups\n/opt/girginospanel/frontend-dist'
 ) ON DUPLICATE KEY UPDATE id = id;

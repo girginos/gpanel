@@ -278,8 +278,69 @@ func (h *Handlers) ImzaGuncelle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// runScan: ClamAV (varsa) + heuristik. taranan dosya sayısı + bulgular döner.
+const avajanYolu = "/usr/local/bin/girginospanel-avajan"
+
+// runScan: panelin "Tara" düğmesi.
+//
+// 🔴 ARTIK YENİ MOTORU + KAYNAK DİLİMİNİ kullanır. Eskiden bu fonksiyon
+// clamscan'i DOĞRUDAN exec ediyordu ve panelin kendi cgroup'unda (slice DIŞI)
+// çalışıyordu — adversaryel denetimde ölçüldü: interaktif tarama hiçbir kaynak
+// limitine tabi değildi ve clamscan PHP webshell'lerinde zayıf. Şimdi:
+//
+//	systemd-run --slice=girginos-av.slice girginospanel-avajan --tara <root> --json
+//
+// ile çalışır → hem KENDİ motorumuz (avmotor) hem SLICE limiti (CPU/RAM/IO).
+// Bu, iki paralel AV yolunu (eski clamscan + yeni avajan) TEKE indirir.
 func runScan(ctx context.Context, root string) (int, []Bulgu) {
+	if _, err := os.Stat(avajanYolu); err == nil {
+		if taranan, bulgular, ok := avajanIleTara(ctx, root); ok {
+			return taranan, bulgular
+		}
+		// avajan var ama çalıştırılamadı → sessizce eski yola düşmüyoruz;
+		// eski yol clamscan'e bağlı ve o da olmayabilir. Yine de fallback
+		// olarak devam (aşağıdaki eski kod), ama bu nadir bir yol.
+	}
+	return runScanEski(ctx, root)
+}
+
+// avajanIleTara — girginospanel-avajan'ı slice içinde çalıştırıp JSON'unu parse eder.
+func avajanIleTara(ctx context.Context, root string) (int, []Bulgu, bool) {
+	// systemd-run: --scope + --slice ile ajanı av dilimine sokar; --wait sonucu
+	// bekler. Slice yoksa systemd-run yine çalışır (default slice), ajan yine
+	// kendi motorunu kullanır — yani en kötü durumda motor doğru, limit yok.
+	args := []string{"--scope", "--quiet", "--slice=girginos-av.slice",
+		avajanYolu, "--tara", root, "--json"}
+	cmd := exec.CommandContext(ctx, "systemd-run", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		// systemd-run yoksa (konteyner/eski) doğrudan çalıştır — motor doğru,
+		// limit yok. Motor > limitsizlik; sessiz clamscan'e düşmekten iyidir.
+		cmd = exec.CommandContext(ctx, avajanYolu, "--tara", root, "--json")
+		out, err = cmd.Output()
+		if err != nil {
+			return 0, nil, false
+		}
+	}
+	var y struct {
+		Taranan  int `json:"taranan"`
+		Bulgular []struct {
+			Dosya    string `json:"dosya"`
+			Seviye   string `json:"seviye"`
+			Aciklama string `json:"aciklama"`
+		} `json:"bulgular"`
+	}
+	if e := json.Unmarshal(out, &y); e != nil {
+		return 0, nil, false
+	}
+	var b []Bulgu
+	for _, f := range y.Bulgular {
+		b = append(b, Bulgu{Dosya: f.Dosya, Imza: f.Aciklama, Motor: "gosp/" + f.Seviye})
+	}
+	return y.Taranan, b, true
+}
+
+// runScanEski: clamscan + heuristik (avajan yoksa fallback).
+func runScanEski(ctx context.Context, root string) (int, []Bulgu) {
 	var findings []Bulgu
 	seen := map[string]bool{}
 

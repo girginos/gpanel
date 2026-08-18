@@ -94,10 +94,11 @@ type ajan struct {
 	motor *avmotor.Motor
 	json  bool
 
-	mu       sync.Mutex
-	taranan  int
-	bulunan  int
-	bulgular []avmotor.Bulgu
+	mu           sync.Mutex
+	taranan      int
+	analizEdilen int
+	bulunan      int
+	bulgular     []avmotor.Bulgu
 }
 
 // ── tek seferlik tarama ────────────────────────────────────────────────────
@@ -163,9 +164,15 @@ func (a *ajan) dosyaIsle(yol string) {
 	a.taranan++
 	a.mu.Unlock()
 
+	// 🔴 ilgiliUzanti gecidi taranan++'tan SONRA: "taranan" = kuyruga giren,
+	// "analizEdilen" = gercekten motora sokulan. Ikisini ayirmazsak ozet
+	// incelenmeyen dosyalari da "tarandi" diye sayar.
 	if !ilgiliUzanti(yol) {
 		return
 	}
+	a.mu.Lock()
+	a.analizEdilen++
+	a.mu.Unlock()
 	wpKok := ""
 	if a.ayar.WPButunluk {
 		wpKok = wpKokBul(yol)
@@ -190,13 +197,13 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 	sure := time.Since(basla)
 	if a.json {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"kokler": kokler, "taranan": a.taranan, "bulunan": a.bulunan,
+			"kokler": kokler, "taranan": a.taranan, "analiz_edilen": a.analizEdilen, "bulunan": a.bulunan,
 			"sure_ms": sure.Milliseconds(), "bulgular": a.bulgular,
 		})
 		return
 	}
-	fmt.Printf("tarandı: %d dosya · bulgu: %d · süre: %s · kapsam: %s\n",
-		a.taranan, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
+	fmt.Printf("tarandı: %d dosya (analiz: %d) · bulgu: %d · süre: %s · kapsam: %s\n",
+		a.taranan, a.analizEdilen, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
 	for _, b := range a.bulgular {
 		fmt.Printf("  [%s puan=%d] %s\n      %s\n", b.Seviye, b.Puan, b.Dosya, b.Aciklama)
 	}
@@ -302,7 +309,11 @@ func olayDosyalari(b []byte) []int {
 // sunucu onu yürütmez (çift uzantı zaten konum sezgisinde yakalanıyor).
 func ilgiliUzanti(yol string) bool {
 	switch strings.ToLower(filepath.Ext(yol)) {
-	case ".php", ".phar", ".phtml", ".php5", ".php7", ".php8", ".inc",
+	// 🔴 .pht/.php3/.php4/.phtm/.phps — cogu Apache/mod_php yapilandirmasinda
+	// PHP olarak YURUTULUR ve klasik bypass uzantilaridir. Uzanti gecidi
+	// taramanin ON KOSULU oldugu icin listede olmayan uzanti = tam kacis.
+	case ".php", ".phar", ".phtml", ".phtm", ".pht", ".php3", ".php4", ".php5",
+		".php7", ".php8", ".phps", ".inc", ".shtml",
 		".js", ".mjs", ".cgi", ".pl", ".py", ".sh", ".htaccess":
 		return true
 	}
@@ -310,9 +321,27 @@ func ilgiliUzanti(yol string) bool {
 }
 
 func haricMi(yol string, haric []string) bool {
+	// 🔴 SUBSTRING DEGIL segment/prefix. `strings.Contains(yol,"node_modules/")`
+	// olsaydi saldirgan shell'i uploads/node_modules/ altina koyup taramadan
+	// KACARDI (adversaryel denetimde kanitlandi: `mkdir node_modules` yeterli).
+	y := filepath.ToSlash(yol)
 	for _, h := range haric {
-		if strings.Contains(yol, h) {
-			return true
+		h = filepath.ToSlash(h)
+		if strings.HasPrefix(h, "/") {
+			hp := strings.TrimRight(h, "/")
+			if y == hp || strings.HasPrefix(y, hp+"/") {
+				return true
+			}
+		} else {
+			seg := strings.Trim(h, "/")
+			if seg == "" {
+				continue
+			}
+			for _, part := range strings.Split(y, "/") {
+				if part == seg {
+					return true
+				}
+			}
 		}
 	}
 	return false
