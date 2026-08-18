@@ -213,6 +213,27 @@ else
   warn "ops/girginospanel-wp-onkosul pakette yok — SELinux etiketi + imagick atlandı"
 fi
 
+# 🔴 JOURNAL KALICILIGI — boot arasi log tutulmali.
+# AlmaLinux 10'da /var/log/journal yoksa journald yalniz BELLEKTE tutar ve her
+# reboot'ta gecmis SILINIR. Sonuc: beklenmedik bir reboot ya da cokme SONRADAN
+# TESHIS EDILEMEZ. 49.12.158.182'de birebir yasandi: ikinci bir reboot oldu,
+# `journalctl -b -1` bos dondu, sebep bulunamadi.
+# NOT: AlmaLinux 10'da /etc/systemd/journald.conf YOKTUR (drop-in yapisina
+# gecildi) — dosyayi olusturmak yerine conf.d altina yaziyoruz.
+mkdir -p /var/log/journal /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/10-girginospanel.conf <<'JRNL'
+[Journal]
+Storage=persistent
+SystemMaxUse=500M
+JRNL
+systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+systemctl restart systemd-journald >/dev/null 2>&1 || true
+if [ -d /var/log/journal ]; then
+  ok "journal kalıcı (boot arası log tutuluyor, en fazla 500M)"
+else
+  warn "journal kalıcı yapılamadı — reboot sonrası eski loglar kaybolur"
+fi
+
 # ============ 4) MARIADB ============
 step "4) MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1; sleep 2
