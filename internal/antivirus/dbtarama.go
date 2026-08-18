@@ -12,6 +12,7 @@ package antivirus
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -35,7 +36,22 @@ var (
 
 	// DB değerlerinde aranan zararlı örüntüler (dosya motoruyla tutarlı sinyaller).
 	reDBZararli = regexp.MustCompile(`(?i)(eval\s*\(|base64_decode\s*\(|gzinflate\s*\(|gzuncompress\s*\(|str_rot13\s*\(|\bassert\s*\(|create_function\s*\(|preg_replace\s*\(\s*['"][^'"]*/e|move_uploaded_file|FilesMan|\bshell_exec\s*\(|\bsystem\s*\(|<script[^>]*>[^<]{0,200}?(eval|unescape|fromCharCode|atob)\s*\()`)
+
+	// L1: tablo oneki yalniz [A-Za-z0-9_] (WordPress sanitize_key). Backtick
+	// identifier-quote breakout'u onler.
+	reDBPrefix = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	// L2: DNS sorgusu oncesi domain label charset.
+	reHostAd = regexp.MustCompile(`^[a-z0-9.-]+$`)
+	// H1: wp_posts DUZ METIN (blog); reDBZararli prose "eval()" gibi FP uretir.
+	// Post icin STRICT: gercek enjeksiyon vektoru sart. Prose ESLESMEZ.
+	reDBPost = regexp.MustCompile(`(?i)(<\?php|<script[^>]*>[^<]{0,600}?(eval\s*\(|unescape\s*\(|String\.fromCharCode\s*\(|document\.write\s*\(\s*unescape)|base64_decode\s*\([^)]{16,}|\beval\s*\(\s*(base64_decode|gzinflate|str_rot13|gzuncompress|\$_|\$GLOBALS)|\bassert\s*\(\s*(\$_|base64_decode))`)
 )
+
+type dbBulgu struct {
+	Tablo string
+	Ad    string
+	Satir int64
+}
 
 type wpKimlik struct{ ad, kul, pw, host, pre, yol string }
 
@@ -112,19 +128,23 @@ func dsnKur(k wpKimlik) string {
 	return k.kul + ":" + k.pw + "@tcp(" + host + ")/" + k.ad + base
 }
 
-// dbTaraKurulum — tek WP kurulumunun DB'sini tarar, bulgu sayısı döner.
-func (h *Handlers) dbTaraKurulum(ctx context.Context, domID int64, k wpKimlik) (int, error) {
+// dbTaraKurulum — tek WP kurulumunun DB'sini tarar, BULGULARI DONER (yazmaz).
+// Cagiran domain-bazli delete+insert yapar (H2).
+func (h *Handlers) dbTaraKurulum(ctx context.Context, k wpKimlik) ([]dbBulgu, error) {
+	if !reDBPrefix.MatchString(k.pre) {
+		return nil, fmt.Errorf("gecersiz tablo oneki: %q", k.pre)
+	}
 	sdb, err := sql.Open("mysql", dsnKur(k))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer sdb.Close()
 	sdb.SetMaxOpenConns(2)
 	if err := sdb.PingContext(ctx); err != nil {
-		return 0, err
+		return nil, err
 	}
-	bulunan := 0
-	// wp_options: autoload='yes' — her istekte yüklenir, en tehlikeli enjeksiyon yeri.
+	var out []dbBulgu
+	// wp_options: autoload serialized config; reDBZararli (dusuk FP).
 	if rows, err := sdb.QueryContext(ctx,
 		"SELECT option_id, option_name, option_value FROM `"+k.pre+"options` WHERE autoload IN ('yes','on','auto') LIMIT 5000"); err == nil {
 		for rows.Next() {
@@ -134,30 +154,28 @@ func (h *Handlers) dbTaraKurulum(ctx context.Context, domID int64, k wpKimlik) (
 				continue
 			}
 			if reDBZararli.MatchString(deger) {
-				h.dbBulguYaz(domID, k.pre+"options", ad, id)
-				bulunan++
+				out = append(out, dbBulgu{k.pre + "options", ad, id})
 			}
 		}
 		rows.Close()
 	}
-	// wp_posts: yayın/taslak içeriğinde enjekte script/eval.
+	// wp_posts: DUZ METIN blog; reDBPost STRICT (prose FP uretmez).
 	if rows, err := sdb.QueryContext(ctx,
 		"SELECT ID, post_content FROM `"+k.pre+"posts` WHERE post_status IN ('publish','draft','private') "+
-			"AND (post_content LIKE '%base64_decode%' OR post_content LIKE '%<script%' OR post_content LIKE '%eval(%' OR post_content LIKE '%gzinflate%') LIMIT 5000"); err == nil {
+			"AND (post_content LIKE '%base64_decode%' OR post_content LIKE '%<script%' OR post_content LIKE '%<?php%' OR post_content LIKE '%eval(%') LIMIT 5000"); err == nil {
 		for rows.Next() {
 			var id int64
 			var icerik string
 			if rows.Scan(&id, &icerik) != nil {
 				continue
 			}
-			if reDBZararli.MatchString(icerik) {
-				h.dbBulguYaz(domID, k.pre+"posts", "post", id)
-				bulunan++
+			if reDBPost.MatchString(icerik) {
+				out = append(out, dbBulgu{k.pre + "posts", "post", id})
 			}
 		}
 		rows.Close()
 	}
-	return bulunan, nil
+	return out, nil
 }
 
 // dbBulguYaz — DB bulgusunu av_bulgular'a yazar (motor=gosp/db).
@@ -217,25 +235,36 @@ func (h *Handlers) AdminDBTara(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	// Önceki DB bulgularını (aktif) temizle — taze durum.
-	_, _ = h.DB.Exec(`DELETE FROM av_bulgular WHERE motor='gosp/db' AND durum='aktif'`)
-
 	tarananKurulum, toplamBulgu, hataliKurulum := 0, 0, 0
 	for _, d := range dl {
+		var found []dbBulgu
+		hata, tarandi := false, false
 		for _, cfg := range wpKurulumlariBul(d.sk) {
 			k, ok := wpConfigOku(cfg)
 			if !ok {
 				continue
 			}
 			tarananKurulum++
-			n, err := h.dbTaraKurulum(ctx, d.id, k)
+			f, err := h.dbTaraKurulum(ctx, k)
 			if err != nil {
-				// 🔴 Baglanamayan DB'yi 'temiz' sayma (basarisizlik guven
-				// olarak render). Hatali olarak raporla.
-				hataliKurulum++
+				hata = true
 				continue
 			}
-			toplamBulgu += n
+			tarandi = true
+			found = append(found, f...)
+		}
+		// 🔴 H2: YALNIZ tam basarili taranan domain tazelenir. Erisilemeyen DB'nin
+		// ONCEKI gercek bulgusu SILINMEZ (basarisizlik guven olarak render
+		// olmasin). Global delete YOK → 0-penceresi de yok.
+		if tarandi && !hata {
+			_, _ = h.DB.Exec(`DELETE FROM av_bulgular WHERE motor='gosp/db' AND durum='aktif' AND domain_id=?`, d.id)
+			for _, b := range found {
+				h.dbBulguYaz(d.id, b.Tablo, b.Ad, b.Satir)
+			}
+			toplamBulgu += len(found)
+		}
+		if hata {
+			hataliKurulum++
 		}
 	}
 	if toplamBulgu > 0 {
@@ -279,8 +308,14 @@ func (h *Handlers) AdminKaraListe(w http.ResponseWriter, r *http.Request) {
 	rez := &net.Resolver{}
 	for _, d := range dl {
 		s := sonuc{DomainID: d.id, Alan: d.ad, Durum: "temiz", Kaynak: "Spamhaus DBL"}
+		ad := dnsAd(d.ad)
+		if !reHostAd.MatchString(ad) {
+			s.Durum = "kontrol_edilemedi"
+			out = append(out, s)
+			continue
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		ips, err := rez.LookupHost(ctx, dnsAd(d.ad)+".dbl.spamhaus.org")
+		ips, err := rez.LookupHost(ctx, ad+".dbl.spamhaus.org")
 		cancel()
 		if err == nil && len(ips) > 0 {
 			listeli := false

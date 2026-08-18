@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -114,7 +114,7 @@ const IKON_SVG: Record<string, string> = {
 function Ikon({ ad, className }: { ad: string; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className || 'w-4 h-4'} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d={IKON_SVG[ad] || ''} />
+      <path d={IKON_SVG[ad] || IKON_SVG.warn} />
     </svg>
   )
 }
@@ -133,6 +133,7 @@ export default function AntivirusPanel() {
   const [secili, setSecili] = useState<Set<number>>(new Set())
   const [filtreMetin, setFiltreMetin] = useState('')
   const [filtreDurum, setFiltreDurum] = useState<'hepsi' | 'enfekte' | 'karantina' | 'temiz'>('hepsi')
+  const pollRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set())
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [kap, setKap] = useState<AyarYanit['kapasite'] | null>(null)
   const [sekme, setSekme] = useState<Sekme>(() => {
@@ -170,12 +171,21 @@ export default function AntivirusPanel() {
       try {
         const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${id}/tara`, {})
         const sid = data.scan_id
-        const poll = setInterval(async () => {
+        let deneme = 0
+        // 🔴 poll'u ref'te tut (unmount'ta temizlenir) + zaman aşımı (~9dk >
+        // backend 8dk context timeout): durum kalıcı 'calisiyor' kalırsa (sunucu
+        // yeniden başlarsa) UI sonsuza dek asılı kalmasın.
+        let t: ReturnType<typeof setInterval>
+        const bit = () => { clearInterval(t); pollRef.current.delete(t); resolve() }
+        t = setInterval(async () => {
+          deneme++
+          if (deneme > 220) { setHata('Tarama durumu güncellenmedi (zaman aşımı).'); bit(); return }
           try {
             const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${id}/tara/${sid}`)
-            if (st.durum !== 'calisiyor') { clearInterval(poll); resolve() }
-          } catch { clearInterval(poll); resolve() }
+            if (st.durum !== 'calisiyor') bit()
+          } catch { bit() }
         }, 2500)
+        pollRef.current.add(t)
       } catch (e) { setHata(apiHata(e, 'Tarama başlatılamadı (başka tarama sürüyor olabilir)')); resolve() }
     })
   }
@@ -199,6 +209,7 @@ export default function AntivirusPanel() {
   }
   function secToggle(id: number) { setSecili(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n }) }
   useEffect(() => { durumYukle(); ayarYukle() }, [])
+  useEffect(() => () => { pollRef.current.forEach((t: ReturnType<typeof setInterval>) => clearInterval(t)); pollRef.current.clear() }, [])
   useEffect(() => {
     if (sekme === 'itibar' && kara.length === 0) itibarYukle()
     if (sekme === 'domainler') domainlerYukle()
@@ -249,9 +260,9 @@ export default function AntivirusPanel() {
   // Koruma duruşu skoru (0-100): açık katman/koruma oranı.
   const korumaAktif = !!(d?.izleyici_aktif && ayar?.gercek_zamanli)
   const tehdit = (d?.toplam_karantina || 0)
-  const posture = tehdit > 0 ? { renk: 'red', metin: 'Tehdit var', ikon: '⚠' }
-    : korumaAktif ? { renk: 'emerald', metin: 'Korunuyor', ikon: '🛡' }
-      : { renk: 'amber', metin: 'Kısmi koruma', ikon: '🛡' }
+  const posture = tehdit > 0 ? { renk: 'red', metin: 'Tehdit var' }
+    : korumaAktif ? { renk: 'emerald', metin: 'Korunuyor' }
+      : { renk: 'amber', metin: 'Kısmi koruma' }
 
   const alan = 'w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
   const dfiltre = domainler.filter(dm => {
@@ -358,7 +369,7 @@ export default function AntivirusPanel() {
             </div>
             {secili.size > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg">
-                <span className="text-sm text-brand-700 dark:text-brand-300">{secili.size} domain seçili</span>
+                <span className="text-sm text-brand-700 dark:text-brand-300">{secili.size} domain seçili{(() => { const gizli = [...secili].filter(x => !dfiltre.some(d => d.id === x)).length; return gizli > 0 ? ` (${gizli} filtre dışı)` : '' })()}</span>
                 <div className="flex gap-2">
                   <button onClick={() => setSecili(new Set())} className="text-xs text-slate-500 hover:underline">Seçimi temizle</button>
                   <button onClick={topluTara} disabled={tarananDom.size > 0}
@@ -373,7 +384,7 @@ export default function AntivirusPanel() {
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}>
                     <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                      <th className={`${T.baslik} w-8`}><input type="checkbox" aria-label="Tümünü seç" className="accent-brand-600 align-middle" checked={dfiltre.length > 0 && dfiltre.every(x => secili.has(x.id))} onChange={e => setSecili(e.target.checked ? new Set(dfiltre.map(x => x.id)) : new Set())} /></th>
+                      <th className={`${T.baslik} w-8`}><input type="checkbox" aria-label="Tümünü seç" className="accent-brand-600 align-middle" checked={dfiltre.length > 0 && dfiltre.every(x => secili.has(x.id))} onChange={e => setSecili(s => { const n = new Set(s); if (e.target.checked) dfiltre.forEach(x => n.add(x.id)); else dfiltre.forEach(x => n.delete(x.id)); return n })} /></th>
                       <th className={T.baslik}>Domain</th><th className={T.baslik}>Kullanıcı</th><th className={T.baslik}>Son tarama</th><th className={T.baslik}>Aktif bulgu</th><th className={T.baslik}>Karantina</th><th className={T.baslik}></th>
                     </tr>
                   </thead>
@@ -616,7 +627,7 @@ export default function AntivirusPanel() {
                   </div>
                   <div className="flex items-center gap-3">
                     <input type="range" min={0} max={kap ? Math.ceil(kap.ram_toplam_mb / 1024) : 4} step={0.25} value={ayar.ram_mb / 1024} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className="flex-1 accent-brand-600" />
-                    <input type="number" min={0} step={0.25} value={Number((ayar.ram_mb / 1024).toFixed(2))} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className={`${alan} w-24`} />
+                    <input type="number" min={0} max={kap ? Math.ceil(kap.ram_toplam_mb / 1024) : undefined} step={0.25} value={Number((ayar.ram_mb / 1024).toFixed(2))} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className={`${alan} w-24`} />
                   </div>
                   <span className="text-xs text-slate-400">0 = otomatik. Toplam: {kap ? `${(kap.ram_toplam_mb / 1024).toFixed(1)} GB` : '—'}. Aşılırsa tarayıcı OOM ile durur (site etkilenmez).</span>
                 </div>
@@ -641,7 +652,7 @@ export default function AntivirusPanel() {
                 <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
                 <button onClick={() => setInceleModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
               </div>
-              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">⚠ Kesik gösterim — yalnızca ilk 64 KB.</div>}
+              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Ikon ad="warn" className="w-3.5 h-3.5" /> Kesik gösterim — yalnızca ilk 64 KB.</div>}
               <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
             </div>
           </div>

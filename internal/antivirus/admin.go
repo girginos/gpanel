@@ -187,13 +187,13 @@ func (h *Handlers) AdminKarantinaGeriYukle(w http.ResponseWriter, r *http.Reques
 
 // AdminKarantinaSil — POST /antivirus/karantina/{bid}/sil
 func (h *Handlers) AdminKarantinaSil(w http.ResponseWriter, r *http.Request) {
-	bid, _, _, _, kar, _, ok := h.adminBulgu(r)
+	bid, _, sk, _, kar, _, ok := h.adminBulgu(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "bulgu bulunamadı")
 		return
 	}
 	if kar != "" {
-		if err := os.Remove(kar); err != nil && !os.IsNotExist(err) {
+		if err := guvenliSil("/home/"+sk, kar); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
 			return
 		}
@@ -204,12 +204,12 @@ func (h *Handlers) AdminKarantinaSil(w http.ResponseWriter, r *http.Request) {
 
 // AdminKarantinaIncele — GET /antivirus/karantina/{bid}/incele (ÇALIŞTIRMADAN)
 func (h *Handlers) AdminKarantinaIncele(w http.ResponseWriter, r *http.Request) {
-	_, _, _, _, kar, _, ok := h.adminBulgu(r)
+	_, _, sk, _, kar, _, ok := h.adminBulgu(r)
 	if !ok || kar == "" {
 		httpx.WriteError(w, http.StatusNotFound, "bulgu bulunamadı")
 		return
 	}
-	f, err := os.Open(kar)
+	f, err := guvenliAc("/home/"+sk, kar)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya açılamadı (silinmiş olabilir)")
 		return

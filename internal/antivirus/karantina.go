@@ -173,7 +173,7 @@ func (h *Handlers) KarantinaSil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kar != "" {
-		if err := os.Remove(kar); err != nil && !os.IsNotExist(err) {
+		if err := guvenliSil("/home/"+sk, kar); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
 			return
 		}
@@ -197,7 +197,7 @@ func (h *Handlers) KarantinaIncele(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "bulgu bu domaine ait değil")
 		return
 	}
-	f, err := os.Open(kar)
+	f, err := guvenliAc("/home/"+sk, kar)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya açılamadı (silinmiş olabilir)")
 		return
@@ -354,5 +354,39 @@ func guvenliGeriTasi(home, kar, orij string, uid, gid int) error {
 	// giremez çünkü destBase az önce rename ile konan gerçek dosyadır.
 	_ = unix.Fchmodat(destFd, destBase, 0o644, 0)
 	_ = unix.Fchownat(destFd, destBase, uid, gid, unix.AT_SYMLINK_NOFOLLOW)
+	return nil
+}
+
+// guvenliAc — kar dosyasini SYMLINK-GUVENLI acar. .karantina'nin ust dizini
+// (/home/<sk>) kiraciya aittir; kiraci .karantina'yi silip yerine symlink
+// koyabilir (CWE-59). evAltDirAc ile hedef kiraci evine capalanir + son bilesen
+// O_NOFOLLOW ile acilir → symlink ise ELOOP/ENOTDIR → reddedilir.
+func guvenliAc(home, yol string) (*os.File, error) {
+	dirFd, err := evAltDirAc(home, filepath.Dir(yol), 0, 0, false)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(dirFd)
+	fd, err := unix.Openat(dirFd, filepath.Base(yol), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+			return nil, errGuvenliYol
+		}
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), yol), nil
+}
+
+// guvenliSil — kar dosyasini SYMLINK-GUVENLI siler (pinlenmis dir-fd + Unlinkat;
+// Unlinkat son bileseni ASLA izlemez → symlink'in kendisi silinir, hedefi degil).
+func guvenliSil(home, yol string) error {
+	dirFd, err := evAltDirAc(home, filepath.Dir(yol), 0, 0, false)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFd)
+	if err := unix.Unlinkat(dirFd, filepath.Base(yol), 0); err != nil && !errors.Is(err, unix.ENOENT) {
+		return err
+	}
 	return nil
 }
