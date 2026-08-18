@@ -479,25 +479,25 @@ export default function AntivirusPanel() {
               <div className="grid gap-5 sm:grid-cols-2 mt-4">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm text-slate-700 dark:text-slate-200">CPU limiti</span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.cpu_yuzde === 0 ? `otomatik${kap ? ` (~${kap.oneri_cpu_yuzde}%)` : ''}` : `${ayar.cpu_yuzde}%`}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-200">CPU limiti (çekirdek)</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.cpu_yuzde === 0 ? `otomatik${kap ? ` (~${(kap.oneri_cpu_yuzde / 100).toFixed(1)})` : ''}` : `${(ayar.cpu_yuzde / 100).toFixed(1)} çekirdek`}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <input type="range" min={0} max={100} step={5} value={ayar.cpu_yuzde} onChange={e => set('cpu_yuzde', Number(e.target.value))} className="flex-1 accent-brand-600" />
-                    <input type="number" min={0} max={100} value={ayar.cpu_yuzde} onChange={e => set('cpu_yuzde', Number(e.target.value))} className={`${alan} w-20`} />
+                    <input type="range" min={0} max={kap ? kap.cpu_cekirdek : 8} step={0.5} value={ayar.cpu_yuzde / 100} onChange={e => set('cpu_yuzde', Math.round(Number(e.target.value) * 100))} className="flex-1 accent-brand-600" />
+                    <input type="number" min={0} max={kap ? kap.cpu_cekirdek : 64} step={0.5} value={ayar.cpu_yuzde / 100} onChange={e => set('cpu_yuzde', Math.round(Number(e.target.value) * 100))} className={`${alan} w-20`} />
                   </div>
-                  <span className="text-xs text-slate-400">0 = otomatik · {kap ? `${kap.cpu_cekirdek} çekirdek` : 'çekirdek sayısına göre'}. %100 = tam bir çekirdek.</span>
+                  <span className="text-xs text-slate-400">0 = otomatik. Sunucu: {kap ? `${kap.cpu_cekirdek} çekirdek` : '—'}. Örn. 2 = iki tam çekirdek.</span>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm text-slate-700 dark:text-slate-200">RAM limiti</span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.ram_mb === 0 ? `otomatik${kap ? ` (~${kap.oneri_ram_mb} MB)` : ''}` : `${ayar.ram_mb} MB`}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-200">RAM limiti (GB)</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.ram_mb === 0 ? `otomatik${kap ? ` (~${(kap.oneri_ram_mb / 1024).toFixed(1)} GB)` : ''}` : `${(ayar.ram_mb / 1024).toFixed(2)} GB`}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <input type="range" min={0} max={kap ? kap.ram_toplam_mb : 4096} step={64} value={ayar.ram_mb} onChange={e => set('ram_mb', Number(e.target.value))} className="flex-1 accent-brand-600" />
-                    <input type="number" min={0} value={ayar.ram_mb} onChange={e => set('ram_mb', Number(e.target.value))} className={`${alan} w-24`} />
+                    <input type="range" min={0} max={kap ? Math.ceil(kap.ram_toplam_mb / 1024) : 4} step={0.25} value={ayar.ram_mb / 1024} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className="flex-1 accent-brand-600" />
+                    <input type="number" min={0} step={0.25} value={Number((ayar.ram_mb / 1024).toFixed(2))} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className={`${alan} w-24`} />
                   </div>
-                  <span className="text-xs text-slate-400">0 = otomatik · {kap ? `toplam ${kap.ram_toplam_mb} MB` : 'toplam RAM /8'}. Aşılırsa tarayıcı OOM ile durdurulur (site etkilenmez).</span>
+                  <span className="text-xs text-slate-400">0 = otomatik. Toplam: {kap ? `${(kap.ram_toplam_mb / 1024).toFixed(1)} GB` : '—'}. Aşılırsa tarayıcı OOM ile durur (site etkilenmez).</span>
                 </div>
               </div>
             </div>
