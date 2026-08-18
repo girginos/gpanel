@@ -20,7 +20,8 @@ export default function DomainAntivirusPage() {
   const [imzaYuk, setImzaYuk] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [kliste, setKliste] = useState<KarantinaKayit[]>([])
-  const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string } | null>(null)
+  const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string; kesik?: boolean } | null>(null)
+  const [klHata, setKlHata] = useState(false)
 
   function yukle() {
     if (!id) return
@@ -63,7 +64,7 @@ export default function DomainAntivirusPage() {
 
   async function kyukle() {
     if (!id) return
-    try { const { data } = await api.get<{ kayitlar: KarantinaKayit[] }>(`/domains/${id}/antivirus/karantina/liste`); setKliste(data.kayitlar || []) } catch { /* sessiz */ }
+    try { const { data } = await api.get<{ kayitlar: KarantinaKayit[] }>(`/domains/${id}/antivirus/karantina/liste`); setKliste(data.kayitlar || []); setKlHata(false) } catch { setKlHata(true) }
   }
   async function geriYukle(k: KarantinaKayit) {
     if (!(await onay({ baslik: 'Geri yükleme', mesaj: `Dosya orijinal konumuna geri yüklensin mi?\n${k.orijinal_yol}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)` }))) return
@@ -72,11 +73,11 @@ export default function DomainAntivirusPage() {
   }
   async function karSil(k: KarantinaKayit) {
     if (!(await onay({ baslik: 'Kalıcı silme', mesaj: `Karantinadaki dosya KALICI silinsin mi?\n${k.orijinal_yol}\n\n(Geri alınamaz.)` }))) return
-    try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle() }
+    try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle(); yukle() }
     catch (e: any) { setHata(apiHata(e)) }
   }
   async function karIncele(k: KarantinaKayit) {
-    try { const { data } = await api.get<{ icerik: string; ikili: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? '[ikili dosya]' : data.icerik }) }
+    try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? '[ikili dosya]' : data.icerik, kesik: data.kesik }) }
     catch (e: any) { setHata(apiHata(e)) }
   }
   async function imzaGuncelle() {
@@ -186,9 +187,12 @@ export default function DomainAntivirusPage() {
         </div>
 
         {/* Karantina yönetimi */}
-        {kliste.length > 0 && (
+        {(kliste.length > 0 || klHata) && (
           <div className="mt-4 lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">🔒 Karantina</h3>
+            {klHata && kliste.length === 0 && (
+              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">Karantina listesi yüklenemedi. <button onClick={kyukle} className="underline">Yeniden dene</button></div>
+            )}
             <div className="lg:overflow-x-auto">
               <table className={`${T.tablo} text-sm`}>
                 <thead className={T.baslikGrubu}>
@@ -232,6 +236,7 @@ export default function DomainAntivirusPage() {
                 <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
                 <button onClick={() => setInceleModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
               </div>
+              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">⚠ Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.</div>}
               <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
             </div>
           </div>

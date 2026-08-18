@@ -64,7 +64,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   }
   function bildirimGit(b: Bildirim) {
     setBAcik(false)
-    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/antivirus`)
+    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/imunify`) // rota adi 'imunify' (App.tsx)
   }
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())

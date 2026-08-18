@@ -8,6 +8,7 @@ package antivirus
 // GERİ ALINABİLİR bir işleme çevirir.
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"os/user"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sys/unix"
 
 	"girginospanel/internal/httpx"
 )
@@ -121,27 +123,34 @@ func (h *Handlers) KarantinaGeriYukle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "karantina/orijinal yol kayıtlı değil — geri yüklenemez")
 		return
 	}
-	if _, err := os.Stat(kar); err != nil {
+	if _, err := os.Lstat(kar); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "karantina dosyası bulunamadı (elle silinmiş olabilir)")
 		return
 	}
-	// 🔴 Orijinal yol boşsa üzerine yazma; hedef zaten varsa reddet (yeni bir
-	// dosya oraya konmuş olabilir — körlemesine ezmeyiz).
-	if _, err := os.Stat(orij); err == nil {
-		httpx.WriteError(w, http.StatusConflict, "orijinal konumda zaten bir dosya var — elle çözün")
+	uid, gid, uok := kiraciUID(sk)
+	if !uok {
+		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(orij), 0o755); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin oluşturulamadı")
+	// 🔴 SYMLINK-GÜVENLİ geri yükleme. Panel-server ROOT çalışır ve orij yolu
+	// TAMAMEN kiracının mülkündedir (/home/<sk>/public_html/...). os.Rename ara
+	// dizin bileşenlerindeki symlink'leri İZLER (CWE-59) ve os.Stat↔os.Rename
+	// arası TOCTOU (CWE-367) vardır: kiracı bir ara bileşeni başka kiracının
+	// public_html'ine symlink yapıp root'a ev DIŞINA yazdırabilir → cross-tenant
+	// RCE. Çözüm: openat(O_NOFOLLOW) zinciriyle hedefi kiracı evine ÇAPALA, tüm
+	// FS işlemlerini pinlenmiş dir-fd'lere göre (renameat/fchmodat/fchownat) yap.
+	home := "/home/" + sk
+	if err := guvenliGeriTasi(home, kar, orij, uid, gid); err != nil {
+		switch {
+		case errors.Is(err, os.ErrExist):
+			httpx.WriteError(w, http.StatusConflict, "orijinal konumda zaten bir dosya var — elle çözün")
+		case errors.Is(err, errGuvenliYol):
+			httpx.WriteError(w, http.StatusBadRequest, "hedef yol güvenli değil (symlink/ev dışı) — geri yüklenmedi")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, "geri yüklenemedi: "+err.Error())
+		}
 		return
 	}
-	if err := os.Rename(kar, orij); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "geri yüklenemedi: "+err.Error())
-		return
-	}
-	_ = os.Chmod(orij, 0o644)
-	// Sahiplik: kiracıya ver (root taşıdı).
-	chownKiraci(orij, sk)
 	_, _ = h.DB.Exec(`UPDATE av_bulgular SET durum='geri_yuklendi', karantina=0 WHERE id=?`, bid)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "geri_yuklendi": orij})
 }
@@ -236,4 +245,114 @@ func chownKiraci(yol, sk string) {
 	if e1 == nil && e2 == nil {
 		_ = os.Chown(yol, uid, gid)
 	}
+}
+
+
+var errGuvenliYol = errors.New("guvenli-olmayan yol (symlink/ev disi)")
+
+// kiraciUID — sk kullanıcısının uid/gid'i (fail-closed).
+func kiraciUID(sk string) (int, int, bool) {
+	u, err := user.Lookup(sk)
+	if err != nil {
+		return 0, 0, false
+	}
+	uid, e1 := strconv.Atoi(u.Uid)
+	gid, e2 := strconv.Atoi(u.Gid)
+	if e1 != nil || e2 != nil {
+		return 0, 0, false
+	}
+	return uid, gid, true
+}
+
+// evAltDirAc — home kökünden hedefDir'e bileşen bileşen O_NOFOLLOW ile iner.
+// Bir bileşen symlink ise (ELOOP) ya da hedef home dışına çıkıyorsa errGuvenliYol
+// döner. eksikOlustur=true ise olmayan ara dizinleri kiracı uid'iyle üretir.
+// Dönen fd hedefDir'in GERÇEK (symlink'siz) halidir; çağıran KAPATMALI.
+func evAltDirAc(home, hedefDir string, uid, gid int, eksikOlustur bool) (int, error) {
+	home = filepath.Clean(home)
+	hedefDir = filepath.Clean(hedefDir)
+	if hedefDir != home && !strings.HasPrefix(hedefDir+"/", home+"/") {
+		return -1, errGuvenliYol
+	}
+	// home güven çapasıdır (root-yönetimli); NOFOLLOW olmadan açılır.
+	dirFd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	if hedefDir == home {
+		return dirFd, nil
+	}
+	rel, err := filepath.Rel(home, hedefDir)
+	if err != nil {
+		unix.Close(dirFd)
+		return -1, errGuvenliYol
+	}
+	for _, parca := range strings.Split(rel, "/") {
+		if parca == "" || parca == "." || parca == ".." {
+			unix.Close(dirFd)
+			return -1, errGuvenliYol
+		}
+		next, err := unix.Openat(dirFd, parca, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err != nil {
+			if eksikOlustur && errors.Is(err, unix.ENOENT) {
+				if e := unix.Mkdirat(dirFd, parca, 0o755); e != nil {
+					unix.Close(dirFd)
+					return -1, e
+				}
+				_ = unix.Fchownat(dirFd, parca, uid, gid, unix.AT_SYMLINK_NOFOLLOW)
+				next, err = unix.Openat(dirFd, parca, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			}
+			if err != nil {
+				unix.Close(dirFd)
+				// ELOOP: bileşen symlink (O_NOFOLLOW). ENOTDIR: bileşen dizin değil
+				// ya da symlink-to-dir O_DIRECTORY ile reddedildi. İkisi de
+				// symlink/kötü-yol saldırısı işaretidir → güvenli-değil.
+				if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+					return -1, errGuvenliYol
+				}
+				return -1, err
+			}
+		}
+		unix.Close(dirFd)
+		dirFd = next
+	}
+	return dirFd, nil
+}
+
+// guvenliGeriTasi — kar dosyasını orij'e symlink-güvenli taşır. Root ayrıcalığı
+// altında bile kiracı-denetimli yol üzerinden ev DIŞINA yazımı engeller: hem
+// kaynak hem hedef dizin openat(O_NOFOLLOW) ile kiracı evine çapalanır, taşıma
+// ve izin/sahiplik işlemleri pinlenmiş dir-fd'lere göre yapılır (TOCTOU-güvenli).
+func guvenliGeriTasi(home, kar, orij string, uid, gid int) error {
+	destDir := filepath.Dir(orij)
+	destBase := filepath.Base(orij)
+	karDir := filepath.Dir(kar)
+	karBase := filepath.Base(kar)
+
+	destFd, err := evAltDirAc(home, destDir, uid, gid, true)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(destFd)
+
+	// Çakışma: hedef zaten var mı (symlink izlemeden, pinlenmiş fd'ye göre).
+	var st unix.Stat_t
+	if unix.Fstatat(destFd, destBase, &st, unix.AT_SYMLINK_NOFOLLOW) == nil {
+		return os.ErrExist
+	}
+
+	karFd, err := evAltDirAc(home, karDir, uid, gid, false)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(karFd)
+
+	if err := unix.Renameat(karFd, karBase, destFd, destBase); err != nil {
+		return err
+	}
+	// İzin/sahiplik: pinlenmiş hedef dir-fd'ye göre; symlink yeniden devreye
+	// giremez çünkü destBase az önce rename ile konan gerçek dosyadır.
+	_ = unix.Fchmodat(destFd, destBase, 0o644, 0)
+	_ = unix.Fchownat(destFd, destBase, uid, gid, unix.AT_SYMLINK_NOFOLLOW)
+	return nil
 }

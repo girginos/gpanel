@@ -261,9 +261,12 @@ func (h *Handlers) Karantina(w http.ResponseWriter, r *http.Request) {
 	// operatör geri yükleyebilsin — sessizce kaybolmasın.
 	if res != nil {
 		if n, _ := res.RowsAffected(); n == 0 {
+			// 🔴 tarama_id NOT NULL, default YOK ve FK YOK → 0 = "taramasız manuel
+			// karantina" sentinel. Atlanırsa INSERT sessizce ERROR 1364 ile düşer ve
+			// dosya .karantina'da DB kaydı olmadan orphan kalır (geri yüklenemez).
 			_, _ = h.DB.Exec(
-				`INSERT INTO av_bulgular (domain_id, dosya, imza, motor, seviye, durum, karantina, orijinal_yol, karantina_yol)
-				 VALUES (?,?,?,?,?,?,?,?,?)`,
+				`INSERT INTO av_bulgular (tarama_id, domain_id, dosya, imza, motor, seviye, durum, karantina, orijinal_yol, karantina_yol)
+				 VALUES (0,?,?,?,?,?,?,?,?,?)`,
 				id, clean, "manuel-karantina", "operator", "kritik", "karantina", 1, clean, hedef)
 		}
 	}
