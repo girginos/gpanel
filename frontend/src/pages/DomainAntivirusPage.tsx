@@ -8,6 +8,7 @@ import { useDialog } from '@/components/Dialog'
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
 type Durum = { clamav: boolean; imza_tarihi: string; kullanici: string; son_tarama: Tarama | null; bulgular: Bulgu[] }
+type KarantinaKayit = { id: number; orijinal_yol: string; imza: string; seviye: string; puan: number; durum: string; tarih: string; boyut: number; mevcut: boolean }
 
 export default function DomainAntivirusPage() {
   const { onay } = useDialog()
@@ -18,6 +19,8 @@ export default function DomainAntivirusPage() {
   const [tarariyor, setTarariyor] = useState(false)
   const [imzaYuk, setImzaYuk] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [kliste, setKliste] = useState<KarantinaKayit[]>([])
+  const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string } | null>(null)
 
   function yukle() {
     if (!id) return
@@ -26,7 +29,7 @@ export default function DomainAntivirusPage() {
       if (r.data.son_tarama?.durum === 'calisiyor') startPoll(r.data.son_tarama.id)
     }).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
   }
-  useEffect(() => { yukle(); return () => { if (pollRef.current) clearInterval(pollRef.current) } }, [id])
+  useEffect(() => { yukle(); kyukle(); return () => { if (pollRef.current) clearInterval(pollRef.current) } }, [id])
 
   function startPoll(sid: number) {
     setTarariyor(true)
@@ -54,10 +57,28 @@ export default function DomainAntivirusPage() {
   async function karantina(b: Bulgu) {
     if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `Dosya karantinaya alınsın mı?\n${b.dosya}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)` }))) return
     setHata(null)
-    try { await api.post(`/domains/${id}/antivirus/karantina`, { dosya: b.dosya }); yukle() }
+    try { await api.post(`/domains/${id}/antivirus/karantina`, { dosya: b.dosya }); yukle(); kyukle() }
     catch (e) { setHata(apiHata(e, 'Karantinaya alınamadı')) }
   }
 
+  async function kyukle() {
+    if (!id) return
+    try { const { data } = await api.get<{ kayitlar: KarantinaKayit[] }>(`/domains/${id}/antivirus/karantina/liste`); setKliste(data.kayitlar || []) } catch { /* sessiz */ }
+  }
+  async function geriYukle(k: KarantinaKayit) {
+    if (!(await onay({ baslik: 'Geri yükleme', mesaj: `Dosya orijinal konumuna geri yüklensin mi?\n${k.orijinal_yol}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)` }))) return
+    try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/geri-yukle`, {}); kyukle(); yukle() }
+    catch (e: any) { setHata(apiHata(e)) }
+  }
+  async function karSil(k: KarantinaKayit) {
+    if (!(await onay({ baslik: 'Kalıcı silme', mesaj: `Karantinadaki dosya KALICI silinsin mi?\n${k.orijinal_yol}\n\n(Geri alınamaz.)` }))) return
+    try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle() }
+    catch (e: any) { setHata(apiHata(e)) }
+  }
+  async function karIncele(k: KarantinaKayit) {
+    try { const { data } = await api.get<{ icerik: string; ikili: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? '[ikili dosya]' : data.icerik }) }
+    catch (e: any) { setHata(apiHata(e)) }
+  }
   async function imzaGuncelle() {
     setImzaYuk(true); setHata(null)
     try { await api.post(`/domains/${id}/antivirus/imza-guncelle`, {}); yukle() }
@@ -163,6 +184,58 @@ export default function DomainAntivirusPage() {
             </div>
           )}
         </div>
+
+        {/* Karantina yönetimi */}
+        {kliste.length > 0 && (
+          <div className="mt-4 lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">🔒 Karantina</h3>
+            <div className="lg:overflow-x-auto">
+              <table className={`${T.tablo} text-sm`}>
+                <thead className={T.baslikGrubu}>
+                  <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                    <th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>Durum</th><th className={T.baslik}>Tarih</th><th className={T.baslik}></th>
+                  </tr>
+                </thead>
+                <tbody className={T.govde}>
+                  {kliste.map(k => (
+                    <tr key={k.id} className={T.satir}>
+                      <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-xs`}>{k.orijinal_yol}</td>
+                      <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
+                      <td className={T.hucre} data-etiket="Durum">
+                        {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
+                          : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
+                          : <span className="text-xs text-slate-400">🗑 Silindi</span>}
+                      </td>
+                      <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
+                      <td className={`${T.hucreAksiyon} lg:text-right`}>
+                        {k.durum === 'karantina' && k.mevcut && (
+                          <span className="flex gap-2 lg:justify-end whitespace-nowrap">
+                            <button onClick={() => karIncele(k)} className="text-xs text-slate-500 hover:underline">İncele</button>
+                            <button onClick={() => geriYukle(k)} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Geri yükle</button>
+                            <button onClick={() => karSil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* İnceleme modalı — dosya ÇALIŞTIRILMADAN düz metin gösterilir */}
+        {inceleModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setInceleModal(null)}>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
+                <button onClick={() => setInceleModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
+              </div>
+              <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
       </div>

@@ -251,7 +251,22 @@ func (h *Handlers) Karantina(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = os.Chmod(hedef, 0o000) // çalıştırılamaz/okunamaz
-	_, _ = h.DB.Exec(`UPDATE av_bulgular SET karantina=1 WHERE domain_id=? AND dosya=?`, id, clean)
+	// 🔴 durum/orijinal_yol/karantina_yol'u DA yaz: yeni karantina yönetimi
+	// (liste/geri-yükle/sil/incele) bu alanlara bakar. Yalnız karantina=1 yazmak
+	// dosyayı taşır ama panelde "Karantina" bölümünde GÖRÜNMEZ → geri yüklenemez.
+	res, _ := h.DB.Exec(
+		`UPDATE av_bulgular SET karantina=1, durum='karantina', orijinal_yol=?, karantina_yol=?
+		   WHERE domain_id=? AND dosya=?`, clean, hedef, id, clean)
+	// Bulgu kaydı yoksa (ör. dış tarama) elle bir karantina kaydı oluştur ki
+	// operatör geri yükleyebilsin — sessizce kaybolmasın.
+	if res != nil {
+		if n, _ := res.RowsAffected(); n == 0 {
+			_, _ = h.DB.Exec(
+				`INSERT INTO av_bulgular (domain_id, dosya, imza, motor, seviye, durum, karantina, orijinal_yol, karantina_yol)
+				 VALUES (?,?,?,?,?,?,?,?,?)`,
+				id, clean, "manuel-karantina", "operator", "kritik", "karantina", 1, clean, hedef)
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "hedef": hedef})
 }
 
@@ -308,14 +323,18 @@ func avajanIleTara(ctx context.Context, root string) (int, []Bulgu, bool) {
 	// systemd-run: --scope + --slice ile ajanı av dilimine sokar; --wait sonucu
 	// bekler. Slice yoksa systemd-run yine çalışır (default slice), ajan yine
 	// kendi motorunu kullanır — yani en kötü durumda motor doğru, limit yok.
+	// 🔴 --json, pozisyonel <root>'tan ÖNCE gelmeli: Go flag paketi ilk pozisyonel
+	// argümanda ayrıştırmayı DURDURUR. "--tara root --json" verilirse --json hiç
+	// okunmaz → ajan METİN döker → panelin json.Unmarshal'ı çöker → panel sessizce
+	// clamscan'e düşer (bizim motor DEVREDIŞI). "--tara --json root" doğru sıradır.
 	args := []string{"--scope", "--quiet", "--slice=girginos-av.slice",
-		avajanYolu, "--tara", root, "--json"}
+		avajanYolu, "--tara", "--json", root}
 	cmd := exec.CommandContext(ctx, "systemd-run", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		// systemd-run yoksa (konteyner/eski) doğrudan çalıştır — motor doğru,
 		// limit yok. Motor > limitsizlik; sessiz clamscan'e düşmekten iyidir.
-		cmd = exec.CommandContext(ctx, avajanYolu, "--tara", root, "--json")
+		cmd = exec.CommandContext(ctx, avajanYolu, "--tara", "--json", root)
 		out, err = cmd.Output()
 		if err != nil {
 			return 0, nil, false

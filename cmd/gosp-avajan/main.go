@@ -158,7 +158,13 @@ func (a *ajan) tamTarama(kokler []string) {
 	}
 
 	// 🔴 Tarama kaydı aç: bulgular buna bağlanır, panel görsün.
-	a.taramaID = taramaBasla(a.db, a.kaynak, a.ayar.Kapsam)
+	// DURUMSUZ (--json) mod: panel kendi tarama satırını sahiplenir ve bulguları
+	// JSON'dan yazar. Ajan burada İKİNCİ bir satır açmamalı — yoksa panel scan
+	// başına çift av_taramalar satırı oluşur ve panelin boş satırı "temiz" diye
+	// render edilir ("başarısızlık güven olarak render"). Bkz. bildirim/oto-karantina.
+	if !a.json {
+		a.taramaID = taramaBasla(a.db, a.kaynak, a.ayar.Kapsam)
+	}
 
 	basla := time.Now()
 	haric := a.ayar.HaricListesi()
@@ -183,7 +189,9 @@ func (a *ajan) tamTarama(kokler []string) {
 	close(is)
 	wg.Wait()
 
-	taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
+	if !a.json {
+		taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
+	}
 	a.ozetYaz(basla, kokler)
 }
 
@@ -217,6 +225,14 @@ func (a *ajan) dosyaIsle(yol string) {
 	a.bulunan++
 	a.bulgular = append(a.bulgular, b)
 	a.mu.Unlock()
+
+	// 🔴 DURUMSUZ (--json / panel) mod: yalnız tespit + JSON çıktısı. Kalıcı DB
+	// kaydı, bildirim ve OTO-KARANTINA burada YAPILMAZ — panel "Tara" bir operatör
+	// eylemidir; bulguları operatör inceler ve karantinayı KENDİ tetikler. Otonom
+	// yollar (--izle, zamanlı --tara) aşağıdaki tam entegrasyonu çalıştırır.
+	if a.json {
+		return
+	}
 
 	// OTO-KARANTINA: cekirdek dosyalari (wp-includes/wp-admin) ASLA karantinaya
 	// alinmaz -- silmek/tasimak siteyi bozar. Cekirdek tespiti RAPORLANIR;

@@ -8,6 +8,7 @@ import { useAuth } from '@/store/auth'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
 
+type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 type AramaDomain = { id: number; alan_adi: string; sistem_kullanici: string }
 type AramaSub = { id: number; tam_ad: string; parent_id: number; sistem_kullanici: string }
 type Sonuc = { tip: 'sayfa' | 'domain' | 'alt'; ad: string; alt: string; yol: string; key: string }
@@ -44,6 +45,27 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const kullanici = useAuth((s) => s.kullanici)
   const cikis = useAuth((s) => s.cikis)
   const navigate = useNavigate()
+  async function bildirimYukle() {
+    try {
+      const { data } = await api.get<{ bildirimler: Bildirim[]; okunmamis: number }>('/bildirimler')
+      setBildirimler(data.bildirimler || []); setOkunmamis(data.okunmamis || 0)
+    } catch { /* sessiz — badge kritik degil */ }
+  }
+  useEffect(() => {
+    bildirimYukle()
+    const t = setInterval(bildirimYukle, 60000)
+    return () => clearInterval(t)
+  }, [])
+  async function bildirimAc() {
+    const yeni = !bAcik; setBAcik(yeni)
+    if (yeni && okunmamis > 0) {
+      try { await api.post('/bildirimler/0/okundu', {}); setOkunmamis(0) } catch { /* sessiz */ }
+    }
+  }
+  function bildirimGit(b: Bildirim) {
+    setBAcik(false)
+    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/antivirus`)
+  }
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())
 
@@ -54,6 +76,10 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const veri = useRef<{ domains: AramaDomain[]; subler: AramaSub[] } | null>(null)
   const [yuklendi, setYuklendi] = useState(false)
   const kutuRef = useRef<HTMLDivElement>(null)
+  const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
+  const [okunmamis, setOkunmamis] = useState(0)
+  const [bAcik, setBAcik] = useState(false)
+  const bRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const h = (e: Event) => setTema((e as CustomEvent<Theme>).detail)
@@ -63,7 +89,10 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
 
   // dışarı tıklama → kapat
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) setAcik(false) }
+    const h = (e: MouseEvent) => {
+      if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) setAcik(false)
+      if (bRef.current && !bRef.current.contains(e.target as Node)) setBAcik(false)
+    }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
@@ -212,11 +241,33 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             </svg>
           )}
         </button>
-        <button className="hidden sm:inline-flex p-2 text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-400 dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-slate-800 rounded-md transition" title="Bildirimler">
+        <div className="relative" ref={bRef}>
+        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition" title="Bildirimler">
+          {okunmamis > 0 && (
+            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
+          )}
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
         </button>
+          {bAcik && (
+            <div className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
+              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200">Bildirimler</div>
+              {bildirimler.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Bildirim yok</div>
+              ) : bildirimler.map(b => (
+                <button key={b.id} onClick={() => bildirimGit(b)} className="w-full text-left px-4 py-2.5 border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition flex gap-2.5">
+                  <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${b.seviye === 'kritik' ? 'bg-red-500' : b.seviye === 'uyari' ? 'bg-amber-500' : 'bg-slate-400'}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{b.baslik}</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{b.mesaj}</span>
+                    <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{b.tarih}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="relative">
           <button
