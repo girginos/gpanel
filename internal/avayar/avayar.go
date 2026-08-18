@@ -39,6 +39,9 @@ type Ayarlar struct {
 	IsParcacigi    int    `json:"is_parcacigi"`
 	DosyaHizSn     int    `json:"dosya_hiz_sn"`
 	ZamanliSaat    string `json:"zamanli_saat"`
+	// Dinamik yük eşiği: sistem 1-dk yük ortalaması bu (çekirdek yüzdesi)
+	// değeri aşınca tarayıcı kendini duraklatır. 0 = kapalı (yalnız cgroup).
+	YukEsigi       int    `json:"yuk_esigi"`
 }
 
 // Kapasite — sunucunun ölçülen kaynakları ve önerilen limitler.
@@ -155,11 +158,11 @@ func Oku(ctx context.Context, db *sql.DB) (Ayarlar, error) {
 	var a Ayarlar
 	err := db.QueryRowContext(ctx, `SELECT gercek_zamanli, zamanli_tarama, wp_butunluk,
 		kural_motoru, konum_sezgileri, oto_karantina, esik_kritik, kapsam, haric_yollar,
-		cpu_yuzde, ram_mb, io_agirlik, is_parcacigi, dosya_hiz_sn, zamanli_saat
+		cpu_yuzde, ram_mb, io_agirlik, is_parcacigi, dosya_hiz_sn, zamanli_saat, yuk_esigi
 		FROM av_ayarlar WHERE id=1`).
 		Scan(&a.GercekZamanli, &a.ZamanliTarama, &a.WPButunluk, &a.KuralMotoru,
 			&a.KonumSezgileri, &a.OtoKarantina, &a.EsikKritik, &a.Kapsam, &a.HaricYollar,
-			&a.CPUYuzde, &a.RAMMb, &a.IOAgirlik, &a.IsParcacigi, &a.DosyaHizSn, &a.ZamanliSaat)
+			&a.CPUYuzde, &a.RAMMb, &a.IOAgirlik, &a.IsParcacigi, &a.DosyaHizSn, &a.ZamanliSaat, &a.YukEsigi)
 	return a, err
 }
 
@@ -177,11 +180,11 @@ func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
 	_, err := db.ExecContext(ctx, `UPDATE av_ayarlar SET
 		gercek_zamanli=?, zamanli_tarama=?, wp_butunluk=?, kural_motoru=?, konum_sezgileri=?,
 		oto_karantina=?, esik_kritik=?, kapsam=?, haric_yollar=?,
-		cpu_yuzde=?, ram_mb=?, io_agirlik=?, is_parcacigi=?, dosya_hiz_sn=?, zamanli_saat=?
+		cpu_yuzde=?, ram_mb=?, io_agirlik=?, is_parcacigi=?, dosya_hiz_sn=?, zamanli_saat=?, yuk_esigi=?
 		WHERE id=1`,
 		a.GercekZamanli, a.ZamanliTarama, a.WPButunluk, a.KuralMotoru, a.KonumSezgileri,
 		a.OtoKarantina, a.EsikKritik, a.Kapsam, a.HaricYollar,
-		a.CPUYuzde, a.RAMMb, a.IOAgirlik, a.IsParcacigi, a.DosyaHizSn, a.ZamanliSaat)
+		a.CPUYuzde, a.RAMMb, a.IOAgirlik, a.IsParcacigi, a.DosyaHizSn, a.ZamanliSaat, a.YukEsigi)
 	if err != nil {
 		return err
 	}

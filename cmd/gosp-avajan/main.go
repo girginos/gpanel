@@ -29,12 +29,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -115,6 +117,7 @@ type ajan struct {
 
 	// DB entegrasyonu: tarama kaydı + domain önbelleği.
 	taramaID int64
+	yuk      int64 // atomik: sistem load1 × 100 (dinamik throttle)
 	domCache *domainCache
 	kaynak   string // panel | ajan-zamanli | ajan-izle
 
@@ -143,6 +146,13 @@ func (a *ajan) tamTarama(kokler []string) {
 	}
 
 	is := make(chan string, 256)
+	// 🔴 DİNAMİK YÜK THROTTLE: cgroup mutlak tavanı garanti eder ama tarama
+	// yine boştaki çekirdeği doldurur. yuk_esigi>0 ise sistem 1-dk yükü eşiği
+	// aşınca tarayıcı kendini duraklatır → gerçek trafik/işler önceliklenir.
+	yukDur := make(chan struct{})
+	if a.ayar.YukEsigi > 0 {
+		go a.yukIzle(yukDur)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < isSayisi; i++ {
 		wg.Add(1)
@@ -152,6 +162,7 @@ func (a *ajan) tamTarama(kokler []string) {
 				if tik != nil {
 					<-tik
 				}
+				a.yukBekle()
 				a.dosyaIsle(yol)
 			}
 		}()
@@ -188,11 +199,43 @@ func (a *ajan) tamTarama(kokler []string) {
 	}
 	close(is)
 	wg.Wait()
+	close(yukDur)
 
 	if !a.json {
 		taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
 	}
 	a.ozetYaz(basla, kokler)
+}
+
+// yukIzle — /proc/loadavg'i 2sn'de bir okur, load1×100'u atomik saklar.
+func (a *ajan) yukIzle(dur chan struct{}) {
+	for {
+		if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+			var l float64
+			_, _ = fmt.Sscanf(string(b), "%f", &l)
+			atomic.StoreInt64(&a.yuk, int64(l*100))
+		}
+		select {
+		case <-dur:
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// yukBekle — sistem yükü eşiği (yuk_esigi% × çekirdek) aşarken duraklar.
+// En fazla ~5 sn bekler sonra ilerler: kalıcı yüklü sunucuda tarama durmaz.
+func (a *ajan) yukBekle() {
+	if a.ayar.YukEsigi <= 0 {
+		return
+	}
+	esik := int64(a.ayar.YukEsigi) * int64(runtime.NumCPU()) // load1×100 birimi
+	for i := 0; i < 50; i++ {
+		if atomic.LoadInt64(&a.yuk) <= esik {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (a *ajan) dosyaIsle(yol string) {
