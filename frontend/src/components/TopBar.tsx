@@ -64,7 +64,10 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   }
   function bildirimGit(b: Bildirim) {
     setBAcik(false)
-    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/imunify`) // rota adi 'imunify' (App.tsx)
+    // Antivirus bildirimleri (DB tarama sunucu-geneli domain_id=0 dahil) merkezi
+    // /antivirus paneline gider; domainli AV bulgusu da orada listelenir.
+    if (b.kategori === 'antivirus') { navigate('/antivirus'); return }
+    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/imunify`)
   }
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())
