@@ -70,6 +70,7 @@ import (
 	"girginospanel/internal/users"
 	"girginospanel/internal/uygulama"
 	"girginospanel/internal/waf"
+	"girginospanel/internal/avayar"
 	"girginospanel/internal/websec"
 	"girginospanel/internal/wordpress"
 
@@ -169,6 +170,7 @@ func main() {
 	provisioner.SetYasakliKontrolu(domainyasak.Yasakli)
 	oturumbostaH := &oturumbosta.Handler{DB: d}
 	websecH := &websec.Handler{DB: d}
+	avAyarH := &avayar.Handlers{DB: d}
 	panelhost.DB = d
 	panelhost.IsRestartTemizle() // yarım kalan işleri temizle
 	panelhostH := &panelhost.Handler{}
@@ -367,6 +369,8 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/websec/status", websecH.Status)
 			r.With(middleware.AdminOnly).Get("/websec/findings", websecH.Findings)
 			r.With(middleware.AdminOnly).Get("/websec/apps", websecH.Apps)
+			r.With(middleware.AdminOnly).Get("/antivirus/ayarlar", avAyarH.Getir)
+			r.With(middleware.AdminOnly).Put("/antivirus/ayarlar", avAyarH.Kaydet)
 			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
 			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
 			// Panel Hostname & SSL (admin only)
