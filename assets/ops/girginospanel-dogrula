@@ -298,8 +298,33 @@ esac
 
 # ══════════════════════════════════════════════════════════════════════
 bas "nginx yapilandirmasi"
-if nginx -t >/dev/null 2>&1; then gec "nginx -t" "gecerli"
-else dus "nginx -t" "yapilandirma GECERSIZ — reload'da patlar"; fi
+# 🔴 `nginx -t >/dev/null 2>&1` SADECE cikis koduna bakar ve UYARILARI YUTAR.
+# Bu bize pahaliya patladi: nginx aylardir
+#     [warn] no "fastcgi_cache_key" for "fastcgi_cache"
+# diyordu; anahtar tanimsiz oldugu icin TUM SAYFALAR md5("") adli TEK onbellek
+# girdisini paylasiyor ve ziyaretciye yanlis sayfa donuyordu. Uyari orada
+# duruyordu, biz bakmiyorduk. Artik uyarilari da RAPORLUYORUZ.
+_ngx=$(nginx -t 2>&1)
+if [ $? -ne 0 ]; then
+  dus "nginx -t" "yapilandirma GECERSIZ — reload'da patlar"
+else
+  gec "nginx -t" "gecerli"
+fi
+# Bilinen zararsiz gurultuyu ayikla, kalan uyarilari goster.
+_ngxw=$(printf '%s
+' "$_ngx" | grep -i "\[warn\]" | grep -v "conflicting server name")
+if [ -n "$_ngxw" ]; then
+  # 🔴 cache_key uyarisi ICERIK KARISMASI demektir — bunu uyari degil KRITIK say.
+  case "$_ngxw" in
+    *fastcgi_cache_key*)
+      dus "nginx UYARILARI" "fastcgi_cache_key TANIMSIZ — tum sayfalar tek onbellek girdisini paylasir (ziyaretci yanlis sayfa gorur)" ;;
+    *)
+      uyar "nginx UYARILARI" "$(printf '%s' "$_ngxw" | head -3 | tr '
+' ' ')" ;;
+  esac
+else
+  gec "nginx uyarilari" "yok"
+fi
 
 # 🔴 URETIM YOLUYLA olc: izin bitine bakmak yetmez, nginx kullanicisi
 # gercekten girebiliyor mu? Ust dizin 0700 root:root kalirsa alt dizin dogru

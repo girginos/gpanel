@@ -84,6 +84,22 @@ const cacheZoneBody = `# GirginOSPanel tarafından otomatik yönetilir — ELLE 
 # vhost'lar "fastcgi_cache girgincache" kullanır; zone tanımı burada garanti edilir.
 # Her vhost render'ında ve panel açılışında yeniden yazılır (idempotent).
 fastcgi_cache_path ` + cacheZoneDir + ` levels=1:2 keys_zone=` + cacheZoneName + `:100m max_size=1g inactive=60m use_temp_path=off;
+
+# 🔴 CACHE ANAHTARI — TANIMLI DEGILSE TUM SAYFALAR TEK GIRDIYI PAYLASIR.
+# nginx'in "fastcgi_cache_key" icin VARSAYILANI YOKTUR; tanimsizken yalnizca
+#   nginx: [warn] no "fastcgi_cache_key" for "fastcgi_cache"
+# uyarisi verir ve calismaya DEVAM eder. Anahtar bos dize olur, dolayisiyla
+# onbellek dosyasinin adi md5("") = d41d8cd98f00b204e9800998ecf8427e olur ve
+# SITEDEKI HER SAYFA AYNI DOSYAYA yazilir/oradan okunur.
+#
+# Canli sonucu (49.12.158.182, versilo.net uzerinde olculdu): "/", "/wp-json/"
+# ve var olmayan "/rastgele/" adresleri ANA SAYFAYLA birebir ayni 70236 bayti
+# dondu. Onbellek temizlense bile ilk istekten sonra ayni sey tekrarlaniyordu.
+# Ziyaretci yanlis sayfayi gorur; bu bir icerik karismasi hatasidir.
+#
+# scheme+method+host+request_uri: HTTP/HTTPS, GET/HEAD, cok-alanli sunucu ve
+# sorgu dizesi ayrimini birlikte saglar.
+fastcgi_cache_key "$scheme$request_method$host$request_uri";
 `
 
 // zoneDefinedElsewhereRe: nginx.conf veya başka bir conf.d dosyasında elle
