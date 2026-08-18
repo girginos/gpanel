@@ -147,6 +147,9 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 
 WPloop:
 	for _, k := range kurulumlar {
+		// Envanter icin BU kurulumun bulgu sayisi ayri tutulur; toplamBulgu
+		// tum ekosistemlerin toplamidir ve tek kuruluma atfedilemez.
+		wpKurulumBulgu := 0
 		if ctx.Err() != nil {
 			break WPloop
 		}
@@ -169,7 +172,9 @@ WPloop:
 					break WPloop
 				}
 			}
-			toplamBulgu += paketKarsilastirveKaydet(ctx, db, &k, "plugin", p, zaflar)
+			n := paketKarsilastirveKaydet(ctx, db, &k, "plugin", p, zaflar)
+			toplamBulgu += n
+			wpKurulumBulgu += n
 		}
 		// Temalar
 		for _, t := range k.Temalar {
@@ -190,8 +195,14 @@ WPloop:
 					break WPloop
 				}
 			}
-			toplamBulgu += paketKarsilastirveKaydet(ctx, db, &k, "theme", t, zaflar)
+			n := paketKarsilastirveKaydet(ctx, db, &k, "theme", t, zaflar)
+			toplamBulgu += n
+			wpKurulumBulgu += n
 		}
+		// Bulgu 0 olsa BILE yaz — envanterin asil degeri zaten budur:
+		// "tarandi, temiz cikti" ile "hic bakilmadi" ayrimi.
+		envanterYaz(ctx, db, k.DomainID, "wordpress", k.Yol, k.CoreSurum,
+			len(k.Eklentiler)+len(k.Temalar), wpKurulumBulgu)
 	}
 
 	// 3) Node.js — package-lock.json / package.json → OSV npm
@@ -210,6 +221,7 @@ WPloop:
 			n, ok := nodejsTara(ctx, db, &k)
 			toplamBulgu += n
 			if ok { nodeFeedOK = true }
+			envanterYaz(ctx, db, k.DomainID, "nodejs", k.Yol, "", len(k.Paketler), n)
 		}
 	}
 
@@ -229,6 +241,7 @@ WPloop:
 			n, ok := phpTara(ctx, db, &k)
 			toplamBulgu += n
 			if ok { phpFeedOK = true }
+			envanterYaz(ctx, db, k.DomainID, "php-composer", k.Yol, "", len(k.Paketler), n)
 		}
 	}
 
@@ -274,6 +287,10 @@ WPloop:
 			sorgu += ` AND domain_id IN (` + strings.Join(domYer, ",") + `)`
 		}
 		_, _ = db.ExecContext(yazCtx, sorgu, sArgs...)
+		// Envanter de ayni solma mantigina tabi: silinen site / kaldirilan
+		// WordPress envanterde kalirsa panel var olmayan bir kurulumu
+		// "tarandi" diye gosterir.
+		envanterSolmaTemizle(yazCtx, db, stale, basariliApps, domainIDs)
 	} else {
 		log.Printf("websec: solma temizliği atlandı — hiçbir feed başarılı yanıt vermedi (network outage şüphesi)")
 	}

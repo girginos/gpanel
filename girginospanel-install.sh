@@ -20,6 +20,18 @@ case ":$PATH:" in
   *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
 esac
 
+# 🔴 AYRISTIRMA ICIN LC_ALL=C ZORUNLU — TURKCE LOCALE REGEX ARALIGINI BOZUYOR.
+# Olculdu (31.56.47.190, LANG=tr_TR.UTF-8):
+#     printf '@CT@ audit_log' | grep -oE '@CT@ [a-zA-Z0-9_]+'   ->  "@CT@ aud"
+#     ayni komut LC_ALL=C ile                                    ->  "@CT@ audit_log"
+# tr_TR collation'inda `a-z` araligi `i` harfini KAPSAMIYOR (noktasiz i/noktali i
+# ayrimi), bu yuzden karakter araligi kullanan HER ayristirma `i` harfinde kesiliyor:
+#   audit_log -> aud · cp_domains -> cp_doma · cp_websec_findings -> cp_websec_f
+# Sonuc: sema kontrolu 22/46 gibi SAHTE bir kritik uretip musteri guncellemesini
+# BLOKLADI. Turkiye bizim ana pazarimiz — bu her musteri sunucusunu etkiler.
+# LC_ALL=C bayt semantigi verir; ASCII tanimlayici ayristirmak icin dogrusu budur.
+export LC_ALL=C
+
 
 # --waf : ModSecurity v3 + OWASP CRS kur (KAYNAKTAN DERLER, ~10 dk).
 # Varsayilan KAPALI — her kurulumu yavaslatmamak icin. Sonradan da kurulur:
@@ -297,7 +309,15 @@ ok "$ENVF (DB DSN + JWT + Redis admin korundu/üretildi; $EKSAY ek anahtar korun
 
 # ============ 6) ARTIFACT DEPLOY ============
 step "6) Panel binary + frontend + migration"
-install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-server
+# 🔴 PAKETTEKI hash CAPA olarak saklanir. Adim 12 bunu kullanir; aksi
+# halde "calisan == diskteki" karsilastirmasi, hic kurulmamis bir binary
+# icin de DOGRU cikar (eski dosya calisiyor, eski dosya diskte).
+PAKET_BIN_SHA=$(sha256sum "$A/girginospanel-server" 2>/dev/null | awk '{print $1}')
+[ -n "$PAKET_BIN_SHA" ] || die "paketteki panel binary okunamadi"
+install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-server \
+  || die "panel binary kurulamadi (disk dolu / salt-okunur / SELinux)"
+_disk_sha=$(sha256sum /opt/girginospanel/bin/girginospanel-server 2>/dev/null | awk '{print $1}')
+[ "$_disk_sha" = "$PAKET_BIN_SHA" ] || die "panel binary diske EKSIK yazildi (hash uyusmuyor)"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
 tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
 tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
@@ -322,6 +342,10 @@ _ops_n=0
 for t in "$A"/ops/*; do
   [ -f "$t" ] || continue
   bn=$(basename "$t")
+  # 🔴 Artik/yedek dosyalar KURULMAZ. Bunlar BAYAT kod olur ve root
+  # yetkisiyle /usr/local/bin e 0755 kurulursa yanlislikla calistirilabilir
+  # (pakette girginospanel-repair.bak.<zaman> bulundu ve kuruluyordu).
+  case "$bn" in *.bak|*.bak.*|*.orig|*.rej|*~) continue ;; esac
   case "$bn" in
     *.conf|*.service|*.timer)
       # Yapilandirma: yalnizca kaynak dizinine, calistirilabilir DEGIL
@@ -396,10 +420,16 @@ step "8) nginx (panel vhost + phpMyAdmin + perf)"
 # zaten var; burada da eklersek "duplicate directive" ile nginx -t patlar.
 grep -q "client_max_body_size 10240m" /etc/nginx/nginx.conf || \
   sed -i '/^http {/a\    client_max_body_size 10240m;' /etc/nginx/nginx.conf
-cp "$A/nginx/_panel.conf"    /etc/nginx/conf.d/_panel.conf
-cp "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf
-cp "$A/nginx/php-fpm.conf"    /etc/nginx/conf.d/php-fpm.conf 2>/dev/null
-nginx -t >/dev/null 2>&1 && # 🔴 /var/cache/nginx UST DIZIN IZNI: RPM bunu 0700 root:root birakiyor.
+install -m 0644 "$A/nginx/_panel.conf" /etc/nginx/conf.d/_panel.conf || die "_panel.conf kurulamadi"
+install -m 0644 "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf || die "_default80.conf kurulamadi"
+install -m 0644 "$A/nginx/php-fpm.conf" /etc/nginx/conf.d/php-fpm.conf || die "nginx php-fpm.conf kurulamadi"
+# 🔴 KAPI ONCE, TEK SATIRDA. Buraya araya yorum/blok SOKMA:
+# bash `&&`den sonra yorumlari atlayip bir sonraki KOMUTU sag operand alir,
+# boylece kapi sessizce olur (birebir yasandi: bozuk conf "✓ nginx -t OK"
+# diye raporlandi ve `die` hic calismadi).
+nginx -t >/dev/null 2>&1 || { nginx -t; die "nginx config hatası"; }
+
+# /var/cache/nginx UST DIZIN IZNI: RPM bunu 0700 root:root birakiyor.
 # Alt dizin (girgincache) dogru sahiplenmis olsa bile nginx worker UST dizini
 # TRAVERSE edemedigi icin cache loader sunu veriyor:
 #   [crit] opendir() "/var/cache/nginx/girgincache" failed (13: Permission denied)
@@ -407,7 +437,7 @@ nginx -t >/dev/null 2>&1 && # 🔴 /var/cache/nginx UST DIZIN IZNI: RPM bunu 070
 if [ -d /var/cache/nginx ]; then
   chmod 0755 /var/cache/nginx; chown root:root /var/cache/nginx
 fi
-ok "nginx -t OK" || { nginx -t; die "nginx config hatası"; }
+ok "nginx -t OK"
 
 # ============ 9) phpMyAdmin ============
 step "9) phpMyAdmin"
@@ -445,7 +475,7 @@ if [ ! -s /etc/girginospanel/pma-internal.token ]; then
   chown root:apache /etc/girginospanel/pma-internal.token 2>/dev/null || true
   chmod 640 /etc/girginospanel/pma-internal.token
 fi
-cp "$A/php-fpm/phpmyadmin.conf" /etc/php-fpm.d/phpmyadmin.conf
+install -m 0644 "$A/php-fpm/phpmyadmin.conf" /etc/php-fpm.d/phpmyadmin.conf || die "phpmyadmin.conf kurulamadi"
 mkdir -p /var/lib/phpmyadmin/{tmp,sessions}
 # ── PMA IZINLERI ────────────────────────────────────────────────────
 # 🔴 Eskiden hepsi `nginx:nginx` yapiliyordu — ama phpMyAdmin FPM havuzu
@@ -488,7 +518,7 @@ ok "phpMyAdmin pool + config + izinler"
 
 # ============ 10) systemd + servisler ============
 step "10) systemd + servisler"
-cp "$A/systemd/girginospanel.service" /etc/systemd/system/girginospanel.service
+install -m 0644 "$A/systemd/girginospanel.service" /etc/systemd/system/girginospanel.service || die "girginospanel.service kurulamadi"
 # journald kalici: panel crash/db-fatal izleri reboot'ta silinmesin (reboot-dayaniklilik teshisi)
 mkdir -p /var/log/journal && systemctl restart systemd-journald >/dev/null 2>&1 || true
 # panel DB'sinin günlük yedeği (03:30) — dosyayı kopyalamak YETMEZ, aşağıda enable --now
@@ -503,14 +533,32 @@ if [ -f /etc/systemd/system/girginospanel-db-backup.timer ]; then
     && ok "günlük panel DB yedeği ACTIVE (03:30 → /var/backups/girginospanel/db, 14 gün)" \
     || warn "DB yedek timer'ı başlatılamadı — günlük panel DB yedeği çalışmayabilir"
 fi
-systemctl enable --now php-fpm >/dev/null 2>&1
-for v in $PHP_VERS; do systemctl enable --now php$v-php-fpm >/dev/null 2>&1; done
-ok "php-fpm (base + 5 sürüm)"
+# 🔴 Eskiden sabit "base + 5 surum" yaziyordu ama PHP_VERS 7 surum
+# iceriyor; ustelik hicbir `is-active` yoktu. Remi'de olmayan bir surum
+# (php86 gibi) icin `enable` sessizce duser, mesaj yine yesil basardi ve o
+# surumu secen musteri sitesi 502 alirdi. Simdi SAYARAK ve OLCEREK bildiriyoruz.
+_fpm_ok=0; _fpm_eksik=""
+for _u in php-fpm $(for v in $PHP_VERS; do echo "php$v-php-fpm"; done); do
+  systemctl enable --now "$_u" >/dev/null 2>&1
+  if systemctl is-active --quiet "$_u"; then
+    _fpm_ok=$((_fpm_ok+1))
+  else
+    _fpm_eksik="$_fpm_eksik $_u"
+  fi
+done
+if [ -z "$_fpm_eksik" ]; then
+  ok "php-fpm ($_fpm_ok havuz ACTIVE)"
+else
+  warn "php-fpm: $_fpm_ok ACTIVE, ACTIVE DEGIL:$_fpm_eksik"
+fi
 
 # ---- named (DNS sunucusu) — domainlerin ad sunucusu ----
 NC=/etc/named.conf
 if [ -f "$NC" ]; then
-  cp -a "$NC" "$NC.gosp-bak" 2>/dev/null || true
+  # 🔴 Yedek HER KOSUDA eziliyordu: ikinci calistirmada ".gosp-bak"
+  # zaten degistirilmis dosyanin kopyasi olur ve ORIJINAL named.conf kalici
+  # olarak kaybedilir. Ilk yedek korunur.
+  [ -f "$NC.gosp-bak" ] || cp -a "$NC" "$NC.gosp-bak" 2>/dev/null || true
   # dışarıdan sorgulanabilsin: tüm arayüzleri dinle (varsayılan yalnız 127.0.0.1)
   sed -i -E 's/listen-on port 53 \{[^}]*\}/listen-on port 53 { any; }/' "$NC"
   sed -i -E 's/listen-on-v6 port 53 \{[^}]*\}/listen-on-v6 port 53 { any; }/' "$NC"
@@ -529,7 +577,25 @@ chmod 640 /etc/named/girginospanel-zones.conf 2>/dev/null || true
 # zone dosyaları /var/named altında (SELinux named_zone_t context ŞART)
 restorecon -R /var/named /etc/named >/dev/null 2>&1 || true
 if named-checkconf >/dev/null 2>&1; then
-  systemctl enable --now named >/dev/null 2>&1 && ok "named (DNS authoritative, :53 açık, recursion kapalı)" || warn "named başlatılamadı"
+  # 🔴 `enable --now` ZATEN CALISAN named'i yeniden baslatmaz -> yukaridaki
+  # sed duzenlemeleri DEVREYE GIRMEZ, ama mesaj yine ":53 acik, recursion kapali"
+  # der. Gerceklikte named hala 127.0.0.1 dinliyor (domainler cozulmez) ya da
+  # hala ACIK COZUCU (DNS amplification) olabilir. Restart + ILAN EDILEN iddialari
+  # OLC.
+  systemctl enable named >/dev/null 2>&1
+  systemctl restart named >/dev/null 2>&1
+  sleep 1
+  if ! systemctl is-active --quiet named; then
+    warn "named başlatılamadı"
+  else
+    _n53=$(ss -lnu 2>/dev/null | grep -c ":53 ")
+    _nrec=$(grep -cE "^[[:space:]]*recursion[[:space:]]+yes" "$NC" 2>/dev/null)
+    if [ "${_n53:-0}" -gt 0 ] && [ "${_nrec:-0}" -eq 0 ]; then
+      ok "named (DNS authoritative, :53 açık, recursion kapalı)"
+    else
+      warn "named ACTIVE ama iddialar DOGRULANAMADI (:53 soket=$_n53, recursion-yes satiri=$_nrec)"
+    fi
+  fi
 else
   warn "named-checkconf hata — DNS elle kontrol edilmeli"
 fi
@@ -598,19 +664,41 @@ systemctl enable --now crond >/dev/null 2>&1
 systemctl is-active --quiet crond && ok "günlük yedek cron + crond ACTIVE (03:00 UTC)" || warn "crond başlatılamadı — yedek cron çalışmayabilir"
 
 # SELinux
-setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
+# 🔴 Basarisizlikta `else` YOKTU: ~40 yesil satir arasinda BIR SATIRIN
+# YOKLUGU operatorce fark edilmez. Sessiz atlama yerine acik uyari.
+if setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1; then
+  ok "SELinux httpd_can_network_connect"
+else
+  warn "SELinux httpd_can_network_connect AYARLANAMADI — panel dis servislere baglanamayabilir"
+fi
 # Batch5A: nginx(httpd_t) tenant home içeriğini (public_html) okuyabilsin — bu boolean'lar
 # KAPALI iken try_files dosyayı "yok" sanar → tüm siteler 404. (Panel açılışında
 # ensureHTTPDHomeBooleans ile de garanti edilir; bu satır ilk-boot için.)
-setsebool -P httpd_enable_homedirs=on httpd_read_user_content=on >/dev/null 2>&1 && ok "SELinux httpd home okuma (homedirs + user_content)"
+# 🔴 Bu boolean yoksa TUM SITELER 404 doner — sessiz gecilemez.
+if setsebool -P httpd_enable_homedirs=on httpd_read_user_content=on >/dev/null 2>&1; then
+  ok "SELinux httpd home okuma (homedirs + user_content)"
+else
+  die "SELinux httpd home boolean'lari ayarlanamadi — tum siteler 404 doner"
+fi
 restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null 2>&1
 # Batch5A: per-tenant php-fpm socket dizinleri /run/php-fpm-<sk>/ için fcontext (httpd_var_run_t).
 # Mevcut /run/php-fpm(/.*)? kuralı tireli yolu kapsamaz → nginx→FPM 500. Idempotent.
 # (Panel açılışında da ensureFPMSELinuxFcontext ile garanti edilir; bu satır ilk boot öncesi içindir.)
 if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ] && command -v semanage >/dev/null 2>&1; then
-  semanage fcontext -l 2>/dev/null | grep -q "/run/php-fpm-\[" || \
-    semanage fcontext -a -t httpd_var_run_t "/run/php-fpm-[^/]+(/.*)?" 2>/dev/null || true
-  ok "SELinux fcontext: per-tenant php-fpm socket (httpd_var_run_t)"
+  # 🔴 `|| true` zinciri sonucu ok satirini KOSULSUZ yapiyordu: kural
+  # eklenmese bile "✓" basiliyordu. Bu kural yoksa nginx->FPM 500 doner (TUM
+  # kiracilar). Ekledikten sonra TEKRAR OLC.
+  # NOT: boru + `grep -q` SIGPIPE uretir (pipefail); listeyi degiskene aliyoruz.
+  _selfc=$(semanage fcontext -l 2>/dev/null)
+  case "$_selfc" in
+    *"/run/php-fpm-["*) : ;;
+    *) semanage fcontext -a -t httpd_var_run_t "/run/php-fpm-[^/]+(/.*)?" 2>/dev/null || true ;;
+  esac
+  _selfc=$(semanage fcontext -l 2>/dev/null)
+  case "$_selfc" in
+    *"/run/php-fpm-["*) ok "SELinux fcontext: per-tenant php-fpm socket (httpd_var_run_t)" ;;
+    *) die "SELinux fcontext kurali EKLENEMEDI — per-tenant FPM soketleri 500 doner" ;;
+  esac
 fi
 
 # ============ 11) Valkey + optimize ============
@@ -659,7 +747,8 @@ if [ -n "$_pid" ] && [ "$_pid" != "0" ] && [ -r "/proc/$_pid/exe" ]; then
   # her zaman "bayat" derdi (ilk surumde bu hata yapildi).
   _link=$(readlink "/proc/$_pid/exe" 2>/dev/null)
   _ch=$(sha256sum "/proc/$_pid/exe" 2>/dev/null | awk '{print $1}')
-  _kh=$(sha256sum "$_kurulu" 2>/dev/null | awk '{print $1}')
+  # Capa PAKETTEKI hash. "$_kurulu" ile karsilastirmak yanlis cift olurdu.
+  _kh=${PAKET_BIN_SHA:-$(sha256sum "$_kurulu" 2>/dev/null | awk '{print $1}')}
   case "$_link" in
     *" (deleted)") die "panel ayakta ama calisan dosya SILINMIS — restart basarisiz" ;;
   esac

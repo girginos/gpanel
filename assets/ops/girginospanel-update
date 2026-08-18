@@ -29,6 +29,18 @@ case ":$PATH:" in
   *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
 esac
 
+# 🔴 AYRISTIRMA ICIN LC_ALL=C ZORUNLU — TURKCE LOCALE REGEX ARALIGINI BOZUYOR.
+# Olculdu (31.56.47.190, LANG=tr_TR.UTF-8):
+#     printf '@CT@ audit_log' | grep -oE '@CT@ [a-zA-Z0-9_]+'   ->  "@CT@ aud"
+#     ayni komut LC_ALL=C ile                                    ->  "@CT@ audit_log"
+# tr_TR collation'inda `a-z` araligi `i` harfini KAPSAMIYOR (noktasiz i/noktali i
+# ayrimi), bu yuzden karakter araligi kullanan HER ayristirma `i` harfinde kesiliyor:
+#   audit_log -> aud · cp_domains -> cp_doma · cp_websec_findings -> cp_websec_f
+# Sonuc: sema kontrolu 22/46 gibi SAHTE bir kritik uretip musteri guncellemesini
+# BLOKLADI. Turkiye bizim ana pazarimiz — bu her musteri sunucusunu etkiler.
+# LC_ALL=C bayt semantigi verir; ASCII tanimlayici ayristirmak icin dogrusu budur.
+export LC_ALL=C
+
 
 REPO="${GOSP_REPO:-girginos/gpanel}"
 BRANCH="main"; DRY=0; FORCE=0
@@ -62,7 +74,18 @@ die()  { echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
 step() { echo -e "${c_b}══ $* ══${c_0}"; }
 
 # çalışan panelin /healthz'inden sürüm (binary'nin --version flag'i YOK, asla çalıştırmıyoruz)
-surum() { curl -fsS http://127.0.0.1:8080/healthz 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4; }
+# 🔴 SAGLIK URL'INI VARSAYMA — env'den OKU. Sabit :8080, portu degistirilmis
+# (girginospanel-port-swap.sh) saglikli bir sunucuda saglik kontrolunu HIC
+# gecirmez ve asagidaki rollback dalini tetikler: eski binary + GUNCELLEME
+# ONCESI DB geri yuklenir. Yani tamamen saglikli bir panelde VERI GERI SARMA.
+PANEL_HEALTH_ADRES=$(grep -oE '^PANEL_LISTEN=.*' /etc/girginospanel/env 2>/dev/null | cut -d= -f2- | tr -d ' ')
+PANEL_HEALTH_ADRES=${PANEL_HEALTH_ADRES:-127.0.0.1:8080}
+case "$PANEL_HEALTH_ADRES" in
+  :*)        PANEL_HEALTH_ADRES="127.0.0.1$PANEL_HEALTH_ADRES" ;;
+  0.0.0.0:*) PANEL_HEALTH_ADRES="127.0.0.1:${PANEL_HEALTH_ADRES##*:}" ;;
+esac
+PANEL_HEALTH="http://$PANEL_HEALTH_ADRES/healthz"
+surum() { curl -fsS "$PANEL_HEALTH" 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4; }
 
 [ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
 [ -x "$BIN" ] || die "GirginOSPanel kurulu değil ($BIN yok) — önce install.sh çalıştırın"
@@ -314,7 +337,12 @@ fi
 
 # 8) migration'lar (idempotent — startup'ta uygulanır). Adım 4'te dump'ı ALDIK.
 if [ -f "$A/migrations.tar.gz" ]; then
-  mkdir -p "$MIGR"; tar xzf "$A/migrations.tar.gz" -C "$MIGR"
+  # 🔴 Bu betikteki TEK korumasiz kritik komuttu. `set -e` altinda tar
+  # duserse HICBIR kirmizi satir basilmaz (die cagrilmaz), saglik/rollback
+  # blogu HIC calismaz ve yeni binary + yeni frontend diskte, eksik migration
+  # ile kalir. Ilk reboot'ta panel bozuk semayla acilir.
+  mkdir -p "$MIGR" || die "migration dizini olusturulamadi"
+  tar xzf "$A/migrations.tar.gz" -C "$MIGR" || die "migration arsivi acilamadi — binary/frontend geri alinmali: $BIN.bak"
   ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
 fi
 
@@ -337,6 +365,10 @@ if [ -d "$A/ops" ]; then
   for t in "$A"/ops/*; do
     [ -f "$t" ] || continue
     bn=$(basename "$t")
+    # 🔴 Artik/yedek dosyalar KURULMAZ. Bunlar BAYAT kod olur ve root
+    # yetkisiyle /usr/local/bin e 0755 kurulursa yanlislikla calistirilabilir
+    # (pakette girginospanel-repair.bak.<zaman> bulundu ve kuruluyordu).
+    case "$bn" in *.bak|*.bak.*|*.orig|*.rej|*~) continue ;; esac
     case "$bn" in
       # Yapilandirma dosyalari /usr/local/bin'e 0755 ile KURULMAZ
       *.conf|*.service|*.timer) continue ;;
@@ -451,7 +483,7 @@ systemctl restart girginospanel
 HEALTHY=0
 for i in 1 2 3 4 5 6; do
   sleep 2
-  if systemctl is-active --quiet girginospanel && curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then HEALTHY=1; break; fi
+  if systemctl is-active --quiet girginospanel && curl -fsS "$PANEL_HEALTH" >/dev/null 2>&1; then HEALTHY=1; break; fi
 done
 
 if [ "$HEALTHY" = 1 ]; then
@@ -463,11 +495,21 @@ if [ "$HEALTHY" = 1 ]; then
 # 🔴 Guncelleme "tamam" demeden ONCE uretim davranisini olc. Eskiden
 # updater servis ayakta diye tamam diyordu; wp-cli bozuk, SELinux
 # etiketi yok, port 80 500 doner haldeyken bile "tamam" yaziyordu.
+# 🔴 KAPI — uyari DEGIL. Installer bu sinyali sert kapi yapmisti ama
+# updater'da yalnizca sari bir satira indirgemistim: hemen ardindan YESIL
+# "Guncelleme tamam" basiliyor ve cikis kodu 0 oluyordu. Cron/otomasyon bunu
+# "basarili" sayar. Ayni sinyal, ayni sonuc olmali.
+DOGRULAMA_KODU=0
 if command -v girginospanel-dogrula >/dev/null 2>&1; then
   echo
-  if ! girginospanel-dogrula --kisa; then
-    warn "guncelleme uygulandi ama DOGRULAMA KRITIK HATA buldu (yukari bak) — ayrinti: girginospanel-dogrula"
-  fi
+  girginospanel-dogrula --kisa || DOGRULAMA_KODU=$?
+else
+  # Arac yoksa "dogrulandi" sayilamaz.
+  warn "girginospanel-dogrula yok — guncelleme DOGRULANAMADI"
+  DOGRULAMA_KODU=1
+fi
+if [ "$DOGRULAMA_KODU" -ne 0 ]; then
+  die "guncelleme uygulandi ama DOGRULAMA BASARISIZ — yukaridaki ✗ satirlarini duzeltip: girginospanel-dogrula"
 fi
   echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
 else

@@ -14,6 +14,18 @@
 #     KORUNUR. Ayrı girginospanel-restore aracına devreder (arg'lar aynen iletilir).
 set -uo pipefail
 
+# 🔴 AYRISTIRMA ICIN LC_ALL=C ZORUNLU — TURKCE LOCALE REGEX ARALIGINI BOZUYOR.
+# Olculdu (31.56.47.190, LANG=tr_TR.UTF-8):
+#     printf '@CT@ audit_log' | grep -oE '@CT@ [a-zA-Z0-9_]+'   ->  "@CT@ aud"
+#     ayni komut LC_ALL=C ile                                    ->  "@CT@ audit_log"
+# tr_TR collation'inda `a-z` araligi `i` harfini KAPSAMIYOR (noktasiz i/noktali i
+# ayrimi), bu yuzden karakter araligi kullanan HER ayristirma `i` harfinde kesiliyor:
+#   audit_log -> aud · cp_domains -> cp_doma · cp_websec_findings -> cp_websec_f
+# Sonuc: sema kontrolu 22/46 gibi SAHTE bir kritik uretip musteri guncellemesini
+# BLOKLADI. Turkiye bizim ana pazarimiz — bu her musteri sunucusunu etkiler.
+# LC_ALL=C bayt semantigi verir; ASCII tanimlayici ayristirmak icin dogrusu budur.
+export LC_ALL=C
+
 # 'restore' ALT-KOMUTU: içerik onarımını ayrı araca devret. GERİYE UYUMLU — mevcut çağrılar
 # (bare / --quiet / --dry-run / --deep / --only) DEĞİŞMEDEN izin/sahiplik/SELinux onarır; sadece
 # ilk argüman tam olarak 'restore' ise devreye girer (install.sh'ın --quiet çağrısı etkilenmez).
@@ -376,18 +388,25 @@ sec_nginx_cache() {
   # hata vermez -- yalnizca sayfa onbellegi SESSIZCE devre disi kalir.
   # Mevcut sunucular installer duzeltmesini almayacagi icin onarim burada.
   [ -d /var/cache/nginx ] || { ok "/var/cache/nginx yok - onbellek yapilandirilmamis"; return 0; }
+  # 🔴 HAM STRING KARSILASTIRMASI YANLIS: setgid/sticky bitli mesru bir dizinde
+  # (2755, 1755) `stat -c%a` "2755" doner, "755" ile esitlenmez ve `chmod 0755`
+  # GNU coreutils'te dizinde setgid'i TEMIZLEMEZ -> her kosuda "DUZELTILDI"
+  # yalani + hemen ardindan "✗ izin degismedi" + KALICI exit 1. Yalnizca ALT
+  # 9 BITE bakiyoruz (ensure_mode zaten boyle yapiyor).
   local izin; izin=$(stat -c%a /var/cache/nginx 2>/dev/null)
-  if [ "$izin" = "755" ]; then
+  local izin9=$(( 8#${izin:-0} & 0777 ))
+  if [ "$izin9" = "$(( 8#755 ))" ]; then
     ok "/var/cache/nginx izni dogru (755)"
   else
     act "chmod 0755 /var/cache/nginx  (su an: $izin)"
     if [ $DRY -eq 0 ]; then
-      chmod 0755 /var/cache/nginx 2>/dev/null
+      # u+rwx,go+rx yuksek bitlere (setgid/sticky) DOKUNMAZ.
+      chmod u+rwx,go+rx,go-w /var/cache/nginx 2>/dev/null
       chown root:root /var/cache/nginx 2>/dev/null
       # SONUCU DOGRULA: chmod sessizce basarisiz olabilir (immutable bayrak,
       # salt-okunur fs). "calistirdim" ile "oldu" ayni sey degil.
       local y; y=$(stat -c%a /var/cache/nginx 2>/dev/null)
-      if [ "$y" = "755" ]; then
+      if [ "$(( 8#${y:-0} & 0777 ))" = "$(( 8#755 ))" ]; then
         ok "izin $izin -> 755 (nginx artik traverse edebiliyor)"
       else
         err "izin degismedi (hala $y)"

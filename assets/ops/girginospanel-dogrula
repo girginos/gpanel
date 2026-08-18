@@ -36,11 +36,26 @@ case ":$PATH:" in
   *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
 esac
 
+# 🔴 AYRISTIRMA ICIN LC_ALL=C ZORUNLU — TURKCE LOCALE REGEX ARALIGINI BOZUYOR.
+# Olculdu (31.56.47.190, LANG=tr_TR.UTF-8):
+#     printf '@CT@ audit_log' | grep -oE '@CT@ [a-zA-Z0-9_]+'   ->  "@CT@ aud"
+#     ayni komut LC_ALL=C ile                                    ->  "@CT@ audit_log"
+# tr_TR collation'inda `a-z` araligi `i` harfini KAPSAMIYOR (noktasiz i/noktali i
+# ayrimi), bu yuzden karakter araligi kullanan HER ayristirma `i` harfinde kesiliyor:
+#   audit_log -> aud · cp_domains -> cp_doma · cp_websec_findings -> cp_websec_f
+# Sonuc: sema kontrolu 22/46 gibi SAHTE bir kritik uretip musteri guncellemesini
+# BLOKLADI. Turkiye bizim ana pazarimiz — bu her musteri sunucusunu etkiler.
+# LC_ALL=C bayt semantigi verir; ASCII tanimlayici ayristirmak icin dogrusu budur.
+export LC_ALL=C
+
 KISA=0; JSON=0
 while [ $# -gt 0 ]; do case "$1" in
   --kisa) KISA=1 ;;
   --json) JSON=1 ;;
   -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+  # 🔴 Bilinmeyen bayrak SESSIZCE yutulmaz: bir kapi `--json` yerine `--jsom`
+  # yazarsa metin raporu alip 0 gorurdu. repair'de bu dogru yapilmis.
+  *) echo "girginospanel-dogrula: bilinmeyen secenek: $1" >&2; exit 2 ;;
 esac; shift; done
 
 c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_b=$'\e[1m'; c_0=$'\e[0m'
@@ -48,12 +63,20 @@ KRITIK=0; UYARI=0; GECEN=0
 declare -a DUSENLER=()
 
 # gec/dus/uyar: her kontrol TEK satirda raporlanir.
-gec()  { GECEN=$((GECEN+1)); [ $KISA -eq 1 ] || printf "  ${c_g}✓${c_0} %-34s %s\n" "$1" "${2:-}"; }
+# 🔴 `return 0` SART: donus degeri printf'inki olursa (dolu disk, kapali
+# log hedefi) `[ kosul ] && gec || dus` kalibinda `dus` da atesenir.
+# Olculdu: `> /dev/full` altinda saglikli sistemde 7 HAYALET KRITIK.
+gec()  { GECEN=$((GECEN+1))
+         if [ $KISA -eq 0 ] && [ $JSON -eq 0 ]; then
+           printf "  ${c_g}✓${c_0} %-34s %s\n" "$1" "${2:-}"
+         fi; return 0; }
+# 🔴 JSON modunda insan ciktisi BASILMAZ; aksi halde stdout gecerli JSON
+# olmaz ve `json.load` patlar (olculdu).
 dus()  { KRITIK=$((KRITIK+1)); DUSENLER+=("KRITIK|$1|${2:-}")
-         printf "  ${c_r}✗${c_0} %-34s %s\n" "$1" "${2:-}"; }
+         [ $JSON -eq 1 ] || printf "  ${c_r}✗${c_0} %-34s %s\n" "$1" "${2:-}"; return 0; }
 uyar() { UYARI=$((UYARI+1)); DUSENLER+=("UYARI|$1|${2:-}")
-         printf "  ${c_y}!${c_0} %-34s %s\n" "$1" "${2:-}"; }
-bas()  { [ $KISA -eq 1 ] || echo -e "\n${c_b}══ $* ══${c_0}"; }
+         [ $JSON -eq 1 ] || printf "  ${c_y}!${c_0} %-34s %s\n" "$1" "${2:-}"; return 0; }
+bas()  { { [ $KISA -eq 1 ] || [ $JSON -eq 1 ]; } && return 0; echo -e "\n${c_b}══ $* ══${c_0}"; }
 
 # http: kodu dondur. Baglanti kurulamadiysa BOS degil, "BAGLANTI-YOK" don —
 # bos string sayisal karsilastirmada sessizce 0 gibi davranir ve kontrolu
@@ -95,32 +118,46 @@ servis() {
 # Ders: tahmin eden yedek yol, yanlis olcumu DOGRUYMUS gibi gosterir. Artik
 # tahmin yok — ayristiramazsak bunu acikca soyleriz ve kontrol DUSER.
 # Desteklenen bicimler:  listen 8443 ssl | listen 127.0.0.1:9443 ssl | listen [::]:8443 ssl
-panel_port() {
+# panel_adaylari: _panel.conf'taki TUM `listen` satirlarindan aday adres:port
+# uretir. Karar vermez — yalniz aday listesi. Yorumlar EN BASTA kirpilir
+# (yorumdaki "ssl" kelimesi portu zehirliyordu), `ssl on;` kullanan legacy
+# bloklar da kapsanir (o blokta listen'de ssl yazmaz).
+panel_adaylari() {
   local pf=/etc/nginx/conf.d/_panel.conf
-  [ -f "$pf" ] || { echo ""; return; }
-  # Yorum satirlarini at, `listen ... ssl` satirlarini al, ssl'den ONCEKI son
-  # sayiyi (portu) cikar. `[::]:8443` icin de dogru calisir.
-  awk '
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*listen[[:space:]]/ && /ssl/ {
-      line = $0
-      sub(/;.*/, "", line)
-      n = split(line, parts, /[[:space:]]+/)
-      for (i = 1; i <= n; i++) {
-        if (parts[i] == "ssl") break
-        tok = parts[i]
-      }
-      if (match(tok, /[0-9]+$/)) { print substr(tok, RSTART, RLENGTH); exit }
-    }
-  ' "$pf"
+  [ -f "$pf" ] || return 0
+  sed -E 's/#.*//' "$pf" \
+  | grep -oE '^[[:space:]]*listen[[:space:]]+[^;]+' \
+  | sed -E 's/^[[:space:]]*listen[[:space:]]+//' \
+  | awk '{print $1}' \
+  | sed -E 's/^\[([0-9a-fA-F:]+)\]:/\1|/; s/^([0-9.]+):/\1|/; s/^\*:/|/' \
+  | awk -F'|' '{ if (NF==2) { adr=$1; p=$2 } else { adr=""; p=$1 }
+                 if (p ~ /^[0-9]+$/) { if (adr=="" || adr=="0.0.0.0" || adr=="::") adr="127.0.0.1"; print adr":"p } }' \
+  | sort -u
 }
-PANEL_PORT=$(panel_port)
-if [ -z "$PANEL_PORT" ]; then
-  PANEL_TABAN=""
-else
-  # Panel vhost 127.0.0.1'e bagli olabilir (masaustu erisim modu) — o yuzden
-  # daima loopback uzerinden test ediyoruz.
-  PANEL_TABAN="https://127.0.0.1:${PANEL_PORT}"
+
+# panel_kimligi: verilen taban URL panelin KENDISI mi? Kod yetmez — govdede
+# panelin surum alanini ariyoruz. _default443 catch-all'i her yola 200 + HTML
+# donduruyor; kod bazli kontrol onu "panel" sanmisti (canli kanitlandi).
+panel_kimligi() {
+  curl -sk --max-time 8 "$1/healthz" 2>/dev/null | grep -q '"surum"'
+}
+
+PANEL_TABAN=""; PANEL_PORT=""
+for _a in $(panel_adaylari); do
+  _p=${_a##*:}; _h=${_a%:*}
+  for _u in "https://$_h:$_p" "http://$_h:$_p"; do
+    if panel_kimligi "$_u"; then
+      PANEL_TABAN="$_u"; PANEL_PORT="$_p"; break 2
+    fi
+  done
+done
+# Aday bulunamadiysa dinlenen soketlerden dene (conf okunamadi/legacy bicim).
+if [ -z "$PANEL_TABAN" ]; then
+  for _p in $(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -un); do
+    for _u in "https://127.0.0.1:$_p" "http://127.0.0.1:$_p"; do
+      if panel_kimligi "$_u"; then PANEL_TABAN="$_u"; PANEL_PORT="$_p"; break 3; fi
+    done
+  done
 fi
 
 # ══════════════════════════════════════════════════════════════════════
@@ -163,30 +200,74 @@ else
     *" (deleted)")
       dus "calisan binary" "BAYAT SUREC — calisan dosya SILINMIS (systemctl restart girginospanel)" ;;
     *)
+      # 🔴 sha256 TEK BASINA YETMEZ: /proc/PID/exe yuklu imaji degil, o inode'un
+      # GUNCEL disk icerigini okur. Binary YERINDE yazilirsa (cp/dd/rsync
+      # --inplace) iki taraf ayni inode olur ve karsilastirma X==X totolojisine
+      # duser — surec eski kodu kosarken kontrol YESIL der (olculdu).
+      # ZAMAN olcumu bu kapiyi kapatir: dosya, surec basladiktan SONRA
+      # degistirilmisse calisan kod bayattir.
+      _bmt=$(stat -c%Y "$_kurulu" 2>/dev/null)
+      _bas=$(awk '{print $22}' "/proc/$_pid/stat" 2>/dev/null)
+      _hz=$(getconf CLK_TCK 2>/dev/null); _hz=${_hz:-100}
+      _up=$(awk '{print int($1)}' /proc/uptime 2>/dev/null)
+      _now=$(date +%s)
+      _surec_bas=""
+      if [ -n "$_bas" ] && [ -n "$_up" ]; then
+        _surec_bas=$(( _now - _up + _bas / _hz ))
+      fi
       if [ -z "$_ch" ] || [ -z "$_kh" ]; then
         uyar "calisan binary" "OLCULEMEDI (sha256 alinamadi) — gecti sayilmaz"
-      elif [ "$_ch" = "$_kh" ]; then
-        gec "calisan binary" "kurulu dosyayla ayni (sha256)"
-      else
+      elif [ "$_ch" != "$_kh" ]; then
         dus "calisan binary" "BAYAT SUREC — diskteki binary calismiyor (systemctl restart girginospanel)"
+      elif [ -n "$_surec_bas" ] && [ -n "$_bmt" ] && [ "$_bmt" -gt "$_surec_bas" ]; then
+        dus "calisan binary" "BAYAT SUREC — binary surec basindan SONRA degistirilmis (systemctl restart girginospanel)"
+      else
+        gec "calisan binary" "kurulu dosyayla ayni (sha256 + zaman)"
       fi ;;
   esac
 fi
 
 bas "Panel HTTP yuzeyi"
 if [ -z "$PANEL_TABAN" ]; then
-  # Olculemeyen kontrol GECMIS sayilmaz. Tahmini bir porta baglanip "calisiyor"
-  # demektense burada durup sebebini soyleriz.
-  dus "panel portu" "_panel.conf'tan ayristirilamadi — panel yuzeyi OLCULEMEDI"
-  dus "/healthz" "OLCULEMEDI (port bilinmiyor)"
-  dus "API kimlik dogrulama" "OLCULEMEDI (port bilinmiyor)"
+  # Hicbir aday panel KIMLIGI vermedi. Bu "port kapali" degil, "o portta panel
+  # YOK" demektir — sahte/yanlis bir servis 200 donse bile buraya duseriz.
+  dus "panel yuzeyi" "hicbir adres panel kimligi vermedi (healthz govdesinde 'surum' yok)"
+  dus "/healthz" "OLCULEMEDI (panel bulunamadi)"
+  dus "API kimlik dogrulama" "OLCULEMEDI (panel bulunamadi)"
 else
-[ $KISA -eq 1 ] || echo "  (panel portu _panel.conf'tan okundu: $PANEL_PORT)"
+# JSON modunda serbest metin BASILMAZ — stdout gecerli JSON olmali.
+if [ $KISA -eq 0 ] && [ $JSON -eq 0 ]; then echo "  (panel yuzeyi sondayla bulundu: $PANEL_TABAN)"; fi
 K=$(http "$PANEL_TABAN/")
 [ "$K" = "200" ] && gec "panel :$PANEL_PORT" "HTTP 200" || dus "panel :$PANEL_PORT" "HTTP $K (200 bekleniyor)"
 
 K=$(http "$PANEL_TABAN/healthz")
-[ "$K" = "200" ] && gec "/healthz" "HTTP 200" || dus "/healthz" "HTTP $K"
+_hz=$(curl -sk --max-time 8 "$PANEL_TABAN/healthz" 2>/dev/null)
+_sur=$(printf '%s' "$_hz" | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4)
+if [ "$K" = "200" ] && [ -n "$_sur" ]; then
+  gec "/healthz" "HTTP 200 · surum $_sur"
+elif [ "$K" = "200" ]; then
+  # Kod dogru ama govde panelinki degil: baska bir servis o portu tutuyor.
+  dus "/healthz" "HTTP 200 ama govde panele ait DEGIL (baska servis mi?)"
+else
+  dus "/healthz" "HTTP $K"
+fi
+
+# 🔴 Portu TUTAN SURECIN panel oldugunu da kanitla: kod+govde dogru olsa bile
+# araya giren bir proxy panelin yerine cevap veriyor olabilir.
+_mp=$(systemctl show -p MainPID --value girginospanel 2>/dev/null)
+_sahip=$(ss -ltnpH 2>/dev/null | grep ":${PANEL_PORT} " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+if [ -z "$_sahip" ]; then
+  uyar "panel port sahibi" "OLCULEMEDI (ss pid vermedi)"
+elif [ "$_sahip" = "$_mp" ]; then
+  gec "panel port sahibi" "girginospanel (pid $_sahip)"
+else
+  _pad=$(ps -o comm= -p "$_sahip" 2>/dev/null)
+  # nginx panelin onunde proxy olarak durur — bu NORMAL.
+  case "$_pad" in
+    nginx) gec "panel port sahibi" "nginx proxy (pid $_sahip) -> panel" ;;
+    *)     uyar "panel port sahibi" "beklenmeyen surec: ${_pad:-?} (pid $_sahip)" ;;
+  esac
+fi
 
 # 🔴 401 ile 404 ayrimi: 404 rotalarin HIC KAYITLI OLMADIGINI gosterir
 # (binary bozuk/eski). "200 degil, demek ki korumali" diye gecmek YALAN OLCUM.
@@ -227,10 +308,13 @@ else dus "nginx -t" "yapilandirma GECERSIZ — reload'da patlar"; fi
 CD=/var/cache/nginx/girgincache
 if [ -d "$CD" ]; then
   if command -v runuser >/dev/null 2>&1; then
-    if runuser -u nginx -- test -r "$CD" 2>/dev/null; then
-      gec "onbellek dizini erisimi" "nginx okuyabiliyor"
+    # 🔴 `test -r` YETMEZ — fastcgi_cache YAZAR. Olculdu: root:root 755 dizinde
+    # `test -r` gecti ama gercek yazma basarisizdi, yani onbellek oluydu ve
+    # kontrol yesildi. Gercekten dosya olusturup siliyoruz.
+    if runuser -u nginx -- sh -c "cd '$CD' && : > .gosp-sonda && rm -f .gosp-sonda" 2>/dev/null; then
+      gec "onbellek dizini erisimi" "nginx GERCEKTEN yazabiliyor"
     else
-      uyar "onbellek dizini erisimi" "nginx OKUYAMIYOR — fastcgi_cache olu (girginospanel-repair --only nginx_cache)"
+      uyar "onbellek dizini erisimi" "nginx YAZAMIYOR — fastcgi_cache olu (girginospanel-repair --only nginx_cache)"
     fi
   else
     uyar "onbellek dizini erisimi" "runuser yok — OLCULEMEDI (gecti sayilmaz)"
@@ -241,21 +325,43 @@ fi
 
 # ══════════════════════════════════════════════════════════════════════
 bas "Veritabani"
-if mysql -N -e 'SELECT 1' >/dev/null 2>&1; then
-  gec "MariaDB baglantisi" "SELECT 1 OK"
-  DB=$(grep -oE 'tcp\([^)]*\)/[a-zA-Z0-9_]+' /etc/girginospanel/env 2>/dev/null | sed 's#.*/##')
-  DB=${DB:-panel}
-  GOC=$(mysql -N -e "SELECT COUNT(*) FROM \`$DB\`.schema_migrations;" 2>/dev/null)
-  TAB=$(mysql -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB';" 2>/dev/null)
-  # 🔴 Bos sonuc "0 goc" DEGIL, "olculemedi" demektir — ikisini ayir.
-  if [ -z "$GOC" ]; then dus "goc kayitlari" "OLCULEMEDI (schema_migrations okunamadi)"
-  elif [ "$GOC" -gt 0 ] 2>/dev/null; then gec "goc kayitlari" "$GOC goc uygulanmis"
-  else dus "goc kayitlari" "0 goc — sema kurulmamis"; fi
-  if [ -z "$TAB" ]; then dus "panel tablolari" "OLCULEMEDI"
-  elif [ "$TAB" -gt 10 ] 2>/dev/null; then gec "panel tablolari" "$TAB tablo ($DB)"
-  else dus "panel tablolari" "$TAB tablo — sema eksik"; fi
+# 🔴 URETIM YOLU: panelin KENDI DSN'i ile baglan. root+socket auth her zaman
+# calisir; env'deki parola bozulsa ya da GRANT iptal olsa panel acilmaz ama
+# root ile olcen bir kontrol YESIL kalir.
+_dsn=$(grep -oE '^PANEL_DB_DSN=.*' /etc/girginospanel/env 2>/dev/null | cut -d= -f2-)
+_dbu=$(printf '%s' "$_dsn" | sed -E 's#^([^:]+):.*#\1#')
+_dbp=$(printf '%s' "$_dsn" | sed -E 's#^[^:]+:([^@]*)@.*#\1#')
+_dbh=$(printf '%s' "$_dsn" | sed -E 's#.*tcp\(([^:]+):([0-9]+)\).*#\1#')
+_dbport=$(printf '%s' "$_dsn" | sed -E 's#.*tcp\(([^:]+):([0-9]+)\).*#\2#')
+_dbn=$(printf '%s' "$_dsn" | sed -E 's#.*/([a-zA-Z0-9_]+)(\?.*)?$#\1#')
+if [ -n "$_dbu" ] && [ -n "$_dbn" ]; then
+  _PANEL_MYSQL="mysql -N -u $_dbu -p$_dbp -h ${_dbh:-127.0.0.1} -P ${_dbport:-3306} $_dbn"
 else
-  dus "MariaDB baglantisi" "baglanilamadi — panel calisamaz"
+  _PANEL_MYSQL=""
+fi
+if [ -z "$_PANEL_MYSQL" ]; then
+  dus "panel DB kimligi" "PANEL_DB_DSN ayristirilamadi — DB uretim yolu OLCULEMEDI"
+elif $_PANEL_MYSQL -e 'SELECT 1' >/dev/null 2>&1; then
+  gec "MariaDB baglantisi" "panel DSN ile OK ($_dbu@$_dbh/$_dbn)"
+  DB=${_dbn:-panel}
+  GOC=$($_PANEL_MYSQL -e "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null)
+  TAB=$($_PANEL_MYSQL -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB';" 2>/dev/null)
+  # 🔴 Bos sonuc "0 goc" DEGIL, "olculemedi" demektir — ikisini ayir.
+  # 🔴 `-gt 0` esigi ANLAMSIZDI: 75 gocten 1'i uygulanmis bir sunucu YESIL
+  # geciyordu — yani updater'in rollback yolunun bizzat korktugu "yarim
+  # migration" senaryosu. Beklenen sayi diskteki dosya sayisidir.
+  _goc_bekl=$(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | grep -c .)
+  if [ -z "$GOC" ]; then dus "goc kayitlari" "OLCULEMEDI (schema_migrations okunamadi)"
+  elif [ "${_goc_bekl:-0}" -eq 0 ]; then uyar "goc kayitlari" "$GOC uygulanmis, beklenen sayi OLCULEMEDI"
+  elif [ "$GOC" -ge "$_goc_bekl" ] 2>/dev/null; then gec "goc kayitlari" "$GOC/$_goc_bekl uygulanmis"
+  else dus "goc kayitlari" "$GOC/$_goc_bekl — YARIM migration (eksik: $((_goc_bekl-GOC)))"; fi
+  # Tablo sayisi tek basina esik olamaz — asagidaki "tablolar" kontrolu
+  # migration'lardan TURETILEN listeyle birebir karsilastirir. Burasi yalniz
+  # bilgi amacli; karar orada verilir.
+  if [ -z "$TAB" ]; then dus "panel tablolari" "OLCULEMEDI"
+  else gec "panel tablolari" "$TAB tablo ($DB)"; fi
+else
+  dus "MariaDB baglantisi" "panel DSN ile BAGLANILAMADI — panel acilmaz ($_dbu@$_dbh/$_dbn)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════
@@ -267,10 +373,17 @@ for t in girginospanel-repair girginospanel-wpcli-kur girginospanel-wp-onkosul \
          girginospanel-optimize girginospanel-redis-setup; do
   if [ ! -x "/usr/local/bin/$t" ]; then
     uyar "$t" "pakette yok"
-  elif command -v "$t" >/dev/null 2>&1; then
-    gec "$t" "cozulebiliyor"
-  else
+  elif ! command -v "$t" >/dev/null 2>&1; then
     dus "$t" "kurulu ama PATH ten cagrilamiyor (PATH=$PATH)"
+  elif [ ! -s "/usr/local/bin/$t" ]; then
+    # 🔴 0 baytlik / kesik bir arac da "calistirilabilir" gorunur ve
+    # `command -v` onu bulur. wp-cli icin ogrenilen ders ("varligina degil
+    # CALISTIGINA bak") diger araclara uygulanmamisti.
+    dus "$t" "dosya BOS (0 bayt) — yarim inmis"
+  elif ! head -c2 "/usr/local/bin/$t" 2>/dev/null | grep -q '#!'; then
+    dus "$t" "shebang YOK — bozuk/kesik dosya"
+  else
+    gec "$t" "cozulebiliyor"
   fi
 done
 
@@ -327,7 +440,19 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 bas "Guvenlik / bakim"
 AV=$(ls /var/lib/clamav/*.c[vl]d 2>/dev/null | wc -l)
-[ "$AV" -gt 0 ] && gec "ClamAV imzalari" "$AV imza" || uyar "ClamAV imzalari" "yok — tarama imzasiz"
+# 🔴 Sadece dosya sayisi bakmak yetmez: yillar oncesinden kalma imzalar da
+# "3 imza" der. Bayat imza da placebo — TAZELIGI olc.
+if [ "${AV:-0}" -eq 0 ]; then
+  uyar "ClamAV imzalari" "yok — tarama imzasiz (placebo)"
+else
+  _en_yeni=$(ls -t /var/lib/clamav/*.c[vl]d 2>/dev/null | head -1)
+  _yas_gun=$(( ( $(date +%s) - $(stat -c%Y "$_en_yeni" 2>/dev/null || echo 0) ) / 86400 ))
+  if [ "$_yas_gun" -le 7 ]; then
+    gec "ClamAV imzalari" "$AV imza · en yeni $_yas_gun gun once"
+  else
+    uyar "ClamAV imzalari" "$AV imza ama EN YENISI $_yas_gun GUN ONCEKI — freshclam calismiyor olabilir"
+  fi
+fi
 
 if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ]; then
   if findmnt -no OPTIONS / 2>/dev/null | tr ',' '\n' | grep -qxE 'usrquota|uquota|quota'; then
@@ -338,18 +463,347 @@ if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ]; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════
+# DERIN DOGRULAMA — dosya / dizin / servis / SQL sema / cokme gecmisi
+#
+# Yukaridaki kontroller "sistem CEVAP VERIYOR mu" diye sorar. Bu bolum
+# "sistem DOGRU KURULMUS mu" diye sorar. Ikisi ayni sey degil: panel ayakta
+# olabilir ama migration yarim uygulanmis, bir dizin hic olusmamis ya da bir
+# ops araci diske yazilamamis olabilir. Bunlar ancak o ozellik kullanildiginda
+# patlar — yani musteride.
+#
+# TASARIM: cikti SISMESIN diye her grup OZET olarak raporlanir; yalnizca
+# BASARISIZLAR tek tek listelenir. "12/12" gibi bir ozet, sifir satirlik
+# sessizlikten daha bilgilendiricidir (sessizlik "kontrol kosmadi" ile
+# ayirt edilemez).
+# ══════════════════════════════════════════════════════════════════════
+
+bas "Dosyalar"
+# bicim: yol|tur|min_boyut   (tur: f=dosya, x=calistirilabilir)
+_dosya_eksik=""; _dosya_ok=0; _dosya_top=0
+while IFS='|' read -r _y _t _min; do
+  [ -z "$_y" ] && continue
+  _dosya_top=$((_dosya_top+1))
+  if [ ! -e "$_y" ]; then
+    _dosya_eksik="$_dosya_eksik\n      YOK        $_y"
+  elif [ "$_t" = "x" ] && [ ! -x "$_y" ]; then
+    _dosya_eksik="$_dosya_eksik\n      CALISMAZ   $_y (calistirilabilir degil)"
+  else
+    _bo=$(stat -c%s "$_y" 2>/dev/null)
+    # Bos/kesik dosya VAR sayilmaz: kesik bir frontend index.html beyaz ekran,
+    # kesik bir binary calismayan panel demektir.
+    if [ -z "$_bo" ]; then
+      _dosya_eksik="$_dosya_eksik\n      OLCULEMEDI $_y"
+    elif [ "$_bo" -lt "${_min:-1}" ]; then
+      _dosya_eksik="$_dosya_eksik\n      KESIK      $_y ($_bo bayt, en az $_min bekleniyor)"
+    else
+      _dosya_ok=$((_dosya_ok+1))
+    fi
+  fi
+done <<'DOSYALAR'
+/opt/girginospanel/bin/girginospanel-server|x|1000000
+/opt/girginospanel/frontend-dist/index.html|f|200
+/etc/girginospanel/env|f|60
+/etc/systemd/system/girginospanel.service|f|100
+/etc/nginx/conf.d/_panel.conf|f|100
+/etc/nginx/conf.d/_default80.conf|f|100
+/etc/nginx/conf.d/_default443.conf|f|100
+/var/www/_default80/index.html|f|200
+/var/www/_default443/index.html|f|200
+/usr/local/bin/girginospanel-update|x|1000
+/usr/local/bin/girginospanel-repair|x|1000
+/usr/local/bin/girginospanel-dogrula|x|1000
+DOSYALAR
+if [ -z "$_dosya_eksik" ]; then
+  gec "kritik dosyalar" "$_dosya_ok/$_dosya_top"
+else
+  dus "kritik dosyalar" "$_dosya_ok/$_dosya_top$(printf "$_dosya_eksik")"
+fi
+
+# frontend asset bundle'i ayri: adi hash'li oldugu icin glob ile aranir.
+# 🔴 Bu kontrol OLMAZSA kesik bir frontend tarball'i sessizce beyaz ekran verir;
+# index.html var olur ama JS bundle'i olmaz ve panel "acilmiyor" diye gelir.
+_asset=$(ls /opt/girginospanel/frontend-dist/assets/index-*.js 2>/dev/null | head -1)
+if [ -n "$_asset" ] && [ -s "$_asset" ]; then
+  gec "frontend JS bundle" "$(basename "$_asset")"
+else
+  dus "frontend JS bundle" "assets/index-*.js YOK veya BOS — panel beyaz ekran verir"
+fi
+
+bas "Dizinler"
+_dizin_eksik=""; _dizin_ok=0; _dizin_top=0
+while IFS='|' read -r _y _sahip; do
+  [ -z "$_y" ] && continue
+  _dizin_top=$((_dizin_top+1))
+  if [ ! -d "$_y" ]; then
+    _dizin_eksik="$_dizin_eksik\n      YOK        $_y"
+  elif [ -n "$_sahip" ]; then
+    _s=$(stat -c%U "$_y" 2>/dev/null)
+    if [ "$_s" != "$_sahip" ]; then
+      _dizin_eksik="$_dizin_eksik\n      SAHIP      $_y ($_s, beklenen $_sahip)"
+    else
+      _dizin_ok=$((_dizin_ok+1))
+    fi
+  else
+    _dizin_ok=$((_dizin_ok+1))
+  fi
+done <<'DIZINLER'
+/opt/girginospanel/bin|root
+/opt/girginospanel/frontend-dist|root
+/opt/girginospanel/src/migrations|root
+/opt/girginospanel/eklentiler|
+/etc/girginospanel|root
+/var/www/_default80|
+/var/www/_default443|
+/var/cache/nginx/girgincache|nginx
+/var/backups/girginospanel|
+DIZINLER
+if [ -z "$_dizin_eksik" ]; then
+  gec "kritik dizinler" "$_dizin_ok/$_dizin_top"
+else
+  dus "kritik dizinler" "$_dizin_ok/$_dizin_top$(printf "$_dizin_eksik")"
+fi
+
+bas "Servis -> port eslesmesi"
+# 🔴 "servis active" YETMEZ: systemd bir birimi "active" sayarken surec ilgili
+# porta hic baglanmamis olabilir (yanlis config, bind hatasi, cakisan port).
+# Servisin GERCEKTEN dinledigini soketten dogruluyoruz.
+_port_hata=""; _port_ok=0; _port_top=0
+_dinlenen=$(ss -tlnH 2>/dev/null; ss -xlnH 2>/dev/null)
+while IFS='|' read -r _srv _desen _aciklama; do
+  [ -z "$_srv" ] && continue
+  systemctl is-active --quiet "$_srv" 2>/dev/null || continue   # kapali servis ustte raporlandi
+  _port_top=$((_port_top+1))
+  case "$_dinlenen" in
+    *"$_desen"*) _port_ok=$((_port_ok+1)) ;;
+    *) _port_hata="$_port_hata\n      $_srv ACTIVE ama $_desen DINLENMIYOR ($_aciklama)" ;;
+  esac
+done <<'PORTLAR'
+mariadb|127.0.0.1:3306|panel DB'ye baglanamaz
+girginospanel|127.0.0.1:8080|nginx panele proxy edemez
+named|:53|DNS cozumlemesi calismaz
+PORTLAR
+if [ -z "$_port_hata" ]; then
+  gec "servis dinleme" "$_port_ok/$_port_top"
+else
+  dus "servis dinleme" "$_port_ok/$_port_top$(printf "$_port_hata")"
+fi
+
+bas "SQL semasi (migration'lardan turetilir)"
+# 🔴 Beklenen sema ELLE TUTULMAZ — migration dosyalarindan TURETILIR. Elle
+# tutulan liste kacinilmaz olarak bayatlar ve "kontrol var ama olcmuyor"
+# durumuna duser. Kaynak: /opt/girginospanel/src/migrations/*.sql
+_MIGR=/opt/girginospanel/src/migrations
+_DB=$(grep -oE 'tcp\([^)]*\)/[a-zA-Z0-9_]+' /etc/girginospanel/env 2>/dev/null | sed 's#.*/##')
+_DB=${_DB:-panel}
+
+if [ ! -d "$_MIGR" ]; then
+  dus "migration kaynagi" "$_MIGR yok — sema DOGRULANAMADI"
+elif [ -z "$_PANEL_MYSQL" ] || ! $_PANEL_MYSQL -e 'SELECT 1' >/dev/null 2>&1; then
+  dus "sema dogrulamasi" "MariaDB'ye baglanilamadi — OLCULEMEDI"
+else
+  # ── 1) Her migration dosyasi UYGULANMIS mi + sha256 TUTUYOR mu ──
+  # schema_migrations (dosya, sha256, uygulandi) tuttugu icin surukLenmeyi de
+  # yakalayabiliyoruz: dosya degistirilmis ama yeniden uygulanmamissa hash tutmaz.
+  _uyg_eksik=""; _uyg_ok=0; _uyg_top=0; _hash_fark=""
+  _uygulanan=$($_PANEL_MYSQL -e "SELECT CONCAT(dosya,'=',sha256) FROM schema_migrations;" 2>/dev/null)
+  if [ -z "$_uygulanan" ]; then
+    dus "goc kayitlari" "schema_migrations OKUNAMADI — sema DOGRULANAMADI"
+  else
+    for _f in "$_MIGR"/*.sql; do
+      [ -f "$_f" ] || continue
+      _uyg_top=$((_uyg_top+1))
+      _ad=$(basename "$_f")
+      _sha=$(sha256sum "$_f" 2>/dev/null | awk '{print $1}')
+      case "$_uygulanan" in
+        *"$_ad=$_sha"*) _uyg_ok=$((_uyg_ok+1)) ;;
+        *"$_ad="*)      _hash_fark="$_hash_fark\n      HASH FARKLI  $_ad (dosya degismis, yeniden uygulanmamis)" ;;
+        *)              _uyg_eksik="$_uyg_eksik\n      UYGULANMAMIS $_ad" ;;
+      esac
+    done
+    # 🔴 SIDDET AYRIMI — kanita dayali:
+    #   UYGULANMAMIS goc  -> KRITIK. Sema eksik olabilir, panel o ozellikte patlar.
+    #   HASH FARKLI       -> UYARI.  Dosya degismis ama semayi ETKILEYIP etkilemedigi
+    #                        buradan bilinemez. Asil kanit asagidaki tablo/kolon
+    #                        kontrolleridir; onlar gecerse etki YOK demektir.
+    # Aksi halde derleme sunucusundaki zararsiz bir yorum degisikligi her kosuda
+    # KRITIK yanip sinyali degersizlestirirdi.
+    _hash_fark_sayisi=$(printf "%s" "$_hash_fark" | grep -c "HASH FARKLI")
+    if [ -n "$_uyg_eksik" ]; then
+      dus "goc dosyalari" "$_uyg_ok/$_uyg_top$(printf "$_uyg_eksik$_hash_fark")"
+    elif [ -n "$_hash_fark" ]; then
+      uyar "goc dosyalari" "$_uyg_ok/$_uyg_top — $_hash_fark_sayisi dosya degismis ama yeniden uygulanmamis$(printf "$_hash_fark")"
+    else
+      gec "goc dosyalari" "$_uyg_ok/$_uyg_top uygulanmis (ad+sha256)"
+    fi
+  fi
+
+  # ── 2) CREATE TABLE ile tanimlanan her tablo DB'de VAR mi ──
+  _mevcut=$($_PANEL_MYSQL -e "SELECT LOWER(table_name) FROM information_schema.tables WHERE table_schema='$_DB';" 2>/dev/null)
+  if [ -z "$_mevcut" ]; then
+    dus "tablolar" "information_schema OKUNAMADI"
+  else
+    # 🔴 AYRISTIRICI IKI KEZ YANLIS POZITIF URETTI, ikisi de duzeltildi:
+    #  1) `CREATE TABLE( IF NOT EXISTS)? <ad>` deseninde opsiyonel grup
+    #     eslesmeyince `[a-z0-9_]+` "IF" kelimesini TABLO ADI sandi -> her
+    #     sunucuda sahte "YOK if" bulgusu. Cozum: IF NOT EXISTS'i ONCE temizle.
+    #  2) DROP TABLE hic sayilmiyordu. cp_banned_tlds 0060'ta yaratilip
+    #     0061'de DROP ediliyor; tablo MESRU olarak yok ama kontrol "YOK"
+    #     diye kirmizi yaniyordu.
+    # Yanlis pozitif veren kontrol, olmayan kontroldan KOTUDUR: insanlari
+    # kirmiziyi gormezden gelmeye alistirir. Beklenen sema, migration'lar
+    # SIRAYLA islenerek hesaplanir (CREATE ekler, DROP cikarir).
+    _beklenen_tablolar() {
+      local f
+      for f in $(ls "$_MIGR"/*.sql 2>/dev/null | sort); do
+        sed -E 's/CREATE[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+/@CT@ /Ig;
+                s/DROP[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+/@DT@ /Ig' "$f" \
+        | grep -oE '@[CD]T@ `?[a-zA-Z0-9_]+' \
+        | sed -E 's/`//g' \
+        | awk '{print $1" "tolower($2)}'
+      done | awk '
+        $1=="@CT@" { var[$2]=1 }
+        $1=="@DT@" { delete var[$2] }
+        END { for (t in var) print t }
+      ' | sort -u
+    }
+    _tab_eksik=""; _tab_ok=0; _tab_top=0
+    for _t in $(_beklenen_tablolar); do
+      _tab_top=$((_tab_top+1))
+      case "
+$_mevcut
+" in
+        *"
+$_t
+"*) _tab_ok=$((_tab_ok+1)) ;;
+        *)  _tab_eksik="$_tab_eksik\n      YOK  $_t" ;;
+      esac
+    done
+    if [ -z "$_tab_eksik" ]; then
+      gec "tablolar" "$_tab_ok/$_tab_top (migration'lardan turetildi)"
+    else
+      dus "tablolar" "$_tab_ok/$_tab_top$(printf "$_tab_eksik")"
+    fi
+  fi
+
+  # Kolonlar da tablolarla ayni mantikla: ADD COLUMN ekler, DROP COLUMN
+  # cikarir, dosyalar SIRAYLA islenir. Tablosu DROP edilmis kolonlar da
+  # dusurulur — aksi halde silinmis bir tablonun kolonu "eksik" gorunur.
+  _beklenen_kolonlar() {
+    local f
+    for f in $(ls "$_MIGR"/*.sql 2>/dev/null | sort); do
+      sed -E 's/ALTER[[:space:]]+TABLE[[:space:]]+`?([a-zA-Z0-9_]+)`?[[:space:]]+ADD[[:space:]]+COLUMN([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+`?([a-zA-Z0-9_]+)`?/@AC@ \1 \3/Ig;
+              s/ALTER[[:space:]]+TABLE[[:space:]]+`?([a-zA-Z0-9_]+)`?[[:space:]]+DROP[[:space:]]+COLUMN([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+`?([a-zA-Z0-9_]+)`?/@DC@ \1 \3/Ig;
+              s/DROP[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+`?([a-zA-Z0-9_]+)`?/@DT@ \2/Ig' "$f" \
+      | grep -oE '@(AC|DC|DT)@ [a-zA-Z0-9_]+( [a-zA-Z0-9_]+)?' \
+      | awk '{ if ($1=="@DT@") print $1" "tolower($2); else print $1" "tolower($2)" "tolower($3) }'
+    done | awk '
+      $1=="@AC@" { var[$2"."$3]=1 }
+      $1=="@DC@" { delete var[$2"."$3] }
+      $1=="@DT@" { for (k in var) { split(k,a,"."); if (a[1]==$2) delete var[k] } }
+      END { for (k in var) print k }
+    ' | sort -u
+  }
+
+  # ── 3) ALTER TABLE ... ADD COLUMN ile eklenen kolonlar VAR mi ──
+  # 🔴 Tablo var ama kolon yok senaryosu, yarim uygulanan bir migration'in en
+  # sik belirtisi: panel acilir, ozellik kullanildiginda "Unknown column" ile
+  # patlar. Tablo sayisi bunu HIC yakalamaz.
+  _kol_eksik=""; _kol_ok=0; _kol_top=0
+  _kolonlar=$($_PANEL_MYSQL -e "SELECT CONCAT(LOWER(table_name),'.',LOWER(column_name)) FROM information_schema.columns WHERE table_schema='$_DB';" 2>/dev/null)
+  if [ -z "$_kolonlar" ]; then
+    dus "kolonlar" "information_schema.columns OKUNAMADI"
+  else
+    while read -r _tk; do
+      [ -z "$_tk" ] && continue
+      _kol_top=$((_kol_top+1))
+      case "
+$_kolonlar
+" in
+        *"
+$_tk
+"*) _kol_ok=$((_kol_ok+1)) ;;
+        *)  _kol_eksik="$_kol_eksik\n      YOK  $_tk" ;;
+      esac
+    done <<EOF
+$(_beklenen_kolonlar)
+EOF
+    if [ "$_kol_top" -eq 0 ]; then
+      uyar "kolonlar" "ALTER TABLE ADD COLUMN kalibi bulunamadi — OLCUM YAPILMADI"
+    elif [ -z "$_kol_eksik" ]; then
+      gec "kolonlar" "$_kol_ok/$_kol_top (ALTER TABLE'lardan turetildi)"
+    else
+      dus "kolonlar" "$_kol_ok/$_kol_top$(printf "$_kol_eksik")"
+    fi
+  fi
+fi
+
+bas "Cokme gecmisi"
+# 🔴 `journalctl -p err` Go panic/SIGSEGV KAYITLARINI YAKALAMAZ — bunlar
+# stderr'e "notice" onceliginde duser. Filo denetiminde birebir bu goruldu:
+# `-p err` "-- No entries --" derken duz grep SIGSEGV cokmesini buldu.
+# Oncelik suzgeciyle calisan HERHANGI bir alarm bu sinifi tamamen kacirir.
+_cok=$(journalctl -u girginospanel --since "24 hours ago" --no-pager 2>/dev/null \
+       | grep -ciE 'panic:|SIGSEGV|SIGBUS|fatal error:|runtime error:')
+if [ -z "$_cok" ]; then
+  uyar "panel cokmeleri" "journal OKUNAMADI — gecti sayilmaz"
+elif [ "$_cok" -eq 0 ]; then
+  gec "panel cokmeleri" "son 24 saatte yok"
+else
+  dus "panel cokmeleri" "son 24 saatte $_cok kayit (journalctl -u girginospanel | grep -iE 'panic|SIGSEGV|fatal')"
+fi
+
+bas "Panel erisim kisitlamasi"
+# 🔴 Panel her hostname'e cevap veriyorsa, sunucunun IP'sini bilen herkes giris
+# ekranini gorur. Filo denetiminde 5 sunucudan 2'sinde `server_name _` ile
+# kisitlama YOKTU. Bu bir zafiyet degil ama saldiri yuzeyini gereksiz genisletir.
+_pf=/etc/nginx/conf.d/_panel.conf
+if [ ! -f "$_pf" ]; then
+  uyar "panel host kisitlamasi" "_panel.conf yok — OLCULEMEDI"
+else
+  _sn=$(grep -oE '^[[:space:]]*server_name[[:space:]]+[^;]*' "$_pf" 2>/dev/null | head -1 | sed 's/^[[:space:]]*server_name[[:space:]]*//')
+  _lo=$(grep -cE '^[[:space:]]*listen[[:space:]]+127\.0\.0\.1' "$_pf" 2>/dev/null)
+  if [ "${_lo:-0}" -gt 0 ]; then
+    gec "panel host kisitlamasi" "yalniz loopback dinliyor"
+  elif [ "$_sn" = "_" ]; then
+    uyar "panel host kisitlamasi" "server_name _ — panel HER hostname'e cevap veriyor (girginospanel-panelhost ile kisitlayin)"
+  elif [ -n "$_sn" ]; then
+    gec "panel host kisitlamasi" "izin listesi tanimli"
+  else
+    uyar "panel host kisitlamasi" "server_name OKUNAMADI"
+  fi
+fi
+
+bas "Saat senkronu"
+# 🔴 Filo denetiminde bir CANLI MUSTERI sunucusunun saati 24 SAAT ileriydi ve
+# NTP kapaliydi. Sertifika gecerliligi, JWT suresi, yedek zaman damgasi ve
+# cron zamanlamasi bundan etkilenir; hicbiri "hata" olarak gorunmez.
+if command -v timedatectl >/dev/null 2>&1; then
+  _senk=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+  case "$_senk" in
+    yes) gec "saat senkronu" "NTP senkron" ;;
+    no)  uyar "saat senkronu" "NTP SENKRON DEGIL — sertifika/JWT/yedek zamani kayabilir" ;;
+    *)   uyar "saat senkronu" "OLCULEMEDI" ;;
+  esac
+else
+  uyar "saat senkronu" "timedatectl yok — OLCULEMEDI"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
 if [ $JSON -eq 1 ]; then
   printf '{"gecen":%d,"kritik":%d,"uyari":%d,"dusenler":[' "$GECEN" "$KRITIK" "$UYARI"
   ilk=1
   for d in "${DUSENLER[@]:-}"; do
     [ -z "$d" ] && continue
     [ $ilk -eq 0 ] && printf ','; ilk=0
-    printf '{"seviye":"%s","kontrol":"%s","detay":"%s"}' "${d%%|*}" "$(echo "$d" | cut -d'|' -f2)" "$(echo "$d" | cut -d'|' -f3)"
+    # 🔴 " ve \\ kacislanmali; aksi halde detay stringi JSON'u bozar (olculdu).
+    _jk() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n'; }
+    printf '{"seviye":"%s","kontrol":"%s","detay":"%s"}' "$(_jk "${d%%|*}")" "$(_jk "$(echo "$d" | cut -d'|' -f2)")" "$(_jk "$(echo "$d" | cut -d'|' -f3)")"
   done
   printf ']}\n'
   [ $KRITIK -gt 0 ] && exit 1 || exit 0
 fi
 
+if [ $JSON -eq 1 ]; then exit $([ $KRITIK -gt 0 ] && echo 1 || echo 0); fi
 echo
 if [ $KRITIK -gt 0 ]; then
   echo -e "${c_r}${c_b}✗ DOGRULAMA BASARISIZ${c_0}  —  gecen: $GECEN   ${c_r}kritik: $KRITIK${c_0}   uyari: $UYARI"

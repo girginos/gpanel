@@ -366,6 +366,7 @@ func main() {
 			// Website Security Monitor
 			r.With(middleware.AdminOnly).Get("/websec/status", websecH.Status)
 			r.With(middleware.AdminOnly).Get("/websec/findings", websecH.Findings)
+			r.With(middleware.AdminOnly).Get("/websec/apps", websecH.Apps)
 			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
 			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
 			// Panel Hostname & SSL (admin only)

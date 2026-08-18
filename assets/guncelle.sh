@@ -78,6 +78,10 @@ KURULAN=0
 for f in "$OPS"/*; do
   [ -f "$f" ] || continue
   bn=$(basename "$f")
+  # 🔴 Artik/yedek dosyalar KURULMAZ. Bunlar BAYAT kod olur ve root
+  # yetkisiyle /usr/local/bin e 0755 kurulursa yanlislikla calistirilabilir
+  # (pakette girginospanel-repair.bak.<zaman> bulundu ve kuruluyordu).
+  case "$bn" in *.bak|*.bak.*|*.orig|*.rej|*~) continue ;; esac
   case "$bn" in
     *.conf|*.service|*.timer) continue ;;   # yapılandırma dosyaları buraya değil
   esac

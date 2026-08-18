@@ -50,6 +50,31 @@ type Sayfa = {
   items: Bulgu[]
 }
 
+// Taranan uygulama envanteri.
+// 🔴 NEDEN VAR: sayfa bugüne kadar YALNIZCA bulguları listeliyordu. Açığı
+// olmayan bir domain hiçbir yerde görünmüyordu; ekranda "her şey güvenli" ile
+// "tarayıcı hiç çalışmadı" AYNI görünüyordu. Müşteri "2 domainim var ama
+// listede yok" dedi — tarayıcı aslında çalışıyordu. Envanter, boş bulgu
+// listesini KANITLI iyi habere çevirir.
+type Uygulama = {
+  domain_id: number
+  alan_adi: string
+  app_type: string
+  install_path: string
+  app_version: string
+  paket_sayisi: number
+  bulgu_sayisi: number
+  son_tarama: string
+}
+
+type EnvanterYanit = {
+  toplam: number
+  items: Uygulama[]
+  // Panelde kayıtlı ama envanterde HİÇ görünmeyen domain'ler.
+  // Bu listenin dolu olması bir UYARIDIR: o siteler taranmamış demektir.
+  taranmayan_domainler: string[]
+}
+
 const SEV_RENK: Record<string, string> = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
   high:     'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
@@ -79,6 +104,7 @@ function useDebouncedValue<T>(v: T, ms: number): T {
 export default function WebsiteSecurityPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [sayfa, setSayfa] = useState<Sayfa>({ toplam: 0, sayfa: 1, sayfa_boyut: 50, items: [] })
+  const [envanter, setEnvanter] = useState<EnvanterYanit | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [taranıyor, setTaranıyor] = useState(false)
@@ -111,9 +137,10 @@ export default function WebsiteSecurityPage() {
       if (filtre) params.set('severity', filtre)
       if (appFiltre) params.set('app_type', appFiltre)
       if (aramaDebounce) params.set('q', aramaDebounce)
-      const [s, p] = await Promise.all([
+      const [s, p, env] = await Promise.all([
         api.get<Status>('/websec/status'),
         api.get<Sayfa>('/websec/findings?' + params.toString()),
+        api.get<EnvanterYanit>('/websec/apps'),
       ])
       setStatus(s.data)
       // Backend'in beklenen şemayı güvenli aldığımızdan emin ol
@@ -123,6 +150,7 @@ export default function WebsiteSecurityPage() {
         sayfa_boyut: p.data.sayfa_boyut ?? sayfaBoyut,
         items: Array.isArray(p.data.items) ? p.data.items : [],
       })
+      setEnvanter(env.data)
       ilkYuklendi.current = true
     } catch (e) {
       setHata(apiHata(e, 'Yüklenemedi'))
@@ -292,6 +320,77 @@ export default function WebsiteSecurityPage() {
           {status.last_error && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
               Son hata: {status.last_error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Taranan uygulama envanteri — "bulgu yok" ile "hiç bakılmadı" ayrımı */}
+      {envanter && (
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Taranan uygulamalar
+              <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {envanter.toplam}
+              </span>
+            </h2>
+          </div>
+
+          {envanter.taranmayan_domainler.length > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+              <b>{envanter.taranmayan_domainler.length} alan adı taranmadı:</b>{' '}
+              {envanter.taranmayan_domainler.join(', ')}
+              <div className="mt-1 opacity-80">
+                Bu alan adlarında desteklenen bir uygulama (WordPress, Node.js, Composer) bulunamadı
+                ya da tarama henüz ulaşmadı.
+              </div>
+            </div>
+          )}
+
+          {envanter.items.length === 0 ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+              Henüz taranmış uygulama yok. Tarama hiç çalışmadıysa yukarıdaki
+              <b> Yeniden tara</b> düğmesini kullanın.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-[720px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2">Alan adı</th>
+                    <th className="px-3 py-2">Tür</th>
+                    <th className="px-3 py-2">Sürüm</th>
+                    <th className="px-3 py-2 text-right">Paket</th>
+                    <th className="px-3 py-2 text-right">Bulgu</th>
+                    <th className="px-3 py-2">Son tarama</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {envanter.items.map((u) => (
+                    <tr key={`${u.domain_id}-${u.app_type}-${u.install_path}`}>
+                      <td className="px-3 py-2 font-medium">{u.alan_adi || `#${u.domain_id}`}</td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded px-1.5 py-0.5 text-xs ${appRenk(u.app_type)}`}>
+                          {appAd(u.app_type)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600 dark:text-slate-400">{u.app_version || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{u.paket_sayisi}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {u.bulgu_sayisi > 0 ? (
+                          <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950/40 dark:text-red-300">
+                            {u.bulgu_sayisi}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-600 dark:text-emerald-400">temiz</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{u.son_tarama}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
