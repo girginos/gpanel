@@ -1,0 +1,12 @@
+[Unit]
+Description=GirginOSPanel antivirüs zamanlı tarama zamanlayıcısı
+
+[Timer]
+# 🔴 Saat panelden ayarlanabilir (av_ayarlar.zamanli_saat). Bu varsayılan
+# 04:00; ayar değişince installer/repair drop-in ile OnCalendar'ı günceller.
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

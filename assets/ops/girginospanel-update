@@ -283,6 +283,36 @@ if [ "$UNITS" = 1 ]; then
   fi
 fi
 
+# Antivirüs birimleri: slice + izleyici + zamanlı tarama.
+# 🔴 $A burada TANIMLI (dirname NEWBIN); yanlışlıkla dosya başına, $A/$TMP
+# tanımlanmadan koymuştum ve birimler HİÇ kurulmuyordu (49'da doğrulandı).
+if [ ! -f /etc/systemd/system/girginos-av.slice ]; then
+  cat > /etc/systemd/system/girginos-av.slice <<'AVSLICE'
+[Unit]
+Description=GirginOSPanel antivirüs tarama dilimi
+Before=slices.target
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+IOAccounting=yes
+CPUQuota=50%
+MemoryMax=512M
+IOWeight=50
+TasksMax=64
+AVSLICE
+fi
+AVUNITS=0
+for u in girginospanel-avizle.service girginospanel-avtara.service girginospanel-avtara.timer; do
+  if [ -f "$A/systemd/$u" ]; then install -m 0644 "$A/systemd/$u" "/etc/systemd/system/$u"; AVUNITS=1; fi
+done
+if [ "$AVUNITS" = 1 ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  # 🔴 Timer enable, ama izleyiciyi DEĞİŞTİRME: gercek_zamanli ayarına panel
+  # karar verir (avayar.IzleyiciSenkron). Updater kullanıcının açtığını kapatmasın.
+  systemctl enable girginospanel-avtara.timer >/dev/null 2>&1 || true
+  systemctl is-active --quiet girginospanel-avtara.timer     && ok "antivirüs zamanlı tarama timer'ı ACTIVE"     || systemctl enable --now girginospanel-avtara.timer >/dev/null 2>&1
+fi
+
 # 4) GÜNCELLEME ÖNCESİ DB DUMP — FAIL-CLOSED.
 # Migration'lar geri alınamaz; yedeksiz migration kabul edilemez. Dump alınamıyorsa
 # güncellemeye HİÇ BAŞLAMA (binary'ye, frontend'e, migration'lara dokunmadan çık).

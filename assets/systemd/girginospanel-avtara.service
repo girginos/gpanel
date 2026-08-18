@@ -1,0 +1,18 @@
+[Unit]
+# GirginOSPanel antivirüs — zamanlı tam tarama (timer tetikler).
+# 🔴 oneshot: çalışır, tarar, biter. Timer tekrar tetikler.
+Description=GirginOSPanel antivirüs zamanlı tarama
+After=network-online.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=oneshot
+# 🔴 Aynı slice: zamanlı tarama da kaynak limitine tabi. Gece 04:00'te bile
+# çalışan bir tarama, o an aktif bir siteyi yavaşlatmamalı.
+Slice=girginos-av.slice
+ExecStart=/usr/local/bin/girginospanel-avajan --tara
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

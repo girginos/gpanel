@@ -553,6 +553,40 @@ for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
   [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
 done
 systemctl daemon-reload
+
+# ── Antivirüs birimleri: kaynak dilimi + izleyici + zamanlı tarama ──
+# 🔴 Slice DOSYASI kurulmali ki av birimleri Slice=girginos-av.slice'a
+# katilabilsin. Slice olmadan birimler default slice'ta calisir ve kaynak
+# limitleri HICBIR SEYI sinirlamaz — panel "limit koydum" der ama uygulanmaz.
+# İçerik panel tarafindan yeniden yazilir (avayar.LimitleriUygula); burada
+# taban bir surum birakiyoruz ki ilk boot'ta da limit olsun.
+if [ ! -f /etc/systemd/system/girginos-av.slice ]; then
+  cat > /etc/systemd/system/girginos-av.slice <<'AVSLICE'
+[Unit]
+Description=GirginOSPanel antivirüs tarama dilimi
+Before=slices.target
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+IOAccounting=yes
+CPUQuota=50%
+MemoryMax=512M
+IOWeight=50
+TasksMax=64
+AVSLICE
+fi
+for u in girginospanel-avizle.service girginospanel-avtara.service girginospanel-avtara.timer; do
+  [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
+done
+systemctl daemon-reload
+# 🔴 VARSAYILAN: yalniz zamanli tarama timer'i etkin. Gercek zamanli izleyici
+# (avizle) VARSAYILAN KAPALI — operator panelden acar (fanotify + surekli
+# tarama, kaynak maliyeti var). Bu, av_ayarlar varsayilanlariyla (gercek_zamanli=0,
+# zamanli_tarama=1) TUTARLI olmali.
+if [ -f /etc/systemd/system/girginospanel-avtara.timer ]; then
+  systemctl enable --now girginospanel-avtara.timer >/dev/null 2>&1
+  systemctl is-active --quiet girginospanel-avtara.timer     && ok "antivirüs zamanlı tarama ACTIVE (04:00)"     || warn "antivirüs tarama timer'ı başlatılamadı"
+fi
 # 🔴 Yedek kok dizini KURULUMDA olusturulur. Yedek betigi zaten `mkdir -p`
 # yapiyor ama o ancak ILK KOSUDA (03:30) calisir; o ana kadar dizin YOKTUR ve
 # kurulum sonrasi denetimde eksik gorunur. Deterministik durum daha iyi.

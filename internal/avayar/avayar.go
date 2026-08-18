@@ -185,7 +185,25 @@ func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
 	if err != nil {
 		return err
 	}
-	return LimitleriUygula(a)
+	if err := LimitleriUygula(a); err != nil {
+		return err
+	}
+	// 🔴 Ayar ile GERCEK durumu senkronla: gercek_zamanli=1 ise izleyici
+	// servisini baslat, 0 ise durdur. Ayari DB'ye yazip servisi elle
+	// yonetmeyi beklemek, panelin "acik" gosterip hicbir seyin izlemediği
+	// durumu yaratir (bu projedeki klasik yarim-baglanti).
+	IzleyiciSenkron(a)
+	return nil
+}
+
+// IzleyiciSenkron — gercek_zamanli ayarina gore izleyici servisini yonetir.
+func IzleyiciSenkron(a Ayarlar) {
+	const birim = "girginospanel-avizle.service"
+	if a.GercekZamanli {
+		_ = exec.Command("systemctl", "enable", "--now", birim).Run()
+	} else {
+		_ = exec.Command("systemctl", "disable", "--now", birim).Run()
+	}
 }
 
 // LimitleriUygula — systemd slice yazar ve ETKİN olduğunu doğrular.

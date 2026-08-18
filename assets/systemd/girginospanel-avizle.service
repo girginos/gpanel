@@ -1,0 +1,26 @@
+[Unit]
+# GirginOSPanel antivirüs — gerçek zamanlı izleyici (fanotify).
+# 🔴 Slice=girginos-av.slice: ajanı panelin yönettiği kaynak diliminin İÇİNE
+# koyar. Bu satır OLMADAN slice tanımlı olur ama ajan ona katılmaz ve CPU/RAM
+# limitleri hiçbir şeyi sınırlamaz — "limit koydum" yanlış güveni.
+Description=GirginOSPanel antivirüs gerçek zamanlı izleyici
+After=network-online.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+Slice=girginos-av.slice
+ExecStart=/usr/local/bin/girginospanel-avajan --izle
+Restart=on-failure
+RestartSec=10
+# fanotify FAN_MARK_MOUNT için CAP_SYS_ADMIN şart; başka yetki gerekmez.
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+ProtectSystem=strict
+# /home taranır → okuma; karantina için /home yazılabilir olmalı.
+ReadWritePaths=/home
+ProtectHome=no
+
+[Install]
+WantedBy=multi-user.target

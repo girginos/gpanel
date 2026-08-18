@@ -463,6 +463,28 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════
+bas "Antivirüs"
+# 🔴 Ajan ikilisi VAR ama slice'a katilmiyorsa kaynak limiti hicbir seyi
+# sinirlamaz. "Birim tanimli" ile "surec gercekten slice icinde" ayri seyler —
+# 49'da birimler bir tur HIC kurulmamisti (updater blogu yanlis yere dusmustu).
+if [ -x /usr/local/bin/girginospanel-avajan ]; then
+  gec "av ajani" "kurulu"
+else
+  uyar "av ajani" "girginospanel-avajan yok"
+fi
+if [ -f /etc/systemd/system/girginos-av.slice ]; then
+  _avslice=$(systemctl show girginospanel-avtara.service -p Slice --value 2>/dev/null)
+  if [ "$_avslice" = "girginos-av.slice" ]; then
+    gec "av kaynak dilimi" "avtara.service -> $_avslice"
+  else
+    dus "av kaynak dilimi" "birim slice'a KATILMIYOR (Slice=$_avslice) — kaynak limiti uygulanmaz"
+  fi
+else
+  uyar "av kaynak dilimi" "girginos-av.slice yok"
+fi
+_avt=$(systemctl is-active girginospanel-avtara.timer 2>/dev/null)
+[ "$_avt" = "active" ] && gec "av zamanli tarama" "timer aktif" || uyar "av zamanli tarama" "timer $_avt"
+
 bas "Guvenlik / bakim"
 AV=$(ls /var/lib/clamav/*.c[vl]d 2>/dev/null | wc -l)
 # 🔴 Sadece dosya sayisi bakmak yetmez: yillar oncesinden kalma imzalar da
