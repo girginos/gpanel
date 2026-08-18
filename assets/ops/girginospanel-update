@@ -435,6 +435,15 @@ if [ "$HEALTHY" = 1 ]; then
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK"
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
+# 🔴 Guncelleme "tamam" demeden ONCE uretim davranisini olc. Eskiden
+# updater servis ayakta diye tamam diyordu; wp-cli bozuk, SELinux
+# etiketi yok, port 80 500 doner haldeyken bile "tamam" yaziyordu.
+if command -v girginospanel-dogrula >/dev/null 2>&1; then
+  echo
+  if ! girginospanel-dogrula --kisa; then
+    warn "guncelleme uygulandi ama DOGRULAMA KRITIK HATA buldu (yukari bak) — ayrinti: girginospanel-dogrula"
+  fi
+fi
   echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
 else
   warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye + güncelleme öncesi DB'ye dönülüyor"

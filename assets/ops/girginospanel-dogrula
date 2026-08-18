@@ -1,0 +1,320 @@
+#!/usr/bin/env bash
+# girginospanel-dogrula — kurulumun/guncellemenin GERCEKTEN calistigini kanitlar.
+#
+#   girginospanel-dogrula            # tam rapor
+#   girginospanel-dogrula --kisa     # yalnizca ozet + basarisizlar (installer/updater icin)
+#   girginospanel-dogrula --json     # makine okunur
+#
+# NEDEN VAR
+# ─────────
+# 🔴 Kurulumun eski "15) Dogrulama" bolumu DEKORATIFTI: durumu yazdiriyor ama
+# hicbir bulgu kurulumu durdurmuyordu. 49.12.158.182'de kurulum ekrana once
+#   "wp-cli (WordPress): YOK"
+# yazip hemen altina
+#   "✓ GirginOSPanel kurulumu tamamlandi"
+# basti. Ayni koseda SELinux etiketi yoktu, valkey kapaliydi, FTP kurulmamisti
+# ve port 80 her Host icin HTTP 500 donuyordu. Operator "tamamlandi" gordu.
+#
+# Bu arac o bolumun yerine gecer ve KAPIDIR: kritik bir kontrol duserse cikis
+# kodu 1 olur, cagiran basari bannerini BASMAZ.
+#
+# TASARIM KURALLARI (hepsi bu projede acryla ogrenildi)
+# ─────────────────────────────────────────────────────
+# 1. URETIM YOLUNU olc, kurulum adimini degil. "chmod calistirdim" ile "nginx
+#    gercekten okuyabiliyor" ayni sey degil — ikincisini olc.
+# 2. OLCULEMEYEN kontrol BASARISIZDIR. Bos cikti/eksik arac "temiz" demek
+#    degildir; `?? 0` ve `|| echo 0` yasak.
+# 3. 401 ile 404 AYNI SEY DEGIL. 401 = rota kayitli, kimlik istiyor (dogru).
+#    404 = rota HIC YOK (binary/frontend bozuk). Ikisini ayirmayan olcum yalan.
+# 4. Boru + `grep -q` KULLANMA: grep ilk eslesmede boruyu kapatir, ustteki
+#    komut SIGPIPE alir ve `pipefail` pipeline'i hatali sayar.
+# 5. Her kontrolun DUSEBILECEGI bir yol olmali. Dusemeyen kontrol olcmuyordur.
+
+set -uo pipefail
+case ":$PATH:" in
+  *:/usr/local/bin:*) : ;;
+  *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
+esac
+
+KISA=0; JSON=0
+while [ $# -gt 0 ]; do case "$1" in
+  --kisa) KISA=1 ;;
+  --json) JSON=1 ;;
+  -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+esac; shift; done
+
+c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_b=$'\e[1m'; c_0=$'\e[0m'
+KRITIK=0; UYARI=0; GECEN=0
+declare -a DUSENLER=()
+
+# gec/dus/uyar: her kontrol TEK satirda raporlanir.
+gec()  { GECEN=$((GECEN+1)); [ $KISA -eq 1 ] || printf "  ${c_g}✓${c_0} %-34s %s\n" "$1" "${2:-}"; }
+dus()  { KRITIK=$((KRITIK+1)); DUSENLER+=("KRITIK|$1|${2:-}")
+         printf "  ${c_r}✗${c_0} %-34s %s\n" "$1" "${2:-}"; }
+uyar() { UYARI=$((UYARI+1)); DUSENLER+=("UYARI|$1|${2:-}")
+         printf "  ${c_y}!${c_0} %-34s %s\n" "$1" "${2:-}"; }
+bas()  { [ $KISA -eq 1 ] || echo -e "\n${c_b}══ $* ══${c_0}"; }
+
+# http: kodu dondur. Baglanti kurulamadiysa BOS degil, "BAGLANTI-YOK" don —
+# bos string sayisal karsilastirmada sessizce 0 gibi davranir ve kontrolu
+# yanlislikla gecirir.
+http() { # $1=url  $2=host header (ops)
+  local k
+  if [ -n "${2:-}" ]; then
+    k=$(curl -sk -o /dev/null -w '%{http_code}' -H "Host: $2" --max-time 10 "$1" 2>/dev/null)
+  else
+    k=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$1" 2>/dev/null)
+  fi
+  [ -n "$k" ] && [ "$k" != "000" ] && echo "$k" || echo "BAGLANTI-YOK"
+}
+
+servis() { systemctl is-active "$1" 2>/dev/null || echo "bilinmiyor"; }
+
+# 🔴 PANEL PORTUNU VARSAYMA — OKU. Ilk surumde 8443 sabit yazmistim ve
+# derleme sunucusunda (port 8899'a alinmis) UC KRITIK YANLIS ALARM verdi.
+# Panel portu operator tarafindan degistirilebiliyor (populer portlardan
+# kacinmak icin bilerek boyle). Kendi kuralimi cignemisim: "uretim yolunu
+# olc, varsayma". Port vhost dosyasindan okunur; okunamazsa 8443'e duseriz
+# AMA bunu SESSIZCE yapmayiz — olcumun hangi porta bakildigini yazar.
+# 🔴 PANEL ADRESINI VARSAYMA — OKU. Bu fonksiyonu iki kez yanlis yazdim:
+#   1) Once "8443" sabitledim  -> port degistirilmis sunucuda 3 KRITIK yanlis alarm.
+#   2) Sonra regex'i `listen <port> ssl` icin yazdim ama gercek satir
+#      `listen 127.0.0.1:9443 ssl;` idi (IP onekli) -> yine kacirdi ve
+#      "ss ciktisinda 8443|8899 ara" seklindeki YEDEK TAHMIN devreye girip
+#      ALAKASIZ bir portu (8899) panel portu sandi.
+# Ders: tahmin eden yedek yol, yanlis olcumu DOGRUYMUS gibi gosterir. Artik
+# tahmin yok — ayristiramazsak bunu acikca soyleriz ve kontrol DUSER.
+# Desteklenen bicimler:  listen 8443 ssl | listen 127.0.0.1:9443 ssl | listen [::]:8443 ssl
+panel_port() {
+  local pf=/etc/nginx/conf.d/_panel.conf
+  [ -f "$pf" ] || { echo ""; return; }
+  # Yorum satirlarini at, `listen ... ssl` satirlarini al, ssl'den ONCEKI son
+  # sayiyi (portu) cikar. `[::]:8443` icin de dogru calisir.
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*listen[[:space:]]/ && /ssl/ {
+      line = $0
+      sub(/;.*/, "", line)
+      n = split(line, parts, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        if (parts[i] == "ssl") break
+        tok = parts[i]
+      }
+      if (match(tok, /[0-9]+$/)) { print substr(tok, RSTART, RLENGTH); exit }
+    }
+  ' "$pf"
+}
+PANEL_PORT=$(panel_port)
+if [ -z "$PANEL_PORT" ]; then
+  PANEL_TABAN=""
+else
+  # Panel vhost 127.0.0.1'e bagli olabilir (masaustu erisim modu) — o yuzden
+  # daima loopback uzerinden test ediyoruz.
+  PANEL_TABAN="https://127.0.0.1:${PANEL_PORT}"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Servisler"
+# Panel + web + DB + PHP olmadan sistem CALISMIYOR demektir -> KRITIK.
+for s in girginospanel nginx mariadb php-fpm; do
+  d=$(servis "$s")
+  [ "$d" = "active" ] && gec "$s" "active" || dus "$s" "$d (KRITIK: sistem calismaz)"
+done
+# Bunlar olmadan da panel acilir, ama ozellik kaybi var -> UYARI.
+for s in valkey named httpd crond; do
+  d=$(servis "$s")
+  [ "$d" = "active" ] && gec "$s" "active" || uyar "$s" "$d"
+done
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Panel HTTP yuzeyi"
+if [ -z "$PANEL_TABAN" ]; then
+  # Olculemeyen kontrol GECMIS sayilmaz. Tahmini bir porta baglanip "calisiyor"
+  # demektense burada durup sebebini soyleriz.
+  dus "panel portu" "_panel.conf'tan ayristirilamadi — panel yuzeyi OLCULEMEDI"
+  dus "/healthz" "OLCULEMEDI (port bilinmiyor)"
+  dus "API kimlik dogrulama" "OLCULEMEDI (port bilinmiyor)"
+else
+[ $KISA -eq 1 ] || echo "  (panel portu _panel.conf'tan okundu: $PANEL_PORT)"
+K=$(http "$PANEL_TABAN/")
+[ "$K" = "200" ] && gec "panel :$PANEL_PORT" "HTTP 200" || dus "panel :$PANEL_PORT" "HTTP $K (200 bekleniyor)"
+
+K=$(http "$PANEL_TABAN/healthz")
+[ "$K" = "200" ] && gec "/healthz" "HTTP 200" || dus "/healthz" "HTTP $K"
+
+# 🔴 401 ile 404 ayrimi: 404 rotalarin HIC KAYITLI OLMADIGINI gosterir
+# (binary bozuk/eski). "200 degil, demek ki korumali" diye gecmek YALAN OLCUM.
+K=$(http "$PANEL_TABAN/api/v1/domains")
+case "$K" in
+  401) gec "API kimlik dogrulama" "HTTP 401 (rota kayitli, koruma calisiyor)" ;;
+  404) dus "API kimlik dogrulama" "HTTP 404 — rota HIC YOK (binary/router bozuk)" ;;
+  200) dus "API kimlik dogrulama" "HTTP 200 — KIMLIKSIZ ERISIM ACIK" ;;
+  *)   dus "API kimlik dogrulama" "HTTP $K (401 bekleniyor)" ;;
+esac
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Catch-all vhost'lar"
+# 🔴 Port 80 catch-all belge kokü olusturulmadigi icin `try_files` sonsuz ic
+# yonlendirmeye girip 500 veriyordu (filoda 4/4 sunucu). 5xx = arizali.
+K=$(http http://127.0.0.1/ "bilinmeyen-dogrulama.example")
+case "$K" in
+  5*)            dus "port 80 catch-all" "HTTP $K — eslesmeyen Host'lar hata aliyor" ;;
+  BAGLANTI-YOK)  dus "port 80 catch-all" "baglanti kurulamadi" ;;
+  *)             gec "port 80 catch-all" "HTTP $K" ;;
+esac
+K=$(http https://127.0.0.1/ "bilinmeyen-dogrulama.example")
+case "$K" in
+  5*|BAGLANTI-YOK) uyar "port 443 catch-all" "HTTP $K" ;;
+  *)               gec "port 443 catch-all" "HTTP $K" ;;
+esac
+
+# ══════════════════════════════════════════════════════════════════════
+bas "nginx yapilandirmasi"
+if nginx -t >/dev/null 2>&1; then gec "nginx -t" "gecerli"
+else dus "nginx -t" "yapilandirma GECERSIZ — reload'da patlar"; fi
+
+# 🔴 URETIM YOLUYLA olc: izin bitine bakmak yetmez, nginx kullanicisi
+# gercekten girebiliyor mu? Ust dizin 0700 root:root kalirsa alt dizin dogru
+# olsa BILE fastcgi_cache sessizce oluyor (nginx ayakta kaldigi icin fark
+# edilmiyor).
+CD=/var/cache/nginx/girgincache
+if [ -d "$CD" ]; then
+  if command -v runuser >/dev/null 2>&1; then
+    if runuser -u nginx -- test -r "$CD" 2>/dev/null; then
+      gec "onbellek dizini erisimi" "nginx okuyabiliyor"
+    else
+      uyar "onbellek dizini erisimi" "nginx OKUYAMIYOR — fastcgi_cache olu (girginospanel-repair --only nginx_cache)"
+    fi
+  else
+    uyar "onbellek dizini erisimi" "runuser yok — OLCULEMEDI (gecti sayilmaz)"
+  fi
+else
+  uyar "onbellek dizini" "$CD yok"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Veritabani"
+if mysql -N -e 'SELECT 1' >/dev/null 2>&1; then
+  gec "MariaDB baglantisi" "SELECT 1 OK"
+  DB=$(grep -oE 'tcp\([^)]*\)/[a-zA-Z0-9_]+' /etc/girginospanel/env 2>/dev/null | sed 's#.*/##')
+  DB=${DB:-panel}
+  GOC=$(mysql -N -e "SELECT COUNT(*) FROM \`$DB\`.schema_migrations;" 2>/dev/null)
+  TAB=$(mysql -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB';" 2>/dev/null)
+  # 🔴 Bos sonuc "0 goc" DEGIL, "olculemedi" demektir — ikisini ayir.
+  if [ -z "$GOC" ]; then dus "goc kayitlari" "OLCULEMEDI (schema_migrations okunamadi)"
+  elif [ "$GOC" -gt 0 ] 2>/dev/null; then gec "goc kayitlari" "$GOC goc uygulanmis"
+  else dus "goc kayitlari" "0 goc — sema kurulmamis"; fi
+  if [ -z "$TAB" ]; then dus "panel tablolari" "OLCULEMEDI"
+  elif [ "$TAB" -gt 10 ] 2>/dev/null; then gec "panel tablolari" "$TAB tablo ($DB)"
+  else dus "panel tablolari" "$TAB tablo — sema eksik"; fi
+else
+  dus "MariaDB baglantisi" "baglanilamadi — panel calisamaz"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Araclar (PATH ten cozulebilirlik)"
+# 🔴 Dosyanin var olmasi YETMEZ. `sudo` /usr/local/bin i PATH ten atiyor;
+# araclar kurulu oldugu halde "command not found" veriyordu ve kurulum
+# 6 adimi sessizce atlayip yesil bitiyordu.
+for t in girginospanel-repair girginospanel-wpcli-kur girginospanel-wp-onkosul \
+         girginospanel-optimize girginospanel-redis-setup; do
+  if [ ! -x "/usr/local/bin/$t" ]; then
+    uyar "$t" "pakette yok"
+  elif command -v "$t" >/dev/null 2>&1; then
+    gec "$t" "cozulebiliyor"
+  else
+    dus "$t" "kurulu ama PATH ten cagrilamiyor (PATH=$PATH)"
+  fi
+done
+
+# wp-cli: varligina degil, CALISTIGINA bak. Bozuk phar da dosya olarak vardir.
+if [ -f /usr/local/bin/wp ]; then
+  V=$(wp --version --allow-root 2>/dev/null | head -1)
+  [ -n "$V" ] && gec "wp-cli" "$V" || dus "wp-cli" "dosya var ama CALISMIYOR (bozuk phar)"
+else
+  uyar "wp-cli" "yok — WordPress ozellikleri calismaz (girginospanel-wpcli-kur)"
+fi
+
+V=$(composer --version 2>/dev/null | head -1)
+[ -n "$V" ] && gec "composer" "$V" || uyar "composer" "yok"
+
+# ══════════════════════════════════════════════════════════════════════
+bas "PHP"
+# 🔴 `grep -qix opcache` TAM SATIR eslesme ister; modul "Zend OPcache" olarak
+# listelenir -> asla tutmaz. Substring testi, boru yok.
+MODL=$(php -m 2>/dev/null | tr 'A-Z' 'a-z' | tr -d ' ')
+if [ -z "$MODL" ]; then
+  dus "PHP modulleri" "php -m calismadi — OLCULEMEDI"
+else
+  eksik=""
+  for m in gd bcmath intl soap ldap sodium opcache mysqlnd mbstring zip; do
+    case "$MODL" in *"$m"*) : ;; *) eksik="$eksik $m" ;; esac
+  done
+  [ -z "$eksik" ] && gec "PHP modulleri" "10/10" || uyar "PHP modulleri" "EKSIK:$eksik"
+  case "$MODL" in
+    *imagick*) gec "imagick" "yuklu" ;;
+    *) uyar "imagick" "yok — WordPress Site Health uyarir (girginospanel-wp-onkosul)" ;;
+  esac
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "SELinux"
+if ! command -v getenforce >/dev/null 2>&1; then
+  uyar "SELinux durumu" "getenforce yok — BILINMIYOR (gecti sayilmaz)"
+else
+  SEL=$(getenforce 2>/dev/null)
+  SPEC='/home/c_[^/]+/(public_html|tmp)(/.*)?'
+  LST=$(semanage fcontext -l 2>/dev/null)
+  case "$LST" in
+    *"$SPEC"*) gec "kiraci docroot kurali" "tanimli ($SEL)" ;;
+    *)
+      # Enforcing'te bu kural yoksa WordPress eklenti KURAMAZ -> KRITIK.
+      if [ "$SEL" = "Enforcing" ]; then
+        dus "kiraci docroot kurali" "YOK + Enforcing — WordPress yazamaz (girginospanel-wp-onkosul)"
+      else
+        uyar "kiraci docroot kurali" "yok ($SEL — Enforcing'e gecilirse WordPress kirilir)"
+      fi ;;
+  esac
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Guvenlik / bakim"
+AV=$(ls /var/lib/clamav/*.c[vl]d 2>/dev/null | wc -l)
+[ "$AV" -gt 0 ] && gec "ClamAV imzalari" "$AV imza" || uyar "ClamAV imzalari" "yok — tarama imzasiz"
+
+if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ]; then
+  if findmnt -no OPTIONS / 2>/dev/null | tr ',' '\n' | grep -qxE 'usrquota|uquota|quota'; then
+    gec "disk kotasi" "aktif"
+  else
+    uyar "disk kotasi" "GRUB'da yazili ama AKTIF DEGIL — tek seferlik reboot gerekli"
+  fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+if [ $JSON -eq 1 ]; then
+  printf '{"gecen":%d,"kritik":%d,"uyari":%d,"dusenler":[' "$GECEN" "$KRITIK" "$UYARI"
+  ilk=1
+  for d in "${DUSENLER[@]:-}"; do
+    [ -z "$d" ] && continue
+    [ $ilk -eq 0 ] && printf ','; ilk=0
+    printf '{"seviye":"%s","kontrol":"%s","detay":"%s"}' "${d%%|*}" "$(echo "$d" | cut -d'|' -f2)" "$(echo "$d" | cut -d'|' -f3)"
+  done
+  printf ']}\n'
+  [ $KRITIK -gt 0 ] && exit 1 || exit 0
+fi
+
+echo
+if [ $KRITIK -gt 0 ]; then
+  echo -e "${c_r}${c_b}✗ DOGRULAMA BASARISIZ${c_0}  —  gecen: $GECEN   ${c_r}kritik: $KRITIK${c_0}   uyari: $UYARI"
+  echo -e "  ${c_r}Kurulum/guncelleme TAMAMLANMIS SAYILMAZ.${c_0} Yukaridaki ✗ satirlarini duzeltip tekrar calistirin:"
+  echo -e "    girginospanel-dogrula"
+  exit 1
+fi
+if [ $UYARI -gt 0 ]; then
+  echo -e "${c_g}${c_b}✓ Kritik kontroller gecti${c_0}  —  gecen: $GECEN   uyari: ${c_y}$UYARI${c_0}"
+  echo -e "  Uyarilar sistemi durdurmaz ama ozellik kaybi anlamina gelir (yukariya bakin)."
+  exit 0
+fi
+echo -e "${c_g}${c_b}✓ Tum kontroller gecti${c_0}  —  $GECEN kontrol"
+exit 0

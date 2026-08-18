@@ -615,8 +615,24 @@ fi
 
 # ============ 11) Valkey + optimize ============
 step "11) Valkey (Redis) + performans tuning"
-command -v girginospanel-redis-setup >/dev/null 2>&1 && girginospanel-redis-setup >/dev/null 2>&1 && ok "girginospanel-redis-setup" || warn "redis-setup atlandı"
-command -v girginospanel-optimize >/dev/null 2>&1 && girginospanel-optimize >/dev/null 2>&1 && ok "girginospanel-optimize" || warn "optimize atlandı"
+if [ ! -x "/usr/local/bin/girginospanel-redis-setup" ]; then
+  die "girginospanel-redis-setup pakette YOK — paketleme hatasi"
+elif ! command -v girginospanel-redis-setup >/dev/null 2>&1; then
+  die "girginospanel-redis-setup kurulu ama PATH ten cagrilamiyor (PATH=$PATH)"
+elif girginospanel-redis-setup >/dev/null 2>&1; then
+  ok "girginospanel-redis-setup"
+else
+  warn "girginospanel-redis-setup calisti ama HATA dondu — sonra elle: girginospanel-redis-setup"
+fi
+if [ ! -x "/usr/local/bin/girginospanel-optimize" ]; then
+  die "girginospanel-optimize pakette YOK — paketleme hatasi"
+elif ! command -v girginospanel-optimize >/dev/null 2>&1; then
+  die "girginospanel-optimize kurulu ama PATH ten cagrilamiyor (PATH=$PATH)"
+elif girginospanel-optimize >/dev/null 2>&1; then
+  ok "girginospanel-optimize"
+else
+  warn "girginospanel-optimize calisti ama HATA dondu — sonra elle: girginospanel-optimize"
+fi
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
 step "12) Panel başlatılıyor"
@@ -627,7 +643,15 @@ if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; el
 # ---- FTP setup (Pure-FTPd) — ŞİMDİ çalışır: migration ftp_accounts tablosunu oluşturdu ----
 # (step 11'de değil çünkü GRANT SELECT ON panel.ftp_accounts tablo yokken patlıyordu)
 sleep 2
-command -v girginospanel-ftp-setup >/dev/null 2>&1 && girginospanel-ftp-setup >/dev/null 2>&1 && ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)" || warn "ftp-setup atlandı"
+if [ ! -x "/usr/local/bin/girginospanel-ftp-setup" ]; then
+  die "girginospanel-ftp-setup pakette YOK — paketleme hatasi"
+elif ! command -v girginospanel-ftp-setup >/dev/null 2>&1; then
+  die "girginospanel-ftp-setup kurulu ama PATH ten cagrilamiyor (PATH=$PATH)"
+elif girginospanel-ftp-setup >/dev/null 2>&1; then
+  ok "girginospanel-ftp-setup (Pure-FTPd, MySQL backend)"
+else
+  warn "girginospanel-ftp-setup calisti ama HATA dondu — sonra elle: girginospanel-ftp-setup"
+fi
 
 # ============ 13) Yönetici erişimi ============
 # 🔴 Panel admin girişi = sunucunun ROOT kullanıcısı (/etc/shadow hash doğrulaması).
@@ -684,7 +708,15 @@ fi
 
 # ============ 14) İzin onarımı ============
 step "14) İzin/SELinux onarımı"
-command -v girginospanel-repair >/dev/null 2>&1 && girginospanel-repair --quiet >/dev/null 2>&1 && ok "girginospanel-repair" || warn "repair atlandı"
+if [ ! -x /usr/local/bin/girginospanel-repair ]; then
+  die "girginospanel-repair pakette YOK — paketleme hatasi"
+elif ! command -v girginospanel-repair >/dev/null 2>&1; then
+  die "girginospanel-repair PATH ten cagrilamiyor (PATH=$PATH)"
+elif girginospanel-repair --quiet >/dev/null 2>&1; then
+  ok "girginospanel-repair"
+else
+  warn "girginospanel-repair hata dondu — elle: girginospanel-repair"
+fi
 
 # ============ 15) DOĞRULAMA ============
 step "15) Doğrulama"
@@ -705,6 +737,39 @@ echo -e "  antivirüs: $AV_D   ·   freshclam $(systemctl is-active clamav-fresh
 echo -e "  ssh izolasyon(jail): $JAIL_D   ·   backend port helper: $PSW_D"
 echo -e "  wp-cli (WordPress): ${WPCLI_DURUM:-?}"
 echo -e "  izolasyon: plan-driven kaynak limitleri (cgroup slice) + per-tenant PHP-FPM (CageFS eşdeğeri) HAZIR   ·   bubblewrap $(command -v bwrap >/dev/null && echo ✓ || echo ✗)"
+
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 GERCEK DOGRULAMA KAPISI
+# Yukaridaki ozet satirlari BILGILENDIRICIDIR, kapi degildir. Eskiden kurulum
+# "wp-cli (WordPress): YOK" yazip hemen ardindan "✓ kurulum tamamlandi"
+# basiyordu; ayni kosuda SELinux etiketi yok, valkey kapali, FTP kurulmamis ve
+# port 80 her Host icin HTTP 500 doner haldeydi. Operator "tamamlandi" gordu.
+#
+# girginospanel-dogrula URETIM DAVRANISINI olcer (HTTP kodlari, gercek komut
+# calistirma, uretim kullanicisiyla dosya erisimi) ve kritik bir sey duserse
+# 1 doner. Bu durumda basari banneri BASILMAZ.
+# ══════════════════════════════════════════════════════════════════════
+DOGRULAMA_KODU=0
+if command -v girginospanel-dogrula >/dev/null 2>&1; then
+  echo
+  girginospanel-dogrula || DOGRULAMA_KODU=$?
+else
+  warn "girginospanel-dogrula bulunamadi — kurulum DOGRULANAMADI"
+  DOGRULAMA_KODU=1
+fi
+
+if [ "$DOGRULAMA_KODU" -ne 0 ]; then
+  echo
+  echo -e "${c_r}═══════════════════════════════════════════════${c_0}"
+  echo -e "${c_r} ✗ Kurulum TAMAMLANMADI — kritik dogrulama basarisiz${c_0}"
+  echo -e "   Yukaridaki ${c_r}✗${c_0} satirlarini duzeltin, sonra:"
+  echo -e "     ${c_b}girginospanel-dogrula${c_0}          (yeniden olc)"
+  echo -e "     ${c_b}girginospanel-repair${c_0}           (bilinen sorunlari onar)"
+  echo -e "   Kurulumu bastan calistirmak guvenlidir (idempotent)."
+  echo -e "${c_r}═══════════════════════════════════════════════${c_0}"
+  exit 1
+fi
+
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
