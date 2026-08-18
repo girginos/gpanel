@@ -42,6 +42,7 @@ import (
 
 	"girginospanel/internal/avayar"
 	"girginospanel/internal/avmotor"
+	"girginospanel/internal/wpsaglama"
 )
 
 func main() {
@@ -75,6 +76,13 @@ func main() {
 	}
 
 	a := &ajan{db: db, ayar: ayar, motor: motor, json: *jsn}
+	// 🔴 WP butunluk katmanini CANLANDIR: onceden nil geciliyordu ve motorun
+	// en guclu katmani (cekirdek md5 dogrulamasi) hic calismiyordu (adversaryel
+	// denetim C-1). Kaynak: disk onbellek -> kendi ayna -> WP.org.
+	// Kosullu ATAMA (typed-nil kacinmak icin arayuz alani ancak burada atanir).
+	if ayar.WPButunluk {
+		a.saglama = wpsaglama.Yeni()
+	}
 
 	switch {
 	case *izle:
@@ -93,6 +101,11 @@ type ajan struct {
 	ayar  avayar.Ayarlar
 	motor *avmotor.Motor
 	json  bool
+	// 🔴 ARAYUZ tipi, concrete pointer DEGIL. `*wpsaglama.Kaynak` olsaydi
+	// WPButunluk kapaliyken arayuze cevrilince TYPED-NIL olur ve
+	// motor.go'daki `wpSaglama != nil` yanlislikla true doner -> nil
+	// pointer'da RLock panik. Arayuz alani atanmazsa gercek nil kalir.
+	saglama avmotor.SaglamaKaynagi
 
 	mu           sync.Mutex
 	taranan      int
@@ -177,7 +190,7 @@ func (a *ajan) dosyaIsle(yol string) {
 	if a.ayar.WPButunluk {
 		wpKok = wpKokBul(yol)
 	}
-	b, tespit := a.motor.TaraDosya(yol, wpKok, nil) // sağlama kaynağı: Faz 3
+	b, tespit := a.motor.TaraDosya(yol, wpKok, a.saglama)
 	if !tespit || b.Puan < a.ayar.EsikKritik {
 		return
 	}
