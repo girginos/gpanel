@@ -277,3 +277,42 @@ func (h *Handlers) AdminGecmis(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kayitlar": out})
 }
+
+// AdminDomainler — GET /antivirus/domainler: her domainin AV özeti (son tarama,
+// aktif bulgu, karantina). Domain-bazlı tarama sekmesi için.
+func (h *Handlers) AdminDomainler(w http.ResponseWriter, r *http.Request) {
+	type dom struct {
+		ID          int64  `json:"id"`
+		Alan        string `json:"alan_adi"`
+		SK          string `json:"sistem_kullanici"`
+		SonTarama   string `json:"son_tarama"`
+		SonTaranan  int    `json:"son_taranan"`
+		SonEnfekte  int    `json:"son_enfekte"`
+		AktifBulgu  int    `json:"aktif_bulgu"`
+		Karantina   int    `json:"karantina"`
+	}
+	out := []dom{}
+	rows, err := h.DB.QueryContext(r.Context(),
+		`SELECT d.id, d.alan_adi, d.sistem_kullanici,
+		        COALESCE((SELECT DATE_FORMAT(t.bitis,'%Y-%m-%d %H:%i') FROM av_taramalar t
+		                   WHERE t.domain_id=d.id AND t.bitis IS NOT NULL ORDER BY t.id DESC LIMIT 1),'') son_tarama,
+		        COALESCE((SELECT t.taranan FROM av_taramalar t WHERE t.domain_id=d.id ORDER BY t.id DESC LIMIT 1),0) son_taranan,
+		        COALESCE((SELECT t.enfekte FROM av_taramalar t WHERE t.domain_id=d.id ORDER BY t.id DESC LIMIT 1),0) son_enfekte,
+		        (SELECT COUNT(*) FROM av_bulgular b WHERE b.domain_id=d.id AND b.durum='aktif') aktif_bulgu,
+		        (SELECT COUNT(*) FROM av_bulgular b WHERE b.domain_id=d.id AND b.durum='karantina') karantina
+		   FROM domains d
+		  WHERE d.sistem_kullanici LIKE 'c_%'
+		  ORDER BY d.alan_adi LIMIT 1000`)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var x dom
+		if rows.Scan(&x.ID, &x.Alan, &x.SK, &x.SonTarama, &x.SonTaranan, &x.SonEnfekte, &x.AktifBulgu, &x.Karantina) == nil {
+			out = append(out, x)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kayitlar": out})
+}

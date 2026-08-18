@@ -15,6 +15,7 @@ type Durum = {
 type Kar = { id: number; alan_adi: string; domain_id: number; orijinal_yol: string; imza: string; seviye: string; puan: number; durum: string; tarih: string; mevcut: boolean }
 type Gecmis = { id: number; alan_adi: string; domain_id: number; dosya: string; imza: string; motor: string; seviye: string; puan: number; durum: string; tarih: string }
 type Kara = { domain_id: number; alan_adi: string; durum: string; kaynak: string }
+type Domain = { id: number; alan_adi: string; sistem_kullanici: string; son_tarama: string; son_taranan: number; son_enfekte: number; aktif_bulgu: number; karantina: number }
 type Ayar = {
   gercek_zamanli: boolean; zamanli_tarama: boolean; wp_butunluk: boolean; kural_motoru: boolean
   konum_sezgileri: boolean; oto_karantina: boolean; esik_kritik: number; kapsam: string
@@ -23,7 +24,7 @@ type Ayar = {
 }
 type AyarYanit = { ayarlar: Ayar; kapasite: { cpu_cekirdek: number; ram_toplam_mb: number; oneri_cpu_yuzde: number; oneri_ram_mb: number; oneri_is_parcacigi: number } }
 
-type Sekme = 'genel' | 'karantina' | 'gecmis' | 'itibar' | 'ayarlar'
+type Sekme = 'genel' | 'domainler' | 'karantina' | 'gecmis' | 'itibar' | 'ayarlar'
 
 function Anahtar({ acik, ayarla, etiket, aciklama, uyari }: { acik: boolean; ayarla: (v: boolean) => void; etiket: string; aciklama?: string; uyari?: boolean }) {
   return (
@@ -127,11 +128,13 @@ export default function AntivirusPanel() {
   const [kliste, setKliste] = useState<Kar[]>([])
   const [gecmis, setGecmis] = useState<Gecmis[]>([])
   const [kara, setKara] = useState<Kara[]>([])
+  const [domainler, setDomainler] = useState<Domain[]>([])
+  const [tarananDom, setTarananDom] = useState<Set<number>>(new Set())
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [kap, setKap] = useState<AyarYanit['kapasite'] | null>(null)
   const [sekme, setSekme] = useState<Sekme>(() => {
     try { const v = localStorage.getItem('gosp.av.sekme') as Sekme
-      return (['genel','karantina','gecmis','itibar','ayarlar'] as Sekme[]).includes(v) ? v : 'genel' } catch { return 'genel' }
+      return (['genel','domainler','karantina','gecmis','itibar','ayarlar'] as Sekme[]).includes(v) ? v : 'genel' } catch { return 'genel' }
   })
   function sekmeSec(k: Sekme) { setSekme(k); try { localStorage.setItem('gosp.av.sekme', k) } catch { /* yoksay */ } }
   const [yuk, setYuk] = useState(true)
@@ -153,8 +156,28 @@ export default function AntivirusPanel() {
     setMesgul('itibar')
     api.get<{ kayitlar: Kara[] }>('/antivirus/kara-liste').then(r => setKara(r.data.kayitlar || [])).catch(e => setHata(apiHata(e))).finally(() => setMesgul(null))
   }
+  function domainlerYukle() {
+    api.get<{ kayitlar: Domain[] }>('/antivirus/domainler').then(r => setDomainler(r.data.kayitlar || [])).catch(e => setHata(apiHata(e)))
+  }
+  async function domainTara(dm: Domain) {
+    setHata(null); setTarananDom(s => new Set(s).add(dm.id))
+    const bitir = () => setTarananDom(s => { const n = new Set(s); n.delete(dm.id); return n })
+    try {
+      const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${dm.id}/tara`, {})
+      const sid = data.scan_id
+      const poll = setInterval(async () => {
+        try {
+          const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${dm.id}/tara/${sid}`)
+          if (st.durum !== 'calisiyor') { clearInterval(poll); bitir(); domainlerYukle(); durumYukle() }
+        } catch { clearInterval(poll); bitir() }
+      }, 2500)
+    } catch (e) { setHata(apiHata(e, 'Tarama başlatılamadı (başka tarama sürüyor olabilir)')); bitir() }
+  }
   useEffect(() => { durumYukle(); ayarYukle() }, [])
-  useEffect(() => { if (sekme === 'itibar' && kara.length === 0) itibarYukle() }, [sekme])
+  useEffect(() => {
+    if (sekme === 'itibar' && kara.length === 0) itibarYukle()
+    if (sekme === 'domainler') domainlerYukle()
+  }, [sekme])
 
   const set = (k: keyof Ayar, v: any) => setAyar(a => a ? { ...a, [k]: v } : a)
   function yogunluk(p: 'dusuk' | 'dengeli' | 'yuksek') {
@@ -208,6 +231,7 @@ export default function AntivirusPanel() {
   const alan = 'w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
   const sekmeler: { k: Sekme; e: string; s?: number }[] = [
     { k: 'genel', e: 'Genel Bakış' },
+    { k: 'domainler', e: 'Domainler', s: domainler.length },
     { k: 'karantina', e: 'Karantina', s: kliste.filter(x => x.durum === 'karantina').length },
     { k: 'gecmis', e: 'Geçmiş', s: gecmis.length },
     { k: 'itibar', e: 'İtibar' },
@@ -279,6 +303,44 @@ export default function AntivirusPanel() {
             </button>
           ))}
         </div>
+
+        {/* ══ DOMAINLER: domain-bazlı tarama ══ */}
+        {sekme === 'domainler' && (
+          <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Domain-bazlı tarama {domainler.length > 0 && <span className="text-xs font-normal text-slate-400">({domainler.length})</span>}</h3>
+              <button onClick={domainlerYukle} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">Yenile</button>
+            </div>
+            {domainler.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Domain yok.</div> : (
+              <div className="lg:overflow-x-auto">
+                <table className={`${T.tablo} text-sm`}>
+                  <thead className={T.baslikGrubu}>
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                      <th className={T.baslik}>Domain</th><th className={T.baslik}>Kullanıcı</th><th className={T.baslik}>Son tarama</th><th className={T.baslik}>Aktif bulgu</th><th className={T.baslik}>Karantina</th><th className={T.baslik}></th>
+                    </tr>
+                  </thead>
+                  <tbody className={T.govde}>
+                    {domainler.map(dm => (
+                      <tr key={dm.id} className={T.satir}>
+                        <td className={T.hucreBaslik}>{dm.alan_adi}</td>
+                        <td className={T.hucre} data-etiket="Kullanıcı"><span className="font-mono text-xs text-slate-500">{dm.sistem_kullanici}</span></td>
+                        <td className={T.hucre} data-etiket="Son tarama"><span className="text-xs text-slate-500">{dm.son_tarama || '—'}{dm.son_taranan > 0 ? ` · ${dm.son_taranan} dosya` : ''}</span></td>
+                        <td className={T.hucre} data-etiket="Aktif bulgu"><span className={dm.aktif_bulgu > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{dm.aktif_bulgu}</span></td>
+                        <td className={T.hucre} data-etiket="Karantina"><span className={dm.karantina > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-400'}>{dm.karantina}</span></td>
+                        <td className={`${T.hucreAksiyon} lg:text-right`}>
+                          <button onClick={() => domainTara(dm)} disabled={tarananDom.has(dm.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg disabled:opacity-50 whitespace-nowrap">
+                            {tarananDom.has(dm.id) ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> Taranıyor…</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> Tara</>}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ══ GENEL BAKIŞ: koruma modülleri + son taramalar ══ */}
         {sekme === 'genel' && d && (
