@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -78,7 +79,7 @@ func main() {
 		log.Printf("uyarı: %d kural derlenemedi (atlandı)", bozuk)
 	}
 
-	a := &ajan{db: db, ayar: ayar, motor: motor, json: *jsn}
+	a := &ajan{db: db, ayar: ayar, motor: motor, json: *jsn, domCache: yeniDomainCache(db)}
 	// 🔴 WP butunluk katmanini CANLANDIR: onceden nil geciliyordu ve motorun
 	// en guclu katmani (cekirdek md5 dogrulamasi) hic calismiyordu (adversaryel
 	// denetim C-1). Kaynak: disk onbellek -> kendi ayna -> WP.org.
@@ -89,8 +90,10 @@ func main() {
 
 	switch {
 	case *izle:
+		a.kaynak = "ajan-izle"
 		a.izleyiciCalistir()
 	default:
+		a.kaynak = "ajan-zamanli"
 		kokler := flag.Args()
 		if len(kokler) == 0 {
 			kokler = ayar.TaramaKokleri()
@@ -109,6 +112,11 @@ type ajan struct {
 	// motor.go'daki `wpSaglama != nil` yanlislikla true doner -> nil
 	// pointer'da RLock panik. Arayuz alani atanmazsa gercek nil kalir.
 	saglama avmotor.SaglamaKaynagi
+
+	// DB entegrasyonu: tarama kaydı + domain önbelleği.
+	taramaID int64
+	domCache *domainCache
+	kaynak   string // panel | ajan-zamanli | ajan-izle
 
 	mu           sync.Mutex
 	taranan      int
@@ -149,6 +157,9 @@ func (a *ajan) tamTarama(kokler []string) {
 		}()
 	}
 
+	// 🔴 Tarama kaydı aç: bulgular buna bağlanır, panel görsün.
+	a.taramaID = taramaBasla(a.db, a.kaynak, a.ayar.Kapsam)
+
 	basla := time.Now()
 	haric := a.ayar.HaricListesi()
 	for _, kok := range kokler {
@@ -172,6 +183,7 @@ func (a *ajan) tamTarama(kokler []string) {
 	close(is)
 	wg.Wait()
 
+	taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
 	a.ozetYaz(basla, kokler)
 }
 
@@ -209,12 +221,35 @@ func (a *ajan) dosyaIsle(yol string) {
 	// OTO-KARANTINA: cekirdek dosyalari (wp-includes/wp-admin) ASLA karantinaya
 	// alinmaz -- silmek/tasimak siteyi bozar. Cekirdek tespiti RAPORLANIR;
 	// operator `wp core verify-checksums` ile onarir.
+	karantinaYol := ""
 	if a.ayar.OtoKarantina && !cekirdekDosya(yol) {
-		if err := karantinaAl(yol); err != nil {
+		if h, err := karantinaAl(yol); err != nil {
 			log.Printf("karantina basarisiz %s: %v", yol, err)
+		} else {
+			karantinaYol = h
 		}
 	}
+
+	// 🔴 DB'YE YAZ: panel görsün. Tarama kaydı yoksa (DB yok) sessizce atlanır.
+	var domID int64
+	if a.domCache != nil {
+		domID = a.domCache.domainID(yol)
+	}
+	bulguID := bulguYaz(a.db, a.taramaID, domID, b, karantinaYol)
+
+	// 🔴 BİLDİRİM: müşteriye/panele akıt. domID>0 → müşteri, 0 → panel-geneli.
+	seviye := "kritik"
+	eylem := "tespit edildi"
+	if karantinaYol != "" {
+		eylem = "karantinaya alındı"
+	}
+	bildirimYaz(a.db, seviye,
+		"Zararlı dosya "+eylem,
+		"Dosya: "+yol+"\nKurallar: "+b.Aciklama+"\nPuan: "+itoa(b.Puan),
+		domID, "av_bulgu", bulguID)
 }
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // cekirdekDosya — WordPress cekirdek agacinda mi (karantina istisnasi).
 func cekirdekDosya(yol string) bool {
@@ -405,20 +440,25 @@ func wpKokBul(yol string) string {
 // saldırgan dosyayı çalıştırmaya devam edebilir ve büyük dosyada yarış oluşur.
 // rename atomiktir. Ayrıca izinler 0000'a çekilir — karantinadaki bir dosya
 // yanlışlıkla servis edilmemeli.
-func karantinaAl(yol string) error {
+// karantinaAl — dosyayı .karantina'ya taşır, HEDEF YOLU döner (geri yükleme
+// için DB'ye yazılır). Boş string = karantina yapılamadı.
+func karantinaAl(yol string) (string, error) {
 	sk, home := kiraciBul(yol)
 	if sk == "" {
-		return fmt.Errorf("kiracı bulunamadı: %s", yol)
+		return "", fmt.Errorf("kiracı bulunamadı: %s", yol)
 	}
 	qdir := filepath.Join(home, ".karantina")
 	if err := os.MkdirAll(qdir, 0o700); err != nil {
-		return err
+		return "", err
 	}
 	hedef := filepath.Join(qdir, fmt.Sprintf("%d-%s", time.Now().Unix(), filepath.Base(yol)))
 	if err := os.Rename(yol, hedef); err != nil {
-		return err
+		return "", err
 	}
-	return os.Chmod(hedef, 0o000)
+	if err := os.Chmod(hedef, 0o000); err != nil {
+		return hedef, err
+	}
+	return hedef, nil
 }
 
 func kiraciBul(yol string) (sk, home string) {

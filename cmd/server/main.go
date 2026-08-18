@@ -18,7 +18,9 @@ import (
 	"girginospanel/internal/accounts"
 	"girginospanel/internal/antivirus"
 	"girginospanel/internal/auth"
+	"girginospanel/internal/avayar"
 	"girginospanel/internal/backups"
+	"girginospanel/internal/bildirim"
 	"girginospanel/internal/composer"
 	"girginospanel/internal/config"
 	"girginospanel/internal/cron"
@@ -70,7 +72,6 @@ import (
 	"girginospanel/internal/users"
 	"girginospanel/internal/uygulama"
 	"girginospanel/internal/waf"
-	"girginospanel/internal/avayar"
 	"girginospanel/internal/websec"
 	"girginospanel/internal/wordpress"
 
@@ -286,6 +287,7 @@ func main() {
 	laravelH := &laravel.Handlers{DB: d}
 	korumaH := &sifrekoruma.Handlers{DB: d}
 	avH := &antivirus.Handlers{DB: d}
+	bildirimH := &bildirim.Handlers{DB: d}
 	kopyaH := &sitekopya.Handlers{DB: d}
 	wpH := &wordpress.Handlers{DB: d}
 	fwH := &guvenlikduvari.Handlers{DB: d}
@@ -371,6 +373,8 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/websec/apps", websecH.Apps)
 			r.With(middleware.AdminOnly).Get("/antivirus/ayarlar", avAyarH.Getir)
 			r.With(middleware.AdminOnly).Put("/antivirus/ayarlar", avAyarH.Kaydet)
+			r.With(middleware.AdminOnly).Get("/bildirimler", bildirimH.Liste)
+			r.With(middleware.AdminOnly).Post("/bildirimler/{id}/okundu", bildirimH.Okundu)
 			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
 			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
 			// Panel Hostname & SSL (admin only)
@@ -500,6 +504,10 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/tara", avH.Tara)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/tara/{sid}", avH.TaraDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina", avH.Karantina)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/karantina/liste", avH.KarantinaListe)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/geri-yukle", avH.KarantinaGeriYukle)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/sil", avH.KarantinaSil)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/karantina/{bid}/incele", avH.KarantinaIncele)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/imza-guncelle", avH.ImzaGuncelle)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/kopya", kopyaH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/kopya", kopyaH.Olustur)
@@ -724,7 +732,7 @@ func main() {
 		_ = avayar.LimitleriUygula(avAyar)
 		avayar.IzleyiciSenkron(avAyar)
 	}
-	guvenlikduvari.FirewalldDevral()                   // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
+	guvenlikduvari.FirewalldDevral() // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
 	}
