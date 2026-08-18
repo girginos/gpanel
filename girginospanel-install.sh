@@ -636,9 +636,44 @@ fi
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
 step "12) Panel başlatılıyor"
-systemctl enable --now girginospanel >/dev/null 2>&1; sleep 3
+# 🔴 BAYAT SUREC: `enable --now` ZATEN CALISAN servisi YENIDEN BASLATMAZ.
+# Adim 6'da binary'yi DEGISTIRDIK; restart etmezsek ESKI surec calismaya
+# devam eder. O zaman yeni binary diskte durur ama devrede olmaz ve
+# provisioner'in her acilista garanti ettigi seyler (catch-all belge
+# kokleri, cache zone, WAF senkronu) YENIDEN OLUSTURULMAZ. Operator
+# "ACTIVE" gorup yeni surumun devrede oldugunu saniyor.
+systemctl enable girginospanel >/dev/null 2>&1
+systemctl restart girginospanel >/dev/null 2>&1; sleep 3
 systemctl enable --now nginx >/dev/null 2>&1; systemctl restart nginx >/dev/null 2>&1
-if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; else journalctl -u girginospanel --no-pager -n 20; die "panel başlamadı"; fi
+if ! systemctl is-active --quiet girginospanel; then
+  journalctl -u girginospanel --no-pager -n 20; die "panel başlamadı"
+fi
+# "ayakta" YETMEZ — CALISAN SURECIN kurdugumuz binary olduğunu kanitla.
+# Binary degistirilip restart edilmediginde /proc/PID/exe ESKI inode'u
+# (cogu zaman "(deleted)") gosterir. Servis yine "active" der.
+_pid=$(systemctl show -p MainPID --value girginospanel 2>/dev/null)
+_kurulu=/opt/girginospanel/bin/girginospanel-server
+if [ -n "$_pid" ] && [ "$_pid" != "0" ] && [ -r "/proc/$_pid/exe" ]; then
+  # ICERIK karsilastirmasi — inode DEGIL. /proc/PID/exe procfs aygitinda
+  # gorunur, kurulu dosya gercek fs'te; inode'lar asla esitlenmez ve kontrol
+  # her zaman "bayat" derdi (ilk surumde bu hata yapildi).
+  _link=$(readlink "/proc/$_pid/exe" 2>/dev/null)
+  _ch=$(sha256sum "/proc/$_pid/exe" 2>/dev/null | awk '{print $1}')
+  _kh=$(sha256sum "$_kurulu" 2>/dev/null | awk '{print $1}')
+  case "$_link" in
+    *" (deleted)") die "panel ayakta ama calisan dosya SILINMIS — restart basarisiz" ;;
+  esac
+  if [ -z "$_ch" ] || [ -z "$_kh" ]; then
+    warn "girginospanel ACTIVE ama calisan binary DOGRULANAMADI (sha256 alinamadi)"
+  elif [ "$_ch" = "$_kh" ]; then
+    ok "girginospanel ACTIVE (calisan surec = kurulan binary)"
+  else
+    die "panel ayakta ama ESKI binary ile calisiyor (${_link:-bilinmiyor}) — restart basarisiz"
+  fi
+else
+  # Olculemiyorsa GECTI sayma.
+  warn "girginospanel ACTIVE ama calisan binary DOGRULANAMADI (MainPID=$_pid)"
+fi
 
 # ---- FTP setup (Pure-FTPd) — ŞİMDİ çalışır: migration ftp_accounts tablosunu oluşturdu ----
 # (step 11'de değil çünkü GRANT SELECT ON panel.ftp_accounts tablo yokken patlıyordu)

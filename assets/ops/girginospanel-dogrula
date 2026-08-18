@@ -68,7 +68,17 @@ http() { # $1=url  $2=host header (ops)
   [ -n "$k" ] && [ "$k" != "000" ] && echo "$k" || echo "BAGLANTI-YOK"
 }
 
-servis() { systemctl is-active "$1" 2>/dev/null || echo "bilinmiyor"; }
+# 🔴 `systemctl is-active X || echo bilinmiyor` IKI SATIR uretebilir:
+# systemctl "inactive" YAZAR *ve* sifirdan farkli doner -> `||` dali DA
+# calisir. Sonuc: degisken "inactive<yenisatir>bilinmiyor" olur ve printf
+# ikinci satiri CIPLAK basar. Bozuk-durum testinde tam olarak bu goruldu:
+# valkey satirinin altinda basibos bir "bilinmiyor" belirdi. Ilk satiri al.
+servis() {
+  local d
+  d=$(systemctl is-active "$1" 2>/dev/null)
+  d=${d%%$'\n'*}
+  [ -n "$d" ] && echo "$d" || echo "bilinmiyor"
+}
 
 # 🔴 PANEL PORTUNU VARSAYMA — OKU. Ilk surumde 8443 sabit yazmistim ve
 # derleme sunucusunda (port 8899'a alinmis) UC KRITIK YANLIS ALARM verdi.
@@ -127,6 +137,42 @@ for s in valkey named httpd crond; do
 done
 
 # ══════════════════════════════════════════════════════════════════════
+# 🔴 "servis active" ile "yeni binary calisiyor" AYNI SEY DEGIL. Binary
+# diskte degistirilip servis restart edilmezse ESKI surec calismaya devam
+# eder ve systemd yine "active" der. Bu sessiz bayat surec, guncellemenin
+# hic uygulanmamis olmasi demektir. /proc/PID/exe inode'unu kurulu dosyayla
+# karsilastiriyoruz — silinmis inode ya da farkli dosya = bayat.
+bas "Calisan surec kimligi"
+_pid=$(systemctl show -p MainPID --value girginospanel 2>/dev/null)
+_kurulu=/opt/girginospanel/bin/girginospanel-server
+if [ -z "$_pid" ] || [ "$_pid" = "0" ]; then
+  dus "calisan binary" "panel surec yok (MainPID=$_pid)"
+elif [ ! -r "/proc/$_pid/exe" ]; then
+  uyar "calisan binary" "OLCULEMEDI (/proc/$_pid/exe okunamadi)"
+elif [ ! -f "$_kurulu" ]; then
+  dus "calisan binary" "kurulu binary bulunamadi ($_kurulu)"
+else
+  # ICERIK karsilastirmasi. `stat` ile inode karsilastirmak YANLIS:
+  # /proc/PID/exe procfs'in aygit numarasini tasir, kurulu dosya gercek fs'te
+  # -> hicbir zaman esitlenmez ve kontrol HER ZAMAN "bayat" der (ilk surumde
+  # tam olarak bu oldu, negatif kontrol yakaladi).
+  _link=$(readlink "/proc/$_pid/exe" 2>/dev/null)
+  _ch=$(sha256sum "/proc/$_pid/exe" 2>/dev/null | awk '{print $1}')
+  _kh=$(sha256sum "$_kurulu" 2>/dev/null | awk '{print $1}')
+  case "$_link" in
+    *" (deleted)")
+      dus "calisan binary" "BAYAT SUREC — calisan dosya SILINMIS (systemctl restart girginospanel)" ;;
+    *)
+      if [ -z "$_ch" ] || [ -z "$_kh" ]; then
+        uyar "calisan binary" "OLCULEMEDI (sha256 alinamadi) — gecti sayilmaz"
+      elif [ "$_ch" = "$_kh" ]; then
+        gec "calisan binary" "kurulu dosyayla ayni (sha256)"
+      else
+        dus "calisan binary" "BAYAT SUREC — diskteki binary calismiyor (systemctl restart girginospanel)"
+      fi ;;
+  esac
+fi
+
 bas "Panel HTTP yuzeyi"
 if [ -z "$PANEL_TABAN" ]; then
   # Olculemeyen kontrol GECMIS sayilmaz. Tahmini bir porta baglanip "calisiyor"
