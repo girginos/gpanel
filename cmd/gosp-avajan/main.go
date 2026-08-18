@@ -68,9 +68,12 @@ func main() {
 		log.Fatalf("ayarlar okunamadı: %v", err)
 	}
 
-	// 🔴 Motor kuralları GÖMÜLÜ tabandan gelir. İmza paketi henüz yoksa bile
-	// koruma çalışır; "kural yok, sessizce hiçbir şey yapma" durumu OLMAMALI.
-	motor, bozuk := avmotor.Yeni(avmotor.TabanSet(), 0)
+	// 🔴 Kural seti: uzak İMZALI paket (varsa + doğrulanırsa) → disk → gömülü
+	// taban. GuncelSet imza doğrulamadan hiçbir kural yüklemez; en kötü durumda
+	// gömülü tabana düşer. "kural yok, sessizce hiçbir şey yapma" durumu OLMAZ.
+	// Ağ maliyeti: --tara her koşuda bir kez uzak dener; --izle başlangıçta.
+	set := avmotor.GuncelSet(avmotor.TabanSet().Surum, false)
+	motor, bozuk := avmotor.Yeni(set, 0)
 	if bozuk > 0 {
 		log.Printf("uyarı: %d kural derlenemedi (atlandı)", bozuk)
 	}
