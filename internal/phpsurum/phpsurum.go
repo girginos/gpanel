@@ -280,7 +280,34 @@ func Discover(m SurumMeta) Surum {
 }
 
 // TumSurumler: desteklenen tüm sürümleri tara
+var (
+	tumSurumlerOnbellek []Surum
+	tumSurumlerZaman    time.Time
+	tumSurumlerMu       sync.Mutex
+)
+
+const tumSurumlerTTL = 60 * time.Second
+
+// TumSurumlerOnbellekSifirla — surum kur/kaldir sonrasi cagirilabilir (opsiyonel;
+// 60s TTL zaten kendiliginden tazeler).
+func TumSurumlerOnbellekSifirla() {
+	tumSurumlerMu.Lock()
+	tumSurumlerOnbellek = nil
+	tumSurumlerMu.Unlock()
+}
+
 func TumSurumler() []Surum {
+	// 🔴 PERF: Discover her KURULU surum icin `php -v`+`php -m` exec eder (~40ms x
+	// kurulu surum). TumSurumler /php-settings'te 2x + /php/versions'ta 1x cagriliyordu
+	// → ~2s "Yükleniyor". Kurulu surumler yalniz kur/kaldir ile degisir → 60s TTL cache.
+	tumSurumlerMu.Lock()
+	if tumSurumlerOnbellek != nil && time.Since(tumSurumlerZaman) < tumSurumlerTTL {
+		c := tumSurumlerOnbellek
+		tumSurumlerMu.Unlock()
+		return c
+	}
+	tumSurumlerMu.Unlock()
+
 	out := make([]Surum, 0, len(DesteklenenSurumler))
 	for _, m := range DesteklenenSurumler {
 		out = append(out, Discover(m))
@@ -292,6 +319,11 @@ func TumSurumler() []Surum {
 		}
 		return surumKarsi(out[i].Surum, out[j].Surum) > 0
 	})
+
+	tumSurumlerMu.Lock()
+	tumSurumlerOnbellek = out
+	tumSurumlerZaman = time.Now()
+	tumSurumlerMu.Unlock()
 	return out
 }
 

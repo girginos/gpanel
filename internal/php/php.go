@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"text/template"
 
 	"girginospanel/internal/httpx"
@@ -632,6 +634,17 @@ func surumModulleri(surum string) []string {
 			}
 		}
 	}
+	// 🔴 PERF: `php -m` PHP CLI'yi baslatir (tum eklentileri yukler) ~2s surer ve
+	// GET /php-settings'i her acilista + kaydet-sonrasi refetch'te blokluyordu
+	// ("Yükleniyor..."). Modül listesi yalnız eklenti kur/kaldir ile degisir →
+	// phpBin bazli TTL'li onbellek. Kaydet sonrasi refetch sicak onbellege duser.
+	modulOnbellekMu.Lock()
+	if k, ok := modulOnbellek[phpBin]; ok && time.Since(k.zaman) < modulOnbellekTTL {
+		modulOnbellekMu.Unlock()
+		return k.moduller
+	}
+	modulOnbellekMu.Unlock()
+
 	out, err := exec.Command(phpBin, "-m").Output()
 	if err != nil {
 		return nil
@@ -644,5 +657,20 @@ func surumModulleri(surum string) []string {
 		}
 		moduller = append(moduller, ln)
 	}
+	modulOnbellekMu.Lock()
+	modulOnbellek[phpBin] = modulKayit{moduller: moduller, zaman: time.Now()}
+	modulOnbellekMu.Unlock()
 	return moduller
 }
+
+type modulKayit struct {
+	moduller []string
+	zaman    time.Time
+}
+
+var (
+	modulOnbellek   = map[string]modulKayit{}
+	modulOnbellekMu sync.Mutex
+)
+
+const modulOnbellekTTL = 5 * time.Minute
