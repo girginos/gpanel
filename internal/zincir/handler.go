@@ -104,10 +104,15 @@ func zincirOlaylari(r *http.Request, db *sql.DB, domID int64, tarih, kos string,
 	defer iptal()
 	args := append([]any{domID}, scopeArg...)
 	args = append(args, tarih, tarih, pencereDk)
+	// FAZ3b: reseller-seviye 'giris' (domain_id NULL) olaylarını da göster —
+	// AMA kos yine uygulanır. müşteri kapsamı (domain_id=?) NULL≠domID olduğundan
+	// giris'i otomatik dışlar (kiracının panel-login atağını müşteriye sızdırmaz);
+	// admin/reseller kapsamı reseller_id üzerinden giris'i dahil eder.
 	rows, err := db.QueryContext(ctx,
 		`SELECT kaynak, asama, seviye, ozet, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
 		 FROM av_olay
-		 WHERE domain_id=? AND `+kos+` AND created_at <= ? AND created_at >= (? - INTERVAL ? MINUTE)
+		 WHERE (domain_id=? OR (domain_id IS NULL AND asama='giris')) AND `+kos+`
+		   AND created_at <= ? AND created_at >= (? - INTERVAL ? MINUTE)
 		 ORDER BY created_at LIMIT 50`, args...)
 	if err != nil {
 		return nil

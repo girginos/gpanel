@@ -30,6 +30,8 @@ const (
 	pencereDk     = 15   // korelasyon penceresi (dakika)
 	tickSaniye    = 20   // tarama aralığı
 	yenidenDk     = 30   // aynı imzayı yeniden bildirmeden önce
+	girisYenidenDk = 10  // giris re-emit dedup — pencereDk(15)'ten KÜÇÜK olmalı: sürekli
+	//                      atak sırasında giris hep pencere-içi kalsın (kör-boşluk yok, üst üste ~5dk)
 	domainDk      = 30   // domain başına bildirim cooldown (imzadan BAĞIMSIZ)
 	domainMaxBild = 3    // cooldown penceresinde domain başına en çok zincir bildirimi
 	olayLimit     = 500  // domain başına tek turda çekilecek en çok olay (bellek sınırı)
@@ -195,6 +197,7 @@ func Baslat(db *sql.DB) {
 					log.Printf("zincir korelasyon panic (kurtarıldı): %v", r)
 				}
 			}()
+			apiTara(db) // FAZ3b: başarısız-giriş selinden 'giris' olayı üret
 			if err := Calistir(db); err != nil {
 				log.Printf("zincir korelasyon: %v", err)
 			}
@@ -264,9 +267,26 @@ func Calistir(db *sql.DB) error {
 func domainOlaylari(db *sql.DB, domID int64) ([]Olay, error) {
 	ctx, iptal := context.WithTimeout(context.Background(), sorguTimeout)
 	defer iptal()
+	// Domain sahibi → reseller-seviye 'giris' (API brute-force) olaylarını da
+	// zincire dahil et (hesap-seviye Initial Access'i domain-seviye zincire bağlar).
+	// 🔴 İZOLASYON: lookup BAŞARISIZSA (silinmiş/orphan domain, geçici DB hatası)
+	// ridArg=nil ile KÖKE DÜŞME — o zaman reseller_id<=>NULL kök giris'ini bu
+	// domaine bağlar (cross-tenant kontaminasyon). Eşleşmeyen sentinel (-1) kullan:
+	// domain olayları yine döner, hiçbir giris eşleşmez.
+	var rid sql.NullInt64
+	lookErr := db.QueryRowContext(ctx, `SELECT reseller_id FROM domains WHERE id=?`, domID).Scan(&rid)
+	var ridArg any = int64(-1) // lookup fail → hiçbir reseller_id ile eşleşmez (kök DEĞİL)
+	if lookErr == nil {
+		if rid.Valid && rid.Int64 > 0 {
+			ridArg = rid.Int64 // reseller domaini → o reseller'ın giris'i
+		} else {
+			ridArg = nil // gerçek kök/0-domain → reseller_id<=>NULL kök giris'i eşleşir
+		}
+	}
 	rows, err := db.QueryContext(ctx, `SELECT asama, seviye, yol, pid, created_at FROM av_olay
-		WHERE domain_id=? AND created_at >= (NOW() - INTERVAL ? MINUTE)
-		ORDER BY created_at LIMIT ?`, domID, pencereDk, olayLimit)
+		WHERE (domain_id=? OR (domain_id IS NULL AND asama='giris' AND reseller_id <=> ?))
+		  AND created_at >= (NOW() - INTERVAL ? MINUTE)
+		ORDER BY created_at LIMIT ?`, domID, ridArg, pencereDk, olayLimit)
 	if err != nil {
 		return nil, err
 	}
