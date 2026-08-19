@@ -288,7 +288,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           </svg>
         </button>
           {bAcik && (
-            <div className="absolute right-0 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
+            <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
               <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-800 z-10">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Bildirimler{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} yeni</span>}
@@ -310,7 +310,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-start gap-1.5">
-                      <span className={`block text-sm truncate ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
+                      <span className={`block text-sm ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
                       {!b.okundu && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0" />}
                     </span>
                     <span className="block text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{yolGizle(b.mesaj)}</span>
@@ -318,6 +318,12 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   </span>
                 </button>
               ))}
+              {bildirimler.length > 0 && (
+                <button onClick={() => { setBAcik(false); navigate('/bildirimler') }}
+                  className="w-full text-center px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
+                  Tümünü göster →
+                </button>
+              )}
             </div>
           )}
         </div>
