@@ -185,6 +185,14 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 				b.Puan += dp
 				b.Kurallar = append(b.Kurallar, dids...)
 			}
+			// FAZ 4 — semantik katman: SABİT string-concat KATLAMA (gizli sink adı
+			// `'sy'.'stem'`) + değişken-fonksiyon/süperglobal-çağrı gibi YAPISAL
+			// kaçışlar (regex İFADE EDEMEZ). Yalnız PHP; concat-yeniden-tara tavanı
+			// EsikKritik altında, yapısal detektörler yüksek-hassasiyetle kritik verir.
+			if sp, sids := semantikTara(icerik, m.set.Kurallar, ext, disGoruldu); sp > 0 {
+				b.Puan += sp
+				b.Kurallar = append(b.Kurallar, sids...)
+			}
 		}
 	}
 
