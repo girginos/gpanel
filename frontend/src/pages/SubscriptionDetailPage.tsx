@@ -327,7 +327,7 @@ function DashboardTabIcerik({ domain }: { domain: Domain }) {
         />
         <ToolCard etiket="Şifre Korumalı Dizinler" aciklama=".htpasswd" ikon={ICONS.kilit} renk="amber" faz="F7" />
         <ToolCard etiket="İstatistikler"            aciklama="Trafik analizi" ikon={ICONS.istatistik} renk="indigo" faz="F10" />
-        <ToolCard etiket="Imunify"                  aciklama="Antivirüs"      ikon={ICONS.imunify}    renk="emerald" />
+        <ToolCard etiket="G-AV"                  aciklama="Antivirüs"      ikon={ICONS.imunify}    renk="emerald" />
       </Grup>
     </div>
   )

@@ -23,7 +23,7 @@ const TOOL_META: Record<string, { etiket: string; faz?: string; aciklama: string
   'ssl':             { etiket: 'SSL/TLS Sertifikası',       faz: 'F7',  aciklama: 'Let\'s Encrypt otomatik kurulum + auto-renew.' },
   'sifre-koruma':    { etiket: 'Şifre Korumalı Dizinler',   faz: 'F7',  aciklama: '.htpasswd ile dizin koruma.' },
   'istatistik':      { etiket: 'İstatistikler',             faz: 'F10', aciklama: 'Disk, trafik, ziyaretçi raporları.' },
-  'imunify':         { etiket: 'Imunify',                    aciklama: 'Antivirüs/WAF entegrasyonu.' },
+  'imunify':         { etiket: 'G-AV',                                           aciklama: 'GirginOS antivirüs — zararlı yazılım taraması.' },
 }
 
 export default function ToolPage() {

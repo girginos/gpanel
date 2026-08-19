@@ -10,6 +10,29 @@ type Tarama = { id: number; durum: string; motor: string; taranan: number; enfek
 type Durum = { clamav: boolean; imza_tarihi: string; kullanici: string; son_tarama: Tarama | null; bulgular: Bulgu[] }
 type KarantinaKayit = { id: number; orijinal_yol: string; imza: string; seviye: string; puan: number; durum: string; tarih: string; boyut: number; mevcut: boolean }
 
+type Sekme = 'bulgular' | 'karantina'
+
+// G-AV marka logosu — GirginOS'un KENDİ antivirüs motoru. (Imunify lisanslı bir
+// markadır; hiçbir yerde kullanılmaz.) Gerçek, dolgulu kalkan SVG — jenerik
+// tek-çizgi path değil.
+function GavLogo({ className = 'w-11 h-11' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="G-AV antivirüs">
+      <defs>
+        <linearGradient id="gav-shield" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#34d399" />
+          <stop offset="1" stopColor="#059669" />
+        </linearGradient>
+      </defs>
+      <path d="M24 3.5l15.5 4.8v10.4c0 10.2-6.6 19.6-15.5 22.3C15.1 38.3 8.5 28.9 8.5 18.7V8.3L24 3.5z" fill="url(#gav-shield)" />
+      {/* sağ yarıya hafif gölge → hacim hissi */}
+      <path d="M24 3.5l15.5 4.8v10.4c0 10.2-6.6 19.6-15.5 22.3V3.5z" fill="#000" opacity="0.07" />
+      {/* onay işareti */}
+      <path d="M16.3 24.2l5.2 5.1 9.8-11.4" fill="none" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export default function DomainAntivirusPage() {
   const { onay } = useDialog()
   const { id } = useParams()
@@ -22,6 +45,7 @@ export default function DomainAntivirusPage() {
   const [kliste, setKliste] = useState<KarantinaKayit[]>([])
   const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string; kesik?: boolean } | null>(null)
   const [klHata, setKlHata] = useState(false)
+  const [sekme, setSekme] = useState<Sekme>('bulgular')
 
   function yukle() {
     if (!id) return
@@ -91,29 +115,59 @@ export default function DomainAntivirusPage() {
   if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
   const aktif = d.bulgular.filter(b => !b.karantina)
+  const karAktif = kliste.filter(k => k.durum === 'karantina' && k.mevcut).length
+
+  const sekmeBtn = (k: Sekme, etiket: string, rozet: number, vurgu?: 'kirmizi' | 'kehribar') => (
+    <button
+      onClick={() => setSekme(k)}
+      className={`relative px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${
+        sekme === k
+          ? 'border-brand-500 text-brand-700 dark:text-brand-300'
+          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+      }`}
+    >
+      {etiket}
+      {rozet > 0 && (
+        <span className={`ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold ${
+          vurgu === 'kirmizi' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+          : vurgu === 'kehribar' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+        }`}>{rozet}</span>
+      )}
+    </button>
+  )
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
           { etiket: 'Domainler', href: '/domainler' },
           { etiket: 'Antivirüs' },
         ]} />
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Antivirüs — Zararlı Yazılım Taraması</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          <span className="font-mono">public_html</span> dizini ClamAV imzaları + yerleşik webshell heuristiği ile taranır.
-        </p>
+
+        {/* Başlık — gerçek G-AV logo görseli */}
+        <div className="flex items-start gap-3 mb-4">
+          <GavLogo className="w-11 h-11 flex-shrink-0" />
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">
+              G-AV <span className="text-slate-400 dark:text-slate-500 font-normal text-lg">— Antivirüs</span>
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="font-mono">public_html</span> dizini GirginOS'un kendi motoruyla taranır: imza + webshell heuristiği.
+            </p>
+          </div>
+        </div>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-        {/* Durum + eylemler */}
+        {/* Durum + eylemler — her zaman üstte */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${d.clamav ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                <span className="text-slate-700 dark:text-slate-200">Motor: <span className="font-medium">{d.clamav ? 'ClamAV + Heuristik' : 'Sadece Heuristik'}</span></span>
+                <span className="text-slate-700 dark:text-slate-200">Motor: <span className="font-medium">{d.clamav ? 'G-AV + İmza veritabanı' : 'G-AV Heuristik'}</span></span>
               </div>
               {d.clamav && <div className="text-xs text-slate-400 ml-4">İmza veritabanı: {d.imza_tarihi || '—'}</div>}
               {d.son_tarama && <div className="text-xs text-slate-400 ml-4">
@@ -137,94 +191,96 @@ export default function DomainAntivirusPage() {
           )}
         </div>
 
-        {/* Bulgular */}
-        {/* Mobilde kart çerçevesi kaldırılır: bulgu satırları zaten kart olur,
-            aksi hâlde kartlar ikinci bir çerçevenin içine hapsolurdu. */}
-        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">
-            Bulgular {d.son_tarama && <span className="text-xs font-normal text-slate-400">— son taramadan</span>}
-          </h3>
-          {!d.son_tarama ? (
-            <div className="text-center py-8 text-sm text-slate-500 dark:text-slate-400">Henüz tarama yapılmadı. “Şimdi Tara” ile başlayın.</div>
-          ) : aktif.length === 0 && d.bulgular.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="text-3xl mb-2">✅</div>
-              <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Temiz — zararlı yazılım bulunmadı.</p>
-            </div>
-          ) : (
-            <div className="lg:overflow-x-auto">
-              <table className={`${T.tablo} text-sm`}>
-                <thead className={T.baslikGrubu}>
-                  <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className={T.baslik}>Dosya</th><th className={T.baslik}>İmza</th><th className={T.baslik}>Motor</th><th className={T.baslik}>Durum</th><th className={T.baslik}></th>
-                  </tr>
-                </thead>
-                <tbody className={T.govde}>
-                  {d.bulgular.map((b, i) => (
-                    <tr key={i} className={T.satir}>
-                      {/* Birincil tanımlayıcı: dosya yolu — mobilde kart başlığı olur */}
-                      <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-xs`}>{b.dosya}</td>
-                      <td className={T.hucre} data-etiket="İmza">
-                        <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
-                      </td>
-                      <td className={T.hucre} data-etiket="Motor"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
-                      <td className={T.hucre} data-etiket="Durum">
-                        {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
-                          : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
-                      </td>
-                      {/* Karantinadaki bulguda buton yok: mobilde boş hücre yalnızca
-                          asılı bir ayraç çizgisi bırakırdı, o yüzden gizlenir.
-                          Masaüstünde kolon hizası için lg:table-cell ile geri gelir. */}
-                      <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
-                        {!b.karantina && <button onClick={() => karantina(b)} className="text-xs text-red-600 dark:text-red-400 hover:underline whitespace-nowrap">Karantinaya al</button>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        {/* Sekme çubuğu — sayfa aşağı inmesin diye içerik sekmelere bölündü */}
+        <div className="border-b border-slate-200 dark:border-slate-700 flex gap-1 mb-4 overflow-x-auto">
+          {sekmeBtn('bulgular', 'Bulgular', aktif.length, 'kirmizi')}
+          {sekmeBtn('karantina', 'Karantina', karAktif, 'kehribar')}
         </div>
 
-        {/* Karantina yönetimi */}
-        {(kliste.length > 0 || klHata) && (
-          <div className="mt-4 lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">🔒 Karantina</h3>
-            {klHata && kliste.length === 0 && (
-              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">Karantina listesi yüklenemedi. <button onClick={kyukle} className="underline">Yeniden dene</button></div>
-            )}
-            <div className="lg:overflow-x-auto">
-              <table className={`${T.tablo} text-sm`}>
-                <thead className={T.baslikGrubu}>
-                  <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>Durum</th><th className={T.baslik}>Tarih</th><th className={T.baslik}></th>
-                  </tr>
-                </thead>
-                <tbody className={T.govde}>
-                  {kliste.map(k => (
-                    <tr key={k.id} className={T.satir}>
-                      <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-xs`}>{k.orijinal_yol}</td>
-                      <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
-                      <td className={T.hucre} data-etiket="Durum">
-                        {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
-                          : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
-                          : <span className="text-xs text-slate-400">🗑 Silindi</span>}
-                      </td>
-                      <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
-                      <td className={`${T.hucreAksiyon} lg:text-right`}>
-                        {k.durum === 'karantina' && k.mevcut && (
-                          <span className="flex gap-2 lg:justify-end whitespace-nowrap">
-                            <button onClick={() => karIncele(k)} className="text-xs text-slate-500 hover:underline">İncele</button>
-                            <button onClick={() => geriYukle(k)} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Geri yükle</button>
-                            <button onClick={() => karSil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
-                          </span>
-                        )}
-                      </td>
+        {/* ── BULGULAR SEKMESİ ── */}
+        {sekme === 'bulgular' && (
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+            {!d.son_tarama ? (
+              <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Henüz tarama yapılmadı. “Şimdi Tara” ile başlayın.</div>
+            ) : d.bulgular.length === 0 ? (
+              <div className="text-center py-10">
+                <GavLogo className="w-12 h-12 mx-auto mb-2 opacity-90" />
+                <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Temiz — zararlı yazılım bulunmadı.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className={`${T.tablo} text-sm`}>
+                  <thead className={T.baslikGrubu}>
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                      <th className={T.baslik}>Dosya</th><th className={T.baslik}>İmza</th><th className={T.baslik}>Motor</th><th className={T.baslik}>Durum</th><th className={T.baslik}></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className={T.govde}>
+                    {d.bulgular.map((b, i) => (
+                      <tr key={i} className={T.satir}>
+                        <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-md`}>{b.dosya}</td>
+                        <td className={T.hucre} data-etiket="İmza">
+                          <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
+                        </td>
+                        <td className={T.hucre} data-etiket="Motor"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
+                        <td className={T.hucre} data-etiket="Durum">
+                          {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
+                            : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
+                        </td>
+                        <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
+                          {!b.karantina && <button onClick={() => karantina(b)} className="text-xs text-red-600 dark:text-red-400 hover:underline whitespace-nowrap">Karantinaya al</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── KARANTİNA SEKMESİ ── */}
+        {sekme === 'karantina' && (
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+            {klHata && kliste.length === 0 && (
+              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2 py-2">Karantina listesi yüklenemedi. <button onClick={kyukle} className="underline">Yeniden dene</button></div>
+            )}
+            {!klHata && kliste.length === 0 ? (
+              <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Karantinada dosya yok.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className={`${T.tablo} text-sm`}>
+                  <thead className={T.baslikGrubu}>
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                      <th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>Durum</th><th className={T.baslik}>Tarih</th><th className={T.baslik}></th>
+                    </tr>
+                  </thead>
+                  <tbody className={T.govde}>
+                    {kliste.map(k => (
+                      <tr key={k.id} className={T.satir}>
+                        <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-md`}>{k.orijinal_yol}</td>
+                        <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
+                        <td className={T.hucre} data-etiket="Durum">
+                          {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
+                            : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
+                            : <span className="text-xs text-slate-400">🗑 Silindi</span>}
+                        </td>
+                        <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
+                        <td className={`${T.hucreAksiyon} lg:text-right`}>
+                          {k.durum === 'karantina' && k.mevcut && (
+                            <span className="flex gap-2 lg:justify-end whitespace-nowrap">
+                              <button onClick={() => karIncele(k)} className="text-xs text-slate-500 hover:underline">İncele</button>
+                              <button onClick={() => geriYukle(k)} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Geri yükle</button>
+                              <button onClick={() => karSil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

@@ -85,7 +85,7 @@ export default function DomainPano({ domain }: { domain: Domain }) {
         <ToolCard etiket="WAF (Güvenlik Duvarı)"   aciklama="ModSecurity + OWASP CRS" ikon={ICONS.waf} renk="emerald" onClick={git('waf')} />
         <ToolCard etiket="Şifre Korumalı Dizinler" aciklama=".htpasswd"       ikon={ICONS.kilit}      renk="amber" faz="F7" onClick={git('sifre-koruma')} />
         <ToolCard etiket="İstatistikler"            aciklama="Trafik analizi"  ikon={ICONS.istatistik} renk="indigo" faz="F10" onClick={git('istatistik')} />
-        <ToolCard etiket="Imunify"                  aciklama="Antivirüs"        ikon={ICONS.imunify}    renk="emerald" onClick={git('imunify')} />
+        <ToolCard etiket="G-AV"                  aciklama="Antivirüs"        ikon={ICONS.imunify}    renk="emerald" onClick={git('imunify')} />
         <ToolCard
           etiket="SSH Erişimi"
           aciklama={domain.ssh_erisim ? 'Açık' : 'Kapalı'}
