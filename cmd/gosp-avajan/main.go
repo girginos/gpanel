@@ -419,6 +419,16 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 
 // ── gerçek zamanlı izleme (fanotify) ───────────────────────────────────────
 
+// altKokMu — yol taranan koklerden birinin altinda mi (FILESYSTEM kapsam filtresi).
+func altKokMu(yol string, kokler []string) bool {
+	for _, k := range kokler {
+		if k == "/" || yol == k || strings.HasPrefix(yol, strings.TrimRight(k, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *ajan) izleyiciCalistir() {
 	if !a.ayar.GercekZamanli {
 		log.Fatal("gerçek zamanlı izleme ayarlarda KAPALI (panel → Antivirüs → Modüller)")
@@ -429,13 +439,19 @@ func (a *ajan) izleyiciCalistir() {
 	}
 	defer unix.Close(fd)
 
-	// FAN_MARK_MOUNT: kök başına TEK işaret, altındaki her şeyi kapsar.
-	for _, kok := range a.ayar.TaramaKokleri() {
-		if err := unix.FanotifyMark(fd, unix.FAN_MARK_ADD|unix.FAN_MARK_MOUNT,
+	// 🔴 FAN_MARK_FILESYSTEM (FAN_MARK_MOUNT DEGIL): superblock/dosya-sistemi
+	// seviyesinde isaret koyar → NAMESPACE-BAGIMSIZ. Unit ProtectSystem=strict ile
+	// OZEL mount namespace'te calisir; FAN_MARK_MOUNT ajanin KENDI namespace'inin
+	// vfsmount'unu izler ve host'ta (shell/PHP) yazilan dosyalari GORMEZ (canli
+	// olculdu: sandbox'li unit yakalamadi, host-ns dogrudan ajan 2sn'de yakaladi).
+	// FILESYSTEM superblock'u paylasilan oldugundan host yazimlari da olay uretir.
+	kokler := a.ayar.TaramaKokleri()
+	for _, kok := range kokler {
+		if err := unix.FanotifyMark(fd, unix.FAN_MARK_ADD|unix.FAN_MARK_FILESYSTEM,
 			unix.FAN_CLOSE_WRITE, unix.AT_FDCWD, kok); err != nil {
 			log.Fatalf("fanotify_mark %s: %v", kok, err)
 		}
-		log.Printf("izleniyor: %s", kok)
+		log.Printf("izleniyor: %s (filesystem)", kok)
 	}
 
 	ctx, iptal := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -468,7 +484,9 @@ func (a *ajan) izleyiciCalistir() {
 			if strings.HasSuffix(yol, " (deleted)") {
 				continue
 			}
-			if haricMi(yol, haric) || !ilgiliUzanti(yol) {
+			// FAN_MARK_FILESYSTEM tum superblock'u kapsar; kapsam=host ise yalniz
+			// /home altini isle (kapsam=sunucu ise kok=/ → hepsi gecer).
+			if !altKokMu(yol, kokler) || haricMi(yol, haric) || !ilgiliUzanti(yol) {
 				continue
 			}
 			a.dosyaIsle(yol)

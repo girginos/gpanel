@@ -14,8 +14,8 @@ ExecStart=/usr/local/bin/girginospanel-avajan --izle
 Restart=on-failure
 RestartSec=10
 # fanotify FAN_MARK_MOUNT için CAP_SYS_ADMIN şart; başka yetki gerekmez.
-AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_FOWNER
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_FOWNER
 NoNewPrivileges=yes
 ProtectSystem=strict
 # /home taranır → okuma; karantina için /home yazılabilir olmalı.
