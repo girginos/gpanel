@@ -301,7 +301,7 @@ export default function DomainPHPPage() {
               <p className="text-xs text-slate-500 dark:text-slate-500">
                 PHP {yanit.php_surum} için yüklü <strong>{yanit.moduller?.length || 0}</strong> modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.
               </p>
-              <Link to="/araclar/php-modulleri" className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
+              <Link to="/sistem/php-modulleri" className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
                 ↗ Sunucu Modüllerini Yönet
               </Link>
             </div>
