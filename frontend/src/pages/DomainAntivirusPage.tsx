@@ -77,7 +77,6 @@ export default function DomainAntivirusPage() {
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [tarariyor, setTarariyor] = useState(false)
-  const [imzaYuk, setImzaYuk] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [kliste, setKliste] = useState<KarantinaKayit[]>([])
   const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string; kesik?: boolean } | null>(null)
@@ -141,13 +140,6 @@ export default function DomainAntivirusPage() {
     try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? '[ikili dosya]' : data.icerik, kesik: data.kesik }) }
     catch (e: any) { setHata(apiHata(e)) }
   }
-  async function imzaGuncelle() {
-    setImzaYuk(true); setHata(null)
-    try { await api.post(`/domains/${id}/antivirus/imza-guncelle`, {}); yukle() }
-    catch (e) { setHata(apiHata(e, 'İmza güncellenemedi')) }
-    finally { setImzaYuk(false) }
-  }
-
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
   if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
 
@@ -192,7 +184,7 @@ export default function DomainAntivirusPage() {
               G-AV <span className="text-slate-400 dark:text-slate-500 font-normal text-lg">— Antivirüs</span>
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              <span className="font-mono">public_html</span> dizini GirginOS'un kendi motoruyla taranır: imza + webshell heuristiği.
+              <span className="font-mono">public_html</span> dizini GirginOS'un kendi motoruyla taranır: kural zinciri + webshell heuristiği.
             </p>
           </div>
         </div>
@@ -204,18 +196,14 @@ export default function DomainAntivirusPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${d.clamav ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                <span className="text-slate-700 dark:text-slate-200">Motor: <span className="font-medium">{d.clamav ? 'G-AV + İmza veritabanı' : 'G-AV Heuristik'}</span></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="text-slate-700 dark:text-slate-200">Motor: <span className="font-medium">G-AV</span> <span className="text-xs text-slate-400">— kural + heuristik</span></span>
               </div>
-              {d.clamav && <div className="text-xs text-slate-400 ml-4">İmza veritabanı: {d.imza_tarihi || '—'}</div>}
               {d.son_tarama && <div className="text-xs text-slate-400 ml-4">
                 Son tarama: {d.son_tarama.bitis || d.son_tarama.baslangic} · {d.son_tarama.taranan} dosya · {d.son_tarama.enfekte} bulgu
               </div>}
             </div>
             <div className="flex gap-2">
-              {d.clamav && <button onClick={imzaGuncelle} disabled={imzaYuk || tarariyor}
-                className="px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-                {imzaYuk ? 'Güncelleniyor…' : 'İmzaları Güncelle'}</button>}
               <button onClick={tara} disabled={tarariyor}
                 className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
                 {tarariyor ? 'Taranıyor…' : 'Şimdi Tara'}</button>
