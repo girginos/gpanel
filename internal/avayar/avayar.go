@@ -203,7 +203,13 @@ func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
 func IzleyiciSenkron(a Ayarlar) {
 	const birim = "girginospanel-avizle.service"
 	if a.GercekZamanli {
-		_ = exec.Command("systemctl", "enable", "--now", birim).Run()
+		// enable: onyukleme kaliciligi. `--now` KULLANMA: zaten calisan birimde
+		// NO-OP olur ve ajani YENIDEN BASLATMAZ. Ajan config'i (oto_karantina,
+		// esik, kapsam, kural/haric) YALNIZ baslangicta okur; her ayar kaydinda
+		// restart SART, yoksa panel "acik" gosterir ama calisan ajan BAYAT ayarla
+		// kosar (kullanici oto_karantinayi acar, etki etmez).
+		_ = exec.Command("systemctl", "enable", birim).Run()
+		_ = exec.Command("systemctl", "restart", birim).Run()
 	} else {
 		_ = exec.Command("systemctl", "disable", "--now", birim).Run()
 	}
