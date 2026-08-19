@@ -88,33 +88,55 @@ type envanterSatir struct {
 	PaketSayisi int    `json:"paket_sayisi"`
 	BulguSayisi int    `json:"bulgu_sayisi"`
 	SonTarama   string `json:"son_tarama"`
+	// Durum: taraniyor | acik | temiz | desteklenmiyor | beklemede.
+	// Her domain'e bir durum verir; frontend rozet + yönlendirme buradan.
+	Durum string `json:"durum"`
 }
 
 type envanterYanit struct {
 	Toplam int             `json:"toplam"`
 	Items  []envanterSatir `json:"items"`
-	// TaranmayanDomainler: panelde kayıtlı ama envanterde HİÇ görünmeyen
-	// domain'ler. "Bulgu yok" ile "hiç bakılmadı" ayrımını kullanıcıya
-	// AÇIKÇA gösteren alan budur — bu listenin dolu olması bir uyarıdır.
-	TaranmayanDomainler []string `json:"taranmayan_domainler"`
+	// Desteklenmeyen: uygulaması bulunamayan domain sayısı (özet sayaç).
+	Desteklenmeyen int `json:"desteklenmeyen"`
 }
 
-// Apps: GET /api/v1/websec/apps — taranan uygulama envanteri.
+// Apps: GET /api/v1/websec/apps — PANELDEKİ HER domain'in güvenlik durumu.
+//
+// 🔴 SÜRÜCÜ TABLO = domains (cp_websec_apps DEĞİL). Önceden yalnız app'i tespit
+// edilmiş domain'ler listeleniyordu → "panelde 9 domain var, monitörde 3 görünüyor"
+// tutarsızlığı. Artık her domain bir satır alır; app'i olmayanlar da durum'la görünür
+// (taranıyor / desteklenmiyor / beklemede). Bir domain'in birden çok app'i varsa
+// (nadiren) app başına satır döner — "Taranan uygulamalar" semantiği korunur.
 func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
-	y := envanterYanit{Items: []envanterSatir{}, TaranmayanDomainler: []string{}}
+	y := envanterYanit{Items: []envanterSatir{}}
+
+	// Domain başına "taranıyor" için canlı tarama durumu (bellek).
+	kosuyor, taranSet := TaramaDurumu()
+	// Hiç tam tarama tamamlandı mı? — "desteklenmiyor" (görüldü, app yok) ile
+	// "beklemede" (henüz taranmadı) ayrımı için.
+	var taramaOldu bool
+	{
+		var ls sql.NullString
+		_ = h.DB.QueryRowContext(r.Context(),
+			`SELECT last_success FROM cp_websec_status WHERE id=1`).Scan(&ls)
+		taramaOldu = ls.Valid && ls.String != ""
+	}
 
 	rows, err := h.DB.QueryContext(r.Context(), `
-		SELECT a.domain_id, COALESCE(d.alan_adi,''), a.app_type, a.install_path,
-		       a.app_version, a.paket_sayisi, a.bulgu_sayisi,
-		       DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s')
-		  FROM cp_websec_apps a
-		  LEFT JOIN domains d ON d.id = a.domain_id
-		 ORDER BY a.bulgu_sayisi DESC, d.alan_adi ASC, a.app_type ASC`)
+		SELECT d.id, COALESCE(d.alan_adi,''),
+		       COALESCE(a.app_type,''), COALESCE(a.install_path,''),
+		       COALESCE(a.app_version,''), COALESCE(a.paket_sayisi,0),
+		       COALESCE(a.bulgu_sayisi,0),
+		       COALESCE(DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s'),'')
+		  FROM domains d
+		  LEFT JOIN cp_websec_apps a ON a.domain_id = d.id
+		 ORDER BY (a.app_type IS NULL) ASC, a.bulgu_sayisi DESC, d.alan_adi ASC`)
 	if err != nil {
 		hataMesaji(w, 500, err.Error())
 		return
 	}
 	defer rows.Close()
+	desteklenmeyen := 0
 	for rows.Next() {
 		var s envanterSatir
 		if err := rows.Scan(&s.DomainID, &s.AlanAdi, &s.AppType, &s.InstallPath,
@@ -122,29 +144,27 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 			hataMesaji(w, 500, err.Error())
 			return
 		}
+		switch {
+		case kosuyor && (len(taranSet) == 0 || taranSet[s.DomainID]):
+			s.Durum = "taraniyor"
+		case s.AppType != "" && s.BulguSayisi > 0:
+			s.Durum = "acik"
+		case s.AppType != "":
+			s.Durum = "temiz"
+		case taramaOldu:
+			s.Durum = "desteklenmiyor"
+			desteklenmeyen++
+		default:
+			s.Durum = "beklemede"
+		}
 		y.Items = append(y.Items, s)
 	}
-	// 🔴 rows.Err() KONTROL EDILMELI: satır döngüsü ortasında kopan bir sorgu
-	// sessizce KISMİ liste döndürür ve "az uygulama var" gibi görünür.
+	// 🔴 rows.Err() KONTROL EDILMELI: kopan sorgu sessizce KISMİ liste döndürür.
 	if err := rows.Err(); err != nil {
 		hataMesaji(w, 500, err.Error())
 		return
 	}
 	y.Toplam = len(y.Items)
-
-	// Envanterde hiç görünmeyen domain'ler
-	drows, err := h.DB.QueryContext(r.Context(), `
-		SELECT d.alan_adi FROM domains d
-		 WHERE NOT EXISTS (SELECT 1 FROM cp_websec_apps a WHERE a.domain_id = d.id)
-		 ORDER BY d.alan_adi`)
-	if err == nil {
-		defer drows.Close()
-		for drows.Next() {
-			var ad string
-			if drows.Scan(&ad) == nil && ad != "" {
-				y.TaranmayanDomainler = append(y.TaranmayanDomainler, ad)
-			}
-		}
-	}
+	y.Desteklenmeyen = desteklenmeyen
 	jsonYaz(w, 200, y)
 }

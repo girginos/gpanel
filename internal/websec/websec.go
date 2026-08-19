@@ -34,7 +34,23 @@ var (
 	kosuyor   bool
 	sonHata   error
 	sonBaslama time.Time
+	// taranEden — o an taranan domain id kümesi (kosmaMu korur). kosuyor==true &&
+	// küme BOŞ => TÜM domainler taranıyor (full-scan). Apps handler domain başına
+	// "taranıyor" durumunu buradan üretir.
+	taranEden = map[int64]bool{}
 )
+
+// TaramaDurumu — (kosuyor mu, hedef domain id kümesi kopyası). Boş küme + kosuyor
+// => tüm domainler taranıyor.
+func TaramaDurumu() (bool, map[int64]bool) {
+	kosmaMu.Lock()
+	defer kosmaMu.Unlock()
+	kopya := make(map[int64]bool, len(taranEden))
+	for k := range taranEden {
+		kopya[k] = true
+	}
+	return kosuyor, kopya
+}
 
 // Dongusu — arka plan zamanlayıcısı. Blocking; goroutine olarak çağır.
 func Dongusu(ctx context.Context, db *sql.DB) {
@@ -93,6 +109,12 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 	}
 	kosuyor = true
 	sonBaslama = time.Now()
+	taranEden = map[int64]bool{}
+	for _, id := range domainIDs {
+		if id > 0 {
+			taranEden[id] = true
+		}
+	}
 	kosmaMu.Unlock()
 	// DB damgası kilit ALTINDA değil — DB yavaşsa Rescan handler'ları da
 	// bloke olur. Kilit yalnız bellek bayrağı için; DB damgası best-effort.
@@ -101,6 +123,7 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 	defer func() {
 		kosmaMu.Lock()
 		kosuyor = false
+		taranEden = map[int64]bool{}
 		kosmaMu.Unlock()
 	}()
 
@@ -484,6 +507,13 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	if appType != "" {
 		where += " AND f.app_type=?"
 		args = append(args, appType)
+	}
+	// domain_id — domaine ÖZEL açık sayfası bu filtreyi kullanır.
+	if dom := q.Get("domain_id"); dom != "" {
+		if n, e := strconv.Atoi(dom); e == nil && n > 0 {
+			where += " AND f.domain_id=?"
+			args = append(args, n)
+		}
 	}
 	if arama != "" {
 		// Domain adı / paket / CVE / başlık üzerinde arama. LIKE '%…%' full
