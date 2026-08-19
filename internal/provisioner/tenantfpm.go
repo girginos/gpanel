@@ -784,6 +784,13 @@ var fpmDeadActiveStates = map[string]bool{
 	"failed":   true,
 }
 
+// fpmGuardAktif — ayni tenant icin cakisan async post-start guard'i onler
+// (kullanici hizli tekrar kaydederse iki guard + iki rollback yaris etmesin).
+var fpmGuardAktif sync.Map // sk -> struct{}
+
+func fpmGuardBaslat(sk string) bool { _, yuklu := fpmGuardAktif.LoadOrStore(sk, struct{}{}); return !yuklu }
+func fpmGuardBitir(sk string)       { fpmGuardAktif.Delete(sk) }
+
 // guardPostStart: enable/start/reload sonrasi crash-loop dedektoru + otomatik
 // RollbackToSharedFPM. nil doner = tenant saglikli. non-nil = crash-loop yakalandi
 // ve tenant paylasilan FPM'e GERI ALINDI (site 200'e doner, izolasyon kaybedilir).
@@ -1225,8 +1232,19 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	// ama master BUNDAN SONRA olurse (SIGSYS vb.) Restart=on-failure sonsuz dongu
 	// kurar ve buraya kadar hicbir kontrol yakalamaz. 15s senkron izleme; tetiklenirse
 	// RollbackToSharedFPM ZATEN icerde calisti → cagirana hata donuyoruz.
-	if gerr := guardPostStart(db, domainID, sk, surum, fpmPostStartWindow); gerr != nil {
-		return "", gerr
+	// 🔴 PERF: guardPostStart ASYNC. fpm -t (adim 3) config'i restart ONCESI dogrular;
+	// bu yuzden ayar kaydinda GECIKMELI crash-loop cok nadir. 15s SENKRON izleme HER
+	// PHP kaydet'i ~16s blokluyordu (canli olculdu: PUT 15.9s). Arka planda izle:
+	// crash-loop yakalanirsa guardPostStart ZATEN RollbackToSharedFPM cagirir (site
+	// paylasilan pool'a doner) + K2 watchdog bagimsiz backstop. Boylece kaydet ~1-2s'e
+	// duser, koruma korunur. Cutover ONCE yapildigi icin healthy kaydette kesinti ~2s.
+	if fpmGuardBaslat(sk) {
+		go func() {
+			defer fpmGuardBitir(sk)
+			if gerr := guardPostStart(db, domainID, sk, surum, fpmPostStartWindow); gerr != nil {
+				log.Printf("🔴 tenant FPM async post-start guard: crash-loop, rollback yapildi: %s: %v", sk, gerr)
+			}
+		}()
 	}
 	// C: tenant (yeniden) izole edildi -> varsa bayat "izolasyon kaybi" uyarisini kaldir.
 	izolasyonKaybiTemizle(sk)
