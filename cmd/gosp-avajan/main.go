@@ -135,8 +135,11 @@ type ajan struct {
 	bulunan      int
 	bulgular     []avmotor.Bulgu
 
-	// FAZ1 süreç izleme: kiracı+kural başına bildirim throttle.
-	surecThrottle map[string]time.Time
+	// FAZ1 süreç izleme (tek-goroutine: surecIzle döngüsü sahibi, kilit yok).
+	surecThrottle map[string]time.Time // domID:kuralKodu → son bildirim
+	pidTablo      map[int]*pidKayit    // FORK-anı ebeveyn/web soyağacı (reparent-güvenli)
+	uidAd         map[int]string       // uid → kullanıcı adı önbelleği
+	oranKova      map[int]*kova        // uid → exec işleme token-bucket
 }
 
 // ── tek seferlik tarama ────────────────────────────────────────────────────
