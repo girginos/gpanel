@@ -42,6 +42,8 @@ type Ayarlar struct {
 	// Dinamik yük eşiği: sistem 1-dk yük ortalaması bu (çekirdek yüzdesi)
 	// değeri aşınca tarayıcı kendini duraklatır. 0 = kapalı (yalnız cgroup).
 	YukEsigi       int    `json:"yuk_esigi"`
+	// FAZ1: netlink süreç davranış izleme (php-fpm→kabuk, webroot-ELF, C2).
+	SurecIzleme    bool   `json:"surec_izleme"`
 }
 
 // Kapasite — sunucunun ölçülen kaynakları ve önerilen limitler.
@@ -158,11 +160,11 @@ func Oku(ctx context.Context, db *sql.DB) (Ayarlar, error) {
 	var a Ayarlar
 	err := db.QueryRowContext(ctx, `SELECT gercek_zamanli, zamanli_tarama, wp_butunluk,
 		kural_motoru, konum_sezgileri, oto_karantina, esik_kritik, kapsam, haric_yollar,
-		cpu_yuzde, ram_mb, io_agirlik, is_parcacigi, dosya_hiz_sn, zamanli_saat, yuk_esigi
+		cpu_yuzde, ram_mb, io_agirlik, is_parcacigi, dosya_hiz_sn, zamanli_saat, yuk_esigi, surec_izleme
 		FROM av_ayarlar WHERE id=1`).
 		Scan(&a.GercekZamanli, &a.ZamanliTarama, &a.WPButunluk, &a.KuralMotoru,
 			&a.KonumSezgileri, &a.OtoKarantina, &a.EsikKritik, &a.Kapsam, &a.HaricYollar,
-			&a.CPUYuzde, &a.RAMMb, &a.IOAgirlik, &a.IsParcacigi, &a.DosyaHizSn, &a.ZamanliSaat, &a.YukEsigi)
+			&a.CPUYuzde, &a.RAMMb, &a.IOAgirlik, &a.IsParcacigi, &a.DosyaHizSn, &a.ZamanliSaat, &a.YukEsigi, &a.SurecIzleme)
 	return a, err
 }
 
@@ -180,11 +182,11 @@ func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
 	_, err := db.ExecContext(ctx, `UPDATE av_ayarlar SET
 		gercek_zamanli=?, zamanli_tarama=?, wp_butunluk=?, kural_motoru=?, konum_sezgileri=?,
 		oto_karantina=?, esik_kritik=?, kapsam=?, haric_yollar=?,
-		cpu_yuzde=?, ram_mb=?, io_agirlik=?, is_parcacigi=?, dosya_hiz_sn=?, zamanli_saat=?, yuk_esigi=?
+		cpu_yuzde=?, ram_mb=?, io_agirlik=?, is_parcacigi=?, dosya_hiz_sn=?, zamanli_saat=?, yuk_esigi=?, surec_izleme=?
 		WHERE id=1`,
 		a.GercekZamanli, a.ZamanliTarama, a.WPButunluk, a.KuralMotoru, a.KonumSezgileri,
 		a.OtoKarantina, a.EsikKritik, a.Kapsam, a.HaricYollar,
-		a.CPUYuzde, a.RAMMb, a.IOAgirlik, a.IsParcacigi, a.DosyaHizSn, a.ZamanliSaat, a.YukEsigi)
+		a.CPUYuzde, a.RAMMb, a.IOAgirlik, a.IsParcacigi, a.DosyaHizSn, a.ZamanliSaat, a.YukEsigi, a.SurecIzleme)
 	if err != nil {
 		return err
 	}
@@ -196,6 +198,7 @@ func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
 	// yonetmeyi beklemek, panelin "acik" gosterip hicbir seyin izlemediği
 	// durumu yaratir (bu projedeki klasik yarim-baglanti).
 	IzleyiciSenkron(a)
+	SurecSenkron(a)
 	return nil
 }
 
@@ -208,6 +211,18 @@ func IzleyiciSenkron(a Ayarlar) {
 		// esik, kapsam, kural/haric) YALNIZ baslangicta okur; her ayar kaydinda
 		// restart SART, yoksa panel "acik" gosterir ama calisan ajan BAYAT ayarla
 		// kosar (kullanici oto_karantinayi acar, etki etmez).
+		_ = exec.Command("systemctl", "enable", birim).Run()
+		_ = exec.Command("systemctl", "restart", birim).Run()
+	} else {
+		_ = exec.Command("systemctl", "disable", "--now", birim).Run()
+	}
+}
+
+// SurecSenkron — surec_izleme ayarina gore süreç davranış izleyicisini yönetir
+// (netlink). IzleyiciSenkron ile ayni desen: enable + restart (config'i taze oku).
+func SurecSenkron(a Ayarlar) {
+	const birim = "girginospanel-avsurec.service"
+	if a.SurecIzleme {
 		_ = exec.Command("systemctl", "enable", birim).Run()
 		_ = exec.Command("systemctl", "restart", birim).Run()
 	} else {

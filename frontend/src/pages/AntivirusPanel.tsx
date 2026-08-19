@@ -18,7 +18,7 @@ type Kara = { domain_id: number; alan_adi: string; durum: string; kaynak: string
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; son_tarama: string; son_taranan: number; son_enfekte: number; aktif_bulgu: number; karantina: number }
 type Ayar = {
   gercek_zamanli: boolean; zamanli_tarama: boolean; wp_butunluk: boolean; kural_motoru: boolean
-  konum_sezgileri: boolean; oto_karantina: boolean; esik_kritik: number; kapsam: string
+  konum_sezgileri: boolean; oto_karantina: boolean; surec_izleme: boolean; esik_kritik: number; kapsam: string
   haric_yollar: string; cpu_yuzde: number; ram_mb: number; io_agirlik: number
   is_parcacigi: number; dosya_hiz_sn: number; zamanli_saat: string; yuk_esigi: number
 }
@@ -573,6 +573,7 @@ export default function AntivirusPanel() {
                     <input type="time" value={ayar.zamanli_saat} onChange={e => set('zamanli_saat', e.target.value)} className={`${alan} w-28`} /></div>
                 )}
                 <Anahtar acik={ayar.oto_karantina} ayarla={v => set('oto_karantina', v)} uyari etiket="Otomatik karantina" aciklama="Kritik bulunca dosyayı otomatik karantinaya alır (WP çekirdeği hariç). KAPALIYKEN sadece bildirir." />
+                <Anahtar acik={ayar.surec_izleme} ayarla={v => set('surec_izleme', v)} etiket="Süreç davranış izleme" aciklama="Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca netlink izleyici başlar; bildirim modu (süreç öldürmez)." />
               </div>
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">Tespit katmanları</div>

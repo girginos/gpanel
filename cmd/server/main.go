@@ -748,6 +748,7 @@ func main() {
 	if avAyar, e := avayar.Oku(context.Background(), d); e == nil {
 		_ = avayar.LimitleriUygula(avAyar)
 		avayar.IzleyiciSenkron(avAyar)
+		avayar.SurecSenkron(avAyar) // FAZ1: boot.ta süreç izleyiciyi de senkronla
 	}
 	guvenlikduvari.FirewalldDevral() // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
 	if err := guvenlikduvari.Reapply(d); err != nil {

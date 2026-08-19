@@ -1,0 +1,24 @@
+[Unit]
+# GirginOSPanel antivirüs — süreç davranış izleyici (netlink proc connector).
+# 🔴 Slice=girginos-av.slice: panelin kaynak dilimine katılır (CPU/RAM sınırı).
+Description=GirginOSPanel antivirüs süreç davranış izleyici
+After=network-online.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+Slice=girginos-av.slice
+ExecStart=/usr/local/bin/girginospanel-avajan --surec
+Restart=on-failure
+RestartSec=10
+# netlink proc connector → CAP_NET_ADMIN; başka uid'lerin /proc/<pid>/exe
+# okuması → CAP_SYS_PTRACE; dosya okuma → CAP_DAC_READ_SEARCH. Karantina YOK
+# (salt gözlem) → DAC_OVERRIDE/FOWNER gerekmez.
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
