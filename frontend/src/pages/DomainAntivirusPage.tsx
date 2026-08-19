@@ -12,6 +12,23 @@ type KarantinaKayit = { id: number; orijinal_yol: string; imza: string; seviye: 
 
 type Sekme = 'bulgular' | 'karantina'
 
+// Görüntülenen yoldan kiracı ev-öneki (/home/<kullanıcı>/) çıkarılır: hem daha
+// KISA hem de sunucu düzenini sızdırmaz — public_html/… göreli yol kalır.
+const kisaYol = (p: string) => p.replace(/^\/home\/[^/]+\//, '')
+
+// YolKutu — uzun dosya yolunu SATIR TAŞIRMADAN, kendi içinde yatay kaydırılan
+// bordürlü bir kutuda gösterir (tablo satırı asla ikinci satıra düşmez).
+function YolKutu({ yol }: { yol: string }) {
+  return (
+    <span
+      title={yol}
+      className="block max-w-full overflow-x-auto whitespace-nowrap font-mono text-xs bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-slate-700 dark:text-slate-200"
+    >
+      {kisaYol(yol)}
+    </span>
+  )
+}
+
 // G-AV marka logosu — GirginOS'un KENDİ antivirüs motoru. (Imunify lisanslı bir
 // markadır; hiçbir yerde kullanılmaz.) Gerçek, dolgulu kalkan SVG — jenerik
 // tek-çizgi path değil.
@@ -139,7 +156,7 @@ export default function DomainAntivirusPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
           { etiket: 'Domainler', href: '/domainler' },
@@ -218,7 +235,7 @@ export default function DomainAntivirusPage() {
                   <tbody className={T.govde}>
                     {d.bulgular.map((b, i) => (
                       <tr key={i} className={T.satir}>
-                        <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-md`}>{b.dosya}</td>
+                        <td className={`${T.hucreBaslik} lg:min-w-[22rem]`}><YolKutu yol={b.dosya} /></td>
                         <td className={T.hucre} data-etiket="İmza">
                           <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
                         </td>
@@ -258,7 +275,7 @@ export default function DomainAntivirusPage() {
                   <tbody className={T.govde}>
                     {kliste.map(k => (
                       <tr key={k.id} className={T.satir}>
-                        <td className={`${T.hucreBaslik} font-mono break-all lg:max-w-md`}>{k.orijinal_yol}</td>
+                        <td className={`${T.hucreBaslik} lg:min-w-[22rem]`}><YolKutu yol={k.orijinal_yol} /></td>
                         <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                         <td className={T.hucre} data-etiket="Durum">
                           {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
