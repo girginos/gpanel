@@ -345,6 +345,16 @@ export default function SiteTasimaPage() {
     basladiRef.current = null; setAdim(hesaplar && hesaplar.length ? 2 : 1)
   }
 
+  // Tekrar dene — aynı seçimle yeniden başlat. Kimlik saklı oturumdan (oturum_id)
+  // sunucu tarafında çözüldüğü için sunucu bilgilerini yeniden girmeye gerek yok.
+  // State yoksa (sayfa yenilendi) forma dön; "Kaldığınız yerden devam edin" ile gelinir.
+  async function tekrarDene() {
+    if (!(hesaplar && hesaplar.length && secilenSayi > 0)) { setAdim(hesaplar && hesaplar.length ? 2 : 1); return }
+    setIsID(null); setCalisiyor(false); setKalemler([]); setLogMetin(''); setOzet({ toplam: 0, tamamlanan: 0, basarisiz: 0, durum: '' })
+    basladiRef.current = null
+    await baslat()
+  }
+
   const secilenSayi = (hesaplar || []).filter(h => secili[h.alan_adi]).length
   const kilitli = calisiyor
   const done = ozet.tamamlanan + ozet.basarisiz
@@ -612,8 +622,13 @@ export default function SiteTasimaPage() {
                 <DurumRozet durum={calisiyor ? 'calisiyor' : (ozet.durum || 'bekliyor')} />
               </div>
               {calisiyor
-                ? <button type="button" onClick={iptalEt} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20">İptal et</button>
-                : <button type="button" onClick={yeniTasima} className={btnKucuk}>+ Yeni taşıma</button>}
+                ? <button type="button" onClick={iptalEt} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20">■ Durdur</button>
+                : <div className="flex items-center gap-2">
+                    {hesaplar && hesaplar.length > 0 && (
+                      <button type="button" onClick={tekrarDene} className={btnKucuk}>↻ Tekrar dene</button>
+                    )}
+                    <button type="button" onClick={yeniTasima} className={btnKucuk}>+ Yeni taşıma</button>
+                  </div>}
             </div>
 
             {/* Canlı: hangi domain taşınıyor + ETA */}
