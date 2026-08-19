@@ -29,6 +29,26 @@ function YolKutu({ yol }: { yol: string }) {
   )
 }
 
+// Küçük tek-path ikon (buton içi).
+const Svg = ({ d, className = 'w-3.5 h-3.5' }: { d: string; className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+  </svg>
+)
+const IK = {
+  kilit: 'M8 11V7a4 4 0 118 0v4m-9 0h10a1 1 0 011 1v7a1 1 0 01-1 1H7a1 1 0 01-1-1v-7a1 1 0 011-1z',
+  ara: 'M21 21l-4.35-4.35M11 18a7 7 0 110-14 7 7 0 010 14z',
+  geri: 'M9 15L3 9l6-6M3 9h12a6 6 0 010 12h-3',
+  cop: 'M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v11a2 2 0 01-2 2h-4a2 2 0 01-2-2V7',
+}
+// Buton stilleri — tutarlı, erişilebilir odak halkası.
+const BTN = {
+  tehlikeCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700/70 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 focus:outline-none focus:ring-2 focus:ring-red-400/40 transition whitespace-nowrap',
+  notr: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400/30 transition whitespace-nowrap',
+  onayCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 transition whitespace-nowrap',
+  tehlikeDolu: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 transition whitespace-nowrap',
+}
+
 // G-AV marka logosu — GirginOS'un KENDİ antivirüs motoru. (Imunify lisanslı bir
 // markadır; hiçbir yerde kullanılmaz.) Gerçek, dolgulu kalkan SVG — jenerik
 // tek-çizgi path değil.
@@ -157,6 +177,7 @@ export default function DomainAntivirusPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-7xl mx-auto">
+        <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline mb-2">← Aboneliğe dön</Link>
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
           { etiket: 'Domainler', href: '/domainler' },
@@ -245,7 +266,11 @@ export default function DomainAntivirusPage() {
                             : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
                         </td>
                         <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
-                          {!b.karantina && <button onClick={() => karantina(b)} className="text-xs text-red-600 dark:text-red-400 hover:underline whitespace-nowrap">Karantinaya al</button>}
+                          {!b.karantina && (
+                            <button onClick={() => karantina(b)} className={`${BTN.tehlikeCizgi} lg:ml-auto`}>
+                              <Svg d={IK.kilit} /> Karantinaya al
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -285,10 +310,10 @@ export default function DomainAntivirusPage() {
                         <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>
                           {k.durum === 'karantina' && k.mevcut && (
-                            <span className="flex gap-2 lg:justify-end whitespace-nowrap">
-                              <button onClick={() => karIncele(k)} className="text-xs text-slate-500 hover:underline">İncele</button>
-                              <button onClick={() => geriYukle(k)} className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Geri yükle</button>
-                              <button onClick={() => karSil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Sil</button>
+                            <span className="flex flex-wrap gap-1.5 lg:justify-end">
+                              <button onClick={() => karIncele(k)} className={BTN.notr}><Svg d={IK.ara} /> İncele</button>
+                              <button onClick={() => geriYukle(k)} className={BTN.onayCizgi}><Svg d={IK.geri} /> Geri yükle</button>
+                              <button onClick={() => karSil(k)} className={BTN.tehlikeDolu}><Svg d={IK.cop} /> Sil</button>
                             </span>
                           )}
                         </td>
@@ -314,8 +339,6 @@ export default function DomainAntivirusPage() {
             </div>
           </div>
         )}
-
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
       </div>
     </div>
   )
