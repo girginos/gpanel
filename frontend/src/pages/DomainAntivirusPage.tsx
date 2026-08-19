@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
@@ -81,7 +81,10 @@ export default function DomainAntivirusPage() {
   const [kliste, setKliste] = useState<KarantinaKayit[]>([])
   const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string; kesik?: boolean } | null>(null)
   const [klHata, setKlHata] = useState(false)
-  const [sekme, setSekme] = useState<Sekme>('bulgular')
+  // Sekme URL'de saklanır (?sekme=): yenilemede/geri gelişte korunur + paylaşılabilir.
+  const [sp, setSp] = useSearchParams()
+  const sekme: Sekme = sp.get('sekme') === 'karantina' ? 'karantina' : 'bulgular'
+  const setSekme = (k: Sekme) => setSp(prev => { prev.set('sekme', k); return prev }, { replace: true })
 
   function yukle() {
     if (!id) return
@@ -168,7 +171,7 @@ export default function DomainAntivirusPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline mb-2">← Aboneliğe dön</Link>
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
