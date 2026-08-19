@@ -169,12 +169,19 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 					b.Kurallar = append(b.Kurallar, k.ID)
 				}
 			}
-			// Entropi sezgisi — uzun, yüksek entropili tek satır obfuscation
-			// göstergesidir. Tek başına yeterli DEĞİL (minified JS de öyledir),
-			// bu yüzden düşük puan.
-			if e, uzun := enYuksekSatirEntropisi(icerik); uzun && e > 5.2 {
-				b.Puan += 25
-				b.Kurallar = append(b.Kurallar, "GOSP-HEUR-ENTROPI")
+			// FAZ 0 — Bölgesel entropi: tek-satır yerine kayan pencere; normal
+			// kod içine GÖMÜLÜ yüksek-entropi bloğunu (gerçek obfuscation) minified
+			// varlıktan ayırır. (Eski enYuksekSatirEntropisi'nin yerini alır.)
+			if es, eid, ok := bolgeselEntropi(icerik); ok {
+				b.Puan += es
+				b.Kurallar = append(b.Kurallar, eid)
+			}
+			// FAZ 0 — Decode katmanı: obfuscate payload'ı SINIRLI derinlikte çöz
+			// (base64/gzinflate/zlib/hex/rot13) ve mevcut kural setiyle yeniden
+			// tara — regex'in göremediği düz metni yakalar. Bütçe: derinlik+bayt.
+			if dp, dids := deobfuskeTara(icerik, m.set.Kurallar, ext); dp > 0 {
+				b.Puan += dp
+				b.Kurallar = append(b.Kurallar, dids...)
 			}
 		}
 	}
