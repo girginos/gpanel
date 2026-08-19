@@ -399,6 +399,8 @@ func (a *ajan) dosyaIsle(yol string) {
 	bildirimYaz(a.db, seviye, baslik,
 		filepath.Base(yol)+" — Antivirüs sayfasından inceleyin.",
 		domID, "av_bulgu", bulguID)
+	// FAZ2 attack-chain: zararlı dosya = File Write aşaması.
+	olayYaz(a.db, domID, "dosya", "dosya_yazma", "kritik", filepath.Base(yol), "av_bulgu", bulguID)
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

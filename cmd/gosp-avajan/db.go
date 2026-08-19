@@ -145,6 +145,19 @@ func domainAdi(db *sql.DB, domainID int64) string {
 	return ad
 }
 
+func olayYaz(db *sql.DB, domainID int64, kaynak, asama, seviye, ozet, refTur string, refID int64) {
+	if db == nil || domainID <= 0 {
+		return
+	}
+	var rid any
+	var r int64
+	if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
+		rid = r
+	}
+	_, _ = db.Exec(`INSERT INTO av_olay (domain_id, reseller_id, kaynak, asama, seviye, ozet, ref_tur, ref_id)
+		 VALUES (?,?,?,?,?,?,?,?)`, domainID, rid, kaynak, asama, seviye, kisalt(ozet, 250), refTur, refID)
+}
+
 func kisalt(s string, n int) string {
 	if len(s) <= n {
 		return s

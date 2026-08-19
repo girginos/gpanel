@@ -207,6 +207,16 @@ func (a *ajan) execDegerlendir(pid int) {
 	}
 	log.Printf("SÜREÇ [%s puan=%d kod=%s] pid=%d uid=%s: %s", seviye, puan, kod, pid, kadi, aciklama)
 	bildirimYaz(a.db, seviye, baslik, aciklama, domID, "av_surec", 0)
+	// FAZ2 attack-chain: süreç kuralına göre aşama (indirici→c2, diğer→çalıştırma).
+	olayYaz(a.db, domID, "surec", surecAsama(kod), seviye, aciklama, "av_surec", 0)
+}
+
+// surecAsama — süreç kural-kodunu kill-chain aşamasına eşler.
+func surecAsama(kod string) string {
+	if kod == "web_indirici" {
+		return "c2"
+	}
+	return "calistirma" // guvenilmez_koken, sanal_kabuk_cmd
 }
 
 // ── Saf puanlama (test edilebilir) ──────────────────────────────────────────

@@ -19,6 +19,7 @@ import (
 	"girginospanel/internal/antivirus"
 	"girginospanel/internal/auth"
 	"girginospanel/internal/avayar"
+	"girginospanel/internal/zincir"
 	"girginospanel/internal/backups"
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/composer"
@@ -739,6 +740,7 @@ func main() {
 	}
 
 	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
+	go zincir.Baslat(d)                                // FAZ2 attack-chain korelasyon
 	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
 	// 🔴 Antivirüs kaynak dilimini açılışta kapasiteye göre YENİDEN YAZ.
 	// Installer taban slice'ı sabit 50% CPUQuota içerir; kapasite-hesaplı
