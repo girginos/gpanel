@@ -321,8 +321,8 @@ func zincirYaz(db *sql.DB, domID int64, s Sonuc, olaySayisi int, imza string) {
 		rid = r.Int64
 	}
 	res, err := db.Exec(`INSERT INTO av_zincir
-		(domain_id, reseller_id, asamalar, guven, olay_sayisi, imza)
-		VALUES (?,?,?,?,?,?)`, domID, rid, asamaStr, s.Guven, olaySayisi, imza)
+		(domain_id, reseller_id, asamalar, guven, seviye, olay_sayisi, imza)
+		VALUES (?,?,?,?,?,?,?)`, domID, rid, asamaStr, s.Guven, s.Seviye, olaySayisi, imza)
 	if err != nil {
 		log.Printf("zincir yazılamadı: %v", err)
 		return

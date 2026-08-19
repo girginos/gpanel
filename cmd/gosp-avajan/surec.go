@@ -314,19 +314,34 @@ func cmdlineSupheli(cmdline string) bool {
 	return false
 }
 
-// persistTokenlar — kalıcılık (persistence) göstergeleri. Web süreci bunlara
-// DOKUNMAMALI (cron/başlangıç düzenlemesi meşru olarak SSH/panelden yapılır,
-// php-fpm çocuğundan DEĞİL) → web-bağlamında güçlü sinyal.
-var persistTokenlar = []string{
-	"crontab", "/etc/cron", "/var/spool/cron", "/etc/cron.d", "/etc/rc.local",
-	".bashrc", ".bash_profile", ".profile", "authorized_keys", "systemctl enable",
-	"chkconfig", "update-rc.d", "/etc/systemd/system",
+// persistYollar — kalıcılık DOSYALARI (crontab HARİÇ; o fiil olarak ele alınır).
+var persistYollar = []string{
+	"/etc/cron", "/var/spool/cron", "/etc/rc.local", ".bashrc",
+	".bash_profile", ".profile", "authorized_keys", "/etc/systemd/system",
+	"/etc/ld.so.preload", ".user.ini", ".htaccess", "auto_prepend",
 }
 
+// cmdlinePersistence — web sürecinin KALICILIK KURMA girişimi. 🔴 Salt-OKUMA
+// (crontab -l, cat .bashrc, grep /etc/cron) YANLIŞ POZİTİF → YAZMA sinyali ŞART.
+// Yazma operatörü hedef yolun ÖNÜNDE olmalı: `>/dev/null 2>&1` gibi İLGİSİZ
+// redirect'ler (path'ten sonra ya da null'a) persistence saymaz.
 func cmdlinePersistence(cmdline string) bool {
 	l := strings.ToLower(cmdline)
-	for _, t := range persistTokenlar {
-		if strings.Contains(l, t) {
+	// Doğrudan kalıcılık FİİLLERİ. crontab -l/-e (liste/editör) hariç.
+	if strings.Contains(l, "systemctl enable") || strings.Contains(l, "chkconfig ") ||
+		strings.Contains(l, "update-rc.d") ||
+		(strings.Contains(l, "crontab") && !strings.Contains(l, "crontab -l") && !strings.Contains(l, "crontab -e")) {
+		return true
+	}
+	// Kalıcılık dosyasına YAZMA: yol'un ÖNÜNDE bir yazma operatörü (yol'a yazılıyor).
+	for _, t := range persistYollar {
+		idx := strings.Index(l, t)
+		if idx < 0 {
+			continue
+		}
+		before := l[:idx]
+		if strings.Contains(before, ">>") || strings.Contains(before, ">") ||
+			strings.Contains(before, "tee ") || strings.Contains(before, "install -") {
 			return true
 		}
 	}

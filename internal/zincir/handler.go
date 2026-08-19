@@ -1,10 +1,11 @@
 package zincir
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
@@ -34,7 +35,8 @@ type ZincirDTO struct {
 }
 
 // kapsam — bildirim ile AYNI rol-kapsam (izolasyon): admin=panel-geneli,
-// reseller=kendi, müşteri=domaini.
+// reseller=kendi, müşteri=domaini. Döndürülen kosul HEM av_zincir HEM av_olay'a
+// uygulanır (ikisinde de reseller_id + domain_id sütunu var).
 func kapsam(r *http.Request) (string, []any, bool) {
 	if c := middleware.ClaimsFrom(r); c != nil {
 		switch c.Role {
@@ -59,7 +61,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT z.id, z.domain_id, COALESCE(d.alan_adi,''), z.asamalar, z.guven,
+		`SELECT z.id, z.domain_id, COALESCE(d.alan_adi,''), z.asamalar, z.guven, z.seviye,
 		        DATE_FORMAT(z.created_at,'%Y-%m-%d %H:%i:%s')
 		 FROM av_zincir z LEFT JOIN domains d ON d.id=z.domain_id
 		 WHERE z.`+kos+` ORDER BY z.created_at DESC LIMIT 50`, arg...)
@@ -73,7 +75,10 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		var z ZincirDTO
 		var dom sql.NullInt64
 		var asamaStr string
-		if rows.Scan(&z.ID, &dom, &z.AlanAdi, &asamaStr, &z.Guven, &z.Tarih) != nil {
+		// 🔴 seviye DB'den okunur (tek gerçek kaynak) — guven>=80 ile YENİDEN
+		// HESAPLANMAZ: ZincirPuanla kritik'i nedensel/3-aşama ile verir (güvenden
+		// bağımsız); yeniden-hesap bildirim ile UI'yı ÇELİŞTİRİRDİ.
+		if rows.Scan(&z.ID, &dom, &z.AlanAdi, &asamaStr, &z.Guven, &z.Seviye, &z.Tarih) != nil {
 			continue
 		}
 		if dom.Valid {
@@ -83,26 +88,27 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		for _, a := range z.Asamalar {
 			z.AsamaAd = append(z.AsamaAd, asamaAd[a])
 		}
-		z.Seviye = "uyari"
-		if z.Guven >= 80 {
-			z.Seviye = "kritik"
-		}
 		if dom.Valid {
-			z.Olaylar = zincirOlaylari(r, h.DB, dom.Int64, z.Tarih)
+			z.Olaylar = zincirOlaylari(r, h.DB, dom.Int64, z.Tarih, kos, arg)
 		}
 		out = append(out, z)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"zincirler": out})
 }
 
-// zincirOlaylari — bir zincirin domaini için olay zaman-çizelgesi (zincir
-// zamanından geriye pencere kadar). N+1 ama LIMIT 50 zincir × ≤ birkaç olay.
-func zincirOlaylari(r *http.Request, db *sql.DB, domID int64, tarih string) []OlayDTO {
-	rows, err := db.QueryContext(r.Context(),
+// zincirOlaylari — bir zincirin olay zaman-çizelgesi. 🔴 İZOLASYON: av_olay da
+// çağıranın KAPSAMIYLA süzülür (kos/scopeArg) — zincirin snapshot domain_id'sine
+// GÜVENİLMEZ (domain devri sonrası eski zincir yeni sahibin olaylarını sızdırırdı).
+func zincirOlaylari(r *http.Request, db *sql.DB, domID int64, tarih, kos string, scopeArg []any) []OlayDTO {
+	ctx, iptal := context.WithTimeout(r.Context(), 5*time.Second)
+	defer iptal()
+	args := append([]any{domID}, scopeArg...)
+	args = append(args, tarih, tarih, pencereDk)
+	rows, err := db.QueryContext(ctx,
 		`SELECT kaynak, asama, seviye, ozet, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
 		 FROM av_olay
-		 WHERE domain_id=? AND created_at <= ? AND created_at >= (? - INTERVAL ? MINUTE)
-		 ORDER BY created_at LIMIT 50`, domID, tarih, tarih, pencereDk)
+		 WHERE domain_id=? AND `+kos+` AND created_at <= ? AND created_at >= (? - INTERVAL ? MINUTE)
+		 ORDER BY created_at LIMIT 50`, args...)
 	if err != nil {
 		return nil
 	}
@@ -117,5 +123,3 @@ func zincirOlaylari(r *http.Request, db *sql.DB, domID int64, tarih string) []Ol
 	}
 	return out
 }
-
-var _ = strconv.Itoa
