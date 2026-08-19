@@ -573,7 +573,7 @@ export default function AntivirusPanel() {
                     <input type="time" value={ayar.zamanli_saat} onChange={e => set('zamanli_saat', e.target.value)} className={`${alan} w-28`} /></div>
                 )}
                 <Anahtar acik={ayar.oto_karantina} ayarla={v => set('oto_karantina', v)} uyari etiket="Otomatik karantina" aciklama="Kritik bulunca dosyayı otomatik karantinaya alır (WP çekirdeği hariç). KAPALIYKEN sadece bildirir." />
-                <Anahtar acik={ayar.surec_izleme} ayarla={v => set('surec_izleme', v)} etiket="Süreç davranış izleme" aciklama="Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca netlink izleyici başlar; bildirim modu (süreç öldürmez)." />
+                <Anahtar acik={ayar.surec_izleme} ayarla={v => set('surec_izleme', v)} etiket="Süreç davranış izleme" aciklama="Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca izleme için root + CAP_SYS_PTRACE'li bir servis başlar (yalnız kimlik doğrulama; ptrace çağrısı engelli). Bildirim modu — süreç öldürmez." />
               </div>
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">Tespit katmanları</div>

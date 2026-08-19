@@ -575,7 +575,7 @@ IOWeight=50
 TasksMax=64
 AVSLICE
 fi
-for u in girginospanel-avizle.service girginospanel-avtara.service girginospanel-avtara.timer; do
+for u in girginospanel-avizle.service girginospanel-avsurec.service girginospanel-avtara.service girginospanel-avtara.timer; do
   [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
 done
 systemctl daemon-reload

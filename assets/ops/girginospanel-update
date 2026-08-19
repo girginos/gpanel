@@ -302,7 +302,7 @@ TasksMax=64
 AVSLICE
 fi
 AVUNITS=0
-for u in girginospanel-avizle.service girginospanel-avtara.service girginospanel-avtara.timer; do
+for u in girginospanel-avizle.service girginospanel-avsurec.service girginospanel-avtara.service girginospanel-avtara.timer; do
   if [ -f "$A/systemd/$u" ]; then install -m 0644 "$A/systemd/$u" "/etc/systemd/system/$u"; AVUNITS=1; fi
 done
 if [ "$AVUNITS" = 1 ]; then

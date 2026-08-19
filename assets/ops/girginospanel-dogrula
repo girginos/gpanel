@@ -484,6 +484,7 @@ else
 fi
 _avt=$(systemctl is-active girginospanel-avtara.timer 2>/dev/null)
 [ "$_avt" = "active" ] && gec "av zamanli tarama" "timer aktif" || uyar "av zamanli tarama" "timer $_avt"
+[ -f /etc/systemd/system/girginospanel-avsurec.service ] && gec "av surec izleyici" "unit kurulu" || uyar "av surec izleyici" "girginospanel-avsurec.service YOK (surec_izleme acilinca sessizce calismaz)"
 
 # 🔴 D.2 (security-auditor): KURAL SETI TAZELIGI. Mirror bloklanirsa ajan yeni
 # kural cekemez ve SESSIZCE bayat kalir; operator "calisiyor" gorurken kurallar

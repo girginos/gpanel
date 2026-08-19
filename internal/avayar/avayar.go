@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -225,6 +226,11 @@ func SurecSenkron(a Ayarlar) {
 	if a.SurecIzleme {
 		_ = exec.Command("systemctl", "enable", birim).Run()
 		_ = exec.Command("systemctl", "restart", birim).Run()
+		// "yazdim==oldu" DEGIL: enable/restart hatalari yutulur; birim fleet'e
+		// kurulu degilse panel "acik" der ama izleyici kosmaz. URETIMI OLC.
+		if out, _ := exec.Command("systemctl", "is-active", birim).CombinedOutput(); strings.TrimSpace(string(out)) != "active" {
+			log.Printf("SurecSenkron: %s active DEGIL (unit /etc/systemd/system'de kurulu mu?)", birim)
+		}
 	} else {
 		_ = exec.Command("systemctl", "disable", "--now", birim).Run()
 	}
