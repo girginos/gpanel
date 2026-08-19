@@ -388,7 +388,23 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	tmpAd := tmp.Name()
 	defer os.Remove(tmpAd)
 
-	ic := "mysqldump --single-transaction --quick --routines --triggers " +
+	// 🔴 KAYNAK MySQL KİMLİĞİ — panele göre. cPanel'de root'un ~/.my.cnf'i vardır
+	// (ek kimlik gerekmez, eski davranış). Plesk/DirectAdmin'de MySQL root/admin
+	// PAROLALIDIR → kimliksiz mysqldump "Access denied (using password: NO)" verir
+	// (kullanıcının gerçek Plesk'inde CANLI yakalandı). Panelin admin MySQL kimliğini
+	// kullan. 🔴 Parola $(cat/sed ...) ile ALINIR: `ps`'te parolanın KENDİSİ görünmez,
+	// yalnız onu okuyan komut görünür.
+	kimlikOnek := ""
+	dumpKul := ""
+	switch k.Tip {
+	case "plesk":
+		kimlikOnek = `MYSQL_PWD="$(cat /etc/psa/.psa.shadow 2>/dev/null)" `
+		dumpKul = "-uadmin "
+	case "directadmin":
+		kimlikOnek = `MYSQL_PWD="$(sed -n 's/^passwd=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
+		dumpKul = `-u"$(sed -n 's/^user=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
+	}
+	ic := kimlikOnek + "mysqldump " + dumpKul + "--single-transaction --quick --routines --triggers " +
 		"--no-tablespaces --default-character-set=utf8mb4 " + shQuote(kaynakDB) + " | gzip -c"
 	// pipefail icin bash zorlanir; yoksa sh'e duser (o zaman dump-sonu damgasi
 	// tek koruma olarak kalir).
