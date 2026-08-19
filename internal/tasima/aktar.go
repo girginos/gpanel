@@ -173,6 +173,16 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 	}
 
 	// --- 3. Veritabanlari --------------------------------------------------
+	// 🔴 YEDEK KEŞIF: Kesif DB listesini boş bıraktıysa (ek/alt alan adı — DB'ler
+	// yalnız ana alana atanır — ya da Plesk DB sorgusu sessizce boş döndü), KOPYALANAN
+	// yapılandırmadan (wp-config.php/.env/…) gerçek DB adını çıkar. Bu ad kaynakta da
+	// aynıdır → dökümü oradan alınır. Böylece "SQL hiç taşınmadı, kalem yeşil" biter.
+	if ay.Veritabani && len(hs.DBler) == 0 && ay.Dosyalar {
+		if bulunan := configtenDBBul(webRoot); len(bulunan) > 0 {
+			log("kesif DB bulmadi; yapilandirmadan %d DB adi cikarildi: %v", len(bulunan), bulunan)
+			hs.DBler = bulunan
+		}
+	}
 	if ay.Veritabani && len(hs.DBler) > 0 {
 		esleme, dbPw, dbHata := h.veritabanlariniAktar(ctx, k, hs, sk, sonuc, log)
 		if dbHata != nil {
@@ -183,6 +193,12 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		if n := h.configYenidenYaz(webRoot, esleme, hs.KaynakHesap, dbPw, log); n > 0 {
 			log("%d yapilandirma dosyasi guncellendi (DB baglantisi)", n)
 		}
+	} else if ay.Veritabani {
+		// 🔴 SESSİZ GEÇME: DB istendi ama hiç DB bulunamadı → kullanıcı "SQL taşındı"
+		// sanmasın. Görünür uyarı bırak (kalem "Not" sütunu + log).
+		log("uyari: bu site icin kaynakta veritabani bulunamadi; SQL tasinmadi")
+		sonuc.Uyarilar = append(sonuc.Uyarilar,
+			"veritabani tasinmadi: kaynakta bu site icin DB bulunamadi (ek/alt alan adiysa DB ana alan adiyla tasinir; ya da kesif DB'yi goremedi)")
 	}
 
 	// --- 4. DNS ------------------------------------------------------------
@@ -565,6 +581,57 @@ var dbKulAnahtarlari = []string{"DB_USER", "DB_USERNAME", "DATABASE_USER"}
 // dbParolaAnahtarlari — degeri DB PAROLASI olan anahtarlar.
 var dbPwAnahtarlari = []string{"DB_PASSWORD", "DB_PASS", "DATABASE_PASSWORD"}
 
+// yapilandirmaAdaylari — DB baglanti bilgisi barindiran bilinen yapilandirma dosyalari.
+var yapilandirmaAdaylari = []string{
+	"wp-config.php", ".env", "configuration.php", "config.php",
+	"app/etc/env.php", "sites/default/settings.php", "config/db.php",
+	"application/config/database.php", "includes/config.php",
+}
+
+// configtenDBBul — kopyalanan site yapilandirmasindan (wp-config.php/.env/…) DB
+// ADLARINI cikarir. Kesif DB listesi bos kaldiginda YEDEK yol: gercek DB adi
+// yapilandirmada yazilidir ve kaynakta da AYNI isimdir → dokumu oradan alinir.
+// Yalniz reDBAd'e uyan, sistemDB olmayan adlar dondurulur (guvenlik).
+func configtenDBBul(webRoot string) []string {
+	gorulen := map[string]bool{}
+	var out []string
+	for _, rel := range yapilandirmaAdaylari {
+		yol := filepath.Join(webRoot, rel)
+		st, err := os.Lstat(yol)
+		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {
+			continue
+		}
+		ham, err := os.ReadFile(yol)
+		if err != nil {
+			continue
+		}
+		for _, satir := range strings.Split(string(ham), "\n") {
+			m := reAnahtarSatir.FindStringSubmatch(satir)
+			if m == nil {
+				continue
+			}
+			dbAnahtar := false
+			for _, a := range dbAdAnahtarlari {
+				if strings.EqualFold(m[2], a) {
+					dbAnahtar = true
+					break
+				}
+			}
+			if !dbAnahtar {
+				continue
+			}
+			deger, _ := degerAyikla(m[3])
+			deger = strings.TrimSpace(deger)
+			if deger == "" || gorulen[deger] || !reDBAd.MatchString(deger) || sistemDB(deger) {
+				continue
+			}
+			gorulen[deger] = true
+			out = append(out, deger)
+		}
+	}
+	return out
+}
+
 // configYenidenYaz — site yapilandirmasindaki DB baglanti bilgilerini gunceller.
 //
 // 🔴 Yalnizca BILINEN ANAHTARLARIN degeri degistirilir. Onceki surum metinde
@@ -581,13 +648,8 @@ func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, k
 		hedefKul = hedef.Kul
 	}
 
-	adaylar := []string{
-		"wp-config.php", ".env", "configuration.php", "config.php",
-		"app/etc/env.php", "sites/default/settings.php", "config/db.php",
-		"application/config/database.php", "includes/config.php",
-	}
 	sayac := 0
-	for _, rel := range adaylar {
+	for _, rel := range yapilandirmaAdaylari {
 		yol := filepath.Join(webRoot, rel)
 		st, err := os.Lstat(yol)
 		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {

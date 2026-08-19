@@ -2,6 +2,7 @@ package tasima
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -115,7 +116,10 @@ func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
 		_ = h.DB.QueryRow(`SELECT COUNT(*) FROM domains WHERE alan_adi=?`, hs.AlanAdi).Scan(&n)
 		out = append(out, cikti{Hesap: hs, Mevcut: n > 0})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hesaplar": out, "toplam": len(out)})
+	// 🔴 Oturumu kalıcılaştır: kaynak bilgileri + keşif sonucu şifreli saklanır ki
+	// sayfa yenilenince kullanıcı her şeyi yeniden girmesin (bkz. oturum.go).
+	oturumID := h.oturumKaydet(g, hesaplar)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hesaplar": out, "toplam": len(out), "oturum_id": oturumID})
 }
 
 // ---------------------------------------------------------------------------
@@ -124,9 +128,10 @@ func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
 
 type baslatGirdi struct {
 	kaynakGirdi
-	Mod     string  `json:"mod"` // tekil | toplu
-	Ayarlar Ayarlar `json:"ayarlar"`
-	Secilen []Hesap `json:"secilen"` // frontend'in kesiften sectigi hesaplar
+	Mod      string  `json:"mod"` // tekil | toplu
+	Ayarlar  Ayarlar `json:"ayarlar"`
+	Secilen  []Hesap `json:"secilen"`   // frontend'in kesiften sectigi hesaplar
+	OturumID int64   `json:"oturum_id"` // kaydedilmis oturum — parola yeniden girilmezse buradan cozulur
 }
 
 // Baslat — POST /system/tasima/baslat
@@ -164,6 +169,24 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := g.kaynak()
+	// 🔴 KİMLİK YENİDEN KULLAN: kullanıcı parolayı yeniden girmediyse (sayfa
+	// yenilendi → oturumdan geldi) saklı şifreli kimliği SUNUCU TARAFINDA çöz.
+	// Parola tarayıcıya asla geri dönmedi; burada düz-metin yalnızca bu iş için.
+	if k.Parola == "" && k.Anahtar == "" && g.OturumID > 0 {
+		var host string
+		var pSif, aSif sql.NullString
+		if h.DB.QueryRow(
+			`SELECT kaynak_host, kaynak_parola, kaynak_anahtar FROM tasima_isleri
+			 WHERE id=? AND durum='oturum' AND (gecerlilik IS NULL OR gecerlilik > NOW())`,
+			g.OturumID).Scan(&host, &pSif, &aSif) == nil {
+			if pSif.Valid && pSif.String != "" {
+				k.Parola = gizli.CozBagli(pSif.String, host)
+			}
+			if aSif.Valid && aSif.String != "" {
+				k.Anahtar = gizli.CozBagli(aSif.String, host)
+			}
+		}
+	}
 	if err := k.Dogrula(); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -345,7 +368,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.DB.Query(
 		`SELECT id, kaynak_tip, kaynak_host, tasima_modu, durum, toplam, tamamlanan, basarisiz,
 		        COALESCE(hata,''), COALESCE(baslatan,''), baslangic, bitis, olusturma
-		 FROM tasima_isleri ORDER BY id DESC LIMIT 25`)
+		 FROM tasima_isleri WHERE durum <> 'oturum' ORDER BY id DESC LIMIT 25`)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "isler okunamadi")
 		return
@@ -490,6 +513,9 @@ func (h *Handlers) AcilistaTemizle() {
 	_, _ = h.DB.Exec(
 		`UPDATE tasima_isleri SET kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1
 		 WHERE durum IN ('tamam','hata','iptal','kesildi') AND kimlik_temiz=0`)
+	// 🔴 Suresi dolan kaydedilmis oturumlari SIL (kimlik dahil). 'oturum' durumu
+	// yeniden baslatmayi ATLATIR (yukaridaki UPDATE onu OLDURMEZ); yalniz TTL siler.
+	_, _ = h.DB.Exec(`DELETE FROM tasima_isleri WHERE durum='oturum' AND gecerlilik IS NOT NULL AND gecerlilik < NOW()`)
 }
 
 // dosyaSonu — dosyanin son n baytini guvenli okur (symlink/ozel dosya reddi).

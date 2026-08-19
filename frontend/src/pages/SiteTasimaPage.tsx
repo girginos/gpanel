@@ -151,6 +151,9 @@ function Stepper({ adim, git, erisim }: { adim: number; git: (n: number) => void
 // Kaynak bağlantı bilgileri sayfa yenilenince kaybolmasın diye saklanır.
 // 🔴 GÜVENLİK: parola/özel anahtar ASLA saklanmaz (localStorage XSS ile okunur).
 const KAYNAK_KEY = 'gosp_tasima_kaynak'
+const OTURUM_KEY = 'gosp_tasima_oturum' // son keşif oturumu id'si (sır değil)
+
+type Oturum = { id: number; tip: string; host: string; port: number; kullanici: string; site_sayisi: number; kimlik_sakli: boolean; son_kullanim: string }
 type KayitliKaynak = { tip?: string; host?: string; port?: number; kullanici?: string; kimlikTipi?: 'parola' | 'anahtar' }
 function kayitliKaynakOku(): KayitliKaynak {
   try { return JSON.parse(localStorage.getItem(KAYNAK_KEY) || '{}') } catch { return {} }
@@ -198,6 +201,9 @@ export default function SiteTasimaPage() {
   const [kalemler, setKalemler] = useState<Kalem[]>([])
   const [ozet, setOzet] = useState({ toplam: 0, tamamlanan: 0, basarisiz: 0, durum: '' })
   const [gecmis, setGecmis] = useState<Is[]>([])
+  const [oturumID, setOturumID] = useState<number | null>(null)
+  const [oturumlar, setOturumlar] = useState<Oturum[]>([])
+  const [kimlikSakli, setKimlikSakli] = useState(false) // oturumdan geldiyse parola sunucuda saklı
   const logRef = useRef<HTMLPreElement>(null)
   const basladiRef = useRef<number | null>(null) // ETA için başlangıç ms
 
@@ -218,6 +224,39 @@ export default function SiteTasimaPage() {
   }, [])
 
   useEffect(() => { durumYukle() }, [durumYukle])
+
+  // Kaydedilmiş keşif oturumları — sayfa yenilenince sunucu bilgilerini yeniden
+  // girmeden kaldığı yerden devam.
+  const oturumlarYukle = useCallback(async () => {
+    try {
+      const { data } = await api.get<{ oturumlar: Oturum[] }>('/system/tasima/oturumlar')
+      setOturumlar(data.oturumlar || [])
+    } catch { /* yok say */ }
+  }, [])
+  useEffect(() => { oturumlarYukle() }, [oturumlarYukle])
+
+  async function oturumaGeri(id: number) {
+    setHata(null)
+    try {
+      const { data } = await api.get<{ id: number; tip: string; host: string; port: number; kullanici: string; hesaplar: Hesap[]; secim: string[]; kimlik_sakli: boolean }>(`/system/tasima/oturum/${id}`)
+      setTip(data.tip); setHost(data.host); setPort(data.port); setKullanici(data.kullanici)
+      const list = data.hesaplar || []
+      setHesaplar(list)
+      const s: Record<string, boolean> = {}
+      if (data.secim && data.secim.length) data.secim.forEach(a => { s[a] = true })
+      else list.forEach(h => { s[h.alan_adi] = !h.mevcut })
+      setSecili(s)
+      setOturumID(data.id); setKimlikSakli(data.kimlik_sakli)
+      try { localStorage.setItem(OTURUM_KEY, String(data.id)) } catch { /* */ }
+      setAdim(list.length ? 2 : 1)
+    } catch (e) { setHata(apiHata(e, 'Oturum geri yüklenemedi')) }
+  }
+
+  async function oturumSil(id: number) {
+    try { await api.delete(`/system/tasima/oturum/${id}`) } catch { /* */ }
+    if (oturumID === id) { setOturumID(null); setKimlikSakli(false); localStorage.removeItem(OTURUM_KEY) }
+    oturumlarYukle()
+  }
 
   // Sır-olmayan kaynak alanlarını sakla (parola/anahtar HARİÇ).
   useEffect(() => {
@@ -268,10 +307,12 @@ export default function SiteTasimaPage() {
   async function kesfet() {
     setKesifYuk(true); setHata(null); setHesaplar(null)
     try {
-      const { data } = await api.post<{ hesaplar: Hesap[] }>('/system/tasima/kesif', kaynakGovde())
+      const { data } = await api.post<{ hesaplar: Hesap[]; oturum_id: number }>('/system/tasima/kesif', kaynakGovde())
       const list = data.hesaplar || []
       setHesaplar(list)
       const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = !h.mevcut }); setSecili(s)
+      if (data.oturum_id) { setOturumID(data.oturum_id); setKimlikSakli(kimlikTipi === 'parola' ? !!parola : !!anahtar); try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
+      oturumlarYukle()
       if (!list.length) setHata('Kaynak sunucuda taşınabilir site bulunamadı.')
       else setAdim(2)
     } catch (e) { setHata(apiHata(e, 'Keşif başarısız')) } finally { setKesifYuk(false) }
@@ -284,6 +325,7 @@ export default function SiteTasimaPage() {
     try {
       const { data } = await api.post<{ is_id: number }>('/system/tasima/baslat', {
         ...kaynakGovde(),
+        oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
         mod: secilenler.length === 1 ? 'tekil' : 'toplu',
         ayarlar: { dosyalar, veritabani, dns, ssl, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, hesaplar: [] },
         secilen: secilenler,
@@ -337,6 +379,29 @@ export default function SiteTasimaPage() {
       </div>
 
       <Stepper adim={adim} git={setAdim} erisim={erisim} />
+
+      {/* Kaydedilmiş oturumlar — sunucu bilgilerini yeniden girmeden devam et */}
+      {adim === 1 && oturumlar.length > 0 && (
+        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
+          <div className="mb-2 text-sm font-medium text-blue-900 dark:text-blue-200">
+            Kaldığınız yerden devam edin
+          </div>
+          <div className="space-y-2">
+            {oturumlar.map(o => (
+              <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200/70 bg-white px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-slate-900">
+                <div className="min-w-0">
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{o.kullanici}@{o.host}</span>
+                  <span className="ml-2 text-xs text-slate-500">{o.tip} · {o.site_sayisi} site{o.kimlik_sakli ? ' · parola saklı' : ''}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => oturumaGeri(o.id)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700">Devam et</button>
+                  <button type="button" onClick={() => oturumSil(o.id)} className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800" title="Oturumu unut">✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {hata && (
         <div className="mb-5 flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-300">
