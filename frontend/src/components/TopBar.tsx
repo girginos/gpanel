@@ -41,6 +41,33 @@ const SAYFALAR: SayfaTanim[] = [
   { etiket: 'Panel Güncelleme', yol: '/araclar/guncelleme', anahtar: ['güncelleme', 'guncelleme', 'update', 'panel güncelle', 'sürüm', 'surum'] },
 ]
 
+// ── Bildirim yardımcıları ──
+const goreliZaman = (t: string) => {
+  const d = new Date(t.replace(' ', 'T'))
+  const s = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (!isFinite(s) || s < 0) return t.slice(0, 16)
+  if (s < 60) return 'az önce'
+  if (s < 3600) return `${Math.floor(s / 60)} dk önce`
+  if (s < 86400) return `${Math.floor(s / 3600)} sa önce`
+  if (s < 604800) return `${Math.floor(s / 86400)} gün önce`
+  return t.slice(0, 10)
+}
+// Eski kayıtlardaki tam sunucu yolunu (/home/<kullanıcı>/) gizle — göreli kalır.
+const yolGizle = (m: string) => m.replace(/\/home\/[^/\s]+\//g, '')
+const sevBg = (s: string) =>
+  s === 'kritik' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+    : s === 'uyari' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
+      : 'bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
+const KatIkon = ({ kategori }: { kategori: string }) => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9}>
+    <path strokeLinecap="round" strokeLinejoin="round" d={
+      kategori === 'antivirus'
+        ? 'M9 12l2 2 4-4m5.6-4A12 12 0 0112 2.9 12 12 0 013.4 6 12 12 0 003 9c0 5.6 3.8 10.3 9 11.6 5.2-1.3 9-6 9-11.6 0-1-.1-2-.4-3z'
+        : 'M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1'
+    } />
+  </svg>
+)
+
 export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; menuAcik?: boolean }) {
   const kullanici = useAuth((s) => s.kullanici)
   const cikis = useAuth((s) => s.cikis)
@@ -56,18 +83,23 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
     const t = setInterval(bildirimYukle, 60000)
     return () => clearInterval(t)
   }, [])
-  async function bildirimAc() {
-    const yeni = !bAcik; setBAcik(yeni)
-    if (yeni && okunmamis > 0) {
-      try { await api.post('/bildirimler/0/okundu', {}); setOkunmamis(0) } catch { /* sessiz */ }
-    }
+  // Açılınca artık otomatik OKUNDU YAPMAZ — okunmamışlar dropdown'da görünsün.
+  function bildirimAc() { setBAcik(v => !v) }
+  async function bildirimTumOkundu() {
+    try {
+      await api.post('/bildirimler/0/okundu', {})
+      setBildirimler(list => list.map(b => ({ ...b, okundu: true })))
+      setOkunmamis(0)
+    } catch { /* sessiz */ }
   }
   function bildirimGit(b: Bildirim) {
     setBAcik(false)
-    // Antivirus bildirimleri (DB tarama sunucu-geneli domain_id=0 dahil) merkezi
-    // /antivirus paneline gider; domainli AV bulgusu da orada listelenir.
-    // Domainli bildirim -> O DOMAININ kendi sayfasina git (AV bulgusunda o
-    // domainin Antivirus sayfasi). domain_id yoksa (panel-geneli) merkezi sayfa.
+    if (!b.okundu) {
+      api.post(`/bildirimler/${b.id}/okundu`, {}).catch(() => { })
+      setBildirimler(list => list.map(x => x.id === b.id ? { ...x, okundu: true } : x))
+      setOkunmamis(n => Math.max(0, n - 1))
+    }
+    // Domainli bildirim → O DOMAİNİN kendi AV sayfasına; yoksa panel-geneli merkezî.
     if (b.domain_id) { navigate(`/abonelikler/${b.domain_id}/imunify`); return }
     if (b.kategori === 'antivirus') { navigate('/antivirus'); return }
   }
@@ -256,17 +288,33 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           </svg>
         </button>
           {bAcik && (
-            <div className="absolute right-0 mt-2 w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
-              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200">Bildirimler</div>
+            <div className="absolute right-0 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
+              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-800 z-10">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Bildirimler{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} yeni</span>}
+                </span>
+                {okunmamis > 0 && (
+                  <button onClick={bildirimTumOkundu} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Tümünü okundu</button>
+                )}
+              </div>
               {bildirimler.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Bildirim yok</div>
+                <div className="px-4 py-10 text-center">
+                  <svg className="w-9 h-9 mx-auto mb-2 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1" /></svg>
+                  <p className="text-sm text-slate-400 dark:text-slate-500">Bildirim yok</p>
+                </div>
               ) : bildirimler.map(b => (
-                <button key={b.id} onClick={() => bildirimGit(b)} className="w-full text-left px-4 py-2.5 border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition flex gap-2.5">
-                  <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${b.seviye === 'kritik' ? 'bg-red-500' : b.seviye === 'uyari' ? 'bg-amber-500' : 'bg-slate-400'}`} />
+                <button key={b.id} onClick={() => bildirimGit(b)}
+                  className={`w-full text-left px-3.5 py-3 border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
+                  <span className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${sevBg(b.seviye)}`}>
+                    <KatIkon kategori={b.kategori} />
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{b.baslik}</span>
-                    <span className="block text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{b.mesaj}</span>
-                    <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{b.tarih}</span>
+                    <span className="flex items-start gap-1.5">
+                      <span className={`block text-sm truncate ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
+                      {!b.okundu && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0" />}
+                    </span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{yolGizle(b.mesaj)}</span>
+                    <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-1">{goreliZaman(b.tarih)}</span>
                   </span>
                 </button>
               ))}
