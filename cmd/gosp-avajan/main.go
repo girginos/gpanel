@@ -52,11 +52,12 @@ func main() {
 	var (
 		tara = flag.Bool("tara", false, "tek seferlik tarama")
 		izle = flag.Bool("izle", false, "gerçek zamanlı izleme (fanotify)")
-		jsn  = flag.Bool("json", false, "makine okunur çıktı")
+		jsn   = flag.Bool("json", false, "makine okunur çıktı")
+		surec = flag.Bool("surec", false, "süreç davranış izleme (netlink proc connector)")
 	)
 	flag.Parse()
-	if !*tara && !*izle {
-		fmt.Fprintln(os.Stderr, "kullanım: girginospanel-avajan --tara [yol...] | --izle")
+	if !*tara && !*izle && !*surec {
+		fmt.Fprintln(os.Stderr, "kullanım: girginospanel-avajan --tara [yol...] | --izle | --surec")
 		os.Exit(2)
 	}
 
@@ -94,6 +95,9 @@ func main() {
 	case *izle:
 		a.kaynak = "ajan-izle"
 		a.izleyiciCalistir()
+	case *surec:
+		a.kaynak = "ajan-surec"
+		a.surecIzle()
 	default:
 		a.kaynak = "ajan-zamanli"
 		kokler := flag.Args()
@@ -130,6 +134,9 @@ type ajan struct {
 	analizEdilen int
 	bulunan      int
 	bulgular     []avmotor.Bulgu
+
+	// FAZ1 süreç izleme: kiracı+kural başına bildirim throttle.
+	surecThrottle map[string]time.Time
 }
 
 // ── tek seferlik tarama ────────────────────────────────────────────────────
