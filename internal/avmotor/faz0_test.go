@@ -32,21 +32,18 @@ func idVar(l []string, s string) bool {
 	return false
 }
 
-// Düz metinde eşleşmeyen ama base64 çözülünce eşleşen payload yakalanmalı.
 func TestDeobfuskeBase64(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString([]byte(testPayload))
 	content := []byte(`<?php eval(base64_decode('` + b64 + `')); ?>`)
-	// Kontrol: düz metin kuralı eşleşMEMELİ (obfuscate).
 	if testKuralSeti(t)[0].re.Match(content) {
-		t.Fatal("düz metinde eşleşmemeliydi — test geçersiz")
+		t.Fatal("duz metinde eslesmemeliydi")
 	}
-	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php")
+	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php", nil)
 	if puan == 0 || !idVar(idler, "GOSP-DECODE:TEST-SYS-POST") {
-		t.Fatalf("base64 payload yakalanmadı: puan=%d idler=%v", puan, idler)
+		t.Fatalf("base64 payload yakalanmadi: puan=%d idler=%v", puan, idler)
 	}
 }
 
-// gzinflate(base64_decode(...)) — PHP gzinflate = ham DEFLATE.
 func TestDeobfuskeGzinflate(t *testing.T) {
 	var buf bytes.Buffer
 	w, _ := flate.NewWriter(&buf, flate.BestCompression)
@@ -54,52 +51,126 @@ func TestDeobfuskeGzinflate(t *testing.T) {
 	_ = w.Close()
 	b64 := base64.StdEncoding.EncodeToString(buf.Bytes())
 	content := []byte(`<?php eval(gzinflate(base64_decode('` + b64 + `'))); ?>`)
-	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php")
+	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php", nil)
 	if puan == 0 || !idVar(idler, "GOSP-DECODE:TEST-SYS-POST") {
-		t.Fatalf("gzinflate payload yakalanmadı: puan=%d idler=%v", puan, idler)
+		t.Fatalf("gzinflate payload yakalanmadi: puan=%d idler=%v", puan, idler)
 	}
 }
 
-// str_rot13 ile gizlenmiş payload.
+func TestDeobfuskeHexKompres(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := flate.NewWriter(&buf, flate.BestCompression)
+	_, _ = w.Write([]byte(testPayload))
+	_ = w.Close()
+	bsx := string([]byte{92, 'x'}) // "\x" oneki, kaynak-kacisi olmadan
+	var hx strings.Builder
+	const hexd = "0123456789abcdef"
+	for _, b := range buf.Bytes() {
+		hx.WriteString(bsx)
+		hx.WriteByte(hexd[b>>4])
+		hx.WriteByte(hexd[b&0xf])
+	}
+	content := []byte(`<?php eval(gzinflate(hex2bin('` + hx.String() + `'))); ?>`)
+	puan, _ := deobfuskeTara(content, testKuralSeti(t), "php", nil)
+	if puan == 0 {
+		t.Fatalf("hex+gzinflate payload yakalanmadi (BYPASS-3 acik)")
+	}
+}
+
 func TestDeobfuskeRot13(t *testing.T) {
-	// rot13("system($_POST['c']);") — çalışma zamanında üretelim.
 	rot := string(rot13([]byte(testPayload)))
 	content := []byte(`<?php eval(str_rot13('` + rot + `')); ?>`)
-	puan, _ := deobfuskeTara(content, testKuralSeti(t), "php")
-	if puan == 0 {
-		t.Fatalf("rot13 payload yakalanmadı")
+	_, idler := deobfuskeTara(content, testKuralSeti(t), "php", nil)
+	if !idVar(idler, "GOSP-DECODE:TEST-SYS-POST") {
+		t.Fatalf("rot13 payload dogru ID ile yakalanmadi: %v", idler)
 	}
 }
 
-// Temiz düz metin → decode katmanı puan ÜRETMEMELİ (negatif kontrol).
 func TestDeobfuskeTemiz(t *testing.T) {
-	content := []byte(`<?php $x = base64_encode("merhaba dunya"); echo $x; ?>`)
-	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php")
-	if puan != 0 {
-		t.Fatalf("temiz dosyada yanlış pozitif: puan=%d idler=%v", puan, idler)
+	content := []byte(`<?php $x = strtoupper("merhaba"); echo $x; ?>`)
+	if puan, _ := deobfuskeTara(content, testKuralSeti(t), "php", nil); puan != 0 {
+		t.Fatalf("temiz dosyada yanlis pozitif: puan=%d", puan)
 	}
 }
 
-// Normal kod + gömülü yüksek-entropi blob → BLOB tespiti.
+func TestDeobfuskeTemizGercekBlok(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString([]byte("merhaba dunya, bu tamamen zararsiz bir metindir."))
+	content := []byte(`<?php $mesaj = base64_decode('` + b64 + `'); echo $mesaj; ?>`)
+	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php", nil)
+	if puan != 0 {
+		t.Fatalf("zararsiz decode edilen blokta yanlis pozitif: puan=%d idler=%v", puan, idler)
+	}
+}
+
+func TestDeobfuskeCiftSayimYok(t *testing.T) {
+	inner := base64.StdEncoding.EncodeToString([]byte(`system($_POST['b']);`))
+	content := []byte(`<?php system($_POST['a']); $y = base64_decode('` + inner + `'); ?>`)
+	disGoruldu := map[string]bool{"TEST-SYS-POST": true}
+	puan, idler := deobfuskeTara(content, testKuralSeti(t), "php", disGoruldu)
+	if puan != 0 || idVar(idler, "GOSP-DECODE:TEST-SYS-POST") {
+		t.Fatalf("cift-sayim FP: puan=%d idler=%v", puan, idler)
+	}
+}
+
+func TestAcKompresBombaOrani(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := flate.NewWriter(&buf, flate.BestCompression)
+	_, _ = w.Write(bytes.Repeat([]byte("A"), 1000000))
+	_ = w.Close()
+	but := &cozButce{kalanBayt: cozMaxBayt, decompresK: cozMaxDecompres}
+	if o := acKompres(buf.Bytes(), but); o != nil {
+		t.Fatalf("oran bombasi nil donmeliydi, %d bayt dondu", len(o))
+	}
+	if but.decompresK != 0 {
+		t.Fatalf("bomba tespitinde decompresK 0'lanmaliydi, %d", but.decompresK)
+	}
+}
+
+func TestAcKompresSayacTukenir(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := flate.NewWriter(&buf, flate.BestCompression)
+	_, _ = w.Write([]byte("kucuk normal payload"))
+	_ = w.Close()
+	but := &cozButce{kalanBayt: cozMaxBayt, decompresK: 0}
+	if o := acKompres(buf.Bytes(), but); o != nil {
+		t.Fatalf("decompresK=0 iken nil donmeliydi")
+	}
+}
+
 func TestBolgeselEntropiBlob(t *testing.T) {
 	normal := strings.Repeat("function f($a){ return $a + 1; } // normal kod satiri duz\n", 80)
-	var blob strings.Builder
-	r := rand.New(rand.NewSource(42)) // sabit seed → deterministik, yüksek entropi
-	const alf = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	for i := 0; i < 18000; i++ {
-		blob.WriteByte(alf[r.Intn(64)])
-	}
-	content := []byte(normal + blob.String() + "\neval($x);\n")
+	blob := rasgeleB64(18000, 42)
+	content := []byte(normal + blob + "\neval($x);\n")
 	s, id, ok := bolgeselEntropi(content)
-	if !ok || s == 0 || id != "GOSP-HEUR-ENTROPI-BLOB" {
-		t.Fatalf("gömülü blob tespit edilmedi: skor=%d id=%s ok=%v", s, id, ok)
+	if !ok || id != "GOSP-HEUR-ENTROPI-BLOB" {
+		t.Fatalf("gomulu blob tespit edilmedi: skor=%d id=%s ok=%v", s, id, ok)
 	}
 }
 
-// Tamamen normal kod → entropi tespiti YOK (negatif kontrol).
+func TestBolgeselEntropiUniformBlobDegil(t *testing.T) {
+	content := []byte(rasgeleB64(20000, 7))
+	s, id, ok := bolgeselEntropi(content)
+	if !ok {
+		t.Fatalf("uniform yuksek entropi sinyal vermeliydi")
+	}
+	if id == "GOSP-HEUR-ENTROPI-BLOB" {
+		t.Fatalf("uniform yuksek entropi YANLISLIKLA BLOB (skor %d)", s)
+	}
+}
+
 func TestBolgeselEntropiTemiz(t *testing.T) {
 	content := []byte(strings.Repeat("$total = $price * $qty; echo $total;\n", 300))
 	if _, _, ok := bolgeselEntropi(content); ok {
-		t.Fatalf("normal kod yanlış pozitif entropi verdi")
+		t.Fatalf("normal kod yanlis pozitif entropi verdi")
 	}
+}
+
+func rasgeleB64(n int, seed int64) string {
+	const alf = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	r := rand.New(rand.NewSource(seed))
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteByte(alf[r.Intn(64)])
+	}
+	return b.String()
 }

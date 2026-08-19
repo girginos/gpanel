@@ -27,9 +27,7 @@
 package avmotor
 
 import (
-	"bufio"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -160,6 +158,9 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 				}
 			}
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(yol), "."))
+			// disGoruldu: düz metinde eşleşen kural ID'leri — decode katmanı
+			// bunları TEKRAR saymaz (çift-sayım FP'si).
+			disGoruldu := map[string]bool{}
 			for _, k := range m.set.Kurallar {
 				if len(k.Uzanti) > 0 && !icerirStr(k.Uzanti, ext) {
 					continue
@@ -167,6 +168,7 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 				if k.re.Match(icerik) {
 					b.Puan += k.Puan
 					b.Kurallar = append(b.Kurallar, k.ID)
+					disGoruldu[k.ID] = true
 				}
 			}
 			// FAZ 0 — Bölgesel entropi: tek-satır yerine kayan pencere; normal
@@ -179,7 +181,7 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 			// FAZ 0 — Decode katmanı: obfuscate payload'ı SINIRLI derinlikte çöz
 			// (base64/gzinflate/zlib/hex/rot13) ve mevcut kural setiyle yeniden
 			// tara — regex'in göremediği düz metni yakalar. Bütçe: derinlik+bayt.
-			if dp, dids := deobfuskeTara(icerik, m.set.Kurallar, ext); dp > 0 {
+			if dp, dids := deobfuskeTara(icerik, m.set.Kurallar, ext, disGoruldu); dp > 0 {
 				b.Puan += dp
 				b.Kurallar = append(b.Kurallar, dids...)
 			}
@@ -289,37 +291,3 @@ func okuSinirli(yol string, n int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, n))
 }
 
-// enYuksekSatirEntropisi — en uzun satırın Shannon entropisi.
-//
-// Obfuscated payload'lar tek satırda çok uzun ve yüksek entropili olur.
-// `uzun` false ise entropi anlamsızdır (kısa satırda entropi yanıltıcıdır).
-func enYuksekSatirEntropisi(b []byte) (float64, bool) {
-	sc := bufio.NewScanner(strings.NewReader(string(b)))
-	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
-	enIyi := 0.0
-	uzunVar := false
-	for sc.Scan() {
-		satir := sc.Bytes()
-		if len(satir) < 200 {
-			continue
-		}
-		uzunVar = true
-		var sayac [256]int
-		for _, c := range satir {
-			sayac[c]++
-		}
-		n := float64(len(satir))
-		e := 0.0
-		for _, c := range sayac {
-			if c == 0 {
-				continue
-			}
-			p := float64(c) / n
-			e -= p * math.Log2(p)
-		}
-		if e > enIyi {
-			enIyi = e
-		}
-	}
-	return enIyi, uzunVar
-}
