@@ -289,6 +289,7 @@ func main() {
 	korumaH := &sifrekoruma.Handlers{DB: d}
 	avH := &antivirus.Handlers{DB: d}
 	bildirimH := &bildirim.Handlers{DB: d}
+	zincirH := &zincir.Handlers{DB: d}
 	kopyaH := &sitekopya.Handlers{DB: d}
 	wpH := &wordpress.Handlers{DB: d}
 	fwH := &guvenlikduvari.Handlers{DB: d}
@@ -380,6 +381,7 @@ func main() {
 			// tespitini gorurdu (izolasyon ihlali).
 			r.Get("/bildirimler", bildirimH.Liste)
 			r.Post("/bildirimler/{id}/okundu", bildirimH.Okundu)
+			r.Get("/antivirus/zincirler", zincirH.Liste) // FAZ3 saldiri zincirleri (rol-kapsamli)
 			// Sunucu-geneli antivirüs paneli (sol menü)
 			r.With(middleware.AdminOnly).Get("/antivirus/durum", avH.AdminDurum)
 			r.With(middleware.AdminOnly).Get("/antivirus/karantina", avH.AdminKarantinaListe)

@@ -213,8 +213,11 @@ func (a *ajan) execDegerlendir(pid int) {
 
 // surecAsama — süreç kural-kodunu kill-chain aşamasına eşler.
 func surecAsama(kod string) string {
-	if kod == "web_indirici" {
+	switch kod {
+	case "web_indirici":
 		return "c2"
+	case "persistence_yazma":
+		return "persistence"
 	}
 	return "calistirma" // guvenilmez_koken, sanal_kabuk_cmd
 }
@@ -242,6 +245,9 @@ func surecPuanla(web bool, exe, cmdline string, uid int) (int, string, string) {
 		// +20 kuralının yerine; artık bildirir).
 		if indiriciMi(temizExe) && cmdlineUzakURL(cmdline) {
 			return 35, "web_indirici", "web sürecinden uzak indirme: " + kisaCmd(cmdline)
+		}
+		if cmdlinePersistence(cmdline) {
+			return 35, "persistence_yazma", "web sürecinden kalıcılık girişimi: " + kisaCmd(cmdline)
 		}
 	}
 	return 0, "", ""
@@ -301,6 +307,25 @@ var supheliTokenlar = []string{
 func cmdlineSupheli(cmdline string) bool {
 	l := strings.ToLower(cmdline)
 	for _, t := range supheliTokenlar {
+		if strings.Contains(l, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// persistTokenlar — kalıcılık (persistence) göstergeleri. Web süreci bunlara
+// DOKUNMAMALI (cron/başlangıç düzenlemesi meşru olarak SSH/panelden yapılır,
+// php-fpm çocuğundan DEĞİL) → web-bağlamında güçlü sinyal.
+var persistTokenlar = []string{
+	"crontab", "/etc/cron", "/var/spool/cron", "/etc/cron.d", "/etc/rc.local",
+	".bashrc", ".bash_profile", ".profile", "authorized_keys", "systemctl enable",
+	"chkconfig", "update-rc.d", "/etc/systemd/system",
+}
+
+func cmdlinePersistence(cmdline string) bool {
+	l := strings.ToLower(cmdline)
+	for _, t := range persistTokenlar {
 		if strings.Contains(l, t) {
 			return true
 		}

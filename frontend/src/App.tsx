@@ -7,6 +7,7 @@ import DomainsPage from '@/pages/DomainsPage'
 import ResellerlarPage from '@/pages/ResellerlarPage'
 import DenetimPage from '@/pages/DenetimPage'
 import BildirimlerPage from '@/pages/BildirimlerPage'
+import SaldiriZincirleriPage from '@/pages/SaldiriZincirleriPage'
 import YasakliDomainPage from '@/pages/YasakliDomainPage'
 import OturumAyarPage from '@/pages/OturumAyarPage'
 import PanelHostPage from '@/pages/PanelHostPage'
@@ -104,6 +105,7 @@ export default function App() {
         <Route path="bayiler"              element={<ResellerlarPage />} />
         <Route path="denetim"              element={<DenetimPage />} />
         <Route path="bildirimler"         element={<BildirimlerPage />} />
+        <Route path="saldiri-zincirleri"  element={<SaldiriZincirleriPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
         <Route path="abonelikler/:id"      element={<SubscriptionDetailPage />} />
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
