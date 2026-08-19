@@ -66,8 +66,10 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
     setBAcik(false)
     // Antivirus bildirimleri (DB tarama sunucu-geneli domain_id=0 dahil) merkezi
     // /antivirus paneline gider; domainli AV bulgusu da orada listelenir.
+    // Domainli bildirim -> O DOMAININ kendi sayfasina git (AV bulgusunda o
+    // domainin Antivirus sayfasi). domain_id yoksa (panel-geneli) merkezi sayfa.
+    if (b.domain_id) { navigate(`/abonelikler/${b.domain_id}/imunify`); return }
     if (b.kategori === 'antivirus') { navigate('/antivirus'); return }
-    if (b.domain_id) navigate(`/abonelikler/${b.domain_id}/imunify`)
   }
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())

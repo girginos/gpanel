@@ -378,9 +378,16 @@ func (a *ajan) dosyaIsle(yol string) {
 	if karantinaYol != "" {
 		eylem = "karantinaya alındı"
 	}
-	bildirimYaz(a.db, seviye,
-		"Zararlı dosya "+eylem,
-		"Dosya: "+yol+"\nKurallar: "+b.Aciklama+"\nPuan: "+itoa(b.Puan),
+	// 🔴 GENEL icerik: tam sunucu yolu SIZDIRILMAZ (yol yerine yalniz alan
+	// adi + dosya adi). Panelde tiklaninca domain_id -> o domainin Antivirus
+	// sayfasina gider (TopBar). Gorunurluk yalniz domain sahibi (bildirimYaz).
+	alan := domainAdi(a.db, domID)
+	baslik := "Zararlı dosya " + eylem
+	if alan != "" {
+		baslik = alan + " alanında zararlı dosya " + eylem
+	}
+	bildirimYaz(a.db, seviye, baslik,
+		filepath.Base(yol)+" — Antivirüs sayfasından inceleyin.",
 		domID, "av_bulgu", bulguID)
 }
 

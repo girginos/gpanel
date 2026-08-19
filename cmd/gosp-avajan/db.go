@@ -120,10 +120,29 @@ func bildirimYaz(db *sql.DB, seviye, baslik, mesaj string, domainID int64, refTu
 	} else {
 		dom = nil
 	}
+	// Sahip reseller_id'yi coz -> bildirim gorunurlugu domain sahibine kilitlenir
+	// (bkz. internal/bildirim.kapsam). domainID=0 / reseller_id=0 -> NULL (admin).
+	var rid any
+	if domainID > 0 {
+		var r int64
+		if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
+			rid = r
+		}
+	}
 	_, _ = db.Exec(
-		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, ref_tur, ref_id)
-		 VALUES (?, 'antivirus', ?, ?, ?, ?, ?)`,
-		seviye, kisalt(baslik, 190), mesaj, dom, refTur, refID)
+		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id, ref_tur, ref_id)
+		 VALUES (?, 'antivirus', ?, ?, ?, ?, ?, ?)`,
+		seviye, kisalt(baslik, 190), mesaj, dom, rid, refTur, refID)
+}
+
+// domainAdi -- bildirim basligi icin alan adi (yoksa "").
+func domainAdi(db *sql.DB, domainID int64) string {
+	if db == nil || domainID <= 0 {
+		return ""
+	}
+	var ad string
+	_ = db.QueryRow(`SELECT alan_adi FROM domains WHERE id=?`, domainID).Scan(&ad)
+	return ad
 }
 
 func kisalt(s string, n int) string {

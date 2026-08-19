@@ -373,8 +373,12 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/websec/apps", websecH.Apps)
 			r.With(middleware.AdminOnly).Get("/antivirus/ayarlar", avAyarH.Getir)
 			r.With(middleware.AdminOnly).Put("/antivirus/ayarlar", avAyarH.Kaydet)
-			r.With(middleware.AdminOnly).Get("/bildirimler", bildirimH.Liste)
-			r.With(middleware.AdminOnly).Post("/bildirimler/{id}/okundu", bildirimH.Okundu)
+			// Bildirimler: rol-kapsamli (internal/bildirim.kapsam) — admin=panel-geneli,
+			// reseller=kendi domainleri, musteri=kendi domaini. AdminOnly KALDIRILDI:
+			// aksi halde domain sahibi kendi bildirimini goremezdi + admin TUM kiracilarin
+			// tespitini gorurdu (izolasyon ihlali).
+			r.Get("/bildirimler", bildirimH.Liste)
+			r.Post("/bildirimler/{id}/okundu", bildirimH.Okundu)
 			// Sunucu-geneli antivirüs paneli (sol menü)
 			r.With(middleware.AdminOnly).Get("/antivirus/durum", avH.AdminDurum)
 			r.With(middleware.AdminOnly).Get("/antivirus/karantina", avH.AdminKarantinaListe)
