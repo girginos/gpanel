@@ -145,8 +145,14 @@ func domainAdi(db *sql.DB, domainID int64) string {
 	return ad
 }
 
-func olayYaz(db *sql.DB, domainID int64, kaynak, asama, seviye, ozet, refTur string, refID int64) {
+func olayYaz(db *sql.DB, domainID int64, kaynak, asama, seviye, ozet, yol string, pid int, refTur string, refID int64) {
 	if db == nil || domainID <= 0 {
+		return
+	}
+	// Insert-dedup: aynı domain+asama+yol son 30sn'de varsa atla (av_olay flood/DoS önlemi).
+	var v int
+	if db.QueryRow(`SELECT 1 FROM av_olay WHERE domain_id=? AND asama=? AND yol=? AND created_at >= (NOW()-INTERVAL 30 SECOND) LIMIT 1`,
+		domainID, asama, yol).Scan(&v) == nil {
 		return
 	}
 	var rid any
@@ -154,8 +160,8 @@ func olayYaz(db *sql.DB, domainID int64, kaynak, asama, seviye, ozet, refTur str
 	if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
 		rid = r
 	}
-	_, _ = db.Exec(`INSERT INTO av_olay (domain_id, reseller_id, kaynak, asama, seviye, ozet, ref_tur, ref_id)
-		 VALUES (?,?,?,?,?,?,?,?)`, domainID, rid, kaynak, asama, seviye, kisalt(ozet, 250), refTur, refID)
+	_, _ = db.Exec(`INSERT INTO av_olay (domain_id, reseller_id, kaynak, asama, seviye, ozet, yol, pid, ref_tur, ref_id)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`, domainID, rid, kaynak, asama, seviye, kisalt(ozet, 250), kisalt(yol, 500), pid, refTur, refID)
 }
 
 func kisalt(s string, n int) string {

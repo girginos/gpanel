@@ -1,63 +1,119 @@
 package zincir
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func ol(asama, seviye string) Olay { return Olay{Asama: asama, Seviye: seviye} }
+func olY(asama, yol string, pid int, t time.Time) Olay {
+	return Olay{Asama: asama, Yol: yol, Pid: pid, Zaman: t}
+}
 
-// Tek aşama (aynı aşamada çok olay) → zincir DEĞİL (yanlış-pozitif önler).
-func TestZincirTekAsamaYetersiz(t *testing.T) {
-	if _, _, ok := ZincirPuanla([]Olay{ol("dosya_yazma", "kritik"), ol("dosya_yazma", "uyari")}); ok {
-		t.Fatal("tek aşama zincir sayıldı")
+func TestTekAsamaYetersiz(t *testing.T) {
+	if ZincirPuanla([]Olay{ol("dosya_yazma", "kritik"), ol("dosya_yazma", "uyari")}).Yeterli {
+		t.Fatal("tek asama zincir sayildi")
 	}
 }
 
-// İki aşama (yaz + çalıştır) → 60 + kritik 5 + yaz&çalıştır 5 = 70.
-func TestZincirIkiAsama(t *testing.T) {
-	g, as, ok := ZincirPuanla([]Olay{ol("dosya_yazma", "kritik"), ol("calistirma", "kritik")})
-	if !ok || g != 70 {
-		t.Fatalf("2 aşama güven=%d ok=%v (70 bekleniyor)", g, ok)
-	}
-	if len(as) != 2 || as[0] != "dosya_yazma" || as[1] != "calistirma" {
-		t.Fatalf("aşama sırası: %v", as)
+func TestBilinmeyenAsama(t *testing.T) {
+	if ZincirPuanla([]Olay{ol("dosya_yazma", "uyari"), ol("zzz", "uyari")}).Yeterli {
+		t.Fatal("bilinmeyen asama gecerli sayildi")
 	}
 }
 
-// Dört aşama → cap 99, sıralı.
-func TestZincirDortAsama(t *testing.T) {
-	g, as, ok := ZincirPuanla([]Olay{ol("c2", "uyari"), ol("giris", "uyari"), ol("dosya_yazma", "kritik"), ol("calistirma", "kritik")})
-	if !ok || g != 99 {
-		t.Fatalf("4 aşama güven=%d (99 bekleniyor)", g)
+// Salt ZAMANSAL 2 asama (nedensel yok) → 55 UYARI (FP-laundering onlenir).
+func TestZamansal2Asama(t *testing.T) {
+	s := ZincirPuanla([]Olay{ol("giris", "uyari"), ol("c2", "uyari")})
+	if !s.Yeterli || s.Guven != 55 {
+		t.Fatalf("guven=%d (55 bekleniyor)", s.Guven)
 	}
-	if len(as) != 4 || as[0] != "giris" || as[3] != "c2" {
-		t.Fatalf("kill-chain sırası bozuk: %v", as)
+	if s.Seviye != "uyari" || s.Nedensel {
+		t.Fatalf("nedensel-yok uyari olmali: %+v", s)
 	}
 }
 
-// Bilinmeyen aşama yok sayılır → geriye tek geçerli aşama kalırsa zincir DEĞİL.
-func TestZincirBilinmeyenAsama(t *testing.T) {
-	if _, _, ok := ZincirPuanla([]Olay{ol("dosya_yazma", "uyari"), ol("zzz", "uyari")}); ok {
-		t.Fatal("bilinmeyen aşama geçerli sayıldı")
+// NEDENSEL 2 asama (ayni yol = dusen dosya calistirildi) + sirali → 55+25+5=85 KRITIK.
+func TestNedensel2Asama(t *testing.T) {
+	t0 := time.Now()
+	s := ZincirPuanla([]Olay{
+		olY("dosya_yazma", "/home/c_x/public_html/shell.php", 0, t0),
+		olY("calistirma", "/home/c_x/public_html/shell.php", 0, t0.Add(time.Second)),
+	})
+	if s.Guven != 85 || s.Seviye != "kritik" || !s.Nedensel {
+		t.Fatalf("nedensel kritik 85 bekleniyor: %+v", s)
+	}
+}
+
+func TestNedenselPid(t *testing.T) {
+	t0 := time.Now()
+	s := ZincirPuanla([]Olay{
+		{Asama: "calistirma", Pid: 4242, Zaman: t0},
+		{Asama: "c2", Pid: 4242, Zaman: t0.Add(time.Second)},
+	})
+	if !s.Nedensel {
+		t.Fatal("ayni pid nedensel olmali")
+	}
+}
+
+// TERS zaman sirasi → sirali bonusu YOK (nedensel de yok).
+func TestTersSira(t *testing.T) {
+	t0 := time.Now()
+	s := ZincirPuanla([]Olay{
+		olY("calistirma", "/tmp/a", 0, t0),
+		olY("giris", "/var/b", 0, t0.Add(time.Minute)),
+	})
+	if s.Guven != 55 {
+		t.Fatalf("ters sira guven=%d (55, +5 sirali OLMAMALI)", s.Guven)
+	}
+}
+
+// 3 SIRALI asama, nedensel yok → 75 KRITIK (distinct>=3 && sirali).
+func Test3SiraliAsama(t *testing.T) {
+	t0 := time.Now()
+	s := ZincirPuanla([]Olay{
+		olY("giris", "/tmp/a", 0, t0),
+		olY("dosya_yazma", "/var/b", 0, t0.Add(time.Second)),
+		olY("calistirma", "/etc/c", 0, t0.Add(2*time.Second)),
+	})
+	if s.Guven != 75 || s.Seviye != "kritik" {
+		t.Fatalf("3 sirali guven=%d seviye=%s (75 kritik bekleniyor)", s.Guven, s.Seviye)
+	}
+}
+
+func TestYolBagli(t *testing.T) {
+	if !yolBagli("/home/c/x/a.php", "/home/c/x/a.php") {
+		t.Fatal("ayni yol bagli olmali")
+	}
+	if yolBagli("/home/c/x/a", "/home/c/x/b") {
+		t.Fatal("farkli dosya (ayni dizin) bagli sayildi — FP riski")
+	}
+	if yolBagli("/home/c/x/a", "/tmp/b") {
+		t.Fatal("farkli dizin bagli sayildi")
+	}
+	if yolBagli("/a", "/b") {
+		t.Fatal("kok dizin bagli sayildi")
+	}
+	if yolBagli("", "/x") {
+		t.Fatal("bos yol bagli sayildi")
 	}
 }
 
 func TestZincirImza(t *testing.T) {
 	a := ZincirImza(5, []string{"dosya_yazma", "calistirma"})
-	b := ZincirImza(5, []string{"dosya_yazma", "calistirma"})
-	c := ZincirImza(6, []string{"dosya_yazma", "calistirma"})
-	d := ZincirImza(5, []string{"dosya_yazma", "c2"})
-	if a != b {
-		t.Fatal("aynı girdi farklı imza")
+	if a != ZincirImza(5, []string{"dosya_yazma", "calistirma"}) {
+		t.Fatal("kararsiz imza")
 	}
-	if a == c || a == d {
-		t.Fatal("farklı girdi aynı imza")
+	if a == ZincirImza(6, []string{"dosya_yazma", "calistirma"}) || a == ZincirImza(5, []string{"dosya_yazma", "c2"}) {
+		t.Fatal("imza duyarsiz")
 	}
 	if len(a) != 32 {
-		t.Fatalf("imza uzunluğu %d", len(a))
+		t.Fatalf("uzunluk %d", len(a))
 	}
 }
 
 func TestAsamaOzet(t *testing.T) {
-	if s := AsamaOzet([]string{"dosya_yazma", "calistirma", "c2"}); s != "File Write → Execution → C2" {
-		t.Fatalf("özet: %q", s)
+	if AsamaOzet([]string{"dosya_yazma", "calistirma", "c2"}) != "File Write → Execution → C2" {
+		t.Fatal("ozet yanlis")
 	}
 }
