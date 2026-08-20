@@ -13,7 +13,15 @@ import { useDialog } from '@/components/Dialog'
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type DB = {
   id: number; domain_id: number; db_adi: string; db_kullanici: string;
-  db_host: string; db_parola: string; olusturulma: string
+  db_host: string; db_parola: string; olusturulma: string; boyut: number
+}
+
+function boyutFmt(b: number): string {
+  if (!b || b <= 0) return '—'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0, v = b
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i]
 }
 
 export default function DomainDatabasesPage() {
@@ -102,6 +110,7 @@ export default function DomainDatabasesPage() {
               <th className={T.baslik}>Sunucu</th>
               <th className={T.baslik}>Parola</th>
               <th className={T.baslik}>Oluşturulma</th>
+              <th className={`${T.baslik} text-right`}>Boyut</th>
               <th className={`${T.baslik} text-right`}>İşlemler</th>
             </tr>
           </thead>
@@ -135,6 +144,7 @@ export default function DomainDatabasesPage() {
                 <td className={T.hucre} data-etiket="Oluşturulma">
                   <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma}</span>
                 </td>
+                <td className={`${T.hucre} text-right`} data-etiket="Boyut"><span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">{boyutFmt(d.boyut)}</span></td>
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   <button onClick={() => pmaAc(d)} className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç">🔓 phpMyAdmin</button>
                   <button onClick={() => setPwResetFor(d)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">🔑 Parola Sıfırla</button>

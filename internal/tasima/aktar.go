@@ -184,7 +184,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		}
 	}
 	if ay.Veritabani && len(hs.DBler) > 0 {
-		esleme, dbPw, dbHata := h.veritabanlariniAktar(ctx, k, hs, sk, sonuc, log)
+		esleme, dbPw, dbHata := h.veritabanlariniAktar(ctx, k, hs, sk, webRoot, sonuc, log)
 		if dbHata != nil {
 			// 🔴 DB adimi basarisizsa kalem BASARILI sayilmaz — sessiz basari
 			// mustericinin sitesini bos veritabaniyla yayina alir.
@@ -248,7 +248,7 @@ type dbHedef struct{ Ad, Kul string }
 // kullanicinin parolasi DEGISTIRILMEZ: hesaplar.MySQLCreateDB kosulsuz
 // "ALTER USER … IDENTIFIED BY" calistiriyor; bu, ayni kullaniciyi paylasan
 // CANLI sitelerin baglantisini aninda koparir.
-func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap, sk string,
+func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap, sk, webRoot string,
 	sonuc *AktarSonuc, log func(string, ...any)) (map[string]dbHedef, string, error) {
 
 	hedefKul := sk + "_db"
@@ -258,6 +258,12 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 	// varsa CREATE-OR-ALTER ile parolayi dbPw'ye esitler.
 	dbPw := hesaplar.RandomParola(24)
 
+	// 🔴 ORIJINAL kimlik tercihi: DB adi+kullanici+parola AYNI kalirsa wp-config
+	// HIC degismez (kullanici config guncellemek zorunda kalmaz) ve ad uzamaz.
+	// Yapilandirmadan okunur; yalniz hedefte ad+kullanici MUSAITSE (cakisma yok)
+	// kullanilir, aksi halde <sk> onekli benzersiz ada + config rewrite'a düsülür.
+	kimlikler := configtenDBKimlik(webRoot)
+
 	esleme := map[string]dbHedef{}
 	kuruldu := false
 	var basarisiz []string
@@ -266,6 +272,23 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 		if !reDBAd.MatchString(kaynakDB) {
 			continue
 		}
+		// --- ORIJINAL kimlikle taşıma (config degismez) ---
+		if orij, ok := kimlikler[kaynakDB]; ok && orij.Kul != "" && orij.Pw != "" &&
+			reDBAd.MatchString(orij.Kul) && h.dbAdiMusaitMi(ctx, kaynakDB) &&
+			!h.dbKullanicisiVarMi(ctx, orij.Kul) {
+			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
+				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
+			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
+				log("HATA: %s aktarilamadi: %v", kaynakDB, err)
+				basarisiz = append(basarisiz, kaynakDB)
+				continue
+			} else {
+				sonuc.DBSayisi++
+				log("veritabani (ORIJINAL ad/kullanici/parola — config degismedi): %s", kaynakDB)
+				continue // esleme'ye EKLENMEZ → configYenidenYaz bu DB'yi atlar
+			}
+		}
+		// --- FALLBACK: benzersiz ad + panel kullanicisi + config rewrite ---
 		hedefAd, err := h.benzersizHedefDB(ctx, sk, kaynakDB, hs.KaynakHesap)
 		if err != nil {
 			log("uyari: %s icin hedef ad uretilemedi: %v", kaynakDB, err)
@@ -646,6 +669,69 @@ func configtenDBBul(webRoot string) []string {
 		}
 	}
 	return out
+}
+
+func anahtardaMi(anahtar string, liste []string) bool {
+	for _, a := range liste {
+		if strings.EqualFold(anahtar, a) {
+			return true
+		}
+	}
+	return false
+}
+
+type dbKimlik struct{ Kul, Pw string }
+
+// configtenDBKimlik — kopyalanan yapilandirmadan DB adi -> {kullanici, parola}.
+// DB'yi ORIJINAL kimligiyle tasimak icin (wp-config DEGISMESIN, ad kisa kalsin).
+func configtenDBKimlik(webRoot string) map[string]dbKimlik {
+	out := map[string]dbKimlik{}
+	for _, rel := range yapilandirmaAdaylari {
+		yol := filepath.Join(webRoot, rel)
+		st, err := os.Lstat(yol)
+		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {
+			continue
+		}
+		ham, err := os.ReadFile(yol)
+		if err != nil {
+			continue
+		}
+		ad, kul, pw := "", "", ""
+		for _, satir := range strings.Split(string(ham), "\n") {
+			m := reAnahtarSatir.FindStringSubmatch(satir)
+			if m == nil {
+				continue
+			}
+			deger, _ := degerAyikla(m[3])
+			deger = strings.TrimSpace(deger)
+			if deger == "" {
+				continue
+			}
+			switch {
+			case ad == "" && anahtardaMi(m[2], dbAdAnahtarlari):
+				ad = deger
+			case kul == "" && anahtardaMi(m[2], dbKulAnahtarlari):
+				kul = deger
+			case pw == "" && anahtardaMi(m[2], dbPwAnahtarlari):
+				pw = deger
+			}
+		}
+		if ad != "" && kul != "" && pw != "" {
+			if _, v := out[ad]; !v {
+				out[ad] = dbKimlik{Kul: kul, Pw: pw}
+			}
+		}
+	}
+	return out
+}
+
+// dbAdiMusaitMi — hedef sunucuda bu DB adi HIC yok mu (sema + panel kaydi).
+func (h *Handlers) dbAdiMusaitMi(ctx context.Context, ad string) bool {
+	var n int
+	_ = h.DB.QueryRowContext(ctx,
+		`SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name=?)
+		      + (SELECT COUNT(*) FROM db_accounts WHERE db_name=?)`, ad, ad).Scan(&n)
+	return n == 0
 }
 
 // configYenidenYaz — site yapilandirmasindaki DB baglanti bilgilerini gunceller.

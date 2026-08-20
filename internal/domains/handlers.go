@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
@@ -769,6 +770,7 @@ type DBAccount struct {
 	DBHost      string `json:"db_host"`
 	DBParola    string `json:"db_parola"`
 	Olusturulma string `json:"olusturulma"`
+	Boyut       int64  `json:"boyut"`
 }
 
 func (h *Handlers) ListDatabases(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +791,29 @@ func (h *Handlers) ListDatabases(w http.ResponseWriter, r *http.Request) {
 		}
 		d.DBParola = gizli.CozBagli(d.DBParola, d.DBKullanici) // at-rest sifreli → sahibine ACIK gosterilir
 		out = append(out, d)
+	}
+	// Boyut (data+index): panel MySQL kullanicisi tenant DB'lerini information_schema'da
+	// GOREMEZ (yetki kapsami) -> ROOT socket exec ile sorgula.
+	if len(out) > 0 {
+		var inl strings.Builder
+		for i := range out {
+			if i > 0 {
+				inl.WriteString(",")
+			}
+			inl.WriteString("'" + strings.ReplaceAll(out[i].DBAdi, "'", "") + "'")
+		}
+		q := "SELECT table_schema, COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema IN (" + inl.String() + ") GROUP BY table_schema"
+		if bo, be := exec.CommandContext(r.Context(), "mysql", "-N", "-B", "-e", q).Output(); be == nil {
+			f := strings.Fields(string(bo))
+			boyutlar := map[string]int64{}
+			for i := 0; i+1 < len(f); i += 2 {
+				nv, _ := strconv.ParseInt(f[i+1], 10, 64)
+				boyutlar[f[i]] = nv
+			}
+			for i := range out {
+				out[i].Boyut = boyutlar[out[i].DBAdi]
+			}
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
