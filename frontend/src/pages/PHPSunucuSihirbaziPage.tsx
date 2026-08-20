@@ -6,8 +6,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { apiHata } from '@/lib/api'
 import PHPSurumleriPage from './PHPSurumleriPage'
-import PHPModuleriPage from './PHPModuleriPage'
+import PHPModuleriPage, { Secim } from './PHPModuleriPage'
 
 type Adim = { key: string; ad: string; aciklama: string }
 const ADIMLAR: Adim[] = [
@@ -20,6 +21,8 @@ const ADIMLAR: Adim[] = [
 export default function PHPSunucuSihirbaziPage() {
   const [aktif, setAktif] = useState('surumler')
   const aktifIdx = ADIMLAR.findIndex(a => a.key === aktif)
+  // Sihirbaz genelinde biriktirilen "kurulacak" eklentiler (Özet adımında toplu kurulur).
+  const [secilenler, setSecilenler] = useState<Secim[]>([])
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -66,9 +69,9 @@ export default function PHPSunucuSihirbaziPage() {
         <section className="min-w-0">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5">
             {aktif === 'surumler' && <PHPSurumleriPage gomulu />}
-            {aktif === 'eklentiler' && <PHPModuleriPage gomulu />}
+            {aktif === 'eklentiler' && <PHPModuleriPage gomulu secilenler={secilenler} setSecilenler={setSecilenler} />}
             {aktif === 'websunucu' && <WebSunucuAdim />}
-            {aktif === 'ozet' && <OzetAdim />}
+            {aktif === 'ozet' && <OzetAdim secilenler={secilenler} onTemizle={() => setSecilenler([])} />}
           </div>
 
           {/* İleri / Geri */}
@@ -136,37 +139,123 @@ function DurumKart({ etiket, deger, ok }: { etiket: string; deger: string; ok?: 
   )
 }
 
-// Özet adımı: kurulu PHP sürümleri + hızlı doğrulama listesi.
-function OzetAdim() {
+// Özet adımı: seçilen eklentileri TOPLU kurar (kullanıcı isteği). Her eklenti
+// için mevcut async PECL-Kur akışı sırayla çalışır, canlı ilerleme gösterilir.
+type Toplu = { anahtar: string; ad: string; surum: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
+function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: () => void }) {
   const [surumler, setSurumler] = useState<any[]>([])
-  const [yuk, setYuk] = useState(true)
+  const [calisiyor, setCalisiyor] = useState(false)
+  const [durumlar, setDurumlar] = useState<Toplu[]>([])
+  const [aktifAdim, setAktifAdim] = useState<{ ad: string; adim: string; yuzde: number } | null>(null)
+  const [bitti, setBitti] = useState(false)
+
   useEffect(() => {
-    api.get('/php-surumler').then(r => setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu)))
-      .catch(() => {}).finally(() => setYuk(false))
+    api.get('/php-surumler').then(r => setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu))).catch(() => {})
   }, [])
+
+  async function topluKur() {
+    if (calisiyor || secilenler.length === 0) return
+    setCalisiyor(true); setBitti(false)
+    const liste: Toplu[] = secilenler.map(s => ({ ...s, durum: 'bekliyor' }))
+    setDurumlar(liste)
+    for (let i = 0; i < liste.length; i++) {
+      const s = liste[i]
+      setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'kuruluyor' } : x))
+      setAktifAdim({ ad: s.ad, adim: 'Başlatılıyor…', yuzde: 2 })
+      try {
+        const { data } = await api.post('/php-extensions/pecl-install', { surum: s.surum, paket: s.anahtar })
+        if (data.is_id) {
+          for (;;) {
+            await new Promise(r => setTimeout(r, 1500))
+            const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
+            setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
+            if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+            if (p.data.durum === 'tamam') break
+          }
+        }
+        setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'tamam' } : x))
+      } catch (e) {
+        setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'hata', mesaj: apiHata(e) } : x))
+      }
+    }
+    setAktifAdim(null); setCalisiyor(false); setBitti(true)
+    onTemizle() // seçim listesini temizle (kurulanlar artık "kurulu")
+  }
+
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Özet</h2>
-      <p className="text-sm text-slate-500 dark:text-slate-500">Sunucunun mevcut PHP yapılandırması. Her değişiklik uygulandığı adımda anında etkinleşir.</p>
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Özet &amp; Uygula</h2>
 
+      {/* Kurulu sürümler */}
       <div>
         <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulu PHP sürümleri</div>
-        {yuk ? <div className="text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> : surumler.length === 0 ? (
-          <div className="text-sm text-slate-500">Kurulu sürüm bulunamadı. "PHP Sürümleri" adımından ekleyin.</div>
+        <div className="flex flex-wrap gap-2">
+          {surumler.length === 0 ? <span className="text-sm text-slate-500">—</span> : surumler.map((s: any) => (
+            <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700/60 text-sm font-mono text-slate-800 dark:text-slate-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />PHP {s.surum}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Kurulacak eklentiler */}
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulacak eklentiler ({secilenler.length})</div>
+        {secilenler.length === 0 && !bitti ? (
+          <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400">
+            "PHP Eklentileri" adımından kurmak istediğiniz eklentileri seçin (toggle ile işaretleyin), sonra buradan tümünü birlikte kurun.
+          </div>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {surumler.map((s: any) => (
-              <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700/60 text-sm font-mono text-slate-800 dark:text-slate-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />PHP {s.surum}
-              </span>
+          <div className="space-y-2">
+            {(durumlar.length > 0 ? durumlar : secilenler.map(s => ({ ...s, durum: 'bekliyor' as const }))).map((s) => (
+              <div key={s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{s.ad}</span>
+                  <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">{s.anahtar} · PHP {s.surum}</span>
+                  {(s as Toplu).mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{(s as Toplu).mesaj}</div>}
+                </div>
+                <DurumRozet durum={(s as Toplu).durum} />
+              </div>
             ))}
           </div>
         )}
       </div>
 
-      <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">
-        ✓ Yapılandırma tamamlandı. Domain bazında PHP sürümü ve ayarları, ilgili domainin PHP ayarları ekranından seçilir.
-      </div>
+      {aktifAdim && (
+        <div className="rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
+              <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
+              <span className="font-mono">{aktifAdim.ad}</span> kuruluyor
+            </span>
+            <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">%{aktifAdim.yuzde}</span>
+          </div>
+          <div className="text-xs text-brand-700 dark:text-brand-300 mb-2">{aktifAdim.adim}</div>
+          <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
+            <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${Math.min(100, aktifAdim.yuzde)}%` }} />
+          </div>
+        </div>
+      )}
+
+      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">✓ Toplu kurulum tamamlandı. Kurulan eklentiler artık "Eklentiler" adımında aktif görünür.</div>}
+
+      {secilenler.length > 0 && (
+        <button onClick={topluKur} disabled={calisiyor}
+          className="w-full sm:w-auto px-5 py-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-60">
+          {calisiyor ? 'Kuruluyor…' : `${secilenler.length} eklentiyi kur`}
+        </button>
+      )}
     </div>
   )
+}
+
+function DurumRozet({ durum }: { durum: Toplu['durum'] }) {
+  const map: Record<Toplu['durum'], { t: string; c: string }> = {
+    bekliyor: { t: 'Bekliyor', c: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400' },
+    kuruluyor: { t: 'Kuruluyor…', c: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' },
+    tamam: { t: '✓ Kuruldu', c: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' },
+    hata: { t: '✕ Hata', c: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' },
+  }
+  const m = map[durum]
+  return <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${m.c}`}>{m.t}</span>
 }

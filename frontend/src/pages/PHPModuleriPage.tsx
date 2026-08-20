@@ -82,7 +82,14 @@ const KATALOG: { kategori: string; ekler: KatalogEk[] }[] = [
 // Curated anahtarların düz kümesi — "kurulu ekstra" bölümünü ayıklamak için.
 const KATALOG_ANAHTARLAR = new Set(KATALOG.flatMap(k => k.ekler.map(e => e.anahtar)))
 
-export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
+// Secim — sihirbazda biriktirilen "kurulacak" eklenti (Özet adımında toplu kurulur).
+export type Secim = { surum: string; anahtar: string; ad: string }
+
+export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
+  gomulu?: boolean
+  secilenler?: Secim[]
+  setSecilenler?: (fn: (s: Secim[]) => Secim[]) => void
+} = {}) {
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [aktifSurum, setAktifSurumState] = useState(() => {
@@ -97,7 +104,6 @@ export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [filtre, setFiltre] = useState('')
-  const [peclIlerleme, setPeclIlerleme] = useState<{ paket: string; adim: string; yuzde: number; yontem: string } | null>(null)
 
   function yukle() {
     setYuk(true); setHata(null)
@@ -164,30 +170,16 @@ export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
     }
   }
 
-  // Katalogtan kurulum — mevcut async PECL-Kur akışı (bundled dnf/pecl/derleme).
-  async function kur(ek: KatalogEk) {
-    if (peclIlerleme) return
-    if (!(await onay({ baslik: 'Eklenti kur', mesaj: `${ek.ad} (${ek.anahtar}) PHP ${aktifSurum} için kurulacak. Hazır paket yoksa kaynaktan derlenir (birkaç dakika sürebilir). Devam?`, onayEtiketi: 'Kur' }))) return
-    setHata(null); setBasari(null)
-    setPeclIlerleme({ paket: ek.anahtar, adim: 'Başlatılıyor…', yuzde: 2, yontem: '' })
-    try {
-      const { data } = await api.post('/php-extensions/pecl-install', { surum: aktifSurum, paket: ek.anahtar })
-      if (data.is_id) {
-        for (;;) {
-          await new Promise(r => setTimeout(r, 1500))
-          const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
-          setPeclIlerleme({ paket: ek.anahtar, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0, yontem: p.data.yontem || '' })
-          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
-          if (p.data.durum === 'tamam') break
-        }
-      }
-      setBasari(`✓ ${ek.ad} kuruldu`)
-      yukle()
-    } catch (err) {
-      setHata(apiHata(err, `${ek.ad} kurulumu başarısız`))
-    } finally {
-      setPeclIlerleme(null)
-    }
+  // Kurulmamış eklentiyi "kurulacak" olarak işaretle/kaldır (toggle). Gerçek
+  // kurulum Özet adımında TOPLU yapılır (kullanıcı isteği: seç → özette toplu kur).
+  const seciliMi = (anahtar: string) =>
+    secilenler?.some(s => s.surum === aktifSurum && s.anahtar === anahtar) ?? false
+  const secimToggle = (ek: KatalogEk) => {
+    setSecilenler?.(prev =>
+      seciliMi(ek.anahtar)
+        ? prev.filter(s => !(s.surum === aktifSurum && s.anahtar === ek.anahtar))
+        : [...prev, { surum: aktifSurum, anahtar: ek.anahtar, ad: ek.ad }],
+    )
   }
 
   const ioncubeKurlu = exts.some(e => e.adi.toLowerCase().includes('ioncube'))
@@ -243,20 +235,9 @@ export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-      {peclIlerleme && (
-        <div className="mb-3 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
-              <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
-              <span className="font-mono">{peclIlerleme.paket}</span> kuruluyor
-              {peclIlerleme.yontem && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-brand-500">({peclIlerleme.yontem === 'dnf' ? 'hazır paket' : 'derleme'})</span>}
-            </span>
-            <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">%{peclIlerleme.yuzde}</span>
-          </div>
-          <div className="text-xs text-brand-700 dark:text-brand-300 mb-2">{peclIlerleme.adim}</div>
-          <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
-            <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${Math.min(100, peclIlerleme.yuzde)}%` }} />
-          </div>
+      {(secilenler?.length ?? 0) > 0 && (
+        <div className="mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
+          {secilenler!.length} eklenti kurulmak üzere seçildi — <strong>Özet</strong> adımında tümü birlikte kurulur.
         </div>
       )}
 
@@ -273,6 +254,7 @@ export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
                       className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${
                         kurulu?.aktif ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800'
                         : kurulu ? 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                        : seciliMi(ek.anahtar) ? 'bg-brand-50 dark:bg-brand-900/15 border-brand-300 dark:border-brand-700'
                         : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
                       }`}>
                       <div className="min-w-0 flex-1">
@@ -285,8 +267,11 @@ export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
                           <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${kurulu.aktif ? 'translate-x-5' : 'translate-x-1'}`} />
                         </button>
                       ) : (
-                        <button onClick={() => kur(ek)} disabled={!!peclIlerleme}
-                          className="flex-shrink-0 px-2.5 py-1 text-xs font-medium rounded-md bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">Kur</button>
+                        // Kurulmamış: toggle açınca "kurulacak" işaretlenir (Özet'te toplu kurulur).
+                        <button onClick={() => secimToggle(ek)} title={seciliMi(ek.anahtar) ? 'Seçimi kaldır' : 'Kurulacaklara ekle'}
+                          className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${seciliMi(ek.anahtar) ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${seciliMi(ek.anahtar) ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
                       )}
                     </div>
                   )
