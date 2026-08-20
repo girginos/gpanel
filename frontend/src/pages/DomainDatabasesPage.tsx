@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -146,9 +147,9 @@ export default function DomainDatabasesPage() {
                 </td>
                 <td className={`${T.hucre} text-right`} data-etiket="Boyut"><span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">{boyutFmt(d.boyut)}</span></td>
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                  <button onClick={() => pmaAc(d)} className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç">🔓 phpMyAdmin</button>
-                  <button onClick={() => setPwResetFor(d)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">🔑 Parola Sıfırla</button>
-                  <button onClick={() => setSilinecek(d)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">Sil</button>
+                  <button onClick={() => pmaAc(d)} className="group inline-flex items-center gap-1.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç"><Ikon d={I.kilitAcik} className="h-4 w-4 transition-transform group-hover:scale-110" /> phpMyAdmin</button>
+                  <button onClick={() => setPwResetFor(d)} className="group inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded"><Ikon d={I.anahtar} className="h-4 w-4 transition-transform group-hover:rotate-12" /> Parola Sıfırla</button>
+                  <button onClick={() => setSilinecek(d)} className="group inline-flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded"><Ikon d={I.cop} className="h-4 w-4 transition-transform group-hover:scale-110" /> Sil</button>
                 </td>
               </tr>
             ))}

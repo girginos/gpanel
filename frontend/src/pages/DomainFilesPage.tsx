@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -445,27 +446,27 @@ export default function DomainFilesPage() {
     const ogeler: CtxOge[] = []
     if (!coklu) {
       if (e.tip === 'klasor') {
-        ogeler.push({ key: 'ac', etiket: 'Aç', ikon: '📂', onTikla: kapatSonra(() => git(e.yol)) })
+        ogeler.push({ key: 'ac', etiket: 'Aç', ikon: I.klasorAcik, onTikla: kapatSonra(() => git(e.yol)) })
       } else {
         if (docrootRel(e.yol) !== null)
-          ogeler.push({ key: 'brw', etiket: 'Tarayıcıda Aç', ikon: '🌐', onTikla: kapatSonra(() => tarayicidaAc(e)) })
-        ogeler.push({ key: 'edit', etiket: 'Düzenle', ikon: '✏️', onTikla: kapatSonra(() => editorAc(e)) })
-        ogeler.push({ key: 'dl', etiket: 'İndir', ikon: '⬇️', onTikla: kapatSonra(() => indir(e)) })
+          ogeler.push({ key: 'brw', etiket: 'Tarayıcıda Aç', ikon: I.kure, onTikla: kapatSonra(() => tarayicidaAc(e)) })
+        ogeler.push({ key: 'edit', etiket: 'Düzenle', ikon: I.kalem, onTikla: kapatSonra(() => editorAc(e)) })
+        ogeler.push({ key: 'dl', etiket: 'İndir', ikon: I.indir, onTikla: kapatSonra(() => indir(e)) })
         if (ARSIV_RX.test(e.adi))
-          ogeler.push({ key: 'ext', etiket: 'Arşivi Aç', ikon: '📦', onTikla: kapatSonra(() => extractEt(e)) })
+          ogeler.push({ key: 'ext', etiket: 'Arşivi Aç', ikon: I.kutu, onTikla: kapatSonra(() => extractEt(e)) })
       }
-      ogeler.push({ key: 'rn', etiket: 'Yeniden Adlandır', ikon: '🔤', onTikla: kapatSonra(() => setRenameFor(e)) })
-      ogeler.push({ key: 'chmod', etiket: 'İzinler', ikon: '🔒', onTikla: kapatSonra(() => setChmodFor(e)) })
-      ogeler.push({ key: 'boyut', etiket: 'Boyut Hesapla', ikon: '📏', onTikla: kapatSonra(() => boyutHesapla(e.yol)) })
+      ogeler.push({ key: 'rn', etiket: 'Yeniden Adlandır', ikon: I.harf, onTikla: kapatSonra(() => setRenameFor(e)) })
+      ogeler.push({ key: 'chmod', etiket: 'İzinler', ikon: I.kilit, onTikla: kapatSonra(() => setChmodFor(e)) })
+      ogeler.push({ key: 'boyut', etiket: 'Boyut Hesapla', ikon: I.cetvel, onTikla: kapatSonra(() => boyutHesapla(e.yol)) })
       ogeler.push({ ayrac: true, key: 's1' })
     }
     const yollar = coklu ? Array.from(seciliSet) : [e.yol]
     const ek = coklu ? ` (${yollar.length})` : ''
-    ogeler.push({ key: 'copy', etiket: 'Kopyala' + ek, ikon: '📋', onTikla: kapatSonra(() => setKopyalaModal({ tip: 'kopyala', yollar })) })
-    ogeler.push({ key: 'move', etiket: 'Taşı' + ek, ikon: '↔️', onTikla: kapatSonra(() => setKopyalaModal({ tip: 'tasi', yollar })) })
-    ogeler.push({ key: 'arch', etiket: 'Arşive Ekle' + ek, ikon: '🗜️', onTikla: kapatSonra(() => setArsivModal(true)) })
+    ogeler.push({ key: 'copy', etiket: 'Kopyala' + ek, ikon: I.pano, onTikla: kapatSonra(() => setKopyalaModal({ tip: 'kopyala', yollar })) })
+    ogeler.push({ key: 'move', etiket: 'Taşı' + ek, ikon: I.tasi, onTikla: kapatSonra(() => setKopyalaModal({ tip: 'tasi', yollar })) })
+    ogeler.push({ key: 'arch', etiket: 'Arşive Ekle' + ek, ikon: I.sikistir, onTikla: kapatSonra(() => setArsivModal(true)) })
     ogeler.push({ ayrac: true, key: 's2' })
-    ogeler.push({ key: 'del', etiket: 'Sil' + ek, ikon: '🗑️', tehlike: true, onTikla: kapatSonra(() => coklu ? setTopluSilOnay(true) : sil(e)) })
+    ogeler.push({ key: 'del', etiket: 'Sil' + ek, ikon: I.cop, tehlike: true, onTikla: kapatSonra(() => coklu ? setTopluSilOnay(true) : sil(e)) })
     return ogeler
   }
 
@@ -567,9 +568,9 @@ export default function DomainFilesPage() {
           </button>
           {yeniMenuAcik && (
             <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
-              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📤 Dosya Yükle</button>
-              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📁 Yeni Klasör</button>
-              <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">📄 Yeni Dosya</button>
+              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.yukle} /> Dosya Yükle</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.klasor} /> Yeni Klasör</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.dosya} /> Yeni Dosya</span></button>
             </div>
           )}
         </div>
@@ -592,7 +593,7 @@ export default function DomainFilesPage() {
             value={aramaQ}
             onChange={e => setAramaQ(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && arama()}
-            placeholder="🔍 Dosya ara…"
+            placeholder="Dosya ara…"
             className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm w-full sm:w-56 focus:border-brand-500 outline-none"
           />
           {aramaSonuc && (
@@ -772,7 +773,7 @@ export default function DomainFilesPage() {
       {boyutSonuc && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setBoyutSonuc(null)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-2">📏 Boyut Bilgisi</h3>
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-2">Boyut Bilgisi</h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-3 font-mono">{boyutSonuc.yol}</p>
             <div className="text-2xl font-bold text-brand-700 dark:text-brand-300 mb-2">
               {(() => {
@@ -793,7 +794,7 @@ export default function DomainFilesPage() {
       {topluSilOnay && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setTopluSilOnay(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">⚠ Toplu Silme</h3>
+            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">Toplu Silme</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
               <span className="font-semibold">{seciliSet.size}</span> öğe geri dönüşsüz silinecek. Klasörler içerdiği dosyalarla birlikte silinir.
             </p>
@@ -905,7 +906,7 @@ function BaglamMenu({ x, y, ogeler, onKapat }: { x: number; y: number; ogeler: C
             onClick={it.onTikla}
             className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 outline-none focus:bg-slate-100 dark:focus:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 ${it.tehlike ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-200'}`}
           >
-            <span className="w-4 text-center text-[13px]">{it.ikon}</span>
+            <span className="flex w-4 items-center justify-center">{it.tehlike ? <Ikon d={it.ikon} className="h-4 w-4" /> : <Ikon d={it.ikon} className="h-4 w-4" />}</span>
             <span>{it.etiket}</span>
           </button>
       )}
@@ -1014,7 +1015,7 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">📦 Arşive Ekle ({adetSayi} öğe)</h3>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Arşive Ekle ({adetSayi} öğe)</h3>
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Dosya adı</label>
         <input value={ad} onChange={e => setAd(e.target.value)}
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm mb-3" />
@@ -1045,7 +1046,7 @@ function YeniDosyaModal({ onTamam, onIptal }: { onTamam: (ad: string) => void; o
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">📄 Yeni Dosya</h3>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Yeni Dosya</h3>
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Dosya adı (uzantı dahil)</label>
         <input value={ad} onChange={e => setAd(e.target.value)} autoFocus
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
