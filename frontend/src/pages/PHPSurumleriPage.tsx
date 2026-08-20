@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -194,13 +195,13 @@ export default function PHPSurumleriPage() {
                   ) : (
                     <button onClick={() => kaldir(s)} disabled={meşgul}
                       className="w-full px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm rounded">
-                      {buOp && aktifOp?.islem === 'kaldir' ? '⏳ Kaldırılıyor…' : '🗑 Kaldır'}
+                      {buOp && aktifOp?.islem === 'kaldir' ? '⏳ Kaldırılıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} />Kaldır</span>}
                     </button>
                   )
                 ) : (
                   <button onClick={() => kur(s)} disabled={meşgul}
                     className="w-full px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium rounded">
-                    {buOp && aktifOp?.islem === 'kur' ? '⏳ Kuruluyor…' : '⬇ Kur'}
+                    {buOp && aktifOp?.islem === 'kur' ? '⏳ Kuruluyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} />Kur</span>}
                   </button>
                 )}
               </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -54,7 +55,7 @@ export default function BackupYonetimiPage() {
         { etiket: 'Backup Yöneticisi' },
       ]} />
       <div className="flex items-center gap-3 mb-1">
-        <span className="text-2xl">💾</span>
+        <Ikon d={I.disket} className="h-6 w-6" />
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Backup Yöneticisi</h1>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Yedekleme ve geri yükleme işleri Plesk tarzı listelenir. Bir işe tıklayarak kendi sayfasında domainleri seçip tam / SQL / dosya bazında geri yükleyin.</p>

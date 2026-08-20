@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -215,7 +216,7 @@ export default function DomainDNSPage() {
       {soa && (
         <div className="border border-slate-200 dark:border-slate-800 rounded-xl mb-4 overflow-hidden">
           <button onClick={() => setSoaAcik(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-            <span>⚙️ SOA Ayarları <span className="text-xs text-slate-400 font-normal">(başlangıç yetki kaydı — refresh/retry/expire/NS)</span></span>
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.ayar} /> SOA Ayarları <span className="text-xs text-slate-400 font-normal">(başlangıç yetki kaydı — refresh/retry/expire/NS)</span></span>
             <span className="text-slate-400 text-xs">{soaAcik ? '▲ gizle' : '▼ düzenle'}</span>
           </button>
           {soaAcik && (
@@ -252,7 +253,7 @@ export default function DomainDNSPage() {
           <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
             <div>
               <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-2">
-                🔐 DNSSEC
+                <Ikon d={I.kilit} /> DNSSEC
                 {dnssec.aktif ? (
                   dnssec.imzali
                     ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-medium">imzalı</span>
@@ -265,7 +266,7 @@ export default function DomainDNSPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {dnssec.aktif && (
-                <button onClick={dnssecDurumYenile} className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-md transition">↻ Durum</button>
+                <button onClick={dnssecDurumYenile} className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Durum</span></button>
               )}
               {dnssec.aktif ? (
                 <button disabled={dnssecIsliyor} onClick={() => setDnssecKapatOnay(true)} className="px-3 py-1.5 text-sm bg-white dark:bg-slate-800 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition disabled:opacity-50">Kapat</button>
@@ -283,7 +284,7 @@ export default function DomainDNSPage() {
                     <div key={i} className="flex items-center gap-2 mb-1">
                       <code className="flex-1 text-xs font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 break-all text-slate-800 dark:text-slate-200">{d}</code>
                       <button onClick={() => { navigator.clipboard?.writeText(d); setDsKopyalandi(true); setTimeout(() => setDsKopyalandi(false), 1500) }}
-                        className="px-2 py-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded transition whitespace-nowrap">{dsKopyalandi ? '✓ Kopyalandı' : 'Kopyala'}</button>
+                        className="px-2 py-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded transition whitespace-nowrap">{dsKopyalandi ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> Kopyalandı</span> : 'Kopyala'}</button>
                     </div>
                   ))}
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Bu DS kaydını alan adınızın operatöründe (registrar) DNSSEC/DS alanına girin. Yayılması TTL süresi kadar sürebilir.</p>
@@ -314,12 +315,12 @@ export default function DomainDNSPage() {
           className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"
           title="A/MX/TXT/NS varsayılan kayıtlarını ekler (idempotent)"
         >
-          <span className="sm:hidden">📋 Şablon Uygula</span>
-          <span className="hidden sm:inline">📋 Varsayılan Şablonu Uygula</span>
+          <span className="sm:hidden inline-flex items-center gap-1.5"><Ikon d={I.pano} /> Şablon Uygula</span>
+          <span className="hidden sm:inline-flex items-center gap-1.5"><Ikon d={I.pano} /> Varsayılan Şablonu Uygula</span>
         </button>
-        <button onClick={yukle} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">↻ Yenile</button>
-        <button onClick={disaAktar} title="DNS kayıtlarını BIND zone dosyası olarak indir" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">⬇ Dışa Aktar</button>
-        <button onClick={() => setIceAcik(true)} title="BIND zone dosyası yükle" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition">⬆ İçe Aktar</button>
+        <button onClick={yukle} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
+        <button onClick={disaAktar} title="DNS kayıtlarını BIND zone dosyası olarak indir" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> Dışa Aktar</span></button>
+        <button onClick={() => setIceAcik(true)} title="BIND zone dosyası yükle" className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yukle} /> İçe Aktar</span></button>
         <span className="col-span-2 text-right sm:col-auto sm:ml-auto sm:text-left text-sm text-slate-500 dark:text-slate-500">{kayitlar.length} kayıt</span>
       </div>
 

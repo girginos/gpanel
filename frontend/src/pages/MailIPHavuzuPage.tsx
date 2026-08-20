@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 
 type IPKaydi = {
@@ -205,7 +206,7 @@ export default function MailIPHavuzuPage() {
                 <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sunucudaki IP Adresleri</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Sunucuya tanımlı tüm IP'ler otomatik algılanır (adaptörler farklı olabilir). Havuza tek tıkla ekleyin.</p>
               </div>
-              <button onClick={() => { setYukleniyor(true); yukle() }} className="text-xs text-slate-500 hover:text-brand-600 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5" title="Sunucu IP'lerini yeniden tara">↻ Yenile</button>
+              <button onClick={() => { setYukleniyor(true); yukle() }} className="text-xs text-slate-500 hover:text-brand-600 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5" title="Sunucu IP'lerini yeniden tara"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
             </div>
             {sunucuIP.length === 0 ? (
               <div className="py-4 text-center text-sm text-slate-400">IP algılanamadı.</div>
@@ -236,7 +237,7 @@ export default function MailIPHavuzuPage() {
                 <button onClick={dnsblKontrolEt} disabled={dnsblKontrol || havuz.length === 0}
                   className="text-sm font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 hover:border-brand-300 hover:text-brand-600 disabled:opacity-50 transition-colors"
                   title="Havuzdaki tüm IP'leri kara listelerde (DNSBL) tara">
-                  {dnsblKontrol ? 'Kontrol ediliyor…' : '🛡 Kara Liste Kontrol Et'}
+                  {dnsblKontrol ? 'Kontrol ediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kalkan} /> Kara Liste Kontrol Et</span>}
                 </button>
                 <button onClick={() => satirEkle()} className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-800 rounded-lg px-3 py-1.5">+ IP ekle</button>
               </div>
@@ -271,7 +272,7 @@ export default function MailIPHavuzuPage() {
                           className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
                         <span className="text-xs text-slate-500 sm:hidden">Aktif</span>
                       </label>
-                      <button onClick={() => satirSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil">✕</button>
+                      <button onClick={() => satirSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil"><Ikon d={I.kapat} /></button>
                     </div>
                     {k.ip.trim() !== '' && durumSatiri(k)}
                   </div>
@@ -320,7 +321,7 @@ export default function MailIPHavuzuPage() {
                       {!aktifIP.includes(d.ip) && d.ip && <option value={d.ip}>{d.ip} (havuzda değil)</option>}
                       {aktifIP.map(ip => <option key={ip} value={ip}>{ip}</option>)}
                     </select>
-                    <button onClick={() => dedSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil">✕</button>
+                    <button onClick={() => dedSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil"><Ikon d={I.kapat} /></button>
                   </div>
                 ))}
               </div>

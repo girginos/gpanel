@@ -1,5 +1,6 @@
 // gosp-dark-swept-v2
 import { useEffect, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -190,7 +191,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
           <input value={appRoot} onChange={e => setAppRoot(e.target.value.replace(/^\/+/, ''))} spellCheck={false}
             className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
           <button type="button" onClick={() => setSeciciAcik(true)}
-            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap">📁 Seç</button>
+            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> Seç</span></button>
         </div>
         <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Örn: <code className="font-mono">public_html</code> (ana site) veya <code className="font-mono">public_html/uygulama</code>. Yeni klasör için elle yazın.</p>
       </div>
@@ -201,7 +202,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
 
       <button onClick={kur} disabled={isleniyor || (mode === 'uzak' && !repoURL.trim())}
         className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
-        {isleniyor ? 'Başlatılıyor…' : '🚀 Kur'}
+        {isleniyor ? 'Başlatılıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.roket} /> Kur</span>}
       </button>
     </div>
   )
@@ -326,7 +327,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
           </div>
           <button type="button" onClick={() => setSeciciAcik(true)}
             className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap">
-            📁 Seç
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> Seç</span>
           </button>
           <button type="button" onClick={appRootKaydet}
             disabled={appKaydediliyor || appRoot.trim() === appKayitli}
@@ -377,7 +378,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
             <div className="mt-3">
               <button onClick={envKaydet} disabled={kaydediliyor}
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
-                {kaydediliyor ? 'Kaydediliyor…' : '💾 .env Kaydet'}
+                {kaydediliyor ? 'Kaydediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> .env Kaydet</span>}
               </button>
             </div>
           </>
@@ -427,7 +428,7 @@ function KomutSekmesi({ baslik, id, d, url, komutlar, onHata }:
           </div>
           <button onClick={() => calistir({ komut }, `artisan ${komut}`)} disabled={calisan}
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
-            {calisan ? 'Çalışıyor…' : '▶ Çalıştır'}
+            {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Çalıştır</span>}
           </button>
         </div>
       </Kart>
@@ -462,7 +463,7 @@ function ComposerSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: 
           <button onClick={() => calistir({ komut, paket }, `composer ${komut}${paketGerek ? ' ' + paket : ''}`)}
             disabled={calisan || (paketGerek && !paket.trim())}
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
-            {calisan ? 'Çalışıyor…' : '▶ Çalıştır'}
+            {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Çalıştır</span>}
           </button>
         </div>
       </Kart>
@@ -509,7 +510,7 @@ function NodeSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: stri
           <button onClick={() => calistir({ komut, script, node_surum: nodeSurum, ignore_scripts: ignoreScripts }, `npm ${komut}${runGerek ? ' ' + script : ''}`)}
             disabled={calisan || surumler.length === 0}
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
-            {calisan ? 'Çalışıyor…' : '▶ Çalıştır'}
+            {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Çalıştır</span>}
           </button>
         </div>
         <label className="flex items-center gap-2 mt-3 text-xs text-slate-500 dark:text-slate-400 cursor-pointer">
@@ -590,7 +591,7 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
             )}
             <button onClick={deploy} disabled={calisiyor}
               className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
-              {calisiyor ? 'Dağıtılıyor…' : '🚀 Dağıt'}
+              {calisiyor ? 'Dağıtılıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.roket} /> Dağıt</span>}
             </button>
             {durum && durum !== 'calisiyor' && (
               <div className={`text-xs font-medium ${durum === 'basarili' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -665,7 +666,7 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
                 {durum.active_state}/{durum.sub_state} · {durum.restarts} yeniden başlatma
               </span>
             )}
-            <button onClick={durumYukle} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">↻ durum</button>
+            <button onClick={durumYukle} className="text-xs text-brand-600 dark:text-brand-400 hover:underline"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> durum</span></button>
           </div>
         )}
       </Kart>
@@ -740,7 +741,7 @@ function KlasorSecici({ id, baslangic, onSec, onKapat }:
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onKapat}>
       <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">📁 Klasör seç</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> Klasör seç</span></h3>
           <button onClick={onKapat} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">×</button>
         </div>
         <div className="px-5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 text-xs">
@@ -755,7 +756,7 @@ function KlasorSecici({ id, baslangic, onSec, onKapat }:
                 : klasorler.map(k => (
                   <button key={k.yol} onClick={() => setYol(k.yol)}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left text-sm text-slate-700 dark:text-slate-200">
-                    <span>📁</span><span className="font-mono truncate">{k.adi}</span>
+                    <Ikon d={I.klasor} /><span className="font-mono truncate">{k.adi}</span>
                     <span className="ml-auto text-slate-300 dark:text-slate-600">›</span>
                   </button>
                 ))}

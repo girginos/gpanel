@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useNavigate } from 'react-router-dom'
 import { apiHata } from '@/lib/api'
 import { useAuth } from '@/store/auth'
@@ -34,7 +35,7 @@ export default function CPanelGirisPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 to-brand-50 px-4">
       <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-7">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-2xl mb-3">🌐</div>
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-2xl mb-3"><Ikon d={I.kure} className="h-7 w-7" /></div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Müşteri Paneli</h1>
           <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">Kullanıcı bilgilerinizle giriş yapın</p>
         </div>

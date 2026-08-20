@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 
@@ -97,7 +98,7 @@ export default function PanelGuncelleme() {
   return (
     <div className="mb-6 p-4 border rounded-2xl bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50">
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-emerald-100 dark:bg-emerald-900/40">⬆️</div>
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-emerald-100 dark:bg-emerald-900/40"><Ikon d={I.yukle} className="h-5 w-5" /></div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Panel Güncellemesi</span>
@@ -138,7 +139,7 @@ export default function PanelGuncelleme() {
               <span className="font-semibold">✓ Güncelleme tamamlandı</span>
               <span className="opacity-80">— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.</span>
               <button onClick={() => window.location.reload()}
-                className="ml-auto text-xs px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium">↻ Sayfayı yenile</button>
+                className="ml-auto text-xs px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />Sayfayı yenile</span></button>
             </div>
           )}
           {!calisiyor && sonuc === 'hata' && (

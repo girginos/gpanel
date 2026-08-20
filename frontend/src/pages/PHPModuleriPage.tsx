@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -123,11 +124,11 @@ export default function PHPModuleriPage() {
               if (ioncubeKurlu) ioncubeKaldir(); else ioncubeKur()
             }}
             className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap bg-amber-600 hover:bg-amber-700 text-white rounded-md">
-            {exts.some(e => e.adi.toLowerCase().includes('ioncube')) ? '⊗ IonCube Kaldır' : '🔐 IonCube Yükle'}
+            {exts.some(e => e.adi.toLowerCase().includes('ioncube')) ? '⊗ IonCube Kaldır' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />IonCube Yükle</span>}
           </button>
           <button onClick={() => setPeclModal(true)}
             className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap bg-slate-700 hover:bg-slate-800 text-white rounded-md">
-            📦 PECL'den Kur
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.kutu} />PECL'den Kur</span>
           </button>
         </div>
       </div>

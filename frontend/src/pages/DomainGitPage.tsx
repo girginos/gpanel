@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -334,12 +335,12 @@ export default function DomainGitPage() {
                 </button>
                 {repo && (
                   <button onClick={() => setKlonOnay(true)} disabled={isleniyor} className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 text-amber-800 dark:text-amber-200 text-sm font-medium rounded-md">
-                    {isleniyor ? '...' : '⬇ Klonla (hedef temizlenir)'}
+                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> Klonla (hedef temizlenir)</span>}
                   </button>
                 )}
                 {repo && (
                   <button onClick={pull} disabled={isleniyor} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-md">
-                    {isleniyor ? '...' : '↻ Pull'}
+                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Pull</span>}
                   </button>
                 )}
                 {repo && (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
@@ -96,7 +97,7 @@ export default function WordPressPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'WordPress' }]} />
       <div className="flex items-center gap-3 mb-1">
-        <span className="text-2xl">📝</span>
+        <Ikon d={I.kalem} className="h-6 w-6" />
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">WordPress</h1>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Sunucudaki tüm WordPress kurulumlarını görüntüleyin, güncelleyin ve yeni kurulum yapın.</p>
@@ -106,7 +107,7 @@ export default function WordPressPage() {
       {/* Güvenlik uyarı bandı */}
       {!tumYuk && eskiler.length > 0 && (
         <div className="mb-4 px-4 py-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-start gap-3">
-          <span className="text-lg leading-none">⚠️</span>
+          <Ikon d={I.uyari} className="h-5 w-5 shrink-0" />
           <div className="text-sm text-amber-800 dark:text-amber-200">
             <strong>{eskiler.length} kurulumda güncelleme mevcut.</strong> Eski WordPress sürümleri bilinen güvenlik açıkları içerir — en kısa sürede güncelleyin.
             <div className="mt-1 text-xs text-amber-700 dark:text-amber-300 font-mono">
@@ -120,7 +121,7 @@ export default function WordPressPage() {
       {sonuc && (
         <div className="mb-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/15 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-2">
-            ✅ WordPress {sonuc.surum} kuruldu
+            <Ikon d={I.onay} /> WordPress {sonuc.surum} kuruldu
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
             <Bilgi et="Site" v={sonuc.site_url} link />
@@ -137,7 +138,7 @@ export default function WordPressPage() {
       <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden mb-6">
         <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Kurulu WordPress Siteleri {!tumYuk && <span className="text-slate-400 font-normal">· {tum.length}</span>}</h3>
-          <button onClick={tumListele} disabled={tumYuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
+          <button onClick={tumListele} disabled={tumYuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
         </div>
         {/* Mobilde yatay kaydırma yok — satırlar kart olur. */}
         <div className="lg:overflow-x-auto pt-3 lg:pt-0">
@@ -157,7 +158,7 @@ export default function WordPressPage() {
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>Kurulumlar taranıyor… (sürüm + güncelleme kontrolü)</td></tr>
               ) : tum.length === 0 ? (
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
-                  <div className="text-2xl mb-1">📝</div>
+                  <Ikon d={I.kalem} className="h-6 w-6 mb-1" />
                   <p className="text-sm text-slate-500 dark:text-slate-400">Sunucuda hiç WordPress kurulumu bulunamadı.</p>
                   <p className="text-xs text-slate-400 mt-1">Aşağıdaki formdan yeni bir kurulum yapabilirsiniz.</p>
                 </td></tr>

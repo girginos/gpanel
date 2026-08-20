@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -50,7 +51,7 @@ export default function DomainStatsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Trafik İstatistikleri</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> — nginx erişim günlüğü analizi.</p>
           </div>
-          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800">↻ Yenile</button>
+          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (

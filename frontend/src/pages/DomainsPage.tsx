@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -299,16 +300,16 @@ export default function DomainsPage() {
           {secili.size > 0 && <>
             <button onClick={() => durumDegistir('aktif')} disabled={isleniyor}
               className="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
-              ▶ Aktif Et
+              <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Aktif Et</span>
             </button>
             <button onClick={() => durumDegistir('pasif')} disabled={isleniyor}
               className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded">
-              ⏸ Pasif Et
+              <span className="inline-flex items-center gap-1.5"><Ikon d={I.durakla} /> Pasif Et</span>
             </button>
           </>}
           <button onClick={() => setSilOnay(true)} disabled={isleniyor}
             className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">
-            🗑 Sil ({secili.size + subSecili.size})
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> Sil ({secili.size + subSecili.size})</span>
           </button>
           <button onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}
             className="text-xs px-3 py-1.5 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:bg-amber-900/30 rounded">
@@ -543,7 +544,7 @@ export default function DomainsPage() {
       {olusturmaSonuc && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setOlusturmaSonuc(null)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-emerald-700 dark:text-emerald-300 mb-1">✓ Domain Oluşturuldu</h3>
+            <h3 className="text-base font-semibold text-emerald-700 dark:text-emerald-300 mb-1"><span className="inline-flex items-center gap-2"><Ikon d={I.onay} className="h-5 w-5" /> Domain Oluşturuldu</span></h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               <span className="font-mono text-slate-700 dark:text-slate-300">{olusturmaSonuc.alan_adi}</span> sağlamlandı. Aşağıdaki parolalar <strong>sadece bir kez</strong> gösterilir — güvenli bir yere kaydedin.
             </p>
@@ -581,7 +582,7 @@ export default function DomainsPage() {
       {silOnay && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSilOnay(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">⚠ Toplu Silme</h3>
+            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2"><span className="inline-flex items-center gap-2"><Ikon d={I.uyari} className="h-5 w-5" /> Toplu Silme</span></h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
               <span className="font-semibold">{secili.size}</span> domain{subSecili.size > 0 ? <> + <span className="font-semibold">{subSecili.size}</span> alt alan</> : ''} ve tüm bağımlı kaynakları (Linux kullanıcı, ev dizini, DB, FTP, vhost, DNS zone) <strong>geri dönüşsüz</strong> silinecek.
             </p>

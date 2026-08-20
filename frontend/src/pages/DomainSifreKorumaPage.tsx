@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -109,7 +110,7 @@ export default function DomainSifreKorumaPage() {
               {Object.entries(grup).map(([g, ks]) => (
                 <div key={g} className="border border-slate-100 dark:border-slate-700 rounded-lg overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-900/40">
-                    <span className="text-sm">🔒</span>
+                    <Ikon d={I.kilit} />
                     <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{g}</span>
                     <span className="text-xs text-slate-400">· {ks.length} kullanıcı</span>
                   </div>

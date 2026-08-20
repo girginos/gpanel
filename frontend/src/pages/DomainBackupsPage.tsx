@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -286,7 +287,7 @@ export default function DomainBackupsPage() {
                   <button key={t} type="button"
                     onClick={() => setDestForm(f => ({...f, tip: t, port: t === 'sftp' ? 22 : 21}))}
                     className={`flex-1 text-xs px-3 py-2 rounded border ${aktif ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-semibold' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
-                    {t === 'sftp' ? '🔒 SFTP (port 22)' : '📡 FTP (port 21)'}
+                    {t === 'sftp' ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> SFTP (port 22)</span> : '📡 FTP (port 21)'}
                   </button>
                 )
               })}
@@ -359,7 +360,7 @@ export default function DomainBackupsPage() {
         <button onClick={olustur} disabled={isleniyor} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
           {isleniyor ? 'Yedekleniyor…' : '+ Şimdi Yedekle'}
         </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ Yenile</button>
+        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} yedek</span>
       </div>
 
@@ -401,7 +402,7 @@ export default function DomainBackupsPage() {
                 </td>
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   <button onClick={() => indir(y)} className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded">İndir</button>
-                  <button onClick={() => setGeriYukle(y)} className="text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 dark:bg-amber-900/20 px-2 py-1 rounded">↺ Geri Yükle</button>
+                  <button onClick={() => setGeriYukle(y)} className="text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 dark:bg-amber-900/20 px-2 py-1 rounded"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Geri Yükle</span></button>
                   <button onClick={() => setSilinecek(y)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">Sil</button>
                 </td>
               </tr>
@@ -566,7 +567,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
                 {!icerikYuk && filtreli.map(d => (
                   <label key={d.yol} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <input type="checkbox" checked={secili.has(d.yol)} onChange={() => toggle(d.yol)} />
-                    <span className={`truncate ${d.dizin ? 'font-medium' : ''}`}>{d.dizin ? '📁 ' : ''}{d.yol}</span>
+                    <span className={`truncate ${d.dizin ? 'font-medium' : ''}`}>{d.dizin ? <Ikon d={I.klasor} className="inline-block h-3.5 w-3.5 mr-1 align-text-bottom" /> : null}{d.yol}</span>
                   </label>
                 ))}
                 {!icerikYuk && filtreli.length === 0 && <div className="p-3 text-sm text-slate-400">Eşleşme yok</div>}

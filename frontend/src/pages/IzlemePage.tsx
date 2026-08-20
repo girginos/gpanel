@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -309,7 +310,7 @@ function DomainIzleme() {
           {secili && (
             <button onClick={() => probet(secili)} disabled={hSorgulaniyor}
               className="text-sm px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded">
-              {hSorgulaniyor ? 'Sorgulanıyor…' : '↻ Sağlık Probe'}
+              {hSorgulaniyor ? 'Sorgulanıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Sağlık Probe</span>}
             </button>
           )}
           {seciliDomain && (
@@ -406,7 +407,7 @@ function SunucuLoglari() {
             className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {[100, 200, 500, 1000].map(n => <option key={n} value={n}>son {n}</option>)}
           </select>
-          <button onClick={() => yukle()} disabled={yuk} className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
+          <button onClick={() => yukle()} disabled={yuk} className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
         </div>
       </div>
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -520,7 +521,7 @@ function SSLKart({ ssl, sema }: { ssl?: SSLBilgi; sema: string }) {
   if (sema !== 'https' || !ssl) {
     return (
       <div className="rounded-2xl p-4 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
-        <div className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">⚠ SSL Yok</div>
+        <div className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2"><span className="inline-flex items-center gap-1.5"><Ikon d={I.uyari} /> SSL Yok</span></div>
         <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">Bu domain HTTPS üzerinden erişilemiyor.</div>
       </div>
     )
@@ -529,7 +530,7 @@ function SSLKart({ ssl, sema }: { ssl?: SSLBilgi; sema: string }) {
   return (
     <div className={`rounded-2xl p-4 border ${krit ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20' : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'}`}>
       <div className={`text-sm font-semibold mb-2 ${krit ? 'text-red-800 dark:text-red-200' : 'text-emerald-800 dark:text-emerald-200'}`}>
-        {ssl.gecerli ? '🔒 SSL Geçerli' : '✗ SSL Geçersiz'}
+        {ssl.gecerli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> SSL Geçerli</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> SSL Geçersiz</span>}
       </div>
       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 font-mono">{ssl.kalan_gun}<span className="text-base ml-1 text-slate-500 dark:text-slate-500">gün</span></div>
       <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">Bitiş: <span className="font-mono">{ssl.bitis_tarihi}</span></div>

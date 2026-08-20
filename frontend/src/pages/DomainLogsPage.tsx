@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -179,14 +180,14 @@ export default function DomainLogsPage() {
                 : 'bg-emerald-600 text-white hover:bg-emerald-700'
             }`}
           >
-            {canli ? '■ Durdur' : '▶ Canlı Takip'}
+            {canli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.durdur} /> Durdur</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Canlı Takip</span>}
           </button>
           <button
             onClick={ilkYukle}
             disabled={canli}
             className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md transition disabled:opacity-50"
           >
-            ↻ Son 200
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Son 200</span>
           </button>
           <button
             onClick={() => setSatirlar([])}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -102,7 +103,7 @@ export default function DomainSubdomainlerPage() {
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                     <button onClick={() => sslKur(s, 'letsencrypt')} disabled={sslMesgul === s.id} title="Let's Encrypt SSL kur"
                       className="text-xs px-2.5 py-1 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-50">
-                      {sslMesgul === s.id ? '…' : "🔒 Let's Encrypt"}
+                      {sslMesgul === s.id ? '…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> Let's Encrypt</span>}
                     </button>
                     <button onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title="Öz-imzalı SSL kur"
                       className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 text-slate-500 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">

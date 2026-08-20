@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
@@ -118,7 +119,7 @@ export default function FirewallPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Güvenlik Duvarı' }]} />
       <div className="flex items-center gap-3 mb-1">
-        <span className="text-2xl">🛡️</span>
+        <span className="text-2xl"><Ikon d={I.kalkan} className="h-6 w-6" /></span>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Güvenlik Duvarı</h1>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
@@ -152,7 +153,7 @@ export default function FirewallPage() {
       </div>
 
       {/* ---------- MANUEL KURAL ---------- */}
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">✍️ Kendi Kuralın</h2>
+      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-1.5"><Ikon d={I.kalem} />Kendi Kuralın</h2>
       <form onSubmit={ekle} className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 mb-6">
         {/* 1) ne yapmak istiyorsun */}
         <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">1 · Ne yapmak istiyorsun?</div>
@@ -226,7 +227,7 @@ export default function FirewallPage() {
       <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden">
         <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Aktif Kurallar {!yuk && <span className="text-slate-400 font-normal">· {kurallar.length}</span>}</h3>
-          <button onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">↻ Yenile</button>
+          <button onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />Yenile</span></button>
         </div>
         {/* Mobilde yatay kaydırma yok — satırlar kart olarak diziliyor. */}
         <div className="lg:overflow-x-auto">
@@ -246,7 +247,7 @@ export default function FirewallPage() {
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>Yükleniyor…</td></tr>
               ) : kurallar.length === 0 ? (
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
-                  <div className="text-2xl mb-1">🛡️</div>
+                  <div className="text-2xl mb-1"><Ikon d={I.kalkan} className="h-6 w-6 mx-auto" /></div>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Henüz kural yok — sunucu tüm bağlantılara açık.</p>
                   <p className="text-xs text-slate-400 mt-1">Yukarıdan bir şablon uygulayarak başlayabilirsiniz.</p>
                 </td></tr>

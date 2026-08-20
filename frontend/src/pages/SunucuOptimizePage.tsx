@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import Breadcrumb from '@/components/Breadcrumb'
 import SunucuOptimize from '@/components/SunucuOptimize'
 import { api } from '@/lib/api'
@@ -84,7 +85,7 @@ export default function SunucuOptimizePage() {
         </div>
         <button onClick={yukle} disabled={yukleniyor}
           className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-          {yukleniyor ? 'Analiz ediliyor…' : '↻ Yeniden analiz et'}
+          {yukleniyor ? 'Analiz ediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} />Yeniden analiz et</span>}
         </button>
       </div>
 

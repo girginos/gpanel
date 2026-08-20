@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -416,7 +417,7 @@ function KurulumFormu(p: {
     <form onSubmit={p.kur} className="rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Yeni WordPress kurulumu</h3>
-        {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600">✕ Kapat</button>}
+        {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> Kapat</span></button>}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Girdi et="Site başlığı" v={p.baslik} set={p.setBaslik} zorunlu ph="Benim Blogum" />
@@ -446,7 +447,7 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
     <div className="mb-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-900/15 p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">WordPress {s.surum} kuruldu</div>
-        <button onClick={kapat} className="text-xs text-emerald-600/70 hover:text-emerald-700">✕</button>
+        <button onClick={kapat} className="text-xs text-emerald-600/70 hover:text-emerald-700"><Ikon d={I.kapat} /></button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
         <Satir et="Site" v={s.site_url} link />

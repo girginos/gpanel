@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -181,7 +182,7 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
           onClick={onAc}
           className="text-xs px-3 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
         >
-          🔑 Şifreyi Göster / Yenile
+          <Ikon d={I.anahtar} /> Şifreyi Göster / Yenile
         </button>
       </dd>
     </div>
@@ -253,7 +254,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
             {!gosterMevcut ? (
               <button onClick={() => setGosterMevcut(true)}
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded-md text-slate-700 dark:text-slate-300">
-                👁 Mevcut parolayı göster
+                <span className="inline-flex items-center gap-1.5"><Ikon d={I.goz} /> Mevcut parolayı göster</span>
               </button>
             ) : (
               <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
@@ -287,7 +288,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
           </button>
           <button onClick={olustur} disabled={isleniyor}
             className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
-            {isleniyor ? 'Üretiliyor…' : (yeni ? '↻ Tekrar üret' : '⚡ Yeni parola üret')}
+            {isleniyor ? 'Üretiliyor…' : (yeni ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Tekrar üret</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.simsek} /> Yeni parola üret</span>)}
           </button>
         </div>
       </div>
@@ -312,7 +313,7 @@ function KopyaButton({ text, renk }: { text: string; renk: 'amber' | 'emerald' }
       }}
       className={`text-[10px] px-2 py-1 rounded font-medium transition ${bg[renk]} ${k ? 'ring-2 ring-emerald-400' : ''}`}
     >
-      {k ? '✓ Kopyalandı' : 'Kopyala'}
+      {k ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> Kopyalandı</span> : 'Kopyala'}
     </button>
   )
 }

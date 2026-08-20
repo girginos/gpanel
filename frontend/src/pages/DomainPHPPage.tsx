@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -249,11 +250,11 @@ export default function DomainPHPPage() {
               <div className="flex gap-2 flex-shrink-0">
                 <button onClick={debugLogYukle} disabled={dlogYuk}
                   className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs rounded-md disabled:opacity-60">
-                  ↻ Yenile
+                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span>
                 </button>
                 <button onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
                   className="px-3 py-1.5 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs rounded-md disabled:opacity-40">
-                  🗑 Temizle
+                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> Temizle</span>
                 </button>
               </div>
             </div>
@@ -425,7 +426,7 @@ export default function DomainPHPPage() {
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
               className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-              {isleniyor ? 'Kaydediliyor…' : '💾 Kaydet ve Uygula'}
+              {isleniyor ? 'Kaydediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> Kaydet ve Uygula</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
               className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
@@ -454,7 +455,7 @@ function Etiket({ children }: { children: any }) {
   return <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">{children}</label>
 }
 function Ipucu({ t }: { t: string }) {
-  return <span title={t} className="inline-block ml-1 text-slate-400 dark:text-slate-500 cursor-help">ⓘ</span>
+  return <span title={t} className="inline-block ml-1 text-slate-400 dark:text-slate-500 cursor-help"><Ikon d={I.bilgi} className="inline-block h-3.5 w-3.5 align-middle" /></span>
 }
 function Tek({ e, h, children }: { e: string; h: string; children: any }) {
   return (
@@ -494,7 +495,7 @@ function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: s
     <Sec etiket={etiket} yardim={yardim}>
       <button onClick={() => onChange(!value)}
         className={`px-3 py-2 rounded-md text-sm font-mono w-full text-left transition border ${value ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>
-        {value ? '✓ On' : '○ Off'}
+        {value ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.onay} /> On</span> : '○ Off'}
       </button>
     </Sec>
   )

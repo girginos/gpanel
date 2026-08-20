@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
@@ -45,17 +46,17 @@ const YIKICI = new Set(['hosting.sil', 'db.sil', 'bayi.sil', 'hosting.askiya_al'
 // eylem kodları (ör. yeni bir *.sil / *.olustur) otomatik doğru kategoriye düşer. Renk TEK
 // sinyal değildir — ikon + etiket + title da anlam taşır (erişilebilirlik).
 function eylemStil(e: string): { ikon: string; renk: string } {
-  if (e === 'guvenlik.izolasyon_kaybi') return { ikon: '🛡️', renk: 'text-rose-700 dark:text-rose-300' }
-  if (/\.sil$/.test(e))                 return { ikon: '🗑️', renk: 'text-rose-700 dark:text-rose-300' }
-  if (/iptal$/.test(e))                 return { ikon: '🚫', renk: 'text-amber-700 dark:text-amber-300' }
-  if (/askiya_al$/.test(e))             return { ikon: '⏸️', renk: 'text-amber-700 dark:text-amber-300' }
-  if (/askidan_al$/.test(e))            return { ikon: '▶️', renk: 'text-emerald-700 dark:text-emerald-300' }
-  if (/\.olustur$/.test(e))             return { ikon: '➕', renk: 'text-emerald-700 dark:text-emerald-300' }
-  if (e.startsWith('yedek'))            return { ikon: '💾', renk: 'text-violet-700 dark:text-violet-300' }
-  if (e.startsWith('tasima'))           return { ikon: '🚚', renk: 'text-sky-700 dark:text-sky-300' }
-  if (e.startsWith('auth.'))            return { ikon: '🔑', renk: 'text-indigo-600 dark:text-indigo-300' }
+  if (e === 'guvenlik.izolasyon_kaybi') return { ikon: I.kalkan, renk: 'text-rose-700 dark:text-rose-300' }
+  if (/\.sil$/.test(e))                 return { ikon: I.cop, renk: 'text-rose-700 dark:text-rose-300' }
+  if (/iptal$/.test(e))                 return { ikon: I.kapat, renk: 'text-amber-700 dark:text-amber-300' }
+  if (/askiya_al$/.test(e))             return { ikon: I.durdur, renk: 'text-amber-700 dark:text-amber-300' }
+  if (/askidan_al$/.test(e))            return { ikon: I.oynat, renk: 'text-emerald-700 dark:text-emerald-300' }
+  if (/\.olustur$/.test(e))             return { ikon: I.arti, renk: 'text-emerald-700 dark:text-emerald-300' }
+  if (e.startsWith('yedek'))            return { ikon: I.disket, renk: 'text-violet-700 dark:text-violet-300' }
+  if (e.startsWith('tasima'))           return { ikon: I.tasi, renk: 'text-sky-700 dark:text-sky-300' }
+  if (e.startsWith('auth.'))            return { ikon: I.anahtar, renk: 'text-indigo-600 dark:text-indigo-300' }
   // güncelleme/plan/parola/toplu-durum vb. — düzenleme kategorisi
-  return { ikon: '✏️', renk: 'text-sky-700 dark:text-sky-300' }
+  return { ikon: I.kalem, renk: 'text-sky-700 dark:text-sky-300' }
 }
 
 // EylemRozet: ikon + kategori-renkli etiket. Tüm eylem türlerini "Hosting silindi" gibi
@@ -65,7 +66,7 @@ function EylemRozet({ eylem }: { eylem: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 font-medium ${s.renk}`}
       title={(YIKICI.has(eylem) ? 'Yıkıcı işlem — ' : '') + eylem}>
-      <span aria-hidden="true" className="text-[13px] leading-none">{s.ikon}</span>
+      <Ikon d={s.ikon} className="h-3.5 w-3.5 shrink-0" />
       {etiketle(eylem)}
     </span>
   )

@@ -1,4 +1,5 @@
 import type { ChangeEvent, FormEvent } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -319,7 +320,7 @@ export default function YasakliDomainPage() {
                 htmlFor="toplu-dosya"
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
               >
-                📁 Dosya seç (TXT)
+                <Ikon d={I.klasor} className="h-4 w-4" /> Dosya seç (TXT)
               </label>
             </div>
           </div>

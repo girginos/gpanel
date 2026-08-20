@@ -253,7 +253,7 @@ export default function DomainAntivirusPage() {
                         </td>
                         <td className={T.hucre} data-etiket="Motor"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">{b.motor}</span></td>
                         <td className={T.hucre} data-etiket="Durum">
-                          {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
+                          {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Svg d={IK.kilit} /> Karantinada</span>
                             : <span className="text-xs text-red-600 dark:text-red-400">⚠ Aktif</span>}
                         </td>
                         <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
@@ -294,9 +294,9 @@ export default function DomainAntivirusPage() {
                         <td className={`${T.hucreBaslik} lg:min-w-[22rem]`}><YolKutu yol={k.orijinal_yol} /></td>
                         <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                         <td className={T.hucre} data-etiket="Durum">
-                          {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400">🔒 Karantinada</span>
-                            : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400">↩ Geri yüklendi</span>
-                            : <span className="text-xs text-slate-400">🗑 Silindi</span>}
+                          {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Svg d={IK.kilit} /> Karantinada</span>
+                            : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><Svg d={IK.geri} /> Geri yüklendi</span>
+                            : <span className="text-xs text-slate-400 inline-flex items-center gap-1"><Svg d={IK.cop} /> Silindi</span>}
                         </td>
                         <td className={T.hucre} data-etiket="Tarih"><span className="text-xs text-slate-400">{k.tarih}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>

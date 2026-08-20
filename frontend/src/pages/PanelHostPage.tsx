@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useCallback, useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -221,7 +222,7 @@ export default function PanelHostPage() {
               </button>
               <button type="button" onClick={sslKur} disabled={!d.acme_var || (aktifIs?.durum === 'kosuyor')}
                 className="rounded-lg border border-emerald-500 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60">
-                🔒 Let's Encrypt Kur
+                <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />Let's Encrypt Kur</span>
               </button>
             </div>
 

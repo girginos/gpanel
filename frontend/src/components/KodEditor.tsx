@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import CodeMirror, { EditorView } from '@uiw/react-codemirror'
 import { html } from '@codemirror/lang-html'
 import { css } from '@codemirror/lang-css'
@@ -138,7 +139,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             <span className="text-xs text-slate-500 dark:text-slate-500 truncate min-w-0 hidden md:inline">— {yol}</span>
             {kayitDurum === 'kirli' && <span className="text-[10px] uppercase tracking-wider text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded">Değişiklik var</span>}
             {kayitDurum === 'kaydediliyor' && <span className="text-[10px] uppercase tracking-wider text-sky-400 bg-sky-500/15 px-1.5 py-0.5 rounded">Kaydediliyor…</span>}
-            {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded">✓ Kaydedildi</span>}
+            {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded"><span className="inline-flex items-center gap-1"><Ikon d={I.onay} className="h-3 w-3" />Kaydedildi</span></span>}
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
@@ -163,7 +164,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
               className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 dark:text-slate-500 text-white rounded font-medium"
               title="Ctrl+S"
             >
-              💾 Kaydet
+              <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />Kaydet</span>
             </button>
             <button
               onClick={onKapat}

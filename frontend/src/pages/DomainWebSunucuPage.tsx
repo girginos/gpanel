@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -380,7 +381,7 @@ export default function DomainWebSunucuPage() {
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
               className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-              {isleniyor ? 'Uygulanıyor…' : '💾 Kaydet ve Uygula'}
+              {isleniyor ? 'Uygulanıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> Kaydet ve Uygula</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
               className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
