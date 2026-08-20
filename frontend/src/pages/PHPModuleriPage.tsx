@@ -18,7 +18,13 @@ const ZORUNLU = new Set([
 export default function PHPModuleriPage() {
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
-  const [aktifSurum, setAktifSurum] = useState('8.3')
+  const [aktifSurum, setAktifSurumState] = useState(() => {
+    try { return localStorage.getItem('gosp.phpModul.surum') || '8.3' } catch { return '8.3' }
+  })
+  const setAktifSurum = (s: string) => {
+    setAktifSurumState(s)
+    try { localStorage.setItem('gosp.phpModul.surum', s) } catch {}
+  }
   const [exts, setExts] = useState<Ext[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -31,7 +37,12 @@ export default function PHPModuleriPage() {
     api.get(`/php-extensions?surum=${aktifSurum}`)
       .then(r => {
         setExts(r.data.icerik || [])
-        setSurumler(r.data.surumler || [])
+        const srm = r.data.surumler || []
+        setSurumler(srm)
+        // Kayitli surum artik kurulu degilse ilk kurulu surume dus
+        if (srm.length > 0 && !srm.some((x: Surum) => x.surum === aktifSurum)) {
+          setAktifSurum(srm[0].surum)
+        }
       })
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))

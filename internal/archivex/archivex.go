@@ -17,6 +17,7 @@ package archivex
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Güvenlik hataları.
@@ -309,6 +311,110 @@ func runuserKomut(sk string, argv ...string) *exec.Cmd {
 	return cmd
 }
 
+// UyeSay: arşivdeki üye sayısını döner (ilerleme çubuğu TOPLAM'ı için).
+// Yalnız sayar, hiçbir şey yazmaz. tar ailesinde tam akış taraması gerekir
+// (başlıklar sıkıştırılmış gövdeye serpiştirilmiştir) — büyük arşivde birkaç
+// saniye sürebilir; iş zaten asenkron goroutine'de olduğundan sorun değil.
+func UyeSay(archivePath string, tur Tur) (int, error) {
+	switch tur {
+	case TurZip:
+		zr, err := zip.OpenReader(archivePath)
+		if err != nil {
+			return 0, fmt.Errorf("zip okuma: %w", err)
+		}
+		defer zr.Close()
+		return len(zr.File), nil
+	case TurTar, TurTarGz, TurTarBz2, TurTarXz:
+		f, err := os.Open(archivePath)
+		if err != nil {
+			return 0, fmt.Errorf("arşiv okuma: %w", err)
+		}
+		defer f.Close()
+		var r io.Reader = f
+		switch tur {
+		case TurTarGz:
+			gz, gerr := gzip.NewReader(f)
+			if gerr != nil {
+				return 0, fmt.Errorf("gzip: %w", gerr)
+			}
+			defer gz.Close()
+			r = gz
+		case TurTarBz2:
+			r = bzip2.NewReader(f)
+		case TurTarXz:
+			xzc := exec.Command("xz", "-dc")
+			xzc.Stdin = f
+			pipe, perr := xzc.StdoutPipe()
+			if perr != nil {
+				return 0, fmt.Errorf("xz pipe: %w", perr)
+			}
+			if serr := xzc.Start(); serr != nil {
+				return 0, fmt.Errorf("xz başlat: %w", serr)
+			}
+			defer func() { _ = xzc.Wait() }()
+			defer pipe.Close()
+			r = pipe
+		}
+		tr := tar.NewReader(r)
+		n := 0
+		for {
+			_, nerr := tr.Next()
+			if nerr == io.EOF {
+				break
+			}
+			if nerr != nil {
+				return 0, fmt.Errorf("tar okuma: %w", nerr)
+			}
+			n++
+		}
+		return n, nil
+	case TurRar:
+		tool, ok := rarAraci()
+		if !ok {
+			return 0, ErrRarAraciYok
+		}
+		names, err := rarUyeAdlari(tool, archivePath)
+		if err != nil {
+			return 0, err
+		}
+		return len(names), nil
+	default:
+		return 0, ErrDesteklenmeyen
+	}
+}
+
+// satirSayacYazici: alt-araç çıktısındaki satırları sayar (verbose modda araçlar
+// üye başına bir satır basar → gerçek zamanlı ilerleme) ve hata mesajı için
+// çıktının SON kısmını tutar (tail — büyük arşivde belleği şişirmemek için).
+type satirSayacYazici struct {
+	mu   sync.Mutex
+	tail []byte
+	cb   func(delta int)
+}
+
+const satirSayacTailMax = 8192
+
+func (s *satirSayacYazici) Write(p []byte) (int, error) {
+	c := bytes.Count(p, []byte("\n"))
+	s.mu.Lock()
+	s.tail = append(s.tail, p...)
+	if len(s.tail) > satirSayacTailMax {
+		s.tail = s.tail[len(s.tail)-satirSayacTailMax:]
+	}
+	cb := s.cb
+	s.mu.Unlock()
+	if cb != nil && c > 0 {
+		cb(c)
+	}
+	return len(p), nil
+}
+
+func (s *satirSayacYazici) Tail() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return string(s.tail)
+}
+
 // GuvenliCikar: arşivi destDir içine, tenant kullanıcısı sk olarak, üye-yollarını
 // doğrulayarak güvenli biçimde çıkarır (çift savunma).
 //
@@ -318,6 +424,14 @@ func runuserKomut(sk string, argv ...string) *exec.Cmd {
 // tar ailesi için arşiv baytları stdin üzerinden akıtılır; böylece root-sahipli
 // arşivler (örn. yedek deposu) bile tenant kullanıcısına okutulmadan çıkarılabilir.
 func GuvenliCikar(archivePath, destDir, sk string) (string, error) {
+	return GuvenliCikarIlerleme(archivePath, destDir, sk, nil)
+}
+
+// GuvenliCikarIlerleme: GuvenliCikar + ilerleme geri çağrısı. ilerle != nil ise
+// araçlar verbose çalıştırılır (üye başına bir satır) ve her satır kümesi için
+// ilerle(delta) çağrılır. Toplam için UyeSay kullanın. ilerle == nil → sessiz
+// mod, davranış GuvenliCikar ile birebir aynı.
+func GuvenliCikarIlerleme(archivePath, destDir, sk string, ilerle func(delta int)) (string, error) {
 	tur := TuruBelirle(archivePath)
 	if tur == TurBilinmeyen {
 		return "", ErrDesteklenmeyen
@@ -332,11 +446,17 @@ func GuvenliCikar(archivePath, destDir, sk string) (string, error) {
 	}
 
 	// Katman 1: tenant-user (DAC) altında çıkar.
+	verbose := ilerle != nil
 	var cmd *exec.Cmd
 	switch tur {
 	case TurZip:
 		// unzip stdin okuyamaz; arşiv sk-okunur olmalı (tenant home'undaki dosya).
-		cmd = runuserKomut(sk, "unzip", "-o", "-q", archivePath, "-d", destDir)
+		// verbose: -q düşer → üye başına " extracting: ..." satırı (ilerleme).
+		if verbose {
+			cmd = runuserKomut(sk, "unzip", "-o", archivePath, "-d", destDir)
+		} else {
+			cmd = runuserKomut(sk, "unzip", "-o", "-q", archivePath, "-d", destDir)
+		}
 	case TurRar:
 		// RAR: seçilen açıcıyı tenant kimliğinde çalıştır (tam-yol koru, üzerine yaz).
 		tool, ok := rarAraci()
@@ -346,7 +466,11 @@ func GuvenliCikar(archivePath, destDir, sk string) (string, error) {
 		switch tool {
 		case "bsdtar":
 			// libarchive: RAR/RAR5 okur, -C hedef; kendisi de ".."/mutlak yolu reddeder.
-			cmd = runuserKomut(sk, "bsdtar", "-x", "-f", archivePath, "-C", destDir)
+			bsdFlag := "-x"
+			if verbose {
+				bsdFlag = "-xv" // üye başına satır (stderr) → ilerleme
+			}
+			cmd = runuserKomut(sk, "bsdtar", bsdFlag, "-f", archivePath, "-C", destDir)
 		case "unar":
 			// -f: üzerine yaz, -D: kapsayıcı dizin oluşturma, -o: hedef.
 			cmd = runuserKomut(sk, "unar", "-f", "-D", "-o", destDir, archivePath)
@@ -370,10 +494,24 @@ func GuvenliCikar(archivePath, destDir, sk string) (string, error) {
 		case TurTarXz:
 			flag = "-xJ"
 		}
+		if verbose {
+			flag += "v" // GNU tar: üye başına satır (stderr) → ilerleme
+		}
 		cmd = runuserKomut(sk, "tar", flag, "-f", "-", "-C", destDir)
 		cmd.Stdin = f
 	}
 
+	if verbose {
+		// Araçlar verbose satırları kimi stdout'a (unzip/unar/unrar) kimi
+		// stderr'e (tar/bsdtar) basar → ikisi de sayılır; tail hata mesajına gider.
+		sayac := &satirSayacYazici{cb: ilerle}
+		cmd.Stdout = sayac
+		cmd.Stderr = sayac
+		if err := cmd.Run(); err != nil {
+			return sayac.Tail(), fmt.Errorf("çıkarma (tenant=%s): %w", sk, err)
+		}
+		return sayac.Tail(), nil
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("çıkarma (tenant=%s): %w", sk, err)

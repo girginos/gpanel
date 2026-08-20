@@ -307,7 +307,17 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	s.MemoryLimit = tenantSanitizeScalar(ml, s.MemoryLimit)
 	s.PostMaxSize = tenantSanitizeScalar(pms, s.PostMaxSize)
 	s.UploadMaxFilesize = tenantSanitizeScalar(ums, s.UploadMaxFilesize)
-	s.DisableFunctions = tenantSanitizeScalar(df, s.DisableFunctions)
+	// disable_functions ÖZEL: satır VARSA boş değer "operatör bilinçli olarak
+	// tüm fonksiyonlara izin verdi" demektir (panelde Shell yürütme AÇIK) —
+	// hardened default'a GERİ DÜŞÜLMEZ. tenantSanitizeScalar bunu "değer yok"
+	// sanıp hardened listeye dönüyordu; panel toggle'ı görünüşte açık ama PHP
+	// gerçekte bloke kalıyordu (UI ≠ runtime sapması). Yalnız kontrol-karakteri
+	// enjeksiyonunda hardened'a düşülür.
+	if strings.ContainsAny(df, "\r\n\x00") {
+		// enjeksiyon girişimi → hardened kalır
+	} else {
+		s.DisableFunctions = strings.TrimSpace(df)
+	}
 	s.PMStrategy = tenantSanitizeScalar(strat, s.PMStrategy)
 	if met > 0 {
 		s.MaxExecutionTime = met
@@ -788,8 +798,11 @@ var fpmDeadActiveStates = map[string]bool{
 // (kullanici hizli tekrar kaydederse iki guard + iki rollback yaris etmesin).
 var fpmGuardAktif sync.Map // sk -> struct{}
 
-func fpmGuardBaslat(sk string) bool { _, yuklu := fpmGuardAktif.LoadOrStore(sk, struct{}{}); return !yuklu }
-func fpmGuardBitir(sk string)       { fpmGuardAktif.Delete(sk) }
+func fpmGuardBaslat(sk string) bool {
+	_, yuklu := fpmGuardAktif.LoadOrStore(sk, struct{}{})
+	return !yuklu
+}
+func fpmGuardBitir(sk string) { fpmGuardAktif.Delete(sk) }
 
 // guardPostStart: enable/start/reload sonrasi crash-loop dedektoru + otomatik
 // RollbackToSharedFPM. nil doner = tenant saglikli. non-nil = crash-loop yakalandi

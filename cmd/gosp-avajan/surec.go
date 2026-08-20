@@ -520,8 +520,8 @@ func olaylarAyristir(buf []byte) []olay {
 				}
 			case procEventFork:
 				if len(veri) >= 16 {
-					ppid := int(int32(binary.LittleEndian.Uint32(veri[0:])))  // parent_pid
-					cpid := int(int32(binary.LittleEndian.Uint32(veri[8:])))  // child_pid
+					ppid := int(int32(binary.LittleEndian.Uint32(veri[0:]))) // parent_pid
+					cpid := int(int32(binary.LittleEndian.Uint32(veri[8:]))) // child_pid
 					if cpid > 0 {
 						out = append(out, olay{tur: procEventFork, pid: cpid, ebeveyn: ppid})
 					}

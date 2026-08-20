@@ -43,15 +43,8 @@ export default function DomainPano({ domain }: { domain: Domain }) {
   const git = (slug: string) => () => navigate(`/abonelikler/${domain.id}/${slug}`)
   return (
     <div>
-      <Grup baslik="Uygulamalar">
-        <ToolCard etiket="WordPress" aciklama="1-tıkla kurulum · yönetim" ikon={ICONS.wordpress} renk="sky" onClick={git('wordpress')} />
-      </Grup>
-
-      <Grup baslik="Alan Adı ve DNS">
-        <ToolCard etiket="DNS Yönetimi"          aciklama="A, MX, TXT, CNAME kayıtları" ikon={ICONS.dns}       renk="sky"  onClick={git('dns')} />
-        <ToolCard etiket="Subdomainler"          aciklama="Alt alan adları"   ikon={ICONS.subdomain} renk="teal" onClick={git('subdomainler')} />
-      </Grup>
-
+      {/* WordPress → "Uygulamalar" sekmesine, DNS → "Barınma ve DNS" sekmesine
+          taşındı; Subdomainler zaten kendi listesinde görünüyor (kullanıcı isteği). */}
       <Grup baslik="Dosyalar ve Veritabanları">
         <ToolCard etiket="Bağlantı Bilgisi"      aciklama="FTP, veri tabanı"  ikon={ICONS.baglanti} renk="emerald" onClick={git('baglanti')} />
         <ToolCard etiket="Dosyalar"              aciklama="Dosya yöneticisi"  ikon={ICONS.dosyalar} renk="amber"   faz="F6"  onClick={git('dosyalar')} />

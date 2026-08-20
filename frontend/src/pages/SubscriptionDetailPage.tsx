@@ -335,10 +335,25 @@ function DashboardTabIcerik({ domain }: { domain: Domain }) {
 
 function HostingTab({ domain }: { domain: Domain }) {
   return (
-    <Grup baslik="Barınma Hizmetleri">
-      <ToolCard etiket="Hosting Planı" aciklama="Yükselt, düşür veya özel plan" ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
-      <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
-    </Grup>
+    <div>
+      <Grup baslik="Barınma Hizmetleri">
+        <ToolCard etiket="Hosting Planı" aciklama="Yükselt, düşür veya özel plan" ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
+        <ToolCard etiket="Apache ve nginx"     aciklama="Güvenlik başlıkları, ek direktifler"  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
+      </Grup>
+      <Grup baslik="Alan Adı ve DNS">
+        <ToolCard etiket="DNS Yönetimi" aciklama="A, MX, TXT, CNAME kayıtları" ikon={ICONS.dns} renk="sky" to={`/abonelikler/${domain.id}/dns`} />
+      </Grup>
+    </div>
+  )
+}
+
+// Resmî WordPress logosu (simple-icons, fill-tabanlı) — genel stroke ikonları
+// markayı temsil etmiyordu; gerçek logo kullanılır.
+function WPLogo() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" aria-hidden="true">
+      <path d="M21.469 6.825c.84 1.537 1.318 3.3 1.318 5.175 0 3.979-2.156 7.456-5.363 9.325l3.295-9.527c.615-1.54.82-2.771.82-3.864 0-.405-.026-.78-.07-1.11m-7.981.105c.647-.03 1.232-.105 1.232-.105.582-.075.514-.93-.067-.899 0 0-1.755.135-2.88.135-1.064 0-2.85-.15-2.85-.15-.585-.03-.661.855-.075.885 0 0 .54.061 1.125.09l1.68 4.605-2.37 7.08L5.354 6.9c.649-.03 1.234-.1 1.234-.1.585-.075.516-.93-.065-.896 0 0-1.746.138-2.874.138-.2 0-.438-.008-.69-.015C4.911 3.15 8.235 1.215 12 1.215c2.809 0 5.365 1.072 7.286 2.833-.046-.003-.091-.009-.141-.009-1.06 0-1.812.923-1.812 1.914 0 .89.513 1.643 1.06 2.531.411.72.89 1.643.89 2.977 0 .915-.354 1.994-.821 3.479l-1.075 3.585-3.9-11.61.001.014zM12 22.784c-1.059 0-2.081-.153-3.048-.437l3.237-9.406 3.315 9.087c.024.053.05.101.078.149-1.12.393-2.325.607-3.582.607M1.211 12c0-1.564.336-3.05.935-4.39L7.29 21.709C3.694 19.96 1.212 16.271 1.211 12M12 0C5.385 0 0 5.385 0 12s5.385 12 12 12 12-5.385 12-12S18.615 0 12 0" />
+    </svg>
   )
 }
 
@@ -389,6 +404,16 @@ function AppTab({ domain }: { domain: Domain }) {
   return (
     <div className="space-y-6">
       {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded text-sm text-red-700">{hata}</div>}
+
+      <section>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+          Öne Çıkan
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          <ToolCard etiket="WordPress" aciklama="1-tıkla kurulum · yönetim" ikonNode={<WPLogo />} renk="sky"
+            to={`/abonelikler/${domain.id}/wordpress`} />
+        </div>
+      </section>
 
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">

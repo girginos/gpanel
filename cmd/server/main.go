@@ -19,7 +19,6 @@ import (
 	"girginospanel/internal/antivirus"
 	"girginospanel/internal/auth"
 	"girginospanel/internal/avayar"
-	"girginospanel/internal/zincir"
 	"girginospanel/internal/backups"
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/composer"
@@ -75,6 +74,7 @@ import (
 	"girginospanel/internal/waf"
 	"girginospanel/internal/websec"
 	"girginospanel/internal/wordpress"
+	"girginospanel/internal/zincir"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -601,6 +601,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/rename", filesH.Rename)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/chmod", filesH.Chmod)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/extract", filesH.Extract)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/files/extract-progress", filesH.ExtractProgress)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/copy", filesH.Copy)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/move", filesH.Move)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/archive", filesH.Archive)
@@ -618,6 +619,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/rename", filesH.Rename)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/chmod", filesH.Chmod)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/extract", filesH.Extract)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/files/extract-progress", filesH.ExtractProgress)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/copy", filesH.Copy)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/move", filesH.Move)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/archive", filesH.Archive)

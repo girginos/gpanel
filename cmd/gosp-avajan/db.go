@@ -10,6 +10,8 @@ package main
 import (
 	"database/sql"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +135,49 @@ func bildirimYaz(db *sql.DB, seviye, baslik, mesaj string, domainID int64, refTu
 		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id, ref_tur, ref_id)
 		 VALUES (?, 'antivirus', ?, ?, ?, ?, ?, ?)`,
 		seviye, kisalt(baslik, 190), mesaj, dom, rid, refTur, refID)
+}
+
+// reSayac — toplu AV bildirimindeki bulgu sayacı ("… — 12 bulgu").
+var reSayac = regexp.MustCompile(`— (\d+) bulgu`)
+
+// bildirimYazAVToplu — AV bulgu bildirimi, SEL KORUMALI. Aynı domain için
+// OKUNMAMIŞ bir antivirüs bildirimi varsa yenisini eklemek yerine onu
+// günceller (sayaç + son dosya + created_at tazelenir → listede öne gelir).
+// Kullanıcı okuduktan sonra gelen ilk bulgu YENİ bildirim açar. Böylece
+// 300 dosyalık bir bulaşma 300 satır yerine tek "N bulgu" satırı üretir.
+// (Kullanıcı şikâyeti: bildirim seli "okundu"yu anlamsızlaştırıyordu.)
+func bildirimYazAVToplu(db *sql.DB, seviye, baslik, dosyaAdi string, domainID int64, refID int64) {
+	if db == nil {
+		return
+	}
+	if domainID > 0 {
+		var id int64
+		var eskiMesaj string
+		err := db.QueryRow(
+			`SELECT id, mesaj FROM cp_bildirim
+			  WHERE kategori='antivirus' AND ref_tur='av_bulgu'
+			    AND domain_id=? AND okundu=0
+			  ORDER BY id DESC LIMIT 1`, domainID).Scan(&id, &eskiMesaj)
+		if err == nil {
+			sayi := int64(1)
+			if m := reSayac.FindStringSubmatch(eskiMesaj); m != nil {
+				if n, e := strconv.ParseInt(m[1], 10, 64); e == nil {
+					sayi = n
+				}
+			}
+			sayi++
+			mesaj := "Son: " + dosyaAdi + " — " + strconv.FormatInt(sayi, 10) +
+				" bulgu. Antivirüs sayfasından inceleyin."
+			// created_at tazelenir → bildirim en üste çıkar; ref_id son bulguya işaret eder.
+			_, _ = db.Exec(
+				`UPDATE cp_bildirim SET mesaj=?, seviye=?, ref_id=?, created_at=NOW() WHERE id=?`,
+				mesaj, seviye, refID, id)
+			return
+		}
+	}
+	bildirimYaz(db, seviye, baslik,
+		dosyaAdi+" — 1 bulgu. Antivirüs sayfasından inceleyin.",
+		domainID, "av_bulgu", refID)
 }
 
 // domainAdi -- bildirim basligi icin alan adi (yoksa "").

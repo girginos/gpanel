@@ -5,6 +5,8 @@ package files
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,7 +15,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"girginospanel/internal/archivex"
 	"girginospanel/internal/httpx"
@@ -177,6 +181,68 @@ type extractReq struct {
 	Hedef string `json:"hedef"` // çıkarılacak dizin (opsiyonel; boşsa arşivin dizini)
 }
 
+// extractIs: asenkron çıkarma işinin ilerleme durumu. Büyük arşivlerde (100k+
+// dosya) senkron HTTP dakikalarca askıda kalıyordu ve kullanıcı hiçbir geri
+// bildirim görmüyordu → iş goroutine'e taşındı, UI ilerlemeyi poll eder.
+type extractIs struct {
+	mu     sync.Mutex
+	Durum  string // "calisiyor" | "tamam" | "hata"
+	Toplam int    // arşivdeki üye sayısı (0 = henüz sayılıyor)
+	Cikan  int    // şu ana dek çıkarılan üye
+	Hata   string
+	bitti  time.Time
+}
+
+var (
+	extractIslerMu sync.Mutex
+	extractIsler   = map[string]*extractIs{}
+)
+
+// extractIsID: tahmin edilemez iş kimliği (crypto/rand). Sıralı sayaç olsaydı
+// başka bir oturum yabancı işin ilerlemesini gözetleyebilirdi.
+func extractIsID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b)
+}
+
+// extractIsTemizle: bitmiş işleri 10 dk sonra haritadan düşür (bellek sızıntısı olmasın).
+func extractIsTemizle() {
+	extractIslerMu.Lock()
+	defer extractIslerMu.Unlock()
+	for id, is := range extractIsler {
+		is.mu.Lock()
+		eski := is.Durum != "calisiyor" && !is.bitti.IsZero() && time.Since(is.bitti) > 10*time.Minute
+		is.mu.Unlock()
+		if eski {
+			delete(extractIsler, id)
+		}
+	}
+}
+
+// ExtractProgress: GET .../files/extract-progress?id=<is_id>
+func (h *Handlers) ExtractProgress(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	extractIslerMu.Lock()
+	is := extractIsler[id]
+	extractIslerMu.Unlock()
+	if is == nil {
+		httpx.WriteError(w, http.StatusNotFound, "iş bulunamadı (bitmiş olabilir)")
+		return
+	}
+	is.mu.Lock()
+	resp := map[string]any{
+		"durum":  is.Durum,
+		"toplam": is.Toplam,
+		"cikan":  is.Cikan,
+		"hata":   is.Hata,
+	}
+	is.mu.Unlock()
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	home, sk, err := h.home(r)
 	if err != nil {
@@ -217,61 +283,107 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	_, _ = exec.Command("chown", sk+":"+sk, hedefAbs).CombinedOutput()
 
 	low := strings.ToLower(abs)
-	if strings.HasSuffix(low, ".gz") && archivex.TuruBelirle(low) == archivex.TurBilinmeyen {
-		// Tek dosyalık .gz: üye yolu yoktur; tek risk çıktı dosyasının symlink
-		// üzerinden dışarı yazması. jailJoinStrict + O_NOFOLLOW ile kapat.
-		rel := filepath.Join(hedef, strings.TrimSuffix(filepath.Base(abs), ".gz"))
-		gzHedef, jerr := jailJoinStrict(home, rel)
-		if jerr != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "gz hedef: "+jerr.Error())
-			return
-		}
-		// O_NOFOLLOW: gzHedef bir symlink ise ELi'ni takip etmeden hata ver.
-		gzOut, gzErr := os.OpenFile(gzHedef, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
-		if gzErr != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "gz hedef: "+gzErr.Error())
-			return
-		}
-		defer gzOut.Close()
-		var eb bytes.Buffer
-		gzc := exec.Command("gunzip", "-k", "-c", abs)
-		gzc.Stdout = gzOut
-		gzc.Stderr = &eb
-		if runErr := gzc.Run(); runErr != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "extract: "+strings.TrimSpace(eb.String()))
-			return
-		}
-	} else {
-		// zip / tar ailesi: ORTAK güvenli-extract helper (çift savunma:
-		// tenant-user DAC + üye-yolu doğrulama, symlink/hardlink reddi).
-		tur := archivex.TuruBelirle(low)
-		if tur == archivex.TurBilinmeyen {
-			httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz, rar)")
-			return
-		}
-		if out, exErr := archivex.GuvenliCikar(abs, hedefAbs, sk); exErr != nil {
-			msg := exErr.Error()
-			if strings.TrimSpace(out) != "" {
-				msg += ": " + strings.TrimSpace(out)
-			}
-			httpx.WriteError(w, http.StatusBadRequest, "extract: "+msg)
-			return
-		}
+	gzTek := strings.HasSuffix(low, ".gz") && archivex.TuruBelirle(low) == archivex.TurBilinmeyen
+	tur := archivex.TuruBelirle(low)
+	if !gzTek && tur == archivex.TurBilinmeyen {
+		httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen format (zip, tar, tar.gz/tgz, tar.bz2, tar.xz, gz, rar)")
+		return
 	}
 
-	// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown (+ SELinux context).
-	_, _ = exec.Command("chown", "-R", sk+":"+sk, hedefAbs).CombinedOutput()
-	_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
-	// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
-	// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.
-	// setfacl yoksa (acl paketi eksik) sessiz atlanır — dosyalar tenant'ta, site diğer yolla servis edilir.
-	if _, err := exec.LookPath("setfacl"); err == nil {
-		_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
-		_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+	// ── ASENKRON: büyük arşivde (100k+ üye) senkron HTTP dakikalarca askıda
+	// kalıyordu, kullanıcı hiçbir şey görmüyordu. İş goroutine'de yürür; yanıt
+	// hemen is_id döner, UI /extract-progress ile ilerlemeyi izler.
+	extractIsTemizle()
+	isID := extractIsID()
+	is := &extractIs{Durum: "calisiyor"}
+	extractIslerMu.Lock()
+	extractIsler[isID] = is
+	extractIslerMu.Unlock()
+
+	basarisiz := func(msg string) {
+		is.mu.Lock()
+		is.Durum = "hata"
+		is.Hata = msg
+		is.bitti = time.Now()
+		is.mu.Unlock()
 	}
+
+	go func() {
+		if gzTek {
+			// Tek dosyalık .gz: üye yolu yoktur; tek risk çıktı dosyasının symlink
+			// üzerinden dışarı yazması. jailJoinStrict + O_NOFOLLOW ile kapat.
+			is.mu.Lock()
+			is.Toplam = 1
+			is.mu.Unlock()
+			rel := filepath.Join(hedef, strings.TrimSuffix(filepath.Base(abs), ".gz"))
+			gzHedef, jerr := jailJoinStrict(home, rel)
+			if jerr != nil {
+				basarisiz("gz hedef: " + jerr.Error())
+				return
+			}
+			// O_NOFOLLOW: gzHedef bir symlink ise ELi'ni takip etmeden hata ver.
+			gzOut, gzErr := os.OpenFile(gzHedef, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
+			if gzErr != nil {
+				basarisiz("gz hedef: " + gzErr.Error())
+				return
+			}
+			var eb bytes.Buffer
+			gzc := exec.Command("gunzip", "-k", "-c", abs)
+			gzc.Stdout = gzOut
+			gzc.Stderr = &eb
+			runErr := gzc.Run()
+			gzOut.Close()
+			if runErr != nil {
+				basarisiz("extract: " + strings.TrimSpace(eb.String()))
+				return
+			}
+			is.mu.Lock()
+			is.Cikan = 1
+			is.mu.Unlock()
+		} else {
+			// Toplam üye sayısı → ilerleme çubuğu paydası. Sayım hatası ölümcül
+			// değil (Toplam=0 → UI belirsiz-mod çubuk gösterir).
+			if n, serr := archivex.UyeSay(abs, tur); serr == nil {
+				is.mu.Lock()
+				is.Toplam = n
+				is.mu.Unlock()
+			}
+			// zip / tar ailesi: ORTAK güvenli-extract helper (çift savunma:
+			// tenant-user DAC + üye-yolu doğrulama, symlink/hardlink reddi).
+			out, exErr := archivex.GuvenliCikarIlerleme(abs, hedefAbs, sk, func(delta int) {
+				is.mu.Lock()
+				is.Cikan += delta
+				is.mu.Unlock()
+			})
+			if exErr != nil {
+				msg := exErr.Error()
+				if strings.TrimSpace(out) != "" {
+					msg += ": " + strings.TrimSpace(out)
+				}
+				basarisiz("extract: " + msg)
+				return
+			}
+		}
+
+		// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown (+ SELinux context).
+		_, _ = exec.Command("chown", "-R", sk+":"+sk, hedefAbs).CombinedOutput()
+		_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
+		// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
+		// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.
+		// setfacl yoksa (acl paketi eksik) sessiz atlanır — dosyalar tenant'ta, site diğer yolla servis edilir.
+		if _, err := exec.LookPath("setfacl"); err == nil {
+			_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+			_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+		}
+		is.mu.Lock()
+		is.Durum = "tamam"
+		is.bitti = time.Now()
+		is.mu.Unlock()
+	}()
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
+		"is_id": isID,
 		"yol":   req.Yol,
 		"hedef": hedef,
 	})

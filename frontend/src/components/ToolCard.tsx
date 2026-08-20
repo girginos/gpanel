@@ -17,11 +17,12 @@ const BG: Record<Renk, string> = {
 }
 
 export default function ToolCard({
-  etiket, aciklama, ikon, renk = 'slate', faz, uyari, to, onClick,
+  etiket, aciklama, ikon, ikonNode, renk = 'slate', faz, uyari, to, onClick,
 }: {
   etiket: string
   aciklama?: string
-  ikon: string
+  ikon?: string
+  ikonNode?: React.ReactNode // gerçek marka logosu vb. (fill-tabanlı SVG) — ikon yerine
   renk?: Renk
   faz?: string
   uyari?: string
@@ -36,9 +37,11 @@ export default function ToolCard({
   const govde = (
     <>
       <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${BG[renk]}`}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-5 h-5">
-          <path strokeLinecap="round" strokeLinejoin="round" d={ikon} />
-        </svg>
+        {ikonNode ?? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-5 h-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d={ikon} />
+          </svg>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">

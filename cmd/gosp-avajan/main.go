@@ -29,14 +29,14 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
-	"syscall"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -50,8 +50,8 @@ import (
 
 func main() {
 	var (
-		tara = flag.Bool("tara", false, "tek seferlik tarama")
-		izle = flag.Bool("izle", false, "gerçek zamanlı izleme (fanotify)")
+		tara  = flag.Bool("tara", false, "tek seferlik tarama")
+		izle  = flag.Bool("izle", false, "gerçek zamanlı izleme (fanotify)")
 		jsn   = flag.Bool("json", false, "makine okunur çıktı")
 		surec = flag.Bool("surec", false, "süreç davranış izleme (netlink proc connector)")
 	)
@@ -396,9 +396,8 @@ func (a *ajan) dosyaIsle(yol string) {
 	if alan != "" {
 		baslik = alan + " alanında zararlı dosya " + eylem
 	}
-	bildirimYaz(a.db, seviye, baslik,
-		filepath.Base(yol)+" — Antivirüs sayfasından inceleyin.",
-		domID, "av_bulgu", bulguID)
+	// SEL KORUMASI: domain başına okunmamış TEK toplu bildirim (bkz. db.go).
+	bildirimYazAVToplu(a.db, seviye, baslik, filepath.Base(yol), domID, bulguID)
 	// FAZ2 attack-chain: zararlı dosya = File Write aşaması.
 	olayYaz(a.db, domID, "dosya", "dosya_yazma", "kritik", filepath.Base(yol), yol, 0, "av_bulgu", bulguID)
 }

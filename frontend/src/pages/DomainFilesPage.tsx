@@ -69,6 +69,7 @@ export default function DomainFilesPage() {
   const [seciliSet, setSeciliSet] = useState<Set<string>>(new Set())
   const [topluSilOnay, setTopluSilOnay] = useState(false)
   const [extractAktif, setExtractAktif] = useState(false)
+  const [extractDurum, setExtractDurum] = useState<{ toplam: number; cikan: number; ad: string } | null>(null)
   const [yeniMenuAcik, setYeniMenuAcik] = useState(false)
   const [aramaQ, setAramaQ] = useState('')
   const [aramaSonuc, setAramaSonuc] = useState<Entry[] | null>(null)
@@ -290,14 +291,26 @@ export default function DomainFilesPage() {
 
   async function extractEt(e: Entry) {
     setExtractAktif(true)
+    setExtractDurum({ toplam: 0, cikan: 0, ad: e.adi })
     try {
-      await api.post(`${base}/files/extract`, { yol: e.yol })
+      const { data } = await api.post(`${base}/files/extract`, { yol: e.yol })
+      // Asenkron iş: is_id ile ilerlemeyi izle (backend üye başına sayar).
+      if (data.is_id) {
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1200))
+          const p = await api.get(`${base}/files/extract-progress`, { params: { id: data.is_id } })
+          setExtractDurum({ toplam: p.data.toplam || 0, cikan: p.data.cikan || 0, ad: e.adi })
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Çıkarma başarısız')
+          if (p.data.durum === 'tamam') break
+        }
+      }
       setAgacYenileme(x => x + 1)
       tara()
     } catch (err) {
       (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Açılamadı (zip/tar/rar destek vardır)') }))
     } finally {
       setExtractAktif(false)
+      setExtractDurum(null)
     }
   }
 
@@ -488,6 +501,32 @@ export default function DomainFilesPage() {
           {' · '}
           <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">/home/{domain.sistem_kullanici}</span>
         </p>
+      )}
+
+      {extractDurum && (
+        <div className="mb-4 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
+              <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
+              Arşiv çıkarılıyor: <span className="font-mono">{extractDurum.ad}</span>
+            </span>
+            <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">
+              {extractDurum.toplam > 0
+                ? `${extractDurum.cikan.toLocaleString('tr-TR')} / ${extractDurum.toplam.toLocaleString('tr-TR')} dosya`
+                : `${extractDurum.cikan.toLocaleString('tr-TR')} dosya çıkarıldı…`}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
+            {extractDurum.toplam > 0 ? (
+              <div
+                className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.round((extractDurum.cikan / extractDurum.toplam) * 100))}%` }}
+              />
+            ) : (
+              <div className="h-full w-1/3 rounded-full bg-brand-400 animate-pulse" />
+            )}
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[13rem_minmax(0,1fr)] gap-4 lg:items-start">
