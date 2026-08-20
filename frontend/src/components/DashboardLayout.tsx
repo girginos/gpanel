@@ -38,6 +38,7 @@ const ICONS = {
   imunify:     'M8 7a4 4 0 018 0M6 11h12M7 11v3a5 5 0 0010 0v-3M4 13h3m10 0h3M12 8v11',
   zincir:      'M13.19 8.69a4.5 4.5 0 011.24 7.24l-4.5 4.5a4.5 4.5 0 01-6.36-6.36l1.76-1.76m13.35-.62l1.76-1.76a4.5 4.5 0 00-6.36-6.36l-4.5 4.5a4.5 4.5 0 001.24 7.24',
   optimize:    'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
+  cpu:         'M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2M7 7h10v10H7V7zm3 3h4v4h-4v-4z',
 }
 
 const NAV: NavGroup[] = [
@@ -52,6 +53,7 @@ const NAV: NavGroup[] = [
   ]},
   { baslik: 'Sunucu Yönetimi', items: [
     { to: '/araclar-ayarlar',     etiket: 'Araçlar ve Ayarlar', ikon: ICONS.araclar },
+    { to: '/php-sunucu-sihirbazi', etiket: 'PHP & Sunucu Sihirbazı', ikon: ICONS.cpu },
     { to: '/araclar/optimize', etiket: 'Sunucu Optimize', ikon: ICONS.optimize },
     { to: '/araclar/tasima', etiket: 'Site Taşıma', ikon: ICONS.tasima },
     { to: '/istatistikler',       etiket: 'İstatistikler',      ikon: ICONS.istatistik },
