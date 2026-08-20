@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -170,13 +171,34 @@ func (h *Handler) Uygula(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 NEGATİF KONTROL (yalnız sysctl): `sysctl --system` GEÇERSİZ parametrede
+	// bile EXIT=0 döner ve BAŞKA bir sysctl.d dosyası (ör. 99-girginosvm-perf)
+	// panelin değerini EZEBİLİR. İkisinde de reload "başarılı" görünür ama runtime
+	// önerilenle EŞLEŞMEZ. Uygulanan her paramı geri okuyup doğrula; eşleşmeyeni
+	// kullanıcıya bildir ("başarısızlık güven olarak render" — sessiz geçme).
+	ozetMesaj := fmt.Sprintf("%d öneri uygulandı, %d yedek alındı", len(uygulandi), len(yedeklenen))
+	if g.Servis == "sysctl" {
+		var sapan []string
+		for _, o := range hedefler {
+			bek := sysctlNormalize(o.Onerilen)
+			got := sysctlNormalize(execOku("sysctl", "-n", o.Param))
+			if bek != "" && got != "" && bek != got {
+				sapan = append(sapan, fmt.Sprintf("%s (istenen %s, çalışan %s)", o.Param, bek, got))
+			}
+		}
+		if len(sapan) > 0 {
+			ozetMesaj += fmt.Sprintf(" — ⚠ %d parametre dosyaya yazıldı ama runtime'da farklı: %s. Başka bir /etc/sysctl.d dosyası eziyor olabilir.",
+				len(sapan), strings.Join(sapan, "; "))
+		}
+	}
+
 	yazJSON(w, 200, UygulaSonuc{
 		YedekID:   yedekIDlerStr(yedeklenen),
 		Yol:       yedekYollarStr(yedeklenen),
 		Uygulanan: uygulandi,
 		Etki:      etkiTur(g.Servis),
 		Basarili:  true,
-		Mesaj:     fmt.Sprintf("%d öneri uygulandı, %d yedek alındı", len(uygulandi), len(yedeklenen)),
+		Mesaj:     ozetMesaj,
 	})
 }
 
@@ -468,9 +490,28 @@ func servisSaglikVeReload(servis string) error {
 		}
 		return fmt.Errorf("mariadb 15sn içinde canlı yanıt vermedi — rollback gerekli")
 	case "sysctl":
+		// Eski ad (override-öncesi) hâlâ diskteyse SİL: aynı parametreler iki
+		// dosyada kalırsa çakışma sürer. Yeni dosya (99-zz-) kanonik.
+		if SysctlEskiYolu != SysctlYolu {
+			_ = os.Remove(SysctlEskiYolu)
+		}
 		return execRun("sysctl", "--system")
 	}
 	return nil
+}
+
+// execOku — komutu çalıştırır, birleşik çıktının trim'lenmiş halini döner
+// (hata olsa da boş döner; negatif kontrol için yeterli).
+func execOku(name string, args ...string) string {
+	out, _ := execOutput(name, args...)
+	return strings.TrimSpace(out)
+}
+
+// sysctlNormalize — sysctl değerlerini karşılaştırmak için normalize eder:
+// TAB/çoklu boşlukları tek boşluğa indirir (sysctl -n çıktısı TAB kullanır,
+// öneri değerleri de). Böylece "1024\t65535" == "1024 65535".
+func sysctlNormalize(v string) string {
+	return strings.Join(strings.Fields(v), " ")
 }
 
 // servisAyagaKaldir — geri alma SONRASI servisi eski (saglam) konfigle

@@ -803,7 +803,18 @@ func phpfpmLogSinyal(pools []FPMPool) []string {
    SYSCTL
    ================================================================ */
 
-const SysctlYolu = "/etc/sysctl.d/99-gpanel-optimize.conf"
+// SysctlYolu — panel sysctl optimizasyonlarının yazıldığı dosya. `zz` öneki
+// KASITLI: `sysctl --system` /etc/sysctl.d/*.conf'u SÖZLÜK SIRASIYLA yükler ve
+// SONRAKİ dosya öncekini EZER. VM guest node'larda `99-girginosvm-perf.conf`
+// (altyapı) panelin dosyasından SONRA yüklenip ortak parametreleri (swappiness,
+// somaxconn, tcp_congestion_control…) eziyordu → kullanıcı "uyguladım ama runtime
+// değişmedi" görüyordu. `99-zz-` her zaman EN SON yüklenir → panelin bilinçli
+// seçimi tüm diğer 99-* dosyalarını override eder.
+const SysctlYolu = "/etc/sysctl.d/99-zz-gpanel-optimize.conf"
+
+// SysctlEskiYolu — override-öncesi ad. Aynı parametreler iki dosyada kalırsa
+// çakışma sürer; apply sırasında eski dosya varsa temizlenir (bkz. handler).
+const SysctlEskiYolu = "/etc/sysctl.d/99-gpanel-optimize.conf"
 
 func sysctlAnaliz(s *Sistem) ServisAnaliz {
 	a := ServisAnaliz{Kod: "sysctl", Ad: "Kernel (sysctl)", Ikon: "⚙️", Durum: &ServisDurum{Aktif: true, Durum: "N/A"}}
