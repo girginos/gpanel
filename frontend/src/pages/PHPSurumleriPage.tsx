@@ -165,20 +165,36 @@ export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) 
             return (
               <div key={key}
                 className={`border rounded-2xl p-4 transition ${buOp ? 'border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/20 ring-1 ring-sky-300 dark:ring-sky-700' : s.yuklu ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'}`}>
-                <div className="flex items-start justify-between mb-2">
-                  <div>
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="min-w-0">
                     <div className="text-lg font-mono font-bold text-slate-900 dark:text-slate-100">PHP {s.surum}</div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium ${
                         s.kaynak === 'appstream'
                           ? 'bg-sky-100 text-sky-700'
                           : 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
                       }`}>{s.kaynak}</span>
-                      {s.yuklu && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">YÜKLÜ</span>}
                       {parseInt(s.surum) < 8 && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">EOL</span>}
                       {buOp && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300">{aktifOp?.islem === 'kaldir' ? 'KALDIRILIYOR' : 'KURULUYOR'}</span>}
                     </div>
                   </div>
+                  {/* Toggle: açık=yüklü. AppStream (sistem default) sabittir; kaldırılabilir değil. */}
+                  {(() => {
+                    const sabit = s.kaynak === 'appstream' && s.yuklu
+                    const kilit = meşgul || sabit
+                    return (
+                      <button
+                        onClick={() => { if (kilit) return; s.yuklu ? kaldir(s) : kur(s) }}
+                        disabled={kilit}
+                        title={sabit ? 'Sistem varsayılanı, kaldırılamaz' : s.yuklu ? 'Kaldır' : 'Kur'}
+                        className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                          s.yuklu ? (buOp ? 'bg-sky-400 animate-pulse' : 'bg-emerald-500') : (buOp ? 'bg-sky-400 animate-pulse' : 'bg-slate-300 dark:bg-slate-600')
+                        } ${kilit ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${s.yuklu ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    )
+                  })()}
                 </div>
 
                 {s.aciklama && <div className="text-xs text-slate-500 dark:text-slate-500 mb-2">{s.aciklama}</div>}
@@ -191,23 +207,10 @@ export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) 
                   </div>
                 )}
 
-                {s.yuklu ? (
-                  s.kaynak === 'appstream' ? (
-                    <button disabled className="w-full px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-sm rounded cursor-not-allowed">
-                      Sabit (sistem default)
-                    </button>
-                  ) : (
-                    <button onClick={() => kaldir(s)} disabled={meşgul}
-                      className="w-full px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm rounded">
-                      {buOp && aktifOp?.islem === 'kaldir' ? '⏳ Kaldırılıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} />Kaldır</span>}
-                    </button>
-                  )
-                ) : (
-                  <button onClick={() => kur(s)} disabled={meşgul}
-                    className="w-full px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium rounded">
-                    {buOp && aktifOp?.islem === 'kur' ? '⏳ Kuruluyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} />Kur</span>}
-                  </button>
-                )}
+                <div className="text-xs text-slate-500 dark:text-slate-500">
+                  {s.yuklu ? (s.kaynak === 'appstream' ? 'Sistem varsayılanı (sabit)' : 'Yüklü — kapatmak için toggle')
+                    : buOp ? 'İşleniyor…' : 'Kurmak için toggle\'ı aç'}
+                </div>
               </div>
             )
           })}

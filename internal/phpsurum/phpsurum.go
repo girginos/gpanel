@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -296,6 +297,56 @@ func TumSurumlerOnbellekSifirla() {
 	tumSurumlerMu.Unlock()
 }
 
+// reRemiFpm — "php83-php-fpm" → sürüm kodu (8,3). Remi tek-rakam major/minor.
+var reRemiFpm = regexp.MustCompile(`^php([0-9])([0-9])-php-fpm$`)
+
+var (
+	kesifOnbellek []SurumMeta
+	kesifZaman    time.Time
+	kesifMu       sync.Mutex
+)
+
+// surumleriKesfet — Remi deposunda mevcut (available VEYA installed) phpXX-php-fpm
+// paketlerinden PHP sürümlerini keşfeder. dnf repoquery pahalı ve kilit altında
+// asılabildiğinden 5sn timeout + 10dk cache; başarısızlıkta boş döner (çağıran
+// sabit DesteklenenSurumler'e düşer). Böylece yeni PHP sürümü Remi'ye gelince
+// panelde otomatik belirir, ama dnf sorunu paneli yavaşlatmaz.
+func surumleriKesfet() []SurumMeta {
+	kesifMu.Lock()
+	if kesifOnbellek != nil && time.Since(kesifZaman) < 10*time.Minute {
+		c := kesifOnbellek
+		kesifMu.Unlock()
+		return c
+	}
+	kesifMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "dnf", "repoquery", "--quiet", "--qf", "%{name}\n", "php*-php-fpm").Output()
+	if err != nil {
+		return nil // dnf yok/kilitli/timeout → sabit listeye düş
+	}
+	gorulen := map[string]bool{}
+	var metalar []SurumMeta
+	for _, ln := range strings.Split(string(out), "\n") {
+		m := reRemiFpm.FindStringSubmatch(strings.TrimSpace(ln))
+		if m == nil {
+			continue
+		}
+		kod := m[1] + m[2]
+		if gorulen[kod] {
+			continue
+		}
+		gorulen[kod] = true
+		metalar = append(metalar, SurumMeta{Surum: m[1] + "." + m[2], Kod: kod, Kaynak: "remi"})
+	}
+	kesifMu.Lock()
+	kesifOnbellek = metalar
+	kesifZaman = time.Now()
+	kesifMu.Unlock()
+	return metalar
+}
+
 func TumSurumler() []Surum {
 	// 🔴 PERF: Discover her KURULU surum icin `php -v`+`php -m` exec eder (~40ms x
 	// kurulu surum). TumSurumler /php-settings'te 2x + /php/versions'ta 1x cagriliyordu
@@ -308,8 +359,26 @@ func TumSurumler() []Surum {
 	}
 	tumSurumlerMu.Unlock()
 
-	out := make([]Surum, 0, len(DesteklenenSurumler))
-	for _, m := range DesteklenenSurumler {
+	// 🔴 DİNAMİK: sabit DesteklenenSurumler (bilinen/fallback) + Remi deposunda
+	// GERÇEKTEN mevcut phpXX-php-fpm paketlerinden keşfedilen sürümler. Böylece
+	// yarın PHP 8.7/9.0 Remi'ye gelince listede OTOMATİK belirir; kod güncellemesi
+	// gerekmez. Keşif dnf ile (timeout-korumalı, cache'li) — dnf kilitliyse sabit
+	// listeye zarifçe düşer.
+	metalar := append([]SurumMeta(nil), DesteklenenSurumler...)
+	for _, k := range surumleriKesfet() {
+		var varmi bool
+		for _, d := range metalar {
+			if d.Kod == k.Kod && d.Kaynak == k.Kaynak {
+				varmi = true
+				break
+			}
+		}
+		if !varmi {
+			metalar = append(metalar, k)
+		}
+	}
+	out := make([]Surum, 0, len(metalar))
+	for _, m := range metalar {
 		out = append(out, Discover(m))
 	}
 	// Yüklüleri öne, sonra sürüm sıralı (büyükten küçüğe)
