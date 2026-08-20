@@ -483,9 +483,9 @@ type seedTier struct {
 func seedPlanlari() []seedTier {
 	return []seedTier{
 		{"Başlangıç", "Tek site, küçük proje", 1024, 5120, 1, 1, 5, 2,
-			50, 256, 30, 25000, 100, 15, 4, 1},
+			50, 256, 30, 100000, 100, 15, 4, 1},
 		{"Standart", "Birden çok proje + e-posta", 10240, 51200, 5, 10, 25, 10,
-			100, 512, 60, 100000, 100, 30, 8, 0},
+			100, 512, 60, 250000, 100, 30, 8, 0},
 		{"Profesyonel", "Yoğun trafik + büyük site", 51200, 204800, 25, 50, 100, 50,
 			200, 2048, 150, 500000, 200, 100, 32, 0},
 	}
