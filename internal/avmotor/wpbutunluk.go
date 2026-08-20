@@ -79,22 +79,42 @@ func wpButunlukKontrol(yol, wpKok string, kaynak SaglamaKaynagi) (string, int, b
 		if hex.EncodeToString(h.Sum(nil)) == beklenen {
 			return "", 0, false
 		}
-		return "GOSP-WP-CEKIRDEK-DEGISMIS", 100, true
+		// Sağlama TUTMADI. AMA resmî checksum tablosu wp-content altındaki
+		// VARSAYILAN tema/eklenti dosyalarını da içerir (twentytwentytwo blok
+		// desenleri, akismet, hello.php). WordPress bunları ÇEKİRDEKTEN BAĞIMSIZ
+		// otomatik günceller → dosya, kurulu çekirdek sürümünün sağlamasıyla
+		// tutmaz ve bu MEŞRUDUR, tahrifat değil. wp-content'te sağlama-tutmazlığını
+		// "çekirdek değişti" saymak = yüzlerce YANLIŞ POZİTİF + oto-karantina ile
+		// CANLI SİTE KIRILMASI (twentytwentytwo/inc/patterns → 149 dosya olayı).
+		// Sağlama-tutmazlığı yalnız GERÇEK çekirdek ağacında (wp-includes/wp-admin/
+		// kök wp-*.php) yüksek-sinyaldir; wp-content İÇERİĞE bakan kural motoruna
+		// düşer (gerçek enjeksiyon eval/base64/shell imzasıyla yine yakalanır).
+		if wpCekirdekAgacinda(bagil) {
+			return "GOSP-WP-CEKIRDEK-DEGISMIS", 100, true
+		}
+		return "", 0, false
 	}
 
 	// Tabloda yok: yalnız ÇEKİRDEK AĞACINDA olmaması gereken dosya "yabancı".
 	// wp-content'te tabloda olmayan dosya meşru eklenti/tema -> kural motoruna.
-	cekirdekAgac := strings.HasPrefix(bagil, "wp-includes/") ||
-		strings.HasPrefix(bagil, "wp-admin/")
-	if !cekirdekAgac {
-		taban := filepath.Base(bagil)
-		if !strings.Contains(bagil, "/") && strings.HasPrefix(taban, "wp-") &&
-			strings.HasSuffix(taban, ".php") && taban != "wp-config.php" {
-			cekirdekAgac = true
-		}
-	}
-	if cekirdekAgac {
+	if wpCekirdekAgacinda(bagil) {
 		return "GOSP-WP-YABANCI-DOSYA", 100, true
 	}
 	return "", 0, false
+}
+
+// wpCekirdekAgacinda — yol GERÇEK WordPress çekirdek ağacında mı: wp-includes/,
+// wp-admin/ veya kökteki wp-*.php (wp-config.php hariç). wp-content (tema/eklenti/
+// yükleme) çekirdek DEĞİLDİR — resmî sağlaması olsa bile bağımsız güncellenir, bu
+// yüzden oradaki sağlama-tutmazlığı tahrifat kanıtı sayılmaz.
+func wpCekirdekAgacinda(bagil string) bool {
+	if strings.HasPrefix(bagil, "wp-includes/") || strings.HasPrefix(bagil, "wp-admin/") {
+		return true
+	}
+	taban := filepath.Base(bagil)
+	if !strings.Contains(bagil, "/") && strings.HasPrefix(taban, "wp-") &&
+		strings.HasSuffix(taban, ".php") && taban != "wp-config.php" {
+		return true
+	}
+	return false
 }
