@@ -185,12 +185,18 @@ func semantikTara(icerik []byte, kurallar []Kural, ext string, disGoruldu map[st
 		if t.tur == tkIdent && evalIdent[strings.ToLower(t.deger)] &&
 			i+2 < len(toks) && toks[i+1].tur == tkLParen {
 			if toks[i+2].tur == tkVar && concatVar[toks[i+2].deger] {
-				ekle(100, "GOSP-SEMANTIK-EVAL-CONCAT")
+				ekle(45, "GOSP-SEMANTIK-EVAL-CONCAT") // 🔴 100 DEĞİL: meşru kütüphaneler eval(concat)
+				//   kullanır (phpseclib EvalBarrett math kodu, şablon motorları) — CANLI FP.
+				//   Tek başına supheli-altı; eval'lenen kod rescan'de zararlı içerik (base64/
+				//   system/superglobal) taşırsa ≥100 kritik olur. Gerçek gizli-eval yakalanır.
 				parcaEkle(symtab[toks[i+2].deger]) // eval'lenen kodu rescan'e ver
 			} else if toks[i+2].tur == tkStr && i+3 < len(toks) && toks[i+3].tur == tkDot {
 				deger, parca, sabit, _, _ := ifadeKatla(toks, i+2, symtab, taint)
 				if sabit && parca >= 2 {
-					ekle(100, "GOSP-SEMANTIK-EVAL-CONCAT")
+					ekle(45, "GOSP-SEMANTIK-EVAL-CONCAT") // 🔴 100 DEĞİL: meşru kütüphaneler eval(concat)
+				//   kullanır (phpseclib EvalBarrett math kodu, şablon motorları) — CANLI FP.
+				//   Tek başına supheli-altı; eval'lenen kod rescan'de zararlı içerik (base64/
+				//   system/superglobal) taşırsa ≥100 kritik olur. Gerçek gizli-eval yakalanır.
 					parcaEkle(deger)
 				}
 			}
