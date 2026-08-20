@@ -297,8 +297,10 @@ func TumSurumlerOnbellekSifirla() {
 	tumSurumlerMu.Unlock()
 }
 
-// reRemiFpm — "php83-php-fpm" → sürüm kodu (8,3). Remi tek-rakam major/minor.
-var reRemiFpm = regexp.MustCompile(`^php([0-9])([0-9])-php-fpm$`)
+// reRemiFpm — "php83-php-fpm"/"php810-php-fpm" → kod ("83"/"810"). İlk rakam major,
+// kalanı minor (8.10 gibi iki-basamaklı minor'ı da yakalar; eski `([0-9])([0-9])`
+// yalnız tek-basamak minor'ı yakalıyordu → PHP 8.10 sessizce düşerdi).
+var reRemiFpm = regexp.MustCompile(`^php([0-9]+)-php-fpm$`)
 
 var (
 	kesifOnbellek []SurumMeta
@@ -324,7 +326,14 @@ func surumleriKesfet() []SurumMeta {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "dnf", "repoquery", "--quiet", "--qf", "%{name}\n", "php*-php-fpm").Output()
 	if err != nil {
-		return nil // dnf yok/kilitli/timeout → sabit listeye düş
+		// 🔴 NEGATİF CACHE: dnf kilitli/hatalıyken her 60sn TTL bitişinde 5sn
+		// bloklamayı önle. Boş (ama non-nil) sonucu cache'le → çağıran sabit
+		// DesteklenenSurumler'e düşer; dnf sorunu geçince 10dk sonra yeniden dener.
+		kesifMu.Lock()
+		kesifOnbellek = []SurumMeta{}
+		kesifZaman = time.Now()
+		kesifMu.Unlock()
+		return nil
 	}
 	gorulen := map[string]bool{}
 	var metalar []SurumMeta
@@ -333,12 +342,17 @@ func surumleriKesfet() []SurumMeta {
 		if m == nil {
 			continue
 		}
-		kod := m[1] + m[2]
+		kod := m[1] // "83", "810"…
+		if len(kod) < 2 {
+			continue // "8" gibi eksik değer
+		}
 		if gorulen[kod] {
 			continue
 		}
 		gorulen[kod] = true
-		metalar = append(metalar, SurumMeta{Surum: m[1] + "." + m[2], Kod: kod, Kaynak: "remi"})
+		// İlk rakam major, kalanı minor: "83"→8.3, "810"→8.10.
+		surum := kod[:1] + "." + kod[1:]
+		metalar = append(metalar, SurumMeta{Surum: surum, Kod: kod, Kaynak: "remi"})
 	}
 	kesifMu.Lock()
 	kesifOnbellek = metalar

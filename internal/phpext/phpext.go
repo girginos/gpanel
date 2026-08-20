@@ -2,6 +2,7 @@
 package phpext
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -309,13 +310,25 @@ func perTenantFPMReload() {
 	if err != nil {
 		return
 	}
+	// 🔴 PARALEL + PER-CALL TIMEOUT: node'da onlarca tenant olabilir. Seri + timeout'suz
+	// reload, tek bir failed/asılı tenant FPM'i yüzünden HTTP handler'ı süresiz bloklardı.
+	// Paralel çalıştır, her reload'a 15sn üst-sınır koy (asılı kalan tenant diğerlerini
+	// bekletmez). Hatalar yutulur ama tekil tenant sorunu tüm işlemi kilitlemez.
+	var wg sync.WaitGroup
 	for _, ln := range strings.Split(string(out), "\n") {
 		f := strings.Fields(ln)
 		if len(f) == 0 || !strings.HasPrefix(f[0], "php-fpm-c_") {
 			continue
 		}
-		_ = exec.Command("systemctl", "reload", f[0]).Run()
+		wg.Add(1)
+		go func(unit string) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_ = exec.CommandContext(ctx, "systemctl", "reload", unit).Run()
+		}(f[0])
 	}
+	wg.Wait()
 }
 
 // PECL install — bonus
@@ -482,6 +495,7 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		}
 		ro, _ := exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
 		is.logEkle(ro)
+		perTenantFPMReload() // 🔴 REGRESYON FIX: derlenen eklenti de tenant FPM'lerinde görünsün
 		is.mu.Lock()
 		is.Durum = "tamam"
 		is.Adim = paket + " derlendi ve etkinleştirildi"

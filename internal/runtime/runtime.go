@@ -23,6 +23,10 @@ type RuntimeEk struct {
 	Anahtar  string `json:"anahtar"` // dnf paket adı (kur/kaldır + kurulu tespiti)
 	Aciklama string `json:"aciklama"`
 	Kurulu   bool   `json:"kurulu"`
+	// Yonetilemez: panel kur/kaldır SUNMAZ (salt-bilgi). Örn Node.js sistemde
+	// nodesource RPM'i ile kurulu; dnf modülü EL10'da yok, dnf remove nodesource'u
+	// kırardı → yönetimi kapalı, yalnız "kurulu" gösterilir.
+	Yonetilemez bool `json:"yonetilemez,omitempty"`
 }
 
 // RuntimeGrup — bir dil ailesi (dotnet/nodejs/python) ve bileşenleri.
@@ -47,13 +51,15 @@ func katalog() []RuntimeGrup {
 			{Ad: ".NET SDK 10.0", Anahtar: "dotnet-sdk-10.0", Aciklama: "Derleme + geliştirme (en yeni)"},
 		}},
 		{Tip: "python", Ad: "Python", Ikon: "python", Ekler: []RuntimeEk{
-			{Ad: "Python 3.12", Anahtar: "python3.12", Aciklama: "Python 3.12 yorumlayıcısı"},
+			// python3.12 YOK: base python3 zaten 3.12 (sanal provide) — kur "nothing to do",
+			// kaldır sistem python'unu hedefler. Yalnız GERÇEK ek sürümler listelenir.
 			{Ad: "Python 3.13", Anahtar: "python3.13", Aciklama: "Python 3.13 yorumlayıcısı"},
 			{Ad: "Python 3.14", Anahtar: "python3.14", Aciklama: "Python 3.14 yorumlayıcısı"},
-			{Ad: "pip (paket yöneticisi)", Anahtar: "python3-pip", Aciklama: "Python paket yöneticisi"},
+			{Ad: "pip (paket yöneticisi)", Anahtar: "python3-pip", Aciklama: "Python paket yöneticisi (python3-pip)"},
 		}},
 		{Tip: "nodejs", Ad: "Node.js", Ikon: "nodejs", Ekler: []RuntimeEk{
-			{Ad: "Node.js 22 (dnf modülü)", Anahtar: "nodejs", Aciklama: "Sistem dnf modülü Node.js — global npm dahil"},
+			// Yönetilemez: sistemde nodesource RPM'i ile kurulu; dnf remove onu kırardı.
+			{Ad: "Node.js (sistem)", Anahtar: "nodejs", Aciklama: "Sistemde kurulu — npm/npx global. Sürüm yönetimi panel dışıdır.", Yonetilemez: true},
 		}},
 	}
 }
@@ -155,16 +161,22 @@ func (h *Handlers) calistir(w http.ResponseWriter, r *http.Request, islem string
 	// Anahtar katalogda olmalı (keyfi paket kur/kaldır engellenir).
 	gecerli := false
 	nodejs := false
+	yonetilemez := false
 	for _, g := range katalog() {
 		for _, e := range g.Ekler {
 			if e.Anahtar == req.Anahtar {
 				gecerli = true
 				nodejs = g.Tip == "nodejs"
+				yonetilemez = e.Yonetilemez
 			}
 		}
 	}
 	if !gecerli {
 		httpx.WriteError(w, http.StatusBadRequest, "bilinmeyen runtime bileşeni")
+		return
+	}
+	if yonetilemez {
+		httpx.WriteError(w, http.StatusBadRequest, "bu bileşen panelden kur/kaldır yapılamaz (sistem yönetimli)")
 		return
 	}
 

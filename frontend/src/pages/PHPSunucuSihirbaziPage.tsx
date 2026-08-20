@@ -21,7 +21,7 @@ const ADIMLAR: Adim[] = [
 ]
 
 type RuntimeSecim = { anahtar: string; ad: string }
-type RuntimeEk = { ad: string; anahtar: string; aciklama: string; kurulu: boolean }
+type RuntimeEk = { ad: string; anahtar: string; aciklama: string; kurulu: boolean; yonetilemez?: boolean }
 type RuntimeGrup = { tip: string; ad: string; ekler: RuntimeEk[] }
 
 export default function PHPSunucuSihirbaziPage() {
@@ -192,16 +192,23 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                     <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{e.ad}</div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-500 truncate">{e.aciklama}</div>
                   </div>
-                  <button
-                    onClick={() => e.kurulu ? kaldir(e) : secimToggle(e)}
-                    disabled={kaldiran === e.anahtar}
-                    title={e.kurulu ? 'Kaldır' : (sec ? 'Seçimi kaldır' : 'Kurulacaklara ekle')}
-                    className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
-                      kaldiran === e.anahtar ? 'bg-sky-400 animate-pulse' : e.kurulu ? 'bg-emerald-500' : sec ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
-                    } ${kaldiran === e.anahtar ? 'opacity-60' : ''}`}
-                  >
-                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${(e.kurulu || sec) ? 'translate-x-5' : 'translate-x-1'}`} />
-                  </button>
+                  {e.yonetilemez ? (
+                    // Sistem yönetimli (ör. Node.js/nodesource) — yalnız durum, aksiyon yok.
+                    <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${e.kurulu ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+                      {e.kurulu ? '✓ Kurulu' : 'Kurulu değil'}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => e.kurulu ? kaldir(e) : secimToggle(e)}
+                      disabled={kaldiran === e.anahtar}
+                      title={e.kurulu ? 'Kaldır' : (sec ? 'Seçimi kaldır' : 'Kurulacaklara ekle')}
+                      className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                        kaldiran === e.anahtar ? 'bg-sky-400 animate-pulse' : e.kurulu ? 'bg-emerald-500' : sec ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
+                      } ${kaldiran === e.anahtar ? 'opacity-60' : ''}`}
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${(e.kurulu || sec) ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -296,6 +303,11 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
             setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : 'Tamamlanıyor…', yuzde: calis ? 55 : 95 })
             if (!d.data?.calisiyor) break
           }
+          // 🔴 GERÇEK doğrulama: unit "failed" de calisiyor=false döndürür. Kurulumun
+          // BAŞARILI olduğunu, sürümün artık yüklü listesinde olmasıyla teyit et.
+          const chk = await api.get('/php-surumler')
+          const yuklendi = (chk.data?.surumler || []).some((x: any) => x.surum === s.surum && x.kaynak === s.kaynak && x.yuklu)
+          if (!yuklendi) throw new Error(`PHP ${s.surum} kurulamadı (paket eksik/derlenemedi olabilir — Sürümler sekmesindeki loga bakın)`)
         } else if (s.tip === 'runtime') {
           // Runtime kurulumu (.NET/Node/Python) — async is_id + durum poll.
           const { data } = await api.post('/runtimeler/kur', { anahtar: s.anahtar })
