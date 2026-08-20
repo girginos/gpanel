@@ -36,6 +36,11 @@ type Gorev struct {
 	Hafta  string `json:"hafta"`
 	Komut  string `json:"komut"`
 	Yorum  string `json:"yorum,omitempty"`
+	// Plesk-tarzı zengin alanlar. Metadata crontab yorumunda (# gosp-meta:) saklanır.
+	Etkin    bool   `json:"etkin"`               // false → cron satırı '#' ile pasif
+	Tip      string `json:"tip,omitempty"`       // "komut" | "url" | "php" (boş=komut)
+	PhpSurum string `json:"php_surum,omitempty"` // tip=php: hangi PHP sürümü
+	Bildirim string `json:"bildirim,omitempty"`  // "bilgi" | "hata" | "her" | "yok"
 }
 
 type Handlers struct {
@@ -87,37 +92,95 @@ func read(sk string) ([]Gorev, error) {
 	out := make([]Gorev, 0)
 	sc := bufio.NewScanner(f)
 	var lastYorum string
+	var meta map[string]string
 	idx := 0
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			lastYorum = ""
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			c := strings.TrimSpace(strings.TrimPrefix(line, "#"))
-			// kendi banner satirimizi atla
-			if !strings.HasPrefix(c, "girginospanel") {
-				lastYorum = c
-			}
-			continue
-		}
-		// 5 alan + komut
+	// cronSatiriParse: bir cron satırını (5 zaman alanı + komut) Gorev'e çevirir.
+	// pasif=satır '#' ile başlıyordu (etkin=false).
+	ekle := func(line string, pasif bool) {
 		fields := strings.Fields(line)
 		if len(fields) < 6 {
-			continue
+			return
 		}
-		out = append(out, Gorev{
+		g := Gorev{
 			Idx:    idx,
 			Dakika: fields[0], Saat: fields[1], Gun: fields[2],
 			Ay: fields[3], Hafta: fields[4],
 			Komut: strings.Join(fields[5:], " "),
 			Yorum: lastYorum,
-		})
+			Etkin: !pasif,
+			Tip:   "komut",
+		}
+		if meta != nil {
+			if v := meta["tip"]; v != "" {
+				g.Tip = v
+			}
+			g.PhpSurum = meta["php_surum"]
+			g.Bildirim = meta["bildirim"]
+			if meta["etkin"] == "0" {
+				g.Etkin = false
+			}
+		}
+		out = append(out, g)
 		idx++
 		lastYorum = ""
+		meta = nil
+	}
+	for sc.Scan() {
+		raw := sc.Text()
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			lastYorum = ""
+			meta = nil
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			c := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+			// Panel metadata satırı: "# gosp-meta: tip=php php_surum=8.3 bildirim=hata etkin=1"
+			if strings.HasPrefix(c, "gosp-meta:") {
+				meta = parseMeta(strings.TrimSpace(strings.TrimPrefix(c, "gosp-meta:")))
+				continue
+			}
+			// PASİF görev: "#0 3 * * * komut" (cron satırı comment'lenmiş). Ayırt et:
+			// '#' sonrası ilk alan cron zaman alanı gibiyse (rakam/*/,/-// içerir) görevdir.
+			if looksCron(c) {
+				ekle(c, true)
+				continue
+			}
+			// kendi banner satirimizi atla, gerisi açıklama
+			if !strings.HasPrefix(c, "girginospanel") {
+				lastYorum = c
+			}
+			continue
+		}
+		ekle(line, false)
 	}
 	return out, sc.Err()
+}
+
+// parseMeta: "k=v k=v" → map. Değerlerde boşluk yok (tip/sürüm/bildirim).
+func parseMeta(s string) map[string]string {
+	m := map[string]string{}
+	for _, kv := range strings.Fields(s) {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			m[kv[:i]] = kv[i+1:]
+		}
+	}
+	return m
+}
+
+// looksCron: satır bir cron zaman-tanımı gibi mi (5 alan + komut, ilk alan cron-token).
+func looksCron(s string) bool {
+	f := strings.Fields(s)
+	if len(f) < 6 {
+		return false
+	}
+	// ilk alan yalnız cron karakterleri içermeli (rakam * , - /)
+	for _, c := range f[0] {
+		if !(c >= '0' && c <= '9') && c != '*' && c != ',' && c != '-' && c != '/' {
+			return false
+		}
+	}
+	return true
 }
 
 func write(sk string, list []Gorev) error {
@@ -125,11 +188,34 @@ func write(sk string, list []Gorev) error {
 	buf.WriteString(bannerLine + "\n")
 	buf.WriteString("# son güncelleme: " + sk + "\n\n")
 	for _, g := range list {
+		// Metadata satırı (tip/php/bildirim/etkin) — panel read'de geri okur.
+		var mp []string
+		if g.Tip != "" && g.Tip != "komut" {
+			mp = append(mp, "tip="+g.Tip)
+		}
+		if g.PhpSurum != "" {
+			mp = append(mp, "php_surum="+g.PhpSurum)
+		}
+		if g.Bildirim != "" {
+			mp = append(mp, "bildirim="+g.Bildirim)
+		}
+		if !g.Etkin {
+			mp = append(mp, "etkin=0")
+		}
+		if len(mp) > 0 {
+			fmt.Fprintf(&buf, "# gosp-meta: %s\n", strings.Join(mp, " "))
+		}
 		if g.Yorum != "" {
 			fmt.Fprintf(&buf, "# %s\n", strings.ReplaceAll(g.Yorum, "\n", " "))
 		}
-		fmt.Fprintf(&buf, "%s %s %s %s %s %s\n",
-			g.Dakika, g.Saat, g.Gun, g.Ay, g.Hafta, g.Komut)
+		// Pasif görev cron satırı '#' ile comment'lenir (crond çalıştırmaz) ama
+		// panel geri okuyabilir (looksCron).
+		pre := ""
+		if !g.Etkin {
+			pre = "#"
+		}
+		fmt.Fprintf(&buf, "%s%s %s %s %s %s %s\n",
+			pre, g.Dakika, g.Saat, g.Gun, g.Ay, g.Hafta, g.Komut)
 	}
 	p := cronPath(sk)
 	tmp := p + ".tmp"
@@ -200,18 +286,100 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// gorevInput — Create/Update gövdesi: Gorev + görev tipine özel ham alanlar
+// (backend bunlardan Komut üretir; ham alanlar crontab'a yazılmaz).
+type gorevInput struct {
+	Gorev
+	URL    string `json:"url,omitempty"`    // tip=url
+	Script string `json:"script,omitempty"` // tip=php: PHP dosya yolu
+	Args   string `json:"args,omitempty"`   // tip=php: argümanlar
+}
+
+// phpBin — sürüm ("8.3") için PHP ikilisinin yolu. Remi düzeni önce denenir.
+func phpBin(surum string) string {
+	kod := strings.ReplaceAll(surum, ".", "")
+	if kod != "" {
+		remi := "/opt/remi/php" + kod + "/root/usr/bin/php"
+		if _, err := os.Stat(remi); err == nil {
+			return remi
+		}
+	}
+	return "/usr/bin/php"
+}
+
+// tehlikeliMeta — komut üretiminde ham alanlara izin verilmeyen shell metakarakterleri.
+const tehlikeliMeta = "'\n\r`;|&<>$\""
+
+// komutUret — görev tipine göre çalıştırılacak komutu üretir. url/php ham
+// girdileri shell-metakarakterlerine karşı doğrulanır (injection önlenir).
+func komutUret(in gorevInput) (string, error) {
+	switch in.Tip {
+	case "url":
+		u := strings.TrimSpace(in.URL)
+		if u == "" {
+			return "", fmt.Errorf("URL boş olamaz")
+		}
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			return "", fmt.Errorf("URL http:// veya https:// ile başlamalı")
+		}
+		if strings.ContainsAny(u, tehlikeliMeta) {
+			return "", fmt.Errorf("URL geçersiz karakter içeriyor")
+		}
+		return fmt.Sprintf("curl -fsS -o /dev/null --max-time 300 '%s'", u), nil
+	case "php":
+		s := strings.TrimSpace(in.Script)
+		if s == "" {
+			return "", fmt.Errorf("PHP dosya yolu boş olamaz")
+		}
+		if strings.ContainsAny(s, tehlikeliMeta) {
+			return "", fmt.Errorf("PHP dosya yolu geçersiz karakter içeriyor")
+		}
+		cmd := fmt.Sprintf("%s -q '%s'", phpBin(in.PhpSurum), s)
+		if a := strings.TrimSpace(in.Args); a != "" {
+			if strings.ContainsAny(a, tehlikeliMeta) {
+				return "", fmt.Errorf("argümanlar geçersiz karakter içeriyor")
+			}
+			cmd += " " + a
+		}
+		return cmd, nil
+	default: // "komut" veya boş
+		return in.Komut, nil
+	}
+}
+
+// hazirla — gorevInput'tan yazılacak Gorev'i türetir (Komut üretilir, defaultlar).
+func hazirla(in gorevInput) (Gorev, error) {
+	g := in.Gorev
+	if g.Tip == "" {
+		g.Tip = "komut"
+	}
+	if g.Bildirim == "" {
+		g.Bildirim = "bilgi"
+	}
+	komut, err := komutUret(in)
+	if err != nil {
+		return Gorev{}, err
+	}
+	g.Komut = komut
+	if err := validate(g); err != nil {
+		return Gorev{}, err
+	}
+	return g, nil
+}
+
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	sk, err := h.lookup(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
 	}
-	var g Gorev
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+	var in gorevInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	if err := validate(g); err != nil {
+	g, err := hazirla(in)
+	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -230,6 +398,41 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "idx": len(list) - 1})
+}
+
+// Update: PUT /domains/{id}/cron/{idx} — mevcut görevi düzenler (aynı index).
+func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
+	sk, err := h.lookup(r)
+	if err != nil {
+		httpx.WriteError(w, statusFromErr(err), err.Error())
+		return
+	}
+	idx, _ := strconv.Atoi(chi.URLParam(r, "idx"))
+	var in gorevInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	g, err := hazirla(in)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	list, err := read(sk)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if idx < 0 || idx >= len(list) {
+		httpx.WriteError(w, http.StatusNotFound, "index aralık dışında")
+		return
+	}
+	list[idx] = g
+	if err := write(sk, list); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "idx": idx})
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {

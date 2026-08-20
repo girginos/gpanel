@@ -19,11 +19,17 @@ type Gorev = {
   hafta: string
   komut: string
   yorum?: string
+  etkin: boolean
+  tip?: string        // "komut" | "url" | "php"
+  php_surum?: string
+  bildirim?: string   // "bilgi" | "hata" | "her" | "yok"
 }
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 
 type ListResp = { sistem_kullanici: string; toplam: number; gorevler: Gorev[] }
+
+const PHP_SURUMLER = ['8.3', '8.2', '8.1', '8.0', '7.4']
 
 const ON_AYARLAR: Array<{ etiket: string; secim: { dakika: string; saat: string; gun: string; ay: string; hafta: string } }> = [
   { etiket: 'Her dakika',        secim: { dakika: '*',  saat: '*', gun: '*', ay: '*', hafta: '*' } },
@@ -42,7 +48,8 @@ export default function DomainCronPage() {
   const [gorevler, setGorevler] = useState<Gorev[]>([])
   const [yukleniyor, setYukleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
-  const [modal, setModal] = useState(false)
+  // null=kapalı, 'yeni'=ekleme, Gorev=düzenleme
+  const [modalGorev, setModalGorev] = useState<Gorev | 'yeni' | null>(null)
   const [calisan, setCalisan] = useState<number | null>(null)
 
   function yukle() {
@@ -104,7 +111,7 @@ export default function DomainCronPage() {
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button
-          onClick={() => setModal(true)}
+          onClick={() => setModalGorev('yeni')}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-sm transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
@@ -118,8 +125,6 @@ export default function DomainCronPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      {/* Çerçeve yalnız masaüstünde: mobilde satırlar zaten kart olduğundan
-          ikinci bir çerçeve iç içe görünüm yaratırdı. */}
       <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yukleniyor ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
@@ -133,45 +138,32 @@ export default function DomainCronPage() {
             <p className="text-sm text-slate-500 dark:text-slate-500">Henüz görev yok. Yukarıdan ekleyin.</p>
           </div>
         ) : (
-          // Yatay kaydırma yalnız masaüstünde; mobilde kart dizilimi gereksiz kılıyor.
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
-                <th className={T.baslik}>Dak</th>
-                <th className={T.baslik}>Saat</th>
-                <th className={T.baslik}>Gün</th>
-                <th className={T.baslik}>Ay</th>
-                <th className={T.baslik}>Hafta</th>
+                <th className={T.baslik}>Zamanlama</th>
                 <th className={T.baslik}>Komut / Açıklama</th>
                 <th className={`${T.baslik} text-right`}>İşlem</th>
               </tr>
             </thead>
             <tbody className={T.govde}>
               {gorevler.map((g) => (
-                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition`}>
-                  <td className={T.hucre} data-etiket="Dak">
-                    <span className="font-mono">{g.dakika}</span>
+                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${!g.etkin ? 'opacity-55' : ''}`}>
+                  <td className={T.hucre} data-etiket="Zamanlama">
+                    <span className="font-mono text-sm whitespace-nowrap">{g.dakika} {g.saat} {g.gun} {g.ay} {g.hafta}</span>
                   </td>
-                  <td className={T.hucre} data-etiket="Saat">
-                    <span className="font-mono">{g.saat}</span>
-                  </td>
-                  <td className={T.hucre} data-etiket="Gün">
-                    <span className="font-mono">{g.gun}</span>
-                  </td>
-                  <td className={T.hucre} data-etiket="Ay">
-                    <span className="font-mono">{g.ay}</span>
-                  </td>
-                  <td className={T.hucre} data-etiket="Hafta">
-                    <span className="font-mono">{g.hafta}</span>
-                  </td>
-                  {/* Birincil tanımlayıcı: görevi ayırt eden şey komutun kendisidir. */}
                   <td className={T.hucreBaslik}>
-                    <div className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</div>
+                    <div className="flex items-center gap-2">
+                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Pasif</span>}
+                      {g.tip && g.tip !== 'komut' && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">{g.tip === 'php' ? `PHP ${g.php_surum || ''}` : g.tip}</span>}
+                      <span className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</span>
+                    </div>
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
                   <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                     <button onClick={() => calistir(g)} disabled={calisan === g.idx} className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition disabled:opacity-50" title="Görevi şimdi elle çalıştır">{calisan === g.idx ? 'Çalışıyor…' : 'Çalıştır'}</button>
+                    <button onClick={() => setModalGorev(g)} className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">Düzenle</button>
                     <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
                   </td>
                 </tr>
@@ -182,25 +174,57 @@ export default function DomainCronPage() {
         )}
       </div>
 
-      <CronEkleModal acik={modal} onKapat={() => setModal(false)} onEklendi={yukle} domainId={Number(id)} />
+      {modalGorev !== null && (
+        <CronModal
+          gorev={modalGorev}
+          domainId={Number(id)}
+          onKapat={() => setModalGorev(null)}
+          onKaydedildi={() => { setModalGorev(null); yukle() }}
+        />
+      )}
     </div>
   )
 }
 
-function CronEkleModal({ acik, onKapat, onEklendi, domainId }: {
-  acik: boolean; onKapat: () => void; onEklendi: () => void; domainId: number
+// komuttan tip'e göre ham alanları geri çıkar (düzenleme için best-effort).
+function komutParse(g: Gorev): { url: string; script: string; args: string; komut: string } {
+  const komut = g.komut
+  if (g.tip === 'url') {
+    const m = komut.match(/'([^']+)'/)
+    return { url: m ? m[1] : '', script: '', args: '', komut }
+  }
+  if (g.tip === 'php') {
+    const m = komut.match(/-q '([^']+)'(.*)$/)
+    return { url: '', script: m ? m[1] : '', args: m ? m[2].trim() : '', komut }
+  }
+  return { url: '', script: '', args: '', komut }
+}
+
+function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
+  gorev: Gorev | 'yeni'; domainId: number; onKapat: () => void; onKaydedildi: () => void
 }) {
-  const [dakika, setDakika] = useState('0')
-  const [saat, setSaat] = useState('3')
-  const [gun, setGun] = useState('*')
-  const [ay, setAy] = useState('*')
-  const [hafta, setHafta] = useState('*')
-  const [komut, setKomut] = useState('')
-  const [yorum, setYorum] = useState('')
+  const yeni = gorev === 'yeni'
+  const mevcut = yeni ? null : (gorev as Gorev)
+  const parsed = mevcut ? komutParse(mevcut) : { url: '', script: '', args: '', komut: '' }
+
+  const [etkin, setEtkin] = useState(mevcut ? mevcut.etkin : true)
+  const [tip, setTip] = useState<string>(mevcut?.tip || 'komut')
+  const [dakika, setDakika] = useState(mevcut?.dakika || '0')
+  const [saat, setSaat] = useState(mevcut?.saat || '3')
+  const [gun, setGun] = useState(mevcut?.gun || '*')
+  const [ay, setAy] = useState(mevcut?.ay || '*')
+  const [hafta, setHafta] = useState(mevcut?.hafta || '*')
+  const [komut, setKomut] = useState(parsed.komut && tip === 'komut' ? parsed.komut : (mevcut && tip === 'komut' ? mevcut.komut : ''))
+  const [url, setUrl] = useState(parsed.url)
+  const [script, setScript] = useState(parsed.script)
+  const [args, setArgs] = useState(parsed.args)
+  const [phpSurum, setPhpSurum] = useState(mevcut?.php_surum || '8.3')
+  const [bildirim, setBildirim] = useState(mevcut?.bildirim || 'bilgi')
+  const [yorum, setYorum] = useState(mevcut?.yorum || '')
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
 
-  function uygula(p: typeof ON_AYARLAR[number]['secim']) {
+  function uygulaPreset(p: typeof ON_AYARLAR[number]['secim']) {
     setDakika(p.dakika); setSaat(p.saat); setGun(p.gun); setAy(p.ay); setHafta(p.hafta)
   }
 
@@ -208,74 +232,132 @@ function CronEkleModal({ acik, onKapat, onEklendi, domainId }: {
     e.preventDefault()
     setIsleniyor(true); setHata(null)
     try {
-      await api.post(`/domains/${domainId}/cron`, { dakika, saat, gun, ay, hafta, komut: komut.trim(), yorum: yorum.trim() })
-      onEklendi()
-      setKomut(''); setYorum('')
-      onKapat()
+      const body: Record<string, unknown> = {
+        dakika, saat, gun, ay, hafta, etkin, tip, bildirim, yorum: yorum.trim(),
+      }
+      if (tip === 'komut') body.komut = komut.trim()
+      else if (tip === 'url') body.url = url.trim()
+      else if (tip === 'php') { body.script = script.trim(); body.args = args.trim(); body.php_surum = phpSurum }
+
+      if (yeni) await api.post(`/domains/${domainId}/cron`, body)
+      else await api.put(`/domains/${domainId}/cron/${(gorev as Gorev).idx}`, body)
+      onKaydedildi()
     } catch (e) {
-      setHata(apiHata(e, 'Ekleme başarısız'))
+      setHata(apiHata(e, 'Kaydetme başarısız'))
     } finally {
       setIsleniyor(false)
     }
   }
 
   return (
-    <Modal acik={acik} baslik="Yeni Zamanlanmış Görev" onKapat={onKapat} genislik="lg">
+    <Modal acik={true} baslik={yeni ? 'Yeni Zamanlanmış Görev' : 'Görevi Düzenle'} onKapat={onKapat} genislik="lg">
       <form onSubmit={gonder} className="space-y-4">
+        {/* Etkin */}
+        <label className="flex items-center gap-2.5 cursor-pointer select-none">
+          <input type="checkbox" checked={etkin} onChange={e => setEtkin(e.target.checked)} className="h-4 w-4 accent-brand-600" />
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Etkin <span className="font-normal text-slate-400 dark:text-slate-500">(kapalıysa görev çalışmaz ama saklanır)</span></span>
+        </label>
+
+        {/* Görev tipi */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Hazır Şablonlar</label>
-          <div className="flex flex-wrap gap-1.5">
-            {ON_AYARLAR.map(p => (
-              <button
-                key={p.etiket}
-                type="button"
-                onClick={() => uygula(p.secim)}
-                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition"
-              >
-                {p.etiket}
-              </button>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Görev tipi</label>
+          <div className="flex flex-wrap gap-4">
+            {[['komut', 'Bir komut çalıştır'], ['url', 'Bir URL getir'], ['php', 'PHP dosyası çalıştır']].map(([v, l]) => (
+              <label key={v} className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input type="radio" name="tip" checked={tip === v} onChange={() => setTip(v)} className="accent-brand-600" />
+                {l}
+              </label>
             ))}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-          <Alan etiket="Dakika"   value={dakika} onChange={setDakika} />
-          <Alan etiket="Saat"     value={saat}   onChange={setSaat} />
-          <Alan etiket="Gün"      value={gun}    onChange={setGun} />
-          <Alan etiket="Ay"       value={ay}     onChange={setAy} />
-          <Alan etiket="Hafta"    value={hafta}  onChange={setHafta} />
-        </div>
-        <p className="text-xs text-slate-500 dark:text-slate-500">Cron biçimi — <code className="font-mono">*</code> her zaman, <code className="font-mono">*/5</code> her 5'te bir, <code className="font-mono">0,15,30</code> liste, <code className="font-mono">9-17</code> aralık.</p>
+        {/* Tipe özel alanlar */}
+        {tip === 'komut' && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Komut</label>
+            <input value={komut} onChange={e => setKomut(e.target.value)} required placeholder="/usr/bin/php /home/c_user/public_html/cron.php"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+          </div>
+        )}
+        {tip === 'url' && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">URL</label>
+            <input value={url} onChange={e => setUrl(e.target.value)} required placeholder="https://example.com/cron.php"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">curl ile getirilir (300sn zaman aşımı, çıktı atılır).</p>
+          </div>
+        )}
+        {tip === 'php' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">PHP dosya yolu</label>
+                <input value={script} onChange={e => setScript(e.target.value)} required placeholder="/home/c_user/public_html/cron.php"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">PHP sürümü</label>
+                <select value={phpSurum} onChange={e => setPhpSurum(e.target.value)}
+                  className="px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
+                  {PHP_SURUMLER.map(s => <option key={s} value={s}>PHP {s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Argümanlar <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
+              <input value={args} onChange={e => setArgs(e.target.value)} placeholder="--verbose görev=1"
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+            </div>
+          </div>
+        )}
 
+        {/* Zamanlama */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Komut</label>
-          <input
-            type="text"
-            value={komut}
-            onChange={e => setKomut(e.target.value)}
-            placeholder="/usr/bin/php /home/c_user/public_html/cron.php"
-            required
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none text-sm font-mono"
-          />
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Zamanlama</label>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {ON_AYARLAR.map(p => (
+              <button key={p.etiket} type="button" onClick={() => uygulaPreset(p.secim)}
+                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition">
+                {p.etiket}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <Alan etiket="Dakika" value={dakika} onChange={setDakika} />
+            <Alan etiket="Saat"   value={saat}   onChange={setSaat} />
+            <Alan etiket="Gün"    value={gun}    onChange={setGun} />
+            <Alan etiket="Ay"     value={ay}     onChange={setAy} />
+            <Alan etiket="Hafta"  value={hafta}  onChange={setHafta} />
+          </div>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">Cron biçimi — <code className="font-mono">*</code> her zaman, <code className="font-mono">*/5</code> her 5'te bir, <code className="font-mono">0,15,30</code> liste, <code className="font-mono">9-17</code> aralık.</p>
         </div>
 
+        {/* Bildirim */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Açıklama (opsiyonel)</label>
-          <input
-            type="text"
-            value={yorum}
-            onChange={e => setYorum(e.target.value)}
-            placeholder="örn. Her gece yedek scripti"
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none text-sm"
-          />
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Bildirim</label>
+          <div className="flex flex-wrap gap-4">
+            {[['bilgi', 'Bilgilendirme'], ['hata', 'Yalnızca hatalar'], ['her', 'Her zaman'], ['yok', 'Gönderme']].map(([v, l]) => (
+              <label key={v} className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input type="radio" name="bildirim" checked={bildirim === v} onChange={() => setBildirim(v)} className="accent-brand-600" />
+                {l}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Açıklama */}
+        <div>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Açıklama <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
+          <input value={yorum} onChange={e => setYorum(e.target.value)} placeholder="örn. Her gece yedek scripti"
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
         </div>
 
         {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 rounded-md text-sm">İptal</button>
-          <button type="submit" disabled={isleniyor || !komut.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-            {isleniyor ? 'Ekleniyor…' : 'Ekle'}
+          <button type="submit" disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+            {isleniyor ? 'Kaydediliyor…' : (yeni ? 'Ekle' : 'Kaydet')}
           </button>
         </div>
       </form>
@@ -291,7 +373,7 @@ function Alan({ etiket, value, onChange }: { etiket: string; value: string; onCh
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="w-full px-2 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
+        className="w-full px-2 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
       />
     </div>
   )
