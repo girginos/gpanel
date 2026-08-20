@@ -100,6 +100,7 @@ func (h *Handlers) IonCubeKur(w http.ResponseWriter, r *http.Request) {
 			"fpm reload: "+strings.TrimSpace(string(out)))
 		return
 	}
+	perTenantFPMReload() // tenant izole FPM'leri de yenile — yoksa ionCube sitede görünmez
 
 	// 8) Doğrulama — php -m'de ionCube görünüyor mu
 	verifyCtx, vc := context.WithTimeout(r.Context(), 5*time.Second)
@@ -136,6 +137,7 @@ func (h *Handlers) IonCubeKaldir(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(filepath.Join(extDir, "ioncube_loader_lin_"+req.Surum+".so"))
 	}
 	_, _ = exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
+	perTenantFPMReload() // tenant izole FPM'leri de yenile
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "surum": req.Surum})
 }
 

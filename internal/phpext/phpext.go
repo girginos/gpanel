@@ -289,6 +289,7 @@ func (h *Handlers) Toggle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("FPM reload: %s: %v", strings.TrimSpace(string(out)), err))
 		return
 	}
+	perTenantFPMReload() // tenant izole FPM'leri de yenile — yoksa toggle sitede görünmez
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
@@ -296,6 +297,25 @@ func (h *Handlers) Toggle(w http.ResponseWriter, r *http.Request) {
 		"dosya": filepath.Base(yeni),
 		"aktif": req.Aktif,
 	})
+}
+
+// perTenantFPMReload — TÜM per-tenant izole FPM servislerini (php-fpm-c_*) graceful
+// reload eder. 🔴 GEREKÇE: extension global php.d'ye kurulur ama her tenant KENDİ
+// php-fpm servisinde çalışır. Global "php-fpm" reload'u tenant servislerini ETKİLEMEZ
+// → yeni extension tenant'ın çalışan sürecinde GÖRÜNMEZ. Gerçek olay: gmp kuruldu,
+// panel "kurulu" gösterdi ama XenForo "gmp yok" dedi; tenant FPM reload edilmemişti.
+func perTenantFPMReload() {
+	out, err := exec.Command("systemctl", "list-units", "--type=service", "--state=active", "--plain", "--no-legend", "php-fpm-c_*").Output()
+	if err != nil {
+		return
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		f := strings.Fields(ln)
+		if len(f) == 0 || !strings.HasPrefix(f[0], "php-fpm-c_") {
+			continue
+		}
+		_ = exec.Command("systemctl", "reload", f[0]).Run()
+	}
 }
 
 // PECL install — bonus
@@ -402,6 +422,7 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 			is.set("PHP-FPM yeniden başlatılıyor…", 90)
 			ro, _ := exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
 			is.logEkle(ro)
+			perTenantFPMReload() // tenant izole FPM'leri de yenile — yoksa eklenti sitede görünmez
 			is.mu.Lock()
 			is.Durum = "tamam"
 			is.Adim = paket + " kuruldu (hazır paket)"
@@ -518,6 +539,7 @@ func (h *Handlers) PECLSil(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
+	perTenantFPMReload() // tenant izole FPM'leri de yenile
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
