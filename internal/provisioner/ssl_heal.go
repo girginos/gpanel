@@ -364,3 +364,61 @@ func wwwSANUygun(domain string) bool {
 	}
 	return true
 }
+
+// SertifikaKur — DIŞARIDAN gelen (ör. taşımada kaynaktan kopyalanan) cert+key PEM'ini
+// DOĞRULAR ve kurar. 🔴 GÜVENLİ: geçersiz / key-eşleşmeyen / süresi geçmiş / alan-adını
+// kapsamayan sertifika REDDEDİLİR (çağıran Let's Encrypt'e düşer, regresyon yok).
+// Kurulum sslVhostYaz ile (nginx -t doğrular + rollback). Döner: (certPath, keyPath,
+// gercekCA, err). gercekCA=false → self-signed (DNS geçince LE yenilenmeli).
+func SertifikaKur(alanAdi, sk, phpSurum, backend, certPEM, keyPEM string) (string, string, bool, error) {
+	if err := ValidateDomain(alanAdi); err != nil {
+		return "", "", false, err
+	}
+	phpSurum = normalizePHP(phpSurum)
+	leaf, err := sertifikaDogrula(certPEM, keyPEM, alanAdi)
+	if err != nil {
+		return "", "", false, err
+	}
+	gercek := leaf.Issuer.String() != leaf.Subject.String() // self-signed'da Issuer==Subject
+	sslDir := certSystemDir(alanAdi)
+	if err := os.MkdirAll(sslDir, 0o755); err != nil {
+		return "", "", false, fmt.Errorf("ssl dizini: %w", err)
+	}
+	certPath := filepath.Join(sslDir, alanAdi+".crt")
+	keyPath := filepath.Join(sslDir, alanAdi+".key")
+	if err := os.WriteFile(certPath, []byte(certPEM), 0o644); err != nil {
+		return "", "", false, err
+	}
+	if err := os.WriteFile(keyPath, []byte(keyPEM), 0o600); err != nil {
+		return "", "", false, err
+	}
+	yazCertKurulumu(sslDir, certPath, keyPath)
+	if err := sslVhostYaz(alanAdi, sk, phpSurum, backend, certPath, keyPath, "imported"); err != nil {
+		return "", "", false, fmt.Errorf("vhost: %w", err)
+	}
+	return certPath, keyPath, gercek, nil
+}
+
+// sertifikaDogrula — cert+key PEM'i doğrular: (a) key<->cert EŞLEŞMESİ (tls.X509KeyPair),
+// (b) leaf ayrıştırma, (c) SÜRE geçerli, (d) alan adını (veya www.<alan>) KAPSAR.
+func sertifikaDogrula(certPEM, keyPEM, alanAdi string) (*x509.Certificate, error) {
+	pair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("cert/key gecersiz veya eslesmiyor: %w", err)
+	}
+	if len(pair.Certificate) == 0 {
+		return nil, fmt.Errorf("cert bos")
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("cert ayristirilamadi: %w", err)
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return nil, fmt.Errorf("sertifika sure-disi (%s .. %s)", leaf.NotBefore.Format("2006-01-02"), leaf.NotAfter.Format("2006-01-02"))
+	}
+	if leaf.VerifyHostname(alanAdi) != nil && leaf.VerifyHostname("www."+alanAdi) != nil {
+		return nil, fmt.Errorf("sertifika %s alan adini kapsamiyor", alanAdi)
+	}
+	return leaf, nil
+}

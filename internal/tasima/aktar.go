@@ -221,23 +221,43 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 
 	// --- 5. SSL ------------------------------------------------------------
 	if ay.SSL {
-		log("SSL sertifikasi isteniyor…")
-		crt, key, gercek := provisioner.OtoSSLDene(alanAdi, sk, kuruluPHPSec(php), "php-fpm")
-		if crt != "" {
-			kaynakAd := "self-signed"
-			if gercek {
-				kaynakAd = "letsencrypt"
-			}
+		// 🔴 ÖNCE kaynak sertifikasını KOPYALA (sslAktar): kaynağın çalışan cert'i
+		// varsa aynen taşınır → DNS geçişini beklemeden HTTPS hazır. Kaynak cert
+		// yok/geçersizse Let's Encrypt'e düşülür (regresyon yok — eski davranış).
+		log("SSL: kaynak sertifikasi okunuyor…")
+		if cp, kp, gercek, err := h.sslAktar(ctx, k, alanAdi, sk, php); err == nil && cp != "" {
 			_, _ = h.DB.ExecContext(ctx,
-				`UPDATE domains SET ssl_aktif=1, ssl_kaynak=?, cert_path=?, key_path=? WHERE id=?`,
-				kaynakAd, crt, key, sonuc.DomainID)
-			log("SSL: %s", kaynakAd)
-			if !gercek {
-				sonuc.Uyarilar = append(sonuc.Uyarilar,
-					"SSL self-signed — DNS bu sunucuya yonlendikten sonra yenileyin")
+				`UPDATE domains SET ssl_aktif=1, ssl_kaynak='imported', cert_path=?, key_path=? WHERE id=?`,
+				cp, kp, sonuc.DomainID)
+			if gercek {
+				log("SSL: kaynak sertifikasi (gercek CA) kopyalandi ve kuruldu")
+			} else {
+				log("SSL: kaynak sertifikasi (self-signed) kopyalandi")
+				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL kaynak self-signed — DNS gecince Let's Encrypt yenileyin")
 			}
 		} else {
-			sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL alinamadi")
+			if err != nil {
+				log("SSL: kaynak sertifikasi alinamadi (%s) — Let's Encrypt deneniyor", kisalt(temizHata(err.Error(), k.Parola), 120))
+			} else {
+				log("SSL: kaynakta kullanilabilir sertifika yok — Let's Encrypt deneniyor")
+			}
+			crt, key, gercek := provisioner.OtoSSLDene(alanAdi, sk, kuruluPHPSec(php), "php-fpm")
+			if crt != "" {
+				kaynakAd := "self-signed"
+				if gercek {
+					kaynakAd = "letsencrypt"
+				}
+				_, _ = h.DB.ExecContext(ctx,
+					`UPDATE domains SET ssl_aktif=1, ssl_kaynak=?, cert_path=?, key_path=? WHERE id=?`,
+					kaynakAd, crt, key, sonuc.DomainID)
+				log("SSL: %s", kaynakAd)
+				if !gercek {
+					sonuc.Uyarilar = append(sonuc.Uyarilar,
+						"SSL self-signed — DNS bu sunucuya yonlendikten sonra yenileyin")
+				}
+			} else {
+				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL alinamadi (kaynak cert yok + LE basarisiz)")
+			}
 		}
 	}
 
@@ -246,6 +266,58 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 	}
 	basarili = true
 	return sonuc, nil
+}
+
+// sslAktar — KAYNAK'tan domainin çalışan cert+key'ini okuyup DOĞRULAYIP kurar.
+// Başarılı: (certPath, keyPath, gercekCA, nil). Kaynakta cert yoksa: ("","",false,nil)
+// → çağıran Let's Encrypt'e düşer. Doğrulama/kurulum hatası: err döner → yine LE.
+func (h *Handlers) sslAktar(ctx context.Context, k *Kaynak, alanAdi, sk, php string) (string, string, bool, error) {
+	certPEM, keyPEM, err := kaynakCertOku(ctx, k, alanAdi)
+	if err != nil {
+		return "", "", false, err
+	}
+	if certPEM == "" || keyPEM == "" {
+		return "", "", false, nil
+	}
+	return provisioner.SertifikaKur(alanAdi, sk, kuruluPHPSec(php), "php-fpm", certPEM, keyPEM)
+}
+
+// kaynakCertOku — kaynak (Plesk) nginx vhost'undan ssl_certificate + ssl_certificate_key
+// YOLLARINI bulup içeriklerini okur (sürümden bağımsız — hangi cert servis ediliyorsa o).
+// Özel anahtar sırdır: yalnız doğrulama+kuruluma beslenir, loglanmaz.
+func kaynakCertOku(ctx context.Context, k *Kaynak, alanAdi string) (string, string, error) {
+	if !reAlanAdi.MatchString(alanAdi) {
+		return "", "", fmt.Errorf("gecersiz alan adi")
+	}
+	uzak := "d=" + shQuote(alanAdi) + "\n" + `conf=$(ls /etc/nginx/plesk.conf.d/vhosts/${d}.conf /etc/nginx/plesk.conf.d/vhosts/${d}_*.conf 2>/dev/null | head -1)
+[ -z "$conf" ] && conf=$(grep -rlsE "server_name[^;]*${d}" /etc/nginx/plesk.conf.d/vhosts/ 2>/dev/null | head -1)
+if [ -n "$conf" ]; then
+  cert=$(grep -hE "^[[:space:]]*ssl_certificate[[:space:]]" "$conf" 2>/dev/null | head -1 | sed -E 's/.*ssl_certificate[[:space:]]+([^;]+);.*/\1/' | tr -d " \t")
+  key=$(grep -hE "^[[:space:]]*ssl_certificate_key[[:space:]]" "$conf" 2>/dev/null | head -1 | sed -E 's/.*ssl_certificate_key[[:space:]]+([^;]+);.*/\1/' | tr -d " \t")
+  if [ -n "$cert" ] && [ -n "$key" ] && [ -f "$cert" ] && [ -f "$key" ]; then
+    printf '###GOSPCERT###\n'; cat "$cert"; printf '\n###GOSPKEY###\n'; cat "$key"; printf '\n###GOSPEND###\n'
+  fi
+fi`
+	out, err := k.Calistir(ctx, uzak)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(kesitAl(out, "###GOSPCERT###", "###GOSPKEY###")),
+		strings.TrimSpace(kesitAl(out, "###GOSPKEY###", "###GOSPEND###")), nil
+}
+
+// kesitAl — s içinde bas ile son işaretleri ARASINDAKİ metni döndürür.
+func kesitAl(s, bas, son string) string {
+	i := strings.Index(s, bas)
+	if i < 0 {
+		return ""
+	}
+	i += len(bas)
+	j := strings.Index(s[i:], son)
+	if j < 0 {
+		return ""
+	}
+	return s[i : i+j]
 }
 
 type dbHedef struct{ Ad, Kul string }
