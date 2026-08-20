@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { apiHata } from '@/lib/api'
-import PHPSurumleriPage from './PHPSurumleriPage'
+import PHPSurumleriPage, { SurumSecim } from './PHPSurumleriPage'
 import PHPModuleriPage, { Secim } from './PHPModuleriPage'
 
 type Adim = { key: string; ad: string; aciklama: string }
@@ -19,10 +19,22 @@ const ADIMLAR: Adim[] = [
 ]
 
 export default function PHPSunucuSihirbaziPage() {
-  const [aktif, setAktif] = useState('surumler')
+  // Aktif adım kalıcı (localStorage) — sayfa yenilenince kalınan adım korunur.
+  const [aktif, setAktifState] = useState<string>(() => {
+    try {
+      const v = localStorage.getItem('gosp.sihirbaz.adim')
+      if (v && ADIMLAR.some(a => a.key === v)) return v
+    } catch { /* yok say */ }
+    return 'surumler'
+  })
+  const setAktif = (k: string) => {
+    setAktifState(k)
+    try { localStorage.setItem('gosp.sihirbaz.adim', k) } catch { /* yok say */ }
+  }
   const aktifIdx = ADIMLAR.findIndex(a => a.key === aktif)
-  // Sihirbaz genelinde biriktirilen "kurulacak" eklentiler (Özet adımında toplu kurulur).
+  // Sihirbaz genelinde biriktirilen "kurulacak" seçimler (Özet adımında toplu kurulur).
   const [secilenler, setSecilenler] = useState<Secim[]>([])
+  const [secilenSurumler, setSecilenSurumler] = useState<SurumSecim[]>([])
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -68,10 +80,10 @@ export default function PHPSunucuSihirbaziPage() {
         {/* İçerik */}
         <section className="min-w-0">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5">
-            {aktif === 'surumler' && <PHPSurumleriPage gomulu />}
+            {aktif === 'surumler' && <PHPSurumleriPage gomulu secilenSurumler={secilenSurumler} setSecilenSurumler={setSecilenSurumler} />}
             {aktif === 'eklentiler' && <PHPModuleriPage gomulu secilenler={secilenler} setSecilenler={setSecilenler} />}
             {aktif === 'websunucu' && <WebSunucuAdim />}
-            {aktif === 'ozet' && <OzetAdim secilenler={secilenler} onTemizle={() => setSecilenler([])} />}
+            {aktif === 'ozet' && <OzetAdim secilenler={secilenler} secilenSurumler={secilenSurumler} onTemizle={() => { setSecilenler([]); setSecilenSurumler([]) }} />}
           </div>
 
           {/* İleri / Geri */}
@@ -141,8 +153,8 @@ function DurumKart({ etiket, deger, ok }: { etiket: string; deger: string; ok?: 
 
 // Özet adımı: seçilen eklentileri TOPLU kurar (kullanıcı isteği). Her eklenti
 // için mevcut async PECL-Kur akışı sırayla çalışır, canlı ilerleme gösterilir.
-type Toplu = { anahtar: string; ad: string; surum: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
-function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: () => void }) {
+type Toplu = { tip: 'surum' | 'eklenti'; anahtar: string; ad: string; surum: string; kaynak?: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
+function OzetAdim({ secilenler, secilenSurumler, onTemizle }: { secilenler: Secim[]; secilenSurumler: SurumSecim[]; onTemizle: () => void }) {
   const [surumler, setSurumler] = useState<any[]>([])
   const [calisiyor, setCalisiyor] = useState(false)
   const [durumlar, setDurumlar] = useState<Toplu[]>([])
@@ -153,24 +165,43 @@ function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: (
     api.get('/php-surumler').then(r => setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu))).catch(() => {})
   }, [])
 
+  const toplamIs = secilenSurumler.length + secilenler.length
+
   async function topluKur() {
-    if (calisiyor || secilenler.length === 0) return
+    if (calisiyor || toplamIs === 0) return
     setCalisiyor(true); setBitti(false)
-    const liste: Toplu[] = secilenler.map(s => ({ ...s, durum: 'bekliyor' }))
+    // Önce PHP sürümleri (eklentiler o sürümlere kurulabilsin), sonra eklentiler.
+    const liste: Toplu[] = [
+      ...secilenSurumler.map(s => ({ tip: 'surum' as const, anahtar: s.surum, ad: `PHP ${s.surum}`, surum: s.surum, kaynak: s.kaynak, durum: 'bekliyor' as const })),
+      ...secilenler.map(s => ({ tip: 'eklenti' as const, anahtar: s.anahtar, ad: s.ad, surum: s.surum, durum: 'bekliyor' as const })),
+    ]
     setDurumlar(liste)
     for (let i = 0; i < liste.length; i++) {
       const s = liste[i]
       setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'kuruluyor' } : x))
       setAktifAdim({ ad: s.ad, adim: 'Başlatılıyor…', yuzde: 2 })
       try {
-        const { data } = await api.post('/php-extensions/pecl-install', { surum: s.surum, paket: s.anahtar })
-        if (data.is_id) {
+        if (s.tip === 'surum') {
+          // PHP sürüm kurulumu — detached iş; durum poll ile izlenir.
+          await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
           for (;;) {
-            await new Promise(r => setTimeout(r, 1500))
-            const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
-            setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
-            if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
-            if (p.data.durum === 'tamam') break
+            await new Promise(r => setTimeout(r, 2000))
+            const d = await api.get('/php-surumler/durum')
+            const calis = d.data?.calisiyor && d.data?.surum === s.surum
+            setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : 'Tamamlanıyor…', yuzde: calis ? 55 : 95 })
+            if (!d.data?.calisiyor) break
+          }
+        } else {
+          // Eklenti — bundled dnf / pecl / derleme (async is_id + yüzde).
+          const { data } = await api.post('/php-extensions/pecl-install', { surum: s.surum, paket: s.anahtar })
+          if (data.is_id) {
+            for (;;) {
+              await new Promise(r => setTimeout(r, 1500))
+              const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
+              setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
+              if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+              if (p.data.durum === 'tamam') break
+            }
           }
         }
         setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'tamam' } : x))
@@ -179,7 +210,7 @@ function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: (
       }
     }
     setAktifAdim(null); setCalisiyor(false); setBitti(true)
-    onTemizle() // seçim listesini temizle (kurulanlar artık "kurulu")
+    onTemizle() // seçim listelerini temizle (kurulanlar artık "kurulu")
   }
 
   return (
@@ -198,23 +229,27 @@ function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: (
         </div>
       </div>
 
-      {/* Kurulacak eklentiler */}
+      {/* Kurulacak bileşenler (PHP sürümleri + eklentiler) */}
       <div>
-        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulacak eklentiler ({secilenler.length})</div>
-        {secilenler.length === 0 && !bitti ? (
+        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulacak bileşenler ({toplamIs})</div>
+        {toplamIs === 0 && !bitti ? (
           <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400">
-            "PHP Eklentileri" adımından kurmak istediğiniz eklentileri seçin (toggle ile işaretleyin), sonra buradan tümünü birlikte kurun.
+            "PHP Sürümleri" ve "PHP Eklentileri" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.
           </div>
         ) : (
           <div className="space-y-2">
-            {(durumlar.length > 0 ? durumlar : secilenler.map(s => ({ ...s, durum: 'bekliyor' as const }))).map((s) => (
-              <div key={s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            {(durumlar.length > 0 ? durumlar : [
+              ...secilenSurumler.map(s => ({ tip: 'surum' as const, anahtar: s.surum, ad: `PHP ${s.surum}`, surum: s.surum, kaynak: s.kaynak, durum: 'bekliyor' as const })),
+              ...secilenler.map(s => ({ tip: 'eklenti' as const, anahtar: s.anahtar, ad: s.ad, surum: s.surum, durum: 'bekliyor' as const })),
+            ] as Toplu[]).map((s) => (
+              <div key={s.tip + s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                 <div className="min-w-0">
+                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? 'sürüm' : 'eklenti'}</span>
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{s.ad}</span>
-                  <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">{s.anahtar} · PHP {s.surum}</span>
-                  {(s as Toplu).mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{(s as Toplu).mesaj}</div>}
+                  {s.tip === 'eklenti' && <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">PHP {s.surum}</span>}
+                  {s.mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{s.mesaj}</div>}
                 </div>
-                <DurumRozet durum={(s as Toplu).durum} />
+                <DurumRozet durum={s.durum} />
               </div>
             ))}
           </div>
@@ -237,12 +272,12 @@ function OzetAdim({ secilenler, onTemizle }: { secilenler: Secim[]; onTemizle: (
         </div>
       )}
 
-      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">✓ Toplu kurulum tamamlandı. Kurulan eklentiler artık "Eklentiler" adımında aktif görünür.</div>}
+      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">✓ Toplu kurulum tamamlandı. Kurulan sürüm/eklentiler ilgili adımlarda aktif görünür.</div>}
 
-      {secilenler.length > 0 && (
+      {toplamIs > 0 && (
         <button onClick={topluKur} disabled={calisiyor}
           className="w-full sm:w-auto px-5 py-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-60">
-          {calisiyor ? 'Kuruluyor…' : `${secilenler.length} eklentiyi kur`}
+          {calisiyor ? 'Kuruluyor…' : `${toplamIs} bileşeni kur`}
         </button>
       )}
     </div>

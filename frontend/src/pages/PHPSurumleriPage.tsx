@@ -19,7 +19,14 @@ type AktifOp = { surum: string; kaynak: string; islem: 'kur' | 'kaldir' }
 type OpDurum = { calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir'; durum?: string }
 type LogYanit = { log: string; calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir' }
 
-export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) {
+// SurumSecim — sihirbazda biriktirilen "kurulacak" PHP sürümü (Özet'te toplu kurulur).
+export type SurumSecim = { surum: string; kaynak: string }
+
+export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSurumler }: {
+  gomulu?: boolean
+  secilenSurumler?: SurumSecim[]
+  setSecilenSurumler?: (fn: (s: SurumSecim[]) => SurumSecim[]) => void
+} = {}) {
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
@@ -73,6 +80,18 @@ export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) 
   }, [aktifOp, yukle])
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [opLog])
+
+  // Sihirbaz (gomulu) modunda: kurulmamış sürümü "kurulacak" işaretle/kaldır.
+  // Gerçek kurulum Özet adımında TOPLU yapılır (tutarlılık: eklentiler gibi).
+  const surumSecili = (s: Surum) =>
+    secilenSurumler?.some(x => x.surum === s.surum && x.kaynak === s.kaynak) ?? false
+  const surumSecimToggle = (s: Surum) => {
+    setSecilenSurumler?.(prev =>
+      surumSecili(s)
+        ? prev.filter(x => !(x.surum === s.surum && x.kaynak === s.kaynak))
+        : [...prev, { surum: s.surum, kaynak: s.kaynak }],
+    )
+  }
 
   async function kur(s: Surum) {
     if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.' })); return }
@@ -178,20 +197,27 @@ export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) 
                       {buOp && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300">{aktifOp?.islem === 'kaldir' ? 'KALDIRILIYOR' : 'KURULUYOR'}</span>}
                     </div>
                   </div>
-                  {/* Toggle: açık=yüklü. AppStream (sistem default) sabittir; kaldırılabilir değil. */}
+                  {/* Toggle: açık=yüklü VEYA "kurulacak" (sihirbazda Özet'te toplu kurulur).
+                      AppStream (sistem default) sabittir; kaldırılabilir değil. */}
                   {(() => {
                     const sabit = s.kaynak === 'appstream' && s.yuklu
-                    const kilit = meşgul || sabit
+                    const secili = !s.yuklu && surumSecili(s)
+                    const acik = s.yuklu || secili
+                    const kilit = sabit || (s.yuklu && meşgul)
                     return (
                       <button
-                        onClick={() => { if (kilit) return; s.yuklu ? kaldir(s) : kur(s) }}
+                        onClick={() => {
+                          if (sabit) return
+                          if (s.yuklu) { if (!meşgul) kaldir(s); return }
+                          if (setSecilenSurumler) surumSecimToggle(s); else if (!meşgul) kur(s)
+                        }}
                         disabled={kilit}
-                        title={sabit ? 'Sistem varsayılanı, kaldırılamaz' : s.yuklu ? 'Kaldır' : 'Kur'}
+                        title={sabit ? 'Sistem varsayılanı, kaldırılamaz' : s.yuklu ? 'Kaldır' : (secili ? 'Seçimi kaldır' : 'Kurulacaklara ekle')}
                         className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                          s.yuklu ? (buOp ? 'bg-sky-400 animate-pulse' : 'bg-emerald-500') : (buOp ? 'bg-sky-400 animate-pulse' : 'bg-slate-300 dark:bg-slate-600')
+                          buOp ? 'bg-sky-400 animate-pulse' : s.yuklu ? 'bg-emerald-500' : secili ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
                         } ${kilit ? 'opacity-60 cursor-not-allowed' : ''}`}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${s.yuklu ? 'translate-x-6' : 'translate-x-1'}`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
                     )
                   })()}
@@ -209,7 +235,7 @@ export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) 
 
                 <div className="text-xs text-slate-500 dark:text-slate-500">
                   {s.yuklu ? (s.kaynak === 'appstream' ? 'Sistem varsayılanı (sabit)' : 'Yüklü — kapatmak için toggle')
-                    : buOp ? 'İşleniyor…' : 'Kurmak için toggle\'ı aç'}
+                    : buOp ? 'İşleniyor…' : surumSecili(s) ? <span className="text-brand-600 dark:text-brand-400">Kurulacak — Özet adımında</span> : 'Kurmak için toggle\'ı aç'}
                 </div>
               </div>
             )
