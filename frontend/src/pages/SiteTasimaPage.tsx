@@ -79,6 +79,8 @@ function Ikon({ d }: { d: string }) {
 }
 const I = {
   check: 'M20 6 9 17l-5-5',
+  mail: 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 7l-10 6L2 7',
+  yenile: 'M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5',
   files: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6',
   db: 'M4 6c0-1.66 3.58-3 8-3s8 1.34 8 3-3.58 3-8 3-8-1.34-8-3M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3',
   dns: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20M2 12h20M12 2c2.5 2.7 3.9 6.3 4 10-.1 3.7-1.5 7.3-4 10-2.5-2.7-3.9-6.3-4-10 .1-3.7 1.5-7.3 4-10',
@@ -109,6 +111,16 @@ function DurumRozet({ durum }: { durum: string }) {
       {durum === 'calisiyor' && <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />}
       {DURUM_ETIKET[durum] || durum}
     </span>
+  )
+}
+
+function RetrySecim({ etiket, ikon, secili, degis, pasif }: { etiket: string; ikon: string; secili: boolean; degis: () => void; pasif?: boolean }) {
+  return (
+    <button type="button" disabled={pasif} onClick={degis}
+      className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm transition ${pasif ? 'opacity-40 cursor-not-allowed' : secili ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-300' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
+      <span className="flex items-center gap-2"><Ikon d={ikon} /> {etiket}</span>
+      <span className={`flex h-4 w-4 items-center justify-center rounded border ${secili ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>{secili && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="h-2.5 w-2.5"><path d={I.check} /></svg>}</span>
+    </button>
   )
 }
 
@@ -203,7 +215,8 @@ export default function SiteTasimaPage() {
   const [gecmis, setGecmis] = useState<Is[]>([])
   const [oturumID, setOturumID] = useState<number | null>(null)
   const [oturumlar, setOturumlar] = useState<Oturum[]>([])
-  const [kimlikSakli, setKimlikSakli] = useState(false) // oturumdan geldiyse parola sunucuda saklı
+  const [kimlikSakli, setKimlikSakli] = useState(false)
+  const [retryAcik, setRetryAcik] = useState(false) // oturumdan geldiyse parola sunucuda saklı
   const logRef = useRef<HTMLPreElement>(null)
   const basladiRef = useRef<number | null>(null) // ETA için başlangıç ms
 
@@ -625,7 +638,29 @@ export default function SiteTasimaPage() {
                 ? <button type="button" onClick={iptalEt} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20">■ Durdur</button>
                 : <div className="flex items-center gap-2">
                     {hesaplar && hesaplar.length > 0 && (
-                      <button type="button" onClick={tekrarDene} className={btnKucuk}>↻ Tekrar dene</button>
+                      <div className="relative">
+                        <button type="button" onClick={() => setRetryAcik(v => !v)} className={btnKucuk}><Ikon d={I.yenile} /> Tekrar dene</button>
+                        {retryAcik && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setRetryAcik(false)} />
+                            <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                              <div className="mb-2 text-xs font-medium text-slate-500">Neyi yeniden taşıyalım?</div>
+                              <div className="space-y-1">
+                                <RetrySecim etiket="Dosyalar" ikon={I.files} secili={dosyalar} degis={() => setDosyalar(v => !v)} />
+                                <RetrySecim etiket="SQL (Veritabanı)" ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
+                                <RetrySecim etiket="DNS" ikon={I.dns} secili={dns} degis={() => setDns(v => !v)} />
+                                <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
+                                <RetrySecim etiket="Mail (yakında)" ikon={I.mail} secili={false} degis={() => {}} pasif />
+                              </div>
+                              <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
+                                <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />
+                                Mevcut siteyi ez (üzerine yaz)
+                              </label>
+                              <button type="button" onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">Seçileni Taşı</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
                     <button type="button" onClick={yeniTasima} className={btnKucuk}>+ Yeni taşıma</button>
                   </div>}
