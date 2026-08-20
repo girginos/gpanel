@@ -247,7 +247,7 @@ export default function PHPModuleriPage() {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setPeclModal(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-2">PECL'den Modül Kur</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">PECL deposundan modül indirir ve derler. Örn: <code className="font-mono">mongodb, swoole, geoip, oauth, yaml, msgpack</code></p>
+            <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">Hazır paket varsa (bundled: <code className="font-mono">gmp, imap, bcmath</code> · PECL: <code className="font-mono">redis, mongodb, imagick</code>) doğrudan kurar; yoksa kaynaktan derler.</p>
             <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded p-2 mb-3">
               ⚠ PHP {aktifSurum} için derleme yapılır. Hedef: <code className="font-mono">/etc/php.d/</code> ya da Remi dizinine
             </p>

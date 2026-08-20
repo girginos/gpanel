@@ -359,8 +359,14 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// 1) DNF prebuild paket dene — hızlı yol (derleme yok).
+		// 🔴 İKİ SINIF: (a) BUNDLED eklentiler (gmp, imap, mbstring, gd, intl…)
+		// PHP kaynak ağacında gelir, paket adı "<prefix>-php-<ad>" (pecl YOK) —
+		// PECL deposunda bulunmaz, `pecl install` başarısız olur. (b) PECL
+		// eklentileri (redis, mongodb, imagick…) "<prefix>-php-pecl-<ad>".
+		// Bundled desenini ÖNCE dene: gmp gibi eklentiler böylece kurulabilir.
 		is.set("Hazır paket aranıyor…", 10)
 		adaylar := []string{
+			prefix + "-php-" + paket, // (a) bundled: php83-php-gmp, php83-php-imap…
 			prefix + "-php-pecl-" + paket,
 			prefix + "-php-pecl-" + paket + "-im7",
 			prefix + "-php-pecl-" + paket + "6",
@@ -369,6 +375,7 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		}
 		if prefix == "php" {
 			adaylar = []string{
+				"php-" + paket, // bundled (AppStream)
 				"php-pecl-" + paket, "php-pecl-" + paket + "6",
 				"php-pecl-" + paket + "5", "php-pecl-" + paket + "3",
 			}
