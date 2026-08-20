@@ -151,7 +151,15 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 	}()
 
 	// --- 2. Dosyalar -------------------------------------------------------
-	if ay.Dosyalar {
+	if ay.Dosyalar && strings.TrimSpace(hs.WebRoot) == "" {
+		// 🔴 KENDİ web kök dizini OLMAYAN alan adı (yönlendirme/hosting-siz alt alan).
+		// Kesif eskiden ANA domainin httpdocs'una düşüyordu → alt alan ANA domainin
+		// TÜM dosyalarını (ör. 15GB WP) alıyordu (canlı bug: wp.girgin.net.tr ana
+		// girgin.net.tr'yi aldı). Artık boş bırakılır; burada SESSİZCE ATLA + uyar.
+		log("bu alan adinin kendi web kok dizini yok (yonlendirme/hosting-siz) — dosya tasinmadi")
+		sonuc.Uyarilar = append(sonuc.Uyarilar,
+			"dosya tasinmadi: bu alan adinin kendi web kok dizini yok (yonlendirme alt alani olabilir)")
+	} else if ay.Dosyalar {
 		uzak := strings.TrimSpace(hs.WebRoot)
 		if !gecerliUzakYol(uzak) {
 			return nil, fmt.Errorf("kaynak web kok dizini gecersiz")

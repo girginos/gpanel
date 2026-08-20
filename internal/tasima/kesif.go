@@ -95,7 +95,7 @@ const komutPlesk = `for d in $(plesk bin subscription --list 2>/dev/null); do
   ana=1
   for sub in $d $(plesk db -Ne "SELECT dom.name FROM domains dom WHERE dom.webspace_id=(SELECT id FROM domains WHERE name='$d') AND dom.name<>'$d'" 2>/dev/null); do
     dr=$(plesk db -Ne "SELECT CONCAT(h.www_root) FROM domains dom JOIN hosting h ON h.dom_id=dom.id WHERE dom.name='$sub' LIMIT 1" 2>/dev/null)
-    [ -n "$dr" ] || dr="/var/www/vhosts/$d/httpdocs"
+    if [ -z "$dr" ]; then if [ "$sub" = "$d" ]; then dr="/var/www/vhosts/$d/httpdocs"; else dr=""; fi; fi
     pv=$(plesk db -Ne "SELECT h.php_handler_id FROM domains dom JOIN hosting h ON h.dom_id=dom.id WHERE dom.name='$sub' LIMIT 1" 2>/dev/null | grep -oE 'php[0-9]+' | head -1 | sed 's/php//')
     sz=$(du -sm "$dr" 2>/dev/null | cut -f1)
     if [ "$ana" = "1" ]; then tur=ana; ana=0; else tur=ek; fi
