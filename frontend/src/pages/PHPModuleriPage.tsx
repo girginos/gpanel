@@ -31,6 +31,7 @@ export default function PHPModuleriPage() {
   const [basari, setBasari] = useState<string | null>(null)
   const [filtre, setFiltre] = useState('')
   const [peclModal, setPeclModal] = useState(false)
+  const [peclIlerleme, setPeclIlerleme] = useState<{ paket: string; adim: string; yuzde: number; yontem: string } | null>(null)
 
   function yukle() {
     setYuk(true); setHata(null)
@@ -102,16 +103,27 @@ export default function PHPModuleriPage() {
     if (!paket.match(/^[a-zA-Z0-9_-]+$/)) {
       (await bilgi({ baslik: 'Bilgi', mesaj: 'Geçersiz paket adı' })); return
     }
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `PECL paketi "${paket}" PHP ${aktifSurum} için derlenip kurulacak. Devam?` }))) return
-    setPeclModal(false); setYuk(true)
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `PECL paketi "${paket}" PHP ${aktifSurum} için kurulacak. Hazır paket yoksa PEAR + derleme araçları otomatik kurulup kaynaktan derlenir (birkaç dakika sürebilir). Devam?` }))) return
+    setPeclModal(false); setHata(null); setBasari(null)
+    setPeclIlerleme({ paket, adim: 'Başlatılıyor…', yuzde: 2, yontem: '' })
     try {
-      const r = await api.post('/php-extensions/pecl-install', { surum: aktifSurum, paket })
+      const { data } = await api.post('/php-extensions/pecl-install', { surum: aktifSurum, paket })
+      // Asenkron iş: is_id ile ilerlemeyi izle (backend derleme adımlarını raporlar).
+      if (data.is_id) {
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1500))
+          const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
+          setPeclIlerleme({ paket, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0, yontem: p.data.yontem || '' })
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+          if (p.data.durum === 'tamam') break
+        }
+      }
       setBasari(`✓ ${paket} kuruldu`)
-      console.log('PECL install output:', r.data.output)
       yukle()
     } catch (err) {
       setHata(apiHata(err, 'PECL kurulum başarısız'))
-      setYuk(false)
+    } finally {
+      setPeclIlerleme(null)
     }
   }
 
@@ -183,6 +195,22 @@ export default function PHPModuleriPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
+      {peclIlerleme && (
+        <div className="mb-3 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
+              <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
+              <span className="font-mono">{peclIlerleme.paket}</span> kuruluyor
+              {peclIlerleme.yontem && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-brand-500">({peclIlerleme.yontem === 'dnf' ? 'hazır paket' : 'derleme'})</span>}
+            </span>
+            <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">%{peclIlerleme.yuzde}</span>
+          </div>
+          <div className="text-xs text-brand-700 dark:text-brand-300 mb-2">{peclIlerleme.adim}</div>
+          <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
+            <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${Math.min(100, peclIlerleme.yuzde)}%` }} />
+          </div>
+        </div>
+      )}
 
       {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">

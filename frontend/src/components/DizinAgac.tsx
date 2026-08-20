@@ -123,7 +123,10 @@ function TreeNode({
               ad={k.adi}
               secili={secili}
               onSec={onSec}
-              baslangicAcik={false}
+              // Kalıcı seçili yola giden dalları otomatik aç: bu klasör seçili
+              // yolun atasıysa (veya kendisiyse) açılır ve alt dizinlerini yükler.
+              // Böylece localStorage'dan gelen derin bir dizin ağaçta görünür.
+              baslangicAcik={secili === k.yol || secili.startsWith(k.yol + '/')}
               derinlik={derinlik + 1}
               yenileme={yenileme}
             />

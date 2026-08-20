@@ -2,7 +2,9 @@
 package phpext
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,12 +13,96 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/phpsurum"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// ── PECL kurulum işi (async + canlı ilerleme) ───────────────────────────────
+// PECL derlemesi (php-devel + pear + gcc derleme) dakikalar sürebilir; senkron
+// HTTP askıda kalır ve kullanıcı ne olduğunu göremezdi. İş goroutine'de yürür,
+// UI /php-extensions/pecl-durum ile adım+yüzdeyi canlı izler.
+type peclIs struct {
+	mu     sync.Mutex
+	Durum  string // "calisiyor" | "tamam" | "hata"
+	Adim   string // insan-okunur adım ("Derleniyor…")
+	Yuzde  int
+	Yontem string // "dnf" | "pecl"
+	Hata   string
+	Log    string // son ~8KB birleşik çıktı
+	bitti  time.Time
+}
+
+func (p *peclIs) set(adim string, yuzde int) {
+	p.mu.Lock()
+	p.Adim = adim
+	p.Yuzde = yuzde
+	p.mu.Unlock()
+}
+func (p *peclIs) logEkle(b []byte) {
+	p.mu.Lock()
+	p.Log += string(b)
+	if len(p.Log) > 8192 {
+		p.Log = p.Log[len(p.Log)-8192:]
+	}
+	p.mu.Unlock()
+}
+func (p *peclIs) basarisiz(msg string) {
+	p.mu.Lock()
+	p.Durum = "hata"
+	p.Hata = msg
+	p.bitti = time.Now()
+	p.mu.Unlock()
+}
+
+var (
+	peclIslerMu sync.Mutex
+	peclIsler   = map[string]*peclIs{}
+)
+
+func peclIsID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "pecl" + time.Now().Format("150405.000000000")
+	}
+	return hex.EncodeToString(b)
+}
+
+func peclIsTemizle() {
+	peclIslerMu.Lock()
+	defer peclIslerMu.Unlock()
+	for id, is := range peclIsler {
+		is.mu.Lock()
+		eski := is.Durum != "calisiyor" && !is.bitti.IsZero() && time.Since(is.bitti) > 10*time.Minute
+		is.mu.Unlock()
+		if eski {
+			delete(peclIsler, id)
+		}
+	}
+}
+
+// PECLDurum: GET /php-extensions/pecl-durum?id=<is_id>
+func (h *Handlers) PECLDurum(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	peclIslerMu.Lock()
+	is := peclIsler[id]
+	peclIslerMu.Unlock()
+	if is == nil {
+		httpx.WriteError(w, http.StatusNotFound, "iş bulunamadı (bitmiş olabilir)")
+		return
+	}
+	is.mu.Lock()
+	resp := map[string]any{
+		"durum": is.Durum, "adim": is.Adim, "yuzde": is.Yuzde,
+		"yontem": is.Yontem, "hata": is.Hata, "log": is.Log,
+	}
+	is.mu.Unlock()
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
 
 type Surum struct {
 	Surum   string `json:"surum"`
@@ -218,6 +304,25 @@ type peclReq struct {
 	Paket string `json:"paket"`
 }
 
+// peclPrefix — Remi sürümünde paket ön eki ("php82"); AppStream'de "php".
+func peclPrefix(s Surum) string {
+	if strings.HasPrefix(s.Service, "php") && strings.Contains(s.Service, "-php-fpm") && s.Service != "php-fpm" {
+		return strings.Split(s.Service, "-")[0]
+	}
+	return "php"
+}
+
+// peclKomut — alt süreci panel sırları OLMADAN, temiz env ile hazırlar.
+func peclKomut(s Surum, argv ...string) *exec.Cmd {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/root",
+		"PHP_PEAR_PHP_BIN=" + s.PHPBin,
+	}
+	return cmd
+}
+
 func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 	var req peclReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -234,94 +339,146 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1) DNF prebuild paket dene — Remi'de paket adı varyantlı (im7, 6, 5 suffixli)
-	prefix := "php"
-	if strings.HasPrefix(s.Service, "php") && strings.Contains(s.Service, "-php-fpm") && s.Service != "php-fpm" {
-		prefix = strings.Split(s.Service, "-")[0] // "php82"
-	}
+	// ── ASENKRON: PECL derlemesi (pear+devel kurulumu + gcc derleme) dakikalar
+	// sürebilir. İş goroutine'de yürür; yanıt hemen is_id döner, UI ilerlemeyi izler.
+	peclIsTemizle()
+	isID := peclIsID()
+	is := &peclIs{Durum: "calisiyor", Adim: "Başlatılıyor…", Yuzde: 2}
+	peclIslerMu.Lock()
+	peclIsler[isID] = is
+	peclIslerMu.Unlock()
 
-	// Olası paket adı varyantları
-	adaylar := []string{
-		prefix + "-php-pecl-" + req.Paket,          // 1) base ad
-		prefix + "-php-pecl-" + req.Paket + "-im7", // 2) imagick için im7 suffix
-		prefix + "-php-pecl-" + req.Paket + "6",    // 3) redis6 / mongodb1 vb. (versiyon suffix)
-		prefix + "-php-pecl-" + req.Paket + "5",    // 4) redis5 (eski sürüm)
-		prefix + "-php-pecl-" + req.Paket + "3",    // 5) xdebug3
-	}
-	if prefix == "php" {
-		// AppStream — ek varyant denemeleri
-		adaylar = []string{
-			"php-pecl-" + req.Paket,
-			"php-pecl-" + req.Paket + "6",
-			"php-pecl-" + req.Paket + "5",
-			"php-pecl-" + req.Paket + "3",
+	prefix := peclPrefix(s)
+	paket := req.Paket
+
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				is.basarisiz(fmt.Sprintf("iç hata: %v", p))
+			}
+		}()
+
+		// 1) DNF prebuild paket dene — hızlı yol (derleme yok).
+		is.set("Hazır paket aranıyor…", 10)
+		adaylar := []string{
+			prefix + "-php-pecl-" + paket,
+			prefix + "-php-pecl-" + paket + "-im7",
+			prefix + "-php-pecl-" + paket + "6",
+			prefix + "-php-pecl-" + paket + "5",
+			prefix + "-php-pecl-" + paket + "3",
 		}
-	}
-
-	dnfPkg := ""
-	for _, ad := range adaylar {
-		if exec.Command("dnf", "info", "--quiet", ad).Run() == nil {
-			dnfPkg = ad
-			break
+		if prefix == "php" {
+			adaylar = []string{
+				"php-pecl-" + paket, "php-pecl-" + paket + "6",
+				"php-pecl-" + paket + "5", "php-pecl-" + paket + "3",
+			}
 		}
-	}
+		dnfPkg := ""
+		for _, ad := range adaylar {
+			if exec.Command("dnf", "info", "--quiet", ad).Run() == nil {
+				dnfPkg = ad
+				break
+			}
+		}
 
-	if dnfPkg != "" {
-		// Prebuild paket var, dnf ile kur
-		cmd := exec.Command("dnf", "install", "-y", dnfPkg)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError,
-				"dnf install fail: "+strings.TrimSpace(string(out)))
+		if dnfPkg != "" {
+			is.mu.Lock()
+			is.Yontem = "dnf"
+			is.mu.Unlock()
+			is.set("Hazır paket kuruluyor ("+dnfPkg+")…", 55)
+			out, err := exec.Command("dnf", "install", "-y", dnfPkg).CombinedOutput()
+			is.logEkle(out)
+			if err != nil {
+				is.basarisiz("dnf install başarısız: " + sonSatir(out))
+				return
+			}
+			is.set("PHP-FPM yeniden başlatılıyor…", 90)
+			ro, _ := exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
+			is.logEkle(ro)
+			is.mu.Lock()
+			is.Durum = "tamam"
+			is.Adim = paket + " kuruldu (hazır paket)"
+			is.Yuzde = 100
+			is.bitti = time.Now()
+			is.mu.Unlock()
 			return
 		}
-		// FPM reload
-		_, _ = exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
-		httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-			"ok":      true,
-			"paket":   req.Paket,
-			"surum":   req.Surum,
-			"yontem":  "dnf",
-			"dnf_pkg": dnfPkg,
-			"output":  string(out),
-		})
-		return
-	}
 
-	// 2) Fallback: PECL build (libc-client gerek olabilir, dev paketleri lazim)
-	if _, err := os.Stat(s.PECLBin); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"prebuild dnf paketi yok ("+dnfPkg+") ve PECL kurulu degil. Manuel kurulum gerekli: dnf install "+strings.Split(s.Service, "-")[0]+"-php-pear")
-		return
-	}
-	cmd := exec.Command(s.PECLBin, "install", "-f", req.Paket)
-	// Guvenlik: panel sirlarini alt-surece verme (allowlist env)
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/root",
-		"PHP_PEAR_PHP_BIN=" + s.PHPBin,
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError,
-			"pecl install fail: "+strings.TrimSpace(string(out)))
-		return
-	}
+		// 2) PECL build yolu. KALICI ÇÖZÜM: pecl/pear + derleme araçları yoksa
+		// otomatik kur (eskiden "Manuel kurulum gerekli" diye hata veriyordu).
+		is.mu.Lock()
+		is.Yontem = "pecl"
+		is.mu.Unlock()
 
-	// ini dosyasi olustur
-	iniPath := filepath.Join(s.IniDir, "50-"+req.Paket+".ini")
-	if _, err := os.Stat(iniPath); err != nil {
-		_ = os.WriteFile(iniPath, []byte("extension="+req.Paket+".so\n"), 0644)
-	}
-	_, _ = exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
+		if _, err := os.Stat(s.PECLBin); err != nil {
+			is.set("PECL/PEAR kuruluyor ("+prefix+"-php-pear)…", 25)
+			out, err := exec.Command("dnf", "install", "-y", prefix+"-php-pear").CombinedOutput()
+			is.logEkle(out)
+			if err != nil {
+				is.basarisiz("PEAR kurulamadı (" + prefix + "-php-pear): " + sonSatir(out))
+				return
+			}
+			if _, err := os.Stat(s.PECLBin); err != nil {
+				is.basarisiz("PEAR kuruldu ama pecl bulunamadı: " + s.PECLBin)
+				return
+			}
+		}
 
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"ok":     true,
-		"paket":  req.Paket,
-		"surum":  req.Surum,
-		"yontem": "pecl",
-		"output": string(out),
+		// Derleme araçları: pecl install kaynaktan derler → php-devel + gcc/make/autoconf şart.
+		is.set("Derleme araçları hazırlanıyor…", 40)
+		devel := prefix + "-php-devel"
+		if prefix == "php" {
+			devel = "php-devel"
+		}
+		bout, berr := exec.Command("dnf", "install", "-y", devel, "gcc", "make", "autoconf").CombinedOutput()
+		is.logEkle(bout)
+		if berr != nil {
+			is.basarisiz("derleme araçları kurulamadı: " + sonSatir(bout))
+			return
+		}
+
+		// pecl install — kaynaktan derleme (uzun sürebilir).
+		is.set("Derleniyor: "+paket+" (pecl install)…", 60)
+		out, err := peclKomut(s, s.PECLBin, "install", "-f", paket).CombinedOutput()
+		is.logEkle(out)
+		if err != nil {
+			is.basarisiz("pecl install başarısız: " + sonSatir(out))
+			return
+		}
+
+		// ini dosyası + FPM reload.
+		is.set("Etkinleştiriliyor (ini + PHP-FPM)…", 88)
+		iniPath := filepath.Join(s.IniDir, "50-"+paket+".ini")
+		if _, err := os.Stat(iniPath); err != nil {
+			_ = os.WriteFile(iniPath, []byte("extension="+paket+".so\n"), 0644)
+		}
+		ro, _ := exec.Command("systemctl", "reload-or-restart", s.Service).CombinedOutput()
+		is.logEkle(ro)
+		is.mu.Lock()
+		is.Durum = "tamam"
+		is.Adim = paket + " derlendi ve etkinleştirildi"
+		is.Yuzde = 100
+		is.bitti = time.Now()
+		is.mu.Unlock()
+	}()
+
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"ok":    true,
+		"is_id": isID,
+		"paket": req.Paket,
+		"surum": req.Surum,
 	})
+}
+
+// sonSatir — çıktının son anlamlı satırı (hata mesajı için).
+func sonSatir(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func (h *Handlers) PECLSil(w http.ResponseWriter, r *http.Request) {

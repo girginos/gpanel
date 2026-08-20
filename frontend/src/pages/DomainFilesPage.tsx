@@ -49,7 +49,16 @@ export default function DomainFilesPage() {
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
-  const [yol, setYol] = useState<string>('/public_html')
+  // Seçili dizin domain başına kalıcı (localStorage) — dosya yöneticisine geri
+  // dönünce en son bakılan dizin açık gelir. Anahtar domain/subdomain'e özel.
+  const yolAnahtar = `gosp.dosya.yol.${id ?? ''}${sid ? '.' + sid : ''}`
+  const [yol, setYolState] = useState<string>(() => {
+    try { return localStorage.getItem(yolAnahtar) || '/public_html' } catch { return '/public_html' }
+  })
+  const setYol = (y: string) => {
+    setYolState(y)
+    try { localStorage.setItem(yolAnahtar, y) } catch { /* yok say */ }
+  }
   useEffect(() => {
     if (!sid) return
     api.get<{ docroot: string }>(`/domains/${id}/subdomain/${sid}`).then(r => {
