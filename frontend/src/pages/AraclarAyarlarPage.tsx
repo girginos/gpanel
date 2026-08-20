@@ -41,12 +41,9 @@ const GRUPLAR: Grup[] = [
     ad: 'PHP',
     ikon: I.chip,
     araclar: [
-      { baslik: 'PHP Sürümleri', href: '/araclar/php-surumler', ikon: I.chip, rozet: 'Dinamik',
-        anahtar: 'remi fpm versiyon 7.4 8.0 8.1 8.2 8.3 8.4 8.5 8.6',
-        aciklama: '7.4 → 8.6 sürümlerini ekleyin / kaldırın. Her domain kendi sürümünü seçer.' },
-      { baslik: 'PHP Modülleri', href: '/sistem/php-modulleri', ikon: I.puzzle,
-        anahtar: 'extension pecl derleme',
-        aciklama: 'Sunucu genelinde eklenti aç/kapat. PECL paket arama ve derleme.' },
+      { baslik: 'PHP & Sunucu Sihirbazı', href: '/php-sunucu-sihirbazi', ikon: I.chip, rozet: 'Sihirbaz',
+        anahtar: 'remi fpm versiyon 7.4 8.0 8.1 8.2 8.3 8.4 extension pecl derleme ioncube loader easyapache web sunucu nginx',
+        aciklama: 'PHP sürümleri, eklentiler, loader ve web sunucu ayarları tek adım-adım sihirbazda.' },
     ],
   },
   {

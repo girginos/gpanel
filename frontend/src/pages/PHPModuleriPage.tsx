@@ -15,7 +15,7 @@ const ZORUNLU = new Set([
   'session', 'pcre', 'tokenizer', 'json', 'hash', 'random', 'libxml',
 ])
 
-export default function PHPModuleriPage() {
+export default function PHPModuleriPage({ gomulu }: { gomulu?: boolean } = {}) {
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [aktifSurum, setAktifSurumState] = useState(() => {
@@ -132,15 +132,17 @@ export default function PHPModuleriPage() {
   const pasifSayi = exts.length - aktifSayi
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Sistem Yönetimi' },
-        { etiket: 'PHP Modülleri' },
-      ]} />
+    <div className={gomulu ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}>
+      {!gomulu && (
+        <Breadcrumb items={[
+          { etiket: 'Anasayfa', href: '/' },
+          { etiket: 'Sistem Yönetimi' },
+          { etiket: 'PHP Modülleri' },
+        ]} />
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">PHP Modülleri</h1>
+        {!gomulu && <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">PHP Modülleri</h1>}
         <div className="flex gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
           <button onClick={() => {
               const ioncubeKurlu = exts.some(e => e.adi.toLowerCase().includes('ioncube'))

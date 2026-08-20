@@ -54,9 +54,9 @@ import DomainWebSunucuPage from '@/pages/DomainWebSunucuPage'
 import DomainLaravelPage from '@/pages/DomainLaravelPage'
 import DomainWafPage from '@/pages/DomainWafPage'
 import PHPModuleriPage from '@/pages/PHPModuleriPage'
+import PHPSunucuSihirbaziPage from '@/pages/PHPSunucuSihirbaziPage'
 import PaketlerPage from '@/pages/PaketlerPage'
 import PaketDetayPage from '@/pages/PaketDetayPage'
-import PHPSurumleriPage from '@/pages/PHPSurumleriPage'
 import AraclarAyarlarPage from '@/pages/AraclarAyarlarPage'
 import DNSSablonuPage from '@/pages/DNSSablonuPage'
 import ServislerPage from '@/pages/ServislerPage'
@@ -148,10 +148,13 @@ export default function App() {
         <Route path="abonelikler/:id/web-sunucu"    element={<DomainWebSunucuPage />} />
         <Route path="abonelikler/:id/laravel" element={<DomainLaravelPage />} />
         <Route path="abonelikler/:id/waf"           element={<DomainWafPage />} />
-        <Route path="sistem/php-modulleri"           element={<PHPModuleriPage />} />
+        <Route path="php-sunucu-sihirbazi"           element={<PHPSunucuSihirbaziPage />} />
+        {/* Eski dağınık sayfalar tek sihirbaza yönlendirir (kullanıcı isteği). */}
+        <Route path="sistem/php-modulleri"           element={<Navigate to="/php-sunucu-sihirbazi" replace />} />
+        <Route path="_eski/php-modulleri"            element={<PHPModuleriPage />} />
         <Route path="araclar/paketler"               element={<PaketlerPage />} />
         <Route path="araclar/paketler/:id"           element={<PaketDetayPage />} />
-        <Route path="araclar/php-surumler"           element={<PHPSurumleriPage />} />
+        <Route path="araclar/php-surumler"           element={<Navigate to="/php-sunucu-sihirbazi" replace />} />
         <Route path="araclar/servisler"              element={<ServislerPage />} />
         <Route path="araclar/dns-sablonu"            element={<DNSSablonuPage />} />
         <Route path="araclar/guncelleme" element={<PanelGuncellemePage />} />

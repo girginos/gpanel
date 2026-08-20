@@ -19,7 +19,7 @@ type AktifOp = { surum: string; kaynak: string; islem: 'kur' | 'kaldir' }
 type OpDurum = { calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir'; durum?: string }
 type LogYanit = { log: string; calisiyor: boolean; surum?: string; kaynak?: string; islem?: 'kur' | 'kaldir' }
 
-export default function PHPSurumleriPage() {
+export default function PHPSurumleriPage({ gomulu }: { gomulu?: boolean } = {}) {
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
@@ -108,19 +108,23 @@ export default function PHPSurumleriPage() {
   const yukluSayi = surumler.filter(s => s.yuklu).length
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
-        { etiket: 'PHP Sürümleri' },
-      ]} />
+    <div className={gomulu ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}>
+      {!gomulu && (
+        <>
+          <Breadcrumb items={[
+            { etiket: 'Anasayfa', href: '/' },
+            { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
+            { etiket: 'PHP Sürümleri' },
+          ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Sürümleri</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
-        Sunucuya istediğiniz PHP sürümünü ekleyin veya kaldırın. Her sürüm bağımsız PHP-FPM havuzunda çalışır; domain bazında seçilebilir.
-        Kurulum 14 paket içerir (fpm, cli, mysqlnd, mbstring, bcmath, intl, gd, soap, opcache, pdo, xml, zip, pgsql, ldap).
-        Kurulum/kaldırma <strong>arka planda</strong> çalışır — <strong>sayfayı kapatabilirsiniz, işlem devam eder</strong>.
-      </p>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Sürümleri</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
+            Sunucuya istediğiniz PHP sürümünü ekleyin veya kaldırın. Her sürüm bağımsız PHP-FPM havuzunda çalışır; domain bazında seçilebilir.
+            Kurulum 14 paket içerir (fpm, cli, mysqlnd, mbstring, bcmath, intl, gd, soap, opcache, pdo, xml, zip, pgsql, ldap).
+            Kurulum/kaldırma <strong>arka planda</strong> çalışır — <strong>sayfayı kapatabilirsiniz, işlem devam eder</strong>.
+          </p>
+        </>
+      )}
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
