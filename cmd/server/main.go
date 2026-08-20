@@ -590,6 +590,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)
 				r.With(middleware.DBSahipligi("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)
 				r.With(middleware.DBSahipligi("dbid")).Put("/databases/{dbid}/password", domainsH.SetDatabasePassword)
+				r.With(middleware.DBSahipligi("dbid")).Post("/databases/{dbid}/optimize", domainsH.OptimizeDatabase)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files", filesH.List)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/oku", filesH.Read)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/indir", filesH.Download)

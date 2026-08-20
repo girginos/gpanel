@@ -26,7 +26,7 @@ function boyutFmt(b: number): string {
 }
 
 export default function DomainDatabasesPage() {
-  const { bilgi } = useDialog()
+  const { bilgi, onay } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dbler, setDbler] = useState<DB[]>([])
@@ -37,6 +37,7 @@ export default function DomainDatabasesPage() {
   const [ekleAcik, setEkleAcik] = useState(false)
   const [paroliGoster, setParolaGoster] = useState<Record<number, boolean>>({})
   const [kopya, setKopya] = useState<number | null>(null)
+  const [optId, setOptId] = useState<number | null>(null)
 
   function yukle() {
     if (!id) return
@@ -46,6 +47,31 @@ export default function DomainDatabasesPage() {
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
   }
+  async function optimizeEt(d: DB) {
+    if (optId) return
+    if (!(await onay({
+      baslik: 'Veritabanını Optimize Et',
+      mesaj: `"${d.db_adi}" içindeki tüm tablolar optimize edilecek (fragmentasyon giderilir, kullanılmayan alan geri kazanılır). Büyük tablolarda işlem birkaç saniye sürebilir. Devam edilsin mi?`,
+      onayEtiketi: 'Optimize Et',
+    }))) return
+    setOptId(d.id)
+    try {
+      const { data } = await api.post(`/databases/${d.id}/optimize`)
+      const kaz = Number(data?.kazanilan_bayt || 0)
+      await bilgi({
+        baslik: 'Optimize Tamamlandı',
+        mesaj: kaz > 0
+          ? `"${d.db_adi}" optimize edildi. ${boyutFmt(kaz)} alan geri kazanıldı (${boyutFmt(Number(data?.once_bayt || 0))} → ${boyutFmt(Number(data?.sonra_bayt || 0))}).`
+          : `"${d.db_adi}" optimize edildi. Tablolar zaten derli topluydu, geri kazanılacak belirgin alan yoktu.`,
+      })
+      yukle()
+    } catch (e) {
+      await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Optimize başarısız') })
+    } finally {
+      setOptId(null)
+    }
+  }
+
   async function pmaAc(d: DB) {
     try {
       const { data } = await api.post<{ signon_url: string }>(`/databases/${d.id}/pma-token`)
@@ -149,6 +175,7 @@ export default function DomainDatabasesPage() {
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   <button onClick={() => pmaAc(d)} className="group inline-flex items-center gap-1.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç"><Ikon d={I.kilitAcik} className="h-4 w-4 transition-transform group-hover:scale-110" /> phpMyAdmin</button>
                   <button onClick={() => setPwResetFor(d)} className="group inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded"><Ikon d={I.anahtar} className="h-4 w-4 transition-transform group-hover:rotate-12" /> Parola Sıfırla</button>
+                  <button onClick={() => optimizeEt(d)} disabled={optId === d.id} className="group inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20 px-2 py-1 rounded disabled:opacity-50" title="Tüm tabloları optimize et (alan geri kazan)"><Ikon d={I.simsek} className={`h-4 w-4 transition-transform ${optId === d.id ? 'animate-pulse' : 'group-hover:scale-110'}`} /> {optId === d.id ? 'Optimize ediliyor…' : 'Optimize Et'}</button>
                   <button onClick={() => setSilinecek(d)} className="group inline-flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded"><Ikon d={I.cop} className="h-4 w-4 transition-transform group-hover:scale-110" /> Sil</button>
                 </td>
               </tr>
