@@ -13,8 +13,14 @@ import (
 // + panel DB metadata (db_accounts.db_pass_plain) güncelle.
 // Birden çok DB aynı user'a sahipse (ki bizde 1:1) tek query yeterli.
 func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
-	if !strings.HasPrefix(dbUser, "c_") {
-		return fmt.Errorf("güvenlik: c_ prefix'siz user reddedildi")
+	// 🔴 GÜVENLİK: dbUser panel-yönetimli bir DB kullanıcısı OLMALI (db_accounts'ta
+	// kayıtlı). Eski "c_ prefix" şartı, ORİJİNAL adla taşınan DB kullanıcılarını
+	// (ör. admin_wp_vvzhh) meşru olduğu halde reddediyordu — sahiplik zaten çağıran
+	// handler'da (YonetimSahibi + db_accounts lookup) doğrulanır. Burada dbUser'ın
+	// panel-kaydı olduğunu teyit et: root/sistem kullanıcısına ALTER'ı yine engeller.
+	var kayitli int
+	if e := panelDB.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_user=?`, dbUser).Scan(&kayitli); e != nil || kayitli == 0 {
+		return fmt.Errorf("güvenlik: panel-kayıtlı olmayan DB kullanıcısı reddedildi")
 	}
 	// MariaDB user'ın varlığını doğrula
 	if !ParolaGecerli(yeniPw) {
