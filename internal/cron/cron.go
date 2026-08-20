@@ -4,6 +4,7 @@ package cron
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 
@@ -253,4 +255,52 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": silinen})
+}
+
+// Calistir: bir cron görevini ELLE tetikler (test/doğrulama). Görevin komutu
+// tenant kullanıcısı (sk) olarak, panel sırları OLMADAN temiz env ile, 120sn
+// zaman aşımıyla çalıştırılır; birleşik çıktının son ~8KB'ı döner.
+//
+// GÜVENLİK: komut zaten tenant'ın KENDİ crontab'ından okunur (kendi yazdığı) ve
+// zaten kendi kimliğinde koşacaktı — bu yalnız zamanı öne alır. runuser tenant'a
+// düşürür; ek ayrıcalık yoktur. lookup demo/sk kontrolünü yapar.
+func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
+	sk, err := h.lookup(r)
+	if err != nil {
+		httpx.WriteError(w, statusFromErr(err), err.Error())
+		return
+	}
+	idx, _ := strconv.Atoi(chi.URLParam(r, "idx"))
+	list, err := read(sk)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if idx < 0 || idx >= len(list) {
+		httpx.WriteError(w, http.StatusNotFound, "index aralık dışında")
+		return
+	}
+	komut := list[idx].Komut
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "runuser", "-u", sk, "--", "/bin/sh", "-c", komut)
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/home/" + sk,
+	}
+	out, runErr := cmd.CombinedOutput()
+	cikti := string(out)
+	if len(cikti) > 8192 {
+		cikti = "…(kısaltıldı)\n" + cikti[len(cikti)-8192:]
+	}
+	resp := map[string]any{"ok": runErr == nil, "cikti": cikti, "komut": komut}
+	if runErr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			resp["hata"] = "zaman aşımı (120sn) — görev arka planda sürebilir"
+		} else {
+			resp["hata"] = runErr.Error()
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }

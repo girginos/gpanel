@@ -10,6 +10,7 @@ export type Ozet = {
   ipv4: string; ssl_aktif: boolean; ssl_bitis?: string
   disk_mb: Limit; trafik_mb: Limit
   db_sayisi: Limit; ftp_sayisi: Limit; eposta_sayi: Limit; domain_sayi: Limit
+  inode_kullanim: number; inode_limit: number
   dns_kayit: number; cron_is: number
   yedek_sayisi: number; yedek_mb: number
 }
@@ -73,6 +74,12 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
         </div>
 
         <Bar etiket="Disk" k={ozet.disk_mb.kullanim} l={ozet.disk_mb.limit} birim="MB" renk="indigo" />
+        {/* Inode (dosya sayısı) kotası — yalnız XFS kota aktifse (limit>0) gösterilir.
+            Disk MB dolu değilken "kota aşıldı" (EDQUOT) yaşanmasının nedeni burasıdır;
+            kullanıcı yalnız MB gördüğü için sebebi anlaşılmıyordu. */}
+        {ozet.inode_limit > 0 && (
+          <Bar etiket="Inode (dosya)" k={ozet.inode_kullanim} l={ozet.inode_limit} birim="adet" renk="teal" />
+        )}
         <Bar etiket="Trafik (aylık)" k={ozet.trafik_mb.kullanim} l={ozet.trafik_mb.limit} birim="MB" renk="sky" />
         <Bar etiket="Veritabanı" k={ozet.db_sayisi.kullanim} l={ozet.db_sayisi.limit} birim="DB" renk="emerald" />
         <Bar etiket="FTP Hesabı" k={ozet.ftp_sayisi.kullanim} l={ozet.ftp_sayisi.limit} birim="hesap" renk="amber" />

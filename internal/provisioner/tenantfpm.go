@@ -257,6 +257,10 @@ type tenantPoolSettings struct {
 	DisableFunctions  string
 	PMStrategy        string
 	PMMaxRequests     int
+	// OPcache: WHMCS gibi bazı uygulamalar cache tutarsızlığı nedeniyle
+	// KAPATILMASINI ister. Panelden kapatılınca pool'a yansımalı (eskiden hiç
+	// render edilmiyordu → tenant PHP global default'u = açık kalıyordu).
+	OpcacheEnable bool
 	// Loglama / Debug Modu (php_settings) — saglam fatal-gorunurluk icin.
 	DisplayErrors  bool
 	LogErrors      bool
@@ -265,6 +269,42 @@ type tenantPoolSettings struct {
 }
 
 const hardenedDisableFns = "exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid"
+
+// zorunluDisableFns — TENANT'IN ASLA AÇAMAYACAĞI taban (mandatory floor).
+// Panel ne gönderirse göndersin (df tamamen boş olsa bile) bu fonksiyonlar
+// HER ZAMAN pool'a bloke yazılır. İçerik BİLİNÇLİ olarak SADECE LPE / izolasyon-
+// kaçışı primitifleridir — meşru web uygulamaları (WP, WHMCS, XenForo) bunları
+// KULLANMAZ; ama bir tenant kabuk (exec) elde ederse bunlarla ayrıcalık yükseltir
+// veya symlink ile jail dışına yazar. "Shell yürütme" kategorisi (exec/system/
+// shell_exec/passthru/proc_open/popen) KASITEN taban DIŞINDADIR: operatör onları
+// panelden açabilsin (kullanıcı isteği: Shell toggle'ı çalışmalı). Böylece boş df
+// artık tenant'ı tamamen açığa çıkarmaz — en tehlikeli non-web primitifleri korur.
+//
+// GÜVENLİK GEÇMİŞİ: eski kod boş df'yi hardened'a düşürüyordu (Shell toggle "geri
+// dönüyor" şikayeti); sonraki fix df'yi verbatim yazınca boş df TÜM guard'ı kapattı
+// (canlı regresyon: xf.versilo.net domain 29 df="" → sıfır bloke). Bu taban ikisini
+// de çözer: toggle çalışır, LPE primitifleri asla düşmez.
+const zorunluDisableFns = "dl,symlink,link,pcntl_exec,proc_nice,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid"
+
+// dfBirlestir — kullanıcı df'sine zorunlu tabanı ekler (yinelenenleri eler, sıra
+// korunur). Kullanıcının koyduğu her şey kalır; taban eksikse tamamlanır.
+func dfBirlestir(kullaniciDF string) string {
+	gorulen := map[string]bool{}
+	var sonuc []string
+	ekle := func(csv string) {
+		for _, f := range strings.Split(csv, ",") {
+			f = strings.TrimSpace(f)
+			if f == "" || gorulen[f] {
+				continue
+			}
+			gorulen[f] = true
+			sonuc = append(sonuc, f)
+		}
+	}
+	ekle(kullaniciDF)       // önce operatörün seçtikleri (Shell dahil edebilir/etmeyebilir)
+	ekle(zorunluDisableFns) // sonra asla-düşmeyecek taban
+	return strings.Join(sonuc, ",")
+}
 
 func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	// 🔴 UCUNCU VARSAYILAN KAYNAGI. Ayni degerler uc yerde tanimli:
@@ -287,6 +327,7 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 		DisableFunctions:  hardenedDisableFns,
 		PMStrategy:        "ondemand",
 		PMMaxRequests:     500,
+		OpcacheEnable:     true,
 		DisplayErrors:     false,
 		LogErrors:         true,
 		ErrorReporting:    "E_ALL & ~E_DEPRECATED & ~E_STRICT",
@@ -297,13 +338,15 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	}
 	var ml, pms, ums, df, strat string
 	var met, mit, pmr int
+	var oce int
 	err := db.QueryRow(`SELECT memory_limit, max_execution_time, max_input_time,
-	        post_max_size, upload_max_filesize, disable_functions, pm_strategy, pm_max_requests
+	        post_max_size, upload_max_filesize, disable_functions, pm_strategy, pm_max_requests, opcache_enable
 	        FROM php_settings WHERE domain_id=?`, domainID).
-		Scan(&ml, &met, &mit, &pms, &ums, &df, &strat, &pmr)
+		Scan(&ml, &met, &mit, &pms, &ums, &df, &strat, &pmr, &oce)
 	if err != nil {
 		return s // satır yok → hardened default
 	}
+	s.OpcacheEnable = oce != 0
 	s.MemoryLimit = tenantSanitizeScalar(ml, s.MemoryLimit)
 	s.PostMaxSize = tenantSanitizeScalar(pms, s.PostMaxSize)
 	s.UploadMaxFilesize = tenantSanitizeScalar(ums, s.UploadMaxFilesize)
@@ -314,9 +357,13 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	// gerçekte bloke kalıyordu (UI ≠ runtime sapması). Yalnız kontrol-karakteri
 	// enjeksiyonunda hardened'a düşülür.
 	if strings.ContainsAny(df, "\r\n\x00") {
-		// enjeksiyon girişimi → hardened kalır
+		// Enjeksiyon girişimi → kullanıcı df'si yok sayılır, hardened default'a
+		// zorunlu taban zaten dahil (aşağıdaki merge no-op).
+		s.DisableFunctions = dfBirlestir(s.DisableFunctions)
 	} else {
-		s.DisableFunctions = strings.TrimSpace(df)
+		// Kullanıcının seçtikleri + ASLA düşmeyen zorunlu taban (LPE primitifleri).
+		// df boş olsa bile taban uygulanır → tenant tamamen açığa çıkamaz.
+		s.DisableFunctions = dfBirlestir(strings.TrimSpace(df))
 	}
 	s.PMStrategy = tenantSanitizeScalar(strat, s.PMStrategy)
 	if met > 0 {
@@ -396,6 +443,14 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	fmt.Fprintf(&b, "php_admin_value[max_input_time] = %d\n", ps.MaxInputTime)
 	fmt.Fprintf(&b, "php_admin_value[post_max_size] = %s\n", ps.PostMaxSize)
 	fmt.Fprintf(&b, "php_admin_value[upload_max_filesize] = %s\n", ps.UploadMaxFilesize)
+	// OPcache: panelden kapatılınca gerçekten kapansın (WHMCS uyumu). php_admin_flag
+	// → tenant ini_set ile geri açamaz. Eskiden hiç render edilmiyordu; panel "kapalı"
+	// gösterse de PHP global default (açık) geçerliydi ve WHMCS uyarı veriyordu.
+	opcFlag := "off"
+	if ps.OpcacheEnable {
+		opcFlag = "on"
+	}
+	fmt.Fprintf(&b, "php_admin_flag[opcache.enable] = %s\n", opcFlag)
 	// ---- Loglama (per-tenant, saglam): PHP fatal'lari sessizce kaybolmasin ----
 	// log_errors ACIK + display_errors KAPALI (prod). error_log BILEREK verilmez ->
 	// PHP hatalari stderr'e gider, catch_workers_output ile master bunlari per-tenant

@@ -43,6 +43,7 @@ export default function DomainCronPage() {
   const [yukleniyor, setYukleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [modal, setModal] = useState(false)
+  const [calisan, setCalisan] = useState<number | null>(null)
 
   function yukle() {
     if (!id) return
@@ -57,6 +58,21 @@ export default function DomainCronPage() {
     if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
     yukle()
   }, [id])
+
+  async function calistir(g: Gorev) {
+    setCalisan(g.idx)
+    try {
+      const { data } = await api.post(`/domains/${id}/cron/${g.idx}/calistir`)
+      const baslik = data.ok ? '✓ Görev çalıştı' : '⚠ Görev hata verdi'
+      const cikti = (data.cikti || '').trim() || '(çıktı yok)'
+      const hataStr = data.hata ? `\n\nHata: ${data.hata}` : ''
+      await bilgi({ baslik, mesaj: `$ ${data.komut}\n\n${cikti}${hataStr}` })
+    } catch (e) {
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Çalıştırma başarısız') }))
+    } finally {
+      setCalisan(null)
+    }
+  }
 
   async function sil(g: Gorev) {
     if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${g.komut.slice(0, 60)}..." görevi silinsin mi?`, tehlike: true }))) return
@@ -154,7 +170,8 @@ export default function DomainCronPage() {
                     <div className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</div>
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
-                  <td className={`${T.hucreAksiyon} lg:text-right`}>
+                  <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
+                    <button onClick={() => calistir(g)} disabled={calisan === g.idx} className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition disabled:opacity-50" title="Görevi şimdi elle çalıştır">{calisan === g.idx ? 'Çalışıyor…' : 'Çalıştır'}</button>
                     <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
                   </td>
                 </tr>
@@ -213,7 +230,7 @@ function CronEkleModal({ acik, onKapat, onEklendi, domainId }: {
                 key={p.etiket}
                 type="button"
                 onClick={() => uygula(p.secim)}
-                className="px-2 py-1 text-xs bg-slate-100 dark:bg-slate-800 hover:bg-brand-100 dark:bg-brand-900/30 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 rounded transition"
+                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition"
               >
                 {p.etiket}
               </button>

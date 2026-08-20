@@ -43,6 +43,9 @@ const (
 	blobB64Oran       = 96   // pencerede yüzde kaç base64 karakteri → kodlanmış gövde
 	blobKodIpucu      = 5    // enjekte kod penceresinde aranan PHP sözdizim karakteri sayısı
 	blobKodPencere    = 160  // PHP açılışından sonra incelenen bayt
+	blobNonB64Esik    = 2    // base64 gövdede bu kadar ardışık base64-olmayan bayt → düz kod başladı
+	// (saf base64 gövde HİÇ non-b64 içermez; 2 ardışık non-b64 = düz kod. `';eval`
+	//  dizisindeki `';` bunu tetikler — `eval` harfleri base64 alfabesinde olsa da.)
 )
 
 // ikiliBayt — bayt "metin dışı" mı. Yazdırılabilir ASCII ve olağan boşluklar
@@ -79,7 +82,10 @@ var phpSozdizimKume = []byte{0x20, 0x24, 0x28, 0x29, 0x3b, 0x27, 0x22, 0x0a, 0x0
 // Gövde başlangıcı = damgadan sonraki ilk `blobIkiliEsik` uzunluğunda ardışık
 // ikili bayt dizisi. Böylece düz metin önsöz (telif başlığı, loader-yok mesajı)
 // tarama KAPSAMINDA kalır; yalnız şifreli kısım dışlanır.
-func kodlayiciBlobBaslangici(icerik []byte) (string, int, bool) {
+// Dönüş: (kodlayıcı adı, blob başlangıç ofseti, bulundu, base64mi). base64mi=false
+// ise blob ham-ikili gövdedir (tümü opak; tail taranmaz — FP kaynağı). base64mi=true
+// ise blob base64 dizisidir ve dizinin BİTİMİNDEN sonrası (sink tail) taranabilir.
+func kodlayiciBlobBaslangici(icerik []byte) (string, int, bool, bool) {
 	bas := icerik
 	if len(bas) > kodlayiciBasBakis {
 		bas = bas[:kodlayiciBasBakis]
@@ -92,7 +98,7 @@ func kodlayiciBlobBaslangici(icerik []byte) (string, int, bool) {
 		}
 	}
 	if adi == "" {
-		return "", 0, false
+		return "", 0, false, false
 	}
 	// (a) İKİLİ gövde (bazı paketleyiciler ham ikili yazar)
 	ardisik := 0
@@ -100,7 +106,7 @@ func kodlayiciBlobBaslangici(icerik []byte) (string, int, bool) {
 		if ikiliBayt(icerik[i]) {
 			ardisik++
 			if ardisik >= blobIkiliEsik {
-				return adi, i - ardisik + 1, true
+				return adi, i - ardisik + 1, true, false
 			}
 			continue
 		}
@@ -124,12 +130,12 @@ func kodlayiciBlobBaslangici(icerik []byte) (string, int, bool) {
 			for bas > 0 && b64Karakter(icerik[bas-1]) {
 				bas--
 			}
-			return adi, bas, true
+			return adi, bas, true, true
 		}
 	}
 	// Damga var ama kodlanmış gövde YOK → kodlanmış değil (ör. ionCube'dan
 	// BAHSEDEN düz PHP dosyası, hatta damgayı taklit eden webshell). Tam tara.
-	return "", 0, false
+	return "", 0, false, false
 }
 
 // govdedeDuzMetinKod — KAÇIŞ KORUMASI. Şifreli gövdeye eklenmiş GERÇEK PHP kodu
@@ -174,21 +180,59 @@ func govdedeDuzMetinKod(govde []byte) []byte {
 	return nil
 }
 
+// blobSonuB64 — base64 şifreli dizinin BİTTİĞİ ofset. blobBas'tan ileri base64
+// karakterleri (+ satır sarma / boşluk) tüketir; blobNonB64Esik kadar ARDIŞIK
+// base64-olmayan bayt görülünce (ör. `';eval(...` başlangıcı) düz kod bölgesi
+// başladı sayar. YALNIZ base64 gövdede çağrılır (ham-ikili gövdede blobSon=len,
+// tail taranmaz — rastgele ikili tail imza-çakışması FP'si üretirdi).
+//
+// 🔴 GÜVENLİK: eski kodlayiciAyikla yalnız önsözü ve blobBas SONRASINDA YENİ
+// `<?php` etiketiyle açılan kodu tarardı. `$c='<base64>'; eval(base64_decode($c));`
+// içinde eval AYNI context'te (yeni açılış yok) blob'dan sonra kalıyor → HİÇ
+// taranmıyordu (kanıtlı puan=0). base64 dizisinin bitiminden sonraki tail'i
+// taramak bu tam-context sink'i geri yakalar.
+func blobSonuB64(icerik []byte, blobBas int) int {
+	n := len(icerik)
+	nonB64 := 0
+	for i := blobBas; i < n; i++ {
+		c := icerik[i]
+		if b64Karakter(c) || c == '\n' || c == '\r' || c == ' ' || c == '\t' {
+			nonB64 = 0
+			continue
+		}
+		nonB64++
+		if nonB64 >= blobNonB64Esik {
+			return i - nonB64 + 1 // düz kod bu noktada başlıyor
+		}
+	}
+	return n
+}
+
 // kodlayiciAyikla — içerik ticari kodlayıcıyla paketlenmişse taranacak kısmı
-// döner: düz metin önsöz + (varsa) gövdeye enjekte edilmiş gerçek kod.
+// döner: düz metin önsöz + (base64 gövde ise) blob-SONRASI tail + (varsa) blob
+// İÇİNE yeni-<?php ile enjekte kod. Yalnız opak gövde (FP kaynağı) çıkarılır.
 // Paketli değilse (nil, "", false) döner ve çağıran normal yolu izler.
 func kodlayiciAyikla(icerik []byte) ([]byte, string, bool) {
-	adi, blobBas, ok := kodlayiciBlobBaslangici(icerik)
+	adi, blobBas, ok, b64 := kodlayiciBlobBaslangici(icerik)
 	if !ok {
 		return nil, "", false
 	}
-	tara := icerik[:blobBas]
-	if enjekte := govdedeDuzMetinKod(icerik[blobBas:]); enjekte != nil {
-		birlesik := make([]byte, 0, len(tara)+len(enjekte)+1)
-		birlesik = append(birlesik, tara...)
-		birlesik = append(birlesik, '\n')
-		birlesik = append(birlesik, enjekte...)
-		tara = birlesik
+	blobSon := len(icerik) // ham-ikili gövde: tümü opak, tail yok
+	if b64 {
+		blobSon = blobSonuB64(icerik, blobBas)
+	}
+	tara := make([]byte, 0, len(icerik))
+	tara = append(tara, icerik[:blobBas]...) // önsöz (telif başlığı, açılış)
+	// blob-SONRASI tail (yalnız base64 gövdede): aynı-context eval/system sink'leri burada.
+	if blobSon < len(icerik) {
+		tara = append(tara, '\n')
+		tara = append(tara, icerik[blobSon:]...)
+	}
+	// blob İÇİNE yeni `<?php` ile gömülmüş kod (nadir ama mümkün): gerçek ionCube
+	// dosyasında yoktur (govdedeDuzMetinKod false döner → FP eklenmez).
+	if enjekte := govdedeDuzMetinKod(icerik[blobBas:blobSon]); enjekte != nil {
+		tara = append(tara, '\n')
+		tara = append(tara, enjekte...)
 	}
 	return tara, adi, true
 }

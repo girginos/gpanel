@@ -43,7 +43,18 @@ export default function SubscriptionDetailPage() {
   const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [hata, setHata] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('dashboard')
+  // Seçili sekme kalıcı (localStorage) — sayfa yenilenince/geri gelince korunur.
+  const [tab, setTabState] = useState<Tab>(() => {
+    try {
+      const v = localStorage.getItem('gosp.abonelik.tab')
+      if (v === 'dashboard' || v === 'hosting' || v === 'apps' || v === 'mail') return v
+    } catch { /* yok say */ }
+    return 'dashboard'
+  })
+  const setTab = (t: Tab) => {
+    setTabState(t)
+    try { localStorage.setItem('gosp.abonelik.tab', t) } catch { /* yok say */ }
+  }
   const [diskMB, setDiskMB] = useState<number | null>(null)
   const [menuAcik, setMenuAcik] = useState(false)
   const [isleniyor, setIsleniyor] = useState(false)

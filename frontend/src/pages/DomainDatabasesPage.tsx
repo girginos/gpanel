@@ -147,16 +147,16 @@ export default function DomainDatabasesPage() {
               <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
                 <td className={`${T.hucreBaslik} font-mono`}>{d.db_adi}</td>
                 <td className={T.hucre} data-etiket="Kullanıcı">
-                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.db_kullanici}</span>
+                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all lg:break-normal lg:whitespace-nowrap">{d.db_kullanici}</span>
                 </td>
                 <td className={T.hucre} data-etiket="Sunucu">
-                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all">{d.db_host}:3306</span>
+                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all lg:break-normal lg:whitespace-nowrap">{d.db_host}:3306</span>
                 </td>
                 <td className={T.hucre} data-etiket="Parola">
-                  <div className="flex flex-wrap items-center gap-1">
+                  <div className="flex flex-wrap lg:flex-nowrap items-center gap-1">
                     <button
                       onClick={() => setParolaGoster({ ...paroliGoster, [d.id]: !paroliGoster[d.id] })}
-                      className="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded break-all text-left"
+                      className="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded break-all lg:break-normal lg:whitespace-nowrap text-left"
                       title={paroliGoster[d.id] ? 'Gizle' : 'Göster'}
                     >
                       {paroliGoster[d.id] ? d.db_parola : '••••••••'}

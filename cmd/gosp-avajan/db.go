@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/avmotor"
@@ -137,8 +138,19 @@ func bildirimYaz(db *sql.DB, seviye, baslik, mesaj string, domainID int64, refTu
 		seviye, kisalt(baslik, 190), mesaj, dom, rid, refTur, refID)
 }
 
-// reSayac — toplu AV bildirimindeki bulgu sayacı ("… — 12 bulgu").
-var reSayac = regexp.MustCompile(`— (\d+) bulgu`)
+// reSayac — toplu AV bildirimindeki bulgu sayacı. Mesajın SONUNDAKİ
+// "— N bulgu. Antivirüs" kalıbına çapalıdır: aksi halde saldırgan
+// "x — 999 bulgu.php" adlı bir dosya bırakıp EN SOLDAKİ eşleşmeyle sayacı
+// bozabilirdi (dosya adı mesaja gömülüyor). Sabit sonek bunu engeller.
+var reSayac = regexp.MustCompile(`— (\d+) bulgu\. Antivirüs`)
+
+// avBildirimMu — bildirimYazAVToplu'nun SELECT→(UPDATE|INSERT) dizisini
+// süreç-içi serileştirir. gosp-avajan tek süreç ama paralel tarama worker'ları
+// aynı domain için EŞ ZAMANLI bulgu işleyebilir; kilit olmadan iki worker aynı
+// okunmamış satırı görüp iki ayrı bildirim açar (sel koruması deliği) ya da
+// ikisi de N okuyup N+1 yazar (sayı eksik). Tek node için mutex yeterli —
+// bildirimler yalnız bu süreçten yazılır. (SELECT ... FOR UPDATE gerektirmez.)
+var avBildirimMu sync.Mutex
 
 // bildirimYazAVToplu — AV bulgu bildirimi, SEL KORUMALI. Aynı domain için
 // OKUNMAMIŞ bir antivirüs bildirimi varsa yenisini eklemek yerine onu
@@ -150,6 +162,8 @@ func bildirimYazAVToplu(db *sql.DB, seviye, baslik, dosyaAdi string, domainID in
 	if db == nil {
 		return
 	}
+	avBildirimMu.Lock()
+	defer avBildirimMu.Unlock()
 	if domainID > 0 {
 		var id int64
 		var eskiMesaj string

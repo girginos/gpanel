@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -309,6 +310,15 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		// 🔴 PANIC KORUMASI: senkron Extract net/http handler goroutine'inde
+		// çalışırdı (per-request recover var → panik yalnız o isteği düşürür).
+		// Bare `go func()` bu korumadan yoksundur: burada bir panik TÜM panel
+		// sürecini (çok-tenant) çökertirdi. recover ile paniği "hata" işine indir.
+		defer func() {
+			if p := recover(); p != nil {
+				basarisiz(fmt.Sprintf("çıkarma iç hatası: %v", p))
+			}
+		}()
 		if gzTek {
 			// Tek dosyalık .gz: üye yolu yoktur; tek risk çıktı dosyasının symlink
 			// üzerinden dışarı yazması. jailJoinStrict + O_NOFOLLOW ile kapat.
@@ -341,8 +351,18 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 			is.Cikan = 1
 			is.mu.Unlock()
 		} else {
+			// 🔴 ÖNCE güvenlik ön-taraması (Tara: bomba tavanı + symlink/jail-dışı
+			// reddi). UyeSay tavansız tüm akışı okuduğu için ONDAN ÖNCE gelmeli;
+			// aksi halde 10M-üyeli/xz-bomba arşiv UyeSay'de bir çekirdeği boşa
+			// yakardı. GuvenliCikarIlerleme de Tara'yı çağırır (idempotent, ucuz
+			// başlık taraması) ama burada erken reddederek UyeSay'i hiç çağırmayız.
+			if terr := archivex.Tara(abs, tur); terr != nil {
+				basarisiz("extract: " + terr.Error())
+				return
+			}
 			// Toplam üye sayısı → ilerleme çubuğu paydası. Sayım hatası ölümcül
-			// değil (Toplam=0 → UI belirsiz-mod çubuk gösterir).
+			// değil (Toplam=0 → UI belirsiz-mod çubuk gösterir). Tara geçtiği için
+			// artık üye/boyut tavanı garanti → UyeSay sınırlı iş yapar.
 			if n, serr := archivex.UyeSay(abs, tur); serr == nil {
 				is.mu.Lock()
 				is.Toplam = n

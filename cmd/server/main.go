@@ -633,6 +633,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/cron", cronH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/cron", cronH.Create)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/cron/{idx}", cronH.Delete)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/cron/{idx}/calistir", cronH.Calistir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/logs", logsH.List)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/logs/oku", logsH.Read)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/logs/canli", logsH.Tail)

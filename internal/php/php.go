@@ -18,10 +18,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"text/template"
+	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/phpsurum"
 	"girginospanel/internal/provisioner"
 
@@ -474,6 +475,23 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Ayarlar.EkDirektifler = temizEk
+
+	// 🔴 İZOLASYON KONTROLÜ: disable_functions'ı YALNIZ ADMIN değiştirebilir.
+	// Müşteri (RolFrom "") veya reseller token'ı bu alanı düzenleyemez — aksi
+	// halde bir müşteri (veya ele geçirilmiş bir müşteri oturumu) kendi PHP'sinde
+	// disable_functions="" göndererek system/exec/shell_exec'i açabilirdi
+	// (kanıtlı regresyon). Gelen değer yok sayılır, mevcut DB değeri korunur;
+	// satır yoksa render zamanı hardened default + zorunlu taban zaten uygulanır.
+	if middleware.RolFrom(r) != "admin" {
+		var mevcutDF sql.NullString
+		_ = h.DB.QueryRowContext(r.Context(),
+			`SELECT disable_functions FROM php_settings WHERE domain_id=?`, id).Scan(&mevcutDF)
+		if mevcutDF.Valid {
+			req.Ayarlar.DisableFunctions = mevcutDF.String
+		} else {
+			req.Ayarlar.DisableFunctions = Defaults().DisableFunctions
+		}
+	}
 
 	var sk, surum string
 	var demo int
