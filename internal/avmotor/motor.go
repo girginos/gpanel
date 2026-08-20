@@ -232,7 +232,18 @@ func konumSezgileri(yol string) []sezgi {
 	if yurutulebilir {
 		switch {
 		case strings.Contains(y, "/wp-content/uploads/"):
-			out = append(out, sezgi{"GOSP-KONUM-UPLOADS-PHP", 100})
+			// 🔴 100 DEĞİL (tek başına kritik→oto-karantina): gerçek WordPress
+			// uploads'a MEŞRU PHP yazar — Redux Framework alan şablonları
+			// (uploads/redux/typography.php…), WPForms önbelleği, ve HER klasördeki
+			// "Silence is golden" index.php koruma dosyaları. CANLI FP: taşınan
+			// müşteri sitesinin 8 meşru dosyası karantinaya alındı. Konum artık
+			// İÇERİK-DOĞRULAMASI gerektiren bir sinyal: 60 (supheli) tek başına
+			// karantinaya ALMAZ; gerçek zararlı içerik (eval/system/base64/decode/
+			// semantik) eklenince ≥100 kritik olur. Boş/sınıf-tanımı dosya güvende.
+			// 🔴 45 (< EsikSupheli 50): içeriksiz meşru uploads PHP'si HİÇ bulgu
+			// üretmez (supheli bile değil, gürültü yok). Bir içerik kuralı (≥55)
+			// eklenince kritik'e taşınır — gerçek webshell zaten güçlü içerik taşır.
+			out = append(out, sezgi{"GOSP-KONUM-UPLOADS-PHP", 45})
 		case strings.Contains(y, "/wp-content/cache/"):
 			out = append(out, sezgi{"GOSP-KONUM-CACHE-PHP", 60})
 		case strings.Contains(y, "/.well-known/"):

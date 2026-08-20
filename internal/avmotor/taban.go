@@ -87,7 +87,7 @@ func TabanSet() KuralSeti {
 			// ── Uzaktan kod çekme ──
 			{ID: "GOSP-PHP-UZAK-INCLUDE", Ad: "http üzerinden include/require",
 				// C-13: php://, data://, phar://, ftp:// sarmalayicilari da tehlikeli.
-				Desen: `(?i)(include|require)(_once)?\s*\(?\s*['"](https?|ftp|php|data|phar)://`,
+				Desen: `(?i)(include|require)(_once)?\s*\(?\s*['"](https?|ftp|php|data|phar)://[^'"\s]`,
 				Puan:  100, Uzanti: php},
 			{ID: "GOSP-PHP-CURL-EVAL", Ad: "uzaktan indirilen içeriği yürütme",
 				Desen: `(?i)eval\s*\(\s*(file_get_contents|curl_exec)\s*\(`,
