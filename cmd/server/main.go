@@ -63,6 +63,7 @@ import (
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 	"girginospanel/internal/reseller"
+	"girginospanel/internal/runtime"
 	"girginospanel/internal/sifrekoruma"
 	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
@@ -302,6 +303,7 @@ func main() {
 	provisioner.HealNginxLogPerms() // nginx log dizinini kiraciya kapat (cross-tenant log okuma)
 	redis.HealScanAcl()             // Valkey SCAN/RANDOMKEY komsu key-ismi sizintisini kapat
 	phpExtH := &phpext.Handlers{DB: d}
+	runtimeH := &runtime.Handlers{}
 	paketlerH := &paketler.Handlers{DB: d}
 	phpSurumH := &phpsurum.Handlers{DB: d}
 	// 🔴 PERF: PHP kurulabilirlik keşfini (dnf) arka-plana al — /php/versions gibi
@@ -718,6 +720,10 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/waf", wafH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/waf", wafH.Kaydet)
 				r.With(middleware.AdminOnly).Get("/php-extensions", phpExtH.List)
+				r.With(middleware.AdminOnly).Get("/runtimeler", runtimeH.Liste)
+				r.With(middleware.AdminOnly).Post("/runtimeler/kur", runtimeH.Kur)
+				r.With(middleware.AdminOnly).Post("/runtimeler/kaldir", runtimeH.Kaldir)
+				r.With(middleware.AdminOnly).Get("/runtimeler/durum", runtimeH.Durum)
 				r.With(middleware.AdminOnly).Put("/php-extensions/toggle", phpExtH.Toggle)
 				r.With(middleware.AdminOnly).Post("/php-extensions/pecl-install", phpExtH.PECLKur)
 				r.With(middleware.AdminOnly).Get("/php-extensions/pecl-durum", phpExtH.PECLDurum)

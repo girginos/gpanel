@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { apiHata } from '@/lib/api'
+import { useDialog } from '@/components/Dialog'
 import PHPSurumleriPage, { SurumSecim } from './PHPSurumleriPage'
 import PHPModuleriPage, { Secim } from './PHPModuleriPage'
 
@@ -14,9 +15,14 @@ type Adim = { key: string; ad: string; aciklama: string }
 const ADIMLAR: Adim[] = [
   { key: 'surumler', ad: 'PHP Sürümleri', aciklama: 'Sunucuya PHP sürümü ekle/kaldır' },
   { key: 'eklentiler', ad: 'PHP Eklentileri & Loader', aciklama: 'Modül aç/kapa, PECL kur, ionCube' },
+  { key: 'runtimeler', ad: 'Ek Runtime\'lar', aciklama: '.NET Core, Node.js, Python' },
   { key: 'websunucu', ad: 'Web Sunucu', aciklama: 'nginx / PHP-FPM durumu' },
   { key: 'ozet', ad: 'Özet', aciklama: 'Yapılandırmayı gözden geçir' },
 ]
+
+type RuntimeSecim = { anahtar: string; ad: string }
+type RuntimeEk = { ad: string; anahtar: string; aciklama: string; kurulu: boolean }
+type RuntimeGrup = { tip: string; ad: string; ekler: RuntimeEk[] }
 
 export default function PHPSunucuSihirbaziPage() {
   // Aktif adım kalıcı (localStorage) — sayfa yenilenince kalınan adım korunur.
@@ -35,6 +41,7 @@ export default function PHPSunucuSihirbaziPage() {
   // Sihirbaz genelinde biriktirilen "kurulacak" seçimler (Özet adımında toplu kurulur).
   const [secilenler, setSecilenler] = useState<Secim[]>([])
   const [secilenSurumler, setSecilenSurumler] = useState<SurumSecim[]>([])
+  const [secilenRuntimeler, setSecilenRuntimeler] = useState<RuntimeSecim[]>([])
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -82,8 +89,9 @@ export default function PHPSunucuSihirbaziPage() {
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5">
             {aktif === 'surumler' && <PHPSurumleriPage gomulu secilenSurumler={secilenSurumler} setSecilenSurumler={setSecilenSurumler} />}
             {aktif === 'eklentiler' && <PHPModuleriPage gomulu secilenler={secilenler} setSecilenler={setSecilenler} />}
+            {aktif === 'runtimeler' && <RuntimeAdim secilenRuntimeler={secilenRuntimeler} setSecilenRuntimeler={setSecilenRuntimeler} />}
             {aktif === 'websunucu' && <WebSunucuAdim />}
-            {aktif === 'ozet' && <OzetAdim secilenler={secilenler} secilenSurumler={secilenSurumler} onTemizle={() => { setSecilenler([]); setSecilenSurumler([]) }} />}
+            {aktif === 'ozet' && <OzetAdim secilenler={secilenler} secilenSurumler={secilenSurumler} secilenRuntimeler={secilenRuntimeler} onTemizle={() => { setSecilenler([]); setSecilenSurumler([]); setSecilenRuntimeler([]) }} />}
           </div>
 
           {/* İleri / Geri */}
@@ -104,6 +112,102 @@ export default function PHPSunucuSihirbaziPage() {
           </div>
         </section>
       </div>
+    </div>
+  )
+}
+
+// Ek Runtime'lar adımı: .NET Core / Node.js / Python bileşenleri. Kurulu değilse
+// toggle ile "kurulacak" seçilir (Özet'te toplu kurulur); kurulu ise toggle kapatınca
+// ANINDA kaldırılır (onay + async). PHP eklentileriyle aynı seç→uygula mantığı.
+function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
+  secilenRuntimeler: RuntimeSecim[]
+  setSecilenRuntimeler: (fn: (s: RuntimeSecim[]) => RuntimeSecim[]) => void
+}) {
+  const { onay, bilgi } = useDialog()
+  const [gruplar, setGruplar] = useState<RuntimeGrup[]>([])
+  const [yuk, setYuk] = useState(true)
+  const [kaldiran, setKaldiran] = useState<string | null>(null)
+
+  function yukle() {
+    setYuk(true)
+    api.get('/runtimeler').then(r => setGruplar(r.data?.gruplar || [])).catch(() => {}).finally(() => setYuk(false))
+  }
+  useEffect(yukle, [])
+
+  const secili = (anahtar: string) => secilenRuntimeler.some(s => s.anahtar === anahtar)
+  const secimToggle = (e: RuntimeEk) => {
+    setSecilenRuntimeler(prev => secili(e.anahtar)
+      ? prev.filter(s => s.anahtar !== e.anahtar)
+      : [...prev, { anahtar: e.anahtar, ad: e.ad }])
+  }
+
+  async function kaldir(e: RuntimeEk) {
+    if (kaldiran) return
+    if (!(await onay({ baslik: 'Kaldır', mesaj: `${e.ad} sunucudan kaldırılacak. Devam?`, tehlike: true }))) return
+    setKaldiran(e.anahtar)
+    try {
+      const { data } = await api.post('/runtimeler/kaldir', { anahtar: e.anahtar })
+      if (data.is_id) {
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1500))
+          const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kaldırma başarısız')
+          if (p.data.durum === 'tamam') break
+        }
+      }
+      yukle()
+    } catch (err) {
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Kaldırma başarısız') }))
+    } finally {
+      setKaldiran(null)
+    }
+  }
+
+  if (yuk) return <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Ek Runtime'lar</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-500">PHP dışı diller. Kurulacakları toggle ile işaretleyin — Özet adımında birlikte kurulur. Kurulu olanı kapatınca kaldırılır.</p>
+      </div>
+      {(secilenRuntimeler.length > 0) && (
+        <div className="px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
+          {secilenRuntimeler.length} runtime bileşeni kurulmak üzere seçildi — Özet adımında kurulur.
+        </div>
+      )}
+      {gruplar.map(g => (
+        <section key={g.tip}>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{g.ad}</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {g.ekler.map(e => {
+              const sec = !e.kurulu && secili(e.anahtar)
+              return (
+                <div key={e.anahtar}
+                  className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${
+                    e.kurulu ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800'
+                    : sec ? 'bg-brand-50 dark:bg-brand-900/15 border-brand-300 dark:border-brand-700'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                  }`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{e.ad}</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-500 truncate">{e.aciklama}</div>
+                  </div>
+                  <button
+                    onClick={() => e.kurulu ? kaldir(e) : secimToggle(e)}
+                    disabled={kaldiran === e.anahtar}
+                    title={e.kurulu ? 'Kaldır' : (sec ? 'Seçimi kaldır' : 'Kurulacaklara ekle')}
+                    className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                      kaldiran === e.anahtar ? 'bg-sky-400 animate-pulse' : e.kurulu ? 'bg-emerald-500' : sec ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
+                    } ${kaldiran === e.anahtar ? 'opacity-60' : ''}`}
+                  >
+                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${(e.kurulu || sec) ? 'translate-x-5' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
@@ -153,8 +257,8 @@ function DurumKart({ etiket, deger, ok }: { etiket: string; deger: string; ok?: 
 
 // Özet adımı: seçilen eklentileri TOPLU kurar (kullanıcı isteği). Her eklenti
 // için mevcut async PECL-Kur akışı sırayla çalışır, canlı ilerleme gösterilir.
-type Toplu = { tip: 'surum' | 'eklenti'; anahtar: string; ad: string; surum: string; kaynak?: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
-function OzetAdim({ secilenler, secilenSurumler, onTemizle }: { secilenler: Secim[]; secilenSurumler: SurumSecim[]; onTemizle: () => void }) {
+type Toplu = { tip: 'surum' | 'eklenti' | 'runtime'; anahtar: string; ad: string; surum: string; kaynak?: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
+function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }: { secilenler: Secim[]; secilenSurumler: SurumSecim[]; secilenRuntimeler: RuntimeSecim[]; onTemizle: () => void }) {
   const [surumler, setSurumler] = useState<any[]>([])
   const [calisiyor, setCalisiyor] = useState(false)
   const [durumlar, setDurumlar] = useState<Toplu[]>([])
@@ -165,15 +269,16 @@ function OzetAdim({ secilenler, secilenSurumler, onTemizle }: { secilenler: Seci
     api.get('/php-surumler').then(r => setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu))).catch(() => {})
   }, [])
 
-  const toplamIs = secilenSurumler.length + secilenler.length
+  const toplamIs = secilenSurumler.length + secilenler.length + secilenRuntimeler.length
 
   async function topluKur() {
     if (calisiyor || toplamIs === 0) return
     setCalisiyor(true); setBitti(false)
-    // Önce PHP sürümleri (eklentiler o sürümlere kurulabilsin), sonra eklentiler.
+    // Sıra: PHP sürümleri → eklentiler → runtime'lar.
     const liste: Toplu[] = [
       ...secilenSurumler.map(s => ({ tip: 'surum' as const, anahtar: s.surum, ad: `PHP ${s.surum}`, surum: s.surum, kaynak: s.kaynak, durum: 'bekliyor' as const })),
       ...secilenler.map(s => ({ tip: 'eklenti' as const, anahtar: s.anahtar, ad: s.ad, surum: s.surum, durum: 'bekliyor' as const })),
+      ...secilenRuntimeler.map(s => ({ tip: 'runtime' as const, anahtar: s.anahtar, ad: s.ad, surum: '', durum: 'bekliyor' as const })),
     ]
     setDurumlar(liste)
     for (let i = 0; i < liste.length; i++) {
@@ -190,6 +295,18 @@ function OzetAdim({ secilenler, secilenSurumler, onTemizle }: { secilenler: Seci
             const calis = d.data?.calisiyor && d.data?.surum === s.surum
             setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : 'Tamamlanıyor…', yuzde: calis ? 55 : 95 })
             if (!d.data?.calisiyor) break
+          }
+        } else if (s.tip === 'runtime') {
+          // Runtime kurulumu (.NET/Node/Python) — async is_id + durum poll.
+          const { data } = await api.post('/runtimeler/kur', { anahtar: s.anahtar })
+          if (data.is_id) {
+            for (;;) {
+              await new Promise(r => setTimeout(r, 1500))
+              const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
+              setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
+              if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+              if (p.data.durum === 'tamam') break
+            }
           }
         } else {
           // Eklenti — bundled dnf / pecl / derleme (async is_id + yüzde).
@@ -241,10 +358,11 @@ function OzetAdim({ secilenler, secilenSurumler, onTemizle }: { secilenler: Seci
             {(durumlar.length > 0 ? durumlar : [
               ...secilenSurumler.map(s => ({ tip: 'surum' as const, anahtar: s.surum, ad: `PHP ${s.surum}`, surum: s.surum, kaynak: s.kaynak, durum: 'bekliyor' as const })),
               ...secilenler.map(s => ({ tip: 'eklenti' as const, anahtar: s.anahtar, ad: s.ad, surum: s.surum, durum: 'bekliyor' as const })),
+              ...secilenRuntimeler.map(s => ({ tip: 'runtime' as const, anahtar: s.anahtar, ad: s.ad, surum: '', durum: 'bekliyor' as const })),
             ] as Toplu[]).map((s) => (
               <div key={s.tip + s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                 <div className="min-w-0">
-                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? 'sürüm' : 'eklenti'}</span>
+                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? 'sürüm' : s.tip === 'runtime' ? 'runtime' : 'eklenti'}</span>
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{s.ad}</span>
                   {s.tip === 'eklenti' && <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">PHP {s.surum}</span>}
                   {s.mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{s.mesaj}</div>}
