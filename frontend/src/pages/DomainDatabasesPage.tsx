@@ -1,23 +1,20 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
-import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
-import { useDialog } from '@/components/Dialog'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
-type DB = {
+export type DB = {
   id: number; domain_id: number; db_adi: string; db_kullanici: string;
   db_host: string; db_parola: string; olusturulma: string; boyut: number
 }
 
-function boyutFmt(b: number): string {
+export function boyutFmt(b: number): string {
   if (!b || b <= 0) return '—'
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
   let i = 0, v = b
@@ -26,18 +23,13 @@ function boyutFmt(b: number): string {
 }
 
 export default function DomainDatabasesPage() {
-  const { bilgi, onay } = useDialog()
   const { id } = useParams()
+  const nav = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dbler, setDbler] = useState<DB[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
-  const [silinecek, setSilinecek] = useState<DB | null>(null)
-  const [pwResetFor, setPwResetFor] = useState<DB | null>(null)
   const [ekleAcik, setEkleAcik] = useState(false)
-  const [paroliGoster, setParolaGoster] = useState<Record<number, boolean>>({})
-  const [kopya, setKopya] = useState<number | null>(null)
-  const [optId, setOptId] = useState<number | null>(null)
 
   function yukle() {
     if (!id) return
@@ -47,56 +39,11 @@ export default function DomainDatabasesPage() {
       .catch(e => setHata(apiHata(e)))
       .finally(() => setYuk(false))
   }
-  async function optimizeEt(d: DB) {
-    if (optId) return
-    if (!(await onay({
-      baslik: 'Veritabanını Optimize Et',
-      mesaj: `"${d.db_adi}" içindeki tüm tablolar optimize edilecek (fragmentasyon giderilir, kullanılmayan alan geri kazanılır). Büyük tablolarda işlem birkaç saniye sürebilir. Devam edilsin mi?`,
-      onayEtiketi: 'Optimize Et',
-    }))) return
-    setOptId(d.id)
-    try {
-      const { data } = await api.post(`/databases/${d.id}/optimize`)
-      const kaz = Number(data?.kazanilan_bayt || 0)
-      await bilgi({
-        baslik: 'Optimize Tamamlandı',
-        mesaj: kaz > 0
-          ? `"${d.db_adi}" optimize edildi. ${boyutFmt(kaz)} alan geri kazanıldı (${boyutFmt(Number(data?.once_bayt || 0))} → ${boyutFmt(Number(data?.sonra_bayt || 0))}).`
-          : `"${d.db_adi}" optimize edildi. Tablolar zaten derli topluydu, geri kazanılacak belirgin alan yoktu.`,
-      })
-      yukle()
-    } catch (e) {
-      await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Optimize başarısız') })
-    } finally {
-      setOptId(null)
-    }
-  }
-
-  async function pmaAc(d: DB) {
-    try {
-      const { data } = await api.post<{ signon_url: string }>(`/databases/${d.id}/pma-token`)
-      window.open(data.signon_url, '_blank', 'noopener')
-    } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'phpMyAdmin token alınamadı') }))
-    }
-  }
 
   useEffect(() => {
     if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
     yukle()
   }, [id])
-
-  async function sil() {
-    if (!silinecek) return
-    try { await api.delete(`/databases/${silinecek.id}`); setSilinecek(null); yukle() }
-    catch (e) { (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') })) }
-  }
-
-  function kopyala(d: DB) {
-    navigator.clipboard.writeText(d.db_parola)
-    setKopya(d.id)
-    setTimeout(() => setKopya(null), 1500)
-  }
 
   // Domain'in mevcut DB-kullanıcıları (mevcut-kullanıcı seçimi için, benzersiz).
   const mevcutKullanicilar = useMemo(
@@ -123,8 +70,8 @@ export default function DomainDatabasesPage() {
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      {/* Kapsayıcı çerçeve yalnız masaüstünde: mobilde satırlar zaten kart olduğu
-          için ikinci bir çerçeve iç içe görünürdü. */}
+      {/* Sadeleştirilmiş liste: kullanıcı/sunucu/parola/işlemler her DB'nin KENDİ
+          detay sayfasında. Böylece tablo dar kalır, yatay scroll gerekmez. */}
       <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> :
          dbler.length === 0 ? <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-500">Henüz veritabanı yok</div> :
@@ -133,50 +80,27 @@ export default function DomainDatabasesPage() {
           <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700`}>
             <tr>
               <th className={T.baslik}>Veritabanı</th>
-              <th className={T.baslik}>Kullanıcı</th>
-              <th className={T.baslik}>Sunucu</th>
-              <th className={T.baslik}>Parola</th>
               <th className={T.baslik}>Oluşturulma</th>
               <th className={`${T.baslik} text-right`}>Boyut</th>
-              <th className={`${T.baslik} text-right`}>İşlemler</th>
+              <th className={`${T.baslik} text-right`}></th>
             </tr>
           </thead>
-          {/* Satır ayracı artık T.satir'ın lg:border-b'si; divide-y gereksiz. */}
           <tbody className={T.govde}>
             {dbler.map(d => (
-              <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
-                <td className={`${T.hucreBaslik} font-mono`}>{d.db_adi}</td>
-                <td className={T.hucre} data-etiket="Kullanıcı">
-                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all lg:break-normal lg:whitespace-nowrap">{d.db_kullanici}</span>
-                </td>
-                <td className={T.hucre} data-etiket="Sunucu">
-                  <span className="font-mono text-slate-600 dark:text-slate-400 text-right lg:text-left break-all lg:break-normal lg:whitespace-nowrap">{d.db_host}:3306</span>
-                </td>
-                <td className={T.hucre} data-etiket="Parola">
-                  <div className="flex flex-wrap lg:flex-nowrap items-center gap-1">
-                    <button
-                      onClick={() => setParolaGoster({ ...paroliGoster, [d.id]: !paroliGoster[d.id] })}
-                      className="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded break-all lg:break-normal lg:whitespace-nowrap text-left"
-                      title={paroliGoster[d.id] ? 'Gizle' : 'Göster'}
-                    >
-                      {paroliGoster[d.id] ? d.db_parola : '••••••••'}
-                    </button>
-                    {paroliGoster[d.id] && (
-                      <button onClick={() => kopyala(d)} className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-brand-100 dark:bg-brand-900/30 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 rounded" title="Kopyala">
-                        {kopya === d.id ? '✓' : '⧉'}
-                      </button>
-                    )}
-                  </div>
-                </td>
+              <tr
+                key={d.id}
+                onClick={() => nav(`/abonelikler/${id}/veritabanlari/${d.id}`)}
+                className={`${T.satir} cursor-pointer lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}
+              >
+                <td className={`${T.hucreBaslik} font-mono`}><span className="text-brand-700 dark:text-brand-300">{d.db_adi}</span></td>
                 <td className={T.hucre} data-etiket="Oluşturulma">
                   <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma}</span>
                 </td>
                 <td className={`${T.hucre} text-right`} data-etiket="Boyut"><span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">{boyutFmt(d.boyut)}</span></td>
-                <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                  <button onClick={() => pmaAc(d)} className="group inline-flex items-center gap-1.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded" title="phpMyAdmin'de yeni sekmede aç"><Ikon d={I.kilitAcik} className="h-4 w-4 transition-transform group-hover:scale-110" /> phpMyAdmin</button>
-                  <button onClick={() => setPwResetFor(d)} className="group inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded"><Ikon d={I.anahtar} className="h-4 w-4 transition-transform group-hover:rotate-12" /> Parola Sıfırla</button>
-                  <button onClick={() => optimizeEt(d)} disabled={optId === d.id} className="group inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20 px-2 py-1 rounded disabled:opacity-50" title="Tüm tabloları optimize et (alan geri kazan)"><Ikon d={I.simsek} className={`h-4 w-4 transition-transform ${optId === d.id ? 'animate-pulse' : 'group-hover:scale-110'}`} /> {optId === d.id ? 'Optimize ediliyor…' : 'Optimize Et'}</button>
-                  <button onClick={() => setSilinecek(d)} className="group inline-flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded"><Ikon d={I.cop} className="h-4 w-4 transition-transform group-hover:scale-110" /> Sil</button>
+                <td className={`${T.hucreAksiyon} lg:text-right`}>
+                  <span className="inline-flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">Yönet
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </span>
                 </td>
               </tr>
             ))}
@@ -194,30 +118,12 @@ export default function DomainDatabasesPage() {
           onTamam={() => { setEkleAcik(false); yukle() }}
         />
       )}
-
-      {pwResetFor && (
-        <PwResetModal
-          db={pwResetFor}
-          onKapat={() => setPwResetFor(null)}
-          onTamam={() => { setPwResetFor(null); yukle() }}
-        />
-      )}
-
-      <ConfirmDialog
-        acik={!!silinecek}
-        baslik="Veritabanını sil"
-        mesaj={`"${silinecek?.db_adi}" veritabanı ve kullanıcısı kalıcı silinecek. Bu işlem geri alınamaz!`}
-        tehlikeli
-        onayMetni="Evet, sil"
-        onOnay={sil}
-        onIptal={() => setSilinecek(null)}
-      />
     </div>
   )
 }
 
 // uretGucluParola: tarayıcı tarafı güçlü parola (harf+rakam karışık, min-güç geçer).
-function uretGucluParola(n = 20): string {
+export function uretGucluParola(n = 20): string {
   const harf = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
   const buf = new Uint32Array(n)
   ;(window.crypto || (window as any).msCrypto).getRandomValues(buf)
@@ -240,9 +146,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
   const onek = sk + '_'
   const [otomatik, setOtomatik] = useState(true)
   const [dbSonek, setDbSonek] = useState('')
-  const [kullaniciTipi, setKullaniciTipi] = useState<'yeni' | 'mevcut'>(
-    mevcutKullanicilar.length ? 'yeni' : 'yeni',
-  )
+  const [kullaniciTipi, setKullaniciTipi] = useState<'yeni' | 'mevcut'>('yeni')
   const [kullaniciSonek, setKullaniciSonek] = useState('')
   const [mevcutKullanici, setMevcutKullanici] = useState(mevcutKullanicilar[0] || '')
   const [parola, setParola] = useState('')
@@ -397,7 +301,8 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
   )
 }
 
-function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; onTamam: () => void }) {
+// PwResetModal — DB parolasını sıfırlar (rastgele/özel). Detay sayfası da kullanır.
+export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; onTamam: () => void }) {
   const [ozelPw, setOzelPw] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)

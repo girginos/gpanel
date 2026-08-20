@@ -44,6 +44,7 @@ import DomainDNSPage from '@/pages/DomainDNSPage'
 import RedisPage from '@/pages/RedisPage'
 import DomainConnectionPage from '@/pages/DomainConnectionPage'
 import DomainDatabasesPage from '@/pages/DomainDatabasesPage'
+import DomainDatabaseDetailPage from '@/pages/DomainDatabaseDetailPage'
 import DomainFTPPage from '@/pages/DomainFTPPage'
 import DomainPHPPage from '@/pages/DomainPHPPage'
 import DomainPlanPage from '@/pages/DomainPlanPage'
@@ -112,6 +113,7 @@ export default function App() {
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
         <Route path="abonelikler/:id/dosyalar"      element={<DomainFilesPage />} />
         <Route path="abonelikler/:id/veritabanlari" element={<DomainDatabasesPage />} />
+        <Route path="abonelikler/:id/veritabanlari/:dbid" element={<DomainDatabaseDetailPage />} />
         <Route path="abonelikler/:id/ftp"           element={<DomainFTPPage />} />
         <Route path="abonelikler/:id/php"           element={<DomainPHPPage />} />
         <Route path="abonelikler/:id/plan"          element={<DomainPlanPage />} />
