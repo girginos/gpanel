@@ -157,6 +157,15 @@ func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (B
 					icerik = append(icerik, kuyruk...)
 				}
 			}
+			// ── TİCARİ KODLAYICI (ionCube/SourceGuardian/ZendGuard) ──
+			// Şifreli gövdede imza aramak yalnız RASTGELE ÇAKIŞMA üretir
+			// (bkz. kodlayici.go — WHMCS'ten 347 dosya bu yüzden yendi).
+			// Düz metin önsöz + gövdeye enjekte edilmiş gerçek kod taranır;
+			// opak şifreli blok kapsam DIŞI.
+			if tara, kodlayiciAdi, ok := kodlayiciAyikla(icerik); ok {
+				icerik = tara
+				b.Kurallar = append(b.Kurallar, "GOSP-KODLAYICI-"+kodlayiciAdi)
+			}
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(yol), "."))
 			// disGoruldu: düz metinde eşleşen kural ID'leri — decode katmanı
 			// bunları TEKRAR saymaz (çift-sayım FP'si).
