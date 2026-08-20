@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# girginospanel-ioncube — kurulu TÜM PHP sürümleri için ionCube Loader kurar.
+#
+# 🔴 NEDEN VAR: WHMCS ve birçok ticari PHP scripti ionCube ile kodlanmıştır.
+# Loader yoksa site "ionCube Loader for PHP needs to be installed" beyaz
+# sayfası verir. Müşteri bunu kendi kuramaz (root gerekir) — panel kursun.
+#
+# 🔴 FAIL-SOFT: hiçbir hata kurulumu/güncellemeyi DÜŞÜRMEZ. ionCube opsiyonel
+# bir kolaylıktır; onun yüzünden PHP'yi kurmamak çok daha kötü olurdu.
+#
+# 🔴 `00-` ÖNEKİ ŞART: loader zend_extension listesinde OPcache'den ÖNCE
+# gelmelidir, aksi halde: "The Loader must appear as the first entry".
+#
+# Idempotent: kurulu loader'ı yeniden indirmez, ini'yi her koşuda doğrular.
+# Kullanım: girginospanel-ioncube [--force] [--restart]
+set -uo pipefail
+
+IC_URL="https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz"
+FORCE=0; RESTART=0
+for a in "$@"; do
+  [ "$a" = "--force" ]   && FORCE=1
+  [ "$a" = "--restart" ] && RESTART=1
+done
+
+c_g=$'\e[32m'; c_y=$'\e[33m'; c_0=$'\e[0m'
+ok(){ echo -e "  ${c_g}✓${c_0} $*"; }
+uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
+
+# 1) Kurulu PHP sürümlerini bul: remi (/etc/opt/remi/phpXX) + sistem (/etc/php.d)
+declare -a SURUMLER=()   # "nokta|modDir|phpdDir|servis"
+for d in /etc/opt/remi/php*/php.d; do
+  [ -d "$d" ] || continue
+  kod=$(echo "$d" | sed -E 's#.*/php([0-9]+)/php.d#\1#')
+  [ -n "$kod" ] || continue
+  nokta="${kod:0:1}.${kod:1}"
+  SURUMLER+=("$nokta|/opt/remi/php$kod/root/usr/lib64/php/modules|$d|php$kod-php-fpm")
+done
+if [ -d /etc/php.d ] && command -v php >/dev/null 2>&1; then
+  sysv=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+  [ -n "$sysv" ] && SURUMLER+=("$sysv|/usr/lib64/php/modules|/etc/php.d|php-fpm")
+fi
+[ ${#SURUMLER[@]} -gt 0 ] || { uyar "kurulu PHP bulunamadı"; exit 0; }
+
+# 2) Eksik olan var mı? (varsa TEK indirme yapılır)
+IC_TMP=""; indirildi=0
+indir() {
+  [ -n "$IC_TMP" ] && return 0
+  IC_TMP=$(mktemp -d) || return 1
+  if ! curl -fsSL --max-time 180 -o "$IC_TMP/ic.tgz" "$IC_URL"; then
+    uyar "ionCube indirilemedi (ağ/erişim) — atlandı"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
+  fi
+  if ! tar xzf "$IC_TMP/ic.tgz" -C "$IC_TMP"; then
+    uyar "ionCube arşivi açılamadı — atlandı"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
+  fi
+  indirildi=1; return 0
+}
+
+kurulan=0; atlanan=0
+for satir in "${SURUMLER[@]}"; do
+  IFS='|' read -r nokta modDir phpdDir servis <<<"$satir"
+  so="$modDir/ioncube_loader_lin_${nokta}.so"
+  ini="$phpdDir/00-ioncube.ini"
+
+  if [ ! -f "$so" ] || [ "$FORCE" = "1" ]; then
+    indir || { atlanan=$((atlanan+1)); continue; }
+    src="$IC_TMP/ioncube/ioncube_loader_lin_${nokta}.so"
+    if [ ! -f "$src" ]; then
+      uyar "PHP $nokta — ionCube bu sürümü henüz desteklemiyor (atlandı)"
+      atlanan=$((atlanan+1)); continue
+    fi
+    mkdir -p "$modDir" || { atlanan=$((atlanan+1)); continue; }
+    install -m 0644 "$src" "$so" || { atlanan=$((atlanan+1)); continue; }
+  fi
+
+  # ini HER koşuda doğrulanır (self-heal: silinmiş/bozulmuşsa yeniden yazılır)
+  istenen="zend_extension = $so"
+  if [ ! -f "$ini" ] || ! grep -qxF "$istenen" "$ini" 2>/dev/null; then
+    mkdir -p "$phpdDir"
+    { echo "; GirginOSPanel: ionCube Loader — OPcache'den ONCE yuklenmeli (00- oneki sart)"
+      echo "$istenen"; } > "$ini"
+  fi
+  ok "PHP $nokta"
+  kurulan=$((kurulan+1))
+
+  if [ "$RESTART" = "1" ] && systemctl is-active --quiet "$servis" 2>/dev/null; then
+    systemctl restart "$servis" >/dev/null 2>&1 || true
+  fi
+done
+[ -n "$IC_TMP" ] && rm -rf "$IC_TMP"
+
+# 3) Per-tenant FPM havuzları: yeni ini'yi ancak restart görür.
+if [ "$RESTART" = "1" ]; then
+  for u in $(systemctl list-units --type=service --state=active --no-legend 'php-fpm-*' 2>/dev/null | awk '{print $1}'); do
+    systemctl restart "$u" >/dev/null 2>&1 || true
+  done
+fi
+
+echo "  ionCube: $kurulan sürümde hazır, $atlanan atlandı"
+exit 0

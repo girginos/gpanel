@@ -202,6 +202,17 @@ else
   warn "ops/girginospanel-wpcli-kur pakette yok — wp-cli kurulmadı"
 fi
 
+# ionCube Loader — WHMCS vb. ticari (kodlanmış) scriptler için ZORUNLU.
+# 🔴 Loader yoksa site "ionCube Loader needs to be installed" beyaz sayfası
+# verir ve müşteri bunu kendi kuramaz (root gerekir). Araç idempotent + fail-soft:
+# indirme başarısız olursa PHP kurulumu etkilenmez, sonra tekrar çağrılabilir.
+if [ -f "$A/ops/girginospanel-ioncube" ]; then
+  install -m 0755 "$A/ops/girginospanel-ioncube" /usr/local/bin/girginospanel-ioncube
+  girginospanel-ioncube || warn "ionCube kurulamadı — sonra: girginospanel-ioncube"
+else
+  warn "ops/girginospanel-ioncube pakette yok — ionCube atlandı"
+fi
+
 # WordPress ön koşulları: SELinux kiracı dizin etiketleri + imagick.
 # 🔴 İkisi de kurulumda SESSİZCE atlanıyordu ve canlı müşteride ard arda
 # patladı: Enforcing'te WordPress eklenti kuramıyor ("FTP bilgileri"

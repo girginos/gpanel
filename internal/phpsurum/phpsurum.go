@@ -552,7 +552,7 @@ cat > '%[7]s/99-girginospanel-input.ini' <<'GOSPINI'
 max_input_vars = 10000
 GOSPINI
 echo "  ✓ max_input_vars ayarı yazıldı"
-if systemctl enable --now '%[8]s'; then
+%[9]sif systemctl enable --now '%[8]s'; then
   echo "  ✓ %[8]s etkin ve başlatıldı"
 else
   echo "  ⚠ %[8]s başlatılamadı (paketler kuruldu; servis elle kontrol edilebilir)"
@@ -568,7 +568,60 @@ echo "════════ ✓ PHP %[1]s kurulumu tamamlandı ════�
 		remiWww,              // 6
 		phpdDir,              // 7
 		svc,                  // 8
+		ioncubeSnippet(m),    // 9
 	)
+}
+
+// ioncubeSnippet — PHP kurulumunun parçası olarak ionCube Loader'ı kurar.
+//
+// 🔴 NEDEN OTOMATİK: WHMCS ve birçok ticari script ionCube ile kodlanmıştır;
+// loader yoksa site "ionCube Loader needs to be installed" beyaz sayfası verir.
+// Müşteri bunu kendi kuramaz (root gerekir) → her PHP kurulumunda hazır gelsin.
+//
+// 🔴 FAIL-SOFT: indirme/çıkarma başarısız olursa PHP kurulumu YİNE BAŞARILIDIR.
+// ionCube opsiyonel bir kolaylıktır; onun yüzünden PHP kurulumunu düşürmek
+// (ve müşteriyi PHP'siz bırakmak) çok daha kötü bir sonuç olurdu.
+//
+// 🔴 `00-` ÖNEKİ ŞART: loader zend_extension listesinde OPcache'den ÖNCE
+// gelmelidir; aksi halde "The Loader must appear as the first entry" fatal'i.
+func ioncubeSnippet(m SurumMeta) string {
+	phpdDir := "/etc/php.d"
+	modDir := "/usr/lib64/php/modules"
+	if m.Kaynak == "remi" {
+		phpdDir = "/etc/opt/remi/php" + m.Kod + "/php.d"
+		modDir = "/opt/remi/php" + m.Kod + "/root/usr/lib64/php/modules"
+	}
+	// 8.4 → "8.4" (loader dosya adı bu biçimi kullanır)
+	nokta := m.Surum
+	return fmt.Sprintf(`
+echo "▶ ionCube Loader"
+gosp_ioncube() {
+  local so='%[1]s/ioncube_loader_lin_%[2]s.so'
+  if [ -f "$so" ]; then echo "  ✓ zaten kurulu"; else
+    local tmp; tmp=$(mktemp -d) || return 1
+    if ! curl -fsSL --max-time 120 -o "$tmp/ic.tgz"         https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz; then
+      echo "  ⚠ indirilemedi (ionCube atlandı — PHP kurulumu etkilenmedi)"; rm -rf "$tmp"; return 1
+    fi
+    if ! tar xzf "$tmp/ic.tgz" -C "$tmp"; then
+      echo "  ⚠ arşiv açılamadı (ionCube atlandı)"; rm -rf "$tmp"; return 1
+    fi
+    local src="$tmp/ioncube/ioncube_loader_lin_%[2]s.so"
+    if [ ! -f "$src" ]; then
+      echo "  ⚠ PHP %[2]s için loader yok (ionCube bu sürümü henüz desteklemiyor)"; rm -rf "$tmp"; return 1
+    fi
+    mkdir -p '%[1]s' && install -m 0644 "$src" "$so" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+    echo "  ✓ loader kuruldu"
+  fi
+  mkdir -p '%[3]s'
+  cat > '%[3]s/00-ioncube.ini' <<'GOSPIC'
+; GirginOSPanel: ionCube Loader — OPcache'den ONCE yuklenmeli (00- oneki sart)
+GOSPIC
+  echo "zend_extension = $so" >> '%[3]s/00-ioncube.ini'
+  echo "  ✓ 00-ioncube.ini yazıldı"
+}
+gosp_ioncube || true
+`, modDir, nokta, phpdDir)
 }
 
 // phpKaldirWrapper: bir Remi sürümü için SABİT kaldırma scripti. FPM'i durdur →
