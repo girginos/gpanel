@@ -48,10 +48,20 @@ const CMP_EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-function bitisSonucu(logMetin: string, calis: boolean): 'tamam' | 'hata' | null {
-  if (logMetin.includes(cevir("Güncelleme tamam"))) return 'tamam'
-  if (/başarısız|geri al[ıi]nd[ıi]|rollback|✗|FATAL|HATA:/i.test(logMetin)) return 'hata'
-  if (!calis && logMetin.trim() !== '' && logMetin.includes('Güncelleme başlatıldı')) return 'tamam'
+function bitisSonucu(logMetin: string, calis: boolean, durum: string): 'tamam' | 'hata' | null {
+  // 🔴 Verdict UNIT durumundan (kesin exit sinyali) alinir — log regex DEGIL.
+  // Eski regex, aciklama metnindeki "auto-rollback" / "✗" kelimesini yakalayip
+  // unit exit=0 (BASARILI) olsa bile YANLIS "basarisiz" veriyordu. Ozellikle panel
+  // zaten guncelken "Güncelleme tamam" sentinel'i yazilmaz, sadece heal/aciklama
+  // metni kalir. Simdi: durum='failed' => gercek hata; aksi halde bitti => tamam.
+  if (calis) return null
+  if (durum === 'failed') return 'hata'
+  if (
+    logMetin.includes('Güncelleme tamam') ||
+    logMetin.includes('Güncelleme başlatıldı') ||
+    durum === 'inactive' ||
+    durum === 'dead'
+  ) return 'tamam'
   return null
 }
 
@@ -83,7 +93,7 @@ export default function PanelGuncelleme() {
   const logYukle = useCallback(async () => {
     const r = await api.get<LogYanit>('/system/guncelleme/log')
     setLog(r.data.log)
-    const s = bitisSonucu(r.data.log, r.data.calisiyor)
+    const s = bitisSonucu(r.data.log, r.data.calisiyor, r.data.durum)
     if (!r.data.calisiyor || s) {
       setCalisiyor(false)
       if (s) setSonuc(s)
