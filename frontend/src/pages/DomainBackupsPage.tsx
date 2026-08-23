@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
@@ -72,6 +73,46 @@ const BACKUP_EN: Record<string, string> = {
   "Şimdi Yedekle": "Back Up Now",
   "● Son: başarılı": "● Last: successful",
   "✓ Bağlantı OK": "✓ Connection OK",
+  "✗ Son: hata": "✗ Last: error",
+  "Hata": "Error",
+  "seçili": "selected",
+  "Tip": "Type",
+  "Evet, sil": "Yes, delete",
+  "Dosya ara…": "Search files…",
+  "backup.firma.com": "backup.company.com",
+  "Son oto-yedek:": "Last auto-backup:",
+  "Uzak Yedek Hedefi (FTP / SFTP)": "Remote Backup Target (FTP / SFTP)",
+  "Uzak dizin": "Remote directory",
+  "Uzak hedef kaydedildi": "Remote target saved",
+  "Uzak hedef silindi": "Remote target deleted",
+  "Yedekler": "Backups",
+  "Protokol": "Protocol",
+  "Dosya": "File",
+  "Yerinde": "In place",
+  "Anasayfa": "Home",
+  "Hedef kaydedilemedi": "Failed to save target",
+  "Emin misiniz?": "Are you sure?",
+  "Otomatik yedek aktif: {0}, {1}:00, son {2} yedek tutulur": "Automatic backup active: {0}, {1}:00, last {2} backups kept",
+  "Plan kaydedilemedi": "Failed to save schedule",
+  "Bilgi": "Info",
+  "{0} {1}:00 · son {2} oto-yedek korunur": "{0} {1}:00 · last {2} auto-backups kept",
+  "Otomatik yedek yok. Yalnız manuel “Şimdi Yedekle”.": "No automatic backup. Only manual “Back Up Now”.",
+  "Yedek üretildikten sonra arkaplanda uzak sunucuya yüklenir — disk arızasına karşı off-site koruma.": "After a backup is produced it is uploaded to the remote server in the background — off-site protection against disk failure.",
+  "Son yükleme:": "Last upload:",
+  "Parola": "Password",
+  "Aktif (her yedek bu hedefe gönderilsin)": "Active (send every backup to this target)",
+  "Test ediliyor…": "Testing…",
+  "Hedefi sil": "Delete target",
+  "● Aktif": "● Active",
+  "Yedekleniyor…": "Backing up…",
+  "yedek": "backups",
+  "\"{0}\" silinsin mi?": "Delete \"{0}\"?",
+  "Tam": "Full",
+  "Dosyalara dokunma": "Don't touch files",
+  " — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.": " — DELETE files not in the backup. When off (recommended) the active app is preserved, only files in the backup are overwritten.",
+  "Domaine ait tüm veritabanları yedekteki haline döndürülür. Dosyalara dokunulmaz.": "All databases of the domain are reverted to their state in the backup. Files are not touched.",
+  "Yeni veritabanına (güvenli, orijinal korunur)": "To a new database (safe, original is preserved)",
+  " — mevcut ‘{0}’ silinip yüklenir": " — the existing ‘{0}’ is dropped and loaded",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BACKUP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -128,10 +169,10 @@ export default function DomainBackupsPage() {
     try {
       const r = await api.put<Destination>(`/domains/${id}/backup-destination`, destForm)
       setDest(r.data)
-      setBasari('Uzak hedef kaydedildi')
+      setBasari(cevir("Uzak hedef kaydedildi"))
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
-      setHata(apiHata(e, 'Hedef kaydedilemedi'))
+      setHata(apiHata(e, cevir("Hedef kaydedilemedi")))
     } finally {
       setDestKayit(false)
     }
@@ -151,13 +192,13 @@ export default function DomainBackupsPage() {
   }
 
   async function destSil() {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), tehlike: true }))) return
     setDestKayit(true)
     try {
       await api.delete(`/domains/${id}/backup-destination`)
       setDest({ yok: true })
       setDestForm({ tip: 'sftp', host: '', port: 22, kullanici: '', parola: '', uzak_dizin: '/', aktif: true })
-      setBasari('Uzak hedef silindi')
+      setBasari(cevir("Uzak hedef silindi"))
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
       setHata(apiHata(e))
@@ -177,10 +218,10 @@ export default function DomainBackupsPage() {
       setSched(r.data.schedule)
       setBasari(yeni.freq === 'none'
         ? cevir("Otomatik yedek kapatıldı")
-        : `Otomatik yedek aktif: ${yeni.freq === 'daily' ? 'Günlük' : cevir("Haftalık")}, ${String(yeni.hour).padStart(2,'0')}:00, son ${yeni.retention} yedek tutulur`)
+        : cevirT(cevir("Otomatik yedek aktif: {0}, {1}:00, son {2} yedek tutulur"), yeni.freq === 'daily' ? cevir("Günlük") : cevir("Haftalık"), String(yeni.hour).padStart(2,'0'), yeni.retention))
       setTimeout(() => setBasari(null), 5000)
     } catch (e) {
-      setHata(apiHata(e, 'Plan kaydedilemedi'))
+      setHata(apiHata(e, cevir("Plan kaydedilemedi")))
     } finally {
       setSchedKayit(false)
     }
@@ -205,7 +246,7 @@ export default function DomainBackupsPage() {
       await api.delete(`/domains/${id}/backups/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e) }))
     }
   }
 
@@ -224,17 +265,17 @@ export default function DomainBackupsPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Yedekler' },
+        { etiket: cevir("Yedekler") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Yedekler</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yedekler")}</h1>
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
         {' · '}home + MySQL dump = tar.gz · {sched.freq === 'none'
           ? cevir("Otomatik yedek kapalı")
-          : `${sched.freq === 'daily' ? 'Günlük' : cevir("Haftalık")} ${String(sched.hour).padStart(2,'0')}:00 · son ${sched.retention} oto-yedek korunur`}
+          : cevirT(cevir("{0} {1}:00 · son {2} oto-yedek korunur"), sched.freq === 'daily' ? cevir("Günlük") : cevir("Haftalık"), String(sched.hour).padStart(2,'0'), sched.retention)}
       </p>}
 
       {/* Otomatik Yedek Planı */}
@@ -247,14 +288,14 @@ export default function DomainBackupsPage() {
             </p>
           </div>
           {sched.last_backup_at && (
-            <div className="text-xs text-slate-500 dark:text-slate-500">Son oto-yedek: <span className="font-mono">{sched.last_backup_at.replace('T',' ').replace('Z','')}</span></div>
+            <div className="text-xs text-slate-500 dark:text-slate-500">{cevir("Son oto-yedek:")} <span className="font-mono">{sched.last_backup_at.replace('T',' ').replace('Z','')}</span></div>
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {(['none','daily','weekly'] as const).map(f => {
             const aktif = sched.freq === f
             const meta: Record<string,{ad:string;ikon:string;aciklama:string;renk:string}> = {
-              none: { ad:cevir("Kapalı"), ikon:'⏸', aciklama:'Otomatik yedek yok. Yalnız manuel cevir("Şimdi Yedekle").', renk:'slate' },
+              none: { ad:cevir("Kapalı"), ikon:'⏸', aciklama:cevir("Otomatik yedek yok. Yalnız manuel “Şimdi Yedekle”."), renk:'slate' },
               daily: { ad:cevir("Günlük"), ikon:'🌙', aciklama:cevir("Her gün seçilen saatte yedek üretilir, son N tutulur."), renk:'emerald' },
               weekly: { ad:cevir("Haftalık"), ikon:'📅', aciklama:cevir("Her 7 günde bir yedek, daha ekonomik disk kullanımı."), renk:'indigo' },
             }
@@ -270,7 +311,7 @@ export default function DomainBackupsPage() {
                 className={`text-left p-3 border rounded-lg transition disabled:cursor-default ${renk[m.renk]}`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-base leading-none">{m.ikon}</span>
-                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">● Aktif</span>}
+                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>}
                 </div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ad}</div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1 leading-snug">{m.aciklama}</div>
@@ -310,9 +351,9 @@ export default function DomainBackupsPage() {
       <div className="mb-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Uzak Yedek Hedefi (FTP / SFTP)</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Uzak Yedek Hedefi (FTP / SFTP)")}</h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-              {cevir(cevir("Yedek üretildikten sonra arkaplanda uzak sunucuya yüklenir — disk arızasına karşı off-site koruma."))}
+              {cevir("Yedek üretildikten sonra arkaplanda uzak sunucuya yüklenir — disk arızasına karşı off-site koruma.")}
             </p>
           </div>
           {!dest.yok && dest.son_durum && (
@@ -320,13 +361,13 @@ export default function DomainBackupsPage() {
               dest.son_durum === 'basarili' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' :
               dest.son_durum === 'hata' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
               'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500'
-            }`}>{dest.son_durum === 'basarili' ? '● Son: başarılı' : dest.son_durum === 'hata' ? '✗ Son: hata' : dest.son_durum}</span>
+            }`}>{dest.son_durum === 'basarili' ? cevir('● Son: başarılı') : dest.son_durum === 'hata' ? cevir('✗ Son: hata') : dest.son_durum}</span>
           )}
         </div>
 
         {!dest.yok && dest.son_yukleme && (
           <div className="mb-3 text-xs text-slate-500 dark:text-slate-500">
-            {cevir(cevir("Son yükleme:"))} <span className="font-mono">{dest.son_yukleme}</span>
+            {cevir("Son yükleme:")} <span className="font-mono">{dest.son_yukleme}</span>
             {dest.son_durum === 'hata' && dest.son_hata && (
               <div className="mt-1 text-[11px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2 font-mono whitespace-pre-wrap">{dest.son_hata}</div>
             )}
@@ -335,7 +376,7 @@ export default function DomainBackupsPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 mb-3">
           <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Protokol</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Protokol")}</label>
             <div className="flex gap-2">
               {(['sftp','ftp'] as const).map(t => {
                 const aktif = destForm.tip === t
@@ -351,7 +392,7 @@ export default function DomainBackupsPage() {
           </div>
           <div className="sm:col-span-3">
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Host</label>
-            <input type="text" value={destForm.host} placeholder="backup.firma.com"
+            <input type="text" value={destForm.host} placeholder={cevir("backup.firma.com")}
               onChange={e => setDestForm(f => ({...f, host: e.target.value}))}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
           </div>
@@ -368,13 +409,13 @@ export default function DomainBackupsPage() {
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Parola {!dest.yok && <span className="text-[10px] text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız mevcut korunur)")}</span>}</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Parola")} {!dest.yok && <span className="text-[10px] text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız mevcut korunur)")}</span>}</label>
             <input type="password" value={destForm.parola} autoComplete="new-password"
               onChange={e => setDestForm(f => ({...f, parola: e.target.value}))}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Uzak dizin</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Uzak dizin")}</label>
             <input type="text" value={destForm.uzak_dizin}
               onChange={e => setDestForm(f => ({...f, uzak_dizin: e.target.value}))}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
@@ -386,17 +427,17 @@ export default function DomainBackupsPage() {
             <input type="checkbox" checked={destForm.aktif}
               onChange={e => setDestForm(f => ({...f, aktif: e.target.checked}))}
               className="cursor-pointer"/>
-            {cevir(cevir("Aktif (her yedek bu hedefe gönderilsin)"))}
+            {cevir("Aktif (her yedek bu hedefe gönderilsin)")}
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {destTest && (
               <span className={`text-xs px-2 py-1 rounded font-medium ${destTest.ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`}>
-                {destTest.ok ? '✓ Bağlantı OK' : '✗ ' + (destTest.hata?.slice(0, 80) || 'Hata')}
+                {destTest.ok ? cevir('✓ Bağlantı OK') : '✗ ' + (destTest.hata?.slice(0, 80) || cevir('Hata'))}
               </span>
             )}
             <button type="button" onClick={destBaglantiTesti} disabled={destKayit || !destForm.host || !destForm.kullanici}
               className="text-xs px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:opacity-50">
-              {destKayit ? 'Test ediliyor…' : cevir("Bağlantı Testi")}
+              {destKayit ? cevir("Test ediliyor…") : cevir("Bağlantı Testi")}
             </button>
             <button type="button" onClick={destKaydet} disabled={destKayit || !destForm.host || !destForm.kullanici}
               className="text-xs px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded font-medium">
@@ -405,7 +446,7 @@ export default function DomainBackupsPage() {
             {!dest.yok && (
               <button type="button" onClick={destSil} disabled={destKayit}
                 className="text-xs px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 rounded">
-                Hedefi sil
+                {cevir("Hedefi sil")}
               </button>
             )}
           </div>
@@ -414,10 +455,10 @@ export default function DomainBackupsPage() {
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={olustur} disabled={isleniyor} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-          {isleniyor ? 'Yedekleniyor…' : cevir("+ Şimdi Yedekle")}
+          {isleniyor ? cevir("Yedekleniyor…") : cevir("+ Şimdi Yedekle")}
         </button>
         <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
-        <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} yedek</span>
+        <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} {cevir("yedek")}</span>
       </div>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -433,8 +474,8 @@ export default function DomainBackupsPage() {
           <table className={T.tablo}>
           <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
             <tr>
-              <th className={T.baslik}>Dosya</th>
-              <th className={T.baslik}>Tip</th>
+              <th className={T.baslik}>{cevir("Dosya")}</th>
+              <th className={T.baslik}>{cevir("Tip")}</th>
               <th className={T.baslik}>{cevir("Boyut")}</th>
               <th className={T.baslik}>{cevir("Oluşturulma")}</th>
               <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
@@ -445,10 +486,10 @@ export default function DomainBackupsPage() {
               <tr key={y.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
                 {/* Birincil tanımlayıcı: dosya adı — mobilde kart başlığı */}
                 <td className={`${T.hucreBaslik} font-mono break-all`}>{y.dosya}</td>
-                <td className={T.hucre} data-etiket="Tip">
+                <td className={T.hucre} data-etiket={cevir("Tip")}>
                   <span className={`text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
                     y.tip === 'planli' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500'
-                  }`}>{y.tip === 'planli' ? 'Planlı' : y.tip}</span>
+                  }`}>{y.tip === 'planli' ? cevir('Planlı') : y.tip}</span>
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Boyut")}>
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span>
@@ -471,8 +512,8 @@ export default function DomainBackupsPage() {
       <ConfirmDialog
         acik={!!silinecek}
         baslik={cevir("Yedek dosyasını sil")}
-        mesaj={`"${silinecek?.dosya}" silinsin mi?`}
-        tehlikeli onayMetni="Evet, sil"
+        mesaj={cevirT(cevir("\"{0}\" silinsin mi?"), silinecek?.dosya)}
+        tehlikeli onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
       />
@@ -498,9 +539,9 @@ type Icerik = {
   kesildi: boolean
 }
 const MODLAR: { deger: RMod; etiket: string; aciklama: string }[] = [
-  { deger: 'tam', etiket: 'Tam', aciklama: cevir("Dosyalar + tüm veritabanları") },
+  { deger: 'tam', etiket: cevir("Tam"), aciklama: cevir("Dosyalar + tüm veritabanları") },
   { deger: 'dosyalar', etiket: cevir("Yalnız Dosyalar"), aciklama: cevir("Veritabanına dokunma") },
-  { deger: 'veritabani', etiket: cevir("Yalnız Veritabanı"), aciklama: 'Dosyalara dokunma' },
+  { deger: 'veritabani', etiket: cevir("Yalnız Veritabanı"), aciklama: cevir("Dosyalara dokunma") },
   { deger: 'dosya', etiket: cevir("Dosya Seç"), aciklama: cevir("Belirli dosya/klasörleri geri al") },
   { deger: 'db', etiket: cevir("Veritabanı Seç"), aciklama: cevir("Tek DB — üzerine yaz veya yeni ada") },
 ]
@@ -600,23 +641,23 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
             <label className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-3 cursor-pointer">
               <input type="checkbox" checked={temiz} onChange={e => setTemiz(e.target.checked)} className="mt-0.5" />
               <span className="text-xs text-amber-800 dark:text-amber-200">
-                <b>{cevir("Temiz geri yükleme")}</b> — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.
+                <b>{cevir("Temiz geri yükleme")}</b>{cevir(" — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.")}
               </span>
             </label>
           )}
 
           {mod === 'veritabani' && (
             <p className="text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
-              {cevir(cevir("Domaine ait tüm veritabanları yedekteki haline döndürülür. Dosyalara dokunulmaz."))}
+              {cevir("Domaine ait tüm veritabanları yedekteki haline döndürülür. Dosyalara dokunulmaz.")}
             </p>
           )}
 
           {mod === 'dosya' && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <input value={ara} onChange={e => setAra(e.target.value)} placeholder="Dosya ara…"
+                <input value={ara} onChange={e => setAra(e.target.value)} placeholder={cevir("Dosya ara…")}
                   className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm" />
-                <span className="text-xs text-slate-400 shrink-0">{secili.size} seçili</span>
+                <span className="text-xs text-slate-400 shrink-0">{secili.size} {cevir('seçili')}</span>
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                 {icerikYuk && <div className="p-3 text-sm text-slate-400">{cevir("Yükleniyor…")}</div>}
@@ -635,7 +676,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
                   <div className={`text-[11px] ${hedef === 'klasor' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>{cevir("geri-yukleme-…/ (hiçbir şey ezilmez)")}</div>
                 </button>
                 <button type="button" onClick={() => setHedef('yerinde')} className={`flex-1 ${secBtn(hedef === 'yerinde')}`}>
-                  <div className="text-sm font-medium">Yerinde</div>
+                  <div className="text-sm font-medium">{cevir("Yerinde")}</div>
                   <div className={`text-[11px] ${hedef === 'yerinde' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>{cevir("orijinal konuma (üzerine yaz)")}</div>
                 </button>
               </div>
@@ -659,7 +700,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
                 <div className="flex flex-col gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="radio" name="dbh" checked={dbHedef === 'yeni'} onChange={() => setDbHedef('yeni')} />
-                    {cevir(cevir("Yeni veritabanına (güvenli, orijinal korunur)"))}
+                    {cevir("Yeni veritabanına (güvenli, orijinal korunur)")}
                   </label>
                   {dbHedef === 'yeni' && (
                     <input value={yeniDb} onChange={e => setYeniDb(e.target.value)}
@@ -667,7 +708,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
                   )}
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="radio" name="dbh" checked={dbHedef === 'ustune'} onChange={() => setDbHedef('ustune')} />
-                    <span><b className="text-amber-700 dark:text-amber-300">{cevir("Üzerine yaz")}</b> — mevcut ‘{db}’ silinip yüklenir</span>
+                    <span><b className="text-amber-700 dark:text-amber-300">{cevir("Üzerine yaz")}</b>{cevirT(cevir(" — mevcut ‘{0}’ silinip yüklenir"), db)}</span>
                   </label>
                 </div>
               )}
@@ -680,7 +721,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
             className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">{cevir("İptal")}</button>
           <button type="button" onClick={gonder} disabled={busy}
             className="rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
-            {busy ? 'Geri yükleniyor…' : cevir("Geri Yükle")}
+            {busy ? cevir("Geri yükleniyor…") : cevir("Geri Yükle")}
           </button>
         </div>
       </div>

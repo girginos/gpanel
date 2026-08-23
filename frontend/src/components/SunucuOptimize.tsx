@@ -14,6 +14,19 @@ type LogYanit = { log: string; calisiyor: boolean; durum: string }
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Bakım": "Maintenance",
+  "Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder).": "Optimization running — the package update may take a while; you can close the page (it continues in the background).",
+  "Paketleri güncelle ve optimize et": "Update packages and optimize",
+  "Sistem paketleri güncellenecek ve servisler yeniden ayarlanacak. Onaylıyor musunuz?": "System packages will be updated and services will be re-tuned. Do you confirm?",
+  "Vazgeç": "Cancel",
+  "optimizasyon başlatılamadı": "could not start optimization",
+  "Optimizasyon başlatıldı…": "Optimization started…",
+  "Sunucuyu Optimize Et": "Optimize the Server",
+  "Sistem paketlerini günceller (": "Updates system packages (",
+  ") ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.": ") and re-tunes MariaDB / nginx / PHP settings based on server resources. The job runs in the background — it may take a while and briefly affect services.",
+  "Başlatılıyor…": "Starting…",
+  "Evet, başlat": "Yes, start",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -58,7 +71,7 @@ export default function SunucuOptimize() {
     setHata(null); setBaslatiliyor(true); setOnay(false)
     try {
       await api.post('/system/optimize/baslat')
-      setLog('Optimizasyon başlatıldı…\n')
+      setLog(cevir("Optimizasyon başlatıldı…") + '\n')
       setCalisiyor(true)
     } catch (e: any) {
       setHata(e?.response?.data?.hata || e?.message || cevir("optimizasyon başlatılamadı"))
@@ -71,11 +84,11 @@ export default function SunucuOptimize() {
         <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-sky-100 dark:bg-sky-900/40">🚀</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sunucuyu Optimize Et</span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Sunucuyu Optimize Et")}</span>
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300">{cevir("Bakım")}</span>
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-            Sistem paketlerini günceller (<code className="text-[11px]">dnf -y update</code>) ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.
+            {cevir("Sistem paketlerini günceller (")}<code className="text-[11px]">dnf -y update</code>{cevir(") ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.")}
           </div>
 
           {hata && <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">{hata}</div>}
@@ -83,7 +96,7 @@ export default function SunucuOptimize() {
           {calisiyor && (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
               <span className="w-3 h-3 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
-              {cevir(cevir("Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder)."))}
+              {cevir("Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder).")}
             </div>
           )}
 
@@ -95,14 +108,14 @@ export default function SunucuOptimize() {
             {!onay ? (
               <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
                 className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-                {cevir(cevir("Paketleri güncelle ve optimize et"))}
+                {cevir("Paketleri güncelle ve optimize et")}
               </button>
             ) : (
               <>
                 <span className="text-xs text-slate-600 dark:text-slate-300">{cevir("Sistem paketleri güncellenecek ve servisler yeniden ayarlanacak. Onaylıyor musunuz?")}</span>
                 <button onClick={baslat} disabled={baslatiliyor}
                   className="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 transition font-medium disabled:opacity-40">
-                  {baslatiliyor ? 'Başlatılıyor…' : 'Evet, başlat'}
+                  {baslatiliyor ? cevir("Başlatılıyor…") : cevir("Evet, başlat")}
                 </button>
                 <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
                   {cevir("Vazgeç")}

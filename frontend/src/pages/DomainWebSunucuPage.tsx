@@ -65,6 +65,34 @@ const HEADERS = [
 
 
 const WEBSRV_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "Uygulanıyor…": "Applying…",
+  "Statik (PHP yok)": "Static (no PHP)",
+  "Varsayılan. nginx PHP-FPM'i doğrudan fastcgi ile çağırır. En düşük gecikme, WordPress/Laravel/dinamik PHP siteler için ideal.": "Default. nginx calls PHP-FPM directly over fastcgi. Lowest latency, ideal for WordPress/Laravel/dynamic PHP sites.",
+  "nginx kenarda TLS terminatörü, Apache (10080) arkada vhost'u servis eder. .htaccess tam desteği — Joomla, eski WP, legacy CMS'ler için.": "nginx as the edge TLS terminator, Apache (10080) serves the vhost behind it. Full .htaccess support — for Joomla, old WP, legacy CMSs.",
+  "Kamera/mikrofon/konum API'lerini varsayılan kapat": "Disable camera/microphone/location APIs by default",
+  "HTTP linkleri otomatik HTTPS'e yükselt": "Automatically upgrade HTTP links to HTTPS",
+  "✓ Web sunucusu \"{0}\" olarak değiştirildi": "✓ Web server changed to \"{0}\"",
+  "✓ Belge kökü \"public_html/{0}\" olarak ayarlandı": "✓ Document root set to \"public_html/{0}\"",
+  "Güvenlik başlıkları ve özel direktifler. Kaydedince nginx vhost yeniden render edilir.": "Security headers and custom directives. When saved, the nginx vhost is re-rendered.",
+  "nginx kenarda TLS terminatörü olarak kalır; alttaki seçim domain'in arkasını çalışan motora yönlendirir.": "nginx stays at the edge as the TLS terminator; the selection below routes the domain's backend to the running engine.",
+  "● Aktif": "● Active",
+  ". Laravel, Symfony gibi": ". Frameworks like Laravel, Symfony",
+  "'yi bir alt klasörde tutar — o klasörü buraya yazın.": " keep in a subfolder — write that folder here.",
+  "· Kaydedince nginx vhost anında yeniden render edilir.": "· When saved, the nginx vhost is re-rendered instantly.",
+  " yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.": " is only meaningful for sites with HTTPS active. If the site is HTTP-only, it is not sent to the browser.",
+  "1 hafta": "1 week",
+  "6 ay": "6 months",
+  "WordPress/PHP sayfalarini diskte onbellege alir. POST/cookie/login/preview otomatik atlanir. WP Site Health (Page cache detected) uyarisini giderir.": "Caches WordPress/PHP pages on disk. POST/cookie/login/preview are skipped automatically. Resolves the WP Site Health (Page cache detected) warning.",
+  "5 dakika": "5 minutes",
+  "15 dakika": "15 minutes",
+  "6 saat": "6 hours",
+  "3 ay": "3 months",
+  "Ek nginx Direktifleri": "Extra nginx Directives",
+  "Bu metin": "This text",
+  "max-age (saniye)": "max-age (seconds)",
+  "Kaydet ve Uygula": "Save and Apply",
+  "# Örn:\nclient_max_body_size 200m;\nrewrite ^/eski/(.*)$ /yeni/$1 permanent;": "# E.g:\nclient_max_body_size 200m;\nrewrite ^/old/(.*)$ /new/$1 permanent;",
   "(boş = public_html kökü)": "(empty = public_html root)",
   "1 gün": "1 day",
   "1 saat (önerilen)": "1 hour (recommended)",
@@ -141,7 +169,7 @@ export default function DomainWebSunucuPage() {
     try {
       await api.put(`/domains/${id}/web-backend`, { backend: yeni })
       setBackend(yeni)
-      setBasari(`✓ Web sunucusu "${BACKEND_BILGI[yeni]?.ad || yeni}" olarak değiştirildi`)
+      setBasari(cevirT(cevir("✓ Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni))
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
       setHata(apiHata(e, cevir("Backend değişimi başarısız")))
@@ -157,7 +185,7 @@ export default function DomainWebSunucuPage() {
       const r = await api.put<{ alt_dizin: string }>(`/domains/${id}/web-root`, { alt_dizin: webRoot.trim() })
       setWebRoot(r.data.alt_dizin); setWebRootKayitli(r.data.alt_dizin)
       setBasari(r.data.alt_dizin
-        ? `✓ Belge kökü "public_html/${r.data.alt_dizin}" olarak ayarlandı`
+        ? cevirT(cevir("✓ Belge kökü \"public_html/{0}\" olarak ayarlandı"), r.data.alt_dizin)
         : cevir("✓ Belge kökü public_html köküne ayarlandı"))
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
@@ -189,7 +217,7 @@ export default function DomainWebSunucuPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: yanit?.alan_adi || '...', href: `/abonelikler/${id}` },
         { etiket: cevir("Apache ve nginx Ayarları") },
       ]} />
@@ -197,7 +225,7 @@ export default function DomainWebSunucuPage() {
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Apache ve nginx Ayarları")}</h1>
       {yanit && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{yanit.alan_adi}</Link>
-        {' · '}Güvenlik başlıkları ve özel direktifler. Kaydedince nginx vhost yeniden render edilir.
+        {' · '}{cevir("Güvenlik başlıkları ve özel direktifler. Kaydedince nginx vhost yeniden render edilir.")}
       </p>}
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
@@ -209,7 +237,7 @@ export default function DomainWebSunucuPage() {
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Web Sunucu Yığını")}</h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-              nginx kenarda TLS terminatörü olarak kalır; alttaki seçim domain'in arkasını çalışan motora yönlendirir.
+              {cevir("nginx kenarda TLS terminatörü olarak kalır; alttaki seçim domain'in arkasını çalışan motora yönlendirir.")}
             </p>
           </div>
           {backendDegistiriliyor && <span className="text-xs text-slate-400 dark:text-slate-500">{cevir("Uygulanıyor…")}</span>}
@@ -231,10 +259,10 @@ export default function DomainWebSunucuPage() {
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-lg leading-none">{b.ikon}</span>
-                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">● Aktif</span>}
+                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>}
                 </div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{b.ad}</div>
-                <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1.5 leading-snug">{b.aciklama}</div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(b.ad)}</div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1.5 leading-snug">{cevir(b.aciklama)}</div>
               </button>
             )
           })}
@@ -246,8 +274,8 @@ export default function DomainWebSunucuPage() {
         <div className="mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Belge Kök Dizini")}</h3>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-            {cevir(cevir("Sitenin açılış (index) dizini. Varsayılan"))} <code className="font-mono">public_html</code>. Laravel, Symfony gibi
-            {cevir(cevir("çatılar"))} <code className="font-mono">index.php</code>'yi bir alt klasörde tutar — o klasörü buraya yazın.
+            {cevir(cevir("Sitenin açılış (index) dizini. Varsayılan"))} <code className="font-mono">public_html</code>{cevir(". Laravel, Symfony gibi")}
+            {cevir(cevir("çatılar"))} <code className="font-mono">index.php</code>{cevir("'yi bir alt klasörde tutar — o klasörü buraya yazın.")}
           </p>
         </div>
 
@@ -268,7 +296,7 @@ export default function DomainWebSunucuPage() {
           <button type="button" onClick={webRootKaydet}
             disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli}
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
-            {webRootKaydediliyor ? 'Uygulanıyor…' : cevir("Belge Kökünü Kaydet")}
+            {webRootKaydediliyor ? cevir("Uygulanıyor…") : cevir("Belge Kökünü Kaydet")}
           </button>
         </div>
         <datalist id="webroot-adaylar">
@@ -293,14 +321,14 @@ export default function DomainWebSunucuPage() {
             <span className="text-slate-400 dark:text-slate-500">{cevir("Etkin kök:")} </span>
             <code className="font-mono break-all text-slate-700 dark:text-slate-300">public_html{webRoot.trim() ? '/' + webRoot.trim().replace(/^\/+|\/+$/g, '') : ''}</code>
             <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-              {cevir(cevir("Klasör önceden var olmalı."))} <span className="font-medium text-slate-500 dark:text-slate-400">{cevir("Laravel için:")} <code className="font-mono">public</code></span> · Kaydedince nginx vhost anında yeniden render edilir.
+              {cevir(cevir("Klasör önceden var olmalı."))} <span className="font-medium text-slate-500 dark:text-slate-400">{cevir("Laravel için:")} <code className="font-mono">public</code></span> {cevir("· Kaydedince nginx vhost anında yeniden render edilir.")}
             </div>
           </div>
         </div>
       </div>
 
       <div className="mb-5 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-        <strong>HSTS</strong> yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.
+        <strong>HSTS</strong>{cevir(" yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.")}
         {cevir(cevir("Ayarlar değiştiğinde"))} <code className="font-mono">nginx -t</code> + <code className="font-mono">reload</code> {cevir("otomatik tetiklenir — sıfır kesinti.")}
       </div>
 
@@ -314,7 +342,7 @@ export default function DomainWebSunucuPage() {
                   key={h.key}
                   etiket={h.etiket}
                   deger={h.deger}
-                  aciklama={h.aciklama}
+                  aciklama={cevir(h.aciklama)}
                   acik={a[h.key] as boolean}
                   onToggle={() => P(h.key as keyof Ayarlar, !a[h.key] as never)}
                 />
@@ -334,14 +362,14 @@ export default function DomainWebSunucuPage() {
             {a.hdr_hsts && (
               <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-700 space-y-2">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">max-age (saniye)</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("max-age (saniye)")}</label>
                   <select value={a.hsts_max_age} onChange={e => P('hsts_max_age', parseInt(e.target.value))}
                     className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
                     <option value={300}>{cevir("5 dk (test için)")}</option>
                     <option value={86400}>{cevir("1 gün")}</option>
-                    <option value={604800}>1 hafta</option>
+                    <option value={604800}>{cevir("1 hafta")}</option>
                     <option value={2592000}>{cevir("30 gün")}</option>
-                    <option value={15768000}>6 ay</option>
+                    <option value={15768000}>{cevir("6 ay")}</option>
                     <option value={31536000}>{cevir("1 yıl (önerilen)")}</option>
                     <option value={63072000}>{cevir("2 yıl (preload için)")}</option>
                   </select>
@@ -367,7 +395,7 @@ export default function DomainWebSunucuPage() {
             <SatirToggle
               etiket="Nginx FastCGI Cache"
               deger={cevirT(cevir("x-cache-status header · {0} dk önbellek süresi"), a.fastcgi_cache_dakika)}
-              aciklama="WordPress/PHP sayfalarini diskte onbellege alir. POST/cookie/login/preview otomatik atlanir. WP Site Health (Page cache detected) uyarisini giderir."
+              aciklama={cevir("WordPress/PHP sayfalarini diskte onbellege alir. POST/cookie/login/preview otomatik atlanir. WP Site Health (Page cache detected) uyarisini giderir.")}
               acik={a.fastcgi_cache}
               onToggle={() => P('fastcgi_cache', !a.fastcgi_cache)}
             />
@@ -376,10 +404,10 @@ export default function DomainWebSunucuPage() {
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Cache süresi (dakika)")}</label>
                 <select value={a.fastcgi_cache_dakika} onChange={e => P('fastcgi_cache_dakika', parseInt(e.target.value))}
                   className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
-                  <option value={5}>5 dakika</option>
-                  <option value={15}>15 dakika</option>
+                  <option value={5}>{cevir("5 dakika")}</option>
+                  <option value={15}>{cevir("15 dakika")}</option>
                   <option value={60}>{cevir("1 saat (önerilen)")}</option>
-                  <option value={360}>6 saat</option>
+                  <option value={360}>{cevir("6 saat")}</option>
                   <option value={1440}>{cevir("1 gün")}</option>
                 </select>
               </div>
@@ -399,9 +427,9 @@ export default function DomainWebSunucuPage() {
                   <select value={a.browser_cache_gun} onChange={e => P('browser_cache_gun', parseInt(e.target.value))}
                     className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
                     <option value={1}>{cevir("1 gün")}</option>
-                    <option value={7}>1 hafta</option>
+                    <option value={7}>{cevir("1 hafta")}</option>
                     <option value={30}>{cevir("30 gün (önerilen)")}</option>
-                    <option value={90}>3 ay</option>
+                    <option value={90}>{cevir("3 ay")}</option>
                     <option value={365}>{cevir("1 yıl")}</option>
                   </select>
                 </div>
@@ -410,20 +438,20 @@ export default function DomainWebSunucuPage() {
           </Kart>
 
           {/* Ek direktifler */}
-          <Kart baslik="Ek nginx Direktifleri">
+          <Kart baslik={cevir("Ek nginx Direktifleri")}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">
-              Bu metin <code className="font-mono">server</code> {cevir("bloğunun sonuna eklenir. Örn:")} <code className="font-mono">client_max_body_size 200m;</code>
+              {cevir("Bu metin")} <code className="font-mono">server</code> {cevir("bloğunun sonuna eklenir. Örn:")} <code className="font-mono">client_max_body_size 200m;</code>
             </p>
             <textarea value={a.ek_direktifler} onChange={e => P('ek_direktifler', e.target.value)}
               rows={6}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-xs font-mono"
-              placeholder="# Örn:&#10;client_max_body_size 200m;&#10;rewrite ^/eski/(.*)$ /yeni/$1 permanent;" />
+              placeholder={cevir("# Örn:\nclient_max_body_size 200m;\nrewrite ^/eski/(.*)$ /yeni/$1 permanent;")} />
           </Kart>
 
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
               className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-              {isleniyor ? 'Uygulanıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> Kaydet ve Uygula</span>}
+              {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
               className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">

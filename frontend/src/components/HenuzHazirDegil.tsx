@@ -5,6 +5,11 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 
 const CMP_EN: Record<string, string> = {
+  "Hazır Değil": "Not Ready",
+  "Yapım aşamasında": "Under construction",
+  "Şu an sadece arayüz iskeleti görülmektedir.": "Only the interface skeleton is visible for now.",
+  "Bu modül ": "This module ",
+  " fazında devreye girecek.": " phase will go live.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -17,7 +22,7 @@ export default function HenuzHazirDegil({
       <div className="flex items-center mb-1">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{baslik}</h1>
         <span className="ml-3 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded">
-          {faz} · Hazır Değil
+          {faz} · {cevir("Hazır Değil")}
         </span>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-8">{aciklama}</p>
@@ -30,8 +35,8 @@ export default function HenuzHazirDegil({
         </div>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yapım aşamasında")}</h3>
         <p className="text-sm text-slate-500 dark:text-slate-500 max-w-md mx-auto">
-          Bu modül <span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span> fazında devreye girecek.
-          {cevir(cevir("Şu an sadece arayüz iskeleti görülmektedir."))}
+          {cevir("Bu modül ")}<span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span>{cevir(" fazında devreye girecek.")}
+          {cevir("Şu an sadece arayüz iskeleti görülmektedir.")}
         </p>
       </div>
     </div>

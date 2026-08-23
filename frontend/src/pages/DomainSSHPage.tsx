@@ -19,6 +19,19 @@ type Durum = {
 
 
 const SSH_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "Anahtar kaydedilemedi": "Failed to save key",
+  "hesabı için kabuk (shell) erişimi.": "shell access for the account.",
+  "SSH KAPALI": "SSH OFF",
+  "Açık:": "On:",
+  "Kapalı:": "Off:",
+  "Mevcut:": "Current:",
+  "SSH'i Kapat": "Disable SSH",
+  "SSH'i Aç": "Enable SSH",
+  "Bağlantı Bilgisi": "Connection Info",
+  "🔑 Parola:": "🔑 Password:",
+  "Parola yerine anahtarla giriş için genel anahtarınızı ekleyin.": "To log in with a key instead of a password, add your public key.",
+  "Anahtarı Kaydet": "Save Key",
   "Bağlantı komutu": "Connection command",
   "Boş bırakıp kaydederseniz tüm anahtarlar silinir.": "If you save it empty, all keys are deleted.",
   "Demo domainde SSH değiştirilemez.": "SSH cannot be changed on a demo domain.",
@@ -61,7 +74,7 @@ export default function DomainSSHPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/domains/${id}/ssh`, { aktif })
-      setBasari(aktif ? 'SSH erişimi açıldı.' : cevir("SSH erişimi kapatıldı."))
+      setBasari(aktif ? cevir("SSH erişimi açıldı.") : cevir("SSH erişimi kapatıldı."))
       setTimeout(() => setBasari(null), 4000)
       yukle()
     } catch (e) {
@@ -73,12 +86,12 @@ export default function DomainSSHPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/ssh/anahtar`, { anahtar })
-      setBasari(data.anahtar_var ? '✓ SSH anahtarı kaydedildi.' : cevir("✓ SSH anahtarları temizlendi."))
+      setBasari(data.anahtar_var ? cevir("✓ SSH anahtarı kaydedildi.") : cevir("✓ SSH anahtarları temizlendi."))
       setTimeout(() => setBasari(null), 4000)
       setAnahtar('')
       yukle()
     } catch (e) {
-      setHata(apiHata(e, 'Anahtar kaydedilemedi'))
+      setHata(apiHata(e, cevir("Anahtar kaydedilemedi")))
     } finally { setIsleniyor(false) }
   }
 
@@ -91,7 +104,7 @@ export default function DomainSSHPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-3xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
+          { etiket: cevir("Anasayfa"), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: d.alan_adi, href: `/abonelikler/${id}` },
           { etiket: cevir("SSH Erişimi") },
@@ -108,7 +121,7 @@ export default function DomainSSHPage() {
             d.aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
           }`}>
             <span className={`w-2 h-2 rounded-full ${d.aktif ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-            {d.aktif ? 'SSH AÇIK' : 'SSH KAPALI'}
+            {d.aktif ? cevir("SSH AÇIK") : cevir("SSH KAPALI")}
           </span>
         </div>
 
@@ -121,14 +134,14 @@ export default function DomainSSHPage() {
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Kabuk Erişimi")}</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {cevir(cevir("Açık:"))} <code className="font-mono">/bin/bash</code> · Kapalı: <code className="font-mono">/usr/sbin/nologin</code>.
-                Mevcut: <code className="font-mono">{d.shell || '—'}</code>
+                {cevir("Açık:")} <code className="font-mono">/bin/bash</code> · {cevir("Kapalı:")} <code className="font-mono">/usr/sbin/nologin</code>.
+                {' '}{cevir("Mevcut:")} <code className="font-mono">{d.shell || '—'}</code>
               </p>
             </div>
             {d.aktif ? (
               <button onClick={() => toggle(false)} disabled={isleniyor || d.is_demo}
                 className="shrink-0 px-4 py-2 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 text-sm font-medium rounded-lg">
-                SSH'i Kapat
+                {cevir("SSH'i Kapat")}
               </button>
             ) : (
               <button onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
@@ -145,7 +158,7 @@ export default function DomainSSHPage() {
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Bağlantı Bilgisi")}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <Bilgi etiket={cevir("Kullanıcı")} deger={d.kullanici} />
-            <Bilgi etiket={cevir(cevir("Sunucu"))} deger={d.ssh_host} />
+            <Bilgi etiket={cevir("Sunucu")} deger={d.ssh_host} />
             <Bilgi etiket="Port" deger={String(d.ssh_port)} />
           </div>
           <div className="mt-3">
@@ -155,14 +168,14 @@ export default function DomainSSHPage() {
               <button onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 text-xs px-2.5 py-2 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Kopyala")}</button>
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">🔑 Parola: <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{cevir("🔑 Parola:")} <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
         </div>
 
         {/* SSH Public Key */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("SSH Genel Anahtarı (authorized_keys)")}</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-            Parola yerine anahtarla giriş için genel anahtarınızı ekleyin. {d.anahtar_var
+            {cevir("Parola yerine anahtarla giriş için genel anahtarınızı ekleyin.")} {d.anahtar_var
               ? <span className="text-emerald-600 dark:text-emerald-400">{cevir("Şu an bir anahtar tanımlı.")}</span>
               : <span className="text-slate-500">{cevir("Henüz anahtar tanımlı değil.")}</span>}
           </p>
@@ -178,7 +191,7 @@ export default function DomainSSHPage() {
             <p className="text-xs text-slate-400">{cevir("Boş bırakıp kaydederseniz tüm anahtarlar silinir.")}</p>
             <button onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
               className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
-              {cevir(cevir("Anahtarı Kaydet"))}
+              {cevir("Anahtarı Kaydet")}
             </button>
           </div>
         </div>

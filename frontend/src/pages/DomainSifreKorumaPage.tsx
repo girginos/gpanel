@@ -12,6 +12,24 @@ type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
 
 const SIFRE_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "Onay gerekiyor": "Confirmation required",
+  "dizini": "directory",
+  "ile korumaya alındı.": "is now protected.",
+  "Eklenemedi": "Could not add",
+  "Silinemedi": "Could not delete",
+  "kullanıcısını": "the user",
+  "korumasından kaldır?": "remove from protection?",
+  "Belirli bir dizini HTTP kimlik doğrulaması (": "Protect a specific directory with HTTP authentication (",
+  ") ile koruyun. Ziyaretçiler kullanıcı adı ve parola olmadan erişemez.": ") . Visitors cannot access it without a username and password.",
+  "Dizin yolu": "Directory path",
+  "Yol": "Path",
+  "ile başlamalı (örn.": "must start with (e.g.",
+  "Aynı yola birden fazla kullanıcı ekleyebilirsiniz.": "You can add multiple users to the same path.",
+  "Ekleniyor…": "Adding…",
+  "Koruma Ekle": "Add Protection",
+  "Korunan dizinler": "Protected directories",
+  "kullanıcı": "users",
   "Henüz korumalı dizin yok.": "No protected directories yet.",
   "Yeni koruma / kullanıcı ekle": "Add new protection / user",
   "Şifre Korumalı Dizinler": "Password Protected Directories",
@@ -45,21 +63,21 @@ export default function DomainSifreKorumaPage() {
     setHata(null); setOk(null); setKaydediyor(true)
     try {
       await api.post(`${base}/koruma`, { yol, kullanici, parola })
-      setOk(`${yol} dizini "${kullanici}" ile korumaya alındı.`)
+      setOk(`${yol} ${cevir("dizini")} "${kullanici}" ${cevir("ile korumaya alındı.")}`)
       setParola('')
       yukle()
     } catch (err) {
-      setHata(apiHata(err, 'Eklenemedi'))
+      setHata(apiHata(err, cevir("Eklenemedi")))
     } finally { setKaydediyor(false) }
   }
 
   async function sil(k: Kayit) {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${k.kullanici}" kullanıcısını ${k.yol} korumasından kaldır?` }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: `"${k.kullanici}" ${cevir("kullanıcısını")} ${k.yol} ${cevir("korumasından kaldır?")}` }))) return
     setHata(null); setOk(null)
     try {
       await api.delete(`${base}/koruma/${k.id}`)
       yukle()
-    } catch (err) { setHata(apiHata(err, 'Silinemedi')) }
+    } catch (err) { setHata(apiHata(err, cevir("Silinemedi"))) }
   }
 
   // yol -> o yola ait kullanıcılar
@@ -69,13 +87,13 @@ export default function DomainSifreKorumaPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-3xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
+          { etiket: cevir("Anasayfa"), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: cevir("Şifre Korumalı Dizinler") },
         ]} />
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Şifre Korumalı Dizinler")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Belirli bir dizini HTTP kimlik doğrulaması (<span className="font-mono">.htpasswd</span>) ile koruyun. Ziyaretçiler kullanıcı adı ve parola olmadan erişemez.
+          {cevir("Belirli bir dizini HTTP kimlik doğrulaması (")}<span className="font-mono">.htpasswd</span>{cevir(") ile koruyun. Ziyaretçiler kullanıcı adı ve parola olmadan erişemez.")}
         </p>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -86,7 +104,7 @@ export default function DomainSifreKorumaPage() {
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yeni koruma / kullanıcı ekle")}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="block">
-              <span className="text-xs text-slate-500 dark:text-slate-400">Dizin yolu</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Dizin yolu")}</span>
               <input value={yol} onChange={e => setYol(e.target.value)} required placeholder="/gizli"
                 className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
@@ -101,15 +119,15 @@ export default function DomainSifreKorumaPage() {
                 className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
           </div>
-          <p className="text-[11px] text-slate-400 mt-2">Yol <span className="font-mono">/</span> {cevir("ile başlamalı (örn.")} <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). Aynı yola birden fazla kullanıcı ekleyebilirsiniz.</p>
+          <p className="text-[11px] text-slate-400 mt-2">{cevir("Yol")} <span className="font-mono">/</span> {cevir("ile başlamalı (örn.")} <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). {cevir("Aynı yola birden fazla kullanıcı ekleyebilirsiniz.")}</p>
           <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
-            {kaydediyor ? 'Ekleniyor…' : 'Koruma Ekle'}
+            {kaydediyor ? cevir("Ekleniyor…") : cevir("Koruma Ekle")}
           </button>
         </form>
 
         {/* Mevcut korumalar */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Korunan dizinler</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Korunan dizinler")}</h3>
           {yuk ? (
             <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : liste.length === 0 ? (
@@ -124,7 +142,7 @@ export default function DomainSifreKorumaPage() {
                   <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-900/40">
                     <Ikon d={I.kilit} />
                     <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{g}</span>
-                    <span className="text-xs text-slate-400">· {ks.length} kullanıcı</span>
+                    <span className="text-xs text-slate-400">· {ks.length} {cevir("kullanıcı")}</span>
                   </div>
                   <ul className="divide-y divide-slate-50 dark:divide-slate-700/50">
                     {ks.map(k => (

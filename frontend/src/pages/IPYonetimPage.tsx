@@ -27,11 +27,35 @@ type Liste = { sunucu_ipler: SunucuIP[]; db_kayitlar: DBKayit[]; varsayilan_aray
 
 
 const IPYON_EN: Record<string, string> = {
+  "Türkçe": "English",
   "Arayüz / CIDR": "Interface / CIDR",
   "IP boş olamaz": "IP cannot be empty",
   "Panel ekletmediği için silinemez": "Cannot be deleted because it wasn't added by the panel",
   "Silme hatası": "Delete error",
   "ör. mail dış IP havuzu": "e.g. mail outbound IP pool",
+  "Araçlar ve Ayarlar": "Tools and Settings",
+  "IP Yönetimi": "IP Management",
+  "Yüklenemedi": "Could not load",
+  "Sunucuya ek IP adresi ekle. Reboot sonrası otomatik geri yüklenir.": "Add an extra IP address to the server. Automatically restored after reboot.",
+  "Kullanıcı IP'leri ve primary IP silinemez.": "User IPs and the primary IP cannot be deleted.",
+  "Yükleniyor…": "Loading…",
+  "Arayüz": "Interface",
+  "Açıklama": "Description",
+  "İşlem": "Action",
+  "kullanıcı": "user",
+  "Sil": "Delete",
+  "Vazgeç": "Cancel",
+  "Eklenemedi": "Could not add",
+  "Ekleniyor…": "Adding…",
+  "Ekle": "Add",
+  "Rol": "Role",
+  "Silinemedi": "Could not delete",
+  "silinemez": "cannot be deleted",
+  "Primary IP silinemez": "Primary IP cannot be deleted",
+  "Varsayılan arayüz:": "Default interface:",
+  "Reboot sonrası panel-etiketli IP'ler otomatik geri yüklenir": "Panel-labeled IPs are automatically restored after reboot",
+  "{ip} silinsin mi?": "Delete {ip}?",
+  "Bu IP sunucudan kaldırılacak ({dev}/{cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.": "This IP will be removed from the server ({dev}/{cidr}). All traffic routed to this IP will drop. It will not be restored after reboot either.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (IPYON_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -67,23 +91,23 @@ export default function IPYonetimPage() {
       await api.post('/ipler', { ip: taslakIP.trim(), iface: taslakIface, cidr: taslakCidr, note: taslakNot.trim() })
       setTaslakIP(''); setTaslakNot('')
       await yukle()
-    } catch (e) { setEkleHata(apiHata(e, 'Eklenemedi')) }
+    } catch (e) { setEkleHata(apiHata(e, cevir("Eklenemedi"))) }
     finally { setGonderiliyor(false) }
   }
 
   const sil = async (s: SunucuIP) => {
     if (!s.silinebilir) return
     const ok = await dialog.onay({
-      baslik: `${s.ip} silinsin mi?`,
-      mesaj: `Bu IP sunucudan kaldırılacak (${s.iface}/${s.cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.`,
-      onayEtiketi: 'Sil', iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      baslik: cevir("{ip} silinsin mi?").replace('{ip}', s.ip),
+      mesaj: cevir("Bu IP sunucudan kaldırılacak ({dev}/{cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.").replace('{dev}', s.iface).replace('{cidr}', String(s.cidr)),
+      onayEtiketi: cevir("Sil"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
     })
     if (!ok) return
     try {
       await api.delete('/ipler/' + encodeURIComponent(s.ip))
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, cevir("Silme hatası")) })
+      await dialog.bilgi({ baslik: cevir("Silinemedi"), mesaj: apiHata(e, cevir("Silme hatası")) })
     }
   }
 
@@ -97,7 +121,7 @@ export default function IPYonetimPage() {
       <div className="mt-4 mb-6">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("IP Yönetimi")}</h1>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          {cevir(cevir("Sunucuya ek IP adresi ekle. Reboot sonrası otomatik geri yüklenir."))}
+          {cevir("Sunucuya ek IP adresi ekle. Reboot sonrası otomatik geri yüklenir.")}
           <span className="ml-1 font-medium text-slate-800 dark:text-slate-200">
             {cevir("Kullanıcı IP'leri ve primary IP silinemez.")}
           </span>
@@ -140,7 +164,7 @@ export default function IPYonetimPage() {
               <div className="flex items-end">
                 <button type="submit" disabled={gonderiliyor || !taslakIP.trim()}
                   className="h-[38px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
-                  {gonderiliyor ? 'Ekleniyor…' : 'Ekle'}
+                  {gonderiliyor ? cevir("Ekleniyor…") : cevir("Ekle")}
                 </button>
               </div>
             </div>
@@ -155,7 +179,7 @@ export default function IPYonetimPage() {
                   <tr>
                     <th className="px-3 py-3 font-semibold">IP</th>
                     <th className="px-3 py-3 font-semibold">{cevir("Arayüz / CIDR")}</th>
-                    <th className="px-3 py-3 font-semibold">Rol</th>
+                    <th className="px-3 py-3 font-semibold">{cevir("Rol")}</th>
                     <th className="px-3 py-3 font-semibold">Label</th>
                     <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                   </tr>
@@ -182,7 +206,7 @@ export default function IPYonetimPage() {
                             {cevir("Sil")}
                           </button>
                         ) : (
-                          <span className="text-xs text-slate-400" title={s.primary_mi ? 'Primary IP silinemez' : cevir("Panel ekletmediği için silinemez")}>silinemez</span>
+                          <span className="text-xs text-slate-400" title={s.primary_mi ? cevir("Primary IP silinemez") : cevir("Panel ekletmediği için silinemez")}>{cevir("silinemez")}</span>
                         )}
                       </td>
                     </tr>
@@ -193,7 +217,7 @@ export default function IPYonetimPage() {
           </div>
 
           <p className="mt-4 text-xs text-slate-500">
-            {liste.sunucu_ipler.length} IP · Varsayılan arayüz: <span className="font-mono">{liste.varsayilan_arayuz || '—'}</span> · Reboot sonrası panel-etiketli IP'ler otomatik geri yüklenir
+            {liste.sunucu_ipler.length} IP · {cevir("Varsayılan arayüz:")} <span className="font-mono">{liste.varsayilan_arayuz || '—'}</span> · {cevir("Reboot sonrası panel-etiketli IP'ler otomatik geri yüklenir")}
           </p>
         </>
       )}

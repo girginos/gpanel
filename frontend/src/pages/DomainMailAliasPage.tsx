@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +23,25 @@ const MAILALIAS_EN: Record<string, string> = {
   "Yeni Yönlendirme": "New Forwarding",
   "Yönlendirmeler": "Forwardings",
   "✓ Yönlendirme silindi.": "✓ Forwarding deleted.",
+  "Türkçe": "English",
+  "Domain yüklenemedi": "Failed to load domain",
+  "✓ {0} → {1} eklendi.": "✓ {0} → {1} added.",
+  "Takma ad eklenemedi": "Failed to add alias",
+  "Emin misiniz?": "Are you sure?",
+  "\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?": "The forwarding \"{0} → {1}\" will be deleted. Are you sure?",
+  "Silinemedi": "Failed to delete",
+  "Anasayfa": "Home",
+  "Takma Adlar": "Aliases",
+  "Bu domain için önce mail servisini kurun (Mail Kutuları sayfasından).": "First set up the mail service for this domain (from the Mailboxes page).",
+  "Kaynak adres": "Source address",
+  "Hedef adres (nereye gitsin)": "Target address (where it should go)",
+  "Catch-all yap (bu domaine gelen": "Make catch-all (forward all",
+  "bilinmeyen tüm adresleri": "unknown addresses",
+  "hedefe yönlendir)": "sent to this domain to the target)",
+  "— zaten bir catch-all var": "— a catch-all already exists",
+  "adet": "item(s)",
+  "Ekle": "Add",
+  "Sil": "Delete",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILALIAS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -70,27 +90,27 @@ export default function DomainMailAliasPage() {
     setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post('/eklenti/mail/aliaslar', { domain_id: mailDomain.id, kaynak: src, hedef: hedef.trim().toLowerCase() })
-      setBildirim(`✓ ${src} → ${hedef} eklendi.`)
+      setBildirim(cevirT(cevir("✓ {0} → {1} eklendi."), src, hedef))
       setKaynak(''); setHedef(''); setCatchall(false)
       yukle(mailDomain.id)
-    } catch (er) { setHata(apiHata(er, 'Takma ad eklenemedi')) }
+    } catch (er) { setHata(apiHata(er, cevir("Takma ad eklenemedi"))) }
     finally { setIsleniyor(false) }
   }
 
   async function sil(a: Alias) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${a.kaynak} → ${a.hedef}" yönlendirmesi silinecek. Emin misiniz?`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?"), a.kaynak, a.hedef), tehlike: true }))) return
     setIsleniyor(true); setHata(null)
     try {
       await api.delete(`/eklenti/mail/aliaslar/${a.id}`)
       setBildirim(cevir("✓ Yönlendirme silindi."))
       if (mailDomain) yukle(mailDomain.id)
-    } catch (e) { setHata(apiHata(e, 'Silinemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Silinemedi"))) }
     finally { setIsleniyor(false) }
   }
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
   )
@@ -98,10 +118,10 @@ export default function DomainMailAliasPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi, href: `/abonelikler/${id}` },
-        { etiket: 'Takma Adlar' },
+        { etiket: cevir("Takma Adlar") },
       ]} />
       <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Takma Adlar & Yönlendirme")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{cevir("Bir adrese gelen postayı başka bir adrese yönlendirin. Catch-all ile bilinmeyen tüm adresleri tek kutuda toplayın.")}</p>
@@ -112,7 +132,7 @@ export default function DomainMailAliasPage() {
       {mailDomain === undefined && <div className="py-8 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>}
       {mailDomain === null && (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-8 text-center text-sm text-slate-500 dark:text-slate-400">
-          {cevir(cevir("Bu domain için önce mail servisini kurun (Mail Kutuları sayfasından)."))}
+          {cevir("Bu domain için önce mail servisini kurun (Mail Kutuları sayfasından).")}
         </div>
       )}
 
@@ -122,7 +142,7 @@ export default function DomainMailAliasPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("Yeni Yönlendirme")}</h2>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-[220px]">
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Kaynak adres</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Kaynak adres")}</label>
                 {catchall ? (
                   <div className="rounded-lg border border-dashed border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-900/20 px-3 py-2 text-sm text-brand-700 dark:text-brand-300">
                     @{domain.alan_adi} <span className="text-brand-500/70">{cevir("(bilinmeyen tüm adresler)")}</span>
@@ -137,7 +157,7 @@ export default function DomainMailAliasPage() {
               </div>
               <div className="text-slate-400 pb-2 hidden sm:block">→</div>
               <div className="flex-1 min-w-[220px]">
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Hedef adres (nereye gitsin)</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Hedef adres (nereye gitsin)")}</label>
                 <input type="email" value={hedef} onChange={e => setHedef(e.target.value)} required placeholder="hedef@ornek.com"
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
@@ -147,15 +167,15 @@ export default function DomainMailAliasPage() {
             <label className="mt-3 inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
               <input type="checkbox" checked={catchall} onChange={e => setCatchall(e.target.checked)} disabled={catchallVar && !catchall}
                 className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
-              Catch-all yap (bu domaine gelen <b>bilinmeyen tüm adresleri</b> {cevir(cevir("hedefe yönlendir)"))}
-              {catchallVar && !catchall && <span className="text-amber-600 dark:text-amber-400">— zaten bir catch-all var</span>}
+              {cevir("Catch-all yap (bu domaine gelen")} <b>{cevir("bilinmeyen tüm adresleri")}</b> {cevir("hedefe yönlendir)")}
+              {catchallVar && !catchall && <span className="text-amber-600 dark:text-amber-400">{cevir("— zaten bir catch-all var")}</span>}
             </label>
           </form>
 
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
             <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Yönlendirmeler")}</h2>
-              <span className="text-xs text-slate-400 tabular-nums">{aliaslar?.length ?? 0} adet</span>
+              <span className="text-xs text-slate-400 tabular-nums">{aliaslar?.length ?? 0} {cevir("adet")}</span>
             </div>
             {aliaslar === null && <div className="py-10 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>}
             {aliaslar?.length === 0 && <div className="py-12 text-center text-sm text-slate-400">{cevir("Henüz yönlendirme yok.")}</div>}

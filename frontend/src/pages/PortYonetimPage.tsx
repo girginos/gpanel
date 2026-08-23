@@ -39,6 +39,32 @@ type YasakliBilgi = { portlar: { port: number; aciklama: string }[]; sistem_alt:
 
 
 const PORT_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Araçlar ve Ayarlar": "Tools and Settings",
+  "Yüklenemedi": "Could not load",
+  "Vazgeç": "Cancel",
+  "Yükleniyor…": "Loading…",
+  "Panelin dış SSL portunu değiştir.": "Change the panel's external SSL port.",
+  "Curl-verify başarısız olursa otomatik geri alınır.": "If curl-verify fails, it is automatically reverted.",
+  "veya panel geri geldiğinde geçmiş tablosu.": "or the history table when the panel is back.",
+  "Mevcut:": "Current:",
+  "Yeni port": "New port",
+  "Uygulanıyor…": "Applying…",
+  "Uygula": "Apply",
+  "Hata": "Error",
+  "Tarih": "Date",
+  "Sonuç": "Result",
+  "Tip": "Type",
+  "Eski → Yeni": "Old → New",
+  "Port değişikliği devam ediyor:": "Port change in progress:",
+  "Yasaklı portlar": "Banned ports",
+  "sistem": "system",
+  "🔴 UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir.": "🔴 WARNING: After the change the panel address becomes https://server:{0}. Your current tab will break. If curl-verify fails it is AUTOMATICALLY REVERTED. The panel AUTOMATICALLY opens the new port in the firewall and AUTOMATICALLY removes the old one. The cloud provider firewall (Hetzner Cloud etc.) is a separate layer — you must open it there manually.",
+  "Dış SSL portu {0} → {1} olsun mu?": "Change external SSL port {0} → {1}?",
+  "örn. {0}": "e.g. {0}",
+  "Curl-verify sadece": "Curl-verify is only run from",
+  "'dan yapılır — firewalld / nftables / Hetzner Cloud FW yeni portu engelliyorsa yerel test geçer, dışardan erişemezsiniz. Yeni port için firewall'ı ÖNCEDEN açın.": " — if firewalld / nftables / Hetzner Cloud FW blocks the new port, the local test passes but you cannot reach it from outside. Open the firewall for the new port IN ADVANCE.",
+  "Bağlantı düşerse durum için: SSH'tan": "If the connection drops, for status: from SSH",
   "Dış SSL portu": "External SSL port",
   "Dış portu değiştir": "Change external port",
   "Geçmiş (son 20)": "History (last 20)",
@@ -111,8 +137,8 @@ export default function PortYonetimPage() {
     if (!p) return
     const ok = await dialog.onay({
       baslik: cevirT(cevir("Dış SSL portu {0} → {1} olsun mu?"), durum?.dis_port, p),
-      mesaj: `🔴 UYARI: Değişiklik sonrası panel adresi https://sunucu:${p} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir.`,
-      onayEtiketi: 'Uygula', iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      mesaj: cevirT(cevir("🔴 UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir."), p),
+      onayEtiketi: cevir("Uygula"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
     })
     if (!ok) return
     setGonderiliyor('dis')
@@ -121,7 +147,7 @@ export default function PortYonetimPage() {
       setYeniDis('')
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Hata', mesaj: apiHata(e, cevir("İstek başarısız")) })
+      await dialog.bilgi({ baslik: cevir("Hata"), mesaj: apiHata(e, cevir("İstek başarısız")) })
     } finally { setGonderiliyor(null) }
   }
 
@@ -139,14 +165,14 @@ export default function PortYonetimPage() {
         <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           <div className="font-medium">{cevir("🔴 Firewall + lockout uyarısı")}</div>
           <ul className="mt-1 space-y-0.5 text-xs list-disc pl-5">
-            <li>Curl-verify sadece <code className="font-mono">127.0.0.1</code>&apos;dan yapılır — firewalld / nftables / Hetzner Cloud FW yeni portu engelliyorsa yerel test geçer, dışardan erişemezsiniz. Yeni port için firewall&apos;ı ÖNCEDEN açın.</li>
-            <li>Bağlantı düşerse durum için: SSH&apos;tan <code className="font-mono">journalctl -u girginospanel</code> {cevir("veya panel geri geldiğinde geçmiş tablosu.")}</li>
+            <li>{cevir("Curl-verify sadece")} <code className="font-mono">127.0.0.1</code>{cevir("'dan yapılır — firewalld / nftables / Hetzner Cloud FW yeni portu engelliyorsa yerel test geçer, dışardan erişemezsiniz. Yeni port için firewall'ı ÖNCEDEN açın.")}</li>
+            <li>{cevir("Bağlantı düşerse durum için: SSH'tan")} <code className="font-mono">journalctl -u girginospanel</code> {cevir("veya panel geri geldiğinde geçmiş tablosu.")}</li>
           </ul>
         </div>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          {cevir(cevir("Panelin dış SSL portunu değiştir."))}
+          {cevir("Panelin dış SSL portunu değiştir.")}
           <span className="ml-1 font-medium text-slate-800 dark:text-slate-200">
-            {cevir(cevir("Curl-verify başarısız olursa otomatik geri alınır."))}
+            {cevir("Curl-verify başarısız olursa otomatik geri alınır.")}
           </span>
         </p>
       </div>
@@ -162,7 +188,7 @@ export default function PortYonetimPage() {
             <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
               <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-                Port değişikliği devam ediyor: {durum.aktif_is.tip} {durum.aktif_is.eski_port} → {durum.aktif_is.yeni_port}
+                {cevir("Port değişikliği devam ediyor:")} {durum.aktif_is.tip} {durum.aktif_is.eski_port} → {durum.aktif_is.yeni_port}
               </div>
               <ol className="space-y-1 text-xs">
                 {durum.aktif_is.adimlar.map((a, i) => (
@@ -180,16 +206,16 @@ export default function PortYonetimPage() {
               <h2 className="mb-1 text-base font-semibold">{cevir("Dış SSL portu")}</h2>
               <p className="mb-4 text-xs text-slate-500">{cevir("Panele tarayıcıdan bağlanma portu (nginx listen).")}</p>
               <div className="mb-3 flex items-center gap-3">
-                <span className="text-sm text-slate-500">Mevcut:</span>
+                <span className="text-sm text-slate-500">{cevir("Mevcut:")}</span>
                 <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-sm dark:bg-slate-800">:{durum.dis_port}</span>
               </div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Yeni port</label>
+              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Yeni port")}</label>
               <input type="number" value={yeniDis} onChange={(e) => setYeniDis(e.target.value)}
                 min={1024} max={65535} placeholder={cevirT(cevir("örn. {0}"), durum.dis_port === 8443 ? 9443 : 8443)}
                 className="mb-4 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-950" />
               <button type="submit" disabled={!!gonderiliyor || !!aktifCalisiyor || !yeniDis}
                 className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">
-                {gonderiliyor === 'dis' ? 'Uygulanıyor…' : cevir("Dış portu değiştir")}
+                {gonderiliyor === 'dis' ? cevir("Uygulanıyor…") : cevir("Dış portu değiştir")}
               </button>
             </form>
           </div>
@@ -197,7 +223,7 @@ export default function PortYonetimPage() {
           {/* Yasaklı portlar (bilgi) */}
           {yasakli && (
             <details className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
-              <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-300">Yasaklı portlar ({yasakli.portlar.length} + 1-1023 sistem)</summary>
+              <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-300">{cevir("Yasaklı portlar")} ({yasakli.portlar.length} + 1-1023 {cevir("sistem")})</summary>
               <p className="mt-2 text-xs text-slate-500">{yasakli.not}</p>
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3 md:grid-cols-4">
                 {[...yasakli.portlar].sort((a, b) => a.port - b.port).map((y) => (
@@ -219,8 +245,8 @@ export default function PortYonetimPage() {
                   <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
                       <th className="px-3 py-2">{cevir("Tarih")}</th>
-                      <th className="px-3 py-2">Tip</th>
-                      <th className="px-3 py-2">Eski → Yeni</th>
+                      <th className="px-3 py-2">{cevir("Tip")}</th>
+                      <th className="px-3 py-2">{cevir("Eski → Yeni")}</th>
                       <th className="px-3 py-2">{cevir("Sonuç")}</th>
                       <th className="px-3 py-2">{cevir("Hata")}</th>
                     </tr>

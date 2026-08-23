@@ -50,6 +50,29 @@ const MAILAYAR_EN: Record<string, string> = {
   "Uyarılı": "Warning",
   "Önerilen DNS Kayıtları": "Recommended DNS Records",
   "✓ kopyalandı": "✓ copied",
+  "Türkçe": "English",
+  "Ad": "Name",
+  "Bağlantı Bilgileri": "Connection Details",
+  "Değer": "Value",
+  "Domain yüklenemedi": "Failed to load domain",
+  "Domainler": "Domains",
+  "Webmail'i Aç": "Open Webmail",
+  "ile başlayın.": "to start.",
+  "Sorunlu": "Problem",
+  "Anasayfa": "Home",
+  "Port": "Port",
+  "kopyala": "copy",
+  "posta hizmeti — sağlık analizi ve bağlantı bilgileri.": "mail service — health analysis and connection details.",
+  "Servisler, portlar, DNS, TLS, DKIM, itibar, kara liste, teslimat — hepsini kontrol eder.": "Services, ports, DNS, TLS, DKIM, reputation, blocklist, delivery — checks all of them.",
+  "Analiz ediliyor…": "Analyzing…",
+  "Analiz Et": "Analyze",
+  "Uyarı": "Warning",
+  "Hata": "Error",
+  "Bilgi": "Info",
+  "Gelen (IMAP)": "Incoming (IMAP)",
+  "Gelen (POP3)": "Incoming (POP3)",
+  "Giden (SMTP)": "Outgoing (SMTP)",
+  "✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin": "✓ Outlook & Thunderbird auto-setup active — just enter email + password in the client",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILAYAR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -85,7 +108,7 @@ export default function DomainMailAyarlarPage() {
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
   )
@@ -95,13 +118,13 @@ export default function DomainMailAyarlarPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi, href: `/abonelikler/${id}` },
         { etiket: cevir("Mail Ayarları") },
       ]} />
       <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Mail Ayarları")}</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{domain.alan_adi} posta hizmeti — sağlık analizi ve bağlantı bilgileri.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{domain.alan_adi} {cevir("posta hizmeti — sağlık analizi ve bağlantı bilgileri.")}</p>
 
       {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
@@ -110,16 +133,16 @@ export default function DomainMailAyarlarPage() {
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div>
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Mail Sunucu Sağlığı")}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Servisler, portlar, DNS, TLS, DKIM, itibar, kara liste, teslimat — hepsini kontrol eder.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{cevir("Servisler, portlar, DNS, TLS, DKIM, itibar, kara liste, teslimat — hepsini kontrol eder.")}</p>
           </div>
           <button
             onClick={analizEt}
             disabled={analizEdiliyor}
             className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-60 transition">
             {analizEdiliyor ? (
-              <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Analiz ediliyor…</>
+              <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>{cevir("Analiz ediliyor…")}</>
             ) : (
-              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Analiz Et</>
+              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>{cevir("Analiz Et")}</>
             )}
           </button>
         </div>
@@ -127,19 +150,19 @@ export default function DomainMailAyarlarPage() {
         {!monitor && !analizEdiliyor && (
           <div className="py-10 text-center">
             <svg className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.3}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz analiz yapılmadı.")} <b>Analiz Et</b> {cevir("ile başlayın.")}</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz analiz yapılmadı.")} <b>{cevir("Analiz Et")}</b> {cevir("ile başlayın.")}</p>
           </div>
         )}
 
         {monitor && (
           <>
             <div className="flex items-center gap-4 mb-4 flex-wrap">
-              <div className={`text-lg font-bold ${g?.renk}`}>● {g?.etiket}</div>
+              <div className={`text-lg font-bold ${g?.renk}`}>● {g ? cevir(g.etiket) : ''}</div>
               <div className="flex items-center gap-2 text-xs">
                 <span className={`px-2 py-0.5 rounded ${DURUM_RENK.ok}`}>{monitor.ozet.ok} OK</span>
-                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.uyari}`}>{monitor.ozet.uyari} Uyarı</span>
-                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.hata}`}>{monitor.ozet.hata} Hata</span>
-                {!!monitor.ozet.bilgi && <span className={`px-2 py-0.5 rounded ${DURUM_RENK.bilgi}`}>{monitor.ozet.bilgi} Bilgi</span>}
+                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.uyari}`}>{monitor.ozet.uyari} {cevir("Uyarı")}</span>
+                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.hata}`}>{monitor.ozet.hata} {cevir("Hata")}</span>
+                {!!monitor.ozet.bilgi && <span className={`px-2 py-0.5 rounded ${DURUM_RENK.bilgi}`}>{monitor.ozet.bilgi} {cevir("Bilgi")}</span>}
               </div>
               <span className="text-xs text-slate-400 ml-auto">IP {monitor.ip} · {monitor.olusturma}</span>
             </div>
@@ -171,9 +194,9 @@ export default function DomainMailAyarlarPage() {
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Bağlantı Bilgileri")}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Mail istemcinize (Outlook, Thunderbird, telefon) elle kurulum için. Kullanıcı adı:")} <b>{baglanti.kullanici_adi}</b>.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-            <SunucuKart baslik="Gelen (IMAP)" host={baglanti.imap.host} port={baglanti.imap.port} g={baglanti.imap.guvenlik} />
-            <SunucuKart baslik="Gelen (POP3)" host={baglanti.pop3.host} port={baglanti.pop3.port} g={baglanti.pop3.guvenlik} />
-            <SunucuKart baslik="Giden (SMTP)" host={baglanti.smtp.host} port={baglanti.smtp.port} g={baglanti.smtp.guvenlik} />
+            <SunucuKart baslik={cevir("Gelen (IMAP)")} host={baglanti.imap.host} port={baglanti.imap.port} g={baglanti.imap.guvenlik} />
+            <SunucuKart baslik={cevir("Gelen (POP3)")} host={baglanti.pop3.host} port={baglanti.pop3.port} g={baglanti.pop3.guvenlik} />
+            <SunucuKart baslik={cevir("Giden (SMTP)")} host={baglanti.smtp.host} port={baglanti.smtp.port} g={baglanti.smtp.guvenlik} />
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
             <a href={baglanti.webmail} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-200">
@@ -181,7 +204,7 @@ export default function DomainMailAyarlarPage() {
               {cevir("Webmail'i Aç")}
             </a>
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-xs">
-              ✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin
+              {cevir("✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin")}
             </span>
           </div>
         </section>
@@ -226,7 +249,7 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
                     title={cevir("Kopyalamak için tıklayın")}
                     className="group text-left font-mono text-xs text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded px-2 py-1 break-all w-full transition-colors">
                     {r.deger}
-                    <span className="ml-1.5 text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? '✓ kopyalandı' : 'kopyala'}</span>
+                    <span className="ml-1.5 text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? cevir("✓ kopyalandı") : cevir("kopyala")}</span>
                   </button>
                   <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{r.aciklama}</div>
                 </td>
@@ -244,7 +267,7 @@ function SunucuKart({ baslik, host, port, g }: { baslik: string; host: string; p
     <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm">
       <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">{baslik}</div>
       <div className="font-mono text-slate-800 dark:text-slate-200">{host}</div>
-      <div className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Port {port} · {g}</div>
+      <div className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{cevir("Port")} {port} · {g}</div>
     </div>
   )
 }

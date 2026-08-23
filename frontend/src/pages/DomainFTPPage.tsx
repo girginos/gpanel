@@ -12,6 +12,8 @@ type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ftp_host
 
 
 const FTP_EN: Record<string, string> = {
+  "Not:": "Note:",
+  "doğrulama kullanıyor (DB local). Şifrelemek için SFTP (port 22) kullanılabilir.": "authentication (DB local). Use SFTP (port 22) to encrypt.",
   "Bu Parolayı Ayarla": "Set This Password",
   "Bunu güvenli bir yere kaydedin, sonra göremezsiniz:": "Save this somewhere safe, you won't see it again:",
   "FTP Hesabı": "FTP Account",
@@ -101,7 +103,7 @@ export default function DomainFTPPage() {
           </div>
 
           <div className="border-t border-slate-200 dark:border-slate-700 pt-5 mt-5 text-xs text-slate-500 dark:text-slate-500">
-            <p><strong>Not:</strong> {cevir("FTP şu anda")} <code className="font-mono">cleartext</code> doğrulama kullanıyor (DB local). Şifrelemek için SFTP (port 22) kullanılabilir.</p>
+            <p><strong>{cevir("Not:")}</strong> {cevir("FTP şu anda")} <code className="font-mono">cleartext</code> {cevir("doğrulama kullanıyor (DB local). Şifrelemek için SFTP (port 22) kullanılabilir.")}</p>
           </div>
         </div>
       )}

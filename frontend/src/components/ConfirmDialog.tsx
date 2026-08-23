@@ -8,11 +8,14 @@ import Modal from './Modal'
 
 
 const CMP_EN: Record<string, string> = {
+  "Onayla": "Confirm",
+  "İşleniyor…": "Processing…",
+  "İptal": "Cancel",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function ConfirmDialog({
-  acik, baslik, mesaj, onayMetni = 'Onayla', tehlikeli = false,
+  acik, baslik, mesaj, onayMetni = cevir('Onayla'), tehlikeli = false,
   onOnay, onIptal,
 }: {
   acik: boolean
@@ -45,7 +48,7 @@ export default function ConfirmDialog({
             tehlikeli ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300' : 'bg-brand-600 hover:bg-brand-700 disabled:opacity-60'
           }`}
         >
-          {yukleniyor ? 'İşleniyor…' : onayMetni}
+          {yukleniyor ? cevir('İşleniyor…') : onayMetni}
         </button>
       </div>
     </Modal>

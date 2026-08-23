@@ -116,9 +116,40 @@ const GRUPLAR: Grup[] = [
 
 
 const ARAC_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Araçlar ve Ayarlar": "Tools and Settings",
+  "Anasayfa": "Home",
+  "Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım.": "Server-wide management — PHP, system packages, network, security and maintenance.",
+  "Sunucu Bakımı": "Server Maintenance",
+  "Panel Güncellemesi": "Panel Update",
+  "Site Taşıma": "Site Migration",
+  "Sunucu": "Server",
+  "\"{q}\" için araç bulunamadı": "no tools found for \"{q}\"",
+  "PHP": "PHP",
+  "Sistem ve Servisler": "System and Services",
+  "Genel Ayarlar": "General Settings",
+  "PHP & Sunucu Sihirbazı": "PHP & Server Wizard",
+  "Paket Yöneticisi": "Package Manager",
+  "Servisler": "Services",
+  "Hizmet Planları": "Service Plans",
+  "DNS Şablonu": "DNS Template",
+  "Domainler": "Domains",
+  "Port Değiştirme": "Port Change",
+  "IP Yönetimi": "IP Management",
+  "Panel Hostname & SSL": "Panel Hostname & SSL",
+  "Oturum Güvenliği": "Session Security",
+  "Yasaklı Alan Adları": "Banned Domain Names",
+  "Güvenlik Duvarı": "Firewall",
+  "Backup Yöneticisi": "Backup Manager",
+  "Sihirbaz": "Wizard",
+  "Merkezi": "Central",
+  "Phishing": "Phishing",
+  "Sunucuya ek IP adresi ekle, panel-yönetimli IP'leri sil. Reboot sonrası otomatik geri yüklenir. Kullanıcı IP'leri korunur.": "Add an extra IP address to the server, delete panel-managed IPs. Automatically restored after reboot. User IPs are preserved.",
+  "Panele özel bir alan adı bağla ve Let's Encrypt sertifikası kur. Kilitlenme koruması + otomatik geri alma.": "Bind a dedicated domain to the panel and install a Let's Encrypt certificate. Lockout protection + automatic rollback.",
   "Arama terimini değiştirin veya temizleyin.": "Change or clear the search term.",
   "Araç ara": "Search tools",
   "Araç ara…": "Search tools…",
+  "araç · sunucu geneli": "tools · server-wide",
   "Ağ ve DNS": "Network and DNS",
   "Barındırma paketleri; disk, veritabanı ve FTP kotaları.": "Hosting packages; disk, database and FTP quotas.",
   "CPU/RAM/disk grafikleri ve sunucu günlükleri (panel/nginx/SSH…).": "CPU/RAM/disk graphs and server logs (panel/nginx/SSH…).",
@@ -168,15 +199,15 @@ function AracKart({ a }: { a: Arac }) {
 
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{a.baslik}</span>
+          <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(a.baslik)}</span>
           {a.rozet && (
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide
                              text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              {a.rozet}
+              {cevir(a.rozet)}
             </span>
           )}
         </span>
-        <span className="mt-1 block text-xs leading-relaxed text-slate-500 dark:text-slate-400">{a.aciklama}</span>
+        <span className="mt-1 block text-xs leading-relaxed text-slate-500 dark:text-slate-400">{cevir(a.aciklama)}</span>
       </span>
 
       <Ikon d={I.chevron}
@@ -206,14 +237,14 @@ export default function AraclarAyarlarPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Araçlar ve Ayarlar") }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Araçlar ve Ayarlar") }]} />
 
       {/* Başlık + arama */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Araçlar ve Ayarlar")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {cevir(cevir("Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım."))}
+            {cevir("Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım.")}
           </p>
         </div>
         <div className="relative w-full sm:w-72">
@@ -237,7 +268,7 @@ export default function AraclarAyarlarPage() {
         <div className="mb-3 flex items-center gap-2">
           <Ikon d={I.wrench} className="h-4 w-4 text-slate-400" />
           <h2 id="bakim-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            {cevir(cevir("Sunucu Bakımı"))}
+            {cevir("Sunucu Bakımı")}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -250,7 +281,7 @@ export default function AraclarAyarlarPage() {
       {gruplar.length === 0 ? (
         <div role="status" className="rounded-2xl border border-dashed border-slate-200 py-14 text-center dark:border-slate-800">
           <Ikon d={I.tune} className="mx-auto h-9 w-9 text-slate-300 dark:text-slate-600" />
-          <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">"{q}" için araç bulunamadı</p>
+          <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">{cevir("\"{q}\" için araç bulunamadı").replace('{q}', q)}</p>
           <p className="mt-1 text-xs text-slate-500">{cevir("Arama terimini değiştirin veya temizleyin.")}</p>
         </div>
       ) : (
@@ -259,7 +290,7 @@ export default function AraclarAyarlarPage() {
             <div className="mb-3 flex items-center gap-2">
               <Ikon d={g.ikon} className="h-4 w-4 text-slate-400" />
               <h2 id={`grup-${g.ad}`} className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                {g.ad}
+                {cevir(g.ad)}
               </h2>
               <span className="text-xs text-slate-300 dark:text-slate-600">·</span>
               <span className="text-xs text-slate-400 dark:text-slate-500">{g.araclar.length}</span>
@@ -272,7 +303,7 @@ export default function AraclarAyarlarPage() {
       )}
 
       {!q && (
-        <p className="pt-2 text-xs text-slate-400 dark:text-slate-600">{toplam} araç · sunucu geneli</p>
+        <p className="pt-2 text-xs text-slate-400 dark:text-slate-600">{toplam} {cevir("araç · sunucu geneli")}</p>
       )}
     </div>
   )

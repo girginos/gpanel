@@ -47,6 +47,43 @@ const ONEM: Record<string, { ad: string; nokta: string; metin: string }> = {
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "CVE bilgisi alınamadı": "Failed to get CVE information",
+  "Güvenlik güncellemeleri tamamlandı.": "Security updates completed.",
+  "Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?": "If there is a kernel update, a restart may be required for it to take effect. Continue?",
+  "Onay gerekiyor": "Confirmation required",
+  "Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ": "Security updates on the server (dnf --security) will be installed. ",
+  "Güncelleme başlatılamadı": "Failed to start update",
+  "Canlı çekirdek yaması uygulandı.": "Live kernel patch applied.",
+  "Canlı yama başlatılamadı": "Failed to start live patch",
+  "Güvenlik Açıkları": "Security Vulnerabilities",
+  "{0} güvenlik danışmanı": "{0} security advisories",
+  "CVE denetimi (AlmaLinux)": "CVE audit (AlmaLinux)",
+  "Taranıyor…": "Scanning…",
+  "Yeniden tara": "Rescan",
+  "Güvenlik güncellemeleri kuruluyor… (arka planda sürer)": "Installing security updates… (continues in the background)",
+  "Canlı çekirdek yaması uygulanıyor… (KernelCare — reboot gerekmez)": "Applying live kernel patch… (KernelCare — no reboot needed)",
+  "Çekirdek canlı yamalı (KernelCare).": "Kernel is live-patched (KernelCare).",
+  "Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı.": "Kernel vulnerabilities were closed without restarting the server.",
+  "Efektif çekirdek:": "Effective kernel:",
+  "KernelCare kurulu ancak lisans kayıtlı değil.": "KernelCare is installed but the license is not registered.",
+  "Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli.": "For reboot-free kernel patching, it must be registered with a TuxCare license key.",
+  "Yeniden başlatma gerekli.": "Restart required.",
+  "Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor — aşağıdaki açıkların çoğu çekirdek kaynaklı ve": "A new security-patched kernel is installed but the system is still running the old kernel — most of the vulnerabilities below are kernel-related and",
+  "sunucu yeniden başlatılana kadar": "until the server is restarted",
+  "açık görünür.": "appear open.",
+  "Bakım penceresinde reboot önerilir.": "A reboot during a maintenance window is recommended.",
+  "Sunucu taranıyor…": "Scanning the server…",
+  "Sistem güncel": "System up to date",
+  "Bilinen bir güvenlik açığı yok": "No known vulnerabilities",
+  "Toplam": "Total",
+  "Güvenlik güncellemelerini kur": "Install security updates",
+  "Canlı çekirdek yamalarını güncelle (reboot yok)": "Update live kernel patches (no reboot)",
+  "CVE canlı yamalı.": "CVEs live-patched.",
+  "Kritik": "Critical",
+  "Önemli": "Important",
+  "Orta": "Medium",
+  "Düşük": "Low",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -106,7 +143,7 @@ export default function CveWidget() {
   }
 
   async function guncelle() {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ' +
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ") +
       cevir("Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?"), }))) return
     setHata('')
     setMesaj('')
@@ -169,7 +206,7 @@ export default function CveWidget() {
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Güvenlik Açıkları")}</h3>
             <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-              {veri ? cevirT(cevir("{0} güvenlik danışmanı"), veri.toplam_danisman) : 'CVE denetimi (AlmaLinux)'}
+              {veri ? cevirT(cevir("{0} güvenlik danışmanı"), veri.toplam_danisman) : cevir("CVE denetimi (AlmaLinux)")}
             </p>
           </div>
         </div>
@@ -178,7 +215,7 @@ export default function CveWidget() {
           onClick={yenidenTara}
           disabled={taraniyor || guncelleniyor}
           className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200">
-          {taraniyor ? 'Taranıyor…' : 'Yeniden tara'}
+          {taraniyor ? cevir("Taranıyor…") : cevir("Yeniden tara")}
         </button>
       </div>
 
@@ -205,7 +242,7 @@ export default function CveWidget() {
           <span>
             <strong>{cevir(cevir("Çekirdek canlı yamalı (KernelCare)."))}</strong> {cevir(cevir("Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı."))}
             {veri.kernelcare.efektif_kernel ? <> {cevir(cevir("Efektif çekirdek:"))} <span className="font-mono">{veri.kernelcare.efektif_kernel}</span>.</> : null}
-            {veri.kernelcare.yamali_cve?.length ? <> {veri.kernelcare.yamali_cve.length} CVE canlı yamalı.</> : null}
+            {veri.kernelcare.yamali_cve?.length ? <> {veri.kernelcare.yamali_cve.length} {cevir("CVE canlı yamalı.")}</> : null}
           </span>
         </div>
       )}
@@ -223,9 +260,8 @@ export default function CveWidget() {
         <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
           <span>
-            <strong>{cevir(cevir("Yeniden başlatma gerekli."))}</strong> Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor —
-            aşağıdaki açıkların çoğu çekirdek kaynaklı ve <strong>{cevir(cevir("sunucu yeniden başlatılana kadar"))}</strong> açık görünür.
-            {cevir(cevir("Bakım penceresinde reboot önerilir."))}
+            <strong>{cevir("Yeniden başlatma gerekli.")}</strong> {cevir("Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor — aşağıdaki açıkların çoğu çekirdek kaynaklı ve")} <strong>{cevir("sunucu yeniden başlatılana kadar")}</strong> {cevir("açık görünür.")}
+            {cevir("Bakım penceresinde reboot önerilir.")}
           </span>
         </div>
       )}
@@ -257,7 +293,7 @@ export default function CveWidget() {
               <div key={k} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-center dark:border-slate-800 dark:bg-slate-950/40">
                 <div className={`text-2xl font-bold tabular-nums ${ONEM[k].metin}`}>{veri[k]}</div>
                 <div className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
-                  <span className={`h-1.5 w-1.5 rounded-full ${ONEM[k].nokta}`} />{ONEM[k].ad}
+                  <span className={`h-1.5 w-1.5 rounded-full ${ONEM[k].nokta}`} />{cevir(ONEM[k].ad)}
                 </div>
               </div>
             ))}

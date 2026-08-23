@@ -24,6 +24,16 @@ const MAILTES_EN: Record<string, string> = {
   "Bu domain için teslimat kaydı bulunamadı.": "No delivery records found for this domain.",
   "Gönderen": "Sender",
   "Teslimat kayıtları alınamadı": "Failed to get delivery records",
+  "Türkçe": "English",
+  "Teslim": "Delivered",
+  "Reddedildi": "Rejected",
+  "Ertelendi": "Deferred",
+  "Domain yüklenemedi": "Failed to load domain",
+  "Anasayfa": "Home",
+  "E-Posta Teslimat Takibi": "Email Delivery Tracking",
+  "gönderilen/alınan son e-postaların teslimat durumu (sunucu günlüğünden).": "delivery status of recent sent/received emails (from the server log).",
+  "Zaman": "Time",
+  "Durum": "Status",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILTES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -56,7 +66,7 @@ export default function DomainMailTeslimatPage() {
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
   )
@@ -66,28 +76,28 @@ export default function DomainMailTeslimatPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi, href: `/abonelikler/${id}` },
-        { etiket: 'E-Posta Teslimat Takibi' },
+        { etiket: cevir("E-Posta Teslimat Takibi") },
       ]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
-        <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300">E-Posta Teslimat Takibi</h1>
+        <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300">{cevir("E-Posta Teslimat Takibi")}</h1>
         <button onClick={() => yukle(domain)} disabled={yenileniyor}
           className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-200 disabled:opacity-60">
           <svg className={`w-4 h-4 ${yenileniyor ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
           {cevir("Yenile")}
         </button>
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{domain.alan_adi} gönderilen/alınan son e-postaların teslimat durumu (sunucu günlüğünden).</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{domain.alan_adi} {cevir("gönderilen/alınan son e-postaların teslimat durumu (sunucu günlüğünden).")}</p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {kayitlar && kayitlar.length > 0 && (
         <div className="flex items-center gap-2 mb-3 text-xs">
-          <span className={`px-2 py-0.5 rounded ${DURUM.sent.renk}`}>{sayac('sent')} Teslim</span>
-          <span className={`px-2 py-0.5 rounded ${DURUM.deferred.renk}`}>{sayac('deferred')} Ertelendi</span>
-          <span className={`px-2 py-0.5 rounded ${DURUM.bounced.renk}`}>{sayac('bounced')} Reddedildi</span>
+          <span className={`px-2 py-0.5 rounded ${DURUM.sent.renk}`}>{sayac('sent')} {cevir("Teslim")}</span>
+          <span className={`px-2 py-0.5 rounded ${DURUM.deferred.renk}`}>{sayac('deferred')} {cevir("Ertelendi")}</span>
+          <span className={`px-2 py-0.5 rounded ${DURUM.bounced.renk}`}>{sayac('bounced')} {cevir("Reddedildi")}</span>
         </div>
       )}
 
@@ -99,7 +109,7 @@ export default function DomainMailTeslimatPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                  <th className="px-4 py-2.5 font-semibold">Zaman</th>
+                  <th className="px-4 py-2.5 font-semibold">{cevir("Zaman")}</th>
                   <th className="px-4 py-2.5 font-semibold">{cevir("Gönderen")}</th>
                   <th className="px-4 py-2.5 font-semibold">{cevir("Alıcı")}</th>
                   <th className="px-4 py-2.5 font-semibold">{cevir("Durum")}</th>
@@ -114,7 +124,7 @@ export default function DomainMailTeslimatPage() {
                       <td className="px-4 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-xs">{k.zaman}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={k.gonderen}>{k.gonderen || '—'}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[180px] truncate" title={k.alici}>{k.alici}</td>
-                      <td className="px-4 py-2"><span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${r.renk}`}>{r.etiket}</span></td>
+                      <td className="px-4 py-2"><span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${r.renk}`}>{cevir(r.etiket)}</span></td>
                       <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 max-w-[240px] truncate" title={k.detay}>{k.detay}</td>
                     </tr>
                   )

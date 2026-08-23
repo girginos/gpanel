@@ -30,6 +30,39 @@ type RuntimeGrup = { tip: string; ad: string; ekler: RuntimeEk[] }
 
 
 const PSIHIR_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "Bilgi": "Info",
+  "PHP Sürümleri": "PHP Versions",
+  "PHP Eklentileri & Loader": "PHP Extensions & Loader",
+  "Ek Runtime'lar": "Additional Runtimes",
+  "Web Sunucu": "Web Server",
+  ".NET Core, Node.js, Python": ".NET Core, Node.js, Python",
+  "nginx / PHP-FPM durumu": "nginx / PHP-FPM status",
+  "PHP & Sunucu Kurulum Sihirbazı": "PHP & Server Setup Wizard",
+  "← Geri": "← Back",
+  "Bitir": "Finish",
+  "Kurulacaklara ekle": "Add to install list",
+  "runtime bileşeni kurulmak üzere seçildi — Özet adımında kurulur.": "runtime component(s) selected to install — installed in the Summary step.",
+  "✓ Kurulu": "✓ Installed",
+  "Bu platform": "This platform",
+  "nginx + izole per-tenant PHP-FPM": "nginx + isolated per-tenant PHP-FPM",
+  "mimarisi kullanır. cPanel/EasyApache'deki gibi Apache derlemesi veya global Apache modül seçimi": "architecture is used. Unlike cPanel/EasyApache there is no Apache compilation or global Apache module selection",
+  "yoktur": "none",
+  "; her domain kendi PHP-FPM havuzunda ve nginx vhost'unda çalışır.": "; each domain runs in its own PHP-FPM pool and nginx vhost.",
+  "Apache uyumluluk": "Apache compatibility",
+  "Barınma ve DNS → Apache & nginx": "Hosting and DNS → Apache & nginx",
+  "PHP-FPM (per-tenant izole)": "PHP-FPM (per-tenant isolated)",
+  "Özet & Uygula": "Summary & Apply",
+  "Kurulacak bileşenler": "Components to install",
+  "\"PHP Sürümleri\" ve \"PHP Eklentileri\" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.": "Mark what you want to install with the toggle in the \"PHP Versions\" and \"PHP Extensions\" steps, then install them all together here.",
+  "sürüm": "version",
+  "eklenti": "extension",
+  "kuruluyor": "installing",
+  "Paketler kuruluyor…": "Installing packages…",
+  "Kuruluyor…": "Installing…",
+  "Bekliyor": "Waiting",
+  "✓ Kuruldu": "✓ Installed",
+  "✕ Hata": "✕ Error",
   "Kurulu PHP sürümleri": "Installed PHP versions",
   "Kurulu PHP sürümü": "Installed PHP version",
   "Modül aç/kapa, PECL kur, ionCube": "Toggle modules, install PECL, ionCube",
@@ -64,12 +97,12 @@ export default function PHPSunucuSihirbaziPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Sunucu Yönetimi"), href: '/araclar-ayarlar' },
         { etiket: cevir("PHP & Sunucu Sihirbazı") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP &amp; Sunucu Kurulum Sihirbazı</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("PHP & Sunucu Kurulum Sihirbazı")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">{cevir("PHP sürümleri, eklentiler, loader'lar ve web sunucu ayarlarını tek yerden yönetin. Değişiklikler her adımda anında uygulanır.")}</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)] gap-5 items-start">
@@ -94,8 +127,8 @@ export default function PHPSunucuSihirbaziPage() {
                   {tamam ? '✓' : i + 1}
                 </span>
                 <span className="min-w-0">
-                  <span className={`block text-sm font-medium ${secili ? 'text-brand-800 dark:text-brand-200' : 'text-slate-700 dark:text-slate-200'}`}>{a.ad}</span>
-                  <span className="hidden lg:block text-[11px] text-slate-400 dark:text-slate-500 truncate">{a.aciklama}</span>
+                  <span className={`block text-sm font-medium ${secili ? 'text-brand-800 dark:text-brand-200' : 'text-slate-700 dark:text-slate-200'}`}>{cevir(a.ad)}</span>
+                  <span className="hidden lg:block text-[11px] text-slate-400 dark:text-slate-500 truncate">{cevir(a.aciklama)}</span>
                 </span>
               </button>
             )
@@ -118,14 +151,14 @@ export default function PHPSunucuSihirbaziPage() {
               onClick={() => aktifIdx > 0 && setAktif(ADIMLAR[aktifIdx - 1].key)}
               disabled={aktifIdx === 0}
               className="px-4 py-2 text-sm rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40"
-            >← Geri</button>
+            >{cevir("← Geri")}</button>
             {aktifIdx < ADIMLAR.length - 1 ? (
               <button
                 onClick={() => setAktif(ADIMLAR[aktifIdx + 1].key)}
                 className="px-4 py-2 text-sm rounded-md bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 font-medium"
               >{cevir("İleri →")}</button>
             ) : (
-              <Link to="/araclar-ayarlar" className="px-4 py-2 text-sm rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium">Bitir</Link>
+              <Link to="/araclar-ayarlar" className="px-4 py-2 text-sm rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium">{cevir("Bitir")}</Link>
             )}
           </div>
         </section>
@@ -175,7 +208,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
       }
       yukle()
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, cevir("Kaldırma başarısız")) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(err, cevir("Kaldırma başarısız")) }))
     } finally {
       setKaldiran(null)
     }
@@ -185,12 +218,12 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Ek Runtime'lar</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Ek Runtime'lar")}</h2>
         <p className="text-sm text-slate-500 dark:text-slate-500">{cevir("PHP dışı diller. Kurulacakları toggle ile işaretleyin — Özet adımında birlikte kurulur. Kurulu olanı kapatınca kaldırılır.")}</p>
       </div>
       {(secilenRuntimeler.length > 0) && (
         <div className="px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
-          {secilenRuntimeler.length} runtime bileşeni kurulmak üzere seçildi — Özet adımında kurulur.
+          {secilenRuntimeler.length} {cevir("runtime bileşeni kurulmak üzere seçildi — Özet adımında kurulur.")}
         </div>
       )}
       {gruplar.map(g => (
@@ -213,13 +246,13 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                   {e.yonetilemez ? (
                     // Sistem yönetimli (ör. Node.js/nodesource) — yalnız durum, aksiyon yok.
                     <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${e.kurulu ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-                      {e.kurulu ? '✓ Kurulu' : cevir("Kurulu değil")}
+                      {e.kurulu ? cevir("✓ Kurulu") : cevir("Kurulu değil")}
                     </span>
                   ) : (
                     <button
                       onClick={() => e.kurulu ? kaldir(e) : secimToggle(e)}
                       disabled={kaldiran === e.anahtar}
-                      title={e.kurulu ? 'Kaldır' : (sec ? 'Seçimi kaldır' : 'Kurulacaklara ekle')}
+                      title={e.kurulu ? cevir("Kaldır") : (sec ? cevir("Seçimi kaldır") : cevir("Kurulacaklara ekle"))}
                       className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
                         kaldiran === e.anahtar ? 'bg-sky-400 animate-pulse' : e.kurulu ? 'bg-emerald-500' : sec ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
                       } ${kaldiran === e.anahtar ? 'opacity-60' : ''}`}
@@ -251,18 +284,18 @@ function WebSunucuAdim() {
   }, [])
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Web Sunucu</h2>
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Web Sunucu")}</h2>
       <div className="rounded-xl border border-sky-200 dark:border-sky-800/50 bg-sky-50 dark:bg-sky-900/15 p-4 text-sm text-sky-800 dark:text-sky-200">
-        Bu platform <strong>nginx + izole per-tenant PHP-FPM</strong> mimarisi kullanır. cPanel/EasyApache'deki gibi Apache derlemesi veya global Apache modül seçimi <strong>yoktur</strong>; her domain kendi PHP-FPM havuzunda ve nginx vhost'unda çalışır.
+        {cevir("Bu platform")} <strong>{cevir("nginx + izole per-tenant PHP-FPM")}</strong> {cevir("mimarisi kullanır. cPanel/EasyApache'deki gibi Apache derlemesi veya global Apache modül seçimi")} <strong>{cevir("yoktur")}</strong>{cevir("; her domain kendi PHP-FPM havuzunda ve nginx vhost'unda çalışır.")}
       </div>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <DurumKart etiket="Web Sunucu" deger="nginx" ok />
-        <DurumKart etiket={cevir("PHP çalışma modu")} deger="PHP-FPM (per-tenant izole)" ok />
+        <DurumKart etiket={cevir("Web Sunucu")} deger="nginx" ok />
+        <DurumKart etiket={cevir("PHP çalışma modu")} deger={cevir("PHP-FPM (per-tenant izole)")} ok />
         <DurumKart etiket={cevir("Kurulu PHP sürümü")} deger={durum?.fpm_sayisi != null ? cevirT(cevir("{0} sürüm"), durum.fpm_sayisi) : '…'} ok={!!durum?.fpm_sayisi} />
-        <DurumKart etiket="Apache uyumluluk" deger={cevir("Site bazında (.htaccess → nginx)")} ok />
+        <DurumKart etiket={cevir("Apache uyumluluk")} deger={cevir("Site bazında (.htaccess → nginx)")} ok />
       </dl>
       <p className="text-xs text-slate-500 dark:text-slate-500">
-        {cevir(cevir("Bir sitenin güvenlik başlıkları, ek direktifler ve Apache/nginx uyumluluk ayarları için ilgili domainin"))} <strong>Barınma ve DNS → Apache &amp; nginx</strong> {cevir(cevir("ekranını kullanın."))}
+        {cevir(cevir("Bir sitenin güvenlik başlıkları, ek direktifler ve Apache/nginx uyumluluk ayarları için ilgili domainin"))} <strong>{cevir("Barınma ve DNS → Apache & nginx")}</strong> {cevir(cevir("ekranını kullanın."))}
       </p>
     </div>
   )
@@ -326,7 +359,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
             const d = await api.get('/php-surumler/durum')
             const calis = !!(d.data?.calisiyor && d.data?.surum === s.surum)
             if (calis) gordukCalisiyor = true
-            setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : cevir("Tamamlanıyor…"), yuzde: calis ? 55 : 90 })
+            setAktifAdim({ ad: s.ad, adim: calis ? cevir("Paketler kuruluyor…") : cevir("Tamamlanıyor…"), yuzde: calis ? 55 : 90 })
             if (!d.data?.calisiyor && (gordukCalisiyor || Date.now() - basla > 20000)) break
           }
           // 🔴 GERÇEK doğrulama: detached iş HÂLÂ kuruyor olabilir (grace'te kırıldıysa)
@@ -377,7 +410,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Özet &amp; Uygula</h2>
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Özet & Uygula")}</h2>
 
       {/* Kurulu sürümler */}
       <div>
@@ -393,10 +426,10 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
 
       {/* Kurulacak bileşenler (PHP sürümleri + eklentiler) */}
       <div>
-        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulacak bileşenler ({toplamIs})</div>
+        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulacak bileşenler")} ({toplamIs})</div>
         {toplamIs === 0 && !bitti ? (
           <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400">
-            cevir("PHP Sürümleri") ve "PHP Eklentileri" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.
+            {cevir("\"PHP Sürümleri\" ve \"PHP Eklentileri\" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.")}
           </div>
         ) : (
           <div className="space-y-2">
@@ -407,7 +440,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
             ] as Toplu[]).map((s) => (
               <div key={s.tip + s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                 <div className="min-w-0">
-                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? 'sürüm' : s.tip === 'runtime' ? 'runtime' : 'eklenti'}</span>
+                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? cevir("sürüm") : s.tip === 'runtime' ? 'runtime' : cevir("eklenti")}</span>
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{s.ad}</span>
                   {s.tip === 'eklenti' && <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">PHP {s.surum}</span>}
                   {s.mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{s.mesaj}</div>}
@@ -424,7 +457,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
               <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
-              <span className="font-mono">{aktifAdim.ad}</span> kuruluyor
+              <span className="font-mono">{aktifAdim.ad}</span> {cevir("kuruluyor")}
             </span>
             <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">%{aktifAdim.yuzde}</span>
           </div>
@@ -440,7 +473,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
       {toplamIs > 0 && (
         <button onClick={topluKur} disabled={calisiyor}
           className="w-full sm:w-auto px-5 py-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-60">
-          {calisiyor ? 'Kuruluyor…' : cevirT(cevir("{0} bileşeni kur"), toplamIs)}
+          {calisiyor ? cevir("Kuruluyor…") : cevirT(cevir("{0} bileşeni kur"), toplamIs)}
         </button>
       )}
     </div>
@@ -455,5 +488,5 @@ function DurumRozet({ durum }: { durum: Toplu['durum'] }) {
     hata: { t: '✕ Hata', c: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' },
   }
   const m = map[durum]
-  return <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${m.c}`}>{m.t}</span>
+  return <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${m.c}`}>{cevir(m.t)}</span>
 }

@@ -67,6 +67,7 @@ const MENU_EN: Record<string, string> = {
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
   'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings',
   'Profilim': 'My Profile',
+  'Menüyü kapat': 'Close menu', 'adet': 'items',
 }
 
 const NAV: NavGroup[] = [
@@ -229,7 +230,7 @@ export default function DashboardLayout() {
           <button
             onClick={() => setMobilAcik(false)}
             className="ml-auto -mr-2 p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md transition lg:hidden"
-            aria-label="Menüyü kapat"
+            aria-label={cevir("Menüyü kapat")}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -292,7 +293,7 @@ export default function DashboardLayout() {
                                     ? 'text-slate-700 dark:text-slate-200 font-medium'
                                     : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
                                 }`}
-                                aria-label={`${sayac[it.sayac]} adet`}
+                                aria-label={`${sayac[it.sayac]} ${cevir('adet')}`}
                               >
                                 {sayac[it.sayac]}
                               </span>

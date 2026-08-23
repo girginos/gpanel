@@ -13,6 +13,9 @@ const NAV_EN: Record<string, string> = {
   'Anasayfa': 'Home', 'Domainler': 'Domains', 'İzleme': 'Monitoring',
   'Genel': 'Overview', 'Dosyalar': 'Files', 'Veritabanı': 'Database',
   'Yedekler': 'Backups', 'Yeni': 'New', 'Menü': 'Menu',
+  'Alt gezinme': 'Bottom navigation',
+  'Yeni domain oluştur': 'Create new domain',
+  'Menüyü aç': 'Open menu',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (NAV_EN[tr] || tr) : tr)
 
@@ -69,7 +72,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
                  border-t border-slate-200 dark:border-slate-800
                  bg-white/95 dark:bg-slate-900/95 backdrop-blur
                  pb-[env(safe-area-inset-bottom)]"
-      aria-label="Alt gezinme"
+      aria-label={cevir("Alt gezinme")}
     >
       {sekmeler.map((s) => (
         <NavLink key={s.to} to={s.to} end={s.end} className={sekmeSinif}>
@@ -98,7 +101,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
           onClick={() => navigate('/domainler?yeni=1')}
           className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 min-w-0
                      text-slate-500 dark:text-slate-400"
-          aria-label="Yeni domain oluştur"
+          aria-label={cevir("Yeni domain oluştur")}
         >
           <span className="flex items-center justify-center w-[26px] h-[26px] rounded-lg
                            bg-brand-600 text-white shadow-sm shadow-brand-600/40">
@@ -115,7 +118,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
         onClick={onMenuAc}
         className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 min-w-0
                    text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
-        aria-label="Menüyü aç"
+        aria-label={cevir("Menüyü aç")}
         aria-controls="gosp-kenar-cubugu"
       >
         <svg className="w-[22px] h-[22px] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>

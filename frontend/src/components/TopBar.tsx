@@ -53,7 +53,7 @@ const goreliZaman = (t: string) => {
   const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
   const s = Math.floor((Date.now() - d.getTime()) / 1000)
   if (!isFinite(s) || s < 0) return t.slice(0, 16)
-  if (s < 60) return 'az önce'
+  if (s < 60) return cevir('az önce')
   if (s < 3600) return cevirT("{0} dk önce", Math.floor(s / 60))
   if (s < 86400) return cevirT("{0} sa önce", Math.floor(s / 3600))
   if (s < 604800) return cevirT("{0} gün önce", Math.floor(s / 86400))
@@ -77,6 +77,42 @@ const KatIkon = ({ kategori }: { kategori: string }) => (
 
 
 const CMP_EN: Record<string, string> = {
+  "Domainler": "Domains",
+  "Hosting Planları": "Hosting Plans",
+  "DNS Şablonu": "DNS Template",
+  "Denetim Kaydı": "Audit Log",
+  "Profil ve Tercihler": "Profile and Preferences",
+  "Bayiler": "Resellers",
+  "Bayi Planları": "Reseller Plans",
+  "Yedek Yönetimi": "Backup Management",
+  "Güvenlik Duvarı": "Firewall",
+  "İzleme": "Monitoring",
+  "İstatistikler": "Statistics",
+  "Site Taşıma": "Site Migration",
+  "Sunucu Optimize": "Server Optimize",
+  "Eklentiler": "Plugins",
+  "Araçlar ve Ayarlar": "Tools and Settings",
+  "Paketler": "Packages",
+  "PHP Sürümleri": "PHP Versions",
+  "PHP Modülleri": "PHP Modules",
+  "Servisler": "Services",
+  "Panel Güncelleme": "Panel Update",
+  "az önce": "just now",
+  "sayfa": "page",
+  "domain": "domain",
+  "alt alan": "subdomain",
+  "Menüyü aç": "Open menu",
+  "Ara: domain, alt alan, sayfa (ör. yedek, firewall)…": "Search: domain, subdomain, page (e.g. backup, firewall)…",
+  "Ara": "Search",
+  "Yükleniyor…": "Loading…",
+  "Tema: {0} — tıkla değiştir": "Theme: {0} — click to change",
+  "Bildirimler": "Notifications",
+  "yeni": "new",
+  "Tümünü okundu": "Mark all read",
+  "Bildirim yok": "No notifications",
+  "Tümünü göster →": "Show all →",
+  "Hesap menüsü": "Account menu",
+  "Çıkış Yap": "Log out",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -164,7 +200,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       .filter(x => (x.roller ? x.roller.includes(rol) : rol === 'admin'))
       .filter(x => x.etiket.toLowerCase().includes(s) || x.anahtar.some(k => k.includes(s)))
       .slice(0, 5)
-      .map<Sonuc>(x => ({ tip: 'sayfa', ad: x.etiket, alt: x.yol, yol: x.yol, key: 'p' + x.yol }))
+      .map<Sonuc>(x => ({ tip: 'sayfa', ad: cevir(x.etiket), alt: x.yol, yol: x.yol, key: 'p' + x.yol }))
     if (!veri.current) return p
     const d = veri.current.domains
       .filter(x => x.alan_adi.toLowerCase().includes(s) || (x.sistem_kullanici || '').toLowerCase().includes(s))
@@ -260,7 +296,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition ${i === aktif ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
                 >
                   <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${r.tip === 'sayfa' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : r.tip === 'domain' ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300'}`}>
-                    {r.tip === 'sayfa' ? 'sayfa' : r.tip === 'domain' ? 'domain' : 'alt alan'}
+                    {r.tip === 'sayfa' ? cevir('sayfa') : r.tip === 'domain' ? cevir('domain') : cevir('alt alan')}
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm text-slate-800 dark:text-slate-200 truncate">{r.ad}</span>
@@ -293,7 +329,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           )}
         </button>
         <div className="relative" ref={bRef}>
-        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition" title="Bildirimler">
+        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition" title={cevir("Bildirimler")}>
           {okunmamis > 0 && (
             <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
           )}
@@ -305,7 +341,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
               <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-800 z-10">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Bildirimler{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} yeni</span>}
+                  {cevir("Bildirimler")}{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} {cevir("yeni")}</span>}
                 </span>
                 {okunmamis > 0 && (
                   <button onClick={bildirimTumOkundu} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Tümünü okundu")}</button>
@@ -314,7 +350,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               {bildirimler.length === 0 ? (
                 <div className="px-4 py-10 text-center">
                   <svg className="w-9 h-9 mx-auto mb-2 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1" /></svg>
-                  <p className="text-sm text-slate-400 dark:text-slate-500">Bildirim yok</p>
+                  <p className="text-sm text-slate-400 dark:text-slate-500">{cevir("Bildirim yok")}</p>
                 </div>
               ) : bildirimler.map(b => (
                 <button key={b.id} onClick={() => bildirimGit(b)}
@@ -370,7 +406,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   onClick={() => { setMenuAcik(false); navigate('/profil') }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
                 >
-                  Profil ve Tercihler
+                  {cevir("Profil ve Tercihler")}
                 </button>
                 <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
                 <button

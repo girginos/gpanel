@@ -28,6 +28,14 @@ const DSTATS_EN: Record<string, string> = {
   "Trafik İstatistikleri": "Traffic Statistics",
   "İstatistikler": "Statistics",
   "— nginx erişim günlüğü analizi.": "— nginx access log analysis.",
+  "Türkçe": "English",
+  "Anasayfa": "Home",
+  "Domainler": "Domains",
+  "Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.": "No access log data yet. It will appear here once the site starts receiving traffic.",
+  "Tekil IP": "Unique IP",
+  "istek": "requests",
+  "En Aktif IP'ler": "Most Active IPs",
+  "Veri yok.": "No data.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DSTATS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -59,10 +67,10 @@ export default function DomainStatsPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
-          { etiket: 'Domainler', href: '/domainler' },
+          { etiket: cevir('Anasayfa'), href: '/' },
+          { etiket: cevir('Domainler'), href: '/domainler' },
           { etiket: o.alan_adi, href: `/abonelikler/${id}` },
-          { etiket: 'İstatistikler' },
+          { etiket: cevir('İstatistikler') },
         ]} />
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
@@ -75,7 +83,7 @@ export default function DomainStatsPage() {
 
         {!o.log_var || o.toplam_istek === 0 ? (
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-10 text-center text-sm text-slate-400">
-            Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.
+            {cevir("Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.")}
           </div>
         ) : (
           <>
@@ -83,7 +91,7 @@ export default function DomainStatsPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               <KPI etiket={cevir("Toplam İstek")} deger={o.toplam_istek.toLocaleString('tr-TR')} renk="indigo" />
               <KPI etiket={cevir("Bant Kullanımı")} deger={`${o.toplam_bant_mb.toFixed(1)} MB`} renk="sky" />
-              <KPI etiket="Tekil IP" deger={o.tekil_ip.toLocaleString('tr-TR')} renk="emerald" />
+              <KPI etiket={cevir("Tekil IP")} deger={o.tekil_ip.toLocaleString('tr-TR')} renk="emerald" />
               <KPI etiket={cevir("Bot Oranı")} deger={`%${o.bot_orani}`} renk={o.bot_orani >= 50 ? 'rose' : 'violet'} />
             </div>
 
@@ -113,7 +121,7 @@ export default function DomainStatsPage() {
                   {o.gunluk.map(g => (
                     <div key={g.tarih} className="flex-1 flex flex-col items-center gap-1">
                       <div className="w-full flex items-end justify-center" style={{ height: '100px' }}>
-                        <div className="w-full max-w-[36px] rounded-t bg-gradient-to-t from-brand-600 to-brand-400" style={{ height: Math.max(4, g.istek / maxGun * 100) + '%' }} title={`${g.istek} istek`} />
+                        <div className="w-full max-w-[36px] rounded-t bg-gradient-to-t from-brand-600 to-brand-400" style={{ height: Math.max(4, g.istek / maxGun * 100) + '%' }} title={`${g.istek} ${cevir("istek")}`} />
                       </div>
                       <span className="text-[10px] text-slate-400 font-mono">{g.tarih.split('/')[0]}</span>
                       <span className="text-[10px] text-slate-600 dark:text-slate-300 font-mono">{g.istek}</span>
@@ -125,10 +133,10 @@ export default function DomainStatsPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Kart baslik={cevir("En Çok İstenen Yollar")}>
-                <Tablo rows={o.top_yollar} birim="istek" mono />
+                <Tablo rows={o.top_yollar} birim={cevir("istek")} mono />
               </Kart>
-              <Kart baslik="En Aktif IP'ler">
-                <Tablo rows={o.top_ip} birim="istek" mono />
+              <Kart baslik={cevir("En Aktif IP'ler")}>
+                <Tablo rows={o.top_ip} birim={cevir("istek")} mono />
               </Kart>
             </div>
 
@@ -169,7 +177,7 @@ function Kart({ baslik, children }: { baslik: string; children: React.ReactNode 
 }
 function Tablo({ rows, birim, mono }: { rows: KV[]; birim: string; mono?: boolean }) {
   const max = Math.max(1, ...rows.map(r => r.sayi))
-  if (!rows.length) return <div className="text-sm text-slate-400 py-3">Veri yok.</div>
+  if (!rows.length) return <div className="text-sm text-slate-400 py-3">{cevir("Veri yok.")}</div>
   return (
     <div className="space-y-1.5">
       {rows.map((r, i) => (

@@ -10,6 +10,16 @@ type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici
 
 
 const COMPOSER_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Çalışıyor…": "Running…",
+  "✓ Tamamlandı": "✓ Completed",
+  "✗ Hata ile bitti": "✗ Finished with error",
+  "Anasayfa": "Home",
+  "dizininde": "directory, running as user",
+  "olarak çalışır.": ".",
+  "✓ composer.json bulundu": "✓ composer.json found",
+  "composer.json yok": "composer.json not found",
+  "vendor/paket veya vendor/paket:^1.2": "vendor/package or vendor/package:^1.2",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (COMPOSER_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -32,10 +42,10 @@ export default function DomainComposerPage() {
   useEffect(yukle, [id])
 
   async function calistir(komut: string, pkt?: string) {
-    setCalisan(komut); setHata(null); setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\nÇalışıyor…`)
+    setCalisan(komut); setHata(null); setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${cevir("Çalışıyor…")}`)
     try {
       const { data } = await api.post(`${base}/composer`, { komut, paket: pkt || '' })
-      setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || cevir("(çıktı yok)")}\n\n${data.ok ? '✓ Tamamlandı' : '✗ Hata ile bitti'}`)
+      setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || cevir("(çıktı yok)")}\n\n${data.ok ? cevir('✓ Tamamlandı') : cevir('✗ Hata ile bitti')}`)
       yukle()
     } catch (e) {
       setHata(apiHata(e, cevir("Çalıştırılamadı"))); setCikti('')
@@ -51,13 +61,13 @@ export default function DomainComposerPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-3xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
+          { etiket: cevir('Anasayfa'), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: 'Composer' },
         ]} />
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Composer</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          <span className="font-mono">{d.dizin}</span> dizininde <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
+          <span className="font-mono">{d.dizin}</span> {cevir("dizininde")} <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
         </p>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -73,7 +83,7 @@ export default function DomainComposerPage() {
                 <div>
                   <span className="text-xs font-mono text-slate-500">{d.surum}</span>
                   <span className={`ml-2 text-xs ${d.composer_json ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
-                    {d.composer_json ? '✓ composer.json bulundu' : 'composer.json yok'}
+                    {d.composer_json ? cevir('✓ composer.json bulundu') : cevir('composer.json yok')}
                   </span>
                 </div>
               </div>
@@ -85,7 +95,7 @@ export default function DomainComposerPage() {
                 <button disabled={!!calisan} onClick={() => calistir('show')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800`}>show</button>
               </div>
               <div className="mt-3 flex gap-2">
-                <input value={paket} onChange={e => setPaket(e.target.value)} placeholder="vendor/paket veya vendor/paket:^1.2"
+                <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
                   className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
                 <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('require', paket.trim())} className={`${btnBase} bg-emerald-600 hover:bg-emerald-700 text-white`}>require</button>
                 <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('remove', paket.trim())} className={`${btnBase} border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`}>remove</button>

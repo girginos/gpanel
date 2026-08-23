@@ -1,4 +1,3 @@
-import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
@@ -24,6 +23,37 @@ type Surum = { surum: string; aciklama?: string }
 // Sınırsız (0) alanlar en yükseğe sayılır — aksi halde "sınırsız" düşürme görünür.
 
 const DPLAN_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "✓ Limitler kaydedildi ve bu hostinge uygulandı.": "✓ Limits saved and applied to this hosting.",
+  "Domainler": "Domains",
+  "Hosting Planı": "Hosting Plan",
+  "Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin.": "Upgrade or downgrade this hosting's package, or create a plan specific to this hosting and set its limits yourself.",
+  "Limitleri özelleştir": "Customize limits",
+  "Tüm ayarlar": "All settings",
+  "Veritabanı": "Database",
+  "PHP sürümü": "PHP version",
+  "Vazgeç": "Cancel",
+  "Gelişmiş ayarlar (WAF, nginx, IO) →": "Advanced settings (WAF, nginx, IO) →",
+  "Aktif": "Active",
+  "Düzenle": "Edit",
+  "Mevcut plan": "Current plan",
+  "Disk": "Disk",
+  "Trafik": "Traffic",
+  "Oluşturuluyor…": "Creating…",
+  "Kaynak limitleri": "Resource limits",
+  "Disk (MB)": "Disk (MB)",
+  "Trafik (MB/ay)": "Traffic (MB/month)",
+  "RAM (MB)": "RAM (MB)",
+  "E-posta kutusu": "Mailbox",
+  "Kutu depolama (MB)": "Mailbox storage (MB)",
+  "Kaydediliyor…": "Saving…",
+  "Kaydet ve uygula": "Save and apply",
+  "Kaydedilemedi": "Could not save",
+  "Planlara git": "Go to plans",
+  "Uygulanıyor…": "Applying…",
+  "planı uygulandı. Kaynak limitleri arka planda güncelleniyor.": "plan applied. Resource limits are being updated in the background.",
+  "zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.": "is already specific to this hosting — you can edit its limits below.",
+  "oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.": "created and assigned to this hosting. Edit its limits below.",
   "0 = sınırsız": "0 = unlimited",
   "100 = 1 çekirdek": "100 = 1 core",
   "Açıklama yok": "No description",
@@ -60,8 +90,8 @@ function puan(p: Plan) {
   const s = (v: number) => (v <= 0 ? 1_000_000 : v)
   return s(p.disk_kota_mb) + s(p.trafik_kota_mb) / 10 + s(p.ram_mb) * 2 + s(p.cpu_yuzde) * 4
 }
-const mb = (v: number) => (v <= 0 ? 'sınırsız' : v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`)
-const adet = (v: number) => (v <= 0 ? 'sınırsız' : String(v))
+const mb = (v: number) => (v <= 0 ? cevir('sınırsız') : v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`)
+const adet = (v: number) => (v <= 0 ? cevir('sınırsız') : String(v))
 
 const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
 
@@ -102,14 +132,16 @@ export default function DomainPlanPage() {
   const mevcut = planlar.find(p => p.id === domain?.plan_id) || null
   const mevcutPuan = mevcut ? puan(mevcut) : -1
   // Bu plan yalnız bu hostinge mi ait? (adı "<alan_adı> — Özel" ile başlıyorsa)
-  const ozelMi = !!(mevcut && domain && mevcut.ad.startsWith(cevirT(cevir("{0} — Özel"), domain.alan_adi)))
+  // 🔴 LOGIC: backend plan adını her zaman Türkçe "<domain> — Özel" olarak üretir;
+  // ceviri UYGULANMAZ, aksi halde EN modda eşleşme bozulur.
+  const ozelMi = !!(mevcut && domain && mevcut.ad.startsWith(`${domain.alan_adi} — Özel`))
 
   async function planUygula(p: Plan) {
     if (!id) return
     setIsleniyor(p.id); setHata(null); setBasari(null); setTaslak(null)
     try {
       await api.put(`/domains/${id}/plan`, { plan_id: p.id })
-      setBasari(`✓ "${p.ad}" planı uygulandı. Kaynak limitleri arka planda güncelleniyor.`)
+      setBasari(`✓ "${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`)
       yukle()
     } catch (e) {
       setHata(apiHata(e, cevir("Plan değiştirilemedi")))
@@ -124,8 +156,8 @@ export default function DomainPlanPage() {
     try {
       const { data } = await api.post<{ plan_id: number; ad: string; zaten_ozel?: boolean }>(`/domains/${id}/ozel-plan`, {})
       setBasari(data.zaten_ozel
-        ? `"${data.ad}" zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.`
-        : `✓ "${data.ad}" oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.`)
+        ? `"${data.ad}" ${cevir("zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.")}`
+        : `✓ "${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`)
       const { data: pl } = await api.get<{ plan: Plan }>(`/plans/${data.plan_id}`)
       setTaslak(pl.plan)
       yukle()
@@ -159,7 +191,7 @@ export default function DomainPlanPage() {
       setTaslak(null)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, 'Kaydedilemedi'))
+      setHata(apiHata(e, cevir('Kaydedilemedi')))
     } finally { setIsleniyor(null) }
   }
 
@@ -176,7 +208,7 @@ export default function DomainPlanPage() {
       <div className="mb-4">
         <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Hosting Planı")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          {cevir(cevir("Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin."))}
+          {cevir("Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin.")}
         </p>
       </div>
 
@@ -193,17 +225,17 @@ export default function DomainPlanPage() {
           <div className="mb-5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">Mevcut plan</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Mevcut plan")}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{mevcut?.ad || domain?.plan_ad || cevir("Plan atanmamış")}</span>
                   {ozelMi && <span className="text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Bu hostinge özel")}</span>}
                 </div>
                 {mevcut && (
                   <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">Disk </dt><dd className="inline font-medium">{mb(mevcut.disk_kota_mb)}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">Trafik </dt><dd className="inline font-medium">{mb(mevcut.trafik_kota_mb)}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Disk")} </dt><dd className="inline font-medium">{mb(mevcut.disk_kota_mb)}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Trafik")} </dt><dd className="inline font-medium">{mb(mevcut.trafik_kota_mb)}</dd></div>
                     <div><dt className="inline text-slate-400 dark:text-slate-500">RAM </dt><dd className="inline font-medium">{mb(mevcut.ram_mb)}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">CPU </dt><dd className="inline font-medium">{mevcut.cpu_yuzde <= 0 ? 'sınırsız' : `%${mevcut.cpu_yuzde}`}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">CPU </dt><dd className="inline font-medium">{mevcut.cpu_yuzde <= 0 ? cevir('sınırsız') : `%${mevcut.cpu_yuzde}`}</dd></div>
                     <div><dt className="inline text-slate-400 dark:text-slate-500">PHP </dt><dd className="inline font-medium">{mevcut.php_surum}</dd></div>
                   </dl>
                 )}
@@ -212,18 +244,18 @@ export default function DomainPlanPage() {
                 {ozelMi ? (
                   <button type="button" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
                           className="inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-                    {cevir(cevir("Limitleri özelleştir"))}
+                    {cevir("Limitleri özelleştir")}
                   </button>
                 ) : (
                   <button type="button" onClick={ozelPlan} disabled={isleniyor !== null}
                           className="inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-                    {isleniyor === 'ozel' ? 'Oluşturuluyor…' : cevir("Tek tıkla özel plan")}
+                    {isleniyor === 'ozel' ? cevir('Oluşturuluyor…') : cevir("Tek tıkla özel plan")}
                   </button>
                 )}
                 {mevcut && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
                         className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-                    {cevir(cevir("Tüm ayarlar"))}
+                    {cevir("Tüm ayarlar")}
                   </Link>
                 )}
               </div>
@@ -239,21 +271,21 @@ export default function DomainPlanPage() {
           {taslak && (
             <div className="mb-5 rounded-lg border border-brand-300 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-950/20 p-4">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Kaynak limitleri — {taslak.ad}</h2>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Kaynak limitleri")} — {taslak.ad}</h2>
                 <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("0 = sınırsız")}</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Alan etiket="Disk (MB)"><input type="number" min={0} className={inp} value={taslak.disk_kota_mb} onChange={e => T('disk_kota_mb', Number(e.target.value))} /></Alan>
-                <Alan etiket="Trafik (MB/ay)"><input type="number" min={0} className={inp} value={taslak.trafik_kota_mb} onChange={e => T('trafik_kota_mb', Number(e.target.value))} /></Alan>
-                <Alan etiket="RAM (MB)"><input type="number" min={0} className={inp} value={taslak.ram_mb} onChange={e => T('ram_mb', Number(e.target.value))} /></Alan>
+                <Alan etiket={cevir("Disk (MB)")}><input type="number" min={0} className={inp} value={taslak.disk_kota_mb} onChange={e => T('disk_kota_mb', Number(e.target.value))} /></Alan>
+                <Alan etiket={cevir("Trafik (MB/ay)")}><input type="number" min={0} className={inp} value={taslak.trafik_kota_mb} onChange={e => T('trafik_kota_mb', Number(e.target.value))} /></Alan>
+                <Alan etiket={cevir("RAM (MB)")}><input type="number" min={0} className={inp} value={taslak.ram_mb} onChange={e => T('ram_mb', Number(e.target.value))} /></Alan>
                 <Alan etiket="CPU (%)" ipucu={cevir("100 = 1 çekirdek")}><input type="number" min={0} className={inp} value={taslak.cpu_yuzde} onChange={e => T('cpu_yuzde', Number(e.target.value))} /></Alan>
                 <Alan etiket={cevir("Veritabanı")}><input type="number" min={0} className={inp} value={taslak.max_db} onChange={e => T('max_db', Number(e.target.value))} /></Alan>
                 <Alan etiket={cevir("FTP hesabı")}><input type="number" min={0} className={inp} value={taslak.max_ftp} onChange={e => T('max_ftp', Number(e.target.value))} /></Alan>
                 {mailAktif && (
                   <>
-                    <Alan etiket="E-posta kutusu" ipucu={cevir("Mail eklentisi — posta kutusu sayısı")}><input type="number" min={0} className={inp} value={taslak.max_email} onChange={e => T('max_email', Number(e.target.value))} /></Alan>
+                    <Alan etiket={cevir("E-posta kutusu")} ipucu={cevir("Mail eklentisi — posta kutusu sayısı")}><input type="number" min={0} className={inp} value={taslak.max_email} onChange={e => T('max_email', Number(e.target.value))} /></Alan>
                     <Alan etiket={cevir("Saatlik gönderim")} ipucu={cevir("Kutu başına giden mail/saat")}><input type="number" min={0} className={inp} value={taslak.saatlik_mail_limiti} onChange={e => T('saatlik_mail_limiti', Number(e.target.value))} /></Alan>
-                    <Alan etiket="Kutu depolama (MB)" ipucu={cevir("Posta kutusu başına disk kotası; 0 = sınırsız")}><input type="number" min={0} className={inp} value={taslak.mail_kutu_kota_mb} onChange={e => T('mail_kutu_kota_mb', Number(e.target.value))} /></Alan>
+                    <Alan etiket={cevir("Kutu depolama (MB)")} ipucu={cevir("Posta kutusu başına disk kotası; 0 = sınırsız")}><input type="number" min={0} className={inp} value={taslak.mail_kutu_kota_mb} onChange={e => T('mail_kutu_kota_mb', Number(e.target.value))} /></Alan>
                   </>
                 )}
                 <Alan etiket={cevir("Inode (dosya sayısı)")}><input type="number" min={0} className={inp} value={taslak.inode_kota} onChange={e => T('inode_kota', Number(e.target.value))} /></Alan>
@@ -266,14 +298,14 @@ export default function DomainPlanPage() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <button type="button" onClick={kaydet} disabled={isleniyor !== null}
                         className="inline-flex items-center rounded-md bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-                  {isleniyor === 'kaydet' ? 'Kaydediliyor…' : 'Kaydet ve uygula'}
+                  {isleniyor === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet ve uygula')}
                 </button>
                 <button type="button" onClick={() => setTaslak(null)} disabled={isleniyor !== null}
                         className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-60">
                   {cevir("Vazgeç")}
                 </button>
                 <Link to={`/araclar/paketler/${taslak.id}`} className="inline-flex items-center px-1 py-2 text-sm text-brand-700 dark:text-brand-300 hover:underline">
-                  {cevir(cevir("Gelişmiş ayarlar (WAF, nginx, IO) →"))}
+                  {cevir("Gelişmiş ayarlar (WAF, nginx, IO) →")}
                 </Link>
               </div>
             </div>
@@ -283,14 +315,14 @@ export default function DomainPlanPage() {
             <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-slate-700">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">{cevir("Tanımlı plan yok")}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Önce bir hosting planı oluşturun.")}</p>
-              <Link to="/araclar/paketler" className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">Planlara git</Link>
+              <Link to="/araclar/paketler" className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">{cevir("Planlara git")}</Link>
             </div>
           ) : (
             <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[...planlar].sort((a, b) => puan(a) - puan(b)).map(p => {
                 const bu = p.id === domain?.plan_id
                 const fark = puan(p) - mevcutPuan
-                const yon = !mevcut ? 'geç' : fark > 0 ? 'yükselt' : fark < 0 ? 'düşür' : cevir("geç")
+                const yon = !mevcut ? 'geç' : fark > 0 ? 'yükselt' : fark < 0 ? 'düşür' : 'geç'
                 return (
                   <li key={p.id} className={`rounded-lg border p-4 flex flex-col gap-3 ${bu ? 'border-brand-500 dark:border-brand-500 bg-brand-50/40 dark:bg-brand-950/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'}`}>
                     <div>
@@ -301,8 +333,8 @@ export default function DomainPlanPage() {
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{p.aciklama || cevir("Açıklama yok")}</p>
                     </div>
                     <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
-                      <div><dt className="inline text-slate-400 dark:text-slate-500">Disk </dt><dd className="inline font-medium">{mb(p.disk_kota_mb)}</dd></div>
-                      <div><dt className="inline text-slate-400 dark:text-slate-500">Trafik </dt><dd className="inline font-medium">{mb(p.trafik_kota_mb)}</dd></div>
+                      <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Disk")} </dt><dd className="inline font-medium">{mb(p.disk_kota_mb)}</dd></div>
+                      <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Trafik")} </dt><dd className="inline font-medium">{mb(p.trafik_kota_mb)}</dd></div>
                       <div><dt className="inline text-slate-400 dark:text-slate-500">RAM </dt><dd className="inline font-medium">{mb(p.ram_mb)}</dd></div>
                       <div><dt className="inline text-slate-400 dark:text-slate-500">CPU </dt><dd className="inline font-medium">{p.cpu_yuzde <= 0 ? '∞' : `%${p.cpu_yuzde}`}</dd></div>
                       <div><dt className="inline text-slate-400 dark:text-slate-500">DB </dt><dd className="inline font-medium">{adet(p.max_db)}</dd></div>
@@ -322,10 +354,10 @@ export default function DomainPlanPage() {
                       ) : (
                         <button type="button" onClick={() => planUygula(p)} disabled={isleniyor !== null}
                                 className={`w-full rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-slate-900 ${
-                                  yon === cevir("düşür")
+                                  yon === 'düşür'
                                     ? 'bg-slate-600 hover:bg-slate-700 focus-visible:ring-slate-500'
                                     : 'bg-brand-600 hover:bg-brand-700 focus-visible:ring-brand-500'}`}>
-                          {isleniyor === p.id ? 'Uygulanıyor…' : yon === cevir("yükselt") ? '↑ Yükselt' : yon === cevir("düşür") ? '↓ Düşür' : cevir("Bu plana geç")}
+                          {isleniyor === p.id ? cevir('Uygulanıyor…') : yon === 'yükselt' ? cevir('↑ Yükselt') : yon === 'düşür' ? cevir('↓ Düşür') : cevir("Bu plana geç")}
                         </button>
                       )}
                     </div>

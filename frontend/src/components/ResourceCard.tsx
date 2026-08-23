@@ -18,6 +18,17 @@ type Saglik = { durum: string; surum: string; zaman: string }
 
 
 const CMP_EN: Record<string, string> = {
+  "Kaynak Kullanımı": "Resource Usage",
+  "canlı": "live",
+  "Yükleniyor…": "Loading…",
+  "{0} çekirdek · yük {1} / {2} / {3}": "{0} cores · load {1} / {2} / {3}",
+  "Bellek": "Memory",
+  "Çalışma süresi": "Uptime",
+  "Sistem Durumu": "System Status",
+  "Bekleniyor…": "Waiting…",
+  "Çalışıyor": "Running",
+  "Sürüm": "Version",
+  "Saat": "Time",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -82,18 +93,18 @@ export default function ResourceCard() {
       </div>
 
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Sistem Durumu</h3>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sistem Durumu")}</h3>
         {!s ? (
-          <div className="text-sm text-slate-400 dark:text-slate-500">Bekleniyor…</div>
+          <div className="text-sm text-slate-400 dark:text-slate-500">{cevir("Bekleniyor…")}</div>
         ) : (
           <div className="space-y-2 text-sm">
             <Satir
               etiket="Backend"
-              deger={s.durum === 'ayakta' ? 'Çalışıyor' : s.durum}
+              deger={s.durum === 'ayakta' ? cevir("Çalışıyor") : s.durum}
               ok={s.durum === 'ayakta'}
             />
             <Satir etiket={cevir("Sürüm")} deger={s.surum} ok />
-            <Satir etiket="Saat" deger={new Date(s.zaman).toLocaleTimeString('tr-TR')} ok />
+            <Satir etiket={cevir("Saat")} deger={new Date(s.zaman).toLocaleTimeString('tr-TR')} ok />
           </div>
         )}
       </div>

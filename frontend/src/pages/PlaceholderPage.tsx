@@ -8,6 +8,11 @@ import Breadcrumb from '@/components/Breadcrumb'
 
 const PLACE_EN: Record<string, string> = {
   "Yapım aşamasında": "Under construction",
+  "Anasayfa": "Homepage",
+  "Hazır Değil": "Not Ready",
+  "Bu modül": "This module",
+  "devreye girecek.": "will go live.",
+  "sonraki fazlarda": "in later phases",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PLACE_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -21,7 +26,7 @@ export default function PlaceholderPage({
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir('Anasayfa'), href: '/' },
         ...(parent ? [parent] : []),
         { etiket: baslik },
       ]} />
@@ -29,7 +34,7 @@ export default function PlaceholderPage({
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{baslik}</h1>
         {faz && (
           <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-0.5 rounded">
-            {faz} · Hazır Değil
+            {faz} · {cevir("Hazır Değil")}
           </span>
         )}
       </div>
@@ -42,7 +47,7 @@ export default function PlaceholderPage({
           </svg>
         </div>
         <h3 className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">{cevir("Yapım aşamasında")}</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-500">Bu modül {faz ? <span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span> : 'sonraki fazlarda'} devreye girecek.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-500">{cevir("Bu modül")} {faz ? <span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span> : cevir('sonraki fazlarda')} {cevir("devreye girecek.")}</p>
       </div>
     </div>
   )

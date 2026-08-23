@@ -32,6 +32,21 @@ const DILLER: { kod: Dil; ad: string; uzantilar: string[] }[] = [
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Değişiklik var": "Unsaved changes",
+  "Kaydediliyor…": "Saving…",
+  "Kaydedildi": "Saved",
+  "Sözdizimi": "Syntax",
+  "Pencerele": "Windowed",
+  "Tam ekran": "Fullscreen",
+  "Düz Metin": "Plain Text",
+  "Kaydet": "Save",
+  "Kapat": "Close",
+  "Satır": "Line",
+  "Kolon": "Column",
+  "satır": "lines",
+  "bayt": "bytes",
+  "Ctrl+S: kaydet · Esc: kapat": "Ctrl+S: save · Esc: close",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -158,12 +173,12 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
               className="text-xs bg-slate-700 text-slate-100 border border-slate-600 rounded px-2 py-1 focus:outline-none focus:border-slate-400"
               title={cevir(cevir("Sözdizimi"))}
             >
-              {DILLER.map(d => <option key={d.kod} value={d.kod}>{d.ad}</option>)}
+              {DILLER.map(d => <option key={d.kod} value={d.kod}>{cevir(d.ad)}</option>)}
             </select>
             <button
               onClick={() => setTamEkran(!tamEkran)}
               className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded"
-              title={tamEkran ? 'Pencerele' : 'Tam ekran'}
+              title={tamEkran ? cevir('Pencerele') : cevir('Tam ekran')}
             >
               {tamEkran ? '⛶' : '⛶'}
             </button>
@@ -218,15 +233,15 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
         {/* Status bar */}
         <div className="flex items-center justify-between gap-4 px-3 py-1.5 bg-slate-800 border-t border-slate-700 text-[11px] text-slate-400 dark:text-slate-500 font-mono">
           <div className="flex items-center gap-4">
-            <span>Satır {cursor.satir}, Kolon {cursor.kolon}</span>
-            <span>{icerik.split('\n').length} satır</span>
-            <span>{baytSayi.toLocaleString('tr-TR')} bayt</span>
+            <span>{cevir("Satır")} {cursor.satir}, {cevir("Kolon")} {cursor.kolon}</span>
+            <span>{icerik.split('\n').length} {cevir("satır")}</span>
+            <span>{baytSayi.toLocaleString('tr-TR')} {cevir("bayt")}</span>
           </div>
           <div className="flex items-center gap-3">
             <span>UTF-8</span>
             <span>LF</span>
             <span className="text-slate-300">{DILLER.find(d => d.kod === dil)?.ad}</span>
-            <span className="text-slate-500 dark:text-slate-500">Ctrl+S: kaydet · Esc: kapat</span>
+            <span className="text-slate-500 dark:text-slate-500">{cevir("Ctrl+S: kaydet · Esc: kapat")}</span>
           </div>
         </div>
       </div>

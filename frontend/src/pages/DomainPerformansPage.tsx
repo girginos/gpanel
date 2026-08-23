@@ -12,9 +12,17 @@ type Ozet = { alan_adi: string; php_surum: string; skor: number; ogeler: Oge[]; 
 
 
 const DPERF_EN: Record<string, string> = {
+  "Türkçe": "English",
   "Hızlandırıcılar": "Accelerators",
   "Performans ve Hızlandırıcılar": "Performance and Accelerators",
   "— mevcut hızlandırıcı durumu ve öneriler.": "— current accelerator status and recommendations.",
+  "Anasayfa": "Home",
+  "Domainler": "Domains",
+  "Performans": "Performance",
+  "Performans Skoru": "Performance Score",
+  "Ayarla →": "Configure →",
+  "Öneriler": "Recommendations",
+  "Git →": "Go →",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DPERF_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -45,10 +53,10 @@ export default function DomainPerformansPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-4xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
-          { etiket: 'Domainler', href: '/domainler' },
+          { etiket: cevir('Anasayfa'), href: '/' },
+          { etiket: cevir('Domainler'), href: '/domainler' },
           { etiket: o.alan_adi, href: `/abonelikler/${id}` },
-          { etiket: 'Performans' },
+          { etiket: cevir('Performans') },
         ]} />
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Performans ve Hızlandırıcılar")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-5"><span className="font-mono">{o.alan_adi}</span> {cevir("— mevcut hızlandırıcı durumu ve öneriler.")}</p>
@@ -67,7 +75,7 @@ export default function DomainPerformansPage() {
                 <span className="text-[10px] text-slate-400">/ 100</span>
               </div>
             </div>
-            <div className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">Performans Skoru</div>
+            <div className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">{cevir("Performans Skoru")}</div>
           </div>
 
           {/* Hızlandırıcı durumları */}
@@ -84,7 +92,7 @@ export default function DomainPerformansPage() {
                     </div>
                     <p className="text-[11px] text-slate-400 ml-4 truncate">{og.aciklama}</p>
                   </div>
-                  {og.ayar && <button onClick={() => git(og.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">Ayarla →</button>}
+                  {og.ayar && <button onClick={() => git(og.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Ayarla →")}</button>}
                 </div>
               ))}
             </div>
@@ -99,7 +107,7 @@ export default function DomainPerformansPage() {
               <li key={i} className="flex items-start gap-2 text-sm">
                 <span className={`mt-0.5 ${onemRenk[n.onem] || 'text-slate-400'}`}>●</span>
                 <span className="text-slate-600 dark:text-slate-300 flex-1">{n.metin}</span>
-                {n.ayar && <button onClick={() => git(n.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">Git →</button>}
+                {n.ayar && <button onClick={() => git(n.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Git →")}</button>}
               </li>
             ))}
           </ul>

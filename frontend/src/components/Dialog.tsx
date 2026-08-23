@@ -14,6 +14,16 @@
 //   await bilgi({ baslik: 'Bitti', mesaj: '…' })
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import i18n from '@/lib/i18n'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import { useTranslation } from 'react-i18next'
+
+const DIALOG_EN: Record<string, string> = {
+  "Vazgeç": "Cancel",
+  "Tamam": "OK",
+  "Onayla": "Confirm",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DIALOG_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 type Tur = 'onay' | 'sor' | 'bilgi'
 
@@ -68,6 +78,7 @@ const IkonSoru = () => (
 )
 
 export function DialogSaglayici({ children }: { children: ReactNode }) {
+  useTranslation() // dil re-render aboneligi
   const [istek, setIstek] = useState<Istek | null>(null)
   const [deger, setDeger] = useState('')
   const girdiRef = useRef<HTMLInputElement | null>(null)
@@ -152,7 +163,7 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
               {istek.tur !== 'bilgi' && (
                 <button onClick={iptal}
                   className="flex-1 text-sm font-medium px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  {s.iptalEtiketi || 'Vazgeç'}
+                  {s.iptalEtiketi || cevir('Vazgeç')}
                 </button>
               )}
               <button ref={onayRef} onClick={tamam}
@@ -160,7 +171,7 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
                   tehlike
                     ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
                     : 'bg-brand-600 hover:bg-brand-700 shadow-brand-600/20'}`}>
-                {s.onayEtiketi || (istek.tur === 'bilgi' ? 'Tamam' : 'Onayla')}
+                {s.onayEtiketi || (istek.tur === 'bilgi' ? cevir('Tamam') : cevir('Onayla'))}
               </button>
             </div>
           </div>

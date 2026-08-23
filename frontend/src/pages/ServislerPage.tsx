@@ -40,6 +40,15 @@ const SERVIS_EN: Record<string, string> = {
   "○ Durmuş": "○ Stopped",
   "● Çalışıyor": "● Running",
   "✕ Hatalı": "✕ Failed",
+  "yeniden yüklendi": "reloaded",
+  "yeniden başlatıldı": "restarted",
+  "Araçlar & Ayarlar": "Tools & Settings",
+  "Servisler": "Services",
+  "Web, veritabanı, DNS ve PHP servislerini buradan yeniden başlatın. Ayar değişikliği sonrası kullanışlıdır.": "Restart the web, database, DNS and PHP services from here. Useful after a configuration change.",
+  "Yükleniyor…": "Loading…",
+  "{0} işlemi başarısız": "{0} operation failed",
+  "Web Sunucusu": "Web Server",
+  "Diğer": "Other",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SERVIS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -67,7 +76,7 @@ export default function ServislerPage() {
     setIslemBirim(s.birim); setHata(null); setBasari(null)
     try {
       await api.post('/system/servis-islem', { birim: s.birim, aksiyon })
-      setBasari(`${s.etiket} ${aksiyon === 'reload' ? 'yeniden yüklendi' : cevir("yeniden başlatıldı")}.`)
+      setBasari(`${s.etiket} ${aksiyon === 'reload' ? cevir("yeniden yüklendi") : cevir("yeniden başlatıldı")}.`)
       await getir()
     } catch (e) {
       setHata(apiHata(e, cevirT(cevir("{0} işlemi başarısız"), s.etiket)))
@@ -88,7 +97,7 @@ export default function ServislerPage() {
     <div className="max-w-4xl mx-auto px-4 py-6">
       <Breadcrumb items={[
         { etiket: cevir("Araçlar & Ayarlar"), href: '/araclar-ayarlar' },
-        { etiket: 'Servisler' },
+        { etiket: cevir("Servisler") },
       ]} />
       <div className="mb-5">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Servis Yönetimi")}</h1>
@@ -107,7 +116,7 @@ export default function ServislerPage() {
           {gruplar.map(g => (
             <section key={g.ad}>
               <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2 px-1">
-                <span className="text-sm">{GRUP_IKON[g.ad] || '•'}</span>{g.ad}
+                <span className="text-sm">{GRUP_IKON[g.ad] || '•'}</span>{cevir(g.ad)}
               </h2>
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
                 <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -121,7 +130,7 @@ export default function ServislerPage() {
                           <div className="text-xs font-mono text-slate-400 dark:text-slate-500">{s.birim}</div>
                         </div>
                         <span className={`w-28 text-center text-xs px-2.5 py-1 rounded-full font-medium ${DURUM_STIL[s.durum] || DURUM_STIL.inactive}`}>
-                          {DURUM_ETIKET[s.durum] || s.durum}
+                          {cevir(DURUM_ETIKET[s.durum] || s.durum)}
                         </span>
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {/* Reload slotu her satırda yer kaplar → Restart hizalı kalır */}

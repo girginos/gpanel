@@ -18,6 +18,8 @@ interface Props {
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "yükleniyor…": "loading…",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 

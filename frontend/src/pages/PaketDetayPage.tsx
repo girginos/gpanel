@@ -30,6 +30,61 @@ type Surum = { surum: string; aciklama?: string }
 
 
 const PKTDET_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Anasayfa": "Home",
+  "Genel": "General",
+  "Plan Adı": "Plan Name",
+  "Varsayılan Plan": "Default Plan",
+  "Açıklama": "Description",
+  "PHP Sürümü": "PHP Version",
+  "Varsayılan": "Default",
+  "Açıklama yok": "No description",
+  "Veritabanı": "Database",
+  "FTP Hesabı": "FTP Account",
+  "Durum": "Status",
+  "Oluşturma": "Created",
+  "İşlem": "Action",
+  "Sistem Kullanıcısı": "System User",
+  "Yükleniyor…": "Loading…",
+  "kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.": "saved. To apply to assigned domains, use “Reapply” below.",
+  "Kaydediliyor…": "Saving…",
+  "Kaynak Limitleri": "Resource Limits",
+  "systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.": "Applied at the system level with systemd cgroup + xfs_quota + MariaDB GRANT. After saving, trigger “Reapply” for assigned domains.",
+  "Hard MemoryMax; MemoryHigh otomatik %90": "Hard MemoryMax; MemoryHigh automatically 90%",
+  "systemd TasksMax — PHP-FPM worker dahil": "systemd TasksMax — including PHP-FPM workers",
+  "Trafik (MB/ay)": "Traffic (MB/month)",
+  "0 = Otomatik": "0 = Automatic",
+  "Disk Okuma (MB/s)": "Disk Read (MB/s)",
+  "Disk Yazma (MB/s)": "Disk Write (MB/s)",
+  "Okuma IOPS": "Read IOPS",
+  "Yazma IOPS": "Write IOPS",
+  "Maks. Sorgu/Saat": "Max Queries/Hour",
+  "Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)": "Database (MySQL Governor — native MariaDB; Connection limit is the “MySQL Connection” above)",
+  "E-posta Kutusu": "Mailbox",
+  "Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz": "Number of mailboxes that can be created on an account in this plan. 0 = unlimited",
+  "Kutu basina giden mail/saat. 0 = sinirsiz": "Outgoing mail per mailbox/hour. 0 = unlimited",
+  "Kutu Depolama (MB)": "Mailbox Storage (MB)",
+  "Posta kutusu basina disk kotasi. 0 = sinirsiz": "Disk quota per mailbox. 0 = unlimited",
+  "Web Sunucusu (nginx)": "Web Server (nginx)",
+  "Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.": "New domains on this plan are installed with these nginx settings. Additional directives are validated with “nginx -t” on save.",
+  "Ek nginx Direktifleri": "Additional nginx Directives",
+  "# Örnek:\nadd_header X-Robots-Tag \"noindex\" always;\nlocation = /saglik { return 200 \"ok\"; }": "# Example:\nadd_header X-Robots-Tag \"noindex\" always;\nlocation = /saglik { return 200 \"ok\"; }",
+  "ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ": "ⓘ When you click Save, the directives are tested in a temporary server block with ",
+  " ile test edilir. Geçersizse plan ": " . If invalid, the plan is ",
+  "kaydedilmez": "not saved",
+  " ve nginx'in hata çıktısı yukarıda gösterilir.": " and nginx's error output is shown above.",
+  "ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.": "ModSecurity v3 + OWASP Core Rule Set. Domains on this plan (unless they have their own WAF override) inherit these values. If ‘Inherit from Plan’ is selected at the domain level, the setting here applies.",
+  "Mod": "Mode",
+  "Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).": "Block = returns 403 for bad requests (SecRuleEngine On). Detect = only writes to the audit log (DetectionOnly).",
+  "Engelle (On)": "Block (On)",
+  "Denetle (yalnızca kaydet)": "Detect (log only)",
+  "Paranoya Seviyesi": "Paranoia Level",
+  "Seviye 2 (Orta)": "Level 2 (Medium)",
+  "ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ": "ⓘ After a change, the vhosts of domains bound to this plan are automatically re-rendered in the background (nginx -t protected, zero downtime). If the module is not installed on the server, the setting is stored and activated with ",
+  " ile etkinleşir.": " .",
+  "Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.": "After the plan is updated, the relevant domain's cgroup + quota + MySQL limits are updated with “Reapply”.",
+  "Uygulanıyor…": "Applying…",
+  "Yeniden Uygula": "Reapply",
   "0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.": "0 = Automatic (max(4, RAM/64)). Consistent with the RAM cap in per-tenant FPM.",
   "100 = 1 çekirdek (systemd CPUQuota)": "100 = 1 core (systemd CPUQuota)",
   "Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.": "Number of objects that can be created on an account bound to this plan. 0 = unlimited.",
@@ -116,7 +171,7 @@ export default function PaketDetayPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/plans/${id}`, plan)
-      setBasari(`"${plan.ad}" kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.`)
+      setBasari(`"${plan.ad}" ${cevir("kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.")}`)
       setTimeout(() => setBasari(null), 6000)
       yukle()
     } catch (e) {
@@ -159,7 +214,7 @@ export default function PaketDetayPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
         <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
+          { etiket: cevir('Anasayfa'), href: '/' },
           { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
           { etiket: cevir("Hizmet Planları"), href: '/araclar/paketler' },
           { etiket: plan.ad },
@@ -178,7 +233,7 @@ export default function PaketDetayPage() {
           </div>
           <button onClick={kaydet} disabled={isleniyor}
             className="shrink-0 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg shadow-sm">
-            {isleniyor ? 'Kaydediliyor…' : cevir("Değişiklikleri Kaydet")}
+            {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
           </button>
         </div>
 
@@ -186,7 +241,7 @@ export default function PaketDetayPage() {
         {basari && <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
         {/* Genel */}
-        <Kart baslik={cevir(cevir("Genel"))} ikon="⚙️">
+        <Kart baslik={cevir("Genel")} ikon="⚙️">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Alan etiket={cevir("Plan Adı")}>
               <input value={plan.ad} onChange={e => P('ad', e.target.value)} className={inp} />
@@ -215,15 +270,15 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Kaynak Limitleri */}
-        <Kart baslik="Kaynak Limitleri" ikon="📊" alt="systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.">
+        <Kart baslik={cevir("Kaynak Limitleri")} ikon="📊" alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Alan etiket="CPU %" ipucu={cevir("100 = 1 çekirdek (systemd CPUQuota)")}>
               <input type="number" min={10} max={2000} value={plan.cpu_yuzde} onChange={e => P('cpu_yuzde', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
-            <Alan etiket="RAM (MB)" ipucu="Hard MemoryMax; MemoryHigh otomatik %90">
+            <Alan etiket="RAM (MB)" ipucu={cevir("Hard MemoryMax; MemoryHigh otomatik %90")}>
               <input type="number" min={64} value={plan.ram_mb} onChange={e => P('ram_mb', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
-            <Alan etiket="Max Process" ipucu="systemd TasksMax — PHP-FPM worker dahil">
+            <Alan etiket="Max Process" ipucu={cevir("systemd TasksMax — PHP-FPM worker dahil")}>
               <input type="number" min={5} value={plan.max_process} onChange={e => P('max_process', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
             <Alan etiket={cevir("MySQL Bağlantı")} ipucu="MAX_USER_CONNECTIONS">
@@ -232,7 +287,7 @@ export default function PaketDetayPage() {
             <Alan etiket="Disk (MB)" ipucu={cevir("0 = sınırsız")}>
               <input type="number" min={0} value={plan.disk_kota_mb} onChange={e => P('disk_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
-            <Alan etiket="Trafik (MB/ay)" ipucu={cevir("0 = sınırsız")}>
+            <Alan etiket={cevir("Trafik (MB/ay)")} ipucu={cevir("0 = sınırsız")}>
               <input type="number" min={0} value={plan.trafik_kota_mb} onChange={e => P('trafik_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
             <Alan etiket={cevir("Inode Kotası")} ipucu={cevir("Toplam dosya + dizin sayısı")}>
@@ -242,27 +297,27 @@ export default function PaketDetayPage() {
               <input type="number" min={1} max={1000} value={plan.io_agirlik} onChange={e => P('io_agirlik', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
             <Alan etiket="PHP-FPM max_children" ipucu={cevir("0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.")}>
-              <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder="0 = Otomatik" />
+              <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = Otomatik")} />
             </Alan>
           </div>
           <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Disk G/Ç (mutlak throttle — IOWeight'ten farklı; cgroup v2)")}</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            <Alan etiket="Disk Okuma (MB/s)" ipucu={cevir("Mutlak okuma bant genişliği. 0 = sınırsız")}>
+            <Alan etiket={cevir("Disk Okuma (MB/s)")} ipucu={cevir("Mutlak okuma bant genişliği. 0 = sınırsız")}>
               <input type="number" min={0} value={plan.io_read_mbps} onChange={e => P('io_read_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
             </Alan>
-            <Alan etiket="Disk Yazma (MB/s)" ipucu={cevir("Mutlak yazma bant genişliği. 0 = sınırsız")}>
+            <Alan etiket={cevir("Disk Yazma (MB/s)")} ipucu={cevir("Mutlak yazma bant genişliği. 0 = sınırsız")}>
               <input type="number" min={0} value={plan.io_write_mbps} onChange={e => P('io_write_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
             </Alan>
-            <Alan etiket="Okuma IOPS" ipucu={cevir("Saniyedeki maksimum okuma işlemi. 0 = sınırsız")}>
+            <Alan etiket={cevir("Okuma IOPS")} ipucu={cevir("Saniyedeki maksimum okuma işlemi. 0 = sınırsız")}>
               <input type="number" min={0} value={plan.io_read_iops} onChange={e => P('io_read_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
             </Alan>
-            <Alan etiket="Yazma IOPS" ipucu={cevir("Saniyedeki maksimum yazma işlemi. 0 = sınırsız")}>
+            <Alan etiket={cevir("Yazma IOPS")} ipucu={cevir("Saniyedeki maksimum yazma işlemi. 0 = sınırsız")}>
               <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
             </Alan>
           </div>
           <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)")}</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            <Alan etiket="Maks. Sorgu/Saat" ipucu={cevir("MAX_QUERIES_PER_HOUR. 0 = sınırsız")}>
+            <Alan etiket={cevir("Maks. Sorgu/Saat")} ipucu={cevir("MAX_QUERIES_PER_HOUR. 0 = sınırsız")}>
               <input type="number" min={0} value={plan.db_max_queries_per_hour} onChange={e => P('db_max_queries_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
             </Alan>
             <Alan etiket={cevir("Maks. Güncelleme/Saat")} ipucu={cevir("MAX_UPDATES_PER_HOUR. 0 = sınırsız")}>
@@ -290,13 +345,13 @@ export default function PaketDetayPage() {
                 bu alanlari gostermek, olmayan bir ozelligi vaat etmek olurdu. */}
             {mailAktif && (
               <>
-                <Alan etiket="E-posta Kutusu" ipucu="Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz">
+                <Alan etiket={cevir("E-posta Kutusu")} ipucu={cevir("Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz")}>
                   <input type="number" min={0} value={plan.max_email} onChange={e => P('max_email', Number(e.target.value) || 0)} className={inpNum} />
                 </Alan>
-                <Alan etiket={cevir("Saatlik Gönderim")} ipucu="Kutu basina giden mail/saat. 0 = sinirsiz">
+                <Alan etiket={cevir("Saatlik Gönderim")} ipucu={cevir("Kutu basina giden mail/saat. 0 = sinirsiz")}>
                   <input type="number" min={0} value={plan.saatlik_mail_limiti} onChange={e => P('saatlik_mail_limiti', Number(e.target.value) || 0)} className={inpNum} />
                 </Alan>
-                <Alan etiket="Kutu Depolama (MB)" ipucu="Posta kutusu basina disk kotasi. 0 = sinirsiz">
+                <Alan etiket={cevir("Kutu Depolama (MB)")} ipucu={cevir("Posta kutusu basina disk kotasi. 0 = sinirsiz")}>
                   <input type="number" min={0} value={plan.mail_kutu_kota_mb} onChange={e => P('mail_kutu_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
                 </Alan>
               </>
@@ -305,7 +360,7 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Web Sunucusu (nginx) */}
-        <Kart baslik="Web Sunucusu (nginx)" ikon="🛠️" alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
+        <Kart baslik={cevir("Web Sunucusu (nginx)")} ikon="🛠️" alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <Alan etiket="FastCGI Cache" ipucu={cevir("Dinamik PHP çıktısını nginx tarafında önbelleğe alır (yüksek trafik için)")}>
               <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
@@ -317,23 +372,23 @@ export default function PaketDetayPage() {
               <input type="number" min={1} max={4096} value={plan.client_max_body_mb} onChange={e => P('client_max_body_mb', Number(e.target.value) || 0)} className={inpNum} />
             </Alan>
           </div>
-          <Alan etiket="Ek nginx Direktifleri" ipucu={cevir("server{} bloğuna eklenir; kaydederken doğrulanır.")}>
+          <Alan etiket={cevir("Ek nginx Direktifleri")} ipucu={cevir("server{} bloğuna eklenir; kaydederken doğrulanır.")}>
             <textarea
               value={plan.nginx_ek_direktifler || ''}
               onChange={e => P('nginx_ek_direktifler', e.target.value)}
               rows={6}
               spellCheck={false}
-              placeholder={'# Örnek:\nadd_header X-Robots-Tag "noindex" always;\nlocation = /saglik { return 200 "ok"; }'}
+              placeholder={cevir('# Örnek:\nadd_header X-Robots-Tag "noindex" always;\nlocation = /saglik { return 200 "ok"; }')}
               className={inp + ' font-mono text-xs leading-relaxed'}
             />
           </Alan>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda <code className="font-mono">nginx -t</code> ile test edilir. Geçersizse plan <strong>kaydedilmez</strong> ve nginx'in hata çıktısı yukarıda gösterilir.
+            {cevir("ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ")}<code className="font-mono">nginx -t</code>{cevir(" ile test edilir. Geçersizse plan ")}<strong>{cevir("kaydedilmez")}</strong>{cevir(" ve nginx'in hata çıktısı yukarıda gösterilir.")}
           </p>
         </Kart>
 
         {/* WAF (ModSecurity + OWASP CRS) plan varsayılanı */}
-        <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon="🛡️" alt="ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.">
+        <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon="🛡️" alt={cevir("ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.")}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Alan etiket={cevir("WAF Varsayılanı")} ipucu={cevir("Bu plandaki yeni domainlerde WAF açık mı gelsin (per-domain override edilebilir).")}>
               <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
@@ -341,28 +396,28 @@ export default function PaketDetayPage() {
                 <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Bu planda açık olsun")}</span>
               </label>
             </Alan>
-            <Alan etiket="Mod" ipucu="Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).">
+            <Alan etiket={cevir("Mod")} ipucu={cevir("Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).")}>
               <select value={plan.waf_mode} onChange={e => P('waf_mode', e.target.value)} className={inp} disabled={!plan.waf_enabled}>
-                <option value="on">Engelle (On)</option>
+                <option value="on">{cevir("Engelle (On)")}</option>
                 <option value="detect">{cevir("Denetle (yalnızca kaydet)")}</option>
               </select>
             </Alan>
-            <Alan etiket="Paranoya Seviyesi" ipucu={cevir("CRS paranoia 1–4. Yüksek = daha sıkı koruma + daha çok yanlış-pozitif.")}>
+            <Alan etiket={cevir("Paranoya Seviyesi")} ipucu={cevir("CRS paranoia 1–4. Yüksek = daha sıkı koruma + daha çok yanlış-pozitif.")}>
               <select value={plan.waf_paranoia} onChange={e => P('waf_paranoia', Number(e.target.value) || 1)} className={inp} disabled={!plan.waf_enabled}>
                 <option value={1}>{cevir("Seviye 1 (Düşük — önerilen)")}</option>
-                <option value={2}>Seviye 2 (Orta)</option>
+                <option value={2}>{cevir("Seviye 2 (Orta)")}</option>
                 <option value={3}>{cevir("Seviye 3 (Yüksek)")}</option>
                 <option value={4}>{cevir("Seviye 4 (Sıkı)")}</option>
               </select>
             </Alan>
           </div>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve <code className="font-mono">girginospanel-waf-setup</code> ile etkinleşir.
+            {cevir("ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}
           </p>
         </Kart>
 
         {/* Atanmış domainler */}
-        <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon="🌐" alt="Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.">
+        <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon="🌐" alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
           {domainler.length === 0 ? (
             <div className="text-sm text-slate-400 py-6 text-center">{cevir("Henüz bu plana atanmış domain yok.")}</div>
           ) : (
@@ -404,7 +459,7 @@ export default function PaketDetayPage() {
                                   ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20'
                                   : 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20')
                               : 'border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                          {uygulananID === d.id ? 'Uygulanıyor…' : sonucID?.id === d.id ? (sonucID.ok ? '✓ Uygulandı' : cevir("✗ Başarısız")) : 'Yeniden Uygula'}
+                          {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('✓ Uygulandı') : cevir("✗ Başarısız")) : cevir('Yeniden Uygula')}
                         </button>
                       </td>
                     </tr>

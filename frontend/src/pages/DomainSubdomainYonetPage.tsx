@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
@@ -18,6 +19,50 @@ type PHPVer = { surum: string; aciklama?: string }
 
 
 const SUBYONET_EN: Record<string, string> = {
+  "PHP surumu {0} olarak guncellendi.": "PHP version updated to {0}.",
+  "PHP degistirilemedi": "Failed to change PHP",
+  "SSL kuruldu ({0}). Artik https:// ile erisilebilir.": "SSL installed ({0}). It is now accessible via https://.",
+  "oz-imzali": "self-signed",
+  "SSL kurulamadi": "Failed to install SSL",
+  "Onay gerekiyor": "Confirmation required",
+  "SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur.": "Remove the SSL certificate? The site will only be accessible via http://.",
+  "SSL kaldirildi.": "SSL removed.",
+  "SSL kaldirilamadi": "Failed to remove SSL",
+  "Emin misiniz?": "Are you sure?",
+  "{0} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz.": "Delete the subdomain {0}?\nThe vhost + its files (docroot) + DNS record will be removed. This cannot be undone.",
+  "Silinemedi": "Could not be deleted",
+  "Anasayfa": "Home",
+  "Subdomainler": "Subdomains",
+  "Yukleniyor...": "Loading...",
+  "Subdomain bulunamadi.": "Subdomain not found.",
+  "alt alan": "subdomain",
+  "alan adinin alt alani · kendi yonetim paneli": "subdomain of the domain · its own management panel",
+  "Ziyaret Et": "Visit",
+  "Araclar": "Tools",
+  "1-tikla kurulum · eklenti/tema · yonetim — bu alt alana kurulur": "1-click install · plugin/theme · management — installed to this subdomain",
+  "Paket yoneticisi": "Package manager",
+  "Gunlukler": "Logs",
+  "Dosyalar": "Files",
+  "Dosya yoneticisi": "File manager",
+  "Istatistik": "Statistics",
+  "Trafik analizi": "Traffic analysis",
+  "Sifre Koruma": "Password Protection",
+  ".htpasswd dizin kilidi": ".htpasswd directory lock",
+  "Genel Bilgi": "General Info",
+  "Olusturulma": "Created",
+  "PHP Surumu": "PHP Version",
+  "Bu alt alanin PHP-FPM havuzunu bagimsiz secebilirsiniz.": "You can choose this subdomain's PHP-FPM pool independently.",
+  " (varsayılan)": " (default)",
+  "Kaydet": "Save",
+  "Aktif:": "Active:",
+  "SSL / TLS Sertifikasi": "SSL / TLS Certificate",
+  "Aktif": "Active",
+  "Yok": "None",
+  "Let's Encrypt Kur": "Install Let's Encrypt",
+  "Oz-imzali": "Self-signed",
+  "Kaldir": "Remove",
+  "Let's Encrypt icin {0} A kaydinin bu sunucuya ({1}) cozumlenmesi gerekir.": "For Let's Encrypt, the A record of {0} must resolve to this server ({1}).",
+  "Sil": "Delete",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SUBYONET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -65,9 +110,9 @@ export default function DomainSubdomainYonetPage() {
     setHata(null); setOk(null); setPhpKaydet(true)
     try {
       await api.put(`/domains/${id}/subdomain/${sid}/php`, { php_surum: yeniPHP })
-      setOk(`PHP surumu ${yeniPHP} olarak guncellendi.`)
+      setOk(cevirT(cevir("PHP surumu {0} olarak guncellendi."), yeniPHP))
       setD({ ...d, php_surum: yeniPHP })
-    } catch (e) { setHata(apiHata(e, 'PHP degistirilemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("PHP degistirilemedi"))) }
     finally { setPhpKaydet(false) }
   }
 
@@ -75,28 +120,28 @@ export default function DomainSubdomainYonetPage() {
     setHata(null); setOk(null); setSslMesgul(true)
     try {
       await api.post(`/domains/${id}/subdomain/${sid}/ssl`, { tip })
-      setOk(`SSL kuruldu (${tip === 'letsencrypt' ? "Let's Encrypt" : 'oz-imzali'}). Artik https:// ile erisilebilir.`)
+      setOk(cevirT(cevir("SSL kuruldu ({0}). Artik https:// ile erisilebilir."), tip === 'letsencrypt' ? "Let's Encrypt" : cevir("oz-imzali")))
       setSslAktif(true)
-    } catch (e) { setHata(apiHata(e, 'SSL kurulamadi')) }
+    } catch (e) { setHata(apiHata(e, cevir("SSL kurulamadi"))) }
     finally { setSslMesgul(false) }
   }
   async function sslKaldir() {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur.' }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur.") }))) return
     setHata(null); setOk(null); setSslMesgul(true)
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}/ssl`)
-      setOk('SSL kaldirildi.'); setSslAktif(false)
-    } catch (e) { setHata(apiHata(e, 'SSL kaldirilamadi')) }
+      setOk(cevir("SSL kaldirildi.")); setSslAktif(false)
+    } catch (e) { setHata(apiHata(e, cevir("SSL kaldirilamadi"))) }
     finally { setSslMesgul(false) }
   }
 
   async function sil() {
     if (!d) return
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `${d.tam_ad} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz.`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz."), d.tam_ad), tehlike: true }))) return
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}`)
       navigate(`/abonelikler/${id}/subdomainler`)
-    } catch (e) { setHata(apiHata(e, 'Silinemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Silinemedi"))) }
   }
 
   const kart = 'rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5'
@@ -105,10 +150,10 @@ export default function DomainSubdomainYonetPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: d?.parent_ad || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Subdomainler', href: `/abonelikler/${id}/subdomainler` },
+        { etiket: cevir("Subdomainler"), href: `/abonelikler/${id}/subdomainler` },
         { etiket: d?.tam_ad || '...' },
       ]} />
 
@@ -116,23 +161,23 @@ export default function DomainSubdomainYonetPage() {
       {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
 
       {yuk ? (
-        <div className="py-12 text-center text-sm text-slate-400">Yukleniyor...</div>
+        <div className="py-12 text-center text-sm text-slate-400">{cevir("Yukleniyor...")}</div>
       ) : !d ? (
-        <div className="py-12 text-center text-sm text-slate-400">Subdomain bulunamadi.</div>
+        <div className="py-12 text-center text-sm text-slate-400">{cevir("Subdomain bulunamadi.")}</div>
       ) : (
         <>
           <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{d.tam_ad}</h1>
-                <span className="text-[10px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded">alt alan</span>
+                <span className="text-[10px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded">{cevir("alt alan")}</span>
               </div>
-              <p className="text-sm text-slate-500 mt-1">{d.parent_ad} alan adinin alt alani &middot; kendi yonetim paneli</p>
+              <p className="text-sm text-slate-500 mt-1">{d.parent_ad} {cevir("alan adinin alt alani · kendi yonetim paneli")}</p>
             </div>
             <div className="flex items-center gap-2">
               <a href={`${sslAktif ? 'https' : 'http'}://${d.tam_ad}`} target="_blank" rel="noreferrer"
                 className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
-                Ziyaret Et &#8599;
+                {cevir("Ziyaret Et")} &#8599;
               </a>
               <button onClick={sil}
                 className="text-sm px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-medium">
@@ -143,45 +188,45 @@ export default function DomainSubdomainYonetPage() {
 
           {/* Uygulamalar */}
           <div className="mb-4">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Araclar</h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">{cevir("Araclar")}</h2>
             <div className="grid gap-2 sm:grid-cols-3">
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/wordpress`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center text-lg font-bold">W</div>
               <div className="flex-1">
                 <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">WordPress</div>
-                <div className="text-xs text-slate-500">1-tikla kurulum &middot; eklenti/tema &middot; yonetim &mdash; bu alt alana kurulur</div>
+                <div className="text-xs text-slate-500">{cevir("1-tikla kurulum · eklenti/tema · yonetim — bu alt alana kurulur")}</div>
               </div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/composer`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg font-bold">C</div>
-              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Composer</div><div className="text-xs text-slate-500">Paket yoneticisi</div></div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Composer</div><div className="text-xs text-slate-500">{cevir("Paket yoneticisi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/gunlukler`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center text-lg font-bold">L</div>
-              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Gunlukler</div><div className="text-xs text-slate-500">access &middot; error</div></div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Gunlukler")}</div><div className="text-xs text-slate-500">access &middot; error</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/dosyalar`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg font-bold">F</div>
-              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Dosyalar</div><div className="text-xs text-slate-500">Dosya yoneticisi</div></div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Dosyalar")}</div><div className="text-xs text-slate-500">{cevir("Dosya yoneticisi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/istatistik`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-lg font-bold">%</div>
-              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Istatistik</div><div className="text-xs text-slate-500">Trafik analizi</div></div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Istatistik")}</div><div className="text-xs text-slate-500">{cevir("Trafik analizi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/sifre-koruma`}
               className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
               <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center text-lg">&#128274;</div>
-              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Sifre Koruma</div><div className="text-xs text-slate-500">.htpasswd dizin kilidi</div></div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Sifre Koruma")}</div><div className="text-xs text-slate-500">{cevir(".htpasswd dizin kilidi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             </div>
@@ -189,58 +234,58 @@ export default function DomainSubdomainYonetPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className={kart}>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Genel Bilgi</h2>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">{cevir("Genel Bilgi")}</h2>
               <dl className="space-y-2.5 text-sm">
                 <div className="flex justify-between gap-3"><dt className={etiket}>Docroot</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right break-all">{d.docroot.replace(/^\/home\/[^/]+/, '~')}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>Disk</dt><dd className="font-mono text-slate-700 dark:text-slate-300">{fmtKB(d.disk_kb)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>DNS (A)</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.alt_ad} &rarr; {d.ipv4 || '-'}</dd></div>
-                <div className="flex justify-between gap-3"><dt className={etiket}>Olusturulma</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.created_at || '-'}</dd></div>
+                <div className="flex justify-between gap-3"><dt className={etiket}>{cevir("Olusturulma")}</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.created_at || '-'}</dd></div>
               </dl>
             </div>
 
             <div className={kart}>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">PHP Surumu</h2>
-              <p className="text-xs text-slate-500 mb-3">Bu alt alanin PHP-FPM havuzunu bagimsiz secebilirsiniz.</p>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">{cevir("PHP Surumu")}</h2>
+              <p className="text-xs text-slate-500 mb-3">{cevir("Bu alt alanin PHP-FPM havuzunu bagimsiz secebilirsiniz.")}</p>
               <div className="flex items-center gap-2">
                 <select value={yeniPHP} onChange={e => setYeniPHP(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm">
-                  {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? ' (varsayılan)' : ''}</option>)}
+                  {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? cevir(" (varsayılan)") : ''}</option>)}
                   {phpler.length === 0 && <option value={d.php_surum}>PHP {d.php_surum}</option>}
                 </select>
                 <button onClick={phpDegistir} disabled={phpKaydet || yeniPHP === d.php_surum}
                   className="px-3 py-2 rounded-md bg-slate-900 dark:bg-slate-700 text-white text-sm font-medium disabled:opacity-40">
-                  {phpKaydet ? '...' : 'Kaydet'}
+                  {phpKaydet ? '...' : cevir("Kaydet")}
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400 mt-2">Aktif: PHP {d.php_surum}</p>
+              <p className="text-[11px] text-slate-400 mt-2">{cevir("Aktif:")} PHP {d.php_surum}</p>
             </div>
 
             <SubPHPAyarlari domainId={String(id)} sid={String(sid)} />
 
             <div className={`${kart} md:col-span-2`}>
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">SSL / TLS Sertifikasi</h2>
+                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("SSL / TLS Sertifikasi")}</h2>
                 <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${sslAktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-                  {sslAktif == null ? '...' : sslAktif ? 'Aktif' : 'Yok'}
+                  {sslAktif == null ? '...' : sslAktif ? cevir("Aktif") : cevir("Yok")}
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <button onClick={() => sslKur('letsencrypt')} disabled={sslMesgul}
                   className="text-sm px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-40">
-                  Let's Encrypt Kur
+                  {cevir("Let's Encrypt Kur")}
                 </button>
                 <button onClick={() => sslKur('self-signed')} disabled={sslMesgul}
                   className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40">
-                  Oz-imzali
+                  {cevir("Oz-imzali")}
                 </button>
                 {sslAktif && (
                   <button onClick={sslKaldir} disabled={sslMesgul}
                     className="text-sm px-3 py-1.5 rounded-md border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 ml-auto">
-                    Kaldir
+                    {cevir("Kaldir")}
                   </button>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-2">Let's Encrypt icin {d.tam_ad} A kaydinin bu sunucuya ({d.ipv4}) cozumlenmesi gerekir.</p>
+              <p className="text-[11px] text-slate-400 mt-2">{cevirT(cevir("Let's Encrypt icin {0} A kaydinin bu sunucuya ({1}) cozumlenmesi gerekir."), d.tam_ad, d.ipv4)}</p>
             </div>
 
             <SubWebAyarlari domainId={String(id)} sid={String(sid)} />

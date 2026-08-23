@@ -37,6 +37,34 @@ type Surum = { surum: string; aciklama?: string }
 
 
 const SVCPLAN_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Bilgi": "Info",
+  "Anasayfa": "Home",
+  "Plan Ekle": "Add Plan",
+  "Trafik": "Traffic",
+  "adet": "pcs",
+  "hesap": "accounts",
+  "MB/ay": "MB/month",
+  "MB": "MB",
+  "Detay & Kaynak Limitleri": "Detail & Resource Limits",
+  "planı silinsin mi?": "be deleted?",
+  "Evet, sil": "Yes, delete",
+  "Yeni Plan": "New Plan",
+  "Trafik (MB)": "Traffic (MB)",
+  "E-posta (Mail eklentisi)": "Email (Mail add-on)",
+  "E-posta kutusu": "Mailbox",
+  "Kutu depolama (MB)": "Mailbox storage (MB)",
+  "Kaydediliyor…": "Saving…",
+  "Ekle": "Add",
+  "Domainler için hizmet planları (paketler) tanımlayın. Her domain bir plana bağlanır;": "Define service plans (packages) for domains. Each domain is bound to a plan;",
+  "disk, trafik, PHP sürümü, veritabanı ve alt domain limiti gibi kaynaklar paket başına ayarlanır.": "resources such as disk, traffic, PHP version, database and subdomain limit are set per package.",
+  "Varsayılan": "Default",
+  "Veritabanı": "Database",
+  "Plan adı": "Plan name",
+  "Açıklama": "Description",
+  "PHP Sürümü": "PHP Version",
+  "Güncelle": "Update",
+  "Yeni domainlerde varsayılan plan": "Default plan for new domains",
   "0 = sınırsız. Disk/trafik MB cinsindendir. Bu plandaki yeni domainler seçili PHP sürümüyle kurulur.": "0 = unlimited. Disk/traffic are in MB. New domains on this plan are installed with the selected PHP version.",
   "Henüz hizmet planı yok": "No service plans yet",
   "Hizmet Planları": "Service Plans",
@@ -77,21 +105,21 @@ export default function ServicePlansPage() {
       await api.delete(`/plans/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, cevir("Silme başarısız")) }))
+      (await bilgi({ baslik: cevir('Bilgi'), mesaj: apiHata(e, cevir("Silme başarısız")) }))
     }
   }
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Hizmet Planları") }]} />
+      <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Hizmet Planları") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Hizmet Planları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
-        {cevir(cevir("Domainler için hizmet planları (paketler) tanımlayın. Her domain bir plana bağlanır;"))}
-        {cevir(cevir("disk, trafik, PHP sürümü, veritabanı ve alt domain limiti gibi kaynaklar paket başına ayarlanır."))}
+        {cevir("Domainler için hizmet planları (paketler) tanımlayın. Her domain bir plana bağlanır;")}
+        {cevir("disk, trafik, PHP sürümü, veritabanı ve alt domain limiti gibi kaynaklar paket başına ayarlanır.")}
       </p>
 
       <ListToolbar
-        birincil={{ etiket: 'Plan Ekle', onClick: () => setModal({} as Plan) }}
+        birincil={{ etiket: cevir('Plan Ekle'), onClick: () => setModal({} as Plan) }}
         butonlar={[]}
       />
 
@@ -103,7 +131,7 @@ export default function ServicePlansPage() {
         <EmptyState
           baslik={cevir("Henüz hizmet planı yok")}
           aciklama={cevir("İlk paketinizi tanımlayarak başlayın.")}
-          buton={{ etiket: 'Plan Ekle', onClick: () => setModal({} as Plan) }}
+          buton={{ etiket: cevir('Plan Ekle'), onClick: () => setModal({} as Plan) }}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -122,7 +150,7 @@ export default function ServicePlansPage() {
 
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-1.5 text-sm mt-4">
                 <Sat e="Disk" d={fmt(p.disk_kota_mb, 'MB')} />
-                <Sat e="Trafik" d={fmt(p.trafik_kota_mb, 'MB/ay')} />
+                <Sat e={cevir("Trafik")} d={fmt(p.trafik_kota_mb, 'MB/ay')} />
                 <Sat e="Domain" d={fmt(p.max_domain, 'adet')} />
                 <Sat e={cevir("Veritabanı")} d={fmt(p.max_db, 'adet')} />
                 <Sat e="FTP" d={fmt(p.max_ftp, 'hesap')} />
@@ -130,7 +158,7 @@ export default function ServicePlansPage() {
 
               <div className="mt-4 flex gap-2">
                 <Link to={`/araclar/paketler/${p.id}`} className="flex-1 text-center text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md">
-                  Detay & Kaynak Limitleri
+                  {cevir("Detay & Kaynak Limitleri")}
                 </Link>
                 <button onClick={() => setSilinecek(p)} className="text-sm px-3 py-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 rounded-md">{cevir("Sil")}</button>
               </div>
@@ -151,9 +179,9 @@ export default function ServicePlansPage() {
       <ConfirmDialog
         acik={!!silinecek}
         baslik={cevir("Planı sil")}
-        mesaj={`"${silinecek?.ad}" planı silinsin mi?`}
+        mesaj={`"${silinecek?.ad}" ${cevir("planı silinsin mi?")}`}
         tehlikeli
-        onayMetni="Evet, sil"
+        onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
       />
@@ -172,8 +200,8 @@ function Sat({ e, d }: { e: string; d: string }) {
 
 function fmt(n: number, birim: string) {
   if (n <= 0) return cevir("sınırsız")
-  if (birim.startsWith('MB') && n >= 1024) return `${(n / 1024).toFixed(1)} G${birim.slice(2)}`
-  return `${n.toLocaleString('tr-TR')} ${birim}`
+  if (birim.startsWith('MB') && n >= 1024) return `${(n / 1024).toFixed(1)} G${cevir(birim).slice(2)}`
+  return `${n.toLocaleString('tr-TR')} ${cevir(birim)}`
 }
 
 function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler: Surum[]; onKapat: () => void; onKayit: () => void }) {
@@ -230,7 +258,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
   }
 
   return (
-    <Modal acik={true} baslik={yeni ? 'Yeni Plan' : cevir("Planı Düzenle")} onKapat={onKapat} genislik="lg">
+    <Modal acik={true} baslik={yeni ? cevir('Yeni Plan') : cevir("Planı Düzenle")} onKapat={onKapat} genislik="lg">
       <form onSubmit={gonder} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Alan etiket={cevir("Plan adı")} value={form.ad} setVal={v => setForm({ ...form, ad: v })} required />
@@ -238,7 +266,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Sayi etiket="Disk (MB)" value={form.disk_kota_mb} setVal={v => setForm({ ...form, disk_kota_mb: v })} />
-          <Sayi etiket="Trafik (MB)" value={form.trafik_kota_mb} setVal={v => setForm({ ...form, trafik_kota_mb: v })} />
+          <Sayi etiket={cevir("Trafik (MB)")} value={form.trafik_kota_mb} setVal={v => setForm({ ...form, trafik_kota_mb: v })} />
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("PHP Sürümü")}</label>
             <select value={form.php_surum} onChange={e => setForm({ ...form, php_surum: e.target.value })}
@@ -255,18 +283,18 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
             plan formunda göstermek yanıltıcı olurdu (lisans kalkınca gizlenir). */}
         {mailAktif && (
           <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
-            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">E-posta (Mail eklentisi)</div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{cevir("E-posta (Mail eklentisi)")}</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <Sayi etiket="E-posta kutusu" value={form.max_email} setVal={v => setForm({ ...form, max_email: v })} />
+              <Sayi etiket={cevir("E-posta kutusu")} value={form.max_email} setVal={v => setForm({ ...form, max_email: v })} />
               <Sayi etiket={cevir("Saatlik gönderim")} value={form.saatlik_mail_limiti} setVal={v => setForm({ ...form, saatlik_mail_limiti: v })} />
-              <Sayi etiket="Kutu depolama (MB)" value={form.mail_kutu_kota_mb} setVal={v => setForm({ ...form, mail_kutu_kota_mb: v })} />
+              <Sayi etiket={cevir("Kutu depolama (MB)")} value={form.mail_kutu_kota_mb} setVal={v => setForm({ ...form, mail_kutu_kota_mb: v })} />
             </div>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-500">{cevir("Kutu = posta kutusu sayısı · Saatlik = kutu başına giden mail/saat · Depolama = kutu başına disk (MB). 0 = sınırsız.")}</p>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
           <input type="checkbox" checked={form.varsayilan} onChange={e => setForm({ ...form, varsayilan: e.target.checked })} className="rounded" />
-          {cevir(cevir("Yeni domainlerde varsayılan plan"))}
+          {cevir("Yeni domainlerde varsayılan plan")}
         </label>
         <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("0 = sınırsız. Disk/trafik MB cinsindendir. Bu plandaki yeni domainler seçili PHP sürümüyle kurulur.")}</p>
 
@@ -274,7 +302,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onKapat} className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm">{cevir("İptal")}</button>
-          <button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded-md">{isleniyor ? 'Kaydediliyor…' : (yeni ? 'Ekle' : cevir("Güncelle"))}</button>
+          <button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded-md">{isleniyor ? cevir('Kaydediliyor…') : (yeni ? cevir('Ekle') : cevir("Güncelle"))}</button>
         </div>
       </form>
     </Modal>

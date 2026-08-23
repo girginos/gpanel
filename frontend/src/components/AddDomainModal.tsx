@@ -16,6 +16,17 @@ type Surum = { surum: string; aciklama?: string }
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Yeni Domain Ekle": "Add New Domain",
+  "Plan (Paket)": "Plan (Package)",
+  "varsayılan": "default",
+  "Plandan geldi": "From plan",
+  "Linux kullanıcı": "Linux user",
+  "ev dizini": "home directory",
+  "nginx vhost + hoşgeldin sayfası": "nginx vhost + welcome page",
+  "Sağlanıyor…": "Provisioning…",
+  "Domain Ekle": "Add Domain",
+  "Domain eklenemedi": "Domain could not be added",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -87,14 +98,14 @@ export default function AddDomainModal({
         onKapat()
       }, 1500)
     } catch (e) {
-      setHata(apiHata(e, 'Domain eklenemedi'))
+      setHata(apiHata(e, cevir('Domain eklenemedi')))
     } finally {
       setYukleniyor(false)
     }
   }
 
   return (
-    <Modal acik={acik} baslik="Yeni Domain Ekle" onKapat={onKapat} genislik="md">
+    <Modal acik={acik} baslik={cevir("Yeni Domain Ekle")} onKapat={onKapat} genislik="md">
       <form onSubmit={gonder} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Alan Adı")}</label>
@@ -112,7 +123,7 @@ export default function AddDomainModal({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Plan (Paket)</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Plan (Paket)")}</label>
             <select
               value={planId}
               onChange={(e) => planDegis(e.target.value)}
@@ -120,7 +131,7 @@ export default function AddDomainModal({
             >
               <option value="">{cevir("Plan seçilmedi")}</option>
               {planlar.map(p => (
-                <option key={p.id} value={p.id}>{p.ad}{p.varsayilan ? ' (varsayılan)' : ''}</option>
+                <option key={p.id} value={p.id}>{p.ad}{p.varsayilan ? ` (${cevir("varsayılan")})` : ''}</option>
               ))}
             </select>
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">{cevir("Kaynak limitleri ve varsayılan PHP bu plandan gelir.")}</p>
@@ -135,13 +146,13 @@ export default function AddDomainModal({
               {phpOpts.map(v => <option key={v} value={v}>PHP {v}</option>)}
             </select>
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-              {phpPlandan ? <span className="text-brand-600 dark:text-brand-400">✓ Plandan geldi ({seciliPlan?.ad})</span> : cevir("Plandan bağımsız değiştirebilirsiniz.")}
+              {phpPlandan ? <span className="text-brand-600 dark:text-brand-400">✓ {cevir("Plandan geldi")} ({seciliPlan?.ad})</span> : cevir("Plandan bağımsız değiştirebilirsiniz.")}
             </p>
           </div>
         </div>
 
         <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 rounded-md p-3 text-xs text-sky-800">
-          <strong>{cevir(cevir("Otomatik yapılacaklar:"))}</strong> Linux kullanıcı (<code className="font-mono">c_&lt;slug&gt;</code>) + ev dizini (<code className="font-mono">/home/c_&lt;slug&gt;/public_html</code>) + nginx vhost + hoşgeldin sayfası
+          <strong>{cevir("Otomatik yapılacaklar:")}</strong> {cevir("Linux kullanıcı")} (<code className="font-mono">c_&lt;slug&gt;</code>) + {cevir("ev dizini")} (<code className="font-mono">/home/c_&lt;slug&gt;/public_html</code>) + {cevir("nginx vhost + hoşgeldin sayfası")}
         </div>
 
         {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -161,7 +172,7 @@ export default function AddDomainModal({
             disabled={yukleniyor || !alanAdi.trim()}
             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded-md text-sm font-medium transition"
           >
-            {yukleniyor ? 'Sağlanıyor…' : 'Domain Ekle'}
+            {yukleniyor ? cevir('Sağlanıyor…') : cevir('Domain Ekle')}
           </button>
         </div>
       </form>

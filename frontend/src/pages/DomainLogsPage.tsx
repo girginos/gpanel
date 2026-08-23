@@ -27,6 +27,29 @@ const DLOGS_EN: Record<string, string> = {
   "Günlükler": "Logs",
   "canlı yayın": "live stream",
   "İstemci": "Client",
+  "Türkçe": "English",
+  "Anasayfa": "Home",
+  "Domainler": "Domains",
+  "Tablo": "Table",
+  "Ham": "Raw",
+  "Otomatik kaydır": "Auto-scroll",
+  "Durdur": "Stop",
+  "Son 200": "Last 200",
+  "Temizle": "Clear",
+  "eşleşti": "matched",
+  "aramasına uygun satır yok.": "has no matching lines.",
+  "satır (filtreli)": "lines (filtered)",
+  "satır": "lines",
+  "pencere": "window",
+  "Zaman": "Time",
+  "Yol": "Path",
+  "Durum": "Status",
+  "Boyut": "Size",
+  "Tarayıcı": "Browser",
+  "Seviye": "Level",
+  "Mesaj": "Message",
+  "stream başlamadı (HTTP {0})": "stream did not start (HTTP {0})",
+  "Alan adı bilgisi alınamadı": "Failed to retrieve domain info",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DLOGS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -135,7 +158,7 @@ export default function DomainLogsPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir('Anasayfa'), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
         { etiket: cevir("Günlükler") },
@@ -179,11 +202,11 @@ export default function DomainLogsPage() {
             <button
               onClick={() => setGorunum('tablo')}
               className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'tablo' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >Tablo</button>
+            >{cevir("Tablo")}</button>
             <button
               onClick={() => setGorunum('ham')}
               className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'ham' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >Ham</button>
+            >{cevir("Ham")}</button>
           </div>
 
           <label className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1.5 select-none cursor-pointer">
@@ -205,13 +228,13 @@ export default function DomainLogsPage() {
             disabled={canli}
             className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md transition disabled:opacity-50"
           >
-            <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Son 200</span>
+            <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Son 200")}</span>
           </button>
           <button
             onClick={() => setSatirlar([])}
             className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md transition"
           >
-            Temizle
+            {cevir("Temizle")}
           </button>
         </div>
       </div>
@@ -238,7 +261,7 @@ export default function DomainLogsPage() {
         </div>
         {arama && (
           <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-            {gorunen.length} / {satirlar.length} eşleşti
+            {gorunen.length} / {satirlar.length} {cevir("eşleşti")}
           </span>
         )}
       </div>
@@ -249,9 +272,9 @@ export default function DomainLogsPage() {
         className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
       >
         {satirlar.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500 font-mono">{canli ? 'Bekleniyor… yeni satırlar geldikçe akacak.' : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
+          <div className="p-6 text-sm text-slate-500 font-mono">{canli ? cevir('Bekleniyor… yeni satırlar geldikçe akacak.') : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
         ) : gorunen.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500 font-mono">"{arama}" aramasına uygun satır yok.</div>
+          <div className="p-6 text-sm text-slate-500 font-mono">"{arama}" {cevir("aramasına uygun satır yok.")}</div>
         ) : gorunum === 'ham' ? (
           <div className="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
             {gorunen.map((s, i) => (
@@ -266,7 +289,7 @@ export default function DomainLogsPage() {
       </div>
 
       <div className="mt-2 text-xs text-slate-500 dark:text-slate-500 flex items-center justify-between">
-        <span>{arama ? `${gorunen.length} / ${satirlar.length} ${cevir("satır (filtreli)")}` : `${satirlar.length} ${cevir("satır")}`} · pencere {MAX_PENCERE}</span>
+        <span>{arama ? `${gorunen.length} / ${satirlar.length} ${cevir("satır (filtreli)")}` : `${satirlar.length} ${cevir("satır")}`} · {cevir("pencere")} {MAX_PENCERE}</span>
         {canli && <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>{cevir("canlı yayın")}</span>}
       </div>
     </div>
@@ -307,10 +330,10 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
       <table className="w-full text-xs border-collapse min-w-[640px]">
       <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
         <tr>
-          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Zaman</th>
+          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">IP</th>
           <th className="text-left font-medium px-3 py-2">Method</th>
-          <th className="text-left font-medium px-3 py-2 w-full">Yol</th>
+          <th className="text-left font-medium px-3 py-2 w-full">{cevir("Yol")}</th>
           <th className="text-left font-medium px-3 py-2">{cevir("Durum")}</th>
           <th className="text-right font-medium px-3 py-2 whitespace-nowrap">{cevir("Boyut")}</th>
           <th className="text-left font-medium px-3 py-2">{cevir("Tarayıcı")}</th>
@@ -412,10 +435,10 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
       <table className="w-full text-xs border-collapse min-w-[640px]">
       <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
         <tr>
-          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Zaman</th>
-          <th className="text-left font-medium px-3 py-2">Seviye</th>
+          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
+          <th className="text-left font-medium px-3 py-2">{cevir("Seviye")}</th>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("İstemci")}</th>
-          <th className="text-left font-medium px-3 py-2 w-full">Mesaj</th>
+          <th className="text-left font-medium px-3 py-2 w-full">{cevir("Mesaj")}</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-800/70">

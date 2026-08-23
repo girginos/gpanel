@@ -34,6 +34,41 @@ const MAILKUTU_EN: Record<string, string> = {
   "Webmail'e tek tıkla giriş": "One-click webmail login",
   "Yeni güçlü parola üret (şifre sıfırla)": "Generate a new strong password (reset password)",
   "Yeni parola üretildi": "New password generated",
+  "Türkçe": "English",
+  "Askıda": "Suspended",
+  "Detaylar": "Details",
+  "Domainler": "Domains",
+  "Ekle": "Add",
+  "Giriş": "Login",
+  "Kapat": "Close",
+  "Kullanıcı adı": "Username",
+  "Üret": "Generate",
+  "Domain yüklenemedi": "Failed to load domain",
+  "Kutular alınamadı": "Failed to get mailboxes",
+  "IMAP/SMTP istemcileri (Outlook, telefon) çalışmaya devam eder. Yönetici:": "IMAP/SMTP clients (Outlook, phone) keep working. Admin:",
+  "adımlarına bakın.": "see the steps.",
+  "kurulum ekranındaki": "on the setup screen, see the",
+  "Eklentiler → Mail": "Plugins → Mail",
+  "parola veya üret →": "password or generate →",
+  "{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur.": "Generate a new strong password for {0}? The current password will be invalidated.",
+  "Şifre sıfırla": "Reset password",
+  "— bu parola yalnızca şimdi gösteriliyor, güvenli bir yere kaydedin.": "— this password is shown only now, save it somewhere safe.",
+  "✓ Mail domaini oluşturuldu. Artık kutu ekleyebilirsiniz.": "✓ Mail domain created. You can now add mailboxes.",
+  "✓ {0} oluşturuldu.": "✓ {0} created.",
+  "kullanılıyor": "used",
+  "Onay gerekiyor": "Confirmation required",
+  "Anasayfa": "Home",
+  "posta kutularını yönetin.": "manage the mailboxes.",
+  "— Posta akışı etkilenmez: gelen postalar kutuya düşer,": "— Mail flow is not affected: incoming mail is delivered to the mailbox,",
+  "Kuruluyor…": "Setting up…",
+  "Mail Servisini Kur": "Set up Mail Service",
+  "Yeni Posta Kutusu": "New Mailbox",
+  "Parola (min 6)": "Password (min 6)",
+  "Kota (MB)": "Quota (MB)",
+  "kutu": "mailboxes",
+  "Kopyalandı": "Copied",
+  "Askıdaki kutuya giriş yapılamaz": "Cannot log in to a suspended mailbox",
+  "Kopyala": "Copy",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILKUTU_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -94,7 +129,7 @@ async function panoyaYaz(metin: string): Promise<boolean> {
 function KotaBar({ kullanilan, kota }: { kullanilan: number; kota: number }) {
   const kul = Math.max(0, kullanilan)
   if (!kota) {
-    return <div className="text-xs text-slate-500 dark:text-slate-400">{boyut(kul)} kullanılıyor · <span className="text-slate-400 dark:text-slate-500">{cevir("Sınırsız kota")}</span></div>
+    return <div className="text-xs text-slate-500 dark:text-slate-400">{boyut(kul)} {cevir("kullanılıyor")} · <span className="text-slate-400 dark:text-slate-500">{cevir("Sınırsız kota")}</span></div>
   }
   const pct = Math.min(100, Math.round((kul / kota) * 100))
   const renk = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
@@ -196,7 +231,7 @@ export default function DomainMailKutularPage() {
 
   // Tek-tık güçlü parola üret (düz metin bir kez modalda gösterilir).
   async function parolaUret(k: Kutu) {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: cevirT(cevir("{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur."), k.email) }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur."), k.email) }))) return
     setIsleniyor(true); setHata(null)
     try {
       const r = await api.post<{ email: string; parola: string }>(`/eklenti/mail/hesaplar/${k.id}/parola-uret`)
@@ -226,7 +261,7 @@ export default function DomainMailKutularPage() {
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
   )
@@ -237,7 +272,7 @@ export default function DomainMailKutularPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi, href: `/abonelikler/${id}` },
         { etiket: cevir("Mail Kutuları") },
@@ -245,7 +280,7 @@ export default function DomainMailKutularPage() {
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Mail Kutuları")}</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{domain.alan_adi} posta kutularını yönetin.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{domain.alan_adi} {cevir("posta kutularını yönetin.")}</p>
         </div>
       </div>
 
@@ -253,9 +288,9 @@ export default function DomainMailKutularPage() {
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {webmailKapali && (
         <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-300">
-          <b>{cevir("Webmail kullanılamıyor.")}</b> {webmailKapali} — Posta akışı etkilenmez: gelen postalar kutuya düşer,
-          {cevir(cevir("IMAP/SMTP istemcileri (Outlook, telefon) çalışmaya devam eder. Yönetici:"))} <span className="font-mono">Eklentiler → Mail</span>
-          {cevir(cevir("kurulum ekranındaki"))} <span className="font-mono">webmail-*</span> {cevir("adımlarına bakın.")}
+          <b>{cevir("Webmail kullanılamıyor.")}</b> {webmailKapali} {cevir("— Posta akışı etkilenmez: gelen postalar kutuya düşer,")}
+          {cevir("IMAP/SMTP istemcileri (Outlook, telefon) çalışmaya devam eder. Yönetici:")} <span className="font-mono">{cevir("Eklentiler → Mail")}</span>
+          {cevir("kurulum ekranındaki")} <span className="font-mono">webmail-*</span> {cevir("adımlarına bakın.")}
         </div>
       )}
 
@@ -267,7 +302,7 @@ export default function DomainMailKutularPage() {
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{cevir("Bu domain için mail servisi henüz kurulmadı.")}</p>
           <button onClick={mailDomainOlustur} disabled={isleniyor}
             className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-60">
-            {isleniyor ? 'Kuruluyor…' : 'Mail Servisini Kur'}
+            {isleniyor ? cevir("Kuruluyor…") : cevir("Mail Servisini Kur")}
           </button>
         </div>
       )}
@@ -276,7 +311,7 @@ export default function DomainMailKutularPage() {
         <>
           {/* Yeni kutu */}
           <form onSubmit={kutuEkle} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">Yeni Posta Kutusu</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("Yeni Posta Kutusu")}</h2>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-[220px]">
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Kullanıcı adı")}</label>
@@ -287,7 +322,7 @@ export default function DomainMailKutularPage() {
                 </div>
               </div>
               <div className="min-w-[210px] flex-1 sm:flex-none">
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Parola (min 6)</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Parola (min 6)")}</label>
                 <div className="flex items-center gap-1.5">
                   <input type="text" value={yeniParola} onChange={e => setYeniParola(e.target.value)} required minLength={6} placeholder={cevir("parola veya üret →")}
                     className="w-full min-w-0 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
@@ -298,7 +333,7 @@ export default function DomainMailKutularPage() {
                 </div>
               </div>
               <div className="w-28">
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Kota (MB)</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Kota (MB)")}</label>
                 <input type="number" min={0} value={yeniQuota} onChange={e => setYeniQuota(+e.target.value)}
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
@@ -311,7 +346,7 @@ export default function DomainMailKutularPage() {
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
             <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Posta Kutuları")}</h2>
-              <span className="text-xs text-slate-400 tabular-nums">{kutular?.length ?? 0} kutu</span>
+              <span className="text-xs text-slate-400 tabular-nums">{kutular?.length ?? 0} {cevir("kutu")}</span>
             </div>
             {kutular === null && <div className="py-10 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>}
             {kutular?.length === 0 && (
@@ -337,7 +372,7 @@ export default function DomainMailKutularPage() {
                           <button
                             type="button"
                             onClick={() => emailKopyala(k.email)}
-                            title={kopyalananEmail === k.email ? 'Kopyalandı' : cevir("Tıkla — e-posta adresini kopyala")}
+                            title={kopyalananEmail === k.email ? cevir("Kopyalandı") : cevir("Tıkla — e-posta adresini kopyala")}
                             className={`group inline-flex items-center gap-1.5 min-w-0 rounded-md -mx-1 px-1 py-0.5 text-left transition-colors hover:bg-brand-50/70 dark:hover:bg-brand-900/20 ${k.aktif ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>
                             <span className={`font-mono text-sm font-medium truncate ${k.aktif ? '' : 'line-through'}`}>{k.email}</span>
                             {kopyalananEmail === k.email
@@ -353,7 +388,7 @@ export default function DomainMailKutularPage() {
                       </div>
                       {/* Aksiyonlar */}
                       <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
-                        <button onClick={() => webmailGiris(k)} disabled={isleniyor || !k.aktif || !!webmailKapali} title={webmailKapali ? 'Webmail kullanılamıyor: ' + webmailKapali : k.aktif ? "Webmail'e tek tıkla giriş" : 'Askıdaki kutuya giriş yapılamaz'} className={btnPri}>
+                        <button onClick={() => webmailGiris(k)} disabled={isleniyor || !k.aktif || !!webmailKapali} title={webmailKapali ? cevir("Webmail kullanılamıyor:") + ' ' + webmailKapali : k.aktif ? cevir("Webmail'e tek tıkla giriş") : cevir("Askıdaki kutuya giriş yapılamaz")} className={btnPri}>
                           <Ikon.giris className="w-4 h-4" />{cevir("Giriş")}
                         </button>
                         <button onClick={() => parolaUret(k)} disabled={isleniyor} title={cevir("Yeni güçlü parola üret (şifre sıfırla)")} className={btnSec}>
@@ -388,7 +423,7 @@ export default function DomainMailKutularPage() {
               <button
                 onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }}
                 className="shrink-0 text-xs font-medium px-3 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-                {kopyalandi ? '✓ Kopyalandı' : 'Kopyala'}
+                {kopyalandi ? '✓ ' + cevir("Kopyalandı") : cevir("Kopyala")}
               </button>
             </div>
             <button onClick={() => setUretilen(null)}

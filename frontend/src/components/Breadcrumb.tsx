@@ -2,10 +2,20 @@
 // gosp-dark-swept-v2
 // gosp-mobil-v1
 import { Link, useNavigate } from 'react-router-dom'
+import i18n from '@/lib/i18n'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import { useTranslation } from 'react-i18next'
+
+const BREADCRUMB_EN: Record<string, string> = {
+  "Sayfa yolu": "Page path",
+  "Geri dön": "Go back",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (BREADCRUMB_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export type BreadcrumbItem = { etiket: string; href?: string }
 
 export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
+  useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
 
   // Mobilde tarayıcı geri tuşu her zaman elde değil (tam ekran/PWA, tek elle
@@ -21,13 +31,13 @@ export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
   return (
     <nav
       className="flex items-center gap-1 text-sm mb-3 text-slate-500 dark:text-slate-500 overflow-x-auto [&>*]:flex-shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      aria-label="Sayfa yolu"
+      aria-label={cevir("Sayfa yolu")}
     >
       <button
         type="button"
         onClick={geri}
         className="lg:hidden -ml-1.5 mr-0.5 p-1.5 rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-        aria-label="Geri dön"
+        aria-label={cevir("Geri dön")}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />

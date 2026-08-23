@@ -20,6 +20,18 @@ export type Ozet = {
 
 
 const CMP_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Paket ve Kaynaklar": "Package and Resources",
+  "Disk": "Disk",
+  "Inode (dosya)": "Inode (files)",
+  "adet": "count",
+  "hesap": "accounts",
+  "E-posta Kutusu": "Email Mailbox",
+  "kutu": "boxes",
+  "IP Adresi": "IP Address",
+  "Yok": "None",
+  "Yedek": "Backup",
+  "Yedek boyutu": "Backup size",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -56,7 +68,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       {/* Plan + Özet */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Paket ve Kaynaklar</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Paket ve Kaynaklar")}</h3>
           <button onClick={yukle} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" title={cevir("Yenile")}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -82,24 +94,24 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           </Link>
         </div>
 
-        <Bar etiket="Disk" k={ozet.disk_mb.kullanim} l={ozet.disk_mb.limit} birim="MB" renk="indigo" />
+        <Bar etiket={cevir("Disk")} k={ozet.disk_mb.kullanim} l={ozet.disk_mb.limit} birim="MB" renk="indigo" />
         {/* Inode (dosya sayısı) kotası — yalnız XFS kota aktifse (limit>0) gösterilir.
             Disk MB dolu değilken cevir("kota aşıldı") (EDQUOT) yaşanmasının nedeni burasıdır;
             kullanıcı yalnız MB gördüğü için sebebi anlaşılmıyordu. */}
         {ozet.inode_limit > 0 && (
-          <Bar etiket="Inode (dosya)" k={ozet.inode_kullanim} l={ozet.inode_limit} birim="adet" renk="teal" />
+          <Bar etiket={cevir("Inode (dosya)")} k={ozet.inode_kullanim} l={ozet.inode_limit} birim={cevir("adet")} renk="teal" />
         )}
         <Bar etiket={cevir(cevir("Trafik (aylık)"))} k={ozet.trafik_mb.kullanim} l={ozet.trafik_mb.limit} birim="MB" renk="sky" />
         <Bar etiket={cevir("Veritabanı")} k={ozet.db_sayisi.kullanim} l={ozet.db_sayisi.limit} birim="DB" renk="emerald" />
-        <Bar etiket={cevir("FTP Hesabı")} k={ozet.ftp_sayisi.kullanim} l={ozet.ftp_sayisi.limit} birim="hesap" renk="amber" />
-        <Bar etiket="E-posta Kutusu" k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim="kutu" renk="rose" />
+        <Bar etiket={cevir("FTP Hesabı")} k={ozet.ftp_sayisi.kullanim} l={ozet.ftp_sayisi.limit} birim={cevir("hesap")} renk="amber" />
+        <Bar etiket={cevir("E-posta Kutusu")} k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim={cevir("kutu")} renk="rose" />
         <Bar etiket="Subdomain" k={ozet.domain_sayi.kullanim} l={ozet.domain_sayi.limit} birim="domain" renk="violet" />
       </div>
 
       {/* Yapılandırma Özeti */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yapılandırma")}</h3>
-        <Sat e="IP Adresi" d={ozet.ipv4 || '—'} mono />
+        <Sat e={cevir("IP Adresi")} d={ozet.ipv4 || '—'} mono />
         <Sat e={cevir("Sistem Kullanıcısı")} d={ozet.sk} mono />
         <Sat e={cevir("PHP Sürümü")}
           d={<span><span className="font-mono font-medium text-slate-800 dark:text-slate-200">PHP {ozet.php_surum}</span></span>}
@@ -114,7 +126,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
                 </span>
               : <span className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                  <span className="text-slate-500 dark:text-slate-500 text-xs">Yok</span>
+                  <span className="text-slate-500 dark:text-slate-500 text-xs">{cevir("Yok")}</span>
                 </span>
           }
         />
@@ -126,8 +138,8 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-3">
           <Mini etiket={cevir(cevir("DNS kayıt"))} deger={ozet.dns_kayit} />
           <Mini etiket={cevir(cevir("Cron işi"))} deger={ozet.cron_is} />
-          <Mini etiket="Yedek" deger={ozet.yedek_sayisi} />
-          <Mini etiket="Yedek boyutu" deger={`${ozet.yedek_mb} MB`} />
+          <Mini etiket={cevir("Yedek")} deger={ozet.yedek_sayisi} />
+          <Mini etiket={cevir("Yedek boyutu")} deger={`${ozet.yedek_mb} MB`} />
         </div>
       </div>
     </div>

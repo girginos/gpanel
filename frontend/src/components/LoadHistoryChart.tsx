@@ -1,6 +1,27 @@
 import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+
+const LOAD_EN: Record<string, string> = {
+  "Sistem Yükü Geçmişi": "System Load History",
+  "Load average (1 / 5 / 15 dk)": "Load average (1 / 5 / 15 min)",
+  " · {0} çekirdek": " · {0} cores",
+  " · √ ölçek": " · √ scale",
+  "Henüz veri toplanmadı": "No data collected yet",
+  "Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.": "Samples are recorded every minute; the chart fills in a few minutes.",
+  "çekirdek · %100": "cores · 100%",
+  "1 dk": "1 min",
+  "5 dk": "5 min",
+  "15 dk": "15 min",
+  "1sa": "1h",
+  "6sa": "6h",
+  "24sa": "24h",
+  "7g": "7d",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (LOAD_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 type Nokta = { ts: string; yuk1: number; yuk5: number; yuk15: number; bellek: number }
 type Yanit = { saat: number; cekirdek: number; noktalar: Nokta[] }
@@ -22,6 +43,7 @@ const SERI = [
 const W0 = 1000, H = 320, ML = 46, MR = 16, MT = 16, MB = 30
 
 export default function LoadHistoryChart() {
+  useTranslation() // dil re-render aboneligi
   const [saat, setSaat] = useState(24)
   const [d, setD] = useState<Yanit | null>(null)
   const [yetkiYok, setYetkiYok] = useState(false)
@@ -123,9 +145,9 @@ export default function LoadHistoryChart() {
     <div ref={wrapRef} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/60">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sistem Yükü Geçmişi</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Sistem Yükü Geçmişi")}</h3>
           <p className="text-[11px] text-slate-400 dark:text-slate-500">
-            Load average (1 / 5 / 15 dk){cek ? cevirT(" · {0} çekirdek", cek) : ''} · √ ölçek
+            {cevir("Load average (1 / 5 / 15 dk)")}{cek ? cevirT(cevir(" · {0} çekirdek"), cek) : ''}{cevir(" · √ ölçek")}
           </p>
         </div>
         <div className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">
@@ -134,7 +156,7 @@ export default function LoadHistoryChart() {
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${saat === a.saat
                 ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              {a.et}
+              {cevir(a.et)}
             </button>
           ))}
         </div>
@@ -148,7 +170,7 @@ export default function LoadHistoryChart() {
           return (
             <div key={s.key} className="flex items-center gap-2 text-xs">
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.renk }} />
-              <span className="text-slate-500 dark:text-slate-400">{s.et}</span>
+              <span className="text-slate-500 dark:text-slate-400">{cevir(s.et)}</span>
               <span className={`font-mono font-semibold tabular-nums ${asiri ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-100'}`}>
                 {v == null ? '—' : v.toFixed(2)}
               </span>
@@ -163,8 +185,8 @@ export default function LoadHistoryChart() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-9 w-9 text-slate-300 dark:text-slate-600">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125 8 8l3 6 4-9 3 6h4" />
           </svg>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Henüz veri toplanmadı</p>
-          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.</p>
+          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz veri toplanmadı")}</p>
+          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{cevir("Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.")}</p>
         </div>
       ) : (
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -188,7 +210,7 @@ export default function LoadHistoryChart() {
           {cek > 0 && cek <= g.yMax && (
             <g>
               <line x1={ML} y1={g.yAt(cek)} x2={W - MR} y2={g.yAt(cek)} stroke="#ef4444" strokeWidth="1" strokeDasharray="5 5" opacity="0.55" />
-              <text x={W - MR} y={g.yAt(cek) - 5} textAnchor="end" fill="#ef4444" fontSize="10" opacity="0.85">{cek} çekirdek · %100</text>
+              <text x={W - MR} y={g.yAt(cek) - 5} textAnchor="end" fill="#ef4444" fontSize="10" opacity="0.85">{cek} {cevir("çekirdek · %100")}</text>
             </g>
           )}
 

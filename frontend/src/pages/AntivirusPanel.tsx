@@ -32,6 +32,92 @@ type Sekme = 'genel' | 'domainler' | 'karantina' | 'gecmis' | 'itibar' | 'ayarla
 
 
 const AVPANEL_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Geri yükleme": "Restore",
+  "Kalıcı silme": "Permanent delete",
+  "Antivirüs": "Antivirus",
+  "İtibar": "Reputation",
+  "Taranıyor…": "Scanning…",
+  "Tümü": "All",
+  "Karantinalı": "Quarantined",
+  "Hazır": "Ready",
+  "Kapalı": "Off",
+  "Genel Bakış": "Overview",
+  "Domainler": "Domains",
+  "Yükleniyor…": "Loading…",
+  "Yükle": "Load",
+  "Ayarlar kaydedilemedi": "Failed to save settings",
+  "Veritabanı taraması: {0} WP kurulumu, {1} zararlı kayıt{2}.": "Database scan: {0} WP installs, {1} malicious records{2}.",
+  ", {0} bağlanılamadı": ", {0} could not connect",
+  "Dosya orijinal konumuna geri yüklensin mi?\n{0}\n({1})": "Restore the file to its original location?\n{0}\n({1})",
+  "Karantinadaki dosya KALICI silinsin mi?\n{0}\n({1})\n\nGeri alınamaz.": "Permanently delete the quarantined file?\n{0}\n({1})\n\nCannot be undone.",
+  "[ikili dosya]": "[binary file]",
+  "Tehdit var": "Threat present",
+  "Korunuyor": "Protected",
+  "Karantina": "Quarantine",
+  "Bulgular": "Findings",
+  "Ayarlar": "Settings",
+  "Kendi motorumuz": "Our own engine",
+  "sürüm": "version",
+  "kural": "rules",
+  "imzalı": "signed",
+  "Başlatılıyor…": "Starting…",
+  "Karantinada": "In quarantine",
+  "Toplam Bulgu": "Total Findings",
+  "Taranan Domain": "Scanned Domains",
+  "Domain-bazlı tarama": "Domain-based scan",
+  "Enfekte": "Infected",
+  "Temiz": "Clean",
+  "{0} domain seçili": "{0} domains selected",
+  " ({0} filtre dışı)": " ({0} outside filter)",
+  "Seçilenleri Tara ({0})": "Scan Selected ({0})",
+  "Domain yok.": "No domains.",
+  "Son tarama": "Last scan",
+  "Aktif bulgu": "Active findings",
+  "{0} seç": "Select {0}",
+  "dosya": "files",
+  "Tara": "Scan",
+  "Kurulu": "Installed",
+  "Yok": "None",
+  "Aktif": "Active",
+  "Kaynak Dilimi": "Resource Slice",
+  "{0} kural · RapidScan": "{0} rules · RapidScan",
+  "fanotify izleme": "fanotify monitoring",
+  "Son taramalar": "Recent scans",
+  "Kaynak": "Source",
+  "Taranan": "Scanned",
+  "— (sunucu)": "— (server)",
+  "Dosya": "File",
+  "Tespit": "Detection",
+  "Geri yüklendi": "Restored",
+  "Silindi": "Deleted",
+  "İncele": "Inspect",
+  "Geri yükle": "Restore",
+  "Sil": "Delete",
+  "Olay günlüğü": "Event log",
+  "({0} kayıt)": "({0} records)",
+  "Kayıt yok.": "No records.",
+  "Kara listede": "Blacklisted",
+  "kontrol edilemedi": "could not check",
+  "Kontrol ediliyor…": "Checking…",
+  "Yenile": "Refresh",
+  "Kaydediliyor…": "Saving…",
+  "Kaydet": "Save",
+  "Koruma": "Protection",
+  "Saat": "Time",
+  "Otomatik karantina": "Automatic quarantine",
+  "Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca izleme için root + CAP_SYS_PTRACE'li bir servis başlar (yalnız kimlik doğrulama; ptrace çağrısı engelli). Bildirim modu — süreç öldürmez.": "Catches suspicious process chains (php-fpm→shell, download-run, webroot binary). When enabled, a service with root + CAP_SYS_PTRACE starts for monitoring (authentication only; ptrace calls are blocked). Notification mode — does not kill processes.",
+  "Konum sezgileri": "Location heuristics",
+  "Kapsam": "Scope",
+  "Dengeli": "Balanced",
+  "% çekirdek · 0 = kapalı. Sistem 1-dk yükü bu değeri (ör. 80 = ×0.8 çekirdek) aşarsa tarama kendini duraklatır.": "% core · 0 = off. If the system's 1-min load exceeds this value (e.g. 80 = ×0.8 core), the scan pauses itself.",
+  "otomatik": "automatic",
+  "çekirdek": "cores",
+  "0 = otomatik. Sunucu:": "0 = automatic. Server:",
+  ". Örn. 2 = iki tam çekirdek.": ". e.g. 2 = two full cores.",
+  "RAM limiti (GB)": "RAM limit (GB)",
+  "0 = otomatik. Toplam:": "0 = automatic. Total:",
+  ". Aşılırsa tarayıcı OOM ile durur (site etkilenmez).": ". If exceeded, the scanner stops with OOM (site not affected).",
   "Ayarlar kaydedildi ve uygulandı.": "Settings saved and applied.",
   "CPU limiti (çekirdek)": "CPU limit (cores)",
   "DB taraması başarısız": "DB scan failed",
@@ -291,7 +377,7 @@ export default function AntivirusPanel() {
     if (!ayar) return
     setHata(null); setBilgi(null); setMesgul('ayar')
     try { await api.put('/antivirus/ayarlar', ayar); setBilgi(cevir("Ayarlar kaydedildi ve uygulandı.")); durumYukle(); ayarYukle() }
-    catch (e) { setHata(apiHata(e, 'Ayarlar kaydedilemedi')) } finally { setMesgul(null) }
+    catch (e) { setHata(apiHata(e, cevir("Ayarlar kaydedilemedi"))) } finally { setMesgul(null) }
   }
   async function taraTumu() {
     if (!(await onay({ baslik: cevir("Tüm sunucuyu tara"), mesaj: cevir("Tüm /home dizini arka planda taranacak (RapidScan ile hızlandırılır). Başlatılsın mı?") }))) return
@@ -302,20 +388,20 @@ export default function AntivirusPanel() {
   async function dbTara() {
     setHata(null); setBilgi(null); setMesgul('db')
     try { const { data } = await api.post<{ taranan_kurulum: number; bulunan: number; hatali_kurulum: number }>('/antivirus/db-tara', {})
-      setBilgi(`Veritabanı taraması: ${data.taranan_kurulum} WP kurulumu, ${data.bulunan} zararlı kayıt${data.hatali_kurulum ? `, ${data.hatali_kurulum} bağlanılamadı` : ''}.`)
+      setBilgi(cevirT(cevir("Veritabanı taraması: {0} WP kurulumu, {1} zararlı kayıt{2}."), data.taranan_kurulum, data.bulunan, data.hatali_kurulum ? cevirT(cevir(", {0} bağlanılamadı"), data.hatali_kurulum) : ''))
       durumYukle()
     } catch (e) { setHata(apiHata(e, cevir("DB taraması başarısız"))) } finally { setMesgul(null) }
   }
   async function geriYukle(k: Kar) {
-    if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: `Dosya orijinal konumuna geri yüklensin mi?\n${k.orijinal_yol}\n(${k.alan_adi})` }))) return
+    if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: cevirT(cevir("Dosya orijinal konumuna geri yüklensin mi?\n{0}\n({1})"), k.orijinal_yol, k.alan_adi) }))) return
     try { await api.post(`/antivirus/karantina/${k.id}/geri-yukle`, {}); durumYukle() } catch (e) { setHata(apiHata(e)) }
   }
   async function sil(k: Kar) {
-    if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: `Karantinadaki dosya KALICI silinsin mi?\n${k.orijinal_yol}\n(${k.alan_adi})\n\nGeri alınamaz.` }))) return
+    if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: cevirT(cevir("Karantinadaki dosya KALICI silinsin mi?\n{0}\n({1})\n\nGeri alınamaz."), k.orijinal_yol, k.alan_adi) }))) return
     try { await api.post(`/antivirus/karantina/${k.id}/sil`, {}); durumYukle() } catch (e) { setHata(apiHata(e)) }
   }
   async function incele(k: Kar) {
-    try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: `${k.orijinal_yol} (${k.alan_adi})`, icerik: data.ikili ? '[ikili dosya]' : data.icerik, kesik: data.kesik }) }
+    try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: `${k.orijinal_yol} (${k.alan_adi})`, icerik: data.ikili ? cevir("[ikili dosya]") : data.icerik, kesik: data.kesik }) }
     catch (e) { setHata(apiHata(e)) }
   }
 
@@ -324,8 +410,8 @@ export default function AntivirusPanel() {
   // Koruma duruşu skoru (0-100): açık katman/koruma oranı.
   const korumaAktif = !!(d?.izleyici_aktif && ayar?.gercek_zamanli)
   const tehdit = (d?.toplam_karantina || 0)
-  const posture = tehdit > 0 ? { renk: 'red', metin: 'Tehdit var' }
-    : korumaAktif ? { renk: 'emerald', metin: 'Korunuyor' }
+  const posture = tehdit > 0 ? { renk: 'red', metin: cevir("Tehdit var") }
+    : korumaAktif ? { renk: 'emerald', metin: cevir("Korunuyor") }
       : { renk: 'amber', metin: cevir("Kısmi koruma") }
 
   const alan = 'w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
@@ -341,17 +427,17 @@ export default function AntivirusPanel() {
   const sekmeler: { k: Sekme; e: string; s?: number }[] = [
     { k: 'genel', e: cevir("Genel Bakış") },
     { k: 'domainler', e: cevir("Domainler"), s: domainler.length },
-    { k: 'karantina', e: 'Karantina', s: kliste.filter(x => x.durum === 'karantina').length },
-    { k: 'gecmis', e: 'Bulgular', s: gecmis.length },
+    { k: 'karantina', e: cevir("Karantina"), s: kliste.filter(x => x.durum === 'karantina').length },
+    { k: 'gecmis', e: cevir("Bulgular"), s: gecmis.length },
     { k: 'itibar', e: cevir("İtibar") },
-    { k: 'ayarlar', e: 'Ayarlar' },
+    { k: 'ayarlar', e: cevir("Ayarlar") },
   ]
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-7xl mx-auto">
         <style>{ANIM_CSS}</style>
-        <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Antivirüs") }]} />
+        <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Antivirüs") }]} />
 
         {/* ══ HERO: güvenlik duruşu konsolu ══ */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 dark:from-black dark:via-slate-950 dark:to-slate-900 text-white p-6 sm:p-8 mb-5 shadow-lg">
@@ -366,17 +452,17 @@ export default function AntivirusPanel() {
                 <div className="text-xs uppercase tracking-widest text-slate-400 mb-1">{cevir("Güvenlik Duruşu")}</div>
                 <div className="text-3xl font-semibold">{posture.metin}</div>
                 <div className="text-sm text-slate-400 mt-1">
-                  Kendi motorumuz · sürüm {d?.kural_surum} · {d?.kural_sayisi} kural{d?.kural_uretim && d.kural_uretim !== 'gomulu' ? ' · imzalı' : ''}
+                  {cevir("Kendi motorumuz")} · {cevir("sürüm")} {d?.kural_surum} · {d?.kural_sayisi} {cevir("kural")}{d?.kural_uretim && d.kural_uretim !== 'gomulu' ? ' · ' + cevir("imzalı") : ''}
                 </div>
               </div>
             </div>
             <div className="flex gap-3">
               <button onClick={taraTumu} disabled={!!mesgul}
                 className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white text-slate-900 rounded-xl hover:bg-slate-100 disabled:opacity-50">
-                <Ikon ad="bolt" />{mesgul === 'tara' ? 'Başlatılıyor…' : cevir("Tüm Sunucuyu Tara")}</button>
+                <Ikon ad="bolt" />{mesgul === 'tara' ? cevir("Başlatılıyor…") : cevir("Tüm Sunucuyu Tara")}</button>
               <button onClick={dbTara} disabled={!!mesgul}
                 className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white/10 text-white rounded-xl hover:bg-white/20 disabled:opacity-50 backdrop-blur">
-                <Ikon ad="db" />{mesgul === 'db' ? 'Taranıyor…' : cevir("Veritabanı Tara")}</button>
+                <Ikon ad="db" />{mesgul === 'db' ? cevir("Taranıyor…") : cevir("Veritabanı Tara")}</button>
             </div>
           </div>
           {(mesgul === 'tara' || mesgul === 'db') && (
@@ -387,9 +473,9 @@ export default function AntivirusPanel() {
           {/* metrik seridi */}
           <div className="relative grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-white/10">
             {[
-              { e: 'Karantinada', v: d?.toplam_karantina ?? 0, r: tehdit > 0 ? 'text-amber-400' : 'text-white', git: 'karantina' as Sekme },
-              { e: 'Toplam Bulgu', v: d?.toplam_bulgu ?? 0, r: 'text-white', git: 'gecmis' as Sekme },
-              { e: 'Taranan Domain', v: d?.taranan_domain ?? 0, r: 'text-white', git: 'domainler' as Sekme },
+              { e: cevir("Karantinada"), v: d?.toplam_karantina ?? 0, r: tehdit > 0 ? 'text-amber-400' : 'text-white', git: 'karantina' as Sekme },
+              { e: cevir("Toplam Bulgu"), v: d?.toplam_bulgu ?? 0, r: 'text-white', git: 'gecmis' as Sekme },
+              { e: cevir("Taranan Domain"), v: d?.taranan_domain ?? 0, r: 'text-white', git: 'domainler' as Sekme },
               { e: cevir("Kural Sayısı"), v: d?.kural_sayisi ?? 0, r: 'text-white' },
             ].map((m, i) => (
               <button key={i} type="button" disabled={!m.git}
@@ -419,54 +505,54 @@ export default function AntivirusPanel() {
         {sekme === 'domainler' && (
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Domain-bazlı tarama {domainler.length > 0 && <span className="text-xs font-normal text-slate-400">({dfiltre.length}/{domainler.length})</span>}</h3>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Domain-bazlı tarama")} {domainler.length > 0 && <span className="text-xs font-normal text-slate-400">({dfiltre.length}/{domainler.length})</span>}</h3>
               <div className="flex flex-wrap items-center gap-2">
                 <input type="search" value={filtreMetin} onChange={e => setFiltreMetin(e.target.value)} placeholder={cevir("Domain / kullanıcı ara…")}
                   className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-48" />
                 <select value={filtreDurum} onChange={e => setFiltreDurum(e.target.value as any)}
                   className="px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
                   <option value="hepsi">{cevir("Tümü")}</option>
-                  <option value="enfekte">Enfekte</option>
+                  <option value="enfekte">{cevir("Enfekte")}</option>
                   <option value="karantina">{cevir("Karantinalı")}</option>
-                  <option value="temiz">Temiz</option>
+                  <option value="temiz">{cevir("Temiz")}</option>
                 </select>
                 <button onClick={domainlerYukle} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Yenile")}</button>
               </div>
             </div>
             {secili.size > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg">
-                <span className="text-sm text-brand-700 dark:text-brand-300">{secili.size} domain seçili{(() => { const gizli = [...secili].filter(x => !dfiltre.some(d => d.id === x)).length; return gizli > 0 ? cevirT(" ({0} filtre dışı)", gizli) : '' })()}</span>
+                <span className="text-sm text-brand-700 dark:text-brand-300">{cevirT(cevir("{0} domain seçili"), secili.size)}{(() => { const gizli = [...secili].filter(x => !dfiltre.some(d => d.id === x)).length; return gizli > 0 ? cevirT(cevir(" ({0} filtre dışı)"), gizli) : '' })()}</span>
                 <div className="flex gap-2">
                   <button onClick={() => setSecili(new Set())} className="text-xs text-slate-500 hover:underline">{cevir("Seçimi temizle")}</button>
                   <button onClick={topluTara} disabled={tarananDom.size > 0}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">
-                    {tarananDom.size > 0 ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> {cevir("Taranıyor…")}</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> Seçilenleri Tara ({secili.size})</>}
+                    {tarananDom.size > 0 ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> {cevir("Taranıyor…")}</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> {cevirT(cevir("Seçilenleri Tara ({0})"), secili.size)}</>}
                   </button>
                 </div>
               </div>
             )}
-            {dfiltre.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{domainler.length === 0 ? 'Domain yok.' : cevir("Eşleşen domain yok.")}</div> : (
+            {dfiltre.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{domainler.length === 0 ? cevir("Domain yok.") : cevir("Eşleşen domain yok.")}</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}>
                     <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
                       <th className={`${T.baslik} w-8`}><input type="checkbox" aria-label={cevir("Tümünü seç")} className="accent-brand-600 align-middle" checked={dfiltre.length > 0 && dfiltre.every(x => secili.has(x.id))} onChange={e => setSecili(s => { const n = new Set(s); if (e.target.checked) dfiltre.forEach(x => n.add(x.id)); else dfiltre.forEach(x => n.delete(x.id)); return n })} /></th>
-                      <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Kullanıcı")}</th><th className={T.baslik}>Son tarama</th><th className={T.baslik}>Aktif bulgu</th><th className={T.baslik}>Karantina</th><th className={T.baslik}></th>
+                      <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Kullanıcı")}</th><th className={T.baslik}>{cevir("Son tarama")}</th><th className={T.baslik}>{cevir("Aktif bulgu")}</th><th className={T.baslik}>{cevir("Karantina")}</th><th className={T.baslik}></th>
                     </tr>
                   </thead>
                   <tbody className={T.govde}>
                     {dfiltre.map(dm => (
                       <tr key={dm.id} className={`${T.satir} ${secili.has(dm.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
-                        <td className={T.hucre}><input type="checkbox" aria-label={cevirT("{0} seç", dm.alan_adi)} className="accent-brand-600 align-middle" checked={secili.has(dm.id)} onChange={() => secToggle(dm.id)} /></td>
+                        <td className={T.hucre}><input type="checkbox" aria-label={cevirT(cevir("{0} seç"), dm.alan_adi)} className="accent-brand-600 align-middle" checked={secili.has(dm.id)} onChange={() => secToggle(dm.id)} /></td>
                         <td className={T.hucreBaslik}>{dm.alan_adi}</td>
                         <td className={T.hucre} data-etiket={cevir("Kullanıcı")}><span className="font-mono text-xs text-slate-500">{dm.sistem_kullanici}</span></td>
-                        <td className={T.hucre} data-etiket="Son tarama"><span className="text-xs text-slate-500">{dm.son_tarama || '—'}{dm.son_taranan > 0 ? ` · ${dm.son_taranan} dosya` : ''}</span></td>
-                        <td className={T.hucre} data-etiket="Aktif bulgu"><span className={dm.aktif_bulgu > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{dm.aktif_bulgu}</span></td>
-                        <td className={T.hucre} data-etiket="Karantina"><span className={dm.karantina > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-400'}>{dm.karantina}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Son tarama")}><span className="text-xs text-slate-500">{dm.son_tarama || '—'}{dm.son_taranan > 0 ? ` · ${dm.son_taranan} ` + cevir("dosya") : ''}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Aktif bulgu")}><span className={dm.aktif_bulgu > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{dm.aktif_bulgu}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Karantina")}><span className={dm.karantina > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-400'}>{dm.karantina}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>
                           <button onClick={() => domainTara(dm)} disabled={tarananDom.has(dm.id)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg disabled:opacity-50 whitespace-nowrap">
-                            {tarananDom.has(dm.id) ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> {cevir("Taranıyor…")}</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> Tara</>}
+                            {tarananDom.has(dm.id) ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> {cevir("Taranıyor…")}</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> {cevir("Tara")}</>}
                           </button>
                         </td>
                       </tr>
@@ -483,10 +569,10 @@ export default function AntivirusPanel() {
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {[
-                { ad: cevir("Dosya Tarayıcı"), ikon: 'dosya', aktif: d.ajan_kurulu, alt: `${d.kural_sayisi} kural · RapidScan`, drm: d.ajan_kurulu ? 'Kurulu' : 'Yok' },
-                { ad: cevir("Gerçek Zamanlı"), ikon: 'realtime', aktif: d.izleyici_aktif, alt: 'fanotify izleme', drm: d.izleyici_aktif ? 'Aktif' : cevir("Kapalı") },
+                { ad: cevir("Dosya Tarayıcı"), ikon: 'dosya', aktif: d.ajan_kurulu, alt: cevirT(cevir("{0} kural · RapidScan"), d.kural_sayisi), drm: d.ajan_kurulu ? cevir("Kurulu") : cevir("Yok") },
+                { ad: cevir("Gerçek Zamanlı"), ikon: 'realtime', aktif: d.izleyici_aktif, alt: cevir("fanotify izleme"), drm: d.izleyici_aktif ? cevir("Aktif") : cevir("Kapalı") },
                 { ad: cevir("Veritabanı Tarayıcı"), ikon: 'db', aktif: true, alt: 'wp_options + wp_posts', drm: cevir("Hazır") },
-                { ad: 'Kaynak Dilimi', ikon: 'slice', aktif: d.slice_aktif, alt: cevir("cgroup + dinamik yük"), drm: d.slice_aktif ? 'Aktif' : cevir("Kapalı") },
+                { ad: cevir("Kaynak Dilimi"), ikon: 'slice', aktif: d.slice_aktif, alt: cevir("cgroup + dinamik yük"), drm: d.slice_aktif ? cevir("Aktif") : cevir("Kapalı") },
               ].map((m, i) => (
                 <div key={i} className="gosp-card bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition">
                   <div className="flex items-center justify-between mb-2">
@@ -500,19 +586,19 @@ export default function AntivirusPanel() {
             </div>
 
             <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Son taramalar</h3>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Son taramalar")}</h3>
               {d.son_taramalar.length === 0 ? <div className="text-center py-6 text-sm text-slate-400">{cevir("Henüz tarama yok.")}</div> : (
                 <div className="lg:overflow-x-auto">
                   <table className={`${T.tablo} text-sm`}>
                     <thead className={T.baslikGrubu}><tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                      <th className={T.baslik}>Domain</th><th className={T.baslik}>Kaynak</th><th className={T.baslik}>Taranan</th><th className={T.baslik}>Enfekte</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Bitiş")}</th>
+                      <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Kaynak")}</th><th className={T.baslik}>{cevir("Taranan")}</th><th className={T.baslik}>{cevir("Enfekte")}</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Bitiş")}</th>
                     </tr></thead>
                     <tbody className={T.govde}>{d.son_taramalar.map(t => (
                       <tr key={t.id} className={T.satir}>
-                        <td className={T.hucreBaslik}>{t.alan_adi || '— (sunucu)'}</td>
-                        <td className={T.hucre} data-etiket="Kaynak"><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{t.kaynak || 'panel'}</span></td>
-                        <td className={T.hucre} data-etiket="Taranan">{t.taranan}</td>
-                        <td className={T.hucre} data-etiket="Enfekte"><span className={t.enfekte > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{t.enfekte}</span></td>
+                        <td className={T.hucreBaslik}>{t.alan_adi || cevir("— (sunucu)")}</td>
+                        <td className={T.hucre} data-etiket={cevir("Kaynak")}><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{t.kaynak || 'panel'}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Taranan")}>{t.taranan}</td>
+                        <td className={T.hucre} data-etiket={cevir("Enfekte")}><span className={t.enfekte > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{t.enfekte}</span></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}><span className="text-xs text-slate-500">{t.durum}</span></td>
                         <td className={T.hucre} data-etiket={cevir("Bitiş")}><span className="text-xs text-slate-400">{t.bitis || '—'}</span></td>
                       </tr>
@@ -528,19 +614,19 @@ export default function AntivirusPanel() {
         {sekme === 'karantina' && (
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
             <h3 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3"><Ikon ad="lock" className="w-4 h-4" /> {cevir("Karantina — tüm sunucu")}</h3>
-            {kliste.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">Karantinada dosya yok.</div> : (
+            {kliste.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{cevir("Karantinada dosya yok.")}</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}><tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className={T.baslik}>Domain</th><th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Tarih")}</th><th className={T.baslik}></th>
+                    <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Dosya")}</th><th className={T.baslik}>{cevir("Tespit")}</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Tarih")}</th><th className={T.baslik}></th>
                   </tr></thead>
                   <tbody className={T.govde}>{kliste.map(k => (
                     <tr key={k.id} className={T.satir}>
                       <td className={T.hucreBaslik}>{k.alan_adi || `#${k.domain_id}`}</td>
-                      <td className={T.hucre} data-etiket="Dosya"><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{k.orijinal_yol}</span></td>
-                      <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
+                      <td className={T.hucre} data-etiket={cevir("Dosya")}><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{k.orijinal_yol}</span></td>
+                      <td className={T.hucre} data-etiket={cevir("Tespit")}><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                       <td className={T.hucre} data-etiket={cevir("Durum")}>
-                        {k.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin="Karantinada" />
+                        {k.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin={cevir("Karantinada")} />
                           : k.durum === 'geri_yuklendi' ? <Rozet ad="undo" renk="text-emerald-600 dark:text-emerald-400" metin={cevir("Geri yüklendi")} />
                           : <Rozet ad="trash" renk="text-slate-400" metin={cevir("Silindi")} />}
                       </td>
@@ -565,21 +651,21 @@ export default function AntivirusPanel() {
         {/* ══ GEÇMİŞ ══ */}
         {sekme === 'gecmis' && (
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Olay günlüğü {gecmis.length > 0 && <span className="text-xs font-normal text-slate-400">({gecmis.length} kayıt)</span>}</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Olay günlüğü")} {gecmis.length > 0 && <span className="text-xs font-normal text-slate-400">{cevirT(cevir("({0} kayıt)"), gecmis.length)}</span>}</h3>
             {gecmis.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{cevir("Kayıt yok.")}</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}><tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className={T.baslik}>{cevir("Tarih")}</th><th className={T.baslik}>Domain</th><th className={T.baslik}>Dosya</th><th className={T.baslik}>Tespit</th><th className={T.baslik}>{cevir("Durum")}</th>
+                    <th className={T.baslik}>{cevir("Tarih")}</th><th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Dosya")}</th><th className={T.baslik}>{cevir("Tespit")}</th><th className={T.baslik}>{cevir("Durum")}</th>
                   </tr></thead>
                   <tbody className={T.govde}>{gecmis.map(g => (
                     <tr key={g.id} className={T.satir}>
                       <td className={T.hucreBaslik}><span className="text-xs text-slate-500">{g.tarih}</span></td>
                       <td className={T.hucre} data-etiket="Domain">{g.alan_adi || `#${g.domain_id}`}</td>
-                      <td className={T.hucre} data-etiket="Dosya"><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{g.dosya}</span></td>
-                      <td className={T.hucre} data-etiket="Tespit"><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{g.imza} <span className="text-slate-400">({g.puan})</span></span></td>
+                      <td className={T.hucre} data-etiket={cevir("Dosya")}><span className="font-mono text-xs break-all lg:max-w-xs inline-block">{g.dosya}</span></td>
+                      <td className={T.hucre} data-etiket={cevir("Tespit")}><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{g.imza} <span className="text-slate-400">({g.puan})</span></span></td>
                       <td className={T.hucre} data-etiket={cevir("Durum")}>
-                        {g.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin="Karantina" />
+                        {g.durum === 'karantina' ? <Rozet ad="lock" renk="text-amber-600 dark:text-amber-400" metin={cevir("Karantina")} />
                           : g.durum === 'geri_yuklendi' ? <Rozet ad="undo" renk="text-emerald-600 dark:text-emerald-400" metin={cevir("Geri yüklendi")} />
                           : g.durum === 'silindi' ? <Rozet ad="trash" renk="text-slate-400" metin={cevir("Silindi")} />
                           : <Rozet ad="warn" renk="text-red-600 dark:text-red-400" metin={cevir("Aktif")} />}
@@ -597,23 +683,23 @@ export default function AntivirusPanel() {
           <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:p-5 lg:shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Domain itibarı — Spamhaus DBL")}</h3>
-              <button onClick={itibarYukle} disabled={mesgul === 'itibar'} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">{mesgul === 'itibar' ? 'Kontrol ediliyor…' : 'Yenile'}</button>
+              <button onClick={itibarYukle} disabled={mesgul === 'itibar'} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50">{mesgul === 'itibar' ? cevir("Kontrol ediliyor…") : cevir("Yenile")}</button>
             </div>
-            {kara.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{mesgul === 'itibar' ? 'Kontrol ediliyor…' : cevir("Kayıt yok.")}</div> : (
+            {kara.length === 0 ? <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{mesgul === 'itibar' ? cevir("Kontrol ediliyor…") : cevir("Kayıt yok.")}</div> : (
               <div className="lg:overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}><tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>Kaynak</th>
+                    <th className={T.baslik}>Domain</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Kaynak")}</th>
                   </tr></thead>
                   <tbody className={T.govde}>{kara.map(k => (
                     <tr key={k.domain_id} className={T.satir}>
                       <td className={T.hucreBaslik}>{k.alan_adi}</td>
                       <td className={T.hucre} data-etiket={cevir("Durum")}>
-                        {k.durum === 'listeli' ? <Rozet ad="ban" renk="text-red-600 dark:text-red-400 font-medium" metin="Kara listede" />
-                          : k.durum === 'kontrol_edilemedi' ? <Rozet ad="dash" renk="text-slate-400" metin="kontrol edilemedi" />
-                          : <Rozet ad="check" renk="text-emerald-600 dark:text-emerald-400" metin="Temiz" />}
+                        {k.durum === 'listeli' ? <Rozet ad="ban" renk="text-red-600 dark:text-red-400 font-medium" metin={cevir("Kara listede")} />
+                          : k.durum === 'kontrol_edilemedi' ? <Rozet ad="dash" renk="text-slate-400" metin={cevir("kontrol edilemedi")} />
+                          : <Rozet ad="check" renk="text-emerald-600 dark:text-emerald-400" metin={cevir("Temiz")} />}
                       </td>
-                      <td className={T.hucre} data-etiket="Kaynak"><span className="text-xs text-slate-400">{k.kaynak}</span></td>
+                      <td className={T.hucre} data-etiket={cevir("Kaynak")}><span className="text-xs text-slate-400">{k.kaynak}</span></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -627,29 +713,29 @@ export default function AntivirusPanel() {
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Ayarlar")}</h3>
-              <button onClick={ayarKaydet} disabled={mesgul === 'ayar'} className="px-4 py-1.5 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">{mesgul === 'ayar' ? 'Kaydediliyor…' : 'Kaydet'}</button>
+              <button onClick={ayarKaydet} disabled={mesgul === 'ayar'} className="px-4 py-1.5 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">{mesgul === 'ayar' ? cevir("Kaydediliyor…") : cevir("Kaydet")}</button>
             </div>
             <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
               <div>
-                <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">Koruma</div>
+                <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">{cevir("Koruma")}</div>
                 <Anahtar kilit acik={ayar.gercek_zamanli} ayarla={v => set('gercek_zamanli', v)} etiket={cevir("Gerçek zamanlı koruma")} aciklama={cevir("Motor kararlı olana dek geçici olarak devre dışı (yanlış-pozitif önlemi).")} />
                 <Anahtar acik={ayar.zamanli_tarama} ayarla={v => set('zamanli_tarama', v)} etiket={cevir("Zamanlı tarama")} aciklama={cevir("Günlük tam tarama.")} />
                 {ayar.zamanli_tarama && (
-                  <div className="ml-12 mb-1 flex items-center gap-2"><span className="text-xs text-slate-400">Saat</span>
+                  <div className="ml-12 mb-1 flex items-center gap-2"><span className="text-xs text-slate-400">{cevir("Saat")}</span>
                     <input type="time" value={ayar.zamanli_saat} onChange={e => set('zamanli_saat', e.target.value)} className={`${alan} w-28`} /></div>
                 )}
-                <Anahtar acik={ayar.oto_karantina} ayarla={v => set('oto_karantina', v)} uyari etiket="Otomatik karantina" aciklama={cevir("Kritik bulunca dosyayı otomatik karantinaya alır (WP çekirdeği hariç). KAPALIYKEN sadece bildirir.")} />
-                <Anahtar acik={ayar.surec_izleme} ayarla={v => set('surec_izleme', v)} etiket={cevir("Süreç davranış izleme")} aciklama="Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca izleme için root + CAP_SYS_PTRACE'li bir servis başlar (yalnız kimlik doğrulama; ptrace çağrısı engelli). Bildirim modu — süreç öldürmez." />
+                <Anahtar acik={ayar.oto_karantina} ayarla={v => set('oto_karantina', v)} uyari etiket={cevir("Otomatik karantina")} aciklama={cevir("Kritik bulunca dosyayı otomatik karantinaya alır (WP çekirdeği hariç). KAPALIYKEN sadece bildirir.")} />
+                <Anahtar acik={ayar.surec_izleme} ayarla={v => set('surec_izleme', v)} etiket={cevir("Süreç davranış izleme")} aciklama={cevir("Şüpheli süreç zincirlerini yakalar (php-fpm→kabuk, indir-çalıştır, webroot binary). Açınca izleme için root + CAP_SYS_PTRACE'li bir servis başlar (yalnız kimlik doğrulama; ptrace çağrısı engelli). Bildirim modu — süreç öldürmez.")} />
               </div>
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">{cevir("Tespit katmanları")}</div>
                 <Anahtar acik={ayar.kural_motoru} ayarla={v => set('kural_motoru', v)} etiket={cevir("Kural motoru")} aciklama={cevir("Kendi motorumuz (imza/örüntü zinciri). KAPALIYKEN yalnız clamav imzaları kullanılır — framework dosyalarında yanlış-pozitif azalır.")} />
-                <Anahtar acik={ayar.konum_sezgileri} ayarla={v => set('konum_sezgileri', v)} etiket="Konum sezgileri" aciklama={cevir("uploads/*.php, çift uzantı, gizli dizin.")} />
+                <Anahtar acik={ayar.konum_sezgileri} ayarla={v => set('konum_sezgileri', v)} etiket={cevir("Konum sezgileri")} aciklama={cevir("uploads/*.php, çift uzantı, gizli dizin.")} />
                 <Anahtar acik={ayar.wp_butunluk} ayarla={v => set('wp_butunluk', v)} etiket={cevir("WordPress çekirdek bütünlüğü")} aciklama={cevir("Resmî md5 ile değişmiş/yabancı çekirdek dosyası.")} />
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-              <label className="block"><span className="block text-xs text-slate-400 mb-1">Kapsam</span>
+              <label className="block"><span className="block text-xs text-slate-400 mb-1">{cevir("Kapsam")}</span>
                 <select value={ayar.kapsam} onChange={e => set('kapsam', e.target.value)} className={alan}>
                   <option value="host">{cevir("host (/home — müşteri siteleri)")}</option>
                   <option value="sunucu">{cevir("sunucu (/ — tüm sistem)")}</option>
@@ -665,13 +751,13 @@ export default function AntivirusPanel() {
               <div className="text-xs font-semibold text-slate-400 uppercase mb-2">{cevir("Tarama yoğunluğu (dinamik kaynak)")}</div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 <button type="button" onClick={() => yogunluk('dusuk')} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Düşük (sunucuyu az yorar)")}</button>
-                <button type="button" onClick={() => yogunluk('dengeli')} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">Dengeli</button>
+                <button type="button" onClick={() => yogunluk('dengeli')} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Dengeli")}</button>
                 <button type="button" onClick={() => yogunluk('yuksek')} className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Yüksek (hızlı)")}</button>
               </div>
               <label className="flex items-center gap-3 flex-wrap">
                 <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("Dinamik yük eşiği")}</span>
                 <input type="number" min={0} max={400} value={ayar.yuk_esigi} onChange={e => set('yuk_esigi', Number(e.target.value))} className={`${alan} w-24`} />
-                <span className="text-xs text-slate-400">% çekirdek · 0 = kapalı. Sistem 1-dk yükü bu değeri (ör. 80 = ×0.8 çekirdek) aşarsa tarama kendini duraklatır.</span>
+                <span className="text-xs text-slate-400">{cevir("% çekirdek · 0 = kapalı. Sistem 1-dk yükü bu değeri (ör. 80 = ×0.8 çekirdek) aşarsa tarama kendini duraklatır.")}</span>
               </label>
 
               {/* CPU + RAM limitleri — görünür ve dinamik (cgroup slice'a uygulanır) */}
@@ -679,28 +765,28 @@ export default function AntivirusPanel() {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("CPU limiti (çekirdek)")}</span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.cpu_yuzde === 0 ? `otomatik${kap ? ` (~${(kap.oneri_cpu_yuzde / 100).toFixed(1)})` : ''}` : `${(ayar.cpu_yuzde / 100).toFixed(1)} ${cevir("çekirdek")}`}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.cpu_yuzde === 0 ? cevir("otomatik") + (kap ? ` (~${(kap.oneri_cpu_yuzde / 100).toFixed(1)})` : '') : `${(ayar.cpu_yuzde / 100).toFixed(1)} ${cevir("çekirdek")}`}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <input type="range" min={0} max={kap ? kap.cpu_cekirdek : 8} step={0.5} value={ayar.cpu_yuzde / 100} onChange={e => set('cpu_yuzde', Math.round(Number(e.target.value) * 100))} className="flex-1 accent-brand-600" />
                     <input type="number" min={0} max={kap ? kap.cpu_cekirdek : 64} step={0.5} value={ayar.cpu_yuzde / 100} onChange={e => set('cpu_yuzde', Math.round(Number(e.target.value) * 100))} className={`${alan} w-20`} />
                   </div>
-                  <span className="text-xs text-slate-400">0 = otomatik. Sunucu: {kap ? `${kap.cpu_cekirdek} ${cevir("çekirdek")}` : '—'}. Örn. 2 = iki tam çekirdek.</span>
+                  <span className="text-xs text-slate-400">{cevir("0 = otomatik. Sunucu:")} {kap ? `${kap.cpu_cekirdek} ${cevir("çekirdek")}` : '—'}{cevir(". Örn. 2 = iki tam çekirdek.")}</span>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm text-slate-700 dark:text-slate-200">RAM limiti (GB)</span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.ram_mb === 0 ? `otomatik${kap ? ` (~${(kap.oneri_ram_mb / 1024).toFixed(1)} GB)` : ''}` : `${(ayar.ram_mb / 1024).toFixed(2)} GB`}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("RAM limiti (GB)")}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{ayar.ram_mb === 0 ? cevir("otomatik") + (kap ? ` (~${(kap.oneri_ram_mb / 1024).toFixed(1)} GB)` : '') : `${(ayar.ram_mb / 1024).toFixed(2)} GB`}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <input type="range" min={0} max={kap ? Math.ceil(kap.ram_toplam_mb / 1024) : 4} step={0.25} value={ayar.ram_mb / 1024} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className="flex-1 accent-brand-600" />
                     <input type="number" min={0} max={kap ? Math.ceil(kap.ram_toplam_mb / 1024) : undefined} step={0.25} value={Number((ayar.ram_mb / 1024).toFixed(2))} onChange={e => set('ram_mb', Math.round(Number(e.target.value) * 1024))} className={`${alan} w-24`} />
                   </div>
-                  <span className="text-xs text-slate-400">0 = otomatik. Toplam: {kap ? `${(kap.ram_toplam_mb / 1024).toFixed(1)} GB` : '—'}. Aşılırsa tarayıcı OOM ile durur (site etkilenmez).</span>
+                  <span className="text-xs text-slate-400">{cevir("0 = otomatik. Toplam:")} {kap ? `${(kap.ram_toplam_mb / 1024).toFixed(1)} GB` : '—'}{cevir(". Aşılırsa tarayıcı OOM ile durur (site etkilenmez).")}</span>
                 </div>
               </div>
             </div>
-            <button onClick={() => setGelismis(g => !g)} className="text-xs text-brand-600 dark:text-brand-400 mt-4">{gelismis ? '▾ Gelişmiş limitler' : cevir("▸ Gelişmiş limitler (iş parçacığı, hız)")}</button>
+            <button onClick={() => setGelismis(g => !g)} className="text-xs text-brand-600 dark:text-brand-400 mt-4">{gelismis ? cevir("▾ Gelişmiş limitler") : cevir("▸ Gelişmiş limitler (iş parçacığı, hız)")}</button>
             {gelismis && (
               <div className="grid gap-4 sm:grid-cols-3 mt-2">
                 <label className="block"><span className="block text-xs text-slate-400 mb-1">{cevir("İş parçacığı (0=otomatik)")}</span><input type="number" min={0} value={ayar.is_parcacigi} onChange={e => set('is_parcacigi', Number(e.target.value))} className={alan} /></label>

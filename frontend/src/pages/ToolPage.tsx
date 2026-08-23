@@ -45,6 +45,24 @@ const TOOLP_EN: Record<string, string> = {
   "access.log, error.log canlı izleme + WebSocket tail.": "Live monitoring of access.log, error.log + WebSocket tail.",
   "composer install/update web arayüzü.": "composer install/update web interface.",
   "public_html altında dosyaları listele, yükle, indir, izin değiştir.": "List, upload, download and change permissions of files under public_html.",
+  "Bağlantı Bilgisi": "Connection Info",
+  "Dosya Yöneticisi": "File Manager",
+  "Veritabanları": "Databases",
+  "FTP Hesapları": "FTP Accounts",
+  "Yedekle ve Geri Yükle": "Backup and Restore",
+  "Web Sitesini Kopyala": "Copy Website",
+  "PHP Ayarları": "PHP Settings",
+  "Günlükler": "Logs",
+  "Zamanlanmış Görevler": "Scheduled Tasks",
+  "Performans": "Performance",
+  "SSL/TLS Sertifikası": "SSL/TLS Certificate",
+  "Şifre Korumalı Dizinler": "Password Protected Directories",
+  "İstatistikler": "Statistics",
+  "Anasayfa": "Homepage",
+  "Hazır Değil": "Not Ready",
+  "Bu modül": "This module",
+  "devreye girecek.": "will go live.",
+  "sonraki fazlarda": "in later phases",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (TOOLP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -64,24 +82,24 @@ export default function ToolPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir('Anasayfa'), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: d?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: meta.etiket },
+        { etiket: cevir(meta.etiket) },
       ]} />
 
       <div className="flex items-center gap-3 mb-2">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{meta.etiket}</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir(meta.etiket)}</h1>
         {meta.faz && (
           <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-0.5 rounded">
-            {meta.faz} · Hazır Değil
+            {meta.faz} · {cevir("Hazır Değil")}
           </span>
         )}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-1">
         {d ? <>Domain: <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{d.alan_adi}</Link></> : '...'}
       </p>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{meta.aciklama}</p>
+      <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{cevir(meta.aciklama)}</p>
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       <div className="bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-12 text-center">
@@ -92,7 +110,7 @@ export default function ToolPage() {
         </div>
         <h3 className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">{cevir("Yapım aşamasında")}</h3>
         <p className="text-sm text-slate-500 dark:text-slate-500">
-          Bu modül {meta.faz ? <span className="font-mono text-brand-700 dark:text-brand-300">{meta.faz}</span> : 'sonraki fazlarda'} devreye girecek.
+          {cevir("Bu modül")} {meta.faz ? <span className="font-mono text-brand-700 dark:text-brand-300">{meta.faz}</span> : cevir('sonraki fazlarda')} {cevir("devreye girecek.")}
         </p>
         <Link to={`/abonelikler/${id}`} className="inline-block mt-4 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">
           {cevir(cevir("← Domain panosuna dön"))}

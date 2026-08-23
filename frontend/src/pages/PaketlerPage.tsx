@@ -64,6 +64,50 @@ const HAZIR_GRUPLAR: Grup[] = [
 
 
 const PAKET_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Anasayfa": "Home",
+  "Onay gerekiyor": "Confirmation required",
+  "Emin misiniz?": "Are you sure?",
+  "paketi KALDIRILACAK. Devam?": "package will be REMOVED. Continue?",
+  "paketi sunucuya kurulacak. Devam?": "package will be installed on the server. Continue?",
+  "paketi sunucu genelinde kurulacak. Devam?": "package will be installed server-wide. Continue?",
+  "kaldırıldı": "removed",
+  "kuruldu": "installed",
+  "kurulu": "installed",
+  "Kaldırma": "Removal",
+  "Kurulum": "Installation",
+  "kaldır": "remove",
+  "kur": "install",
+  "Kaldır": "Remove",
+  "Kur": "Install",
+  "İşleniyor…": "Processing…",
+  "paket kurulu (açılan gruplarda)": "packages installed (in expanded groups)",
+  "Paket Ara": "Search Package",
+  "Repolarda Ara": "Search in Repos",
+  "Kurulu Paketler": "Installed Packages",
+  "Paket ara": "Search package",
+  "Aranıyor…": "Searching…",
+  "Ara": "Search",
+  "için sonuç bulunamadı.": "no results found.",
+  "sonuç": "results",
+  "Kaldırılıyor…": "Removing…",
+  "Kuruluyor…": "Installing…",
+  "Python": "Python",
+  "Node.js + npm": "Node.js + npm",
+  "Go": "Go",
+  "Java": "Java",
+  "Rust": "Rust",
+  "Container / VM": "Container / VM",
+  "Güvenlik": "Security",
+  "gcc, make, autoconf, automake, libtool, kernel-devel": "gcc, make, autoconf, automake, libtool, kernel-devel",
+  "Node.js LTS + npm": "Node.js LTS + npm",
+  "Golang derleyici": "Golang compiler",
+  "OpenJDK 21 LTS + Maven": "OpenJDK 21 LTS + Maven",
+  "Rust + cargo": "Rust + cargo",
+  "Docker uyumlu — podman + buildah + skopeo": "Docker compatible — podman + buildah + skopeo",
+  "ImageMagick + WebP + optimizasyon": "ImageMagick + WebP + optimization",
+  "PostgreSQL + Redis CLI": "PostgreSQL + Redis CLI",
+  "GnuPG, OpenSSL, fail2ban": "GnuPG, OpenSSL, fail2ban",
   "CLI üretkenlik araçları": "CLI productivity tools",
   "DB İstemcileri": "DB Clients",
   "Geliştirme Araçları": "Development Tools",
@@ -129,17 +173,17 @@ export default function PaketlerPage() {
   async function paketToggle(paket: string, suankiKurulu: boolean) {
     const eylem = suankiKurulu ? 'kaldir' : 'kur'
     const onayMesaji = suankiKurulu
-      ? `"${paket}" paketi KALDIRILACAK. Devam?`
-      : `"${paket}" paketi sunucuya kurulacak. Devam?`
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: onayMesaji }))) return
+      ? `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`
+      : `"${paket}" ${cevir("paketi sunucuya kurulacak. Devam?")}`
+    if (!(await onay({ baslik: cevir('Onay gerekiyor'), mesaj: onayMesaji }))) return
 
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post(`/paketler/${eylem}`, { paket })
-      setBasari(`${paket} ${suankiKurulu ? 'kaldırıldı' : 'kuruldu'}`)
+      setBasari(`${paket} ${suankiKurulu ? cevir('kaldırıldı') : cevir('kuruldu')}`)
       setGrupDurum(prev => ({ ...prev, [paket]: !suankiKurulu }))
       setOutputModal({
-        baslik: cevirT(cevir("{0} çıktısı — {1}"), suankiKurulu ? 'Kaldırma' : 'Kurulum', paket),
+        baslik: cevirT(cevir("{0} çıktısı — {1}"), suankiKurulu ? cevir('Kaldırma') : cevir('Kurulum'), paket),
         output: (r.data as any).output || '',
       })
       setTimeout(() => setBasari(null), 3500)
@@ -165,11 +209,11 @@ export default function PaketlerPage() {
   }
 
   async function kur(paket: string) {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${paket}" paketi sunucu genelinde kurulacak. Devam?` }))) return
+    if (!(await onay({ baslik: cevir('Onay gerekiyor'), mesaj: `"${paket}" ${cevir("paketi sunucu genelinde kurulacak. Devam?")}` }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kur', { paket })
-      setBasari(`${paket} kuruldu`)
+      setBasari(`${paket} ${cevir("kuruldu")}`)
       setOutputModal({ baslik: cevirT(cevir("Kurulum çıktısı — {0}"), paket), output: r.data.output || '' })
       setTimeout(() => setBasari(null), 4000)
       if (sekme === 'ara') ara()
@@ -177,7 +221,7 @@ export default function PaketlerPage() {
     finally { setIsleniyor(null) }
   }
   async function kaldir(paket: string) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${paket}" paketi KALDIRILACAK. Devam?`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`, tehlike: true }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kaldir', { paket })
@@ -197,7 +241,7 @@ export default function PaketlerPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir('Anasayfa'), href: '/' },
         { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
         { etiket: cevir("Paket Yöneticisi") },
       ]} />
@@ -207,7 +251,7 @@ export default function PaketlerPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Paket Yöneticisi")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {cevir(cevir("DNF üzerinden sunucu paketleri ve derleyici ortamları."))}
+            {cevir("DNF üzerinden sunucu paketleri ve derleyici ortamları.")}
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700
@@ -238,7 +282,7 @@ export default function PaketlerPage() {
         <div className="mb-3 flex items-center gap-2">
           <Ikon d={I.box} className="h-4 w-4 text-slate-400" />
           <h2 id="grup-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            {cevir(cevir("Hızlı Kurulum Grupları"))}
+            {cevir("Hızlı Kurulum Grupları")}
           </h2>
           <span className="text-xs text-slate-300 dark:text-slate-600">·</span>
           <span className="text-xs text-slate-400 dark:text-slate-500">{cevir("bir grubu aç, paketleri tek tek aç/kapat")}</span>
@@ -262,8 +306,8 @@ export default function PaketlerPage() {
                     <Ikon d={g.ikon} className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{g.ad}</span>
-                    <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">{g.aciklama}</span>
+                    <span className="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(g.ad)}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">{cevir(g.aciklama)}</span>
                   </span>
                   {open && (
                     <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 tabular-nums
@@ -289,12 +333,12 @@ export default function PaketlerPage() {
                               <code className="truncate font-mono text-[13px] text-slate-700 dark:text-slate-200">{p}</code>
                               {kurulu && (
                                 <span className="flex-shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700
-                                                 dark:bg-emerald-900/30 dark:text-emerald-300">kurulu</span>
+                                                 dark:bg-emerald-900/30 dark:text-emerald-300">{cevir("kurulu")}</span>
                               )}
                             </span>
                             <button onClick={() => paketToggle(p, kurulu)} disabled={bekleniyor}
-                              role="switch" aria-checked={kurulu} aria-label={`${p} ${kurulu ? 'kaldır' : 'kur'}`}
-                              title={bekleniyor ? 'İşleniyor…' : (kurulu ? 'Kaldır' : 'Kur')}
+                              role="switch" aria-checked={kurulu} aria-label={`${p} ${kurulu ? cevir('kaldır') : cevir('kur')}`}
+                              title={bekleniyor ? cevir('İşleniyor…') : (kurulu ? cevir('Kaldır') : cevir('Kur'))}
                               className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors
                                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1
                                           dark:focus-visible:ring-offset-slate-900
@@ -314,7 +358,7 @@ export default function PaketlerPage() {
           })}
         </div>
         {kuruluToplam > 0 && (
-          <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-600">{kuruluToplam} paket kurulu (açılan gruplarda)</p>
+          <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-600">{kuruluToplam} {cevir("paket kurulu (açılan gruplarda)")}</p>
         )}
       </section>
 
@@ -323,14 +367,14 @@ export default function PaketlerPage() {
         <div className="mb-3 flex items-center gap-2">
           <Ikon d={I.search} className="h-4 w-4 text-slate-400" />
           <h2 id="ara-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Paket Ara
+            {cevir("Paket Ara")}
           </h2>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           {/* Segment sekmeler */}
           <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">
-            {([['ara', 'Repolarda Ara'], ['kurulu', 'Kurulu Paketler']] as [Sekme, string][]).map(([s, etiket]) => (
+            {([['ara', cevir('Repolarda Ara')], ['kurulu', cevir('Kurulu Paketler')]] as [Sekme, string][]).map(([s, etiket]) => (
               <button key={s}
                 onClick={() => { setSekme(s); setSonuc([]); setArandi(false) }}
                 className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none
@@ -348,8 +392,8 @@ export default function PaketlerPage() {
               <Ikon d={I.search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input type="text" value={q} onChange={e => setQ(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && ara()}
-                placeholder={sekme === 'ara' ? 'örn: mongodb, redis, nodejs, gcc, htop' : cevir("kurulu paket adı veya açıklama")}
-                aria-label="Paket ara"
+                placeholder={sekme === 'ara' ? cevir('örn: mongodb, redis, nodejs, gcc, htop') : cevir("kurulu paket adı veya açıklama")}
+                aria-label={cevir("Paket ara")}
                 className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 font-mono text-sm text-slate-900
                            placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
                            dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-100" />
@@ -357,7 +401,7 @@ export default function PaketlerPage() {
             <button onClick={ara} disabled={yuk || !q.trim()}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors
                          hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600">
-              {yuk ? 'Aranıyor…' : 'Ara'}
+              {yuk ? cevir('Aranıyor…') : cevir('Ara')}
             </button>
           </div>
 
@@ -365,13 +409,13 @@ export default function PaketlerPage() {
           {arandi && !yuk && sonuc.length === 0 && (
             <div role="status" className="py-10 text-center">
               <Ikon d={I.search} className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">"{q}" için sonuç bulunamadı.</p>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">"{q}" {cevir("için sonuç bulunamadı.")}</p>
             </div>
           )}
 
           {sonuc.length > 0 && (
             <div className="mt-4">
-              <div className="mb-2 text-xs text-slate-400 dark:text-slate-500">{sonuc.length} sonuç</div>
+              <div className="mb-2 text-xs text-slate-400 dark:text-slate-500">{sonuc.length} {cevir("sonuç")}</div>
               <ul className="space-y-1.5">
                 {sonuc.map(p => (
                   <li key={p.adi}
@@ -385,7 +429,7 @@ export default function PaketlerPage() {
                         {p.surum && <span className="font-mono text-[11px] text-slate-400 dark:text-slate-500">{p.surum}</span>}
                         {p.kurulu && (
                           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700
-                                           dark:bg-emerald-900/30 dark:text-emerald-300">kurulu</span>
+                                           dark:bg-emerald-900/30 dark:text-emerald-300">{cevir("kurulu")}</span>
                         )}
                         {p.korunan && (
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700
@@ -399,13 +443,13 @@ export default function PaketlerPage() {
                         className="flex-shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors
                                    hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40
                                    dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20">
-                        {isleniyor === p.adi ? 'Kaldırılıyor…' : cevir("Kaldır")}
+                        {isleniyor === p.adi ? cevir('Kaldırılıyor…') : cevir("Kaldır")}
                       </button>
                     ) : (
                       <button onClick={() => kur(p.adi)} disabled={isleniyor === p.adi}
                         className="flex-shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition-colors
                                    hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600">
-                        {isleniyor === p.adi ? 'Kuruluyor…' : 'Kur'}
+                        {isleniyor === p.adi ? cevir('Kuruluyor…') : cevir('Kur')}
                       </button>
                     )}
                   </li>

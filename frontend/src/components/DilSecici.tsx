@@ -5,6 +5,34 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DILLER } from '@/lib/i18n'
 
+// Bayrak — inline SVG bayrak. 🔴 EMOJI bayrak (🇹🇷/🇬🇧) Windows Chrome/Edge'de
+// render OLMAZ (regional-indicator glyph yok → "TR"/"GB" harfleri görünür).
+// Inline SVG her platformda çizilir.
+function Bayrak({ kod, className = '' }: { kod: string; className?: string }) {
+  const ort = `inline-block rounded-[2px] ring-1 ring-black/10 dark:ring-white/15 ${className}`
+  if (kod === 'tr') {
+    return (
+      <svg viewBox="0 0 24 16" width={21} height={14} className={ort} aria-hidden="true">
+        <rect width="24" height="16" fill="#E30A17" />
+        <circle cx="9" cy="8" r="4.2" fill="#fff" />
+        <circle cx="10.6" cy="8" r="3.4" fill="#E30A17" />
+        <polygon points="15.5,5 16.205,7.029 18.353,7.073 16.641,8.371 17.263,10.427 15.5,9.2 13.737,10.427 14.359,8.371 12.647,7.073 14.795,7.029" fill="#fff" />
+      </svg>
+    )
+  }
+  // en → Birleşik Krallık bayrağı (Union Jack)
+  return (
+    <svg viewBox="0 0 60 30" width={28} height={14} className={ort} aria-hidden="true">
+      <clipPath id="gb-ukt"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z" /></clipPath>
+      <rect width="60" height="30" fill="#012169" />
+      <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" strokeWidth="6" />
+      <path d="M0,0 L60,30 M60,0 L0,30" clipPath="url(#gb-ukt)" stroke="#C8102E" strokeWidth="4" />
+      <path d="M30,0 V30 M0,15 H60" stroke="#fff" strokeWidth="10" />
+      <path d="M30,0 V30 M0,15 H60" stroke="#C8102E" strokeWidth="6" />
+    </svg>
+  )
+}
+
 export default function DilSecici() {
   const { i18n, t } = useTranslation()
   const [acik, setAcik] = useState(false)
@@ -36,7 +64,7 @@ export default function DilSecici() {
         title={t('dil.degistir')}
         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
       >
-        <span className="text-base leading-none">{aktif.bayrak}</span>
+        <Bayrak kod={aktif.kod} />
         <span className="hidden sm:inline">{aktif.kod.toUpperCase()}</span>
         <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${acik ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
@@ -57,7 +85,7 @@ export default function DilSecici() {
                   : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
               }`}
             >
-              <span className="text-base leading-none">{d.bayrak}</span>
+              <Bayrak kod={d.kod} />
               <span>{d.ad}</span>
             </button>
           ))}

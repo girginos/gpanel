@@ -96,6 +96,27 @@ const EKL_EN: Record<string, string> = {
   "Ücretsiz 1 Ay Dene": "Try Free for 1 Month",
   "Şu anda kurulabilecek bir eklenti bulunmuyor.": "No add-on is currently available to install.",
   "← Eklentilere dön": "← Back to add-ons",
+  "Emin misiniz?": "Are you sure?",
+  "\"{0}\" lisansı kaldırılacak ve eklenti kapatılacak.": "The \"{0}\" license will be removed and the add-on turned off.",
+  "Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar girdiğinizde kaldığı yerden devam eder.": "Your mailboxes, domains and settings are NOT deleted — when you enter the license again it resumes where it left off.",
+  "Devam edilsin mi?": "Continue?",
+  "Anasayfa": "Homepage",
+  "Eklentiler": "Add-ons",
+  "Tekrar dene": "Try again",
+  "Sunucu Kodu": "Server Code",
+  "Lisans alabilmek için bu sunucunun hesabınıza kayıtlı olması gerekir.": "To obtain a license, this server must be registered to your account.",
+  "Kopyalandı ✓": "Copied ✓",
+  "Kopyala": "Copy",
+  "Lisans sunucusu:": "License server:",
+  "Doğrulanıyor…": "Verifying…",
+  "Kuruluyor…": "Installing…",
+  "İşleniyor…": "Processing…",
+  "Anahtar:": "Key:",
+  " (deneme)": " (trial)",
+  "Son doğrulama:": "Last verification:",
+  "Not:": "Note:",
+  "adım · tamamlandı": "steps · completed",
+  "Kurulum tamamlanamadı, eklenti ETKİNLEŞTİRİLMEDİ. Hatayı giderdikten sonra lisansı tekrar girip yeniden deneyin.": "Installation could not be completed, the add-on was NOT activated. After fixing the error, enter the license again and retry.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (EKL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -220,9 +241,10 @@ export default function EklentilerPage() {
   }
 
   async function lisansKaldir(k: Kart) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${k.ad}" lisansı kaldırılacak ve eklenti kapatılacak.\n\n` +
-      'Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar ' +
-      'girdiğinizde kaldığı yerden devam eder.\n\nDevam edilsin mi?', tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'),
+      mesaj: cevirT(cevir('"{0}" lisansı kaldırılacak ve eklenti kapatılacak.'), k.ad) + '\n\n' +
+        cevir('Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar girdiğinizde kaldığı yerden devam eder.') + '\n\n' +
+        cevir('Devam edilsin mi?'), tehlike: true }))) return
     setIslem(k.eklenti_ad); setIslemHata(null); setBasari(null)
     try {
       const { data } = await api.delete(`/eklenti/${k.eklenti_ad}/lisans`)
@@ -243,13 +265,13 @@ export default function EklentilerPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto">
       <Breadcrumb items={
         secili
-          ? [{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Eklentiler', href: '/eklentiler' }, { etiket: secili.ad }]
-          : [{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Sunucu Yönetimi") }, { etiket: 'Eklentiler' }]
+          ? [{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir('Eklentiler'), href: '/eklentiler' }, { etiket: secili.ad }]
+          : [{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Sunucu Yönetimi") }, { etiket: cevir('Eklentiler') }]
       } />
 
       {!secili && (
         <>
-          <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">Eklentiler</h1>
+          <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Eklentiler")}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
             {cevir(cevir("Panelinize ek yetenekler kazandıran lisanslı modüller. Lisansınızı girin, kurulum otomatik yapılsın."))}
           </p>
@@ -292,7 +314,7 @@ export default function EklentilerPage() {
           <p className="text-sm font-medium text-rose-800 dark:text-rose-200">{cevir("Eklenti kataloğu yüklenemedi")}</p>
           <p className="text-sm text-rose-700 dark:text-rose-300 mt-1">{hata}</p>
           <button onClick={() => cek()} className="mt-3 px-3 py-1.5 text-sm rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition">
-            Tekrar dene
+            {cevir("Tekrar dene")}
           </button>
         </div>
       )}
@@ -347,9 +369,9 @@ export default function EklentilerPage() {
         <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Sunucu Kodu</h3>
+              <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Sunucu Kodu")}</h3>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Lisans alabilmek için bu sunucunun hesabınıza kayıtlı olması gerekir.{' '}
+                {cevir("Lisans alabilmek için bu sunucunun hesabınıza kayıtlı olması gerekir.")}{' '}
                 <a
                   href="https://app.girginos.io/sunucularim"
                   target="_blank"
@@ -369,11 +391,11 @@ export default function EklentilerPage() {
               onClick={() => kodKopyala(katalog.parmakizi)}
               className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
             >
-              {kopyaDurum === 'ok' ? 'Kopyalandı ✓' : kopyaDurum === 'hata' ? 'Elle kopyalayın' : 'Kopyala'}
+              {kopyaDurum === 'ok' ? cevir('Kopyalandı ✓') : kopyaDurum === 'hata' ? cevir("Elle kopyalayın") : cevir('Kopyala')}
             </button>
           </div>
           <p className="mt-3 text-[11px] text-slate-400 dark:text-slate-500">
-            Lisans sunucusu: <span className="font-mono">{katalog.sunucu}</span>
+            {cevir("Lisans sunucusu:")} <span className="font-mono">{katalog.sunucu}</span>
           </p>
         </div>
       )}
@@ -403,7 +425,7 @@ export default function EklentilerPage() {
             </button>
             <button type="submit" disabled={!anahtar.trim() || !!islem}
               className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white transition">
-              {islem ? 'Doğrulanıyor…' : cevir("Doğrula ve Kur")}
+              {islem ? cevir('Doğrulanıyor…') : cevir("Doğrula ve Kur")}
             </button>
           </div>
         </form>
@@ -416,11 +438,11 @@ export default function EklentilerPage() {
 
 function Rozet({ k }: { k: Kart }) {
   if (k.kurulum?.durum === 'calisiyor')
-    return <Etiket renk="sky">Kuruluyor…</Etiket>
+    return <Etiket renk="sky">{cevir("Kuruluyor…")}</Etiket>
   if (k.kurulum?.durum === 'hata')
     return <Etiket renk="rose">{cevir("Kurulum başarısız")}</Etiket>
   if (k.aktif && k.lisans.var)
-    return <Etiket renk="emerald">{k.lisans.deneme ? 'Deneme sürümü etkin' : cevir("Lisanslı ve etkin")}</Etiket>
+    return <Etiket renk="emerald">{k.lisans.deneme ? cevir('Deneme sürümü etkin') : cevir("Lisanslı ve etkin")}</Etiket>
   if (k.lisans.var && !k.aktif)
     return <Etiket renk="amber">{cevir("Lisans var, eklenti kapalı")}</Etiket>
   if (k.kurulu && !k.aktif)
@@ -450,7 +472,7 @@ function Eylem({ k, mesgul, onLisans, onDeneme, onKaldir, onDogrula }: { k: Kart
       <div className="flex flex-wrap gap-2">
         <button onClick={onDogrula} disabled={mesgul}
           className="px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition">
-          {mesgul ? 'İşleniyor…' : cevir("Lisansı Doğrula")}
+          {mesgul ? cevir('İşleniyor…') : cevir("Lisansı Doğrula")}
         </button>
         <button onClick={onKaldir} disabled={mesgul}
           className="px-3 py-2 text-sm rounded-lg border border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/25 disabled:opacity-50 transition">
@@ -468,7 +490,7 @@ function Eylem({ k, mesgul, onLisans, onDeneme, onKaldir, onDogrula }: { k: Kart
       {k.deneme && (
         <button onClick={onDeneme} disabled={mesgul}
           className="px-4 py-2 text-sm rounded-lg border border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/25 disabled:opacity-50 transition">
-          {mesgul ? 'İşleniyor…' : cevir("Ücretsiz 1 Ay Dene")}
+          {mesgul ? cevir('İşleniyor…') : cevir("Ücretsiz 1 Ay Dene")}
         </button>
       )}
     </div>
@@ -489,10 +511,10 @@ function LisansOzet({ l }: { l: LisansDurum }) {
   if (!l.var) return null
   return (
     <div className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
-      <div>Anahtar: <span className="font-mono">{l.maskeli}</span>{l.deneme && ' (deneme)'}</div>
+      <div>{cevir("Anahtar:")} <span className="font-mono">{l.maskeli}</span>{l.deneme && cevir(" (deneme)")}</div>
       {l.expires_at && <div>{cevir("Bitiş tarihi:")} <strong>{tarih(l.expires_at)}</strong></div>}
-      {l.son_dogrulama && <div>Son doğrulama: {tarih(l.son_dogrulama)}</div>}
-      {l.son_hata && <div className="text-rose-600 dark:text-rose-400">Not: {l.son_hata}</div>}
+      {l.son_dogrulama && <div>{cevir("Son doğrulama:")} {tarih(l.son_dogrulama)}</div>}
+      {l.son_hata && <div className="text-rose-600 dark:text-rose-400">{cevir("Not:")} {l.son_hata}</div>}
       {/*
         Kopya uyarisi. Kirmizi DEGIL kehribar: hizmet calisiyor, lisans gecerli.
         Kirmiziya boyasaydik musteri calisan kurulumunu arizali sanardi. Metin
@@ -545,7 +567,7 @@ function Adimlar({ ku }: { ku: KurulumDurum }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
           <span>{cevir("Kurulum günlüğü")}</span>
-          <span className="text-slate-400 dark:text-slate-500">({ku.adimlar.length} adım · tamamlandı)</span>
+          <span className="text-slate-400 dark:text-slate-500">({ku.adimlar.length} {cevir("adım · tamamlandı")})</span>
         </button>
       ) : (
         <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">{cevir("Kurulum adımları")}</p>
@@ -586,7 +608,7 @@ function Adimlar({ ku }: { ku: KurulumDurum }) {
 
       {ku.durum === 'hata' && (
         <p className="mt-2 text-xs text-rose-700 dark:text-rose-300">
-          Kurulum tamamlanamadı, eklenti ETKİNLEŞTİRİLMEDİ. Hatayı giderdikten sonra lisansı tekrar girip yeniden deneyin.
+          {cevir("Kurulum tamamlanamadı, eklenti ETKİNLEŞTİRİLMEDİ. Hatayı giderdikten sonra lisansı tekrar girip yeniden deneyin.")}
         </p>
       )}
     </div>

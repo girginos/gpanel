@@ -20,6 +20,7 @@ const bos = { ad: '', aciklama: '', max_domain: 0, max_disk_mb: 0, max_trafik_mb
 
 
 const BPLAN_EN: Record<string, string> = {
+  "Türkçe": "English",
   "0 = limitsiz. Plan güncellenince MEVCUT bayilerin limitleri değişmez; bayiyi düzenleyip planı yeniden seçin.": "0 = unlimited. Updating a plan does not change EXISTING resellers' limits; edit the reseller and reselect the plan.",
   "Bayi Planı Oluştur": "Create Reseller Plan",
   "Bayilerinize satacağınız limit paketlerini tanımlayın (ör. Bronz: 10 hosting / 5 GB). Bayi oluştururken tek tıkla atanır.": "Define the limit packages you'll sell to your resellers (e.g. Bronze: 10 hosting / 5 GB). Assigned with one click when creating a reseller.",
@@ -27,11 +28,46 @@ const BPLAN_EN: Record<string, string> = {
   "Henüz bayi planı yok": "No reseller plans yet",
   "Paket güncellendi.": "Package updated.",
   "Yeni Bayi Planı": "New Reseller Plan",
+  "Bayi Planları": "Reseller Plans",
+  "Bayilere satacağınız hazır limit paketleri.": "Ready-made limit packages to sell to your resellers.",
+  "Bayi oluştururken": "When creating a reseller",
+  "paket seçilir, limitler otomatik atanır.": "a package is selected and limits are assigned automatically.",
+  "Hosting müşterilerine satılan planlar için": "For plans sold to hosting customers,",
+  "Hosting Planları": "Hosting Plans",
+  "sayfasını kullanın.": "use the page.",
+  "İşlem başarısız": "Operation failed",
+  "Yükleniyor…": "Loading…",
+  "Plan": "Plan",
+  "Bayi": "Reseller",
+  "İşlemler": "Actions",
+  "varsayılan": "default",
+  "Düzenle": "Edit",
+  "Sil": "Delete",
+  "Plan adı": "Plan name",
+  "Açıklama": "Description",
+  "Başlangıç paketi": "Starter package",
+  "Varsayılan plan": "Default plan",
+  "İptal": "Cancel",
+  "Kaydet": "Save",
+  "Disk": "Disk",
+  "Trafik": "Traffic",
+  "Fiyat": "Price",
+  "Disk (MB)": "Disk (MB)",
+  "Trafik (MB)": "Traffic (MB)",
+  "Max hosting": "Max hosting",
+  "Limitsiz": "Unlimited",
+  "paketi oluşturuldu.": "package created.",
+  "Emin misiniz?": "Are you sure?",
+  "paketi silinsin mi?": "package be deleted?",
+  "Paket silindi.": "Package deleted.",
+  "Silinemedi": "Could not delete",
+  "Anasayfa": "Home",
+  "Bronz Bayi": "Bronze Reseller",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function fmtMB(mb: number) {
-  if (!mb) return 'Limitsiz'
+  if (!mb) return cevir('Limitsiz')
   if (mb < 1024) return mb + ' MB'
   return (mb / 1024).toFixed(1) + ' GB'
 }
@@ -74,7 +110,7 @@ export default function BayiPlanlariPage() {
       varsayilan: !!form.varsayilan,
     }
     try {
-      if (modal === 'yeni') { await api.post('/reseller-plans', body); setOk(`"${form.ad}" paketi oluşturuldu.`) }
+      if (modal === 'yeni') { await api.post('/reseller-plans', body); setOk(`"${form.ad}" ${cevir("paketi oluşturuldu.")}`) }
       else if (modal) { await api.put(`/reseller-plans/${modal.id}`, body); setOk(cevir("Paket güncellendi.")) }
       setModal(null); yukle()
     } catch (err) { setHata(apiHata(err, cevir("İşlem başarısız"))) }
@@ -82,10 +118,10 @@ export default function BayiPlanlariPage() {
   }
 
   async function sil(p: Paket) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${p.ad}" paketi silinsin mi?`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, tehlike: true }))) return
     setHata(null); setOk(null)
-    try { await api.delete(`/reseller-plans/${p.id}`); setOk('Paket silindi.'); yukle() }
-    catch (err) { setHata(apiHata(err, 'Silinemedi')) }
+    try { await api.delete(`/reseller-plans/${p.id}`); setOk(cevir('Paket silindi.')); yukle() }
+    catch (err) { setHata(apiHata(err, cevir('Silinemedi'))) }
   }
 
   const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm bg-white dark:bg-slate-900 focus:border-brand-500 outline-none'
@@ -93,7 +129,7 @@ export default function BayiPlanlariPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Bayi Planları") }]} />
+      <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Bayi Planları") }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayi Planları")}</h1>
         <button onClick={yeniAc} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-md font-medium">
@@ -101,8 +137,8 @@ export default function BayiPlanlariPage() {
         </button>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        {cevir(cevir("Bayilere satacağınız hazır limit paketleri."))} <Link to="/bayiler" className="text-brand-600 dark:text-brand-400 hover:underline">Bayi oluştururken</Link> {cevir("paket seçilir, limitler otomatik atanır.")}
-        {cevir(cevir("Hosting müşterilerine satılan planlar için"))} <Link to="/hizmet-planlari" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("Hosting Planları")}</Link> {cevir("sayfasını kullanın.")}
+        {cevir("Bayilere satacağınız hazır limit paketleri.")} <Link to="/bayiler" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("Bayi oluştururken")}</Link> {cevir("paket seçilir, limitler otomatik atanır.")}
+        {cevir("Hosting müşterilerine satılan planlar için")} <Link to="/hizmet-planlari" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("Hosting Planları")}</Link> {cevir("sayfasını kullanın.")}
       </p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -122,9 +158,9 @@ export default function BayiPlanlariPage() {
                 <tr>
                   <th className={T.baslik}>{cevir("Plan")}</th>
                   <th className={T.baslik}>Hosting</th>
-                  <th className={T.baslik}>Disk</th>
-                  <th className={T.baslik}>Trafik</th>
-                  <th className={T.baslik}>Fiyat</th>
+                  <th className={T.baslik}>{cevir("Disk")}</th>
+                  <th className={T.baslik}>{cevir("Trafik")}</th>
+                  <th className={T.baslik}>{cevir("Fiyat")}</th>
                   <th className={T.baslik}>{cevir("Bayi")}</th>
                   <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
                 </tr>
@@ -138,9 +174,9 @@ export default function BayiPlanlariPage() {
                       {p.aciklama && <div className="text-xs text-slate-500 mt-0.5">{p.aciklama}</div>}
                     </td>
                     <td className={T.hucre} data-etiket="Hosting"><span className="font-mono text-sm text-slate-700 dark:text-slate-300">{p.max_domain > 0 ? p.max_domain : '∞'}</span></td>
-                    <td className={T.hucre} data-etiket="Disk"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_disk_mb)}</span></td>
-                    <td className={T.hucre} data-etiket="Trafik"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_trafik_mb)}</span></td>
-                    <td className={T.hucre} data-etiket="Fiyat"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtFiyat(p.fiyat_kurus)}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("Disk")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_disk_mb)}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("Trafik")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_trafik_mb)}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("Fiyat")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtFiyat(p.fiyat_kurus)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Bayi")}><span className="text-slate-700 dark:text-slate-300">{p.bayi_sayisi}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
                       <button onClick={() => nav(`/bayi-planlari/${p.id}`)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 lg:mr-3">{cevir("Düzenle")}</button>
@@ -157,28 +193,28 @@ export default function BayiPlanlariPage() {
       {modal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !kaydet && setModal(null)}>
           <form onSubmit={gonder} className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? 'Yeni Bayi Planı' : `Plan — ${modal.ad}`}</h2>
+            <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? cevir('Yeni Bayi Planı') : `${cevir('Plan')} — ${modal.ad}`}</h2>
             <div className="space-y-3">
               <div><label className={lbl}>{cevir("Plan adı")}</label>
-                <input className={inp} value={form.ad} onChange={e => setForm({ ...form, ad: e.target.value })} placeholder="Bronz Bayi" autoFocus required /></div>
+                <input className={inp} value={form.ad} onChange={e => setForm({ ...form, ad: e.target.value })} placeholder={cevir("Bronz Bayi")} autoFocus required /></div>
               <div><label className={lbl}>{cevir("Açıklama")}</label>
                 <input className={inp} value={form.aciklama} onChange={e => setForm({ ...form, aciklama: e.target.value })} placeholder={cevir("Başlangıç paketi")} /></div>
               <div className="grid grid-cols-3 gap-2">
-                <div><label className={lbl}>Max hosting</label><input className={inp} type="number" min={0} value={form.max_domain} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
-                <div><label className={lbl}>Disk (MB)</label><input className={inp} type="number" min={0} value={form.max_disk_mb} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
-                <div><label className={lbl}>Trafik (MB)</label><input className={inp} type="number" min={0} value={form.max_trafik_mb} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
+                <div><label className={lbl}>{cevir("Max hosting")}</label><input className={inp} type="number" min={0} value={form.max_domain} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
+                <div><label className={lbl}>{cevir("Disk (MB)")}</label><input className={inp} type="number" min={0} value={form.max_disk_mb} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
+                <div><label className={lbl}>{cevir("Trafik (MB)")}</label><input className={inp} type="number" min={0} value={form.max_trafik_mb} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
               </div>
               <div><label className={lbl}>{cevir("Fiyat (kuruş) — 0 = belirtilmemiş")}</label>
                 <input className={inp} type="number" min={0} value={form.fiyat_kurus} onChange={e => setForm({ ...form, fiyat_kurus: e.target.value })} placeholder="49900 = 499,00 ₺" /></div>
               <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <input type="checkbox" checked={!!form.varsayilan} onChange={e => setForm({ ...form, varsayilan: e.target.checked })} />
-                {cevir(cevir("Varsayılan plan"))}
+                {cevir("Varsayılan plan")}
               </label>
               <p className="text-[11px] text-slate-400">{cevir("0 = limitsiz. Plan güncellenince MEVCUT bayilerin limitleri değişmez; bayiyi düzenleyip planı yeniden seçin.")}</p>
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md text-slate-600 dark:text-slate-300">{cevir("İptal")}</button>
-              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-slate-900 dark:bg-slate-700 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : 'Kaydet'}</button>
+              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-slate-900 dark:bg-slate-700 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : cevir('Kaydet')}</button>
             </div>
           </form>
         </div>

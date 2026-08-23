@@ -22,11 +22,17 @@ const ASAMA_IKON: Record<string, string> = {
 
 
 const SALDIRI_EN: Record<string, string> = {
+  "Türkçe": "English",
   "Etkin saldırı": "Active attack",
   "Etkin saldırı zinciri yok.": "No active attack chains.",
   "Saldırı Zincirleri": "Attack Chains",
   "Tespit motorları (dosya + süreç) izliyor; zincir oluşursa burada görünür.": "Detection engines (file + process) are monitoring; if a chain forms it appears here.",
   "Şüpheli zincir": "Suspicious chain",
+  "Yükleniyor…": "Loading…",
+  "Dosya, süreç ve API olayları kiracı + zaman penceresinde": "File, process and API events, within the tenant + time window, are strung",
+  "tek saldırı zincirine": "into a single attack chain",
+  "dizilir. Nedensel bağ (aynı dosya/süreç) güveni yükseltir.": ". A causal link (same file/process) raises confidence.",
+  "etkin kritik saldırı zinciri": "active critical attack chains",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SALDIRI_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -54,20 +60,20 @@ export default function SaldiriZincirleriPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
-        <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Saldırı Zincirleri") }]} />
+        <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Saldırı Zincirleri") }]} />
         <div className="flex items-start gap-3 mb-1">
           <span className={`mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 ${aktifKritik > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
           <div>
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">{cevir("Saldırı Zincirleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Dosya, süreç ve API olayları kiracı + zaman penceresinde <b>tek saldırı zincirine</b> dizilir. Nedensel bağ (aynı dosya/süreç) güveni yükseltir.
+              {cevir("Dosya, süreç ve API olayları kiracı + zaman penceresinde")} <b>{cevir("tek saldırı zincirine")}</b> {cevir("dizilir. Nedensel bağ (aynı dosya/süreç) güveni yükseltir.")}
             </p>
           </div>
         </div>
 
         {aktifKritik > 0 && (
           <div className="mt-3 mb-4 px-4 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
-            <span className="font-mono">● {aktifKritik} etkin kritik saldırı zinciri</span>
+            <span className="font-mono">● {aktifKritik} {cevir("etkin kritik saldırı zinciri")}</span>
           </div>
         )}
 
@@ -92,7 +98,7 @@ export default function SaldiriZincirleriPage() {
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${kritik ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
                       <span className={`font-mono text-xs font-semibold uppercase tracking-wide ${kritik ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
-                        {kritik ? 'Etkin saldırı' : cevir("Şüpheli zincir")}
+                        {kritik ? cevir("Etkin saldırı") : cevir("Şüpheli zincir")}
                       </span>
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">· {z.alan_adi || '—'}</span>
                     </div>

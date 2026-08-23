@@ -16,7 +16,7 @@ const goreliZaman = (t: string) => {
   const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
   const s = Math.floor((Date.now() - d.getTime()) / 1000)
   if (!isFinite(s) || s < 0) return t.slice(0, 16)
-  if (s < 60) return 'az önce'
+  if (s < 60) return cevir("az önce")
   if (s < 3600) return `${Math.floor(s / 60)} ${cevir("dk önce")}`
   if (s < 86400) return `${Math.floor(s / 3600)} ${cevir("sa önce")}`
   if (s < 604800) return `${Math.floor(s / 86400)} ${cevir("gün önce")}`
@@ -44,6 +44,19 @@ const BILDIRIM_EN: Record<string, string> = {
   "az önce": "just now",
   "○ Yalnız okunmamış": "○ Unread only",
   "● Yalnız okunmamış": "● Unread only",
+  "dk önce": "min ago",
+  "sa önce": "h ago",
+  "gün önce": "d ago",
+  "Anasayfa": "Homepage",
+  "Bildirimler": "Notifications",
+  "Antivirüs": "Antivirus",
+  "Yedek": "Backup",
+  "Kota": "Quota",
+  "Sistem": "System",
+  "Genel": "General",
+  "Tümünü okundu işaretle": "Mark all as read",
+  "Bildirim yok.": "No notifications.",
+  "Kritik": "Critical",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BILDIRIM_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -95,13 +108,13 @@ export default function BildirimlerPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-4xl mx-auto">
-        <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Bildirimler' }]} />
+        <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir('Bildirimler') }]} />
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Bildirimler</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bildirimler")}</h1>
           {okunmamisSayi > 0 && (
             <button onClick={tumOkundu}
               className="px-3 py-2 text-sm font-medium border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
-              Tümünü okundu işaretle ({okunmamisSayi})
+              {cevir("Tümünü okundu işaretle")} ({okunmamisSayi})
             </button>
           )}
         </div>
@@ -114,11 +127,11 @@ export default function BildirimlerPage() {
                 ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
                 : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}>
-            {sadeceOkunmamis ? '● Yalnız okunmamış' : cevir("○ Yalnız okunmamış")}
+            {sadeceOkunmamis ? cevir("● Yalnız okunmamış") : cevir("○ Yalnız okunmamış")}
           </button>
           <span className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1" />
           {cip('', cevir("Tümü"))}
-          {katlar.map(k => cip(k, katAd(k)))}
+          {katlar.map(k => cip(k, cevir(katAd(k))))}
         </div>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -129,7 +142,7 @@ export default function BildirimlerPage() {
           ) : goster.length === 0 ? (
             <div className="px-4 py-16 text-center">
               <svg className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1" /></svg>
-              <p className="text-sm text-slate-400 dark:text-slate-500">{sadeceOkunmamis ? 'Okunmamış bildirim yok.' : 'Bildirim yok.'}</p>
+              <p className="text-sm text-slate-400 dark:text-slate-500">{sadeceOkunmamis ? cevir('Okunmamış bildirim yok.') : cevir('Bildirim yok.')}</p>
             </div>
           ) : (
             goster.map(b => (
@@ -148,8 +161,8 @@ export default function BildirimlerPage() {
                   </span>
                   <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1 break-words">{yolGizle(b.mesaj)}</span>
                   <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/60">{katAd(b.kategori)}</span>
-                    {b.seviye === 'kritik' && <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">Kritik</span>}
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/60">{cevir(katAd(b.kategori))}</span>
+                    {b.seviye === 'kritik' && <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">{cevir("Kritik")}</span>}
                   </span>
                 </span>
               </button>

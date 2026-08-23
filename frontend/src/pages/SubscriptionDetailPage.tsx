@@ -70,6 +70,36 @@ const SUBD2_EN: Record<string, string> = {
   "Önizleme yalnızca HTTPS sitelerde gösterilir": "Preview is shown only on HTTPS sites",
   "✓ Askı kaldırıldı — site tekrar erişilebilir.": "✓ Suspension lifted — the site is accessible again.",
   "✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.": "✓ Account suspended — the site now returns a 503 maintenance page.",
+  "Onay gerekiyor": "Confirmation required",
+  "\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?": "\"{0}\" will be suspended — the site will become inaccessible (503). Continue?",
+  "Anasayfa": "Home",
+  "Hata": "Error",
+  "Askıdan Al (Geri Getir)": "Unsuspend (Restore)",
+  "Hesabı Askıya Al": "Suspend Account",
+  "Pano": "Dashboard",
+  "Uygulamalar": "Applications",
+  "Web sitesi:": "Website:",
+  "Web Sitesi": "Website",
+  "Dosyalar": "Files",
+  "Web Sitesini Kopyala": "Clone Website",
+  "Klonlama": "Cloning",
+  "Depo entegrasyonu": "Repository integration",
+  "Trafik analizi": "Traffic analysis",
+  "{0} silinsin mi? Dosyalar + DB kaybolur.": "Delete {0}? Files + DB will be lost.",
+  "Silinemedi": "Could not be deleted",
+  "Öne Çıkan": "Featured",
+  "Kurulu Uygulamalar ({0})": "Installed Applications ({0})",
+  "Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç.": "No applications installed yet. Choose from the catalog below.",
+  "Yönetim Paneli →": "Admin Panel →",
+  "Katalog ({0})": "Catalog ({0})",
+  "Admin'den kurulur": "Installed from Admin",
+  "Kur": "Install",
+  "Site:": "Site:",
+  "Kuruluyor…": "Installing…",
+  "Posta Hizmetleri": "Mail Services",
+  "E-Posta Teslimat Takibi": "Email Delivery Tracking",
+  "Performans": "Performance",
+  "Apache ve nginx": "Apache and nginx",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SUBD2_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -120,11 +150,11 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${domain.alan_adi}" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?` }))) return
+    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi) }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
-      setBildirim(askiyaAl ? '✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.' : cevir("✓ Askı kaldırıldı — site tekrar erişilebilir."))
+      setBildirim(askiyaAl ? cevir("✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("✓ Askı kaldırıldı — site tekrar erişilebilir."))
       setTimeout(() => setBildirim(null), 6000)
       domainYukle()
     } catch (e) { setHata(apiHata(e, cevir("İşlem başarısız"))) }
@@ -133,14 +163,14 @@ export default function SubscriptionDetailPage() {
 
   if (hata && !domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: 'Hata' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: cevir("Hata") }]} />
       <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4 text-sm text-red-700 dark:text-red-300">{hata}</div>
     </div>
   )
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
     </div>
   )
@@ -148,7 +178,7 @@ export default function SubscriptionDetailPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi },
       ]} />
@@ -197,12 +227,12 @@ export default function SubscriptionDetailPage() {
                   {domain.askida ? (
                     <>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
-                      {cevir(cevir("Askıdan Al (Geri Getir)"))}
+                      {cevir("Askıdan Al (Geri Getir)")}
                     </>
                   ) : (
                     <>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6M9 3h6a2 2 0 012 2v0H7v0a2 2 0 012-2z" /></svg>
-                      {cevir(cevir("Hesabı Askıya Al"))}
+                      {cevir("Hesabı Askıya Al")}
                     </>
                   )}
                 </button>
@@ -216,9 +246,9 @@ export default function SubscriptionDetailPage() {
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       <div className="flex items-center gap-5 border-b border-slate-200 dark:border-slate-700 mb-5">
-        <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>Pano</TabBtn>
+        <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>{cevir("Pano")}</TabBtn>
         <TabBtn aktif={tab === 'hosting'}   onClick={() => setTab('hosting')}>{cevir("Barınma ve DNS")}</TabBtn>
-        <TabBtn aktif={tab === 'apps'} onClick={() => setTab('apps')}>Uygulamalar</TabBtn>
+        <TabBtn aktif={tab === 'apps'} onClick={() => setTab('apps')}>{cevir("Uygulamalar")}</TabBtn>
         {mailAktif && <TabBtn aktif={tab === 'mail'} onClick={() => setTab('mail')}>Mail</TabBtn>}
       </div>
 
@@ -252,7 +282,7 @@ export default function SubscriptionDetailPage() {
 
           <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 flex-wrap gap-2">
             <div className="flex items-center gap-4">
-              <span>Web sitesi: <span className="font-mono text-slate-700 dark:text-slate-300">httpdocs</span></span>
+              <span>{cevir("Web sitesi:")} <span className="font-mono text-slate-700 dark:text-slate-300">httpdocs</span></span>
               <span>IP: <span className="font-mono text-slate-700 dark:text-slate-300">{domain.ipv4}</span></span>
               <span>{cevir("Sistem kullanıcısı:")} <span className="font-mono text-slate-700 dark:text-slate-300">{domain.sistem_kullanici}</span></span>
             </div>
@@ -295,7 +325,7 @@ function WebSitePreview({ alanAdi, ssl }: { alanAdi: string; ssl: boolean }) {
         )}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-3 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[9px] uppercase tracking-wider text-white/60">Web Sitesi</div>
+            <div className="text-[9px] uppercase tracking-wider text-white/60">{cevir("Web Sitesi")}</div>
             <div className="text-xs font-semibold text-white truncate">{alanAdi}</div>
           </div>
           <a href={url} target="_blank" rel="noreferrer"
@@ -348,20 +378,20 @@ function DashboardTabIcerik({ domain }: { domain: Domain }) {
     <div>
       <Grup baslik={cevir("Dosyalar ve Veritabanları")}>
         <ToolCard etiket={cevir("Bağlantı Bilgisi")}     aciklama={cevir("FTP, veri tabanı")}     ikon={ICONS.baglanti} renk="emerald" />
-        <ToolCard etiket="Dosyalar"              aciklama={cevir("Dosya yöneticisi")}     ikon={ICONS.dosyalar} renk="amber"  faz="F6" />
+        <ToolCard etiket={cevir("Dosyalar")}              aciklama={cevir("Dosya yöneticisi")}     ikon={ICONS.dosyalar} renk="amber"  faz="F6" />
         <ToolCard etiket={cevir("Veritabanları")}         aciklama={domain.db_adi}         ikon={ICONS.db}       renk="violet" faz="F5" />
         <ToolCard etiket="FTP"                   aciklama={cevir("FTP hesapları")}        ikon={ICONS.ftp}      renk="sky"    faz="F4" />
         <ToolCard etiket={cevir("Yedekle ve Geri Yükle")} aciklama={cevir("Yedek yönetimi")}        ikon={ICONS.yedek}    renk="rose"   faz="F12" />
-        <ToolCard etiket="Web Sitesini Kopyala"  aciklama="Klonlama"              ikon={ICONS.kopya}    renk="sky" />
+        <ToolCard etiket={cevir("Web Sitesini Kopyala")}  aciklama={cevir("Klonlama")}              ikon={ICONS.kopya}    renk="sky" />
       </Grup>
 
       <Grup baslik={cevir("Geliştirme Araçları")}>
         <ToolCard etiket="PHP"                   aciklama={cevirT("Sürüm {0}", domain.php_surum)} ikon={ICONS.php}      renk="indigo" faz="F3" />
         <ToolCard etiket={cevir("Günlükler")}             aciklama="access, error"        ikon={ICONS.log}      renk="slate"  faz="F10" />
         <ToolCard etiket={cevir("Zamanlanmış Görevler")}  aciklama="Cron"                  ikon={ICONS.cron}     renk="teal"   faz="F8" />
-        <ToolCard etiket="Git"                   aciklama="Depo entegrasyonu"     ikon={ICONS.git}      renk="orange" faz="F9" />
+        <ToolCard etiket="Git"                   aciklama={cevir("Depo entegrasyonu")}     ikon={ICONS.git}      renk="orange" faz="F9" />
         <ToolCard etiket="PHP Composer"          aciklama={cevir("Paket yöneticisi")}      ikon={ICONS.composer} renk="amber" />
-        <ToolCard etiket="Performans"            aciklama={cevir("Hızlandırıcılar")}       ikon={ICONS.hizmet}   renk="emerald" />
+        <ToolCard etiket={cevir("Performans")}            aciklama={cevir("Hızlandırıcılar")}       ikon={ICONS.hizmet}   renk="emerald" />
       </Grup>
 
       <Grup baslik={cevir("Güvenlik")}>
@@ -371,10 +401,10 @@ function DashboardTabIcerik({ domain }: { domain: Domain }) {
           ikon={ICONS.ssl}
           renk={domain.ssl ? 'emerald' : 'rose'}
           faz="F7"
-          uyari={!domain.ssl ? 'Alan adı korunmadı' : undefined}
+          uyari={!domain.ssl ? cevir("Alan adı korunmadı") : undefined}
         />
         <ToolCard etiket={cevir("Şifre Korumalı Dizinler")} aciklama=".htpasswd" ikon={ICONS.kilit} renk="amber" faz="F7" />
-        <ToolCard etiket={cevir("İstatistikler")}            aciklama="Trafik analizi" ikon={ICONS.istatistik} renk="indigo" faz="F10" />
+        <ToolCard etiket={cevir("İstatistikler")}            aciklama={cevir("Trafik analizi")} ikon={ICONS.istatistik} renk="indigo" faz="F10" />
         <ToolCard etiket="G-AV"                  aciklama={cevir("Antivirüs")}      ikon={ICONS.imunify}    renk="emerald" />
       </Grup>
     </div>
@@ -386,7 +416,7 @@ function HostingTab({ domain }: { domain: Domain }) {
     <div>
       <Grup baslik={cevir("Barınma Hizmetleri")}>
         <ToolCard etiket={cevir("Hosting Planı")} aciklama={cevir("Yükselt, düşür veya özel plan")} ikon={ICONS.hizmet} renk="violet" to={`/abonelikler/${domain.id}/plan`} />
-        <ToolCard etiket="Apache ve nginx"     aciklama={cevir("Güvenlik başlıkları, ek direktifler")}  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
+        <ToolCard etiket={cevir("Apache ve nginx")}     aciklama={cevir("Güvenlik başlıkları, ek direktifler")}  ikon={ICONS.apache} renk="orange" to={`/abonelikler/${domain.id}/web-sunucu`} />
       </Grup>
       <Grup baslik={cevir("Alan Adı ve DNS")}>
         <ToolCard etiket={cevir("DNS Yönetimi")} aciklama={cevir("A, MX, TXT, CNAME kayıtları")} ikon={ICONS.dns} renk="sky" to={`/abonelikler/${domain.id}/dns`} />
@@ -441,11 +471,11 @@ function AppTab({ domain }: { domain: Domain }) {
     } finally { setGonderiliyor(false) }
   }
   const sil = async (kayitID: number, ad: string) => {
-    if (!confirm(`${ad} silinsin mi? Dosyalar + DB kaybolur.`)) return
+    if (!confirm(cevirT(cevir("{0} silinsin mi? Dosyalar + DB kaybolur."), ad))) return
     try {
       await api.delete(`/domains/${domain.id}/uygulamalar/${kayitID}`)
       await yukle()
-    } catch (e: any) { alert(e?.response?.data?.error || 'Silinemedi') }
+    } catch (e: any) { alert(e?.response?.data?.error || cevir("Silinemedi")) }
   }
 
   if (yukleniyor) return <div className="py-8 text-center text-slate-500">{cevir("Yükleniyor…")}</div>
@@ -455,7 +485,7 @@ function AppTab({ domain }: { domain: Domain }) {
 
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
-          {cevir(cevir("Öne Çıkan"))}
+          {cevir("Öne Çıkan")}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           <ToolCard etiket="WordPress" aciklama={cevir("1-tıkla kurulum · yönetim")} ikonNode={<WPLogo />} renk="sky"
@@ -465,11 +495,11 @@ function AppTab({ domain }: { domain: Domain }) {
 
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
-          Kurulu Uygulamalar ({kurulu.length})
+          {cevirT(cevir("Kurulu Uygulamalar ({0})"), kurulu.length)}
         </h3>
         {kurulu.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500">
-            {cevir(cevir("Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç."))}
+            {cevir("Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç.")}
           </div>
         ) : (
           <div className="space-y-2">
@@ -482,7 +512,7 @@ function AppTab({ domain }: { domain: Domain }) {
                 <div className="flex items-center gap-2">
                   <a href={u.yonetim_url} target="_blank" rel="noreferrer"
                     className="rounded-md bg-slate-900 text-white text-xs px-3 py-1.5 hover:bg-slate-800">
-                    {cevir(cevir("Yönetim Paneli →"))}
+                    {cevir("Yönetim Paneli →")}
                   </a>
                   <button onClick={() => sil(u.id, u.ad)}
                     className="text-xs text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-md">{cevir("Sil")}</button>
@@ -495,7 +525,7 @@ function AppTab({ domain }: { domain: Domain }) {
 
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
-          Katalog ({katalog.length})
+          {cevirT(cevir("Katalog ({0})"), katalog.length)}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {katalog.map((t) => (
@@ -518,11 +548,11 @@ function AppTab({ domain }: { domain: Domain }) {
               <p className="text-xs text-slate-600 mb-3">{t.Aciklama}</p>
               <button
                 onClick={() => t.NativeApp
-                  ? alert(t.Ad + ' host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.')
+                  ? alert(t.Ad + ' ' + cevir("host seviyesinde bir uygulamadır, tenant panelinden kurulamaz."))
                   : setKurTaslak({kod: t.Kod, ad: t.Ad, ikon: t.Ikon, alt_dizin: t.Kod})}
                 disabled={t.NativeApp}
                 className="w-full rounded-md bg-slate-900 text-white text-xs py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-400">
-                {t.NativeApp ? 'Admin\'den kurulur' : 'Kur'}
+                {t.NativeApp ? cevir("Admin'den kurulur") : cevir("Kur")}
               </button>
             </div>
           ))}
@@ -533,20 +563,20 @@ function AppTab({ domain }: { domain: Domain }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setKurTaslak(null) }}>
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xl">
-            <h3 className="text-lg font-semibold mb-4">{kurTaslak.ikon} {kurTaslak.ad} Kur</h3>
+            <h3 className="text-lg font-semibold mb-4">{kurTaslak.ikon} {kurTaslak.ad} {cevir("Kur")}</h3>
             <label className="block text-xs font-medium text-slate-600 mb-1">{cevir("Alt dizin (public_html/... altına)")}</label>
             <input value={kurTaslak.alt_dizin} onChange={(e) => setKurTaslak({...kurTaslak, alt_dizin: e.target.value})}
               placeholder={cevir("boş = kök, blog, shop vb.")}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-slate-950 dark:border-slate-700" />
             <p className="text-xs text-slate-500 mb-4">
-              Site: <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
+              {cevir("Site:")} <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setKurTaslak(null)}
                 className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">{cevir("Vazgeç")}</button>
               <button onClick={kur} disabled={gonderiliyor}
                 className="px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
-                {gonderiliyor ? 'Kuruluyor…' : 'Kur'}
+                {gonderiliyor ? cevir("Kuruluyor…") : cevir("Kur")}
               </button>
             </div>
           </div>
@@ -558,10 +588,10 @@ function AppTab({ domain }: { domain: Domain }) {
 
 function MailTab({ domain }: { domain: Domain }) {
   return (
-    <Grup baslik="Posta Hizmetleri">
+    <Grup baslik={cevir("Posta Hizmetleri")}>
       <ToolCard etiket={cevir("Mail Ayarları")}            aciklama={cevir("Sağlık analizi, bağlantı bilgileri")} ikon={ICONS.posta}      renk="emerald" to={`/abonelikler/${domain.id}/mail/ayarlar`} />
       <ToolCard etiket={cevir("Mail Kutuları")}            aciklama={cevir("Posta kutusu ekle/yönet")}            ikon={ICONS.baglanti}   renk="sky"     to={`/abonelikler/${domain.id}/mail/kutular`} />
-      <ToolCard etiket="E-Posta Teslimat Takibi"  aciklama={cevir("Gönderim/teslimat günlüğü")}          ikon={ICONS.istatistik} renk="indigo"  to={`/abonelikler/${domain.id}/mail/teslimat`} />
+      <ToolCard etiket={cevir("E-Posta Teslimat Takibi")}  aciklama={cevir("Gönderim/teslimat günlüğü")}          ikon={ICONS.istatistik} renk="indigo"  to={`/abonelikler/${domain.id}/mail/teslimat`} />
       <ToolCard etiket={cevir("Takma Adlar & Yönlendirme")} aciklama={cevir("Yönlendirme, catch-all")}            ikon={ICONS.baglanti}   renk="amber"   to={`/abonelikler/${domain.id}/mail/takmaadlar`} />
     </Grup>
   )

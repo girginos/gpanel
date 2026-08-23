@@ -53,6 +53,18 @@ const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700
 
 
 const SEC_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "paket": "packages",
+  "Bu Domaini Tara": "Scan This Domain",
+  "Filtre:": "Filter:",
+  "Hepsi": "All",
+  "Kritik {0}": "Critical {0}",
+  "Yüksek {0}": "High {0}",
+  "Orta {0}": "Medium {0}",
+  "Düşük {0}": "Low {0}",
+  "Tekrar dene": "Retry",
+  "Paket": "Package",
+  "Kurulu / Fix": "Installed / Fix",
   "Başlatılamadı": "Failed to start",
   "Başlatılıyor…": "Starting…",
   "Bu domainde bilinen açık bulunmadı.": "No known vulnerabilities found on this domain.",
@@ -135,7 +147,7 @@ export default function DomainSecurityPage() {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {uyg.map((u) => (
               <span key={u.app_type} className={`rounded px-2 py-0.5 text-xs ${appRenk(u.app_type)}`}>
-                {appAd(u.app_type)}{u.app_version ? ' ' + u.app_version : ''} · {u.paket_sayisi} paket
+                {appAd(u.app_type)}{u.app_version ? ' ' + u.app_version : ''} · {u.paket_sayisi} {cevir("paket")}
               </span>
             ))}
             {taraniyorMu && (
@@ -147,14 +159,14 @@ export default function DomainSecurityPage() {
         </div>
         <button onClick={domainTara} disabled={taranıyor || taraniyorMu}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
-          {taraniyorMu ? 'Taranıyor…' : (taranıyor ? 'Başlatılıyor…' : 'Bu Domaini Tara')}
+          {taraniyorMu ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
         </button>
       </div>
 
       {/* Şiddet filtresi */}
       <div className="mb-3 flex flex-wrap items-center gap-1 text-xs">
-        <span className="text-slate-500 mr-1">Filtre:</span>
-        {([['', 'Hepsi'], ['critical', `Kritik ${sev.critical}`], ['high', cevirT(cevir("Yüksek {0}"), sev.high)], ['medium', `Orta ${sev.medium}`], ['low', cevirT(cevir("Düşük {0}"), sev.low)]] as [string, string][]).map(([v, ad]) => (
+        <span className="text-slate-500 mr-1">{cevir("Filtre:")}</span>
+        {([['', cevir("Hepsi")], ['critical', cevirT(cevir("Kritik {0}"), sev.critical)], ['high', cevirT(cevir("Yüksek {0}"), sev.high)], ['medium', cevirT(cevir("Orta {0}"), sev.medium)], ['low', cevirT(cevir("Düşük {0}"), sev.low)]] as [string, string][]).map(([v, ad]) => (
           <button key={v} onClick={() => { setFiltre(v); setAktifSayfa(1) }}
             className={`rounded-md border px-2 py-1 ${filtre === v ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
             {ad}
@@ -165,10 +177,10 @@ export default function DomainSecurityPage() {
       {yukleniyor && !ilk.current ? (
         <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">Tekrar dene</button></div>
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
       ) : sayfa.items.length === 0 ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 py-10 text-center text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {taraniyorMu ? 'Taranıyor…' : (filtre ? 'Bu filtreyle açık yok.' : cevir("Bu domainde bilinen açık bulunmadı."))}
+          {taraniyorMu ? cevir("Taranıyor…") : (filtre ? cevir("Bu filtreyle açık yok.") : cevir("Bu domainde bilinen açık bulunmadı."))}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -177,8 +189,8 @@ export default function DomainSecurityPage() {
               <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                 <tr>
                   <th className="w-32 px-3 py-3 font-semibold">{cevir("Şiddet")}</th>
-                  <th className="px-3 py-3 font-semibold">Paket</th>
-                  <th className="w-40 px-3 py-3 font-semibold">Kurulu / Fix</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Paket")}</th>
+                  <th className="w-40 px-3 py-3 font-semibold">{cevir("Kurulu / Fix")}</th>
                   <th className="w-40 px-3 py-3 font-semibold">CVE</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Başlık")}</th>
                 </tr>

@@ -27,13 +27,18 @@ type Props = {
 
 
 const CMP_EN: Record<string, string> = {
+  "Seçiniz…": "Select…",
+  "Ara…": "Search…",
+  "Kayıt yok": "No records",
+  "Yükleniyor…": "Loading…",
+  "Eşleşen yok": "No matches",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function AramaliSecim({
   secenekler, deger, onDegis,
   yerTutucu = cevir("Seçiniz…"),
-  aramaYerTutucu = 'Ara…',
+  aramaYerTutucu = cevir("Ara…"),
   bosMetin = cevir("Kayıt yok"),
   yukleniyor = false,
 }: Props) {

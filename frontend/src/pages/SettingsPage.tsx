@@ -35,6 +35,31 @@ const SETT_EN: Record<string, string> = {
   "Yeni parolalar eşleşmiyor.": "The new passwords do not match.",
   "İki Adımlı Doğrulama (2FA)": "Two-Factor Authentication (2FA)",
   "○ Kapalı": "○ Off",
+  "Kaydedilemedi": "Could not save",
+  "Bilgiler kaydedildi.": "Information saved.",
+  "Tercihler kaydedildi.": "Preferences saved.",
+  "Anasayfa": "Home",
+  "Profil ve Tercihler": "Profile and Preferences",
+  "Hesap Bilgileri": "Account Information",
+  "Rol / Durum": "Role / Status",
+  "Ad Soyad": "Full Name",
+  "Kaydediliyor…": "Saving…",
+  "Kaydet": "Save",
+  "Mevcut parola": "Current password",
+  "Yeni parola": "New password",
+  "Yeni parola (tekrar)": "New password (again)",
+  "Değiştiriliyor…": "Changing…",
+  "Durum:": "Status:",
+  "● Aktif": "● Active",
+  "2FA QR kodu": "2FA QR code",
+  "2) Uygulamadaki 6 haneli kodu girin:": "2) Enter the 6-digit code from the app:",
+  "Doğrulanıyor…": "Verifying…",
+  "Tercihler": "Preferences",
+  "Tema": "Theme",
+  "Koyu": "Dark",
+  "Dil": "Language",
+  "Tercihleri Kaydet": "Save Preferences",
+  "Parola": "Password",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SETT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -102,8 +127,8 @@ export default function SettingsPage() {
     try {
       await api.put('/me', { ad_soyad: ad, eposta })
       guncelleAd(ad) // sağ üst bar dinamik güncellensin
-      setPOk('Bilgiler kaydedildi.'); setTimeout(() => setPOk(''), 3000); yukle()
-    } catch (e) { setPErr(apiHata(e, 'Kaydedilemedi')) } finally { setPYuk(false) }
+      setPOk(cevir("Bilgiler kaydedildi.")); setTimeout(() => setPOk(''), 3000); yukle()
+    } catch (e) { setPErr(apiHata(e, cevir("Kaydedilemedi"))) } finally { setPYuk(false) }
   }
 
   async function parolaDegistir(e: React.FormEvent) {
@@ -141,7 +166,7 @@ export default function SettingsPage() {
     try {
       await api.put('/me', { ad_soyad: ad, eposta, tercih_tema: tema, tercih_dil: dil })
       try { localStorage.setItem('gosp.tema', tema) } catch { /* yoksay */ }
-      setTOk('Tercihler kaydedildi.'); setTimeout(() => setTOk(''), 3000)
+      setTOk(cevir("Tercihler kaydedildi.")); setTimeout(() => setTOk(''), 3000)
     } catch { setTOk('') } finally { setTYuk(false) }
   }
 
@@ -150,31 +175,31 @@ export default function SettingsPage() {
 
   return (
     <div className="px-6 md:px-8 py-6">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Profil ve Tercihler' }]} />
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Profil ve Tercihler</h1>
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Profil ve Tercihler") }]} />
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Profil ve Tercihler")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{cevir("Hesap bilgileriniz, parola, iki adımlı doğrulama ve panel tercihleri.")}</p>
       {yukHata && <div className="mb-4"><Uyari tip="err" mesaj={yukHata} /></div>}
 
       <div className="space-y-5">
         {/* 1) Hesap Bilgileri */}
-        <Kart baslik="Hesap Bilgileri" aciklama={cevir("Ad soyad ve e-posta adresinizi düzenleyin.")}
+        <Kart baslik={cevir("Hesap Bilgileri")} aciklama={cevir("Ad soyad ve e-posta adresinizi düzenleyin.")}
           ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}
           cocuk={
             <form onSubmit={profilKaydet} className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
                 <Girdi etiket={cevir("Kullanıcı adı")} value={ben?.adi || 'root'} disabled />
                 <div>
-                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Rol / Durum</span>
+                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Rol / Durum")}</span>
                   <div className="flex gap-2 pt-1.5">
                     <span className="text-[11px] uppercase tracking-wider px-2 py-1 rounded bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 font-semibold">{ben?.rol || 'admin'}</span>
                     <span className="text-[11px] uppercase tracking-wider px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold">{ben?.durum || 'active'}</span>
                   </div>
                 </div>
-                <Girdi etiket="Ad Soyad" value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
+                <Girdi etiket={cevir("Ad Soyad")} value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
                 <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder="ornek@site.com" />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button type="submit" disabled={pYuk} className={btn}>{pYuk ? 'Kaydediliyor…' : 'Kaydet'}</button>
+                <button type="submit" disabled={pYuk} className={btn}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</button>
                 <Uyari tip="ok" mesaj={pOk} /><Uyari tip="err" mesaj={pErr} />
               </div>
             </form>
@@ -185,13 +210,13 @@ export default function SettingsPage() {
           ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
           cocuk={
             <form onSubmit={parolaDegistir} className="space-y-4">
-              <Girdi etiket="Mevcut parola" type="password" value={mevcut} onChange={e => setMevcut(e.target.value)} autoComplete="current-password" />
+              <Girdi etiket={cevir("Mevcut parola")} type="password" value={mevcut} onChange={e => setMevcut(e.target.value)} autoComplete="current-password" />
               <div className="grid sm:grid-cols-2 gap-4">
-                <Girdi etiket="Yeni parola" type="password" value={yeni} onChange={e => setYeni(e.target.value)} autoComplete="new-password" />
-                <Girdi etiket="Yeni parola (tekrar)" type="password" value={yeni2} onChange={e => setYeni2(e.target.value)} autoComplete="new-password" />
+                <Girdi etiket={cevir("Yeni parola")} type="password" value={yeni} onChange={e => setYeni(e.target.value)} autoComplete="new-password" />
+                <Girdi etiket={cevir("Yeni parola (tekrar)")} type="password" value={yeni2} onChange={e => setYeni2(e.target.value)} autoComplete="new-password" />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button type="submit" disabled={paYuk || !mevcut || !yeni} className={btn}>{paYuk ? 'Değiştiriliyor…' : cevir("Parolayı Değiştir")}</button>
+                <button type="submit" disabled={paYuk || !mevcut || !yeni} className={btn}>{paYuk ? cevir("Değiştiriliyor…") : cevir("Parolayı Değiştir")}</button>
                 <Uyari tip="ok" mesaj={paOk} /><Uyari tip="err" mesaj={paErr} />
               </div>
             </form>
@@ -203,9 +228,9 @@ export default function SettingsPage() {
           cocuk={
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-600 dark:text-slate-400">Durum:</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400">{cevir("Durum:")}</span>
                 {ben?.iki_fa
-                  ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">● Aktif</span>
+                  ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>
                   : <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{cevir("○ Kapalı")}</span>}
               </div>
 
@@ -218,7 +243,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:")}</p>
                   {f2Kur.qr_data_uri && (
                     <div className="flex flex-col items-center gap-2 py-1">
-                      <img src={f2Kur.qr_data_uri} alt="2FA QR kodu" width={256} height={256}
+                      <img src={f2Kur.qr_data_uri} alt={cevir("2FA QR kodu")} width={256} height={256}
                         className="w-64 h-64 rounded-2xl bg-white p-3 border border-slate-200 dark:border-slate-700 shadow-sm" />
                       <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Authenticator uygulamanızla tarayın")}</p>
                     </div>
@@ -229,11 +254,11 @@ export default function SettingsPage() {
                     <button type="button" onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }} className="text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">{cevir("Kopyala")}</button>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-500 break-all">{cevir("veya bağlantı:")} <span className="font-mono">{f2Kur.otpauth}</span></p>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">2) Uygulamadaki 6 haneli kodu girin:</p>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("2) Uygulamadaki 6 haneli kodu girin:")}</p>
                   <div className="flex items-center gap-3 flex-wrap">
                     <input value={f2Kod} onChange={e => setF2Kod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
                       className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
-                    <button type="submit" disabled={f2Yuk || f2Kod.length !== 6} className={btn}>{f2Yuk ? 'Doğrulanıyor…' : cevir("Doğrula ve Aç")}</button>
+                    <button type="submit" disabled={f2Yuk || f2Kod.length !== 6} className={btn}>{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</button>
                     <button type="button" onClick={() => setF2Kur(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{cevir("İptal")}</button>
                   </div>
                   <Uyari tip="err" mesaj={f2Err} />
@@ -259,26 +284,26 @@ export default function SettingsPage() {
           } />
 
         {/* 4) Tercihler */}
-        <Kart baslik="Tercihler" aciklama={cevir("Panel görünüm ve dil tercihleri.")}
+        <Kart baslik={cevir("Tercihler")} aciklama={cevir("Panel görünüm ve dil tercihleri.")}
           ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
           cocuk={
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
                 <label className="block">
-                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Tema</span>
+                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Tema")}</span>
                   <select value={tema} onChange={e => setTema(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
-                    <option value="system">{cevir("Sistem")}</option><option value="light">{cevir("Açık")}</option><option value="dark">Koyu</option>
+                    <option value="system">{cevir("Sistem")}</option><option value="light">{cevir("Açık")}</option><option value="dark">{cevir("Koyu")}</option>
                   </select>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Dil</span>
+                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Dil")}</span>
                   <select value={dil} onChange={e => setDil(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
                     <option value="tr">{cevir("Türkçe")}</option><option value="en">English</option>
                   </select>
                 </label>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={tercihKaydet} disabled={tYuk} className={btn}>{tYuk ? 'Kaydediliyor…' : 'Tercihleri Kaydet'}</button>
+                <button onClick={tercihKaydet} disabled={tYuk} className={btn}>{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</button>
                 <Uyari tip="ok" mesaj={tOk} />
               </div>
             </div>

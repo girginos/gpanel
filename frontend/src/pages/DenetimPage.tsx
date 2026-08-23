@@ -76,6 +76,24 @@ const DEN_EN: Record<string, string> = {
   "yıkıcı": "destructive",
   "Özel plan uygulandı": "Custom plan applied",
   "İzolasyon uyarısı": "Isolation warning",
+  "Giriş": "Login",
+  "Hosting silindi": "Hosting deleted",
+  "Bayi silindi": "Reseller deleted",
+  "Kapsam": "Scope",
+  "Bayi": "Reseller",
+  "kayıt": "records",
+  "Zaman": "Time",
+  "Eylem": "Action",
+  "Hedef": "Target",
+  "Sayfa": "Page",
+  "Sonraki →": "Next →",
+  "← Önceki": "← Previous",
+  "başarılı": "successful",
+  "yönetici": "admin",
+  "bayi": "reseller",
+  "kök": "root",
+  "Silinmiş bayi #{0}": "Deleted reseller #{0}",
+  "Anasayfa": "Homepage",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DEN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -111,9 +129,9 @@ function EylemRozet({ eylem }: { eylem: string }) {
   const s = eylemStil(eylem)
   return (
     <span className={`inline-flex items-center gap-1.5 font-medium ${s.renk}`}
-      title={(YIKICI.has(eylem) ? 'Yıkıcı işlem — ' : '') + eylem}>
+      title={(YIKICI.has(eylem) ? cevir('Yıkıcı işlem —') + ' ' : '') + eylem}>
       <Ikon d={s.ikon} className="h-3.5 w-3.5 shrink-0" />
-      {etiketle(eylem)}
+      {cevir(etiketle(eylem))}
     </span>
   )
 }
@@ -156,7 +174,7 @@ export default function DenetimPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 space-y-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Denetim Kaydı") }]} />
+      <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Denetim Kaydı") }]} />
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Denetim Kaydı")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -186,20 +204,20 @@ export default function DenetimPage() {
         <select id="denetim-eylem" value={eylem} onChange={e => { setSayfa(0); setEylem(e.target.value) }}
           className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
           <option value="">{cevir("Tüm eylemler")}</option>
-          {(veri?.eylemler || []).map(e => <option key={e} value={e}>{etiketle(e)}</option>)}
+          {(veri?.eylemler || []).map(e => <option key={e} value={e}>{cevir(etiketle(e))}</option>)}
         </select>
         {!bayiMi && (
           <>
-            <label className="sr-only" htmlFor="denetim-kapsam">Kapsam</label>
+            <label className="sr-only" htmlFor="denetim-kapsam">{cevir("Kapsam")}</label>
             <select id="denetim-kapsam" value={kapsam} onChange={e => { setSayfa(0); setKapsam(e.target.value) }}
               className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
               <option value="">{cevir("Tüm kapsamlar")}</option>
               <option value="kok">{cevir("Yalnız kök (panel sahibi)")}</option>
-              {bayiler.map(b => <option key={b.id} value={String(b.id)}>Bayi: {b.kullanici}</option>)}
+              {bayiler.map(b => <option key={b.id} value={String(b.id)}>{cevir("Bayi")}: {b.kullanici}</option>)}
             </select>
           </>
         )}
-        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">{toplam.toLocaleString('tr-TR')} kayıt</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">{toplam.toLocaleString('tr-TR')} {cevir("kayıt")}</span>
       </div>
 
       {yuk && !veri ? (
@@ -213,11 +231,11 @@ export default function DenetimPage() {
             <table className={T.tablo}>
               <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
                 <tr>
-                  <th className={T.baslik}>Zaman</th>
+                  <th className={T.baslik}>{cevir("Zaman")}</th>
                   <th className={T.baslik}>{cevir("Kullanıcı")}</th>
-                  <th className={T.baslik}>Eylem</th>
-                  <th className={T.baslik}>Hedef</th>
-                  {!bayiMi && <th className={T.baslik}>Kapsam</th>}
+                  <th className={T.baslik}>{cevir("Eylem")}</th>
+                  <th className={T.baslik}>{cevir("Hedef")}</th>
+                  {!bayiMi && <th className={T.baslik}>{cevir("Kapsam")}</th>}
                   <th className={T.baslik}>IP</th>
                   <th className={T.baslik}>{cevir("Sonuç")}</th>
                 </tr>
@@ -225,18 +243,18 @@ export default function DenetimPage() {
               <tbody className={T.govde}>
                 {kayitlar.map(k => (
                   <tr key={k.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition`}>
-                    <td className={T.hucre} data-etiket="Zaman">
+                    <td className={T.hucre} data-etiket={cevir("Zaman")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap tabular-nums">{k.zaman}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
                       <span className="text-slate-700 dark:text-slate-300">{k.aktor || '—'}</span>
                       {k.aktor_rol && (
                         <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                          {k.aktor_rol === 'admin' ? 'yönetici' : k.aktor_rol === 'reseller' ? 'bayi' : k.aktor_rol}
+                          {k.aktor_rol === 'admin' ? cevir('yönetici') : k.aktor_rol === 'reseller' ? cevir('bayi') : k.aktor_rol}
                         </span>
                       )}
                     </td>
-                    <td className={T.hucre} data-etiket="Eylem">
+                    <td className={T.hucre} data-etiket={cevir("Eylem")}>
                       <EylemRozet eylem={k.eylem} />
                       {k.detay && (
                         // Uzun sistem kayitlari satiri sismesin: iki satirda kirpilir,
@@ -247,14 +265,14 @@ export default function DenetimPage() {
                         </div>
                       )}
                     </td>
-                    <td className={T.hucre} data-etiket="Hedef">
+                    <td className={T.hucre} data-etiket={cevir("Hedef")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 break-all">{k.hedef || '—'}</span>
                     </td>
                     {!bayiMi && (
-                      <td className={T.hucre} data-etiket="Kapsam">
+                      <td className={T.hucre} data-etiket={cevir("Kapsam")}>
                         {k.kapsam_id === 0
                           ? <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("kök")}</span>
-                          : <span title={k.kapsam_ad ? `Bayi: ${k.kapsam_ad}` : cevirT(cevir("Silinmiş bayi #{0}"), k.kapsam_id)}
+                          : <span title={k.kapsam_ad ? `${cevir("Bayi")}: ${k.kapsam_ad}` : cevirT(cevir("Silinmiş bayi #{0}"), k.kapsam_id)}
                                   className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold ${
                                     k.kapsam_ad
                                       ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
@@ -271,7 +289,7 @@ export default function DenetimPage() {
                         k.basarili
                           ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
                           : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>
-                        {k.basarili ? 'başarılı' : cevir("başarısız")}
+                        {k.basarili ? cevir('başarılı') : cevir("başarısız")}
                       </span>
                     </td>
                   </tr>
@@ -288,10 +306,10 @@ export default function DenetimPage() {
             className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">
             {cevir(cevir("← Önceki"))}
           </button>
-          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">Sayfa {sayfa + 1} / {sonSayfa + 1}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{cevir("Sayfa")} {sayfa + 1} / {sonSayfa + 1}</span>
           <button onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}
             className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">
-            Sonraki →
+            {cevir("Sonraki →")}
           </button>
         </div>
       )}

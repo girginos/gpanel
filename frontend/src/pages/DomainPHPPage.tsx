@@ -39,6 +39,48 @@ const PMS = [
 
 
 const PHP_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "static (sabit havuz)": "static (fixed pool)",
+  "Kaydedildi.": "Saved.",
+  "Debug log temizlenemedi": "Failed to clear debug log",
+  "Sistem kullanıcısı:": "System user:",
+  "Burada belirlediğiniz ayarlar PHP-FPM havuzuna (": "The settings you define here are written to the PHP-FPM pool (",
+  ") yazılır. Web sitesindeki ": ") . The website's ",
+  "Kaydet ile uygula": "Apply with Save",
+  "PHP'nin erişebileceği dizinler (boş = sınır yok). : ile ayır": "Directories PHP can access (empty = no limit). Separate with :",
+  "örn: /home/kullanici/:/tmp/": "e.g: /home/user/:/tmp/",
+  "PHP Debug Modu": "PHP Debug Mode",
+  "Debug modunu kapat": "Turn off debug mode",
+  "Debug modunu ac": "Turn on debug mode",
+  "Debug modu": "Debug mode",
+  "Acik": "On",
+  "Kapali": "Off",
+  "Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip": "When on, it prints PHP errors to the screen and reliably catches fatal errors, saving them to",
+  "'a kaydeder. Uygulama kendi ": ". Even if the application calls its own ",
+  "'ini cagirsa bile fatal hatalar yine yakalanir.": ", fatal errors are still caught.",
+  "⚠️ Debug modu acikken ": "⚠️ When debug mode is on, ",
+  " ve ": " and ",
+  " zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ": " are forced; error details may be visible to visitors. Turn it on only while troubleshooting, and on a live site ",
+  "kapatin": "turn it off",
+  ". Degisiklik ": ". The change ",
+  "'ten sonra uygulanir.": " is applied afterwards.",
+  "Son Hatalar (Debug Log)": "Recent Errors (Debug Log)",
+  "En yeni fatal hatalar ustte. Kaynak: ": "Newest fatal errors on top. Source: ",
+  " (son 200 satir).": " (last 200 lines).",
+  "Temizle": "Clear",
+  "Yukleniyor…": "Loading…",
+  "Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.": "No fatal errors recorded yet. If an error occurs it will appear here.",
+  "Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.": "Debug mode is off. To record fatal errors, turn on debug mode above and save.",
+  "PHP-FPM Havuzu": "PHP-FPM Pool",
+  "Process manager stratejisi": "Process manager strategy",
+  "için yüklü": "has",
+  "modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.": "modules installed. Modules are server-level — they cannot be disabled for a single domain and are managed server-wide.",
+  "Bloke": "Blocked",
+  "Aktif": "Active",
+  "'a yazılır.": " is written.",
+  "(engellenmemiş),": "(not blocked),",
+  "php.ini sözdizimini kullanarak ek parametreler tanımlayın. Örn: ": "Define additional parameters using php.ini syntax. E.g: ",
+  "Kaydet ve Uygula": "Save and Apply",
   "<? ?> kısa tag desteği": "<? ?> short tag support",
   "Aynı anda en çok kaç PHP worker": "Max concurrent PHP workers",
   "Açık = aktif": "On = active",
@@ -111,7 +153,7 @@ export default function DomainPHPPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: a })
-      setBasari(`✓ Kaydedildi. PHP ${data.php_surum}, socket: ${data.socket}`)
+      setBasari(`✓ ${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`)
       yukle()
     } catch (e) {
       setHata(apiHata(e, cevir("Kaydetme başarısız")))
@@ -144,7 +186,7 @@ export default function DomainPHPPage() {
       await api.delete(`/domains/${id}/php/debug-log`)
       setDlog([])
     } catch (e) {
-      setHata(apiHata(e, 'Debug log temizlenemedi'))
+      setHata(apiHata(e, cevir("Debug log temizlenemedi")))
     } finally {
       setDlogYuk(false)
     }
@@ -153,7 +195,7 @@ export default function DomainPHPPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: yanit?.alan_adi || '...', href: `/abonelikler/${id}` },
         { etiket: cevir("PHP Ayarları") },
       ]} />
@@ -161,12 +203,11 @@ export default function DomainPHPPage() {
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("PHP Ayarları")}</h1>
       {yanit && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{yanit.alan_adi}</Link>
-        {' · Sistem kullanıcısı: '}<code className="font-mono">{yanit.sk}</code>
+        {' · '}{cevir("Sistem kullanıcısı:")}{' '}<code className="font-mono">{yanit.sk}</code>
       </p>}
 
       <div className="mb-5 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-        Burada belirlediğiniz ayarlar PHP-FPM havuzuna (<code className="font-mono">php_admin_value/flag</code>) yazılır.
-        Web sitesindeki <code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
+        {cevir("Burada belirlediğiniz ayarlar PHP-FPM havuzuna (")}<code className="font-mono">php_admin_value/flag</code>{cevir(") yazılır. Web sitesindeki ")}<code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
         {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
       </div>
 
@@ -205,7 +246,7 @@ export default function DomainPHPPage() {
                     {akt ? (
                       <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Aktif")}</span>
                     ) : (
-                      <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-semibold">Kaydet ile uygula</span>
+                      <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Kaydet ile uygula")}</span>
                     )}
                   </span>
                 )
@@ -250,8 +291,8 @@ export default function DomainPHPPage() {
             <Tek e="include_path" h={cevir("Script include dizinleri (Linux: : ile ayır)")}>
               <Txt value={a.include_path} onChange={v => P('include_path', v)} mono />
             </Tek>
-            <Tek e="open_basedir" h="PHP'nin erişebileceği dizinler (boş = sınır yok). : ile ayır">
-              <Txt value={a.open_basedir} onChange={v => P('open_basedir', v)} mono placeholder="örn: /home/kullanici/:/tmp/" />
+            <Tek e="open_basedir" h={cevir("PHP'nin erişebileceği dizinler (boş = sınır yok). : ile ayır")}>
+              <Txt value={a.open_basedir} onChange={v => P('open_basedir', v)} mono placeholder={cevir("örn: /home/kullanici/:/tmp/")} />
             </Tek>
             <Tek e="session.save_path" h={cevir("Session dosyaları dizini (boş = /home/{sk}/tmp)")}>
               <Txt value={a.session_save_path} onChange={v => P('session_save_path', v)} mono />
@@ -262,40 +303,38 @@ export default function DomainPHPPage() {
           </Kart>
 
           {/* PHP Debug Modu — master switch */}
-          <Kart baslik="PHP Debug Modu">
+          <Kart baslik={cevir("PHP Debug Modu")}>
             <div className="flex items-start gap-4">
               <button onClick={() => P('debug_mode', !a.debug_mode)}
                 className={`flex-shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
-                title={a.debug_mode ? 'Debug modunu kapat' : 'Debug modunu ac'}>
+                title={a.debug_mode ? cevir("Debug modunu kapat") : cevir("Debug modunu ac")}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${a.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Debug modu</span>
+                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Debug modu")}</span>
                   <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${a.debug_mode ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-                    {a.debug_mode ? 'Acik' : 'Kapali'}
+                    {a.debug_mode ? cevir("Acik") : cevir("Kapali")}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 leading-relaxed">
-                  Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip
-                  <code className="font-mono"> .gpanel/php_debug.log</code>'a kaydeder. Uygulama kendi <code className="font-mono">error_reporting(0)</code>'ini
-                  cagirsa bile fatal hatalar yine yakalanir.
+                  {cevir("Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip")}
+                  <code className="font-mono"> .gpanel/php_debug.log</code>{cevir("'a kaydeder. Uygulama kendi ")}<code className="font-mono">error_reporting(0)</code>{cevir("'ini cagirsa bile fatal hatalar yine yakalanir.")}
                 </p>
               </div>
             </div>
             {a.debug_mode && (
               <div className="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-                ⚠️ Debug modu acikken <strong>display_errors</strong> ve <strong>error_reporting = E_ALL</strong> zorlanir; hata detaylari ziyaretcilere gorunebilir.
-                Yalnizca sorun giderirken acin, canli sitede <strong>kapatin</strong>. Degisiklik <strong>{cevir("Kaydet")}</strong>'ten sonra uygulanir.
+                {cevir("⚠️ Debug modu acikken ")}<strong>display_errors</strong>{cevir(" ve ")}<strong>error_reporting = E_ALL</strong>{cevir(" zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ")}<strong>{cevir("kapatin")}</strong>{cevir(". Degisiklik ")}<strong>{cevir("Kaydet")}</strong>{cevir("'ten sonra uygulanir.")}
               </div>
             )}
           </Kart>
 
           {/* Son Hatalar — debug log paneli */}
-          <Kart baslik="Son Hatalar (Debug Log)">
+          <Kart baslik={cevir("Son Hatalar (Debug Log)")}>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <p className="text-xs text-slate-500 dark:text-slate-500 min-w-0 break-all">
-                En yeni fatal hatalar ustte. Kaynak: <code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code> (son 200 satir).
+                {cevir("En yeni fatal hatalar ustte. Kaynak: ")}<code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code>{cevir(" (son 200 satir).")}
               </p>
               <div className="flex gap-2 flex-shrink-0">
                 <button onClick={debugLogYukle} disabled={dlogYuk}
@@ -304,17 +343,17 @@ export default function DomainPHPPage() {
                 </button>
                 <button onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
                   className="px-3 py-1.5 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs rounded-md disabled:opacity-40">
-                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> Temizle</span>
+                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> {cevir("Temizle")}</span>
                 </button>
               </div>
             </div>
             {dlogYuk ? (
-              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">Yukleniyor…</div>
+              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">{cevir("Yukleniyor…")}</div>
             ) : dlog.length === 0 ? (
               <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
                 {a.debug_mode
-                  ? 'Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.'
-                  : 'Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.'}
+                  ? cevir("Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.")
+                  : cevir("Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.")}
               </div>
             ) : (
               <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-950">
@@ -330,12 +369,12 @@ export default function DomainPHPPage() {
           </Kart>
 
           {/* PHP-FPM */}
-          <Kart baslik="PHP-FPM Havuzu">
+          <Kart baslik={cevir("PHP-FPM Havuzu")}>
             <Grid>
-              <Sec etiket="pm" yardim="Process manager stratejisi">
+              <Sec etiket="pm" yardim={cevir("Process manager stratejisi")}>
                 <select value={a.pm_strategy} onChange={e => P('pm_strategy', e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono">
-                  {PMS.map(p => <option key={p.v} value={p.v}>{p.t}</option>)}
+                  {PMS.map(p => <option key={p.v} value={p.v}>{cevir(p.t)}</option>)}
                 </select>
               </Sec>
               <Saytec etiket="pm.max_children" yardim={cevir("Aynı anda en çok kaç PHP worker")} value={a.pm_max_children} onChange={v => P('pm_max_children', v)} />
@@ -350,7 +389,7 @@ export default function DomainPHPPage() {
           <Kart baslik={cevir("Kurulu PHP Modülleri")}>
             <div className="flex items-baseline justify-between mb-2">
               <p className="text-xs text-slate-500 dark:text-slate-500">
-                PHP {yanit.php_surum} için yüklü <strong>{yanit.moduller?.length || 0}</strong> modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.
+                PHP {yanit.php_surum} {cevir("için yüklü")} <strong>{yanit.moduller?.length || 0}</strong> {cevir("modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.")}
               </p>
               <Link to="/sistem/php-modulleri" className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
                 {cevir(cevir("↗ Sunucu Modüllerini Yönet"))}
@@ -368,7 +407,7 @@ export default function DomainPHPPage() {
           {/* Tehlikeli Fonksiyonlar — per-domain disable_functions toggle */}
           <Kart baslik={cevir("Tehlikeli Fonksiyonları Devre Dışı Bırak")}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">
-              {cevir(cevir("Bu fonksiyonlar shell injection, RCE, malware riski oluşturur. Kategori bazlı toggle ile"))} <code className="font-mono">disable_functions</code>'a yazılır. <strong>{cevir("Açık = aktif")}</strong> (engellenmemiş), <strong>{cevir("kapalı = bloke")}</strong>.
+              {cevir(cevir("Bu fonksiyonlar shell injection, RCE, malware riski oluşturur. Kategori bazlı toggle ile"))} <code className="font-mono">disable_functions</code>{cevir("'a yazılır.")} <strong>{cevir("Açık = aktif")}</strong> {cevir("(engellenmemiş),")} <strong>{cevir("kapalı = bloke")}</strong>.
             </p>
             {(() => {
               const gruplar = [
@@ -421,24 +460,24 @@ export default function DomainPHPPage() {
                     const blokeli = durum === 'blokeli'
                     const karisik = durum === 'karisik'
                     return (
-                      <div key={g.ad} className={`border rounded-lg p-3 ${renkMap[g.renk]}`}>
+                      <div key={g.renk} className={`border rounded-lg p-3 ${renkMap[g.renk]}`}>
                         <div className="flex items-start gap-3">
                           <button onClick={() => grupTogga(g)}
                             className={`flex-shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition ${
                               blokeli ? 'bg-red-500' : (karisik ? 'bg-amber-400' : 'bg-emerald-500')
                             }`}
-                            title={blokeli ? 'Tümünü aç (etkin yap)' : (karisik ? 'Tümünü kapat' : cevir("Tümünü kapat (engelle)"))}>
+                            title={blokeli ? cevir("Tümünü aç (etkin yap)") : (karisik ? cevir("Tümünü kapat") : cevir("Tümünü kapat (engelle)"))}>
                             <span className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-slate-800 shadow transition ${
                               blokeli ? 'translate-x-1' : 'translate-x-5'
                             }`} />
                           </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2">
-                              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{g.ad}</span>
+                              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(g.ad)}</span>
                               <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium ${
                                 blokeli ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' : (karisik ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300')
                               }`}>
-                                {blokeli ? 'Bloke' : (karisik ? 'Karışık' : 'Aktif')}
+                                {blokeli ? cevir("Bloke") : (karisik ? cevir("Karışık") : cevir("Aktif"))}
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 font-mono mt-0.5 break-all">
@@ -464,7 +503,7 @@ export default function DomainPHPPage() {
           {/* Additional */}
           <Kart baslik={cevir("Ek Yapılandırma Direktifleri")}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">
-              php.ini sözdizimini kullanarak ek parametreler tanımlayın. Örn: <code className="font-mono">extension=imagick.so</code>
+              {cevir("php.ini sözdizimini kullanarak ek parametreler tanımlayın. Örn: ")}<code className="font-mono">extension=imagick.so</code>
             </p>
             <textarea value={a.ek_direktifler} onChange={e => P('ek_direktifler', e.target.value)}
               rows={5}
@@ -476,7 +515,7 @@ export default function DomainPHPPage() {
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
               className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-              {isleniyor ? 'Kaydediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> Kaydet ve Uygula</span>}
+              {isleniyor ? cevir("Kaydediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
               className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">

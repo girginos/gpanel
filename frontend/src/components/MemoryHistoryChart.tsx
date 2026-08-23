@@ -22,6 +22,16 @@ const RENK = '#0ea5e9' // sky — CPU grafiğinden görsel olarak ayrışsın
 // LoadHistoryChart ile aynı görsel dil: alan + gradyan + yumuşatılmış çizgi + ızgara + hover.
 
 const CMP_EN: Record<string, string> = {
+  "Bellek kullanımı": "Memory usage",
+  "Kullanılan RAM yüzdesi · 0–100%": "Used RAM percentage · 0–100%",
+  "Bellek": "Memory",
+  "Henüz veri toplanmadı": "No data collected yet",
+  "Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.": "Samples are recorded every minute; the chart fills in a few minutes.",
+  "%85 kritik": "85% critical",
+  "1sa": "1h",
+  "6sa": "6h",
+  "24sa": "24h",
+  "7g": "7d",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -115,7 +125,7 @@ export default function MemoryHistoryChart() {
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${saat === a.saat
                 ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              {a.et}
+              {cevir(a.et)}
             </button>
           ))}
         </div>
@@ -162,7 +172,7 @@ export default function MemoryHistoryChart() {
           {/* %85 kritik referans çizgisi */}
           <g>
             <line x1={ML} y1={g.yAt(85)} x2={W - MR} y2={g.yAt(85)} stroke="#ef4444" strokeWidth="1" strokeDasharray="5 5" opacity="0.5" />
-            <text x={W - MR} y={g.yAt(85) - 5} textAnchor="end" fill="#ef4444" fontSize="10" opacity="0.8">%85 kritik</text>
+            <text x={W - MR} y={g.yAt(85) - 5} textAnchor="end" fill="#ef4444" fontSize="10" opacity="0.8">{cevir("%85 kritik")}</text>
           </g>
 
           {/* X etiketleri */}

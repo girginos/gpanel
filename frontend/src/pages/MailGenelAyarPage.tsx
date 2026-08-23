@@ -30,6 +30,15 @@ const MGENEL_EN: Record<string, string> = {
   "Spam/kötüye kullanımı önler. 0 = sınırsız. En kısıtlayıcı olan uygulanır. Domain planı özel limit belirlemişse o öncelikli olur.": "Prevents spam/abuse. 0 = unlimited. The most restrictive one applies. If a domain plan sets a specific limit it takes precedence.",
   "Sunucu genelinde geçerli mail ayarları (tüm domainler için varsayılan).": "Server-wide mail settings (default for all domains).",
   "✓ Ayarlar kaydedildi ve sunucuya uygulandı.": "✓ Settings saved and applied to the server.",
+  "Türkçe": "English",
+  "Kaydedilemedi": "Failed to save",
+  "Mesaj Boyutu": "Message Size",
+  "Maksimum mesaj boyutu (MB)": "Maximum message size (MB)",
+  "Tek bir kutunun saatlik giden limiti.": "Hourly outgoing limit for a single mailbox.",
+  "— 10 alıcıya giden 1 mesaj, 10 mesaj sayılır": "— 1 message to 10 recipients counts as 10 messages",
+  "DNSBL (kara delik listeleri)": "DNSBL (blackhole lists)",
+  "Kaydediliyor…": "Saving…",
+  "Kaydet ve Uygula": "Save and Apply",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MGENEL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -64,7 +73,7 @@ export default function MailGenelAyarPage() {
     try {
       await api.put('/eklenti/mail/genel-ayarlar', a)
       setBildirim(cevir("✓ Ayarlar kaydedildi ve sunucuya uygulandı."))
-    } catch (e) { setHata(apiHata(e, 'Kaydedilemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kaydedilemedi"))) }
     finally { setKaydediliyor(false) }
   }
 
@@ -80,27 +89,27 @@ export default function MailGenelAyarPage() {
       {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div> : (
         <div className="space-y-5">
           <section className={kart}>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">Mesaj Boyutu</h2>
-            <SayiAlan etiket="Maksimum mesaj boyutu (MB)" aciklama={cevir("Bir e-postanın (ekler dahil) izin verilen en büyük boyutu.")} min={1} deger={a.max_mesaj_mb} setir={n => setA(s => ({ ...s, max_mesaj_mb: n }))} />
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("Mesaj Boyutu")}</h2>
+            <SayiAlan etiket={cevir("Maksimum mesaj boyutu (MB)")} aciklama={cevir("Bir e-postanın (ekler dahil) izin verilen en büyük boyutu.")} min={1} deger={a.max_mesaj_mb} setir={n => setA(s => ({ ...s, max_mesaj_mb: n }))} />
           </section>
 
           <section className={kart}>
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Giden Gönderim Limitleri (saatlik)")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Spam/kötüye kullanımı önler. 0 = sınırsız. En kısıtlayıcı olan uygulanır. Domain planı özel limit belirlemişse o öncelikli olur.")}</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              <SayiAlan etiket={cevir("Posta kutusu başına")} aciklama="Tek bir kutunun saatlik giden limiti." deger={a.saatlik_kutu} setir={n => setA(s => ({ ...s, saatlik_kutu: n }))} />
+              <SayiAlan etiket={cevir("Posta kutusu başına")} aciklama={cevir("Tek bir kutunun saatlik giden limiti.")} deger={a.saatlik_kutu} setir={n => setA(s => ({ ...s, saatlik_kutu: n }))} />
               <SayiAlan etiket={cevir("Alan adı başına")} aciklama={cevir("Bir domainin tüm kutuları toplam.")} deger={a.saatlik_domain} setir={n => setA(s => ({ ...s, saatlik_domain: n }))} />
               <SayiAlan etiket={cevir("IP başına")} aciklama={cevir("Aynı IP'den saatlik giden.")} deger={a.saatlik_ip} setir={n => setA(s => ({ ...s, saatlik_ip: n }))} />
             </div>
             <label className="mt-4 inline-flex items-center gap-2.5 cursor-pointer">
               <input type="checkbox" checked={a.alici_say} onChange={e => setA(s => ({ ...s, alici_say: e.target.checked }))}
                 className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
-              <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("Mesaj yerine alıcı say")} <span className="text-slate-400">— 10 alıcıya giden 1 mesaj, 10 mesaj sayılır</span></span>
+              <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("Mesaj yerine alıcı say")} <span className="text-slate-400">{cevir("— 10 alıcıya giden 1 mesaj, 10 mesaj sayılır")}</span></span>
             </label>
           </section>
 
           <section className={kart}>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">DNSBL (kara delik listeleri)</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("DNSBL (kara delik listeleri)")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">{cevir("Sağlık analizinde kontrol edilecek DNSBL bölgeleri. Noktalı virgül veya virgülle ayırın.")}</p>
             <input value={a.dnsbl} onChange={e => setA(s => ({ ...s, dnsbl: e.target.value }))} placeholder="zen.spamhaus.org; bl.spamcop.net"
               className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
@@ -109,7 +118,7 @@ export default function MailGenelAyarPage() {
           <div className="flex justify-end">
             <button onClick={kaydet} disabled={kaydediliyor}
               className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-6 py-2.5 rounded-lg disabled:opacity-60 transition-colors">
-              {kaydediliyor ? 'Kaydediliyor…' : 'Kaydet ve Uygula'}
+              {kaydediliyor ? cevir("Kaydediliyor…") : cevir("Kaydet ve Uygula")}
             </button>
           </div>
         </div>

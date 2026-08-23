@@ -32,6 +32,32 @@ const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-
 
 
 const BPDUZ_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Kaydedilemedi": "Could not save",
+  "Yeni plan": "New plan",
+  "Yeni Bayi Planı": "New Reseller Plan",
+  "Bayiye satılan kaynak paketi: limitler, aşım ve fazla satma ilkeleri.": "Resource package sold to the reseller: limits, overage and overselling policies.",
+  "bayi kullanıyor": "resellers using it",
+  "Kaynak limitleri": "Resource limits",
+  "Domain (hosting) limiti": "Domain (hosting) limit",
+  "Disk limiti (MB)": "Disk limit (MB)",
+  "Trafik limiti (MB/ay)": "Traffic limit (MB/month)",
+  "kutu başına en fazla {0} GB": "at most {0} GB per mailbox",
+  "Fazla satma ilkesi": "Overselling policy",
+  "Fazla satmaya izin verilmez": "Overselling is not allowed",
+  "Fazla satmaya izin verilir": "Overselling is allowed",
+  "Kaydediliyor…": "Saving…",
+  "Kaydet": "Save",
+  "Bayi Planları": "Reseller Plans",
+  "Tanım": "Definition",
+  "Plan adı": "Plan name",
+  "Açıklama": "Description",
+  "Başlangıç paketi": "Starter package",
+  "sınırsız": "unlimited",
+  "İptal": "Cancel",
+  "Fiyat (kuruş)": "Price (cents)",
+  "belirtilmemiş": "unspecified",
+  "Bronz Bayi": "Bronze Reseller",
   "0 = sınırsız. Bu limitler bayiye atandığı anda kopyalanır; planı sonradan değiştirmek mevcut bayileri etkilemez.": "0 = unlimited. These limits are copied when assigned to a reseller; changing the plan later does not affect existing resellers.",
   "Bayi, hosting planlarının kotaları toplamı paketini aşacak şekilde hesap açamaz (taahhüt kontrolü).": "A reseller cannot open accounts exceeding the sum of the hosting plan quotas in their package (commitment check).",
   "Bayinin BİR domaine tanımlayabileceği en fazla kutu sayısı. 0 = sınırsız": "The maximum number of mailboxes the reseller can define for ONE domain. 0 = unlimited",
@@ -94,7 +120,7 @@ export default function BayiPlaniDuzenlePage() {
       else await api.put(`/reseller-plans/${id}`, p)
       nav('/bayi-planlari')
     } catch (err) {
-      setHata(apiHata(err, 'Kaydedilemedi'))
+      setHata(apiHata(err, cevir('Kaydedilemedi')))
       setKaydediyor(false)
     }
   }
@@ -103,20 +129,20 @@ export default function BayiPlaniDuzenlePage() {
 
   return (
     <form onSubmit={kaydet} className="px-4 py-4 sm:px-6 sm:py-5 max-w-4xl">
-      <Breadcrumb items={[{ etiket: cevir("Bayi Planları"), href: '/bayi-planlari' }, { etiket: yeni ? 'Yeni plan' : p.ad || '…' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Bayi Planları"), href: '/bayi-planlari' }, { etiket: yeni ? cevir('Yeni plan') : p.ad || '…' }]} />
 
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {yeni ? 'Yeni Bayi Planı' : p.ad}
+            {yeni ? cevir('Yeni Bayi Planı') : p.ad}
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {cevir(cevir("Bayiye satılan kaynak paketi: limitler, aşım ve fazla satma ilkeleri."))}
+            {cevir("Bayiye satılan kaynak paketi: limitler, aşım ve fazla satma ilkeleri.")}
           </p>
         </div>
         {!yeni && !!p.bayi_sayisi && (
           <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
-            {p.bayi_sayisi} bayi kullanıyor
+            {p.bayi_sayisi} {cevir("bayi kullanıyor")}
           </span>
         )}
       </div>
@@ -127,7 +153,7 @@ export default function BayiPlaniDuzenlePage() {
         <Bolum baslik={cevir("Tanım")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Alan etiket={cevir("Plan adı")} gerekli>
-              <input className={inp} required maxLength={100} placeholder="Bronz Bayi"
+              <input className={inp} required maxLength={100} placeholder={cevir("Bronz Bayi")}
                      value={p.ad} onChange={e => S('ad', e.target.value)} />
             </Alan>
             <Alan etiket={cevir("Açıklama")}>
@@ -137,17 +163,17 @@ export default function BayiPlaniDuzenlePage() {
           </div>
         </Bolum>
 
-        <Bolum baslik="Kaynak limitleri" alt={cevir("0 = sınırsız. Bu limitler bayiye atandığı anda kopyalanır; planı sonradan değiştirmek mevcut bayileri etkilemez.")}>
+        <Bolum baslik={cevir("Kaynak limitleri")} alt={cevir("0 = sınırsız. Bu limitler bayiye atandığı anda kopyalanır; planı sonradan değiştirmek mevcut bayileri etkilemez.")}>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Alan etiket="Domain (hosting) limiti" ipucu={cevir("Bayinin açabileceği hosting hesabı sayısı")}>
+            <Alan etiket={cevir("Domain (hosting) limiti")} ipucu={cevir("Bayinin açabileceği hosting hesabı sayısı")}>
               <input type="number" min={0} className={inp} value={p.max_domain}
                      onChange={e => S('max_domain', Number(e.target.value))} />
             </Alan>
-            <Alan etiket="Disk limiti (MB)" ipucu={p.max_disk_mb > 0 ? `${(p.max_disk_mb / 1024).toFixed(1)} GB` : cevir("sınırsız")}>
+            <Alan etiket={cevir("Disk limiti (MB)")} ipucu={p.max_disk_mb > 0 ? `${(p.max_disk_mb / 1024).toFixed(1)} GB` : cevir("sınırsız")}>
               <input type="number" min={0} className={inp} value={p.max_disk_mb}
                      onChange={e => S('max_disk_mb', Number(e.target.value))} />
             </Alan>
-            <Alan etiket="Trafik limiti (MB/ay)" ipucu={p.max_trafik_mb > 0 ? `${(p.max_trafik_mb / 1024).toFixed(1)} GB` : cevir("sınırsız")}>
+            <Alan etiket={cevir("Trafik limiti (MB/ay)")} ipucu={p.max_trafik_mb > 0 ? `${(p.max_trafik_mb / 1024).toFixed(1)} GB` : cevir("sınırsız")}>
               <input type="number" min={0} className={inp} value={p.max_trafik_mb}
                      onChange={e => S('max_trafik_mb', Number(e.target.value))} />
             </Alan>
@@ -200,17 +226,17 @@ export default function BayiPlaniDuzenlePage() {
           </fieldset>
         </Bolum>
 
-        <Bolum baslik="Fazla satma ilkesi" alt={cevir("Bayinin, kendisine ayrılandan daha fazla kaynağı müşterilerine satıp satamayacağını belirler.")}>
+        <Bolum baslik={cevir("Fazla satma ilkesi")} alt={cevir("Bayinin, kendisine ayrılandan daha fazla kaynağı müşterilerine satıp satamayacağını belirler.")}>
           <fieldset className="space-y-3">
-            <legend className="sr-only">Fazla satma ilkesi</legend>
+            <legend className="sr-only">{cevir("Fazla satma ilkesi")}</legend>
             <Secenek
               secili={!p.fazla_satis} onSec={() => S('fazla_satis', false)}
-              baslik="Fazla satmaya izin verilmez"
+              baslik={cevir("Fazla satmaya izin verilmez")}
               aciklama={cevir("Bayi, hosting planlarının kotaları toplamı paketini aşacak şekilde hesap açamaz (taahhüt kontrolü).")}
             />
             <Secenek
               secili={p.fazla_satis} onSec={() => S('fazla_satis', true)}
-              baslik="Fazla satmaya izin verilir"
+              baslik={cevir("Fazla satmaya izin verilir")}
               aciklama={cevir("Taahhüt yerine gerçek kullanım esas alınır; bayi kağıt üzerinde paketinden fazlasını satabilir.")}
             />
           </fieldset>
@@ -234,7 +260,7 @@ export default function BayiPlaniDuzenlePage() {
       <div className="mt-6 flex flex-wrap gap-2">
         <button type="submit" disabled={kaydediyor}
                 className="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-          {kaydediyor ? 'Kaydediliyor…' : yeni ? 'Planı oluştur' : 'Kaydet'}
+          {kaydediyor ? cevir('Kaydediliyor…') : yeni ? cevir('Planı oluştur') : cevir('Kaydet')}
         </button>
         <Link to="/bayi-planlari"
               className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">

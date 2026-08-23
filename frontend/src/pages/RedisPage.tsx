@@ -32,6 +32,23 @@ const REDIS_EN: Record<string, string> = {
   "Redis cache etkinleştirildi. WordPress dışı uygulamalar için aşağıdaki bilgileri tanımlayın.": "Redis cache enabled. Define the info below for non-WordPress applications.",
   "Redis cache kapatıldı.": "Redis cache disabled.",
   "Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir.": "Disable Redis cache? The ACL user of this domain is deleted.",
+  "Redis cache etkinleştirildi ve {0} WordPress kurulumu otomatik bağlandı — ekstra bir şey yapmanıza gerek yok.": "Redis cache enabled and {0} WordPress installation(s) connected automatically — you don't need to do anything extra.",
+  "Emin misiniz?": "Are you sure?",
+  "Anasayfa": "Home",
+  "● Aktif": "● Active",
+  "Bu domaine": "For this domain, an",
+  "izole (kendine ait) bir Redis nesne cache'i": "isolated (dedicated) Redis object cache",
+  "tahsis eder — WordPress ve dinamik uygulamalar veritabanı yükünü azaltıp hızlanır. Diğer siteler bu cache'e erişemez.": "is allocated — WordPress and dynamic apps reduce database load and speed up. Other sites cannot access this cache.",
+  "Sunucu": "Server",
+  "WordPress kurulumu": "WordPress setup",
+  "Kopyala": "Copy",
+  "1) Aşağıdaki satırları": "1) Add the lines below to your",
+  "dosyanıza ekleyin.": "file.",
+  "2) WordPress panelinden": "2) From the WordPress panel, install the",
+  " eklentisini kurup \"Enable Object Cache\" deyin.": " plugin and click \"Enable Object Cache\".",
+  "göster": "show",
+  "gizle": "hide",
+  "kopyala": "copy",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (REDIS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -67,7 +84,7 @@ export default function RedisPage() {
     finally { setMesgul(false) }
   }
   async function kapat() {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), tehlike: true }))) return
     setHata(null); setBasari(null); setMesgul(true)
     try {
       await api.delete(`/domains/${id}/redis`)
@@ -85,7 +102,7 @@ export default function RedisPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: 'Redis Cache' }]} />
+      <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: 'Redis Cache' }]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl">⚡</span>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Redis Cache</h1>
@@ -93,12 +110,12 @@ export default function RedisPage() {
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${d.aktif
             ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
             : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-            {d.aktif ? '● Aktif' : cevir("Kapalı")}
+            {d.aktif ? cevir("● Aktif") : cevir("Kapalı")}
           </span>
         )}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-        Bu domaine <strong>izole (kendine ait) bir Redis nesne cache'i</strong> tahsis eder — WordPress ve dinamik uygulamalar veritabanı yükünü azaltıp hızlanır. Diğer siteler bu cache'e erişemez.
+        {cevir("Bu domaine")} <strong>{cevir("izole (kendine ait) bir Redis nesne cache'i")}</strong> {cevir("tahsis eder — WordPress ve dinamik uygulamalar veritabanı yükünü azaltıp hızlanır. Diğer siteler bu cache'e erişemez.")}
       </p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -113,7 +130,7 @@ export default function RedisPage() {
           <p className="text-xs text-slate-400 mb-4">{cevir("Etkinleştirince izole bir ACL kullanıcısı + bağlantı bilgisi oluşturulur.")}</p>
           <button onClick={ac} disabled={mesgul}
             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
-            {mesgul ? 'Etkinleştiriliyor…' : cevir("Redis Cache Etkinleştir")}
+            {mesgul ? cevir("Etkinleştiriliyor…") : cevir("Redis Cache Etkinleştir")}
           </button>
         </div>
       ) : (
@@ -128,7 +145,7 @@ export default function RedisPage() {
               </button>
             </div>
             <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-              <SatirKopya etiket={cevir(cevir("Sunucu"))} deger={`${d.host}:${d.port}`} onKopya={kopyala} kopyalandi={kopyalandi} />
+              <SatirKopya etiket={cevir("Sunucu")} deger={`${d.host}:${d.port}`} onKopya={kopyala} kopyalandi={kopyalandi} />
               <SatirKopya etiket={cevir("Kullanıcı")} deger={d.kullanici} onKopya={kopyala} kopyalandi={kopyalandi} />
               <SatirKopya etiket={cevir("Parola")} deger={d.parola || ''} gizli onKopya={kopyala} kopyalandi={kopyalandi} />
               <SatirKopya etiket={cevir("Anahtar öneki")} deger={d.prefix} onKopya={kopyala} kopyalandi={kopyalandi} />
@@ -139,16 +156,16 @@ export default function RedisPage() {
           {d.wp_snippet && (
             <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">WordPress kurulumu</h3>
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("WordPress kurulumu")}</h3>
                 <button onClick={() => kopyala(d.wp_snippet!, 'wp')}
                   className="text-xs px-2.5 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md">
-                  {kopyalandi === 'wp' ? 'Kopyalandı ✓' : 'Kopyala'}
+                  {kopyalandi === 'wp' ? cevir("Kopyalandı ✓") : cevir("Kopyala")}
                 </button>
               </div>
               <div className="p-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  {cevir(cevir("1) Aşağıdaki satırları"))} <code className="font-mono bg-slate-100 dark:bg-slate-900 px-1 rounded">wp-config.php</code> {cevir("dosyanıza ekleyin.")}
-                  2) WordPress panelinden <strong>Redis Object Cache</strong> eklentisini kurup "Enable Object Cache" deyin.
+                  {cevir("1) Aşağıdaki satırları")} <code className="font-mono bg-slate-100 dark:bg-slate-900 px-1 rounded">wp-config.php</code> {cevir("dosyanıza ekleyin.")}
+                  {cevir("2) WordPress panelinden")} <strong>Redis Object Cache</strong>{cevir(" eklentisini kurup \"Enable Object Cache\" deyin.")}
                 </p>
                 <pre className="text-[11px] font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-3 overflow-x-auto text-slate-700 dark:text-slate-200 whitespace-pre">{d.wp_snippet}</pre>
               </div>
@@ -172,12 +189,12 @@ function SatirKopya({ etiket, deger, gizli, onKopya, kopyalandi }: {
       <span className="flex-1 font-mono text-xs text-slate-800 dark:text-slate-200 truncate">{gorunen}</span>
       {gizli && (
         <button onClick={() => setGoster(g => !g)} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-          {goster ? 'gizle' : cevir("göster")}
+          {goster ? cevir("gizle") : cevir("göster")}
         </button>
       )}
       <button onClick={() => onKopya(deger, etiket)}
         className="text-xs px-2 py-0.5 border border-slate-200 dark:border-slate-700 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
-        {kopyalandi === etiket ? '✓' : 'kopyala'}
+        {kopyalandi === etiket ? '✓' : cevir("kopyala")}
       </button>
     </div>
   )

@@ -29,6 +29,24 @@ const WPP_EN: Record<string, string> = {
   "kök": "root",
   "/ (kök)": "/ (root)",
   "⚠ Parolayı şimdi kaydedin — tekrar gösterilmez.": "⚠ Save the password now — it won't be shown again.",
+  "Türkçe": "English",
+  "{0} kök dizinindeki WordPress kaldırılsın mı?\nWordPress dosyaları ve veritabanı silinir; dizin ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.": "Remove WordPress in the root directory of {0}?\nThe WordPress files and database are deleted; the directory and other files you added are preserved. This cannot be undone.",
+  "{0}{1} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.": "Delete WordPress under {0}{1}?\nAll files in this directory and the database are removed. This cannot be undone.",
+  "Emin misiniz?": "Are you sure?",
+  "Silinemedi": "Could not be deleted",
+  "Anasayfa": "Home",
+  "{0} kurulumda güncelleme mevcut.": "Update available on {0} installation(s).",
+  "kuruldu": "installed",
+  "Kurulu WordPress Siteleri": "Installed WordPress Sites",
+  "Domain": "Domain",
+  "Dizin": "Directory",
+  "Kurulum": "Installation",
+  "Yeni Kurulum": "New Installation",
+  "Benim Blogum": "My Blog",
+  "Admin E-posta": "Admin Email",
+  "Kuruluyor… (~30 sn)": "Installing… (~30 s)",
+  "WordPress Kur": "Install WordPress",
+  "Güncelleme var": "Update available",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WPP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -93,9 +111,9 @@ export default function WordPressPage() {
     // Yikici bir islemde yanlis uyari, uyari olmamasindan daha kotudur.
     const _kok = t.dizin.includes(cevir("kök"))
     const _msj = _kok
-      ? `${t.alan_adi} kök dizinindeki WordPress kaldırılsın mı?\nWordPress dosyaları ve veritabanı silinir; dizin ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.`
-      : `${t.alan_adi}${t.dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: _msj, tehlike: true }))) return
+      ? cevirT(cevir("{0} kök dizinindeki WordPress kaldırılsın mı?\nWordPress dosyaları ve veritabanı silinir; dizin ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz."), t.alan_adi)
+      : cevirT(cevir("{0}{1} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz."), t.alan_adi, t.dizin)
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: _msj, tehlike: true }))) return
     const key = t.domain_id + t.dizin
     setMesgul(key); setHata(null)
     try {
@@ -106,7 +124,7 @@ export default function WordPressPage() {
         await bilgi({ baslik: cevir("Dosyalar silindi, veritabanı KALDI"), mesaj: r.data.db_uyari })
       }
       tumListele()
-    } catch (err) { setHata(apiHata(err, 'Silinemedi')) }
+    } catch (err) { setHata(apiHata(err, cevir('Silinemedi'))) }
     finally { setMesgul(null) }
   }
 
@@ -115,7 +133,7 @@ export default function WordPressPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'WordPress' }]} />
+      <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: 'WordPress' }]} />
       <div className="flex items-center gap-3 mb-1">
         <Ikon d={I.kalem} className="h-6 w-6" />
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">WordPress</h1>
@@ -129,7 +147,7 @@ export default function WordPressPage() {
         <div className="mb-4 px-4 py-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-start gap-3">
           <Ikon d={I.uyari} className="h-5 w-5 shrink-0" />
           <div className="text-sm text-amber-800 dark:text-amber-200">
-            <strong>{eskiler.length} kurulumda güncelleme mevcut.</strong> {cevir(cevir("Eski WordPress sürümleri bilinen güvenlik açıkları içerir — en kısa sürede güncelleyin."))}
+            <strong>{cevirT(cevir("{0} kurulumda güncelleme mevcut."), eskiler.length)}</strong> {cevir("Eski WordPress sürümleri bilinen güvenlik açıkları içerir — en kısa sürede güncelleyin.")}
             <div className="mt-1 text-xs text-amber-700 dark:text-amber-300 font-mono">
               {eskiler.map(e => `${e.alan_adi}${e.dizin === cevir("/ (kök)") ? '' : e.dizin}`).join(' · ')}
             </div>
@@ -141,7 +159,7 @@ export default function WordPressPage() {
       {sonuc && (
         <div className="mb-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/15 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-2">
-            <Ikon d={I.onay} /> WordPress {sonuc.surum} kuruldu
+            <Ikon d={I.onay} /> WordPress {sonuc.surum} {cevir("kuruldu")}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
             <Bilgi et="Site" v={sonuc.site_url} link />
@@ -157,7 +175,7 @@ export default function WordPressPage() {
       {/* Kapsayıcı çerçeve yalnız masaüstünde; mobilde kartlar ikinci bir çerçeveye hapsolmasın. */}
       <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden mb-6">
         <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Kurulu WordPress Siteleri {!tumYuk && <span className="text-slate-400 font-normal">· {tum.length}</span>}</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Kurulu WordPress Siteleri")} {!tumYuk && <span className="text-slate-400 font-normal">· {tum.length}</span>}</h3>
           <button onClick={tumListele} disabled={tumYuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         </div>
         {/* Mobilde yatay kaydırma yok — satırlar kart olur. */}
@@ -165,11 +183,11 @@ export default function WordPressPage() {
           <table className={`${T.tablo} text-sm`}>
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className={T.baslik}>Domain</th>
-                <th className={T.baslik}>Dizin</th>
+                <th className={T.baslik}>{cevir("Domain")}</th>
+                <th className={T.baslik}>{cevir("Dizin")}</th>
                 <th className={T.baslik}>{cevir("Sürüm")}</th>
                 <th className={T.baslik}>{cevir("Durum")}</th>
-                <th className={`${T.baslik} whitespace-nowrap`}>Kurulum</th>
+                <th className={`${T.baslik} whitespace-nowrap`}>{cevir("Kurulum")}</th>
                 <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
               </tr>
             </thead>
@@ -194,14 +212,14 @@ export default function WordPressPage() {
                       <td className={T.hucreBaslik}>
                         <a href={t.site_url} target="_blank" rel="noreferrer" className="font-medium text-slate-800 dark:text-slate-100 hover:text-brand-600 dark:hover:text-brand-400">{t.alan_adi}</a>
                       </td>
-                      <td className={T.hucre} data-etiket="Dizin">
+                      <td className={T.hucre} data-etiket={cevir("Dizin")}>
                         <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{t.dizin}</span>
                       </td>
                       <td className={T.hucre} data-etiket={cevir("Sürüm")}>
                         <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-semibold">{t.surum ? `v${t.surum}` : '—'}</span>
                       </td>
                       <td className={T.hucre} data-etiket={cevir("Durum")}><DurumRozet t={t} /></td>
-                      <td className={T.hucre} data-etiket="Kurulum">
+                      <td className={T.hucre} data-etiket={cevir("Kurulum")}>
                         <span className="text-xs text-slate-500 dark:text-slate-400 font-mono whitespace-nowrap">{t.kurulum_tarihi || '—'}</span>
                       </td>
                       <td className={T.hucreAksiyon}>
@@ -227,22 +245,22 @@ export default function WordPressPage() {
 
       {/* Yeni kurulum */}
       <form onSubmit={kur} className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 max-w-2xl">
-        <h3 className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-3">Yeni Kurulum</h3>
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-3">{cevir("Yeni Kurulum")}</h3>
         <div className="mb-3">
-          <label className="block text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-1.5">Domain</label>
+          <label className="block text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-1.5">{cevir("Domain")}</label>
           <select value={domainId ?? ''} onChange={e => setDomainId(Number(e.target.value))}
             className="w-full sm:w-80 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
             {domainler.map(d => <option key={d.id} value={d.id}>{d.alan_adi}</option>)}
           </select>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Alan et={cevir("Site Başlığı")} v={baslik} set={setBaslik} zorunlu ph="Benim Blogum" />
+          <Alan et={cevir("Site Başlığı")} v={baslik} set={setBaslik} zorunlu ph={cevir("Benim Blogum")} />
           <Alan et={cevir("Alt Dizin (isteğe bağlı)")} v={altDizin} set={setAltDizin} ph={cevir("boş = kök · örn: blog")} mono />
           <Alan et={cevir("Admin Kullanıcı")} v={adminK} set={setAdminK} zorunlu mono />
-          <Alan et="Admin E-posta" v={adminE} set={setAdminE} zorunlu type="email" ph="admin@site.com" />
+          <Alan et={cevir("Admin E-posta")} v={adminE} set={setAdminE} zorunlu type="email" ph="admin@site.com" />
         </div>
         <button disabled={kuruyor || !domainId} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
-          {kuruyor ? 'Kuruluyor… (~30 sn)' : `WordPress Kur${sel ? ` · ${sel.alan_adi}` : ''}`}
+          {kuruyor ? cevir('Kuruluyor… (~30 sn)') : `${cevir('WordPress Kur')}${sel ? ` · ${sel.alan_adi}` : ''}`}
         </button>
       </form>
     </div>
@@ -254,7 +272,7 @@ function DurumRozet({ t }: { t: TumKurulum }) {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 font-medium">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-        Güncelleme var{t.son_surum && ` → v${t.son_surum}`}
+        {cevir("Güncelleme var")}{t.son_surum && ` → v${t.son_surum}`}
       </span>
     )
   }

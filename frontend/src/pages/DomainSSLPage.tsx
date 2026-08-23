@@ -1,4 +1,5 @@
 import i18n from '@/lib/i18n'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
@@ -34,6 +35,39 @@ type KapsamResp = { mail_eklenti: boolean; sunucu_ip: string; kapsamlar: KapsamS
 
 
 const SSL_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "SSL kuruluyor…": "Installing SSL…",
+  "SSL kurulumu — hata": "SSL installation — error",
+  "Mevcut Durum": "Current Status",
+  "Korumalı": "Protected",
+  "Korumasız": "Unprotected",
+  "Kaynak": "Source",
+  "Sertifika yolu": "Certificate path",
+  "Anahtar yolu": "Key path",
+  "SSL'i Kaldır (HTTP'ye dön)": "Remove SSL (revert to HTTP)",
+  "Bu domain için aktif SSL sertifikası yok. Aşağıdan birini kurabilirsiniz.": "There is no active SSL certificate for this domain. You can install one below.",
+  "Self-Signed Sertifika": "Self-Signed Certificate",
+  "Sunucu tarafından öz-imzalı bir sertifika oluşturur. Tarayıcı uyarısı verir ama bağlantı şifrelidir.": "Creates a self-signed certificate on the server. The browser shows a warning but the connection is encrypted.",
+  "Test/dev ortamı için uygun.": "Suitable for test/dev environments.",
+  "✗ Tarayıcıda \"güvenli değil\" uyarısı": "✗ \"Not secure\" warning in the browser",
+  "Kuruluyor…": "Installing…",
+  "Self-Signed Kur": "Install Self-Signed",
+  "Resmi Let's Encrypt sertifikası, tüm tarayıcılarda otomatik güvenilir. 90 günde bir otomatik yenilenir.": "Official Let's Encrypt certificate, automatically trusted in all browsers. Auto-renews every 90 days.",
+  "✓ Otomatik yenileme (cron)": "✓ Automatic renewal (cron)",
+  "için ayrı sertifika alınıp IMAP/POP/SMTP + webmail'e kurulur.": "a separate certificate is obtained and installed for IMAP/POP/SMTP + webmail.",
+  "Let's Encrypt Sertifikası Al": "Get Let's Encrypt Certificate",
+  "Kurulu": "Installed",
+  "DNS yok": "No DNS",
+  "Eksik": "Missing",
+  "Mail eklentisi etkin": "Mail add-on enabled",
+  "Her alt-alan için ayrı sertifika durumu. Posta istemcileri (Outlook, telefon)": "Separate certificate status for each subdomain. Mail clients (Outlook, phone)",
+  "adına bağlanır — o satır “Kurulu” değilse istemci sertifika uyarısı verir.": "connect to this name — if that row is not “Installed”, the client shows a certificate warning.",
+  "Posta": "Mail",
+  "Posta SSL kur": "Install mail SSL",
+  "Bu sayfayı kapatabilirsiniz; kurulum arka planda sürer. Posta SSL'inde 7 alt-alan (mail, webmail, smtp, imap, pop, autoconfig, autodiscover) tek tek doğrulandığı için 1–2 dakika sürebilir.": "You can close this page; installation continues in the background. Mail SSL may take 1–2 minutes because 7 subdomains (mail, webmail, smtp, imap, pop, autoconfig, autodiscover) are verified one by one.",
+  "Onay gerekiyor": "Confirmation required",
+  "Let's Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?": "To obtain a Let's Encrypt certificate, the domain must point to this server with a DNS A record. Continue?",
+  "SSL kaldırılsın mı? Site HTTP'ye dönecek.": "Remove SSL? The site will revert to HTTP.",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "Bitiş": "Expiry",
   "Bu alt alanların da sunucuya DNS A kaydı gerekir.": "These subdomains also need a DNS A record to this server.",
@@ -59,7 +93,7 @@ const SSL_EN: Record<string, string> = {
   "✓ DNS bağımlılığı yok": "✓ No DNS dependency",
   "✓ Tarayıcılarda yeşil kilit": "✓ Green padlock in browsers",
 }
-const cevir = (tr: string): string => (i18n.language === "en" ? (SSL_EN[tr] || tr) : tr)
+const cevir = (tr: string): string => (i18n.language === "en" ? (SSL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DomainSSLPage() {
   useTranslation() // dil degisince re-render aboneligi
@@ -104,9 +138,9 @@ export default function DomainSSLPage() {
         yukle()
         const uyarili = (d.adimlar || []).filter(a => a.durum === 'uyari')
         if (d.durum === 'hata') {
-          setHata('SSL kurulumu başarısız: ' + (d.hata || (d.adimlar || []).find(a => a.durum === 'hata')?.mesaj || ''))
+          setHata(cevir("SSL kurulumu başarısız:") + ' ' + (d.hata || (d.adimlar || []).find(a => a.durum === 'hata')?.mesaj || ''))
         } else if (uyarili.length) {
-          setUyari('SSL kuruldu, bazı adımlar uyarıyla tamamlandı: ' + uyarili.map(a => a.mesaj).filter(Boolean).join(' | '))
+          setUyari(cevir("SSL kuruldu, bazı adımlar uyarıyla tamamlandı:") + ' ' + uyarili.map(a => a.mesaj).filter(Boolean).join(' | '))
         } else {
           setBasari(cevir("SSL kurulumu tamamlandı — site artık HTTPS üzerinden çalışıyor."))
         }
@@ -135,7 +169,7 @@ export default function DomainSSLPage() {
   }, [id])
 
   async function issue(tip: 'self-signed' | 'letsencrypt') {
-    if (tip === 'letsencrypt' && !(await onay({ baslik: 'Onay gerekiyor', mesaj: 'Let\'s Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?' }))) return
+    if (tip === 'letsencrypt' && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("Let's Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?") }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null); setAdimlar([])
     try {
       const govde: { tip: string; mail_ssl?: boolean } = { tip }
@@ -153,7 +187,7 @@ export default function DomainSSLPage() {
   }
 
   async function disable() {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'SSL kaldırılsın mı? Site HTTP\'ye dönecek.' }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("SSL kaldırılsın mı? Site HTTP'ye dönecek.") }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
     try {
       await api.delete(`/domains/${id}/ssl`)
@@ -169,7 +203,7 @@ export default function DomainSSLPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
         { etiket: cevir("SSL/TLS Sertifikaları") },
@@ -193,7 +227,7 @@ export default function DomainSSLPage() {
           <div className="flex items-center gap-2 mb-2">
             {isDurum === 'calisiyor' && <span className="inline-block w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />}
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              {isDurum === 'calisiyor' ? 'SSL kuruluyor…' : isDurum === 'hata' ? 'SSL kurulumu — hata' : cevir("SSL kurulumu tamamlandı")}
+              {isDurum === 'calisiyor' ? cevir("SSL kuruluyor…") : isDurum === 'hata' ? cevir("SSL kurulumu — hata") : cevir("SSL kurulumu tamamlandı")}
             </h2>
           </div>
           {isDurum === 'calisiyor' && (
@@ -226,7 +260,7 @@ export default function DomainSSLPage() {
       {/* Durum kartı */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Mevcut Durum</h2>
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Mevcut Durum")}</h2>
           {durum && (
             durum.aktif && durum.kaynak === 'letsencrypt' ? (
               // Yalnız GERÇEK CA (Let's Encrypt) = tarayıcıda güvenilir → yeşil Korumalı.
@@ -252,10 +286,10 @@ export default function DomainSSLPage() {
           <div className="text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
         ) : durum.aktif ? (
           <div className="space-y-2 text-sm">
-            <Sat e="Kaynak" d={durum.kaynak === 'letsencrypt' ? "Let's Encrypt" : cevir("Self-signed (öz-imzalı)")} />
+            <Sat e={cevir("Kaynak")} d={durum.kaynak === 'letsencrypt' ? "Let's Encrypt" : cevir("Self-signed (öz-imzalı)")} />
             {durum.bitis_iso && <Sat e={cevir("Bitiş")} d={new Date(durum.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'long' })} />}
-            <Sat e="Sertifika yolu" d={durum.cert_yol || '—'} mono />
-            <Sat e="Anahtar yolu" d={durum.key_yol || '—'} mono />
+            <Sat e={cevir("Sertifika yolu")} d={durum.cert_yol || '—'} mono />
+            <Sat e={cevir("Anahtar yolu")} d={durum.key_yol || '—'} mono />
             <button
               onClick={disable}
               disabled={isleniyor || isDurum === 'calisiyor'}
@@ -283,7 +317,7 @@ export default function DomainSSLPage() {
               <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 flex items-center justify-center">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
               </div>
-              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Self-Signed Sertifika</h3>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Self-Signed Sertifika")}</h3>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-500 mb-4">
               {cevir(cevir("Sunucu tarafından öz-imzalı bir sertifika oluşturur. Tarayıcı uyarısı verir ama bağlantı şifrelidir."))}
@@ -292,14 +326,14 @@ export default function DomainSSLPage() {
             <ul className="text-xs text-slate-500 dark:text-slate-500 mb-4 space-y-1">
               <li>{cevir("✓ DNS bağımlılığı yok")}</li>
               <li>{cevir("✓ Anında kurulur")}</li>
-              <li>✗ Tarayıcıda cevir("güvenli değil") uyarısı</li>
+              <li>{cevir("✗ Tarayıcıda \"güvenli değil\" uyarısı")}</li>
             </ul>
             <button
               onClick={() => issue('self-signed')}
               disabled={isleniyor || isDurum === 'calisiyor'}
               className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md transition"
             >
-              {(isleniyor || isDurum === 'calisiyor') ? 'Kuruluyor…' : 'Self-Signed Kur'}
+              {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Self-Signed Kur")}
             </button>
           </div>
 
@@ -315,7 +349,7 @@ export default function DomainSSLPage() {
             </p>
             <ul className="text-xs text-slate-500 dark:text-slate-500 mb-4 space-y-1">
               <li>{cevir("✓ Tarayıcılarda yeşil kilit")}</li>
-              <li>✓ Otomatik yenileme (cron)</li>
+              <li>{cevir("✓ Otomatik yenileme (cron)")}</li>
               <li>{cevir("⚠ Alan adı bu sunucuya DNS ile yönelmiş olmalı")}</li>
             </ul>
             {mailAktif && (
@@ -332,7 +366,7 @@ export default function DomainSSLPage() {
               disabled={isleniyor || isDurum === 'calisiyor'}
               className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-md transition"
             >
-              {(isleniyor || isDurum === 'calisiyor') ? 'Kuruluyor…' : 'Let\'s Encrypt Sertifikası Al'}
+              {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Let's Encrypt Sertifikası Al")}
             </button>
           </div>
         </div>
@@ -354,12 +388,12 @@ function Sat({ e, d, mono }: { e: string; d: string; mono?: boolean }) {
 function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void }) {
   const rozet = (d: KapsamSatir) => {
     if (d.durum === 'kurulu') {
-      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Kurulu</span>
+      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{cevir("Kurulu")}</span>
     }
     if (d.durum === 'dns_yok') {
-      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-400" />DNS yok</span>
+      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-400" />{cevir("DNS yok")}</span>
     }
-    return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />Eksik</span>
+    return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{cevir("Eksik")}</span>
   }
   const eksikMailVar = kapsam.kapsamlar.some(k => k.grup === 'mail' && k.durum === 'eksik')
   return (
@@ -367,11 +401,11 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Sertifika Kapsamı")}</h2>
         {kapsam.mail_eklenti && (
-          <span className="text-[11px] text-slate-400 dark:text-slate-500">Mail eklentisi etkin</span>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Mail eklentisi etkin")}</span>
         )}
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
-        {cevir(cevir("Her alt-alan için ayrı sertifika durumu. Posta istemcileri (Outlook, telefon)"))} <span className="font-mono">mail.{'{'}alan{'}'}</span> {cevir(cevir("adına bağlanır — o satır “Kurulu” değilse istemci sertifika uyarısı verir."))}
+        {cevir("Her alt-alan için ayrı sertifika durumu. Posta istemcileri (Outlook, telefon)")} <span className="font-mono">mail.{'{'}alan{'}'}</span> {cevir("adına bağlanır — o satır “Kurulu” değilse istemci sertifika uyarısı verir.")}
       </p>
       <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
         {kapsam.kapsamlar.map(d => (
@@ -379,14 +413,14 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{d.etiket}</span>
-                <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">{d.grup === 'mail' ? 'Posta' : 'Web'}</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">{d.grup === 'mail' ? cevir("Posta") : 'Web'}</span>
               </div>
               <div className="text-xs font-mono text-slate-400 dark:text-slate-500 truncate">{d.host}</div>
               {d.durum !== 'kurulu' && d.aciklama && (
                 <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{d.aciklama}</div>
               )}
               {d.durum === 'kurulu' && d.bitis_iso && (
-                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Bitiş: {new Date(d.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'medium' })}</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir("Bitiş")}: {new Date(d.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'medium' })}</div>
               )}
             </div>
             {rozet(d)}
@@ -396,7 +430,7 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void
       {eksikMailVar && onKur && (
         <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex items-center justify-between gap-3">
           <span className="text-xs text-amber-800 dark:text-amber-200">{cevir("Posta alt-alanlarına sertifika kurulmamış — Outlook/istemciler şifre sorabilir.")}</span>
-          <button onClick={onKur} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition">Posta SSL kur</button>
+          <button onClick={onKur} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition">{cevir("Posta SSL kur")}</button>
         </div>
       )}
     </div>

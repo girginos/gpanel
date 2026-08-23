@@ -6,6 +6,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import i18n from '@/lib/i18n'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import { useTranslation } from 'react-i18next'
+
+const TOAST_EN: Record<string, string> = {
+  "Kapatmak için tıklayın": "Click to close",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (TOAST_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 type ToastTip = 'basari' | 'hata' | 'bilgi'
 
@@ -79,6 +87,7 @@ export function ToastSaglayici({ children }: { children: ReactNode }) {
 }
 
 function ToastSatir({ kayit, kapat }: { kayit: ToastKaydi; kapat: () => void }) {
+  useTranslation() // dil re-render aboneligi
   const renk =
     kayit.tip === 'basari'
       ? 'border-emerald-200 dark:border-emerald-800/60 bg-white dark:bg-slate-800'
@@ -99,7 +108,7 @@ function ToastSatir({ kayit, kapat }: { kayit: ToastKaydi; kapat: () => void }) 
       className={`pointer-events-auto cursor-pointer flex items-start gap-2.5 rounded-xl border ${renk} shadow-lg shadow-slate-900/5 px-3.5 py-2.5 transition-all duration-200 motion-reduce:transition-none ${
         kayit.cikiyor ? 'opacity-0 translate-x-2' : 'opacity-100 translate-x-0'
       }`}
-      title="Kapatmak için tıklayın"
+      title={cevir("Kapatmak için tıklayın")}
     >
       <span className={`w-6 h-6 shrink-0 rounded-lg flex items-center justify-center ${ikonRenk}`}>
         {kayit.tip === 'basari' ? <IkonTik /> : kayit.tip === 'hata' ? <IkonUnlem /> : <IkonBilgi />}

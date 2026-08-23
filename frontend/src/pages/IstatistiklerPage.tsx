@@ -29,6 +29,19 @@ const ISTAT_EN: Record<string, string> = {
   "İşlemci": "Processor",
   "İşletim sistemi": "Operating system",
   "● Canlı (10sn)": "● Live (10s)",
+  "Anasayfa": "Home",
+  "İstatistikler": "Statistics",
+  "çekirdek": "cores",
+  "5dk: {0} · 15dk: {1}": "5m: {0} · 15m: {1}",
+  "Bellek": "Memory",
+  "Sistem": "System",
+  "Domainler": "Domains",
+  "Toplam domain": "Total domains",
+  "Aktif domain": "Active domains",
+  "Pasif domain": "Inactive domains",
+  "Daha detaylı izleme için": "For more detailed monitoring",
+  "İzleme": "Monitoring",
+  "sayfasını ziyaret edin.": "visit the page.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (ISTAT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -71,7 +84,7 @@ export default function IstatistiklerPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("İstatistikler") },
       ]} />
       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
@@ -93,7 +106,7 @@ export default function IstatistiklerPage() {
           alt={u ? `${fmt(n(u?.disk?.kullanilan_byte))} / ${fmt(n(u?.disk?.toplam_byte))}` : ''}
           renk="violet" oran={disk} />
         <Metrik baslik={cevir("Yük (1dk)")} deger={u ? yuk1.toFixed(2) : '–'}
-          alt={u ? cevirT("5dk: {0} · 15dk: {1}", n(u?.cpu?.yuk_5dk).toFixed(2), n(u?.cpu?.yuk_15dk).toFixed(2)) : ''}
+          alt={u ? cevirT(cevir("5dk: {0} · 15dk: {1}"), n(u?.cpu?.yuk_5dk).toFixed(2), n(u?.cpu?.yuk_15dk).toFixed(2)) : ''}
           renk="amber" oran={Math.min(100, (yuk1 / cekirdek) * 100)} />
       </div>
 

@@ -22,6 +22,29 @@ type SurumDurum = {
 // Log metninden bitiş sonucunu çıkarır: 'tamam' | 'hata' | null (henüz bitmedi).
 
 const CMP_EN: Record<string, string> = {
+  "Sürüm kontrolü yapılamadı": "Version check failed",
+  "Güncelleme günlüğü alınamadı": "Failed to get update log",
+  "güncelleme başlatılamadı": "update could not be started",
+  "Panel Güncellemesi": "Panel Update",
+  "Sunucu": "Server",
+  "Paneli GitHub'daki son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.": "Updates the panel to the latest version on GitHub. Data (env, database, sites) is preserved; if the new version does not start healthy it is automatically rolled back.",
+  " Güncelleme aracı sunucuda yok — ilk çalıştırmada otomatik indirilecek.": " The update tool is not on the server — it will be downloaded automatically on first run.",
+  "🔴 Kritik güvenlik güncellemesi": "🔴 Critical security update",
+  "Yeni sürüm mevcut": "New version available",
+  "kurulu": "installed",
+  "Panel güncel": "Panel is up to date",
+  "Sürüm kontrolü kapalı": "Version check is off",
+  "Güncelleme çalışıyor — panel kısa süre yeniden başlayabilir, sayfayı kapatmayın.": "Update running — the panel may restart briefly, do not close the page.",
+  "✓ Güncelleme tamamlandı": "✓ Update completed",
+  "— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.": "— panel is up to date. Refresh the page to see the new features.",
+  "Sayfayı yenile": "Refresh page",
+  "✗ Güncelleme başarısız": "✗ Update failed",
+  "— aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).": "— review the log below (if the new version was unhealthy it has been rolled back automatically).",
+  "Güncellemeleri denetle ve kur": "Check for updates and install",
+  "Panel güncellenecek ve servis yeniden başlayacak. Onaylıyor musunuz?": "The panel will be updated and the service will restart. Do you confirm?",
+  "Başlatılıyor…": "Starting…",
+  "Evet, güncelle": "Yes, update",
+  "Vazgeç": "Cancel",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -115,23 +138,23 @@ export default function PanelGuncelleme() {
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
             {cevir("Paneli GitHub'daki son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.")}
-            {durum && !durum.arac_var && ' Güncelleme aracı sunucuda yok — ilk çalıştırmada otomatik indirilecek.'}
+            {durum && !durum.arac_var && cevir(" Güncelleme aracı sunucuda yok — ilk çalıştırmada otomatik indirilecek.")}
           </div>
 
           {surum && surum.acik && surum.guncelleme_var && (
             <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${surum.kritik
               ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
               : 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'}`}>
-              <span className="font-semibold">{surum.kritik ? '🔴 Kritik güvenlik güncellemesi' : 'Yeni sürüm mevcut'}: {surum.son}</span>
-              <span className="opacity-75"> (kurulu: {surum.mevcut})</span>
+              <span className="font-semibold">{surum.kritik ? cevir("🔴 Kritik güvenlik güncellemesi") : cevir("Yeni sürüm mevcut")}: {surum.son}</span>
+              <span className="opacity-75"> ({cevir("kurulu")}: {surum.mevcut})</span>
               {surum.duyuru && <div className="mt-1 opacity-90">{surum.duyuru}</div>}
             </div>
           )}
           {surum && surum.acik && !surum.guncelleme_var && surum.son && (
-            <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">✓ Panel güncel ({surum.mevcut})</div>
+            <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">✓ {cevir("Panel güncel")} ({surum.mevcut})</div>
           )}
           {surum && !surum.acik && (
-            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Sürüm kontrolü kapalı (PANEL_SURUM_KONTROL=0)</div>
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{cevir("Sürüm kontrolü kapalı")} (PANEL_SURUM_KONTROL=0)</div>
           )}
 
           {hata && <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">{hata}</div>}
@@ -146,14 +169,14 @@ export default function PanelGuncelleme() {
           {!calisiyor && sonuc === 'tamam' && (
             <div className="mt-2 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 text-xs">
               <span className="font-semibold">{cevir("✓ Güncelleme tamamlandı")}</span>
-              <span className="opacity-80">— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.</span>
+              <span className="opacity-80">{cevir("— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.")}</span>
               <button onClick={() => window.location.reload()}
                 className="ml-auto text-xs px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />{cevir("Sayfayı yenile")}</span></button>
             </div>
           )}
           {!calisiyor && sonuc === 'hata' && (
             <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">
-              <span className="font-semibold">{cevir("✗ Güncelleme başarısız")}</span> — aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).
+              <span className="font-semibold">{cevir("✗ Güncelleme başarısız")}</span> {cevir("— aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).")}
             </div>
           )}
 
@@ -172,7 +195,7 @@ export default function PanelGuncelleme() {
                 <span className="text-xs text-slate-600 dark:text-slate-300">{cevir("Panel güncellenecek ve servis yeniden başlayacak. Onaylıyor musunuz?")}</span>
                 <button onClick={baslat} disabled={baslatiliyor}
                   className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium disabled:opacity-40">
-                  {baslatiliyor ? 'Başlatılıyor…' : 'Evet, güncelle'}
+                  {baslatiliyor ? cevir("Başlatılıyor…") : cevir("Evet, güncelle")}
                 </button>
                 <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
                   {cevir("Vazgeç")}

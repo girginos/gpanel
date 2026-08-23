@@ -67,6 +67,28 @@ const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700
 // Durum rozetleri — domain başına.
 
 const WSEC_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "açık": "open",
+  "Temiz": "Clean",
+  "Uygulama yok": "No app",
+  "Beklemede": "Pending",
+  "Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.": "Scans all hosted domains every 6 hours and matches them against known CVE vulnerabilities.",
+  "Bir domainin açıkları için satırına tıklayın.": "Click a domain's row to see its vulnerabilities.",
+  "filtre temizle": "clear filter",
+  "Başlatılıyor…": "Starting…",
+  "Kritik": "Critical",
+  "Orta": "Medium",
+  "Son tarama": "Last scan",
+  "Taranan uygulama": "Scanned apps",
+  "Toplam bulgu": "Total findings",
+  "Son hata:": "Last error:",
+  "Domain ara…": "Search domain…",
+  "uygulama yok": "no app",
+  "Tekrar dene": "Retry",
+  "Bu arama/filtreyle domain yok.": "No domains with this search/filter.",
+  "Paket": "Package",
+  "Tara": "Scan",
+  "Veri kaynakları: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · Yeni bulgular her 6 saatte bir güncellenir": "Data sources: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · New findings are updated every 6 hours",
   "Domain bulunamadı.": "Domain not found.",
   "Rescan hatası": "Rescan error",
   "Son başarılı": "Last successful",
@@ -87,25 +109,25 @@ function DurumRozet({ u }: { u: Uygulama }) {
     case 'acik':
       return (
         <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800 dark:bg-red-950/40 dark:text-red-300">
-          {u.bulgu_sayisi} açık
+          {u.bulgu_sayisi} {cevir("açık")}
         </span>
       )
     case 'temiz':
       return (
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-          Temiz
+          {cevir("Temiz")}
         </span>
       )
     case 'desteklenmiyor':
       return (
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          Uygulama yok
+          {cevir("Uygulama yok")}
         </span>
       )
     default: // beklemede
       return (
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-          Beklemede
+          {cevir("Beklemede")}
         </span>
       )
   }
@@ -200,8 +222,8 @@ export default function WebsiteSecurityPage() {
             Website Security Monitor
           </h1>
           <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-            {cevir(cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir."))}
-            {cevir(cevir("Bir domainin açıkları için satırına tıklayın."))}
+            {cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")}
+            {cevir("Bir domainin açıkları için satırına tıklayın.")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <span className="text-xs text-slate-500">{cevir("Tür:")}</span>
@@ -216,7 +238,7 @@ export default function WebsiteSecurityPage() {
             })}
             {appFiltre && (
               <button onClick={() => setAppFiltre('')} className="text-[11px] text-slate-500 underline hover:text-slate-700 dark:hover:text-slate-300">
-                filtre temizle
+                {cevir("filtre temizle")}
               </button>
             )}
           </div>
@@ -226,16 +248,16 @@ export default function WebsiteSecurityPage() {
           disabled={taranıyor || status?.running}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
-          {status?.running ? 'Taranıyor…' : (taranıyor ? 'Başlatılıyor…' : cevir("Tümünü Tara"))}
+          {status?.running ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Tümünü Tara"))}
         </button>
       </div>
 
       {/* Sayaç kartları — global şiddet toplamları (görüntü) */}
       {status && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-          <SayacKart etiket="Kritik" sayi={status.critical} renk={SEV_RENK.critical} />
+          <SayacKart etiket={cevir("Kritik")} sayi={status.critical} renk={SEV_RENK.critical} />
           <SayacKart etiket={cevir("Yüksek")} sayi={status.high} renk={SEV_RENK.high} />
-          <SayacKart etiket="Orta" sayi={status.medium} renk={SEV_RENK.medium} />
+          <SayacKart etiket={cevir("Orta")} sayi={status.medium} renk={SEV_RENK.medium} />
           <SayacKart etiket={cevir("Düşük")} sayi={status.low} renk={SEV_RENK.low} />
         </div>
       )}
@@ -244,14 +266,14 @@ export default function WebsiteSecurityPage() {
       {status && (
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div><div className="text-xs text-slate-500">Son tarama</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Son tarama")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
             <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
-            <div><div className="text-xs text-slate-500">Taranan uygulama</div><div className="mt-0.5 font-medium">{status.scanned_apps}</div></div>
-            <div><div className="text-xs text-slate-500">Toplam bulgu</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Taranan uygulama")}</div><div className="mt-0.5 font-medium">{status.scanned_apps}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Toplam bulgu")}</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
           {status.last_error && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-              Son hata: {status.last_error}
+              {cevir("Son hata:")} {status.last_error}
             </div>
           )}
         </div>
@@ -263,7 +285,7 @@ export default function WebsiteSecurityPage() {
           <input
             value={arama}
             onChange={(e) => setArama(e.target.value)}
-            placeholder="Domain ara…"
+            placeholder={cevir("Domain ara…")}
             className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-8 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           />
           <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2">
@@ -272,7 +294,7 @@ export default function WebsiteSecurityPage() {
         </div>
         {envanter && (
           <div className="ml-auto text-xs text-slate-500">
-            {envanter.toplam} domain{envanter.desteklenmeyen > 0 ? ` · ${envanter.desteklenmeyen} uygulama yok` : ''}
+            {envanter.toplam} domain{envanter.desteklenmeyen > 0 ? ` · ${envanter.desteklenmeyen} ` + cevir("uygulama yok") : ''}
           </div>
         )}
       </div>
@@ -281,10 +303,10 @@ export default function WebsiteSecurityPage() {
       {yukleniyor && !ilkYuklendi.current ? (
         <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">Tekrar dene</button></div>
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
       ) : listelenen.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
-          {arama || appFiltre ? 'Bu arama/filtreyle domain yok.' : cevir("Domain bulunamadı.")}
+          {arama || appFiltre ? cevir("Bu arama/filtreyle domain yok.") : cevir("Domain bulunamadı.")}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -295,9 +317,9 @@ export default function WebsiteSecurityPage() {
                   <th className="px-3 py-3 font-semibold">{cevir("Alan adı")}</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Tür")}</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Sürüm")}</th>
-                  <th className="px-3 py-3 text-right font-semibold">Paket</th>
+                  <th className="px-3 py-3 text-right font-semibold">{cevir("Paket")}</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Durum")}</th>
-                  <th className="px-3 py-3 font-semibold">Son tarama</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Son tarama")}</th>
                   <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                 </tr>
               </thead>
@@ -324,7 +346,7 @@ export default function WebsiteSecurityPage() {
                           disabled={status?.running || tarananDomain === u.domain_id || u.durum === 'taraniyor'}
                           className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                         >
-                          {tarananDomain === u.domain_id ? '…' : 'Tara'}
+                          {tarananDomain === u.domain_id ? '…' : cevir("Tara")}
                         </button>
                       </td>
                     </tr>
@@ -337,7 +359,7 @@ export default function WebsiteSecurityPage() {
       )}
 
       <p className="mt-4 text-xs text-slate-500">
-        {cevir(cevir("Veri kaynakları: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · Yeni bulgular her 6 saatte bir güncellenir"))}
+        {cevir("Veri kaynakları: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · Yeni bulgular her 6 saatte bir güncellenir")}
       </p>
     </div>
   )

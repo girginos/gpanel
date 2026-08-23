@@ -57,6 +57,37 @@ const WP_EN: Record<string, string> = {
   "Önbelleği temizle": "Clear cache",
   "İşlem çıktısı": "Operation output",
   "İşleniyor…": "Processing…",
+  "Türkçe": "English",
+  "Anasayfa": "Home",
+  "Abonelik": "Subscription",
+  "Yeni WordPress": "New WordPress",
+  "Eklentiler": "Plugins",
+  "Temalar": "Themes",
+  "Onay gerekiyor": "Confirmation required",
+  "\"{0}\" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.": "Generate a new password for user \"{0}\"?\nThe current password will become invalid.",
+  "Kök dizindeki WordPress kaldırılsın mı?\nWordPress dosyaları (wp-admin, wp-includes, wp-content, wp-*.php) ve veritabanı silinir.\nDizinin kendisi ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.": "Remove WordPress in the root directory?\nThe WordPress files (wp-admin, wp-includes, wp-content, wp-*.php) and the database are deleted.\nThe directory itself and other files you added are preserved. This cannot be undone.",
+  "{0} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.": "Delete WordPress under {0}?\nAll files in this directory and the database are removed. This cannot be undone.",
+  "Emin misiniz?": "Are you sure?",
+  "\n\nVeritabanını Veritabanları sayfasından elle kaldırabilirsiniz.": "\n\nYou can remove the database manually from the Databases page.",
+  "Silinemedi": "Could not be deleted",
+  "Açık": "On",
+  "aktif": "active",
+  "Sürümü güncelle": "Update version",
+  "Eklenti": "Plugin",
+  "Tema": "Theme",
+  "bulunamadı.": "not found.",
+  "güncelleme mevcut": "update available",
+  "Etkin": "Enabled",
+  "Sürüm": "Version",
+  "mevcut": "available",
+  "Devre dışı bırak": "Disable",
+  "Aktif tema": "Active theme",
+  "Yeni WordPress kurulumu": "New WordPress installation",
+  "Benim Blogum": "My Blog",
+  "Admin e-posta": "Admin email",
+  "Kuruluyor… (~30 sn)": "Installing… (~30 s)",
+  "WordPress kur": "Install WordPress",
+  "kuruldu": "installed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -108,8 +139,8 @@ export default function DomainWordPressPage() {
   return (
     <div className="px-6 py-6 max-w-5xl">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' },
-        { etiket: alanAdi || 'Abonelik', href: `/abonelikler/${id}` },
+        { etiket: cevir('Anasayfa'), href: '/' },
+        { etiket: alanAdi || cevir('Abonelik'), href: `/abonelikler/${id}` },
         { etiket: 'WordPress' },
       ]} />
       <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
@@ -120,7 +151,7 @@ export default function DomainWordPressPage() {
         {!bosDurum && !formAcik && (
           <button onClick={() => { setFormAcik(true); setSonuc(null) }}
             className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
-            <span className="text-base leading-none">+</span> Yeni WordPress
+            <span className="text-base leading-none">+</span> {cevir("Yeni WordPress")}
           </button>
         )}
       </div>
@@ -160,8 +191,8 @@ export default function DomainWordPressPage() {
 
 type AltTab = 'genel' | 'eklentiler' | 'temalar' | 'kullanicilar'
 const TABLAR: { k: AltTab; ad: string }[] = [
-  { k: 'genel', ad: cevir("Genel") }, { k: 'eklentiler', ad: 'Eklentiler' },
-  { k: 'temalar', ad: 'Temalar' }, { k: 'kullanicilar', ad: cevir("Kullanıcılar") },
+  { k: 'genel', ad: cevir("Genel") }, { k: 'eklentiler', ad: cevir("Eklentiler") },
+  { k: 'temalar', ad: cevir("Temalar") }, { k: 'kullanicilar', ad: cevir("Kullanıcılar") },
 ]
 
 function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; kurulum: Kurulum; onDegisti: () => void }) {
@@ -207,17 +238,17 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
 
   const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin })).data, cevir("WordPress çekirdeği güncellendi."), () => { durumYukle(); onDegisti() })
   const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Çekirdek, eklenti ve temalar güncellendi."), () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
-  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? 'Bakım modu kapatıldı.' : cevir("Bakım modu açıldı."), durumYukle)
+  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? cevir("Bakım modu kapatıldı.") : cevir("Bakım modu açıldı."), durumYukle)
   const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, cevir("Önbellek temizlendi."))
   const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, cevir("Çekirdek onarımı tamamlandı."), durumYukle)
 
   const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, cevirT(cevir("{0} güncellendi."), ad), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
   const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Tümü güncellendi."), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? 'devre dışı bırakıldı' : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
+  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? cevir("devre dışı bırakıldı") : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
   const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, cevirT(cevir("{0} etkinleştirildi."), p.name), () => setTemalar(null))
 
   async function parolaSifirla(u: Kullanici) {
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${u.user_login}" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.` }))) return
+    if (!(await onay({ baslik: cevir('Onay gerekiyor'), mesaj: cevirT(cevir("\"{0}\" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak."), u.user_login) }))) return
     setMesgul(`pw:${u.ID}`); setHata(null); setBasari(null)
     try {
       const { data } = await api.post<{ parola: string; kullanici: string }>(`${base}/kullanici-parola`, { dizin, user_id: u.ID })
@@ -228,9 +259,9 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
 
   async function sil() {
     const msj = kok
-      ? `Kök dizindeki WordPress kaldırılsın mı?\nWordPress dosyaları (wp-admin, wp-includes, wp-content, wp-*.php) ve veritabanı silinir.\nDizinin kendisi ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.`
-      : `${dizin} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz.`
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: msj, tehlike: true }))) return
+      ? cevir("Kök dizindeki WordPress kaldırılsın mı?\nWordPress dosyaları (wp-admin, wp-includes, wp-content, wp-*.php) ve veritabanı silinir.\nDizinin kendisi ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.")
+      : cevirT(cevir("{0} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz."), dizin)
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: msj, tehlike: true }))) return
     setMesgul('sil'); setHata(null)
     try {
       // 🔴 Yanıt ATILMAMALI. Dosyalar silinse bile veritabanı
@@ -244,12 +275,12 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
       if (r?.data?.db_uyari) {
         await bilgi({
           baslik: cevir("Dosyalar silindi, veritabanı KALDI"),
-          mesaj: r.data.db_uyari + '\n\nVeritabanını Veritabanları sayfasından elle kaldırabilirsiniz.',
+          mesaj: r.data.db_uyari + cevir('\n\nVeritabanını Veritabanları sayfasından elle kaldırabilirsiniz.'),
         })
       }
       onDegisti()
     }
-    catch (err) { setHata(apiHata(err, 'Silinemedi')) }
+    catch (err) { setHata(apiHata(err, cevir('Silinemedi'))) }
     finally { setMesgul(null) }
   }
 
@@ -285,8 +316,8 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
           pill={durum ? (durum.guncelleme_var ? { t: `↑ ${durum.hedef_surum}`, c: 'amber' } : { t: cevir("güncel"), c: 'green' }) : undefined} />
         <Metrik label="PHP" v={durum?.php || '…'} />
         <Metrik label={cevir("Veritabanı")} v={durum ? `${durum.db_mb} MB` : '…'} />
-        <Metrik label={cevir("Bakım modu")} v={durum?.bakim ? 'Açık' : cevir("Kapalı")}
-          pill={durum?.bakim ? { t: 'aktif', c: 'amber' } : undefined} />
+        <Metrik label={cevir("Bakım modu")} v={durum?.bakim ? cevir('Açık') : cevir("Kapalı")}
+          pill={durum?.bakim ? { t: cevir('aktif'), c: 'amber' } : undefined} />
       </div>
 
       {/* segment sekmeler */}
@@ -311,9 +342,9 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         {tab === 'genel' && (
           <div>
             <div className="flex flex-wrap gap-2">
-              {durum?.guncelleme_var && <Btn onClick={surumGuncelle} bekle={mesgul === 'surum'} tur="primary">Sürümü güncelle · v{durum.hedef_surum}</Btn>}
+              {durum?.guncelleme_var && <Btn onClick={surumGuncelle} bekle={mesgul === 'surum'} tur="primary">{cevir("Sürümü güncelle")} · v{durum.hedef_surum}</Btn>}
               <Btn onClick={tumunuGuncelle} bekle={mesgul === 'tumu'} tur={durum?.guncelleme_var ? 'outline' : 'primary'}>{cevir("Tümünü güncelle")}</Btn>
-              <Btn onClick={bakimTogle} bekle={mesgul === 'bakim'}>{durum?.bakim ? 'Bakım modunu kapat' : cevir("Bakım moduna al")}</Btn>
+              <Btn onClick={bakimTogle} bekle={mesgul === 'bakim'}>{durum?.bakim ? cevir('Bakım modunu kapat') : cevir("Bakım moduna al")}</Btn>
               <Btn onClick={cacheTemizle} bekle={mesgul === 'cache'}>{cevir("Önbelleği temizle")}</Btn>
               <Btn onClick={onar} bekle={mesgul === 'onar'}>{cevir("Çekirdeği onar")}</Btn>
             </div>
@@ -370,7 +401,7 @@ function Btn({ onClick, bekle, children, tur }: { onClick: () => void; bekle: bo
     : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
   return (
     <button onClick={onClick} disabled={bekle} className={`text-sm px-4 py-2 rounded-full border font-medium disabled:opacity-50 transition ${cls}`}>
-      {bekle ? 'İşleniyor…' : children}
+      {bekle ? cevir('İşleniyor…') : children}
     </button>
   )
 }
@@ -390,13 +421,13 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
   onTumu: () => void; onGuncelle: (p: Paket) => void; onTogle?: (p: Paket) => void; onAktif?: (p: Paket) => void
 }) {
   if (liste === null) return <div className="text-sm text-slate-400 py-4">{cevir("Yükleniyor…")}</div>
-  if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{tur === 'eklenti' ? 'Eklenti' : 'Tema'} bulunamadı.</div>
+  if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{tur === 'eklenti' ? cevir('Eklenti') : cevir('Tema')} {cevir("bulunamadı.")}</div>
   const guncellenebilir = liste.filter(p => p.update === 'available').length
   return (
     <div>
       {guncellenebilir > 0 && (
         <div className="flex items-center justify-between mb-4 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/15 border border-amber-100 dark:border-amber-800/50">
-          <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">{guncellenebilir} güncelleme mevcut</span>
+          <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">{guncellenebilir} {cevir("güncelleme mevcut")}</span>
           <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : cevir("Tümünü güncelle")}</button>
         </div>
       )}
@@ -409,17 +440,17 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</span>
-                  <StatusPill t={aktif ? 'Etkin' : cevir("Devre dışı")} c={aktif ? 'green' : 'slate'} />
+                  <StatusPill t={aktif ? cevir('Etkin') : cevir("Devre dışı")} c={aktif ? 'green' : 'slate'} />
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">
-                  Sürüm {p.version}{guncel && <span className="text-amber-600 dark:text-amber-400"> → {p.update_version} mevcut</span>}
+                  {cevir("Sürüm")} {p.version}{guncel && <span className="text-amber-600 dark:text-amber-400"> → {p.update_version} {cevir("mevcut")}</span>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {guncel && <button disabled={!!mesgul} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-medium disabled:opacity-50 transition">{mesgul === `${tur}:${p.name}` ? '…' : cevir("Güncelle")}</button>}
-                {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? 'Devre dışı bırak' : cevir("Etkinleştir")}</button>}
+                {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? cevir('Devre dışı bırak') : cevir("Etkinleştir")}</button>}
                 {onAktif && !aktif && <button disabled={!!mesgul} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `tema:${p.name}` ? '…' : cevir("Etkinleştir")}</button>}
-                {onAktif && aktif && <StatusPill t="Aktif tema" c="green" />}
+                {onAktif && aktif && <StatusPill t={cevir("Aktif tema")} c="green" />}
               </div>
             </div>
           )
@@ -465,17 +496,17 @@ function KurulumFormu(p: {
   return (
     <form onSubmit={p.kur} className="rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-5">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Yeni WordPress kurulumu</h3>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Yeni WordPress kurulumu")}</h3>
         {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> {cevir("Kapat")}</span></button>}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Girdi et={cevir("Site başlığı")} v={p.baslik} set={p.setBaslik} zorunlu ph="Benim Blogum" />
+        <Girdi et={cevir("Site başlığı")} v={p.baslik} set={p.setBaslik} zorunlu ph={cevir("Benim Blogum")} />
         <Girdi et={cevir("Alt dizin (isteğe bağlı)")} v={p.altDizin} set={p.setAltDizin} ph={cevir("boş = kök · örn: blog")} mono />
         <Girdi et={cevir("Admin kullanıcı")} v={p.adminK} set={p.setAdminK} zorunlu mono />
-        <Girdi et="Admin e-posta" v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
+        <Girdi et={cevir("Admin e-posta")} v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
       </div>
       <button disabled={p.kuruyor} className="mt-5 px-5 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">
-        {p.kuruyor ? 'Kuruluyor… (~30 sn)' : 'WordPress kur'}
+        {p.kuruyor ? cevir('Kuruluyor… (~30 sn)') : cevir('WordPress kur')}
       </button>
     </form>
   )
@@ -495,7 +526,7 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
   return (
     <div className="mb-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-900/15 p-5">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">WordPress {s.surum} kuruldu</div>
+        <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">WordPress {s.surum} {cevir("kuruldu")}</div>
         <button onClick={kapat} className="text-xs text-emerald-600/70 hover:text-emerald-700"><Ikon d={I.kapat} /></button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">

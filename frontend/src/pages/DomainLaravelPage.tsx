@@ -48,6 +48,9 @@ const NPM_KOMUTLAR = ['install', 'ci', 'run', 'prune', 'audit', 'outdated', 'ls'
 
 
 const LARAVEL_EN: Record<string, string> = {
+  "(ana site) veya": "(main site) or",
+  "Yeni klasör için elle yazın.": "Type manually for a new folder.",
+  "'e taşınır. Yol": " . The path",
   "Algılanan Laravel kökleri:": "Detected Laravel roots:",
   "Ayrıntı yok — sunucuda disk veya dosya-sayısı (inode) kotası dolmuş olabilir. Dosya yöneticisinden alanı kontrol edin.": "No detail — disk or file-count (inode) quota may be full on the server. Check space from the file manager.",
   "Bakım Modu": "Maintenance Mode",
@@ -257,7 +260,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
           <button type="button" onClick={() => setSeciciAcik(true)}
             className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> {cevir("Seç")}</span></button>
         </div>
-        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{cevir("Örn:")} <code className="font-mono">public_html</code> (ana site) veya <code className="font-mono">public_html/uygulama</code>. Yeni klasör için elle yazın.</p>
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{cevir("Örn:")} <code className="font-mono">public_html</code> {cevir("(ana site) veya")} <code className="font-mono">public_html/uygulama</code>. {cevir("Yeni klasör için elle yazın.")}</p>
       </div>
       {seciciAcik && (
         <KlasorSecici id={id} baslangic={appRoot} onKapat={() => setSeciciAcik(false)}
@@ -415,7 +418,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
             ))}
           </div>
         )}
-        <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">{cevir("Değiştirince belge kökü de otomatik")} <code className="font-mono">…/public</code>'e taşınır. Yol <code className="font-mono">public_html</code> {cevir("içinde olmalıdır.")}</p>
+        <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">{cevir("Değiştirince belge kökü de otomatik")} <code className="font-mono">…/public</code>{cevir("'e taşınır. Yol")} <code className="font-mono">public_html</code> {cevir("içinde olmalıdır.")}</p>
       </Kart>
 
       {/* Ayarlar */}

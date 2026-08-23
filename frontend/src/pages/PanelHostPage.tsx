@@ -52,6 +52,11 @@ type Is = {
 
 
 const PHOST_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Araçlar ve Ayarlar": "Tools and Settings",
+  "Yüklenemedi": "Could not load",
+  "Yükleniyor…": "Loading…",
+  "hiç": "none",
   "DNS eşleşmiyor": "DNS mismatch",
   "DNS kontrol hatası": "DNS check error",
   "Hostname Uygulanıyor": "Applying Hostname",

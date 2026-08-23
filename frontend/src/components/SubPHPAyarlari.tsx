@@ -25,6 +25,7 @@ const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border
 
 
 const CMP_EN: Record<string, string> = {
+  "FPM Havuzu": "FPM Pool",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -112,7 +113,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">FPM Havuzu</h3>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{cevir("FPM Havuzu")}</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <label className={etk}>pm stratejisi</label>
@@ -142,7 +143,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
           <div className="flex justify-end">
             <button onClick={kaydet} disabled={kaydediliyor}
               className="px-4 py-2 rounded-md bg-slate-900 dark:bg-slate-700 text-white text-sm font-medium disabled:opacity-40">
-              {kaydediliyor ? 'Kaydediliyor…' : 'PHP ayarlarını kaydet'}
+              {kaydediliyor ? cevir("Kaydediliyor…") : cevir("PHP ayarlarını kaydet")}
             </button>
           </div>
         </div>

@@ -19,6 +19,41 @@ type Reseller = {
 
 
 const RES_EN: Record<string, string> = {
+  "Türkçe": "English",
+  "Limitsiz": "Unlimited",
+  "Bayi": "Reseller",
+  "oluşturuldu.": "created.",
+  "Emin misiniz?": "Are you sure?",
+  "bayisi silinsin mi?": "be deleted?",
+  "Bayi silindi.": "Reseller deleted.",
+  "Silinemedi": "Could not delete",
+  "Anasayfa": "Home",
+  "Bayiler": "Resellers",
+  "Bayiler (Reseller)": "Resellers",
+  "Yeni Bayi": "New Reseller",
+  "Bayi paketlerini": "You manage reseller packages from the",
+  "Bayi Planları": "Reseller Plans",
+  "sayfasından yönetirsiniz; burada bayi eklerken seçersiniz.": "page; you select it here when adding a reseller.",
+  "Ad Soyad": "Full Name",
+  "Paket": "Package",
+  "Durum": "Status",
+  "İşlemler": "Actions",
+  "Aktif": "Active",
+  "Askıda": "Suspended",
+  "Düzenle": "Edit",
+  "Sil": "Delete",
+  "Bayi paketi": "Reseller package",
+  "Henüz bayi paketi yok — limitleri aşağıdan tek tek girebilir ya da": "No reseller packages yet — you can enter the limits one by one below or",
+  "Limitler paketten gelir": "Limits come from the package",
+  "Parola": "Password",
+  "En az 8 karakter": "At least 8 characters",
+  "Gizle": "Hide",
+  "Göster": "Show",
+  "“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.": "You can generate a strong 16-character password with “Generate”.",
+  "Trafik (MB)": "Traffic (MB)",
+  "Limitler seçili paketten gelir — değiştirmek için paketi düzenleyin ya da “Paketsiz” seçin.": "Limits come from the selected package — to change them, edit the package or choose “No package”.",
+  "Oluştur": "Create",
+  "Kaydet": "Save",
   "0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.": "0 = unlimited. The disk/traffic pool is distributed across all the reseller's hosting accounts.",
   "Bayi Oluştur": "Create Reseller",
   "Bayi güncellendi.": "Reseller updated.",
@@ -45,7 +80,7 @@ const RES_EN: Record<string, string> = {
 const cevir = (tr: string): string => (i18n.language === "en" ? (RES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function fmtMB(mb: number) {
-  if (!mb) return 'Limitsiz'
+  if (!mb) return cevir('Limitsiz')
   if (mb < 1024) return mb + ' MB'
   return (mb / 1024).toFixed(1) + ' GB'
 }
@@ -100,7 +135,7 @@ export default function ResellerlarPage() {
           kullanici: form.kullanici, parola: form.parola, ad_soyad: form.ad_soyad, paket_id: Number(form.paket_id) || 0,
           max_domain: Number(form.max_domain), max_disk_mb: Number(form.max_disk_mb), max_trafik_mb: Number(form.max_trafik_mb),
         })
-        setOk(`Bayi "${form.kullanici}" oluşturuldu.`)
+        setOk(`${cevir("Bayi")} "${form.kullanici}" ${cevir("oluşturuldu.")}`)
       } else if (modal) {
         const body: any = {
           ad_soyad: form.ad_soyad, durum: form.durum, paket_id: Number(form.paket_id) || 0,
@@ -116,10 +151,10 @@ export default function ResellerlarPage() {
   }
 
   async function sil(x: Reseller) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `"${x.kullanici}" bayisi silinsin mi?`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}`, tehlike: true }))) return
     setHata(null); setOk(null)
-    try { await api.delete(`/resellers/${x.id}`); setOk('Bayi silindi.'); yukle() }
-    catch (err) { setHata(apiHata(err, 'Silinemedi')) }
+    try { await api.delete(`/resellers/${x.id}`); setOk(cevir('Bayi silindi.')); yukle() }
+    catch (err) { setHata(apiHata(err, cevir('Silinemedi'))) }
   }
 
   const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm bg-white dark:bg-slate-900 focus:border-brand-500 outline-none'
@@ -127,11 +162,11 @@ export default function ResellerlarPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Bayiler' }]} />
+      <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir('Bayiler') }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Bayiler (Reseller)</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayiler (Reseller)")}</h1>
         <button onClick={yeniAc} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-md font-medium">
-          <span className="text-base leading-none">+</span> Yeni Bayi
+          <span className="text-base leading-none">+</span> {cevir("Yeni Bayi")}
         </button>
       </div>
       <p className="text-sm text-slate-500 mb-4">{cevir("Her bayi kendi kullanıcı adı/parolasıyla panele girer; yalnız kendi hosting hesaplarını, planlarını ve DNS şablonunu görür.")}</p>
@@ -140,7 +175,7 @@ export default function ResellerlarPage() {
       {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
 
       <div className="mb-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-        Bayi paketlerini <Link to="/bayi-planlari" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">{cevir("Bayi Planları")}</Link> {cevir("sayfasından yönetirsiniz; burada bayi eklerken seçersiniz.")}
+        {cevir("Bayi paketlerini")} <Link to="/bayi-planlari" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">{cevir("Bayi Planları")}</Link> {cevir("sayfasından yönetirsiniz; burada bayi eklerken seçersiniz.")}
       </div>
 
       {yuk ? (
@@ -154,8 +189,8 @@ export default function ResellerlarPage() {
               <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
                 <tr>
                   <th className={T.baslik}>{cevir("Bayi")}</th>
-                  <th className={T.baslik}>Ad Soyad</th>
-                  <th className={T.baslik}>Paket</th>
+                  <th className={T.baslik}>{cevir("Ad Soyad")}</th>
+                  <th className={T.baslik}>{cevir("Paket")}</th>
                   <th className={T.baslik}>Hosting</th>
                   <th className={T.baslik}>Disk</th>
                   <th className={T.baslik}>{cevir("Durum")}</th>
@@ -167,12 +202,12 @@ export default function ResellerlarPage() {
                 {items.map(x => (
                   <tr key={x.id} className={T.satir}>
                     <td className={T.hucreBaslik}><span className="font-mono text-sm text-slate-800 dark:text-slate-200">{x.kullanici}</span></td>
-                    <td className={T.hucre} data-etiket="Ad Soyad"><span className="text-slate-700 dark:text-slate-300">{x.ad_soyad || '—'}</span></td>
-                    <td className={T.hucre} data-etiket="Paket"><span className="text-slate-600 dark:text-slate-400">{x.paket_ad || '—'}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("Ad Soyad")}><span className="text-slate-700 dark:text-slate-300">{x.ad_soyad || '—'}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("Paket")}><span className="text-slate-600 dark:text-slate-400">{x.paket_ad || '—'}</span></td>
                     <td className={T.hucre} data-etiket="Hosting"><span className="text-slate-700 dark:text-slate-300">{x.domain_sayisi}{x.max_domain > 0 ? ` / ${x.max_domain}` : ' / ∞'}</span></td>
                     <td className={T.hucre} data-etiket="Disk"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(x.disk_kullanim_kb)} / {fmtMB(x.max_disk_mb)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
-                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${x.durum === 'active' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`}>{x.durum === 'active' ? 'Aktif' : cevir("Askıda")}</span>
+                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${x.durum === 'active' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`}>{x.durum === 'active' ? cevir('Aktif') : cevir("Askıda")}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Son Giriş")}><span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{x.son_giris || '—'}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
@@ -190,20 +225,20 @@ export default function ResellerlarPage() {
       {modal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !kaydet && setModal(null)}>
           <form onSubmit={gonder} className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? 'Yeni Bayi' : cevirT(cevir("Bayi Düzenle — {0}"), modal.kullanici)}</h2>
+            <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? cevir('Yeni Bayi') : cevirT(cevir("Bayi Düzenle — {0}"), modal.kullanici)}</h2>
             <div className="space-y-3">
               {modal === 'yeni' && (
                 <div><label className={lbl}>{cevir("Kullanıcı adı")}</label>
                   <input className={inp} value={form.kullanici} onChange={e => setForm({ ...form, kullanici: e.target.value })} placeholder="bayiadi" autoFocus required /></div>
               )}
-              <div><label className={lbl}>Ad Soyad</label>
+              <div><label className={lbl}>{cevir("Ad Soyad")}</label>
                 <input className={inp} value={form.ad_soyad} onChange={e => setForm({ ...form, ad_soyad: e.target.value })} placeholder={cevir("Firma / Kişi")} /></div>
-              <div><label className={lbl}>Bayi paketi</label>
+              <div><label className={lbl}>{cevir("Bayi paketi")}</label>
                 {paketler.length === 0 ? (
                   // 🔴 Paket yokken alani GIZLEME: yonetici paket kavramindan
                   // habersiz kaliyordu. Bos durumda dogrudan olusturma yolunu goster.
                   <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-3 py-2.5 text-sm text-slate-500 dark:text-slate-400">
-                    Henüz bayi paketi yok — limitleri aşağıdan tek tek girebilir ya da{' '}
+                    {cevir("Henüz bayi paketi yok — limitleri aşağıdan tek tek girebilir ya da")}{' '}
                     <Link to="/bayi-planlari/yeni" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">{cevir("bir paket oluşturabilirsiniz")}</Link>.
                   </div>
                 ) : (
@@ -224,7 +259,7 @@ export default function ResellerlarPage() {
                         : cevir("disk + trafik aşımına izin")
                       return (
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          Limitler paketten gelir · {asim} · {pk.fazla_satis ? 'fazla satışa izin' : cevir("fazla satış kapalı")}
+                          {cevir("Limitler paketten gelir")} · {asim} · {pk.fazla_satis ? cevir('fazla satışa izin') : cevir("fazla satış kapalı")}
                           {' · '}<Link to={`/bayi-planlari/${pk.id}`} className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("paketi düzenle")}</Link>
                         </p>
                       )
@@ -233,14 +268,14 @@ export default function ResellerlarPage() {
                 )}
               </div>
               <div>
-                <label className={lbl}>{modal === 'yeni' ? 'Parola' : cevir("Yeni parola (boş = değişmez)")}</label>
+                <label className={lbl}>{modal === 'yeni' ? cevir('Parola') : cevir("Yeni parola (boş = değişmez)")}</label>
                 <div className="flex gap-2">
                   <input
                     className={inp + ' flex-1'}
                     type={parolaGoster ? 'text' : 'password'}
                     value={form.parola}
                     onChange={e => { setForm({ ...form, parola: e.target.value }); setKopyalandi(false) }}
-                    placeholder="En az 8 karakter"
+                    placeholder={cevir("En az 8 karakter")}
                     autoComplete="new-password"
                     required={modal === 'yeni'}
                   />
@@ -258,8 +293,8 @@ export default function ResellerlarPage() {
                     type="button"
                     onClick={() => setParolaGoster(v => !v)}
                     className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                    aria-label={parolaGoster ? 'Parolayı gizle' : cevir("Parolayı göster")}
-                    title={parolaGoster ? 'Gizle' : cevir("Göster")}
+                    aria-label={parolaGoster ? cevir('Parolayı gizle') : cevir("Parolayı göster")}
+                    title={parolaGoster ? cevir('Gizle') : cevir("Göster")}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
                       {parolaGoster
@@ -283,15 +318,15 @@ export default function ResellerlarPage() {
                 <p className="text-[11px] mt-1 h-4 text-slate-400 dark:text-slate-500" aria-live="polite">
                   {kopyalandi ? <span className="text-emerald-600 dark:text-emerald-400">{cevir("✓ Parola panoya kopyalandı")}</span>
                     : form.parola ? cevir("Bayiye iletmeyi unutmayın — kaydedildikten sonra bir daha görüntülenemez.")
-                    : '“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.'}
+                    : cevir('“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.')}
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <div><label className={lbl}>Max hosting</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_domain} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
-                <div><label className={lbl}>Disk (MB)</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_disk_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
-                <div><label className={lbl}>Trafik (MB)</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_trafik_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? 'Bu limit seçili paketten gelir' : ''} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
+                <div><label className={lbl}>Max hosting</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_domain} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? cevir('Bu limit seçili paketten gelir') : ''} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
+                <div><label className={lbl}>Disk (MB)</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_disk_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? cevir('Bu limit seçili paketten gelir') : ''} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
+                <div><label className={lbl}>{cevir("Trafik (MB)")}</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_trafik_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? cevir('Bu limit seçili paketten gelir') : ''} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
               </div>
-              <p className="text-[11px] text-slate-400">{Number(form.paket_id) ? 'Limitler seçili paketten gelir — değiştirmek için paketi düzenleyin ya da “Paketsiz” seçin.' : cevir("0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.")}</p>
+              <p className="text-[11px] text-slate-400">{Number(form.paket_id) ? cevir('Limitler seçili paketten gelir — değiştirmek için paketi düzenleyin ya da “Paketsiz” seçin.') : cevir("0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.")}</p>
               {modal !== 'yeni' && (
                 <div><label className={lbl}>{cevir("Durum")}</label>
                   <select className={inp} value={form.durum} onChange={e => setForm({ ...form, durum: e.target.value })}>
@@ -301,7 +336,7 @@ export default function ResellerlarPage() {
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md text-slate-600 dark:text-slate-300">{cevir("İptal")}</button>
-              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-slate-900 dark:bg-slate-700 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : (modal === 'yeni' ? 'Oluştur' : 'Kaydet')}</button>
+              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-slate-900 dark:bg-slate-700 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : (modal === 'yeni' ? cevir('Oluştur') : cevir('Kaydet'))}</button>
             </div>
           </form>
         </div>

@@ -28,6 +28,44 @@ type GHRepo = { full_name: string; name: string; description?: string; private: 
 
 
 const GIT_EN: Record<string, string> = {
+  "Anasayfa": "Home",
+  "Alan adı bilgisi alınamadı": "Failed to get domain info",
+  "GitHub PAT zorunlu": "GitHub PAT is required",
+  "GitHub bağlandı: @{0}": "Connected to GitHub: @{0}",
+  "Repo bağlandı: {0}@{1}": "Repo connected: {0}@{1}",
+  "Otomatik dağıtım aktif (webhook kuruldu)": "Auto deploy active (webhook installed)",
+  "Webhook hata:": "Webhook error:",
+  "Emin misiniz?": "Are you sure?",
+  "GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez.": "The GitHub connection will be removed. Any webhook is deleted; existing repo files are unaffected.",
+  "Repo bağlandı. Deploy key'i kopyalayıp GitHub repo'nuza ekleyin, sonra \"Klonla\" tıklayın.": "Repo connected. Copy the deploy key and add it to your GitHub repo, then click \"Clone\".",
+  "Klonlandı! Commit: {0}": "Cloned! Commit: {0}",
+  "Pull tamam. Commit:": "Pull complete. Commit:",
+  "Repo bağlayın, deploy key'i GitHub'a ekleyin, otomatik pull için webhook URL'ini kullanın.": "Connect a repo, add the deploy key to GitHub, use the webhook URL for automatic pull.",
+  "Bağlanıyor…": "Connecting…",
+  "Bağlan": "Connect",
+  "Bağla": "Connect",
+  "Güncelle": "Update",
+  "Bilgi": "Info",
+  "(auto-deploy için).": "(for auto-deploy).",
+  "— seç —": "— select —",
+  "repo bulundu": "repos found",
+  "Push'ta otomatik dağıtım (webhook kurulur)": "Auto deploy on push (webhook is installed)",
+  "Bu Repo'yu Kullan": "Use This Repo",
+  "Hedef Dizin": "Target Directory",
+  "Klonla (hedef temizlenir)": "Clone (target is cleared)",
+  "Bağlantıyı Kaldır": "Disconnect",
+  "bu anahtarı yapıştırın (Allow write access GEREKMEZ).": "paste this key (Allow write access NOT required).",
+  "Webhook (Otomatik Pull)": "Webhook (Automatic Pull)",
+  "Push event yeterli.": "The push event is enough.",
+  "Sync Durumu": "Sync Status",
+  "Son sync": "Last sync",
+  "— (henüz yok)": "— (none yet)",
+  "Son commit": "Last commit",
+  "⚠ hata": "⚠ error",
+  "Son log": "Last log",
+  "Hedef dizin ({0}) içeriği TAMAMEN silinip repodaki {1} branch'i klonlanacak. Devam edilsin mi?": "The target directory ({0}) contents will be COMPLETELY deleted and branch {1} from the repo will be cloned. Continue?",
+  "Evet, klonla": "Yes, clone",
+  "Evet, sil": "Yes, delete",
   "Bağlama başarısız": "Connection failed",
   "Bağlantıyı kaldır": "Disconnect",
   "GitHub Bağlantısı": "GitHub Connection",
@@ -99,7 +137,7 @@ export default function DomainGitPage() {
   useEffect(yukle, [id])
 
   async function ghConnect() {
-    if (!ghToken.trim()) { setHata('GitHub PAT zorunlu'); return }
+    if (!ghToken.trim()) { setHata(cevir("GitHub PAT zorunlu")); return }
     setGhYukluyor(true); setHata(null); setBasari(null)
     try {
       const r = await api.post<GHConn>(`/domains/${id}/github/connect`, { token: ghToken.trim() })
@@ -142,8 +180,8 @@ export default function DomainGitPage() {
       )
       let msg = cevirT(cevir("Repo bağlandı: {0}@{1}"), ghSelectedRepo, ghSelectedBranch)
       if (ghAutoDeploy) {
-        if (r.data.webhook_ok) msg += ' · Otomatik dağıtım aktif (webhook kuruldu)'
-        else if (r.data.webhook_hata) msg += ` · Webhook hata: ${r.data.webhook_hata}`
+        if (r.data.webhook_ok) msg += ' · ' + cevir("Otomatik dağıtım aktif (webhook kuruldu)")
+        else if (r.data.webhook_hata) msg += ' · ' + cevir("Webhook hata:") + ' ' + r.data.webhook_hata
       }
       setBasari(msg)
       yukle()
@@ -153,7 +191,7 @@ export default function DomainGitPage() {
   }
 
   async function ghDisconnect() {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), tehlike: true }))) return
     try {
       await api.delete(`/domains/${id}/github`)
       setGhConn({ yok: true })
@@ -171,7 +209,7 @@ export default function DomainGitPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.post(`/domains/${id}/git`, { repo_url: repoUrl, branch, target_dir: targetDir })
-      setBasari('Repo bağlandı. Deploy key\'i kopyalayıp GitHub repo\'nuza ekleyin, sonra "Klonla" tıklayın.')
+      setBasari(cevir("Repo bağlandı. Deploy key'i kopyalayıp GitHub repo'nuza ekleyin, sonra \"Klonla\" tıklayın."))
       yukle()
     } catch (e) {
       setHata(apiHata(e, cevir("Bağlama başarısız")))
@@ -198,7 +236,7 @@ export default function DomainGitPage() {
     setIsleniyor(true); setHata(null); setBasari(null); setLogSon(null)
     try {
       const { data } = await api.post(`/domains/${id}/git/pull`)
-      setBasari(`Pull tamam. Commit: ${data.commit.slice(0, 7)}`)
+      setBasari(cevir("Pull tamam. Commit:") + ' ' + data.commit.slice(0, 7))
       setLogSon(data.log)
       yukle()
     } catch (e) {
@@ -213,7 +251,7 @@ export default function DomainGitPage() {
       await api.delete(`/domains/${id}/git`)
       setRepo(null); setSilinecek(false); setBasari(cevir("Repo bağlantısı kaldırıldı"))
     } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e) }))
     }
   }
 
@@ -224,7 +262,7 @@ export default function DomainGitPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
         { etiket: 'Git' },
       ]} />
@@ -232,7 +270,7 @@ export default function DomainGitPage() {
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Git Deploy</h1>
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
-        {' · '}Repo bağlayın, deploy key'i GitHub'a ekleyin, otomatik pull için webhook URL'ini kullanın.
+        {' · '}{cevir("Repo bağlayın, deploy key'i GitHub'a ekleyin, otomatik pull için webhook URL'ini kullanın.")}
       </p>}
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
@@ -267,14 +305,14 @@ export default function DomainGitPage() {
                     className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
                   <button onClick={ghConnect} disabled={ghYukluyor || !ghToken.trim()}
                     className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-sm font-medium rounded">
-                    {ghYukluyor ? 'Bağlanıyor…' : cevir("Bağlan")}
+                    {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bağlan")}
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-2">
                   <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noreferrer"
                     className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">github.com/settings/tokens</a> →
                   Fine-grained PAT → scope: <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">repo</code> +
-                  <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded ml-1">admin:repo_hook</code> (auto-deploy için).
+                  <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded ml-1">admin:repo_hook</code> {cevir("(auto-deploy için).")}
                 </p>
               </div>
             ) : (
@@ -295,21 +333,21 @@ export default function DomainGitPage() {
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Repo</label>
                     <select value={ghSelectedRepo} onChange={e => ghLoadBranches(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-slate-800">
-                      <option value="">— seç —</option>
+                      <option value="">{cevir("— seç —")}</option>
                       {ghRepos.map(r => (
                         <option key={r.full_name} value={r.full_name}>
                           {r.private ? '🔒 ' : ''}{r.full_name}
                         </option>
                       ))}
                     </select>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5 block">{ghRepos.length} repo bulundu</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5 block">{ghRepos.length} {cevir("repo bulundu")}</span>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Branch</label>
                     <select value={ghSelectedBranch} onChange={e => setGhSelectedBranch(e.target.value)}
                       disabled={!ghSelectedRepo}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-slate-800 disabled:bg-slate-50 dark:bg-slate-900">
-                      {!ghSelectedBranch && <option value="">— seç —</option>}
+                      {!ghSelectedBranch && <option value="">{cevir("— seç —")}</option>}
                       {ghBranches.map(b => <option key={b} value={b}>{b}</option>)}
                       {ghSelectedBranch && !ghBranches.includes(ghSelectedBranch) && <option value={ghSelectedBranch}>{ghSelectedBranch}</option>}
                     </select>
@@ -323,7 +361,7 @@ export default function DomainGitPage() {
                   </label>
                   <button onClick={ghUse} disabled={ghYukluyor || !ghSelectedRepo || !ghSelectedBranch}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded">
-                    {ghYukluyor ? 'Bağlanıyor…' : 'Bu Repo\'yu Kullan'}
+                    {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bu Repo'yu Kullan")}
                   </button>
                 </div>
 
@@ -338,7 +376,7 @@ export default function DomainGitPage() {
 
           {/* Repo bağlama / güncelleme */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{repo ? 'Repo Ayarları' : cevir("Repo Bağla")}</h3>
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{repo ? cevir("Repo Ayarları") : cevir("Repo Bağla")}</h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Git URL (SSH)</label>
@@ -354,18 +392,18 @@ export default function DomainGitPage() {
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Hedef Dizin</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Hedef Dizin")}</label>
                   <input type="text" value={targetDir} onChange={e => setTargetDir(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono" />
                 </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
-                  {repo ? 'Güncelle' : cevir("Bağla")}
+                  {repo ? cevir("Güncelle") : cevir("Bağla")}
                 </button>
                 {repo && (
                   <button onClick={() => setKlonOnay(true)} disabled={isleniyor} className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 text-amber-800 dark:text-amber-200 text-sm font-medium rounded-md">
-                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> Klonla (hedef temizlenir)</span>}
+                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> {cevir("Klonla (hedef temizlenir)")}</span>}
                   </button>
                 )}
                 {repo && (
@@ -375,7 +413,7 @@ export default function DomainGitPage() {
                 )}
                 {repo && (
                   <button onClick={() => setSilinecek(true)} className="ml-auto px-4 py-2 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 text-sm rounded-md">
-                    {cevir(cevir("Bağlantıyı Kaldır"))}
+                    {cevir("Bağlantıyı Kaldır")}
                   </button>
                 )}
               </div>
@@ -390,7 +428,7 @@ export default function DomainGitPage() {
                   <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Deploy Key (Public)</h3>
                   <button onClick={() => kopyala(repo.deploy_key_pub)} className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-brand-100 dark:bg-brand-900/30 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 rounded">{cevir("Kopyala")}</button>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">GitHub → Repository → Settings → Deploy keys → Add deploy key — bu anahtarı yapıştırın (Allow write access GEREKMEZ).</p>
+                <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">GitHub → Repository → Settings → Deploy keys → Add deploy key — {cevir("bu anahtarı yapıştırın (Allow write access GEREKMEZ).")}</p>
                 <textarea readOnly value={repo.deploy_key_pub} rows={3}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-xs font-mono break-all" />
               </div>
@@ -398,9 +436,9 @@ export default function DomainGitPage() {
               {/* Webhook */}
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Webhook (Otomatik Pull)</h3>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Webhook (Otomatik Pull)")}</h3>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">GitHub → Repository → Settings → Webhooks → Add webhook. Content type: <code className="font-mono">application/json</code>. Push event yeterli.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">GitHub → Repository → Settings → Webhooks → Add webhook. Content type: <code className="font-mono">application/json</code>. {cevir("Push event yeterli.")}</p>
                 <div className="space-y-2">
                   <Sat e="Payload URL" d={`http://${domain?.ipv4 || ''}:8443/api/v1/git-webhook/${repo.webhook_secret}`} onCopy={kopyala} />
                   <Sat e="Secret" d={repo.webhook_secret} onCopy={kopyala} />
@@ -411,18 +449,18 @@ export default function DomainGitPage() {
 
               {/* Durum */}
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Sync Durumu</h3>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sync Durumu")}</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
-                  <Stat e="Son sync" d={repo.son_sync || '— (henüz yok)'} />
-                  <Stat e="Son commit" d={repo.son_commit ? repo.son_commit.slice(0, 8) : '—'} mono />
+                  <Stat e={cevir("Son sync")} d={repo.son_sync || cevir("— (henüz yok)")} />
+                  <Stat e={cevir("Son commit")} d={repo.son_commit ? repo.son_commit.slice(0, 8) : '—'} mono />
                   <Stat e={cevir("Durum")}
-                    d={repo.son_durum === 'basarili' ? '✓ başarılı' : (repo.son_durum === 'hata' || repo.son_durum.startsWith('hata') ? '⚠ hata' : repo.son_durum)}
+                    d={repo.son_durum === 'basarili' ? cevir("✓ başarılı") : (repo.son_durum === 'hata' || repo.son_durum.startsWith('hata') ? cevir("⚠ hata") : repo.son_durum)}
                     renk={repo.son_durum === 'basarili' ? 'emerald' : (repo.son_durum.startsWith('hata') ? 'red' : 'slate')}
                   />
                 </div>
                 {logSon && (
                   <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
-                    <div className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-1">Son log</div>
+                    <div className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-1">{cevir("Son log")}</div>
                     <pre className="text-xs bg-slate-900 text-slate-100 p-3 rounded-md overflow-auto max-h-60 font-mono whitespace-pre-wrap">{logSon}</pre>
                   </div>
                 )}
@@ -435,9 +473,9 @@ export default function DomainGitPage() {
       <ConfirmDialog
         acik={klonOnay}
         baslik={cevir("İlk klonlama")}
-        mesaj={`Hedef dizin (${targetDir}) içeriği TAMAMEN silinip repodaki ${branch} branch'i klonlanacak. Devam edilsin mi?`}
+        mesaj={cevirT(cevir("Hedef dizin ({0}) içeriği TAMAMEN silinip repodaki {1} branch'i klonlanacak. Devam edilsin mi?"), targetDir, branch)}
         tehlikeli
-        onayMetni="Evet, klonla"
+        onayMetni={cevir("Evet, klonla")}
         onOnay={klonla}
         onIptal={() => setKlonOnay(false)}
       />
@@ -447,7 +485,7 @@ export default function DomainGitPage() {
         baslik={cevir("Repo bağlantısını kaldır")}
         mesaj={cevir("Panel'deki kayıt silinecek (klonlanmış dosyalar diskte kalır).")}
         tehlikeli
-        onayMetni="Evet, sil"
+        onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(false)}
       />
