@@ -713,7 +713,13 @@ fi
 
 # ---- composer (per-domain PHP dependency management) ----
 if [ ! -x /usr/local/bin/composer ]; then
-  curl -sS https://getcomposer.org/installer 2>/dev/null | php -- --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+  # 🔴 `php --` (stdin-pipe) bazi ortamlarda (PHP 8.3 + ionCube) SEGFAULT eder ->
+  # temp dosya + `php <dosya>` formu kullan (segfault YOK).
+  _ci=$(mktemp)
+  if curl -sS https://getcomposer.org/installer -o "$_ci" 2>/dev/null; then
+    php "$_ci" --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+  fi
+  rm -f "$_ci"
 fi
 [ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer could not be installed"
 
