@@ -65,10 +65,16 @@ func (h *Handlers) SSLKapsam(w http.ResponseWriter, r *http.Request) {
 		webKapsam("www", "www."+alanAdi, "web", webSAN, webBitis, webKaynak, sunucuIP),
 	}
 	if mailAktif {
-		kapsamlar = append(kapsamlar,
-			webKapsam("Mail", "mail."+alanAdi, "mail", mailSAN, mailBitis, mailKaynak, sunucuIP),
-			webKapsam("Webmail", "webmail."+alanAdi, "mail", mailSAN, mailBitis, mailKaynak, sunucuIP),
-		)
+		// 🔴 Her mail alt-alani AYRI satir/checkbox: kullanici hangilerine SSL
+		// istedigini tek tek secer (or. SMTP-only -> mail; Outlook yok -> autodiscover atla).
+		for _, m := range []struct{ etiket, prefix string }{
+			{"Mail", "mail"}, {"Webmail", "webmail"},
+			{"SMTP", "smtp"}, {"IMAP", "imap"}, {"POP", "pop"},
+			{"Autoconfig", "autoconfig"}, {"Autodiscover", "autodiscover"},
+		} {
+			kapsamlar = append(kapsamlar,
+				webKapsam(m.etiket, m.prefix+"."+alanAdi, "mail", mailSAN, mailBitis, mailKaynak, sunucuIP))
+		}
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, sslKapsamResp{

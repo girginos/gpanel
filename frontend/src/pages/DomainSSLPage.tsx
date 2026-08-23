@@ -296,8 +296,6 @@ export default function DomainSSLPage() {
           <div className="space-y-2 text-sm">
             <Sat e={cevir("Kaynak")} d={durum.kaynak === 'letsencrypt' ? "Let's Encrypt" : cevir("Self-signed (öz-imzalı)")} />
             {durum.bitis_iso && <Sat e={cevir("Bitiş")} d={new Date(durum.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'long' })} />}
-            <Sat e={cevir("Sertifika yolu")} d={durum.cert_yol || '—'} mono />
-            <Sat e={cevir("Anahtar yolu")} d={durum.key_yol || '—'} mono />
             <button
               onClick={disable}
               disabled={isleniyor || isDurum === 'calisiyor'}
