@@ -26,6 +26,10 @@ import (
 
 const clamBin = "/usr/bin/clamscan"
 
+// 🔴 avYakinda — Antivirus "yakinda": motor kararli olana dek tarama endpointleri
+// DEVRE DISI (yanlis-pozitif firtinasi cozulene dek). Geri acmak: false + reship.
+const avYakinda = true
+
 type Handlers struct{ DB *sql.DB }
 
 // scanning: 0=boş 1=tarama sürüyor. TÜM sunucu için tek (ClamAV DB ~1.5G RAM → eşzamanlı tarama OOM riski).
@@ -175,6 +179,10 @@ func (h *Handlers) bulgular(ctx context.Context, sid int64) []Bulgu {
 
 // POST /domains/{id}/antivirus/tara
 func (h *Handlers) Tara(w http.ResponseWriter, r *http.Request) {
+	if avYakinda {
+		httpx.WriteError(w, http.StatusServiceUnavailable, "Antivirüs geçici olarak devre dışı — yakında.")
+		return
+	}
 	id, sk, demo, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")

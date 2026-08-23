@@ -594,9 +594,10 @@ systemctl daemon-reload
 # (avizle) is DEFAULT OFF — the operator enables it from the panel (fanotify + continuous
 # scanning, has a resource cost). This must be CONSISTENT with av_ayarlar defaults
 # (gercek_zamanli=0, zamanli_tarama=1).
+# 🔴 ANTIVIRUS "YAKINDA": motor kararli olana dek zamanli tarama DEVRE DISI.
 if [ -f /etc/systemd/system/girginospanel-avtara.timer ]; then
-  systemctl enable --now girginospanel-avtara.timer >/dev/null 2>&1
-  systemctl is-active --quiet girginospanel-avtara.timer     && ok "antivirus scheduled scan ACTIVE (04:00)"     || warn "antivirus scan timer could not be started"
+  systemctl disable --now girginospanel-avtara.timer >/dev/null 2>&1
+  ok "antivirus scheduled scan DISABLED (feature coming soon)"
 fi
 # 🔴 The backup root dir is created DURING INSTALL. The backup script already does `mkdir -p`
 # but that only runs on the FIRST RUN (03:30); until then the dir is ABSENT and

@@ -49,6 +49,9 @@ import (
 	"girginospanel/internal/wpsaglama"
 )
 
+// 🔴 avKapali — Antivirus "yakinda": tarama DEVRE DISI. avajan bos sonuc dondurur.
+const avKapali = true
+
 func main() {
 	var (
 		tara  = flag.Bool("tara", false, "tek seferlik tarama")
@@ -60,6 +63,16 @@ func main() {
 	if !*tara && !*izle && !*surec {
 		fmt.Fprintln(os.Stderr, "kullanım: girginospanel-avajan --tara [yol...] | --izle | --surec")
 		os.Exit(2)
+	}
+
+	// 🔴 ANTIVIRUS "YAKINDA": motor kararli olana dek tarama devre disi. Bos sonuc
+	// don (panel "temiz" gorur, yanlis-pozitif URETMEZ). Installer avtara.timer'i
+	// da enable etmez. Geri acmak: avKapali=false + reship.
+	if avKapali {
+		if *jsn {
+			fmt.Println(`{"taranan":0,"analiz_edilen":0,"atlanan":0,"bulgular":[],"bulunan":0,"kokler":[],"sure_ms":0}`)
+		}
+		return
 	}
 
 	db, err := dbAc()

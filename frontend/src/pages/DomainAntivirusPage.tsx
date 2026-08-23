@@ -34,6 +34,7 @@ const DOMAV_EN: Record<string, string> = {
   "← Aboneliğe dön": "← Back to subscription",
   "dizini GirginOS'un kendi motoruyla taranır: kural zinciri + webshell heuristiği.": "directory is scanned with GirginOS's own engine: rule chain + webshell heuristics.",
   "Motor:": "Engine:",
+  "Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.": "Antivirus is under development — temporarily disabled (coming soon). No scanning, no false positives.",
   "— kural + heuristik": "— rules + heuristics",
   "Son tarama:": "Last scan:",
   "dosya": "files",
@@ -229,6 +230,9 @@ export default function DomainAntivirusPage() {
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: cevir("Antivirüs") },
         ]} />
+        <div className="mb-4 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          🔒 {cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
+        </div>
 
         {/* Başlık — gerçek G-AV logo görseli */}
         <div className="flex items-start gap-3 mb-4">

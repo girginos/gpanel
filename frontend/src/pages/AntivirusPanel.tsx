@@ -38,6 +38,7 @@ const AVPANEL_EN: Record<string, string> = {
   "Antivirüs": "Antivirus",
   "İtibar": "Reputation",
   "Taranıyor…": "Scanning…",
+  "Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.": "Antivirus is under development — temporarily disabled (coming soon). No scanning, no false positives.",
   "Tümü": "All",
   "Karantinalı": "Quarantined",
   "Hazır": "Ready",
@@ -438,6 +439,9 @@ export default function AntivirusPanel() {
       <div className="max-w-7xl mx-auto">
         <style>{ANIM_CSS}</style>
         <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Antivirüs") }]} />
+        <div className="mb-4 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          🔒 {cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
+        </div>
 
         {/* ══ HERO: güvenlik duruşu konsolu ══ */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 dark:from-black dark:via-slate-950 dark:to-slate-900 text-white p-6 sm:p-8 mb-5 shadow-lg">

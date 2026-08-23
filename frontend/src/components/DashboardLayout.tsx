@@ -10,7 +10,7 @@ import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
 import HataYuzeyi from './HataYuzeyi'
 
-type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string }
+type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
 // Sayac anahtarlari GET /nav-sayaclar yanitindan gelir (Plesk deseni:
 // menu ogesinin sagindaki adet). Deger 0/yoksa rozet CIZILMEZ.
@@ -51,7 +51,7 @@ const MENU_EN: Record<string, string> = {
   'Sunucu Optimize': 'Server Optimization', 'Site Taşıma': 'Site Migration',
   'İstatistikler': 'Statistics', 'Eklentiler': 'Plugins', 'WordPress': 'WordPress',
   'Güvenlik Duvarı': 'Firewall', 'İzleme': 'Monitoring',
-  'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus',
+  'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus', 'Yakında': 'Soon',
   'Saldırı Zincirleri': 'Attack Chains', 'Denetim Kaydı': 'Audit Log',
   'Denetim Kaydım': 'My Audit Log', 'Mail Sunucu': 'Mail Server',
   'Dosya Yöneticisi': 'File Manager', 'Veritabanları': 'Databases',
@@ -92,7 +92,7 @@ const NAV: NavGroup[] = [
     { to: '/izleme',              etiket: 'İzleme',             ikon: ICONS.izleme },
     { to: '/mail-sunucu',         etiket: 'Mail Sunucu',        ikon: ICONS.mail },
     { to: '/website-security',     etiket: 'Website Security Monitor', ikon: ICONS.websec },
-    { to: '/antivirus',           etiket: 'Antivirüs',          ikon: ICONS.imunify },
+    { to: '/antivirus',           etiket: 'Antivirüs',          ikon: ICONS.imunify, rozet: 'Yakında' },
     { to: '/saldiri-zincirleri',  etiket: 'Saldırı Zincirleri',  ikon: ICONS.zincir },
     { to: '/denetim',             etiket: 'Denetim Kaydı',      ikon: ICONS.denetim },
   ]},
@@ -297,6 +297,9 @@ export default function DashboardLayout() {
                               >
                                 {sayac[it.sayac]}
                               </span>
+                            ) : null}
+                            {it.rozet ? (
+                              <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{cevir(it.rozet)}</span>
                             ) : null}
                           </>
                         )}
