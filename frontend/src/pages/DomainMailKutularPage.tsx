@@ -15,6 +15,7 @@ type Kutu = { id: number; email: string; domain_id: number; quota_bytes: number;
 // Client-side güçlü parola üretici (yeni kutu formu için — kripto-güvenli).
 
 const MAILKUTU_EN: Record<string, string> = {
+  "ornek": "example",
   "Bu domain için mail servisi henüz kurulmadı.": "Mail service is not set up for this domain yet.",
   "Güçlü parola üret": "Generate strong password",
   "Henüz posta kutusu yok. Yukarıdan ekleyin.": "No mailboxes yet. Add one above.",
@@ -316,7 +317,7 @@ export default function DomainMailKutularPage() {
               <div className="flex-1 min-w-[220px]">
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Kullanıcı adı")}</label>
                 <div className="flex items-center">
-                  <input value={yeniKullanici} onChange={e => setYeniKullanici(e.target.value)} required placeholder="ornek"
+                  <input value={yeniKullanici} onChange={e => setYeniKullanici(e.target.value)} required placeholder={cevir("ornek")}
                     className="w-full rounded-l-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
                   <span className="px-3 py-2 text-sm bg-slate-50 dark:bg-slate-700 border border-l-0 border-slate-300 dark:border-slate-600 rounded-r-lg text-slate-500 dark:text-slate-400 whitespace-nowrap">@{domain.alan_adi}</span>
                 </div>

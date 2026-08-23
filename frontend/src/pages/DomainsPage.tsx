@@ -81,6 +81,7 @@ function fmtKB(kb: number) {
 
 
 const DOMAINS_EN: Record<string, string> = {
+  "ornek.com": "example.com",
   "(varsayılan)": "(default)",
   "Alan adı": "Domain name",
   "Başlangıç": "Start",
@@ -657,7 +658,7 @@ export default function DomainsPage() {
                   type="text"
                   value={fAlanAdi}
                   onChange={e => setFAlanAdi(e.target.value)}
-                  placeholder="ornek.com"
+                  placeholder={cevir("ornek.com")}
                   autoFocus
                   required
                   disabled={olusturuluyor}

@@ -48,6 +48,8 @@ const NPM_KOMUTLAR = ['install', 'ci', 'run', 'prune', 'audit', 'outdated', 'ls'
 
 
 const LARAVEL_EN: Record<string, string> = {
+  "https://github.com/kullanici/proje.git veya git@github.com:kullanici/proje.git": "https://github.com/username/project.git or git@github.com:username/project.git",
+  "vendor/paket:^1.0": "vendor/package:^1.0",
   "(ana site) veya": "(main site) or",
   "Yeni klasör için elle yazın.": "Type manually for a new folder.",
   "'e taşınır. Yol": " . The path",
@@ -241,7 +243,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Depo URL</label>
             <input value={repoURL} onChange={e => setRepoURL(e.target.value)} spellCheck={false}
-              placeholder="https://github.com/kullanici/proje.git veya git@github.com:kullanici/proje.git"
+              placeholder={cevir("https://github.com/kullanici/proje.git veya git@github.com:kullanici/proje.git")}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
           </div>
           <div className="max-w-[220px]">
@@ -524,7 +526,7 @@ function ComposerSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: 
             </select>
           </div>
           {paketGerek && (
-            <input value={paket} onChange={e => setPaket(e.target.value)} spellCheck={false} placeholder="vendor/paket:^1.0"
+            <input value={paket} onChange={e => setPaket(e.target.value)} spellCheck={false} placeholder={cevir("vendor/paket:^1.0")}
               className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
           )}
           <button onClick={() => calistir({ komut, paket }, `composer ${komut}${paketGerek ? ' ' + paket : ''}`)}

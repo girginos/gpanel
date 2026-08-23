@@ -52,6 +52,9 @@ const ADIMLAR = [
 
 
 const MAILKUTUDETAY_EN: Record<string, string> = {
+  "ornek@baska.com, ikinci@baska.com": "user@other.com, second@other.com",
+  "kullanici@eskisunucu.com": "user@oldserver.com",
+  "mail.eskisunucu.com": "mail.oldserver.com",
   "Aktifleştir": "Activate",
   "Askıya al": "Suspend",
   "Bağlantıyı doğrula": "Verify connection",
@@ -745,7 +748,7 @@ export default function MailKutuDetayPage() {
                 <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("İletimi etkinleştir")}</span>
               </label>
               <div className={`space-y-3 transition-opacity ${iletim.aktif ? '' : 'opacity-50 pointer-events-none'}`}>
-                <div><label className={etiket}>{cevir("Hedef e-posta(lar)")}</label><textarea value={iletim.hedef} onChange={e => setIletim(i => ({ ...i, hedef: e.target.value }))} rows={2} placeholder="ornek@baska.com, ikinci@baska.com" className={`${girdi} resize-y font-mono`} /></div>
+                <div><label className={etiket}>{cevir("Hedef e-posta(lar)")}</label><textarea value={iletim.hedef} onChange={e => setIletim(i => ({ ...i, hedef: e.target.value }))} rows={2} placeholder={cevir("ornek@baska.com, ikinci@baska.com")} className={`${girdi} resize-y font-mono`} /></div>
                 <label className="flex items-center gap-2.5 cursor-pointer">
                   <input type="checkbox" checked={iletim.kopya} onChange={e => setIletim(i => ({ ...i, kopya: e.target.checked }))} className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
                   <span className="text-sm text-slate-700 dark:text-slate-200">{cevir("Bu kutuda bir kopya da sakla")}</span>
@@ -801,7 +804,7 @@ export default function MailKutuDetayPage() {
                       <label className={etiket}>{cevir("Eski e-posta adresi")}</label>
                       <input value={tasima.kullanici} autoFocus
                         onChange={e => { setTasima(t => ({ ...t, kullanici: e.target.value })); setAdaylar(null); setDogrulama(null) }}
-                        placeholder="kullanici@eskisunucu.com" className={girdi} />
+                        placeholder={cevir("kullanici@eskisunucu.com")} className={girdi} />
                     </div>
                     <div>
                       <label className={etiket}>{cevir("Eski hesabın parolası")}</label>
@@ -859,7 +862,7 @@ export default function MailKutuDetayPage() {
 
                   {elle && (
                     <div className="mt-3 grid sm:grid-cols-2 gap-3">
-                      <div><label className={etiket}>{cevir("Uzak IMAP sunucusu")}</label><input value={tasima.host} onChange={e => { setTasima(t => ({ ...t, host: e.target.value })); setDogrulama(null) }} placeholder="mail.eskisunucu.com" className={girdi} /></div>
+                      <div><label className={etiket}>{cevir("Uzak IMAP sunucusu")}</label><input value={tasima.host} onChange={e => { setTasima(t => ({ ...t, host: e.target.value })); setDogrulama(null) }} placeholder={cevir("mail.eskisunucu.com")} className={girdi} /></div>
                       <div className="grid grid-cols-2 gap-3">
                         <div><label className={etiket}>{cevir("Port")}</label><input type="number" value={tasima.port} onChange={e => setTasima(t => ({ ...t, port: +e.target.value }))} className={girdi} /></div>
                         <div><label className={etiket}>{cevir("Güvenlik")}</label><select value={tasima.guvenlik} onChange={e => { const g = e.target.value; setTasima(t => ({ ...t, guvenlik: g, port: g === 'ssl' ? 993 : g === 'tls' ? 143 : t.port })) }} className={girdi}><option value="ssl">SSL (993)</option><option value="tls">STARTTLS (143)</option></select></div>

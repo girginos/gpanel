@@ -14,6 +14,7 @@ type Alias = { id: number; domain_id: number; kaynak: string; hedef: string }
 
 
 const MAILALIAS_EN: Record<string, string> = {
+  "hedef@ornek.com": "target@example.com",
   "(bilinmeyen tüm adresler)": "(all unknown addresses)",
   "Bir adrese gelen postayı başka bir adrese yönlendirin. Catch-all ile bilinmeyen tüm adresleri tek kutuda toplayın.": "Forward mail sent to one address to another. With catch-all, collect all unknown addresses in a single mailbox.",
   "Henüz yönlendirme yok.": "No forwarding yet.",
@@ -158,7 +159,7 @@ export default function DomainMailAliasPage() {
               <div className="text-slate-400 pb-2 hidden sm:block">→</div>
               <div className="flex-1 min-w-[220px]">
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Hedef adres (nereye gitsin)")}</label>
-                <input type="email" value={hedef} onChange={e => setHedef(e.target.value)} required placeholder="hedef@ornek.com"
+                <input type="email" value={hedef} onChange={e => setHedef(e.target.value)} required placeholder={cevir("hedef@ornek.com")}
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
               <button type="submit" disabled={isleniyor}

@@ -13,6 +13,7 @@ type Ben = {
 
 
 const SETT_EN: Record<string, string> = {
+  "ornek@site.com": "name@example.com",
   "1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:": "1) Add to your authenticator app (Google Authenticator, Authy, Microsoft Authenticator):",
   "2FA'yı Etkinleştir": "Enable 2FA",
   "2FA'yı Kapat": "Disable 2FA",
@@ -196,7 +197,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <Girdi etiket={cevir("Ad Soyad")} value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
-                <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder="ornek@site.com" />
+                <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder={cevir("ornek@site.com")} />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 <button type="submit" disabled={pYuk} className={btn}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</button>

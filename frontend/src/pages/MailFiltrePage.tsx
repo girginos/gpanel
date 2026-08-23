@@ -13,6 +13,8 @@ const BOS: Filtre = { whitelist: '', blacklist: '', ip_blocklist: '', asn_blockl
 
 
 const MFILT_EN: Record<string, string> = {
+  'dost@ornek.com\nguvenli.com': 'friend@example.com\ntrusted.com',
+  'spam@kotu.com\nreklam.net': 'spam@bad.com\nads.net',
   "Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı.": "Some ASN entries could not be resolved (see below). Other rules were applied.",
   "Filtreler yüklenemedi (mail eklentisi aktif mi?)": "Failed to load filters (is the mail add-on active?)",
   "Gönderen Filtreleri (e-posta / domain)": "Sender Filters (email / domain)",
@@ -105,12 +107,12 @@ export default function MailFiltrePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1.5">{cevir("Beyaz liste (kabul)")}</label>
-                <textarea value={f.whitelist} onChange={e => setF(s => ({ ...s, whitelist: e.target.value }))} rows={5} placeholder={'dost@ornek.com\nguvenli.com'}
+                <textarea value={f.whitelist} onChange={e => setF(s => ({ ...s, whitelist: e.target.value }))} rows={5} placeholder={cevir('dost@ornek.com\nguvenli.com')}
                   className={ta + ' focus:ring-emerald-500/40 focus:border-emerald-400'} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-red-700 dark:text-red-400 mb-1.5">{cevir("Kara liste (reddet)")}</label>
-                <textarea value={f.blacklist} onChange={e => setF(s => ({ ...s, blacklist: e.target.value }))} rows={5} placeholder={'spam@kotu.com\nreklam.net'}
+                <textarea value={f.blacklist} onChange={e => setF(s => ({ ...s, blacklist: e.target.value }))} rows={5} placeholder={cevir('spam@kotu.com\nreklam.net')}
                   className={ta + ' focus:ring-red-500/40 focus:border-red-400'} />
               </div>
             </div>

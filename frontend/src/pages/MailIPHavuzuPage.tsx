@@ -27,6 +27,7 @@ type DedYanit = { dedicated: Dedicated[]; aktif_ip: string[] }
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
 
 const MIPH_EN: Record<string, string> = {
+  "firma.com": "company.com",
   "Bu adaptörde tanımlı": "Defined on this adapter",
   "Domaine Özel IP (Dedicated)": "Domain-Specific IP (Dedicated)",
   "Havuzdaki tüm IP'leri kara listelerde (DNSBL) tara": "Scan all IPs in the pool against blocklists (DNSBL)",
@@ -398,7 +399,7 @@ export default function MailIPHavuzuPage() {
                 </div>
                 {dedicated.map((d, i) => (
                   <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-center">
-                    <input value={d.domain} onChange={e => dedGuncelle(i, { domain: e.target.value })} placeholder="firma.com" className={inp} />
+                    <input value={d.domain} onChange={e => dedGuncelle(i, { domain: e.target.value })} placeholder={cevir("firma.com")} className={inp} />
                     <select value={d.ip} onChange={e => dedGuncelle(i, { ip: e.target.value })} className={inp + ' font-mono'}>
                       {!aktifIP.includes(d.ip) && d.ip && <option value={d.ip}>{d.ip} {cevir("(havuzda değil)")}</option>}
                       {aktifIP.map(ip => <option key={ip} value={ip}>{ip}</option>)}

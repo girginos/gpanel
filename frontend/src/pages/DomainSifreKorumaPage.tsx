@@ -12,6 +12,8 @@ type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
 
 const SIFRE_EN: Record<string, string> = {
+  "/gizli": "/secret",
+  "kullanici": "username",
   "Anasayfa": "Home",
   "Onay gerekiyor": "Confirmation required",
   "dizini": "directory",
@@ -105,12 +107,12 @@ export default function DomainSifreKorumaPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Dizin yolu")}</span>
-              <input value={yol} onChange={e => setYol(e.target.value)} required placeholder="/gizli"
+              <input value={yol} onChange={e => setYol(e.target.value)} required placeholder={cevir("/gizli")}
                 className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Kullanıcı adı")}</span>
-              <input value={kullanici} onChange={e => setKullanici(e.target.value)} required placeholder="kullanici"
+              <input value={kullanici} onChange={e => setKullanici(e.target.value)} required placeholder={cevir("kullanici")}
                 className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
             <label className="block">

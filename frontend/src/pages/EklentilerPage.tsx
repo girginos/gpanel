@@ -66,6 +66,9 @@ type KatalogYanit = { sunucu: string; parmakizi: string; uyari?: string; urunler
 
 
 const EKL_EN: Record<string, string> = {
+  "Mail Sunucu": "Mail Server",
+  "E-POSTA": "E-MAIL",
+  "Panelinize tam donanımlı e-posta sunucusu ekler: posta kutuları, takma adlar, spam filtresi ve giden IP havuzu.": "Adds a full-featured email server to your panel: mailboxes, aliases, spam filter and outgoing IP pool.",
   "Bitiş tarihi:": "Expiry date:",
   "Böyle bir eklenti bulunamadı.": "No such add-on found.",
   "Deneme lisansı alınamadı": "Failed to get trial license",
@@ -124,7 +127,7 @@ function tarih(s: string): string {
   if (!s) return ''
   const d = new Date(s)
   if (isNaN(d.getTime())) return s
-  return d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' })
+  return d.toLocaleDateString(i18n.language === 'en' ? 'en-US' : 'tr-TR', { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
 function kurulumSuruyor(k: KatalogYanit | null): boolean {
@@ -623,15 +626,15 @@ function KartGovde({ k, ...e }: { k: Kart } & Eylemler) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <Link to={`/eklentiler/${k.slug}`} className="text-base font-semibold text-slate-900 dark:text-slate-100 hover:text-brand-600 dark:hover:text-brand-400 transition">
-              {k.ad}
+              {cevir(k.ad)}
             </Link>
             <Rozet k={k} />
           </div>
-          <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mt-0.5">{k.kategori}</p>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mt-0.5">{cevir(k.kategori)}</p>
         </div>
       </div>
 
-      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300 flex-1">{k.kisa}</p>
+      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300 flex-1">{cevir(k.kisa)}</p>
       <LisansOzet l={k.lisans} />
       {k.kurulum && k.kurulum.durum !== 'yok' && k.kurulum.adimlar.length > 0 && <Adimlar ku={k.kurulum} />}
 
@@ -651,15 +654,15 @@ function Detay({ k, ...e }: { k: Kart } & Eylemler) {
           <Ikon d={k.ikon} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{k.ad}</h1>
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{cevir(k.ad)}</h1>
               <Rozet k={k} />
             </div>
             <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mt-0.5">
-              {k.kategori}{k.fiyat && ` · ${k.fiyat}`}{k.surum && cevirT(cevir(" · sürüm {0}"), k.surum)}
+              {cevir(k.kategori)}{k.fiyat && ` · ${k.fiyat}`}{k.surum && cevirT(cevir(" · sürüm {0}"), k.surum)}
             </p>
           </div>
         </div>
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">{k.kisa}</p>
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">{cevir(k.kisa)}</p>
         <LisansOzet l={k.lisans} />
         {k.kurulum && k.kurulum.durum !== 'yok' && k.kurulum.adimlar.length > 0 && <Adimlar ku={k.kurulum} />}
         <div className="mt-4"><Eylem k={k} {...e} /></div>

@@ -19,6 +19,7 @@ type Durum = {
 
 
 const SSH_EN: Record<string, string> = {
+  "ssh-ed25519 AAAA... kullanici@makine": "ssh-ed25519 AAAA... user@machine",
   "Anasayfa": "Home",
   "Anahtar kaydedilemedi": "Failed to save key",
   "hesabı için kabuk (shell) erişimi.": "shell access for the account.",
@@ -184,7 +185,7 @@ export default function DomainSSHPage() {
             onChange={e => setAnahtar(e.target.value)}
             rows={4}
             spellCheck={false}
-            placeholder="ssh-ed25519 AAAA... kullanici@makine"
+            placeholder={cevir("ssh-ed25519 AAAA... kullanici@makine")}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-xs font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
           />
           <div className="mt-3 flex items-center justify-between">

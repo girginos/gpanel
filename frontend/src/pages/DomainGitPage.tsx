@@ -28,6 +28,7 @@ type GHRepo = { full_name: string; name: string; description?: string; private: 
 
 
 const GIT_EN: Record<string, string> = {
+  "git@github.com:kullanici/repo.git": "git@github.com:username/repo.git",
   "Anasayfa": "Home",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "GitHub PAT zorunlu": "GitHub PAT is required",
@@ -381,7 +382,7 @@ export default function DomainGitPage() {
               <div>
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Git URL (SSH)</label>
                 <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)}
-                  placeholder="git@github.com:kullanici/repo.git"
+                  placeholder={cevir("git@github.com:kullanici/repo.git")}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">{cevir("Private repo için SSH URL kullanın; HTTPS ile auth çalışmaz.")}</p>
               </div>
