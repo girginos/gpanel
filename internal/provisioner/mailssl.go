@@ -450,12 +450,47 @@ func acmeYoluCanli(host string) error {
 	return nil
 }
 
+// mailAltAlanTumu — desteklenen mail alt-alan prefix'leri (SAN whitelist).
+// 🔴 Panelden gelen secim BU kumeyle sinirli — rastgele SAN enjeksiyonu engellenir.
+var mailAltAlanTumu = []string{"mail", "webmail", "smtp", "imap", "pop", "autoconfig", "autodiscover"}
+
+// mailHostlariSec — secilen prefix'lerden <prefix>.<alan> host listesi uretir.
+// secilenler bos ise TUMU (geriye uyum). Yalniz whitelist'teki prefix'ler kabul;
+// gecersiz/bos secim guvenli varsayilana (tumu) duser.
+func mailHostlariSec(alanAdi string, secilenler []string) []string {
+	izin := map[string]bool{}
+	for _, p := range mailAltAlanTumu {
+		izin[p] = true
+	}
+	var pref []string
+	if len(secilenler) == 0 {
+		pref = mailAltAlanTumu
+	} else {
+		gorulen := map[string]bool{}
+		for _, s := range secilenler {
+			s = strings.ToLower(strings.TrimSpace(s))
+			if izin[s] && !gorulen[s] {
+				gorulen[s] = true
+				pref = append(pref, s)
+			}
+		}
+		if len(pref) == 0 {
+			pref = mailAltAlanTumu
+		}
+	}
+	out := make([]string, 0, len(pref))
+	for _, p := range pref {
+		out = append(out, p+"."+alanAdi)
+	}
+	return out
+}
+
 // MailSertifikaAl — mail.<d> + webmail.<d> için Let's Encrypt sertifikası alır.
 //
 // Dönüş: cert/key yolu, SAN'a GİREN adlar, SAN'dan ÇIKARILAN adlar (sebebiyle).
 // sk parametresi geriye uyumluluk için durur; ACME kökü artık tenant home'u
 // değil, paylaşımlı MailAcmeWebroot'tur (bkz. dosya başı).
-func MailSertifikaAl(alanAdi, sk string) (certPath, keyPath string, kapsam []string, atlanan []string, err error) {
+func MailSertifikaAl(alanAdi, sk string, secilenler []string) (certPath, keyPath string, kapsam []string, atlanan []string, err error) {
 	if verr := ValidateDomain(alanAdi); verr != nil {
 		return "", "", nil, nil, verr
 	}
@@ -469,11 +504,7 @@ func MailSertifikaAl(alanAdi, sk string) (certPath, keyPath string, kapsam []str
 	// 🔴 autoconfig./autodiscover. cert'e GİRMELİ: Outlook oto-kurulumda
 	// https://autodiscover.<d>'ye gider; cert o adı kapsamazsa tarayıcı/istemci
 	// GÜVENMEZ ve oto-kurulum başarısız olur (istemci "sürekli parola sorar").
-	for _, h := range []string{
-		"mail." + alanAdi, "webmail." + alanAdi,
-		"smtp." + alanAdi, "imap." + alanAdi, "pop." + alanAdi,
-		"autoconfig." + alanAdi, "autodiscover." + alanAdi,
-	} {
+	for _, h := range mailHostlariSec(alanAdi, secilenler) {
 		if !hostCozuluyorMu(alanAdi, h) {
 			atlanan = append(atlanan, h+": DNS bu sunucuya çözülmüyor (A kaydı gerekli)")
 			continue

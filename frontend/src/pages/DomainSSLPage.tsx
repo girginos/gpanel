@@ -35,6 +35,12 @@ type KapsamResp = { mail_eklenti: boolean; sunucu_ip: string; kapsamlar: KapsamS
 
 
 const SSL_EN: Record<string, string> = {
+  "Alan adı": "Domain name",
+  "Posta SSL kurulmadı": "Mail SSL not installed",
+  "Sertifika bu adı kapsamıyor": "Certificate does not cover this name",
+  "DNS bu sunucuya gelmiyor — sertifika alınamaz": "DNS does not point to this server — certificate cannot be obtained",
+  "Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.": "A Let's Encrypt certificate is installed for the selected mail subdomains. You can uncheck the ones you don't use (e.g. autodiscover if you don't use Outlook).",
+  "Seçili alt-alanlara SSL kur": "Install SSL for selected",
   "Anasayfa": "Home",
   "SSL kuruluyor…": "Installing SSL…",
   "SSL kurulumu — hata": "SSL installation — error",
@@ -168,12 +174,14 @@ export default function DomainSSLPage() {
     }).catch(() => {})
   }, [id])
 
-  async function issue(tip: 'self-signed' | 'letsencrypt') {
+  async function issue(tip: 'self-signed' | 'letsencrypt', mailAltlar?: string[]) {
     if (tip === 'letsencrypt' && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("Let's Encrypt sertifikası alınması için alan adının bu sunucuya DNS A kaydı ile yönlenmiş olması gerekir. Devam edilsin mi?") }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null); setAdimlar([])
     try {
-      const govde: { tip: string; mail_ssl?: boolean } = { tip }
+      const govde: { tip: string; mail_ssl?: boolean; mail_altlar?: string[] } = { tip }
       if (tip === 'letsencrypt' && mailAktif && mailSSL) govde.mail_ssl = true
+      // Kapsam kartindan secilen mail alt-alanlari: sadece onlar icin cert.
+      if (tip === 'letsencrypt' && mailAltlar && mailAltlar.length) { govde.mail_ssl = true; govde.mail_altlar = mailAltlar }
       // 🔴 ASENKRON: istek HEMEN döner (cevir("başladı")); SSL çekimi arka planda sürer
       // (sayfa kapansa da). İlerleme aşağıda adım-adım gösterilir — poll başlar.
       await api.post(`/domains/${id}/ssl/issue`, govde)
@@ -306,7 +314,7 @@ export default function DomainSSLPage() {
       </div>
 
       {kapsam && kapsam.kapsamlar.length > 0 && (
-        <KapsamKarti kapsam={kapsam} onKur={() => issue('letsencrypt')} />
+        <KapsamKarti kapsam={kapsam} onKur={(altlar) => issue('letsencrypt', altlar)} />
       )}
 
       {/* Aksiyon kartları */}
@@ -385,7 +393,12 @@ function Sat({ e, d, mono }: { e: string; d: string; mono?: boolean }) {
 }
 
 // KapsamKarti — SSL kapsamlarını (domain/www/mail/webmail) satır satır gösterir.
-function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void }) {
+function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: (mailAltlar: string[]) => void }) {
+  const onek = (host: string) => host.split('.')[0]
+  const mailSatirlar = kapsam.kapsamlar.filter(k => k.grup === 'mail')
+  // Varsayilan: tum mail alt-alanlari TIKLI; kullanici gereksizi kaldirir.
+  const [secili, setSecili] = useState<Set<string>>(() => new Set(mailSatirlar.map(k => onek(k.host))))
+  const secTogglee = (p: string) => setSecili(s => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n })
   const rozet = (d: KapsamSatir) => {
     if (d.durum === 'kurulu') {
       return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{cevir("Kurulu")}</span>
@@ -395,7 +408,6 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void
     }
     return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{cevir("Eksik")}</span>
   }
-  const eksikMailVar = kapsam.kapsamlar.some(k => k.grup === 'mail' && k.durum === 'eksik')
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5">
       <div className="flex items-center justify-between mb-1">
@@ -410,27 +422,32 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: () => void
       <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
         {kapsam.kapsamlar.map(d => (
           <div key={d.host} className="flex items-center justify-between gap-3 py-2.5">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{d.etiket}</span>
-                <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">{d.grup === 'mail' ? cevir("Posta") : 'Web'}</span>
+            <div className="flex items-start gap-2.5 min-w-0">
+              {d.grup === 'mail' && onKur && (
+                <input type="checkbox" checked={secili.has(onek(d.host))} onChange={() => secTogglee(onek(d.host))} aria-label={cevir(d.etiket)} className="mt-1 accent-brand-600 h-4 w-4 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{cevir(d.etiket)}</span>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">{d.grup === 'mail' ? cevir("Posta") : 'Web'}</span>
+                </div>
+                <div className="text-xs font-mono text-slate-400 dark:text-slate-500 truncate">{d.host}</div>
+                {d.durum !== 'kurulu' && d.aciklama && (
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir(d.aciklama)}</div>
+                )}
+                {d.durum === 'kurulu' && d.bitis_iso && (
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir("Bitiş")}: {new Date(d.bitis_iso).toLocaleDateString(i18n.language === 'en' ? 'en-US' : 'tr-TR', { dateStyle: 'medium' })}</div>
+                )}
               </div>
-              <div className="text-xs font-mono text-slate-400 dark:text-slate-500 truncate">{d.host}</div>
-              {d.durum !== 'kurulu' && d.aciklama && (
-                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{d.aciklama}</div>
-              )}
-              {d.durum === 'kurulu' && d.bitis_iso && (
-                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir("Bitiş")}: {new Date(d.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'medium' })}</div>
-              )}
             </div>
             {rozet(d)}
           </div>
         ))}
       </div>
-      {eksikMailVar && onKur && (
-        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex items-center justify-between gap-3">
-          <span className="text-xs text-amber-800 dark:text-amber-200">{cevir("Posta alt-alanlarına sertifika kurulmamış — Outlook/istemciler şifre sorabilir.")}</span>
-          <button onClick={onKur} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition">{cevir("Posta SSL kur")}</button>
+      {mailSatirlar.length > 0 && onKur && (
+        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <span className="text-xs text-amber-800 dark:text-amber-200">{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
+          <button disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</button>
         </div>
       )}
     </div>

@@ -52,6 +52,7 @@ func sertifikaGercek(certYol, istenenTip string, varsayilanBitis time.Time) (kay
 type sslIssueReq struct {
 	Tip     string `json:"tip"`                // "self-signed" | "letsencrypt"
 	MailSSL bool   `json:"mail_ssl,omitempty"` // mail eklentisi aktifse: mail.<d>+webmail.<d> cert al + mail stack'e kur
+	MailAltlar []string `json:"mail_altlar,omitempty"` // secilen mail alt-alan prefix'leri (bos=tumu)
 }
 
 // mailEklentiAktif — mail eklentisi kurulu ve etkin mi (paralı/lisans gate).
@@ -141,7 +142,7 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	// aksi halde mail sunucusu kendinden imzali sertifikada kalir ve Outlook/
 	// istemciler her baglantida sifre sorar. Basarisizligi web SSL'i bloklamaz.
 	mailSSL := (req.MailSSL || h.mailEklentiAktif(r.Context())) && req.Tip == "letsencrypt"
-	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, req.Tip, mailSSL)
+	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, req.Tip, mailSSL, req.MailAltlar)
 
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"ok":    true,

@@ -153,7 +153,7 @@ func SSLSuruyor(id int64) bool {
 
 // sslBaslat — asenkron SSL kurulumunu başlatır ve oturumu döner. Goroutine
 // istekten bağımsız context ile sonuna kadar çalışır (sekme kapansa da sürer).
-func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip string, mailSSL bool) *sslIsi {
+func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip string, mailSSL bool, mailAltlar []string) *sslIsi {
 	k := &sslIsi{DomainID: id, AlanAdi: alanAdi, Durum: "calisiyor", Basladi: time.Now()}
 	sslMu.Lock()
 	sslIsleri[id] = k
@@ -225,7 +225,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 				dogruTamam := k.adim("mail-dogrula",
 					"Posta alt-alanları doğrulanıyor ve sertifika alınıyor (mail, webmail, smtp, imap, pop, autoconfig, autodiscover)",
 					func() (string, bool, error) {
-						c, key, kapsam, atlanan, e := provisioner.MailSertifikaAl(alanAdi, sk)
+						c, key, kapsam, atlanan, e := provisioner.MailSertifikaAl(alanAdi, sk, mailAltlar)
 						if e != nil {
 							m := "posta sertifikası alınamadı: " + e.Error()
 							if len(atlanan) > 0 {

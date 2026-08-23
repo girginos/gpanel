@@ -23,7 +23,7 @@ func TestMailSertifikaGercek(t *testing.T) {
 	if alanAdi == "" {
 		t.Skip("GOSP_TEST_DOMAIN verilmedi")
 	}
-	cert, key, kapsam, atlanan, err := MailSertifikaAl(alanAdi, os.Getenv("GOSP_TEST_SK"))
+	cert, key, kapsam, atlanan, err := MailSertifikaAl(alanAdi, os.Getenv("GOSP_TEST_SK"), nil)
 	t.Logf("kapsam (SAN'a giren) : %v", kapsam)
 	t.Logf("atlanan (SAN'dan çıkarılan): %v", atlanan)
 	if err != nil {
