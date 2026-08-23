@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# GirginOSPanel — herkese açık kurulum önyükleyicisi
+# GirginOSPanel — public install bootstrap
 #
 #   curl -fsSL https://get.girginos.io | sudo bash
 #   curl -fsSL https://get.girginos.io | sudo bash -s -- --waf
 #
-# Yaptığı iş: yayınlanan installer paketini indirir, sha256'sını latest.txt ile
-# DOĞRULAR, açar ve girginospanel-install.sh'ı verilen argümanlarla çalıştırır.
+# What it does: downloads the published installer package, VERIFIES its sha256
+# against latest.txt, extracts it and runs girginospanel-install.sh with the given args.
 #
-# 🔴 sha256 doğrulaması ZORUNLU: bu betik `curl | bash` ile çalıştırılıyor,
-# yani indirilen tarball doğrudan root olarak çalışacak. Sağlama tutmazsa
-# hiçbir şey çalıştırmadan çıkarız — "indirdik, herhalde doğrudur" YOK.
+# 🔴 sha256 verification is MANDATORY: this script runs via `curl | bash`,
+# so the downloaded tarball executes directly as root. If the checksum does not
+# match we exit without running anything — no "downloaded it, probably fine".
 set -uo pipefail
 
-# 🔴 PATH'İ KENDİMİZ KURUYORUZ — `sudo` /usr/local/bin'i ATAR.
-# AlmaLinux/RHEL varsayılanı:  Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin
-# Belgelenen kurulum/güncelleme komutu `curl ... | sudo bash` olduğu için bu
-# yol HER MÜŞTERİDE çalışır ve kendi araçlarımız (girginospanel-*, composer,
-# wp) bare-name çağrıldığında "command not found" verir. Ölçüldü: araç dosya
-# olarak VARDI, yalnızca PATH'te yoktu; kurulum yine de yeşil bitiyordu.
+# 🔴 WE SET PATH OURSELVES — `sudo` DROPS /usr/local/bin.
+# AlmaLinux/RHEL default:  Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin
+# Since the documented install/update command is `curl ... | sudo bash`, this
+# path works ON EVERY CUSTOMER and our own tools (girginospanel-*, composer,
+# wp) give "command not found" when called bare-name. Measured: the tool existed
+# as a file, it just wasn't on PATH; the install still finished green.
 case ":$PATH:" in
   *:/usr/local/bin:*) : ;;
   *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
@@ -29,49 +29,49 @@ c_g=$'\e[32m'; c_r=$'\e[31m'; c_0=$'\e[0m'
 bilgi(){ echo -e "  $*"; }
 dur(){ echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
 
-[ "$(id -u)" = "0" ] || dur "root gerekli:  curl -fsSL https://get.girginos.io | sudo bash"
+[ "$(id -u)" = "0" ] || dur "root required:  curl -fsSL https://get.girginos.io | sudo bash"
 
 for k in curl tar sha256sum; do
-  command -v "$k" >/dev/null || dur "'$k' bulunamadı — önce kurun"
+  command -v "$k" >/dev/null || dur "'$k' not found — install it first"
 done
 
 echo
-echo "  GirginOSPanel kurulumu"
-echo "  ──────────────────────"
+echo "  GirginOSPanel installer"
+echo "  ───────────────────────"
 
-# 1) Sürüm bilgisi
-LATEST=$(curl -fsSL --max-time 30 "$TABAN/latest.txt") || dur "sürüm bilgisi alınamadı ($TABAN/latest.txt)"
+# 1) Version info
+LATEST=$(curl -fsSL --max-time 30 "$TABAN/latest.txt") || dur "could not fetch version info ($TABAN/latest.txt)"
 PAKET=$(echo "$LATEST"  | awk -F': ' '/^paket:/{print $2}')
 BEK_SHA=$(echo "$LATEST" | awk -F': ' '/^sha256:/{print $2}')
 SURUM=$(echo "$LATEST"  | awk -F': ' '/^surum:/{print $2}')
-[ -n "$PAKET" ]   || dur "latest.txt içinde 'paket:' yok"
-[ -n "$BEK_SHA" ] || dur "latest.txt içinde 'sha256:' yok — doğrulanamayan paket kurulmaz"
-bilgi "sürüm: ${SURUM:-?}   paket: $PAKET"
+[ -n "$PAKET" ]   || dur "'paket:' missing in latest.txt"
+[ -n "$BEK_SHA" ] || dur "'sha256:' missing in latest.txt — an unverifiable package is not installed"
+bilgi "version: ${SURUM:-?}   package: $PAKET"
 
-# 2) İndir
-GEC=$(mktemp -d /tmp/gosp-kur.XXXXXX) || dur "geçici dizin açılamadı"
+# 2) Download
+GEC=$(mktemp -d /tmp/gosp-kur.XXXXXX) || dur "could not create temp dir"
 temizle(){ rm -rf "$GEC"; }
 trap temizle EXIT
-bilgi "indiriliyor…"
-curl -fSL --max-time 900 -o "$GEC/paket.tar.gz" "$TABAN/$PAKET" || dur "indirme başarısız"
+bilgi "downloading…"
+curl -fSL --max-time 900 -o "$GEC/paket.tar.gz" "$TABAN/$PAKET" || dur "download failed"
 
-# 3) DOĞRULA (kurulumdan ÖNCE)
+# 3) VERIFY (BEFORE install)
 GER_SHA=$(sha256sum "$GEC/paket.tar.gz" | cut -d' ' -f1)
 if [ "$GER_SHA" != "$BEK_SHA" ]; then
-  dur "sha256 TUTMUYOR — kurulum durduruldu
-     beklenen: $BEK_SHA
-     gelen   : $GER_SHA"
+  dur "sha256 MISMATCH — install aborted
+     expected: $BEK_SHA
+     got     : $GER_SHA"
 fi
-bilgi "${c_g}✓${c_0} sha256 doğrulandı"
+bilgi "${c_g}✓${c_0} sha256 verified"
 
-# 4) Aç
-tar xzf "$GEC/paket.tar.gz" -C "$GEC" || dur "arşiv açılamadı"
+# 4) Extract
+tar xzf "$GEC/paket.tar.gz" -C "$GEC" || dur "could not extract archive"
 KUR=$(find "$GEC" -maxdepth 2 -name girginospanel-install.sh -type f | head -1)
-[ -n "$KUR" ] || dur "pakette girginospanel-install.sh yok"
+[ -n "$KUR" ] || dur "girginospanel-install.sh not found in package"
 chmod +x "$KUR"
 
-# 5) Çalıştır — argümanları aynen aktar
-bilgi "kurulum başlıyor…"
+# 5) Run — pass args through verbatim
+bilgi "starting install…"
 echo
-cd "$(dirname "$KUR")" || dur "dizine girilemedi"
+cd "$(dirname "$KUR")" || dur "could not enter directory"
 exec "$KUR" "$@"

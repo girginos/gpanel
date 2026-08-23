@@ -1,5 +1,6 @@
 // gPanel MEGA ceviri sozlugu. TR -> EN.
 export const ORTAK_EN: Record<string, string> = {
+  "\"{0}\" için sonuç yok": "no results for \"{0}\"",
   "Ayarlar kaydedildi ve uygulandı.": "Settings saved and applied.",
   "CPU limiti (çekirdek)": "CPU limit (cores)",
   "DB taraması başarısız": "DB scan failed",

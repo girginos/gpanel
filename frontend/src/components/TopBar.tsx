@@ -248,7 +248,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                 <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
               )}
               {sonuclar.length === 0 && veri.current && (
-                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">"{q}" için sonuç yok</div>
+                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevirT("\"{0}\" için sonuç yok", q)}</div>
               )}
               {sonuclar.map((r, i) => (
                 <button

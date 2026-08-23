@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -145,6 +146,15 @@ type ajan struct {
 // ── tek seferlik tarama ────────────────────────────────────────────────────
 
 func (a *ajan) tamTarama(kokler []string) {
+	// 🔴 CLAMAV MODU: "Kural Motoru" KAPALI iken kendi motorumuz (avmotor) yerine
+	// clamav imzalari kullanilir. avmotor cok agresifti ve mesru framework
+	// dosyalarinda (Compiler.php, StorageServiceProvider.php, ActionScheduler...)
+	// yanlis-pozitif firtinasi uretiyordu. Bu toggle "sunucu motoru == clamav"
+	// saglar. Geri donus: Kural Motoru tekrar acilinca avmotor devreye girer.
+	if !a.ayar.KuralMotoru {
+		a.clamavTarama(kokler)
+		return
+	}
 	kap := avayar.SunucuKapasitesi()
 	_, _, isSayisi := a.ayar.Etkin(kap)
 
@@ -350,6 +360,13 @@ func (a *ajan) dosyaIsle(yol string) {
 		}
 		return
 	}
+	a.bulguKaydet(yol, b)
+}
+
+// bulguKaydet — tespit edilen bulguyu kaydeder: panel listesi (+json) ve otonom
+// modda (--izle / zamanli --tara) oto-karantina + DB + bildirim + attack-chain
+// olayi. Hem avmotor hem clamav yolu bunu ortak kullanir.
+func (a *ajan) bulguKaydet(yol string, b avmotor.Bulgu) {
 	a.mu.Lock()
 	a.bulunan++
 	a.bulgular = append(a.bulgular, b)
@@ -400,6 +417,79 @@ func (a *ajan) dosyaIsle(yol string) {
 	bildirimYazAVToplu(a.db, seviye, baslik, filepath.Base(yol), domID, bulguID)
 	// FAZ2 attack-chain: zararlı dosya = File Write aşaması.
 	olayYaz(a.db, domID, "dosya", "dosya_yazma", "kritik", filepath.Base(yol), yol, 0, "av_bulgu", bulguID)
+}
+
+// clamBin — clamscan yolu (clamav modu).
+const clamBin = "/usr/bin/clamscan"
+
+// clamavTarama — "Kural Motoru" KAPALI iken clamscan ile tarar; bulgulari mevcut
+// kayit/karantina/bildirim plumbing'i (bulguKaydet) uzerinden isler. avmotor
+// devre disi; "sunucu motoru == clamav" davranisi.
+func (a *ajan) clamavTarama(kokler []string) {
+	basla := time.Now()
+	if !a.json {
+		a.taramaID = taramaBasla(a.db, a.kaynak, a.ayar.Kapsam)
+	}
+	if _, err := os.Stat(clamBin); err != nil {
+		log.Printf("clamav modu: %s yok — tarama atlandi", clamBin)
+		if !a.json {
+			taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
+		}
+		a.ozetYaz(basla, kokler)
+		return
+	}
+	haric := a.ayar.HaricListesi()
+	for _, kok := range kokler {
+		a.clamKok(kok, haric)
+	}
+	if !a.json {
+		taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
+	}
+	a.ozetYaz(basla, kokler)
+}
+
+// clamKok — tek kok icin clamscan -r calistirir; FOUND satirlarini bulguKaydet'e
+// verir, "Scanned files:" ozetinden taranan sayisini toplar.
+func (a *ajan) clamKok(kok string, haric []string) {
+	args := []string{"-r", "-i", "--stdout", "--max-filesize=25M", "--max-scansize=1024M"}
+	for _, h := range haric {
+		if h != "" {
+			args = append(args, "--exclude-dir="+h)
+		}
+	}
+	args = append(args, kok)
+	out, _ := exec.Command(clamBin, args...).CombinedOutput()
+	for _, satir := range strings.Split(string(out), "\n") {
+		satir = strings.TrimSpace(satir)
+		if strings.HasPrefix(satir, "Scanned files:") {
+			if n, e := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(satir, "Scanned files:"))); e == nil {
+				a.mu.Lock()
+				a.taranan += n
+				a.analizEdilen += n
+				a.mu.Unlock()
+			}
+			continue
+		}
+		if !strings.HasSuffix(satir, " FOUND") {
+			continue
+		}
+		i := strings.LastIndex(satir, ": ")
+		if i <= 0 {
+			continue
+		}
+		yol := satir[:i]
+		imza := strings.TrimSuffix(satir[i+2:], " FOUND")
+		if haricMi(yol, haric) {
+			continue
+		}
+		a.bulguKaydet(yol, avmotor.Bulgu{
+			Dosya:    yol,
+			Puan:     100,
+			Seviye:   avmotor.SeviyeKritik,
+			Aciklama: imza,
+			Kurallar: []string{"clamav"},
+		})
+	}
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

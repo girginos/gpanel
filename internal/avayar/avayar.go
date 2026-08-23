@@ -166,6 +166,9 @@ func Oku(ctx context.Context, db *sql.DB) (Ayarlar, error) {
 		Scan(&a.GercekZamanli, &a.ZamanliTarama, &a.WPButunluk, &a.KuralMotoru,
 			&a.KonumSezgileri, &a.OtoKarantina, &a.EsikKritik, &a.Kapsam, &a.HaricYollar,
 			&a.CPUYuzde, &a.RAMMb, &a.IOAgirlik, &a.IsParcacigi, &a.DosyaHizSn, &a.ZamanliSaat, &a.YukEsigi, &a.SurecIzleme)
+	// 🔴 GERCEK ZAMANLI KORUMA GECICI KISIT (bkz. Yaz): sistem HER YERDE kapali
+	// gorur (panel durumu + ajan). Kaldirmak icin bu satiri sil.
+	a.GercekZamanli = false
 	return a, err
 }
 
@@ -174,6 +177,12 @@ func Oku(ctx context.Context, db *sql.DB) (Ayarlar, error) {
 // 🔴 İkisi AYRILAMAZ: sadece DB'ye yazıp slice'ı güncellememek, panelin
 // "limit 200%" gösterirken çekirdeğin eski limiti uygulaması demektir.
 func Yaz(ctx context.Context, db *sql.DB, a Ayarlar) error {
+	// 🔴 GERCEK ZAMANLI KORUMA GECICI KISIT: motor kararli olana dek acilamaz.
+	// Gercek-zamanli (fanotify) izleyici + agresif motor, musteri sitelerinde
+	// yanlis-pozitif/erisim sorunlari cikariyordu. Panelden acilmaya calisilsa
+	// bile burada ZORLA kapatilir; IzleyiciSenkron avizle servisini durdurur.
+	// KALDIRMAK icin: bu satiri (ve Oku'daki esini) sil + UI toggle'ini geri ac.
+	a.GercekZamanli = false
 	if a.Kapsam != "host" && a.Kapsam != "sunucu" {
 		return fmt.Errorf("gecersiz kapsam: %q (host|sunucu)", a.Kapsam)
 	}

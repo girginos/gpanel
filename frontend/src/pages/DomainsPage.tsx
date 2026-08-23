@@ -706,6 +706,7 @@ export default function DomainsPage() {
                 <KopyaSatir e="Parola" v={olusturmaSonuc.olusturulan_parolalar.ftp} kopyala={panoYaz} parola />
               </div>
 
+              {olusturmaSonuc.db_adi && (
               <div className="border border-slate-200 dark:border-slate-700 rounded-md p-3 bg-slate-50 dark:bg-slate-900">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 font-semibold mb-2">{cevir("MySQL Veritabanı")}</div>
                 <KopyaSatir e="Host" v={olusturmaSonuc.db_host || 'localhost'} kopyala={panoYaz} />
@@ -713,6 +714,7 @@ export default function DomainsPage() {
                 <KopyaSatir e={cevir("Kullanıcı")} v={olusturmaSonuc.db_user} kopyala={panoYaz} />
                 <KopyaSatir e="Parola" v={olusturmaSonuc.olusturulan_parolalar.db} kopyala={panoYaz} parola />
               </div>
+              )}
 
               <div className="text-[11px] text-slate-500 dark:text-slate-500 italic">
                 {cevir(cevir("Sistem kullanıcısı:"))} <span className="font-mono">{olusturmaSonuc.sistem_kullanici}</span>

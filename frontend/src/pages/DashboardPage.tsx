@@ -15,6 +15,7 @@ import { useAuth } from '@/store/auth'
 const DASH_EN: Record<string, string> = {
   "Henüz domain yok. Sol panelden ekleyin.": "No domains yet. Add one from the left panel.",
   "Seçili domain": "Selected domain",
+  "Pano": "Dashboard",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DASH_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -51,7 +52,7 @@ export default function DashboardPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1600px]">
       <div className="mb-5 flex items-baseline justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Pano</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Pano")}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-500 mt-0.5">
             {cevir(cevir("Hoş geldiniz,"))} <span className="text-slate-700 dark:text-slate-300 font-medium">{kullanici?.ad_soyad || kullanici?.adi}</span>
           </p>
@@ -80,7 +81,7 @@ export default function DashboardPage() {
             <DomainPano domain={secili} />
           ) : (
             <div className="bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-12 text-center text-slate-500 dark:text-slate-500">
-              {yukleniyor ? 'Yükleniyor…' : cevir("Henüz domain yok. Sol panelden ekleyin.")}
+              {yukleniyor ? cevir("Yükleniyor…") : cevir("Henüz domain yok. Sol panelden ekleyin.")}
             </div>
           )}
         </section>

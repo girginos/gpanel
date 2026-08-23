@@ -6,6 +6,15 @@
 // erişilebilir bir yer gerekiyor. Menü sekmesi, çubuğa sığmayan her şey için
 // mevcut çekmeceyi açar — yani hiçbir sayfa erişilemez hâle gelmez.
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import i18n from '@/lib/i18n'
+
+const NAV_EN: Record<string, string> = {
+  'Anasayfa': 'Home', 'Domainler': 'Domains', 'İzleme': 'Monitoring',
+  'Genel': 'Overview', 'Dosyalar': 'Files', 'Veritabanı': 'Database',
+  'Yedekler': 'Backups', 'Yeni': 'New', 'Menü': 'Menu',
+}
+const cevir = (tr: string): string => (i18n.language === 'en' ? (NAV_EN[tr] || tr) : tr)
 
 type Sekme = { to: string; etiket: string; ikon: string; end?: boolean }
 
@@ -20,6 +29,7 @@ const IK = {
 }
 
 export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
+  useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
 
   const isMusteri =
@@ -74,7 +84,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d={s.ikon} />
               </svg>
-              <span className="text-[10px] leading-none truncate max-w-full px-0.5">{s.etiket}</span>
+              <span className="text-[10px] leading-none truncate max-w-full px-0.5">{cevir(s.etiket)}</span>
             </>
           )}
         </NavLink>
@@ -96,7 +106,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
             </svg>
           </span>
-          <span className="text-[10px] leading-none truncate max-w-full px-0.5">Yeni</span>
+          <span className="text-[10px] leading-none truncate max-w-full px-0.5">{cevir('Yeni')}</span>
         </button>
       )}
 
@@ -111,7 +121,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
         <svg className="w-[22px] h-[22px] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
           <path strokeLinecap="round" strokeLinejoin="round" d={IK.menu} />
         </svg>
-        <span className="text-[10px] leading-none">Menü</span>
+        <span className="text-[10px] leading-none">{cevir('Menü')}</span>
       </button>
     </nav>
   )

@@ -28,7 +28,7 @@ export default function CPanelGirisPage() {
       nav('/abonelikler/' + domain_id, { replace: true })
       setTimeout(() => window.location.reload(), 100)
     } catch (e) {
-      setHata(apiHata(e, 'Giriş başarısız'))
+      setHata(apiHata(e, t('giris.hata')))
     } finally {
       setYuk(false)
     }

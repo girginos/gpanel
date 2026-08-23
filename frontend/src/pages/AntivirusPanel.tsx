@@ -79,17 +79,24 @@ const AVPANEL_EN: Record<string, string> = {
   "İş parçacığı (0=otomatik)": "Threads (0=automatic)",
   "▸ Gelişmiş limitler (iş parçacığı, hız)": "▸ Advanced limits (threads, rate)",
   "▾ Gelişmiş limitler": "▾ Advanced limits",
+  "geçici kısıtlı": "temporarily restricted",
+  "Motor kararlı olana dek geçici olarak devre dışı (yanlış-pozitif önlemi).": "Temporarily disabled until the engine stabilizes (false-positive mitigation).",
+  "Kural motoru": "Rule engine",
+  "Kendi motorumuz (imza/örüntü zinciri). KAPALIYKEN yalnız clamav imzaları kullanılır — framework dosyalarında yanlış-pozitif azalır.": "Our own engine (signature/pattern chain). When OFF, only clamav signatures are used — fewer false positives on framework files.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (AVPANEL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-function Anahtar({ acik, ayarla, etiket, aciklama, uyari }: { acik: boolean; ayarla: (v: boolean) => void; etiket: string; aciklama?: string; uyari?: boolean }) {
+function Anahtar({ acik, ayarla, etiket, aciklama, uyari, kilit }: { acik: boolean; ayarla: (v: boolean) => void; etiket: string; aciklama?: string; uyari?: boolean; kilit?: boolean }) {
+  // kilit: geçici olarak kısıtlandı — tıklanamaz, kapalı görünür.
+  const gorunurAcik = kilit ? false : acik
   return (
-    <button type="button" onClick={() => ayarla(!acik)} className="flex items-start gap-3 text-left w-full py-1.5">
-      <span className={`mt-0.5 relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition ${acik ? (uyari ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-300 dark:bg-slate-600'}`}>
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${acik ? 'left-4' : 'left-0.5'}`} />
+    <button type="button" disabled={kilit} onClick={() => { if (!kilit) ayarla(!acik) }}
+      className={`flex items-start gap-3 text-left w-full py-1.5 ${kilit ? 'opacity-60 cursor-not-allowed' : ''}`}>
+      <span className={`mt-0.5 relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition ${gorunurAcik ? (uyari ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-300 dark:bg-slate-600'}`}>
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${gorunurAcik ? 'left-4' : 'left-0.5'}`} />
       </span>
       <span className="min-w-0">
-        <span className="block text-sm text-slate-800 dark:text-slate-100">{etiket}</span>
+        <span className="block text-sm text-slate-800 dark:text-slate-100">{etiket}{kilit && <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-500">{cevir("geçici kısıtlı")}</span>}</span>
         {aciklama && <span className="block text-xs text-slate-400 dark:text-slate-500">{aciklama}</span>}
       </span>
     </button>
@@ -625,7 +632,7 @@ export default function AntivirusPanel() {
             <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">Koruma</div>
-                <Anahtar acik={ayar.gercek_zamanli} ayarla={v => set('gercek_zamanli', v)} etiket={cevir("Gerçek zamanlı koruma")} aciklama={cevir("Yeni/değişen dosyayı anında tarar (fanotify). Açınca izleyici servisi başlar.")} />
+                <Anahtar kilit acik={ayar.gercek_zamanli} ayarla={v => set('gercek_zamanli', v)} etiket={cevir("Gerçek zamanlı koruma")} aciklama={cevir("Motor kararlı olana dek geçici olarak devre dışı (yanlış-pozitif önlemi).")} />
                 <Anahtar acik={ayar.zamanli_tarama} ayarla={v => set('zamanli_tarama', v)} etiket={cevir("Zamanlı tarama")} aciklama={cevir("Günlük tam tarama.")} />
                 {ayar.zamanli_tarama && (
                   <div className="ml-12 mb-1 flex items-center gap-2"><span className="text-xs text-slate-400">Saat</span>
@@ -636,7 +643,7 @@ export default function AntivirusPanel() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-slate-400 uppercase mt-1 mb-1">{cevir("Tespit katmanları")}</div>
-                <Anahtar acik={ayar.kural_motoru} ayarla={v => set('kural_motoru', v)} etiket="Kural motoru" aciklama={cevir("İmza/örüntü zinciri (eval+superglobal, shell, webshell).")} />
+                <Anahtar acik={ayar.kural_motoru} ayarla={v => set('kural_motoru', v)} etiket={cevir("Kural motoru")} aciklama={cevir("Kendi motorumuz (imza/örüntü zinciri). KAPALIYKEN yalnız clamav imzaları kullanılır — framework dosyalarında yanlış-pozitif azalır.")} />
                 <Anahtar acik={ayar.konum_sezgileri} ayarla={v => set('konum_sezgileri', v)} etiket="Konum sezgileri" aciklama={cevir("uploads/*.php, çift uzantı, gizli dizin.")} />
                 <Anahtar acik={ayar.wp_butunluk} ayarla={v => set('wp_butunluk', v)} etiket={cevir("WordPress çekirdek bütünlüğü")} aciklama={cevir("Resmî md5 ile değişmiş/yabancı çekirdek dosyası.")} />
               </div>
