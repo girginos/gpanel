@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 // gosp-mobil-v1
@@ -39,6 +40,33 @@ const ICONS = {
   zincir:      'M13.19 8.69a4.5 4.5 0 011.24 7.24l-4.5 4.5a4.5 4.5 0 01-6.36-6.36l1.76-1.76m13.35-.62l1.76-1.76a4.5 4.5 0 00-6.36-6.36l-4.5 4.5a4.5 4.5 0 001.24 7.24',
   optimize:    'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4',
   cpu:         'M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2M7 7h10v10H7V7zm3 3h4v4h-4v-4z',
+}
+
+
+// Menü/başlık çevirisi (TR anahtar → EN). Diğer diller şimdilik TR'ye düşer.
+const MENU_EN: Record<string, string> = {
+  'Anasayfa': 'Home', 'Domainler': 'Domains', 'Bayiler': 'Resellers',
+  'Hosting Planları': 'Hosting Plans', 'Bayi Planları': 'Reseller Plans',
+  'Araçlar ve Ayarlar': 'Tools & Settings', 'PHP & Sunucu Sihirbazı': 'PHP & Server Wizard',
+  'Sunucu Optimize': 'Server Optimization', 'Site Taşıma': 'Site Migration',
+  'İstatistikler': 'Statistics', 'Eklentiler': 'Plugins', 'WordPress': 'WordPress',
+  'Güvenlik Duvarı': 'Firewall', 'İzleme': 'Monitoring',
+  'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus',
+  'Saldırı Zincirleri': 'Attack Chains', 'Denetim Kaydı': 'Audit Log',
+  'Denetim Kaydım': 'My Audit Log', 'Mail Sunucu': 'Mail Server',
+  'Dosya Yöneticisi': 'File Manager', 'Veritabanları': 'Databases',
+  'FTP Hesapları': 'FTP Accounts', 'DNS Ayarları': 'DNS Settings',
+  'DNS Şablonum': 'My DNS Template', 'SSL/TLS': 'SSL/TLS',
+  'PHP Ayarları': 'PHP Settings', 'Yedekler': 'Backups', 'Günlükler': 'Logs',
+  'Zamanlanmış Görevler': 'Cron Jobs', 'Git Deploy': 'Git Deploy', 'Laravel': 'Laravel',
+  'Apache & nginx': 'Apache & nginx', 'Hosting Hesapları': 'Hosting Accounts',
+  'Genel Bakış': 'Overview', 'Domainim': 'My Domain',
+  'Hosting Planlarım': 'My Hosting Plans',
+  'Profil ve Tercihler': 'Profile & Preferences',
+  // Grup başlıkları
+  'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
+  'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings',
+  'Profilim': 'My Profile',
 }
 
 const NAV: NavGroup[] = [
@@ -86,6 +114,9 @@ const RESELLER_NAV: NavGroup[] = [
 ]
 
 export default function DashboardLayout() {
+  const { i18n } = useTranslation()
+  const cevir = (tr: string) => (i18n.language === 'en' ? (MENU_EN[tr] || tr) : tr)
+
   const isMusteri = typeof window !== 'undefined' && localStorage.getItem('girginospanel.musteri') === '1'
   let _rol = ''
   try { _rol = JSON.parse(localStorage.getItem('gosp.user') || '{}').rol || '' } catch { /* okunamadi */ }
@@ -214,7 +245,7 @@ export default function DashboardLayout() {
                   onClick={() => toggle(grup.baslik!)}
                   className="w-full flex items-center justify-between px-3 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition"
                 >
-                  <span>{grup.baslik}</span>
+                  <span>{cevir(grup.baslik!)}</span>
                   <svg
                     className={`w-3 h-3 transition-transform ${acikGruplar[grup.baslik!] ? '' : '-rotate-90'}`}
                     fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}
@@ -253,7 +284,7 @@ export default function DashboardLayout() {
                             }`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
                               <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
                             </svg>
-                            <span className="whitespace-nowrap">{it.etiket}</span>
+                            <span className="whitespace-nowrap">{cevir(it.etiket)}</span>
                             {it.sayac && sayac[it.sayac] ? (
                               <span
                                 className={`ml-auto pl-2 shrink-0 text-[13px] tabular-nums transition ${

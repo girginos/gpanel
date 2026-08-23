@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -36,13 +40,48 @@ type Nokta = { t: number; cpu: number; mem: number; swap: number; load: number; 
 const MAX_NOKTA = 60 // 60 sample × 5s = 5 dakika
 const POLL_MS = 5000
 
+
+const IZL_EN: Record<string, string> = {
+  "(kayıt yok)": "(no records)",
+  "Alan adı listesi alınamadı": "Failed to get domain list",
+  "Ağ Trafiği": "Network Traffic",
+  "Bu domain HTTPS üzerinden erişilemiyor.": "This domain is not accessible over HTTPS.",
+  "Domain Bazlı": "Per Domain",
+  "Domain Seçimi": "Domain Selection",
+  "En Yoğun İşlemler": "Top Processes",
+  "Erişilebilir": "Accessible",
+  "Erişilemez": "Unreachable",
+  "Erişim Logu (Access)": "Access Log",
+  "Hata günlüğü alınamadı": "Failed to get error log",
+  "Henüz hata kaydı yok": "No error records yet",
+  "Henüz log yok…": "No logs yet…",
+  "Hızlı": "Fast",
+  "SSL Geçerli": "SSL Valid",
+  "SSL Geçersiz": "SSL Invalid",
+  "Sağlık Probe": "Health Probe",
+  "Sistem Kaynakları": "System Resources",
+  "Siteyi aç ↗": "Open site ↗",
+  "Sorgulanıyor…": "Querying…",
+  "Sunucu Günlükleri": "Server Logs",
+  "Süreç listesi alınamadı": "Failed to get process list",
+  "Tüm Sistem": "Whole System",
+  "Uçtan Uca İzleme": "End-to-End Monitoring",
+  "Veri toplanıyor…": "Collecting data…",
+  "Yanıt Süresi": "Response Time",
+  "Yavaş": "Slow",
+  "Yük (norm)": "Load (norm)",
+  "gün": "days",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (IZL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function IzlemePage() {
+  useTranslation() // dil re-render aboneligi
   const [tab, setTab] = useState<'sunucu' | 'domain' | 'loglar'>('sunucu')
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'İzleme' }]} />
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("İzleme") }]} />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Uçtan Uca İzleme</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Uçtan Uca İzleme")}</h1>
         <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-500">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           Canlı · {POLL_MS / 1000}sn yenile
@@ -50,9 +89,9 @@ export default function IzlemePage() {
       </div>
 
       <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-700 overflow-x-auto [&>*]:flex-shrink-0">
-        <SekmeButon aktif={tab === 'sunucu'}  onClick={() => setTab('sunucu')}>Sunucu</SekmeButon>
-        <SekmeButon aktif={tab === 'domain'} onClick={() => setTab('domain')}>Domain Bazlı</SekmeButon>
-        <SekmeButon aktif={tab === 'loglar'} onClick={() => setTab('loglar')}>Sunucu Günlükleri</SekmeButon>
+        <SekmeButon aktif={tab === 'sunucu'}  onClick={() => setTab('sunucu')}>{cevir(cevir("Sunucu"))}</SekmeButon>
+        <SekmeButon aktif={tab === 'domain'} onClick={() => setTab('domain')}>{cevir("Domain Bazlı")}</SekmeButon>
+        <SekmeButon aktif={tab === 'loglar'} onClick={() => setTab('loglar')}>{cevir("Sunucu Günlükleri")}</SekmeButon>
       </div>
 
       {tab === 'sunucu' ? <SunucuIzleme /> : tab === 'domain' ? <DomainIzleme /> : <SunucuLoglari />}
@@ -104,7 +143,7 @@ function SunucuIzleme() {
 
   useEffect(() => {
     function yukleProcs() {
-      api.get<Process[]>(`/system/processes?n=15&sirala=${procSort}`).then(r => setProcs(r.data)).catch(hataYakala('Süreç listesi alınamadı'))
+      api.get<Process[]>(`/system/processes?n=15&sirala=${procSort}`).then(r => setProcs(r.data)).catch(hataYakala(cevir("Süreç listesi alınamadı")))
     }
     yukleProcs()
     const t = setInterval(yukleProcs, POLL_MS * 2)
@@ -118,10 +157,10 @@ function SunucuIzleme() {
       {/* Snapshot grid */}
       {u && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <Snap baslik="CPU" deger={u.cpu.yuzde.toFixed(1) + '%'} alt={`${u.cpu.cekirdek} çekirdek`} renk="indigo" />
-          <Snap baslik="Bellek" deger={u.bellek.yuzde.toFixed(1) + '%'}
+          <Snap baslik="CPU" deger={u.cpu.yuzde.toFixed(1) + '%'} alt={`${u.cpu.cekirdek} ${cevir("çekirdek")}`} renk="indigo" />
+          <Snap baslik={cevir(cevir("Bellek"))} deger={u.bellek.yuzde.toFixed(1) + '%'}
             alt={`${(u.bellek.kullanilan_kb/1024).toFixed(0)} / ${(u.bellek.toplam_kb/1024).toFixed(0)} MB`} renk="emerald" />
-          <Snap baslik="Yük (1dk)" deger={u.cpu.yuk_1dk.toFixed(2)}
+          <Snap baslik={cevir("Yük (1dk)")} deger={u.cpu.yuk_1dk.toFixed(2)}
             alt={`5dk ${u.cpu.yuk_5dk.toFixed(2)} · 15dk ${u.cpu.yuk_15dk.toFixed(2)}`} renk="amber" />
           <Snap baslik="Disk (/)" deger={u.disk.yuzde.toFixed(1) + '%'}
             alt={`${fmtByte(u.disk.kullanilan_byte)} / ${fmtByte(u.disk.toplam_byte)}`} renk="violet" />
@@ -129,12 +168,12 @@ function SunucuIzleme() {
       )}
 
       {/* Çok serili çizgi grafik */}
-      <Kart baslik="Sistem Kaynakları" sag={`${noktalar.length}/${MAX_NOKTA} örnek · ${(noktalar.length*POLL_MS/1000/60).toFixed(1)}dk`}>
+      <Kart baslik={cevir("Sistem Kaynakları")} sag={cevirT(cevir("{0}/{1} örnek · {2}dk"), noktalar.length, MAX_NOKTA, (noktalar.length*POLL_MS/1000/60).toFixed(1))}>
         <div className="flex items-center gap-4 mb-2 text-xs">
           <Lej renk="bg-indigo-500" et="CPU" />
-          <Lej renk="bg-emerald-500" et="Bellek" />
+          <Lej renk="bg-emerald-500" et={cevir("Bellek")} />
           <Lej renk="bg-violet-500" et="Swap" />
-          <Lej renk="bg-amber-500" et="Yük (norm)" />
+          <Lej renk="bg-amber-500" et={cevir("Yük (norm)")} />
         </div>
         <CokSeriliGrafik noktalar={noktalar} alanlar={[
           { anahtar: 'cpu', renk: '#6366f1' },
@@ -147,7 +186,7 @@ function SunucuIzleme() {
       <div className="h-5" />
 
       {/* Ağ trafiği grafiği */}
-      <Kart baslik="Ağ Trafiği" sag={u?.ag?.arayuz ? `Arayüz: ${u.ag.arayuz}` : ''}>
+      <Kart baslik={cevir("Ağ Trafiği")} sag={u?.ag?.arayuz ? cevirT(cevir("Arayüz: {0}"), u.ag.arayuz) : ''}>
         <div className="flex items-center gap-4 mb-2 text-xs">
           <Lej renk="bg-sky-500" et="↓ RX (KB/s)" />
           <Lej renk="bg-pink-500" et="↑ TX (KB/s)" />
@@ -179,7 +218,7 @@ function SunucuIzleme() {
                   <div className="text-[10px] font-mono text-slate-500 dark:text-slate-500 truncate">{s.ad}</div>
                 </div>
                 <span className={`text-[10px] font-semibold uppercase ${s.aktif ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
-                  {s.aktif ? 'Aktif' : 'Kapalı'}
+                  {s.aktif ? 'Aktif' : cevir("Kapalı")}
                 </span>
               </div>
             ))}
@@ -190,12 +229,12 @@ function SunucuIzleme() {
       <div className="h-5" />
 
       {/* Top processes */}
-      <Kart baslik="En Yoğun İşlemler" tabloMod sag={
+      <Kart baslik={cevir("En Yoğun İşlemler")} tabloMod sag={
         <div className="flex flex-wrap items-center gap-1">
           <button onClick={() => setProcSort('cpu')}
             className={`text-[11px] px-2 py-1 rounded ${procSort === 'cpu' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>CPU</button>
           <button onClick={() => setProcSort('mem')}
-            className={`text-[11px] px-2 py-1 rounded ${procSort === 'mem' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>Bellek</button>
+            className={`text-[11px] px-2 py-1 rounded ${procSort === 'mem' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-200'}`}>{cevir(cevir("Bellek"))}</button>
         </div>
       }>
         {/* Mobilde her satır bir kart; >= lg gerçek tablo olarak kalır. */}
@@ -204,7 +243,7 @@ function SunucuIzleme() {
           <thead className={`${T.baslikGrubu} border-b border-slate-200 dark:border-slate-700`}>
             <tr>
               <th className={`${T.baslik} lg:w-16`}>PID</th>
-              <th className={T.baslik}>Kullanıcı</th>
+              <th className={T.baslik}>{cevir("Kullanıcı")}</th>
               <th className={`${T.baslik} text-right lg:w-16`}>CPU%</th>
               <th className={`${T.baslik} text-right lg:w-16`}>MEM%</th>
               <th className={T.baslik}>Komut</th>
@@ -212,7 +251,7 @@ function SunucuIzleme() {
           </thead>
           <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
             {procs.length === 0 && (
-              <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>Yükleniyor…</td></tr>
+              <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>{cevir("Yükleniyor…")}</td></tr>
             )}
             {procs.map(p => (
               <tr key={p.pid} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}>
@@ -223,7 +262,7 @@ function SunucuIzleme() {
                       Span'e taşındı — doğrudan sınıf, td'den gelen kalıtımı yener. */}
                   <span className="lg:text-xs">{p.pid}</span>
                 </td>
-                <td className={`${T.hucre} lg:max-w-[120px] lg:truncate`} data-etiket="Kullanıcı">
+                <td className={`${T.hucre} lg:max-w-[120px] lg:truncate`} data-etiket={cevir("Kullanıcı")}>
                   <span className="font-mono text-xs text-slate-700 dark:text-slate-300 text-right lg:text-left break-all">{p.user}</span>
                 </td>
                 <td className={`${T.hucre} lg:text-right`} data-etiket="CPU%">
@@ -264,7 +303,7 @@ function DomainIzleme() {
       const aktif = r.data.filter(d => d.durum === 'aktif')
       setDomains(aktif)
       if (aktif.length > 0 && secili === null) setSecili(aktif[0].id)
-    }).catch(hataYakala('Alan adı listesi alınamadı'))
+    }).catch(hataYakala(cevir("Alan adı listesi alınamadı")))
   }, [])
 
   function probet(id: number) {
@@ -285,7 +324,7 @@ function DomainIzleme() {
         .catch(e => setLogHata(apiHata(e)))
       api.get<{ satirlar: string[]; mevcut: boolean }>(`/domains/${secili}/logs/oku?dosya=error&son=40`)
         .then(r => setErrorLog(r.data.satirlar || []))
-        .catch(hataYakala('Hata günlüğü alınamadı'))
+        .catch(hataYakala(cevir("Hata günlüğü alınamadı")))
     }
     logCek()
     const t = setInterval(logCek, POLL_MS)
@@ -300,7 +339,7 @@ function DomainIzleme() {
 
   return (
     <>
-      <Kart baslik="Domain Seçimi">
+      <Kart baslik={cevir("Domain Seçimi")}>
         <div className="flex items-center gap-3 flex-wrap">
           <select value={secili ?? ''} onChange={e => setSecili(Number(e.target.value))}
             className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-slate-800 w-full sm:w-auto sm:min-w-[280px] focus:border-brand-500 outline-none">
@@ -310,12 +349,12 @@ function DomainIzleme() {
           {secili && (
             <button onClick={() => probet(secili)} disabled={hSorgulaniyor}
               className="text-sm px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded">
-              {hSorgulaniyor ? 'Sorgulanıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Sağlık Probe</span>}
+              {hSorgulaniyor ? 'Sorgulanıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Sağlık Probe")}</span>}
             </button>
           )}
           {seciliDomain && (
             <a href={`https://${seciliDomain.alan_adi}`} target="_blank" rel="noreferrer"
-              className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">Siteyi aç ↗</a>
+              className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">{cevir("Siteyi aç ↗")}</a>
           )}
         </div>
       </Kart>
@@ -333,17 +372,17 @@ function DomainIzleme() {
 
       {/* Loglar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Kart baslik="Erişim Logu (Access)" sag={`son ${accessLog.length} satır`}>
+        <Kart baslik={cevir("Erişim Logu (Access)")} sag={`son ${accessLog.length} ${cevir("satır")}`}>
           <div ref={accessRef} className="bg-slate-950 text-emerald-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
             {accessLog.length === 0
-              ? <div className="text-slate-500 dark:text-slate-500 italic">Henüz log yok…</div>
+              ? <div className="text-slate-500 dark:text-slate-500 italic">{cevir("Henüz log yok…")}</div>
               : accessLog.join('\n')}
           </div>
         </Kart>
-        <Kart baslik="Hata Logu (Error)" sag={`son ${errorLog.length} satır`}>
+        <Kart baslik="Hata Logu (Error)" sag={`son ${errorLog.length} ${cevir("satır")}`}>
           <div ref={errorRef} className="bg-slate-950 text-rose-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
             {errorLog.length === 0
-              ? <div className="text-slate-500 dark:text-slate-500 italic">{logHata || 'Henüz hata kaydı yok'}</div>
+              ? <div className="text-slate-500 dark:text-slate-500 italic">{logHata || cevir("Henüz hata kaydı yok")}</div>
               : errorLog.join('\n')}
           </div>
         </Kart>
@@ -401,22 +440,22 @@ function SunucuLoglari() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ara…"
+          <input value={arama} onChange={e => setArama(e.target.value)} placeholder={cevir("Ara…")}
             className="px-2.5 py-1.5 text-xs w-40 border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 outline-none focus:border-brand-500" />
           <select value={son} onChange={e => setSon(Number(e.target.value))}
             className="px-2 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {[100, 200, 500, 1000].map(n => <option key={n} value={n}>son {n}</option>)}
           </select>
-          <button onClick={() => yukle()} disabled={yuk} className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
+          <button onClick={() => yukle()} disabled={yuk} className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         </div>
       </div>
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
       <div ref={scrollRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all h-[min(60vh,320px)] sm:h-[420px] lg:h-[560px]">
-        {yuk ? <div className="text-slate-500 py-4">Yükleniyor…</div>
-          : gorunen.length === 0 ? <div className="text-slate-500 py-4">{arama ? `"${arama}" bulunamadı.` : '(kayıt yok)'}</div>
+        {yuk ? <div className="text-slate-500 py-4">{cevir("Yükleniyor…")}</div>
+          : gorunen.length === 0 ? <div className="text-slate-500 py-4">{arama ? `"${arama}" bulunamadı.` : cevir("(kayıt yok)")}</div>
             : gorunen.map((s, i) => <div key={i} className={logRenk(s)}>{s}</div>)}
       </div>
-      <p className="text-xs text-slate-400 mt-2">{arama ? `${gorunen.length} / ${satirlar.length}` : satirlar.length} satır · journald · {LOG_KAYNAK_ET[kaynak] || kaynak}</p>
+      <p className="text-xs text-slate-400 mt-2">{arama ? `${gorunen.length} / ${satirlar.length}` : satirlar.length} ${cevir("satır")} · journald · {LOG_KAYNAK_ET[kaynak] || kaynak}</p>
     </div>
   )
 }
@@ -471,7 +510,7 @@ function CokSeriliGrafik({
   const W = 1000, H = 180, P = 8
   const innerW = W - P * 2, innerH = H - P * 2
   if (noktalar.length < 2) {
-    return <div className="text-xs text-slate-400 dark:text-slate-500 italic py-12 text-center">Veri toplanıyor…</div>
+    return <div className="text-xs text-slate-400 dark:text-slate-500 italic py-12 text-center">{cevir("Veri toplanıyor…")}</div>
   }
   function path(anahtar: string) {
     return noktalar.map((n, i) => {
@@ -505,7 +544,7 @@ function SaglikKart({ h }: { h: Health }) {
       <div className="flex items-center gap-2 mb-2">
         <span className={`w-2.5 h-2.5 rounded-full ${ok ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
         <span className={`text-sm font-semibold ${ok ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-800 dark:text-red-200'}`}>
-          {ok ? 'Erişilebilir' : 'Erişilemez'}
+          {ok ? 'Erişilebilir' : cevir("Erişilemez")}
         </span>
       </div>
       <div className="text-3xl font-bold font-mono mt-1">
@@ -522,7 +561,7 @@ function SSLKart({ ssl, sema }: { ssl?: SSLBilgi; sema: string }) {
     return (
       <div className="rounded-2xl p-4 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
         <div className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2"><span className="inline-flex items-center gap-1.5"><Ikon d={I.uyari} /> SSL Yok</span></div>
-        <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">Bu domain HTTPS üzerinden erişilemiyor.</div>
+        <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{cevir("Bu domain HTTPS üzerinden erişilemiyor.")}</div>
       </div>
     )
   }
@@ -530,11 +569,11 @@ function SSLKart({ ssl, sema }: { ssl?: SSLBilgi; sema: string }) {
   return (
     <div className={`rounded-2xl p-4 border ${krit ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20' : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'}`}>
       <div className={`text-sm font-semibold mb-2 ${krit ? 'text-red-800 dark:text-red-200' : 'text-emerald-800 dark:text-emerald-200'}`}>
-        {ssl.gecerli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> SSL Geçerli</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> SSL Geçersiz</span>}
+        {ssl.gecerli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> {cevir("SSL Geçerli")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> {cevir("SSL Geçersiz")}</span>}
       </div>
-      <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 font-mono">{ssl.kalan_gun}<span className="text-base ml-1 text-slate-500 dark:text-slate-500">gün</span></div>
-      <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">Bitiş: <span className="font-mono">{ssl.bitis_tarihi}</span></div>
-      {ssl.cikaran && <div className="text-[11px] text-slate-500 dark:text-slate-500">Çıkaran: <span className="font-mono">{ssl.cikaran}</span></div>}
+      <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 font-mono">{ssl.kalan_gun}<span className="text-base ml-1 text-slate-500 dark:text-slate-500">{cevir("gün")}</span></div>
+      <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">{cevir("Bitiş:")} <span className="font-mono">{ssl.bitis_tarihi}</span></div>
+      {ssl.cikaran && <div className="text-[11px] text-slate-500 dark:text-slate-500">{cevir("Çıkaran:")} <span className="font-mono">{ssl.cikaran}</span></div>}
     </div>
   )
 }
@@ -548,10 +587,10 @@ function YanitKart({ h }: { h: Health }) {
   }
   return (
     <div className={`rounded-2xl p-4 border ${m[renk]}`}>
-      <div className="text-sm font-semibold mb-2">Yanıt Süresi</div>
+      <div className="text-sm font-semibold mb-2">{cevir("Yanıt Süresi")}</div>
       <div className="text-3xl font-bold text-slate-900 dark:text-slate-100 font-mono">{ms.toFixed(0)}<span className="text-base ml-1 text-slate-500 dark:text-slate-500">ms</span></div>
       <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">
-        {ms < 300 ? 'Hızlı' : ms < 1000 ? 'Kabul edilebilir' : 'Yavaş'} · {h.sema.toUpperCase()}
+        {ms < 300 ? 'Hızlı' : ms < 1000 ? 'Kabul edilebilir' : cevir("Yavaş")} · {h.sema.toUpperCase()}
       </div>
     </div>
   )

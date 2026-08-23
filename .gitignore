@@ -57,3 +57,8 @@ girginospanel-install.sh.oncesi
 *.yedek.*
 *.testyedek
 *~
+
+# tek-seferlik cok-dil/yama gelistirme scriptleri — repoya GITMEZ
+yama_*.py
+fix_*.py
+frontend/yama_*.py

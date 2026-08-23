@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
@@ -7,7 +11,17 @@ import { useDialog } from '@/components/Dialog'
 
 type Sub = { id: number; alt_ad: string; tam_ad: string; php_surum: string; docroot: string; created_at: string }
 
+
+const SUBD_EN: Record<string, string> = {
+  "Henüz subdomain yok.": "No subdomains yet.",
+  "SSL kurulamadı": "Failed to install SSL",
+  "Öz-imzalı SSL kur": "Install self-signed SSL",
+  "Küçük harf, rakam ve tire. Örn:": "Lowercase, digits and hyphen. E.g:",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SUBD_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainSubdomainlerPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const { id } = useParams()
   const [liste, setListe] = useState<Sub[]>([])
@@ -29,10 +43,10 @@ export default function DomainSubdomainlerPage() {
     setHata(null); setOk(null); setKaydediyor(true)
     try {
       const { data } = await api.post(`/domains/${id}/subdomain`, { alt_ad: altAd.trim() })
-      setOk(`${data.tam_ad} oluşturuldu. DNS A kaydı eklendi.`)
+      setOk(cevirT(cevir("{0} oluşturuldu. DNS A kaydı eklendi."), data.tam_ad))
       setAltAd('')
       yukle()
-    } catch (err) { setHata(apiHata(err, 'Oluşturulamadı')) }
+    } catch (err) { setHata(apiHata(err, cevir("Oluşturulamadı"))) }
     finally { setKaydediyor(false) }
   }
 
@@ -48,8 +62,8 @@ export default function DomainSubdomainlerPage() {
     setHata(null); setOk(null); setSslMesgul(s.id)
     try {
       await api.post(`/domains/${id}/subdomain/${s.id}/ssl`, { tip })
-      setOk(`${s.tam_ad} için SSL kuruldu (${tip === 'letsencrypt' ? "Let's Encrypt" : 'öz-imzalı'}). Artık https:// ile erişilebilir.`)
-    } catch (err) { setHata(apiHata(err, 'SSL kurulamadı')) }
+      setOk(`${s.tam_ad} için SSL kuruldu (${tip === 'letsencrypt' ? "Let's Encrypt" : cevir("öz-imzalı")}). Artık https:// ile erişilebilir.`)
+    } catch (err) { setHata(apiHata(err, cevir("SSL kurulamadı"))) }
     finally { setSslMesgul(null) }
   }
 
@@ -57,14 +71,14 @@ export default function DomainSubdomainlerPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: 'Subdomainler' },
       ]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl">🌐</span>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Subdomainler</h1>
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Bu domain altında alt alan adları (örn. <span className="font-mono">blog.alan.com</span>) oluşturun; her biri ayrı web dizinine sahiptir.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{cevir("Bu domain altında alt alan adları (örn.")} <span className="font-mono">blog.alan.com</span>) oluşturun; her biri ayrı web dizinine sahiptir.</p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
@@ -81,16 +95,16 @@ export default function DomainSubdomainlerPage() {
             {kaydediyor ? 'Oluşturuluyor…' : 'Subdomain Ekle'}
           </button>
         </div>
-        <p className="text-[11px] text-slate-400 mt-2">Küçük harf, rakam ve tire. Örn: <span className="font-mono">blog</span>, <span className="font-mono">shop</span>, <span className="font-mono">api</span>.</p>
+        <p className="text-[11px] text-slate-400 mt-2">{cevir("Küçük harf, rakam ve tire. Örn:")} <span className="font-mono">blog</span>, <span className="font-mono">shop</span>, <span className="font-mono">api</span>.</p>
       </form>
 
       <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4">
         <h3 className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-3">Mevcut Subdomainler</h3>
-        {yuk ? <div className="text-sm text-slate-400 py-2">Yükleniyor…</div>
+        {yuk ? <div className="text-sm text-slate-400 py-2">{cevir("Yükleniyor…")}</div>
           : liste.length === 0 ? (
             <div className="text-center py-6">
               <div className="text-2xl mb-1">🌐</div>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Henüz subdomain yok.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz subdomain yok.")}</p>
             </div>
           ) : (
             <ul className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -105,11 +119,11 @@ export default function DomainSubdomainlerPage() {
                       className="text-xs px-2.5 py-1 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-50">
                       {sslMesgul === s.id ? '…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> Let's Encrypt</span>}
                     </button>
-                    <button onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title="Öz-imzalı SSL kur"
+                    <button onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title={cevir("Öz-imzalı SSL kur")}
                       className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 text-slate-500 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
-                      öz-imza
+                      {cevir(cevir("öz-imza"))}
                     </button>
-                    <button onClick={() => sil(s)} className="text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">Sil</button>
+                    <button onClick={() => sil(s)} className="text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">{cevir("Sil")}</button>
                   </div>
                 </li>
               ))}
@@ -120,7 +134,7 @@ export default function DomainSubdomainlerPage() {
         </p>
       </div>
 
-      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
+      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
     </div>
   )
 }

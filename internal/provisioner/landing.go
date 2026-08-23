@@ -21,6 +21,10 @@ const (
 	// HataSayfaYolu: nginx location = /_gosp_404.html icin dosya adi (root ile birleşir).
 	HataSayfaYolu = "/" + hataSayfaAd
 
+	hata5xxAd = "_gosp_5xx.html"
+	// Hata5xxYolu: uygulama/backend 5xx yanitlarinda gosterilen marka sayfasi.
+	Hata5xxYolu = "/" + hata5xxAd
+
 	askidaSayfaAd = "_gosp_askida.html"
 	// AskidaSayfaYolu: askiya alinmis vhost'un 503 govdesi icin dosya adi.
 	AskidaSayfaYolu = "/" + askidaSayfaAd
@@ -396,5 +400,64 @@ const hata404Blok = `    error_page 404 /_gosp_404.html;
         expires 7d;
         gzip on;
         gzip_types application/json application/javascript;
+    }
+`
+
+// error5xxHTML: uygulama/backend kaynakli 5xx (500/502/503/504) icin marka sayfasi.
+// 404 ile AYNI gorsel dil (markaStil + ayni animasyon) — ziyaretci icin tutarli,
+// site sahibi icin yol gosterici (ham "500 Internal Server Error" yerine).
+func error5xxHTML() string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Site su anda yanit veremiyor</title>
+<style>%s</style>
+</head>
+<body>
+<div class="sayfa">
+  <aside class="gorsel">
+    <div class="anim" id="anim" aria-hidden="true"></div>
+%s
+    <div class="dev">girginos</div>
+  </aside>
+  <main class="icerik">
+    <span class="ust">Sunucu hatasi</span>
+    <div class="kod-buyuk">500</div>
+    <h1>Site su anda yanit veremiyor</h1>
+    <p class="spot">Bu sayfa gecici bir uygulama hatasi nedeniyle goruntulenemiyor. Birkac dakika sonra yeniden deneyebilirsiniz.</p>
+    <a class="dugme" href="/">&larr; Yeniden dene</a>
+    <p class="spot" style="margin-top:18px;font-size:13px;opacity:.75">Sitenin sahibiyseniz: hatanin ayrintisi hosting panelinizde <strong>Gunlukler</strong> bolumundeki PHP/hata kayitlarinda yer alir.</p>
+%s
+  </main>
+</div>
+%s
+</body>
+</html>`, markaStil, markaCizim, markaAlt, animScript("hata500.json"))
+}
+
+// Ensure5xxPage: marka 5xx sayfasini paylasilan dizine yazar (root-sahipli).
+func Ensure5xxPage() {
+	if err := os.MkdirAll(hataSayfaDizin, 0o755); err != nil {
+		return
+	}
+	yol := filepath.Join(hataSayfaDizin, hata5xxAd)
+	yeni := []byte(error5xxHTML())
+	if mevcut, err := os.ReadFile(yol); err == nil && string(mevcut) == string(yeni) {
+		return
+	}
+	_ = os.WriteFile(yol, yeni, 0o644)
+	_ = os.Chmod(hataSayfaDizin, 0o755)
+}
+
+// hata5xxBlok: 5xx marka sayfasini servis eden nginx location'i (server seviyesi).
+// Intercept ayari BACKEND location'inda yapilir (fastcgi_intercept_errors /
+// proxy_intercept_errors) — boylece uygulamanin KENDI 404'u bozulmaz, yalniz 5xx yakalanir.
+const hata5xxBlok = `    location = /_gosp_5xx.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
     }
 `

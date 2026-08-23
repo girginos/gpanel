@@ -1,10 +1,19 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // Gorunur hata yuzeyi — ekranin sag-altinda kapatilabilir uyari yigini.
 // Sessiz `.catch(() => {})` yerine gecen lib/hata.ts kayitlarini render eder.
 // DashboardLayout'ta bir kez mount edilir.
 import { useEffect, useState } from 'react'
 import { hataAbone, hataKapat, type HataKaydi } from '@/lib/hata'
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function HataYuzeyi() {
+  useTranslation() // dil re-render aboneligi
   const [kayitlar, setKayitlar] = useState<HataKaydi[]>([])
   useEffect(() => hataAbone(setKayitlar), [])
 
@@ -35,7 +44,7 @@ export default function HataYuzeyi() {
           <button
             onClick={() => hataKapat(k.id)}
             className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200"
-            aria-label="Kapat"
+            aria-label={cevir("Kapat")}
           >
             <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />

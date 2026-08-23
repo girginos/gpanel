@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -7,7 +10,16 @@ type Oge = { ad: string; aktif: boolean; deger: string; ayar: string; aciklama: 
 type Oneri = { metin: string; onem: string; ayar: string }
 type Ozet = { alan_adi: string; php_surum: string; skor: number; ogeler: Oge[]; oneriler: Oneri[] }
 
+
+const DPERF_EN: Record<string, string> = {
+  "Hızlandırıcılar": "Accelerators",
+  "Performans ve Hızlandırıcılar": "Performance and Accelerators",
+  "— mevcut hızlandırıcı durumu ve öneriler.": "— current accelerator status and recommendations.",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DPERF_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainPerformansPage() {
+  useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const navigate = useNavigate()
   const [o, setO] = useState<Ozet | null>(null)
@@ -21,8 +33,8 @@ export default function DomainPerformansPage() {
       .then(r => setO(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
   }, [id])
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
-  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
 
   const skorRenk = o.skor >= 80 ? 'emerald' : o.skor >= 60 ? 'amber' : 'rose'
   const skorHex: Record<string, string> = { emerald: '#10b981', amber: '#f59e0b', rose: '#f43f5e' }
@@ -38,8 +50,8 @@ export default function DomainPerformansPage() {
           { etiket: o.alan_adi, href: `/abonelikler/${id}` },
           { etiket: 'Performans' },
         ]} />
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Performans ve Hızlandırıcılar</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-5"><span className="font-mono">{o.alan_adi}</span> — mevcut hızlandırıcı durumu ve öneriler.</p>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Performans ve Hızlandırıcılar")}</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-5"><span className="font-mono">{o.alan_adi}</span> {cevir("— mevcut hızlandırıcı durumu ve öneriler.")}</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           {/* Skor halkası */}
@@ -60,7 +72,7 @@ export default function DomainPerformansPage() {
 
           {/* Hızlandırıcı durumları */}
           <div className="sm:col-span-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Hızlandırıcılar</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Hızlandırıcılar")}</h3>
             <div className="space-y-2">
               {o.ogeler.map(og => (
                 <div key={og.ad} className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
@@ -81,7 +93,7 @@ export default function DomainPerformansPage() {
 
         {/* Öneriler */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Öneriler</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Öneriler")}</h3>
           <ul className="space-y-2">
             {o.oneriler.map((n, i) => (
               <li key={i} className="flex items-start gap-2 text-sm">
@@ -93,7 +105,7 @@ export default function DomainPerformansPage() {
           </ul>
         </div>
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

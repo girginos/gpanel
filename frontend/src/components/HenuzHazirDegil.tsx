@@ -1,8 +1,17 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function HenuzHazirDegil({
   baslik, faz, aciklama,
 }: { baslik: string; faz: string; aciklama: string }) {
+  useTranslation() // dil re-render aboneligi
   return (
     <div className="px-8 py-6">
       <div className="flex items-center mb-1">
@@ -19,10 +28,10 @@ export default function HenuzHazirDegil({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">Yapım aşamasında</h3>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yapım aşamasında")}</h3>
         <p className="text-sm text-slate-500 dark:text-slate-500 max-w-md mx-auto">
           Bu modül <span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span> fazında devreye girecek.
-          Şu an sadece arayüz iskeleti görülmektedir.
+          {cevir(cevir("Şu an sadece arayüz iskeleti görülmektedir."))}
         </p>
       </div>
     </div>

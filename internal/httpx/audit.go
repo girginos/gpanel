@@ -58,3 +58,30 @@ func DomainKapsam(db *sql.DB, domainID int64) int64 {
 	}
 	return 0
 }
+
+// DenetimSistem: arka plan işleri (toplu işlem, zamanlanmış görev) için denetim
+// kaydı. Denetim/DenetimDomain *http.Request ister ve DenetimIP(nil) panikler;
+// arka planda istek yoktur, IP "sistem" olarak yazılır.
+func DenetimSistem(db *sql.DB, uid int64, kullanici, eylem, hedef, detay string, kapsam int64, basarili bool) {
+	if db == nil {
+		return
+	}
+	var uidVal any
+	if uid > 0 {
+		uidVal = uid
+	}
+	var detayVal any
+	if detay != "" {
+		if b, err := json.Marshal(map[string]string{"not": detay}); err == nil {
+			detayVal = string(b)
+		}
+	}
+	ok := 0
+	if basarili {
+		ok = 1
+	}
+	_, _ = db.Exec(
+		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok, reseller_id)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		uidVal, kullanici, "sistem", eylem, hedef, detayVal, ok, kapsam)
+}

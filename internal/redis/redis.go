@@ -104,6 +104,12 @@ func wpDizinler(sk string) []string {
 func wpBagla(sk, pass string) int {
 	n := 0
 	for _, dir := range wpDizinler(sk) {
+		cfg := filepath.Join(dir, "wp-config.php")
+		bak := cfg + ".gosp-redis-bak"
+		// 🔴 VERİ-KAYBI GUARD: `wp config set` wp-config'i truncate+rewrite eder;
+		// disk/kota dolunca 0 bayta düşer. Önce yedekle, işlem sonunda boş/bozuk
+		// kaldıysa yedekten geri yükle (aşağıda).
+		_, _ = exec.Command("runuser", "-u", sk, "--", "cp", "-p", cfg, bak).CombinedOutput()
 		set := func(k, v string, raw bool) {
 			a := []string{"config", "set", k, v, "--type=constant", "--path=" + dir}
 			if raw {
@@ -131,6 +137,14 @@ func wpBagla(sk, pass string) int {
 		if _, err := exec.Command("runuser", "-u", sk, "--", "cp", "-f", src, dst).CombinedOutput(); err != nil {
 			continue
 		}
+		// 🔴 GUARD DEVAMI: wp-config boş/okunamaz kaldıysa (disk dolu → truncate)
+		// yedekten geri yükle. Başarılıysa yedeği sil.
+		if st, e := os.Stat(cfg); e != nil || st.Size() == 0 {
+			_, _ = exec.Command("runuser", "-u", sk, "--", "cp", "-p", bak, cfg).CombinedOutput()
+			_, _ = exec.Command("runuser", "-u", sk, "--", "rm", "-f", bak).CombinedOutput()
+			continue // bu kurulum başarısız — wp-config kurtarıldı, Redis bağlanmadı
+		}
+		_, _ = exec.Command("runuser", "-u", sk, "--", "rm", "-f", bak).CombinedOutput()
 		// bağlantı doğrula — status "Connected" içeriyorsa başarılı say
 		if out, err := wpKomut(sk, "redis", "status", "--path="+dir); err == nil && strings.Contains(string(out), "Connected") {
 			n++

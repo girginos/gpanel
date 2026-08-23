@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -20,7 +23,13 @@ const kart = 'rounded-xl border border-slate-200 dark:border-slate-700 bg-white 
 const etk = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
 const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm'
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; sid: string }) {
+  useTranslation() // dil re-render aboneligi
   const [a, setA] = useState<Ayar | null>(null)
   const [ozel, setOzel] = useState(false)
   const [acik, setAcik] = useState(false)
@@ -30,7 +39,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
   useEffect(() => {
     api.get<{ ayarlar: Ayar; ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`)
       .then(r => { setA(r.data.ayarlar); setOzel(r.data.ozel_havuz) })
-      .catch(hataYakala('Alt alan PHP ayarları yüklenemedi'))
+      .catch(hataYakala(cevir("Alt alan PHP ayarları yüklenemedi")))
   }, [domainId, sid])
 
   function P<K extends keyof Ayar>(k: K, v: Ayar[K]) { setA(prev => prev ? { ...prev, [k]: v } : prev) }
@@ -41,7 +50,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
     try {
       const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: a })
       setOzel(r.data.ozel_havuz)
-      setMesaj({ t: 'ok', m: '✓ Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.' })
+      setMesaj({ t: 'ok', m: cevir("✓ Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.") })
     } catch (e) {
       setMesaj({ t: 'hata', m: apiHata(e) })
     } finally { setKaydediliyor(false) }
@@ -66,11 +75,11 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
     <div className={`${kart} md:col-span-2`}>
       <button onClick={() => setAcik(v => !v)} className="w-full flex items-center justify-between text-left">
         <div>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">PHP Ayarları</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Bellek, yükleme boyutu, hata gösterimi ve FPM havuz limitleri — domain gibi tam özelleştirme.</p>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("PHP Ayarları")}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{cevir("Bellek, yükleme boyutu, hata gösterimi ve FPM havuz limitleri — domain gibi tam özelleştirme.")}</p>
         </div>
         <span className="flex items-center gap-2">
-          {ozel && <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">ayrı havuz</span>}
+          {ozel && <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">{cevir("ayrı havuz")}</span>}
           <span className="text-slate-400 text-lg">{acik ? '−' : '+'}</span>
         </span>
       </button>
@@ -90,7 +99,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Genel</h3>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{cevir("Genel")}</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <Toggle k="opcache_enable" l="OPcache" />
               <Toggle k="display_errors" l="display_errors" />
@@ -98,7 +107,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
               <Toggle k="allow_url_fopen" l="allow_url_fopen" />
               <Toggle k="file_uploads" l="file_uploads" />
               <Toggle k="short_open_tag" l="short_open_tag" />
-              <Toggle k="debug_mode" l="Hata ayıklama modu" />
+              <Toggle k="debug_mode" l={cevir("Hata ayıklama modu")} />
             </div>
           </div>
 

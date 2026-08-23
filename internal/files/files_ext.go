@@ -394,6 +394,10 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		if _, err := exec.LookPath("setfacl"); err == nil {
 			_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
 			_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
+			// Apache backend modundaki siteler icin de ayni erisim (apache yoksa
+			// setfacl hata doner, yutulur — zararsiz).
+			_, _ = exec.Command("setfacl", "-R", "-m", "u:apache:rX", hedefAbs).CombinedOutput()
+			_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:apache:rX", hedefAbs).CombinedOutput()
 		}
 		is.mu.Lock()
 		is.Durum = "tamam"
@@ -479,84 +483,8 @@ func (h *Handlers) bulkMoveCopy(w http.ResponseWriter, r *http.Request, move boo
 // yol üzerinde) TOCTOU symlink-yarışına açıktı. Kopya artık safeio.go'daki symlink-güvenli
 // copyTreeBeneath (openat2 + O_NOFOLLOW, jail-dışı symlink içeriğini sızdırmaz) ile yapılır.
 
-// ----- Arşivle (seçili dosyaları zip yap) -----
-
-type archiveReq struct {
-	Kaynaklar []string `json:"kaynaklar"`
-	CiktiYol  string   `json:"cikti_yol"` // örn /public_html/yedek.zip
-	Format    string   `json:"format"`    // zip | tar.gz
-}
-
-func (h *Handlers) Archive(w http.ResponseWriter, r *http.Request) {
-	home, sk, err := h.home(r)
-	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
-		return
-	}
-	var req archiveReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
-		return
-	}
-	if len(req.Kaynaklar) == 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "kaynak yok")
-		return
-	}
-	if req.Format == "" {
-		req.Format = "zip"
-	}
-	ciktiAbs, err := jailJoinStrict(home, req.CiktiYol)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "cikti: "+err.Error())
-		return
-	}
-	_ = os.MkdirAll(filepath.Dir(ciktiAbs), 0755)
-
-	// Tum kaynaklarin home-altinda abs yolunu hazirla, relative isimlerle arşivle
-	// Stratejisi: ortak parent'i bul, oradan çalış
-	var args []string
-	if req.Format == "zip" {
-		args = []string{"-r", "-q", ciktiAbs}
-		for _, k := range req.Kaynaklar {
-			kAbs, err := jailJoinStrict(home, k)
-			if err != nil {
-				continue
-			}
-			// chdir + relative isim
-			args = append(args, kAbs)
-		}
-		out, err := exec.Command("zip", args...).CombinedOutput()
-		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "zip: "+strings.TrimSpace(string(out)))
-			return
-		}
-	} else { // tar.gz
-		args = []string{"-czf", ciktiAbs}
-		for _, k := range req.Kaynaklar {
-			kAbs, err := jailJoinStrict(home, k)
-			if err != nil {
-				continue
-			}
-			args = append(args, kAbs)
-		}
-		out, err := exec.Command("tar", args...).CombinedOutput()
-		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "tar: "+strings.TrimSpace(string(out)))
-			return
-		}
-	}
-	_, _ = exec.Command("chown", sk+":"+sk, ciktiAbs).CombinedOutput()
-	_, _ = exec.Command("restorecon", ciktiAbs).CombinedOutput()
-
-	info, _ := os.Stat(ciktiAbs)
-	var boyut int64
-	if info != nil {
-		boyut = info.Size()
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "cikti_yol": req.CiktiYol, "boyut": boyut,
-	})
-}
+// Arşivleme (Archive/ArchiveProgress + archiveReq) arsiv.go dosyasına taşındı:
+// asenkron yürütme + ilerleme takibi + göreli yol düzeltmesi.
 
 // ----- Yeni boş dosya -----
 

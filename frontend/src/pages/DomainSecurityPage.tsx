@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -47,7 +51,18 @@ const APP_META: Record<string, { ad: string; renk: string }> = {
 const appAd = (t: string) => APP_META[t]?.ad ?? (t || '—')
 const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
 
+
+const SEC_EN: Record<string, string> = {
+  "Başlatılamadı": "Failed to start",
+  "Başlatılıyor…": "Starting…",
+  "Bu domainde bilinen açık bulunmadı.": "No known vulnerabilities found on this domain.",
+  "Bu filtreyle açık yok.": "No vulnerabilities with this filter.",
+  "Tarama hatası": "Scan error",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainSecurityPage() {
+  useTranslation() // dil re-render aboneligi
   const { id } = useParams<{ id: string }>()
   const domainID = Number(id)
   const [sayfa, setSayfa] = useState<Sayfa>({ toplam: 0, sayfa: 1, sayfa_boyut: 50, items: [] })
@@ -77,7 +92,7 @@ export default function DomainSecurityPage() {
       setUyg((env.data.items ?? []).filter((u) => u.domain_id === domainID))
       ilk.current = true
     } catch (e) {
-      setHata(apiHata(e, 'Yüklenemedi'))
+      setHata(apiHata(e, cevir("Yüklenemedi")))
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { if (domainID > 0) void yukle() }, [domainID, filtre, aktifSayfa])
@@ -95,7 +110,7 @@ export default function DomainSecurityPage() {
       await api.post('/websec/rescan?domain_id=' + domainID, {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Başlatılamadı', mesaj: apiHata(e, 'Tarama hatası') })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")) })
     } finally { setTaranıyor(false) }
   }
 
@@ -125,7 +140,7 @@ export default function DomainSecurityPage() {
             ))}
             {taraniyorMu && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> Taranıyor…
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> {cevir("Taranıyor…")}
               </span>
             )}
           </div>
@@ -139,7 +154,7 @@ export default function DomainSecurityPage() {
       {/* Şiddet filtresi */}
       <div className="mb-3 flex flex-wrap items-center gap-1 text-xs">
         <span className="text-slate-500 mr-1">Filtre:</span>
-        {([['', 'Hepsi'], ['critical', `Kritik ${sev.critical}`], ['high', `Yüksek ${sev.high}`], ['medium', `Orta ${sev.medium}`], ['low', `Düşük ${sev.low}`]] as [string, string][]).map(([v, ad]) => (
+        {([['', 'Hepsi'], ['critical', `Kritik ${sev.critical}`], ['high', cevirT(cevir("Yüksek {0}"), sev.high)], ['medium', `Orta ${sev.medium}`], ['low', cevirT(cevir("Düşük {0}"), sev.low)]] as [string, string][]).map(([v, ad]) => (
           <button key={v} onClick={() => { setFiltre(v); setAktifSayfa(1) }}
             className={`rounded-md border px-2 py-1 ${filtre === v ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
             {ad}
@@ -148,12 +163,12 @@ export default function DomainSecurityPage() {
       </div>
 
       {yukleniyor && !ilk.current ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">Tekrar dene</button></div>
       ) : sayfa.items.length === 0 ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 py-10 text-center text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {taraniyorMu ? 'Taranıyor…' : (filtre ? 'Bu filtreyle açık yok.' : 'Bu domainde bilinen açık bulunmadı.')}
+          {taraniyorMu ? 'Taranıyor…' : (filtre ? 'Bu filtreyle açık yok.' : cevir("Bu domainde bilinen açık bulunmadı."))}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -161,11 +176,11 @@ export default function DomainSecurityPage() {
             <table className="min-w-[860px] w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                 <tr>
-                  <th className="w-32 px-3 py-3 font-semibold">Şiddet</th>
+                  <th className="w-32 px-3 py-3 font-semibold">{cevir("Şiddet")}</th>
                   <th className="px-3 py-3 font-semibold">Paket</th>
                   <th className="w-40 px-3 py-3 font-semibold">Kurulu / Fix</th>
                   <th className="w-40 px-3 py-3 font-semibold">CVE</th>
-                  <th className="px-3 py-3 font-semibold">Başlık</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Başlık")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

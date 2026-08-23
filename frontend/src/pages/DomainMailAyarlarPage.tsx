@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -33,7 +36,25 @@ const GENEL: Record<string, { renk: string; etiket: string }> = {
   sorunlu: { renk: 'text-red-600 dark:text-red-400', etiket: 'Sorunlu' },
 }
 
+
+const MAILAYAR_EN: Record<string, string> = {
+  "Analiz başarısız — mail sunucusuna ulaşılamadı": "Analysis failed — could not reach the mail server",
+  "Henüz analiz yapılmadı.": "No analysis yet.",
+  "Kopyalamak için tıklayın": "Click to copy",
+  "Mail Ayarları": "Mail Settings",
+  "Mail Sunucu Sağlığı": "Mail Server Health",
+  "Mail bağlantı bilgileri alınamadı": "Failed to get mail connection info",
+  "Mail istemcinize (Outlook, Thunderbird, telefon) elle kurulum için. Kullanıcı adı:": "For manual setup in your mail client (Outlook, Thunderbird, phone). Username:",
+  "Postanın spam'e düşmemesi için domain DNS'inize bu kayıtları ekleyin (SPF · DKIM · DMARC). Değere tıklayıp kopyalayın.": "Add these records to your domain DNS so mail doesn't go to spam (SPF · DKIM · DMARC). Click a value to copy it.",
+  "Sağlıklı": "Healthy",
+  "Uyarılı": "Warning",
+  "Önerilen DNS Kayıtları": "Recommended DNS Records",
+  "✓ kopyalandı": "✓ copied",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (MAILAYAR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainMailAyarlarPage() {
+  useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [baglanti, setBaglanti] = useState<Baglanti | null>(null)
@@ -43,13 +64,13 @@ export default function DomainMailAyarlarPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e, 'Domain yüklenemedi')))
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e, cevir("Domain yüklenemedi"))))
   }, [id])
 
   useEffect(() => {
     if (!domain) return
     api.get<Baglanti>(`/eklenti/mail/baglanti/${domain.alan_adi}`)
-      .then(r => setBaglanti(r.data)).catch(hataYakala('Mail bağlantı bilgileri alınamadı'))
+      .then(r => setBaglanti(r.data)).catch(hataYakala(cevir("Mail bağlantı bilgileri alınamadı")))
   }, [domain])
 
   async function analizEt() {
@@ -58,14 +79,14 @@ export default function DomainMailAyarlarPage() {
     try {
       const { data } = await api.get<Monitor>(`/eklenti/mail/monitor?domain=${encodeURIComponent(domain.alan_adi)}`)
       setMonitor(data)
-    } catch (e) { setHata(apiHata(e, 'Analiz başarısız — mail sunucusuna ulaşılamadı')) }
+    } catch (e) { setHata(apiHata(e, cevir("Analiz başarısız — mail sunucusuna ulaşılamadı"))) }
     finally { setAnalizEdiliyor(false) }
   }
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' }]} />
-      <div className="py-12 text-center text-sm text-slate-400">Yükleniyor…</div>
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
+      <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
   )
 
@@ -75,11 +96,11 @@ export default function DomainMailAyarlarPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain.alan_adi, href: `/abonelikler/${id}` },
-        { etiket: 'Mail Ayarları' },
+        { etiket: cevir("Mail Ayarları") },
       ]} />
-      <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">Mail Ayarları</h1>
+      <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Mail Ayarları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{domain.alan_adi} posta hizmeti — sağlık analizi ve bağlantı bilgileri.</p>
 
       {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -88,7 +109,7 @@ export default function DomainMailAyarlarPage() {
       <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Mail Sunucu Sağlığı</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Mail Sunucu Sağlığı")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">Servisler, portlar, DNS, TLS, DKIM, itibar, kara liste, teslimat — hepsini kontrol eder.</p>
           </div>
           <button
@@ -106,7 +127,7 @@ export default function DomainMailAyarlarPage() {
         {!monitor && !analizEdiliyor && (
           <div className="py-10 text-center">
             <svg className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.3}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Henüz analiz yapılmadı. <b>Analiz Et</b> ile başlayın.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz analiz yapılmadı.")} <b>Analiz Et</b> {cevir("ile başlayın.")}</p>
           </div>
         )}
 
@@ -147,8 +168,8 @@ export default function DomainMailAyarlarPage() {
       {/* Bağlantı Bilgileri */}
       {baglanti && (
         <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Bağlantı Bilgileri</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Mail istemcinize (Outlook, Thunderbird, telefon) elle kurulum için. Kullanıcı adı: <b>{baglanti.kullanici_adi}</b>.</p>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Bağlantı Bilgileri")}</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Mail istemcinize (Outlook, Thunderbird, telefon) elle kurulum için. Kullanıcı adı:")} <b>{baglanti.kullanici_adi}</b>.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <SunucuKart baslik="Gelen (IMAP)" host={baglanti.imap.host} port={baglanti.imap.port} g={baglanti.imap.guvenlik} />
             <SunucuKart baslik="Gelen (POP3)" host={baglanti.pop3.host} port={baglanti.pop3.port} g={baglanti.pop3.guvenlik} />
@@ -157,7 +178,7 @@ export default function DomainMailAyarlarPage() {
           <div className="flex flex-wrap gap-2 text-sm">
             <a href={baglanti.webmail} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-200">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6m-9 6V4" /></svg>
-              Webmail'i Aç
+              {cevir("Webmail'i Aç")}
             </a>
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-xs">
               ✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin
@@ -184,15 +205,15 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
   if (!kayitlar || kayitlar.length === 0) return null
   return (
     <section className="mt-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-      <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Önerilen DNS Kayıtları</h2>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Postanın spam'e düşmemesi için domain DNS'inize bu kayıtları ekleyin (SPF · DKIM · DMARC). Değere tıklayıp kopyalayın.</p>
+      <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Önerilen DNS Kayıtları")}</h2>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Postanın spam'e düşmemesi için domain DNS'inize bu kayıtları ekleyin (SPF · DKIM · DMARC). Değere tıklayıp kopyalayın.")}</p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[520px]">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-700">
-              <th className="py-2 pr-3 font-medium">Ad</th>
+              <th className="py-2 pr-3 font-medium">{cevir("Ad")}</th>
               <th className="py-2 pr-3 font-medium">Tip</th>
-              <th className="py-2 pr-3 font-medium">Değer</th>
+              <th className="py-2 pr-3 font-medium">{cevir("Değer")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
@@ -202,7 +223,7 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
                 <td className="py-2.5 pr-3"><span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{r.tip}</span></td>
                 <td className="py-2.5">
                   <button onClick={() => { navigator.clipboard?.writeText(r.deger); setKopyalanan(r.deger); setTimeout(() => setKopyalanan(null), 1500) }}
-                    title="Kopyalamak için tıklayın"
+                    title={cevir("Kopyalamak için tıklayın")}
                     className="group text-left font-mono text-xs text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded px-2 py-1 break-all w-full transition-colors">
                     {r.deger}
                     <span className="ml-1.5 text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? '✓ kopyalandı' : 'kopyala'}</span>

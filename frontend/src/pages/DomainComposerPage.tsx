@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -5,7 +8,13 @@ import Breadcrumb from '@/components/Breadcrumb'
 
 type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici: string; dizin: string }
 
+
+const COMPOSER_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (COMPOSER_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainComposerPage() {
+  useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [d, setD] = useState<Durum | null>(null)
@@ -26,15 +35,15 @@ export default function DomainComposerPage() {
     setCalisan(komut); setHata(null); setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\nÇalışıyor…`)
     try {
       const { data } = await api.post(`${base}/composer`, { komut, paket: pkt || '' })
-      setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || '(çıktı yok)'}\n\n${data.ok ? '✓ Tamamlandı' : '✗ Hata ile bitti'}`)
+      setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || cevir("(çıktı yok)")}\n\n${data.ok ? '✓ Tamamlandı' : '✗ Hata ile bitti'}`)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, 'Çalıştırılamadı')); setCikti('')
+      setHata(apiHata(e, cevir("Çalıştırılamadı"))); setCikti('')
     } finally { setCalisan(null) }
   }
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
-  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
 
   const btnBase = 'px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50'
 
@@ -43,19 +52,19 @@ export default function DomainComposerPage() {
       <div className="max-w-3xl mx-auto">
         <Breadcrumb items={[
           { etiket: 'Anasayfa', href: '/' },
-          { etiket: 'Domainler', href: '/domainler' },
+          { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: 'Composer' },
         ]} />
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Composer</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          <span className="font-mono">{d.dizin}</span> dizininde <span className="font-mono">{d.kullanici}</span> olarak çalışır.
+          <span className="font-mono">{d.dizin}</span> dizininde <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
         </p>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
         {!d.kurulu ? (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-5 text-sm text-amber-800 dark:text-amber-200">
-            Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor.
+            {cevir(cevir("Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor."))}
           </div>
         ) : (
           <>
@@ -91,7 +100,7 @@ export default function DomainComposerPage() {
           </>
         )}
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

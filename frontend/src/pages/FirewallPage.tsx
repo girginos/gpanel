@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
@@ -36,7 +40,44 @@ const MODLAR = {
     ornek: "Örnek: Veritabanı portu 3306'yı dışarıya kapat." },
 } as const
 
+
+const FW_EN: Record<string, string> = {
+  "(boş = tümü)": "(empty = all)",
+  "Belirli bir IP adresini engelle. Port yazarsan sadece o porta, boş bırakırsan TÜM portlara erişimi kesilir.": "Block a specific IP address. If you enter a port, only that port; if left empty, access to ALL ports is cut.",
+  "Bir portu HERKESE kapat (beyaz listedekiler hariç). Kritik portlar (SSH/web/panel/DNS) korunur; kapatılamaz.": "Close a port to EVERYONE (except allowlisted). Critical ports (SSH/web/panel/DNS) are protected; cannot be closed.",
+  "FTP portunu (21) kapatır. SFTP kullanıyorsanız FTP güvenle kapatılabilir.": "Closes the FTP port (21). If you use SFTP, FTP can be safely closed.",
+  "Henüz kural yok — sunucu tüm bağlantılara açık.": "No rules yet — the server is open to all connections.",
+  "IP adresi veya aralığı": "IP address or range",
+  "Kendi Kuralın": "Your Own Rule",
+  "Kural eklendi ve firewall'a uygulandı.": "Rule added and applied to the firewall.",
+  "Kuralı Ekle ve Uygula": "Add and Apply Rule",
+  "Mail Portlarını Kapat": "Close Mail Ports",
+  "MySQL'i Dışa Kapat": "Close MySQL Externally",
+  "Not (isteğe bağlı)": "Note (optional)",
+  "Port yazarsan o port SADECE bu IP(ler)e açılır — diğer herkes engellenir (allowlist). Portu boş bırakırsan bu IP tüm portlara öncelikli erişir (yasaklardan önce değerlendirilir).": "If you enter a port, that port opens ONLY to this IP(s) — everyone else is blocked (allowlist). If you leave the port empty, this IP gets priority access to all ports (evaluated before bans).",
+  "SMTP/POP3/IMAP portlarını kapatır. Mail sunucusu yoksa spam-relay riskini azaltır.": "Closes the SMTP/POP3/IMAP ports. If there is no mail server, reduces spam-relay risk.",
+  "Veritabanı portunu (3306) internete kapatır. MySQL yalnız sunucu içinden erişilir.": "Closes the database port (3306) to the internet. MySQL is accessible only from within the server.",
+  "Yukarıdan bir şablon uygulayarak başlayabilirsiniz.": "You can start by applying a template above.",
+  "rpcbind (111) ve NFS (2049) portlarını kapatır. Dosya paylaşımı kullanmıyorsanız kapatın.": "Closes the rpcbind (111) and NFS (2049) ports. Close them if you don't use file sharing.",
+  "tek tıkla uygula": "apply with one click",
+  "tüm portlara": "to all ports",
+  "tümü": "all",
+  "Önizleme:": "Preview:",
+  "Örnek: Port 8443 yazıp ofis IP'nizi girin → panele yalnız siz erişebilirsiniz.": "Example: Enter port 8443 and your office IP → only you can access the panel.",
+  "Örnek: Sürekli SSH deneyen 45.9.1.2 adresini tamamen engelle.": "Example: Fully block 45.9.1.2 that keeps trying SSH.",
+  "Örnek: Veritabanı portu 3306'yı dışarıya kapat.": "Example: Close database port 3306 to the outside.",
+  "ör. SSH brute-force yapan IP": "e.g. IP doing SSH brute-force",
+  "örn. 22": "e.g. 22",
+  "İzin Ver": "Allow",
+  "Şablon uygulanamadı": "Failed to apply template",
+  "⚡ Hazır Şablonlar": "⚡ Ready Templates",
+  "✅ İzin": "✅ Allow",
+  "🔒 Kapalı": "🔒 Closed",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (FW_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function FirewallPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const [kurallar, setKurallar] = useState<Kural[]>([])
   const [korumali, setKorumali] = useState<number[]>([])
@@ -67,7 +108,7 @@ export default function FirewallPage() {
       const { data } = await api.post('/firewall/sablon', { sablon: s.key })
       setBasari(data.eklenen > 0 ? `"${s.ad}" uygulandı — ${data.eklenen} kural eklendi.` : `"${s.ad}" zaten uygulanmış (yeni kural yok).`)
       yukle()
-    } catch (err) { setHata(apiHata(err, 'Şablon uygulanamadı')) }
+    } catch (err) { setHata(apiHata(err, cevir("Şablon uygulanamadı"))) }
     finally { setMesgul(null) }
   }
 
@@ -101,15 +142,15 @@ export default function FirewallPage() {
 
   // canlı önizleme cümlesi
   const onizleme = useMemo(() => {
-    if (tip === 'kapat') return port ? `Port ${port} HERKESE kapatılacak (beyaz listedekiler hariç).` : 'Kapatılacak portu girin.'
+    if (tip === 'kapat') return port ? cevirT(cevir("Port {0} HERKESE kapatılacak (beyaz listedekiler hariç)."), port) : cevir("Kapatılacak portu girin.")
     const kim = ip.trim() || '(IP girin)'
     if (tip === 'ban') {
-      const hedef = port ? `port ${port}'a` : 'tüm portlara'
-      return `${kim} adresinin ${hedef} erişimi ENGELLENECEK.`
+      const hedef = port ? `port ${port}'a` : cevir("tüm portlara")
+      return cevirT(cevir("{0} adresinin {1} erişimi ENGELLENECEK."), kim, hedef)
     }
     // whitelist
-    if (port) return `Port ${port} yalnızca ${kim} adresine açık olacak — diğer herkes ENGELLENİR (allowlist).`
-    return `${kim} adresi tüm portlara İZİNLİ olacak (öncelikli erişim).`
+    if (port) return cevirT(cevir("Port {0} yalnızca {1} adresine açık olacak — diğer herkes ENGELLENİR (allowlist)."), port, kim)
+    return cevirT(cevir("{0} adresi tüm portlara İZİNLİ olacak (öncelikli erişim)."), kim)
   }, [tip, ip, port])
 
   // whitelist + port → allowlist kısıt: dinamik IP uyarısı
@@ -117,24 +158,24 @@ export default function FirewallPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Güvenlik Duvarı' }]} />
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Güvenlik Duvarı") }]} />
       <div className="flex items-center gap-3 mb-1">
         <span className="text-2xl"><Ikon d={I.kalkan} className="h-6 w-6" /></span>
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Güvenlik Duvarı</h1>
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Güvenlik Duvarı")}</h1>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-        Sunucunuza <strong>internetten kimin erişebileceğini</strong> kontrol edin. Hazır bir şablon uygulayın veya kendi kuralınızı ekleyin.
+        Sunucunuza <strong>{cevir(cevir("internetten kimin erişebileceğini"))}</strong> {cevir(cevir("kontrol edin. Hazır bir şablon uygulayın veya kendi kuralınızı ekleyin."))}
       </p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
       <div className="mb-5 px-4 py-2.5 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 text-xs text-sky-800 dark:text-sky-200">
-        ℹ️ Kurallar yalnızca <strong>yeni bağlantıları</strong> etkiler — açık oturumunuz (SSH/panel) kopmaz. Kritik portlar <span className="font-mono">{korumaliMetin || '22, 53, 80, 443, 8080, 8443'}</span> güvenlik için kapatılamaz.
+        ℹ️ Kurallar yalnızca <strong>{cevir(cevir("yeni bağlantıları"))}</strong> {cevir(cevir("etkiler — açık oturumunuz (SSH/panel) kopmaz. Kritik portlar"))} <span className="font-mono">{korumaliMetin || '22, 53, 80, 443, 8080, 8443'}</span> {cevir(cevir("güvenlik için kapatılamaz."))}
       </div>
 
       {/* ---------- HAZIR ŞABLONLAR ---------- */}
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">⚡ Hazır Şablonlar <span className="text-xs font-normal text-slate-400">tek tıkla uygula</span></h2>
+      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">{cevir("⚡ Hazır Şablonlar")} <span className="text-xs font-normal text-slate-400">{cevir("tek tıkla uygula")}</span></h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         {SABLONLAR.map(s => (
           <div key={s.key} className="flex items-start gap-3 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
@@ -153,7 +194,7 @@ export default function FirewallPage() {
       </div>
 
       {/* ---------- MANUEL KURAL ---------- */}
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-1.5"><Ikon d={I.kalem} />Kendi Kuralın</h2>
+      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-1.5"><Ikon d={I.kalem} />{cevir("Kendi Kuralın")}</h2>
       <form onSubmit={ekle} className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-2xl p-4 mb-6">
         {/* 1) ne yapmak istiyorsun */}
         <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">1 · Ne yapmak istiyorsun?</div>
@@ -179,14 +220,14 @@ export default function FirewallPage() {
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           {ipGerekli && (
             <label className="block sm:col-span-2">
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">IP adresi veya aralığı</span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">{cevir("IP adresi veya aralığı")}</span>
               <input value={ip} onChange={e => setIp(e.target.value)} required placeholder="1.2.3.4  ·  1.2.3.0/24"
                 className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
           )}
           <label className="block">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">Port {ipGerekli && <span className="text-slate-400">(boş = tümü)</span>}</span>
-            <input value={port} onChange={e => setPort(e.target.value.replace(/[^0-9]/g, ''))} required={tip === 'kapat'} placeholder={tip === 'kapat' ? '3306' : 'örn. 22'}
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">Port {ipGerekli && <span className="text-slate-400">{cevir("(boş = tümü)")}</span>}</span>
+            <input value={port} onChange={e => setPort(e.target.value.replace(/[^0-9]/g, ''))} required={tip === 'kapat'} placeholder={tip === 'kapat' ? '3306' : cevir("örn. 22")}
               className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </label>
           <label className="block">
@@ -197,15 +238,15 @@ export default function FirewallPage() {
             </select>
           </label>
           <label className="block sm:col-span-4">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">Not (isteğe bağlı)</span>
-            <input value={aciklama} onChange={e => setAciklama(e.target.value)} placeholder="ör. SSH brute-force yapan IP"
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">{cevir("Not (isteğe bağlı)")}</span>
+            <input value={aciklama} onChange={e => setAciklama(e.target.value)} placeholder={cevir("ör. SSH brute-force yapan IP")}
               className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </label>
         </div>
 
         {/* canlı önizleme */}
         <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-900/60 text-xs">
-          <span className="text-slate-400">Önizleme:</span>
+          <span className="text-slate-400">{cevir("Önizleme:")}</span>
           <span className="font-medium text-slate-700 dark:text-slate-200">{onizleme}</span>
         </div>
 
@@ -213,12 +254,12 @@ export default function FirewallPage() {
         {kisitUyari && (
           <div className="mt-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
             ⚠️ <strong>Dikkat:</strong> Bu port artık yalnızca yukarıdaki IP'ye açılacak. IP'niz <strong>dinamikse</strong> (ev/mobil internet gibi değişebilen), IP değişince bu porta erişimi kaybedersiniz.
-            SSH (22) açık kaldığı için kilitlenirseniz sunucuya SSH ile girip bu kuralı silebilirsiniz — ya da sabit (statik) bir IP kullanın.
+            {cevir(cevir("SSH (22) açık kaldığı için kilitlenirseniz sunucuya SSH ile girip bu kuralı silebilirsiniz — ya da sabit (statik) bir IP kullanın."))}
           </div>
         )}
 
         <button disabled={mesgul === 'manuel'} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
-          {mesgul === 'manuel' ? 'Uygulanıyor…' : 'Kuralı Ekle ve Uygula'}
+          {mesgul === 'manuel' ? 'Uygulanıyor…' : cevir("Kuralı Ekle ve Uygula")}
         </button>
       </form>
 
@@ -227,46 +268,46 @@ export default function FirewallPage() {
       <div className="lg:bg-white dark:lg:bg-slate-800/60 lg:border lg:border-slate-200 dark:lg:border-slate-700/60 lg:rounded-2xl lg:overflow-hidden">
         <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-slate-700/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Aktif Kurallar {!yuk && <span className="text-slate-400 font-normal">· {kurallar.length}</span>}</h3>
-          <button onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />Yenile</span></button>
+          <button onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />{cevir("Yenile")}</span></button>
         </div>
         {/* Mobilde yatay kaydırma yok — satırlar kart olarak diziliyor. */}
         <div className="lg:overflow-x-auto">
           <table className={`${T.tablo} text-sm`}>
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60`}>
               <tr>
-                <th className={T.baslik}>Tür</th>
+                <th className={T.baslik}>{cevir("Tür")}</th>
                 <th className={T.baslik}>IP / CIDR</th>
                 <th className={T.baslik}>Port</th>
                 <th className={T.baslik}>Proto</th>
-                <th className={`${T.baslik} w-full`}>Not</th>
-                <th className={`${T.baslik} text-right`}>İşlem</th>
+                <th className={`${T.baslik} w-full`}>{cevir("Not")}</th>
+                <th className={`${T.baslik} text-right`}>{cevir("İşlem")}</th>
               </tr>
             </thead>
             <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-700/60`}>
               {yuk ? (
-                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>Yükleniyor…</td></tr>
+                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>{cevir("Yükleniyor…")}</td></tr>
               ) : kurallar.length === 0 ? (
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
                   <div className="text-2xl mb-1"><Ikon d={I.kalkan} className="h-6 w-6 mx-auto" /></div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Henüz kural yok — sunucu tüm bağlantılara açık.</p>
-                  <p className="text-xs text-slate-400 mt-1">Yukarıdan bir şablon uygulayarak başlayabilirsiniz.</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kural yok — sunucu tüm bağlantılara açık.")}</p>
+                  <p className="text-xs text-slate-400 mt-1">{cevir("Yukarıdan bir şablon uygulayarak başlayabilirsiniz.")}</p>
                 </td></tr>
               ) : (
                 kurallar.map(k => (
                   <tr key={k.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/40`}>
-                    <td className={T.hucre} data-etiket="Tür"><TurRozet tip={k.tip} /></td>
+                    <td className={T.hucre} data-etiket={cevir("Tür")}><TurRozet tip={k.tip} /></td>
                     {/* Birincil tanımlayıcı: IP / CIDR — mobilde kart başlığı olur.
-                        Kolon sırası masaüstündeki <th> sırasıyla birebir aynı kalıyor. */}
+                        {cevir(cevir("Kolon sırası masaüstündeki"))} <th> sırasıyla birebir aynı kalıyor. */}
                     <td className={`${T.hucreBaslik} font-mono lg:font-normal lg:text-xs lg:text-slate-700 dark:lg:text-slate-200`}>
                       {k.ip || <span className="text-slate-400">herkes</span>}
                     </td>
                     <td className={T.hucre} data-etiket="Port">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{k.port || <span className="text-slate-400">tümü</span>}</span>
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{k.port || <span className="text-slate-400">{cevir("tümü")}</span>}</span>
                     </td>
                     <td className={T.hucre} data-etiket="Proto">
                       <span className="font-mono text-[11px] text-slate-500 uppercase">{k.protokol}</span>
                     </td>
-                    <td className={T.hucre} data-etiket="Not">
+                    <td className={T.hucre} data-etiket={cevir("Not")}>
                       <span className="text-xs text-slate-500 dark:text-slate-400 text-right lg:text-left break-words">{k.aciklama || '—'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
@@ -286,8 +327,8 @@ export default function FirewallPage() {
 function TurRozet({ tip }: { tip: Kural['tip'] }) {
   const m = {
     ban: ['🚫 Yasak', 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'],
-    whitelist: ['✅ İzin', 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'],
-    kapat: ['🔒 Kapalı', 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'],
+    whitelist: [cevir("✅ İzin"), 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'],
+    kapat: [cevir("🔒 Kapalı"), 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'],
   }[tip]
   return <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${m[1]}`}>{m[0]}</span>
 }

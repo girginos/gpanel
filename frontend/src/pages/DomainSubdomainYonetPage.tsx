@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -13,6 +16,11 @@ type Detay = {
 }
 type PHPVer = { surum: string; aciklama?: string }
 
+
+const SUBYONET_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SUBYONET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function fmtKB(kb: number) {
   if (!kb) return '0 KB'
   if (kb < 1024) return kb + ' KB'
@@ -21,6 +29,7 @@ function fmtKB(kb: number) {
 }
 
 export default function DomainSubdomainYonetPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const { id, sid } = useParams()
   const navigate = useNavigate()
@@ -97,7 +106,7 @@ export default function DomainSubdomainYonetPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: d?.parent_ad || '...', href: `/abonelikler/${id}` },
         { etiket: 'Subdomainler', href: `/abonelikler/${id}/subdomainler` },
         { etiket: d?.tam_ad || '...' },
@@ -127,7 +136,7 @@ export default function DomainSubdomainYonetPage() {
               </a>
               <button onClick={sil}
                 className="text-sm px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-medium">
-                Sil
+                {cevir("Sil")}
               </button>
             </div>
           </div>

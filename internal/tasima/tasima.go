@@ -56,6 +56,11 @@ type Ayarlar struct {
 	ResellerID int64    `json:"reseller_id"`
 	CustomerID int64    `json:"customer_id"`
 	Hesaplar   []string `json:"hesaplar"` // toplu modda secilen hesaplar (bos = hepsi)
+	// SahipleriTasi: kaynaktaki reseller/müşteri hesapları GVM'de oluşturulup her
+	// domain KENDİ sahibine atanır. Bu durumda ResellerID/CustomerID yalnız
+	// admin-sahipli (sahibi keşfedilemeyen) domainler için varsayılan olur.
+	SahipleriTasi bool                  `json:"sahipleri_tasi"`
+	SahipEsle     map[string]sahipHedef `json:"-"` // runtime: kaynak login → GVM hedef (Baslat doldurur)
 }
 
 const (
@@ -87,6 +92,28 @@ var gecerliTipler = map[string]bool{"cpanel": true, "plesk": true, "directadmin"
 
 // Dogrula — Kaynak girdisini kabul etmeden once tam dogrular.
 // Bastaki '-' kontrolu ozellikle onemli: "-oProxyCommand=..." bir ssh BAYRAGIDIR.
+// kendineMiCozuluyor — host bu sunucunun kendisine (loopback: 127.0.0.0/8, ::1) mi
+// çözülüyor? /etc/hosts'ta "127.0.0.1 <hostname>" olduğunda ve kaynak adı bu sunucunun
+// adıyla aynıysa true döner. IP girildiyse LookupHost onu aynen döndürür → gerçek uzak
+// IP loopback değildir, geçer. Kısa timeout: istek yolunda takılmasın.
+func kendineMiCozuluyor(host string) bool {
+	if p := net.ParseIP(host); p != nil {
+		return p.IsLoopback()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupHost(ctx, host)
+	if err != nil {
+		return false // çözülemiyorsa burada karar verme; bağlantı denemesi hata verir
+	}
+	for _, ip := range ips {
+		if p := net.ParseIP(ip); p != nil && p.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
 func (k *Kaynak) Dogrula() error {
 	if !gecerliTipler[k.Tip] {
 		return fmt.Errorf("gecersiz kaynak panel tipi")
@@ -103,6 +130,16 @@ func (k *Kaynak) Dogrula() error {
 		return fmt.Errorf("kaynak sunucu adresi gecersiz")
 	}
 	k.Host = h
+
+	// 🔴 LOOPBACK GUARD: kaynak host bu sunucunun KENDISINE (localhost) çözülüyorsa
+	// reddet. SIK TUZAK: panel sunucusunun hostname'i kaynağınkiyle AYNI ise
+	// (/etc/hosts'ta "127.0.0.1 <hostname>") host adı localhost'a döner → taşıma
+	// GERÇEK uzak sunucu yerine KENDİNE bağlanır ve kaynağın parolası "yanlış"
+	// görünür. Çözüm net: gerçek uzak sunucunun IP adresini girmek. (Canlı olay
+	// 2026-08-22: plesk.lto.com.tr hem kaynak hem panel adıydı → ::1'e çözülüyordu.)
+	if kendineMiCozuluyor(h) {
+		return fmt.Errorf("kaynak adresi '%s' bu sunucunun KENDİSİNE (localhost) çözülüyor — taşıma gerçek uzak sunucuya ulaşamaz. Bu genellikle bu sunucunun adı kaynakla AYNI olduğunda olur (/etc/hosts). ÇÖZÜM: kaynak alanına hostname yerine uzak sunucunun IP ADRESİNİ girin", h)
+	}
 
 	if k.Port <= 0 || k.Port > 65535 {
 		return fmt.Errorf("SSH portu gecersiz")
@@ -221,7 +258,7 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 	cmd.Stdout = &sb
 	cmd.Stderr = &eb
 	if err := cmd.Run(); err != nil {
-		return sb.String(), fmt.Errorf("uzak komut basarisiz: %s", kisalt(temizHata(eb.String(), k.Parola), 300))
+		return sb.String(), fmt.Errorf("%s", k.sshHataYorumla(eb.String()))
 	}
 	return sb.String(), nil
 }
@@ -269,7 +306,7 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 	cmd.Stdout = &sb
 	cmd.Stderr = &eb
 	if err := cmd.Run(); err != nil {
-		return sb.String(), fmt.Errorf("rsync basarisiz: %s", kisalt(temizHata(eb.String(), k.Parola), 300))
+		return sb.String(), fmt.Errorf("dosya kopyalama (rsync) hatasi: %s", k.sshHataYorumla(eb.String()))
 	}
 	return sb.String(), nil
 }
@@ -296,6 +333,37 @@ func (k *Kaynak) BaglantiTesti(ctx context.Context) (string, error) {
 // ---------------------------------------------------------------------------
 // Yardimcilar
 // ---------------------------------------------------------------------------
+
+// sshHataYorumla — ham ssh/rsync stderr'ini KULLANICININ ANLAYACAGI Turkce
+// yonlendirmeye cevirir. Amac: "Permission denied (publickey,...,password)" gibi
+// yalniz sistem yoneticilerinin cozdugu hatalar yerine, ne yapilacagini soylemek.
+// (Kullanici SSH detayi bilmek zorunda kalmasin — kaynak-baglanti sorunlari
+// tasimanin en sik takilma noktasi.) Sir icermez (temizHata ile maskelenir).
+func (k *Kaynak) sshHataYorumla(stderr string) string {
+	low := strings.ToLower(stderr)
+	switch {
+	case strings.Contains(low, "permission denied") || strings.Contains(low, "authentication failed"):
+		if strings.TrimSpace(k.Anahtar) != "" {
+			return "SSH anahtari kabul edilmedi. Girdiginiz ozel anahtarin karsiligi (public key), kaynak sunucuda '" +
+				k.Kullanici + "' kullanicisinin ~/.ssh/authorized_keys dosyasinda ekli olmali. Alternatif olarak parola ile baglanabilirsiniz."
+		}
+		return "Kaynak sunucu SSH parolasini reddetti. En sik iki neden:\n" +
+			"1) Yanlis parola — buraya kaynak sunucunun LINUX '" + k.Kullanici +
+			"' (SSH) parolasi girilmeli; Plesk/cPanel PANEL parolasi DEGIL (ikisi farklidir).\n" +
+			"2) Parola dogru ama kaynak sunucu root'un parola ile girisini kapatmis olabilir. Bu durumda ya SSH ANAHTARI kullanin (asagidaki 'SSH anahtari' alanina yetkili bir ozel anahtar girin), ya da kaynakta gecici olarak acin:\n" +
+			"   /etc/ssh/sshd_config -> 'PermitRootLogin yes' + 'PasswordAuthentication yes', sonra 'systemctl restart sshd' (tasima bitince eski haline getirin)."
+	case strings.Contains(low, "connection refused"):
+		return fmt.Sprintf("Kaynak sunucuya SSH baglantisi reddedildi (port %d). SSH portu dogru mu? Kaynagin guvenlik duvari bu sunucunun IP'sine izin veriyor mu?", k.Port)
+	case strings.Contains(low, "timed out") || strings.Contains(low, "no route to host") || strings.Contains(low, "network is unreachable"):
+		return "Kaynak sunucuya ulasilamadi (baglanti zaman asimi). Host adresi ve SSH portu dogru mu? Kaynagin guvenlik duvari bu sunucuyu engelliyor olabilir."
+	case strings.Contains(low, "could not resolve") || strings.Contains(low, "name or service not known") || strings.Contains(low, "nodename nor servname"):
+		return fmt.Sprintf("Kaynak host adi cozulemedi ('%s'). Yazimi kontrol edin ya da dogrudan IP adresi girin.", k.Host)
+	case strings.Contains(low, "host key") && (strings.Contains(low, "changed") || strings.Contains(low, "verification failed")):
+		return "Kaynagin SSH host anahtari degismis gorunuyor (yeniden kurulum ya da guvenlik uyarisi). Kaynaga guveniyorsaniz /root/.ssh/known_hosts_tasima icindeki ilgili satiri silip tekrar deneyin."
+	}
+	// Taninmayan hata: ham (ama sir-maskeli + kisa).
+	return kisalt(temizHata(stderr, k.Parola), 300)
+}
 
 // temizHata — uzak stderr'i tek satira indirger VE bilinen sirlari maskeler.
 // Bu metin DB'ye (tasima_kalemleri.hata) ve API yanitina gidiyor; ssh/sshpass/

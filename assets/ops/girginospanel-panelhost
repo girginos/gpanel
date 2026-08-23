@@ -9,12 +9,20 @@
 #   • panel bloğunu YALNIZ izin verilen isimlere bağlar.
 #
 # 🔴 KİLİTLENME KORUMASI: `localhost` ve `127.0.0.1` HER ZAMAN listede kalır.
-# Böylece isim yanlış ayarlansa bile `ssh -L 8443:127.0.0.1:8443` ile panele
+# Böylece isim yanlış ayarlansa bile `ssh -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT}` ile panele
 # girip düzeltebilirsin. Ayrıca isim ayarlarken DNS'in BU sunucuya çözüldüğü
 # doğrulanır; çözülmüyorsa değişiklik UYGULANMAZ.
 set -uo pipefail
 
 PANEL_CONF=/etc/nginx/conf.d/_panel.conf
+
+# 🔴 PANEL PORTU DINAMIK: betik eskiden 8443 varsayiyordu. Panel portu
+# degistirilmisse (ornek: 8443 doluydu -> 7443) dogrulama "https://127.0.0.1:8443"
+# ile 000 doner ve betik SAGLIKLI degisikligi "panel erisilemez" sanip GERI ALIR.
+# Portu panel vhost'undan oku; okunamazsa dinlenen ssl portundan, o da yoksa 8443.
+PANEL_PORT="$(grep -hoE '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl' "$PANEL_CONF" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+[ -n "$PANEL_PORT" ] || PANEL_PORT="$(ss -ltnH 2>/dev/null | grep -oE ':(7443|8443)' | head -1 | tr -d ':')"
+[ -n "$PANEL_PORT" ] || PANEL_PORT=8443
 CATCH_CONF=/etc/nginx/conf.d/_panel_catchall.conf
 CERT=/etc/ssl/girginospanel/panel.crt
 KEY=/etc/ssl/girginospanel/panel.key
@@ -54,7 +62,7 @@ durum() {
   echo "  sunucu IP'leri: $(sunucu_ipleri | tr '\n' ' ')"
   echo
   echo "  Test:"
-  echo "    curl -sk -o /dev/null -w '%{http_code}\\n' https://127.0.0.1:8443/ --resolve panel.test:8443:127.0.0.1"
+  echo "    curl -sk -o /dev/null -w '%{http_code}\\n' https://127.0.0.1:${PANEL_PORT}/ --resolve panel.test:${PANEL_PORT}:127.0.0.1"
 }
 
 # yakala_hepsi_kur — bilinmeyen isimleri 444 ile kapatan blok.
@@ -67,8 +75,8 @@ yakala_hepsi_kur() {
 # varlığını bile öğrenemeden bağlantıyı kaybeder. IP taraması yapan botlar
 # ve Host-başlığı karıştırma denemeleri buraya düşer.
 server {
-    listen 8443 ssl default_server;
-    listen [::]:8443 ssl default_server;
+    listen ${PANEL_PORT} ssl default_server;
+    listen [::]:${PANEL_PORT} ssl default_server;
     server_name _;
 
     ssl_certificate     $CERT;
@@ -109,7 +117,7 @@ ayarla() {
   ok "yedek: $yedek"
 
   # 1) panel bloğundan default_server'ı kaldır, 2) server_name'i yaz.
-  sed -i 's/\(listen[^;]*8443[^;]*\) default_server;/\1;/' "$PANEL_CONF"
+  sed -i "s/\(listen[^;]*${PANEL_PORT}[^;]*\) default_server;/\1;/" "$PANEL_CONF"
   sed -i "0,/^\s*server_name\s\+[^;]*;/s//    server_name $izinli;/" "$PANEL_CONF"
   yakala_hepsi_kur
 
@@ -125,8 +133,8 @@ ayarla() {
   # yanıt verebiliyor; "uygulandı" demek yeterli değil, DAVRANIŞI ölç.
   sleep 1
   local bilinmeyen izinli_kod
-  bilinmeyen=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8       --resolve gosp-dogrulama.invalid:8443:127.0.0.1 https://gosp-dogrulama.invalid:8443/ 2>/dev/null)
-  izinli_kod=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 https://127.0.0.1:8443/ 2>/dev/null)
+  bilinmeyen=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8       --resolve gosp-dogrulama.invalid:${PANEL_PORT}:127.0.0.1 https://gosp-dogrulama.invalid:${PANEL_PORT}/ 2>/dev/null)
+  izinli_kod=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 https://127.0.0.1:${PANEL_PORT}/ 2>/dev/null)
 
   if [ "$izinli_kod" != "200" ]; then
     cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"

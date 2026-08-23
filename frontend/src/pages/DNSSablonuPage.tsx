@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -25,7 +28,21 @@ type Meta = {
 
 const TIPLER = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'PTR']
 
+
+const DNSTPL_EN: Record<string, string> = {
+  "DKIM Seçici": "DKIM Selector",
+  "DNS Şablonu": "DNS Template",
+  "Kayıt Ekle": "Add Record",
+  "Merkezi DNS Şablonu": "Central DNS Template",
+  "Satırı sil": "Delete row",
+  "Varsayılan Şablonu Uygula": "Apply Default Template",
+  "Şablon kaydedilemedi": "Failed to save template",
+  "Şablonu Kaydet": "Save Template",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DNSTPL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DNSSablonuPage() {
+  useTranslation() // dil re-render aboneligi
   const [rows, setRows] = useState<Row[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -57,10 +74,10 @@ export default function DNSSablonuPage() {
     setHata(null); setBasari(null); setKaydediyor(true)
     try {
       await api.put('/dns-template', { kayitlar: rows, meta })
-      setBasari('Şablon kaydedildi. Yeni domainler ve "Varsayılan Şablonu Uygula" bu şablonu kullanır.')
+      setBasari('Şablon kaydedildi. Yeni domainler ve cevir("Varsayılan Şablonu Uygula") bu şablonu kullanır.')
       setTimeout(() => setBasari(null), 5000)
       yukle()
-    } catch (e) { setHata(apiHata(e, 'Şablon kaydedilemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Şablon kaydedilemedi"))) }
     finally { setKaydediyor(false) }
   }
 
@@ -69,11 +86,11 @@ export default function DNSSablonuPage() {
 
   return (
     <div className="px-6 md:px-8 py-6">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' }, { etiket: 'DNS Şablonu' }]} />
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Merkezi DNS Şablonu</h1>
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' }, { etiket: cevir("DNS Şablonu") }]} />
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Merkezi DNS Şablonu")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
-        Yeni bir domain eklendiğinde ve <span className="font-medium">"Varsayılan Şablonu Uygula"</span> butonuna basıldığında bu şablon uygulanır.
-        Değişiklikleriniz anında geçerli olur.
+        {cevir(cevir("Yeni bir domain eklendiğinde ve"))} <span className="font-medium">cevir("Varsayılan Şablonu Uygula")</span> {cevir("butonuna basıldığında bu şablon uygulanır.")}
+        {cevir(cevir("Değişiklikleriniz anında geçerli olur."))}
       </p>
 
       {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -84,11 +101,11 @@ export default function DNSSablonuPage() {
         <code className="font-mono">{'{DOMAIN}'}</code> alan adı ·{' '}
         <code className="font-mono">{'{IP}'}</code> sunucu IP ·{' '}
         <code className="font-mono">{'{SELECTOR}'}</code> DKIM seçici ·{' '}
-        <code className="font-mono">{'{DKIM}'}</code> otomatik üretilen DKIM public key (TXT)
+        <code className="font-mono">{'{DKIM}'}</code> {cevir(cevir("otomatik üretilen DKIM public key (TXT)"))}
       </div>
 
       {yuk ? (
-        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : (
         <>
           {/* Kayıt satırları */}
@@ -99,10 +116,10 @@ export default function DNSSablonuPage() {
                   <tr>
                     <th className={`${T.baslik} w-40`}>Ad (alt-ad)</th>
                     <th className={`${T.baslik} w-28`}>Tip</th>
-                    <th className={T.baslik}>Değer</th>
+                    <th className={T.baslik}>{cevir("Değer")}</th>
                     <th className={`${T.baslik} w-24`}>TTL</th>
-                    <th className={`${T.baslik} w-24`}>Öncelik</th>
-                    <th className={`${T.baslik} text-center w-20`}>Aktif</th>
+                    <th className={`${T.baslik} w-24`}>{cevir("Öncelik")}</th>
+                    <th className={`${T.baslik} text-center w-20`}>{cevir("Aktif")}</th>
                     <th className={`${T.baslik} w-12`}></th>
                   </tr>
                 </thead>
@@ -118,13 +135,13 @@ export default function DNSSablonuPage() {
                           </select>
                         </span>
                       </td>
-                      <td className={T.hucre} data-etiket="Değer">
+                      <td className={T.hucre} data-etiket={cevir("Değer")}>
                         <span className="block flex-1 min-w-0"><input value={r.deger} onChange={e => setRow(i, { deger: e.target.value })} className={inp + ' font-mono'} /></span>
                       </td>
                       <td className={T.hucre} data-etiket="TTL">
                         <span className="block flex-1 min-w-0"><input type="number" min={60} value={r.ttl} onChange={e => setRow(i, { ttl: parseInt(e.target.value) || 3600 })} className={inp + ' font-mono'} /></span>
                       </td>
-                      <td className={T.hucre} data-etiket="Öncelik">
+                      <td className={T.hucre} data-etiket={cevir("Öncelik")}>
                         {/* Tek flex öğesi: koşullu içerik ortak bir span'e sarıldı */}
                         <span className="block flex-1 min-w-0">
                           {(r.tip === 'MX' || r.tip === 'SRV')
@@ -132,11 +149,11 @@ export default function DNSSablonuPage() {
                             : <span className="text-slate-300 dark:text-slate-600 text-sm pl-2">—</span>}
                         </span>
                       </td>
-                      <td className={`${T.hucre} lg:text-center`} data-etiket="Aktif">
+                      <td className={`${T.hucre} lg:text-center`} data-etiket={cevir("Aktif")}>
                         <input type="checkbox" checked={r.aktif} onChange={e => setRow(i, { aktif: e.target.checked })} className="cursor-pointer w-4 h-4 accent-brand-600" />
                       </td>
                       <td className={`${T.hucreAksiyon} lg:text-center`}>
-                        <button onClick={() => satirSil(i)} title="Satırı sil" className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                        <button onClick={() => satirSil(i)} title={cevir("Satırı sil")} className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                       </td>
@@ -144,7 +161,7 @@ export default function DNSSablonuPage() {
                   ))}
                   {/* Boş durum da tek/son satır olduğu için masaüstünde alt çizgi çizmemeli (eski divide-y davranışı) */}
                   {rows.length === 0 && (
-                    <tr className={`${T.satir} lg:last:border-b-0`}><td colSpan={7} className={T.hucreDurum}>Şablonda kayıt yok — "Kayıt Ekle" ile başlayın.</td></tr>
+                    <tr className={`${T.satir} lg:last:border-b-0`}><td colSpan={7} className={T.hucreDurum}>Şablonda kayıt yok — cevir("Kayıt Ekle") ile başlayın.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -152,7 +169,7 @@ export default function DNSSablonuPage() {
             <div className="py-2.5 lg:px-3 lg:border-t lg:border-slate-100 dark:lg:border-slate-800">
               <button onClick={satirEkle} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                Kayıt Ekle
+                {cevir("Kayıt Ekle")}
               </button>
             </div>
           </div>
@@ -171,24 +188,24 @@ export default function DNSSablonuPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 <label className="block">
-                  <span className="block text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-1">DKIM Seçici</span>
+                  <span className="block text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-1">{cevir("DKIM Seçici")}</span>
                   <input value={meta.dkim_selector} onChange={e => setMeta({ ...meta, dkim_selector: e.target.value })} className={inp + ' font-mono'} placeholder="default" />
                 </label>
                 <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer pb-2">
                   <input type="checkbox" checked={meta.dkim_aktif} onChange={e => setMeta({ ...meta, dkim_aktif: e.target.checked })} className="w-4 h-4 accent-brand-600" />
-                  DKIM anahtar üretimini etkinleştir
+                  {cevir(cevir("DKIM anahtar üretimini etkinleştir"))}
                 </label>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-3">
-                DKIM açıkken şablonda <code className="font-mono">{'{DKIM}'}</code> içeren bir TXT kaydı olmalıdır (ör. ad: <code className="font-mono">{'{SELECTOR}._domainkey'}</code>).
-                Her domain için 2048-bit RSA anahtar çifti otomatik üretilir; public key DNS'e yazılır, private key OpenDKIM kuruluysa mail sunucusuyla eşlenir.
+                DKIM açıkken şablonda <code className="font-mono">{'{DKIM}'}</code> {cevir(cevir("içeren bir TXT kaydı olmalıdır (ör. ad:"))} <code className="font-mono">{'{SELECTOR}._domainkey'}</code>).
+                {cevir("Her domain için 2048-bit RSA anahtar çifti otomatik üretilir; public key DNS'e yazılır, private key OpenDKIM kuruluysa mail sunucusuyla eşlenir.")}
               </p>
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-3">
             <button onClick={kaydet} disabled={kaydediyor} className={btnDark}>
-              {kaydediyor ? 'Kaydediliyor…' : 'Şablonu Kaydet'}
+              {kaydediyor ? 'Kaydediliyor…' : cevir("Şablonu Kaydet")}
             </button>
             <button onClick={yukle} className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Geri Al</button>
           </div>

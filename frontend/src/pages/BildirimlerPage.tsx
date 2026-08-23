@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -9,13 +12,14 @@ const KAT_ETIKET: Record<string, string> = { antivirus: 'Antivirüs', ssl: 'SSL'
 const katAd = (k: string) => KAT_ETIKET[k] || (k ? k[0].toUpperCase() + k.slice(1) : 'Genel')
 
 const goreliZaman = (t: string) => {
-  const d = new Date(t.replace(' ', 'T'))
+  // UTC timezone-suz zaman damgasi (bkz. TopBar). Z eklemeden 3 saat kayar.
+  const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
   const s = Math.floor((Date.now() - d.getTime()) / 1000)
   if (!isFinite(s) || s < 0) return t.slice(0, 16)
   if (s < 60) return 'az önce'
-  if (s < 3600) return `${Math.floor(s / 60)} dk önce`
-  if (s < 86400) return `${Math.floor(s / 3600)} sa önce`
-  if (s < 604800) return `${Math.floor(s / 86400)} gün önce`
+  if (s < 3600) return `${Math.floor(s / 60)} ${cevir("dk önce")}`
+  if (s < 86400) return `${Math.floor(s / 3600)} ${cevir("sa önce")}`
+  if (s < 604800) return `${Math.floor(s / 86400)} ${cevir("gün önce")}`
   return t.slice(0, 10)
 }
 // Eski kayıtlardaki tam sunucu yolunu (/home/<kullanıcı>/) gizle — göreli kalır.
@@ -34,7 +38,17 @@ const KatIkon = ({ kategori }: { kategori: string }) => (
   </svg>
 )
 
+
+const BILDIRIM_EN: Record<string, string> = {
+  "Okunmamış bildirim yok.": "No unread notifications.",
+  "az önce": "just now",
+  "○ Yalnız okunmamış": "○ Unread only",
+  "● Yalnız okunmamış": "● Unread only",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (BILDIRIM_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function BildirimlerPage() {
+  useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
   const [liste, setListe] = useState<Bildirim[]>([])
   const [yuk, setYuk] = useState(true)
@@ -100,10 +114,10 @@ export default function BildirimlerPage() {
                 ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
                 : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}>
-            {sadeceOkunmamis ? '● Yalnız okunmamış' : '○ Yalnız okunmamış'}
+            {sadeceOkunmamis ? '● Yalnız okunmamış' : cevir("○ Yalnız okunmamış")}
           </button>
           <span className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1" />
-          {cip('', 'Tümü')}
+          {cip('', cevir("Tümü"))}
           {katlar.map(k => cip(k, katAd(k)))}
         </div>
 
@@ -111,7 +125,7 @@ export default function BildirimlerPage() {
 
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden">
           {yuk ? (
-            <div className="px-4 py-12 text-center text-sm text-slate-400">Yükleniyor…</div>
+            <div className="px-4 py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : goster.length === 0 ? (
             <div className="px-4 py-16 text-center">
               <svg className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1" /></svg>

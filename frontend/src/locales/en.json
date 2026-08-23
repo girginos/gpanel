@@ -1,0 +1,40 @@
+{
+  "ortak": {
+    "kaydet": "Save",
+    "iptal": "Cancel",
+    "vazgec": "Dismiss",
+    "sil": "Delete",
+    "duzenle": "Edit",
+    "kapat": "Close",
+    "yukleniyor": "Loading…",
+    "ara": "Search…",
+    "onayla": "Confirm",
+    "geri": "Back",
+    "evet": "Yes",
+    "hayir": "No"
+  },
+  "giris": {
+    "baslik": "Customer Login",
+    "altbaslik": "Sign in to access your hosting account.",
+    "kullanici": "Username",
+    "parola": "Password",
+    "girisYap": "Sign in",
+    "hata": "Incorrect username or password."
+  },
+  "nav": {
+    "panom": "Dashboard",
+    "dosyalar": "Files",
+    "veritabanlari": "Databases",
+    "eposta": "Email",
+    "dns": "DNS",
+    "ssl": "SSL",
+    "yedekler": "Backups",
+    "wordpress": "WordPress",
+    "ayarlar": "Settings",
+    "cikis": "Sign out"
+  },
+  "dil": {
+    "sec": "Language",
+    "degistir": "Change language"
+  }
+}

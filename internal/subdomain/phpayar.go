@@ -33,7 +33,7 @@ func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd
 			return err
 		}
 	}
-	koruma := provisioner.ProtectedBlocksForSub(h.DB, sid, socket)
+	koruma := provisioner.ProtectedBlocksForSub(h.DB, sid, socket, webBackendGet(ctx, h.DB, sid))
 	crt, key := certYolu(sk, tamAd)
 	ssl := dosyaVar(crt) && dosyaVar(key)
 	ng, _ := subNginxGet(ctx, h.DB, sid)

@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -22,11 +26,31 @@ type LogYanit = { log: string; calisiyor: boolean; surum?: string; kaynak?: stri
 // SurumSecim — sihirbazda biriktirilen "kurulacak" PHP sürümü (Özet'te toplu kurulur).
 export type SurumSecim = { surum: string; kaynak: string }
 
+
+const PHPSUR_EN: Record<string, string> = {
+  "Kaldırma başlatılamadı": "Failed to start removal",
+  "Kurulacak — Özet adımında": "To be installed — in the Summary step",
+  "Kurulum başlatılamadı": "Failed to start installation",
+  "PHP Sürümleri": "PHP Versions",
+  "Seçimi kaldır": "Deselect",
+  "Sistem varsayılanı (sabit)": "System default (fixed)",
+  "Sistem varsayılanı, kaldırılamaz": "System default, cannot be removed",
+  "Yüklü — kapatmak için toggle": "Installed — toggle to disable",
+  "Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.": "A PHP operation is already running — wait for it to finish.",
+  "kaldırıldı": "removed",
+  "kaldırılıyor": "removing",
+  "sayfayı kapatabilirsiniz": "you can close the page",
+  "sayfayı kapatabilirsiniz, işlem devam eder": "you can close the page, the operation continues",
+  "çalışır —": "runs —",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (PHPSUR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSurumler }: {
   gomulu?: boolean
   secilenSurumler?: SurumSecim[]
   setSecilenSurumler?: (fn: (s: SurumSecim[]) => SurumSecim[]) => void
 } = {}) {
+  useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
@@ -94,14 +118,14 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
   }
 
   async function kur(s: Surum) {
-    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.' })); return }
-    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `PHP ${s.surum} (${s.kaynak}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?` }))) return
+    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.") })); return }
+    if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: cevirT(cevir("PHP {0} ({1}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?"), s.surum, s.kaynak) }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
       setOpLog(`PHP ${s.surum} kurulumu başlatıldı…\n`)
       setAktifOp({ surum: s.surum, kaynak: s.kaynak, islem: 'kur' })
-    } catch (e) { setHata(apiHata(e, 'Kurulum başlatılamadı')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kurulum başlatılamadı"))) }
   }
 
   async function kaldir(s: Surum) {
@@ -109,14 +133,14 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
       (await bilgi({ baslik: 'Bilgi', mesaj: 'AppStream PHP sistem default\'u, kaldırılamaz' }))
       return
     }
-    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: 'Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.' })); return }
+    if (aktifOp) { (await bilgi({ baslik: 'Bilgi', mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.") })); return }
     if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `PHP ${s.surum} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?`, tehlike: true }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })
       setOpLog(`PHP ${s.surum} kaldırma başlatıldı…\n`)
       setAktifOp({ surum: s.surum, kaynak: s.kaynak, islem: 'kaldir' })
-    } catch (e) { setHata(apiHata(e, 'Kaldırma başlatılamadı')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kaldırma başlatılamadı"))) }
   }
 
   const filtreli = surumler.filter(s => {
@@ -132,15 +156,15 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
         <>
           <Breadcrumb items={[
             { etiket: 'Anasayfa', href: '/' },
-            { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
-            { etiket: 'PHP Sürümleri' },
+            { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
+            { etiket: cevir("PHP Sürümleri") },
           ]} />
 
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Sürümleri</h1>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("PHP Sürümleri")}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
-            Sunucuya istediğiniz PHP sürümünü ekleyin veya kaldırın. Her sürüm bağımsız PHP-FPM havuzunda çalışır; domain bazında seçilebilir.
+            {cevir(cevir("Sunucuya istediğiniz PHP sürümünü ekleyin veya kaldırın. Her sürüm bağımsız PHP-FPM havuzunda çalışır; domain bazında seçilebilir."))}
             Kurulum 14 paket içerir (fpm, cli, mysqlnd, mbstring, bcmath, intl, gd, soap, opcache, pdo, xml, zip, pgsql, ldap).
-            Kurulum/kaldırma <strong>arka planda</strong> çalışır — <strong>sayfayı kapatabilirsiniz, işlem devam eder</strong>.
+            {cevir(cevir("Kurulum/kaldırma"))} <strong>arka planda</strong> {cevir("çalışır —")} <strong>{cevir("sayfayı kapatabilirsiniz, işlem devam eder")}</strong>.
           </p>
         </>
       )}
@@ -148,7 +172,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
-      {/* Aktif iş bandı — canlı ilerleme + "sayfayı kapatabilirsiniz" güvencesi */}
+      {/* Aktif iş bandı — canlı ilerleme + cevir("sayfayı kapatabilirsiniz") güvencesi */}
       {aktifOp && (
         <div className="mb-4 p-4 border rounded-2xl bg-sky-50 dark:bg-sky-900/15 border-sky-200 dark:border-sky-800/50">
           <div className="inline-flex items-center gap-2 text-sm font-medium text-sky-700 dark:text-sky-300">
@@ -156,7 +180,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
             PHP {aktifOp.surum} {aktifOp.islem === 'kaldir' ? 'kaldırılıyor' : 'kuruluyor'} — bu işlem uzun sürebilir.
           </div>
           <div className="text-xs text-sky-700/80 dark:text-sky-300/80 mt-0.5">
-            İş arka planda (ayrı sistem servisi) çalışır. Sayfayı kapatabilirsiniz — işlem devam eder, tekrar açtığınızda ilerleme kaldığı yerden görünür.
+            {cevir(cevir("İş arka planda (ayrı sistem servisi) çalışır. Sayfayı kapatabilirsiniz — işlem devam eder, tekrar açtığınızda ilerleme kaldığı yerden görünür."))}
           </div>
           {opLog && (
             <pre ref={logRef} className="mt-2 text-[11px] font-mono bg-slate-900 text-slate-300 rounded-lg p-2.5 max-h-72 overflow-auto whitespace-pre-wrap leading-relaxed">{opLog}</pre>
@@ -170,12 +194,12 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
         {(['tumu', 'yuklu', 'yuklenebilir'] as const).map(f => (
           <button key={f} onClick={() => setFiltre(f)}
             className={`px-3 py-1 text-sm rounded ${filtre === f ? 'bg-brand-600 text-white' : 'border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
-            {f === 'tumu' ? 'Tümü' : f === 'yuklu' ? `Yüklü (${yukluSayi})` : `Yüklenebilir (${surumler.length - yukluSayi})`}
+            {f === 'tumu' ? 'Tümü' : f === 'yuklu' ? cevirT(cevir("Yüklü ({0})"), yukluSayi) : cevirT(cevir("Yüklenebilir ({0})"), surumler.length - yukluSayi)}
           </button>
         ))}
       </div>
 
-      {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div> : (
+      {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtreli.map(s => {
             const key = s.surum + ':' + s.kaynak
@@ -227,15 +251,15 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
 
                 {s.yuklu && (
                   <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 space-y-0.5 mb-3 font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded p-2">
-                    {s.gercek_surum && <div>Sürüm: <span className="text-slate-900 dark:text-slate-100">{s.gercek_surum}</span></div>}
-                    {s.modul_sayi !== undefined && <div>Modül: <span className="text-slate-900 dark:text-slate-100">{s.modul_sayi}</span></div>}
+                    {s.gercek_surum && <div>{cevir(cevir("Sürüm:"))} <span className="text-slate-900 dark:text-slate-100">{s.gercek_surum}</span></div>}
+                    {s.modul_sayi !== undefined && <div>{cevir(cevir("Modül:"))} <span className="text-slate-900 dark:text-slate-100">{s.modul_sayi}</span></div>}
                     {s.service && <div className="truncate">Servis: <span className="text-slate-700 dark:text-slate-300">{s.service}</span></div>}
                   </div>
                 )}
 
                 <div className="text-xs text-slate-500 dark:text-slate-500">
-                  {s.yuklu ? (s.kaynak === 'appstream' ? 'Sistem varsayılanı (sabit)' : 'Yüklü — kapatmak için toggle')
-                    : buOp ? 'İşleniyor…' : surumSecili(s) ? <span className="text-brand-600 dark:text-brand-400">Kurulacak — Özet adımında</span> : 'Kurmak için toggle\'ı aç'}
+                  {s.yuklu ? (s.kaynak === 'appstream' ? 'Sistem varsayılanı (sabit)' : cevir("Yüklü — kapatmak için toggle"))
+                    : buOp ? 'İşleniyor…' : surumSecili(s) ? <span className="text-brand-600 dark:text-brand-400">{cevir("Kurulacak — Özet adımında")}</span> : 'Kurmak için toggle\'ı aç'}
                 </div>
               </div>
             )

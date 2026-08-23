@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -14,6 +18,20 @@ type Usage = {
 
 type Sayilar = { domain: number; domain_aktif: number }
 
+
+const ISTAT_EN: Record<string, string> = {
+  "Alan adı istatistikleri alınamadı": "Failed to get domain statistics",
+  "Panel sürümü": "Panel version",
+  "Sunucu adı": "Server name",
+  "Sunucu kaynak kullanımı, domain sayıları, sistem özeti.": "Server resource usage, domain counts, system summary.",
+  "Yük (1dk)": "Load (1m)",
+  "Çekirdek (kernel)": "Kernel",
+  "İşlemci": "Processor",
+  "İşletim sistemi": "Operating system",
+  "● Canlı (10sn)": "● Live (10s)",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (ISTAT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function fmt(b: number) {
   if (!b || b < 0) return '0 B'
   if (b < 1024) return b + ' B'
@@ -27,6 +45,7 @@ function n(v: number | undefined | null): number {
 }
 
 export default function IstatistiklerPage() {
+  useTranslation() // dil re-render aboneligi
   const [u, setU] = useState<Usage | null>(null)
   const [s, setS] = useState<Sayilar | null>(null)
   const [hata, setHata] = useState<string | null>(null)
@@ -39,7 +58,7 @@ export default function IstatistiklerPage() {
         domain: domains.length,
         domain_aktif: domains.filter((d: any) => d.durum === 'aktif').length,
       })
-    }).catch(hataYakala('Alan adı istatistikleri alınamadı'))
+    }).catch(hataYakala(cevir("Alan adı istatistikleri alınamadı")))
   }
   useEffect(() => { yukle(); const t = setInterval(yukle, 10000); return () => clearInterval(t) }, [])
 
@@ -53,58 +72,58 @@ export default function IstatistiklerPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'İstatistikler' },
+        { etiket: cevir("İstatistikler") },
       ]} />
       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">İstatistikler</h1>
-        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">● Canlı (10sn)</span>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("İstatistikler")}</h1>
+        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{cevir("● Canlı (10sn)")}</span>
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">Sunucu kaynak kullanımı, domain sayıları, sistem özeti.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">{cevir("Sunucu kaynak kullanımı, domain sayıları, sistem özeti.")}</p>
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {/* Sistem metrik 4 kart */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <Metrik baslik="CPU" deger={u ? cpu.toFixed(1) + '%' : '–'}
-          alt={u ? `${cekirdek} çekirdek` : ''} renk="indigo" oran={cpu} />
-        <Metrik baslik="Bellek" deger={u ? bellek.toFixed(1) + '%' : '–'}
+          alt={u ? `${cekirdek} ${cevir("çekirdek")}` : ''} renk="indigo" oran={cpu} />
+        <Metrik baslik={cevir(cevir("Bellek"))} deger={u ? bellek.toFixed(1) + '%' : '–'}
           alt={u ? `${fmt(n(u?.bellek?.kullanilan_kb) * 1024)} / ${fmt(n(u?.bellek?.toplam_kb) * 1024)}` : ''}
           renk="emerald" oran={bellek} />
         <Metrik baslik="Disk" deger={u ? disk.toFixed(1) + '%' : '–'}
           alt={u ? `${fmt(n(u?.disk?.kullanilan_byte))} / ${fmt(n(u?.disk?.toplam_byte))}` : ''}
           renk="violet" oran={disk} />
-        <Metrik baslik="Yük (1dk)" deger={u ? yuk1.toFixed(2) : '–'}
-          alt={u ? `5dk: ${n(u?.cpu?.yuk_5dk).toFixed(2)} · 15dk: ${n(u?.cpu?.yuk_15dk).toFixed(2)}` : ''}
+        <Metrik baslik={cevir("Yük (1dk)")} deger={u ? yuk1.toFixed(2) : '–'}
+          alt={u ? cevirT("5dk: {0} · 15dk: {1}", n(u?.cpu?.yuk_5dk).toFixed(2), n(u?.cpu?.yuk_15dk).toFixed(2)) : ''}
           renk="amber" oran={Math.min(100, (yuk1 / cekirdek) * 100)} />
       </div>
 
       {/* Sistem özeti + sayaçlar */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Sistem</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sistem")}</h3>
           <div className="space-y-1.5 text-sm">
-            <Satir e="Sunucu adı" d={u?.sistem?.hostname || '–'} />
-            <Satir e="İşletim sistemi" d={u?.sistem?.os_adi || '–'} />
-            <Satir e="Çekirdek (kernel)" d={u?.sistem?.kernel || '–'} />
-            <Satir e="İşlemci" d={u?.sistem?.cpu_modeli ? `${u.sistem.cpu_modeli} · ${cekirdek} çekirdek` : '–'} />
+            <Satir e={cevir("Sunucu adı")} d={u?.sistem?.hostname || '–'} />
+            <Satir e={cevir("İşletim sistemi")} d={u?.sistem?.os_adi || '–'} />
+            <Satir e={cevir("Çekirdek (kernel)")} d={u?.sistem?.kernel || '–'} />
+            <Satir e={cevir("İşlemci")} d={u?.sistem?.cpu_modeli ? `${u.sistem.cpu_modeli} · ${cekirdek} ${cevir("çekirdek")}` : '–'} />
             <Satir e="Swap" d={u?.swap ? `${n(u.swap.yuzde).toFixed(1)}% · ${fmt(n(u.swap.kullanilan_kb) * 1024)} / ${fmt(n(u.swap.toplam_kb) * 1024)}` : '–'} />
-            <Satir e="Panel sürümü" d={u?.sistem?.panel_surum || '–'} />
+            <Satir e={cevir("Panel sürümü")} d={u?.sistem?.panel_surum || '–'} />
           </div>
         </div>
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Domainler</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Domainler")}</h3>
           <div className="space-y-1.5 text-sm">
-            <Satir e="Toplam domain" d={s ? String(s.domain) : '–'} />
-            <Satir e="Aktif domain" d={
+            <Satir e={cevir(cevir("Toplam domain"))} d={s ? String(s.domain) : '–'} />
+            <Satir e={cevir(cevir("Aktif domain"))} d={
               <span className="text-emerald-700 dark:text-emerald-300 font-semibold">{s ? s.domain_aktif : 0}</span>
             } />
-            <Satir e="Pasif domain" d={String(s ? s.domain - s.domain_aktif : 0)} />
+            <Satir e={cevir(cevir("Pasif domain"))} d={String(s ? s.domain - s.domain_aktif : 0)} />
           </div>
         </div>
       </div>
 
       <div className="text-xs text-slate-400 dark:text-slate-500 text-center mt-6">
-        Daha detaylı izleme için <a href="/izleme" className="text-brand-600 dark:text-brand-400 hover:underline">İzleme</a> sayfasını ziyaret edin.
+        {cevir(cevir("Daha detaylı izleme için"))} <a href="/izleme" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("İzleme")}</a> {cevir("sayfasını ziyaret edin.")}
       </div>
     </div>
   )

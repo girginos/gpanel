@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/bildirim"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 
@@ -61,8 +62,13 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 		ek = "-auto"
 	}
 	dosya := fmt.Sprintf("%s%s-%s.tar.gz", sk, ek, stamp)
-	boyut, err := arsivOlustur(ctx, db, domainID, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
+	boyut, sha, eksikDB, err := arsivOlustur(ctx, db, domainID, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
+		// 🔴 Yedek basarisiz/bozuk → MUTLAKA bildirim (scheduler'da sessizce log'lanip
+		// kaybolmasin; sahibi/operator zil'de gorur). bildirim.Yaz domain sahibine yonlendirir.
+		bildirim.Yaz(db, "kritik", "yedek", "Yedek başarısız",
+			fmt.Sprintf("%s alan adının yedeği alınamadı veya bozuk: %s", sk, err.Error()),
+			domainID, "backup", 0)
 		return 0, "", err
 	}
 	var jid any
@@ -70,9 +76,16 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 		jid = jobID
 	}
 	if _, err := db.Exec(
-		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar, job_id) VALUES(?,?,?,?,?,?)`,
-		domainID, tip, dosya, boyut, notlar, jid); err != nil {
+		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar, job_id, sha256, dogrulama) VALUES(?,?,?,?,?,?,?,'ok')`,
+		domainID, tip, dosya, boyut, notlar, jid, sha); err != nil {
 		return boyut, dosya, err
+	}
+	// 🔴 Eksik-veri yedegi: bir/birden fazla veritabani dump'i basarisiz oldu ama arsiv
+	// olustu. Yedek "tamam" gorunur ama restore'da veri EKSIK cikar → mutlaka bildir.
+	if len(eksikDB) > 0 {
+		bildirim.Yaz(db, "kritik", "yedek", "Yedek eksik veri",
+			fmt.Sprintf("%s: yedek alındı ancak şu veritabanları dahil edilemedi: %s", sk, strings.Join(eksikDB, ", ")),
+			domainID, "backup", 0)
 	}
 	pushToDestinationAsync(db, domainID, filepath.Join(dir, dosya), dosya)
 	return boyut, dosya, nil

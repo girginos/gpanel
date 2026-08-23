@@ -101,21 +101,59 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		"son_tarama":  nil,
 		"bulgular":    []Bulgu{},
 	}
+	// Bulgular HER ZAMAN domain_id'den okunur (tarama-bağımsız): host-geneli
+	// zamanlanmış tarama (domain_id=0) da bu domainin bulgularını üretir; eski
+	// "tarama_id=domain-özel-tarama" yolu o bulguları hiç göstermiyordu.
+	dbulgular := h.bulgularDomain(r.Context(), id)
+	resp["bulgular"] = dbulgular
+
+	// Son tarama: önce domain-özel, yoksa son HOST-geneli (domain_id=0) tarama.
 	var sid int64
 	var durum, motor, bas string
 	var bitis sql.NullString
 	var taranan, enfekte int
-	if err := h.DB.QueryRowContext(r.Context(),
+	err := h.DB.QueryRowContext(r.Context(),
 		`SELECT id, durum, motor, taranan, enfekte, baslangic, bitis
 		   FROM av_taramalar WHERE domain_id=? ORDER BY id DESC LIMIT 1`, id).
-		Scan(&sid, &durum, &motor, &taranan, &enfekte, &bas, &bitis); err == nil {
+		Scan(&sid, &durum, &motor, &taranan, &enfekte, &bas, &bitis)
+	if err != nil {
+		err = h.DB.QueryRowContext(r.Context(),
+			`SELECT id, durum, motor, taranan, enfekte, baslangic, bitis
+			   FROM av_taramalar WHERE domain_id=0 AND durum='tamam' ORDER BY id DESC LIMIT 1`).
+			Scan(&sid, &durum, &motor, &taranan, &enfekte, &bas, &bitis)
+	}
+	if err == nil {
 		resp["son_tarama"] = map[string]any{
 			"id": sid, "durum": durum, "motor": motor, "taranan": taranan,
-			"enfekte": enfekte, "baslangic": bas, "bitis": bitis.String,
+			// enfekte: bu domainin AKTIF bulgu sayisi (host toplami degil — yaniltmaz).
+			"enfekte": len(dbulgular), "baslangic": bas, "bitis": bitis.String,
 		}
-		resp["bulgular"] = h.bulgular(r.Context(), sid)
+	} else if len(dbulgular) > 0 {
+		// Hiç tarama kaydı yok ama bulgu var → yine de bulguları göster.
+		resp["son_tarama"] = map[string]any{"durum": "tamam", "motor": "G-AV", "enfekte": len(dbulgular)}
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// bulgularDomain — domainin AKTIF/karantina bulgulari (tarama-bagimsiz). Host
+// zamanlanmis tarama domain_id ile bulgu yazar; domain sayfasi bunlari gostersin.
+func (h *Handlers) bulgularDomain(ctx context.Context, did int64) []Bulgu {
+	out := []Bulgu{}
+	rows, err := h.DB.QueryContext(ctx,
+		`SELECT dosya, imza, COALESCE(motor,''), karantina FROM av_bulgular
+		  WHERE domain_id=? AND durum IN ('aktif','karantina') ORDER BY id DESC LIMIT 500`, did)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b Bulgu
+		if err := rows.Scan(&b.Dosya, &b.Imza, &b.Motor, &b.Karantina); err == nil {
+			out = append(out, b)
+		}
+	}
+	_ = rows.Err()
+	return out
 }
 
 func (h *Handlers) bulgular(ctx context.Context, sid int64) []Bulgu {

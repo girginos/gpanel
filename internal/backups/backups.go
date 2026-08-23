@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/bildirim"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -182,20 +183,31 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	abs := filepath.Join(dir, dosya)
 
 	// TÜM domain DB'lerini (ana + wp_* vb.) + home'u tek arşive paketle.
-	boyut, aerr := arsivOlustur(ctx, h.DB, id, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
+	boyut, sha, eksikDB, aerr := arsivOlustur(ctx, h.DB, id, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
 	if aerr != nil {
+		// 🔴 Yedek basarisiz/bozuk → MUTLAKA bildirim (HTTP hatasi kullaniciya doner ama
+		// zil'de kalici kayit + domain sahibine yonlendirme icin bildirim de gonderilir).
+		bildirim.Yaz(h.DB, "kritik", "yedek", "Yedek başarısız",
+			fmt.Sprintf("%s alan adının yedeği alınamadı veya bozuk: %s", sk, aerr.Error()),
+			id, "backup", 0)
 		httpx.WriteError(w, http.StatusInternalServerError, aerr.Error())
 		return
 	}
 
 	res, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar) VALUES(?,?,?,?,?)`,
-		id, "tam", dosya, boyut, "alan adı: "+alanAdi)
+		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar, sha256, dogrulama) VALUES(?,?,?,?,?,?,'ok')`,
+		id, "tam", dosya, boyut, "alan adı: "+alanAdi, sha)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kayıt: "+err.Error())
 		return
 	}
 	yid, _ := res.LastInsertId()
+	// 🔴 Eksik-veri yedegi: arsiv olustu ama bazi DB'ler dump edilemedi → mutlaka bildir.
+	if len(eksikDB) > 0 {
+		bildirim.Yaz(h.DB, "kritik", "yedek", "Yedek eksik veri",
+			fmt.Sprintf("%s: yedek alındı ancak şu veritabanları dahil edilemedi: %s", sk, strings.Join(eksikDB, ", ")),
+			id, "backup", 0)
+	}
 	pruneManuelYedek(h.DB, id, sk) // manuel yedeklerde de adet siniri (kok disk birikimi DoS)
 	// Uzak hedef varsa arkaplanda yükle (API cevabını bloke etme)
 	pushToDestinationAsync(h.DB, id, abs, dosya)

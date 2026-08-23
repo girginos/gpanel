@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
@@ -22,7 +25,18 @@ type SunucuIP = {
 type DBKayit = { id: number; ip: string; iface: string; cidr: number; note: string; created_at: string }
 type Liste = { sunucu_ipler: SunucuIP[]; db_kayitlar: DBKayit[]; varsayilan_arayuz: string }
 
+
+const IPYON_EN: Record<string, string> = {
+  "Arayüz / CIDR": "Interface / CIDR",
+  "IP boş olamaz": "IP cannot be empty",
+  "Panel ekletmediği için silinemez": "Cannot be deleted because it wasn't added by the panel",
+  "Silme hatası": "Delete error",
+  "ör. mail dış IP havuzu": "e.g. mail outbound IP pool",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (IPYON_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function IPYonetimPage() {
+  useTranslation() // dil re-render aboneligi
   const [liste, setListe] = useState<Liste | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -40,14 +54,14 @@ export default function IPYonetimPage() {
       const r = await api.get<Liste>('/ipler')
       setListe(r.data)
       if (!taslakIface) setTaslakIface(r.data.varsayilan_arayuz || '')
-    } catch (e) { setHata(apiHata(e, 'Yüklenemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Yüklenemedi"))) }
     finally { setYukleniyor(false) }
   }
   useEffect(() => { void yukle() }, [])
 
   const ekle = async (ev: FormEvent) => {
     ev.preventDefault(); setEkleHata(null)
-    if (!taslakIP.trim()) { setEkleHata('IP boş olamaz'); return }
+    if (!taslakIP.trim()) { setEkleHata(cevir("IP boş olamaz")); return }
     setGonderiliyor(true)
     try {
       await api.post('/ipler', { ip: taslakIP.trim(), iface: taslakIface, cidr: taslakCidr, note: taslakNot.trim() })
@@ -62,36 +76,36 @@ export default function IPYonetimPage() {
     const ok = await dialog.onay({
       baslik: `${s.ip} silinsin mi?`,
       mesaj: `Bu IP sunucudan kaldırılacak (${s.iface}/${s.cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.`,
-      onayEtiketi: 'Sil', iptalEtiketi: 'Vazgeç', tehlike: true,
+      onayEtiketi: 'Sil', iptalEtiketi: cevir("Vazgeç"), tehlike: true,
     })
     if (!ok) return
     try {
       await api.delete('/ipler/' + encodeURIComponent(s.ip))
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, 'Silme hatası') })
+      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, cevir("Silme hatası")) })
     }
   }
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
       <Breadcrumb items={[
-        { href: '/araclar-ayarlar', etiket: 'Araçlar ve Ayarlar' },
-        { etiket: 'IP Yönetimi' },
+        { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
+        { etiket: cevir("IP Yönetimi") },
       ]} />
 
       <div className="mt-4 mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">IP Yönetimi</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("IP Yönetimi")}</h1>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          Sunucuya ek IP adresi ekle. Reboot sonrası otomatik geri yüklenir.
+          {cevir(cevir("Sunucuya ek IP adresi ekle. Reboot sonrası otomatik geri yüklenir."))}
           <span className="ml-1 font-medium text-slate-800 dark:text-slate-200">
-            Kullanıcı IP'leri ve primary IP silinemez.
+            {cevir("Kullanıcı IP'leri ve primary IP silinemez.")}
           </span>
         </p>
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
       ) : liste && (
@@ -106,7 +120,7 @@ export default function IPYonetimPage() {
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Arayüz</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Arayüz")}</label>
                 <input value={taslakIface} onChange={(e) => setTaslakIface(e.target.value)}
                   placeholder="pub0" spellCheck={false}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
@@ -118,9 +132,9 @@ export default function IPYonetimPage() {
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Açıklama</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Açıklama")}</label>
                 <input value={taslakNot} onChange={(e) => setTaslakNot(e.target.value)}
-                  placeholder="ör. mail dış IP havuzu" maxLength={255}
+                  placeholder={cevir("ör. mail dış IP havuzu")} maxLength={255}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
               </div>
               <div className="flex items-end">
@@ -140,10 +154,10 @@ export default function IPYonetimPage() {
                 <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                   <tr>
                     <th className="px-3 py-3 font-semibold">IP</th>
-                    <th className="px-3 py-3 font-semibold">Arayüz / CIDR</th>
+                    <th className="px-3 py-3 font-semibold">{cevir("Arayüz / CIDR")}</th>
                     <th className="px-3 py-3 font-semibold">Rol</th>
                     <th className="px-3 py-3 font-semibold">Label</th>
-                    <th className="px-3 py-3 text-right font-semibold">İşlem</th>
+                    <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -157,7 +171,7 @@ export default function IPYonetimPage() {
                         ) : s.panel_ip ? (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">panel</span>
                         ) : (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">kullanıcı</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">{cevir("kullanıcı")}</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{s.label || '—'}</td>
@@ -165,10 +179,10 @@ export default function IPYonetimPage() {
                         {s.silinebilir ? (
                           <button onClick={() => sil(s)}
                             className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
-                            Sil
+                            {cevir("Sil")}
                           </button>
                         ) : (
-                          <span className="text-xs text-slate-400" title={s.primary_mi ? 'Primary IP silinemez' : 'Panel ekletmediği için silinemez'}>silinemez</span>
+                          <span className="text-xs text-slate-400" title={s.primary_mi ? 'Primary IP silinemez' : cevir("Panel ekletmediği için silinemez")}>silinemez</span>
                         )}
                       </td>
                     </tr>

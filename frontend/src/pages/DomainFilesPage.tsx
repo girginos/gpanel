@@ -1,3 +1,6 @@
+import { cevirT } from '@/lib/cevirT'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
@@ -10,6 +13,7 @@ import DizinAgac from '@/components/DizinAgac'
 import KodEditor from '@/components/KodEditor'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Entry = {
   adi: string
@@ -25,6 +29,68 @@ type Entry = {
 
 // docrootRel: dosyanın public_html (docroot) altındaki göreli yolunu döndürür; docroot
 // dışındaysa null (o dosyalar canlı URL'de erişilemez → "Tarayıcıda Aç" gösterilmez).
+
+const FILES_EN: Record<string, string> = {
+  "Adlandır": "Rename",
+  "Alan adı bilgisi alınamadı": "Failed to get domain info",
+  "Alt alan belge kökü alınamadı": "Failed to get subdomain document root",
+  "Arama başarısız": "Search failed",
+  "Arşive Ekle": "Add to Archive",
+  "Arşivi Aç": "Extract Archive",
+  "Arşivle": "Archive",
+  "Arşivleme başarısız": "Archiving failed",
+  "Arşivlenemedi": "Failed to archive",
+  "Aynı diskte taşıma anlık.": "Moving on the same disk is instant.",
+  "Aç": "Open",
+  "Açılamadı": "Failed to open",
+  "Açılamadı (zip/tar/rar destek vardır)": "Failed to open (zip/tar/rar supported)",
+  "Bazı hatalar:": "Some errors:",
+  "Boş dosya oluşturulur, ardından kod editörü açılır.": "An empty file is created, then the code editor opens.",
+  "Bu klasör boş": "This folder is empty",
+  "Değişiklik": "Modified",
+  "Diğer": "Other",
+  "Dosya Yöneticisi": "File Manager",
+  "Dosya Yükle": "Upload File",
+  "Dosya adı": "File name",
+  "Dosya adı (uzantı dahil)": "File name (with extension)",
+  "Dosyaları buraya bırak": "Drop files here",
+  "Düzenle": "Edit",
+  "Geçersiz ad": "Invalid name",
+  "Hedef dizin (home altında)": "Target directory (under home)",
+  "Klasör oluşturma başarısız": "Failed to create folder",
+  "Klasörler içerikleriyle kopyalanır.": "Folders are copied with their contents.",
+  "Kopyalanamadı": "Failed to copy",
+  "Kullanıcı": "User",
+  "Oluştur ve Düzenle": "Create and Edit",
+  "Oluşturulamadı": "Failed to create",
+  "Sağ tık ile işlemler": "Right-click for actions",
+  "Silme başarısız": "Delete failed",
+  "Tarayıcıda Aç": "Open in Browser",
+  "Taşı": "Move",
+  "Taşınamadı": "Failed to move",
+  "Yeni Klasör": "New Folder",
+  "Yeni klasör adı:": "New folder name:",
+  "Yeniden Adlandır": "Rename",
+  "Yeniden adlandırılamadı": "Failed to rename",
+  "Yükleniyor…": "Loading…",
+  "Ad boş olamaz": "Name cannot be empty",
+  "Ad çok uzun (en fazla 255 karakter)": "Name too long (max 255 characters)",
+  "dosyalar sayılıyor…": "counting files…",
+  "kopyalandı": "copied",
+  "taşındı": "moved",
+  "Çalıştır": "Run",
+  "Çıkarma başarısız": "Extraction failed",
+  "Çıktı:": "Output:",
+  "İndir": "Download",
+  "İndirme başarısız:": "Download failed:",
+  "İptal": "Cancel",
+  "İzin değiştirilemedi": "Failed to change permission",
+  "İzinler": "Permissions",
+  "İşlemler": "Actions",
+  "↑ üst klasör": "↑ parent folder",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (FILES_EN[tr] || tr) : tr)
+
 function docrootRel(yol: string): string | null {
   const pre = '/public_html'
   if (yol === pre) return '/'
@@ -39,13 +105,27 @@ type CtxOge =
 
 const ARSIV_RX = /\.(zip|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|gz)$/i
 
+// adGecerliDegil: tek bir ad mı? Yol ayracı veya ".." içeren ad jail'i aşamaz
+// ama sessizce BAŞKA bir dizinde dosya oluşturur ("yedek/../x" → "x"), yani
+// kullanıcı istediğinden farklı bir sonuç alır. Girişte reddediyoruz.
+function adGecerliDegil(ad: string): string | null {
+  const a = ad.trim()
+  if (!a) return cevir("Ad boş olamaz")
+  if (a === '.' || a === '..') return cevir("Geçersiz ad")
+  if (a.includes('/') || a.includes('\\')) return 'Ad "/" veya "\\" içeremez'
+  if (a.length > 255) return cevir("Ad çok uzun (en fazla 255 karakter)")
+  return null
+}
+
 type ListResp = { yol: string; icerik: Entry[]; toplam: number }
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 
 const ROOT = '/'
 
 export default function DomainFilesPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay, sor, bilgi } = useDialog()
+  const toast = useToast()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -64,7 +144,7 @@ export default function DomainFilesPage() {
     api.get<{ docroot: string }>(`/domains/${id}/subdomain/${sid}`).then(r => {
       const rel = (r.data.docroot || '').replace(/^\/home\/[^/]+/, '')
       if (rel) setYol(rel)
-    }).catch(hataYakala('Alt alan belge kökü alınamadı'))
+    }).catch(hataYakala(cevir("Alt alan belge kökü alınamadı")))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, sid])
   const [icerik, setIcerik] = useState<Entry[]>([])
@@ -84,6 +164,7 @@ export default function DomainFilesPage() {
   const [aramaSonuc, setAramaSonuc] = useState<Entry[] | null>(null)
   const [kopyalaModal, setKopyalaModal] = useState<{ tip: 'kopyala' | 'tasi'; yollar: string[] } | null>(null)
   const [arsivModal, setArsivModal] = useState(false)
+  const [arsivDurum, setArsivDurum] = useState<{ toplam: number; eklenen: number; boyut: number; ad: string } | null>(null)
   const [yeniDosyaModal, setYeniDosyaModal] = useState(false)
   const [boyutSonuc, setBoyutSonuc] = useState<{ yol: string; boyut: number } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null)
@@ -104,7 +185,7 @@ export default function DomainFilesPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
   }, [id])
 
   function tara() {
@@ -135,21 +216,25 @@ export default function DomainFilesPage() {
       await api.delete(`${base}/files`, { params: { yol: e.yol } })
       setAgacYenileme(x => x + 1)
       tara()
+      toast.basari(`"${e.adi}" silindi`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Silme başarısız') }))
+      toast.hata(apiHata(err, cevir("Silme başarısız")))
     }
   }
 
   async function klasorOlustur() {
-    const ad = (await sor({ baslik: 'Yeni klasör adı:' }))
+    const ad = (await sor({ baslik: cevir("Yeni klasör adı:") }))
     if (!ad) return
-    const hedef = (yol === '/' ? '' : yol) + '/' + ad
+    const adHata = adGecerliDegil(ad)
+    if (adHata) { toast.hata(adHata); return }
+    const hedef = (yol === '/' ? '' : yol) + '/' + ad.trim()
     try {
       await api.post(`${base}/files/mkdir`, { yol: hedef })
       setAgacYenileme(x => x + 1)
       tara()
+      toast.basari(`"${ad}" klasörü oluşturuldu`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Klasör oluşturma başarısız') }))
+      toast.hata(apiHata(err, cevir("Klasör oluşturma başarısız")))
     }
   }
 
@@ -159,30 +244,35 @@ export default function DomainFilesPage() {
       const { data } = await api.get<{yol: string; icerik: string}>(`${base}/files/oku`, { params: { yol: e.yol } })
       setEditor({ yol: e.yol, icerik: data.icerik })
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Açılamadı') }))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, cevir("Açılamadı")) }))
     }
   }
 
   async function editorKaydet() {
     if (!editor) return
     try {
+      const kaydedilen = editor.yol.split('/').pop() || editor.yol
       await api.post(`${base}/files/yaz`, { yol: editor.yol, icerik: editor.icerik })
       setEditor(null); tara()
+      toast.basari(`"${kaydedilen}" kaydedildi`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Kaydedilemedi') }))
+      toast.hata(apiHata(err, 'Kaydedilemedi'))
     }
   }
 
   async function yenidenAdlandir(e: Entry, yeniAd: string) {
     if (!yeniAd || yeniAd === e.adi) return
+    const adHata = adGecerliDegil(yeniAd)
+    if (adHata) { toast.hata(adHata); return }
     const parca = e.yol.split('/')
     parca[parca.length - 1] = yeniAd
     const yeni = parca.join('/')
     try {
       await api.post(`${base}/files/rename`, { eski: e.yol, yeni })
       setRenameFor(null); setAgacYenileme(x => x + 1); tara()
+      toast.basari(`"${e.adi}" → "${yeniAd}" olarak değiştirildi`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Yeniden adlandırılamadı') }))
+      toast.hata(apiHata(err, cevir("Yeniden adlandırılamadı")))
     }
   }
 
@@ -190,8 +280,9 @@ export default function DomainFilesPage() {
     try {
       await api.post(`${base}/files/chmod`, { yol: e.yol, mod })
       setChmodFor(null); tara()
+      toast.basari(`"${e.adi}" izni ${mod} yapıldı`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'İzin değiştirilemedi') }))
+      toast.hata(apiHata(err, cevir("İzin değiştirilemedi")))
     }
   }
 
@@ -262,8 +353,12 @@ export default function DomainFilesPage() {
     setTopluYukleme(null)
     setAgacYenileme(x => x + 1)
     tara()
-    if (basarili < files.length) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: `${basarili}/${files.length} dosya yüklendi, bazıları başarısız oldu.` }))
+    if (basarili === files.length) {
+      toast.basari(files.length === 1 ? `"${files[0].name}" yüklendi` : `${files.length} ${cevir("dosya yüklendi")}`)
+    } else if (basarili === 0) {
+      toast.hata(cevirT(cevir("Yükleme başarısız ({0} dosya)"), files.length))
+    } else {
+      toast.hata(`${basarili}/${files.length} ${cevir("dosya yüklendi")}, bazıları başarısız oldu`)
     }
   }
 
@@ -295,7 +390,9 @@ export default function DomainFilesPage() {
     setSeciliSet(new Set())
     setAgacYenileme(x => x + 1)
     tara()
-    if (basarili < yollar.length) (await bilgi({ baslik: 'Bilgi', mesaj: `${basarili}/${yollar.length} silindi.` }))
+    if (basarili === yollar.length) toast.basari(`${yollar.length} ${cevir("öğe silindi")}`)
+    else if (basarili === 0) toast.hata(cevirT(cevir("Silinemedi ({0} öğe)"), yollar.length))
+    else toast.hata(`${basarili}/${yollar.length} ${cevir("öğe silindi, kalanı silinemedi")}`)
   }
 
   async function extractEt(e: Entry) {
@@ -309,14 +406,15 @@ export default function DomainFilesPage() {
           await new Promise(r => setTimeout(r, 1200))
           const p = await api.get(`${base}/files/extract-progress`, { params: { id: data.is_id } })
           setExtractDurum({ toplam: p.data.toplam || 0, cikan: p.data.cikan || 0, ad: e.adi })
-          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Çıkarma başarısız')
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Çıkarma başarısız"))
           if (p.data.durum === 'tamam') break
         }
       }
       setAgacYenileme(x => x + 1)
       tara()
+      toast.basari(`"${e.adi}" arşivi açıldı`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Açılamadı (zip/tar/rar destek vardır)') }))
+      toast.hata(apiHata(err, cevir("Açılamadı (zip/tar/rar destek vardır)")))
     } finally {
       setExtractAktif(false)
       setExtractDurum(null)
@@ -329,7 +427,7 @@ export default function DomainFilesPage() {
       const { data } = await api.get(`${base}/files/ara`, { params: { q: aramaQ, yol } })
       setAramaSonuc(data.icerik)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Arama başarısız') }))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, cevir("Arama başarısız")) }))
     }
   }
 
@@ -340,37 +438,64 @@ export default function DomainFilesPage() {
       const { data } = await api.post(`${base}/files/${url}`, {
         kaynaklar: kopyalaModal.yollar, hedef,
       })
+      const adet = kopyalaModal.yollar.length
+      const fiil = kopyalaModal.tip === 'kopyala' ? 'kopyalandı' : cevir("taşındı")
       setKopyalaModal(null); setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
-      if (data.hatalar?.length) (await bilgi({ baslik: 'Bilgi', mesaj: 'Bazı hatalar: ' + data.hatalar.join('\n') }))
+      if (data.hatalar?.length) toast.hata('Bazı hatalar: ' + data.hatalar.join(' · '))
+      else toast.basari(cevirT(cevir("{0} öğe {1} dizinine {2}"), adet, hedef, fiil))
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, kopyalaModal.tip === 'kopyala' ? 'Kopyalama hata' : 'Taşıma hata') }))
+      toast.hata(apiHata(err, kopyalaModal.tip === 'kopyala' ? 'Kopyalanamadı' : cevir("Taşınamadı")))
     }
   }
 
   async function arsivle(ciktiAd: string, format: 'zip' | 'tar.gz') {
     const yollar = Array.from(seciliSet)
     if (yollar.length === 0) return
-    const cikti = (yol === '/' ? '' : yol) + '/' + ciktiAd + (format === 'zip' ? '.zip' : '.tar.gz')
+    const adHata = adGecerliDegil(ciktiAd)
+    if (adHata) { toast.hata(adHata); return }
+    const cikti = (yol === '/' ? '' : yol) + '/' + ciktiAd.trim() + (format === 'zip' ? '.zip' : '.tar.gz')
+    const arsivAdi = cikti.split('/').pop() || cikti
+    setArsivModal(false)
+    setArsivDurum({ toplam: 0, eklenen: 0, boyut: 0, ad: arsivAdi })
     try {
-      await api.post(`${base}/files/archive`, { kaynaklar: yollar, cikti_yol: cikti, format })
-      setArsivModal(false); setSeciliSet(new Set())
+      const { data } = await api.post(`${base}/files/archive`, { kaynaklar: yollar, cikti_yol: cikti, format })
+      // Asenkron iş: büyük dizinlerde istek askıda kalmasın diye is_id ile izlenir.
+      if (data.is_id) {
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1000))
+          const p = await api.get(`${base}/files/archive-progress`, { params: { id: data.is_id } })
+          setArsivDurum({
+            toplam: p.data.toplam || 0, eklenen: p.data.eklenen || 0,
+            boyut: p.data.boyut || 0, ad: arsivAdi,
+          })
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Arşivleme başarısız"))
+          if (p.data.durum === 'tamam') break
+        }
+      }
+      setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
+      toast.basari(`"${arsivAdi}" oluşturuldu`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Arşivleme hata') }))
+      toast.hata(apiHata(err, cevir("Arşivlenemedi")))
+    } finally {
+      setArsivDurum(null)
     }
   }
 
   async function yeniDosyaOlustur(ad: string) {
-    const hedef = (yol === '/' ? '' : yol) + '/' + ad
+    const adHata = adGecerliDegil(ad)
+    if (adHata) { toast.hata(adHata); return }
+    const hedef = (yol === '/' ? '' : yol) + '/' + ad.trim()
     try {
       const { data } = await api.post(`${base}/files/yeni-dosya`, { yol: hedef })
       setYeniDosyaModal(false); tara()
       // Direkt editöre aç
       const okuResp = await api.get(`${base}/files/oku`, { params: { yol: hedef } })
       setEditor({ yol: hedef, icerik: okuResp.data.icerik })
+      toast.basari(`"${ad}" oluşturuldu`)
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Oluşturma hata') }))
+      toast.hata(apiHata(err, cevir("Oluşturulamadı")))
     }
   }
 
@@ -468,25 +593,25 @@ export default function DomainFilesPage() {
     const ogeler: CtxOge[] = []
     if (!coklu) {
       if (e.tip === 'klasor') {
-        ogeler.push({ key: 'ac', etiket: 'Aç', ikon: I.klasorAcik, onTikla: kapatSonra(() => git(e.yol)) })
+        ogeler.push({ key: 'ac', etiket: cevir("Aç"), ikon: I.klasorAcik, onTikla: kapatSonra(() => git(e.yol)) })
       } else {
         if (docrootRel(e.yol) !== null)
-          ogeler.push({ key: 'brw', etiket: 'Tarayıcıda Aç', ikon: I.kure, onTikla: kapatSonra(() => tarayicidaAc(e)) })
-        ogeler.push({ key: 'edit', etiket: 'Düzenle', ikon: I.kalem, onTikla: kapatSonra(() => editorAc(e)) })
-        ogeler.push({ key: 'dl', etiket: 'İndir', ikon: I.indir, onTikla: kapatSonra(() => indir(e)) })
+          ogeler.push({ key: 'brw', etiket: cevir("Tarayıcıda Aç"), ikon: I.kure, onTikla: kapatSonra(() => tarayicidaAc(e)) })
+        ogeler.push({ key: 'edit', etiket: cevir("Düzenle"), ikon: I.kalem, onTikla: kapatSonra(() => editorAc(e)) })
+        ogeler.push({ key: 'dl', etiket: cevir("İndir"), ikon: I.indir, onTikla: kapatSonra(() => indir(e)) })
         if (ARSIV_RX.test(e.adi))
-          ogeler.push({ key: 'ext', etiket: 'Arşivi Aç', ikon: I.kutu, onTikla: kapatSonra(() => extractEt(e)) })
+          ogeler.push({ key: 'ext', etiket: cevir("Arşivi Aç"), ikon: I.kutu, onTikla: kapatSonra(() => extractEt(e)) })
       }
-      ogeler.push({ key: 'rn', etiket: 'Yeniden Adlandır', ikon: I.harf, onTikla: kapatSonra(() => setRenameFor(e)) })
-      ogeler.push({ key: 'chmod', etiket: 'İzinler', ikon: I.kilit, onTikla: kapatSonra(() => setChmodFor(e)) })
+      ogeler.push({ key: 'rn', etiket: cevir("Yeniden Adlandır"), ikon: I.harf, onTikla: kapatSonra(() => setRenameFor(e)) })
+      ogeler.push({ key: 'chmod', etiket: cevir("İzinler"), ikon: I.kilit, onTikla: kapatSonra(() => setChmodFor(e)) })
       ogeler.push({ key: 'boyut', etiket: 'Boyut Hesapla', ikon: I.cetvel, onTikla: kapatSonra(() => boyutHesapla(e.yol)) })
       ogeler.push({ ayrac: true, key: 's1' })
     }
     const yollar = coklu ? Array.from(seciliSet) : [e.yol]
     const ek = coklu ? ` (${yollar.length})` : ''
     ogeler.push({ key: 'copy', etiket: 'Kopyala' + ek, ikon: I.pano, onTikla: kapatSonra(() => setKopyalaModal({ tip: 'kopyala', yollar })) })
-    ogeler.push({ key: 'move', etiket: 'Taşı' + ek, ikon: I.tasi, onTikla: kapatSonra(() => setKopyalaModal({ tip: 'tasi', yollar })) })
-    ogeler.push({ key: 'arch', etiket: 'Arşive Ekle' + ek, ikon: I.sikistir, onTikla: kapatSonra(() => setArsivModal(true)) })
+    ogeler.push({ key: 'move', etiket: cevir("Taşı") + ek, ikon: I.tasi, onTikla: kapatSonra(() => setKopyalaModal({ tip: 'tasi', yollar })) })
+    ogeler.push({ key: 'arch', etiket: cevir("Arşive Ekle") + ek, ikon: I.sikistir, onTikla: kapatSonra(() => setArsivModal(true)) })
     ogeler.push({ ayrac: true, key: 's2' })
     ogeler.push({ key: 'del', etiket: 'Sil' + ek, ikon: I.cop, tehlike: true, onTikla: kapatSonra(() => coklu ? setTopluSilOnay(true) : sil(e)) })
     return ogeler
@@ -498,12 +623,12 @@ export default function DomainFilesPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '…', href: `/abonelikler/${id}` },
         { etiket: 'Dosyalar' },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Dosya Yöneticisi</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Dosya Yöneticisi")}</h1>
       {domain && (
         <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
@@ -517,12 +642,12 @@ export default function DomainFilesPage() {
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
               <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
-              Arşiv çıkarılıyor: <span className="font-mono">{extractDurum.ad}</span>
+              {cevir(cevir("Arşiv çıkarılıyor:"))} <span className="font-mono">{extractDurum.ad}</span>
             </span>
             <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">
               {extractDurum.toplam > 0
                 ? `${extractDurum.cikan.toLocaleString('tr-TR')} / ${extractDurum.toplam.toLocaleString('tr-TR')} dosya`
-                : `${extractDurum.cikan.toLocaleString('tr-TR')} dosya çıkarıldı…`}
+                : cevirT(cevir("{0} dosya çıkarıldı…"), extractDurum.cikan.toLocaleString('tr-TR'))}
             </span>
           </div>
           <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
@@ -530,6 +655,34 @@ export default function DomainFilesPage() {
               <div
                 className="h-full rounded-full bg-brand-500 transition-all duration-500"
                 style={{ width: `${Math.min(100, Math.round((extractDurum.cikan / extractDurum.toplam) * 100))}%` }}
+              />
+            ) : (
+              <div className="h-full w-1/3 rounded-full bg-brand-400 animate-pulse" />
+            )}
+          </div>
+        </div>
+      )}
+
+
+      {arsivDurum && (
+        <div className="mb-4 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-medium text-brand-800 dark:text-brand-200">
+              <span className="inline-block w-3.5 h-3.5 mr-2 align-[-2px] rounded-full border-2 border-brand-400 border-t-transparent animate-spin" />
+              {cevir(cevir("Arşiv oluşturuluyor:"))} <span className="font-mono">{arsivDurum.ad}</span>
+            </span>
+            <span className="text-xs tabular-nums text-brand-700 dark:text-brand-300">
+              {arsivDurum.toplam > 0
+                ? `${arsivDurum.eklenen.toLocaleString('tr-TR')} / ${arsivDurum.toplam.toLocaleString('tr-TR')} dosya`
+                : cevir("dosyalar sayılıyor…")}
+              {arsivDurum.boyut > 0 && ` · ${boyutBicim(arsivDurum.boyut)}`}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-brand-100 dark:bg-brand-900 overflow-hidden">
+            {arsivDurum.toplam > 0 ? (
+              <div
+                className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.round((arsivDurum.eklenen / arsivDurum.toplam) * 100))}%` }}
               />
             ) : (
               <div className="h-full w-1/3 rounded-full bg-brand-400 animate-pulse" />
@@ -555,7 +708,7 @@ export default function DomainFilesPage() {
             <svg className="w-14 h-14 mx-auto text-brand-600 dark:text-brand-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
             </svg>
-            <div className="text-lg font-semibold text-brand-700 dark:text-brand-300">Dosyaları buraya bırak</div>
+            <div className="text-lg font-semibold text-brand-700 dark:text-brand-300">{cevir("Dosyaları buraya bırak")}</div>
             <div className="text-sm text-brand-600 dark:text-brand-400/80 mt-1">Hedef dizin: <code className="font-mono bg-white dark:bg-slate-800/60 px-1.5 py-0.5 rounded">{yol}</code></div>
           </div>
         </div>
@@ -563,7 +716,7 @@ export default function DomainFilesPage() {
       {seciliSet.size > 0 && (
         <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md flex items-center gap-3 flex-wrap">
           <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">{seciliSet.size} öğe seçili</span>
-          <span className="text-xs text-amber-700/80 dark:text-amber-300/80">Sağ tık ile işlemler</span>
+          <span className="text-xs text-amber-700/80 dark:text-amber-300/80">{cevir("Sağ tık ile işlemler")}</span>
           <button onClick={() => setTopluSilOnay(true)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">Sil ({seciliSet.size})</button>
           <button onClick={() => setSeciliSet(new Set())} className="text-xs px-3 py-1.5 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:bg-amber-900/30 rounded">Secimi temizle</button>
         </div>
@@ -577,7 +730,7 @@ export default function DomainFilesPage() {
             </svg>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm">
-                Yükleniyor… <span className="font-mono">{topluYukleme.aktifIndex + 1} / {topluYukleme.toplam}</span>
+                {cevir("Yükleniyor…")} <span className="font-mono">{topluYukleme.aktifIndex + 1} / {topluYukleme.toplam}</span>
               </div>
               <div className="text-xs text-sky-700/90 truncate">{topluYukleme.aktif}</div>
             </div>
@@ -616,8 +769,8 @@ export default function DomainFilesPage() {
           </button>
           {yeniMenuAcik && (
             <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
-              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.yukle} /> Dosya Yükle</span></button>
-              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.klasor} /> Yeni Klasör</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.yukle} /> {cevir("Dosya Yükle")}</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.klasor} /> {cevir("Yeni Klasör")}</span></button>
               <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.dosya} /> Yeni Dosya</span></button>
             </div>
           )}
@@ -677,7 +830,7 @@ export default function DomainFilesPage() {
           çerçevelerini taşır (iç içe çerçeve olmasın). */}
       <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yukleniyor ? (
-          <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+          <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
         ) : (
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
@@ -687,9 +840,9 @@ export default function DomainFilesPage() {
                 <th className={T.baslik}>Ad</th>
                 <th className={T.baslik}>Boyut</th>
                 <th className={T.baslik}>Yetkiler</th>
-                <th className={T.baslik}>Kullanıcı</th>
+                <th className={T.baslik}>{cevir("Kullanıcı")}</th>
                 <th className={T.baslik}>Grup</th>
-                <th className={T.baslik}>Değişiklik</th>
+                <th className={T.baslik}>{cevir("Değişiklik")}</th>
                 <th className={`${T.baslik} w-10`}></th>
               </tr>
             </thead>
@@ -698,13 +851,13 @@ export default function DomainFilesPage() {
                 <tr className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 cursor-pointer`} onClick={geri}>
                   {/* Tek hücreli gezinme satırı: colSpan korundu, mobilde tek kart olur. */}
                   <td className={`${T.hucreBaslik} lg:font-normal`} colSpan={8}>
-                    <span className="text-slate-500 dark:text-slate-500">↑ üst klasör</span>
+                    <span className="text-slate-500 dark:text-slate-500">{cevir("↑ üst klasör")}</span>
                   </td>
                 </tr>
               )}
               {icerik.length === 0 && !yukleniyor && (
                 <tr className={T.satir}>
-                  <td colSpan={8} className={T.hucreDurum}>Bu klasör boş</td>
+                  <td colSpan={8} className={T.hucreDurum}>{cevir("Bu klasör boş")}</td>
                 </tr>
               )}
               {/* Seçili satır: mobilde halka (ring), masaüstünde zemin rengi. T.satir'ın
@@ -755,21 +908,21 @@ export default function DomainFilesPage() {
                   <td className={T.hucre} data-etiket="Yetkiler">
                     <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500" title={e.mod}>{e.yetkiler || e.mod}</span>
                   </td>
-                  <td className={T.hucre} data-etiket="Kullanıcı">
+                  <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
                     <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500 break-all">{e.sahip || '—'}</span>
                   </td>
                   <td className={T.hucre} data-etiket="Grup">
                     <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500 break-all">{e.grup || '—'}</span>
                   </td>
-                  <td className={T.hucre} data-etiket="Değişiklik">
+                  <td className={T.hucre} data-etiket={cevir("Değişiklik")}>
                     <span className="text-slate-600 dark:text-slate-400 dark:text-slate-500 whitespace-nowrap">{formatTarih(e.degisme)}</span>
                   </td>
                   <td className={`${T.hucreAksiyon} lg:text-right`}>
                     <button
                       onClick={ev => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); ctxAc(r.right, r.bottom, e) }}
                       className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
-                      title="İşlemler"
-                      aria-label={`${e.adi} işlemleri`}
+                      title={cevir("İşlemler")}
+                      aria-label={cevirT(cevir("{0} işlemleri"), e.adi)}
                     >
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
@@ -844,14 +997,14 @@ export default function DomainFilesPage() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">Toplu Silme</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
-              <span className="font-semibold">{seciliSet.size}</span> öğe geri dönüşsüz silinecek. Klasörler içerdiği dosyalarla birlikte silinir.
+              <span className="font-semibold">{seciliSet.size}</span> {cevir("öğe geri dönüşsüz silinecek. Klasörler içerdiği dosyalarla birlikte silinir.")}
             </p>
             <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded p-2 max-h-40 overflow-auto mb-4">
               {Array.from(seciliSet).slice(0, 8).map(y => <li key={y} className="truncate">{y}</li>)}
               {seciliSet.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {seciliSet.size - 8} daha…</li>}
             </ul>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setTopluSilOnay(false)} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+              <button onClick={() => setTopluSilOnay(false)} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
               <button onClick={topluSil} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">Evet, Sil</button>
             </div>
           </div>
@@ -967,14 +1120,14 @@ function RenameModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (yeni
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Yeniden Adlandır</h3>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yeniden Adlandır")}</h3>
         <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{entry.yol}</code></p>
         <input value={ad} onChange={e => setAd(e.target.value)} autoFocus
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad)} disabled={!ad || ad === entry.adi}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Adlandır</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Adlandır")}</button>
         </div>
       </div>
     </div>
@@ -994,19 +1147,19 @@ function ChmodModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (mod: 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">İzinler</h3>
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("İzinler")}</h3>
         <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{entry.yol}</code></p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-3 text-center">
           <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Sahip</div>
           <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Grup</div>
-          <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">Diğer</div>
+          <div className="text-xs text-slate-500 dark:text-slate-500 font-semibold">{cevir("Diğer")}</div>
           {[0o400, 0o040, 0o004].map((b, i) => <button key={'r'+i} onClick={() => tog(b)} className={cls(bit(b))}>Oku</button>)}
           {[0o200, 0o020, 0o002].map((b, i) => <button key={'w'+i} onClick={() => tog(b)} className={cls(bit(b))}>Yaz</button>)}
-          {[0o100, 0o010, 0o001].map((b, i) => <button key={'x'+i} onClick={() => tog(b)} className={cls(bit(b))}>Çalıştır</button>)}
+          {[0o100, 0o010, 0o001].map((b, i) => <button key={'x'+i} onClick={() => tog(b)} className={cls(bit(b))}>{cevir("Çalıştır")}</button>)}
         </div>
         <div className="text-xs text-slate-500 dark:text-slate-500 mb-3">Octal: <input value={mod} onChange={e => setMod(e.target.value)} className="font-mono ml-1 px-2 py-0.5 border border-slate-300 dark:border-slate-600 rounded w-20" /></div>
         <div className="flex justify-end gap-2">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(mod)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">Uygula</button>
         </div>
       </div>
@@ -1035,7 +1188,7 @@ function etaBicim(sn: number): string {
 function KopyaTasiModal({ tip, yollar, domainId, onTamam, onIptal }:
   { tip: 'kopyala' | 'tasi'; yollar: string[]; domainId: string | number; onTamam: (hedef: string) => void; onIptal: () => void }) {
   const [hedef, setHedef] = useState('/public_html')
-  const baslik = tip === 'kopyala' ? 'Kopyala' : 'Taşı'
+  const baslik = tip === 'kopyala' ? 'Kopyala' : cevir("Taşı")
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
@@ -1044,12 +1197,12 @@ function KopyaTasiModal({ tip, yollar, domainId, onTamam, onIptal }:
           {yollar.slice(0, 5).map(y => <li key={y} className="truncate">{y}</li>)}
           {yollar.length > 5 && <li className="text-slate-400 dark:text-slate-500 italic">+ {yollar.length - 5} daha…</li>}
         </ul>
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Hedef dizin (home altında)</label>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Hedef dizin (home altında)")}</label>
         <input value={hedef} onChange={e => setHedef(e.target.value)} placeholder="/public_html/yedek"
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
-        <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">Hedefin var olması gerekir. {tip === 'kopyala' ? 'Klasörler içerikleriyle kopyalanır.' : 'Aynı diskte taşıma anlık.'}</p>
+        <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">Hedefin var olması gerekir. {tip === 'kopyala' ? 'Klasörler içerikleriyle kopyalanır.' : cevir("Aynı diskte taşıma anlık.")}</p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(hedef)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{baslik}</button>
         </div>
       </div>
@@ -1064,7 +1217,7 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Arşive Ekle ({adetSayi} öğe)</h3>
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Dosya adı</label>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Dosya adı")}</label>
         <input value={ad} onChange={e => setAd(e.target.value)}
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm mb-3" />
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Format</label>
@@ -1078,11 +1231,11 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
             TAR.GZ
           </button>
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">Çıktı: <code className="font-mono">{ad}.{format}</code></p>
+        <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">{cevir("Çıktı:")} <code className="font-mono">{ad}.{format}</code></p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad, format)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Arşivle</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Arşivle")}</button>
         </div>
       </div>
     </div>
@@ -1095,14 +1248,14 @@ function YeniDosyaModal({ onTamam, onIptal }: { onTamam: (ad: string) => void; o
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">Yeni Dosya</h3>
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Dosya adı (uzantı dahil)</label>
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Dosya adı (uzantı dahil)")}</label>
         <input value={ad} onChange={e => setAd(e.target.value)} autoFocus
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
-        <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">Boş dosya oluşturulur, ardından kod editörü açılır.</p>
+        <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">{cevir("Boş dosya oluşturulur, ardından kod editörü açılır.")}</p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">İptal</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">Oluştur ve Düzenle</button>
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Oluştur ve Düzenle")}</button>
         </div>
       </div>
     </div>

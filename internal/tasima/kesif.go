@@ -8,13 +8,18 @@ import (
 
 // Hesap — kaynak sunucuda bulunan tasinabilir bir site.
 type Hesap struct {
-	KaynakHesap string   `json:"kaynak_hesap"` // uzak panel kullanicisi
+	KaynakHesap string   `json:"kaynak_hesap"` // uzak panel kullanicisi (sistem kullanicisi)
 	AlanAdi     string   `json:"alan_adi"`
 	WebRoot     string   `json:"web_root"`
 	PHPSurum    string   `json:"php_surum"`
 	DBler       []string `json:"dbler"`
 	BoyutMB     int64    `json:"boyut_mb"`
 	Not         string   `json:"not"`
+	// Sahiplik (Plesk/cPanel'de bu domainin sahibi). Reseller/müşteri taşımada
+	// domain doğru sahibe atanır. Boşsa admin-sahipli sayılır.
+	SahipLogin string `json:"sahip_login"` // domain sahibi panel client login
+	SahipTip   string `json:"sahip_tip"`   // admin | reseller | client
+	Reseller   string `json:"reseller"`    // üst reseller login (client ise; reseller-sahipli ise kendi login'i)
 }
 
 // PanelTespit — uzak sunucuda hangi panelin kurulu oldugunu bulur.
@@ -45,6 +50,105 @@ func (k *Kaynak) Kesfet(ctx context.Context) ([]Hesap, error) {
 		return k.ayristir(k.Calistir(ctx, komutDirectAdmin))
 	}
 	return nil, fmt.Errorf("desteklenmeyen panel tipi")
+}
+
+// KaynakSahip — kaynaktaki bir reseller veya müşteri (client). Reseller/sahip
+// taşımada GVM'de karşılık oluşturulur. Limitler MB/adet; 0 = sınırsız.
+type KaynakSahip struct {
+	Login     string `json:"login"`
+	Tip       string `json:"tip"` // reseller | client
+	Ad        string `json:"ad"`  // kişi/firma adı
+	Eposta    string `json:"eposta"`
+	Reseller  string `json:"reseller"` // üst reseller login (client ise)
+	DiskMB    int64  `json:"disk_mb"`
+	MaxDomain int    `json:"max_domain"`
+	TrafikMB  int64  `json:"trafik_mb"`
+}
+
+// KesfetSahipler — kaynaktaki reseller + müşteri hesaplarını (iletişim + limit)
+// keşfeder. Şimdilik yalnız Plesk (cPanel/DA reseller yapısı ayrı ele alınır).
+func (k *Kaynak) KesfetSahipler(ctx context.Context) ([]KaynakSahip, error) {
+	if k.Tip != "plesk" {
+		return nil, nil
+	}
+	ctx, iptal := context.WithTimeout(ctx, kesifTimeout)
+	defer iptal()
+	cikti, err := k.Calistir(ctx, komutPleskSahipler)
+	if err != nil {
+		return nil, err
+	}
+	return ayristirSahipler(cikti), nil
+}
+
+// komutPleskSahipler — reseller + client'ları CONCAT_WS('|', ...) ile tek satırda
+// döndürür: login|type|ad|eposta|ust_reseller|disk_bayt|max_dom|max_traffic_bayt.
+const komutPleskSahipler = `plesk db -Ne "SELECT CONCAT_WS('|', c.login, c.type, COALESCE(NULLIF(c.pname,''), NULLIF(c.cname,''), c.login), COALESCE(c.email,''), COALESCE((SELECT p.login FROM clients p WHERE p.id=c.parent_id AND p.type='reseller'),''), COALESCE((SELECT l.value FROM Limits l WHERE l.id=c.limits_id AND l.limit_name='disk_space'),'-1'), COALESCE((SELECT l.value FROM Limits l WHERE l.id=c.limits_id AND l.limit_name='max_dom'),'-1'), COALESCE((SELECT l.value FROM Limits l WHERE l.id=c.limits_id AND l.limit_name='max_traffic'),'-1')) FROM clients c WHERE c.type IN ('reseller','client')" 2>/dev/null`
+
+func ayristirSahipler(cikti string) []KaynakSahip {
+	var out []KaynakSahip
+	for _, satir := range strings.Split(cikti, "\n") {
+		satir = strings.TrimSpace(satir)
+		if satir == "" {
+			continue
+		}
+		p := strings.Split(satir, "|")
+		if len(p) < 8 {
+			continue
+		}
+		login := strings.TrimSpace(p[0])
+		tip := strings.TrimSpace(p[1])
+		if !reHesap.MatchString(login) || (tip != "reseller" && tip != "client") {
+			continue // uzak veri düşmandır: allowlist
+		}
+		s := KaynakSahip{
+			Login: login, Tip: tip,
+			Ad:       kisaltAlan(strings.TrimSpace(p[2]), 128),
+			Eposta:   temizEposta(strings.TrimSpace(p[3])),
+			Reseller: strings.TrimSpace(p[4]),
+		}
+		if !reHesap.MatchString(s.Reseller) {
+			s.Reseller = ""
+		}
+		s.DiskMB = pleskBaytMB(p[5])
+		s.MaxDomain = pleskLimitInt(p[6])
+		s.TrafikMB = pleskBaytMB(p[7])
+		out = append(out, s)
+	}
+	return out
+}
+
+// pleskBaytMB — Plesk bayt limitini MB'ye çevirir; -1/boş/negatif = 0 (sınırsız).
+func pleskBaytMB(s string) int64 {
+	var v int64
+	fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
+	if v < 0 {
+		return 0
+	}
+	return v / (1024 * 1024)
+}
+
+func pleskLimitInt(s string) int {
+	var v int
+	fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func kisaltAlan(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// temizEposta — basit doğrulama; şüpheli/geçersizse boş döner (uzak veri).
+func temizEposta(s string) string {
+	if s == "" || len(s) > 190 || !strings.Contains(s, "@") || strings.ContainsAny(s, " \r\n\t'\"`;|") {
+		return ""
+	}
+	return s
 }
 
 func (k *Kaynak) ayristir(cikti string, err error) ([]Hesap, error) {
@@ -91,6 +195,7 @@ const komutPlesk = `for d in $(plesk bin subscription --list 2>/dev/null); do
   su=$(plesk db -Ne "SELECT s.login FROM domains dom JOIN hosting h ON h.dom_id=dom.id JOIN sys_users s ON s.id=h.sys_user_id WHERE dom.name='$d' LIMIT 1" 2>/dev/null)
   [ -n "$su" ] || su="$d"
   echo "###USER:$su"
+  echo "###OWNER:$(plesk db -Ne "SELECT CONCAT_WS('|', cl.login, cl.type, COALESCE(p.login,''), COALESCE(p.type,'')) FROM domains dom JOIN clients cl ON cl.id=dom.cl_id LEFT JOIN clients p ON p.id=cl.parent_id WHERE dom.name='$d' LIMIT 1" 2>/dev/null)"
   echo "###DB:$(plesk db -Ne "SELECT db.name FROM data_bases db JOIN domains dom ON db.dom_id=dom.id WHERE dom.name='$d'" 2>/dev/null | tr '\n' ',')"
   ana=1
   for sub in $d $(plesk db -Ne "SELECT dom.name FROM domains dom WHERE dom.webspace_id=(SELECT id FROM domains WHERE name='$d') AND dom.name<>'$d'" 2>/dev/null); do
@@ -135,6 +240,7 @@ done`
 func ayristirBlok(cikti string) []Hesap {
 	var sonuc []Hesap
 	var aktifHesap, dbler string
+	var sahipLogin, sahipTip, reseller string // ###OWNER'dan (abonelik başına)
 
 	for _, satir := range strings.Split(cikti, "\n") {
 		satir = strings.TrimSpace(satir)
@@ -142,8 +248,28 @@ func ayristirBlok(cikti string) []Hesap {
 		case strings.HasPrefix(satir, "###USER:"):
 			u := strings.TrimPrefix(satir, "###USER:")
 			aktifHesap, dbler = "", ""
+			sahipLogin, sahipTip, reseller = "", "", ""
 			if reHesap.MatchString(u) {
 				aktifHesap = u
+			}
+		case strings.HasPrefix(satir, "###OWNER:"):
+			// login|type|parent_login|parent_type
+			p := strings.Split(strings.TrimPrefix(satir, "###OWNER:"), "|")
+			if len(p) >= 2 {
+				lg, tp := strings.TrimSpace(p[0]), strings.TrimSpace(p[1])
+				if reHesap.MatchString(lg) {
+					switch tp {
+					case "reseller":
+						sahipLogin, sahipTip, reseller = lg, "reseller", lg // reseller-sahipli
+					case "client":
+						sahipLogin, sahipTip = lg, "client"
+						if len(p) >= 4 && strings.TrimSpace(p[3]) == "reseller" && reHesap.MatchString(strings.TrimSpace(p[2])) {
+							reseller = strings.TrimSpace(p[2]) // müşterinin üst reseller'ı
+						}
+					default: // admin veya diğer → admin-sahipli
+						sahipLogin, sahipTip, reseller = "", "admin", ""
+					}
+				}
 			}
 		case strings.HasPrefix(satir, "###DB:"):
 			dbler = strings.TrimPrefix(satir, "###DB:")
@@ -173,6 +299,9 @@ func ayristirBlok(cikti string) []Hesap {
 				WebRoot:     kok,
 				PHPSurum:    normalizePHP(p[2]),
 				BoyutMB:     boyut,
+				SahipLogin:  sahipLogin,
+				SahipTip:    sahipTip,
+				Reseller:    reseller,
 			}
 			// 🔴 Veritabanlari YALNIZ ana domaine atanir. Hesap geneli liste
 			// ek domainlere de verilirse ayni DB birden cok kez tasinir.

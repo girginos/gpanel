@@ -70,6 +70,7 @@ import (
 	"girginospanel/internal/subdomain"
 	"girginospanel/internal/system"
 	"girginospanel/internal/tasima"
+	"girginospanel/internal/toplu"
 	"girginospanel/internal/users"
 	"girginospanel/internal/uygulama"
 	"girginospanel/internal/waf"
@@ -264,6 +265,7 @@ func main() {
 	dnsH := &dns.Handlers{DB: d}
 	accountsH := &accounts.Handlers{DB: d}
 	backupsH := &backups.Handlers{DB: d}
+	topluH := &toplu.Handlers{DB: d}
 	backups.StartScheduler(d)
 	gitH := &git.Handlers{DB: d}
 	githubH := &githubpkg.Handlers{DB: d, WebhookBase: "https://" + ipv4 + ":8443"}
@@ -301,6 +303,16 @@ func main() {
 	denetimH := &denetim.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	provisioner.HealNginxLogPerms() // nginx log dizinini kiraciya kapat (cross-tenant log okuma)
+	// Swap yoksa OOM-killer ile aramizda tampon yoktur: 2026-08-22'de bellek
+	// baskisi dogrudan MariaDB'yi oldurup butun siteleri dusurdu. Swap dosyasi
+	// olusturmak disk tuketen bir operator karari — panel yalnizca uyarir.
+	if !provisioner.SwapVarMi() {
+		bildirim.Yaz(d, "kritik", "sistem", "Swap alani yok",
+			"Sunucuda etkin swap yok. Bellek dolarsa cekirdek dogrudan surec oldurur "+
+				"(genellikle once veritabani) ve tum siteler kesintiye girer. Oneri: 4 GB swap "+
+				"dosyasi olusturun (fallocate -l 4G /swapfile; chmod 600; mkswap; swapon; fstab).",
+			0, "", 0)
+	}
 	redis.HealScanAcl()             // Valkey SCAN/RANDOMKEY komsu key-ismi sizintisini kapat
 	phpExtH := &phpext.Handlers{DB: d}
 	runtimeH := &runtime.Handlers{}
@@ -460,6 +472,7 @@ func main() {
 			// Site tasima (cPanel / Plesk / DirectAdmin) — yalniz yonetici.
 			r.With(middleware.AdminOnly).Post("/system/tasima/test", tasimaH.Test)
 			r.With(middleware.AdminOnly).Post("/system/tasima/kesif", tasimaH.Kesif)
+			r.With(middleware.AdminOnly).Get("/system/tasima/anahtar", tasimaH.PanelAnahtar)
 			r.With(middleware.AdminOnly).Post("/system/tasima/baslat", tasimaH.Baslat)
 			r.With(middleware.AdminOnly).Get("/system/tasima", tasimaH.Durum)
 			r.With(middleware.AdminOnly).Get("/system/tasima/{id}", tasimaH.Detay)
@@ -486,7 +499,11 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.With(middleware.AdminVeyaReseller).Post("/domains", domainsH.Create)
 				r.With(middleware.SahipYonetim).Delete("/domains/{id}", domainsH.Delete)
-				r.With(middleware.AdminOnly).Post("/domains/toplu/sahip", domainsH.TopluSahip)
+				// Toplu islemler (async + process bar): DNS reset / SSL / sahip / plan
+				r.With(middleware.AdminOnly).Post("/domains/toplu/is", topluH.Baslat)
+				r.With(middleware.AdminOnly).Get("/domains/toplu/is", topluH.Durum)
+				r.With(middleware.AdminOnly).Post("/domains/toplu/is/iptal", topluH.Iptal)
+				r.With(middleware.AdminOnly).Get("/domains/toplu/aktif", topluH.Aktif)
 				r.With(middleware.AdminVeyaReseller).Post("/domains/toplu/durum", domainsH.TopluDurum)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/php", domainsH.SetPHP)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssh", sshH.Goster)
@@ -502,6 +519,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel", laravelH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/kur", laravelH.Kur)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/kur/durum", laravelH.KurDurum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/otomatik-hazirla", laravelH.OtomatikHazirla)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/artisan", laravelH.Artisan)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/composer", laravelH.Composer)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/node", laravelH.NodeSurumler)
@@ -604,6 +622,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/chmod", filesH.Chmod)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/extract", filesH.Extract)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/extract-progress", filesH.ExtractProgress)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/files/archive-progress", filesH.ArchiveProgress)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/copy", filesH.Copy)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/move", filesH.Move)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/files/archive", filesH.Archive)
@@ -622,6 +641,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/chmod", filesH.Chmod)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/extract", filesH.Extract)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/files/extract-progress", filesH.ExtractProgress)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/files/archive-progress", filesH.ArchiveProgress)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/copy", filesH.Copy)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/move", filesH.Move)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/files/archive", filesH.Archive)
@@ -631,6 +651,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl", domainsH.SSLDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/ssl/issue", domainsH.SSLIssue)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl/ilerleme", domainsH.SSLIlerleme)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl/kapsam", domainsH.SSLKapsam)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/ssl", domainsH.SSLDisable)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/cron", cronH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/cron", cronH.Create)
@@ -689,6 +710,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backup-schedule", backupsH.GetSchedule)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/backup-schedule", backupsH.SetSchedule)
 				r.With(middleware.AdminOnly).Post("/admin/backups/tick", backupsH.TickNow)
+				r.With(middleware.AdminOnly).Post("/admin/backups/verify", backupsH.VerifyNow)
 				r.With(middleware.AdminOnly).Get("/admin/backups/ozet", backupsH.Ozet)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
@@ -720,6 +742,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/waf", wafH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/waf", wafH.Kaydet)
 				r.With(middleware.AdminOnly).Get("/php-extensions", phpExtH.List)
+				r.With(middleware.AdminOnly).Post("/php-extensions/kurulabilir", phpExtH.Kurulabilir)
 				r.With(middleware.AdminOnly).Get("/runtimeler", runtimeH.Liste)
 				r.With(middleware.AdminOnly).Post("/runtimeler/kur", runtimeH.Kur)
 				r.With(middleware.AdminOnly).Post("/runtimeler/kaldir", runtimeH.Kaldir)

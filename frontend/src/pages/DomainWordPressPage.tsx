@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
@@ -12,7 +16,52 @@ type Durum = { surum: string; guncelleme_var: boolean; hedef_surum: string; php:
 type Paket = { name: string; status: string; version: string; update: string; update_version: string }
 type Kullanici = { ID: number; user_login: string; user_email: string; display_name: string; roles: string }
 
+
+const WP_EN: Record<string, string> = {
+  "Admin kullanıcı": "Admin user",
+  "Alt dizin (isteğe bağlı)": "Subdirectory (optional)",
+  "Aşağıdaki formdan tek tıkla kurabilirsiniz.": "You can install with one click from the form below.",
+  "Bakım modu": "Maintenance mode",
+  "Bakım modu açıldı.": "Maintenance mode enabled.",
+  "Bakım modu kapatıldı.": "Maintenance mode disabled.",
+  "Bakım moduna al": "Enable maintenance mode",
+  "Bakım modunu kapat": "Disable maintenance mode",
+  "Bu domainde henüz WordPress yok": "No WordPress on this domain yet",
+  "Bu parola tekrar gösterilmez — şimdi kaydedin.": "This password won't be shown again — save it now.",
+  "Devre dışı": "Disabled",
+  "Dosyalar silindi, veritabanı KALDI": "Files deleted, the database REMAINS",
+  "Hızlı bakım işlemleri. Sürüm güncellemesi varsa üstteki metrikte görünür.": "Quick maintenance operations. If a version update is available it shows in the metric above.",
+  "Kullanıcı bulunamadı.": "User not found.",
+  "Kullanıcılar": "Users",
+  "Kurulum başarısız": "Installation failed",
+  "Parola sıfırla": "Reset password",
+  "Parola sıfırlanamadı": "Failed to reset password",
+  "Parolayı şimdi kaydedin — tekrar gösterilmez.": "Save the password now — it won't be shown again.",
+  "Site başlığı": "Site title",
+  "Sürüm, eklenti, tema ve kullanıcıları tek yerden yönetin.": "Manage version, plugins, themes and users in one place.",
+  "Tümü güncellendi.": "All updated.",
+  "Tümünü güncelle": "Update all",
+  "WordPress çekirdeği güncellendi.": "WordPress core updated.",
+  "Yeni parola oluşturuldu": "New password created",
+  "Yönetim": "Management",
+  "boş = kök · örn: blog": "empty = root · e.g: blog",
+  "devre dışı bırakıldı": "disabled",
+  "etkinleştirildi": "enabled",
+  "güncel": "up to date",
+  "kök": "root",
+  "veritabanı silinir": "the database is deleted",
+  "Çekirdek onarımı tamamlandı.": "Core repair completed.",
+  "Çekirdek, eklenti ve temalar güncellendi.": "Core, plugins and themes updated.",
+  "Çekirdeği onar": "Repair core",
+  "Önbellek temizlendi.": "Cache cleared.",
+  "Önbelleği temizle": "Clear cache",
+  "İşlem çıktısı": "Operation output",
+  "İşleniyor…": "Processing…",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainWordPressPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}/wordpress` : `/domains/${id}/wordpress`
@@ -31,7 +80,7 @@ export default function DomainWordPressPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<{ alan_adi: string }>(`/domains/${id}`).then(r => setAlanAdi(r.data.alan_adi || '')).catch(hataYakala('Alan adı bilgisi alınamadı'))
+    api.get<{ alan_adi: string }>(`/domains/${id}`).then(r => setAlanAdi(r.data.alan_adi || '')).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
   }, [id])
 
   const listele = useCallback(() => {
@@ -50,7 +99,7 @@ export default function DomainWordPressPage() {
       })
       setSonuc(data); setBaslik(''); setAltDizin(''); setFormAcik(false)
       listele()
-    } catch (err) { setHata(apiHata(err, 'Kurulum başarısız')) }
+    } catch (err) { setHata(apiHata(err, cevir("Kurulum başarısız"))) }
     finally { setKuruyor(false) }
   }
 
@@ -66,7 +115,7 @@ export default function DomainWordPressPage() {
       <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">WordPress Toolkit</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Sürüm, eklenti, tema ve kullanıcıları tek yerden yönetin.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{cevir("Sürüm, eklenti, tema ve kullanıcıları tek yerden yönetin.")}</p>
         </div>
         {!bosDurum && !formAcik && (
           <button onClick={() => { setFormAcik(true); setSonuc(null) }}
@@ -81,12 +130,12 @@ export default function DomainWordPressPage() {
       {sonuc && <KurulumSonuc s={sonuc} kapat={() => setSonuc(null)} />}
 
       {yuk ? (
-        <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-10 text-center text-sm text-slate-400">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-10 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
       ) : bosDurum ? (
         <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 p-12 text-center mb-5">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center text-2xl mb-3">📝</div>
-          <p className="text-base font-medium text-slate-800 dark:text-slate-100">Bu domainde henüz WordPress yok</p>
-          <p className="text-sm text-slate-400 mt-1">Aşağıdaki formdan tek tıkla kurabilirsiniz.</p>
+          <p className="text-base font-medium text-slate-800 dark:text-slate-100">{cevir("Bu domainde henüz WordPress yok")}</p>
+          <p className="text-sm text-slate-400 mt-1">{cevir("Aşağıdaki formdan tek tıkla kurabilirsiniz.")}</p>
         </div>
       ) : (
         <div className="space-y-5">
@@ -102,7 +151,7 @@ export default function DomainWordPressPage() {
         </div>
       )}
 
-      <div className="mt-6"><Link to={`/abonelikler/${id}`} className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition">← Aboneliğe dön</Link></div>
+      <div className="mt-6"><Link to={`/abonelikler/${id}`} className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition">{cevir("← Aboneliğe dön")}</Link></div>
     </div>
   )
 }
@@ -111,14 +160,14 @@ export default function DomainWordPressPage() {
 
 type AltTab = 'genel' | 'eklentiler' | 'temalar' | 'kullanicilar'
 const TABLAR: { k: AltTab; ad: string }[] = [
-  { k: 'genel', ad: 'Genel' }, { k: 'eklentiler', ad: 'Eklentiler' },
-  { k: 'temalar', ad: 'Temalar' }, { k: 'kullanicilar', ad: 'Kullanıcılar' },
+  { k: 'genel', ad: cevir("Genel") }, { k: 'eklentiler', ad: 'Eklentiler' },
+  { k: 'temalar', ad: 'Temalar' }, { k: 'kullanicilar', ad: cevir("Kullanıcılar") },
 ]
 
 function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; kurulum: Kurulum; onDegisti: () => void }) {
   const { onay, bilgi } = useDialog()
   const dizin = kurulum.dizin
-  const kok = dizin.includes('kök')
+  const kok = dizin.includes(cevir("kök"))
   const [tab, setTab] = useState<AltTab>('genel')
   const [durum, setDurum] = useState<Durum | null>(null)
   const [eklentiler, setEklentiler] = useState<Paket[] | null>(null)
@@ -152,20 +201,20 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
       setBasari(basariMsj)
       if (data?.cikti) setCikti(data.cikti)
       sonra?.()
-    } catch (err) { setHata(apiHata(err, 'İşlem başarısız')) }
+    } catch (err) { setHata(apiHata(err, cevir("İşlem başarısız"))) }
     finally { setMesgul(null) }
   }
 
-  const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin })).data, 'WordPress çekirdeği güncellendi.', () => { durumYukle(); onDegisti() })
-  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' })).data, 'Çekirdek, eklenti ve temalar güncellendi.', () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
-  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? 'Bakım modu kapatıldı.' : 'Bakım modu açıldı.', durumYukle)
-  const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, 'Önbellek temizlendi.')
-  const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, 'Çekirdek onarımı tamamlandı.', durumYukle)
+  const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin })).data, cevir("WordPress çekirdeği güncellendi."), () => { durumYukle(); onDegisti() })
+  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Çekirdek, eklenti ve temalar güncellendi."), () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
+  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? 'Bakım modu kapatıldı.' : cevir("Bakım modu açıldı."), durumYukle)
+  const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, cevir("Önbellek temizlendi."))
+  const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, cevir("Çekirdek onarımı tamamlandı."), durumYukle)
 
-  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, `${ad} güncellendi.`, () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, 'Tümü güncellendi.', () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? 'devre dışı bırakıldı' : 'etkinleştirildi'}.`, () => setEklentiler(null))
-  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, `${p.name} etkinleştirildi.`, () => setTemalar(null))
+  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, cevirT(cevir("{0} güncellendi."), ad), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
+  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Tümü güncellendi."), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
+  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? 'devre dışı bırakıldı' : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
+  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, cevirT(cevir("{0} etkinleştirildi."), p.name), () => setTemalar(null))
 
   async function parolaSifirla(u: Kullanici) {
     if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: `"${u.user_login}" kullanıcısı için yeni bir parola üretilsin mi?\nMevcut parola geçersiz olacak.` }))) return
@@ -173,7 +222,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
     try {
       const { data } = await api.post<{ parola: string; kullanici: string }>(`${base}/kullanici-parola`, { dizin, user_id: u.ID })
       setParolaSonuc({ kullanici: data.kullanici || u.user_login, parola: data.parola })
-    } catch (err) { setHata(apiHata(err, 'Parola sıfırlanamadı')) }
+    } catch (err) { setHata(apiHata(err, cevir("Parola sıfırlanamadı"))) }
     finally { setMesgul(null) }
   }
 
@@ -189,12 +238,12 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
       // okunamadı). Sunucu bunu `db_uyari` ile bildiriyor ama eskiden
       // yanıt tamamen atılıyordu: HTTP 200 + ok:true olduğu için
       // `catch` de tetiklenmiyor ve kullanıcı düz BAŞARI görüyordu —
-      // üstelik onay diyaloğu ona 'veritabanı silinir' demişti.
+      // üstelik onay diyaloğu ona cevir("veritabanı silinir") demişti.
       const r = await api.delete<{ ok: boolean; db_uyari?: string }>(
         `${base}`, { data: { dizin, db_sil: true } })
       if (r?.data?.db_uyari) {
         await bilgi({
-          baslik: 'Dosyalar silindi, veritabanı KALDI',
+          baslik: cevir("Dosyalar silindi, veritabanı KALDI"),
           mesaj: r.data.db_uyari + '\n\nVeritabanını Veritabanları sayfasından elle kaldırabilirsiniz.',
         })
       }
@@ -223,20 +272,20 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
           {kurulum.admin_url && (
             <a href={kurulum.admin_url} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1 px-3.5 py-2 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-xs font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">
-              Yönetim paneli <span className="opacity-70">↗</span>
+              {cevir(cevir("Yönetim paneli"))} <span className="opacity-70">↗</span>
             </a>
           )}
-          {<button disabled={!!mesgul} onClick={sil} className="px-3 py-2 rounded-full border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 dark:hover:border-red-800 dark:hover:text-red-400 disabled:opacity-50 transition">{mesgul === 'sil' ? '…' : 'Kaldır'}</button>}
+          {<button disabled={!!mesgul} onClick={sil} className="px-3 py-2 rounded-full border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 dark:hover:border-red-800 dark:hover:text-red-400 disabled:opacity-50 transition">{mesgul === 'sil' ? '…' : cevir("Kaldır")}</button>}
         </div>
       </div>
 
       {/* metrikler */}
       <div className="px-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Metrik label="Sürüm" v={durum?.surum ? durum.surum : '…'}
-          pill={durum ? (durum.guncelleme_var ? { t: `↑ ${durum.hedef_surum}`, c: 'amber' } : { t: 'güncel', c: 'green' }) : undefined} />
+        <Metrik label={cevir("Sürüm")} v={durum?.surum ? durum.surum : '…'}
+          pill={durum ? (durum.guncelleme_var ? { t: `↑ ${durum.hedef_surum}`, c: 'amber' } : { t: cevir("güncel"), c: 'green' }) : undefined} />
         <Metrik label="PHP" v={durum?.php || '…'} />
-        <Metrik label="Veritabanı" v={durum ? `${durum.db_mb} MB` : '…'} />
-        <Metrik label="Bakım modu" v={durum?.bakim ? 'Açık' : 'Kapalı'}
+        <Metrik label={cevir("Veritabanı")} v={durum ? `${durum.db_mb} MB` : '…'} />
+        <Metrik label={cevir("Bakım modu")} v={durum?.bakim ? 'Açık' : cevir("Kapalı")}
           pill={durum?.bakim ? { t: 'aktif', c: 'amber' } : undefined} />
       </div>
 
@@ -263,13 +312,13 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
           <div>
             <div className="flex flex-wrap gap-2">
               {durum?.guncelleme_var && <Btn onClick={surumGuncelle} bekle={mesgul === 'surum'} tur="primary">Sürümü güncelle · v{durum.hedef_surum}</Btn>}
-              <Btn onClick={tumunuGuncelle} bekle={mesgul === 'tumu'} tur={durum?.guncelleme_var ? 'outline' : 'primary'}>Tümünü güncelle</Btn>
-              <Btn onClick={bakimTogle} bekle={mesgul === 'bakim'}>{durum?.bakim ? 'Bakım modunu kapat' : 'Bakım moduna al'}</Btn>
-              <Btn onClick={cacheTemizle} bekle={mesgul === 'cache'}>Önbelleği temizle</Btn>
-              <Btn onClick={onar} bekle={mesgul === 'onar'}>Çekirdeği onar</Btn>
+              <Btn onClick={tumunuGuncelle} bekle={mesgul === 'tumu'} tur={durum?.guncelleme_var ? 'outline' : 'primary'}>{cevir("Tümünü güncelle")}</Btn>
+              <Btn onClick={bakimTogle} bekle={mesgul === 'bakim'}>{durum?.bakim ? 'Bakım modunu kapat' : cevir("Bakım moduna al")}</Btn>
+              <Btn onClick={cacheTemizle} bekle={mesgul === 'cache'}>{cevir("Önbelleği temizle")}</Btn>
+              <Btn onClick={onar} bekle={mesgul === 'onar'}>{cevir("Çekirdeği onar")}</Btn>
             </div>
             {cikti && <Cikti metin={cikti} />}
-            {!cikti && <p className="text-xs text-slate-400 mt-4">Hızlı bakım işlemleri. Sürüm güncellemesi varsa üstteki metrikte görünür.</p>}
+            {!cikti && <p className="text-xs text-slate-400 mt-4">{cevir("Hızlı bakım işlemleri. Sürüm güncellemesi varsa üstteki metrikte görünür.")}</p>}
           </div>
         )}
 
@@ -330,7 +379,7 @@ function Cikti({ metin }: { metin: string }) {
   const temiz = metin.replace(/\[[0-9;]*m/g, '')
   return (
     <details className="mt-4 group" open>
-      <summary className="text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600 dark:hover:text-slate-300">İşlem çıktısı</summary>
+      <summary className="text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600 dark:hover:text-slate-300">{cevir("İşlem çıktısı")}</summary>
       <pre className="mt-2 max-h-44 overflow-auto text-[12px] leading-relaxed bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 rounded-xl p-3 whitespace-pre-wrap break-words">{temiz}</pre>
     </details>
   )
@@ -340,7 +389,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
   tur: 'eklenti' | 'tema'; liste: Paket[] | null; mesgul: string | null
   onTumu: () => void; onGuncelle: (p: Paket) => void; onTogle?: (p: Paket) => void; onAktif?: (p: Paket) => void
 }) {
-  if (liste === null) return <div className="text-sm text-slate-400 py-4">Yükleniyor…</div>
+  if (liste === null) return <div className="text-sm text-slate-400 py-4">{cevir("Yükleniyor…")}</div>
   if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{tur === 'eklenti' ? 'Eklenti' : 'Tema'} bulunamadı.</div>
   const guncellenebilir = liste.filter(p => p.update === 'available').length
   return (
@@ -348,7 +397,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
       {guncellenebilir > 0 && (
         <div className="flex items-center justify-between mb-4 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/15 border border-amber-100 dark:border-amber-800/50">
           <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">{guncellenebilir} güncelleme mevcut</span>
-          <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : 'Tümünü güncelle'}</button>
+          <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : cevir("Tümünü güncelle")}</button>
         </div>
       )}
       <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -360,16 +409,16 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{p.name}</span>
-                  <StatusPill t={aktif ? 'Etkin' : 'Devre dışı'} c={aktif ? 'green' : 'slate'} />
+                  <StatusPill t={aktif ? 'Etkin' : cevir("Devre dışı")} c={aktif ? 'green' : 'slate'} />
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">
                   Sürüm {p.version}{guncel && <span className="text-amber-600 dark:text-amber-400"> → {p.update_version} mevcut</span>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {guncel && <button disabled={!!mesgul} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-medium disabled:opacity-50 transition">{mesgul === `${tur}:${p.name}` ? '…' : 'Güncelle'}</button>}
-                {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? 'Devre dışı bırak' : 'Etkinleştir'}</button>}
-                {onAktif && !aktif && <button disabled={!!mesgul} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `tema:${p.name}` ? '…' : 'Etkinleştir'}</button>}
+                {guncel && <button disabled={!!mesgul} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-medium disabled:opacity-50 transition">{mesgul === `${tur}:${p.name}` ? '…' : cevir("Güncelle")}</button>}
+                {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? 'Devre dışı bırak' : cevir("Etkinleştir")}</button>}
+                {onAktif && !aktif && <button disabled={!!mesgul} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition">{mesgul === `tema:${p.name}` ? '…' : cevir("Etkinleştir")}</button>}
                 {onAktif && aktif && <StatusPill t="Aktif tema" c="green" />}
               </div>
             </div>
@@ -381,8 +430,8 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
 }
 
 function KullaniciListe({ liste, mesgul, onReset }: { liste: Kullanici[] | null; mesgul: string | null; onReset: (u: Kullanici) => void }) {
-  if (liste === null) return <div className="text-sm text-slate-400 py-4">Yükleniyor…</div>
-  if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">Kullanıcı bulunamadı.</div>
+  if (liste === null) return <div className="text-sm text-slate-400 py-4">{cevir("Yükleniyor…")}</div>
+  if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{cevir("Kullanıcı bulunamadı.")}</div>
   return (
     <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
       {liste.map(u => (
@@ -399,7 +448,7 @@ function KullaniciListe({ liste, mesgul, onReset }: { liste: Kullanici[] | null;
               <div className="text-xs text-slate-400 truncate">{u.user_email}</div>
             </div>
           </div>
-          <button disabled={!!mesgul} onClick={() => onReset(u)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition shrink-0">{mesgul === `pw:${u.ID}` ? '…' : 'Parola sıfırla'}</button>
+          <button disabled={!!mesgul} onClick={() => onReset(u)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition shrink-0">{mesgul === `pw:${u.ID}` ? '…' : cevir("Parola sıfırla")}</button>
         </div>
       ))}
     </div>
@@ -417,12 +466,12 @@ function KurulumFormu(p: {
     <form onSubmit={p.kur} className="rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Yeni WordPress kurulumu</h3>
-        {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> Kapat</span></button>}
+        {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> {cevir("Kapat")}</span></button>}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Girdi et="Site başlığı" v={p.baslik} set={p.setBaslik} zorunlu ph="Benim Blogum" />
-        <Girdi et="Alt dizin (isteğe bağlı)" v={p.altDizin} set={p.setAltDizin} ph="boş = kök · örn: blog" mono />
-        <Girdi et="Admin kullanıcı" v={p.adminK} set={p.setAdminK} zorunlu mono />
+        <Girdi et={cevir("Site başlığı")} v={p.baslik} set={p.setBaslik} zorunlu ph="Benim Blogum" />
+        <Girdi et={cevir("Alt dizin (isteğe bağlı)")} v={p.altDizin} set={p.setAltDizin} ph={cevir("boş = kök · örn: blog")} mono />
+        <Girdi et={cevir("Admin kullanıcı")} v={p.adminK} set={p.setAdminK} zorunlu mono />
         <Girdi et="Admin e-posta" v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
       </div>
       <button disabled={p.kuruyor} className="mt-5 px-5 py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50 transition">
@@ -451,11 +500,11 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
         <Satir et="Site" v={s.site_url} link />
-        <Satir et="Yönetim" v={s.admin_url} link />
-        <Satir et="Kullanıcı" v={s.admin_kullanici} mono />
-        <Satir et="Parola" v={s.admin_parola} mono />
+        <Satir et={cevir("Yönetim")} v={s.admin_url} link />
+        <Satir et={cevir("Kullanıcı")} v={s.admin_kullanici} mono />
+        <Satir et={cevir("Parola")} v={s.admin_parola} mono />
       </div>
-      <p className="text-xs text-amber-700 dark:text-amber-400 mt-3">Parolayı şimdi kaydedin — tekrar gösterilmez.</p>
+      <p className="text-xs text-amber-700 dark:text-amber-400 mt-3">{cevir("Parolayı şimdi kaydedin — tekrar gösterilmez.")}</p>
     </div>
   )
 }
@@ -474,14 +523,14 @@ function ParolaModal({ s, kapat }: { s: { kullanici: string; parola: string }; k
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-sm p-4" onClick={kapat}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 max-w-sm w-full shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">Yeni parola oluşturuldu</div>
-        <div className="text-xs text-slate-400 mb-4">Kullanıcı: <span className="font-mono text-slate-600 dark:text-slate-300">{s.kullanici}</span></div>
+        <div className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yeni parola oluşturuldu")}</div>
+        <div className="text-xs text-slate-400 mb-4">{cevir("Kullanıcı:")} <span className="font-mono text-slate-600 dark:text-slate-300">{s.kullanici}</span></div>
         <div className="flex flex-wrap items-center gap-2">
           <code className="flex-1 px-3.5 py-3 bg-slate-50 dark:bg-slate-900 rounded-xl text-sm font-mono text-slate-800 dark:text-slate-100 break-all border border-slate-100 dark:border-slate-700">{s.parola}</code>
-          <button onClick={() => navigator.clipboard?.writeText(s.parola)} className="text-xs px-3.5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">Kopyala</button>
+          <button onClick={() => navigator.clipboard?.writeText(s.parola)} className="text-xs px-3.5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">{cevir("Kopyala")}</button>
         </div>
-        <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">Bu parola tekrar gösterilmez — şimdi kaydedin.</p>
-        <button onClick={kapat} className="mt-5 w-full py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">Tamam</button>
+        <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">{cevir("Bu parola tekrar gösterilmez — şimdi kaydedin.")}</p>
+        <button onClick={kapat} className="mt-5 w-full py-2.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-600 transition">{cevir("Tamam")}</button>
       </div>
     </div>
   )

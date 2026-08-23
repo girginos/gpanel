@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -12,7 +16,13 @@ type Usage = {
 
 type Saglik = { durum: string; surum: string; zaman: string }
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function ResourceCard() {
+  useTranslation() // dil re-render aboneligi
   const [u, setU] = useState<Usage | null>(null)
   const [s, setS] = useState<Saglik | null>(null)
 
@@ -37,22 +47,22 @@ export default function ResourceCard() {
     <div className="space-y-4">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center justify-between">
-          Kaynak Kullanımı
-          {u && <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 uppercase tracking-wider">canlı</span>}
+          {cevir(cevir("Kaynak Kullanımı"))}
+          {u && <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 uppercase tracking-wider">{cevir("canlı")}</span>}
         </h3>
 
         {!u ? (
-          <div className="text-sm text-slate-400 dark:text-slate-500 py-6 text-center">Yükleniyor…</div>
+          <div className="text-sm text-slate-400 dark:text-slate-500 py-6 text-center">{cevir("Yükleniyor…")}</div>
         ) : (
           <>
             <Cubuk
               etiket="CPU"
               yuzde={u.cpu.yuzde}
-              alt={`${u.cpu.cekirdek} çekirdek · yük ${u.cpu.yuk_1dk.toFixed(2)} / ${u.cpu.yuk_5dk.toFixed(2)} / ${u.cpu.yuk_15dk.toFixed(2)}`}
+              alt={cevirT(cevir("{0} çekirdek · yük {1} / {2} / {3}"), u.cpu.cekirdek, u.cpu.yuk_1dk.toFixed(2), u.cpu.yuk_5dk.toFixed(2), u.cpu.yuk_15dk.toFixed(2))}
               renk="brand"
             />
             <Cubuk
-              etiket="Bellek"
+              etiket={cevir("Bellek")}
               yuzde={u.bellek.yuzde}
               alt={`${(u.bellek.kullanilan_kb / 1024).toFixed(0)} MB / ${(u.bellek.toplam_kb / 1024).toFixed(0)} MB`}
               renk="emerald"
@@ -64,7 +74,7 @@ export default function ResourceCard() {
               renk="violet"
             />
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-500 flex justify-between">
-              <span>Çalışma süresi</span>
+              <span>{cevir("Çalışma süresi")}</span>
               <span className="font-mono text-slate-700 dark:text-slate-300">{formatUptime(u.uptime_sn)}</span>
             </div>
           </>
@@ -82,7 +92,7 @@ export default function ResourceCard() {
               deger={s.durum === 'ayakta' ? 'Çalışıyor' : s.durum}
               ok={s.durum === 'ayakta'}
             />
-            <Satir etiket="Sürüm" deger={s.surum} ok />
+            <Satir etiket={cevir("Sürüm")} deger={s.surum} ok />
             <Satir etiket="Saat" deger={new Date(s.zaman).toLocaleTimeString('tr-TR')} ok />
           </div>
         )}

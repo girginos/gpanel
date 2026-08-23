@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -37,7 +41,30 @@ const PARANOYA_ACIKLAMA: Record<number, string> = {
   4: 'Sıkı — en agresif. Yalnızca sıkı denetim gereken durumlar için.',
 }
 
+
+const WAF_EN: Record<string, string> = {
+  "Bu domain, bağlı olduğu hizmet planının WAF varsayılanını kullanır.": "This domain uses the WAF default of its associated service plan.",
+  "Düşük — temel saldırı imzaları. Neredeyse hiç yanlış-pozitif. (önerilen)": "Low — basic attack signatures. Almost no false positives. (recommended)",
+  "Kötü amaçlı istekler (SQLi, XSS, RCE…) 403 ile bloklanır. SecRuleEngine On.": "Malicious requests (SQLi, XSS, RCE…) are blocked with 403. SecRuleEngine On.",
+  "ModSecurity modülü sunucuda kurulu değil.": "The ModSecurity module is not installed on the server.",
+  "Orta — daha fazla kural. Bazı meşru istekler engellenebilir.": "Medium — more rules. Some legitimate requests may be blocked.",
+  "Plan varsayılanı kullanılır.": "The plan default is used.",
+  "Seviye 1 (Düşük)": "Level 1 (Low)",
+  "Seviye 3 (Yüksek)": "Level 3 (High)",
+  "Seviye 4 (Sıkı)": "Level 4 (Strict)",
+  "Sıkı — en agresif. Yalnızca sıkı denetim gereken durumlar için.": "Strict — most aggressive. Only for cases requiring strict inspection.",
+  "WAF bu domain için tamamen devre dışı (plan açık olsa bile).": "WAF is fully disabled for this domain (even if the plan is on).",
+  "Web Uygulama Güvenlik Duvarı": "Web Application Firewall",
+  "Web Uygulama Güvenlik Duvarı (WAF)": "Web Application Firewall (WAF)",
+  "Yüksek — agresif. Uygulamaya göre ayarlama (exclusion) gerekebilir.": "High — aggressive. May need per-application tuning (exclusions).",
+  "İstekler bloklanmaz; yalnızca eşleşen kurallar audit log’a yazılır. DetectionOnly — kural ayarlamak için ideal.": "Requests are not blocked; only matching rules are written to the audit log. DetectionOnly — ideal for tuning rules.",
+  "● Seçili": "● Selected",
+  "✓ Ayar kaydedildi — WAF bu domain için pasif": "✓ Setting saved — WAF is passive for this domain",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (WAF_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainWafPage() {
+  useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const [y, setY] = useState<Yanit | null>(null)
   const [ayar, setAyar] = useState<Ayar | null>(null)
@@ -63,11 +90,11 @@ export default function DomainWafPage() {
       const r = await api.put<{ efektif: Efektif; modul_yuklu: boolean }>(`/domains/${id}/waf`, { ayar })
       const ef = r.data.efektif
       setBasari(ef.aktif
-        ? `✓ WAF uygulandı — ${ef.engine === 'On' ? 'Engelleme' : 'Denetleme'} modu, paranoya ${ef.paranoya}`
-        : '✓ Ayar kaydedildi — WAF bu domain için pasif')
+        ? cevirT(cevir("✓ WAF uygulandı — {0} modu, paranoya {1}"), ef.engine === 'On' ? 'Engelleme' : 'Denetleme', ef.paranoya)
+        : cevir("✓ Ayar kaydedildi — WAF bu domain için pasif"))
       yukle()
     } catch (e) {
-      setHata(apiHata(e, 'Kaydetme başarısız'))
+      setHata(apiHata(e, cevir("Kaydetme başarısız")))
     } finally {
       setIsleniyor(false)
     }
@@ -76,12 +103,12 @@ export default function DomainWafPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
-        { etiket: 'Anasayfa', href: '/' }, { etiket: 'Domainler', href: '/domainler' },
+        { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: y?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Web Uygulama Güvenlik Duvarı (WAF)' },
+        { etiket: cevir("Web Uygulama Güvenlik Duvarı (WAF)") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Web Uygulama Güvenlik Duvarı</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Web Uygulama Güvenlik Duvarı")}</h1>
       {y && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 font-medium">{y.alan_adi}</Link>
         {' · '}ModSecurity v3 + OWASP Core Rule Set. Kaydedince nginx vhost yeniden render edilir (sıfır kesinti).
@@ -92,13 +119,13 @@ export default function DomainWafPage() {
 
       {y && !y.modul_yuklu && (
         <div className="mb-5 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-          <strong>ModSecurity modülü sunucuda kurulu değil.</strong> Ayarlar kaydedilir ancak WAF uygulanmaz.
+          <strong>{cevir("ModSecurity modülü sunucuda kurulu değil.")}</strong> Ayarlar kaydedilir ancak WAF uygulanmaz.
           Sunucuda <code className="font-mono">girginospanel-waf-setup</code> çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).
         </div>
       )}
 
       {yuk || !ayar || !y ? (
-        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : (
         <>
           {/* Efektif durum + plan bilgisi */}
@@ -118,7 +145,7 @@ export default function DomainWafPage() {
               )}
               <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
                 Plan varsayılanı ({y.plan.ad || '—'}):{' '}
-                {y.plan.aktif ? `${y.plan.mod === 'denetle' ? 'Denetle' : 'Engelle'} · PL${y.plan.paranoya}` : 'Kapalı'}
+                {y.plan.aktif ? `${y.plan.mod === 'denetle' ? 'Denetle' : 'Engelle'} · PL${y.plan.paranoya}` : cevir("Kapalı")}
               </span>
             </div>
           </div>
@@ -139,7 +166,7 @@ export default function DomainWafPage() {
                     className={`text-left p-4 border rounded-xl transition ${renk[m.renk]}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ikon} {m.ad}</span>
-                      {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">● Seçili</span>}
+                      {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">{cevir("● Seçili")}</span>}
                     </div>
                     <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">{m.aciklama}</div>
                   </button>
@@ -152,7 +179,7 @@ export default function DomainWafPage() {
           <Kart baslik="Paranoya Seviyesi (CRS)">
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">
               Daha yüksek seviye = daha çok kural + daha güçlü koruma, ancak yanlış-pozitif olasılığı artar.
-              Yalnızca WAF <strong>Engelle</strong> veya <strong>Denetle</strong> modundayken etkilidir.
+              {cevir(cevir("Yalnızca WAF"))} <strong>Engelle</strong> veya <strong>Denetle</strong> modundayken etkilidir.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <select
@@ -161,10 +188,10 @@ export default function DomainWafPage() {
                 disabled={ayar.mod === 'devral' || ayar.mod === 'kapali'}
                 className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded text-sm font-mono disabled:opacity-50">
                 <option value={0}>Plandan devral</option>
-                <option value={1}>Seviye 1 (Düşük)</option>
+                <option value={1}>{cevir("Seviye 1 (Düşük)")}</option>
                 <option value={2}>Seviye 2 (Orta)</option>
-                <option value={3}>Seviye 3 (Yüksek)</option>
-                <option value={4}>Seviye 4 (Sıkı)</option>
+                <option value={3}>{cevir("Seviye 3 (Yüksek)")}</option>
+                <option value={4}>{cevir("Seviye 4 (Sıkı)")}</option>
               </select>
               <span className="text-xs text-slate-500 dark:text-slate-400">{PARANOYA_ACIKLAMA[ayar.paranoya]}</span>
             </div>
@@ -177,7 +204,7 @@ export default function DomainWafPage() {
             </button>
             <button onClick={yukle} disabled={isleniyor}
               className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
-              Yeniden Yükle
+              {cevir(cevir("Yeniden Yükle"))}
             </button>
           </div>
         </>

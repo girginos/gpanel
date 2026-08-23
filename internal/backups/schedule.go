@@ -5,11 +5,15 @@ package backups
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+
+	"girginospanel/internal/bildirim"
 )
 
 type Schedule struct {
@@ -57,6 +61,14 @@ func tickOnce(db *sql.DB) {
 	currentHour := now.Hour()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+
+	// 🔴 AT-REST BOZULMA TARAMASI: gunde 1 kez (04:00) her domainin en yeni yedeginin
+	// saklanan sha256'sini diskteki dosyayla karsilastir. Olusturma-aninda saglam olan
+	// bir yedek sonradan bozulabilir (disk bit-rot, bozuk uzak-kopya, elle-oynama). Bunu
+	// SESSIZCE birakmak, kurtarma aninda "yedek var ama bozuk" felaketi demektir.
+	if currentHour == 4 {
+		verifyYedekBozulma(db)
+	}
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, alan_adi, sistem_kullanici,
@@ -179,4 +191,66 @@ func pruneOld(db *sql.DB, domainID int64, sk string, retention int) error {
 	}
 	log.Printf("backup retention domain=%d: %d eski yedek silindi (keep %d)", domainID, len(old), retention)
 	return nil
+}
+
+// verifyYedekBozulma: her domainin EN YENI (sha256'li) yedeginin saklanan checksum'ini
+// diskteki dosyayla karsilastirir. Uyusmazlik VEYA dosya-okunamiyor → dogrulama='bozuk'
+// + KRITIK bildirim (domain sahibine yonlendirilir). Gunde 1 kez cagrilir (04:00).
+//
+// 🔴 NEDEN: gzip -t olusturma aninda saglamligi dogrular; ama bir yedek AYLARCA diskte/
+// uzak-hedefte durur ve bit-rot/bozuk-kopya/elle-oynama ile sessizce bozulabilir. Bunu
+// yalniz restore aninda kesfetmek = veri kaybi. Proaktif tarama + bildirim sarttir.
+func verifyYedekBozulma(db *sql.DB) (int, int) {
+	rows, err := db.Query(`
+		SELECT b.id, b.domain_id, d.sistem_kullanici, b.dosya, b.sha256
+		FROM backups b
+		JOIN domains d ON d.id = b.domain_id
+		JOIN (SELECT domain_id, MAX(id) AS mid FROM backups WHERE sha256 <> '' GROUP BY domain_id) x
+		  ON x.mid = b.id`)
+	if err != nil {
+		log.Printf("yedek bozulma taramasi query: %v", err)
+		return 0, 0
+	}
+	type kayit struct {
+		id, domainID   int64
+		sk, dosya, sha string
+	}
+	var liste []kayit
+	for rows.Next() {
+		var k kayit
+		if rows.Scan(&k.id, &k.domainID, &k.sk, &k.dosya, &k.sha) == nil {
+			liste = append(liste, k)
+		}
+	}
+	rows.Close()
+
+	bozuk := 0
+	for _, k := range liste {
+		if !strings.HasPrefix(k.sk, "c_") {
+			continue
+		}
+		yol := filepath.Join(BackupRoot, k.sk, k.dosya)
+		suanki, err := dosyaSha256(yol)
+		if err != nil {
+			db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id)
+			bildirim.Yaz(db, "kritik", "yedek", "Yedek dosyası kayıp/okunamıyor",
+				fmt.Sprintf("%s: en yeni yedek dosyası diskte okunamadı (%s) — kurtarma için GEÇERSİZ olabilir: %v", k.sk, k.dosya, err),
+				k.domainID, "backup", k.id)
+			bozuk++
+			continue
+		}
+		if suanki != k.sha {
+			db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id)
+			bildirim.Yaz(db, "kritik", "yedek", "Yedek BOZULMUŞ (bit-rot)",
+				fmt.Sprintf("%s: en yeni yedek (%s) checksum'ı oluşturma anındakiyle UYUŞMUYOR — dosya sonradan bozulmuş; bu yedekten geri yükleme YAPILAMAYABİLİR.", k.sk, k.dosya),
+				k.domainID, "backup", k.id)
+			bozuk++
+		}
+	}
+	if bozuk > 0 {
+		log.Printf("🔴 yedek bozulma taramasi: %d/%d domainin en yeni yedegi BOZUK", bozuk, len(liste))
+	} else {
+		log.Printf("yedek bozulma taramasi: %d domain temiz", len(liste))
+	}
+	return len(liste), bozuk
 }

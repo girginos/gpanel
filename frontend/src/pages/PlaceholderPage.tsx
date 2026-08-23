@@ -1,6 +1,15 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import Breadcrumb from '@/components/Breadcrumb'
+
+
+const PLACE_EN: Record<string, string> = {
+  "Yapım aşamasında": "Under construction",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (PLACE_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function PlaceholderPage({
   baslik, faz, aciklama, parent,
@@ -8,6 +17,7 @@ export default function PlaceholderPage({
   baslik: string; faz?: string; aciklama: string
   parent?: { etiket: string; href: string }
 }) {
+  useTranslation() // dil re-render aboneligi
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
@@ -31,7 +41,7 @@ export default function PlaceholderPage({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
-        <h3 className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">Yapım aşamasında</h3>
+        <h3 className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">{cevir("Yapım aşamasında")}</h3>
         <p className="text-sm text-slate-500 dark:text-slate-500">Bu modül {faz ? <span className="font-mono text-brand-700 dark:text-brand-300">{faz}</span> : 'sonraki fazlarda'} devreye girecek.</p>
       </div>
     </div>

@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 // gosp-mobil-v1
@@ -7,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
+import DilSecici from '@/components/DilSecici'
 
 type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 type AramaDomain = { id: number; alan_adi: string; sistem_kullanici: string }
@@ -43,13 +48,15 @@ const SAYFALAR: SayfaTanim[] = [
 
 // ── Bildirim yardımcıları ──
 const goreliZaman = (t: string) => {
-  const d = new Date(t.replace(' ', 'T'))
+  // Backend zaman damgalari UTC ama timezone-suz ("2026-08-22 14:14:45").
+  // 'Z' eklemeden new Date() bunu LOCAL sanip UTC+3 kullanicida 3 saat kaydirirdi.
+  const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
   const s = Math.floor((Date.now() - d.getTime()) / 1000)
   if (!isFinite(s) || s < 0) return t.slice(0, 16)
   if (s < 60) return 'az önce'
-  if (s < 3600) return `${Math.floor(s / 60)} dk önce`
-  if (s < 86400) return `${Math.floor(s / 3600)} sa önce`
-  if (s < 604800) return `${Math.floor(s / 86400)} gün önce`
+  if (s < 3600) return cevirT("{0} dk önce", Math.floor(s / 60))
+  if (s < 86400) return cevirT("{0} sa önce", Math.floor(s / 3600))
+  if (s < 604800) return cevirT("{0} gün önce", Math.floor(s / 86400))
   return t.slice(0, 10)
 }
 // Eski kayıtlardaki tam sunucu yolunu (/home/<kullanıcı>/) gizle — göreli kalır.
@@ -68,7 +75,13 @@ const KatIkon = ({ kategori }: { kategori: string }) => (
   </svg>
 )
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; menuAcik?: boolean }) {
+  useTranslation() // dil re-render aboneligi
   const kullanici = useAuth((s) => s.kullanici)
   const cikis = useAuth((s) => s.cikis)
   const navigate = useNavigate()
@@ -196,7 +209,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       <button
         onClick={onMenuAc}
         className="lg:hidden -ml-1 p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition flex-shrink-0"
-        aria-label="Menüyü aç"
+        aria-label={cevir(cevir("Menüyü aç"))}
         aria-expanded={!!menuAcik}
         aria-controls="gosp-kenar-cubugu"
       >
@@ -219,8 +232,8 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             onChange={(e) => { setQ(e.target.value); setAktif(0); setAcik(true); veriYukle() }}
             onFocus={() => { veriYukle(); if (q) setAcik(true) }}
             onKeyDown={tusla}
-            placeholder="Ara: domain, alt alan, sayfa (ör. yedek, firewall)…"
-            aria-label="Ara"
+            placeholder={cevir(cevir("Ara: domain, alt alan, sayfa (ör. yedek, firewall)…"))}
+            aria-label={cevir("Ara")}
             role="combobox"
             aria-expanded={acik && sonuclar.length > 0}
             aria-controls="gosp-arama-sonuc"
@@ -232,7 +245,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             <div id="gosp-arama-sonuc" role="listbox"
               className="absolute left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-auto">
               {sonuclar.length === 0 && !veri.current && (
-                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+                <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
               )}
               {sonuclar.length === 0 && veri.current && (
                 <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">"{q}" için sonuç yok</div>
@@ -261,9 +274,10 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       </div>
 
       <div className="flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1">
+        <DilSecici />
         <button onClick={temaDegistir}
           className="p-2 text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-400 dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-slate-800 rounded-md transition"
-          title={`Tema: ${tema} — tıkla değiştir`}>
+          title={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}>
           {tema === 'dark' ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
@@ -294,7 +308,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   Bildirimler{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} yeni</span>}
                 </span>
                 {okunmamis > 0 && (
-                  <button onClick={bildirimTumOkundu} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Tümünü okundu</button>
+                  <button onClick={bildirimTumOkundu} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Tümünü okundu")}</button>
                 )}
               </div>
               {bildirimler.length === 0 ? (
@@ -321,7 +335,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               {bildirimler.length > 0 && (
                 <button onClick={() => { setBAcik(false); navigate('/bildirimler') }}
                   className="w-full text-center px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
-                  Tümünü göster →
+                  {cevir(cevir("Tümünü göster →"))}
                 </button>
               )}
             </div>
@@ -332,7 +346,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           <button
             onClick={() => setMenuAcik((v) => !v)}
             className="flex items-center gap-2 px-1.5 sm:px-2 py-1.5 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 rounded-md transition"
-            aria-label="Hesap menüsü"
+            aria-label={cevir(cevir("Hesap menüsü"))}
           >
             <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 font-semibold text-xs flex items-center justify-center flex-shrink-0">
               {(kullanici?.ad_soyad || kullanici?.adi || '?').slice(0, 1).toUpperCase()}
@@ -363,7 +377,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   onClick={onCikis}
                   className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20"
                 >
-                  Çıkış Yap
+                  {cevir(cevir("Çıkış Yap"))}
                 </button>
               </div>
             </>

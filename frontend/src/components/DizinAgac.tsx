@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -13,7 +16,13 @@ interface Props {
   yenileme?: number // değişince yeniden çek (yeni klasör/silme sonrası)
 }
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DizinAgac({ domainId, secili, onSec, yenileme }: Props) {
+  useTranslation() // dil re-render aboneligi
   // Yukseklik: mobilde makul bir kutu, lg+ ekranda GORUNUR ALANIN SONUNA kadar
   // uzanir (sticky) — uzun dizin agaclari kutunun ICINDE kayar, sayfa kaymaz.
   return (
@@ -112,7 +121,7 @@ function TreeNode({
         <div>
           {yukleniyor && klasorler.length === 0 && (
             <div className="px-3 py-1 text-xs text-slate-400 dark:text-slate-500" style={{ paddingLeft: 24 + derinlik * 14 }}>
-              yükleniyor…
+              {cevir("yükleniyor…")}
             </div>
           )}
           {klasorler.map(k => (

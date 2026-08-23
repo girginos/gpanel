@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -51,6 +52,10 @@ type kaynakGirdi struct {
 	Kullanici string `json:"kullanici"`
 	Parola    string `json:"parola"`
 	Anahtar   string `json:"anahtar"`
+	// PanelAnahtari: true ise panelin KENDI taşıma anahtarı kullanılır (parola/kullanıcı
+	// anahtarı yerine). Kaynak sunucuya panelin public anahtarı eklenmiş olmalı. Kaynak
+	// root parola-girişini kapatmış (prohibit-password) olsa bile çalışır.
+	PanelAnahtari bool `json:"panel_anahtari"`
 }
 
 func (g kaynakGirdi) kaynak() *Kaynak {
@@ -58,10 +63,63 @@ func (g kaynakGirdi) kaynak() *Kaynak {
 	if p == 0 {
 		p = 22
 	}
+	parola, anahtar := g.Parola, g.Anahtar
+	if g.PanelAnahtari {
+		if priv, _, err := panelTasimaAnahtar(); err == nil {
+			anahtar = priv // panel özel anahtarı → key-auth (parola devre dışı)
+			parola = ""
+		}
+	}
 	return &Kaynak{
 		Tip: strings.ToLower(strings.TrimSpace(g.Tip)), Host: g.Host, Port: p,
-		Kullanici: g.Kullanici, Parola: g.Parola, Anahtar: g.Anahtar,
+		Kullanici: g.Kullanici, Parola: parola, Anahtar: anahtar,
 	}
+}
+
+// ── Panel taşıma SSH anahtarı (parola çalışmadığında otomatik yol) ──────────
+const tasimaKeyDir = "/var/lib/girginospanel/tasima"
+const tasimaKeyPath = tasimaKeyDir + "/id_ed25519"
+
+var tasimaKeyMu sync.Mutex
+
+// panelTasimaAnahtar — panelin taşıma ed25519 anahtar çiftini garanti eder (yoksa
+// üretir) ve (özel-anahtar-içeriği, public-anahtar-satırı) döner. Kullanıcı public
+// anahtarı kaynağa ekler; taşıma panelin özel anahtarıyla parolasız bağlanır.
+func panelTasimaAnahtar() (priv string, pub string, err error) {
+	tasimaKeyMu.Lock()
+	defer tasimaKeyMu.Unlock()
+	if err = os.MkdirAll(tasimaKeyDir, 0o700); err != nil {
+		return "", "", err
+	}
+	if _, e := os.Stat(tasimaKeyPath); e != nil {
+		out, ge := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "girginospanel-tasima", "-f", tasimaKeyPath).CombinedOutput()
+		if ge != nil {
+			return "", "", fmt.Errorf("anahtar üretilemedi: %s", strings.TrimSpace(string(out)))
+		}
+	}
+	pb, err := os.ReadFile(tasimaKeyPath)
+	if err != nil {
+		return "", "", err
+	}
+	pubB, err := os.ReadFile(tasimaKeyPath + ".pub")
+	if err != nil {
+		return "", "", err
+	}
+	return string(pb), strings.TrimSpace(string(pubB)), nil
+}
+
+// PanelAnahtar: GET /system/tasima/anahtar → {pubkey, komut}. Parola çalışmazsa
+// (yanlış parola veya kaynak root parola-girişini kapatmış) kullanılır: kullanıcı
+// tek-satır komutu kaynak sunucuda çalıştırır, sonra "Panel anahtarıyla" bağlanır.
+func (h *Handlers) PanelAnahtar(w http.ResponseWriter, r *http.Request) {
+	_, pub, err := panelTasimaAnahtar()
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "panel taşıma anahtarı hazırlanamadı: "+err.Error())
+		return
+	}
+	// Kaynakta çalıştırılacak tek komut (idempotent): dizin + izin + anahtar ekle.
+	komut := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '" + pub + "' ~/.ssh/authorized_keys 2>/dev/null || echo '" + pub + "' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"pubkey": pub, "komut": komut})
 }
 
 // Test — POST /system/tasima/test
@@ -220,6 +278,26 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 SAHİPLİK TAŞIMA (senkron, domainlerden ÖNCE): kaynaktaki reseller/müşteri
+	// hesaplarını GVM'de oluştur; login→hedef eşlemesini Ayarlar'a koy. Üretilen
+	// reseller parolaları admin'e yanıtta bir kez raporlanır (Plesk parolaları
+	// düz-metin alınamaz). İş kaydı açılmadan yapılır ki hata olursa temiz dönülür.
+	var uretilenKimlikler []UretilenKimlik
+	if g.Ayarlar.SahipleriTasi {
+		sahipler, serr := k.KesfetSahipler(r.Context())
+		if serr != nil {
+			httpx.WriteError(w, http.StatusBadGateway, "sahip keşfi başarısız: "+serr.Error())
+			return
+		}
+		esle, kimlikler, herr := sahipleriHazirla(r.Context(), h.DB, sahipler)
+		if herr != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "sahip hesapları oluşturulamadı: "+herr.Error())
+			return
+		}
+		g.Ayarlar.SahipEsle = esle
+		uretilenKimlikler = kimlikler
+	}
+
 	ayarJSON, _ := json.Marshal(g.Ayarlar)
 	aktorUID, aktor := middleware.Aktor(r)
 
@@ -263,7 +341,7 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 
 	go h.calistir(ctx, isID, k, gecerli, g.Ayarlar)
 
-	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(gecerli)})
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(gecerli), "uretilen_kimlikler": uretilenKimlikler})
 }
 
 // calistir — is yurutucusu (goroutine).

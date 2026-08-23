@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -7,10 +10,30 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 
+
+const CONN_EN: Record<string, string> = {
+  "(saklanmıyor)": "(not stored)",
+  "Değer üstüne tıkla → otomatik kopyalanır": "Click a value → it's copied automatically",
+  "FTP yönetimine git →": "Go to FTP management →",
+  "Mevcut parolayı göster": "Show current password",
+  "Panoya kopyalanamadı": "Failed to copy to clipboard",
+  "Parola üretilemedi": "Failed to generate password",
+  "Sistem kullanıcısı": "System user",
+  "Tekrar üret": "Regenerate",
+  "Tıkla → kopyala": "Click → copy",
+  "Veritabanları yönetimine git →": "Go to database management →",
+  "Web kökü": "Web root",
+  "Yeni parola üret": "Generate new password",
+  "veritabanı yok": "no database",
+  "⚠ Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.": "⚠ Copy the password now — you may not see it again after closing this window.",
+  "✓ Yeni parola üretildi": "✓ New password generated",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CONN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function panoYaz(text: string): boolean {
   // 1) Modern API (HTTPS / localhost only) — kullanıcı gesture içindeyse async ok
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).catch(hataYakala('Panoya kopyalanamadı'))
+    navigator.clipboard.writeText(text).catch(hataYakala(cevir("Panoya kopyalanamadı")))
     return true
   }
   // 2) Fallback: textarea + execCommand
@@ -49,6 +72,7 @@ type Domain = {
 }
 
 export default function DomainConnectionPage() {
+  useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [hata, setHata] = useState<string | null>(null)
@@ -70,16 +94,16 @@ export default function DomainConnectionPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Bağlantı Bilgisi' },
+        { etiket: cevir("Bağlantı Bilgisi") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Bağlantı Bilgisi</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Bağlantı Bilgisi")}</h1>
       {domain && (
         <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
-          {' · '}<span className="text-xs text-slate-400 dark:text-slate-500">Değer üstüne tıkla → otomatik kopyalanır</span>
+          {' · '}<span className="text-xs text-slate-400 dark:text-slate-500">{cevir("Değer üstüne tıkla → otomatik kopyalanır")}</span>
         </p>
       )}
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
@@ -87,27 +111,27 @@ export default function DomainConnectionPage() {
       {domain && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <Kart baslik="FTP / SFTP" renk="sky" ikon="M3 16V8a2 2 0 012-2h6l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2z">
-            <Sat e="Sunucu" d={domain.ftp_host} onKopya={kopyala} kopya={kopya} />
+            <Sat e={cevir(cevir("Sunucu"))} d={domain.ftp_host} onKopya={kopyala} kopya={kopya} />
             <Sat e="Port" d="21" onKopya={kopyala} kopya={kopya} />
-            <Sat e="Kullanıcı adı" d={domain.ftp_user} onKopya={kopyala} kopya={kopya} mono />
-            <Parola e="Parola" id={id!} tip="ftp" onAc={() => setParolaModal({ tip: 'ftp' })} />
+            <Sat e={cevir("Kullanıcı adı")} d={domain.ftp_user} onKopya={kopyala} kopya={kopya} mono />
+            <Parola e={cevir("Parola")} id={id!} tip="ftp" onAc={() => setParolaModal({ tip: 'ftp' })} />
             <Sat e="Ev dizini" d={`/home/${domain.sistem_kullanici}`} onKopya={kopyala} kopya={kopya} mono />
-            <Link to={`/abonelikler/${id}/ftp`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">FTP yönetimine git →</Link>
+            <Link to={`/abonelikler/${id}/ftp`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("FTP yönetimine git →")}</Link>
           </Kart>
 
           <Kart baslik="MySQL / MariaDB" renk="violet" ikon="M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3z">
-            <Sat e="Sunucu" d={domain.db_host} onKopya={kopyala} kopya={kopya} />
+            <Sat e={cevir(cevir("Sunucu"))} d={domain.db_host} onKopya={kopyala} kopya={kopya} />
             <Sat e="Port" d="3306" onKopya={kopyala} kopya={kopya} />
-            <Sat e="Veritabanı" d={domain.db_adi} onKopya={kopyala} kopya={kopya} mono />
-            <Sat e="Kullanıcı adı" d={domain.db_user} onKopya={kopyala} kopya={kopya} mono />
-            <Parola e="Parola" id={id!} tip="db" onAc={() => setParolaModal({ tip: 'db' })} />
-            <Link to={`/abonelikler/${id}/veritabanlari`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">Veritabanları yönetimine git →</Link>
+            <Sat e={cevir("Veritabanı")} d={domain.db_adi} onKopya={kopyala} kopya={kopya} mono />
+            <Sat e={cevir("Kullanıcı adı")} d={domain.db_user} onKopya={kopyala} kopya={kopya} mono />
+            <Parola e={cevir("Parola")} id={id!} tip="db" onAc={() => setParolaModal({ tip: 'db' })} />
+            <Link to={`/abonelikler/${id}/veritabanlari`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("Veritabanları yönetimine git →")}</Link>
           </Kart>
 
           <Kart baslik="Web" renk="amber" ikon="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" cift>
-            <Sat e="Web kökü" d={domain.web_root} onKopya={kopyala} kopya={kopya} mono />
+            <Sat e={cevir("Web kökü")} d={domain.web_root} onKopya={kopyala} kopya={kopya} mono />
             <Sat e="IPv4" d={domain.ipv4} onKopya={kopyala} kopya={kopya} mono />
-            <Sat e="Sistem kullanıcısı" d={domain.sistem_kullanici} onKopya={kopyala} kopya={kopya} mono />
+            <Sat e={cevir("Sistem kullanıcısı")} d={domain.sistem_kullanici} onKopya={kopyala} kopya={kopya} mono />
             <Sat e="HTTP URL" d={`http://${domain.alan_adi}/`} onKopya={kopyala} kopya={kopya} />
             <Sat e="HTTPS URL" d={`https://${domain.alan_adi}/`} onKopya={kopyala} kopya={kopya} />
           </Kart>
@@ -165,7 +189,7 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
         </span>
         {kopyalandi && (
           <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-medium animate-pulse">
-            ✓ Kopyalandı
+            {cevir(cevir("✓ Kopyalandı"))}
           </span>
         )}
       </dd>
@@ -182,7 +206,7 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
           onClick={onAc}
           className="text-xs px-3 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
         >
-          <Ikon d={I.anahtar} /> Şifreyi Göster / Yenile
+          <Ikon d={I.anahtar} /> {cevir(cevir("Şifreyi Göster / Yenile"))}
         </button>
       </dd>
     </div>
@@ -202,13 +226,13 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
     if (!gosterMevcut) return
     if (tip === 'ftp') {
       api.get<{ ftp_pass_plain: string }>(`/domains/${domainId}/ftp/parola-goster`)
-        .then(r => setMevcutParola(r.data.ftp_pass_plain || '(saklanmıyor)'))
+        .then(r => setMevcutParola(r.data.ftp_pass_plain || cevir("(saklanmıyor)")))
         .catch(() => setMevcutParola('(yetki yok)'))
     } else {
       api.get<any[]>(`/domains/${domainId}/databases`)
         .then(r => {
           const main = (r.data || [])[0]
-          setMevcutParola(main?.db_parola || main?.db_pass_plain || '(saklanmıyor)')
+          setMevcutParola(main?.db_parola || main?.db_pass_plain || cevir("(saklanmıyor)"))
         })
         .catch(() => setMevcutParola('(yetki yok)'))
     }
@@ -224,16 +248,16 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
         // İlk DB id'sini al
         const dbs = await api.get<any[]>(`/domains/${domainId}/databases`)
         const main = (dbs.data || [])[0]
-        if (!main) throw new Error('veritabanı yok')
+        if (!main) throw new Error(cevir("veritabanı yok"))
         const r = await api.put<{ parola: string }>(`/databases/${main.id}/password`, {})
         setYeni(r.data.parola)
       }
-    } catch (e) { setHata(apiHata(e, 'Parola üretilemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Parola üretilemedi"))) }
     finally { setIsleniyor(false) }
   }
 
   const user = tip === 'ftp' ? ftpUser : dbUser
-  const tipAd = tip === 'ftp' ? 'FTP' : 'Veritabanı'
+  const tipAd = tip === 'ftp' ? 'FTP' : cevir("Veritabanı")
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onKapat}>
@@ -243,7 +267,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{tipAd} Parolası</h3>
         </div>
         <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-4 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded">
-          <span className="text-slate-500 dark:text-slate-500">Kullanıcı:</span> <code className="font-mono text-slate-900 dark:text-slate-100">{user}</code>
+          <span className="text-slate-500 dark:text-slate-500">{cevir("Kullanıcı:")}</span> <code className="font-mono text-slate-900 dark:text-slate-100">{user}</code>
         </div>
 
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-xs text-red-700 dark:text-red-300">{hata}</div>}
@@ -254,7 +278,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
             {!gosterMevcut ? (
               <button onClick={() => setGosterMevcut(true)}
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded-md text-slate-700 dark:text-slate-300">
-                <span className="inline-flex items-center gap-1.5"><Ikon d={I.goz} /> Mevcut parolayı göster</span>
+                <span className="inline-flex items-center gap-1.5"><Ikon d={I.goz} /> {cevir("Mevcut parolayı göster")}</span>
               </button>
             ) : (
               <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
@@ -273,22 +297,22 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
         {/* Yeni parola */}
         {yeni && (
           <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded">
-            <div className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">✓ Yeni parola üretildi</div>
+            <div className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">{cevir("✓ Yeni parola üretildi")}</div>
             <div className="flex flex-wrap items-center gap-2">
               <code className="font-mono text-sm text-slate-900 dark:text-slate-100 flex-1 break-all">{yeni}</code>
               <KopyaButton text={yeni} renk="emerald" />
             </div>
-            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2">⚠ Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.</p>
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2">{cevir("⚠ Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.")}</p>
           </div>
         )}
 
         <div className="flex gap-2 justify-end mt-4">
           <button onClick={onKapat} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
-            Kapat
+            {cevir("Kapat")}
           </button>
           <button onClick={olustur} disabled={isleniyor}
             className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
-            {isleniyor ? 'Üretiliyor…' : (yeni ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Tekrar üret</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.simsek} /> Yeni parola üret</span>)}
+            {isleniyor ? 'Üretiliyor…' : (yeni ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Tekrar üret")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.simsek} /> {cevir("Yeni parola üret")}</span>)}
           </button>
         </div>
       </div>
@@ -313,7 +337,7 @@ function KopyaButton({ text, renk }: { text: string; renk: 'amber' | 'emerald' }
       }}
       className={`text-[10px] px-2 py-1 rounded font-medium transition ${bg[renk]} ${k ? 'ring-2 ring-emerald-400' : ''}`}
     >
-      {k ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> Kopyalandı</span> : 'Kopyala'}
+      {k ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> {cevir("Kopyalandı")}</span> : 'Kopyala'}
     </button>
   )
 }

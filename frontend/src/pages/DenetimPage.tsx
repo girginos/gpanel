@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
@@ -35,10 +39,52 @@ const ETIKET: Record<string, string> = {
   'tasima_baslat': 'Taşıma başlatıldı', 'tasima_iptal': 'Taşıma iptal edildi',
   'guvenlik.izolasyon_kaybi': 'İzolasyon uyarısı',
 }
-function etiketle(e: string) { return ETIKET[e] || e }
+
+const DEN_EN: Record<string, string> = {
+  "2FA açıldı": "2FA enabled",
+  "2FA doğrulama": "2FA verification",
+  "2FA kapatıldı": "2FA disabled",
+  "Bayi askıdan alındı": "Reseller unsuspended",
+  "Bayi askıya alındı": "Reseller suspended",
+  "Bayi güncellendi": "Reseller updated",
+  "Bayi oluşturuldu": "Reseller created",
+  "Bayi parolası değişti": "Reseller password changed",
+  "Bu süzgeçlerle eşleşen denetim kaydı bulunamadı. Süzgeçleri temizleyip tekrar deneyin.": "No audit records match these filters. Clear the filters and try again.",
+  "DB parolası değişti": "DB password changed",
+  "Denetim Kaydı": "Audit Log",
+  "Hosting askıdan alındı": "Hosting unsuspended",
+  "Hosting askıya alındı": "Hosting suspended",
+  "Hosting oluşturuldu": "Hosting created",
+  "Kayıtlarda ara": "Search records",
+  "Kendi hosting hesaplarınızda yapılan işlemler. Yönetici bir işlem yaptığında da burada görünür.": "Operations on your own hosting accounts. Also appears here when an admin performs an operation.",
+  "Kullanıcı, hedef, IP veya eylem ara…": "Search user, target, IP or action…",
+  "Parola değişimi": "Password change",
+  "Plan değiştirildi": "Plan changed",
+  "Plan güncellendi": "Plan updated",
+  "Plan oluşturuldu": "Plan created",
+  "Sunucudaki tüm panel işlemleri — kök ve bayiler dâhil. Kapsam süzgeciyle tek bir bayiye daraltabilirsiniz.": "All panel operations on the server — including root and resellers. You can narrow to a single reseller with the scope filter.",
+  "Taşıma başlatıldı": "Migration started",
+  "Taşıma iptal edildi": "Migration cancelled",
+  "Toplu durum değişimi": "Bulk status change",
+  "Tüm eylemler": "All actions",
+  "Tüm kapsamlar": "All scopes",
+  "Veritabanı oluşturuldu": "Database created",
+  "Veritabanı silindi": "Database deleted",
+  "Yalnız kök (panel sahibi)": "Root only (panel owner)",
+  "Yedek geri yüklendi": "Backup restored",
+  "Yıkıcı işlem —": "Destructive operation —",
+  "yıkıcı": "destructive",
+  "Özel plan uygulandı": "Custom plan applied",
+  "İzolasyon uyarısı": "Isolation warning",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DEN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
+function etiketle(e: string) {
+  return ETIKET[e] || e
+}
 
 // Yıkıcı işlemler listede göz ile ayrılsın (renk TEK başına anlam taşımasın diye
-// ayrıca "yıkıcı" ibaresi title'da verilir).
+// ayrıca cevir("yıkıcı") ibaresi title'da verilir).
 const YIKICI = new Set(['hosting.sil', 'db.sil', 'bayi.sil', 'hosting.askiya_al', 'bayi.askiya_al'])
 
 // Eylem türüne göre ikon + renk — düz metin yerine görsel kategori ayrımı (tıpkı yıkıcı
@@ -73,6 +119,7 @@ function EylemRozet({ eylem }: { eylem: string }) {
 }
 
 export default function DenetimPage() {
+  useTranslation() // dil re-render aboneligi
   const bayiMi = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('gosp.user') || '{}').rol === 'reseller' } catch { return false }
   }, [])
@@ -109,13 +156,13 @@ export default function DenetimPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 space-y-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Denetim Kaydı' }]} />
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Denetim Kaydı") }]} />
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Denetim Kaydı</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Denetim Kaydı")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           {bayiMi
-            ? 'Kendi hosting hesaplarınızda yapılan işlemler. Yönetici bir işlem yaptığında da burada görünür.'
-            : 'Sunucudaki tüm panel işlemleri — kök ve bayiler dâhil. Kapsam süzgeciyle tek bir bayiye daraltabilirsiniz.'}
+            ? cevir("Kendi hosting hesaplarınızda yapılan işlemler. Yönetici bir işlem yaptığında da burada görünür.")
+            : cevir("Sunucudaki tüm panel işlemleri — kök ve bayiler dâhil. Kapsam süzgeciyle tek bir bayiye daraltabilirsiniz.")}
         </p>
       </div>
 
@@ -126,19 +173,19 @@ export default function DenetimPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-3">
-        <label className="sr-only" htmlFor="denetim-ara">Kayıtlarda ara</label>
+        <label className="sr-only" htmlFor="denetim-ara">{cevir("Kayıtlarda ara")}</label>
         <div className="relative min-w-[200px] flex-1">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
           </span>
           <input id="denetim-ara" value={ara} onChange={e => { setSayfa(0); setAra(e.target.value) }}
-            placeholder="Kullanıcı, hedef, IP veya eylem ara…"
+            placeholder={cevir("Kullanıcı, hedef, IP veya eylem ara…")}
             className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 pl-9 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15" />
         </div>
-        <label className="sr-only" htmlFor="denetim-eylem">Eylem türü</label>
+        <label className="sr-only" htmlFor="denetim-eylem">{cevir("Eylem türü")}</label>
         <select id="denetim-eylem" value={eylem} onChange={e => { setSayfa(0); setEylem(e.target.value) }}
           className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
-          <option value="">Tüm eylemler</option>
+          <option value="">{cevir("Tüm eylemler")}</option>
           {(veri?.eylemler || []).map(e => <option key={e} value={e}>{etiketle(e)}</option>)}
         </select>
         {!bayiMi && (
@@ -146,8 +193,8 @@ export default function DenetimPage() {
             <label className="sr-only" htmlFor="denetim-kapsam">Kapsam</label>
             <select id="denetim-kapsam" value={kapsam} onChange={e => { setSayfa(0); setKapsam(e.target.value) }}
               className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
-              <option value="">Tüm kapsamlar</option>
-              <option value="kok">Yalnız kök (panel sahibi)</option>
+              <option value="">{cevir("Tüm kapsamlar")}</option>
+              <option value="kok">{cevir("Yalnız kök (panel sahibi)")}</option>
               {bayiler.map(b => <option key={b.id} value={String(b.id)}>Bayi: {b.kullanici}</option>)}
             </select>
           </>
@@ -156,10 +203,10 @@ export default function DenetimPage() {
       </div>
 
       {yuk && !veri ? (
-        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : kayitlar.length === 0 ? (
-        <EmptyState baslik="Kayıt yok"
-          aciklama="Bu süzgeçlerle eşleşen denetim kaydı bulunamadı. Süzgeçleri temizleyip tekrar deneyin." />
+        <EmptyState baslik={cevir("Kayıt yok")}
+          aciklama={cevir("Bu süzgeçlerle eşleşen denetim kaydı bulunamadı. Süzgeçleri temizleyip tekrar deneyin.")} />
       ) : (
         <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
@@ -167,12 +214,12 @@ export default function DenetimPage() {
               <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
                 <tr>
                   <th className={T.baslik}>Zaman</th>
-                  <th className={T.baslik}>Kullanıcı</th>
+                  <th className={T.baslik}>{cevir("Kullanıcı")}</th>
                   <th className={T.baslik}>Eylem</th>
                   <th className={T.baslik}>Hedef</th>
                   {!bayiMi && <th className={T.baslik}>Kapsam</th>}
                   <th className={T.baslik}>IP</th>
-                  <th className={T.baslik}>Sonuç</th>
+                  <th className={T.baslik}>{cevir("Sonuç")}</th>
                 </tr>
               </thead>
               <tbody className={T.govde}>
@@ -181,7 +228,7 @@ export default function DenetimPage() {
                     <td className={T.hucre} data-etiket="Zaman">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap tabular-nums">{k.zaman}</span>
                     </td>
-                    <td className={T.hucre} data-etiket="Kullanıcı">
+                    <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
                       <span className="text-slate-700 dark:text-slate-300">{k.aktor || '—'}</span>
                       {k.aktor_rol && (
                         <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
@@ -206,8 +253,8 @@ export default function DenetimPage() {
                     {!bayiMi && (
                       <td className={T.hucre} data-etiket="Kapsam">
                         {k.kapsam_id === 0
-                          ? <span className="text-xs text-slate-500 dark:text-slate-400">kök</span>
-                          : <span title={k.kapsam_ad ? `Bayi: ${k.kapsam_ad}` : `Silinmiş bayi #${k.kapsam_id}`}
+                          ? <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("kök")}</span>
+                          : <span title={k.kapsam_ad ? `Bayi: ${k.kapsam_ad}` : cevirT(cevir("Silinmiş bayi #{0}"), k.kapsam_id)}
                                   className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold ${
                                     k.kapsam_ad
                                       ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
@@ -219,12 +266,12 @@ export default function DenetimPage() {
                     <td className={T.hucre} data-etiket="IP">
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{k.ip || '—'}</span>
                     </td>
-                    <td className={T.hucre} data-etiket="Sonuç">
+                    <td className={T.hucre} data-etiket={cevir("Sonuç")}>
                       <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold ${
                         k.basarili
                           ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
                           : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>
-                        {k.basarili ? 'başarılı' : 'başarısız'}
+                        {k.basarili ? 'başarılı' : cevir("başarısız")}
                       </span>
                     </td>
                   </tr>
@@ -239,7 +286,7 @@ export default function DenetimPage() {
         <div className="flex items-center justify-between gap-3">
           <button onClick={() => setSayfa(s => Math.max(0, s - 1))} disabled={sayfa === 0}
             className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">
-            ← Önceki
+            {cevir(cevir("← Önceki"))}
           </button>
           <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">Sayfa {sayfa + 1} / {sonSayfa + 1}</span>
           <button onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}

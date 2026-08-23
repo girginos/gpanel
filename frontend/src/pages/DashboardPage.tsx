@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -8,7 +11,15 @@ import DomainPano from '@/components/DomainPano'
 import ResourceCard from '@/components/ResourceCard'
 import { useAuth } from '@/store/auth'
 
+
+const DASH_EN: Record<string, string> = {
+  "Henüz domain yok. Sol panelden ekleyin.": "No domains yet. Add one from the left panel.",
+  "Seçili domain": "Selected domain",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DASH_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DashboardPage() {
+  useTranslation() // dil re-render aboneligi
   const kullanici = useAuth((s) => s.kullanici)
   const [params, setParams] = useSearchParams()
   const [domainler, setDomainler] = useState<Domain[]>([])
@@ -42,12 +53,12 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Pano</h1>
           <p className="text-sm text-slate-500 dark:text-slate-500 mt-0.5">
-            Hoş geldiniz, <span className="text-slate-700 dark:text-slate-300 font-medium">{kullanici?.ad_soyad || kullanici?.adi}</span>
+            {cevir(cevir("Hoş geldiniz,"))} <span className="text-slate-700 dark:text-slate-300 font-medium">{kullanici?.ad_soyad || kullanici?.adi}</span>
           </p>
         </div>
         {secili && (
           <div className="text-right text-xs text-slate-500 dark:text-slate-500">
-            <span className="block">Seçili domain</span>
+            <span className="block">{cevir("Seçili domain")}</span>
             <span className="text-brand-700 dark:text-brand-300 font-mono font-semibold text-sm">{secili.alan_adi}</span>
           </div>
         )}
@@ -69,7 +80,7 @@ export default function DashboardPage() {
             <DomainPano domain={secili} />
           ) : (
             <div className="bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-12 text-center text-slate-500 dark:text-slate-500">
-              {yukleniyor ? 'Yükleniyor…' : 'Henüz domain yok. Sol panelden ekleyin.'}
+              {yukleniyor ? 'Yükleniyor…' : cevir("Henüz domain yok. Sol panelden ekleyin.")}
             </div>
           )}
         </section>

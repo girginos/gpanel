@@ -28,6 +28,11 @@ var (
 // askıdaki bir domain'i sessizce yeniden yayına almaz.
 var pkgDB *sql.DB
 
+// provizyonKilit: kullanici-adi TAHSISI (BenzersizKullanici) ile useradd/home
+// olusturma arasini serilestirir. Yoksa iki eszamanli olusturma ayni ilk-etiket
+// slugunu (c_girgin) alip AYNI home/FPM/DB paylasir -> tenant izolasyonu coker.
+var provizyonKilit sync.Mutex
+
 // Init: paket DB handle'ını ayarlar (askıya-alma tutarlılığı için) ve açılışta
 // (her boot) fastcgi_cache "girgincache" zone tanımını GARANTİ EDİP nginx'i
 // reload eder. Böylece "kullanım var, tanım yok" durumundaki MEVCUT sunucular
@@ -51,6 +56,7 @@ func Init(d *sql.DB) {
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
 	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
 	Ensure404Page()             // marka 404 sayfasi (root-sahipli, tenant degistiremez)
+	Ensure5xxPage()             // marka 5xx sayfasi (uygulama hatasi)
 	EnsureAskidaPage()          // marka "askiya alindi" sayfasi (ayni dizin)
 	EnsureMarkaAssets()         // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
 	EnsureDefault80()           // 80 catch-all: belge kokunu de garanti eder (yoksa try_files donguye girip 500 verir)
@@ -244,13 +250,50 @@ func ValidateDomain(d string) error {
 }
 
 func SlugFromDomain(d string) string {
+	// cPanel gibi: domainin ANA adini al (ilk label, TLD'siz). girgin.com -> c_girgin
+	// (c_ ic-sistem prefix'i KORUNUR — jail/FPM/ACL guvenligi buna bagli).
 	s := strings.ToLower(strings.TrimSpace(d))
+	s = strings.TrimPrefix(s, "www.")
+	if i := strings.IndexByte(s, '.'); i > 0 {
+		s = s[:i]
+	}
 	s = slugSan.ReplaceAllString(s, "_")
 	s = strings.Trim(s, "_")
-	if len(s) > 26 {
-		s = s[:26]
+	if s == "" {
+		s = "site"
+	}
+	if len(s) > 24 { // benzersizlik sayisina yer birak (max ~26)
+		s = s[:24]
 	}
 	return "c_" + s
+}
+
+// BenzersizKullanici: SlugFromDomain tabanini alir, sistem_kullanici/home
+// cakismasi varsa sonuna sayi ekler (c_girgin, c_girgin2, c_girgin3...).
+func BenzersizKullanici(alanAdi string) string {
+	taban := SlugFromDomain(alanAdi)
+	u := taban
+	for i := 2; kullaniciKullanimda(u); i++ {
+		u = taban + strconv.Itoa(i)
+	}
+	return u
+}
+
+// kullaniciKullanimda: bu sistem_kullanici DB'de kayitli mi VEYA /home altinda var mi.
+func kullaniciKullanimda(u string) bool {
+	if pkgDB != nil {
+		var n int
+		if err := pkgDB.QueryRow(`SELECT COUNT(*) FROM domains WHERE sistem_kullanici=?`, u).Scan(&n); err == nil && n > 0 {
+			return true
+		}
+	}
+	if userExists(u) {
+		return true
+	}
+	if _, err := os.Stat("/home/" + u); err == nil {
+		return true
+	}
+	return false
 }
 
 func normalizePHP(v string) string {
@@ -277,15 +320,48 @@ server {
     server_name {{.AlanAdi}} www.{{.AlanAdi}};
 
     location /.well-known/acme-challenge/ {
-        root {{.WebRoot}};
+        root /var/www/acme;
         auth_basic off;
         try_files $uri =404;
     }
 
 
-    location / {
+    # CDN/proxy (Cloudflare "Flexible") edge'de TLS'i sonlandirip origin'e DUZ HTTP
+    # gonderir; kosulsuz "301 https" SONSUZ DONGU uretir (ERR_TOO_MANY_REDIRECTS).
+    # $gosp_force_https yalniz GERCEK duz-HTTP istemcide 1'dir (00-gosp-edge.conf).
+    if ($gosp_force_https) {
         return 301 https://$host$request_uri;
     }
+
+    # Edge zaten HTTPS: icerigi burada servis et (dongu yok, site calisir).
+    root {{.WebRoot}};
+    index index.php index.html index.htm;
+{{if eq .Backend "apache"}}    location / {
+        proxy_pass http://127.0.0.1:10080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_http_version 1.1;
+        proxy_read_timeout 60s;
+    }
+{{else if eq .Backend "static"}}    location / { try_files $uri $uri/ =404; }
+    location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
+{{else}}    location / { try_files $uri $uri/ /index.php?$query_string; }
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_pass unix:{{.PHPSocket}};
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS on;
+        # Uygulama 5xx dondururse marka sayfasi goster. error_page BURADA yalniz 5xx
+        # tanimli → uygulamanin KENDI 404'u (WordPress vb.) intercept EDILMEZ.
+        fastcgi_intercept_errors on;
+        error_page 500 502 503 504 /_gosp_5xx.html;
+        fastcgi_read_timeout 60s;
+    }
+{{end}}    location ~ /\.(?!well-known) { deny all; }
 }
 
 server {
@@ -296,11 +372,9 @@ server {
 
     ssl_certificate     {{.CertPath}};
     ssl_certificate_key {{.KeyPath}};
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
+    # TLS politikasi (protokol/cipher/session/stapling) GLOBAL: 00-gosp-tls.conf.
+    # Stapling zincir dosyasi — LE fullchain; self-signed'da etkisiz, zararsiz.
+    ssl_trusted_certificate {{.CertPath}};
 
     root {{.WebRoot}};
     index index.php index.html index.htm;
@@ -321,12 +395,23 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-Host $host;
+        # HTTP/1.1 + keepalive: varsayilan HTTP/1.0'da her istek yeni TCP baglantisi
+        # acar (Apache event MPM'de bosuna slot tuketir, chunked yanit desteklenmez).
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_intercept_errors on;
+        error_page 500 502 503 504 /_gosp_5xx.html;
         proxy_read_timeout 60s;
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik dosya (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
     error_page 404 /_gosp_404.html;
     location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location = /_gosp_5xx.html {
         root /usr/share/girginospanel/errors;
         internal;
         access_log off;
@@ -342,6 +427,11 @@ server {
 {{else}}    # ---- Backend: nginx + PHP-FPM (default) ----
     error_page 404 /_gosp_404.html;
     location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location = /_gosp_5xx.html {
         root /usr/share/girginospanel/errors;
         internal;
         access_log off;
@@ -369,6 +459,10 @@ server {
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param PATH_INFO $fastcgi_path_info;
         fastcgi_param HTTPS on;
+        # Uygulama 5xx dondururse marka sayfasi goster. error_page BURADA yalniz 5xx
+        # tanimli → uygulamanin KENDI 404'u (WordPress vb.) intercept EDILMEZ.
+        fastcgi_intercept_errors on;
+        error_page 500 502 503 504 /_gosp_5xx.html;
         fastcgi_read_timeout 60s;
         # Guvenlik header'lari — location kendi add_header'ini tanimladigi icin tekrar
 {{.SecHeaders}}{{if .FastCgiCache}}        fastcgi_cache girgincache;
@@ -415,7 +509,7 @@ server {
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
 {{.SecHeaders}}
 {{.ModSec}}    location /.well-known/acme-challenge/ {
-        root {{.WebRoot}};
+        root /var/www/acme;
         auth_basic off;
         try_files $uri =404;
     }
@@ -430,12 +524,23 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto http;
         proxy_set_header X-Forwarded-Host $host;
+        # HTTP/1.1 + keepalive: varsayilan HTTP/1.0'da her istek yeni TCP baglantisi
+        # acar (Apache event MPM'de bosuna slot tuketir, chunked yanit desteklenmez).
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_intercept_errors on;
+        error_page 500 502 503 504 /_gosp_5xx.html;
         proxy_read_timeout 60s;
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
     error_page 404 /_gosp_404.html;
     location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location = /_gosp_5xx.html {
         root /usr/share/girginospanel/errors;
         internal;
         access_log off;
@@ -451,6 +556,11 @@ server {
 {{else}}    # ---- Backend: nginx + PHP-FPM (default) ----
     error_page 404 /_gosp_404.html;
     location = /_gosp_404.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location = /_gosp_5xx.html {
         root /usr/share/girginospanel/errors;
         internal;
         access_log off;
@@ -568,7 +678,7 @@ server {
     server_name {{.AlanAdi}} www.{{.AlanAdi}};
 
     location /.well-known/acme-challenge/ {
-        root {{.WebRoot}};
+        root /var/www/acme;
         auth_basic off;
         try_files $uri =404;
     }
@@ -639,13 +749,14 @@ server {
 // erisimini tenant home + /tmp ile sinirlar (baska tenant/sistem dosyalarini okuyamaz).
 // disable_functions komut yurutme + surec kontrol + symlink fonksiyonlarini kapatir
 // (mail acik birakilir; wp_mail vb. bozulmaz).
-var phpPoolTmpl = template.Must(template.New("p").Parse(`[{{.User}}]
+var phpPoolTmpl = template.Must(template.New("p").Funcs(template.FuncMap{"aclSatiri": aclSatiri}).Parse(`[{{.User}}]
 user = {{.User}}
 group = {{.User}}
 listen = {{.Socket}}
 listen.owner = nginx
 listen.group = nginx
 listen.mode = 0660
+{{aclSatiri}}
 pm = ondemand
 pm.max_children = 8
 pm.process_idle_timeout = 30s
@@ -772,6 +883,7 @@ func writePoolValidated(sk, phpSurum string) (socket, service string, err error)
 // Backend "apache" ise per-domain Apache vhost'unu da yazıp httpd'yi yeniden yükler.
 // Backend değiştirildiyse eski Apache vhost dosyası temizlenir.
 func renderAndReload(opts VhostOpts, sk string) error {
+	edgeMapEnsure() // $gosp_force_https map'i yoksa vhost gecersiz olur
 	// 🔴 Silinmis tenant korumasi (writePoolValidated ile ayni degismez kural):
 	// kullanici yoksa vhost YAZILMAZ — aksi halde silme ile es zamanli calisan
 	// heal/downgrade yollari sahipsiz bir vhost birakir.
@@ -870,15 +982,21 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 	}
 	phpSurum = normalizePHP(phpSurum)
 	alanAdi = strings.ToLower(strings.TrimSpace(alanAdi))
-	u := SlugFromDomain(alanAdi)
+	// KRITIK BOLUM: slug tahsisi + useradd tek kilit altinda. Aksi halde iki
+	// eszamanli olusturma ayni slugu alip izolasyonu cokertir (TOCTOU).
+	provizyonKilit.Lock()
+	u := BenzersizKullanici(alanAdi) // c_girgin, cakisirsa c_girgin2
 	home := "/home/" + u
-
 	if !userExists(u) {
 		out, err := exec.Command("useradd", "-m", "-d", home, "-s", "/usr/sbin/nologin", u).CombinedOutput()
-		if err != nil && !strings.Contains(string(out), "already exists") {
+		if err != nil {
+			// "already exists" ARTIK YUTULMUYOR: kilit altinda BenzersizKullanici
+			// benzersiz garanti eder; yine de olursa YARIS demektir -> hata don.
+			provizyonKilit.Unlock()
 			return nil, fmt.Errorf("useradd: %s: %w", strings.TrimSpace(string(out)), err)
 		}
 	}
+	provizyonKilit.Unlock()
 
 	dirs := []string{"public_html", "logs", "tmp", "ssl", ".cron"}
 	for _, d := range dirs {
@@ -1118,20 +1236,24 @@ func AcmeConfigHome() string { return acmeConfigHome }
 
 // acmeHazirla: config-home + challenge dizinini olusturur (challenge domainin
 // KENDI public_html'inde), sahiplik + SELinux etiketini duzeltir. Webroot doner.
+// acmeWebroot — HTTP-01 challenge icin SABIT, docroot'tan BAGIMSIZ dizin.
+// NEDEN: eskiden challenge /home/<sk>/public_html altina yazilirdi ama nginx ACME
+// location'i vhost'un WebRoot'unu kullanir. Laravel gibi ozel docroot'ta (/public)
+// ikisi ayrisir → token 404 → LE dogrulamasi hem ilk cekimde hem CRON YENILEMEDE
+// sessizce basarisiz olup self-signed'a duserdi. Tek sabit dizin bunu bitirir;
+// askidaki domainlerde ve apache modunda da calisir.
+const acmeWebroot = "/var/www/acme"
+
 func acmeHazirla(sk string) string {
 	_ = os.MkdirAll(acmeConfigHome, 0o700)
 	_ = os.Chmod(acmeConfigHome, 0o700)
-	wr := filepath.Join("/home", sk, "public_html")
-	ch := filepath.Join(wr, ".well-known", "acme-challenge")
+	ch := filepath.Join(acmeWebroot, ".well-known", "acme-challenge")
 	_ = os.MkdirAll(ch, 0o755)
-	if u, err := user.Lookup(sk); err == nil {
-		uid, _ := strconv.Atoi(u.Uid)
-		gid, _ := strconv.Atoi(u.Gid)
-		_ = os.Chown(filepath.Join(wr, ".well-known"), uid, gid)
-		_ = os.Chown(ch, uid, gid)
-	}
-	_, _ = exec.Command("restorecon", "-R", filepath.Join(wr, ".well-known")).CombinedOutput()
-	return wr
+	_ = os.Chmod(acmeWebroot, 0o755)
+	_ = os.Chmod(filepath.Join(acmeWebroot, ".well-known"), 0o755)
+	_ = os.Chmod(ch, 0o755)
+	_, _ = exec.Command("restorecon", "-R", acmeWebroot).CombinedOutput()
+	return acmeWebroot
 }
 
 func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath string, err error) {
@@ -1407,11 +1529,20 @@ func hardenHomePerms(home, sk string, uid, gid int) {
 		_ = os.Chmod(ph, 0o750)
 		// home: nginx yalnız traverse edebilsin (list yok).
 		o1, _ := exec.Command("setfacl", "-m", "u:nginx:--x", home).CombinedOutput()
+		// Apache backend modu: httpd de docroot'a girip statik dosya okur.
+		// PHP yine tenant kullanicisinda calisir (izolasyon degismez).
+		if apacheKullanicisiVar() {
+			_, _ = exec.Command("setfacl", "-m", "u:apache:--x", home).CombinedOutput()
+		}
 		// public_html: nginx oku+traverse (rX) + DEFAULT ACL (üst dizin) → yeni oluşturulan
 		// alt dizin/dosyalar u:nginx:rX'i miras alır. -R DEĞİL: mevcut içerik HealHomePerms
 		// (sentinel) tarafından tek seferde dönüştürülür; yeni site zaten boş.
 		o2, _ := exec.Command("setfacl", "-m", "u:nginx:rX", ph).CombinedOutput()
 		_, _ = exec.Command("setfacl", "-d", "-m", "u:nginx:rX", ph).CombinedOutput()
+		if apacheKullanicisiVar() {
+			_, _ = exec.Command("setfacl", "-m", "u:apache:rX", ph).CombinedOutput()
+			_, _ = exec.Command("setfacl", "-d", "-m", "u:apache:rX", ph).CombinedOutput()
+		}
 		// 🔴 DOĞRULA: setfacl bazı dosya sistemlerinde (acl mount opsiyonu yok, vb.) hatayı
 		// SESSİZCE yutar → 0710/0750 kalır ama nginx okuyamaz → site 403 ("dosya sistemi
 		// bozuk" şikâyeti). ACL gerçekten etkili mi diye nginx olarak okuma testi yap; etkili
@@ -1463,6 +1594,10 @@ func hardenHomePermsRecursive(ph string) {
 	}
 	_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", ph).CombinedOutput()
 	_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", ph).CombinedOutput()
+	if apacheKullanicisiVar() {
+		_, _ = exec.Command("setfacl", "-R", "-m", "u:apache:rX", ph).CombinedOutput()
+		_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:apache:rX", ph).CombinedOutput()
+	}
 }
 
 // HealHomePerms: MEVCUT tüm tenant ev dizinlerine (retroaktif) izolasyon izinlerini
@@ -1739,7 +1874,7 @@ func ApplyVhostForDomain(db *sql.DB, domainID int64, socket, surum string) error
 		opts.BrowserCacheGun = bcGun
 	}
 	// Korumali dizin (.htpasswd) bloklari — nginx_settings satiri olsun olmasin eklenir
-	if pb := buildProtectedBlocks(db, domainID, socket); pb != "" {
+	if pb := buildProtectedBlocks(db, domainID, socket, opts.Backend); pb != "" {
 		if opts.EkDirektifler != "" {
 			opts.EkDirektifler += "\n"
 		}
@@ -1799,7 +1934,7 @@ func sharedSocketPath(sk, surum string) (string, error) {
 // buildProtectedBlocks: korumali_dizinler tablosundan nginx auth_basic location bloklari uretir.
 // Her korunan yol icin outer prefix location + PHP kaynak sizmasini engelleyen nested .php location.
 // ProtectedBlocksForSub: subdomain_id ile korumali_dizinler auth_basic bloklari (subdomain vhost icin).
-func ProtectedBlocksForSub(db *sql.DB, subID int64, socket string) string {
+func ProtectedBlocksForSub(db *sql.DB, subID int64, socket, backend string) string {
 	rows, err := db.Query(`SELECT DISTINCT yol, htpasswd_dosya FROM korumali_dizinler WHERE subdomain_id=? ORDER BY yol`, subID)
 	if err != nil {
 		return ""
@@ -1825,25 +1960,14 @@ func ProtectedBlocksForSub(db *sql.DB, subID int64, socket string) string {
 		fmt.Fprintf(&b, `    location ^~ %s {
         auth_basic "Kimlik Dogrulamasi Gerekli";
         auth_basic_user_file %s;
-        location ~ \.php$ {
-            auth_basic "Kimlik Dogrulamasi Gerekli";
-            auth_basic_user_file %s;
-            try_files $uri =404;
-            fastcgi_split_path_info ^(.+\.php)(/.+)$;
-            fastcgi_pass unix:%s;
-            fastcgi_index index.php;
-            include fastcgi_params;
-            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-            fastcgi_param HTTPS on;
-        }
-    }
-`, yol, dosya, dosya, socket)
+%s    }
+`, yol, dosya, korumaliPHPBlok(dosya, socket, backend))
 	}
 	_ = rows.Err()
 	return b.String()
 }
 
-func buildProtectedBlocks(db *sql.DB, domainID int64, socket string) string {
+func buildProtectedBlocks(db *sql.DB, domainID int64, socket, backend string) string {
 	rows, err := db.Query(`SELECT DISTINCT yol, htpasswd_dosya FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=0 ORDER BY yol`, domainID)
 	if err != nil {
 		return ""
@@ -1869,19 +1993,8 @@ func buildProtectedBlocks(db *sql.DB, domainID int64, socket string) string {
 		fmt.Fprintf(&b, `    location ^~ %s {
         auth_basic "Kimlik Dogrulamasi Gerekli";
         auth_basic_user_file %s;
-        location ~ \.php$ {
-            auth_basic "Kimlik Dogrulamasi Gerekli";
-            auth_basic_user_file %s;
-            try_files $uri =404;
-            fastcgi_split_path_info ^(.+\.php)(/.+)$;
-            fastcgi_pass unix:%s;
-            fastcgi_index index.php;
-            include fastcgi_params;
-            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-            fastcgi_param HTTPS on;
-        }
-    }
-`, yol, dosya, dosya, socket)
+%s    }
+`, yol, dosya, korumaliPHPBlok(dosya, socket, backend))
 	}
 	_ = rows.Err()
 	return b.String()
@@ -2252,5 +2365,45 @@ func selinuxDocrootEtiketle(docRoot string) {
 	}
 	if o, e := exec.Command("restorecon", "-RF", docRoot).CombinedOutput(); e != nil {
 		log.Printf("selinux restorecon basarisiz (%s): %s", docRoot, strings.TrimSpace(string(o)))
+	}
+}
+
+// korumaliPHPBlok — korumali dizin icindeki .php istekleri BACKEND'e gore ele alinir.
+// 🔴 GUVENLIK: "location ^~ <yol>" PREFIX eslesmesi, regex location denemesini TAMAMEN
+// atlar. Bu yuzden static moddaki "PHP calistirma" guard'i (location ~* \.php$ { 404 })
+// korumali dizinlerde DEVREYE GIRMEZ — eskiden burada kosulsuz fastcgi_pass vardi ve
+// static modda PHP yine calisiyordu (guard bypass). Apache modunda da FPM'e dogrudan
+// gidildigi icin .htaccess/deny kurallari o dizinde uygulanmiyordu.
+func korumaliPHPBlok(dosya, socket, backend string) string {
+	switch backend {
+	case "static":
+		return `        location ~ \.php$ { return 404; }
+`
+	case "apache":
+		return `        location ~ \.php$ {
+            auth_basic "Kimlik Dogrulamasi Gerekli";
+            auth_basic_user_file ` + dosya + `;
+            proxy_pass http://127.0.0.1:10080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+        }
+`
+	default:
+		return `        location ~ \.php$ {
+            auth_basic "Kimlik Dogrulamasi Gerekli";
+            auth_basic_user_file ` + dosya + `;
+            try_files $uri =404;
+            fastcgi_split_path_info ^(.+\.php)(/.+)$;
+            fastcgi_pass unix:` + socket + `;
+            fastcgi_index index.php;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param HTTPS on;
+        }
+`
 	}
 }

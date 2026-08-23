@@ -159,16 +159,62 @@ func chmodBeneath(home, rel string, mode uint32) error {
 // korunur (open, create-dışında mode'a dokunmaz); yeni dosya createMode alır. Ardından fd
 // üzerinden tenant'a chown + restorecon.
 func writeBeneath(home, rel string, data []byte, createMode uint32, sk string) error {
-	f, err := openAt2Beneath(home, rel, unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC, createMode)
+	// ── ATOMIK YAZMA (veri-kaybı guard) ────────────────────────────────────
+	// Eski O_TRUNC yolu, disk/kota dolduğunda dosyayı önce sıfırlar sonra
+	// yazamaz → içerik kaybı. Artık: aynı dizinde geçici dosyaya yaz + fsync,
+	// sonra Renameat ile hedefe ata (rename atomiktir). Temp yazımı başarısızsa
+	// (ENOSPC/EDQUOT) hedef dosyaya HİÇ dokunulmaz → orijinal korunur.
+	pfd, leaf, err := safeParentFd(home, rel)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.Write(data); err != nil {
+	defer unix.Close(pfd)
+
+	// Mevcut dosyanın izinlerini koru (varsa); yoksa createMode.
+	mode := createMode
+	if st, serr := fstatatLeaf(pfd, leaf); serr == nil {
+		mode = st.Mode & 0o7777
+	}
+
+	tmp := "." + leaf + ".gosp-tmp"
+	// Kalıntı temp varsa temizle (önceki yarım yazım).
+	_ = unix.Unlinkat(pfd, tmp, 0)
+	tfd, err := unix.Openat(pfd, tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, mode)
+	if err != nil {
 		return err
 	}
-	fchownRestoreFd(home, f, sk)
+	tf := os.NewFile(uintptr(tfd), tmp)
+	yaz := func() error {
+		if _, e := tf.Write(data); e != nil {
+			return e // ENOSPC/EDQUOT burada yakalanır — hedef henüz DOKUNULMADI
+		}
+		if e := tf.Sync(); e != nil { // fsync: rename öncesi veri diske insin
+			return e
+		}
+		// Yeni dosya için tenant chown + SELinux etiketi (mevcut dosya rename ile
+		// zaten kendi etiketini korur; yine de tutarlılık için uygula).
+		fchownRestoreFd(home, tf, sk)
+		return nil
+	}
+	if e := yaz(); e != nil {
+		tf.Close()
+		_ = unix.Unlinkat(pfd, tmp, 0) // yarım temp'i sil, hedef bozulmadı
+		return e
+	}
+	tf.Close()
+	// Atomik geçiş: temp → hedef (aynı dizin fd'si içinde, symlink takip etmez).
+	if e := unix.Renameat(pfd, tmp, pfd, leaf); e != nil {
+		_ = unix.Unlinkat(pfd, tmp, 0)
+		return e
+	}
 	return nil
+}
+
+// fstatatLeaf: parent fd içindeki leaf'in Stat_t'si (symlink TAKİP EDİLMEZ).
+func fstatatLeaf(pfd int, leaf string) (unix.Stat_t, error) {
+	var st unix.Stat_t
+	err := unix.Fstatat(pfd, leaf, &st, unix.AT_SYMLINK_NOFOLLOW)
+	return st, err
 }
 
 // createExclBeneath: symlink-güvenli yeni-boş-dosya (O_EXCL). Zaten varsa unix.EEXIST.

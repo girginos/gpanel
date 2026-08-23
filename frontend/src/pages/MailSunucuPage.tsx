@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -13,11 +16,18 @@ const SEKMELER: { k: Sekme; ad: string }[] = [
 ]
 const KEY = 'mail_sunucu_sekme'
 
+
+const MAILSRV_EN: Record<string, string> = {
+  "Sunucu geneli mail ayarları ve giden IP havuzu — tek yerden yönetin.": "Server-wide mail settings and outgoing IP pool — manage from one place.",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (MAILSRV_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function normalize(v: string | null): Sekme | null {
   return v === 'genel' || v === 'filtre' || v === 'ip-havuzu' ? v : null
 }
 
 export default function MailSunucuPage() {
+  useTranslation() // dil re-render aboneligi
   const [sp, setSp] = useSearchParams()
   // Sekme kaynağı önceliği: URL ?sekme → localStorage → varsayılan 'genel'.
   const kayitli = typeof localStorage !== 'undefined' ? localStorage.getItem(KEY) : null
@@ -38,9 +48,9 @@ export default function MailSunucuPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Sunucu Yönetimi' }, { etiket: 'Mail Sunucu' }]} />
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Sunucu Yönetimi") }, { etiket: 'Mail Sunucu' }]} />
       <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">Mail Sunucu</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Sunucu geneli mail ayarları ve giden IP havuzu — tek yerden yönetin.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{cevir("Sunucu geneli mail ayarları ve giden IP havuzu — tek yerden yönetin.")}</p>
 
       {/* segment sekmeler */}
       <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700 mb-5" role="tablist" aria-label="Mail sunucu sekmeleri">

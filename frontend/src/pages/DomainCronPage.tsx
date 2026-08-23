@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
@@ -41,7 +44,31 @@ const ON_AYARLAR: Array<{ etiket: string; secim: { dakika: string; saat: string;
   { etiket: 'Ayın 1\'i 00:00',   secim: { dakika: '0',  saat: '0', gun: '1', ay: '*', hafta: '*' } },
 ]
 
+
+const CRON_EN: Record<string, string> = {
+  "(kapalıysa görev çalışmaz ama saklanır)": "(if off, the task won't run but is kept)",
+  "(çıktı yok)": "(no output)",
+  "Argümanlar": "Arguments",
+  "Bir komut çalıştır": "Run a command",
+  "Görev tipi": "Task type",
+  "Görevi Düzenle": "Edit Task",
+  "Görevi şimdi elle çalıştır": "Run the task manually now",
+  "Gün": "Day",
+  "Henüz görev yok. Yukarıdan ekleyin.": "No tasks yet. Add one above.",
+  "Her gün gece 03:00": "Every day at 03:00",
+  "Komut / Açıklama": "Command / Description",
+  "PHP dosyası çalıştır": "Run a PHP file",
+  "Yalnızca hatalar": "Errors only",
+  "Yeni Zamanlanmış Görev": "New Cron Job",
+  "curl ile getirilir (300sn zaman aşımı, çıktı atılır).": "Fetched via curl (300s timeout, output discarded).",
+  "örn. Her gece yedek scripti": "e.g. Nightly backup script",
+  "⚠ Görev hata verdi": "⚠ Task returned an error",
+  "✓ Görev çalıştı": "✓ Task ran",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CRON_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainCronPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -62,7 +89,7 @@ export default function DomainCronPage() {
   }
 
   useEffect(() => {
-    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
+    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
     yukle()
   }, [id])
 
@@ -70,12 +97,12 @@ export default function DomainCronPage() {
     setCalisan(g.idx)
     try {
       const { data } = await api.post(`/domains/${id}/cron/${g.idx}/calistir`)
-      const baslik = data.ok ? '✓ Görev çalıştı' : '⚠ Görev hata verdi'
-      const cikti = (data.cikti || '').trim() || '(çıktı yok)'
+      const baslik = data.ok ? '✓ Görev çalıştı' : cevir("⚠ Görev hata verdi")
+      const cikti = (data.cikti || '').trim() || cevir("(çıktı yok)")
       const hataStr = data.hata ? `\n\nHata: ${data.hata}` : ''
       await bilgi({ baslik, mesaj: `$ ${data.komut}\n\n${cikti}${hataStr}` })
     } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Çalıştırma başarısız') }))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, cevir("Çalıştırma başarısız")) }))
     } finally {
       setCalisan(null)
     }
@@ -87,7 +114,7 @@ export default function DomainCronPage() {
       await api.delete(`/domains/${id}/cron/${g.idx}`)
       yukle()
     } catch (e) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, 'Silme başarısız') }))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(e, cevir("Silme başarısız")) }))
     }
   }
 
@@ -95,12 +122,12 @@ export default function DomainCronPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1300px]">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Zamanlanmış Görevler' },
+        { etiket: cevir("Zamanlanmış Görevler") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Zamanlanmış Görevler</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Zamanlanmış Görevler")}</h1>
       {domain && (
         <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
@@ -117,9 +144,9 @@ export default function DomainCronPage() {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
-          Görev Ekle
+          {cevir(cevir("Görev Ekle"))}
         </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
+        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{gorevler.length} görev</span>
       </div>
 
@@ -127,7 +154,7 @@ export default function DomainCronPage() {
 
       <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
         {yukleniyor ? (
-          <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+          <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
         ) : gorevler.length === 0 ? (
           <div className="py-16 text-center">
             <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
@@ -135,7 +162,7 @@ export default function DomainCronPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-500">Henüz görev yok. Yukarıdan ekleyin.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-500">{cevir("Henüz görev yok. Yukarıdan ekleyin.")}</p>
           </div>
         ) : (
           <div className="lg:overflow-x-auto">
@@ -143,8 +170,8 @@ export default function DomainCronPage() {
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
               <tr>
                 <th className={T.baslik}>Zamanlama</th>
-                <th className={T.baslik}>Komut / Açıklama</th>
-                <th className={`${T.baslik} text-right`}>İşlem</th>
+                <th className={T.baslik}>{cevir("Komut / Açıklama")}</th>
+                <th className={`${T.baslik} text-right`}>{cevir("İşlem")}</th>
               </tr>
             </thead>
             <tbody className={T.govde}>
@@ -155,16 +182,16 @@ export default function DomainCronPage() {
                   </td>
                   <td className={T.hucreBaslik}>
                     <div className="flex items-center gap-2">
-                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Pasif</span>}
+                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{cevir("Pasif")}</span>}
                       {g.tip && g.tip !== 'komut' && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">{g.tip === 'php' ? `PHP ${g.php_surum || ''}` : g.tip}</span>}
                       <span className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</span>
                     </div>
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
                   <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                    <button onClick={() => calistir(g)} disabled={calisan === g.idx} className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition disabled:opacity-50" title="Görevi şimdi elle çalıştır">{calisan === g.idx ? 'Çalışıyor…' : 'Çalıştır'}</button>
-                    <button onClick={() => setModalGorev(g)} className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">Düzenle</button>
-                    <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">Sil</button>
+                    <button onClick={() => calistir(g)} disabled={calisan === g.idx} className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition disabled:opacity-50" title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? 'Çalışıyor…' : cevir("Çalıştır")}</button>
+                    <button onClick={() => setModalGorev(g)} className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">{cevir("Düzenle")}</button>
+                    <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">{cevir("Sil")}</button>
                   </td>
                 </tr>
               ))}
@@ -243,26 +270,26 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
       else await api.put(`/domains/${domainId}/cron/${(gorev as Gorev).idx}`, body)
       onKaydedildi()
     } catch (e) {
-      setHata(apiHata(e, 'Kaydetme başarısız'))
+      setHata(apiHata(e, cevir("Kaydetme başarısız")))
     } finally {
       setIsleniyor(false)
     }
   }
 
   return (
-    <Modal acik={true} baslik={yeni ? 'Yeni Zamanlanmış Görev' : 'Görevi Düzenle'} onKapat={onKapat} genislik="lg">
+    <Modal acik={true} baslik={yeni ? 'Yeni Zamanlanmış Görev' : cevir("Görevi Düzenle")} onKapat={onKapat} genislik="lg">
       <form onSubmit={gonder} className="space-y-4">
         {/* Etkin */}
         <label className="flex items-center gap-2.5 cursor-pointer select-none">
           <input type="checkbox" checked={etkin} onChange={e => setEtkin(e.target.checked)} className="h-4 w-4 accent-brand-600" />
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Etkin <span className="font-normal text-slate-400 dark:text-slate-500">(kapalıysa görev çalışmaz ama saklanır)</span></span>
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Etkin <span className="font-normal text-slate-400 dark:text-slate-500">{cevir("(kapalıysa görev çalışmaz ama saklanır)")}</span></span>
         </label>
 
         {/* Görev tipi */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Görev tipi</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Görev tipi")}</label>
           <div className="flex flex-wrap gap-4">
-            {[['komut', 'Bir komut çalıştır'], ['url', 'Bir URL getir'], ['php', 'PHP dosyası çalıştır']].map(([v, l]) => (
+            {[['komut', cevir("Bir komut çalıştır")], ['url', 'Bir URL getir'], ['php', cevir("PHP dosyası çalıştır")]].map(([v, l]) => (
               <label key={v} className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                 <input type="radio" name="tip" checked={tip === v} onChange={() => setTip(v)} className="accent-brand-600" />
                 {l}
@@ -284,7 +311,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">URL</label>
             <input value={url} onChange={e => setUrl(e.target.value)} required placeholder="https://example.com/cron.php"
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">curl ile getirilir (300sn zaman aşımı, çıktı atılır).</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{cevir("curl ile getirilir (300sn zaman aşımı, çıktı atılır).")}</p>
           </div>
         )}
         {tip === 'php' && (
@@ -296,7 +323,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">PHP sürümü</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("PHP sürümü")}</label>
                 <select value={phpSurum} onChange={e => setPhpSurum(e.target.value)}
                   className="px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
                   {PHP_SURUMLER.map(s => <option key={s} value={s}>PHP {s}</option>)}
@@ -304,7 +331,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Argümanlar <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Argümanlar")} <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
               <input value={args} onChange={e => setArgs(e.target.value)} placeholder="--verbose görev=1"
                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </div>
@@ -325,18 +352,18 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             <Alan etiket="Dakika" value={dakika} onChange={setDakika} />
             <Alan etiket="Saat"   value={saat}   onChange={setSaat} />
-            <Alan etiket="Gün"    value={gun}    onChange={setGun} />
+            <Alan etiket={cevir("Gün")}    value={gun}    onChange={setGun} />
             <Alan etiket="Ay"     value={ay}     onChange={setAy} />
             <Alan etiket="Hafta"  value={hafta}  onChange={setHafta} />
           </div>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">Cron biçimi — <code className="font-mono">*</code> her zaman, <code className="font-mono">*/5</code> her 5'te bir, <code className="font-mono">0,15,30</code> liste, <code className="font-mono">9-17</code> aralık.</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{cevir("Cron biçimi —")} <code className="font-mono">*</code> her zaman, <code className="font-mono">*/5</code> her 5'te bir, <code className="font-mono">0,15,30</code> liste, <code className="font-mono">9-17</code> aralık.</p>
         </div>
 
         {/* Bildirim */}
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Bildirim</label>
           <div className="flex flex-wrap gap-4">
-            {[['bilgi', 'Bilgilendirme'], ['hata', 'Yalnızca hatalar'], ['her', 'Her zaman'], ['yok', 'Gönderme']].map(([v, l]) => (
+            {[['bilgi', 'Bilgilendirme'], ['hata', cevir("Yalnızca hatalar")], ['her', 'Her zaman'], ['yok', cevir("Gönderme")]].map(([v, l]) => (
               <label key={v} className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                 <input type="radio" name="bildirim" checked={bildirim === v} onChange={() => setBildirim(v)} className="accent-brand-600" />
                 {l}
@@ -347,15 +374,15 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
 
         {/* Açıklama */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Açıklama <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
-          <input value={yorum} onChange={e => setYorum(e.target.value)} placeholder="örn. Her gece yedek scripti"
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Açıklama")} <span className="font-normal text-slate-400 dark:text-slate-500">(opsiyonel)</span></label>
+          <input value={yorum} onChange={e => setYorum(e.target.value)} placeholder={cevir("örn. Her gece yedek scripti")}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
         </div>
 
         {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 rounded-md text-sm">İptal</button>
+          <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 rounded-md text-sm">{cevir("İptal")}</button>
           <button type="submit" disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
             {isleniyor ? 'Kaydediliyor…' : (yeni ? 'Ekle' : 'Kaydet')}
           </button>

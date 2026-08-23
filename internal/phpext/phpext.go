@@ -345,6 +345,129 @@ func peclPrefix(s Surum) string {
 	return "php"
 }
 
+// eklentiAdaylar — bir eklenti için denenecek dnf paket adayları. Kurulum (PECLKur)
+// ve kurulabilirlik sorgusu (Kurulabilir) ORTAK kullanır → tek doğruluk kaynağı.
+func eklentiAdaylar(prefix, paket string) []string {
+	if prefix == "php" { // AppStream
+		return []string{
+			"php-" + paket, // bundled
+			"php-pecl-" + paket, "php-pecl-" + paket + "6",
+			"php-pecl-" + paket + "5", "php-pecl-" + paket + "3",
+		}
+	}
+	return []string{
+		prefix + "-php-" + paket, // bundled: php83-php-gmp…
+		prefix + "-php-pecl-" + paket,
+		prefix + "-php-pecl-" + paket + "-im7",
+		prefix + "-php-pecl-" + paket + "6",
+		prefix + "-php-pecl-" + paket + "5",
+		prefix + "-php-pecl-" + paket + "3",
+	}
+}
+
+// ── Dinamik katalog: eklenti kurulabilirliği ──────────────────────────────────
+// Frontend katalogu bu sonuca göre süzer: bu PHP sürümünde HAZIR dnf paketi OLMAYAN
+// eklenti (ör. EL10'da IMAP — php-imap/php-pecl-imap YOK, libc-client de yok) listede
+// GÖZÜKMEZ. Kurulu olanlar filtreden bağımsız her zaman gösterilir (frontend kararı).
+//
+// 🔴 Yalnız KESİN "var" (true) kalıcı cache'lenir; "yok" HER sorguda yeniden prob edilir
+// → geçici bir dnf kilidi bir eklentiyi KALICI gizlemez (son-bilinen-iyi mantığı).
+var (
+	extAvailMu sync.Mutex
+	extAvail   = map[string]bool{} // "surum|anahtar" -> hazır paket var (yalnız true tutulur)
+)
+
+// dnfVarOlanlar — verilen paket adlarından dnf'te GERÇEKTEN mevcut olanların kümesi.
+// 🔴 TEK repoquery çağrısı: eskiden aday-başına paralel `dnf info` yapılıyordu →
+// dnf kilit/CPU çekişmesi + kısa timeout SAHTE false üretiyordu (ör. php-soap "yok"
+// sanılıyordu). Tek sorgu hem güvenilir hem hızlı (ölçüldü: ~0.6sn / 9 aday).
+func dnfVarOlanlar(pkgs []string) map[string]bool {
+	set := map[string]bool{}
+	if len(pkgs) == 0 {
+		return set
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	args := append([]string{"repoquery", "--quiet", "--qf", "%{name}\n"}, pkgs...)
+	out, err := exec.CommandContext(ctx, "dnf", args...).Output()
+	if err != nil {
+		return set // sorgu başarısız → hiçbiri "kesin var" değil (true cache'lenmez, sonra tekrar denenir)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if n := strings.TrimSpace(line); n != "" {
+			set[n] = true
+		}
+	}
+	return set
+}
+
+type kurulabilirReq struct {
+	Surum      string   `json:"surum"`
+	Anahtarlar []string `json:"anahtarlar"`
+}
+
+// Kurulabilir: POST /php-extensions/kurulabilir {surum, anahtarlar[]} →
+// {kurulabilir: {anahtar: bool}}. Frontend katalog süzme için çağırır.
+func (h *Handlers) Kurulabilir(w http.ResponseWriter, r *http.Request) {
+	var req kurulabilirReq
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	s, ok := surumByID(req.Surum)
+	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, "sürüm bulunamadı")
+		return
+	}
+	prefix := peclPrefix(s)
+
+	out := map[string]bool{}
+	var eksik []string
+	extAvailMu.Lock()
+	for _, a := range req.Anahtarlar {
+		if extAvail[req.Surum+"|"+a] { // yalnız cache'lenmiş true'lar
+			out[a] = true
+		} else {
+			eksik = append(eksik, a)
+		}
+	}
+	extAvailMu.Unlock()
+
+	// Bilinmeyenler: TÜM adaylarını TEK dnf repoquery ile sorgula (paralel dnf YOK).
+	if len(eksik) > 0 {
+		adayMap := make(map[string][]string, len(eksik))
+		var hepsi []string
+		gorulen := map[string]bool{}
+		for _, a := range eksik {
+			ad := eklentiAdaylar(prefix, a)
+			adayMap[a] = ad
+			for _, p := range ad {
+				if !gorulen[p] {
+					gorulen[p] = true
+					hepsi = append(hepsi, p)
+				}
+			}
+		}
+		varSet := dnfVarOlanlar(hepsi)
+		extAvailMu.Lock()
+		for _, a := range eksik {
+			v := false
+			for _, p := range adayMap[a] {
+				if varSet[p] {
+					v = true
+					break
+				}
+			}
+			out[a] = v
+			if v {
+				extAvail[req.Surum+"|"+a] = true // yalnız kesin true kalıcı
+			}
+		}
+		extAvailMu.Unlock()
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kurulabilir": out})
+}
+
 // peclKomut — alt süreci panel sırları OLMADAN, temiz env ile hazırlar.
 func peclKomut(s Surum, argv ...string) *exec.Cmd {
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -398,21 +521,7 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		// eklentileri (redis, mongodb, imagick…) "<prefix>-php-pecl-<ad>".
 		// Bundled desenini ÖNCE dene: gmp gibi eklentiler böylece kurulabilir.
 		is.set("Hazır paket aranıyor…", 10)
-		adaylar := []string{
-			prefix + "-php-" + paket, // (a) bundled: php83-php-gmp, php83-php-imap…
-			prefix + "-php-pecl-" + paket,
-			prefix + "-php-pecl-" + paket + "-im7",
-			prefix + "-php-pecl-" + paket + "6",
-			prefix + "-php-pecl-" + paket + "5",
-			prefix + "-php-pecl-" + paket + "3",
-		}
-		if prefix == "php" {
-			adaylar = []string{
-				"php-" + paket, // bundled (AppStream)
-				"php-pecl-" + paket, "php-pecl-" + paket + "6",
-				"php-pecl-" + paket + "5", "php-pecl-" + paket + "3",
-			}
-		}
+		adaylar := eklentiAdaylar(prefix, paket)
 		dnfPkg := ""
 		for _, ad := range adaylar {
 			if exec.Command("dnf", "info", "--quiet", ad).Run() == nil {
@@ -452,11 +561,17 @@ func (h *Handlers) PECLKur(w http.ResponseWriter, r *http.Request) {
 		is.mu.Unlock()
 
 		if _, err := os.Stat(s.PECLBin); err != nil {
-			is.set("PECL/PEAR kuruluyor ("+prefix+"-php-pear)…", 25)
-			out, err := exec.Command("dnf", "install", "-y", prefix+"-php-pear").CombinedOutput()
+			// 🔴 AppStream (prefix=="php") ozel-durumu — aksi halde "php-php-pear" gibi
+			// BOZUK paket adi uretilir (devel'de zaten var, pear'da eksikti).
+			pear := prefix + "-php-pear"
+			if prefix == "php" {
+				pear = "php-pear"
+			}
+			is.set("PECL/PEAR kuruluyor ("+pear+")…", 25)
+			out, err := exec.Command("dnf", "install", "-y", pear).CombinedOutput()
 			is.logEkle(out)
 			if err != nil {
-				is.basarisiz("PEAR kurulamadı (" + prefix + "-php-pear): " + sonSatir(out))
+				is.basarisiz("PEAR kurulamadı (" + pear + "): " + sonSatir(out))
 				return
 			}
 			if _, err := os.Stat(s.PECLBin); err != nil {

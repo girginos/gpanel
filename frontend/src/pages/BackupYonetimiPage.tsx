@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { Link } from 'react-router-dom'
@@ -41,7 +42,7 @@ export default function BackupYonetimiPage() {
     setHata(null); setBasari(null); setYedekliyor(true)
     try {
       const { data } = await api.post('/admin/backups/jobs', {})
-      setBasari(`Yedekleme başladı — iş #${data.job_id} (${data.toplam} domain).`)
+      setBasari(cevirT("Yedekleme başladı — iş #{0} ({1} domain).", data.job_id, data.toplam))
       jobYukle()
     } catch (e) { setHata(apiHata(e, 'Yedekleme başlatılamadı')) }
     finally { setYedekliyor(false) }

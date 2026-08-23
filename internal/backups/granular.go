@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,30 +87,63 @@ type arsivManifest struct {
 	Veritabanlari []string `json:"veritabanlari"`
 }
 
+// dosyaSha256: bir dosyanin sha256 checksum'i (hex). At-rest bit-rot / uzak-kopya
+// dogrulamasi + olusturma-ani butunluk kaydi icin. Buyuk arsivi akiskan okur (streaming).
+func dosyaSha256(yol string) (string, error) {
+	f, err := os.Open(yol)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // arsivOlustur: /home/<sk> + TUM domain DB'leri (__db__/<ad>.sql) + manifest'i tek
 // .tar.gz'ye paketler. Hem manuel (Create) hem otomatik (scheduler) tarafindan kullanilir.
 // Eski surum yalniz <sk>_main aliyordu; artik wp_* gibi ek DB'ler de yedeklenir.
-func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosya, olusturmaTS string) (int64, error) {
+//
+// 🔴 BUTUNLUK: tar'in cikis kodu YALNIZ kaba hatalari yakalar; sessiz sikistirma
+// bozulmasini (truncation, disk hatasi) yakalamaz. Arsiv olusturulur olusturulmaz
+// `gzip -t` ile dogrulanir ve sha256 hesaplanir. Bozuk arsiv SILINIR ve hata doner
+// (cagiran KRITIK bildirim gonderir). Doner: (boyut, sha256, basarisiz_db_listesi, hata).
+func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosya, olusturmaTS string) (int64, string, []string, error) {
 	abs := filepath.Join(dir, dosya)
 	dbDir := filepath.Join(dir, "__db__")
 	_ = os.RemoveAll(dbDir)
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
-		return 0, fmt.Errorf("db staging: %w", err)
+		return 0, "", nil, fmt.Errorf("db staging: %w", err)
 	}
 	defer os.RemoveAll(dbDir)
 
 	yazilan := []string{}
+	basarisizDB := []string{}
 	for _, dbName := range domainDBleri(db, domainID, sk) {
+		// 🔴 EKSIK-VERI vs DB'SIZ SITE AYRIMI: domainDBleri her zaman speculatif <sk>_main
+		// ekler. DB'siz statik site'de bu DB HIC OLMAZ → dump'i basarisiz olur ama bu bir
+		// HATA DEGILDIR (yedeklenecek veri yok). Yalniz GERCEKTEN VAR OLAN bir DB'nin dump'i
+		// basarisizsa "eksik veri" sayilir (kilit/izin/bozulma = gercek veri kaybi riski).
+		// mysqldump ile AYNI auth yolu (root socket) kullanilir ki gorunurluk tutarli olsun.
+		chk := exec.CommandContext(ctx, "bash", "-c",
+			fmt.Sprintf("mysql -N -e \"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=%s\"", shq(dbName)))
+		if out, _ := chk.Output(); strings.TrimSpace(string(out)) == "" {
+			continue // DB yok — beklenmiyor (DB'siz site), sessizce atla
+		}
 		hedef := filepath.Join(dbDir, dbName+".sql")
 		cmd := exec.CommandContext(ctx, "bash", "-c",
 			fmt.Sprintf("mysqldump --single-transaction --skip-lock-tables %s > %s 2>/dev/null",
 				shq(dbName), shq(hedef)))
 		if err := cmd.Run(); err != nil {
 			_ = os.Remove(hedef)
+			basarisizDB = append(basarisizDB, dbName) // DB VAR ama dump BASARISIZ = gercek problem
 			continue
 		}
 		if fi, e := os.Stat(hedef); e != nil || fi.Size() == 0 {
 			_ = os.Remove(hedef)
+			basarisizDB = append(basarisizDB, dbName)
 			continue
 		}
 		yazilan = append(yazilan, dbName)
@@ -122,13 +157,26 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 	args := []string{"czf", abs, "-C", "/home", sk, "-C", dir, "__db__"}
 	if out, err := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); err != nil {
 		_ = os.Remove(abs)
-		return 0, fmt.Errorf("tar: %s: %w", strings.TrimSpace(string(out)), err)
+		return 0, "", basarisizDB, fmt.Errorf("tar: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+
+	// 🔴 BUTUNLUK DOGRULAMASI: gzip stream'i saglam mi (bozulma/truncation tespiti).
+	if out, err := exec.CommandContext(ctx, "gzip", "-t", abs).CombinedOutput(); err != nil {
+		_ = os.Remove(abs) // bozuk arsivi tut-ma: yaniltici "gecerli yedek" olusmasin
+		return 0, "", basarisizDB, fmt.Errorf("yedek butunluk dogrulamasi basarisiz — BOZUK arsiv: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// sha256: at-rest bit-rot / uzak-hedef kopya dogrulamasi icin saklanir.
+	sum, err := dosyaSha256(abs)
+	if err != nil {
+		return 0, "", basarisizDB, fmt.Errorf("checksum hesaplanamadi: %w", err)
+	}
+
 	var boyut int64
 	if st, _ := os.Stat(abs); st != nil {
 		boyut = st.Size()
 	}
-	return boyut, nil
+	return boyut, sum, basarisizDB, nil
 }
 
 // IcerikDosya / IcerikDB: arsiv listeleme cikti tipleri.

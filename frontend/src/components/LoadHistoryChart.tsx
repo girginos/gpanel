@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
@@ -124,7 +125,7 @@ export default function LoadHistoryChart() {
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sistem Yükü Geçmişi</h3>
           <p className="text-[11px] text-slate-400 dark:text-slate-500">
-            Load average (1 / 5 / 15 dk){cek ? ` · ${cek} çekirdek` : ''} · √ ölçek
+            Load average (1 / 5 / 15 dk){cek ? cevirT(" · {0} çekirdek", cek) : ''} · √ ölçek
           </p>
         </div>
         <div className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">

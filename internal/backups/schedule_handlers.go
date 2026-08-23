@@ -85,3 +85,11 @@ func (h *Handlers) TickNow(w http.ResponseWriter, r *http.Request) {
 	go TickOnce(h.DB)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "tick": "started"})
 }
+
+// VerifyNow: POST /admin/backups/verify — at-rest butunluk taramasini SIMDI calistirir
+// (operator on-demand + otomatik 04:00 taramasiyla ayni is). Her domainin en yeni yedegini
+// re-hash edip saklanan sha256 ile karsilastirir; bozulani dogrulama=bozuk + KRITIK bildirim.
+func (h *Handlers) VerifyNow(w http.ResponseWriter, r *http.Request) {
+	kontrol, bozuk := verifyYedekBozulma(h.DB)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "kontrol": kontrol, "bozuk": bozuk})
+}

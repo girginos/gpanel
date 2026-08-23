@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
@@ -26,6 +29,11 @@ const DILLER: { kod: Dil; ad: string; uzantilar: string[] }[] = [
   { kod: 'xml',  ad: 'XML',        uzantilar: ['xml', 'svg'] },
   { kod: 'text', ad: 'Düz Metin',  uzantilar: ['txt', 'log', 'ini', 'conf', 'env'] },
 ]
+
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function dilTespit(yol: string): Dil {
   const m = yol.toLowerCase().match(/\.([a-z0-9]+)$/)
@@ -58,6 +66,7 @@ interface Props {
 }
 
 export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: Props) {
+  useTranslation() // dil re-render aboneligi
   const [tamEkran, setTamEkran] = useState(false)
   const [dil, setDil] = useState<Dil>(() => dilTespit(yol))
   const [kayitDurum, setKayitDurum] = useState<'temiz' | 'kirli' | 'kaydediliyor' | 'kaydedildi'>('temiz')
@@ -137,9 +146,9 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             </svg>
             <span className="text-sm font-semibold text-slate-100 truncate">{dosyaAdi}</span>
             <span className="text-xs text-slate-500 dark:text-slate-500 truncate min-w-0 hidden md:inline">— {yol}</span>
-            {kayitDurum === 'kirli' && <span className="text-[10px] uppercase tracking-wider text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded">Değişiklik var</span>}
-            {kayitDurum === 'kaydediliyor' && <span className="text-[10px] uppercase tracking-wider text-sky-400 bg-sky-500/15 px-1.5 py-0.5 rounded">Kaydediliyor…</span>}
-            {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded"><span className="inline-flex items-center gap-1"><Ikon d={I.onay} className="h-3 w-3" />Kaydedildi</span></span>}
+            {kayitDurum === 'kirli' && <span className="text-[10px] uppercase tracking-wider text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded">{cevir("Değişiklik var")}</span>}
+            {kayitDurum === 'kaydediliyor' && <span className="text-[10px] uppercase tracking-wider text-sky-400 bg-sky-500/15 px-1.5 py-0.5 rounded">{cevir("Kaydediliyor…")}</span>}
+            {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded"><span className="inline-flex items-center gap-1"><Ikon d={I.onay} className="h-3 w-3" />{cevir("Kaydedildi")}</span></span>}
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
@@ -147,7 +156,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
               value={dil}
               onChange={e => setDil(e.target.value as Dil)}
               className="text-xs bg-slate-700 text-slate-100 border border-slate-600 rounded px-2 py-1 focus:outline-none focus:border-slate-400"
-              title="Sözdizimi"
+              title={cevir(cevir("Sözdizimi"))}
             >
               {DILLER.map(d => <option key={d.kod} value={d.kod}>{d.ad}</option>)}
             </select>
@@ -164,14 +173,14 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
               className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 dark:text-slate-500 text-white rounded font-medium"
               title="Ctrl+S"
             >
-              <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />Kaydet</span>
+              <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />{cevir("Kaydet")}</span>
             </button>
             <button
               onClick={onKapat}
               className="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded"
               title="ESC"
             >
-              Kapat
+              {cevir("Kapat")}
             </button>
           </div>
         </div>

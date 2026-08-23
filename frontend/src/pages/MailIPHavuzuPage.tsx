@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
@@ -21,6 +25,28 @@ type Dedicated = { domain: string; ip: string }
 type DedYanit = { dedicated: Dedicated[]; aktif_ip: string[] }
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+
+const MIPH_EN: Record<string, string> = {
+  "Bu adaptörde tanımlı": "Defined on this adapter",
+  "Domaine Özel IP (Dedicated)": "Domain-Specific IP (Dedicated)",
+  "Havuzdaki tüm IP'leri kara listelerde (DNSBL) tara": "Scan all IPs in the pool against blocklists (DNSBL)",
+  "Henüz kara liste kontrolü yapılmadı": "No blocklist check yet",
+  "Henüz uygulanmadı": "Not applied yet",
+  "IP algılanamadı.": "IP could not be detected.",
+  "IP havuzu yüklenemedi (mail eklentisi aktif mi?)": "Failed to load IP pool (is the mail add-on active?)",
+  "Kara liste kontrolü yapılamadı": "Failed to run blocklist check",
+  "Sunucuya tanımlı tüm IP'ler otomatik algılanır (adaptörler farklı olabilir). Havuza tek tıkla ekleyin.": "All IPs defined on the server are auto-detected (adapters may differ). Add to the pool with one click.",
+  "Warm-up açık → kademeli ısınma; kapalı → tam ağırlık (10)": "Warm-up on → gradual warm-up; off → full weight (10)",
+  "Warm-up kapalı — tam ağırlık": "Warm-up off — full weight",
+  "kademeli ısınır": "warms up gradually",
+  "otomatik rotasyondan çıkar": "removed from auto rotation",
+  "Çıkış IP'si (havuzdan)": "Outgoing IP (from pool)",
+  "Önce yukarıda en az bir aktif IP ekleyip kaydedin.": "First add and save at least one active IP above.",
+  "✓ IP havuzu kaydedildi, arayüze tanımlandı ve Postfix rotasyonu uygulandı.": "✓ IP pool saved, defined on the interface and Postfix rotation applied.",
+  "✓ IP temiz — kara listede değil": "✓ IP is clean — not on any blocklist",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (MIPH_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function gecerliIP(s: string): boolean {
   const m = IPV4.exec(s.trim())
   return !!m && m.slice(1).every(o => +o >= 0 && +o <= 255)
@@ -44,6 +70,7 @@ function SaatlikBar({ veri, max }: { veri: number[]; max: number }) {
 }
 
 export default function MailIPHavuzuPage() {
+  useTranslation() // dil re-render aboneligi
   const [havuz, setHavuz] = useState<IPKaydi[]>([])
   const [arayuz, setArayuz] = useState('')
   const [sunucuIP, setSunucuIP] = useState<SunucuAdres[]>([])
@@ -65,7 +92,7 @@ export default function MailIPHavuzuPage() {
   function yukle() {
     api.get<Yanit>('/eklenti/mail/genel/ip-havuzu')
       .then(r => { setHavuz(r.data.havuz ?? []); setArayuz(r.data.arayuz ?? ''); setSunucuIP(r.data.sunucu_ipleri ?? []) })
-      .catch(e => setHata(apiHata(e, 'IP havuzu yüklenemedi (mail eklentisi aktif mi?)')))
+      .catch(e => setHata(apiHata(e, cevir("IP havuzu yüklenemedi (mail eklentisi aktif mi?)"))))
       .finally(() => setYukleniyor(false))
   }
   function dedYukle() {
@@ -101,7 +128,7 @@ export default function MailIPHavuzuPage() {
       setBildirim(kirli.length === 0
         ? '✓ Kara liste kontrolü tamamlandı — tüm IP\'ler temiz (hiçbir kara listede değil).'
         : `⚠ ${kirli.length} IP kara listede: ${kirli.map(k => k.ip).join(', ')}`)
-    } catch (e) { setHata(apiHata(e, 'Kara liste kontrolü yapılamadı')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kara liste kontrolü yapılamadı"))) }
     finally { setDnsblKontrol(false) }
   }
   function satirSil(i: number) { setHavuz(h => h.filter((_, j) => j !== i)) }
@@ -110,14 +137,14 @@ export default function MailIPHavuzuPage() {
     setHata(null); setBildirim(null)
     const temiz = havuz.map(k => ({ ...k, ip: k.ip.trim() })).filter(k => k.ip !== '')
     const gecersiz = temiz.find(k => !gecerliIP(k.ip))
-    if (gecersiz) { setHata(`Geçersiz IPv4 adresi: ${gecersiz.ip}`); return }
+    if (gecersiz) { setHata(cevirT(cevir("Geçersiz IPv4 adresi: {0}"), gecersiz.ip)); return }
     setKaydediliyor(true)
     try {
       const r = await api.put<Yanit>('/eklenti/mail/genel/ip-havuzu', {
         havuz: temiz.map(k => ({ ip: k.ip, aktif: k.aktif, etiket: k.etiket, warmup: k.warmup ?? true })),
       })
       setHavuz(r.data.havuz ?? [])
-      setBildirim('✓ IP havuzu kaydedildi, arayüze tanımlandı ve Postfix rotasyonu uygulandı.')
+      setBildirim(cevir("✓ IP havuzu kaydedildi, arayüze tanımlandı ve Postfix rotasyonu uygulandı."))
       dedYukle() // aktif IP listesi değişmiş olabilir
     } catch (e) { setHata(apiHata(e, 'Kaydedilemedi')) }
     finally { setKaydediliyor(false) }
@@ -159,12 +186,12 @@ export default function MailIPHavuzuPage() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400 pl-1">
         {/* warm-up */}
         {k.warmup === false
-          ? <span title="Warm-up kapalı — tam ağırlık">warm-up: kapalı · ağırlık {agirlik}/10 (tam)</span>
-          : <span title="IP eklendiğinden bu yana gün · rotasyon ağırlığı">
+          ? <span title={cevir("Warm-up kapalı — tam ağırlık")}>warm-up: kapalı · ağırlık {agirlik}/10 (tam)</span>
+          : <span title={cevir(cevir("IP eklendiğinden bu yana gün · rotasyon ağırlığı"))}>
               warm-up: gün {k.warmup_gun ?? 0} · ağırlık {agirlik}/10
             </span>}
         {/* warm-up mini bar */}
-        <span className="inline-flex h-1.5 w-16 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden align-middle" title={`ağırlık ${agirlik}/10`}>
+        <span className="inline-flex h-1.5 w-16 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden align-middle" title={cevirT("ağırlık {0}/10", agirlik)}>
           <span className="h-full bg-brand-500" style={{ width: `${Math.round((agirlik / 10) * 100)}%` }} />
         </span>
         {/* kara liste (DNSBL) durumu — temizse "IP temiz", kirliyse yalnız kirli servisler */}
@@ -173,8 +200,8 @@ export default function MailIPHavuzuPage() {
               🔴 Kirli: {k.dnsbl!.join(', ')}
             </span>
           : k.son_kontrol
-            ? <span className="text-emerald-600 dark:text-emerald-400" title={`Son kontrol: ${k.son_kontrol}`}>✓ IP temiz — kara listede değil</span>
-            : <span className="text-slate-400" title="Henüz kara liste kontrolü yapılmadı">kara liste: kontrol edilmedi</span>}
+            ? <span className="text-emerald-600 dark:text-emerald-400" title={`Son kontrol: ${k.son_kontrol}`}>{cevir("✓ IP temiz — kara listede değil")}</span>
+            : <span className="text-slate-400" title={cevir("Henüz kara liste kontrolü yapılmadı")}>kara liste: kontrol edilmedi</span>}
         {/* rotasyon durumu (ayrı gösterge) */}
         {k.rotasyonda
           ? <span className="text-emerald-600 dark:text-emerald-400">· rotasyonda</span>
@@ -188,34 +215,34 @@ export default function MailIPHavuzuPage() {
   return (
     <div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
-        Giden mail trafiği için birden çok IP tanımlayın. Aktif IP'ler otomatik olarak sunucu arayüzüne
+        {cevir("Giden mail trafiği için birden çok IP tanımlayın. Aktif IP'ler otomatik olarak sunucu arayüzüne")}
         {arayuz && <span className="font-mono"> ({arayuz})</span>} eklenir ve her e-posta havuzdaki IP'lerden
-        ağırlıklı-rastgele gönderilir. Yeni IP'ler <span className="font-medium">kademeli ısınır</span> (warm-up),
-        DNSBL'e düşen IP <span className="font-medium">otomatik rotasyondan çıkar</span>.
+        {cevir("ağırlıklı-rastgele gönderilir. Yeni IP'ler")} <span className="font-medium">{cevir("kademeli ısınır")}</span> (warm-up),
+        DNSBL'e düşen IP <span className="font-medium">{cevir("otomatik rotasyondan çıkar")}</span>.
       </p>
 
       {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">Yükleniyor…</div> : (
+      {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div> : (
         <div className="space-y-5">
           {/* Sunucudaki mevcut IP'ler — dinamik, tüm adaptörler otomatik algılanır */}
           <section className={kart}>
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sunucudaki IP Adresleri</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Sunucuya tanımlı tüm IP'ler otomatik algılanır (adaptörler farklı olabilir). Havuza tek tıkla ekleyin.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{cevir("Sunucuya tanımlı tüm IP'ler otomatik algılanır (adaptörler farklı olabilir). Havuza tek tıkla ekleyin.")}</p>
               </div>
-              <button onClick={() => { setYukleniyor(true); yukle() }} className="text-xs text-slate-500 hover:text-brand-600 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5" title="Sunucu IP'lerini yeniden tara"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
+              <button onClick={() => { setYukleniyor(true); yukle() }} className="text-xs text-slate-500 hover:text-brand-600 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5" title="Sunucu IP'lerini yeniden tara"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
             </div>
             {sunucuIP.length === 0 ? (
-              <div className="py-4 text-center text-sm text-slate-400">IP algılanamadı.</div>
+              <div className="py-4 text-center text-sm text-slate-400">{cevir("IP algılanamadı.")}</div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {sunucuIP.map(s => (
                   <div key={s.ip} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 pl-3 pr-1.5 py-1.5">
                     <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{s.ip}</span>
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono" title="Ağ adaptörü">{s.arayuz}</span>
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono" title={cevir("Ağ adaptörü")}>{s.arayuz}</span>
                     {s.havuzda
                       ? <span className="text-[11px] text-emerald-600 dark:text-emerald-400 px-1.5">✓ havuzda</span>
                       : <button onClick={() => satirEkle(s.ip)} className="text-[11px] font-medium text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-200 dark:border-brand-800 rounded px-2 py-0.5 transition-colors">+ Havuza ekle</button>}
@@ -230,13 +257,13 @@ export default function MailIPHavuzuPage() {
               <div>
                 <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Giden IP Adresleri</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  {aktifSayisi > 0 ? `${aktifSayisi} aktif IP — ağırlıklı rotasyon etkin` : 'Aktif IP yok — varsayılan sunucu IP\'si kullanılır'}
+                  {aktifSayisi > 0 ? cevirT(cevir("{0} aktif IP — ağırlıklı rotasyon etkin"), aktifSayisi) : 'Aktif IP yok — varsayılan sunucu IP\'si kullanılır'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={dnsblKontrolEt} disabled={dnsblKontrol || havuz.length === 0}
                   className="text-sm font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 hover:border-brand-300 hover:text-brand-600 disabled:opacity-50 transition-colors"
-                  title="Havuzdaki tüm IP'leri kara listelerde (DNSBL) tara">
+                  title={cevir("Havuzdaki tüm IP'leri kara listelerde (DNSBL) tara")}>
                   {dnsblKontrol ? 'Kontrol ediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kalkan} /> Kara Liste Kontrol Et</span>}
                 </button>
                 <button onClick={() => satirEkle()} className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-800 rounded-lg px-3 py-1.5">+ IP ekle</button>
@@ -248,7 +275,7 @@ export default function MailIPHavuzuPage() {
             ) : (
               <div className="space-y-3">
                 <div className="hidden sm:grid grid-cols-[1.1fr_110px_1.4fr_auto_auto_auto_auto] gap-3 px-1 text-xs font-medium text-slate-400">
-                  <span>IP adresi (IPv4)</span><span>Etiket</span><span className="text-center">Saatlik çıkış</span><span>Arayüz</span><span>Warm-up</span><span>Aktif</span><span></span>
+                  <span>IP adresi (IPv4)</span><span>Etiket</span><span className="text-center">{cevir("Saatlik çıkış")}</span><span>{cevir("Arayüz")}</span><span>Warm-up</span><span>{cevir("Aktif")}</span><span></span>
                 </div>
                 {havuz.map((k, i) => (
                   <div key={i} className="border-b border-slate-100 dark:border-slate-700/60 pb-3 last:border-0 last:pb-0">
@@ -259,10 +286,10 @@ export default function MailIPHavuzuPage() {
                       <SaatlikBar veri={grafik[k.ip.trim()] ?? []} max={grafikMax} />
                       <span className="text-xs text-center whitespace-nowrap">
                         {k.arayuzde
-                          ? <span className="text-emerald-600 dark:text-emerald-400 font-mono" title="Bu adaptörde tanımlı">✓ {k.arayuz || 'tanımlı'}</span>
-                          : <span className="text-slate-400" title="Henüz uygulanmadı">✗ yok</span>}
+                          ? <span className="text-emerald-600 dark:text-emerald-400 font-mono" title={cevir("Bu adaptörde tanımlı")}>✓ {k.arayuz || cevir("tanımlı")}</span>
+                          : <span className="text-slate-400" title={cevir("Henüz uygulanmadı")}>✗ yok</span>}
                       </span>
-                      <label className="inline-flex items-center gap-1.5 cursor-pointer justify-self-start sm:justify-self-center" title="Warm-up açık → kademeli ısınma; kapalı → tam ağırlık (10)">
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer justify-self-start sm:justify-self-center" title={cevir("Warm-up açık → kademeli ısınma; kapalı → tam ağırlık (10)")}>
                         <input type="checkbox" checked={k.warmup ?? true} onChange={e => satirGuncelle(i, { warmup: e.target.checked })}
                           className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
                         <span className="text-xs text-slate-500 sm:hidden">Warm-up</span>
@@ -270,9 +297,9 @@ export default function MailIPHavuzuPage() {
                       <label className="inline-flex items-center gap-1.5 cursor-pointer justify-self-start sm:justify-self-center">
                         <input type="checkbox" checked={k.aktif} onChange={e => satirGuncelle(i, { aktif: e.target.checked })}
                           className="rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
-                        <span className="text-xs text-slate-500 sm:hidden">Aktif</span>
+                        <span className="text-xs text-slate-500 sm:hidden">{cevir("Aktif")}</span>
                       </label>
-                      <button onClick={() => satirSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil"><Ikon d={I.kapat} /></button>
+                      <button onClick={() => satirSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title={cevir("Sil")}><Ikon d={I.kapat} /></button>
                     </div>
                     {k.ip.trim() !== '' && durumSatiri(k)}
                   </div>
@@ -292,10 +319,10 @@ export default function MailIPHavuzuPage() {
           <section className={kart}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Domaine Özel IP (Dedicated)</h2>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Domaine Özel IP (Dedicated)")}</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Seçili domainlerin gideni rotasyon yerine <span className="font-medium">sabit</span> bir havuz IP'sinden çıkar.
-                  Diğer tüm domainler ağırlıklı rotasyonu kullanmaya devam eder.
+                  {cevir(cevir("Seçili domainlerin gideni rotasyon yerine"))} <span className="font-medium">sabit</span> {cevir("bir havuz IP'sinden çıkar.")}
+                  {cevir(cevir("Diğer tüm domainler ağırlıklı rotasyonu kullanmaya devam eder."))}
                 </p>
               </div>
               <button onClick={dedEkle} disabled={aktifIP.length === 0}
@@ -306,13 +333,13 @@ export default function MailIPHavuzuPage() {
             {dedHata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{dedHata}</div>}
 
             {aktifIP.length === 0 ? (
-              <div className="py-6 text-center text-sm text-slate-400">Önce yukarıda en az bir aktif IP ekleyip kaydedin.</div>
+              <div className="py-6 text-center text-sm text-slate-400">{cevir("Önce yukarıda en az bir aktif IP ekleyip kaydedin.")}</div>
             ) : dedicated.length === 0 ? (
               <div className="py-6 text-center text-sm text-slate-400">Domaine özel IP tanımlı değil. "+ Ekle" ile başlayın.</div>
             ) : (
               <div className="space-y-2.5">
                 <div className="hidden sm:grid grid-cols-[1fr_1fr_auto] gap-3 px-1 text-xs font-medium text-slate-400">
-                  <span>Gönderen domaini</span><span>Çıkış IP'si (havuzdan)</span><span></span>
+                  <span>{cevir("Gönderen domaini")}</span><span>{cevir("Çıkış IP'si (havuzdan)")}</span><span></span>
                 </div>
                 {dedicated.map((d, i) => (
                   <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-center">
@@ -321,7 +348,7 @@ export default function MailIPHavuzuPage() {
                       {!aktifIP.includes(d.ip) && d.ip && <option value={d.ip}>{d.ip} (havuzda değil)</option>}
                       {aktifIP.map(ip => <option key={ip} value={ip}>{ip}</option>)}
                     </select>
-                    <button onClick={() => dedSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title="Sil"><Ikon d={I.kapat} /></button>
+                    <button onClick={() => dedSil(i)} className="text-sm text-red-500 hover:text-red-600 justify-self-start sm:justify-self-center px-2" title={cevir("Sil")}><Ikon d={I.kapat} /></button>
                   </div>
                 ))}
               </div>

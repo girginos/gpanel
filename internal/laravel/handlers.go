@@ -111,6 +111,16 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	if appRoot == "" {
 		appRoot = "public_html"
 	}
+	// 🔴 OTOMATIK ALGILAMA: kayitli kokte Laravel yoksa sunucuyu tara ve bulunani
+	// sahiplen. Tasinmis Laravel'de uygulama kodu belge kokunun DISINDA olabilir
+	// (public_html kardesi laravel_11); bu olmadan panel "kur" ekranini gosterip
+	// mevcut CALISAN uygulamayi gormezden geliyordu.
+	otomatikAlgilandi := ""
+	if kur, _ := laravelKurulu(filepath.Join("/home", sk, appRoot)); !kur {
+		if ad := otomatikSahiplenDurum(r.Context(), h.DB, id, sk); ad != "" {
+			appRoot, otomatikAlgilandi = ad, ad
+		}
+	}
 	appDir, err := guvenliAppDir(sk, appRoot)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
@@ -132,23 +142,38 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"kurulu":           artisan,
-		"kayit_var":        k.Mevcut,
-		"app_root":         appRoot,
-		"kullanici":        sk,
-		"dizin":            appDir,
-		"php_surum":        php,
-		"node_surum":       k.NodeSurum,
-		"composer_json":    composerJSON,
-		"git_var":          gitVar,
-		"last_commit":      lastCommit,
-		"bakim":            bakimAktif(appDir),
-		"schedule_enabled": k.ScheduleEnabled,
-		"queue_enabled":    k.QueueEnabled,
-		"queue_timeout":    k.QueueTimeout,
-		"queue_max_jobs":   k.QueueMaxJobs,
-		"queue_connection": k.QueueConnection,
-		"son_deploy_durum": k.SonDeployDurum,
-		"php_binary":       phpBin(php),
+		"kurulu":             artisan,
+		"otomatik_algilandi": otomatikAlgilandi,
+		"eksikler":           laravelEksikler(appDir, artisan, composerJSON),
+		"kayit_var":          k.Mevcut,
+		"app_root":           appRoot,
+		"kullanici":          sk,
+		"dizin":              appDir,
+		"php_surum":          php,
+		"node_surum":         k.NodeSurum,
+		"composer_json":      composerJSON,
+		"git_var":            gitVar,
+		"last_commit":        lastCommit,
+		"bakim":              bakimAktif(appDir),
+		"schedule_enabled":   k.ScheduleEnabled,
+		"queue_enabled":      k.QueueEnabled,
+		"queue_timeout":      k.QueueTimeout,
+		"queue_max_jobs":     k.QueueMaxJobs,
+		"queue_connection":   k.QueueConnection,
+		"son_deploy_durum":   k.SonDeployDurum,
+		"php_binary":         phpBin(php),
 	})
+}
+
+// otomatikSahiplenDurum — sunucuda Laravel koku ararsa ilkini cp_laravel_apps'e yazar
+// ve adini doner (yoksa ""). Idempotent; dosya/veri DEGISTIRMEZ.
+func otomatikSahiplenDurum(ctx context.Context, db *sql.DB, id int64, sk string) string {
+	adaylar := laravelKokAdaylari(sk)
+	if len(adaylar) == 0 {
+		return ""
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE cp_laravel_apps SET app_root=? WHERE domain_id=?`, adaylar[0], id); err != nil {
+		return ""
+	}
+	return adaylar[0]
 }

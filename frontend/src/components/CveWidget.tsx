@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { useDialog } from '@/components/Dialog'
@@ -41,7 +45,13 @@ const ONEM: Record<string, { ad: string; nokta: string; metin: string }> = {
   dusuk: { ad: 'Düşük', nokta: 'bg-slate-400', metin: 'text-slate-500 dark:text-slate-400' },
 }
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function CveWidget() {
+  useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const [veri, setVeri] = useState<CveOzet | null>(null)
   const [hata, setHata] = useState('')
@@ -59,7 +69,7 @@ export default function CveWidget() {
       setHata('')
       if (data.guncelleme_calisiyor) baslatPoll()
     } catch (e) {
-      setHata(apiHata(e, 'CVE bilgisi alınamadı'))
+      setHata(apiHata(e, cevir("CVE bilgisi alınamadı")))
     }
   }
 
@@ -81,7 +91,7 @@ export default function CveWidget() {
         if (!data.calisiyor) {
           if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null }
           setGuncelleniyor(false)
-          setMesaj('Güvenlik güncellemeleri tamamlandı.')
+          setMesaj(cevir("Güvenlik güncellemeleri tamamlandı."))
           getir(true)
         }
       } catch { /* geçici — bir sonraki tick tekrar dener */ }
@@ -97,14 +107,14 @@ export default function CveWidget() {
 
   async function guncelle() {
     if (!(await onay({ baslik: 'Onay gerekiyor', mesaj: 'Sunucudaki güvenlik güncellemeleri (dnf --security) kurulacak. ' +
-      'Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?', }))) return
+      cevir("Çekirdek (kernel) güncellemesi varsa etkin olması için yeniden başlatma gerekebilir. Devam edilsin mi?"), }))) return
     setHata('')
     setMesaj('')
     try {
       await api.post('/system/cve/guncelle')
       baslatPoll()
     } catch (e) {
-      setHata(apiHata(e, 'Güncelleme başlatılamadı'))
+      setHata(apiHata(e, cevir("Güncelleme başlatılamadı")))
     }
   }
 
@@ -117,7 +127,7 @@ export default function CveWidget() {
         if (!data.calisiyor) {
           if (kcPollRef.current) { window.clearInterval(kcPollRef.current); kcPollRef.current = null }
           setKcCalisiyor(false)
-          setMesaj('Canlı çekirdek yaması uygulandı.')
+          setMesaj(cevir("Canlı çekirdek yaması uygulandı."))
           getir(true)
         }
       } catch { /* geçici — bir sonraki tick tekrar dener */ }
@@ -131,7 +141,7 @@ export default function CveWidget() {
       await api.post('/system/kernelcare/yamala')
       baslatKcPoll()
     } catch (e) {
-      setHata(apiHata(e, 'Canlı yama başlatılamadı'))
+      setHata(apiHata(e, cevir("Canlı yama başlatılamadı")))
     }
   }
 
@@ -157,9 +167,9 @@ export default function CveWidget() {
             </svg>
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Güvenlik Açıkları</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Güvenlik Açıkları")}</h3>
             <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-              {veri ? `${veri.toplam_danisman} güvenlik danışmanı` : 'CVE denetimi (AlmaLinux)'}
+              {veri ? cevirT(cevir("{0} güvenlik danışmanı"), veri.toplam_danisman) : 'CVE denetimi (AlmaLinux)'}
             </p>
           </div>
         </div>
@@ -176,7 +186,7 @@ export default function CveWidget() {
       {guncelleniyor && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-[12px] font-medium text-brand-700 dark:border-brand-900/50 dark:bg-brand-900/15 dark:text-brand-300">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
-          Güvenlik güncellemeleri kuruluyor… (arka planda sürer)
+          {cevir(cevir("Güvenlik güncellemeleri kuruluyor… (arka planda sürer)"))}
         </div>
       )}
 
@@ -184,7 +194,7 @@ export default function CveWidget() {
       {kcCalisiyor && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
-          Canlı çekirdek yaması uygulanıyor… (KernelCare — reboot gerekmez)
+          {cevir(cevir("Canlı çekirdek yaması uygulanıyor… (KernelCare — reboot gerekmez)"))}
         </div>
       )}
 
@@ -193,8 +203,8 @@ export default function CveWidget() {
         <div className="mb-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0"><path d={SHIELD} /><path d={CHECK} /></svg>
           <span>
-            <strong>Çekirdek canlı yamalı (KernelCare).</strong> Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı.
-            {veri.kernelcare.efektif_kernel ? <> Efektif çekirdek: <span className="font-mono">{veri.kernelcare.efektif_kernel}</span>.</> : null}
+            <strong>{cevir(cevir("Çekirdek canlı yamalı (KernelCare)."))}</strong> {cevir(cevir("Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı."))}
+            {veri.kernelcare.efektif_kernel ? <> {cevir(cevir("Efektif çekirdek:"))} <span className="font-mono">{veri.kernelcare.efektif_kernel}</span>.</> : null}
             {veri.kernelcare.yamali_cve?.length ? <> {veri.kernelcare.yamali_cve.length} CVE canlı yamalı.</> : null}
           </span>
         </div>
@@ -204,7 +214,7 @@ export default function CveWidget() {
       {!kcCalisiyor && veri?.kernelcare?.kurulu && !veri.kernelcare.kayitli && (
         <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
-          <span><strong>KernelCare kurulu ancak lisans kayıtlı değil.</strong> Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli.</span>
+          <span><strong>{cevir(cevir("KernelCare kurulu ancak lisans kayıtlı değil."))}</strong> {cevir(cevir("Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli."))}</span>
         </div>
       )}
 
@@ -213,9 +223,9 @@ export default function CveWidget() {
         <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
           <span>
-            <strong>Yeniden başlatma gerekli.</strong> Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor —
-            aşağıdaki açıkların çoğu çekirdek kaynaklı ve <strong>sunucu yeniden başlatılana kadar</strong> açık görünür.
-            Bakım penceresinde reboot önerilir.
+            <strong>{cevir(cevir("Yeniden başlatma gerekli."))}</strong> Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor —
+            aşağıdaki açıkların çoğu çekirdek kaynaklı ve <strong>{cevir(cevir("sunucu yeniden başlatılana kadar"))}</strong> açık görünür.
+            {cevir(cevir("Bakım penceresinde reboot önerilir."))}
           </span>
         </div>
       )}
@@ -229,15 +239,15 @@ export default function CveWidget() {
       ) : veri === null ? (
         <div className="flex items-center justify-center gap-2 py-6 text-xs text-slate-400">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-600 dark:border-t-transparent" />
-          Sunucu taranıyor…
+          {cevir(cevir("Sunucu taranıyor…"))}
         </div>
       ) : temiz ? (
         <div className="flex flex-col items-center gap-1.5 py-5 text-center">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-900/25">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-emerald-500"><path d="M20 6 9 17l-5-5" /></svg>
           </span>
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Sistem güncel</p>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">Bilinen bir güvenlik açığı yok</p>
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Sistem güncel")}</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Bilinen bir güvenlik açığı yok")}</p>
         </div>
       ) : (
         <>
@@ -253,7 +263,7 @@ export default function CveWidget() {
             ))}
           </div>
           <p className="mb-3 text-[11px] text-slate-400 dark:text-slate-500">
-            Toplam <strong className="text-slate-600 dark:text-slate-300">{veri.toplam_cve}</strong> benzersiz CVE
+            {cevir("Toplam")} <strong className="text-slate-600 dark:text-slate-300">{veri.toplam_cve}</strong> benzersiz CVE
             {veri.son_tarama ? <> · son tarama {veri.son_tarama}</> : null}
           </p>
 
@@ -279,7 +289,7 @@ export default function CveWidget() {
               onClick={guncelle}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
-              Güvenlik güncellemelerini kur
+              {cevir(cevir("Güvenlik güncellemelerini kur"))}
             </button>
           )}
           {/* KernelCare — rebootsuz canlı çekirdek yaması aksiyonu */}
@@ -289,7 +299,7 @@ export default function CveWidget() {
               onClick={canliYamala}
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-[13px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
-              Canlı çekirdek yamalarını güncelle (reboot yok)
+              {cevir(cevir("Canlı çekirdek yamalarını güncelle (reboot yok)"))}
             </button>
           )}
           {mesaj && <p className="mt-2 text-center text-[11px] font-medium text-emerald-600 dark:text-emerald-400">{mesaj}</p>}

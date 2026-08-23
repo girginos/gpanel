@@ -103,7 +103,7 @@ func TabanSet() KuralSeti {
 
 			// ── Bilinen webshell parmak izleri ──
 			{ID: "GOSP-SHELL-C99-R57", Ad: "c99/r57 webshell işareti",
-				Desen: `(?i)(c99shell|r57shell|WSO\s*\d|FilesMan|b374k|IndoXploit|priv8)`,
+				Desen: `(?i)(c99shell|r57shell|wso[\s_]?(shell|v?\d+\.\d+)|\bFilesMan\b|b374k|IndoXploit|priv8)`,
 				Puan:  100, Uzanti: php},
 			{ID: "GOSP-SHELL-PAROLA-KAPISI", Ad: "webshell parola kapısı deseni",
 				Desen: `(?i)\$(pass|password|pwd)\s*=\s*['"][0-9a-f]{32}['"]\s*;.{0,200}(md5|hash)\s*\(\s*\$_`,

@@ -356,7 +356,14 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 // wafPlanReapply: bu plana bagli tum domainlerin WAF ayarini (plan varsayilanini devralanlar
 // dahil) yeniden uygular. Arka plan goroutine — kendi baglaminda calisir.
 func (h *Handlers) wafPlanReapply(planID int64) {
-	rows, err := h.DB.Query(`SELECT id FROM domains WHERE plan_id=?`, planID)
+	// Plan sahibi disindaki kiracilara ait domainler HARIC: devir sonrasi
+	// domain eski bayinin planina bagli kalabiliyor; o bayinin plan
+	// guncellemesi yabanci bir kiracinin vhost'una uygulanmamali.
+	rows, err := h.DB.Query(`
+		SELECT d.id FROM domains d
+		  JOIN service_plans p ON p.id = d.plan_id
+		 WHERE d.plan_id = ?
+		   AND (p.reseller_id = 0 OR p.reseller_id = d.reseller_id)`, planID)
 	if err != nil {
 		return
 	}

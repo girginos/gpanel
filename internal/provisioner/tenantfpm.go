@@ -422,6 +422,9 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	fmt.Fprintf(&b, "listen.owner = nginx\n")
 	fmt.Fprintf(&b, "listen.group = nginx\n")
 	fmt.Fprintf(&b, "listen.mode = 0660\n")
+	if apacheKullanicisiVar() {
+		fmt.Fprintf(&b, "listen.acl_users = nginx,apache\n")
+	}
 	fmt.Fprintf(&b, "pm = %s\n", ps.PMStrategy)
 	fmt.Fprintf(&b, "pm.max_children = %d\n", maxCh)
 	if ps.PMStrategy == "dynamic" {

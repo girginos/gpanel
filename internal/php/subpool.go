@@ -27,13 +27,14 @@ func SubPoolName(sk string, subID int64) string {
 
 // subPoolTmpl: named pool — bölüm adı poolName, ama user/group = sk (gerçek Linux
 // kullanıcısı), listen = sockDir/poolName.sock. Sertleştirme poolTmpl ile birebir.
-var subPoolTmpl = template.Must(template.New("subpool").Funcs(template.FuncMap{"onoff": onoff}).Parse(`[{{.Pool}}]
+var subPoolTmpl = template.Must(template.New("subpool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri}).Parse(`[{{.Pool}}]
 user = {{.SK}}
 group = {{.SK}}
 listen = {{.SockDir}}/{{.Pool}}.sock
 listen.owner = nginx
 listen.group = nginx
 listen.mode = 0660
+{{aclSatiri}}
 
 pm = {{.S.PMStrategy}}
 pm.max_children = {{.S.PMMaxChildren}}

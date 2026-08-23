@@ -31,6 +31,18 @@ api.interceptors.response.use(
 export function apiHata(err: unknown, varsayilan = 'Beklenmeyen bir hata oluştu'): string {
   const e = err as AxiosError<{ hata?: string }>
   if (e?.response?.data?.hata) return e.response.data.hata
+  // Axios'un ham İngilizce taşıyıcı hataları ("Network Error", "timeout of
+  // 0ms exceeded") Türkçe panelde kullanıcıya hiçbir şey anlatmıyordu.
+  const kod = (e as { code?: string })?.code
+  if (kod === 'ECONNABORTED' || /timeout/i.test(e?.message || '')) {
+    return 'İşlem zaman aşımına uğradı — sunucu yanıt vermedi'
+  }
+  if (kod === 'ERR_NETWORK' || e?.message === 'Network Error') {
+    return 'Sunucuya ulaşılamadı — bağlantınızı kontrol edin'
+  }
+  const durum = e?.response?.status
+  if (durum === 413) return 'Dosya çok büyük — sunucu sınırını aşıyor'
+  if (durum === 502 || durum === 504) return 'Sunucu şu an yanıt vermiyor, biraz sonra tekrar deneyin'
   if (e?.message) return e.message
   return varsayilan
 }

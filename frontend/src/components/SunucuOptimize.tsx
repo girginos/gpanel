@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
@@ -9,7 +12,13 @@ import { api } from '@/lib/api'
 type Durum = { calisiyor: boolean; durum: string }
 type LogYanit = { log: string; calisiyor: boolean; durum: string }
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function SunucuOptimize() {
+  useTranslation() // dil re-render aboneligi
   const [log, setLog] = useState('')
   const [calisiyor, setCalisiyor] = useState(false)
   const [baslatiliyor, setBaslatiliyor] = useState(false)
@@ -52,7 +61,7 @@ export default function SunucuOptimize() {
       setLog('Optimizasyon başlatıldı…\n')
       setCalisiyor(true)
     } catch (e: any) {
-      setHata(e?.response?.data?.hata || e?.message || 'optimizasyon başlatılamadı')
+      setHata(e?.response?.data?.hata || e?.message || cevir("optimizasyon başlatılamadı"))
     } finally { setBaslatiliyor(false) }
   }
 
@@ -63,7 +72,7 @@ export default function SunucuOptimize() {
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sunucuyu Optimize Et</span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300">Bakım</span>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300">{cevir("Bakım")}</span>
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
             Sistem paketlerini günceller (<code className="text-[11px]">dnf -y update</code>) ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.
@@ -74,7 +83,7 @@ export default function SunucuOptimize() {
           {calisiyor && (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
               <span className="w-3 h-3 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
-              Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder).
+              {cevir(cevir("Optimizasyon çalışıyor — paket güncellemesi uzun sürebilir, sayfayı kapatabilirsiniz (arka planda devam eder)."))}
             </div>
           )}
 
@@ -86,17 +95,17 @@ export default function SunucuOptimize() {
             {!onay ? (
               <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
                 className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-                Paketleri güncelle ve optimize et
+                {cevir(cevir("Paketleri güncelle ve optimize et"))}
               </button>
             ) : (
               <>
-                <span className="text-xs text-slate-600 dark:text-slate-300">Sistem paketleri güncellenecek ve servisler yeniden ayarlanacak. Onaylıyor musunuz?</span>
+                <span className="text-xs text-slate-600 dark:text-slate-300">{cevir("Sistem paketleri güncellenecek ve servisler yeniden ayarlanacak. Onaylıyor musunuz?")}</span>
                 <button onClick={baslat} disabled={baslatiliyor}
                   className="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 transition font-medium disabled:opacity-40">
                   {baslatiliyor ? 'Başlatılıyor…' : 'Evet, başlat'}
                 </button>
                 <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                  Vazgeç
+                  {cevir("Vazgeç")}
                 </button>
               </>
             )}

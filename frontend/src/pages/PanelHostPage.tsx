@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import type { FormEvent } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useCallback, useEffect, useState } from 'react'
@@ -47,7 +50,26 @@ type Is = {
   hata: string
 }
 
+
+const PHOST_EN: Record<string, string> = {
+  "DNS eşleşmiyor": "DNS mismatch",
+  "DNS kontrol hatası": "DNS check error",
+  "Hostname Uygulanıyor": "Applying Hostname",
+  "Hostname bu sunucuya çözülmüyor. Yine de deneyeyim mi? (Betik kilitlenmeyi önlemek için değişikliği REDDEDECEK.)": "The hostname does not resolve to this server. Try anyway? (The script will REJECT the change to prevent a lockout.)",
+  "SSL kurma hatası": "SSL installation error",
+  "SSL sertifikası": "SSL certificate",
+  "Uygulama hatası": "Application error",
+  "acme.sh yüklü değil:": "acme.sh is not installed:",
+  "localhost ve IP her zaman erişilebilir kalır.": "localhost and IP always remain accessible.",
+  "İzinli isimler:": "Allowed names:",
+  "— (IP ile erişim)": "— (access via IP)",
+  "⚠ DNS uyuşmuyor. Çözülen:": "⚠ DNS mismatch. Resolved:",
+  "✓ DNS bu sunucuya çözülüyor:": "✓ DNS resolves to this server:",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (PHOST_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function PanelHostPage() {
+  useTranslation() // dil re-render aboneligi
   const [d, setD] = useState<Durum | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -63,7 +85,7 @@ export default function PanelHostPage() {
       setD(r.data)
       if (!taslak) setTaslak(r.data.durum.hostname || '')
     } catch (e) {
-      setHata(apiHata(e, 'Yüklenemedi'))
+      setHata(apiHata(e, cevir("Yüklenemedi")))
     } finally { setYukleniyor(false) }
   }, [taslak])
   useEffect(() => { void yukle() }, [])
@@ -93,15 +115,15 @@ export default function PanelHostPage() {
     try {
       const r = await api.post('/panel-host/dns', { hostname: taslak })
       setDnsSonuc(r.data)
-    } catch (e) { setHata(apiHata(e, 'DNS kontrol hatası')) }
+    } catch (e) { setHata(apiHata(e, cevir("DNS kontrol hatası"))) }
     finally { setDnsKontrol(false) }
   }
 
   const uygula = async () => {
     if (!dnsSonuc?.eslesme) {
       const yine = await dialog.onay({
-        baslik: 'DNS eşleşmiyor',
-        mesaj: 'Hostname bu sunucuya çözülmüyor. Yine de deneyeyim mi? (Betik kilitlenmeyi önlemek için değişikliği REDDEDECEK.)',
+        baslik: cevir("DNS eşleşmiyor"),
+        mesaj: cevir("Hostname bu sunucuya çözülmüyor. Yine de deneyeyim mi? (Betik kilitlenmeyi önlemek için değişikliği REDDEDECEK.)"),
         onayEtiketi: 'Yine de dene', tehlike: true,
       })
       if (!yine) return
@@ -112,7 +134,7 @@ export default function PanelHostPage() {
       const rr = await api.get<Is>('/panel-host/is?id=' + r.data.is_id)
       setAktifIs(rr.data)
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Başlatılamadı', mesaj: apiHata(e, 'Uygulama hatası') })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Uygulama hatası")) })
     }
   }
 
@@ -129,7 +151,7 @@ export default function PanelHostPage() {
       const rr = await api.get<Is>('/panel-host/is?id=' + r.data.is_id)
       setAktifIs(rr.data)
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Başlatılamadı', mesaj: apiHata(e, 'SSL kurma hatası') })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("SSL kurma hatası")) })
     }
   }
 
@@ -141,20 +163,20 @@ export default function PanelHostPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
       <Breadcrumb items={[
-        { href: '/araclar-ayarlar', etiket: 'Araçlar ve Ayarlar' },
+        { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
         { etiket: 'Panel Hostname & SSL' },
       ]} />
 
       <div className="mt-4 mb-6">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Panel Hostname & SSL</h1>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          Paneline özel bir alan adı bağla ve Let's Encrypt sertifikası kur. Kilitlenme koruması:
-          <span className="font-medium text-slate-800 dark:text-slate-200"> localhost ve IP her zaman erişilebilir kalır.</span>
+          {cevir("Paneline özel bir alan adı bağla ve Let's Encrypt sertifikası kur. Kilitlenme koruması:")}
+          <span className="font-medium text-slate-800 dark:text-slate-200"> {cevir("localhost ve IP her zaman erişilebilir kalır.")}</span>
         </p>
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
       ) : d && (
@@ -167,7 +189,7 @@ export default function PanelHostPage() {
           )}
           {!d.acme_var && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
-              <b>acme.sh yüklü değil:</b> Let's Encrypt SSL kurma bu sunucuda yapılamaz. `curl https://get.acme.sh | sh` ile kur.
+              <b>{cevir("acme.sh yüklü değil:")}</b> Let's Encrypt SSL kurma bu sunucuda yapılamaz. `curl https://get.acme.sh | sh` ile kur.
             </div>
           )}
 
@@ -176,8 +198,8 @@ export default function PanelHostPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-slate-500">Mevcut hostname</div>
-                <div className="mt-0.5 font-mono text-sm">{d.durum.hostname || <span className="text-slate-400">— (IP ile erişim)</span>}</div>
-                <div className="mt-1 text-xs text-slate-500">İzinli isimler: <span className="font-mono">{(d.durum.izinliler ?? []).join(' ')}</span></div>
+                <div className="mt-0.5 font-mono text-sm">{d.durum.hostname || <span className="text-slate-400">{cevir("— (IP ile erişim)")}</span>}</div>
+                <div className="mt-1 text-xs text-slate-500">{cevir("İzinli isimler:")} <span className="font-mono">{(d.durum.izinliler ?? []).join(' ')}</span></div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">Sunucu IP'leri</div>
@@ -185,7 +207,7 @@ export default function PanelHostPage() {
                 {(d.durum.sunucu_ip6?.length ?? 0) > 0 && <div className="mt-0.5 font-mono text-xs text-slate-500">v6: {(d.durum.sunucu_ip6 ?? []).join(', ')}</div>}
               </div>
               <div>
-                <div className="text-xs text-slate-500">SSL sertifikası</div>
+                <div className="text-xs text-slate-500">{cevir("SSL sertifikası")}</div>
                 <div className="mt-0.5 flex items-center gap-2 text-sm">
                   <span className="font-mono">{d.durum.ssl_konu || '—'}</span>
                   {d.durum.ssl_le
@@ -231,8 +253,8 @@ export default function PanelHostPage() {
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300'
                 : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300'}`}>
                 {dnsSonuc.eslesme
-                  ? <>✓ DNS bu sunucuya çözülüyor: <span className="font-mono">{dnsSonuc.cozulen.join(', ')}</span></>
-                  : <>⚠ DNS uyuşmuyor. Çözülen: <span className="font-mono">{dnsSonuc.cozulen.join(', ') || 'hiç'}</span> · Sunucu: <span className="font-mono">{dnsSonuc.sunucu_ip4.join(', ')}</span>. Registrar'da A kaydını sunucunun IP'sine çevir.</>}
+                  ? <>{cevir("✓ DNS bu sunucuya çözülüyor:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ')}</span></>
+                  : <>{cevir("⚠ DNS uyuşmuyor. Çözülen:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ') || cevir("hiç")}</span> · Sunucu: <span className="font-mono">{dnsSonuc.sunucu_ip4.join(', ')}</span>. Registrar'da A kaydını sunucunun IP'sine çevir.</>}
               </div>
             )}
           </form>

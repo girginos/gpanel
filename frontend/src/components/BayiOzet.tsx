@@ -1,3 +1,4 @@
+import { cevirT } from '@/lib/cevirT'
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -75,7 +76,7 @@ export default function BayiOzet() {
             {o.hosting_adet}{o.hosting_limit > 0 ? ` / ${o.hosting_limit}` : ''}
           </div>
           <div className={`mt-1 text-xs ${hostingDolu ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
-            {hostingDolu ? '⚠ Limit doldu — yeni hesap açılamaz' : o.askida_adet > 0 ? `${o.askida_adet} hesap askıda` : 'Tümü aktif'}
+            {hostingDolu ? '⚠ Limit doldu — yeni hesap açılamaz' : o.askida_adet > 0 ? cevirT("{0} hesap askıda", o.askida_adet) : 'Tümü aktif'}
           </div>
         </div>
         <Olcum etiket="Disk havuzu" deger={mbKullanim(Math.round(o.disk_kullanim_kb / 1024))} taahhut={o.disk_taahhut_mb} limit={o.disk_limit_mb} ipucu={o.disk_limit_mb <= 0 ? 'Sınırsız' : undefined} />

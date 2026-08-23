@@ -141,15 +141,34 @@ func sslKurKos(is *Is, hostname string) {
 	out, err := issueCmd.CombinedOutput()
 	// Çıktının son 20 satırını iş kaydına al (tam çıktı yüzlerce satır)
 	for _, ln := range sonSatirlar(string(out), 20) {
-		if ln == "" { continue }
+		if ln == "" {
+			continue
+		}
 		is.AdimEkle(ln, err == nil)
+	}
+	// 🔴 acme.sh "Domains not changed / Skipping" (exit 2) = SERTIFIKA ZATEN GECERLI.
+	// Bu bir HATA DEGILDIR; eskiden hata sayilip install-cert ATLANIYORDU → panel
+	// yeni cert'i hic kurmuyor, is "hata" gorunuyor ama sebebi "her sey zaten yolunda".
+	// Bu durumda akisa DEVAM et: mevcut cert'i panel'e kur.
+	zatenGecerli := false
+	if err != nil {
+		low := strings.ToLower(string(out))
+		if strings.Contains(low, "domains not changed") || strings.Contains(low, "skipping") ||
+			strings.Contains(low, "next renewal time is") || strings.Contains(low, "cert success") {
+			zatenGecerli = true
+			err = nil
+		}
 	}
 	if err != nil {
 		RateLimitFail(hostname)
 		is.Bitir("acme.sh --issue başarısız: " + err.Error())
 		return
 	}
-	is.AdimEkle("cert alındı", true)
+	if zatenGecerli {
+		is.AdimEkle("sertifika zaten geçerli (yeniden alınmadı) — panele kuruluyor", true)
+	} else {
+		is.AdimEkle("cert alındı", true)
+	}
 
 	// 5b) 🔴 CRITICAL fix: install-cert öncesi mevcut cert/key'i YEDEKLE — reload
 	// sonrasında panel HTTPS'te doğrulanamıyor veya cert bozuksa geri koy.
@@ -176,7 +195,9 @@ func sslKurKos(is *Is, hostname string) {
 	)
 	out2, err := installCmd.CombinedOutput()
 	for _, ln := range sonSatirlar(string(out2), 10) {
-		if ln == "" { continue }
+		if ln == "" {
+			continue
+		}
 		is.AdimEkle(ln, err == nil)
 	}
 	if err != nil {
@@ -193,7 +214,7 @@ func sslKurKos(is *Is, hostname string) {
 	if raw, e := os.ReadFile(CertPath); e != nil {
 		_ = certGeriYukle(certYedek, CertPath, keyYedek, KeyPath)
 		_, _ = exec.Command("systemctl", "reload", "nginx").CombinedOutput()
-		is.Bitir("yeni cert okunamıyor, yedekten geri alındı: "+e.Error())
+		is.Bitir("yeni cert okunamıyor, yedekten geri alındı: " + e.Error())
 		return
 	} else if blok, _ := pem.Decode(raw); blok == nil {
 		_ = certGeriYukle(certYedek, CertPath, keyYedek, KeyPath)
@@ -224,7 +245,8 @@ func sslKurKos(is *Is, hostname string) {
 				bulundu := false
 				for _, n := range dns {
 					if strings.EqualFold(n, hostname) {
-						bulundu = true; break
+						bulundu = true
+						break
 					}
 				}
 				if !bulundu {

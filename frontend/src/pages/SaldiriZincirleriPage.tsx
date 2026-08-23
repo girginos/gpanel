@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -17,7 +20,18 @@ const ASAMA_IKON: Record<string, string> = {
   persistence: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
 }
 
+
+const SALDIRI_EN: Record<string, string> = {
+  "Etkin saldırı": "Active attack",
+  "Etkin saldırı zinciri yok.": "No active attack chains.",
+  "Saldırı Zincirleri": "Attack Chains",
+  "Tespit motorları (dosya + süreç) izliyor; zincir oluşursa burada görünür.": "Detection engines (file + process) are monitoring; if a chain forms it appears here.",
+  "Şüpheli zincir": "Suspicious chain",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SALDIRI_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function SaldiriZincirleriPage() {
+  useTranslation() // dil re-render aboneligi
   const [zincirler, setZincirler] = useState<Zincir[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -40,11 +54,11 @@ export default function SaldiriZincirleriPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-5xl mx-auto">
-        <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Saldırı Zincirleri' }]} />
+        <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Saldırı Zincirleri") }]} />
         <div className="flex items-start gap-3 mb-1">
           <span className={`mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 ${aktifKritik > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">Saldırı Zincirleri</h1>
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">{cevir("Saldırı Zincirleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               Dosya, süreç ve API olayları kiracı + zaman penceresinde <b>tek saldırı zincirine</b> dizilir. Nedensel bağ (aynı dosya/süreç) güveni yükseltir.
             </p>
@@ -60,12 +74,12 @@ export default function SaldiriZincirleriPage() {
         {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
         {yuk ? (
-          <div className="py-16 text-center text-sm text-slate-400">Yükleniyor…</div>
+          <div className="py-16 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
         ) : zincirler.length === 0 ? (
           <div className="py-16 text-center">
             <svg className="w-12 h-12 mx-auto mb-3 text-emerald-400 dark:text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.6-4A12 12 0 0112 2.9 12 12 0 013.4 6 12 12 0 003 9c0 5.6 3.8 10.3 9 11.6 5.2-1.3 9-6 9-11.6 0-1-.1-2-.4-3z" /></svg>
-            <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Etkin saldırı zinciri yok.</p>
-            <p className="text-xs text-slate-400 mt-1">Tespit motorları (dosya + süreç) izliyor; zincir oluşursa burada görünür.</p>
+            <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">{cevir("Etkin saldırı zinciri yok.")}</p>
+            <p className="text-xs text-slate-400 mt-1">{cevir("Tespit motorları (dosya + süreç) izliyor; zincir oluşursa burada görünür.")}</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -78,7 +92,7 @@ export default function SaldiriZincirleriPage() {
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${kritik ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
                       <span className={`font-mono text-xs font-semibold uppercase tracking-wide ${kritik ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
-                        {kritik ? 'Etkin saldırı' : 'Şüpheli zincir'}
+                        {kritik ? 'Etkin saldırı' : cevir("Şüpheli zincir")}
                       </span>
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">· {z.alan_adi || '—'}</span>
                     </div>

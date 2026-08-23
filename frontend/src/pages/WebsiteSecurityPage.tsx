@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -62,12 +65,23 @@ const appAd = (t: string) => APP_META[t]?.ad ?? (t || '—')
 const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
 
 // Durum rozetleri — domain başına.
+
+const WSEC_EN: Record<string, string> = {
+  "Domain bulunamadı.": "Domain not found.",
+  "Rescan hatası": "Rescan error",
+  "Son başarılı": "Last successful",
+  "Tarama hatası": "Scan error",
+  "Tümünü Tara": "Scan All",
+  "Tür:": "Type:",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function DurumRozet({ u }: { u: Uygulama }) {
   switch (u.durum) {
     case 'taraniyor':
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> Taranıyor…
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> {cevir("Taranıyor…")}
         </span>
       )
     case 'acik':
@@ -98,6 +112,7 @@ function DurumRozet({ u }: { u: Uygulama }) {
 }
 
 export default function WebsiteSecurityPage() {
+  useTranslation() // dil re-render aboneligi
   const [status, setStatus] = useState<Status | null>(null)
   const [envanter, setEnvanter] = useState<EnvanterYanit | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
@@ -123,7 +138,7 @@ export default function WebsiteSecurityPage() {
       setEnvanter(env.data)
       ilkYuklendi.current = true
     } catch (e) {
-      setHata(apiHata(e, 'Yüklenemedi'))
+      setHata(apiHata(e, cevir("Yüklenemedi")))
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { void yukle() }, [])
@@ -142,7 +157,7 @@ export default function WebsiteSecurityPage() {
       await api.post('/websec/rescan', {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Başlatılamadı', mesaj: apiHata(e, 'Rescan hatası') })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Rescan hatası")) })
     } finally { setTaranıyor(false) }
   }
 
@@ -152,13 +167,13 @@ export default function WebsiteSecurityPage() {
       await api.post('/websec/rescan?domain_id=' + id, {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Başlatılamadı', mesaj: apiHata(e, 'Tarama hatası') })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")) })
     } finally { setTarananDomain(null) }
   }
 
   const zamanFmt = (s: string | null) => {
     if (!s) return '—'
-    try { return new Date(s.replace(' ', 'T')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) }
+    try { return new Date(s.replace(' ', 'T') + (s.includes(' ') ? 'Z' : '')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) }
     catch { return s }
   }
 
@@ -185,11 +200,11 @@ export default function WebsiteSecurityPage() {
             Website Security Monitor
           </h1>
           <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-            Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.
-            Bir domainin açıkları için satırına tıklayın.
+            {cevir(cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir."))}
+            {cevir(cevir("Bir domainin açıkları için satırına tıklayın."))}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-slate-500">Tür:</span>
+            <span className="text-xs text-slate-500">{cevir("Tür:")}</span>
             {(status?.ekosistemler ?? ['wordpress', 'nodejs', 'php-composer']).map((e) => {
               const aktif = appFiltre === e
               return (
@@ -211,7 +226,7 @@ export default function WebsiteSecurityPage() {
           disabled={taranıyor || status?.running}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
-          {status?.running ? 'Taranıyor…' : (taranıyor ? 'Başlatılıyor…' : 'Tümünü Tara')}
+          {status?.running ? 'Taranıyor…' : (taranıyor ? 'Başlatılıyor…' : cevir("Tümünü Tara"))}
         </button>
       </div>
 
@@ -219,9 +234,9 @@ export default function WebsiteSecurityPage() {
       {status && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           <SayacKart etiket="Kritik" sayi={status.critical} renk={SEV_RENK.critical} />
-          <SayacKart etiket="Yüksek" sayi={status.high} renk={SEV_RENK.high} />
+          <SayacKart etiket={cevir("Yüksek")} sayi={status.high} renk={SEV_RENK.high} />
           <SayacKart etiket="Orta" sayi={status.medium} renk={SEV_RENK.medium} />
-          <SayacKart etiket="Düşük" sayi={status.low} renk={SEV_RENK.low} />
+          <SayacKart etiket={cevir("Düşük")} sayi={status.low} renk={SEV_RENK.low} />
         </div>
       )}
 
@@ -230,7 +245,7 @@ export default function WebsiteSecurityPage() {
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             <div><div className="text-xs text-slate-500">Son tarama</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
-            <div><div className="text-xs text-slate-500">Son başarılı</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
             <div><div className="text-xs text-slate-500">Taranan uygulama</div><div className="mt-0.5 font-medium">{status.scanned_apps}</div></div>
             <div><div className="text-xs text-slate-500">Toplam bulgu</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
@@ -264,12 +279,12 @@ export default function WebsiteSecurityPage() {
 
       {/* Domain tablosu — TEK ana tablo (açık listesi ayrı sayfada) */}
       {yukleniyor && !ilkYuklendi.current ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">Tekrar dene</button></div>
       ) : listelenen.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
-          {arama || appFiltre ? 'Bu arama/filtreyle domain yok.' : 'Domain bulunamadı.'}
+          {arama || appFiltre ? 'Bu arama/filtreyle domain yok.' : cevir("Domain bulunamadı.")}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -277,13 +292,13 @@ export default function WebsiteSecurityPage() {
             <table className="min-w-[820px] w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                 <tr>
-                  <th className="px-3 py-3 font-semibold">Alan adı</th>
-                  <th className="px-3 py-3 font-semibold">Tür</th>
-                  <th className="px-3 py-3 font-semibold">Sürüm</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Alan adı")}</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Tür")}</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Sürüm")}</th>
                   <th className="px-3 py-3 text-right font-semibold">Paket</th>
-                  <th className="px-3 py-3 font-semibold">Durum</th>
+                  <th className="px-3 py-3 font-semibold">{cevir("Durum")}</th>
                   <th className="px-3 py-3 font-semibold">Son tarama</th>
-                  <th className="px-3 py-3 text-right font-semibold">İşlem</th>
+                  <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -322,7 +337,7 @@ export default function WebsiteSecurityPage() {
       )}
 
       <p className="mt-4 text-xs text-slate-500">
-        Veri kaynakları: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · Yeni bulgular her 6 saatte bir güncellenir
+        {cevir(cevir("Veri kaynakları: WordPress → wpvulnerability.net · Node.js / PHP Composer → osv.dev · Yeni bulgular her 6 saatte bir güncellenir"))}
       </p>
     </div>
   )

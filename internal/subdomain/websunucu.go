@@ -20,20 +20,20 @@ import (
 // ── Alt alan web-sunucu ayarları (domain nginx_settings + web_backend paritesi) ──
 
 type subNginx struct {
-	HdrXContentType    bool `json:"hdr_x_content_type"`
-	HdrXXSS            bool `json:"hdr_x_xss"`
-	HdrReferrer        bool `json:"hdr_referrer"`
-	HdrPermissions     bool `json:"hdr_permissions"`
-	HdrCSPUpgrade      bool `json:"hdr_csp_upgrade"`
-	HdrHSTS            bool `json:"hdr_hsts"`
-	HSTSMaxAge         int  `json:"hsts_max_age"`
-	HSTSSubdomains     bool `json:"hsts_subdomains"`
-	HSTSPreload        bool `json:"hsts_preload"`
-	FastcgiCache       bool `json:"fastcgi_cache"`
-	FastcgiCacheDakika int  `json:"fastcgi_cache_dakika"`
-	BrowserCache       bool `json:"browser_cache"`
-	BrowserCacheGun    int  `json:"browser_cache_gun"`
-	ClientMaxBodyMB    int  `json:"client_max_body_mb"`
+	HdrXContentType    bool   `json:"hdr_x_content_type"`
+	HdrXXSS            bool   `json:"hdr_x_xss"`
+	HdrReferrer        bool   `json:"hdr_referrer"`
+	HdrPermissions     bool   `json:"hdr_permissions"`
+	HdrCSPUpgrade      bool   `json:"hdr_csp_upgrade"`
+	HdrHSTS            bool   `json:"hdr_hsts"`
+	HSTSMaxAge         int    `json:"hsts_max_age"`
+	HSTSSubdomains     bool   `json:"hsts_subdomains"`
+	HSTSPreload        bool   `json:"hsts_preload"`
+	FastcgiCache       bool   `json:"fastcgi_cache"`
+	FastcgiCacheDakika int    `json:"fastcgi_cache_dakika"`
+	BrowserCache       bool   `json:"browser_cache"`
+	BrowserCacheGun    int    `json:"browser_cache_gun"`
+	ClientMaxBodyMB    int    `json:"client_max_body_mb"`
 	EkDirektifler      string `json:"ek_direktifler"`
 }
 
@@ -58,7 +58,12 @@ func subNginxGet(ctx context.Context, db *sql.DB, sid int64) (subNginx, error) {
 }
 
 func subNginxSave(ctx context.Context, db *sql.DB, sid int64, n subNginx) error {
-	b := func(x bool) int { if x { return 1 }; return 0 }
+	b := func(x bool) int {
+		if x {
+			return 1
+		}
+		return 0
+	}
 	_, err := db.ExecContext(ctx, `INSERT INTO subdomain_nginx_settings(subdomain_id,
 		hdr_x_content_type, hdr_x_xss, hdr_referrer, hdr_permissions, hdr_csp_upgrade, hdr_hsts,
 		hsts_max_age, hsts_subdomains, hsts_preload, fastcgi_cache, fastcgi_cache_dakika,
@@ -90,7 +95,9 @@ func webBackendGet(ctx context.Context, db *sql.DB, sid int64) string {
 
 // ── nginx vhost render (parite: backend switch + cache + client_max_body + başlıklar) ──
 
-func subApachePath(sk, altAd string) string { return "/etc/httpd/conf.d/sub_apache_" + sk + "_" + altAd + ".conf" }
+func subApachePath(sk, altAd string) string {
+	return "/etc/httpd/conf.d/sub_apache_" + sk + "_" + altAd + ".conf"
+}
 
 func subSecHeaders(n subNginx, ssl bool) string {
 	var b strings.Builder

@@ -1,6 +1,7 @@
 package subdomain
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ func ReRenderKoruma(db *sql.DB, subID int64) error {
 	if err != nil {
 		return err
 	}
-	koruma := provisioner.ProtectedBlocksForSub(db, subID, socket)
+	koruma := provisioner.ProtectedBlocksForSub(db, subID, socket, webBackendGet(context.Background(), db, subID))
 	docroot := docrootOf(sk, tamAd)
 	// SSL-farkinda: cert varsa HTTPS vhost'u koru (SSL'i ezme)
 	crt, key := certYolu(sk, tamAd)

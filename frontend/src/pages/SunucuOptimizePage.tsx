@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import React, { useEffect, useMemo, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -43,7 +47,27 @@ type YedekKayit = { id: number; servis: string; yedek: string; hedef: string; ac
 
 const SERVIS_SIRA = ['mariadb', 'nginx', 'apache', 'phpfpm', 'sysctl']
 
+
+const SOPT_EN: Record<string, string> = {
+  "Analiz alınamadı": "Failed to get analysis",
+  "Bakım: Paket güncelle + Tune script": "Maintenance: Update packages + Tune script",
+  "Bu yedeği geri yükle ve servisi reload et?": "Restore this backup and reload the service?",
+  "Büyük": "Large",
+  "Geri alındı — yeniden analiz ediliyor": "Reverted — re-analyzing",
+  "Henüz yedek yok — henüz hiçbir öneri uygulanmamış.": "No backups yet — no recommendation has been applied yet.",
+  "Küçük": "Small",
+  "Rollback hatası:": "Rollback error:",
+  "Uygulandı": "Applied",
+  "Yedek geçmişi": "Backup history",
+  "geri alındı": "reverted",
+  "paketleri güncelle + tune script": "update packages + tune script",
+  "Çok büyük": "Very large",
+  "Önerilen": "Recommended",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SOPT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function SunucuOptimizePage() {
+  useTranslation() // dil re-render aboneligi
   const [rapor, setRapor] = useState<AnalizRaporu | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [aktif, setAktif] = useState<string>('mariadb')
@@ -57,7 +81,7 @@ export default function SunucuOptimizePage() {
       const ordered = SERVIS_SIRA.map(k => r.data.servisler.find((s: ServisAnaliz) => s.kod === k)).filter(Boolean) as ServisAnaliz[]
       setRapor({ ...r.data, servisler: ordered })
     } catch (e: any) {
-      setHata(e?.response?.data?.hata || 'Analiz alınamadı')
+      setHata(e?.response?.data?.hata || cevir("Analiz alınamadı"))
     } finally {
       setYukleniyor(false)
     }
@@ -71,7 +95,7 @@ export default function SunucuOptimizePage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
+        { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
         { etiket: 'Sunucu Optimize' },
       ]} />
 
@@ -79,8 +103,8 @@ export default function SunucuOptimizePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Sunucu Optimize</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Sistem loglarını + kaynak durumunu okuyarak MariaDB / Nginx / Apache / PHP-FPM / kernel için değişiklik önerir.
-            Her uygulama önce yedek alır, servisi -t doğrular, sonra reload eder.
+            {cevir(cevir("Sistem loglarını + kaynak durumunu okuyarak MariaDB / Nginx / Apache / PHP-FPM / kernel için değişiklik önerir."))}
+            {cevir(cevir("Her uygulama önce yedek alır, servisi -t doğrular, sonra reload eder."))}
           </p>
         </div>
         <button onClick={yukle} disabled={yukleniyor}
@@ -122,7 +146,7 @@ export default function SunucuOptimizePage() {
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
                     <span className={`inline-block h-1.5 w-1.5 rounded-full ${s.durum?.aktif ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
-                    {s.durum?.aktif ? 'aktif' : (s.not_yok || 'kapalı')}
+                    {s.durum?.aktif ? 'aktif' : (s.not_yok || cevir("kapalı"))}
                     {s.durum?.memory_mb > 0 && <span>· {s.durum.memory_mb}MB</span>}
                   </div>
                 </button>
@@ -139,7 +163,7 @@ export default function SunucuOptimizePage() {
 
       {/* Mevcut BAKIM tune script bloğu (backward-compat) */}
       <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">Bakım: Paket güncelle + Tune script</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">{cevir("Bakım: Paket güncelle + Tune script")}</h2>
         <div className="max-w-3xl">
           <SunucuOptimize />
         </div>
@@ -166,7 +190,7 @@ function SistemPanosu({ s, toplamOneri }: { s: Sistem; toplamOneri: number }) {
         <PanoKart ikon={<IcSwap />} etiket="Swap" deger={s.swap_toplam_mb > 0 ? `${s.swap_kullanim_yuzde}%` : 'yok'} renk={swapRenk} trend={s.swap_kullanim_yuzde} altBilgi={`${s.swap_kullan_mb}/${s.swap_toplam_mb}M`} />
         <PanoKart ikon={<IcDisk />} etiket="Disk /" deger={`${s.disk_yuzde}%`} renk={diskRenk} trend={s.disk_yuzde} altBilgi={`${s.disk_kullan_gb.toFixed(0)}/${s.disk_toplam_gb.toFixed(0)}G`} />
         <PanoKart ikon={<IcServer />} etiket="Profil" deger={profilAd(s.profil)} renk="violet" altBilgi={`${s.cpu_cekirdek} CPU · ${(s.ram_toplam_mb / 1024).toFixed(1)}G RAM`} />
-        <PanoKart ikon={<IcBulb />} etiket="Öneri" deger={String(toplamOneri)} renk={toplamOneri > 10 ? 'amber' : toplamOneri > 0 ? 'blue' : 'emerald'} altBilgi={toplamOneri === 0 ? 'sistem optimum' : 'inceleyip uygula'} />
+        <PanoKart ikon={<IcBulb />} etiket={cevir("Öneri")} deger={String(toplamOneri)} renk={toplamOneri > 10 ? 'amber' : toplamOneri > 0 ? 'blue' : 'emerald'} altBilgi={toplamOneri === 0 ? 'sistem optimum' : 'inceleyip uygula'} />
       </div>
       <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-4 flex-wrap">
         <span>Kernel {s.kernel}</span>
@@ -198,7 +222,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
 Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
     try {
       await api.post('/optimize/rollback', { yedek_id: yedekID })
-      setSonuc('Geri alındı — yeniden analiz ediliyor')
+      setSonuc(cevir("Geri alındı — yeniden analiz ediliyor"))
       await yenile()
     } catch (e: any) {
       setSonuc('Rollback hatası: ' + (e?.response?.data?.hata || 'bilinmeyen'))
@@ -207,11 +231,11 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
 
   const uygula = async () => {
     if (secili.size === 0) return
-    if (!confirm(`${secili.size} öneri uygulanacak. Servisler ${analiz.kod === 'mariadb' ? 'RESTART' : 'reload'} edilecek. Emin misin?`)) return
+    if (!confirm(cevirT(cevir("{0} öneri uygulanacak. Servisler {1} edilecek. Emin misin?"), secili.size, analiz.kod === 'mariadb' ? 'RESTART' : 'reload'))) return
     setUyguluyor(true); setSonuc(null)
     try {
       const r = await api.post<any>('/optimize/uygula', { servis: analiz.kod, oneri_id: Array.from(secili) })
-      setSonuc(r.data?.mesaj || 'Uygulandı')
+      setSonuc(r.data?.mesaj || cevir("Uygulandı"))
       setSecili(new Set())
       await yenile()
     } catch (e: any) {
@@ -236,7 +260,7 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
         </div>
         {sirali.length > 0 && (
           <div className="flex items-center gap-2">
-            {secili.size < sirali.length && <button onClick={tumunuSec} className="text-xs text-slate-600 hover:underline">Tümünü seç</button>}
+            {secili.size < sirali.length && <button onClick={tumunuSec} className="text-xs text-slate-600 hover:underline">{cevir("Tümünü seç")}</button>}
             {secili.size > 0 && <button onClick={tumunuBirak} className="text-xs text-slate-600 hover:underline">Temizle</button>}
             <button onClick={uygula} disabled={secili.size === 0 || uyguluyor}
               className="rounded-lg bg-emerald-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
@@ -263,7 +287,7 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
             Son uygulananlar
           </div>
           <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mb-2 -mt-1">
-            Değişiklik ters tepti mi? Yanındaki <span className="font-mono">↶ Geri al</span> ile tek tıkla eski hale döndür.
+            {cevir(cevir("Değişiklik ters tepti mi? Yanındaki"))} <span className="font-mono">↶ Geri al</span> {cevir("ile tek tıkla eski hale döndür.")}
           </div>
           <div className="space-y-2">
             {analiz.son_uygulama!.map(u => (
@@ -279,7 +303,7 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[10px] text-slate-500">{u.tarih}</span>
                     {u.geri_alindi
-                      ? <span className="text-[10px] text-slate-400 italic">geri alındı</span>
+                      ? <span className="text-[10px] text-slate-400 italic">{cevir("geri alındı")}</span>
                       : <button onClick={() => geriAlUygulama(u.yedek_id, u.uygulananlar)}
                           className="text-[10px] rounded-md border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/30 px-2 py-0.5 whitespace-nowrap">
                           ↶ Geri al
@@ -306,7 +330,7 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
       {sirali.length === 0 && !analiz.not_yok && (
         <div className="py-8 text-center text-sm text-slate-500">
           <div className="text-2xl mb-2 opacity-40">✨</div>
-          Bu servis için öneri yok — mevcut ayarlar optimum.
+          {cevir(cevir("Bu servis için öneri yok — mevcut ayarlar optimum."))}
         </div>
       )}
 
@@ -318,8 +342,8 @@ Servis ${analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'} edilecek.`)) return
                 <th className="py-2 pr-2 w-8"></th>
                 <th className="py-2 pr-3 text-left">Parametre</th>
                 <th className="py-2 pr-3 text-left">Mevcut</th>
-                <th className="py-2 pr-3 text-left">Önerilen</th>
-                <th className="py-2 pr-3 text-left">Gerekçe</th>
+                <th className="py-2 pr-3 text-left">{cevir("Önerilen")}</th>
+                <th className="py-2 pr-3 text-left">{cevir("Gerekçe")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -370,7 +394,7 @@ function YedeklerBolumu() {
   useEffect(() => { if (acik) void yukle() }, [acik])
 
   const geriYukle = async (id: number) => {
-    if (!confirm('Bu yedeği geri yükle ve servisi reload et?')) return
+    if (!confirm(cevir("Bu yedeği geri yükle ve servisi reload et?"))) return
     try {
       await api.post('/optimize/rollback', { yedek_id: id })
       await yukle()
@@ -382,7 +406,7 @@ function YedeklerBolumu() {
       <button onClick={() => setAcik(a => !a)} className="w-full flex items-center justify-between p-4 text-left">
         <div className="flex items-center gap-2">
           <IcArchive className="w-5 h-5 text-slate-500" />
-          <span className="font-medium">Yedek geçmişi</span>
+          <span className="font-medium">{cevir("Yedek geçmişi")}</span>
           {yedekler && <span className="text-xs text-slate-500">({yedekler.length})</span>}
         </div>
         <span className="text-slate-400">{acik ? '▴' : '▾'}</span>
@@ -390,12 +414,12 @@ function YedeklerBolumu() {
       {acik && yedekler && (
         <div className="border-t border-slate-200 dark:border-slate-800 p-4">
           {yedekler.length === 0 ? (
-            <div className="text-sm text-slate-500 text-center py-4">Henüz yedek yok — henüz hiçbir öneri uygulanmamış.</div>
+            <div className="text-sm text-slate-500 text-center py-4">{cevir("Henüz yedek yok — henüz hiçbir öneri uygulanmamış.")}</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-slate-800">
-                  <tr><th className="py-2 pr-3 text-left">Servis</th><th className="py-2 pr-3 text-left">Hedef</th><th className="py-2 pr-3 text-left">Yedek yolu</th><th className="py-2 pr-3 text-left">Tarih</th><th className="py-2 text-right">İşlem</th></tr>
+                  <tr><th className="py-2 pr-3 text-left">Servis</th><th className="py-2 pr-3 text-left">Hedef</th><th className="py-2 pr-3 text-left">Yedek yolu</th><th className="py-2 pr-3 text-left">{cevir("Tarih")}</th><th className="py-2 text-right">{cevir("İşlem")}</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {yedekler.map(y => (
@@ -406,8 +430,8 @@ function YedeklerBolumu() {
                       <td className="py-2 pr-3 text-xs text-slate-500">{y.created_at}</td>
                       <td className="py-2 text-right">
                         {y.rolled_back
-                          ? <span className="text-xs text-slate-400">geri alındı</span>
-                          : <button onClick={() => geriYukle(y.id)} className="text-xs rounded-md border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 px-2 py-1">Geri yükle</button>}
+                          ? <span className="text-xs text-slate-400">{cevir("geri alındı")}</span>
+                          : <button onClick={() => geriYukle(y.id)} className="text-xs rounded-md border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 px-2 py-1">{cevir("Geri yükle")}</button>}
                       </td>
                     </tr>
                   ))}

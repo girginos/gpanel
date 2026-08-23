@@ -94,7 +94,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		if php != istenen {
 			log("uyari: kaynak PHP %s hedefte kurulu degil → %s kullanilacak", istenen, php)
 			sonuc.Uyarilar = append(sonuc.Uyarilar,
-				fmt.Sprintf("PHP %s kurulu degil, %s ile saglandi", istenen, php))
+				fmt.Sprintf("PHP %s yok → %s", istenen, php))
 		}
 		log("sistem hesabi olusturuluyor (php %s)…", php)
 		pr, err := provisioner.Provision(alanAdi, php)
@@ -108,8 +108,17 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		dbUser, dbAdi := sk+"_db", sk+"_main"
 		// 🔴 durum='pasif': surec yarida olurse (panel restart) yarim domain
 		// "aktif" gorunmesin. Basarida 'aktif'e cevrilir.
+		// 🔴 PER-DOMAIN SAHİPLİK: sahiplik taşıma açıksa bu domainin KENDİ sahibini
+		// (SahipEsle[hs.SahipLogin]) kullan; yoksa Ayarlar varsayılanına düş (admin
+		// seçimi / admin-sahipli). Böylece her site kaynaktaki reseller/müşterisine gider.
+		resellerID, customerID := ay.ResellerID, ay.CustomerID
+		if hs.SahipLogin != "" && ay.SahipEsle != nil {
+			if hedef, ok := ay.SahipEsle[hs.SahipLogin]; ok {
+				resellerID, customerID = hedef.ResellerID, hedef.CustomerID
+			}
+		}
 		// Sahiplik hedefi geçerli mi (bayi=reseller users satırı, müşteri=customers).
-		if err := h.sahiplikDogrula(ctx, ay.ResellerID, ay.CustomerID); err != nil {
+		if err := h.sahiplikDogrula(ctx, resellerID, customerID); err != nil {
 			_ = provisioner.Deprovision(alanAdi, sk)
 			return nil, err
 		}
@@ -117,7 +126,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 			`INSERT INTO domains (alan_adi, sistem_kullanici, php_surum, ipv4, ftp_host,
 			   db_host, db_user, db_adi, web_root, durum, plan_id, web_backend, reseller_id, customer_id)
 			 VALUES (?,?,?,?,?,'localhost',?,?,?, 'pasif', NULLIF(?,0), 'php-fpm', ?, NULLIF(?,0))`,
-			alanAdi, sk, php, h.sunucuIP(), h.sunucuIP(), dbUser, dbAdi, pr.WebRoot, ay.PlanID, ay.ResellerID, ay.CustomerID)
+			alanAdi, sk, php, h.sunucuIP(), h.sunucuIP(), dbUser, dbAdi, pr.WebRoot, ay.PlanID, resellerID, customerID)
 		if err != nil {
 			_ = provisioner.Deprovision(alanAdi, sk)
 			return nil, fmt.Errorf("domain kaydi: %w", err)
@@ -127,7 +136,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		limCtx, limIptal := context.WithTimeout(context.Background(), 5*time.Minute)
 		if err := kaynaklimit.UygulaHepsi(limCtx, h.DB, sonuc.DomainID); err != nil {
 			log("uyari: kaynak limitleri uygulanamadi: %v", err)
-			sonuc.Uyarilar = append(sonuc.Uyarilar, "kaynak limitleri uygulanamadi")
+			sonuc.Uyarilar = append(sonuc.Uyarilar, "Limitler uygulanamadı")
 		}
 		limIptal()
 
@@ -157,8 +166,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		// TÜM dosyalarını (ör. 15GB WP) alıyordu (canlı bug: wp.girgin.net.tr ana
 		// girgin.net.tr'yi aldı). Artık boş bırakılır; burada SESSİZCE ATLA + uyar.
 		log("bu alan adinin kendi web kok dizini yok (yonlendirme/hosting-siz) — dosya tasinmadi")
-		sonuc.Uyarilar = append(sonuc.Uyarilar,
-			"dosya tasinmadi: bu alan adinin kendi web kok dizini yok (yonlendirme alt alani olabilir)")
+		sonuc.Uyarilar = append(sonuc.Uyarilar, "Dosya yok — taşınmadı")
 	} else if ay.Dosyalar {
 		uzak := strings.TrimSpace(hs.WebRoot)
 		if !gecerliUzakYol(uzak) {
@@ -178,6 +186,32 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		_ = exec.CommandContext(ctx, "chown", "-R", sk+":"+sk, webRoot).Run()
 		_ = exec.CommandContext(ctx, "restorecon", "-RF", webRoot).Run()
 		log("dosyalar tamam (%.1f MB)", float64(sonuc.DosyaBayt)/(1024*1024))
+		// 🔴 DOCROOT-DISI BAGIMLILIK (Laravel/Symfony): uygulama kodu belge kokunun
+		// DISINDA durur (public_html/index.php -> ../laravel_11/vendor/autoload.php).
+		// Yalniz docroot tasinirsa site 500 verir. index.php'deki "../<dizin>/"
+		// referanslarini tara, kaynaktan o dizinleri de getir.
+		for _, ust := range docrootDisiBagimlilik(webRoot) {
+			uzakUst := filepath.Join(filepath.Dir(uzak), ust)
+			hedefUst := filepath.Join("/home", sk, ust)
+			if !gecerliUzakYol(uzakUst) {
+				continue
+			}
+			log("uygulama dizini (belge koku disi) aktariliyor: %s → %s", uzakUst, hedefUst)
+			if err := os.MkdirAll(hedefUst, 0o750); err != nil {
+				continue
+			}
+			if _, err := k.RsyncCek(ctx, uzakUst+"/", hedefUst+"/", "--exclude=.git/", "--exclude=*.sock"); err != nil {
+				log("uyari: %s aktarilamadi: %v", ust, kisalt(temizHata(err.Error(), k.Parola), 120))
+				sonuc.Uyarilar = append(sonuc.Uyarilar, "Uygulama dizini eksik: "+ust)
+				continue
+			}
+			_ = exec.CommandContext(ctx, "chown", "-R", sk+":"+sk, hedefUst).Run()
+			_ = exec.CommandContext(ctx, "restorecon", "-RF", hedefUst).Run()
+			// Laravel ise: APP_URL'i hedef domaine cek, cache temizle, .env'i 0600 yap.
+			laravelSonrasiDuzelt(hedefUst, alanAdi, sk, log)
+		}
+		// Docroot'un KENDISI Laravel ise (public_html/artisan) ayni duzeltmeler.
+		laravelSonrasiDuzelt(webRoot, alanAdi, sk, log)
 	}
 
 	// --- 3. Veritabanlari --------------------------------------------------
@@ -205,8 +239,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		// 🔴 SESSİZ GEÇME: DB istendi ama hiç DB bulunamadı → kullanıcı "SQL taşındı"
 		// sanmasın. Görünür uyarı bırak (kalem "Not" sütunu + log).
 		log("uyari: bu site icin kaynakta veritabani bulunamadi; SQL tasinmadi")
-		sonuc.Uyarilar = append(sonuc.Uyarilar,
-			"veritabani tasinmadi: kaynakta bu site icin DB bulunamadi (ek/alt alan adiysa DB ana alan adiyla tasinir; ya da kesif DB'yi goremedi)")
+		sonuc.Uyarilar = append(sonuc.Uyarilar, "Veritabanı yok — taşınmadı")
 	}
 
 	// --- 4. DNS ------------------------------------------------------------
@@ -214,7 +247,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		n, err := h.dnsAktar(ctx, k, sonuc.DomainID, alanAdi, log)
 		if err != nil {
 			log("uyari: DNS aktarilamadi (varsayilan sablon kullanildi): %v", err)
-			sonuc.Uyarilar = append(sonuc.Uyarilar, "DNS varsayilan sablonla olusturuldu")
+			sonuc.Uyarilar = append(sonuc.Uyarilar, "DNS: varsayılan şablon")
 		}
 		sonuc.DNSSayisi = n
 	}
@@ -233,7 +266,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 				log("SSL: kaynak sertifikasi (gercek CA) kopyalandi ve kuruldu")
 			} else {
 				log("SSL: kaynak sertifikasi (self-signed) kopyalandi")
-				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL kaynak self-signed — DNS gecince Let's Encrypt yenileyin")
+				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL: self-signed (DNS sonrası yenilenir)")
 			}
 		} else {
 			if err != nil {
@@ -253,10 +286,10 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 				log("SSL: %s", kaynakAd)
 				if !gercek {
 					sonuc.Uyarilar = append(sonuc.Uyarilar,
-						"SSL self-signed — DNS bu sunucuya yonlendikten sonra yenileyin")
+						"SSL: self-signed (DNS sonrası yenilenir)")
 				}
 			} else {
-				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL alinamadi (kaynak cert yok + LE basarisiz)")
+				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL yok — taşınmadı")
 			}
 		}
 	}
@@ -289,8 +322,21 @@ func kaynakCertOku(ctx context.Context, k *Kaynak, alanAdi string) (string, stri
 	if !reAlanAdi.MatchString(alanAdi) {
 		return "", "", fmt.Errorf("gecersiz alan adi")
 	}
-	uzak := "d=" + shQuote(alanAdi) + "\n" + `conf=$(ls /etc/nginx/plesk.conf.d/vhosts/${d}.conf /etc/nginx/plesk.conf.d/vhosts/${d}_*.conf 2>/dev/null | head -1)
-[ -z "$conf" ] && conf=$(grep -rlsE "server_name[^;]*${d}" /etc/nginx/plesk.conf.d/vhosts/ 2>/dev/null | head -1)
+	uzak := "d=" + shQuote(alanAdi) + "\n" + `# 🔴 KAYNAK PANEL FARKETMEZ (Plesk / GirginOSPanel / cPanel / duz nginx):
+# server_name TOKEN'larinda $d TAM eslesme + ssl_certificate tanimli ilk vhost'u bul.
+# Eskiden yalniz Plesk yollari taraniyordu → GirginOSPanel/cPanel kaynagindan
+# tasimada cert BULUNAMIYOR, SSL kayboluyordu (self-signed). POSIX sh uyumlu.
+conf=""
+for c in /etc/nginx/plesk.conf.d/vhosts/*.conf /etc/nginx/conf.d/*.conf $(grep -rlsE "server_name[^;]*${d}" /etc/nginx/ 2>/dev/null); do
+  [ -f "$c" ] || continue
+  case "$c" in *_default*|*_panel*|*default443*|*default80*|*catch*) continue;; esac
+  grep -qE "^[[:space:]]*ssl_certificate[[:space:]]" "$c" 2>/dev/null || continue
+  sn=$(grep -hE "^[[:space:]]*server_name[[:space:]]" "$c" 2>/dev/null | head -1 | sed -E 's/.*server_name[[:space:]]+([^;]+);.*/\1/')
+  ok=0
+  for t in $sn; do [ "$t" = "$d" ] && ok=1; done
+  [ "$ok" = 1 ] || continue
+  conf="$c"; break
+done
 if [ -n "$conf" ]; then
   cert=$(grep -hE "^[[:space:]]*ssl_certificate[[:space:]]" "$conf" 2>/dev/null | head -1 | sed -E 's/.*ssl_certificate[[:space:]]+([^;]+);.*/\1/' | tr -d " \t")
   key=$(grep -hE "^[[:space:]]*ssl_certificate_key[[:space:]]" "$conf" 2>/dev/null | head -1 | sed -E 's/.*ssl_certificate_key[[:space:]]+([^;]+);.*/\1/' | tr -d " \t")
@@ -705,6 +751,29 @@ var yapilandirmaAdaylari = []string{
 	"wp-config.php", ".env", "configuration.php", "config.php",
 	"app/etc/env.php", "sites/default/settings.php", "config/db.php",
 	"application/config/database.php", "includes/config.php",
+	"src/config.php", // XenForo
+}
+
+// xenforoDBOku — XenForo src/config.php'den $config['db']['<key>'] değerini okur.
+// XenForo iç-içe-bracket kullandığı için generic reAnahtarSatir bunu tanımaz;
+// DB'nin ORİJİNAL kimliğini (ad/kullanıcı/parola) çıkarıp korumak için ayrı okunur.
+func xenforoDBOku(icerik, key string) string {
+	re := regexp.MustCompile(`\$config\s*\[\s*['"]db['"]\s*\]\s*\[\s*['"]` + key + `['"]\s*\]\s*=\s*['"]([^'"]*)['"]`)
+	// 🔴 SON eşleşme: config'de birden çok $config['db'] bloğu olabilir (eski + yeni);
+	// PHP'de SON atama aktiftir. İlk'i almak yanlış (eski/ölü DB'yi çıkarır).
+	ms := re.FindAllStringSubmatch(icerik, -1)
+	if len(ms) == 0 {
+		return ""
+	}
+	return ms[len(ms)-1][1]
+}
+
+// xenforoDBYaz — XenForo $config['db']['<key>'] değerini yeni değerle değiştirir.
+// Yalnız DB adı hedefte çakışıp yeniden adlandırıldığında (orijinal korunamadığında)
+// devreye girer. val alfanumerik (RandomParola / sk_) olduğundan tek-tırnak güvenli.
+func xenforoDBYaz(icerik, key, val string) string {
+	re := regexp.MustCompile(`(\$config\s*\[\s*['"]db['"]\s*\]\s*\[\s*['"]` + key + `['"]\s*\]\s*=\s*)['"][^'"]*['"]`)
+	return re.ReplaceAllString(icerik, `${1}'`+val+`'`)
 }
 
 // configtenDBBul — kopyalanan site yapilandirmasindan (wp-config.php/.env/…) DB
@@ -746,6 +815,11 @@ func configtenDBBul(webRoot string) []string {
 			}
 			gorulen[deger] = true
 			out = append(out, deger)
+		}
+		// XenForo dbname (generic satır tanımaz) — orijinal DB adı korunsun diye keşfe ekle.
+		if xa := xenforoDBOku(string(ham), "dbname"); xa != "" && !gorulen[xa] && reDBAd.MatchString(xa) && !sistemDB(xa) {
+			gorulen[xa] = true
+			out = append(out, xa)
 		}
 	}
 	return out
@@ -794,6 +868,19 @@ func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 				kul = deger
 			case pw == "" && anahtardaMi(m[2], dbPwAnahtarlari):
 				pw = deger
+			}
+		}
+		// XenForo ($config['db'][...]) — generic reAnahtarSatir tanımaz. ORİJİNAL DB
+		// kimliğini buradan çıkar ki taşımada DB adı/kullanıcı DEĞİŞMESİN (korunur).
+		if (ad == "" || kul == "" || pw == "") && strings.Contains(string(ham), "'db'") {
+			if v := xenforoDBOku(string(ham), "dbname"); v != "" {
+				ad = v
+			}
+			if v := xenforoDBOku(string(ham), "username"); v != "" {
+				kul = v
+			}
+			if v := xenforoDBOku(string(ham), "password"); v != "" {
+				pw = v
 			}
 		}
 		if ad != "" && kul != "" && pw != "" {
@@ -853,6 +940,22 @@ func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, k
 		if yeniPw != "" {
 			for _, a := range dbPwAnahtarlari {
 				yeni = anahtarDegeriDegistir(yeni, a, yeniPw, "")
+			}
+		}
+		// XenForo ($config['db'][...]) — generic anahtar tanımaz. YALNIZ orijinal DB
+		// adı hedefte çakışıp yeniden adlandırıldığında gerekir (aksi halde orijinal
+		// kimlik korunur, config zaten doğrudur). username/password + eşlenen dbname.
+		if strings.Contains(yeni, "'db'") || strings.Contains(yeni, "\"db\"") {
+			if cur := xenforoDBOku(yeni, "dbname"); cur != "" {
+				if hedef, ok := esleme[cur]; ok && hedef.Ad != "" && hedef.Ad != cur {
+					yeni = xenforoDBYaz(yeni, "dbname", hedef.Ad)
+				}
+			}
+			if hedefKul != "" {
+				yeni = xenforoDBYaz(yeni, "username", hedefKul)
+			}
+			if yeniPw != "" {
+				yeni = xenforoDBYaz(yeni, "password", yeniPw)
 			}
 		}
 		if yeni == string(ham) {
@@ -1428,4 +1531,54 @@ func (h *Handlers) sahiplikDogrula(ctx context.Context, resellerID, customerID i
 		}
 	}
 	return nil
+}
+
+// docrootDisiBagimlilik — belge kokundeki PHP giris dosyalarinda "../<dizin>/"
+// referanslarini bulur (Laravel/Symfony deseni). Donen adlar TEK SEVIYE dizin
+// adidir; ".."/slash iceren veya supheli degerler elenir.
+func docrootDisiBagimlilik(webRoot string) []string {
+	re := regexp.MustCompile(`\.\./([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/`)
+	gorulen := map[string]bool{}
+	var out []string
+	for _, ad := range []string{"index.php", "server.php", "bootstrap.php"} {
+		b, err := os.ReadFile(filepath.Join(webRoot, ad))
+		if err != nil || len(b) > 1<<20 {
+			continue
+		}
+		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+			d := m[1]
+			if d == "" || d == "." || d == ".." || gorulen[d] {
+				continue
+			}
+			gorulen[d] = true
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// laravelSonrasiDuzelt — tasinan Laravel uygulamasinda kaynak sunucuya ait kalintilari
+// temizler: APP_URL hedef domaine cekilir (aksi halde link/asset yanlis uretilir),
+// onbelleklenmis config/route (eski YOLLARI icerir) silinir, .env 0600 yapilir
+// (kaynaktan 0644 gelir — APP_KEY/DB parolasi dunyaya okunur kalirdi).
+func laravelSonrasiDuzelt(dir, alanAdi, sk string, log func(string, ...any)) {
+	if _, err := os.Stat(filepath.Join(dir, "artisan")); err != nil {
+		return // Laravel degil
+	}
+	envYol := filepath.Join(dir, ".env")
+	if b, err := os.ReadFile(envYol); err == nil {
+		yeni := regexp.MustCompile(`(?m)^APP_URL=.*$`).ReplaceAllString(string(b), "APP_URL=https://"+alanAdi)
+		if yeni != string(b) {
+			if st, e := os.Stat(envYol); e == nil {
+				_ = atomikYaz(envYol, []byte(yeni), st)
+			}
+			log("laravel: APP_URL → https://%s", alanAdi)
+		}
+		_ = os.Chmod(envYol, 0o600)
+	}
+	for _, c := range []string{"config.php", "services.php", "packages.php", "routes-v7.php"} {
+		_ = os.Remove(filepath.Join(dir, "bootstrap", "cache", c))
+	}
+	_ = exec.Command("chown", "-R", sk+":"+sk, filepath.Join(dir, "storage"), filepath.Join(dir, "bootstrap", "cache")).Run()
+	log("laravel: onbellek temizlendi, .env 0600, storage sahipligi ayarlandi")
 }

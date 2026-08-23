@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
@@ -16,7 +20,19 @@ import Breadcrumb from '@/components/Breadcrumb'
  * kısa (30 dk) tutmak ekran kilidi + otomatik çıkış davranışını sağlar.
  */
 
+
+const OTURUM_EN: Record<string, string> = {
+  "0 = kapalı.": "0 = off.",
+  "0 ile 1440 arasında bir değer girin (0 = kapalı)": "Enter a value between 0 and 1440 (0 = off)",
+  "Ayar okunamadı": "Failed to read setting",
+  "Oturum Güvenliği": "Session Security",
+  "Oturum boşta süresi kapatıldı — yalnız JWT mutlak süresi kaldı.": "Session idle timeout disabled — only the JWT absolute lifetime remains.",
+  "Üst sınır 1440 dakika (24 saat).": "Maximum 1440 minutes (24 hours).",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (OTURUM_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function OturumAyarPage() {
+  useTranslation() // dil re-render aboneligi
   const [mevcut, setMevcut] = useState<number | null>(null)
   const [taslak, setTaslak] = useState<string>('')
   const [yukleniyor, setYukleniyor] = useState(true)
@@ -33,7 +49,7 @@ export default function OturumAyarPage() {
       setMevcut(r.data.dakika)
       setTaslak(String(r.data.dakika))
     } catch (e) {
-      setHata(apiHata(e, 'Ayar okunamadı'))
+      setHata(apiHata(e, cevir("Ayar okunamadı")))
     } finally { setYukleniyor(false) }
   }
 
@@ -42,15 +58,15 @@ export default function OturumAyarPage() {
     setHata(null); setMesaj(null)
     const dk = parseInt(taslak, 10)
     if (Number.isNaN(dk) || dk < 0 || dk > 1440) {
-      setHata('0 ile 1440 arasında bir değer girin (0 = kapalı)'); return
+      setHata(cevir("0 ile 1440 arasında bir değer girin (0 = kapalı)")); return
     }
     setGonderiliyor(true)
     try {
       await api.put('/settings/session-idle', { dakika: dk })
       setMevcut(dk)
       setMesaj(dk === 0
-        ? 'Oturum boşta süresi kapatıldı — yalnız JWT mutlak süresi kaldı.'
-        : `Oturum boşta süresi ${dk} dakika olarak kaydedildi.`)
+        ? cevir("Oturum boşta süresi kapatıldı — yalnız JWT mutlak süresi kaldı.")
+        : cevirT(cevir("Oturum boşta süresi {0} dakika olarak kaydedildi."), dk))
       setTimeout(() => setMesaj(null), 5000)
     } catch (e) {
       setHata(apiHata(e, 'Kaydedilemedi'))
@@ -62,26 +78,26 @@ export default function OturumAyarPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 md:px-6 md:py-8">
       <Breadcrumb items={[
-        { href: '/araclar-ayarlar', etiket: 'Araçlar ve Ayarlar' },
-        { etiket: 'Oturum Güvenliği' },
+        { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
+        { etiket: cevir("Oturum Güvenliği") },
       ]} />
 
       <div className="mt-4 mb-6">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Oturum Boşta Süresi
+          {cevir(cevir("Oturum Boşta Süresi"))}
         </h1>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          Kullanıcı belirlenen süre boyunca istek atmazsa oturumu otomatik kapanır.
-          {' '}<span className="font-medium text-slate-800 dark:text-slate-200">0 = kapalı.</span>
+          {cevir(cevir("Kullanıcı belirlenen süre boyunca istek atmazsa oturumu otomatik kapanır."))}
+          {' '}<span className="font-medium text-slate-800 dark:text-slate-200">{cevir("0 = kapalı.")}</span>
         </p>
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : (
         <form onSubmit={kaydet} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-            Boşta süresi (dakika)
+            {cevir(cevir("Boşta süresi (dakika)"))}
           </label>
           <div className="flex items-center gap-3">
             <input
@@ -108,12 +124,12 @@ export default function OturumAyarPage() {
               type="button"
               onClick={() => setTaslak('0')}
               className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-              title="Kapat"
+              title={cevir("Kapat")}
             >
-              Kapat
+              {cevir("Kapat")}
             </button>
           </div>
-          <p className="mt-2 text-xs text-slate-500">Üst sınır 1440 dakika (24 saat).</p>
+          <p className="mt-2 text-xs text-slate-500">{cevir("Üst sınır 1440 dakika (24 saat).")}</p>
 
           <div className="mt-5 flex items-center gap-3">
             <button

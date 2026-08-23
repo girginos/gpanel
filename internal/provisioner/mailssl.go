@@ -93,12 +93,24 @@ func hostCozuluyorMu(domain, host string) bool {
 		}
 		return nil
 	}
-	apex := cozumle(domain)
-	if len(apex) == 0 {
-		return false
-	}
 	h := cozumle(host)
 	if len(h) == 0 {
+		return false
+	}
+	// 🔴 KALICI FIX (mail-only / split-server): mail alt-alani BU sunucunun IP'sine
+	// cozulyorsa YETER. Apex (web) baska sunucuda/CDN'de (Cloudflare vb.) olabilir;
+	// mail icin apex ile AYNI IP olmasi GEREKMEZ. Eski apex-eslesme, web'i CDN'de
+	// olan domainlerde mail SSL'i yanlislikla "cozulmuyor" sayiyordu.
+	if sip := mailYerelSunucuIP(); sip != "" {
+		for _, ip := range h {
+			if ip == sip {
+				return true
+			}
+		}
+	}
+	// Geriye uyum: apex = bu sunucu senaryosu (host, apex ile ayni IP kumesinde).
+	apex := cozumle(domain)
+	if len(apex) == 0 {
 		return false
 	}
 	kume := make(map[string]bool, len(apex))
@@ -111,6 +123,19 @@ func hostCozuluyorMu(domain, host string) bool {
 		}
 	}
 	return true
+}
+
+// mailYerelSunucuIP — sunucunun giden (public) IPv4'unu dondurur (ssl_kapsam.go
+// yerelSunucuIP ile ayni yontem; paketler-arasi bagimlilik olmasin diye kopya).
+func mailYerelSunucuIP() string {
+	c, err := net.Dial("udp", "1.1.1.1:80")
+	if err == nil {
+		defer c.Close()
+		if a, ok := c.LocalAddr().(*net.UDPAddr); ok {
+			return a.IP.String()
+		}
+	}
+	return ""
 }
 
 // ── webmail vhost ──────────────────────────────────────────────────────────

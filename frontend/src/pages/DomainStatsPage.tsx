@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
@@ -13,7 +16,23 @@ type Ozet = {
   top_yollar: KV[]; top_ip: KV[]; top_durum: KV[]; gunluk: Gun[]; son_istekler: string[]
 }
 
+
+const DSTATS_EN: Record<string, string> = {
+  "Bant Kullanımı": "Bandwidth Usage",
+  "Bot Oranı": "Bot Ratio",
+  "En Çok İstenen Yollar": "Most Requested Paths",
+  "Günlük İstek (son 7 gün)": "Daily Requests (last 7 days)",
+  "HTTP Durum Dağılımı": "HTTP Status Distribution",
+  "Son İstekler": "Recent Requests",
+  "Toplam İstek": "Total Requests",
+  "Trafik İstatistikleri": "Traffic Statistics",
+  "İstatistikler": "Statistics",
+  "— nginx erişim günlüğü analizi.": "— nginx access log analysis.",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DSTATS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainStatsPage() {
+  useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [o, setO] = useState<Ozet | null>(null)
@@ -30,8 +49,8 @@ export default function DomainStatsPage() {
   }
   useEffect(yukle, [id])
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">Yükleniyor…</div>
-  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || 'Bulunamadı'}</div></div>
+  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
 
   const maxGun = Math.max(1, ...o.gunluk.map(g => g.istek))
   const durumBar: Record<string, string> = { '2xx': 'bg-emerald-500', '3xx': 'bg-sky-500', '4xx': 'bg-amber-500', '5xx': 'bg-rose-500' }
@@ -48,10 +67,10 @@ export default function DomainStatsPage() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Trafik İstatistikleri</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> — nginx erişim günlüğü analizi.</p>
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
           </div>
-          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Yenile</span></button>
+          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (
@@ -62,14 +81,14 @@ export default function DomainStatsPage() {
           <>
             {/* KPI kartları */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <KPI etiket="Toplam İstek" deger={o.toplam_istek.toLocaleString('tr-TR')} renk="indigo" />
-              <KPI etiket="Bant Kullanımı" deger={`${o.toplam_bant_mb.toFixed(1)} MB`} renk="sky" />
+              <KPI etiket={cevir("Toplam İstek")} deger={o.toplam_istek.toLocaleString('tr-TR')} renk="indigo" />
+              <KPI etiket={cevir("Bant Kullanımı")} deger={`${o.toplam_bant_mb.toFixed(1)} MB`} renk="sky" />
               <KPI etiket="Tekil IP" deger={o.tekil_ip.toLocaleString('tr-TR')} renk="emerald" />
-              <KPI etiket="Bot Oranı" deger={`%${o.bot_orani}`} renk={o.bot_orani >= 50 ? 'rose' : 'violet'} />
+              <KPI etiket={cevir("Bot Oranı")} deger={`%${o.bot_orani}`} renk={o.bot_orani >= 50 ? 'rose' : 'violet'} />
             </div>
 
             {/* Durum dağılımı */}
-            <Kart baslik="HTTP Durum Dağılımı">
+            <Kart baslik={cevir("HTTP Durum Dağılımı")}>
               <div className="space-y-2">
                 {(['2xx', '3xx', '4xx', '5xx'] as const).map(g => {
                   const v = o.durum_grup[g] || 0
@@ -89,7 +108,7 @@ export default function DomainStatsPage() {
 
             {/* Günlük istek (7 gün) */}
             {o.gunluk.length > 0 && (
-              <Kart baslik="Günlük İstek (son 7 gün)">
+              <Kart baslik={cevir("Günlük İstek (son 7 gün)")}>
                 <div className="flex items-end gap-2 h-32">
                   {o.gunluk.map(g => (
                     <div key={g.tarih} className="flex-1 flex flex-col items-center gap-1">
@@ -105,7 +124,7 @@ export default function DomainStatsPage() {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Kart baslik="En Çok İstenen Yollar">
+              <Kart baslik={cevir("En Çok İstenen Yollar")}>
                 <Tablo rows={o.top_yollar} birim="istek" mono />
               </Kart>
               <Kart baslik="En Aktif IP'ler">
@@ -113,7 +132,7 @@ export default function DomainStatsPage() {
               </Kart>
             </div>
 
-            <Kart baslik="Son İstekler">
+            <Kart baslik={cevir("Son İstekler")}>
               <div className="font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
                 {o.son_istekler.map((s, i) => {
                   const kod = s.slice(0, 3)
@@ -125,7 +144,7 @@ export default function DomainStatsPage() {
           </>
         )}
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">← Aboneliğe dön</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

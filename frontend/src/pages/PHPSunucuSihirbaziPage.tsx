@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // PHP & Sunucu Kurulum Sihirbazı — dağınık PHP sürüm/modül/loader/web-sunucu
 // yönetimini tek yerde toplar (EasyApache tarzı adım-adım). Her adım mevcut
@@ -24,7 +28,21 @@ type RuntimeSecim = { anahtar: string; ad: string }
 type RuntimeEk = { ad: string; anahtar: string; aciklama: string; kurulu: boolean; yonetilemez?: boolean }
 type RuntimeGrup = { tip: string; ad: string; ekler: RuntimeEk[] }
 
+
+const PSIHIR_EN: Record<string, string> = {
+  "Kurulu PHP sürümleri": "Installed PHP versions",
+  "Kurulu PHP sürümü": "Installed PHP version",
+  "Modül aç/kapa, PECL kur, ionCube": "Toggle modules, install PECL, ionCube",
+  "PHP dışı diller. Kurulacakları toggle ile işaretleyin — Özet adımında birlikte kurulur. Kurulu olanı kapatınca kaldırılır.": "Non-PHP languages. Mark those to install with the toggle — installed together in the Summary step. Disabling an installed one removes it.",
+  "PHP sürümleri, eklentiler, loader'lar ve web sunucu ayarlarını tek yerden yönetin. Değişiklikler her adımda anında uygulanır.": "Manage PHP versions, extensions, loaders and web server settings in one place. Changes are applied instantly at each step.",
+  "Site bazında (.htaccess → nginx)": "Per-site (.htaccess → nginx)",
+  "Sunucuya PHP sürümü ekle/kaldır": "Add/remove PHP version on the server",
+  "Yapılandırmayı gözden geçir": "Review the configuration",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (PSIHIR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function PHPSunucuSihirbaziPage() {
+  useTranslation() // dil re-render aboneligi
   // Aktif adım kalıcı (localStorage) — sayfa yenilenince kalınan adım korunur.
   const [aktif, setAktifState] = useState<string>(() => {
     try {
@@ -47,12 +65,12 @@ export default function PHPSunucuSihirbaziPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Sunucu Yönetimi', href: '/araclar-ayarlar' },
-        { etiket: 'PHP & Sunucu Sihirbazı' },
+        { etiket: cevir("Sunucu Yönetimi"), href: '/araclar-ayarlar' },
+        { etiket: cevir("PHP & Sunucu Sihirbazı") },
       ]} />
 
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP &amp; Sunucu Kurulum Sihirbazı</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">PHP sürümleri, eklentiler, loader'lar ve web sunucu ayarlarını tek yerden yönetin. Değişiklikler her adımda anında uygulanır.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">{cevir("PHP sürümleri, eklentiler, loader'lar ve web sunucu ayarlarını tek yerden yönetin. Değişiklikler her adımda anında uygulanır.")}</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)] gap-5 items-start">
         {/* Sol adım listesi */}
@@ -105,7 +123,7 @@ export default function PHPSunucuSihirbaziPage() {
               <button
                 onClick={() => setAktif(ADIMLAR[aktifIdx + 1].key)}
                 className="px-4 py-2 text-sm rounded-md bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 font-medium"
-              >İleri →</button>
+              >{cevir("İleri →")}</button>
             ) : (
               <Link to="/araclar-ayarlar" className="px-4 py-2 text-sm rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium">Bitir</Link>
             )}
@@ -143,7 +161,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
 
   async function kaldir(e: RuntimeEk) {
     if (kaldiran) return
-    if (!(await onay({ baslik: 'Kaldır', mesaj: `${e.ad} sunucudan kaldırılacak. Devam?`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Kaldır"), mesaj: cevirT(cevir("{0} sunucudan kaldırılacak. Devam?"), e.ad), tehlike: true }))) return
     setKaldiran(e.anahtar)
     try {
       const { data } = await api.post('/runtimeler/kaldir', { anahtar: e.anahtar })
@@ -151,24 +169,24 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
         for (;;) {
           await new Promise(r => setTimeout(r, 1500))
           const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
-          if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kaldırma başarısız')
+          if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kaldırma başarısız"))
           if (p.data.durum === 'tamam') break
         }
       }
       yukle()
     } catch (err) {
-      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, 'Kaldırma başarısız') }))
+      (await bilgi({ baslik: 'Bilgi', mesaj: apiHata(err, cevir("Kaldırma başarısız")) }))
     } finally {
       setKaldiran(null)
     }
   }
 
-  if (yuk) return <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</div>
+  if (yuk) return <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Ek Runtime'lar</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-500">PHP dışı diller. Kurulacakları toggle ile işaretleyin — Özet adımında birlikte kurulur. Kurulu olanı kapatınca kaldırılır.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-500">{cevir("PHP dışı diller. Kurulacakları toggle ile işaretleyin — Özet adımında birlikte kurulur. Kurulu olanı kapatınca kaldırılır.")}</p>
       </div>
       {(secilenRuntimeler.length > 0) && (
         <div className="px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
@@ -195,7 +213,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                   {e.yonetilemez ? (
                     // Sistem yönetimli (ör. Node.js/nodesource) — yalnız durum, aksiyon yok.
                     <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${e.kurulu ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-                      {e.kurulu ? '✓ Kurulu' : 'Kurulu değil'}
+                      {e.kurulu ? '✓ Kurulu' : cevir("Kurulu değil")}
                     </span>
                   ) : (
                     <button
@@ -239,12 +257,12 @@ function WebSunucuAdim() {
       </div>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <DurumKart etiket="Web Sunucu" deger="nginx" ok />
-        <DurumKart etiket="PHP çalışma modu" deger="PHP-FPM (per-tenant izole)" ok />
-        <DurumKart etiket="Kurulu PHP sürümü" deger={durum?.fpm_sayisi != null ? `${durum.fpm_sayisi} sürüm` : '…'} ok={!!durum?.fpm_sayisi} />
-        <DurumKart etiket="Apache uyumluluk" deger="Site bazında (.htaccess → nginx)" ok />
+        <DurumKart etiket={cevir("PHP çalışma modu")} deger="PHP-FPM (per-tenant izole)" ok />
+        <DurumKart etiket={cevir("Kurulu PHP sürümü")} deger={durum?.fpm_sayisi != null ? cevirT(cevir("{0} sürüm"), durum.fpm_sayisi) : '…'} ok={!!durum?.fpm_sayisi} />
+        <DurumKart etiket="Apache uyumluluk" deger={cevir("Site bazında (.htaccess → nginx)")} ok />
       </dl>
       <p className="text-xs text-slate-500 dark:text-slate-500">
-        Bir sitenin güvenlik başlıkları, ek direktifler ve Apache/nginx uyumluluk ayarları için ilgili domainin <strong>Barınma ve DNS → Apache &amp; nginx</strong> ekranını kullanın.
+        {cevir(cevir("Bir sitenin güvenlik başlıkları, ek direktifler ve Apache/nginx uyumluluk ayarları için ilgili domainin"))} <strong>Barınma ve DNS → Apache &amp; nginx</strong> {cevir(cevir("ekranını kullanın."))}
       </p>
     </div>
   )
@@ -291,23 +309,38 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
     for (let i = 0; i < liste.length; i++) {
       const s = liste[i]
       setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'kuruluyor' } : x))
-      setAktifAdim({ ad: s.ad, adim: 'Başlatılıyor…', yuzde: 2 })
+      setAktifAdim({ ad: s.ad, adim: cevir("Başlatılıyor…"), yuzde: 2 })
       try {
         if (s.tip === 'surum') {
-          // PHP sürüm kurulumu — detached iş; durum poll ile izlenir.
+          // PHP sürüm kurulumu — detached iş (systemd-run); durum poll ile izlenir.
           await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
+          // 🔴 YARIŞ FIX: systemd-run unit'i aktifleşmeden ilk poll calisiyor=false
+          // görebiliyordu → döngü ERKEN kırılıp kurulum bitmeden doğrulama yapıyor,
+          // YENİ sürüm (ör. 8.6) sahte "kurulamadı" veriyordu. Çözüm: (a) unit'in
+          // aktifleşmesi için ~20sn başlama-grace'i (calisiyor'u en az bir kez gör),
+          // (b) sonra bitene kadar poll.
+          let gordukCalisiyor = false
+          const basla = Date.now()
           for (;;) {
             await new Promise(r => setTimeout(r, 2000))
             const d = await api.get('/php-surumler/durum')
-            const calis = d.data?.calisiyor && d.data?.surum === s.surum
-            setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : 'Tamamlanıyor…', yuzde: calis ? 55 : 95 })
-            if (!d.data?.calisiyor) break
+            const calis = !!(d.data?.calisiyor && d.data?.surum === s.surum)
+            if (calis) gordukCalisiyor = true
+            setAktifAdim({ ad: s.ad, adim: calis ? 'Paketler kuruluyor…' : cevir("Tamamlanıyor…"), yuzde: calis ? 55 : 90 })
+            if (!d.data?.calisiyor && (gordukCalisiyor || Date.now() - basla > 20000)) break
           }
-          // 🔴 GERÇEK doğrulama: unit "failed" de calisiyor=false döndürür. Kurulumun
-          // BAŞARILI olduğunu, sürümün artık yüklü listesinde olmasıyla teyit et.
-          const chk = await api.get('/php-surumler')
-          const yuklendi = (chk.data?.surumler || []).some((x: any) => x.surum === s.surum && x.kaynak === s.kaynak && x.yuklu)
-          if (!yuklendi) throw new Error(`PHP ${s.surum} kurulamadı (paket eksik/derlenemedi olabilir — Sürümler sekmesindeki loga bakın)`)
+          // 🔴 GERÇEK doğrulama: detached iş HÂLÂ kuruyor olabilir (grace'te kırıldıysa)
+          // ve binary birkaç saniye sonra görünebilir. Sürüm yüklü listesinde belirene
+          // kadar ~90sn boyunca yeniden kontrol et; kaynak eşitliği ŞART DEĞİL (yüklüyse
+          // hangi kaynaktan olursa olsun kuruldu demektir).
+          let yuklendi = false
+          for (let t = 0; t < 45; t++) {
+            const chk = await api.get('/php-surumler')
+            if ((chk.data?.surumler || []).some((x: any) => x.surum === s.surum && x.yuklu)) { yuklendi = true; break }
+            setAktifAdim({ ad: s.ad, adim: cevir("Doğrulanıyor…"), yuzde: 95 })
+            await new Promise(r => setTimeout(r, 2000))
+          }
+          if (!yuklendi) throw new Error(cevirT(cevir("PHP {0} kurulamadı (paket eksik/derlenemedi olabilir — Sürümler sekmesindeki loga bakın)"), s.surum))
         } else if (s.tip === 'runtime') {
           // Runtime kurulumu (.NET/Node/Python) — async is_id + durum poll.
           const { data } = await api.post('/runtimeler/kur', { anahtar: s.anahtar })
@@ -316,7 +349,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
               await new Promise(r => setTimeout(r, 1500))
               const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
               setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
-              if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+              if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kurulum başarısız"))
               if (p.data.durum === 'tamam') break
             }
           }
@@ -328,7 +361,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
               await new Promise(r => setTimeout(r, 1500))
               const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
               setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
-              if (p.data.durum === 'hata') throw new Error(p.data.hata || 'Kurulum başarısız')
+              if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kurulum başarısız"))
               if (p.data.durum === 'tamam') break
             }
           }
@@ -348,7 +381,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
 
       {/* Kurulu sürümler */}
       <div>
-        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulu PHP sürümleri</div>
+        <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulu PHP sürümleri")}</div>
         <div className="flex flex-wrap gap-2">
           {surumler.length === 0 ? <span className="text-sm text-slate-500">—</span> : surumler.map((s: any) => (
             <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700/60 text-sm font-mono text-slate-800 dark:text-slate-200">
@@ -363,7 +396,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
         <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">Kurulacak bileşenler ({toplamIs})</div>
         {toplamIs === 0 && !bitti ? (
           <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400">
-            "PHP Sürümleri" ve "PHP Eklentileri" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.
+            cevir("PHP Sürümleri") ve "PHP Eklentileri" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.
           </div>
         ) : (
           <div className="space-y-2">
@@ -402,12 +435,12 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
         </div>
       )}
 
-      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">✓ Toplu kurulum tamamlandı. Kurulan sürüm/eklentiler ilgili adımlarda aktif görünür.</div>}
+      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">{cevir("✓ Toplu kurulum tamamlandı. Kurulan sürüm/eklentiler ilgili adımlarda aktif görünür.")}</div>}
 
       {toplamIs > 0 && (
         <button onClick={topluKur} disabled={calisiyor}
           className="w-full sm:w-auto px-5 py-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-60">
-          {calisiyor ? 'Kuruluyor…' : `${toplamIs} bileşeni kur`}
+          {calisiyor ? 'Kuruluyor…' : cevirT(cevir("{0} bileşeni kur"), toplamIs)}
         </button>
       )}
     </div>

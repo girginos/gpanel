@@ -8,6 +8,7 @@ package panelhost
 import (
 	"fmt"
 	"os"
+	"regexp"
 )
 
 const acmeVhostSablon = `# OTOMATİK ÜRETİLDİ — panelhost.AcmeVhostYaz
@@ -34,7 +35,7 @@ server {
     # 🔴 $server_name (deterministik) — $host Host başlığından gelir ve open
     # redirect riski taşır. server_name eşleşmesi zaten hostname'i garanti eder.
     location / {
-        return 301 https://$server_name:8443$request_uri;
+        return 301 https://$server_name:%s$request_uri;
     }
 }
 `
@@ -45,7 +46,7 @@ func AcmeVhostYaz(hostname string) error {
 	if hostname == "" {
 		return fmt.Errorf("hostname boş")
 	}
-	yeni := fmt.Sprintf(acmeVhostSablon, WebrootDir, hostname, WebrootDir)
+	yeni := fmt.Sprintf(acmeVhostSablon, WebrootDir, hostname, WebrootDir, PanelPort())
 	// Aynıysa dokunma — nginx reload gereksiz olur
 	if mev, err := os.ReadFile(AcmeVhostPath); err == nil && string(mev) == yeni {
 		return nil
@@ -60,3 +61,19 @@ func AcmeVhostSil() error {
 	}
 	return os.Remove(AcmeVhostPath)
 }
+
+// PanelPort — panel vhost'unun dinledigi HTTPS portu (_panel.conf'tan okunur).
+// 🔴 NEDEN: port sabit 8443 varsayiliyordu; kurulumda cakisma olursa panel baska
+// porta (or. 7443) tasinir ve HTTP->HTTPS yonlendirmesi YANLIS porta gider
+// (panel acilmaz). Okunamazsa 8443'e duser.
+func PanelPort() string {
+	b, err := os.ReadFile(PanelVhostPath)
+	if err == nil {
+		if m := rePanelListen.FindSubmatch(b); len(m) >= 2 {
+			return string(m[1])
+		}
+	}
+	return "8443"
+}
+
+var rePanelListen = regexp.MustCompile(`(?m)^\s*listen\s+(\d+)\s+ssl`)

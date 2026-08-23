@@ -104,13 +104,15 @@ func guvenliAppDir(sk, appRoot string) (string, error) {
 	if strings.Contains(ar, "..") || !regexp.MustCompile(`^[A-Za-z0-9._/-]+$`).MatchString(ar) {
 		return "", fmt.Errorf("geçersiz uygulama dizini")
 	}
-	if ar != "public_html" && !strings.HasPrefix(ar, "public_html/") {
-		return "", fmt.Errorf("uygulama public_html altında olmalı")
+	// 🔴 Gizli dizin (.ssh/.cron) secilemez; kapsam TENANT HOME (Laravel kodu
+	// belge kokunun DISINDA olabilir — public_html kardesi laravel_11 gibi).
+	if strings.HasPrefix(ar, ".") || strings.Contains(ar, "/.") {
+		return "", fmt.Errorf("gizli dizin seçilemez")
 	}
-	base := "/home/" + sk + "/public_html"
+	base := "/home/" + sk
 	abs := filepath.Clean("/home/" + sk + "/" + ar)
 	if abs != base && !strings.HasPrefix(abs, base+"/") {
-		return "", fmt.Errorf("dizin public_html dışına çıkamaz")
+		return "", fmt.Errorf("dizin ev dizini dışına çıkamaz")
 	}
 	// Symlink kaçışını kapat — leaf henüz yoksa (kur öncesi) EN DERİN MEVCUT atayı çöz
 	// ve base altında olduğunu doğrula. Aksi halde public_html→/etc symlink'iyle mkdir
@@ -119,7 +121,7 @@ func guvenliAppDir(sk, appRoot string) (string, error) {
 	for kontrol == base || strings.HasPrefix(kontrol, base+"/") {
 		if real, err := filepath.EvalSymlinks(kontrol); err == nil {
 			if real != base && !strings.HasPrefix(real, base+"/") {
-				return "", fmt.Errorf("dizin (symlink dahil) public_html dışına çıkamaz")
+				return "", fmt.Errorf("dizin (symlink dahil) ev dizini dışına çıkamaz")
 			}
 			break // en derin mevcut ata base altında — güvenli
 		}

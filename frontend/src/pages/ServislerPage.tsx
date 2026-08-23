@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -27,7 +31,20 @@ const GRUP_IKON: Record<string, string> = {
   'Diğer': '⚙️',
 }
 
+
+const SERVIS_EN: Record<string, string> = {
+  "Servis Yönetimi": "Service Management",
+  "Servisler alınamadı": "Failed to get services",
+  "Veritabanı & Önbellek": "Database & Cache",
+  "— Kurulu değil": "— Not installed",
+  "○ Durmuş": "○ Stopped",
+  "● Çalışıyor": "● Running",
+  "✕ Hatalı": "✕ Failed",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (SERVIS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function ServislerPage() {
+  useTranslation() // dil re-render aboneligi
   const [liste, setListe] = useState<Servis[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
   const [islemBirim, setIslemBirim] = useState<string | null>(null)
@@ -39,7 +56,7 @@ export default function ServislerPage() {
       const r = await api.get<Servis[]>('/system/servisler')
       setListe(r.data)
     } catch (e) {
-      setHata(apiHata(e, 'Servisler alınamadı'))
+      setHata(apiHata(e, cevir("Servisler alınamadı")))
     } finally {
       setYukleniyor(false)
     }
@@ -50,10 +67,10 @@ export default function ServislerPage() {
     setIslemBirim(s.birim); setHata(null); setBasari(null)
     try {
       await api.post('/system/servis-islem', { birim: s.birim, aksiyon })
-      setBasari(`${s.etiket} ${aksiyon === 'reload' ? 'yeniden yüklendi' : 'yeniden başlatıldı'}.`)
+      setBasari(`${s.etiket} ${aksiyon === 'reload' ? 'yeniden yüklendi' : cevir("yeniden başlatıldı")}.`)
       await getir()
     } catch (e) {
-      setHata(apiHata(e, `${s.etiket} işlemi başarısız`))
+      setHata(apiHata(e, cevirT(cevir("{0} işlemi başarısız"), s.etiket)))
     } finally {
       setIslemBirim(null)
     }
@@ -70,13 +87,13 @@ export default function ServislerPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
       <Breadcrumb items={[
-        { etiket: 'Araçlar & Ayarlar', href: '/araclar-ayarlar' },
+        { etiket: cevir("Araçlar & Ayarlar"), href: '/araclar-ayarlar' },
         { etiket: 'Servisler' },
       ]} />
       <div className="mb-5">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Servis Yönetimi</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Servis Yönetimi")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Web, veritabanı, DNS ve PHP servislerini buradan yeniden başlatın. Ayar değişikliği sonrası kullanışlıdır.
+          {cevir(cevir("Web, veritabanı, DNS ve PHP servislerini buradan yeniden başlatın. Ayar değişikliği sonrası kullanışlıdır."))}
         </p>
       </div>
 
@@ -84,7 +101,7 @@ export default function ServislerPage() {
       {basari && <div className="mb-4 px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
       {yukleniyor ? (
-        <div className="p-8 text-center text-sm text-slate-400">Yükleniyor…</div>
+        <div className="p-8 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
       ) : (
         <div className="space-y-6">
           {gruplar.map(g => (

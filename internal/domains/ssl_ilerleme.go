@@ -24,6 +24,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/provisioner"
+	"girginospanel/internal/dns"
 )
 
 // SSLAdim — tek SSL adımı.
@@ -245,6 +246,13 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 						if e := provisioner.MailSertifikaGonder(alanAdi, mc, mk); e != nil {
 							return "sertifika alındı ama posta sunucusuna gönderilemedi: " + e.Error(), true, nil
 						}
+						// Varsayılan (SNI-siz) sertifikayı da geçerli yap: Outlook gibi
+						// SNI göndermeyen istemciler self-signed görüp şifre soruyordu.
+						if degisti, e := provisioner.MailVarsayilanKur(mc, mk); e != nil {
+							return "posta SNI sertifikası kuruldu; varsayılan (SNI-siz) güncellenemedi: " + e.Error(), true, nil
+						} else if degisti {
+							return "posta sunucusu sertifikaya geçirildi (SNI + varsayılan — SNI göndermeyen istemciler de güvenli)", false, nil
+						}
 						return "posta sunucusu (IMAP/POP/SMTP) sertifikaya geçirildi", false, nil
 					})
 					k.adim("webmail", "Webmail ve otomatik kurulum (autodiscover) yapılandırılıyor", func() (string, bool, error) {
@@ -252,6 +260,22 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 							return "webmail vhost güncellenemedi: " + e.Error(), true, nil
 						}
 						return "webmail.<d>, autoconfig ve autodiscover güvenli sertifikayla yapılandırıldı", false, nil
+					})
+					// DKIM DNS senkronu: mail eklentisinin imzalamada kullandığı GERÇEK
+					// mail._domainkey key'ini panel DNS'e yayınla (uyumsuz default._domainkey
+					// kaldırılır). Aksi halde alıcı public key'i bulamaz, DKIM doğrulanamaz.
+					k.adim("dkim-dns", "DKIM imzası DNS'e yayınlanıyor (mail._domainkey)", func() (string, bool, error) {
+						txt, e := provisioner.MailDKIMTXTAl(alanAdi)
+						if e != nil {
+							return "DKIM anahtarı eklentiden alınamadı: " + e.Error(), true, nil
+						}
+						if txt == "" {
+							return "eklenti DKIM anahtarı vermedi — DNS'e yazılmadı", true, nil
+						}
+						if e := dns.MailDKIMYayinla(ctx, h.DB, id, txt); e != nil {
+							return "DKIM DNS'e yazılamadı: " + e.Error(), true, nil
+						}
+						return "DKIM public key mail._domainkey olarak yayınlandı (imzalayan gerçek anahtar)", false, nil
 					})
 				}
 			}

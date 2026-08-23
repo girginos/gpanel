@@ -1,0 +1,40 @@
+{
+  "ortak": {
+    "kaydet": "Kaydet",
+    "iptal": "İptal",
+    "vazgec": "Vazgeç",
+    "sil": "Sil",
+    "duzenle": "Düzenle",
+    "kapat": "Kapat",
+    "yukleniyor": "Yükleniyor…",
+    "ara": "Ara…",
+    "onayla": "Onayla",
+    "geri": "Geri",
+    "evet": "Evet",
+    "hayir": "Hayır"
+  },
+  "giris": {
+    "baslik": "Müşteri Girişi",
+    "altbaslik": "Hosting hesabınıza erişmek için giriş yapın.",
+    "kullanici": "Kullanıcı adı",
+    "parola": "Parola",
+    "girisYap": "Giriş yap",
+    "hata": "Kullanıcı adı veya parola hatalı."
+  },
+  "nav": {
+    "panom": "Panom",
+    "dosyalar": "Dosyalar",
+    "veritabanlari": "Veritabanları",
+    "eposta": "E-posta",
+    "dns": "DNS",
+    "ssl": "SSL",
+    "yedekler": "Yedekler",
+    "wordpress": "WordPress",
+    "ayarlar": "Ayarlar",
+    "cikis": "Çıkış"
+  },
+  "dil": {
+    "sec": "Dil",
+    "degistir": "Dili değiştir"
+  }
+}

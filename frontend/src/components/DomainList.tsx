@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 export type Domain = {
@@ -23,6 +26,11 @@ export type Domain = {
   askida?: boolean
 }
 
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainList({
   items, seciliId, onSec, yukleniyor,
 }: {
@@ -31,6 +39,7 @@ export default function DomainList({
   onSec: (id: number) => void
   yukleniyor?: boolean
 }) {
+  useTranslation() // dil re-render aboneligi
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -49,10 +58,10 @@ export default function DomainList({
 
       <ul className="max-h-[640px] overflow-auto divide-y divide-slate-100 dark:divide-slate-800">
         {yukleniyor && (
-          <li className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Yükleniyor…</li>
+          <li className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</li>
         )}
         {!yukleniyor && items.length === 0 && (
-          <li className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-500">Henüz domain yok</li>
+          <li className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-500">{cevir("Henüz domain yok")}</li>
         )}
         {items.map((d) => {
           const sec = d.id === seciliId

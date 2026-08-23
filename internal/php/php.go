@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -214,13 +215,14 @@ func onoff(b bool) string {
 }
 
 // poolTmpl: PHP-FPM pool conf icerigi - tum ayarlari icerir
-var poolTmpl = template.Must(template.New("pool").Funcs(template.FuncMap{"onoff": onoff}).Parse(`[{{.SK}}]
+var poolTmpl = template.Must(template.New("pool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri}).Parse(`[{{.SK}}]
 user = {{.SK}}
 group = {{.SK}}
 listen = {{.SockDir}}/{{.SK}}.sock
 listen.owner = nginx
 listen.group = nginx
 listen.mode = 0660
+{{aclSatiri}}
 
 pm = {{.S.PMStrategy}}
 pm.max_children = {{.S.PMMaxChildren}}
@@ -692,3 +694,17 @@ var (
 )
 
 const modulOnbellekTTL = 5 * time.Minute
+
+// apacheVarMi / aclSatiri — bkz. internal/provisioner/apache.go (ayni mantik, paket
+// dongusu olusmasin diye yerel kopya). apache yoksa listen.acl_users YAZILMAZ.
+func apacheVarMi() bool {
+	_, err := user.Lookup("apache")
+	return err == nil
+}
+
+func aclSatiri() string {
+	if apacheVarMi() {
+		return "listen.acl_users = nginx,apache"
+	}
+	return ""
+}

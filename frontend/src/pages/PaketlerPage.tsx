@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useMemo, useState } from 'react'
@@ -58,6 +62,22 @@ const HAZIR_GRUPLAR: Grup[] = [
     paketler: ['gnupg2', 'openssl', 'fail2ban'] },
 ]
 
+
+const PAKET_EN: Record<string, string> = {
+  "CLI üretkenlik araçları": "CLI productivity tools",
+  "DB İstemcileri": "DB Clients",
+  "Geliştirme Araçları": "Development Tools",
+  "Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır": "Critical packages (kernel, bash, openssh, nginx, mariadb…) are protected",
+  "Python 3 + pip + venv + devel başlıkları": "Python 3 + pip + venv + devel headers",
+  "Resim İşleme": "Image Processing",
+  "Sistem Araçları": "System Tools",
+  "bir grubu aç, paketleri tek tek aç/kapat": "open a group, toggle packages individually",
+  "korumalı": "protected",
+  "kurulu paket adı veya açıklama": "installed package name or description",
+  "örn: mongodb, redis, nodejs, gcc, htop": "e.g: mongodb, redis, nodejs, gcc, htop",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (PAKET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function Ikon({ d, className = '' }: { d: string; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
@@ -68,6 +88,7 @@ function Ikon({ d, className = '' }: { d: string; className?: string }) {
 }
 
 export default function PaketlerPage() {
+  useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const [sekme, setSekme] = useState<Sekme>('ara')
   const [q, setQ] = useState('')
@@ -118,12 +139,12 @@ export default function PaketlerPage() {
       setBasari(`${paket} ${suankiKurulu ? 'kaldırıldı' : 'kuruldu'}`)
       setGrupDurum(prev => ({ ...prev, [paket]: !suankiKurulu }))
       setOutputModal({
-        baslik: `${suankiKurulu ? 'Kaldırma' : 'Kurulum'} çıktısı — ${paket}`,
+        baslik: cevirT(cevir("{0} çıktısı — {1}"), suankiKurulu ? 'Kaldırma' : 'Kurulum', paket),
         output: (r.data as any).output || '',
       })
       setTimeout(() => setBasari(null), 3500)
     } catch (e) {
-      setHata(apiHata(e, `${eylem} başarısız`))
+      setHata(apiHata(e, cevirT(cevir("{0} başarısız"), eylem)))
     } finally {
       setIsleniyor(null)
     }
@@ -137,7 +158,7 @@ export default function PaketlerPage() {
       const r = await api.get<{ icerik: Paket[]; toplam: number }>(ep, { params: { q } })
       setSonuc(r.data.icerik || [])
     } catch (e) {
-      setHata(apiHata(e, 'Arama başarısız'))
+      setHata(apiHata(e, cevir("Arama başarısız")))
     } finally {
       setYuk(false)
     }
@@ -149,10 +170,10 @@ export default function PaketlerPage() {
     try {
       const r = await api.post('/paketler/kur', { paket })
       setBasari(`${paket} kuruldu`)
-      setOutputModal({ baslik: `Kurulum çıktısı — ${paket}`, output: r.data.output || '' })
+      setOutputModal({ baslik: cevirT(cevir("Kurulum çıktısı — {0}"), paket), output: r.data.output || '' })
       setTimeout(() => setBasari(null), 4000)
       if (sekme === 'ara') ara()
-    } catch (e) { setHata(apiHata(e, 'Kurulum başarısız')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kurulum başarısız"))) }
     finally { setIsleniyor(null) }
   }
   async function kaldir(paket: string) {
@@ -160,11 +181,11 @@ export default function PaketlerPage() {
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kaldir', { paket })
-      setBasari(`${paket} kaldırıldı`)
-      setOutputModal({ baslik: `Kaldırma çıktısı — ${paket}`, output: r.data.output || '' })
+      setBasari(cevirT(cevir("{0} kaldırıldı"), paket))
+      setOutputModal({ baslik: cevirT(cevir("Kaldırma çıktısı — {0}"), paket), output: r.data.output || '' })
       setTimeout(() => setBasari(null), 4000)
       ara()
-    } catch (e) { setHata(apiHata(e, 'Kaldırma başarısız')) }
+    } catch (e) { setHata(apiHata(e, cevir("Kaldırma başarısız"))) }
     finally { setIsleniyor(null) }
   }
 
@@ -177,22 +198,22 @@ export default function PaketlerPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
-        { etiket: 'Paket Yöneticisi' },
+        { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
+        { etiket: cevir("Paket Yöneticisi") },
       ]} />
 
       {/* Başlık */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Paket Yöneticisi</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Paket Yöneticisi")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            DNF üzerinden sunucu paketleri ve derleyici ortamları.
+            {cevir(cevir("DNF üzerinden sunucu paketleri ve derleyici ortamları."))}
           </p>
         </div>
         <div className="inline-flex items-center gap-2 self-start rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700
                         dark:border-amber-900/40 dark:bg-amber-900/15 dark:text-amber-300">
           <Ikon d={I.shield} className="h-4 w-4 flex-shrink-0" />
-          <span>Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır</span>
+          <span>{cevir("Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır")}</span>
         </div>
       </div>
 
@@ -217,10 +238,10 @@ export default function PaketlerPage() {
         <div className="mb-3 flex items-center gap-2">
           <Ikon d={I.box} className="h-4 w-4 text-slate-400" />
           <h2 id="grup-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Hızlı Kurulum Grupları
+            {cevir(cevir("Hızlı Kurulum Grupları"))}
           </h2>
           <span className="text-xs text-slate-300 dark:text-slate-600">·</span>
-          <span className="text-xs text-slate-400 dark:text-slate-500">bir grubu aç, paketleri tek tek aç/kapat</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">{cevir("bir grubu aç, paketleri tek tek aç/kapat")}</span>
         </div>
 
         <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
@@ -327,7 +348,7 @@ export default function PaketlerPage() {
               <Ikon d={I.search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input type="text" value={q} onChange={e => setQ(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && ara()}
-                placeholder={sekme === 'ara' ? 'örn: mongodb, redis, nodejs, gcc, htop' : 'kurulu paket adı veya açıklama'}
+                placeholder={sekme === 'ara' ? 'örn: mongodb, redis, nodejs, gcc, htop' : cevir("kurulu paket adı veya açıklama")}
                 aria-label="Paket ara"
                 className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 font-mono text-sm text-slate-900
                            placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
@@ -368,7 +389,7 @@ export default function PaketlerPage() {
                         )}
                         {p.korunan && (
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700
-                                           dark:bg-amber-900/30 dark:text-amber-300">korumalı</span>
+                                           dark:bg-amber-900/30 dark:text-amber-300">{cevir("korumalı")}</span>
                         )}
                       </div>
                       {p.aciklama && <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{p.aciklama}</div>}
@@ -378,7 +399,7 @@ export default function PaketlerPage() {
                         className="flex-shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors
                                    hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40
                                    dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/20">
-                        {isleniyor === p.adi ? 'Kaldırılıyor…' : 'Kaldır'}
+                        {isleniyor === p.adi ? 'Kaldırılıyor…' : cevir("Kaldır")}
                       </button>
                     ) : (
                       <button onClick={() => kur(p.adi)} disabled={isleniyor === p.adi}
@@ -403,20 +424,20 @@ export default function PaketlerPage() {
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{outputModal.baslik}</h3>
-              <button onClick={() => setOutputModal(null)} aria-label="Kapat"
+              <button onClick={() => setOutputModal(null)} aria-label={cevir("Kapat")}
                 className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700
                            dark:hover:bg-slate-800 dark:hover:text-slate-200">
                 <Ikon d="M6 18 18 6M6 6l12 12" className="h-4 w-4" />
               </button>
             </div>
             <pre className="flex-1 overflow-auto bg-slate-950 p-4 text-xs font-mono leading-relaxed text-slate-100 whitespace-pre-wrap">
-              {outputModal.output || '(çıktı yok)'}
+              {outputModal.output || cevir("(çıktı yok)")}
             </pre>
             <div className="border-t border-slate-200 px-4 py-2.5 text-right dark:border-slate-800">
               <button onClick={() => setOutputModal(null)}
                 className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition-colors
                            hover:bg-slate-800 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600">
-                Kapat
+                {cevir("Kapat")}
               </button>
             </div>
           </div>

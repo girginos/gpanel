@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"text/template"
 )
@@ -53,6 +54,14 @@ var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — 
     DirectoryIndex index.php index.html index.htm
 
     # Gerçek istemci IP'sini nginx'ten al
+    # 🔴 EDGE ŞEMASI: TLS nginx'te sonlanıyor; Apache'ye düz HTTP geliyor.
+    # Bu satır olmadan PHP'de $_SERVER['HTTPS'] BOŞ kalır → WordPress/Laravel
+    # kendini HTTP sanıp http:// URL üretir ve HTTPS'e sonsuz yönlendirme yapar
+    # (Cloudflare arkasında ERR_TOO_MANY_REDIRECTS). FPM modunda karşılığı
+    # fastcgi_param HTTPS on olarak zaten var; Apache modunda eksikti.
+    SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
+    # Kanonik URL'lerde ":10080" sızmasın (uygulama SERVER_PORT'a bakarsa).
+    UseCanonicalName Off
     RemoteIPHeader X-Forwarded-For
     RemoteIPInternalProxy 127.0.0.1
 
@@ -66,6 +75,7 @@ func apacheVhostPath(sk string) string {
 }
 
 func writeApacheVhost(opts VhostOpts, sk string) error {
+	apacheDefaultEnsure() // eslesmeyen Host ilk siteye dusmesin
 	var buf bytes.Buffer
 	if err := apacheVhostTmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("apache template: %w", err)
@@ -95,4 +105,48 @@ func apacheTestReload() error {
 		return fmt.Errorf("httpd reload: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// apacheKullanicisiVar — sistemde "apache" kullanıcısı tanımlı mı (httpd kurulu mu).
+// 🔴 NEDEN: FPM poola içinde VAR OLMAYAN bir kullanıcı yazılırsa
+
+// apacheKullanicisiVar — sistemde "apache" kullanicisi tanimli mi (httpd kurulu mu).
+// NEDEN: FPM pool'una `listen.acl_users` icinde VAR OLMAYAN kullanici yazilirsa
+// php-fpm BASLAMAZ; setfacl de hata doner. Apache'ye erisim acan her yer once bunu sorar.
+func apacheKullanicisiVar() bool {
+	_, err := user.Lookup("apache")
+	return err == nil
+}
+
+// aclSatiri — FPM pool sablonlarina konan listen.acl_users satiri (apache yoksa BOS).
+func aclSatiri() string {
+	if apacheKullanicisiVar() {
+		return "listen.acl_users = nginx,apache"
+	}
+	return ""
+}
+
+// apacheDefaultEnsure: 10080 icin "her seyi reddet" DEFAULT vhost.
+// Apache ilk yuklenen vhost'u default sayar; bu dosya olmadan eslesmeyen Host
+// header'i ilk sitenin icerigine duser (cross-site sizinti).
+func apacheDefaultEnsure() {
+	_ = os.MkdirAll("/var/www/_gosp_apache_default", 0o755)
+	yol := "/etc/httpd/conf.d/00-gosp-default.conf"
+	icerik := `# GirginOSPanel — 10080 DEFAULT vhost (otomatik). 00- prefix: dom_*.conf'tan ONCE yuklenir.
+# NEDEN: Apache'de ilk yuklenen vhost "default"tur; bu dosya olmadan eslesmeyen HER Host
+# ilk sitenin icerigini gorur (cross-site sizinti). Burasi her seyi REDDEDER.
+<VirtualHost 127.0.0.1:10080>
+    ServerName gosp-default.invalid
+    DocumentRoot /var/www/_gosp_apache_default
+    <Directory />
+        AllowOverride None
+        Require all denied
+    </Directory>
+    ErrorLog /var/log/httpd/gosp-default.error.log
+</VirtualHost>
+`
+	if b, err := os.ReadFile(yol); err == nil && strings.Contains(string(b), "gosp-default.invalid") {
+		return
+	}
+	_ = os.WriteFile(yol, []byte(icerik), 0o644)
 }

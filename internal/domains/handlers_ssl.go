@@ -137,7 +137,10 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 
 	// ASENKRON: SSL çekimi (özellikle mail SSL — 7 SAN) uzun sürer; iş arka planda
 	// yürür (sekme kapansa da). İlerleme /domains/{id}/ssl/ilerleme'den izlenir.
-	mailSSL := req.MailSSL && req.Tip == "letsencrypt"
+	// Mail eklentisi aktifse Posta SSL OTOMATIK dahil (kutu isaretsiz olsa da):
+	// aksi halde mail sunucusu kendinden imzali sertifikada kalir ve Outlook/
+	// istemciler her baglantida sifre sorar. Basarisizligi web SSL'i bloklamaz.
+	mailSSL := (req.MailSSL || h.mailEklentiAktif(r.Context())) && req.Tip == "letsencrypt"
 	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, req.Tip, mailSSL)
 
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{

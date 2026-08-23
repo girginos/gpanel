@@ -76,6 +76,13 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 			}
 			// Sonra müşteri claims dene
 			if mc, err := auth.ParseMusteri(secret, tokenRaw); err == nil {
+				// İmza tek başına yetmez: hesap askıya alınmış, parolası
+				// değişmiş veya domain DEVREDİLMİŞ olabilir (bkz.
+				// musteri_oturum.go). Sunucu-taraflı iptal kontrolü.
+				if kod, mesaj := musteriOturumGecerli(r.Context(), mc); kod != 0 {
+					httpx.WriteError(w, kod, mesaj)
+					return
+				}
 				ctx := context.WithValue(r.Context(), musteriClaimsKey, mc)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return

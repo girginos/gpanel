@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useEffect, useRef, useState } from 'react'
@@ -29,7 +33,33 @@ type Kayit = {
   created_at: string
 }
 
+
+const YASAK_EN: Record<string, string> = {
+  "(phishing için önerilen)": "(recommended for phishing)",
+  "+ Toplu ekle (TXT / liste yapıştır)": "+ Bulk add (paste TXT / list)",
+  "Alan adı boş olamaz": "Domain name cannot be empty",
+  "Açıklama (opsiyonel)": "Description (optional)",
+  "Bu alan adına ve alt-domainlerine YENİ vhost açılışına yeniden izin verilecek. Mevcut domainler etkilenmez.": "New vhost creation will be re-allowed for this domain and its subdomains. Existing domains are unaffected.",
+  "Dosya okunamadı:": "Failed to read file:",
+  "Dosya çok büyük (üst sınır 5 MB)": "File too large (max 5 MB)",
+  "Henüz yasaklı alan adı yok": "No banned domains yet",
+  "Liste alınamadı": "Failed to get list",
+  "Phishing hedefi olabilecek marka domainleri için yukarıdaki formu kullanın.": "Use the form above for brand domains that could be phishing targets.",
+  "Phishing koruması.": "Phishing protection.",
+  "Silme hatası": "Delete error",
+  "Tam alan adı girin (örn. sahibinden.com)": "Enter the full domain (e.g. sahibinden.com)",
+  "Toplu ekleme başarısız": "Bulk add failed",
+  "Toplu ekleme tamamlandı": "Bulk add completed",
+  "Toplu silme hatası": "Bulk delete error",
+  "Toplu silme tamamlandı": "Bulk delete completed",
+  "yalnız tam eşleşme": "exact match only",
+  "Ör. phishing hedefi marka": "E.g. phishing target brand",
+  "İçerik boş": "Content is empty",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (YASAK_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function YasakliDomainPage() {
+  useTranslation() // dil re-render aboneligi
   const [list, setList] = useState<Kayit[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
@@ -59,7 +89,7 @@ export default function YasakliDomainPage() {
       const r = await api.get<Kayit[]>('/banned-domains')
       setList(Array.isArray(r.data) ? r.data : [])
     } catch (e) {
-      setHata(apiHata(e, 'Liste alınamadı'))
+      setHata(apiHata(e, cevir("Liste alınamadı")))
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { yukle() }, [])
@@ -68,8 +98,8 @@ export default function YasakliDomainPage() {
     ev.preventDefault(); setEkleHata(null)
     const d = domain.trim().replace(/^https?:\/\//, '').replace(/^www\./, '')
       .replace(/[/?#].*$/, '').replace(/^\.+|\.+$/g, '').toLowerCase()
-    if (!d) { setEkleHata('Alan adı boş olamaz'); return }
-    if (!d.includes('.')) { setEkleHata('Tam alan adı girin (örn. sahibinden.com)'); return }
+    if (!d) { setEkleHata(cevir("Alan adı boş olamaz")); return }
+    if (!d.includes('.')) { setEkleHata(cevir("Tam alan adı girin (örn. sahibinden.com)")); return }
     setGonderiliyor(true)
     try {
       await api.post('/banned-domains', {
@@ -90,7 +120,7 @@ export default function YasakliDomainPage() {
     if (!f) return
     // 5 MB'lık üst sınır — daha büyük dosya = başka bir şey.
     if (f.size > 5 * 1024 * 1024) {
-      setTopluHata('Dosya çok büyük (üst sınır 5 MB)')
+      setTopluHata(cevir("Dosya çok büyük (üst sınır 5 MB)"))
       return
     }
     try {
@@ -108,7 +138,7 @@ export default function YasakliDomainPage() {
 
   const topluGonder = async () => {
     setTopluHata(null)
-    if (!topluMetin.trim()) { setTopluHata('İçerik boş'); return }
+    if (!topluMetin.trim()) { setTopluHata(cevir("İçerik boş")); return }
     setTopluGidiyor(true)
     try {
       const r = await api.post('/banned-domains/bulk', {
@@ -129,16 +159,16 @@ export default function YasakliDomainPage() {
           (basarisiz.length > 20 ? `\n  … ve ${basarisiz.length - 20} tane daha` : '')
         : ''
       await dialog.bilgi({
-        baslik: 'Toplu ekleme tamamlandı',
+        baslik: cevir("Toplu ekleme tamamlandı"),
         mesaj:
-          `${islendi} eklendi/güncellendi, ${yoksayildi} atlandı (boş/yorum/tekrar), ` +
-          `${basarisiz.length} başarısız.` + basarisizOzet,
+          cevirT(cevir("{0} eklendi/güncellendi, {1} atlandı (boş/yorum/tekrar), "), islendi, yoksayildi) +
+          cevirT(cevir("{0} başarısız."), basarisiz.length) + basarisizOzet,
       })
       setTopluMetin('')
       await yukle()
       if (basarisiz.length === 0) setTopluAcik(false)
     } catch (e) {
-      setTopluHata(apiHata(e, 'Toplu ekleme başarısız'))
+      setTopluHata(apiHata(e, cevir("Toplu ekleme başarısız")))
     } finally {
       setTopluGidiyor(false)
     }
@@ -163,9 +193,9 @@ export default function YasakliDomainPage() {
     if (secili.size === 0) return
     const kumeArr = Array.from(secili)
     const ok = await dialog.onay({
-      baslik: `${kumeArr.length} kaydı sil?`,
-      mesaj: `Seçili ${kumeArr.length} alan adı yasak listesinden kaldırılacak. Bu alan adlarına YENİ vhost açılışına yeniden izin verilecek. Mevcut siteler etkilenmez.`,
-      onayEtiketi: 'Sil', iptalEtiketi: 'Vazgeç', tehlike: true,
+      baslik: cevirT(cevir("{0} kaydı sil?"), kumeArr.length),
+      mesaj: cevirT(cevir("Seçili {0} alan adı yasak listesinden kaldırılacak. Bu alan adlarına YENİ vhost açılışına yeniden izin verilecek. Mevcut siteler etkilenmez."), kumeArr.length),
+      onayEtiketi: 'Sil', iptalEtiketi: cevir("Vazgeç"), tehlike: true,
     })
     if (!ok) return
     setSiliniyor(true)
@@ -180,17 +210,17 @@ export default function YasakliDomainPage() {
         // Sessiz başarı — çok tıklamadan iş bitti
       } else {
         await dialog.bilgi({
-          baslik: 'Toplu silme tamamlandı',
+          baslik: cevir("Toplu silme tamamlandı"),
           mesaj:
             `${silinen} silindi. ` +
-            (bulunamayan.length ? `${bulunamayan.length} kayıt zaten yoktu. ` : '') +
-            (gecersiz.length ? `${gecersiz.length} geçersiz biçim.` : ''),
+            (bulunamayan.length ? cevirT(cevir("{0} kayıt zaten yoktu. "), bulunamayan.length) : '') +
+            (gecersiz.length ? cevirT(cevir("{0} geçersiz biçim."), gecersiz.length) : ''),
         })
       }
       setSecili(new Set())
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, 'Toplu silme hatası') })
+      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, cevir("Toplu silme hatası")) })
     } finally {
       setSiliniyor(false)
     }
@@ -199,29 +229,29 @@ export default function YasakliDomainPage() {
   const sil = async (k: Kayit) => {
     const kapsam = k.match_subdomains ? ' (alt-domainler dahil)' : ''
     const ok = await dialog.onay({
-      baslik: `${k.domain}${kapsam} yasağını kaldır?`,
-      mesaj: 'Bu alan adına ve alt-domainlerine YENİ vhost açılışına yeniden izin verilecek. Mevcut domainler etkilenmez.',
-      onayEtiketi: 'Kaldır', iptalEtiketi: 'Vazgeç', tehlike: true,
+      baslik: cevirT(cevir("{0}{1} yasağını kaldır?"), k.domain, kapsam),
+      mesaj: cevir("Bu alan adına ve alt-domainlerine YENİ vhost açılışına yeniden izin verilecek. Mevcut domainler etkilenmez."),
+      onayEtiketi: cevir("Kaldır"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
     })
     if (!ok) return
     try {
       await api.delete(`/banned-domains/${encodeURIComponent(k.domain)}`)
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, 'Silme hatası') })
+      await dialog.bilgi({ baslik: 'Silinemedi', mesaj: apiHata(e, cevir("Silme hatası")) })
     }
   }
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
       <Breadcrumb items={[
-        { href: '/araclar-ayarlar', etiket: 'Araçlar ve Ayarlar' },
-        { etiket: 'Yasaklı Alan Adları' },
+        { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
+        { etiket: cevir("Yasaklı Alan Adları") },
       ]} />
 
       <div className="mt-4 mb-2">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Yasaklı Alan Adları
+          {cevir("Yasaklı Alan Adları")}
         </h1>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
           Bayi ve müşteriler bu alan adlarında yeni domain açamaz.{' '}
@@ -231,16 +261,16 @@ export default function YasakliDomainPage() {
 
       {/* Bilgilendirme */}
       <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-        <strong>Phishing koruması.</strong> Alt-domainler dahil seçeneği açıkken
+        <strong>{cevir("Phishing koruması.")}</strong> {cevir(cevir("Alt-domainler dahil seçeneği açıkken"))}
         <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">sahibinden.com</code>
-        eklendiğinde <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">login.sahibinden.com</code> gibi tüm alt-domainler de otomatik engellenir.
+        {cevir(cevir("eklendiğinde"))} <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">login.sahibinden.com</code> {cevir("gibi tüm alt-domainler de otomatik engellenir.")}
       </div>
 
       {/* Ekleme formu */}
       <form onSubmit={ekle} className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(200px,1.2fr)_1fr_auto]">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Alan Adı</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Alan Adı")}</label>
             <input
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
@@ -251,11 +281,11 @@ export default function YasakliDomainPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Açıklama (opsiyonel)</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Açıklama (opsiyonel)")}</label>
             <input
               value={aciklama}
               onChange={(e) => setAciklama(e.target.value)}
-              placeholder="Ör. phishing hedefi marka"
+              placeholder={cevir("Ör. phishing hedefi marka")}
               maxLength={255}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
@@ -277,7 +307,7 @@ export default function YasakliDomainPage() {
             onChange={(e) => setAltDahil(e.target.checked)}
             className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
           />
-          Alt-domain'ler dahil <span className="text-xs text-slate-500">(phishing için önerilen)</span>
+          Alt-domain'ler dahil <span className="text-xs text-slate-500">{cevir("(phishing için önerilen)")}</span>
         </label>
         {ekleHata && (
           <p className="mt-3 text-sm text-red-600 dark:text-red-400">{ekleHata}</p>
@@ -291,7 +321,7 @@ export default function YasakliDomainPage() {
             onClick={() => setTopluAcik((v) => !v)}
             className="text-sm font-medium text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
           >
-            {topluAcik ? '− Toplu ekleme panelini kapat' : '+ Toplu ekle (TXT / liste yapıştır)'}
+            {topluAcik ? '− Toplu ekleme panelini kapat' : cevir("+ Toplu ekle (TXT / liste yapıştır)")}
           </button>
         </div>
       </form>
@@ -302,9 +332,9 @@ export default function YasakliDomainPage() {
             <div>
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Toplu Ekleme</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Her satıra bir domain. Boşluk, virgül, noktalı virgül veya sekme ile de
+                {cevir(cevir("Her satıra bir domain. Boşluk, virgül, noktalı virgül veya sekme ile de"))}
                 ayırabilirsin. <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">#</code> ile
-                başlayan satırlar yorumdur, atlanır. Üst sınır 5.000 domain.
+                {cevir(cevir("başlayan satırlar yorumdur, atlanır. Üst sınır 5.000 domain."))}
               </p>
             </div>
             <div>
@@ -320,7 +350,7 @@ export default function YasakliDomainPage() {
                 htmlFor="toplu-dosya"
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
               >
-                <Ikon d={I.klasor} className="h-4 w-4" /> Dosya seç (TXT)
+                <Ikon d={I.klasor} className="h-4 w-4" /> {cevir("Dosya seç (TXT)")}
               </label>
             </div>
           </div>
@@ -356,7 +386,7 @@ export default function YasakliDomainPage() {
           <div className="mt-3 flex items-center justify-between gap-3">
             <div className="text-xs text-slate-500">
               {topluMetin.trim() ? (
-                <>~{(topluMetin.match(/[\n,;\s]+/g)?.length ?? 0) + 1} satır algılandı</>
+                <>~{(topluMetin.match(/[\n,;\s]+/g)?.length ?? 0) + 1} ${cevir("satır")} algılandı</>
               ) : (
                 'Metin bekleniyor…'
               )}
@@ -379,34 +409,34 @@ export default function YasakliDomainPage() {
 
       {/* Liste */}
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">Yükleniyor…</div>
+        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
           {hata} <button onClick={yukle} className="underline">Tekrar dene</button>
         </div>
       ) : list.length === 0 ? (
-        <EmptyState baslik="Henüz yasaklı alan adı yok" aciklama="Phishing hedefi olabilecek marka domainleri için yukarıdaki formu kullanın." />
+        <EmptyState baslik={cevir("Henüz yasaklı alan adı yok")} aciklama={cevir("Phishing hedefi olabilecek marka domainleri için yukarıdaki formu kullanın.")} />
       ) : (
         <>
           {/* Seçim çubuğu — sadece bir şey seçildiğinde görünür */}
           {secili.size > 0 && (
             <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900">
               <div className="text-sm text-slate-700 dark:text-slate-300">
-                <span className="font-semibold">{secili.size}</span> kayıt seçili
+                <span className="font-semibold">{secili.size}</span> {cevir("kayıt seçili")}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setSecili(new Set())}
                   className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                 >
-                  Seçimi temizle
+                  {cevir("Seçimi temizle")}
                 </button>
                 <button
                   onClick={topluSil}
                   disabled={siliniyor}
                   className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {siliniyor ? 'Siliniyor…' : `Seçilenleri Sil (${secili.size})`}
+                  {siliniyor ? 'Siliniyor…' : cevirT(cevir("Seçilenleri Sil ({0})"), secili.size)}
                 </button>
               </div>
             </div>
@@ -419,18 +449,18 @@ export default function YasakliDomainPage() {
                   <th className="w-10 px-4 py-3">
                     <input
                       type="checkbox"
-                      aria-label="Hepsini seç"
+                      aria-label={cevir("Hepsini seç")}
                       checked={hepsiSecili}
                       ref={(el) => { if (el) el.indeterminate = bazisiSecili }}
                       onChange={hepsiSecDegistir}
                       className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </th>
-                  <th className="px-4 py-3 font-semibold">Alan Adı</th>
-                  <th className="px-4 py-3 font-semibold">Açıklama</th>
+                  <th className="px-4 py-3 font-semibold">{cevir("Alan Adı")}</th>
+                  <th className="px-4 py-3 font-semibold">{cevir("Açıklama")}</th>
                   <th className="px-4 py-3 font-semibold">Kapsam</th>
                   <th className="px-4 py-3 font-semibold">Eklendi</th>
-                  <th className="px-4 py-3 text-right font-semibold">İşlem</th>
+                  <th className="px-4 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -439,7 +469,7 @@ export default function YasakliDomainPage() {
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
-                        aria-label={`${k.domain} seç`}
+                        aria-label={cevirT(cevir("{0} seç"), k.domain)}
                         checked={secili.has(k.domain)}
                         onChange={() => seciliDegistir(k.domain)}
                         className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
@@ -453,7 +483,7 @@ export default function YasakliDomainPage() {
                       {k.match_subdomains ? (
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700 dark:bg-slate-800 dark:text-slate-300">alt-domainler dahil</span>
                       ) : (
-                        <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-500 dark:bg-slate-900 dark:text-slate-500">yalnız tam eşleşme</span>
+                        <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-500 dark:bg-slate-900 dark:text-slate-500">{cevir("yalnız tam eşleşme")}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
@@ -464,7 +494,7 @@ export default function YasakliDomainPage() {
                         onClick={() => sil(k)}
                         className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                       >
-                        Kaldır
+                        {cevir("Kaldır")}
                       </button>
                     </td>
                   </tr>

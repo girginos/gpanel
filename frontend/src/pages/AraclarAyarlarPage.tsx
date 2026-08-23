@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -111,6 +114,31 @@ const GRUPLAR: Grup[] = [
   },
 ]
 
+
+const ARAC_EN: Record<string, string> = {
+  "Arama terimini değiştirin veya temizleyin.": "Change or clear the search term.",
+  "Araç ara": "Search tools",
+  "Araç ara…": "Search tools…",
+  "Ağ ve DNS": "Network and DNS",
+  "Barındırma paketleri; disk, veritabanı ve FTP kotaları.": "Hosting packages; disk, database and FTP quotas.",
+  "CPU/RAM/disk grafikleri ve sunucu günlükleri (panel/nginx/SSH…).": "CPU/RAM/disk graphs and server logs (panel/nginx/SSH…).",
+  "DNF paketleri — derleyiciler ve çalışma ortamları. Hazır kurulum grupları.": "DNF packages — compilers and runtimes. Ready-made installation groups.",
+  "Güvenlik ve Yedekleme": "Security and Backup",
+  "IP/port yasağı, beyaz liste, port kapatma. Kritik portlar korumalı.": "IP/port ban, allowlist, port closing. Critical ports are protected.",
+  "Kullanıcı hareketsiz kaldığında oturumu otomatik kapat. Dakika bazlı; 0 = kapalı.": "Automatically close the session when the user is idle. In minutes; 0 = off.",
+  "Nginx / Apache / MariaDB / DNS / PHP-FPM durumu ve yeniden başlatma.": "Nginx / Apache / MariaDB / DNS / PHP-FPM status and restart.",
+  "PHP sürümleri, eklentiler, loader ve web sunucu ayarları tek adım-adım sihirbazda.": "PHP versions, extensions, loader and web server settings in a single step-by-step wizard.",
+  "Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.": "Update the panel to the latest version — data is preserved, runs in the background.",
+  "Panelin backend ve dış SSL portunu değiştir. Kilitlenme koruması ile otomatik geri alma.": "Change the panel's backend and external SSL port. Automatic rollback with lockout protection.",
+  "Tüm domain listesi, arama ve hızlı erişim.": "Full domain list, search and quick access.",
+  "Tüm domainlerin yedekleri + boyut, tek tıkla yedekle. S3/SFTP hedefler.": "Backups of all domains + size, back up with one click. S3/SFTP targets.",
+  "Yeni domainlere uygulanan merkezi DNS kayıtları (A/MX/SPF/DMARC/DKIM) + SOA.": "Central DNS records applied to new domains (A/MX/SPF/DMARC/DKIM) + SOA.",
+  "cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.": "Migrate sites from your cPanel, Plesk or DirectAdmin server to this panel along with files, database, DNS and SSL.",
+  "sahibinden.com gibi marka domainlerini engelleyerek phishing için panele eklenmesini önleyin. Alt-domain kapsamı seçilebilir; mevcut siteler etkilenmez.": "Prevent brand domains like sahibinden.com from being added to the panel for phishing. Subdomain scope is selectable; existing sites are unaffected.",
+  "İzleme ve Loglar": "Monitoring and Logs",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (ARAC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function Ikon({ d, className = '' }: { d: string; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
@@ -159,6 +187,7 @@ function AracKart({ a }: { a: Arac }) {
 }
 
 export default function AraclarAyarlarPage() {
+  useTranslation() // dil re-render aboneligi
   const [q, setQ] = useState('')
 
   const gruplar = useMemo(() => {
@@ -177,14 +206,14 @@ export default function AraclarAyarlarPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: 'Araçlar ve Ayarlar' }]} />
+      <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Araçlar ve Ayarlar") }]} />
 
       {/* Başlık + arama */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Araçlar ve Ayarlar</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Araçlar ve Ayarlar")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım.
+            {cevir(cevir("Sunucu geneli yönetim — PHP, sistem paketleri, ağ, güvenlik ve bakım."))}
           </p>
         </div>
         <div className="relative w-full sm:w-72">
@@ -194,8 +223,8 @@ export default function AraclarAyarlarPage() {
             type="search"
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Araç ara…"
-            aria-label="Araç ara"
+            placeholder={cevir("Araç ara…")}
+            aria-label={cevir("Araç ara")}
             className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900
                        placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
                        dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
@@ -208,12 +237,12 @@ export default function AraclarAyarlarPage() {
         <div className="mb-3 flex items-center gap-2">
           <Ikon d={I.wrench} className="h-4 w-4 text-slate-400" />
           <h2 id="bakim-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Sunucu Bakımı
+            {cevir(cevir("Sunucu Bakımı"))}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <AracKart a={{ baslik: 'Panel Güncellemesi', href: '/araclar/guncelleme', ikon: I.refresh, rozet: 'Sunucu', aciklama: 'Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.' }} />
-          <AracKart a={{ baslik: 'Site Taşıma', href: '/araclar/tasima', ikon: I.server, rozet: 'Sunucu', anahtar: 'tasima migration cpanel plesk directadmin aktar transfer goc', aciklama: 'cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.' }} />
+          <AracKart a={{ baslik: cevir("Panel Güncellemesi"), href: '/araclar/guncelleme', ikon: I.refresh, rozet: cevir("Sunucu"), aciklama: cevir("Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.") }} />
+          <AracKart a={{ baslik: cevir("Site Taşıma"), href: '/araclar/tasima', ikon: I.server, rozet: cevir("Sunucu"), anahtar: 'tasima migration cpanel plesk directadmin aktar transfer goc', aciklama: cevir("cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.") }} />
         </div>
       </section>
 
@@ -222,7 +251,7 @@ export default function AraclarAyarlarPage() {
         <div role="status" className="rounded-2xl border border-dashed border-slate-200 py-14 text-center dark:border-slate-800">
           <Ikon d={I.tune} className="mx-auto h-9 w-9 text-slate-300 dark:text-slate-600" />
           <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">"{q}" için araç bulunamadı</p>
-          <p className="mt-1 text-xs text-slate-500">Arama terimini değiştirin veya temizleyin.</p>
+          <p className="mt-1 text-xs text-slate-500">{cevir("Arama terimini değiştirin veya temizleyin.")}</p>
         </div>
       ) : (
         gruplar.map(g => (

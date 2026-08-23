@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -13,7 +17,21 @@ type ReadResp = { dosya: string; yol: string; satirlar: string[]; mevcut: boolea
 
 const MAX_PENCERE = 1000
 
+
+const DLOGS_EN: Record<string, string> = {
+  "(log dosyası boş veya henüz oluşmadı)": "(log file is empty or not created yet)",
+  "Ara — IP, yol, durum kodu, tarayıcı…": "Search — IP, path, status code, browser…",
+  "Aramayı temizle": "Clear search",
+  "Bekleniyor… yeni satırlar geldikçe akacak.": "Waiting… will stream as new lines arrive.",
+  "Canlı Takip": "Live Follow",
+  "Günlükler": "Logs",
+  "canlı yayın": "live stream",
+  "İstemci": "Client",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (DLOGS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function DomainLogsPage() {
+  useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -39,7 +57,7 @@ export default function DomainLogsPage() {
 
   useEffect(() => {
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala('Alan adı bilgisi alınamadı'))
+    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
     api.get<LogDosya[]>(`${base}/logs`).then(r => setDosyalar(r.data)).catch(e => setHata(apiHata(e)))
   }, [id])
 
@@ -75,7 +93,7 @@ export default function DomainLogsPage() {
           signal: ctrl.signal,
         })
         if (!res.ok || !res.body) {
-          setHata(`stream başlamadı (HTTP ${res.status})`)
+          setHata(cevirT(cevir("stream başlamadı (HTTP {0})"), res.status))
           setCanli(false)
           return
         }
@@ -118,12 +136,12 @@ export default function DomainLogsPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Domainler', href: '/domainler' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
-        { etiket: 'Günlükler' },
+        { etiket: cevir("Günlükler") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Günlükler</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Günlükler")}</h1>
       {domain && (
         <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
@@ -170,7 +188,7 @@ export default function DomainLogsPage() {
 
           <label className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1.5 select-none cursor-pointer">
             <input type="checkbox" checked={otoScroll} onChange={e => setOtoScroll(e.target.checked)} className="rounded" />
-            Otomatik kaydır
+            {cevir(cevir("Otomatik kaydır"))}
           </label>
           <button
             onClick={() => setCanli(c => !c)}
@@ -180,7 +198,7 @@ export default function DomainLogsPage() {
                 : 'bg-emerald-600 text-white hover:bg-emerald-700'
             }`}
           >
-            {canli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.durdur} /> Durdur</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> Canlı Takip</span>}
+            {canli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.durdur} /> {cevir("Durdur")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Canlı Takip")}</span>}
           </button>
           <button
             onClick={ilkYukle}
@@ -207,13 +225,13 @@ export default function DomainLogsPage() {
           <input
             value={arama}
             onChange={e => setArama(e.target.value)}
-            placeholder="Ara — IP, yol, durum kodu, tarayıcı…"
+            placeholder={cevir("Ara — IP, yol, durum kodu, tarayıcı…")}
             className="w-full pl-8 pr-8 py-1.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
           />
           {arama && (
             <button
               onClick={() => setArama('')}
-              aria-label="Aramayı temizle"
+              aria-label={cevir("Aramayı temizle")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none"
             >×</button>
           )}
@@ -231,7 +249,7 @@ export default function DomainLogsPage() {
         className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
       >
         {satirlar.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500 font-mono">{canli ? 'Bekleniyor… yeni satırlar geldikçe akacak.' : '(log dosyası boş veya henüz oluşmadı)'}</div>
+          <div className="p-6 text-sm text-slate-500 font-mono">{canli ? 'Bekleniyor… yeni satırlar geldikçe akacak.' : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
         ) : gorunen.length === 0 ? (
           <div className="p-6 text-sm text-slate-500 font-mono">"{arama}" aramasına uygun satır yok.</div>
         ) : gorunum === 'ham' ? (
@@ -248,8 +266,8 @@ export default function DomainLogsPage() {
       </div>
 
       <div className="mt-2 text-xs text-slate-500 dark:text-slate-500 flex items-center justify-between">
-        <span>{arama ? `${gorunen.length} / ${satirlar.length} satır (filtreli)` : `${satirlar.length} satır`} · pencere {MAX_PENCERE}</span>
-        {canli && <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>canlı yayın</span>}
+        <span>{arama ? `${gorunen.length} / ${satirlar.length} ${cevir("satır (filtreli)")}` : `${satirlar.length} ${cevir("satır")}`} · pencere {MAX_PENCERE}</span>
+        {canli && <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>{cevir("canlı yayın")}</span>}
       </div>
     </div>
   )
@@ -293,9 +311,9 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">IP</th>
           <th className="text-left font-medium px-3 py-2">Method</th>
           <th className="text-left font-medium px-3 py-2 w-full">Yol</th>
-          <th className="text-left font-medium px-3 py-2">Durum</th>
-          <th className="text-right font-medium px-3 py-2 whitespace-nowrap">Boyut</th>
-          <th className="text-left font-medium px-3 py-2">Tarayıcı</th>
+          <th className="text-left font-medium px-3 py-2">{cevir("Durum")}</th>
+          <th className="text-right font-medium px-3 py-2 whitespace-nowrap">{cevir("Boyut")}</th>
+          <th className="text-left font-medium px-3 py-2">{cevir("Tarayıcı")}</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-800/70">
@@ -340,6 +358,54 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
 const ERROR_RE = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}) \[(\w+)\] (.*)$/
 const CLIENT_RE = /client: (\S+?)[,\s]/
 
+// grupla: nginx error log'da bir PHP hatasi cok fiziksel satirdir (Stack trace,
+// #0, #1, "thrown in" — timestamp'siz). Timestamp ile baslayan satir yeni bir
+// giris acar; timestamp'siz satirlar oncekinin DEVAMIDIR. Boylece bir hata =
+// bir tablo satiri (mesaj cok satirli ama tek giris) → kayma olmaz.
+function grupla(satirlar: string[]): { bas: string; devam: string[] }[] {
+  const out: { bas: string; devam: string[] }[] = []
+  for (const s of satirlar) {
+    if (ERROR_RE.test(s) || out.length === 0) {
+      out.push({ bas: s, devam: [] })
+    } else {
+      out[out.length - 1].devam.push(s)
+    }
+  }
+  return out
+}
+
+// ozetMesaj: ham nginx error mesajini Plesk gibi kisaltir — FastCGI/stderr
+// gurultusu, upstream/client kuyrugu atilir; ozde PHP hata + tur kalir.
+function ozetMesaj(msg: string): string {
+  let s = msg
+    .replace(/^\d+#\d+:\s*\*\d+\s*/, '')                 // "248518#248518: *121302 "
+    .replace(/FastCGI sent in stderr:\s*/i, '')
+    .replace(/PHP message:\s*/i, '')
+    .replace(/^"+/, '')
+    // Tenant/vhost yol onekini at — zaten domain bazli bakiliyor, /home/c_xxx/
+    // public_html/ veya /var/www/vhosts/<d>/httpdocs/ gurultu. Goreli yol kalir.
+    .replace(/\/home\/c_[a-z0-9_]+\/(?:public_html\/)?/gi, '')
+    .replace(/\/var\/www\/vhosts\/[^/]+\/(?:httpdocs\/)?/gi, '')
+    .replace(/"?\s*while reading response header from upstream.*$/i, '')
+    .replace(/,?\s*client:.*$/i, '')
+    .replace(/\s*Stack trace:.*$/is, '')                   // ilk satirda stack basladiysa kes
+    .trim()
+  return s || msg
+}
+
+// konumBul: hata mesajindaki "dosya:satir" veya "on line N" konumunu cikarir
+// (Plesk gibi tek rozet). Dosya adini kisaltir (son iki bilesenle).
+function konumBul(satirlar: string[]): string {
+  const hepsi = satirlar.join(' ')
+  // "/path/to/file.php on line 405"  veya  "/path/to/file.php:16"
+  let m = /([\w./-]+\.php)\s+on line\s+(\d+)/i.exec(hepsi)
+  if (!m) m = /([\w./-]+\.php):(\d+)/.exec(hepsi)
+  if (!m) return ''
+  const parca = m[1].split('/').filter(Boolean)
+  const kisa = parca.slice(-2).join('/')
+  return kisa + ':' + m[2]
+}
+
 function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
   return (
     <div className="overflow-x-auto">
@@ -348,22 +414,27 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Zaman</th>
           <th className="text-left font-medium px-3 py-2">Seviye</th>
-          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">İstemci</th>
+          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("İstemci")}</th>
           <th className="text-left font-medium px-3 py-2 w-full">Mesaj</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-800/70">
-        {satirlar.map((ham, i) => {
-          const m = ERROR_RE.exec(ham)
+        {grupla(satirlar).map((g, i) => {
+          const m = ERROR_RE.exec(g.bas)
           if (!m) {
+            // Hiç timestamp'li satır yok (nadir) — ham göster.
             return (
               <tr key={i}>
-                <td colSpan={4} className="px-3 py-1.5 font-mono text-slate-500 break-all">{ham}</td>
+                <td colSpan={4} className="px-3 py-1.5 font-mono text-slate-500 break-all whitespace-pre-wrap">{[g.bas, ...g.devam].join('\n')}</td>
               </tr>
             )
           }
           const cm = CLIENT_RE.exec(m[3])
           const client = cm ? cm[1] : ''
+          // Tam metin (stack dahil) hover ile erisilir; gorunen satir kompakt.
+          const tamMesaj = [m[3], ...g.devam].join('\n')
+          const ozet = ozetMesaj(m[3])
+          const konum = konumBul([m[3], ...g.devam])
           return (
             <tr key={i} className="hover:bg-slate-800/40">
               <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap">{m[1].slice(5)}</td>
@@ -372,7 +443,12 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
               </td>
               <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{client || '—'}</td>
               <td className="px-3 py-1.5 font-mono text-slate-200 max-w-0">
-                <div className="truncate" title={m[3]}>{m[3]}</div>
+                <div className="flex items-center gap-2 min-w-0" title={tamMesaj}>
+                  <span className="truncate">{ozet}</span>
+                  {konum && (
+                    <span className="shrink-0 font-mono text-[11px] text-amber-400/90 bg-amber-500/10 rounded px-1.5 py-0.5">{konum}</span>
+                  )}
+                </div>
               </td>
             </tr>
           )

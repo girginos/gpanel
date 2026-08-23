@@ -171,6 +171,7 @@ type createReq struct {
 	PHPSurum   string `json:"php_surum"`
 	CustomerID *int64 `json:"customer_id,omitempty"`
 	PlanID     *int64 `json:"plan_id,omitempty"`
+	SqlOlustur bool   `json:"sql_olustur,omitempty"` // varsayılan false: DB otomatik açılmaz
 }
 
 type createResp struct {
@@ -341,8 +342,16 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbUser := pr.SistemKullanici + "_db"
-	dbName := pr.SistemKullanici + "_main"
+	// DB adi/kullanici cPanel gibi: c_ ONEKSIZ temiz slug (c_girgin -> girgin_).
+	dbPrefix := strings.TrimPrefix(pr.SistemKullanici, "c_")
+	dbUser := dbPrefix + "_db"
+	dbName := dbPrefix + "_main"
+	// SQL istenmediyse domains satirina HAYALET db adi/kullanici yazma: kullanici
+	// detayda var-olmayan bir DB gorup baglanmaya calisirdi. db_accounts zaten
+	// kaynak-of-truth; bu alanlar yalniz DB gercekten olusturulunca dolar.
+	if !req.SqlOlustur {
+		dbUser, dbName = "", ""
+	}
 
 	// 2) domains satırı
 	res, err := h.DB.ExecContext(r.Context(),
@@ -396,10 +405,14 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		log.Printf("FTP create %q hata: %v", pr.SistemKullanici, err)
 	}
 
-	// 4) Default MySQL veritabanı + kullanıcı
-	dbPass := hesaplar.RandomParola(24)
-	if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
-		log.Printf("MySQL create %q hata: %v", dbName, err)
+	// 4) MySQL veritabanı — YALNIZCA istenirse (sql_olustur). Çoğu kurulum önce
+	// dosya yükler, DB'yi sonra Databases sekmesinden açar → varsayılan KAPALI.
+	dbPass := ""
+	if req.SqlOlustur {
+		dbPass = hesaplar.RandomParola(24)
+		if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
+			log.Printf("MySQL create %q hata: %v", dbName, err)
+		}
 	}
 
 	// 4.5) HTTPS-ZORUNLU uzanti (.app/.dev/.page...) → sertifikayi HEMEN dene.
@@ -867,11 +880,12 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 	otomatik := req.Otomatik ||
 		(req.DBSonek == "" && req.KullaniciSonek == "" && req.MevcutKullanici == "" && req.Parola == "")
 
+	dbPrefix := strings.TrimPrefix(sk, "c_") // cPanel gibi c_ oneksiz DB prefix (girgin_)
 	var dbAdi, dbKullanici, parola string
 	mevcutKullaniciModu := false
 
 	if otomatik {
-		dbAdi = sk + "_ek" + strconv.FormatInt(id, 10)
+		dbAdi = dbPrefix + "_ek" + strconv.FormatInt(id, 10)
 		dbKullanici = dbAdi
 		parola = hesaplar.RandomParola(24)
 	} else {
@@ -884,7 +898,7 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadRequest, "geçersiz veritabanı soneki (yalnız küçük harf/rakam/alt-çizgi, 1-32 karakter)")
 			return
 		}
-		dbAdi = sk + "_" + req.DBSonek
+		dbAdi = dbPrefix + "_" + req.DBSonek
 		if !hesaplar.GecerliDBKimlik(dbAdi) {
 			httpx.WriteError(w, http.StatusBadRequest, "veritabanı adı çok uzun (önek + sonek ≤64 karakter olmalı)")
 			return
@@ -916,7 +930,7 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 				httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı soneki (yalnız küçük harf/rakam/alt-çizgi, 1-32 karakter)")
 				return
 			}
-			dbKullanici = sk + "_" + req.KullaniciSonek
+			dbKullanici = dbPrefix + "_" + req.KullaniciSonek
 			if !hesaplar.GecerliDBKimlik(dbKullanici) {
 				httpx.WriteError(w, http.StatusBadRequest, "kullanıcı adı çok uzun (önek + sonek ≤64 karakter olmalı)")
 				return
@@ -1016,58 +1030,14 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": dbName})
 }
 
-// TopluSahip: birden Ã§ok domain'in customer_id'sini gÃ¼ncelle
-type topluSahipReq struct {
-	IDs        []int64 `json:"ids"`
-	CustomerID *int64  `json:"customer_id"`
-}
-
-func (h *Handlers) TopluSahip(w http.ResponseWriter, r *http.Request) {
-	var req topluSahipReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geÃ§ersiz gÃ¶vde")
-		return
-	}
-	if len(req.IDs) == 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "boÅŸ ids")
-		return
-	}
-	// customer_id NULL veya pozitif olabilir
-	if req.CustomerID != nil && *req.CustomerID > 0 {
-		var exists int
-		_ = h.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM customers WHERE id=?`, *req.CustomerID).Scan(&exists)
-		if exists == 0 {
-			httpx.WriteError(w, http.StatusBadRequest, "mÃ¼ÅŸteri bulunamadÄ±")
-			return
-		}
-	}
-	// IN clause icin placeholder
-	placeholders := make([]string, len(req.IDs))
-	args := []any{}
-	if req.CustomerID != nil && *req.CustomerID > 0 {
-		args = append(args, *req.CustomerID)
-	} else {
-		args = append(args, nil)
-	}
-	for i, id := range req.IDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	sql := `UPDATE domains SET customer_id=? WHERE id IN (` + strings.Join(placeholders, ",") + `)`
-	res, err := h.DB.ExecContext(r.Context(), sql, args...)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "gÃ¼ncelleme: "+err.Error())
-		return
-	}
-	n, _ := res.RowsAffected()
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "guncellenen": n})
-}
-
-// TopluDurum: aktif/pasif toggle
+// TopluSahip KALDIRILDI (rota da): sahiplik devri artik yalniz
+// POST /domains/toplu/is (tip=sahip) uzerinden, internal/toplu/devir.go'daki
+// tam devir zinciriyle yapilir — kimlik rotasyonu, oturum dusurme, webhook
+// secret yenileme ve denetim kaydi dahil. Bu handler yalnizca customer_id
+// yaziyordu; duran ikinci bir yol, sertlestirmenin atlandigi arka kapidir.
 type topluDurumReq struct {
 	IDs   []int64 `json:"ids"`
-	Durum string  `json:"durum"` // "aktif" | "pasif"
+	Durum string  `json:"durum"` // aktif | pasif
 }
 
 func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {

@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 
@@ -7,7 +10,24 @@ type PutYanit = { durum: string; cozunum: AsnCozum[] | null; toplam_cidr: number
 
 const BOS: Filtre = { whitelist: '', blacklist: '', ip_blocklist: '', asn_blocklist: '' }
 
+
+const MFILT_EN: Record<string, string> = {
+  "Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı.": "Some ASN entries could not be resolved (see below). Other rules were applied.",
+  "Filtreler yüklenemedi (mail eklentisi aktif mi?)": "Failed to load filters (is the mail add-on active?)",
+  "Gönderen Filtreleri (e-posta / domain)": "Sender Filters (email / domain)",
+  "Her satıra bir e-posta veya domain. Beyaz liste her zaman kabul edilir, kara liste reddedilir.": "One email or domain per line. The allowlist is always accepted, the blocklist is rejected.",
+  "IP / CIDR ağ engelle": "Block IP / CIDR network",
+  "IP ve ASN Engelleme (bağlanan istemci)": "IP and ASN Blocking (connecting client)",
+  "kısmi": "partial",
+  "çözülemedi": "could not resolve",
+  "önbellek": "cache",
+  "⚠ önbellekten": "⚠ from cache",
+  "✓ canlı": "✓ live",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (MFILT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function MailFiltrePage() {
+  useTranslation() // dil re-render aboneligi
   const [f, setF] = useState<Filtre>(BOS)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [kaydediliyor, setKaydediliyor] = useState(false)
@@ -19,7 +39,7 @@ export default function MailFiltrePage() {
   useEffect(() => {
     api.get<Filtre>('/eklenti/mail/genel/filtre')
       .then(r => setF({ ...BOS, ...r.data }))
-      .catch(e => setHata(apiHata(e, 'Filtreler yüklenemedi (mail eklentisi aktif mi?)')))
+      .catch(e => setHata(apiHata(e, cevir("Filtreler yüklenemedi (mail eklentisi aktif mi?)"))))
       .finally(() => setYukleniyor(false))
   }, [])
 
@@ -29,8 +49,8 @@ export default function MailFiltrePage() {
       const r = await api.put<PutYanit>('/eklenti/mail/genel/filtre', f)
       setCozunum(r.data.cozunum ?? [])
       setToplamCidr(r.data.toplam_cidr)
-      if (r.data.durum === 'kısmi') {
-        setHata('Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı.')
+      if (r.data.durum === cevir("kısmi")) {
+        setHata(cevir("Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı."))
       } else {
         setBildirim(`✓ Filtreler kaydedildi ve Postfix'e uygulandı. Toplam ${r.data.toplam_cidr} IP/ağ engelleniyor.`)
       }
@@ -44,20 +64,20 @@ export default function MailFiltrePage() {
   return (
     <div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
-        Gönderen (e-posta/domain) ve bağlanan istemci (IP, CIDR ağ veya tüm ASN) bazında kabul/engelleme kuralları.
-        ASN girdikten sonra o otonom sistemin <span className="font-medium">duyurduğu tüm IP blokları</span> otomatik çözülüp engellenir.
-        Kimlik doğrulamış kullanıcılar ve yerel ağ bu kurallardan <span className="font-medium">etkilenmez</span>.
+        {cevir(cevir("Gönderen (e-posta/domain) ve bağlanan istemci (IP, CIDR ağ veya tüm ASN) bazında kabul/engelleme kuralları."))}
+        ASN girdikten sonra o otonom sistemin <span className="font-medium">{cevir("duyurduğu tüm IP blokları")}</span> {cevir("otomatik çözülüp engellenir.")}
+        {cevir(cevir("Kimlik doğrulamış kullanıcılar ve yerel ağ bu kurallardan"))} <span className="font-medium">etkilenmez</span>.
       </p>
 
       {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">Yükleniyor…</div> : (
+      {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div> : (
         <div className="space-y-5">
           {/* Gönderen filtreleri */}
           <section className={kart}>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Gönderen Filtreleri (e-posta / domain)</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Her satıra bir e-posta veya domain. Beyaz liste her zaman kabul edilir, kara liste reddedilir.</p>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Gönderen Filtreleri (e-posta / domain)")}</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Her satıra bir e-posta veya domain. Beyaz liste her zaman kabul edilir, kara liste reddedilir.")}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1.5">Beyaz liste (kabul)</label>
@@ -74,13 +94,13 @@ export default function MailFiltrePage() {
 
           {/* IP / ASN engelleme */}
           <section className={kart}>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">IP ve ASN Engelleme (bağlanan istemci)</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("IP ve ASN Engelleme (bağlanan istemci)")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Buradaki IP/ağlardan gelen tüm SMTP bağlantıları reddedilir (kimlik doğrulamış kullanıcılar hariç).
+              {cevir(cevir("Buradaki IP/ağlardan gelen tüm SMTP bağlantıları reddedilir (kimlik doğrulamış kullanıcılar hariç)."))}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">IP / CIDR ağ engelle</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">{cevir("IP / CIDR ağ engelle")}</label>
                 <p className="text-xs text-slate-400 mb-1.5">Tek IP (<span className="font-mono">203.0.113.5</span>) veya ağ (<span className="font-mono">203.0.113.0/24</span>). Satır başına bir tane.</p>
                 <textarea value={f.ip_blocklist} onChange={e => setF(s => ({ ...s, ip_blocklist: e.target.value }))} rows={6} placeholder={'203.0.113.5\n45.146.0.0/16'}
                   className={ta + ' focus:ring-brand-500/40 focus:border-brand-400'} />
@@ -98,7 +118,7 @@ export default function MailFiltrePage() {
               <div className="mt-4 border-t border-slate-100 dark:border-slate-700/60 pt-3">
                 {toplamCidr !== null && (
                   <p className="text-xs text-slate-600 dark:text-slate-300 mb-2">
-                    Toplam <span className="font-semibold">{toplamCidr}</span> IP/ağ engelleniyor.
+                    {cevir("Toplam")} <span className="font-semibold">{toplamCidr}</span> {cevir("IP/ağ engelleniyor.")}
                   </p>
                 )}
                 {cozunum.length > 0 && (
@@ -107,12 +127,12 @@ export default function MailFiltrePage() {
                       <li key={i} className="text-xs flex flex-wrap items-center gap-x-2">
                         <span className="font-mono font-medium text-slate-700 dark:text-slate-200">{c.asn}</span>
                         {c.kaynak === 'yok'
-                          ? <span className="text-red-600 dark:text-red-400">🔴 {c.uyari || 'çözülemedi'}</span>
+                          ? <span className="text-red-600 dark:text-red-400">🔴 {c.uyari || cevir("çözülemedi")}</span>
                           : <>
                               <span className="text-slate-500">{c.prefiks_sayisi} prefiks</span>
-                              {c.kaynak === 'önbellek'
-                                ? <span className="text-amber-600 dark:text-amber-400" title={c.uyari}>⚠ önbellekten</span>
-                                : <span className="text-emerald-600 dark:text-emerald-400">✓ canlı</span>}
+                              {c.kaynak === cevir("önbellek")
+                                ? <span className="text-amber-600 dark:text-amber-400" title={c.uyari}>{cevir("⚠ önbellekten")}</span>
+                                : <span className="text-emerald-600 dark:text-emerald-400">{cevir("✓ canlı")}</span>}
                             </>}
                       </li>
                     ))}

@@ -28,12 +28,16 @@ var anim404 []byte
 //go:embed marka/askida.json
 var animAskida []byte
 
+//go:embed marka/hata500.json
+var anim500 []byte
+
 // markaVarliklar: dosya adi → icerik.
 func markaVarliklar() map[string][]byte {
 	return map[string][]byte{
 		"lottie.min.js": lottieJS,
 		"hazir.json":    animHazir,
 		"yok404.json":   anim404,
+		"hata500.json":  anim500,
 		"askida.json":   animAskida,
 	}
 }

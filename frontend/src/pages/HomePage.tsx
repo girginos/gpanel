@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -53,6 +57,66 @@ type Cekim = 'yukleniyor' | 'hazir' | 'hazirlaniyor' | 'hata'
 
 // cekimSinifi - HTTP kodundan siniflandirir. Yanit YOKSA (status yok) bu gercek
 // bir ag hatasidir; "hazirlaniyor" diye yumusatilmaz.
+
+const HOME_EN: Record<string, string> = {
+  "Anlık CPU · RAM · Disk": "Live CPU · RAM · Disk",
+  "Arayüz bulunamadı": "No interface found",
+  "Araç yok": "No tools",
+  "Barındırma abonelikleri": "Hosting subscriptions",
+  "Barındırılan siteler ve SSL durumu": "Hosted sites and SSL status",
+  "Bayi paneliniz — hosting hesaplarınızı buradan yönetin.": "Your reseller panel — manage your hosting accounts here.",
+  "Bazı kaynaklar yükseliyor, göz atmakta fayda var.": "Some resources are rising, worth a look.",
+  "Bellek Grafiği": "Memory Graph",
+  "Canlı Kaynaklar": "Live Resources",
+  "Canlı izleme": "Live monitoring",
+  "Daha fazlası →": "More →",
+  "Disk kotası aktif değil": "Disk quota not active",
+  "Domain listesi alınamadı": "Failed to get domain list",
+  "Donanım ve sistem": "Hardware and system",
+  "Günaydın": "Good morning",
+  "Güncelleme aracı yok": "No update tool",
+  "Güncelleme durumu": "Update status",
+  "Güncelleme çalışıyor": "Update running",
+  "Güvenlik Açıkları (CVE)": "Security Vulnerabilities (CVE)",
+  "Güvenlik: hesap izolasyonu kaybı": "Security: account isolation loss",
+  "Hazırlanıyor": "Preparing",
+  "Henüz domain yok": "No domains yet",
+  "Hesap izolasyonu kaybı var — güvenlik önceliği.": "Account isolation loss — security priority.",
+  "Kaynak kullanımı çok yüksek, hemen inceleyin.": "Resource usage is very high, review immediately.",
+  "Kurulu WordPress bulunamadı": "No installed WordPress found",
+  "Lisans/servis doğrulaması sürüyor.": "License/service verification in progress.",
+  "Lisans/servis doğrulanıyor — kurulum sonrası kısa sürer.": "Verifying license/service — takes a short time after setup.",
+  "MariaDB · nginx · PHP ayarları": "MariaDB · nginx · PHP settings",
+  "Optimizasyon hazır": "Optimization ready",
+  "Optimizasyon çalışıyor": "Optimization running",
+  "Otomatik günlük yedek": "Automatic daily backup",
+  "Panel güncel": "Panel up to date",
+  "SSL sertifikalı": "SSL certified",
+  "Sağlık verileri yükleniyor…": "Loading health data…",
+  "Sistem Sağlıklı": "System Healthy",
+  "Sistem Sağlığı": "System Health",
+  "Sistem verileri yükleniyor…": "Loading system data…",
+  "Sunucu ayarlarını iyileştir": "Improve server settings",
+  "Sunucuya ulaşılamadı — birazdan yeniden denenecek.": "Server unreachable — will retry shortly.",
+  "Sürükleyerek taşı": "Drag to move",
+  "Sürüm ve sistem paketleri": "Version and system packages",
+  "Tüm hesaplardaki kurulumlar": "Installations across all accounts",
+  "Tüm kritik servisler çalışıyor, kaynak kullanımı normal seviyelerde.": "All critical services are running, resource usage is at normal levels.",
+  "Yedek özeti alınamadı": "Failed to get backup summary",
+  "Widget düzenini varsayılana döndür": "Reset widget layout to default",
+  "Yük Grafiği": "Load Graph",
+  "arayüz": "interface",
+  "etkin değil": "not active",
+  "hazırlanıyor": "preparing",
+  "izolasyon sağlam": "isolation intact",
+  "kurulumda güncelleme mevcut — eski sürümler güvenlik açığı taşır.": "an update is available in the install — old versions carry security vulnerabilities.",
+  "kök dizin": "root directory",
+  "İyi akşamlar": "Good evening",
+  "İyi geceler": "Good night",
+  "İyi günler": "Good afternoon",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (HOME_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 function cekimSinifi(err: unknown): Cekim {
   const kod = (err as { response?: { status?: number } })?.response?.status
   if (kod === 402 || kod === 423 || kod === 425 || kod === 503) return 'hazirlaniyor'
@@ -144,6 +208,7 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export default function HomePage() {
+  useTranslation() // dil re-render aboneligi
   const isBayi = bayiMi()
   const kullanici = useAuth((s) => s.kullanici)
   const [s, setS] = useState<Sistem | null>(null)
@@ -363,25 +428,25 @@ export default function HomePage() {
     'cve-guvenlik': <CveWidget />,
 
     'wordpress': (
-      <Kart baslik="WordPress Siteleri" alt="Tüm hesaplardaki kurulumlar" ikon={I.wp}
-        sag={<Link to="/wordpress" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik="WordPress Siteleri" alt={cevir("Tüm hesaplardaki kurulumlar")} ikon={I.wp}
+        sag={<Link to="/wordpress" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         {wp === null ? (
           <VeriYok durum={cekim.wp} />
         ) : (
           <>
             <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               <MiniIstatistik deger={wpToplam} etiket="Kurulum" renk="slate" />
-              <MiniIstatistik deger={wpEski} etiket="Güncelleme" renk={wpEski > 0 ? 'amber' : 'emerald'} />
-              <MiniIstatistik deger={wpGuncel} etiket="Güncel" renk="emerald" />
+              <MiniIstatistik deger={wpEski} etiket={cevir("Güncelleme")} renk={wpEski > 0 ? 'amber' : 'emerald'} />
+              <MiniIstatistik deger={wpGuncel} etiket={cevir("Güncel")} renk="emerald" />
             </div>
             {wpEski > 0 && (
               <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
-                <span><strong>{wpEski}</strong> kurulumda güncelleme mevcut — eski sürümler güvenlik açığı taşır.</span>
+                <span><strong>{wpEski}</strong> {cevir("kurulumda güncelleme mevcut — eski sürümler güvenlik açığı taşır.")}</span>
               </div>
             )}
             {wpToplam === 0 ? (
-              <div className="py-5 text-center text-xs text-slate-400">Kurulu WordPress bulunamadı</div>
+              <div className="py-5 text-center text-xs text-slate-400">{cevir("Kurulu WordPress bulunamadı")}</div>
             ) : (
               <div className="space-y-0.5">
                 {wp!.slice(0, 5).map((k) => (
@@ -392,15 +457,15 @@ export default function HomePage() {
                         className={`h-4 w-4 shrink-0 ${k.durum === 'eski' ? 'text-amber-500' : k.durum === 'guncel' ? 'text-emerald-500' : 'text-slate-400'}`}><path d={I.wp} /></svg>
                       <span className="min-w-0">
                         <span className="block truncate font-mono text-[13px] text-slate-700 dark:text-slate-200">{k.alan_adi}</span>
-                        <span className="block truncate text-[10px] text-slate-400 dark:text-slate-500">{k.dizin === '/ (kök)' ? 'kök dizin' : k.dizin}{k.surum ? ` · v${k.surum}` : ''}</span>
+                        <span className="block truncate text-[10px] text-slate-400 dark:text-slate-500">{k.dizin === cevir("/ (kök)") ? 'kök dizin' : k.dizin}{k.surum ? ` · v${k.surum}` : ''}</span>
                       </span>
                     </span>
                     <span className="shrink-0">
                       {k.durum === 'eski'
-                        ? <Rozet renk="amber" metin={k.son_surum ? `→ v${k.son_surum}` : 'Güncelle'} />
+                        ? <Rozet renk="amber" metin={k.son_surum ? `→ v${k.son_surum}` : cevir("Güncelle")} />
                         : k.durum === 'guncel'
-                          ? <Rozet renk="emerald" metin="Güncel" />
-                          : <Rozet renk="slate" metin="Bilinmiyor" />}
+                          ? <Rozet renk="emerald" metin={cevir("Güncel")} />
+                          : <Rozet renk="slate" metin={cevir("Bilinmiyor")} />}
                     </span>
                   </Link>
                 ))}
@@ -420,8 +485,8 @@ export default function HomePage() {
     ),
 
     'panel-guncelleme': (
-      <Kart baslik="Panel Güncelleme" alt="Sürüm ve sistem paketleri" ikon={I.guncelle}
-        sag={<Link to="/araclar/guncelleme" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik={cevir("Panel Güncelleme")} alt={cevir("Sürüm ve sistem paketleri")} ikon={I.guncelle}
+        sag={<Link to="/araclar/guncelleme" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         <div className="flex items-center gap-3">
           {/*
             ESKIDEN: guncelleme null iken (istek DUSMUS olsa bile) kart yesil
@@ -439,9 +504,9 @@ export default function HomePage() {
           </span>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {!guncelleme ? durumBasligi(cekim.guncelleme, 'Güncelleme durumu')
-                : guncelleme.calisiyor ? 'Güncelleme çalışıyor'
-                  : guncelleme.arac_var === false ? 'Güncelleme aracı yok' : 'Panel güncel'}
+              {!guncelleme ? durumBasligi(cekim.guncelleme, cevir("Güncelleme durumu"))
+                : guncelleme.calisiyor ? cevir("Güncelleme çalışıyor")
+                  : guncelleme.arac_var === false ? 'Güncelleme aracı yok' : cevir("Panel güncel")}
             </div>
             <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" title={guncelleme?.durum}>
               {guncelleme ? (guncelleme.durum || 'Durum bilgisi yok') : durumAciklamasi(cekim.guncelleme)}
@@ -451,7 +516,7 @@ export default function HomePage() {
             <Rozet renk={!guncelleme ? (cekim.guncelleme === 'hata' ? 'rose' : 'slate')
               : guncelleme.calisiyor ? 'sky' : guncelleme.arac_var === false ? 'amber' : 'emerald'}
               metin={!guncelleme ? durumRozeti(cekim.guncelleme)
-                : guncelleme.calisiyor ? 'Çalışıyor' : guncelleme.arac_var === false ? 'Araç yok' : 'Güncel'} />
+                : guncelleme.calisiyor ? 'Çalışıyor' : guncelleme.arac_var === false ? 'Araç yok' : cevir("Güncel")} />
           </span>
         </div>
         <Link to="/araclar/paketler" className="-mx-2 mt-3 flex items-center justify-between rounded-xl border-t border-slate-100 px-2 pt-3 text-xs transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
@@ -459,16 +524,16 @@ export default function HomePage() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-slate-400"><path d={I.paket} /></svg>
             Sistem paketleri
           </span>
-          <span className="text-brand-600 dark:text-brand-400">Yönet →</span>
+          <span className="text-brand-600 dark:text-brand-400">{cevir("Yönet →")}</span>
         </Link>
       </Kart>
     ),
 
     'son-yedek': (
-      <Kart baslik="Son Sunucu Yedeklemesi" alt="Otomatik günlük yedek" ikon={I.yedek}
-        sag={<Link to="/backup-yonetimi" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik="Son Sunucu Yedeklemesi" alt={cevir("Otomatik günlük yedek")} ikon={I.yedek}
+        sag={<Link to="/backup-yonetimi" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         {!yedek ? (
-          <VeriYok durum={cekim.yedek} hataMetni="Yedek özeti alınamadı" />
+          <VeriYok durum={cekim.yedek} hataMetni={cevir("Yedek özeti alınamadı")} />
         ) : (
           <>
             <div className="flex items-baseline gap-2">
@@ -487,8 +552,8 @@ export default function HomePage() {
     ),
 
     'performans': (
-      <Kart baslik="Performans / Optimize" alt="Sunucu ayarlarını iyileştir" ikon={I.optimize}
-        sag={<Link to="/araclar/optimize" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik="Performans / Optimize" alt={cevir("Sunucu ayarlarını iyileştir")} ikon={I.optimize}
+        sag={<Link to="/araclar/optimize" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         <div className="flex items-center gap-3">
           <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${optimize?.calisiyor ? 'bg-sky-50 text-sky-600 dark:bg-sky-900/25 dark:text-sky-300' : 'bg-brand-50 text-brand-600 dark:bg-brand-900/20 dark:text-brand-300'}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d={I.optimize} /></svg>
@@ -497,23 +562,23 @@ export default function HomePage() {
             <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
               {/* Veri gelmeden "hazir" DEMEYIZ - olculmemis durum iddia edilmez. */}
               {!optimize ? durumBasligi(cekim.optimize, 'Optimizasyon durumu')
-                : optimize.calisiyor ? 'Optimizasyon çalışıyor' : 'Optimizasyon hazır'}
+                : optimize.calisiyor ? 'Optimizasyon çalışıyor' : cevir("Optimizasyon hazır")}
             </div>
             <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" title={optimize?.durum}>
-              {optimize ? (optimize.durum || 'MariaDB · nginx · PHP ayarları') : durumAciklamasi(cekim.optimize)}
+              {optimize ? (optimize.durum || cevir("MariaDB · nginx · PHP ayarları")) : durumAciklamasi(cekim.optimize)}
             </div>
           </div>
           <span className="ml-auto shrink-0">
             <Rozet renk={!optimize ? (cekim.optimize === 'hata' ? 'rose' : 'slate') : optimize.calisiyor ? 'sky' : 'slate'}
-              metin={!optimize ? durumRozeti(cekim.optimize) : optimize.calisiyor ? 'Çalışıyor' : 'Boşta'} />
+              metin={!optimize ? durumRozeti(cekim.optimize) : optimize.calisiyor ? 'Çalışıyor' : cevir("Boşta")} />
           </span>
         </div>
       </Kart>
     ),
 
     'servisler': (
-      <Kart baslik="Servisler" alt={s ? `${servisAktif}/${servisToplam} servis çalışıyor` : 'servis durumu'} ikon={I.servis}
-        sag={s ? <Rozet renk={servisDown === 0 ? 'emerald' : 'amber'} metin={servisDown === 0 ? 'Hepsi aktif' : `${servisDown} kapalı`} /> : undefined}>
+      <Kart baslik="Servisler" alt={s ? cevirT("{0}/{1} servis çalışıyor", servisAktif, servisToplam) : 'servis durumu'} ikon={I.servis}
+        sag={s ? <Rozet renk={servisDown === 0 ? 'emerald' : 'amber'} metin={servisDown === 0 ? 'Hepsi aktif' : cevirT(cevir("{0} kapalı"), servisDown)} /> : undefined}>
         {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="grid grid-cols-1 gap-x-5 gap-y-0.5 sm:grid-cols-2">
             {s.servisler.map((sv) => (
@@ -524,7 +589,7 @@ export default function HomePage() {
                   <span className="truncate text-[13px] text-slate-700 dark:text-slate-200">{sv.etiket}</span>
                 </span>
                 <span className={`shrink-0 text-[11px] font-medium ${sv.aktif ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                  {sv.aktif ? 'Aktif' : 'Kapalı'}
+                  {sv.aktif ? 'Aktif' : cevir("Kapalı")}
                 </span>
               </div>
             ))}
@@ -534,18 +599,18 @@ export default function HomePage() {
     ),
 
     'domainler': (
-      <Kart baslik="Domainler" alt="Barındırılan siteler ve SSL durumu" ikon={I.domain}
-        sag={<Link to="/domainler" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik={cevir(cevir("Domainler"))} alt={cevir("Barındırılan siteler ve SSL durumu")} ikon={I.domain}
+        sag={<Link to="/domainler" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-          <MiniIstatistik deger={domainler.length} etiket="Toplam" renk="slate" />
-          <MiniIstatistik deger={aktif} etiket="Aktif" renk="emerald" />
+          <MiniIstatistik deger={domainler.length} etiket={cevir("Toplam")} renk="slate" />
+          <MiniIstatistik deger={aktif} etiket={cevir("Aktif")} renk="emerald" />
           <MiniIstatistik deger={sslli} etiket="SSL" renk="sky" />
         </div>
         {domainler.length === 0 ? (
           // Liste GERCEKTEN bos mu, yoksa istek mi dustu? Ikisi ayni sey degil.
           cekim.domainler === 'hazir'
-            ? <div className="py-6 text-center text-xs text-slate-400">Henüz domain yok</div>
-            : <VeriYok durum={cekim.domainler} hataMetni="Domain listesi alınamadı" />
+            ? <div className="py-6 text-center text-xs text-slate-400">{cevir("Henüz domain yok")}</div>
+            : <VeriYok durum={cekim.domainler} hataMetni={cevir("Domain listesi alınamadı")} />
         ) : (
           <div className="space-y-0.5">
             {domainler.slice(0, 7).map((d) => (
@@ -577,17 +642,17 @@ export default function HomePage() {
     ),
 
     'sunucu-bilgi': (
-      <Kart baslik="Sunucu Bilgileri" alt="Donanım ve sistem" ikon={I.sunucu}>
+      <Kart baslik="Sunucu Bilgileri" alt={cevir("Donanım ve sistem")} ikon={I.sunucu}>
         {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="space-y-0">
-            <KV etiket="Sunucu adı" deger={s.sistem.hostname} />
+            <KV etiket={cevir("Sunucu adı")} deger={s.sistem.hostname} />
             <KV etiket="IP adresi" deger={s.sistem.ip || '—'} />
-            <KV etiket="İşletim sistemi" deger={s.sistem.os_adi || '—'} />
-            <KV etiket="Çekirdek" deger={s.sistem.kernel || '—'} />
-            <KV etiket="İşlemci" deger={s.sistem.cpu_modeli || '—'} />
-            <KV etiket="Çekirdek sayısı" deger={`${s.sistem.cpu_cekirdek} vCPU`} />
-            <KV etiket="Çalışma süresi" deger={formatUptime(s.uptime_sn)} />
-            <KV etiket="Panel sürümü" deger={s.sistem.panel_surum || '—'} />
+            <KV etiket={cevir("İşletim sistemi")} deger={s.sistem.os_adi || '—'} />
+            <KV etiket={cevir("Çekirdek")} deger={s.sistem.kernel || '—'} />
+            <KV etiket={cevir("İşlemci")} deger={s.sistem.cpu_modeli || '—'} />
+            <KV etiket={cevir("Çekirdek sayısı")} deger={`${s.sistem.cpu_cekirdek} vCPU`} />
+            <KV etiket={cevir("Çalışma süresi")} deger={formatUptime(s.uptime_sn)} />
+            <KV etiket={cevir("Panel sürümü")} deger={s.sistem.panel_surum || '—'} />
           </div>
         )}
       </Kart>
@@ -597,7 +662,7 @@ export default function HomePage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/60">
         <div className="mb-4 flex items-center gap-2">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-slate-400 dark:text-slate-500"><path d={I.saglik} /></svg>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sistem Sağlığı</h3>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Sistem Sağlığı")}</h3>
         </div>
         <div className="flex items-center gap-4">
           <SaglikHalka skor={saglik.skor} renk={saglik.renk} hazir={!!s} />
@@ -606,10 +671,10 @@ export default function HomePage() {
               <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${saglik.nokta}`} />
               <span className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">{s ? saglik.baslik : '—'}</span>
             </div>
-            <p className="mt-1 text-[12px] leading-snug text-slate-500 dark:text-slate-400">{s ? saglik.aciklama : 'Sağlık verileri yükleniyor…'}</p>
+            <p className="mt-1 text-[12px] leading-snug text-slate-500 dark:text-slate-400">{s ? saglik.aciklama : cevir("Sağlık verileri yükleniyor…")}</p>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               <Cip renk={servisDown === 0 ? 'emerald' : 'amber'} metin={s ? `${servisAktif}/${servisToplam} servis` : '…'} />
-              <Cip renk={izoAdet === 0 ? 'emerald' : 'rose'} metin={izoAdet === 0 ? 'izolasyon sağlam' : `${izoAdet} izolasyon kaybı`} />
+              <Cip renk={izoAdet === 0 ? 'emerald' : 'rose'} metin={izoAdet === 0 ? 'izolasyon sağlam' : cevirT(cevir("{0} izolasyon kaybı"), izoAdet)} />
             </div>
           </div>
         </div>
@@ -617,11 +682,11 @@ export default function HomePage() {
     ),
 
     'canli-kaynak': (
-      <Kart baslik="Canlı Kaynaklar" alt="Anlık CPU · RAM · Disk" ikon={I.grafik}>
+      <Kart baslik={cevir("Canlı Kaynaklar")} alt={cevir("Anlık CPU · RAM · Disk")} ikon={I.grafik}>
         {!s ? <VeriYok durum={cekim.sistem} /> : (
           <div className="space-y-3.5">
-            <KaynakBar etiket="İşlemci" ikon={I.cpu} yuzde={s.cpu.yuzde} alt={`${s.cpu.cekirdek} çekirdek · yük ${s.cpu.yuk_1dk.toFixed(2)}`} />
-            <KaynakBar etiket="Bellek" ikon={I.ram} yuzde={s.bellek.yuzde} alt={`${fmtGB(s.bellek.kullanilan_kb)} / ${fmtGB(s.bellek.toplam_kb)}`} />
+            <KaynakBar etiket={cevir("İşlemci")} ikon={I.cpu} yuzde={s.cpu.yuzde} alt={`${s.cpu.cekirdek} ${cevir("çekirdek")} · yük ${s.cpu.yuk_1dk.toFixed(2)}`} />
+            <KaynakBar etiket={cevir(cevir("Bellek"))} ikon={I.ram} yuzde={s.bellek.yuzde} alt={`${fmtGB(s.bellek.kullanilan_kb)} / ${fmtGB(s.bellek.toplam_kb)}`} />
             <KaynakBar etiket="Disk" ikon={I.disk} yuzde={anaDisk?.yuzde ?? 0} alt={anaDisk ? `${fmtByteGB(anaDisk.kullanilan_byte)} / ${fmtByteGB(anaDisk.toplam_byte)}` : '…'} />
             {s.swap.toplam_kb > 0 && (
               <KaynakBar etiket="Takas" ikon={I.ram} yuzde={s.swap.yuzde} alt={`${fmtGB(s.swap.kullanilan_kb)} / ${fmtGB(s.swap.toplam_kb)}`} />
@@ -632,24 +697,24 @@ export default function HomePage() {
     ),
 
     'abonelikler': (
-      <Kart baslik="Aboneliklerim" alt="Barındırma abonelikleri" ikon={I.abonelik}
-        sag={<Link to="/domainler" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Daha fazlası →</Link>}>
+      <Kart baslik="Aboneliklerim" alt={cevir("Barındırma abonelikleri")} ikon={I.abonelik}
+        sag={<Link to="/domainler" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">{cevir("Daha fazlası →")}</Link>}>
         <div className="flex items-baseline gap-2">
           <span className="text-3xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-slate-100">{domainler.length}</span>
           <span className="text-sm text-slate-500 dark:text-slate-400">abonelik</span>
         </div>
         <div className="mt-3 space-y-0">
           <KV etiket="Aktif abonelik" deger={`${aktif} / ${domainler.length}`} />
-          <KV etiket="SSL sertifikalı" deger={`${sslli} / ${domainler.length}`} />
+          <KV etiket={cevir("SSL sertifikalı")} deger={`${sslli} / ${domainler.length}`} />
           <KV etiket="WordPress kurulumu" deger={wp === null ? '…' : `${wpToplam}`} />
         </div>
       </Kart>
     ),
 
     'ag': (
-      <Kart baslik="Ağ Trafiği" alt={s?.ag.arayuz ? s.ag.arayuz : 'arayüz'} ikon={I.ag}>
+      <Kart baslik={cevir("Ağ Trafiği")} alt={s?.ag.arayuz ? s.ag.arayuz : cevir("arayüz")} ikon={I.ag}>
         {!s ? <VeriYok durum={cekim.sistem} /> : !s.ag.arayuz ? (
-          <div className="py-4 text-xs italic text-slate-400 dark:text-slate-500">Arayüz bulunamadı</div>
+          <div className="py-4 text-xs italic text-slate-400 dark:text-slate-500">{cevir("Arayüz bulunamadı")}</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 dark:border-emerald-800/40 dark:bg-emerald-900/15">
@@ -690,7 +755,7 @@ export default function HomePage() {
                 <span className="mx-1.5 text-slate-300 dark:text-slate-600">·</span>
                 {formatUptime(s.uptime_sn)} kesintisiz çalışıyor
               </>
-            ) : isBayi ? 'Bayi paneliniz — hosting hesaplarınızı buradan yönetin.' : 'Sistem verileri yükleniyor…'}
+            ) : isBayi ? 'Bayi paneliniz — hosting hesaplarınızı buradan yönetin.' : cevir("Sistem verileri yükleniyor…")}
           </p>
         </div>
 
@@ -705,12 +770,12 @@ export default function HomePage() {
             </span>
           )}
 
-          <button type="button" onClick={varsayilanaDon} title="Widget düzenini varsayılana döndür"
+          <button type="button" onClick={varsayilanaDon} title={cevir("Widget düzenini varsayılana döndür")}
             className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
               <path d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4" />
             </svg>
-            Varsayılan düzen
+            {cevir(cevir("Varsayılan düzen"))}
           </button>
 
           {/* Canli izleme rozeti sunucu metrikleri icindir; bayide bu veri yok. */}
@@ -738,10 +803,10 @@ export default function HomePage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.363 3.591 2.257 17.657a1.5 1.5 0 0 0 1.302 2.25h16.882a1.5 1.5 0 0 0 1.302-2.25L13.638 3.591a1.5 1.5 0 0 0-2.598 0Z" />
           </svg>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-rose-800 dark:text-rose-200">Güvenlik: hesap izolasyonu kaybı</div>
+            <div className="text-sm font-semibold text-rose-800 dark:text-rose-200">{cevir("Güvenlik: hesap izolasyonu kaybı")}</div>
             <div className="mt-0.5 text-xs text-rose-700 dark:text-rose-300">
-              Aşağıdaki hesaplar paylaşılan PHP-FPM düzenine indirildi; kendilerine özel dosya sistemi
-              izolasyonu (CageFS) şu anda <span className="font-semibold">etkin değil</span> — komşu hesapların
+              {cevir(cevir("Aşağıdaki hesaplar paylaşılan PHP-FPM düzenine indirildi; kendilerine özel dosya sistemi"))}
+              izolasyonu (CageFS) şu anda <span className="font-semibold">{cevir("etkin değil")}</span> — komşu hesapların
               yüzeyine açıklar. Ayrıntı için denetim kaydına bakın (<span className="font-mono">guvenlik.izolasyon_kaybi</span>).
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -760,9 +825,9 @@ export default function HomePage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.363 3.591 2.257 17.657a1.5 1.5 0 0 0 1.302 2.25h16.882a1.5 1.5 0 0 0 1.302-2.25L13.638 3.591a1.5 1.5 0 0 0-2.598 0Z" />
           </svg>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">Disk kotası aktif değil</div>
+            <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">{cevir("Disk kotası aktif değil")}</div>
             <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
-              Etkinleştirmek için tek seferlik sunucu yeniden başlatması gerekli.
+              {cevir(cevir("Etkinleştirmek için tek seferlik sunucu yeniden başlatması gerekli."))}
             </div>
           </div>
         </div>
@@ -838,8 +903,8 @@ function SortableWidget({ id, index, reduced, children }:
         ref={setActivatorNodeRef}
         {...attributes}
         {...listeners}
-        aria-label={`${WIDGET_ADI[id] ?? id} kartını sürükleyerek taşı`}
-        title="Sürükleyerek taşı"
+        aria-label={cevirT(cevir("{0} kartını sürükleyerek taşı"), WIDGET_ADI[id] ?? id)}
+        title={cevir("Sürükleyerek taşı")}
         className="absolute -right-2.5 -top-2.5 z-20 flex h-7 w-7 cursor-grab touch-none items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 opacity-60 shadow-sm transition hover:text-slate-700 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 group-hover:opacity-100 active:cursor-grabbing dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500 dark:hover:text-slate-200">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
           <circle cx="9" cy="6" r="1.4" /><circle cx="15" cy="6" r="1.4" />
@@ -860,10 +925,10 @@ const ANIM_CSS = `
 
 function selamla(): string {
   const h = new Date().getHours()
-  if (h < 6) return 'İyi geceler'
-  if (h < 12) return 'Günaydın'
-  if (h < 18) return 'İyi günler'
-  return 'İyi akşamlar'
+  if (h < 6) return cevir("İyi geceler")
+  if (h < 12) return cevir("Günaydın")
+  if (h < 18) return cevir("İyi günler")
+  return cevir("İyi akşamlar")
 }
 
 /* ---------- ikonlar (stroke) ---------- */
@@ -899,18 +964,18 @@ function hesaplaSaglik(s: Sistem | null, servisDown: number, izoAdet: number): S
   if (kritik) {
     return {
       skor, baslik: 'Sistem Kritik', renk: '#ef4444', nokta: 'bg-red-500',
-      aciklama: izoAdet > 0 ? 'Hesap izolasyonu kaybı var — güvenlik önceliği.' : 'Kaynak kullanımı çok yüksek, hemen inceleyin.',
+      aciklama: izoAdet > 0 ? 'Hesap izolasyonu kaybı var — güvenlik önceliği.' : cevir("Kaynak kullanımı çok yüksek, hemen inceleyin."),
     }
   }
   if (dikkat) {
     return {
       skor, baslik: 'Dikkat Gerekli', renk: '#f59e0b', nokta: 'bg-amber-500',
-      aciklama: servisDown > 0 ? `${servisDown} servis çalışmıyor — kontrol edin.` : 'Bazı kaynaklar yükseliyor, göz atmakta fayda var.',
+      aciklama: servisDown > 0 ? cevirT(cevir("{0} servis çalışmıyor — kontrol edin."), servisDown) : cevir("Bazı kaynaklar yükseliyor, göz atmakta fayda var."),
     }
   }
   return {
-    skor, baslik: 'Sistem Sağlıklı', renk: '#10b981', nokta: 'bg-emerald-500',
-    aciklama: 'Tüm kritik servisler çalışıyor, kaynak kullanımı normal seviyelerde.',
+    skor, baslik: cevir("Sistem Sağlıklı"), renk: '#10b981', nokta: 'bg-emerald-500',
+    aciklama: cevir("Tüm kritik servisler çalışıyor, kaynak kullanımı normal seviyelerde."),
   }
 }
 
@@ -956,7 +1021,7 @@ function SaglikHalka({ skor, renk, hazir }: { skor: number; renk: string; hazir:
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">{hazir ? skor : '—'}</span>
-        <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Sağlık</span>
+        <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">{cevir("Sağlık")}</span>
       </div>
     </div>
   )
@@ -1053,7 +1118,7 @@ function KV({ etiket, deger }: { etiket: string; deger: string }) {
   )
 }
 
-function Yukleniyor() { return <div className="py-4 text-center text-xs text-slate-400">Yükleniyor…</div> }
+function Yukleniyor() { return <div className="py-4 text-center text-xs text-slate-400">{cevir("Yükleniyor…")}</div> }
 
 /* ---- "hazir degil" ile "HATA" ayrimi: ortak metin + govde yardimcilari ----
    Musteri taze kurulumda paneli ILK KEZ aciyor. Henuz ayaga kalkmamis bir ucun
@@ -1065,15 +1130,15 @@ function durumBasligi(d: Cekim, konu: string): string {
   return konu + ' yükleniyor'
 }
 function durumAciklamasi(d: Cekim): string {
-  if (d === 'hata') return 'Sunucuya ulaşılamadı — birazdan yeniden denenecek.'
+  if (d === 'hata') return cevir("Sunucuya ulaşılamadı — birazdan yeniden denenecek.")
   // 402: parali eklentinin lisans bileti henuz yazilmadi (ilk nabizla gelir).
-  if (d === 'hazirlaniyor') return 'Lisans/servis doğrulanıyor — kurulum sonrası kısa sürer.'
-  return 'Yükleniyor…'
+  if (d === 'hazirlaniyor') return cevir("Lisans/servis doğrulanıyor — kurulum sonrası kısa sürer.")
+  return cevir("Yükleniyor…")
 }
 function durumRozeti(d: Cekim): string {
-  if (d === 'hata') return 'Alınamadı'
-  if (d === 'hazirlaniyor') return 'Hazırlanıyor'
-  return 'Yükleniyor'
+  if (d === 'hata') return cevir("Alınamadı")
+  if (d === 'hazirlaniyor') return cevir("Hazırlanıyor")
+  return cevir("Yükleniyor")
 }
 
 // VeriYok - veri gelmemis bir kart govdesi. ASLA "bos / temiz" gibi cizmez.
@@ -1081,7 +1146,7 @@ function VeriYok({ durum, hataMetni }: { durum: Cekim; hataMetni?: string }) {
   if (durum === 'hata') {
     return (
       <div className="py-5 text-center text-xs text-rose-600 dark:text-rose-400">
-        {hataMetni || 'Veri alınamadı'}
+        {hataMetni || cevir("Veri alınamadı")}
         <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">Otomatik olarak yeniden denenecek.</div>
       </div>
     )
@@ -1089,8 +1154,8 @@ function VeriYok({ durum, hataMetni }: { durum: Cekim; hataMetni?: string }) {
   if (durum === 'hazirlaniyor') {
     return (
       <div className="py-5 text-center text-xs text-slate-500 dark:text-slate-400">
-        Hazırlanıyor…
-        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">Lisans/servis doğrulaması sürüyor.</div>
+        {cevir(cevir("Hazırlanıyor…"))}
+        <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">{cevir("Lisans/servis doğrulaması sürüyor.")}</div>
       </div>
     )
   }

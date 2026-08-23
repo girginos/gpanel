@@ -1,3 +1,6 @@
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
@@ -17,7 +20,13 @@ const RENK = '#0ea5e9' // sky — CPU grafiğinden görsel olarak ayrışsın
 
 // Bellek kullanımı geçmişi (%). /system/load-history noktalarındaki `bellek` alanını çizer.
 // LoadHistoryChart ile aynı görsel dil: alan + gradyan + yumuşatılmış çizgi + ızgara + hover.
+
+const CMP_EN: Record<string, string> = {
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
 export default function MemoryHistoryChart() {
+  useTranslation() // dil re-render aboneligi
   const [saat, setSaat] = useState(24)
   const [d, setD] = useState<Yanit | null>(null)
   const [yetkiYok, setYetkiYok] = useState(false)
@@ -96,8 +105,8 @@ export default function MemoryHistoryChart() {
             <path d="M3 7h18v10H3zM7 7v10m5-10v10m5-10v10" />
           </svg>
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Bellek kullanımı</h3>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">Kullanılan RAM yüzdesi · 0–100%</p>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Bellek kullanımı")}</h3>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Kullanılan RAM yüzdesi · 0–100%")}</p>
           </div>
         </div>
         <div className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">
@@ -116,7 +125,7 @@ export default function MemoryHistoryChart() {
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
         <div className="flex items-center gap-2 text-xs">
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: RENK }} />
-          <span className="text-slate-500 dark:text-slate-400">Bellek</span>
+          <span className="text-slate-500 dark:text-slate-400">{cevir("Bellek")}</span>
           <span className={`font-mono font-semibold tabular-nums ${asiri ? 'text-red-600 dark:text-red-400' : dikkat ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-slate-100'}`}>
             {guncelDeger == null ? '—' : `%${guncelDeger.toFixed(1)}`}
           </span>
@@ -129,8 +138,8 @@ export default function MemoryHistoryChart() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-9 w-9 text-slate-300 dark:text-slate-600">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125 8 8l3 6 4-9 3 6h4" />
           </svg>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Henüz veri toplanmadı</p>
-          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.</p>
+          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz veri toplanmadı")}</p>
+          <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{cevir("Örnekler her dakika kaydedilir; grafik birkaç dakikada dolar.")}</p>
         </div>
       ) : (
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>

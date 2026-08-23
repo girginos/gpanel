@@ -1,3 +1,7 @@
+import { cevirT } from '@/lib/cevirT'
+import { ORTAK_EN } from '@/lib/cevirOrtak'
+import i18n from '@/lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Breadcrumb from '@/components/Breadcrumb'
 import { api, apiHata } from '@/lib/api'
@@ -36,6 +40,54 @@ const PANELLER = [
   { deger: 'plesk', etiket: 'Plesk' },
 ]
 const PHP_SURUMLERI = ['', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
+
+
+const STASIMA_EN: Record<string, string> = {
+  "(seçtiğiniz panel ile uyuşmuyor!)": "(does not match the panel you selected!)",
+  "+ Yeni taşıma": "+ New migration",
+  "Anahtar hazırlanıyor…": "Preparing key…",
+  "Bayiler yüklenemedi": "Failed to load resellers",
+  "Bağlantı testi başarısız": "Connection test failed",
+  "Bağlantıyı test et": "Test connection",
+  "Dump alınır, aktarılır, ayarlar güncellenir": "Dumped, transferred, settings updated",
+  "En az bir site seçin.": "Select at least one site.",
+  "Geçmiş taşımalar": "Past migrations",
+  "Kaldığınız yerden devam edin": "Continue where you left off",
+  "Kaynak sunucuda taşınabilir site bulunamadı.": "No migratable sites found on the source server.",
+  "Kaynak zone okunur, A kayıtları çevrilir": "Source zone is read, A records are translated",
+  "Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturulur; her site kendi sahibine atanır (Plesk). Reseller parolaları başlatınca gösterilir.": "Reseller/customer accounts on the source are created with their plans; each site is assigned to its own owner (Plesk). Reseller passwords are shown when you start.",
+  "Kaynaktakiyle aynı": "Same as the source",
+  "Kayıt bekleniyor…": "Waiting for records…",
+  "Keşif başarısız": "Discovery failed",
+  "Mail (yakında)": "Mail (coming soon)",
+  "Müşteriler yüklenemedi": "Failed to load customers",
+  "Neyi yeniden taşıyalım?": "What should we migrate again?",
+  "Neyin taşınacağını, hangi plana ve kime atanacağını seçin.": "Choose what will be migrated, to which plan and to whom it will be assigned.",
+  "Oturum geri yüklenemedi": "Failed to restore session",
+  "Panel anahtarı (parola çalışmıyorsa)": "Panel key (if the password doesn't work)",
+  "Panel anahtarı — kaynak sunucuda tek komut çalıştırın": "Panel key — run a single command on the source server",
+  "Panelde aynı alan adı varsa üzerine yazar": "Overwrites if the same domain exists in the panel",
+  "Planlar yüklenemedi": "Failed to load plans",
+  "Plansız (limit yok)": "No plan (no limits)",
+  "SQL (Veritabanı)": "SQL (Database)",
+  "SSH anahtarı": "SSH key",
+  "SSH kullanıcısı": "SSH user",
+  "SSH özel anahtarı": "SSH private key",
+  "SSL sertifikası": "SSL certificate",
+  "Sahiplik ve aktarım ayarları": "Ownership and transfer settings",
+  "Site sahiplerini taşı (bayi/müşteri)": "Migrate site owners (reseller/customer)",
+  "Siteler taranıyor…": "Scanning sites…",
+  "Siteleri keşfet →": "Discover sites →",
+  "Taşıma başlatılamadı": "Failed to start migration",
+  "Taşınacak siteler": "Sites to migrate",
+  "Web kök dizini rsync ile aktarılır": "The web root is transferred via rsync",
+  "hazırlanıyor…": "preparing…",
+  "parola girişini kapatmış": "has disabled password login",
+  "İptal edilemedi": "Could not cancel",
+  "🔑 Oluşturulan sahip hesapları — parolaları KAYDEDİN": "🔑 Created owner accounts — SAVE the passwords",
+  "“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.": "“Overwrite existing site” is on — files and databases of sites with the same domain will be overwritten. A backup first is recommended.",
+}
+const cevir = (tr: string): string => (i18n.language === "en" ? (STASIMA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function mb(n: number) { if (!n) return '—'; return n < 1024 ? `${n} MB` : `${(n / 1024).toFixed(1)} GB` }
 function bayt(n: number) { if (!n) return '—'; const m = n / (1024 * 1024); return m < 1024 ? `${m.toFixed(1)} MB` : `${(m / 1024).toFixed(2)} GB` }
@@ -132,7 +184,7 @@ function Kart({ children, className }: { children: ReactNode; className?: string
   )
 }
 
-const ADIMLAR = ['Sunucu bilgileri', 'Siteler & Ayarlar', 'Taşıma']
+const ADIMLAR = ['Sunucu bilgileri', 'Siteler & Ayarlar', cevir("Taşıma")]
 function Stepper({ adim, git, erisim }: { adim: number; git: (n: number) => void; erisim: (n: number) => boolean }) {
   return (
     <div className="mb-6 flex items-center">
@@ -166,21 +218,26 @@ const KAYNAK_KEY = 'gosp_tasima_kaynak'
 const OTURUM_KEY = 'gosp_tasima_oturum' // son keşif oturumu id'si (sır değil)
 
 type Oturum = { id: number; tip: string; host: string; port: number; kullanici: string; site_sayisi: number; kimlik_sakli: boolean; son_kullanim: string }
-type KayitliKaynak = { tip?: string; host?: string; port?: number; kullanici?: string; kimlikTipi?: 'parola' | 'anahtar' }
+type KayitliKaynak = { tip?: string; host?: string; port?: number; kullanici?: string; kimlikTipi?: 'parola' | 'anahtar' | 'panel' }
 function kayitliKaynakOku(): KayitliKaynak {
   try { return JSON.parse(localStorage.getItem(KAYNAK_KEY) || '{}') } catch { return {} }
 }
 
 export default function SiteTasimaPage() {
+  useTranslation() // dil re-render aboneligi
   const kk = kayitliKaynakOku()
   // --- kaynak sunucu ---
   const [tip, setTip] = useState('plesk')
   const [host, setHost] = useState(kk.host || '')
   const [port, setPort] = useState(kk.port || 22)
   const [kullanici, setKullanici] = useState(kk.kullanici || 'root')
-  const [kimlikTipi, setKimlikTipi] = useState<'parola' | 'anahtar'>(kk.kimlikTipi || 'parola')
+  const [kimlikTipi, setKimlikTipi] = useState<'parola' | 'anahtar' | 'panel'>(kk.kimlikTipi || 'parola')
   const [parola, setParola] = useState('')
   const [anahtar, setAnahtar] = useState('')
+  // Panel taşıma anahtarı (parola çalışmadığında): kaynağa eklenecek public anahtar + komut.
+  const [panelPub, setPanelPub] = useState('')
+  const [panelKomut, setPanelKomut] = useState('')
+  const [panelKopya, setPanelKopya] = useState(false)
   const [parolaGoster, setParolaGoster] = useState(false)
 
   // --- akış ---
@@ -198,6 +255,9 @@ export default function SiteTasimaPage() {
   const [dns, setDns] = useState(true)
   const [ssl, setSsl] = useState(true)
   const [ustune, setUstune] = useState(false)
+  const [sahipleriTasi, setSahipleriTasi] = useState(false)
+  // Taşımada oluşturulan reseller/müşteri hesapları (üretilen parolalar admin'e bir kez gösterilir).
+  const [uretilenKimlikler, setUretilenKimlikler] = useState<Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }>>([])
   const [hedefPHP, setHedefPHP] = useState('')
   const [planlar, setPlanlar] = useState<Plan[]>([])
   const [planID, setPlanID] = useState(0)
@@ -223,7 +283,16 @@ export default function SiteTasimaPage() {
   const kaynakGovde = () => ({
     tip, host: host.trim(), port: Number(port) || 22, kullanici: kullanici.trim(),
     parola: kimlikTipi === 'parola' ? parola : '', anahtar: kimlikTipi === 'anahtar' ? anahtar : '',
+    panel_anahtari: kimlikTipi === 'panel',
   })
+
+  // Panel taşıma anahtarını (public + kurulum komutu) getir — 'panel' modu seçilince.
+  useEffect(() => {
+    if (kimlikTipi !== 'panel' || panelPub) return
+    api.get<{ pubkey: string; komut: string }>('/system/tasima/anahtar')
+      .then(r => { setPanelPub(r.data.pubkey || ''); setPanelKomut(r.data.komut || '') })
+      .catch(() => { /* sessiz */ })
+  }, [kimlikTipi, panelPub])
 
   const durumYukle = useCallback(async () => {
     try {
@@ -262,7 +331,7 @@ export default function SiteTasimaPage() {
       setOturumID(data.id); setKimlikSakli(data.kimlik_sakli)
       try { localStorage.setItem(OTURUM_KEY, String(data.id)) } catch { /* */ }
       setAdim(list.length ? 2 : 1)
-    } catch (e) { setHata(apiHata(e, 'Oturum geri yüklenemedi')) }
+    } catch (e) { setHata(apiHata(e, cevir("Oturum geri yüklenemedi"))) }
   }
 
   async function oturumSil(id: number) {
@@ -278,9 +347,9 @@ export default function SiteTasimaPage() {
 
   // Plan + sahiplik hedefleri.
   useEffect(() => {
-    api.get<Plan[]>('/plans').then(r => { const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(hataYakala('Planlar yüklenemedi'))
-    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(hataYakala('Bayiler yüklenemedi'))
-    api.get<Musteri[]>('/customers').then(r => setMusteriler(r.data || [])).catch(hataYakala('Müşteriler yüklenemedi'))
+    api.get<Plan[]>('/plans').then(r => { const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(hataYakala(cevir("Planlar yüklenemedi")))
+    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(hataYakala(cevir("Bayiler yüklenemedi")))
+    api.get<Musteri[]>('/customers').then(r => setMusteriler(r.data || [])).catch(hataYakala(cevir("Müşteriler yüklenemedi")))
 
   }, [])
 
@@ -313,8 +382,8 @@ export default function SiteTasimaPage() {
     setTestYuk(true); setHata(null); setTestSonuc(null)
     try {
       const { data } = await api.post<{ sunucu_adi: string; tespit_edilen: string; uyusuyor: boolean }>('/system/tasima/test', kaynakGovde())
-      setTestSonuc(`Bağlantı başarılı — ${data.sunucu_adi || 'sunucu'} · tespit edilen panel: ${data.tespit_edilen || 'bilinmiyor'}` + (data.uyusuyor ? '' : ' (seçtiğiniz panel ile uyuşmuyor!)'))
-    } catch (e) { setHata(apiHata(e, 'Bağlantı testi başarısız')) } finally { setTestYuk(false) }
+      setTestSonuc(cevirT(cevir("Bağlantı başarılı — {0} · tespit edilen panel: {1}"), data.sunucu_adi || 'sunucu', data.tespit_edilen || 'bilinmiyor') + (data.uyusuyor ? '' : ' (seçtiğiniz panel ile uyuşmuyor!)'))
+    } catch (e) { setHata(apiHata(e, cevir("Bağlantı testi başarısız"))) } finally { setTestYuk(false) }
   }
 
   async function kesfet() {
@@ -324,33 +393,34 @@ export default function SiteTasimaPage() {
       const list = data.hesaplar || []
       setHesaplar(list)
       const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = !h.mevcut }); setSecili(s)
-      if (data.oturum_id) { setOturumID(data.oturum_id); setKimlikSakli(kimlikTipi === 'parola' ? !!parola : !!anahtar); try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
+      if (data.oturum_id) { setOturumID(data.oturum_id); setKimlikSakli(kimlikTipi === 'parola' ? !!parola : kimlikTipi === 'anahtar' ? !!anahtar : false); try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
       oturumlarYukle()
-      if (!list.length) setHata('Kaynak sunucuda taşınabilir site bulunamadı.')
+      if (!list.length) setHata(cevir("Kaynak sunucuda taşınabilir site bulunamadı."))
       else setAdim(2)
-    } catch (e) { setHata(apiHata(e, 'Keşif başarısız')) } finally { setKesifYuk(false) }
+    } catch (e) { setHata(apiHata(e, cevir("Keşif başarısız"))) } finally { setKesifYuk(false) }
   }
 
   async function baslat() {
     const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi])
-    if (!secilenler.length) { setHata('En az bir site seçin.'); return }
+    if (!secilenler.length) { setHata(cevir("En az bir site seçin.")); return }
     setHata(null)
     try {
-      const { data } = await api.post<{ is_id: number }>('/system/tasima/baslat', {
+      const { data } = await api.post<{ is_id: number; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>('/system/tasima/baslat', {
         ...kaynakGovde(),
         oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
         mod: secilenler.length === 1 ? 'tekil' : 'toplu',
-        ayarlar: { dosyalar, veritabani, dns, ssl, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, hesaplar: [] },
+        ayarlar: { dosyalar, veritabani, dns, ssl, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, sahipleri_tasi: sahipleriTasi, hesaplar: [] },
         secilen: secilenler,
       })
       basladiRef.current = Date.now()
+      setUretilenKimlikler(data.uretilen_kimlikler || [])
       setIsID(data.is_id); setCalisiyor(true); setLogMetin(''); setKalemler([]); setAdim(3)
-    } catch (e) { setHata(apiHata(e, 'Taşıma başlatılamadı')) }
+    } catch (e) { setHata(apiHata(e, cevir("Taşıma başlatılamadı"))) }
   }
 
   async function iptalEt() {
     if (!isID) return
-    try { await api.post(`/system/tasima/${isID}/iptal`, {}) } catch (e) { setHata(apiHata(e, 'İptal edilemedi')) }
+    try { await api.post(`/system/tasima/${isID}/iptal`, {}) } catch (e) { setHata(apiHata(e, cevir("İptal edilemedi"))) }
   }
 
   function yeniTasima() {
@@ -360,7 +430,7 @@ export default function SiteTasimaPage() {
 
   // Tekrar dene — aynı seçimle yeniden başlat. Kimlik saklı oturumdan (oturum_id)
   // sunucu tarafında çözüldüğü için sunucu bilgilerini yeniden girmeye gerek yok.
-  // State yoksa (sayfa yenilendi) forma dön; "Kaldığınız yerden devam edin" ile gelinir.
+  // State yoksa (sayfa yenilendi) forma dön; cevir("Kaldığınız yerden devam edin") ile gelinir.
   async function tekrarDene() {
     if (!(hesaplar && hesaplar.length && secilenSayi > 0)) { setAdim(hesaplar && hesaplar.length ? 2 : 1); return }
     setIsID(null); setCalisiyor(false); setKalemler([]); setLogMetin(''); setOzet({ toplam: 0, tamamlanan: 0, basarisiz: 0, durum: '' })
@@ -378,26 +448,27 @@ export default function SiteTasimaPage() {
   const erisim = (n: number) => n === 1 || (n === 2 && !!(hesaplar && hesaplar.length)) || (n === 3 && !!isID)
 
   const ayarlar: [string, boolean, (v: boolean) => void, string, string][] = [
-    ['Dosyalar', dosyalar, setDosyalar, 'Web kök dizini rsync ile aktarılır', I.files],
-    ['Veritabanları', veritabani, setVeritabani, 'Dump alınır, aktarılır, ayarlar güncellenir', I.db],
-    ['DNS kayıtları', dns, setDns, 'Kaynak zone okunur, A kayıtları çevrilir', I.dns],
-    ['SSL sertifikası', ssl, setSsl, "Let's Encrypt denenir", I.ssl],
-    ['Mevcut siteyi ez', ustune, setUstune, 'Panelde aynı alan adı varsa üzerine yazar', I.ez],
+    ['Dosyalar', dosyalar, setDosyalar, cevir("Web kök dizini rsync ile aktarılır"), I.files],
+    [cevir("Veritabanları"), veritabani, setVeritabani, cevir("Dump alınır, aktarılır, ayarlar güncellenir"), I.db],
+    [cevir("DNS kayıtları"), dns, setDns, cevir("Kaynak zone okunur, A kayıtları çevrilir"), I.dns],
+    [cevir("SSL sertifikası"), ssl, setSsl, "Let's Encrypt denenir", I.ssl],
+    [cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturulur; her site kendi sahibine atanır (Plesk). Reseller parolaları başlatınca gösterilir."), I.anahtarIkon],
+    ['Mevcut siteyi ez', ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez],
   ]
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-6">
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
-        { etiket: 'Araçlar ve Ayarlar', href: '/araclar-ayarlar' },
-        { etiket: 'Site Taşıma' },
+        { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
+        { etiket: cevir("Site Taşıma") },
       ]} />
 
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Site Taşıma</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Site Taşıma")}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-          Plesk sunucunuzdaki siteleri dosyaları, veritabanları, DNS ve SSL ile
-          birlikte 3 adımda bu panele aktarın. İşlem arka planda çalışır — bu sayfayı kapatabilirsiniz.
+          {cevir(cevir("Plesk sunucunuzdaki siteleri dosyaları, veritabanları, DNS ve SSL ile"))}
+          {cevir(cevir("birlikte 3 adımda bu panele aktarın. İşlem arka planda çalışır — bu sayfayı kapatabilirsiniz."))}
         </p>
       </div>
 
@@ -407,7 +478,7 @@ export default function SiteTasimaPage() {
       {adim === 1 && oturumlar.length > 0 && (
         <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
           <div className="mb-2 text-sm font-medium text-blue-900 dark:text-blue-200">
-            Kaldığınız yerden devam edin
+            {cevir("Kaldığınız yerden devam edin")}
           </div>
           <div className="space-y-2">
             {oturumlar.map(o => (
@@ -439,7 +510,7 @@ export default function SiteTasimaPage() {
           <Kart>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Kaynak sunucu bilgileri</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Taşınacak sitelerin bulunduğu sunucunun SSH bilgileri. Kimlik bilgileri şifreli saklanır, iş bitince silinir.
+              {cevir(cevir("Taşınacak sitelerin bulunduğu sunucunun SSH bilgileri. Kimlik bilgileri şifreli saklanır, iş bitince silinir."))}
             </p>
             <div className="mt-5 grid max-w-4xl gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-6">
               <label className="block lg:col-span-2">
@@ -466,46 +537,68 @@ export default function SiteTasimaPage() {
                 </div>
               </label>
               <label className="block lg:col-span-2">
-                <span className={labelCls}>SSH kullanıcısı</span>
+                <span className={labelCls}>{cevir("SSH kullanıcısı")}</span>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Ikon d={I.kullaniciIkon} /></span>
                   <input value={kullanici} onChange={e => setKullanici(e.target.value)} placeholder="root" className={inputCls + ' pl-9'} />
                 </div>
               </label>
               <label className="block lg:col-span-2">
-                <span className={labelCls}>Kimlik doğrulama</span>
+                <span className={labelCls}>{cevir("Kimlik doğrulama")}</span>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Ikon d={I.anahtarIkon} /></span>
-                  <select value={kimlikTipi} onChange={e => setKimlikTipi(e.target.value as 'parola' | 'anahtar')} className={inputCls + ' pl-9'}>
-                    <option value="parola">Parola</option>
-                    <option value="anahtar">SSH anahtarı</option>
+                  <select value={kimlikTipi} onChange={e => setKimlikTipi(e.target.value as 'parola' | 'anahtar' | 'panel')} className={inputCls + ' pl-9'}>
+                    <option value="parola">{cevir("Parola")}</option>
+                    <option value="anahtar">{cevir("SSH anahtarı")}</option>
+                    <option value="panel">{cevir("Panel anahtarı (parola çalışmıyorsa)")}</option>
                   </select>
                 </div>
               </label>
               {kimlikTipi === 'parola' ? (
                 <label className="block lg:col-span-2">
-                  <span className={labelCls}>Parola</span>
+                  <span className={labelCls}>{cevir("Parola")}</span>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Ikon d={I.kilit} /></span>
                     <input type={parolaGoster ? 'text' : 'password'} value={parola} onChange={e => setParola(e.target.value)} autoComplete="new-password" placeholder="••••••••" className={inputCls + ' pl-9 pr-10'} />
-                    <button type="button" onClick={() => setParolaGoster(v => !v)} title={parolaGoster ? 'Gizle' : 'Göster'}
+                    <button type="button" onClick={() => setParolaGoster(v => !v)} title={parolaGoster ? 'Gizle' : cevir("Göster")}
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200">
                       <Ikon d={parolaGoster ? I.gozKapali : I.goz} />
                     </button>
                   </div>
                 </label>
-              ) : (
+              ) : kimlikTipi === 'anahtar' ? (
                 <label className="block sm:col-span-2 lg:col-span-4">
-                  <span className={labelCls}>SSH özel anahtarı</span>
+                  <span className={labelCls}>{cevir("SSH özel anahtarı")}</span>
                   <textarea value={anahtar} onChange={e => setAnahtar(e.target.value)} rows={3}
                     placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" className={`${inputCls} font-mono text-xs`} />
                 </label>
+              ) : (
+                <div className="block sm:col-span-2 lg:col-span-4">
+                  <span className={labelCls}>{cevir("Panel anahtarı — kaynak sunucuda tek komut çalıştırın")}</span>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+                    <p className="mb-2 leading-relaxed">
+                      Kaynak sunucu <strong>{cevir("parola girişini kapatmış")}</strong> olabilir (Plesk'te sık). Bunun yerine panel kendi anahtarını kullanır — parola gerekmez.
+                      {cevir(cevir("Aşağıdaki komutu"))} <strong>kaynak sunucuda</strong> ({host || 'kaynak'}) <strong>bir kez</strong> {cevir(cevir("çalıştırın, sonra “Siteleri keşfet”e basın:"))}
+                    </p>
+                    <div className="relative">
+                      <pre className="max-h-28 overflow-auto rounded-lg bg-slate-900 px-3 py-2 pr-16 font-mono text-[11px] leading-snug text-slate-100 whitespace-pre-wrap break-all">{panelKomut || cevir("Anahtar hazırlanıyor…")}</pre>
+                      <button type="button" disabled={!panelKomut}
+                        onClick={() => { if (panelKomut) { navigator.clipboard?.writeText(panelKomut); setPanelKopya(true); setTimeout(() => setPanelKopya(false), 1500) } }}
+                        className="absolute right-2 top-2 rounded-md bg-slate-700 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-slate-600 disabled:opacity-50">
+                        {panelKopya ? 'Kopyalandı ✓' : 'Kopyala'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-300/70">
+                      {cevir(cevir("Not: Komutu kaynağa Plesk’in SSH terminalinden veya hosting konsolundan yapıştırabilirsiniz. Taşıma bitince anahtarı kaynaktan silebilirsiniz."))}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
 
             <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
               <span className="text-emerald-500"><Ikon d={I.ssl} /></span>
-              Kimlik bilgileri AES ile şifreli saklanır, taşıma bitince otomatik silinir.
+              {cevir(cevir("Kimlik bilgileri AES ile şifreli saklanır, taşıma bitince otomatik silinir."))}
             </div>
 
             {testSonuc && (
@@ -517,10 +610,10 @@ export default function SiteTasimaPage() {
 
             <div className="mt-5 flex flex-wrap gap-2.5">
               <button type="button" onClick={baglantiTest} disabled={testYuk || !host} className={btnIkincil}>
-                {testYuk ? 'Test ediliyor…' : 'Bağlantıyı test et'}
+                {testYuk ? 'Test ediliyor…' : cevir("Bağlantıyı test et")}
               </button>
               <button type="button" onClick={kesfet} disabled={kesifYuk || !host} className={btnBirincil}>
-                <Ikon d={I.sunucu} />{kesifYuk ? 'Siteler taranıyor…' : 'Siteleri keşfet →'}
+                <Ikon d={I.sunucu} />{kesifYuk ? 'Siteler taranıyor…' : cevir("Siteleri keşfet →")}
               </button>
             </div>
           </Kart>
@@ -535,11 +628,11 @@ export default function SiteTasimaPage() {
           <Kart>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Taşınacak siteler</h2>
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Taşınacak siteler")}</h2>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hesaplar.length} site bulundu · {secilenSayi} seçili</p>
               </div>
               <div className="flex gap-2">
-                <button type="button" className={btnKucuk} onClick={() => setSecili(Object.fromEntries(hesaplar.map(h => [h.alan_adi, true])))}>Tümünü seç</button>
+                <button type="button" className={btnKucuk} onClick={() => setSecili(Object.fromEntries(hesaplar.map(h => [h.alan_adi, true])))}>{cevir("Tümünü seç")}</button>
                 <button type="button" className={btnKucuk} onClick={() => setSecili({})}>Temizle</button>
               </div>
             </div>
@@ -547,8 +640,8 @@ export default function SiteTasimaPage() {
               <table className={T.tablo}>
                 <thead className={T.baslikGrubu}>
                   <tr>
-                    <th className={T.baslik}>Seç</th><th className={T.baslik}>Alan adı</th><th className={T.baslik}>Kaynak hesap</th>
-                    <th className={T.baslik}>PHP</th><th className={T.baslik}>Boyut</th><th className={T.baslik}>Veritabanı</th><th className={T.baslik}>Durum</th>
+                    <th className={T.baslik}>{cevir("Seç")}</th><th className={T.baslik}>{cevir("Alan adı")}</th><th className={T.baslik}>Kaynak hesap</th>
+                    <th className={T.baslik}>PHP</th><th className={T.baslik}>{cevir("Boyut")}</th><th className={T.baslik}>{cevir("Veritabanı")}</th><th className={T.baslik}>{cevir("Durum")}</th>
                   </tr>
                 </thead>
                 <tbody className={T.govde}>
@@ -557,19 +650,19 @@ export default function SiteTasimaPage() {
                     return (
                       <tr key={`${h.kaynak_hesap}|${h.alan_adi}`} onClick={() => setSecili(s => ({ ...s, [h.alan_adi]: !sec }))}
                         className={`${T.satir} cursor-pointer transition ${sec ? 'bg-brand-50/30 dark:bg-brand-900/10' : ''}`}>
-                        <td className={T.hucre} data-etiket="Seç">
+                        <td className={T.hucre} data-etiket={cevir("Seç")}>
                           <input type="checkbox" checked={sec} onClick={e => e.stopPropagation()} onChange={e => setSecili(s => ({ ...s, [h.alan_adi]: e.target.checked }))}
                             className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-slate-800" />
                         </td>
-                        <td className={T.hucreBaslik} data-etiket="Alan adı">
+                        <td className={T.hucreBaslik} data-etiket={cevir("Alan adı")}>
                           <span className="font-medium">{h.alan_adi}</span>
                           {h.not && <span className="ml-1.5 text-[11px] text-slate-400">({h.not})</span>}
                         </td>
                         <td className={T.hucre} data-etiket="Kaynak hesap"><span className="text-slate-500 dark:text-slate-400">{h.kaynak_hesap || '—'}</span></td>
                         <td className={T.hucre} data-etiket="PHP">{h.php_surum || '—'}</td>
-                        <td className={T.hucre} data-etiket="Boyut">{mb(h.boyut_mb)}</td>
-                        <td className={T.hucre} data-etiket="Veritabanı">{h.dbler?.length || 0}</td>
-                        <td className={T.hucre} data-etiket="Durum">
+                        <td className={T.hucre} data-etiket={cevir("Boyut")}>{mb(h.boyut_mb)}</td>
+                        <td className={T.hucre} data-etiket={cevir("Veritabanı")}>{h.dbler?.length || 0}</td>
+                        <td className={T.hucre} data-etiket={cevir("Durum")}>
                           {h.mevcut
                             ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">Panelde var</span>
                             : <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">Yeni</span>}
@@ -583,8 +676,8 @@ export default function SiteTasimaPage() {
           </Kart>
 
           <Kart>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Sahiplik ve aktarım ayarları</h2>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Neyin taşınacağını, hangi plana ve kime atanacağını seçin.</p>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Sahiplik ve aktarım ayarları")}</h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{cevir("Neyin taşınacağını, hangi plana ve kime atanacağını seçin.")}</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {ayarlar.map(([et, deger, ayarla, ipucu, ikon]) => (
                 <button key={et} type="button" onClick={() => ayarla(!deger)}
@@ -602,21 +695,21 @@ export default function SiteTasimaPage() {
                   </span>
                 </button>
               ))}
-              <SelKart etiket="Hedef PHP"><select value={hedefPHP} onChange={e => setHedefPHP(e.target.value)} className={selCls}>{PHP_SURUMLERI.map(v => <option key={v} value={v}>{v || 'Kaynaktakiyle aynı'}</option>)}</select></SelKart>
-              <SelKart etiket="Hosting planı"><select value={planID} onChange={e => setPlanID(Number(e.target.value))} className={selCls}><option value={0}>Plansız (limit yok)</option>{planlar.map(p => <option key={p.id} value={p.id}>{p.ad}</option>)}</select></SelKart>
+              <SelKart etiket="Hedef PHP"><select value={hedefPHP} onChange={e => setHedefPHP(e.target.value)} className={selCls}>{PHP_SURUMLERI.map(v => <option key={v} value={v}>{v || cevir("Kaynaktakiyle aynı")}</option>)}</select></SelKart>
+              <SelKart etiket={cevir("Hosting planı")}><select value={planID} onChange={e => setPlanID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Plansız (limit yok)")}</option>{planlar.map(p => <option key={p.id} value={p.id}>{p.ad}</option>)}</select></SelKart>
               <SelKart etiket="Bayi (sahip)"><select value={resellerID} onChange={e => setResellerID(Number(e.target.value))} className={selCls}><option value={0}>Ana hesap (admin)</option>{bayiler.map(b => <option key={b.id} value={b.id}>{b.ad_soyad ? `${b.ad_soyad} (${b.kullanici})` : b.kullanici}</option>)}</select></SelKart>
-              <SelKart etiket="Müşteri"><select value={customerID} onChange={e => setCustomerID(Number(e.target.value))} className={selCls}><option value={0}>Yok</option>{musteriler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}</select></SelKart>
+              <SelKart etiket={cevir("Müşteri")}><select value={customerID} onChange={e => setCustomerID(Number(e.target.value))} className={selCls}><option value={0}>Yok</option>{musteriler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}</select></SelKart>
             </div>
 
             {ustune && (
               <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">
                 <span className="mt-0.5 shrink-0"><Ikon d={I.uyari} /></span>
-                <span><strong className="font-semibold">Dikkat:</strong> “Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.</span>
+                <span><strong className="font-semibold">Dikkat:</strong> {cevir("“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.")}</span>
               </div>
             )}
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-2.5">
-              <button type="button" onClick={() => setAdim(1)} className={btnIkincil}><Ikon d={I.geri} />Geri</button>
+              <button type="button" onClick={() => setAdim(1)} className={btnIkincil}><Ikon d={I.geri} />{cevir("Geri")}</button>
               <button type="button" onClick={baslat} disabled={!secilenSayi} className={btnBirincil}>
                 <Ikon d={I.ok} />Taşımayı başlat ({secilenSayi} site) →
               </button>
@@ -628,6 +721,34 @@ export default function SiteTasimaPage() {
       {/* ==================== ADIM 3 — Taşıma (canlı) ==================== */}
       {adim === 3 && isID && (
         <div className="space-y-5">
+          {uretilenKimlikler.length > 0 && (
+            <Kart>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-800/60 dark:bg-amber-900/20">
+                <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">{cevir("🔑 Oluşturulan sahip hesapları — parolaları KAYDEDİN")}</h3>
+                <p className="mb-2 mt-0.5 text-xs text-amber-700/80 dark:text-amber-300/70">
+                  {cevir(cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturuldu. Reseller parolaları YALNIZ ŞİMDİ gösterilir (bir daha görünmez) — sahiplere siz iletin."))}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left text-slate-500 dark:text-slate-400">
+                      <th className="py-1 pr-3">Tip</th><th className="py-1 pr-3">{cevir("Ad")}</th><th className="py-1 pr-3">{cevir("Kullanıcı")}</th><th className="py-1 pr-3">{cevir("E-posta")}</th><th className="py-1">{cevir("Parola")}</th>
+                    </tr></thead>
+                    <tbody>
+                      {uretilenKimlikler.map((u, i) => (
+                        <tr key={i} className="border-t border-amber-200/50 dark:border-amber-800/40">
+                          <td className="py-1 pr-3 capitalize">{u.tip}</td>
+                          <td className="py-1 pr-3">{u.ad}</td>
+                          <td className="py-1 pr-3 font-mono">{u.login}</td>
+                          <td className="py-1 pr-3">{u.eposta || '—'}</td>
+                          <td className="py-1 font-mono font-semibold">{u.parola || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Kart>
+          )}
           <Kart>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -644,25 +765,25 @@ export default function SiteTasimaPage() {
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setRetryAcik(false)} />
                             <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                              <div className="mb-2 text-xs font-medium text-slate-500">Neyi yeniden taşıyalım?</div>
+                              <div className="mb-2 text-xs font-medium text-slate-500">{cevir("Neyi yeniden taşıyalım?")}</div>
                               <div className="space-y-1">
                                 <RetrySecim etiket="Dosyalar" ikon={I.files} secili={dosyalar} degis={() => setDosyalar(v => !v)} />
-                                <RetrySecim etiket="SQL (Veritabanı)" ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
+                                <RetrySecim etiket={cevir("SQL (Veritabanı)")} ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
                                 <RetrySecim etiket="DNS" ikon={I.dns} secili={dns} degis={() => setDns(v => !v)} />
                                 <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
-                                <RetrySecim etiket="Mail (yakında)" ikon={I.mail} secili={false} degis={() => {}} pasif />
+                                <RetrySecim etiket={cevir("Mail (yakında)")} ikon={I.mail} secili={false} degis={() => {}} pasif />
                               </div>
                               <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
                                 <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />
-                                Mevcut siteyi ez (üzerine yaz)
+                                {cevir(cevir("Mevcut siteyi ez (üzerine yaz)"))}
                               </label>
-                              <button type="button" onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">Seçileni Taşı</button>
+                              <button type="button" onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">{cevir("Seçileni Taşı")}</button>
                             </div>
                           </>
                         )}
                       </div>
                     )}
-                    <button type="button" onClick={yeniTasima} className={btnKucuk}>+ Yeni taşıma</button>
+                    <button type="button" onClick={yeniTasima} className={btnKucuk}>{cevir("+ Yeni taşıma")}</button>
                   </div>}
             </div>
 
@@ -671,8 +792,8 @@ export default function SiteTasimaPage() {
               <div className="mt-4 flex flex-wrap items-center gap-4 rounded-2xl border border-brand-200/60 bg-brand-50/50 px-4 py-3 dark:border-brand-800/40 dark:bg-brand-900/10">
                 <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-medium uppercase tracking-wide text-brand-600 dark:text-brand-400">Şu an taşınıyor</div>
-                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{aktifKalem?.alan_adi || 'hazırlanıyor…'}</div>
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-brand-600 dark:text-brand-400">{cevir("Şu an taşınıyor")}</div>
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{aktifKalem?.alan_adi || cevir("hazırlanıyor…")}</div>
                 </div>
                 <div className="text-right">
                   <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500"><Ikon d={I.saat} />Tahmini kalan</div>
@@ -688,7 +809,7 @@ export default function SiteTasimaPage() {
                     ['Toplam', ozet.toplam, 'text-slate-900 dark:text-slate-100'],
                     ['Tamamlanan', ozet.tamamlanan, 'text-emerald-600 dark:text-emerald-400'],
                     ['Hata', ozet.basarisiz, ozet.basarisiz ? 'text-red-600 dark:text-red-400' : 'text-slate-400'],
-                    ['Geçen süre', sure(gecenSn), 'text-slate-900 dark:text-slate-100'],
+                    [cevir("Geçen süre"), sure(gecenSn), 'text-slate-900 dark:text-slate-100'],
                   ].map(([et, deg, renk]) => (
                     <div key={et as string} className="rounded-2xl bg-slate-50 px-3.5 py-3 dark:bg-slate-900/40">
                       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{et}</div>
@@ -709,17 +830,17 @@ export default function SiteTasimaPage() {
               <div className="mt-5 overflow-x-auto">
                 <table className={T.tablo}>
                   <thead className={T.baslikGrubu}>
-                    <tr><th className={T.baslik}>Alan adı</th><th className={T.baslik}>Durum</th><th className={T.baslik}>Dosya</th><th className={T.baslik}>DB</th><th className={T.baslik}>DNS</th><th className={T.baslik}>Not</th></tr>
+                    <tr><th className={T.baslik}>{cevir("Alan adı")}</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>Dosya</th><th className={T.baslik}>DB</th><th className={T.baslik}>DNS</th><th className={T.baslik}>{cevir("Not")}</th></tr>
                   </thead>
                   <tbody className={T.govde}>
                     {kalemler.map(k => (
                       <tr key={k.id} className={`${T.satir} ${k.durum === 'calisiyor' ? 'bg-brand-50/40 dark:bg-brand-900/10' : ''}`}>
-                        <td className={T.hucreBaslik} data-etiket="Alan adı"><span className="font-medium">{k.alan_adi}</span></td>
-                        <td className={T.hucre} data-etiket="Durum"><DurumRozet durum={k.durum} /></td>
+                        <td className={T.hucreBaslik} data-etiket={cevir("Alan adı")}><span className="font-medium">{k.alan_adi}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Durum")}><DurumRozet durum={k.durum} /></td>
                         <td className={T.hucre} data-etiket="Dosya">{bayt(k.dosya_bayt)}</td>
                         <td className={T.hucre} data-etiket="DB">{k.db_sayisi || '—'}</td>
                         <td className={T.hucre} data-etiket="DNS">{k.dns_sayisi || '—'}</td>
-                        <td className={T.hucre} data-etiket="Not"><span className="text-[11px] text-slate-500 dark:text-slate-400">{k.hata || '—'}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Not")}><span className="text-[11px] text-slate-500 dark:text-slate-400">{k.hata || '—'}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -728,7 +849,7 @@ export default function SiteTasimaPage() {
             )}
 
             <pre ref={logRef} className="mt-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3.5 font-mono text-[11px] leading-relaxed text-slate-300 ring-1 ring-slate-800">
-              {logMetin || 'Kayıt bekleniyor…'}
+              {logMetin || cevir("Kayıt bekleniyor…")}
             </pre>
           </Kart>
 
@@ -751,11 +872,11 @@ function SelKart({ etiket, children }: { etiket: string; children: ReactNode }) 
 function GecmisKart({ gecmis, sec }: { gecmis: Is[]; sec: (g: Is) => void }) {
   return (
     <Kart>
-      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Geçmiş taşımalar</h2>
+      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Geçmiş taşımalar")}</h2>
       <div className="mt-4 overflow-x-auto">
         <table className={T.tablo}>
           <thead className={T.baslikGrubu}>
-            <tr><th className={T.baslik}>#</th><th className={T.baslik}>Kaynak</th><th className={T.baslik}>Panel</th><th className={T.baslik}>Durum</th><th className={T.baslik}>Sonuç</th><th className={T.baslik}>Başlatan</th></tr>
+            <tr><th className={T.baslik}>#</th><th className={T.baslik}>Kaynak</th><th className={T.baslik}>Panel</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Sonuç")}</th><th className={T.baslik}>{cevir("Başlatan")}</th></tr>
           </thead>
           <tbody className={T.govde}>
             {gecmis.map(g => (
@@ -763,9 +884,9 @@ function GecmisKart({ gecmis, sec }: { gecmis: Is[]; sec: (g: Is) => void }) {
                 <td className={T.hucreBaslik} data-etiket="#">{g.id}</td>
                 <td className={T.hucre} data-etiket="Kaynak">{g.host}</td>
                 <td className={T.hucre} data-etiket="Panel">{g.tip}</td>
-                <td className={T.hucre} data-etiket="Durum"><DurumRozet durum={g.durum} /></td>
-                <td className={T.hucre} data-etiket="Sonuç">{g.tamamlanan}/{g.toplam}{g.basarisiz ? ` (${g.basarisiz} hata)` : ''}</td>
-                <td className={T.hucre} data-etiket="Başlatan">{g.baslatan || '—'}</td>
+                <td className={T.hucre} data-etiket={cevir("Durum")}><DurumRozet durum={g.durum} /></td>
+                <td className={T.hucre} data-etiket={cevir("Sonuç")}>{g.tamamlanan}/{g.toplam}{g.basarisiz ? ` (${g.basarisiz} hata)` : ''}</td>
+                <td className={T.hucre} data-etiket={cevir("Başlatan")}>{g.baslatan || '—'}</td>
               </tr>
             ))}
           </tbody>
