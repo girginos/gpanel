@@ -100,6 +100,16 @@ const SSL_EN: Record<string, string> = {
   "✓ Tarayıcılarda yeşil kilit": "✓ Green padlock in browsers",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SSL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+// ceviriAciklama — backend'in DINAMIK kapsam aciklamalarini (host/IP gomulu) EN'e
+// cevirir. Statik olanlar cevir sozlugunden gecer.
+function ceviriAciklama(a?: string): string {
+  if (!a) return ''
+  if (i18n.language === 'en') {
+    const m = a.match(/^(.+) A kaydı bu sunucuya \((.+)\) gelmeli$/)
+    if (m) return `${m[1]} A record must point to this server (${m[2]})`
+  }
+  return cevir(a)
+}
 
 export default function DomainSSLPage() {
   useTranslation() // dil degisince re-render aboneligi
@@ -431,7 +441,7 @@ function KapsamKarti({ kapsam, onKur }: { kapsam: KapsamResp; onKur?: (mailAltla
                 </div>
                 <div className="text-xs font-mono text-slate-400 dark:text-slate-500 truncate">{d.host}</div>
                 {d.durum !== 'kurulu' && d.aciklama && (
-                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir(d.aciklama)}</div>
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{ceviriAciklama(d.aciklama)}</div>
                 )}
                 {d.durum === 'kurulu' && d.bitis_iso && (
                   <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{cevir("Bitiş")}: {new Date(d.bitis_iso).toLocaleDateString(i18n.language === 'en' ? 'en-US' : 'tr-TR', { dateStyle: 'medium' })}</div>
