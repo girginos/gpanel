@@ -458,12 +458,14 @@ fi
 #   nginx_cache      -> /var/cache/nginx ust dizin izni
 #   docroot_selinux  -> yalnizca SELinux ETIKETI degistirir (canli sunucuda
 #                       dogrulandi: 710/750 korundu, sadece etiket degisti)
+#   mail_sieve       -> dovecot-pigeonhole + sieve teslim + forward envelope-from
+#                       (kiraci izinlerine DOKUNMAZ: paket + dovecot config + restart)
 # ══════════════════════════════════════════════════════════════════════
 if command -v girginospanel-repair >/dev/null 2>&1; then
-  if girginospanel-repair --only nginx_cache,docroot_selinux >/dev/null 2>&1; then
-    ok "hedefli onarim (nginx onbellek + docroot SELinux)"
+  if girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve >/dev/null 2>&1; then
+    ok "hedefli onarim (nginx onbellek + docroot SELinux + mail sieve)"
   else
-    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux"
+    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve"
   fi
 else
   warn "girginospanel-repair yok — onbellek/SELinux onarimi atlandi"

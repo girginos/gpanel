@@ -48,6 +48,10 @@ const CMP_EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
+// ANSI renk kaçış dizilerini (\x1b[..m) sil — terminal renkleri tarayıcıda
+// çıplak '[32m' gibi görünmesin. Log salt-okunur gösterildiği için düz metin yeter.
+const ansiSil = (t: string): string => t.replace(/\x1b\[[0-9;]*m/g, '')
+
 function bitisSonucu(logMetin: string, calis: boolean, durum: string): 'tamam' | 'hata' | null {
   // 🔴 Verdict UNIT durumundan (kesin exit sinyali) alinir — log regex DEGIL.
   // Eski regex, aciklama metnindeki "auto-rollback" / "✗" kelimesini yakalayip
@@ -92,8 +96,9 @@ export default function PanelGuncelleme() {
   // Log + bitiş değerlendirmesi (mount'ta ve poll'de kullanılır).
   const logYukle = useCallback(async () => {
     const r = await api.get<LogYanit>('/system/guncelleme/log')
-    setLog(r.data.log)
-    const s = bitisSonucu(r.data.log, r.data.calisiyor, r.data.durum)
+    const temizLog = ansiSil(r.data.log)
+    setLog(temizLog)
+    const s = bitisSonucu(temizLog, r.data.calisiyor, r.data.durum)
     if (!r.data.calisiyor || s) {
       setCalisiyor(false)
       if (s) setSonuc(s)

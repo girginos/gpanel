@@ -48,6 +48,7 @@ type Ayarlar struct {
 	Veritabani bool   `json:"veritabani"`
 	DNS        bool   `json:"dns"`
 	SSL        bool   `json:"ssl"`
+	Posta      bool   `json:"posta"` // kutular + mail verisi (Plesk maildir)
 	Ustune     bool   `json:"ustune"` // hedefte domain varsa uzerine yaz
 	HedefPHP   string `json:"hedef_php"`
 	PlanID     int64  `json:"plan_id"`

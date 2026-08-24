@@ -435,6 +435,58 @@ sec_nginx_cache() {
   fi
 }
 
+sec_mail_sieve() {
+  want mail_sieve || return 0
+  head_ "mail sieve (iletim/oto-yanit motoru + forward deliverability)"
+  # 🔴 Mevcut kurulumlarda dovecot-pigeonhole KURULU DEGILDI + lmtp/lda'da sieve
+  # YOKtu -> forward VE oto-yanit SESSIZCE calismiyordu (mail yalniz yerelde). Ayrica
+  # forward'da envelope-from orijinal gonderende kalinca hedef SPF -all ile spam/red
+  # olurdu. Bu bolum kiraci izinlerine DOKUNMAZ (paket + dovecot config + restart).
+  command -v doveconf >/dev/null 2>&1 || { ok "dovecot yok - atlandi"; return 0; }
+  [ -f /etc/dovecot/conf.d/99-gosp-mail.conf ] || { ok "mail eklentisi kurulu degil - atlandi"; return 0; }
+
+  # 1) Pigeonhole (Sieve motoru)
+  if ! rpm -q dovecot-pigeonhole >/dev/null 2>&1; then
+    act "dovecot-pigeonhole eksik - kuruluyor (Sieve motoru)"
+    [ $DRY -eq 0 ] && { dnf -y install dovecot-pigeonhole >/dev/null 2>&1 || err "dovecot-pigeonhole kurulamadi"; }
+  else
+    ok "dovecot-pigeonhole kurulu"
+  fi
+
+  # 2) Sieve teslim yolu + forward envelope-from etkin mi (doveconf ile olc)
+  local has_sieve has_env
+  has_sieve=$(doveconf -a 2>/dev/null | awk '/^protocol lmtp/{p=1} p&&/mail_plugins/{print; exit}' | grep -c sieve)
+  has_env=$(doveconf -a 2>/dev/null | grep -c "sieve_redirect_envelope_from = user_email")
+  if [ "${has_sieve:-0}" -ge 1 ] && [ "${has_env:-0}" -ge 1 ]; then
+    ok "sieve teslim yolu + forward envelope-from etkin"
+    return 0
+  fi
+
+  act "sieve teslim config yaziliyor (lmtp/lda sieve + envelope-from=user_email)"
+  [ $DRY -eq 1 ] && return 0
+  local SF=/etc/dovecot/conf.d/99-gosp-sieve.conf
+  cat > "$SF" <<'SIEVEEOF'
+# GirginOSPanel Mail - Sieve (iletim/oto-yanit) teslim yolunda ETKIN. OTOMATIK (repair).
+# quota GLOBAL $mail_plugins uzerinden korunur; buraya yalniz sieve eklenir.
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
+}
+protocol lda {
+  mail_plugins = $mail_plugins sieve
+}
+plugin {
+  sieve = file:/var/vmail/%d/%n/.dovecot.sieve
+  # Forward deliverability: envelope-from = kutunun kendi adresi (hedef SPF gecer).
+  sieve_redirect_envelope_from = user_email
+}
+SIEVEEOF
+  if doveconf -n >/dev/null 2>&1; then
+    systemctl restart dovecot >/dev/null 2>&1 && ok "dovecot yeniden baslatildi - forward+oto-yanit aktif" || err "dovecot restart basarisiz"
+  else
+    rm -f "$SF"; err "sieve config doveconf testini gecmedi - geri alindi"
+  fi
+}
+
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_phpmyadmin
@@ -448,6 +500,7 @@ sec_frontend
 sec_signon
 sec_firewall
 sec_nginx_cache
+sec_mail_sieve
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then

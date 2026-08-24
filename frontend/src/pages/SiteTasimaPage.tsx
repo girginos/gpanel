@@ -74,6 +74,9 @@ const STASIMA_EN: Record<string, string> = {
   "SSH kullanıcısı": "SSH user",
   "SSH özel anahtarı": "SSH private key",
   "SSL sertifikası": "SSL certificate",
+  "Posta (kutular + mesajlar)": "Mail (mailboxes + messages)",
+  "Kutular oluşturulur, mail verisi taşınır, parolalar korunur": "Mailboxes created, mail data transferred, passwords preserved",
+  "Mail": "Mail",
   "Sahiplik ve aktarım ayarları": "Ownership and transfer settings",
   "Site sahiplerini taşı (bayi/müşteri)": "Migrate site owners (reseller/customer)",
   "Siteler taranıyor…": "Scanning sites…",
@@ -310,6 +313,7 @@ export default function SiteTasimaPage() {
   const [veritabani, setVeritabani] = useState(true)
   const [dns, setDns] = useState(true)
   const [ssl, setSsl] = useState(true)
+  const [posta, setPosta] = useState(true)
   const [ustune, setUstune] = useState(false)
   const [sahipleriTasi, setSahipleriTasi] = useState(false)
   // Taşımada oluşturulan reseller/müşteri hesapları (üretilen parolalar admin'e bir kez gösterilir).
@@ -465,7 +469,7 @@ export default function SiteTasimaPage() {
         ...kaynakGovde(),
         oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
         mod: secilenler.length === 1 ? 'tekil' : 'toplu',
-        ayarlar: { dosyalar, veritabani, dns, ssl, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, sahipleri_tasi: sahipleriTasi, hesaplar: [] },
+        ayarlar: { dosyalar, veritabani, dns, ssl, posta, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, sahipleri_tasi: sahipleriTasi, hesaplar: [] },
         secilen: secilenler,
       })
       basladiRef.current = Date.now()
@@ -508,6 +512,7 @@ export default function SiteTasimaPage() {
     [cevir("Veritabanları"), veritabani, setVeritabani, cevir("Dump alınır, aktarılır, ayarlar güncellenir"), I.db],
     [cevir("DNS kayıtları"), dns, setDns, cevir("Kaynak zone okunur, A kayıtları çevrilir"), I.dns],
     [cevir("SSL sertifikası"), ssl, setSsl, cevir("Let's Encrypt denenir"), I.ssl],
+    [cevir("Posta (kutular + mesajlar)"), posta, setPosta, cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail],
     [cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturulur; her site kendi sahibine atanır (Plesk). Reseller parolaları başlatınca gösterilir."), I.anahtarIkon],
     [cevir("Mevcut siteyi ez"), ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez],
   ]
@@ -827,7 +832,7 @@ export default function SiteTasimaPage() {
                                 <RetrySecim etiket={cevir("SQL (Veritabanı)")} ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
                                 <RetrySecim etiket="DNS" ikon={I.dns} secili={dns} degis={() => setDns(v => !v)} />
                                 <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
-                                <RetrySecim etiket={cevir("Mail (yakında)")} ikon={I.mail} secili={false} degis={() => {}} pasif />
+                                <RetrySecim etiket="Mail" ikon={I.mail} secili={posta} degis={() => setPosta(v => !v)} />
                               </div>
                               <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
                                 <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />

@@ -33,6 +33,7 @@ type AktarSonuc struct {
 	DosyaBayt int64
 	DBSayisi  int
 	DNSSayisi int
+	PostaSayisi int
 	Uyarilar  []string
 }
 
@@ -290,6 +291,22 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 				}
 			} else {
 				sonuc.Uyarilar = append(sonuc.Uyarilar, "SSL yok — taşınmadı")
+			}
+		}
+	}
+
+	// --- 6. Posta (kutular + mail verisi) ----------------------------------
+	if ay.Posta {
+		log("Posta: kaynak kutulari kesfediliyor…")
+		n, uyar, err := h.mailAktar(ctx, k, alanAdi, log)
+		sonuc.Uyarilar = append(sonuc.Uyarilar, uyar...)
+		if err != nil {
+			log("Posta: taşınamadı (%s)", kisalt(temizHata(err.Error(), k.Parola), 120))
+			sonuc.Uyarilar = append(sonuc.Uyarilar, "Posta taşınamadı")
+		} else {
+			sonuc.PostaSayisi = n
+			if n > 0 {
+				log("Posta: %d kutu taşındı", n)
 			}
 		}
 	}
