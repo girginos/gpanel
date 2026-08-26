@@ -736,17 +736,27 @@ if command -v npm >/dev/null 2>&1 && [ ! -d /usr/local/n/versions/node ]; then
 fi
 if [ -d /usr/local/n/versions/node ]; then ok "node ($(ls /usr/local/n/versions/node 2>/dev/null | tr '\n' ' '))"; else warn "node could not be installed (Laravel npm features disabled)"; fi
 
-# ---- daily backup cron (girginospanel-backup-all 03:00 UTC) ----
-cat > /etc/cron.d/girginospanel-backup <<'CRON'
-# girginospanel — daily scheduled backup 03:00 UTC
-SHELL=/bin/bash
-PATH=/usr/local/bin:/usr/bin:/bin
-0 3 * * * root /usr/local/bin/girginospanel-backup-all
-CRON
-# start + enable crond NOW (AlmaLinux preset only enables, doesn't start until
-# reboot → the backup cron wouldn't run until the first reboot). enable --now is idempotent.
+# ---- backups: NO cron installed — the panel scheduler owns backups ----
+# This used to write /etc/cron.d/girginospanel-backup running
+# girginospanel-backup-all every night at 03:00. That script never read the
+# `domains.backup_freq` column: it archived EVERY domain nightly — including
+# domains whose backup was switched OFF in the panel — applied a hard-coded
+# 14-day retention (ignoring `domains.backup_retention`), never checked free
+# space before writing, and dumped only `<sk>_main`, so multi-database tenants
+# had NO database in their backups. In production it filled the root disk and
+# took the panel and the customer sites down with it.
+#
+# Backups are now owned by the Go scheduler inside the panel binary: it honours
+# backup_freq / backup_hour / backup_retention, obeys the `backup_genel_ayar`
+# master switch and free-space gate, dumps ALL of a tenant's databases, verifies
+# each archive with sha256 + gzip -t, and can push to an off-site target. It
+# needs no separate cron entry.
+#
+# `girginospanel-backup-all` is still installed into /usr/local/bin, but it is a
+# no-op stub now, so a leftover cron entry on an upgraded host does no harm.
+# crond is still started because other components rely on it.
 systemctl enable --now crond >/dev/null 2>&1
-systemctl is-active --quiet crond && ok "daily backup cron + crond ACTIVE (03:00 UTC)" || warn "crond could not be started — backup cron may not run"
+systemctl is-active --quiet crond && ok "crond ACTIVE (backups run from the panel scheduler, no extra cron)" || warn "crond could not be started"
 
 # ---- daily SYSTEM (disaster-recovery) backup cron (girginospanel-sistem-yedek 04:00 UTC) ----
 # panel-backup'in KAPSAMADIGI ogeler: TUM MySQL DB (mail+domain+panel+grantlar),

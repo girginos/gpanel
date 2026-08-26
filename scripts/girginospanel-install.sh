@@ -255,14 +255,23 @@ if [ ! -x /usr/local/bin/composer ]; then
 fi
 [ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer kurulamadı"
 
-# ---- günlük yedek cron (girginospanel-backup-all 03:00 UTC) ----
-cat > /etc/cron.d/girginospanel-backup <<'CRON'
-# girginospanel — günlük planlı yedek 03:00 UTC
-SHELL=/bin/bash
-PATH=/usr/local/bin:/usr/bin:/bin
-0 3 * * * root /usr/local/bin/girginospanel-backup-all
-CRON
-ok "günlük yedek cron (03:00 UTC)"
+# ---- yedekleme: cron KURULMAZ, panel zamanlayicisi devralir ----
+# 🔴 Eskiden burada /etc/cron.d/girginospanel-backup yazilir ve her gece 03:00'te
+# girginospanel-backup-all calisirdi. O betik `domains.backup_freq` sutununu HIC
+# okumuyordu: panelde yedegi KAPALI olan domainler dahil hepsini her gece tam
+# kopyaliyor, retention'i kod icinde sabit 14 gun uyguluyor, yazmadan once bos
+# alan KONTROL ETMIYOR ve yalniz `<sk>_main` DB'sini aliyordu (cok-DB'li
+# tenant'larin veritabani yedege HIC girmiyordu). Uretimde kok diski doldurup
+# paneli+siteleri dusurdu.
+#
+# Yerine panel binary'sindeki Go zamanlayicisi gecti: backup_freq/backup_hour/
+# backup_retention'a saygi duyar, `backup_genel_ayar` ana salterine ve disk
+# kapisina uyar, TUM domain DB'lerini alir, sha256+gzip -t ile dogrular ve
+# istenirse off-site hedefe yukler. Ayri bir cron gerektirmez.
+#
+# `girginospanel-backup-all` ikilisi /usr/local/bin'e kurulmaya devam eder ama
+# artik no-op stub'dir (eski kurulumlarda kalmis cron girdileri zarar vermesin).
+ok "yedekleme: panel zamanlayicisi (ayri cron kurulmadi)"
 
 # SELinux
 setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 && ok "SELinux httpd_can_network_connect"
