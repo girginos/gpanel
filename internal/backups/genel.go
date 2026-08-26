@@ -366,12 +366,16 @@ func uzakKopyaVar(db *sql.DB, dosya string) bool {
 }
 
 // uzakBoyut: uzak hedefteki dosyanin bayt cinsinden boyutunu doner (-1 = okunamadi).
+// 🔴 `ls "<dosya>"` KULLANMA: Hetzner Storage Box gibi SFTP hedeflerinde tek dosya
+// argumaniyla "Access failed: Not a directory" doner ve boyut hic okunamaz (-1) →
+// dogrulama kapisi hep basarisiz olur, yerel kopya asla silinmez. `cls -l <dosya>`
+// tek dosyanin uzun listesini verir ve bayt cinsinden boyutu icerir (olculdu).
 // lftp `cls -s` cikti formatina bagli kalmamak icin `ls` ciktisindan sayisal alan
 // ayiklanir; bulunamazsa -1.
 func uzakBoyut(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi string) int64 {
 	betik := fmt.Sprintf(
 		`set cmd:fail-exit yes; set sftp:auto-confirm yes; set net:max-retries 1; set net:timeout 20; `+
-			`open -u "%s","%s" %s; cd "%s"; ls "%s"; bye`,
+			`open -u "%s","%s" %s; cd "%s"; cls -l "%s"; bye`,
 		lftpEscape(g.UzakKullanici), lftpEscape(g.UzakParola), lftpURL(g.hedef()),
 		lftpEscape(uzakDizin), lftpEscape(dosyaAdi))
 	cmd, temizle, err := lftpKomutu(ctx, betik)
