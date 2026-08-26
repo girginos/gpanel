@@ -70,6 +70,18 @@ func tickOnce(db *sql.DB) {
 		verifyYedekBozulma(db)
 	}
 
+	// ANA SALTER + DISK KAPISI (yedek YAZMADAN once).
+	// Eskiden ikisi de yoktu: otomatik yedegi topluca kapatmanin yolu yoktu ve bos alan
+	// bakilmadan yazildigi icin yedekler kok diski doldurup paneli+siteleri dusurebiliyordu.
+	genel := genelAyarOku(ctx, db)
+	if !genel.Aktif {
+		return
+	}
+	if sebep := diskKapisi(genel); sebep != "" {
+		diskBildirimiVer(db, sebep)
+		return
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, alan_adi, sistem_kullanici,
 		       COALESCE(backup_freq,'none'), COALESCE(backup_hour,3),
@@ -122,7 +134,7 @@ func tickOnce(db *sql.DB) {
 	basari, hata := 0, 0
 	for _, d := range due {
 		db.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.AlanAdi, jid)
-		b, err := runOneBackup(db, d, jid)
+		b, err := runOneBackup(db, d, jid, genel)
 		if err != nil {
 			hata++
 			log.Printf("backup scheduler %s: %v", d.AlanAdi, err)
@@ -139,13 +151,17 @@ func tickOnce(db *sql.DB) {
 }
 
 // runOneBackup: bir domain için backup üret (job_id ile) + last_backup_at. Boyut döner.
-func runOneBackup(db *sql.DB, d dueDomain, jobID int64) (int64, error) {
+func runOneBackup(db *sql.DB, d dueDomain, jobID int64, genel *GenelAyar) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
-	boyut, _, err := birDomainYedekle(ctx, db, d.ID, d.SK, "oto", "Otomatik yedek ("+d.Freq+")", jobID)
+	boyut, dosya, err := birDomainYedekle(ctx, db, d.ID, d.SK, "oto", "Otomatik yedek ("+d.Freq+")", jobID)
 	if err != nil {
 		return 0, err
 	}
+	// NOT: sistem geneli uzak yukleme birDomainYedekle icinde yapilir (ortak cekirdek)
+	// — manuel toplu is de ayni yoldan gecsin diye. Burada TEKRAR tetiklenmez.
+	_ = genel
+	_ = dosya
 	db.Exec(`UPDATE domains SET last_backup_at=NOW() WHERE id=?`, d.ID)
 	log.Printf("backup auto %s: boyut=%d", d.AlanAdi, boyut)
 	return boyut, nil
@@ -225,6 +241,7 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 	rows.Close()
 
 	bozuk := 0
+	uzakta := 0
 	for _, k := range liste {
 		if !strings.HasPrefix(k.sk, "c_") {
 			continue
@@ -232,6 +249,16 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 		yol := filepath.Join(BackupRoot, k.sk, k.dosya)
 		suanki, err := dosyaSha256(yol)
 		if err != nil {
+			// 🔴 "Yerelde yok" ile "BOZUK" ayni sey DEGILDIR. uzak_yerel_sil acikken
+			// yedek TASARIM GEREGI yalniz uzak hedefte durur; eskiden tarama bunlari
+			// tek tek "bozuk" damgalayip KRITIK bildirim gonderiyordu (uretimde 27
+			// saglam yedek icin tetiklenecekti). Sonuc: alarm korlugu — gercek bir
+			// bit-rot ayni metinle gelir ve gozden kacar.
+			if os.IsNotExist(err) && uzakKopyaVar(db, k.dosya) {
+				uzakta++
+				db.Exec(`UPDATE backups SET dogrulama='uzakta' WHERE id=? AND dogrulama<>'bozuk'`, k.id)
+				continue
+			}
 			db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id)
 			bildirim.Yaz(db, "kritik", "yedek", "Yedek dosyası kayıp/okunamıyor",
 				fmt.Sprintf("%s: en yeni yedek dosyası diskte okunamadı (%s) — kurtarma için GEÇERSİZ olabilir: %v", k.sk, k.dosya, err),
@@ -248,9 +275,9 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 		}
 	}
 	if bozuk > 0 {
-		log.Printf("🔴 yedek bozulma taramasi: %d/%d domainin en yeni yedegi BOZUK", bozuk, len(liste))
+		log.Printf("🔴 yedek bozulma taramasi: %d/%d domainin en yeni yedegi BOZUK (%d uzak hedefte, taranmadi)", bozuk, len(liste), uzakta)
 	} else {
-		log.Printf("yedek bozulma taramasi: %d domain temiz", len(liste))
+		log.Printf("yedek bozulma taramasi: %d domain temiz (%d uzak hedefte, taranmadi)", len(liste)-uzakta, uzakta)
 	}
 	return len(liste), bozuk
 }

@@ -149,14 +149,18 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log
 		}
 
 		// Maildir verisini taşı: Plesk (qmail düzeni) → gPanel (dovecot maildir).
+		domainDir := "/var/vmail/" + alanAdi
 		uzak := "/var/qmail/mailnames/" + alanAdi + "/" + hs.Yerel + "/Maildir/"
-		yerel := "/var/vmail/" + alanAdi + "/" + hs.Yerel + "/"
+		yerel := domainDir + "/" + hs.Yerel + "/"
 		if err := os.MkdirAll(yerel, 0o700); err != nil {
 			uyarilar = append(uyarilar, "Posta: "+email+" hedef maildir hazırlanamadı")
 		} else if _, err := k.RsyncCek(ctx, uzak, yerel, "--exclude=dovecot*", "--exclude=maildirsize"); err != nil {
 			uyarilar = append(uyarilar, "Posta: "+email+" mesajları kısmen/hiç taşınamadı")
 		}
-		// Sahiplik + dizin izinleri (vmail okumazsa teslim/erişim düşer).
+		// 🔴 Sahiplik: DOMAIN dizini + kutu dizini vmail:vmail. MkdirAll domain parent'ını
+		// root:root 0700 yaratır → vmail(dovecot) TRAVERSE EDEMEZ → sieve+teslim "Permission
+		// denied". Yalnız leaf'i chown YETMEZ; parent'ı da düzelt.
+		_ = exec.CommandContext(ctx, "chown", "vmail:vmail", domainDir).Run()
 		_ = exec.CommandContext(ctx, "chown", "-R", "vmail:vmail", yerel).Run()
 
 		sayi++

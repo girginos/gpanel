@@ -624,6 +624,13 @@ server {
 // yerlestirilir (arsiv uzantilari onceligi burada kazanir).
 const denyBlocksNginx = `    # ---- Yurutme engeli: CGI / betik yorumlayicilari ----
     location ~* \.(cgi|pl|py|sh|rb|lua|fcgi)$ { deny all; }
+    # ---- Saldiri/tarama path engeli (ETIS) — nginx TUM siteleri (nginx+Apache modu) onden
+    # karsilar, bu yuzden buradaki deny her iki backend'i de korur. IP-bazli DEGIL (CF arkasi
+    # IP'ler yaniltir) → path-bazli. Gizli config/secret tarama (/.env /.git /.aws /.svn).
+    location ~ /\.(env|git|aws|svn|hg)(/|$) { deny all; }
+    # WordPress xmlrpc.php — yogun kotuye kullanim (pingback DDoS + brute). Ihtiyaci olan
+    # site whitelisting yapabilir; varsayilan kapali (saldiri yuzeyini kapatir).
+    location = /xmlrpc.php { deny all; }
     # ---- Yedek / dump / hassas dosya engeli ----
     # NOT: MESRU arsivler (zip/gz/tar/tgz/tar.gz/rar/7z) + gzip'li sitemap (xml.gz)
     # engellenMEZ. Sadece hassas dosyalar: gzip'li SQL dump (sql.gz) HARIC tutulur.
@@ -900,7 +907,13 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	// EnableLetsEncrypt), SetPHPVersion, DisableSSL gibi bu fonksiyonu DOĞRUDAN çağıran
 	// (ApplyVhostForDomain guard'ını atlayan) yollar da doğru FPM'e bağlansın. Aksi halde
 	// per-tenant tenant'ta SSL vhost'u paylaşılan (taşınmış) socket'e işaret eder → 502.
-	if opts.Backend == "php-fpm" && TenantFPMActive(sk) {
+	// 🔴🔴 APACHE MODU DAHİL: eskiden yalnız Backend=="php-fpm" kapsanıyordu; Apache modunda
+	// (nginx→httpd:10080) Apache vhost'unun SetHandler socket'i override EDİLMİYORDU → per-tenant
+	// FPM unit'i vhost render anında henüz yoksa (enable ile vhost-render race'i) Apache remi
+	// varsayılan socket'ine (/var/opt/remi/phpXX/run/php-fpm/<sk>.sock) yazıp o socket hiç
+	// oluşmadığından 503 veriyordu (islam-tr.org canlı olayı). Artık her backend'de zorlanır →
+	// sonraki her render (SSL/repair/setphp) self-heal eder.
+	if TenantFPMActive(sk) {
 		opts.PHPSocket = tenantSocket(sk)
 	}
 

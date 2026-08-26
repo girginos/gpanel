@@ -462,10 +462,10 @@ fi
 #                       (kiraci izinlerine DOKUNMAZ: paket + dovecot config + restart)
 # ══════════════════════════════════════════════════════════════════════
 if command -v girginospanel-repair >/dev/null 2>&1; then
-  if girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve >/dev/null 2>&1; then
+  if girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve,backup_cron >/dev/null 2>&1; then
     ok "hedefli onarim (nginx onbellek + docroot SELinux + mail sieve)"
   else
-    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve"
+    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve,backup_cron"
   fi
 else
   warn "girginospanel-repair yok — onbellek/SELinux onarimi atlandi"

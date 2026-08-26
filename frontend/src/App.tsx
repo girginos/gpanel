@@ -75,6 +75,7 @@ import CPanelGirisPage from '@/pages/CPanelGirisPage'
 import IstatistiklerPage from '@/pages/IstatistiklerPage'
 import IzlemePage from '@/pages/IzlemePage'
 import YakindaPage from '@/pages/YakindaPage'
+import TehditPage from '@/pages/TehditPage'
 
 function GuardedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuth((s) => s.token)
@@ -177,6 +178,7 @@ export default function App() {
         <Route path="araclar-ayarlar" element={<AraclarAyarlarPage />} />
         <Route path="istatistikler" element={<IstatistiklerPage />} />
         <Route path="eklentiler" element={<EklentilerPage />} />
+        <Route path="tehdit" element={<TehditPage />} />
         <Route path="eklentiler/:slug" element={<EklentilerPage />} />
         <Route path="wordpress" element={<WordPressPage />} />
         <Route path="firewall" element={<FirewallPage />} />

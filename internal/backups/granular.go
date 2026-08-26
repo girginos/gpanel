@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -102,6 +103,29 @@ func dosyaSha256(yol string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// dumpTamamlandiMi: mysqldump ciktisinin son 512 baytinda "-- Dump completed"
+// damgasini arar. Yarim kalan dump exit 0 + boyut>0 ile "basarili" gorunebilir.
+func dumpTamamlandiMi(yol string) bool {
+	f, err := os.Open(yol)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	n := int64(512)
+	if fi.Size() < n {
+		n = fi.Size()
+	}
+	buf := make([]byte, n)
+	if _, err := f.ReadAt(buf, fi.Size()-n); err != nil {
+		return false
+	}
+	return strings.Contains(string(buf), "-- Dump completed")
+}
+
 // arsivOlustur: /home/<sk> + TUM domain DB'leri (__db__/<ad>.sql) + manifest'i tek
 // .tar.gz'ye paketler. Hem manuel (Create) hem otomatik (scheduler) tarafindan kullanilir.
 // Eski surum yalniz <sk>_main aliyordu; artik wp_* gibi ek DB'ler de yedeklenir.
@@ -129,21 +153,59 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		// mysqldump ile AYNI auth yolu (root socket) kullanilir ki gorunurluk tutarli olsun.
 		chk := exec.CommandContext(ctx, "bash", "-c",
 			fmt.Sprintf("mysql -N -e \"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=%s\"", shq(dbName)))
-		if out, _ := chk.Output(); strings.TrimSpace(string(out)) == "" {
-			continue // DB yok — beklenmiyor (DB'siz site), sessizce atla
-		}
-		hedef := filepath.Join(dbDir, dbName+".sql")
-		cmd := exec.CommandContext(ctx, "bash", "-c",
-			fmt.Sprintf("mysqldump --single-transaction --skip-lock-tables %s > %s 2>/dev/null",
-				shq(dbName), shq(hedef)))
-		if err := cmd.Run(); err != nil {
-			_ = os.Remove(hedef)
-			basarisizDB = append(basarisizDB, dbName) // DB VAR ama dump BASARISIZ = gercek problem
+		chkOut, chkErr := chk.Output()
+		if chkErr != nil {
+			// 🔴 "DB yok" ile "kontrol EDILEMEDI" ayni sey DEGILDIR. Eskiden hata
+			// yutuluyordu: MySQL kisa sure cevap veremezse (upgrade, max_connections,
+			// socket doluluğu) var olan DB "yok" sayilip SESSIZCE atlaniyor, yedek
+			// yine 'ok' isaretleniyordu. Artik eksik-veri olarak raporlanir.
+			basarisizDB = append(basarisizDB, dbName+" (varlık kontrolü başarısız)")
 			continue
 		}
+		if strings.TrimSpace(string(chkOut)) == "" {
+			continue // DB gercekten yok (DB'siz statik site) — beklenen durum
+		}
+		hedef := filepath.Join(dbDir, dbName+".sql")
+		// 🔴 --routines --events: MariaDB'de triggers VARSAYILAN acik ama routines ve
+		// events KAPALI. Eskiden eksiktiler → stored procedure/function/event yedege
+		// GIRMIYORDU (site tasima aktar.go ve sistem-yedek betigi bunlari zaten
+		// kullaniyor; yalniz per-domain yedek geride kalmisti).
+		//: sunucuya MySQL-8 istemcisi kurulursa varsayilan
+		// MariaDB mysqldump 'unknown option' ile exit 2 verir ve TUM dumplar patlar.
+		hataDosya := hedef + ".hata"
+		cmd := exec.CommandContext(ctx, "bash", "-c",
+			fmt.Sprintf("mysqldump --single-transaction --skip-lock-tables --routines --events --triggers --default-character-set=utf8mb4 --hex-blob %s > %s 2> %s",
+				shq(dbName), shq(hedef), shq(hataDosya)))
+		dumpHata := func() string {
+			b, _ := os.ReadFile(hataDosya)
+			m := strings.TrimSpace(string(b))
+			if len(m) > 200 {
+				m = m[:200]
+			}
+			return m
+		}
+		if err := cmd.Run(); err != nil {
+			// 🔴 Sebep eskiden 2>/dev/null ile yok ediliyordu → bildirimde yalniz DB adi
+			// vardi, teshis imkansizdi. Artik stderr'in ilk 200 karakteri tasinir.
+			sebep := dumpHata()
+			_ = os.Remove(hedef)
+			_ = os.Remove(hataDosya)
+			basarisizDB = append(basarisizDB, dbName+" ("+sebep+")")
+			continue
+		}
+		_ = os.Remove(hataDosya)
 		if fi, e := os.Stat(hedef); e != nil || fi.Size() == 0 {
 			_ = os.Remove(hedef)
-			basarisizDB = append(basarisizDB, dbName)
+			basarisizDB = append(basarisizDB, dbName+" (boş dump)")
+			continue
+		}
+		// 🔴 KAPANIS DAMGASI: mysqldump ciktisini "-- Dump completed" ile bitirir.
+		// Damga yoksa dump YARIM kalmistir (disk dolmasi, kesilen baglanti).
+		// exit kodu + boyut kontrolu bunu YAKALAMAZ. Site tasima (aktar.go) bu
+		// korumaya sahipti, yedekleme yolu degildi.
+		if !dumpTamamlandiMi(hedef) {
+			_ = os.Remove(hedef)
+			basarisizDB = append(basarisizDB, dbName+" (dump yarım kaldı: kapanış damgası yok)")
 			continue
 		}
 		yazilan = append(yazilan, dbName)
@@ -155,9 +217,31 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 	}
 
 	args := []string{"czf", abs, "-C", "/home", sk, "-C", dir, "__db__"}
+	// 🔴 GNU tar CIKIS KODLARI: 0 = tam basarili, 1 = "bazi dosyalar farkli"
+	// (ornegin "file changed as we read it" — canli oturum/cache/log dosyasi
+	// yedeklenirken degisti) = UYARI, arsiv GECERLIDIR; 2 = olumcul hata.
+	// Eskiden her sifir-olmayan kod olumcul sayilip arsiv SILINIYORDU: en cok
+	// trafik alan (= en degerli) siteler, Laravel storage/framework/sessions veya
+	// WP wp-content/cache yuzunden rastgele YEDEKSIZ kaliyordu. Uretimde
+	// gerceklesti (c_kuran_islam_tr_org, 2026-08-26) ve kontrollu deneyle
+	// dogrulandi: exit=1 iken gzip -t saglam, tum uyeler listelendi, cikarim basarili.
+	tarUyarisi := ""
 	if out, err := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); err != nil {
-		_ = os.Remove(abs)
-		return 0, "", basarisizDB, fmt.Errorf("tar: %s: %w", strings.TrimSpace(string(out)), err)
+		kod := -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			kod = ee.ExitCode()
+		}
+		if kod != 1 {
+			_ = os.Remove(abs)
+			return 0, "", basarisizDB, fmt.Errorf("tar: %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		// exit 1 → arsivi TUT; asagidaki gzip -t + sha256 zaten gecerliligi olcer.
+		tarUyarisi = strings.TrimSpace(string(out))
+		if len(tarUyarisi) > 300 {
+			tarUyarisi = tarUyarisi[:300]
+		}
+		log.Printf("backup %s: tar uyarisi (arsiv korundu): %s", sk, tarUyarisi)
 	}
 
 	// 🔴 BUTUNLUK DOGRULAMASI: gzip stream'i saglam mi (bozulma/truncation tespiti).
@@ -214,7 +298,11 @@ func (h *Handlers) Icerik(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik")
 		return
 	}
-	abs := filepath.Join(BackupRoot, sk, dosya)
+	abs, hazirErr := YerelDosyaHazirla(r.Context(), h.DB, sk, dosya)
+	if hazirErr != nil {
+		httpx.WriteError(w, http.StatusNotFound, hazirErr.Error())
+		return
+	}
 
 	f, err := os.Open(abs)
 	if err != nil {

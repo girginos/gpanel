@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -85,7 +86,11 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 		lftpEscape(d.Kullanici), lftpEscape(d.Parola), url,
 		lftpEscape(d.UzakDizin), lftpEscape(d.UzakDizin), localPath)
 
-	cmd := exec.CommandContext(ctx, "lftp", "-c", script)
+	cmd, temizle, err := lftpKomutu(ctx, script)
+	if err != nil {
+		return err
+	}
+	defer temizle()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("lftp: %s: %w", strings.TrimSpace(string(out)), err)
@@ -100,6 +105,34 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 	}
 	_ = dosyaAdi
 	return nil
+}
+
+// lftpKomutu: lftp betigini 0600 GECICI DOSYAYA yazip `lftp -f <dosya>` ile calistirir.
+//
+// 🔴 Neden: `lftp -c "<betik>"` betigi ARGV'ye koyar; betikte `open -u kullanici,PAROLA`
+// oldugu icin parola `ps aux` ile herkese gorunur. Sunucuda /proc hidepid'siz bagli
+// oldugundan bunu HERHANGI bir kiraci okuyabiliyordu. Dosya root'a ait 0600 olunca
+// icerik kiracilara kapali; argv'de yalniz dosya yolu kalir.
+func lftpKomutu(ctx context.Context, betik string) (*exec.Cmd, func(), error) {
+	f, err := os.CreateTemp("", "gosp-lftp-*.cmd")
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("lftp betigi: %w", err)
+	}
+	yol := f.Name()
+	temizle := func() { _ = os.Remove(yol) }
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		temizle()
+		return nil, func() {}, fmt.Errorf("lftp betigi izin: %w", err)
+	}
+	// lftp -f dosyayi SATIR SATIR isler; tek satirlik ";" ayrilmis betik de gecerlidir.
+	if _, err := f.WriteString(betik + "\n"); err != nil {
+		_ = f.Close()
+		temizle()
+		return nil, func() {}, fmt.Errorf("lftp betigi yazma: %w", err)
+	}
+	_ = f.Close()
+	return exec.CommandContext(ctx, "lftp", "-f", yol), temizle, nil
 }
 
 // lftpEscape: lftp komut satırı içinde çift tırnak içine konacak değerleri escape eder.
@@ -117,31 +150,64 @@ func lftpEscape(s string) string {
 // SFTP için sshpass+ssh, FTP için curl — her ikisi de auth-specific exit kodu döner.
 func testConnection(ctx context.Context, d *Destination) error {
 	if d.Tip == "sftp" {
-		// sshpass parola passwd, ssh BatchMode=no + PreferredAuthentications=password
-		// publickey by-pass — kullanıcı parolasının gerçekten geçerli olduğunu garanti eder.
-		// KRITIK: kullaniciyi `-l` ile, host'u `--`'den SONRA ver → ikisi de ssh
-		// opsiyonu olarak yorumlanamaz (ProxyCommand arg-injection kapali).
+		// 🔴 SFTP ALTSISTEMI ile test et, kabuk komutu ile DEGIL. Eskiden
+		// `ssh ... true` calistiriliyordu; Hetzner Storage Box gibi SFTP-ONLY
+		// hedefler kabuk exec'ine izin VERMEZ → kimlik dogrulama BASARILI olsa
+		// bile "exec request failed on channel 0" hatasi donuyor ve kullanici
+		// dogru parolayi girdigi halde "baglanti kurulamadi" goruyordu.
+		// `sftp -b` toplu-mod: pwd + quit → yalniz altsistem gerekir.
+		// sshpass parola passwd, PreferredAuthentications=password + publickey
+		// kapali → parolanin gercekten gecerli oldugu garanti edilir.
+		// KRITIK: kullaniciyi `-o User=` ile ver, host `--`'den SONRA gelsin →
+		// ikisi de ssh opsiyonu olarak yorumlanamaz (ProxyCommand arg-injection kapali).
 		args := []string{
-			"-p", d.Parola,
-			"ssh",
-			"-p", fmt.Sprintf("%d", d.Port),
-			"-l", d.Kullanici,
+			"-e", // parola SSHPASS ortam degiskeninden okunur; argv'de GORUNMEZ
+			"sftp",
+			"-P", fmt.Sprintf("%d", d.Port),
+			"-o", "User=" + d.Kullanici,
 			"-o", "ConnectTimeout=10",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",
 			"-o", "PreferredAuthentications=password",
 			"-o", "PubkeyAuthentication=no",
 			"-o", "BatchMode=no",
-			"--", d.Host, "true",
+			"-b", "-",
+			"--", d.Host,
 		}
 		cmd := exec.CommandContext(ctx, "sshpass", args...)
+		// Ortam degiskeni: /proc/<pid>/environ yalniz sahibine (root) okunur,
+		// kiracilar goremez — argv ise herkese aciktir.
+		cmd.Env = append(os.Environ(), "SSHPASS="+d.Parola)
+		// 🔴 Test, YUKLEYICININ yaptigi isin aynisini yapmali: yukleyici
+		// (uploadToRemote) `mkdir -p` ile dizini kendisi yaratir. Test yalnizca
+		// `cd` deneseydi, HENUZ olusturulmamis hedef dizinde "No such file"
+		// dondurup calisan bir yapilandirmayi bozukmus gibi gosterirdi.
+		// Bu yuzden: dizin agacini olustur (varsa hatayi yut), ic, gercek bir
+		// dosya YAZ ve sil → yazma yetkisi de kanitlanir.
+		gecici, err := os.CreateTemp("", "gosp-erisim-*.tmp")
+		if err != nil {
+			return fmt.Errorf("gecici dosya: %w", err)
+		}
+		defer os.Remove(gecici.Name())
+		_, _ = gecici.WriteString("girginospanel erisim testi\n")
+		_ = gecici.Close()
+
+		var b strings.Builder
+		hedef := strings.TrimSpace(d.UzakDizin)
+		// "-" oneki: sftp toplu-modda o satirin hatasini yut (dizin zaten varsa).
+		for _, seviye := range dizinSeviyeleri(hedef) {
+			b.WriteString("-mkdir " + seviye + "\n")
+		}
+		if hedef != "" && hedef != "/" {
+			b.WriteString("cd " + hedef + "\n")
+		}
+		b.WriteString("put " + gecici.Name() + " .girginospanel-erisim-testi\n")
+		b.WriteString("-rm .girginospanel-erisim-testi\n")
+		b.WriteString("pwd\n")
+		cmd.Stdin = strings.NewReader(b.String())
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			short := strings.TrimSpace(string(out))
-			if short == "" {
-				short = err.Error()
-			}
-			return fmt.Errorf("%s", short)
+			return fmt.Errorf("%s", sshGurultuTemizle(string(out), err))
 		}
 		return nil
 	}
@@ -151,20 +217,86 @@ func testConnection(ctx context.Context, d *Destination) error {
 		"-sS",
 		"--connect-timeout", "10",
 		"--max-time", "15",
-		"--user", d.Kullanici + ":" + d.Parola,
+		"-K", "-", // kimlik STDIN config'ten; argv'de GORUNMEZ
 		"--ftp-skip-pasv-ip",
 		url,
 	}
 	cmd := exec.CommandContext(ctx, "curl", args...)
+	cmd.Stdin = strings.NewReader("user = \"" + curlConfEscape(d.Kullanici+":"+d.Parola) + "\"\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		short := strings.TrimSpace(string(out))
-		if short == "" {
-			short = err.Error()
-		}
-		return fmt.Errorf("%s", short)
+		return fmt.Errorf("%s", sshGurultuTemizle(string(out), err))
 	}
 	return nil
+}
+
+// dizinSeviyeleri: "/a/b/c" -> ["/a", "/a/b", "/a/b/c"]. sftp toplu-modunda
+// `mkdir -p` yoktur; her seviye tek tek yaratilmalidir.
+func dizinSeviyeleri(yol string) []string {
+	yol = strings.TrimSpace(yol)
+	if yol == "" || yol == "/" {
+		return nil
+	}
+	mutlak := strings.HasPrefix(yol, "/")
+	var birikim string
+	var res []string
+	for _, parca := range strings.Split(strings.Trim(yol, "/"), "/") {
+		if parca == "" || parca == "." || parca == ".." {
+			continue
+		}
+		if birikim == "" {
+			if mutlak {
+				birikim = "/" + parca
+			} else {
+				birikim = parca
+			}
+		} else {
+			birikim += "/" + parca
+		}
+		res = append(res, birikim)
+	}
+	return res
+}
+
+// curlConfEscape: curl -K config dosyasinda cift tirnak icine konacak degeri kacisla.
+func curlConfEscape(v string) string {
+	v = strings.ReplaceAll(v, "\\", "\\\\")
+	v = strings.ReplaceAll(v, "\"", "\\\"")
+	v = strings.ReplaceAll(v, "\r", "")
+	v = strings.ReplaceAll(v, "\n", "")
+	return v
+}
+
+// sshGurultuTemizle: ssh/sftp/curl ciktisindan ZARARSIZ uyarilari atar ve geriye
+// gercek hata satirini birakir. Ozellikle "Warning: Permanently added '<host>'
+// (RSA) to the list of known hosts." satiri her ILK baglantida cikar; kullaniciya
+// hata gibi gosterilmesi yanlis alarm uretiyordu.
+func sshGurultuTemizle(cikti string, err error) string {
+	var kalan []string
+	for _, satir := range strings.Split(cikti, "\n") {
+		t := strings.TrimSpace(satir)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "Warning: Permanently added") ||
+			strings.HasPrefix(t, "Uploading ") ||
+			strings.HasPrefix(t, "Removing ") ||
+			strings.HasPrefix(t, "Changing to:") ||
+			strings.Contains(t, "to the list of known hosts") ||
+			strings.HasPrefix(t, "Connected to ") ||
+			strings.HasPrefix(t, "sftp> ") ||
+			t == "Remote working directory: /" {
+			continue
+		}
+		kalan = append(kalan, t)
+	}
+	if len(kalan) == 0 {
+		if err != nil {
+			return err.Error()
+		}
+		return "bilinmeyen hata"
+	}
+	return strings.Join(kalan, "; ")
 }
 
 // pushToDestinationAsync: yedek başarıyla oluştuktan sonra arkaplanda upload tetikler.

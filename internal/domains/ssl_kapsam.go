@@ -17,21 +17,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"girginospanel/internal/httpx"
+	"github.com/go-chi/chi/v5"
 )
 
 type kapsamDurumu struct {
-	Etiket    string `json:"etiket"`              // "Alan adı" | "www" | "Mail" | "Webmail"
-	Host      string `json:"host"`                // dnshosting.me, www.dnshosting.me, ...
-	Durum     string `json:"durum"`               // "kurulu" | "eksik" | "dns_yok"
-	Kaynak    string `json:"kaynak,omitempty"`    // letsencrypt | self-signed
-	BitisISO  string `json:"bitis_iso,omitempty"` // sertifikanın gerçek NotAfter'ı
-	DNSVar    bool   `json:"dns_var"`             // host bu sunucunun IP'sine çözülüyor mu
-	Grup      string `json:"grup"`                // "web" | "mail"
-	Aciklama  string `json:"aciklama,omitempty"`  // kısa neden (eksikse)
+	Etiket   string `json:"etiket"`              // "Alan adı" | "www" | "Mail" | "Webmail"
+	Host     string `json:"host"`                // dnshosting.me, www.dnshosting.me, ...
+	Durum    string `json:"durum"`               // "kurulu" | "eksik" | "dns_yok"
+	Kaynak   string `json:"kaynak,omitempty"`    // letsencrypt | self-signed
+	BitisISO string `json:"bitis_iso,omitempty"` // sertifikanın gerçek NotAfter'ı
+	DNSVar   bool   `json:"dns_var"`             // host bu sunucunun IP'sine çözülüyor mu
+	Grup     string `json:"grup"`                // "web" | "mail"
+	Aciklama string `json:"aciklama,omitempty"`  // kısa neden (eksikse)
 }
 
 type sslKapsamResp struct {
@@ -60,9 +61,11 @@ func (h *Handlers) SSLKapsam(w http.ResponseWriter, r *http.Request) {
 	// Mail sertifikası — panel kopyası: /var/lib/girginospanel/mail-certs/<d>/fullchain.pem
 	mailSAN, mailBitis, mailKaynak := sertifikaOku("/var/lib/girginospanel/mail-certs/" + alanAdi + "/fullchain.pem")
 
-	kapsamlar := []kapsamDurumu{
-		webKapsam("Alan adı", alanAdi, "web", webSAN, webBitis, webKaynak, sunucuIP),
-		webKapsam("www", "www."+alanAdi, "web", webSAN, webBitis, webKaynak, sunucuIP),
+	// Gosterilecek satirlar (sertifika/DNS durumu asagida doldurulur).
+	type satir struct{ etiket, host, grup string }
+	satirlar := []satir{
+		{"Alan adı", alanAdi, "web"},
+		{"www", "www." + alanAdi, "web"},
 	}
 	if mailAktif {
 		// 🔴 Her mail alt-alani AYRI satir/checkbox: kullanici hangilerine SSL
@@ -72,9 +75,35 @@ func (h *Handlers) SSLKapsam(w http.ResponseWriter, r *http.Request) {
 			{"SMTP", "smtp"}, {"IMAP", "imap"}, {"POP", "pop"},
 			{"Autoconfig", "autoconfig"}, {"Autodiscover", "autodiscover"},
 		} {
-			kapsamlar = append(kapsamlar,
-				webKapsam(m.etiket, m.prefix+"."+alanAdi, "mail", mailSAN, mailBitis, mailKaynak, sunucuIP))
+			satirlar = append(satirlar, satir{m.etiket, m.prefix + "." + alanAdi, "mail"})
 		}
+	}
+
+	// 🔴 DNS aramalari PARALEL. Eskiden her satir kendi icinde sirayla
+	// LookupHost cagiriyordu: 9 host x 3sn timeout = ~24sn yanit. Sunucunun
+	// resolv.conf'undaki ilk resolver takildiginda her arama tam timeout'a
+	// gidiyor ve uc, istemci timeout'una (30sn) dayaniyordu -> SSL sayfasinda
+	// kapsam karti SESSIZCE hic gorunmuyordu (catch -> setKapsam(null)).
+	// Paralelde toplam sure en yavas TEK aramaya iner (<=3sn).
+	dnsSonuc := make([]bool, len(satirlar))
+	var wg sync.WaitGroup
+	for i, st := range satirlar {
+		wg.Add(1)
+		go func(i int, host string) {
+			defer wg.Done()
+			dnsSonuc[i] = hostBuSunucuya(host, sunucuIP)
+		}(i, st.host)
+	}
+	wg.Wait()
+
+	kapsamlar := make([]kapsamDurumu, 0, len(satirlar))
+	for i, st := range satirlar {
+		san, bitis, kaynak := webSAN, webBitis, webKaynak
+		if st.grup == "mail" {
+			san, bitis, kaynak = mailSAN, mailBitis, mailKaynak
+		}
+		kapsamlar = append(kapsamlar,
+			webKapsam(st.etiket, st.host, st.grup, san, bitis, kaynak, sunucuIP, dnsSonuc[i]))
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, sslKapsamResp{
@@ -85,9 +114,9 @@ func (h *Handlers) SSLKapsam(w http.ResponseWriter, r *http.Request) {
 }
 
 // webKapsam — bir host için durum kartı üretir: sertifika kapsıyor mu + DNS var mı.
-func webKapsam(etiket, host, grup string, san map[string]bool, bitis, kaynak, sunucuIP string) kapsamDurumu {
+func webKapsam(etiket, host, grup string, san map[string]bool, bitis, kaynak, sunucuIP string, dnsVar bool) kapsamDurumu {
 	k := kapsamDurumu{Etiket: etiket, Host: host, Grup: grup}
-	k.DNSVar = hostBuSunucuya(host, sunucuIP)
+	k.DNSVar = dnsVar
 
 	if san[strings.ToLower(host)] {
 		k.Durum = "kurulu"

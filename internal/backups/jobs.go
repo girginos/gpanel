@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/bildirim"
@@ -36,6 +37,33 @@ type Job struct {
 	Baslatan    string `json:"baslatan"`
 	Baslangic   string `json:"baslangic"`
 	Bitis       string `json:"bitis"`
+}
+
+// calisanIsler: calisan toplu islerin iptal fonksiyonlari (jobID -> context.CancelFunc).
+//
+// 🔴 Neden gerekli: toplu yedek/geri-yukleme saatlerce surebiliyor (28 domain,
+// tek basina 15 GB'lik tenant var). Operatorun tek caresi paneli yeniden
+// baslatmakti — bu da calisan `tar`i ortada kesip YARIM ARSIV birakiyordu
+// (surec oldurulunce temizlik kodu hic calismaz). Duzgun iptal: context iptal
+// edilir, exec.CommandContext `tar`i oldurur, arsivOlustur yarim dosyayi siler.
+var calisanIsler sync.Map
+
+func isKaydet(jobID int64, iptal context.CancelFunc) { calisanIsler.Store(jobID, iptal) }
+func isSil(jobID int64)                              { calisanIsler.Delete(jobID) }
+
+// isDurdur: kayitli ise iptal fonksiyonunu cagirir. Bulunamazsa false doner
+// (panel yeniden baslamis olabilir — o durumda kayit DB'de "calisiyor" olarak
+// ASILI kalir; handler yine de satiri kapatir ki panel donuk gorunmesin).
+func isDurdur(jobID int64) bool {
+	v, ok := calisanIsler.Load(jobID)
+	if !ok {
+		return false
+	}
+	if iptal, tamam := v.(context.CancelFunc); tamam {
+		iptal()
+	}
+	calisanIsler.Delete(jobID)
+	return true
 }
 
 func jobDurum(basari, hata int) string {
@@ -75,11 +103,13 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 	if jobID > 0 {
 		jid = jobID
 	}
-	if _, err := db.Exec(
+	res, err := db.Exec(
 		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar, job_id, sha256, dogrulama) VALUES(?,?,?,?,?,?,?,'ok')`,
-		domainID, tip, dosya, boyut, notlar, jid, sha); err != nil {
+		domainID, tip, dosya, boyut, notlar, jid, sha)
+	if err != nil {
 		return boyut, dosya, err
 	}
+	yedekID, _ := res.LastInsertId()
 	// 🔴 Eksik-veri yedegi: bir/birden fazla veritabani dump'i basarisiz oldu ama arsiv
 	// olustu. Yedek "tamam" gorunur ama restore'da veri EKSIK cikar → mutlaka bildir.
 	if len(eksikDB) > 0 {
@@ -88,6 +118,14 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 			domainID, "backup", 0)
 	}
 	pushToDestinationAsync(db, domainID, filepath.Join(dir, dosya), dosya)
+	// 🔴 SISTEM GENELI uzak hedef BURADA tetiklenir, cagiran katmanda DEGIL:
+	// birDomainYedekle manuel toplu is + zamanlayici icin ORTAK cekirdektir.
+	// Once yalniz zamanlayici yoluna baglanmisti → panelden "Tum Domainleri
+	// Simdi Yedekle" ile alinan yedekler uzaga HIC gitmiyordu (Storage Box bos,
+	// son_yukleme YOK). Ortak cekirdege tasinarak her yol kapsanir.
+	if genel := genelAyarOku(ctx, db); genel.UzakAktif {
+		pushGenelAsync(db, genel, filepath.Join(dir, dosya), dosya, yedekID)
+	}
 	return boyut, dosya, nil
 }
 
@@ -112,9 +150,9 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 	if !strings.HasPrefix(sk, "c_") {
 		return "", fmt.Errorf("güvenlik")
 	}
-	abs := filepath.Join(BackupRoot, sk, dosya)
-	if _, err := os.Stat(abs); err != nil {
-		return "", fmt.Errorf("yedek dosyası diskte yok")
+	abs, hazirErr := YerelDosyaHazirla(context.Background(), db, sk, dosya)
+	if hazirErr != nil {
+		return "", hazirErr
 	}
 	uyeListesi, _ := arsivUyeListesi(abs)
 	uyeler := cikarUyeleri(mod, sk, uyeListesi, nil)
@@ -195,15 +233,31 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 	}
 	jid, _ := res.LastInsertId()
 
+	isCtx, isIptal := context.WithCancel(context.Background())
+	isKaydet(jid, isIptal)
+
 	go func() {
+		defer func() { isIptal(); isSil(jid) }()
 		var toplamB int64
 		basari, hata := 0, 0
+		iptalEdildi := false
 		for _, d := range liste {
+			// Domainler ARASINDA iptali kontrol et: yarida kesilen tek domain
+			// zaten context ile oldurulur, kalanlara hic baslanmaz.
+			if isCtx.Err() != nil {
+				iptalEdildi = true
+				break
+			}
 			h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.ad, jid)
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			ctx, cancel := context.WithTimeout(isCtx, 20*time.Minute)
 			b, _, err := birDomainYedekle(ctx, h.DB, d.id, d.sk, "tam", "Toplu yedek", jid)
 			cancel()
 			if err != nil {
+				if isCtx.Err() != nil {
+					// Hata iptalden kaynaklandi — basarisizlik sayma.
+					iptalEdildi = true
+					break
+				}
 				hata++
 			} else {
 				basari++
@@ -213,8 +267,11 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 			h.DB.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`,
 				basari+hata, basari, hata, toplamB, jid)
 		}
-		h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`,
-			jobDurum(basari, hata), jid)
+		son := jobDurum(basari, hata)
+		if iptalEdildi {
+			son = "iptal"
+		}
+		h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, son, jid)
 	}()
 
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "job_id": jid, "toplam": len(liste)})
@@ -383,4 +440,36 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "job_id": jid, "toplam": len(oglar)})
+}
+
+// JobDurdur: POST /admin/backups/jobs/{jid}/durdur — calisan toplu isi iptal eder.
+//
+// Iki senaryo: (a) is bu surecte calisiyor -> context iptal edilir, suren `tar`
+// oldurulur, arsivOlustur yarim dosyayi siler, kalan domainlere baslanmaz.
+// (b) kayit yok (panel yeniden baslamis, goroutine olmus) -> is DB'de sonsuza
+// kadar "calisiyor" ASILI kalirdi; bu durumda da satir kapatilir ki panelde
+// donuk ilerleme cubugu kalmasin ve yeni is baslatilabilsin.
+func (h *Handlers) JobDurdur(w http.ResponseWriter, r *http.Request) {
+	jid, _ := strconv.ParseInt(chi.URLParam(r, "jid"), 10, 64)
+	if jid <= 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz iş")
+		return
+	}
+	var durum string
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT durum FROM backup_jobs WHERE id=?`, jid).Scan(&durum); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "iş bulunamadı")
+		return
+	}
+	if durum != "calisiyor" {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "durum": durum, "not": "iş zaten bitmiş"})
+		return
+	}
+	canli := isDurdur(jid)
+	// Canli isi durdurduysak son durumu goroutine yazar (yaris olmasin diye
+	// burada EZMIYORUZ). Asili kayitta ise satiri biz kapatiriz.
+	if !canli {
+		h.DB.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, jid)
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "canli": canli})
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -64,9 +63,9 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	abs := filepath.Join(BackupRoot, sk, dosya)
-	if _, err := os.Stat(abs); err != nil {
-		httpx.WriteError(w, http.StatusNotFound, "yedek dosyası diskte bulunamadı")
+	abs, err := YerelDosyaHazirla(r.Context(), h.DB, sk, dosya)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
 

@@ -211,6 +211,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	pruneManuelYedek(h.DB, id, sk) // manuel yedeklerde de adet siniri (kok disk birikimi DoS)
 	// Uzak hedef varsa arkaplanda yükle (API cevabını bloke etme)
 	pushToDestinationAsync(h.DB, id, abs, dosya)
+	// Tek-domain manuel yedek de sistem geneli uzak hedefe gitsin (toplu is +
+	// zamanlayici ile ayni davranis).
+	if genel := genelAyarOku(r.Context(), h.DB); genel.UzakAktif {
+		pushGenelAsync(h.DB, genel, abs, dosya, yid)
+	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
 		"ok":      true,
 		"id":      yid,

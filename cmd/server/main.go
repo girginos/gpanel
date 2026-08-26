@@ -313,7 +313,7 @@ func main() {
 				"dosyasi olusturun (fallocate -l 4G /swapfile; chmod 600; mkswap; swapon; fstab).",
 			0, "", 0)
 	}
-	redis.HealScanAcl()             // Valkey SCAN/RANDOMKEY komsu key-ismi sizintisini kapat
+	redis.HealScanAcl() // Valkey SCAN/RANDOMKEY komsu key-ismi sizintisini kapat
 	phpExtH := &phpext.Handlers{DB: d}
 	runtimeH := &runtime.Handlers{}
 	paketlerH := &paketler.Handlers{DB: d}
@@ -712,9 +712,13 @@ func main() {
 				r.With(middleware.AdminOnly).Post("/admin/backups/tick", backupsH.TickNow)
 				r.With(middleware.AdminOnly).Post("/admin/backups/verify", backupsH.VerifyNow)
 				r.With(middleware.AdminOnly).Get("/admin/backups/ozet", backupsH.Ozet)
+				r.With(middleware.AdminOnly).Get("/admin/backups/ayar", backupsH.GenelAyarGet)
+				r.With(middleware.AdminOnly).Put("/admin/backups/ayar", backupsH.GenelAyarSet)
+				r.With(middleware.AdminOnly).Post("/admin/backups/ayar/test", backupsH.GenelAyarTest)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
+				r.With(middleware.AdminOnly).Post("/admin/backups/jobs/{jid}/durdur", backupsH.JobDurdur)
 				r.With(middleware.AdminOnly).Post("/admin/backups/restore", backupsH.JobGeriBaslat)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backup-destination", backupsH.GetDestination)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/backup-destination", backupsH.PutDestination)

@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import YedekGenelAyar from '@/components/YedekGenelAyar'
 
 const BACKUP_EN: Record<string, string> = {
   'Anasayfa': 'Home',
@@ -34,6 +35,12 @@ const BACKUP_EN: Record<string, string> = {
   'geri': 'restore',
   'Yedek': 'Backup',
   'otomatik': 'automatic',
+  'Durdur': 'Stop',
+  'Durduruluyor…': 'Stopping…',
+  'İşi durdurmak istediğinize emin misiniz? Süren yedek yarıda kesilir, yarım dosya silinir. Tamamlanan yedekler korunur.': 'Are you sure you want to stop the job? The running backup is aborted and its partial file removed. Completed backups are kept.',
+  'İş durduruldu.': 'Job stopped.',
+  'İş durdurulamadı': 'Could not stop the job',
+  'iptal': 'cancelled',
   'manuel': 'manual',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (BACKUP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -104,6 +111,8 @@ export default function BackupYonetimiPage() {
         <Kpi et={cevir("Aktif Uzak Hedef")} v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon="☁️" alt="S3 / SFTP" />
       </div>
 
+      <YedekGenelAyar />
+
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
         <span className="text-sm text-slate-600 dark:text-slate-300">🕒 {cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
         <div className="ml-auto flex items-center gap-2">
@@ -122,7 +131,7 @@ export default function BackupYonetimiPage() {
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
           {jobs.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">{cevir("Henüz iş yok. “Tüm Domainleri Şimdi Yedekle” ile başlayın.")}</div>}
-          {jobs.map(j => <JobSatir key={j.id} j={j} />)}
+          {jobs.map(j => <JobSatir key={j.id} j={j} onDurdur={() => { setBasari(cevir('İş durduruldu.')); jobYukle(); ozetYukle() }} />)}
         </div>
       </div>
 
@@ -144,8 +153,17 @@ export default function BackupYonetimiPage() {
   )
 }
 
-function JobSatir({ j }: { j: Job }) {
+function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
   const pct = j.toplam ? Math.round((j.tamamlanan / j.toplam) * 100) : (j.durum === 'tamam' ? 100 : 0)
+  const [durduruluyor, setDurduruluyor] = useState(false)
+  async function durdur(e: React.MouseEvent) {
+    // Satirin tamami <Link> — tiklamayi yut, yoksa is detayina gider.
+    e.preventDefault(); e.stopPropagation()
+    if (!window.confirm(cevir('İşi durdurmak istediğinize emin misiniz? Süren yedek yarıda kesilir, yarım dosya silinir. Tamamlanan yedekler korunur.'))) return
+    setDurduruluyor(true)
+    try { await api.post(`/admin/backups/jobs/${j.id}/durdur`); onDurdur(j.id) }
+    finally { setDurduruluyor(false) }
+  }
   return (
     <Link to={`/backup-yonetimi/is/${j.id}`} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">
       <DurumIkon durum={j.durum} />
@@ -165,6 +183,17 @@ function JobSatir({ j }: { j: Job }) {
             <div className={`h-full rounded-full transition-all duration-500 ${barRenk(j.durum)} ${j.durum === 'calisiyor' ? 'animate-pulse' : ''}`} style={{ width: `${pct}%` }} />
           </div>
         </div>
+        {j.durum === 'calisiyor' && (
+          <button
+            type="button"
+            onClick={durdur}
+            disabled={durduruluyor}
+            title={cevir('Durdur')}
+            className="px-2.5 py-1 text-xs font-medium rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+          >
+            {durduruluyor ? cevir('Durduruluyor…') : cevir('Durdur')}
+          </button>
+        )}
         <span className="text-slate-300 dark:text-slate-600 text-xs">→</span>
       </div>
     </Link>
@@ -174,6 +203,7 @@ function JobSatir({ j }: { j: Job }) {
 export function DurumIkon({ durum, kucuk }: { durum: string; kucuk?: boolean }) {
   const s = kucuk ? 'w-4 h-4 text-xs' : 'w-6 h-6 text-sm'
   if (durum === 'calisiyor') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 animate-pulse`}>◔</span>
+  if (durum === 'iptal') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400`}>■</span>
   if (durum === 'tamam') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400`}>✓</span>
   if (durum === 'kismi') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400`}>!</span>
   return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400`}>✕</span>
@@ -189,6 +219,7 @@ export function barRenk(durum: string): string {
   if (durum === 'calisiyor') return 'bg-amber-400'
   if (durum === 'tamam') return 'bg-emerald-500'
   if (durum === 'kismi') return 'bg-amber-500'
+  if (durum === 'iptal') return 'bg-slate-400'
   return 'bg-red-500'
 }
 

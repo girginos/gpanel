@@ -435,6 +435,39 @@ sec_nginx_cache() {
   fi
 }
 
+sec_backup_cron() {
+  want backup_cron || return 0
+  head_ "kacak yedek cron'u (girginospanel-backup-all)"
+  # 🔴 /etc/cron.d/girginospanel-backup her gece 03:00'te girginospanel-backup-all
+  # calistiriyordu. O script `domains.backup_freq` sutununu HIC okumuyordu: panelde
+  # yedegi KAPALI (none) olan domainler dahil TUM domainleri her gece tam kopyaliyor,
+  # retention'i kod icinde sabit 14 gun uyguluyor ve yazmadan once bos alan
+  # KONTROL ETMIYORDU. Sonuc: kok disk sessizce doluyor, dolunca panel + siteler +
+  # MySQL birlikte duruyor. Yedekleme artik panel binary'sindeki Go scheduler'da
+  # (backup_freq/retention + ana salter + disk kapisi + uzak hedef).
+  #
+  # Bu onarim yalnizca CRON GIRDISINI yorum satiri yapar. Hicbir yedek dosyasi
+  # SILINMEZ (bkz. yedekleri koru kurali) ve /usr/local/bin/girginospanel-backup-all
+  # kaldirilmaz -- guncelleme onu zaten no-op stub ile degistirir.
+  local f=/etc/cron.d/girginospanel-backup
+  [ -f "$f" ] || { ok "kacak yedek cron'u yok"; return 0; }
+  if ! grep -qE '^[^#]*girginospanel-backup-all' "$f"; then
+    ok "yedek cron'u zaten devre disi"
+    return 0
+  fi
+  if [ $DRY -eq 1 ]; then
+    warn "kacak yedek cron'u AKTIF (dry-run: degistirilmedi)"
+    return 0
+  fi
+  cp -a "$f" "${f}.oncesi" 2>/dev/null
+  sed -i 's|^\([^#]*girginospanel-backup-all.*\)$|# girginospanel-repair: panel scheduler devraldi (backup_freq + disk kapisi)\n#\1|' "$f"
+  if grep -qE '^[^#]*girginospanel-backup-all' "$f"; then
+    err "yedek cron'u devre disi birakilamadi: $f"
+    return 1
+  fi
+  act "kacak yedek cron'u devre disi birakildi (yedek: ${f}.oncesi)"
+}
+
 sec_mail_sieve() {
   want mail_sieve || return 0
   head_ "mail sieve (iletim/oto-yanit motoru + forward deliverability)"
@@ -451,6 +484,16 @@ sec_mail_sieve() {
     [ $DRY -eq 0 ] && { dnf -y install dovecot-pigeonhole >/dev/null 2>&1 || err "dovecot-pigeonhole kurulamadi"; }
   else
     ok "dovecot-pigeonhole kurulu"
+  fi
+
+  # 1b) /var/vmail domain dizin sahipligi — root:root 0700 ise vmail traverse EDEMEZ
+  # (sieve+teslim "Permission denied"). Site-tasima MkdirAll'i bunu yaratabiliyordu.
+  if [ -d /var/vmail ]; then
+    kotu=$(find /var/vmail -maxdepth 1 -type d ! -user vmail ! -path /var/vmail 2>/dev/null)
+    if [ -n "$kotu" ]; then
+      if [ $DRY -eq 1 ]; then act "root-owned /var/vmail domain dizinleri vmail'e cevrilecek ($(echo "$kotu"|wc -l) adet)"
+      else echo "$kotu" | while read d; do [ -n "$d" ] && chown vmail:vmail "$d"; done; act "vmail domain dizin sahipligi duzeltildi ($(echo "$kotu"|wc -l) domain)"; fi
+    else ok "/var/vmail domain dizin sahipligi dogru"; fi
   fi
 
   # 2) Sieve teslim yolu + forward envelope-from etkin mi (doveconf ile olc)
@@ -501,6 +544,7 @@ sec_signon
 sec_firewall
 sec_nginx_cache
 sec_mail_sieve
+sec_backup_cron
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then
