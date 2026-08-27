@@ -30,6 +30,9 @@ func gecerliFreq(f string) bool {
 // StartScheduler: panel başlangıcında çağrılır, kendi goroutine'ini başlatır.
 // Her saatin başında (~ +60s offset) due olanları tarayıp yedekler.
 func StartScheduler(db *sql.DB) {
+	// Panel yeniden baslarken yarim kalan isleri kapat (UI sonsuz "calisiyor" gostermesin).
+	AsiliIsleriKapat(db)
+
 	go func() {
 		// İlk run: panel başladıktan 2 dakika sonra (warmup)
 		time.Sleep(2 * time.Minute)
@@ -280,4 +283,42 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 		log.Printf("yedek bozulma taramasi: %d domain temiz (%d uzak hedefte, taranmadi)", len(liste)-uzakta, uzakta)
 	}
 	return len(liste), bozuk
+}
+
+// AsiliIsleriKapat: panel yeniden baslarken 'calisiyor' durumunda kalmis toplu
+// isleri kapatir.
+//
+// 🔴 Neden: is goroutine'i surecle birlikte olur ama DB satiri 'calisiyor'
+// kalir; panel ilerleme cubugunu sonsuza kadar gosterir, operatör isin surdugunu
+// sanir ve yeni is baslatamaz. Uretimde gerceklesti (deploy sirasinda calisan
+// geri-yukleme isi 0/1'de dondu). Acilista bir kez cagrilir.
+func AsiliIsleriKapat(db *sql.DB) {
+	rows, err := db.Query(`SELECT id, islem, tamamlanan, toplam FROM backup_jobs WHERE durum='calisiyor'`)
+	if err != nil {
+		return
+	}
+	type is struct {
+		id            int64
+		islem         string
+		tamam, toplam int
+	}
+	var liste []is
+	for rows.Next() {
+		var x is
+		if rows.Scan(&x.id, &x.islem, &x.tamam, &x.toplam) == nil {
+			liste = append(liste, x)
+		}
+	}
+	rows.Close()
+	if len(liste) == 0 {
+		return
+	}
+	for _, x := range liste {
+		db.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, x.id)
+		log.Printf("backup: is #%d (%s %d/%d) panel yeniden baslarken kesilmisti — 'iptal' olarak kapatildi",
+			x.id, x.islem, x.tamam, x.toplam)
+	}
+	bildirim.Yaz(db, "uyari", "yedek", "Yarım kalan iş kapatıldı",
+		fmt.Sprintf("Panel yeniden başlarken %d adet devam eden yedek/geri-yükleme işi kesildi ve 'iptal' olarak işaretlendi. Gerekiyorsa yeniden başlatın.", len(liste)),
+		0, "backup", 0)
 }

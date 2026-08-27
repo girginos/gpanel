@@ -367,15 +367,26 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [yeniPw, setYeniPw] = useState<string | null>(null)
+  // 🔴 Kullanicisi OLMAYAN veritabani: DB panelden silinip yedekten geri
+  // yuklendiginde olusur — yedek yalniz sema+veri icerir, MySQL kullanicisi ve
+  // GRANT'ler arsivde bulunmaz. Panel her DB'nin kullanicisi oldugunu varsayiyor
+  // ve bu durumda kullanici olusturmanin HICBIR yolu yoktu (site baglanamiyordu).
+  const kullaniciYok = !db.db_kullanici
+  const [yeniKullanici, setYeniKullanici] = useState('')
 
   async function sifirla(rastgele: boolean) {
     if (!rastgele && ozelPw.length < 6) {
       setHata(cevir("Parola en az 6 karakter olmalı"))
       return
     }
+    if (kullaniciYok && !yeniKullanici.trim()) {
+      setHata(cevir("Kullanıcı adı girin"))
+      return
+    }
     setIsleniyor(true); setHata(null)
     try {
-      const body = rastgele ? {} : { parola: ozelPw }
+      const body: Record<string, string> = rastgele ? {} : { parola: ozelPw }
+      if (kullaniciYok) body.kullanici = yeniKullanici.trim()
       const { data } = await api.put(`/databases/${db.id}/password`, body)
       setYeniPw(data.db_parola)
     } catch (e) {
@@ -386,12 +397,33 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   }
 
   return (
-    <Modal acik={true} baslik={cevirT(cevir("Parola Sıfırla — {0}"), db.db_adi)} onKapat={yeniPw ? onTamam : onKapat} genislik="md">
+    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={yeniPw ? onTamam : onKapat} genislik="md">
       {!yeniPw ? (
         <div className="space-y-4">
-          <div className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">
-            <strong className="font-mono">{db.db_kullanici}</strong>{cevir(" kullanıcısının parolası MariaDB ve panel'de eşzamanlı güncellenir.")}
-          </div>
+          {kullaniciYok ? (
+            <>
+              <div className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                {cevir("Bu veritabanının MySQL kullanıcısı yok. Yedekten geri yüklenen veritabanlarında olur — yedek yalnızca şema ve veri içerir, kullanıcı ile yetkiler içermez.")}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1" htmlFor="yeni-db-kullanici">{cevir("Kullanıcı adı")}</label>
+                <input
+                  id="yeni-db-kullanici"
+                  value={yeniKullanici}
+                  onChange={e => setYeniKullanici(e.target.value)}
+                  placeholder={cevir("uygulamanın beklediği kullanıcı adı")}
+                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {cevir("Site zaten kuruluysa uygulamanın yapılandırma dosyasındaki kullanıcı adını girin (WordPress: wp-config.php → DB_USER) — böylece dosyayı düzenlemeden bağlanır.")}
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">
+              <strong className="font-mono">{db.db_kullanici}</strong>{cevir(" kullanıcısının parolası MariaDB ve panel'de eşzamanlı güncellenir.")}
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Özel parola (boş bırakırsanız rastgele)")}</label>
             <input

@@ -171,14 +171,32 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 	switch mod {
 	case "tam":
 		homeGeriYukle(tmpDir, sk, temiz)
-		tumDBGeriYukle(db, domainID, tmpDir, sk, "")
-		return "tam geri yüklendi", nil
+		y, a, h, m := DBSonucOzeti(tumDBGeriYukle(db, domainID, tmpDir, sk, ""))
+		if h > 0 {
+			return "", fmt.Errorf("dosyalar geri yüklendi ancak %d veritabanı HATA verdi — %s", h, m)
+		}
+		if y == 0 && a > 0 {
+			return "", fmt.Errorf("dosyalar geri yüklendi ancak HİÇBİR veritabanı geri yüklenmedi — %s", m)
+		}
+		return fmt.Sprintf("tam geri yüklendi (%d veritabanı%s)", y, dbEk(a)), nil
 	case "dosyalar":
 		homeGeriYukle(tmpDir, sk, temiz)
 		return "dosyalar geri yüklendi", nil
 	case "veritabani":
-		tumDBGeriYukle(db, domainID, tmpDir, sk, "")
-		return "veritabanları geri yüklendi", nil
+		// 🔴 Sonuc ARTIK ATILMIYOR. Eskiden bu satir "veritabanları geri yüklendi"
+		// donuyordu; whitelist bos oldugu icin tum DB'ler atlanmis olsa bile is
+		// "tamam / basari=1" gorunuyordu (uretimde yasandi).
+		y, a, h, m := DBSonucOzeti(tumDBGeriYukle(db, domainID, tmpDir, sk, ""))
+		if h > 0 {
+			return "", fmt.Errorf("%d veritabanı geri yüklenemedi — %s", h, m)
+		}
+		if y == 0 {
+			if a == 0 {
+				return "", fmt.Errorf("bu yedekte geri yüklenecek veritabanı YOK")
+			}
+			return "", fmt.Errorf("hiçbir veritabanı geri yüklenmedi — %s", m)
+		}
+		return fmt.Sprintf("%d veritabanı geri yüklendi%s — %s", y, dbEk(a), m), nil
 	}
 	return "", fmt.Errorf("geçersiz mod: %s", mod)
 }
@@ -408,7 +426,11 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 	}
 	jid, _ := res.LastInsertId()
 
+	isCtx, isIptal := context.WithCancel(context.Background())
+	isKaydet(jid, isIptal)
+
 	go func() {
+		defer func() { isIptal(); isSil(jid) }()
 		type sonuc struct {
 			DomainID int64  `json:"domain_id"`
 			AlanAdi  string `json:"alan_adi"`
@@ -417,7 +439,15 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 		}
 		sonuclar := []sonuc{}
 		basari, hata := 0, 0
+		iptalEdildi := false
 		for _, o := range oglar {
+			// Domainler ARASINDA iptali kontrol et. Yanlis yedegi 28 domaine
+			// uygulamaya baslayan operatorun tek caresi paneli yeniden baslatmak
+			// olmamali (yedek isi iptal edilebiliyordu, geri-yukleme EDILEMIYORDU).
+			if isCtx.Err() != nil {
+				iptalEdildi = true
+				break
+			}
 			h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, o.ad, jid)
 			msg, err := geriYukleCekirdek(h.DB, o.domainID, o.backupID, req.Mod, req.Temiz)
 			s := sonuc{DomainID: o.domainID, AlanAdi: o.ad}
@@ -436,7 +466,12 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 				basari+hata, basari, hata, string(b), jid)
 		}
 		h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`,
-			jobDurum(basari, hata), jid)
+			func() string {
+				if iptalEdildi {
+					return "iptal"
+				}
+				return jobDurum(basari, hata)
+			}(), jid)
 	}()
 
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "job_id": jid, "toplam": len(oglar)})
@@ -472,4 +507,12 @@ func (h *Handlers) JobDurdur(w http.ResponseWriter, r *http.Request) {
 		h.DB.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, jid)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "canli": canli})
+}
+
+// dbEk: atlanan DB sayisini mesaja ekler ("" veya ", 2 atlandı").
+func dbEk(atlanan int) string {
+	if atlanan <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d atlandı", atlanan)
 }

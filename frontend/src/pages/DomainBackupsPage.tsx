@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -40,7 +40,6 @@ const BACKUP_EN: Record<string, string> = {
   "Geri Yükle": "Restore",
   "Geri yükleme başarısız": "Restore failed",
   "Geri yükleme tamam": "Restore complete",
-  "Geri yükleniyor…": "Restoring…",
   "Günlük": "Daily",
   "Haftalık": "Weekly",
   "Henüz yedek yok": "No backups yet",
@@ -105,6 +104,18 @@ const BACKUP_EN: Record<string, string> = {
   "Hedefi sil": "Delete target",
   "● Aktif": "● Active",
   "Yedekleniyor…": "Backing up…",
+  "hazırlanıyor": "preparing",
+  "veritabanları alınıyor": "dumping databases",
+  "dosyalar arşivleniyor": "archiving files",
+  "bütünlük doğrulanıyor": "verifying integrity",
+  "uzak hedefe yükleniyor": "uploading off-site",
+  "yedek uzak hedeften indiriliyor": "downloading from off-site",
+  "arşiv açılıyor": "extracting archive",
+  "dosyalar geri yükleniyor": "restoring files",
+  "veritabanı içe aktarılıyor": "importing database",
+  "tamamlandı": "completed",
+  "başarısız": "failed",
+  "Geri yükleniyor…": "Restoring…",
   "yedek": "backups",
   "\"{0}\" silinsin mi?": "Delete \"{0}\"?",
   "Tam": "Full",
@@ -116,6 +127,12 @@ const BACKUP_EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BACKUP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
+type Ilerleme = {
+  aktif: boolean; bitti: boolean; islem: string; asama: string
+  yapilan: number; toplam: number; yuzde: number; gecen_sn: number
+  sonuc?: string; hata?: string
+}
+
 export default function DomainBackupsPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
@@ -126,6 +143,10 @@ export default function DomainBackupsPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
+  // 🔴 Uzun islem gorunurlugu: yedek/geri-yukleme dakikalarca surer. Tek bir
+  // "Yedekleniyor…" yazisi kullaniciya ilerleyip ilerlemedigini SOYLEMIYORDU.
+  const [ilerleme, setIlerleme] = useState<Ilerleme | null>(null)
+  const ilerlemeTimer = useRef<number | null>(null)
   const [silinecek, setSilinecek] = useState<Yedek | null>(null)
   const [geriYukle, setGeriYukle] = useState<Yedek | null>(null)
 
@@ -227,15 +248,36 @@ export default function DomainBackupsPage() {
     }
   }
 
+  // Ilerlemeyi 1.5 sn'de bir yoklar; is bitince durur ve listeyi tazeler.
+  // 🔴 Yedek/geri-yukleme dakikalarca surer; tek bir "Yedekleniyor…" yazisi
+  // kullaniciya ilerleyip ilerlemedigini SOYLEMIYORDU.
+  function ilerlemeIzle() {
+    if (ilerlemeTimer.current) window.clearInterval(ilerlemeTimer.current)
+    ilerlemeTimer.current = window.setInterval(async () => {
+      try {
+        const { data } = await api.get<Ilerleme>(`/domains/${id}/backups/ilerleme`)
+        setIlerleme(data.aktif ? data : null)
+        if (!data.aktif || data.bitti) {
+          if (ilerlemeTimer.current) window.clearInterval(ilerlemeTimer.current)
+          ilerlemeTimer.current = null
+          setIsleniyor(false)
+          yukle()
+          if (data.hata) setHata(data.hata)
+          else if (data.sonuc) setBasari(data.sonuc)
+          window.setTimeout(() => setIlerleme(null), 6000)
+        }
+      } catch { /* gecici hata: bir sonraki tur tekrar dener */ }
+    }, 1500)
+  }
+
   async function olustur() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
+      // Uc 202 doner: is arka planda calisir, ilerleme cubugu devralir.
       await api.post(`/domains/${id}/backups`)
-      setBasari(cevir("Yedek oluşturuldu"))
-      yukle()
+      ilerlemeIzle()
     } catch (e) {
       setHata(apiHata(e, cevir("Yedek oluşturulamadı")))
-    } finally {
       setIsleniyor(false)
     }
   }
@@ -460,6 +502,33 @@ export default function DomainBackupsPage() {
         <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} {cevir("yedek")}</span>
       </div>
+
+      {/* 🔴 Uzun islem gorunurlugu: asama + yuzde + gecen sure. Yuzde YALNIZ
+          beklenen boyut bilindiginde gosterilir; bilinmiyorsa hareketli cizgi ve
+          yazilan bayt gosterilir ki kullanici "takildi mi" diye dusunmesin. */}
+      {ilerleme && (
+        <div className="mb-4 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span className={`w-2 h-2 rounded-full ${ilerleme.bitti ? (ilerleme.hata ? 'bg-red-500' : 'bg-emerald-500') : 'bg-amber-500 animate-pulse'}`} />
+            <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
+              {ilerleme.islem === 'geri' ? cevir("Geri yükleniyor…") : cevir("Yedekleniyor…")}
+            </span>
+            <span className="text-sm text-slate-500 dark:text-slate-400">· {cevir(ilerleme.asama)}</span>
+            <span className="ml-auto text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+              {ilerleme.yuzde > 0 ? `${ilerleme.yuzde}%` : ''}
+              {ilerleme.yapilan > 0 ? ` · ${formatBoyut(ilerleme.yapilan)}${ilerleme.toplam > 0 ? ' / ' + formatBoyut(ilerleme.toplam) : ''}` : ''}
+              {` · ${ilerleme.gecen_sn}s`}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+            {ilerleme.yuzde > 0 ? (
+              <div className={`h-full rounded-full transition-all duration-700 ${ilerleme.hata ? 'bg-red-500' : ilerleme.bitti ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${ilerleme.yuzde}%` }} />
+            ) : (
+              <div className="h-full w-1/3 rounded-full bg-amber-400 animate-pulse" />
+            )}
+          </div>
+        </div>
+      )}
 
       {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
       {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}

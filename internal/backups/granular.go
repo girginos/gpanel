@@ -136,6 +136,7 @@ func dumpTamamlandiMi(yol string) bool {
 // (cagiran KRITIK bildirim gonderir). Doner: (boyut, sha256, basarisiz_db_listesi, hata).
 func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosya, olusturmaTS string) (int64, string, []string, error) {
 	abs := filepath.Join(dir, dosya)
+	IlerlemeAsama(domainID, "veritabanları alınıyor", 0)
 	dbDir := filepath.Join(dir, "__db__")
 	_ = os.RemoveAll(dbDir)
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
@@ -211,6 +212,13 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		yazilan = append(yazilan, dbName)
 	}
 
+	// 🔴 KULLANICI + GRANT: mysqldump bunlari ALMAZ (mysql semasinda dururlar).
+	// Bu satir olmadan geri yukleme semayi ve veriyi getiriyor ama siteyi ayaga
+	// kaldiran kullaniciyi getirmiyordu — site 500 donmeye devam ediyordu.
+	if n := dbKullanicilariYaz(dbDir, yazilan); n > 0 {
+		log.Printf("backup %s: %d veritabani kullanicisi arsive eklendi", sk, n)
+	}
+
 	man := arsivManifest{Olusturma: olusturmaTS, Home: sk, AnaDB: sk + "_main", Veritabanlari: yazilan}
 	if b, err := json.MarshalIndent(man, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(dbDir, "manifest.json"), b, 0600)
@@ -225,6 +233,9 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 	// WP wp-content/cache yuzunden rastgele YEDEKSIZ kaliyordu. Uretimde
 	// gerceklesti (c_kuran_islam_tr_org, 2026-08-26) ve kontrollu deneyle
 	// dogrulandi: exit=1 iken gzip -t saglam, tum uyeler listelendi, cikarim basarili.
+	// Arsiv olusurken hedef dosyanin buyumesini ornekle → musteri ilerlemeyi gorur.
+	IlerlemeAsama(domainID, "dosyalar arşivleniyor", oncekiYedekBoyutu(db, domainID))
+	IlerlemeDosyaIzle(domainID, abs)
 	tarUyarisi := ""
 	if out, err := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); err != nil {
 		kod := -1
@@ -244,6 +255,8 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		log.Printf("backup %s: tar uyarisi (arsiv korundu): %s", sk, tarUyarisi)
 	}
 
+	IlerlemeDosyaDur(domainID)
+	IlerlemeAsama(domainID, "bütünlük doğrulanıyor", 0)
 	// 🔴 BUTUNLUK DOGRULAMASI: gzip stream'i saglam mi (bozulma/truncation tespiti).
 	if out, err := exec.CommandContext(ctx, "gzip", "-t", abs).CombinedOutput(); err != nil {
 		_ = os.Remove(abs) // bozuk arsivi tut-ma: yaniltici "gecerli yedek" olusmasin
@@ -401,7 +414,9 @@ func arsivDBDosyalari(tmp, sk string) map[string]string {
 	if fi, err := os.Stat(dbDir); err == nil && fi.IsDir() {
 		ents, _ := os.ReadDir(dbDir)
 		for _, e := range ents {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			// kullanicilar.sql bir DB dump'i DEGILDIR; "kullanicilar" adinda bir
+			// veritabani olusturmaya calismak geri yuklemeyi kirardi.
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") || e.Name() == kullaniciDosyaAdi {
 				continue
 			}
 			out[strings.TrimSuffix(e.Name(), ".sql")] = filepath.Join(dbDir, e.Name())
@@ -424,6 +439,14 @@ func arsivDBDosyalari(tmp, sk string) map[string]string {
 
 // dbImport: bir .sql dosyasini verilen (whitelist'ten gecmis) DB'ye import eder.
 func dbImport(dbName, sqlPath string) error {
+	// 🔴 Hedef DB yoksa OLUSTUR. Eskiden dogrudan `mysql <ad> < dump` calisiyordu;
+	// veritabani silinmisse "Unknown database" ile patliyordu — yani tam da geri
+	// yuklemeye EN COK ihtiyac duyulan durumda (DB kaybi) restore imkansizdi.
+	// Ad zaten GecerliDBKimlik + sistemDBmi + sahiplik kapisindan gecmis olur.
+	if out, err := exec.Command("bash", "-c",
+		fmt.Sprintf("mysql -e %s", shq("CREATE DATABASE IF NOT EXISTS `"+dbName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))).CombinedOutput(); err != nil {
+		return fmt.Errorf("veritabanı oluşturulamadı: %s", strings.TrimSpace(string(out)))
+	}
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("mysql %s < %s 2>&1", shq(dbName), shq(sqlPath)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -441,21 +464,109 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 		sahip[n] = true
 	}
 	res := []map[string]string{}
+	idx := map[string]int{} // db adi -> res icindeki konum (sonradan not eklemek icin)
+	yuklenen := []string{}  // gercekten import edilen veritabanlari
 	for name, p := range files {
 		if filter != "" && name != filter {
 			continue
 		}
-		if sistemDBmi(name) || !sahip[name] {
-			res = append(res, map[string]string{"db": name, "durum": "atlandı (domaine ait değil)"})
+		if sistemDBmi(name) {
+			res = append(res, map[string]string{"db": name, "durum": "reddedildi (sistem veritabanı)"})
 			continue
+		}
+		yenidenKayit := false
+		if !sahip[name] {
+			// 🔴 KURTARMA YOLU: panel kaydi silinmis DB'yi de geri yukleyebilmeliyiz.
+			// Operator veritabanini panelden silince db_accounts satiri da gider;
+			// whitelist bosalir ve "kendi yedeginden kendi DB'sini" geri yuklemek
+			// IMKANSIZ hale gelirdi (uretimde yasandi: is "tamam" dedi ama sifir DB
+			// geri yuklendi). Arsiv zaten BU domainin yedegi oldugu icin icindeki DB
+			// adi tanim geregi bu domaine aittir. Tek gercek risk, adin BASKA bir
+			// domaine kayitli olmasi — o durumda REDDEDILIR.
+			if baskaDomaininMi(db, name, domainID) {
+				res = append(res, map[string]string{"db": name, "durum": "reddedildi (başka bir domaine kayıtlı)"})
+				continue
+			}
+			yenidenKayit = true
 		}
 		if err := dbImport(name, p); err != nil {
 			res = append(res, map[string]string{"db": name, "durum": "hata: " + err.Error()})
-		} else {
-			res = append(res, map[string]string{"db": name, "durum": "geri yüklendi"})
+			continue
+		}
+		durum := "geri yüklendi"
+		if yenidenKayit {
+			// Panele geri kaydet: aksi halde bu DB bir daha YEDEKLENMEZ
+			// (domainDBleri yalniz db_accounts + <sk>_main bakar).
+			// db_user ve db_pass_plain NOT NULL ve DEFAULT'suz; sql_mode
+			// STRICT_TRANS_TABLES oldugu icin bu sutunlari atlayan INSERT DUSER
+			// (olculdu). Bos string veriyoruz: DB kullanicisi/parolasi yedekte
+			// BULUNMAZ, operator panelden tanimlar.
+			if _, e := db.Exec(
+				`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain, notlar) VALUES (?,?,'','',?)`,
+				domainID, name, "geri yüklemede yeniden kaydedildi"); e == nil {
+				durum = "geri yüklendi (panel kaydı yeniden oluşturuldu — kullanıcı/parola tanımlayın)"
+			} else {
+				durum = "geri yüklendi (panelde kayıtlı değil — Veritabanları bölümünden ekleyin)"
+			}
+		}
+		idx[name] = len(res)
+		yuklenen = append(yuklenen, name)
+		res = append(res, map[string]string{"db": name, "durum": durum})
+	}
+
+	// 🔴 KIMLIK GERI YUKLEME. Semayi ve veriyi geri getirmek siteyi ayaga
+	// KALDIRMAZ; baglanacak MySQL kullanicisi da gerekir. Iki kaynak denenir:
+	//  (A) arsivdeki kullanicilar.sql (yeni yedekler) — parola hash'iyle birebir,
+	//  (B) yoksa sitenin kendi yapilandirmasi (wp-config.php/.env) — eski
+	//      arsivler icin. Ikisi de yoksa durum degismez, operator panelden
+	//      "Kullanici Olustur" ile tanimlar.
+	if len(yuklenen) > 0 {
+		izin := map[string]bool{}
+		for _, n := range yuklenen {
+			izin[n] = true
+		}
+		if n, err := dbKullanicilariUygula(filepath.Join(tmp, "__db__"), izin); err == nil && n > 0 {
+			log.Printf("restore %s: %d kullanici/yetki ifadesi uygulandi", sk, n)
+		}
+		for _, name := range yuklenen {
+			if ek := kimlikTamamla(db, domainID, sk, name); ek != "" {
+				i := idx[name]
+				res[i]["durum"] = res[i]["durum"] + " — " + ek
+			}
 		}
 	}
 	return res
+}
+
+// baskaDomaininMi: db_name BASKA bir domaine kayitli mi (cross-tenant koruma).
+func baskaDomaininMi(db *sql.DB, dbName string, domainID int64) bool {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_name=? AND domain_id<>?`,
+		dbName, domainID).Scan(&n); err != nil {
+		return true // olcemiyorsak REDDET (fail-closed)
+	}
+	return n > 0
+}
+
+// DBSonucOzeti: tumDBGeriYukle sonucunu sayilara ve okunur mesaja cevirir.
+// 🔴 Bu ozet OLMADAN cagiran katman sonucu atiyordu ve "veritabanları geri
+// yüklendi" diyordu — SIFIR DB geri yuklenmis olsa bile. Basarisizligin guven
+// olarak render edilmesi tam olarak buydu.
+func DBSonucOzeti(res []map[string]string) (yuklenen, atlanan, hatali int, mesaj string) {
+	var p []string
+	for _, r := range res {
+		d := r["durum"]
+		switch {
+		case strings.HasPrefix(d, "geri yüklendi"):
+			yuklenen++
+		case strings.HasPrefix(d, "hata"):
+			hatali++
+		default:
+			atlanan++
+		}
+		p = append(p, r["db"]+": "+d)
+	}
+	return yuklenen, atlanan, hatali, strings.Join(p, " | ")
 }
 
 // birDBGeriYukle: tek DB'yi ya orijinal ustune (hedefDB boş) ya da YENİ ada geri yükler (mod=db).

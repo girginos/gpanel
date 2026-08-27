@@ -58,5 +58,17 @@ $_SESSION['PMA_single_signon_host'] = 'localhost';
 $_SESSION['PMA_single_signon_only_db']  = [$data['db']];
 session_write_close();
 
-header('Location: /pma/', true, 302);
+// 🔴 Kullaniciyi SUNUCU KOKUNE degil, kendi VERITABANINA birak.
+// Eskiden '/pma/' ile kok sayfaya dusuluyordu: phpMyAdmin orada SUNUCU
+// kapsaminda acilir, "Disa aktar" sekmesi de sunucu kapsamli calisir ve dosyayi
+// $cfg['Export']['file_template_server'] = '@SERVER@' ile adlandirir -> her
+// export "localhost.sql" olur, hangi veritabani oldugu belli olmaz.
+// Veritabani kapsaminda acilinca sablon '@DATABASE@' olur -> "<db_adi>.sql".
+// (only_db zaten tek DB'ye kilitliyordu; sorun yetkide degil, ACILIS KAPSAMINDA.)
+$hedef = '/pma/';
+if (!empty($data['db'])) {
+    // phpMyAdmin 5.x rota bicimi.
+    $hedef = '/pma/index.php?route=/database/structure&db=' . rawurlencode($data['db']);
+}
+header('Location: ' . $hedef, true, 302);
 exit;

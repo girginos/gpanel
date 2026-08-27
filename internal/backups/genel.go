@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -285,6 +286,10 @@ func fetchGenelUzaktan(ctx context.Context, g *GenelAyar, dosyaAdi, yerelYol str
 }
 
 // fetchGenelDizinden: tek bir uzak dizinden indirme denemesi.
+// 🔴 `get -O <dizin>` DEGIL `get <uzak> -o <yerel>`: -O dosyayi dizine ORIJINAL
+// adiyla yazar, cagiranin verdigi gecici ada (.indiriliyor) DEGIL. Atomik
+// indirme bu yuzden kirilmisti: dosya dogru inip nihai ada yaziliyor ama kod
+// gecici adi arayip bulamayinca "dosya olusmadi" hatasi donuyordu.
 func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, yerelYol string) error {
 	url := lftpURL(g.hedef())
 	betik := fmt.Sprintf(
@@ -296,10 +301,10 @@ func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, 
 			`set net:timeout 20; `+
 			`open -u "%s","%s" %s; `+
 			`cd "%s"; `+
-			`get -O "%s" "%s"; `+
+			`get "%s" -o "%s"; `+
 			`bye`,
 		lftpEscape(g.UzakKullanici), lftpEscape(g.UzakParola), url,
-		lftpEscape(uzakDizin), filepath.Dir(yerelYol), lftpEscape(dosyaAdi))
+		lftpEscape(uzakDizin), lftpEscape(dosyaAdi), yerelYol)
 	cmd, temizle, err := lftpKomutu(ctx, betik)
 	if err != nil {
 		return err
@@ -325,8 +330,21 @@ func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, 
 // diskte bulunamadı"). Kanit: uzaga tasinan yedek 404, yereli duran 200.
 func YerelDosyaHazirla(ctx context.Context, db *sql.DB, sk, dosya string) (string, error) {
 	yol := filepath.Join(BackupRoot, sk, dosya)
-	if _, err := os.Stat(yol); err == nil {
-		return yol, nil
+	// 🔴 VAR OLMAK YETMEZ, DOGRU OLMALI. Eskiden yalnizca os.Stat basariliysa
+	// dosya kabul ediliyordu. Panel indirme sirasinda yeniden baslarsa (deploy,
+	// crash, OOM) goroutine olur ve YARIM dosya nihai adiyla diskte kalir; bir
+	// sonraki geri-yukleme onu SAGLAM sanip BOZUK arsivle calisir.
+	// Uretimde gerceklesti: 1.30 GB / 5.49 GB, gzip -t "unexpected end of file".
+	// Artik beklenen boyutla karsilastirilir; tutmuyorsa kalinti SILINIR ve
+	// yeniden indirilir.
+	if fi, err := os.Stat(yol); err == nil {
+		bekBoyut, _ := yedekBeklenenBoyut(db, dosya)
+		if bekBoyut <= 0 || fi.Size() == bekBoyut {
+			return yol, nil
+		}
+		log.Printf("backup: %s yerel kopya EKSIK (%d/%d bayt) — kalinti silinip yeniden indirilecek",
+			dosya, fi.Size(), bekBoyut)
+		_ = os.Remove(yol)
 	}
 	g := genelAyarOku(ctx, db)
 	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
@@ -342,14 +360,87 @@ func YerelDosyaHazirla(ctx context.Context, db *sql.DB, sk, dosya string) (strin
 		return "", err
 	}
 	log.Printf("backup genel: %s yerelde yok, uzak hedeften indiriliyor", dosya)
-	indirmeCtx, iptal := context.WithTimeout(ctx, 30*time.Minute)
+	// Indirme yuzdesi KESINDIR: beklenen boyut backups.boyut_b'den bilinir.
+	if bek, _ := yedekBeklenenBoyut(db, dosya); bek > 0 {
+		if did := dosyaDomainID(db, dosya); did > 0 {
+			IlerlemeAsama(did, "yedek uzak hedeften indiriliyor", bek)
+			IlerlemeDosyaIzle(did, yol+".indiriliyor")
+		}
+	}
+	indirmeCtx, iptal := context.WithTimeout(ctx, 60*time.Minute)
 	defer iptal()
-	if err := fetchGenelUzaktan(indirmeCtx, g, dosya, yol); err != nil {
-		_ = os.Remove(yol)
+	// 🔴 ATOMIK: once ".indiriliyor" adina indir, boyutu dogrula, ANCAK SONRA
+	// nihai ada tasi. Boylece kesilen bir indirme nihai adi ASLA almaz ve
+	// yukaridaki dogrulama devreye girmek zorunda kalmaz (ikinci savunma hatti).
+	gecici := yol + ".indiriliyor"
+	_ = os.Remove(gecici)
+	if err := fetchGenelUzaktan(indirmeCtx, g, dosya, gecici); err != nil {
+		_ = os.Remove(gecici)
 		return "", err
 	}
-	log.Printf("backup genel: %s uzak hedeften indirildi", dosya)
+	if bek, _ := yedekBeklenenBoyut(db, dosya); bek > 0 {
+		if fi, err := os.Stat(gecici); err != nil || fi.Size() != bek {
+			var gercek int64 = -1
+			if fi != nil {
+				gercek = fi.Size()
+			}
+			_ = os.Remove(gecici)
+			return "", fmt.Errorf("uzaktan indirme eksik: %d/%d bayt", gercek, bek)
+		}
+	}
+	if err := os.Rename(gecici, yol); err != nil {
+		_ = os.Remove(gecici)
+		return "", fmt.Errorf("indirilen dosya yerine konamadi: %w", err)
+	}
+	log.Printf("backup genel: %s uzak hedeften indirildi (dogrulandi)", dosya)
 	return yol, nil
+}
+
+// yedekBeklenenBoyut: backups tablosundaki kayitli boyut (0 = bilinmiyor).
+func yedekBeklenenBoyut(db *sql.DB, dosya string) (int64, error) {
+	var b int64
+	err := db.QueryRow(`SELECT boyut_b FROM backups WHERE dosya=? ORDER BY id DESC LIMIT 1`, dosya).Scan(&b)
+	return b, err
+}
+
+// indirmeKuyrugu: ayni yedek icin es zamanli/tekrarlanan indirmeleri engeller.
+// (Kullanici "geri yukle"ye ust uste basarsa 5 GB'lik dosya birden fazla kez
+// indirilmemeli.)
+var indirmeKuyrugu sync.Map // dosya adi -> zaman.Time (baslangic)
+
+// UzakIndirmeBaslat: yedegi ARKA PLANDA uzak hedeften indirir ve durum doner.
+//
+//	hazir=true  → dosya zaten yerelde ve dogru boyutta, hemen kullanilabilir
+//	hazir=false → indirme baslatildi/suruyor; cagiran islemi kuyruga almali
+//
+// 🔴 Neden: senkron geri-yukleme ucu indirmeyi ISTEGIN ICINDE yapiyordu. 5 GB'lik
+// bir yedekte bu dakikalar surer; tarayici/istemci cok daha once kopar ve
+// kullaniciya "sunucu yanit vermiyor" gibi ALAKASIZ bir hata doner — oysa is
+// arka planda surmektedir. Artik istek aninda doner, indirme arkada akar.
+func UzakIndirmeBaslat(db *sql.DB, sk, dosya string) (hazir bool, suruyor bool, err error) {
+	yol := filepath.Join(BackupRoot, sk, dosya)
+	bek, _ := yedekBeklenenBoyut(db, dosya)
+	if fi, e := os.Stat(yol); e == nil && (bek <= 0 || fi.Size() == bek) {
+		return true, false, nil
+	}
+	g := genelAyarOku(context.Background(), db)
+	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
+		return false, false, fmt.Errorf("yedek dosyası diskte bulunamadı")
+	}
+	if _, yukleniyor := indirmeKuyrugu.LoadOrStore(dosya, time.Now()); yukleniyor {
+		return false, true, nil // zaten iniyor
+	}
+	go func() {
+		defer indirmeKuyrugu.Delete(dosya)
+		if _, e := YerelDosyaHazirla(context.Background(), db, sk, dosya); e != nil {
+			log.Printf("backup: %s arka plan indirme basarisiz: %v", dosya, e)
+			bildirim.Yaz(db, "uyari", "yedek", "Yedek indirilemedi",
+				dosya+": uzak hedeften indirilemedi — "+e.Error(), 0, "backup", 0)
+			return
+		}
+		log.Printf("backup: %s arka plan indirme TAMAM, geri yukleme yapilabilir", dosya)
+	}()
+	return false, true, nil
 }
 
 // uzakKopyaVar: yedegin sistem geneli uzak hedefte TASARIM GEREGI durup durmadigini
@@ -398,4 +489,11 @@ func uzakBoyut(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi string) in
 		}
 	}
 	return -1
+}
+
+// dosyaDomainID: yedek dosya adindan domain_id (ilerleme kaydini bulmak icin).
+func dosyaDomainID(db *sql.DB, dosya string) int64 {
+	var id int64
+	_ = db.QueryRow(`SELECT domain_id FROM backups WHERE dosya=? ORDER BY id DESC LIMIT 1`, dosya).Scan(&id)
+	return id
 }

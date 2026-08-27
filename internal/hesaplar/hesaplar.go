@@ -276,3 +276,31 @@ func DBVarMi(dbName string) bool {
 	}
 	return strings.TrimSpace(string(out)) != ""
 }
+
+// MySQLKullaniciEkle: MEVCUT bir veritabanina kullanici + yetki ekler.
+//
+// 🔴 Neden MySQLCreateDB kullanilamiyor: o fonksiyon sonunda db_accounts'a INSERT
+// yapar; kaydi ZATEN var olan (ornegin geri yuklemede yeniden kaydedilmis) bir DB
+// icin bu UNIQUE(db_name) ihlali verir. Buradaki surum yalniz MariaDB tarafini
+// kurar, panel metadata'sini cagiran gunceller.
+//
+// Kullanim yeri: veritabani var ama kullanicisi YOK durumu — DB panelden silinip
+// yedekten geri yuklendiginde olusur (yedekte MySQL kullanicisi/GRANT bulunmaz).
+func MySQLKullaniciEkle(dbName, dbUser, dbPass string) error {
+	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
+	}
+	if !ParolaGecerli(dbPass) {
+		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
+	}
+	stmts := []string{
+		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
+		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
+		"FLUSH PRIVILEGES;",
+	}
+	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
+		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}

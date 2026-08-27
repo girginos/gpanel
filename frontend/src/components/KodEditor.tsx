@@ -185,7 +185,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             <button
               onClick={kaydet}
               disabled={kayitDurum === 'kaydediliyor' || kayitDurum === 'temiz'}
-              className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 dark:text-slate-500 text-white rounded font-medium"
+              className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded font-medium"
               title="Ctrl+S"
             >
               <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />{cevir("Kaydet")}</span>

@@ -1,11 +1,11 @@
 package domains
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"context"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -21,6 +21,9 @@ import (
 
 type setDBPwReq struct {
 	Parola string `json:"parola"`
+	// Kullanici: YALNIZ db_user bos oldugunda (kullanicisi olmayan veritabani)
+	// zorunludur — o durumda bu ad ile kullanici olusturulur.
+	Kullanici string `json:"kullanici"`
 }
 
 // SetDatabasePassword: PUT /api/v1/databases/:dbid/password
@@ -71,12 +74,48 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hesaplar.MySQLChangePassword(h.DB, dbUser, req.Parola); err != nil {
+	islem := "db.parola"
+	if strings.TrimSpace(dbUser) == "" {
+		// 🔴 KULLANICISI OLMAYAN VERITABANI. Bu durum, DB panelden silinip
+		// yedekten geri yuklendiginde olusur: yedek yalniz sema+veri icerir,
+		// MySQL kullanicisi ve GRANT'ler arsivde BULUNMAZ. Panel ise her DB'nin
+		// bir kullanicisi oldugunu varsayiyordu; sonuc olarak veritabani geri
+		// gelse bile site baglanamiyor ve panelde kullanici olusturma yolu YOKTU.
+		yeni := strings.TrimSpace(req.Kullanici)
+		if yeni == "" {
+			httpx.WriteError(w, http.StatusBadRequest,
+				"bu veritabanının kullanıcısı yok — oluşturmak için kullanıcı adı gönderin")
+			return
+		}
+		if !hesaplar.GecerliDBKimlik(yeni) {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı adı")
+			return
+		}
+		// Baska bir DB kaydinin kullanicisiyla CAKISMASIN (yetki sizmasi).
+		var cakisma int
+		if e := h.DB.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND id<>?`, yeni, dbid).Scan(&cakisma); e != nil || cakisma > 0 {
+			httpx.WriteError(w, http.StatusConflict, "bu kullanıcı adı başka bir veritabanında kullanılıyor")
+			return
+		}
+		if err := hesaplar.MySQLKullaniciEkle(dbName, yeni, req.Parola); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "kullanıcı oluşturulamadı: "+err.Error())
+			return
+		}
+		if _, err := h.DB.ExecContext(r.Context(),
+			`UPDATE db_accounts SET db_user=?, db_pass_plain=?, db_host='localhost' WHERE id=?`,
+			yeni, gizli.SaklaBagli(req.Parola, yeni), dbid); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "kayıt güncellenemedi: "+err.Error())
+			return
+		}
+		dbUser = yeni
+		islem = "db.kullanici-olustur"
+	} else if err := hesaplar.MySQLChangePassword(h.DB, dbUser, req.Parola); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "parola değişimi: "+err.Error())
 		return
 	}
 	uid, kul := middleware.Aktor(r)
-	httpx.DenetimDomain(h.DB, r, uid, kul, "db.parola", dbName, "kullanici="+dbUser, domainID, true)
+	httpx.DenetimDomain(h.DB, r, uid, kul, islem, dbName, "kullanici="+dbUser, domainID, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"dbid":         dbid,

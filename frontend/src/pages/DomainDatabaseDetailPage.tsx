@@ -152,7 +152,7 @@ export default function DomainDatabaseDetailPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("Bağlantı Bilgileri")}</h2>
             <dl className="space-y-3">
               <Satir e={cevir("Veritabanı adı")} v={db.db_adi} mono />
-              <Satir e={cevir("Kullanıcı")} v={db.db_kullanici} mono />
+              <Satir e={cevir("Kullanıcı")} v={db.db_kullanici || cevir("— tanımlı değil")} mono />
               <Satir e={cevir("Sunucu")} v={`${db.db_host}:3306`} mono />
               <div className="flex items-start justify-between gap-3 py-1.5">
                 <dt className="text-sm text-slate-500 dark:text-slate-400 pt-1">{cevir("Parola")}</dt>
@@ -174,7 +174,7 @@ export default function DomainDatabaseDetailPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("İşlemler")}</h2>
             <div className="flex flex-wrap gap-2">
               <button onClick={pmaAc} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-md"><Ikon d={I.kilitAcik} className="h-4 w-4" /> {cevir("phpMyAdmin'de Aç")}</button>
-              <button onClick={() => setPwReset(true)} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/40 rounded-md"><Ikon d={I.anahtar} className="h-4 w-4" /> {cevir("Parola Sıfırla")}</button>
+              <button onClick={() => setPwReset(true)} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/40 rounded-md"><Ikon d={I.anahtar} className="h-4 w-4" /> {db.db_kullanici ? cevir("Parola Sıfırla") : cevir("Kullanıcı Oluştur")}</button>
               <button onClick={optimizeEt} disabled={optCalisiyor} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-md disabled:opacity-50"><Ikon d={I.simsek} className={`h-4 w-4 ${optCalisiyor ? 'animate-pulse' : ''}`} /> {optCalisiyor ? cevir("Optimize ediliyor…") : cevir("Optimize Et")}</button>
               <button onClick={() => setSilOnay(true)} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md ml-auto"><Ikon d={I.cop} className="h-4 w-4" /> {cevir("Sil")}</button>
             </div>

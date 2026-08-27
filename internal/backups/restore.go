@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -63,11 +64,32 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 TEK TIK. Onceki surum "indirme basladi, tekrar deneyin" donuyordu;
+	// kullanici bir kez tikliyor, indirme arkada bitiyor ama GERI YUKLEME HIC
+	// BASLAMIYORDU (uretimde yasandi: "yine olmadi"). Artik istek, gerekiyorsa
+	// indirmeyi de kapsayacak sekilde is bitene kadar acik kalir; kullanici
+	// bekleyisi bos degil: ilerleme /domains/{id}/backups/ilerleme ucundan
+	// asama + yuzde olarak akar (nginx panel vhost'u 3600s okuma izni verir).
+	if IlerlemeAktifMi(id) {
+		httpx.WriteError(w, http.StatusTooManyRequests,
+			"bu domain için zaten bir işlem sürüyor, lütfen bekleyin")
+		return
+	}
+	IlerlemeBaslat(id, "geri", "hazırlanıyor", 0)
+	defer func() {
+		// Hata yollarinda da kayit kapansin (basarili bitis asagida ayrica yazilir).
+		if IlerlemeAktifMi(id) {
+			IlerlemeBitir(id, "", fmt.Errorf("geri yükleme tamamlanamadı"))
+		}
+	}()
+
+	// Yedek uzak hedefteyse burada indirilir; yuzde KESIN (beklenen boyut bilinir).
 	abs, err := YerelDosyaHazirla(r.Context(), h.DB, sk, dosya)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	IlerlemeAsama(id, "arşiv açılıyor", 0)
 
 	// Kota-dostu sahneleme: SADECE moda göre gereken üyeleri ROOT olarak /var/tmp'e
 	// çıkar (tenant home'unun tam kopyası tenant kotasını aşmadan). Güvenlik: üye
@@ -93,16 +115,48 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Mod {
 	case "tam":
+		IlerlemeAsama(id, "dosyalar geri yükleniyor", 0)
 		homeGeriYukle(tmpDir, sk, req.Temiz)
-		sonuc["db"] = tumDBGeriYukle(h.DB, id, tmpDir, sk, "")
-		sonuc["uyari"] = ezmeUyari(req.Temiz)
+		IlerlemeAsama(id, "veritabanı içe aktarılıyor", 0)
+		dbSonuc := tumDBGeriYukle(h.DB, id, tmpDir, sk, "")
+		sonuc["db"] = dbSonuc
+		y, a, hn, m := DBSonucOzeti(dbSonuc)
+		uyari := ezmeUyari(req.Temiz)
+		// Dosyalar geri geldi; DB tarafi eksikse bunu SOYLE (sessizce "tamam" deme).
+		if hn > 0 || (y == 0 && a > 0) {
+			uyari = strings.TrimSpace(uyari + " ⚠ Dosyalar geri yüklendi ancak veritabanı tarafında sorun var: " + m)
+		} else if y > 0 {
+			uyari = strings.TrimSpace(uyari + fmt.Sprintf(" %d veritabanı geri yüklendi.", y))
+		}
+		sonuc["uyari"] = uyari
 
 	case "dosyalar":
 		homeGeriYukle(tmpDir, sk, req.Temiz)
 		sonuc["uyari"] = ezmeUyari(req.Temiz)
 
 	case "veritabani":
-		sonuc["db"] = tumDBGeriYukle(h.DB, id, tmpDir, sk, strings.TrimSpace(req.DB))
+		IlerlemeAsama(id, "veritabanı içe aktarılıyor", 0)
+		dbSonuc := tumDBGeriYukle(h.DB, id, tmpDir, sk, strings.TrimSpace(req.DB))
+		sonuc["db"] = dbSonuc
+		// 🔴 SIFIR DB geri yuklendiyse bu BASARI DEGILDIR. Toplu-is yolunda
+		// duzeltilmisti; tekil (domain sayfasi) yolu hala "ok" donuyordu ve
+		// kullanici hicbir sey olmadigi halde "Geri yukleme tamam" goruyordu.
+		y, a, hn, m := DBSonucOzeti(dbSonuc)
+		if hn > 0 {
+			IlerlemeBitir(id, "", fmt.Errorf("%d veritabanı geri yüklenemedi — %s", hn, m))
+			httpx.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("%d veritabanı geri yüklenemedi — %s", hn, m))
+			return
+		}
+		if y == 0 {
+			msg := "bu yedekte geri yüklenecek veritabanı YOK"
+			if a > 0 {
+				msg = "hiçbir veritabanı geri yüklenmedi — " + m
+			}
+			IlerlemeBitir(id, "", fmt.Errorf("%s", msg))
+			httpx.WriteError(w, http.StatusBadRequest, msg)
+			return
+		}
+		sonuc["uyari"] = fmt.Sprintf("%d veritabanı geri yüklendi — %s", y, m)
 
 	case "dosya":
 		if len(req.Yollar) == 0 {
@@ -143,6 +197,8 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.geriyukle",
 		alanAdi, "mod="+req.Mod+" dosya="+dosya, id, true)
 
+	// Ilerleme kaydini BASARIYLA kapat (defer yalniz hata yollarini yakalar).
+	IlerlemeBitir(id, "Geri yükleme tamamlandı ("+req.Mod+")", nil)
 	httpx.WriteJSON(w, http.StatusOK, sonuc)
 }
 

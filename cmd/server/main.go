@@ -703,6 +703,7 @@ func main() {
 				r.With(middleware.AdminOnly).Delete("/customers/{id}", accountsH.DeleteCustomer)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backups", backupsH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/backups", backupsH.Create)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/backups/ilerleme", backupsH.IlerlemeGetir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/backups/{bid}/indir", backupsH.Download)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/backups/{bid}", backupsH.Delete)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/backups/{bid}/geriyukle", backupsH.Restore)

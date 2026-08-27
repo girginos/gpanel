@@ -172,15 +172,36 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusTooManyRequests, "bu domain için zaten bir yedekleme sürüyor, lütfen bekleyin")
 		return
 	}
-	defer yedekBitir(id)
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
-	defer cancel()
+	// NOT: kilidi (yedekBitir) ve context'i ARKA PLAN gorevi yonetir. Handler
+	// hemen dondugu icin burada birakmak kilidi is bitmeden acar ve ikinci bir
+	// yedek ayni anda baslayabilirdi.
 
 	stamp := time.Now().UTC().Format("20060102-150405")
 	dir := filepath.Join(BackupRoot, sk)
 	_ = os.MkdirAll(dir, 0700)
 	dosya := fmt.Sprintf("%s-%s.tar.gz", sk, stamp)
 	abs := filepath.Join(dir, dosya)
+
+	// 🔴 ASENKRON: 5 GB'lik bir tenant'ta yedek dakikalarca surer. Istek boyunca
+	// beklemek istemciyi kopariyor ve kullaniciya "sunucu yanit vermiyor" gibi
+	// alakasiz hatalar donduruyordu. Artik istek hemen doner; ilerleme
+	// GET /domains/{id}/backups/ilerleme ucundan izlenir.
+	IlerlemeBaslat(id, "yedek", "hazırlanıyor", oncekiYedekBoyutu(h.DB, id))
+	go h.yedekGorevi(id, alanAdi, sk, dir, dosya, abs)
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"ok":      true,
+		"basladi": true,
+		"dosya":   dosya,
+		"mesaj":   "Yedekleme başladı — ilerlemeyi bu sayfadan izleyebilirsiniz.",
+	})
+}
+
+// yedekGorevi: Create'in arka plan govdesi. Kendi context'i vardir (istek
+// context'i cevapla birlikte iptal olur).
+func (h *Handlers) yedekGorevi(id int64, alanAdi, sk, dir, dosya, abs string) {
+	defer yedekBitir(id)
+	ctx, iptal := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer iptal()
 
 	// TÜM domain DB'lerini (ana + wp_* vb.) + home'u tek arşive paketle.
 	boyut, sha, eksikDB, aerr := arsivOlustur(ctx, h.DB, id, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
@@ -190,15 +211,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		bildirim.Yaz(h.DB, "kritik", "yedek", "Yedek başarısız",
 			fmt.Sprintf("%s alan adının yedeği alınamadı veya bozuk: %s", sk, aerr.Error()),
 			id, "backup", 0)
-		httpx.WriteError(w, http.StatusInternalServerError, aerr.Error())
+		IlerlemeBitir(id, "", aerr)
 		return
 	}
 
-	res, err := h.DB.ExecContext(r.Context(),
+	res, err := h.DB.Exec(
 		`INSERT INTO backups(domain_id, tip, dosya, boyut_b, notlar, sha256, dogrulama) VALUES(?,?,?,?,?,?,'ok')`,
 		id, "tam", dosya, boyut, "alan adı: "+alanAdi, sha)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "DB kayıt: "+err.Error())
+		IlerlemeBitir(id, "", fmt.Errorf("DB kayıt: %w", err))
 		return
 	}
 	yid, _ := res.LastInsertId()
@@ -213,16 +234,35 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	pushToDestinationAsync(h.DB, id, abs, dosya)
 	// Tek-domain manuel yedek de sistem geneli uzak hedefe gitsin (toplu is +
 	// zamanlayici ile ayni davranis).
-	if genel := genelAyarOku(r.Context(), h.DB); genel.UzakAktif {
+	if genel := genelAyarOku(context.Background(), h.DB); genel.UzakAktif {
+		IlerlemeAsama(id, "uzak hedefe yükleniyor", 0)
 		pushGenelAsync(h.DB, genel, abs, dosya, yid)
 	}
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-		"ok":      true,
-		"id":      yid,
-		"dosya":   dosya,
-		"boyut_b": boyut,
-		"yol":     abs,
-	})
+	IlerlemeBitir(id, fmt.Sprintf("Yedek alındı: %s (%s)", dosya, insanBoyut(boyut)), nil)
+}
+
+// insanBoyut: bayt -> okunur metin.
+func insanBoyut(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.2f GB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(b)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", b)
+}
+
+// Ilerleme: GET /domains/{id}/backups/ilerleme — suren (veya yeni bitmis)
+// yedek/geri-yukleme durumu. Musteri sayfasi bunu 1.5 sn'de bir yoklar.
+func (h *Handlers) IlerlemeGetir(w http.ResponseWriter, r *http.Request) {
+	id, _, _, _, err := h.lookupDomain(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, IlerlemeOku(id))
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
