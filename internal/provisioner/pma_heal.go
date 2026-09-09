@@ -190,7 +190,12 @@ func ensurePMAToken() {
 		_ = os.Chown(pmaTokenPath, 0, gid)
 		_ = os.Chmod(pmaTokenPath, 0640)
 	} else {
-		_ = os.Chmod(pmaTokenPath, 0644) // apache grubu yok → pool okuyabilsin
+		// 🔴 FAIL-CLOSED (karsit denetim bulgusu): apache grubu yokken 0644'e
+		// GENISLETME — herkes-okur token, kiraci kabuk/FTP kullanicisina pma-redeem
+		// kanalini acardi. apache grubu yoksa phpMyAdmin havuzu da yok = signon
+		// zaten calismaz; token root'a kilitlenir, heal dongusu grup gelince 0640 yapar.
+		_ = os.Chmod(pmaTokenPath, 0600)
+		log.Printf("pma heal: UYARI — apache grubu yok; token 0600 kilitlendi (signon calismaz)")
 	}
 	log.Printf("pma heal: /etc/girginospanel/pma-internal.token üretildi")
 }

@@ -264,13 +264,25 @@ func dbKullanicilariUygula(dbDir string, izin map[string]bool) (int, error) {
 //
 // Donen metin kullaniciya gosterilecek EK aciklamadir; bos ise ek yok.
 func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
+	// 🔴 GUVENLIK (fail-closed): dbName arsiv icindeki DOSYA ADINDAN turetilebilir
+	// (arsivDBDosyalari) ve arsiv disaridan gelmis olabilir (site tasima).
+	// Backtick iceren bir ad asagidaki GRANT'in `%s` kimligini kirar ve mysql
+	// ROOT olarak zincirleme ifade calistirirdi. Gecersiz ad = kurtarma YOK.
+	if !gecerliKimlikMi(dbName) {
+		log.Printf("backup: kimlik kurtarma reddedildi (geçersiz db adı): %.60s", dbName)
+		return ""
+	}
 	if h := dbHesaplari(dbName); len(h) > 0 {
 		panelKaydiGuncelle(db, domainID, dbName, h[0].K, "")
 		return "kullanıcı " + h[0].K + " geri yüklendi"
 	}
 
 	kul, parola, kaynak := uygulamaKimligi(sk, dbName)
-	if kul == "" {
+	// 🔴 kul KIRACI-YAZILABILIR dosyadan (wp-config.php/.env) gelir; uygulamaKimligi
+	// zaten dogrular ama asagidaki Sprintf'in sahibi olarak burada da kesinlestir:
+	// "x'@'localhost' IDENTIFIED BY 'p'; DROP ...;-- " tarzi bir deger CREATE
+	// USER'in tek tirnagini kirip mysql root'ta zincirleme ifade calistirirdi.
+	if kul == "" || !gecerliKimlikMi(kul) {
 		return ""
 	}
 	stmt := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+

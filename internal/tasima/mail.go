@@ -171,6 +171,13 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log
 
 // pleskMailKesfet — kaynak Plesk'ten domainin GERÇEK kutularını + düz parolalarını alır.
 func pleskMailKesfet(ctx context.Context, k *Kaynak, alanAdi string) ([]mailHesap, error) {
+	// 🔴 Savunma katmanı: alanAdi çağıran zincirde (aktar.go, reAlanAdi) doğrulanır,
+	// ama burada uzak kabuk komutuna VE SQL'e tek tırnak içinde gömülüyor. Tırnak/
+	// metakarakter içeren bir değer kaynak sunucuda komut çalıştırırdı; kaynakCertOku
+	// ile aynı yerel kontrol burada da uygulanır.
+	if !reAlanAdi.MatchString(alanAdi) {
+		return nil, fmt.Errorf("gecersiz alan adi: %q", alanAdi)
+	}
 	// postbox='true' = gerçek kutu (yalnız forward/alias olan kayıtlar hariç).
 	q := `plesk db -Ne "SELECT m.mail_name FROM mail m JOIN domains d ON m.dom_id=d.id WHERE d.name='` +
 		alanAdi + `' AND m.postbox='true'" 2>/dev/null`

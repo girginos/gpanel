@@ -127,6 +127,12 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 func probe(targetURL string) DomainHealth {
 	res := DomainHealth{URL: targetURL}
 
+	// 🔴 InsecureSkipVerify BİLEREK açık ve YALNIZ bu tanı probuna özgü:
+	// müşterinin KENDİ alan adı yoklanır; self-signed/süresi geçmiş/uyumsuz
+	// sertifikalı siteler de sağlık raporu almalı (doğrulama açık olsa probe
+	// düşer, SSL durumu hiç raporlanamazdı). İstek kimlik bilgisi TAŞIMAZ
+	// (salt GET); sertifika geçerliliği aşağıda ayrıca okunup kullanıcıya
+	// raporlanır. Bu Transport panelin başka hiçbir API çağrısında KULLANILMAZ.
 	tlsCfg := &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
 	tr := &http.Transport{
 		TLSClientConfig:       tlsCfg,

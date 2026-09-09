@@ -206,7 +206,8 @@ func write(sk string, list []Gorev) error {
 			fmt.Fprintf(&buf, "# gosp-meta: %s\n", strings.Join(mp, " "))
 		}
 		if g.Yorum != "" {
-			fmt.Fprintf(&buf, "# %s\n", strings.ReplaceAll(g.Yorum, "\n", " "))
+			// 🔴 \r de temizlenir: yorumdan satır kaçışı olmasın (crontab satır enjeksiyonu).
+			fmt.Fprintf(&buf, "# %s\n", strings.NewReplacer("\n", " ", "\r", " ").Replace(g.Yorum))
 		}
 		// Pasif görev cron satırı '#' ile comment'lenir (crond çalıştırmaz) ama
 		// panel geri okuyabilir (looksCron).
@@ -246,12 +247,20 @@ func validate(g Gorev) error {
 		return fmt.Errorf("komut çok uzun (max %d)", maxKomut)
 	}
 	for _, f := range []string{g.Dakika, g.Saat, g.Gun, g.Ay, g.Hafta} {
-		if strings.ContainsAny(f, ";|&`\n") {
+		if strings.ContainsAny(f, ";|&`\n\r") {
 			return fmt.Errorf("zaman alanlarında geçersiz karakter")
 		}
 	}
 	if strings.ContainsAny(g.Komut, "\n\r") {
 		return fmt.Errorf("komutta satır sonu olamaz")
+	}
+	// 🔴 Meta alanlar "# gosp-meta:" YORUM satırına yazılır; \n içeren bir değer
+	// yorumdan taşıp crontab'a KEYFİ satır enjekte ederdi (satır enjeksiyonu —
+	// kendi crontab'ı da olsa panel doğrulamasını/maxKomut sınırını atlatır).
+	for _, f := range []string{g.Tip, g.PhpSurum, g.Bildirim} {
+		if strings.ContainsAny(f, "\n\r") {
+			return fmt.Errorf("meta alanlarında satır sonu olamaz")
+		}
 	}
 	return nil
 }

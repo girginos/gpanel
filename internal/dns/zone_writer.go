@@ -157,6 +157,13 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	if err := db.QueryRowContext(ctx, `SELECT alan_adi FROM domains WHERE id=?`, domainID).Scan(&alanAdi); err != nil {
 		return err
 	}
+	// 🔴 GUVENLIK (path traversal): alan_adi eklemede alanAdiRe'den gecer ama
+	// burada DB'den geri okunur. "/" veya ".." iceren bir deger zone yolunu
+	// ZoneDir disina tasir (or. ../../etc/x.zone yazimi + .bak/.tmp yan yollari).
+	// Yaprak ad ayirici iceremez — savunma derinligi olarak reddet.
+	if strings.ContainsAny(alanAdi, "/\\") || strings.Contains(alanAdi, "..") {
+		return fmt.Errorf("geçersiz alan adı: %q", alanAdi)
+	}
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, domain_id, ad, tip, deger, ttl, oncelik, aktif,
 		   DATE_FORMAT(created_at,'%Y-%m-%d %H:%i') FROM dns_records

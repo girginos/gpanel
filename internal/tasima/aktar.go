@@ -29,12 +29,12 @@ import (
 
 // AktarSonuc — bir hesabin tasima ciktisi.
 type AktarSonuc struct {
-	DomainID  int64
-	DosyaBayt int64
-	DBSayisi  int
-	DNSSayisi int
+	DomainID    int64
+	DosyaBayt   int64
+	DBSayisi    int
+	DNSSayisi   int
 	PostaSayisi int
-	Uyarilar  []string
+	Uyarilar    []string
 }
 
 // HesapAktar — TEK bir hesabi/domaini uctan uca tasir.
@@ -469,6 +469,16 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 }
 
 func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {
+	// 🔴 kul, taşınan sitenin wp-config.php'sinden okunur (saldırgan etkisine açık
+	// dosya) ve aşağıda mysql -e içine DİZE BİRLEŞTİRME ile giriyor. mysql CLI
+	// (root socket auth — panel DB kullanıcısı mysql.user'ı okuyamayabilir, bkz.
+	// kaynaklimit.mysqlUserHosts) parametreli sorgu desteklemez; bu yüzden girdi
+	// reDBAd allowlist'ine sabitlenir — tırnak/; içeren değer root MySQL'de SQL
+	// enjeksiyonu olurdu. Geçersiz değere "var" denir → çağıran orijinal-kimlik
+	// yolunu atlar (fail-closed, benzersiz panel adına düşer).
+	if !reDBAd.MatchString(kul) {
+		return true
+	}
 	out, err := exec.CommandContext(ctx, "mysql", "-N", "-B", "-e",
 		"SELECT COUNT(*) FROM mysql.user WHERE user='"+kul+"' AND host='localhost'").Output()
 	if err != nil {

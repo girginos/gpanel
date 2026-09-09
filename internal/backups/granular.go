@@ -152,8 +152,12 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		// HATA DEGILDIR (yedeklenecek veri yok). Yalniz GERCEKTEN VAR OLAN bir DB'nin dump'i
 		// basarisizsa "eksik veri" sayilir (kilit/izin/bozulma = gercek veri kaybi riski).
 		// mysqldump ile AYNI auth yolu (root socket) kullanilir ki gorunurluk tutarli olsun.
+		// 🔴 shq() ciktisi cift tirnak ICINE gomulmez: bash cift tirnak icinde
+		// $ ` \ genislemeye devam eder ve tek-tirnak kacisi etkisiz kalirdi.
+		// SQL'in tamami tek shq ile sarilir (dbName GecerliDBKimlik'ten gecmis
+		// [A-Za-z0-9_] oldugu icin SQL literali olarak da guvenlidir).
 		chk := exec.CommandContext(ctx, "bash", "-c",
-			fmt.Sprintf("mysql -N -e \"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=%s\"", shq(dbName)))
+			fmt.Sprintf("mysql -N -e %s", shq("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='"+dbName+"'")))
 		chkOut, chkErr := chk.Output()
 		if chkErr != nil {
 			// 🔴 "DB yok" ile "kontrol EDILEMEDI" ayni sey DEGILDIR. Eskiden hata
@@ -437,12 +441,20 @@ func arsivDBDosyalari(tmp, sk string) map[string]string {
 	return out
 }
 
-// dbImport: bir .sql dosyasini verilen (whitelist'ten gecmis) DB'ye import eder.
+// dbImport: bir .sql dosyasini verilen DB'ye import eder.
 func dbImport(dbName, sqlPath string) error {
+	// 🔴 GUVENLIK (fail-closed): dbName arsiv icindeki DOSYA ADINDAN gelebilir
+	// (arsivDBDosyalari HIC dogrulamaz) ve panel kaydi silinmis DB kurtarma
+	// yolunda (tumDBGeriYukle, sahip[name] yokken) whitelist'e ugramadan buraya
+	// ulasir; arsiv disaridan gelmis olabilir (site tasima). Backtick iceren
+	// "x`;DROP DATABASE ..." tarzi bir ad asagidaki CREATE DATABASE'in `%s`
+	// kimligini kirar ve mysql ROOT olarak zincirleme ifade calistirirdi.
+	if !hesaplar.GecerliDBKimlik(dbName) || sistemDBmi(dbName) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı reddedildi")
+	}
 	// 🔴 Hedef DB yoksa OLUSTUR. Eskiden dogrudan `mysql <ad> < dump` calisiyordu;
 	// veritabani silinmisse "Unknown database" ile patliyordu — yani tam da geri
 	// yuklemeye EN COK ihtiyac duyulan durumda (DB kaybi) restore imkansizdi.
-	// Ad zaten GecerliDBKimlik + sistemDBmi + sahiplik kapisindan gecmis olur.
 	if out, err := exec.Command("bash", "-c",
 		fmt.Sprintf("mysql -e %s", shq("CREATE DATABASE IF NOT EXISTS `"+dbName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))).CombinedOutput(); err != nil {
 		return fmt.Errorf("veritabanı oluşturulamadı: %s", strings.TrimSpace(string(out)))

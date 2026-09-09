@@ -69,8 +69,16 @@ func main() {
 	if err != nil {
 		oldu("paket üretilemedi: " + err.Error())
 	}
-	if err := os.WriteFile(*cikti, paket, 0o644); err != nil {
+	// 🔴 0600: imzali paket YAYIN ARACI ciktisi -- aynaya root yukler, yerelde
+	// baska kullanicinin okumasi gerekmez (kural seti yayin oncesi sizmasin).
+	// Chmod VAR OLAN dosyayi da daraltir (mod yalniz OLUSTURMADA uygulanir; umask'i da asar).
+	// os.WriteFile bilerek korundu: O_TRUNC tasir -- OpenFile+O_CREATE deseni TRUNC'siz
+	// olsaydi, kuculen paket eski dosyanin kuyrugunu tasir ve paket BOZULURDU.
+	if err := os.WriteFile(*cikti, paket, 0o600); err != nil {
 		oldu("çıktı yazılamadı: " + err.Error())
+	}
+	if err := os.Chmod(*cikti, 0o600); err != nil {
+		oldu("çıktı izinleri ayarlanamadı: " + err.Error())
 	}
 	fmt.Printf("✓ imzalı kural paketi: %s (sürüm %d, %d kural, %d bayt)\n",
 		*cikti, *surum, len(set.Kurallar), len(paket))

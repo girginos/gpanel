@@ -8,6 +8,18 @@
 declare(strict_types=1);
 session_name('pma_signon');
 ini_set('session.cookie_path', '/');
+// 🔴 Oturum sertlestirme (session fixation + cerez hirsizligi savunmasi):
+//  - use_strict_mode: PHP, deposunda OLMAYAN (saldirganin uydurdugu) oturum
+//    ID'lerini reddeder -> fixation'in birinci kapisi burada kapanir.
+//  - httponly: XSS cerezi okuyamaz; samesite=Lax: cross-site istek cerez
+//    tasimaz (panelden gelen top-level redirect calismaya devam eder).
+//  - secure: yalniz HTTPS'te acilir (duz-HTTP kurulum kirilmasin diye kosullu).
+ini_set('session.use_strict_mode', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+    ini_set('session.cookie_secure', '1');
+}
 session_start();
 
 if (empty($_GET['t'])) {
@@ -51,6 +63,12 @@ if (!is_array($data) || empty($data['kullanici'])) {
     http_response_code(500);
     die('Sunucudan beklenmedik yanit.');
 }
+
+// 🔴 SESSION FIXATION savunmasinin ikinci kapisi: kimlik dogrulama
+// BASARILI -- kimlik bilgileri yazilmadan ONCE oturum ID'si yenilenir, eski
+// oturum dosyasi SILINIR (true). Giris oncesi kurbana cerez sabitleyen bir
+// saldirgan, bildigi eski ID ile DB kullanici/parola tasiyan oturumu alamaz.
+session_regenerate_id(true);
 
 $_SESSION['PMA_single_signon_user']     = $data['kullanici'];
 $_SESSION['PMA_single_signon_password'] = $data['parola'];

@@ -76,6 +76,8 @@ func mailKutuLimitSenkron(ctx context.Context, db *sql.DB, domainID int64, alanA
 	pr.Header.Set("Content-Type", "application/json")
 	if pres, err := cl.Do(pr); err == nil {
 		pres.Body.Close()
-		log.Printf("mail limit senkron: %s → kutu=%d saatlik=%d kota=%dMB", alanAdi, kutu, saatlik, kotaMB)
+		// 🔴 Log nötrleme: alan adı %q ile yazılır — CR/LF vb. kaçışlanır,
+		// kullanıcı kaynaklı değerle sahte log satırı enjekte edilemez.
+		log.Printf("mail limit senkron: %q → kutu=%d saatlik=%d kota=%dMB", alanAdi, kutu, saatlik, kotaMB)
 	}
 }

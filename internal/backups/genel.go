@@ -329,6 +329,15 @@ func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, 
 // yedek alinmis ama panelden GERI YUKLENEMEZ durumdaydi (404 "yedek dosyası
 // diskte bulunamadı"). Kanit: uzaga tasinan yedek 404, yereli duran 200.
 func YerelDosyaHazirla(ctx context.Context, db *sql.DB, sk, dosya string) (string, error) {
+	// 🔴 GUVENLIK (path traversal): sk ve dosya DB'den okunur; uretimleri panel
+	// tarafinda (provisioner slug + sk-tarih.tar.gz) olsa da bu ORTAK cekirdek
+	// tum geri-yukleme yollarinin gecididir. "/" veya ".." iceren bir deger
+	// BackupRoot disina (or. /etc) cikip oradan okuma/indirme yapabilirdi —
+	// yaprak adlar ayirici iceremez, iceren deger reddedilir.
+	if strings.ContainsAny(sk, "/\\") || strings.Contains(sk, "..") ||
+		strings.ContainsAny(dosya, "/\\") || strings.Contains(dosya, "..") {
+		return "", fmt.Errorf("geçersiz yedek yolu bileşeni")
+	}
 	yol := filepath.Join(BackupRoot, sk, dosya)
 	// 🔴 VAR OLMAK YETMEZ, DOGRU OLMALI. Eskiden yalnizca os.Stat basariliysa
 	// dosya kabul ediliyordu. Panel indirme sirasinda yeniden baslarsa (deploy,
