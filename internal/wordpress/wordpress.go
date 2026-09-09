@@ -343,7 +343,14 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin oluşturulamadı")
 		return
 	}
-	_ = exec.Command("chown", "-R", sk+":"+sk, hedef).Run()
+	// 🔴 TOCTOU savunmasi: musteri (kendi kabugu var) MkdirAll ile chown arasinda
+	// hedefi symlink'le degistirebilir. Lstat kapisi + chown -h (symlink'in KENDISINI
+	// degistirir, isaret ettigi agaca inmez) birlikte kacisi kapatir.
+	if fi, lerr := os.Lstat(hedef); lerr != nil || !fi.IsDir() {
+		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin doğrulanamadı")
+		return
+	}
+	_ = exec.Command("chown", "-Rh", sk+":"+sk, hedef).Run()
 	_ = exec.Command("restorecon", "-R", hedef).Run()
 
 	// DB oluştur
@@ -351,15 +358,31 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	dbName := "wp_" + slug
 	dbUser := "wpu_" + slug
 	dbPass := hesaplar.RandomParola(24)
+	if slug == "" || dbPass == "" {
+		// 🔴 crypto/rand basarisiz — tahmin edilebilir kimlikle DEVAM ETME.
+		httpx.WriteError(w, http.StatusInternalServerError, "güvenli rastgele üretim başarısız")
+		return
+	}
 	if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "veritabanı oluşturulamadı: "+err.Error())
+		// 🔴 ham err.Error() musteri yanitina degil loga (mysql cikti detaylari).
+		log.Printf("wp kurulum: veritabanı oluşturulamadı (db=%s): %v", dbName, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "veritabanı oluşturulamadı")
 		return
 	}
 	basarisiz := func(asama string, out []byte) {
-		_, _ = h.DB.Exec("DROP DATABASE IF EXISTS `" + dbName + "`")
-		_, _ = h.DB.Exec("DROP USER IF EXISTS '" + dbUser + "'@'localhost'")
+		// 🔴 panel DB kullanicisinin tenant DB'lerinde DROP yetkisi YOK (Error 1044) —
+		// eski hali her basarisiz kurulumda yetim wp_<slug> DB + wpu_<slug> kullanici
+		// + db_accounts satiri biriktiriyordu. MySQLDropDB root-socket ile duser,
+		// metadata satirini da siler.
+		if derr := hesaplar.MySQLDropDB(h.DB, dbName, dbUser); derr != nil {
+			log.Printf("wp kurulum: başarısız-kurulum temizliği düşmedi (db=%s): %v", dbName, derr)
+		}
 		if req.AltDizin != "" { // sadece kendi oluşturduğumuz alt dizini temizle
 			_ = os.RemoveAll(hedef)
+		} else {
+			// kok kurulumda dizin silinmez; kurulumZatenVar bos-kok garantiledigi
+			// icin yalniz wp-* artiklarini kaldirmak guvenli.
+			_ = wpKokTemizle(hedef)
 		}
 		msg := strings.TrimSpace(string(out))
 		if len(msg) > 600 {
@@ -388,13 +411,17 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		url += "/" + req.AltDizin
 	}
 	adminParola := randParola()
+	if adminParola == "" {
+		basarisiz("yönetici parolası üretimi", nil)
+		return
+	}
 	if out, err := wpKomut(sk, "core", "install", "--url="+url, "--title="+req.SiteBasligi,
 		"--admin_user="+req.AdminKullanici, "--admin_password="+adminParola,
 		"--admin_email="+req.AdminEmail, "--skip-email", "--path="+hedef); err != nil {
 		basarisiz("WordPress kurulum", out)
 		return
 	}
-	_ = exec.Command("chown", "-R", sk+":"+sk, hedef).Run()
+	_ = exec.Command("chown", "-Rh", sk+":"+sk, hedef).Run() // -h: symlink'e inme (TOCTOU)
 	_ = exec.Command("restorecon", "-R", hedef).Run()
 
 	surum := ""
@@ -640,14 +667,18 @@ func (h *Handlers) dbSahipMi(ctx context.Context, dbName string, domainID int64)
 
 func randSlug() string {
 	b := make([]byte, 4)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "" // 🔴 tahmin edilebilir slug uretme — cagiran bos gorup durdurur
+	}
 	return hex.EncodeToString(b) // 8 hex char
 }
 
 func randParola() string {
 	const alfabe = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 	b := make([]byte, 18)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "" // 🔴 tahmin edilebilir parola uretme — cagiran bos gorup durdurur
+	}
 	out := make([]byte, 18)
 	for i, c := range b {
 		out[i] = alfabe[int(c)%len(alfabe)]

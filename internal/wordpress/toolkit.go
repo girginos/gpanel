@@ -262,6 +262,10 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 	parola := strings.TrimSpace(req.Parola)
 	if parola == "" {
 		parola = randParola()
+		if parola == "" {
+			httpx.WriteError(w, http.StatusInternalServerError, "güvenli parola üretimi başarısız")
+			return
+		}
 	} else if len(parola) < 8 || len(parola) > 100 {
 		httpx.WriteError(w, http.StatusBadRequest, "parola 8-100 karakter olmalı")
 		return
