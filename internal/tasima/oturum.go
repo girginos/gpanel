@@ -135,7 +135,19 @@ func (h *Handlers) OturumGetir(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) OturumSil(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	aktorUID, aktor := middleware.Aktor(r)
-	_, _ = h.DB.Exec(`DELETE FROM tasima_isleri WHERE id=? AND durum='oturum'`, id)
+	// Sahiplik kaydi YOK ve bilincli: oturumlar sunucu-seviyesi PAYLASILAN admin
+	// kaynagidir (Liste/Getir de filtresiz, rota AdminOnly). Buradaki sertlestirme
+	// durustluk icindir: hata yutulmaz, olmayan kayit "silindi" gorunmez ve
+	// denetim kaydi yalniz GERCEK silmede yazilir.
+	res, err := h.DB.Exec(`DELETE FROM tasima_isleri WHERE id=? AND durum='oturum'`, id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "oturum silinemedi")
+		return
+	}
+	if aff, _ := res.RowsAffected(); aff == 0 {
+		httpx.WriteError(w, http.StatusNotFound, "oturum bulunamadi ya da suresi doldu")
+		return
+	}
 	httpx.Denetim(h.DB, r, aktorUID, aktor, "tasima_oturum_sil", strconv.FormatInt(id, 10), "", 0, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
