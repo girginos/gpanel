@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -819,7 +820,19 @@ func arsivUyeCikarRoot(abs, destDir string, uyeler []string) (string, error) {
 // homeGeriYukle: tum home'u geri yukler. temiz=false → EZMEZ (yedekte olmayan aktif
 // dosyalar korunur, yalniz yedektekiler ustune yazilir). temiz=true → rsync --delete
 // (yedekteki tam durum; ESKI davranis, tehlikeli).
+// reSKGuvenli: provisioner.SlugFromDomain uretimi sistem kullanicisi —
+// "c_" oneki + kucuk harf/rakam/altcizgi (BenzersizKullanici sayi eki dahil).
+var reSKGuvenli = regexp.MustCompile(`^c_[a-z0-9_]{1,62}$`)
+
 func homeGeriYukle(tmp, sk string, temiz bool) {
+	// 🔴 fail-closed sk kapisi: sk DB'den gelir ve cagiranlar "c_" onekini
+	// denetler; ama bu fonksiyon "/home/"+sk yolunu root rsync/cp/chown'a
+	// verir — ayrac veya ".." tasiyabilecek bozuk bir deger (DB-tamper
+	// senaryosu) chokepoint'te de kesilir, 4 cagiran birden korunur.
+	if !reSKGuvenli.MatchString(sk) {
+		log.Printf("backups: homeGeriYukle geçersiz sk reddedildi: %q", sk)
+		return
+	}
 	extractedHome := filepath.Join(tmp, sk)
 	if _, err := os.Stat(extractedHome); err != nil {
 		return
