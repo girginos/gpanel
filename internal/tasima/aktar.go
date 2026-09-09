@@ -470,21 +470,29 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 
 func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {
 	// 🔴 kul, taşınan sitenin wp-config.php'sinden okunur (saldırgan etkisine açık
-	// dosya) ve aşağıda mysql -e içine DİZE BİRLEŞTİRME ile giriyor. mysql CLI
-	// (root socket auth — panel DB kullanıcısı mysql.user'ı okuyamayabilir, bkz.
-	// kaynaklimit.mysqlUserHosts) parametreli sorgu desteklemez; bu yüzden girdi
-	// reDBAd allowlist'ine sabitlenir — tırnak/; içeren değer root MySQL'de SQL
-	// enjeksiyonu olurdu. Geçersiz değere "var" denir → çağıran orijinal-kimlik
+	// dosya). mysql CLI (root socket auth — panel DB kullanıcısı mysql.user'ı
+	// okuyamayabilir, bkz. kaynaklimit.mysqlUserHosts) parametreli sorgu
+	// desteklemez; bu yüzden SQL tamamen SABİT tutulur — kullanıcı girdisi
+	// sorguya hiçbir biçimde girmez, karşılaştırma Go tarafında yapılır
+	// (parametrize sorgunun yapısal eşdeğeri). reDBAd allowlist'i ilk kapı
+	// olarak kalır; geçersiz değere "var" denir → çağıran orijinal-kimlik
 	// yolunu atlar (fail-closed, benzersiz panel adına düşer).
 	if !reDBAd.MatchString(kul) {
 		return true
 	}
 	out, err := exec.CommandContext(ctx, "mysql", "-N", "-B", "-e",
-		"SELECT COUNT(*) FROM mysql.user WHERE user='"+kul+"' AND host='localhost'").Output()
+		"SELECT user FROM mysql.user WHERE host='localhost'").Output()
 	if err != nil {
+		// mevcut davranış korunur: belirsizlikte çağıran orijinal yolu dener,
+		// MySQLCreateDB hatası zaten "benzersize düşülüyor" loguyla zarifçe düşer.
 		return false
 	}
-	return strings.TrimSpace(string(out)) != "0"
+	for _, satir := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(satir) == kul {
+			return true
+		}
+	}
+	return false
 }
 
 // benzersizHedefDB — "olduser_wp" → "<sk>_wp". 64 karakter sinirinda KIRPMAK
