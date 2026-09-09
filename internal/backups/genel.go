@@ -304,7 +304,10 @@ func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, 
 			`get "%s" -o "%s"; `+
 			`bye`,
 		lftpEscape(g.UzakKullanici), lftpEscape(g.UzakParola), url,
-		lftpEscape(uzakDizin), lftpEscape(dosyaAdi), yerelYol)
+		// 🔴 yerelYol sunucu uretimidir ama betikte cift tirnak icine gomuluyor;
+		// lftpEscape olasi tirnak/ters-bolu kacisini bastan kapatir (destination.go
+		// uploadToRemote'daki kuralin aynisi).
+		lftpEscape(uzakDizin), lftpEscape(dosyaAdi), lftpEscape(yerelYol))
 	cmd, temizle, err := lftpKomutu(ctx, betik)
 	if err != nil {
 		return err

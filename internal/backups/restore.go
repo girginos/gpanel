@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -52,7 +53,9 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		// 🔴 ham err.Error() musteri yanitina degil loga — DB ic detaylari sizmasin.
+		log.Printf("restore: yedek kaydı okunamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı okunamadı")
 		return
 	}
 	if isDemo == 1 {

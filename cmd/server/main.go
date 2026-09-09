@@ -115,6 +115,7 @@ func main() {
 	// migrations
 	runMigrations(d)
 	gizli.ParolalariSifrele(d)          // mevcut duz-metin DB parolalarini at-rest sifrele (idempotent)
+	gizli.RedisParolalariSifrele(d)     // redis ACL parolalari icin ayni gecis (idempotent)
 	gizli.SaglikKontrol(d)              // anahtar gercekten cozuyor mu (sessiz bozulma uyarisi)
 	gizli.PMATokenSupur(d, time.Minute) // suresi gecmis pma token satirlari birikmesin
 

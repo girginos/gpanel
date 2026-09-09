@@ -69,7 +69,9 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, domain_id, tip, dosya, boyut_b, notlar, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i')
 		 FROM backups WHERE domain_id=? ORDER BY id DESC`, id)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		// 🔴 ham err.Error() musteri yanitina degil loga — DB ic detaylari sizmasin.
+		log.Printf("backups: liste okunamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "yedekler listelenemedi")
 		return
 	}
 	defer rows.Close()

@@ -84,7 +84,10 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 			`put -O . "%s"; `+
 			`bye`,
 		lftpEscape(d.Kullanici), lftpEscape(d.Parola), url,
-		lftpEscape(d.UzakDizin), lftpEscape(d.UzakDizin), localPath)
+		// 🔴 localPath sunucu üretimidir ama betikte çift tırnak içine gömülüyor;
+		// lftpEscape olası bir tırnak/ters-bölü kaçışını (lftp betik enjeksiyonu →
+		// `!komut` kabuk kaçışı) baştan kapatır — dosyadaki diğer alanlarla aynı kural.
+		lftpEscape(d.UzakDizin), lftpEscape(d.UzakDizin), lftpEscape(localPath))
 
 	cmd, temizle, err := lftpKomutu(ctx, script)
 	if err != nil {

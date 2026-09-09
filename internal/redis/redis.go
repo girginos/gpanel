@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -205,13 +206,16 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var aktif int
-	var pass string
+	var rowSK, pass string
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT aktif, redis_pass FROM cp_domain_redis WHERE domain_id=?`, id).Scan(&aktif, &pass)
+		`SELECT aktif, sk, redis_pass FROM cp_domain_redis WHERE domain_id=?`, id).Scan(&aktif, &rowSK, &pass)
 	if err != nil || aktif == 0 {
 		httpx.WriteJSON(w, http.StatusOK, durumResp{Aktif: false, Host: redisHost, Port: redisPort, Kullanici: sk, Prefix: sk + ":"})
 		return
 	}
+	// 🔴 at-rest sifreli (Ac + gizli.RedisParolalariSifrele gecisi); baglam =
+	// SATIRIN kendi sk'si (rename'e dayanikli). Eski duz-metin satir oldugu gibi doner.
+	pass = gizli.CozBagli(pass, rowSK)
 	httpx.WriteJSON(w, http.StatusOK, durumResp{
 		Aktif: true, Host: redisHost, Port: redisPort, Kullanici: sk, Parola: pass,
 		Prefix: sk + ":", WPSnippet: wpSnippet(sk, pass),
@@ -231,15 +235,17 @@ func (h *Handlers) Ac(w http.ResponseWriter, r *http.Request) {
 	}
 	pass := genPass()
 	if err := enableUser(sk, pass); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "Redis ACL oluşturulamadı: "+err.Error())
+		log.Printf("redis: ACL oluşturulamadı (sk=%s): %v", sk, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "Redis ACL oluşturulamadı")
 		return
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO cp_domain_redis (domain_id, sk, redis_pass, aktif) VALUES (?,?,?,1)
 		 ON DUPLICATE KEY UPDATE sk=VALUES(sk), redis_pass=VALUES(redis_pass), aktif=1`,
-		id, sk, pass); err != nil {
+		id, sk, gizli.SaklaBagli(pass, sk)); err != nil {
 		disableUser(sk) // DB başarısızsa ACL'i geri al
-		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi: "+err.Error())
+		log.Printf("redis: kayıt yazılamadı (sk=%s): %v", sk, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi")
 		return
 	}
 	// WordPress kurulumları varsa otomatik bağla (best-effort — WP yoksa snippet elle kalır)

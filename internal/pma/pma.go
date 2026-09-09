@@ -145,9 +145,19 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token süresi doldu", http.StatusGone)
 		return
 	}
-	// Tek-kullanim: işaretle
-	_, _ = h.DB.ExecContext(r.Context(),
-		`UPDATE pma_tokens SET kullanildi=1 WHERE token=?`, req.Token)
+	// Tek-kullanim: ATOMİK işaretle — SELECT-sonra-UPDATE arasindaki yarista
+	// (ayni token'la eszamanli iki bozdurma) yalniz ILK istek kazanir;
+	// RowsAffected 1 degilse baska istek once davranmistir → kimlik bilgisi VERME.
+	res, uerr := h.DB.ExecContext(r.Context(),
+		`UPDATE pma_tokens SET kullanildi=1 WHERE token=? AND kullanildi=0`, req.Token)
+	if uerr != nil {
+		http.Error(w, "token işaretlenemedi", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		http.Error(w, "token zaten kullanılmış", http.StatusGone)
+		return
+	}
 
 	// 🔴 host DAİMA localhost (socket). Cloud/GCP'de dış IP NIC'te yok → TCP hairpin/denied;
 	// ayrıca DB-user'lar @localhost (socket) kayıtlı → 127.0.0.1 (TCP) eşleşmez. pma-signon.php

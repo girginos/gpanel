@@ -318,6 +318,13 @@ func HealZoneIncludes(ctx context.Context, db *sql.DB) error {
 }
 
 func DeleteZone(ctx context.Context, db *sql.DB, alanAdi string) error {
+	// 🔴 GUVENLIK (path traversal): alanAdi caller'in DB Scan'inden gelir —
+	// WriteZone'daki kapinin aynisi (savunma derinligi, DB-tamper senaryosu).
+	// Regex ekleme yolunda "/" zaten giremez; bu kapi bozuk DB satirinin
+	// ".zone" son ekiyle keyfi dosya sildirmesini keser.
+	if strings.ContainsAny(alanAdi, "/\\") || strings.Contains(alanAdi, "..") {
+		return fmt.Errorf("geçersiz alan adı: %q", alanAdi)
+	}
 	_ = os.Remove(filepath.Join(ZoneDir, alanAdi+".zone"))
 	_ = updateZoneIncludes(ctx, db)
 	reloadNamed()
