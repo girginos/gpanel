@@ -161,6 +161,12 @@ func main() {
 	// efektif kotayı (domain override > plan > varsayılan) idempotent uygula; noquota ise
 	// (tek seferlik reboot bekliyor) sessizce atla. Boot'u bloklamaz (bg goroutine).
 	go kaynaklimit.HealKotaOnStartup(context.Background(), d)
+	// Cross-tenant GRANT-joker onarimi (pentest 2026-09-13): eski KACISSIZ
+	// grant'lerde db adindaki _ / % LIKE-joker gibi davranip komsu tenant
+	// DB'lerine erisim aciyordu. GrantDBKac YENI grant'leri kacisliyor; bu
+	// heal MEVCUT grant'leri panel her acilista idempotent kacisli hale
+	// getirir (kaynak: db_accounts, DCL root-socket). Boot'u bloklamaz.
+	go hesaplar.HealGrantJokerleri(context.Background(), d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
@@ -873,10 +879,69 @@ func gocDefteriKur(d *sql.DB) (map[string]string, bool) {
 	return uygulanan, true
 }
 
+// gocDiziniGuvenli: goc dizini root'a mi ait ve grup/diger-yazilamaz mi?
+// (Corgea "SQLi" FP -> defense-in-depth.) Dogru kurulumda root:root 0755 -> gecer.
+// Gevsek izin / root-disi sahiplik / symlink = birinin goc SQL'ine mudahale
+// ihtimali -> FAIL-CLOSED: goc kosmaz, acikca loglanir. Goc dosyalari imzali
+// surumle gelir ve YALNIZ root'un yazabildigi yerden calistirilir.
+func gocDiziniGuvenli(dir string) bool {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		log.Printf("🔴 goc dizini stat edilemedi (%s): %v — GOC DEVRE DISI", dir, err)
+		return false
+	}
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		log.Printf("🔴 goc yolu duz dizin degil / symlink (%s) — GOC DEVRE DISI", dir)
+		return false
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		log.Printf("🔴 goc dizini grup/diger-yazilabilir (%s, %#o) — root-disi "+
+			"mudahaleye acik, GOC DEVRE DISI. Duzeltme: chown root:root %s && chmod 755 %s",
+			dir, fi.Mode().Perm(), dir, dir)
+		return false
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 {
+		log.Printf("🔴 goc dizini root'a ait degil (%s, uid=%d) — GOC DEVRE DISI. "+
+			"Duzeltme: chown -R root:root %s", dir, st.Uid, dir)
+		return false
+	}
+	return true
+}
+
+// gocDosyasiGuvenli: tek goc dosyasi duz dosya mi, root'a mi ait, grup/diger
+// yazilamaz mi? (symlink-swap + gevsek-izin savunmasi). e.Info()/e.Type()
+// lstat tabanlidir: symlink HEDEFINI degil link'in kendisini raporlar.
+func gocDosyasiGuvenli(e os.DirEntry) bool {
+	if e.Type()&os.ModeSymlink != 0 || !e.Type().IsRegular() {
+		log.Printf("🔴 goc dosyasi duz dosya degil / symlink (%s) — ATLANDI", e.Name())
+		return false
+	}
+	fi, err := e.Info()
+	if err != nil {
+		log.Printf("🔴 goc dosyasi bilgisi alinamadi (%s): %v — ATLANDI", e.Name(), err)
+		return false
+	}
+	if fi.Mode().Perm()&0o022 != 0 {
+		log.Printf("🔴 goc dosyasi grup/diger-yazilabilir (%s, %#o) — ATLANDI (mudahale riski)",
+			e.Name(), fi.Mode().Perm())
+		return false
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Uid != 0 {
+		log.Printf("🔴 goc dosyasi root'a ait degil (%s, uid=%d) — ATLANDI", e.Name(), st.Uid)
+		return false
+	}
+	return true
+}
+
 func runMigrations(d *sql.DB) {
 	// Gercek (zararsiz olmayan) goc hatalarinin sayisi.
 	gercekHata := 0
 	dir := "/opt/girginospanel/src/migrations"
+	// 🔴 Guvenlik (defense-in-depth, Corgea SQLi FP): goc SQL'i YALNIZ root'un
+	// yazabildigi, root'a ait bir dizinden calisir. Degilse fail-closed (kosma).
+	if !gocDiziniGuvenli(dir) {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		log.Printf("migrations dir okunamadı: %v", err)
@@ -891,6 +956,9 @@ func runMigrations(d *sql.DB) {
 
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		if !gocDosyasiGuvenli(e) {
 			continue
 		}
 		body, err := os.ReadFile(dir + "/" + e.Name())

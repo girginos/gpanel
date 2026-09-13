@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 
 	"girginospanel/internal/httpx"
 
@@ -120,21 +123,32 @@ func gidAdi(gid uint32) string {
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	home, _, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	rel := r.URL.Query().Get("yol")
 	if rel == "" {
 		rel = "/"
 	}
-	abs, err := jailJoinStrict(home, rel)
+	// 🔴 TOCTOU-guvenli: jailJoinStrict (string, kontrol-ani) yerine openat2
+	// (RESOLVE_NO_SYMLINKS) ile dizini fd olarak ac — ara-bilesen symlink
+	// takasi imkansiz. Bayat/silinmis yol → 404; symlink/ENOTDIR/EACCES →
+	// generic (mutlak /home/<sk> yolu sizmaz).
+	df, err := openAt2Beneath(home, rel, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		if os.IsNotExist(err) {
+			httpx.WriteError(w, http.StatusNotFound, "yol bulunamadi: "+rel)
+			return
+		}
+		log.Printf("files List: dizin acilamadi (rel=%s): %v", rel, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "dizin okunamadı")
 		return
 	}
-	dir, err := os.ReadDir(abs)
+	defer df.Close()
+	dir, err := df.ReadDir(-1)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "okuma: "+err.Error())
+		log.Printf("files List: dizin listelenemedi (rel=%s): %v", rel, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "dizin okunamadı")
 		return
 	}
 	out := make([]Entry, 0, len(dir))
@@ -186,16 +200,19 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 	home, _, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	rel := r.URL.Query().Get("yol")
-	abs, err := jailJoinStrict(home, rel)
+	// 🔴 TOCTOU-guvenli: openat2 ile fd ac (symlink ara-bilesen reddedilir);
+	// Stat ve icerik AYNI fd'den → kontrol ile okuma arasinda takas yok.
+	f, err := openAt2Beneath(home, rel, unix.O_RDONLY, 0)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusNotFound, "bulunamadı")
 		return
 	}
-	info, err := os.Stat(abs)
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "bulunamadı")
 		return
@@ -204,12 +221,6 @@ func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "klasör indirilemez")
 		return
 	}
-	f, err := os.Open(abs)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "açılamadı: "+err.Error())
-		return
-	}
-	defer f.Close()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+info.Name()+"\"")
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
@@ -220,27 +231,34 @@ func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
 	home, _, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	rel := r.URL.Query().Get("yol")
-	abs, err := jailJoinStrict(home, rel)
-	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	info, err := os.Stat(abs)
+	// 🔴 TOCTOU-guvenli: openat2 fd; Stat ve icerik AYNI fd'den okunur.
+	f, err := openAt2Beneath(home, rel, unix.O_RDONLY, 0)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "bulunamadı")
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "bulunamadı")
+		return
+	}
+	if info.IsDir() {
+		httpx.WriteError(w, http.StatusBadRequest, "klasör okunamaz")
 		return
 	}
 	if info.Size() > 2*1024*1024 {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya 2 MB'tan büyük; düzenleme için uygun değil")
 		return
 	}
-	data, err := os.ReadFile(abs)
+	data, err := io.ReadAll(f)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("files Read: dosya okunamadi (rel=%s): %v", rel, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "dosya okunamadı")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -257,7 +275,7 @@ type mkdirReq struct {
 func (h *Handlers) Mkdir(w http.ResponseWriter, r *http.Request) {
 	home, sk, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	var req mkdirReq
@@ -269,7 +287,8 @@ func (h *Handlers) Mkdir(w http.ResponseWriter, r *http.Request) {
 	// dizinler fd üzerinden tenant'a chown edilir (bkz. safeio.go). Eski os.MkdirAll(abs)
 	// resolved-string üzerinde çalışıp ara-dizin symlink takasına açıktı.
 	if err := mkdirAllBeneath(home, req.Yol, sk); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "mkdir: "+err.Error())
+		log.Printf("files Mkdir: klasor olusturulamadi (home=%s yol=%s): %v", home, req.Yol, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "klasör oluşturulamadı")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "yol": req.Yol})
@@ -278,7 +297,7 @@ func (h *Handlers) Mkdir(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	home, _, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	rel := r.URL.Query().Get("yol")
@@ -290,7 +309,8 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	// fd-özyinelemeli unlinkat ile sil (bkz. safeio.go). Eski os.RemoveAll(abs) resolved-string
 	// üzerinde çalışıp ara-dizin symlink takasıyla jail-dışı silmeye kandırılabilirdi.
 	if err := removeAllBeneath(home, rel); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "silme: "+err.Error())
+		log.Printf("files Delete: silinemedi (home=%s yol=%s): %v", home, rel, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": rel})
@@ -334,7 +354,7 @@ func diskSerbestBirak() {
 func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	home, sk, err := h.home(r)
 	if err != nil {
-		httpx.WriteError(w, statusFromErr(err), err.Error())
+		evHatasiYaz(w, err)
 		return
 	}
 	rel := r.URL.Query().Get("yol")
@@ -358,7 +378,8 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "yükleme boyutu sınırı aştı (max 2 GiB)")
 			return
 		}
-		httpx.WriteError(w, http.StatusBadRequest, "form parse: "+err.Error())
+		log.Printf("files Upload: multipart ayristirilamadi: %v", err)
+		httpx.WriteError(w, http.StatusBadRequest, "yükleme formu okunamadı")
 		return
 	}
 	// DoS: 32MB ustu multipart geciciyi DISKE tasir; RemoveAll cagrilmazsa
@@ -370,7 +391,8 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	}()
 	file, fh, err := r.FormFile("dosya")
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "dosya alanı bulunamadı: "+err.Error())
+		log.Printf("files Upload: dosya alani bulunamadi: %v", err)
+		httpx.WriteError(w, http.StatusBadRequest, "dosya alanı bulunamadı")
 		return
 	}
 	defer file.Close()
@@ -391,7 +413,8 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	written, err := copyStreamBeneath(home, dstRel, file, sk)
 	if err != nil {
 		_ = removeAllBeneath(home, dstRel)
-		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
+		log.Printf("files Upload: yazilamadi (home=%s hedef=%s): %v", home, dstRel, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "dosya yazılamadı")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{
@@ -413,6 +436,19 @@ func yetkiRWX(m os.FileMode) string {
 		}
 	}
 	return string(b)
+}
+
+// evHatasiYaz: h.home() hatalarini yanitlar. Sentinel hatalarin metni musteriye
+// gosterilebilir (demo/gecersiz kullanici/jail ihlali); BILINMEYEN hata (or. DB)
+// ham metniyle yazilmaz — jenerik mesaj doner, ayrinti loga gider.
+func evHatasiYaz(w http.ResponseWriter, err error) {
+	switch err {
+	case os.ErrNotExist, errDemo, errBadUser, errEscape:
+		httpx.WriteError(w, statusFromErr(err), err.Error())
+		return
+	}
+	log.Printf("files: ev dizini cozumlenemedi: %v", err)
+	httpx.WriteError(w, http.StatusInternalServerError, "işlem tamamlanamadı")
 }
 
 func statusFromErr(err error) int {

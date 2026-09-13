@@ -747,7 +747,7 @@ func (h *Handlers) geciciImportKullanicisi(ctx context.Context, hedefDB string) 
 	pw := hesaplar.RandomParola(28)
 	for _, q := range []string{
 		"CREATE USER '" + kul + "'@'localhost' IDENTIFIED BY '" + pw + "'",
-		"GRANT ALL PRIVILEGES ON `" + hedefDB + "`.* TO '" + kul + "'@'localhost'",
+		"GRANT ALL PRIVILEGES ON `" + hesaplar.GrantDBKac(hedefDB) + "`.* TO '" + kul + "'@'localhost'",
 		"FLUSH PRIVILEGES",
 	} {
 		c := exec.CommandContext(ctx, "mysql", "-e", q)

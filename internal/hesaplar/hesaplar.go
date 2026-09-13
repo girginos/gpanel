@@ -2,10 +2,12 @@
 package hesaplar
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"girginospanel/internal/gizli"
+	"log"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -17,17 +19,34 @@ func RandomParola(n int) string {
 		n = 20
 	}
 	const harf = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
-	b := make([]byte, n)
-	// 🔴 Hata YUTULMAZ: crypto/rand okunamazsa b tamamen sifir kalir ve
-	// uretilen "parola" AAAA... olur. Bos donup cagirani durdurmak,
-	// tahmin edilebilir parola vermekten iyidir.
-	if _, err := rand.Read(b); err != nil {
-		return ""
+	// 🔴 MODULO YANLILIGI: alfabe 56 karakter, 256 % 56 = 32 artik birakir →
+	// 0..31 bayt degerlerine dusen ilk 32 harf digerlerinden ~%20 daha sik
+	// cikiyordu. Reddetme ornekleme (rejection sampling): 56'nin 256'yi asmayan
+	// en buyuk kati 224'tur; >=224 baytlar ATILIR ve yerine yenisi cekilir.
+	const esik = 256 - (256 % len(harf)) // 224
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for tur := 0; len(out) < n; tur++ {
+		if tur > 64 {
+			return "" // pratikte imkansiz; yine de sonsuz donguye kapi birakma
+		}
+		// Hata YUTULMAZ: crypto/rand okunamazsa buf tamamen sifir kalir ve
+		// uretilen "parola" AAAA... olur. Bos donup cagirani durdurmak,
+		// tahmin edilebilir parola vermekten iyidir.
+		if _, err := rand.Read(buf); err != nil {
+			return ""
+		}
+		for _, v := range buf {
+			if int(v) >= esik {
+				continue // yanliligi yaratan artik bolge — at, yeniden cek
+			}
+			out = append(out, harf[int(v)%len(harf)])
+			if len(out) == n {
+				break
+			}
+		}
 	}
-	for i := range b {
-		b[i] = harf[int(b[i])%len(harf)]
-	}
-	return string(b)
+	return string(out)
 }
 
 var reDBKimlik = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
@@ -79,6 +98,19 @@ func MusteriDBKimlikGecerli(sk, s string) bool {
 	return s == sk || strings.HasPrefix(s, sk+"_")
 }
 
+// GrantDBKac: GRANT/REVOKE'ta backtick'li DB ADI icin LIKE-joker kacisi.
+// 🔴 MySQL/MariaDB, GRANT ... ON `db`.* ifadesindeki db adinda `_` ve `%`
+// karakterlerini backtick icinde OLSA BILE joker sayar. DB adlari <slug>_<sonek>
+// biciminde alt-cizgiyle dolu ve sonek kiraci kontrolunde; kacissiz GRANT bir
+// kiracinin yetkisini komsu DB'lere tasiyor (cross-tenant; canli kanitlandi).
+// Literal istenirse \_ / \%% kacisi sart. YALNIZ GRANT/REVOKE icin; CREATE/DROP
+// DATABASE adi LITERAL alir, orada KULLANMA.
+func GrantDBKac(s string) string {
+	s = strings.ReplaceAll(s, "_", `\_`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	return s
+}
+
 // sqlKac: MySQL string-literal ('...') icin kacis (ters-bolu + tek-tirnak)
 func sqlKac(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
@@ -126,7 +158,7 @@ func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) er
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
 		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
 		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
 		"FLUSH PRIVILEGES;",
 	}
 	sql := strings.Join(stmts, " ")
@@ -161,7 +193,7 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 	// DB olustur + mevcut kullaniciya GRANT (CREATE/ALTER USER YOK → parola korunur).
 	stmts := []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
 		"FLUSH PRIVILEGES;",
 	}
 	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
@@ -296,11 +328,83 @@ func MySQLKullaniciEkle(dbName, dbUser, dbPass string) error {
 	stmts := []string{
 		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
 		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", dbName, dbUser),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
 		"FLUSH PRIVILEGES;",
 	}
 	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// HealGrantJokerleri: MEVCUT kurulumlarda eski KACISSIZ GRANT'leri onarir.
+// Eski "GRANT ALL ON `db`.*" satirlarinda db adindaki _ ve % LIKE-joker gibi
+// davranip komsu tenant DB'lerine erisim aciyordu (cross-tenant, canli kanit).
+// GrantDBKac artik YENI grant'leri kacisliyor; bu fonksiyon panel HER acilista
+// MEVCUT grant'leri idempotent olarak kacisli hale getirir.
+//
+// Kaynak = panel'in KENDI db_accounts tablosu (c_*_db + wpu_* kayitlari; ikisi
+// de MySQLCreateDB uzerinden yazildigi icin tam). DCL root-socket (mysql CLI),
+// tenant DB olusturmayla ayni yol. Yalniz GecerliDBKimlik gecen adlar islenir
+// => backtick/tirnak yok => SQLi kapali.
+//
+// Idempotency: mysql.db'de Db degeri TAM ad'a ("=" ile, _ literal) esitse
+// kacissiz grant hala duruyor demektir; kacisli satirin Db'si "db\_x" oldugu
+// icin bu esitligi saglamaz => zaten onarilmis satirlar atlanir.
+func HealGrantJokerleri(ctx context.Context, db *sql.DB) {
+	rows, err := db.QueryContext(ctx, "SELECT db_name, db_user FROM db_accounts")
+	if err != nil {
+		log.Printf("grant-joker heal: db_accounts okunamadi: %v", err)
+		return
+	}
+	type cift struct{ ad, kul string }
+	var liste []cift
+	for rows.Next() {
+		var c cift
+		if err := rows.Scan(&c.ad, &c.kul); err == nil {
+			liste = append(liste, c)
+		}
+	}
+	rows.Close()
+
+	var onarilan, atlanan, hata int
+	for _, c := range liste {
+		if !GecerliDBKimlik(c.ad) || !GecerliDBKimlik(c.kul) {
+			atlanan++
+			continue
+		}
+		esc := GrantDBKac(c.ad)
+		if esc == c.ad {
+			atlanan++ // _ veya % yok -> joker riski yok
+			continue
+		}
+		// Kacissiz grant HALA duruyor mu? ("=" literal eslesme)
+		q := fmt.Sprintf(
+			"SELECT 1 FROM mysql.db WHERE User='%s' AND Host='localhost' AND Db='%s' LIMIT 1",
+			c.kul, c.ad)
+		out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", q).Output()
+		if err != nil {
+			log.Printf("grant-joker heal: durum sorgusu hata (%s): %v", c.ad, err)
+			hata++
+			continue
+		}
+		if strings.TrimSpace(string(out)) == "" {
+			atlanan++ // zaten kacisli ya da grant yok
+			continue
+		}
+		// REVOKE eski kacissiz + GRANT kacisli (root-socket, idempotent-safe).
+		stmt := fmt.Sprintf(
+			"REVOKE ALL PRIVILEGES ON `%s`.* FROM '%s'@'localhost'; "+
+				"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
+			c.ad, c.kul, esc, c.kul)
+		if o, e := exec.Command("mysql", "-e", stmt).CombinedOutput(); e != nil {
+			log.Printf("grant-joker heal HATA (%s): %s: %v", c.ad, strings.TrimSpace(string(o)), e)
+			hata++
+			continue
+		}
+		onarilan++
+	}
+	if onarilan > 0 || hata > 0 {
+		log.Printf("grant-joker heal: %d onarildi, %d atlandi, %d hata", onarilan, atlanan, hata)
+	}
 }

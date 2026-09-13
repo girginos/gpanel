@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
+
 	"time"
 
 	"girginospanel/internal/archivex"
@@ -270,18 +271,20 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	if hedef == "" {
 		hedef = filepath.Dir(req.Yol)
 	}
+	// 🔴 TOCTOU-guvenli: hedef dizinini openat2 (RESOLVE_NO_SYMLINKS) ile
+	// olustur VE tenant'a chown et — eski os.MkdirAll+`chown hedefAbs` root
+	// olarak symlink'i izleyip /etc gibi bir dizinin sahipligini kiraciya
+	// gecirebiliyordu (privesc). mkdirAllBeneath ara-bilesen symlink'i reddeder.
+	if err := mkdirAllBeneath(home, hedef, sk); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "hedef hazırlanamadı")
+		return
+	}
+	// Dizin artik var + symlink-guvenli; archivex'e vermek icin resolved yolu al.
 	hedefAbs, err := jailJoinStrict(home, hedef)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "hedef: "+err.Error())
 		return
 	}
-	if err := os.MkdirAll(hedefAbs, 0755); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "mkdir hedef: "+err.Error())
-		return
-	}
-	// GÜVENLİK: hedef dizini çıkarmadan ÖNCE tenant kullanıcısına devret ki
-	// çıkarma root DEĞİL, tenant olarak (DAC altında) çalışabilsin.
-	_, _ = exec.Command("chown", sk+":"+sk, hedefAbs).CombinedOutput()
 
 	low := strings.ToLower(abs)
 	gzTek := strings.HasSuffix(low, ".gz") && archivex.TuruBelirle(low) == archivex.TurBilinmeyen
@@ -326,24 +329,27 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 			is.Toplam = 1
 			is.mu.Unlock()
 			rel := filepath.Join(hedef, strings.TrimSuffix(filepath.Base(abs), ".gz"))
-			gzHedef, jerr := jailJoinStrict(home, rel)
-			if jerr != nil {
-				basarisiz("gz hedef: " + jerr.Error())
-				return
-			}
-			// O_NOFOLLOW: gzHedef bir symlink ise ELi'ni takip etmeden hata ver.
-			gzOut, gzErr := os.OpenFile(gzHedef, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
-			if gzErr != nil {
-				basarisiz("gz hedef: " + gzErr.Error())
-				return
-			}
+			// 🔴 TOCTOU-guvenli: gunzip ciktisini copyStreamBeneath (openat2) ile
+			// yaz — eski os.OpenFile(O_NOFOLLOW) yalniz LEAF symlink'ini korurdu,
+			// ara-bilesen symlink'i takip edilirdi (keyfi root yazma).
 			var eb bytes.Buffer
 			gzc := exec.Command("gunzip", "-k", "-c", abs)
-			gzc.Stdout = gzOut
 			gzc.Stderr = &eb
-			runErr := gzc.Run()
-			gzOut.Close()
-			if runErr != nil {
+			gzPipe, pErr := gzc.StdoutPipe()
+			if pErr != nil {
+				basarisiz("gz hedef: " + pErr.Error())
+				return
+			}
+			if startErr := gzc.Start(); startErr != nil {
+				basarisiz("extract: " + startErr.Error())
+				return
+			}
+			if _, cErr := copyStreamBeneath(home, rel, gzPipe, sk); cErr != nil {
+				_ = gzc.Wait()
+				basarisiz("gz hedef: yazilamadi")
+				return
+			}
+			if runErr := gzc.Wait(); runErr != nil {
 				basarisiz("extract: " + strings.TrimSpace(eb.String()))
 				return
 			}
@@ -385,8 +391,12 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// İzole ortam: çıkartılan tüm dosyaları domain user'ına chown (+ SELinux context).
-		_, _ = exec.Command("chown", "-R", sk+":"+sk, hedefAbs).CombinedOutput()
+		// İzole ortam: çıkartılanları tenant'a chown — 🔴 symlink-guvenli
+		// (chownTreeBeneath, Fchownat AT_SYMLINK_NOFOLLOW): eski `chown -R`
+		// cikarma sonrasi bir symlink'i izleyip jail disi sahiplik degistirebilirdi.
+		if cerr := chownTreeBeneath(home, hedef, sk); cerr != nil {
+			log.Printf("files Extract: chown agaci (rel=%s): %v", hedef, cerr)
+		}
 		_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
 		// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
 		// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.

@@ -56,6 +56,14 @@ func readDestination(ctx context.Context, db *sql.DB, domainID int64) (*Destinat
 
 // lftpURL: tip + host + port'tan lftp URL'i kurar.
 func lftpURL(d *Destination) string {
+	// 🔴 Savunma derinligi (CWE-78, Corgea): Host lftp betigine TIRNAKSIZ
+	// girdigi icin gecersiz bir host `open ... sftp://<host>` satirinda `;`+`!` ile
+	// kabuk-kacisi (RCE) acardi. Girdi katmani (gecerliDestGirdi + genelAyarDogrula)
+	// zaten allowlist'liyor; burada CAGIRANDAN BAGIMSIZ fail-closed: allowlist
+	// gecmeyen host icin BOS url don — cagiranlar bos url'i guvenlik hatasi sayar.
+	if !yedekHostRe.MatchString(d.Host) {
+		return ""
+	}
 	if d.Tip == "sftp" {
 		return fmt.Sprintf("sftp://%s:%d", d.Host, d.Port)
 	}
@@ -69,6 +77,9 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 		return nil // disable: sessizce skip
 	}
 	url := lftpURL(d)
+	if url == "" {
+		return fmt.Errorf("güvenlik: geçersiz yedek host %q", d.Host)
+	}
 	// cmd:fail-exit ile herhangi bir komut başarısız olursa lftp non-zero exit eder
 	script := fmt.Sprintf(
 		`set cmd:fail-exit yes; `+

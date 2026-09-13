@@ -43,6 +43,9 @@ frontend/tsconfig.tsbuildinfo
 internal/lisans/
 assets/eklentiler/
 cmd/gosp-paketle/
+# 🔴 cmd/gosp-baslatici internal/lisans'i import eder. O paket public repoda
+# YOK; baslatici commit edilirse `go build ./...` temiz checkout'ta KIRILIR.
+cmd/gosp-baslatici/
 girginospanel-install.sh.oncesi
 
 # --- yedek/geçici dosyalar (asla commit edilmez) ---
@@ -62,3 +65,10 @@ girginospanel-install.sh.oncesi
 yama_*.py
 fix_*.py
 frontend/yama_*.py
+
+# 🔴 Sifreli teslim SIRLARI + build artiklari — ASLA commit edilmez
+.gosp-anahtarlari.json
+.gosp-icerik-*
+.gosp-paketle.bin
+/gosp-avkural
+/gosp-avajan

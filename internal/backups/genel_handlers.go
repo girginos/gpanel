@@ -38,14 +38,21 @@ func genelAyarDogrula(g *GenelAyar) string {
 	if !gecerliTip(g.UzakTip) {
 		return "uzak_tip ftp veya sftp olmali"
 	}
-	if strings.TrimSpace(g.UzakHost) == "" {
-		return "uzak_host bos olamaz"
+	// 🔴 CWE-78 (Corgea): UzakHost lftp betigine TIRNAKSIZ girer -> allowlist
+	// ZORUNLU (musteri yolundaki gecerliDestGirdi ile birebir ayni kural). Bosluk,
+	// ";", "!", "\"" gibi lftp metakarakterleri reddedilir; aksi halde lftp betiginde
+	// `;`+`!` kabuk-kacisi (RCE) acilirdi.
+	if !yedekHostRe.MatchString(g.UzakHost) {
+		return "uzak_host yalniz harf, rakam, nokta ve tire icerebilir (port ayri alandir)"
 	}
 	if g.UzakPort < 1 || g.UzakPort > 65535 {
 		return "uzak_port 1-65535 araliginda olmali"
 	}
 	if strings.TrimSpace(g.UzakKullanici) == "" {
 		return "uzak_kullanici bos olamaz"
+	}
+	if strings.HasPrefix(g.UzakKullanici, "-") {
+		return "uzak_kullanici tire ile baslayamaz (ssh opsiyon-enjeksiyonu)"
 	}
 	// Kontrol karakteri = lftp/ssh komut satirina enjeksiyon riski; girdide reddet.
 	for _, v := range []string{g.UzakHost, g.UzakKullanici, g.UzakParola, g.UzakDizin} {

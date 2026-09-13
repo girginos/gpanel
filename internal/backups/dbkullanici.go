@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/gizli"
+	"girginospanel/internal/hesaplar"
 
 	"golang.org/x/sys/unix"
 )
@@ -287,7 +288,7 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 	}
 	stmt := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
 		"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
-		kul, sqlKacis(parola), dbName, kul)
+		kul, sqlKacis(parola), hesaplar.GrantDBKac(dbName), kul)
 	if err := mysqlCalistir(stmt); err != nil {
 		log.Printf("backup: %s icin kimlik kurtarma basarisiz: %v", dbName, err)
 		return ""
