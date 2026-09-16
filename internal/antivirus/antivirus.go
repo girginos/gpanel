@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -218,11 +219,15 @@ func (h *Handlers) Tara(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		taranan, findings := runScan(ctx, root)
 		for _, f := range findings {
-			_, _ = h.DB.Exec(`INSERT INTO av_bulgular (tarama_id, domain_id, dosya, imza, motor) VALUES (?,?,?,?,?)`,
-				sid, id, f.Dosya, f.Imza, f.Motor)
+			if _, err := h.DB.Exec(`INSERT INTO av_bulgular (tarama_id, domain_id, dosya, imza, motor) VALUES (?,?,?,?,?)`,
+				sid, id, f.Dosya, f.Imza, f.Motor); err != nil {
+				log.Printf("antivirus: bulgu kaydedilemedi (tarama=%d domain=%d dosya=%s): %v — sayac ile detay AYRISIR", sid, id, f.Dosya, err)
+			}
 		}
-		_, _ = h.DB.Exec(`UPDATE av_taramalar SET durum='bitti', taranan=?, enfekte=?, bitis=NOW() WHERE id=?`,
-			taranan, len(findings), sid)
+		if _, err := h.DB.Exec(`UPDATE av_taramalar SET durum='bitti', taranan=?, enfekte=?, bitis=NOW() WHERE id=?`,
+			taranan, len(findings), sid); err != nil {
+			log.Printf("antivirus: tarama tamamlanamadı (id=%d): %v — kayıt 'çalışıyor' takılı kalabilir", sid, err)
+		}
 	}()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"scan_id": sid})
 }

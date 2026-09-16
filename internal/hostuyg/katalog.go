@@ -185,7 +185,7 @@ DISABLE_REGISTRATION = true
 			"GF_PATHS_PROVISIONING":         "{kurulum}/grafana-v11.3.1/conf/provisioning",
 			"GF_SERVER_HTTP_ADDR":           "127.0.0.1",
 			"GF_SERVER_HTTP_PORT":           "{port_web}",
-			"GF_SERVER_ROOT_URL":            "https://{panelhost}:8443/grafana/",
+			"GF_SERVER_ROOT_URL":            "https://{panelhost}:{panelport}/grafana/",
 			"GF_SERVER_SERVE_FROM_SUB_PATH": "true",
 			"GF_SECURITY_ADMIN_PASSWORD":    "{secret16}",
 		},

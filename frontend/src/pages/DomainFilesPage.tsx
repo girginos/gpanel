@@ -32,6 +32,7 @@ type Entry = {
 
 const FILES_EN: Record<string, string> = {
   "Adlandır": "Rename",
+  "İşlem başarısız": "Operation failed",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "Alt alan belge kökü alınamadı": "Failed to get subdomain document root",
   "Arama başarısız": "Search failed",
@@ -185,6 +186,10 @@ type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 
 const ROOT = '/'
 
+// Dosya islemleri yoklama backstop'u: buyuk arsiv/cikarma uzun surebilir; 30 dk yalniz
+// sonsuz-asilma korkulugu (asil koruma unmount-abort).
+const DOSYA_POLL_AZAMI_MS = 30 * 60_000
+
 export default function DomainFilesPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, sor, bilgi } = useDialog()
@@ -203,16 +208,19 @@ export default function DomainFilesPage() {
     try { localStorage.setItem(yolAnahtar, y) } catch { /* yok say */ }
   }
   useEffect(() => {
+    let iptal = false
     if (!sid) return
     api.get<{ docroot: string }>(`/domains/${id}/subdomain/${sid}`).then(r => {
+      if (iptal) return
       const rel = (r.data.docroot || '').replace(/^\/home\/[^/]+/, '')
       if (rel) setYol(rel)
-    }).catch(hataYakala(cevir("Alt alan belge kökü alınamadı")))
+    }).catch(e => { if (!iptal) hataYakala(cevir("Alt alan belge kökü alınamadı"))(e) })
+    return () => { iptal = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, sid])
   const [icerik, setIcerik] = useState<Entry[]>([])
   const [yukleniyor, setYukleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [editor, setEditor] = useState<{yol: string; icerik: string} | null>(null)
   const [chmodFor, setChmodFor] = useState<Entry | null>(null)
@@ -233,6 +241,13 @@ export default function DomainFilesPage() {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null)
   const uzunBasRef = useRef<number | undefined>(undefined)
   const uzunBasTetikRef = useRef(false)
+  // Calisan extract/arsivle yoklama dongulerini unmount'ta iptal et (AYRI ref: eszamanli
+  // extract+arsivle birbirinin controller'ini ezmesin, ikisi de temizlensin).
+  const extractAbortRef = useRef<AbortController | null>(null)
+  const arsivAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => { extractAbortRef.current?.abort(); arsivAbortRef.current?.abort() }
+  }, [])
   const [topluYukleme, setTopluYukleme] = useState<{
     tamam: number
     toplam: number
@@ -247,19 +262,35 @@ export default function DomainFilesPage() {
   const [renameFor, setRenameFor] = useState<Entry | null>(null)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
+    return () => { iptal = true }
   }, [id])
 
+  const taraNesli = useRef(0)
   function tara() {
     if (!id) return
     setYukleniyor(true); setHata(null)
+    const _n = ++taraNesli.current
     api.get<ListResp>(`${base}/files`, { params: { yol } })
-      .then(r => setIcerik(r.data.icerik))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYukleniyor(false))
+      .then(r => { if (_n !== taraNesli.current) return; setIcerik(r.data.icerik); setHata(null) })
+      .catch(e => {
+        if (_n !== taraNesli.current) return
+        // 🔴 Bayat/silinmis yol (localStorage'da kalmis eski klasor): 404'te en
+        // yakin VAR olan ust klasore çık (test yoksa public_html'e, o da yoksa ~),
+        // kalintiyi temizle. Böylece dosya yöneticisi kendini onarır, sert hata
+        // + kırık boş ekran göstermez. Segment strip her adımda kısalttığı için
+        // sonlu (en fazla ~'a iner) — sonsuz döngü yok.
+        if (e?.response?.status === 404 && yol && yol !== '/') {
+          const ust = yol.replace(/\/[^/]*\/?$/, '')
+          setYol(ust || ''); return
+        }
+        const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      })
+      .finally(() => { if (_n === taraNesli.current) setYukleniyor(false) })
   }
-  useEffect(tara, [id, yol])
+  useEffect(() => { tara(); return () => { taraNesli.current++ } }, [id, yol])
   useEffect(() => { setSeciliSet(new Set()) }, [yol])
 
   function git(yeni: string) {
@@ -459,24 +490,32 @@ export default function DomainFilesPage() {
   }
 
   async function extractEt(e: Entry) {
+    if (extractAktif) return // eszamanli 2. extract'i engelle (ref tutarliligi)
     setExtractAktif(true)
     setExtractDurum({ toplam: 0, cikan: 0, ad: e.adi })
     try {
       const { data } = await api.post(`${base}/files/extract`, { yol: e.yol })
       // Asenkron iş: is_id ile ilerlemeyi izle (backend üye başına sayar).
       if (data.is_id) {
+        const ctrl = new AbortController()
+        extractAbortRef.current = ctrl
+        const bitis = Date.now() + DOSYA_POLL_AZAMI_MS
         for (;;) {
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
           await new Promise(r => setTimeout(r, 1200))
-          const p = await api.get(`${base}/files/extract-progress`, { params: { id: data.is_id } })
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+          const p = await api.get(`${base}/files/extract-progress`, { params: { id: data.is_id }, signal: ctrl.signal })
           setExtractDurum({ toplam: p.data.toplam || 0, cikan: p.data.cikan || 0, ad: e.adi })
           if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Çıkarma başarısız"))
           if (p.data.durum === 'tamam') break
+          if (Date.now() >= bitis) throw new Error(cevir("Çıkarma zaman aşımı (30 dk) — sunucu tamamlamadı"))
         }
       }
       setAgacYenileme(x => x + 1)
       tara()
       toast.basari(cevirT(cevir('"{0}" arşivi açıldı'), e.adi))
     } catch (err) {
+      if (extractAbortRef.current?.signal.aborted) return
       toast.hata(apiHata(err, cevir("Açılamadı (zip/tar/rar destek vardır)")))
     } finally {
       setExtractAktif(false)
@@ -513,6 +552,7 @@ export default function DomainFilesPage() {
   }
 
   async function arsivle(ciktiAd: string, format: 'zip' | 'tar.gz') {
+    if (arsivDurum) return // eszamanli 2. arsivleme'yi engelle (ref tutarliligi)
     const yollar = Array.from(seciliSet)
     if (yollar.length === 0) return
     const adHata = adGecerliDegil(ciktiAd)
@@ -525,21 +565,28 @@ export default function DomainFilesPage() {
       const { data } = await api.post(`${base}/files/archive`, { kaynaklar: yollar, cikti_yol: cikti, format })
       // Asenkron iş: büyük dizinlerde istek askıda kalmasın diye is_id ile izlenir.
       if (data.is_id) {
+        const ctrl = new AbortController()
+        arsivAbortRef.current = ctrl
+        const bitis = Date.now() + DOSYA_POLL_AZAMI_MS
         for (;;) {
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
           await new Promise(r => setTimeout(r, 1000))
-          const p = await api.get(`${base}/files/archive-progress`, { params: { id: data.is_id } })
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+          const p = await api.get(`${base}/files/archive-progress`, { params: { id: data.is_id }, signal: ctrl.signal })
           setArsivDurum({
             toplam: p.data.toplam || 0, eklenen: p.data.eklenen || 0,
             boyut: p.data.boyut || 0, ad: arsivAdi,
           })
           if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Arşivleme başarısız"))
           if (p.data.durum === 'tamam') break
+          if (Date.now() >= bitis) throw new Error(cevir("Arşivleme zaman aşımı (30 dk) — sunucu tamamlamadı"))
         }
       }
       setSeciliSet(new Set())
       setAgacYenileme(x => x + 1); tara()
       toast.basari(cevirT(cevir('"{0}" oluşturuldu'), arsivAdi))
     } catch (err) {
+      if (arsivAbortRef.current?.signal.aborted) return
       toast.hata(apiHata(err, cevir("Arşivlenemedi")))
     } finally {
       setArsivDurum(null)
@@ -726,7 +773,6 @@ export default function DomainFilesPage() {
         </div>
       )}
 
-
       {arsivDurum && (
         <div className="mb-4 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/40 px-4 py-3">
           <div className="flex items-center justify-between mb-1.5">
@@ -772,7 +818,7 @@ export default function DomainFilesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
             </svg>
             <div className="text-lg font-semibold text-brand-700 dark:text-brand-300">{cevir("Dosyaları buraya bırak")}</div>
-            <div className="text-sm text-brand-600 dark:text-brand-400/80 mt-1">{cevir("Hedef dizin:")} <code className="font-mono bg-white dark:bg-slate-800/60 px-1.5 py-0.5 rounded">{yol}</code></div>
+            <div className="text-sm text-brand-600 dark:text-brand-400/80 mt-1">{cevir("Hedef dizin:")} <code className="font-mono bg-white dark:bg-dark-700/60 px-1.5 py-0.5 rounded">{yol}</code></div>
           </div>
         </div>
       )}
@@ -787,7 +833,7 @@ export default function DomainFilesPage() {
       {topluYukleme && (
         <div className="mb-3 px-3 py-2.5 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 rounded-md text-sm text-sky-800">
           <div className="flex items-center gap-3 mb-1.5">
-            <svg className="w-4 h-4 flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
             </svg>
@@ -797,7 +843,7 @@ export default function DomainFilesPage() {
               </div>
               <div className="text-xs text-sky-700/90 truncate">{topluYukleme.aktif}</div>
             </div>
-            <div className="flex-shrink-0 text-right">
+            <div className="shrink-0 text-right">
               <div className="text-sm font-mono font-semibold">{topluYukleme.yuzde.toFixed(1)}%</div>
               <div className="text-[10px] text-sky-700/80">{boyutBicim(topluYukleme.yuklenenByte)} / {boyutBicim(topluYukleme.toplamByte)}</div>
             </div>
@@ -821,7 +867,7 @@ export default function DomainFilesPage() {
         {/* + dropdown (Yeni Dosya / Klasör / Upload) */}
         <div className="relative">
           <button onClick={() => setYeniMenuAcik(v => !v)}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded shadow-sm">
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded shadow-xs">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
@@ -831,17 +877,17 @@ export default function DomainFilesPage() {
             </svg>
           </button>
           {yeniMenuAcik && (
-            <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg min-w-[180px] py-1">
-              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.yukle} /> {cevir("Dosya Yükle")}</span></button>
-              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.klasor} /> {cevir("Yeni Klasör")}</span></button>
-              <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-2"><Ikon d={I.dosya} /> {cevir("Yeni Dosya")}</span></button>
+            <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md shadow-lg min-w-[180px] py-1">
+              <button onClick={() => { setYeniMenuAcik(false); fileInputRef.current?.click() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700"><span className="inline-flex items-center gap-2"><Ikon d={I.yukle} /> {cevir("Dosya Yükle")}</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); klasorOlustur() }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700"><span className="inline-flex items-center gap-2"><Ikon d={I.klasor} /> {cevir("Yeni Klasör")}</span></button>
+              <button onClick={() => { setYeniMenuAcik(false); setYeniDosyaModal(true) }} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700"><span className="inline-flex items-center gap-2"><Ikon d={I.dosya} /> {cevir("Yeni Dosya")}</span></button>
             </div>
           )}
         </div>
 
         {/* Yenile */}
         <button onClick={() => tara()} title={cevir("Yenile")}
-          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
+          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
@@ -873,7 +919,7 @@ export default function DomainFilesPage() {
       </div>
 
       {/* Path breadcrumb */}
-      <div className="flex items-center gap-1 mb-4 text-sm flex-wrap bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
+      <div className="flex items-center gap-1 mb-4 text-sm flex-wrap bg-slate-50 dark:bg-dark-800 px-3 py-2 rounded-lg border border-slate-200 dark:border-dark-600">
         <button onClick={() => git('/')} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-mono">~</button>
         {parcalar.map((p, i) => {
           const yolBuraya = '/' + parcalar.slice(0, i + 1).join('/')
@@ -886,18 +932,16 @@ export default function DomainFilesPage() {
         })}
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {/* Dosya tablosu — mobilde kart dizilimi, >=lg gerçek tablo.
           Kapsayıcı çerçeve/zemin yalnız masaüstünde; mobilde kartlar kendi
           çerçevelerini taşır (iç içe çerçeve olmasın). */}
-      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+      <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
         {yukleniyor ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
         ) : (
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
-            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-dark-600`}>
               <tr>
                 <th className={`${T.baslik} w-10 text-center`}><input type="checkbox" checked={icerik.length > 0 && seciliSet.size === icerik.length} ref={ref => { if (ref) ref.indeterminate = seciliSet.size > 0 && seciliSet.size < icerik.length }} onChange={e => tumunuSec(e.target.checked)} className="cursor-pointer" /></th>
                 <th className={T.baslik}>{cevir("Ad")}</th>
@@ -909,9 +953,9 @@ export default function DomainFilesPage() {
                 <th className={`${T.baslik} w-10`}></th>
               </tr>
             </thead>
-            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-slate-800`}>
+            <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-dark-600`}>
               {yol !== '/' && (
-                <tr className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 cursor-pointer`} onClick={geri}>
+                <tr className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700 cursor-pointer`} onClick={geri}>
                   {/* Tek hücreli gezinme satırı: colSpan korundu, mobilde tek kart olur. */}
                   <td className={`${T.hucreBaslik} lg:font-normal`} colSpan={8}>
                     <span className="text-slate-500 dark:text-slate-500">{cevir("↑ üst klasör")}</span>
@@ -933,7 +977,7 @@ export default function DomainFilesPage() {
                   onTouchStart={ev => dokunBasla(ev, e)}
                   onTouchEnd={dokunBitir}
                   onTouchMove={dokunHareket}
-                  className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${seciliSet.has(e.yol) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20 lg:bg-brand-50 dark:lg:bg-brand-900/20' : ''}`}
+                  className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700 transition ${seciliSet.has(e.yol) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20 lg:bg-brand-50 dark:lg:bg-brand-900/20' : ''}`}
                 >
                   <td className={T.hucreSecim}>
                     <input type="checkbox" checked={seciliSet.has(e.yol)}
@@ -958,7 +1002,7 @@ export default function DomainFilesPage() {
                         onClick={() => e.tip === 'dosya' && editorAc(e)}
                         className="flex items-center gap-2 text-slate-800 dark:text-slate-200 text-left hover:text-brand-600 dark:hover:text-brand-400"
                       >
-                        <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
+                        <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <span>{e.adi}</span>
@@ -983,7 +1027,7 @@ export default function DomainFilesPage() {
                   <td className={`${T.hucreAksiyon} lg:text-right`}>
                     <button
                       onClick={ev => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); ctxAc(r.right, r.bottom, e) }}
-                      className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
+                      className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-dark-600 hover:text-slate-900 dark:hover:text-slate-100"
                       title={cevir("İşlemler")}
                       aria-label={cevirT(cevir("{0} işlemleri"), e.adi)}
                     >
@@ -1036,7 +1080,7 @@ export default function DomainFilesPage() {
       )}
       {boyutSonuc && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setBoyutSonuc(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Boyut Bilgisi")}</h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-3 font-mono">{boyutSonuc.yol}</p>
             <div className="text-2xl font-bold text-brand-700 dark:text-brand-300 mb-2">
@@ -1050,24 +1094,24 @@ export default function DomainFilesPage() {
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-500 font-mono">{boyutSonuc.boyut.toLocaleString('tr-TR')} {cevir("bayt")}</div>
             <div className="mt-4 flex justify-end">
-              <button onClick={() => setBoyutSonuc(null)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{cevir("Tamam")}</button>
+              <button onClick={() => setBoyutSonuc(null)} className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{cevir("Tamam")}</button>
             </div>
           </div>
         </div>
       )}
       {topluSilOnay && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setTopluSilOnay(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2">{cevir("Toplu Silme")}</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
               <span className="font-semibold">{seciliSet.size}</span> {cevir("öğe geri dönüşsüz silinecek. Klasörler içerdiği dosyalarla birlikte silinir.")}
             </p>
-            <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded p-2 max-h-40 overflow-auto mb-4">
+            <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-dark-800 rounded p-2 max-h-40 overflow-auto mb-4">
               {Array.from(seciliSet).slice(0, 8).map(y => <li key={y} className="truncate">{y}</li>)}
               {seciliSet.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {seciliSet.size - 8} {cevir("daha…")}</li>}
             </ul>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setTopluSilOnay(false)} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+              <button onClick={() => setTopluSilOnay(false)} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
               <button onClick={topluSil} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">{cevir("Evet, Sil")}</button>
             </div>
           </div>
@@ -1158,17 +1202,17 @@ function BaglamMenu({ x, y, ogeler, onKapat }: { x: number; y: number; ogeler: C
       ref={ref}
       role="menu"
       onKeyDown={menuKey}
-      className={`fixed z-[60] min-w-[190px] py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl text-sm ${olculdu ? '' : 'opacity-0'}`}
+      className={`fixed z-[60] min-w-[190px] py-1 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-xl text-sm ${olculdu ? '' : 'opacity-0'}`}
       style={{ left: pos.x, top: pos.y }}
     >
       {ogeler.map(it => it.ayrac
-        ? <div key={it.key} className="border-t border-slate-100 dark:border-slate-700 my-1" />
+        ? <div key={it.key} className="border-t border-slate-100 dark:border-dark-600 my-1" />
         : <button
             key={it.key}
             data-mi
             role="menuitem"
             onClick={it.onTikla}
-            className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 outline-none focus:bg-slate-100 dark:focus:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 ${it.tehlike ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-200'}`}
+            className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 outline-none focus:bg-slate-100 dark:focus:bg-dark-600 hover:bg-slate-100 dark:hover:bg-dark-600 ${it.tehlike ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-200'}`}
           >
             <span className="flex w-4 items-center justify-center">{it.tehlike ? <Ikon d={it.ikon} className="h-4 w-4" /> : <Ikon d={it.ikon} className="h-4 w-4" />}</span>
             <span>{it.etiket}</span>
@@ -1182,15 +1226,15 @@ function RenameModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (yeni
   const [ad, setAd] = useState(entry.adi)
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yeniden Adlandır")}</h3>
         <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{entry.yol}</code></p>
         <input value={ad} onChange={e => setAd(e.target.value)} autoFocus
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad)} disabled={!ad || ad === entry.adi}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Adlandır")}</button>
+            className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Adlandır")}</button>
         </div>
       </div>
     </div>
@@ -1206,10 +1250,10 @@ function ChmodModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (mod: 
     const yeni = (n & b) ? n & ~b : n | b
     setMod('0' + yeni.toString(8).padStart(3, '0'))
   }
-  const cls = (on: boolean) => `text-xs px-2 py-1 rounded border ${on ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-500'}`
+  const cls = (on: boolean) => `text-xs px-2 py-1 rounded border ${on ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600 text-slate-500 dark:text-slate-500'}`
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("İzinler")}</h3>
         <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{entry.yol}</code></p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-3 text-center">
@@ -1222,8 +1266,8 @@ function ChmodModal({ entry, onTamam, onIptal }: { entry: Entry; onTamam: (mod: 
         </div>
         <div className="text-xs text-slate-500 dark:text-slate-500 mb-3">Octal: <input value={mod} onChange={e => setMod(e.target.value)} className="font-mono ml-1 px-2 py-0.5 border border-slate-300 dark:border-slate-600 rounded w-20" /></div>
         <div className="flex justify-end gap-2">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
-          <button onClick={() => onTamam(mod)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{cevir("Uygula")}</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
+          <button onClick={() => onTamam(mod)} className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{cevir("Uygula")}</button>
         </div>
       </div>
     </div>
@@ -1254,9 +1298,9 @@ function KopyaTasiModal({ tip, yollar, domainId, onTamam, onIptal }:
   const baslik = tip === 'kopyala' ? cevir('Kopyala') : cevir("Taşı")
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{baslik} ({yollar.length} {cevir("öğe")})</h3>
-        <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded p-2 max-h-32 overflow-auto mb-4">
+        <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-dark-800 rounded p-2 max-h-32 overflow-auto mb-4">
           {yollar.slice(0, 5).map(y => <li key={y} className="truncate">{y}</li>)}
           {yollar.length > 5 && <li className="text-slate-400 dark:text-slate-500 italic">+ {yollar.length - 5} {cevir("daha…")}</li>}
         </ul>
@@ -1265,8 +1309,8 @@ function KopyaTasiModal({ tip, yollar, domainId, onTamam, onIptal }:
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
         <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">{cevir("Hedefin var olması gerekir.")} {tip === 'kopyala' ? cevir('Klasörler içerikleriyle kopyalanır.') : cevir("Aynı diskte taşıma anlık.")}</p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
-          <button onClick={() => onTamam(hedef)} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{baslik}</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
+          <button onClick={() => onTamam(hedef)} className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded">{baslik}</button>
         </div>
       </div>
     </div>
@@ -1278,7 +1322,7 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
   const [format, setFormat] = useState<'zip' | 'tar.gz'>('zip')
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Arşive Ekle")} ({adetSayi} {cevir("öğe")})</h3>
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Dosya adı")}</label>
         <input value={ad} onChange={e => setAd(e.target.value)}
@@ -1286,19 +1330,19 @@ function ArsivModal({ adetSayi, onTamam, onIptal }: { adetSayi: number; onTamam:
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Format</label>
         <div className="flex gap-2">
           <button onClick={() => setFormat('zip')}
-            className={`px-3 py-1.5 text-sm rounded border ${format === 'zip' ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-500 text-brand-700 dark:text-brand-300' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
+            className={`px-3 py-1.5 text-sm rounded border ${format === 'zip' ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-500 text-brand-700 dark:text-brand-300' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700'}`}>
             ZIP
           </button>
           <button onClick={() => setFormat('tar.gz')}
-            className={`px-3 py-1.5 text-sm rounded border ${format === 'tar.gz' ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-500 text-brand-700 dark:text-brand-300' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
+            className={`px-3 py-1.5 text-sm rounded border ${format === 'tar.gz' ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-500 text-brand-700 dark:text-brand-300' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700'}`}>
             TAR.GZ
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">{cevir("Çıktı:")} <code className="font-mono">{ad}.{format}</code></p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad, format)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Arşivle")}</button>
+            className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Arşivle")}</button>
         </div>
       </div>
     </div>
@@ -1309,16 +1353,16 @@ function YeniDosyaModal({ onTamam, onIptal }: { onTamam: (ad: string) => void; o
   const [ad, setAd] = useState('yeni-dosya.txt')
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onIptal}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yeni Dosya")}</h3>
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Dosya adı (uzantı dahil)")}</label>
         <input value={ad} onChange={e => setAd(e.target.value)} autoFocus
           className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm" />
         <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">{cevir("Boş dosya oluşturulur, ardından kod editörü açılır.")}</p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+          <button onClick={onIptal} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
           <button onClick={() => onTamam(ad)} disabled={!ad}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Oluştur ve Düzenle")}</button>
+            className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded">{cevir("Oluştur ve Düzenle")}</button>
         </div>
       </div>
     </div>

@@ -165,7 +165,7 @@ func MetrikTopla(ctx context.Context, k *UygulamaKayit) Metrik {
 	return m
 }
 
-// diskByteOku — cache önce; miss/expire ise `du -sb`.
+// diskByteOku — cache önce; miss/expire ise `du -sbx`.
 func diskByteOku(ctx context.Context, yol string) int64 {
 	if yol == "" {
 		return 0

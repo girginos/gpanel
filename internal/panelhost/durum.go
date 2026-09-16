@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"girginospanel/internal/dnsutil"
 )
 
 const (
@@ -41,16 +43,16 @@ const (
 type Durum struct {
 	// nginx _panel.conf'tan okunan server_name listesi (ilk özel isim,
 	// localhost/IP hariç).
-	Hostname    string   `json:"hostname"`
-	Izinliler   []string `json:"izinliler"` // tüm server_name
-	SunucuIP4   []string `json:"sunucu_ip4"`
-	SunucuIP6   []string `json:"sunucu_ip6"`
+	Hostname  string   `json:"hostname"`
+	Izinliler []string `json:"izinliler"` // tüm server_name
+	SunucuIP4 []string `json:"sunucu_ip4"`
+	SunucuIP6 []string `json:"sunucu_ip6"`
 	// SSL bilgileri
 	SslKonu        string `json:"ssl_konu"`
-	SslBitis       string `json:"ssl_bitis"`  // RFC3339
+	SslBitis       string `json:"ssl_bitis"` // RFC3339
 	SslKalanGun    int    `json:"ssl_kalan_gun"`
-	SslLeSertifika bool   `json:"ssl_le"`     // Let's Encrypt CA'sı mı?
-	SslHata        string `json:"ssl_hata"`    // cert okunamıyor/parse fail — UI göstersin
+	SslLeSertifika bool   `json:"ssl_le"`   // Let's Encrypt CA'sı mı?
+	SslHata        string `json:"ssl_hata"` // cert okunamıyor/parse fail — UI göstersin
 	// nginx'te bilinmeyen isimlerin yakalanma durumu
 	CatchallKurulu bool `json:"catchall_kurulu"`
 }
@@ -169,13 +171,22 @@ func AcmeVarMi() bool {
 // (girginospanel-panelhost betiğinin `ayarla` içindeki mantığın Go tarafı,
 // dry-run için ayrıca yararlı.)
 func DNSCoz(hostname string, sunucuIP4 []string, sunucuIP6 []string) (cozulen []string, eslesme bool) {
-	ipler, err := net.LookupHost(hostname)
-	if err != nil {
+	// 🔴 KAMU DNS: yerel (önbellekli) çözümleyici, bir alan adı bu sunucuya
+	// taşındığında eski IP'yi ya da 127.0.0.1'i döndürüp SSL'i YANLIŞ bloke
+	// ediyordu (yeni sunucuda ölçüldü: dev-test.girginos.dev kamu DNS'te doğru
+	// sunucu IP'sine çözülürken yerel resolver 127.0.0.1 diyordu). LE'nin
+	// göreceği kamu kaydından çöz — bkz. dnsutil.
+	ipler := dnsutil.Cozumle(hostname)
+	if len(ipler) == 0 {
 		return nil, false
 	}
 	sunucuSet := make(map[string]struct{}, len(sunucuIP4)+len(sunucuIP6))
-	for _, ip := range sunucuIP4 { sunucuSet[ip] = struct{}{} }
-	for _, ip := range sunucuIP6 { sunucuSet[ip] = struct{}{} }
+	for _, ip := range sunucuIP4 {
+		sunucuSet[ip] = struct{}{}
+	}
+	for _, ip := range sunucuIP6 {
+		sunucuSet[ip] = struct{}{}
+	}
 	for _, ip := range ipler {
 		cozulen = append(cozulen, ip)
 		if _, ok := sunucuSet[ip]; ok {

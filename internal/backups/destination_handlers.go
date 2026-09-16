@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"girginospanel/internal/gizli"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,6 +97,7 @@ func (h *Handlers) PutDestination(w http.ResponseWriter, r *http.Request) {
 	var mevcutParola string
 	_ = h.DB.QueryRowContext(r.Context(),
 		`SELECT COALESCE(parola,'') FROM backup_destinations WHERE domain_id=?`, id).Scan(&mevcutParola)
+	mevcutParola = gizli.CozBagli(mevcutParola, "yedek") // cift-sifrelemeyi onle
 	if req.Parola == "" {
 		req.Parola = mevcutParola
 	}
@@ -114,7 +117,7 @@ func (h *Handlers) PutDestination(w http.ResponseWriter, r *http.Request) {
 		   kullanici=VALUES(kullanici), parola=VALUES(parola),
 		   uzak_dizin=VALUES(uzak_dizin), aktif=VALUES(aktif),
 		   son_durum='', son_hata=''`,
-		id, req.Tip, req.Host, req.Port, req.Kullanici, req.Parola, req.UzakDizin, aktif)
+		id, req.Tip, req.Host, req.Port, req.Kullanici, gizli.SaklaBagli(req.Parola, "yedek"), req.UzakDizin, aktif)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kayıt: "+err.Error())
 		return
@@ -137,12 +140,27 @@ func (h *Handlers) DeleteDestination(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 🔴 YETİM UYARISI. Hedef kaydı silinince FTP host/kullanıcı/PAROLA da
+	// gider; o hedefe yüklenmiş yedeklerin uzak kopyaları panelden BİR DAHA
+	// silinemez. Arayüz "mevcut yedekler etkilenmez" diyordu — doğru ama
+	// eksikti: etkilenmiyor olmaları, artık yönetilemeyecekleri anlamına
+	// geliyor. Kaç dosyanın yetim kalacağını sayıp söylüyoruz.
+	var yedekSayisi int
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM backups WHERE domain_id=?`, id).Scan(&yedekSayisi)
+
 	if _, err := h.DB.ExecContext(r.Context(),
 		`DELETE FROM backup_destinations WHERE domain_id=?`, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silme: "+err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	yanit := map[string]any{"ok": true}
+	if yedekSayisi > 0 {
+		yanit["uyari"] = "Uzak hedef kaldırıldı. Bu alan adının " + strconv.Itoa(yedekSayisi) +
+			" yedeği var; bunların uzak depoya yüklenmiş kopyaları varsa artık panelden silinemez " +
+			"(erişim bilgileri kaldırıldı). Gerekirse uzak depoyu elle temizleyin."
+	}
+	httpx.WriteJSON(w, http.StatusOK, yanit)
 }
 
 // POST /domains/{id}/backup-destination/test
@@ -166,6 +184,7 @@ func (h *Handlers) TestDestination(w http.ResponseWriter, r *http.Request) {
 		mevcutParola := ""
 		_ = h.DB.QueryRowContext(r.Context(),
 			`SELECT COALESCE(parola,'') FROM backup_destinations WHERE domain_id=?`, id).Scan(&mevcutParola)
+		mevcutParola = gizli.CozBagli(mevcutParola, "yedek")
 		if ad.Parola == "" {
 			ad.Parola = mevcutParola
 		}

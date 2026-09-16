@@ -34,7 +34,7 @@ const ARALIKLAR = [
 ]
 
 const SERI = [
-  { key: 'yuk1' as const, et: '1 dk', renk: '#f97316' },  // brand
+  { key: 'yuk1' as const, et: '1 dk', renk: '#3b82f6' },  // brand
   { key: 'yuk5' as const, et: '5 dk', renk: '#0ea5e9' },  // sky
   { key: 'yuk15' as const, et: '15 dk', renk: '#8b5cf6' }, // violet
 ]
@@ -142,7 +142,7 @@ export default function LoadHistoryChart() {
   }
 
   return (
-    <div ref={wrapRef} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <div ref={wrapRef} className="card rounded-lg bg-white p-5 shadow-soft dark:bg-dark-700 dark:shadow-none">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Sistem Yükü Geçmişi")}</h3>
@@ -150,11 +150,11 @@ export default function LoadHistoryChart() {
             {cevir("Load average (1 / 5 / 15 dk)")}{cek ? cevirT(cevir(" · {0} çekirdek"), cek) : ''}{cevir(" · √ ölçek")}
           </p>
         </div>
-        <div className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-dark-600 dark:bg-dark-700/60">
           {ARALIKLAR.map(a => (
             <button key={a.saat} onClick={() => { setSaat(a.saat); setHover(null) }}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${saat === a.saat
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-xs dark:bg-dark-600 dark:text-slate-100'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}>
               {cevir(a.et)}
             </button>
@@ -192,9 +192,9 @@ export default function LoadHistoryChart() {
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
           <defs>
             <linearGradient id="lh-area" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f97316" stopOpacity="0.30" />
-              <stop offset="70%" stopColor="#f97316" stopOpacity="0.06" />
-              <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.30" />
+              <stop offset="70%" stopColor="#3b82f6" stopOpacity="0.06" />
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
             </linearGradient>
           </defs>
 
@@ -224,16 +224,16 @@ export default function LoadHistoryChart() {
           <path d={g.area1} fill="url(#lh-area)" />
           <SmoothLine gg={g} data={pts} k="yuk15" renk="#8b5cf6" w={1.5} op={0.75} />
           <SmoothLine gg={g} data={pts} k="yuk5" renk="#0ea5e9" w={1.8} op={0.9} />
-          <path d={g.line1} fill="none" stroke="#f97316" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={g.line1} fill="none" stroke="#3b82f6" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
           {/* son nokta nabzı */}
           {pts.length > 0 && (
             <g>
-              <circle cx={g.xAt(pts.length - 1)} cy={g.yAt(pts[pts.length - 1].yuk1)} r="7" fill="#f97316" opacity="0.18">
+              <circle cx={g.xAt(pts.length - 1)} cy={g.yAt(pts[pts.length - 1].yuk1)} r="7" fill="#3b82f6" opacity="0.18">
                 <animate attributeName="r" values="4;9;4" dur="2.4s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.28;0;0.28" dur="2.4s" repeatCount="indefinite" />
               </circle>
-              <circle cx={g.xAt(pts.length - 1)} cy={g.yAt(pts[pts.length - 1].yuk1)} r="3" fill="#f97316" />
+              <circle cx={g.xAt(pts.length - 1)} cy={g.yAt(pts[pts.length - 1].yuk1)} r="3" fill="#3b82f6" />
             </g>
           )}
 

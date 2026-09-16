@@ -26,8 +26,13 @@ type Hesap struct {
 func (k *Kaynak) PanelTespit(ctx context.Context) (string, error) {
 	ctx, iptal := context.WithTimeout(ctx, kesifTimeout)
 	defer iptal()
+	// 🔴 gpanel EN BASTA sinanir: bir GirginOSPanel sunucusunda cPanel/Plesk
+	// dizinleri bulunmaz, ama tersi de dogru degildir — kalinti bir
+	// /usr/local/psa dizini gercek panelin yanlis tespitine yol acabilir.
+	// Kesin imza: panel ikilisi VE yapilandirma dizini birlikte.
 	cikti, err := k.Calistir(ctx,
-		"if [ -d /usr/local/cpanel ]; then echo cpanel; "+
+		"if [ -x /opt/girginospanel/bin/girginospanel-server ] && [ -d /etc/girginospanel ]; then echo gpanel; "+
+			"elif [ -d /usr/local/cpanel ]; then echo cpanel; "+
 			"elif [ -d /usr/local/psa ] || command -v plesk >/dev/null 2>&1; then echo plesk; "+
 			"elif [ -d /usr/local/directadmin ]; then echo directadmin; "+
 			"else echo bilinmiyor; fi")
@@ -48,6 +53,8 @@ func (k *Kaynak) Kesfet(ctx context.Context) ([]Hesap, error) {
 		return k.ayristir(k.Calistir(ctx, komutPlesk))
 	case "directadmin":
 		return k.ayristir(k.Calistir(ctx, komutDirectAdmin))
+	case "gpanel":
+		return k.ayristir(k.Calistir(ctx, komutGpanel))
 	}
 	return nil, fmt.Errorf("desteklenmeyen panel tipi")
 }
@@ -68,12 +75,18 @@ type KaynakSahip struct {
 // KesfetSahipler — kaynaktaki reseller + müşteri hesaplarını (iletişim + limit)
 // keşfeder. Şimdilik yalnız Plesk (cPanel/DA reseller yapısı ayrı ele alınır).
 func (k *Kaynak) KesfetSahipler(ctx context.Context) ([]KaynakSahip, error) {
-	if k.Tip != "plesk" {
-		return nil, nil
+	komut := ""
+	switch k.Tip {
+	case "plesk":
+		komut = komutPleskSahipler
+	case "gpanel":
+		komut = komutGpanelSahipler
+	default:
+		return nil, nil // cPanel/DA reseller yapisi ayri ele alinir
 	}
 	ctx, iptal := context.WithTimeout(ctx, kesifTimeout)
 	defer iptal()
-	cikti, err := k.Calistir(ctx, komutPleskSahipler)
+	cikti, err := k.Calistir(ctx, komut)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +133,9 @@ func ayristirSahipler(cikti string) []KaynakSahip {
 // pleskBaytMB — Plesk bayt limitini MB'ye çevirir; -1/boş/negatif = 0 (sınırsız).
 func pleskBaytMB(s string) int64 {
 	var v int64
-	fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
+	// Sscanf hatası bilinçli yok sayılır: başarısızsa v=0 kalır; aşağıdaki v<0
+	// kapısı 0'a çeker — geçersiz Plesk bayt limiti sınırsız (0) sayılır.
+	_, _ = fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
 	if v < 0 {
 		return 0
 	}
@@ -129,7 +144,9 @@ func pleskBaytMB(s string) int64 {
 
 func pleskLimitInt(s string) int {
 	var v int
-	fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
+	// Sscanf hatası bilinçli yok sayılır: başarısızsa v=0 kalır; v<0 kapısı 0'a
+	// çeker — geçersiz/boş limit sınırsız (0) sayılır.
+	_, _ = fmt.Sscanf(strings.TrimSpace(s), "%d", &v)
 	if v < 0 {
 		return 0
 	}
@@ -290,7 +307,9 @@ func ayristirBlok(cikti string) []Hesap {
 				continue
 			}
 			var boyut int64
-			fmt.Sscanf(strings.TrimSpace(p[3]), "%d", &boyut)
+			// Sscanf hatası bilinçli yok sayılır: başarısızsa boyut=0 kalır (yalnız
+			// görüntü/rapor değeri) — bozuk satır keşfi çökertmez.
+			_, _ = fmt.Sscanf(strings.TrimSpace(p[3]), "%d", &boyut)
 			anaMi := strings.TrimSpace(p[4]) == "ana"
 
 			h := Hesap{
@@ -370,3 +389,66 @@ func normalizePHP(s string) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// GirginOSPanel kaynak kesfi (panelden panele tasima)
+// ---------------------------------------------------------------------------
+//
+// Kaynak da bir GirginOSPanel oldugu icin bilgi panelin KENDI veritabanindan
+// okunur — dosya/dizin tahmini yapilmaz.
+//
+// 🔴 Panel veritabaninin adi SABIT DEGIL: /etc/girginospanel/env icindeki
+// PANEL_DB_DSN'den cikarilir. Sabit "panel" varsaymak, adi degistirilmis bir
+// kurulumda kesfin SESSIZCE bos donmesine yol acardi.
+//
+// 🔴 MySQL kimligi VERILMEZ: gPanel sunucusunda root, unix_socket ile
+// parolasiz baglanir (cPanel dalinin aynisi). Plesk/DA'daki gibi bir parola
+// dosyasi yoktur.
+//
+// 🔴 db_accounts.db_pass_plain KAYNAKTA SIFRELIDIR (gos1: oneki, anahtar
+// kaynagin /etc/girginospanel/db.key dosyasinda). Yani kaynak DB parolasi
+// TASINAMAZ ve tasinmamalidir — motor hedefte yeni kullanici+parola uretip
+// uygulama config'lerini yeniden yaziyor. Buradan yalnizca DB ADLARI okunur.
+//
+// Alt alan adlari `ek` olarak listelenir: hedefte AYRI birer domain olarak
+// acilirlar (gPanel'in alt alani ust domainin sistem kullanicisi altinda
+// yasar; hedefte birebir yeniden kurmak icin ayri bir mekanizma gerekirdi).
+// Kullanici listede gorup secer.
+const komutGpanel = `env=/etc/girginospanel/env
+[ -r "$env" ] || exit 0
+dsn=$(sed -n 's/^PANEL_DB_DSN=//p' "$env" 2>/dev/null | head -1)
+pdb=$(printf '%s' "$dsn" | sed -e 's/?.*$//' -e 's#.*/##')
+[ -n "$pdb" ] || pdb=panel
+mysql -N -B "$pdb" -e "SELECT CONCAT_WS('|', d.id, d.sistem_kullanici, d.alan_adi, COALESCE(NULLIF(d.web_root,''), CONCAT('/home/', d.sistem_kullanici, '/public_html')), COALESCE(NULLIF(d.php_surum,''),'8.3'), COALESCE((SELECT u.username FROM users u WHERE u.id=d.reseller_id AND u.role='reseller'),''), COALESCE(d.customer_id,0)) FROM domains d WHERE COALESCE(d.askida,0)=0 ORDER BY d.alan_adi" 2>/dev/null | while IFS='|' read -r did su dom kok php res cid; do
+  [ -n "$dom" ] || continue
+  echo "###USER:$su"
+  if [ -n "$res" ] && [ "$cid" != "0" ]; then echo "###OWNER:m$cid|client|$res|reseller"
+  elif [ -n "$res" ]; then echo "###OWNER:$res|reseller||"
+  elif [ "$cid" != "0" ]; then echo "###OWNER:m$cid|client||"
+  else echo "###OWNER:|admin||"; fi
+  echo "###DB:$(mysql -N -B "$pdb" -e "SELECT db_name FROM db_accounts WHERE domain_id=$did" 2>/dev/null | tr '\n' ',')"
+  sz=$(du -sm "$kok" 2>/dev/null | cut -f1)
+  echo "###DOM:$dom|$kok|$php|$sz|ana"
+  mysql -N -B "$pdb" -e "SELECT CONCAT_WS('|', s.tam_ad, COALESCE(NULLIF(s.php_surum,''),'$php')) FROM subdomanlar s WHERE s.domain_id=$did" 2>/dev/null | while IFS='|' read -r sad sphp; do
+    [ -n "$sad" ] || continue
+    sk="/home/$su/subdomains/$sad"
+    ssz=$(du -sm "$sk" 2>/dev/null | cut -f1)
+    echo "###DOM:$sad|$sk|$sphp|$ssz|ek"
+  done
+done`
+
+// komutGpanelSahipler — bayi + musteri hesaplari.
+//
+// 🔴 Limitler MB olarak saklanir, cozumleyici (ayristirSahipler) ise Plesk
+// biciminde BAYT bekler → 1048576 ile carpilir. Carpim unutulsaydi 10240 MB'lik
+// bir bayi hedefte 10240 BAYT limitle acilirdi.
+//
+// 🔴 gPanel musterilerinin LOGIN'i yoktur (ad + eposta vardir). Eslestirme
+// anahtari olarak "m<id>" uretilir; bu yalnizca kaynak↔hedef eslemesi icin
+// kullanilir, hedefte musteri kaydi gercek ad/eposta ile acilir.
+const komutGpanelSahipler = `env=/etc/girginospanel/env
+[ -r "$env" ] || exit 0
+dsn=$(sed -n 's/^PANEL_DB_DSN=//p' "$env" 2>/dev/null | head -1)
+pdb=$(printf '%s' "$dsn" | sed -e 's/?.*$//' -e 's#.*/##')
+[ -n "$pdb" ] || pdb=panel
+mysql -N -B "$pdb" -e "SELECT CONCAT_WS('|', u.username, 'reseller', COALESCE(NULLIF(u.full_name,''), u.username), COALESCE(u.email,''), '', COALESCE(NULLIF(u.max_disk_mb,0), (SELECT p.max_disk_mb FROM reseller_plans p WHERE p.id=u.reseller_plan_id), 0)*1048576, COALESCE(NULLIF(u.max_domain,0), (SELECT p.max_domain FROM reseller_plans p WHERE p.id=u.reseller_plan_id), 0), COALESCE(NULLIF(u.max_trafik_mb,0), (SELECT p.max_trafik_mb FROM reseller_plans p WHERE p.id=u.reseller_plan_id), 0)*1048576) FROM users u WHERE u.role='reseller' AND u.status='active' UNION ALL SELECT CONCAT_WS('|', CONCAT('m', c.id), 'client', COALESCE(NULLIF(c.ad,''), CONCAT('musteri-', c.id)), COALESCE(c.eposta,''), '', 0, 0, 0) FROM customers c WHERE c.durum='aktif'" 2>/dev/null`

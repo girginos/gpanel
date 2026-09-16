@@ -72,3 +72,10 @@ frontend/yama_*.py
 .gosp-paketle.bin
 /gosp-avkural
 /gosp-avajan
+cmd/eklenti-kur/
+
+# --- Eski frontend yedegi (131M) + scratch/epoch-yedek — public main ASLA ---
+frontend.v3-yedek/
+*.ARGCHECK
+*.bak-*
+*.yedek-*

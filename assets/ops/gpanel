@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# gpanel — GirginOSPanel yönetim CLI.
+#
+# Alt komut:
+#   gpanel ip change <yeni-ip>                # eski IP otomatik bulunur
+#   gpanel ip change <eski-ip> <yeni-ip>      # açık
+#   gpanel ip change [--kuru] [--evet] ...    # DENEME / onaysız
+#
+# `ip change`: sunucunun ESKİ IP'sini YENİ IP ile değiştirir. gPanel IP'yi tek
+# yerde tutmaz: DB (dns_records + domains ipv4/ftp_host/db_host + panelhost
+# geçmişi), DNS zone dosyaları (+ SOA serial), nginx vhost'ları ve genel metin
+# dosyaları (/etc, /opt/girginospanel, /var/named, /usr/local/{bin,sbin}).
+# Yalnızca verilen TEK IP dizesini değiştirir; başka IP'lere dokunmaz. Önce
+# yedek alır (/root/ipdegis-<ts>/), idempotenttir. --kuru ile önizlenir.
+set -uo pipefail
+# 🔴 Türkçe locale, [a-z] aralığını ve sayı eşlemesini bozar → LC_ALL=C ZORUNLU.
+export LC_ALL=C
+
+# ── Alt komut dağıtıcı ──────────────────────────────────────────────────────
+kullanim() { echo "Kullanım: gpanel ip change [<eski-ip>] <yeni-ip> [--kuru] [--evet]"; }
+grup="${1:-}"; eylem="${2:-}"
+case "$grup" in
+  ""|-h|--help|yardim) kullanim; exit 0 ;;
+esac
+if [ "$grup" != "ip" ] || [ "$eylem" != "change" ]; then
+  echo "Bilinmeyen komut: '$grup ${eylem}'." >&2; kullanim >&2; exit 2
+fi
+shift 2   # "ip change" tüketildi; geri kalan argümanlar ip-change'e ait
+
+DB=panel
+ZONEDIZ=/var/named
+NGINXDIZ=/etc/nginx/conf.d
+
+KURU=0; EVET=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    --kuru|--dry-run) KURU=1 ;;
+    --evet|-y|--yes)  EVET=1 ;;
+    -h|--help) kullanim; exit 0 ;;
+    -*) echo "bilinmeyen seçenek: $a" >&2; exit 2 ;;
+    *) args+=("$a") ;;
+  esac
+done
+
+gecerli_ip(){ [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
+
+mysql_calisir(){ mysql -N -e 'SELECT 1' >/dev/null 2>&1; }
+
+# ── Argüman çözümleme ──────────────────────────────────────────────────────
+if [ "${#args[@]}" -eq 2 ]; then
+  ESKI="${args[0]}"; YENI="${args[1]}"
+elif [ "${#args[@]}" -eq 1 ]; then
+  YENI="${args[0]}"
+  # Eski IP = domains.ipv4'te EN ÇOK geçen ve YENİ olmayan IP.
+  ESKI=$(mysql -N "$DB" -e "SELECT ipv4 FROM domains WHERE ipv4<>'' AND ipv4<>'$YENI' GROUP BY ipv4 ORDER BY COUNT(*) DESC LIMIT 1" 2>/dev/null)
+  if [ -z "$ESKI" ]; then
+    echo "HATA: eski IP otomatik bulunamadı (domains tablosu boş olabilir). Açık verin:" >&2
+    echo "  girginospanel-ip-degistir <eski-ip> <yeni-ip>" >&2
+    exit 1
+  fi
+  echo "ℹ eski IP otomatik bulundu: $ESKI"
+else
+  sed -n '2,20p' "$0"; exit 2
+fi
+
+gecerli_ip "$ESKI" || { echo "HATA: geçersiz eski IP: $ESKI" >&2; exit 2; }
+gecerli_ip "$YENI" || { echo "HATA: geçersiz yeni IP: $YENI" >&2; exit 2; }
+[ "$ESKI" = "$YENI" ] || true
+if [ "$ESKI" = "$YENI" ]; then echo "eski ve yeni IP aynı ($ESKI) — yapılacak bir şey yok."; exit 0; fi
+mysql_calisir || { echo "HATA: MySQL'e bağlanılamadı (root socket)." >&2; exit 1; }
+
+# ── Kapsam (neyin değişeceği) ──────────────────────────────────────────────
+n_dns=$(mysql -N "$DB" -e "SELECT COUNT(*) FROM dns_records WHERE deger LIKE '%$ESKI%'" 2>/dev/null)
+# 🔴 domains'te IP birden fazla kolonda: ipv4 (sunucu IP), ftp_host, db_host.
+# Yalnız ipv4'ü saymak/değiştirmek ftp_host'u eskide bırakıyordu (E2E testte
+# yakalandı). Üçünü de kapsa.
+n_dom=$(mysql -N "$DB" -e "SELECT COUNT(*) FROM domains WHERE ipv4 LIKE '%$ESKI%' OR ftp_host LIKE '%$ESKI%' OR db_host LIKE '%$ESKI%'" 2>/dev/null)
+n_zone=$(grep -lF "$ESKI" "$ZONEDIZ"/*.zone 2>/dev/null | wc -l)
+n_nginx=$(grep -lF "$ESKI" "$NGINXDIZ"/*.conf 2>/dev/null | wc -l)
+# 🔴 GENEL METİN-DOSYA taraması: rc.conf, yorumlar, aracın hedeflemediği HER
+# text dosya. `grep -rI` binary dosyaları ATLAR (asla sed'lenmez → imzalı
+# panel ikilisi güvende). Yedek/log/git hariç.
+# 🔴 /var/log HARİÇ: geçmiş log kayıtlarını yeniden yazmak tahrifattır (ve
+# anlamsız — rotate olup giderler). Yalnız KONFİG/servis dosyaları.
+FS_HARIC='\.bak|\.yedek|/backups?/|/ipdegis-|/ipchange-|\.log$|\.log-|\.log\.|/var/log/|\.gz$|named\.run|/\.git/'
+# /usr/local/bin + /usr/local/sbin dahil (ops scriptleri orada da kurulu;
+# girginospanel-dogrula gibi). grep -rIl binary'yi atlar.
+FS_KOK="/etc /opt/girginospanel /var/named /usr/local/bin /usr/local/sbin"
+n_fs=$(grep -rIlF "$ESKI" $FS_KOK 2>/dev/null | grep -vE "$FS_HARIC" | wc -l)
+# Denetim geçmişi: geçmiş kaydı silmeyiz ama eski IP DİZESİNİ yenisiyle
+# değiştiririz — "hiçbir yerde eski IP kalmasın" için (kayıt yapısı korunur).
+n_audit=$(mysql -N "$DB" -e "SELECT COUNT(*) FROM cp_panelhost_gecmisi WHERE hostname LIKE '%$ESKI%' OR adimlar_json LIKE '%$ESKI%' OR hata LIKE '%$ESKI%'" 2>/dev/null)
+
+echo "────────────────────────────────────────────"
+echo " ESKİ IP : $ESKI"
+echo " YENİ IP : $YENI"
+echo " Değişecek:"
+echo "   dns_records (DB) : $n_dns kayıt"
+echo "   domains (DB)     : $n_dom alan adı (ipv4/ftp_host/db_host)"
+echo "   DNS zone dosyası : $n_zone (+ SOA serial artırılır)"
+echo "   nginx vhost      : $n_nginx dosya"
+echo "   diğer metin dsy. : $n_fs (rc.conf/yorum/vb)"
+echo "   panelhost geçmişi: ${n_audit:-0} kayıt"
+echo "────────────────────────────────────────────"
+
+if [ $((n_dns+n_dom+n_zone+n_nginx+n_fs+${n_audit:-0})) -eq 0 ]; then
+  echo "Bu IP hiçbir yerde bulunamadı — değişecek bir şey yok."; exit 0
+fi
+if [ "$KURU" = "1" ]; then echo "[--kuru] Deneme modu: hiçbir şey değiştirilmedi."; exit 0; fi
+
+# 🔴 Yeni IP gerçekten bir arayüzde mi? Değilse UYAR (engelleme — önceden hazırlanmış olabilir).
+if ! ip -4 addr 2>/dev/null | grep -qF "$YENI"; then
+  echo "⚠ UYARI: $YENI hiçbir ağ arayüzünde görünmüyor. Değişiklik yapılacak ama"
+  echo "  trafik gelmesi için IP'nin arayüze eklenmiş olması gerekir."
+fi
+
+if [ "$EVET" != "1" ]; then
+  read -r -p "Devam edilsin mi? (evet/hayır) " c
+  case "$c" in evet|e|yes|y) ;; *) echo "iptal."; exit 0 ;; esac
+fi
+
+# ── Yedek ──────────────────────────────────────────────────────────────────
+TS=$(date +%Y%m%d-%H%M%S)
+YD=/root/ipdegis-$TS
+mkdir -p "$YD"
+mysqldump --single-transaction "$DB" dns_records domains cp_panelhost_gecmisi > "$YD/db.sql" 2>/dev/null \
+  && echo "✓ DB yedek: $YD/db.sql"
+# Değişecek genel metin dosyalarını da yedekle (rc.conf/yorum/vb).
+FS_YEDEK=$(grep -rIlF "$ESKI" $FS_KOK 2>/dev/null | grep -vE "$FS_HARIC")
+tar czf "$YD/dosyalar.tar.gz" "$ZONEDIZ"/*.zone "$NGINXDIZ"/*.conf $FS_YEDEK 2>/dev/null \
+  && echo "✓ dosya yedek: $YD/dosyalar.tar.gz"
+
+# ── 1) DB ───────────────────────────────────────────────────────────────────
+mysql "$DB" <<SQL
+UPDATE dns_records SET deger=REPLACE(deger,'$ESKI','$YENI'), updated_at=NOW() WHERE deger LIKE '%$ESKI%';
+UPDATE domains SET
+  ipv4     = REPLACE(ipv4,     '$ESKI','$YENI'),
+  ftp_host = REPLACE(ftp_host, '$ESKI','$YENI'),
+  db_host  = REPLACE(db_host,  '$ESKI','$YENI')
+ WHERE ipv4 LIKE '%$ESKI%' OR ftp_host LIKE '%$ESKI%' OR db_host LIKE '%$ESKI%';
+SQL
+echo "✓ DB güncellendi (dns_records + domains: ipv4/ftp_host/db_host)"
+
+# ── 2) Zone dosyaları + SOA serial +1 ───────────────────────────────────────
+z_degisen=0
+for z in "$ZONEDIZ"/*.zone; do
+  [ -e "$z" ] || continue
+  grep -qF "$ESKI" "$z" || continue
+  sed -i "s/$ESKI/$YENI/g" "$z"
+  # SOA serial'i +1: format KORUNUR (yalnız ilk '; serial' satırındaki sayı
+  # yerinde artar). perl varsa onu kullan (boşlukları bozmaz); yoksa awk
+  # fallback (satır boşluklarını sıkıştırır ama BIND için geçerli kalır).
+  if command -v perl >/dev/null 2>&1; then
+    perl -i -pe 's/(\d{6,10})(\s*;\s*[Ss]erial)/($1+1).$2/e unless $d; $d=1 if /;\s*[Ss]erial/' "$z"
+  else
+    awk '!d && tolower($0) ~ /;[[:space:]]*serial/ { for(i=1;i<=NF;i++){ if($i ~ /^[0-9]{6,10}$/){ $i=$i+1; d=1; break } } } {print}' "$z" > "$z.tmp" && mv "$z.tmp" "$z"
+  fi
+  z_degisen=$((z_degisen+1))
+done
+echo "✓ $z_degisen zone dosyası güncellendi (+ serial)"
+
+# ── 3) nginx vhost'ları ──────────────────────────────────────────────────────
+for f in "$NGINXDIZ"/*.conf; do
+  [ -e "$f" ] || continue
+  grep -qF "$ESKI" "$f" || continue
+  sed -i "s/$ESKI/$YENI/g" "$f"
+done
+echo "✓ nginx vhost'ları güncellendi"
+
+# ── 3b) GENEL METİN-DOSYA taraması — kalan HER şey (rc.conf, yorumlar, vb) ───
+# grep -rIl binary'yi atlar; zone/nginx zaten yukarıda yapıldı (burada 0 bulur).
+fs_degisen=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  sed -i "s/$ESKI/$YENI/g" "$f" && fs_degisen=$((fs_degisen+1))
+done < <(grep -rIlF "$ESKI" $FS_KOK 2>/dev/null | grep -vE "$FS_HARIC")
+echo "✓ $fs_degisen genel metin dosyası temizlendi (rc.conf/yorum/vb)"
+
+# ── 3c) panelhost geçmişi (denetim) — eski IP DİZESİNİ değiştir, kaydı koru ──
+mysql "$DB" -e "UPDATE cp_panelhost_gecmisi SET
+    hostname=REPLACE(hostname,'$ESKI','$YENI'),
+    adimlar_json=REPLACE(adimlar_json,'$ESKI','$YENI'),
+    hata=REPLACE(hata,'$ESKI','$YENI')
+  WHERE hostname LIKE '%$ESKI%' OR adimlar_json LIKE '%$ESKI%' OR hata LIKE '%$ESKI%';" 2>/dev/null \
+  && echo "✓ panelhost geçmişinde eski IP dizesi güncellendi"
+
+# ── 4) Servis reload ─────────────────────────────────────────────────────────
+if nginx -t >/dev/null 2>&1; then
+  nginx -s reload >/dev/null 2>&1 && echo "✓ nginx reload"
+else
+  echo "⚠ nginx -t HATA verdi — reload YAPILMADI. Kontrol: nginx -t"
+fi
+if command -v rndc >/dev/null 2>&1; then
+  rndc reload >/dev/null 2>&1 && echo "✓ named reload (rndc)"
+else
+  systemctl reload named >/dev/null 2>&1 && echo "✓ named reload"
+fi
+
+# ── 5) Doğrulama ─────────────────────────────────────────────────────────────
+# 🔴 TÜM DB'yi tara (denetim geçmişi DAHİL — artık orası da temizlendi) +
+# TÜM metin dosyalarını tara. Belirli kolon/dosya saymak ATLANANI gizler.
+kalan_db=0
+for t in $(mysql -N "$DB" -e "SHOW TABLES" 2>/dev/null); do
+  h=$(mysqldump --no-create-info --skip-extended-insert "$DB" "$t" 2>/dev/null | grep -c "$ESKI")
+  [ "${h:-0}" -gt 0 ] && { echo "   ⚠ DB tablosu '$t' hâlâ $ESKI içeriyor ($h)"; kalan_db=$((kalan_db+h)); }
+done
+# TÜM metin dosyaları (binary hariç — imzalı ikilideki şablon yorumu HARİÇ;
+# o build artefaktıdır, kaynakta düzeltilir, sed'lenmez).
+kalan_fs=$(grep -rIlF "$ESKI" $FS_KOK 2>/dev/null | grep -vE "$FS_HARIC" | wc -l)
+kalan_zone=$(grep -lF "$ESKI" "$ZONEDIZ"/*.zone 2>/dev/null | wc -l)
+bin_kalinti=$(grep -rlF "$ESKI" $FS_KOK 2>/dev/null | grep -vE "$FS_HARIC" | while read -r b; do grep -qI . "$b" 2>/dev/null || echo "$b"; done | head -3)
+echo "────────────────────────────────────────────"
+echo " DOĞRULAMA:"
+echo "   DB'de kalan $ESKI      : $kalan_db (0 olmalı, denetim geçmişi dahil)"
+echo "   metin dosyada kalan    : $kalan_fs (0 olmalı)"
+echo "   zone'da kalan $ESKI    : $kalan_zone (0 olmalı)"
+[ -n "$bin_kalinti" ] && echo "   ⚠ BINARY (sed'lenmez, build artefaktı): $bin_kalinti"
+ornek=$(mysql -N "$DB" -e "SELECT alan_adi FROM domains LIMIT 1" 2>/dev/null)
+[ -n "$ornek" ] && echo "   dig $ornek @localhost : $(dig +short "$ornek" @127.0.0.1 2>/dev/null | tr '\n' ' ')"
+echo " Yedek: $YD"
+echo "────────────────────────────────────────────"
+if [ "${kalan_db:-1}" = "0" ] && [ "${kalan_zone:-1}" = "0" ] && [ "${kalan_fs:-1}" = "0" ]; then
+  echo "✓ TAMAM: $ESKI → $YENI (DB + tüm metin dosyaları temiz)"
+  [ -n "$bin_kalinti" ] && echo "  Not: yalnız imzalı ikilideki şablon YORUMU kaldı (fonksiyonel değil; kaynakta düzeltilir)."
+else
+  echo "⚠ Bazı yerlerde eski IP KALDI (yukarıdaki ⚠ satırlarına bakın) — elle kontrol edin."
+fi

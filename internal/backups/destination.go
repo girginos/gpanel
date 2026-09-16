@@ -5,10 +5,13 @@ package backups
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"girginospanel/internal/gizli"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -51,6 +54,7 @@ func readDestination(ctx context.Context, db *sql.DB, domainID int64) (*Destinat
 	if sonYuk.Valid {
 		d.SonYukleme = sonYuk.String
 	}
+	d.Parola = gizli.CozBagli(d.Parola, "yedek") // at-rest sifreli (graceful: eski duz-metin oldugu gibi doner)
 	return d, nil
 }
 
@@ -118,6 +122,250 @@ func uploadToRemote(ctx context.Context, d *Destination, localPath, dosyaAdi str
 		}
 	}
 	_ = dosyaAdi
+	return nil
+}
+
+// deleteFromRemote: uzak hedefteki yedek dosyasini siler.
+//
+// 🔴 BU FONKSIYON YOKTU. Yedek silme yalnizca YEREL dosyayi ve DB kaydini
+// kaldiriyordu; FTP/SFTP'ye yuklenmis kopya orada KALICI olarak duruyordu.
+// Kullanici panelde "silindi" gorup uzak depoda dosyayi bulmaya devam
+// ediyordu — ve depo sinirsiz buyuyordu (saklama/retention yolu da ayni
+// eksigi tasiyordu).
+//
+// `rm -f`: dosya uzakta yoksa hata DEGILDIR. Silme, "bu dosya orada
+// olmasin" demektir; zaten yoksa amac gerceklesmistir. Baglanti/kimlik
+// hatasi ise GERCEK hatadir ve cagirana bildirilir.
+// BETIK: `cd <TABAN dizin>` + `rm -f <TAM yol>`.
+//
+// 🔴 IKISI DE GEREKLI, ve nedeni olculerek ogrenildi:
+//   - `rm -f` TAM YOL alir cunku hedef dosya TARIHLI alt dizinde olabilir
+//     (genel hedef) ve o dizine `cd` etmek, dizin yoksa cmd:fail-exit ile
+//     butun betigi dusururdu — oysa "dizin yok" = "dosya zaten orada yok".
+//   - `cd <TABAN>` ise BAGLANTIYI KANITLAR. Yalniz `open` + `rm -f` yazan
+//     ilk surumde erisilemeyen bir host'a silme 3 saniyede `{"ok":true}`
+//     donuyordu: lftp baglanamiyor, ama `-f` hatayi yutuyor ve exit 0
+//     veriyordu. Yani "uzak kopya silindi" diye rapor edilen sey hic
+//     denenmemisti. Taban dizin her zaman vardir (yukleme onu `mkdir -p`
+//     ile yaratiyor), bu yuzden `cd` yalnizca gercek baglanti/kimlik
+//     hatalarinda patlar.
+//
+// ErrLftpYok — lftp ikilisi kurulu degil.
+//
+// 🔴 AYRI BIR HATA TIPI OLMASININ SEBEBI: lftp yoklugu bir UZAK DEPO arizasi
+// degil, SUNUCU EKSIGIDIR. Ikisini ayni sepete koymak, lftp'siz eski
+// kurulumlarda (paket listesine 2026-08-17'de eklendi) her silmeyi 409 ile
+// bloke ederdi — duzeltmeden ONCE calisan bir islevi bozmak olurdu.
+// Cagiran bunu "silmeyi engelleme, ama kullaniciya ACIKCA soyle" diye isler.
+var ErrLftpYok = errors.New("lftp kurulu değil: uzak depodaki kopya silinemez")
+
+// deleteFromRemote: uzak hedefteki yedek dosyasini siler VE silindigini
+// DOGRULAR.
+//
+// 🔴🔴 `rm -f`'IN DONUS DEGERINE GUVENILEMEZ — olculdu:
+//
+//	yanlis parola   -> exit 0, cikti BOS
+//	erisilemez host -> exit 0, cikti BOS
+//	izin yok        -> exit 0, cikti BOS, dosya DURUYOR
+//
+// `-f` "hata verme" demektir ve `cmd:fail-exit` bu yuzden hic tetiklenmez;
+// cikti bos oldugu icin desen taramasi da bosa calisir. Onceki surum tam da
+// bu yuzden "silindi" deyip dosyayi FTP'de birakiyordu — yani duzeltilmek
+// istenen hatanin kendisini uretiyordu.
+//
+// Bu yuzden IKI GECIS yapilir:
+//  1. SILME: `cd <TABAN dizin>` (baglanti+kimlik KANITI; taban dizin
+//     yukleme tarafinda `mkdir -p` ile yaratildigi icin vardir, bu yuzden
+//     yalniz gercek arizada patlar) + `rm -f <TAM yol>` (dosya tarihli alt
+//     dizinde olabilir; `cd` etmek dizin yoksa betigi dusururdu).
+//  2. DOGRULAMA: `cls -1 <TAM yol>` — dosya HALA listeleniyorsa silme
+//     BASARISIZDIR. Nobetci uretimi olcmeli, niyeti degil.
+func deleteFromRemote(ctx context.Context, d *Destination, uzakDizin, dosyaAdi string) error {
+	// 🔴 `Aktif` YUKLEME kapisidir, SILME kapisi DEGIL: dun aktif olan bir
+	// hedefte bugun de dosyalar durur. Silerken kimlik bilgisi varsa DENERIZ.
+	if d == nil || strings.TrimSpace(d.Host) == "" {
+		return nil // hedef hic tanimli degil: silinecek uzak kopya da yok
+	}
+	if strings.TrimSpace(dosyaAdi) == "" {
+		return fmt.Errorf("uzak silme: dosya adi bos")
+	}
+	// 🔴 YOL GECISI KORUMASI (savunma derinligi).
+	//
+	// `dosyaAdi` bugun yalniz sunucunun urettigi adlardan geliyor
+	// (`c_<sk>-<damga>.tar.gz`) ve olculdugunde 324 kayitta tehlikeli ad
+	// YOK. Ama koruma OLMADIGI icin mekanik olarak calisiyordu: bir ajan
+	// `../KURBAN.tar.gz` ile hedef dizinin DISINDAKI dosyayi sildirdi.
+	// Ileride bir ice-aktarma/restore yolu `backups.dosya`'ya `/` iceren
+	// ad yazarsa, GENEL (admin ortak) hedefte capraz-dosya silme mumkun
+	// olurdu. Ad, tek bir dosya adi olmak ZORUNDA.
+	if dosyaAdi != filepath.Base(dosyaAdi) || strings.Contains(dosyaAdi, "..") {
+		return fmt.Errorf("uzak silme: gecersiz dosya adi (%q)", dosyaAdi)
+	}
+	if _, err := exec.LookPath("lftp"); err != nil {
+		return ErrLftpYok
+	}
+
+	url := lftpURL(d)
+	if url == "" {
+		return fmt.Errorf("güvenlik: geçersiz yedek host %q", d.Host)
+	}
+	tamYol := birlestirYol(uzakDizin, "") + "/" + dosyaAdi
+	// Cift slash: `birlestirYol` "/" dondugunde "//dosya" olusuyordu.
+	tamYol = strings.ReplaceAll(tamYol, "//", "/")
+	ortak := `set sftp:auto-confirm yes; ` +
+		`set ssl:verify-certificate no; ` +
+		`set ftp:ssl-allow no; ` +
+		`set net:max-retries 1; ` +
+		`set net:timeout 15; ` +
+		`set net:reconnect-interval-base 2; `
+
+	// ── 1) SILME ────────────────────────────────────────────────────────
+	silBetik := fmt.Sprintf(
+		`set cmd:fail-exit yes; `+ortak+
+			`open -u "%s","%s" %s; `+
+			`cd "%s"; `+
+			`rm -f "%s"; `+
+			`bye`,
+		lftpEscape(d.Kullanici), lftpEscape(d.Parola), url,
+		lftpEscape(birlestirYol(d.UzakDizin, "")), lftpEscape(tamYol))
+	if out, err := lftpKos(ctx, silBetik); err != nil {
+		// 🔴 "DIZIN YOK" HATA DEGIL. `cd "<taban>"` dizin yoksa 550 verir ve
+		// cmd:fail-exit betigi dusurur. Ama silinecek uzak kopya zaten yoksa
+		// amac gerceklesmistir. Onceki hali, `uzak_dizin` yanlis/silinmis bir
+		// hedefte HER dosyayi hata sayip domaini silinemez kiliyordu.
+		if dizinYok(out) {
+			return nil
+		}
+		return fmt.Errorf("lftp: %s: %w", kisaCikti(out), err)
+	} else if p := lftpHataDeseni(out); p != "" {
+		return fmt.Errorf("lftp: %s", p)
+	}
+
+	// ── 2) DOGRULAMA ────────────────────────────────────────────────────
+	// fail-exit YOK: dizin/dosya yoksa `cls` non-zero doner ve bu BASARIDIR.
+	//
+	// 🔴 DOSYA YOLUNU DEGIL DIZINI LISTELE, ve TAM SATIR esle.
+	// Ilk surum `cls -1 "<tam yol>"` yapip ciktida dosya adini ariyordu.
+	// Ama lftp dosya YOKKEN de hata metninde YOLU yaziyor
+	// ("...<yol>: No such file...") — yani basarili silmeden sonra bile
+	// eslesme oluyor ve silme "basarisiz" raporlaniyordu (olculdu: dosya
+	// gercekten silinmisken 409 donuyordu). Dizin listesi bu tuzagi
+	// tasimaz: ya ad bir satir olarak vardir ya yoktur.
+	dizin := birlestirYol(uzakDizin, "")
+	dogBetik := fmt.Sprintf(
+		ortak+`open -u "%s","%s" %s; `+`cls -1 "%s/"; `+`bye`,
+		lftpEscape(d.Kullanici), lftpEscape(d.Parola), url, lftpEscape(dizin))
+	out, _ := lftpKos(ctx, dogBetik)
+	for _, satir := range strings.Split(out, "\n") {
+		ad := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(satir), "/"))
+		// `cls -1` yol da yazabilir; son bileseni karsilastir.
+		if i := strings.LastIndexByte(ad, '/'); i >= 0 {
+			ad = ad[i+1:]
+		}
+		if ad == dosyaAdi {
+			return fmt.Errorf("uzak kopya silme komutundan SONRA hâlâ listeleniyor (%s) — hedefteki izinleri kontrol edin", tamYol)
+		}
+	}
+	return nil
+}
+
+// lftpKos — betigi calistirir, birlesik ciktiyi doner.
+func lftpKos(ctx context.Context, betik string) (string, error) {
+	cmd, temizle, err := lftpKomutu(ctx, betik)
+	if err != nil {
+		return "", err
+	}
+	defer temizle()
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// lftpHataDeseni — exit 0 olsa bile ciktida hata izi var mi.
+// "No such file" BILEREK yok: silmede o bir basaridir.
+func lftpHataDeseni(out string) string {
+	bad := []string{"Login failed", "Access failed", "Connection refused", "Permission denied",
+		"Could not resolve", "Host key verification failed", "No route to host",
+		"Connection timed out", "cannot connect", "Name or service not known",
+		"Network is unreachable", "Fatal error"}
+	for _, p := range bad {
+		if strings.Contains(out, p) {
+			return strings.TrimSpace(out)
+		}
+	}
+	return ""
+}
+
+// dizinYok — cikti "dizin/dosya yok" mu diyor.
+func dizinYok(out string) bool {
+	l := strings.ToLower(out)
+	return strings.Contains(l, "no such file") || strings.Contains(l, "550")
+}
+
+func kisaCikti(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 300 {
+		return s[:300] + "…"
+	}
+	return s
+}
+
+// YedekUzaktanSil — yedegin UZAK kopyalarini siler.
+//
+// 🔴 IKI AYRI UZAK HEDEF VAR ve ikisi de temizlenmeli:
+//  1. DOMAIN hedefi  (backup_destinations)  — duz `UzakDizin`
+//  2. GENEL hedef    (backup_genel_ayar)    — Tools > Yedek Yoneticisi'nin
+//     kendi FTP'si; dosyayi TARIHLI alt dizine (YYYY-AA-GG) yukluyor.
+//
+// Yalniz birincisini silmek, panelde "Yedek Yoneticisi"nden yonetilen
+// kurulumlarda hicbir sey temizlemezdi — kullanicinin bildirdigi durum
+// tam olarak buydu.
+//
+// Genel hedefte hem tarihli alt dizin hem taban dizin denenir (tarih dizini
+// gelmeden once yuklenmis yedekler tabandadir; indirme yolu da ayni iki
+// adayi deniyor).
+func YedekUzaktanSil(ctx context.Context, db *sql.DB, domainID int64, dosyaAdi string) error {
+	var hatalar []string
+	lftpEksik := false
+
+	if d, err := readDestination(ctx, db, domainID); err == nil && d != nil {
+		if e := deleteFromRemote(ctx, d, d.UzakDizin, dosyaAdi); e != nil {
+			if errors.Is(e, ErrLftpYok) {
+				lftpEksik = true
+			} else {
+				hatalar = append(hatalar, "domain hedefi: "+e.Error())
+			}
+		}
+	}
+
+	// `UzakAktif` de burada aranmaz (bkz. deleteFromRemote): kapali bir
+	// hedefte dosyalar durmaya devam eder.
+	if g := genelAyarOku(ctx, db); g != nil && strings.TrimSpace(g.UzakHost) != "" {
+		h := g.hedef()
+		adaylar := []string{birlestirYol(g.UzakDizin, uzakTarihDizini(dosyaAdi))}
+		if taban := birlestirYol(g.UzakDizin, ""); taban != adaylar[0] {
+			adaylar = append(adaylar, taban)
+		}
+		for _, dz := range adaylar {
+			if e := deleteFromRemote(ctx, h, dz, dosyaAdi); e != nil {
+				if errors.Is(e, ErrLftpYok) {
+					lftpEksik = true
+					break
+				}
+				hatalar = append(hatalar, "genel hedef ("+dz+"): "+e.Error())
+			}
+		}
+	}
+
+	if lftpEksik {
+		// Tek sebep lftp yoklugu ise cagiran bunu "engelleme, uyar" diye
+		// isler; gercek depo arizalariyla karistirilmaz.
+		if len(hatalar) == 0 {
+			return ErrLftpYok
+		}
+	}
+	if len(hatalar) > 0 {
+		return fmt.Errorf("%s", strings.Join(hatalar, " | "))
+	}
 	return nil
 }
 

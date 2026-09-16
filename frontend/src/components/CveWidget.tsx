@@ -38,11 +38,11 @@ const CHECK = 'M9 12.5l2 2 4.5-4.5'
 const ALERT = 'M12 9v3.5m0 3h.01'
 
 // Önem etiketine göre renk/metin (semantik — marka turuncusundan ayrı).
-const ONEM: Record<string, { ad: string; nokta: string; metin: string }> = {
-  kritik: { ad: 'Kritik', nokta: 'bg-red-500', metin: 'text-red-600 dark:text-red-400' },
-  onemli: { ad: 'Önemli', nokta: 'bg-amber-500', metin: 'text-amber-600 dark:text-amber-400' },
-  orta: { ad: 'Orta', nokta: 'bg-sky-500', metin: 'text-sky-600 dark:text-sky-400' },
-  dusuk: { ad: 'Düşük', nokta: 'bg-slate-400', metin: 'text-slate-500 dark:text-slate-400' },
+const ONEM: Record<string, { ad: string; nokta: string; metin: string; zemin: string }> = {
+  kritik: { ad: 'Kritik', nokta: 'bg-red-500', metin: 'text-red-600 dark:text-red-400', zemin: 'bg-red-50 dark:bg-red-500/10' },
+  onemli: { ad: 'Önemli', nokta: 'bg-amber-500', metin: 'text-amber-600 dark:text-amber-400', zemin: 'bg-amber-50 dark:bg-amber-500/10' },
+  orta: { ad: 'Orta', nokta: 'bg-sky-500', metin: 'text-sky-600 dark:text-sky-400', zemin: 'bg-sky-50 dark:bg-sky-500/10' },
+  dusuk: { ad: 'Düşük', nokta: 'bg-slate-400', metin: 'text-slate-500 dark:text-slate-400', zemin: 'bg-gray-100 dark:bg-dark-600/40' },
 }
 
 
@@ -192,7 +192,7 @@ export default function CveWidget() {
   const top = veri?.top_cve ?? []
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <div className="card rounded-lg bg-white p-5 shadow-soft dark:bg-dark-700 dark:shadow-none">
       {/* başlık */}
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -214,14 +214,14 @@ export default function CveWidget() {
           type="button"
           onClick={yenidenTara}
           disabled={taraniyor || guncelleniyor}
-          className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+          className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-dark-700 dark:hover:text-slate-200">
           {taraniyor ? cevir("Taranıyor…") : cevir("Yeniden tara")}
         </button>
       </div>
 
       {/* güncelleme her durumda üstte görünür (yükleme/temiz dahil) */}
       {guncelleniyor && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-[12px] font-medium text-brand-700 dark:border-brand-900/50 dark:bg-brand-900/15 dark:text-brand-300">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-[12px] font-medium text-brand-700 dark:border-brand-900/50 dark:bg-brand-900/15 dark:text-brand-300">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
           {cevir(cevir("Güvenlik güncellemeleri kuruluyor… (arka planda sürer)"))}
         </div>
@@ -229,7 +229,7 @@ export default function CveWidget() {
 
       {/* KernelCare canlı yama uygulanıyor */}
       {kcCalisiyor && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-medium text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
           {cevir(cevir("Canlı çekirdek yaması uygulanıyor… (KernelCare — reboot gerekmez)"))}
         </div>
@@ -237,7 +237,7 @@ export default function CveWidget() {
 
       {/* KernelCare aktif — çekirdek canlı yamalı */}
       {!kcCalisiyor && veri?.kernelcare?.aktif && (
-        <div className="mb-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0"><path d={SHIELD} /><path d={CHECK} /></svg>
           <span>
             <strong>{cevir(cevir("Çekirdek canlı yamalı (KernelCare)."))}</strong> {cevir(cevir("Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı."))}
@@ -249,7 +249,7 @@ export default function CveWidget() {
 
       {/* KernelCare kurulu ama lisans kayıtlı değil */}
       {!kcCalisiyor && veri?.kernelcare?.kurulu && !veri.kernelcare.kayitli && (
-        <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
           <span><strong>{cevir(cevir("KernelCare kurulu ancak lisans kayıtlı değil."))}</strong> {cevir(cevir("Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli."))}</span>
         </div>
@@ -257,7 +257,7 @@ export default function CveWidget() {
 
       {/* yeniden başlatma gerekli — yamalı çekirdek kurulu ama henüz etkin değil */}
       {!guncelleniyor && veri?.reboot_gerekli && (
-        <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
           <span>
             <strong>{cevir("Yeniden başlatma gerekli.")}</strong> {cevir("Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor — aşağıdaki açıkların çoğu çekirdek kaynaklı ve")} <strong>{cevir("sunucu yeniden başlatılana kadar")}</strong> {cevir("açık görünür.")}
@@ -268,7 +268,7 @@ export default function CveWidget() {
 
       {/* gövde */}
       {hata ? (
-        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] text-red-700 dark:border-red-900/50 dark:bg-red-900/15 dark:text-red-300">
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] text-red-700 dark:border-red-900/50 dark:bg-red-900/15 dark:text-red-300">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
           <span>{hata}</span>
         </div>
@@ -290,9 +290,9 @@ export default function CveWidget() {
           {/* önem özeti */}
           <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {(['kritik', 'onemli', 'orta'] as const).map((k) => (
-              <div key={k} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-center dark:border-slate-800 dark:bg-slate-950/40">
-                <div className={`text-2xl font-bold tabular-nums ${ONEM[k].metin}`}>{veri[k]}</div>
-                <div className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+              <div key={k} className={`rounded-lg p-3.5 text-center ${ONEM[k].zemin}`}>
+                <div className={`text-[26px] font-bold leading-none tabular-nums ${ONEM[k].metin}`}>{veri[k]}</div>
+                <div className="mt-1.5 flex items-center justify-center gap-1 text-[11px] font-medium text-slate-500 dark:text-dark-300">
                   <span className={`h-1.5 w-1.5 rounded-full ${ONEM[k].nokta}`} />{cevir(ONEM[k].ad)}
                 </div>
               </div>
@@ -323,7 +323,7 @@ export default function CveWidget() {
             <button
               type="button"
               onClick={guncelle}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2.5 text-[13px] font-semibold text-white shadow-xs transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
               {cevir(cevir("Güvenlik güncellemelerini kur"))}
             </button>
@@ -333,7 +333,7 @@ export default function CveWidget() {
             <button
               type="button"
               onClick={canliYamala}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-[13px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-[13px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
               {cevir(cevir("Canlı çekirdek yamalarını güncelle (reboot yok)"))}
             </button>

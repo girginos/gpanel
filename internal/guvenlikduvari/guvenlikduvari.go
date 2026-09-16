@@ -13,7 +13,9 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -240,7 +242,10 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Aktif bool `json:"aktif"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	ak := 0
 	if req.Aktif {
 		ak = 1
@@ -338,8 +343,12 @@ func (h *Handlers) rebuild() error {
 		return fmt.Errorf("nft uygulama: %s", strings.TrimSpace(out))
 	}
 	// 3) kalıcı yaz (reboot sonrası panel başlangıcı yeniden yükler)
-	_ = os.MkdirAll("/etc/nftables", 0o755)
-	_ = os.WriteFile(kuralDosya, ruleset, 0o600)
+	if err := os.MkdirAll("/etc/nftables", 0o755); err != nil {
+		return fmt.Errorf("nftables dizini oluşturulamadı (kurallar canlı ama reboot sonrası kaybolur): %w", err)
+	}
+	if err := os.WriteFile(kuralDosya, ruleset, 0o600); err != nil {
+		return fmt.Errorf("kalıcı ruleset yazılamadı (kurallar canlı ama reboot sonrası kaybolur): %w", err)
+	}
 	return nil
 }
 

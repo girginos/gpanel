@@ -41,6 +41,25 @@ sunucu_ipleri() {
   ip -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
 }
 
+# kamu_coz — host'u KAMU DNS'ten çözer (Let's Encrypt'in göreceği kayıt).
+# 🔴 NEDEN: `getent ahosts` sistem/yerel (önbellekli) çözümleyiciyi kullanır;
+# bir alan adı bu sunucuya taşınınca yerel resolver eski IP'yi ya da 127.0.0.1'i
+# döndürüp SSL'i YANLIŞ bloke ediyordu — oysa kamu DNS doğru sunucu IP'sini
+# veriyordu (yeni sunucuda ölçüldü). dig varsa kamu NS'lerden A+AAAA çeker;
+# hepsi ulaşılamazsa son çare getent'e düşer.
+kamu_coz() {
+  local ad="$1" ns out=""
+  if command -v dig >/dev/null 2>&1; then
+    for ns in 1.1.1.1 8.8.8.8 9.9.9.9; do
+      out=$( { dig +short +time=3 +tries=1 "@$ns" A "$ad" 2>/dev/null | grep -E '^[0-9]+\.'; \
+               dig +short +time=3 +tries=1 "@$ns" AAAA "$ad" 2>/dev/null | grep ':'; } | sort -u )
+      [ -n "$out" ] && { echo "$out"; return; }
+    done
+  fi
+  # dig yok / kamu NS ulaşılamadı → son çare yerel çözümleyici.
+  getent ahosts "$ad" 2>/dev/null | awk '{print $1}' | sort -u
+}
+
 mevcut_isimler() {
   grep -oP '^\s*server_name\s+\K[^;]+' "$PANEL_CONF" | head -1
 }
@@ -94,7 +113,8 @@ ayarla() {
 
   if [ -n "$istenen" ]; then
     # DNS bu sunucuya mı çözülüyor? Değilse kilitlenirsin.
-    local coz; coz=$(getent ahosts "$istenen" 2>/dev/null | awk '{print $1}' | sort -u)
+    # 🔴 KAMU DNS'ten çöz (getent yerel/bayat cache 127.0.0.1 döndürüp yanlış bloke ediyordu).
+    local coz; coz=$(kamu_coz "$istenen")
     [ -n "$coz" ] || dur "'$istenen' DNS'te çözülmüyor — ayarlanmadı (kilitlenme riski)"
     local eslesme=0
     for ip in $(sunucu_ipleri); do echo "$coz" | grep -qx "$ip" && eslesme=1; done

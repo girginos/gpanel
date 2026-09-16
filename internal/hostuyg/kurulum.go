@@ -321,8 +321,10 @@ func kurulumYurut(db *sql.DB, is *Is, tarif *Tarif, ornekAd string, aktor *int64
 			is.AdimEkle("firewall "+pt.Ad+" uyarı: "+err.Error(), false)
 		} else {
 			is.AdimEkle(fmt.Sprintf("firewall açıldı %d/%s (%s)", port, pt.Protokol, pt.Ad), true)
-			_, _ = db.Exec(`UPDATE cp_host_uyg_portlari SET firewall_acik=1
-				WHERE uygulama_id=? AND port=? AND protokol=?`, uygID, port, pt.Protokol)
+			if _, err := db.Exec(`UPDATE cp_host_uyg_portlari SET firewall_acik=1
+				WHERE uygulama_id=? AND port=? AND protokol=?`, uygID, port, pt.Protokol); err != nil {
+				log.Printf("hostuyg.kurulum: firewall_acik işaretlenemedi (uyg=%d port=%d): %v", uygID, port, err)
+			}
 		}
 	}
 	if tarif.NginxProxy != nil {

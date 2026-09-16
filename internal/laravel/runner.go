@@ -61,9 +61,7 @@ func kilitle(id int64) func() {
 }
 
 var (
-	reAltKomut    = regexp.MustCompile(`^[a-z][a-z0-9:_-]*$`)    // artisan/composer/npm alt-komut
 	reArg         = regexp.MustCompile(`^[A-Za-z0-9:_.,=/@-]+$`) // serbest argüman
-	reNpmPkg      = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*)(/[a-z0-9._-]+)?(@[a-z0-9._^~<>=* |,-]+)?$`)
 	reComposerPkg = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*)/[a-z0-9]([a-z0-9._-]*)(:[\^~<>=0-9.* |,-]+)?$`)
 	reNodeSurum   = regexp.MustCompile(`^[0-9]{1,2}(\.[0-9]{1,3}){0,2}$`)
 )

@@ -27,6 +27,32 @@ type Handlers struct {
 
 var reKullanici = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 
+// govdeCoz: istek govdesini KATI cozer — SEMADA OLMAYAN alan 400 ile reddedilir.
+//
+// 🔴 NEDEN: eskiden istemci `reseller_plan_id` gibi OLMAYAN bir alan
+// gonderdiginde encoding/json onu SESSIZCE yok sayiyor, endpoint 200 donuyordu.
+// Istemci "limiti ayarladim" saniyor, backend hicbir sey yapmamis oluyordu —
+// fatura konusu limitlerde bu sessiz-kabul dogrudan YANILTICI. Artik alan adi
+// yanlissa istemci bunu HEMEN ogrenir.
+//
+// Not: internal/httpx icinde ortak bir DecodeJSON helper'i YOK (yalniz WriteJSON/
+// WriteError var); paket-yerel tutuldu. httpx'e boyle bir helper eklenirse bu
+// fonksiyon ona devredilmeli.
+func govdeCoz(r *http.Request, hedef any) error {
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	return d.Decode(hedef)
+}
+
+// govdeHata: decode hatasini NET Turkce mesaja cevirir (400 mesajlari anlasilir kalsin).
+func govdeHata(err error) string {
+	m := err.Error()
+	if alan := strings.TrimPrefix(m, "json: unknown field "); alan != m {
+		return "geçersiz gövde: bilinmeyen alan " + alan + " — alan adını kontrol edin (sessizce yok sayılmaz)"
+	}
+	return "geçersiz gövde"
+}
+
 type Reseller struct {
 	ID           int64  `json:"id"`
 	Kullanici    string `json:"kullanici"`
@@ -84,8 +110,8 @@ type olusturReq struct {
 // POST /resellers — yeni reseller (admin).
 func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	var req olusturReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+	if err := govdeCoz(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, govdeHata(err))
 		return
 	}
 	req.Kullanici = strings.ToLower(strings.TrimSpace(req.Kullanici))
@@ -166,8 +192,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req guncelleReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+	if err := govdeCoz(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, govdeHata(err))
 		return
 	}
 	// Denetim icin ONCEKI degerler (B10: "bayi.guncelle" detayi bostu; hangi
@@ -275,7 +301,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, id)
 	if _, err := h.DB.ExecContext(r.Context(),
-		`UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id=? AND role='reseller'`, args...); err != nil {
+		`UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id=? AND role='reseller'`, args...); err != nil { //nolint:gosec // G202: sets = SABİT "kolon=?" parçaları listesi (allowlist); tüm değerler args ile ? bağlanır, kullanıcı kolon adı enjekte edemez.
 		httpx.WriteError(w, http.StatusInternalServerError, "güncellenemedi: "+err.Error())
 		return
 	}

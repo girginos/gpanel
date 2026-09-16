@@ -1,10 +1,11 @@
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 import type { Domain } from '@/components/DomainList'
 
 type Kayit = {
@@ -19,6 +20,7 @@ const DURUM: Record<string, { renk: string; etiket: string }> = {
 }
 
 const MAILTES_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "Alıcı": "Recipient",
   "Ayrıntı": "Detail",
   "Bu domain için teslimat kaydı bulunamadı.": "No delivery records found for this domain.",
@@ -38,31 +40,36 @@ const MAILTES_EN: Record<string, string> = {
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILTES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function rozet(durum: string) {
-  return DURUM[durum] || { renk: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300', etiket: durum }
+  return DURUM[durum] || { renk: 'bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300', etiket: durum }
 }
 
 export default function DomainMailTeslimatPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [kayitlar, setKayitlar] = useState<Kayit[] | null>(null)
   const [hata, setHata] = useState<string | null>(null)
   const [yenileniyor, setYenileniyor] = useState(false)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e, cevir("Domain yüklenemedi"))))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e, cevir("Domain yüklenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
   }, [id])
 
+  const yukleNesli = useRef(0)
   const yukle = useCallback((d: Domain) => {
     setYenileniyor(true)
+    const _n = ++yukleNesli.current
     api.get<{ kayitlar: Kayit[] }>(`/eklenti/mail/teslimat?domain=${encodeURIComponent(d.alan_adi)}&limit=150`)
-      .then(r => setKayitlar(r.data.kayitlar || []))
-      .catch(e => { setHata(apiHata(e, cevir("Teslimat kayıtları alınamadı"))); setKayitlar([]) })
-      .finally(() => setYenileniyor(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setKayitlar(r.data.kayitlar || []) })
+      .catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e, cevir("Teslimat kayıtları alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setKayitlar([]) })
+      .finally(() => { if (_n !== yukleNesli.current) return; setYenileniyor(false) })
   }, [])
 
-  useEffect(() => { if (domain) yukle(domain) }, [domain, yukle])
+  useEffect(() => { if (domain) yukle(domain); return () => { yukleNesli.current++ } }, [domain, yukle])
 
   if (!domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -84,14 +91,12 @@ export default function DomainMailTeslimatPage() {
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300">{cevir("E-Posta Teslimat Takibi")}</h1>
         <button onClick={() => yukle(domain)} disabled={yenileniyor}
-          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-200 disabled:opacity-60">
+          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:hover:bg-dark-600/50 text-slate-700 dark:text-slate-200 disabled:opacity-60">
           <svg className={`w-4 h-4 ${yenileniyor ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
           {cevir("Yenile")}
         </button>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{domain.alan_adi} {cevir("gönderilen/alınan son e-postaların teslimat durumu (sunucu günlüğünden).")}</p>
-
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {kayitlar && kayitlar.length > 0 && (
         <div className="flex items-center gap-2 mb-3 text-xs">
@@ -101,14 +106,14 @@ export default function DomainMailTeslimatPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg overflow-hidden">
         {kayitlar === null && <div className="py-10 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>}
         {kayitlar?.length === 0 && <div className="py-10 text-center text-sm text-slate-400">{cevir("Bu domain için teslimat kaydı bulunamadı.")}</div>}
         {kayitlar && kayitlar.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                <tr className="text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-dark-600">
                   <th className="px-4 py-2.5 font-semibold">{cevir("Zaman")}</th>
                   <th className="px-4 py-2.5 font-semibold">{cevir("Gönderen")}</th>
                   <th className="px-4 py-2.5 font-semibold">{cevir("Alıcı")}</th>
@@ -116,11 +121,11 @@ export default function DomainMailTeslimatPage() {
                   <th className="px-4 py-2.5 font-semibold">{cevir("Ayrıntı")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+              <tbody className="divide-y divide-slate-50 dark:divide-dark-600/50">
                 {kayitlar.map((k, i) => {
                   const r = rozet(k.durum)
                   return (
-                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-dark-600/30">
                       <td className="px-4 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-xs">{k.zaman}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={k.gonderen}>{k.gonderen || '—'}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[180px] truncate" title={k.alici}>{k.alici}</td>

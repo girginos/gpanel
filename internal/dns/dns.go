@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -104,10 +105,19 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var k Kayit
-	if err := json.NewDecoder(r.Body).Decode(&k); err != nil {
+	// aktif alani govdede YOKSA varsayilan AKTIF (DB default=1 + frontend uyumu).
+	// Kayit.Aktif bool oldugundan "gonderilmedi" ile "false" ayirt edilemiyor; ayrica
+	// *bool ile yakaliyoruz. Eskiden alan yokken Go sifiri (false) kaydi sessizce pasif
+	// yapip WriteZone WHERE aktif=1 ile zone disinda birakiyordu (E2E bulgusu).
+	ham, _ := io.ReadAll(r.Body)
+	if err := json.Unmarshal(ham, &k); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
+	var girdiAktif struct {
+		Aktif *bool `json:"aktif"`
+	}
+	_ = json.Unmarshal(ham, &girdiAktif)
 	k.Tip = strings.ToUpper(strings.TrimSpace(k.Tip))
 	if !gecerliTip(k.Tip) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz DNS tipi")
@@ -120,8 +130,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		k.TTL = 3600
 	}
 	ak := 1
-	if !k.Aktif && k.Aktif != true {
-		// JSON'da aktif false ise 0 yaz, default true (yeni eklemede çoğunlukla aktif)
+	if girdiAktif.Aktif != nil && !*girdiAktif.Aktif {
+		ak = 0
 	}
 	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
 	if err := gecerliKayitAlanlari(k.Ad, k.Deger); err != nil {
@@ -210,6 +220,12 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Silme de zone YENIDEN URETMELI. Create/Update/TopluSil/TopluDurum/ApplyTemplate
+	// WriteZone cagiriyor; tek-kayit Delete atlanmisti -> silinen kayit baska bir
+	// mutasyon zone uretene dek DNS uzerinde YAYINDA kaliyordu.
+	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+		log.Printf("dns WriteZone(delete) domain=%d: %v", id, zerr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -245,7 +261,7 @@ func (h *Handlers) TopluSil(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, id)
 	res, err := h.DB.ExecContext(r.Context(),
-		"DELETE FROM dns_records WHERE id IN ("+strings.Join(ph, ",")+") AND domain_id=?", args...)
+		"DELETE FROM dns_records WHERE id IN ("+strings.Join(ph, ",")+") AND domain_id=?", args...) //nolint:gosec // G202: ph = []string{"?",...} (yalnız placeholder); req.IDs []int64 ve domain id, args ile ? bağlanır.
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -295,7 +311,7 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, id)
 	res, err := h.DB.ExecContext(r.Context(),
-		"UPDATE dns_records SET aktif=? WHERE id IN ("+strings.Join(ph, ",")+") AND domain_id=?", args...)
+		"UPDATE dns_records SET aktif=? WHERE id IN ("+strings.Join(ph, ",")+") AND domain_id=?", args...) //nolint:gosec // G202: ph = []string{"?",...} (yalnız placeholder); aktif, req.IDs []int64 ve domain id, args ile ? bağlanır.
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -403,11 +419,13 @@ func seedSOAFromMeta(ctx context.Context, db *sql.DB, domainID int64, alanAdi st
 		return
 	}
 	d := defaultSOA(alanAdi)
-	_, _ = db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
 		 VALUES(?,?,?,?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE domain_id=domain_id`,
-		domainID, d.PrimaryNS, d.Hostmaster, meta.SOARefresh, meta.SOARetry, meta.SOAExpire, meta.SOAMinimum, meta.SOATTL)
+		domainID, d.PrimaryNS, d.Hostmaster, meta.SOARefresh, meta.SOARetry, meta.SOAExpire, meta.SOAMinimum, meta.SOATTL); err != nil {
+		log.Printf("dns.seedSOAFromMeta: SOA seed yazılamadı (domain=%d): %v — zone SOA'sız kalabilir", domainID, err)
+	}
 }
 
 func gecerliTip(t string) bool {

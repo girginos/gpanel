@@ -9,6 +9,7 @@ import { api, apiHata } from '@/lib/api'
 import DomainList, { type Domain } from '@/components/DomainList'
 import DomainPano from '@/components/DomainPano'
 import ResourceCard from '@/components/ResourceCard'
+import { useToast } from '@/components/Toast'
 import { useAuth } from '@/store/auth'
 
 
@@ -16,28 +17,33 @@ const DASH_EN: Record<string, string> = {
   "Henüz domain yok. Sol panelden ekleyin.": "No domains yet. Add one from the left panel.",
   "Seçili domain": "Selected domain",
   "Pano": "Dashboard",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DASH_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DashboardPage() {
   useTranslation() // dil re-render aboneligi
   const kullanici = useAuth((s) => s.kullanici)
+  const toast = useToast()
   const [params, setParams] = useSearchParams()
   const [domainler, setDomainler] = useState<Domain[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     setYukleniyor(true)
     api.get<Domain[]>('/domains')
       .then((r) => {
+        if (iptal) return
         setDomainler(r.data)
         if (!params.get('domain') && r.data.length > 0) {
           setParams({ domain: String(r.data[0].id) }, { replace: true })
         }
       })
-      .catch((e) => setHata(apiHata(e)))
-      .finally(() => setYukleniyor(false))
+      .catch((e) => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (!iptal) setYukleniyor(false) })
+    return () => { iptal = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -65,12 +71,6 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {hata && (
-        <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
-          {hata}
-        </div>
-      )}
-
       <div className="grid grid-cols-12 gap-5">
         <aside className="col-span-12 lg:col-span-3">
           <DomainList items={domainler} seciliId={secili?.id} onSec={secimYap} yukleniyor={yukleniyor} />
@@ -80,7 +80,7 @@ export default function DashboardPage() {
           {secili ? (
             <DomainPano domain={secili} />
           ) : (
-            <div className="bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-12 text-center text-slate-500 dark:text-slate-500">
+            <div className="bg-white dark:bg-dark-700 border-2 border-dashed border-slate-200 dark:border-dark-600 rounded-lg p-12 text-center text-slate-500 dark:text-slate-500">
               {yukleniyor ? cevir("Yükleniyor…") : cevir("Henüz domain yok. Sol panelden ekleyin.")}
             </div>
           )}

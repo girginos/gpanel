@@ -105,6 +105,7 @@ PANEL_JWT_LIFETIME_SEC=43200
 PANEL_REDIS_ADMIN_PASS=${RADMIN}
 ENV
 chmod 600 /etc/girginospanel/env
+chown root:root /etc/girginospanel/env
 ok "/etc/girginospanel/env (JWT + DB DSN + Redis admin üretildi)"
 
 # ============ 6) ARTIFACT DEPLOY ============
@@ -113,6 +114,26 @@ install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-s
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
 tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
 tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
+# 🔴 Eklenti başlatıcısı. Şifreli eklentiler systemd'de BUNU ExecStart yapar
+# (bkz. internal/lisans/baslatici.go). Kurulmazsa eklenti birimi 203/EXEC ile
+# düşer ve düz ikili de silinmiş olduğu için kurtarma yolu kalmaz.
+if [ -f "$A/girginospanel-eklenti-baslatici" ]; then
+  install -m 0755 "$A/girginospanel-eklenti-baslatici" /opt/girginospanel/bin/girginospanel-eklenti-baslatici \
+    && ok "eklenti başlatıcısı"
+fi
+
+# Eklenti YÜKLERİ: whitelabel (düz ikili+app.js) ve şifreli eklentilerin app.js'i
+# src/eklentiler'e konur; şifreli İKİLİLER buraya KONMAZ (lic-eu'dan .gosp iner).
+# whitelabelKur/calistiriciKur bu yükten kopyalar.
+mkdir -p /opt/girginospanel/src/eklentiler
+if [ -d "$A/eklentiler" ]; then
+  cp -a "$A/eklentiler/." /opt/girginospanel/src/eklentiler/ 2>/dev/null || true
+  rm -f /opt/girginospanel/src/eklentiler/mail/girginospanel-eklenti-mail \
+        /opt/girginospanel/src/eklentiler/calistirici/girginospanel-eklenti-calistirici 2>/dev/null || true
+  ok "eklenti yükleri (src/eklentiler)"
+fi
+[ -f "$A/eklenti-kur" ] && install -m 0755 "$A/eklenti-kur" /usr/local/bin/eklenti-kur && ok "eklenti-kur"
+
 # ops tool + signon
 for t in "$A"/ops/*; do
   bn=$(basename "$t"); nm="${bn%.sh}"
@@ -279,8 +300,11 @@ restorecon -R /opt/girginospanel/bin /opt/girginospanel/frontend-dist >/dev/null
 
 # ============ 11) Valkey + optimize ============
 step "11) Valkey (Redis) + performans tuning"
-command -v girginospanel-redis-setup >/dev/null 2>&1 && girginospanel-redis-setup >/dev/null 2>&1 && ok "girginospanel-redis-setup" || warn "redis-setup atlandı"
-command -v girginospanel-optimize >/dev/null 2>&1 && girginospanel-optimize >/dev/null 2>&1 && ok "girginospanel-optimize" || warn "optimize atlandı"
+if command -v girginospanel-redis-setup >/dev/null 2>&1; then
+  for _i in 1 2 3; do girginospanel-redis-setup >/dev/null 2>&1; systemctl is-active --quiet valkey && break; sleep 4; done
+fi
+systemctl is-active --quiet valkey && ok "girginospanel-redis-setup" || warn "redis-setup atlandı (sonra: girginospanel-redis-setup)"
+command -v girginospanel-optimize >/dev/null 2>&1 && { girginospanel-optimize >/dev/null 2>&1 || { sleep 2; girginospanel-optimize >/dev/null 2>&1; }; } && ok "girginospanel-optimize" || warn "optimize atlandı"
 # WAF (ModSecurity + OWASP CRS) altyapısı — idempotent, per-domain opt-in (modül yükleme zararsız).
 # İlk kurulumda connector derlemesi birkaç dakika sürebilir; başarısız olursa kurulum durmaz.
 command -v girginospanel-waf-setup >/dev/null 2>&1 && girginospanel-waf-setup >/dev/null 2>&1 && ok "girginospanel-waf-setup (ModSecurity+CRS)" || warn "waf-setup atlandı (panel WAF modülsüz graceful çalışır)"
@@ -290,6 +314,15 @@ step "12) Panel başlatılıyor"
 systemctl enable --now girginospanel >/dev/null 2>&1; sleep 3
 systemctl enable --now nginx >/dev/null 2>&1; systemctl restart nginx >/dev/null 2>&1
 if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; else journalctl -u girginospanel --no-pager -n 20; die "panel başlamadı"; fi
+
+# 🔴 Whitelabel çekirdek/ücretsiz — panelle BİRLİKTE gelir: otomatik kur.
+# 🔴 ÖNCE migration bekle: fresh kurulumda panel startup migration'ları bitmeden
+# eklenti-kur koşup cp_eklentiler tablosu oluşana kadar DÜŞÜYORDU.
+if command -v eklenti-kur >/dev/null 2>&1; then
+  for _i in $(seq 1 40); do mysql panel -e "SELECT 1 FROM cp_eklentiler LIMIT 1" >/dev/null 2>&1 && break; sleep 2; done
+  eklenti-kur whitelabel >/dev/null 2>&1 || { sleep 4; eklenti-kur whitelabel >/dev/null 2>&1; }
+  systemctl is-active --quiet girginospanel-eklenti-whitelabel && ok "whitelabel kuruldu (panelle birlikte)" || warn "whitelabel otomatik kurulamadı (panelden Kur ile eklenebilir)"
+fi
 
 # ---- FTP setup (Pure-FTPd) — ŞİMDİ çalışır: migration ftp_accounts tablosunu oluşturdu ----
 # (step 11'de değil çünkü GRANT SELECT ON panel.ftp_accounts tablo yokken patlıyordu)

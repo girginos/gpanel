@@ -1,0 +1,168 @@
+/* gPanel dashboard — demo (gpanel-dashboard-demo) CSS'inin BİREBİR portu.
+   Tüm kurallar `.gp-dash` altına scope'landı: panelin geri kalanını etkilemez.
+   Kabuk (sidebar/topbar/brand/plan) hariç tutuldu — gPanel'in kendi kabuğu var.
+   Tasarım koyu temaya göre; dashboard bu görünümü her temada korur. */
+
+.gp-dash {
+  --gpd-bg: #080c13;
+  --gpd-card: #111722;
+  --gpd-line: rgba(255, 255, 255, .065);
+  background: var(--gpd-bg);
+  color: #e8eef8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 24px;
+  min-height: 100%;
+}
+.gp-dash *, .gp-dash *::before, .gp-dash *::after { box-sizing: border-box; }
+.gp-dash button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+
+/* ── sayfa başlığı ── */
+.gp-dash .page-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 12px; }
+.gp-dash .page-title h1 { font-size: 24px; margin: 0 0 5px; letter-spacing: -.5px; color: #e8eef8; }
+.gp-dash .page-title p { margin: 0; color: #64748b; font-size: 13px; }
+.gp-dash .title-actions { display: flex; gap: 8px; }
+.gp-dash .primary { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-radius: 9px; background: #2563eb; color: #fff; font-size: 13px; font-weight: 600; }
+.gp-dash .primary:hover { background: #1d4ed8; }
+.gp-dash .secondary { background: #101722; border: 1px solid rgba(255, 255, 255, .07); border-radius: 9px; padding: 8px 11px; color: #9aa8ba; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.gp-dash .secondary:hover { background: #16202e; }
+
+/* ── stat kartları ── */
+.gp-dash .stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.gp-dash .stat-card, .gp-dash .card { position: relative; overflow: hidden; background: var(--gpd-card); border: 1px solid var(--gpd-line); border-radius: 13px; }
+.gp-dash .stat-card { min-height: 112px; padding: 16px; display: flex; justify-content: space-between; }
+.gp-dash .glow { position: absolute; right: -20px; top: -35px; width: 100px; height: 100px; background: rgba(37, 99, 235, .14); filter: blur(28px); border-radius: 50%; }
+.gp-dash .muted { color: #718097; }
+.gp-dash .tiny { font-size: 12px; }
+.gp-dash .stat-copy { position: relative; min-width: 0; }
+.gp-dash .stat-copy > .muted:first-child { font-size: 13px; }
+.gp-dash .stat-value-row { display: flex; align-items: baseline; gap: 7px; margin: 7px 0 2px; }
+.gp-dash .stat-value-row strong { font-size: 23px; letter-spacing: -.5px; color: #e8eef8; }
+.gp-dash .trend { display: flex; align-items: center; color: #34d399; font-size: 11px; }
+.gp-dash .trend.down { color: #fb923c; }
+.gp-dash .stat-icon { position: relative; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: #10213c; color: #60a5fa; border: 1px solid rgba(59, 130, 246, .16); flex: none; }
+/* kart içi mini sparkline — alta tam genişlik, metnin arkasında */
+.gp-dash .stat-card { min-height: 122px; padding-bottom: 44px; }
+.gp-dash .stat-spark { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 46px; pointer-events: none; }
+
+/* ── grid ── */
+.gp-dash .grid { display: grid; gap: 12px; }
+.gp-dash .grid-main { grid-template-columns: 1.35fr 1fr .78fr; margin-top: 12px; }
+.gp-dash .grid-second { grid-template-columns: 1.35fr 1fr .78fr; margin-top: 12px; }
+
+/* ── kart ── */
+.gp-dash .card-head { min-height: 52px; padding: 0 16px; border-bottom: 1px solid rgba(255, 255, 255, .055); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gp-dash .card-title { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: #e8eef8; }
+.gp-dash .card-title svg { color: #60a5fa; }
+.gp-dash .ghost-button { background: transparent; color: #4e9aff; font-size: 12px; }
+
+/* ── sekmeler + grafik ── */
+.gp-dash .tabs { display: flex; gap: 20px; padding: 13px 16px 0; }
+.gp-dash .tabs button { background: transparent; color: #64748b; padding: 0 0 8px; font-size: 12px; }
+.gp-dash .tabs .selected { color: #60a5fa; border-bottom: 2px solid #3b82f6; }
+.gp-dash .chart { height: 245px; padding: 6px 10px 10px 4px; }
+.gp-dash .traffic-chart { height: 180px; }
+
+/* ── sunucu/servis listesi ── */
+.gp-dash .server-list { padding: 3px 0; max-height: 340px; overflow-y: auto; }
+.gp-dash .server-row { padding: 11px 14px; border-bottom: 1px solid rgba(255, 255, 255, .045); display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.gp-dash .server-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.gp-dash .server-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: #18202c; color: #94a3b8; flex: none; }
+.gp-dash .server-main strong { font-size: 12px; font-weight: 600; display: block; color: #e8eef8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-dash .server-main small { font-size: 10px; color: #58677c; display: block; margin-top: 2px; }
+.gp-dash .status { font-size: 10px; padding: 4px 7px; border-radius: 5px; background: rgba(16, 185, 129, .09); color: #34d399; align-self: center; white-space: nowrap; }
+.gp-dash .status.warning { background: rgba(249, 115, 22, .1); color: #fb923c; }
+.gp-dash .status.down { background: rgba(244, 63, 94, .1); color: #fb7185; }
+.gp-dash .metrics { grid-column: 1/-1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gp-dash .metrics label { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 4px; }
+.gp-dash .metrics label b { color: #94a3b8; font-weight: 500; }
+.gp-dash .progress { height: 4px; background: #202936; border-radius: 5px; overflow: hidden; }
+.gp-dash .progress-fill { height: 100%; background: #3b82f6; border-radius: 5px; transition: width .6s cubic-bezier(.22, 1, .36, 1); }
+.gp-dash .progress-fill.purple { background: #8b5cf6; }
+.gp-dash .progress-fill.orange { background: #f97316; }
+.gp-dash .progress-fill.green { background: #10b981; }
+.gp-dash .progress-fill.red { background: #f43f5e; }
+
+/* ── sistem sağlığı ── */
+.gp-dash .health { padding: 17px; }
+.gp-dash .health-ring { width: 126px; height: 126px; margin: 2px auto 18px; border-radius: 50%; display: grid; place-items: center; position: relative; }
+.gp-dash .health-ring:after { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: var(--gpd-card); }
+.gp-dash .health-ring > div { position: relative; z-index: 1; text-align: center; }
+.gp-dash .health-ring strong { font-size: 31px; display: block; color: #e8eef8; }
+.gp-dash .health-ring small { font-size: 11px; color: #34d399; }
+.gp-dash .health-list { display: grid; gap: 6px; }
+.gp-dash .health-list div { display: flex; justify-content: space-between; align-items: center; background: #0e151f; padding: 8px 9px; border-radius: 7px; }
+.gp-dash .health-list span { font-size: 11px; color: #748299; }
+.gp-dash .health-list b { font-size: 11px; color: #34d399; display: flex; gap: 4px; align-items: center; }
+.gp-dash .health-list b.warn { color: #fb923c; }
+
+/* ── trafik ── */
+.gp-dash .traffic-top { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 14px 14px 0; }
+.gp-dash .traffic-box { padding: 12px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .05); background: #0d1820; }
+.gp-dash .traffic-box.blue-box { background: #0e1724; }
+.gp-dash .traffic-box small { display: block; color: #718097; font-size: 11px; }
+.gp-dash .traffic-box strong { display: block; font-size: 18px; margin: 4px 0; color: #e8eef8; }
+.gp-dash .traffic-box span { font-size: 11px; color: #34d399; }
+.gp-dash .traffic-box.blue-box span { color: #60a5fa; }
+
+/* ── depolama kullanımı (donut) ── */
+.gp-dash .depo { display: flex; align-items: center; gap: 16px; padding: 16px 16px 12px; }
+.gp-dash .depo-ring { position: relative; width: 132px; height: 132px; flex: none; }
+.gp-dash .depo-ring svg { width: 132px; height: 132px; display: block; }
+.gp-dash .depo-ic { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+.gp-dash .depo-ic strong { display: block; font-size: 19px; letter-spacing: -.4px; color: #e8eef8; }
+.gp-dash .depo-ic small { font-size: 11px; color: #718097; }
+/* 6 satıra kadar (host/sql/yedek/log/diğer/boş) halka yüksekliğine sığsın diye gap dar */
+.gp-dash .depo-list { flex: 1; min-width: 0; display: grid; gap: 7px; }
+.gp-dash .depo-list > div { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gp-dash .depo-list i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.gp-dash .depo-list span { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-dash .depo-list b { margin-left: auto; color: #e8eef8; font-weight: 600; white-space: nowrap; }
+.gp-dash .depo-list em { font-style: normal; color: #718097; width: 44px; text-align: right; }
+.gp-dash .depo-alt { border-top: 1px solid rgba(255, 255, 255, .045); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gp-dash .depo-bos { font-size: 12px; color: #718097; white-space: nowrap; }
+.gp-dash .depo-bos b { color: #cbd5e1; font-weight: 600; }
+.gp-dash .depo-alt button { color: #4e9aff; font-size: 12px; background: transparent; }
+
+/* ── hızlı işlemler ── */
+.gp-dash .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px; }
+.gp-dash .quick-grid button { padding: 16px 7px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .06); background: #0e151f; display: flex; flex-direction: column; align-items: center; gap: 7px; color: #60a5fa; transition: background .15s, border-color .15s; }
+.gp-dash .quick-grid button:hover { background: #122039; border-color: rgba(59, 130, 246, .25); }
+.gp-dash .quick-grid span { font-size: 11px; color: #7f8da0; text-align: center; }
+
+/* ── bildirimler ── */
+.gp-dash .alerts > div { display: flex; gap: 10px; padding: 15px; border-bottom: 1px solid rgba(255, 255, 255, .045); }
+.gp-dash .alerts > div > svg { flex: none; color: #60a5fa; }
+.gp-dash .alerts > div.sev-uyari > svg { color: #fb923c; }
+.gp-dash .alerts > div.sev-kritik > svg { color: #f43f5e; }
+.gp-dash .alerts > div.sev-basari > svg { color: #34d399; }
+.gp-dash .alerts section strong { display: block; font-size: 12px; font-weight: 600; color: #e8eef8; }
+.gp-dash .alerts section small { display: block; color: #58677c; font-size: 10px; margin-top: 4px; }
+.gp-dash .alerts .bos { padding: 26px 15px; text-align: center; color: #58677c; font-size: 12px; }
+
+/* ── footer ── */
+.gp-dash .dash-footer { display: flex; align-items: center; gap: 20px; margin-top: 12px; padding: 13px 15px; border: 1px solid rgba(255, 255, 255, .06); background: var(--gpd-card); border-radius: 11px; color: #65748a; font-size: 11px; flex-wrap: wrap; }
+.gp-dash .dash-footer > div { display: flex; align-items: center; gap: 7px; color: #8a98aa; margin-right: auto; }
+.gp-dash .online-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 9px rgba(52, 211, 153, .8); }
+.gp-dash .online-dot.warn { background: #fb923c; box-shadow: 0 0 9px rgba(251, 146, 60, .8); }
+.gp-dash .blue { color: #60a5fa !important; }
+
+/* ── duyarlı ── */
+@media (max-width: 1250px) {
+  .gp-dash .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .gp-dash .grid-main, .gp-dash .grid-second { grid-template-columns: 1fr 1fr; }
+  .gp-dash .grid-main > *:last-child, .gp-dash .grid-second > *:last-child { grid-column: 1/-1; }
+}
+@media (max-width: 800px) {
+  .gp-dash { padding: 14px; }
+  .gp-dash .page-title { align-items: flex-start; gap: 10px; flex-direction: column; }
+  .gp-dash .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .gp-dash .grid-main, .gp-dash .grid-second { grid-template-columns: 1fr; }
+  .gp-dash .grid-main > *:last-child, .gp-dash .grid-second > *:last-child { grid-column: auto; }
+  .gp-dash .dash-footer { flex-wrap: wrap; }
+}
+@media (max-width: 500px) {
+  .gp-dash .stats-grid { grid-template-columns: 1fr; }
+  .gp-dash .page-title h1 { font-size: 20px; }
+  .gp-dash .traffic-top { grid-template-columns: 1fr; }
+  .gp-dash .chart { height: 220px; }
+}

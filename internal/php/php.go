@@ -36,6 +36,14 @@ type Surum struct {
 	SockDir  string `json:"sock_dir"`
 	Service  string `json:"service"`
 	Aciklama string `json:"aciklama"`
+	// EOL: guvenlik destegi bitmis surum mu. 🔴 Tek gercek kaynak
+	// phpsurum.DesteklenenSurumler — burada IKINCI bir liste TUTULMAZ, deger
+	// Versions() icinde phpsurum meta'sindan turetilir. JSON alan adi `eol`
+	// admin ucu (GET /php-surumler) ile AYNI sozlesmedir; degistirme.
+	// Not: asagidaki KurulSurumler (geriye-uyum sabit listesi) JSON'a ASLA
+	// serialize edilmez (yalniz surumBilgi/ApplyToFilesystem yol cozumu) —
+	// bu yuzden orada EOL doldurulmaz.
+	EOL bool `json:"eol"`
 }
 
 var KurulSurumler = []Surum{
@@ -404,6 +412,8 @@ func (h *Handlers) Versions(w http.ResponseWriter, r *http.Request) {
 			SockDir:  s.SockDir,
 			Service:  s.Service,
 			Aciklama: aciklama,
+			// EOL phpsurum meta'sindan gelir (tek gercek kaynak).
+			EOL: s.EOL,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, yuklu)

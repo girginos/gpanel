@@ -9,6 +9,7 @@ import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Mod = 'devral' | 'kapali' | 'engelle' | 'denetle'
 type Ayar = { mod: Mod; paranoya: number }
@@ -22,14 +23,14 @@ type Yanit = {
   modul_yuklu: boolean
 }
 
-const MODLAR: { key: Mod; ad: string; ikon: string; aciklama: string; renk: string }[] = [
-  { key: 'devral', ad: 'Plandan Devral', ikon: '↩︎',
+const MODLAR: { key: Mod; ad: string; ikon: React.ReactNode; aciklama: string; renk: string }[] = [
+  { key: 'devral', ad: 'Plandan Devral', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M9 14L4 9l5-5M4 9h11a4 4 0 010 8h-2"/></svg>,
     aciklama: 'Bu domain, bağlı olduğu hizmet planının WAF varsayılanını kullanır.', renk: 'slate' },
-  { key: 'engelle', ad: 'Engelle', ikon: '🛡️',
+  { key: 'engelle', ad: 'Engelle', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M12 3l7 2.6v5.2c0 4.3-3 7-7 8.2-4-1.2-7-3.9-7-8.2V5.6L12 3z"/></svg>,
     aciklama: 'Kötü amaçlı istekler (SQLi, XSS, RCE…) 403 ile bloklanır. SecRuleEngine On.', renk: 'emerald' },
-  { key: 'denetle', ad: 'Denetle', ikon: '👁️',
+  { key: 'denetle', ad: 'Denetle', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zM12 15a3 3 0 100-6 3 3 0 000 6z"/></svg>,
     aciklama: 'İstekler bloklanmaz; yalnızca eşleşen kurallar audit log’a yazılır. DetectionOnly — kural ayarlamak için ideal.', renk: 'indigo' },
-  { key: 'kapali', ad: 'Kapalı', ikon: '⛔',
+  { key: 'kapali', ad: 'Kapalı', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M4.9 4.9l14.2 14.2M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>,
     aciklama: 'WAF bu domain için tamamen devre dışı (plan açık olsa bile).', renk: 'rose' },
 ]
 
@@ -51,6 +52,8 @@ const WAF_EN: Record<string, string> = {
   "✓ WAF uygulandı — {0} modu, paranoya {1}": "✓ WAF applied — {0} mode, paranoia {1}",
   "Engelleme": "Blocking",
   "Denetleme": "Auditing",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Kaydedince nginx vhost yeniden render edilir (sıfır kesinti).": "On save the nginx vhost is re-rendered (zero downtime).",
   "Ayarlar kaydedilir ancak WAF uygulanmaz.": "Settings are saved but the WAF is not applied.",
   "Sunucuda": "When",
@@ -94,12 +97,14 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (WAF_EN[tr] || O
 
 export default function DomainWafPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const { id } = useParams()
   const [y, setY] = useState<Yanit | null>(null)
   const [ayar, setAyar] = useState<Ayar | null>(null)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  // Hata/basari artik sag ust toast'ta gosterilir; state'ler mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
 
   function yukle() {
@@ -107,7 +112,11 @@ export default function DomainWafPage() {
     setYuk(true); setHata(null)
     api.get<Yanit>(`/domains/${id}/waf`)
       .then(r => { setY(r.data); setAyar(r.data.ayar) })
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => {
+        const m = apiHata(e)
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -118,12 +127,16 @@ export default function DomainWafPage() {
     try {
       const r = await api.put<{ efektif: Efektif; modul_yuklu: boolean }>(`/domains/${id}/waf`, { ayar })
       const ef = r.data.efektif
-      setBasari(ef.aktif
+      const mesaj = ef.aktif
         ? cevirT(cevir("✓ WAF uygulandı — {0} modu, paranoya {1}"), ef.engine === 'On' ? cevir("Engelleme") : cevir("Denetleme"), ef.paranoya)
-        : cevir("✓ Ayar kaydedildi — WAF bu domain için pasif"))
+        : cevir("✓ Ayar kaydedildi — WAF bu domain için pasif")
+      setBasari(mesaj)
+      toast.basari(cevir("Kaydedildi"), mesaj)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydetme başarısız")))
+      const m = apiHata(e, cevir("Kaydetme başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -143,9 +156,6 @@ export default function DomainWafPage() {
         {' · '}ModSecurity v3 + OWASP Core Rule Set. {cevir("Kaydedince nginx vhost yeniden render edilir (sıfır kesinti).")}
       </p>}
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
       {y && !y.modul_yuklu && (
         <div className="mb-5 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
           <strong>{cevir("ModSecurity modülü sunucuda kurulu değil.")}</strong> {cevir("Ayarlar kaydedilir ancak WAF uygulanmaz.")}
@@ -158,7 +168,7 @@ export default function DomainWafPage() {
       ) : (
         <>
           {/* Efektif durum + plan bilgisi */}
-          <div className="mb-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="mb-4 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Etkin Durum:")}</span>
               {y.efektif.aktif ? (
@@ -170,7 +180,7 @@ export default function DomainWafPage() {
                   ● {y.efektif.engine === 'On' ? cevir("Aktif · Engelleme") : cevir("Aktif · Denetleme")} · {cevir("Paranoya")} {y.efektif.paranoya}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{cevir("○ Pasif")}</span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400">{cevir("○ Pasif")}</span>
               )}
               <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
                 {cevir("Plan varsayılanı")} ({y.plan.ad || '—'}):{' '}
@@ -185,14 +195,14 @@ export default function DomainWafPage() {
               {MODLAR.map(m => {
                 const aktif = ayar.mod === m.key
                 const renk: Record<string, string> = {
-                  slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-slate-700/40 ring-2 ring-slate-400/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-400',
-                  emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300',
-                  indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300',
-                  rose:    aktif ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/20 ring-2 ring-rose-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-rose-300',
+                  slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-dark-600/40 ring-2 ring-slate-400/20' : 'border-slate-200 dark:border-dark-600 hover:border-slate-400',
+                  emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-emerald-300',
+                  indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300',
+                  rose:    aktif ? 'border-rose-500 bg-rose-50 dark:bg-rose-900/20 ring-2 ring-rose-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-rose-300',
                 }
                 return (
                   <button key={m.key} type="button" onClick={() => setAyar({ ...ayar, mod: m.key })}
-                    className={`text-left p-4 border rounded-xl transition ${renk[m.renk]}`}>
+                    className={`text-left p-4 border rounded-lg transition ${renk[m.renk]}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ikon} {cevir(m.ad)}</span>
                       {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">{cevir("● Seçili")}</span>}
@@ -215,7 +225,7 @@ export default function DomainWafPage() {
                 value={ayar.paranoya}
                 onChange={e => setAyar({ ...ayar, paranoya: parseInt(e.target.value) })}
                 disabled={ayar.mod === 'devral' || ayar.mod === 'kapali'}
-                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded text-sm font-mono disabled:opacity-50">
+                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-700 rounded text-sm font-mono disabled:opacity-50">
                 <option value={0}>{cevir("Plandan devral")}</option>
                 <option value={1}>{cevir("Seviye 1 (Düşük)")}</option>
                 <option value={2}>{cevir("Seviye 2 (Orta)")}</option>
@@ -228,11 +238,11 @@ export default function DomainWafPage() {
 
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
               {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
               {cevir("Yeniden Yükle")}
             </button>
           </div>
@@ -244,8 +254,8 @@ export default function DomainWafPage() {
 
 function Kart({ baslik, children }: { baslik: string; children: any }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-slate-800">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
+      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )

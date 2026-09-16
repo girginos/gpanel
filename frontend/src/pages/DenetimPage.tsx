@@ -8,6 +8,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
+import { Button } from '@/components/ui'
+import { useToast } from '@/components/Toast'
 
 type Kayit = {
   id: number; zaman: string; aktor: string; aktor_rol: string; ip: string
@@ -41,6 +43,7 @@ const ETIKET: Record<string, string> = {
 }
 
 const DEN_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "2FA açıldı": "2FA enabled",
   "2FA doğrulama": "2FA verification",
   "2FA kapatıldı": "2FA disabled",
@@ -138,6 +141,7 @@ function EylemRozet({ eylem }: { eylem: string }) {
 
 export default function DenetimPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const bayiMi = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('gosp.user') || '{}').rol === 'reseller' } catch { return false }
   }, [])
@@ -148,24 +152,28 @@ export default function DenetimPage() {
   const [kapsam, setKapsam] = useState('')
   const [sayfa, setSayfa] = useState(0)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const limit = 50
 
   useEffect(() => {
+    let iptal = false
     if (bayiMi) return
-    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(() => { /* opsiyonel */ })
+    api.get<Bayi[]>('/resellers').then(r => { if (iptal) return; setBayiler(r.data || []) }).catch(() => { /* opsiyonel */ })
+    return () => { iptal = true }
   }, [bayiMi])
 
   useEffect(() => {
+    let iptal = false
     setYuk(true)
     const p = new URLSearchParams({ limit: String(limit), offset: String(sayfa * limit) })
     if (ara.trim()) p.set('ara', ara.trim())
     if (eylem) p.set('eylem', eylem)
     if (kapsam) p.set('kapsam', kapsam)
     api.get<Yanit>(`/denetim?${p}`)
-      .then(r => { setVeri(r.data); setHata(null) })
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (iptal) return; setVeri(r.data); setHata(null) })
+      .catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (!iptal) setYuk(false) })
+    return () => { iptal = true }
   }, [ara, eylem, kapsam, sayfa])
 
   const kayitlar = veri?.kayitlar || []
@@ -184,13 +192,7 @@ export default function DenetimPage() {
         </p>
       </div>
 
-      {hata && (
-        <div role="alert" className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
-          {hata}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 bg-white dark:bg-slate-800/40 p-3">
+      <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-3">
         <label className="sr-only" htmlFor="denetim-ara">{cevir("Kayıtlarda ara")}</label>
         <div className="relative min-w-[200px] flex-1">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -198,11 +200,11 @@ export default function DenetimPage() {
           </span>
           <input id="denetim-ara" value={ara} onChange={e => { setSayfa(0); setAra(e.target.value) }}
             placeholder={cevir("Kullanıcı, hedef, IP veya eylem ara…")}
-            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 pl-9 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15" />
+            className="w-full rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800/60 pl-9 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15" />
         </div>
         <label className="sr-only" htmlFor="denetim-eylem">{cevir("Eylem türü")}</label>
         <select id="denetim-eylem" value={eylem} onChange={e => { setSayfa(0); setEylem(e.target.value) }}
-          className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
+          className="shrink-0 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
           <option value="">{cevir("Tüm eylemler")}</option>
           {(veri?.eylemler || []).map(e => <option key={e} value={e}>{cevir(etiketle(e))}</option>)}
         </select>
@@ -210,14 +212,14 @@ export default function DenetimPage() {
           <>
             <label className="sr-only" htmlFor="denetim-kapsam">{cevir("Kapsam")}</label>
             <select id="denetim-kapsam" value={kapsam} onChange={e => { setSayfa(0); setKapsam(e.target.value) }}
-              className="shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
+              className="shrink-0 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
               <option value="">{cevir("Tüm kapsamlar")}</option>
               <option value="kok">{cevir("Yalnız kök (panel sahibi)")}</option>
               {bayiler.map(b => <option key={b.id} value={String(b.id)}>{cevir("Bayi")}: {b.kullanici}</option>)}
             </select>
           </>
         )}
-        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">{toplam.toLocaleString('tr-TR')} {cevir("kayıt")}</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap rounded-full bg-slate-100 dark:bg-dark-700 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">{toplam.toLocaleString('tr-TR')} {cevir("kayıt")}</span>
       </div>
 
       {yuk && !veri ? (
@@ -226,10 +228,10 @@ export default function DenetimPage() {
         <EmptyState baslik={cevir("Kayıt yok")}
           aciklama={cevir("Bu süzgeçlerle eşleşen denetim kaydı bulunamadı. Süzgeçleri temizleyip tekrar deneyin.")} />
       ) : (
-        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+        <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
-              <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+              <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
                 <tr>
                   <th className={T.baslik}>{cevir("Zaman")}</th>
                   <th className={T.baslik}>{cevir("Kullanıcı")}</th>
@@ -242,14 +244,14 @@ export default function DenetimPage() {
               </thead>
               <tbody className={T.govde}>
                 {kayitlar.map(k => (
-                  <tr key={k.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition`}>
+                  <tr key={k.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700 transition`}>
                     <td className={T.hucre} data-etiket={cevir("Zaman")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap tabular-nums">{k.zaman}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
                       <span className="text-slate-700 dark:text-slate-300">{k.aktor || '—'}</span>
                       {k.aktor_rol && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400">
                           {k.aktor_rol === 'admin' ? cevir('yönetici') : k.aktor_rol === 'reseller' ? cevir('bayi') : k.aktor_rol}
                         </span>
                       )}
@@ -276,7 +278,7 @@ export default function DenetimPage() {
                                   className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold ${
                                     k.kapsam_ad
                                       ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
-                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 line-through'}`}>
+                                      : 'bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 line-through'}`}>
                               {k.kapsam_ad || ('#' + k.kapsam_id)}
                             </span>}
                       </td>
@@ -302,15 +304,15 @@ export default function DenetimPage() {
 
       {toplam > limit && (
         <div className="flex items-center justify-between gap-3">
-          <button onClick={() => setSayfa(s => Math.max(0, s - 1))} disabled={sayfa === 0}
-            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">
+          <Button variant="outlined" onClick={() => setSayfa(s => Math.max(0, s - 1))} disabled={sayfa === 0}
+            className="px-3 py-1.5 text-sm">
             {cevir(cevir("← Önceki"))}
-          </button>
+          </Button>
           <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{cevir("Sayfa")} {sayfa + 1} / {sonSayfa + 1}</span>
-          <button onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}
-            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800">
+          <Button variant="outlined" onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}
+            className="px-3 py-1.5 text-sm">
             {cevir("Sonraki →")}
-          </button>
+          </Button>
         </div>
       )}
     </div>

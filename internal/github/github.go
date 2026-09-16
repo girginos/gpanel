@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
-	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -122,10 +122,8 @@ func patHataMesaji(status int, b []byte) string {
 }
 
 func (h *Handlers) lookupDomain(r *http.Request) (id int64, sk string, demo bool, err error) {
-	mc := middleware.MusteriClaimsFrom(r)
 	idStr := chi.URLParam(r, "id")
 	_, _ = fmt.Sscanf(idStr, "%d", &id)
-	_ = mc
 	var dmo int
 	err = h.DB.QueryRowContext(r.Context(),
 		`SELECT sistem_kullanici, is_demo FROM domains WHERE id=?`, id).
@@ -179,7 +177,7 @@ func (h *Handlers) Connect(w http.ResponseWriter, r *http.Request) {
 		 VALUES(?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE pat=VALUES(pat), login=VALUES(login),
 		   ad_soyad=VALUES(ad_soyad), avatar_url=VALUES(avatar_url)`,
-		id, req.Token, u.Login, u.Name, u.AvatarURL)
+		id, gizli.SaklaBagli(req.Token, "github-pat"), u.Login, u.Name, u.AvatarURL)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB: "+err.Error())
 		return
@@ -229,10 +227,14 @@ func (h *Handlers) Disconnect(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRowContext(r.Context(),
 		`SELECT pat, secili_repo, webhook_id FROM github_connections WHERE domain_id=?`, id).
 		Scan(&pat, &repo, &hookID)
+	pat = gizli.CozBagli(pat, "github-pat")
 	if pat != "" && repo != "" && hookID > 0 {
 		_, _, _ = ghCall(r.Context(), "DELETE", fmt.Sprintf("/repos/%s/hooks/%d", repo, hookID), pat, nil)
 	}
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM github_connections WHERE domain_id=?`, id)
+	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM github_connections WHERE domain_id=?`, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "bağlantı silinemedi: "+err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -347,22 +349,26 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cloneURL := fmt.Sprintf("https://%s@github.com/%s.git", pat, req.Repo)
+	// 🔴 GÜVENLİK (at-rest sır / CWE-312): PAT'i clone URL'ine gömüp git_repos.repo_url'e
+	// DÜZ METİN yazma. PAT yalnız github_connections.pat'te AEAD şifreli tutulur; repo_url
+	// TOKEN'SIZ saklanır, clone anında git.patliURL ile RUNTIME enjekte edilir.
+	cloneURL := fmt.Sprintf("https://github.com/%s.git", req.Repo)
 
 	// git_repos kaydını yaz/güncelle
 	var existingSecret string
 	_ = h.DB.QueryRowContext(r.Context(),
 		`SELECT COALESCE(webhook_secret,'') FROM git_repos WHERE domain_id=?`, id).Scan(&existingSecret)
+	existingSecret = gizli.CozBagli(existingSecret, "webhook")
 	secret := existingSecret
 	if secret == "" {
 		secret = randomHex(20)
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO git_repos(domain_id, repo_url, branch, target_dir, deploy_key_pub, webhook_secret, son_durum)
-		 VALUES(?,?,?,?, '', ?, 'beklemede')
+		`INSERT INTO git_repos(domain_id, repo_url, branch, target_dir, deploy_key_pub, webhook_secret, webhook_secret_hash, son_durum)
+		 VALUES(?,?,?,?, '', ?,?, 'beklemede')
 		 ON DUPLICATE KEY UPDATE repo_url=VALUES(repo_url), branch=VALUES(branch),
-		   target_dir=VALUES(target_dir), webhook_secret=VALUES(webhook_secret)`,
-		id, cloneURL, req.Branch, req.TargetDir, secret); err != nil {
+		   target_dir=VALUES(target_dir), webhook_secret=VALUES(webhook_secret), webhook_secret_hash=VALUES(webhook_secret_hash)`,
+		id, cloneURL, req.Branch, req.TargetDir, gizli.SaklaBagli(secret, "webhook"), gizli.Sha256Hex(secret)); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB: "+err.Error())
 		return
 	}
@@ -428,7 +434,7 @@ func (h *Handlers) readConnection(ctx context.Context, domainID int64) (*Connect
 func (h *Handlers) tokenOf(ctx context.Context, domainID int64) string {
 	var pat string
 	_ = h.DB.QueryRowContext(ctx, `SELECT pat FROM github_connections WHERE domain_id=?`, domainID).Scan(&pat)
-	return pat
+	return gizli.CozBagli(pat, "github-pat")
 }
 
 func randomHex(n int) string {

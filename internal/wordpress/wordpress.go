@@ -9,7 +9,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -21,8 +23,10 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kota"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -39,10 +43,12 @@ var (
 )
 
 type Kurulum struct {
-	Dizin    string `json:"dizin"`
-	SiteURL  string `json:"site_url"`
-	AdminURL string `json:"admin_url"`
-	Surum    string `json:"surum"`
+	Dizin          string `json:"dizin"`
+	SiteURL        string `json:"site_url"`
+	AdminURL       string `json:"admin_url"`
+	Surum          string `json:"surum"`
+	AdminKullanici string `json:"admin_kullanici,omitempty"`
+	ParolaVar      bool   `json:"parola_var"` // kurulumda uretilen parola saklandi mi (iste-goster)
 }
 
 func (h *Handlers) domain(r *http.Request) (id int64, sk, alanAdi string, ssl, demo, ok bool) {
@@ -67,6 +73,27 @@ func wpKomut(sk string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// guvenliSilTenant: hedefi TENANT kimliğinde (runuser -u sk) siler.
+// 🔴 GÜVENLİK (CWE-59 link-following): os.RemoveAll KÖK olarak çağrılınca yol'daki
+// ara-bileşen symlink'lerini izler (Go os.RemoveAll parent'ı plain open() ile açar).
+// Tenant kendi public_html'ine `x -> /home/baskatenant` symlink'i kurup (RAR çıkarma
+// veya PHP symlink) silme ucunu tetikleyerek KÖK yetkisiyle komşu tenant'ın sitesini
+// sildirebiliyordu. Silmeyi tenant UID'sinde yapınca kurbanın 0710 home'una erişim
+// imkânsız (DAC). shell yok (argv). Bkz. internal/files/safeio.go (aynı tehdit, openat2).
+func guvenliSilTenant(sk, hedef string) error {
+	if !strings.HasPrefix(sk, "c_") {
+		return fmt.Errorf("güvenlik: geçersiz kullanıcı")
+	}
+	if hedef == "" || !strings.HasPrefix(hedef, "/home/"+sk+"/") {
+		return fmt.Errorf("güvenlik: hedef tenant dizini dışında")
+	}
+	cmd := exec.Command("runuser", "-u", sk, "--", "rm", "-rf", "--", hedef)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("silme: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 func (h *Handlers) scheme(ssl bool) string {
 	if ssl {
 		return "https://"
@@ -76,7 +103,7 @@ func (h *Handlers) scheme(ssl bool) string {
 
 // GET /domains/{id}/wordpress — kurulu WP'leri keşfet (public_html + 1 alt dizin)
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
-	_, sk, _, _, _, ok := h.domain(r)
+	id, sk, _, _, _, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -105,6 +132,13 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		if b, err := wpKomut(sk, "option", "get", "siteurl", "--path="+dir); err == nil {
 			k.SiteURL = strings.TrimSpace(string(b))
 			k.AdminURL = k.SiteURL + "/wp-admin"
+		}
+		var akul string
+		if h.DB.QueryRowContext(r.Context(),
+			`SELECT admin_kullanici FROM cp_wp_kurulum WHERE domain_id=? AND hedef=?`,
+			id, dir).Scan(&akul) == nil {
+			k.ParolaVar = true
+			k.AdminKullanici = akul
 		}
 		out = append(out, k)
 	}
@@ -339,6 +373,16 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusConflict, msg)
 		return
 	}
+	// 🔴 PLAN LIMITI: Kur her cagrisinda YENI bir wp_<slug> veritabani acar,
+	// ama kota kapisi (kota.CheckDBEklenebilir) bu pakette HIC cagrilmiyordu →
+	// "domain olustur + WP kur" akisi plan max_db limitini (or. 1) sessizce 2'ye
+	// cikariyordu. Kapi, DB acilmadan (ve dizin hazirlanmadan) ONCE calisir;
+	// MEVCUT kurulumlar etkilenmez — yalniz yeni DB acan bu yol kontrol edilir.
+	if kerr := kota.CheckDBEklenebilir(r.Context(), h.DB, id); kerr != nil {
+		httpx.WriteError(w, http.StatusForbidden,
+			"WordPress kurulumu yeni bir veritabanı gerektiriyor; "+kerr.Error())
+		return
+	}
 	if err := os.MkdirAll(hedef, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin oluşturulamadı")
 		return
@@ -378,11 +422,11 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 			log.Printf("wp kurulum: başarısız-kurulum temizliği düşmedi (db=%s): %v", dbName, derr)
 		}
 		if req.AltDizin != "" { // sadece kendi oluşturduğumuz alt dizini temizle
-			_ = os.RemoveAll(hedef)
+			_ = guvenliSilTenant(sk, hedef)
 		} else {
 			// kok kurulumda dizin silinmez; kurulumZatenVar bos-kok garantiledigi
 			// icin yalniz wp-* artiklarini kaldirmak guvenli.
-			_ = wpKokTemizle(hedef)
+			_ = wpKokTemizle(sk, hedef)
 		}
 		msg := strings.TrimSpace(string(out))
 		if len(msg) > 600 {
@@ -428,6 +472,14 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	if b, err := wpKomut(sk, "core", "version", "--path="+hedef); err == nil {
 		surum = strings.TrimSpace(string(b))
 	}
+	// 🔴 CWE-200: uretilen admin parolasi YANITTA DONMEZ; sifreli saklanir,
+	// sahip /domains/{id}/wordpress/admin-parola ucundan iste-goster ile alir.
+	if _, e := h.DB.ExecContext(r.Context(),
+		`INSERT INTO cp_wp_kurulum (domain_id, hedef, admin_kullanici, admin_parola) VALUES (?,?,?,?)
+		 ON DUPLICATE KEY UPDATE admin_kullanici=VALUES(admin_kullanici), admin_parola=VALUES(admin_parola), olusturulma=CURRENT_TIMESTAMP`,
+		id, hedef, req.AdminKullanici, gizli.SaklaBagli(adminParola, sk)); e != nil {
+		log.Printf("wp kurulum parolasi saklanamadi (domain=%d hedef=%s): %v", id, hedef, e)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "site_url": url, "admin_url": url + "/wp-admin",
 		"admin_kullanici": req.AdminKullanici, "admin_parola": adminParola,
@@ -449,7 +501,10 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	var greq struct {
 		Dizin string `json:"dizin"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&greq)
+	if err := json.NewDecoder(r.Body).Decode(&greq); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	wpRoot, _, _ := h.wpKapsam(r, sk)
 	dir, err := cozDizin(wpRoot, greq.Dizin)
 	if err != nil {
@@ -483,9 +538,15 @@ var wpKokGirdileri = []string{
 // wpKokTemizle — kökteki WordPress dosyalarını kaldırır, dizinin kendisini
 // KORUR. Sabit listeye ek olarak `wp-*.php` kalıbındaki dosyalar da silinir
 // (wp-config.php, wp-load.php, wp-settings.php … sürümden sürüme değişir).
-func wpKokTemizle(dir string) error {
+func wpKokTemizle(sk, dir string) error {
+	// 🔴 GÜVENLİK (CWE-59): dir kök symlink olabilir (tenant public_html'ini komşuya
+	// symlink'lemiş). Son bileşen symlink ise reddet; silmeleri tenant UID'sinde yap
+	// (guvenliSilTenant) → kök-yetkili symlink-takibi ile cross-tenant silme imkânsız.
+	if fi, err := os.Lstat(dir); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("güvenlik: kök dizin sembolik bağlantı")
+	}
 	for _, ad := range wpKokGirdileri {
-		if err := os.RemoveAll(filepath.Join(dir, ad)); err != nil {
+		if err := guvenliSilTenant(sk, filepath.Join(dir, ad)); err != nil {
 			return err
 		}
 	}
@@ -498,7 +559,7 @@ func wpKokTemizle(dir string) error {
 		if g.IsDir() || !strings.HasPrefix(ad, "wp-") || !strings.HasSuffix(ad, ".php") {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, ad)); err != nil {
+		if err := guvenliSilTenant(sk, filepath.Join(dir, ad)); err != nil {
 			return err
 		}
 	}
@@ -554,7 +615,10 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		Dizin string `json:"dizin"`
 		DBSil bool   `json:"db_sil"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&sreq)
+	if err := json.NewDecoder(r.Body).Decode(&sreq); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	wpRoot, _, _ := h.wpKapsam(r, sk)
 	dir, err := cozDizin(wpRoot, sreq.Dizin)
 	if err != nil {
@@ -604,11 +668,11 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if kokKurulum {
-		if err := wpKokTemizle(dir); err != nil {
+		if err := wpKokTemizle(sk, dir); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "WordPress dosyaları temizlenemedi: "+err.Error())
 			return
 		}
-	} else if err := os.RemoveAll(dir); err != nil {
+	} else if err := guvenliSilTenant(sk, dir); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi")
 		return
 	}

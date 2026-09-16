@@ -14,7 +14,7 @@ import (
 // `proxy_set_header X-Gosp-Proxy "<gizli>"` enjekte ettikten ve `nginx -t` GECTIKTEN
 // SONRA bu dosyayi yazar. Boylece dosya varsa nginx'in de basligi gonderdigi GARANTIdir
 // (yoksa ClientIP eski loopback-guven davranisina duser → kilitlenme yok).
-const ProxySecretPath = "/etc/girginospanel/proxy.secret"
+const ProxySecretPath = "/etc/girginospanel/proxy.secret" //nolint:gosec // G101 yanlış-pozitif: gömülü sır DEĞİL, bir dosya YOLU (değişken adı "Secret" içerdiği için regex takılıyor); asıl gizli çalışma anında bu dosyadan okunur / NewProxySecret'te crypto/rand ile üretilir.
 
 var (
 	proxyOnce sync.Once

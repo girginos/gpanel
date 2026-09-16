@@ -8,7 +8,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 /*
  * Araçlar ve Ayarlar — sunucu geneli yönetim merkezi.
  * Tasarım: panelin monokrom "premium açık SaaS" dili. Nötr yüzey + tek brand-aksan,
- * çizgi (stroke) SVG ikon, tutarlı rounded-2xl, canlı arama. Emoji/gökkuşağı YOK.
+ * çizgi (stroke) SVG ikon, tutarlı rounded-lg, canlı arama. Emoji/gökkuşağı YOK.
  */
 
 type Arac = {
@@ -183,16 +183,16 @@ function AracKart({ a }: { a: Arac }) {
   return (
     <Link
       to={a.href}
-      className="group relative flex items-start gap-3.5 rounded-2xl border border-slate-200 bg-white p-4
-                 transition-all hover:border-brand-300 hover:shadow-sm
+      className="group relative flex items-start gap-3.5 rounded-lg border border-slate-200 bg-white p-4
+                 transition-all hover:border-brand-300 hover:shadow-xs
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50
-                 dark:border-slate-800 dark:bg-slate-900/40 dark:hover:border-brand-700/60 dark:hover:bg-slate-900"
+                 dark:border-dark-600 dark:bg-dark-800/40 dark:hover:border-brand-700/60 dark:hover:bg-dark-800"
     >
       <span
-        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
                    bg-slate-100 text-slate-500 transition-colors
                    group-hover:bg-brand-50 group-hover:text-brand-600
-                   dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-brand-900/30 dark:group-hover:text-brand-400"
+                   dark:bg-dark-700 dark:text-slate-400 dark:group-hover:bg-brand-900/30 dark:group-hover:text-brand-400"
       >
         <Ikon d={a.ikon} className="h-5 w-5" />
       </span>
@@ -202,7 +202,7 @@ function AracKart({ a }: { a: Arac }) {
           <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(a.baslik)}</span>
           {a.rozet && (
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide
-                             text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                             text-slate-500 dark:bg-dark-700 dark:text-slate-400">
               {cevir(a.rozet)}
             </span>
           )}
@@ -211,7 +211,7 @@ function AracKart({ a }: { a: Arac }) {
       </span>
 
       <Ikon d={I.chevron}
-        className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-300 transition-all
+        className="mt-0.5 h-4 w-4 shrink-0 text-slate-300 transition-all
                    group-hover:translate-x-0.5 group-hover:text-brand-500 dark:text-slate-600" />
     </Link>
   )
@@ -256,9 +256,9 @@ export default function AraclarAyarlarPage() {
             onChange={e => setQ(e.target.value)}
             placeholder={cevir("Araç ara…")}
             aria-label={cevir("Araç ara")}
-            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900
                        placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
-                       dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
+                       dark:border-dark-600 dark:bg-dark-800/60 dark:text-slate-100"
           />
         </div>
       </div>
@@ -279,7 +279,7 @@ export default function AraclarAyarlarPage() {
 
       {/* Araç grupları */}
       {gruplar.length === 0 ? (
-        <div role="status" className="rounded-2xl border border-dashed border-slate-200 py-14 text-center dark:border-slate-800">
+        <div role="status" className="rounded-lg border border-dashed border-slate-200 py-14 text-center dark:border-dark-600">
           <Ikon d={I.tune} className="mx-auto h-9 w-9 text-slate-300 dark:text-slate-600" />
           <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">{cevir("\"{q}\" için araç bulunamadı").replace('{q}', q)}</p>
           <p className="mt-1 text-xs text-slate-500">{cevir("Arama terimini değiştirin veya temizleyin.")}</p>

@@ -32,7 +32,7 @@ import (
 const (
 	pmaSignonDir  = "/opt/girginospanel/pma-signon"
 	pmaSignonPath = "/opt/girginospanel/pma-signon/pma-signon.php"
-	pmaTokenPath  = "/etc/girginospanel/pma-internal.token"
+	pmaTokenPath  = "/etc/girginospanel/pma-internal.token" //nolint:gosec // G101 yanlış-pozitif: gömülü sır DEĞİL, dosya YOLU (ad "Token" içeriyor); asıl token ensurePMAToken'da crypto/rand ile üretilip bu yola yazılır.
 	pmaPoolPath   = "/etc/php-fpm.d/phpmyadmin.conf"
 	pmaConfigPath = "/opt/phpmyadmin/config.inc.php"
 )

@@ -27,7 +27,7 @@ type rateFail struct {
 }
 
 var (
-	rateMu   sync.Mutex
+	rateMu    sync.Mutex
 	rateFails = map[string][]rateFail{} // hostname → fail listesi
 )
 
@@ -79,7 +79,9 @@ func RateLimitBilgi(hostname string) (kalan int, bekleyen time.Duration) {
 		}
 	}
 	kalan = rateLimitFailSayisi - sayi
-	if kalan < 0 { kalan = 0 }
+	if kalan < 0 {
+		kalan = 0
+	}
 	if kalan == 0 && !enEskiAktif.IsZero() {
 		bekleyen = time.Until(enEskiAktif.Add(rateLimitPencere))
 	}

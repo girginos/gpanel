@@ -17,6 +17,7 @@ import type { ReactNode } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
+import { Button } from './ui'
 
 const DIALOG_EN: Record<string, string> = {
   "Vazgeç": "Cancel",
@@ -131,12 +132,12 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
     <Ctx.Provider value={api}>
       {children}
       {istek && s && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+        <div className="gosp-fade fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm dark:bg-black/50"
           role="dialog" aria-modal="true" aria-label={s.baslik} onClick={iptal}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-700"
+          <div className="gosp-modal-in w-full max-w-md rounded-lg bg-white p-6 shadow-soft dark:bg-dark-700 dark:shadow-none"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${
+              <div className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center ${
                 tehlike
                   ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                   : 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300'}`}>
@@ -155,24 +156,19 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
                 value={deger}
                 onChange={e => setDeger(e.target.value)}
                 placeholder={s.yerTutucu}
-                className="mt-4 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400"
+                className="mt-4 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400"
               />
             )}
 
-            <div className="flex gap-2 mt-5">
+            <div className="mt-5 flex gap-2">
               {istek.tur !== 'bilgi' && (
-                <button onClick={iptal}
-                  className="flex-1 text-sm font-medium px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <Button variant="outlined" onClick={iptal} className="flex-1 px-4 py-2.5 text-sm">
                   {s.iptalEtiketi || cevir('Vazgeç')}
-                </button>
+                </Button>
               )}
-              <button ref={onayRef} onClick={tamam}
-                className={`flex-1 text-sm font-medium px-4 py-2.5 rounded-xl text-white shadow-sm transition-colors ${
-                  tehlike
-                    ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
-                    : 'bg-brand-600 hover:bg-brand-700 shadow-brand-600/20'}`}>
+              <Button ref={onayRef} color={tehlike ? 'error' : 'primary'} onClick={tamam} className="flex-1 px-4 py-2.5 text-sm">
                 {s.onayEtiketi || (istek.tur === 'bilgi' ? cevir('Tamam') : cevir('Onayla'))}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

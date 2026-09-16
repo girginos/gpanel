@@ -9,6 +9,7 @@ package antivirus
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"os/user"
@@ -151,7 +152,9 @@ func (h *Handlers) KarantinaGeriYukle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	_, _ = h.DB.Exec(`UPDATE av_bulgular SET durum='geri_yuklendi', karantina=0 WHERE id=?`, bid)
+	if _, err := h.DB.Exec(`UPDATE av_bulgular SET durum='geri_yuklendi', karantina=0 WHERE id=?`, bid); err != nil {
+		log.Printf("antivirus KarantinaGeriYukle: durum güncellenemedi (bid=%d): %v — dosya geri yüklendi ama panel karantinada gösterebilir", bid, err)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "geri_yuklendi": orij})
 }
 
@@ -178,7 +181,9 @@ func (h *Handlers) KarantinaSil(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, _ = h.DB.Exec(`UPDATE av_bulgular SET durum='silindi', karantina=0 WHERE id=?`, bid)
+	if _, err := h.DB.Exec(`UPDATE av_bulgular SET durum='silindi', karantina=0 WHERE id=?`, bid); err != nil {
+		log.Printf("antivirus KarantinaSil: durum güncellenemedi (bid=%d): %v — dosya silindi ama panel karantinada gösterebilir", bid, err)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silindi": true})
 }
 
@@ -231,22 +236,6 @@ func hasNUL(b []byte) bool {
 	}
 	return false
 }
-
-// chownKiraci — geri yüklenen dosyayı kiracı kullanıcı:grup yapar (best-effort).
-// 🔴 root taşıdı; sahiplik verilmezse site FPM'i dosyayı okuyamaz. Hata sessiz
-// (dosya root kalır, panel yine erişir; operatör görür).
-func chownKiraci(yol, sk string) {
-	u, err := user.Lookup(sk)
-	if err != nil {
-		return
-	}
-	uid, e1 := strconv.Atoi(u.Uid)
-	gid, e2 := strconv.Atoi(u.Gid)
-	if e1 == nil && e2 == nil {
-		_ = os.Chown(yol, uid, gid)
-	}
-}
-
 
 var errGuvenliYol = errors.New("guvenli-olmayan yol (symlink/ev disi)")
 

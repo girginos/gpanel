@@ -24,16 +24,14 @@ import (
 )
 
 const (
-	varsayilanPeriyot   = 6 * time.Hour
-	acilisGecikmesi     = 5 * time.Minute
-	feedIsteğiBekleme   = 200 * time.Millisecond // eklenti başına küçük jitter
+	varsayilanPeriyot = 6 * time.Hour
+	acilisGecikmesi   = 5 * time.Minute
+	feedIsteğiBekleme = 200 * time.Millisecond // eklenti başına küçük jitter
 )
 
 var (
-	kosmaMu   sync.Mutex
-	kosuyor   bool
-	sonHata   error
-	sonBaslama time.Time
+	kosmaMu sync.Mutex
+	kosuyor bool
 	// taranEden — o an taranan domain id kümesi (kosmaMu korur). kosuyor==true &&
 	// küme BOŞ => TÜM domainler taranıyor (full-scan). Apps handler domain başına
 	// "taranıyor" durumunu buradan üretir.
@@ -67,7 +65,9 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 	case <-time.After(acilisGecikmesi):
 	}
 
-	Tara(ctx, db, false)
+	if err := Tara(ctx, db, false); err != nil {
+		log.Printf("websec: açılış taraması atlandı: %v", err)
+	}
 
 	tk := time.NewTicker(varsayilanPeriyot)
 	defer tk.Stop()
@@ -76,7 +76,9 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 		case <-ctx.Done():
 			return
 		case <-tk.C:
-			Tara(ctx, db, false)
+			if err := Tara(ctx, db, false); err != nil {
+				log.Printf("websec: periyodik tarama atlandı: %v", err)
+			}
 		}
 	}
 }
@@ -108,7 +110,6 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 		return errors.New("tarama zaten çalışıyor")
 	}
 	kosuyor = true
-	sonBaslama = time.Now()
 	taranEden = map[int64]bool{}
 	for _, id := range domainIDs {
 		if id > 0 {
@@ -190,7 +191,7 @@ WPloop:
 				}
 				feedCache[anahtar] = zaflar
 				select {
-				case <-time.After(feedIsteğiBekleme + time.Duration(rand.IntN(200))*time.Millisecond):
+				case <-time.After(feedIsteğiBekleme + time.Duration(rand.IntN(200))*time.Millisecond): //nolint:gosec // G404: math/rand/v2 IntN yalnız feed istekleri arası 0-199ms JITTER üretir (kibar hız-sınırlama); güvenlik jetonu/karar değeri değil, crypto/rand gerekmez.
 				case <-ctx.Done():
 					break WPloop
 				}
@@ -233,17 +234,27 @@ WPloop:
 	if err == nil {
 		if len(domainIDs) > 0 {
 			set := make(map[int64]struct{}, len(domainIDs))
-			for _, id := range domainIDs { set[id] = struct{}{} }
+			for _, id := range domainIDs {
+				set[id] = struct{}{}
+			}
 			var f []nodejsKurulum
-			for _, k := range nodeKur { if _, ok := set[k.DomainID]; ok { f = append(f, k) } }
+			for _, k := range nodeKur {
+				if _, ok := set[k.DomainID]; ok {
+					f = append(f, k)
+				}
+			}
 			nodeKur = f
 		}
 		toplamApp += len(nodeKur)
 		for _, k := range nodeKur {
-			if ctx.Err() != nil { break }
+			if ctx.Err() != nil {
+				break
+			}
 			n, ok := nodejsTara(ctx, db, &k)
 			toplamBulgu += n
-			if ok { nodeFeedOK = true }
+			if ok {
+				nodeFeedOK = true
+			}
 			envanterYaz(ctx, db, k.DomainID, "nodejs", k.Yol, "", len(k.Paketler), n)
 		}
 	}
@@ -253,17 +264,27 @@ WPloop:
 	if err == nil {
 		if len(domainIDs) > 0 {
 			set := make(map[int64]struct{}, len(domainIDs))
-			for _, id := range domainIDs { set[id] = struct{}{} }
+			for _, id := range domainIDs {
+				set[id] = struct{}{}
+			}
 			var f []phpKurulum
-			for _, k := range phpKur { if _, ok := set[k.DomainID]; ok { f = append(f, k) } }
+			for _, k := range phpKur {
+				if _, ok := set[k.DomainID]; ok {
+					f = append(f, k)
+				}
+			}
 			phpKur = f
 		}
 		toplamApp += len(phpKur)
 		for _, k := range phpKur {
-			if ctx.Err() != nil { break }
+			if ctx.Err() != nil {
+				break
+			}
 			n, ok := phpTara(ctx, db, &k)
 			toplamBulgu += n
-			if ok { phpFeedOK = true }
+			if ok {
+				phpFeedOK = true
+			}
 			envanterYaz(ctx, db, k.DomainID, "php-composer", k.Yol, "", len(k.Paketler), n)
 		}
 	}
@@ -288,9 +309,15 @@ WPloop:
 	// Kısmi tarama (domainIDs) ise silme SADECE o domain'lerle sınırlı olmalı;
 	// aksi halde taranmayan domain'lerin sağlam bulguları silinir.
 	basariliApps := []string{}
-	if wpFeedOK   { basariliApps = append(basariliApps, "wordpress") }
-	if nodeFeedOK { basariliApps = append(basariliApps, "nodejs") }
-	if phpFeedOK  { basariliApps = append(basariliApps, "php-composer") }
+	if wpFeedOK {
+		basariliApps = append(basariliApps, "wordpress")
+	}
+	if nodeFeedOK {
+		basariliApps = append(basariliApps, "nodejs")
+	}
+	if phpFeedOK {
+		basariliApps = append(basariliApps, "php-composer")
+	}
 
 	if len(basariliApps) > 0 {
 		stale := basla.Add(-1 * time.Second)
@@ -300,7 +327,7 @@ WPloop:
 			appYer[i] = "?"
 			sArgs = append(sArgs, a)
 		}
-		sorgu := `DELETE FROM cp_websec_findings WHERE last_seen < ? AND app_type IN (` + strings.Join(appYer, ",") + `)`
+		sorgu := `DELETE FROM cp_websec_findings WHERE last_seen < ? AND app_type IN (` + strings.Join(appYer, ",") + `)` //nolint:gosec // G202: appYer = []string{"?",...} (yalnız placeholder); basariliApps SABİT ("wordpress"/"nodejs"/"php-composer") ve tüm değerler sArgs ile ? bağlanır.
 		if len(domainIDs) > 0 {
 			domYer := make([]string, len(domainIDs))
 			for i, id := range domainIDs {
@@ -350,7 +377,6 @@ WPloop:
 }
 
 func hataYaz(db *sql.DB, err error) {
-	sonHata = err
 	_, _ = db.Exec(`UPDATE cp_websec_status SET running=0, last_error=? WHERE id=1`, err.Error())
 	log.Printf("websec: tarama başarısız: %v", err)
 }
@@ -395,22 +421,22 @@ type Handler struct {
 }
 
 type durumYanit struct {
-	Running        bool     `json:"running"`
-	LastRun        *string  `json:"last_run"`
-	LastSuccess    *string  `json:"last_success"`
-	TotalFindings  int      `json:"total_findings"`
-	Critical       int      `json:"critical"`
-	High           int      `json:"high"`
-	Medium         int      `json:"medium"`
-	Low            int      `json:"low"`
-	ScannedApps    int      `json:"scanned_apps"`
-	DurationMs     int      `json:"duration_ms"`
-	LastError      *string  `json:"last_error"`
-	NextEstimate   string   `json:"next_estimate"`
+	Running       bool    `json:"running"`
+	LastRun       *string `json:"last_run"`
+	LastSuccess   *string `json:"last_success"`
+	TotalFindings int     `json:"total_findings"`
+	Critical      int     `json:"critical"`
+	High          int     `json:"high"`
+	Medium        int     `json:"medium"`
+	Low           int     `json:"low"`
+	ScannedApps   int     `json:"scanned_apps"`
+	DurationMs    int     `json:"duration_ms"`
+	LastError     *string `json:"last_error"`
+	NextEstimate  string  `json:"next_estimate"`
 	// Aktif tarayıcı ekosistemleri — sayfa "Şu an: X, Y, Z" chip'i buradan üretir.
 	// Her ekosistem için ayrıca kaç bulgu var: {"wordpress": 3, "nodejs": 12}
-	Ekosistemler   []string       `json:"ekosistemler"`
-	AppSayaclari   map[string]int `json:"app_sayaclari"`
+	Ekosistemler []string       `json:"ekosistemler"`
+	AppSayaclari map[string]int `json:"app_sayaclari"`
 }
 
 func (h *Handler) Status(w http.ResponseWriter, _ *http.Request) {
@@ -450,7 +476,8 @@ func (h *Handler) Status(w http.ResponseWriter, _ *http.Request) {
 	if rows, e := h.DB.Query(`SELECT app_type, COUNT(*) FROM cp_websec_findings GROUP BY app_type`); e == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var at string; var n int
+			var at string
+			var n int
 			if rows.Scan(&at, &n) == nil {
 				y.AppSayaclari[at] = n
 			}
@@ -490,11 +517,15 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 
 	sayfa := 1
 	if s := q.Get("page"); s != "" {
-		if n, _ := strconv.Atoi(s); n > 0 { sayfa = n }
+		if n, _ := strconv.Atoi(s); n > 0 {
+			sayfa = n
+		}
 	}
 	boyut := 50
 	if s := q.Get("page_size"); s != "" {
-		if n, e := strconv.Atoi(s); e == nil && n > 0 && n <= 500 { boyut = n }
+		if n, e := strconv.Atoi(s); e == nil && n > 0 && n <= 500 {
+			boyut = n
+		}
 	}
 
 	// WHERE koşulları — hem count hem list için ortak
@@ -584,7 +615,11 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Async — API cevabı hemen dön, tarama arka planda
-	go TaraDomain(context.Background(), h.DB, true, domainID)
+	go func() {
+		if err := TaraDomain(context.Background(), h.DB, true, domainID); err != nil {
+			log.Printf("websec: elle tarama başarısız (domain=%d): %v", domainID, err)
+		}
+	}()
 	jsonYaz(w, 202, map[string]any{"started": true, "domain_id": domainID, "at": time.Now().Format(time.RFC3339)})
 }
 
@@ -631,7 +666,11 @@ func (h *Handler) RescanMany(w http.ResponseWriter, r *http.Request) {
 		hataMesaji(w, 413, "tek seferde en fazla 200 domain taranabilir")
 		return
 	}
-	go TaraDomains(context.Background(), h.DB, true, temiz)
+	go func() {
+		if err := TaraDomains(context.Background(), h.DB, true, temiz); err != nil {
+			log.Printf("websec: elle toplu tarama başarısız (%d domain): %v", len(temiz), err)
+		}
+	}()
 	jsonYaz(w, 202, map[string]any{"started": true, "count": len(temiz), "at": time.Now().Format(time.RFC3339)})
 }
 

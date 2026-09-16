@@ -1,0 +1,95 @@
+# gPanel — golangci-lint kapisi (golangci-lint v2 formati).
+#
+# Mevcut CI kapilarini (gofmt/vet/staticcheck/gosec) TAMAMLAR: errcheck / ineffassign /
+# unused / bodyclose / noctx / misspell ile GERCEK bug + kaynak-sizintisi siniflarini
+# TEK arac altinda toplar. Amac: stil-selanik degil, gercek bug/kod-kokusu.
+#
+# 🔴 LISANS-GIZLI paketler (cmd/server · cmd/eklenti-kur · cmd/gosp-baslatici ·
+#    cmd/gosp-paketle · internal/eklenti · internal/lisans) TEMIZ-CHECKOUT'ta DERLENEMEZ.
+#    Bu yuzden CI'daki gibi CLI paket-filtresiyle ('go list ... | grep -vE ...') VE
+#    ayrica asagidaki exclusions.paths ile HARIC tutulur (cift emniyet).
+#    Frontend (TypeScript) ve node_modules Go disidir; yine de dislanir.
+#
+# Baslangicta BLOKLAMAYAN (continue-on-error / UYARI) kapisi olarak kosulmasi onerilir;
+# bulgular eritildikce bloklayana cevrilebilir.
+
+version: "2"
+
+run:
+  tests: true
+
+linters:
+  default: none            # yalniz asagida ACIKCA sayilanlar kosar (ongorulebilir set)
+  enable:
+    - govet                # supheli yapilar (mevcut 'go vet' kapisiyla ayni motor)
+    - staticcheck          # SA* (bug) + S1* (eski 'gosimple' v2'de buraya birlesti) + ST*
+    - errcheck             # kontrol edilmemis hata donusleri — gercek bug kaynagi
+    - ineffassign          # etkisiz (bir daha okunmayan) atamalar
+    - unused               # kullanilmayan kod (eski deadcode/varcheck/structcheck)
+    - gosec                # guvenlik (mevcut gosec kapisiyla ayni motor)
+    - misspell             # yaygin INGILIZCE yazim hatalari (yorum/stringlerde)
+    - bodyclose            # kapatilmamis HTTP response.Body — fd/baglanti sizintisi
+    # noctx KAPALI: exec/sql/http'ye context gecirme MIMARI iyilestirme (~566 cagri) —
+    # bug degil, kitlesel refactor; ayri backlog. Per-PR bug-kapisini bogmasin.
+
+  settings:
+    gosec:
+      # 🔴 GERCEK kalir: G401/G501 (zayif hash — WP-checksum MD5 disi), G402 (TLS —
+      #    bilincli olanlar inline //nolint), G101 (gomulu-sir), G107 (SSRF), G110
+      #    (decompression bomb), G505 (SHA1 — TOTP disi). YENI ihlaller yakalanir.
+      #    Asagidakiler bu kod-tabaninda YAYGIN + dogrulanmis FP/idiom (derin triyaj):
+      excludes:
+        - G104             # 'unhandled errors' — errcheck ile cakisir + defer Close()/Fprintf idiyomu
+        - G204             # subprocess — dogrulanmis sistem araclari (nginx/systemctl/runuser...)
+        - G304             # dosya-yolu degiskenden — girdi onceden dogrulaniyor (jail/allowlist)
+        - G306             # dosya izni — 0644/0600 kasitli
+        - G115             # int cevrim tasmasi — cogunlukla FP (boyut/sayac)
+        - G702             # tainted -> subprocess (validated-input; G204 ile ayni sinif)
+        - G703             # tainted -> path (jail/openat2 korumali)
+        - G704             # tainted -> SSRF (monitor/hostuyg guard'li; degiskenler dogrulanir)
+        - G706             # log-injection — loglanan degerler enjekte-edilemez (id/sabit/hata)
+        - G118             # goroutine'de context.Background — noctx ile ayni MIMARI backlog (bug degil)
+        - G122             # filepath.Walk TOCTOU — akut yollar openat2/jail korumali; tara/render dusuk-risk
+    misspell:
+      locale: US
+      # 🔴 Turkce kelimeler misspell'de yanlis-pozitif uretiyor (adres/paralel/performans/
+      #    esle/modeller ...). Gercek Ingilizce yazim hatalarini yakalamayi surdur, bunlari sustur.
+      ignore-rules:
+        - adres
+        - paralel
+        - performans
+        - esle
+        - strat
+        - mamal
+        - modeller
+
+  exclusions:
+    generated: lax         # uretilmis dosyalari atla
+    presets:
+      - common-false-positives
+      - std-error-handling # w.Write / fmt.Fprintf gibi stdlib idiyomlarinda errcheck/gosec gurultusunu kes
+      - legacy
+    paths:
+      # 🔴 lisans-gizli (temiz-checkout'ta derlenemez) — CLI filtresiyle birebir
+      - '^cmd/server/'
+      - '^cmd/eklenti-kur/'
+      - '^cmd/gosp-baslatici/'
+      - '^cmd/gosp-paketle/'
+      - '^internal/eklenti/'
+      - '^internal/lisans/'
+      # Go disi / ucuncu-parti
+      - '^frontend/'
+      - '^frontend\.v3-yedek/'
+      - 'node_modules'
+    rules:
+      # test kodu: hata yoksayma / body kapatmama / context'siz istek NORMAL — gurultuyu kes
+      - path: '_test\.go'
+        linters:
+          - errcheck
+          - gosec
+          - bodyclose
+          - noctx
+
+issues:
+  max-issues-per-linter: 0 # UYARI kapisi: TUM bulgulari goster (varsayilan 50 siniri kalkar)
+  max-same-issues: 0       # ayni bulgunun tum ornekleri (varsayilan 3 siniri kalkar)

@@ -10,6 +10,8 @@ import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Surum = { surum: string; ini_dir: string; service: string }
 type Ext = { adi: string; aktif: boolean; ini_dosya: string }
@@ -93,6 +95,8 @@ export type Secim = { surum: string; anahtar: string; ad: string }
 const PHPMOD_EN: Record<string, string> = {
   "Anasayfa": "Home",
   "Bilgi": "Info",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Onay gerekiyor": "Confirmation required",
   "Emin misiniz?": "Are you sure?",
   "Aktif et": "Enable",
@@ -103,7 +107,7 @@ const PHPMOD_EN: Record<string, string> = {
   "IonCube kuruldu": "IonCube installed",
   "ini yazıldı ancak runtime'da görünmedi": "ini written but not visible at runtime",
   "IonCube Loader PHP {0}'ten kaldırılacak. Devam?": "IonCube Loader will be removed from PHP {0}. Continue?",
-  "🔍 Eklenti ara...": "🔍 Search extension...",
+  "Eklenti ara...": "Search extension...",
   "eklenti kurulmak üzere seçildi —": "extension(s) selected to install —",
   "— tüm domain'leri etkiler, FPM otomatik yeniden başlatılır.": "— affects all domains, FPM is restarted automatically.",
   "Veritabanı": "Database",
@@ -169,6 +173,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
 } = {}) {
   useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
+  const toast = useToast()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [aktifSurum, setAktifSurumState] = useState(() => {
     try { return localStorage.getItem('gosp.phpModul.surum') || '8.3' } catch { return '8.3' }
@@ -179,8 +184,9 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
   }
   const [exts, setExts] = useState<Ext[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  // Hata/basari artik sag ust toast'ta gosterilir; state'ler mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [filtre, setFiltre] = useState('')
   // Dinamik katalog: anahtar -> bu sürümde kurulabilir mi (dnf paketi var). Boş/true
   // gösterilir; SADECE kesin false (paket yok) + kurulu değil olan GİZLENİR.
@@ -197,7 +203,11 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
           setAktifSurum(srm[0].surum)
         }
       })
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => {
+        const m = apiHata(e)
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
       .finally(() => setYuk(false))
     // Bu sürümde hangi katalog bileşenlerinin HAZIR paketi var → desteklenmeyeni gizle.
     api.post('/php-extensions/kurulabilir', { surum: aktifSurum, anahtarlar: [...KATALOG_ANAHTARLAR] })
@@ -223,11 +233,15 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
     const yeniAktif = !e.aktif
     try {
       await api.put('/php-extensions/toggle', { surum: aktifSurum, ini_dosya: e.ini_dosya, aktif: yeniAktif })
-      setBasari(`✓ ${e.adi} ${yeniAktif ? cevir("aktif edildi") : cevir("devre dışı")} · ${cevir("PHP-FPM yeniden başlatıldı")}`)
+      const m = `✓ ${e.adi} ${yeniAktif ? cevir("aktif edildi") : cevir("devre dışı")} · ${cevir("PHP-FPM yeniden başlatıldı")}`
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 3000)
       yukle()
     } catch (err) {
-      setHata(apiHata(err, cevir("Toggle başarısız")))
+      const m = apiHata(err, cevir("Toggle başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     }
   }
 
@@ -236,11 +250,16 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
     setYuk(true); setHata(null)
     try {
       const r = await api.post('/php-extensions/ioncube-kur', { surum: aktifSurum })
-      setBasari(`✓ ${cevir("IonCube kuruldu")} — ${r.data.yuklendi ? 'LOADED' : cevir("ini yazıldı ancak runtime'da görünmedi")}`)
+      const m = `✓ ${cevir("IonCube kuruldu")} — ${r.data.yuklendi ? 'LOADED' : cevir("ini yazıldı ancak runtime'da görünmedi")}`
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 5000)
       yukle()
     } catch (err) {
-      setHata(apiHata(err, cevir("IonCube kurulum başarısız"))); setYuk(false)
+      const m = apiHata(err, cevir("IonCube kurulum başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+      setYuk(false)
     }
   }
 
@@ -249,9 +268,14 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
     setYuk(true); setHata(null)
     try {
       await api.post('/php-extensions/ioncube-kaldir', { surum: aktifSurum })
-      setBasari(cevir("✓ IonCube kaldırıldı")); setTimeout(() => setBasari(null), 3000); yukle()
+      setBasari(cevir("✓ IonCube kaldırıldı"))
+      toast.basari(cevir("✓ IonCube kaldırıldı"))
+      setTimeout(() => setBasari(null), 3000); yukle()
     } catch (err) {
-      setHata(apiHata(err, cevir("IonCube kaldırma başarısız"))); setYuk(false)
+      const m = apiHata(err, cevir("IonCube kaldırma başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+      setYuk(false)
     }
   }
 
@@ -301,17 +325,18 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-1">
         {!gomulu && <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("PHP Modülleri")}</h1>}
-        <button onClick={() => ioncubeKurlu ? ioncubeKaldir() : ioncubeKur()}
-          className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap bg-amber-600 hover:bg-amber-700 text-white rounded-md self-start">
+        <Button onClick={() => ioncubeKurlu ? ioncubeKaldir() : ioncubeKur()}
+          color="warning"
+          className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap self-start">
           {ioncubeKurlu ? cevir("⊗ IonCube Kaldır") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />{cevir("IonCube Loader Yükle")}</span>}
-        </button>
+        </Button>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         {cevir(cevir("Hazır listeden PHP eklentisi seçip kurun; kurulu olanları toggle ile aç/kapatın."))} <strong>{cevir("Sunucu bazında")}</strong> {cevir("— tüm domain'leri etkiler, FPM otomatik yeniden başlatılır.")}
       </p>
 
       {/* Sürüm sekmesi */}
-      <div className="flex gap-2 mb-4 border-b border-slate-200 dark:border-slate-700 overflow-x-auto [&>*]:flex-shrink-0">
+      <div className="flex gap-2 mb-4 border-b border-slate-200 dark:border-dark-600 overflow-x-auto [&>*]:shrink-0">
         {surumler.map(s => (
           <button key={s.surum} onClick={() => setAktifSurum(s.surum)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
@@ -328,12 +353,10 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
             ? cevirT(cevir("Bu PHP sürümünde kurulamayan {0} bileşen gizlendi (sunucuda hazır paketi yok)."), gizliSayi)
             : ''}
         </span>
-        <input type="text" value={filtre} onChange={e => setFiltre(e.target.value)} placeholder={cevir("🔍 Eklenti ara...")}
-          className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm w-64 focus:border-brand-500 outline-none shrink-0" />
+        <input type="text" value={filtre} onChange={e => setFiltre(e.target.value)} placeholder={cevir("Eklenti ara...")}
+          className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded text-sm w-64 focus:border-brand-500 outline-none shrink-0" />
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
       {(secilenler?.length ?? 0) > 0 && (
         <div className="mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
           {secilenler!.length} {cevir("eklenti kurulmak üzere seçildi —")} <strong>{cevir("Özet")}</strong> {cevir(cevir("adımında tümü birlikte kurulur."))}
@@ -352,9 +375,9 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
                     <div key={ek.anahtar}
                       className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${
                         kurulu?.aktif ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800'
-                        : kurulu ? 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                        : kurulu ? 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600'
                         : seciliMi(ek.anahtar) ? 'bg-brand-50 dark:bg-brand-900/15 border-brand-300 dark:border-brand-700'
-                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                        : 'bg-white dark:bg-dark-700 border-slate-200 dark:border-dark-600'
                       }`}>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{ek.ad} <span className="font-mono text-[11px] text-slate-400 dark:text-slate-500">{ek.anahtar}</span></div>
@@ -362,13 +385,13 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
                       </div>
                       {kurulu ? (
                         <button onClick={() => toggle(kurulu)} title={kurulu.aktif ? cevir("Devre dışı bırak") : cevir("Aktif et")}
-                          className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${kurulu.aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                          className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${kurulu.aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
                           <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${kurulu.aktif ? 'translate-x-5' : 'translate-x-1'}`} />
                         </button>
                       ) : (
                         // Kurulmamış: toggle açınca "kurulacak" işaretlenir (Özet'te toplu kurulur).
                         <button onClick={() => secimToggle(ek)} title={seciliMi(ek.anahtar) ? cevir("Seçimi kaldır") : cevir("Kurulacaklara ekle")}
-                          className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${seciliMi(ek.anahtar) ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                          className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${seciliMi(ek.anahtar) ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
                           <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${seciliMi(ek.anahtar) ? 'translate-x-5' : 'translate-x-1'}`} />
                         </button>
                       )}
@@ -384,10 +407,10 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulu (katalog dışı)")}</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {ekstraKurulu.map(e => (
-                  <div key={e.ini_dosya} className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${e.aktif ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
+                  <div key={e.ini_dosya} className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${e.aktif ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800' : 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600'}`}>
                     <div className="font-mono text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{e.adi}</div>
                     <button onClick={() => toggle(e)} title={e.aktif ? cevir("Devre dışı bırak") : cevir("Aktif et")}
-                      className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${e.aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                      className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${e.aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
                       <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${e.aktif ? 'translate-x-5' : 'translate-x-1'}`} />
                     </button>
                   </div>

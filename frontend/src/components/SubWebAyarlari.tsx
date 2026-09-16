@@ -16,9 +16,9 @@ type Nginx = {
   client_max_body_mb: number; ek_direktifler: string
 }
 
-const kart = 'rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 md:p-5'
+const kart = 'rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 md:p-5'
 const etk = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
-const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm'
+const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm'
 
 const backendler: { v: string; ad: string; aciklama: string }[] = [
   { v: 'php-fpm', ad: 'PHP-FPM', aciklama: 'nginx + PHP-FPM (varsayılan, en hızlı)' },
@@ -48,9 +48,11 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
   const [mesaj, setMesaj] = useState<{ t: 'ok' | 'hata'; m: string } | null>(null)
 
   useEffect(() => {
+    let iptal = false
     api.get<{ backend: string; nginx: Nginx }>(`/domains/${domainId}/subdomain/${sid}/web-sunucu`)
-      .then(r => { setN(r.data.nginx); setBackend(r.data.backend) })
-      .catch(hataYakala(cevir("Alt alan web sunucu ayarları yüklenemedi")))
+      .then(r => { if (iptal) return; setN(r.data.nginx); setBackend(r.data.backend) })
+      .catch(e => { if (!iptal) hataYakala(cevir("Alt alan web sunucu ayarları yüklenemedi"))(e) })
+    return () => { iptal = true }
   }, [domainId, sid])
 
   function P<K extends keyof Nginx>(k: K, v: Nginx[K]) { setN(prev => prev ? { ...prev, [k]: v } : prev) }
@@ -81,7 +83,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
           <p className="text-xs text-slate-500 mt-0.5">{cevir("Backend, önbellek, yükleme limiti ve güvenlik başlıkları — domain gibi tam parite.")}</p>
         </div>
         <span className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{backend}</span>
+          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{backend}</span>
           <span className="text-slate-400 text-lg">{acik ? '−' : '+'}</span>
         </span>
       </button>
@@ -97,7 +99,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {backendler.map(b => (
                 <button key={b.v} onClick={() => setBackend(b.v)}
-                  className={`text-left p-3 rounded-lg border transition ${backend === b.v ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-1 ring-brand-400' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}>
+                  className={`text-left p-3 rounded-lg border transition ${backend === b.v ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-1 ring-brand-400' : 'border-slate-200 dark:border-dark-600 hover:border-slate-300 dark:hover:border-slate-600'}`}>
                   <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir(b.ad)}</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">{cevir(b.aciklama)}</div>
                 </button>
@@ -132,7 +134,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           {n.hdr_hsts && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pl-1 border-l-2 border-slate-200 dark:border-slate-700">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pl-1 border-l-2 border-slate-200 dark:border-dark-600">
               <div><label className={etk}>HSTS max-age</label><input type="number" value={n.hsts_max_age} onChange={e => P('hsts_max_age', Number(e.target.value))} className={inp} /></div>
               <Toggle k="hsts_subdomains" l="includeSubDomains" />
               <Toggle k="hsts_preload" l="preload" />
@@ -147,7 +149,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
 
           <div className="flex justify-end">
             <button onClick={kaydet} disabled={kaydediliyor}
-              className="px-4 py-2 rounded-md bg-slate-900 dark:bg-slate-700 text-white text-sm font-medium disabled:opacity-40">
+              className="px-4 py-2 rounded-md bg-dark-800 dark:bg-dark-600 text-white text-sm font-medium disabled:opacity-40">
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("Web sunucu ayarlarını kaydet")}
             </button>
           </div>

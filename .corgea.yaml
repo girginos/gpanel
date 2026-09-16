@@ -1,0 +1,45 @@
+# Corgea tarama yapılandırması — https://docs.corgea.app/policies
+# Amaç: kod-kalitesi FALSE-POSITIVE gürültüsünü (Go idiyomu) PolicyIQ ile bastırmak.
+# Çok-ajanlı triyaj (2026-09-14) 1179 "kod kalitesi" bulgusunun ~%95'inin Go idiyomu FP
+# olduğunu doğruladı; bunlar kod değiştirilerek kapanmaz (satır kayar), FP olarak
+# ele alınmalıdır. GERÇEK güvenlik/mantık bulguları RAPORLANMAYA DEVAM EDER.
+version: 1
+
+# Tarama-dışı yollar (build çıktısı / üretilmiş / veri — kod kalitesi anlamsız)
+ignore_paths:
+  - "frontend/dist/**"
+  - "frontend/node_modules/**"
+  - "frontend/.vite/**"
+  - "migrations/**"
+
+policies:
+  - type: "scan"
+    description: >
+      This is a mature Go hosting-panel codebase (chi router, per-tenant isolation).
+      Apply the following organizational rules when triaging findings and mark any
+      MATCHING finding as a FALSE POSITIVE. Genuine security and logic bugs
+      (race conditions, SQL injection, auth/authz bypass, path traversal,
+      use-after-free, incorrect control flow) MUST STILL be reported.
+
+      (1) CWE-390 (Detection of Error Condition Without Action): idiomatic Go
+      best-effort error handling is INTENTIONAL here and is NOT a defect —
+      blank-assigned calls (`_ = f()`, `_, _ = f()`), deferred `Close()`/`Remove()`/
+      reloads, `os.MkdirAll` followed by a checked write, fire-and-forget status/
+      telemetry/log writes, `LastInsertId()`/`RowsAffected()` after a checked Exec,
+      and `exec.Command(...)` of system tools (nginx/systemctl/restorecon/chown)
+      guarded by prior validation. Do not flag these.
+
+      (2) CWE-1078 (formatting), CWE-1064 (parameter count), CWE-1120 (cyclomatic
+      complexity): the code is gofmt-clean and enforced by CI; formatting, parameter
+      counts and function complexity are stylistic here, not defects. Do not flag.
+
+      (3) CWE-1050 (resource in loop): package-level compiled regexps, one-time
+      ticker/semaphore setup before a loop, background periodic tickers, and
+      unavoidable per-item file I/O are correct patterns. Do not flag.
+
+      (4) CWE-1041 (redundant code) and CWE-1099 (naming): helpers with distinct
+      queries that look similar, and Turkish-language identifiers, are intentional.
+      Do not flag on style grounds alone.
+
+      (5) CWE-398 / CWE-1046 / CWE-1047 low-severity code-quality nits in this
+      codebase are accepted engineering trade-offs unless tied to a real defect.

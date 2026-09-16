@@ -3,6 +3,7 @@ package laravel
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -92,10 +93,14 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "cron yazılamadı: "+err.Error())
 			return
 		}
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=1 WHERE domain_id=?`, id)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=1 WHERE domain_id=?`, id); err != nil {
+			log.Printf("laravel schedule: schedule_enabled=1 yazılamadı (domain=%d): %v — cron kuruldu ama panel durumu güncellenmedi", id, err)
+		}
 	} else {
 		_ = os.Remove(p)
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=0 WHERE domain_id=?`, id)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=0 WHERE domain_id=?`, id); err != nil {
+			log.Printf("laravel schedule: schedule_enabled=0 yazılamadı (domain=%d): %v — cron kaldırıldı ama panel durumu güncellenmedi", id, err)
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "schedule_enabled": req.Aktif})
 }

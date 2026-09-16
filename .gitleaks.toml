@@ -1,0 +1,115 @@
+# .gitleaks.toml — GirginOSPanel SECRET-SCAN kapisi
+# ---------------------------------------------------------------------------
+# Amac: GERCEK sir (ozel anahtar, API token, parola) yakala; uretilmis/build
+# ciktisi + lock + fixture + migration verisi gurultusunu ELE.
+# Kural: mesru KOD asla susturulmaz; yalniz gercek-olmayan gurultu allowlist'lenir.
+# gitleaks >= 8.30 ile uyumlu. (Orkestrator ci.yml/Makefile'i ayrica birlestirir.)
+# ---------------------------------------------------------------------------
+
+title = "GirginOSPanel gitleaks config"
+
+[extend]
+# gitleaks yerlesik (default) kural setini OLDUGU GIBI devral ve uzerine GENISLET.
+# Boylece private-key / aws / stripe / github-pat / jwt / generic-api-key gibi
+# tum yerlesik kurallar aktif; asagida bir de parola/kimlik kurali eklenir.
+useDefault = true
+
+# ===========================================================================
+# EK KURAL — Hardcoded parola / kimlik bilgisi atamasi
+# ---------------------------------------------------------------------------
+# Default 'generic-api-key' cogu token'i yakalar ama degiskeni "parola"ya
+# benzeyen ciplak parola atamalarini kacirabiliyor. Bu kural onu kapatir.
+#   * Deger (grup 1) secretGroup=1 ile entropiye tabi (>=3.6) -> sozluk kelimesi elenir.
+#   * En az 10 karakter -> kisa/dusuk-degerli sabitler haric.
+#   * keywords: kural yalniz ilgili satirlarda degerlendirilir (performans + gurultu).
+# ===========================================================================
+[[rules]]
+id = "gosp-hardcoded-credential"
+description = "Hardcoded parola/kimlik atamasi (yuksek-entropi sabit deger)"
+regex = '''(?i)\b\w{0,20}(?:password|passwd|pass|pwd|parola|sifre|secret|apikey|api[_-]?key|token|access[_-]?key)\w{0,20}\s*(?::=|=|:)\s*(?:"|'|`)([^"'`\s]{10,80})(?:"|'|`)'''
+secretGroup = 1
+entropy = 3.6
+keywords = ["pass", "pwd", "parola", "sifre", "secret", "token", "apikey", "api_key", "access_key", "accesskey"]
+
+  # Kural-ozel allowlist: env/config okuma, template ve placeholder degerleri.
+  # 'mesru kod'u susturma' ilkesi: yalniz SIR OLMAYAN kaliplar elenir.
+  [[rules.allowlists]]
+  description = "env/template/placeholder — sir degil"
+  regexTarget = "match"
+  regexes = [
+      '''(?i)(placeholder|example|dummy|changeme|change[_-]?this|your[-_ ]?(pass|pwd|token|key|secret)|redacted|sample|foobar|xxxx+|\btest[_-]?(pass|pwd|token|key|secret)?\b)''',
+      '''(?i)(getenv|os\.Getenv|process\.env|viper\.|flag\.|cfg\.|config\.|c\.Env|Env\()''',
+      '''(\{\{|\}\}|\$\{|<[^>]{1,40}>|%[sdvqx]|:=\s*[A-Za-z_])''',
+  ]
+
+# ===========================================================================
+# ALLOWLIST 1 — YOL BAZLI: uretilmis / build ciktisi / binary / lock / veri
+# (Yuksek entropili ama SIR OLMAYAN dosyalar. Yalniz path ile elenir.)
+# ===========================================================================
+[[allowlists]]
+description = "Uretilmis/build ciktisi, binary, lock ve veri dosyalari (kaynak sir degil)"
+paths = [
+    # --- Frontend build ciktisi + bagimliliklar ---
+    '''(^|/)frontend/dist/''',
+    '''(^|/)frontend/\.vite/''',
+    '''(^|/)node_modules/''',
+    '''(^|/)frontend/tsconfig\.tsbuildinfo$''',
+    # --- Arsiv / build tarball: frontend-dist.tar.gz + .bak-<epoch> turevleri ---
+    '''\.tar\.gz$''',
+    '''\.tar\.gz\.bak[^/]*$''',
+    '''\.tgz$''',
+    '''\.zip$''',
+    # --- Lock / cozunurluk dosyalari (deterministik hash; sir degil) ---
+    '''(^|/)package-lock\.json$''',
+    '''(^|/)yarn\.lock$''',
+    '''(^|/)pnpm-lock\.yaml$''',
+    '''(^|/)go\.sum$''',
+    # --- DB goc (migration) verisi / sabit veri tohumlari ---
+    '''(^|/)migrations/.*\.sql$''',
+    # --- Test fixture'lari / testdata ---
+    '''(^|/)testdata/''',
+    '''(^|/)fixtures/''',
+    '''(^|/)__fixtures__/''',
+    # --- Derlenmis binary / paket ciktilari ---
+    '''\.(exe|bin|so|a|dll|dylib|wasm)$''',
+    '''(^|/)\.gosp-paketle\.bin$''',
+]
+
+# ===========================================================================
+# ALLOWLIST 2 — TEST DOSYALARI: yalniz heuristik parola kurali icin
+# ---------------------------------------------------------------------------
+# *_test.go / *.test.* / *.spec.* dosyalarindaki parolalar uydurma test
+# SABITLERIDIR (or. pg_windows_test.go: parola := "..."). Bunlar 'test fixture'
+# gurultusu; uretim sirri degil. SADECE kendi heuristik kuralimiz (targetRules)
+# icin susturulur -> yerlesik guclu kurallar (private-key/aws/stripe/github-pat)
+# test dosyalarini TARAMAYA DEVAM eder; oraya yapistirilan GERCEK bir anahtar
+# yine yakalanir.
+# ===========================================================================
+[[allowlists]]
+description = "Test dosyalari — uydurma test sabitleri (yalniz heuristik parola kurali icin)"
+targetRules = ["gosp-hardcoded-credential"]
+paths = [
+    '''_test\.go$''',
+    '''\.test\.(ts|tsx|js|jsx|mjs)$''',
+    '''\.spec\.(ts|tsx|js|jsx|mjs)$''',
+]
+
+# ===========================================================================
+# ALLOWLIST 3 — HEDEFLI FP: DKIM anahtar URETIMI (calisma-zamani PEM kurulumu)
+# ---------------------------------------------------------------------------
+# internal/dns/template.go:
+#   privPEM := "-----BEGIN RSA PRIVATE KEY-----\n" +
+#              chunk64(base64.StdEncoding.EncodeToString(privDER)) +
+#              "-----END RSA PRIVATE KEY-----\n"
+# Bu bir KOD deyimi; SABIT ozel anahtar DEGIL. Anahtar rand.Reader ile
+# calisma zamaninda uretilir, at-rest sifrelenerek (gizli.SaklaBagli) saklanir.
+# Yalniz bu deyimi susturuyoruz: gercek YAPISTIRILMIS bir anahtar asla
+# 'chunk64(base64.StdEncoding' icermez -> yine yakalanir (over-suppress yok).
+# ===========================================================================
+[[allowlists]]
+description = "DKIM anahtar uretimi — calisma-zamani PEM string kurulumu (kaynak sir degil)"
+targetRules = ["private-key"]
+regexTarget = "match"
+regexes = [
+    '''chunk64\(base64\.StdEncoding''',
+]

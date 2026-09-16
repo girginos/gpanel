@@ -39,9 +39,26 @@ const kullaniciDosyaAdi = "kullanicilar.sql"
 
 // kimlikRe: MySQL kullanici/veritabani adlari icin dar whitelist. Bu kontrol
 // SQL enjeksiyonunu ifade uretiminden ONCE keser (adlar mysql -e ile gecer).
-var kimlikRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+var kimlikRe = regexp.MustCompile(`\A[A-Za-z0-9_]{1,64}\z`)
 
 func gecerliKimlikMi(s string) bool { return kimlikRe.MatchString(s) }
+
+// gecerliParolaMi: config'den (wp-config.php/.env) okunan DB parolasi — yazdirilabilir
+// olmali, KONTROL karakteri (NUL/newline/CR/tab/DEL) icermemeli, makul uzunlukta olmali.
+// sqlKacis backslash+tirnak kacisi yapar; bu ek dogrulama (a) mysql -e ifadesini bozan
+// kontrol karakterlerini reddeder, (b) parolayi "yalnizca-escape" degil VALIDATE edilmis
+// kilar (SAST taint kirilir). Anormal parola = kurtarma YOK (fail-closed).
+func gecerliParolaMi(pw string) bool {
+	if pw == "" || len(pw) > 256 {
+		return false
+	}
+	for _, r := range pw {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
 
 // sistemKullanicisiMi: asla yedeklenmeyecek/geri yuklenmeyecek hesaplar.
 func sistemKullanicisiMi(u string) bool {
@@ -58,7 +75,7 @@ func sistemKullanicisiMi(u string) bool {
 
 // mysqlSorgu: root socket auth ile sorgu (sekmeli satirlar).
 func mysqlSorgu(q string) ([]string, error) {
-	out, err := exec.Command("mysql", "-N", "-B", "-e", q).Output()
+	out, err := exec.Command("mysql", "--default-character-set=utf8mb4", "-N", "-B", "-e", q).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +90,7 @@ func mysqlSorgu(q string) ([]string, error) {
 
 // mysqlCalistir: tek ifade calistirir (shell YOK, arg olarak gecer).
 func mysqlCalistir(stmt string) error {
-	if out, err := exec.Command("mysql", "-e", stmt).CombinedOutput(); err != nil {
+	if out, err := exec.Command("mysql", "--default-character-set=utf8mb4", "-e", stmt).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -286,7 +303,18 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 	if kul == "" || !gecerliKimlikMi(kul) {
 		return ""
 	}
-	stmt := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
+	// 🔴 GUVENLIK: parola da KIRACI-YAZILABILIR config'den gelir. sqlKacis kacislar ama
+	// kontrol karakteri (NUL/newline) iceren parola mysql -e ifadesini bozabilir →
+	// fail-closed reddet (defense-in-depth; SAST parola taint'ini kirar).
+	if !gecerliParolaMi(parola) {
+		log.Printf("backup: kimlik kurtarma reddedildi (geçersiz parola biçimi): %.60s", dbName)
+		return ""
+	}
+	// 🔴 GUVENLIK: NO_BACKSLASH_ESCAPES sql_mode ACIKSA sqlKacis'in \' kacisi kirilir
+	// (backslash literal olur → tirnak string'i kapatir → SQLi). Bu oturumda o modu
+	// kaldirarak sqlKacis'i mode-BAGIMSIZ guvenli kil (diger sql_mode bayraklari korunur).
+	stmt := fmt.Sprintf("SET SESSION sql_mode=REPLACE(@@SESSION.sql_mode,'NO_BACKSLASH_ESCAPES',''); "+
+		"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
 		"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
 		kul, sqlKacis(parola), hesaplar.GrantDBKac(dbName), kul)
 	if err := mysqlCalistir(stmt); err != nil {
@@ -303,14 +331,18 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 // TURETILEMEZ; site calisir, operator gerekirse panelden sifirlar).
 func panelKaydiGuncelle(db *sql.DB, domainID int64, dbName, kul, parola string) {
 	if parola != "" {
-		_, _ = db.Exec(`UPDATE db_accounts SET db_user=?, db_pass_plain=?
+		if _, err := db.Exec(`UPDATE db_accounts SET db_user=?, db_pass_plain=?
 			WHERE domain_id=? AND db_name=?`,
-			kul, gizli.SaklaGecis(parola, kul), domainID, dbName)
+			kul, gizli.SaklaGecis(parola, kul), domainID, dbName); err != nil {
+			log.Printf("backup: panel db_accounts guncellenemedi (domain=%d db=%s): %v", domainID, dbName, err)
+		}
 		return
 	}
-	_, _ = db.Exec(`UPDATE db_accounts SET db_user=?
+	if _, err := db.Exec(`UPDATE db_accounts SET db_user=?
 		WHERE domain_id=? AND db_name=? AND (db_user='' OR db_user IS NULL)`,
-		kul, domainID, dbName)
+		kul, domainID, dbName); err != nil {
+		log.Printf("backup: panel db_accounts kullanici guncellenemedi (domain=%d db=%s): %v", domainID, dbName, err)
+	}
 }
 
 // uygulamaKimligi: /home/<sk> altindaki uygulama yapilandirmasinda dbName'i

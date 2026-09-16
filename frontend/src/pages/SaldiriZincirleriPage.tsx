@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Olay = { kaynak: string; asama: string; asama_ad: string; seviye: string; ozet: string; tarih: string }
 type Zincir = {
@@ -33,20 +34,29 @@ const SALDIRI_EN: Record<string, string> = {
   "tek saldırı zincirine": "into a single attack chain",
   "dizilir. Nedensel bağ (aynı dosya/süreç) güveni yükseltir.": ". A causal link (same file/process) raises confidence.",
   "etkin kritik saldırı zinciri": "active critical attack chains",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SALDIRI_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function SaldiriZincirleriPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const [zincirler, setZincirler] = useState<Zincir[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  // Hata artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
+  const [, setHata] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 15sn'lik yoklama sürekli aynı hatayı vermesin: aynı metin tekrar toast'lanmaz.
+  const sonHataRef = useRef<string | null>(null)
 
   function yukle() {
     api.get<{ zincirler: Zincir[] }>('/antivirus/zincirler')
-      .then(r => { setZincirler(r.data.zincirler || []); setHata(null) })
-      .catch(e => setHata(apiHata(e)))
+      .then(r => { setZincirler(r.data.zincirler || []); setHata(null); sonHataRef.current = null })
+      .catch(e => {
+        const m = apiHata(e)
+        setHata(m)
+        if (sonHataRef.current !== m) { sonHataRef.current = m; toast.hata(cevir("İşlem başarısız"), m) }
+      })
       .finally(() => setYuk(false))
   }
   useEffect(() => {
@@ -62,7 +72,7 @@ export default function SaldiriZincirleriPage() {
       <div className="max-w-5xl mx-auto">
         <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Saldırı Zincirleri") }]} />
         <div className="flex items-start gap-3 mb-1">
-          <span className={`mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 ${aktifKritik > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
+          <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${aktifKritik > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
           <div>
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">{cevir("Saldırı Zincirleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -77,8 +87,6 @@ export default function SaldiriZincirleriPage() {
           </div>
         )}
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
         {yuk ? (
           <div className="py-16 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
         ) : zincirler.length === 0 ? (
@@ -92,28 +100,28 @@ export default function SaldiriZincirleriPage() {
             {zincirler.map(z => {
               const kritik = z.seviye === 'kritik'
               return (
-                <div key={z.id} className={`rounded-2xl border overflow-hidden shadow-sm ${kritik ? 'border-red-300 dark:border-red-800' : 'border-amber-200 dark:border-amber-800/60'}`}>
+                <div key={z.id} className={`rounded-lg border overflow-hidden shadow-xs ${kritik ? 'border-red-300 dark:border-red-800' : 'border-amber-200 dark:border-amber-800/60'}`}>
                   {/* Başlık çubuğu */}
                   <div className={`px-4 py-3 flex flex-wrap items-center justify-between gap-2 ${kritik ? 'bg-red-50 dark:bg-red-900/20' : 'bg-amber-50 dark:bg-amber-900/15'}`}>
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${kritik ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${kritik ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
                       <span className={`font-mono text-xs font-semibold uppercase tracking-wide ${kritik ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
                         {kritik ? cevir("Etkin saldırı") : cevir("Şüpheli zincir")}
                       </span>
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">· {z.alan_adi || '—'}</span>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex items-center gap-3 shrink-0">
                       <span className="text-xs text-slate-400 font-mono">{z.tarih}</span>
                       <span className={`text-sm font-mono font-bold ${kritik ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>Risk %{z.guven}</span>
                     </div>
                   </div>
 
                   {/* Aşama zaman çizelgesi */}
-                  <div className="px-4 py-3 bg-white dark:bg-slate-800">
+                  <div className="px-4 py-3 bg-white dark:bg-dark-700">
                     <div className="flex items-center gap-1 flex-wrap">
                       {z.asamalar.map((a, i) => (
                         <span key={a} className="flex items-center gap-1">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700/60 text-xs font-medium text-slate-700 dark:text-slate-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-dark-600/60 text-xs font-medium text-slate-700 dark:text-slate-200">
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d={ASAMA_IKON[a] || ''} /></svg>
                             {z.asama_ad[i] || a}
                           </span>
@@ -124,11 +132,11 @@ export default function SaldiriZincirleriPage() {
 
                     {/* Olay dökümü */}
                     {z.olaylar?.length > 0 && (
-                      <div className="mt-3 border-t border-slate-100 dark:border-slate-700 pt-2 space-y-1">
+                      <div className="mt-3 border-t border-slate-100 dark:border-dark-600 pt-2 space-y-1">
                         {z.olaylar.map((o, i) => (
                           <div key={i} className="flex items-start gap-2 text-xs font-mono">
                             <span className="text-slate-400 whitespace-nowrap">{o.tarih?.slice(11)}</span>
-                            <span className={`px-1.5 rounded ${o.kaynak === 'dosya' ? 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300' : o.kaynak === 'surec' ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>{o.kaynak}</span>
+                            <span className={`px-1.5 rounded ${o.kaynak === 'dosya' ? 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300' : o.kaynak === 'surec' ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500'}`}>{o.kaynak}</span>
                             <span className="text-slate-400">{o.asama_ad}</span>
                             <span className="text-slate-600 dark:text-slate-300 break-all">{o.ozet}</span>
                           </div>

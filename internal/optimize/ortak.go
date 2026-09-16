@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,7 +195,9 @@ func YedekGeriYukle(db *sql.DB, yedekID int64) error {
 			return err
 		}
 	}
-	_, _ = db.Exec(`UPDATE cp_optimize_yedekler SET geri_alindi=1 WHERE id=?`, yedekID)
+	if _, err := db.Exec(`UPDATE cp_optimize_yedekler SET geri_alindi=1 WHERE id=?`, yedekID); err != nil {
+		log.Printf("optimize: geri_alindi bayragi yazilamadi (yedek=%d): %v", yedekID, err)
+	}
 	// Servis reload/restart
 	_ = ServisReload(servis)
 	return nil
@@ -221,6 +224,12 @@ func ServisReload(servis string) error {
 // Section-aware değil (nginx için değil; my.cnf, php-fpm.d/*.conf için).
 // Anahtar birden fazla kere varsa hepsini günceller. Yoksa dosyanın sonuna ekler.
 func SatirYazVeyaGuncelle(dosya, anahtar, deger string) error {
+	// Güvenlik (defense-in-depth): yalnız mutlak, '..' içermeyen yapılandırma yolu.
+	// Çağıranlar sabit sistem yolları geçiriyor (my.cnf, php-fpm.d/*.conf) — bu
+	// CWE-22 FP savunma katmanı taint-izini kırar.
+	if !filepath.IsAbs(dosya) || strings.Contains(dosya, "..") {
+		return fmt.Errorf("güvenlik: geçersiz yapılandırma yolu: %s", dosya)
+	}
 	b, err := os.ReadFile(dosya)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

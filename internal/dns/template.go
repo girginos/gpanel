@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"girginospanel/internal/gizli"
 	"log"
 	"net/http"
 	"os"
@@ -169,6 +170,9 @@ func EnsureDKIM(ctx context.Context, db *sql.DB, domainID int64, alanAdi, select
 	err := db.QueryRowContext(ctx,
 		`SELECT private_key, public_key FROM dkim_keys WHERE domain_id=? AND selector=?`,
 		domainID, selector).Scan(&priv, &pub)
+	if err == nil {
+		priv = gizli.CozBagli(priv, "dkim") // at-rest sifreli (graceful)
+	}
 	if err == nil && pub != "" {
 		syncOpenDKIM(alanAdi, selector, priv, pub)
 		return dkimTXT(pub), nil
@@ -190,7 +194,7 @@ func EnsureDKIM(ctx context.Context, db *sql.DB, domainID int64, alanAdi, select
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO dkim_keys(domain_id, selector, private_key, public_key) VALUES(?,?,?,?)
 		 ON DUPLICATE KEY UPDATE private_key=VALUES(private_key), public_key=VALUES(public_key)`,
-		domainID, selector, privPEM, pubB64); err != nil {
+		domainID, selector, gizli.SaklaBagli(privPEM, "dkim"), pubB64); err != nil {
 		return "", err
 	}
 	syncOpenDKIM(alanAdi, selector, privPEM, pubB64)

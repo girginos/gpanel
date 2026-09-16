@@ -8,8 +8,9 @@ import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
-type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string }
+type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
 
 type Ayarlar = {
   memory_limit: string; max_execution_time: number; max_input_time: number
@@ -39,7 +40,11 @@ const PMS = [
 
 
 const PHP_EN: Record<string, string> = {
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Anasayfa": "Home",
+  "güncelleme almıyor": "no longer updated",
+  "Bu sürüm artık güvenlik güncellemesi almıyor (EOL)": "This version no longer receives security updates (EOL)",
   "static (sabit havuz)": "static (fixed pool)",
   "Kaydedildi.": "Saved.",
   "Debug log temizlenemedi": "Failed to clear debug log",
@@ -58,7 +63,7 @@ const PHP_EN: Record<string, string> = {
   "Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip": "When on, it prints PHP errors to the screen and reliably catches fatal errors, saving them to",
   "'a kaydeder. Uygulama kendi ": ". Even if the application calls its own ",
   "'ini cagirsa bile fatal hatalar yine yakalanir.": ", fatal errors are still caught.",
-  "⚠️ Debug modu acikken ": "⚠️ When debug mode is on, ",
+  "Debug modu acikken ": "When debug mode is on, ",
   " ve ": " and ",
   " zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ": " are forced; error details may be visible to visitors. Turn it on only while troubleshooting, and on a live site ",
   "kapatin": "turn it off",
@@ -128,6 +133,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (PHP_EN[tr] || O
 export default function DomainPHPPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [yanit, setYanit] = useState<Yanit | null>(null)
   const [secili, setSurum] = useState<string>('')
   const [a, setA] = useState<Ayarlar | null>(null)
@@ -143,7 +149,7 @@ export default function DomainPHPPage() {
     setYuk(true); setHata(null)
     api.get<Yanit>(`/domains/${id}/php-settings`)
       .then(r => { setYanit(r.data); setSurum(r.data.php_surum); setA(r.data.ayarlar); debugLogYukle() })
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -153,10 +159,12 @@ export default function DomainPHPPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: a })
-      setBasari(`✓ ${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`)
+      const m = `✓ ${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydetme başarısız")))
+      const m = apiHata(e, cevir("Kaydetme başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -186,7 +194,7 @@ export default function DomainPHPPage() {
       await api.delete(`/domains/${id}/php/debug-log`)
       setDlog([])
     } catch (e) {
-      setHata(apiHata(e, cevir("Debug log temizlenemedi")))
+      const m = apiHata(e, cevir("Debug log temizlenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setDlogYuk(false)
     }
@@ -211,15 +219,13 @@ export default function DomainPHPPage() {
         {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
       {yuk || !a || !yanit ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (
         <>
           {/* PHP Sürümü — kompakt segmented pill */}
           <Kart baslik={cevir("PHP Sürümü")}>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-1">
+              <div className="inline-flex rounded-lg border border-slate-200 dark:border-dark-600 bg-slate-50 dark:bg-dark-800 p-1">
                 {yanit.surumler.map(s => {
                   const sec = secili === s.surum
                   const akt = yanit.php_surum === s.surum
@@ -227,10 +233,11 @@ export default function DomainPHPPage() {
                     <button key={s.surum} onClick={() => setSurum(s.surum)}
                       className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-mono transition ${
                         sec
-                          ? 'bg-white dark:bg-slate-800 shadow-sm text-slate-900 dark:text-slate-100 ring-1 ring-brand-300'
-                          : 'text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 hover:bg-white dark:bg-slate-800/60'
+                          ? 'bg-white dark:bg-dark-700 shadow-xs text-slate-900 dark:text-slate-100 ring-1 ring-brand-300'
+                          : 'text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 hover:bg-white dark:bg-dark-700/60'
                       }`}>
                       <span className="font-semibold">PHP {s.surum}</span>
+                      {s.eol && <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>EOL</span>}
                       {akt && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={cevir("Aktif")} />}
                     </button>
                   )
@@ -243,6 +250,9 @@ export default function DomainPHPPage() {
                 return (
                   <span className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
                     <span>{s.aciklama}</span>
+                    {s.eol && (
+                      <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-semibold" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>{cevir("güncelleme almıyor")}</span>
+                    )}
                     {akt ? (
                       <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Aktif")}</span>
                     ) : (
@@ -306,14 +316,14 @@ export default function DomainPHPPage() {
           <Kart baslik={cevir("PHP Debug Modu")}>
             <div className="flex items-start gap-4">
               <button onClick={() => P('debug_mode', !a.debug_mode)}
-                className={`flex-shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                 title={a.debug_mode ? cevir("Debug modunu kapat") : cevir("Debug modunu ac")}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${a.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Debug modu")}</span>
-                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${a.debug_mode ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${a.debug_mode ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400'}`}>
                     {a.debug_mode ? cevir("Acik") : cevir("Kapali")}
                   </span>
                 </div>
@@ -325,7 +335,7 @@ export default function DomainPHPPage() {
             </div>
             {a.debug_mode && (
               <div className="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-                {cevir("⚠️ Debug modu acikken ")}<strong>display_errors</strong>{cevir(" ve ")}<strong>error_reporting = E_ALL</strong>{cevir(" zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ")}<strong>{cevir("kapatin")}</strong>{cevir(". Degisiklik ")}<strong>{cevir("Kaydet")}</strong>{cevir("'ten sonra uygulanir.")}
+                {cevir("Debug modu acikken ")}<strong>display_errors</strong>{cevir(" ve ")}<strong>error_reporting = E_ALL</strong>{cevir(" zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ")}<strong>{cevir("kapatin")}</strong>{cevir(". Degisiklik ")}<strong>{cevir("Kaydet")}</strong>{cevir("'ten sonra uygulanir.")}
               </div>
             )}
           </Kart>
@@ -336,9 +346,9 @@ export default function DomainPHPPage() {
               <p className="text-xs text-slate-500 dark:text-slate-500 min-w-0 break-all">
                 {cevir("En yeni fatal hatalar ustte. Kaynak: ")}<code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code>{cevir(" (son 200 satir).")}
               </p>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-2 shrink-0">
                 <button onClick={debugLogYukle} disabled={dlogYuk}
-                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs rounded-md disabled:opacity-60">
+                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-xs rounded-md disabled:opacity-60">
                   <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span>
                 </button>
                 <button onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
@@ -350,14 +360,14 @@ export default function DomainPHPPage() {
             {dlogYuk ? (
               <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500">{cevir("Yukleniyor…")}</div>
             ) : dlog.length === 0 ? (
-              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+              <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-dark-600 rounded-lg">
                 {a.debug_mode
                   ? cevir("Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.")
                   : cevir("Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.")}
               </div>
             ) : (
-              <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-950">
-                <ul className="divide-y divide-slate-800">
+              <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-dark-600 bg-dark-900">
+                <ul className="divide-y divide-dark-600">
                   {[...dlog].reverse().map((satir, i) => (
                     <li key={i} className="px-3 py-1.5 text-[11px] font-mono text-red-300 whitespace-pre-wrap break-all leading-relaxed">
                       {satir}
@@ -463,11 +473,11 @@ export default function DomainPHPPage() {
                       <div key={g.renk} className={`border rounded-lg p-3 ${renkMap[g.renk]}`}>
                         <div className="flex items-start gap-3">
                           <button onClick={() => grupTogga(g)}
-                            className={`flex-shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                            className={`shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition ${
                               blokeli ? 'bg-red-500' : (karisik ? 'bg-amber-400' : 'bg-emerald-500')
                             }`}
                             title={blokeli ? cevir("Tümünü aç (etkin yap)") : (karisik ? cevir("Tümünü kapat") : cevir("Tümünü kapat (engelle)"))}>
-                            <span className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-slate-800 shadow transition ${
+                            <span className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-dark-700 shadow transition ${
                               blokeli ? 'translate-x-1' : 'translate-x-5'
                             }`} />
                           </button>
@@ -514,11 +524,11 @@ export default function DomainPHPPage() {
           {/* Kaydet */}
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
               {isleniyor ? cevir("Kaydediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
               {cevir(cevir("İptal / Yeniden Yükle"))}
             </button>
           </div>
@@ -531,8 +541,8 @@ export default function DomainPHPPage() {
 // ----- helper components -----
 function Kart({ baslik, children }: { baslik: string; children: any }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 pb-2 border-b border-slate-100 dark:border-slate-800">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
+      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )
@@ -583,7 +593,7 @@ function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: s
   return (
     <Sec etiket={etiket} yardim={yardim}>
       <button onClick={() => onChange(!value)}
-        className={`px-3 py-2 rounded-md text-sm font-mono w-full text-left transition border ${value ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>
+        className={`px-3 py-2 rounded-md text-sm font-mono w-full text-left transition border ${value ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>
         {value ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.onay} /> On</span> : '○ Off'}
       </button>
     </Sec>
@@ -611,7 +621,7 @@ function Boyut({ value, onChange }: { value: string; onChange: (v: string) => vo
       placeholder="orn: 2048M, 8G, -1 (sinirsiz)"
       spellCheck={false}
       autoComplete="off"
-      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono"
+      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm font-mono"
     />
   )
 }

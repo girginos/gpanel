@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/system"
 )
 
 // StartYukSampler: her `every` sürede /proc/loadavg + /proc/meminfo örnekler, sistem_yuk'e yazar.
@@ -35,7 +36,28 @@ func StartYukSampler(db *sql.DB, every time.Duration) {
 func yukOrnekle(db *sql.DB) {
 	y1, y5, y15 := okuLoad()
 	mem := okuBellekYuzde()
-	_, _ = db.Exec(`INSERT INTO sistem_yuk (yuk1, yuk5, yuk15, bellek_yuzde) VALUES (?,?,?,?)`, y1, y5, y15, mem)
+
+	// 🔴 OKUYUCULAR system PAKETINDEN YENIDEN KULLANILIYOR, kopyalanmiyor.
+	// Ayni /proc ayristirmasini burada bir daha yazsaydik OPS panelindeki
+	// gecmis egri ile panodaki anlik deger zamanla birbirinden ayrilirdi
+	// (iki ayri arayuz secimi, iki ayri yuvarlama). Tek kaynak: system.Read*.
+	var cpu, disk, swap float64
+	var rx, tx int64
+	if c, err := system.ReadCPU(); err == nil {
+		cpu = c.Yuzde
+	}
+	if d, err := system.ReadDisk("/"); err == nil {
+		disk = d.Yuzde
+	}
+	swap = system.ReadSwap().Yuzde
+	ag := system.ReadAg()
+	rx, tx = ag.RxBytes, ag.TxBytes
+
+	_, _ = db.Exec(`
+		INSERT INTO sistem_yuk
+		  (yuk1, yuk5, yuk15, bellek_yuzde, cpu_yuzde, disk_yuzde, swap_yuzde, net_rx_bps, net_tx_bps)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		y1, y5, y15, mem, cpu, disk, swap, rx, tx)
 }
 
 func okuLoad() (float64, float64, float64) {
@@ -84,6 +106,14 @@ type YukNokta struct {
 	Yuk5   float64 `json:"yuk5"`
 	Yuk15  float64 `json:"yuk15"`
 	Bellek float64 `json:"bellek"`
+	CPU    float64 `json:"cpu"`
+	CPUMax float64 `json:"cpu_max"`
+	Disk   float64 `json:"disk"`
+	Swap   float64 `json:"swap"`
+	RxBps  int64   `json:"rx_bps"`
+	RxMax  int64   `json:"rx_max"`
+	TxBps  int64   `json:"tx_bps"`
+	TxMax  int64   `json:"tx_max"`
 }
 
 // GET /system/load-history?saat=24  (1..168) — bucket'lanmış (≤ ~500 nokta) yük serisi
@@ -98,12 +128,24 @@ func (h *Handlers) YukGecmisi(w http.ResponseWriter, r *http.Request) {
 	if bucket < 60 {
 		bucket = 60
 	}
+	// 🔴 AVG'IN YANINDA MAX DA DONUYOR. 7 gunluk aralik ~20 dakikalik kovalara
+	// dusuyor; sadece ortalama donseydi o kovadaki CPU/ag SIVRILERI tamamen
+	// kaybolurdu — oysa bir OPS panelinde bakilan sey tam olarak odur.
+	// Arayuz ortalamayi cizgi, tepeyi soluk bant olarak cizer.
 	rows, err := h.DB.QueryContext(r.Context(), `
 		SELECT MIN(ts)          AS ts,
 		       ROUND(AVG(yuk1),2),
 		       ROUND(AVG(yuk5),2),
 		       ROUND(AVG(yuk15),2),
-		       ROUND(AVG(bellek_yuzde),1)
+		       ROUND(AVG(bellek_yuzde),1),
+		       ROUND(AVG(cpu_yuzde),1),
+		       ROUND(MAX(cpu_yuzde),1),
+		       ROUND(AVG(disk_yuzde),1),
+		       ROUND(AVG(swap_yuzde),1),
+		       CAST(AVG(net_rx_bps) AS SIGNED),
+		       CAST(MAX(net_rx_bps) AS SIGNED),
+		       CAST(AVG(net_tx_bps) AS SIGNED),
+		       CAST(MAX(net_tx_bps) AS SIGNED)
 		  FROM sistem_yuk
 		 WHERE ts >= NOW() - INTERVAL ? HOUR
 		 GROUP BY FLOOR(UNIX_TIMESTAMP(ts) / ?)
@@ -116,7 +158,9 @@ func (h *Handlers) YukGecmisi(w http.ResponseWriter, r *http.Request) {
 	out := []YukNokta{}
 	for rows.Next() {
 		var p YukNokta
-		if err := rows.Scan(&p.Ts, &p.Yuk1, &p.Yuk5, &p.Yuk15, &p.Bellek); err == nil {
+		if err := rows.Scan(&p.Ts, &p.Yuk1, &p.Yuk5, &p.Yuk15, &p.Bellek,
+			&p.CPU, &p.CPUMax, &p.Disk, &p.Swap,
+			&p.RxBps, &p.RxMax, &p.TxBps, &p.TxMax); err == nil {
 			out = append(out, p)
 		}
 	}

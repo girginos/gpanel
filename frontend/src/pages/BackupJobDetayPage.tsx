@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 import { Job, DurumIkon, IslemRozet, TurRozet, fmtByte } from '@/pages/BackupYonetimiPage'
 
 type Kalem = { backup_id: number; domain_id: number; alan_adi: string; sistem_kullanici: string; boyut_b: number; tip: string }
@@ -51,6 +52,7 @@ const BJOB_EN: Record<string, string> = {
   "Domainleri soldan sağa taşıyın (tıklayın ya da başlıktaki kutuyla tümünü taşıyın). Yalnız": "Move domains from left to right (click, or use the header checkbox to move all). Only",
   "listesindekiler geri yüklenir. Dosya/DB bazlı hassas geri yükleme için “detaylı”.": "items in the list are restored. Use “detailed” for precise file/DB-level restore.",
   "Nesne yok": "No objects",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BJOB_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -67,10 +69,11 @@ export default function BackupJobDetayPage() {
   const [temiz, setTemiz] = useState(false)
   const [gonderiliyor, setGonderiliyor] = useState(false)
   const timer = useRef<number | null>(null)
+  const toast = useToast()
 
   function yukle() {
     if (!jid) return
-    api.get<Detay>(`/admin/backups/jobs/${jid}`).then(r => setD(r.data)).catch(e => setHata(apiHata(e)))
+    api.get<Detay>(`/admin/backups/jobs/${jid}`).then(r => setD(r.data)).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
   }
   useEffect(() => {
     yukle()
@@ -83,13 +86,22 @@ export default function BackupJobDetayPage() {
   const kalemler = d?.domainler || []
 
   async function geriYukle() {
-    if (secili.size === 0) { setHata(cevir("Sağdaki “Seçili” listesine en az bir domain taşıyın")); return }
+    if (secili.size === 0) {
+      const v = cevir("Sağdaki “Seçili” listesine en az bir domain taşıyın")
+      setHata(v)
+      toast.hata(cevir("İşlem başarısız"), v)
+      return
+    }
     const items = kalemler.filter(k => secili.has(k.domain_id)).map(k => ({ domain_id: k.domain_id, backup_id: k.backup_id }))
     setGonderiliyor(true); setHata(null)
     try {
       const { data } = await api.post('/admin/backups/restore', { mod, temiz, items })
       nav(`/backup-yonetimi/is/${data.job_id}`)
-    } catch (e) { setHata(apiHata(e, cevir("Geri yükleme başlatılamadı"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Geri yükleme başlatılamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setGonderiliyor(false) }
   }
 
@@ -102,13 +114,11 @@ export default function BackupJobDetayPage() {
         { etiket: cevirT(cevir("İş #{0}"), jid) },
       ]} />
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {!j ? (
         <div className="text-sm text-slate-400 py-8">{cevir("Yükleniyor…")}</div>
       ) : (
         <>
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5 mb-4">
+          <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 p-5 mb-4">
             <div className="flex items-center gap-3 flex-wrap">
               <DurumIkon durum={j.durum} />
               <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("İş #")}{j.id}</h1>
@@ -135,7 +145,7 @@ export default function BackupJobDetayPage() {
                   </span>
                   <span>{j.toplam ? Math.round((j.tamamlanan / j.toplam) * 100) : 0}%</span>
                 </div>
-                <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                <div className="h-2 rounded-full bg-slate-100 dark:bg-dark-600 overflow-hidden">
                   <div className="h-full rounded-full bg-amber-400 animate-pulse transition-all duration-500"
                     style={{ width: `${j.toplam ? Math.round((j.tamamlanan / j.toplam) * 100) : 0}%` }} />
                 </div>
@@ -144,9 +154,9 @@ export default function BackupJobDetayPage() {
           </div>
 
           {j.islem === 'geri' ? (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Geri Yükleme Sonuçları")}</div>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Geri Yükleme Sonuçları")}</div>
+              <div className="divide-y divide-slate-100 dark:divide-dark-600/60">
                 {(d?.sonuclar || []).map(s => (
                   <div key={s.domain_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                     <DurumIkon durum={s.durum} kucuk />
@@ -158,12 +168,12 @@ export default function BackupJobDetayPage() {
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
+            <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 p-4">
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Geri Yükleme")}</h3>
                 <span className="text-xs font-semibold text-slate-500 ml-2">{cevir("mod:")}</span>
                 {([['tam', cevir("Tam")], ['dosyalar', cevir("Yalnız Dosyalar")], ['veritabani', cevir("Yalnız SQL")]] as const).map(([v, et]) => (
-                  <button key={v} onClick={() => setMod(v)} className={`text-xs px-2.5 py-1 rounded-full border ${mod === v ? 'border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>{et}</button>
+                  <button key={v} onClick={() => setMod(v)} className={`text-xs px-2.5 py-1 rounded-full border ${mod === v ? 'border-dark-700 dark:border-slate-100 bg-dark-800 dark:bg-slate-100 text-white dark:text-slate-900' : 'border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300'}`}>{et}</button>
                 ))}
                 {(mod === 'tam' || mod === 'dosyalar') && (
                   <label className="flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300 ml-1">
@@ -171,7 +181,7 @@ export default function BackupJobDetayPage() {
                   </label>
                 )}
                 <button onClick={geriYukle} disabled={gonderiliyor || secili.size === 0}
-                  className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-medium disabled:opacity-50">
+                  className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-dark-800 dark:bg-slate-100 text-white dark:text-slate-900 font-medium disabled:opacity-50">
                   {gonderiliyor ? cevir("Başlatılıyor…") : cevirT(cevir("Seçilenleri Geri Yükle ({0})"), secili.size)}
                 </button>
               </div>
@@ -216,12 +226,12 @@ function Sutun({ baslik, adet, items, ara, setAra, yon, onTasi, onHepsi, bosMeti
   yon: 'sag' | 'sol'; onTasi: (id: number) => void; onHepsi: () => void; bosMetin: string
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col">
-      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/60 bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2">
+    <div className="rounded-lg border border-slate-200 dark:border-dark-600 overflow-hidden flex flex-col">
+      <div className="px-3 py-2 border-b border-slate-100 dark:border-dark-600/60 bg-slate-50 dark:bg-dark-700/50 flex items-center gap-2">
         <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{baslik}</span>
         <span className="text-[11px] text-slate-400">({adet})</span>
       </div>
-      <div className="px-2 py-2 border-b border-slate-100 dark:border-slate-700/60 flex items-center gap-2">
+      <div className="px-2 py-2 border-b border-slate-100 dark:border-dark-600/60 flex items-center gap-2">
         <input type="checkbox" checked={false} onChange={onHepsi} disabled={items.length === 0}
           title={yon === 'sag' ? cevir("Görünenlerin tümünü seç") : cevir("Görünenlerin tümünü kaldır")}
           className="shrink-0 disabled:opacity-40" />
@@ -230,10 +240,10 @@ function Sutun({ baslik, adet, items, ara, setAra, yon, onTasi, onHepsi, bosMeti
             <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" strokeLinecap="round" />
           </svg>
           <input value={ara} onChange={e => setAra(e.target.value)} placeholder={cevir("Ara…")}
-            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 pl-7 pr-2 py-1.5 text-sm" />
+            className="w-full rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 pl-7 pr-2 py-1.5 text-sm" />
         </div>
       </div>
-      <div className="max-h-72 min-h-[8rem] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-800/40">
+      <div className="max-h-72 min-h-[8rem] overflow-y-auto divide-y divide-slate-100 dark:divide-dark-600 bg-white dark:bg-dark-700/40">
         {items.length === 0 && <div className="p-6 text-center text-xs text-slate-400">{bosMetin}</div>}
         {items.map(k => (
           <button key={k.domain_id} onClick={() => onTasi(k.domain_id)}

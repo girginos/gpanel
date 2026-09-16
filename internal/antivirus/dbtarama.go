@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -146,7 +147,7 @@ func (h *Handlers) dbTaraKurulum(ctx context.Context, k wpKimlik) ([]dbBulgu, er
 	var out []dbBulgu
 	// wp_options: autoload serialized config; reDBZararli (dusuk FP).
 	if rows, err := sdb.QueryContext(ctx,
-		"SELECT option_id, option_name, option_value FROM `"+k.pre+"options` WHERE autoload IN ('yes','on','auto') LIMIT 5000"); err == nil {
+		"SELECT option_id, option_name, option_value FROM `"+k.pre+"options` WHERE autoload IN ('yes','on','auto') LIMIT 5000"); err == nil { //nolint:gosec // G202: k.pre tablo-öneki, fonksiyon girişinde reDBPrefix=^[A-Za-z0-9_]+$ ile doğrulanır (135. satır) ve backtick-tırnaklı tanımlayıcıya konur; tablo adı ? ile parametrelenemez, SQL metakarakteri imkânsız.
 		for rows.Next() {
 			var id int64
 			var ad, deger string
@@ -160,6 +161,7 @@ func (h *Handlers) dbTaraKurulum(ctx context.Context, k wpKimlik) ([]dbBulgu, er
 		rows.Close()
 	}
 	// wp_posts: DUZ METIN blog; reDBPost STRICT (prose FP uretmez).
+	//nolint:gosec // G202: k.pre tablo-öneki, fonksiyon girişinde reDBPrefix=^[A-Za-z0-9_]+$ ile doğrulanır (135. satır) ve backtick-tırnaklı tanımlayıcıya konur; tablo adı ? ile parametrelenemez, SQL metakarakteri imkânsız.
 	if rows, err := sdb.QueryContext(ctx,
 		"SELECT ID, post_content FROM `"+k.pre+"posts` WHERE post_status IN ('publish','draft','private') "+
 			"AND (post_content LIKE '%base64_decode%' OR post_content LIKE '%<script%' OR post_content LIKE '%<?php%' OR post_content LIKE '%eval(%') LIMIT 5000"); err == nil {
@@ -184,10 +186,12 @@ func (h *Handlers) dbBulguYaz(domID int64, tablo, ad string, satirID int64) {
 	if ad != "" && ad != "post" {
 		yer += " (" + ad + ")"
 	}
-	_, _ = h.DB.Exec(
+	if _, err := h.DB.Exec(
 		`INSERT INTO av_bulgular (tarama_id, domain_id, dosya, imza, motor, seviye, puan, durum, orijinal_yol, karantina_yol)
 		 VALUES (0,?,?,?,?,?,?,?,?,?)`,
-		domID, "DB: "+yer, "GOSP-DB-ZARARLI", "gosp/db", "kritik", 100, "aktif", "", "")
+		domID, "DB: "+yer, "GOSP-DB-ZARARLI", "gosp/db", "kritik", 100, "aktif", "", ""); err != nil {
+		log.Printf("antivirus dbBulguYaz: DB zararlı bulgusu yazılamadı (domain=%d, yer=%s): %v — tespit KAYBOLDU", domID, yer, err)
+	}
 }
 
 func itoa64(n int64) string {
@@ -257,7 +261,9 @@ func (h *Handlers) AdminDBTara(w http.ResponseWriter, r *http.Request) {
 		// ONCEKI gercek bulgusu SILINMEZ (basarisizlik guven olarak render
 		// olmasin). Global delete YOK → 0-penceresi de yok.
 		if tarandi && !hata {
-			_, _ = h.DB.Exec(`DELETE FROM av_bulgular WHERE motor='gosp/db' AND durum='aktif' AND domain_id=?`, d.id)
+			if _, err := h.DB.Exec(`DELETE FROM av_bulgular WHERE motor='gosp/db' AND durum='aktif' AND domain_id=?`, d.id); err != nil {
+				log.Printf("antivirus.db: eski bulgular silinemedi (domain=%d): %v — tekrar taramada mükerrer olabilir", d.id, err)
+			}
 			for _, b := range found {
 				h.dbBulguYaz(d.id, b.Tablo, b.Ad, b.Satir)
 			}
@@ -286,8 +292,8 @@ func (h *Handlers) AdminKaraListe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type dm struct {
-		id  int64
-		ad  string
+		id int64
+		ad string
 	}
 	var dl []dm
 	for rows.Next() {

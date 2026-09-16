@@ -9,9 +9,9 @@ package panelhost
 // GET  /admin/panel-host/is?id=X  — iş durumu (poll)
 
 import (
-	"strconv"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,9 +21,9 @@ type Handler struct{}
 func (h *Handler) Durum(w http.ResponseWriter, _ *http.Request) {
 	d := DurumOku()
 	jsonYaz(w, 200, map[string]any{
-		"durum":       d,
-		"betik_var":   BetikVarMi(),
-		"acme_var":    AcmeVarMi(),
+		"durum":     d,
+		"betik_var": BetikVarMi(),
+		"acme_var":  AcmeVarMi(),
 	})
 }
 
@@ -170,4 +170,3 @@ func (h *Handler) Gecmis(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
 }
-

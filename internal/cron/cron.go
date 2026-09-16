@@ -416,7 +416,11 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
 	}
-	idx, _ := strconv.Atoi(chi.URLParam(r, "idx"))
+	idx, idxErr := strconv.Atoi(chi.URLParam(r, "idx"))
+	if idxErr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz index")
+		return
+	}
 	var in gorevInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
@@ -450,7 +454,11 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
 	}
-	idx, _ := strconv.Atoi(chi.URLParam(r, "idx"))
+	idx, idxErr := strconv.Atoi(chi.URLParam(r, "idx"))
+	if idxErr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz index")
+		return
+	}
 	list, err := read(sk)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -482,7 +490,11 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
 	}
-	idx, _ := strconv.Atoi(chi.URLParam(r, "idx"))
+	idx, idxErr := strconv.Atoi(chi.URLParam(r, "idx"))
+	if idxErr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz index")
+		return
+	}
 	list, err := read(sk)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())

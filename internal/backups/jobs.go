@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -208,7 +210,10 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DomainIDs []int64 `json:"domain_ids"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 
 	type dm struct {
 		id     int64
@@ -218,7 +223,7 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	if len(req.DomainIDs) > 0 {
 		ph := strings.TrimRight(strings.Repeat("?,", len(req.DomainIDs)), ",")
-		q += " AND id IN (" + ph + ")"
+		q += " AND id IN (" + ph + ")" //nolint:gosec // G202: ph yalnızca "?,?,..." (placeholder listesi) üretir; req.DomainIDs []int64 değerleri args ile ? parametresi olarak bağlanır.
 		for _, id := range req.DomainIDs {
 			args = append(args, id)
 		}
@@ -266,7 +271,9 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 				iptalEdildi = true
 				break
 			}
-			h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.ad, jid)
+			if _, err := h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.ad, jid); err != nil {
+				log.Printf("backups.JobYedekBaslat: aktif domain yazilamadi: %v", err)
+			}
 			ctx, cancel := context.WithTimeout(isCtx, 20*time.Minute)
 			b, _, err := birDomainYedekle(ctx, h.DB, d.id, d.sk, "tam", "Toplu yedek", jid)
 			cancel()
@@ -282,14 +289,18 @@ func (h *Handlers) JobYedekBaslat(w http.ResponseWriter, r *http.Request) {
 				toplamB += b
 				pruneManuelYedek(h.DB, d.id, d.sk)
 			}
-			h.DB.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`,
-				basari+hata, basari, hata, toplamB, jid)
+			if _, err := h.DB.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`,
+				basari+hata, basari, hata, toplamB, jid); err != nil {
+				log.Printf("backups.JobYedekBaslat: is ilerlemesi yazilamadi: %v", err)
+			}
 		}
 		son := jobDurum(basari, hata)
 		if iptalEdildi {
 			son = "iptal"
 		}
-		h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, son, jid)
+		if _, err := h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, son, jid); err != nil {
+			log.Printf("backups.JobYedekBaslat: is durum yazilamadi: %v", err)
+		}
 	}()
 
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "job_id": jid, "toplam": len(liste)})
@@ -448,7 +459,9 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 				iptalEdildi = true
 				break
 			}
-			h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, o.ad, jid)
+			if _, err := h.DB.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, o.ad, jid); err != nil {
+				log.Printf("backups.JobGeriBaslat: aktif domain yazilamadi: %v", err)
+			}
 			msg, err := geriYukleCekirdek(h.DB, o.domainID, o.backupID, req.Mod, req.Temiz)
 			s := sonuc{DomainID: o.domainID, AlanAdi: o.ad}
 			if err != nil {
@@ -462,16 +475,20 @@ func (h *Handlers) JobGeriBaslat(w http.ResponseWriter, r *http.Request) {
 			}
 			sonuclar = append(sonuclar, s)
 			b, _ := json.Marshal(sonuclar)
-			h.DB.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, detay=? WHERE id=?`,
-				basari+hata, basari, hata, string(b), jid)
+			if _, err := h.DB.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, detay=? WHERE id=?`,
+				basari+hata, basari, hata, string(b), jid); err != nil {
+				log.Printf("backups.JobGeriBaslat: is ilerlemesi yazilamadi: %v", err)
+			}
 		}
-		h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`,
+		if _, err := h.DB.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`,
 			func() string {
 				if iptalEdildi {
 					return "iptal"
 				}
 				return jobDurum(basari, hata)
-			}(), jid)
+			}(), jid); err != nil {
+			log.Printf("backups.JobGeriBaslat: is durum yazilamadi: %v", err)
+		}
 	}()
 
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "job_id": jid, "toplam": len(oglar)})
@@ -504,7 +521,10 @@ func (h *Handlers) JobDurdur(w http.ResponseWriter, r *http.Request) {
 	// Canli isi durdurduysak son durumu goroutine yazar (yaris olmasin diye
 	// burada EZMIYORUZ). Asili kayitta ise satiri biz kapatiriz.
 	if !canli {
-		h.DB.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, jid)
+		if _, err := h.DB.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, jid); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "iş iptal edilemedi: "+err.Error())
+			return
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "canli": canli})
 }

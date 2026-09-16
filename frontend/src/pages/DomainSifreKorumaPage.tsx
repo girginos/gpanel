@@ -7,6 +7,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
@@ -35,12 +36,15 @@ const SIFRE_EN: Record<string, string> = {
   "Henüz korumalı dizin yok.": "No protected directories yet.",
   "Yeni koruma / kullanıcı ekle": "Add new protection / user",
   "Şifre Korumalı Dizinler": "Password Protected Directories",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SIFRE_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DomainSifreKorumaPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [liste, setListe] = useState<Kayit[]>([])
@@ -56,7 +60,7 @@ export default function DomainSifreKorumaPage() {
     if (!id) return
     setYuk(true)
     api.get<Kayit[]>(`${base}/koruma`)
-      .then(r => setListe(r.data || [])).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+      .then(r => setListe(r.data || [])).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
 
@@ -65,11 +69,15 @@ export default function DomainSifreKorumaPage() {
     setHata(null); setOk(null); setKaydediyor(true)
     try {
       await api.post(`${base}/koruma`, { yol, kullanici, parola })
-      setOk(`${yol} ${cevir("dizini")} "${kullanici}" ${cevir("ile korumaya alındı.")}`)
+      const iyi = `${yol} ${cevir("dizini")} "${kullanici}" ${cevir("ile korumaya alındı.")}`
+      setOk(iyi)
+      toast.basari(cevir("Kaydedildi"), iyi)
       setParola('')
       yukle()
     } catch (err) {
-      setHata(apiHata(err, cevir("Eklenemedi")))
+      const m = apiHata(err, cevir("Eklenemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setKaydediyor(false) }
   }
 
@@ -79,7 +87,11 @@ export default function DomainSifreKorumaPage() {
     try {
       await api.delete(`${base}/koruma/${k.id}`)
       yukle()
-    } catch (err) { setHata(apiHata(err, cevir("Silinemedi"))) }
+    } catch (err) {
+      const m = apiHata(err, cevir("Silinemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
   // yol -> o yola ait kullanıcılar
@@ -98,55 +110,52 @@ export default function DomainSifreKorumaPage() {
           {cevir("Belirli bir dizini HTTP kimlik doğrulaması (")}<span className="font-mono">.htpasswd</span>{cevir(") ile koruyun. Ziyaretçiler kullanıcı adı ve parola olmadan erişemez.")}
         </p>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-        {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
-
         {/* Ekleme formu */}
-        <form onSubmit={ekle} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5 shadow-sm">
+        <form onSubmit={ekle} className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yeni koruma / kullanıcı ekle")}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Dizin yolu")}</span>
               <input value={yol} onChange={e => setYol(e.target.value)} required placeholder={cevir("/gizli")}
-                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Kullanıcı adı")}</span>
               <input value={kullanici} onChange={e => setKullanici(e.target.value)} required placeholder={cevir("kullanici")}
-                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Parola")}</span>
               <input value={parola} onChange={e => setParola(e.target.value)} required type="password" placeholder="••••••••"
-                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </label>
           </div>
           <p className="text-[11px] text-slate-400 mt-2">{cevir("Yol")} <span className="font-mono">/</span> {cevir("ile başlamalı (örn.")} <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). {cevir("Aynı yola birden fazla kullanıcı ekleyebilirsiniz.")}</p>
-          <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
+          <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
             {kaydediyor ? cevir("Ekleniyor…") : cevir("Koruma Ekle")}
           </button>
         </form>
 
         {/* Mevcut korumalar */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Korunan dizinler")}</h3>
           {yuk ? (
             <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : liste.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-3xl mb-2">🔒</div>
+              <div className="mb-2 flex justify-center text-slate-300 dark:text-slate-600"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8" aria-hidden><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a1.5 1.5 0 011.5 1.5v6a1.5 1.5 0 01-1.5 1.5H6.75a1.5 1.5 0 01-1.5-1.5v-6a1.5 1.5 0 011.5-1.5z"/></svg></div>
               <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz korumalı dizin yok.")}</p>
             </div>
           ) : (
             <div className="space-y-4">
               {Object.entries(grup).map(([g, ks]) => (
-                <div key={g} className="border border-slate-100 dark:border-slate-700 rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-900/40">
+                <div key={g} className="border border-slate-100 dark:border-dark-600 rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-dark-800/40">
                     <Ikon d={I.kilit} />
                     <span className="font-mono text-sm text-slate-700 dark:text-slate-200">{g}</span>
                     <span className="text-xs text-slate-400">· {ks.length} {cevir("kullanıcı")}</span>
                   </div>
-                  <ul className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                  <ul className="divide-y divide-slate-50 dark:divide-dark-600/50">
                     {ks.map(k => (
                       <li key={k.id} className="flex items-center justify-between px-3 py-2">
                         <span className="text-sm text-slate-600 dark:text-slate-300">{k.kullanici}</span>

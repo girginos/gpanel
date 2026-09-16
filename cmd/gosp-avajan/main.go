@@ -505,8 +505,6 @@ func (a *ajan) clamKok(kok string, haric []string) {
 	}
 }
 
-func itoa(n int) string { return strconv.Itoa(n) }
-
 // cekirdekDosya — WordPress cekirdek agacinda mi (karantina istisnasi).
 func cekirdekDosya(yol string) bool {
 	y := filepath.ToSlash(yol)

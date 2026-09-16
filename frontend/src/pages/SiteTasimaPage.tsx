@@ -7,6 +7,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { T } from '@/lib/tablo'
+import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 /*
  * Site Taşıma — cPanel / Plesk / DirectAdmin'den bu panele uçtan uca aktarım.
@@ -34,16 +36,23 @@ type Plan = { id: number; ad: string }
 type Bayi = { id: number; kullanici: string; ad_soyad?: string }
 type Musteri = { id: number; ad: string }
 
-// Su an YALNIZ Plesk destekleniyor (uctan uca test edildi). cPanel/DA backend'de
-// hazir ama gercek sunucuda dogrulanmadigi icin UI'dan gecici olarak kaldirildi.
+// UI'da yalniz UCTAN UCA DOGRULANMIS kaynaklar listelenir. cPanel/DA backend'de
+// hazir ama gercek sunucuda dogrulanmadigi icin gecici olarak kaldirildi —
+// "destekleniyor" demek, denenmis demek olmali.
+//
+// gpanel: kaynak da bir GirginOSPanel kurulumu. Kesif panelin KENDI
+// veritabanindan okunur (dosya/dizin tahmini yok); ozel docroot'lar
+// (`public_html/public`) korunur, alt alanlar ayri site olarak listelenir.
 const PANELLER = [
   { deger: 'plesk', etiket: 'Plesk' },
+  { deger: 'gpanel', etiket: 'GirginOSPanel' },
 ]
 const PHP_SURUMLERI = ['', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
 
 
 const STASIMA_EN: Record<string, string> = {
   "(seçtiğiniz panel ile uyuşmuyor!)": "(does not match the panel you selected!)",
+  "Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir.": "Source reseller/customer accounts are created with their limits; each site is assigned to its own owner (Plesk and GirginOSPanel). Reseller passwords are shown when you start.",
   "+ Yeni taşıma": "+ New migration",
   "Anahtar hazırlanıyor…": "Preparing key…",
   "Bayiler yüklenemedi": "Failed to load resellers",
@@ -87,7 +96,7 @@ const STASIMA_EN: Record<string, string> = {
   "hazırlanıyor…": "preparing…",
   "parola girişini kapatmış": "has disabled password login",
   "İptal edilemedi": "Could not cancel",
-  "🔑 Oluşturulan sahip hesapları — parolaları KAYDEDİN": "🔑 Created owner accounts — SAVE the passwords",
+  "Oluşturulan sahip hesapları — parolaları KAYDEDİN": "Created owner accounts — SAVE the passwords",
   "“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.": "“Overwrite existing site” is on — files and databases of sites with the same domain will be overwritten. A backup first is recommended.",
   "Türkçe": "English",
   "Bekliyor": "Waiting",
@@ -145,6 +154,7 @@ const STASIMA_EN: Record<string, string> = {
   "tamamlandı": "completed",
   "Kaynak": "Source",
   "hata": "error",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (STASIMA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -162,26 +172,14 @@ const DURUM_ETIKET: Record<string, string> = {
 }
 
 const inputCls =
-  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 ' +
+  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 ' +
   'placeholder:text-slate-400 transition focus:border-brand-400 focus:outline-none focus:ring-2 ' +
   'focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:opacity-60 ' +
-  'dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100'
+  'dark:border-dark-600 dark:bg-dark-800/60 dark:text-slate-100'
 const labelCls = 'mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400'
 const selCls =
   'rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-brand-400 ' +
-  'focus:outline-none focus:ring-2 focus:ring-brand-500/15 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100'
-const btnBirincil =
-  'inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium ' +
-  'text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 ' +
-  'dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100'
-const btnIkincil =
-  'inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 px-4 py-2.5 text-sm ' +
-  'font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 ' +
-  'dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800'
-const btnKucuk =
-  'inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium ' +
-  'text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
-
+  'focus:outline-none focus:ring-2 focus:ring-brand-500/15 dark:border-dark-600 dark:bg-dark-800/60 dark:text-slate-100'
 function Ikon({ d }: { d: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
@@ -216,7 +214,7 @@ function DurumRozet({ durum }: { durum: string }) {
     durum === 'tamam' ? 'border-emerald-200 text-emerald-700 bg-emerald-50 dark:border-emerald-800/60 dark:text-emerald-300 dark:bg-emerald-900/20'
     : durum === 'hata' ? 'border-red-200 text-red-700 bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:bg-red-900/20'
     : durum === 'calisiyor' ? 'border-brand-200 text-brand-700 bg-brand-50 dark:border-brand-800/60 dark:text-brand-300 dark:bg-brand-900/20'
-    : 'border-slate-200 text-slate-600 bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:bg-slate-800'
+    : 'border-slate-200 text-slate-600 bg-slate-50 dark:border-dark-600 dark:text-slate-300 dark:bg-dark-700'
   return (
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${stil}`}>
       {durum === 'calisiyor' && <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />}
@@ -228,7 +226,7 @@ function DurumRozet({ durum }: { durum: string }) {
 function RetrySecim({ etiket, ikon, secili, degis, pasif }: { etiket: string; ikon: string; secili: boolean; degis: () => void; pasif?: boolean }) {
   return (
     <button type="button" disabled={pasif} onClick={degis}
-      className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm transition ${pasif ? 'opacity-40 cursor-not-allowed' : secili ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-300' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
+      className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-sm transition ${pasif ? 'opacity-40 cursor-not-allowed' : secili ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-300' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-dark-700'}`}>
       <span className="flex items-center gap-2"><Ikon d={ikon} /> {etiket}</span>
       <span className={`flex h-4 w-4 items-center justify-center rounded border ${secili ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>{secili && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="h-2.5 w-2.5"><path d={I.check} /></svg>}</span>
     </button>
@@ -237,7 +235,7 @@ function RetrySecim({ etiket, ikon, secili, degis, pasif }: { etiket: string; ik
 
 function Kart({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6 dark:border-slate-700/60 dark:bg-slate-800/40 ${className || ''}`}>
+    <section className={`rounded-lg border border-slate-200/70 bg-white p-5 sm:p-6 dark:border-dark-600/60 dark:bg-dark-700/40 ${className || ''}`}>
       {children}
     </section>
   )
@@ -257,13 +255,13 @@ function Stepper({ adim, git, erisim }: { adim: number; git: (n: number) => void
               className="flex items-center gap-2.5 disabled:cursor-default">
               <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition ${
                 durum === 'done' ? 'bg-emerald-500 text-white'
-                : durum === 'active' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>
+                : durum === 'active' ? 'bg-dark-800 text-white dark:bg-white dark:text-slate-900'
+                : 'bg-slate-100 text-slate-400 dark:bg-dark-700 dark:text-slate-500'}`}>
                 {durum === 'done' ? <Ikon d={I.check} /> : no}
               </span>
               <span className={`hidden text-sm font-medium sm:block ${durum === 'todo' ? 'text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-100'}`}>{cevir(t)}</span>
             </button>
-            {no < 3 && <span className={`mx-3 h-px flex-1 ${no < adim ? 'bg-emerald-400' : 'bg-slate-200 dark:bg-slate-700'}`} />}
+            {no < 3 && <span className={`mx-3 h-px flex-1 ${no < adim ? 'bg-emerald-400' : 'bg-slate-200 dark:bg-dark-600'}`} />}
           </div>
         )
       })}
@@ -307,6 +305,7 @@ export default function SiteTasimaPage() {
   const [hesaplar, setHesaplar] = useState<Hesap[] | null>(null)
   const [secili, setSecili] = useState<Record<string, boolean>>({})
   const [hata, setHata] = useState<string | null>(null)
+  const toast = useToast()
 
   // --- ayarlar ---
   const [dosyalar, setDosyalar] = useState(true)
@@ -348,10 +347,12 @@ export default function SiteTasimaPage() {
 
   // Panel taşıma anahtarını (public + kurulum komutu) getir — 'panel' modu seçilince.
   useEffect(() => {
+    let iptal = false
     if (kimlikTipi !== 'panel' || panelPub) return
     api.get<{ pubkey: string; komut: string }>('/system/tasima/anahtar')
-      .then(r => { setPanelPub(r.data.pubkey || ''); setPanelKomut(r.data.komut || '') })
+      .then(r => { if (iptal) return; setPanelPub(r.data.pubkey || ''); setPanelKomut(r.data.komut || '') })
       .catch(() => { /* sessiz */ })
+    return () => { iptal = true }
   }, [kimlikTipi, panelPub])
 
   const durumYukle = useCallback(async () => {
@@ -391,7 +392,10 @@ export default function SiteTasimaPage() {
       setOturumID(data.id); setKimlikSakli(data.kimlik_sakli)
       try { localStorage.setItem(OTURUM_KEY, String(data.id)) } catch { /* */ }
       setAdim(list.length ? 2 : 1)
-    } catch (e) { setHata(apiHata(e, cevir("Oturum geri yüklenemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Oturum geri yüklenemedi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
   async function oturumSil(id: number) {
@@ -407,10 +411,11 @@ export default function SiteTasimaPage() {
 
   // Plan + sahiplik hedefleri.
   useEffect(() => {
-    api.get<Plan[]>('/plans').then(r => { const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(hataYakala(cevir("Planlar yüklenemedi")))
-    api.get<Bayi[]>('/resellers').then(r => setBayiler(r.data || [])).catch(hataYakala(cevir("Bayiler yüklenemedi")))
-    api.get<Musteri[]>('/customers').then(r => setMusteriler(r.data || [])).catch(hataYakala(cevir("Müşteriler yüklenemedi")))
-
+    let iptal = false
+    api.get<Plan[]>('/plans').then(r => { if (iptal) return; const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
+    api.get<Bayi[]>('/resellers').then(r => { if (iptal) return; setBayiler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Bayiler yüklenemedi"))(e) })
+    api.get<Musteri[]>('/customers').then(r => { if (iptal) return; setMusteriler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Müşteriler yüklenemedi"))(e) })
+    return () => { iptal = true }
   }, [])
 
   // Çalışan işi izle (2sn polling).
@@ -443,7 +448,10 @@ export default function SiteTasimaPage() {
     try {
       const { data } = await api.post<{ sunucu_adi: string; tespit_edilen: string; uyusuyor: boolean }>('/system/tasima/test', kaynakGovde())
       setTestSonuc(cevirT(cevir("Bağlantı başarılı — {0} · tespit edilen panel: {1}"), data.sunucu_adi || cevir('sunucu'), data.tespit_edilen || cevir('bilinmiyor')) + (data.uyusuyor ? '' : ' ' + cevir('(seçtiğiniz panel ile uyuşmuyor!)')))
-    } catch (e) { setHata(apiHata(e, cevir("Bağlantı testi başarısız"))) } finally { setTestYuk(false) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Bağlantı testi başarısız"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setTestYuk(false) }
   }
 
   async function kesfet() {
@@ -455,14 +463,17 @@ export default function SiteTasimaPage() {
       const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = !h.mevcut }); setSecili(s)
       if (data.oturum_id) { setOturumID(data.oturum_id); setKimlikSakli(kimlikTipi === 'parola' ? !!parola : kimlikTipi === 'anahtar' ? !!anahtar : false); try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
       oturumlarYukle()
-      if (!list.length) setHata(cevir("Kaynak sunucuda taşınabilir site bulunamadı."))
+      if (!list.length) { setHata(cevir("Kaynak sunucuda taşınabilir site bulunamadı.")); toast.hata(cevir("Kaynak sunucuda taşınabilir site bulunamadı.")) }
       else setAdim(2)
-    } catch (e) { setHata(apiHata(e, cevir("Keşif başarısız"))) } finally { setKesifYuk(false) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Keşif başarısız"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setKesifYuk(false) }
   }
 
   async function baslat() {
     const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi])
-    if (!secilenler.length) { setHata(cevir("En az bir site seçin.")); return }
+    if (!secilenler.length) { setHata(cevir("En az bir site seçin.")); toast.hata(cevir("En az bir site seçin.")); return }
     setHata(null)
     try {
       const { data } = await api.post<{ is_id: number; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>('/system/tasima/baslat', {
@@ -475,12 +486,18 @@ export default function SiteTasimaPage() {
       basladiRef.current = Date.now()
       setUretilenKimlikler(data.uretilen_kimlikler || [])
       setIsID(data.is_id); setCalisiyor(true); setLogMetin(''); setKalemler([]); setAdim(3)
-    } catch (e) { setHata(apiHata(e, cevir("Taşıma başlatılamadı"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Taşıma başlatılamadı"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
   async function iptalEt() {
     if (!isID) return
-    try { await api.post(`/system/tasima/${isID}/iptal`, {}) } catch (e) { setHata(apiHata(e, cevir("İptal edilemedi"))) }
+    try { await api.post(`/system/tasima/${isID}/iptal`, {}) } catch (e) {
+      const m = apiHata(e, cevir("İptal edilemedi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
   function yeniTasima() {
@@ -513,7 +530,7 @@ export default function SiteTasimaPage() {
     [cevir("DNS kayıtları"), dns, setDns, cevir("Kaynak zone okunur, A kayıtları çevrilir"), I.dns],
     [cevir("SSL sertifikası"), ssl, setSsl, cevir("Let's Encrypt denenir"), I.ssl],
     [cevir("Posta (kutular + mesajlar)"), posta, setPosta, cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail],
-    [cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturulur; her site kendi sahibine atanır (Plesk). Reseller parolaları başlatınca gösterilir."), I.anahtarIkon],
+    [cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir."), I.anahtarIkon],
     [cevir("Mevcut siteyi ez"), ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez],
   ]
 
@@ -537,31 +554,24 @@ export default function SiteTasimaPage() {
 
       {/* Kaydedilmiş oturumlar — sunucu bilgilerini yeniden girmeden devam et */}
       {adim === 1 && oturumlar.length > 0 && (
-        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
+        <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
           <div className="mb-2 text-sm font-medium text-blue-900 dark:text-blue-200">
             {cevir("Kaldığınız yerden devam edin")}
           </div>
           <div className="space-y-2">
             {oturumlar.map(o => (
-              <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200/70 bg-white px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-slate-900">
+              <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200/70 bg-white px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-dark-800">
                 <div className="min-w-0">
                   <span className="font-medium text-slate-900 dark:text-slate-100">{o.kullanici}@{o.host}</span>
                   <span className="ml-2 text-xs text-slate-500">{o.tip} · {o.site_sayisi} site{o.kimlik_sakli ? ` · ${cevir("parola saklı")}` : ''}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button type="button" onClick={() => oturumaGeri(o.id)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700">{cevir("Devam et")}</button>
-                  <button type="button" onClick={() => oturumSil(o.id)} className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800" title={cevir("Oturumu unut")}>✕</button>
+                  <Button type="button" color="primary" onClick={() => oturumaGeri(o.id)} className="px-3 py-1.5 text-xs">{cevir("Devam et")}</Button>
+                  <Button type="button" variant="flat" onClick={() => oturumSil(o.id)} className="px-2 py-1.5 text-xs" title={cevir("Oturumu unut")}>✕</Button>
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {hata && (
-        <div className="mb-5 flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-300">
-          <span className="mt-0.5 shrink-0"><Ikon d={I.uyari} /></span>
-          <span className="min-w-0 break-words">{hata}</span>
         </div>
       )}
 
@@ -636,18 +646,18 @@ export default function SiteTasimaPage() {
               ) : (
                 <div className="block sm:col-span-2 lg:col-span-4">
                   <span className={labelCls}>{cevir("Panel anahtarı — kaynak sunucuda tek komut çalıştırın")}</span>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
                     <p className="mb-2 leading-relaxed">
                       {cevir("Kaynak sunucu")} <strong>{cevir("parola girişini kapatmış")}</strong>{cevir(" olabilir (Plesk'te sık). Bunun yerine panel kendi anahtarını kullanır — parola gerekmez.")}
                       {cevir("Aşağıdaki komutu")} <strong>{cevir("kaynak sunucuda")}</strong> ({host || cevir('kaynak')}) <strong>{cevir("bir kez")}</strong> {cevir("çalıştırın, sonra “Siteleri keşfet”e basın:")}
                     </p>
                     <div className="relative">
-                      <pre className="max-h-28 overflow-auto rounded-lg bg-slate-900 px-3 py-2 pr-16 font-mono text-[11px] leading-snug text-slate-100 whitespace-pre-wrap break-all">{panelKomut || cevir("Anahtar hazırlanıyor…")}</pre>
-                      <button type="button" disabled={!panelKomut}
+                      <pre className="max-h-28 overflow-auto rounded-lg bg-dark-800 px-3 py-2 pr-16 font-mono text-[11px] leading-snug text-slate-100 whitespace-pre-wrap break-all">{panelKomut || cevir("Anahtar hazırlanıyor…")}</pre>
+                      <Button type="button" disabled={!panelKomut}
                         onClick={() => { if (panelKomut) { navigator.clipboard?.writeText(panelKomut); setPanelKopya(true); setTimeout(() => setPanelKopya(false), 1500) } }}
-                        className="absolute right-2 top-2 rounded-md bg-slate-700 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-slate-600 disabled:opacity-50">
+                        className="absolute right-2 top-2 px-2 py-1 text-[11px]">
                         {panelKopya ? cevir('Kopyalandı ✓') : cevir('Kopyala')}
-                      </button>
+                      </Button>
                     </div>
                     <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-300/70">
                       {cevir(cevir("Not: Komutu kaynağa Plesk’in SSH terminalinden veya hosting konsolundan yapıştırabilirsiniz. Taşıma bitince anahtarı kaynaktan silebilirsiniz."))}
@@ -657,25 +667,25 @@ export default function SiteTasimaPage() {
               )}
             </div>
 
-            <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+            <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:bg-dark-700/60 dark:text-slate-400">
               <span className="text-emerald-500"><Ikon d={I.ssl} /></span>
               {cevir(cevir("Kimlik bilgileri AES ile şifreli saklanır, taşıma bitince otomatik silinir."))}
             </div>
 
             {testSonuc && (
-              <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300">
+              <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300">
                 <span className="mt-0.5 shrink-0"><Ikon d={I.check} /></span>
                 <span className="min-w-0 break-words">{testSonuc}</span>
               </div>
             )}
 
             <div className="mt-5 flex flex-wrap gap-2.5">
-              <button type="button" onClick={baglantiTest} disabled={testYuk || !host} className={btnIkincil}>
+              <Button type="button" variant="outlined" onClick={baglantiTest} disabled={testYuk || !host} className="gap-2 px-4 py-2.5 text-sm">
                 {testYuk ? cevir('Test ediliyor…') : cevir("Bağlantıyı test et")}
-              </button>
-              <button type="button" onClick={kesfet} disabled={kesifYuk || !host} className={btnBirincil}>
+              </Button>
+              <Button type="button" onClick={kesfet} disabled={kesifYuk || !host} className="gap-2 px-5 py-2.5 text-sm">
                 <Ikon d={I.sunucu} />{kesifYuk ? cevir('Siteler taranıyor…') : cevir("Siteleri keşfet →")}
-              </button>
+              </Button>
             </div>
           </Kart>
 
@@ -693,8 +703,8 @@ export default function SiteTasimaPage() {
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hesaplar.length} {cevir("site bulundu")} · {secilenSayi} {cevir("seçili")}</p>
               </div>
               <div className="flex gap-2">
-                <button type="button" className={btnKucuk} onClick={() => setSecili(Object.fromEntries(hesaplar.map(h => [h.alan_adi, true])))}>{cevir("Tümünü seç")}</button>
-                <button type="button" className={btnKucuk} onClick={() => setSecili({})}>{cevir("Temizle")}</button>
+                <Button type="button" variant="outlined" className="gap-1.5 px-3 py-1.5 text-xs" onClick={() => setSecili(Object.fromEntries(hesaplar.map(h => [h.alan_adi, true])))}>{cevir("Tümünü seç")}</Button>
+                <Button type="button" variant="outlined" className="gap-1.5 px-3 py-1.5 text-xs" onClick={() => setSecili({})}>{cevir("Temizle")}</Button>
               </div>
             </div>
             <div className="mt-4 overflow-x-auto">
@@ -713,7 +723,7 @@ export default function SiteTasimaPage() {
                         className={`${T.satir} cursor-pointer transition ${sec ? 'bg-brand-50/30 dark:bg-brand-900/10' : ''}`}>
                         <td className={T.hucre} data-etiket={cevir("Seç")}>
                           <input type="checkbox" checked={sec} onClick={e => e.stopPropagation()} onChange={e => setSecili(s => ({ ...s, [h.alan_adi]: e.target.checked }))}
-                            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-slate-800" />
+                            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-dark-700" />
                         </td>
                         <td className={T.hucreBaslik} data-etiket={cevir("Alan adı")}>
                           <span className="font-medium">{h.alan_adi}</span>
@@ -725,8 +735,8 @@ export default function SiteTasimaPage() {
                         <td className={T.hucre} data-etiket={cevir("Veritabanı")}>{h.dbler?.length || 0}</td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
                           {h.mevcut
-                            ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">{cevir("Panelde var")}</span>
-                            : <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">{cevir("Yeni")}</span>}
+                            ? <Badge color="warning" variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Panelde var")}</Badge>
+                            : <Badge variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Yeni")}</Badge>}
                         </td>
                       </tr>
                     )
@@ -742,10 +752,10 @@ export default function SiteTasimaPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {ayarlar.map(([et, deger, ayarla, ipucu, ikon]) => (
                 <button key={et} type="button" onClick={() => ayarla(!deger)}
-                  className={`flex items-start gap-3 rounded-2xl border p-3.5 text-left transition ${
-                    deger ? 'border-slate-900/15 bg-slate-50 dark:border-white/15 dark:bg-slate-800/70' : 'border-slate-200/70 hover:border-slate-300 dark:border-slate-700/60 dark:hover:border-slate-600'}`}>
+                  className={`flex items-start gap-3 rounded-lg border p-3.5 text-left transition ${
+                    deger ? 'border-dark-700/15 bg-slate-50 dark:border-white/15 dark:bg-dark-700/70' : 'border-slate-200/70 hover:border-slate-300 dark:border-dark-600/60 dark:hover:border-slate-600'}`}>
                   <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${
-                    deger ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-300 text-transparent dark:border-slate-600'}`}>
+                    deger ? 'border-dark-700 bg-dark-800 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-300 text-transparent dark:border-slate-600'}`}>
                     <Ikon d={I.check} />
                   </span>
                   <span className="min-w-0">
@@ -763,17 +773,17 @@ export default function SiteTasimaPage() {
             </div>
 
             {ustune && (
-              <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">
+              <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">
                 <span className="mt-0.5 shrink-0"><Ikon d={I.uyari} /></span>
                 <span><strong className="font-semibold">{cevir("Dikkat:")}</strong> {cevir("“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.")}</span>
               </div>
             )}
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-2.5">
-              <button type="button" onClick={() => setAdim(1)} className={btnIkincil}><Ikon d={I.geri} />{cevir("Geri")}</button>
-              <button type="button" onClick={baslat} disabled={!secilenSayi} className={btnBirincil}>
+              <Button type="button" variant="outlined" onClick={() => setAdim(1)} className="gap-2 px-4 py-2.5 text-sm"><Ikon d={I.geri} />{cevir("Geri")}</Button>
+              <Button type="button" onClick={baslat} disabled={!secilenSayi} className="gap-2 px-5 py-2.5 text-sm">
                 <Ikon d={I.ok} />{cevir("Taşımayı başlat")} ({secilenSayi} site) →
-              </button>
+              </Button>
             </div>
           </Kart>
         </div>
@@ -785,7 +795,7 @@ export default function SiteTasimaPage() {
           {uretilenKimlikler.length > 0 && (
             <Kart>
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-800/60 dark:bg-amber-900/20">
-                <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">{cevir("🔑 Oluşturulan sahip hesapları — parolaları KAYDEDİN")}</h3>
+                <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">{cevir("Oluşturulan sahip hesapları — parolaları KAYDEDİN")}</h3>
                 <p className="mb-2 mt-0.5 text-xs text-amber-700/80 dark:text-amber-300/70">
                   {cevir(cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturuldu. Reseller parolaları YALNIZ ŞİMDİ gösterilir (bir daha görünmez) — sahiplere siz iletin."))}
                 </p>
@@ -817,15 +827,15 @@ export default function SiteTasimaPage() {
                 <DurumRozet durum={calisiyor ? 'calisiyor' : (ozet.durum || 'bekliyor')} />
               </div>
               {calisiyor
-                ? <button type="button" onClick={iptalEt} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20">■ {cevir("Durdur")}</button>
+                ? <Button type="button" color="error" variant="outlined" onClick={iptalEt} className="gap-1.5 px-3.5 py-1.5 text-xs">■ {cevir("Durdur")}</Button>
                 : <div className="flex items-center gap-2">
                     {hesaplar && hesaplar.length > 0 && (
                       <div className="relative">
-                        <button type="button" onClick={() => setRetryAcik(v => !v)} className={btnKucuk}><Ikon d={I.yenile} /> {cevir("Tekrar dene")}</button>
+                        <Button type="button" onClick={() => setRetryAcik(v => !v)} variant="outlined" className="gap-1.5 px-3 py-1.5 text-xs"><Ikon d={I.yenile} /> {cevir("Tekrar dene")}</Button>
                         {retryAcik && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setRetryAcik(false)} />
-                            <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                            <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-dark-600 dark:bg-dark-800">
                               <div className="mb-2 text-xs font-medium text-slate-500">{cevir("Neyi yeniden taşıyalım?")}</div>
                               <div className="space-y-1">
                                 <RetrySecim etiket={cevir("Dosyalar")} ikon={I.files} secili={dosyalar} degis={() => setDosyalar(v => !v)} />
@@ -834,23 +844,23 @@ export default function SiteTasimaPage() {
                                 <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
                                 <RetrySecim etiket="Mail" ikon={I.mail} secili={posta} degis={() => setPosta(v => !v)} />
                               </div>
-                              <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
+                              <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-dark-600 dark:text-slate-400">
                                 <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />
                                 {cevir(cevir("Mevcut siteyi ez (üzerine yaz)"))}
                               </label>
-                              <button type="button" onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">{cevir("Seçileni Taşı")}</button>
+                              <Button type="button" onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full px-3 py-1.5 text-xs">{cevir("Seçileni Taşı")}</Button>
                             </div>
                           </>
                         )}
                       </div>
                     )}
-                    <button type="button" onClick={yeniTasima} className={btnKucuk}>{cevir("+ Yeni taşıma")}</button>
+                    <Button type="button" variant="outlined" onClick={yeniTasima} className="gap-1.5 px-3 py-1.5 text-xs">{cevir("+ Yeni taşıma")}</Button>
                   </div>}
             </div>
 
             {/* Canlı: hangi domain taşınıyor + ETA */}
             {calisiyor && (
-              <div className="mt-4 flex flex-wrap items-center gap-4 rounded-2xl border border-brand-200/60 bg-brand-50/50 px-4 py-3 dark:border-brand-800/40 dark:bg-brand-900/10">
+              <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-brand-200/60 bg-brand-50/50 px-4 py-3 dark:border-brand-800/40 dark:bg-brand-900/10">
                 <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] font-medium uppercase tracking-wide text-brand-600 dark:text-brand-400">{cevir("Şu an taşınıyor")}</div>
@@ -872,7 +882,7 @@ export default function SiteTasimaPage() {
                     [cevir('Hata'), ozet.basarisiz, ozet.basarisiz ? 'text-red-600 dark:text-red-400' : 'text-slate-400'],
                     [cevir("Geçen süre"), sure(gecenSn), 'text-slate-900 dark:text-slate-100'],
                   ].map(([et, deg, renk]) => (
-                    <div key={et as string} className="rounded-2xl bg-slate-50 px-3.5 py-3 dark:bg-slate-900/40">
+                    <div key={et as string} className="rounded-lg bg-slate-50 px-3.5 py-3 dark:bg-dark-800/40">
                       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{et}</div>
                       <div className={`mt-0.5 text-lg font-semibold tabular-nums ${renk}`}>{deg as ReactNode}</div>
                     </div>
@@ -881,7 +891,7 @@ export default function SiteTasimaPage() {
                 <div className="mb-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">
                   <span>{done} / {ozet.toplam} {cevir("tamamlandı")}</span><span className="tabular-nums">{yuzde}%</span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-dark-700">
                   <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${yuzde}%` }} />
                 </div>
               </div>
@@ -909,7 +919,7 @@ export default function SiteTasimaPage() {
               </div>
             )}
 
-            <pre ref={logRef} className="mt-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3.5 font-mono text-[11px] leading-relaxed text-slate-300 ring-1 ring-slate-800">
+            <pre ref={logRef} className="mt-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-dark-900 p-3.5 font-mono text-[11px] leading-relaxed text-slate-300 ring-1 ring-dark-600">
               {logMetin || cevir("Kayıt bekleniyor…")}
             </pre>
           </Kart>
@@ -923,7 +933,7 @@ export default function SiteTasimaPage() {
 
 function SelKart({ etiket, children }: { etiket: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200/70 p-3.5 dark:border-slate-700/60">
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/70 p-3.5 dark:border-dark-600/60">
       <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{etiket}</span>
       {children}
     </div>

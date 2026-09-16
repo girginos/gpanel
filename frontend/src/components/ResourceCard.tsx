@@ -56,7 +56,7 @@ export default function ResourceCard() {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center justify-between">
           {cevir(cevir("Kaynak Kullanımı"))}
           {u && <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 uppercase tracking-wider">{cevir("canlı")}</span>}
@@ -84,7 +84,7 @@ export default function ResourceCard() {
               alt={`${(u.disk.kullanilan_byte / 1e9).toFixed(1)} GB / ${(u.disk.toplam_byte / 1e9).toFixed(1)} GB`}
               renk="violet"
             />
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-500 flex justify-between">
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-dark-600 text-xs text-slate-500 dark:text-slate-500 flex justify-between">
               <span>{cevir("Çalışma süresi")}</span>
               <span className="font-mono text-slate-700 dark:text-slate-300">{formatUptime(u.uptime_sn)}</span>
             </div>
@@ -92,7 +92,7 @@ export default function ResourceCard() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sistem Durumu")}</h3>
         {!s ? (
           <div className="text-sm text-slate-400 dark:text-slate-500">{cevir("Bekleniyor…")}</div>
@@ -125,7 +125,7 @@ function Cubuk({ etiket, yuzde, alt, renk }: { etiket: string; yuzde: number; al
         <span className="text-slate-700 dark:text-slate-300 font-medium">{etiket}</span>
         <span className="font-mono text-slate-900 dark:text-slate-100">%{yuzde.toFixed(1)}</span>
       </div>
-      <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden my-1">
+      <div className="h-2 bg-slate-100 dark:bg-dark-700 rounded-full overflow-hidden my-1">
         <div className={`h-full transition-all duration-500 ${teh}`} style={{ width: `${Math.min(100, Math.max(2, yuzde))}%` }}></div>
       </div>
       <div className="text-[11px] text-slate-500 dark:text-slate-500 font-mono">{alt}</div>

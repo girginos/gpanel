@@ -29,7 +29,7 @@ $cfg['ShowPhpInfo']               = false;
 $cfg['ShowChgPassword']           = false;
 $cfg['Servers'][$i]['hide_db']    = '^(mysql|information_schema|performance_schema|sys|panel|phpmyadmin)$';
 
-// Cookie session timeout (dakika)
+// Cookie session timeout (saniye) — 3600 = 1 saat
 $cfg['LoginCookieValidity']       = 3600;
 $cfg['LoginCookieStore']          = 0;
 

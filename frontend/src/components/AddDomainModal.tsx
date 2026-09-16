@@ -12,7 +12,7 @@ import Modal from './Modal'
 const PHP_FALLBACK = ['7.4', '8.1', '8.2', '8.3', '8.4']
 
 type Plan = { id: number; ad: string; php_surum: string; varsayilan: boolean }
-type Surum = { surum: string; aciklama?: string }
+type Surum = { surum: string; aciklama?: string; eol?: boolean }
 
 
 const CMP_EN: Record<string, string> = {
@@ -27,6 +27,7 @@ const CMP_EN: Record<string, string> = {
   "Sağlanıyor…": "Provisioning…",
   "Domain Ekle": "Add Domain",
   "Domain eklenemedi": "Domain could not be added",
+  "güncelleme almıyor": "no longer updated",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -49,8 +50,10 @@ export default function AddDomainModal({
 
   // Modal açıldığında planları + kurulu PHP sürümlerini çek
   useEffect(() => {
+    let iptal = false
     if (!acik) return
     api.get<Plan[]>('/plans').then(r => {
+      if (iptal) return
       const list = r.data || []
       setPlanlar(list)
       // Varsayılan plan varsa ön-seç + PHP'sini uygula
@@ -59,8 +62,9 @@ export default function AddDomainModal({
         setPlanId(vars.id)
         if (vars.php_surum) setPhpSurum(vars.php_surum)
       }
-    }).catch(hataYakala(cevir("Planlar yüklenemedi")))
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala(cevir("PHP sürümleri alınamadı")))
+    }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
+    api.get<Surum[]>('/php/versions').then(r => { if (iptal) return; setSurumler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("PHP sürümleri alınamadı"))(e) })
+    return () => { iptal = true }
   }, [acik])
 
   function planDegis(v: string) {
@@ -127,7 +131,7 @@ export default function AddDomainModal({
             <select
               value={planId}
               onChange={(e) => planDegis(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition text-sm bg-white dark:bg-slate-800"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition text-sm bg-white dark:bg-dark-700"
             >
               <option value="">{cevir("Plan seçilmedi")}</option>
               {planlar.map(p => (
@@ -141,9 +145,14 @@ export default function AddDomainModal({
             <select
               value={phpSurum}
               onChange={(e) => setPhpSurum(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition text-sm bg-white dark:bg-slate-800"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition text-sm bg-white dark:bg-dark-700"
             >
-              {phpOpts.map(v => <option key={v} value={v}>PHP {v}</option>)}
+              {phpOpts.map(v => {
+                // EOL surumler secilebilir kalir; yalniz etikette isaretlenir
+                // (<option> icinde JSX rozet render edilemez).
+                const eol = surumler.find(s => s.surum === v)?.eol
+                return <option key={v} value={v}>PHP {v}{eol ? ` — ${cevir("güncelleme almıyor")}` : ''}</option>
+              })}
             </select>
             <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
               {phpPlandan ? <span className="text-brand-600 dark:text-brand-400">✓ {cevir("Plandan geldi")} ({seciliPlan?.ad})</span> : cevir("Plandan bağımsız değiştirebilirsiniz.")}
@@ -163,14 +172,14 @@ export default function AddDomainModal({
             type="button"
             onClick={onKapat}
             disabled={yukleniyor}
-            className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 rounded-md text-sm transition"
+            className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 rounded-md text-sm transition"
           >
             {cevir("İptal")}
           </button>
           <button
             type="submit"
             disabled={yukleniyor || !alanAdi.trim()}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded-md text-sm font-medium transition"
+            className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded-md text-sm font-medium transition"
           >
             {yukleniyor ? cevir('Sağlanıyor…') : cevir('Domain Ekle')}
           </button>

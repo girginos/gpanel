@@ -155,7 +155,9 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		}
 		if yeniOlusturuldu {
 			log("hata olustu — olusturulan hesap geri aliniyor…")
-			_, _ = h.DB.Exec(`DELETE FROM domains WHERE id=?`, sonuc.DomainID)
+			if _, err := h.DB.Exec(`DELETE FROM domains WHERE id=?`, sonuc.DomainID); err != nil {
+				log("UYARI: geri alma sirasinda domain kaydi silinemedi (id=%d): %v", sonuc.DomainID, err)
+			}
 			_ = provisioner.Deprovision(alanAdi, sk)
 		}
 	}()
@@ -312,7 +314,9 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 	}
 
 	if yeniOlusturuldu {
-		_, _ = h.DB.ExecContext(ctx, `UPDATE domains SET durum='aktif' WHERE id=?`, sonuc.DomainID)
+		if _, err := h.DB.ExecContext(ctx, `UPDATE domains SET durum='aktif' WHERE id=?`, sonuc.DomainID); err != nil {
+			sonuc.Uyarilar = append(sonuc.Uyarilar, "domain 'aktif' işaretlenemedi (elle etkinleştirin): "+err.Error())
+		}
 	}
 	basarili = true
 	return sonuc, nil

@@ -11,6 +11,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/gizli"
 	"log"
 	"os"
 	"path/filepath"
@@ -74,6 +75,7 @@ func genelAyarOku(ctx context.Context, db *sql.DB) *GenelAyar {
 	g.UzakAktif = uzakAktif == 1
 	g.UzakYerelSil = yerelSil == 1
 	g.SonYukleme = sonYuk.String
+	g.UzakParola = gizli.CozBagli(g.UzakParola, "yedek") // at-rest sifreli (graceful)
 	return g
 }
 
@@ -103,7 +105,7 @@ func genelAyarYaz(ctx context.Context, db *sql.DB, g *GenelAyar) error {
 		 uzak_tip=?, uzak_host=?, uzak_port=?, uzak_kullanici=?, uzak_parola=?, uzak_dizin=?,
 		 uzak_yerel_sil=? WHERE id=1`,
 		b(g.Aktif), g.MinBosGB, g.MaxDepoGB, b(g.UzakAktif),
-		g.UzakTip, g.UzakHost, g.UzakPort, g.UzakKullanici, g.UzakParola, g.UzakDizin, b(g.UzakYerelSil))
+		g.UzakTip, g.UzakHost, g.UzakPort, g.UzakKullanici, gizli.SaklaBagli(g.UzakParola, "yedek"), g.UzakDizin, b(g.UzakYerelSil))
 	return err
 }
 
@@ -194,7 +196,9 @@ func pushGenelAsync(db *sql.DB, g *GenelAyar, yerelYol, dosyaAdi string, yedekID
 			if len(kisa) > 500 {
 				kisa = kisa[:500]
 			}
-			db.Exec(`UPDATE backup_genel_ayar SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE id=1`, kisa)
+			if _, err := db.Exec(`UPDATE backup_genel_ayar SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE id=1`, kisa); err != nil {
+				log.Printf("backups.pushGenelAsync: off-site hata durumu yazilamadi: %v", err)
+			}
 			// 🔴 Tek satirlik son_durum'u paralel yuklemeler EZIYOR (son-yazan-kazanir):
 			// bir hata, hemen ardindan gelen basari ile silinir ve operatör yedegin
 			// off-site'a HIC gitmedigini asla ogrenemez. Bildirim kalici iz birakir.
@@ -214,18 +218,24 @@ func pushGenelAsync(db *sql.DB, g *GenelAyar, yerelYol, dosyaAdi string, yedekID
 		ub := uzakBoyut(ctx, g, hedef.UzakDizin, dosyaAdi)
 		if yerelBoyut > 0 && ub > 0 && ub != yerelBoyut {
 			msg := fmt.Sprintf("uzak boyut uyuşmuyor (yerel=%d uzak=%d)", yerelBoyut, ub)
-			db.Exec(`UPDATE backup_genel_ayar SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE id=1`, msg)
+			if _, err := db.Exec(`UPDATE backup_genel_ayar SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE id=1`, msg); err != nil {
+				log.Printf("backups.pushGenelAsync: off-site dogrulama hatasi yazilamadi: %v", err)
+			}
 			bildirim.Yaz(db, "kritik", "yedek", "Off-site yükleme doğrulanamadı",
 				dosyaAdi+": "+msg+" — yerel kopya KORUNDU.", 0, "backup", yedekID)
 			log.Printf("backup genel: %s DOGRULAMA BASARISIZ: %s (yerel kopya korundu)", dosyaAdi, msg)
 			return
 		}
-		db.Exec(`UPDATE backup_genel_ayar SET son_durum='ok', son_hata='', son_yukleme=NOW() WHERE id=1`)
+		if _, err := db.Exec(`UPDATE backup_genel_ayar SET son_durum='ok', son_hata='', son_yukleme=NOW() WHERE id=1`); err != nil {
+			log.Printf("backups.pushGenelAsync: off-site ok durumu yazilamadi: %v", err)
+		}
 		if g.UzakYerelSil && yedekID > 0 && ub > 0 {
 			// Yerel kopyayi sil: uzakta guvende. DB kaydi kalir ki operatorun elinde
 			// ne yedegi oldugu gorunsun.
 			if err := os.Remove(yerelYol); err == nil {
-				db.Exec(`UPDATE backups SET notlar=CONCAT(notlar,' [uzaga tasindi]') WHERE id=?`, yedekID)
+				if _, err := db.Exec(`UPDATE backups SET notlar=CONCAT(notlar,' [uzaga tasindi]') WHERE id=?`, yedekID); err != nil {
+					log.Printf("backups.pushGenelAsync: yedek notu yazilamadi: %v", err)
+				}
 				log.Printf("backup genel: %s uzaga tasindi, yerel kopya silindi", dosyaAdi)
 			}
 		}
@@ -292,6 +302,9 @@ func fetchGenelUzaktan(ctx context.Context, g *GenelAyar, dosyaAdi, yerelYol str
 // gecici adi arayip bulamayinca "dosya olusmadi" hatasi donuyordu.
 func fetchGenelDizinden(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi, yerelYol string) error {
 	url := lftpURL(g.hedef())
+	if url == "" {
+		return fmt.Errorf("güvenlik: geçersiz yedek host")
+	}
 	betik := fmt.Sprintf(
 		`set cmd:fail-exit yes; `+
 			`set sftp:auto-confirm yes; `+
@@ -476,10 +489,14 @@ func uzakKopyaVar(db *sql.DB, dosya string) bool {
 // lftp `cls -s` cikti formatina bagli kalmamak icin `ls` ciktisindan sayisal alan
 // ayiklanir; bulunamazsa -1.
 func uzakBoyut(ctx context.Context, g *GenelAyar, uzakDizin, dosyaAdi string) int64 {
+	url := lftpURL(g.hedef())
+	if url == "" {
+		return -1 // güvenlik: geçersiz yedek host
+	}
 	betik := fmt.Sprintf(
 		`set cmd:fail-exit yes; set sftp:auto-confirm yes; set net:max-retries 1; set net:timeout 20; `+
 			`open -u "%s","%s" %s; cd "%s"; cls -l "%s"; bye`,
-		lftpEscape(g.UzakKullanici), lftpEscape(g.UzakParola), lftpURL(g.hedef()),
+		lftpEscape(g.UzakKullanici), lftpEscape(g.UzakParola), url,
 		lftpEscape(uzakDizin), lftpEscape(dosyaAdi))
 	cmd, temizle, err := lftpKomutu(ctx, betik)
 	if err != nil {

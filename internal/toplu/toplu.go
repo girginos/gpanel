@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -138,7 +139,9 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, req baslatReq, akto
 	var detay []string
 	for i, did := range req.IDs {
 		if ctx.Err() != nil {
-			h.DB.Exec("UPDATE cp_toplu_isler SET durum='iptal', bitis=NOW() WHERE id=?", isID)
+			if _, e := h.DB.Exec("UPDATE cp_toplu_isler SET durum='iptal', bitis=NOW() WHERE id=?", isID); e != nil {
+				log.Printf("toplu: iş iptal durumu yazılamadı (is=%d): %v", isID, e)
+			}
 			return
 		}
 		var alanAdi, sk, php, backend string
@@ -149,7 +152,9 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, req baslatReq, akto
 			detay = append(detay, fmt.Sprintf("#%d: domain bulunamadı", did))
 			continue
 		}
-		h.DB.Exec("UPDATE cp_toplu_isler SET aktif_domain=? WHERE id=?", alanAdi, isID)
+		if _, e := h.DB.Exec("UPDATE cp_toplu_isler SET aktif_domain=? WHERE id=?", alanAdi, isID); e != nil {
+			log.Printf("toplu: aktif_domain güncellenemedi (is=%d): %v", isID, e)
+		}
 
 		var err error
 		switch req.Tip {
@@ -185,7 +190,9 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, req baslatReq, akto
 		} else {
 			basari++
 		}
-		h.DB.Exec("UPDATE cp_toplu_isler SET tamamlanan=?, basari=?, hata=? WHERE id=?", i+1, basari, hata, isID)
+		if _, e := h.DB.Exec("UPDATE cp_toplu_isler SET tamamlanan=?, basari=?, hata=? WHERE id=?", i+1, basari, hata, isID); e != nil {
+			log.Printf("toplu: ilerleme yazılamadı (is=%d): %v", isID, e)
+		}
 	}
 
 	durum := "tamam"
@@ -195,7 +202,9 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, req baslatReq, akto
 		durum = "kismi"
 	}
 	dj, _ := json.Marshal(detay)
-	h.DB.Exec("UPDATE cp_toplu_isler SET durum=?, aktif_domain='', detay=?, bitis=NOW() WHERE id=?", durum, string(dj), isID)
+	if _, e := h.DB.Exec("UPDATE cp_toplu_isler SET durum=?, aktif_domain='', detay=?, bitis=NOW() WHERE id=?", durum, string(dj), isID); e != nil {
+		log.Printf("toplu: iş sonucu yazılamadı (is=%d): %v", isID, e)
+	}
 }
 
 // dnsReset — domainin TUM DNS kayitlarini silip sablondan yeniden uretir.

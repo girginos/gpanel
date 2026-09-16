@@ -8,7 +8,7 @@
 # WHY THIS EXISTS
 # ───────────────
 # 🔴 The old "15) Verification" section was DECORATIVE: it printed status but
-# no finding stopped the install. On 49.12.158.182 the install first printed
+# no finding stopped the install. On demo-sunucu the install first printed
 #   "wp-cli (WordPress): MISSING"
 # and right below it printed
 #   "✓ GirginOSPanel installation complete"

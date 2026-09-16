@@ -95,7 +95,7 @@ export default function AramaliSecim({
       <button
         type="button"
         onClick={() => setAcik(a => !a)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-left text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400"
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm text-left text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400"
       >
         <span className={`truncate ${secili ? '' : 'text-slate-400 dark:text-slate-500'}`}>
           {secili ? secili.etiket : yerTutucu}
@@ -107,8 +107,8 @@ export default function AramaliSecim({
       </button>
 
       {acik && (
-        <div className="absolute z-[60] mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl">
-          <div className="p-2 border-b border-slate-100 dark:border-slate-700">
+        <div className="absolute z-[60] mt-1 w-full rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 shadow-xl">
+          <div className="p-2 border-b border-slate-100 dark:border-dark-600">
             <input
               ref={aramaRef}
               type="text"
@@ -116,7 +116,7 @@ export default function AramaliSecim({
               onChange={e => { setQ(e.target.value); setVurgu(0) }}
               onKeyDown={klavye}
               placeholder={aramaYerTutucu}
-              className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
           </div>
           <ul className="max-h-56 overflow-auto py-1" role="listbox">

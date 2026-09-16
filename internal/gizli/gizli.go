@@ -17,7 +17,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -140,3 +142,10 @@ func CozBagli(deger, baglam string) string {
 
 // SifreliMi: deger at-rest sifreli mi (gecis/denetim icin).
 func SifreliMi(deger string) bool { return strings.HasPrefix(deger, onEk) }
+
+// Sha256Hex: deterministik arama anahtari. AEAD non-deterministik oldugu icin
+// WHERE ile aranamayan sirlar (orn git webhook_secret) icin hash sutunu uretir.
+func Sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}

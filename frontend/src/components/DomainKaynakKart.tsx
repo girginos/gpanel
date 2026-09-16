@@ -32,6 +32,8 @@ const CMP_EN: Record<string, string> = {
   "Yok": "None",
   "Yedek": "Backup",
   "Yedek boyutu": "Backup size",
+  "Kaynak bilgisi alınamadı.": "Could not load resource info.",
+  "Yeniden dene": "Retry",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -51,22 +53,41 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
 
   if (yuk) {
     return (
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-        <div className="h-5 bg-slate-100 dark:bg-slate-800 rounded w-32 mb-3 animate-pulse" />
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
+        {/*
+          🔴 KOYU TEMADA GÖRÜNÜR OLMALI. Önceki hâlde çubuklar `dark:bg-dark-700`
+          idi — kartın kendi arka planıyla AYNI renk. Sonuç: yükleme sırasında
+          kutu tamamen BOŞ görünüyordu ve kullanıcı bunu "sağ bar bekliyor,
+          sayfa bozuk" diye bildirdi. Bekleme durumunun görünmemesi, bekleyişi
+          arızaya benzetir; `slate-700` karta göre bir ton açık.
+        */}
+        <div className="h-5 bg-slate-100 dark:bg-dark-600 rounded w-32 mb-3 animate-pulse" />
         <div className="space-y-3">
           {[1, 2, 3, 4].map(i => (
-            <div key={i} className="h-3 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+            <div key={i} className="h-3 bg-slate-100 dark:bg-dark-600 rounded animate-pulse" />
           ))}
         </div>
       </div>
     )
   }
-  if (!ozet) return null
+  if (!ozet) {
+    // 🔴 SESSİZ BOŞLUK YOK. `null` döndürmek, istek başarısız olduğunda sayfada
+    // açıklamasız bir boşluk bırakıyordu; kullanıcı bunu "yükleniyor" sanıp
+    // bekliyordu. Başarısızlık, bekleyiş gibi görünmemeli.
+    return (
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 text-sm text-slate-500 dark:text-slate-400">
+        <div className="mb-2">{cevir("Kaynak bilgisi alınamadı.")}</div>
+        <button onClick={yukle} className="text-brand-600 dark:text-brand-400 hover:underline">
+          {cevir("Yeniden dene")}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">
       {/* Plan + Özet */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Paket ve Kaynaklar")}</h3>
           <button onClick={yukle} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" title={cevir("Yenile")}>
@@ -76,7 +97,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           </button>
         </div>
 
-        <div className="mb-3 pb-3 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3">
+        <div className="mb-3 pb-3 border-b border-slate-100 dark:border-dark-600 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-0.5">{cevir("Hizmet Planı")}</div>
             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{ozet.plan_adi}</div>
@@ -84,7 +105,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           {/* Plan aksiyonu: yükseltme / düşürme / bu hostinge özel plan — hepsi plan sayfasında */}
           <Link
             to={`/abonelikler/${domainId}/plan`}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-dark-600 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600/60 hover:border-slate-300 dark:hover:border-slate-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
             title={cevir(cevir("Planı yükselt, düşür veya bu hostinge özel plan oluştur"))}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
@@ -109,7 +130,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       </div>
 
       {/* Yapılandırma Özeti */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yapılandırma")}</h3>
         <Sat e={cevir("IP Adresi")} d={ozet.ipv4 || '—'} mono />
         <Sat e={cevir("Sistem Kullanıcısı")} d={ozet.sk} mono />
@@ -133,7 +154,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       </div>
 
       {/* İlave Sayaclar */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sayaçlar")}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-3">
           <Mini etiket={cevir(cevir("DNS kayıt"))} deger={ozet.dns_kayit} />
@@ -173,7 +194,7 @@ function Bar({ etiket, k, l, birim, renk }: { etiket: string; k: number; l: numb
           }
         </span>
       </div>
-      <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700/50 overflow-hidden">
+      <div className="h-2 rounded-full bg-slate-100 dark:bg-dark-600/50 overflow-hidden">
         {sinirsiz ? (
           <div
             className={`h-full rounded-full bg-gradient-to-r ${grad[renk] || 'from-slate-400 to-slate-600'}`}
@@ -192,7 +213,7 @@ function fmt(n: number) {
 }
 function Sat({ e, d, mono }: { e: string; d: any; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
+    <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-dark-600 last:border-0">
       <span className="text-xs text-slate-500 dark:text-slate-500">{e}</span>
       <span className={`text-xs text-slate-700 dark:text-slate-300 text-right ${mono ? 'font-mono' : ''} max-w-[60%] truncate`} title={typeof d === 'string' ? d : undefined}>{d}</span>
     </div>

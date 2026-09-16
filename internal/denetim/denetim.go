@@ -98,6 +98,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		log.Printf("denetim: toplam sayilamadi: %v", err)
 	}
 
+	//nolint:gosec // G202: where = SABİT koşul parçalarının (kapsam + "a.action=?" + LIKE ? bloğu) " AND " birleşimidir; kapsam parametresi ParseInt ile int'e çevrilir, tüm kullanıcı değerleri args ile ? bağlanır.
 	sorgu := `SELECT a.id, DATE_FORMAT(a.ts,'%Y-%m-%d %H:%i:%s'), a.actor_username,
 	                 COALESCE(au.role,''), a.ip, a.action, COALESCE(a.target,''),
 	                 COALESCE(a.detail,''), a.ok, a.reseller_id, COALESCE(ru.username,'')
@@ -143,7 +144,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	// Suzgec kutusu icin bu KAPSAMDAKI eylem turleri (secili eylem listeyi daraltmaz)
 	eylemler := make([]string, 0, 24)
 	if er, err := h.DB.QueryContext(r.Context(),
-		`SELECT DISTINCT a.action FROM audit_log a`+kapsamWhere+` ORDER BY a.action`, kapsamArgs...); err == nil {
+		`SELECT DISTINCT a.action FROM audit_log a`+kapsamWhere+` ORDER BY a.action`, kapsamArgs...); err == nil { //nolint:gosec // G202: kapsamWhere = SABİT kapsam parçalarının " AND " birleşimi; kapsamArgs değerleri ? bağlanır, kullanıcı girdisi enterpole edilmez.
 		defer er.Close()
 		for er.Next() {
 			var e string

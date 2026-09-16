@@ -246,6 +246,168 @@ func tenantPMMaxChildren(db *sql.DB, domainID int64) int {
 	return 8
 }
 
+// ---------------------------------------------------------------------------
+// PLAN TAVANLARI — php_settings degerleri plan kaynaklarini ASAMAZ.
+//
+// 🔴 NEDEN: panel varsayilanlari (upload=2000M, post=8000M,
+// max_execution_time=3000) XFS disk kotasinin KAT KAT ustunde — 2GB'lik bir
+// upload 1GB kotada ASLA tamamlanamaz, 3000sn'lik bir istek FPM worker'ini
+// sonsuza kadar tutar. Bu yuzden pool RENDER edilirken bu degerler plandan
+// TAVANLANIR.
+//
+// 🔴 memory_limit BU TAVANIN DISINDADIR (2026-09-11 operator karari): modern
+// yazilimin ihtiyaci plan RAM'inin kesrinden buyuk oldugu icin panelden girilen
+// deger aynen gecerlidir. Ayrinti: renderTenantPool icindeki yorum.
+//
+// 🔴 SESSIZ DEGIL: tavan uygulandiginda log.Printf ile YAZILIR — kullanicinin
+// panelden bilincli girdigi deger sessizce yok sayilmaz.
+//
+// 🔴 Oranlar bilinerek "ust sinir", hedef deger DEGIL: 0 = tavan uygulanmaz.
+const (
+	// 🔴 memory_limit tavani KALDIRILDI (2026-09-11): bkz. renderTenantPool
+	// icindeki gerekce — modern yazilim icin cok dusuk kaliyordu.
+	// upload_max_filesize: disk kotasinin %25'i (tek dosya kotanin tamamini
+	// yiyemesin), taban 16M. post_max_size: %50, taban 32M.
+	// 🔴 PHP SARTI: post_max_size >= upload_max_filesize — bu yuzden post'un
+	// orani/tabani upload'inkinden BUYUK secildi; tavanlardan sonra ayrica
+	// tenantPostEnAzUpload ile yeniden dengelenir.
+	tenantUploadYuzde   = 25
+	tenantUploadTabanMB = 16
+	tenantPostYuzde     = 50
+	tenantPostTabanMB   = 32
+	// Zaman tavanlari: 3000s/6000s bir web istegi icin anlamsiz (FPM worker'i
+	// sonsuza kadar tutar, pm.max_children'i tuketir).
+	tenantMaxExecTavanSn  = 300
+	tenantMaxInputTavanSn = 600
+	// Plan/kota cozulemezse kullanilan varsayilanlar — kaynaklimit paketiyle
+	// AYNI degerler olmalidir (import dongusu: kaynaklimit provisioner'i import
+	// ediyor, tersi MUMKUN DEGIL → degerler elle eslenmis).
+	//   kaynaklimit.SystemdSliceYaz  → nonzero(l.RAMMB, 512)
+	//   kaynaklimit.varsayilanDiskMB → 5120
+	tenantVarsayilanRAMMB  = 512
+	tenantVarsayilanDiskMB = 5120
+)
+
+// tenantPlanTavanlari: domain'in planindan efektif RAM (cgroup MemoryMax) ve disk
+// kotasini MB cinsinden cozer. 0 donen deger = "sinirsiz/bilinmiyor" → tavan yok.
+//
+// Disk kotasi cozumu kaynaklimit.efektifKota ile AYNI sirayi izler:
+// domain override (>0) > plan degeri > (plan yoksa) varsayilan 5120MB.
+func tenantPlanTavanlari(db *sql.DB, domainID int64) (ramMB, diskMB int) {
+	if db == nil || domainID <= 0 {
+		return 0, 0
+	}
+	var pRAM, dDisk, pDisk, planVar int
+	if err := db.QueryRow(`SELECT COALESCE(p.ram_mb,0), COALESCE(d.disk_kota_mb,0),
+	                              COALESCE(p.disk_kota_mb,0), (d.plan_id IS NOT NULL)
+	                       FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
+	                       WHERE d.id=?`, domainID).Scan(&pRAM, &dDisk, &pDisk, &planVar); err != nil {
+		// Plan okunamadi → TAVAN UYGULAMA (mevcut davranis korunur, site bozulmaz).
+		log.Printf("tenant-fpm plan tavani: domain %d plan limitleri okunamadi (%v) — tavan uygulanmadi", domainID, err)
+		return 0, 0
+	}
+	ramMB = pRAM
+	if ramMB <= 0 {
+		ramMB = tenantVarsayilanRAMMB // cgroup MemoryMax de bu degere duser
+	}
+	diskMB = tenantVarsayilanDiskMB
+	if planVar == 1 {
+		diskMB = pDisk // plan disk_kota_mb=0 → "sinirsiz" → tavan uygulanmaz
+	}
+	if dDisk > 0 {
+		diskMB = dDisk // domain-seviye override
+	}
+	return ramMB, diskMB
+}
+
+// tenantOranTavani: limitMB'nin yuzde'si, en az tabanMB. limitMB<=0 (sinirsiz/
+// bilinmiyor) → 0 doner = tavan uygulanmaz.
+func tenantOranTavani(limitMB, yuzde, tabanMB int) int {
+	if limitMB <= 0 {
+		return 0
+	}
+	v := limitMB * yuzde / 100
+	if v < tabanMB {
+		v = tabanMB
+	}
+	return v
+}
+
+// phpBoyutBayt: PHP ini boyut dizesini ("2048M", "1g", "512K", "1048576", "-1")
+// bayta cevirir. sinirsiz=true → "-1". ok=false → ayristirilamadi.
+func phpBoyutBayt(v string) (bayt int64, sinirsiz bool, ok bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false, false
+	}
+	if v == "-1" {
+		return 0, true, true
+	}
+	carpan := int64(1)
+	switch v[len(v)-1] {
+	case 'K', 'k':
+		carpan, v = 1024, v[:len(v)-1]
+	case 'M', 'm':
+		carpan, v = 1024*1024, v[:len(v)-1]
+	case 'G', 'g':
+		carpan, v = 1024*1024*1024, v[:len(v)-1]
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	if err != nil || n < 0 {
+		return 0, false, false
+	}
+	return n * carpan, false, true
+}
+
+// tenantBoyutTavani: boyut ayarini tavanMB ile sinirlar. Tavan uygulandiginda
+// LOG'A YAZAR (kullanicinin bilincli ayari sessizce yok sayilmaz).
+// tavanMB<=0 → dokunmaz. Ayristirilamayan deger → tavana cekilir (dogrulanamayan
+// bir deger plan sinirinin uzerinde olabilir; guvenli taraf tavandir).
+func tenantBoyutTavani(sk, ad, deger string, tavanMB int) string {
+	if tavanMB <= 0 {
+		return deger
+	}
+	tavanBayt := int64(tavanMB) * 1024 * 1024
+	bayt, sinirsiz, ok := phpBoyutBayt(deger)
+	if ok && !sinirsiz && bayt <= tavanBayt {
+		return deger
+	}
+	yeni := strconv.Itoa(tavanMB) + "M"
+	sebep := "plan tavanini asiyor"
+	if !ok {
+		sebep = "ayristirilamadi"
+	} else if sinirsiz {
+		sebep = "sinirsiz (-1)"
+	}
+	log.Printf("tenant-fpm %s: php %s=%q %s → %q uygulandi (plan tavani %d MB)", sk, ad, deger, sebep, yeni, tavanMB)
+	return yeni
+}
+
+// tenantSureTavani: saniye cinsinden ayari tavanla + logla.
+func tenantSureTavani(sk, ad string, deger, tavan int) int {
+	if tavan <= 0 || (deger > 0 && deger <= tavan) {
+		return deger
+	}
+	log.Printf("tenant-fpm %s: php %s=%d plan tavanini asiyor → %d uygulandi", sk, ad, deger, tavan)
+	return tavan
+}
+
+// tenantPostEnAzUpload: PHP post_max_size >= upload_max_filesize SART. Tavanlar
+// sonrasi post upload'in altina duserse upload degerine yukseltilir (aksi halde
+// hicbir dosya yuklenemez).
+func tenantPostEnAzUpload(sk, post, upload string) string {
+	pb, psz, pok := phpBoyutBayt(post)
+	ub, usz, uok := phpBoyutBayt(upload)
+	if !pok || !uok || psz || usz {
+		return post
+	}
+	if pb >= ub {
+		return post
+	}
+	log.Printf("tenant-fpm %s: post_max_size=%q < upload_max_filesize=%q → %q uygulandi (PHP sarti)", sk, post, upload, upload)
+	return upload
+}
+
 // tenantPoolSettings: pool'a yansıyacak (güvenli) php_settings alanları. Satır yoksa
 // hardened default'lar kullanılır.
 type tenantPoolSettings struct {
@@ -318,6 +480,14 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	// Import dongusu yuzunden php.Defaults() BURADAN CAGRILAMAZ (internal/php
 	// zaten provisioner'i import ediyor). O yuzden degerler elle eslenmeli —
 	// birini degistiren UCUNU de degistirmeli.
+	//
+	// 🔴 GUNCELLEME (plan tavani): asagidaki degerler artik yalniz BASLANGIC
+	// noktasidir. renderTenantPool bunlari (ve php_settings'ten okunan kullanici
+	// degerlerini) PLANIN cgroup RAM'i / disk kotasi ile TAVANLAR — bkz.
+	// tenantPlanTavanlari + tenantBoyutTavani. Yani uc kaynagin sayilari
+	// ayrisirsa panel yine yanlis gosterir (yukaridaki uyari GECERLI), ama
+	// GERCEKTEN calisan deger her halukarda plan tavaninin altinda kalir.
+	// Migration DEFAULT'lari degistirilmedi: tavan RUNTIME'da uygulanir.
 	s := tenantPoolSettings{
 		MemoryLimit:       "2048M",
 		MaxExecutionTime:  3000,
@@ -405,6 +575,25 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	ps := tenantReadPoolSettings(db, domainID)
 	maxCh := tenantPMMaxChildren(db, domainID)
+	// 🔴 PLAN TAVANI: php_settings degerleri plan cgroup RAM'ini / disk kotasini
+	// ASAMAZ (aksi halde temiz PHP fatal'i yerine cgroup OOM-kill = 502 + bos log).
+	// Tavan uygulanan her alan log'a yazilir.
+	_, diskMB := tenantPlanTavanlari(db, domainID)
+	// 🔴 memory_limit BILEREK TAVANLANMIYOR (2026-09-11, operator karari):
+	// cgroup RAM'in bir kesri modern yazilima YETMIYOR (WP+WooCommerce, Laravel,
+	// composer tek basina 256M+ ister; 256MB'lik planda %50 tavani 128M yapiyordu
+	// ve siteler calismaz hale geliyordu). Panelden girilen deger AYNEN gecerli.
+	// KABUL EDILEN ODUN: memory_limit cgroup MemoryMax'in ustunde kalabilir; kacak
+	// bir script temiz "Allowed memory size exhausted" yerine cgroup OOM-kill
+	// yiyebilir (502 + logda PHP hatasi yok). Dogru cozum PHP'yi kismak degil,
+	// planin ram_mb'sini yazilimin ihtiyacina gore ayarlamaktir.
+	ps.UploadMaxFilesize = tenantBoyutTavani(sk, "upload_max_filesize", ps.UploadMaxFilesize,
+		tenantOranTavani(diskMB, tenantUploadYuzde, tenantUploadTabanMB))
+	ps.PostMaxSize = tenantBoyutTavani(sk, "post_max_size", ps.PostMaxSize,
+		tenantOranTavani(diskMB, tenantPostYuzde, tenantPostTabanMB))
+	ps.PostMaxSize = tenantPostEnAzUpload(sk, ps.PostMaxSize, ps.UploadMaxFilesize)
+	ps.MaxExecutionTime = tenantSureTavani(sk, "max_execution_time", ps.MaxExecutionTime, tenantMaxExecTavanSn)
+	ps.MaxInputTime = tenantSureTavani(sk, "max_input_time", ps.MaxInputTime, tenantMaxInputTavanSn)
 	startServers := maxCh / 4
 	if startServers < 1 {
 		startServers = 1

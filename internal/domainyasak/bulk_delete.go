@@ -19,9 +19,9 @@ type bulkSilGovde struct {
 }
 
 type bulkSilYanit struct {
-	Silinen      int      `json:"silinen"`
-	Bulunamayan  []string `json:"bulunamayan"`
-	Gecersiz     []string `json:"gecersiz"` // format bozuk olanlar (ne silindi ne aranmış)
+	Silinen     int      `json:"silinen"`
+	Bulunamayan []string `json:"bulunamayan"`
+	Gecersiz    []string `json:"gecersiz"` // format bozuk olanlar (ne silindi ne aranmış)
 }
 
 func (h *Handler) BulkDelete(w http.ResponseWriter, r *http.Request) {

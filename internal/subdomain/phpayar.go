@@ -2,7 +2,10 @@ package subdomain
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,9 +24,33 @@ import (
 // yoksa parent soketini), SSL cert varsa HTTPS bloğunu, koruma bloklarını
 // uygular; nginx -t + reload, hata olursa eski conf'a geri alır.
 // Part 3 bu fonksiyonu nginx ayarları + backend paritesiyle genişletir.
+// rebuildVhost — Handlers uzerinden kisayol.
 func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd, phpSurum string) error {
+	return rebuildVhostDB(ctx, h.DB, sid, sk, altAd, tamAd, phpSurum)
+}
+
+// rebuildVhostDB — alt alan vhost'unun TEK ureticisi.
+//
+// 🔴 Onceki surumde IKI ayri uretici vardi: burasi ve koruma.go'daki
+// vhostSSL/vhost. Sifre-koruma degistirildiginde ikincisi calisiyor ve
+// URETTIGI DOSYADA erisim kisitlama blogu YOKTU -- yani musteri .htpasswd
+// ayarina dokununca kisitlama SESSIZCE dusuyordu. (Ayni yol musterinin nginx
+// ayarlarini da kaybediyordu.) Iki uretici kaçinilmaz olarak ayrisir; tek
+// uretici tek davranis demektir.
+func rebuildVhostDB(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd, phpSurum string) error {
+	return rebuildVhostIc(ctx, db, sid, sk, altAd, tamAd, phpSurum)
+}
+
+func rebuildVhostIc(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd, phpSurum string) error {
+	// 🔴 Kilit EN BASTA alinir. Onceki surumde yalniz dosya yazma bolumunu
+	// sariyordu; oysa EnsureCacheZone ve subApacheYaz da conf.d/httpd
+	// altinda dosya yazip silebiliyor ve GLOBAL `nginx -t`'yi etkiliyor.
+	// Kapsam disi kalan her adim, kapatmaya calistigimiz yarisi geri acar.
+	birak := provisioner.RenderKilidiAl()
+	defer birak()
+
 	docroot := docrootOf(sk, tamAd)
-	socket, hasPool, err := php.ApplyForSub(ctx, h.DB, sk, sid, phpSurum)
+	socket, hasPool, err := php.ApplyForSub(ctx, db, sk, sid, phpSurum)
 	if err != nil {
 		return err
 	}
@@ -33,11 +60,11 @@ func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd
 			return err
 		}
 	}
-	koruma := provisioner.ProtectedBlocksForSub(h.DB, sid, socket, webBackendGet(ctx, h.DB, sid))
+	koruma := provisioner.ProtectedBlocksForSub(db, sid, socket, webBackendGet(ctx, db, sid))
 	crt, key := certYolu(sk, tamAd)
 	ssl := dosyaVar(crt) && dosyaVar(key)
-	ng, _ := subNginxGet(ctx, h.DB, sid)
-	backend := webBackendGet(ctx, h.DB, sid)
+	ng, _ := subNginxGet(ctx, db, sid)
+	backend := webBackendGet(ctx, db, sid)
 	if ng.FastcgiCache && backend == "php-fpm" {
 		_, _ = provisioner.EnsureCacheZone()
 	}
@@ -50,10 +77,19 @@ func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd
 		subApacheSil(sk, altAd)
 	}
 
+	// 🔴 Erisim kisitlama: hata varsa vhost'a DOKUNMA. Diskteki yapilandirma
+	// korumali olabilir; okunamayan bir ayar yuzunden onu ezmek, korumayi
+	// SESSIZCE kaldirmak olurdu.
+	kisit, kerr := provisioner.AltAlanErisimBloku(db, sid)
+	if kerr != nil {
+		return fmt.Errorf("erisim kisitlama okunamadi, alt alan vhost'u DEGISTIRILMEDI (%s): %w", tamAd, kerr)
+	}
+
 	o := subVhostOpts{TamAd: tamAd, DocRoot: docroot, Socket: socket, Backend: backend,
-		SSL: ssl, Crt: crt, Key: key, Koruma: koruma, N: ng}
+		SSL: ssl, Crt: crt, Key: key, Koruma: koruma, N: ng, Kisit: kisit}
 	body := renderSubVhost(o)
 	conf := confPath(sk, altAd)
+
 	eskiB, _ := os.ReadFile(conf)
 	if err := os.WriteFile(conf, []byte(body), 0o644); err != nil {
 		return err
@@ -68,13 +104,31 @@ func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd
 		_ = exec.Command("systemctl", "reload", "nginx").Run()
 		return &nginxHata{strings.TrimSpace(string(out))}
 	}
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	if out, e := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); e != nil {
+		// Ana domainde olculen ders: reload dalinda geri alma YOKSA dosya
+		// diskte kalir ve BASKA bir domainin sonraki basarili reload'i, hic
+		// sinanmamis bu degisikligi sessizce yururluge sokar.
+		if len(eskiB) > 0 {
+			_ = os.WriteFile(conf, eskiB, 0o644)
+		} else {
+			_ = os.Remove(conf)
+		}
+		return fmt.Errorf("nginx reload BASARISIZ, %s GERI ALINDI: %s", conf, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 
 type nginxHata struct{ msg string }
 
-func (e *nginxHata) Error() string { return "nginx doğrulanamadı: " + e.msg }
+// Error — nginx ciktisi istemciye HAM verilmez.
+//
+// 🔴 Global `nginx -t` ciktisi KOMSU yapilandirmalarin direktif adlarini ve
+// yollarini icerebiliyor; olculdu ("unknown directive X in ..."). Kiraciya
+// yalniz kendi isini yapamadigi bilgisi doner; ayrinti panel loguna gider.
+func (e *nginxHata) Error() string {
+	log.Printf("alt alan nginx dogrulama hatasi (ayrinti): %s", e.msg)
+	return "nginx yapılandırma doğrulaması başarısız — değişiklik uygulanmadı"
+}
 
 // PHPAyarGet: GET /domains/{id}/subdomain/{sid}/php-settings
 // Alt alanın PHP ayarlarını döner (kendi satırı yoksa varsayılanlar).

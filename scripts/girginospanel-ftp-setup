@@ -46,7 +46,7 @@ MYSQLPort       3306
 MYSQLUser       pureftpd
 MYSQLPassword   $PFPW
 MYSQLDatabase   panel
-MYSQLCrypt      cleartext
+MYSQLCrypt      crypt
 MYSQLGetPW      SELECT password_md5 FROM ftp_accounts WHERE username="\L" AND status='active'
 MYSQLGetUID     SELECT uid_n FROM ftp_accounts WHERE username="\L" AND status='active'
 MYSQLGetGID     SELECT gid_n FROM ftp_accounts WHERE username="\L" AND status='active'

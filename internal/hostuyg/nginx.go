@@ -245,14 +245,3 @@ func subdomainVhostYaz(kod string, np *NginxProxyTarifi, port int) error {
 	}
 	return SubdomainVhostYaz(kod, subdomain, certPath, keyPath, port, np)
 }
-
-// SubdomainVhostKaldir — kaldırma pipeline'ında NginxProxyKaldir tarafından
-// çağrılır. Vhost + cert + acme entry silinir.
-func subdomainVhostKaldir(kod, panelhost string, np *NginxProxyTarifi) {
-	SubdomainVhostSil(kod)
-	if np != nil && np.Subdomain {
-		if subdomain := SubdomainAdi(np.SubdomainOn, panelhost); subdomain != "" {
-			SubdomainCertSil(subdomain)
-		}
-	}
-}

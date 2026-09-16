@@ -7,11 +7,14 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Kopya = { ad: string; boyut_mb: number; tarih: string }
 
 
 const DKOPYA_EN: Record<string, string> = {
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Henüz kopya yok.": "No copies yet.",
   "Kopya Oluştur": "Create Copy",
   "Kopya oluşturulamadı": "Failed to create copy",
@@ -24,6 +27,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (DKOPYA_EN[tr] |
 export default function DomainKopyaPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const { id } = useParams()
   const [liste, setListe] = useState<Kopya[]>([])
   const [yuk, setYuk] = useState(true)
@@ -33,7 +37,7 @@ export default function DomainKopyaPage() {
 
   function yukle() {
     if (!id) return
-    api.get<Kopya[]>(`/domains/${id}/kopya`).then(r => setListe(r.data || [])).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    api.get<Kopya[]>(`/domains/${id}/kopya`).then(r => setListe(r.data || [])).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
 
@@ -41,9 +45,11 @@ export default function DomainKopyaPage() {
     setHata(null); setOk(null); setOlusturuyor(true)
     try {
       const { data } = await api.post(`/domains/${id}/kopya`, {})
-      setOk(cevirT(cevir("Kopya oluşturuldu: {0} ({1} MB)"), data.ad, data.boyut_mb))
+      const m = cevirT(cevir("Kopya oluşturuldu: {0} ({1} MB)"), data.ad, data.boyut_mb)
+      setOk(m)
+      toast.basari(cevir("Kaydedildi"), m)
       yukle()
-    } catch (e) { setHata(apiHata(e, cevir("Kopya oluşturulamadı"))) }
+    } catch (e) { const m = apiHata(e, cevir("Kopya oluşturulamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setOlusturuyor(false) }
   }
 
@@ -51,7 +57,7 @@ export default function DomainKopyaPage() {
     if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, tehlike: true }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/kopya/${k.ad}`); yukle() }
-    catch (e) { setHata(apiHata(e, 'Silinemedi')) }
+    catch (e) { const m = apiHata(e, 'Silinemedi'); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
 
   return (
@@ -67,32 +73,29 @@ export default function DomainKopyaPage() {
           {cevir(cevir("Sitenizin dosyalarının zaman-damgalı bir anlık-görüntüsünü"))} <span className="font-mono">~/kopyalar/</span> {cevir("altında oluşturur — değişiklik yapmadan önce güvenli bir yedek noktası.")}
         </p>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-        {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
-
-        <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-2xl p-4 mb-4 text-xs text-amber-800 dark:text-amber-300">
-          ℹ️ Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
+        <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg p-4 mb-4 text-xs text-amber-800 dark:text-amber-300">
+          Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
         </div>
 
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5 shadow-xs flex items-center justify-between">
           <div className="text-sm text-slate-600 dark:text-slate-300">{cevir("public_html içeriğinden yeni bir kopya oluştur.")}</div>
           <button onClick={olustur} disabled={olusturuyor}
-            className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+            className="px-4 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
             {olusturuyor ? 'Kopyalanıyor…' : cevir("Kopya Oluştur")}
           </button>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Mevcut kopyalar</h3>
           {yuk ? (
             <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : liste.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-3xl mb-2">📁</div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7 mx-auto mb-2 text-slate-300 dark:text-slate-600"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
               <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kopya yok.")}</p>
             </div>
           ) : (
-            <ul className="divide-y divide-slate-50 dark:divide-slate-700/50">
+            <ul className="divide-y divide-slate-50 dark:divide-dark-600/50">
               {liste.map(k => (
                 <li key={k.ad} className="flex items-center justify-between py-2.5">
                   <div>

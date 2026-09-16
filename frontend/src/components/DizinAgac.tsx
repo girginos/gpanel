@@ -28,7 +28,7 @@ export default function DizinAgac({ domainId, secili, onSec, yenileme }: Props) 
   // Yukseklik: mobilde makul bir kutu, lg+ ekranda GORUNUR ALANIN SONUNA kadar
   // uzanir (sticky) — uzun dizin agaclari kutunun ICINDE kayar, sayfa kaymaz.
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-2 text-sm
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-2 text-sm
                     overflow-auto overscroll-contain min-h-[220px] max-h-[60vh]
                     lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100vh-6rem)] lg:min-h-[calc(100vh-6rem)]">
       <TreeNode
@@ -93,7 +93,7 @@ function TreeNode({
       <div
         onClick={() => onSec(yol)}
         className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer transition ${
-          seciliMi ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+          seciliMi ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300'
         }`}
         style={{ paddingLeft: 8 + derinlik * 14 }}
         title={yol}
@@ -113,7 +113,7 @@ function TreeNode({
         ) : (
           <span className="w-4" />
         )}
-        <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <svg className="w-4 h-4 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
         <span className="truncate text-sm">{ad}</span>

@@ -7,6 +7,7 @@ package antivirus
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -181,7 +182,9 @@ func (h *Handlers) AdminKarantinaGeriYukle(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	_, _ = h.DB.Exec(`UPDATE av_bulgular SET durum='geri_yuklendi', karantina=0 WHERE id=?`, bid)
+	if _, err := h.DB.Exec(`UPDATE av_bulgular SET durum='geri_yuklendi', karantina=0 WHERE id=?`, bid); err != nil {
+		log.Printf("antivirus AdminKarantinaGeriYukle: durum güncellenemedi (bid=%d): %v — dosya geri yüklendi ama panel karantinada gösterebilir", bid, err)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "geri_yuklendi": orij})
 }
 
@@ -198,7 +201,9 @@ func (h *Handlers) AdminKarantinaSil(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, _ = h.DB.Exec(`UPDATE av_bulgular SET durum='silindi', karantina=0 WHERE id=?`, bid)
+	if _, err := h.DB.Exec(`UPDATE av_bulgular SET durum='silindi', karantina=0 WHERE id=?`, bid); err != nil {
+		log.Printf("antivirus AdminKarantinaSil: durum güncellenemedi (bid=%d): %v — dosya silindi ama panel karantinada gösterebilir", bid, err)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silindi": true})
 }
 
@@ -282,14 +287,14 @@ func (h *Handlers) AdminGecmis(w http.ResponseWriter, r *http.Request) {
 // aktif bulgu, karantina). Domain-bazlı tarama sekmesi için.
 func (h *Handlers) AdminDomainler(w http.ResponseWriter, r *http.Request) {
 	type dom struct {
-		ID          int64  `json:"id"`
-		Alan        string `json:"alan_adi"`
-		SK          string `json:"sistem_kullanici"`
-		SonTarama   string `json:"son_tarama"`
-		SonTaranan  int    `json:"son_taranan"`
-		SonEnfekte  int    `json:"son_enfekte"`
-		AktifBulgu  int    `json:"aktif_bulgu"`
-		Karantina   int    `json:"karantina"`
+		ID         int64  `json:"id"`
+		Alan       string `json:"alan_adi"`
+		SK         string `json:"sistem_kullanici"`
+		SonTarama  string `json:"son_tarama"`
+		SonTaranan int    `json:"son_taranan"`
+		SonEnfekte int    `json:"son_enfekte"`
+		AktifBulgu int    `json:"aktif_bulgu"`
+		Karantina  int    `json:"karantina"`
 	}
 	out := []dom{}
 	rows, err := h.DB.QueryContext(r.Context(),

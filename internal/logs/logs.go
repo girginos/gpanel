@@ -164,12 +164,12 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, ": tail %s baslatildi\n\n", anahtar)
+	_, _ = fmt.Fprintf(w, ": tail %s baslatildi\n\n", anahtar) //nolint:gosec // G705 FP: Content-Type text/event-stream (HTML DEGIL); anahtar yalniz {access,error} allowlist (aksi halde ustte 400) - tarayici govdeyi HTML yorumlamaz.
 	flusher.Flush()
 
 	f, err := os.Open(p)
 	if err != nil {
-		_, _ = fmt.Fprintf(w, "event: hata\ndata: dosya açılamadı: %s\n\n", err.Error())
+		_, _ = fmt.Fprintf(w, "event: hata\ndata: dosya açılamadı: %s\n\n", err.Error()) //nolint:gosec // G705 FP: SSE akisi (text/event-stream), HTML degil; err yol-tabanli FS hatasi, tarayiciya HTML olarak render edilmez.
 		flusher.Flush()
 		return
 	}
@@ -177,7 +177,7 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	// Önce son ~200 satırı gönder
 	if mevcut, err := sonNSatir(p, 200); err == nil {
 		for _, ln := range mevcut {
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(ln, "\n", " "))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(ln, "\n", " ")) //nolint:gosec // G705 FP: SSE (text/event-stream); satir EventSource ile JS metnine, oradan React textContent icine gider (dangerouslySetInnerHTML yok). \n temizlendigi icin SSE alan-enjeksiyonu da kapali.
 		}
 		flusher.Flush()
 	}
@@ -196,7 +196,7 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 		}
 		if line != "" {
 			ln := strings.TrimRight(line, "\n\r")
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(ln, "\n", " "))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(ln, "\n", " ")) //nolint:gosec // G705 FP: SSE (text/event-stream); satir EventSource ile JS metnine, oradan React textContent icine gider (dangerouslySetInnerHTML yok). \n temizlendigi icin SSE alan-enjeksiyonu da kapali.
 			flusher.Flush()
 		}
 		if err == io.EOF {

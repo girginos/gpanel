@@ -333,11 +333,50 @@ install -m 0755 "$NEWBIN" "$BIN"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
 ok "binary güncellendi"
 
+# 🔴 Eklenti baslaticisi — sifreli eklentilerin ExecStart'i BUDUR.
+# Panelle AYNI pakette gelir ve atomik kurulur (calisan surec eski inode'u
+# tutar). Guncellenmezse: yeni panel duz ikiliyi silip ExecStart'i baslaticiya
+# cevirir, baslatici eski/eksik olur ve eklenti bir daha acilmaz.
+NEWBAS=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-eklenti-baslatici -path '*/assets/*' 2>/dev/null | head -1)
+if [ -n "$NEWBAS" ]; then
+  install -m 0755 "$NEWBAS" /opt/girginospanel/bin/girginospanel-eklenti-baslatici \
+    && ok "eklenti baslaticisi guncellendi" || warn "eklenti baslaticisi guncellenemedi"
+fi
+
 # Antivirus ajani — server ile ayni turden binary. Pakette varsa atomik kur.
 NEWAV=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-avajan -path '*/assets/*' 2>/dev/null | head -1)
 if [ -n "$NEWAV" ]; then
   install -m 0755 "$NEWAV" /usr/local/bin/girginospanel-avajan || warn "avajan guncellenemedi"
   ok "antivirus ajani guncellendi"
+fi
+
+# Eklenti YUKLERI (src/eklentiler) — installer bunu yapar, updater ESKIDEN
+# YAPMIYORDU. Sonuc: guncellenen eski sunucularda whitelabel (panelle birlikte
+# gelen ucretsiz eklenti) payload'i hic gelmiyor, panel 'Marka eklentisi dosyasi
+# yok' ile kuramiyordu. Installer ile AYNI: tum agac 0700/0600 kopyalanir
+# (ucretli ikili de 0600 = yalniz root; kapi license girilene dek KAPALI).
+if [ -d "$A/eklentiler" ]; then
+  mkdir -p /opt/girginospanel/src/eklentiler
+  if cp -a "$A/eklentiler/." /opt/girginospanel/src/eklentiler/ 2>/dev/null; then
+    chmod 0700 /opt/girginospanel/src/eklentiler 2>/dev/null
+    find /opt/girginospanel/src/eklentiler -mindepth 1 -type d -exec chmod 0700 {} + 2>/dev/null
+    find /opt/girginospanel/src/eklentiler -mindepth 1 -type f -exec chmod 0600 {} + 2>/dev/null
+    # 🔴 KACAK/ARTIK DUZ-METIN UCRETLI IKILI TEMIZLIGI — GUNCELLEMEDE kendini duzeltir.
+    # Ucretli eklenti (mail, calistirici) DUZ ELF olarak diskte ASLA kalmamali:
+    # runtime .gosp dosyasini BELLEKTEN calistirir (cmd/gosp-baslatici), duz ELF
+    # gerekmez. Ustteki cp -a ekler ama hedefteki fazlaligi SILMEZ; kapi-oncesi
+    # kurulumdan kalan ya da kacak kopyalanan DUZ ELF boyle kaliyordu.
+    for _u in mail calistirici; do
+      for _b in /opt/girginospanel/src/eklentiler/$_u /opt/girginospanel/eklentiler/$_u; do
+        if [ -f "$_b/girginospanel-eklenti-$_u" ]; then
+          rm -f "$_b/girginospanel-eklenti-$_u" && ok "kacak/artik duz ucretli ikili temizlendi: $_u ($_b)"
+        fi
+      done
+    done
+    ok "eklenti yukleri guncellendi (src/eklentiler)"
+  else
+    warn "eklenti yukleri kopyalanamadi (whitelabel Kur ile eklenebilir)"
+  fi
 fi
 
 # 7) frontend-dist — ATOMİK + DOĞRULANMIŞ swap.

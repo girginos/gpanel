@@ -22,9 +22,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"girginospanel/internal/dns"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/provisioner"
-	"girginospanel/internal/dns"
 )
 
 // SSLAdim — tek SSL adımı.
@@ -46,6 +46,19 @@ type sslIsi struct {
 	Adimlar  []SSLAdim
 	Basladi  time.Time
 	Bitti    time.Time
+
+	// Toplam — bu oturumun ÇALIŞTIRMAYI PLANLADIĞI adım sayısı.
+	//
+	// 🔴 Adımlar append-only üretilir (bkz. adim): gelen `Adimlar` listesi
+	// "şimdiye kadar BAŞLAMIŞ adım"dır, "toplam" değil. Arayüz yüzdeyi
+	// bitmis/len(Adimlar) ile hesaplasaydı kurulum boyunca hep ~%95-100
+	// gösterirdi. Posta SSL'i açık olan kurulumda 7, yalnız web SSL'inde 2
+	// adım koşar; sayı BAŞLARKEN bilinir (bkz. sslBaslat).
+	//
+	// Doğrulama düşerse sonraki 3 adım atlanır ve gerçek sayı Toplam'ın
+	// altında kalır: çubuk %99'da durur, iş bitince arayüz 100'e çeker.
+	// Eksik göstermek, olmayan bir ilerlemeyi uydurmaktan iyidir.
+	Toplam int
 }
 
 // SSLGoruntu — kilitsiz JSON kopyası.
@@ -57,6 +70,7 @@ type SSLGoruntu struct {
 	Adimlar  []SSLAdim `json:"adimlar"`
 	Basladi  string    `json:"basladi"`
 	Bitti    string    `json:"bitti"`
+	Toplam   int       `json:"toplam"`
 }
 
 func (k *sslIsi) Goruntu() SSLGoruntu {
@@ -64,7 +78,7 @@ func (k *sslIsi) Goruntu() SSLGoruntu {
 	defer k.mu.Unlock()
 	a := make([]SSLAdim, len(k.Adimlar))
 	copy(a, k.Adimlar)
-	g := SSLGoruntu{DomainID: k.DomainID, AlanAdi: k.AlanAdi, Durum: k.Durum, Hata: k.Hata, Adimlar: a}
+	g := SSLGoruntu{DomainID: k.DomainID, AlanAdi: k.AlanAdi, Durum: k.Durum, Hata: k.Hata, Adimlar: a, Toplam: k.Toplam}
 	if !k.Basladi.IsZero() {
 		g.Basladi = k.Basladi.UTC().Format(time.RFC3339)
 	}
@@ -103,6 +117,14 @@ func (k *sslIsi) adim(ad, etiket string, fn func() (string, bool, error)) error 
 		log.Printf("ssl-kurulum[%s]: %s HATA (%s): %v", k.AlanAdi, ad, sure, err)
 		return err
 	}
+	if uyari {
+		// 🔴 UYARI "tamam" DEĞİLDİR. mail-dogrula başarısızlığı bilerek uyarıya
+		// çevriliyor (web SSL'i bloklamasın), ama onu "tamam" diye loglamak
+		// başarısızlığı görünmez kılıyordu. Ayrı etiket + TAM mesaj (160 değil):
+		// acme.sh'in asıl hata satırı journal'da da okunabilsin.
+		log.Printf("ssl-kurulum[%s]: %s UYARI (%s): %s", k.AlanAdi, ad, sure, mesaj)
+		return nil
+	}
 	log.Printf("ssl-kurulum[%s]: %s tamam (%s) %s", k.AlanAdi, ad, sure, sslKirp(mesaj, 160))
 	return nil
 }
@@ -123,7 +145,17 @@ func sslKirp(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// 🔴 ORTADAN kırp, baştan DEĞİL. acme.sh'in gerçek hata satırı
+	// ("Verify error detail…", "error:urn:ietf:params:acme:error:…") çıktının
+	// SONUNDADIR; baştan kırpmak tam o teşhisi yok ediyordu (kullanıcı
+	// "…Getti…" diye kesilen bir metin görüyordu). Baş yarı normal mesajlar
+	// için, son yarı acme kuyruğu için tutulur.
+	if n < 16 {
+		return s[:n]
+	}
+	bas := n / 2
+	son := n - bas - 1
+	return s[:bas] + "…" + s[len(s)-son:]
 }
 
 // ── Kayıt defteri ───────────────────────────────────────────────────────────
@@ -154,7 +186,16 @@ func SSLSuruyor(id int64) bool {
 // sslBaslat — asenkron SSL kurulumunu başlatır ve oturumu döner. Goroutine
 // istekten bağımsız context ile sonuna kadar çalışır (sekme kapansa da sürer).
 func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip string, mailSSL bool, mailAltlar []string) *sslIsi {
-	k := &sslIsi{DomainID: id, AlanAdi: alanAdi, Durum: "calisiyor", Basladi: time.Now()}
+	// Adım sayısı: her koşulda "cert" + "kayit"; posta SSL'i devredeyse
+	// mail / mail-dogrula / mail-kur / webmail / dkim-dns de eklenir.
+	// (mailEklentiAktif burada ölçülemez — ctx goroutine içinde açılıyor —
+	// ama mailSSL false ise posta dalı HİÇ girilmez, o yüzden bu ayrım
+	// ilerleme çubuğu için yeterli.)
+	toplam := 2
+	if mailSSL && tip == "letsencrypt" {
+		toplam = 7
+	}
+	k := &sslIsi{DomainID: id, AlanAdi: alanAdi, Durum: "calisiyor", Basladi: time.Now(), Toplam: toplam}
 	sslMu.Lock()
 	sslIsleri[id] = k
 	sslMu.Unlock()
@@ -215,9 +256,11 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 
 		// 3) Mail SSL (yalnız LE + mail eklentisi aktif). Başarısızlık web SSL'i
 		//    BLOKLAMAZ → uyarı olarak raporlanır (uyari=true).
+		//    Bu best-effort adimlarin adim() donusu bilerek yok sayilir (_ =):
+		//    hata uyariya cevrilip k.Adimlar'a yazilir, web SSL akisini durdurmaz.
 		if mailSSL && tip == "letsencrypt" {
 			if !h.mailEklentiAktif(ctx) {
-				k.adim("mail", "Posta SSL", func() (string, bool, error) {
+				_ = k.adim("mail", "Posta SSL", func() (string, bool, error) {
 					return "mail eklentisi etkin değil — posta SSL atlandı", true, nil
 				})
 			} else {
@@ -242,7 +285,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 					}) == nil
 
 				if dogruTamam && mc != "" {
-					k.adim("mail-kur", "Sertifika posta sunucusuna kuruluyor", func() (string, bool, error) {
+					_ = k.adim("mail-kur", "Sertifika posta sunucusuna kuruluyor", func() (string, bool, error) {
 						if e := provisioner.MailSertifikaGonder(alanAdi, mc, mk); e != nil {
 							return "sertifika alındı ama posta sunucusuna gönderilemedi: " + e.Error(), true, nil
 						}
@@ -255,7 +298,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 						}
 						return "posta sunucusu (IMAP/POP/SMTP) sertifikaya geçirildi", false, nil
 					})
-					k.adim("webmail", "Webmail ve otomatik kurulum (autodiscover) yapılandırılıyor", func() (string, bool, error) {
+					_ = k.adim("webmail", "Webmail ve otomatik kurulum (autodiscover) yapılandırılıyor", func() (string, bool, error) {
 						if e := provisioner.WebmailVhostDomainYaz(alanAdi, mc, mk); e != nil {
 							return "webmail vhost güncellenemedi: " + e.Error(), true, nil
 						}
@@ -264,7 +307,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 					// DKIM DNS senkronu: mail eklentisinin imzalamada kullandığı GERÇEK
 					// mail._domainkey key'ini panel DNS'e yayınla (uyumsuz default._domainkey
 					// kaldırılır). Aksi halde alıcı public key'i bulamaz, DKIM doğrulanamaz.
-					k.adim("dkim-dns", "DKIM imzası DNS'e yayınlanıyor (mail._domainkey)", func() (string, bool, error) {
+					_ = k.adim("dkim-dns", "DKIM imzası DNS'e yayınlanıyor (mail._domainkey)", func() (string, bool, error) {
 						txt, e := provisioner.MailDKIMTXTAl(alanAdi)
 						if e != nil {
 							return "DKIM anahtarı eklentiden alınamadı: " + e.Error(), true, nil

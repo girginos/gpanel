@@ -76,6 +76,13 @@ server {
     ssl_certificate_key %s;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:GOSPDEF:1m;
+    # 🔴 Kendinden imzali sertifika: global 00-gosp-tls.conf'taki
+    # ssl_stapling on burada her nginx reload'unda "ssl_stapling ignored,
+    # issuer certificate not found" uyarisi uretir (self-signed'in issuer/OCSP
+    # zinciri yoktur) ve temiz kurulumun saglik raporunu kirletir. YALNIZ bu
+    # vhost'ta kapatilir; gercek LE sertifikali domain vhost'larinda stapling
+    # acik kalir.
+    ssl_stapling off;
 
     root %s;
     index index.html;

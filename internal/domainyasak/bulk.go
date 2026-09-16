@@ -39,7 +39,7 @@ type bulkHata struct {
 
 type bulkYanit struct {
 	Toplam    int        `json:"toplam"`
-	Islendi   int        `json:"islendi"` // upsert başarılı (yeni + güncellenmiş)
+	Islendi   int        `json:"islendi"`    // upsert başarılı (yeni + güncellenmiş)
 	Yoksayild int        `json:"yoksayildi"` // boş / yorum satırı / duplicate
 	Basarisiz []bulkHata `json:"basarisiz"`
 }

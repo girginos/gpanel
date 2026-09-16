@@ -28,6 +28,12 @@ import (
 
 const MaxIndirmeBoyutu = 5 * 1024 * 1024 * 1024 // 5 GB
 
+// MaxCikarilanBoyut: bir arsivden cikarilabilecek TOPLAM acilmis bayt tavani.
+// G110 (decompression-bomb) DoS korumasi: SHA256 arsiv ICERIGINI sabitler ama
+// ACILMIS boyutu sinirlamaz; kucuk bir zip/gzip bomb diski doldurabilir.
+// Katalog uygulamalari <200MB; 10 GiB bol tavan (indirme tavani zaten 5GB).
+const MaxCikarilanBoyut = 10 * 1024 * 1024 * 1024 // 10 GiB
+
 // IndirmeCacheDir — indirilen dosyalar burada tutulur. /tmp yerine ayrı
 // bir konum ki 5GB'lık indirmeler root FS'i doldurmasın (I2 fix).
 var IndirmeCacheDir = "/var/tmp/gpanel-apps-cache"
@@ -36,7 +42,7 @@ var IndirmeCacheDir = "/var/tmp/gpanel-apps-cache"
 // Hata halinde geçici dosya silinir.
 func Indir(url, beklenenSHA256 string) (string, error) {
 	// HEAD önce — boyut kontrolü
-	head, err := http.Head(url)
+	head, err := http.Head(url) //nolint:gosec // G107: url yalniz derleme-ici Katalog'dan gelir (KatalogAra kod->tarif; kullanici yalniz kod secer) -> kullanici-kontrollu URL/SSRF yok; ayrica SHA256 zorunlu dogrulanir.
 	if err == nil {
 		defer head.Body.Close()
 		if head.ContentLength > MaxIndirmeBoyutu {
@@ -156,6 +162,26 @@ func dosyaTasi(src, dst string) error {
 	return os.Remove(src)
 }
 
+// sinirliKopyala: io.Copy, fakat acilmis toplam bayt MaxCikarilanBoyut'u asarsa
+// hata doner (G110 decompression-bomb korumasi). Kaynak io.LimitReader ile
+// sarildigindan hem tek giris hem arsiv geneli sinirlanir; *toplam arsiv boyunca
+// birikir. Acilan dosyayi cagiran kapatir.
+func sinirliKopyala(dst io.Writer, src io.Reader, toplam *int64) error {
+	kalan := MaxCikarilanBoyut - *toplam
+	if kalan < 0 {
+		kalan = 0
+	}
+	n, err := io.Copy(dst, io.LimitReader(src, kalan+1))
+	*toplam += n
+	if err != nil {
+		return err
+	}
+	if n > kalan {
+		return errors.New("arsiv acilmis boyutu 10 GiB sinirini asti (decompression-bomb korumasi)")
+	}
+	return nil
+}
+
 // tarballCikart — .tar.gz açar. Path traversal + symlink reddi.
 func tarballCikart(arsiv, hedefKok string, gz bool) error {
 	f, err := os.Open(arsiv)
@@ -178,6 +204,7 @@ func tarballCikart(arsiv, hedefKok string, gz bool) error {
 	if err != nil {
 		return err
 	}
+	var toplam int64 // acilmis toplam bayt (G110 siniri)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -190,7 +217,7 @@ func tarballCikart(arsiv, hedefKok string, gz bool) error {
 		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
 			return fmt.Errorf("arşiv symlink içeriyor: %s (güvenlik reddi)", hdr.Name)
 		}
-		hedef := filepath.Join(hedefKok, hdr.Name)
+		hedef := filepath.Join(hedefKok, hdr.Name) //nolint:gosec // G305 FP: hemen altta filepath.Abs + hedefKok prefix-kapsama kontrolu arsiv-disi uyeyi REDDEDER; symlink/hardlink zaten ustte reddedilir.
 		hedefMutlak, err := filepath.Abs(hedef)
 		if err != nil {
 			return err
@@ -214,7 +241,7 @@ func tarballCikart(arsiv, hedefKok string, gz bool) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(fh, tr); err != nil {
+			if err := sinirliKopyala(fh, tr, &toplam); err != nil {
 				fh.Close()
 				return err
 			}
@@ -234,12 +261,13 @@ func zipCikart(arsiv, hedefKok string) error {
 	if err != nil {
 		return err
 	}
+	var toplam int64 // acilmis toplam bayt (G110 siniri)
 	for _, f := range zr.File {
 		// symlink reddi
 		if f.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("zip symlink içeriyor: %s (güvenlik reddi)", f.Name)
 		}
-		hedef := filepath.Join(hedefKok, f.Name)
+		hedef := filepath.Join(hedefKok, f.Name) //nolint:gosec // G305 FP: hemen altta filepath.Abs + hedefKok prefix-kapsama kontrolu arsiv-disi uyeyi REDDEDER; symlink zaten ustte reddedilir.
 		hedefMutlak, err := filepath.Abs(hedef)
 		if err != nil {
 			return err
@@ -264,7 +292,7 @@ func zipCikart(arsiv, hedefKok string) error {
 			rc.Close()
 			return err
 		}
-		if _, err := io.Copy(out, rc); err != nil {
+		if err := sinirliKopyala(out, rc, &toplam); err != nil {
 			rc.Close()
 			out.Close()
 			return err

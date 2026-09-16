@@ -9,6 +9,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 /*
  * Yasaklı Alan Adları — phishing koruması.
@@ -44,6 +46,7 @@ const YASAK_EN: Record<string, string> = {
   "Dosya çok büyük (üst sınır 5 MB)": "File too large (max 5 MB)",
   "Henüz yasaklı alan adı yok": "No banned domains yet",
   "Liste alınamadı": "Failed to get list",
+  "İşlem başarısız": "Operation failed",
   "Phishing hedefi olabilecek marka domainleri için yukarıdaki formu kullanın.": "Use the form above for brand domains that could be phishing targets.",
   "Phishing koruması.": "Phishing protection.",
   "Silme hatası": "Delete error",
@@ -96,6 +99,7 @@ export default function YasakliDomainPage() {
   const [gonderiliyor, setGonderiliyor] = useState(false)
   const [ekleHata, setEkleHata] = useState<string | null>(null)
   const dialog = useDialog()
+  const toast = useToast()
 
   // Toplu ekleme
   const [topluAcik, setTopluAcik] = useState(false)
@@ -116,7 +120,9 @@ export default function YasakliDomainPage() {
       const r = await api.get<Kayit[]>('/banned-domains')
       setList(Array.isArray(r.data) ? r.data : [])
     } catch (e) {
-      setHata(apiHata(e, cevir("Liste alınamadı")))
+      const m = apiHata(e, cevir("Liste alınamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { yukle() }, [])
@@ -294,7 +300,7 @@ export default function YasakliDomainPage() {
       </div>
 
       {/* Ekleme formu */}
-      <form onSubmit={ekle} className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <form onSubmit={ekle} className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(200px,1.2fr)_1fr_auto]">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Alan Adı")}</label>
@@ -302,7 +308,7 @@ export default function YasakliDomainPage() {
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               placeholder="sahibinden.com"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
               autoComplete="off"
               spellCheck={false}
             />
@@ -314,17 +320,17 @@ export default function YasakliDomainPage() {
               onChange={(e) => setAciklama(e.target.value)}
               placeholder={cevir("Ör. phishing hedefi marka")}
               maxLength={255}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
             />
           </div>
           <div className="flex items-end">
-            <button
+            <Button
               type="submit"
               disabled={gonderiliyor || !domain.trim()}
-              className="h-[38px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+              className="h-[38px] px-4 text-sm"
             >
               {gonderiliyor ? cevir('Ekleniyor…') : cevir('Yasakla')}
-            </button>
+            </Button>
           </div>
         </div>
         <label className="mt-3 flex cursor-pointer select-none items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
@@ -332,7 +338,7 @@ export default function YasakliDomainPage() {
             type="checkbox"
             checked={altDahil}
             onChange={(e) => setAltDahil(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
+            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-dark-600 dark:bg-dark-900"
           />
           {cevir("Alt-domain'ler dahil")} <span className="text-xs text-slate-500">{cevir("(phishing için önerilen)")}</span>
         </label>
@@ -342,7 +348,7 @@ export default function YasakliDomainPage() {
 
         {/* Toplu ekleme aç/kapa — mevcut tekil formun kirlenmemesi için ayrı
             expander. Kullanıcı tek eklerken bu panel görünmez. */}
-        <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <div className="mt-3 border-t border-slate-100 pt-3 dark:border-dark-600">
           <button
             type="button"
             onClick={() => setTopluAcik((v) => !v)}
@@ -354,13 +360,13 @@ export default function YasakliDomainPage() {
       </form>
 
       {topluAcik && (
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Toplu Ekleme")}</h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 {cevir("Her satıra bir domain. Boşluk, virgül, noktalı virgül veya sekme ile de")}{' '}
-                {cevir("ayırabilirsin.")} <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">#</code> {cevir("ile")}{' '}
+                {cevir("ayırabilirsin.")} <code className="rounded bg-slate-100 px-1 dark:bg-dark-700">#</code> {cevir("ile")}{' '}
                 {cevir("başlayan satırlar yorumdur, atlanır. Üst sınır 5.000 domain.")}
               </p>
             </div>
@@ -375,7 +381,7 @@ export default function YasakliDomainPage() {
               />
               <label
                 htmlFor="toplu-dosya"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-300 dark:hover:bg-dark-800"
               >
                 <Ikon d={I.klasor} className="h-4 w-4" /> {cevir("Dosya seç (TXT)")}
               </label>
@@ -388,7 +394,7 @@ export default function YasakliDomainPage() {
             placeholder={'sahibinden.com\ntrendyol.com\nhepsiburada.com\n# yorum satırı — atlanır\nakbank.com garanti.com.tr'}
             rows={10}
             spellCheck={false}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
           />
 
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
@@ -397,14 +403,14 @@ export default function YasakliDomainPage() {
               onChange={(e) => setTopluAciklama(e.target.value)}
               placeholder={cevir("Tümüne uygulanacak açıklama (opsiyonel, ör. 'phishing marka listesi')")}
               maxLength={255}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
             />
             <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
               <input
                 type="checkbox"
                 checked={topluAltDahil}
                 onChange={(e) => setTopluAltDahil(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-dark-600 dark:bg-dark-900"
               />
               {cevir("Alt-domain'ler dahil")}
             </label>
@@ -418,14 +424,14 @@ export default function YasakliDomainPage() {
                 cevir('Metin bekleniyor…')
               )}
             </div>
-            <button
+            <Button
               type="button"
               onClick={topluGonder}
               disabled={topluGidiyor || !topluMetin.trim()}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+              className="px-4 py-2 text-sm"
             >
               {topluGidiyor ? cevir('Yükleniyor…') : cevir('Toplu Yasakla')}
-            </button>
+            </Button>
           </div>
 
           {topluHata && (
@@ -436,9 +442,9 @@ export default function YasakliDomainPage() {
 
       {/* Liste */}
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
           {hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button>
         </div>
       ) : list.length === 0 ? (
@@ -447,31 +453,33 @@ export default function YasakliDomainPage() {
         <>
           {/* Seçim çubuğu — sadece bir şey seçildiğinde görünür */}
           {secili.size > 0 && (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 dark:border-dark-600 dark:bg-dark-800">
               <div className="text-sm text-slate-700 dark:text-slate-300">
                 <span className="font-semibold">{secili.size}</span> {cevir("kayıt seçili")}
               </div>
               <div className="flex items-center gap-2">
-                <button
+                <Button
+                  variant="flat"
                   onClick={() => setSecili(new Set())}
-                  className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                  className="px-2.5 py-1 text-xs"
                 >
                   {cevir("Seçimi temizle")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  color="error"
                   onClick={topluSil}
                   disabled={siliniyor}
-                  className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="px-3 py-1 text-xs"
                 >
                   {siliniyor ? 'Siliniyor…' : cevirT(cevir("Seçilenleri Sil ({0})"), secili.size)}
-                </button>
+                </Button>
               </div>
             </div>
           )}
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-dark-600">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
                 <tr>
                   <th className="w-10 px-4 py-3">
                     <input
@@ -480,7 +488,7 @@ export default function YasakliDomainPage() {
                       checked={hepsiSecili}
                       ref={(el) => { if (el) el.indeterminate = bazisiSecili }}
                       onChange={hepsiSecDegistir}
-                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
+                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-dark-600 dark:bg-dark-900"
                     />
                   </th>
                   <th className="px-4 py-3 font-semibold">{cevir("Alan Adı")}</th>
@@ -490,16 +498,16 @@ export default function YasakliDomainPage() {
                   <th className="px-4 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                 {list.map((k) => (
-                  <tr key={k.domain} className={secili.has(k.domain) ? 'bg-slate-50 dark:bg-slate-900/60' : 'bg-white dark:bg-slate-950'}>
+                  <tr key={k.domain} className={secili.has(k.domain) ? 'bg-slate-50 dark:bg-dark-800/60' : 'bg-white dark:bg-dark-900'}>
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
                         aria-label={cevirT(cevir("{0} seç"), k.domain)}
                         checked={secili.has(k.domain)}
                         onChange={() => seciliDegistir(k.domain)}
-                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-950"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 dark:border-dark-600 dark:bg-dark-900"
                       />
                     </td>
                     <td className="px-4 py-3 font-mono font-medium text-slate-900 dark:text-slate-100">{k.domain}</td>
@@ -508,21 +516,23 @@ export default function YasakliDomainPage() {
                     </td>
                     <td className="px-4 py-3 text-xs">
                       {k.match_subdomains ? (
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700 dark:bg-slate-800 dark:text-slate-300">{cevir("alt-domainler dahil")}</span>
+                        <Badge variant="soft" className="px-2 py-0.5">{cevir("alt-domainler dahil")}</Badge>
                       ) : (
-                        <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-500 dark:bg-slate-900 dark:text-slate-500">{cevir("yalnız tam eşleşme")}</span>
+                        <Badge variant="soft" className="px-2 py-0.5">{cevir("yalnız tam eşleşme")}</Badge>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {new Date(k.created_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
+                      <Button
+                        color="error"
+                        variant="flat"
                         onClick={() => sil(k)}
-                        className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                        className="px-2.5 py-1 text-xs"
                       >
                         {cevir("Kaldır")}
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

@@ -179,11 +179,13 @@ func serverGovde(o subVhostOpts) string {
 		extras += fmt.Sprintf("    client_max_body_size %dm;\n", o.N.ClientMaxBodyMB)
 	}
 	extras += subSecHeaders(o.N, o.SSL)
+	o.N.EkDirektifler = provisioner.KullaniciDirektifTemizle(o.N.EkDirektifler)
 	if strings.TrimSpace(o.N.EkDirektifler) != "" {
 		extras += "    # Ek direktifler\n    " + strings.ReplaceAll(strings.TrimSpace(o.N.EkDirektifler), "\n", "\n    ") + "\n"
 	}
 	return `    root ` + o.DocRoot + `;
     index index.php index.html index.htm;
+` + o.Kisit + `
 
     access_log /var/log/nginx/` + o.TamAd + `.access.log;
     error_log  /var/log/nginx/` + o.TamAd + `.error.log warn;
@@ -204,8 +206,8 @@ func renderSubVhost(o subVhostOpts) string {
     listen 80;
     listen [::]:80;
     server_name ` + o.TamAd + `;
-    location /.well-known/acme-challenge/ { root ` + o.DocRoot + `; auth_basic off; try_files $uri =404; }
-    location / { return 301 https://$host$request_uri; }
+    location ~ "^/\.well-known/acme-challenge/[A-Za-z0-9_-]{16,128}$" { root ` + acmeKok() + `; auth_basic off; allow all; try_files $uri =404; }
+` + o.Kisit + `    location / { return 301 https://$host$request_uri; }
 }
 server {
     listen 443 ssl;
@@ -225,7 +227,14 @@ server {
     listen [::]:80;
     server_name ` + o.TamAd + `;
 
-    location /.well-known/acme-challenge/ { auth_basic off; root ` + o.DocRoot + `; try_files $uri =404; }
+    # 🔴 allow all: server baglamindaki "deny all" ACME'yi de kapatirdi ve
+    # Let's Encrypt HTTP-01 dogrulamasi kesilirdi -> sertifika 90 gun sonra
+    # yenilenemez. Location kendi allow'unu tanimlayinca miras kesilir.
+    # 🔴 ACME muafiyeti YALNIZ token bicimindeki adlara. Genis birakilirsa
+    # bu dizine dosya koyabilen herkes (kiraci, ele gecirilmis site, dosya
+    # yukleme acigi) IP kisitlamasini statik icerik icin tamamen atlatir --
+    # olculdu: kisitli sitede / -> 403 iken .../acme-challenge/db.sql -> 200.
+    location ~ "^/\.well-known/acme-challenge/[A-Za-z0-9_-]{16,128}$" { auth_basic off; allow all; root ` + acmeKok() + `; try_files $uri =404; }
 
 ` + serverGovde(o) + `}
 `
@@ -236,6 +245,8 @@ type subVhostOpts struct {
 	SSL                             bool
 	Crt, Key, Koruma                string
 	N                               subNginx
+	// Erisim kisitlama allow/deny blogu (server baglaminda). Kisit pasifse "".
+	Kisit string
 }
 
 // ── Apache backend (alt alana özel httpd vhost) ──
@@ -357,3 +368,11 @@ func (h *Handlers) WebPut(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "backend": backend})
 }
+
+// acmeKok — ACME dogrulama koku. Alt alanin docroot'u DEGIL.
+//
+// 🔴 Kiraci kendi docroot'una yazabilir; acme location'i "allow all" tasidigi
+// icin oraya konan her dosya erisim kisitlamasini atlatirdi. Kok, root-sahipli
+// /var/www/acme olmali -- ana domainle ayni. Sertifika verme tarafi
+// (ssl.go --webroot) da AYNI koku kullanmali, yoksa dogrulama kirilir.
+func acmeKok() string { return provisioner.AcmeWebroot() }

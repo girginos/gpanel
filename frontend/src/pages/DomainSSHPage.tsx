@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Durum = {
   alan_adi: string
@@ -19,6 +20,7 @@ type Durum = {
 
 
 const SSH_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "ssh-ed25519 AAAA... kullanici@makine": "ssh-ed25519 AAAA... user@machine",
   "Anasayfa": "Home",
   "Anahtar kaydedilemedi": "Failed to save key",
@@ -30,7 +32,7 @@ const SSH_EN: Record<string, string> = {
   "SSH'i Kapat": "Disable SSH",
   "SSH'i Aç": "Enable SSH",
   "Bağlantı Bilgisi": "Connection Info",
-  "🔑 Parola:": "🔑 Password:",
+  "Parola:": "Password:",
   "Parola yerine anahtarla giriş için genel anahtarınızı ekleyin.": "To log in with a key instead of a password, add your public key.",
   "Anahtarı Kaydet": "Save Key",
   "Bağlantı komutu": "Connection command",
@@ -54,6 +56,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (SSH_EN[tr] || O
 export default function DomainSSHPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
   const [isleniyor, setIsleniyor] = useState(false)
@@ -66,7 +69,7 @@ export default function DomainSSHPage() {
     setYuk(true); setHata(null)
     api.get<Durum>(`/domains/${id}/ssh`)
       .then(r => setD(r.data))
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -75,11 +78,13 @@ export default function DomainSSHPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/domains/${id}/ssh`, { aktif })
-      setBasari(aktif ? cevir("SSH erişimi açıldı.") : cevir("SSH erişimi kapatıldı."))
+      const m = aktif ? cevir("SSH erişimi açıldı.") : cevir("SSH erişimi kapatıldı.")
+      setBasari(m)
+      toast.basari(m)
       setTimeout(() => setBasari(null), 4000)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("İşlem başarısız")))
+      const m = apiHata(e, cevir("İşlem başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(false) }
   }
 
@@ -87,12 +92,14 @@ export default function DomainSSHPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/ssh/anahtar`, { anahtar })
-      setBasari(data.anahtar_var ? cevir("✓ SSH anahtarı kaydedildi.") : cevir("✓ SSH anahtarları temizlendi."))
+      const m = data.anahtar_var ? cevir("✓ SSH anahtarı kaydedildi.") : cevir("✓ SSH anahtarları temizlendi.")
+      setBasari(m)
+      toast.basari(m)
       setTimeout(() => setBasari(null), 4000)
       setAnahtar('')
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Anahtar kaydedilemedi")))
+      const m = apiHata(e, cevir("Anahtar kaydedilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(false) }
   }
 
@@ -119,18 +126,15 @@ export default function DomainSSHPage() {
             </p>
           </div>
           <span className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-            d.aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
+            d.aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-300'
           }`}>
             <span className={`w-2 h-2 rounded-full ${d.aktif ? 'bg-emerald-500' : 'bg-slate-400'}`} />
             {d.aktif ? cevir("SSH AÇIK") : cevir("SSH KAPALI")}
           </span>
         </div>
 
-        {hata && <div className="my-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-        {basari && <div className="my-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
         {/* Durum + toggle */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Kabuk Erişimi")}</h3>
@@ -146,7 +150,7 @@ export default function DomainSSHPage() {
               </button>
             ) : (
               <button onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
+                className="shrink-0 px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
                 {cevir("SSH'i Aç")}
               </button>
             )}
@@ -155,7 +159,7 @@ export default function DomainSSHPage() {
         </div>
 
         {/* Bağlantı bilgisi */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Bağlantı Bilgisi")}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
             <Bilgi etiket={cevir("Kullanıcı")} deger={d.kullanici} />
@@ -165,15 +169,15 @@ export default function DomainSSHPage() {
           <div className="mt-3">
             <label className="text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Bağlantı komutu")}</label>
             <div className="mt-1 flex items-center gap-2">
-              <code className="flex-1 px-3 py-2 bg-slate-900 text-slate-100 rounded-lg text-xs font-mono overflow-x-auto">{sshKomut}</code>
-              <button onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 text-xs px-2.5 py-2 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Kopyala")}</button>
+              <code className="flex-1 px-3 py-2 bg-dark-800 text-slate-100 rounded-lg text-xs font-mono overflow-x-auto">{sshKomut}</code>
+              <button onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 text-xs px-2.5 py-2 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-dark-600">{cevir("Kopyala")}</button>
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{cevir("🔑 Parola:")} <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{cevir("Parola:")} <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
         </div>
 
         {/* SSH Public Key */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("SSH Genel Anahtarı (authorized_keys)")}</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
             {cevir("Parola yerine anahtarla giriş için genel anahtarınızı ekleyin.")} {d.anahtar_var
@@ -186,12 +190,12 @@ export default function DomainSSHPage() {
             rows={4}
             spellCheck={false}
             placeholder={cevir("ssh-ed25519 AAAA... kullanici@makine")}
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-xs font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-xs font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
           />
           <div className="mt-3 flex items-center justify-between">
             <p className="text-xs text-slate-400">{cevir("Boş bırakıp kaydederseniz tüm anahtarlar silinir.")}</p>
             <button onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
+              className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
               {cevir("Anahtarı Kaydet")}
             </button>
           </div>
@@ -207,7 +211,7 @@ export default function DomainSSHPage() {
 
 function Bilgi({ etiket, deger }: { etiket: string; deger: string }) {
   return (
-    <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200 dark:border-slate-700">
+    <div className="px-3 py-2 bg-slate-50 dark:bg-dark-800/40 rounded-lg border border-slate-200 dark:border-dark-600">
       <div className="text-[10px] uppercase tracking-wider text-slate-400">{etiket}</div>
       <div className="font-mono text-slate-800 dark:text-slate-200 truncate">{deger}</div>
     </div>

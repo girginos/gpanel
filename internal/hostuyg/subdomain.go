@@ -167,9 +167,21 @@ func SubdomainCertSil(subdomain string) {
 	_ = os.RemoveAll(filepath.Join(HostuygSSLKok, subdomain))
 }
 
+// guvenliVhostKod (defense-in-depth): vhost kodu dosya adına gömülüyor
+// ("gpanel-app-<kod>.conf") → yalnız harf/rakam/nokta/tire/altçizgi; '/' ve '..'
+// yasak. Kod dahili üretilir (proxy tarifi / on-disk dosya adı) — CWE-22 FP savunması.
+var vhostKodRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func guvenliVhostKod(kod string) bool {
+	return kod != "" && !strings.Contains(kod, "..") && vhostKodRe.MatchString(kod)
+}
+
 // SubdomainVhostYaz — ayrı server bloğu :8443 SSL. cert + key path caller'dan.
 // UpgradeWS + MaxBodySize + ExtraDirektif de destekler.
 func SubdomainVhostYaz(kod, subdomain, certPath, keyPath string, port int, np *NginxProxyTarifi) error {
+	if !guvenliVhostKod(kod) {
+		return fmt.Errorf("güvenlik: geçersiz subdomain kodu")
+	}
 	upgrade := ""
 	if np.UpgradeWS {
 		upgrade = "        proxy_http_version 1.1;\n" +
@@ -242,6 +254,9 @@ server {
 
 // SubdomainVhostSil — vhost dosyasını sil + reload.
 func SubdomainVhostSil(kod string) {
+	if !guvenliVhostKod(kod) {
+		return
+	}
 	yol := filepath.Join(SubdomainVhostDir, "gpanel-app-"+kod+".conf")
 	_ = os.Remove(yol)
 	_, _ = exec.Command("nginx", "-s", "reload").CombinedOutput()

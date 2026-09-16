@@ -294,8 +294,3 @@ func (k *Kaynak) wporgCek2(url string) map[string]string {
 	}
 	return sarma.Checksums
 }
-
-// normalizeYol — WP.org bazı sürümlerde yolları farklı ayraçla verebilir;
-// motorun beklediği ileri-eğik-çizgiye çevir. (Şu an WP.org zaten '/' veriyor,
-// ama savunma amaçlı.)
-func normalizeYol(y string) string { return strings.ReplaceAll(y, "\\", "/") }

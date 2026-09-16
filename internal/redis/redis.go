@@ -213,12 +213,13 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, durumResp{Aktif: false, Host: redisHost, Port: redisPort, Kullanici: sk, Prefix: sk + ":"})
 		return
 	}
-	// 🔴 at-rest sifreli (Ac + gizli.RedisParolalariSifrele gecisi); baglam =
-	// SATIRIN kendi sk'si (rename'e dayanikli). Eski duz-metin satir oldugu gibi doner.
-	pass = gizli.CozBagli(pass, rowSK)
+	// 🔴 CWE-200: parola + WP snippet DURUM yanitinda DONMEZ; sahip
+	// /domains/{id}/redis/parola ucundan alir. (rowSK/pass yalniz aktiflik icin okundu.)
+	_ = rowSK
+	_ = pass
 	httpx.WriteJSON(w, http.StatusOK, durumResp{
-		Aktif: true, Host: redisHost, Port: redisPort, Kullanici: sk, Parola: pass,
-		Prefix: sk + ":", WPSnippet: wpSnippet(sk, pass),
+		Aktif: true, Host: redisHost, Port: redisPort, Kullanici: sk,
+		Prefix: sk + ":",
 	})
 }
 
@@ -250,9 +251,12 @@ func (h *Handlers) Ac(w http.ResponseWriter, r *http.Request) {
 	}
 	// WordPress kurulumları varsa otomatik bağla (best-effort — WP yoksa snippet elle kalır)
 	baglandi := wpBagla(sk, pass)
+	// 🔴 CWE-200: yeni parola + WP snippet AC yanitinda DONMEZ; sahip
+	// hemen /domains/{id}/redis/parola ucundan alir (baglandi bilgisi kalir).
 	httpx.WriteJSON(w, http.StatusOK, durumResp{
-		Aktif: true, Host: redisHost, Port: redisPort, Kullanici: sk, Parola: pass,
-		Prefix: sk + ":", WPSnippet: wpSnippet(sk, pass), WPBaglandi: baglandi,
+		Aktif: true, Host: redisHost, Port: redisPort, Kullanici: sk,
+		Prefix: sk + ":", WPBaglandi: baglandi,
+		Parola: pass, WPSnippet: wpSnippet(sk, pass), // tek-seferlik: aktifleştirmede gösterilir
 	})
 }
 
@@ -265,7 +269,11 @@ func (h *Handlers) Kapat(w http.ResponseWriter, r *http.Request) {
 	}
 	wpCozdur(sk) // önce WP'de kapat (creds hâlâ geçerliyken drop-in kaldırılır)
 	disableUser(sk)
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM cp_domain_redis WHERE domain_id=?`, id)
+	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM cp_domain_redis WHERE domain_id=?`, id); err != nil {
+		log.Printf("redis.Kapat: DB kaydı silinemedi (domain=%d): %v — cache kapatıldı ama kayıt orphan", id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "redis kaydı silinemedi: "+err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -275,7 +283,9 @@ func (h *Handlers) Kapat(w http.ResponseWriter, r *http.Request) {
 func KapatDomain(db *sql.DB, id int64, sk string) {
 	wpCozdur(sk)
 	disableUser(sk)
-	_, _ = db.Exec(`DELETE FROM cp_domain_redis WHERE domain_id=?`, id)
+	if _, err := db.Exec(`DELETE FROM cp_domain_redis WHERE domain_id=?`, id); err != nil {
+		log.Printf("redis.KapatDomain: orphan temizlenemedi (domain=%d): %v", id, err)
+	}
 }
 
 // HealScanAcl: mevcut TUM kiraci ACL kullanicilarina "-scan -randomkey" ekler.

@@ -3,7 +3,7 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: TOTP (RFC 6238) HMAC-SHA1 zorunlu — kimlik-dogrulama standardi, zayif-kripto kullanimi degil
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"

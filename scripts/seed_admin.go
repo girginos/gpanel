@@ -1,7 +1,8 @@
 //go:build ignore
 
 // Tek seferlik admin tohumlama:
-//   go run scripts/seed_admin.go -dsn '...' -kullanici admin -parola '...'
+//
+//	go run scripts/seed_admin.go -dsn '...' -kullanici admin -parola '...'
 package main
 
 import (

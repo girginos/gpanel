@@ -31,6 +31,7 @@ dur(){ echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || dur "root required:  curl -fsSL https://get.girginos.io | sudo bash"
 
+command -v tar >/dev/null 2>&1 || dnf install -y tar >/dev/null 2>&1 || true
 for k in curl tar sha256sum; do
   command -v "$k" >/dev/null || dur "'$k' not found — install it first"
 done

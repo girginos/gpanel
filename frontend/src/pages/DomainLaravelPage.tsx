@@ -5,10 +5,11 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Durum = {
   kurulu: boolean
@@ -48,6 +49,8 @@ const NPM_KOMUTLAR = ['install', 'ci', 'run', 'prune', 'audit', 'outdated', 'ls'
 
 
 const LARAVEL_EN: Record<string, string> = {
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "https://github.com/kullanici/proje.git veya git@github.com:kullanici/proje.git": "https://github.com/username/project.git or git@github.com:username/project.git",
   "vendor/paket:^1.0": "vendor/package:^1.0",
   "(ana site) veya": "(main site) or",
@@ -101,32 +104,37 @@ const LARAVEL_EN: Record<string, string> = {
   "Zamanlanmış görev": "Scheduled task",
   "npm komutu çalıştır": "Run npm command",
   "↑ Üst": "↑ Up",
-  "⚠ .env henüz yok — kaydedince oluşturulur.": "⚠ No .env yet — created when you save.",
-  "⚠ Sunucuda Node.js kurulu değil.": "⚠ Node.js is not installed on the server.",
-  "✓ Laravel uygulaması kuruldu": "✓ Laravel application installed",
+  ".env henüz yok — kaydedince oluşturulur.": "No .env yet — created when you save.",
+  "Sunucuda Node.js kurulu değil.": "Node.js is not installed on the server.",
+  "Laravel uygulaması kuruldu": "Laravel application installed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (LARAVEL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DomainLaravelPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [sekme, setSekme] = useState<Sekme>('Kontrol Paneli')
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id) return
     setYuk(true)
+    const _n = ++yukleNesli.current
     api.get<Durum>(`/domains/${id}/laravel`)
-      .then(r => setD(r.data))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setD(r.data) })
+      .catch(e => { if (_n !== yukleNesli.current) return; hataBildir(apiHata(e)) })
+      .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
-  useEffect(yukle, [id])
+  useEffect(() => { yukle(); return () => { yukleNesli.current++ } }, [id])
 
-  function bildir(msg: string) { setBasari(msg); setTimeout(() => setBasari(null), 4000) }
+  function bildir(msg: string) { setBasari(msg); toast.basari(cevir("Kaydedildi"), msg); setTimeout(() => setBasari(null), 4000) }
+  // Alt bileşenler hata kanalını `onHata` ile kullanır; '' = temizleme (toast YOK).
+  function hataBildir(msg: string) { setHata(msg); if (msg) toast.hata(cevir("İşlem başarısız"), msg) }
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
@@ -137,26 +145,23 @@ export default function DomainLaravelPage() {
       ]} />
 
       <div className="flex items-center gap-2.5 mb-1">
-        <span className="text-2xl leading-none">🅛</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-brand-600 dark:text-brand-400"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Laravel Toolkit</h1>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         {cevir(cevir("Laravel uygulamanızı kurun, Artisan/Composer/npm çalıştırın, dağıtın; zamanlanmış görev ve kuyruk işleyiciyi yönetin."))}
       </p>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
       {yuk || !d ? (
         <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : !d.kurulu && d.son_deploy_durum !== 'kuruluyor' ? (
-        <KurulumSihirbazi id={id!} onKuruldu={() => { yukle(); bildir(cevir("✓ Laravel uygulaması kuruldu")) }} onHata={setHata} />
+        <KurulumSihirbazi id={id!} onKuruldu={() => { yukle(); bildir(cevir("Laravel uygulaması kuruldu")) }} onHata={hataBildir} />
       ) : d.son_deploy_durum === 'kuruluyor' ? (
-        <KurulumIlerleme id={id!} onBitti={(basarili, log) => { yukle(); basarili ? bildir(cevir("✓ Laravel uygulaması kuruldu")) : setHata('Kurulum başarısız oldu:\n' + (log || cevir("Ayrıntı yok — sunucuda disk veya dosya-sayısı (inode) kotası dolmuş olabilir. Dosya yöneticisinden alanı kontrol edin."))) }} />
+        <KurulumIlerleme id={id!} onBitti={(basarili, log) => { yukle(); basarili ? bildir(cevir("Laravel uygulaması kuruldu")) : hataBildir('Kurulum başarısız oldu:\n' + (log || cevir("Ayrıntı yok — sunucuda disk veya dosya-sayısı (inode) kotası dolmuş olabilir. Dosya yöneticisinden alanı kontrol edin."))) }} />
       ) : (
         <>
           {/* Sekme çubuğu (mobilde yatay kaydırılır) */}
-          <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700 mb-5 overflow-x-auto">
+          <div className="flex gap-1 border-b border-slate-200 dark:border-dark-600 mb-5 overflow-x-auto">
             {SEKMELER.map(s => (
               <button key={s} onClick={() => setSekme(s)}
                 className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition -mb-px ${
@@ -167,13 +172,13 @@ export default function DomainLaravelPage() {
             ))}
           </div>
 
-          {sekme === 'Kontrol Paneli' && <KontrolPaneli id={id!} d={d} onDegisti={yukle} onBildir={bildir} onHata={setHata} />}
+          {sekme === 'Kontrol Paneli' && <KontrolPaneli id={id!} d={d} onDegisti={yukle} onBildir={bildir} onHata={hataBildir} />}
           {sekme === 'Artisan' && <KomutSekmesi baslik="Artisan" id={id!} d={d} url={`/domains/${id}/laravel/artisan`}
-            komutlar={ARTISAN_KOMUTLAR} onHata={setHata} />}
-          {sekme === 'Composer' && <ComposerSekmesi id={id!} d={d} onHata={setHata} />}
-          {sekme === 'Node.js' && <NodeSekmesi id={id!} d={d} onHata={setHata} />}
-          {sekme === cevir("Dağıtım") && <DeploySekmesi id={id!} d={d} onHata={setHata} />}
-          {sekme === 'Kuyruk' && <KuyrukSekmesi id={id!} d={d} onDegisti={yukle} onHata={setHata} />}
+            komutlar={ARTISAN_KOMUTLAR} onHata={hataBildir} />}
+          {sekme === 'Composer' && <ComposerSekmesi id={id!} d={d} onHata={hataBildir} />}
+          {sekme === 'Node.js' && <NodeSekmesi id={id!} d={d} onHata={hataBildir} />}
+          {sekme === cevir("Dağıtım") && <DeploySekmesi id={id!} d={d} onHata={hataBildir} />}
+          {sekme === 'Kuyruk' && <KuyrukSekmesi id={id!} d={d} onDegisti={yukle} onHata={hataBildir} />}
         </>
       )}
     </div>
@@ -217,7 +222,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
   }} />
 
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 sm:p-6">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 sm:p-6">
       <OtomatikAlgilaSerit id={id} onKuruldu={onKuruldu} onHata={onHata} />
       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Laravel uygulaması kur")}</h3>
       <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">{cevir("Bir kurulum yöntemi seçin. Kurulum bitince belge kökü otomatik")} <code className="font-mono">public</code> {cevir("olarak ayarlanır.")}</p>
@@ -229,7 +234,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
             <button key={m.key} type="button" onClick={() => setMode(m.key)}
               className={`text-left p-4 border rounded-lg transition ${
                 aktif ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-500/20'
-                      : 'border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:hover:border-brand-700'}`}>
+                      : 'border-slate-200 dark:border-dark-600 hover:border-brand-300 dark:hover:border-brand-700'}`}>
               <LIkon ad={m.ikon} aktif={aktif} />
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ad}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">{m.ac}</div>
@@ -244,12 +249,12 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Depo URL</label>
             <input value={repoURL} onChange={e => setRepoURL(e.target.value)} spellCheck={false}
               placeholder={cevir("https://github.com/kullanici/proje.git veya git@github.com:kullanici/proje.git")}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           </div>
           <div className="max-w-[220px]">
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Branch</label>
             <input value={branch} onChange={e => setBranch(e.target.value)} spellCheck={false}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           </div>
         </div>
       )}
@@ -258,9 +263,9 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Uygulama dizini (public_html altında)")}</label>
         <div className="flex gap-2">
           <input value={appRoot} onChange={e => setAppRoot(e.target.value.replace(/^\/+/, ''))} spellCheck={false}
-            className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+            className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           <button type="button" onClick={() => setSeciciAcik(true)}
-            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> {cevir("Seç")}</span></button>
+            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600 whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> {cevir("Seç")}</span></button>
         </div>
         <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{cevir("Örn:")} <code className="font-mono">public_html</code> {cevir("(ana site) veya")} <code className="font-mono">public_html/uygulama</code>. {cevir("Yeni klasör için elle yazın.")}</p>
       </div>
@@ -270,7 +275,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
       )}
 
       <button onClick={kur} disabled={isleniyor || (mode === 'uzak' && !repoURL.trim())}
-        className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
+        className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
         {isleniyor ? 'Başlatılıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.roket} /> Kur</span>}
       </button>
     </div>
@@ -299,11 +304,13 @@ function KurulumIlerleme({ id, onBitti }: { id: string; onBitti: (basarili: bool
     return () => clearInterval(t)
   }, [id])
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
       <div className="flex items-center gap-2 mb-3">
         {durum === 'kuruluyor'
           ? <span className="inline-block h-2 w-2 rounded-full bg-brand-500 animate-pulse" />
-          : <span className={`text-sm ${durum === 'hazir' ? 'text-emerald-500' : 'text-red-500'}`}>{durum === 'hazir' ? '✓' : '✗'}</span>}
+          : <span className={`${durum === 'hazir' ? 'text-emerald-500' : 'text-red-500'}`}>{durum === 'hazir'
+              ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M5 12l5 5L20 7"/></svg>
+              : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M6 6l12 12M18 6L6 18"/></svg>}</span>}
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           {durum === 'kuruluyor' ? 'Kuruluyor…' : durum === 'hazir' ? 'Kurulum tamamlandı' : 'Kurulum hata verdi'}
         </h3>
@@ -327,12 +334,14 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
   const [seciciAcik, setSeciciAcik] = useState(false)
 
   useEffect(() => {
+    let iptal = false
     api.get<{ var: boolean; icerik: string }>(`/domains/${id}/laravel/env`)
-      .then(r => { setEnvVar(r.data.var); setEnv(r.data.icerik) })
-      .catch(() => setEnv(''))
+      .then(r => { if (iptal) return; setEnvVar(r.data.var); setEnv(r.data.icerik) })
+      .catch(() => { if (!iptal) setEnv('') })
     api.get<{ mevcut: string; adaylar: string[] }>(`/domains/${id}/laravel/app-adaylar`)
-      .then(r => { setAppRoot(r.data.mevcut); setAppKayitli(r.data.mevcut); setAppAdaylar(r.data.adaylar || []) })
-      .catch(hataYakala(cevir("Laravel uygulama adayları alınamadı")))
+      .then(r => { if (iptal) return; setAppRoot(r.data.mevcut); setAppKayitli(r.data.mevcut); setAppAdaylar(r.data.adaylar || []) })
+      .catch(e => { if (!iptal) hataYakala(cevir("Laravel uygulama adayları alınamadı"))(e) })
+    return () => { iptal = true }
   }, [id])
 
   async function appRootKaydet() {
@@ -341,7 +350,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
     try {
       const r = await api.put<{ app_root: string; kurulu: boolean }>(`/domains/${id}/laravel/app-root`, { app_root: appRoot.trim() })
       setAppKayitli(r.data.app_root)
-      onBildir(`✓ Uygulama dizini "${r.data.app_root}" olarak ayarlandı`)
+      onBildir(`Uygulama dizini "${r.data.app_root}" olarak ayarlandı`)
       onDegisti() // kurulu değişmiş olabilir → sayfa yeniden yüklensin
     } catch (e) { onHata(apiHata(e, cevir("Uygulama dizini değiştirilemedi"))) }
     finally { setAppKaydediliyor(false) }
@@ -352,7 +361,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
     setKaydediliyor(true); onHata('')
     try {
       await api.put(`/domains/${id}/laravel/env`, { icerik: env })
-      onBildir('✓ .env kaydedildi'); setEnvVar(true)
+      onBildir('.env kaydedildi'); setEnvVar(true)
     } catch (e) { onHata(apiHata(e, '.env kaydedilemedi')) }
     finally { setKaydediliyor(false) }
   }
@@ -360,7 +369,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
   async function toggle(url: string, aktif: boolean, ad: string) {
     onHata('')
     try {
-      await api.post(url, { aktif }); onBildir(`✓ ${ad} ${aktif ? 'açıldı' : 'kapatıldı'}`); onDegisti()
+      await api.post(url, { aktif }); onBildir(`${ad} ${aktif ? 'açıldı' : 'kapatıldı'}`); onDegisti()
     } catch (e) { onHata(apiHata(e)) }
   }
 
@@ -387,20 +396,20 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Ev dizinine göre yol")}</label>
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex items-stretch flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500/30">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-slate-700 select-none whitespace-nowrap">/home/{d.kullanici}/</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-dark-600 select-none whitespace-nowrap">/home/{d.kullanici}/</span>
             <input list="lt-app-adaylar" value={appRoot}
               onChange={e => setAppRoot(e.target.value.replace(/^\/+/, ''))}
               onKeyDown={e => { if (e.key === 'Enter') appRootKaydet() }}
               spellCheck={false} autoCapitalize="off" autoCorrect="off"
-              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none" />
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none" />
           </div>
           <button type="button" onClick={() => setSeciciAcik(true)}
-            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap">
+            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600 whitespace-nowrap">
             <span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> {cevir("Seç")}</span>
           </button>
           <button type="button" onClick={appRootKaydet}
             disabled={appKaydediliyor || appRoot.trim() === appKayitli}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
             {appKaydediliyor ? 'Uygulanıyor…' : 'Kaydet'}
           </button>
         </div>
@@ -416,7 +425,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
             <span className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Algılanan Laravel kökleri:")}</span>
             {appAdaylar.map(x => (
               <button key={x} type="button" onClick={() => setAppRoot(x)}
-                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">{x}</button>
+                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">{x}</button>
             ))}
           </div>
         )}
@@ -428,7 +437,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
         <div className="space-y-3">
           <SatirToggle etiket={cevir("Bakım Modu")} aciklama={cevir("Site geçici olarak 503 döner (php artisan down/up).")}
             acik={d.bakim} onToggle={() => toggle(`/domains/${id}/laravel/bakim`, !d.bakim, cevir("Bakım modu"))} />
-          <div className="border-t border-slate-100 dark:border-slate-800" />
+          <div className="border-t border-slate-100 dark:border-dark-600" />
           <SatirToggle etiket={cevir("Zamanlanmış Görevler")} aciklama={cevir("Dakikada bir 'schedule:run' (cron). Laravel Scheduler için gerekli.")}
             acik={d.schedule_enabled} onToggle={() => toggle(`/domains/${id}/laravel/schedule`, !d.schedule_enabled, cevir("Zamanlanmış görev"))} />
         </div>
@@ -440,13 +449,13 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
           <div className="text-sm text-slate-400 dark:text-slate-500 py-4">{cevir("Yükleniyor…")}</div>
         ) : (
           <>
-            {!envVar && <div className="mb-2 text-xs text-amber-600 dark:text-amber-400">{cevir("⚠ .env henüz yok — kaydedince oluşturulur.")}</div>}
+            {!envVar && <div className="mb-2 text-xs text-amber-600 dark:text-amber-400">{cevir(".env henüz yok — kaydedince oluşturulur.")}</div>}
             <textarea value={env} onChange={e => setEnv(e.target.value)} spellCheck={false} rows={14}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-xs font-mono bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 leading-relaxed"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-xs font-mono bg-slate-50 dark:bg-dark-800 text-slate-900 dark:text-slate-100 leading-relaxed"
               placeholder="APP_NAME=Laravel&#10;APP_ENV=production&#10;APP_KEY=..." />
             <div className="mt-3">
               <button onClick={envKaydet} disabled={kaydediliyor}
-                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
+                className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md">
                 {kaydediliyor ? 'Kaydediliyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> .env Kaydet</span>}
               </button>
             </div>
@@ -468,10 +477,10 @@ function useRunner(url: string, onHata: (m: string) => void) {
     try {
       const r = await api.post<{ ok: boolean; cikti: string }>(url, body)
       setSonOk(r.data.ok)
-      setCik(prev => prev.replace(/\(çalışıyor…\)\n$/, '') + (r.data.cikti || cevir("(çıktı yok)")) + `\n[${r.data.ok ? '✓ başarılı' : '✗ hata'}]\n`)
+      setCik(prev => prev.replace(/\(çalışıyor…\)\n$/, '') + (r.data.cikti || cevir("(çıktı yok)")) + `\n[${r.data.ok ? 'başarılı' : 'hata'}]\n`)
     } catch (e) {
       setSonOk(false); onHata(apiHata(e))
-      setCik(prev => prev.replace(/\(çalışıyor…\)\n$/, '') + '[✗ istek hatası]\n')
+      setCik(prev => prev.replace(/\(çalışıyor…\)\n$/, '') + '[istek hatası]\n')
     } finally { setCalisan(false) }
   }
   return { cik, setCik, calisan, sonOk, calistir }
@@ -489,14 +498,14 @@ function KomutSekmesi({ baslik, id, d, url, komutlar, onHata }:
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex items-stretch flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-slate-700 select-none">php artisan</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-dark-600 select-none">php artisan</span>
             <select value={komut} onChange={e => setKomut(e.target.value)}
-              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none">
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none">
               {komutlar.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
           <button onClick={() => calistir({ komut }, `artisan ${komut}`)} disabled={calisan}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
             {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Çalıştır")}</span>}
           </button>
         </div>
@@ -519,19 +528,19 @@ function ComposerSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: 
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex items-stretch rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden sm:w-[220px]">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-slate-700 select-none">composer</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-dark-600 select-none">composer</span>
             <select value={komut} onChange={e => setKomut(e.target.value)}
-              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none">
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none">
               {COMPOSER_KOMUTLAR.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
           {paketGerek && (
             <input value={paket} onChange={e => setPaket(e.target.value)} spellCheck={false} placeholder={cevir("vendor/paket:^1.0")}
-              className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="flex-1 min-w-0 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           )}
           <button onClick={() => calistir({ komut, paket }, `composer ${komut}${paketGerek ? ' ' + paket : ''}`)}
             disabled={calisan || (paketGerek && !paket.trim())}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
             {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Çalıştır")}</span>}
           </button>
         </div>
@@ -549,36 +558,39 @@ function NodeSekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: stri
   const [ignoreScripts, setIgnoreScripts] = useState(false)
   const { cik, calisan, calistir } = useRunner(`/domains/${id}/laravel/npm`, onHata)
   useEffect(() => {
+    let iptal = false
     api.get<{ surumler: string[] }>(`/domains/${id}/laravel/node`).then(r => {
+      if (iptal) return
       setSurumler(r.data.surumler || []); if (r.data.surumler?.length) setNodeSurum(r.data.surumler[0])
-    }).catch(hataYakala(cevir("Node sürümleri alınamadı")))
+    }).catch(e => { if (!iptal) hataYakala(cevir("Node sürümleri alınamadı"))(e) })
+    return () => { iptal = true }
   }, [id])
   const runGerek = komut === 'run'
   return (
     <div className="space-y-3">
       <Kart baslik={cevir("npm komutu çalıştır")}>
         {surumler.length === 0
-          ? <div className="text-xs text-amber-600 dark:text-amber-400 mb-3">{cevir("⚠ Sunucuda Node.js kurulu değil.")}</div>
+          ? <div className="text-xs text-amber-600 dark:text-amber-400 mb-3">{cevir("Sunucuda Node.js kurulu değil.")}</div>
           : <p className="text-xs text-slate-500 dark:text-slate-500 mb-3"><code className="font-mono">{d.kullanici}</code> {cevir("olarak çalışır.")}</p>}
         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
           <select value={nodeSurum} onChange={e => setNodeSurum(e.target.value)}
-            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100">
             {surumler.map(s => <option key={s} value={s}>{s === 'sistem' ? 'sistem node' : 'Node ' + s}</option>)}
           </select>
           <div className="flex items-stretch rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-slate-700 select-none">npm</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 border-r border-slate-200 dark:border-dark-600 select-none">npm</span>
             <select value={komut} onChange={e => setKomut(e.target.value)}
-              className="px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none">
+              className="px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none">
               {NPM_KOMUTLAR.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
           {runGerek && (
             <input value={script} onChange={e => setScript(e.target.value)} spellCheck={false} placeholder="build"
-              className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 w-[140px]" />
+              className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 w-[140px]" />
           )}
           <button onClick={() => calistir({ komut, script, node_surum: nodeSurum, ignore_scripts: ignoreScripts }, `npm ${komut}${runGerek ? ' ' + script : ''}`)}
             disabled={calisan || surumler.length === 0}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-brand-600 dark:hover:bg-brand-500 text-white disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
             {calisan ? 'Çalışıyor…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Çalıştır")}</span>}
           </button>
         </div>
@@ -603,10 +615,12 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
   const [durum, setDurum] = useState(d.son_deploy_durum || '')
   const poll = useRef<any>(null)
   useEffect(() => {
+    let iptal = false
     api.get<{ surumler: string[] }>(`/domains/${id}/laravel/node`).then(r => {
+      if (iptal) return
       setSurumler(r.data.surumler || []); if (r.data.surumler?.length) setNodeSurum(r.data.surumler[0])
-    }).catch(hataYakala(cevir("Node sürümleri alınamadı")))
-    return () => { if (poll.current) clearInterval(poll.current) }
+    }).catch(e => { if (!iptal) hataYakala(cevir("Node sürümleri alınamadı"))(e) })
+    return () => { iptal = true; if (poll.current) clearInterval(poll.current) }
   }, [id])
 
   async function deploy() {
@@ -637,7 +651,7 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
             <ol className="space-y-1.5">
               {ADIMLAR.map((a, i) => (
                 <li key={i} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                  <span className="flex-shrink-0 h-5 w-5 rounded-full bg-slate-100 dark:bg-slate-700 text-[11px] flex items-center justify-center text-slate-500 dark:text-slate-400">{i + 1}</span>
+                  <span className="shrink-0 h-5 w-5 rounded-full bg-slate-100 dark:bg-dark-600 text-[11px] flex items-center justify-center text-slate-500 dark:text-slate-400">{i + 1}</span>
                   {a}
                 </li>
               ))}
@@ -654,7 +668,7 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
             </label>
             {npmBuild && surumler.length > 0 && (
               <select value={nodeSurum} onChange={e => setNodeSurum(e.target.value)}
-                className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100">
                 {surumler.map(s => <option key={s} value={s}>{s === 'sistem' ? 'sistem node' : 'Node ' + s}</option>)}
               </select>
             )}
@@ -684,10 +698,12 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
   const [isleniyor, setIsleniyor] = useState(false)
   const [durum, setDurum] = useState<{ active_state: string; sub_state: string; restarts: string } | null>(null)
 
+  const durumYukleNesli = useRef(0)
   function durumYukle() {
-    api.get<any>(`/domains/${id}/laravel/queue/durum`).then(r => setDurum(r.data)).catch(hataYakala(cevir("Kuyruk durumu alınamadı")))
+    const _n = ++durumYukleNesli.current
+    api.get<any>(`/domains/${id}/laravel/queue/durum`).then(r => { if (_n !== durumYukleNesli.current) return; setDurum(r.data) }).catch(e => { if (_n === durumYukleNesli.current) hataYakala(cevir("Kuyruk durumu alınamadı"))(e) })
   }
-  useEffect(() => { if (d.queue_enabled) durumYukle() }, [id, d.queue_enabled])
+  useEffect(() => { if (d.queue_enabled) durumYukle(); return () => { durumYukleNesli.current++ } }, [id, d.queue_enabled])
 
   async function ayarla(aktif: boolean) {
     setIsleniyor(true); onHata('')
@@ -711,27 +727,27 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Zaman aşımı (sn)")}</label>
             <input type="number" min={5} max={600} value={timeout} onChange={e => setTimeoutV(+e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Max iş (yeniden başlat)")}</label>
             <input type="number" min={10} value={maxJobs} onChange={e => setMaxJobs(+e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Bağlantı")}</label>
             <input value={conn} onChange={e => setConn(e.target.value)} spellCheck={false}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100" />
           </div>
         </div>
         {d.queue_enabled && (
           <div className="mt-3 flex flex-wrap gap-2 items-center">
             <button onClick={() => ayarla(true)} disabled={isleniyor}
-              className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-md text-xs hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">
+              className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-md text-xs hover:bg-slate-50 dark:hover:bg-dark-600 text-slate-700 dark:text-slate-300">
               {cevir(cevir("Ayarları uygula + yeniden başlat"))}
             </button>
             {durum && (
-              <span className={`text-xs px-2 py-1 rounded font-mono ${durum.active_state === 'active' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}`}>
+              <span className={`text-xs px-2 py-1 rounded font-mono ${durum.active_state === 'active' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-400'}`}>
                 {durum.active_state}/{durum.sub_state} · {durum.restarts} yeniden başlatma
               </span>
             )}
@@ -746,8 +762,8 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
 // ─────────────────────────── Ortak bileşenler ───────────────────────────
 function Kart({ baslik, children }: { baslik: string; children: any }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-slate-800">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
+      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )
@@ -755,7 +771,7 @@ function Kart({ baslik, children }: { baslik: string; children: any }) {
 
 function Bilgi({ etiket, deger, mono }: { etiket: string; deger: string; mono?: boolean }) {
   return (
-    <div className="flex justify-between gap-3 border-b border-slate-50 dark:border-slate-800/50 py-1">
+    <div className="flex justify-between gap-3 border-b border-slate-50 dark:border-dark-600/50 py-1">
       <dt className="text-slate-500 dark:text-slate-500">{etiket}</dt>
       <dd className={`text-slate-800 dark:text-slate-200 text-right truncate ${mono ? 'font-mono text-xs' : ''}`}>{deger}</dd>
     </div>
@@ -767,7 +783,7 @@ function SatirToggle({ etiket, aciklama, acik, onToggle }:
   return (
     <div className="flex items-start gap-3 py-1">
       <button onClick={onToggle}
-        className={`flex-shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
       </button>
       <div className="flex-1 min-w-0">
@@ -790,12 +806,14 @@ function KlasorSecici({ id, baslangic, onSec, onKapat }:
   const [hata, setHata] = useState('')
 
   useEffect(() => {
+    let iptal = false
     setYuk(true); setHata('')
     api.get<{ icerik: { adi: string; yol: string; tip: string }[] }>(`/domains/${id}/files`, { params: { yol } })
-      .then(r => setKlasorler((r.data.icerik || []).filter(e => e.tip === 'klasor')
-        .map(e => ({ adi: e.adi, yol: e.yol.replace(/^\/+/, '') }))))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (iptal) return; setKlasorler((r.data.icerik || []).filter(e => e.tip === 'klasor')
+        .map(e => ({ adi: e.adi, yol: e.yol.replace(/^\/+/, '') }))) })
+      .catch(e => { if (iptal) return; setHata(apiHata(e)) })
+      .finally(() => { if (!iptal) setYuk(false) })
+    return () => { iptal = true }
   }, [id, yol])
 
   const kokte = yol === kok
@@ -808,14 +826,14 @@ function KlasorSecici({ id, baslangic, onSec, onKapat }:
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onKapat}>
-      <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+      <div className="w-full max-w-lg bg-white dark:bg-dark-700 rounded-lg shadow-xl border border-slate-200 dark:border-dark-600 flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-dark-600">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100"><span className="inline-flex items-center gap-1.5"><Ikon d={I.klasor} /> {cevir("Klasör seç")}</span></h3>
           <button onClick={onKapat} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none">×</button>
         </div>
-        <div className="px-5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 text-xs">
+        <div className="px-5 py-2 border-b border-slate-100 dark:border-dark-600 flex items-center gap-2 text-xs">
           <button onClick={yukari} disabled={kokte}
-            className="px-2 py-1 rounded border border-slate-300 dark:border-slate-600 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 whitespace-nowrap">{cevir("↑ Üst")}</button>
+            className="px-2 py-1 rounded border border-slate-300 dark:border-slate-600 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-dark-600 text-slate-600 dark:text-slate-300 whitespace-nowrap">{cevir("↑ Üst")}</button>
           <code className="font-mono text-slate-500 dark:text-slate-400 truncate">/{yol}</code>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2 min-h-[160px]">
@@ -824,17 +842,17 @@ function KlasorSecici({ id, baslangic, onSec, onKapat }:
               : klasorler.length === 0 ? <div className="text-center text-sm text-slate-400 dark:text-slate-500 py-8">{cevir("Bu dizinde alt klasör yok")}</div>
                 : klasorler.map(k => (
                   <button key={k.yol} onClick={() => setYol(k.yol)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left text-sm text-slate-700 dark:text-slate-200">
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-slate-50 dark:hover:bg-dark-600/50 text-left text-sm text-slate-700 dark:text-slate-200">
                     <Ikon d={I.klasor} /><span className="font-mono truncate">{k.adi}</span>
                     <span className="ml-auto text-slate-300 dark:text-slate-600">›</span>
                   </button>
                 ))}
         </div>
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-dark-600 flex items-center justify-between gap-3">
           <div className="text-xs text-slate-500 dark:text-slate-400 truncate min-w-0">{cevir("Seçilen:")} <code className="font-mono text-slate-700 dark:text-slate-300">{yol}</code></div>
-          <div className="flex gap-2 flex-shrink-0">
-            <button onClick={onKapat} className="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300">{cevir("İptal")}</button>
-            <button onClick={() => onSec(yol)} className="px-4 py-1.5 text-sm bg-slate-900 dark:bg-brand-600 hover:bg-slate-800 dark:hover:bg-brand-500 text-white rounded-md whitespace-nowrap">{cevir("Bu klasörü seç")}</button>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={onKapat} className="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-dark-600 text-slate-600 dark:text-slate-300">{cevir("İptal")}</button>
+            <button onClick={() => onSec(yol)} className="px-4 py-1.5 text-sm bg-dark-800 dark:bg-brand-600 hover:bg-dark-700 dark:hover:bg-brand-500 text-white rounded-md whitespace-nowrap">{cevir("Bu klasörü seç")}</button>
           </div>
         </div>
       </div>
@@ -846,7 +864,7 @@ function CiktiKutusu({ cikti }: { cikti: string }) {
   const ref = useRef<HTMLPreElement>(null)
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight }, [cikti])
   return (
-    <div className="bg-slate-900 rounded-2xl p-4 border border-slate-700">
+    <div className="bg-dark-800 rounded-lg p-4 border border-dark-600">
       <pre ref={ref} className="text-xs font-mono text-slate-100 whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{cikti}</pre>
     </div>
   )
@@ -895,13 +913,16 @@ function OtomatikAlgilaSerit({ id, onKuruldu, onHata }: { id: string | number; o
   const [adimlar, setAdimlar] = useState<Array<{ adim: string; ok: boolean; not?: string }>>([])
 
   useEffect(() => {
+    let iptal = false
     api.get<{ adaylar: string[]; mevcut: string; kurulu: boolean; eksikler?: string[]; otomatik_algilandi?: string }>(`/domains/${id}/laravel/app-adaylar`)
       .then(r => {
+        if (iptal) return
         setAdaylar(r.data.adaylar || [])
         setEksikler(r.data.eksikler || [])
         if (r.data.kurulu || r.data.otomatik_algilandi) setBulundu(r.data.mevcut)
       })
       .catch(() => { /* sessiz — kur ekrani yine calisir */ })
+    return () => { iptal = true }
   }, [id])
 
   if (!bulundu && adaylar.length === 0) return null
@@ -916,7 +937,7 @@ function OtomatikAlgilaSerit({ id, onKuruldu, onHata }: { id: string | number; o
   }
 
   return (
-    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800/60 dark:bg-emerald-900/20">
+    <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800/60 dark:bg-emerald-900/20">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
@@ -936,7 +957,12 @@ function OtomatikAlgilaSerit({ id, onKuruldu, onHata }: { id: string | number; o
       {adimlar.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-[11px] text-emerald-800/90 dark:text-emerald-200/80">
           {adimlar.map((a, i) => (
-            <li key={i}>{a.ok ? '✓' : '✗'} {a.adim}{a.not ? ` — ${a.not}` : ''}</li>
+            <li key={i} className="flex items-start gap-1.5">
+              {a.ok
+                ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"><path d="M5 12l5 5L20 7"/></svg>
+                : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 mt-0.5 shrink-0 text-red-600 dark:text-red-400"><path d="M6 6l12 12M18 6L6 18"/></svg>}
+              <span>{a.adim}{a.not ? ` — ${a.not}` : ''}</span>
+            </li>
           ))}
         </ul>
       )}

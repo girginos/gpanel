@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici: string; dizin: string }
 
@@ -20,12 +21,14 @@ const COMPOSER_EN: Record<string, string> = {
   "✓ composer.json bulundu": "✓ composer.json found",
   "composer.json yok": "composer.json not found",
   "vendor/paket veya vendor/paket:^1.2": "vendor/package or vendor/package:^1.2",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (COMPOSER_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DomainComposerPage() {
   useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
+  const toast = useToast()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -37,7 +40,7 @@ export default function DomainComposerPage() {
   function yukle() {
     if (!id) return
     setYuk(true)
-    api.get<Durum>(`${base}/composer`).then(r => setD(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    api.get<Durum>(`${base}/composer`).then(r => setD(r.data)).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
 
@@ -48,7 +51,7 @@ export default function DomainComposerPage() {
       setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || cevir("(çıktı yok)")}\n\n${data.ok ? cevir('✓ Tamamlandı') : cevir('✗ Hata ile bitti')}`)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Çalıştırılamadı"))); setCikti('')
+      const m = apiHata(e, cevir("Çalıştırılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setCikti('')
     } finally { setCalisan(null) }
   }
 
@@ -70,15 +73,13 @@ export default function DomainComposerPage() {
           <span className="font-mono">{d.dizin}</span> {cevir("dizininde")} <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
         </p>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
         {!d.kurulu ? (
-          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-5 text-sm text-amber-800 dark:text-amber-200">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-5 text-sm text-amber-800 dark:text-amber-200">
             {cevir(cevir("Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor."))}
           </div>
         ) : (
           <>
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+            <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <span className="text-xs font-mono text-slate-500">{d.surum}</span>
@@ -88,22 +89,22 @@ export default function DomainComposerPage() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button disabled={!!calisan} onClick={() => calistir('install')} className={`${btnBase} bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'install' ? '…' : 'install'}</button>
-                <button disabled={!!calisan} onClick={() => calistir('update')} className={`${btnBase} bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'update' ? '…' : 'update'}</button>
-                <button disabled={!!calisan} onClick={() => calistir('dump-autoload')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800`}>dump-autoload</button>
-                <button disabled={!!calisan} onClick={() => calistir('validate')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800`}>validate</button>
-                <button disabled={!!calisan} onClick={() => calistir('show')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800`}>show</button>
+                <button disabled={!!calisan} onClick={() => calistir('install')} className={`${btnBase} bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'install' ? '…' : 'install'}</button>
+                <button disabled={!!calisan} onClick={() => calistir('update')} className={`${btnBase} bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'update' ? '…' : 'update'}</button>
+                <button disabled={!!calisan} onClick={() => calistir('dump-autoload')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>dump-autoload</button>
+                <button disabled={!!calisan} onClick={() => calistir('validate')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>validate</button>
+                <button disabled={!!calisan} onClick={() => calistir('show')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>show</button>
               </div>
               <div className="mt-3 flex gap-2">
                 <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
-                  className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                  className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
                 <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('require', paket.trim())} className={`${btnBase} bg-emerald-600 hover:bg-emerald-700 text-white`}>require</button>
                 <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('remove', paket.trim())} className={`${btnBase} border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`}>remove</button>
               </div>
             </div>
 
             {cikti && (
-              <div className="bg-slate-900 rounded-2xl p-4 shadow-sm">
+              <div className="bg-dark-800 rounded-lg p-4 shadow-xs">
                 <pre className="text-xs font-mono text-slate-100 whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{cikti}</pre>
               </div>
             )}

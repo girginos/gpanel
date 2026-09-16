@@ -14,7 +14,7 @@ const BAYIOZET_EN: Record<string, string> = {
   "Bayi özeti": "Reseller summary",
   "Bayi Özeti": "Reseller Summary",
   "Hosting hesabı": "Hosting account",
-  "⚠ Limit doldu — yeni hesap açılamaz": "⚠ Limit reached — no new accounts allowed",
+  "Limit doldu — yeni hesap açılamaz": "Limit reached — no new accounts allowed",
   "Tümü aktif": "All active",
   "Disk havuzu": "Disk pool",
   "Trafik havuzu": "Traffic pool",
@@ -47,16 +47,16 @@ function Olcum({ etiket, deger, taahhut, limit, ipucu }: {
   const kritik = oran >= 90
   const uyari = oran >= 75 && !kritik
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">
+    <div className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-3.5">
       <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{etiket}</div>
       <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{deger}</div>
       {limit > 0 && taahhut !== undefined && (
         <>
-          <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-dark-600 overflow-hidden">
             <div className={`h-full rounded-full ${kritik ? 'bg-red-500' : uyari ? 'bg-amber-500' : 'bg-brand-500'}`} style={{ width: `${oran}%` }} />
           </div>
           <div className={`mt-1 text-xs tabular-nums ${kritik ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
-            {kritik ? '⚠ ' : ''}{cevir("Taahhüt")} {mb(taahhut)} / {mb(limit)} (%{oran})
+            {cevir("Taahhüt")} {mb(taahhut)} / {mb(limit)} (%{oran})
           </div>
         </>
       )}
@@ -74,14 +74,16 @@ export default function BayiOzet() {
   const [yuk, setYuk] = useState(true)
 
   useEffect(() => {
+    let iptal = false
     api.get<Ozet>('/reseller/ozet')
-      .then(r => setO(r.data))
-      .catch(() => setO(null))
-      .finally(() => setYuk(false))
+      .then(r => { if (iptal) return; setO(r.data) })
+      .catch(() => { if (!iptal) setO(null) })
+      .finally(() => { if (!iptal) setYuk(false) })
+    return () => { iptal = true }
   }, [])
 
   if (yuk) return <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true" aria-label={cevir("Bayi özeti yükleniyor")}>
-    {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />)}
+    {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 rounded-lg bg-slate-100 dark:bg-dark-700 animate-pulse" />)}
   </div>
   if (!o) return null
 
@@ -94,18 +96,18 @@ export default function BayiOzet() {
         {o.paket_ad && <span className="text-[11px] uppercase tracking-wider font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{o.paket_ad}</span>}
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">
+        <div className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-3.5">
           <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Hosting hesabı")}</div>
           <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100 tabular-nums">
             {o.hosting_adet}{o.hosting_limit > 0 ? ` / ${o.hosting_limit}` : ''}
           </div>
           <div className={`mt-1 text-xs ${hostingDolu ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
-            {hostingDolu ? cevir('⚠ Limit doldu — yeni hesap açılamaz') : o.askida_adet > 0 ? cevirT("{0} hesap askıda", o.askida_adet) : cevir('Tümü aktif')}
+            {hostingDolu ? cevir('Limit doldu — yeni hesap açılamaz') : o.askida_adet > 0 ? cevirT("{0} hesap askıda", o.askida_adet) : cevir('Tümü aktif')}
           </div>
         </div>
         <Olcum etiket={cevir("Disk havuzu")} deger={mbKullanim(Math.round(o.disk_kullanim_kb / 1024))} taahhut={o.disk_taahhut_mb} limit={o.disk_limit_mb} ipucu={o.disk_limit_mb <= 0 ? cevir('Sınırsız') : undefined} />
         <Olcum etiket={cevir("Trafik havuzu")} deger={mbKullanim(Math.round(o.trafik_kullanim_kb / 1024))} taahhut={o.trafik_taahhut_mb} limit={o.trafik_limit_mb} ipucu={o.trafik_limit_mb <= 0 ? cevir('Sınırsız') : undefined} />
-        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3.5">
+        <div className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-3.5">
           <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Kendi planlarım")}</div>
           <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{o.plan_adet}</div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">

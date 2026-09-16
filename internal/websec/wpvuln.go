@@ -72,7 +72,7 @@ type wpvulnHam struct {
 			Name        string `json:"name"`
 			Description any    `json:"description"` // string veya null
 			Operator    struct {
-				MinVersion  any    `json:"min_version"`  // string veya null
+				MinVersion  any    `json:"min_version"` // string veya null
 				MinOperator any    `json:"min_operator"`
 				MaxVersion  any    `json:"max_version"`
 				MaxOperator any    `json:"max_operator"`
@@ -176,11 +176,11 @@ func WPVulnGetir(ctx context.Context, tur, slug string) ([]WPVulnZafiyet, error)
 // döner. Boş/tanınmaz şema → (0, "").
 //
 // Kabul edilen şekiller:
-//   1) {"cvss": {"score": "6.1", "severity": "medium"}, ...}  ← modern
-//   2) {"cvss": "9.8", "score": "critical"}                    ← eski
-//   3) {"cvss": 9.8}                                           ← nadiren number
-//   4) []                                                       ← impact yok
-//   5) nil
+//  1. {"cvss": {"score": "6.1", "severity": "medium"}, ...}  ← modern
+//  2. {"cvss": "9.8", "score": "critical"}                    ← eski
+//  3. {"cvss": 9.8}                                           ← nadiren number
+//  4. []                                                       ← impact yok
+//  5. nil
 func impactCoz(v any) (float64, string) {
 	m, ok := v.(map[string]any)
 	if !ok || m == nil {

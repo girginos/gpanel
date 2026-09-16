@@ -6,6 +6,9 @@ package wordpress
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -60,15 +63,19 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 5 wp-cli çağrısını PARALEL çalıştır → gecikme = en yavaş tek çağrı (~check-update),
-	// toplam ~3s yerine ~1.5s. Her sonuç kendi alanına yazılır (yarış yok).
-	out := map[string]any{"surum": "", "guncelleme_var": false, "hedef_surum": "",
-		"php": "", "db_mb": "", "bakim": false}
+	// toplam ~3s yerine ~1.5s. 🔴 Her goroutine KENDİ yerel değişkenine yazar; map
+	// yalnız wg.Wait() sonrası kurulur. (Eski hâl aynı map'e eşzamanlı yazıp Go'nun
+	// "concurrent map writes" fatal'ıyla TÜM paneli düşürüyordu — farklı anahtar dahi olsa.)
+	var (
+		surum, hedefSurum, php, dbMB string
+		guncellemeVar, bakim         bool
+	)
 	var wg sync.WaitGroup
 	wg.Add(5)
 	go func() {
 		defer wg.Done()
 		if b, e := wpStdout(ctx, sk, "core", "version", "--path="+dir); e == nil {
-			out["surum"] = strings.TrimSpace(string(b))
+			surum = strings.TrimSpace(string(b))
 		}
 	}()
 	go func() {
@@ -80,8 +87,8 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 					Version string `json:"version"`
 				}
 				if json.Unmarshal([]byte(bt), &ups) == nil && len(ups) > 0 {
-					out["guncelleme_var"] = true
-					out["hedef_surum"] = ups[0].Version
+					guncellemeVar = true
+					hedefSurum = ups[0].Version
 				}
 			}
 		}
@@ -89,21 +96,25 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		if b, e := wpStdout(ctx, sk, "eval", "echo PHP_VERSION;", "--path="+dir); e == nil {
-			out["php"] = strings.TrimSpace(string(b))
+			php = strings.TrimSpace(string(b))
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		if b, e := wpStdout(ctx, sk, "db", "size", "--size_format=mb", "--path="+dir); e == nil {
-			out["db_mb"] = strings.TrimSpace(string(b))
+			dbMB = strings.TrimSpace(string(b))
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		// KALICI bakım modu: WP-native 10dk auto-expiry yerine mu-plugin bayrağını oku.
-		out["bakim"] = bakimAktif(dir)
+		bakim = bakimAktif(dir)
 	}()
 	wg.Wait()
+	out := map[string]any{
+		"surum": surum, "guncelleme_var": guncellemeVar, "hedef_surum": hedefSurum,
+		"php": php, "db_mb": dbMB, "bakim": bakim,
+	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -164,7 +175,7 @@ func (h *Handlers) Kullanicilar(w http.ResponseWriter, r *http.Request) {
 	gonderJSON(w, b, e)
 }
 
-// demoRet: mutasyon işlemlerinde ortak domain+demo+dizin çözümü. ok=false ise yanıt yazılmıştır.
+// mutasyonHazir: mutasyon işlemlerinde ortak domain+demo+dizin çözümü. ok=false ise yanıt yazılmıştır.
 func (h *Handlers) mutasyonHazir(w http.ResponseWriter, r *http.Request, dizin string) (sk, dir string, ok bool) {
 	_, sk, _, _, demo, dok := h.domain(r)
 	if !dok {
@@ -187,7 +198,10 @@ func (h *Handlers) mutasyonHazir(w http.ResponseWriter, r *http.Request, dizin s
 // POST /domains/{id}/wordpress/eklenti  {dizin, islem: guncelle|tumunu-guncelle|aktif|pasif, ad}
 func (h *Handlers) EklentiIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem, Ad string }
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	sk, dir, ok := h.mutasyonHazir(w, r, req.Dizin)
 	if !ok {
 		return
@@ -198,7 +212,10 @@ func (h *Handlers) EklentiIslem(w http.ResponseWriter, r *http.Request) {
 // POST /domains/{id}/wordpress/tema  {dizin, islem: guncelle|tumunu-guncelle|aktif, ad}
 func (h *Handlers) TemaIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem, Ad string }
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	sk, dir, ok := h.mutasyonHazir(w, r, req.Dizin)
 	if !ok {
 		return
@@ -250,7 +267,10 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 		UserID int    `json:"user_id"`
 		Parola string `json:"parola"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	sk, dir, ok := h.mutasyonHazir(w, r, req.Dizin)
 	if !ok {
 		return
@@ -261,12 +281,10 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 	}
 	parola := strings.TrimSpace(req.Parola)
 	if parola == "" {
-		parola = randParola()
-		if parola == "" {
-			httpx.WriteError(w, http.StatusInternalServerError, "güvenli parola üretimi başarısız")
-			return
-		}
-	} else if len(parola) < 8 || len(parola) > 100 {
+		httpx.WriteError(w, http.StatusBadRequest, "yeni parola gerekli")
+		return
+	}
+	if len(parola) < 8 || len(parola) > 100 {
 		httpx.WriteError(w, http.StatusBadRequest, "parola 8-100 karakter olmalı")
 		return
 	}
@@ -281,7 +299,7 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 	if b, e := wpKomut(sk, "user", "get", strconv.Itoa(req.UserID), "--field=user_login", "--path="+dir); e == nil {
 		login = strings.TrimSpace(string(b))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "parola": parola, "kullanici": login})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "kullanici": login})
 }
 
 // POST /domains/{id}/wordpress/onar  {dizin}
@@ -289,7 +307,10 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 // (wp-content'e dokunmadan), DB'yi günceller, tekrar doğrular.
 func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin string }
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	sk, dir, ok := h.mutasyonHazir(w, r, req.Dizin)
 	if !ok {
 		return
@@ -329,7 +350,10 @@ func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 // POST /domains/{id}/wordpress/arac  {dizin, islem: bakim-ac|bakim-kapat|cache-temizle|tumunu-guncelle}
 func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem string }
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	sk, dir, ok := h.mutasyonHazir(w, r, req.Dizin)
 	if !ok {
 		return
@@ -384,9 +408,11 @@ func (h *Handlers) bakimKaydet(r *http.Request, dir string, aktif bool) {
 	if aktif {
 		ak = 1
 	}
-	_, _ = h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO wp_bakim(domain_id, dizin, aktif) VALUES(?,?,?)
-		 ON DUPLICATE KEY UPDATE aktif=VALUES(aktif)`, id, dir, ak)
+		 ON DUPLICATE KEY UPDATE aktif=VALUES(aktif)`, id, dir, ak); err != nil {
+		log.Printf("wordpress.bakimKaydet: durum yazılamadı (domain=%d): %v — panel görünümü gerçek bakım durumundan sapabilir", id, err)
+	}
 }
 
 // kisalt: uzun wp-cli çıktısını son 600 karaktere kırpar (hata mesajı için yeterli).

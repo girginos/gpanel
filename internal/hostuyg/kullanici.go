@@ -8,7 +8,6 @@ package hostuyg
 // Silme: `userdel -r` home dizinini de siler.
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
 	"os/user"
@@ -44,7 +43,7 @@ func KullaniciVarMi(ad string) bool {
 }
 
 // KullaniciYarat — sistem user oluştur (login yok, home = homeYolu).
-// İdempotent: zaten varsa hata dönmez, sadece home'u kontrol eder.
+// İdempotent: zaten varsa hata dönmez (erken çıkar, useradd çağrılmaz).
 func KullaniciYarat(ad, homeYolu string) error {
 	if !strings.HasPrefix(ad, KullaniciPrefix) {
 		return fmt.Errorf("güvenlik: user adı %q %s prefix'i taşımıyor", ad, KullaniciPrefix)
@@ -104,18 +103,4 @@ func KullaniciUID(ad string) (uid, gid int, err error) {
 		return 0, 0, err
 	}
 	return uid, gid, nil
-}
-
-// Sanity — kullanıcı adı boş ya da güvenlik prefix'siz olmasın.
-func kullaniciAdiDogrula(ad string) error {
-	if ad == "" {
-		return errors.New("kullanıcı adı boş")
-	}
-	if !strings.HasPrefix(ad, KullaniciPrefix) {
-		return fmt.Errorf("prefix zorunlu (%s...)", KullaniciPrefix)
-	}
-	if len(ad) > 32 {
-		return errors.New("kullanıcı adı 32 karakteri aşamaz")
-	}
-	return nil
 }

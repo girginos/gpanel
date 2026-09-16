@@ -9,6 +9,7 @@ import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Ayarlar = {
   hdr_x_content_type: boolean
@@ -29,22 +30,22 @@ type Ayarlar = {
 
 type Yanit = { alan_adi: string; ayarlar: Ayarlar }
 
-const BACKEND_BILGI: Record<string, { ad: string; ikon: string; aciklama: string; renk: string }> = {
+const BACKEND_BILGI: Record<string, { ad: string; ikon: React.ReactNode; aciklama: string; renk: string }> = {
   'php-fpm': {
     ad: 'nginx + PHP-FPM',
-    ikon: '⚡',
+    ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>,
     aciklama: 'Varsayılan. nginx PHP-FPM\'i doğrudan fastcgi ile çağırır. En düşük gecikme, WordPress/Laravel/dinamik PHP siteler için ideal.',
     renk: 'emerald',
   },
   'apache': {
     ad: 'nginx + Apache',
-    ikon: '🪶',
+    ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M20 4C11 4 7 8 5 14l-2 6 6-2c6-2 10-6 11-14zM8 16l8-8"/></svg>,
     aciklama: 'nginx kenarda TLS terminatörü, Apache (10080) arkada vhost\'u servis eder. .htaccess tam desteği — Joomla, eski WP, legacy CMS\'ler için.',
     renk: 'indigo',
   },
   'static': {
     ad: 'Statik (PHP yok)',
-    ikon: '📄',
+    ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M14 3v4a1 1 0 001 1h4M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"/></svg>,
     aciklama: 'Yalnız dosya servisi — React/Vue/Angular SPA, statik site jeneratörleri (Hugo/Jekyll), CDN içeriği için. PHP çağrıları 404 döner.',
     renk: 'slate',
   },
@@ -67,6 +68,8 @@ const HEADERS = [
 const WEBSRV_EN: Record<string, string> = {
   "Anasayfa": "Home",
   "Uygulanıyor…": "Applying…",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Statik (PHP yok)": "Static (no PHP)",
   "Varsayılan. nginx PHP-FPM'i doğrudan fastcgi ile çağırır. En düşük gecikme, WordPress/Laravel/dinamik PHP siteler için ideal.": "Default. nginx calls PHP-FPM directly over fastcgi. Lowest latency, ideal for WordPress/Laravel/dynamic PHP sites.",
   "nginx kenarda TLS terminatörü, Apache (10080) arkada vhost'u servis eder. .htaccess tam desteği — Joomla, eski WP, legacy CMS'ler için.": "nginx as the edge TLS terminator, Apache (10080) serves the vhost behind it. Full .htaccess support — for Joomla, old WP, legacy CMSs.",
@@ -130,12 +133,14 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (WEBSRV_EN[tr] |
 
 export default function DomainWebSunucuPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const { id } = useParams()
   const [yanit, setYanit] = useState<Yanit | null>(null)
   const [a, setA] = useState<Ayarlar | null>(null)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  // Hata/basari artik sag ust toast'ta gosterilir; state'ler mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
 
   const [backend, setBackend] = useState<string>('php-fpm')
@@ -158,7 +163,11 @@ export default function DomainWebSunucuPage() {
       setBackend(b.data.backend)
       setWebRoot(w.data.alt_dizin); setWebRootKayitli(w.data.alt_dizin)
       setWebRootAdaylar(w.data.adaylar || [])
-    }).catch(e => setHata(apiHata(e)))
+    }).catch(e => {
+      const m = apiHata(e)
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -169,10 +178,14 @@ export default function DomainWebSunucuPage() {
     try {
       await api.put(`/domains/${id}/web-backend`, { backend: yeni })
       setBackend(yeni)
-      setBasari(cevirT(cevir("✓ Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni))
+      const m = cevirT(cevir("✓ Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni)
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
-      setHata(apiHata(e, cevir("Backend değişimi başarısız")))
+      const m = apiHata(e, cevir("Backend değişimi başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setBackendDegistiriliyor(false)
     }
@@ -184,12 +197,16 @@ export default function DomainWebSunucuPage() {
     try {
       const r = await api.put<{ alt_dizin: string }>(`/domains/${id}/web-root`, { alt_dizin: webRoot.trim() })
       setWebRoot(r.data.alt_dizin); setWebRootKayitli(r.data.alt_dizin)
-      setBasari(r.data.alt_dizin
+      const m = r.data.alt_dizin
         ? cevirT(cevir("✓ Belge kökü \"public_html/{0}\" olarak ayarlandı"), r.data.alt_dizin)
-        : cevir("✓ Belge kökü public_html köküne ayarlandı"))
+        : cevir("✓ Belge kökü public_html köküne ayarlandı")
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 4000)
     } catch (e) {
-      setHata(apiHata(e, cevir("Belge kökü değiştirilemedi")))
+      const m = apiHata(e, cevir("Belge kökü değiştirilemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setWebRootKaydediliyor(false)
     }
@@ -201,9 +218,12 @@ export default function DomainWebSunucuPage() {
     try {
       await api.put(`/domains/${id}/nginx-settings`, { ayarlar: a })
       setBasari(cevir("✓ Ayarlar uygulandı, nginx yeniden yüklendi"))
+      toast.basari(cevir("Kaydedildi"), cevir("✓ Ayarlar uygulandı, nginx yeniden yüklendi"))
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydetme başarısız")))
+      const m = apiHata(e, cevir("Kaydetme başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -228,11 +248,8 @@ export default function DomainWebSunucuPage() {
         {' · '}{cevir("Güvenlik başlıkları ve özel direktifler. Kaydedince nginx vhost yeniden render edilir.")}
       </p>}
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
       {/* Web Sunucu Yığını Seçici */}
-      <div className="mb-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+      <div className="mb-6 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Web Sunucu Yığını")}</h3>
@@ -247,9 +264,9 @@ export default function DomainWebSunucuPage() {
             const b = BACKEND_BILGI[k]
             const aktif = backend === k
             const renkler: Record<string, string> = {
-              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20',
-              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'    : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/20',
-              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-slate-800 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800',
+              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20',
+              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'    : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/20',
+              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-dark-700 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700',
             }
             return (
               <button key={k} type="button"
@@ -270,7 +287,7 @@ export default function DomainWebSunucuPage() {
       </div>
 
       {/* Belge Kök Dizini (Laravel vb. için dinamik alt klasör) */}
-      <div className="mb-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+      <div className="mb-6 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
         <div className="mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Belge Kök Dizini")}</h3>
           <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
@@ -282,7 +299,7 @@ export default function DomainWebSunucuPage() {
         <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("public_html içindeki alt klasör")}</label>
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex items-stretch flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500/30">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-slate-700 select-none whitespace-nowrap">public_html/</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-dark-600 select-none whitespace-nowrap">public_html/</span>
             <input
               list="webroot-adaylar"
               value={webRoot}
@@ -290,12 +307,12 @@ export default function DomainWebSunucuPage() {
               onKeyDown={e => { if (e.key === 'Enter') webRootKaydet() }}
               placeholder={cevir("(boş = public_html kökü)")}
               spellCheck={false} autoCapitalize="off" autoCorrect="off"
-              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none"
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none"
             />
           </div>
           <button type="button" onClick={webRootKaydet}
             disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
             {webRootKaydediliyor ? cevir("Uygulanıyor…") : cevir("Belge Kökünü Kaydet")}
           </button>
         </div>
@@ -308,14 +325,14 @@ export default function DomainWebSunucuPage() {
             <span className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Algılanan klasörler:")}</span>
             {webRootAdaylar.map(x => (
               <button key={x} type="button" onClick={() => setWebRoot(x)}
-                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
+                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
                 {x}
               </button>
             ))}
           </div>
         )}
 
-        <div className="mt-3 flex items-start gap-2 px-2.5 py-2 bg-slate-50 dark:bg-slate-900/40 rounded-md">
+        <div className="mt-3 flex items-start gap-2 px-2.5 py-2 bg-slate-50 dark:bg-dark-800/40 rounded-md">
           <span className="text-xs text-slate-400 dark:text-slate-500 mt-px">↳</span>
           <div className="text-xs text-slate-600 dark:text-slate-400 min-w-0">
             <span className="text-slate-400 dark:text-slate-500">{cevir("Etkin kök:")} </span>
@@ -360,7 +377,7 @@ export default function DomainWebSunucuPage() {
               onToggle={() => P('hdr_hsts', !a.hdr_hsts)}
             />
             {a.hdr_hsts && (
-              <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-600 space-y-2">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("max-age (saniye)")}</label>
                   <select value={a.hsts_max_age} onChange={e => P('hsts_max_age', parseInt(e.target.value))}
@@ -400,7 +417,7 @@ export default function DomainWebSunucuPage() {
               onToggle={() => P('fastcgi_cache', !a.fastcgi_cache)}
             />
             {a.fastcgi_cache && (
-              <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-700">
+              <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-600">
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Cache süresi (dakika)")}</label>
                 <select value={a.fastcgi_cache_dakika} onChange={e => P('fastcgi_cache_dakika', parseInt(e.target.value))}
                   className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
@@ -413,7 +430,7 @@ export default function DomainWebSunucuPage() {
               </div>
             )}
 
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-dark-600">
               <SatirToggle
                 etiket="Browser Cache (statik dosyalar)"
                 deger={`Cache-Control: public, immutable · expires ${a.browser_cache_gun}d`}
@@ -422,7 +439,7 @@ export default function DomainWebSunucuPage() {
                 onToggle={() => P('browser_cache', !a.browser_cache)}
               />
               {a.browser_cache && (
-                <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-700">
+                <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-600">
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Cache süresi (gün)")}</label>
                   <select value={a.browser_cache_gun} onChange={e => P('browser_cache_gun', parseInt(e.target.value))}
                     className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
@@ -450,11 +467,11 @@ export default function DomainWebSunucuPage() {
 
           <div className="flex gap-3 mt-6">
             <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
               {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
             </button>
             <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
               {cevir(cevir("Yeniden Yükle"))}
             </button>
           </div>
@@ -466,8 +483,8 @@ export default function DomainWebSunucuPage() {
 
 function Kart({ baslik, children }: { baslik: string; children: any }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-slate-800">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
+      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )
@@ -478,10 +495,10 @@ function SatirToggle({ etiket, deger, aciklama, acik, onToggle }:
   return (
     <div className="flex items-start gap-3 py-2 border-b border-slate-50 last:border-0">
       <button onClick={onToggle}
-        className={`flex-shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${
+        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${
           acik ? 'bg-emerald-500' : 'bg-slate-300'
         }`}>
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-slate-800 shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-dark-700 shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline justify-between gap-2">

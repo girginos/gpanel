@@ -9,13 +9,13 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 
 const CONN_EN: Record<string, string> = {
-  "(saklanmıyor)": "(not stored)",
+  "İşlem başarısız": "Operation failed",
   "Değer üstüne tıkla → otomatik kopyalanır": "Click a value → it's copied automatically",
   "FTP yönetimine git →": "Go to FTP management →",
-  "Mevcut parolayı göster": "Show current password",
   "Panoya kopyalanamadı": "Failed to copy to clipboard",
   "Parola üretilemedi": "Failed to generate password",
   "Sistem kullanıcısı": "System user",
@@ -25,8 +25,8 @@ const CONN_EN: Record<string, string> = {
   "Web kökü": "Web root",
   "Yeni parola üret": "Generate new password",
   "veritabanı yok": "no database",
-  "⚠ Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.": "⚠ Copy the password now — you may not see it again after closing this window.",
-  "✓ Yeni parola üretildi": "✓ New password generated",
+  "Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.": "Copy the password now — you may not see it again after closing this window.",
+  "Yeni parola üretildi": "New password generated",
   "Türkçe": "English",
   "Anasayfa": "Home",
   "Domainler": "Domains",
@@ -37,12 +37,9 @@ const CONN_EN: Record<string, string> = {
   "Parola": "Password",
   "Veritabanı": "Database",
   "Otomatik kopyalanamadı. Ctrl+C basıp Enter'a tıklayın:": "Auto-copy failed. Press Ctrl+C and click Enter:",
-  "✓ Kopyalandı": "✓ Copied",
   "Şifreyi Göster / Yenile": "Show / Reset Password",
-  "(yetki yok)": "(no permission)",
   "Parolası": "Password",
   "Kullanıcı:": "User:",
-  "Mevcut parola": "Current password",
   "Kapat": "Close",
   "Üretiliyor…": "Generating…",
   "Kopyala": "Copy",
@@ -94,14 +91,17 @@ type Domain = {
 export default function DomainConnectionPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [kopya, setKopya] = useState<string | null>(null)
   const [parolaModal, setParolaModal] = useState<{ tip: 'ftp' | 'db'; cikti?: string } | null>(null)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e)))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
   }, [id])
 
   function kopyala(deg: string) {
@@ -126,7 +126,6 @@ export default function DomainConnectionPage() {
           {' · '}<span className="text-xs text-slate-400 dark:text-slate-500">{cevir("Değer üstüne tıkla → otomatik kopyalanır")}</span>
         </p>
       )}
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {domain && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -179,7 +178,7 @@ function Kart({ baslik, renk, ikon, children, cift }: { baslik: string; renk: st
     amber: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   }
   return (
-    <div className={`bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 ${cift ? 'lg:col-span-2' : ''}`}>
+    <div className={`bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 ${cift ? 'lg:col-span-2' : ''}`}>
       <div className="flex items-center gap-2 mb-3">
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${bg[renk]}`}>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
@@ -197,7 +196,7 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
   const aktif = !!onKopya
   const kopyalandi = kopya === d
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
       <dt className="text-slate-500 dark:text-slate-500 text-xs uppercase tracking-wider">{e}</dt>
       <dd
         onClick={() => aktif && onKopya!(d)}
@@ -209,7 +208,7 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
         </span>
         {kopyalandi && (
           <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-medium animate-pulse">
-            {cevir(cevir("✓ Kopyalandı"))}
+            {cevir(cevir("Kopyalandı"))}
           </span>
         )}
       </dd>
@@ -219,12 +218,12 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
 
 function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
       <dt className="text-slate-500 dark:text-slate-500 text-xs uppercase tracking-wider">{e}</dt>
       <dd className="text-right">
         <button
           onClick={onAc}
-          className="text-xs px-3 py-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
+          className="text-xs px-3 py-1 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
         >
           <Ikon d={I.anahtar} /> {cevir(cevir("Şifreyi Göster / Yenile"))}
         </button>
@@ -235,44 +234,27 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
 
 function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }:
   { tip: 'ftp' | 'db'; domainId: string; ftpUser: string; dbUser: string; onKapat: () => void; onKopya: (s: string) => void }) {
-  const [yeni, setYeni] = useState<string | null>(null)
+  const toast = useToast()
+  const [parola, setParola] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [gosterMevcut, setGosterMevcut] = useState(false)
-  const [mevcutParola, setMevcutParola] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
 
-  // Mevcut parolayı çek (FTP için DB'de saklı, db_pass_plain için databases endpoint)
-  useEffect(() => {
-    if (!gosterMevcut) return
-    if (tip === 'ftp') {
-      api.get<{ ftp_pass_plain: string }>(`/domains/${domainId}/ftp/parola-goster`)
-        .then(r => setMevcutParola(r.data.ftp_pass_plain || cevir("(saklanmıyor)")))
-        .catch(() => setMevcutParola(cevir('(yetki yok)')))
-    } else {
-      api.get<any[]>(`/domains/${domainId}/databases`)
-        .then(r => {
-          const main = (r.data || [])[0]
-          setMevcutParola(main?.db_parola || main?.db_pass_plain || cevir("(saklanmıyor)"))
-        })
-        .catch(() => setMevcutParola(cevir('(yetki yok)')))
-    }
-  }, [gosterMevcut, tip, domainId])
-
-  async function olustur() {
+  async function kaydet() {
+    if (parola.trim().length < 8) { toast.hata(cevir("İşlem başarısız"), cevir("Parola en az 8 karakter olmalı")); return }
     setIsleniyor(true); setHata(null)
     try {
       if (tip === 'ftp') {
-        const r = await api.put<{ parola: string }>(`/domains/${domainId}/ftp/password`, {})
-        setYeni(r.data.parola)
+        await api.put(`/domains/${domainId}/ftp/password`, { parola })
       } else {
         // İlk DB id'sini al
         const dbs = await api.get<any[]>(`/domains/${domainId}/databases`)
         const main = (dbs.data || [])[0]
         if (!main) throw new Error(cevir("veritabanı yok"))
-        const r = await api.put<{ parola: string }>(`/databases/${main.id}/password`, {})
-        setYeni(r.data.parola)
+        await api.put(`/databases/${main.id}/password`, { parola })
       }
-    } catch (e) { setHata(apiHata(e, cevir("Parola üretilemedi"))) }
+      toast.basari(cevir("✓ Parola güncellendi"))
+      onKapat()
+    } catch (e) { const m = apiHata(e, cevir("Parola güncellenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setIsleniyor(false) }
   }
 
@@ -281,58 +263,30 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onKapat}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={ev => ev.stopPropagation()}>
+      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={ev => ev.stopPropagation()}>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-2xl">🔑</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M15.75 7.5a3.75 3.75 0 10-3.4 3.73L6 17.6V21h3.4l.9-.9v-1.8h1.8l1.2-1.2v-1.8h1.4l1.05-1.05A3.75 3.75 0 0015.75 7.5z"/></svg>
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{tipAd} {cevir("Parolası")}</h3>
         </div>
-        <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-4 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded">
+        <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-4 bg-slate-50 dark:bg-dark-800 px-3 py-2 rounded">
           <span className="text-slate-500 dark:text-slate-500">{cevir("Kullanıcı:")}</span> <code className="font-mono text-slate-900 dark:text-slate-100">{user}</code>
         </div>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-xs text-red-700 dark:text-red-300">{hata}</div>}
-
-        {/* Mevcut parolayı göster */}
-        {!yeni && (
-          <div className="mb-4">
-            {!gosterMevcut ? (
-              <button onClick={() => setGosterMevcut(true)}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded-md text-slate-700 dark:text-slate-300">
-                <span className="inline-flex items-center gap-1.5"><Ikon d={I.goz} /> {cevir("Mevcut parolayı göster")}</span>
-              </button>
-            ) : (
-              <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
-                <div className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">{cevir("Mevcut parola")}</div>
-                <div className="flex items-center gap-2">
-                  <code className="font-mono text-sm text-slate-900 dark:text-slate-100 flex-1 break-all">{mevcutParola || '...'}</code>
-                  {mevcutParola && mevcutParola.length > 5 && (
-                    <KopyaButton text={mevcutParola} renk="amber" />
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Yeni parola */}
-        {yeni && (
-          <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded">
-            <div className="text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">{cevir("✓ Yeni parola üretildi")}</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <code className="font-mono text-sm text-slate-900 dark:text-slate-100 flex-1 break-all">{yeni}</code>
-              <KopyaButton text={yeni} renk="emerald" />
-            </div>
-            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2">{cevir("⚠ Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.")}</p>
-          </div>
-        )}
+        {/* Yeni parola — kullanıcı yazar, gösterilmez (write-only) */}
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Yeni parola")}</label>
+          <input type="password" value={parola} onChange={e => setParola(e.target.value)} autoComplete="new-password"
+            placeholder={cevir("Yeni parola girin (≥8)")}
+            className="w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm" />
+        </div>
 
         <div className="flex gap-2 justify-end mt-4">
-          <button onClick={onKapat} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">
+          <button onClick={onKapat} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">
             {cevir("Kapat")}
           </button>
-          <button onClick={olustur} disabled={isleniyor}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
-            {isleniyor ? cevir('Üretiliyor…') : (yeni ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Tekrar üret")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.simsek} /> {cevir("Yeni parola üret")}</span>)}
+          <button onClick={kaydet} disabled={isleniyor || parola.trim().length < 8}
+            className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
+            {isleniyor ? cevir('Kaydediliyor…') : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Parolayı güncelle")}</span>}
           </button>
         </div>
       </div>

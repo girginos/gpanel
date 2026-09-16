@@ -386,7 +386,10 @@ func rotasyonUygulaN(ctx context.Context, db *sql.DB, uygID int64, tutSayisi int
 		if err := os.Remove(tumu[i].dosya); err != nil && !os.IsNotExist(err) {
 			log.Printf("hostuyg.rotasyon: dosya sil UYARI %s: %v", tumu[i].dosya, err)
 		}
-		_, _ = db.ExecContext(ctx, `DELETE FROM cp_host_uyg_yedekler WHERE id=?`, tumu[i].id)
+		if _, err := db.ExecContext(ctx, `DELETE FROM cp_host_uyg_yedekler WHERE id=?`, tumu[i].id); err != nil {
+			log.Printf("hostuyg.rotasyon: DB kaydı silinemedi (id=%d %s): %v — dosya gitti, kayıt orphan", tumu[i].id, tumu[i].dosya, err)
+			continue
+		}
 		log.Printf("hostuyg.rotasyon: eski yedek silindi %s", tumu[i].dosya)
 	}
 	return nil

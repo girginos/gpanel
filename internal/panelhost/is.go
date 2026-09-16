@@ -16,9 +16,9 @@ import (
 )
 
 type Adim struct {
-	Zaman   time.Time `json:"zaman"`
-	Mesaj   string    `json:"mesaj"`
-	Basari  bool      `json:"basari"`
+	Zaman  time.Time `json:"zaman"`
+	Mesaj  string    `json:"mesaj"`
+	Basari bool      `json:"basari"`
 }
 
 type Is struct {
@@ -35,9 +35,9 @@ type Is struct {
 }
 
 var (
-	isMu      sync.RWMutex
-	isKayit   = map[string]*Is{}
-	sonTemiz  time.Time
+	isMu     sync.RWMutex
+	isKayit  = map[string]*Is{}
+	sonTemiz time.Time
 
 	// 🔴 Kritik: aynı tip iş (ayarla/sslkur) için EŞZAMANLI ÇALIŞMA YASAK.
 	// İki paralel `girginospanel-panelhost ayarla` bash süreci aynı vhost

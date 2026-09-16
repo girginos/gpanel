@@ -169,10 +169,30 @@ func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
 		Mevcut bool `json:"mevcut"`
 	}
 	out := make([]cikti, 0, len(hesaplar))
+	// N+1 yerine tek sorgu: hedefte var olan alan adlarini topla. 'mevcut' bayragi
+	// advisory oldugundan DB hatasinda kesfi dusurmeyiz — log + eksik bayrak.
+	mevcutSet := map[string]bool{}
+	if len(hesaplar) > 0 {
+		ph := make([]string, len(hesaplar))
+		args := make([]any, len(hesaplar))
+		for i, hs := range hesaplar {
+			ph[i] = "?"
+			args[i] = hs.AlanAdi
+		}
+		if rows, err := h.DB.Query(`SELECT alan_adi FROM domains WHERE alan_adi IN (`+strings.Join(ph, ",")+`)`, args...); err != nil { //nolint:gosec // G202: ph = []string{"?",...} (yalnız placeholder); alan adları (hs.AlanAdi) args ile ? bağlanır.
+			log.Printf("tasima.Kesif: mevcut-domain sorgusu basarisiz: %v — 'mevcut' bayragi eksik olabilir", err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var a string
+				if err := rows.Scan(&a); err == nil {
+					mevcutSet[a] = true
+				}
+			}
+		}
+	}
 	for _, hs := range hesaplar {
-		var n int
-		_ = h.DB.QueryRow(`SELECT COUNT(*) FROM domains WHERE alan_adi=?`, hs.AlanAdi).Scan(&n)
-		out = append(out, cikti{Hesap: hs, Mevcut: n > 0})
+		out = append(out, cikti{Hesap: hs, Mevcut: mevcutSet[hs.AlanAdi]})
 	}
 	// 🔴 Oturumu kalıcılaştır: kaynak bilgileri + keşif sonucu şifreli saklanır ki
 	// sayfa yenilenince kullanıcı her şeyi yeniden girmesin (bkz. oturum.go).

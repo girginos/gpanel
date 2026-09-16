@@ -2,6 +2,7 @@ package reseller
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,6 +92,63 @@ func (q *paketReq) dogrula() string {
 	return ""
 }
 
+// enKucukTaahhut: HER bayinin kullanabilecegi (global katalog) en kucuk hosting
+// planinin disk/trafik taahhudunu, plan adiyla birlikte dondurur.
+//
+// 🔴 KAPSAM: reseller_id=0 (admin katalogu — her bayiye acik) VE
+// domain_id IS NULL (domaine-ozel planlar katalogda degil, 0046 gocu). Bayinin
+// KENDI planlari (reseller_id>0) bilerek HARIC: onlar yalniz o bayiye aciktir,
+// yeni acilan bir bayi onlari kullanamaz → kapi yanlis gecerdi.
+//
+// 0 doner = "olcut yok" (hic plan yok ya da tum planlar sinirsiz) → kapi uygulanmaz.
+func (h *Handlers) enKucukTaahhut(r *http.Request) (diskAd string, diskMB int64, trafikAd string, trafikMB int64) {
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT ad, disk_kota_mb FROM service_plans
+		  WHERE reseller_id=0 AND domain_id IS NULL AND disk_kota_mb>0
+		  ORDER BY disk_kota_mb ASC, id ASC LIMIT 1`).Scan(&diskAd, &diskMB)
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT ad, trafik_kota_mb FROM service_plans
+		  WHERE reseller_id=0 AND domain_id IS NULL AND trafik_kota_mb>0
+		  ORDER BY trafik_kota_mb ASC, id ASC LIMIT 1`).Scan(&trafikAd, &trafikMB)
+	return
+}
+
+// taahhutKapisi: paket limitleri en kucuk hosting planinin taahhudunu karsilamiyorsa
+// NET Turkce mesaj doner (bos = gecti).
+//
+// 🔴 NEDEN: paket limiti tek bir hosting planinin taahhudunun altindaysa o bayi
+// TEK hosting bile acamaz; panel bugun bunu SESSIZCE kaydediyor, hata ancak bayi
+// hosting acmaya calisinca "trafik/disk kotanız yetersiz..." diye ortaya cikiyordu
+// (bkz. internal/domains/handlers.go taahhut kapisi).
+//
+// 🔴 KARSILASTIRMA "<=": domains tarafindaki kapi `mevcut+yeni >= limit` ile
+// reddediyor — yani SINIR DEGERINE ULASMAK da dolu sayiliyor. Paket limiti bu
+// yuzden plan taahhudunden KESINLIKLE BUYUK olmali; esitlik de kullanilamaz paket.
+//
+// 🔴 fazla_satis (oversell) ACIK ise kapi UYGULANMAZ: o modda domains
+// tarafindaki taahhut kapisi zaten atlaniyor (fazlaSatis==1 kontrolu).
+//
+// 0 = sinirsiz semantigi korunur: limiti 0 olan alan denetlenmez.
+func (h *Handlers) taahhutKapisi(r *http.Request, req *paketReq) string {
+	if req.FazlaSatis {
+		return ""
+	}
+	diskAd, diskMB, trafikAd, trafikMB := h.enKucukTaahhut(r)
+	if req.MaxDiskMB > 0 && diskMB > 0 && req.MaxDiskMB <= diskMB {
+		return fmt.Sprintf("bu paketle tek hosting bile açılamaz: paketin disk limiti %d MB, "+
+			"en küçük hosting planı %q ise %d MB taahhüt ediyor. Paket limiti bu taahhütten BÜYÜK olmalı "+
+			"(sınır değerine ulaşmak dolu sayılır). Paket limitini artırın ya da “fazla satış”ı açın.",
+			req.MaxDiskMB, diskAd, diskMB)
+	}
+	if req.MaxTrafikMB > 0 && trafikMB > 0 && req.MaxTrafikMB <= trafikMB {
+		return fmt.Sprintf("bu paketle tek hosting bile açılamaz: paketin trafik limiti %d MB, "+
+			"en küçük hosting planı %q ise %d MB taahhüt ediyor. Paket limiti bu taahhütten BÜYÜK olmalı "+
+			"(sınır değerine ulaşmak dolu sayılır). Paket limitini artırın ya da “fazla satış”ı açın.",
+			req.MaxTrafikMB, trafikAd, trafikMB)
+	}
+	return ""
+}
+
 // POST /reseller-plans — yeni bayi paketi (admin).
 func (h *Handlers) PaketOlustur(w http.ResponseWriter, r *http.Request) {
 	var req paketReq
@@ -102,10 +160,17 @@ func (h *Handlers) PaketOlustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := h.taahhutKapisi(r, &req); msg != "" {
+		httpx.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 	v := 0
 	if req.Varsayilan {
 		v = 1
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE reseller_plans SET varsayilan=0`)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE reseller_plans SET varsayilan=0`); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "varsayılan sıfırlanamadı: "+err.Error())
+			return
+		}
 	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO reseller_plans(ad, aciklama, max_domain, max_disk_mb, max_trafik_mb,
@@ -140,10 +205,17 @@ func (h *Handlers) PaketGuncelle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := h.taahhutKapisi(r, &req); msg != "" {
+		httpx.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 	v := 0
 	if req.Varsayilan {
 		v = 1
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE reseller_plans SET varsayilan=0 WHERE id<>?`, id)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE reseller_plans SET varsayilan=0 WHERE id<>?`, id); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "varsayılan sıfırlanamadı: "+err.Error())
+			return
+		}
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE reseller_plans SET ad=?, aciklama=?, max_domain=?, max_disk_mb=?, max_trafik_mb=?,

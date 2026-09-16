@@ -11,7 +11,7 @@ const BG: Record<Renk, string> = {
   indigo:  'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
   emerald: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
   teal:    'bg-teal-100 text-teal-700',
-  slate:   'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300',
+  slate:   'bg-slate-100 dark:bg-dark-700 text-slate-700 dark:text-slate-300',
   orange:  'bg-orange-100 text-orange-700',
   rose:    'bg-rose-100 text-rose-700',
 }
@@ -36,7 +36,7 @@ export default function ToolCard({
   }
   const govde = (
     <>
-      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${BG[renk]}`}>
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${BG[renk]}`}>
         {ikonNode ?? (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-5 h-5">
             <path strokeLinecap="round" strokeLinejoin="round" d={ikon} />
@@ -57,7 +57,7 @@ export default function ToolCard({
       </div>
     </>
   )
-  const klass = 'group flex items-start gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:shadow-sm transition text-left w-full cursor-pointer'
+  const klass = 'group flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-dark-600 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700/50 hover:shadow-xs transition text-left w-full cursor-pointer'
 
   return <button type="button" onClick={tikla} className={klass}>{govde}</button>
 }

@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -23,6 +24,8 @@ type Surum = { surum: string; aciklama?: string }
 // Sınırsız (0) alanlar en yükseğe sayılır — aksi halde "sınırsız" düşürme görünür.
 
 const DPLAN_EN: Record<string, string> = {
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
   "Türkçe": "English",
   "✓ Limitler kaydedildi ve bu hostinge uygulandı.": "✓ Limits saved and applied to this hosting.",
   "Domainler": "Domains",
@@ -93,11 +96,12 @@ function puan(p: Plan) {
 const mb = (v: number) => (v <= 0 ? cevir('sınırsız') : v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`)
 const adet = (v: number) => (v <= 0 ? cevir('sınırsız') : String(v))
 
-const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
+const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
 
 export default function DomainPlanPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [planlar, setPlanlar] = useState<Plan[]>([])
   const [surumler, setSurumler] = useState<Surum[]>([])
@@ -120,7 +124,7 @@ export default function DomainPlanPage() {
       api.get<Surum[]>('/php/versions').catch(() => ({ data: [] as Surum[] })),
     ])
       .then(([d, p, s]) => { setDomain(d.data); setPlanlar(p.data || []); setSurumler(s.data || []) })
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
     // Mail eklentisi aktif mi? (posta limiti alanlarının gate'i)
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
@@ -141,10 +145,12 @@ export default function DomainPlanPage() {
     setIsleniyor(p.id); setHata(null); setBasari(null); setTaslak(null)
     try {
       await api.put(`/domains/${id}/plan`, { plan_id: p.id })
-      setBasari(`✓ "${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`)
+      const m = `✓ "${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Plan değiştirilemedi")))
+      const m = apiHata(e, cevir("Plan değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(null) }
   }
 
@@ -155,14 +161,16 @@ export default function DomainPlanPage() {
     setIsleniyor('ozel'); setHata(null); setBasari(null)
     try {
       const { data } = await api.post<{ plan_id: number; ad: string; zaten_ozel?: boolean }>(`/domains/${id}/ozel-plan`, {})
-      setBasari(data.zaten_ozel
+      const m = data.zaten_ozel
         ? `"${data.ad}" ${cevir("zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.")}`
-        : `✓ "${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`)
+        : `✓ "${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`
+      setBasari(m)
+      toast.basari(cevir("Kaydedildi"), m)
       const { data: pl } = await api.get<{ plan: Plan }>(`/plans/${data.plan_id}`)
       setTaslak(pl.plan)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Özel plan oluşturulamadı")))
+      const m = apiHata(e, cevir("Özel plan oluşturulamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(null) }
   }
 
@@ -172,7 +180,7 @@ export default function DomainPlanPage() {
     try {
       const { data } = await api.get<{ plan: Plan }>(`/plans/${mevcut.id}`)
       setTaslak(data.plan)
-    } catch (e) { setHata(apiHata(e, cevir("Plan okunamadı"))) }
+    } catch (e) { const m = apiHata(e, cevir("Plan okunamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
 
   function T<K extends keyof Plan>(k: K, v: Plan[K]) {
@@ -188,10 +196,11 @@ export default function DomainPlanPage() {
       // Plan kaydı limitleri hostinge KENDİLİĞİNDEN uygulamaz — yeniden atayarak uygula.
       await api.put(`/domains/${id}/plan`, { plan_id: taslak.id })
       setBasari(cevir("✓ Limitler kaydedildi ve bu hostinge uygulandı."))
+      toast.basari(cevir("Kaydedildi"), cevir("✓ Limitler kaydedildi ve bu hostinge uygulandı."))
       setTaslak(null)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir('Kaydedilemedi')))
+      const m = apiHata(e, cevir('Kaydedilemedi')); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(null) }
   }
 
@@ -212,17 +221,14 @@ export default function DomainPlanPage() {
         </p>
       </div>
 
-      {hata && <div role="alert" className="mb-3 text-sm rounded-md border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 px-3 py-2">{hata}</div>}
-      {basari && <div role="status" className="mb-3 text-sm rounded-md border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 px-3 py-2">{basari}</div>}
-
       {yuk ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label={cevir("Planlar yükleniyor")}>
-          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-44 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />)}
+          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-44 rounded-lg bg-slate-100 dark:bg-dark-700 animate-pulse" />)}
         </div>
       ) : (
         <>
           {/* Mevcut plan + aksiyonlar */}
-          <div className="mb-5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+          <div className="mb-5 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Mevcut plan")}</div>
@@ -254,7 +260,7 @@ export default function DomainPlanPage() {
                 )}
                 {mevcut && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
-                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
                     {cevir("Tüm ayarlar")}
                   </Link>
                 )}
@@ -301,7 +307,7 @@ export default function DomainPlanPage() {
                   {isleniyor === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet ve uygula')}
                 </button>
                 <button type="button" onClick={() => setTaslak(null)} disabled={isleniyor !== null}
-                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-60">
+                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-dark-700 disabled:opacity-60">
                   {cevir("Vazgeç")}
                 </button>
                 <Link to={`/araclar/paketler/${taslak.id}`} className="inline-flex items-center px-1 py-2 text-sm text-brand-700 dark:text-brand-300 hover:underline">
@@ -312,7 +318,7 @@ export default function DomainPlanPage() {
           )}
 
           {planlar.length === 0 ? (
-            <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-slate-700">
+            <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-dark-600">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">{cevir("Tanımlı plan yok")}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Önce bir hosting planı oluşturun.")}</p>
               <Link to="/araclar/paketler" className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">{cevir("Planlara git")}</Link>
@@ -324,7 +330,7 @@ export default function DomainPlanPage() {
                 const fark = puan(p) - mevcutPuan
                 const yon = !mevcut ? 'geç' : fark > 0 ? 'yükselt' : fark < 0 ? 'düşür' : 'geç'
                 return (
-                  <li key={p.id} className={`rounded-lg border p-4 flex flex-col gap-3 ${bu ? 'border-brand-500 dark:border-brand-500 bg-brand-50/40 dark:bg-brand-950/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'}`}>
+                  <li key={p.id} className={`rounded-lg border p-4 flex flex-col gap-3 ${bu ? 'border-brand-500 dark:border-brand-500 bg-brand-50/40 dark:bg-brand-950/20' : 'border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800'}`}>
                     <div>
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{p.ad}</h3>
@@ -343,7 +349,7 @@ export default function DomainPlanPage() {
                     <div className="mt-auto flex gap-2">
                       {bu ? (
                         <>
-                          <span className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
+                          <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
                           {ozelMi && (
                             <button type="button" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
                                     className="shrink-0 rounded-md border border-brand-300 dark:border-brand-700 px-3 py-1.5 text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-950/40 disabled:opacity-60">
@@ -355,7 +361,7 @@ export default function DomainPlanPage() {
                         <button type="button" onClick={() => planUygula(p)} disabled={isleniyor !== null}
                                 className={`w-full rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-slate-900 ${
                                   yon === 'düşür'
-                                    ? 'bg-slate-600 hover:bg-slate-700 focus-visible:ring-slate-500'
+                                    ? 'bg-slate-600 hover:bg-dark-600 focus-visible:ring-slate-500'
                                     : 'bg-brand-600 hover:bg-brand-700 focus-visible:ring-brand-500'}`}>
                           {isleniyor === p.id ? cevir('Uygulanıyor…') : yon === 'yükselt' ? cevir('↑ Yükselt') : yon === 'düşür' ? cevir('↓ Düşür') : cevir("Bu plana geç")}
                         </button>

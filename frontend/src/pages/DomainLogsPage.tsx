@@ -10,6 +10,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type LogDosya = { anahtar: string; etiket: string; yol: string; boyut_b: number; degisme: string; mevcut: boolean }
@@ -19,6 +20,7 @@ const MAX_PENCERE = 1000
 
 
 const DLOGS_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "(log dosyası boş veya henüz oluşmadı)": "(log file is empty or not created yet)",
   "Ara — IP, yol, durum kodu, tarayıcı…": "Search — IP, path, status code, browser…",
   "Aramayı temizle": "Clear search",
@@ -56,6 +58,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (DLOGS_EN[tr] ||
 export default function DomainLogsPage() {
   useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
+  const toast = useToast()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dosyalar, setDosyalar] = useState<LogDosya[]>([])
@@ -79,25 +82,32 @@ export default function DomainLogsPage() {
   }, [satirlar, arama])
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
-    api.get<LogDosya[]>(`${base}/logs`).then(r => setDosyalar(r.data)).catch(e => setHata(apiHata(e)))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
+    api.get<LogDosya[]>(`${base}/logs`).then(r => { if (iptal) return; setDosyalar(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
   }, [id])
 
   // Aktif dosya değişince son N satırı yükle
+  const ilkYukleNesli = useRef(0)
   async function ilkYukle() {
     if (!id || !aktif) return
+    const _n = ++ilkYukleNesli.current
     try {
       const { data } = await api.get<ReadResp>(`${base}/logs/oku`, { params: { dosya: aktif, son: 200 } })
+      if (_n !== ilkYukleNesli.current) return
       setSatirlar(data.satirlar || [])
       setHata(null)
     } catch (e) {
-      setHata(apiHata(e))
+      if (_n !== ilkYukleNesli.current) return
+      const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     }
   }
   useEffect(() => {
     setCanli(false)
     ilkYukle()
+    return () => { ilkYukleNesli.current++ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktif, id])
 
@@ -116,7 +126,9 @@ export default function DomainLogsPage() {
           signal: ctrl.signal,
         })
         if (!res.ok || !res.body) {
-          setHata(cevirT(cevir("stream başlamadı (HTTP {0})"), res.status))
+          const m = cevirT(cevir("stream başlamadı (HTTP {0})"), res.status)
+          setHata(m)
+          toast.hata(m)
           setCanli(false)
           return
         }
@@ -142,7 +154,7 @@ export default function DomainLogsPage() {
           }
         }
       } catch (e: any) {
-        if (e.name !== 'AbortError') setHata(e.message)
+        if (e.name !== 'AbortError') { setHata(e.message); toast.hata(cevir("İşlem başarısız"), e.message) }
       }
     })()
     return () => ctrl.abort()
@@ -173,10 +185,8 @@ export default function DomainLogsPage() {
         </p>
       )}
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {/* Sekmeler */}
-      <div className="flex items-center flex-wrap gap-y-2 border-b border-slate-200 dark:border-slate-700 mb-3">
+      <div className="flex items-center flex-wrap gap-y-2 border-b border-slate-200 dark:border-dark-600 mb-3">
         {dosyalar.map(d => (
           <button
             key={d.anahtar}
@@ -198,14 +208,14 @@ export default function DomainLogsPage() {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {/* Görünüm toggle */}
-          <div className="flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden text-xs">
+          <div className="flex rounded-md border border-slate-200 dark:border-dark-600 overflow-hidden text-xs">
             <button
               onClick={() => setGorunum('tablo')}
-              className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'tablo' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+              className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'tablo' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-dark-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600'}`}
             >{cevir("Tablo")}</button>
             <button
               onClick={() => setGorunum('ham')}
-              className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'ham' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+              className={`px-2.5 py-1.5 font-medium transition ${gorunum === 'ham' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-dark-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600'}`}
             >{cevir("Ham")}</button>
           </div>
 
@@ -226,13 +236,13 @@ export default function DomainLogsPage() {
           <button
             onClick={ilkYukle}
             disabled={canli}
-            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md transition disabled:opacity-50"
+            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md transition disabled:opacity-50"
           >
             <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Son 200")}</span>
           </button>
           <button
             onClick={() => setSatirlar([])}
-            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md transition"
+            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md transition"
           >
             {cevir("Temizle")}
           </button>
@@ -249,7 +259,7 @@ export default function DomainLogsPage() {
             value={arama}
             onChange={e => setArama(e.target.value)}
             placeholder={cevir("Ara — IP, yol, durum kodu, tarayıcı…")}
-            className="w-full pl-8 pr-8 py-1.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
+            className="w-full pl-8 pr-8 py-1.5 text-sm bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
           />
           {arama && (
             <button
@@ -269,7 +279,7 @@ export default function DomainLogsPage() {
       {/* Log gövdesi */}
       <div
         ref={scrollRef}
-        className="bg-slate-900 border border-slate-800 rounded-2xl overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
+        className="bg-dark-800 border border-dark-600 rounded-lg overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
       >
         {satirlar.length === 0 ? (
           <div className="p-6 text-sm text-slate-500 font-mono">{canli ? cevir('Bekleniyor… yeni satırlar geldikçe akacak.') : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
@@ -328,7 +338,7 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse min-w-[640px]">
-      <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+      <thead className="sticky top-0 z-10 bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-dark-600">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">IP</th>
@@ -339,7 +349,7 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
           <th className="text-left font-medium px-3 py-2">{cevir("Tarayıcı")}</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-slate-800/70">
+      <tbody className="divide-y divide-dark-600/70">
         {satirlar.map((ham, i) => {
           const r = satirNesne[i]
           if (!r) {
@@ -350,7 +360,7 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
             )
           }
           return (
-            <tr key={i} className="hover:bg-slate-800/40">
+            <tr key={i} className="hover:bg-dark-700/40">
               <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap">{kisaZaman(r.zaman)}</td>
               <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.ip}</td>
               <td className="px-3 py-1.5">
@@ -433,7 +443,7 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse min-w-[640px]">
-      <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+      <thead className="sticky top-0 z-10 bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-dark-600">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
           <th className="text-left font-medium px-3 py-2">{cevir("Seviye")}</th>
@@ -441,7 +451,7 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
           <th className="text-left font-medium px-3 py-2 w-full">{cevir("Mesaj")}</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-slate-800/70">
+      <tbody className="divide-y divide-dark-600/70">
         {grupla(satirlar).map((g, i) => {
           const m = ERROR_RE.exec(g.bas)
           if (!m) {
@@ -459,7 +469,7 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
           const ozet = ozetMesaj(m[3])
           const konum = konumBul([m[3], ...g.devam])
           return (
-            <tr key={i} className="hover:bg-slate-800/40">
+            <tr key={i} className="hover:bg-dark-700/40">
               <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap">{m[1].slice(5)}</td>
               <td className="px-3 py-1.5">
                 <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold text-[10px] ${seviyeRenk(m[2])}`}>{m[2]}</span>
@@ -486,14 +496,14 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
 
 function methodRenk(m: string): string {
   switch (m) {
-    case 'GET': return 'bg-slate-700 text-slate-200'
+    case 'GET': return 'bg-dark-600 text-slate-200'
     case 'POST': return 'bg-sky-900/70 text-sky-200'
     case 'PUT':
     case 'PATCH': return 'bg-amber-900/70 text-amber-200'
     case 'DELETE': return 'bg-red-900/70 text-red-200'
     case 'HEAD':
-    case 'OPTIONS': return 'bg-slate-700/60 text-slate-300'
-    default: return 'bg-slate-800 text-slate-400'
+    case 'OPTIONS': return 'bg-dark-600/60 text-slate-300'
+    default: return 'bg-dark-700 text-slate-400'
   }
 }
 
@@ -502,7 +512,7 @@ function durumRenk(s: number): string {
   if (s >= 400) return 'bg-amber-900/70 text-amber-200'
   if (s >= 300) return 'bg-sky-900/70 text-sky-200'
   if (s >= 200) return 'bg-emerald-900/70 text-emerald-200'
-  return 'bg-slate-700 text-slate-300'
+  return 'bg-dark-600 text-slate-300'
 }
 
 function seviyeRenk(s: string): string {
@@ -510,7 +520,7 @@ function seviyeRenk(s: string): string {
   if (l === 'emerg' || l === 'alert' || l === 'crit' || l === 'error') return 'bg-red-900/70 text-red-200'
   if (l === 'warn') return 'bg-amber-900/70 text-amber-200'
   if (l === 'notice') return 'bg-sky-900/70 text-sky-200'
-  return 'bg-slate-700 text-slate-300'
+  return 'bg-dark-600 text-slate-300'
 }
 
 // 03/Jul/2026:22:40:31 +0000  ->  03/Jul 22:40:31
@@ -531,7 +541,7 @@ function boyutFmt(b: string): string {
 function uaKisa(ua: string): string {
   if (!ua || ua === '-') return '—'
   const bot = /(bot|crawl|spider|zgrab|curl|wget|python|go-http|scan|nikto|masscan)/i.exec(ua)
-  if (bot) return `🤖 ${bot[1]}`
+  if (bot) return bot[1]
   let os = ''
   if (/Windows NT 10/.test(ua)) os = 'Windows'
   else if (/Mac OS X/.test(ua)) os = 'macOS'

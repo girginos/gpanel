@@ -12,6 +12,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -27,7 +28,7 @@ type SubGenel = {
   sistem_kullanici: string; php_surum: string; docroot: string; olusturulma: string
 }
 type Plan = { id: number; ad: string; disk_kota_mb?: number }
-type PHPVer = { surum: string; aciklama?: string }
+type PHPVer = { surum: string; aciklama?: string; eol?: boolean }
 type OlusturmaSonuc = {
   alan_adi: string; sistem_kullanici: string; ftp_user: string; ftp_host: string
   db_host: string; db_user: string; db_adi: string
@@ -49,7 +50,7 @@ function SahipHucre({ ad, tur }: { ad?: string; tur?: string }) {
       <span className="text-slate-700 dark:text-slate-300 truncate">{ad}</span>
       <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold shrink-0 ${
         bayi ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
-             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+             : 'bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400'}`}>
         {bayi ? cevir('bayi') : cevir('yönetici')}
       </span>
     </span>
@@ -63,7 +64,7 @@ function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
     <a href={`${ssl ? 'https' : 'http'}://${ad}`} target="_blank" rel="noopener noreferrer"
        title={cevirT(cevir("{0} sitesini yeni sekmede aç"), ad)} aria-label={cevirT(cevir("{0} sitesini yeni sekmede aç"), ad)}
        onClick={e => e.stopPropagation()}
-       className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition">
+       className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-dark-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
            strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden="true">
         <path d="M14 4h6v6" /><path d="M20 4l-8.5 8.5" />
@@ -134,7 +135,7 @@ const DOMAINS_EN: Record<string, string> = {
   "yükleniyor…": "loading…",
   "Özel": "Custom",
   "çalışıyor": "running",
-  "İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL veritabanı ve DNS zone otomatik oluşturulur.": "Start by adding your first domain. Linux user, nginx vhost, PHP-FPM pool, FTP account, MySQL database and DNS zone are created automatically.",
+  "İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik oluşturulur.": "Start by adding your first domain. Linux user, nginx vhost, PHP-FPM pool, FTP account and DNS zone are created automatically.",
   "İptal": "Cancel",
   "İstemezseniz kapalı bırakın — sonradan Veritabanları sekmesinden açabilirsiniz.": "Leave it off if you prefer — you can enable it later from the Databases tab.",
   "İşlemler": "Actions",
@@ -151,9 +152,11 @@ const DOMAINS_EN: Record<string, string> = {
   "Pasif Et": "Deactivate",
   "SSL kur (Let's Encrypt)": "Install SSL (Let's Encrypt)",
   "Sil": "Delete",
-  "🔍 Domain ara...": "🔍 Search domain...",
+  "Domain ara...": "Search domain...",
   "{0} sitesini yeni sekmede aç": "Open site {0} in a new tab",
   "✓ \"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.": "✓ \"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account, MySQL DB and DNS zone are ready.",
+  "✓ \"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.": "✓ \"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account and DNS zone are ready.",
+  "güncelleme almıyor": "no longer updated",
   "{0} domainin TÜM DNS kayıtları silinip şablondan yeniden oluşturulacak. Özel kayıtlar (MX, TXT, doğrulama kayıtları) KAYBOLUR.": "ALL DNS records of {0} domain(s) will be deleted and recreated from the template. Custom records (MX, TXT, verification records) WILL BE LOST.",
   "✓ {0} domain \"{1}\" durumuna geçirildi": "✓ {0} domain(s) switched to \"{1}\" status",
   "domain etkilenecek.": "domain(s) will be affected.",
@@ -182,6 +185,8 @@ const DOMAINS_EN: Record<string, string> = {
   "kayıt silindi": "records deleted",
   "oturumları düşer, Git webhook anahtarı değişir, SSH anahtarları arşivlenir, uzak yedek hedefi ve GitHub bağlantısı kaldırılır.": "sessions are dropped, the Git webhook key changes, SSH keys are archived, the remote backup target and GitHub connection are removed.",
   "— kaydedin.": "— save it.",
+  "Oluşturuldu": "Created",
+  "İşlem başarısız": "Operation failed",
 }
 
 function useCevir() {
@@ -193,12 +198,14 @@ export default function DomainsPage() {
   const cevir = useCevir()
 
   const { sor, onay } = useDialog()
+  const toast = useToast()
   const sahipKolonu = panelSahibiMi()
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  // Hata/başarı artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [secili, setSecili] = useState<Set<number>>(new Set())
   // Toplu async islem (DNS reset / SSL / sahip / plan) — process bar ile
@@ -231,29 +238,33 @@ export default function DomainsPage() {
     setYuk(true)
     api.get<Domain[]>('/domains')
       .then(r => setItems(r.data))
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
     api.get<SubGenel[]>('/subdomains')
       .then(r => setSubler(r.data))
       .catch(() => setSubler([]))
   }
   useEffect(() => {
+    let iptal = false
     if (topluModal === 'sahip') {
-      api.get('/resellers').then(r => setTopluBayiler((r.data?.bayiler || r.data || []) as never)).catch(() => {})
-      api.get('/customers').then(r => setTopluMusteriler((r.data?.musteriler || r.data || []) as never)).catch(() => {})
+      api.get('/resellers').then(r => { if (iptal) return; setTopluBayiler((r.data?.bayiler || r.data || []) as never) }).catch(() => {})
+      api.get('/customers').then(r => { if (iptal) return; setTopluMusteriler((r.data?.musteriler || r.data || []) as never) }).catch(() => {})
     } else if (topluModal === 'plan') {
       // Toplu plan modalı planları modalVeriYukle üzerinden çeker; eskiden yalnız
       // "yeni domain" modalında yükleniyordu, o yüzden toplu planda liste boştu.
       modalVeriYukle()
     }
+    return () => { iptal = true }
   }, [topluModal])
 
   useEffect(yukle, [])
   // SSL degisimi nginx reload tetikleyip sayfayi yenileyebilir → devam eden isi bul.
   useEffect(() => {
+    let iptal = false
     api.get<{ is_id: number }>('/domains/toplu/aktif')
-      .then(r => { if (r.data.is_id > 0) setTopluIsID(r.data.is_id) })
+      .then(r => { if (iptal) return; if (r.data.is_id > 0) setTopluIsID(r.data.is_id) })
       .catch(() => { /* sessiz */ })
+    return () => { iptal = true }
   }, [])
 
   // Alt alanlar da toplu seçime dahil — sol kutucukla seçilir, "🗑 Sil" ile domainlerle
@@ -314,6 +325,7 @@ export default function DomainsPage() {
     const alanAdi = fAlanAdi.trim().toLowerCase()
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(alanAdi)) {
       setHata(cevir("Geçersiz alan adı. Örn: ornek.com veya panel.ornek.com"))
+      toast.hata(cevir("İşlem başarısız"), cevir("Geçersiz alan adı. Örn: ornek.com veya panel.ornek.com"))
       return
     }
     setOlusturuluyor(true)
@@ -324,11 +336,18 @@ export default function DomainsPage() {
       const r = await api.post<OlusturmaSonuc>('/domains', body)
       setOlusturAcik(false)
       setOlusturmaSonuc(r.data)
-      setBasari(cevirT(cevir('✓ "{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.'), alanAdi))
+      // Metin davranisla ortusmeli: DB yalniz kutu isaretliyse olusturulur.
+      const m = cevirT(cevir(fSqlOlustur
+        ? '✓ "{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.'
+        : '✓ "{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.'), alanAdi)
+      setBasari(m)
+      toast.basari(cevir("Oluşturuldu"), m)
       setTimeout(() => setBasari(null), 8000)
       yukle()
     } catch (e: any) {
-      setHata(apiHata(e, cevir("Domain oluşturulamadı")))
+      const m = apiHata(e, cevir("Domain oluşturulamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setOlusturuluyor(false)
     }
@@ -383,18 +402,44 @@ export default function DomainsPage() {
 
   async function topluSil() {
     setSilOnay(false); setIsleniyor(true); setHata(null)
-    const ids = Array.from(secili); let basarili = 0
-    for (const id of ids) {
-      try { await api.delete(`/domains/${id}`); basarili++ } catch {}
+    const ids = Array.from(secili)
+    const subIds = Array.from(subSecili)
+    // O(n^2) subler.find yerine id -> subdomain on-indeksleme.
+    const subById = new Map(subler.map(sd => [sd.id, sd]))
+    const domById = new Map(items.map(d => [d.id, d.alan_adi]))
+    type SilGorev = { url: string; etiket: string }
+    const gorevler: SilGorev[] = [
+      ...ids.map(id => ({ url: `/domains/${id}`, etiket: domById.get(id) ?? String(id) })),
+      ...subIds
+        .map(sid => {
+          const sd = subById.get(sid)
+          return sd ? { url: `/domains/${sd.parent_id}/subdomain/${sid}`, etiket: sd.tam_ad } : null
+        })
+        .filter((g): g is SilGorev => g !== null),
+    ]
+    // Sinirli-eszamanli sil (sunucuyu bogmadan paralel; sirali await UI'yi kilitliyordu).
+    const ESZAMAN = 5
+    let basarili = 0
+    const basarisizlar: string[] = []
+    let idx = 0
+    const isci = async () => {
+      while (idx < gorevler.length) {
+        const g = gorevler[idx++]
+        try { await api.delete(g.url); basarili++ } catch { basarisizlar.push(g.etiket) }
+      }
     }
-    // Seçili alt alanları da sil (kendi endpoint'i: parent üzerinden).
-    const subIds = Array.from(subSecili); let subBasarili = 0
-    for (const sid of subIds) {
-      const sd = subler.find(s => s.id === sid); if (!sd) continue
-      try { await api.delete(`/domains/${sd.parent_id}/subdomain/${sid}`); subBasarili++ } catch {}
-    }
+    await Promise.all(Array.from({ length: Math.min(ESZAMAN, gorevler.length) }, isci))
     setSecili(new Set()); setSubSecili(new Set())
-    setBasari(`✓ ${basarili + subBasarili}/${ids.length + subIds.length} ${cevir("kayıt silindi")}`)
+    const toplam = gorevler.length
+    if (basarisizlar.length === 0) {
+      const m = `✓ ${basarili}/${toplam} ${cevir("kayıt silindi")}`
+      setBasari(m); toast.basari(m)
+    } else {
+      // Sessiz catch{} yerine: hangileri basarisiz oldu, YUZEYE CIKAR.
+      const ornek = basarisizlar.slice(0, 5).join(', ') + (basarisizlar.length > 5 ? '…' : '')
+      const m = `${basarili}/${toplam} ${cevir("kayıt silindi")} — ${basarisizlar.length} ${cevir("başarısız")}: ${ornek}`
+      setBasari(m); toast.hata(m)
+    }
     setTimeout(() => setBasari(null), 4000)
     setIsleniyor(false); yukle()
   }
@@ -413,7 +458,11 @@ export default function DomainsPage() {
     try {
       const { data } = await api.post<{ is_id: number }>('/domains/toplu/is', { tip, ids, ...(ek || {}) })
       setTopluIsID(data.is_id); setTopluModal('')
-    } catch (e) { setHata(apiHata(e, cevir("Toplu işlem başlatılamadı"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Toplu işlem başlatılamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
   async function durumDegistir(yeniDurum: 'aktif' | 'pasif') {
@@ -421,10 +470,16 @@ export default function DomainsPage() {
     const ids = Array.from(secili)
     try {
       await api.post('/domains/toplu/durum', { ids, durum: yeniDurum })
-      setBasari(cevirT(cevir('✓ {0} domain "{1}" durumuna geçirildi'), ids.length, yeniDurum))
+      const m = cevirT(cevir('✓ {0} domain "{1}" durumuna geçirildi'), ids.length, yeniDurum)
+      setBasari(m)
+      toast.basari(m)
       setTimeout(() => setBasari(null), 4000)
       setSecili(new Set()); yukle()
-    } catch (e) { setHata(apiHata(e, cevir("Durum değiştirme başarısız"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Durum değiştirme başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setIsleniyor(false) }
   }
 
@@ -436,19 +491,17 @@ export default function DomainsPage() {
         {cevir(cevir("Tüm kayıtlı domainlerinizi listeleyin, toplu seçim ile durum değiştirin veya silin."))}
       </p>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="flex-1 max-w-md">
           <input type="text" value={q} onChange={e => setQ(e.target.value)}
-            placeholder={cevir("🔍 Domain ara...")}
+            placeholder={cevir("Domain ara...")}
             className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none" />
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-500">{filtreli.length} / {items.length}</span>
         <button onClick={olusturAc}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md font-medium shadow-sm">
+          className="ml-auto inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md font-medium shadow-xs">
           <span className="text-base leading-none">+</span> {cevir("Yeni Domain")}
         </button>
       </div>
@@ -469,7 +522,7 @@ export default function DomainsPage() {
               <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Aktif Et")}</span>
             </button>
             <button onClick={() => durumDegistir('pasif')} disabled={isleniyor}
-              className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded">
+              className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-dark-600 text-white rounded">
               <span className="inline-flex items-center gap-1.5"><Ikon d={I.durakla} /> {cevir("Pasif Et")}</span>
             </button>
           </>}
@@ -506,13 +559,13 @@ export default function DomainsPage() {
         <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : items.length === 0 ? (
         <EmptyState baslik={cevir("Henüz domain yok")}
-          aciklama={cevir("İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL veritabanı ve DNS zone otomatik oluşturulur.")}
+          aciklama={cevir("İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik oluşturulur.")}
           buton={{ etiket: cevir("Domain Oluştur"), onClick: olusturAc }} />
       ) : (
-        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+        <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
-            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
               <tr>
                 <th className={`${T.baslik} w-10 text-center`}>
                   <input type="checkbox"
@@ -537,7 +590,7 @@ export default function DomainsPage() {
               {filtreli.flatMap(d => {
                 const subs = sublerByParent.get(d.id) || []
                 const parentRow = (
-                  <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${secili.has(d.id) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20' : ''}`}>
+                  <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700 transition ${secili.has(d.id) ? 'ring-2 ring-brand-400 lg:ring-0 bg-brand-50 dark:bg-brand-900/20' : ''}`}>
                     <td className={T.hucreSecim}>
                       <input type="checkbox" checked={secili.has(d.id)}
                         onChange={() => togga(d.id)}
@@ -565,7 +618,7 @@ export default function DomainsPage() {
                       {!d.plan_ad
                         ? <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                         : (/—\s*Özel\s*$/.test(d.plan_ad) || d.plan_ad.trim() === cevir("Özel"))
-                          ? <span title={d.plan_ad} className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{cevir("Özel")}</span>
+                          ? <span title={d.plan_ad} className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-dark-600 dark:bg-dark-700 dark:text-slate-300">{cevir("Özel")}</span>
                           : <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span>}
                     </td>
                     <td className={T.hucre} data-etiket="PHP">
@@ -576,20 +629,20 @@ export default function DomainsPage() {
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
                       <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
-                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400'
                       }`}>{d.durum}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${d.id}/subdomainler`} className="text-xs text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 lg:mr-3">+ Subdomain</Link>
-                      <Link to={`/abonelikler/${d.id}`} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 ml-auto lg:ml-0">{cevir("Yönet →")}</Link>
+                      <Link to={`/abonelikler/${d.id}/subdomainler`} className={`${T.aksiyon} lg:mr-2`}>+ Subdomain</Link>
+                      <Link to={`/abonelikler/${d.id}`} className={`${T.aksiyonBirincil} ml-auto lg:ml-0`}>{cevir("Yönet →")}</Link>
                     </td>
                   </tr>
                 )
                 const subRows = subs.map(sd => (
-                  <tr key={'sub-' + sd.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/50 transition bg-slate-50/40 dark:bg-slate-900/20`}>
+                  <tr key={'sub-' + sd.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700/50 transition bg-slate-50/40 dark:bg-dark-800/20`}>
                     <td className={T.hucreSecim}>
                       <input type="checkbox" checked={subSecili.has(sd.id)}
                         onChange={() => subTogga(sd.id)}
@@ -628,7 +681,7 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{cevir("Yönet →")}</Link>
+                      <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className={T.aksiyonBirincil}>{cevir("Yönet →")}</Link>
                     </td>
                   </tr>
                 ))
@@ -643,13 +696,11 @@ export default function DomainsPage() {
       {/* Domain Oluştur Modal */}
       {olusturAcik && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !olusturuluyor && setOlusturAcik(false)}>
-          <form onSubmit={olusturGonder} className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <form onSubmit={olusturGonder} className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yeni Domain Oluştur")}</h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
-              {cevir(cevir("Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL veritabanı ve DNS zone otomatik kurulur."))}
+              {cevir(cevir("Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik kurulur."))}
             </p>
-
-            {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
             <div className="space-y-3">
               <div>
@@ -676,12 +727,12 @@ export default function DomainsPage() {
                   value={fPHPSurum}
                   onChange={e => setFPHPSurum(e.target.value)}
                   disabled={olusturuluyor}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none bg-white dark:bg-slate-800"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none bg-white dark:bg-dark-700"
                 >
                   {phpSurumler.length === 0
                     ? <option value="8.3">{cevir("PHP 8.3 (varsayılan)")}</option>
                     : phpSurumler.map(p => (
-                        <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? ` ${cevir("(varsayılan)")}` : ''}</option>
+                        <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? ` ${cevir("(varsayılan)")}` : ''}{p.eol ? ` — ${cevir("güncelleme almıyor")}` : ''}</option>
                       ))
                   }
                 </select>
@@ -718,9 +769,9 @@ export default function DomainsPage() {
 
             <div className="flex justify-end gap-2 mt-5">
               <button type="button" onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}
-                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
               <button type="submit" disabled={olusturuluyor || !fAlanAdi.trim()}
-                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium inline-flex items-center gap-2">
+                className="px-4 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium inline-flex items-center gap-2">
                 {olusturuluyor && (
                   <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
                     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.3"/>
@@ -737,14 +788,14 @@ export default function DomainsPage() {
       {/* Oluşturma Sonucu Modal (FTP + DB parolaları) */}
       {olusturmaSonuc && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setOlusturmaSonuc(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-emerald-700 dark:text-emerald-300 mb-1"><span className="inline-flex items-center gap-2"><Ikon d={I.onay} className="h-5 w-5" /> {cevir("Domain Oluşturuldu")}</span></h3>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               <span className="font-mono text-slate-700 dark:text-slate-300">{olusturmaSonuc.alan_adi}</span> {cevir("sağlamlandı. Aşağıdaki parolalar")} <strong>sadece bir kez</strong> gösterilir — güvenli bir yere kaydedin.
             </p>
 
             <div className="space-y-3">
-              <div className="border border-slate-200 dark:border-slate-700 rounded-md p-3 bg-slate-50 dark:bg-slate-900">
+              <div className="border border-slate-200 dark:border-dark-600 rounded-md p-3 bg-slate-50 dark:bg-dark-800">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 font-semibold mb-2">FTP</div>
                 <KopyaSatir e="Host" v={olusturmaSonuc.ftp_host || '—'} kopyala={panoYaz} />
                 <KopyaSatir e={cevir("Kullanıcı")} v={olusturmaSonuc.ftp_user} kopyala={panoYaz} />
@@ -752,7 +803,7 @@ export default function DomainsPage() {
               </div>
 
               {olusturmaSonuc.db_adi && (
-              <div className="border border-slate-200 dark:border-slate-700 rounded-md p-3 bg-slate-50 dark:bg-slate-900">
+              <div className="border border-slate-200 dark:border-dark-600 rounded-md p-3 bg-slate-50 dark:bg-dark-800">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 font-semibold mb-2">{cevir("MySQL Veritabanı")}</div>
                 <KopyaSatir e="Host" v={olusturmaSonuc.db_host || 'localhost'} kopyala={panoYaz} />
                 <KopyaSatir e={cevir("Veritabanı")} v={olusturmaSonuc.db_adi} kopyala={panoYaz} />
@@ -768,7 +819,7 @@ export default function DomainsPage() {
 
             <div className="flex justify-end mt-5">
               <button onClick={() => setOlusturmaSonuc(null)}
-                className="px-4 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-sm rounded">{cevir("Tamam")}</button>
+                className="px-4 py-1.5 bg-dark-600 hover:bg-dark-700 text-white text-sm rounded">{cevir("Tamam")}</button>
             </div>
           </div>
         </div>
@@ -778,7 +829,7 @@ export default function DomainsPage() {
       {/* topluHedefModal — sahip/plan hedefi secimi (async is bundan sonra baslar) */}
       {topluModal !== '' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setTopluModal('')}>
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-lg bg-white p-5 dark:bg-dark-700" onClick={e => e.stopPropagation()}>
             <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">
               {topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
             </h3>
@@ -853,12 +904,12 @@ export default function DomainsPage() {
 
       {silOnay && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSilOnay(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2"><span className="inline-flex items-center gap-2"><Ikon d={I.uyari} className="h-5 w-5" /> {cevir("Toplu Silme")}</span></h3>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
               <span className="font-semibold">{secili.size}</span> domain{subSecili.size > 0 ? <> + <span className="font-semibold">{subSecili.size}</span> {cevir("alt alan")}</> : ''} {cevir("ve tüm bağımlı kaynakları (Linux kullanıcı, ev dizini, DB, FTP, vhost, DNS zone)")} <strong>{cevir("geri dönüşsüz")}</strong> {cevir("silinecek.")}
             </p>
-            <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-slate-900 rounded p-2 max-h-40 overflow-auto mb-4">
+            <ul className="text-xs font-mono text-slate-500 dark:text-slate-500 bg-slate-50 dark:bg-dark-800 rounded p-2 max-h-40 overflow-auto mb-4">
               {Array.from(secili).slice(0, 8).map(id => {
                 const d = items.find(x => x.id === id)
                 return <li key={id} className="truncate">{d?.alan_adi || '?'}</li>
@@ -872,7 +923,7 @@ export default function DomainsPage() {
             </ul>
             <div className="flex justify-end gap-2">
               <button onClick={() => setSilOnay(false)}
-                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-sm rounded">{cevir("İptal")}</button>
+                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
               <button onClick={topluSil} disabled={isleniyor}
                 className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
                 {cevir("Evet, Sil")}
@@ -899,7 +950,7 @@ function KopyaSatir({ e, v, kopyala, parola }: { e: string; v: string; kopyala: 
       <code
         onClick={tikla}
         className={`flex-1 font-mono px-2 py-1 rounded border cursor-pointer select-all transition ${
-          kopyalandi ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-brand-400 text-slate-800 dark:text-slate-200'
+          kopyalandi ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 hover:border-brand-400 text-slate-800 dark:text-slate-200'
         }`}
         title={cevir("Tıklayarak kopyala")}
       >
@@ -907,7 +958,7 @@ function KopyaSatir({ e, v, kopyala, parola }: { e: string; v: string; kopyala: 
       </code>
       {parola && (
         <button type="button" onClick={() => setAcik(s => !s)}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
+          className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700">
           {acik ? cevir('Gizle') : cevir("Göster")}
         </button>
       )}
@@ -958,7 +1009,7 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   }
 
   return (
-    <div className={`mb-3 rounded-xl border px-4 py-3 border-${renk}-200 bg-${renk}-50 dark:border-${renk}-800/60 dark:bg-${renk}-900/20`}>
+    <div className={`mb-3 rounded-lg border px-4 py-3 border-${renk}-200 bg-${renk}-50 dark:border-${renk}-800/60 dark:bg-${renk}-900/20`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -971,11 +1022,11 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
         </div>
         {bitti
           ? <button type="button" onClick={() => { setKapandi(true); onBitti() }}
-              className="shrink-0 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">{cevir("Kapat")}</button>
+              className="shrink-0 rounded-lg bg-dark-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-dark-700">{cevir("Kapat")}</button>
           : <button type="button" onClick={iptalEt}
               className="shrink-0 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300">{cevir("Durdur")}</button>}
       </div>
-      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-dark-600">
         <div className={`h-full rounded-full transition-all duration-500 ${bitti && d.durum === 'tamam' ? 'bg-emerald-500' : bitti && d.durum === 'hata' ? 'bg-red-500' : 'bg-brand-500'}`}
           style={{ width: `${yuzde}%` }} />
       </div>
@@ -991,7 +1042,11 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
               <li key={i} className={parola
                 ? 'text-emerald-700 dark:text-emerald-300 font-mono select-all'
                 : uyari ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}>
-                {parola ? '🔑' : uyari ? '⚠' : '✗'} {x}
+                {parola
+                  ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]"><path d="M15.75 7.5a3.75 3.75 0 10-3.4 3.73L6 17.6V21h3.4l.9-.9v-1.8h1.8l1.2-1.2v-1.8h1.4l1.05-1.05A3.75 3.75 0 0015.75 7.5z"/></svg>
+                  : uyari
+                    ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]"><path d="M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z"/></svg>
+                    : '✗'} {x}
               </li>
             )
           })}

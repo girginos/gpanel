@@ -9,6 +9,12 @@
 #   migrations.tar.gz  nginx/*  php-fpm/*  phpmyadmin/*  systemd/*  ops/*
 set -uo pipefail
 
+# HOME must be set: systemd-run/cloud-init bos HOME composer ("HOME must be set")
+# ve acme.sh (/.acme.sh) kurulumunu bozar - en basta garanti et.
+export HOME="${HOME:-/root}"
+# Kurulum ayrinti logu (acme.sh + composer ciktilari buraya yonlenir).
+GOSP_LOG="${GOSP_LOG:-/var/log/girginospanel-install.log}"
+
 # 🔴 WE SET PATH OURSELVES — `sudo` DROPS /usr/local/bin.
 # AlmaLinux/RHEL default:  Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin
 # Because the documented install/update command is `curl ... | sudo bash`, this
@@ -62,6 +68,15 @@ die(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
 [ "$(id -u)" = 0 ] || die "root required"
 [ -d "$A" ] || die "assets/ not found ($A)"
 grep -qiE "AlmaLinux|Rocky|Red Hat|CentOS" /etc/os-release || warn "AlmaLinux/RHEL10 expected — continuing"
+# EL surum kapisi: remi-release-10 sabit -> 10 disinda zaten kurulamaz; erken+net durdur.
+_os_major="$(. /etc/os-release 2>/dev/null; printf %s "${VERSION_ID:-}" | cut -d. -f1)"
+if [ "$_os_major" != "10" ]; then
+  if [ "${GOSP_FORCE_OS:-0}" = "1" ]; then
+    warn "OS major surumu 10 degil (${_os_major:-bilinmiyor}) — GOSP_FORCE_OS=1 ile devam ediliyor"
+  else
+    die "AlmaLinux/RHEL 10 gerekli (bulunan major: ${_os_major:-bilinmiyor}); GOSP_FORCE_OS=1 ile atlanabilir"
+  fi
+fi
 
 # 🔴 php86 NOT YET RELEASED in remi. If left in the list, every install
 # fails silently: package not installed, /etc/opt/remi/php86 never
@@ -86,9 +101,11 @@ step "2) Base packages"
 dnf install -y nginx httpd mariadb-server valkey certbot python3-certbot-nginx \
   clamav clamav-freshclam httpd-tools mod_proxy_html tar openssl policycoreutils-python-utils \
   setools-console jq bind bind-utils nftables unzip zip cronie xfsprogs sudo \
-  bubblewrap rsync git curl acl \
+  bubblewrap rsync git curl acl chrony \
   bzip2 lftp sshpass unrar bsdtar >/dev/null 2>&1 \
   && ok "nginx, httpd, mariadb, valkey, certbot, clamav, bind, nftables, unzip/zip/bzip2, bubblewrap, acl, tools" || die "base package install"
+# chrony: saat senkronu (SSL/JWT/log tutarliligi) — kuruluysa idempotent.
+systemctl enable --now chronyd >/dev/null 2>&1 || true
 
 # RAR extractor (file manager .rar extract) — PRIMARY: bsdtar (libarchive, in appstream base
 # reads RAR/RAR5 RELIABLY; also rejects path-traversal). 🔴 NOTE: AlmaLinux 10 default
@@ -150,7 +167,7 @@ else
   ok "firewalld not installed — panel nftables is already the sole firewall"
 fi
 
-step "3) PHP versions (5 remi + base) + wp-cli"
+step "3) PHP versions (7 remi + base) + wp-cli"
 BASE_PKGS="php php-fpm php-cli php-mysqlnd php-mbstring php-json php-pecl-zip php-pecl-redis6 php-gd php-bcmath php-intl php-soap php-ldap php-sodium php-opcache"
 # 🔴 BEFORE the PHP batch install: disable dnf auto-lock sources (dnf-automatic/makecache
 #    if the timer is active, the bulk "dnf install" hits the lock/produces false-negatives).
@@ -350,20 +367,73 @@ install -m 0755 "$A/girginospanel-server" /opt/girginospanel/bin/girginospanel-s
   || die "panel binary could not be installed (disk full / read-only / SELinux)"
 _disk_sha=$(sha256sum /opt/girginospanel/bin/girginospanel-server 2>/dev/null | awk '{print $1}')
 [ "$_disk_sha" = "$PAKET_BIN_SHA" ] || die "panel binary written INCOMPLETELY to disk (hash mismatch)"
-[ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin
-tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist && ok "frontend-dist"
-tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations && ok "migrations ($(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l) sql)"
+# 🔴 PLUGIN LAUNCHER — REQUIRED, NOT OPTIONAL.
+# scripts/build-assets.sh has always produced it, but this installer never
+# copied it to disk. Encrypted (licensed) plugins are started through it:
+# internal/lisans/baslatici.go pins the path and the systemd unit's ExecStart
+# is rewritten to it. Missing => the mail plugin install runs the whole
+# 29-step sequence (postfix, dovecot, users, DB) and fails at the END with
+# "eklenti başlatıcısı bulunamadı", leaving the system half-configured.
+# Every panel installed from this script had that fault. `die`, not a warn:
+# without it no paid plugin can ever be installed.
+[ -f "$A/girginospanel-eklenti-baslatici" ]   || die "package is missing girginospanel-eklenti-baslatici (packaging error) — licensed plugins could not be installed"
+install -m 0755 "$A/girginospanel-eklenti-baslatici" /opt/girginospanel/bin/girginospanel-eklenti-baslatici   || die "plugin launcher could not be installed"
+ok "plugin launcher"
+
+if [ -f "$A/girginospanel-seed-admin" ]; then
+  install -m 0755 "$A/girginospanel-seed-admin" /opt/girginospanel/bin/girginospanel-seed-admin || die "seed-admin could not be installed"
+else
+  warn "girginospanel-seed-admin not in package — the admin user will not be seeded automatically"
+fi
+
+# 🔴 tar failures were SILENT: no `|| die`, and the script runs without `set -e`.
+# A broken archive / full disk left frontend-dist EMPTY (panel serves a blank
+# page) or migrations empty (panel opens against an unmigrated schema) and the
+# install still reported success. Verify the RESULT, not just the exit code.
+tar xzf "$A/frontend-dist.tar.gz" -C /opt/girginospanel/frontend-dist || die "frontend-dist could not be extracted"
+[ -s /opt/girginospanel/frontend-dist/index.html ] || die "frontend-dist extracted EMPTY (index.html missing)"
+ok "frontend-dist"
+tar xzf "$A/migrations.tar.gz" -C /opt/girginospanel/src/migrations || die "migrations could not be extracted"
+_mig=$(ls /opt/girginospanel/src/migrations/*.sql 2>/dev/null | wc -l)
+[ "$_mig" -gt 0 ] || die "migrations extracted EMPTY (0 sql)"
+ok "migrations ($_mig sql)"
 # Licensed plugin payloads: ship to the server binary but the gate is CLOSED (active=0).
 # Not run until a license is entered; when it is, the install puts it in place.
 if [ -d "$A/eklentiler" ]; then
-  cp -a "$A/eklentiler/." /opt/girginospanel/src/eklentiler/ 2>/dev/null
-  chmod -R 0755 /opt/girginospanel/src/eklentiler 2>/dev/null
+  cp -a "$A/eklentiler/." /opt/girginospanel/src/eklentiler/ || die "plugin payload could not be copied"
+  # 🔴 ROOT ONLY. This tree holds the PLAINTEXT binary of a PAID plugin and it
+  # lands on disk BEFORE any license is entered (see the note above). The old
+  # `chmod -R 0755` made it world-readable, so any local user could copy the
+  # paid binary and run it elsewhere — the exact threat internal/lisans/
+  # kurulum_mail.go argues against ("the plaintext binary is NOT written to
+  # disk ... a customer who unpacks it once could copy and redistribute it").
+  # build-assets.sh already ships it 0700; do not widen it here.
+  chmod 0700 /opt/girginospanel/src/eklentiler || die "plugin payload permissions could not be set"
+  find /opt/girginospanel/src/eklentiler -mindepth 1 -type d -exec chmod 0700 {} + 2>/dev/null
+  find /opt/girginospanel/src/eklentiler -mindepth 1 -type f -exec chmod 0600 {} + 2>/dev/null
+  # 🔴 KACAK/ARTIK DUZ-METIN UCRETLI IKILI TEMIZLIGI — kendini duzeltir.
+  # Ucretli eklenti (mail, calistirici) DUZ ELF olarak diskte ASLA kalmamali:
+  # runtime .gosp dosyasini BELLEKTEN calistirir (cmd/gosp-baslatici), duz ELF
+  # gerekmez. Ustteki cp -a ekler ama hedefteki fazlaligi SILMEZ; kapi-oncesi
+  # kurulumdan kalan ya da kacak kopyalanan DUZ ELF boyle kaliyordu.
+  for _u in mail calistirici; do
+    for _b in /opt/girginospanel/src/eklentiler/$_u /opt/girginospanel/eklentiler/$_u; do
+      if [ -f "$_b/girginospanel-eklenti-$_u" ]; then
+        rm -f "$_b/girginospanel-eklenti-$_u" && echo "  temizlendi (kacak/artik duz ucretli ikili): $_b/girginospanel-eklenti-$_u"
+      fi
+    done
+  done
   ok "plugin payload ($(find /opt/girginospanel/src/eklentiler -type f 2>/dev/null | wc -l) files)"
 fi
 
 # Install the antivirus agent binary if present in the package (real-time monitor + scanner).
 if [ -f "$A/girginospanel-avajan" ]; then
   install -m 0755 "$A/girginospanel-avajan" /usr/local/bin/girginospanel-avajan || die "avajan could not be installed"
+else
+  # Silent skip was the same fault class as the launcher: the av* units below
+  # are copied unconditionally and would die with 203/EXEC the moment the
+  # feature is switched on. Say it out loud instead.
+  warn "girginospanel-avajan not in package — antivirus units will not start (203/EXEC)"
 fi
 # ops tool + signon
 # 🔴 Two separate targets, two separate meanings:
@@ -504,7 +574,13 @@ FLUSH PRIVILEGES;
 SQL
   [ -f /opt/phpmyadmin/sql/create_tables.sql ] && mysql -u root phpmyadmin < /opt/phpmyadmin/sql/create_tables.sql 2>/dev/null
 fi
-[ -f "$A/phpmyadmin/pma-signon.php" ] && cp "$A/phpmyadmin/pma-signon.php" /opt/girginospanel/pma-signon/ 2>/dev/null
+if [ -f "$A/phpmyadmin/pma-signon.php" ]; then
+  cp "$A/phpmyadmin/pma-signon.php" /opt/girginospanel/pma-signon/ || die "pma-signon.php could not be copied"
+else
+  # Was doubly silent: missing file produced no output, and a failed copy was
+  # swallowed by 2>/dev/null. phpMyAdmin SSO then breaks with no trace.
+  warn "pma-signon.php not in package — phpMyAdmin single sign-on will not work"
+fi
 # pma internal-auth token (pma-signon.php + panel API read the same file → random value matches).
 # Generate if absent (root:apache 0640 → pma FPM pool [apache] reads it, no one else). Don't touch existing.
 if [ ! -s /etc/girginospanel/pma-internal.token ]; then
@@ -561,7 +637,13 @@ mkdir -p /var/log/journal && systemctl restart systemd-journald >/dev/null 2>&1 
 # daily backup of the panel DB (03:30) — copying the file is NOT enough, it's enable --now
 # below; otherwise the timer never fires and the install silently stays WITHOUT BACKUP.
 for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
-  [ -f "$A/systemd/$u" ] && cp "$A/systemd/$u" "/etc/systemd/system/$u"
+  if [ -f "$A/systemd/$u" ]; then
+    cp "$A/systemd/$u" "/etc/systemd/system/$u" || die "$u could not be copied"
+  else
+    # Both this copy and the enable below are conditional; a missing unit made
+    # the install finish WITHOUT DB BACKUP and without a single line saying so.
+    warn "$u not in package — the panel DB will NOT be backed up daily"
+  fi
 done
 systemctl daemon-reload
 
@@ -683,17 +765,17 @@ fi
 # LE requires a valid email (@ + dot). If invalid like admin@local, register without contact.
 AEMAIL="$ADMIN_EPOSTA"; echo "$AEMAIL" | grep -qE '@[^@]+\.[^@]+$' || AEMAIL=""
 if [ ! -x /root/.acme.sh/acme.sh ]; then
-  if [ -n "$AEMAIL" ]; then curl -fsSL https://get.acme.sh 2>/dev/null | sh -s email="$AEMAIL" >/dev/null 2>&1 || true
-  else curl -fsSL https://get.acme.sh 2>/dev/null | sh >/dev/null 2>&1 || true; fi
+  if [ -n "$AEMAIL" ]; then curl -fsSL https://get.acme.sh 2>>"$GOSP_LOG" | sh -s email="$AEMAIL" >>"$GOSP_LOG" 2>&1 || true
+  else curl -fsSL https://get.acme.sh 2>>"$GOSP_LOG" | sh >>"$GOSP_LOG" 2>&1 || true; fi
 fi
 if [ -x /root/.acme.sh/acme.sh ]; then
-  /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt >/dev/null 2>&1
+  /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt >>"$GOSP_LOG" 2>&1
   # register the LE account NOW (with the valid email if any, otherwise contactless) — avoid errors at issue time
-  if [ -n "$AEMAIL" ]; then /root/.acme.sh/acme.sh --register-account -m "$AEMAIL" --server letsencrypt >/dev/null 2>&1
-  else /root/.acme.sh/acme.sh --register-account --server letsencrypt >/dev/null 2>&1; fi
+  if [ -n "$AEMAIL" ]; then /root/.acme.sh/acme.sh --register-account -m "$AEMAIL" --server letsencrypt >>"$GOSP_LOG" 2>&1
+  else /root/.acme.sh/acme.sh --register-account --server letsencrypt >>"$GOSP_LOG" 2>&1; fi
   ok "acme.sh (Let's Encrypt CA + account registered + auto-renew cron)"
 else
-  warn "acme.sh could not be installed — for Let's Encrypt SSL manually: curl https://get.acme.sh | sh"
+  warn "acme.sh could not be installed — for Let's Encrypt SSL manually: curl https://get.acme.sh | sh — ayrinti: $GOSP_LOG"
 fi
 
 # ---- httpd (Apache backend — web_backend=apache option, nginx front-proxy) ----
@@ -717,12 +799,12 @@ if [ ! -x /usr/local/bin/composer ]; then
   # 🔴 `php --` (stdin-pipe) bazi ortamlarda (PHP 8.3 + ionCube) SEGFAULT eder ->
   # temp dosya + `php <dosya>` formu kullan (segfault YOK).
   _ci=$(mktemp)
-  if curl -sS https://getcomposer.org/installer -o "$_ci" 2>/dev/null; then
-    php "$_ci" --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+  if curl -sS https://getcomposer.org/installer -o "$_ci" 2>>"$GOSP_LOG"; then
+    php "$_ci" --install-dir=/usr/local/bin --filename=composer >>"$GOSP_LOG" 2>&1
   fi
   rm -f "$_ci"
 fi
-[ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer could not be installed"
+[ -x /usr/local/bin/composer ] && ok "composer ($(/usr/local/bin/composer --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1))" || warn "composer could not be installed — ayrinti: $GOSP_LOG"
 
 # ---- Node.js (Laravel Toolkit: npm/vite build + multi-version 'n') ----
 if ! command -v node >/dev/null 2>&1; then
@@ -973,6 +1055,8 @@ echo -e "  antivirus: $AV_D   ·   freshclam $(systemctl is-active clamav-freshc
 echo -e "  ssh isolation(jail): $JAIL_D   ·   backend port helper: $PSW_D"
 echo -e "  wp-cli (WordPress): ${WPCLI_DURUM:-?}"
 echo -e "  isolation: plan-driven resource limits (cgroup slice) + per-tenant PHP-FPM (CageFS equivalent) READY   ·   bubblewrap $(command -v bwrap >/dev/null && echo ✓ || echo ✗)"
+echo -e "  ${c_y}Firewall:${c_0} ag durusu artik panel guvenlik duvarina (nftables) bagli — firewalld durduruldu/mask'landi."
+echo -e "          panel tablosu varsayilani GELEN IZINLI (policy-accept); portlari panelden yonetin (Guvenlik duvari arayuzu)."
 
 # ══════════════════════════════════════════════════════════════════════
 # 🔴 REAL VERIFICATION GATE

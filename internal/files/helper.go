@@ -1,7 +1,6 @@
 package files
 
 import (
-	"os"
 	"os/user"
 	"strconv"
 )
@@ -16,8 +15,4 @@ func userLookup(name string) (usrInfo, error) {
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 	return usrInfo{UID: uid, GID: gid}, nil
-}
-
-func osChown(path string, uid, gid int) error {
-	return os.Chown(path, uid, gid)
 }

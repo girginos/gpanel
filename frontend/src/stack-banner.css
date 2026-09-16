@@ -1,0 +1,193 @@
+/* GirginOS Platforms — login banner: KATMAN YIGINI.
+   Panelin gercekte yonettigi seyi gosterir: cekirdekten musterinin sitesine
+   kadar bes katman.
+
+   TASARIM KARARI — yigin YUKARIDAN aydinlanir. En ustteki katman (siteniz) en
+   parlak, metale indikce soner. Parlaklik dekorasyon degil BILGI tasir:
+   "size ne kadar yakin". Bu yuzden opaklik/kontrast katman sirasina bagli.
+
+   Zemin bilerek NOTR-SICAK grafit (#0d0f12), koyu-mavi degil: mavi vurgu ancak
+   notr bir zeminde SECILMIS gorunur, mavi zeminde vurgu olmaktan cikar. */
+
+.gp-stack {
+  container-type: inline-size;
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 700px;
+  overflow: hidden;
+
+  --ink: #0d0f12;
+  --slab: #161a20;
+  --edge: #262d38;
+  --text: #e6e9ee;
+  --dim: #79838f;
+  --accent: #3b82f6;
+  --live: #34d399;
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  background: var(--ink);
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 4cqw;
+  padding: 6cqw 5cqw;
+}
+
+/* Cok ince dikey doku — parlak "glow" yerine sessiz bir zemin.
+   maske ile sag tarafa dogru soner ki yigin onunde temiz kalsin. */
+.gp-stack::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image: linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 34px 100%;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 22%, black 78%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 22%, black 78%, transparent);
+  pointer-events: none;
+}
+
+/* ── sol: söz ── */
+.gp-stack .soz { position: relative; z-index: 2; min-width: 0; }
+
+.gp-stack .marka { display: flex; align-items: baseline; gap: 12px; }
+.gp-stack .marka h1 {
+  margin: 0;
+  font-size: clamp(38px, 8cqw, 76px);
+  font-weight: 700;
+  letter-spacing: -.045em;
+  line-height: .92;
+}
+.gp-stack .marka h1 em { font-style: normal; color: var(--accent); }
+.gp-stack .marka span {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.7cqw, 15px);
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.gp-stack .lead {
+  margin: clamp(20px, 3cqw, 34px) 0 0;
+  font-size: clamp(15px, 2.05cqw, 21px);
+  line-height: 1.55;
+  color: #aeb8c4;
+  max-width: 26ch;
+}
+.gp-stack .lead b { color: var(--text); font-weight: 600; }
+
+.gp-stack .altbilgi {
+  position: absolute; left: 5cqw; bottom: 4cqw;
+  font-family: var(--mono);
+  font-size: 11px; letter-spacing: .06em;
+  color: #56606d;
+}
+
+/* ── sağ: yığın ── */
+.gp-stack .yigin { position: relative; z-index: 2; display: flex; flex-direction: column-reverse; gap: 10px; }
+
+/* Katmanlari birlestiren omurga — sinyal bu hat boyunca yukari cikar. */
+.gp-stack .omurga {
+  position: absolute; left: 14px; top: 8px; bottom: 8px; width: 1px;
+  background: linear-gradient(to top, var(--edge), rgba(59,130,246,.35));
+}
+/* Tek tekrarli hareket: omurga boyunca dipten tepeye tirmanan sinyal.
+   Dinlenme hali GORUNMEZ (opacity 0) — dekoratif oldugu icin kaybi zararsiz. */
+.gp-stack .sinyal {
+  position: absolute; left: -2px; top: 100%; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 10px var(--accent);
+  opacity: 0;
+}
+
+.gp-stack .kat {
+  position: relative;
+  display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 12px;
+  padding: clamp(11px, 1.5cqw, 16px) clamp(12px, 1.6cqw, 18px);
+  background: var(--slab);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  /* --p: katmanin "size yakinlik" payi (0 en dip, 1 en ust) */
+  opacity: calc(.5 + var(--p) * .5);
+}
+.gp-stack .kat .nokta {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) calc(var(--p) * 100%), #46505d);
+  justify-self: center;
+}
+.gp-stack .kat h3 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(12px, 1.55cqw, 15px);
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: color-mix(in oklab, var(--text) calc(45% + var(--p) * 55%), #5d6773);
+}
+.gp-stack .kat p {
+  margin: 3px 0 0;
+  font-size: clamp(10px, 1.25cqw, 12px);
+  color: var(--dim);
+  letter-spacing: .01em;
+  /* Aciklama ASLA sarmasin: tek satir sarsa o katman digerlerinden yuksek
+     olur ve yigin ritmi bozulur — esit yukseklik bu tasarimin bel kemigi. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gp-stack .kat .rozet {
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: #5d6773;
+  white-space: nowrap;
+}
+
+/* En ust katman = musterinin sitesi. Tek vurgulu oge; gerisi sakin kalir. */
+.gp-stack .kat.tepe {
+  background: linear-gradient(160deg, #17243a, #121821);
+  border-color: rgba(59, 130, 246, .42);
+  box-shadow: 0 0 0 1px rgba(59,130,246,.07), 0 18px 44px -22px rgba(59,130,246,.55);
+}
+.gp-stack .kat.tepe h3 { color: #fff; }
+.gp-stack .kat.tepe .rozet { color: var(--live); }
+.gp-stack .kat.tepe .nokta { background: var(--live); box-shadow: 0 0 9px var(--live); }
+
+/* ── dar kapsayıcı ── */
+@container (max-width: 600px) {
+  .gp-stack { grid-template-columns: 1fr; gap: 5cqw; align-content: center; }
+  .gp-stack .lead { max-width: none; }
+  .gp-stack .kat p { display: none; }
+}
+
+/* Dar ekranda banner hiç çizilmez; form tek sütun ortalanır. */
+@media (max-width: 900px) { .gp-stack { display: none; } }
+
+/* ── giriş hareketi ──
+   🔴 KURAL: hicbir ogenin GORUNURLUGU gecikmeli bir animasyona bagli DEGIL.
+   Katmanlar dinlenme halinde zaten gorunur; animasyon yalnizca `transform`
+   ekler. Boylece animasyon hic kosmasa bile (arka plan sekmesi, kare kisma,
+   motor hatasi) banner dogru gorunur — yalnizca hareketi kaybeder.
+   Opaklik sadece KAPSAYICI seviyesinde ve GECIKMESIZ olarak canlandirilir. */
+@keyframes gs-belir { from { opacity: 0 } }
+@keyframes gs-kalk  { from { transform: translateY(16px) } }
+@keyframes gs-sinyal {
+  0%          { top: 100%; opacity: 0 }
+  8%          { opacity: 1 }
+  45%         { opacity: 1 }
+  55%, 100%   { top: 0%;   opacity: 0 }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .gp-stack .soz   { animation: gs-belir .5s ease-out; }
+  .gp-stack .yigin { animation: gs-belir .5s ease-out; }
+  /* `backwards`: gecikme boyunca yalnizca KAYMA hali tutulur, opaklik degil. */
+  .gp-stack .kat {
+    animation: gs-kalk .5s cubic-bezier(.22, 1, .36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * .08s);
+  }
+  .gp-stack .sinyal { animation: gs-sinyal 6s ease-in-out infinite; }
+}
+
+/* Hareket azaltma tercihi: hicbir sey oynamaz, her sey yerinde durur. */
+@media (prefers-reduced-motion: reduce) {
+  .gp-stack .sinyal { display: none; }
+}

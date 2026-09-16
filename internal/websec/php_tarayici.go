@@ -32,10 +32,30 @@ type phpPaket struct {
 	Surum string // "v1.2.3"
 }
 
+// guvenliKullanici (defense-in-depth): sistem kullanıcı adı yalnız
+// harf/rakam/altçizgi/tire olabilir ('/', '.', '..' yasak) — CWE-22 savunması.
+func guvenliKullanici(sk string) bool {
+	if sk == "" || len(sk) > 64 {
+		return false
+	}
+	for _, r := range sk {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 // phpBul — composer.lock arar. Sırayla:
-//   1. /home/<sk>/public_html/composer.lock
-//   2. /home/<sk>/composer.lock             (Laravel gibi framework kalıbı)
+//  1. /home/<sk>/public_html/composer.lock
+//  2. /home/<sk>/composer.lock             (Laravel gibi framework kalıbı)
 func phpBul(_ context.Context, sk, _ string) *phpKurulum {
+	// Güvenlik (defense-in-depth): sk = sistem_kullanici (DB) yol içine gömülüyor
+	// ("/home/<sk>/..."). gPanel sistem kullanıcıları harf/rakam/altçizgi/tire —
+	// '/', '.', '..' yasak → CWE-22 FP savunma katmanı.
+	if !guvenliKullanici(sk) {
+		return nil
+	}
 	adaylar := []string{
 		filepath.Join("/home", sk, "public_html", "composer.lock"),
 		filepath.Join("/home", sk, "composer.lock"),

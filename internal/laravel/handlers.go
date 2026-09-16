@@ -166,7 +166,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 }
 
 // otomatikSahiplenDurum — sunucuda Laravel koku ararsa ilkini cp_laravel_apps'e yazar
-// ve adini doner (yoksa ""). Idempotent; dosya/veri DEGISTIRMEZ.
+// ve adini doner (yoksa ""). Idempotent; app_root'u gunceller ama dosya sistemine DOKUNMAZ.
 func otomatikSahiplenDurum(ctx context.Context, db *sql.DB, id int64, sk string) string {
 	adaylar := laravelKokAdaylari(sk)
 	if len(adaylar) == 0 {

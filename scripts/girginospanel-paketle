@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+# girginospanel-paketle — kurulum paketini KAYNAKTAN yeniden üretir + yayınlar.
+#
+#   girginospanel-paketle             # üret + doğrula
+#   girginospanel-paketle --yayinla   # üret + doğrula + surum.girginos.io'ya at
+#
+# NEDEN VAR: kaynakta düzeltme yapılıp `assets/` içindeki prebuilt binary /
+# frontend / migration tarball'ı eski kalıyordu; installer "tamamlandı" derken
+# 9 gün eski, 16 göç eksik bir panel kuruyordu. Burada assets HER KOŞUDA
+# kaynaktan yeniden üretilir — bayat kalma ihtimali yok.
+#
+# 🔴 set -e ŞART. Önceki sürümde yoktu ve `cd $YAYIN_DIZIN` uzak sunucuda
+# başarısız olduğunda ardından gelen `chown -R nginx:nginx .` KOMUTU ROOT'UN
+# EV DİZİNİNDE çalıştı (/root/.ssh sahipliği bozuldu -> sshd StrictModes
+# anahtar girişini reddetti), betik yine "✓ yayında" yazdı. Sessizce yutulan
+# hata, hata olmamasından beterdir.
+set -euo pipefail
+
+S=/root/gpanel-temiz
+A=$S/assets
+YAYIN_HOST=148.251.169.182
+YAYIN_DIZIN=/var/www/surum.girginos.io/panel
+YAYINLA=0
+for a in "$@"; do [ "$a" = "--yayinla" ] && YAYINLA=1; done
+
+c_g=$'\e[32m'; c_r=$'\e[31m'; c_y=$'\e[33m'; c_0=$'\e[0m'
+ok(){   echo -e "  ${c_g}✓${c_0} $*"; }
+uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
+dur(){  echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
+
+cd "$S" || dur "kaynak dizin yok: $S"
+
+# ═══════════════════════════════════════════════════════ 0) ÖN KAPILAR
+# 🔴 KAYNAK KAPILARI DERLEMEDEN ÖNCE KOŞAR. Eskiden 5/5'te koşuyorlardı:
+# kapı düştüğünde `go build` ÇOKTAN çalışmış oluyor ve `assets/` içinde
+# yanlış yapılandırmayla derlenmiş bir binary KALIYORDU. Bu teorik değil —
+# tam olarak bu oldu: kapı "Host Uygulamaları AÇIK" diye durdurdu ama
+# assets'teki AÇIK binary'yi başka bir işlem canlı panele deploy etti ve
+# kapalı olması gereken API ~8 dakika açık kaldı. Kaynağa bakan her kapı
+# hiçbir çıktı üretilmeden ÖNCE koşmalı.
+echo "== 0/5 · ön kapılar (derlemeden önce) =="
+I=$S/girginospanel-install.sh
+bash -n "$I" || dur "installer sözdizimi"
+
+# — Host Uygulamaları kullanıcı talebiyle kapalı (2026-08-17)
+grep -q "hostUygulamalariAcik = false" "$S/cmd/server/main.go" || dur "Host Uygulamaları AÇIK — pakete girmemeli"
+if grep -rq "araclar/host-uygulamalari" "$S/frontend/src"; then dur "frontend'de host-uygulamalari rotası var"; fi
+ok "Host Uygulamaları kapalı"
+
+# — CSP: uygulama katalogu logoları cdn.simpleicons.org'dan geliyor.
+# 🔴 KARA LİSTE KULLANMA. Önceki sürüm tek bir bozuk yazımı ("data: blob:;")
+# arıyordu; `img-src 'self' blob: data:;` aynı derecede bozuk ama farklı
+# sırada olduğu için kapıdan GEÇİYORDU. Beyaz liste: img-src geçen HER
+# satırda CDN aranır — sıra, boşluk, yazım farkı önemsiz.
+# 🔴 Değişken adı SADECE ASCII olmalı: `read -r vuruş` bash'te
+# "not a valid identifier" verir, döngü hiç dönmez ve kapı BOŞ YERE YEŞİL
+# yanar — tam da engellemeye çalıştığı arıza sınıfı.
+# 🔴 ON KOSUL: en az bir img-src satiri BULUNMALI. Aksi halde `while read`
+# dongusu hic donmez, KOTU bos kalir ve kapi "✓" yazar — img-src'i tamamen
+# SILMEK kapidan gecerdi (CSP default-src'e duser, data:/blob: gorseller de
+# kirilir). Bos olcum "temiz" degildir.
+IMG_SATIRLAR=$(grep -rn "img-src" "$S" --include=*.go --include=*.conf 2>/dev/null | grep -v node_modules || true)
+IMG_ADET=$(printf '%s' "$IMG_SATIRLAR" | grep -c . || true)
+[ "${IMG_ADET:-0}" -ge 2 ] || dur "CSP kapısı ölçemedi: yalnız ${IMG_ADET:-0} img-src satırı bulundu (beklenen ≥2) — direktif silinmiş olabilir"
+KOTU=""
+while read -r csatir; do
+  [ -n "$csatir" ] || continue
+  # yorum satirlari politika uretmez, atla
+  case "$csatir" in *:[[:space:]]*//*|*:[[:space:]]*#*) continue ;; esac
+  case "$csatir" in *cdn.simpleicons.org*) : ;; *) KOTU="$KOTU\n    $csatir" ;; esac
+done <<< "$IMG_SATIRLAR"
+[ -z "$KOTU" ] || dur "CSP'de cdn.simpleicons.org eksik olan satır(lar):$(echo -e "$KOTU")"
+ok "CSP: $IMG_ADET img-src satırının tümü CDN'e izin veriyor"
+
+# — nginx şablonu ile koddaki güvenlik-header sentinel sürümü aynı mı?
+# Ayrışırlarsa heal her açılışta vhost'u yeniden yazıp nginx'i boşuna reload eder.
+# 🔴 `X=$(grep ...)` + set -e + pipefail: grep eslesme bulamazsa ATAMA
+# betigi ANINDA oldurur, alttaki `|| dur` satiri ULASILAMAZ olur ->
+# operator hicbir hata mesaji gormeden duran bir betikle kalir.
+# `|| true` ile exit kodunu yutup BOSLUGU kendimiz kontrol ediyoruz.
+# Ayrica `v[0-9]*` SIFIR rakamla da esleser (regex satirindaki `v\d+`'i
+# "v" olarak yakalardi) -> `v[0-9]\+` ile en az bir rakam sart.
+S_KOD=$(grep -o 'GOSP-PANEL-SEC v[0-9]\+' "$S/internal/provisioner/provisioner.go" | head -1 || true)
+S_TPL=$(grep -o 'GOSP-PANEL-SEC v[0-9]\+' "$A/nginx/_panel.conf" | head -1 || true)
+[ -n "$S_KOD" ] || dur "kodda GOSP-PANEL-SEC sentineli yok"
+[ "$S_KOD" = "$S_TPL" ] || dur "sentinel uyuşmuyor: kod=$S_KOD şablon=$S_TPL"
+ok "güvenlik sentineli hizalı ($S_KOD)"
+# Onyukleyiciler kaynakta var mi? Yoksa yayin adimi sessizce eski
+# dosyayi birakir ve musteriler bayat onyukleyici ceker.
+for z in kur.sh guncelle.sh; do
+  [ -f "$A/$z" ] || dur "onyukleyici eksik: assets/$z"
+  bash -n "$A/$z" || dur "onyukleyici sozdizimi hatali: assets/$z"
+done
+ok "önyükleyiciler (kur.sh, guncelle.sh) geçerli"
+
+# ─────────────────────────────────────────────────────────── 1) binary
+echo "== 1/5 · Go binary =="
+# 🔴 SÜRÜM: her yayın benzersiz+monoton (tarih tabanlı). ldflags ile
+# internal/surum.Panel enjekte edilir → binary kendini "0.3.0-YYYYMMDD" tanıtır;
+# surum.json a da AYNI değer yazılır (aşağıda). SUR latest.txt ile paylaşılır.
+SUR="$(date +%Y%m%d)"
+SURUM_TAM="0.3.0-$SUR"
+# 🔴 -trimpath: onsuz ikili MUTLAK kaynak yolunu gomer; ayni kaynak farkli
+# dizinde derlenince farkli bayt uretir ve ucuncu taraf ikiliyi dogrulayamaz.
+go build -trimpath -ldflags "-X girginospanel/internal/surum.Panel=$SURUM_TAM" -o "$A/girginospanel-server" ./cmd/server || dur "go build: server"
+# Antivirus ajani — fanotify izleyici + tarayici. Kendi motorumuz.
+if [ -d "$S/cmd/gosp-avajan" ]; then
+  go build -trimpath -o "$A/girginospanel-avajan" ./cmd/gosp-avajan || dur "go build: avajan"
+fi
+# Antivirus kural imzalama araci + IMZALI kural paketi.
+# 🔴 Kural seti Ed25519 ile imzalanir; ajan gomulu acik anahtarla dogrular.
+# Imza tutmazsa ajan tabana duser -> sahte kural enjeksiyonu imkansiz.
+if [ -d "$S/cmd/gosp-avkural" ] && [ -f /root/.gosp-paket-imza ]; then
+  go build -trimpath -o "$A/gosp-avkural" ./cmd/gosp-avkural || dur "go build: avkural"
+  # Kural seti surumu: git commit sayisi (monoton artar) — ajan yalniz DAHA
+  # YUKSEK surumu yukler. Uretim zamani deterministik (paketleme ani).
+  AVKSUR=$(git -C "$S" rev-list --count HEAD 2>/dev/null || echo 1)
+  AVKZAMAN=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  "$A/gosp-avkural" --imza-anahtari /root/.gosp-paket-imza \
+    --surum "$AVKSUR" --uretim "$AVKZAMAN" \
+    --cikti "$A/kurallar.gospav" || dur "avkural: imzali paket uretilemedi"
+  echo "  imzali av kural paketi: surum $AVKSUR"
+fi
+# 🔴 Bu iki ikili PAKETE GIRIYOR ve installer tarafindan KURULUYOR ama
+# hicbir zaman yeniden derlenmiyordu — 10 gun bayat halde yayinlaniyorlardi.
+# Betigin varlik sebebi olan "bayat prebuilt asset" arizasinin ta kendisi.
+if [ -d "$S/cmd/seed-admin" ]; then
+  go build -trimpath -o "$A/girginospanel-seed-admin" ./cmd/seed-admin || dur "go build: seed-admin"
+elif [ -f "$S/cmd/server/seed_admin.go" ] || ls "$S"/cmd/*/seed_admin.go >/dev/null 2>&1; then
+  uyar "seed-admin kaynağı var ama ayrı bir cmd/ dizini yok — yeniden derlenmedi"
+fi
+# 🔴 EKLENTI YUKLERI — build-assets.sh ILE (2026-09-13'te baglandi).
+# ONCESI: burada `if [ -d "$S/cmd/eklenti-mail" ]` diye OLU bir dal vardi;
+# o dizin hic var olmadi (eklentiler AYRI depolar: /root/gpanel-eklenti-*).
+# Yani YAYIN hatti eklenti yukunu HIC tazelemiyordu ve pakete
+# assets/eklentiler/ altinda ne kaldiysa o giriyordu. Olculdu: yayin
+# 20260907 paketinde ucretli eklentiler DUZ ELF olarak gitti ve paket
+# herkese acik indirilebildigi icin odeme yapmamis biri ikiliyi alabiliyordu.
+#
+# build-assets.sh artik: ucretliyi (mail, calistirici) gecici yola derler,
+# gosp-paketle ile .gosp uretir, DUZ ikiliyi SILER; whitelabel duz kalir.
+GOSP_SURUM="$SURUM_TAM" bash "$S/scripts/build-assets.sh" || dur "build-assets.sh (eklenti yukleri + .gosp)"
+
+# 🔴 KAPI: ucretli eklentinin DUZ ikilisi assets'te KALMAMALI. build-assets.sh
+# silmis olmali; kalmissa yayin paketi sifreli teslimi bosa cikarirdi.
+for _u in mail calistirici; do
+  [ ! -f "$A/eklentiler/$_u/girginospanel-eklenti-$_u" ]     || dur "assets'te DUZ ucretli ikili duruyor: $_u (yalniz .gosp olmali)"
+  [ -f "$A/eklentiler/$_u/girginospanel-eklenti-$_u.gosp" ]     || dur "sifreli eklenti paketi yok: $_u.gosp (build-assets.sh basarisiz?)"
+done
+# Bu koşuda üretilen ikilinin parmak izi; paketleme anında yeniden hesaplanıp
+# karşılaştırılır (arada bir şey ikiliyi değiştirdiyse paket üretilmez).
+# 🔴 mtime ile ÖLÇME: kaynak değişmediyse `go build -o` çıktıyı yeniden YAZMAZ,
+# mtime eski kalır ve kapı sağlam paketi boşuna bloklar (yanlış pozitif kapı,
+# operatöre kapıyı devre dışı bırakmayı öğretir).
+BIN_SHA=$(sha256sum "$A/girginospanel-server" | cut -d' ' -f1)
+ok "$(stat -c%s "$A/girginospanel-server") bayt · ${BIN_SHA:0:12}…"
+
+# ─────────────────────────────────────────────────────────── 2) frontend
+echo "== 2/5 · frontend =="
+( cd "$S/frontend" && npm run build >/dev/null 2>&1 ) || dur "npm run build"
+tar czf "$A/frontend-dist.tar.gz" -C "$S/frontend/dist" . || dur "frontend tarball"
+ok "$(stat -c%s "$A/frontend-dist.tar.gz") bayt"
+
+# ─────────────────────────────────────────────────────────── 3) migrations
+echo "== 3/5 · migrations =="
+( cd "$S/migrations" && tar czf "$A/migrations.tar.gz" ./*.sql ) || dur "migration tarball"
+GOC_KAYNAK=$(ls "$S"/migrations/*.sql | wc -l)
+GOC_LISTE=$(tar tzf "$A/migrations.tar.gz")
+GOC_PAKET=$(echo "$GOC_LISTE" | grep -c '\.sql$')
+[ "$GOC_KAYNAK" = "$GOC_PAKET" ] || dur "göç sayısı tutmuyor: kaynak=$GOC_KAYNAK paket=$GOC_PAKET"
+ok "$GOC_PAKET göç"
+
+# ─────────────────────────────────────────────────────────── 4) ops
+echo "== 4/5 · ops araçları =="
+mkdir -p "$A/ops"
+# 🔴 Buradaki liste ile /usr/local/bin ayrışırsa pakette SESSİZCE bayat araç
+# kalır. O yüzden: kurulu olan HER girginospanel-* aracı tazelenir, liste
+# elle bakımlı değildir.
+TAZE=0
+for f in /usr/local/bin/girginospanel-* /usr/local/sbin/girginospanel-*; do
+  [ -f "$f" ] || continue
+  b=$(basename "$f")
+  # paketleme aracının kendisi pakete girmez (kurulum makinesine ait)
+  [ "$b" = "girginospanel-paketle" ] && continue
+  # 🔴 Installer/updater kurarken `.sh` uzantısını SOYAR. Dolayısıyla
+  # /usr/local/bin'deki ad soyulmuş addır. Onu olduğu gibi assets'e geri
+  # yazmak, `.sh` aslının yanına İKİZ üretir ve kurulumda hangisinin
+  # kazanacağı glob sırasına kalır. Kaynakta `.sh` hâli varsa ONU tazele.
+  HEDEF_ADI="$b"
+  [ -f "$A/ops/$b.sh" ] && HEDEF_ADI="$b.sh"
+  # 🔴 assets/ops KAYNAK GERCEĞİDİR — buraya /usr/local/bin'den KOPYALAMA.
+  # Eskiden kopyalanıyordu ve ters yönde çalışıyordu: /usr/local/bin
+  # bayatladığında (ör. updater kendini yayındaki eski sürüme düşürünce)
+  # o bayatlık kaynağa geri yazılıp yayınlanıyordu. Değişiklik iki kez
+  # bu yolla sessizce geri alındı. Artık yalnız FARKI BİLDİRİYORUZ.
+  if [ -f "$A/ops/$HEDEF_ADI" ] && ! cmp -s "$f" "$A/ops/$HEDEF_ADI"; then
+    uyar "kurulu araç kaynaktan farklı: $b  (kaynak esas alındı — gerekiyorsa assets/ops'u düzenleyin)"
+  elif [ ! -f "$A/ops/$HEDEF_ADI" ]; then
+    cp -f "$f" "$A/ops/$HEDEF_ADI" || dur "ops kopyalanamadı: $HEDEF_ADI"
+    TAZE=$((TAZE+1))
+  fi
+done
+# 🔴 Installer ops dosyalarini kurarken `.sh` uzantisini SOYUYOR. Yani
+# `girginospanel-optimize` ve `girginospanel-optimize.sh` AYNI hedefe
+# kuruluyor ve glob sirasi geregi `.sh` (hic tazelenmeyen, bayat olan)
+# SONRA yaziyor -> taze kopyayi eziyor. Ikiz varsa paketleme durur.
+IKIZ=""
+for f in "$A"/ops/*.sh; do
+  [ -f "$f" ] || continue
+  ciplak="${f%.sh}"
+  [ -f "$ciplak" ] && IKIZ="$IKIZ $(basename "$ciplak")"
+done
+[ -z "$IKIZ" ] || dur "ops'ta .sh ikizi var, kurulumda bayat olan taze olanı EZER:$IKIZ"
+ok "$(ls "$A/ops" | wc -l) dosya ($TAZE tazelendi, .sh ikizi yok)"
+
+# ─────────────────────────────────────────────────────────── 5) kapılar
+echo "== 5/5 · çıktı kapıları =="
+# (kaynak kapıları 0/5'te koştu — burada yalnızca ÜRETİLEN çıktı denetlenir)
+
+# — installer'ın atıf yaptığı HER asset gerçekten pakette mi?
+# Elle tutulan 3-dosyalık liste yerine install.sh'tan TÜRETİLİR: installer
+# yeni bir dosyaya atıf eklerse kapı onu kendiliğinden kapsar.
+EKSIK_ASSET=""
+while read -r yol; do
+  [ -n "$yol" ] || continue
+  [ -e "$A/$yol" ] || EKSIK_ASSET="$EKSIK_ASSET $yol"
+# 🔴 `${A}/` (suslu) yazimi eski regexte GORUNMUYORDU: installer tek bir
+# duzenlemeyle suslu yazima gecerse liste bosalir ve kapi hicbir sey
+# kontrol etmeden "✓" der.
+done < <(grep -oE '\$\{?(ASSETS|A)\}?/[A-Za-z0-9._/-]+' "$I" | sed -E 's#^\$\{?(ASSETS|A)\}?/##' | sort -u)
+[ -z "$EKSIK_ASSET" ] || dur "installer'ın istediği asset(ler) pakette YOK:$EKSIK_ASSET"
+ok "installer'ın atıf yaptığı tüm asset'ler yerinde"
+
+# — ikili derlemeden sonra değişmiş mi?
+BIN_SIMDI=$(sha256sum "$A/girginospanel-server" | cut -d' ' -f1)
+[ "$BIN_SIMDI" = "$BIN_SHA" ] || dur "binary derlemeden sonra değişmiş"
+ok "binary bu koşuda derlendi"
+
+# — her .sql pakette tek tek var mı?
+# 🔴 `tar tzf X | grep -q Y` KULLANMA: grep ilk eşleşmede çıkıp boruyu kapatır,
+# tar SIGPIPE alır, pipefail pipeline'ı hatalı sayar -> dosya pakette OLSA BİLE
+# "eksik" denir. Listeyi bir kez alıp substring ara.
+for f in "$S"/migrations/*.sql; do
+  case "$GOC_LISTE" in
+    *"$(basename "$f")"*) : ;;
+    *) dur "göç eksik: $(basename "$f")" ;;
+  esac
+done
+# 🔴 Yukarıdaki kontrol TOTOLOJİK: tarball da liste de aynı dizinden türüyor,
+# yani KAYNAKTAN silinmiş bir göçü yakalayamaz. Gerçek çapa: göç sayısı asla
+# AZALMAZ. Azalırsa biri dosya silmiştir -> dur.
+# 🔴 Capa yalniz ADET tutarsa sil+ekle (veya yeniden adlandirma) sayiyi
+# sabit birakir ve kapidan gecer. Artik DOSYA ADI + ICERIK HASH'i tutulur:
+# silinen, adi degisen veya icerigi degistirilen bir goc yakalanir.
+CAPA=$A/.goc_capasi
+YENI_CAPA=$(cd "$S/migrations" && sha256sum ./*.sql | sed 's#\./##' | sort -k2)
+if [ -f "$CAPA" ]; then
+  KAYIP=""
+  while read -r csum cad; do
+    [ -n "$cad" ] || continue
+    case "$YENI_CAPA" in
+      *"$cad"*) : ;;
+      *) KAYIP="$KAYIP $cad" ;;
+    esac
+  done < "$CAPA"
+  [ -z "$KAYIP" ] || dur "göç dosyası KAYBOLDU (silinmiş veya adı değişmiş):$KAYIP"
+  DEGISEN=$(diff <(sort -k2 "$CAPA") <(echo "$YENI_CAPA") | grep '^>' | awk '{print $3}' | tr '\n' ' ' || true)
+  [ -z "$DEGISEN" ] || uyar "yeni/değişmiş göç: $DEGISEN"
+else
+  uyar "göç çapası ilk kez yazıldı"
+fi
+echo "$YENI_CAPA" > "$CAPA"
+ok "göç dosyaları birebir eşleşiyor ($GOC_PAKET dosya, ad+hash çapası)"
+
+# ─────────────────────────────────────────────────────────── paketle
+echo "== paketleniyor =="
+rm -rf /root/gpanel-installer
+mkdir -p /root/gpanel-installer
+cp "$I" /root/gpanel-installer/
+# 🔴 `cp -a "$A"` ne bulursa kopyalıyordu — CSP düzeltmesinden ÖNCEKİ
+# `_panel.conf.bak.csp.*` gibi yedekler pakete giriyordu. Yedek/geçici
+# dosyalar dışarıda kalsın.
+tar cf - -C "$S" --exclude='*.bak' --exclude='*.bak.*' --exclude='*.eski' \
+    --exclude='*~' --exclude='.goc_sayisi' --exclude='*.exe' \
+    --exclude='eklentiler/mail/girginospanel-eklenti-mail' \
+    --exclude='eklentiler/calistirici/girginospanel-eklenti-calistirici' assets \
+  | tar xf - -C /root/gpanel-installer
+chmod +x /root/gpanel-installer/girginospanel-install.sh
+tar czf /root/girginospanel-installer.tar.gz -C /root gpanel-installer
+# Ürettiğimiz arşiv gerçekten açılabiliyor mu + beklenen dosyalar içinde mi?
+# 🔴 Listeyi BİR KEZ al. `tar tzf X | grep -q Y` grep erken çıkınca tar'a
+# SIGPIPE yollar, pipefail pipeline'ı hatalı sayar -> dosya arşivde OLSA BİLE
+# "eksik" denir. (Bu tuzağa bu betikte iki kez düşüldü.)
+ARS_LISTE=$(tar tzf /root/girginospanel-installer.tar.gz) || dur "üretilen arşiv okunamıyor"
+for z in gpanel-installer/girginospanel-install.sh gpanel-installer/assets/girginospanel-server \
+         gpanel-installer/assets/migrations.tar.gz gpanel-installer/assets/frontend-dist.tar.gz; do
+  case "$ARS_LISTE" in *"$z"*) : ;; *) dur "arşivde eksik: $z" ;; esac
+done
+# 🔴 İZOLASYON KAPISI: Windows ajanı (.exe) Linux stable paketine ASLA girmez
+# (Linux/Windows bağımsız artefakt+kanal sözleşmesi). --exclude=*.exe kaçağı
+# eler; bu kapı son emniyet. ARS_LISTE zaten değişkende (grep -c tümünü okur,
+# SIGPIPE tuzağı yok).
+EXE_SAY=$(printf '%s\n' "$ARS_LISTE" | grep -ic '\.exe$' || true)
+[ "$EXE_SAY" = 0 ] || dur "pakette Windows (.exe) artefaktı VAR ($EXE_SAY) — izolasyon ihlali"
+ok "izolasyon: pakette Windows .exe yok"
+SHA=$(sha256sum /root/girginospanel-installer.tar.gz | cut -d' ' -f1)
+BOYUT=$(stat -c%s /root/girginospanel-installer.tar.gz)
+ok "/root/girginospanel-installer.tar.gz ($BOYUT bayt)"
+echo "  sha256: $SHA"
+
+# ─────────────────────────────────────────────────────────── yayınla
+if [ "$YAYINLA" = "1" ]; then
+  echo "== yayınlanıyor =="
+  PAKET="girginospanel-installer-${SUR}.tar.gz"
+
+  scp -q -o ConnectTimeout=10 /root/girginospanel-installer.tar.gz \
+    "root@$YAYIN_HOST:$YAYIN_DIZIN/$PAKET" || dur "scp: paket"
+  scp -q -o ConnectTimeout=10 "$A/kur.sh" \
+    "root@$YAYIN_HOST:$YAYIN_DIZIN/kur.sh" || dur "scp: kur.sh"
+  # Guncelleme onyukleyicisi de AYNI kosuda yayinlanir: kur.sh ile ayni
+  # gerekce -- eski bir surum kalirsa yanlis sha bekleyip her seyi reddeder.
+  scp -q -o ConnectTimeout=10 "$A/guncelle.sh" \
+    "root@$YAYIN_HOST:$YAYIN_DIZIN/guncelle.sh" || dur "scp: guncelle.sh"
+
+  # Antivirus imzali kural paketi -> surum.girginos.io/av/kurallar.gospav
+  # (ajan buradan ceker, imza dogrular). YAYIN_DIZIN panel/, av/ bir ust.
+  if [ -f "$A/kurallar.gospav" ]; then
+    AV_DIZIN="${YAYIN_DIZIN%/*}/av"
+    ssh -o ConnectTimeout=10 "root@$YAYIN_HOST" "mkdir -p '$AV_DIZIN'" || dur "av dizini"
+    scp -q -o ConnectTimeout=10 "$A/kurallar.gospav" \
+      "root@$YAYIN_HOST:$AV_DIZIN/kurallar.gospav" || dur "scp: kural paketi"
+    echo "  ✓ imzali kural paketi yayinlandi (av/kurallar.gospav)"
+  fi
+
+  # 🔴 Uzak komutlar `bash -s` ile ve KENDİ `set -e`'siyle çalışır.
+  # Eskiden tek satırlık dizeydi ve sonu `|| true` ile bitiyordu: ssh HER ZAMAN
+  # 0 dönüyordu, `|| dur "yayın"` ÖLÜ KAPIYDI. Ayrıca `cd` başarısız olunca
+  # `chown -R .` root'un ev dizininde çalışmıştı — artık `cd || exit` var ve
+  # chown mutlak yola veriliyor.
+  ssh -o ConnectTimeout=10 "root@$YAYIN_HOST" bash -s -- "$YAYIN_DIZIN" "$PAKET" "$SHA" "$BOYUT" "$SUR" "$GOC_PAKET" <<'UZAK' || dur "uzak yayın adımı"
+set -euo pipefail
+D=$1; PAKET=$2; SHA=$3; BOYUT=$4; SUR=$5; GOC=$6
+cd "$D"
+[ -f "$PAKET" ]
+ln -sfn "$PAKET" girginospanel-installer-latest.tar.gz
+printf 'surum: %s\npaket: %s\nboyut: %s\nsha256: %s\nmigration: %s\n' \
+  "$SUR" "$PAKET" "$BOYUT" "$SHA" "$GOC" > latest.txt
+chown -R nginx:nginx "$D"
+UZAK
+
+  # Yayınlanan HER ŞEY doğrulanır: sürümlü dosya, `latest` bağının HEDEFİ ve
+  # latest.txt içeriği. Eskiden yalnız sürümlü dosya kontrol ediliyordu —
+  # bayat bir `latest` bağı "✓ doğrulandı" ile geçebilirdi.
+  UZAK_CIKTI=$(ssh -o ConnectTimeout=10 "root@$YAYIN_HOST" \
+    "cd $YAYIN_DIZIN && sha256sum $PAKET girginospanel-installer-latest.tar.gz | cut -d' ' -f1 && grep '^sha256:' latest.txt | cut -d' ' -f2") \
+    || dur "uzak doğrulama komutu başarısız"
+  U1=$(echo "$UZAK_CIKTI" | sed -n 1p)
+  U2=$(echo "$UZAK_CIKTI" | sed -n 2p)
+  U3=$(echo "$UZAK_CIKTI" | sed -n 3p)
+  [ "$U1" = "$SHA" ] || dur "yayınlanan paket farklı: $U1"
+  [ "$U2" = "$SHA" ] || dur "'latest' bağı BAYAT (hedef sha $U2)"
+  [ "$U3" = "$SHA" ] || dur "latest.txt bayat sha içeriyor: $U3"
+  ok "paket + 'latest' bağı + latest.txt üçü de doğrulandı"
+
+  # Son söz dışarıdan: CDN/nginx gerçekten yeni dosyayı mı veriyor?
+  PUB=$(curl -fsSL --max-time 30 https://surum.girginos.io/panel/latest.txt | awk -F': ' '/^sha256:/{print $2}') \
+    || dur "public latest.txt okunamadı"
+  [ "$PUB" = "$SHA" ] || dur "public latest.txt farklı sha gösteriyor: $PUB (önbellek?)"
+  ok "public latest.txt doğrulandı"
+
+  # ── Panel içi sürüm-kontrol manifesti (surum.json) — HER yayında güncellenir ──
+  # Panel günde 1 okur; son_surum != kurulu sürüm → "yeni sürüm var" bildirimi.
+  # Eskiden elle bırakılıp bayat kalıyordu; artık her yayında $SURUM_TAM a eşitlenir.
+  # panel/ bir üstünde: /var/www/surum.girginos.io/surum.json. Duyuru GOSP_DUYURU ile
+  # özelleştirilebilir (tırnak KULLANMA — JSON bozar).
+  DUYURU_MET="${GOSP_DUYURU:-Yeni sürüm $SURUM_TAM yayınlandı.}"
+  # 🔴 JSON YERELDE üretilir, scp ile atılır: ssh arg-geçişi tırnakları
+  # KORUMAZ (boşluk/parantez uzak kabukta sözdizim hatası). Yerel heredoc
+  # değişkenleri burada genişletir; uzağa parametre geçişi YOK.
+  TMPSJ=$(mktemp)
+  cat > "$TMPSJ" <<JSON
+{
+  "son_surum": "$SURUM_TAM",
+  "duyuru": "$DUYURU_MET",
+  "kritik": false,
+  "yayin_tarihi": "$(date +%Y-%m-%d)"
+}
+JSON
+  scp -q -o ConnectTimeout=10 "$TMPSJ" "root@$YAYIN_HOST:${YAYIN_DIZIN%/*}/surum.json" || { rm -f "$TMPSJ"; dur "surum.json scp"; }
+  rm -f "$TMPSJ"
+  ssh -o ConnectTimeout=10 "root@$YAYIN_HOST" "chown nginx:nginx '${YAYIN_DIZIN%/*}/surum.json'" || dur "surum.json chown"
+  SJV=$(ssh -o ConnectTimeout=10 "root@$YAYIN_HOST" "cat '${YAYIN_DIZIN%/*}/surum.json'" | grep -o '"son_surum": *"[^"]*"' | grep -o '0\.[0-9][^"]*' | head -1) || dur "surum.json okunamadı"
+  [ "$SJV" = "$SURUM_TAM" ] || dur "surum.json son_surum farklı: $SJV (beklenen $SURUM_TAM)"
+  ok "surum.json güncellendi (son_surum=$SURUM_TAM)"
+  echo "  https://surum.girginos.io/panel/girginospanel-installer-latest.tar.gz"
+  echo "  curl -fsSL https://surum.girginos.io/panel/kur.sh | sudo bash"
+  echo "  curl -fsSL https://get.girginos.io/guncelle | sudo bash"
+else
+  echo
+  echo "  yayınlamak için: girginospanel-paketle --yayinla"
+fi

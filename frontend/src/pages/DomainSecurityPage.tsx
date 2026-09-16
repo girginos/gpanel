@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 /*
  * Domaine ÖZEL güvenlik sayfası — bir domainin bilinen açıklarını listeler.
@@ -41,7 +42,7 @@ const SEV_RENK: Record<string, string> = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
   high:     'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
   medium:   'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
-  low:      'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  low:      'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300',
 }
 const APP_META: Record<string, { ad: string; renk: string }> = {
   'wordpress':    { ad: 'WordPress',    renk: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300' },
@@ -49,7 +50,7 @@ const APP_META: Record<string, { ad: string; renk: string }> = {
   'php-composer': { ad: 'PHP Composer', renk: 'bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300' },
 }
 const appAd = (t: string) => APP_META[t]?.ad ?? (t || '—')
-const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300'
 
 
 const SEC_EN: Record<string, string> = {
@@ -70,6 +71,7 @@ const SEC_EN: Record<string, string> = {
   "Bu domainde bilinen açık bulunmadı.": "No known vulnerabilities found on this domain.",
   "Bu filtreyle açık yok.": "No vulnerabilities with this filter.",
   "Tarama hatası": "Scan error",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -85,6 +87,7 @@ export default function DomainSecurityPage() {
   const [aktifSayfa, setAktifSayfa] = useState(1)
   const [taranıyor, setTaranıyor] = useState(false)
   const dialog = useDialog()
+  const toast = useToast()
   const ilk = useRef(false)
 
   const yukle = async () => {
@@ -104,7 +107,9 @@ export default function DomainSecurityPage() {
       setUyg((env.data.items ?? []).filter((u) => u.domain_id === domainID))
       ilk.current = true
     } catch (e) {
-      setHata(apiHata(e, cevir("Yüklenemedi")))
+      const m = apiHata(e, cevir("Yüklenemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { if (domainID > 0) void yukle() }, [domainID, filtre, aktifSayfa])
@@ -158,7 +163,7 @@ export default function DomainSecurityPage() {
           </div>
         </div>
         <button onClick={domainTara} disabled={taranıyor || taraniyorMu}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+          className="rounded-lg bg-dark-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-dark-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
           {taraniyorMu ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
         </button>
       </div>
@@ -168,25 +173,25 @@ export default function DomainSecurityPage() {
         <span className="text-slate-500 mr-1">{cevir("Filtre:")}</span>
         {([['', cevir("Hepsi")], ['critical', cevirT(cevir("Kritik {0}"), sev.critical)], ['high', cevirT(cevir("Yüksek {0}"), sev.high)], ['medium', cevirT(cevir("Orta {0}"), sev.medium)], ['low', cevirT(cevir("Düşük {0}"), sev.low)]] as [string, string][]).map(([v, ad]) => (
           <button key={v} onClick={() => { setFiltre(v); setAktifSayfa(1) }}
-            className={`rounded-md border px-2 py-1 ${filtre === v ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+            className={`rounded-md border px-2 py-1 ${filtre === v ? 'border-dark-700 bg-dark-800 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-dark-600 dark:text-slate-400 dark:hover:bg-dark-700'}`}>
             {ad}
           </button>
         ))}
       </div>
 
       {yukleniyor && !ilk.current ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
       ) : sayfa.items.length === 0 ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 py-10 text-center text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 py-10 text-center text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
           {taraniyorMu ? cevir("Taranıyor…") : (filtre ? cevir("Bu filtreyle açık yok.") : cevir("Bu domainde bilinen açık bulunmadı."))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-dark-600">
           <div className="overflow-x-auto">
             <table className="min-w-[860px] w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
                 <tr>
                   <th className="w-32 px-3 py-3 font-semibold">{cevir("Şiddet")}</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Paket")}</th>
@@ -195,9 +200,9 @@ export default function DomainSecurityPage() {
                   <th className="px-3 py-3 font-semibold">{cevir("Başlık")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                 {sayfa.items.map((b) => (
-                  <tr key={b.id} className="bg-white dark:bg-slate-950">
+                  <tr key={b.id} className="bg-white dark:bg-dark-900">
                     <td className="px-3 py-2.5">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${SEV_RENK[b.severity] || SEV_RENK.low}`}>
                         {b.severity || '—'}{b.cvss > 0 ? ' · ' + b.cvss.toFixed(1) : ''}

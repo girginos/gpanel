@@ -31,11 +31,14 @@ const ICONS = {
   dns:       'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01',
   redis:     'M13 10V3L4 14h7v7l9-11h-7z',
   waf:       'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  erisim:    'M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2zM7 11V7a5 5 0 0110 0v4',
 }
 
 
 const CMP_EN: Record<string, string> = {
   "Türkçe": "English",
+  "Erişim Kısıtlama": "Access Restrictions",
+  "IP bazlı erişim izni": "IP-based access control",
   "Dosyalar": "Files",
   "Web Sitesini Kopyala": "Copy Website",
   "Klonlama": "Cloning",
@@ -96,6 +99,7 @@ export default function DomainPano({ domain }: { domain: Domain }) {
           onClick={git('ssl')}
         />
         <ToolCard etiket={cevir(cevir("WAF (Güvenlik Duvarı)"))}   aciklama="ModSecurity + OWASP CRS" ikon={ICONS.waf} renk="emerald" onClick={git('waf')} />
+        <ToolCard etiket={cevir("Erişim Kısıtlama")} aciklama={cevir("IP bazlı erişim izni")} ikon={ICONS.erisim} renk="indigo" onClick={git('erisim')} />
         <ToolCard etiket={cevir("Şifre Korumalı Dizinler")} aciklama=".htpasswd"       ikon={ICONS.kilit}      renk="amber" faz="F7" onClick={git('sifre-koruma')} />
         <ToolCard etiket={cevir("İstatistikler")}            aciklama={cevir("Trafik analizi")}  ikon={ICONS.istatistik} renk="indigo" faz="F10" onClick={git('istatistik')} />
         <ToolCard etiket="G-AV"                  aciklama={cevir("Antivirüs")}        ikon={ICONS.imunify}    renk="emerald" onClick={git('imunify')} />

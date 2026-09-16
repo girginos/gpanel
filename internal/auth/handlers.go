@@ -4,6 +4,8 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"girginospanel/internal/gizli"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -133,6 +135,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "2FA durumu doğrulanamadı")
 			return
 		}
+		sec = gizli.CozBagli(sec, "totp") // at-rest sifreli (graceful)
 		if en == 1 {
 			if strings.TrimSpace(sec) == "" {
 				httpx.WriteError(w, http.StatusInternalServerError, "2FA yapılandırması hatalı")
@@ -148,7 +151,9 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
 				return
 			}
-			_, _ = h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=1`, adim) // replay koruması
+			if _, err := h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=1`, adim); err != nil { // replay koruması
+				log.Printf("auth: TOTP totp_last_step kaydedilemedi (adim=%d): %v — replay koruması bu istekte KALICI OLMADI", adim, err)
+			}
 		}
 	}
 
@@ -206,6 +211,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 			httpx.WriteError(w, http.StatusInternalServerError, "2FA durumu doğrulanamadı")
 			return
 		}
+		sec = gizli.CozBagli(sec, "totp")
 		if en == 1 {
 			if strings.TrimSpace(sec) == "" {
 				httpx.WriteError(w, http.StatusInternalServerError, "2FA yapılandırması hatalı")
@@ -221,7 +227,9 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 				httpx.WriteError(w, http.StatusUnauthorized, "2FA kodu hatalı veya tekrar kullanıldı")
 				return
 			}
-			_, _ = h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=?`, adim, id)
+			if _, err := h.DB.Exec(`UPDATE users SET totp_last_step=? WHERE id=?`, adim, id); err != nil {
+				log.Printf("GÜVENLİK: totp_last_step yazılamadı (uid=%d): %v — TOTP kodu tekrar kullanılabilir", id, err)
+			}
 		}
 	}
 	tok, err := IssueResellerAt(h.Secret, h.LifetimeSec, id, req.Kullanici, id, h.gecersizDamga(id))

@@ -269,6 +269,17 @@ var nginxBaglam = map[string]string{
 // yazmak `duplicate` uretirdi.
 const nginxHTTPConfYolu = "/etc/nginx/conf.d/00-girginospanel-perf.conf"
 
+// nginxTLSConfYolu — global TLS politikasinin TEK KAYNAGI (panelhardening yazar).
+//
+// 🔴 NEDEN ADAY LISTESINDE OLMAK ZORUNDA: bu dosya perf conf'tan SONRA eklendi
+// ve ssl_protocols / ssl_prefer_server_ciphers gibi yonergeleri http baglaminda
+// tanimliyor. NginxHedefDosya onu taramadigi icin ayni yonergeyi perf conf'a
+// IKINCI kez yaziyordu -> "duplicate directive" -> `nginx -t` DUSUYOR -> o
+// sunucuda artik HICBIR vhost render edilemiyor (core render oncesi nginx -t
+// calistirip dogru sekilde reddediyor) ve nginx yeniden baslatilamiyor.
+// Dev .181'de tam olarak bu olustu ve olculdu.
+const nginxTLSConfYolu = "/etc/nginx/conf.d/00-gosp-tls.conf"
+
 // NginxHedefDosya — bu direktifin GERCEKTEN yazilacagi dosya.
 // Analiz asamasinda Oneri.Dosya'ya konur; yedekleme ve geri alma bu
 // alani kullandigi icin yanlis olursa degistirilen dosya YEDEKLENMEZ.
@@ -277,9 +288,11 @@ const nginxHTTPConfYolu = "/etc/nginx/conf.d/00-girginospanel-perf.conf"
 // uretmemek icin). Hicbir yerde yoksa baglamin kanonik dosyasina yazilir.
 func NginxHedefDosya(param string) string {
 	baglam := nginxDirektifBaglami(param)
-	aday := []string{nginxHTTPConfYolu, NginxAnaConfYolu}
+	// TLS tek-kaynak dosyasi ONCE taranir: bir yonerge orada tanimliysa
+	// degisiklik ORADA yapilmali, aksi halde ikinci tanim uretilir.
+	aday := []string{nginxTLSConfYolu, nginxHTTPConfYolu, NginxAnaConfYolu}
 	if baglam != "http" {
-		aday = []string{NginxAnaConfYolu, nginxHTTPConfYolu}
+		aday = []string{NginxAnaConfYolu, nginxTLSConfYolu, nginxHTTPConfYolu}
 	}
 	for _, y := range aday {
 		b, err := readAll(y)

@@ -40,6 +40,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"girginospanel/internal/dnsutil"
 )
 
 const mailEklentiSoket = "/run/girginospanel/eklenti-mail.sock"
@@ -81,18 +83,12 @@ const (
 // çözümleme HATASINDA yeniden denenir. IP kümesi UYUŞMUYORSA (yani cevap
 // alınmış ama başka sunucuyu gösteriyorsa) tekrar denemenin anlamı yok.
 func hostCozuluyorMu(domain, host string) bool {
-	cozumle := func(ad string) []string {
-		for deneme := 0; deneme < 3; deneme++ {
-			ip, err := net.LookupHost(ad)
-			if err == nil && len(ip) > 0 {
-				return ip
-			}
-			if deneme < 2 {
-				time.Sleep(time.Second)
-			}
-		}
-		return nil
-	}
+	// 🔴 KALICI FIX: yerel (önbellekli) çözümleyici yerine KAMU DNS'ten çöz —
+	// LE'nin HTTP-01'de göreceği kayıt budur. Yerel unbound/systemd-resolved
+	// bir domain taşındıktan sonra eski IP'yi önbellekte tutup adı yanlışlıkla
+	// "çözülmüyor" saydırıyordu (bkz. dnsutil). dnsutil.Cozumle 3 kamu NS dener,
+	// hepsi ulaşılamazsa sistem çözümleyicisine düşer.
+	cozumle := func(ad string) []string { return dnsutil.Cozumle(ad) }
 	h := cozumle(host)
 	if len(h) == 0 {
 		return false
@@ -180,7 +176,9 @@ func acmeBlok() string {
         root ` + MailAcmeWebroot + `;
         default_type "text/plain";
         try_files $uri =404;
-        access_log off;
+        # 🔴 access_log AÇIK: LE HTTP-01 doğrulama isteklerinin gelip
+        # gelmediği, hangi hostta ne yanıt aldığı görünsün (SSL teşhisi).
+        access_log /var/log/nginx/acme-challenge.access.log;
     }
 `
 }
@@ -240,6 +238,13 @@ server {
     ssl_prefer_server_ciphers on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
+    # 🔴 Kendinden imzali sertifika: global 00-gosp-tls.conf'taki
+    # ssl_stapling on burada her nginx reload'unda "ssl_stapling ignored,
+    # issuer certificate not found" uyarisi uretir (self-signed'in issuer/OCSP
+    # zinciri yoktur) ve temiz kurulumun saglik raporunu kirletir. YALNIZ bu
+    # vhost'ta kapatilir; gercek LE sertifikali domain vhost'larinda stapling
+    # acik kalir.
+    ssl_stapling off;
 
 `)
 		b.WriteString(acmeBlok())
@@ -530,7 +535,15 @@ func MailSertifikaAl(alanAdi, sk string, secilenler []string) (certPath, keyPath
 	certPath = filepath.Join(dir, "fullchain.pem")
 	keyPath = filepath.Join(dir, "key.pem")
 
-	args := []string{"--issue", "--server", "letsencrypt", "--config-home", acmeConfigHome, "--webroot", MailAcmeWebroot}
+	// 🔴 acme.sh KENDI KONUSMA KAYDINI yazsin. --log verilmezse acme.sh hicbir
+	// log dosyasi uretmez; LE ile 30+ saniyelik HTTP-01 pazarligi (hangi ad
+	// dogrulanamadi, LE tam olarak ne dedi) hicbir yere yazilmiyordu. Bu ariza
+	// sinifinin teshis edilememesinin birincil sebebiydi.
+	_ = os.MkdirAll("/var/log/girginospanel", 0o750)
+	acmeLog := "/var/log/girginospanel/acme-mail-" + alanAdi + ".log"
+
+	args := []string{"--issue", "--server", "letsencrypt", "--config-home", acmeConfigHome,
+		"--webroot", MailAcmeWebroot, "--log", acmeLog, "--log-level", "2"}
 	for _, h := range kapsam {
 		args = append(args, "-d", h)
 	}
@@ -540,13 +553,18 @@ func MailSertifikaAl(alanAdi, sk string, secilenler []string) (certPath, keyPath
 		// sertifika dosyası GERÇEKTEN yerindeyse devam et, yoksa hata ver.
 		if !dosyaVarPv(filepath.Join(acmeConfigHome, kapsam[0], "fullchain.cer")) &&
 			!dosyaVarPv(filepath.Join(acmeConfigHome, kapsam[0]+"_ecc", "fullchain.cer")) {
-			return "", "", kapsam, atlanan, fmt.Errorf("acme mail issue: %s", strings.TrimSpace(string(out)))
+			// 🔴 exit SEBEBI (e) ve KAPSAM da mesaja girer: "exit status 1" mi
+			// yoksa "signal: killed" (OOM) mi olduğu, ve hangi 7 adla sipariş
+			// verildiği kayıttan okunabilsin. Tam acme.sh konuşması acmeLog'da.
+			return "", "", kapsam, atlanan, fmt.Errorf(
+				"acme mail issue (kapsam=%s, çıkış=%v, tam kayıt=%s): %s",
+				strings.Join(kapsam, ","), e, acmeLog, strings.TrimSpace(string(out)))
 		}
 	}
 	ins := []string{"--install-cert", "--config-home", acmeConfigHome, "-d", kapsam[0],
 		"--fullchain-file", certPath, "--key-file", keyPath}
 	if out, e := exec.Command("/root/.acme.sh/acme.sh", ins...).CombinedOutput(); e != nil {
-		return "", "", kapsam, atlanan, fmt.Errorf("acme mail install: %s", strings.TrimSpace(string(out)))
+		return "", "", kapsam, atlanan, fmt.Errorf("acme mail install (çıkış=%v): %s", e, strings.TrimSpace(string(out)))
 	}
 	// 🔴 "acme.sh hata vermedi" KANIT DEĞİLDİR — dosya gerçekten oluştu mu?
 	if !dosyaVarPv(certPath) || !dosyaVarPv(keyPath) {

@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,8 +51,8 @@ type osvYanit struct {
 }
 
 type osvVuln struct {
-	ID       string   `json:"id"`       // GHSA-xxxx-xxxx-xxxx
-	Aliases  []string `json:"aliases"`  // ["CVE-2024-...", "..."]
+	ID       string   `json:"id"`      // GHSA-xxxx-xxxx-xxxx
+	Aliases  []string `json:"aliases"` // ["CVE-2024-...", "..."]
 	Summary  string   `json:"summary"`
 	Details  string   `json:"details"`
 	Severity []struct {
@@ -189,14 +188,3 @@ func firstFixed(affected []struct {
 	}
 	return ""
 }
-
-// oSVPaketiKarsilastirveKaydet — Node/PHP tarayıcıları için ortak yardımcı.
-// WP tarafındaki paketKarsilastirveKaydet ile eşdeğer, ama versiyon
-// karşılaştırması yok (OSV döndüğü şey zaten etkilenen zafiyetlerin listesi).
-func oSVPaketiKarsilastirveKaydet(ctx context.Context, db interface{ Exec(string, ...any) (any, error) }, _ struct{}) int {
-	// Bu fonksiyon Node/PHP tarayıcılarında inline yazıldı — burada bir stub yok.
-	// Import döngüsü nedeniyle burada tutmuyoruz.
-	return 0
-}
-
-var _ = errors.New // gelecekte kullanmak için import'u tut

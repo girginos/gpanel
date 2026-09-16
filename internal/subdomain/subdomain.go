@@ -5,6 +5,7 @@ package subdomain
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -166,9 +167,12 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	}
 	// DNS A kaydı (parent zone'a) + zone yaz
 	if h.IPv4 != "" {
-		_, _ = h.DB.Exec(`INSERT INTO dns_records (domain_id, ad, tip, deger, ttl, oncelik, aktif) VALUES (?,?,?,?,?,?,1)`,
-			id, altAd, "A", h.IPv4, 3600, 0)
-		_ = dns.WriteZone(r.Context(), h.DB, id)
+		if _, err := h.DB.Exec(`INSERT INTO dns_records (domain_id, ad, tip, deger, ttl, oncelik, aktif) VALUES (?,?,?,?,?,?,1)`,
+			id, altAd, "A", h.IPv4, 3600, 0); err != nil {
+			log.Printf("subdomain %s: DNS A kaydı eklenemedi: %v — subdomain çözümlenmeyebilir", tamAd, err)
+		} else if err := dns.WriteZone(r.Context(), h.DB, id); err != nil {
+			log.Printf("subdomain %s: zone dosyası yazılamadı: %v", tamAd, err)
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "tam_ad": tamAd, "docroot": docroot})
 }
@@ -206,8 +210,14 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(docroot, base) && filepath.Clean(docroot) != filepath.Clean(base) {
 		_ = os.RemoveAll(docroot)
 	}
-	_, _ = h.DB.Exec(`DELETE FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id)
-	_, _ = h.DB.Exec(`DELETE FROM dns_records WHERE domain_id=? AND ad=? AND tip='A'`, id, altAd)
+	if _, err := h.DB.Exec(`DELETE FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id); err != nil {
+		log.Printf("subdomain sil: DB satırı silinemedi (sid=%d domain=%d): %v — nginx/docroot GİTTİ ama kayıt kaldı", sid, id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "subdomain kaydı silinemedi: "+err.Error())
+		return
+	}
+	if _, err := h.DB.Exec(`DELETE FROM dns_records WHERE domain_id=? AND ad=? AND tip='A'`, id, altAd); err != nil {
+		log.Printf("subdomain sil: DNS A kaydı silinemedi (domain=%d ad=%s): %v — zone'da orphan kalabilir", id, altAd, err)
+	}
 	_ = dns.WriteZone(r.Context(), h.DB, id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

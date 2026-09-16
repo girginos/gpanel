@@ -96,7 +96,7 @@ func soaHost(ns string) string {
 	return ns
 }
 
-// soaMail: hostmaster e-postasını zone formatına çevir (admin@x.com -> admin.x.com.).
+// soaMail: hostmaster e-postasını SOA RNAME biçimine çevirir ('@' -> '.', sona nokta eklenir).
 func soaMail(hm string) string {
 	hm = strings.TrimSpace(hm)
 	if i := strings.Index(hm, "@"); i >= 0 {

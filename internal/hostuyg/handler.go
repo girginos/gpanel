@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -261,7 +262,10 @@ func (h *Handler) YedekAl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var g yedekGovde
-	_ = json.NewDecoder(r.Body).Decode(&g)
+	if err := json.NewDecoder(r.Body).Decode(&g); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "geçersiz gövde", http.StatusBadRequest)
+		return
+	}
 	uid := aktorUID(h.Aktor, r)
 	// Async — büyük app'ler için HTTP timeout riski yok
 	is := YedekAlAsync(h.DB, k, g.Aciklama, uid)

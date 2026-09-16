@@ -143,9 +143,9 @@ export default function PanelGuncelleme() {
   }
 
   return (
-    <div className="mb-6 p-4 border rounded-2xl bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50">
+    <div className="mb-6 p-4 border rounded-lg bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50">
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-emerald-100 dark:bg-emerald-900/40"><Ikon d={I.yukle} className="h-5 w-5" /></div>
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0 bg-emerald-100 dark:bg-emerald-900/40"><Ikon d={I.yukle} className="h-5 w-5" /></div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Panel Güncellemesi")}</span>
@@ -196,13 +196,13 @@ export default function PanelGuncelleme() {
           )}
 
           {log && (
-            <pre ref={logRef} className="mt-2 text-[11px] font-mono bg-slate-900 text-slate-300 rounded-lg p-2.5 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{log}</pre>
+            <pre ref={logRef} className="mt-2 text-[11px] font-mono bg-dark-800 text-slate-300 rounded-lg p-2.5 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{log}</pre>
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {!onay ? (
               <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                className="text-xs px-3 py-1.5 rounded-lg bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
                 {cevir(cevir("Güncellemeleri denetle ve kur"))}
               </button>
             ) : (
@@ -212,7 +212,7 @@ export default function PanelGuncelleme() {
                   className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium disabled:opacity-40">
                   {baslatiliyor ? cevir("Başlatılıyor…") : cevir("Evet, güncelle")}
                 </button>
-                <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-700 transition">
                   {cevir("Vazgeç")}
                 </button>
               </>

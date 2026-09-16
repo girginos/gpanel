@@ -69,8 +69,8 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
   return (
     <nav
       className="lg:hidden fixed bottom-0 inset-x-0 z-30 flex items-stretch
-                 border-t border-slate-200 dark:border-slate-800
-                 bg-white/95 dark:bg-slate-900/95 backdrop-blur
+                 border-t border-slate-200 dark:border-dark-600
+                 bg-white/95 dark:bg-dark-800/95 backdrop-blur
                  pb-[env(safe-area-inset-bottom)]"
       aria-label={cevir("Alt gezinme")}
     >

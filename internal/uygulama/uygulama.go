@@ -27,10 +27,8 @@ import (
 	"girginospanel/internal/hesaplar"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -394,6 +392,9 @@ func Liste(ctx context.Context, db *sql.DB, domainID int64) ([]Kayit, error) {
 			out = append(out, k)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -474,24 +475,6 @@ func randomStr(n int) string {
 		b[i] = harfler[int(b[i])%len(harfler)]
 	}
 	return string(b)
-}
-
-// sistemUIDGID — "c_xxx" sistem kullanicisinin uid/gid'sini dondurur.
-// os.Chown sayisal id ister; user.Lookup string dondurdugu icin cevrilir.
-func sistemUIDGID(sk string) (int, int, error) {
-	u, err := user.Lookup(sk)
-	if err != nil {
-		return 0, 0, err
-	}
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return 0, 0, err
-	}
-	gid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		return 0, 0, err
-	}
-	return uid, gid, nil
 }
 
 // tekKokDiziniDuzlestirTenant — arsivin tek kok klasoru varsa icerigini bir

@@ -3,7 +3,6 @@
 package musteri
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 )
 
@@ -61,8 +61,9 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "FTP hesabı askıya alınmış")
 		return
 	}
-	// Plain text karşılaştırma (Pure-FTPd MYSQLCrypt cleartext) — sabit-zamanlı
-	if subtle.ConstantTimeCompare([]byte(req.Parola), []byte(passDB)) != 1 {
+	// FTP parolasi at-rest $6$ crypt hash'i; sabit-zamanli crypt dogrulama
+	// (eski duz-metin satir icin geriye-uyumlu). Bkz hesaplar.FTPParolaDogrula.
+	if !hesaplar.FTPParolaDogrula(req.Parola, passDB) {
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}
@@ -89,16 +90,6 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// MusteriOnly: middleware — token tipi "musteri" ise ve domain_id path'le eşleşmiyorsa 403
-// Admin token'ı ise bypass eder (admin'ler her şeyi yapabilir)
-func MusteriOnly(secret []byte) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // CheckScope: handler içinde manuel scope kontrolü. Admin ise allow.
 // Müşteri token ise URL'deki {id} ile token.DomainID eşleşmeli.
 func CheckScope(r *http.Request, secret []byte, urlDomainIDParam string) (bool, error) {
@@ -108,8 +99,7 @@ func CheckScope(r *http.Request, secret []byte, urlDomainIDParam string) (bool, 
 	}
 	raw := strings.TrimPrefix(authH, "Bearer ")
 	// Önce admin claims dene
-	if c, err := auth.Parse(secret, raw); err == nil {
-		_ = c
+	if _, err := auth.Parse(secret, raw); err == nil {
 		return true, nil // admin
 	}
 	// Sonra musteri claims dene

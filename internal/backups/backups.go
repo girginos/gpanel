@@ -18,6 +18,7 @@ import (
 
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -41,6 +42,9 @@ func RemoveDomainBackups(sk string) error {
 }
 
 type Yedek struct {
+	// Mevcut — "yerel" | "uzak" | "yok". Dosyasi hicbir yerde bulunmayan
+	// kayitlar arayuzde gecerli yedek gibi gorunmemeli.
+	Mevcut    string `json:"mevcut"`
 	ID        int64  `json:"id"`
 	DomainID  int64  `json:"domain_id"`
 	Tip       string `json:"tip"`
@@ -76,14 +80,52 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+
+	// 🔴 DOSYA VARLIĞI ÖLÇÜLÜR. Liste bugüne kadar yalnız DB satırlarını
+	// gösteriyordu; dosyası silinmiş (ör. eski `find -mtime +14 -delete`
+	// cron'u ya da elle temizlik) kayıtlar geçerli yedek gibi listeleniyor,
+	// "İndir" denince 500 dönüyordu. Bu dev sunucuda 324 kaydın 179'u
+	// (%55) böyleydi. Kullanıcı listeye bakıp "yedeğim var" diyordu — yoktu.
+	var sk string
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT sistem_kullanici FROM domains WHERE id=?`, id).Scan(&sk)
+
+	// Ö9: "uzağa taşındı" bilgisi zaten satırdaki `notlar` sütununda. Eskiden
+	// her satır için ayrı bir `SELECT COUNT(*) ... WHERE dosya=?` çalışıyordu
+	// (dosya sütununda index YOK → tam tablo taraması, 300 satırda 300 tarama).
+
 	out := make([]Yedek, 0)
 	for rows.Next() {
 		var y Yedek
-		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma); err == nil {
-			out = append(out, y)
+		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma); err != nil {
+			continue
 		}
+		switch {
+		case sk != "" && dosyaVar(filepath.Join(BackupRoot, sk, y.Dosya)):
+			y.Mevcut = "yerel"
+		case strings.Contains(y.Notlar, "[uzaga tasindi]"):
+			// 🔴 "uzak" DEĞİL "uzak_iddia".
+			//
+			// Burada AĞA ÇIKILMIYOR: değer yalnızca kaydın `notlar`
+			// sütunundaki "[uzaga tasindi]" etiketinden okunuyor. Önceki
+			// sürüm buna "uzak" deyip İndir düğmesini AÇIK bırakıyordu —
+			// yani hiçbir yerde olmayan bir yedek kullanıcıya GEÇERLİ
+			// gösteriliyordu. Bu, listeyi dürüstleştirme amacının tam tersi.
+			//
+			// Ağ yoklaması burada YAPILAMAZ: liste tek istekte yüzlerce
+			// satır döndürüyor, her satır için FTP bağlantısı açmak sayfayı
+			// dakikalarca bekletirdi. Bu yüzden dürüst etiket: doğrulanmadı.
+			y.Mevcut = "uzak_iddia"
+		default:
+			y.Mevcut = "yok"
+		}
+		out = append(out, y)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func dosyaVar(yol string) bool {
+	fi, err := os.Stat(yol)
+	return err == nil && !fi.IsDir()
 }
 
 // OzetSatir: bir domainin yedek özeti (sunucu-geneli görünüm için).
@@ -280,10 +322,93 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "yedek bulunamadı")
 		return
 	}
-	if err == nil {
-		_ = os.Remove(filepath.Join(BackupRoot, sk, dosya))
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı okunamadı: "+err.Error())
+		return
 	}
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM backups WHERE id=?`, bid)
+
+	// 🔴 BILINCLI CIKIS KAPISI (`?uzagi_yoksay=1`).
+	//
+	// Uzak silmeyi zorunlu kilmak sessiz sizintiyi bitirdi ama yeni bir
+	// tuzak acti: uzak hedefi TANIMLI olup erisilemeyen (ya da kapatilmis
+	// ama adresi duran) bir kurulumda HICBIR yedek silinemez hale geliyor.
+	// "Uzak depoyu duzeltene kadar disk temizleyemezsin" kabul edilemez.
+	//
+	// Cozum, sessizce atlamak DEGIL: kullanici uyariyi GORUR ve acikca
+	// "yine de sil" der. O zaman uzak kopyanin kaldigi kullaniciya soylenir
+	// ve denetim kaydina yazilir — kimse yanlislikla sizinti biriktirmez.
+	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
+	uid, kullanici := middleware.Aktor(r)
+	if uzagiYoksay {
+		yh := ""
+		if e := os.Remove(filepath.Join(BackupRoot, sk, dosya)); e != nil && !os.IsNotExist(e) {
+			yh = e.Error()
+		}
+		if _, e := h.DB.ExecContext(r.Context(), `DELETE FROM backups WHERE id=?`, bid); e != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı silinemedi: "+e.Error())
+			return
+		}
+		httpx.Denetim(h.DB, r, uid, kullanici, "yedek.sil.uzak-yoksayildi", dosya,
+			"uzak kopya BIRAKILDI (kullanıcı onayı)", id, true)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":    true,
+			"uyari": "Yedek kaydı silindi, ancak uzak depodaki (FTP/SFTP) kopya BIRAKILDI. Depoda yer kaplamaya devam eder.",
+			"yerel": yh == "",
+		})
+		return
+	}
+
+	// Uzak → yerel → DB, tek noktadan (bkz. yedekKaydiniYokEt).
+	yerelHata, e := yedekKaydiniYokEt(r.Context(), h.DB, id, sk, dosya, bid)
+	if errors.Is(e, ErrLftpYok) {
+		// 🔴 SUNUCU EKSIGI, DEPO ARIZASI DEGIL. Silmeyi bloke etmek,
+		// duzeltmeden ONCE calisan bir islevi bozardi (lftp paket listesine
+		// sonradan eklendi; eski kurulumlarda yok). Kullaniciya DOGRUSU
+		// soylenir: uzak kopya kalmistir.
+		yh := ""
+		if er := os.Remove(filepath.Join(BackupRoot, sk, dosya)); er != nil && !os.IsNotExist(er) {
+			yh = er.Error()
+		}
+		if _, er := h.DB.ExecContext(r.Context(), `DELETE FROM backups WHERE id=?`, bid); er != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı silinemedi: "+er.Error())
+			return
+		}
+		log.Printf("yedek sil: lftp kurulu değil — %s uzak kopyası SİLİNEMEDİ (domain=%d)", dosya, id)
+		httpx.Denetim(h.DB, r, uid, kullanici, "yedek.sil.lftp-yok", dosya, "uzak kopya kaldı", id, true)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":    true,
+			"uyari": "Yedek kaydı silindi, ancak sunucuda lftp kurulu olmadığı için uzak depodaki (FTP/SFTP) kopya SİLİNEMEDİ. Sunucuya lftp kurulmalı.",
+			"yerel": yh == "",
+		})
+		return
+	}
+	if e != nil {
+		// 🔴 UZAK SILME BASARISIZSA KAYIT SILINMEZ ve kullaniciya SOYLENIR.
+		// Eskiden yanit kosulsuz {"ok":true} idi: uzak kopya duruyorken
+		// panel "silindi" diyordu.
+		// 🔴 HAM lftp ÇIKTISI YALNIZ ADMİN'E.
+		// Bu uç `MusteriScope` ile korunuyor, yani müşteri/bayi de çağırabilir.
+		// Ham hata, GENEL hedefin (yani ADMİN'in kendi uzak deposunun) host
+		// adını ve dizin şemasını kiracıya sızdırıyordu.
+		ayrinti := "Uzak depodaki (FTP/SFTP) kopya silinemedi, bu yüzden yedek kaydı korundu."
+		if middleware.RolFrom(r) == "admin" {
+			ayrinti += " " + e.Error()
+		}
+		log.Printf("yedek sil: %s uzak kopyası silinemedi (domain=%d): %v", dosya, id, e)
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+			"ok":           false,
+			"hata":         ayrinti,
+			"uzagi_yoksay": true, // istemci "yine de sil" secenegi sunabilir
+		})
+		return
+	}
+	if yerelHata != "" {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":    true,
+			"uyari": "Yedek kaydı ve uzak kopya silindi, ancak sunucudaki yerel dosya silinemedi: " + yerelHata,
+		})
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -337,6 +462,79 @@ func yedekBitir(id int64) {
 	yedekMu.Unlock()
 }
 
+// DomainYedekleriniTemizle — bir domainin TUM yedeklerinin UZAK kopyalarini
+// siler. Domain silinmeden ONCE cagrilmalidir.
+//
+// 🔴 SIRA HAYATI: `domains` satiri silininde `backup_destinations` FK cascade
+// ile gider — yani FTP host/kullanici/PAROLA da gider. Ondan sonra uzak
+// depoyu temizlemek IMKANSIZDIR: ne dosyalarin listesi ne baglanacak kimlik
+// kalir. 2 yillik bir hosting silindiginde yuzlerce GB arsiv uzak depoda
+// KALICI olarak yetim kaliyordu ve panelde izi bile yoktu.
+//
+// Yerel dosyalari SILMEZ (cagiran dizini komple kaldiriyor) ve DB kaydina
+// dokunmaz (cascade halledecek). Isi yalniz uzak kopyalar.
+//
+// Doner: temizlenemeyen dosya sayisi + ilk hata.
+func DomainYedekleriniTemizle(ctx context.Context, db *sql.DB, domainID int64) (kalan int, ilkHata error) {
+	rows, err := db.QueryContext(ctx, `SELECT dosya FROM backups WHERE domain_id=?`, domainID)
+	if err != nil {
+		return 0, err
+	}
+	var dosyalar []string
+	for rows.Next() {
+		var d string
+		if rows.Scan(&d) == nil && strings.TrimSpace(d) != "" {
+			dosyalar = append(dosyalar, d)
+		}
+	}
+	rows.Close()
+
+	for _, d := range dosyalar {
+		if e := YedekUzaktanSil(ctx, db, domainID, d); e != nil {
+			// 🔴 lftp YOKLUGU ENGELLEYICI DEGIL — yorum bunu soyluyordu ama
+			// kod `kalan++` yapip 409 uretiyordu: lftp kurulu olmayan bir
+			// kurulumda HICBIR domain silinemez hale geliyordu. Tek yedek
+			// silme yolu bunu dogru ele aliyordu; iki yol yine ayrismisti.
+			if errors.Is(e, ErrLftpYok) {
+				log.Printf("domain %d silme: lftp yok — %s uzak kopyasi temizlenemedi (engellenmedi)", domainID, d)
+				continue
+			}
+			kalan++
+			if ilkHata == nil {
+				ilkHata = e
+			}
+			log.Printf("domain %d silme: %s uzak kopyasi temizlenemedi: %v", domainID, d, e)
+		}
+	}
+	return kalan, ilkHata
+}
+
+// yedekKaydiniYokEt — bir yedegi UCUNDEN de temizler: uzak kopya, yerel
+// dosya, DB kaydi.
+//
+// 🔴 TEK NOKTA OLMASININ SEBEBI: bu is uc ayri yerde yapiliyordu (silme
+// handler'i, manuel budama, otomatik saklama) ve ucu de birbirinden AYRI
+// evrildi. Uzak silme eklendiginde ikisine eklendi, `pruneOld`'a
+// EKLENMEDI — yani her gece calisan asil budama yolu sizdirmaya devam
+// etti. Ayni sinifin bir daha ayrismamasi icin uc cagiran da buradan gecer.
+//
+// SIRA ONEMLI: once UZAK. Uzak silinemezse yerel dosya ve DB kaydi
+// KORUNUR — kaydi silmek, dosyayi kullanicidan gizleyip uzak depoda
+// birakmak olurdu (sorunu gorunmez kilmak). Bir sonraki turda tekrar
+// denenir.
+func yedekKaydiniYokEt(ctx context.Context, db *sql.DB, domainID int64, sk, dosya string, bid int64) (yerelHata string, err error) {
+	if e := YedekUzaktanSil(ctx, db, domainID, dosya); e != nil {
+		return "", e
+	}
+	if e := os.Remove(filepath.Join(BackupRoot, sk, dosya)); e != nil && !os.IsNotExist(e) {
+		yerelHata = e.Error()
+	}
+	if _, e := db.ExecContext(ctx, `DELETE FROM backups WHERE id=?`, bid); e != nil {
+		return yerelHata, e
+	}
+	return yerelHata, nil
+}
+
 // pruneManuelYedek: domain basina en yeni 10 manuel ('tam') yedegi tutar; fazlasinin
 // dosyasini + DB kaydini siler. Eskiden retention YALNIZ 'oto' yedeklere vardi → manuel
 // yedekler kok diskte (tenant kotasi disinda) sinirsiz birikip diski dolduruyordu.
@@ -359,7 +557,13 @@ func pruneManuelYedek(db *sql.DB, id int64, sk string) {
 	}
 	rows.Close()
 	for _, k := range eski {
-		_ = os.Remove(filepath.Join(BackupRoot, sk, k.dosya))
-		_, _ = db.Exec(`DELETE FROM backups WHERE id=?`, k.bid)
+		yh, e := yedekKaydiniYokEt(context.Background(), db, id, sk, k.dosya, k.bid)
+		if e != nil {
+			log.Printf("yedek budama (manuel): %s silinemedi, kayit korundu: %v", k.dosya, e)
+			continue
+		}
+		if yh != "" {
+			log.Printf("yedek budama (manuel): %s yerel dosyasi silinemedi: %s", k.dosya, yh)
+		}
 	}
 }

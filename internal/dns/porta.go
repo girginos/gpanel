@@ -108,8 +108,9 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var icerik []byte
-	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // zone dosyasi kucuktur
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // zone dosyasi kucuktur — gövde 2 MiB'a sınırlı (DoS savunması)
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		// #nosec G120 -- gövde üstteki MaxBytesReader ile 2 MiB'a sınırlı; ParseMultipartForm bundan fazlasını belleğe/diske alamaz. Taint analizi MaxBytesReader'ı tanımadığı için yanlış-pozitif.
 		if e := r.ParseMultipartForm(2 << 20); e != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "yükleme okunamadı")
 			return
@@ -142,7 +143,7 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // Commit başarılıysa no-op; hata/erken dönüşte geri alır.
 
 	if degistir {
 		if _, e := tx.ExecContext(r.Context(), `DELETE FROM dns_records WHERE domain_id=?`, id); e != nil {
@@ -172,13 +173,16 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 		eklenen++
 	}
 	if soaP != nil {
-		_, _ = tx.ExecContext(r.Context(),
+		if _, e := tx.ExecContext(r.Context(),
 			`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
 			 VALUES(?,?,?,?,?,?,?,?)
 			 ON DUPLICATE KEY UPDATE primary_ns=VALUES(primary_ns), hostmaster=VALUES(hostmaster),
 			   refresh=VALUES(refresh), retry=VALUES(retry), expire=VALUES(expire),
 			   minimum=VALUES(minimum), ttl=VALUES(ttl)`,
-			id, soaP.PrimaryNS, soaP.Hostmaster, soaP.Refresh, soaP.Retry, soaP.Expire, soaP.Minimum, soaP.TTL)
+			id, soaP.PrimaryNS, soaP.Hostmaster, soaP.Refresh, soaP.Retry, soaP.Expire, soaP.Minimum, soaP.TTL); e != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "SOA kaydedilemedi: "+e.Error())
+			return
+		}
 	}
 	if e := tx.Commit(); e != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, e.Error())

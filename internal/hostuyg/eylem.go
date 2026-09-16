@@ -94,7 +94,9 @@ func ts3Query(ctx context.Context, k *UygulamaKayit, komutlar ...string) ([]stri
 		return nil, fmt.Errorf("TS3 bağlantı: %w", err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return nil, err
+	}
 	rd := bufio.NewReader(conn)
 	// Banner: "TS3\r\n" + welcome message
 	_, _ = rd.ReadString('\n') // "TS3"
@@ -232,14 +234,11 @@ func ts3Parse(s string) map[string]string {
 	return out
 }
 
-// TS3 escape: space→\s, \→\\, /→\/, |→\p
-var ts3EscapeMap = map[string]string{" ": "\\s", "\\": "\\\\", "/": "\\/", "|": "\\p"}
-
+// TS3 escape: TEK geçiş (NewReplacer). Eski map+ReplaceAll döngüsü map iterasyon
+// sırası rastgele olduğundan önce eklenen ters-bölü kaçışlarını ikinci kez kaçışlayıp
+// veriyi bozabiliyordu (nondeterministik). ts3Unescape zaten NewReplacer kullanıyor.
 func ts3Escape(s string) string {
-	for a, b := range ts3EscapeMap {
-		s = strings.ReplaceAll(s, a, b)
-	}
-	return s
+	return strings.NewReplacer(" ", "\\s", "\\", "\\\\", "/", "\\/", "|", "\\p").Replace(s)
 }
 func ts3Unescape(s string) string {
 	r := strings.NewReplacer("\\s", " ", "\\p", "|", "\\/", "/", "\\\\", "\\")

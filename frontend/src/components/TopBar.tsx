@@ -34,7 +34,6 @@ const SAYFALAR: SayfaTanim[] = [
   { etiket: 'Güvenlik Duvarı', yol: '/firewall', anahtar: ['firewall', 'güvenlik', 'guvenlik', 'security', 'iptables', 'ban', 'duvar', 'kara liste', 'ip engel'] },
   { etiket: 'WordPress', yol: '/wordpress', anahtar: ['wordpress', 'wp', 'toolkit', 'wp toolkit'] },
   { etiket: 'İzleme', yol: '/izleme', anahtar: ['izleme', 'monitoring', 'monitor', 'metrik', 'cpu', 'ram', 'yük', 'load', 'kaynak'] },
-  { etiket: 'İstatistikler', yol: '/istatistikler', anahtar: ['istatistik', 'statistics', 'trafik', 'kullanım', 'kullanim', 'grafik'] },
   { etiket: 'Site Taşıma', yol: '/araclar/tasima', anahtar: ['taşıma', 'tasima', 'migration', 'transfer', 'göç', 'goc', 'cpanel', 'plesk', 'directadmin', 'aktar', 'import'] },
   { etiket: 'Sunucu Optimize', yol: '/araclar/optimize', anahtar: ['optimize', 'optimizasyon', 'hızlandır', 'hizlandir', 'performans', 'performance', 'temizlik'] },
   { etiket: 'Eklentiler', yol: '/eklentiler', anahtar: ['eklenti', 'plugin', 'addon', 'marketplace', 'eklentiler'] },
@@ -240,11 +239,11 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   }
 
   return (
-    <header className="h-14 bg-white dark:bg-slate-800 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 dark:border-slate-800 flex items-center px-3 sm:px-4 sticky top-0 z-30 gap-2 sm:gap-4">
+    <header className="h-[60px] bg-white/85 dark:bg-dark-800/85 backdrop-blur-md border-b border-slate-200 dark:border-dark-600 flex items-center px-3 sm:px-4 sticky top-0 z-30 gap-2 sm:gap-4">
       {/* Hamburger — yalnız < lg; kenar çubuğu orada çekmeceye dönüşüyor */}
       <button
         onClick={onMenuAc}
-        className="lg:hidden -ml-1 p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition flex-shrink-0"
+        className="lg:hidden -ml-1 p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-dark-700 rounded-md transition flex-shrink-0"
         aria-label={cevir(cevir("Menüyü aç"))}
         aria-expanded={!!menuAcik}
         aria-controls="gosp-kenar-cubugu"
@@ -274,12 +273,12 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             aria-expanded={acik && sonuclar.length > 0}
             aria-controls="gosp-arama-sonuc"
             autoComplete="off"
-            className="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:bg-white dark:bg-slate-800 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/15 outline-none transition"
+            className="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-dark-600 rounded-lg focus:bg-white dark:focus:bg-white/10 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/15 outline-none transition"
           />
 
           {acik && s.length > 0 && (
             <div id="gosp-arama-sonuc" role="listbox"
-              className="absolute left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-auto">
+              className="absolute left-0 right-0 mt-1 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-auto">
               {sonuclar.length === 0 && !veri.current && (
                 <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
               )}
@@ -293,7 +292,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   aria-selected={i === aktif}
                   onMouseEnter={() => setAktif(i)}
                   onClick={() => git(r.yol)}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition ${i === aktif ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition ${i === aktif ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-slate-50 dark:hover:bg-dark-600/50'}`}
                 >
                   <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${r.tip === 'sayfa' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : r.tip === 'domain' ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300'}`}>
                     {r.tip === 'sayfa' ? cevir('sayfa') : r.tip === 'domain' ? cevir('domain') : cevir('alt alan')}
@@ -312,7 +311,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
       <div className="flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1">
         <DilSecici />
         <button onClick={temaDegistir}
-          className="p-2 text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-400 dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-slate-800 rounded-md transition"
+          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded-md transition"
           title={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}>
           {tema === 'dark' ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
@@ -329,7 +328,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           )}
         </button>
         <div className="relative" ref={bRef}>
-        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition" title={cevir("Bildirimler")}>
+        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-dark-700 rounded-md transition" title={cevir("Bildirimler")}>
           {okunmamis > 0 && (
             <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
           )}
@@ -338,8 +337,8 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           </svg>
         </button>
           {bAcik && (
-            <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50">
-              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-800 z-10">
+            <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50">
+              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-dark-600 flex items-center justify-between sticky top-0 bg-white dark:bg-dark-700 z-10">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   {cevir("Bildirimler")}{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} {cevir("yeni")}</span>}
                 </span>
@@ -354,7 +353,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                 </div>
               ) : bildirimler.map(b => (
                 <button key={b.id} onClick={() => bildirimGit(b)}
-                  className={`w-full text-left px-3.5 py-3 border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
+                  className={`w-full text-left px-3.5 py-3 border-b border-slate-50 dark:border-dark-600/50 hover:bg-slate-50 dark:hover:bg-dark-600/50 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
                   <span className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${sevBg(b.seviye)}`}>
                     <KatIkon kategori={b.kategori} />
                   </span>
@@ -370,7 +369,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               ))}
               {bildirimler.length > 0 && (
                 <button onClick={() => { setBAcik(false); navigate('/bildirimler') }}
-                  className="w-full text-center px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
+                  className="w-full text-center px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600/50 sticky bottom-0 bg-white dark:bg-dark-700 border-t border-slate-100 dark:border-dark-600">
                   {cevir(cevir("Tümünü göster →"))}
                 </button>
               )}
@@ -381,7 +380,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
         <div className="relative">
           <button
             onClick={() => setMenuAcik((v) => !v)}
-            className="flex items-center gap-2 px-1.5 sm:px-2 py-1.5 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-800 rounded-md transition"
+            className="flex items-center gap-2 px-1.5 sm:px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-md transition"
             aria-label={cevir(cevir("Hesap menüsü"))}
           >
             <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 font-semibold text-xs flex items-center justify-center flex-shrink-0">
@@ -397,18 +396,18 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           {menuAcikProfil && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuAcik(false)} />
-              <div className="absolute right-0 mt-1 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 py-1">
-                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+              <div className="absolute right-0 mt-1 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50 py-1">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-dark-600">
                   <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{kullanici?.ad_soyad || kullanici?.adi}</div>
                   <div className="text-xs text-slate-500 dark:text-slate-500 capitalize">{kullanici?.rol}</div>
                 </div>
                 <button
                   onClick={() => { setMenuAcik(false); navigate('/profil') }}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700"
                 >
                   {cevir("Profil ve Tercihler")}
                 </button>
-                <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
+                <div className="border-t border-slate-100 dark:border-dark-600 my-1"></div>
                 <button
                   onClick={onCikis}
                   className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20"

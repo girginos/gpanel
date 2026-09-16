@@ -82,6 +82,11 @@ func degiskenYerinekoy(s, kurulum, sistemKul, panelhost string, portlar map[stri
 	s = strings.ReplaceAll(s, "{kurulum}", kurulum)
 	s = strings.ReplaceAll(s, "{sistem_kullanici}", sistemKul)
 	s = strings.ReplaceAll(s, "{panelhost}", panelhost)
+	// 🔴 {panelport} — panelin DIŞ portu SABİT DEĞİLDİR. Kurulumda 8443 çakışırsa
+	// panel başka porta taşınır ve müşteri Port Yönetimi'nden değiştirebilir;
+	// şablona 8443 gömmek, port değiştiği anda çalışmayan bir adres üretirdi.
+	// Değer runtime'da okunur (PanelListenPortGetir → portyonetim.DisPortOku).
+	s = strings.ReplaceAll(s, "{panelport}", fmt.Sprintf("%d", PanelListenPortGetir()))
 	for ad, p := range portlar {
 		s = strings.ReplaceAll(s, "{port_"+ad+"}", fmt.Sprintf("%d", p))
 	}

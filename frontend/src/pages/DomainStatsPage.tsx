@@ -6,8 +6,9 @@ import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
-type KV = { ad: string; sayi: number }
+type KV ={ ad: string; sayi: number }
 type Gun = { tarih: string; istek: number }
 type Ozet = {
   alan_adi: string; log_var: boolean
@@ -27,6 +28,7 @@ const DSTATS_EN: Record<string, string> = {
   "Toplam İstek": "Total Requests",
   "Trafik İstatistikleri": "Traffic Statistics",
   "İstatistikler": "Statistics",
+  "İşlem başarısız": "Operation failed",
   "— nginx erişim günlüğü analizi.": "— nginx access log analysis.",
   "Türkçe": "English",
   "Anasayfa": "Home",
@@ -41,6 +43,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (DSTATS_EN[tr] |
 
 export default function DomainStatsPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [o, setO] = useState<Ozet | null>(null)
@@ -52,7 +55,11 @@ export default function DomainStatsPage() {
     setYuk(true); setHata(null)
     api.get<Ozet>(`${base}/istatistik`)
       .then(r => setO(r.data))
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => {
+        const m = apiHata(e)
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
@@ -78,11 +85,11 @@ export default function DomainStatsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
           </div>
-          <button onClick={yukle} className="self-start sm:self-auto flex-shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
+          <button onClick={yukle} className="self-start sm:self-auto shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-dark-700"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-10 text-center text-sm text-slate-400">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-10 text-center text-sm text-slate-400">
             {cevir("Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.")}
           </div>
         ) : (
@@ -104,7 +111,7 @@ export default function DomainStatsPage() {
                   return (
                     <div key={g} className="flex items-center gap-3">
                       <span className="w-10 text-xs font-mono text-slate-500">{g}</span>
-                      <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-slate-700/50 overflow-hidden">
+                      <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-dark-600/50 overflow-hidden">
                         <div className={`h-full rounded-full ${durumBar[g]}`} style={{ width: Math.max(oran, v > 0 ? 2 : 0) + '%' }} />
                       </div>
                       <span className="w-24 text-right text-xs font-mono text-slate-600 dark:text-slate-300">{v.toLocaleString('tr-TR')} <span className="text-slate-400">%{oran}</span></span>
@@ -161,7 +168,7 @@ export default function DomainStatsPage() {
 function KPI({ etiket, deger, renk }: { etiket: string; deger: string; renk: string }) {
   const map: Record<string, string> = { indigo: 'text-indigo-500', sky: 'text-sky-500', emerald: 'text-emerald-500', violet: 'text-violet-500', rose: 'text-rose-500' }
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 shadow-sm">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 shadow-xs">
       <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">{etiket}</div>
       <div className={`text-2xl font-bold font-mono mt-1 ${map[renk] || 'text-slate-700'}`}>{deger}</div>
     </div>
@@ -169,7 +176,7 @@ function KPI({ etiket, deger, renk }: { etiket: string; deger: string; renk: str
 }
 function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
       <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{baslik}</h3>
       {children}
     </div>

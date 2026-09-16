@@ -144,11 +144,11 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
       onClick={onKapat}
     >
       <div
-        className={`bg-slate-900 shadow-2xl flex flex-col text-slate-100 ${tamEkran ? 'w-full h-full' : 'w-full h-[85vh] rounded-2xl overflow-hidden'}`}
+        className={`bg-dark-800 shadow-2xl flex flex-col text-slate-100 ${tamEkran ? 'w-full h-full' : 'w-full h-[85vh] rounded-lg overflow-hidden'}`}
         onClick={e => e.stopPropagation()}
       >
         {/* Üst bar */}
-        <div className="flex items-center justify-between px-3 py-2 bg-slate-800 border-b border-slate-700">
+        <div className="flex items-center justify-between px-3 py-2 bg-dark-700 border-b border-dark-600">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             {/* "Dot trafik isigi" stil */}
             <div className="flex items-center gap-1 mr-2">
@@ -156,7 +156,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
             </div>
-            <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <span className="text-sm font-semibold text-slate-100 truncate">{dosyaAdi}</span>
@@ -166,18 +166,18 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             {kayitDurum === 'kaydedildi' && <span className="text-[10px] uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded"><span className="inline-flex items-center gap-1"><Ikon d={I.onay} className="h-3 w-3" />{cevir("Kaydedildi")}</span></span>}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
             <select
               value={dil}
               onChange={e => setDil(e.target.value as Dil)}
-              className="text-xs bg-slate-700 text-slate-100 border border-slate-600 rounded px-2 py-1 focus:outline-none focus:border-slate-400"
+              className="text-xs bg-dark-600 text-slate-100 border border-slate-600 rounded px-2 py-1 focus:outline-none focus:border-slate-400"
               title={cevir(cevir("Sözdizimi"))}
             >
               {DILLER.map(d => <option key={d.kod} value={d.kod}>{cevir(d.ad)}</option>)}
             </select>
             <button
               onClick={() => setTamEkran(!tamEkran)}
-              className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded"
+              className="text-xs px-2 py-1 bg-dark-600 hover:bg-slate-600 text-slate-100 rounded"
               title={tamEkran ? cevir('Pencerele') : cevir('Tam ekran')}
             >
               {tamEkran ? '⛶' : '⛶'}
@@ -185,14 +185,14 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             <button
               onClick={kaydet}
               disabled={kayitDurum === 'kaydediliyor' || kayitDurum === 'temiz'}
-              className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded font-medium"
+              className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-dark-600 disabled:text-slate-500 text-white rounded font-medium"
               title="Ctrl+S"
             >
               <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />{cevir("Kaydet")}</span>
             </button>
             <button
               onClick={onKapat}
-              className="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded"
+              className="text-xs px-3 py-1 bg-dark-600 hover:bg-slate-600 text-slate-100 rounded"
               title="ESC"
             >
               {cevir("Kapat")}
@@ -231,7 +231,7 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
         </div>
 
         {/* Status bar */}
-        <div className="flex items-center justify-between gap-4 px-3 py-1.5 bg-slate-800 border-t border-slate-700 text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+        <div className="flex items-center justify-between gap-4 px-3 py-1.5 bg-dark-700 border-t border-dark-600 text-[11px] text-slate-400 dark:text-slate-500 font-mono">
           <div className="flex items-center gap-4">
             <span>{cevir("Satır")} {cursor.satir}, {cevir("Kolon")} {cursor.kolon}</span>
             <span>{icerik.split('\n').length} {cevir("satır")}</span>

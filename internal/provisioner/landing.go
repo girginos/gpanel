@@ -385,24 +385,6 @@ func Ensure404Page() {
 	_ = os.Chmod(hataSayfaDizin, 0o755)
 }
 
-// hata404Blok: vhost'lara eklenen nginx bloğu (marka 404 + animasyon varliklari).
-// ACME/panel etkilenmez; 404 yalnizca nginx-seviyesi 404'lerde (dosya yok)
-// devreye girer — uygulama kendi 404'unu uretiyorsa (WordPress vb.) o gecerlidir.
-const hata404Blok = `    error_page 404 /_gosp_404.html;
-    location = /_gosp_404.html {
-        root /usr/share/girginospanel/errors;
-        internal;
-        access_log off;
-    }
-    location ^~ /_gosp/ {
-        alias /usr/share/girginospanel/errors/;
-        access_log off;
-        expires 7d;
-        gzip on;
-        gzip_types application/json application/javascript;
-    }
-`
-
 // error5xxHTML: uygulama/backend kaynakli 5xx (500/502/503/504) icin marka sayfasi.
 // 404 ile AYNI gorsel dil (markaStil + ayni animasyon) — ziyaretci icin tutarli,
 // site sahibi icin yol gosterici (ham "500 Internal Server Error" yerine).
@@ -451,13 +433,3 @@ func Ensure5xxPage() {
 	_ = os.WriteFile(yol, yeni, 0o644)
 	_ = os.Chmod(hataSayfaDizin, 0o755)
 }
-
-// hata5xxBlok: 5xx marka sayfasini servis eden nginx location'i (server seviyesi).
-// Intercept ayari BACKEND location'inda yapilir (fastcgi_intercept_errors /
-// proxy_intercept_errors) — boylece uygulamanin KENDI 404'u bozulmaz, yalniz 5xx yakalanir.
-const hata5xxBlok = `    location = /_gosp_5xx.html {
-        root /usr/share/girginospanel/errors;
-        internal;
-        access_log off;
-    }
-`

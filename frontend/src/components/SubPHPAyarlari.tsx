@@ -19,9 +19,9 @@ type Ayar = {
   ek_direktifler: string; debug_mode: boolean
 }
 
-const kart = 'rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 md:p-5'
+const kart = 'rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 md:p-5'
 const etk = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
-const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm'
+const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm'
 
 
 const CMP_EN: Record<string, string> = {
@@ -38,9 +38,12 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
   const [mesaj, setMesaj] = useState<{ t: 'ok' | 'hata'; m: string } | null>(null)
 
   useEffect(() => {
-    api.get<{ ayarlar: Ayar; ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`)
-      .then(r => { setA(r.data.ayarlar); setOzel(r.data.ozel_havuz) })
-      .catch(hataYakala(cevir("Alt alan PHP ayarları yüklenemedi")))
+    let iptal = false
+    const ctrl = new AbortController()
+    api.get<{ ayarlar: Ayar; ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { signal: ctrl.signal })
+      .then(r => { if (!iptal) { setA(r.data.ayarlar); setOzel(r.data.ozel_havuz) } })
+      .catch(e => { if (!iptal) hataYakala(cevir("Alt alan PHP ayarları yüklenemedi"))(e) })
+    return () => { iptal = true; ctrl.abort() }
   }, [domainId, sid])
 
   function P<K extends keyof Ayar>(k: K, v: Ayar[K]) { setA(prev => prev ? { ...prev, [k]: v } : prev) }
@@ -142,7 +145,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
 
           <div className="flex justify-end">
             <button onClick={kaydet} disabled={kaydediliyor}
-              className="px-4 py-2 rounded-md bg-slate-900 dark:bg-slate-700 text-white text-sm font-medium disabled:opacity-40">
+              className="px-4 py-2 rounded-md bg-dark-800 dark:bg-dark-600 text-white text-sm font-medium disabled:opacity-40">
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("PHP ayarlarını kaydet")}
             </button>
           </div>

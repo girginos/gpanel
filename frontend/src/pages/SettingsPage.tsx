@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useAuth } from '@/store/auth'
+import { Button, Badge } from '@/components/ui'
 
 type Ben = {
   id: number; adi: string; rol: string; eposta: string; ad_soyad: string
@@ -66,9 +67,9 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (SETT_EN[tr] || 
 
 function Kart({ baslik, aciklama, ikon, cocuk }: { baslik: string; aciklama?: string; ikon: React.ReactNode; cocuk: React.ReactNode }) {
   return (
-    <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-sm">
+    <section className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-6 shadow-xs">
       <div className="flex items-start gap-3 mb-5">
-        <div className="w-10 h-10 rounded-2xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">{ikon}</div>
+        <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">{ikon}</div>
         <div>
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{baslik}</h2>
           {aciklama && <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">{aciklama}</p>}
@@ -83,7 +84,7 @@ function Girdi({ etiket, ...p }: { etiket: string } & React.InputHTMLAttributes<
   return (
     <label className="block">
       <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{etiket}</span>
-      <input {...p} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-800" />
+      <input {...p} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-dark-700" />
     </label>
   )
 }
@@ -171,7 +172,6 @@ export default function SettingsPage() {
     } catch { setTOk('') } finally { setTYuk(false) }
   }
 
-  const btn = 'px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 inline-flex items-center gap-2'
   const secretGruplu = f2Kur ? (f2Kur.secret.match(/.{1,4}/g) || []).join(' ') : ''
 
   return (
@@ -192,15 +192,15 @@ export default function SettingsPage() {
                 <div>
                   <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Rol / Durum")}</span>
                   <div className="flex gap-2 pt-1.5">
-                    <span className="text-[11px] uppercase tracking-wider px-2 py-1 rounded bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 font-semibold">{ben?.rol || 'admin'}</span>
-                    <span className="text-[11px] uppercase tracking-wider px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold">{ben?.durum || 'active'}</span>
+                    <Badge color="primary" variant="soft" className="text-[11px] uppercase tracking-wider px-2 py-1 font-semibold">{ben?.rol || 'admin'}</Badge>
+                    <Badge color="success" variant="soft" className="text-[11px] uppercase tracking-wider px-2 py-1 font-semibold">{ben?.durum || 'active'}</Badge>
                   </div>
                 </div>
                 <Girdi etiket={cevir("Ad Soyad")} value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
                 <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder={cevir("ornek@site.com")} />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button type="submit" disabled={pYuk} className={btn}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</button>
+                <Button type="submit" disabled={pYuk} className="px-4 py-2 text-sm">{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</Button>
                 <Uyari tip="ok" mesaj={pOk} /><Uyari tip="err" mesaj={pErr} />
               </div>
             </form>
@@ -217,7 +217,7 @@ export default function SettingsPage() {
                 <Girdi etiket={cevir("Yeni parola (tekrar)")} type="password" value={yeni2} onChange={e => setYeni2(e.target.value)} autoComplete="new-password" />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button type="submit" disabled={paYuk || !mevcut || !yeni} className={btn}>{paYuk ? cevir("Değiştiriliyor…") : cevir("Parolayı Değiştir")}</button>
+                <Button type="submit" disabled={paYuk || !mevcut || !yeni} className="px-4 py-2 text-sm">{paYuk ? cevir("Değiştiriliyor…") : cevir("Parolayı Değiştir")}</Button>
                 <Uyari tip="ok" mesaj={paOk} /><Uyari tip="err" mesaj={paErr} />
               </div>
             </form>
@@ -231,35 +231,35 @@ export default function SettingsPage() {
               <div className="flex items-center gap-3">
                 <span className="text-sm text-slate-600 dark:text-slate-400">{cevir("Durum:")}</span>
                 {ben?.iki_fa
-                  ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>
-                  : <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{cevir("○ Kapalı")}</span>}
+                  ? <Badge color="success" variant="soft" className="text-xs font-semibold px-2.5 py-1">{cevir("● Aktif")}</Badge>
+                  : <Badge variant="soft" className="text-xs font-semibold px-2.5 py-1">{cevir("○ Kapalı")}</Badge>}
               </div>
 
               {!ben?.iki_fa && !f2Kur && (
-                <button onClick={f2Baslat} className={btn}>{cevir("2FA'yı Etkinleştir")}</button>
+                <Button onClick={f2Baslat} className="px-4 py-2 text-sm">{cevir("2FA'yı Etkinleştir")}</Button>
               )}
 
               {!ben?.iki_fa && f2Kur && (
-                <form onSubmit={f2Etkinlestir} className="space-y-3 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900">
+                <form onSubmit={f2Etkinlestir} className="space-y-3 border border-slate-200 dark:border-dark-600 rounded-lg p-4 bg-slate-50 dark:bg-dark-800">
                   <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:")}</p>
                   {f2Kur.qr_data_uri && (
                     <div className="flex flex-col items-center gap-2 py-1">
                       <img src={f2Kur.qr_data_uri} alt={cevir("2FA QR kodu")} width={256} height={256}
-                        className="w-64 h-64 rounded-2xl bg-white p-3 border border-slate-200 dark:border-slate-700 shadow-sm" />
+                        className="w-64 h-64 rounded-lg bg-white p-3 border border-slate-200 dark:border-dark-600 shadow-xs" />
                       <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Authenticator uygulamanızla tarayın")}</p>
                     </div>
                   )}
                   <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Tarayamıyorsanız, elle giriş için gizli anahtar:")}</p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
-                    <button type="button" onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }} className="text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">{cevir("Kopyala")}</button>
+                    <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
+                    <Button type="button" variant="outlined" onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }} className="text-xs px-2.5 py-1.5">{cevir("Kopyala")}</Button>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-500 break-all">{cevir("veya bağlantı:")} <span className="font-mono">{f2Kur.otpauth}</span></p>
                   <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("2) Uygulamadaki 6 haneli kodu girin:")}</p>
                   <div className="flex items-center gap-3 flex-wrap">
                     <input value={f2Kod} onChange={e => setF2Kod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
-                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
-                    <button type="submit" disabled={f2Yuk || f2Kod.length !== 6} className={btn}>{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</button>
+                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
+                    <Button type="submit" disabled={f2Yuk || f2Kod.length !== 6} className="px-4 py-2 text-sm">{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</Button>
                     <button type="button" onClick={() => setF2Kur(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{cevir("İptal")}</button>
                   </div>
                   <Uyari tip="err" mesaj={f2Err} />
@@ -267,15 +267,15 @@ export default function SettingsPage() {
               )}
 
               {ben?.iki_fa && !f2Kapat && (
-                <button onClick={() => { setF2Kapat(true); setF2Err('') }} className="px-4 py-2 text-sm font-medium rounded-lg border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">{cevir("2FA'yı Kapat")}</button>
+                <Button color="error" variant="outlined" onClick={() => { setF2Kapat(true); setF2Err('') }} className="px-4 py-2 text-sm">{cevir("2FA'yı Kapat")}</Button>
               )}
               {ben?.iki_fa && f2Kapat && (
-                <form onSubmit={f2KapatOnay} className="space-y-3 border border-red-200 dark:border-red-800 rounded-2xl p-4 bg-red-50 dark:bg-red-900/10">
+                <form onSubmit={f2KapatOnay} className="space-y-3 border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/10">
                   <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("Kapatmak için authenticator kodunu girin:")}</p>
                   <div className="flex items-center gap-3 flex-wrap">
                     <input value={kapatKod} onChange={e => setKapatKod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
-                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none" />
-                    <button type="submit" disabled={f2Yuk || kapatKod.length !== 6} className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50">{cevir("Kapat")}</button>
+                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none" />
+                    <Button type="submit" color="error" disabled={f2Yuk || kapatKod.length !== 6} className="px-4 py-2 text-sm">{cevir("Kapat")}</Button>
                     <button type="button" onClick={() => setF2Kapat(false)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{cevir("Vazgeç")}</button>
                   </div>
                   <Uyari tip="err" mesaj={f2Err} />
@@ -292,19 +292,19 @@ export default function SettingsPage() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <label className="block">
                   <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Tema")}</span>
-                  <select value={tema} onChange={e => setTema(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
+                  <select value={tema} onChange={e => setTema(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
                     <option value="system">{cevir("Sistem")}</option><option value="light">{cevir("Açık")}</option><option value="dark">{cevir("Koyu")}</option>
                   </select>
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Dil")}</span>
-                  <select value={dil} onChange={e => setDil(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
+                  <select value={dil} onChange={e => setDil(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
                     <option value="tr">{cevir("Türkçe")}</option><option value="en">English</option>
                   </select>
                 </label>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={tercihKaydet} disabled={tYuk} className={btn}>{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</button>
+                <Button onClick={tercihKaydet} disabled={tYuk} className="px-4 py-2 text-sm">{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</Button>
                 <Uyari tip="ok" mesaj={tOk} />
               </div>
             </div>

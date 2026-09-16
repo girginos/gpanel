@@ -4,13 +4,14 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 import { DB, boyutFmt, PwResetModal } from './DomainDatabasesPage'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
@@ -18,6 +19,7 @@ type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 
 const DBDETAIL_EN: Record<string, string> = {
   "Listeye dön": "Back to list",
+  "İşlem başarısız": "Operation failed",
   "Optimize Tamamlandı": "Optimization Complete",
   "Optimize başarısız": "Optimization failed",
   "Veritabanı adı": "Database name",
@@ -39,6 +41,7 @@ const DBDETAIL_EN: Record<string, string> = {
   "Optimize ediliyor…": "Optimizing…",
   "Evet, sil": "Yes, delete",
   "\"{0}\" veritabanı ve kullanıcısı kalıcı silinecek. Bu işlem geri alınamaz!": "The database \"{0}\" and its user will be permanently deleted. This action cannot be undone!",
+  "Parola alınamadı": "Failed to get password",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DBDETAIL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -47,39 +50,48 @@ export default function DomainDatabaseDetailPage() {
   const { id, dbid } = useParams()
   const nav = useNavigate()
   const { bilgi, onay } = useDialog()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [db, setDb] = useState<DB | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
-  const [parolaGoster, setParolaGoster] = useState(false)
-  const [kopya, setKopya] = useState(false)
   const [optCalisiyor, setOptCalisiyor] = useState(false)
   const [pwReset, setPwReset] = useState(false)
   const [silOnay, setSilOnay] = useState(false)
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id || !dbid) return
     setYuk(true); setHata(null)
+    const _n = ++yukleNesli.current
     api.get<DB[]>(`/domains/${id}/databases`)
       .then(r => {
+        if (_n !== yukleNesli.current) return
         const bulunan = r.data.find(x => String(x.id) === String(dbid))
-        if (!bulunan) { setHata(cevir("Veritabanı bulunamadı")); setDb(null) }
+        if (!bulunan) { setHata(cevir("Veritabanı bulunamadı")); toast.hata(cevir("Veritabanı bulunamadı")); setDb(null) }
         else setDb(bulunan)
       })
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
 
   useEffect(() => {
-    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(() => {})
+    let iptal = false
+    if (id) api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(() => {})
     yukle()
+    return () => { iptal = true; yukleNesli.current++ }
   }, [id, dbid])
 
   async function pmaAc() {
     if (!db) return
     try {
       const { data } = await api.post<{ signon_url: string }>(`/databases/${db.id}/pma-token`)
-      window.open(data.signon_url, '_blank', 'noopener')
+      // Güvenlik (open-redirect / CWE-601): signon_url sunucudan gelen göreli yol
+      // ("/pma-signon.php?t=..."). Yine de yalnız AYNI KÖKEN'e açılmasına izin ver —
+      // "//evil.com" veya mutlak dış URL reddedilir.
+      const hedef = new URL(data.signon_url, window.location.origin)
+      if (hedef.origin !== window.location.origin) return
+      window.open(hedef.href, '_blank', 'noopener')
     } catch (e) {
       (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("phpMyAdmin token alınamadı")) }))
     }
@@ -121,13 +133,6 @@ export default function DomainDatabaseDetailPage() {
     }
   }
 
-  function kopyala() {
-    if (!db) return
-    navigator.clipboard.writeText(db.db_parola)
-    setKopya(true)
-    setTimeout(() => setKopya(false), 1500)
-  }
-
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[900px]">
       <Breadcrumb items={[
@@ -148,29 +153,20 @@ export default function DomainDatabaseDetailPage() {
       {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : db && (
         <div className="space-y-4">
           {/* Bağlantı bilgileri */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("Bağlantı Bilgileri")}</h2>
             <dl className="space-y-3">
               <Satir e={cevir("Veritabanı adı")} v={db.db_adi} mono />
               <Satir e={cevir("Kullanıcı")} v={db.db_kullanici || cevir("— tanımlı değil")} mono />
               <Satir e={cevir("Sunucu")} v={`${db.db_host}:3306`} mono />
-              <div className="flex items-start justify-between gap-3 py-1.5">
-                <dt className="text-sm text-slate-500 dark:text-slate-400 pt-1">{cevir("Parola")}</dt>
-                <dd className="flex flex-wrap items-center gap-2 justify-end">
-                  <code className="font-mono text-sm bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded text-slate-800 dark:text-slate-200 break-all">
-                    {parolaGoster ? db.db_parola : '••••••••••••'}
-                  </code>
-                  <button onClick={() => setParolaGoster(!parolaGoster)} className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded text-slate-600 dark:text-slate-300">{parolaGoster ? cevir("Gizle") : cevir("Göster")}</button>
-                  {parolaGoster && <button onClick={kopyala} className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-brand-100 dark:hover:bg-brand-900/40 rounded text-slate-600 dark:text-slate-300">{kopya ? cevir("✓ Kopyalandı") : cevir("Kopyala")}</button>}
-                </dd>
-              </div>
+              <Satir e={cevir("Parola")} v="••••••••••••" mono />
               <Satir e={cevir("Boyut")} v={boyutFmt(db.boyut)} mono />
               <Satir e={cevir("Oluşturulma")} v={db.olusturulma} />
             </dl>
           </div>
 
           {/* İşlemler */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("İşlemler")}</h2>
             <div className="flex flex-wrap gap-2">
               <button onClick={pmaAc} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-md"><Ikon d={I.kilitAcik} className="h-4 w-4" /> {cevir("phpMyAdmin'de Aç")}</button>

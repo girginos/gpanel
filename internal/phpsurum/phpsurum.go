@@ -23,22 +23,54 @@ import (
 // AlmaLinux 10 Remi'nin gerçekten sağladığı: 7.4, 8.0-8.6 (8.6 alpha) + AppStream native 8.3.
 // Gerçek kurulabilirlik ayrıca RUNTIME'da dnf ile doğrulanır (Kurulabilir alanı, cache'li) →
 // bir sürüm OS'tan kalkarsa panel zarif biçimde "kurulamaz" gösterir, ham dnf hatası patlamaz.
+//
+// 🔴 EOL (End-Of-Life) alani — PANELDEKI TEK GERÇEK KAYNAK. Bir sürümün
+// güvenlik desteğinin BİTMİŞ olup olmadığını SADECE burada tanımla; hem müşteri ucu
+// (GET /php/versions) hem admin ucu (GET /php-surumler) bu değeri `eol` alanıyla
+// döndürür. Frontend'de "parseInt(surum)<8" gibi SEZGİ kullanma — 8.0/8.1 de EOL.
+//
+// 🔴 KULLANICI KARARI: EOL sürümler listeden KALDIRILMAZ (mevcut müşteri siteleri
+// kırılmasın), YALNIZ İŞARETLENİR — panel rozet gösterir, kurulum engellenmez.
+//
+// EOL gerçeği (2026-09 itibarıyla güvenlik desteği BİTMİŞ):
+// 7.4 → Kasım 2022'de bitti · 8.0 → Kasım 2023'te bitti · 8.1 → Aralık 2025'te bitti
+// Hâlâ destekli: 8.2 (güvenlik desteği Aralık 2026'da biter), 8.3, 8.4, 8.5, 8.6(alpha).
+//
+// 🔴 BU LİSTEYİ YILDA BİR GÖZDEN GEÇİR: PHP her Aralık ayında bir sürümü daha
+// EOL'e düşürür (8.2 → Ara 2026, 8.3 → Ara 2027 …). Gecikirse panel EOL bir
+// sürümü "güvenli" gösterir.
 var DesteklenenSurumler = []SurumMeta{
-	{"7.4", "74", "remi"},
-	{"8.0", "80", "remi"},
-	{"8.1", "81", "remi"},
-	{"8.2", "82", "remi"},
-	{"8.3", "", "appstream"}, // AppStream native
-	{"8.3", "83", "remi"},
-	{"8.4", "84", "remi"},
-	{"8.5", "85", "remi"},
-	{"8.6", "86", "remi"},
+	{Surum: "7.4", Kod: "74", Kaynak: "remi", EOL: true},
+	{Surum: "8.0", Kod: "80", Kaynak: "remi", EOL: true},
+	{Surum: "8.1", Kod: "81", Kaynak: "remi", EOL: true},
+	{Surum: "8.2", Kod: "82", Kaynak: "remi", EOL: false},
+	{Surum: "8.3", Kod: "", Kaynak: "appstream", EOL: false}, // AppStream native
+	{Surum: "8.3", Kod: "83", Kaynak: "remi", EOL: false},
+	{Surum: "8.4", Kod: "84", Kaynak: "remi", EOL: false},
+	{Surum: "8.5", Kod: "85", Kaynak: "remi", EOL: false},
+	{Surum: "8.6", Kod: "86", Kaynak: "remi", EOL: false},
+}
+
+// EOLMu: sürüm dizesi ("8.1") EOL mi — tek gerçek kaynak DesteklenenSurumler'dir.
+// Listede OLMAYAN (Remi'de yeni beliren) sürüm için false döner: yeni sürümler EOL
+// değildir ve yanlış "EOL" rozeti göstermek yanlış-pozitif korkutma olurdu.
+// 🔴 İKİNCİ BİR SABİT LİSTE OLUŞTURMA — EOL bilgisi HER YERDE buradan türetilir.
+func EOLMu(surum string) bool {
+	for _, m := range DesteklenenSurumler {
+		if m.Surum == surum {
+			return m.EOL
+		}
+	}
+	return false
 }
 
 type SurumMeta struct {
 	Surum  string `json:"surum"`
 	Kod    string `json:"kod"`    // "74", "82" — Remi paket prefix
 	Kaynak string `json:"kaynak"` // "remi" | "appstream"
+	// EOL: güvenlik desteği bitmiş sürüm mü (yukarıdaki tabloya bak). JSON alan
+	// adı `eol` — müşteri ve admin uçlarının PAYLAŞTIĞI sözleşme, değiştirme.
+	EOL bool `json:"eol"`
 }
 
 type Surum struct {
@@ -69,7 +101,6 @@ type Surum struct {
 var (
 	availMu     sync.Mutex
 	availCache  = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız checked=true değerler yazılır)
-	availAt     time.Time           // son BAŞARILI (en az bir paket checked) sweep zamanı
 	sweeperOnce sync.Once
 
 	// dnfProbe: arka-plan sweep sondası (display cache'i doldurur). Test için enjekte edilebilir.
@@ -133,7 +164,6 @@ func sweepOnce() {
 	availMu.Unlock()
 
 	seen := map[string]bool{}
-	anyChecked := false
 	for _, m := range DesteklenenSurumler {
 		if m.Kaynak != "remi" {
 			continue // appstream daima mevcut; dnf'e sormaya gerek yok
@@ -146,16 +176,12 @@ func sweepOnce() {
 		available, checked := dnfProbe(pkg)
 		if checked {
 			yeni[pkg] = available // kesin sonuç → yaz
-			anyChecked = true
 		}
 		// checked=false → yeni[pkg] önceki değerinde KALIR (varsa); yoksa yine bilinmiyor.
 	}
 
 	availMu.Lock()
 	availCache = yeni
-	if anyChecked {
-		availAt = time.Now()
-	}
 	availMu.Unlock()
 }
 
@@ -285,6 +311,9 @@ var (
 	tumSurumlerOnbellek []Surum
 	tumSurumlerZaman    time.Time
 	tumSurumlerMu       sync.Mutex
+	// tumSurumlerHesaplaMu — TEK-UÇUŞ kilidi: soğuk/expired cache'te pahalı
+	// hesabı (dnf repoquery + php exec) AYNI ANDA yalnız bir goroutine yapsın.
+	tumSurumlerHesaplaMu sync.Mutex
 )
 
 const tumSurumlerTTL = 60 * time.Second
@@ -352,7 +381,9 @@ func surumleriKesfet() []SurumMeta {
 		gorulen[kod] = true
 		// İlk rakam major, kalanı minor: "83"→8.3, "810"→8.10.
 		surum := kod[:1] + "." + kod[1:]
-		metalar = append(metalar, SurumMeta{Surum: surum, Kod: kod, Kaynak: "remi"})
+		// 🔴 EOL dinamik keşifte de DOLDURULUR — aksi halde Remi'den keşfedilen
+		// bir EOL sürüm (örn. 8.1) sabit listede varken bile eol=false dönerdi.
+		metalar = append(metalar, SurumMeta{Surum: surum, Kod: kod, Kaynak: "remi", EOL: EOLMu(surum)})
 	}
 	kesifMu.Lock()
 	kesifOnbellek = metalar
@@ -365,6 +396,21 @@ func TumSurumler() []Surum {
 	// 🔴 PERF: Discover her KURULU surum icin `php -v`+`php -m` exec eder (~40ms x
 	// kurulu surum). TumSurumler /php-settings'te 2x + /php/versions'ta 1x cagriliyordu
 	// → ~2s "Yükleniyor". Kurulu surumler yalniz kur/kaldir ile degisir → 60s TTL cache.
+	tumSurumlerMu.Lock()
+	if tumSurumlerOnbellek != nil && time.Since(tumSurumlerZaman) < tumSurumlerTTL {
+		c := tumSurumlerOnbellek
+		tumSurumlerMu.Unlock()
+		return c
+	}
+	tumSurumlerMu.Unlock()
+
+	// 🔴 TEK-UÇUŞ (thundering herd): soğuk/expired cache'te N eşzamanlı istek
+	// HEPSİ surumleriKesfet (dnf repoquery) + Discover (php -v/-m exec) çalıştırmasın
+	// — dnf sistem kilidinde çekişip paneli dondurur (200 goroutine birim testi
+	// 770s'de timeout oldu). Pahalı işi tek goroutine yapar; bekleyenler aşağıdaki
+	// double-check ile bu koşuda dolan cache'i alıp hemen döner.
+	tumSurumlerHesaplaMu.Lock()
+	defer tumSurumlerHesaplaMu.Unlock()
 	tumSurumlerMu.Lock()
 	if tumSurumlerOnbellek != nil && time.Since(tumSurumlerZaman) < tumSurumlerTTL {
 		c := tumSurumlerOnbellek
@@ -415,8 +461,9 @@ func surumKarsi(a, b string) int {
 	pb := strings.Split(b, ".")
 	for i := 0; i < len(pa) && i < len(pb); i++ {
 		ia, ib := 0, 0
-		fmt.Sscanf(pa[i], "%d", &ia)
-		fmt.Sscanf(pb[i], "%d", &ib)
+		// parse-fail -> 0 kalir (guvenli); surum-parcasi karsilastirmasi bunu tolere eder.
+		_, _ = fmt.Sscanf(pa[i], "%d", &ia)
+		_, _ = fmt.Sscanf(pb[i], "%d", &ib)
 		if ia != ib {
 			return ia - ib
 		}
@@ -453,28 +500,6 @@ func PaketAdlari(m SurumMeta) []string {
 		out = append(out, strings.Replace(p, "php", pre, 1))
 	}
 	return out
-}
-
-// dnfHataOzet: dnf çıktısından anlamlı son satır(lar)ı süzer (tüm ham dökümü değil).
-// "No match for argument" / "Error:" satırlarını öne çıkarır; hiçbiri yoksa son satır.
-func dnfHataOzet(out string) string {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	var son string
-	for _, ln := range lines {
-		ln = strings.TrimSpace(ln)
-		if ln == "" {
-			continue
-		}
-		son = ln
-		low := strings.ToLower(ln)
-		if strings.Contains(low, "no match") || strings.HasPrefix(low, "error") || strings.Contains(low, "nothing provides") {
-			return ln
-		}
-	}
-	if son == "" {
-		return "bilinmeyen dnf hatası"
-	}
-	return son
 }
 
 // ============================================================================

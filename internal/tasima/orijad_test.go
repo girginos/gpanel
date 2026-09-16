@@ -48,11 +48,11 @@ $config['db']['password'] = 'YeniParola456';
 `)
 
 	testler := []struct {
-		ad         string
-		kok        string
-		bekAd      string
-		bekKul     string
-		bekPw      string
+		ad     string
+		kok    string
+		bekAd  string
+		bekKul string
+		bekPw  string
 	}{
 		{"wordpress", wp, "musteri_wp_asil", "musteri_wpuser", "GizliParola123"},
 		{"xenforo (son atama kazanır)", xf, "forum_xf2", "forum_xfuser", "YeniParola456"},

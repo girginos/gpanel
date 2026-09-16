@@ -131,6 +131,41 @@ func rarAraci() (string, bool) {
 }
 
 // rarUyeAdlari: seçilen araçla arşivdeki üye ADLARINI listeler (Katman 2 ön-taraması için).
+// rarSymlinkReddet: RAR arşivinde symlink/hardlink üyesi varsa ErrUyeSymlink döner.
+// bsdtar birincil araç (libarchive): `-tvf` ilk sütun tip ('l'=symlink) + "->" hedef.
+// unar/unrar için best-effort (tip/"->" satırı). zip/tar taramasının RAR karşılığı.
+func rarSymlinkReddet(tool, archivePath string) error {
+	var out []byte
+	var err error
+	switch tool {
+	case "bsdtar":
+		out, err = exec.Command("bsdtar", "-tvf", archivePath).CombinedOutput()
+	case "unar":
+		out, err = exec.Command("lsar", "-l", archivePath).CombinedOutput()
+	default: // unrar
+		out, err = exec.Command("unrar", "vt", archivePath).CombinedOutput()
+	}
+	if err != nil {
+		return fmt.Errorf("rar tip taraması (%s): %s", tool, strings.TrimSpace(string(out)))
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		s := strings.TrimSpace(ln)
+		if s == "" {
+			continue
+		}
+		// bsdtar -tvf: satır tip harfiyle başlar ('l'=symlink). Tüm araçlarda " -> " symlink işareti.
+		if (tool == "bsdtar" && s[0] == 'l') || strings.Contains(ln, " -> ") {
+			return ErrUyeSymlink
+		}
+		// unrar vt: "Type: Symbolic link"
+		low := strings.ToLower(s)
+		if strings.HasPrefix(low, "type:") && strings.Contains(low, "link") {
+			return ErrUyeSymlink
+		}
+	}
+	return nil
+}
+
 func rarUyeAdlari(tool, archivePath string) ([]string, error) {
 	var names []string
 	switch tool {
@@ -191,6 +226,12 @@ func rarTara(archivePath string) error {
 	tool, ok := rarAraci()
 	if !ok {
 		return ErrRarAraciYok
+	}
+	// 🔴 GÜVENLİK (CWE-59 link-following): zip/tar gibi RAR de symlink/hardlink üyesini
+	// REDDETMELİ. Aksi halde tenant public_html'ine `x -> /home/baskatenant` symlink'i
+	// çıkarıp kök-yetkili silme/işlem ucunu cross-tenant tetikleyebilir.
+	if err := rarSymlinkReddet(tool, archivePath); err != nil {
+		return err
 	}
 	names, err := rarUyeAdlari(tool, archivePath)
 	if err != nil {

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 
 type Oge = { ad: string; aktif: boolean; deger: string; ayar: string; aciklama: string }
 type Oneri = { metin: string; onem: string; ayar: string }
@@ -12,6 +13,7 @@ type Ozet = { alan_adi: string; php_surum: string; skor: number; ogeler: Oge[]; 
 
 
 const DPERF_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "Türkçe": "English",
   "Hızlandırıcılar": "Accelerators",
   "Performans ve Hızlandırıcılar": "Performance and Accelerators",
@@ -29,16 +31,19 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (DPERF_EN[tr] ||
 export default function DomainPerformansPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const navigate = useNavigate()
   const [o, setO] = useState<Ozet | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
     setYuk(true)
     api.get<Ozet>(`/domains/${id}/performans`)
-      .then(r => setO(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+      .then(r => { if (iptal) return; setO(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => { if (!iptal) setYuk(false) })
+    return () => { iptal = true }
   }, [id])
 
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
@@ -63,7 +68,7 @@ export default function DomainPerformansPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           {/* Skor halkası */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm flex flex-col items-center justify-center">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs flex flex-col items-center justify-center">
             <div className="relative w-28 h-28">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                 <circle cx="18" cy="18" r="15.9" fill="none" className="stroke-slate-100 dark:stroke-slate-700" strokeWidth="3" />
@@ -79,11 +84,11 @@ export default function DomainPerformansPage() {
           </div>
 
           {/* Hızlandırıcı durumları */}
-          <div className="sm:col-span-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+          <div className="sm:col-span-2 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Hızlandırıcılar")}</h3>
             <div className="space-y-2">
               {o.ogeler.map(og => (
-                <div key={og.ad} className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
+                <div key={og.ad} className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 dark:border-dark-600 last:border-0">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${og.aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
@@ -100,7 +105,7 @@ export default function DomainPerformansPage() {
         </div>
 
         {/* Öneriler */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Öneriler")}</h3>
           <ul className="space-y-2">
             {o.oneriler.map((n, i) => (

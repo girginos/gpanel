@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
+import { Badge } from '@/components/ui'
 
 type Domain = { id: number; alan_adi: string }
 
@@ -61,6 +63,7 @@ const TOOLP_EN: Record<string, string> = {
   "Anasayfa": "Homepage",
   "Hazır Değil": "Not Ready",
   "Bu modül": "This module",
+  "İşlem başarısız": "Operation failed",
   "devreye girecek.": "will go live.",
   "sonraki fazlarda": "in later phases",
 }
@@ -68,13 +71,22 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (TOOLP_EN[tr] ||
 
 export default function ToolPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const { id, slug } = useParams()
   const [d, setD] = useState<Domain | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
+  // Hata artik sag ust toast'ta gosterilir; state mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setD(r.data)).catch(e => setHata(apiHata(e)))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setD(r.data) }).catch(e => {
+      if (iptal) return
+      const m = apiHata(e)
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    })
+    return () => { iptal = true }
   }, [id])
 
   const meta = TOOL_META[slug || ''] || { etiket: slug || cevir("Araç"), aciklama: cevir("Henüz uygulanmadı.") }
@@ -91,19 +103,18 @@ export default function ToolPage() {
       <div className="flex items-center gap-3 mb-2">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir(meta.etiket)}</h1>
         {meta.faz && (
-          <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-0.5 rounded">
+          <Badge color="warning" variant="soft" className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5">
             {meta.faz} · {cevir("Hazır Değil")}
-          </span>
+          </Badge>
         )}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-1">
         {d ? <>Domain: <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{d.alan_adi}</Link></> : '...'}
       </p>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{cevir(meta.aciklama)}</p>
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
-      <div className="bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-12 text-center">
-        <div className="w-16 h-16 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
+      <div className="bg-white dark:bg-dark-700 border-2 border-dashed border-slate-200 dark:border-dark-600 rounded-lg p-12 text-center">
+        <div className="w-16 h-16 mx-auto rounded-full bg-slate-100 dark:bg-dark-700 flex items-center justify-center mb-3">
           <svg className="w-8 h-8 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>

@@ -65,8 +65,8 @@ type Ayar = {
 }
 
 const kutu =
-  'w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 ' +
-  'bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 ' +
+  'w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-dark-600 ' +
+  'bg-white dark:bg-dark-800/40 text-slate-900 dark:text-slate-100 ' +
   'focus:outline-none focus:ring-2 focus:ring-sky-500/40'
 const etiket = 'block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1'
 
@@ -103,10 +103,12 @@ export default function YedekGenelAyar() {
   const [basari, setBasari] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     api
       .get<Ayar>('/admin/backups/ayar')
-      .then(r => setA({ ...r.data, uzak_parola: '' }))
-      .catch(e => setHata(apiHata(e, cevir('Ayarlar alınamadı'))))
+      .then(r => { if (iptal) return; setA({ ...r.data, uzak_parola: '' }) })
+      .catch(e => { if (iptal) return; setHata(apiHata(e, cevir('Ayarlar alınamadı'))) })
+    return () => { iptal = true }
   }, [])
 
   function yaz<K extends keyof Ayar>(k: K, v: Ayar[K]) {
@@ -147,8 +149,8 @@ export default function YedekGenelAyar() {
   const dusukAlan = a.min_bos_gb > 0 && a.bos_gb < a.min_bos_gb
 
   return (
-    <div className="mb-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 flex items-center gap-2">
+    <div className="mb-5 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 flex items-center gap-2">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir('Genel Yedek Ayarları')}</h3>
         <span className="ml-auto text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
           {cevir('Boş alan')}: <strong className={dusukAlan ? 'text-red-600 dark:text-red-400' : ''}>{a.bos_gb.toFixed(1)} GB</strong>
@@ -259,7 +261,7 @@ export default function YedekGenelAyar() {
               )}
 
               <button type="button" onClick={test} disabled={testEdiyor}
-                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/40 disabled:opacity-50">
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600/40 disabled:opacity-50">
                 {testEdiyor ? cevir('Test ediliyor…') : cevir('Bağlantıyı Test Et')}
               </button>
             </div>
@@ -268,7 +270,7 @@ export default function YedekGenelAyar() {
 
         <div className="pt-1">
           <button type="button" onClick={kaydet} disabled={kaydediyor}
-            className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+            className="px-3.5 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
             {kaydediyor ? cevir('Kaydediliyor…') : cevir('Kaydet')}
           </button>
         </div>

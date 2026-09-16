@@ -8,9 +8,11 @@
 // 🔴🔴 İZOLASYON: bir hosting hesabındaki zararlı dosya bildirimi YALNIZ o
 // domainin SAHİBİNE görünür. Root/admin BAŞKA kiracının tespitini görmez;
 // başka resellerlar da görmez. Görünürlük `kapsam()` ile role göre süzülür:
-//   admin    → yalnız panel-geneli bildirimler (reseller_id IS NULL)
-//   reseller → yalnız KENDİ domainleri (reseller_id = kendi uid)
-//   müşteri  → yalnız KENDİ domaini (domain_id = token domaini)
+//
+//	admin    → yalnız panel-geneli bildirimler (reseller_id IS NULL)
+//	reseller → yalnız KENDİ domainleri (reseller_id = kendi uid)
+//	müşteri  → yalnız KENDİ domaini (domain_id = token domaini)
+//
 // Bu süzgeç OLMADAN cp_bildirim küresel okunuyordu → tam sunucu yolu dahil her
 // kiracının tespiti admin bell'ine düşüyordu (gizlilik sızıntısı).
 package bildirim
@@ -79,6 +81,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		kosuller = append(kosuller, "kategori=?")
 		arg = append(arg, k)
 	}
+	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (kos=kapsam() rol ifadesi + "okundu=0" + "kategori=?") birleştirir; kullanıcı değerleri (kategori) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
 	q := `SELECT id, seviye, kategori, baslik, mesaj, domain_id, ref_tur, ref_id, okundu,
 	             DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
 	        FROM cp_bildirim WHERE ` + joinAnd(kosuller) + ` ORDER BY created_at DESC LIMIT 200`
@@ -120,10 +123,10 @@ func (h *Handlers) Okundu(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if id == 0 {
 		// 🔴 Kapsam ŞART: aksi hâlde bir kullanıcı HERKESİN bildirimini okundu yapardı.
-		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND okundu=0`, scopeArg...)
+		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND okundu=0`, scopeArg...) //nolint:gosec // G202: kos = kapsam() SABİT rol ifadesi (reseller_id IS NULL | reseller_id = ? | domain_id = ?); değerler scopeArg ile ? bağlanır.
 	} else {
 		args := append(append([]any{}, scopeArg...), id)
-		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND id=?`, args...)
+		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND id=?`, args...) //nolint:gosec // G202: kos = kapsam() SABİT rol ifadesi; id ve scopeArg değerleri ? ile bağlanır.
 	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -146,6 +149,19 @@ func Yaz(db *sql.DB, seviye, kategori, baslik, mesaj string, domainID int64, ref
 		if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
 			rid = r // reseller-sahipli; 0 ise admin-sahipli → NULL (admin görür)
 		}
+	}
+	// 🔴 DEDUP: aynı (kategori, başlık, ref, domain) OKUNMAMIŞ bildirim zaten
+	// varsa YENİDEN YAZMA. Kalıcı bir durum (swap yok, SSL hatası, ...) her
+	// panel açılışında / monitoring turunda yeni kayıt üretip bildirim merkezini
+	// spam'liyordu (kullanıcı 11 özdeş "Swap alanı yok" gördü). Kullanıcı okundu
+	// işaretlerse ve durum sürerse tekrar uyarılır (kabul edilebilir). Farklı
+	// olaylar (farklı başlık/ref/domain) BİRLEŞTİRİLMEZ — yalnız birebir tekrar.
+	var mevcut int
+	if db.QueryRow(
+		`SELECT COUNT(*) FROM cp_bildirim
+		  WHERE okundu=0 AND kategori=? AND baslik=? AND ref_tur=? AND ref_id=? AND domain_id <=> ?`,
+		kategori, baslik, refTur, refID, dom).Scan(&mevcut) == nil && mevcut > 0 {
+		return
 	}
 	_, _ = db.Exec(
 		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id, ref_tur, ref_id)

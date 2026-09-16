@@ -237,7 +237,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		v = 1
 		// KRITIK: varsayilan sifirlama KENDI kapsaminda (aksi halde bir bayi
 		// digerlerinin/globalin varsayilan planini sifirlar).
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE reseller_id=?`, ridC)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE reseller_id=?`, ridC); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "varsayılan sıfırlanamadı: "+err.Error())
+			return
+		}
 	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
@@ -314,7 +317,10 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	v := 0
 	if p.Varsayilan {
 		v = 1
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>? AND reseller_id=?`, id, ridU)
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>? AND reseller_id=?`, id, ridU); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "varsayılan sıfırlanamadı: "+err.Error())
+			return
+		}
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE service_plans SET ad=?, aciklama=?, disk_kota_mb=?, trafik_kota_mb=?,
@@ -488,11 +494,19 @@ type seedTier struct {
 }
 
 func seedPlanlari() []seedTier {
+	// 🔴 RAM (cgroup MemoryMax) UC PLANDA DA 2048 MB (2026-09-11, operator karari).
+	// Eski degerler 256/512/2048 idi; 256MB modern yazilimi CALISTIRAMIYORDU
+	// (WP+WooCommerce, Laravel, composer tek basina 256M+ ister) ve PHP'ye 2048M
+	// memory_limit yazilsa bile tenant'in GERCEK tavani cgroup'tur.
+	// RAM artik plan farki DEGILDIR: kademeler disk / trafik / domain / DB / mail
+	// sayisi ve CPU-IO agirliklariyla ayrisir (asagidaki diger alanlar aynen duruyor).
+	// 🔴 pm_max_children BILEREK degismedi (4/8/32 acikca verilmis): tenantPMMaxChildren
+	// pmc>0 iken RAM'den turetmez, yani bu degisiklik process sayisini SISIRMEZ.
 	return []seedTier{
 		{"Başlangıç", "Tek site, küçük proje", 1024, 5120, 1, 1, 5, 2,
-			50, 256, 30, 100000, 100, 15, 4, 1},
+			50, 2048, 30, 100000, 100, 15, 4, 1},
 		{"Standart", "Birden çok proje + e-posta", 10240, 51200, 5, 10, 25, 10,
-			100, 512, 60, 250000, 100, 30, 8, 0},
+			100, 2048, 60, 250000, 100, 30, 8, 0},
 		{"Profesyonel", "Yoğun trafik + büyük site", 51200, 204800, 25, 50, 100, 50,
 			200, 2048, 150, 500000, 200, 100, 32, 0},
 	}

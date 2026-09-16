@@ -17,6 +17,11 @@ export type EklentiKayit = {
   aktif: boolean
   ui: boolean
   saglik: string
+  // Nav (sol menu) metadata — plugin deklare eder (dinamik nav). '' => sekme yok.
+  nav_yol?: string
+  nav_grup?: string
+  nav_ikon?: string
+  nav_sira?: number
 }
 
 const OLAY = 'gosp:eklenti-degisti'
@@ -67,4 +72,39 @@ export function useEklentiAktif(ad: string, etkin = true): boolean | null {
   }, [cek])
 
   return aktif
+}
+
+/**
+ * Kurulu eklentilerin TAM listesini (nav metadata dahil) izler.
+ * `null` = henuz bilinmiyor (ilk yukleme). Nav'i INSTALLED plugin'lerden
+ * kurmak icin kullanilir; askiya alinmis (kurulu ama aktif=false) plugin de
+ * listede kalir (sekmesi gizlenmez, sayfasi landing cizer).
+ */
+export function useEklentiler(etkin = true): EklentiKayit[] | null {
+  const [liste, setListe] = useState<EklentiKayit[] | null>(null)
+  const sonRef = useRef<EklentiKayit[] | null>(null)
+  const cek = useCallback(() => {
+    if (!etkin) return
+    eklentileriGetir()
+      .then((l) => {
+        sonRef.current = l
+        setListe(l)
+      })
+      .catch(() => {
+        setListe(sonRef.current)
+      })
+  }, [etkin])
+  useEffect(() => {
+    cek()
+    const t = setInterval(cek, 60_000)
+    const onOlay = () => cek()
+    window.addEventListener(OLAY, onOlay)
+    window.addEventListener('focus', onOlay)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener(OLAY, onOlay)
+      window.removeEventListener('focus', onOlay)
+    }
+  }, [cek])
+  return etkin ? liste : null
 }

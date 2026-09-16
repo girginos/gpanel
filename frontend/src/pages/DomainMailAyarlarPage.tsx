@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
 import type { Domain } from '@/components/DomainList'
 
 type Kontrol = { ad: string; durum: 'ok' | 'uyari' | 'hata' | 'bilgi'; mesaj: string }
@@ -28,7 +29,7 @@ const DURUM_RENK: Record<string, string> = {
   ok: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
   uyari: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   hata: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-  bilgi: 'bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300',
+  bilgi: 'bg-slate-100 dark:bg-dark-600/50 text-slate-600 dark:text-slate-300',
 }
 const GENEL: Record<string, { renk: string; etiket: string }> = {
   saglikli: { renk: 'text-emerald-600 dark:text-emerald-400', etiket: 'Sağlıklı' },
@@ -38,6 +39,7 @@ const GENEL: Record<string, { renk: string; etiket: string }> = {
 
 
 const MAILAYAR_EN: Record<string, string> = {
+  "İşlem başarısız": "Operation failed",
   "Analiz başarısız — mail sunucusuna ulaşılamadı": "Analysis failed — could not reach the mail server",
   "Henüz analiz yapılmadı.": "No analysis yet.",
   "Kopyalamak için tıklayın": "Click to copy",
@@ -79,6 +81,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (MAILAYAR_EN[tr]
 export default function DomainMailAyarlarPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [baglanti, setBaglanti] = useState<Baglanti | null>(null)
   const [monitor, setMonitor] = useState<Monitor | null>(null)
@@ -86,14 +89,18 @@ export default function DomainMailAyarlarPage() {
   const [hata, setHata] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e, cevir("Domain yüklenemedi"))))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e, cevir("Domain yüklenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
   }, [id])
 
   useEffect(() => {
+    let iptal = false
     if (!domain) return
     api.get<Baglanti>(`/eklenti/mail/baglanti/${domain.alan_adi}`)
-      .then(r => setBaglanti(r.data)).catch(hataYakala(cevir("Mail bağlantı bilgileri alınamadı")))
+      .then(r => { if (iptal) return; setBaglanti(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Mail bağlantı bilgileri alınamadı"))(e) })
+    return () => { iptal = true }
   }, [domain])
 
   async function analizEt() {
@@ -102,7 +109,7 @@ export default function DomainMailAyarlarPage() {
     try {
       const { data } = await api.get<Monitor>(`/eklenti/mail/monitor?domain=${encodeURIComponent(domain.alan_adi)}`)
       setMonitor(data)
-    } catch (e) { setHata(apiHata(e, cevir("Analiz başarısız — mail sunucusuna ulaşılamadı"))) }
+    } catch (e) { const m = apiHata(e, cevir("Analiz başarısız — mail sunucusuna ulaşılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setAnalizEdiliyor(false) }
   }
 
@@ -126,10 +133,8 @@ export default function DomainMailAyarlarPage() {
       <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Mail Ayarları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{domain.alan_adi} {cevir("posta hizmeti — sağlık analizi ve bağlantı bilgileri.")}</p>
 
-      {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {/* Sağlık Monitörü */}
-      <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
+      <section className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div>
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Mail Sunucu Sağlığı")}</h2>
@@ -168,7 +173,7 @@ export default function DomainMailAyarlarPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {monitor.kategoriler.map(kat => (
-                <div key={kat.ad} className="border border-slate-200 dark:border-slate-700 rounded-xl p-3">
+                <div key={kat.ad} className="border border-slate-200 dark:border-dark-600 rounded-lg p-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">{kat.ad}</h3>
                   <ul className="space-y-1.5">
                     {kat.kontroller.map((k, i) => (
@@ -190,7 +195,7 @@ export default function DomainMailAyarlarPage() {
 
       {/* Bağlantı Bilgileri */}
       {baglanti && (
-        <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+        <section className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Bağlantı Bilgileri")}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Mail istemcinize (Outlook, Thunderbird, telefon) elle kurulum için. Kullanıcı adı:")} <b>{baglanti.kullanici_adi}</b>.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
@@ -199,7 +204,7 @@ export default function DomainMailAyarlarPage() {
             <SunucuKart baslik={cevir("Giden (SMTP)")} host={baglanti.smtp.host} port={baglanti.smtp.port} g={baglanti.smtp.guvenlik} />
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
-            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-200">
+            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:hover:bg-dark-600/50 text-slate-700 dark:text-slate-200">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6m-9 6V4" /></svg>
               {cevir("Webmail'i Aç")}
             </a>
@@ -222,32 +227,34 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
   const [kayitlar, setKayitlar] = useState<DnsKaydi[] | null>(null)
   const [kopyalanan, setKopyalanan] = useState<string | null>(null)
   useEffect(() => {
+    let iptal = false
     api.get<{ kayitlar: DnsKaydi[] }>(`/eklenti/mail/dnskayitlari/${domain}`)
-      .then(r => setKayitlar(r.data.kayitlar || [])).catch(() => setKayitlar([]))
+      .then(r => { if (iptal) return; setKayitlar(r.data.kayitlar || []) }).catch(() => { if (!iptal) setKayitlar([]) })
+    return () => { iptal = true }
   }, [domain])
   if (!kayitlar || kayitlar.length === 0) return null
   return (
-    <section className="mt-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+    <section className="mt-5 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
       <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Önerilen DNS Kayıtları")}</h2>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{cevir("Postanın spam'e düşmemesi için domain DNS'inize bu kayıtları ekleyin (SPF · DKIM · DMARC). Değere tıklayıp kopyalayın.")}</p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[520px]">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-700">
+            <tr className="text-left text-xs uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-dark-600">
               <th className="py-2 pr-3 font-medium">{cevir("Ad")}</th>
               <th className="py-2 pr-3 font-medium">Tip</th>
               <th className="py-2 pr-3 font-medium">{cevir("Değer")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+          <tbody className="divide-y divide-slate-50 dark:divide-dark-600/50">
             {kayitlar.map((r, i) => (
               <tr key={i} className="align-top">
                 <td className="py-2.5 pr-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.ad}</td>
-                <td className="py-2.5 pr-3"><span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{r.tip}</span></td>
+                <td className="py-2.5 pr-3"><span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{r.tip}</span></td>
                 <td className="py-2.5">
                   <button onClick={() => { navigator.clipboard?.writeText(r.deger); setKopyalanan(r.deger); setTimeout(() => setKopyalanan(null), 1500) }}
                     title={cevir("Kopyalamak için tıklayın")}
-                    className="group text-left font-mono text-xs text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded px-2 py-1 break-all w-full transition-colors">
+                    className="group text-left font-mono text-xs text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-dark-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded px-2 py-1 break-all w-full transition-colors">
                     {r.deger}
                     <span className="ml-1.5 text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? cevir("✓ kopyalandı") : cevir("kopyala")}</span>
                   </button>
@@ -264,7 +271,7 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
 
 function SunucuKart({ baslik, host, port, g }: { baslik: string; host: string; port: number; g: string }) {
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm">
+    <div className="border border-slate-200 dark:border-dark-600 rounded-lg p-3 text-sm">
       <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">{baslik}</div>
       <div className="font-mono text-slate-800 dark:text-slate-200">{host}</div>
       <div className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{cevir("Port")} {port} · {g}</div>

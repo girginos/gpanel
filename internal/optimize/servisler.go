@@ -14,6 +14,7 @@ package optimize
 import (
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,7 +42,7 @@ func mariadbAnaliz(s *Sistem) ServisAnaliz {
 
 	// Öneri matrisi (RAM tabanlı)
 	bpMB := mariadbBpBoyut(s.RAMToplamMB)
-	_ = max(1, min(8, bpMB/1024)) // deprecated (MariaDB 10.5+)
+	// (eski buffer_pool_instances hesabı kaldırıldı — MariaDB 10.5+'ta deprecated)
 	logMB := clamp((bpMB/3/128)*128, 128, 512)
 	threadCache := min(100, s.CPUCekirdek*16)
 	ioThreads := clamp(s.CPUCekirdek, 4, 8)
@@ -731,7 +732,9 @@ var fpmKeyRe = regexp.MustCompile(`^\s*(pm\.\w+)\s*=\s*(\S+)`)
 
 func phpfpmPoollar() []FPMPool {
 	var out []FPMPool
-	filepath.WalkDir(PHPFPMPoolDir, func(path string, d fs.DirEntry, err error) error {
+	// WalkDir kök-tarama hatası (dizin yok/okunamıyor) sessiz kalmasın: öneri
+	// motoru pool'suz devam eder (fatal değil), ama teşhis için loglanır.
+	if werr := filepath.WalkDir(PHPFPMPoolDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
@@ -764,7 +767,9 @@ func phpfpmPoollar() []FPMPool {
 			out = append(out, p)
 		}
 		return nil
-	})
+	}); werr != nil {
+		log.Printf("optimize: php-fpm pool dizini taranamadı (%s): %v", PHPFPMPoolDir, werr)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ad < out[j].Ad })
 	return out
 }

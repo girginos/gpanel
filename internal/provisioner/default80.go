@@ -9,7 +9,7 @@ import (
 )
 
 // ── 80 catch-all ────────────────────────────────────────────────────────────
-// 🔴 SORUN (49.12.158.182'de ölçüldü, HER kurulumu etkiliyor): port 80
+// 🔴 SORUN (demo-sunucu'de ölçüldü, HER kurulumu etkiliyor): port 80
 // catch-all vhost'u installer tarafından STATİK olarak kopyalanıyordu
 // (assets/nginx/_default80.conf) ama belge kökünü — /var/www/_default80 —
 // ve içindeki index.html'i HİÇ KİMSE oluşturmuyordu. Dizin yokken vhost'un

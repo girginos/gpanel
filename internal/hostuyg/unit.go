@@ -97,6 +97,11 @@ func UnitRender(t *Tarif, unitAd, sistemKullanici, kurulumYolu string, portlar m
 		s = strings.ReplaceAll(s, "{kurulum}", kurulumYolu)
 		s = strings.ReplaceAll(s, "{sistem_kullanici}", sistemKullanici)
 		s = strings.ReplaceAll(s, "{panelhost}", panelhost)
+		// 🔴 {panelport} — panelin DIŞ portu SABİT DEĞİLDİR. Kurulumda 8443 çakışırsa
+		// panel başka porta taşınır ve müşteri Port Yönetimi'nden değiştirebilir;
+		// şablona 8443 gömmek, port değiştiği anda çalışmayan bir adres üretirdi.
+		// Değer runtime'da okunur (PanelListenPortGetir → portyonetim.DisPortOku).
+		s = strings.ReplaceAll(s, "{panelport}", fmt.Sprintf("%d", PanelListenPortGetir()))
 		for ad, p := range portlar {
 			s = strings.ReplaceAll(s, "{port_"+ad+"}", fmt.Sprintf("%d", p))
 		}

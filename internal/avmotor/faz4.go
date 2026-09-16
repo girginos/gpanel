@@ -30,11 +30,11 @@ import (
 )
 
 const (
-	semRescanTavan   = 60      // concat-yeniden-tara katkısı — EsikKritik(100) ALTINDA
-	semMaxToken      = 200000  // token tavanı (DoS)
-	semMaxParca      = 4096    // rescan parça sayısı tavanı
+	semRescanTavan   = 60       // concat-yeniden-tara katkısı — EsikKritik(100) ALTINDA
+	semMaxToken      = 200000   // token tavanı (DoS)
+	semMaxParca      = 4096     // rescan parça sayısı tavanı
 	semMaxKatlaBoyut = 64 << 10 // katlanan string / symtab değeri BAYT tavanı (OOM önlemi)
-	semMaxIndeksTok  = 256     // süperglobal [ ... ] atlama token tavanı (O(n^2) önlemi)
+	semMaxIndeksTok  = 256      // süperglobal [ ... ] atlama token tavanı (O(n^2) önlemi)
 )
 
 // sertSink — ADI gizlenip çağrıldığında neredeyse HER ZAMAN zararlı gerçek PHP
@@ -58,10 +58,10 @@ var evalIdent = map[string]bool{
 type tokTur int
 
 const (
-	tkStr tokTur = iota
-	tkDot        // .
-	tkDotEq      // .=
-	tkVar        // $ad
+	tkStr   tokTur = iota
+	tkDot          // .
+	tkDotEq        // .=
+	tkVar          // $ad
 	tkIdent
 	tkAssign // =
 	tkLParen
@@ -194,9 +194,9 @@ func semantikTara(icerik []byte, kurallar []Kural, ext string, disGoruldu map[st
 				deger, parca, sabit, _, _ := ifadeKatla(toks, i+2, symtab, taint)
 				if sabit && parca >= 2 {
 					ekle(45, "GOSP-SEMANTIK-EVAL-CONCAT") // 🔴 100 DEĞİL: meşru kütüphaneler eval(concat)
-				//   kullanır (phpseclib EvalBarrett math kodu, şablon motorları) — CANLI FP.
-				//   Tek başına supheli-altı; eval'lenen kod rescan'de zararlı içerik (base64/
-				//   system/superglobal) taşırsa ≥100 kritik olur. Gerçek gizli-eval yakalanır.
+					//   kullanır (phpseclib EvalBarrett math kodu, şablon motorları) — CANLI FP.
+					//   Tek başına supheli-altı; eval'lenen kod rescan'de zararlı içerik (base64/
+					//   system/superglobal) taşırsa ≥100 kritik olur. Gerçek gizli-eval yakalanır.
 					parcaEkle(deger)
 				}
 			}

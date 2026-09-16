@@ -5,9 +5,11 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/DomainList'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 import { kaydet, oku, sil, GUN } from '@/lib/kalici'
 
 type MailDomain = { id: number; ad: string; kutu_sayisi: number }
@@ -188,6 +190,8 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "Kopyala": "Copy",
   "Silinemedi": "Failed to delete",
   ".pst içe aktarmaya git": "Go to .pst import",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILKUTUDETAY_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -232,12 +236,13 @@ function KopyaSatir({ etiket, deger }: { etiket: string; deger: string }) {
         <div className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">{etiket}</div>
         <div className="font-mono text-sm text-slate-800 dark:text-slate-100 truncate">{deger}</div>
       </div>
-      <button
+      <Button
         onClick={() => { navigator.clipboard?.writeText(deger); setOk(true); setTimeout(() => setOk(false), 1500) }}
         title={cevir("Kopyala")}
-        className={`shrink-0 inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-lg border transition-colors ${ok ? 'border-emerald-300 text-emerald-600 dark:text-emerald-400 dark:border-emerald-700' : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/60'}`}>
+        color={ok ? 'success' : 'neutral'} variant="outlined"
+        className="shrink-0 gap-1 text-xs px-2 py-1.5">
         {ok ? <><Ikon.onay className="w-3.5 h-3.5" />{cevir("Kopyalandı")}</> : <><Ikon.kopya className="w-3.5 h-3.5" />{cevir("Kopyala")}</>}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -245,6 +250,7 @@ function KopyaSatir({ etiket, deger }: { etiket: string; deger: string }) {
 export default function MailKutuDetayPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, sor } = useDialog()
+  const toast = useToast()
   const { id, kutuId } = useParams()
   const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -286,38 +292,51 @@ export default function MailKutuDetayPage() {
 
   // Domain → mail domain → kutu.
   useEffect(() => {
+    let iptal = false
     if (!id) return
-    api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(e => setHata(apiHata(e, cevir("Domain yüklenemedi"))))
+    api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e, cevir("Domain yüklenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
   }, [id])
   useEffect(() => {
+    let iptal = false
     if (!domain) return
     api.get<{ domainler: MailDomain[] }>('/eklenti/mail/domainler')
       .then(r => {
+        if (iptal) return
         const md = (r.data.domainler || []).find(x => x.ad.toLowerCase() === domain.alan_adi.toLowerCase())
         setMailDomain(md || null)
-        if (!md) { setKutu(null); setHata(cevir("Bu domain için mail servisi kurulu değil.")) }
+        if (!md) {
+          setKutu(null)
+          const y = cevir("Bu domain için mail servisi kurulu değil.")
+          setHata(y)
+          toast.hata(cevir("İşlem başarısız"), y)
+        }
       })
-      .catch(e => { setHata(apiHata(e, cevir("Mail domaini alınamadı"))); setKutu(null) })
+      .catch(e => { if (iptal) return; const m = apiHata(e, cevir("Mail domaini alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setKutu(null) })
+    return () => { iptal = true }
   }, [domain])
+  const kutuYukleNesli = useRef(0)
   function kutuYukle(mdId: number) {
+    const _n = ++kutuYukleNesli.current
     api.get<{ hesaplar: Kutu[] }>(`/eklenti/mail/hesaplar?domain=${mdId}`)
-      .then(r => setKutu((r.data.hesaplar || []).find(k => k.id === kid) || null))
-      .catch(e => { setHata(apiHata(e, cevir("Kutu alınamadı"))); setKutu(null) })
+      .then(r => { if (_n !== kutuYukleNesli.current) return; setKutu((r.data.hesaplar || []).find(k => k.id === kid) || null) })
+      .catch(e => { if (_n !== kutuYukleNesli.current) return; const m = apiHata(e, cevir("Kutu alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setKutu(null) })
   }
-  useEffect(() => { if (mailDomain) kutuYukle(mailDomain.id) }, [mailDomain])
+  useEffect(() => { if (mailDomain) kutuYukle(mailDomain.id); return () => { kutuYukleNesli.current++ } }, [mailDomain])
 
   // Kutu geldiğinde oto-yanıt + iletim + taşıma durumunu yükle.
   useEffect(() => {
     if (!kutu) return
+    let iptal = false
     api.get<{ aktif: boolean; konu: string; mesaj: string }>(`/eklenti/mail/hesaplar/${kutu.id}/otomatik-yanit`)
-      .then(r => setOto({ aktif: r.data.aktif, konu: r.data.konu || '', mesaj: r.data.mesaj || '' })).catch(() => {})
+      .then(r => { if (!iptal) setOto({ aktif: r.data.aktif, konu: r.data.konu || '', mesaj: r.data.mesaj || '' }) }).catch(() => {})
     api.get<Iletim>(`/eklenti/mail/hesaplar/${kutu.id}/iletim`)
-      .then(r => setIletim({ aktif: r.data.aktif, hedef: r.data.hedef || '', kopya: r.data.kopya })).catch(() => {})
+      .then(r => { if (!iptal) setIletim({ aktif: r.data.aktif, hedef: r.data.hedef || '', kopya: r.data.kopya }) }).catch(() => {})
     // Entegrasyon bilgileri Genel sekmesinde satır içi gösterilir (çekmece yok).
     if (domain) {
       api.get<Baglanti>(`/eklenti/mail/baglanti/${domain.alan_adi}?email=${encodeURIComponent(kutu.email)}`)
-        .then(r => setBaglanti(r.data))
-        .catch(e => setHata(apiHata(e, cevir("Entegrasyon bilgileri alınamadı"))))
+        .then(r => { if (!iptal) setBaglanti(r.data) })
+        .catch(e => { if (iptal) return; const m = apiHata(e, cevir("Entegrasyon bilgileri alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
     }
     tasimaDurumCek(kutu.id)
 
@@ -332,11 +351,16 @@ export default function MailKutuDetayPage() {
       setTaslakVar(true)
     }
 
-    return () => { if (tasimaTimer.current) window.clearInterval(tasimaTimer.current) }
+    return () => { iptal = true; if (tasimaTimer.current) window.clearInterval(tasimaTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kutu?.id])
 
-  function bildir(m: string) { setBildirim(m); setHata(null); setTimeout(() => setBildirim(null), 4000) }
+  function bildir(m: string) {
+    setBildirim(m); setHata(null)
+    // Kisa mesaj = yalniz baslik; uzun mesaj = kisa ozet + alt satir.
+    if (m.length < 40) toast.basari(m); else toast.basari(cevir("Kaydedildi"), m)
+    setTimeout(() => setBildirim(null), 4000)
+  }
 
   // ── Genel ──
   async function aktifDegistir() {
@@ -347,7 +371,7 @@ export default function MailKutuDetayPage() {
     try {
       await api.put(`/eklenti/mail/hesaplar/${kutu.id}/aktif`, { aktif: yeni })
       setKutu({ ...kutu, aktif: yeni }); bildir(`✓ ${kutu.email} ${yeni ? cevir("aktifleştirildi") : cevir("askıya alındı")}.`)
-    } catch (e) { setHata(apiHata(e, cevir("Durum değiştirilemedi"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Durum değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function kotaOnar() {
     if (!kutu) return
@@ -355,7 +379,7 @@ export default function MailKutuDetayPage() {
     try {
       const r = await api.post<{ kullanilan_bytes: number }>(`/eklenti/mail/hesaplar/${kutu.id}/kota-onar`)
       setKutu({ ...kutu, kullanilan_bytes: r.data.kullanilan_bytes }); bildir(cevir("✓ Kota onarıldı ve yeniden hesaplandı."))
-    } catch (e) { setHata(apiHata(e, cevir("Kota onarılamadı"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Kota onarılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function parolaUret() {
     if (!kutu) return
@@ -364,7 +388,7 @@ export default function MailKutuDetayPage() {
     try {
       const r = await api.post<{ email: string; parola: string }>(`/eklenti/mail/hesaplar/${kutu.id}/parola-uret`)
       setKopyalandi(false); setUretilen({ email: r.data.email, parola: r.data.parola })
-    } catch (e) { setHata(apiHata(e, cevir("Parola üretilemedi"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Parola üretilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function parolaElle() {
     if (!kutu) return
@@ -372,7 +396,7 @@ export default function MailKutuDetayPage() {
     if (!p) return
     setIsleniyor(true); setHata(null)
     try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/parola`, { parola: p }); bildir(cevir("✓ Parola güncellendi.")) }
-    catch (e) { setHata(apiHata(e, cevir("Parola değiştirilemedi"))) } finally { setIsleniyor(false) }
+    catch (e) { const m = apiHata(e, cevir("Parola değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function webmailGiris() {
     if (!kutu) return
@@ -380,35 +404,35 @@ export default function MailKutuDetayPage() {
     try {
       const r = await api.post<{ url: string }>(`/eklenti/mail/hesaplar/${kutu.id}/giris`)
       if (w) w.location.href = r.data.url; else window.location.href = r.data.url
-    } catch (e) { if (w) w.close(); setHata(apiHata(e, cevir("Webmail girişi açılamadı"))) } finally { setIsleniyor(false) }
+    } catch (e) { if (w) w.close(); const m = apiHata(e, cevir("Webmail girişi açılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function kutuSil() {
     if (!kutu) return
     if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?"), kutu.email), tehlike: true }))) return
     setIsleniyor(true); setHata(null)
     try { await api.delete(`/eklenti/mail/hesaplar/${kutu.id}`); navigate(`/abonelikler/${id}/mail/kutular`) }
-    catch (e) { setHata(apiHata(e, cevir("Silinemedi"))); setIsleniyor(false) }
+    catch (e) { const m = apiHata(e, cevir("Silinemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setIsleniyor(false) }
   }
 
   // ── Oto-yanıt ──
   async function otoKaydet() {
     if (!kutu) return
-    if (oto.aktif && !oto.mesaj.trim()) { setHata(cevir("Otomatik yanıt için mesaj boş olamaz")); return }
+    if (oto.aktif && !oto.mesaj.trim()) { const v = cevir("Otomatik yanıt için mesaj boş olamaz"); setHata(v); toast.hata(v); return }
     setIsleniyor(true); setHata(null)
     try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/otomatik-yanit`, oto); bildir(`✓ ${cevir("Otomatik yanıt")} ${oto.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`) }
-    catch (e) { setHata(apiHata(e, cevir("Otomatik yanıt kaydedilemedi"))) } finally { setIsleniyor(false) }
+    catch (e) { const m = apiHata(e, cevir("Otomatik yanıt kaydedilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
 
   // ── İletim ──
   async function iletimKaydet() {
     if (!kutu) return
-    if (iletim.aktif && !iletim.hedef.trim()) { setHata(cevir("İletim için en az bir hedef e-posta girin")); return }
+    if (iletim.aktif && !iletim.hedef.trim()) { const v = cevir("İletim için en az bir hedef e-posta girin"); setHata(v); toast.hata(cevir("İşlem başarısız"), v); return }
     setIsleniyor(true); setHata(null)
     try {
       const r = await api.put<Iletim & { durum: string }>(`/eklenti/mail/hesaplar/${kutu.id}/iletim`, iletim)
       setIletim({ aktif: r.data.aktif, hedef: r.data.hedef || '', kopya: r.data.kopya })
       bildir(`✓ ${cevir("İletim")} ${r.data.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`)
-    } catch (e) { setHata(apiHata(e, cevir("İletim kaydedilemedi"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("İletim kaydedilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
 
   // ── Dışa / İçe aktar ──
@@ -422,7 +446,7 @@ export default function MailKutuDetayPage() {
       a.href = url; a.download = `${kutu.email.replace('@', '_at_')}-maildir.tar.gz`
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
       bildir(cevir("✓ Yedek indiriliyor."))
-    } catch (e) { setHata(apiHata(e, cevir("Dışa aktarma başarısız"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Dışa aktarma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   const dosyaRef = useRef<HTMLInputElement | null>(null)
   async function iceriAktar(dosya: File) {
@@ -434,7 +458,7 @@ export default function MailKutuDetayPage() {
       const n = r.data.eklenen
       bildir(n >= 0 ? cevirT(cevir("✓ İçe aktarıldı — {0} mesaj eklendi."), n) : cevir("✓ İçe aktarıldı."))
       kutuYukle(mailDomain!.id)
-    } catch (e) { setHata(apiHata(e, cevir("İçe aktarma başarısız"))) } finally { setIsleniyor(false); if (dosyaRef.current) dosyaRef.current.value = '' }
+    } catch (e) { const m = apiHata(e, cevir("İçe aktarma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false); if (dosyaRef.current) dosyaRef.current.value = '' }
   }
 
   // ── Taşıma ──
@@ -471,7 +495,7 @@ export default function MailKutuDetayPage() {
       const ilk = liste.find(a => a.yanit)
       if (ilk) setTasima(t => ({ ...t, host: ilk.host, port: ilk.port, guvenlik: ilk.guvenlik }))
       else setElle(true) // hiçbiri yanıt vermediyse elle girişe geç
-    } catch (e) { setHata(apiHata(e, cevir("Sunucu araması başarısız"))) }
+    } catch (e) { const m = apiHata(e, cevir("Sunucu araması başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setKesfediliyor(false) }
   }
 
@@ -484,19 +508,19 @@ export default function MailKutuDetayPage() {
         { host: tasima.host, port: tasima.port, guvenlik: tasima.guvenlik, kullanici: tasima.kullanici, parola: tasima.parola },
         { timeout: 60_000 })
       setDogrulama(r.data)
-    } catch (e) { setHata(apiHata(e, cevir("Doğrulama başarısız"))) }
+    } catch (e) { const m = apiHata(e, cevir("Doğrulama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setDogrulaniyor(false) }
   }
 
   async function tasimaBaslat() {
     if (!kutu) return
-    if (!tasima.host || !tasima.kullanici || !tasima.parola || !tasima.hedef_parola) { setHata(cevir("Uzak sunucu, kullanıcı, uzak parola ve hedef kutu parolası zorunlu")); return }
+    if (!tasima.host || !tasima.kullanici || !tasima.parola || !tasima.hedef_parola) { const v = cevir("Uzak sunucu, kullanıcı, uzak parola ve hedef kutu parolası zorunlu"); setHata(v); toast.hata(cevir("İşlem başarısız"), v); return }
     setIsleniyor(true); setHata(null)
     try {
       await api.post(`/eklenti/mail/hesaplar/${kutu.id}/tasima`, tasima)
       bildir(cevir("✓ Taşıma başladı — ilerleme aşağıda görünecek."))
       tasimaDurumCek(kutu.id) // 'calisiyor' görünce polling'i kendi başlatır
-    } catch (e) { setHata(apiHata(e, cevir("Taşıma başlatılamadı"))) } finally { setIsleniyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Taşıma başlatılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
 
   // Taslağı otomatik kaydet (sekme + taşıma formu, parolasız). 24 saat yaşar.
@@ -523,11 +547,10 @@ export default function MailKutuDetayPage() {
     </div>
   )
 
-  const btnSec = 'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/60 disabled:opacity-50 transition-colors'
-  const btnPri = 'inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white shadow-sm shadow-brand-600/20 disabled:opacity-50 transition-colors'
-  const kart = 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm'
+  const btnPri = 'inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white shadow-xs shadow-brand-600/20 disabled:opacity-50 transition-colors'
+  const kart = 'bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-xs'
   const etiket = 'block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5'
-  const girdi = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400'
+  const girdi = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400'
 
   // saglayiciUyarisi — büyük sağlayıcılar parolayla IMAP'i kısıtladı. Kullanıcı
   // parolayı DENEMEDEN önce uyarılmalı; aksi halde cevir("parolam yanlış") sanıp
@@ -565,16 +588,18 @@ export default function MailKutuDetayPage() {
 
   // Uyarı şeridi — 2. ve 3. adımda aynı bileşen (kullanıcı parolayı DENEMEDEN görür).
   const UyariSeridi = () => saglayiciUyarisi ? (
-    <div className={`mt-3 rounded-xl border px-4 py-3 text-xs leading-relaxed ${saglayiciUyarisi.agir
+    <div className={`mt-3 rounded-lg border px-4 py-3 text-xs leading-relaxed ${saglayiciUyarisi.agir
       ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
       : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'}`}>
-      <div className="font-semibold mb-1">{saglayiciUyarisi.agir ? '⛔ ' : '⚠ '}{saglayiciUyarisi.baslik}</div>
+      <div className="font-semibold mb-1 flex items-center gap-1.5">{saglayiciUyarisi.agir
+        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M4.9 4.9l14.2 14.2M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>
+        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z"/></svg>}{saglayiciUyarisi.baslik}</div>
       <p>{saglayiciUyarisi.metin}</p>
       {saglayiciUyarisi.pst && (
-        <button onClick={() => setSekme('aktar')}
-          className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors">
+        <Button onClick={() => setSekme('aktar')} color="error"
+          className="mt-2.5 gap-1.5 text-xs px-3 py-1.5">
           <Ikon.iceri className="w-3.5 h-3.5" />{cevir(".pst içe aktarmaya git")}
-        </button>
+        </Button>
       )}
     </div>
   ) : null
@@ -604,9 +629,6 @@ export default function MailKutuDetayPage() {
         { etiket: kutu?.email || 'Kutu' },
       ]} />
 
-      {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {kutu === null ? (
         <div className={`${kart} p-8 text-center`}>
           <p className="text-sm text-slate-500 dark:text-slate-300 mb-4">{cevir("Posta kutusu bulunamadı.")}</p>
@@ -619,35 +641,36 @@ export default function MailKutuDetayPage() {
             {/* 3 sütun: kimlik · ORTADA kota barı · aksiyonlar */}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
               <div className="flex items-center gap-3 min-w-0 lg:w-[320px] lg:shrink-0">
-                <div className="w-11 h-11 shrink-0 rounded-xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300">
+                <div className="w-11 h-11 shrink-0 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300">
                   <Ikon.cevap className="w-5 h-5" />
                 </div>
                 <div className="flex items-center gap-2 min-w-0">
                   <h1 className={`font-mono text-lg font-semibold truncate ${kutu.aktif ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 line-through'}`}>{kutu.email}</h1>
                   {kutu.aktif
-                    ? <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 uppercase">{cevir("Aktif")}</span>
-                    : <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 uppercase">{cevir("Askıda")}</span>}
+                    ? <Badge color="success" variant="soft" className="shrink-0 text-[10px] uppercase">{cevir("Aktif")}</Badge>
+                    : <Badge color="warning" variant="soft" className="shrink-0 text-[10px] uppercase">{cevir("Askıda")}</Badge>}
                 </div>
               </div>
               {/* Kota barı — e-posta ile butonların ortasında */}
               <div className="flex-1 min-w-0 flex items-center gap-2 lg:justify-center">
                 <KotaBar kullanilan={kutu.kullanilan_bytes} kota={kutu.quota_bytes} />
-                <button onClick={kotaOnar} disabled={isleniyor} title={cevir("Kotayı onar / yeniden hesapla")}
-                  className="shrink-0 grid h-8 w-8 place-items-center rounded-lg border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-slate-700/60 disabled:opacity-50 transition-colors">
+                <Button onClick={kotaOnar} disabled={isleniyor} title={cevir("Kotayı onar / yeniden hesapla")}
+                  isIcon variant="outlined"
+                  className="shrink-0 h-8 w-8">
                   <Ikon.yenile className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
               <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
-                <button onClick={webmailGiris} disabled={isleniyor || !kutu.aktif} className={btnPri}><Ikon.giris className="w-4 h-4" />{cevir("Giriş")}</button>
-                <button onClick={aktifDegistir} disabled={isleniyor} className={btnSec}>
+                <Button onClick={webmailGiris} disabled={isleniyor || !kutu.aktif} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.giris className="w-4 h-4" />{cevir("Giriş")}</Button>
+                <Button onClick={aktifDegistir} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
                   {kutu.aktif ? <><Ikon.duraklat className="w-4 h-4" />{cevir("Askıya al")}</> : <><Ikon.oynat className="w-4 h-4" />{cevir("Aktifleştir")}</>}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
 
           {/* Sekmeler */}
-          <div className="flex items-center gap-1 mb-4 border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
+          <div className="flex items-center gap-1 mb-4 border-b border-slate-200 dark:border-dark-600 overflow-x-auto">
             {sekmeler.map(s => (
               <button key={s.k} onClick={() => setSekme(s.k)}
                 className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${sekme === s.k ? 'border-brand-500 text-brand-700 dark:text-brand-300' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
@@ -672,7 +695,7 @@ export default function MailKutuDetayPage() {
                   <div className="py-6 text-center text-sm text-slate-400">{cevir("Entegrasyon bilgileri yükleniyor…")}</div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/70 px-4">
+                    <div className="rounded-lg border border-slate-200 dark:border-dark-600 divide-y divide-slate-100 dark:divide-dark-600/70 px-4">
                       <KopyaSatir etiket={cevir("Kullanıcı adı")} deger={baglanti.kullanici_adi || kutu.email} />
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -688,9 +711,9 @@ export default function MailKutuDetayPage() {
                         .map(([ad, s]) => (
                         <div key={ad}>
                           <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                            {ad} <span className="ml-1 text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.guvenlik}</span>
+                            {ad} <span className="ml-1 text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400">{s.guvenlik}</span>
                           </div>
-                          <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/70 px-4">
+                          <div className="rounded-lg border border-slate-200 dark:border-dark-600 divide-y divide-slate-100 dark:divide-dark-600/70 px-4">
                             <KopyaSatir etiket={cevir(cevir("Sunucu"))} deger={s.host} />
                             <KopyaSatir etiket="Port" deger={String(s.port)} />
                           </div>
@@ -698,25 +721,25 @@ export default function MailKutuDetayPage() {
                       ))}
                     </div>
                     {baglanti.webmail && (
-                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/70 px-4">
+                      <div className="rounded-lg border border-slate-200 dark:border-dark-600 divide-y divide-slate-100 dark:divide-dark-600/70 px-4">
                         <KopyaSatir etiket="Webmail" deger={baglanti.webmail} />
                       </div>
                     )}
                   </div>
                 )}
               </div>
-              <div className="border-t border-slate-100 dark:border-slate-700 pt-5">
+              <div className="border-t border-slate-100 dark:border-dark-600 pt-5">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Parola")}</h3>
                 <p className="text-xs text-slate-400 mb-3">{cevir("Kutunun IMAP/SMTP/webmail parolasını sıfırlayın.")}</p>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button onClick={parolaUret} disabled={isleniyor} className={btnPri}><Ikon.anahtar className="w-3.5 h-3.5" />{cevir("Güçlü parola üret")}</button>
-                  <button onClick={parolaElle} disabled={isleniyor} className={btnSec}><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Elle değiştir")}</button>
+                  <Button onClick={parolaUret} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.anahtar className="w-3.5 h-3.5" />{cevir("Güçlü parola üret")}</Button>
+                  <Button onClick={parolaElle} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5"><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Elle değiştir")}</Button>
                 </div>
               </div>
               <div className="border-t border-red-100 dark:border-red-900/40 pt-5">
                 <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">{cevir("Tehlikeli Bölge")}</h3>
                 <p className="text-xs text-slate-400 mb-3">{cevir("Posta kutusu ve içindeki tüm e-postalar kalıcı olarak silinir. Geri alınamaz.")}</p>
-                <button onClick={kutuSil} disabled={isleniyor} className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-red-200 dark:border-red-800/70 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Posta kutusunu sil")}</button>
+                <Button onClick={kutuSil} disabled={isleniyor} color="error" variant="outlined" className="gap-1.5 text-xs px-3 py-2"><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Posta kutusunu sil")}</Button>
               </div>
             </div>
           )}
@@ -734,7 +757,7 @@ export default function MailKutuDetayPage() {
                 <div><label className={etiket}>{cevir("Konu")}</label><input value={oto.konu} onChange={e => setOto(o => ({ ...o, konu: e.target.value }))} maxLength={255} placeholder={cevir("Ofis dışındayım")} className={girdi} /></div>
                 <div><label className={etiket}>{cevir("Mesaj")}</label><textarea value={oto.mesaj} onChange={e => setOto(o => ({ ...o, mesaj: e.target.value }))} rows={5} maxLength={8000} placeholder={cevir("Merhaba, şu an ofis dışındayım. En kısa sürede dönüş yapacağım.")} className={`${girdi} resize-y`} /></div>
               </div>
-              <div className="mt-4"><button onClick={otoKaydet} disabled={isleniyor} className={btnPri}>{cevir("Kaydet")}</button></div>
+              <div className="mt-4"><Button onClick={otoKaydet} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Kaydet")}</Button></div>
             </div>
           )}
 
@@ -755,7 +778,7 @@ export default function MailKutuDetayPage() {
                 </label>
                 <p className="text-[11px] text-slate-400">{cevir("Kopya kapalıysa gelen posta yalnızca hedefe iletilir, bu kutuda tutulmaz.")}</p>
               </div>
-              <div className="mt-4"><button onClick={iletimKaydet} disabled={isleniyor} className={btnPri}>{cevir("Kaydet")}</button></div>
+              <div className="mt-4"><Button onClick={iletimKaydet} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Kaydet")}</Button></div>
             </div>
           )}
 
@@ -775,18 +798,18 @@ export default function MailKutuDetayPage() {
                   return (
                     <li key={s.n} className="flex items-center gap-2">
                       <button type="button" onClick={() => gecildi && setAdim(s.n)} disabled={!gecildi}
-                        className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-colors ${gecildi ? 'bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer' : aktif ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'}`}>
+                        className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-colors ${gecildi ? 'bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer' : aktif ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-dark-600 text-slate-400'}`}>
                         {gecildi ? '✓' : s.n}
                       </button>
                       <span className={aktif ? 'font-medium text-slate-700 dark:text-slate-200' : 'text-slate-400'}>{cevir(s.ad)}</span>
-                      {i < ADIMLAR.length - 1 && <span className="w-6 h-px bg-slate-200 dark:bg-slate-700" />}
+                      {i < ADIMLAR.length - 1 && <span className="w-6 h-px bg-slate-200 dark:bg-dark-600" />}
                     </li>
                   )
                 })}
               </ol>
 
               {taslakVar && adim === 1 && (
-                <div className="mb-4 px-3 py-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 flex items-start justify-between gap-3">
+                <div className="mb-4 px-3 py-2 bg-slate-50 dark:bg-dark-800/40 border border-slate-200 dark:border-dark-600 rounded-lg text-xs text-slate-600 dark:text-slate-300 flex items-start justify-between gap-3">
                   <span>
                     {cevir(cevir("Kaldığınız yerden devam ediyorsunuz — form 24 saat saklanır."))}
                     <span className="text-slate-400"> {cevir("Güvenlik gereği parolalar saklanmaz, yeniden girin.")}</span>
@@ -823,14 +846,14 @@ export default function MailKutuDetayPage() {
                     <span className="font-mono text-slate-700 dark:text-slate-200">{tasima.kullanici}</span> {cevir("için eski sunucuyu seçin.")}
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={sunucuKesfet} disabled={kesfediliyor} className={btnPri}>
+                    <Button onClick={sunucuKesfet} disabled={kesfediliyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">
                       {kesfediliyor
                         ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />{cevir("Aranıyor…")}</>
                         : <><Ikon.ayar className="w-4 h-4" />{cevir("Sunucuyu otomatik bul")}</>}
-                    </button>
-                    <button onClick={() => { setElle(v => !v); setAdaylar(null) }} className={btnSec}>
+                    </Button>
+                    <Button onClick={() => { setElle(v => !v); setAdaylar(null) }} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
                       {elle ? cevir("Otomatik moda dön") : cevir("Elle gireceğim")}
-                    </button>
+                    </Button>
                   </div>
 
                   {!elle && adaylar && (
@@ -842,7 +865,7 @@ export default function MailKutuDetayPage() {
                           return (
                             <li key={`${a.host}:${a.port}:${a.guvenlik}`}>
                               <button onClick={() => { setTasima(t => ({ ...t, host: a.host, port: a.port, guvenlik: a.guvenlik })); setDogrulama(null) }}
-                                className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${secili ? 'border-brand-400 bg-brand-50/60 dark:bg-brand-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:bg-slate-700/30'}`}>
+                                className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${secili ? 'border-brand-400 bg-brand-50/60 dark:bg-brand-900/20' : 'border-slate-200 dark:border-dark-600 hover:border-slate-300 dark:hover:bg-dark-600/30'}`}>
                                 <span className={`shrink-0 w-2 h-2 rounded-full ${a.yanit ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                                 <span className="min-w-0 flex-1">
                                   <span className="block font-mono text-sm text-slate-800 dark:text-slate-100 truncate">{a.host}:{a.port}</span>
@@ -880,7 +903,7 @@ export default function MailKutuDetayPage() {
               {adim === 3 && (
                 <div>
                   {/* Özet */}
-                  <dl className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/70 mb-4">
+                  <dl className="rounded-lg border border-slate-200 dark:border-dark-600 divide-y divide-slate-100 dark:divide-dark-600/70 mb-4">
                     {[
                       [cevir("Kaynak hesap"), tasima.kullanici],
                       [cevir("Kaynak sunucu"), `${tasima.host}:${tasima.port} (${tasima.guvenlik === 'ssl' ? 'SSL' : 'STARTTLS'})`],
@@ -910,31 +933,31 @@ export default function MailKutuDetayPage() {
                   )}
 
                   <div className="mt-4 flex items-center gap-2 flex-wrap">
-                    <button onClick={baglantiDogrula} disabled={dogrulaniyor} className={btnSec}>
+                    <Button onClick={baglantiDogrula} disabled={dogrulaniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
                       {dogrulaniyor ? cevir("Doğrulanıyor…") : dogrulama?.ok ? cevir("Yeniden doğrula") : cevir("Bağlantıyı doğrula")}
-                    </button>
-                    <button onClick={tasimaBaslat} disabled={isleniyor || tasimaDurum?.durum === 'calisiyor' || !dogrulama?.ok || !tasima.hedef_parola} className={btnPri}
+                    </Button>
+                    <Button onClick={tasimaBaslat} disabled={isleniyor || tasimaDurum?.durum === 'calisiyor' || !dogrulama?.ok || !tasima.hedef_parola} color="primary" className="text-xs px-3.5 py-2 gap-1.5"
                       title={!dogrulama?.ok ? 'Önce bağlantıyı doğrulayın' : cevir("Taşımayı başlat")}>
                       <Ikon.tasima className="w-4 h-4" />{tasimaDurum?.durum === 'calisiyor' ? cevir("Taşınıyor…") : cevir("Taşımayı başlat")}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               {/* GEZİNME — ileri/geri */}
-              <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-2">
-                <button onClick={() => setAdim(a => Math.max(1, a - 1))} disabled={adim === 1}
-                  className={`${btnSec} ${adim === 1 ? 'invisible' : ''}`}>{cevir("← Geri")}</button>
+              <div className="mt-5 pt-4 border-t border-slate-100 dark:border-dark-600 flex items-center justify-between gap-2">
+                <Button onClick={() => setAdim(a => Math.max(1, a - 1))} disabled={adim === 1}
+                  variant="outlined" className={`text-xs px-3 py-2 gap-1.5 ${adim === 1 ? 'invisible' : ''}`}>{cevir("← Geri")}</Button>
                 {adim < 3 ? (
-                  <button onClick={() => setAdim(a => a + 1)} disabled={!adimTamam(adim)}
+                  <Button onClick={() => setAdim(a => a + 1)} disabled={!adimTamam(adim)}
                     title={adimTamam(adim) ? '' : adim === 1 ? 'E-posta ve parolayı girin' : cevir("Bir sunucu seçin ya da elle girin")}
-                    className={btnPri}>{cevir("Devam →")}</button>
+                    color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Devam →")}</Button>
                 ) : <span />}
               </div>
 
               {/* İlerleme paneli — hangi adımda olursanız olun görünür */}
               {tasimaDurum && tasimaDurum.durum !== 'yok' && (
-                <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 p-4">
+                <div className="mt-4 rounded-lg border border-slate-200 dark:border-dark-600 bg-slate-50/60 dark:bg-dark-800/30 p-4">
                   <div className="flex items-center gap-2 text-sm">
                     {tasimaDurum.durum === 'calisiyor' && <span className="w-3.5 h-3.5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />}
                     {tasimaDurum.durum === 'tamam' && <Ikon.onay className="w-4 h-4 text-emerald-500" />}
@@ -945,7 +968,7 @@ export default function MailKutuDetayPage() {
                   {tasimaDurum.mesaj && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tasimaDurum.mesaj}</p>}
                   {tasimaDurum.hata && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{tasimaDurum.hata}</p>}
                   {tasimaDurum.log && tasimaDurum.log.length > 0 && (
-                    <pre className="mt-2 max-h-40 overflow-auto text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-950/40 rounded-lg p-2 border border-slate-200 dark:border-slate-700">{tasimaDurum.log.join('\n')}</pre>
+                    <pre className="mt-2 max-h-40 overflow-auto text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-white dark:bg-dark-900/40 rounded-lg p-2 border border-slate-200 dark:border-dark-600">{tasimaDurum.log.join('\n')}</pre>
                   )}
                 </div>
               )}
@@ -959,14 +982,14 @@ export default function MailKutuDetayPage() {
                 <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.disari className="w-5 h-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Dışa Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4">{cevir("Kutunun tüm postalarını")} <span className="font-mono">.tar.gz</span> (Maildir) {cevir("olarak indir. Yedekleme veya başka kutuya taşımak için.")}</p>
-                <button onClick={disariAktar} disabled={isleniyor} className={btnPri}><Ikon.disari className="w-3.5 h-3.5" />{cevir("Yedeği indir")}</button>
+                <Button onClick={disariAktar} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.disari className="w-3.5 h-3.5" />{cevir("Yedeği indir")}</Button>
               </div>
               <div className={`${kart} p-5`}>
                 <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.iceri className="w-5 h-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("İçe Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4"><span className="font-mono">.tar.gz</span> {cevir("(Maildir yedeği) veya")} <span className="font-mono">.mbox</span> {cevir("yükleyin. Mevcut postalar korunur, üzerine eklenir.")}</p>
                 <input ref={dosyaRef} type="file" accept=".tar.gz,.tgz,.mbox,.eml" onChange={e => { const f = e.target.files?.[0]; if (f) iceriAktar(f) }} className="hidden" />
-                <button onClick={() => dosyaRef.current?.click()} disabled={isleniyor} className={btnSec}><Ikon.iceri className="w-3.5 h-3.5" />{cevir("Dosya seç ve yükle")}</button>
+                <Button onClick={() => dosyaRef.current?.click()} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5"><Ikon.iceri className="w-3.5 h-3.5" />{cevir("Dosya seç ve yükle")}</Button>
               </div>
             </div>
           )}
@@ -976,17 +999,17 @@ export default function MailKutuDetayPage() {
       {/* Üretilen parola modalı */}
       {uretilen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setUretilen(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-dark-700 rounded-lg p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-dark-600" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2.5 mb-3">
               <div className="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400"><Ikon.anahtar className="w-5 h-5" /></div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Yeni parola üretildi")}</h3>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4"><span className="font-mono text-slate-700 dark:text-slate-300">{uretilen.email}</span> {cevir("— bu parola yalnızca şimdi gösteriliyor, güvenli bir yere kaydedin.")}</p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-sm bg-slate-100 dark:bg-slate-900 rounded-lg px-3 py-2.5 break-all select-all text-slate-800 dark:text-slate-100">{uretilen.parola}</code>
-              <button onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }} className="shrink-0 text-xs font-medium px-3 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">{kopyalandi ? '✓ ' + cevir("Kopyalandı") : cevir("Kopyala")}</button>
+              <code className="flex-1 font-mono text-sm bg-slate-100 dark:bg-dark-800 rounded-lg px-3 py-2.5 break-all select-all text-slate-800 dark:text-slate-100">{uretilen.parola}</code>
+              <Button onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }} color="primary" className="shrink-0 text-xs px-3 py-2.5">{kopyalandi ? '✓ ' + cevir("Kopyalandı") : cevir("Kopyala")}</Button>
             </div>
-            <button onClick={() => setUretilen(null)} className="mt-4 w-full text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">{cevir("Kapat")}</button>
+            <Button onClick={() => setUretilen(null)} variant="outlined" className="mt-4 w-full text-sm px-4 py-2">{cevir("Kapat")}</Button>
           </div>
         </div>
       )}
@@ -1006,7 +1029,7 @@ function KotaBar({ kullanilan, kota }: { kullanilan: number; kota: number }) {
         <span className="text-slate-600 dark:text-slate-300 tabular-nums">{boyut(kul)} <span className="text-slate-400">/ {boyut(kota)}</span></span>
         <span className={`tabular-nums font-medium ${pct >= 90 ? 'text-red-600 dark:text-red-400' : pct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`}>%{pct}</span>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700/70 overflow-hidden">
+      <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-dark-600/70 overflow-hidden">
         <div className={`h-full ${renk} rounded-full transition-all duration-500`} style={{ width: `${Math.max(pct, 2)}%` }} />
       </div>
     </div>

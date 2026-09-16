@@ -9,6 +9,8 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import YedekGenelAyar from '@/components/YedekGenelAyar'
+import { Button } from '@/components/ui'
+import { useToast } from '@/components/Toast'
 
 const BACKUP_EN: Record<string, string> = {
   'Anasayfa': 'Home',
@@ -22,7 +24,7 @@ const BACKUP_EN: Record<string, string> = {
   'Her gün 03:00': 'Every day 03:00',
   'Başlatılıyor…': 'Starting…',
   'Bir iş sürüyor…': 'A job is running…',
-  '⏱ Tüm Domainleri Şimdi Yedekle': '⏱ Back Up All Domains Now',
+  'Tüm Domainleri Şimdi Yedekle': 'Back Up All Domains Now',
   'Yedekleme / Geri Yükleme İşleri': 'Backup / Restore Jobs',
   'çalışıyor': 'running',
   'otomatik yenilenir': 'auto-refreshes',
@@ -42,6 +44,7 @@ const BACKUP_EN: Record<string, string> = {
   'İş durdurulamadı': 'Could not stop the job',
   'iptal': 'cancelled',
   'manuel': 'manual',
+  'İşlem başarısız': 'Operation failed',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (BACKUP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -61,9 +64,10 @@ export default function BackupYonetimiPage() {
   const [basari, setBasari] = useState<string | null>(null)
   const [yedekliyor, setYedekliyor] = useState(false)
   const timer = useRef<number | null>(null)
+  const toast = useToast()
 
   function ozetYukle() { api.get<Ozet>('/admin/backups/ozet').then(r => setO(r.data)).catch(hataYakala(cevir('Yedek özeti alınamadı'))) }
-  function jobYukle() { api.get<Job[]>('/admin/backups/jobs').then(r => setJobs(r.data)).catch(e => setHata(apiHata(e))) }
+  function jobYukle() { api.get<Job[]>('/admin/backups/jobs').then(r => setJobs(r.data)).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir('İşlem başarısız'), m) }) }
 
   useEffect(() => {
     ozetYukle(); jobYukle()
@@ -82,9 +86,15 @@ export default function BackupYonetimiPage() {
     setHata(null); setBasari(null); setYedekliyor(true)
     try {
       const { data } = await api.post('/admin/backups/jobs', {})
-      setBasari(cevirT("Yedekleme başladı — iş #{0} ({1} domain).", data.job_id, data.toplam))
+      const iyi = cevirT("Yedekleme başladı — iş #{0} ({1} domain).", data.job_id, data.toplam)
+      setBasari(iyi)
+      toast.basari(iyi)
       jobYukle()
-    } catch (e) { setHata(apiHata(e, cevir('Yedekleme başlatılamadı'))) }
+    } catch (e) {
+      const m = apiHata(e, cevir('Yedekleme başlatılamadı'))
+      setHata(m)
+      toast.hata(cevir('İşlem başarısız'), m)
+    }
     finally { setYedekliyor(false) }
   }
 
@@ -101,49 +111,46 @@ export default function BackupYonetimiPage() {
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{cevir('Yedekleme ve geri yükleme işleri Plesk tarzı listelenir. Bir işe tıklayarak kendi sayfasında domainleri seçip tam / SQL / dosya bazında geri yükleyin.')}</p>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      {basari && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <Kpi et={cevir("Toplam Yedek Boyutu")} v={o ? fmtByte(o.toplam_boyut_b) : '—'} renk="sky" ikon="💽" />
-        <Kpi et={cevir("Toplam Yedek")} v={o ? String(o.toplam_yedek) : '—'} renk="violet" ikon="📦" />
-        <Kpi et={cevir("Domain Sayısı")} v={o ? String(o.domainler.length) : '—'} renk="teal" ikon="🌐" />
-        <Kpi et={cevir("Aktif Uzak Hedef")} v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon="☁️" alt="S3 / SFTP" />
+        <Kpi et={cevir("Toplam Yedek Boyutu")} v={o ? fmtByte(o.toplam_boyut_b) : '—'} renk="sky" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M5 4h11l3 3v13a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1zM8 4v5h6V4M8 15h8"/></svg>} />
+        <Kpi et={cevir("Toplam Yedek")} v={o ? String(o.toplam_yedek) : '—'} renk="violet" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg>} />
+        <Kpi et={cevir("Domain Sayısı")} v={o ? String(o.domainler.length) : '—'} renk="teal" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} />
+        <Kpi et={cevir("Aktif Uzak Hedef")} v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1.3A3.5 3.5 0 0117 18H7z"/></svg>} alt="S3 / SFTP" />
       </div>
 
       <YedekGenelAyar />
 
-      <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
-        <span className="text-sm text-slate-600 dark:text-slate-300">🕒 {cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
+      <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
+        <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={tumunuYedekle} disabled={yedekliyor || calisan}
-            className="px-3.5 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
-            {yedekliyor ? cevir('Başlatılıyor…') : calisan ? cevir('Bir iş sürüyor…') : cevir('⏱ Tüm Domainleri Şimdi Yedekle')}
+            className="px-3.5 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+            {yedekliyor ? cevir('Başlatılıyor…') : calisan ? cevir('Bir iş sürüyor…') : cevir('Tüm Domainleri Şimdi Yedekle')}
           </button>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700/60 flex items-center gap-2">
+      <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Yedekleme / Geri Yükleme İşleri")}</h3>
           {calisan && <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> {cevir("çalışıyor")}</span>}
           <span className="ml-auto text-[11px] text-slate-400">{cevir("otomatik yenilenir")}</span>
         </div>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+        <div className="divide-y divide-slate-100 dark:divide-dark-600/60">
           {jobs.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">{cevir("Henüz iş yok. “Tüm Domainleri Şimdi Yedekle” ile başlayın.")}</div>}
-          {jobs.map(j => <JobSatir key={j.id} j={j} onDurdur={() => { setBasari(cevir('İş durduruldu.')); jobYukle(); ozetYukle() }} />)}
+          {jobs.map(j => <JobSatir key={j.id} j={j} onDurdur={() => { setBasari(cevir('İş durduruldu.')); toast.basari(cevir('İş durduruldu.')); jobYukle(); ozetYukle() }} />)}
         </div>
       </div>
 
       {o && o.domainler.length > 0 && (
-        <details className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60">
+        <details className="mt-4 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
           <summary className="px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer select-none">{cevir("Domain bazlı yedekler (granüler dosya/DB geri yükleme)")}</summary>
-          <div className="border-t border-slate-100 dark:border-slate-700/60 divide-y divide-slate-100 dark:divide-slate-700/60">
+          <div className="border-t border-slate-100 dark:border-dark-600/60 divide-y divide-slate-100 dark:divide-dark-600/60">
             {o.domainler.map(d => (
               <div key={d.domain_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <span className="font-medium text-slate-800 dark:text-slate-200">{d.alan_adi}</span>
                 <span className="font-mono text-xs text-slate-400">{d.sayi} {cevir("yedek")} · {d.sayi ? fmtByte(d.toplam_b) : '—'}</span>
-                <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="ml-auto text-xs px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-700">{cevir("Yönet →")}</Link>
+                <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="ml-auto text-xs px-2.5 py-1 border border-slate-200 dark:border-dark-600 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600">{cevir("Yönet →")}</Link>
               </div>
             ))}
           </div>
@@ -165,7 +172,7 @@ function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
     finally { setDurduruluyor(false) }
   }
   return (
-    <Link to={`/backup-yonetimi/is/${j.id}`} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+    <Link to={`/backup-yonetimi/is/${j.id}`} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-dark-700/40">
       <DurumIkon durum={j.durum} />
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -179,20 +186,22 @@ function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
         {j.boyut_b > 0 && <span className="hidden sm:inline font-mono text-xs text-slate-500 dark:text-slate-400">{fmtByte(j.boyut_b)}</span>}
         <div className="w-28 sm:w-40">
           <div className="flex justify-between text-[11px] text-slate-400 mb-0.5"><span>{j.tamamlanan}/{j.toplam}</span><span>{pct}%</span></div>
-          <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div className="h-1.5 rounded-full bg-slate-100 dark:bg-dark-600 overflow-hidden">
             <div className={`h-full rounded-full transition-all duration-500 ${barRenk(j.durum)} ${j.durum === 'calisiyor' ? 'animate-pulse' : ''}`} style={{ width: `${pct}%` }} />
           </div>
         </div>
         {j.durum === 'calisiyor' && (
-          <button
+          <Button
+            color="error"
+            variant="outlined"
             type="button"
             onClick={durdur}
             disabled={durduruluyor}
             title={cevir('Durdur')}
-            className="px-2.5 py-1 text-xs font-medium rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+            className="px-2.5 py-1 text-xs"
           >
             {durduruluyor ? cevir('Durduruluyor…') : cevir('Durdur')}
-          </button>
+          </Button>
         )}
         <span className="text-slate-300 dark:text-slate-600 text-xs">→</span>
       </div>
@@ -203,7 +212,7 @@ function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
 export function DurumIkon({ durum, kucuk }: { durum: string; kucuk?: boolean }) {
   const s = kucuk ? 'w-4 h-4 text-xs' : 'w-6 h-6 text-sm'
   if (durum === 'calisiyor') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 animate-pulse`}>◔</span>
-  if (durum === 'iptal') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400`}>■</span>
+  if (durum === 'iptal') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400`}>■</span>
   if (durum === 'tamam') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400`}>✓</span>
   if (durum === 'kismi') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400`}>!</span>
   return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400`}>✕</span>
@@ -213,7 +222,7 @@ export function IslemRozet({ islem, mod }: { islem: string; mod: string }) {
   return <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${geri ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300'}`}>{geri ? cevir('geri') + (mod ? ' · ' + mod : '') : cevir('Yedek')}</span>
 }
 export function TurRozet({ tur }: { tur: string }) {
-  return <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">{tur === 'otomatik' ? cevir('otomatik') : cevir('manuel')}</span>
+  return <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400">{tur === 'otomatik' ? cevir('otomatik') : cevir('manuel')}</span>
 }
 export function barRenk(durum: string): string {
   if (durum === 'calisiyor') return 'bg-amber-400'
@@ -223,13 +232,13 @@ export function barRenk(durum: string): string {
   return 'bg-red-500'
 }
 
-function Kpi({ et, v, renk, ikon, alt }: { et: string; v: string; renk: string; ikon: string; alt?: string }) {
+function Kpi({ et, v, renk, ikon, alt }: { et: string; v: string; renk: string; ikon: React.ReactNode; alt?: string }) {
   const c: Record<string, string> = {
     sky: 'text-sky-600 dark:text-sky-400', violet: 'text-violet-600 dark:text-violet-400',
     teal: 'text-teal-600 dark:text-teal-400', emerald: 'text-emerald-600 dark:text-emerald-400',
   }
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
+    <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 p-4">
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-400 font-semibold">{ikon} {et}</div>
       <div className={`text-2xl font-semibold mt-1 ${c[renk] || 'text-slate-700 dark:text-slate-200'}`}>{v}</div>
       {alt && <div className="text-[11px] text-slate-400 mt-0.5">{alt}</div>}

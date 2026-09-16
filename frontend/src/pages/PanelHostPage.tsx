@@ -3,10 +3,12 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import type { FormEvent } from 'react'
 import { Ikon, I } from '@/components/Ikon'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 /*
  * Panel Hostname & SSL — admin.
@@ -68,7 +70,7 @@ const PHOST_EN: Record<string, string> = {
   "localhost ve IP her zaman erişilebilir kalır.": "localhost and IP always remain accessible.",
   "İzinli isimler:": "Allowed names:",
   "— (IP ile erişim)": "— (access via IP)",
-  "⚠ DNS uyuşmuyor. Çözülen:": "⚠ DNS mismatch. Resolved:",
+  "DNS uyuşmuyor. Çözülen:": "DNS mismatch. Resolved:",
   "✓ DNS bu sunucuya çözülüyor:": "✓ DNS resolves to this server:",
   "Yine de dene": "Try anyway",
   "Let's Encrypt kur?": "Install Let's Encrypt?",
@@ -120,8 +122,13 @@ const PHOST_EN: Record<string, string> = {
   "install-cert fail → cert/key yedekten geri alındı": "install-cert fail → cert/key restored from backup",
   "yeni cert PEM olarak geçerli": "new cert valid as PEM",
   "acme.sh cron kaydı yenilendi (90 gün öncesi auto-renew)": "acme.sh cron entry refreshed (auto-renew before 90 days)",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PHOST_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
+// Bekleme döngüsü üst sınırı: LE kurulumu normalde 30-90 sn sürer; 5 dk güvenli tavan.
+const BEKLE_AZAMI_MS = 5 * 60_000
+const BEKLE_ARALIK_MS = 2000 // yoklama aralığı — mevcut davranış korunuyor
 
 export default function PanelHostPage() {
   useTranslation() // dil re-render aboneligi
@@ -134,6 +141,13 @@ export default function PanelHostPage() {
   const [aktifIs, setAktifIs] = useState<Is | null>(null)
   const [yeniLink, setYeniLink] = useState<string | null>(null)
   const dialog = useDialog()
+  const toast = useToast()
+
+  // Çalışan isBekle döngüsünü bileşen unmount olunca iptal et (setAktifIs sızıntısı olmasın).
+  const isBekleAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => { isBekleAbortRef.current?.abort() }
+  }, [])
 
   const yukle = useCallback(async () => {
     try {
@@ -141,7 +155,9 @@ export default function PanelHostPage() {
       setD(r.data)
       if (!taslak) setTaslak(r.data.durum.hostname || '')
     } catch (e) {
-      setHata(apiHata(e, cevir("Yüklenemedi")))
+      const m = apiHata(e, cevir("Yüklenemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }, [taslak])
   useEffect(() => { void yukle() }, [])
@@ -165,12 +181,22 @@ export default function PanelHostPage() {
   }, [aktifIs, yukle])
 
   // isBekle — bir işi bitene kadar (durum "kosuyor" değil) yoklar; son durumu döner.
+  // Üst sınır: BEKLE_AZAMI_MS aşılınca anlamlı hata fırlatır (çağıran try/catch mesaj gösterir).
+  // İptal: bileşen unmount olunca isBekleAbortRef üzerinden abort edilir; abort sonrası setAktifIs çağrılmaz.
   const isBekle = async (isId: string): Promise<Is> => {
+    const ctrl = new AbortController()
+    isBekleAbortRef.current = ctrl
+    const bitisZamani = Date.now() + BEKLE_AZAMI_MS
     for (;;) {
-      const r = await api.get<Is>('/panel-host/is?id=' + isId)
+      if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+      const r = await api.get<Is>('/panel-host/is?id=' + isId, { signal: ctrl.signal })
+      if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
       setAktifIs(r.data)
       if (r.data.durum !== 'kosuyor') return r.data
-      await new Promise(res => setTimeout(res, 2000))
+      if (Date.now() >= bitisZamani) {
+        throw new Error(cevir('İş zaman aşımına uğradı: sunucu iş durumunu 5 dk içinde tamamlamadı.'))
+      }
+      await new Promise(res => setTimeout(res, BEKLE_ARALIK_MS))
     }
   }
 
@@ -184,7 +210,11 @@ export default function PanelHostPage() {
     setDnsSonuc(null); setDnsKontrol(true)
     let dnsR: any
     try { dnsR = (await api.post('/panel-host/dns', { hostname: taslak })).data; setDnsSonuc(dnsR) }
-    catch (e) { setHata(apiHata(e, cevir("DNS kontrol hatası"))); setDnsKontrol(false); return }
+    catch (e) {
+      const m = apiHata(e, cevir("DNS kontrol hatası"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      setDnsKontrol(false); return
+    }
     setDnsKontrol(false)
     // 2) DNS uyuşmuyorsa onay (betik kilitlenmeyi önlemek için yine de reddedebilir)
     if (!dnsR?.eslesme) {
@@ -224,6 +254,8 @@ export default function PanelHostPage() {
         await dialog.bilgi({ baslik: cevir("SSL kurulamadı"), mesaj: ssSon.hata || cevir("Let's Encrypt sertifikası alınamadı.") })
       }
     } catch (e) {
+      // Bileşen unmount → bekleme iptal edildi: sessizce çık (dialog/setState yok).
+      if (isBekleAbortRef.current?.signal.aborted) return
       await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Kurulum hatası")) })
     }
   }
@@ -249,9 +281,7 @@ export default function PanelHostPage() {
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
-      ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : d && (
         <>
           {/* Ön koşul kontrol */}
@@ -267,12 +297,30 @@ export default function PanelHostPage() {
           )}
 
           {/* Mevcut durum kartı */}
-          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-slate-500">{cevir("Mevcut hostname")}</div>
                 <div className="mt-0.5 font-mono text-sm">{d.durum.hostname || <span className="text-slate-400">{cevir("— (IP ile erişim)")}</span>}</div>
-                <div className="mt-1 text-xs text-slate-500">{cevir("İzinli isimler:")} <span className="font-mono">{(d.durum.izinliler ?? []).join(' ')}</span></div>
+                {(() => {
+                  // İzinli isimler'den kilitlenme-koruması gürültüsünü (IP, localhost,
+                  // 127.0.0.1, ::1) ve ana hostname'in kendisini (tekrar) çıkar; yalnız
+                  // gerçek EK alan adları varsa göster. Yoksa satırı hiç çizme.
+                  const ekstra = (d.durum.izinliler ?? []).filter(
+                    (a) =>
+                      a !== 'localhost' &&
+                      a !== '127.0.0.1' &&
+                      a !== '::1' &&
+                      !a.includes(':') &&
+                      !/^[0-9.]+$/.test(a) &&
+                      a !== d.durum.hostname,
+                  )
+                  return ekstra.length > 0 ? (
+                    <div className="mt-1 text-xs text-slate-500">
+                      {cevir("İzinli isimler:")} <span className="font-mono">{ekstra.join(' ')}</span>
+                    </div>
+                  ) : null
+                })()}
               </div>
               <div>
                 <div className="text-xs text-slate-500">{cevir("Sunucu IP'leri")}</div>
@@ -297,20 +345,21 @@ export default function PanelHostPage() {
           </div>
 
           {/* Form */}
-          <form onSubmit={tekTiklaKur} className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <form onSubmit={tekTiklaKur} className="mb-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
             <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Yeni Hostname")}</label>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 value={taslak}
                 onChange={(e) => { setTaslak(e.target.value); setDnsSonuc(null) }}
                 placeholder="panel.musteri.com"
-                className="flex-1 min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="flex-1 min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
                 autoComplete="off" spellCheck={false}
               />
-              <button type="submit" disabled={!d.acme_var || dnsKontrol || !taslak.trim() || aktifIs?.durum === 'kosuyor'}
-                className="rounded-lg border border-emerald-500 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60">
+              <Button type="submit" disabled={!d.acme_var || dnsKontrol || !taslak.trim() || aktifIs?.durum === 'kosuyor'}
+                color="success" variant="soft"
+                className="px-4 py-2 text-sm">
                 <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />{dnsKontrol ? cevir("DNS kontrol…") : aktifIs?.durum === 'kosuyor' ? cevir("Kuruluyor…") : cevir("Let's Encrypt Kur")}</span>
-              </button>
+              </Button>
             </div>
 
             {dnsSonuc && (
@@ -319,7 +368,7 @@ export default function PanelHostPage() {
                 : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300'}`}>
                 {dnsSonuc.eslesme
                   ? <>{cevir("✓ DNS bu sunucuya çözülüyor:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ')}</span></>
-                  : <>{cevir("⚠ DNS uyuşmuyor. Çözülen:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ') || cevir("hiç")}</span> · {cevir("Sunucu:")} <span className="font-mono">{dnsSonuc.sunucu_ip4.join(', ')}</span>. {cevir("Registrar'da A kaydını sunucunun IP'sine çevir.")}</>}
+                  : <>{cevir("DNS uyuşmuyor. Çözülen:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ') || cevir("hiç")}</span> · {cevir("Sunucu:")} <span className="font-mono">{dnsSonuc.sunucu_ip4.join(', ')}</span>. {cevir("Registrar'da A kaydını sunucunun IP'sine çevir.")}</>}
               </div>
             )}
 
@@ -332,7 +381,7 @@ export default function PanelHostPage() {
 
           {/* İş ilerleme */}
           {aktifIs && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-medium">
@@ -345,7 +394,7 @@ export default function PanelHostPage() {
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
                 )}
               </div>
-              <div className="max-h-64 overflow-y-auto rounded border border-slate-100 bg-slate-50 p-2 font-mono text-xs dark:border-slate-800 dark:bg-slate-950">
+              <div className="max-h-64 overflow-y-auto rounded border border-slate-100 bg-slate-50 p-2 font-mono text-xs dark:border-dark-600 dark:bg-dark-900">
                 {aktifIs.adimlar.map((a, i) => (
                   <div key={i} className={a.basari ? 'text-slate-700 dark:text-slate-300' : 'text-red-700 dark:text-red-400'}>
                     <span className="text-slate-400">{new Date(a.zaman).toLocaleTimeString('tr-TR', { hour12: false })}</span>{' '}

@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 /*
  * IP Yönetimi — admin only.
@@ -56,6 +58,7 @@ const IPYON_EN: Record<string, string> = {
   "Reboot sonrası panel-etiketli IP'ler otomatik geri yüklenir": "Panel-labeled IPs are automatically restored after reboot",
   "{ip} silinsin mi?": "Delete {ip}?",
   "Bu IP sunucudan kaldırılacak ({dev}/{cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.": "This IP will be removed from the server ({dev}/{cidr}). All traffic routed to this IP will drop. It will not be restored after reboot either.",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (IPYON_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -71,6 +74,7 @@ export default function IPYonetimPage() {
   const [gonderiliyor, setGonderiliyor] = useState(false)
   const [ekleHata, setEkleHata] = useState<string | null>(null)
   const dialog = useDialog()
+  const toast = useToast()
 
   const yukle = async () => {
     setYukleniyor(true); setHata(null)
@@ -78,7 +82,11 @@ export default function IPYonetimPage() {
       const r = await api.get<Liste>('/ipler')
       setListe(r.data)
       if (!taslakIface) setTaslakIface(r.data.varsayilan_arayuz || '')
-    } catch (e) { setHata(apiHata(e, cevir("Yüklenemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Yüklenemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setYukleniyor(false) }
   }
   useEffect(() => { void yukle() }, [])
@@ -129,53 +137,53 @@ export default function IPYonetimPage() {
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
       ) : liste && (
         <>
           {/* Ekleme formu */}
-          <form onSubmit={ekle} className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <form onSubmit={ekle} className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(180px,1fr)_140px_100px_1fr_auto]">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">IPv4</label>
                 <input value={taslakIP} onChange={(e) => setTaslakIP(e.target.value)}
                   placeholder="148.251.169.182" spellCheck={false} autoComplete="off"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Arayüz")}</label>
                 <input value={taslakIface} onChange={(e) => setTaslakIface(e.target.value)}
                   placeholder="pub0" spellCheck={false}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">CIDR</label>
                 <input type="number" value={taslakCidr} onChange={(e) => setTaslakCidr(Number(e.target.value))}
                   min={1} max={32}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Açıklama")}</label>
                 <input value={taslakNot} onChange={(e) => setTaslakNot(e.target.value)}
                   placeholder={cevir("ör. mail dış IP havuzu")} maxLength={255}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100" />
               </div>
               <div className="flex items-end">
-                <button type="submit" disabled={gonderiliyor || !taslakIP.trim()}
-                  className="h-[38px] rounded-lg bg-slate-900 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+                <Button type="submit" color="primary" disabled={gonderiliyor || !taslakIP.trim()}
+                  className="h-[38px] px-4 text-sm">
                   {gonderiliyor ? cevir("Ekleniyor…") : cevir("Ekle")}
-                </button>
+                </Button>
               </div>
             </div>
             {ekleHata && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{ekleHata}</p>}
           </form>
 
           {/* Sunucu IP tablosu — TÜM IP'ler; renk kodları rolleri gösterir */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-dark-600">
             <div className="overflow-x-auto">
               <table className="min-w-[720px] w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
                   <tr>
                     <th className="px-3 py-3 font-semibold">IP</th>
                     <th className="px-3 py-3 font-semibold">{cevir("Arayüz / CIDR")}</th>
@@ -184,9 +192,9 @@ export default function IPYonetimPage() {
                     <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                   {liste.sunucu_ipler.map((s) => (
-                    <tr key={s.ip} className="bg-white dark:bg-slate-950">
+                    <tr key={s.ip} className="bg-white dark:bg-dark-900">
                       <td className="px-3 py-2.5 font-mono">{s.ip}</td>
                       <td className="px-3 py-2.5 font-mono text-slate-600 dark:text-slate-400">{s.iface} / {s.cidr}</td>
                       <td className="px-3 py-2.5">
@@ -195,16 +203,16 @@ export default function IPYonetimPage() {
                         ) : s.panel_ip ? (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">panel</span>
                         ) : (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">{cevir("kullanıcı")}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-dark-700 dark:text-slate-300">{cevir("kullanıcı")}</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{s.label || '—'}</td>
                       <td className="px-3 py-2.5 text-right">
                         {s.silinebilir ? (
-                          <button onClick={() => sil(s)}
-                            className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
+                          <Button color="error" variant="flat" onClick={() => sil(s)}
+                            className="px-2.5 py-1 text-xs">
                             {cevir("Sil")}
-                          </button>
+                          </Button>
                         ) : (
                           <span className="text-xs text-slate-400" title={s.primary_mi ? cevir("Primary IP silinemez") : cevir("Panel ekletmediği için silinemez")}>{cevir("silinemez")}</span>
                         )}

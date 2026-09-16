@@ -332,8 +332,6 @@ func rotateYedekler() {
 }
 
 var (
-	// Multi-verify #7 fix — whitespace-agnostic proxy_pass regex
-	reProxyPassPort = regexp.MustCompile(`(proxy_pass\s+http://127\.0\.0\.1:)(\d+)(\s*;)`)
 	// Multi-verify #8 fix — optional [IP:] prefix
 	reListenV4 = regexp.MustCompile(`(?m)^(\s*listen\s+(?:\d+\.\d+\.\d+\.\d+:)?)(\d+)(\s+ssl\b)`)
 	reListenV6 = regexp.MustCompile(`(?m)^(\s*listen\s+(?:\[[0-9a-fA-F:]+\]|\[::\]):)(\d+)(\s+ssl\b)`)

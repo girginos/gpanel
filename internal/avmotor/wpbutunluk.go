@@ -16,7 +16,7 @@ package avmotor
 // binlerce paket). Oraya kural motoru + konum sezgileri bakar.
 
 import (
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // G501: WordPress dosya-butunluk checksum (WP.org MD5 yayinlar) — guvenlik hash'i degil
 	"encoding/hex"
 	"io"
 	"os"
@@ -72,7 +72,7 @@ func wpButunlukKontrol(yol, wpKok string, kaynak SaglamaKaynagi) (string, int, b
 			return "", 0, false
 		}
 		defer f.Close()
-		h := md5.New()
+		h := md5.New() //nolint:gosec // G401: WP butunluk-checksum karsilastirmasi (guvenlik hash'i degil)
 		if _, err := io.Copy(h, f); err != nil {
 			return "", 0, false
 		}

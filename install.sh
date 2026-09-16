@@ -14,7 +14,7 @@ c_b="\033[1;34m"; c_g="\033[32m"; c_r="\033[31m"; c_0="\033[0m"
 
 [ "$(id -u)" = 0 ] || { echo -e "${c_r}✗ root required:  curl ... | sudo bash${c_0}"; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo -e "${c_r}✗ curl required${c_0}"; exit 1; }
-command -v tar  >/dev/null 2>&1 || { echo -e "${c_r}✗ tar required${c_0}"; exit 1; }
+command -v tar  >/dev/null 2>&1 || dnf install -y tar >/dev/null 2>&1 || { echo -e "${c_r}✗ tar kurulamadi${c_0}"; exit 1; }
 
 echo -e "${c_b}══ Downloading GirginOSPanel (github.com/$REPO) ══${c_0}"
 TMP=$(mktemp -d)

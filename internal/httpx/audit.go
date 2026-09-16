@@ -3,6 +3,7 @@ package httpx
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -32,10 +33,12 @@ func Denetim(db *sql.DB, r *http.Request, uid int64, kullanici, eylem, hedef, de
 	if basarili {
 		ok = 1
 	}
-	_, _ = db.Exec(
+	if _, err := db.Exec(
 		`INSERT INTO audit_log(actor_user_id, actor_username, ip, action, target, detail, ok, reseller_id)
 		 VALUES(?,?,?,?,?,?,?,?)`,
-		uidVal, kullanici, DenetimIP(r), eylem, hedef, detayVal, ok, kapsam)
+		uidVal, kullanici, DenetimIP(r), eylem, hedef, detayVal, ok, kapsam); err != nil {
+		log.Printf("denetim: audit_log yazılamadı (eylem=%s hedef=%s): %v", eylem, hedef, err)
+	}
 }
 
 // DenetimDomain: kapsami domainin sahibinden (domains.reseller_id) cozer.

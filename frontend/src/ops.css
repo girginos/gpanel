@@ -1,0 +1,108 @@
+/* OPS paneli — Grafana benzeri operasyon gorunumu.
+   BAGIMSIZ modul: kendi token'lari, kendi grid'i. `.gp-dash` (pano) ile hicbir
+   kurali paylasmaz; birinde yapilan degisiklik otekini ETKILEMEZ. */
+
+.gp-ops {
+  --ops-bg: #0b0f16;
+  --ops-panel: #131a24;
+  --ops-line: rgba(255, 255, 255, .07);
+  --ops-text: #d8e2f0;
+  --ops-dim: #6b7c92;
+  --ops-ok: #10b981;
+  --ops-warn: #f59e0b;
+  --ops-crit: #f43f5e;
+
+  background: var(--ops-bg);
+  color: var(--ops-text);
+  padding: 14px;
+  min-height: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.gp-ops *, .gp-ops *::before, .gp-ops *::after { box-sizing: border-box; }
+.gp-ops button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+
+/* ── araç çubuğu ── */
+.gp-ops .ops-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--ops-panel); border: 1px solid var(--ops-line); border-radius: 10px;
+}
+.gp-ops .ops-bar-sep { flex: 1; }
+.gp-ops .ops-label { font-size: 11px; color: var(--ops-dim); }
+.gp-ops .ops-pills { display: flex; gap: 3px; background: #0b1119; border: 1px solid var(--ops-line); border-radius: 8px; padding: 3px; }
+.gp-ops .ops-pills button {
+  background: transparent; color: var(--ops-dim);
+  font-size: 12px; padding: 5px 11px; border-radius: 6px; transition: background .12s, color .12s;
+}
+.gp-ops .ops-pills button:hover { color: var(--ops-text); background: rgba(255,255,255,.04); }
+.gp-ops .ops-pills button[aria-pressed="true"] { background: #1d4ed8; color: #fff; }
+.gp-ops .ops-select {
+  background: #0b1119; border: 1px solid var(--ops-line); color: var(--ops-text);
+  font-size: 12px; padding: 6px 9px; border-radius: 8px;
+}
+.gp-ops .ops-canli { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ops-dim); }
+.gp-ops .ops-canli i { width: 7px; height: 7px; border-radius: 50%; background: var(--ops-ok); box-shadow: 0 0 8px var(--ops-ok); }
+.gp-ops .ops-canli.duruk i { background: var(--ops-dim); box-shadow: none; }
+
+/* ── tek-değer kutuları ── */
+.gp-ops .ops-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.gp-ops .ops-stat {
+  background: var(--ops-panel); border: 1px solid var(--ops-line); border-radius: 10px;
+  padding: 12px 13px; position: relative; overflow: hidden;
+}
+/* Sol kenardaki esik seridi: renk TEK BASINA anlam tasimasin diye deger
+   metninde de ayni renk kullanilir (renk korlugu icin). */
+.gp-ops .ops-stat::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--d, var(--ops-dim)); }
+.gp-ops .ops-stat h4 { margin: 0; font-size: 11px; font-weight: 500; color: var(--ops-dim); display: flex; align-items: center; gap: 6px; }
+.gp-ops .ops-stat h4 svg { width: 14px; height: 14px; }
+.gp-ops .ops-stat b { display: block; margin-top: 6px; font-size: 22px; font-weight: 600; letter-spacing: -.5px; color: var(--d, var(--ops-text)); }
+.gp-ops .ops-stat small { display: block; margin-top: 2px; font-size: 10px; color: var(--ops-dim); }
+
+/* ── panel ızgarası ── */
+.gp-ops .ops-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.gp-ops .ops-panel { background: var(--ops-panel); border: 1px solid var(--ops-line); border-radius: 10px; overflow: hidden; }
+.gp-ops .ops-panel.genis { grid-column: 1 / -1; }
+.gp-ops .ops-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 13px; border-bottom: 1px solid var(--ops-line);
+}
+.gp-ops .ops-head h3 { margin: 0; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 7px; color: var(--ops-text); }
+.gp-ops .ops-head h3 svg { width: 15px; height: 15px; color: #60a5fa; }
+.gp-ops .ops-head span { font-size: 10px; color: var(--ops-dim); }
+.gp-ops .ops-chart { height: 190px; padding: 10px 8px 4px 0; }
+.gp-ops .ops-chart.kisa { height: 150px; }
+
+/* ── Grafana tarzı tablo lejant: seri | min | max | ort | son ── */
+.gp-ops .ops-legend { border-top: 1px solid var(--ops-line); font-size: 10px; }
+.gp-ops .ops-legend table { width: 100%; border-collapse: collapse; }
+.gp-ops .ops-legend th {
+  text-align: right; font-weight: 500; color: var(--ops-dim);
+  padding: 5px 10px; border-bottom: 1px solid var(--ops-line);
+}
+.gp-ops .ops-legend th:first-child { text-align: left; }
+.gp-ops .ops-legend td { text-align: right; padding: 4px 10px; color: var(--ops-text); }
+.gp-ops .ops-legend td:first-child { text-align: left; color: var(--ops-dim); display: flex; align-items: center; gap: 6px; }
+.gp-ops .ops-legend i { width: 8px; height: 2px; border-radius: 2px; flex: none; }
+.gp-ops .ops-legend tr:hover td { background: rgba(255,255,255,.025); }
+
+/* ── boş / bekleme durumu ── */
+.gp-ops .ops-bos {
+  display: flex; align-items: center; justify-content: center;
+  height: 190px; font-size: 11px; color: var(--ops-dim); text-align: center; padding: 0 20px;
+}
+
+/* ── ipucu kutusu ── */
+.gp-ops .ops-tip {
+  background: #0b1119; border: 1px solid var(--ops-line); border-radius: 8px;
+  padding: 8px 10px; font-size: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.gp-ops .ops-tip strong { display: block; color: var(--ops-dim); font-weight: 500; font-size: 10px; margin-bottom: 4px; }
+.gp-ops .ops-tip div { display: flex; align-items: center; gap: 7px; }
+.gp-ops .ops-tip div + div { margin-top: 3px; }
+.gp-ops .ops-tip i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.gp-ops .ops-tip b { margin-left: auto; font-weight: 600; }
+
+/* ── duyarlı ── */
+@media (max-width: 1280px) { .gp-ops .ops-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px)  { .gp-ops .ops-grid { grid-template-columns: 1fr; } .gp-ops .ops-panel.genis { grid-column: auto; } }
+@media (max-width: 560px)  { .gp-ops .ops-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gp-ops { padding: 10px; } }

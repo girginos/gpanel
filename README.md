@@ -29,7 +29,7 @@ Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giri
 | Bileşen | Detay |
 |---|---|
 | **Web** | nginx (panel :8443 + müşteri siteleri :80/:443) |
-| **PHP** | 7.4 / 8.2 / 8.3 / 8.4 / 8.5 (remi) — her domain bağımsız sürüm seçer, per-domain FPM havuzu |
+| **PHP** | 7.4 / 8.0 / 8.1 / 8.2 / 8.3 / 8.4 / 8.5 (remi, 7 sürüm) — her domain bağımsız sürüm seçer, per-domain FPM havuzu |
 | **Veritabanı** | MariaDB 10.11 (`panel` DB) + phpMyAdmin (`/pma/`) |
 | **Cache** | Valkey (Redis) — per-tenant izole object cache (WordPress'e otomatik bağlanır) |
 | **Güvenlik** | nftables güvenlik duvarı, SELinux uyumlu, ClamAV |
@@ -47,7 +47,7 @@ Kurulum ~5-10 dakika sürer (paket indirmeleri). Bittiğinde panel adresi + giri
 ## Sistem gereksinimleri
 
 - **AlmaLinux 10** (RHEL 10 / Rocky 10 de çalışır)
-- En az **2 GB RAM**, 2 vCPU (5 PHP sürümü + MariaDB + Valkey için)
+- En az **2 GB RAM**, 2 vCPU (7 PHP sürümü + MariaDB + Valkey için)
 - Root erişimi + internet bağlantısı
 
 ## Kurulum sonrası yardımcı araçlar

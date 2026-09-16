@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Breadcrumb from '@/components/Breadcrumb'
+import LisansAskida from '@/components/LisansAskida'
+import { useEklentiAktif } from '@/lib/eklenti'
 import MailGenelAyarPage from './MailGenelAyarPage'
 import MailIPHavuzuPage from './MailIPHavuzuPage'
 import MailFiltrePage from './MailFiltrePage'
@@ -36,6 +38,10 @@ function normalize(v: string | null): Sekme | null {
 export default function MailSunucuPage() {
   useTranslation() // dil re-render aboneligi
   const [sp, setSp] = useSearchParams()
+  // 🔴 Mail lisansi askidaysa YONETIM YERINE landing goster (kullanici
+  // yonetemesin). Gercek engel server-side'dir (mail proxy'si aktif=0 => 402);
+  // bu ekran sekme kaybolmak yerine neden'i + yenileme yolunu verir.
+  const mailAktif = useEklentiAktif('mail')
   // Sekme kaynağı önceliği: URL ?sekme → localStorage → varsayılan 'genel'.
   const kayitli = typeof localStorage !== 'undefined' ? localStorage.getItem(KEY) : null
   const sekme: Sekme = normalize(sp.get('sekme')) ?? normalize(kayitli) ?? 'genel'
@@ -53,6 +59,8 @@ export default function MailSunucuPage() {
     setSp({ sekme: k }, { replace: true })
   }
 
+  if (mailAktif === false) return <LisansAskida baslik={cevir('Mail Sunucu')} />
+
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Sunucu Yönetimi") }, { etiket: cevir("Mail Sunucu") }]} />
@@ -60,7 +68,7 @@ export default function MailSunucuPage() {
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{cevir("Sunucu geneli mail ayarları ve giden IP havuzu — tek yerden yönetin.")}</p>
 
       {/* segment sekmeler */}
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700 mb-5" role="tablist" aria-label={cevir("Mail sunucu sekmeleri")}>
+      <div className="flex gap-1 border-b border-slate-200 dark:border-dark-600 mb-5" role="tablist" aria-label={cevir("Mail sunucu sekmeleri")}>
         {SEKMELER.map(s => {
           const aktif = sekme === s.k
           return (

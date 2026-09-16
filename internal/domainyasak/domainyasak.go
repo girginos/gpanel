@@ -61,10 +61,11 @@ func Init(d *sql.DB) error {
 //     match_subdomains=true ise → yasak
 //
 // Örnek liste = { "sahibinden.com" (match_subdomains=true) }:
-//   sahibinden.com          → yasak (exact)
-//   login.sahibinden.com    → yasak (subdomain match)
-//   x.login.sahibinden.com  → yasak (nested subdomain match)
-//   sahibindenmadam.com     → SERBEST (substring değil, sadece domain eşleşmesi)
+//
+//	sahibinden.com          → yasak (exact)
+//	login.sahibinden.com    → yasak (subdomain match)
+//	x.login.sahibinden.com  → yasak (nested subdomain match)
+//	sahibindenmadam.com     → SERBEST (substring değil, sadece domain eşleşmesi)
 func Yasakli(hostname string) (bool, string) {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if hostname == "" {

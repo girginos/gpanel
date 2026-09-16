@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 🔴 internal/lisans/ (lisans koruması) ve ona TRANSİTİF bağımlı cmd/server ·
+# internal/eklenti · cmd/eklenti-kur · cmd/gosp-baslatici · cmd/gosp-paketle KASITLI
+# olarak public repoda YOK (.gitignore). Temiz checkout'ta `go build ./...` çözülemez.
+# CI, lisans-bağımsız paketleri (güvenlik/kod-kalitesi düzeltmelerinin %95'i internal/*)
+# kapılardan geçirir; lisans-bağımlı wiring canlı/deploy'da (lisans mevcut) doğrulanır.
+
+jobs:
+  go:
+    name: Go — cfg · vet · build · race · vuln · lint · sec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # --- BLOKLAYAN KAPILAR (lisans-bağımsız paketler; inline filtre) ---
+      - name: config-check (YAML/JSON · migration sırası · go mod verify)
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check pyyaml || pip3 install --quiet pyyaml
+          go mod download
+          bash scripts/config-check.sh
+
+      - name: gofmt (format)
+        run: |
+          diff=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$diff" ]; then echo "gofmt gerekli:"; echo "$diff"; exit 1; fi
+
+      - name: go vet
+        run: go vet $(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$')
+
+      - name: go build
+        run: go build $(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$')
+
+      - name: go test -race -cover
+        # concurrent-map-writes gibi yarışları yakalar (toolkit.go bug'ı bu kapıyla kaçmıştı);
+        # -cover paket-bazlı kapsam raporlar (make cover ile toplam yüzde).
+        run: go test -race -cover $(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$')
+
+      - name: govulncheck (CVE)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)"/bin/govulncheck $(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$')
+
+      # --- UYARI KAPILARI (build'i kırmaz; backlog eritildikçe bloklayana çevrilir) ---
+      - name: golangci-lint (lint · sec — UYARI)
+        continue-on-error: true
+        # 🔴 Ön-derlenmiş binary go1.26 kodunu reddedebilir → job'ın kendi go'suyla derle.
+        # 🔴 Tam import-path 'directory not found' verir → ./ göreli desene çevir.
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+          BIN="$(go env GOPATH)/bin/golangci-lint"; "$BIN" version
+          PKGS=$(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$' | sed -e 's#^girginospanel/#./#' -e 's#^girginospanel$#.#')
+          "$BIN" run --timeout=10m $PKGS || true
+
+      - name: staticcheck
+        continue-on-error: true
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)"/bin/staticcheck $(go list -e ./... | grep -vE '/(cmd/server|cmd/eklenti-kur|cmd/gosp-baslatici|cmd/gosp-paketle|internal/eklenti|internal/lisans)$') || true
+
+      - name: gosec (HIGH/HIGH)
+        continue-on-error: true
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          "$(go env GOPATH)"/bin/gosec -quiet -severity high -confidence high ./... || true
+
+  secret-scan:
+    name: Secret scan — gitleaks (BLOKLAYAN)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git-geçmişi taraması için TAM geçmiş şart
+      - name: gitleaks kur (pinned + checksum)
+        run: |
+          set -euo pipefail
+          VER=8.30.1; cd /tmp
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VER}"
+          curl -fsSL -o gl.tar.gz   "${BASE}/gitleaks_${VER}_linux_x64.tar.gz"
+          curl -fsSL -o gl_sums.txt "${BASE}/gitleaks_${VER}_checksums.txt"
+          want=$(grep "linux_x64.tar.gz" gl_sums.txt | awk '{print $1}')
+          got=$(sha256sum gl.tar.gz | awk '{print $1}')
+          [ "$want" = "$got" ] || { echo "gitleaks checksum FAIL"; exit 1; }
+          tar -xzf gl.tar.gz gitleaks && sudo install -m0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: gitleaks — çalışma ağacı
+        run: gitleaks detect --source . --config .gitleaks.toml --no-git --redact -v --exit-code 1
+      - name: gitleaks — git geçmişi
+        run: gitleaks detect --source . --config .gitleaks.toml --redact -v --exit-code 1
+
+  migrations:
+    name: DB — migration temiz-kurulum + idempotency (BLOKLAYAN)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: mariadb-client kur
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+      - name: migrate-test (scratch DB — canlı DB'ye dokunmaz)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: "3306"
+          DB_USER: root
+          MYSQL_PWD: root
+        run: bash scripts/migrate-test.sh
+
+  frontend:
+    name: Frontend — tsc · eslint · audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+      - name: tsc build
+        working-directory: frontend
+        run: npm run build
+      - name: eslint (UYARI)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm run lint
+      - name: npm audit (prod — BLOKLAYAN high/critical)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high

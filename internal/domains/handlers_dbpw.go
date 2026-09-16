@@ -36,7 +36,8 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Parola == "" {
-		req.Parola = hesaplar.RandomParola(24)
+		httpx.WriteError(w, http.StatusBadRequest, "yeni parola gerekli")
+		return
 	}
 	// 🔴 Kullanici, BASKA bir satirin ciphertext'ini parola olarak yazamaz:
 	// aksi halde deger sonra cozulup okunarak sifre-cozme oracle'i olusuyordu.
@@ -121,7 +122,6 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		"dbid":         dbid,
 		"db_adi":       dbName,
 		"db_kullanici": dbUser,
-		"db_parola":    req.Parola,
 	})
 }
 

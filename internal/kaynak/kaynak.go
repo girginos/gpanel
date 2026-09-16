@@ -4,6 +4,7 @@ package kaynak
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -126,21 +127,47 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 
 	// Disk kullanım
 	home := "/home/" + o.SK
-	o.DiskMB.Kullanim = duMB(home)
-	_, _ = h.DB.ExecContext(ctx, `UPDATE domains SET boyut_kb=? WHERE id=?`, o.DiskMB.Kullanim*1024, id)
 	o.DiskMB.Limit = diskKota
-	// XFS user quota AKTİF ise gerçek disk kullanım/limit + inode kullanım/limit oradan (du'dan
-	// daha doğru + inode dahil). noquota'da KotaDurum 0 döner → du-tabanlı değerler korunur.
-	if kMB, klimMB, kIno, klimIno := kaynaklimit.KotaDurum(o.SK); klimMB > 0 || klimIno > 0 {
-		if kMB > 0 {
-			o.DiskMB.Kullanim = int64(kMB)
-		}
+
+	// ─── KOTA ÖNCE, `du` YALNIZCA GERİ DÜŞÜŞ ───────────────────────────────
+	//
+	// 🔴 ÖLÇÜLMÜŞ İSRAF: önceki sıra `du -sm` ile başlıyordu ve sonucu hemen
+	// ardından gelen kota değeriyle EZİYORDU. Yani her istek, sonucu atılacak
+	// bir dizin taraması yapıyordu:
+	//
+	//	du -sm /home/c_test_com     1985 ms
+	//	du -sm /home/c_kaan_com     1559 ms
+	//	du -sm /home/c_cageb_local   757 ms
+	//	quota -us <kiracı>             5 ms   ← aynı bilgi, üstelik daha doğru
+	//
+	// Domain detay sayfası `/kaynak`'ı İKİ ayrı bileşenden çağırıyor (sağdaki
+	// kaynak kartı ve istatistik kutusundaki "Disk alanı"), yani bedel iki kat
+	// ödeniyordu. Kullanıcı bunu "sağ bar bekliyor, sayfada yavaşlık var"
+	// olarak bildirdi ve haklıydı: kart, sonucu kullanılmayacak bir taramanın
+	// bitmesini bekliyordu.
+	//
+	// Kota AKTİF olduğunda `du`'ya hiç gerek yok — kota çekirdek tarafından
+	// zaten sayılır ve dosya (inode) sayısını da verir. `du` yalnız kotanın
+	// kapalı olduğu kurulumlarda çalışır; orada da doğru davranış odur.
+	kMB, klimMB, kIno, klimIno := kaynaklimit.KotaDurum(o.SK)
+	if klimMB > 0 || klimIno > 0 {
+		o.InodeKullanim = int64(kIno)
+		o.InodeLimit = int64(klimIno)
 		if klimMB > 0 {
 			o.DiskMB.Limit = int64(klimMB)
 		}
-		o.InodeKullanim = int64(kIno)
-		o.InodeLimit = int64(klimIno)
+		if kMB > 0 {
+			o.DiskMB.Kullanim = int64(kMB)
+		} else {
+			// Kota "0 kullanım" diyorsa ev gerçekten boş olabilir; yine de
+			// doğrulanır. Boş bir dizinde `du` zaten anlıktır.
+			o.DiskMB.Kullanim = duMB(home)
+		}
+	} else {
+		// Kota kapalı: tek kaynak `du`.
+		o.DiskMB.Kullanim = duMB(home)
 	}
+	_, _ = h.DB.ExecContext(ctx, `UPDATE domains SET boyut_kb=? WHERE id=?`, o.DiskMB.Kullanim*1024, id)
 
 	// Trafik: domains.trafik_kb (KB → MB)
 	var trafikKB int64
@@ -190,9 +217,15 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Yedek sayısı + toplam boyut
-	_ = h.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(SUM(boyut),0) FROM backups WHERE domain_id=?`, id).
-		Scan(&o.YedekSayisi, &o.YedekMB)
+	// 🔴 Kolon adi `boyut` DEGIL `boyut_b` (migrations/0008_accounts_backups.sql).
+	// Yanlis kolon "Unknown column" hatasi veriyor, hata da `_ =` ile yutuluyordu:
+	// panodaki yedek sayaclari KALICI 0 kaliyordu. Ayni sinif hata bir daha sessiz
+	// kalmasin diye hata artik loglaniyor.
+	if qerr := h.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(boyut_b),0) FROM backups WHERE domain_id=?`, id).
+		Scan(&o.YedekSayisi, &o.YedekMB); qerr != nil {
+		log.Printf("kaynak: yedek sayaci sorgusu basarisiz (domain=%d): %v", id, qerr)
+	}
 	o.YedekMB = o.YedekMB / (1024 * 1024) // byte → MB
 
 	// DB total MB (kullanim göstergesi için DiskMB.Kullanim'a EKLEME — ayrı tutalim)

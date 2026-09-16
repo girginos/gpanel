@@ -37,7 +37,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache"
+DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -435,6 +435,96 @@ sec_nginx_cache() {
   fi
 }
 
+sec_eklenti_runtime() {
+  want eklenti_runtime || return 0
+  head_ "eklenti soketleri ve marka dizini"
+  # 🔴 IKI AYRI KUSUR, AYNI BELIRTI: panelde "Bu modul su an hazirlaniyor".
+  #
+  # (a) Butun `girginospanel-eklenti-*` birimleri `RuntimeDirectory=girginospanel`
+  #     tanimliyor. systemd bu dizini birim DURUNCA siler; bir eklentiyi
+  #     yeniden baslatmak DIGER eklentilerin soketlerini de siliyor. O
+  #     surecler yasamaya devam ediyor ama artik erisilemezler.
+  #     Duzeltme: her birime `RuntimeDirectoryPreserve=yes` drop-in'i.
+  #
+  # (b) Whitelabel birimi `ReadWritePaths=-/opt/girginospanel/marka` diyor.
+  #     Bastaki `-`, yol YOKSA onu sessizce atlar; dizin olusturulmadan
+  #     servis baslarsa marka kaydetme "read-only file system" ile duser.
+  #     Duzeltme: dizini VAR ET (birim disinda, namespace'e girmeden).
+  local d=/opt/girginospanel/marka
+  if [ ! -d "$d" ]; then
+    install -d -m 0755 -o root -g root "$d" && ok "marka dizini olusturuldu ($d)" \
+      || warn "marka dizini olusturulamadi ($d)"
+  else
+    ok "marka dizini var ($d)"
+  fi
+
+  local birim degisti=0
+  for birim in $(systemctl list-unit-files --no-legend "girginospanel-eklenti-*.service" 2>/dev/null | awk "{print \$1}"); do
+    [ -n "$birim" ] || continue
+    if [ "$(systemctl show -p RuntimeDirectoryPreserve --value "$birim" 2>/dev/null)" = "yes" ]; then
+      continue
+    fi
+    local dd="/etc/systemd/system/${birim}.d"
+    install -d -m 0755 "$dd" 2>/dev/null || continue
+    printf "[Service]\nRuntimeDirectoryPreserve=yes\n" > "$dd/20-gosp-runtime.conf" \
+      && { ok "$birim: RuntimeDirectoryPreserve=yes"; degisti=1; } \
+      || warn "$birim: drop-in yazilamadi"
+  done
+  if [ "$degisti" = "1" ]; then
+    systemctl daemon-reload 2>/dev/null && ok "daemon-reload"
+    # 🔴 Soketi ZATEN silinmis olan eklentiler yeniden baslatilmali; preserve
+    # yalnizca BUNDAN SONRA silinmesini onler, kayip soketi geri getirmez.
+    for birim in $(systemctl list-unit-files --no-legend "girginospanel-eklenti-*.service" 2>/dev/null | awk "{print \$1}"); do
+      local ad="${birim#girginospanel-eklenti-}"; ad="${ad%.service}"
+      local sk="/run/girginospanel/eklenti-${ad}.sock"
+      if [ "$(systemctl is-active "$birim" 2>/dev/null)" = "active" ] && [ ! -S "$sk" ]; then
+        systemctl restart "$birim" 2>/dev/null && ok "$ad: soket yoktu, servis yeniden baslatildi" \
+          || warn "$ad: yeniden baslatilamadi"
+      fi
+    done
+  else
+    ok "tum eklenti birimlerinde preserve zaten acik"
+  fi
+}
+
+sec_env_izin() {
+  want env_izin || return 0
+  head_ "panel env dosyasi izni (/etc/girginospanel/env)"
+  # 🔴🔴 BU DOSYA HERKESE OKUNUR OLABILIR ve icinde PANEL_JWT_SECRET,
+  # PANEL_DB_DSN (DB parolasi) ve PANEL_REDIS_ADMIN_PASS var.
+  #
+  # Kurucu artik `chmod 600` yapiyor ama o satir sonradan eklendi: daha eski
+  # bir surumle kurulmus her panelde dosya `0644` kalmis olabilir. Olculdu
+  # (.181): gercek bir kiraci sistem kullanicisi dosyayi OKUYABILIYORDU.
+  #
+  # Etki, yedeklerle sinirli degil: JWT sirrini okuyan bir kiraci `rol=admin`
+  # jetonu uretip panelin TUM yetki denetimini baypas edebilir. /proc
+  # hidepid'siz bagli oldugu icin surec ortamindan da okunabiliyordu.
+  local f=/etc/girginospanel/env
+  [ -f "$f" ] || { ok "env dosyasi yok (kurulum eksik?)"; return 0; }
+  local mod sahip
+  mod="$(stat -c %a "$f" 2>/dev/null)"
+  sahip="$(stat -c %U:%G "$f" 2>/dev/null)"
+  if [ "$mod" = "600" ] && [ "$sahip" = "root:root" ]; then
+    ok "izin zaten dogru ($mod $sahip)"
+    return 0
+  fi
+  warn "env dosyasi $mod $sahip — SIR SIZINTISI (JWT/DB/Redis parolalari)"
+  if [ "$DRY" = "1" ]; then
+    echo "    [kuru] chmod 600 + chown root:root $f"
+    return 0
+  fi
+  chown root:root "$f" 2>/dev/null
+  chmod 600 "$f" 2>/dev/null
+  # Yedek kopyalar da ayni siri tasir.
+  for y in "$f".* ; do
+    [ -f "$y" ] || continue
+    chown root:root "$y" 2>/dev/null; chmod 600 "$y" 2>/dev/null
+  done
+  FIXN=$((FIXN+1))
+  ok "duzeltildi: $(stat -c '%a %U:%G' "$f")"
+}
+
 sec_backup_cron() {
   want backup_cron || return 0
   head_ "kacak yedek cron'u (girginospanel-backup-all)"
@@ -532,6 +622,8 @@ SIEVEEOF
 
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
+sec_env_izin
+sec_eklenti_runtime
 sec_phpmyadmin
 sec_docroot_selinux
 sec_migrations

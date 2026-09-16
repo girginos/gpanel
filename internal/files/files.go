@@ -372,6 +372,7 @@ func (h *Handlers) Upload(w http.ResponseWriter, r *http.Request) {
 	// diski korur; sınır aşılınca okuma *http.MaxBytesError döner.
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBytes)
 	// maxMemory küçük → gövde RAM yerine geçici diske taşar (RAM DoS engellenir).
+	// #nosec G120 -- gövde üstteki MaxBytesReader ile MaxUploadBytes'a (2 GiB) sınırlı; ParseMultipartForm bundan fazlasını belleğe/diske alamaz. Taint analizi MaxBytesReader'ı tanımadığı için yanlış-pozitif.
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) || strings.Contains(err.Error(), "too large") {
@@ -461,17 +462,6 @@ func statusFromErr(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
-}
-
-// chown helper — dosyayı domain user'ına ata + SELinux context'ini düzelt (restorecon).
-// restorecon ŞART: panel root olarak çalışır; oluşturduğu/değiştirdiği dosya doğru
-// SELinux context'i (httpd_sys_content_t) almazsa nginx/php-fpm erişemez ve
-// "dosya izinleri bozuldu" gibi görünür (SELinux Enforcing sunucularda).
-func chown(path, sistemKullanici string) {
-	if uu, err := userLookup(sistemKullanici); err == nil {
-		_ = osChown(path, uu.UID, uu.GID)
-	}
-	_, _ = exec.Command("restorecon", path).CombinedOutput()
 }
 
 // uploadKotaYeterli: tenant'in XFS kotasinda ekBayt icin yer var mi? xfs_quota'dan used/hard

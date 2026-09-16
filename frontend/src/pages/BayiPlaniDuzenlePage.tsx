@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Paket = {
   id?: number; ad: string; aciklama: string
@@ -28,12 +30,13 @@ const BOS: Paket = {
   asim_ilkesi: 'disk_trafik', asim_bildirim: true, fazla_satis: false, varsayilan: false,
 }
 
-const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
+const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
 
 
 const BPDUZ_EN: Record<string, string> = {
   "Türkçe": "English",
   "Kaydedilemedi": "Could not save",
+  "İşlem başarısız": "Operation failed",
   "Yeni plan": "New plan",
   "Yeni Bayi Planı": "New Reseller Plan",
   "Bayiye satılan kaynak paketi: limitler, aşım ve fazla satma ilkeleri.": "Resource package sold to the reseller: limits, overage and overselling policies.",
@@ -87,27 +90,36 @@ export default function BayiPlaniDuzenlePage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const nav = useNavigate()
+  const toast = useToast()
   const yeni = !id || id === 'yeni'
   const [p, setP] = useState<Paket>(BOS)
   const [yuk, setYuk] = useState(!yeni)
-  const [hata, setHata] = useState<string | null>(null)
+  // Hata artik sag ust toast'ta gosterilir; state mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
   const [kaydediyor, setKaydediyor] = useState(false)
   // Mail eklentisi aktifse posta tavani alanlari gorunur (ayni kapi).
   const [mailAktif, setMailAktif] = useState(false)
 
   useEffect(() => {
+    let iptal = false
     // 🔴 mailAktif YENİ planda da gerekli: eski kod `if (yeni) return`'i eklenti
     // kontrolünden ÖNCE yapıyordu → yeni bayi planı oluştururken mail bölümü hiç
     // görünmüyordu (mailAktif false kalıyordu). Eklenti kontrolü HER ZAMAN çalışır;
     // yalnız mevcut planı yükleme (yeni değilken) atlanır.
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
-      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
-      .catch(() => setMailAktif(false))
-    if (yeni) return
+      .then(r => { if (iptal) return; setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)) })
+      .catch(() => { if (!iptal) setMailAktif(false) })
+    if (yeni) return () => { iptal = true }
     api.get<Paket>(`/reseller-plans/${id}`)
-      .then(r => setP(r.data))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (iptal) return; setP(r.data) })
+      .catch(e => {
+        if (iptal) return
+        const m = apiHata(e)
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
+      .finally(() => { if (!iptal) setYuk(false) })
+    return () => { iptal = true }
   }, [id, yeni])
 
   function S<K extends keyof Paket>(k: K, v: Paket[K]) { setP({ ...p, [k]: v }) }
@@ -120,12 +132,14 @@ export default function BayiPlaniDuzenlePage() {
       else await api.put(`/reseller-plans/${id}`, p)
       nav('/bayi-planlari')
     } catch (err) {
-      setHata(apiHata(err, cevir('Kaydedilemedi')))
+      const m = apiHata(err, cevir('Kaydedilemedi'))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
       setKaydediyor(false)
     }
   }
 
-  if (yuk) return <div className="px-4 py-6 sm:px-6"><div className="h-64 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" /></div>
+  if (yuk) return <div className="px-4 py-6 sm:px-6"><div className="h-64 rounded-lg bg-slate-100 dark:bg-dark-700 animate-pulse" /></div>
 
   return (
     <form onSubmit={kaydet} className="px-4 py-4 sm:px-6 sm:py-5 max-w-4xl">
@@ -141,13 +155,11 @@ export default function BayiPlaniDuzenlePage() {
           </p>
         </div>
         {!yeni && !!p.bayi_sayisi && (
-          <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
+          <span className="rounded-md bg-slate-100 dark:bg-dark-700 px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
             {p.bayi_sayisi} {cevir("bayi kullanıyor")}
           </span>
         )}
       </div>
-
-      {hata && <div role="alert" className="mb-4 text-sm rounded-md border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 px-3 py-2">{hata}</div>}
 
       <div className="space-y-5">
         <Bolum baslik={cevir("Tanım")}>
@@ -258,12 +270,12 @@ export default function BayiPlaniDuzenlePage() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        <button type="submit" disabled={kaydediyor}
-                className="inline-flex items-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+        <Button color="primary" type="submit" disabled={kaydediyor}
+                className="px-4 py-2 text-sm">
           {kaydediyor ? cevir('Kaydediliyor…') : yeni ? cevir('Planı oluştur') : cevir('Kaydet')}
-        </button>
+        </Button>
         <Link to="/bayi-planlari"
-              className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+              className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-700">
           {cevir("İptal")}
         </Link>
       </div>
@@ -273,7 +285,7 @@ export default function BayiPlaniDuzenlePage() {
 
 function Bolum({ baslik, alt, children }: { baslik: string; alt?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+    <section className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800 p-4">
       <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{baslik}</h2>
       {alt && <p className="mt-0.5 mb-3 text-xs text-slate-500 dark:text-slate-400 max-w-2xl">{alt}</p>}
       <div className={alt ? '' : 'mt-3'}>{children}</div>
@@ -298,7 +310,7 @@ function Secenek({ secili, onSec, baslik, aciklama }: { secili: boolean; onSec: 
     <label className={`flex gap-3 rounded-lg border p-3 cursor-pointer transition ${
       secili
         ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-950/20'
-        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+        : 'border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:hover:bg-dark-700/60'
     }`}>
       <input type="radio" checked={secili} onChange={onSec} className="mt-0.5 shrink-0" />
       <span>

@@ -3,6 +3,8 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Ayar = {
   max_mesaj_mb: number
@@ -39,6 +41,9 @@ const MGENEL_EN: Record<string, string> = {
   "DNSBL (kara delik listeleri)": "DNSBL (blackhole lists)",
   "Kaydediliyor…": "Saving…",
   "Kaydet ve Uygula": "Save and Apply",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
+  "Ayarlar kaydedildi ve sunucuya uygulandı.": "Settings saved and applied to the server.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MGENEL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -48,24 +53,33 @@ function SayiAlan({ etiket, aciklama, deger, setir, min = 0 }: { etiket: string;
       <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">{etiket}</label>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">{aciklama}</p>
       <input type="number" min={min} value={deger} onChange={e => setir(+e.target.value)}
-        className="w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
+        className="w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
     </div>
   )
 }
 
 export default function MailGenelAyarPage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const [a, setA] = useState<Ayar>(BOS)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [kaydediliyor, setKaydediliyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [bildirim, setBildirim] = useState<string | null>(null)
+  // Hata/başarı artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBildirim] = useState<string | null>(null)
 
   useEffect(() => {
+    let iptal = false
     api.get<Ayar>('/eklenti/mail/genel-ayarlar')
-      .then(r => setA({ ...BOS, ...r.data }))
-      .catch(e => setHata(apiHata(e, cevir("Ayarlar yüklenemedi (mail eklentisi aktif mi?)"))))
-      .finally(() => setYukleniyor(false))
+      .then(r => { if (iptal) return; setA({ ...BOS, ...r.data }) })
+      .catch(e => {
+        if (iptal) return
+        const m = apiHata(e, cevir("Ayarlar yüklenemedi (mail eklentisi aktif mi?)"))
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
+      .finally(() => { if (!iptal) setYukleniyor(false) })
+    return () => { iptal = true }
   }, [])
 
   async function kaydet() {
@@ -73,18 +87,20 @@ export default function MailGenelAyarPage() {
     try {
       await api.put('/eklenti/mail/genel-ayarlar', a)
       setBildirim(cevir("✓ Ayarlar kaydedildi ve sunucuya uygulandı."))
-    } catch (e) { setHata(apiHata(e, cevir("Kaydedilemedi"))) }
+      toast.basari(cevir("Kaydedildi"), cevir("Ayarlar kaydedildi ve sunucuya uygulandı."))
+    } catch (e) {
+      const m = apiHata(e, cevir("Kaydedilemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setKaydediliyor(false) }
   }
 
-  const kart = 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm'
+  const kart = 'bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs'
 
   return (
     <div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{cevir("Sunucu genelinde geçerli mail ayarları (tüm domainler için varsayılan).")}</p>
-
-      {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div> : (
         <div className="space-y-5">
@@ -112,14 +128,14 @@ export default function MailGenelAyarPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("DNSBL (kara delik listeleri)")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">{cevir("Sağlık analizinde kontrol edilecek DNSBL bölgeleri. Noktalı virgül veya virgülle ayırın.")}</p>
             <input value={a.dnsbl} onChange={e => setA(s => ({ ...s, dnsbl: e.target.value }))} placeholder="zen.spamhaus.org; bl.spamcop.net"
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
           </section>
 
           <div className="flex justify-end">
-            <button onClick={kaydet} disabled={kaydediliyor}
-              className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-6 py-2.5 rounded-lg disabled:opacity-60 transition-colors">
+            <Button onClick={kaydet} disabled={kaydediliyor} color="primary"
+              className="text-sm px-6 py-2.5">
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("Kaydet ve Uygula")}
-            </button>
+            </Button>
           </div>
         </div>
       )}

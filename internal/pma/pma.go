@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -162,10 +163,12 @@ func (h *Handlers) Bozdur(w http.ResponseWriter, r *http.Request) {
 	// 🔴 host DAİMA localhost (socket). Cloud/GCP'de dış IP NIC'te yok → TCP hairpin/denied;
 	// ayrıca DB-user'lar @localhost (socket) kayıtlı → 127.0.0.1 (TCP) eşleşmez. pma-signon.php
 	// zaten localhost'a zorluyor; burada da tutarlı olsun (savunma-derinliği).
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"kullanici": dbKul,
 		"parola":    dbPar,
 		"db":        dbAdi,
 		"host":      "localhost",
-	})
+	}); err != nil {
+		log.Printf("pma signon: yanit encode edilemedi: %v", err)
+	}
 }

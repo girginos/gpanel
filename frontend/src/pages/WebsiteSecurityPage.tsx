@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 /*
  * Website Security Monitor — admin.
@@ -53,7 +55,7 @@ const SEV_RENK: Record<string, string> = {
   critical: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
   high:     'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
   medium:   'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
-  low:      'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  low:      'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300',
 }
 
 const APP_META: Record<string, { ad: string; renk: string }> = {
@@ -62,7 +64,7 @@ const APP_META: Record<string, { ad: string; renk: string }> = {
   'php-composer': { ad: 'PHP Composer', renk: 'bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300' },
 }
 const appAd = (t: string) => APP_META[t]?.ad ?? (t || '—')
-const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300'
 
 // Durum rozetleri — domain başına.
 
@@ -95,6 +97,7 @@ const WSEC_EN: Record<string, string> = {
   "Tarama hatası": "Scan error",
   "Tümünü Tara": "Scan All",
   "Tür:": "Type:",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -102,33 +105,33 @@ function DurumRozet({ u }: { u: Uygulama }) {
   switch (u.durum) {
     case 'taraniyor':
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+        <Badge color="info" variant="soft" className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> {cevir("Taranıyor…")}
-        </span>
+        </Badge>
       )
     case 'acik':
       return (
-        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800 dark:bg-red-950/40 dark:text-red-300">
+        <Badge color="error" variant="soft" className="px-2 py-0.5 text-[11px] font-semibold">
           {u.bulgu_sayisi} {cevir("açık")}
-        </span>
+        </Badge>
       )
     case 'temiz':
       return (
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <Badge color="success" variant="soft" className="px-2 py-0.5 text-[11px] font-medium">
           {cevir("Temiz")}
-        </span>
+        </Badge>
       )
     case 'desteklenmiyor':
       return (
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+        <Badge variant="soft" className="px-2 py-0.5 text-[11px]">
           {cevir("Uygulama yok")}
-        </span>
+        </Badge>
       )
     default: // beklemede
       return (
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+        <Badge color="warning" variant="soft" className="px-2 py-0.5 text-[11px]">
           {cevir("Beklemede")}
-        </span>
+        </Badge>
       )
   }
 }
@@ -145,6 +148,7 @@ export default function WebsiteSecurityPage() {
   const [tarananDomain, setTarananDomain] = useState<number | null>(null)
 
   const dialog = useDialog()
+  const toast = useToast()
   const nav = useNavigate()
   const ilkYuklendi = useRef(false)
 
@@ -160,7 +164,9 @@ export default function WebsiteSecurityPage() {
       setEnvanter(env.data)
       ilkYuklendi.current = true
     } catch (e) {
-      setHata(apiHata(e, cevir("Yüklenemedi")))
+      const m = apiHata(e, cevir("Yüklenemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
   useEffect(() => { void yukle() }, [])
@@ -231,7 +237,7 @@ export default function WebsiteSecurityPage() {
               const aktif = appFiltre === e
               return (
                 <button key={e} onClick={() => setAppFiltre(aktif ? '' : e)}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${appRenk(e)} ${aktif ? 'ring-2 ring-slate-900 dark:ring-slate-100' : 'hover:opacity-80'}`}>
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${appRenk(e)} ${aktif ? 'ring-2 ring-dark-700 dark:ring-slate-100' : 'hover:opacity-80'}`}>
                   {appAd(e)}
                 </button>
               )
@@ -243,13 +249,13 @@ export default function WebsiteSecurityPage() {
             )}
           </div>
         </div>
-        <button
+        <Button
           onClick={tumunuTara}
           disabled={taranıyor || status?.running}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+          className="px-4 py-2 text-sm"
         >
           {status?.running ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Tümünü Tara"))}
-        </button>
+        </Button>
       </div>
 
       {/* Sayaç kartları — global şiddet toplamları (görüntü) */}
@@ -264,7 +270,7 @@ export default function WebsiteSecurityPage() {
 
       {/* Durum */}
       {status && (
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             <div><div className="text-xs text-slate-500">{cevir("Son tarama")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
             <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
@@ -286,7 +292,7 @@ export default function WebsiteSecurityPage() {
             value={arama}
             onChange={(e) => setArama(e.target.value)}
             placeholder={cevir("Domain ara…")}
-            className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-8 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-8 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
           />
           <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -301,18 +307,18 @@ export default function WebsiteSecurityPage() {
 
       {/* Domain tablosu — TEK ana tablo (açık listesi ayrı sayfada) */}
       {yukleniyor && !ilkYuklendi.current ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
       ) : listelenen.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-400">
           {arama || appFiltre ? cevir("Bu arama/filtreyle domain yok.") : cevir("Domain bulunamadı.")}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-dark-600">
           <div className="overflow-x-auto">
             <table className="min-w-[820px] w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
                 <tr>
                   <th className="px-3 py-3 font-semibold">{cevir("Alan adı")}</th>
                   <th className="px-3 py-3 font-semibold">{cevir("Tür")}</th>
@@ -323,13 +329,13 @@ export default function WebsiteSecurityPage() {
                   <th className="px-3 py-3 text-right font-semibold">{cevir("İşlem")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                 {listelenen.map((u) => {
                   const tiklanabilir = !!u.app_type
                   return (
                     <tr key={`${u.domain_id}-${u.app_type}-${u.install_path}`}
                       onClick={() => detayaGit(u)}
-                      className={`bg-white dark:bg-slate-950 ${tiklanabilir ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/60' : ''}`}>
+                      className={`bg-white dark:bg-dark-900 ${tiklanabilir ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-dark-800/60' : ''}`}>
                       <td className="px-3 py-2.5 font-medium text-slate-900 dark:text-slate-100">{u.alan_adi || `#${u.domain_id}`}</td>
                       <td className="px-3 py-2.5">
                         {u.app_type
@@ -341,13 +347,14 @@ export default function WebsiteSecurityPage() {
                       <td className="px-3 py-2.5"><DurumRozet u={u} /></td>
                       <td className="px-3 py-2.5 text-xs text-slate-500">{u.son_tarama || '—'}</td>
                       <td className="px-3 py-2.5 text-right">
-                        <button
+                        <Button
+                          variant="outlined"
                           onClick={(e) => { e.stopPropagation(); void domainTara(u.domain_id) }}
                           disabled={status?.running || tarananDomain === u.domain_id || u.durum === 'taraniyor'}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                          className="px-2 py-1 text-xs"
                         >
                           {tarananDomain === u.domain_id ? '…' : cevir("Tara")}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   )
@@ -367,7 +374,7 @@ export default function WebsiteSecurityPage() {
 
 function SayacKart({ etiket, sayi, renk }: { etiket: string; sayi: number; renk: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 text-left dark:border-slate-800 dark:bg-slate-900">
+    <div className="rounded-lg border border-slate-200 bg-white p-4 text-left dark:border-dark-600 dark:bg-dark-800">
       <div className="text-xs font-medium uppercase tracking-wider text-slate-500">{etiket}</div>
       <div className="mt-1 flex items-baseline gap-2">
         <div className={`rounded-md px-2 py-0.5 text-2xl font-semibold ${renk}`}>{sayi}</div>

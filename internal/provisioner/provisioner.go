@@ -28,6 +28,21 @@ var (
 // askıdaki bir domain'i sessizce yeniden yayına almaz.
 var pkgDB *sql.DB
 
+// renderKilidi — vhost yazma+dogrulama+reload'u SERILESTIRIR.
+//
+// 🔴 NEDEN: renderAndReload once dosyayi diske YAZIP sonra GLOBAL `nginx -t`
+// calistiriyor. Iki kiraci ayni anda render ederse, A'nin gecici olarak
+// bozuk dosyasi B'nin testini dusurur — B'nin dosyasi kusursuz oldugu halde.
+// Denetimde olculdu: bir kiraci gecersiz bir kural degerini dongude
+// ekleyip silerken, KOMSU kiracinin 24 mesru render'inin 5'i basarisiz oldu
+// (%21) ve bir kez GLOBAL `systemctl reload nginx` de dustu. Yani kimligi
+// dogrulanmis herhangi bir kiraci, sunucudaki TUM kiracilarin yapilandirma
+// degisikliklerini olasiliksal olarak bozabiliyordu.
+//
+// Kilit bu pencereyi kapatir: A yazar, test eder, geri alir, birakir; B ancak
+// ondan sonra girer ve temiz bir agac gorur.
+var renderKilidi sync.Mutex
+
 // provizyonKilit: kullanici-adi TAHSISI (BenzersizKullanici) ile useradd/home
 // olusturma arasini serilestirir. Yoksa iki eszamanli olusturma ayni ilk-etiket
 // slugunu (c_girgin) alip AYNI home/FPM/DB paylasir -> tenant izolasyonu coker.
@@ -98,7 +113,7 @@ fastcgi_cache_path ` + cacheZoneDir + ` levels=1:2 keys_zone=` + cacheZoneName +
 # onbellek dosyasinin adi md5("") = d41d8cd98f00b204e9800998ecf8427e olur ve
 # SITEDEKI HER SAYFA AYNI DOSYAYA yazilir/oradan okunur.
 #
-# Canli sonucu (49.12.158.182, versilo.net uzerinde olculdu): "/", "/wp-json/"
+# Canli sonucu (demo-sunucu, versilo.net uzerinde olculdu): "/", "/wp-json/"
 # ve var olmayan "/rastgele/" adresleri ANA SAYFAYLA birebir ayni 70236 bayti
 # dondu. Onbellek temizlense bile ilk istekten sonra ayni sey tekrarlaniyordu.
 # Ziyaretci yanlis sayfayi gorur; bu bir icerik karismasi hatasidir.
@@ -322,6 +337,11 @@ server {
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
         auth_basic off;
+        # 🔴 Erisim kisitlamasi ACME'yi KESMEMELI: server baglamindaki
+        # "deny all" burayi da kapatsaydi Let's Encrypt HTTP-01 dogrulamasi
+        # basarisiz olur, sertifika yenilenemez ve site 90 gun sonra TLS
+        # hatasiyla olurdu. Location kendi allow'unu tanimlayinca miras kesilir.
+        allow all;
         try_files $uri =404;
     }
 
@@ -333,9 +353,22 @@ server {
         return 301 https://$host$request_uri;
     }
 
+    # ---- Erisim kisitlama ----
+    # 🔴 BU BLOK ATLANAMAZ. Onceki surumde kisit YALNIZ 443 blogunda vardi;
+    # bu :80 blogu ise $gosp_force_https 0 oldugunda TUM SITE ICERIGINI
+    # servis eder. $gosp_force_https, 00-gosp-edge.conf icinde ISTEMCININ
+    # gonderdigi X-Forwarded-Proto / CF-Visitor basligindan uretilir ve
+    # guvenilir-vekil kapisi YOKTUR. Yani saldirgan basligi kendisi
+    # gondererek kisiti tek istekte atlatabiliyordu:
+    #     443                                -> 403
+    #     80 + "X-Forwarded-Proto: https"    -> 200  (tam icerik)
+    # Daha kotusu: Cloudflare "Flexible" modunda origin'e ZATEN duz HTTP +
+    # XFP:https geldigi icin kisit HIC uygulanmiyordu.
+{{.ErisimKisit}}
     # Edge zaten HTTPS: icerigi burada servis et (dongu yok, site calisir).
     root {{.WebRoot}};
     index index.php index.html index.htm;
+{{.UygulamaSnippetAltyol}}
 {{if eq .Backend "apache"}}    location / {
         proxy_pass http://127.0.0.1:10080;
         proxy_set_header Host $host;
@@ -346,6 +379,14 @@ server {
         proxy_http_version 1.1;
         proxy_read_timeout 60s;
     }
+{{else if eq .Backend "proxy"}}    # ---- Backend: Uygulama proxy (Node.js/Python) ----
+{{.UygulamaSnippetKok}}
+    # 🔴 location / BURADA TANIMLANMAZ: uygulama snippet'i (yukarıdaki include)
+    # kendi location /'unu getirir. İkisi birden tanımlanırsa nginx
+    # "duplicate location /" ile HİÇ AÇILMAZ — ölçüldü (nginx -t).
+    # 🔴 error_page 404 da TANIMLANMAZ: uygulamanın KENDİ 404'ü (SPA yönlendirmesi,
+    # API "bulunamadı") panelin marka sayfasıyla değiştirilmemeli.
+    location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
 {{else if eq .Backend "static"}}    location / { try_files $uri $uri/ =404; }
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
 {{else}}    location / { try_files $uri $uri/ /index.php?$query_string; }
@@ -385,8 +426,9 @@ server {
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
 
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
-{{.SecHeaders}}
+{{.SecHeaders}}{{.ErisimKisit}}
 {{.ModSec}}{{.DenyBlocks}}
+{{.UygulamaSnippetAltyol}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -402,6 +444,24 @@ server {
         proxy_intercept_errors on;
         error_page 500 502 503 504 /_gosp_5xx.html;
         proxy_read_timeout 60s;
+    }
+{{else if eq .Backend "proxy"}}    # ---- Backend: Uygulama proxy (Node.js/Python) ----
+{{.UygulamaSnippetKok}}
+    # 🔴 location / BURADA TANIMLANMAZ: uygulama snippet'i (yukarıdaki include)
+    # kendi location /'unu getirir. İkisi birden tanımlanırsa nginx
+    # "duplicate location /" ile HİÇ AÇILMAZ — ölçüldü (nginx -t).
+    # 🔴 error_page 404 da TANIMLANMAZ: uygulamanın KENDİ 404'ü (SPA yönlendirmesi,
+    # API "bulunamadı") panelin marka sayfasıyla değiştirilmemeli.
+    location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
+    location = /_gosp_5xx.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik dosya (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
@@ -507,15 +567,21 @@ server {
     error_log  /var/log/nginx/{{.AlanAdi}}.error.log warn;
 
     # ---- Güvenlik header'ları (panel'den yönetilir; server seviyesi) ----
-{{.SecHeaders}}
+{{.SecHeaders}}{{.ErisimKisit}}
 {{.ModSec}}    location /.well-known/acme-challenge/ {
         root /var/www/acme;
         auth_basic off;
+        # 🔴 Erisim kisitlamasi ACME'yi KESMEMELI: server baglamindaki
+        # "deny all" burayi da kapatsaydi Let's Encrypt HTTP-01 dogrulamasi
+        # basarisiz olur, sertifika yenilenemez ve site 90 gun sonra TLS
+        # hatasiyla olurdu. Location kendi allow'unu tanimlayinca miras kesilir.
+        allow all;
         try_files $uri =404;
     }
 
 
 {{.DenyBlocks}}
+{{.UygulamaSnippetAltyol}}
 {{if eq .Backend "apache"}}    # ---- Backend: Apache (127.0.0.1:10080 proxy) ----
     location / {
         proxy_pass http://127.0.0.1:10080;
@@ -531,6 +597,24 @@ server {
         proxy_intercept_errors on;
         error_page 500 502 503 504 /_gosp_5xx.html;
         proxy_read_timeout 60s;
+    }
+{{else if eq .Backend "proxy"}}    # ---- Backend: Uygulama proxy (Node.js/Python) ----
+{{.UygulamaSnippetKok}}
+    # 🔴 location / BURADA TANIMLANMAZ: uygulama snippet'i (yukarıdaki include)
+    # kendi location /'unu getirir. İkisi birden tanımlanırsa nginx
+    # "duplicate location /" ile HİÇ AÇILMAZ — ölçüldü (nginx -t).
+    # 🔴 error_page 404 da TANIMLANMAZ: uygulamanın KENDİ 404'ü (SPA yönlendirmesi,
+    # API "bulunamadı") panelin marka sayfasıyla değiştirilmemeli.
+    location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
+    location = /_gosp_5xx.html {
+        root /usr/share/girginospanel/errors;
+        internal;
+        access_log off;
+    }
+    location ^~ /_gosp/ {
+        alias /usr/share/girginospanel/errors/;
+        access_log off;
+        expires 7d;
     }
 {{else if eq .Backend "static"}}    # ---- Backend: Statik (PHP yok) — PHP-EXFIL guard ----
     location ~* \.(php|phtml|php3|php4|php5|phps)(/|$) { return 404; }
@@ -687,6 +771,11 @@ server {
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
         auth_basic off;
+        # 🔴 Erisim kisitlamasi ACME'yi KESMEMELI: server baglamindaki
+        # "deny all" burayi da kapatsaydi Let's Encrypt HTTP-01 dogrulamasi
+        # basarisiz olur, sertifika yenilenemez ve site 90 gun sonra TLS
+        # hatasiyla olurdu. Location kendi allow'unu tanimlayinca miras kesilir.
+        allow all;
         try_files $uri =404;
     }
 
@@ -779,8 +868,32 @@ catch_workers_output = yes
 
 // VhostOpts: tek render fonksiyonu, SSL bilgisi opsiyonel
 type VhostOpts struct {
-	AlanAdi   string
-	WebRoot   string
+	AlanAdi string
+	WebRoot string
+
+	// UygulamaSnippetAltyol / UygulamaSnippetKok — server bloğuna basılacak
+	// include satırları (ya da boş).
+	//
+	// 🔴 NEDEN VAR: vhost'u core TAMAMEN yeniden üretiyor (RerenderVhost), bu
+	// yüzden dışarıdan (eklentiden) vhost'a yazılan her satır ilk SSL
+	// yenilemesinde / PHP sürüm değişiminde SİLİNİRDİ. Bu kanca sayesinde
+	// snippet'ler ayrı dosyalarda yaşar ve her yeniden üretimden sağ çıkar.
+	// Core snippet'in İÇERİĞİNİ bilmez — genel bir uzatma noktasıdır.
+	//
+	// 🔴 NEDEN İKİ AYRI DİZİN: alt-yol snippet'i (`location ^~ /api`) her
+	// backend ile birlikte yaşayabilir. Kök snippet'i (`location /`) ise
+	// YALNIZ proxy modunda geçerlidir — php-fpm/apache/static dalları kendi
+	// `location /`'unu bastığı için ikisi bir araya gelirse nginx
+	// `duplicate location "/"` verir ve YAPILANDIRMA HİÇ AÇILMAZ.
+	//
+	// Bu teorik değil: bir domain proxy moduna alınıp (kök uygulama kurulur)
+	// sonra Web Sunucusu sayfasından php-fpm'e geri döndürülürse, tek include
+	// tasarımında o kiracının SONRAKİ HER render'ı düşerdi — SSL yenilemesi
+	// dahil. Sertifika yenilenemeyince site 90 gün sonra kendiliğinden kapanır
+	// ve sebebi çok uzakta görünür.
+	UygulamaSnippetAltyol string
+	UygulamaSnippetKok    string
+
 	PHPSocket string
 	PHPSurum  string
 	CertPath  string
@@ -814,9 +927,14 @@ type VhostOpts struct {
 	Askida bool
 
 	// Render-time hesaplanan alanlar (DB'de TUTULMAZ). renderAndReload icinde set edilir.
-	SecHeaders string // guvenlik add_header blogu (her location'a enjekte edilir)
-	DenyBlocks string // CGI/betik + yedek/dump dosya deny location'lari
-	ModSec     string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
+	// Erisim kisitlama (Access Restrictions) allow/deny blogu; kisit pasifse "".
+	// 🔴 Server BAGLAMINDA durur: tum location'lara miras kalir. acme-challenge
+	// location'i "allow all" ile MUAF tutulur, yoksa "deny all" Let's Encrypt
+	// HTTP-01 dogrulamasini da keser ve sertifika 90 gun sonra yenilenemez.
+	ErisimKisit string
+	SecHeaders  string // guvenlik add_header blogu (her location'a enjekte edilir)
+	DenyBlocks  string // CGI/betik + yedek/dump dosya deny location'lari
+	ModSec      string // WAF (ModSecurity) server-context direktif blogu; WAF pasif/modul yoksa ""
 }
 
 func (o VhostOpts) SSL() bool {
@@ -889,8 +1007,55 @@ func writePoolValidated(sk, phpSurum string) (socket, service string, err error)
 // renderAndReload: vhost'u yaz + nginx -t + reload (SSL var/yok aynı yol)
 // Backend "apache" ise per-domain Apache vhost'unu da yazıp httpd'yi yeniden yükler.
 // Backend değiştirildiyse eski Apache vhost dosyası temizlenir.
+// uygulamaSnippetSatiri — kiracının uygulama snippet dizinini include eden satır.
+//
+// Glob hiç eşleşmezse nginx SORUN ÇIKARMAZ (ölçüldü: boş dizinle `nginx -t`
+// başarılı) — yani uygulaması olmayan kiracıda satır zararsızdır.
+func uygulamaSnippetSatirlari(sk string) (altyol, kok string) {
+	if !gecerliSKAdi(sk) {
+		// 🔴 Sessizce boş dönmek, proxy modundaki bir sitenin sebepsiz 404
+		// vermesine yol açıyordu ve hiçbir yerde iz kalmıyordu.
+		log.Printf("vhost: gecersiz sistem kullanici adi %q — uygulama snippet kancasi ATLANDI", sk)
+		return "", ""
+	}
+	kokDizin := "/etc/nginx/gosp-app/" + sk
+	// Dizinler yoksa yaratılır: include glob olduğu için şart değil, ama
+	// eklentinin yazacağı yer hazır dursun.
+	_ = os.MkdirAll(kokDizin+"/altyol", 0o755)
+	_ = os.MkdirAll(kokDizin+"/kok", 0o755)
+	altyol = "    # Uygulama alt-yol snippet'leri (eklenti yazar; core içeriğini bilmez)\n" +
+		"    include " + kokDizin + "/altyol/*.conf;"
+	kok = "    # Uygulama KÖK snippet'i — yalnız proxy modunda include edilir\n" +
+		"    include " + kokDizin + "/kok/*.conf;"
+	return altyol, kok
+}
+
+// gecerliSKAdi — sistem kullanıcı adı yol bileşenine giriyor: dar doğrula.
+func gecerliSKAdi(sk string) bool {
+	if sk == "" || len(sk) > 32 {
+		return false
+	}
+	for _, c := range sk {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func renderAndReload(opts VhostOpts, sk string) error {
+	// 🔴 TEK NOKTA: tüm vhost üretim yolları (HTTP, SSL, yeniden üretim) buradan
+	// geçer. Snippet satırını burada doldurmak, çağıran her yerde tekrar etmeye
+	// göre bir yolun unutulmasını imkânsız kılar.
+	if opts.UygulamaSnippetAltyol == "" && opts.UygulamaSnippetKok == "" {
+		opts.UygulamaSnippetAltyol, opts.UygulamaSnippetKok = uygulamaSnippetSatirlari(sk)
+	}
 	edgeMapEnsure() // $gosp_force_https map'i yoksa vhost gecersiz olur
+	// 🔴 Ayni gerekce: Uygulama Calistirici snippet'i $connection_upgrade_gosp
+	// kullanir ve tanimsiz degisken GLOBAL `nginx -t`'yi dusurur — o an hicbir
+	// domain render edilemez. Render yolunda da garanti altina alinir ki eklenti
+	// kaldirilmis olsa bile cekirdek kendi kendine yeterli kalsin.
+	uygulamaUpgradeMapEnsure()
 	// 🔴 Silinmis tenant korumasi (writePoolValidated ile ayni degismez kural):
 	// kullanici yoksa vhost YAZILMAZ — aksi halde silme ile es zamanli calisan
 	// heal/downgrade yollari sahipsiz bir vhost birakir.
@@ -931,6 +1096,21 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
 	opts.SecHeaders = buildSecurityHeaders(opts)
 	opts.DenyBlocks = denyBlocksNginx
+	// Erisim kisitlama her render'da DB'den tazelenir (tek kaynak: DB).
+	// Askidayken suspend sablonu render edilir; o sablonda alan yok.
+	if !opts.Askida {
+		// 🔴 Hata varsa vhost'a DOKUNMA. Diskteki yapilandirma korumali olabilir;
+		// okunamayan bir ayar yuzunden onu ezmek, korumayi SESSIZCE kaldirmak
+		// olurdu. Render'i iptal et, mevcut dosya yerinde kalsin.
+		ek, err := buildErisimKisit(sk)
+		if err != nil {
+			return fmt.Errorf("erisim kisitlama okunamadi, vhost DEGISTIRILMEDI (%s): %w", sk, err)
+		}
+		opts.ErisimKisit = ek
+	}
+	// Kiracının yazdığı direktiflerden sapma imzasını ayıkla (nöbetçiyi
+	// kiracı kontrolünden çıkarır).
+	opts.EkDirektifler = KullaniciDirektifTemizle(opts.EkDirektifler)
 	// WAF (ModSecurity) direktifi: her render'da efektif ayardan hesapla. Askidayken
 	// suspend vhost'u (ModSec alani yok) render edilir → hesaplama gereksiz.
 	// buildModSec, WAF pasif/modul yoksa "" doner (vhost'u bozmaz) ve aktifse per-domain
@@ -947,6 +1127,10 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	if err := tmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("template render: %w", err)
 	}
+	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi).
+	renderKilidi.Lock()
+	defer renderKilidi.Unlock()
+
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	// Fail-safe: bozuk config diske kalirsa sonraki nginx -t/reload TUM nginx'i dusurur.
 	// Eski icerigi yedekle; nginx -t patlarsa geri yukle.
@@ -972,7 +1156,19 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		return fmt.Errorf("nginx -t başarısız: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	if out, err := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); err != nil {
-		return fmt.Errorf("nginx reload: %s: %w", strings.TrimSpace(string(out)), err)
+		// 🔴 GERI ALMA BURADA DA SART. Onceki surum yalniz `nginx -t` dalinda
+		// geri aliyordu; reload dalinda dosya DISKTE KALIYORDU. Sonuc: nginx
+		// eski yapilandirmayla kosmaya devam ediyor ama BASKA bir domainin bir
+		// sonraki basarili reload'i, hic sinanmamis bu degisikligi SESSIZCE
+		// yururluge sokuyordu. Ustelik API mesaji "nginx degismedi" diyordu —
+		// dosya degismisti; mesaj olgusal olarak yanlisti.
+		if yedekVar {
+			_ = os.WriteFile(cfgPath, yedek, 0644)
+		} else {
+			_ = os.Remove(cfgPath)
+		}
+		return fmt.Errorf("nginx reload BASARISIZ, %s GERI ALINDI: %s: %w",
+			cfgPath, strings.TrimSpace(string(out)), err)
 	}
 
 	// Apache backend yönetimi (idempotent — yoksa yaz, varsa sil)
@@ -1088,6 +1284,20 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 }
 
 func Deprovision(alanAdi, sk string) error {
+	// 🔴 SNIPPET DİZİNİ DE SİLİNİR. Sistem kullanıcı adı (sk) alan adından
+	// türetiliyor ve domain silinince YENİDEN KULLANILABİLİR hale geliyor
+	// (kullaniciKullanimda yalnız canlı DB satırı / passwd / home bakıyor).
+	// Kalıntı snippet, aynı sk'yi alan YENİ bir kiracıya miras kalırdı:
+	//   • kök snippet'i varsa yeni domain php-fpm ile açılır → duplicate
+	//     location → domain OLUŞTURULAMAZ,
+	//   • alt-yol snippet'i varsa yeni müşterinin sitesinde, SİLİNMİŞ
+	//     kiracının portuna proxy yapan bir yol açık kalır.
+	if gecerliSKAdi(sk) {
+		if err := os.RemoveAll("/etc/nginx/gosp-app/" + sk); err != nil {
+			log.Printf("deprovision: uygulama snippet dizini silinemedi (%s): %v", sk, err)
+		}
+	}
+
 	IzolasyonSentinelSil(sk) // silinen hesap kalici 'izolasyon kaybi' uyarisi birakmasin
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	_ = os.Remove(cfgPath)
@@ -1135,9 +1345,16 @@ func Deprovision(alanAdi, sk string) error {
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
-		// Orphan temizlik: userdel home'u siler ama bunlar home DISINDA kaliyordu.
-		_ = os.RemoveAll(filepath.Join("/var/backups/girginospanel", sk)) // manuel/oto yedekler
-		_ = os.RemoveAll("/var/log/php-fpm-" + sk)                        // fpm log dizini
+		// Orphan temizlik: userdel home'u siler ama bu home DISINDA kaliyordu.
+		_ = os.RemoveAll("/var/log/php-fpm-" + sk) // fpm log dizini
+
+		// 🔴 YEDEK DIZINI BURADA SILINMEZ — cagirana tasindi.
+		// Deprovision yalniz domain silmeden degil, site TASIMA ROLLBACK'inden
+		// de cagriliyor; buradaki `RemoveAll`, yarim kalan bir tasimanin
+		// mevcut yedekleri yok etmesine yol aciyordu. Ayrica yedeklerin
+		// silinmesi, UZAK kopyalarin ONCE temizlenmesini gerektiriyor ve o
+		// is icin veritabani erisimi lazim (bkz. backups.DomainYedekleriniTemizle).
+		// Domain silme akisi: internal/domains/handlers.go
 	}
 	// 🔴 Havuz supurmesi userdel'den SONRA: kullanici artik yok, dolayisiyla
 	// writePoolValidated koruması devreye girer ve hicbir yol havuzu geri yazamaz.
@@ -1247,6 +1464,16 @@ const acmeConfigHome = "/var/lib/girginospanel/acme"
 // AcmeConfigHome: disa acik okuyucu (subdomain paketi de ayni dizini kullanir).
 func AcmeConfigHome() string { return acmeConfigHome }
 
+// AcmeWebroot — ACME HTTP-01 dogrulama koku (root-sahipli, KIRACI YAZAMAZ).
+//
+// 🔴 Alt alanlar bunu kullanmak ZORUNDA. Onceki surumde alt alanin acme koku
+// kiracinin KENDI docroot'uydu; acme location'i "allow all" tasidigi icin
+// kiraci, kisitli bir alt alanda .well-known/acme-challenge/ altina koydugu
+// HER SEYI tum internete servis edebiliyordu. Olculdu: kisitli sitede
+// "/" -> 403 iken ".../acme-challenge/zd.txt" -> 200 (icerik sizdi).
+// Ana domain bagisikti, cunku kok /var/www/acme ve root-sahipli.
+func AcmeWebroot() string { return acmeHazirla("") }
+
 // acmeHazirla: config-home + challenge dizinini olusturur (challenge domainin
 // KENDI public_html'inde), sahiplik + SELinux etiketini duzeltir. Webroot doner.
 // acmeWebroot — HTTP-01 challenge icin SABIT, docroot'tan BAGIMSIZ dizin.
@@ -1323,7 +1550,6 @@ func EnableLetsEncrypt(alanAdi, sk, phpSurum, backend string) (certPath, keyPath
 		// silinmis olabilir). Apex-only cert, self-signed'dan HER ZAMAN iyidir.
 		log.Printf("ssl: %s www SAN'li cekim basarisiz — apex-only tekrar deneniyor", alanAdi)
 		args = []string{"--issue", "--server", "letsencrypt", "--config-home", acmeConfigHome, "--webroot", webroot, "-d", alanAdi, "--keylength", "2048"}
-		wwwVar = false
 		out, e = exec.Command("/root/.acme.sh/acme.sh", args...).CombinedOutput()
 	}
 	if e != nil {
@@ -2307,7 +2533,7 @@ func TrafikArtikSupur(db *sql.DB) {
 		return
 	}
 	for _, t := range []string{"domain_trafik", "domain_trafik_imlec"} {
-		res, err := db.Exec("DELETE FROM " + t + " WHERE domain_id NOT IN (SELECT id FROM domains)")
+		res, err := db.Exec("DELETE FROM " + t + " WHERE domain_id NOT IN (SELECT id FROM domains)") //nolint:gosec // G202: t SABİT dilimden gelir ([]string{"domain_trafik","domain_trafik_imlec"}); kullanıcı girdisi yok, tablo adı ? ile parametrelenemez.
 		if err != nil {
 			continue
 		}

@@ -30,18 +30,18 @@ type nodejsKurulum struct {
 }
 
 type nodejsPaket struct {
-	Ad     string
-	Surum  string
+	Ad    string
+	Surum string
 }
 
 // nodejsBul — public_html'de package.json arar. Bulunursa lock dosyasını
 // parse eder ve tüm dependency+devDependency paketlerini çıkarır.
 //
 // Lock önceliği:
-//   1. package-lock.json (npm)      — en kesin, semver-lock
-//   2. yarn.lock                     — Yarn 1.x + Berry (klasik format)
-//   3. pnpm-lock.yaml                — pnpm workspace/monorepo yaygın
-//   4. package.json dependencies     — hiçbir lock yoksa fallback (range içerir)
+//  1. package-lock.json (npm)      — en kesin, semver-lock
+//  2. yarn.lock                     — Yarn 1.x + Berry (klasik format)
+//  3. pnpm-lock.yaml                — pnpm workspace/monorepo yaygın
+//  4. package.json dependencies     — hiçbir lock yoksa fallback (range içerir)
 func nodejsBul(ctx context.Context, sk, alanAdi string) *nodejsKurulum {
 	kok := filepath.Join("/home", sk, "public_html")
 	pj := filepath.Join(kok, "package.json")
@@ -139,12 +139,13 @@ func npmLockOku(pl string) []nodejsPaket {
 // yarnLockOku — yarn.lock (klasik + Berry) parse eder.
 //
 // Format örneği:
-//   "lodash@^4.17.15":
-//     version "4.17.21"
-//     resolved "https://..."
 //
-//   lodash@^4.17.15, lodash@^4.17.19:
-//     version "4.17.21"
+//	"lodash@^4.17.15":
+//	  version "4.17.21"
+//	  resolved "https://..."
+//
+//	lodash@^4.17.15, lodash@^4.17.19:
+//	  version "4.17.21"
 //
 // 🔴 Berry (Yarn 2+) __metadata bloğu var, atlanmalı. dev vs prod ayrımı bu
 // dosyadan çıkarılamaz — hepsi dahil (feed'in yanlış-pozitif oranı OSV'de
@@ -214,9 +215,13 @@ func berryProtokolBar(spec string) bool {
 	at := strings.Index(spec, "@")
 	if strings.HasPrefix(spec, "@") { // scoped
 		at = strings.Index(spec[1:], "@")
-		if at >= 0 { at++ }
+		if at >= 0 {
+			at++
+		}
 	}
-	if at < 0 || at+1 >= len(spec) { return false }
+	if at < 0 || at+1 >= len(spec) {
+		return false
+	}
 	rest := spec[at+1:]
 	for _, p := range []string{"workspace:", "link:", "portal:", "file:", "git", "http", "npm:"} {
 		if strings.HasPrefix(rest, p) {
@@ -245,11 +250,12 @@ func yarnSpecAd(spec string) string {
 // pnpmLockOku — pnpm-lock.yaml parse eder (minimal, YAML paketi kullanmadan).
 //
 // Formatlar:
-//   v5:  `/lodash/4.17.21:`              (slash ayırıcı, leading '/')
-//   v6:  `/lodash@4.17.21:`              (at ayırıcı, leading '/')
-//   v9:  `lodash@4.17.21:`               (leading '/' KALDIRILDI, at ayırıcı)
-//   v9:  `lodash@4.17.21(peer@x):`       (peer bilgisi parantezle)
-//   v9:  `@scope/pkg@1.0.0:`             (scoped paket, leading '/' YOK)
+//
+//	v5:  `/lodash/4.17.21:`              (slash ayırıcı, leading '/')
+//	v6:  `/lodash@4.17.21:`              (at ayırıcı, leading '/')
+//	v9:  `lodash@4.17.21:`               (leading '/' KALDIRILDI, at ayırıcı)
+//	v9:  `lodash@4.17.21(peer@x):`       (peer bilgisi parantezle)
+//	v9:  `@scope/pkg@1.0.0:`             (scoped paket, leading '/' YOK)
 //
 // 🔴 pnpm v9 (May 2024'ten beri varsayılan) leading '/' KULLANMIYOR. Önceki
 // parser sadece '/' ile başlayanları kabul ediyordu → v9 tenantlar tamamen

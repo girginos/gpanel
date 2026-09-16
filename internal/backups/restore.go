@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -36,7 +37,10 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	bid, _ := strconv.ParseInt(chi.URLParam(r, "bid"), 10, 64)
 
 	var req restoreIstek
-	_ = json.NewDecoder(r.Body).Decode(&req) // boş gövde tolere edilir
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) { // boş gövde tolere, bozuk reddet
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	req.Mod = strings.TrimSpace(req.Mod)
 	if req.Mod == "" {
 		req.Mod = "tam"

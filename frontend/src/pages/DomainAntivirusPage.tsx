@@ -8,6 +8,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
@@ -25,6 +26,7 @@ const kisaYol = (p: string) => p.replace(/^\/home\/[^/]+\//, '')
 
 const DOMAV_EN: Record<string, string> = {
   "Türkçe": "English",
+  "İşlem başarısız": "Operation failed",
   "Onay gerekiyor": "Confirmation required",
   "Dosya karantinaya alınsın mı?\n{0}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)": "Quarantine the file?\n{0}\n\n(The file is moved under ~/.karantina and becomes inaccessible.)",
   "Geri yükleme": "Restore",
@@ -45,7 +47,7 @@ const DOMAV_EN: Record<string, string> = {
   "Dosya": "File",
   "Motor": "Engine",
   "Karantinada": "Quarantined",
-  "⚠ Aktif": "⚠ Active",
+  "Aktif": "Active",
   "Karantinaya al": "Quarantine",
   "Yeniden dene": "Retry",
   "Karantinada dosya yok.": "No files in quarantine.",
@@ -65,7 +67,7 @@ const DOMAV_EN: Record<string, string> = {
   "Şimdi Tara": "Scan Now",
   "— Antivirüs": "— Antivirus",
   "Henüz tarama yapılmadı. “Şimdi Tara” ile başlayın.": "No scan yet. Start with “Scan Now”.",
-  "⚠ Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.": "⚠ Truncated view — first 64 KB only. The file is longer; the rest is not shown.",
+  "Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.": "Truncated view — first 64 KB only. The file is longer; the rest is not shown.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DOMAV_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -73,7 +75,7 @@ function YolKutu({ yol }: { yol: string }) {
   return (
     <span
       title={yol}
-      className="block max-w-full overflow-x-auto whitespace-nowrap font-mono text-xs bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-slate-700 dark:text-slate-200"
+      className="block max-w-full overflow-x-auto whitespace-nowrap font-mono text-xs bg-slate-50 dark:bg-dark-800/40 border border-slate-200 dark:border-dark-600 rounded-md px-2 py-1 text-slate-700 dark:text-slate-200"
     >
       {kisaYol(yol)}
     </span>
@@ -95,7 +97,7 @@ const IK = {
 // Buton stilleri — tutarlı, erişilebilir odak halkası.
 const BTN = {
   tehlikeCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700/70 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 focus:outline-none focus:ring-2 focus:ring-red-400/40 transition whitespace-nowrap',
-  notr: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400/30 transition whitespace-nowrap',
+  notr: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-600 focus:outline-none focus:ring-2 focus:ring-slate-400/30 transition whitespace-nowrap',
   onayCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 transition whitespace-nowrap',
   tehlikeDolu: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 transition whitespace-nowrap',
 }
@@ -124,6 +126,7 @@ function GavLogo({ className = 'w-11 h-11' }: { className?: string }) {
 export default function DomainAntivirusPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const { id } = useParams()
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -143,7 +146,7 @@ export default function DomainAntivirusPage() {
     api.get<Durum>(`/domains/${id}/antivirus`).then(r => {
       setD(r.data)
       if (r.data.son_tarama?.durum === 'calisiyor') startPoll(r.data.son_tarama.id)
-    }).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    }).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
   }
   useEffect(() => { yukle(); kyukle(); return () => { if (pollRef.current) clearInterval(pollRef.current) } }, [id])
 
@@ -167,14 +170,14 @@ export default function DomainAntivirusPage() {
     try {
       const { data } = await api.post(`/domains/${id}/antivirus/tara`, {})
       startPoll(data.scan_id)
-    } catch (e) { setHata(apiHata(e, cevir("Tarama başlatılamadı"))); setTarariyor(false) }
+    } catch (e) { const m = apiHata(e, cevir("Tarama başlatılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setTarariyor(false) }
   }
 
   async function karantina(b: Bulgu) {
     if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("Dosya karantinaya alınsın mı?\n{0}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)"), b.dosya) }))) return
     setHata(null)
     try { await api.post(`/domains/${id}/antivirus/karantina`, { dosya: b.dosya }); yukle(); kyukle() }
-    catch (e) { setHata(apiHata(e, cevir("Karantinaya alınamadı"))) }
+    catch (e) { const m = apiHata(e, cevir("Karantinaya alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
 
   async function kyukle() {
@@ -184,16 +187,16 @@ export default function DomainAntivirusPage() {
   async function geriYukle(k: KarantinaKayit) {
     if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: cevirT(cevir("Dosya orijinal konumuna geri yüklensin mi?\n{0}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)"), k.orijinal_yol) }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/geri-yukle`, {}); kyukle(); yukle() }
-    catch (e: any) { setHata(apiHata(e)) }
+    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   async function karSil(k: KarantinaKayit) {
     if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: cevirT(cevir("Karantinadaki dosya KALICI silinsin mi?\n{0}\n\n(Geri alınamaz.)"), k.orijinal_yol) }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle(); yukle() }
-    catch (e: any) { setHata(apiHata(e)) }
+    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   async function karIncele(k: KarantinaKayit) {
     try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? cevir("[ikili dosya]") : data.icerik, kesik: data.kesik }) }
-    catch (e: any) { setHata(apiHata(e)) }
+    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
   if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
@@ -215,7 +218,7 @@ export default function DomainAntivirusPage() {
         <span className={`ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold ${
           vurgu === 'kirmizi' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
           : vurgu === 'kehribar' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+          : 'bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300'
         }`}>{rozet}</span>
       )}
     </button>
@@ -230,13 +233,13 @@ export default function DomainAntivirusPage() {
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: cevir("Antivirüs") },
         ]} />
-        <div className="mb-4 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-          🔒 {cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
+        <div className="mb-4 rounded-lg border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 mr-1.5 align-[-3px]"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a1.5 1.5 0 011.5 1.5v6a1.5 1.5 0 01-1.5 1.5H6.75a1.5 1.5 0 01-1.5-1.5v-6a1.5 1.5 0 011.5-1.5z"/></svg>{cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
         </div>
 
         {/* Başlık — gerçek G-AV logo görseli */}
         <div className="flex items-start gap-3 mb-4">
-          <GavLogo className="w-11 h-11 flex-shrink-0" />
+          <GavLogo className="w-11 h-11 shrink-0" />
           <div>
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 leading-tight">
               G-AV <span className="text-slate-400 dark:text-slate-500 font-normal text-lg">{cevir("— Antivirüs")}</span>
@@ -247,10 +250,8 @@ export default function DomainAntivirusPage() {
           </div>
         </div>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
         {/* Durum + eylemler — her zaman üstte */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -263,7 +264,7 @@ export default function DomainAntivirusPage() {
             </div>
             <div className="flex gap-2">
               <button onClick={tara} disabled={tarariyor}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+                className="px-4 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
                 {tarariyor ? cevir("Taranıyor…") : cevir("Şimdi Tara")}</button>
             </div>
           </div>
@@ -276,14 +277,14 @@ export default function DomainAntivirusPage() {
         </div>
 
         {/* Sekme çubuğu — sayfa aşağı inmesin diye içerik sekmelere bölündü */}
-        <div className="border-b border-slate-200 dark:border-slate-700 flex gap-1 mb-4 overflow-x-auto">
+        <div className="border-b border-slate-200 dark:border-dark-600 flex gap-1 mb-4 overflow-x-auto">
           {sekmeBtn('bulgular', cevir("Bulgular"), aktif.length, 'kirmizi')}
           {sekmeBtn('karantina', cevir("Karantina"), karAktif, 'kehribar')}
         </div>
 
         {/* ── BULGULAR SEKMESİ ── */}
         {sekme === 'bulgular' && (
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 sm:p-5 shadow-xs">
             {!d.son_tarama ? (
               <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz tarama yapılmadı. “Şimdi Tara” ile başlayın.")}</div>
             ) : d.bulgular.length === 0 ? (
@@ -295,7 +296,7 @@ export default function DomainAntivirusPage() {
               <div className="overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}>
-                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-dark-600">
                       <th className={T.baslik}>{cevir("Dosya")}</th><th className={T.baslik}>{cevir("İmza")}</th><th className={T.baslik}>{cevir("Motor")}</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}></th>
                     </tr>
                   </thead>
@@ -306,10 +307,10 @@ export default function DomainAntivirusPage() {
                         <td className={T.hucre} data-etiket={cevir("İmza")}>
                           <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
                         </td>
-                        <td className={T.hucre} data-etiket={cevir("Motor")}><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{b.motor}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Motor")}><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{b.motor}</span></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
                           {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</span>
-                            : <span className="text-xs text-red-600 dark:text-red-400">{cevir("⚠ Aktif")}</span>}
+                            : <span className="text-xs text-red-600 dark:text-red-400">{cevir("Aktif")}</span>}
                         </td>
                         <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
                           {!b.karantina && (
@@ -329,7 +330,7 @@ export default function DomainAntivirusPage() {
 
         {/* ── KARANTİNA SEKMESİ ── */}
         {sekme === 'karantina' && (
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 sm:p-5 shadow-xs">
             {klHata && kliste.length === 0 && (
               <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2 py-2">{cevir("Karantina listesi yüklenemedi.")} <button onClick={kyukle} className="underline">{cevir("Yeniden dene")}</button></div>
             )}
@@ -339,7 +340,7 @@ export default function DomainAntivirusPage() {
               <div className="overflow-x-auto">
                 <table className={`${T.tablo} text-sm`}>
                   <thead className={T.baslikGrubu}>
-                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-dark-600">
                       <th className={T.baslik}>{cevir("Dosya")}</th><th className={T.baslik}>{cevir("Tespit")}</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Tarih")}</th><th className={T.baslik}></th>
                     </tr>
                   </thead>
@@ -375,12 +376,12 @@ export default function DomainAntivirusPage() {
         {/* İnceleme modalı — dosya ÇALIŞTIRILMADAN düz metin gösterilir */}
         {inceleModal && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setInceleModal(null)}>
-            <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
-              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <div className="bg-white dark:bg-dark-700 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-dark-600 flex items-center justify-between">
                 <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
                 <button onClick={() => setInceleModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
               </div>
-              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">{cevir("⚠ Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.")}</div>}
+              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">{cevir("Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.")}</div>}
               <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
             </div>
           </div>

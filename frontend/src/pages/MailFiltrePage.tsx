@@ -4,6 +4,8 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Filtre = { whitelist: string; blacklist: string; ip_blocklist: string; asn_blocklist: string }
 type AsnCozum = { asn: string; prefiks_sayisi: number; kaynak: string; uyari?: string }
@@ -24,7 +26,7 @@ const MFILT_EN: Record<string, string> = {
   "kısmi": "partial",
   "çözülemedi": "could not resolve",
   "önbellek": "cache",
-  "⚠ önbellekten": "⚠ from cache",
+  "önbellekten": "from cache",
   "✓ canlı": "✓ live",
   "Türkçe": "English",
   "Buradaki IP/ağlardan gelen tüm SMTP bağlantıları reddedilir (kimlik doğrulamış kullanıcılar hariç).": "All SMTP connections from the IPs/networks here are rejected (except authenticated users).",
@@ -49,24 +51,36 @@ const MFILT_EN: Record<string, string> = {
   "prefiks": "prefixes",
   "Uygulanıyor…": "Applying…",
   "Kaydet ve Uygula": "Save and Apply",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
+  "Kısmen uygulandı": "Partially applied",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MFILT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function MailFiltrePage() {
   useTranslation() // dil re-render aboneligi
+  const toast = useToast()
   const [f, setF] = useState<Filtre>(BOS)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [kaydediliyor, setKaydediliyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [bildirim, setBildirim] = useState<string | null>(null)
+  // Hata/başarı artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setBildirim] = useState<string | null>(null)
   const [cozunum, setCozunum] = useState<AsnCozum[]>([])
   const [toplamCidr, setToplamCidr] = useState<number | null>(null)
 
   useEffect(() => {
+    let iptal = false
     api.get<Filtre>('/eklenti/mail/genel/filtre')
-      .then(r => setF({ ...BOS, ...r.data }))
-      .catch(e => setHata(apiHata(e, cevir("Filtreler yüklenemedi (mail eklentisi aktif mi?)"))))
-      .finally(() => setYukleniyor(false))
+      .then(r => { if (iptal) return; setF({ ...BOS, ...r.data }) })
+      .catch(e => {
+        if (iptal) return
+        const m = apiHata(e, cevir("Filtreler yüklenemedi (mail eklentisi aktif mi?)"))
+        setHata(m)
+        toast.hata(cevir("İşlem başarısız"), m)
+      })
+      .finally(() => { if (!iptal) setYukleniyor(false) })
+    return () => { iptal = true }
   }, [])
 
   async function kaydet() {
@@ -76,16 +90,24 @@ export default function MailFiltrePage() {
       setCozunum(r.data.cozunum ?? [])
       setToplamCidr(r.data.toplam_cidr)
       if (r.data.durum === cevir("kısmi")) {
-        setHata(cevir("Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı."))
+        const m = cevir("Bazı ASN girdileri çözülemedi (aşağıya bakın). Diğer kurallar uygulandı.")
+        setHata(m)
+        toast.hata(cevir("Kısmen uygulandı"), m)
       } else {
-        setBildirim(cevirT(cevir("✓ Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor."), r.data.toplam_cidr))
+        const m = cevirT(cevir("✓ Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor."), r.data.toplam_cidr)
+        setBildirim(m)
+        toast.basari(cevir("Kaydedildi"), m)
       }
-    } catch (e) { setHata(apiHata(e, cevir("Kaydedilemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Kaydedilemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setKaydediliyor(false) }
   }
 
-  const kart = 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm'
-  const ta = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-mono resize-y focus:outline-none focus:ring-2'
+  const kart = 'bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs'
+  const ta = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm font-mono resize-y focus:outline-none focus:ring-2'
 
   return (
     <div>
@@ -94,9 +116,6 @@ export default function MailFiltrePage() {
         {cevir("ASN girdikten sonra o otonom sistemin")} <span className="font-medium">{cevir("duyurduğu tüm IP blokları")}</span> {cevir("otomatik çözülüp engellenir.")}
         {cevir("Kimlik doğrulamış kullanıcılar ve yerel ağ bu kurallardan")} <span className="font-medium">{cevir("etkilenmez")}</span>.
       </p>
-
-      {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
       {yukleniyor ? <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div> : (
         <div className="space-y-5">
@@ -141,7 +160,7 @@ export default function MailFiltrePage() {
 
             {/* ASN çözüm özeti */}
             {(cozunum.length > 0 || toplamCidr !== null) && (
-              <div className="mt-4 border-t border-slate-100 dark:border-slate-700/60 pt-3">
+              <div className="mt-4 border-t border-slate-100 dark:border-dark-600/60 pt-3">
                 {toplamCidr !== null && (
                   <p className="text-xs text-slate-600 dark:text-slate-300 mb-2">
                     {cevir("Toplam")} <span className="font-semibold">{toplamCidr}</span> {cevir("IP/ağ engelleniyor.")}
@@ -153,11 +172,11 @@ export default function MailFiltrePage() {
                       <li key={i} className="text-xs flex flex-wrap items-center gap-x-2">
                         <span className="font-mono font-medium text-slate-700 dark:text-slate-200">{c.asn}</span>
                         {c.kaynak === 'yok'
-                          ? <span className="text-red-600 dark:text-red-400">🔴 {c.uyari || cevir("çözülemedi")}</span>
+                          ? <span className="text-red-600 dark:text-red-400">{c.uyari || cevir("çözülemedi")}</span>
                           : <>
                               <span className="text-slate-500">{c.prefiks_sayisi} {cevir("prefiks")}</span>
                               {c.kaynak === cevir("önbellek")
-                                ? <span className="text-amber-600 dark:text-amber-400" title={c.uyari}>{cevir("⚠ önbellekten")}</span>
+                                ? <span className="text-amber-600 dark:text-amber-400" title={c.uyari}>{cevir("önbellekten")}</span>
                                 : <span className="text-emerald-600 dark:text-emerald-400">{cevir("✓ canlı")}</span>}
                             </>}
                       </li>
@@ -169,10 +188,10 @@ export default function MailFiltrePage() {
           </section>
 
           <div className="flex justify-end">
-            <button onClick={kaydet} disabled={kaydediliyor}
-              className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-6 py-2.5 rounded-lg disabled:opacity-60 transition-colors">
+            <Button onClick={kaydet} disabled={kaydediliyor} color="primary"
+              className="text-sm px-6 py-2.5">
               {kaydediliyor ? cevir("Uygulanıyor…") : cevir("Kaydet ve Uygula")}
-            </button>
+            </Button>
           </div>
         </div>
       )}

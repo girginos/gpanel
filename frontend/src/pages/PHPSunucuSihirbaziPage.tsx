@@ -6,12 +6,13 @@ import { useTranslation } from 'react-i18next'
 // PHP & Sunucu Kurulum Sihirbazı — dağınık PHP sürüm/modül/loader/web-sunucu
 // yönetimini tek yerde toplar (EasyApache tarzı adım-adım). Her adım mevcut
 // yönetim ekranını gömülü (gomulu) render eder; backend endpoint'leri aynıdır.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { apiHata } from '@/lib/api'
 import { useDialog } from '@/components/Dialog'
+import { Button } from '@/components/ui'
 import PHPSurumleriPage, { SurumSecim } from './PHPSurumleriPage'
 import PHPModuleriPage, { Secim } from './PHPModuleriPage'
 
@@ -74,6 +75,9 @@ const PSIHIR_EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PSIHIR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
+// Yoklama backstop'u: kurulum normalde saniyeler-birkac dk; 10 dk sonsuz-asilma korkulugu.
+const PHP_POLL_AZAMI_MS = 30 * 60_000
+
 export default function PHPSunucuSihirbaziPage() {
   useTranslation() // dil re-render aboneligi
   // Aktif adım kalıcı (localStorage) — sayfa yenilenince kalınan adım korunur.
@@ -115,14 +119,14 @@ export default function PHPSunucuSihirbaziPage() {
               <button
                 key={a.key}
                 onClick={() => setAktif(a.key)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition shrink-0 lg:shrink w-auto lg:w-full ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition shrink-0 lg:shrink w-auto lg:w-full ${
                   secili
                     ? 'bg-brand-50 dark:bg-brand-900/25 border border-brand-300 dark:border-brand-700'
-                    : 'border border-transparent hover:bg-slate-50 dark:hover:bg-slate-800'
+                    : 'border border-transparent hover:bg-slate-50 dark:hover:bg-dark-700'
                 }`}
               >
                 <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0 ${
-                  secili ? 'bg-brand-600 text-white' : tamam ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  secili ? 'bg-brand-600 text-white' : tamam ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-dark-600 text-slate-600 dark:text-slate-300'
                 }`}>
                   {tamam ? '✓' : i + 1}
                 </span>
@@ -137,7 +141,7 @@ export default function PHPSunucuSihirbaziPage() {
 
         {/* İçerik */}
         <section className="min-w-0">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-5">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 sm:p-5">
             {aktif === 'surumler' && <PHPSurumleriPage gomulu secilenSurumler={secilenSurumler} setSecilenSurumler={setSecilenSurumler} />}
             {aktif === 'eklentiler' && <PHPModuleriPage gomulu secilenler={secilenler} setSecilenler={setSecilenler} />}
             {aktif === 'runtimeler' && <RuntimeAdim secilenRuntimeler={secilenRuntimeler} setSecilenRuntimeler={setSecilenRuntimeler} />}
@@ -147,16 +151,18 @@ export default function PHPSunucuSihirbaziPage() {
 
           {/* İleri / Geri */}
           <div className="flex items-center justify-between mt-4">
-            <button
+            <Button
               onClick={() => aktifIdx > 0 && setAktif(ADIMLAR[aktifIdx - 1].key)}
               disabled={aktifIdx === 0}
-              className="px-4 py-2 text-sm rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40"
-            >{cevir("← Geri")}</button>
+              variant="outlined"
+              className="px-4 py-2 text-sm"
+            >{cevir("← Geri")}</Button>
             {aktifIdx < ADIMLAR.length - 1 ? (
-              <button
+              <Button
                 onClick={() => setAktif(ADIMLAR[aktifIdx + 1].key)}
-                className="px-4 py-2 text-sm rounded-md bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 font-medium"
-              >{cevir("İleri →")}</button>
+                color="primary"
+                className="px-4 py-2 text-sm"
+              >{cevir("İleri →")}</Button>
             ) : (
               <Link to="/araclar-ayarlar" className="px-4 py-2 text-sm rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium">{cevir("Bitir")}</Link>
             )}
@@ -178,6 +184,11 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
   const [gruplar, setGruplar] = useState<RuntimeGrup[]>([])
   const [yuk, setYuk] = useState(true)
   const [kaldiran, setKaldiran] = useState<string | null>(null)
+  // Calisan kaldirma yoklamasini unmount'ta iptal et (poll sizintisi olmasin).
+  const pollAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => { pollAbortRef.current?.abort() }
+  }, [])
 
   function yukle() {
     setYuk(true)
@@ -199,15 +210,22 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
     try {
       const { data } = await api.post('/runtimeler/kaldir', { anahtar: e.anahtar })
       if (data.is_id) {
+        const ctrl = new AbortController()
+        pollAbortRef.current = ctrl
+        const bitis = Date.now() + PHP_POLL_AZAMI_MS
         for (;;) {
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
           await new Promise(r => setTimeout(r, 1500))
-          const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
+          if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+          const p = await api.get('/runtimeler/durum', { params: { id: data.is_id }, signal: ctrl.signal })
           if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kaldırma başarısız"))
           if (p.data.durum === 'tamam') break
+          if (Date.now() >= bitis) throw new Error(cevir("Kaldırma zaman aşımı (30 dk) — sunucu tamamlamadı"))
         }
       }
       yukle()
     } catch (err) {
+      if (pollAbortRef.current?.signal.aborted) return
       (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(err, cevir("Kaldırma başarısız")) }))
     } finally {
       setKaldiran(null)
@@ -237,7 +255,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                   className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${
                     e.kurulu ? 'bg-emerald-50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800'
                     : sec ? 'bg-brand-50 dark:bg-brand-900/15 border-brand-300 dark:border-brand-700'
-                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                    : 'bg-white dark:bg-dark-700 border-slate-200 dark:border-dark-600'
                   }`}>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{e.ad}</div>
@@ -245,7 +263,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                   </div>
                   {e.yonetilemez ? (
                     // Sistem yönetimli (ör. Node.js/nodesource) — yalnız durum, aksiyon yok.
-                    <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${e.kurulu ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+                    <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${e.kurulu ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400'}`}>
                       {e.kurulu ? cevir("✓ Kurulu") : cevir("Kurulu değil")}
                     </span>
                   ) : (
@@ -253,7 +271,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
                       onClick={() => e.kurulu ? kaldir(e) : secimToggle(e)}
                       disabled={kaldiran === e.anahtar}
                       title={e.kurulu ? cevir("Kaldır") : (sec ? cevir("Seçimi kaldır") : cevir("Kurulacaklara ekle"))}
-                      className={`flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                      className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition ${
                         kaldiran === e.anahtar ? 'bg-sky-400 animate-pulse' : e.kurulu ? 'bg-emerald-500' : sec ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
                       } ${kaldiran === e.anahtar ? 'opacity-60' : ''}`}
                     >
@@ -277,15 +295,18 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
 function WebSunucuAdim() {
   const [durum, setDurum] = useState<{ nginx?: boolean; fpm_sayisi?: number } | null>(null)
   useEffect(() => {
+    let iptal = false
     api.get('/php-surumler').then(r => {
+      if (iptal) return
       const yuklu = (r.data?.surumler || []).filter((s: any) => s.yuklu).length
       setDurum({ nginx: true, fpm_sayisi: yuklu })
-    }).catch(() => setDurum({ nginx: true }))
+    }).catch(() => { if (!iptal) setDurum({ nginx: true }) })
+    return () => { iptal = true }
   }, [])
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Web Sunucu")}</h2>
-      <div className="rounded-xl border border-sky-200 dark:border-sky-800/50 bg-sky-50 dark:bg-sky-900/15 p-4 text-sm text-sky-800 dark:text-sky-200">
+      <div className="rounded-lg border border-sky-200 dark:border-sky-800/50 bg-sky-50 dark:bg-sky-900/15 p-4 text-sm text-sky-800 dark:text-sky-200">
         {cevir("Bu platform")} <strong>{cevir("nginx + izole per-tenant PHP-FPM")}</strong> {cevir("mimarisi kullanır. cPanel/EasyApache'deki gibi Apache derlemesi veya global Apache modül seçimi")} <strong>{cevir("yoktur")}</strong>{cevir("; her domain kendi PHP-FPM havuzunda ve nginx vhost'unda çalışır.")}
       </div>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -303,7 +324,7 @@ function WebSunucuAdim() {
 
 function DurumKart({ etiket, deger, ok }: { etiket: string; deger: string; ok?: boolean }) {
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+    <div className="rounded-lg border border-slate-200 dark:border-dark-600 p-3">
       <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-1">{etiket}</div>
       <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800 dark:text-slate-200">
         <span className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
@@ -322,9 +343,16 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
   const [durumlar, setDurumlar] = useState<Toplu[]>([])
   const [aktifAdim, setAktifAdim] = useState<{ ad: string; adim: string; yuzde: number } | null>(null)
   const [bitti, setBitti] = useState(false)
+  // Calisan toplu-kurulum yoklamasini unmount'ta iptal et (poll sizintisi olmasin).
+  const pollAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => { pollAbortRef.current?.abort() }
+  }, [])
 
   useEffect(() => {
-    api.get('/php-surumler').then(r => setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu))).catch(() => {})
+    let iptal = false
+    api.get('/php-surumler').then(r => { if (iptal) return; setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu)) }).catch(() => {})
+    return () => { iptal = true }
   }, [])
 
   const toplamIs = secilenSurumler.length + secilenler.length + secilenRuntimeler.length
@@ -339,7 +367,10 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
       ...secilenRuntimeler.map(s => ({ tip: 'runtime' as const, anahtar: s.anahtar, ad: s.ad, surum: '', durum: 'bekliyor' as const })),
     ]
     setDurumlar(liste)
+    const ctrl = new AbortController()
+    pollAbortRef.current = ctrl
     for (let i = 0; i < liste.length; i++) {
+      if (ctrl.signal.aborted) break
       const s = liste[i]
       setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'kuruluyor' } : x))
       setAktifAdim({ ad: s.ad, adim: cevir("Başlatılıyor…"), yuzde: 2 })
@@ -354,13 +385,17 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
           // (b) sonra bitene kadar poll.
           let gordukCalisiyor = false
           const basla = Date.now()
+          const surumBitis = Date.now() + PHP_POLL_AZAMI_MS
           for (;;) {
+            if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
             await new Promise(r => setTimeout(r, 2000))
-            const d = await api.get('/php-surumler/durum')
+            if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+            const d = await api.get('/php-surumler/durum', { signal: ctrl.signal })
             const calis = !!(d.data?.calisiyor && d.data?.surum === s.surum)
             if (calis) gordukCalisiyor = true
             setAktifAdim({ ad: s.ad, adim: calis ? cevir("Paketler kuruluyor…") : cevir("Tamamlanıyor…"), yuzde: calis ? 55 : 90 })
             if (!d.data?.calisiyor && (gordukCalisiyor || Date.now() - basla > 20000)) break
+            if (Date.now() >= surumBitis) throw new Error(cevir("PHP sürüm kurulum zaman aşımı (30 dk)"))
           }
           // 🔴 GERÇEK doğrulama: detached iş HÂLÂ kuruyor olabilir (grace'te kırıldıysa)
           // ve binary birkaç saniye sonra görünebilir. Sürüm yüklü listesinde belirene
@@ -368,7 +403,8 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
           // hangi kaynaktan olursa olsun kuruldu demektir).
           let yuklendi = false
           for (let t = 0; t < 45; t++) {
-            const chk = await api.get('/php-surumler')
+            if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+            const chk = await api.get('/php-surumler', { signal: ctrl.signal })
             if ((chk.data?.surumler || []).some((x: any) => x.surum === s.surum && x.yuklu)) { yuklendi = true; break }
             setAktifAdim({ ad: s.ad, adim: cevir("Doğrulanıyor…"), yuzde: 95 })
             await new Promise(r => setTimeout(r, 2000))
@@ -378,32 +414,42 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
           // Runtime kurulumu (.NET/Node/Python) — async is_id + durum poll.
           const { data } = await api.post('/runtimeler/kur', { anahtar: s.anahtar })
           if (data.is_id) {
+            const runtimeBitis = Date.now() + PHP_POLL_AZAMI_MS
             for (;;) {
+              if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
               await new Promise(r => setTimeout(r, 1500))
-              const p = await api.get('/runtimeler/durum', { params: { id: data.is_id } })
+              if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+              const p = await api.get('/runtimeler/durum', { params: { id: data.is_id }, signal: ctrl.signal })
               setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
               if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kurulum başarısız"))
               if (p.data.durum === 'tamam') break
+              if (Date.now() >= runtimeBitis) throw new Error(cevir("Runtime kurulum zaman aşımı (30 dk)"))
             }
           }
         } else {
           // Eklenti — bundled dnf / pecl / derleme (async is_id + yüzde).
           const { data } = await api.post('/php-extensions/pecl-install', { surum: s.surum, paket: s.anahtar })
           if (data.is_id) {
+            const eklBitis = Date.now() + PHP_POLL_AZAMI_MS
             for (;;) {
+              if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
               await new Promise(r => setTimeout(r, 1500))
-              const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id } })
+              if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
+              const p = await api.get('/php-extensions/pecl-durum', { params: { id: data.is_id }, signal: ctrl.signal })
               setAktifAdim({ ad: s.ad, adim: p.data.adim || '…', yuzde: p.data.yuzde || 0 })
               if (p.data.durum === 'hata') throw new Error(p.data.hata || cevir("Kurulum başarısız"))
               if (p.data.durum === 'tamam') break
+              if (Date.now() >= eklBitis) throw new Error(cevir("Eklenti kurulum zaman aşımı (30 dk)"))
             }
           }
         }
         setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'tamam' } : x))
       } catch (e) {
+        if (ctrl.signal.aborted) break
         setDurumlar(prev => prev.map((x, j) => j === i ? { ...x, durum: 'hata', mesaj: apiHata(e) } : x))
       }
     }
+    if (ctrl.signal.aborted) return // iptal edildi (unmount): kuyrugu ve onTemizle'yi calistirma
     setAktifAdim(null); setCalisiyor(false); setBitti(true)
     onTemizle() // seçim listelerini temizle (kurulanlar artık "kurulu")
   }
@@ -417,7 +463,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
         <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulu PHP sürümleri")}</div>
         <div className="flex flex-wrap gap-2">
           {surumler.length === 0 ? <span className="text-sm text-slate-500">—</span> : surumler.map((s: any) => (
-            <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700/60 text-sm font-mono text-slate-800 dark:text-slate-200">
+            <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-dark-600/60 text-sm font-mono text-slate-800 dark:text-slate-200">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />PHP {s.surum}
             </span>
           ))}
@@ -428,7 +474,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
       <div>
         <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulacak bileşenler")} ({toplamIs})</div>
         {toplamIs === 0 && !bitti ? (
-          <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400">
+          <div className="rounded-lg border border-dashed border-slate-300 dark:border-dark-600 p-4 text-sm text-slate-500 dark:text-slate-400">
             {cevir("\"PHP Sürümleri\" ve \"PHP Eklentileri\" adımlarından kurmak istediklerinizi toggle ile işaretleyin, sonra buradan tümünü birlikte kurun.")}
           </div>
         ) : (
@@ -438,9 +484,9 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
               ...secilenler.map(s => ({ tip: 'eklenti' as const, anahtar: s.anahtar, ad: s.ad, surum: s.surum, durum: 'bekliyor' as const })),
               ...secilenRuntimeler.map(s => ({ tip: 'runtime' as const, anahtar: s.anahtar, ad: s.ad, surum: '', durum: 'bekliyor' as const })),
             ] as Toplu[]).map((s) => (
-              <div key={s.tip + s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+              <div key={s.tip + s.surum + s.anahtar} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700">
                 <div className="min-w-0">
-                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? cevir("sürüm") : s.tip === 'runtime' ? 'runtime' : cevir("eklenti")}</span>
+                  <span className="text-[9px] uppercase tracking-wide mr-1.5 px-1 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400">{s.tip === 'surum' ? cevir("sürüm") : s.tip === 'runtime' ? 'runtime' : cevir("eklenti")}</span>
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{s.ad}</span>
                   {s.tip === 'eklenti' && <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">PHP {s.surum}</span>}
                   {s.mesaj && <div className="text-[11px] text-red-600 dark:text-red-400 mt-0.5">{s.mesaj}</div>}
@@ -468,13 +514,13 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
         </div>
       )}
 
-      {bitti && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">{cevir("✓ Toplu kurulum tamamlandı. Kurulan sürüm/eklentiler ilgili adımlarda aktif görünür.")}</div>}
+      {bitti && <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-900/15 p-4 text-sm text-emerald-800 dark:text-emerald-200">{cevir("✓ Toplu kurulum tamamlandı. Kurulan sürüm/eklentiler ilgili adımlarda aktif görünür.")}</div>}
 
       {toplamIs > 0 && (
-        <button onClick={topluKur} disabled={calisiyor}
-          className="w-full sm:w-auto px-5 py-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-60">
+        <Button onClick={topluKur} disabled={calisiyor} color="primary"
+          className="w-full sm:w-auto px-5 py-2.5 text-sm">
           {calisiyor ? cevir("Kuruluyor…") : cevirT(cevir("{0} bileşeni kur"), toplamIs)}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -482,7 +528,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
 
 function DurumRozet({ durum }: { durum: Toplu['durum'] }) {
   const map: Record<Toplu['durum'], { t: string; c: string }> = {
-    bekliyor: { t: 'Bekliyor', c: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400' },
+    bekliyor: { t: 'Bekliyor', c: 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400' },
     kuruluyor: { t: 'Kuruluyor…', c: 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' },
     tamam: { t: '✓ Kuruldu', c: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' },
     hata: { t: '✕ Hata', c: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' },

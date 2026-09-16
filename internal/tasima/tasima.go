@@ -48,7 +48,7 @@ type Ayarlar struct {
 	Veritabani bool   `json:"veritabani"`
 	DNS        bool   `json:"dns"`
 	SSL        bool   `json:"ssl"`
-	Posta      bool   `json:"posta"` // kutular + mail verisi (Plesk maildir)
+	Posta      bool   `json:"posta"`  // kutular + mail verisi (Plesk maildir)
 	Ustune     bool   `json:"ustune"` // hedefte domain varsa uzerine yaz
 	HedefPHP   string `json:"hedef_php"`
 	PlanID     int64  `json:"plan_id"`
@@ -89,7 +89,8 @@ var (
 	reDBAd = regexp.MustCompile(`^[A-Za-z0-9_$-]{1,64}$`)
 )
 
-var gecerliTipler = map[string]bool{"cpanel": true, "plesk": true, "directadmin": true}
+// gpanel: kaynak da bir GirginOSPanel kurulumu (panelden panele tasima).
+var gecerliTipler = map[string]bool{"cpanel": true, "plesk": true, "directadmin": true, "gpanel": true}
 
 // Dogrula — Kaynak girdisini kabul etmeden once tam dogrular.
 // Bastaki '-' kontrolu ozellikle onemli: "-oProxyCommand=..." bir ssh BAYRAGIDIR.

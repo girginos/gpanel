@@ -700,7 +700,7 @@ func restoreArsivTara(abs string) error {
 				return fmt.Errorf("güvenlik: mutlak symlink hedefi reddedildi: %s -> %s", hd.Name, hd.Linkname)
 			}
 			// hedefi symlink'in bulunduğu dizine göre çöz; arşiv kökünü aşamaz.
-			if yolKacis(filepath.Join(filepath.Dir(name), hd.Linkname)) {
+			if yolKacis(filepath.Join(filepath.Dir(name), hd.Linkname)) { //nolint:gosec // G305 FP: bu Join YAZMA hedefi degil; salt-okunur on-tarama restoreArsivTara icinde symlink hedefi arsiv kokunu asiyor mu diye yolKacis ile SINANIR, asan uye REDDEDILIR (cikarma oncesi cagrilir, satir 809).
 				return fmt.Errorf("güvenlik: arşiv dışına symlink reddedildi: %s -> %s", hd.Name, hd.Linkname)
 			}
 		case tar.TypeLink:
@@ -757,7 +757,7 @@ func cikarUyeleri(mod, sk string, tumUyeler, yollar []string) []string {
 			legacySql = append(legacySql, m)
 		}
 	}
-	dbUye := []string{}
+	var dbUye []string
 	if hasDbDir {
 		dbUye = []string{"__db__"}
 	} else {

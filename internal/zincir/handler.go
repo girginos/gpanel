@@ -60,6 +60,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
 	}
+	//nolint:gosec // G202: kos = kapsam() SABİT rol ifadesi (reseller_id IS NULL | reseller_id = ? | domain_id = ?); değerler arg ile ? bağlanır, kullanıcı girdisi enterpole edilmez.
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT z.id, z.domain_id, COALESCE(d.alan_adi,''), z.asamalar, z.guven, z.seviye,
 		        DATE_FORMAT(z.created_at,'%Y-%m-%d %H:%i:%s')
@@ -108,6 +109,7 @@ func zincirOlaylari(r *http.Request, db *sql.DB, domID int64, tarih, kos string,
 	// AMA kos yine uygulanır. müşteri kapsamı (domain_id=?) NULL≠domID olduğundan
 	// giris'i otomatik dışlar (kiracının panel-login atağını müşteriye sızdırmaz);
 	// admin/reseller kapsamı reseller_id üzerinden giris'i dahil eder.
+	//nolint:gosec // G202: kos = çağıranın kapsam() SABİT rol ifadesi; domID, scopeArg, tarih ve pencereDk değerleri args ile ? bağlanır, kullanıcı girdisi enterpole edilmez.
 	rows, err := db.QueryContext(ctx,
 		`SELECT kaynak, asama, seviye, ozet, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
 		 FROM av_olay

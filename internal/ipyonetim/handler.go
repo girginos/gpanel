@@ -23,9 +23,9 @@ type Handler struct {
 }
 
 type listeYanit struct {
-	SunucuIPler   []SunucuIP  `json:"sunucu_ipler"`   // Sunucudaki TÜM IP'ler (kullanıcı+panel)
-	DBKayitlar    []dbKayit   `json:"db_kayitlar"`    // Panel'in DB'de tuttuğu kayıtlar
-	VarsayilanArayuz string   `json:"varsayilan_arayuz"`
+	SunucuIPler      []SunucuIP `json:"sunucu_ipler"` // Sunucudaki TÜM IP'ler (kullanıcı+panel)
+	DBKayitlar       []dbKayit  `json:"db_kayitlar"`  // Panel'in DB'de tuttuğu kayıtlar
+	VarsayilanArayuz string     `json:"varsayilan_arayuz"`
 }
 
 type dbKayit struct {
@@ -39,7 +39,7 @@ type dbKayit struct {
 
 func (h *Handler) Liste(w http.ResponseWriter, _ *http.Request) {
 	y := listeYanit{
-		SunucuIPler:     SunucuIPler(),
+		SunucuIPler:      SunucuIPler(),
 		VarsayilanArayuz: varsayilanArayuz(),
 	}
 	rows, err := h.DB.Query(`SELECT id, ip, iface, cidr, note, created_at FROM cp_server_ips ORDER BY created_at`)
@@ -140,7 +140,8 @@ func (h *Handler) DomainIPGuncelle(w http.ResponseWriter, r *http.Request) {
 	sunucuVar := false
 	for _, s := range SunucuIPler() {
 		if s.IP == newIP {
-			sunucuVar = true; break
+			sunucuVar = true
+			break
 		}
 	}
 	res, err := h.DB.ExecContext(r.Context(),

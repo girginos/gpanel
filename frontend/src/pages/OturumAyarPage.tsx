@@ -6,6 +6,8 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { Button } from '@/components/ui'
+import { useToast } from '@/components/Toast'
 
 /*
  * Oturum Boşta Süresi.
@@ -45,6 +47,8 @@ const OTURUM_EN: Record<string, string> = {
   "Oturum Güvenliği": "Session Security",
   "Oturum boşta süresi kapatıldı — yalnız JWT mutlak süresi kaldı.": "Session idle timeout disabled — only the JWT absolute lifetime remains.",
   "Üst sınır 1440 dakika (24 saat).": "Maximum 1440 minutes (24 hours).",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (OTURUM_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -56,6 +60,7 @@ export default function OturumAyarPage() {
   const [gonderiliyor, setGonderiliyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [mesaj, setMesaj] = useState<string | null>(null)
+  const toast = useToast()
 
   useEffect(() => { void yukle() }, [])
 
@@ -66,7 +71,9 @@ export default function OturumAyarPage() {
       setMevcut(r.data.dakika)
       setTaslak(String(r.data.dakika))
     } catch (e) {
-      setHata(apiHata(e, cevir("Ayar okunamadı")))
+      const m = apiHata(e, cevir("Ayar okunamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
 
@@ -75,18 +82,25 @@ export default function OturumAyarPage() {
     setHata(null); setMesaj(null)
     const dk = parseInt(taslak, 10)
     if (Number.isNaN(dk) || dk < 0 || dk > 1440) {
-      setHata(cevir("0 ile 1440 arasında bir değer girin (0 = kapalı)")); return
+      const v = cevir("0 ile 1440 arasında bir değer girin (0 = kapalı)")
+      setHata(v)
+      toast.hata(cevir("İşlem başarısız"), v)
+      return
     }
     setGonderiliyor(true)
     try {
       await api.put('/settings/session-idle', { dakika: dk })
       setMevcut(dk)
-      setMesaj(dk === 0
+      const ok = dk === 0
         ? cevir("Oturum boşta süresi kapatıldı — yalnız JWT mutlak süresi kaldı.")
-        : cevirT(cevir("Oturum boşta süresi {0} dakika olarak kaydedildi."), dk))
+        : cevirT(cevir("Oturum boşta süresi {0} dakika olarak kaydedildi."), dk)
+      setMesaj(ok)
+      toast.basari(cevir("Kaydedildi"), ok)
       setTimeout(() => setMesaj(null), 5000)
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydedilemedi")))
+      const m = apiHata(e, cevir("Kaydedilemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setGonderiliyor(false) }
   }
 
@@ -110,9 +124,9 @@ export default function OturumAyarPage() {
       </div>
 
       {yukleniyor ? (
-        <div className="rounded-2xl border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : (
-        <form onSubmit={kaydet} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <form onSubmit={kaydet} className="rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
           <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             {cevir("Boşta süresi (dakika)")}
           </label>
@@ -124,51 +138,47 @@ export default function OturumAyarPage() {
               step={1}
               value={taslak}
               onChange={(e) => setTaslak(e.target.value)}
-              className="w-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="w-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
             />
             <span className="text-sm text-slate-500">{cevir("dakika")}</span>
             {[15, 30, 60, 120].map((v) => (
-              <button
+              <Button
                 key={v}
                 type="button"
+                variant="outlined"
                 onClick={() => setTaslak(String(v))}
-                className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                className="px-2 py-1 text-xs"
               >
                 {v}
-              </button>
+              </Button>
             ))}
-            <button
+            <Button
               type="button"
+              variant="outlined"
               onClick={() => setTaslak('0')}
-              className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+              className="px-2 py-1 text-xs"
               title={cevir("Kapat")}
             >
               {cevir("Kapat")}
-            </button>
+            </Button>
           </div>
           <p className="mt-2 text-xs text-slate-500">{cevir("Üst sınır 1440 dakika (24 saat).")}</p>
 
           <div className="mt-5 flex items-center gap-3">
-            <button
+            <Button
               type="submit"
+              color="primary"
               disabled={!degistiMi || gonderiliyor}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+              className="px-4 py-2 text-sm"
             >
               {gonderiliyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
-            </button>
+            </Button>
             {mevcut !== null && (
               <span className="text-xs text-slate-500">
                 {cevir("Mevcut:")} <span className="font-mono">{mevcut === 0 ? cevir("kapalı") : cevirT(cevir("{0} dk"), mevcut)}</span>
               </span>
             )}
           </div>
-
-          {mesaj && (
-            <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">{mesaj}</p>
-          )}
-          {hata && (
-            <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{hata}</p>
-          )}
         </form>
       )}
 

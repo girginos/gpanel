@@ -49,7 +49,7 @@ func RandomParola(n int) string {
 	return string(out)
 }
 
-var reDBKimlik = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+var reDBKimlik = regexp.MustCompile(`\A[A-Za-z0-9_]{1,64}\z`)
 
 // reDBSonek: musteri-verdigi DB/kullanici SONEKI (panel `<sk>_` onekini kendisi ekler).
 // Yalniz kucuk harf/rakam/alt-cizgi, 1-32 karakter. Onek eklendikten sonra toplam <=64
@@ -123,22 +123,30 @@ func ParolaGecerli(pw string) bool {
 	return !strings.ContainsAny(pw, "\r\n\x00")
 }
 
-// FTPCreate: ftp_accounts tablosuna kayit ekler, parolayi cleartext olarak tutar (Pure-FTPd MYSQLCrypt cleartext)
+// FTPCreate: ftp_accounts tablosuna kayit ekler; parola at-rest $6$ crypt hash olarak saklanir (password_md5 sutunu, Pure-FTPd MYSQLCrypt crypt)
 func FTPCreate(db *sql.DB, domainID int64, sistemKullanici, parola string, uidN, gidN int) error {
 	home := "/home/" + sistemKullanici
+	hash := FTPParolaHash(parola) // at-rest $6$ crypt (cleartext DEGIL)
+	if hash == "" {
+		return fmt.Errorf("güvenlik: FTP parola hash üretilemedi")
+	}
 	_, err := db.Exec(
 		`INSERT INTO ftp_accounts(domain_id, username, password_md5, home_dir, uid_n, gid_n, status)
 		 VALUES(?,?,?,?,?,?, 'active')
 		 ON DUPLICATE KEY UPDATE password_md5=VALUES(password_md5), home_dir=VALUES(home_dir), uid_n=VALUES(uid_n), gid_n=VALUES(gid_n), status='active'`,
-		domainID, sistemKullanici, parola, home, uidN, gidN)
+		domainID, sistemKullanici, hash, home, uidN, gidN)
 	return err
 }
 
 // FTPUpdatePassword: mevcut FTP hesabinin parolasini guncelle
 func FTPUpdatePassword(db *sql.DB, sistemKullanici, parola string) error {
+	hash := FTPParolaHash(parola) // at-rest $6$ crypt
+	if hash == "" {
+		return fmt.Errorf("güvenlik: FTP parola hash üretilemedi")
+	}
 	_, err := db.Exec(
 		`UPDATE ftp_accounts SET password_md5=? WHERE username=?`,
-		parola, sistemKullanici)
+		hash, sistemKullanici)
 	return err
 }
 
@@ -271,10 +279,18 @@ func SyncSSHPassword(db *sql.DB, sistemKullanici string) error {
 	if strings.TrimSpace(pw) == "" {
 		return fmt.Errorf("ftp parolası boş")
 	}
-	if !ParolaGecerli(pw) {
-		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
+	// pw artik $6$ crypt hash'i (FTP ile paylasilan). /etc/shadow'a -e ile DOGRUDAN
+	// yazilir → SSH parolasi = FTP parolasi (ayni hash). Eski duz-metin satir icin
+	// (migrate edilmemis) geriye-uyumlu cleartext chpasswd.
+	var cmd *exec.Cmd
+	if IsFTPHash(pw) {
+		cmd = exec.Command("chpasswd", "-e")
+	} else {
+		if !ParolaGecerli(pw) {
+			return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
+		}
+		cmd = exec.Command("chpasswd")
 	}
-	cmd := exec.Command("chpasswd")
 	cmd.Stdin = strings.NewReader(sistemKullanici + ":" + pw)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("chpasswd: %s: %w", strings.TrimSpace(string(out)), err)

@@ -13,6 +13,8 @@ import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Plan = {
   id: number
@@ -74,12 +76,14 @@ const SVCPLAN_EN: Record<string, string> = {
   "Planı sil": "Delete plan",
   "Saatlik gönderim": "Hourly sending",
   "İlk paketinizi tanımlayarak başlayın.": "Start by defining your first package.",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SVCPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function ServicePlansPage() {
   useTranslation() // dil re-render aboneligi
   const { bilgi } = useDialog()
+  const toast = useToast()
   const [items, setItems] = useState<Plan[]>([])
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
@@ -91,12 +95,14 @@ export default function ServicePlansPage() {
     setYuk(true); setHata(null)
     api.get<Plan[]>('/plans')
       .then(r => setItems(r.data))
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [])
   useEffect(() => {
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala(cevir("PHP sürümleri alınamadı")))
+    let iptal = false
+    api.get<Surum[]>('/php/versions').then(r => { if (iptal) return; setSurumler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("PHP sürümleri alınamadı"))(e) })
+    return () => { iptal = true }
   }, [])
 
   async function sil() {
@@ -123,8 +129,6 @@ export default function ServicePlansPage() {
         butonlar={[]}
       />
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {yuk ? (
         <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
       ) : items.length === 0 ? (
@@ -136,7 +140,7 @@ export default function ServicePlansPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {items.map(p => (
-            <div key={p.id} className={`bg-white dark:bg-slate-800 border rounded-2xl p-5 shadow-sm ${p.varsayilan ? 'border-brand-400 ring-2 ring-brand-100 dark:ring-brand-900/40' : 'border-slate-200 dark:border-slate-700'}`}>
+            <div key={p.id} className={`bg-white dark:bg-dark-700 border rounded-lg p-5 shadow-xs ${p.varsayilan ? 'border-brand-400 ring-2 ring-brand-100 dark:ring-brand-900/40' : 'border-slate-200 dark:border-dark-600'}`}>
               <div className="flex items-start justify-between mb-2">
                 <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -145,7 +149,7 @@ export default function ServicePlansPage() {
                   </h3>
                   {p.aciklama && <p className="text-sm text-slate-500 dark:text-slate-500 mt-0.5">{p.aciklama}</p>}
                 </div>
-                {p.php_surum && <span className="shrink-0 text-[11px] font-mono font-semibold bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">PHP {p.php_surum}</span>}
+                {p.php_surum && <span className="shrink-0 text-[11px] font-mono font-semibold bg-slate-100 dark:bg-dark-600/60 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">PHP {p.php_surum}</span>}
               </div>
 
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-1.5 text-sm mt-4">
@@ -157,10 +161,10 @@ export default function ServicePlansPage() {
               </dl>
 
               <div className="mt-4 flex gap-2">
-                <Link to={`/araclar/paketler/${p.id}`} className="flex-1 text-center text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md">
+                <Link to={`/araclar/paketler/${p.id}`} className="flex-1 inline-flex items-center justify-center text-center text-sm font-medium px-3 py-1.5 rounded-md border border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-300 hover:bg-brand-500/20 hover:border-brand-500/50 transition">
                   {cevir("Detay & Kaynak Limitleri")}
                 </Link>
-                <button onClick={() => setSilinecek(p)} className="text-sm px-3 py-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 rounded-md">{cevir("Sil")}</button>
+                <Button onClick={() => setSilinecek(p)} color="error" variant="soft" className="text-sm px-3 py-1.5">{cevir("Sil")}</Button>
               </div>
             </div>
           ))}
@@ -227,14 +231,17 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
   })
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
+  const toast = useToast()
   // Mail eklentisi aktif+ödemeli ise plandaki mail kotası alanlarını göster.
   // DomainPlanPage/PaketDetayPage ile AYNI kapı — lisans kalkınca alanlar
   // kendiliğinden gizlenir; olmayan bir özelliği vaat etmeyiz.
   const [mailAktif, setMailAktif] = useState(false)
   useEffect(() => {
+    let iptal = false
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
-      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
-      .catch(() => setMailAktif(false))
+      .then(r => { if (iptal) return; setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)) })
+      .catch(() => { if (!iptal) setMailAktif(false) })
+    return () => { iptal = true }
   }, [])
 
   const phpOpts = Array.from(new Set([
@@ -251,7 +258,9 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
       else await api.put(`/plans/${form.id}`, form)
       onKayit()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kayıt başarısız")))
+      const m = apiHata(e, cevir("Kayıt başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -270,7 +279,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("PHP Sürümü")}</label>
             <select value={form.php_surum} onChange={e => setForm({ ...form, php_surum: e.target.value })}
-              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
+              className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-700 rounded text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
               {phpOpts.map(v => <option key={v} value={v}>PHP {v}</option>)}
             </select>
           </div>
@@ -282,7 +291,7 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
         {/* Mail kotaları — yalnız mail eklentisi aktifken. Olmayan bir özelliği
             plan formunda göstermek yanıltıcı olurdu (lisans kalkınca gizlenir). */}
         {mailAktif && (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+          <div className="rounded-lg border border-slate-200 dark:border-dark-600 p-3">
             <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{cevir("E-posta (Mail eklentisi)")}</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <Sayi etiket={cevir("E-posta kutusu")} value={form.max_email} setVal={v => setForm({ ...form, max_email: v })} />
@@ -298,11 +307,9 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
         </label>
         <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("0 = sınırsız. Disk/trafik MB cinsindendir. Bu plandaki yeni domainler seçili PHP sürümüyle kurulur.")}</p>
 
-        {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onKapat} className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm">{cevir("İptal")}</button>
-          <button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded-md">{isleniyor ? cevir('Kaydediliyor…') : (yeni ? cevir('Ekle') : cevir("Güncelle"))}</button>
+          <Button type="button" variant="outlined" onClick={onKapat} className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+          <Button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 text-sm">{isleniyor ? cevir('Kaydediliyor…') : (yeni ? cevir('Ekle') : cevir("Güncelle"))}</Button>
         </div>
       </form>
     </Modal>

@@ -22,6 +22,22 @@ type ioncubeReq struct {
 	Surum string `json:"surum"`
 }
 
+// phpSurumGuvenli (defense-in-depth): PHP sürümü yalnız rakam+nokta içerebilir —
+// path-traversal karakteri ('/', '..') taşıyamaz. surumByID zaten kurulu-sürüm
+// allowlist'i ile doğrular; bu ek biçim-sanitizasyonu SAST taint-izini de kırar
+// (CWE-22 FP: değer "ioncube_loader_lin_<sürüm>.so" olarak dosya yolunda kullanılıyor).
+func phpSurumGuvenli(s string) bool {
+	if s == "" || strings.Contains(s, "..") {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 // IonCubeKur: belirtilen sürüm için IonCube loader kurar (zend_extension)
 func (h *Handlers) IonCubeKur(w http.ResponseWriter, r *http.Request) {
 	var req ioncubeReq
@@ -32,6 +48,10 @@ func (h *Handlers) IonCubeKur(w http.ResponseWriter, r *http.Request) {
 	s, ok := surumByID(req.Surum)
 	if !ok {
 		httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen sürüm")
+		return
+	}
+	if !phpSurumGuvenli(req.Surum) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz sürüm biçimi")
 		return
 	}
 
@@ -127,6 +147,10 @@ func (h *Handlers) IonCubeKaldir(w http.ResponseWriter, r *http.Request) {
 	s, ok := surumByID(req.Surum)
 	if !ok {
 		httpx.WriteError(w, http.StatusBadRequest, "desteklenmeyen sürüm")
+		return
+	}
+	if !phpSurumGuvenli(req.Surum) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz sürüm biçimi")
 		return
 	}
 	iniPath := filepath.Join(s.IniDir, "00-ioncube.ini")

@@ -27,16 +27,16 @@ import (
 )
 
 const (
-	pencereDk     = 15   // korelasyon penceresi (dakika)
-	tickSaniye    = 20   // tarama aralığı
-	yenidenDk     = 30   // aynı imzayı yeniden bildirmeden önce
-	girisYenidenDk = 10  // giris re-emit dedup — pencereDk(15)'ten KÜÇÜK olmalı: sürekli
+	pencereDk      = 15 // korelasyon penceresi (dakika)
+	tickSaniye     = 20 // tarama aralığı
+	yenidenDk      = 30 // aynı imzayı yeniden bildirmeden önce
+	girisYenidenDk = 10 // giris re-emit dedup — pencereDk(15)'ten KÜÇÜK olmalı: sürekli
 	//                      atak sırasında giris hep pencere-içi kalsın (kör-boşluk yok, üst üste ~5dk)
-	domainDk      = 30   // domain başına bildirim cooldown (imzadan BAĞIMSIZ)
-	domainMaxBild = 3    // cooldown penceresinde domain başına en çok zincir bildirimi
-	olayLimit     = 500  // domain başına tek turda çekilecek en çok olay (bellek sınırı)
-	saklamaGun    = 7    // av_olay/av_zincir retention (gün)
-	temizlikDk    = 60   // retention job aralığı (dakika)
+	domainDk      = 30  // domain başına bildirim cooldown (imzadan BAĞIMSIZ)
+	domainMaxBild = 3   // cooldown penceresinde domain başına en çok zincir bildirimi
+	olayLimit     = 500 // domain başına tek turda çekilecek en çok olay (bellek sınırı)
+	saklamaGun    = 7   // av_olay/av_zincir retention (gün)
+	temizlikDk    = 60  // retention job aralığı (dakika)
 	sorguTimeout  = 5 * time.Second
 )
 
@@ -217,7 +217,7 @@ func temizle(db *sql.DB) {
 	for _, tbl := range []string{"av_olay", "av_zincir"} {
 		for i := 0; i < 20; i++ { // en çok 20×5000 satır/tur
 			r, err := db.ExecContext(ctx,
-				"DELETE FROM "+tbl+" WHERE created_at < (NOW() - INTERVAL ? DAY) LIMIT 5000", saklamaGun)
+				"DELETE FROM "+tbl+" WHERE created_at < (NOW() - INTERVAL ? DAY) LIMIT 5000", saklamaGun) //nolint:gosec // G202: tbl SABİT dilimden gelir ([]string{"av_olay","av_zincir"}); saklamaGun ? ile bağlanır, kullanıcı girdisi yok.
 			if err != nil {
 				log.Printf("zincir temizlik %s: %v", tbl, err)
 				break

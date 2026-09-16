@@ -20,9 +20,13 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/provisioner"
+	"girginospanel/internal/surum"
 )
 
-const PanelSurum = "GirginOSPanel 0.2.0"
+// PanelSurum — TEK kanonik surum (internal/surum). Yalniz SURUM dizesidir; marka
+// adi UI'da AYRI gosterilir (footer/Izleme/Istatistikler "Panel surumu" satiri) —
+// eskiden "GirginOSPanel 0.2.0" idi, hem bayat hem marka'yi tekrar ediyordu.
+var PanelSurum = surum.Panel
 
 type CPUUsage struct {
 	Yuzde    float64 `json:"yuzde"`
@@ -169,21 +173,24 @@ func ReadMem() (MemUsage, error) {
 	for s.Scan() {
 		line := s.Text()
 		var v int64
+		// Sscanf hatası bilinçli yok sayılır (idiyom): ayrıştırma başarısızsa v=0
+		// kalır; used/oran hesapları sıfırı güvenle işler (total>0 kapısı, used<=0
+		// yedeği) — bozuk /proc/meminfo satırı metriği çökertmez.
 		switch {
 		case strings.HasPrefix(line, "MemTotal:"):
-			fmt.Sscanf(line, "MemTotal: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "MemTotal: %d kB", &v)
 			total = v
 		case strings.HasPrefix(line, "MemFree:"):
-			fmt.Sscanf(line, "MemFree: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "MemFree: %d kB", &v)
 			free = v
 		case strings.HasPrefix(line, "Buffers:"):
-			fmt.Sscanf(line, "Buffers: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "Buffers: %d kB", &v)
 			buffers = v
 		case strings.HasPrefix(line, "Cached:"):
-			fmt.Sscanf(line, "Cached: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "Cached: %d kB", &v)
 			cached = v
 		case strings.HasPrefix(line, "MemAvailable:"):
-			fmt.Sscanf(line, "MemAvailable: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "MemAvailable: %d kB", &v)
 			available = v
 		}
 	}
@@ -214,12 +221,14 @@ func ReadSwap() SwapUsage {
 	for s.Scan() {
 		line := s.Text()
 		var v int64
+		// Sscanf hatası bilinçli yok sayılır (idiyom): ayrıştırma başarısızsa v=0
+		// kalır; swap oranı total>0 kapısıyla korunur — bozuk satır çökertmez.
 		switch {
 		case strings.HasPrefix(line, "SwapTotal:"):
-			fmt.Sscanf(line, "SwapTotal: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "SwapTotal: %d kB", &v)
 			total = v
 		case strings.HasPrefix(line, "SwapFree:"):
-			fmt.Sscanf(line, "SwapFree: %d kB", &v)
+			_, _ = fmt.Sscanf(line, "SwapFree: %d kB", &v)
 			free = v
 		}
 	}
@@ -580,6 +589,7 @@ func DBAyarla(db *sql.DB) {
 //     hicbir parcasi panelde iddia edilmez. Servisin gercek durumu askidayken
 //     de Araclar > Servisler ekranindan degil, sunucudan gorulur; panel askida
 //     olan bir urun hakkinda hicbir sey iddia etmez.
+//
 // Karar degisirse: burada aktif=0 iken de listeleyip ayri bir "lisans askida"
 // rozeti eklemek gerekir — asla sessizce "Aktif" yazilmamalidir.
 func mailEklentiAktifMi() bool {

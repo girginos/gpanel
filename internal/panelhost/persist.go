@@ -83,16 +83,16 @@ func IsRestartTemizle() {
 
 // GecmisSatir — API için.
 type GecmisSatir struct {
-	ID       int64     `json:"id"`
-	IsID     string    `json:"is_id"`
-	Tip      string    `json:"tip"`
-	Hostname string    `json:"hostname"`
-	Durum    string    `json:"durum"`
-	Basla    time.Time `json:"basla"`
+	ID       int64      `json:"id"`
+	IsID     string     `json:"is_id"`
+	Tip      string     `json:"tip"`
+	Hostname string     `json:"hostname"`
+	Durum    string     `json:"durum"`
+	Basla    time.Time  `json:"basla"`
 	Bitis    *time.Time `json:"bitis,omitempty"`
-	Hata     string    `json:"hata"`
-	Adimlar  []Adim    `json:"adimlar"`
-	AktorUID *int64    `json:"aktor_uid,omitempty"`
+	Hata     string     `json:"hata"`
+	Adimlar  []Adim     `json:"adimlar"`
+	AktorUID *int64     `json:"aktor_uid,omitempty"`
 }
 
 // IsGecmis — son N iş.

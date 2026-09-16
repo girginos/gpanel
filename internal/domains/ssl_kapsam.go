@@ -9,7 +9,6 @@ package domains
 // olduğu için şifre sorması tam olarak bu görünürlük eksikliğiydi.
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"net"
@@ -20,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/dnsutil"
 	"girginospanel/internal/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -198,21 +198,12 @@ func yerelSunucuIP() string {
 	return ""
 }
 
-// hostBuSunucuya — host bu sunucunun IP'sine çözülüyor mu (kısa timeout).
+// hostBuSunucuya — host bu sunucunun IP'sine çözülüyor mu.
+//
+// 🔴 KALICI FIX: KAMU DNS'ten çözer (dnsutil), yerel önbellekli çözümleyiciden
+// DEĞİL. Bir domain bu sunucuya taşındığında yerel unbound/systemd-resolved
+// eski IP'yi önbellekte tutup bu kontrolü "DNS yok" gösteriyordu — oysa kamu
+// DNS (LE'nin göreceği) doğruydu. Artık SSL kapsam ekranı gerçeği yansıtır.
 func hostBuSunucuya(host, sunucuIP string) bool {
-	if sunucuIP == "" {
-		return false
-	}
-	ctx, iptal := context.WithTimeout(context.Background(), 3*time.Second)
-	defer iptal()
-	ips, err := net.DefaultResolver.LookupHost(ctx, host)
-	if err != nil {
-		return false
-	}
-	for _, ip := range ips {
-		if ip == sunucuIP {
-			return true
-		}
-	}
-	return false
+	return dnsutil.BuSunucuya(host, sunucuIP)
 }

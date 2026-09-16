@@ -4,13 +4,14 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
+import { useToast } from '@/components/Toast'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 export type DB = {
@@ -21,6 +22,7 @@ export type DB = {
 
 const DB_EN: Record<string, string> = {
   "(boş bırakırsanız panel üretir)": "(leave empty and the panel generates one)",
+  "İşlem başarısız": "Operation failed",
   "+ Yeni Veritabanı": "+ New Database",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "Bilgileri güvenli bir yere kaydedin. Parolayı sonra düz metin göremeyebilirsiniz:": "Save this info somewhere safe. You may not be able to see the password in plain text later:",
@@ -51,6 +53,8 @@ const DB_EN: Record<string, string> = {
   "Üret": "Generate",
   "İptal": "Cancel",
   "✓ Parola güncellendi": "✓ Password updated",
+  "✓ Kullanıcı oluşturuldu": "✓ User created",
+  "Parolayı Güncelle": "Update Password",
   "✓ Veritabanı oluşturuldu": "✓ Database created",
   "Anasayfa": "Home",
   "Yenile": "Refresh",
@@ -84,24 +88,29 @@ export default function DomainDatabasesPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const nav = useNavigate()
+  const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dbler, setDbler] = useState<DB[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [ekleAcik, setEkleAcik] = useState(false)
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id) return
     setYuk(true)
+    const _n = ++yukleNesli.current
     api.get<DB[]>(`/domains/${id}/databases`)
-      .then(r => setDbler(r.data))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setDbler(r.data) })
+      .catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
 
   useEffect(() => {
-    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
+    let iptal = false
+    if (id) api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
     yukle()
+    return () => { iptal = true; yukleNesli.current++ }
   }, [id])
 
   // Domain'in mevcut DB-kullanıcıları (mevcut-kullanıcı seçimi için, benzersiz).
@@ -122,21 +131,19 @@ export default function DomainDatabasesPage() {
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5"><Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link></p>}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">{cevir("+ Yeni Veritabanı")}</button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ {cevir("Yenile")}</button>
+        <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">{cevir("+ Yeni Veritabanı")}</button>
+        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ {cevir("Yenile")}</button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{dbler.length} {cevir("veritabanı")}</span>
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
       {/* Sadeleştirilmiş liste: kullanıcı/sunucu/parola/işlemler her DB'nin KENDİ
           detay sayfasında. Böylece tablo dar kalır, yatay scroll gerekmez. */}
-      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+      <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
         {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> :
          dbler.length === 0 ? <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-500">{cevir("Henüz veritabanı yok")}</div> :
         <div className="lg:overflow-x-auto">
           <table className={T.tablo}>
-          <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700`}>
+          <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-dark-600`}>
             <tr>
               <th className={T.baslik}>{cevir("Veritabanı")}</th>
               <th className={T.baslik}>{cevir("Oluşturulma")}</th>
@@ -149,7 +156,7 @@ export default function DomainDatabasesPage() {
               <tr
                 key={d.id}
                 onClick={() => nav(`/abonelikler/${id}/veritabanlari/${d.id}`)}
-                className={`${T.satir} cursor-pointer lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800`}
+                className={`${T.satir} cursor-pointer lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700`}
               >
                 <td className={`${T.hucreBaslik} font-mono`}><span className="text-brand-700 dark:text-brand-300">{d.db_adi}</span></td>
                 <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
@@ -202,6 +209,7 @@ type YeniDBModalProps = {
 const SONEK_RE = /^[a-z0-9_]{1,32}$/
 
 function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: YeniDBModalProps) {
+  const toast = useToast()
   // DB oneki cPanel gibi c_ ONEKSIZ (backend TrimPrefix ile ayni): c_girgin -> girgin_
   const onek = sk.replace(/^c_/, '') + '_'
   const [otomatik, setOtomatik] = useState(true)
@@ -211,7 +219,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
   const [mevcutKullanici, setMevcutKullanici] = useState(mevcutKullanicilar[0] || '')
   const [parola, setParola] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [sonuc, setSonuc] = useState<{ db_adi: string; db_kullanici: string; db_parola: string } | null>(null)
 
   const dbAdiOnizleme = onek + (dbSonek || '…')
@@ -235,7 +243,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
 
   async function olustur() {
     const y = yerelDogrula()
-    if (y) { setHata(y); return }
+    if (y) { setHata(y); toast.hata(cevir("İşlem başarısız"), y); return }
     setIsleniyor(true); setHata(null)
     try {
       const body: Record<string, unknown> = otomatik
@@ -250,13 +258,13 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
       const { data } = await api.post(`/domains/${domainId}/databases`, body)
       setSonuc({ db_adi: data.db_adi, db_kullanici: data.db_kullanici, db_parola: data.db_parola })
     } catch (e) {
-      setHata(apiHata(e, cevir("Oluşturma başarısız")))
+      const m = apiHata(e, cevir("Oluşturma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
   }
 
-  const inputCls = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none disabled:opacity-50'
+  const inputCls = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-slate-900 dark:text-slate-100 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none disabled:opacity-50'
 
   return (
     <Modal acik={true} baslik={cevir("Yeni Veritabanı")} onKapat={sonuc ? onTamam : onKapat} genislik="lg">
@@ -270,7 +278,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
             <SonucSatir e={cevir("Parola")} v={sonuc.db_parola} />
           </div>
           <div className="flex justify-end">
-            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">{cevir("Tamam")}</button>
+            <button onClick={onTamam} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">{cevir("Tamam")}</button>
           </div>
         </div>
       ) : (
@@ -289,7 +297,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
               <div>
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Veritabanı adı")}</label>
                 <div className="flex items-stretch">
-                  <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
+                  <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
                   <input value={dbSonek} onChange={e => setDbSonek(e.target.value.toLowerCase())} placeholder="blog" className={inputCls + ' rounded-l-none'} />
                 </div>
                 <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 font-mono">→ {dbAdiOnizleme}</p>
@@ -312,7 +320,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                 {kullaniciTipi === 'yeni' ? (
                   <>
                     <div className="flex items-stretch">
-                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
+                      <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
                       <input value={kullaniciSonek} onChange={e => setKullaniciSonek(e.target.value.toLowerCase())} placeholder="bloguser" className={inputCls + ' rounded-l-none'} />
                     </div>
                     <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 font-mono">→ {kullaniciOnizleme}</p>
@@ -330,7 +338,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Parola")} <span className="text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız panel üretir)")}</span></label>
                   <div className="flex gap-2">
                     <input type="text" value={parola} onChange={e => setParola(e.target.value)} placeholder={cevir("En az 12 karakter, harf+rakam")} className={inputCls} />
-                    <button type="button" onClick={() => setParola(uretGucluParola())} className="whitespace-nowrap px-3 py-2 bg-white dark:bg-slate-800 border border-brand-600 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-sm rounded-md">{cevir("Üret")}</button>
+                    <button type="button" onClick={() => setParola(uretGucluParola())} className="whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 border border-brand-600 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-sm rounded-md">{cevir("Üret")}</button>
                   </div>
                   {parolaGucSorunu && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{cevir("Parola en az 12 karakter ve harf+rakam karışık olmalı.")}</p>}
                 </div>
@@ -338,11 +346,9 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
             </div>
           )}
 
-          {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md text-sm">{cevir("İptal")}</button>
-            <button onClick={olustur} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</button>
+            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md text-sm">{cevir("İptal")}</button>
+            <button onClick={olustur} disabled={isleniyor} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</button>
           </div>
         </div>
       )}
@@ -355,7 +361,7 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-24 shrink-0 text-xs text-emerald-700 dark:text-emerald-300">{e}</span>
-      <code className="flex-1 bg-white dark:bg-slate-800 px-3 py-1.5 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{v}</code>
+      <code className="flex-1 bg-white dark:bg-dark-700 px-3 py-1.5 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{v}</code>
       <button onClick={() => { navigator.clipboard.writeText(v); setOk(true); setTimeout(() => setOk(false), 1500) }} className="px-2.5 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs rounded">{ok ? '✓' : cevir("Kopyala")}</button>
     </div>
   )
@@ -363,10 +369,10 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
 
 // PwResetModal — DB parolasını sıfırlar (rastgele/özel). Detay sayfası da kullanır.
 export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; onTamam: () => void }) {
+  const toast = useToast()
   const [ozelPw, setOzelPw] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [yeniPw, setYeniPw] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   // 🔴 Kullanicisi OLMAYAN veritabani: DB panelden silinip yedekten geri
   // yuklendiginde olusur — yedek yalniz sema+veri icerir, MySQL kullanicisi ve
   // GRANT'ler arsivde bulunmaz. Panel her DB'nin kullanicisi oldugunu varsayiyor
@@ -374,31 +380,31 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   const kullaniciYok = !db.db_kullanici
   const [yeniKullanici, setYeniKullanici] = useState('')
 
-  async function sifirla(rastgele: boolean) {
-    if (!rastgele && ozelPw.length < 6) {
-      setHata(cevir("Parola en az 6 karakter olmalı"))
+  async function sifirla() {
+    if (ozelPw.length < 6) {
+      setHata(cevir("Parola en az 6 karakter olmalı")); toast.hata(cevir("Parola en az 6 karakter olmalı"))
       return
     }
     if (kullaniciYok && !yeniKullanici.trim()) {
-      setHata(cevir("Kullanıcı adı girin"))
+      setHata(cevir("Kullanıcı adı girin")); toast.hata(cevir("Kullanıcı adı girin"))
       return
     }
     setIsleniyor(true); setHata(null)
     try {
-      const body: Record<string, string> = rastgele ? {} : { parola: ozelPw }
+      const body: Record<string, string> = { parola: ozelPw }
       if (kullaniciYok) body.kullanici = yeniKullanici.trim()
-      const { data } = await api.put(`/databases/${db.id}/password`, body)
-      setYeniPw(data.db_parola)
+      await api.put(`/databases/${db.id}/password`, body)
+      toast.basari(cevir(kullaniciYok ? "✓ Kullanıcı oluşturuldu" : "✓ Parola güncellendi"))
+      onTamam()
     } catch (e) {
-      setHata(apiHata(e, cevir("Sıfırlama başarısız")))
+      const m = apiHata(e, cevir("Sıfırlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
   }
 
   return (
-    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={yeniPw ? onTamam : onKapat} genislik="md">
-      {!yeniPw ? (
+    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={onKapat} genislik="md">
         <div className="space-y-4">
           {kullaniciYok ? (
             <>
@@ -412,7 +418,7 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
                   value={yeniKullanici}
                   onChange={e => setYeniKullanici(e.target.value)}
                   placeholder={cevir("uygulamanın beklediği kullanıcı adı")}
-                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800/40 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 />
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {cevir("Site zaten kuruluysa uygulamanın yapılandırma dosyasındaki kullanıcı adını girin (WordPress: wp-config.php → DB_USER) — böylece dosyayı düzenlemeden bağlanır.")}
@@ -425,7 +431,7 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
             </div>
           )}
           <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Özel parola (boş bırakırsanız rastgele)")}</label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Parola")}</label>
             <input
               type="text"
               value={ozelPw}
@@ -434,28 +440,11 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
             />
           </div>
-          {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">{hata}</div>}
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-md text-sm">{cevir("İptal")}</button>
-            <button onClick={() => sifirla(false)} disabled={isleniyor || !ozelPw} className="px-4 py-2 bg-white dark:bg-slate-800 border border-brand-600 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 disabled:opacity-50 rounded-md text-sm">{cevir("Bunu Ayarla")}</button>
-            <button onClick={() => sifirla(true)} disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Sıfırlanıyor…") : cevir("Rastgele Üret")}</button>
+            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 rounded-md text-sm">{cevir("İptal")}</button>
+            <button onClick={() => sifirla()} disabled={isleniyor || ozelPw.length < 6} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</button>
           </div>
         </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md p-4">
-            <p className="text-sm text-emerald-800 dark:text-emerald-200 font-medium mb-2">{cevir("✓ Parola güncellendi")}</p>
-            <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-2">{cevir("Bunu güvenli bir yere kaydedin. Sonra göremezsiniz:")}</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <code className="flex-1 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{yeniPw}</code>
-              <button onClick={() => navigator.clipboard.writeText(yeniPw)} className="px-3 py-2 bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs rounded">{cevir("Kopyala")}</button>
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <button onClick={onTamam} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">{cevir("Tamam")}</button>
-          </div>
-        </div>
-      )}
     </Modal>
   )
 }

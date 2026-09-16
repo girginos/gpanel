@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
+import { Button } from '@/components/ui'
+import { useToast } from '@/components/Toast'
 
 type Row = {
   id?: number
@@ -60,6 +62,8 @@ const DNSTPL_EN: Record<string, string> = {
   "Varsayılan Şablonu Uygula": "Apply Default Template",
   "Şablon kaydedilemedi": "Failed to save template",
   "Şablonu Kaydet": "Save Template",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DNSTPL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -71,12 +75,13 @@ export default function DNSSablonuPage() {
   const [kaydediyor, setKaydediyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
+  const toast = useToast()
 
   function yukle() {
     setYuk(true)
     api.get<{ kayitlar: Row[]; meta: Meta }>('/dns-template')
       .then(r => { setRows(r.data.kayitlar || []); setMeta(r.data.meta) })
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [])
@@ -96,15 +101,20 @@ export default function DNSSablonuPage() {
     setHata(null); setBasari(null); setKaydediyor(true)
     try {
       await api.put('/dns-template', { kayitlar: rows, meta })
-      setBasari(cevir("Şablon kaydedildi. Yeni domainler ve") + ' “' + cevir("Varsayılan Şablonu Uygula") + '” ' + cevir("bu şablonu kullanır."))
+      const iyi = cevir("Şablon kaydedildi. Yeni domainler ve") + ' “' + cevir("Varsayılan Şablonu Uygula") + '” ' + cevir("bu şablonu kullanır.")
+      setBasari(iyi)
+      toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBasari(null), 5000)
       yukle()
-    } catch (e) { setHata(apiHata(e, cevir("Şablon kaydedilemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Şablon kaydedilemedi"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setKaydediyor(false) }
   }
 
-  const inp = 'w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-800 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none'
-  const btnDark = 'px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 inline-flex items-center gap-2'
+  const inp = 'w-full px-2.5 py-1.5 bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-800 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none'
 
   return (
     <div className="px-6 md:px-8 py-6">
@@ -114,9 +124,6 @@ export default function DNSSablonuPage() {
         {cevir("Yeni bir domain eklendiğinde ve")} <span className="font-medium">{cevir("Varsayılan Şablonu Uygula")}</span> {cevir("butonuna basıldığında bu şablon uygulanır.")}
         {' '}{cevir("Değişiklikleriniz anında geçerli olur.")}
       </p>
-
-      {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      {basari && <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
       <div className="mb-4 px-3.5 py-2.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-xs text-brand-800 dark:text-brand-200">
         <strong>{cevir("Yer tutucular:")}</strong>{' '}
@@ -131,10 +138,10 @@ export default function DNSSablonuPage() {
       ) : (
         <>
           {/* Kayıt satırları */}
-          <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden mb-5">
+          <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden mb-5">
             <div className="lg:overflow-x-auto">
               <table className={T.tablo}>
-                <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+                <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
                   <tr>
                     <th className={`${T.baslik} w-40`}>{cevir("Ad (alt-ad)")}</th>
                     <th className={`${T.baslik} w-28`}>{cevir("Tip")}</th>
@@ -147,7 +154,7 @@ export default function DNSSablonuPage() {
                 </thead>
                 <tbody className={T.govde}>
                   {rows.map((r, i) => (
-                    <tr key={i} className={`${T.satir} lg:last:border-b-0 lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60`}>
+                    <tr key={i} className={`${T.satir} lg:last:border-b-0 lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700/60`}>
                       {/* Birincil hücre: kaydın adı — mobilde kart başlığı olur, etiket istemez */}
                       <td className={T.hucreBaslik}><input value={r.ad} onChange={e => setRow(i, { ad: e.target.value })} className={inp + ' font-mono'} /></td>
                       <td className={T.hucre} data-etiket={cevir("Tip")}>
@@ -175,9 +182,9 @@ export default function DNSSablonuPage() {
                         <input type="checkbox" checked={r.aktif} onChange={e => setRow(i, { aktif: e.target.checked })} className="cursor-pointer w-4 h-4 accent-brand-600" />
                       </td>
                       <td className={`${T.hucreAksiyon} lg:text-center`}>
-                        <button onClick={() => satirSil(i)} title={cevir("Satırı sil")} className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                        <Button color="error" variant="flat" isIcon onClick={() => satirSil(i)} title={cevir("Satırı sil")} className="p-1">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -188,17 +195,17 @@ export default function DNSSablonuPage() {
                 </tbody>
               </table>
             </div>
-            <div className="py-2.5 lg:px-3 lg:border-t lg:border-slate-100 dark:lg:border-slate-800">
-              <button onClick={satirEkle} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300">
+            <div className="py-2.5 lg:px-3 lg:border-t lg:border-slate-100 dark:lg:border-dark-600">
+              <Button variant="outlined" onClick={satirEkle} className="gap-1.5 text-sm px-3 py-1.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                 {cevir("Kayıt Ekle")}
-              </button>
+              </Button>
             </div>
           </div>
 
           {/* Meta: SOA + DKIM */}
           {meta && (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5">
+            <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("SOA & DKIM Parametreleri")}</h2>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 {(['soa_refresh', 'soa_retry', 'soa_expire', 'soa_minimum', 'soa_ttl'] as const).map(f => (
@@ -226,10 +233,10 @@ export default function DNSSablonuPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <button onClick={kaydet} disabled={kaydediyor} className={btnDark}>
+            <Button color="primary" onClick={kaydet} disabled={kaydediyor} className="gap-2 text-sm px-4 py-2">
               {kaydediyor ? cevir("Kaydediliyor…") : cevir("Şablonu Kaydet")}
-            </button>
-            <button onClick={yukle} className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">{cevir("Geri Al")}</button>
+            </Button>
+            <Button variant="outlined" onClick={yukle} className="text-sm px-4 py-2">{cevir("Geri Al")}</Button>
           </div>
         </>
       )}

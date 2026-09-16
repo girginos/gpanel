@@ -98,9 +98,9 @@ type DomainHealth struct {
 // HTTPS önce dener; bağlanamazsa HTTP'ye düşer. SSL bilgisi cert'ten okunur.
 func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var alanAdi, ipv4 string
+	var alanAdi string
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alan_adi, ipv4 FROM domains WHERE id=?`, id).Scan(&alanAdi, &ipv4)
+		`SELECT alan_adi FROM domains WHERE id=?`, id).Scan(&alanAdi)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -133,22 +133,17 @@ func probe(targetURL string) DomainHealth {
 	// düşer, SSL durumu hiç raporlanamazdı). İstek kimlik bilgisi TAŞIMAZ
 	// (salt GET); sertifika geçerliliği aşağıda ayrıca okunup kullanıcıya
 	// raporlanır. Bu Transport panelin başka hiçbir API çağrısında KULLANILMAZ.
-	tlsCfg := &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
+	tlsCfg := &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12} //nolint:gosec // G402: saglik probu bozuk/expired cert'i de RAPORLAMALI; ic-hedef SSRF ssrf_guard.go DialContext ile onlenir
 	tr := &http.Transport{
 		TLSClientConfig:       tlsCfg,
 		DisableKeepAlives:     true,
 		ResponseHeaderTimeout: 6 * time.Second,
+		DialContext:           guvenliDialContext, // 🔴 SSRF kapisi — bkz. ssrf_guard.go
 	}
 	client := &http.Client{
-		Transport: tr,
-		Timeout:   8 * time.Second,
-		// 5 yönlendirmeye kadar takip et
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return http.ErrUseLastResponse
-			}
-			return nil
-		},
+		Transport:     tr,
+		Timeout:       8 * time.Second,
+		CheckRedirect: yonlendirmeGuard, // 5-yonlendirme siniri + dahili-hedef reddi
 	}
 
 	start := time.Now()

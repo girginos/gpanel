@@ -2,12 +2,14 @@ import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
+import { Button } from '@/components/ui'
+import { useToast } from '@/components/Toast'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -124,6 +126,8 @@ const PKTDET_EN: Record<string, string> = {
   "server{} bloğuna eklenir; kaydederken doğrulanır.": "Added to the server{} block; validated on save.",
   "✓ Uygulandı": "✓ Applied",
   "✗ Başarısız": "✗ Failed",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PKTDET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -143,27 +147,33 @@ export default function PaketDetayPage() {
   const [mailAktif, setMailAktif] = useState(false)
   const [uygulananID, setUygulananID] = useState<number | null>(null)
   const [sonucID, setSonucID] = useState<{ id: number; ok: boolean } | null>(null)
+  const toast = useToast()
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
+    const _n = ++yukleNesli.current
     // Mail eklentisi aktif mi? (posta limiti alanlarinin kapisi)
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
-      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
-      .catch(() => setMailAktif(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)) })
+      .catch(() => { if (_n !== yukleNesli.current) return; setMailAktif(false) })
     Promise.all([
       api.get<GetResp>(`/plans/${id}`),
       api.get<Domain[]>(`/plans/${id}/domains`),
     ]).then(([g, d]) => {
+      if (_n !== yukleNesli.current) return
       setPlan(g.data.plan)
       setDomainSayisi(g.data.domain_sayisi)
       setDomainler(d.data || [])
-    }).catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+    }).catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
-  useEffect(yukle, [id])
+  useEffect(() => { yukle(); return () => { yukleNesli.current++ } }, [id])
   useEffect(() => {
-    api.get<Surum[]>('/php/versions').then(r => setSurumler(r.data || [])).catch(hataYakala(cevir("PHP sürümleri alınamadı")))
+    let iptal = false
+    api.get<Surum[]>('/php/versions').then(r => { if (iptal) return; setSurumler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("PHP sürümleri alınamadı"))(e) })
+    return () => { iptal = true }
   }, [])
 
   async function kaydet() {
@@ -171,11 +181,15 @@ export default function PaketDetayPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/plans/${id}`, plan)
-      setBasari(`"${plan.ad}" ${cevir("kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.")}`)
+      const iyi = `"${plan.ad}" ${cevir("kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.")}`
+      setBasari(iyi)
+      toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBasari(null), 6000)
       yukle()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydetme başarısız")))
+      const m = apiHata(e, cevir("Kaydetme başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -188,7 +202,10 @@ export default function PaketDetayPage() {
       await api.put(`/domains/${domID}/plan`, { plan_id: plan.id })
       setSonucID({ id: domID, ok: true })
     } catch (e) {
-      setSonucID({ id: domID, ok: false }); setHata(apiHata(e))
+      setSonucID({ id: domID, ok: false })
+      const m = apiHata(e)
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setUygulananID(null)
       setTimeout(() => setSonucID(v => (v?.id === domID ? null : v)), 3500)
@@ -221,7 +238,7 @@ export default function PaketDetayPage() {
         ]} />
 
         {/* Başlık + kaydet (yapışkan) */}
-        <div className="sticky top-0 z-10 -mx-2 px-2 py-3 mb-4 bg-slate-50/85 dark:bg-slate-900/85 backdrop-blur border-b border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-4">
+        <div className="sticky top-0 z-10 -mx-2 px-2 py-3 mb-4 bg-slate-50/85 dark:bg-dark-800/85 backdrop-blur border-b border-slate-200/70 dark:border-dark-600 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 truncate">
               {plan.ad}
@@ -231,23 +248,20 @@ export default function PaketDetayPage() {
               {plan.aciklama || cevir("Açıklama yok")} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
             </p>
           </div>
-          <button onClick={kaydet} disabled={isleniyor}
-            className="shrink-0 px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg shadow-sm">
+          <Button onClick={kaydet} disabled={isleniyor} color="primary"
+            className="shrink-0 px-4 py-2 text-sm">
             {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
-          </button>
+          </Button>
         </div>
 
-        {hata && <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-        {basari && <div className="mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
-
         {/* Genel */}
-        <Kart baslik={cevir("Genel")} ikon="⚙️">
+        <Kart baslik={cevir("Genel")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Alan etiket={cevir("Plan Adı")}>
               <input value={plan.ad} onChange={e => P('ad', e.target.value)} className={inp} />
             </Alan>
             <Alan etiket={cevir("Varsayılan Plan")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
                 <input type="checkbox" checked={plan.varsayilan} onChange={e => P('varsayilan', e.target.checked)} className="rounded" />
                 <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlere otomatik atansın")}</span>
               </label>
@@ -259,7 +273,7 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Varsayılanlar — yeni domainler bu değerleri miras alır */}
-        <Kart baslik={cevir("Varsayılanlar")} ikon="🧩" alt={cevir("Bu plana bağlı yeni bir domain oluşturulduğunda uygulanacak başlangıç değerleri.")}>
+        <Kart baslik={cevir("Varsayılanlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10 4a2 2 0 114 0v2h2a2 2 0 012 2v2h-2a2 2 0 100 4h2v2a2 2 0 01-2 2h-2v-2a2 2 0 10-4 0v2H8a2 2 0 01-2-2v-2H4a2 2 0 110-4h2V8a2 2 0 012-2h2V4z"/></svg>} alt={cevir("Bu plana bağlı yeni bir domain oluşturulduğunda uygulanacak başlangıç değerleri.")}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Alan etiket={cevir("PHP Sürümü")} ipucu={cevir("Bu plandaki yeni domainler bu PHP sürümüyle kurulur.")}>
               <select value={plan.php_surum} onChange={e => P('php_surum', e.target.value)} className={inp}>
@@ -270,7 +284,7 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Kaynak Limitleri */}
-        <Kart baslik={cevir("Kaynak Limitleri")} ikon="📊" alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
+        <Kart baslik={cevir("Kaynak Limitleri")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M5 21V10M12 21V4M19 21v-7M3 21h18"/></svg>} alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Alan etiket="CPU %" ipucu={cevir("100 = 1 çekirdek (systemd CPUQuota)")}>
               <input type="number" min={10} max={2000} value={plan.cpu_yuzde} onChange={e => P('cpu_yuzde', Number(e.target.value) || 0)} className={inpNum} />
@@ -330,7 +344,7 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Sayısal Sınırlar — posta alanlari mail eklentisi aktifken eklenir */}
-        <Kart baslik={cevir("Sayısal Sınırlar")} ikon="🔢" alt={cevir("Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.")}>
+        <Kart baslik={cevir("Sayısal Sınırlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M4 7h4m-4 5h4m-4 5h4M14 5l-1 14M19 5l-1 14"/></svg>} alt={cevir("Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.")}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <Alan etiket="Domain">
               <input type="number" min={0} value={plan.max_domain} onChange={e => P('max_domain', Number(e.target.value) || 0)} className={inpNum} />
@@ -360,10 +374,10 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Web Sunucusu (nginx) */}
-        <Kart baslik={cevir("Web Sunucusu (nginx)")} ikon="🛠️" alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
+        <Kart baslik={cevir("Web Sunucusu (nginx)")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>} alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <Alan etiket="FastCGI Cache" ipucu={cevir("Dinamik PHP çıktısını nginx tarafında önbelleğe alır (yüksek trafik için)")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
                 <input type="checkbox" checked={plan.fastcgi_cache} onChange={e => P('fastcgi_cache', e.target.checked)} className="rounded" />
                 <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlerde açık olsun")}</span>
               </label>
@@ -388,10 +402,10 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* WAF (ModSecurity + OWASP CRS) plan varsayılanı */}
-        <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon="🛡️" alt={cevir("ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.")}>
+        <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3l7 2.6v5.2c0 4.3-3 7-7 8.2-4-1.2-7-3.9-7-8.2V5.6L12 3z"/></svg>} alt={cevir("ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.")}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Alan etiket={cevir("WAF Varsayılanı")} ipucu={cevir("Bu plandaki yeni domainlerde WAF açık mı gelsin (per-domain override edilebilir).")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
                 <input type="checkbox" checked={plan.waf_enabled} onChange={e => P('waf_enabled', e.target.checked)} className="rounded" />
                 <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Bu planda açık olsun")}</span>
               </label>
@@ -417,14 +431,14 @@ export default function PaketDetayPage() {
         </Kart>
 
         {/* Atanmış domainler */}
-        <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon="🌐" alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
+        <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
           {domainler.length === 0 ? (
             <div className="text-sm text-slate-400 py-6 text-center">{cevir("Henüz bu plana atanmış domain yok.")}</div>
           ) : (
             // Mobilde yatay kaydırma yok — her satır kart olur (bkz. @/lib/tablo)
             <div className="lg:overflow-x-auto">
               <table className={`${T.tablo} text-sm`}>
-                <thead className={`${T.baslikGrubu} text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700`}>
+                <thead className={`${T.baslikGrubu} text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-dark-600`}>
                   <tr>
                     <th className={T.baslik}>Domain</th>
                     <th className={T.baslik}>{cevir("Sistem Kullanıcısı")}</th>
@@ -435,7 +449,7 @@ export default function PaketDetayPage() {
                 </thead>
                 <tbody className={T.govde}>
                   {domainler.map(d => (
-                    <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800/60`}>
+                    <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700/60`}>
                       {/* Birincil tanımlayıcı: mobilde kart başlığı olur, etiket istemez */}
                       <td className={T.hucreBaslik}>
                         <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 font-medium">{d.alan_adi}</Link>
@@ -445,7 +459,7 @@ export default function PaketDetayPage() {
                       </td>
                       <td className={T.hucre} data-etiket={cevir("Durum")}>
                         <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
-                          d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+                          d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500'
                         }`}>{d.durum}</span>
                       </td>
                       <td className={T.hucre} data-etiket={cevir("Oluşturma")}>
@@ -458,7 +472,7 @@ export default function PaketDetayPage() {
                               ? (sonucID.ok
                                   ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20'
                                   : 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20')
-                              : 'border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                              : 'border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700'}`}>
                           {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('✓ Uygulandı') : cevir("✗ Başarısız")) : cevir('Yeniden Uygula')}
                         </button>
                       </td>
@@ -474,14 +488,14 @@ export default function PaketDetayPage() {
   )
 }
 
-const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none'
+const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-700 rounded-lg text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none'
 const inpNum = inp + ' font-mono'
 
-function Kart({ baslik, alt, ikon, children }: { baslik: string; alt?: string; ikon?: string; children: React.ReactNode }) {
+function Kart({ baslik, alt, ikon, children }: { baslik: string; alt?: string; ikon?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-sm">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
       <div className="flex items-center gap-2 mb-1">
-        {ikon && <span className="text-base leading-none" aria-hidden>{ikon}</span>}
+        {ikon && <span className="text-slate-500 dark:text-slate-400 leading-none" aria-hidden>{ikon}</span>}
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{baslik}</h3>
       </div>
       {alt && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-2xl">{alt}</p>}

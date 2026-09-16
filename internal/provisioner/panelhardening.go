@@ -79,8 +79,13 @@ func HealPanelProxyTrustOnStartup() {
 	// (4) limit_conn: per-IP eszamanli baglanti tavani (slowloris/baglanti-tukenme derinlik savunmasi).
 	limitZoneEnsure()
 	edgeMapEnsure()
+	uygulamaUpgradeMapEnsure()
 	tlsGlobalEnsure()
 	logrotateEnsure()
+	// nginx log dondurme: hazir ayardaki notifempty + hatayi yutan postrotate
+	// kombinasyonu, tek bir kacirilmis yeniden-acma sinyalinde sistemi KALICI
+	// kilitliyordu (uretimde 265 bayat tanitici / 408 MB olculdu).
+	NginxLogrotateEnsure()
 	oomGuardEnsure() // OOM zinciri: userdbd tavani + MariaDB korumasi
 	if !strings.Contains(s, "limit_conn gosppanel") {
 		if i := strings.Index(s, "client_body_timeout 60s;"); i >= 0 {
@@ -175,6 +180,38 @@ map "$scheme$gosp_xfp_https$gosp_cf_https" $gosp_force_https {
 }
 `
 	if b, err := os.ReadFile(yol); err == nil && strings.Contains(string(b), "gosp_force_https") {
+		return
+	}
+	_ = os.WriteFile(yol, []byte(icerik), 0o644)
+}
+
+// uygulamaUpgradeMapEnsure: Uygulama Calistirici eklentisinin snippet'lerinin
+// ihtiyac duydugu $connection_upgrade_gosp haritasini CEKIRDEK yazar.
+//
+// 🔴 NEDEN CEKIRDEKTE: bu haritayi eskiden yalniz eklenti yaziyordu ve kiraci
+// snippet'leri ona atifta bulunuyordu. Dosya kaybolursa (eklenti kaldirilir,
+// conf.d elle temizlenir, yedekten donulur) nginx sunu der:
+//
+//	nginx: [emerg] unknown "connection_upgrade_gosp" variable
+//
+// `nginx -t` GLOBALDIR — yani o an hicbir domain render EDILEMEZ: yeni vhost
+// yok, SSL yenilemesi yok, hicbir kiracide hicbir degisiklik uygulanamaz.
+// Yani bir EKLENTININ kaldirilmasi CEKIRDEGIN tamamini kilitleyebilirdi.
+// Bir bagimliligin sahibi, o bagimliligi tasiyan taraf olmali.
+//
+// Eklenti ayni yola yazar ama dosya varsa DOKUNMAZ; cift map tanimi nginx'i
+// dusurecegi icin iki tarafin ayni yolu paylasmasi kasitlidir.
+func uygulamaUpgradeMapEnsure() {
+	yol := "/etc/nginx/conf.d/00-gosp-app-upgrade.conf"
+	icerik := `# GirginOSPanel — WebSocket yukseltme haritasi (otomatik).
+# Uygulama Calistirici snippet'leri bu degiskeni kullanir; eklenti kurulu
+# olmasa da tanimli kalmalidir (tanimsiz degisken TUM nginx -t'yi dusurur).
+map $http_upgrade $connection_upgrade_gosp {
+    default upgrade;
+    ''      close;
+}
+`
+	if b, err := os.ReadFile(yol); err == nil && strings.Contains(string(b), "connection_upgrade_gosp") {
 		return
 	}
 	_ = os.WriteFile(yol, []byte(icerik), 0o644)

@@ -3,6 +3,7 @@ package git
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -53,6 +55,7 @@ func scan(rs interface{ Scan(...any) error }) (Repo, error) {
 	var r Repo
 	err := rs.Scan(&r.ID, &r.DomainID, &r.RepoURL, &r.Branch, &r.TargetDir,
 		&r.DeployKeyPub, &r.WebhookSecret, &r.SonSync, &r.SonCommit, &r.SonDurum, &r.Olusturulma)
+	r.WebhookSecret = gizli.CozBagli(r.WebhookSecret, "webhook") // at-rest AEAD → gösterim için çöz
 	return r, err
 }
 
@@ -63,6 +66,11 @@ func (h *Handlers) lookupDomain(r *http.Request) (id int64, sk string, demo bool
 		`SELECT sistem_kullanici, is_demo FROM domains WHERE id=?`, id).Scan(&sk, &dmo)
 	demo = dmo == 1
 	return
+}
+
+func sha256hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 func randomHex(n int) string {
@@ -318,11 +326,11 @@ func (h *Handlers) Bagla(w http.ResponseWriter, r *http.Request) {
 	}
 	secret := randomHex(20)
 	res, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO git_repos(domain_id, repo_url, branch, target_dir, deploy_key_pub, webhook_secret, son_durum)
-		 VALUES(?,?,?,?,?,?, 'beklemede')
+		`INSERT INTO git_repos(domain_id, repo_url, branch, target_dir, deploy_key_pub, webhook_secret, webhook_secret_hash, son_durum)
+		 VALUES(?,?,?,?,?,?,?, 'beklemede')
 		 ON DUPLICATE KEY UPDATE repo_url=VALUES(repo_url), branch=VALUES(branch),
 		   target_dir=VALUES(target_dir), deploy_key_pub=VALUES(deploy_key_pub)`,
-		id, req.RepoURL, req.Branch, req.TargetDir, pub, secret)
+		id, req.RepoURL, req.Branch, req.TargetDir, pub, gizli.SaklaBagli(secret, "webhook"), sha256hex(secret))
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -331,6 +339,22 @@ func (h *Handlers) Bagla(w http.ResponseWriter, r *http.Request) {
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", gid)
 	repo, _ := scan(row)
 	httpx.WriteJSON(w, http.StatusCreated, repo)
+}
+
+// patliURL: github.com HTTPS repo_url'e domainin ŞİFRELİ PAT'ini (github_connections.pat)
+// çözüp RUNTIME enjekte eder. PAT DB'de repo_url'e DÜZ METİN GÖMÜLMEZ (yalnız
+// github_connections.pat'te AEAD). SSH/public/deploy-key repo'lar dokunulmadan döner.
+func (h *Handlers) patliURL(domainID int64, repoURL string) string {
+	if !strings.HasPrefix(repoURL, "https://github.com/") {
+		return repoURL
+	}
+	var enc string
+	_ = h.DB.QueryRow(`SELECT COALESCE(pat,'') FROM github_connections WHERE domain_id=?`, domainID).Scan(&enc)
+	pat := gizli.CozBagli(enc, "github-pat")
+	if pat == "" {
+		return repoURL // token yok — public repo olabilir; olduğu gibi dene
+	}
+	return strings.Replace(repoURL, "https://", "https://"+pat+"@", 1)
 }
 
 // Klonla: ilk clone
@@ -349,7 +373,7 @@ func (h *Handlers) Klonla(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "önce repo bağlayın")
 		return
 	}
-	sha, log, err := gitClone(sk, repoURL, branch, targetDir)
+	sha, log, err := gitClone(sk, h.patliURL(id, repoURL), branch, targetDir)
 	durum := "basarili"
 	if err != nil {
 		durum = "hata"
@@ -402,7 +426,10 @@ func (h *Handlers) Pull(w http.ResponseWriter, r *http.Request) {
 // Sil: repo kaydını sil (deploy key dosyada kalır)
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM git_repos WHERE domain_id=?`, id)
+	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM git_repos WHERE domain_id=?`, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "repo kaydı silinemedi: "+err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -420,7 +447,7 @@ func (h *Handlers) Webhook(w http.ResponseWriter, r *http.Request) {
 	err := h.DB.QueryRowContext(r.Context(),
 		`SELECT g.id, g.domain_id, d.sistem_kullanici, g.branch, g.target_dir
 		 FROM git_repos g JOIN domains d ON d.id=g.domain_id
-		 WHERE g.webhook_secret=? LIMIT 1`, secret).Scan(&gid, &domainID, &sk, &branch, &targetDir)
+		 WHERE g.webhook_secret_hash=? LIMIT 1`, sha256hex(secret)).Scan(&gid, &domainID, &sk, &branch, &targetDir)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "secret eşleşmedi", http.StatusNotFound)
 		return

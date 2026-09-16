@@ -2,7 +2,11 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
+	"girginospanel/internal/gizli"
 	"golang.org/x/crypto/bcrypt"
+	"io"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -19,7 +23,9 @@ func (h *Handlers) oturumlariDusur(uid int64) {
 	if h.DB == nil || uid <= 0 {
 		return
 	}
-	_, _ = h.DB.Exec(`UPDATE users SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE id=?`, uid)
+	if _, err := h.DB.Exec(`UPDATE users SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE id=?`, uid); err != nil {
+		log.Printf("GÜVENLİK: oturum iptali yazılamadı (uid=%d): %v — eski JWT'ler geçerli kalır", uid, err)
+	}
 }
 
 // kapsamRol: denetim kaydinin kapsami — bayi ise kendi id'si, kok ise 0.
@@ -191,7 +197,10 @@ func (h *Handlers) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 		Secret string `json:"secret"`
 		Kod    string `json:"kod"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&b)
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	b.Secret = strings.TrimSpace(b.Secret)
 	adim, ok := TOTPVerifyAdim(b.Secret, b.Kod, -1)
 	if !ok {
@@ -199,7 +208,7 @@ func (h *Handlers) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Etkinleştirme kodunun login'de hemen replay edilmesini önle: kullanılan adımı kaydet
-	if _, err := h.DB.Exec(`UPDATE users SET totp_secret=?, totp_enabled=1, totp_last_step=? WHERE id=?`, b.Secret, adim, c.UserID); err != nil {
+	if _, err := h.DB.Exec(`UPDATE users SET totp_secret=?, totp_enabled=1, totp_last_step=? WHERE id=?`, gizli.SaklaBagli(b.Secret, "totp"), adim, c.UserID); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi")
 		return
 	}
@@ -217,9 +226,13 @@ func (h *Handlers) TwoFADisable(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Kod string `json:"kod"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&b)
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	var secret string
 	_ = h.DB.QueryRow(`SELECT totp_secret FROM users WHERE id=?`, c.UserID).Scan(&secret)
+	secret = gizli.CozBagli(secret, "totp")
 	if !TOTPVerify(secret, b.Kod) {
 		httpx.WriteError(w, http.StatusBadRequest, "kod doğrulanamadı")
 		return

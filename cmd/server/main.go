@@ -30,6 +30,7 @@ import (
 	"girginospanel/internal/domains"
 	"girginospanel/internal/domainyasak"
 	"girginospanel/internal/eklenti"
+	"girginospanel/internal/erisim"
 	"girginospanel/internal/files"
 	"girginospanel/internal/git"
 	githubpkg "girginospanel/internal/github"
@@ -45,6 +46,7 @@ import (
 	"girginospanel/internal/laravel"
 	"girginospanel/internal/lisans"
 	"girginospanel/internal/logs"
+	"girginospanel/internal/marka"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/monitor"
 	"girginospanel/internal/musteri"
@@ -68,6 +70,7 @@ import (
 	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
 	"girginospanel/internal/subdomain"
+	"girginospanel/internal/surum"
 	"girginospanel/internal/system"
 	"girginospanel/internal/tasima"
 	"girginospanel/internal/toplu"
@@ -75,6 +78,7 @@ import (
 	"girginospanel/internal/uygulama"
 	"girginospanel/internal/waf"
 	"girginospanel/internal/websec"
+	"girginospanel/internal/winajan"
 	"girginospanel/internal/wordpress"
 	"girginospanel/internal/zincir"
 
@@ -82,7 +86,9 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
-const version = "0.3.0-f3"
+// version — TEK kanonik surum kaynagi internal/surum (healthz + /ozet footer +
+// lisans el sikismasi hepsi ayni degeri kullansin; surum yalniz orada degisir).
+var version = surum.Panel
 
 // 🔴 Host Uygulamalari GECICI olarak kapali (kullanici talebi 2026-08-17).
 // Paket ve sayfalar duruyor; geri acmak icin bunu true yapmak + frontend'de
@@ -167,6 +173,8 @@ func main() {
 	// heal MEVCUT grant'leri panel her acilista idempotent kacisli hale
 	// getirir (kaynak: db_accounts, DCL root-socket). Boot'u bloklamaz.
 	go hesaplar.HealGrantJokerleri(context.Background(), d)
+	// At-rest DUZ METIN kalan kritik sirlari (yedek/totp/dkim/webhook) sifrele.
+	go healSirleriSifrele(d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
@@ -275,11 +283,12 @@ func main() {
 	topluH := &toplu.Handlers{DB: d}
 	backups.StartScheduler(d)
 	gitH := &git.Handlers{DB: d}
-	githubH := &githubpkg.Handlers{DB: d, WebhookBase: "https://" + ipv4 + ":8443"}
+	githubH := &githubpkg.Handlers{DB: d, WebhookBase: "https://" + ipv4 + ":" + panelhost.PanelPort()}
 	pmaH := &pma.Handlers{DB: d}
 	phpH := &php.Handlers{DB: d}
 	kaynakH := &kaynak.Handlers{DB: d}
 	monitorH := &monitor.Handlers{DB: d}
+	winajanH := winajan.New(d)
 	eklentiH := &eklenti.Handlers{DB: d}
 	go eklentiH.SaglikDongusu(context.Background())
 	// Lisansli eklenti pazaryeri + periyodik lisans nabzi.
@@ -290,6 +299,11 @@ func main() {
 	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
 	// sunucusuna ulasilamasa bile goruilmelidir.
 	go lisans.ButunlukIzleyici(d)
+	// 🔴 Çekirdek/ücretsiz eklenti (whitelabel) "panelle BİRLİKTE gelir":
+	// payload src/eklentiler'de olduğu halde cp_eklentiler'e kayıtlı DEĞİLSE
+	// otomatik kurulur. Hem taze kurulumu (installer adımı atlanmış olsa bile)
+	// hem güncellemeyi (girginospanel-update installer'ı çalıştırmaz) kapsar.
+	go cekirdekEklentiGuvence(d)
 	nginxsetH := &nginxset.Handlers{DB: d}
 	sshH := &sshaccess.Handlers{DB: d, IPv4: ipv4}
 	statH := &istatistik.Handlers{DB: d}
@@ -304,12 +318,30 @@ func main() {
 	wpH := &wordpress.Handlers{DB: d}
 	fwH := &guvenlikduvari.Handlers{DB: d}
 	wafH := &waf.Handlers{DB: d}
+	erisimH := &erisim.Handlers{DB: d}
 	redisH := &redis.Handlers{DB: d}
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
 	resellerH := &reseller.Handlers{DB: d}
 	denetimH := &denetim.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	provisioner.HealNginxLogPerms() // nginx log dizinini kiraciya kapat (cross-tenant log okuma)
+	// 🔴 SIRA ONEMLI: yeniden-acma kurtarmasi izin duzeltmesinden SONRA kosmali.
+	// nginx iscileri log dizinine giremezse reopen zaten basarisiz olur; once
+	// dizin 0710 root:nginx yapilir, ANCAK ONDAN SONRA kurtarma denenir.
+	provisioner.HealNginxLogReopen() // dondurulmus log tanitiicilarini olc + kurtar
+	// Erisim kisitlama sapmasi: DB ile vhost birbirini tutmuyorsa duzelt.
+	// (Elle SQL / yedekten donus / toplu temizlik sonrasi site sebepsiz 403
+	// dondurebiliyordu; panel ise "kisit yok" gosteriyordu.)
+	provisioner.HealErisimSapmasi()
+	// Alt alanlar ayri bir dosya adinda (sub_<sk>_<alt>.conf) ve yeniden
+	// render'lari subdomain paketinde; nobetci orada kosar. Kapsamdan
+	// birakilsaydi "panelde gorunmeyen kesinti" sinifi ozelligin alt alan
+	// yarisinda oldugu gibi kalirdi.
+	subdomain.HealAltAlanSapmasi(d)
+	// Acilistaki tek seferlik kontrol, iki acilis ARASINDA olusan sapmalari
+	// goremez (yeni domainin 0644 logu, sessizce basarisiz olan bir gunluk
+	// dondurme). Periyodik olcum bu bosluğu kapatir.
+	provisioner.LogBakimBaslat(30 * time.Minute)
 	// Swap yoksa OOM-killer ile aramizda tampon yoktur: 2026-08-22'de bellek
 	// baskisi dogrudan MariaDB'yi oldurup butun siteleri dusurdu. Swap dosyasi
 	// olusturmak disk tuketen bir operator karari — panel yalnizca uyarir.
@@ -351,6 +383,77 @@ func main() {
 
 	// eklenti frontend bundle: nginx yalnizca /api/ proxyler + <script src> JWT tasiyamaz => auth disi
 	r.Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
+
+	// Marka (whitelabel) — AUTH YOK.
+	//
+	// 🔴 Giris sayfasi markayi kimlik dogrulamadan ONCE gostermek zorunda;
+	// eklenti proxysi (/api/v1/eklenti/...) RequireAuth arkasindadir → oradan
+	// okunamaz. nginx de yalniz /api/ yolunu panele proxyledigi icin ayri bir
+	// statik yol acmak vhost'a dokunmayi gerektirirdi.
+	//
+	// Uc yalniz GORUNUM alanlari doner: surum/sunucu/eklenti bilgisi SIZMAZ.
+	// 🔴 Eklenti unit'i ProtectSystem=strict + ReadWritePaths ile kosar ve
+	// dizin YOKSA systemd namespace'i kuramadan servisi oldurur. Dizini
+	// kisitsiz kosan core garanti eder.
+	if err := marka.DizinHazirla(); err != nil {
+		log.Printf("UYARI: marka dizini hazırlanamadı: %v", err)
+	}
+
+	// Webmail (Roundcube) markalamasi — acilista bir kez, sonra periyodik.
+	//
+	// 🔴 NEDEN YOKLAMA (polling), OLAY DEGIL: markayi yazan taraf AYRI bir
+	// surectir (whitelabel eklentisi) ve core'a kimlik dogrulayarak istek
+	// atamaz. Yoklama tek yonlu bagimliligi korur — core eklentiyi tanimaz.
+	//
+	// 🔴 IMZA DEGISMEDIKCE HICBIR SEY YAPILMAZ: her turda 120 KB'lik CSS'i
+	// yeniden yazmak diski ve log'u bosuna mesgul ederdi. Imzaya kaynak
+	// CSS'in boyut+mtime'i da girer, boylece `dnf update roundcubemail`
+	// sonrasi bayat kalan tema kendiliginden yenilenir.
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		ilk := true
+		// 🔴 PANİK YAKALANIR. Bu döngü dosya sistemine dokunuyor ve panelin
+		// ömrü boyunca koşuyor; buradaki bir panik TÜM paneli düşürürdü.
+		// Marka, panelin ayakta kalmasından daha önemli değildir.
+		tur := func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("webmail markalama döngüsünde panik (yoksayıldı): %v", r)
+				}
+			}()
+			// Zamanlama DIS DONGUNUN isi: burada da beklemek her turu iki
+			// kez bekletirdi (30 sn yerine 60 sn).
+			// 🔴 OKUMA HATASINDA HİÇBİR ŞEY YAPILMAZ. Oku() bozuk dosyada
+			// varsayilana düşer ve orada webmail_marka=false'tur; o değerle
+			// devam etmek, geçici bir okuma hatasını "kullanıcı kapattı"
+			// sayıp üretilmiş temayı SİLMEK demekti.
+			m, err := marka.OkuKesin()
+			if err != nil {
+				log.Printf("marka okunamadı, webmail teması DEĞİŞTİRİLMEDİ: %v", err)
+				return
+			}
+			if marka.WebmailGuncelMi(m) {
+				return
+			}
+			if err := marka.WebmailUygula(m); err != nil {
+				log.Printf("webmail markalama: %v", err)
+			} else if marka.WebmailKurulu() {
+				log.Printf("webmail markalama güncellendi (webmail_marka=%v)", m.WebmailMarka)
+			}
+		}
+		for {
+			if !ilk {
+				<-t.C
+			}
+			ilk = false
+			tur()
+		}
+	}()
+	r.Get("/api/v1/marka", marka.Handler)
+	r.Get("/api/v1/marka/logo", marka.LogoHandler)
+	r.Get("/api/v1/marka/banner", marka.BannerHandler)
+	r.Get("/api/v1/marka/favicon", marka.FaviconHandler)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
@@ -464,6 +567,13 @@ func main() {
 			r.Get("/uygulamalar/katalog", uygulamaH.Katalog)
 			r.With(middleware.MusteriScope).Get("/domains/{id}", domainsH.Get)
 			r.With(middleware.AdminOnly).Get("/system/usage", system.Handler)
+			r.With(middleware.AdminOnly).Get("/system/disk-dagilim", system.DiskDagilim)
+			r.With(middleware.AdminOnly).Get("/windows-ajanlar", winajanH.List)
+			r.With(middleware.AdminOnly).Post("/windows-ajanlar", winajanH.Ekle)
+			r.With(middleware.AdminOnly).Post("/windows-ajanlar/{id}/sina", winajanH.Sina)
+			r.With(middleware.AdminOnly).Get("/windows-ajanlar/{id}/olaylar", winajanH.Olaylar)
+			r.With(middleware.AdminOnly).Get("/windows-ajanlar/{id}/gorevler", winajanH.Gorevler)
+			r.With(middleware.AdminOnly).Delete("/windows-ajanlar/{id}", winajanH.Sil)
 			r.With(middleware.AdminOnly).Get("/optimize/analiz", optimizeH.Analiz)
 			r.With(middleware.AdminOnly).Post("/optimize/uygula", optimizeH.Uygula)
 			r.With(middleware.AdminOnly).Get("/optimize/yedekler", optimizeH.Yedekler)
@@ -587,6 +697,13 @@ func main() {
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}", subH.Sil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}", subH.Detay)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/php", subH.PHPDegistir)
+				// Alt alan adi erisim kisitlama. MusteriScope {id}'yi (ust domain
+				// sahipligini) dogrular; {sid}'nin O domaine ait oldugu handler
+				// icinde ayrica dogrulanir (cross-tenant IDOR kapisi).
+				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/erisim", subH.ErisimGoster)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/erisim", subH.ErisimKaydet)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/erisim/kural", subH.ErisimKuralEkle)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/erisim/kural/{kid}", subH.ErisimKuralSil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/php-settings", subH.PHPAyarGet)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/subdomain/{sid}/php-settings", subH.PHPAyarPut)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/web-sunucu", subH.WebGet)
@@ -659,6 +776,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/ssl/issue", domainsH.SSLIssue)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl/ilerleme", domainsH.SSLIlerleme)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl/kapsam", domainsH.SSLKapsam)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ssl/dns-yenile", domainsH.SSLDnsYenile)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/ssl", domainsH.SSLDisable)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/cron", cronH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/cron", cronH.Create)
@@ -753,6 +871,15 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/nginx-settings", nginxsetH.Kaydet)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/waf", wafH.Goster)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/waf", wafH.Kaydet)
+				// Domain bazli erisim kisitlama (Access Restrictions).
+				r.With(middleware.MusteriScope).Get("/domains/{id}/erisim", erisimH.Goster)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/erisim", erisimH.Kaydet)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/erisim/kural", erisimH.KuralEkle)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/erisim/kural/{kid}", erisimH.KuralSil)
+				// Guvenilir vekil (CDN) araliklari GLOBAL etkili -> AdminOnly.
+				r.With(middleware.AdminOnly).Get("/guvenilir-vekil", erisimH.VekilListe)
+				r.With(middleware.AdminOnly).Post("/guvenilir-vekil", erisimH.VekilEkle)
+				r.With(middleware.AdminOnly).Delete("/guvenilir-vekil/{id}", erisimH.VekilSil)
 				r.With(middleware.AdminOnly).Get("/php-extensions", phpExtH.List)
 				r.With(middleware.AdminOnly).Post("/php-extensions/kurulabilir", phpExtH.Kurulabilir)
 				r.With(middleware.AdminOnly).Get("/runtimeler", runtimeH.Liste)
@@ -1094,4 +1221,36 @@ func detectIPv4() string {
 		}
 	}
 	return ""
+}
+
+// cekirdekEklentiGuvence — çekirdek/ücretsiz eklentileri (whitelabel) panelle
+// birlikte gelmiş sayar: kurulum yordamı tanımlı VE payload mevcut olduğu halde
+// cp_eklentiler'e kaydedilmemişse otomatik kurar. Best-effort — açılışı BLOKLAMAZ,
+// hata panelin çalışmasını engellemez (yalnız loglanır). Idempotent: zaten kayıtlı
+// eklenti tekrar kurulmaz.
+func cekirdekEklentiGuvence(d *sql.DB) {
+	for _, ad := range []string{"whitelabel"} {
+		if !lisans.KurucuVarMi(ad) {
+			continue
+		}
+		// cp_eklentiler migration ile gelir; taze kurulumda tablo henüz
+		// oluşmamış olabilir → hazır olana kadar (en çok ~2 dk) bekle.
+		hazir, kurulu := false, false
+		for i := 0; i < 60; i++ {
+			var n int
+			if err := d.QueryRow(`SELECT COUNT(*) FROM cp_eklentiler WHERE ad = ?`, ad).Scan(&n); err == nil {
+				hazir, kurulu = true, n > 0
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if !hazir || kurulu {
+			continue
+		}
+		if _, err := lisans.KurulumBaslat(d, ad); err != nil {
+			log.Printf("çekirdek eklenti güvence: %s otomatik kurulamadı: %v", ad, err)
+			continue
+		}
+		log.Printf("çekirdek eklenti güvence: %s otomatik kuruldu (panelle birlikte)", ad)
+	}
 }

@@ -53,7 +53,7 @@ func TestCertGecerliLE(t *testing.T) {
 	gelecek := time.Now().Add(90 * 24 * time.Hour)
 	gecmis := time.Now().Add(-24 * time.Hour)
 
-	self := certUret(t, "gpanel.example", "gpanel.example", gelecek) // self-signed
+	self := certUret(t, "gpanel.example", "gpanel.example", gelecek)  // self-signed
 	le := certUret(t, "mail.example", "R3 Let's Encrypt", gelecek)    // CA imzalı
 	suresi := certUret(t, "mail.example", "R3 Let's Encrypt", gecmis) // süresi geçmiş LE
 

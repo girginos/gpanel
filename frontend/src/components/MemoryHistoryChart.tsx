@@ -107,7 +107,7 @@ export default function MemoryHistoryChart() {
   const dikkat = guncelDeger != null && guncelDeger >= 70
 
   return (
-    <div ref={wrapRef} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/60">
+    <div ref={wrapRef} className="card rounded-lg bg-white p-5 shadow-soft dark:bg-dark-700 dark:shadow-none">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"
@@ -119,11 +119,11 @@ export default function MemoryHistoryChart() {
             <p className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Kullanılan RAM yüzdesi · 0–100%")}</p>
           </div>
         </div>
-        <div className="flex items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-800/60">
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-dark-600 dark:bg-dark-700/60">
           {ARALIKLAR.map(a => (
             <button key={a.saat} onClick={() => { setSaat(a.saat); setHover(null) }}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${saat === a.saat
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-xs dark:bg-dark-600 dark:text-slate-100'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}>
               {cevir(a.et)}
             </button>

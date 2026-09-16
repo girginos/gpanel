@@ -42,9 +42,9 @@ type Ayarlar struct {
 	ZamanliSaat    string `json:"zamanli_saat"`
 	// Dinamik yük eşiği: sistem 1-dk yük ortalaması bu (çekirdek yüzdesi)
 	// değeri aşınca tarayıcı kendini duraklatır. 0 = kapalı (yalnız cgroup).
-	YukEsigi       int    `json:"yuk_esigi"`
+	YukEsigi int `json:"yuk_esigi"`
 	// FAZ1: netlink süreç davranış izleme (php-fpm→kabuk, webroot-ELF, C2).
-	SurecIzleme    bool   `json:"surec_izleme"`
+	SurecIzleme bool `json:"surec_izleme"`
 }
 
 // Kapasite — sunucunun ölçülen kaynakları ve önerilen limitler.

@@ -9,6 +9,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Paket = {
   id: number; ad: string; aciklama: string
@@ -36,6 +38,7 @@ const BPLAN_EN: Record<string, string> = {
   "Hosting Planları": "Hosting Plans",
   "sayfasını kullanın.": "use the page.",
   "İşlem başarısız": "Operation failed",
+  "Kaydedildi": "Saved",
   "Yükleniyor…": "Loading…",
   "Plan": "Plan",
   "Bayi": "Reseller",
@@ -79,18 +82,24 @@ function fmtFiyat(kurus: number) {
 export default function BayiPlanlariPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const nav = useNavigate()
   const [items, setItems] = useState<Paket[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
+  // Hata/basari artik sag ust toast'ta gosterilir; state'ler mantik icin duruyor.
+  const [, setHata] = useState<string | null>(null)
+  const [, setOk] = useState<string | null>(null)
   const [modal, setModal] = useState<'yeni' | Paket | null>(null)
   const [form, setForm] = useState<any>(bos)
   const [kaydet, setKaydet] = useState(false)
 
   function yukle() {
     setYuk(true)
-    api.get<Paket[]>('/reseller-plans').then(r => setItems(r.data)).catch(e => setHata(apiHata(e))).finally(() => setYuk(false))
+    api.get<Paket[]>('/reseller-plans').then(r => setItems(r.data)).catch(e => {
+      const m = apiHata(e)
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }).finally(() => setYuk(false))
   }
   useEffect(yukle, [])
 
@@ -110,21 +119,43 @@ export default function BayiPlanlariPage() {
       varsayilan: !!form.varsayilan,
     }
     try {
-      if (modal === 'yeni') { await api.post('/reseller-plans', body); setOk(`"${form.ad}" ${cevir("paketi oluşturuldu.")}`) }
-      else if (modal) { await api.put(`/reseller-plans/${modal.id}`, body); setOk(cevir("Paket güncellendi.")) }
+      if (modal === 'yeni') {
+        await api.post('/reseller-plans', body)
+        const m = `"${form.ad}" ${cevir("paketi oluşturuldu.")}`
+        setOk(m)
+        toast.basari(cevir("Kaydedildi"), m)
+      }
+      else if (modal) {
+        await api.put(`/reseller-plans/${modal.id}`, body)
+        setOk(cevir("Paket güncellendi."))
+        toast.basari(cevir("Paket güncellendi."))
+      }
       setModal(null); yukle()
-    } catch (err) { setHata(apiHata(err, cevir("İşlem başarısız"))) }
+    } catch (err) {
+      const m = apiHata(err, cevir("İşlem başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setKaydet(false) }
   }
 
   async function sil(p: Paket) {
     if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, tehlike: true }))) return
     setHata(null); setOk(null)
-    try { await api.delete(`/reseller-plans/${p.id}`); setOk(cevir('Paket silindi.')); yukle() }
-    catch (err) { setHata(apiHata(err, cevir('Silinemedi'))) }
+    try {
+      await api.delete(`/reseller-plans/${p.id}`)
+      setOk(cevir('Paket silindi.'))
+      toast.basari(cevir('Paket silindi.'))
+      yukle()
+    }
+    catch (err) {
+      const m = apiHata(err, cevir('Silinemedi'))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
-  const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm bg-white dark:bg-slate-900 focus:border-brand-500 outline-none'
+  const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm bg-white dark:bg-dark-800 focus:border-brand-500 outline-none'
   const lbl = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
 
   return (
@@ -132,7 +163,7 @@ export default function BayiPlanlariPage() {
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Bayi Planları") }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayi Planları")}</h1>
-        <button onClick={yeniAc} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-md font-medium">
+        <button onClick={yeniAc} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white rounded-md font-medium">
           <span className="text-base leading-none">+</span> {cevir("Yeni Bayi Planı")}
         </button>
       </div>
@@ -141,9 +172,6 @@ export default function BayiPlanlariPage() {
         {cevir("Hosting müşterilerine satılan planlar için")} <Link to="/hizmet-planlari" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("Hosting Planları")}</Link> {cevir("sayfasını kullanın.")}
       </p>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
-
       {yuk ? (
         <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
       ) : items.length === 0 ? (
@@ -151,10 +179,10 @@ export default function BayiPlanlariPage() {
           aciklama={cevir("Bayilerinize satacağınız limit paketlerini tanımlayın (ör. Bronz: 10 hosting / 5 GB). Bayi oluştururken tek tıkla atanır.")}
           buton={{ etiket: cevir("Bayi Planı Oluştur"), onClick: yeniAc }} />
       ) : (
-        <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+        <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
-              <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+              <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
                 <tr>
                   <th className={T.baslik}>{cevir("Plan")}</th>
                   <th className={T.baslik}>Hosting</th>
@@ -192,7 +220,7 @@ export default function BayiPlanlariPage() {
 
       {modal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !kaydet && setModal(null)}>
-          <form onSubmit={gonder} className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <form onSubmit={gonder} className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? cevir('Yeni Bayi Planı') : `${cevir('Plan')} — ${modal.ad}`}</h2>
             <div className="space-y-3">
               <div><label className={lbl}>{cevir("Plan adı")}</label>
@@ -213,8 +241,8 @@ export default function BayiPlanlariPage() {
               <p className="text-[11px] text-slate-400">{cevir("0 = limitsiz. Plan güncellenince MEVCUT bayilerin limitleri değişmez; bayiyi düzenleyip planı yeniden seçin.")}</p>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md text-slate-600 dark:text-slate-300">{cevir("İptal")}</button>
-              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-slate-900 dark:bg-slate-700 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : cevir('Kaydet')}</button>
+              <Button variant="outlined" type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-dark-800 dark:bg-dark-600 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : cevir('Kaydet')}</button>
             </div>
           </form>
         </div>

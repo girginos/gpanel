@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>gPanel — Windows</title>
+  <link rel="stylesheet" href="stil.css?v=055">
+  <link rel="stylesheet" href="gpdash.css?v=054">
+</head>
+<body>
+
+  <!-- Tost bildirimleri (sağ üst, 4 sn) -->
+  <div id="tost-kabi" aria-live="polite"></div>
+
+  <!-- GİRİŞ görünümü -->
+  <main id="gorunum-giris" class="giris-sahne" hidden>
+    <form id="giris-form" class="kart giris-kart">
+      <div class="giris-dil">
+        <label class="gorunmez" for="dil-sec-giris">Dil / Language</label>
+        <select id="dil-sec-giris" class="dil-sec">
+          <option value="tr">Türkçe</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div class="giris-baslik">
+        <svg class="ikon ikon-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M7 16.5h.01"/></svg>
+        <h1>gPanel — Windows</h1>
+      </div>
+      <label for="giris-kullanici" data-i18n="Kullanıcı adı">Kullanıcı adı</label>
+      <input id="giris-kullanici" type="text" name="kullanici" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      <label for="giris-parola" data-i18n="Parola">Parola</label>
+      <input id="giris-parola" type="password" name="parola" autocomplete="current-password" required>
+      <button id="btn-giris" type="submit" class="btn btn-dolgulu btn-tam" data-i18n="Giriş yap">Giriş yap</button>
+    </form>
+  </main>
+
+  <!-- PANEL görünümü -->
+  <div id="gorunum-panel" hidden>
+    <div class="kabuk">
+
+      <!-- IKON RAYI (68px): logo + bölüm ikonları + kullanıcı rozeti -->
+      <aside class="ikon-rayi" aria-label="Bölüm rayı">
+        <div class="rayi-logo"><svg class="ikon ikon-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M7 16.5h.01"/></svg></div>
+        <button type="button" class="ray-dugme aktif" data-bolum="genel" title="Genel" aria-label="Genel" aria-current="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg></button>
+        <div class="ray-bolumler">
+          <button type="button" class="ray-dugme" data-bolum="barindirma" title="Barındırma" aria-label="Barındırma" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18 13.5 13.5 0 0 1 0-18z"/></svg></button>
+          <button type="button" class="ray-dugme" data-bolum="sunucu" title="Sunucu" aria-label="Sunucu" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M7 7h.01M7 14h.01"/></svg></button>
+          <button type="button" class="ray-dugme" data-bolum="profil" title="Profil" aria-label="Profil" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
+        </div>
+        <div class="ray-avatar" aria-hidden="true">R</div>
+      </aside>
+
+      <!-- ETIKETLI PANEL (208px): marka + aktif bölüm başlığı + o bölümün sekmeleri -->
+      <aside class="etiket-panel">
+        <div class="panel-baslik">
+          <svg class="ikon ikon-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M7 16.5h.01"/></svg>
+          <span class="marka">gPanel Windows</span>
+        </div>
+        <nav class="panel-nav" aria-label="Bölümler">
+          <div class="panel-caption" id="panel-baslik-metin" data-i18n="Genel">Genel</div>
+          <div class="sekme-grup" data-grup="genel">
+            <button type="button" class="sekme aktif" data-sekme="ozet" aria-current="true"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="Genel Bakış">Genel Bakış</span></button>
+          </div>
+          <div class="sekme-grup" data-grup="barindirma" hidden>
+            <button type="button" class="sekme" data-sekme="siteler" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18 13.5 13.5 0 0 1 0-18z"/></svg><span data-i18n="Siteler">Siteler</span></button>
+            <button type="button" class="sekme" data-sekme="vt" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span data-i18n="Veritabanları">Veritabanları</span></button>
+            <button type="button" class="sekme" data-sekme="plan" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 15h5"/></svg><span data-i18n="Planlar">Planlar</span></button>
+          </div>
+          <div class="sekme-grup" data-grup="sunucu" hidden>
+            <button type="button" class="sekme" data-sekme="servisler" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M7 7h.01M7 14h.01"/></svg><span data-i18n="Servisler">Servisler</span></button>
+            <button type="button" class="sekme" data-sekme="kurulum" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg><span data-i18n="Kurulum">Kurulum</span></button>
+            <button type="button" class="sekme" data-sekme="gorevler" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="Görevler">Görevler</span></button>
+            <button type="button" class="sekme" data-sekme="olaylar" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg><span data-i18n="Olay Günlüğü">Olay Günlüğü</span></button>
+          </div>
+          <div class="sekme-grup" data-grup="profil" hidden>
+            <button type="button" class="sekme" data-sekme="ayarlar" aria-current="false"><svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span data-i18n="Ayarlar">Ayarlar</span></button>
+          </div>
+        </nav>
+      </aside>
+
+      <!-- SAG SUTUN: üst bar + ana içerik -->
+      <div class="kabuk-sag">
+        <header class="ustbar">
+          <div class="ustbar-sol">
+            <span id="ust-hostname" class="mono soluk"></span>
+            <span id="ust-rozet" class="rozet"></span>
+          </div>
+          <div class="ustbar-arama">
+            <span class="arama-sar">
+              <label class="gorunmez" for="ust-arama">Ara</label>
+              <input id="ust-arama" class="arama-girdi" type="text" placeholder="Ara: site, veritabanı, sayfa…" data-i18n-ph="Ara: site, veritabanı, sayfa…" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </span>
+          </div>
+          <div class="ustbar-sag">
+            <label class="gorunmez" for="dil-sec-ust">Dil / Language</label>
+            <select id="dil-sec-ust" class="dil-sec">
+              <option value="tr">Türkçe</option>
+              <option value="en">English</option>
+            </select>
+            <span class="kullanici-cip">
+              <span class="kullanici-avatar" aria-hidden="true">R</span>
+              <span class="kullanici-ad">root</span>
+            </span>
+            <button id="btn-cikis" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Çıkış">Çıkış</button>
+          </div>
+        </header>
+        <main class="ana">
+
+      <!-- Genel Bakış (Linux gp-dash tasarimi; JS ile cizilir) -->
+      <section id="sekme-ozet" class="sekme-panel">
+        <div id="gp-dash-kap"></div>
+      </section>
+
+      <!-- Siteler -->
+      <section id="sekme-siteler" class="sekme-panel" hidden>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Siteler">Siteler</h2>
+            <button id="btn-siteler-yenile" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Yenile">Yenile</button>
+          </div>
+          <form id="site-ekle-form" class="kart-ic satir-form">
+            <label class="gorunmez" for="site-alan">Alan adı</label>
+            <input id="site-alan" type="text" name="alan_adi" placeholder="ornek.com.tr" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+            <button id="btn-site-ekle" type="submit" class="btn btn-dolgulu" data-i18n="Site Ekle">Site Ekle</button>
+          </form>
+          <div id="siteler-kap" class="tablo-kap"></div>
+        </div>
+      </section>
+
+      <!-- Planlar (paket): disk kotası + IIS limitleri, siteye atama -->
+      <section id="sekme-plan" class="sekme-panel" hidden>
+        <div id="plan-kap"></div>
+      </section>
+
+      <!-- Olay Günlüğü -->
+      <section id="sekme-olaylar" class="sekme-panel" hidden>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Olay Günlüğü">Olay Günlüğü</h2>
+            <div class="arac-cubuk">
+              <label class="gorunmez" for="olay-gunluk">Günlük</label>
+              <select id="olay-gunluk">
+                <option value="System">System</option>
+                <option value="Application">Application</option>
+                <option value="Security">Security</option>
+              </select>
+              <label class="gorunmez" for="olay-seviye">Seviye filtresi</label>
+              <select id="olay-seviye">
+                <option value="" data-i18n="Tümü">Tümü</option>
+                <option value="hata" data-i18n="Hata">Hata</option>
+                <option value="uyari" data-i18n="Uyarı">Uyarı</option>
+              </select>
+              <button id="btn-olaylar-yenile" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Yenile">Yenile</button>
+            </div>
+          </div>
+          <div id="olaylar-kap" class="tablo-kap"></div>
+        </div>
+      </section>
+
+      <!-- Görevler -->
+      <section id="sekme-gorevler" class="sekme-panel" hidden>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Zamanlanmış Görevler">Zamanlanmış Görevler</h2>
+            <div class="arac-cubuk">
+              <label class="onay"><input id="gorev-tumu" type="checkbox"> <span data-i18n="Microsoft görevleri">Microsoft görevleri</span></label>
+              <button id="btn-gorevler-yenile" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Yenile">Yenile</button>
+            </div>
+          </div>
+          <div id="gorevler-kap" class="tablo-kap"></div>
+        </div>
+      </section>
+
+      <!-- Veritabanları -->
+      <section id="sekme-vt" class="sekme-panel" hidden>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Veritabanları">Veritabanları</h2>
+            <div class="arac-cubuk">
+              <label class="gorunmez" for="vt-motor">Motor</label>
+              <select id="vt-motor"></select>
+              <button id="btn-vt-yenile" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Yenile">Yenile</button>
+            </div>
+          </div>
+          <div id="vt-motor-yok" class="band band-bilgi" hidden>
+            <svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/></svg>
+            <span data-i18n="Önce Kurulum sekmesinden bir veritabanı motoru kurun">Önce Kurulum sekmesinden bir veritabanı motoru kurun</span>
+          </div>
+          <div id="vt-govde">
+            <div id="vt-uyari" class="kart-ic uyari-satir" hidden>
+              <svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.9 18.1a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+              <span id="vt-uyari-metin"></span>
+            </div>
+            <form id="vt-olustur-form" class="kart-ic satir-form">
+              <label class="gorunmez" for="vt-ad">Veritabanı adı</label>
+              <input id="vt-ad" type="text" placeholder="veritabani_adi" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+              <label class="gorunmez" for="vt-kullanici">Kullanıcı</label>
+              <input id="vt-kullanici" type="text" placeholder="kullanıcı" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <label class="gorunmez" for="vt-parola">Parola</label>
+              <input id="vt-parola" type="password" placeholder="parola" autocomplete="new-password">
+              <button id="btn-vt-olustur" type="submit" class="btn btn-dolgulu" data-i18n="Oluştur">Oluştur</button>
+            </form>
+            <div id="vt-liste-kap" class="tablo-kap"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Servisler -->
+      <section id="sekme-servisler" class="sekme-panel" hidden>
+        <div id="kaynak-dizi" class="stat-dizi"></div>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Servisler">Servisler</h2>
+            <button id="btn-servisler-yenile" type="button" class="btn btn-cerceve btn-kucuk" data-i18n="Yenile">Yenile</button>
+          </div>
+          <div id="servisler-kap" class="tablo-kap"></div>
+        </div>
+      </section>
+
+      <!-- Kurulum Sihirbazı -->
+      <section id="sekme-kurulum" class="sekme-panel" hidden>
+        <div class="kart tablolu">
+          <div class="kart-baslik">
+            <h2 data-i18n="Kurulum Sihirbazı">Kurulum Sihirbazı</h2>
+            <ol id="kur-adimlar" class="adimlar">
+              <li class="adim aktif"><span class="adim-no">1</span><span data-i18n="Seç">Seç</span></li>
+              <li class="adim"><span class="adim-no">2</span><span data-i18n="Onay">Onay</span></li>
+              <li class="adim"><span class="adim-no">3</span><span data-i18n="Kurulum">Kurulum</span></li>
+              <li class="adim"><span class="adim-no">4</span><span data-i18n="Özet">Özet</span></li>
+            </ol>
+          </div>
+          <div id="kur-adim-1">
+            <div class="kart-ic kur-ara-sar">
+              <span class="kur-ara">
+                <label class="gorunmez" for="kur-ara">Bileşen ara</label>
+                <input id="kur-ara" type="text" placeholder="Bileşen ara…" data-i18n-ph="Bileşen ara…" autocomplete="off" autocapitalize="off" spellcheck="false">
+              </span>
+            </div>
+            <div id="kur-liste"></div>
+            <div class="kart-ic kur-altbar">
+              <span id="kur-sec-ozet" class="kur-sec-ozet"></span>
+              <button id="btn-kur-devam" type="button" class="btn btn-dolgulu" disabled data-i18n="Devam">Devam</button>
+            </div>
+          </div>
+          <div id="kur-adim-2" hidden>
+            <div id="kur-ozet-liste" class="kart-ic"></div>
+            <div id="kur-deneysel-uyari" class="kart-ic uyari-satir" hidden>
+              <svg class="ikon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.9 18.1a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+              <span data-i18n="Deneysel bileşenler uzun sürebilir ve elle yapılandırma gerektirebilir">Deneysel bileşenler uzun sürebilir ve elle yapılandırma gerektirebilir</span>
+            </div>
+            <div class="kart-ic kur-altbar">
+              <button id="btn-kur-geri" type="button" class="btn btn-cerceve" data-i18n="Geri">Geri</button>
+              <button id="btn-kur-baslat" type="button" class="btn btn-dolgulu" data-i18n="Kurulumu Başlat">Kurulumu Başlat</button>
+            </div>
+          </div>
+          <div id="kur-adim-3" hidden>
+            <div id="kur-simdiki" class="kart-ic"></div>
+            <div id="kur-genel" class="kur-genel" hidden>
+              <div class="kur-genel-cubuk" id="kur-genel-cubuk" aria-label="Genel ilerleme"></div>
+            </div>
+            <div id="kur-ilerleme" class="kur-ilerleme" hidden aria-live="polite">
+              <div class="ilrl-ust">
+                <span class="ilrl-etiket mono" id="ilrl-etiket">—</span>
+                <span class="cip cip-mavi" id="ilrl-asama">—</span>
+                <span class="ilrl-yuzde mono" id="ilrl-yuzde"></span>
+              </div>
+              <div class="ilrl-cubuk"><div class="ilrl-dolgu" id="ilrl-dolgu"></div></div>
+              <div class="ilrl-alt mono soluk" id="ilrl-alt"></div>
+            </div>
+            <div id="kur-log" class="kur-log" tabindex="0" aria-label="Kurulum günlüğü"></div>
+            <div id="kur-karar" class="kart-ic kur-altbar" hidden>
+              <button id="btn-kur-durdur" type="button" class="btn btn-tehlike" data-i18n="Durdur">Durdur</button>
+              <button id="btn-kur-devam-et" type="button" class="btn btn-dolgulu" data-i18n="Devam Et (kalanları kur)">Devam Et (kalanları kur)</button>
+            </div>
+          </div>
+          <div id="kur-adim-4" hidden>
+            <div id="kur-sonuc-kap" class="tablo-kap"></div>
+            <div class="kart-ic kur-altbar">
+              <button id="btn-kur-bitir" type="button" class="btn btn-dolgulu" data-i18n="Genel Bakış'a Dön">Genel Bakış'a Dön</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Genel Ayarlar: ajan bilgisi + dil + panel parolası -->
+      <section id="sekme-ayarlar" class="sekme-panel" hidden>
+        <div id="ayarlar-kap"></div>
+      </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="uygulama.js?v=055"></script>
+</body>
+</html>

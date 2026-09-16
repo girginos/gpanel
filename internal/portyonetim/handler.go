@@ -32,7 +32,7 @@ func (h *Handler) IsDurum(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) YasakliListele(w http.ResponseWriter, _ *http.Request) {
-	// Map'i sıralı liste'ye dönüştür
+	// Map'i liste'ye dönüştür
 	out := make([]map[string]any, 0, len(YasakliPortlar))
 	for p, aciklama := range YasakliPortlar {
 		out = append(out, map[string]any{"port": p, "aciklama": aciklama})

@@ -136,7 +136,9 @@ func tickOnce(db *sql.DB) {
 	var toplamB int64
 	basari, hata := 0, 0
 	for _, d := range due {
-		db.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.AlanAdi, jid)
+		if _, err := db.Exec(`UPDATE backup_jobs SET aktif_domain=? WHERE id=?`, d.AlanAdi, jid); err != nil {
+			log.Printf("backups.tickOnce: aktif domain yazilamadi: %v", err)
+		}
 		b, err := runOneBackup(db, d, jid, genel)
 		if err != nil {
 			hata++
@@ -148,9 +150,13 @@ func tickOnce(db *sql.DB) {
 				log.Printf("backup retention %s: %v", d.AlanAdi, err)
 			}
 		}
-		db.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`, basari+hata, basari, hata, toplamB, jid)
+		if _, err := db.Exec(`UPDATE backup_jobs SET tamamlanan=?, basari=?, hata=?, boyut_b=? WHERE id=?`, basari+hata, basari, hata, toplamB, jid); err != nil {
+			log.Printf("backups.tickOnce: is ilerlemesi yazilamadi: %v", err)
+		}
 	}
-	db.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, jobDurum(basari, hata), jid)
+	if _, err := db.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, jobDurum(basari, hata), jid); err != nil {
+		log.Printf("backups.tickOnce: is durum yazilamadi: %v", err)
+	}
 }
 
 // runOneBackup: bir domain için backup üret (job_id ile) + last_backup_at. Boyut döner.
@@ -165,7 +171,9 @@ func runOneBackup(db *sql.DB, d dueDomain, jobID int64, genel *GenelAyar) (int64
 	// — manuel toplu is de ayni yoldan gecsin diye. Burada TEKRAR tetiklenmez.
 	_ = genel
 	_ = dosya
-	db.Exec(`UPDATE domains SET last_backup_at=NOW() WHERE id=?`, d.ID)
+	if _, err := db.Exec(`UPDATE domains SET last_backup_at=NOW() WHERE id=?`, d.ID); err != nil {
+		log.Printf("backups.runOneBackup: last_backup_at yazilamadi: %v", err)
+	}
 	log.Printf("backup auto %s: boyut=%d", d.AlanAdi, boyut)
 	return boyut, nil
 }
@@ -203,12 +211,26 @@ func pruneOld(db *sql.DB, domainID int64, sk string, retention int) error {
 	// En yeni N tut, geri kalan sil
 	old := all[retention:]
 	sort.Slice(old, func(i, j int) bool { return old[i].ID < old[j].ID })
+	// 🔴 UZAK KOPYA DA SILINIR. Bu, sizintinin ASIL kaynagiydi: `pruneOld`
+	// her gece HER domain icin calisiyor ve yalnizca yerel dosyayi + DB
+	// kaydini siliyordu. Uzak hedefi olan bir kurulumda panelde 7 yedek
+	// gorunurken FTP'de 90+ dosya birikiyor, kullanici neden dolduguna
+	// panelden BAKAMIYORDU (yonetim ekrani yalniz yerel diski tarar).
+	//
+	// Uzak silinemezse kayit KORUNUR ve bir sonraki turda tekrar denenir.
+	silinen := 0
 	for _, it := range old {
-		yol := filepath.Join(BackupRoot, sk, it.Dosya)
-		_ = os.Remove(yol)
-		_, _ = db.Exec(`DELETE FROM backups WHERE id=?`, it.ID)
+		yh, e := yedekKaydiniYokEt(context.Background(), db, domainID, sk, it.Dosya, it.ID)
+		if e != nil {
+			log.Printf("backup retention domain=%d: %s silinemedi, kayit korundu: %v", domainID, it.Dosya, e)
+			continue
+		}
+		if yh != "" {
+			log.Printf("backup retention domain=%d: %s yerel dosyasi silinemedi: %s", domainID, it.Dosya, yh)
+		}
+		silinen++
 	}
-	log.Printf("backup retention domain=%d: %d eski yedek silindi (keep %d)", domainID, len(old), retention)
+	log.Printf("backup retention domain=%d: %d/%d eski yedek silindi (keep %d)", domainID, silinen, len(old), retention)
 	return nil
 }
 
@@ -259,10 +281,14 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 			// bit-rot ayni metinle gelir ve gozden kacar.
 			if os.IsNotExist(err) && uzakKopyaVar(db, k.dosya) {
 				uzakta++
-				db.Exec(`UPDATE backups SET dogrulama='uzakta' WHERE id=? AND dogrulama<>'bozuk'`, k.id)
+				if _, err := db.Exec(`UPDATE backups SET dogrulama='uzakta' WHERE id=? AND dogrulama<>'bozuk'`, k.id); err != nil {
+					log.Printf("backups.verifyYedekBozulma: dogrulama=uzakta yazilamadi: %v", err)
+				}
 				continue
 			}
-			db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id)
+			if _, err := db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id); err != nil {
+				log.Printf("backups.verifyYedekBozulma: dogrulama=bozuk yazilamadi: %v", err)
+			}
 			bildirim.Yaz(db, "kritik", "yedek", "Yedek dosyası kayıp/okunamıyor",
 				fmt.Sprintf("%s: en yeni yedek dosyası diskte okunamadı (%s) — kurtarma için GEÇERSİZ olabilir: %v", k.sk, k.dosya, err),
 				k.domainID, "backup", k.id)
@@ -270,7 +296,9 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 			continue
 		}
 		if suanki != k.sha {
-			db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id)
+			if _, err := db.Exec(`UPDATE backups SET dogrulama='bozuk' WHERE id=?`, k.id); err != nil {
+				log.Printf("backups.verifyYedekBozulma: dogrulama=bozuk yazilamadi: %v", err)
+			}
 			bildirim.Yaz(db, "kritik", "yedek", "Yedek BOZULMUŞ (bit-rot)",
 				fmt.Sprintf("%s: en yeni yedek (%s) checksum'ı oluşturma anındakiyle UYUŞMUYOR — dosya sonradan bozulmuş; bu yedekten geri yükleme YAPILAMAYABİLİR.", k.sk, k.dosya),
 				k.domainID, "backup", k.id)
@@ -314,7 +342,9 @@ func AsiliIsleriKapat(db *sql.DB) {
 		return
 	}
 	for _, x := range liste {
-		db.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, x.id)
+		if _, err := db.Exec(`UPDATE backup_jobs SET durum='iptal', aktif_domain='', bitis=NOW() WHERE id=? AND durum='calisiyor'`, x.id); err != nil {
+			log.Printf("backups.AsiliIsleriKapat: is iptal durumu yazilamadi: %v", err)
+		}
 		log.Printf("backup: is #%d (%s %d/%d) panel yeniden baslarken kesilmisti — 'iptal' olarak kapatildi",
 			x.id, x.islem, x.tamam, x.toplam)
 	}

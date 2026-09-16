@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -116,7 +117,9 @@ func OturumlariDusur(db *sql.DB, userID int64) {
 	// +1 saniye: JWT 'iat' saniye cozunurlugunde. Damga tam SU AN olsaydi, ayni
 	// saniye icinde uretilmis bir token (iat == damga) karsilastirmayi geciyordu —
 	// E2E'de parola degisiminden hemen once alinan token boyle hayatta kaldi.
-	_, _ = db.Exec(`UPDATE users SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE id=?`, userID)
+	if _, err := db.Exec(`UPDATE users SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE id=?`, userID); err != nil {
+		log.Printf("GÜVENLİK: OturumlariDusur yazılamadı (uid=%d): %v — askıya alınan hesabın token'ları geçerli kalır", userID, err)
+	}
 }
 
 // RequireRole: sadece admin rol kontrolü

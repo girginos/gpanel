@@ -2,7 +2,8 @@ package subdomain
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -81,7 +82,10 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Tip string `json:"tip"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
 	tip := strings.ToLower(strings.TrimSpace(req.Tip))
 	if tip == "" {
 		tip = "self-signed"
@@ -97,11 +101,14 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 
 	switch tip {
 	case "letsencrypt", "le":
-		// Challenge subdomainin KENDI docroot'unda; acme kaydi panel veri dizininde.
-		_ = os.MkdirAll(filepath.Join(docroot, ".well-known", "acme-challenge"), 0o755)
+		// 🔴 Challenge koku ROOT-SAHIPLI /var/www/acme -- alt alanin docroot'u
+		// DEGIL. Kiracinin yazabildigi bir koke "allow all" vermek, erisim
+		// kisitlamasini atlatma kapisi acar (olculdu). Vhost tarafi da AYNI
+		// koku gosteriyor; ikisi birlikte degismeli.
+		_ = provisioner.AcmeWebroot()
 		_, _ = exec.Command("restorecon", "-R", filepath.Join(docroot, ".well-known")).CombinedOutput()
 		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
-			"--config-home", provisioner.AcmeConfigHome(), "--webroot", docroot,
+			"--config-home", provisioner.AcmeConfigHome(), "--webroot", provisioner.AcmeWebroot(),
 			"-d", tamAd, "--keylength", "ec-256").CombinedOutput(); err != nil {
 			// 🔴 acme.sh çıkış kodu 2 = RENEW_SKIP: geçerli cert ZATEN var, yenileme gerekmiyor.
 			// Bu HATA DEĞİL — mevcut cert'i install-cert ile yerleştirmeye devam et. Aksi halde
@@ -167,68 +174,3 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 }
 
 func dosyaVar(p string) bool { _, err := os.Stat(p); return err == nil }
-
-func vhostSSL(tamAd, docroot, socket, crt, key, koruma string) string {
-	return fmt.Sprintf(`server {
-    listen 80;
-    listen [::]:80;
-    server_name %[1]s;
-    location /.well-known/acme-challenge/ { root %[2]s; auth_basic off; try_files $uri =404; }
-    location / { return 301 https://$host$request_uri; }
-}
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name %[1]s;
-
-    ssl_certificate     %[4]s;
-    ssl_certificate_key %[5]s;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    root %[2]s;
-    index index.php index.html index.htm;
-
-    access_log /var/log/nginx/%[1]s.access.log;
-    error_log  /var/log/nginx/%[1]s.error.log warn;
-
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-%[6]s
-    error_page 404 /_gosp_404.html;
-    location = /_gosp_404.html {
-        root /usr/share/girginospanel/errors;
-        internal;
-        access_log off;
-    }
-    location ^~ /_gosp/ {
-        alias /usr/share/girginospanel/errors/;
-        access_log off;
-        expires 7d;
-        gzip on;
-        gzip_types application/json application/javascript;
-    }
-
-    location / { try_files $uri $uri/ /index.php?$query_string; }
-
-    location ~ \.php$ {
-        try_files $uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass unix:%[3]s;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_param HTTPS on;
-        fastcgi_read_timeout 60s;
-    }
-
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|pdf|zip|gz)$ {
-        expires 30d;
-        access_log off;
-    }
-
-    location ~ /\.(?!well-known) { deny all; }
-}
-`, tamAd, docroot, socket, crt, key, koruma)
-}

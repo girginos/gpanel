@@ -7,6 +7,9 @@ import { Ikon, I } from '@/components/Ikon'
 import Breadcrumb from '@/components/Breadcrumb'
 import SunucuOptimize from '@/components/SunucuOptimize'
 import { api } from '@/lib/api'
+import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
+import { useDialog } from '@/components/Dialog'
 
 /*
  * Sunucu Optimize v2 — sistem panosu + servis-bazlı analiz + öneri + uygula + yedek/rollback.
@@ -101,6 +104,8 @@ const SOPT_EN: Record<string, string> = {
   "paketleri güncelle + tune script": "update packages + tune script",
   "Çok büyük": "Very large",
   "Önerilen": "Recommended",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SOPT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -110,6 +115,7 @@ export default function SunucuOptimizePage() {
   const [yukleniyor, setYukleniyor] = useState(true)
   const [aktif, setAktif] = useState<string>('mariadb')
   const [hata, setHata] = useState<string | null>(null)
+  const toast = useToast()
 
   const yukle = async () => {
     setHata(null)
@@ -119,7 +125,9 @@ export default function SunucuOptimizePage() {
       const ordered = SERVIS_SIRA.map(k => r.data.servisler.find((s: ServisAnaliz) => s.kod === k)).filter(Boolean) as ServisAnaliz[]
       setRapor({ ...r.data, servisler: ordered })
     } catch (e: any) {
-      setHata(e?.response?.data?.hata || cevir("Analiz alınamadı"))
+      const m = e?.response?.data?.hata || cevir("Analiz alınamadı")
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setYukleniyor(false)
     }
@@ -145,13 +153,11 @@ export default function SunucuOptimizePage() {
             {cevir("Her uygulama önce yedek alır, servisi -t doğrular, sonra reload eder.")}
           </p>
         </div>
-        <button onClick={yukle} disabled={yukleniyor}
-          className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <Button variant="outlined" yukleniyor={yukleniyor} onClick={yukle}
+          className="px-3 py-1.5 text-sm">
           {yukleniyor ? cevir("Analiz ediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} />{cevir("Yeniden analiz et")}</span>}
-        </button>
+        </Button>
       </div>
-
-      {hata && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{hata}</div>}
 
       {rapor && (
         <>
@@ -162,10 +168,10 @@ export default function SunucuOptimizePage() {
             <div className="space-y-1.5">
               {rapor.servisler.map(s => (
                 <button key={s.kod} onClick={() => setAktif(s.kod)}
-                  className={`w-full text-left rounded-xl border p-3 transition ${
+                  className={`w-full text-left rounded-lg border p-3 transition ${
                     aktif === s.kod
                       ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30'
-                      : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 hover:border-slate-300'
+                      : 'border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800 hover:border-slate-300'
                   }`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
@@ -173,13 +179,10 @@ export default function SunucuOptimizePage() {
                       <span className="font-medium text-sm text-slate-900 dark:text-slate-100">{s.ad}</span>
                     </div>
                     {(s.oneriler?.length || 0) > 0 && (
-                      <span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${
-                        s.oneriler?.some(o => o.seviye === 'kritik') ? 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200' :
-                        s.oneriler?.some(o => o.seviye === 'onemli') ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200' :
-                        'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}>
+                      <Badge variant="soft" className="text-[11px] font-medium px-2 py-0.5"
+                        color={s.oneriler?.some(o => o.seviye === 'kritik') ? 'error' : s.oneriler?.some(o => o.seviye === 'onemli') ? 'warning' : 'neutral'}>
                         {s.oneriler.length}
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
@@ -200,7 +203,7 @@ export default function SunucuOptimizePage() {
       )}
 
       {/* Mevcut BAKIM tune script bloğu (backward-compat) */}
-      <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
+      <div className="mt-8 pt-6 border-t border-slate-200 dark:border-dark-600">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">{cevir("Bakım: Paket güncelle + Tune script")}</h2>
         <div className="max-w-3xl">
           <SunucuOptimize />
@@ -244,7 +247,10 @@ function SistemPanosu({ s, toplamOneri }: { s: Sistem; toplamOneri: number }) {
 function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => Promise<void> }) {
   const [secili, setSecili] = useState<Set<string>>(new Set())
   const [uyguluyor, setUyguluyor] = useState(false)
+  const [geriAlId, setGeriAlId] = useState<number | null>(null)
   const [sonuc, setSonuc] = useState<string | null>(null)
+  const toast = useToast()
+  const { onay } = useDialog()
 
   const oneriler = analiz.oneriler || []
   const seviyeSira = { kritik: 0, onemli: 1, bilgi: 2 } as const
@@ -255,38 +261,53 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
   const toggle = (id: string) => setSecili(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const geriAlUygulama = async (yedekID: number, ozet: string) => {
-    if (!confirm(cevirT(cevir("\"{0}\" değişikliğini geri al?\n\nServis {1} edilecek."), ozet, analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'))) return
+    if (!(await onay({
+      baslik: cevir("Emin misiniz?"),
+      mesaj: cevirT(cevir("\"{0}\" değişikliğini geri al?\n\nServis {1} edilecek."), ozet, analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'),
+      tehlike: true,
+    }))) return
+    setGeriAlId(yedekID)
     try {
       await api.post('/optimize/rollback', { yedek_id: yedekID })
       setSonuc(cevir("Geri alındı — yeniden analiz ediliyor"))
+      toast.basari(cevir("Geri alındı — yeniden analiz ediliyor"))
       await yenile()
     } catch (e: any) {
-      setSonuc(cevir("Rollback hatası:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")))
-    }
+      const m = cevir("Rollback hatası:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen"))
+      setSonuc(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setGeriAlId(null) }
   }
 
   const uygula = async () => {
     if (secili.size === 0) return
-    if (!confirm(cevirT(cevir("{0} öneri uygulanacak. Servisler {1} edilecek. Emin misin?"), secili.size, analiz.kod === 'mariadb' ? 'RESTART' : 'reload'))) return
+    if (!(await onay({
+      baslik: cevir("Emin misiniz?"),
+      mesaj: cevirT(cevir("{0} öneri uygulanacak. Servisler {1} edilecek. Emin misin?"), secili.size, analiz.kod === 'mariadb' ? 'RESTART' : 'reload'),
+    }))) return
     setUyguluyor(true); setSonuc(null)
     try {
       const r = await api.post<any>('/optimize/uygula', { servis: analiz.kod, oneri_id: Array.from(secili) })
-      setSonuc(r.data?.mesaj || cevir("Uygulandı"))
+      const ok = r.data?.mesaj || cevir("Uygulandı")
+      setSonuc(ok)
+      toast.basari(cevir("Kaydedildi"), ok)
       setSecili(new Set())
       await yenile()
     } catch (e: any) {
-      setSonuc(cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")))
+      const m = cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen"))
+      setSonuc(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setUyguluyor(false) }
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
           <div className="flex items-center gap-2.5">
             <ServisLogo kod={analiz.kod} boy={32} />
             <h2 className="text-lg font-semibold">{analiz.ad}</h2>
-            {analiz.durum?.aktif && <span className="text-xs bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 rounded-full px-2 py-0.5">{cevir("aktif")}</span>}
+            {analiz.durum?.aktif && <Badge color="success" variant="soft" className="text-xs px-2 py-0.5">{cevir("aktif")}</Badge>}
           </div>
           {analiz.durum && analiz.durum.memory_mb > 0 && (
             <div className="mt-1 text-xs text-slate-500">
@@ -298,24 +319,22 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
           <div className="flex items-center gap-2">
             {secili.size < sirali.length && <button onClick={tumunuSec} className="text-xs text-slate-600 hover:underline">{cevir("Tümünü seç")}</button>}
             {secili.size > 0 && <button onClick={tumunuBirak} className="text-xs text-slate-600 hover:underline">{cevir("Temizle")}</button>}
-            <button onClick={uygula} disabled={secili.size === 0 || uyguluyor}
-              className="rounded-lg bg-emerald-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
+            <Button color="success" onClick={uygula} disabled={secili.size === 0} yukleniyor={uyguluyor}
+              className="px-3.5 py-1.5 text-sm">
               {uyguluyor ? cevir("Uygulanıyor…") : cevirT(cevir("Uygula ({0})"), secili.size)}
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
-      {sonuc && <div className={`mb-3 rounded-lg border p-3 text-sm ${(sonuc.startsWith(cevir("Hata:")) || sonuc.startsWith(cevir("Rollback hatası:"))) ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{sonuc}</div>}
-
       {analiz.not_yok && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-dark-600 dark:bg-dark-700/50 dark:text-slate-300">
           {analiz.not_yok}
         </div>
       )}
 
       {(analiz.son_uygulama?.length || 0) > 0 && (
-        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-900 dark:text-emerald-200 uppercase tracking-wider mb-2">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 12l2 2 4-4M12 22C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10z" />
@@ -332,7 +351,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap gap-1.5">
                       {u.uygulananlar.split(', ').map((kv, i) => (
-                        <span key={i} className="font-mono text-[11px] rounded bg-white/70 dark:bg-slate-800/70 border border-emerald-200 dark:border-emerald-900/50 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200">{kv}</span>
+                        <span key={i} className="font-mono text-[11px] rounded bg-white/70 dark:bg-dark-700/70 border border-emerald-200 dark:border-emerald-900/50 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200">{kv}</span>
                       ))}
                     </div>
                   </div>
@@ -340,10 +359,10 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
                     <span className="text-[10px] text-slate-500">{u.tarih}</span>
                     {u.geri_alindi
                       ? <span className="text-[10px] text-slate-400 italic">{cevir("geri alındı")}</span>
-                      : <button onClick={() => geriAlUygulama(u.yedek_id, u.uygulananlar)}
-                          className="text-[10px] rounded-md border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/30 px-2 py-0.5 whitespace-nowrap">
+                      : <Button color="warning" variant="outlined" yukleniyor={geriAlId === u.yedek_id} onClick={() => geriAlUygulama(u.yedek_id, u.uygulananlar)}
+                          className="text-[10px] px-2 py-0.5 whitespace-nowrap">
                           ↶ {cevir("Geri al")}
-                        </button>}
+                        </Button>}
                   </div>
                 </div>
               </div>
@@ -353,7 +372,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
       )}
 
       {(analiz.log_sinyal?.length || 0) > 0 && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wider mb-1.5">
             <IcSearch className="w-3.5 h-3.5" /> Log/Metric {cevir("sinyalleri")}
           </div>
@@ -365,7 +384,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
 
       {sirali.length === 0 && !analiz.not_yok && (
         <div className="py-8 text-center text-sm text-slate-500">
-          <div className="text-2xl mb-2 opacity-40">✨</div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 mx-auto mb-2 opacity-40"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" /></svg>
           {cevir("Bu servis için öneri yok — mevcut ayarlar optimum.")}
         </div>
       )}
@@ -373,7 +392,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
       {sirali.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-slate-800">
+            <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-dark-600">
               <tr>
                 <th className="py-2 pr-2 w-8"></th>
                 <th className="py-2 pr-3 text-left">{cevir("Parametre")}</th>
@@ -382,9 +401,9 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
                 <th className="py-2 pr-3 text-left">{cevir("Gerekçe")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
               {sirali.map(o => (
-                <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-dark-700/40">
                   <td className="py-2 pr-2">
                     <input type="checkbox" checked={secili.has(o.id)} onChange={() => toggle(o.id)}
                       className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
@@ -424,21 +443,25 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
 function YedeklerBolumu() {
   const [yedekler, setYedekler] = useState<YedekKayit[] | null>(null)
   const [acik, setAcik] = useState(false)
+  const [geriId, setGeriId] = useState<number | null>(null)
+  const { onay, bilgi } = useDialog()
   const yukle = async () => {
     try { const r = await api.get<{ items: YedekKayit[] }>('/optimize/yedekler'); setYedekler(r.data.items || []) } catch { /* */ }
   }
   useEffect(() => { if (acik) void yukle() }, [acik])
 
   const geriYukle = async (id: number) => {
-    if (!confirm(cevir("Bu yedeği geri yükle ve servisi reload et?"))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Bu yedeği geri yükle ve servisi reload et?") }))) return
+    setGeriId(id)
     try {
       await api.post('/optimize/rollback', { yedek_id: id })
       await yukle()
-    } catch (e: any) { alert(cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen"))) }
+    } catch (e: any) { await bilgi({ baslik: cevir("İşlem başarısız"), mesaj: cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")) }) }
+    finally { setGeriId(null) }
   }
 
   return (
-    <section className="mt-6 rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <section className="mt-6 rounded-lg border border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800">
       <button onClick={() => setAcik(a => !a)} className="w-full flex items-center justify-between p-4 text-left">
         <div className="flex items-center gap-2">
           <IcArchive className="w-5 h-5 text-slate-500" />
@@ -448,26 +471,26 @@ function YedeklerBolumu() {
         <span className="text-slate-400">{acik ? '▴' : '▾'}</span>
       </button>
       {acik && yedekler && (
-        <div className="border-t border-slate-200 dark:border-slate-800 p-4">
+        <div className="border-t border-slate-200 dark:border-dark-600 p-4">
           {yedekler.length === 0 ? (
             <div className="text-sm text-slate-500 text-center py-4">{cevir("Henüz yedek yok — henüz hiçbir öneri uygulanmamış.")}</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-dark-600">
                   <tr><th className="py-2 pr-3 text-left">{cevir("Servis")}</th><th className="py-2 pr-3 text-left">{cevir("Hedef")}</th><th className="py-2 pr-3 text-left">{cevir("Yedek yolu")}</th><th className="py-2 pr-3 text-left">{cevir("Tarih")}</th><th className="py-2 text-right">{cevir("İşlem")}</th></tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                   {yedekler.map(y => (
                     <tr key={y.id}>
-                      <td className="py-2 pr-3"><span className="text-xs bg-slate-100 dark:bg-slate-800 rounded px-2 py-0.5 uppercase">{y.servis}</span></td>
+                      <td className="py-2 pr-3"><span className="text-xs bg-slate-100 dark:bg-dark-700 rounded px-2 py-0.5 uppercase">{y.servis}</span></td>
                       <td className="py-2 pr-3 font-mono text-[11px] text-slate-600 truncate max-w-[280px]">{y.hedef}</td>
                       <td className="py-2 pr-3 font-mono text-[11px] text-slate-500 truncate max-w-[280px]">{y.yedek}</td>
                       <td className="py-2 pr-3 text-xs text-slate-500">{y.created_at}</td>
                       <td className="py-2 text-right">
                         {y.rolled_back
                           ? <span className="text-xs text-slate-400">{cevir("geri alındı")}</span>
-                          : <button onClick={() => geriYukle(y.id)} className="text-xs rounded-md border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 px-2 py-1">{cevir("Geri yükle")}</button>}
+                          : <Button color="warning" variant="outlined" yukleniyor={geriId === y.id} onClick={() => geriYukle(y.id)} className="text-xs px-2 py-1">{cevir("Geri yükle")}</Button>}
                       </td>
                     </tr>
                   ))}
@@ -490,13 +513,13 @@ const renkler: Record<Renk, { border: string; bg: string; deger: string; bar: st
   amber: { border: 'border-amber-200 dark:border-amber-900/50', bg: 'bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/30 dark:to-slate-900', deger: 'text-amber-950 dark:text-amber-100', bar: 'bg-amber-500', ikonBg: 'bg-amber-100 dark:bg-amber-900/40' },
   red: { border: 'border-red-200 dark:border-red-900/50', bg: 'bg-gradient-to-br from-red-50 to-white dark:from-red-950/30 dark:to-slate-900', deger: 'text-red-950 dark:text-red-100', bar: 'bg-red-500', ikonBg: 'bg-red-100 dark:bg-red-900/40' },
   violet: { border: 'border-violet-200 dark:border-violet-900/50', bg: 'bg-gradient-to-br from-violet-50 to-white dark:from-violet-950/30 dark:to-slate-900', deger: 'text-violet-950 dark:text-violet-100', bar: 'bg-violet-500', ikonBg: 'bg-violet-100 dark:bg-violet-900/40' },
-  slate: { border: 'border-slate-200 dark:border-slate-800', bg: 'bg-white dark:bg-slate-900', deger: 'text-slate-900 dark:text-slate-100', bar: 'bg-slate-500', ikonBg: 'bg-slate-100 dark:bg-slate-800' },
+  slate: { border: 'border-slate-200 dark:border-dark-600', bg: 'bg-white dark:bg-dark-800', deger: 'text-slate-900 dark:text-slate-100', bar: 'bg-slate-500', ikonBg: 'bg-slate-100 dark:bg-dark-700' },
 }
 
 function PanoKart({ ikon, etiket, deger, renk, trend, altBilgi }: { ikon: React.ReactNode; etiket: string; deger: string; renk: Renk; trend?: number; altBilgi?: string }) {
   const s = renkler[renk]
   return (
-    <div className={`rounded-xl border ${s.border} ${s.bg} p-3`}>
+    <div className={`rounded-lg border ${s.border} ${s.bg} p-3`}>
       <div className="flex items-center justify-between mb-1.5">
         <div className={`w-9 h-9 rounded-lg ${s.ikonBg} ${s.deger} flex items-center justify-center`}>{ikon}</div>
         <div className="text-[10px] uppercase tracking-wider text-slate-500">{etiket}</div>
@@ -504,7 +527,7 @@ function PanoKart({ ikon, etiket, deger, renk, trend, altBilgi }: { ikon: React.
       <div className={`text-lg font-bold ${s.deger} tabular-nums`}>{deger}</div>
       {altBilgi && <div className="text-[10px] text-slate-500 truncate">{altBilgi}</div>}
       {trend !== undefined && trend >= 0 && (
-        <div className="mt-1.5 h-1 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+        <div className="mt-1.5 h-1 rounded-full bg-slate-200 dark:bg-dark-700 overflow-hidden">
           <div className={`h-full ${s.bar}`} style={{ width: `${Math.min(100, trend)}%` }} />
         </div>
       )}

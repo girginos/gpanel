@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
+import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 
@@ -57,15 +59,18 @@ const BILDIRIM_EN: Record<string, string> = {
   "Tümünü okundu işaretle": "Mark all as read",
   "Bildirim yok.": "No notifications.",
   "Kritik": "Critical",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BILDIRIM_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function BildirimlerPage() {
   useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
+  const toast = useToast()
   const [liste, setListe] = useState<Bildirim[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  // Hata artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
+  const [, setHata] = useState<string | null>(null)
   const [sadeceOkunmamis, setSadeceOkunmamis] = useState(false)
   const [kat, setKat] = useState('') // '' = tümü (istemci tarafı süzülür)
 
@@ -74,7 +79,7 @@ export default function BildirimlerPage() {
     const q = sadeceOkunmamis ? '?sadece_okunmamis=1' : ''
     api.get<{ bildirimler: Bildirim[] }>(`/bildirimler${q}`)
       .then(r => setListe(r.data.bildirimler || []))
-      .catch(e => setHata(apiHata(e)))
+      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir('İşlem başarısız'), m) })
       .finally(() => setYuk(false))
   }
   useEffect(() => { setYuk(true); yukle() }, [sadeceOkunmamis])
@@ -101,7 +106,7 @@ export default function BildirimlerPage() {
       className={`px-3 py-1.5 text-xs font-medium rounded-full border transition ${
         kat === deger
           ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-          : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+          : 'border-slate-200 dark:border-dark-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-dark-700'
       }`}>{etiket}</button>
   )
 
@@ -112,10 +117,10 @@ export default function BildirimlerPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bildirimler")}</h1>
           {okunmamisSayi > 0 && (
-            <button onClick={tumOkundu}
-              className="px-3 py-2 text-sm font-medium border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+            <Button variant="outlined" onClick={tumOkundu}
+              className="px-3 py-2 text-sm">
               {cevir("Tümünü okundu işaretle")} ({okunmamisSayi})
-            </button>
+            </Button>
           )}
         </div>
 
@@ -125,18 +130,16 @@ export default function BildirimlerPage() {
             className={`px-3 py-1.5 text-xs font-medium rounded-full border transition ${
               sadeceOkunmamis
                 ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-                : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                : 'border-slate-200 dark:border-dark-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-dark-700'
             }`}>
             {sadeceOkunmamis ? cevir("● Yalnız okunmamış") : cevir("○ Yalnız okunmamış")}
           </button>
-          <span className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1" />
+          <span className="w-px h-5 bg-slate-200 dark:bg-dark-600 mx-1" />
           {cip('', cevir("Tümü"))}
           {katlar.map(k => cip(k, cevir(katAd(k))))}
         </div>
 
-        {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-xs overflow-hidden">
           {yuk ? (
             <div className="px-4 py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : goster.length === 0 ? (
@@ -147,21 +150,21 @@ export default function BildirimlerPage() {
           ) : (
             goster.map(b => (
               <button key={b.id} onClick={() => git(b)}
-                className={`w-full text-left px-4 py-3.5 border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/40 dark:bg-brand-900/10' : ''}`}>
-                <span className={`mt-0.5 w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${sevBg(b.seviye)}`}>
+                className={`w-full text-left px-4 py-3.5 border-b border-slate-100 dark:border-dark-600/50 last:border-b-0 hover:bg-slate-50 dark:hover:bg-dark-600/40 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/40 dark:bg-brand-900/10' : ''}`}>
+                <span className={`mt-0.5 w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${sevBg(b.seviye)}`}>
                   <KatIkon kategori={b.kategori} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
                     <span className={`text-sm ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
-                    <span className="flex items-center gap-2 flex-shrink-0">
+                    <span className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">{goreliZaman(b.tarih)}</span>
                       {!b.okundu && <span className="w-2 h-2 rounded-full bg-brand-500" />}
                     </span>
                   </span>
                   <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1 break-words">{yolGizle(b.mesaj)}</span>
                   <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/60">{cevir(katAd(b.kategori))}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600/60">{cevir(katAd(b.kategori))}</span>
                     {b.seviye === 'kritik' && <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">{cevir("Kritik")}</span>}
                   </span>
                 </span>

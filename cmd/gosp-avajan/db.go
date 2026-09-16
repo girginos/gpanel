@@ -9,6 +9,7 @@ package main
 
 import (
 	"database/sql"
+	"log"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -40,9 +41,11 @@ func taramaBitir(db *sql.DB, taramaID int64, taranan, enfekte int) {
 	if db == nil || taramaID == 0 {
 		return
 	}
-	_, _ = db.Exec(
+	if _, err := db.Exec(
 		`UPDATE av_taramalar SET bitis=NOW(), durum='tamam', taranan=?, enfekte=? WHERE id=?`,
-		taranan, enfekte, taramaID)
+		taranan, enfekte, taramaID); err != nil {
+		log.Printf("gosp-avajan: tarama tamamlanamadı (id=%d): %v — kayıt 'çalışıyor' takılı kalabilir", taramaID, err)
+	}
 }
 
 // domainCache — /home/c_X → domain_id eşlemesini önbellekler (tarama başına

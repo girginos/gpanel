@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	bayikilit "girginospanel/internal/kilit"
@@ -135,8 +136,10 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 
 	// ── 3) Git webhook secret'ı yenile ─────────────────────────────────────
 	// Kimlik doğrulamasız uç; eski secret elde kaldığı sürece kod push'lanabilir.
+	yeniWH := hesaplar.RandomParola(32)
 	if _, err := tx.ExecContext(ctx,
-		"UPDATE git_repos SET webhook_secret=? WHERE domain_id=?", hesaplar.RandomParola(32), did); err != nil {
+		"UPDATE git_repos SET webhook_secret=?, webhook_secret_hash=? WHERE domain_id=?",
+		gizli.SaklaBagli(yeniWH, "webhook"), gizli.Sha256Hex(yeniWH), did); err != nil {
 		uyar("git webhook secret yenilenemedi: %v", err)
 	}
 
@@ -275,8 +278,9 @@ func (h *Handlers) sshAnahtarlariArsivle(sk string) error {
 	return nil
 }
 
-// crontabArsivle — tenant crontab'ının kopyasını devir arşivine alır, satır
-// sayısını döner. İçeriği SİLMEZ (meşru işler durmasın).
+// crontabArsivleVeBosalt — tenant crontab'ının kopyasını devir arşivine alır,
+// satır sayısını döner, sonra crontab'ı BOŞALTIR (eski sahibin cron satırı
+// arka kapı olarak çalışmaya devam etmesin).
 func (h *Handlers) crontabArsivleVeBosalt(sk string) (int, error) {
 	if !strings.HasPrefix(sk, "c_") {
 		return 0, fmt.Errorf("güvenlik: c_ prefiksli olmayan kullanıcı")

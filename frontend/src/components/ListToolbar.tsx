@@ -19,7 +19,7 @@ export default function ListToolbar({
           onClick={birincil.onClick}
           disabled={birincil.disabled}
           title={birincil.ipucu}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-full shadow-sm disabled:shadow-none transition"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-60 text-sm font-medium rounded-full shadow-sm shadow-brand-600/30 disabled:shadow-none transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -33,7 +33,7 @@ export default function ListToolbar({
           onClick={b.onClick}
           disabled={b.disabled}
           title={b.ipucu}
-          className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 disabled:opacity-50 disabled:bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-full transition"
+          className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 disabled:opacity-50 disabled:bg-slate-100 dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-full transition"
         >
           {b.etiket}
         </button>
@@ -48,7 +48,7 @@ export default function ListToolbar({
             value={aranan || ''}
             onChange={(e) => arananSetter(e.target.value)}
             placeholder="Ara..."
-            className="pl-8 pr-3 py-1.5 text-sm w-56 border border-slate-200 dark:border-slate-700 rounded-full focus:border-brand-400 focus:ring-2 focus:ring-brand-500/15 outline-none transition"
+            className="pl-8 pr-3 py-1.5 text-sm w-56 border border-slate-200 dark:border-dark-600 rounded-full focus:border-brand-400 focus:ring-2 focus:ring-brand-500/15 outline-none transition"
           />
         </div>
       )}

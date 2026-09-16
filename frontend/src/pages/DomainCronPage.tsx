@@ -3,7 +3,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -12,6 +12,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Gorev = {
   idx: number
@@ -47,6 +48,7 @@ const ON_AYARLAR: Array<{ etiket: string; secim: { dakika: string; saat: string;
 
 const CRON_EN: Record<string, string> = {
   "Anasayfa": "Home",
+  "İşlem başarısız": "Operation failed",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "Hata:": "Error:",
   "Çalıştırma başarısız": "Run failed",
@@ -103,42 +105,47 @@ const CRON_EN: Record<string, string> = {
   "curl ile getirilir (300sn zaman aşımı, çıktı atılır).": "Fetched via curl (300s timeout, output discarded).",
   "örn. Her gece yedek scripti": "e.g. Nightly backup script",
   "--verbose görev=1": "--verbose task=1",
-  "⚠ Görev hata verdi": "⚠ Task returned an error",
-  "✓ Görev çalıştı": "✓ Task ran",
+  "Görev hata verdi": "Task returned an error",
+  "Görev çalıştı": "Task ran",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CRON_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function DomainCronPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
+  const toast = useToast()
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [gorevler, setGorevler] = useState<Gorev[]>([])
   const [yukleniyor, setYukleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   // null=kapalı, 'yeni'=ekleme, Gorev=düzenleme
   const [modalGorev, setModalGorev] = useState<Gorev | 'yeni' | null>(null)
   const [calisan, setCalisan] = useState<number | null>(null)
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id) return
     setYukleniyor(true); setHata(null)
+    const _n = ++yukleNesli.current
     api.get<ListResp>(`/domains/${id}/cron`)
-      .then(r => setGorevler(r.data.gorevler))
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYukleniyor(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setGorevler(r.data.gorevler) })
+      .catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (_n === yukleNesli.current) setYukleniyor(false) })
   }
 
   useEffect(() => {
-    if (id) api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
+    let iptal = false
+    if (id) api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
     yukle()
+    return () => { iptal = true; yukleNesli.current++ }
   }, [id])
 
   async function calistir(g: Gorev) {
     setCalisan(g.idx)
     try {
       const { data } = await api.post(`/domains/${id}/cron/${g.idx}/calistir`)
-      const baslik = data.ok ? cevir("✓ Görev çalıştı") : cevir("⚠ Görev hata verdi")
+      const baslik = data.ok ? cevir("Görev çalıştı") : cevir("Görev hata verdi")
       const cikti = (data.cikti || '').trim() || cevir("(çıktı yok)")
       const hataStr = data.hata ? '\n\n' + cevir("Hata:") + ' ' + data.hata : ''
       await bilgi({ baslik, mesaj: `$ ${data.komut}\n\n${cikti}${hataStr}` })
@@ -180,25 +187,23 @@ export default function DomainCronPage() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button
           onClick={() => setModalGorev('yeni')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-xs transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {cevir("Görev Ekle")}
         </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
+        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{gorevler.length} {cevir("görev")}</span>
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
-      <div className="lg:bg-white dark:lg:bg-slate-800 lg:border lg:border-slate-200 dark:lg:border-slate-700 lg:rounded-2xl lg:overflow-hidden">
+      <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
         {yukleniyor ? (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
         ) : gorevler.length === 0 ? (
           <div className="py-16 text-center">
-            <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
+            <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 dark:bg-dark-700 flex items-center justify-center mb-3">
               <svg className="w-7 h-7 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -208,7 +213,7 @@ export default function DomainCronPage() {
         ) : (
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
-            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700`}>
+            <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
               <tr>
                 <th className={T.baslik}>{cevir("Zamanlama")}</th>
                 <th className={T.baslik}>{cevir("Komut / Açıklama")}</th>
@@ -217,13 +222,13 @@ export default function DomainCronPage() {
             </thead>
             <tbody className={T.govde}>
               {gorevler.map((g) => (
-                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-slate-800 transition ${!g.etkin ? 'opacity-55' : ''}`}>
+                <tr key={g.idx} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700 transition ${!g.etkin ? 'opacity-55' : ''}`}>
                   <td className={T.hucre} data-etiket={cevir("Zamanlama")}>
                     <span className="font-mono text-sm whitespace-nowrap">{g.dakika} {g.saat} {g.gun} {g.ay} {g.hafta}</span>
                   </td>
                   <td className={T.hucreBaslik}>
                     <div className="flex items-center gap-2">
-                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{cevir("Pasif")}</span>}
+                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{cevir("Pasif")}</span>}
                       {g.tip && g.tip !== 'komut' && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">{g.tip === 'php' ? `PHP ${g.php_surum || ''}` : g.tip}</span>}
                       <span className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</span>
                     </div>
@@ -271,6 +276,7 @@ function komutParse(g: Gorev): { url: string; script: string; args: string; komu
 function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
   gorev: Gorev | 'yeni'; domainId: number; onKapat: () => void; onKaydedildi: () => void
 }) {
+  const toast = useToast()
   const yeni = gorev === 'yeni'
   const mevcut = yeni ? null : (gorev as Gorev)
   const parsed = mevcut ? komutParse(mevcut) : { url: '', script: '', args: '', komut: '' }
@@ -290,7 +296,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
   const [bildirim, setBildirim] = useState(mevcut?.bildirim || 'bilgi')
   const [yorum, setYorum] = useState(mevcut?.yorum || '')
   const [isleniyor, setIsleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
 
   function uygulaPreset(p: typeof ON_AYARLAR[number]['secim']) {
     setDakika(p.dakika); setSaat(p.saat); setGun(p.gun); setAy(p.ay); setHafta(p.hafta)
@@ -311,7 +317,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
       else await api.put(`/domains/${domainId}/cron/${(gorev as Gorev).idx}`, body)
       onKaydedildi()
     } catch (e) {
-      setHata(apiHata(e, cevir("Kaydetme başarısız")))
+      const m = apiHata(e, cevir("Kaydetme başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -344,14 +350,14 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Komut")}</label>
             <input value={komut} onChange={e => setKomut(e.target.value)} required placeholder="/usr/bin/php /home/c_user/public_html/cron.php"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </div>
         )}
         {tip === 'url' && (
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">URL</label>
             <input value={url} onChange={e => setUrl(e.target.value)} required placeholder="https://example.com/cron.php"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">{cevir("curl ile getirilir (300sn zaman aşımı, çıktı atılır).")}</p>
           </div>
         )}
@@ -361,12 +367,12 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("PHP dosya yolu")}</label>
                 <input value={script} onChange={e => setScript(e.target.value)} required placeholder="/home/c_user/public_html/cron.php"
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("PHP sürümü")}</label>
                 <select value={phpSurum} onChange={e => setPhpSurum(e.target.value)}
-                  className="px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
+                  className="px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none">
                   {PHP_SURUMLER.map(s => <option key={s} value={s}>PHP {s}</option>)}
                 </select>
               </div>
@@ -374,7 +380,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Argümanlar")} <span className="font-normal text-slate-400 dark:text-slate-500">{cevir("(opsiyonel)")}</span></label>
               <input value={args} onChange={e => setArgs(e.target.value)} placeholder={cevir("--verbose görev=1")}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
             </div>
           </div>
         )}
@@ -385,7 +391,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <div className="flex flex-wrap gap-1.5 mb-2">
             {ON_AYARLAR.map(p => (
               <button key={p.etiket} type="button" onClick={() => uygulaPreset(p.secim)}
-                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition">
+                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-dark-600/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition">
                 {cevir(p.etiket)}
               </button>
             ))}
@@ -417,14 +423,12 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Açıklama")} <span className="font-normal text-slate-400 dark:text-slate-500">{cevir("(opsiyonel)")}</span></label>
           <input value={yorum} onChange={e => setYorum(e.target.value)} placeholder={cevir("örn. Her gece yedek scripti")}
-            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
         </div>
 
-        {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 rounded-md text-sm">{cevir("İptal")}</button>
-          <button type="submit" disabled={isleniyor} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+          <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 rounded-md text-sm">{cevir("İptal")}</button>
+          <button type="submit" disabled={isleniyor} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
             {isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Kaydet"))}
           </button>
         </div>
@@ -441,7 +445,7 @@ function Alan({ etiket, value, onChange }: { etiket: string; value: string; onCh
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="w-full px-2 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-900 rounded text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
+        className="w-full px-2 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
       />
     </div>
   )

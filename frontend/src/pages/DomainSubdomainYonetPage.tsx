@@ -2,13 +2,14 @@ import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import SubPHPAyarlari from '@/components/SubPHPAyarlari'
 import SubWebAyarlari from '@/components/SubWebAyarlari'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
 type Detay = {
   id: number; alt_ad: string; tam_ad: string; php_surum: string
@@ -19,6 +20,8 @@ type PHPVer = { surum: string; aciklama?: string }
 
 
 const SUBYONET_EN: Record<string, string> = {
+  "Erişim Kısıtlama": "Access Restrictions",
+  "IP bazlı erişim izni": "IP-based access control",
   "PHP surumu {0} olarak guncellendi.": "PHP version updated to {0}.",
   "PHP degistirilemedi": "Failed to change PHP",
   "SSL kuruldu ({0}). Artik https:// ile erisilebilir.": "SSL installed ({0}). It is now accessible via https://.",
@@ -63,6 +66,8 @@ const SUBYONET_EN: Record<string, string> = {
   "Kaldir": "Remove",
   "Let's Encrypt icin {0} A kaydinin bu sunucuya ({1}) cozumlenmesi gerekir.": "For Let's Encrypt, the A record of {0} must resolve to this server ({1}).",
   "Sil": "Delete",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SUBYONET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -76,6 +81,7 @@ function fmtKB(kb: number) {
 export default function DomainSubdomainYonetPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const { id, sid } = useParams()
   const navigate = useNavigate()
   const [d, setD] = useState<Detay | null>(null)
@@ -90,19 +96,23 @@ export default function DomainSubdomainYonetPage() {
   const [sslAktif, setSslAktif] = useState<boolean | null>(null)
   const [sslMesgul, setSslMesgul] = useState(false)
 
+  const yukleNesli = useRef(0)
   function yukle() {
     if (!id || !sid) return
     setYuk(true)
+    const _n = ++yukleNesli.current
     api.get<Detay>(`/domains/${id}/subdomain/${sid}`)
-      .then(r => { setD(r.data); setYeniPHP(r.data.php_surum) })
-      .catch(e => setHata(apiHata(e)))
-      .finally(() => setYuk(false))
+      .then(r => { if (_n !== yukleNesli.current) return; setD(r.data); setYeniPHP(r.data.php_surum) })
+      .catch(e => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .finally(() => { if (_n !== yukleNesli.current) return; setYuk(false) })
     api.get<{ aktif: boolean }>(`/domains/${id}/subdomain/${sid}/ssl`)
-      .then(r => setSslAktif(r.data.aktif)).catch(() => setSslAktif(null))
+      .then(r => { if (_n !== yukleNesli.current) return; setSslAktif(r.data.aktif) }).catch(() => { if (_n !== yukleNesli.current) return; setSslAktif(null) })
   }
-  useEffect(yukle, [id, sid])
+  useEffect(() => { yukle(); return () => { yukleNesli.current++ } }, [id, sid])
   useEffect(() => {
-    api.get<PHPVer[]>('/php/versions').then(r => setPhpler(r.data || [])).catch(() => setPhpler([]))
+    let iptal = false
+    api.get<PHPVer[]>('/php/versions').then(r => { if (iptal) return; setPhpler(r.data || []) }).catch(() => { if (!iptal) setPhpler([]) })
+    return () => { iptal = true }
   }, [])
 
   async function phpDegistir() {
@@ -110,9 +120,13 @@ export default function DomainSubdomainYonetPage() {
     setHata(null); setOk(null); setPhpKaydet(true)
     try {
       await api.put(`/domains/${id}/subdomain/${sid}/php`, { php_surum: yeniPHP })
-      setOk(cevirT(cevir("PHP surumu {0} olarak guncellendi."), yeniPHP))
+      const m = cevirT(cevir("PHP surumu {0} olarak guncellendi."), yeniPHP)
+      setOk(m); toast.basari(m)
       setD({ ...d, php_surum: yeniPHP })
-    } catch (e) { setHata(apiHata(e, cevir("PHP degistirilemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("PHP degistirilemedi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setPhpKaydet(false) }
   }
 
@@ -120,9 +134,13 @@ export default function DomainSubdomainYonetPage() {
     setHata(null); setOk(null); setSslMesgul(true)
     try {
       await api.post(`/domains/${id}/subdomain/${sid}/ssl`, { tip })
-      setOk(cevirT(cevir("SSL kuruldu ({0}). Artik https:// ile erisilebilir."), tip === 'letsencrypt' ? "Let's Encrypt" : cevir("oz-imzali")))
+      const m = cevirT(cevir("SSL kuruldu ({0}). Artik https:// ile erisilebilir."), tip === 'letsencrypt' ? "Let's Encrypt" : cevir("oz-imzali"))
+      setOk(m); toast.basari(cevir("Kaydedildi"), m)
       setSslAktif(true)
-    } catch (e) { setHata(apiHata(e, cevir("SSL kurulamadi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("SSL kurulamadi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setSslMesgul(false) }
   }
   async function sslKaldir() {
@@ -130,8 +148,11 @@ export default function DomainSubdomainYonetPage() {
     setHata(null); setOk(null); setSslMesgul(true)
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}/ssl`)
-      setOk(cevir("SSL kaldirildi.")); setSslAktif(false)
-    } catch (e) { setHata(apiHata(e, cevir("SSL kaldirilamadi"))) }
+      setOk(cevir("SSL kaldirildi.")); toast.basari(cevir("SSL kaldirildi.")); setSslAktif(false)
+    } catch (e) {
+      const m = apiHata(e, cevir("SSL kaldirilamadi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setSslMesgul(false) }
   }
 
@@ -141,10 +162,13 @@ export default function DomainSubdomainYonetPage() {
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}`)
       navigate(`/abonelikler/${id}/subdomainler`)
-    } catch (e) { setHata(apiHata(e, cevir("Silinemedi"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("Silinemedi"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    }
   }
 
-  const kart = 'rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5'
+  const kart = 'rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-5'
   const etiket = 'text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500'
 
   return (
@@ -156,9 +180,6 @@ export default function DomainSubdomainYonetPage() {
         { etiket: cevir("Subdomainler"), href: `/abonelikler/${id}/subdomainler` },
         { etiket: d?.tam_ad || '...' },
       ]} />
-
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-      {ok && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{ok}</div>}
 
       {yuk ? (
         <div className="py-12 text-center text-sm text-slate-400">{cevir("Yukleniyor...")}</div>
@@ -176,7 +197,7 @@ export default function DomainSubdomainYonetPage() {
             </div>
             <div className="flex items-center gap-2">
               <a href={`${sslAktif ? 'https' : 'http'}://${d.tam_ad}`} target="_blank" rel="noreferrer"
-                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
+                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600">
                 {cevir("Ziyaret Et")} &#8599;
               </a>
               <button onClick={sil}
@@ -191,8 +212,8 @@ export default function DomainSubdomainYonetPage() {
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">{cevir("Araclar")}</h2>
             <div className="grid gap-2 sm:grid-cols-3">
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/wordpress`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center text-lg font-bold">W</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 flex items-center justify-center text-lg font-bold">W</div>
               <div className="flex-1">
                 <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">WordPress</div>
                 <div className="text-xs text-slate-500">{cevir("1-tikla kurulum · eklenti/tema · yonetim — bu alt alana kurulur")}</div>
@@ -200,32 +221,42 @@ export default function DomainSubdomainYonetPage() {
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/composer`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg font-bold">C</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg font-bold">C</div>
               <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Composer</div><div className="text-xs text-slate-500">{cevir("Paket yoneticisi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
+            <Link to={`/abonelikler/${id}/subdomainler/${sid}/erisim`}
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+              <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Erişim Kısıtlama")}</div><div className="text-xs text-slate-500">{cevir("IP bazlı erişim izni")}</div></div>
+              <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
+            </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/gunlukler`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center text-lg font-bold">L</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300 flex items-center justify-center text-lg font-bold">L</div>
               <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Gunlukler")}</div><div className="text-xs text-slate-500">access &middot; error</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/dosyalar`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg font-bold">F</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg font-bold">F</div>
               <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Dosyalar")}</div><div className="text-xs text-slate-500">{cevir("Dosya yoneticisi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/istatistik`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-lg font-bold">%</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-lg font-bold">%</div>
               <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Istatistik")}</div><div className="text-xs text-slate-500">{cevir("Trafik analizi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
             <Link to={`/abonelikler/${id}/subdomainler/${sid}/sifre-koruma`}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center text-lg">&#128274;</div>
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition group">
+              <div className="w-10 h-10 rounded-lg bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center text-lg">&#128274;</div>
               <div className="flex-1"><div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("Sifre Koruma")}</div><div className="text-xs text-slate-500">{cevir(".htpasswd dizin kilidi")}</div></div>
               <span className="text-brand-500 group-hover:translate-x-0.5 transition">&rarr;</span>
             </Link>
@@ -248,12 +279,12 @@ export default function DomainSubdomainYonetPage() {
               <p className="text-xs text-slate-500 mb-3">{cevir("Bu alt alanin PHP-FPM havuzunu bagimsiz secebilirsiniz.")}</p>
               <div className="flex items-center gap-2">
                 <select value={yeniPHP} onChange={e => setYeniPHP(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm">
+                  className="flex-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm">
                   {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? cevir(" (varsayılan)") : ''}</option>)}
                   {phpler.length === 0 && <option value={d.php_surum}>PHP {d.php_surum}</option>}
                 </select>
                 <button onClick={phpDegistir} disabled={phpKaydet || yeniPHP === d.php_surum}
-                  className="px-3 py-2 rounded-md bg-slate-900 dark:bg-slate-700 text-white text-sm font-medium disabled:opacity-40">
+                  className="px-3 py-2 rounded-md bg-dark-800 dark:bg-dark-600 text-white text-sm font-medium disabled:opacity-40">
                   {phpKaydet ? '...' : cevir("Kaydet")}
                 </button>
               </div>
@@ -265,7 +296,7 @@ export default function DomainSubdomainYonetPage() {
             <div className={`${kart} md:col-span-2`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("SSL / TLS Sertifikasi")}</h2>
-                <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${sslAktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+                <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${sslAktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400'}`}>
                   {sslAktif == null ? '...' : sslAktif ? cevir("Aktif") : cevir("Yok")}
                 </span>
               </div>
@@ -275,7 +306,7 @@ export default function DomainSubdomainYonetPage() {
                   {cevir("Let's Encrypt Kur")}
                 </button>
                 <button onClick={() => sslKur('self-signed')} disabled={sslMesgul}
-                  className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40">
+                  className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600 disabled:opacity-40">
                   {cevir("Oz-imzali")}
                 </button>
                 {sslAktif && (

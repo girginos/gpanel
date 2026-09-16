@@ -47,7 +47,7 @@ func httpDene(url string, deneme int, ara time.Duration) (bool, string) {
 			// üzerinden çağrılır — self-signed cert veya wrong CN olası ama
 			// MITM riski YOK. Recipe.SaglikHTTP dışardan verilse bile
 			// 127.0.0.1 dışı adresler bu client'a girmemeli.
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: hedef daima 127.0.0.1 (katalog SaglikHTTP hepsi http://127.0.0.1), loopback -> MITM yok; URL kullanici-kontrollu degil. SSRF/internal-IP guard uygulanamaz: loopback zaten internal sayilir, guard saglik probunu bloklardi.
 		},
 	}
 	var son string

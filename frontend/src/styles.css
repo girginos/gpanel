@@ -1,53 +1,213 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
-/* Body-level scroll — sticky sidebar için gerekli.
-   height:100% kullanılırsa root scroll'u kilitlenir ve sidebar sticky çalışmaz. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   TAILUX TASARIM SİSTEMİ (themeforest Tailux — TS sürümü) gPanel'e uyarlandı.
+   Nötr = slate (gPanel zaten slate), primary = MAVİ (kullanıcı seçimi),
+   dark ölçeği = Tailux "cinder". Whitelabel `brand-*` ölçeği KORUNUR (altta).
+   ═════════════════════════════════════════════════════════════════════════ */
+@theme {
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  --text-tiny: 0.625rem;
+  --text-tiny--line-height: 0.8125rem;
+  --text-tiny-plus: 0.6875rem;
+  --text-tiny-plus--line-height: 0.875rem;
+  --text-xs-plus: 0.8125rem;
+  --text-xs-plus--line-height: 1.125rem;
+  --text-sm-plus: 0.9375rem;
+  --text-sm-plus--line-height: 1.375rem;
+
+  --shadow-soft:
+    rgba(145, 158, 171, 0.2) 0px 0px 2px 0px,
+    rgba(145, 158, 171, 0.12) 0px 12px 24px -4px;
+  --shadow-soft-dark: 0 3px 10px 0 rgb(25 25 25 / 30%);
+
+  --ease-elastic: cubic-bezier(0.53, 0.21, 0.29, 0.67);
+
+  /* "this" (buton/aktif renk köprüsü) + yüzeyler */
+  --color-this-lighter: var(--this-lighter);
+  --color-this-light: var(--this-light);
+  --color-this: var(--this);
+  --color-this-darker: var(--this-darker);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  /* Semantik renkler (Tailux) */
+  --color-secondary-lighter: #ff75df;
+  --color-secondary-light: #ff2ecf;
+  --color-secondary: #e000ad;
+  --color-secondary-darker: #b8008c;
+  --color-info-lighter: var(--color-sky-400);
+  --color-info-light: var(--color-sky-500);
+  --color-info: var(--color-sky-600);
+  --color-info-darker: var(--color-sky-700);
+  --color-success-lighter: var(--color-emerald-400);
+  --color-success-light: var(--color-emerald-500);
+  --color-success: var(--color-emerald-600);
+  --color-success-darker: var(--color-emerald-700);
+  --color-warning-lighter: #ffba42;
+  --color-warning-light: #ffa71a;
+  --color-warning: #f59200;
+  --color-warning-darker: #db7c00;
+  --color-error-lighter: #ff8a5c;
+  --color-error-light: #ff6933;
+  --color-error: #ff4f1a;
+  --color-error-darker: #e52e00;
+
+  --border-width-3: 3px;
+
+  /* gri ölçek — slate köprüsü + Tailux gray-150 */
+  --color-gray-50: var(--color-slate-50);
+  --color-gray-100: var(--color-slate-100);
+  --color-gray-150: #e9eef5;
+  --color-gray-200: var(--color-slate-200);
+  --color-gray-300: var(--color-slate-300);
+  --color-gray-400: var(--color-slate-400);
+  --color-gray-500: var(--color-slate-500);
+  --color-gray-600: var(--color-slate-600);
+  --color-gray-700: var(--color-slate-700);
+  --color-gray-800: var(--color-slate-800);
+  --color-gray-900: var(--color-slate-900);
+  --color-gray-950: var(--color-slate-950);
+
+  /* dark ölçek — Tailux "cinder" */
+  --color-dark-50: #e6e7eb;
+  --color-dark-100: #d0d2db;
+  --color-dark-200: #b7bac4;
+  --color-dark-300: #838794;
+  --color-dark-400: #4c4f57;
+  --color-dark-450: #383a41;
+  --color-dark-500: #2a2c32;
+  --color-dark-600: #232429;
+  --color-dark-700: #1c1d21;
+  --color-dark-750: #1a1b1f;
+  --color-dark-800: #15161a;
+  --color-dark-900: #0e0f11;
+
+  /* primary = MAVİ (Tailwind blue) — kullanıcı seçimi */
+  --color-primary-50: var(--color-blue-50);
+  --color-primary-100: var(--color-blue-100);
+  --color-primary-200: var(--color-blue-200);
+  --color-primary-300: var(--color-blue-300);
+  --color-primary-400: var(--color-blue-400);
+  --color-primary-500: var(--color-blue-500);
+  --color-primary-600: var(--color-blue-600);
+  --color-primary-700: var(--color-blue-700);
+  --color-primary-800: var(--color-blue-800);
+  --color-primary-900: var(--color-blue-900);
+  --color-primary-950: var(--color-blue-950);
+}
+
+/* ── "this:" renk variantları (Button vb. için) ── */
+.this\:primary   { --color-this-lighter: var(--color-primary-400); --color-this-light: var(--color-primary-500); --color-this: var(--color-primary-600); --color-this-darker: var(--color-primary-700); }
+.this\:secondary { --color-this-lighter: var(--color-secondary-lighter); --color-this-light: var(--color-secondary-light); --color-this: var(--color-secondary); --color-this-darker: var(--color-secondary-darker); }
+.this\:info      { --color-this-lighter: var(--color-info-lighter); --color-this-light: var(--color-info-light); --color-this: var(--color-info); --color-this-darker: var(--color-info-darker); }
+.this\:success   { --color-this-lighter: var(--color-success-lighter); --color-this-light: var(--color-success-light); --color-this: var(--color-success); --color-this-darker: var(--color-success-darker); }
+.this\:warning   { --color-this-lighter: var(--color-warning-lighter); --color-this-light: var(--color-warning-light); --color-this: var(--color-warning); --color-this-darker: var(--color-warning-darker); }
+.this\:error     { --color-this-lighter: var(--color-error-lighter); --color-this-light: var(--color-error-light); --color-this: var(--color-error); --color-this-darker: var(--color-error-darker); }
+
+/* ── Tailux base: yüzey değişkenleri + gövde ── */
+html {
+  --surface-1: var(--color-dark-450);
+  --surface-2: var(--color-dark-500);
+  --surface-3: var(--color-dark-600);
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+html.dark { color-scheme: dark; }
 html, body, #root { min-height: 100%; }
 
 body {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8fafc;   /* slate-50 light default */
-  color: #0f172a;              /* slate-900 */
+  background-color: var(--color-gray-50);   /* slate-50 */
+  color: var(--color-gray-700);
   transition: background-color 200ms ease, color 200ms ease;
 }
-
 html.dark body {
-  background-color: #0f172a;   /* slate-900 dark */
-  color: #e2e8f0;              /* slate-200 */
+  background-color: var(--color-dark-900);  /* #0e0f11 */
+  color: var(--color-dark-200);
 }
 
-/* dark modda genel geçiş için */
-html.dark {
-  color-scheme: dark;
+/* ── Tailux bileşen sınıfları (components katmanı — utility'ler bunları ezebilsin) ── */
+@layer components {
+  .btn-base {
+    @apply inline-flex cursor-pointer items-center justify-center text-center font-medium tracking-wide outline-hidden transition-all duration-200 focus:outline-hidden disabled:pointer-events-none disabled:select-none;
+  }
+  .btn {
+    @apply rounded-lg px-5 py-2 disabled:opacity-70 dark:disabled:opacity-60;
+  }
+
+  .badge-base, .tag-base {
+    @apply inline-flex items-center justify-center align-baseline font-medium leading-none tracking-wide;
+  }
+  .badge, .tag {
+    @apply rounded-sm px-2 py-1 text-xs;
+  }
+
+  /* Form/Input (Tailux) */
+  .input-root, .input-wrapper { @apply flex flex-col; }
+  .input-label { @apply text-sm font-medium text-gray-800 dark:text-dark-100; }
+  .form-input-base, .form-textarea-base {
+    @apply block w-full appearance-none bg-transparent tracking-wide outline-hidden transition-colors duration-200 ease-in-out placeholder:font-light focus:outline-hidden disabled:select-none;
+  }
+  .form-input, .form-textarea {
+    @apply rounded-lg border border-transparent px-3 py-2 text-start text-gray-800 placeholder:font-light placeholder:text-gray-600 dark:text-dark-100 dark:placeholder:text-dark-200;
+  }
+  .form-textarea { @apply resize-none; }
 }
 
-/* odak halkası: erişilebilirlik için belirgin */
+/* ── Tailux özel scrollbar ── */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.custom-scrollbar::-webkit-scrollbar { width: .3rem; height: .3rem; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--color-gray-300); border-radius: 4px; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--color-dark-400); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WHITELABEL marka ölçeği — DEFAULT = Tailux mavisi. `brand-*` sınıfları
+   (mevcut sayfalar) çalışsın diye korunur; marka.ts çalışma anında ezebilir.
+   ═════════════════════════════════════════════════════════════════════════ */
+:root {
+  --brand-50: 239 246 255;
+  --brand-100: 219 234 254;
+  --brand-200: 191 219 254;
+  --brand-300: 147 197 253;
+  --brand-400: 96 165 250;
+  --brand-500: 59 130 246;
+  --brand-600: 37 99 235;
+  --brand-700: 29 78 216;
+  --brand-800: 30 64 175;
+  --brand-900: 30 58 138;
+  --brand-950: 23 37 84;
+}
+
+/* odak halkası (Tailux mavisi) */
 :focus-visible {
-  outline: 2px solid #ea580c;
+  outline: 2px solid #2563eb;
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* scrollbar dark */
-html.dark ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-html.dark ::-webkit-scrollbar-track { background: #1e293b; }
-html.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-
-/* Duyarli tablo etiketleri (bkz. src/lib/tablo.ts).
-   Tailwind-in content-[attr(...)] yardimcisi calismaz: content-i
-   var(--tw-content) uzerinden verir, attr() ise custom property icinde
-   gecersizdir ve BOS hesaplanir. Bu yuzden content-i dogrudan yaziyoruz.
-   Yalniz lg altinda (kart gorunumu) uygulanir. */
+/* Duyarli tablo etiketleri (bkz. src/lib/tablo.ts) — yalnız lg altinda. */
 @media (max-width: 1023.98px) {
-  td[data-etiket]::before {
-    content: attr(data-etiket);
-  }
+  td[data-etiket]::before { content: attr(data-etiket); }
 }
+
+/* ── Tailux modal giriş animasyonu ── */
+@keyframes gosp-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes gosp-modal-in { from { opacity: 0; transform: translateY(10px) scale(.97) } to { opacity: 1; transform: none } }
+.gosp-fade { animation: gosp-fade .18s ease-out }
+.gosp-modal-in { animation: gosp-modal-in .22s cubic-bezier(.22,1,.36,1) }
+@media (prefers-reduced-motion: reduce) { .gosp-fade, .gosp-modal-in { animation: none } }
+
+/* ── KPI sparkline + halka animasyonu ── */
+@keyframes spark-draw { to { stroke-dashoffset: 0 } }
+@keyframes gosp-ring { to { stroke-dashoffset: var(--to) } }
+@media (prefers-reduced-motion: reduce) { [style*="gosp-ring"] { animation: none !important; stroke-dashoffset: var(--to) !important } }
+@media (prefers-reduced-motion: reduce) { [style*="spark-draw"] { animation: none !important; stroke-dashoffset: 0 !important } }

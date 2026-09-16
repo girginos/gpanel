@@ -96,7 +96,9 @@ func IlerlemeAsama(domainID int64, asama string, toplam int64) {
 		k.mu.Lock()
 		k.asama = asama
 		k.yapilan = 0
-		k.toplam = toplam
+		if toplam > 0 { // toplam=0 geçilirse önceki toplam KORUNUR (yorum sözleşmesi)
+			k.toplam = toplam
+		}
 		k.mu.Unlock()
 	}
 }

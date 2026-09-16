@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import React from "react"
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -14,10 +14,18 @@ import ResourceCard from '@/components/ResourceCard'
 import DomainKaynakKart from '@/components/DomainKaynakKart'
 import DomainPano from "@/components/DomainPano"
 import ToolCard from '@/components/ToolCard'
+import EklentiEkrani from '@/components/EklentiEkrani'
+import LisansAskida from '@/components/LisansAskida'
 import type { Domain } from '@/components/DomainList'
 import { useDialog } from '@/components/Dialog'
+import { useToast } from '@/components/Toast'
 
-type Tab = 'dashboard' | 'hosting' | 'apps' | 'mail'
+// 🔴 TEK KAYNAK. Önceki sürümde geri yükleme, elle yazılmış bir `v === '...'`
+// zinciriyle doğruluyordu ve yeni sekme eklenince ORAYA yazmak unutuldu:
+// kullanıcı Geliştirici sekmesini seçiyor, sayfayı yenileyince Pano'ya
+// düşüyordu ve "sekme kaydetmiyor" olarak görünüyordu.
+const GECERLI_TABLAR = ['dashboard', 'hosting', 'apps', 'mail', 'gelistirici'] as const
+type Tab = (typeof GECERLI_TABLAR)[number]
 
 const ICONS = {
   baglanti:  'M13.828 10.172a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656-5.656m.172-5.172a4 4 0 00-5.656 5.656l-3 3a4 4 0 005.656 5.656',
@@ -77,6 +85,7 @@ const SUBD2_EN: Record<string, string> = {
   "Askıdan Al (Geri Getir)": "Unsuspend (Restore)",
   "Hesabı Askıya Al": "Suspend Account",
   "Pano": "Dashboard",
+  "Geliştirici": "Developer",
   "Uygulamalar": "Applications",
   "Web sitesi:": "Website:",
   "Web Sitesi": "Website",
@@ -100,12 +109,15 @@ const SUBD2_EN: Record<string, string> = {
   "E-Posta Teslimat Takibi": "Email Delivery Tracking",
   "Performans": "Performance",
   "Apache ve nginx": "Apache and nginx",
+  "Kaydedildi": "Saved",
+  "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SUBD2_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 export default function SubscriptionDetailPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
+  const toast = useToast()
   const { id } = useParams()
   const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -114,7 +126,7 @@ export default function SubscriptionDetailPage() {
   const [tab, setTabState] = useState<Tab>(() => {
     try {
       const v = localStorage.getItem('gosp.abonelik.tab')
-      if (v === 'dashboard' || v === 'hosting' || v === 'apps' || v === 'mail') return v
+      if (v && (GECERLI_TABLAR as readonly string[]).includes(v)) return v as Tab
     } catch { /* yok say */ }
     return 'dashboard'
   })
@@ -127,24 +139,39 @@ export default function SubscriptionDetailPage() {
   const [isleniyor, setIsleniyor] = useState(false)
   const [bildirim, setBildirim] = useState<string | null>(null)
   const [mailAktif, setMailAktif] = useState(false)
+  const [calistiriciAktif, setCalistiriciAktif] = useState(false)
+  // 🔴 KURULU (aktif'ten AYRI): askıya alınmış (kurulu ama aktif=0) eklentinin
+  // sekmesi kaybolmasın — açık kalıp landing göstersin (Marka/top-level ile tutarlı).
+  const [mailKurulu, setMailKurulu] = useState(false)
+  const [calistiriciKurulu, setCalistiriciKurulu] = useState(false)
 
+  const domainYukleNesli = useRef(0)
   function domainYukle() {
     if (!id) return
+    const _n = ++domainYukleNesli.current
     api.get<Domain>(`/domains/${id}`)
-      .then(r => setDomain(r.data))
-      .catch(e => setHata(apiHata(e, cevir("Abonelik yüklenemedi"))))
+      .then(r => { if (_n !== domainYukleNesli.current) return; setDomain(r.data) })
+      .catch(e => { if (_n !== domainYukleNesli.current) return; const m = apiHata(e, cevir("Abonelik yüklenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
   }
 
   useEffect(() => {
+    let iptal = false
     if (!id) return
     domainYukle()
     api.get<{ disk_mb: { kullanim: number } }>(`/domains/${id}/kaynak`)
-      .then(r => setDiskMB(r.data.disk_mb.kullanim))
-      .catch(hataYakala(cevir("Disk kullanımı alınamadı")))
+      .then(r => { if (iptal) return; setDiskMB(r.data.disk_mb.kullanim) })
+      .catch(e => { if (!iptal) hataYakala(cevir("Disk kullanımı alınamadı"))(e) })
     // Mail eklentisi aktif+ödemeli ise Mail sekmesini göster.
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
-      .then(r => setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif)))
-      .catch(() => setMailAktif(false))
+      .then(r => {
+        if (iptal) return
+        setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif))
+        setCalistiriciAktif(r.data.some(e => e.ad === 'calistirici' && e.aktif))
+        setMailKurulu(r.data.some(e => e.ad === 'mail'))
+        setCalistiriciKurulu(r.data.some(e => e.ad === 'calistirici'))
+      })
+      .catch(() => { if (iptal) return; setMailAktif(false); setCalistiriciAktif(false); setMailKurulu(false); setCalistiriciKurulu(false) })
+    return () => { iptal = true; domainYukleNesli.current++ }
   }, [id])
 
   async function askiToggle() {
@@ -154,10 +181,16 @@ export default function SubscriptionDetailPage() {
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
-      setBildirim(askiyaAl ? cevir("✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("✓ Askı kaldırıldı — site tekrar erişilebilir."))
+      const iyi = askiyaAl ? cevir("✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("✓ Askı kaldırıldı — site tekrar erişilebilir.")
+      setBildirim(iyi)
+      toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBildirim(null), 6000)
       domainYukle()
-    } catch (e) { setHata(apiHata(e, cevir("İşlem başarısız"))) }
+    } catch (e) {
+      const m = apiHata(e, cevir("İşlem başarısız"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setIsleniyor(false) }
   }
 
@@ -211,7 +244,7 @@ export default function SubscriptionDetailPage() {
           <button
             onClick={() => setMenuAcik(v => !v)}
             disabled={isleniyor}
-            className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded disabled:opacity-50"
+            className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-700 rounded disabled:opacity-50"
             title={cevir("Daha fazla işlem")}>
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
@@ -220,10 +253,10 @@ export default function SubscriptionDetailPage() {
           {menuAcik && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuAcik(false)} />
-              <div className="absolute right-0 mt-1 z-20 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-1 text-sm">
+              <div className="absolute right-0 mt-1 z-20 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg py-1 text-sm">
                 <button
                   onClick={askiToggle}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-700/60 ${domain.askida ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-dark-600/60 ${domain.askida ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
                   {domain.askida ? (
                     <>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
@@ -242,21 +275,29 @@ export default function SubscriptionDetailPage() {
         </div>
       </div>
 
-      {bildirim && <div className="mb-3 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{bildirim}</div>}
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
-
-      <div className="flex items-center gap-5 border-b border-slate-200 dark:border-slate-700 mb-5">
+      <div className="flex items-center gap-5 border-b border-slate-200 dark:border-dark-600 mb-5">
         <TabBtn aktif={tab === 'dashboard'} onClick={() => setTab('dashboard')}>{cevir("Pano")}</TabBtn>
         <TabBtn aktif={tab === 'hosting'}   onClick={() => setTab('hosting')}>{cevir("Barınma ve DNS")}</TabBtn>
         <TabBtn aktif={tab === 'apps'} onClick={() => setTab('apps')}>{cevir("Uygulamalar")}</TabBtn>
-        {mailAktif && <TabBtn aktif={tab === 'mail'} onClick={() => setTab('mail')}>Mail</TabBtn>}
+        {mailKurulu && <TabBtn aktif={tab === 'mail'} onClick={() => setTab('mail')}>Mail</TabBtn>}
+        {calistiriciKurulu && <TabBtn aktif={tab === 'gelistirici'} onClick={() => setTab('gelistirici')}>{cevir("Geliştirici")}</TabBtn>}
       </div>
 
-      <div className="grid grid-cols-12 gap-5">
+      {/* 🔴 GELİŞTİRİCİ SEKMESİ TAM GENİŞLİK.
+          Uygulama çalıştırıcı; dağıtım adımları, uzun komut satırları, günlük
+          çıktısı ve sürüm listesi gösteriyor — hepsi YATAY yer isteyen içerik.
+          Üç sütunlu düzende ortadaki 6 sütuna sıkışınca komutlar sarılıyor ve
+          günlük okunmaz hâle geliyordu. Yan sütunlardaki bilgiler (site
+          önizlemesi, domain kaynak kartı) bu sekmede zaten işe yaramıyor:
+          kullanıcı burada domainle değil UYGULAMAYLA ilgileniyor.
+          Onun yerine eklentinin kendi sağ paneli var (servis durumu, port,
+          disk) — yani bilgi kaybolmuyor, uygulamaya ÖZEL hâle geliyor. */}
+      <div className={tab === 'gelistirici' ? '' : 'grid grid-cols-12 gap-5'}>
+        {tab !== 'gelistirici' && (
         <aside className="col-span-12 lg:col-span-3 space-y-4">
           <WebSitePreview alanAdi={domain.alan_adi} ssl={domain.ssl} />
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("İstatistikler")}</h3>
               <button className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300" title={cevir("Yenile")}>
@@ -273,16 +314,29 @@ export default function SubscriptionDetailPage() {
             </div>
           </div>
         </aside>
+        )}
 
-        <section className="col-span-12 lg:col-span-6">
+        <section className={tab === 'gelistirici' ? '' : 'col-span-12 lg:col-span-6'}>
           {tab === 'dashboard' && <DomainPano domain={domain} />}
           {tab === 'hosting'   && <HostingTab domain={domain} />}
           {tab === 'apps'      && <AppTab domain={domain} />}
-          {tab === 'mail'      && <MailTab domain={domain} />}
+          {tab === 'mail'      && (mailAktif ? <MailTab domain={domain} /> : <LisansAskida baslik={cevir("Mail Sunucu")} />)}
+          {/* 🔴 `calistiriciAktif &&` şart: seçili sekme localStorage'da
+              saklanıyor. Eklenti kaldırıldıktan sonra kullanıcı bu sayfaya
+              dönerse sekme DÜĞMESİ çizilmez ama içerik yine de render edilir
+              ve boş/hatalı bir ekran görünürdü. */}
+          {tab === 'gelistirici' && calistiriciKurulu && (
+            <EklentiEkrani
+              ad="calistirici"
+              baslik={cevir("Uygulama Çalıştırıcı")}
+              sade
+              ekBaglam={{ domainID: domain.id, alanAdi: domain.alan_adi }}
+            />
+          )}
 
-          <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 flex-wrap gap-2">
+          <div className="mt-5 pt-3 border-t border-slate-100 dark:border-dark-600 flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 flex-wrap gap-2">
             <div className="flex items-center gap-4">
-              <span>{cevir("Web sitesi:")} <span className="font-mono text-slate-700 dark:text-slate-300">httpdocs</span></span>
+              <span>{cevir("Web sitesi:")} <span className="font-mono text-slate-700 dark:text-slate-300">public_html</span></span>
               <span>IP: <span className="font-mono text-slate-700 dark:text-slate-300">{domain.ipv4}</span></span>
               <span>{cevir("Sistem kullanıcısı:")} <span className="font-mono text-slate-700 dark:text-slate-300">{domain.sistem_kullanici}</span></span>
             </div>
@@ -290,9 +344,11 @@ export default function SubscriptionDetailPage() {
           </div>
         </section>
 
-        <aside className="col-span-12 lg:col-span-3">
-          <DomainKaynakKart domainId={domain.id} />
-        </aside>
+        {tab !== 'gelistirici' && (
+          <aside className="col-span-12 lg:col-span-3">
+            <DomainKaynakKart domainId={domain.id} />
+          </aside>
+        )}
       </div>
     </div>
   )
@@ -301,7 +357,7 @@ export default function SubscriptionDetailPage() {
 function WebSitePreview({ alanAdi, ssl }: { alanAdi: string; ssl: boolean }) {
   const url = `${ssl ? 'https' : 'http'}://${alanAdi}`
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg overflow-hidden">
       <div className="relative aspect-[4/3] bg-gradient-to-br from-slate-800 to-slate-900 overflow-hidden">
         {ssl ? (
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -442,6 +498,7 @@ function AppTab({ domain }: { domain: Domain }) {
   const [kurTaslak, setKurTaslak] = React.useState<{kod: string; ad: string; ikon: string; alt_dizin: string} | null>(null)
   const [gonderiliyor, setGonderiliyor] = React.useState(false)
   const [hata, setHata] = React.useState<string | null>(null)
+  const toast = useToast()
 
   const yukle = async () => {
     setYukleniyor(true); setHata(null)
@@ -452,7 +509,11 @@ function AppTab({ domain }: { domain: Domain }) {
       ])
       setKatalog(k.data.items || [])
       setKurulu(l.data.items || [])
-    } catch (e: any) { setHata(e?.response?.data?.error || cevir("Yüklenemedi")) }
+    } catch (e: any) {
+      const m = e?.response?.data?.error || cevir("Yüklenemedi")
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
     finally { setYukleniyor(false) }
   }
   React.useEffect(() => { void yukle() }, [])
@@ -467,7 +528,9 @@ function AppTab({ domain }: { domain: Domain }) {
       setKurTaslak(null)
       await yukle()
     } catch (e: any) {
-      setHata(e?.response?.data?.error || cevir("Kurulum başarısız"))
+      const m = e?.response?.data?.error || cevir("Kurulum başarısız")
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
     } finally { setGonderiliyor(false) }
   }
   const sil = async (kayitID: number, ad: string) => {
@@ -481,8 +544,6 @@ function AppTab({ domain }: { domain: Domain }) {
   if (yukleniyor) return <div className="py-8 text-center text-slate-500">{cevir("Yükleniyor…")}</div>
   return (
     <div className="space-y-6">
-      {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 rounded text-sm text-red-700">{hata}</div>}
-
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
           {cevir("Öne Çıkan")}
@@ -504,14 +565,14 @@ function AppTab({ domain }: { domain: Domain }) {
         ) : (
           <div className="space-y-2">
             {kurulu.map((u) => (
-              <div key={u.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white dark:bg-slate-900 p-3">
+              <div key={u.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white dark:bg-dark-800 p-3">
                 <div className="flex-1">
                   <div className="font-medium">{u.ad} <span className="text-xs text-slate-500">v{u.surum}</span></div>
                   <div className="text-xs text-slate-500 font-mono">/{u.alt_dizin || ''} · DB: {u.db_adi || '—'}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <a href={u.yonetim_url} target="_blank" rel="noreferrer"
-                    className="rounded-md bg-slate-900 text-white text-xs px-3 py-1.5 hover:bg-slate-800">
+                    className="rounded-md bg-dark-800 text-white text-xs px-3 py-1.5 hover:bg-dark-700">
                     {cevir("Yönetim Paneli →")}
                   </a>
                   <button onClick={() => sil(u.id, u.ad)}
@@ -529,7 +590,7 @@ function AppTab({ domain }: { domain: Domain }) {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {katalog.map((t) => (
-            <div key={t.Kod} className="rounded-lg border border-slate-200 bg-white dark:bg-slate-900 p-3">
+            <div key={t.Kod} className="rounded-lg border border-slate-200 bg-white dark:bg-dark-800 p-3">
               <div className="flex items-start gap-2 mb-2">
                 {t.LogoURL ? (
                   <img src={t.LogoURL} alt={t.Ad} className="w-8 h-8 object-contain shrink-0"
@@ -551,7 +612,7 @@ function AppTab({ domain }: { domain: Domain }) {
                   ? alert(t.Ad + ' ' + cevir("host seviyesinde bir uygulamadır, tenant panelinden kurulamaz."))
                   : setKurTaslak({kod: t.Kod, ad: t.Ad, ikon: t.Ikon, alt_dizin: t.Kod})}
                 disabled={t.NativeApp}
-                className="w-full rounded-md bg-slate-900 text-white text-xs py-1.5 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-400">
+                className="w-full rounded-md bg-dark-800 text-white text-xs py-1.5 hover:bg-dark-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-400">
                 {t.NativeApp ? cevir("Admin'den kurulur") : cevir("Kur")}
               </button>
             </div>
@@ -562,12 +623,12 @@ function AppTab({ domain }: { domain: Domain }) {
       {kurTaslak && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setKurTaslak(null) }}>
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xl">
+          <div className="w-full max-w-md rounded-lg bg-white dark:bg-dark-800 p-5 shadow-xl">
             <h3 className="text-lg font-semibold mb-4">{kurTaslak.ikon} {kurTaslak.ad} {cevir("Kur")}</h3>
             <label className="block text-xs font-medium text-slate-600 mb-1">{cevir("Alt dizin (public_html/... altına)")}</label>
             <input value={kurTaslak.alt_dizin} onChange={(e) => setKurTaslak({...kurTaslak, alt_dizin: e.target.value})}
               placeholder={cevir("boş = kök, blog, shop vb.")}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-slate-950 dark:border-slate-700" />
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-dark-900 dark:border-dark-600" />
             <p className="text-xs text-slate-500 mb-4">
               {cevir("Site:")} <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
             </p>
@@ -575,7 +636,7 @@ function AppTab({ domain }: { domain: Domain }) {
               <button onClick={() => setKurTaslak(null)}
                 className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">{cevir("Vazgeç")}</button>
               <button onClick={kur} disabled={gonderiliyor}
-                className="px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+                className="px-3 py-1.5 text-sm bg-dark-800 text-white rounded-lg hover:bg-dark-700 disabled:opacity-50">
                 {gonderiliyor ? cevir("Kuruluyor…") : cevir("Kur")}
               </button>
             </div>

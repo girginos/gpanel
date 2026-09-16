@@ -24,19 +24,19 @@ import (
 )
 
 type WPKurulum struct {
-	DomainID     int64
+	DomainID        int64
 	SistemKullanici string
-	AlanAdi      string
-	Yol          string
-	CoreSurum    string
-	Eklentiler   []WPPaket
-	Temalar      []WPPaket
+	AlanAdi         string
+	Yol             string
+	CoreSurum       string
+	Eklentiler      []WPPaket
+	Temalar         []WPPaket
 }
 
 type WPPaket struct {
-	Slug   string
-	Surum  string
-	Aktif  bool
+	Slug  string
+	Surum string
+	Aktif bool
 }
 
 // wpKurulumBul — panel'deki bir tenant için wp-core kurulumlarını bul.

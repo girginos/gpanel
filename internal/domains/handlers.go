@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"os/user"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/backups"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
@@ -428,9 +430,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 				return // DNS yayilmamis olabilir; panelden elle kurulabilir
 			}
 			// Gercek CA cert'i kuruldu → panel "SSL var" gostersin.
-			_, _ = h.DB.Exec(`UPDATE domains SET ssl_aktif=1, ssl_kaynak='letsencrypt',
+			if _, err := h.DB.Exec(`UPDATE domains SET ssl_aktif=1, ssl_kaynak='letsencrypt',
 			  cert_path=?, key_path=?, ssl_bitis=DATE_ADD(NOW(), INTERVAL 90 DAY) WHERE id=?`,
-				crt, key, did)
+				crt, key, did); err != nil {
+				log.Printf("oto-SSL: domain %d ssl_aktif yazılamadı: %v — cert kuruldu ama panel 'SSL yok' gösterir", did, err)
+			}
 		}(req.AlanAdi, pr.SistemKullanici, req.PHPSurum, "php-fpm", id)
 	}
 
@@ -477,6 +481,69 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 UZAK YEDEKLER, HER ŞEYDEN ÖNCE.
+	//
+	// `DELETE FROM domains` çalıştığı anda `backup_destinations` FK cascade
+	// ile gider — FTP host/kullanıcı/PAROLA dahil. Ondan sonra uzak depoyu
+	// temizlemek imkânsızdır: ne dosya listesi ne kimlik kalır. Bu yüzden
+	// temizlik en başta yapılır.
+	//
+	// Temizlenemezse silme DURDURULUR (409) — kullanıcı ya bağlantıyı
+	// düzeltir ya `?uzagi_yoksay=1` ile bilerek devam eder. Sessizce devam
+	// etmek, geri dönülemez bir sızıntıyı görünmez kılardı.
+	// 🔴 `uzagi_yoksay` YALNIZ ADMIN.
+	//
+	// Bu bayrak "uzak depoda kalici cop birak" demektir ve YedekUzaktanSil
+	// SISTEM GENELI hedefe (backup_genel_ayar) de dokunur — yani birakilan
+	// cop ADMIN'in deposundadir. Rol kontrolu olmadan bir BAYI, admin'in
+	// bilgisi olmadan admin'in kotasinda kalici cop birakabiliyordu
+	// (olculdu: rol=reseller ile 200 donuyordu).
+	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1" && middleware.RolFrom(r) == "admin"
+
+	// Ö6: yoksayiliyorsa temizligi HIC calistirma. Eskiden kosul `kalan > 0`
+	// oldugu icin zorlama isteginde de tum temizlik bastan kosuyordu —
+	// kullanici ayni bedeli iki kez oduyordu (olculdu: 30sn + 30sn).
+	kalan, uzakErr := 0, error(nil)
+	if !uzagiYoksay {
+		kalan, uzakErr = backups.DomainYedekleriniTemizle(r.Context(), h.DB, id)
+	}
+	if kalan > 0 {
+		{
+			mesaj := "Bu alan adının uzak depodaki (FTP/SFTP) " + strconv.Itoa(kalan) +
+				" yedeği silinemedi. Alan adı silinirse uzak depo erişim bilgileri de silineceği için " +
+				"bu dosyalar bir daha temizlenemez."
+			if middleware.RolFrom(r) == "admin" && uzakErr != nil {
+				mesaj += " (" + uzakErr.Error() + ")"
+			}
+			// Zorlama secenegi YALNIZ admin'e bildirilir.
+			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+				"ok":           false,
+				"hata":         mesaj,
+				"uzagi_yoksay": middleware.RolFrom(r) == "admin",
+			})
+			return
+		}
+	}
+	if uzagiYoksay {
+		uidY, kulY := middleware.Aktor(r)
+		httpx.Denetim(h.DB, r, uidY, kulY, "hosting.sil.uzak-yedek-birakildi", alanAdi,
+			"uzak yedekler BIRAKILDI (admin onayı)", id, true)
+	}
+
+	// 🔴 YIKIM BASLADIKTAN SONRA ISTEK BAGLAMI KULLANILMAZ.
+	//
+	// Deprovision (userdel -r, acme kaldirma, nginx reload) ve yedek dizini
+	// silme ctx'e bagli DEGIL; ama sonrasindaki `DELETE FROM domains` ve
+	// orphan temizlikleri `r.Context()` kullaniyordu. Istemci koparsa
+	// (tarayici 30 sn'de zaman asimina ugruyor) yikim TAMAMLANIR, kayit
+	// silme IPTAL EDILIR: panel domaini "aktif" gosterir ama vhost'u, PHP
+	// havuzu ve yedekleri gitmistir. Olculdu — 200.000 dosyalik bir yedek
+	// dizini silindi, domain satiri kaldi.
+	//
+	// Ironik olan: bu, hayalet kayitlari gorunur kilma isinin tam da
+	// engellemeye calistigi durumu URETIYORDU.
+	silCtx := context.WithoutCancel(r.Context())
+
 	if isDemo == 0 {
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(h.DB, id)
@@ -489,24 +556,40 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		// Redis tenant cache: Valkey ACL user + WP drop-in + cp_domain_redis satırı.
 		// cp_domain_redis'te CASCADE FK olmadığı için domain silinince satır orphan kalıyordu.
 		redis.KapatDomain(h.DB, id, sk)
-		// NOT: /var/backups/girginospanel/<sk>/ dizini KASITLI olarak korunur.
-		// Müşteri domaini yanlışlıkla silmiş olabilir → yedekler kurtarma için saklanır.
-		// (Manuel temizlik için backups.RemoveDomainBackups mevcut.)
+		// 🔴 YEDEK DİZİNİ SİLİNİR.
+		//
+		// Buradaki eski yorum "yedekler kurtarma için KASITLI korunur" diyordu
+		// ama kod bunun TERSİNİ yapıyordu: Deprovision içindeki RemoveAll
+		// dizini zaten siliyordu. Yorumla davranış arasındaki bu çelişki,
+		// "yanlışlıkla silinen domainin yedeğinden kurtarma" diye var
+		// sanılan ama HİÇ VAR OLMAYAN bir özelliği belgeliyordu.
+		//
+		// Davranış korunuyor (silinen domainin yedekleri kök diskte sınırsız
+		// birikmemeli), ama artık DOĞRU yerde ve UZAK kopyalar temizlendikten
+		// SONRA yapılıyor (yukarıdaki uzakTemizlik adımı).
+		// 🔴 KORUMALI YARDIMCI. Ham `os.RemoveAll(filepath.Join(...))` hicbir
+		// kontrol yapmiyordu: `sk` bos gelirse yol KOK dizine cozuluyor ve
+		// TUM kiracilarin yedekleri siliniyordu (DB bos sistem_kullanici'yi
+		// kabul ediyor — olculdu). RemoveDomainBackups `c_` on-ek ve
+		// path-escape kontrolu yapiyor ama cagirani kalmamisti.
+		if e := backups.RemoveDomainBackups(sk); e != nil {
+			log.Printf("yedek dizini silinemedi (%s): %v", sk, e)
+		}
 	}
 
 	// Orphan temizliği: bu tablolarda FK cascade yok (mevcut kurulumlar için),
 	// domain silinince satırlar orphan kalmasın diye açıkça sil.
 	// 🔴 Domaine-ÖZEL plan da gider: katalog planları (domain_id NULL) korunur.
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM service_plans WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(r.Context(), `DELETE FROM wp_bakim WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM service_plans WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
+	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM wp_bakim WHERE domain_id=?`, id)
 
 	// Denetim kaydi SILMEDEN once alinir: kapsam (domains.reseller_id) satir
 	// gittikten sonra cozulemez.
 	kapsamSil := httpx.DomainKapsam(h.DB, id)
 	uidSil, kulSil := middleware.Aktor(r)
-	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM domains WHERE id=?`, id); err != nil {
+	if _, err := h.DB.ExecContext(silCtx, `DELETE FROM domains WHERE id=?`, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+err.Error())
 		return
 	}
@@ -588,7 +671,13 @@ type setBackendReq struct {
 	Backend string `json:"backend"`
 }
 
-var gecerliBackendler = map[string]bool{"php-fpm": true, "apache": true, "static": true}
+// gecerliBackendler — API'nin kabul ettiği backend'ler.
+//
+// 🔴 "proxy" bilerek `mevcutlar` listesinde DEĞİL: kullanıcı arayüzünden elle
+// seçilebilir olsaydı, uygulaması olmayan bir domain proxy'ye alınıp location /
+// hiç tanımlanmadan kalır ve site 404'e düşerdi. Bu modu Uygulama Çalıştırıcı
+// eklentisi, uygulamayı kurduktan SONRA ayarlar.
+var gecerliBackendler = map[string]bool{"php-fpm": true, "apache": true, "static": true, "proxy": true}
 
 func (h *Handlers) GetWebBackend(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -609,6 +698,31 @@ func (h *Handlers) GetWebBackend(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// uygulamaKokSnippetiVar — kiracının kök dizinde yayınlanmış bir uygulaması
+// (yani `location /` getiren bir snippet'i) var mı.
+//
+// Core eklentiyi TANIMAZ; yalnız uzatma noktasının dolu olup olmadığına bakar.
+func uygulamaKokSnippetiVar(sk string) bool {
+	for _, c := range sk {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	if sk == "" {
+		return false
+	}
+	ents, err := os.ReadDir("/etc/nginx/gosp-app/" + sk + "/kok")
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var req setBackendReq
@@ -617,7 +731,7 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !gecerliBackendler[req.Backend] {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz backend (php-fpm|apache|static)")
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz backend (php-fpm|apache|static|proxy)")
 		return
 	}
 	var alanAdi, sk, phpSurum string
@@ -637,7 +751,22 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin backend'i değiştirilemez")
 		return
 	}
+	// 🔴 UYGULAMASIZ PROXY MODU REDDEDİLİR. proxy dalı bilerek `location /`
+	// BASMAZ — onu uygulama snippet'i getirir. Snippet yokken bu moda geçen bir
+	// domainin TAMAMI 404 döner, üstelik arayüzde proxy diye bir kart olmadığı
+	// için hiçbir seçenek seçili görünmez ve kullanıcı sitesinin neden öldüğünü
+	// panelden ANLAYAMAZ. Kapı bunu baştan engeller.
+	if req.Backend == "proxy" && !uygulamaKokSnippetiVar(sk) {
+		httpx.WriteError(w, http.StatusBadRequest,
+			"bu alan adında kök dizinde yayınlanmış bir uygulama yok — proxy moduna geçilemez")
+		return
+	}
 	_ = alanAdi
+	// Eski değeri SAKLA: render düşerse DB'yi geri almak için gerekir.
+	var eskiBackend string
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(web_backend,'php-fpm') FROM domains WHERE id=?`, id).Scan(&eskiBackend)
+
 	// 1) DB güncelle
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE domains SET web_backend=? WHERE id=?`, req.Backend, id); err != nil {
@@ -647,7 +776,20 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 	// 2) Vhost'u yeniden uygula (nginx + apache yöneticisi web_backend'i DB'den okur)
 	socket, _ := provisioner.PHPSocketFor(sk, phpSurum)
 	if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, phpSurum); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+err.Error())
+		// 🔴 DB'Yİ GERİ AL. Aksi halde DB "php-fpm" derken disk proxy vhost'unu
+		// servis eder; daha kötüsü, bundan sonraki HER arka plan render'ı (SSL
+		// yenilemesi dahil) DB'den yeni değeri okuyup aynı hataya düşer ve o
+		// kiracının yenilemesi KALICI olarak bozulur — kimse fark etmeden.
+		if eskiBackend != "" {
+			if _, gerr := h.DB.ExecContext(r.Context(),
+				`UPDATE domains SET web_backend=? WHERE id=?`, eskiBackend, id); gerr != nil {
+				httpx.WriteError(w, http.StatusInternalServerError,
+					"vhost render: "+err.Error()+" — DB geri alınamadı: "+gerr.Error())
+				return
+			}
+		}
+		httpx.WriteError(w, http.StatusInternalServerError,
+			"vhost render: "+err.Error()+" (backend değişikliği geri alındı)")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -740,7 +882,8 @@ func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Parola == "" {
-		req.Parola = hesaplar.RandomParola(20)
+		httpx.WriteError(w, http.StatusBadRequest, "yeni parola gerekli")
+		return
 	}
 	if !hesaplar.ParolaGecerli(req.Parola) {
 		httpx.WriteError(w, http.StatusBadRequest, "parola geçersiz karakter (satır sonu) içeriyor")
@@ -770,7 +913,7 @@ func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
 		_ = hesaplar.SyncSSHPassword(h.DB, sk)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "id": id, "username": sk, "parola": req.Parola,
+		"ok": true, "id": id, "username": sk,
 	})
 }
 
@@ -802,7 +945,7 @@ func (h *Handlers) ListDatabases(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.DomainID, &d.DBAdi, &d.DBKullanici, &d.DBHost, &d.DBParola, &d.Olusturulma); err != nil {
 			continue
 		}
-		d.DBParola = gizli.CozBagli(d.DBParola, d.DBKullanici) // at-rest sifreli → sahibine ACIK gosterilir
+		d.DBParola = "" // 🔴 CWE-200: parola LISTEDE donmez; sahip /databases/{dbid}/parola ucundan alir
 		out = append(out, d)
 	}
 	// Boyut (data+index): panel MySQL kullanicisi tenant DB'lerini information_schema'da
