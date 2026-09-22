@@ -570,6 +570,51 @@ if [ "$HEALTHY" = 1 ]; then
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK"
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
+
+  # 11a) FTP kimlik-modu uyumu (pure-ftpd MYSQLCrypt) — 🔴 updater eskiden FTP
+  # config'ine HİÇ dokunmuyordu. Panel restart'ta sifreheal (cmd/server/sifreheal.go)
+  # eski DÜZ-metin ftp_accounts.password_md5 satırlarını $6$ crypt hash'e çevirir; ama
+  # /etc/pure-ftpd/pureftpd-mysql.conf MYSQLCrypt=cleartext kalırsa pure-ftpd girilen
+  # parolayı $6$ hash string'iyle DÜZ-metin karşılaştırır → o sunucudaki TÜM müşteriler
+  # 530 (331 user OK → 530); panel login FTP'den ayrı olduğu için sorun SESSİZ kalır.
+  # Bu adım MYSQLCrypt'i GERÇEK at-rest formata hizalar (idempotent; MYSQLPassword /
+  # .pfsql_pass KORUNUR — yalnız MYSQLCrypt satırı). sifreheal restart'tan SONRA koştuğu
+  # için burada (panel ACTIVE sonrası) password_md5 zaten $6$'dır.
+  PFCONF=/etc/pure-ftpd/pureftpd-mysql.conf
+  if command -v mysql >/dev/null 2>&1 && [ -f "$PFCONF" ]; then
+    _h6='$6$'
+    _hn=$(mysql -N -e "SELECT COUNT(*) FROM panel.ftp_accounts WHERE status='active' AND password_md5 LIKE '${_h6}%'" 2>/dev/null) || _hn=0
+    _pn=$(mysql -N -e "SELECT COUNT(*) FROM panel.ftp_accounts WHERE status='active' AND password_md5 <> '' AND password_md5 NOT LIKE '${_h6}%'" 2>/dev/null) || _pn=0
+    case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
+    case "$_pn" in ''|*[!0-9]*) _pn=0 ;; esac
+    # $6$ mevcut (ya da tablo boş) → crypt; TÜM aktif hesaplar düz-metin (sifreheal
+    # koşmamış) → cleartext, çalışan düz-metin FTP'yi KIRMA.
+    if [ "$_hn" -eq 0 ] && [ "$_pn" -gt 0 ]; then _want=cleartext; else _want=crypt; fi
+    _cur=$(awk 'tolower($1)=="mysqlcrypt"{print $2; exit}' "$PFCONF")
+    if [ "$_cur" != "$_want" ]; then
+      cp -a "$PFCONF" "$PFCONF.bak-$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+      if grep -qiE '^[[:space:]]*MYSQLCrypt[[:space:]]' "$PFCONF"; then
+        sed -ri "s/^([[:space:]]*MYSQLCrypt[[:space:]]+).*/\1$_want/" "$PFCONF"
+      else
+        printf 'MYSQLCrypt      %s\n' "$_want" >> "$PFCONF"
+      fi
+      if systemctl is-active --quiet pure-ftpd; then
+        systemctl restart pure-ftpd >/dev/null 2>&1 \
+          && ok "FTP kimlik modu düzeltildi: MYSQLCrypt ${_cur:-yok} → $_want (pure-ftpd restart)" \
+          || warn "MYSQLCrypt $_want yazıldı ama pure-ftpd restart BAŞARISIZ — elle: systemctl restart pure-ftpd"
+      else
+        ok "FTP kimlik modu düzeltildi: MYSQLCrypt ${_cur:-yok} → $_want (pure-ftpd pasif)"
+      fi
+    else
+      ok "FTP kimlik modu uyumlu (MYSQLCrypt=$_cur)"
+    fi
+  elif command -v mysql >/dev/null 2>&1 && command -v girginospanel-ftp-setup >/dev/null 2>&1; then
+    # pureftpd-mysql.conf yok → tam kurulum (idempotent; .pfsql_pass varsa parola KORUNUR)
+    girginospanel-ftp-setup >/dev/null 2>&1 \
+      && ok "pure-ftpd config yoktu → girginospanel-ftp-setup ile kuruldu" \
+      || warn "pure-ftpd config yok + girginospanel-ftp-setup HATA — elle: girginospanel-ftp-setup"
+  fi
+
 # 🔴 Guncelleme "tamam" demeden ONCE uretim davranisini olc. Eskiden
 # updater servis ayakta diye tamam diyordu; wp-cli bozuk, SELinux
 # etiketi yok, port 80 500 doner haldeyken bile "tamam" yaziyordu.
