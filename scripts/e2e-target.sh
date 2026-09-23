@@ -284,7 +284,7 @@ if [ -f "$KAPI_JSON" ]; then
     r=${kt%%:*}; x=${kt#*:}; p=${x%%:*}; bek=${x#*:}; t=$(kapi_tipi "$p")
     [ "$t" = "$bek" ] && ok "$r kapisi :$p -> $t" || no "$r kapisi :$p tipi '$t' ($bek beklenir) - zincir kopuk, rol ayrimi KAPALI"
   done
-  GOVDE='{"username":"e2e-yok","password":"e2e-yok"}'
+  GOVDE='{"kullanici":"e2e-yok","parola":"e2e-yok"}'
   K1=$(kod -X POST -H 'Content-Type: application/json' -d "$GOVDE" "https://127.0.0.1:$KM/api/v1/auth/login")
   [ "$K1" = "404" ] && ok "musteri kapisinda yonetici girisi YOK (404, varlik sizdirmaz)" || no "musteri kapisinda /auth/login -> HTTP $K1 (404 beklenir)"
   K2=$(kod -X POST -H 'Content-Type: application/json' -d "$GOVDE" "https://127.0.0.1:$KA/api/v1/musteri/login")

@@ -301,10 +301,12 @@ func TestTokenUyumlu(t *testing.T) {
 }
 
 func TestIstek(t *testing.T) {
-	eskiGuven := nginxtenMi
-	t.Cleanup(func() { nginxtenMi = eskiGuven; ZorlamaAyarla(false) })
+	eskiGuven, eskiSinyal := nginxtenMi, ZincirKopuk
+	t.Cleanup(func() { nginxtenMi, ZincirKopuk = eskiGuven, eskiSinyal; ZorlamaAyarla(false) })
 	guven := true
 	nginxtenMi = func(*http.Request) bool { return guven }
+	sinyal := 0
+	ZincirKopuk = func() { sinyal++ }
 
 	istek := func(vals ...string) *http.Request {
 		r := httptest.NewRequest("GET", "/api/v1/x", nil)
@@ -319,21 +321,27 @@ func TestIstek(t *testing.T) {
 		t.Errorf("zorlama kapalı → \"\" (başlık yok sayılır), got %q", k)
 	}
 	ZorlamaAyarla(true)
-	if k := Istek(istek(Musteri)); k != Musteri {
-		t.Errorf("geçerli başlık → %q, got %q", Musteri, k)
+	if k := Istek(istek(Musteri)); k != Musteri || sinyal != 0 {
+		t.Errorf("geçerli başlık → %q (sinyal yok), got %q sinyal=%d", Musteri, k, sinyal)
 	}
 	if k := Istek(istek("root")); k != Bilinmeyen {
 		t.Errorf("tanımsız değer → bilinmeyen, got %q", k)
 	}
-	if k := Istek(istek()); k != Bilinmeyen {
-		t.Errorf("başlık yok → bilinmeyen, got %q", k)
-	}
 	if k := Istek(istek(Admin, Musteri)); k != Bilinmeyen {
 		t.Errorf("çoklu başlık (sahtecilik) → bilinmeyen, got %q", k)
+	}
+	// Kanıtlı ama başlıksız = yapılandırma kayması (istemci üretemez): KİLİTLEME, eski
+	// davranışa düş ve zinciri yeniden doğrulat.
+	sinyal = 0
+	if k := Istek(istek()); k != "" || sinyal != 1 {
+		t.Errorf("kanıtlı + başlık yok → \"\" ve onarım sinyali, got %q sinyal=%d", k, sinyal)
 	}
 	guven = false
 	if k := Istek(istek(Admin)); k != Bilinmeyen {
 		t.Errorf("nginx kanıtı yoksa (doğrudan :8080) → bilinmeyen, got %q", k)
+	}
+	if k := Istek(istek()); k != Bilinmeyen {
+		t.Errorf("kanıtsız + başlık yok (doğrudan :8080) → bilinmeyen (fail-open YOK), got %q", k)
 	}
 }
 

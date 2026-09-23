@@ -442,6 +442,38 @@ func TestKapiHealEskiDusurmeTazeAyaraBakar(t *testing.T) {
 	}
 }
 
+// Kapısı kanıtlanamayan istek yağmuru onarımı YALNIZ bir kez tetikler; onarılamayan
+// zincirde zorlama kapanır (15 dk kilitlenme yerine saniyeler).
+func TestKapiZincirKopuk(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	eskiOlc, eskiAra := kapiTipOlcucu, kapiZincirAra
+	t.Cleanup(func() { kapiTipOlcucu, kapiZincirAra = eskiOlc, eskiAra; kapiZincirTetik.Store(false) })
+	kapiZincirAra = time.Hour // bu test boyunca yeniden tetiklenmesin
+	var olcum int32
+	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) {
+		atomic.AddInt32(&olcum, 1)
+		return map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}[port], nil
+	}
+	kapi.ZorlamaAyarla(true)
+	s.nginxT = func(int) error { return errors.New("ilgisiz vhost bozuk") } // onarım uygulanamaz
+	for i := 0; i < 50; i++ {
+		kapiZincirKopuk()
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for kapi.ZorlamaAktif() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if kapi.ZorlamaAktif() {
+		t.Fatal("onarılamayan zincirde zorlama KAPANMALI (kilitlenme yerine eski davranış)")
+	}
+	if s.tSayac != 1 {
+		t.Fatalf("50 sinyal tek onarım tetiklemeli, nginx -t sayısı=%d", s.tSayac)
+	}
+	if atomic.LoadInt32(&olcum) != 0 {
+		t.Fatal("uzlaştırma düşünce ölçüme gidilmemeli")
+	}
+}
+
 func TestKapiSimdiUygula(t *testing.T) {
 	kapiTestKur(t, kapiTestSablon, rolAyar())
 	eski := kapiTipOlcucu

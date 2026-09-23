@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -83,7 +84,46 @@ var kapiMu sync.Mutex
 func HealPanelKapiOnStartup() {
 	kapiMu.Lock()
 	defer kapiMu.Unlock()
-	kapi.ZorlamaAyarla(kapiUzlastir(time.Now().Unix()))
+	acik := kapiUzlastir(time.Now().Unix())
+	kapi.ZorlamaAyarla(acik)
+	kapi.ZincirKopuk = kapiZincirKopuk
+	if acik {
+		log.Printf("kapi: rol kapıları uygulandı — zorlama AÇIK (uçtan uca ölçüm doğrulayacak)")
+	}
+}
+
+// kapiZincirTetik / kapiZincirAra: kopuk zincirde HER istek sinyal verir; onarım
+// sinyal başına değil, en fazla kapiZincirAra'da bir koşar (kanıtsız istek yağdıran
+// biri de yalnız bu kadarını tetikleyebilir).
+var (
+	kapiZincirTetik atomic.Bool
+	kapiZincirAra   = 30 * time.Second
+)
+
+// kapiZincirKopuk: zorlama açıkken kapısı kanıtlanamayan istek geldi (kapi.ZincirKopuk).
+// 15 dakikalık bakımı beklemeden zinciri yeniden uzlaştırır ve ölçer: onarılabiliyorsa
+// onarır, onarılamıyorsa zorlamayı kapatır (eski davranış — kimse kilitli kalmaz).
+func kapiZincirKopuk() {
+	if !kapiZincirTetik.CompareAndSwap(false, true) {
+		return
+	}
+	ara := kapiZincirAra
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("🔴 kapi zincir onarımı panikledi: %v", r)
+			}
+			time.AfterFunc(ara, func() { kapiZincirTetik.Store(false) })
+		}()
+		kapiMu.Lock()
+		acilabilir := kapiUzlastir(time.Now().Unix())
+		kapiMu.Unlock()
+		if !acilabilir {
+			kapiZorlamaYaz(false, "zincir kopuk")
+			return
+		}
+		kapiOlcVeAyarla(context.Background(), 3)
+	}()
 }
 
 // KapiSimdiUygula: kapı ayarı panelden değiştikten sonra nginx'i HEMEN uyumlar ve

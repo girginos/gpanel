@@ -258,15 +258,33 @@ func KanitliKapi(r *http.Request) string {
 	return ""
 }
 
+// ZincirKopuk: zorlama açıkken kapısı kanıtlanamayan bir istek geldiğinde çağrılır.
+// provisioner bağlar (seyreltilmiş yeniden uzlaştırma + ölçüm); nil → yok.
+var ZincirKopuk func()
+
 // Istek: isteğin geldiği kapı (yetki kararları bunu kullanır).
 //   - zorlama kapalı → "" (eski davranış: tek kapı, her rol)
-//   - kanıtsız istek (doğrudan :8080) / başlık yok / çoklu / tanımsız → Bilinmeyen
+//   - kanıtsız istek (doğrudan :8080) / çoklu / tanımsız başlık → Bilinmeyen
+//   - nginx'ten geldiği KANITLI ama kapı başlığı HİÇ yok → "" (aşağıya bkz.)
+//
+// 🔴 KİLİTLENME KORUMASI: kanıtlı istekte başlığın hiç olmaması ancak yapılandırma
+// kaymasıyla olur — _panel.conf başlıksız bir sürümle değişmiş (şablonla yeniden
+// kurulum, eski yedeğin geri yüklenmesi). nginx başlığı istemciden gelse bile ezer ve
+// kapı modunda map değeri asla boş değildir; yani bu durum istemcinin eseri OLAMAZ.
+// Reddetmek, bir sonraki ölçüme dek HERKESİ kilitlerdi. Eski davranışa düşülür ve
+// zincir hemen yeniden uzlaştırılıp ölçülür (ZincirKopuk).
 func Istek(r *http.Request) string {
 	if !ZorlamaAktif() {
 		return ""
 	}
 	if k := KanitliKapi(r); k != "" {
 		return k
+	}
+	if f := ZincirKopuk; f != nil {
+		f()
+	}
+	if nginxtenMi(r) && len(r.Header.Values(Baslik)) == 0 {
+		return ""
 	}
 	return Bilinmeyen
 }
