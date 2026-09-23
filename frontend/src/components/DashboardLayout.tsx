@@ -12,6 +12,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
 import HataYuzeyi from './HataYuzeyi'
+import KapiAdresSeridi from './KapiAdresSeridi'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -494,6 +495,7 @@ export default function DashboardLayout() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar onMenuAc={() => setMobilAcik(true)} menuAcik={mobilAcik} />
+        <KapiAdresSeridi />
         {/* Alt gezinme çubuğu (AltNavBar) mobilde ekranın dibine sabitlenir;
             altında kalan boşluğu akışın SON ögesi ayırır. Alt bilgi
             çiziliyorsa o son öge footer'dır — ikisi birden ayırırsa boşluk

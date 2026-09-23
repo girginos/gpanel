@@ -81,7 +81,7 @@ const GRUPLAR: Grup[] = [
     ikon: I.tune,
     araclar: [
       { baslik: 'Port Değiştirme', href: '/araclar/port-degistirme', ikon: I.tune,
-        anahtar: 'port değiştir 8443 8080 backend dış ssl nginx listen kilit',
+        anahtar: 'port değiştir kapı kapısı rol yönetici admin bayi müşteri 8443 8080 backend dış ssl nginx listen kilit',
         aciklama: 'Panelin backend ve dış SSL portunu değiştir. Kilitlenme koruması ile otomatik geri alma.' },
       { baslik: 'IP Yönetimi', href: '/araclar/ip-yonetimi', ikon: I.globe,
         anahtar: 'ip adres ekle sil sunucu network arayüz iface secondary alias',

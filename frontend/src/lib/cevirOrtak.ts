@@ -507,7 +507,7 @@ export const ORTAK_EN: Record<string, string> = {
   "tüm portlara": "to all ports",
   "tümü": "all",
   "Önizleme:": "Preview:",
-  "Örnek: Port 8443 yazıp ofis IP'nizi girin → panele yalnız siz erişebilirsiniz.": "Example: Enter port 8443 and your office IP → only you can access the panel.",
+  "Örnek: Panelin yönetici portunu yazıp ofis IP'nizi girin → yönetici paneline yalnız siz erişebilirsiniz.": "Example: Enter the panel's administrator port and your office IP → only you can reach the administrator panel.",
   "Örnek: Sürekli SSH deneyen 45.9.1.2 adresini tamamen engelle.": "Example: Fully block 45.9.1.2 that keeps trying SSH.",
   "Örnek: Veritabanı portu 3306'yı dışarıya kapat.": "Example: Close database port 3306 to the outside.",
   "ör. SSH brute-force yapan IP": "e.g. IP doing SSH brute-force",

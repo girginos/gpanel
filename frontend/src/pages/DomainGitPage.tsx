@@ -17,7 +17,7 @@ import { useToast } from '@/components/Toast'
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string }
 type Repo = {
   id: number; domain_id: number; repo_url: string; branch: string; target_dir: string;
-  deploy_key_pub: string; webhook_secret: string; son_sync?: string; son_commit?: string; son_durum: string; olusturulma: string
+  deploy_key_pub: string; webhook_secret: string; webhook_url?: string; son_sync?: string; son_commit?: string; son_durum: string; olusturulma: string
 }
 type GHConn = {
   yok?: boolean
@@ -101,8 +101,6 @@ export default function DomainGitPage() {
   const [domain, setDomain] = useState<Domain | null>(null)
   const [repo, setRepo] = useState<Repo | null>(null)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   const [silinecek, setSilinecek] = useState(false)
   const [klonOnay, setKlonOnay] = useState(false)
@@ -128,7 +126,7 @@ export default function DomainGitPage() {
     api.get<Domain>(`/domains/${id}`).then(r => setDomain(r.data)).catch(hataYakala(cevir("Alan adı bilgisi alınamadı")))
     api.get<Repo | null>(`/domains/${id}/git`)
       .then(r => { setRepo(r.data); if (r.data) { setRepoUrl(r.data.repo_url); setBranch(r.data.branch); setTargetDir(r.data.target_dir) } })
-      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .catch(e => { const m = apiHata(e); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
     api.get<GHConn>(`/domains/${id}/github`).then(r => {
       setGhConn(r.data)
@@ -142,17 +140,16 @@ export default function DomainGitPage() {
   useEffect(yukle, [id])
 
   async function ghConnect() {
-    if (!ghToken.trim()) { setHata(cevir("GitHub PAT zorunlu")); toast.hata(cevir("GitHub PAT zorunlu")); return }
-    setGhYukluyor(true); setHata(null); setBasari(null)
+    if (!ghToken.trim()) { toast.hata(cevir("GitHub PAT zorunlu")); return }
+    setGhYukluyor(true)
     try {
       const r = await api.post<GHConn>(`/domains/${id}/github/connect`, { token: ghToken.trim() })
       setGhConn(r.data); setGhToken('')
       const m = cevirT(cevir("GitHub bağlandı: @{0}"), r.data.login)
-      setBasari(m)
       toast.basari(m)
       ghLoadRepos()
     } catch (e) {
-      const m = apiHata(e, cevir("GitHub bağlantı başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("GitHub bağlantı başarısız")); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setGhYukluyor(false) }
   }
 
@@ -161,7 +158,7 @@ export default function DomainGitPage() {
       const r = await api.get<GHRepo[]>(`/domains/${id}/github/repos`)
       setGhRepos(r.data || [])
     } catch (e) {
-      const m = apiHata(e, cevir("Repo listesi alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("Repo listesi alınamadı")); toast.hata(cevir("İşlem başarısız"), m)
     }
   }
 
@@ -178,8 +175,8 @@ export default function DomainGitPage() {
   }
 
   async function ghUse() {
-    if (!ghSelectedRepo || !ghSelectedBranch) { setHata(cevir("Repo ve branch seçin")); toast.hata(cevir("Repo ve branch seçin")); return }
-    setGhYukluyor(true); setHata(null); setBasari(null)
+    if (!ghSelectedRepo || !ghSelectedBranch) { toast.hata(cevir("Repo ve branch seçin")); return }
+    setGhYukluyor(true)
     try {
       const r = await api.post<{ ok: boolean; webhook_ok?: boolean; webhook_hata?: string }>(
         `/domains/${id}/github/use`,
@@ -190,11 +187,10 @@ export default function DomainGitPage() {
         if (r.data.webhook_ok) msg += ' · ' + cevir("Otomatik dağıtım aktif (webhook kuruldu)")
         else if (r.data.webhook_hata) msg += ' · ' + cevir("Webhook hata:") + ' ' + r.data.webhook_hata
       }
-      setBasari(msg)
       toast.basari(cevir("Kaydedildi"), msg)
       yukle()
     } catch (e) {
-      const m = apiHata(e, cevir("Bağlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("Bağlama başarısız")); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setGhYukluyor(false) }
   }
 
@@ -207,54 +203,50 @@ export default function DomainGitPage() {
       setGhBranches([])
       setGhSelectedRepo('')
       setGhSelectedBranch('')
-      setBasari(cevir("GitHub bağlantısı kaldırıldı"))
       toast.basari(cevir("GitHub bağlantısı kaldırıldı"))
     } catch (e) {
-      const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e); toast.hata(cevir("İşlem başarısız"), m)
     }
   }
 
   async function bagla() {
-    setIsleniyor(true); setHata(null); setBasari(null)
+    setIsleniyor(true)
     try {
       await api.post(`/domains/${id}/git`, { repo_url: repoUrl, branch, target_dir: targetDir })
-      setBasari(cevir("Repo bağlandı. Deploy key'i kopyalayıp GitHub repo'nuza ekleyin, sonra \"Klonla\" tıklayın."))
       toast.basari(cevir("Kaydedildi"), cevir("Repo bağlandı. Deploy key'i kopyalayıp GitHub repo'nuza ekleyin, sonra \"Klonla\" tıklayın."))
       yukle()
     } catch (e) {
-      const m = apiHata(e, cevir("Bağlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("Bağlama başarısız")); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
   }
 
   async function klonla() {
-    setIsleniyor(true); setHata(null); setBasari(null); setLogSon(null); setKlonOnay(false)
+    setIsleniyor(true); setLogSon(null); setKlonOnay(false)
     try {
       const { data } = await api.post(`/domains/${id}/git/klonla`)
       const m = cevirT(cevir("Klonlandı! Commit: {0}"), data.commit.slice(0, 7))
-      setBasari(m)
       toast.basari(m)
       setLogSon(data.log)
       yukle()
     } catch (e) {
-      const m = apiHata(e, cevir("Klonlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("Klonlama başarısız")); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
   }
 
   async function pull() {
-    setIsleniyor(true); setHata(null); setBasari(null); setLogSon(null)
+    setIsleniyor(true); setLogSon(null)
     try {
       const { data } = await api.post(`/domains/${id}/git/pull`)
       const m = cevir("Pull tamam. Commit:") + ' ' + data.commit.slice(0, 7)
-      setBasari(m)
       toast.basari(m)
       setLogSon(data.log)
       yukle()
     } catch (e) {
-      const m = apiHata(e, cevir("Pull başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      const m = apiHata(e, cevir("Pull başarısız")); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
       setIsleniyor(false)
     }
@@ -263,7 +255,7 @@ export default function DomainGitPage() {
   async function sil() {
     try {
       await api.delete(`/domains/${id}/git`)
-      setRepo(null); setSilinecek(false); setBasari(cevir("Repo bağlantısı kaldırıldı")); toast.basari(cevir("Repo bağlantısı kaldırıldı"))
+      setRepo(null); setSilinecek(false); toast.basari(cevir("Repo bağlantısı kaldırıldı"))
     } catch (e) {
       (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e) }))
     }
@@ -452,7 +444,7 @@ export default function DomainGitPage() {
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">GitHub → Repository → Settings → Webhooks → Add webhook. Content type: <code className="font-mono">application/json</code>. {cevir("Push event yeterli.")}</p>
                 <div className="space-y-2">
-                  <Sat e="Payload URL" d={`http://${domain?.ipv4 || ''}:8443/api/v1/git-webhook/${repo.webhook_secret}`} onCopy={kopyala} />
+                  <Sat e="Payload URL" d={repo.webhook_url || ''} onCopy={kopyala} />
                   <Sat e="Secret" d={repo.webhook_secret} onCopy={kopyala} />
                   <Sat e="Content type" d="application/json" />
                   <Sat e="Events" d="Just the push event" />

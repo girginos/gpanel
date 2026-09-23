@@ -38,10 +38,25 @@ type Repo struct {
 	SonCommit     string `json:"son_commit,omitempty"`
 	SonDurum      string `json:"son_durum"`
 	Olusturulma   string `json:"olusturulma"`
+	// WebhookURL: el ile webhook kurulumu için Payload URL (sunucu üretir).
+	WebhookURL string `json:"webhook_url,omitempty"`
 }
 
 type Handlers struct {
 	DB *sql.DB
+	// WebhookBase: panelin GENEL adresi, örn. "https://203.0.113.10:23003" (kapı
+	// modunda müşteri kapısı — admin portu sızmaz). Boşsa Payload URL üretilmez.
+	WebhookBase string
+}
+
+// webhookURL: Payload URL. 🔴 Arayüz eskiden `http://<ip>:8443/...` kuruyordu: HTTPS
+// portuna düz HTTP (nginx 400 döner) ve sabit port (dış port değişince / rol
+// kapılarında ölü adres). Portu yalnız sunucu doğru bilir.
+func (h *Handlers) webhookURL(secret string) string {
+	if h.WebhookBase == "" || secret == "" {
+		return ""
+	}
+	return strings.TrimRight(h.WebhookBase, "/") + "/api/v1/git-webhook/" + secret
 }
 
 const selectAll = `SELECT id, domain_id, repo_url, branch, target_dir,
@@ -273,6 +288,7 @@ func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	repo.WebhookURL = h.webhookURL(repo.WebhookSecret)
 	httpx.WriteJSON(w, http.StatusOK, repo)
 }
 
@@ -338,6 +354,7 @@ func (h *Handlers) Bagla(w http.ResponseWriter, r *http.Request) {
 	gid, _ := res.LastInsertId()
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", gid)
 	repo, _ := scan(row)
+	repo.WebhookURL = h.webhookURL(repo.WebhookSecret)
 	httpx.WriteJSON(w, http.StatusCreated, repo)
 }
 

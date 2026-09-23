@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
+import KapiGiris from '@/components/KapiGiris'
 const HomePage = lazy(() => import('@/pages/HomePage'))
 const DomainsPage = lazy(() => import('@/pages/DomainsPage'))
 const ResellerlarPage = lazy(() => import('@/pages/ResellerlarPage'))
@@ -21,7 +22,6 @@ const BayiPlanlariPage = lazy(() => import('@/pages/BayiPlanlariPage'))
 const SubscriptionDetailPage = lazy(() => import('@/pages/SubscriptionDetailPage'))
 const ServicePlansPage = lazy(() => import('@/pages/ServicePlansPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
-const PlaceholderPage = lazy(() => import('@/pages/PlaceholderPage'))
 const ToolPage = lazy(() => import('@/pages/ToolPage'))
 const DomainFilesPage = lazy(() => import('@/pages/DomainFilesPage'))
 const DomainSSLPage = lazy(() => import('@/pages/DomainSSLPage'))
@@ -76,7 +76,6 @@ const DomainSubdomainlerPage = lazy(() => import('@/pages/DomainSubdomainlerPage
 const DomainSubdomainYonetPage = lazy(() => import('@/pages/DomainSubdomainYonetPage'))
 const CPanelGirisPage = lazy(() => import('@/pages/CPanelGirisPage'))
 const IzlemePage = lazy(() => import('@/pages/IzlemePage'))
-const YakindaPage = lazy(() => import('@/pages/YakindaPage'))
 const TehditPage = lazy(() => import('@/pages/TehditPage'))
 const MarkaPage = lazy(() => import('@/pages/MarkaPage'))
 function GuardedRoute({ children }: { children: React.ReactNode }) {
@@ -105,9 +104,10 @@ export default function App() {
   return (
     <Suspense fallback={<SayfaYukleniyor />}>
     <Routes>
-      <Route path="/giris" element={<LoginPage />} />
-        <Route path="/cp/giris" element={<CPanelGirisPage />} />
-        <Route path="/cp" element={<CPanelGirisPage />} />
+      {/* Rol kapıları (ADR-GP-001): her kapı yalnız kendi giriş formunu gösterir. */}
+      <Route path="/giris" element={<KapiGiris form="yonetim"><LoginPage /></KapiGiris>} />
+        <Route path="/cp/giris" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
+        <Route path="/cp" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
       <Route
         path="/"
         element={

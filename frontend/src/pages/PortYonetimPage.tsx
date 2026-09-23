@@ -9,6 +9,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import PanelKapilari, { type KapiDurum } from '@/components/PanelKapilari'
 
 /*
  * Port Değiştirme — admin only.
@@ -20,8 +21,10 @@ import { Button, Badge } from '@/components/ui'
  *   3. Async iş: env yedekle → conf yedekle → uygula → curl-verify → başarısızsa
  *      OTOMATİK GERI AL. Kilitlenme koruması bu curl-verify adımıdır.
  *
- * UI iki port için ayrı form: backend (127.0.0.1:X) ve dış (nginx :X).
- * Değişiklik sonrası panel adresi değişebilir — kullanıcıya UYARI ver.
+ * UI: dış port (nginx :X) formu. Değişiklik sonrası panel adresi değişebilir —
+ * kullanıcıya UYARI ver. Rol kapıları (ADR-GP-001) kuruluysa tek bir dış port
+ * yoktur: form yerine PanelKapilari kartı çizilir (sunucu tek-port değişimini
+ * kapı modunda zaten reddeder).
  */
 
 type Adim = { etiket: string; ok: boolean; bilgi?: string; ts: string }
@@ -34,6 +37,16 @@ type Is = {
 type Durum = {
   backend_port: number; dis_port: number
   uygulama: string; aktif_is?: Is
+  kapi?: KapiDurum
+}
+
+// Geçmiş tablosundaki iş tipleri (cp_port_gecmisi.tip).
+const TIP_ETIKET: Record<string, string> = {
+  dis: 'Dış port',
+  backend: 'Backend port',
+  'kapi-admin': 'Yönetici kapısı',
+  'kapi-bayi': 'Bayi kapısı',
+  'kapi-musteri': 'Müşteri kapısı',
 }
 type Gecmis = { id: number; tip: string; eski_port: number; yeni_port: number
   basarili: boolean; rollback: boolean; son_hata: string; created_at: string }
@@ -78,6 +91,12 @@ const PORT_EN: Record<string, string> = {
   "İstek başarısız": "Request failed",
   "🔴 Firewall + lockout uyarısı": "🔴 Firewall + lockout warning",
   "İşlem başarısız": "Operation failed",
+  "Panele rol başına ayrı portlardan girilir: yönetici, bayi ve müşteri.": "The panel is reached on a separate port per role: administrator, reseller and customer.",
+  "Dış port": "External port",
+  "Backend port": "Backend port",
+  "Yönetici kapısı": "Administrator gate",
+  "Bayi kapısı": "Reseller gate",
+  "Müşteri kapısı": "Customer gate",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PORT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -177,10 +196,14 @@ export default function PortYonetimPage() {
           </ul>
         </div>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-          {cevir("Panelin dış SSL portunu değiştir.")}
-          <span className="ml-1 font-medium text-slate-800 dark:text-slate-200">
-            {cevir("Curl-verify başarısız olursa otomatik geri alınır.")}
-          </span>
+          {durum?.kapi ? cevir("Panele rol başına ayrı portlardan girilir: yönetici, bayi ve müşteri.") : (
+            <>
+              {cevir("Panelin dış SSL portunu değiştir.")}
+              <span className="ml-1 font-medium text-slate-800 dark:text-slate-200">
+                {cevir("Curl-verify başarısız olursa otomatik geri alınır.")}
+              </span>
+            </>
+          )}
         </p>
       </div>
 
@@ -208,7 +231,9 @@ export default function PortYonetimPage() {
           )}
 
           <div className="mx-auto max-w-2xl">
-            {/* Dış port */}
+            {durum.kapi ? (
+              <PanelKapilari kapi={durum.kapi} onDegisti={() => void yukle()} />
+            ) : (
             <form onSubmit={disUygula} className="rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
               <h2 className="mb-1 text-base font-semibold">{cevir("Dış SSL portu")}</h2>
               <p className="mb-4 text-xs text-slate-500">{cevir("Panele tarayıcıdan bağlanma portu (nginx listen).")}</p>
@@ -225,6 +250,7 @@ export default function PortYonetimPage() {
                 {gonderiliyor === 'dis' ? cevir("Uygulanıyor…") : cevir("Dış portu değiştir")}
               </Button>
             </form>
+            )}
           </div>
 
           {/* Yasaklı portlar (bilgi) */}
@@ -262,7 +288,7 @@ export default function PortYonetimPage() {
                     {gecmis.map((g) => (
                       <tr key={g.id} className="bg-white dark:bg-dark-900">
                         <td className="px-3 py-2 font-mono text-xs text-slate-500">{g.created_at}</td>
-                        <td className="px-3 py-2 text-xs">{g.tip}</td>
+                        <td className="px-3 py-2 text-xs">{TIP_ETIKET[g.tip] ? cevir(TIP_ETIKET[g.tip]) : g.tip}</td>
                         <td className="px-3 py-2 font-mono">{g.eski_port} → {g.yeni_port}</td>
                         <td className="px-3 py-2">
                           {g.basarili ? (

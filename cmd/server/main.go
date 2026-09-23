@@ -307,8 +307,10 @@ func main() {
 	backupsH := &backups.Handlers{DB: d}
 	topluH := &toplu.Handlers{DB: d}
 	backups.StartScheduler(d)
-	gitH := &git.Handlers{DB: d}
-	githubH := &githubpkg.Handlers{DB: d, WebhookBase: "https://" + ipv4 + ":" + panelhost.PanelPort()}
+	// Webhook adresleri panelin GENEL portunu kullanır (kapı modunda müşteri kapısı).
+	webhookBase := "https://" + ipv4 + ":" + panelhost.PanelPort()
+	gitH := &git.Handlers{DB: d, WebhookBase: webhookBase}
+	githubH := &githubpkg.Handlers{DB: d, WebhookBase: webhookBase}
 	pmaH := &pma.Handlers{DB: d}
 	phpH := &php.Handlers{DB: d}
 	kaynakH := &kaynak.Handlers{DB: d}
