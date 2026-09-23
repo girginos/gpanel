@@ -45,18 +45,24 @@ type Repo struct {
 type Handlers struct {
 	DB *sql.DB
 	// WebhookBase: panelin GENEL adresi, örn. "https://203.0.113.10:23003" (kapı
-	// modunda müşteri kapısı — admin portu sızmaz). Boşsa Payload URL üretilmez.
-	WebhookBase string
+	// modunda müşteri kapısı — admin portu sızmaz). HER ÇAĞRIDA okunur: müşteri kapısı
+	// panelden değişince (yeniden başlatma yok) adres kapanmış portta kalmasın.
+	// nil ya da "" → Payload URL üretilmez.
+	WebhookBase func() string
 }
 
 // webhookURL: Payload URL. 🔴 Arayüz eskiden `http://<ip>:8443/...` kuruyordu: HTTPS
 // portuna düz HTTP (nginx 400 döner) ve sabit port (dış port değişince / rol
 // kapılarında ölü adres). Portu yalnız sunucu doğru bilir.
 func (h *Handlers) webhookURL(secret string) string {
-	if h.WebhookBase == "" || secret == "" {
+	if h.WebhookBase == nil || secret == "" {
 		return ""
 	}
-	return strings.TrimRight(h.WebhookBase, "/") + "/api/v1/git-webhook/" + secret
+	taban := strings.TrimRight(h.WebhookBase(), "/")
+	if taban == "" {
+		return ""
+	}
+	return taban + "/api/v1/git-webhook/" + secret
 }
 
 const selectAll = `SELECT id, domain_id, repo_url, branch, target_dir,

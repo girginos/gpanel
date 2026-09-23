@@ -27,9 +27,19 @@ var apiBase = "https://api.github.com"
 
 type Handlers struct {
 	DB *sql.DB
-	// WebhookBase: GitHub'a register edilecek public URL'in ön eki, örn. "https://203.0.113.10:8443"
-	// Boş bırakılırsa webhook register denenmez, sadece bilgilendirme döner.
-	WebhookBase string
+	// WebhookBase: GitHub'a register edilecek public URL'in ön eki, örn.
+	// "https://203.0.113.10:23003" — HER ÇAĞRIDA okunur (müşteri kapısı panelden değişince
+	// yeni webhook kapanmış porta kaydedilmesin). nil ya da "" → webhook register denenmez,
+	// sadece bilgilendirme döner.
+	WebhookBase func() string
+}
+
+// webhookTabani: GitHub'a kaydedilecek adresin ön eki ("" = yok).
+func (h *Handlers) webhookTabani() string {
+	if h.WebhookBase == nil {
+		return ""
+	}
+	return strings.TrimRight(h.WebhookBase(), "/")
 }
 
 type Connection struct {
@@ -384,8 +394,8 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 
 	// Otomatik webhook
 	resp := map[string]any{"ok": true, "repo": req.Repo, "branch": req.Branch, "auto_deploy": req.AutoDeploy}
-	if req.AutoDeploy && h.WebhookBase != "" {
-		hookURL := strings.TrimRight(h.WebhookBase, "/") + "/api/v1/git-webhook/" + secret
+	if taban := h.webhookTabani(); req.AutoDeploy && taban != "" {
+		hookURL := taban + "/api/v1/git-webhook/" + secret
 		// Önce eski webhook'u temizle
 		var oldID int64
 		_ = h.DB.QueryRowContext(r.Context(),

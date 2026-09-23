@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/hesaplar"
@@ -25,8 +27,11 @@ type loginReq struct {
 	Parola    string `json:"parola"`
 }
 
-// kapiCoz: isteğin panel kapısı. Testlerde değiştirilebilen dikiş.
-var kapiCoz = kapi.Istek
+// Dikişler (testler): isteğin panel kapısı, kapı giriş kanıtı.
+var (
+	kapiCoz         = kapi.Istek
+	kapiGirisKaydet = kapi.GirisiKaydet
+)
 
 // Login: FTP user/password ile, FTP hesabının bağlı olduğu domain için JWT döner
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +94,11 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "token: "+err.Error())
 		return
+	}
+	// Müşteri kapısından ilk dış giriş: arayüz eski kapıyı kapatmadan önce bu kapının
+	// gerçekten kullanıldığını gösterir. Hata girişi engellemez.
+	if err := kapiGirisKaydet(kapi.AyarYolu, kapi.Musteri, r, time.Now().Unix()); err != nil {
+		log.Printf("kapi: müşteri kapısı giriş kanıtı kaydedilemedi: %v", err)
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

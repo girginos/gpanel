@@ -5,11 +5,9 @@ package portyonetim
 
 import (
 	"bufio"
-	"net"
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // PortMesgul — sunucuda başka bir servis bu portu dinliyor mu?
@@ -48,19 +46,4 @@ func SistemdePortlar() map[int]bool {
 		}
 	}
 	return out
-}
-
-// PortAcikTest — belirli bir porta TCP connect edebilir miyiz? (curl'a
-// başvurmadan önce hızlı sağlık kontrolü).
-// 🔴 Eski sürüm `bash -c "... /dev/tcp/"+host+...` ile kabuk dizgesi birleştiriyordu:
-// host hiç doğrulanmadan kabuğa gidiyordu → `x; komut` biçiminde bir host değeri
-// root olarak keyfi komut çalıştırırdı (komut enjeksiyonu). Saf Go dial ile kabuk
-// tamamen kaldırıldı; davranış aynı (2sn TCP connect testi).
-func PortAcikTest(host string, port int) bool {
-	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 2*time.Second)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
 }

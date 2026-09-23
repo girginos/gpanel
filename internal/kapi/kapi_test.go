@@ -2,6 +2,7 @@ package kapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,7 +96,7 @@ func TestDinlemelerVeGenelPortlar(t *testing.T) {
 
 func TestUzlastirSablon(t *testing.T) {
 	a := ornekAyar()
-	yeni, err := Uzlastir(sablonConf, a, 0)
+	yeni, err := Uzlastir(sablonConf, a, 0, testSecenek)
 	if err != nil {
 		t.Fatalf("Uzlastir: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestUzlastirSablon(t *testing.T) {
 			t.Errorf("rol listen'ı default_server ALMAMALI (catchall çakışması): %s", p)
 		}
 	}
-	if !BaslikTamMi(yeni) {
+	if !BaslikTamMi(yeni, testGizli) {
 		t.Error("X-Real-IP çapasının ardında kapı başlığı olmalı")
 	}
 	if !strings.Contains(yeni, "listen 8443 ssl default_server;") {
@@ -122,7 +123,7 @@ func TestUzlastirSablon(t *testing.T) {
 		t.Error("kapı başlığı healthz'e eklenmemeli")
 	}
 	// İdempotent.
-	iki, err := Uzlastir(yeni, a, 0)
+	iki, err := Uzlastir(yeni, a, 0, testSecenek)
 	if err != nil || iki != yeni {
 		t.Errorf("Uzlastir idempotent olmalı (err=%v)", err)
 	}
@@ -131,7 +132,7 @@ func TestUzlastirSablon(t *testing.T) {
 func TestUzlastirErisimeDokunmaz(t *testing.T) {
 	// admin portu erisim'in loopback'e çektiği 9443: yeni listen EKLENMEMELİ.
 	a := &Ayar{Admin: 9443, Bayi: 22002, Musteri: 23003}
-	yeni, err := Uzlastir(canliConf, a, 0)
+	yeni, err := Uzlastir(canliConf, a, 0, testSecenek)
 	if err != nil {
 		t.Fatalf("Uzlastir: %v", err)
 	}
@@ -145,37 +146,37 @@ func TestUzlastirErisimeDokunmaz(t *testing.T) {
 		t.Error("bayi portu eklenmeli")
 	}
 	// Canlı dosyada 2 çapa (login + /api/) → ikisine de başlık.
-	if strings.Count(yeni, kapiSatiri) != 2 || !BaslikTamMi(yeni) {
-		t.Errorf("iki çapanın ikisine de başlık gerekli, sayım=%d", strings.Count(yeni, kapiSatiri))
+	if strings.Count(yeni, KapiSatiri(testGizli)) != 2 || !BaslikTamMi(yeni, testGizli) {
+		t.Errorf("iki çapanın ikisine de başlık gerekli, sayım=%d", strings.Count(yeni, KapiSatiri(testGizli)))
 	}
 }
 
 func TestUzlastirCapasizHata(t *testing.T) {
 	conf := "server {\n    listen 8443 ssl;\n    location / { root /x; }\n}"
-	if _, err := Uzlastir(conf, ornekAyar(), 0); err == nil {
+	if _, err := Uzlastir(conf, ornekAyar(), 0, testSecenek); err == nil {
 		t.Fatal("X-Real-IP çapası yokken hata dönmeli (başlıksız zorlama = sessiz kilitlenme)")
 	}
-	if _, err := Uzlastir("server { }", ornekAyar(), 0); err == nil {
+	if _, err := Uzlastir("server { }", ornekAyar(), 0, testSecenek); err == nil {
 		t.Fatal("listen'sız dosyada hata dönmeli")
 	}
 }
 
 func TestBaslikTamMiEksikCapa(t *testing.T) {
-	yeni, _ := Uzlastir(canliConf, ornekAyar(), 0)
+	yeni, _ := Uzlastir(canliConf, ornekAyar(), 0, testSecenek)
 	// İkinci çapanın başlığını sök → eksik.
-	i := strings.LastIndex(yeni, kapiSatiri)
-	bozuk := yeni[:i] + "proxy_set_header X-Baska 1;" + yeni[i+len(kapiSatiri):]
-	if BaslikTamMi(bozuk) {
+	i := strings.LastIndex(yeni, KapiSatiri(testGizli))
+	bozuk := yeni[:i] + "proxy_set_header X-Baska 1;" + yeni[i+len(KapiSatiri(testGizli)):]
+	if BaslikTamMi(bozuk, testGizli) {
 		t.Fatal("bir çapada başlık eksikken BaslikTamMi false dönmeli")
 	}
-	if BaslikTamMi("server { listen 1 ssl; }") {
+	if BaslikTamMi("server { listen 1 ssl; }", testGizli) {
 		t.Fatal("hiç çapa yokken true dönmemeli")
 	}
 }
 
 func TestGenelListenKaldir(t *testing.T) {
 	a := ornekAyar()
-	eklenmis, _ := Uzlastir(canliConf, a, 0)
+	eklenmis, _ := Uzlastir(canliConf, a, 0, testSecenek)
 	tut := map[int]bool{a.Admin: true, a.Bayi: true, a.Musteri: true}
 	sonuc, silinen := GenelListenKaldir(eklenmis, tut)
 	if len(silinen) != 1 || silinen[0] != 8443 {
@@ -193,7 +194,7 @@ func TestGenelListenKaldir(t *testing.T) {
 }
 
 func TestKapiBasliginiSil(t *testing.T) {
-	yeni, _ := Uzlastir(canliConf, ornekAyar(), 0)
+	yeni, _ := Uzlastir(canliConf, ornekAyar(), 0, testSecenek)
 	temiz := KapiBasliginiSil(yeni)
 	if strings.Contains(temiz, Baslik) {
 		t.Fatal("kapı başlığı temizlenmeli")
@@ -244,21 +245,44 @@ func TestGecerli(t *testing.T) {
 }
 
 func TestMapIcerigi(t *testing.T) {
-	kapali := MapIcerigi(nil, 0)
+	kapali := MapIcerigi(nil, 0, []int{9443})
 	if !strings.Contains(kapali, `default "";`) || strings.Contains(kapali, Admin) {
 		t.Errorf("mod kapalı: $gp_kapi TANIMLI ama boş olmalı:\n%s", kapali)
 	}
 	a := ornekAyar()
 	a.EskiPortlar, a.EskiBitis = []int{8443}, 1000
-	acik := MapIcerigi(a, 500)
-	for _, s := range []string{"default bilinmeyen;", "21001 admin;", "22002 bayi;", "23003 musteri;", "8443 eski;"} {
+	acik := MapIcerigi(a, 500, []int{9443})
+	for _, s := range []string{"default bilinmeyen;", "21001 admin;", "22002 bayi;", "23003 musteri;", "8443 eski;", "9443 admin;"} {
 		if !strings.Contains(acik, s) {
 			t.Errorf("harita eksik: %q\n%s", s, acik)
 		}
 	}
 	a.AdminDogrulandi = 1
-	if strings.Contains(MapIcerigi(a, 2000), "8443") {
+	if strings.Contains(MapIcerigi(a, 2000, nil), "8443") {
 		t.Error("eski kapandıktan sonra haritada olmamalı")
+	}
+	// Haritadaki bir port yerel listede de olsa İKİ kez yazılmaz (nginx -t "duplicate").
+	if m := MapIcerigi(ornekAyar(), 0, []int{21001}); strings.Count(m, "21001 ") != 1 {
+		t.Errorf("yinelenen map girdisi:\n%s", m)
+	}
+}
+
+// Geçişten önce erisim'in loopback'e çektiği panel portu (181: 127.0.0.1:9443) tünel
+// yoludur: haritada yönetici kapısı olur, yoksa geçiş onu sessizce öldürürdü.
+func TestYerelPortlar(t *testing.T) {
+	a := ornekAyar()
+	if got := YerelPortlar(canliConf, a, 0); len(got) != 1 || got[0] != 9443 {
+		t.Fatalf("yalnız-loopback 9443 yerel olmalı, got %v", got)
+	}
+	// Haritadaki port (masaüstü modunda loopback'e çekilmiş admin kapısı) yerel sayılmaz.
+	a.Admin = 9443
+	if got := YerelPortlar(canliConf, a, 0); len(got) != 0 {
+		t.Fatalf("haritadaki port yerel listeye girmemeli, got %v", got)
+	}
+	// Aynı portun genel satırı da varsa yerel değildir.
+	karma := strings.Replace(canliConf, "    listen 8443 ssl;", "    listen 8443 ssl;\n    listen 9443 ssl;", 1)
+	if got := YerelPortlar(karma, ornekAyar(), 0); len(got) != 0 {
+		t.Fatalf("genel satırı olan port yerel değil, got %v", got)
 	}
 }
 
@@ -301,10 +325,7 @@ func TestTokenUyumlu(t *testing.T) {
 }
 
 func TestIstek(t *testing.T) {
-	eskiGuven, eskiSinyal := nginxtenMi, ZincirKopuk
-	t.Cleanup(func() { nginxtenMi, ZincirKopuk = eskiGuven, eskiSinyal; ZorlamaAyarla(false) })
-	guven := true
-	nginxtenMi = func(*http.Request) bool { return guven }
+	guven, _ := testOrtami(t)
 	sinyal := 0
 	ZincirKopuk = func() { sinyal++ }
 
@@ -317,18 +338,25 @@ func TestIstek(t *testing.T) {
 	}
 
 	ZorlamaAyarla(false)
-	if k := Istek(istek(Admin)); k != "" {
+	if k := Istek(istek(kapiBasligi(Admin, 21001))); k != "" {
 		t.Errorf("zorlama kapalı → \"\" (başlık yok sayılır), got %q", k)
 	}
 	ZorlamaAyarla(true)
-	if k := Istek(istek(Musteri)); k != Musteri || sinyal != 0 {
+	if k := Istek(istek(kapiBasligi(Musteri, 23003))); k != Musteri || sinyal != 0 {
 		t.Errorf("geçerli başlık → %q (sinyal yok), got %q sinyal=%d", Musteri, k, sinyal)
 	}
-	if k := Istek(istek("root")); k != Bilinmeyen {
+	if k := Istek(istek(kapiBasligi("root", 21001))); k != Bilinmeyen {
 		t.Errorf("tanımsız değer → bilinmeyen, got %q", k)
 	}
-	if k := Istek(istek(Admin, Musteri)); k != Bilinmeyen {
+	if k := Istek(istek(kapiBasligi(Admin, 21001), kapiBasligi(Musteri, 23003))); k != Bilinmeyen {
 		t.Errorf("çoklu başlık (sahtecilik) → bilinmeyen, got %q", k)
+	}
+	// Yapılandırma kaymasında kapı satırı olmayan location istemcinin kendi başlığını
+	// geçirir: gizlisiz değer taklittir → REDDEDİLİR (eski biçim "admin" dahil).
+	for _, sahte := range []string{Admin, "admin 21001 yanlis-gizli"} {
+		if k := Istek(istek(sahte)); k != Bilinmeyen {
+			t.Errorf("gizlisiz/yanlış gizlili başlık %q → bilinmeyen, got %q", sahte, k)
+		}
 	}
 	// Kanıtlı ama başlıksız = yapılandırma kayması (istemci üretemez): KİLİTLEME, eski
 	// davranışa düş ve zinciri yeniden doğrulat.
@@ -336,12 +364,49 @@ func TestIstek(t *testing.T) {
 	if k := Istek(istek()); k != "" || sinyal != 1 {
 		t.Errorf("kanıtlı + başlık yok → \"\" ve onarım sinyali, got %q sinyal=%d", k, sinyal)
 	}
-	guven = false
-	if k := Istek(istek(Admin)); k != Bilinmeyen {
+	*guven = false
+	if k := Istek(istek(kapiBasligi(Admin, 21001))); k != Bilinmeyen {
 		t.Errorf("nginx kanıtı yoksa (doğrudan :8080) → bilinmeyen, got %q", k)
 	}
 	if k := Istek(istek()); k != Bilinmeyen {
 		t.Errorf("kanıtsız + başlık yok (doğrudan :8080) → bilinmeyen (fail-open YOK), got %q", k)
+	}
+}
+
+// Masaüstü (erisim) modunda yeni admin kapısı yalnız loopback'te dinler; IPv6 yorumlu.
+func TestUzlastirAdminLoopback(t *testing.T) {
+	s := testSecenek
+	s.AdminLoopback = true
+	yeni, err := Uzlastir(sablonConf, ornekAyar(), 0, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yeni, "listen 127.0.0.1:21001 ssl; # gp-kapi") ||
+		!strings.Contains(yeni, "# [erisim:masaustu] listen [::]:21001 ssl; # gp-kapi") {
+		t.Fatalf("admin kapısı loopback + yorumlu IPv6 olmalı:\n%s", yeni)
+	}
+	if strings.Contains(yeni, "listen 21001 ssl;") || strings.Contains(yeni, "    listen [::]:21001 ssl; # gp-kapi\n") {
+		t.Fatalf("admin kapısı GENEL dinlenmemeli (operatörün kapatması geri alınır):\n%s", yeni)
+	}
+	if !strings.Contains(yeni, "listen 22002 ssl; # gp-kapi") || !strings.Contains(yeni, "listen 23003 ssl; # gp-kapi") {
+		t.Fatal("bayi/müşteri kapıları genel kalmalı")
+	}
+	if g := GenelPortlar(yeni); strings.Contains(fmt.Sprint(g), "21001") {
+		t.Fatalf("admin portu genel portlarda görünmemeli (firewall'da açılmaz): %v", g)
+	}
+}
+
+func TestUzlastirGizsizHata(t *testing.T) {
+	if _, err := Uzlastir(sablonConf, ornekAyar(), 0, Secenek{}); err == nil {
+		t.Fatal("proxy gizlisi yokken kapı başlığı yazılamaz → hata")
+	}
+	yeni, _ := Uzlastir(sablonConf, ornekAyar(), 0, testSecenek)
+	if BaslikTamMi(yeni, "baska-gizli") || BaslikTamMi(yeni, "") {
+		t.Fatal("başlık GÜNCEL gizliyle eşleşmeli (gizli değişince Heal yeniden yazar)")
+	}
+	iki, _ := Uzlastir(yeni, ornekAyar(), 0, Secenek{Gizli: "yeni-gizli"})
+	if !BaslikTamMi(iki, "yeni-gizli") || strings.Contains(iki, testGizli) {
+		t.Fatal("gizli değişince eski başlık satırları kaldırılıp yenisi yazılmalı")
 	}
 }
 

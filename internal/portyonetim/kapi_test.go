@@ -2,10 +2,12 @@ package portyonetim
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,17 +17,22 @@ import (
 
 type kapiPYSahte struct {
 	mesgul, fw map[int]bool
+	selinux    map[int]string // port → başka servis türü
+	conf       string         // _panel.conf
 	uygula     int
 	uygHata    error
 	denetim    []string
+	disBasladi bool
 }
 
 func kapiPYKur(t *testing.T, a *kapi.Ayar) *kapiPYSahte {
 	t.Helper()
-	s := &kapiPYSahte{mesgul: map[int]bool{}, fw: map[int]bool{}}
+	s := &kapiPYSahte{mesgul: map[int]bool{}, fw: map[int]bool{}, selinux: map[int]string{}}
 	eskiYol, eskiSis, eskiFw, eskiUyg := kapiAyarYolu, kapiSistemPortu, kapiFwKapaliPort, KapiUygula
+	eskiSE, eskiFtp, eskiConf, eskiDis := kapiSELinux, kapiFtpPasif, kapiPanelConf, disBaslat
 	t.Cleanup(func() {
 		kapiAyarYolu, kapiSistemPortu, kapiFwKapaliPort, KapiUygula = eskiYol, eskiSis, eskiFw, eskiUyg
+		kapiSELinux, kapiFtpPasif, kapiPanelConf, disBaslat = eskiSE, eskiFtp, eskiConf, eskiDis
 	})
 	kapiAyarYolu = filepath.Join(t.TempDir(), "kapi.json")
 	kapiSistemPortu = func() map[int]bool {
@@ -36,6 +43,12 @@ func kapiPYKur(t *testing.T, a *kapi.Ayar) *kapiPYSahte {
 		return c
 	}
 	kapiFwKapaliPort = func() map[int]bool { return s.fw }
+	kapiSELinux = func() func(int) string { return func(p int) string { return s.selinux[p] } }
+	kapiFtpPasif = func() (int, int) { return 30000, 30100 }
+	kapiPanelConf = func() string { return s.conf }
+	// 🔴 Gerçek disYurut canlı _panel.conf'u yeniden yazar, nginx reload + firewall yapar:
+	// koruma gerilese bile testte ASLA koşmamalı.
+	disBaslat = func(*sql.DB, *Is, int, int, *int64) { s.disBasladi = true; TipSerbest("dis") }
 	KapiUygula = func(context.Context) error { s.uygula++; return s.uygHata }
 	if a != nil {
 		if err := kapi.Yaz(kapiAyarYolu, a); err != nil {
@@ -57,6 +70,7 @@ func TestKapiRolPortuAtaDenetim(t *testing.T) {
 	s := kapiPYKur(t, rolAyari())
 	s.mesgul[24004] = true
 	s.fw[25005] = true
+	s.selinux[20048] = "mountd_port_t"
 	cases := []struct {
 		rol  string
 		port int
@@ -66,6 +80,8 @@ func TestKapiRolPortuAtaDenetim(t *testing.T) {
 		{kapi.Musteri, 80, "kullanılamaz"},          // <1024
 		{kapi.Musteri, 24004, "başka bir servis"},   // meşgul
 		{kapi.Musteri, 25005, "güvenlik duvarında"}, // firewall'da kapalı
+		{kapi.Musteri, 30050, "FTP pasif"},          // pure-ftpd pasif aralığı (ss'te görünmez)
+		{kapi.Musteri, 20048, "SELinux"},            // başka servise ayrılmış SELinux türü
 		{kapi.Musteri, 21001, "zaten admin kapısı"}, // başka rolün portu
 		{"root", 26006, "bilinmeyen rol"},
 	}
@@ -96,19 +112,40 @@ func TestKapiRolPortuAtaRastgele(t *testing.T) {
 	}
 }
 
-// Açık eski port (nginx onu dinliyor → ss "meşgul" der) müşteri kapısı yapılabilmeli.
+// Açık eski port (nginx onu dinliyor → ss "meşgul" der) müşteri kapısı yapılabilmeli —
+// ama admin yeni admin kapısını doğrulamadan DEĞİL (devralma geçiş kapısını kapatır).
 func TestKapiRolPortuAtaEskiPortuDevralir(t *testing.T) {
 	a := rolAyari()
 	a.EskiPortlar, a.EskiBitis = []int{8443}, 9_999_999_999
 	s := kapiPYKur(t, a)
 	s.mesgul[8443] = true
+	if _, _, err := KapiRolPortuAta(kapi.Musteri, 8443); !errors.Is(err, kapi.ErrEskiDevralma) {
+		t.Fatalf("admin doğrulamadan eski port devralınamamalı, got %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.handler().KapiRol(rr, httptest.NewRequest("POST", "/", strings.NewReader(`{"rol":"musteri","yeni_port":8443}`)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("devralma reddi → 409 (arayüz açıklamayı gösterir), got %d %s", rr.Code, rr.Body)
+	}
+	_ = kapi.Guncelle(kapiAyarYolu, func(x *kapi.Ayar) error { x.AdminDogrulandi = 1; return nil })
 	if _, _, err := KapiRolPortuAta(kapi.Musteri, 8443); err != nil {
 		t.Fatalf("panelin kendi eski portu meşgul sayılmamalı: %v", err)
 	}
 }
 
+// Yalnız-loopback tünel portu (erisim masaüstü; nginx dinliyor → ss "meşgul") panelin
+// kendi portudur: yönetici kapısı yapılabilir (tünel yolunu geri kazanmanın yolu).
+func TestKapiRolPortuAtaYerelPort(t *testing.T) {
+	s := kapiPYKur(t, rolAyari())
+	s.conf = "server {\n    listen 127.0.0.1:9443 ssl;\n    listen 21001 ssl;\n}"
+	s.mesgul[9443] = true
+	if _, _, err := KapiRolPortuAta(kapi.Admin, 9443); err != nil {
+		t.Fatalf("panelin loopback tünel portu meşgul sayılmamalı: %v", err)
+	}
+}
+
 func TestDisPortDegistirKapiModundaReddedilir(t *testing.T) {
-	kapiPYKur(t, rolAyari())
+	s := kapiPYKur(t, rolAyari())
 	if _, err := DisPortDegistir(context.Background(), nil, 7443, nil); !errors.Is(err, errKapiModu) {
 		t.Fatalf("kapı modunda tek dış port değişimi reddedilmeli (rol listen'ını taşırdı), got %v", err)
 	}
@@ -116,6 +153,9 @@ func TestDisPortDegistirKapiModundaReddedilir(t *testing.T) {
 	(&Handler{}).DisDegistir(rr, httptest.NewRequest("POST", "/", strings.NewReader(`{"yeni_port":7443}`)))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("kapı modu → 409, got %d", rr.Code)
+	}
+	if s.disBasladi {
+		t.Fatal("kapı modunda dış port yürütmesi BAŞLAMAMALI")
 	}
 }
 
@@ -212,5 +252,35 @@ func TestKapiDurumGetir(t *testing.T) {
 	}
 	if kapiModu() {
 		t.Fatal("kapi.json yokken kapı modu değil")
+	}
+	a := rolAyari()
+	a.IlkGiris = map[string]int64{kapi.Musteri: 77}
+	if err := kapi.Yaz(kapiAyarYolu, a); err != nil {
+		t.Fatal(err)
+	}
+	d := KapiDurumGetir()
+	if d == nil || d.IlkGiris[kapi.Musteri] != 77 || d.IlkGiris[kapi.Bayi] != 0 {
+		t.Fatalf("rol başına ilk giriş durumu dönmeli: %+v", d)
+	}
+	if b, _ := json.Marshal(d); !strings.Contains(string(b), `"ilk_giris":{"bayi":0,"musteri":77}`) {
+		t.Fatalf("arayüz her iki rolün anahtarını da görmeli: %s", b)
+	}
+}
+
+func TestFtpPasifAraligi(t *testing.T) {
+	eski := ftpConfYolu
+	t.Cleanup(func() { ftpConfYolu = eski })
+	ftpConfYolu = filepath.Join(t.TempDir(), "yok.conf")
+	if alt, ust := ftpPasifAraligi(); alt != 30000 || ust != 30100 {
+		t.Fatalf("FTP henüz kurulmamışsa ftp-setup varsayılanı: %d-%d", alt, ust)
+	}
+	ftpConfYolu = filepath.Join(t.TempDir(), "pure-ftpd.conf")
+	// ftp-setup'ın set_directive biçimi; yorumlu satır dikkate alınmaz.
+	icerik := "# PassivePortRange 1 2\nPassivePortRange                  40000 40100\n"
+	if err := os.WriteFile(ftpConfYolu, []byte(icerik), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if alt, ust := ftpPasifAraligi(); alt != 40000 || ust != 40100 {
+		t.Fatalf("yapılandırılmış aralık okunmalı: %d-%d", alt, ust)
 	}
 }

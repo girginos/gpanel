@@ -66,8 +66,6 @@ func TestRolPortuDegistirBayiMusteriHemenTasinir(t *testing.T) {
 // Admin portu değişince önceki admin portu eski kapı olur ve admin yeni porttan
 // girene dek KAPANMAZ (dış firewall yeni portu kesiyorsa kilitlenme olmasın).
 func TestRolPortuDegistirAdminEskiKapiOlur(t *testing.T) {
-	adminKaydedildi.Store(true)
-	t.Cleanup(func() { adminKaydedildi.Store(false) })
 	yol := filepath.Join(t.TempDir(), "kapi.json")
 	a := ornekAyar()
 	a.AdminDogrulandi = 50
@@ -80,37 +78,26 @@ func TestRolPortuDegistirAdminEskiKapiOlur(t *testing.T) {
 	if a.Admin != 25005 || len(a.EskiPortlar) != 1 || a.EskiPortlar[0] != 21001 {
 		t.Fatalf("önceki admin portu eski kapı olmalı: %+v", a)
 	}
-	if a.AdminDogrulandi != 0 || a.AdminPortDegisti != 1000 {
+	if a.AdminDogrulandi != 0 {
 		t.Fatalf("admin kanıtı sıfırlanmalı: %+v", a)
 	}
 	if !a.EskiAcik(999_999) {
 		t.Fatal("admin yeni porttan girmeden eski kapı süre dolsa da AÇIK kalmalı")
 	}
-	if adminKaydedildi.Load() {
-		t.Fatal("bellek bayrağı düşmeli; yoksa yeni porttan giriş hiç kaydedilmez")
-	}
-
-	// Bekleme içindeki (reload öncesi eski porttan gelmiş olabilecek) giriş kanıt değildir.
-	if err := AdminGirisiniKaydet(yol, 1000+adminKanitBekleme-1); err != nil {
-		t.Fatal(err)
-	}
-	if a, _ = Oku(yol); a.AdminDogrulandi != 0 {
-		t.Fatal("bekleme içindeki giriş kanıt SAYILMAMALI")
-	}
-	if adminKaydedildi.Load() {
-		t.Fatal("kaydedilmeyen giriş bayrağı kaldırmamalı")
-	}
-	if err := AdminGirisiniKaydet(yol, 1000+adminKanitBekleme); err != nil {
-		t.Fatal(err)
-	}
-	if a, _ = Oku(yol); a.AdminDogrulandi != 1000+adminKanitBekleme {
-		t.Fatalf("bekleme sonrası giriş kaydedilmeli: %+v", a)
-	}
 }
 
-// Açık eski port rol portu yapılabilir (müşteri bilinen 8443'te kalsın).
+// Açık eski port rol portu yapılabilir (müşteri bilinen 8443'te kalsın) — ama YALNIZ
+// admin yeni admin kapısını doğruladıktan sonra: devralmak o adresteki geçiş kapısını
+// kapatır; admin hâlâ oradan çalışıyor ve yeni portu dışarıdan kapalıysa kilitlenirdi.
 func TestRolPortuDegistirEskiPortuDevralir(t *testing.T) {
-	yol := eskiliAyar(t) // eski: [8443]
+	yol := eskiliAyar(t) // eski: [8443], admin doğrulamadı
+	if _, err := RolPortuDegistir(yol, Musteri, 8443, 500); !errors.Is(err, ErrEskiDevralma) {
+		t.Fatalf("admin doğrulamadan eski port devralınamamalı, got %v", err)
+	}
+	if a, _ := Oku(yol); a.Musteri != 23003 || len(a.EskiPortlar) != 1 {
+		t.Fatalf("reddedilen değişiklik ayarı DEĞİŞTİRMEMELİ: %+v", a)
+	}
+	_ = Guncelle(yol, func(a *Ayar) error { a.AdminDogrulandi = 400; return nil })
 	if _, err := RolPortuDegistir(yol, Musteri, 8443, 500); err != nil {
 		t.Fatal(err)
 	}

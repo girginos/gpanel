@@ -308,7 +308,9 @@ func main() {
 	topluH := &toplu.Handlers{DB: d}
 	backups.StartScheduler(d)
 	// Webhook adresleri panelin GENEL portunu kullanır (kapı modunda müşteri kapısı).
-	webhookBase := "https://" + ipv4 + ":" + panelhost.PanelPort()
+	// Her çağrıda okunur: müşteri kapısı panelden değişince (yeniden başlatma yok) Payload
+	// URL ve yeni GitHub webhook'ları kapanmış porta işaret etmesin.
+	webhookBase := func() string { return "https://" + ipv4 + ":" + panelhost.PanelPort() }
 	gitH := &git.Handlers{DB: d, WebhookBase: webhookBase}
 	githubH := &githubpkg.Handlers{DB: d, WebhookBase: webhookBase}
 	pmaH := &pma.Handlers{DB: d}

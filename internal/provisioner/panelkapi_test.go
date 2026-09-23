@@ -54,31 +54,51 @@ const kapiTestCatchall = `server {
     return 444;
 }`
 
+// kapiTestGizli: testlerin proxy gizlisi (üretimde 64 hex karakter).
+// Çalışma anında üretilir: depoda gizli-benzeri sabit dize bulunmasın (gitleaks).
+var kapiTestGizli = strings.Repeat("0123456789abcdef", 4)
+
 type kapiSahte struct {
 	dir                 string
 	nginxT              func(n int) error // n: kaçıncı `nginx -t` çağrısı (1'den)
 	tSayac              int
+	reloadHata          func(n int) error // n: kaçıncı `systemctl reload nginx` çağrısı
+	rSayac              int
 	cagrilar            []string
 	fwAcilan, fwKapanan []int
+	ozelIzin            []string // kapiOzelIzin'e verilen yollar
 	dinliyor            bool
+	masaustu            bool
 	gizli               string
 }
 
 func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	t.Helper()
-	s := &kapiSahte{dir: t.TempDir(), dinliyor: true, gizli: "gizli"}
+	s := &kapiSahte{dir: t.TempDir(), dinliyor: true, gizli: kapiTestGizli}
 	eskiVhost, eskiCatch, eskiMap, eskiAyar := kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu
 	eskiAcme, eskiYay := kapiAcmeYolu, KapiGenelPortUzlastir
 	eskiKomut, eskiAc, eskiKapat := kapiNginxKomut, kapiFwAc, kapiFwKapat
 	eskiDinl, eskiGizli, eskiIzin, eskiAktif := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif
+	eskiMasa, eskiOzel := kapiMasaustu, kapiOzelIzin
+	eskiSEMod, eskiSEListe, eskiSEEtiket, eskiEtiketli := kapiSELinuxModu, kapiSELinuxListe, kapiSELinuxEtiket, kapiEtiketli
+	eskiZDosya := kapiZorlamaDosyasi
 	t.Cleanup(func() {
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
 		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
 		kapiNginxKomut, kapiFwAc, kapiFwKapat = eskiKomut, eskiAc, eskiKapat
 		kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif = eskiDinl, eskiGizli, eskiIzin, eskiAktif
+		kapiMasaustu, kapiOzelIzin = eskiMasa, eskiOzel
+		kapiSELinuxModu, kapiSELinuxListe, kapiSELinuxEtiket, kapiEtiketli = eskiSEMod, eskiSEListe, eskiSEEtiket, eskiEtiketli
+		kapiZorlamaDosyasi = eskiZDosya
 		kapi.ZorlamaAyarla(false)
 	})
 	kapiNginxAktif = func() bool { return true }
+	// SELinux kapalı varsayılır; semanage asla gerçekten çalışmaz.
+	kapiSELinuxModu = func() string { return "" }
+	kapiSELinuxListe = func() (string, error) { t.Error("semanage listesi beklenmiyordu"); return "", nil }
+	kapiSELinuxEtiket = func(int) error { t.Error("semanage etiketi beklenmiyordu"); return nil }
+	kapiEtiketli = map[int]bool{}
+	kapiZorlamaDosyasi = filepath.Join(s.dir, "run", "kapi-zorlama")
 	// 🔴 HER yol geçici dizine: kapiNginxUygula dosya YAZAR; gerçek /etc yolunda kalan
 	// tek bir dikiş testi canlı nginx dosyasını değiştirirdi.
 	kapiVhostYolu = filepath.Join(s.dir, "_panel.conf")
@@ -90,11 +110,19 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	kapiNginxKomut = func(ad string, arg ...string) ([]byte, error) {
 		c := ad + " " + strings.Join(arg, " ")
 		s.cagrilar = append(s.cagrilar, c)
-		if c == "nginx -t" {
+		switch c {
+		case "nginx -t":
 			s.tSayac++
 			if s.nginxT != nil {
 				if err := s.nginxT(s.tSayac); err != nil {
 					return []byte("nginx: [emerg] test"), err
+				}
+			}
+		case "systemctl reload nginx":
+			s.rSayac++
+			if s.reloadHata != nil {
+				if err := s.reloadHata(s.rSayac); err != nil {
+					return []byte("Job for nginx.service failed"), err
 				}
 			}
 		}
@@ -104,7 +132,9 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	kapiFwKapat = func(p int) error { s.fwKapanan = append(s.fwKapanan, p); return nil }
 	kapiPortDinliyor = func(int) bool { return s.dinliyor }
 	kapiProxyGizli = func() string { return s.gizli }
+	kapiMasaustu = func() bool { return s.masaustu }
 	kapiVhostIzin = func() {}
+	kapiOzelIzin = func(yol string) { s.ozelIzin = append(s.ozelIzin, yol) }
 	if err := os.WriteFile(kapiVhostYolu, []byte(conf), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +187,55 @@ func TestKapiHealTazeKurulum(t *testing.T) {
 	if !iceriyor(s.fwKapanan, 8443) {
 		t.Error("kaldırılan 8443 firewall'da kapatılmalı")
 	}
-	if !kapi.BaslikTamMi(conf) {
+	if !kapi.BaslikTamMi(conf, kapiTestGizli) {
 		t.Error("kapı başlığı eksik")
 	}
 	if m := oku(t, kapiMapYolu); !strings.Contains(m, "21001 admin;") || !strings.Contains(m, "default bilinmeyen;") {
 		t.Errorf("map eksik:\n%s", m)
+	}
+}
+
+// Kapı haritası rol etiketlerini taşır: yeni dosya 0640 doğar, var olan dosyanın izni
+// de (WriteFile değiştirmez) açıkça daraltılır.
+func TestKapiHealHaritaOzelIzin(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiUzlastir(1000)
+	if fi, err := os.Stat(kapiMapYolu); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Fatalf("yeni harita 0640 doğmalı: %v %v", fi.Mode().Perm(), err)
+	}
+	if len(s.ozelIzin) != 1 || s.ozelIzin[0] != kapiMapYolu {
+		t.Fatalf("harita yazılınca izin daraltılmalı: %v", s.ozelIzin)
+	}
+	// Eski sürümün 0644 yazdığı harita: içerik değişince izni de daraltılır.
+	s2 := kapiTestKur(t, kapiTestSablon, rolAyar())
+	if err := os.WriteFile(kapiMapYolu, []byte("# eski\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kapiUzlastir(1000)
+	if len(s2.ozelIzin) != 1 || s2.ozelIzin[0] != kapiMapYolu {
+		t.Fatalf("var olan harita da daraltılmalı: %v", s2.ozelIzin)
+	}
+}
+
+// Masaüstü modunda (yönetici yüzeyi internete kapalı) yeni admin kapısı da yalnız
+// 127.0.0.1'de dinler ve firewall'da AÇILMAZ — admin portu değişince operatörün bilinçli
+// kapatması sessizce geri alınmasın. Bayi/müşteri etkilenmez.
+func TestKapiHealMasaustuAdminLoopback(t *testing.T) {
+	s := kapiTestKur(t, kapiTestCanli, rolAyar())
+	s.masaustu = true
+	kapiUzlastir(1000)
+	conf := oku(t, kapiVhostYolu)
+	if !strings.Contains(conf, "listen 127.0.0.1:21001 ssl; # gp-kapi") || strings.Contains(conf, "listen 21001 ssl;") {
+		t.Fatalf("admin kapısı yalnız loopback'te dinlemeli:\n%s", conf)
+	}
+	if strings.Contains(conf, "\n    listen [::]:21001") {
+		t.Fatalf("admin IPv6 satırı etkin OLMAMALI:\n%s", conf)
+	}
+	if iceriyor(s.fwAcilan, 21001) {
+		t.Fatal("masaüstü modunda admin portu firewall'da açılmamalı")
+	}
+	if !strings.Contains(conf, "listen 22002 ssl;") || !iceriyor(s.fwAcilan, 23003) {
+		t.Fatal("bayi/müşteri kapıları genel kalmalı")
 	}
 }
 
@@ -184,6 +258,10 @@ func TestKapiHealGecisEskiKorunur(t *testing.T) {
 	}
 	if m := oku(t, kapiMapYolu); !strings.Contains(m, "8443 eski;") {
 		t.Errorf("eski port haritada olmalı:\n%s", m)
+	}
+	// Yalnız-loopback 9443 (SSH tüneli yolu) yönetici kapısı olarak haritada kalmalı.
+	if m := oku(t, kapiMapYolu); !strings.Contains(m, "9443 admin;") {
+		t.Errorf("tünel portu haritada yönetici kapısı olmalı:\n%s", m)
 	}
 	if strings.Count(conf, kapi.Baslik) != 2 {
 		t.Error("iki çapanın ikisine de başlık gerekli")
@@ -226,9 +304,37 @@ func TestKapiHealSureDolduAdminDogruladi(t *testing.T) {
 	}
 }
 
+// reload 0 döndü ama nginx yeni portları bağlamadı (SELinux etiketi, port çakışması):
+// dosyada kalan yapılandırmayla sonraki nginx restart'ı HİÇ açılmazdı → geri alınır,
+// hiçbir port kaldırılmaz, firewall'a dokunulmaz.
+func TestKapiHealPortlarBaglanmazsaGeriAlinir(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	yanDosyalariKur(t)
+	s.dinliyor = false
+	if kapiUzlastir(1000) {
+		t.Fatal("portlar bağlanmadıysa zorlama açılmamalı")
+	}
+	if oku(t, kapiVhostYolu) != kapiTestSablon || oku(t, kapiCatchallYolu) != kapiTestCatchall {
+		t.Fatal("yüklenemeyen yapılandırma ÖZGÜN haline geri alınmalı")
+	}
+	if _, err := os.Stat(kapiMapYolu); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("yeni map dosyası geri almada silinmeli")
+	}
+	if s.rSayac != 2 {
+		t.Fatalf("uygula + geri alma için 2 reload beklenir, got %d", s.rSayac)
+	}
+	if len(s.fwAcilan) != 0 || len(s.fwKapanan) != 0 {
+		t.Fatalf("firewall'a dokunulmamalı: açılan=%v kapanan=%v", s.fwAcilan, s.fwKapanan)
+	}
+}
+
+// Kaldırma aşaması admin kapısının GERÇEKTEN dinlediği ölçülmeden koşmaz (son çalışan
+// portu kapatmak herkesi kilitlerdi). Burada ekleme doğrulandı ama kaldırma anında admin
+// kapısı düşmüş: hiçbir port kaldırılmaz.
 func TestKapiHealAdminDinlemiyorKaldirmaYok(t *testing.T) {
 	s := kapiTestKur(t, kapiTestSablon, rolAyar())
-	s.dinliyor = false
+	n := 0
+	kapiPortDinliyor = func(int) bool { n++; return n <= 3 } // 3 rol portu doğrulanır, sonra düşer
 	kapiUzlastir(1000)
 	if !strings.Contains(oku(t, kapiVhostYolu), "listen 8443 ssl default_server;") {
 		t.Fatal("admin kapısı dinlemiyorken HİÇBİR port kaldırılmamalı (son çalışan port)")
@@ -236,10 +342,135 @@ func TestKapiHealAdminDinlemiyorKaldirmaYok(t *testing.T) {
 	if len(s.fwKapanan) != 0 {
 		t.Fatalf("firewall'da port kapatılmamalı: %v", s.fwKapanan)
 	}
+	if n != 4 {
+		t.Fatalf("kaldırmadan önce admin kapısı yeniden ölçülmeli (4 ölçüm), got %d", n)
+	}
+}
+
+// SELinux Enforcing: etiketsiz kapı portları listen yazılmadan ÖNCE http_port_t yapılır;
+// başarılı etiket sonrası sonraki uzlaştırmalar semanage'i yeniden koşturmaz.
+func TestKapiHealSELinuxEtiketler(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiSELinuxModu = func() string { return "enforcing" }
+	liste := 0
+	kapiSELinuxListe = func() (string, error) {
+		liste++
+		return "http_port_t tcp 80, 443, 8443\nunreserved_port_t tcp 1024-32767\n", nil
+	}
+	var etiket []int
+	kapiSELinuxEtiket = func(p int) error {
+		if _, err := os.Stat(kapiMapYolu); err == nil {
+			t.Error("etiket nginx dosyaları yazılmadan ÖNCE atılmalı")
+		}
+		etiket = append(etiket, p)
+		return nil
+	}
+	if !kapiUzlastir(1000) {
+		t.Fatal("etiketlenen portlarla uzlaştırma açılabilir dönmeli")
+	}
+	if fmt.Sprint(etiket) != "[21001 22002 23003]" {
+		t.Fatalf("üç rol portu etiketlenmeli, got %v", etiket)
+	}
+	kapiUzlastir(1000)
+	if liste != 1 || len(etiket) != 3 {
+		t.Fatalf("doğrulanan etiketler önbellekte: liste=%d etiket=%v", liste, etiket)
+	}
+}
+
+// Enforcing + etiketlenemeyen port (başka servise ayrılmış tür ya da semanage hatası):
+// nginx'e HİÇ yazılmaz — restart'ta açılmayan nginx tüm siteleri düşürürdü.
+func TestKapiHealSELinuxEtiketlenemezseYazilmaz(t *testing.T) {
+	for ad, ayar := range map[string]struct {
+		liste string
+		hata  error
+	}{
+		"başka servisin portu": {"mountd_port_t tcp 21001\nunreserved_port_t tcp 1024-32767\n", nil},
+		"semanage hatası":      {"unreserved_port_t tcp 1024-32767\n", errors.New("ValueError")},
+	} {
+		t.Run(ad, func(t *testing.T) {
+			s := kapiTestKur(t, kapiTestSablon, rolAyar())
+			kapiSELinuxModu = func() string { return "enforcing" }
+			kapiSELinuxListe = func() (string, error) { return ayar.liste, nil }
+			kapiSELinuxEtiket = func(int) error { return ayar.hata }
+			if kapiUzlastir(1000) {
+				t.Fatal("etiketlenemeyen portla zorlama açılmamalı")
+			}
+			if len(s.cagrilar) != 0 || oku(t, kapiVhostYolu) != kapiTestSablon {
+				t.Fatalf("nginx'e dokunulmamalı: %v", s.cagrilar)
+			}
+		})
+	}
+	// Permissive'de bind serbesttir: etiket hatası uygulamayı engellemez.
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiSELinuxModu = func() string { return "permissive" }
+	kapiSELinuxListe = func() (string, error) { return "", errors.New("semanage yok") }
+	if !kapiUzlastir(1000) || !strings.Contains(oku(t, kapiVhostYolu), "listen 21001 ssl;") || s.rSayac == 0 {
+		t.Fatal("permissive'de etiket hatası uygulamayı engellememeli")
+	}
+}
+
+// Yeni etiket atıldıysa dosyalar değişmese de reload edilir: önceden bind edilemeyen
+// (etiketsiz) port nginx'e ancak böyle bağlanır.
+func TestKapiHealSELinuxYeniEtiketReloadEder(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiUzlastir(1000) // SELinux kapalıyken uygulandı (dosyalar yerinde)
+	oncekiReload := s.rSayac
+	kapiSELinuxModu = func() string { return "enforcing" }
+	kapiSELinuxListe = func() (string, error) { return "unreserved_port_t tcp 1024-32767\n", nil }
+	kapiSELinuxEtiket = func(int) error { return nil }
+	if !kapiUzlastir(1000) {
+		t.Fatal("uzlaştırma açılabilir dönmeli")
+	}
+	if s.rSayac != oncekiReload+1 {
+		t.Fatalf("yeni etiket sonrası dosya değişmese de reload beklenir: %d → %d", oncekiReload, s.rSayac)
+	}
+}
+
+// Zorlama durumu sistem araçları için dosyaya yansır (erisim masaüstü modu bakar).
+func TestKapiZorlamaDosyasi(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiZorlamaYaz(true, "test")
+	if oku(t, kapiZorlamaDosyasi) != "acik\n" {
+		t.Fatal("zorlama açık dosyaya yansımalı")
+	}
+	kapiZorlamaYaz(false, "test")
+	if oku(t, kapiZorlamaDosyasi) != "kapali\n" {
+		t.Fatal("zorlama kapalı dosyaya yansımalı")
+	}
+}
+
+// Yarıda kesilen ölçüm (istemci koptu / kapanış) kesin değildir: zorlamayı KAPATMAZ.
+func TestKapiOlcIptalZorlamayiDegistirmez(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	eski := kapiTipOlcucu
+	t.Cleanup(func() { kapiTipOlcucu = eski })
+	kapiTipOlcucu = func(ctx context.Context, _ int, _ string, _ int) (string, error) { return "", ctx.Err() }
+	ctx, iptal := context.WithCancel(context.Background())
+	iptal()
+	kapi.ZorlamaAyarla(true)
+	kapiOlcVeAyarla(ctx, 1)
+	if !kapi.ZorlamaAktif() {
+		t.Fatal("iptal edilen ölçüm zorlamayı kapatmamalı")
+	}
+}
+
+const kapiTestAcme = "server {\n    listen 80;\n    location / {\n        return 301 https://$server_name:8443$request_uri;\n    }\n}"
+
+// yanDosyalariKur: catchall + acme (panelhost) dosyalarını yazar — geri alma testleri
+// yalnız _panel.conf'u değil, aynı işlemdeki yan dosyaları da denetlesin.
+func yanDosyalariKur(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(kapiCatchallYolu, []byte(kapiTestCatchall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kapiAcmeYolu, []byte(kapiTestAcme), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestKapiHealNginxTestiDuserseGeriAlinir(t *testing.T) {
 	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	yanDosyalariKur(t)
 	s.nginxT = func(n int) error {
 		if n == 2 { // yazma SONRASI ilk test
 			return errors.New("emerg")
@@ -252,6 +483,9 @@ func TestKapiHealNginxTestiDuserseGeriAlinir(t *testing.T) {
 	if oku(t, kapiVhostYolu) != kapiTestSablon {
 		t.Fatal("_panel.conf ÖZGÜN haline geri alınmalı")
 	}
+	if oku(t, kapiCatchallYolu) != kapiTestCatchall || oku(t, kapiAcmeYolu) != kapiTestAcme {
+		t.Fatal("aynı işlemdeki catchall/acme de ÖZGÜN haline geri alınmalı")
+	}
 	if _, err := os.Stat(kapiMapYolu); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("önceden olmayan map dosyası geri almada SİLİNMELİ")
 	}
@@ -259,6 +493,67 @@ func TestKapiHealNginxTestiDuserseGeriAlinir(t *testing.T) {
 		if strings.HasPrefix(c, "systemctl reload") {
 			t.Fatal("başarısız doğrulamadan sonra reload yapılmamalı")
 		}
+	}
+	if len(s.fwAcilan) != 0 {
+		t.Fatalf("uygulanamayan değişiklik için firewall'da port açılmamalı: %v", s.fwAcilan)
+	}
+}
+
+// reload düşerse (ör. yeni portu başka süreç tutuyor) dosyalar geri alınır ve eski
+// yapılandırma yeniden yüklenir; firewall'a dokunulmaz.
+func TestKapiHealReloadDuserseGeriAlinir(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	yanDosyalariKur(t)
+	s.reloadHata = func(n int) error {
+		if n == 1 {
+			return errors.New("reload failed")
+		}
+		return nil
+	}
+	if kapiUzlastir(1000) {
+		t.Fatal("reload düşünce zorlama açılmamalı")
+	}
+	if oku(t, kapiVhostYolu) != kapiTestSablon || oku(t, kapiCatchallYolu) != kapiTestCatchall || oku(t, kapiAcmeYolu) != kapiTestAcme {
+		t.Fatal("reload hatasında tüm dosyalar ÖZGÜN haline dönmeli")
+	}
+	if _, err := os.Stat(kapiMapYolu); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("önceden olmayan map dosyası silinmeli")
+	}
+	if s.rSayac != 2 {
+		t.Fatalf("geri alınan yapılandırma yeniden yüklenmeli (2 reload), got %d", s.rSayac)
+	}
+	if len(s.fwAcilan) != 0 || len(s.fwKapanan) != 0 {
+		t.Fatalf("firewall'a dokunulmamalı: açılan=%v kapanan=%v", s.fwAcilan, s.fwKapanan)
+	}
+}
+
+// 2. aşama (kaldırma) düşerse yalnız O aşama geri alınır: 1. aşamanın eklediği rol
+// kapıları kalır, kaldırılamayan port firewall'da KAPATILMAZ (nginx hâlâ dinliyor).
+func TestKapiHealKaldirmaDuserseGeriAlinir(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	yanDosyalariKur(t)
+	s.nginxT = func(n int) error {
+		if n == 4 { // 1: taban, 2: aşama 1, 3: aşama 2 tabanı, 4: aşama 2 yazımı
+			return errors.New("emerg")
+		}
+		return nil
+	}
+	if !kapiUzlastir(1000) {
+		t.Fatal("1. aşama uygulandı; kaldırmanın düşmesi zorlamayı engellememeli")
+	}
+	conf := oku(t, kapiVhostYolu)
+	if !strings.Contains(conf, "listen 8443 ssl default_server;") || !strings.Contains(conf, "listen 21001 ssl;") {
+		t.Fatalf("kaldırma geri alınmalı, eklenen rol kapıları KALMALI:\n%s", conf)
+	}
+	c := oku(t, kapiCatchallYolu)
+	if !strings.Contains(c, "listen 8443 ssl default_server;") || !strings.Contains(c, "listen 21001 ssl default_server;") {
+		t.Fatalf("catchall 1. aşama haline dönmeli (8443 + rol portları):\n%s", c)
+	}
+	if !strings.Contains(oku(t, kapiAcmeYolu), ":23003$request_uri;") {
+		t.Fatal("acme 1. aşamanın yönlendirmesini korumalı")
+	}
+	if len(s.fwKapanan) != 0 {
+		t.Fatalf("kaldırılamayan port firewall'da KAPATILMAMALI: %v", s.fwKapanan)
 	}
 }
 
@@ -305,15 +600,18 @@ func TestKapiHealModKapaliTemizSunucuyaDokunmaz(t *testing.T) {
 }
 
 func TestKapiHealModKapaliIzleriTemizler(t *testing.T) {
-	izli, err := kapi.Uzlastir(kapiTestCanli, rolAyar(), 0)
+	izli, err := kapi.Uzlastir(kapiTestCanli, rolAyar(), 0, kapi.Secenek{Gizli: kapiTestGizli})
 	if err != nil {
 		t.Fatal(err)
 	}
-	kapiTestKur(t, izli, nil)
-	if err := os.WriteFile(kapiMapYolu, []byte(kapi.MapIcerigi(rolAyar(), 0)), 0o644); err != nil {
+	s := kapiTestKur(t, izli, nil)
+	if err := os.WriteFile(kapiMapYolu, []byte(kapi.MapIcerigi(rolAyar(), 0, nil)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kapiUzlastir(1000)
+	if len(s.ozelIzin) != 1 {
+		t.Error("boşaltılan harita da özel izinle yazılmalı")
+	}
 	conf := oku(t, kapiVhostYolu)
 	if strings.Contains(conf, kapi.Baslik) {
 		t.Error("mod kapalı: kapı başlığı temizlenmeli")
@@ -351,7 +649,7 @@ func TestKapiHealNginxDurukkenGeriAlinmaz(t *testing.T) {
 	s.dinliyor = false // nginx yokken admin portu da dinlemez → kaldırma aşaması atlanır
 	kapiUzlastir(1000)
 	conf := oku(t, kapiVhostYolu)
-	if !strings.Contains(conf, "listen 21001 ssl;") || !kapi.BaslikTamMi(conf) {
+	if !strings.Contains(conf, "listen 21001 ssl;") || !kapi.BaslikTamMi(conf, kapiTestGizli) {
 		t.Fatalf("doğrulanan yapılandırma KORUNMALI:\n%s", conf)
 	}
 	for _, c := range s.cagrilar {
@@ -450,7 +748,7 @@ func TestKapiZincirKopuk(t *testing.T) {
 	t.Cleanup(func() { kapiTipOlcucu, kapiZincirAra = eskiOlc, eskiAra; kapiZincirTetik.Store(false) })
 	kapiZincirAra = time.Hour // bu test boyunca yeniden tetiklenmesin
 	var olcum int32
-	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) {
+	kapiTipOlcucu = func(_ context.Context, port int, _ string, _ int) (string, error) {
 		atomic.AddInt32(&olcum, 1)
 		return map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}[port], nil
 	}
@@ -479,7 +777,7 @@ func TestKapiSimdiUygula(t *testing.T) {
 	eski := kapiTipOlcucu
 	t.Cleanup(func() { kapiTipOlcucu = eski })
 	yanit := map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}
-	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) { return yanit[port], nil }
+	kapiTipOlcucu = func(_ context.Context, port int, _ string, _ int) (string, error) { return yanit[port], nil }
 	if err := KapiSimdiUygula(context.Background()); err != nil || !kapi.ZorlamaAktif() {
 		t.Fatalf("başarılı uygulama: err=%v zorlama=%v", err, kapi.ZorlamaAktif())
 	}
@@ -489,11 +787,59 @@ func TestKapiSimdiUygula(t *testing.T) {
 	}
 }
 
+// Gizli yokken kapı başlığı yazılamaz: yarım kapı düzeni (listen'lar var, başlık yok)
+// kurulmaz — hiçbir dosyaya dokunulmaz.
 func TestKapiHealProxyGizliYoksaZorlamaYok(t *testing.T) {
 	s := kapiTestKur(t, kapiTestSablon, rolAyar())
 	s.gizli = ""
+	// Gizli denetimi SELinux etiketlemesinden de ÖNCE: uygulanmayacak kapı için sistem
+	// politikası değiştirilmez (kapiTestKur'un semanage dikişleri çağrılırsa test düşer).
+	kapiSELinuxModu = func() string { return "enforcing" }
 	if kapiUzlastir(1000) {
 		t.Fatal("proxy gizlisi yokken başlığa güvenilemez → zorlama açılmamalı")
+	}
+	if len(s.cagrilar) != 0 || oku(t, kapiVhostYolu) != kapiTestSablon {
+		t.Fatalf("gizli yokken nginx'e dokunulmamalı: %v", s.cagrilar)
+	}
+	if _, err := os.Stat(kapiMapYolu); err == nil {
+		t.Fatal("gizli yokken map yazılmamalı")
+	}
+}
+
+// Proxy gizlisi döndürülünce (proxy.secret yenilendi) başlık satırları yeni gizliyle
+// yeniden yazılır; eski gizlili satır "tam" SAYILMAZ.
+func TestKapiHealGizliDegisinceBaslikYenilenir(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiUzlastir(1000)
+	yeniGizli := strings.Repeat("f", 64)
+	if kapi.BaslikTamMi(oku(t, kapiVhostYolu), yeniGizli) {
+		t.Fatal("eski gizlili başlık yeni gizliyle tam sayılmamalı")
+	}
+	s.gizli = yeniGizli
+	if !kapiUzlastir(1000) {
+		t.Fatal("yeni gizliyle uzlaştırma açılabilir dönmeli")
+	}
+	conf := oku(t, kapiVhostYolu)
+	if !kapi.BaslikTamMi(conf, yeniGizli) || strings.Contains(conf, kapiTestGizli) {
+		t.Fatalf("başlık yeni gizliyle yazılmalı, eski gizli kalmamalı:\n%s", conf)
+	}
+}
+
+func TestYalnizNginxDinliyor(t *testing.T) {
+	cases := map[string]bool{
+		`LISTEN 0 511 0.0.0.0:21001 0.0.0.0:* users:(("nginx",pid=12,fd=6),("nginx",pid=11,fd=6))` + "\n" +
+			`LISTEN 0 511 [::]:21001 [::]:* users:(("nginx",pid=12,fd=7),("nginx",pid=11,fd=7))`: true,
+		`LISTEN 0 511 127.0.0.1:21001 0.0.0.0:* users:(("nginx",pid=12,fd=6))`: true,
+		"": false, // dinleyen yok
+		`LISTEN 0 4096 0.0.0.0:21001 0.0.0.0:* users:(("node",pid=99,fd=3))`: false,
+		`LISTEN 0 511 0.0.0.0:21001 0.0.0.0:* users:(("nginx",pid=12,fd=6))` + "\n" +
+			`LISTEN 0 4096 [::]:21001 [::]:* users:(("python3",pid=99,fd=3))`: false, // biri başkası
+		`LISTEN 0 511 0.0.0.0:21001 0.0.0.0:*`: false, // süreç bilgisi yok (yetkisiz ss)
+	}
+	for ss, bek := range cases {
+		if got := yalnizNginxDinliyor(ss); got != bek {
+			t.Errorf("%q → %v beklenir, got %v", ss, bek, got)
+		}
 	}
 }
 
@@ -526,12 +872,20 @@ func TestKapiOlcVeAyarla(t *testing.T) {
 	eski := kapiTipOlcucu
 	t.Cleanup(func() { kapiTipOlcucu = eski })
 	yanit := map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}
-	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) { return yanit[port], nil }
+	var kapilar []string
+	kapiTipOlcucu = func(_ context.Context, port int, k string, _ int) (string, error) {
+		kapilar = append(kapilar, fmt.Sprintf("%d=%s", port, k))
+		return yanit[port], nil
+	}
 
 	kapi.ZorlamaAyarla(false)
 	kapiOlcVeAyarla(context.Background(), 1)
 	if !kapi.ZorlamaAktif() {
 		t.Fatal("üç port da doğruysa zorlama açılmalı")
+	}
+	// Her port KENDİ kapı adıyla doğrulanır (kanıt admin/bayi etiket kaymasını yakalar).
+	if strings.Join(kapilar, " ") != "21001=admin 22002=bayi 23003=musteri" {
+		t.Fatalf("ölçüm beklenen kapı adlarıyla yapılmalı: %v", kapilar)
 	}
 	yanit[23003] = "karma" // müşteri portunda başlık güvenilmiyor
 	kapiOlcVeAyarla(context.Background(), 1)
@@ -539,7 +893,7 @@ func TestKapiOlcVeAyarla(t *testing.T) {
 		t.Fatal("tek port bile yanlışsa zorlama KAPANMALI (eski davranış, kilitlenme yok)")
 	}
 	yanit[23003] = "musteri"
-	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) {
+	kapiTipOlcucu = func(_ context.Context, port int, _ string, _ int) (string, error) {
 		if port == 22002 {
 			return "", errors.New("bağlantı reddedildi")
 		}
@@ -552,31 +906,81 @@ func TestKapiOlcVeAyarla(t *testing.T) {
 	}
 }
 
-// kapiTipOlc: gerçek HTTPS yolu — backend önce 502 (henüz ayakta değil) sonra 200.
-func TestKapiTipOlcYenidenDener(t *testing.T) {
+// olcumSunucusu: /api/v1/kapi'yi taklit eden TLS sunucusu. yanitla(deneme, nonce, port)
+// yanıtı belirler; port sunucunun kendi portudur.
+func olcumSunucusu(t *testing.T, yanitla func(n int32, nonce string, port int, w http.ResponseWriter)) int {
+	t.Helper()
 	var n int32
+	var port int
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/kapi" {
 			http.NotFound(w, r)
 			return
 		}
-		if atomic.AddInt32(&n, 1) == 1 {
+		yanitla(atomic.AddInt32(&n, 1), r.Header.Get(kapi.OlcumBaslik), port, w)
+	}))
+	t.Cleanup(srv.Close)
+	_, portS, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	port, _ = strconv.Atoi(portS)
+	eskiAra, eskiGizli := kapiOlcAra, kapiProxyGizli
+	kapiOlcAra = 10 * time.Millisecond
+	kapiProxyGizli = func() string { return kapiTestGizli }
+	t.Cleanup(func() { kapiOlcAra, kapiProxyGizli = eskiAra, eskiGizli })
+	return port
+}
+
+// kapiTipOlc: gerçek HTTPS yolu — backend önce 502 (henüz ayakta değil) sonra 200.
+func TestKapiTipOlcYenidenDener(t *testing.T) {
+	var deneme int32
+	port := olcumSunucusu(t, func(n int32, nonce string, port int, w http.ResponseWriter) {
+		deneme = n
+		if n == 1 {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		fmt.Fprint(w, `{"tip":"musteri"}`)
-	}))
-	defer srv.Close()
-	eskiAra := kapiOlcAra
-	kapiOlcAra = 10 * time.Millisecond
-	t.Cleanup(func() { kapiOlcAra = eskiAra })
-	_, portS, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	port, _ := strconv.Atoi(portS)
-	tip, err := kapiTipOlc(context.Background(), port, 3)
+		fmt.Fprintf(w, `{"tip":"musteri","kanit":%q}`, kapi.OlcumKaniti(kapiTestGizli, nonce, kapi.Musteri, port))
+	})
+	tip, err := kapiTipOlc(context.Background(), port, kapi.Musteri, 3)
 	if err != nil || tip != "musteri" {
 		t.Fatalf("yeniden deneme ile tip okunmalı: tip=%q err=%v", tip, err)
 	}
-	if atomic.LoadInt32(&n) != 2 {
-		t.Fatalf("502 sonrası bir kez daha denenmeli, deneme=%d", n)
+	if deneme != 2 {
+		t.Fatalf("502 sonrası bir kez daha denenmeli, deneme=%d", deneme)
+	}
+}
+
+// Kanıtı tutmayan yanıt (portu başka süreç tutuyor / yanlış etiket / başka porta
+// aktarılmış) tip ne derse desin ölçümü GEÇEMEZ; her deneme taze nonce kullanır.
+func TestKapiTipOlcKanitsizYanitGecmez(t *testing.T) {
+	nonceler := map[string]bool{}
+	for ad, uret := range map[string]func(nonce string, port int) string{
+		"kanıt yok":      func(string, int) string { return "" },
+		"yanlış kapı":    func(n string, p int) string { return kapi.OlcumKaniti(kapiTestGizli, n, kapi.Bayi, p) },
+		"başka port":     func(n string, p int) string { return kapi.OlcumKaniti(kapiTestGizli, n, kapi.Admin, p+1) },
+		"yanlış gizli":   func(n string, p int) string { return kapi.OlcumKaniti("baska", n, kapi.Admin, p) },
+		"bayat (tekrar)": func(string, int) string { return kapi.OlcumKaniti(kapiTestGizli, "sabit", kapi.Admin, 0) },
+	} {
+		t.Run(ad, func(t *testing.T) {
+			port := olcumSunucusu(t, func(_ int32, nonce string, port int, w http.ResponseWriter) {
+				nonceler[nonce] = true
+				fmt.Fprintf(w, `{"tip":"yonetim","kanit":%q}`, uret(nonce, port))
+			})
+			if tip, err := kapiTipOlc(context.Background(), port, kapi.Admin, 2); err == nil {
+				t.Fatalf("kanıtsız yanıt kabul edildi: tip=%q", tip)
+			}
+		})
+	}
+	if len(nonceler) != 10 {
+		t.Fatalf("her deneme taze nonce göndermeli: %d farklı nonce / 10 deneme", len(nonceler))
+	}
+}
+
+func TestKapiTipOlcGizliYoksaOlcmez(t *testing.T) {
+	port := olcumSunucusu(t, func(_ int32, _ string, _ int, w http.ResponseWriter) {
+		t.Error("gizli yokken istek atılmamalı")
+	})
+	kapiProxyGizli = func() string { return "" }
+	if _, err := kapiTipOlc(context.Background(), port, kapi.Admin, 1); err == nil {
+		t.Fatal("gizli yokken ölçüm hata dönmeli")
 	}
 }

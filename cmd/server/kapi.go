@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -38,8 +39,26 @@ const kapiKullanim = `Kullanım: girginospanel-server kapi <komut>
   eski-kapat --zorla   admin doğrulaması olmadan kapat (kilitlenme riski SİZDE)
 Çıkış: 0 tamam · 1 hata · 2 kullanım · 3 kapı modu yapılandırılmamış`
 
-// kapiPanelConf: geçişte "bugünkü genel portlar" buradan okunur.
-const kapiPanelConf = "/etc/nginx/conf.d/_panel.conf"
+// Dikişler (testler): CLI gerçek kapi.json'a, _panel.conf'a ve systemctl'e dokunmasın.
+var (
+	kapiCLIAyarYolu = kapi.AyarYolu
+	// kapiPanelConf: geçişte "bugünkü genel portlar" buradan okunur.
+	kapiPanelConf    = "/etc/nginx/conf.d/_panel.conf"
+	kapiPortUygunluk = kapiPortUygun
+	kapiRolPortuAta  = portyonetim.KapiRolPortuAta
+	// panelYenidenBaslat: değişikliği hemen uygulamak için (Heal açılışta koşar).
+	panelYenidenBaslat = func() {
+		if exec.Command("systemctl", "is-active", "--quiet", "girginospanel").Run() != nil {
+			fmt.Println("panel çalışmıyor — değişiklik bir sonraki açılışta uygulanır")
+			return
+		}
+		if out, err := exec.Command("systemctl", "restart", "girginospanel").CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "panel yeniden başlatılamadı: %v %s\n", err, out)
+			return
+		}
+		fmt.Println("panel yeniden başlatıldı — değişiklik uygulandı")
+	}
+)
 
 func kapiCLI(args []string) int {
 	komut := ""
@@ -118,7 +137,7 @@ func kapiRolMu(rol string) bool {
 
 // kapiMevcut: ayar varsa (true, 0); yoksa (false, 0); okunamıyorsa (false, 1).
 func kapiMevcut() (*kapi.Ayar, bool, int) {
-	a, err := kapi.Oku(kapi.AyarYolu)
+	a, err := kapi.Oku(kapiCLIAyarYolu)
 	if err == nil {
 		return a, true, 0
 	}
@@ -139,9 +158,9 @@ func kapiKur() int {
 		kapiYazdir(a)
 		return 0
 	}
-	a, err := kapi.KurulumAyari(kapiPortUygun(), time.Now().Unix())
+	a, err := kapi.KurulumAyari(kapiPortUygunluk(), time.Now().Unix())
 	if err == nil {
-		err = kapi.Yaz(kapi.AyarYolu, a)
+		err = kapi.Yaz(kapiCLIAyarYolu, a)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kapı portları atanamadı: %v\n", err)
@@ -167,13 +186,13 @@ func kapiGecis(gun int) int {
 		fmt.Fprintf(os.Stderr, "panel vhost okunamadı (%s): %v\n", kapiPanelConf, err)
 		return 1
 	}
-	a, err = kapi.GecisAyari(string(conf), kapiPortUygun(), time.Now().Unix(), gun)
+	a, err = kapi.GecisAyari(string(conf), kapiPortUygunluk(), time.Now().Unix(), gun)
 	if errors.Is(err, kapi.ErrDisariyaKapali) {
 		fmt.Println(err.Error() + " — web moduna geçince `girginospanel-server kapi gecis` ile tekrar deneyin")
 		return 0 // hata değil: operatörün bilinçli seçimi korundu
 	}
 	if err == nil {
-		err = kapi.Yaz(kapi.AyarYolu, a)
+		err = kapi.Yaz(kapiCLIAyarYolu, a)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kapı geçişi yapılamadı: %v\n", err)
@@ -227,7 +246,7 @@ func kapiPort(rol string) int {
 }
 
 func kapiRolPort(rol string, yeni int) int {
-	eski, atanan, err := portyonetim.KapiRolPortuAta(rol, yeni)
+	eski, atanan, err := kapiRolPortuAta(rol, yeni)
 	switch {
 	case errors.Is(err, kapi.ErrYok):
 		fmt.Fprintln(os.Stderr, "kapı modu yapılandırılmamış")
@@ -248,7 +267,7 @@ func kapiRolPort(rol string, yeni int) int {
 }
 
 func kapiUzat(gun int) int {
-	if err := kapi.EskiUzat(kapi.AyarYolu, gun, time.Now().Unix()); err != nil {
+	if err := kapi.EskiUzat(kapiCLIAyarYolu, gun, time.Now().Unix()); err != nil {
 		fmt.Fprintf(os.Stderr, "uzatılamadı: %v\n", err)
 		return 1
 	}
@@ -258,7 +277,7 @@ func kapiUzat(gun int) int {
 }
 
 func kapiEskiKapat(zorla bool) int {
-	if err := kapi.EskiKapat(kapi.AyarYolu, zorla, time.Now().Unix()); err != nil {
+	if err := kapi.EskiKapat(kapiCLIAyarYolu, zorla, time.Now().Unix()); err != nil {
 		fmt.Fprintf(os.Stderr, "eski kapı kapatılamadı: %v\n", err)
 		var adh *kapi.AdminDogrulanmadiHatasi
 		if errors.As(err, &adh) {
@@ -269,19 +288,6 @@ func kapiEskiKapat(zorla bool) int {
 	fmt.Println("eski kapı kapatılıyor")
 	panelYenidenBaslat()
 	return 0
-}
-
-// panelYenidenBaslat: değişikliği hemen uygulamak için (Heal açılışta koşar).
-func panelYenidenBaslat() {
-	if exec.Command("systemctl", "is-active", "--quiet", "girginospanel").Run() != nil {
-		fmt.Println("panel çalışmıyor — değişiklik bir sonraki açılışta uygulanır")
-		return
-	}
-	if out, err := exec.Command("systemctl", "restart", "girginospanel").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "panel yeniden başlatılamadı: %v %s\n", err, out)
-		return
-	}
-	fmt.Println("panel yeniden başlatıldı — değişiklik uygulandı")
 }
 
 func kapiYazdir(a *kapi.Ayar) {
@@ -333,10 +339,14 @@ func kapiAdres(w http.ResponseWriter, r *http.Request) {
 }
 
 // kapiAdresURL: isteğin host'unu (varsa portunu atarak) yeni kapı portuyla birleştirir.
-// IPv6 host köşeli parantezle yazılır.
+// IPv6 host köşeli parantezle yazılır. nginx `Host $host` ile varsayılan portta portsuz
+// ama parantezli IPv6 ("[2001:db8::1]") iletir: parantez atılmazsa JoinHostPort ikinci
+// kez sarar → "https://[[2001:db8::1]]:P" (geçersiz URL).
 func kapiAdresURL(host string, port int) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
 	}
 	return "https://" + net.JoinHostPort(host, strconv.Itoa(port))
 }

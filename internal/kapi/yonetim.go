@@ -59,17 +59,25 @@ func EskiKapat(yol string, zorla bool, simdi int64) error {
 // ErrAyniPort: istenen port rolün zaten kullandığı port.
 var ErrAyniPort = errors.New("rol zaten bu portta — değişiklik yok")
 
+// ErrEskiDevralma: admin yeni admin kapısını doğrulamadan açık bir eski port başka bir
+// role devredilemez — devretmek geçiş kapısını (ya da onun bir portunu) kapatır.
+var ErrEskiDevralma = errors.New("açık eski kapı portu, admin YENİ admin kapısından bir kez giriş " +
+	"yapmadan bir role devredilemez: devretmek o adresteki geçiş kapısını kapatır ve sağlayıcı " +
+	"firewall'u yeni admin portunu kesiyorsa admin kilitlenir. Önce yeni admin adresinden giriş yapın")
+
 // RolPortuDegistir: bir rolün kapı portunu AYAR düzeyinde değiştirir; nginx'i Heal /
 // provisioner.KapiSimdiUygula uygular. yeni'nin sistemde uygunluğunu (yasaklı, meşgul,
 // firewall'da kapalı) ÇAĞIRAN denetler; burada yalnız ayar tutarlılığı sağlanır.
 //
 // Açık bir eski port rol portu yapılabilir (ör. müşteri kapısı bilinen 8443'te kalsın):
-// port eski listesinden çıkar, o rolün kapısı olur.
+// port eski listesinden çıkar, o rolün kapısı olur — ama yalnız admin yeni admin
+// kapısını doğruladıktan sonra (ErrEskiDevralma).
 //
 // 🔴 ADMIN portu değişince önceki admin portu "eski kapı" olur ve admin YENİ porttan
 // girene dek açık kalır: sağlayıcının dış firewall'u yeni portu kesiyorsa önceki port
 // da kapanırsa admin kilitlenirdi. Bayi/müşteri portu hemen taşınır (admin kendi
-// kapısından ulaşmaya devam eder; kullanıcılara yeni adresi o bildirir).
+// kapısından ulaşmaya devam eder; kullanıcılara yeni adresi o bildirir). Değişen rolün
+// kapı kanıtı sıfırlanır: yeni port henüz dışarıdan hiç kullanılmadı.
 func RolPortuDegistir(yol, rol string, yeni int, simdi int64) (eski int, err error) {
 	err = Guncelle(yol, func(a *Ayar) error {
 		eski = a.RolPortu(rol)
@@ -85,6 +93,9 @@ func RolPortuDegistir(yol, rol string, yeni int, simdi int64) (eski int, err err
 				kalan = append(kalan, p)
 			}
 		}
+		if len(kalan) != len(a.EskiPortlar) && a.AdminDogrulandi == 0 {
+			return ErrEskiDevralma
+		}
 		a.EskiPortlar = kalan
 		switch rol {
 		case Admin:
@@ -93,23 +104,18 @@ func RolPortuDegistir(yol, rol string, yeni int, simdi int64) (eski int, err err
 			if a.EskiBitis < simdi {
 				a.EskiBitis = simdi
 			}
-			a.AdminDogrulandi, a.AdminPortDegisti = 0, simdi
+			a.AdminDogrulandi = 0
 		case Bayi:
 			a.Bayi = yeni
+			delete(a.IlkGiris, Bayi)
 		case Musteri:
 			a.Musteri = yeni
+			delete(a.IlkGiris, Musteri)
 		}
 		if len(a.EskiPortlar) == 0 {
 			a.EskiPortlar, a.EskiBitis = nil, 0
 		}
 		return nil
 	})
-	if err == nil && rol == Admin {
-		AdminKaydiSifirla()
-	}
 	return eski, err
 }
-
-// AdminKaydiSifirla: admin portu değişince bellek önbelleğini düşürür; yoksa yeni
-// porttan ilk giriş "zaten kaydedildi" sanılıp kanıt HİÇ yazılmazdı.
-func AdminKaydiSifirla() { adminKaydedildi.Store(false) }

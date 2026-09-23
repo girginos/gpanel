@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"girginospanel/internal/guvenlikduvari"
@@ -32,7 +33,33 @@ var (
 	kapiAyarYolu     = kapi.AyarYolu
 	kapiSistemPortu  = SistemdePortlar
 	kapiFwKapaliPort = guvenlikduvari.KapatilanPortlar
+	kapiSELinux      = selinuxDenetci
+	kapiFtpPasif     = ftpPasifAraligi
+	kapiPanelConf    = func() string {
+		b, _ := os.ReadFile(VhostYolu)
+		return string(b)
+	}
 )
+
+// ftpConfYolu: pure-ftpd yapılandırması (girginospanel-ftp-setup yazar). Dikiş (testler).
+var ftpConfYolu = "/etc/pure-ftpd/pure-ftpd.conf"
+
+// ftpPasifAraligi: pure-ftpd'nin pasif veri portları. Bu portlar yalnız aktarım sırasında
+// dinlendiği için `ss` anlık görüntüsünde görünmez; kapı portu bu aralıktan seçilirse nginx
+// ile pure-ftpd aynı portu tutmaya çalışır (nginx restart'ında EADDRINUSE → nginx açılmaz).
+// Yapılandırma yoksa ftp-setup'ın varsayılanı: FTP kapı portundan SONRA da kurulabilir.
+func ftpPasifAraligi() (int, int) {
+	if b, err := os.ReadFile(ftpConfYolu); err == nil {
+		for _, ln := range strings.Split(string(b), "\n") {
+			if f := strings.Fields(ln); len(f) == 3 && f[0] == "PassivePortRange" {
+				if alt, ust, ok := portAraligi(f[1] + "-" + f[2]); ok {
+					return alt, ust
+				}
+			}
+		}
+	}
+	return 30000, 30100
+}
 
 var errKapiModu = errors.New("kapı modunda dış port tek başına değiştirilemez — rol portlarını Kapılar bölümünden yönetin")
 
@@ -44,15 +71,20 @@ func kapiModu() bool {
 
 // KapiDurum: arayüz için kapı özeti. Yalnız admin görür (GET /portlar AdminOnly).
 type KapiDurum struct {
-	Admin           int    `json:"admin"`
-	Bayi            int    `json:"bayi"`
-	Musteri         int    `json:"musteri"`
-	EskiPortlar     []int  `json:"eski_portlar"`
-	EskiBitis       int64  `json:"eski_bitis"`
-	EskiAcik        bool   `json:"eski_acik"`
-	AdminDogrulandi int64  `json:"admin_dogrulandi"`
-	Zorlama         bool   `json:"zorlama"`
-	Hata            string `json:"hata,omitempty"`
+	Admin           int   `json:"admin"`
+	Bayi            int   `json:"bayi"`
+	Musteri         int   `json:"musteri"`
+	EskiPortlar     []int `json:"eski_portlar"`
+	EskiBitis       int64 `json:"eski_bitis"`
+	EskiAcik        bool  `json:"eski_acik"`
+	AdminDogrulandi int64 `json:"admin_dogrulandi"`
+	// IlkGiris: bayi/müşteri kapısından ilk dış giriş (rol → unix sn; yoksa 0). Eski kapı
+	// kapanmadan önce hangi rolün yeni kapısının gerçekten kullanıldığını gösterir.
+	IlkGiris map[string]int64 `json:"ilk_giris"`
+	// Masaustu: erisim masaüstü modu — yönetici kapısı yalnız SSH tünelinden.
+	Masaustu bool   `json:"masaustu"`
+	Zorlama  bool   `json:"zorlama"`
+	Hata     string `json:"hata,omitempty"`
 }
 
 // KapiDurumGetir: kapı modu kapalıysa nil. Ayar okunamıyorsa yalnız Hata dolu döner
@@ -63,28 +95,33 @@ func KapiDurumGetir() *KapiDurum {
 		return nil
 	}
 	if err != nil {
-		return &KapiDurum{Hata: err.Error(), EskiPortlar: []int{}}
+		return &KapiDurum{Hata: err.Error(), EskiPortlar: []int{}, IlkGiris: map[string]int64{}}
 	}
 	simdi := time.Now().Unix()
 	eski := a.EskiPortlar
 	if eski == nil {
 		eski = []int{}
 	}
+	ilk := map[string]int64{kapi.Bayi: a.IlkGiris[kapi.Bayi], kapi.Musteri: a.IlkGiris[kapi.Musteri]}
 	return &KapiDurum{
 		Admin: a.Admin, Bayi: a.Bayi, Musteri: a.Musteri,
 		EskiPortlar: eski, EskiBitis: a.EskiBitis, EskiAcik: a.EskiAcik(simdi),
 		AdminDogrulandi: a.AdminDogrulandi,
+		IlkGiris:        ilk,
+		Masaustu:        kapi.MasaustuModu(),
 		Zorlama:         kapi.ZorlamaAktif(),
 	}
 }
 
 // KapiPortDenetleyici: bir portun kapı portu OLAMAMA nedenini döner ("" = uygun).
-// `ss` ve firewall anlık görüntüsü BİR KEZ alınır (rastgele seçimde her aday için
-// yeniden çalışmasın). kendi: panelin zaten dinlediği ve devralınabilecek portlar
-// (açık eski kapı) — "meşgul" sayılmaz.
+// `ss`, firewall ve SELinux anlık görüntüsü BİR KEZ alınır (rastgele seçimde her aday
+// için yeniden çalışmasın). kendi: panelin zaten dinlediği ve devralınabilecek portlar
+// (açık eski kapı, yalnız-loopback tünel portu) — "meşgul" sayılmaz.
 func KapiPortDenetleyici(kendi ...int) func(int) string {
 	mesgul := kapiSistemPortu()
 	fw := kapiFwKapaliPort()
+	selinux := kapiSELinux()
+	ftpAlt, ftpUst := kapiFtpPasif()
 	for _, p := range kendi {
 		delete(mesgul, p)
 	}
@@ -92,11 +129,17 @@ func KapiPortDenetleyici(kendi ...int) func(int) string {
 		if yasak, aciklama := PortYasakMi(p); yasak {
 			return fmt.Sprintf("port %d kullanılamaz: %s", p, aciklama)
 		}
+		if p >= ftpAlt && p <= ftpUst {
+			return fmt.Sprintf("port %d FTP pasif veri aralığında (%d-%d) — pure-ftpd aktarım sırasında kullanır", p, ftpAlt, ftpUst)
+		}
 		if mesgul[p] {
 			return fmt.Sprintf("port %d başka bir servis tarafından kullanılıyor", p)
 		}
 		if fw[p] {
 			return fmt.Sprintf("port %d güvenlik duvarında kapatılmış/kısıtlanmış — önce o kuralı kaldırın", p)
+		}
+		if tur := selinux(p); tur != "" {
+			return fmt.Sprintf("port %d SELinux'ta başka bir servise ayrılmış (%s) — nginx bu portu kullanamaz", p, tur)
 		}
 		return ""
 	}
@@ -132,10 +175,13 @@ func KapiRolPortuAta(rol string, yeni int) (eski, atanan int, err error) {
 			return 0, 0, fmt.Errorf("port %d zaten %s kapısı", yeni, r)
 		}
 	}
-	sorun := KapiPortDenetleyici(a.EskiPortlar...)
+	// Panelin kendi portları: açık eski kapı ve yalnız-loopback tünel portu (nginx onları
+	// dinlediği için `ss` "meşgul" der) — elle seçilebilir, rastgele seçilmez.
+	kendi := append(append([]int{}, a.EskiPortlar...), kapi.YerelPortlar(kapiPanelConf(), a, time.Now().Unix())...)
+	sorun := KapiPortDenetleyici(kendi...)
 	if yeni == 0 {
 		haric := map[int]bool{a.Admin: true, a.Bayi: true, a.Musteri: true}
-		for _, p := range a.EskiPortlar {
+		for _, p := range kendi {
 			haric[p] = true
 		}
 		if yeni, err = kapi.RastgelePortSec(func(p int) bool { return sorun(p) == "" }, haric); err != nil {
@@ -262,7 +308,7 @@ func kapiHataYaz(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errDegisiklikSuruyor):
 		hataYaz(w, http.StatusConflict, err.Error())
-	case errors.Is(err, kapi.ErrYok), errors.Is(err, kapi.ErrEskiYok):
+	case errors.Is(err, kapi.ErrYok), errors.Is(err, kapi.ErrEskiYok), errors.Is(err, kapi.ErrEskiDevralma):
 		hataYaz(w, http.StatusConflict, err.Error())
 	case errors.As(err, &adh):
 		hataYaz(w, http.StatusConflict, err.Error())

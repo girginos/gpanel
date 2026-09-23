@@ -103,8 +103,22 @@ func pythonCryptDogrula(parola, hash string) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(out))), []byte(hash)) == 1
 }
 
-// kapiCoz: isteğin panel kapısı. Testlerde değiştirilebilen dikiş.
-var kapiCoz = kapi.Istek
+// Dikişler (testler): isteğin panel kapısı, root parola doğrulaması, kapı giriş kanıtı.
+var (
+	kapiCoz           = kapi.Istek
+	rootParolaKontrol = rootParolaDogrula
+	kapiGirisKaydet   = kapi.GirisiKaydet
+)
+
+// kapiKanitiKaydet: başarılı giriş, girilen kapının erişilebilir olduğunun kanıtıdır
+// (eski kapı admin kanıtı olmadan kapanmaz). Kararı kapi.GirisiKaydet verir: nginx'ten
+// kanıtlı başlık, rolün GÜNCEL portu, loopback olmayan istemci — zorlamadan bağımsız.
+// Hata girişi engellemez: kanıt yazılamazsa eski kapı açık kalır (güvenli başarısızlık).
+func kapiKanitiKaydet(rol string, r *http.Request) {
+	if err := kapiGirisKaydet(kapi.AyarYolu, rol, r, time.Now().Unix()); err != nil {
+		log.Printf("kapi: %s kapısı giriş kanıtı kaydedilemedi: %v — eski kapı açık kalır", rol, err)
+	}
+}
 
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	// 🔴 KAPI: bu uç (admin + bayi girişi) müşteri kapısında YOKTUR. Kimlik bilgisi hiç
@@ -131,7 +145,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		h.resellerLogin(w, r, req, istekKapi)
 		return
 	}
-	if !rootParolaDogrula(req.Parola) {
+	if !rootParolaKontrol(req.Parola) {
 		writeAudit(h.DB, 0, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
@@ -187,13 +201,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAudit(h.DB, adminUID, "root", httpx.DenetimIP(r), "auth.login", "root", true)
-	if istekKapi == kapi.Admin {
-		// Yeni admin kapısından ilk başarılı giriş = dış erişilebilirlik kanıtı; eski
-		// kapı bu olmadan kapanmaz (sağlayıcı firewall'u portu kesmiş olabilir).
-		if err := kapi.AdminGirisiniKaydet(kapi.AyarYolu, time.Now().Unix()); err != nil {
-			log.Printf("kapi: admin kapısı doğrulaması kaydedilemedi: %v — eski kapı açık kalır", err)
-		}
-	}
+	kapiKanitiKaydet(kapi.Admin, r)
 
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = adminUID
@@ -279,6 +287,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 		// login ekranina geri atiliyor ve donguden cikamiyor.
 		`UPDATE users SET last_login_at=NOW(), last_login_ip=?, last_activity_ts=UNIX_TIMESTAMP() WHERE id=?`, httpx.ClientIP(r), id)
 	writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, true, id)
+	kapiKanitiKaydet(kapi.Bayi, r)
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = id
 	resp.Kullanici.Adi = req.Kullanici

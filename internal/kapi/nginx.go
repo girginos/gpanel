@@ -101,12 +101,27 @@ func GenelPortlar(conf string) []int {
 	return out
 }
 
-// kapiSatiri: X-Real-IP çapasının yanına eklenen başlık satırı (girintisiz).
-const kapiSatiri = "proxy_set_header " + Baslik + " $gp_kapi;"
+// KapiSatiri: X-Real-IP çapasının yanına eklenen başlık satırı (girintisiz). Değer
+// kapıyı, isteği kabul eden GERÇEK portu ve paylaşılan proxy gizlisini taşır (bkz.
+// kanitliKapiPort) — gizli değişince satır da değişir, Heal yeniden yazar.
+func KapiSatiri(gizli string) string {
+	return fmt.Sprintf("proxy_set_header %s \"$gp_kapi $server_port %s\";", Baslik, gizli)
+}
 
 // realIPCapa: panelhardening'in X-Gosp-Proxy için kullandığı AYNI çapa → kapı
 // başlığı tam olarak Go backend'e giden location'lara (/api/ + login) girer.
 const realIPCapa = "proxy_set_header X-Real-IP $remote_addr;"
+
+// Secenek: Uzlastir'in ortam bilgisi (dosya/G-Ç okuması provisioner'dadır).
+type Secenek struct {
+	// Gizli: paylaşılan proxy gizlisi — kapı başlığı değerine gömülür.
+	Gizli string
+	// AdminLoopback: operatör erisim "masaüstü" modunda (yönetici yüzeyi internete
+	// kapalı). Yeni admin kapısı da yalnız 127.0.0.1'de dinler, IPv6 satırı erisim
+	// biçiminde yorumlu yazılır: admin portu değişince operatörün bilinçli kapatması
+	// sessizce geri alınmasın (firewall'da da açılmaz — genel değildir).
+	AdminLoopback bool
+}
 
 // Uzlastir: _panel.conf'u ayara uyumlar (EKLEYİCİ):
 //  1. her kapı portu (roller + açık eski portlar) için HİÇ satırı yoksa
@@ -115,8 +130,11 @@ const realIPCapa = "proxy_set_header X-Real-IP $remote_addr;"
 //     varsayılanıdır; iki default_server aynı portta `nginx -t`'yi düşürür.
 //  2. her X-Real-IP çapasının hemen ardına kapı başlığını yerleştirir (idempotent).
 //
-// Çapa bulunamazsa hata döner: başlık enjekte edilmeden zorlama AÇILMAMALI.
-func Uzlastir(conf string, a *Ayar, simdi int64) (string, error) {
+// Çapa ya da gizli yoksa hata döner: başlık enjekte edilmeden zorlama AÇILMAMALI.
+func Uzlastir(conf string, a *Ayar, simdi int64, s Secenek) (string, error) {
+	if s.Gizli == "" {
+		return conf, fmt.Errorf("proxy gizlisi yok — kapı başlığı yazılamaz")
+	}
 	satirlar := strings.Split(conf, "\n")
 	dinlemeler := Dinlemeler(satirlar)
 	if len(dinlemeler) == 0 {
@@ -152,6 +170,13 @@ func Uzlastir(conf string, a *Ayar, simdi int64) (string, error) {
 		if var4[p] || var6[p] {
 			continue
 		}
+		if p == a.Admin && s.AdminLoopback {
+			eklenecek = append(eklenecek, fmt.Sprintf("%slisten 127.0.0.1:%d ssl; # gp-kapi", girinti, p))
+			if ipv6Var {
+				eklenecek = append(eklenecek, fmt.Sprintf("%s# [erisim:masaustu] listen [::]:%d ssl; # gp-kapi", girinti, p))
+			}
+			continue
+		}
 		eklenecek = append(eklenecek, fmt.Sprintf("%slisten %d ssl; # gp-kapi", girinti, p))
 		if ipv6Var {
 			eklenecek = append(eklenecek, fmt.Sprintf("%slisten [::]:%d ssl; # gp-kapi", girinti, p))
@@ -164,16 +189,16 @@ func Uzlastir(conf string, a *Ayar, simdi int64) (string, error) {
 		yeni = append(yeni, satirlar[sonListen+1:]...)
 		satirlar = yeni
 	}
-	s, n := basligiYerlestir(strings.Join(satirlar, "\n"))
+	sonuc, n := basligiYerlestir(strings.Join(satirlar, "\n"), KapiSatiri(s.Gizli))
 	if n == 0 {
 		return conf, fmt.Errorf("X-Real-IP çapası yok — kapı başlığı enjekte edilemedi")
 	}
-	return s, nil
+	return sonuc, nil
 }
 
 // basligiYerlestir: eski kapı başlığı satırlarını siler, her X-Real-IP çapasının
-// ardına yenisini ekler. Kaç çapaya eklendiğini döner.
-func basligiYerlestir(conf string) (string, int) {
+// ardına satir'ı ekler. Kaç çapaya eklendiğini döner.
+func basligiYerlestir(conf, satir string) (string, int) {
 	var out []string
 	n := 0
 	for _, ln := range strings.Split(conf, "\n") {
@@ -183,7 +208,7 @@ func basligiYerlestir(conf string) (string, int) {
 		out = append(out, ln)
 		if strings.Contains(ln, realIPCapa) {
 			ind := ln[:len(ln)-len(strings.TrimLeft(ln, " \t"))]
-			out = append(out, ind+kapiSatiri)
+			out = append(out, ind+satir)
 			n++
 		}
 	}
@@ -202,10 +227,14 @@ func KapiBasliginiSil(conf string) string {
 	return strings.Join(out, "\n")
 }
 
-// BaslikTamMi: her X-Real-IP çapasının hemen ardında kapı başlığı var mı?
-// Zorlama YALNIZ bu true iken açılır — başlıksız bir location kalırsa oradaki
-// istekler kapısız gelir ve reddedilir; eksik enjeksiyon sessiz kilitlenmedir.
-func BaslikTamMi(conf string) bool {
+// BaslikTamMi: her X-Real-IP çapasının hemen ardında GÜNCEL gizliyle kapı başlığı var
+// mı? Zorlama YALNIZ bu true iken açılır — başlıksız ya da eski gizlili bir location
+// kalırsa oradaki istekler kapısız gelir; eksik enjeksiyon sessiz kilitlenmedir.
+func BaslikTamMi(conf, gizli string) bool {
+	if gizli == "" {
+		return false
+	}
+	beklenen := KapiSatiri(gizli)
 	satirlar := strings.Split(conf, "\n")
 	capa := 0
 	for i, ln := range satirlar {
@@ -213,7 +242,7 @@ func BaslikTamMi(conf string) bool {
 			continue
 		}
 		capa++
-		if i+1 >= len(satirlar) || strings.TrimSpace(satirlar[i+1]) != kapiSatiri {
+		if i+1 >= len(satirlar) || strings.TrimSpace(satirlar[i+1]) != beklenen {
 			return false
 		}
 	}
@@ -253,7 +282,34 @@ func GenelListenKaldir(conf string, tut map[int]bool) (string, []int) {
 	return strings.Join(out, "\n"), portlar
 }
 
-// MapIcerigi: 00-gosp-kapi.conf içeriği.
+// YerelPortlar: panel bloğunda YALNIZ loopback'te dinlenen (genel satırı olmayan) ve kapı
+// haritasında bulunmayan portlar — erisim masaüstü / SSH tüneli yolu (ör. geçişten önce
+// 127.0.0.1'e çekilmiş 9443). Haritada YÖNETİCİ kapısına eşlenir: oraya yalnız sunucunun
+// kendisi ve SSH tüneli ulaşır. Eşlenmezse `default bilinmeyen` geçişten sonra tünel
+// yolunu sessizce öldürürdü (giriş 404, API 401).
+func YerelPortlar(conf string, a *Ayar, simdi int64) []int {
+	harita := a.PortHaritasi(simdi)
+	genel, yerel := map[int]bool{}, map[int]bool{}
+	for _, d := range Dinlemeler(strings.Split(conf, "\n")) {
+		switch {
+		case d.Port == 0 || d.Yorum:
+		case d.Loopback:
+			yerel[d.Port] = true
+		default:
+			genel[d.Port] = true
+		}
+	}
+	var out []int
+	for p := range yerel {
+		if !genel[p] && harita[p] == "" {
+			out = append(out, p)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// MapIcerigi: 00-gosp-kapi.conf içeriği. yerel: YerelPortlar (yönetici kapısına eşlenir).
 //
 // 🔴 a == nil (kapı modu kapalı) iken de $gp_kapi TANIMLI kalır: tanımsız bir nginx
 // değişkeni `nginx -t`'yi GLOBAL düşürür — hiçbir domain reload edilemez (bkz.
@@ -262,7 +318,7 @@ func GenelListenKaldir(conf string, tut map[int]bool) (string, []int) {
 //
 // Zorlama açıkken varsayılan "bilinmeyen": haritada olmayan bir porttan gelen
 // (yanlış yapılandırma) istek sessizce "eski" gibi davranmaz, reddedilir.
-func MapIcerigi(a *Ayar, simdi int64) string {
+func MapIcerigi(a *Ayar, simdi int64, yerel []int) string {
 	var b strings.Builder
 	b.WriteString("# GirginOSPanel — panel kapı haritası (ADR-GP-001). OTOMATİK — elle düzenlemeyin.\n")
 	b.WriteString("# Kaynak: " + AyarYolu + " · yönetim: girginospanel-server kapi <durum|uzat|eski-kapat|rol-port>\n")
@@ -274,6 +330,11 @@ func MapIcerigi(a *Ayar, simdi int64) string {
 		m := a.PortHaritasi(simdi)
 		for _, p := range SiraliPortlar(m) {
 			fmt.Fprintf(&b, "    %d %s;\n", p, m[p])
+		}
+		for _, p := range yerel {
+			if m[p] == "" {
+				fmt.Fprintf(&b, "    %d %s; # yalnız loopback (SSH tüneli)\n", p, Admin)
+			}
 		}
 	}
 	b.WriteString("}\n")

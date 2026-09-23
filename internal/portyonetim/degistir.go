@@ -103,8 +103,14 @@ func DisPortDegistir(ctx context.Context, db *sql.DB, yeniPort int, aktorUID *in
 		return nil, errDegisiklikSuruyor
 	}
 	is := isBaslat("dis", eski, yeniPort)
-	go disYurut(context.Background(), db, is, eski, yeniPort, aktorUID)
+	disBaslat(db, is, eski, yeniPort, aktorUID)
 	return is, nil
+}
+
+// disBaslat: dış port değişimini arka planda başlatır. Dikiş: testler gerçek nginx'e ve
+// firewall'a dokunan disYurut'u asla koşturmamalı (koruma gerilese bile).
+var disBaslat = func(db *sql.DB, is *Is, eski, yeni int, aktor *int64) {
+	go disYurut(context.Background(), db, is, eski, yeni, aktor)
 }
 
 /* ============================================================
