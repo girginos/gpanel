@@ -383,6 +383,14 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 	for _, d := range dosyalar {
 		if !bytes.Equal(d.eski, d.yeni) {
 			degisen = append(degisen, d)
+			continue
+		}
+		// İçerik aynı ama izin geniş (önceki sürüm haritayı 0644 yazdı): yalnız yazımda
+		// daraltılsaydı rol etiketleri (yönetici portu) yerel kiracılara açık KALIRDI.
+		if d.ozel && d.eski != nil {
+			if fi, err := os.Stat(d.yol); err == nil && fi.Mode().Perm() != 0o640 {
+				kapiOzelIzin(d.yol)
+			}
 		}
 	}
 	if len(degisen) == 0 && !zorlaReload {

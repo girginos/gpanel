@@ -134,7 +134,8 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	kapiProxyGizli = func() string { return s.gizli }
 	kapiMasaustu = func() bool { return s.masaustu }
 	kapiVhostIzin = func() {}
-	kapiOzelIzin = func(yol string) { s.ozelIzin = append(s.ozelIzin, yol) }
+	// Üretimdeki gibi izni gerçekten daraltır (chgrp testte yok): tekrar çağrılar ölçülebilsin.
+	kapiOzelIzin = func(yol string) { s.ozelIzin = append(s.ozelIzin, yol); _ = os.Chmod(yol, 0o640) }
 	if err := os.WriteFile(kapiVhostYolu, []byte(conf), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +215,28 @@ func TestKapiHealHaritaOzelIzin(t *testing.T) {
 	kapiUzlastir(1000)
 	if len(s2.ozelIzin) != 1 || s2.ozelIzin[0] != kapiMapYolu {
 		t.Fatalf("var olan harita da daraltılmalı: %v", s2.ozelIzin)
+	}
+	// İçerik AYNI ama izin 0644 (önceki sürümün yazdığı dosya, güncellemeden sonra): dosya
+	// yeniden yazılmasa da izin daraltılmalı — canlı test VPS'inde yakalanan durum.
+	s3 := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiUzlastir(1000)
+	if err := os.Chmod(kapiMapYolu, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	once := oku(t, kapiMapYolu)
+	s3.ozelIzin = nil
+	kapiUzlastir(1000)
+	if oku(t, kapiMapYolu) != once {
+		t.Fatal("ön koşul: harita içeriği değişmemeli")
+	}
+	if fi, err := os.Stat(kapiMapYolu); err != nil || fi.Mode().Perm() != 0o640 || len(s3.ozelIzin) != 1 {
+		t.Fatalf("içerik aynıyken de geniş izin daraltılmalı: izin=%v çağrı=%v err=%v", fi.Mode().Perm(), s3.ozelIzin, err)
+	}
+	// İzin zaten doğruysa her turda tekrar chgrp/chmod koşmaz.
+	s3.ozelIzin = nil
+	kapiUzlastir(1000)
+	if len(s3.ozelIzin) != 0 {
+		t.Fatalf("izin doğruyken tekrar dokunulmamalı: %v", s3.ozelIzin)
 	}
 }
 
