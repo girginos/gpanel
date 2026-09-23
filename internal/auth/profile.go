@@ -133,7 +133,9 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 		// TAZE token doneriz, kullanici yeniden giris yapmak zorunda kalmasin.
 		h.oturumlariDusur(c.UserID)
 		writeAudit(h.DB, c.UserID, c.Username, httpx.ClientIP(r), "auth.parola", c.Username, true, kapsamRol(c))
-		yeniTok, _ := IssueResellerAt(h.Secret, h.LifetimeSec, c.UserID, c.Username, c.UserID, h.gecersizDamga(c.UserID))
+		// Yeni token AYNI kapıya bağlanır: kapısız üretilseydi rol kapısında RequireAuth
+		// onu reddeder ve bayi parolasını değiştirdiği an oturumdan atılırdı.
+		yeniTok, _ := IssueResellerAt(h.Secret, h.LifetimeSec, c.UserID, c.Username, c.UserID, h.gecersizDamga(c.UserID), kapiCoz(r))
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "token": yeniTok})
 		return
 	}

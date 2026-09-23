@@ -272,6 +272,34 @@ func GirisIzinli(istekKapi, rol string) bool {
 	return istekKapi == rol
 }
 
+var adminKaydedildi atomic.Bool
+
+// AdminGirisiniKaydet: admin'in YENİ admin kapısından başarılı girişini kaydeder —
+// eski kapının kapanabilmesi için tek gerçek dış-erişilebilirlik kanıtı (bkz.
+// Ayar.AdminDogrulandi). Dosyaya yalnız ilk seferde yazar; sonrası bellekten döner.
+// Hata girişi ENGELLEMEZ: kanıt yazılamazsa eski kapı açık kalır (güvenli başarısızlık).
+func AdminGirisiniKaydet(yol string, simdi int64) error {
+	if adminKaydedildi.Load() {
+		return nil
+	}
+	a, err := Oku(yol)
+	if err != nil {
+		return err
+	}
+	if a.AdminDogrulandi == 0 {
+		if err := Guncelle(yol, func(x *Ayar) error {
+			if x.AdminDogrulandi == 0 {
+				x.AdminDogrulandi = simdi
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	adminKaydedildi.Store(true)
+	return nil
+}
+
 // TokenUyumlu: token'ın bağlı olduğu kapı, isteğin kapısında geçerli mi?
 //   - "" (zorlama kapalı) → her token (geri alma/ilk açılışta kimse atılmasın)
 //   - Eski → bağsız (geçiş öncesi) ve eski-kapısı token'ları

@@ -15,6 +15,7 @@ import (
 	yescrypt "github.com/openwall/yescrypt-go"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kapi"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -102,7 +103,19 @@ func pythonCryptDogrula(parola, hash string) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(out))), []byte(hash)) == 1
 }
 
+// kapiCoz: isteğin panel kapısı. Testlerde değiştirilebilen dikiş.
+var kapiCoz = kapi.Istek
+
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	// 🔴 KAPI: bu uç (admin + bayi girişi) müşteri kapısında YOKTUR. Kimlik bilgisi hiç
+	// işlenmeden, var-olmayan bir rotayla BİREBİR aynı yanıt döner (chi varsayılanı =
+	// http.NotFound) → müşteri portundan yönetici parolası denemek imkânsız, ucun
+	// varlığı da sızmaz. Bilinmeyen kapı (doğrudan :8080 / haritasız port) da aynı.
+	istekKapi := kapiCoz(r)
+	if istekKapi == kapi.Musteri || istekKapi == kapi.Bilinmeyen {
+		http.NotFound(w, r)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64KB üstü login gövdesi = kötüye kullanım (DoS)
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -115,11 +128,21 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Kullanici != "root" {
-		h.resellerLogin(w, r, req)
+		h.resellerLogin(w, r, req, istekKapi)
 		return
 	}
 	if !rootParolaDogrula(req.Parola) {
 		writeAudit(h.DB, 0, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false)
+		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
+		return
+	}
+	// 🔴 KAPI kontrolü parola doğrulamasından HEMEN SONRA ve 2FA'dan ÖNCE: 2FA açıkken
+	// doğru parola {"iki_fa_gerekli":true} (200) döndürür — kapıya sonra bakılsaydı bayi
+	// portundan root parolasının doğru olduğu öğrenilirdi (oracle). Yanıt ve iş yükü
+	// yanlış parolayla BİREBİR aynı; yalnız denetim kaydı ayrışır: geçerli yönetici
+	// parolasının yanlış kapıda denenmesi = parola ele geçirilmiş olabilir sinyali.
+	if !kapi.GirisIzinli(istekKapi, kapi.Admin) {
+		writeAudit(h.DB, 1, req.Kullanici, httpx.DenetimIP(r), "auth.login.kapi", req.Kullanici, false)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
@@ -158,12 +181,19 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const adminUID = int64(1)
-	tok, err := IssueAt(h.Secret, h.LifetimeSec, adminUID, "root", "admin", h.gecersizDamga(adminUID))
+	tok, err := IssueAt(h.Secret, h.LifetimeSec, adminUID, "root", "admin", h.gecersizDamga(adminUID), istekKapi)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return
 	}
 	writeAudit(h.DB, adminUID, "root", httpx.DenetimIP(r), "auth.login", "root", true)
+	if istekKapi == kapi.Admin {
+		// Yeni admin kapısından ilk başarılı giriş = dış erişilebilirlik kanıtı; eski
+		// kapı bu olmadan kapanmaz (sağlayıcı firewall'u portu kesmiş olabilir).
+		if err := kapi.AdminGirisiniKaydet(kapi.AyarYolu, time.Now().Unix()); err != nil {
+			log.Printf("kapi: admin kapısı doğrulaması kaydedilemedi: %v — eski kapı açık kalır", err)
+		}
+	}
 
 	resp := loginResp{Token: tok, Bitis: time.Now().Add(time.Duration(h.LifetimeSec) * time.Second).Unix()}
 	resp.Kullanici.ID = adminUID
@@ -181,7 +211,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 // ve olmayan bayi kullanici adi zamanlamayla (~180x) ayirt edilemesin.
 var dummyBcryptHash, _ = bcrypt.GenerateFromPassword([]byte("gosp-timing-guard-x9f2"), 12)
 
-func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req loginReq) {
+func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req loginReq, istekKapi string) {
 	var id int64
 	var hash, fullName, status string
 	err := h.DB.QueryRow(`SELECT id, password_hash, COALESCE(full_name,''), status FROM users WHERE username=? AND role='reseller'`, req.Kullanici).Scan(&id, &hash, &fullName, &status)
@@ -193,6 +223,13 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Parola)) != nil {
 		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
+		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
+		return
+	}
+	// 🔴 KAPI: parola doğrulandıktan hemen sonra; askı (403) ve 2FA (200) yanıtlarından
+	// ÖNCE — ikisi de "parola doğru" diye ayrışan yanıtlardır (bkz. Login).
+	if !kapi.GirisIzinli(istekKapi, kapi.Bayi) {
+		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login.kapi", req.Kullanici, false, id)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
@@ -232,7 +269,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 			}
 		}
 	}
-	tok, err := IssueResellerAt(h.Secret, h.LifetimeSec, id, req.Kullanici, id, h.gecersizDamga(id))
+	tok, err := IssueResellerAt(h.Secret, h.LifetimeSec, id, req.Kullanici, id, h.gecersizDamga(id), istekKapi)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "token üretilemedi")
 		return

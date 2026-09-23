@@ -12,6 +12,7 @@ import (
 	"girginospanel/internal/auth"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kapi"
 )
 
 type Handlers struct {
@@ -24,8 +25,18 @@ type loginReq struct {
 	Parola    string `json:"parola"`
 }
 
+// kapiCoz: isteğin panel kapısı. Testlerde değiştirilebilen dikiş.
+var kapiCoz = kapi.Istek
+
 // Login: FTP user/password ile, FTP hesabının bağlı olduğu domain için JWT döner
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	// 🔴 KAPI: müşteri girişi yalnız müşteri kapısında (ve geçişteki eski kapıda) vardır.
+	// Yönetici/bayi portunda kimlik hiç işlenmeden var-olmayan rotayla aynı yanıt döner.
+	istekKapi := kapiCoz(r)
+	if !kapi.GirisIzinli(istekKapi, kapi.Musteri) {
+		http.NotFound(w, r)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64KB üstü login gövdesi = kötüye kullanım (DoS)
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -72,6 +83,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		DomainID:   domainID,
 		Kullanici:  req.Kullanici,
 		AlanAdi:    alanAdi,
+		Kapi:       istekKapi,
 	}
 	tok, exp, err := auth.GenerateMusteri(h.Secret, c, 24*3600)
 	if err != nil {

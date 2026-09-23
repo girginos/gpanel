@@ -12,17 +12,21 @@ type Claims struct {
 	Username   string `json:"usr"`
 	Role       string `json:"rol"`
 	ResellerID int64  `json:"rid,omitempty"` // reseller token'i icin sahiplik scope-anahtari (kendi users.id)
+	// Kapi: token'in alindigi panel kapisi (kapi.Admin/Bayi/Eski; "" = kapi modu
+	// kapaliyken alinmis, bagsiz). RequireAuth baska kapida kullanimi reddeder.
+	Kapi string `json:"kpi,omitempty"`
 	jwt.RegisteredClaims
 }
 
 func Issue(secret []byte, lifetimeSec int, uid int64, username, role string) (string, error) {
-	return IssueAt(secret, lifetimeSec, uid, username, role, 0)
+	return IssueAt(secret, lifetimeSec, uid, username, role, 0, "")
 }
 
 // IssueAt: enErkenIat verilirse token'in "iat" degeri en az o degere cekilir.
 // Oturum-dusurme damgasiyla ayni saniyeye denk gelen YENI girislerin kendi
 // kendini gecersiz kilmasini onler (bkz. middleware.oturumGecerli).
-func IssueAt(secret []byte, lifetimeSec int, uid int64, username, role string, enErkenIat int64) (string, error) {
+// kapiAdi: token'in baglanacagi panel kapisi (kapi.Istek(r)); "" = bagsiz.
+func IssueAt(secret []byte, lifetimeSec int, uid int64, username, role string, enErkenIat int64, kapiAdi string) (string, error) {
 	now := time.Now()
 	if enErkenIat > now.Unix() {
 		now = time.Unix(enErkenIat, 0)
@@ -31,6 +35,7 @@ func IssueAt(secret []byte, lifetimeSec int, uid int64, username, role string, e
 		UserID:   uid,
 		Username: username,
 		Role:     role,
+		Kapi:     kapiAdi,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(lifetimeSec) * time.Second)),
@@ -43,11 +48,11 @@ func IssueAt(secret []byte, lifetimeSec int, uid int64, username, role string, e
 
 // IssueReseller: reseller token'i uretir (role=reseller, ResellerID=kendi uid).
 func IssueReseller(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64) (string, error) {
-	return IssueResellerAt(secret, lifetimeSec, uid, username, resellerID, 0)
+	return IssueResellerAt(secret, lifetimeSec, uid, username, resellerID, 0, "")
 }
 
 // IssueResellerAt: bkz. IssueAt — bayi tokeni icin ayni davranis.
-func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64) (string, error) {
+func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64, kapiAdi string) (string, error) {
 	now := time.Now()
 	if enErkenIat > now.Unix() {
 		now = time.Unix(enErkenIat, 0)
@@ -57,6 +62,7 @@ func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string,
 		Username:   username,
 		Role:       "reseller",
 		ResellerID: resellerID,
+		Kapi:       kapiAdi,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(lifetimeSec) * time.Second)),
@@ -103,7 +109,8 @@ type MusteriClaims struct {
 	DomainID   int64  `json:"did"`
 	Kullanici  string `json:"usr"`
 	AlanAdi    string `json:"alan"`
-	Tip        string `json:"tip"` // "musteri"
+	Tip        string `json:"tip"`           // "musteri"
+	Kapi       string `json:"kpi,omitempty"` // alindigi panel kapisi (bkz. Claims.Kapi)
 	jwt.RegisteredClaims
 }
 

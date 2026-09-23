@@ -10,6 +10,7 @@ import (
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kapi"
 	"girginospanel/internal/oturumbosta"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,9 @@ var scopeDB *sql.DB
 
 // Init: middleware paketine DB handle'ı verir (müşteri-scope askı kontrolü için).
 func Init(db *sql.DB) { scopeDB = db }
+
+// kapiCoz: isteğin panel kapısı. Testlerde değiştirilebilen dikiş.
+var kapiCoz = kapi.Istek
 
 type ctxKey int
 
@@ -47,9 +51,18 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
 				return
 			}
+			istekKapi := kapiCoz(r)
 
 			// Önce admin claims dene
 			if c, err := auth.Parse(secret, tokenRaw); err == nil {
+				// 🔴 KAPI: token alındığı kapıya bağlıdır; başka kapıda geçmez (çalınan
+				// token taşınamaz, müşteri portundan yönetici API'si çağrılamaz). Yanıt
+				// genel "geçersiz oturum" — token'ın hangi kapıya ait olduğu sızmaz.
+				// Ucuz kontrol → DB'li iptal kontrolünden ÖNCE.
+				if !kapi.TokenUyumlu(istekKapi, c.Kapi) {
+					httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
+					return
+				}
 				// 🔴 Imza gecerli olmasi YETMEZ: askiya alinan / silinen / parolasi
 				// degisen hesabin ACIK oturumu da dusmeli. Aksi halde askiya alinan
 				// bayi, token omru (8 saat) boyunca hosting acmaya devam ediyordu.
@@ -77,6 +90,10 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 			}
 			// Sonra müşteri claims dene
 			if mc, err := auth.ParseMusteri(secret, tokenRaw); err == nil {
+				if !kapi.TokenUyumlu(istekKapi, mc.Kapi) {
+					httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
+					return
+				}
 				// İmza tek başına yetmez: hesap askıya alınmış, parolası
 				// değişmiş veya domain DEVREDİLMİŞ olabilir (bkz.
 				// musteri_oturum.go). Sunucu-taraflı iptal kontrolü.
