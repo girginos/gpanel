@@ -87,6 +87,24 @@ esac
 PANEL_HEALTH="http://$PANEL_HEALTH_ADRES/healthz"
 surum() { curl -fsS "$PANEL_HEALTH" 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4; }
 
+# kapi_adresleri: rol kapısı adreslerini gösterir (kapı modu yoksa sessiz). Otomatik
+# geçişten sonra yöneticinin YENİ admin adresini öğrendiği yer burası + eski kapıdaki
+# panel uyarısıdır.
+kapi_adresleri() {
+  local a b m ip
+  a=$("$BIN" kapi port admin 2>/dev/null) || return 0
+  b=$("$BIN" kapi port bayi 2>/dev/null); m=$("$BIN" kapi port musteri 2>/dev/null)
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  step "Panel kapıları"
+  echo "   Yönetici (admin): https://${ip:-SUNUCU_IP}:$a   ← bu adresi GİZLİ tutun"
+  echo "   Bayi:             https://${ip:-SUNUCU_IP}:$b"
+  echo "   Müşteri:          https://${ip:-SUNUCU_IP}:$m"
+  if "$BIN" kapi durum 2>/dev/null | grep -E '^  eski'; then
+    warn "eski adres, admin YENİ admin adresinden bir kez giriş yapana dek kapanmaz"
+  fi
+  warn "bulut sağlayıcınızın güvenlik duvarı varsa TCP $a, $b, $m portlarını orada da açın"
+}
+
 [ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
 [ -x "$BIN" ] || die "GirginOSPanel kurulu değil ($BIN yok) — önce install.sh çalıştırın"
 command -v curl >/dev/null || die "curl gerekli"
@@ -555,6 +573,20 @@ elif [ "$QROOTFS" = "xfs" ]; then
   [ -f "$QSENTINEL" ] && rm -f "$QSENTINEL" 2>/dev/null && ok "disk kotası aktif — reboot sentinel temizlendi" || ok "disk kotası aktif (kök XFS user quota)"
 fi
 
+# 10c) Rol kapıları (ADR-GP-001) — mevcut kurulumu KİLİTLENMESİZ geçir: admin / bayi /
+# müşteri ayrı rastgele portlara alınır; bugünkü genel port(lar) "eski kapı" olur ve en
+# az 60 gün VE admin yeni admin kapısından bir kez girene dek açık kalır. RESTART'TAN
+# ÖNCE: yeni binary'nin açılış Heal'i uygular (tek restart). İdempotent (geçiş
+# yapılmışsa dokunmaz); yalnız loopback'te dinleyen (erisim masaüstü) sunucu atlanır.
+# Rollback olursa eski binary kapi.json'u tanımaz → davranış değişmez.
+if [ ! -f /etc/girginospanel/kapi.json ]; then
+  if "$BIN" kapi gecis >/dev/null 2>&1; then
+    [ -f /etc/girginospanel/kapi.json ] && ok "rol kapıları geçişi hazırlandı (panel açılışında uygulanır)"
+  else
+    warn "rol kapıları geçişi yapılamadı — panel tek portla devam eder (sonra: girginospanel-server kapi gecis)"
+  fi
+fi
+
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
 step "Yeniden başlatılıyor"
 systemctl restart girginospanel
@@ -634,6 +666,7 @@ fi
 if [ "$DOGRULAMA_KODU" -ne 0 ]; then
   die "guncelleme uygulandi ama DOGRULAMA BASARISIZ — yukaridaki ✗ satirlarini duzeltip: girginospanel-dogrula"
 fi
+  kapi_adresleri
   echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
 else
   warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye + güncelleme öncesi DB'ye dönülüyor"

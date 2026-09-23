@@ -70,14 +70,15 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	eskiVhost, eskiCatch, eskiMap, eskiAyar := kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu
 	eskiAcme, eskiYay := kapiAcmeYolu, KapiGenelPortUzlastir
 	eskiKomut, eskiAc, eskiKapat := kapiNginxKomut, kapiFwAc, kapiFwKapat
-	eskiDinl, eskiGizli, eskiIzin := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin
+	eskiDinl, eskiGizli, eskiIzin, eskiAktif := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif
 	t.Cleanup(func() {
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
 		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
 		kapiNginxKomut, kapiFwAc, kapiFwKapat = eskiKomut, eskiAc, eskiKapat
-		kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin = eskiDinl, eskiGizli, eskiIzin
+		kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif = eskiDinl, eskiGizli, eskiIzin, eskiAktif
 		kapi.ZorlamaAyarla(false)
 	})
+	kapiNginxAktif = func() bool { return true }
 	// 🔴 HER yol geçici dizine: kapiNginxUygula dosya YAZAR; gerçek /etc yolunda kalan
 	// tek bir dikiş testi canlı nginx dosyasını değiştirirdi.
 	kapiVhostYolu = filepath.Join(s.dir, "_panel.conf")
@@ -339,6 +340,24 @@ func TestKapiHealCatchallRolPortlarinaGenisler(t *testing.T) {
 	}
 	if strings.Contains(c, "8443") {
 		t.Error("kaldırılan 8443 catchall'dan da çıkmalı")
+	}
+}
+
+// Taze kurulumda panel nginx'ten önce kalkabilir: doğrulanmış (nginx -t geçen)
+// yapılandırma reload edilemedi diye GERİ ALINMAZ; nginx kalkınca onunla başlar.
+func TestKapiHealNginxDurukkenGeriAlinmaz(t *testing.T) {
+	s := kapiTestKur(t, kapiTestSablon, rolAyar())
+	kapiNginxAktif = func() bool { return false }
+	s.dinliyor = false // nginx yokken admin portu da dinlemez → kaldırma aşaması atlanır
+	kapiUzlastir(1000)
+	conf := oku(t, kapiVhostYolu)
+	if !strings.Contains(conf, "listen 21001 ssl;") || !kapi.BaslikTamMi(conf) {
+		t.Fatalf("doğrulanan yapılandırma KORUNMALI:\n%s", conf)
+	}
+	for _, c := range s.cagrilar {
+		if strings.HasPrefix(c, "systemctl reload") {
+			t.Fatal("nginx çalışmıyorken reload denenmemeli")
+		}
 	}
 }
 

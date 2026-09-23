@@ -143,7 +143,7 @@ cp "$A/ops/"* /opt/girginospanel/src/scripts/ 2>/dev/null
 ok "ops-tool'lar (/usr/local/bin: optimize, redis-setup, ftp-setup, backup-all, repair, jail, wp-redis)"
 
 # ============ 7) PANEL SSL (self-signed) ============
-step "7) Panel SSL (:8443 self-signed)"
+step "7) Panel SSL (self-signed)"
 if [ ! -f /etc/ssl/girginospanel/panel.crt ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout /etc/ssl/girginospanel/panel.key -out /etc/ssl/girginospanel/panel.crt \
@@ -159,6 +159,20 @@ step "8) nginx (panel vhost + phpMyAdmin + perf)"
 # zaten var; burada da eklersek "duplicate directive" ile nginx -t patlar.
 grep -q "client_max_body_size 10240m" /etc/nginx/nginx.conf || \
   sed -i '/^http {/a\    client_max_body_size 10240m;' /etc/nginx/nginx.conf
+# Rol kapıları (ADR-GP-001): admin / bayi / müşteri AYRI, kuruluma özel rastgele
+# portlardan girer. Taze kurulumda portlar atanır; mevcut bir panelin üstüne kurulumda
+# bugünkü port(lar) "eski kapı" olur ve admin yeni admin kapısından girene dek açık
+# kalır (kilitlenmesiz geçiş). kapi.json varsa portlar KORUNUR. 🔴 Şablon _panel.conf'u
+# ezmeden ÖNCE: geçiş bugünkü genel portları buradan okur. nginx'i panelin açılıştaki
+# Heal'i uygular (rol listen'ları + kapı başlığı + map).
+KAPI_CLI=/opt/girginospanel/bin/girginospanel-server
+if [ -f /etc/nginx/conf.d/_panel.conf ]; then
+  "$KAPI_CLI" kapi gecis && ok "rol kapıları: mevcut kurulum (portlar korunur / geçiş)" \
+    || warn "rol kapıları hazırlanamadı — panel tek portla çalışır (sonra: girginospanel-server kapi gecis)"
+else
+  "$KAPI_CLI" kapi kur && ok "rol kapıları: rastgele portlar atandı" \
+    || warn "rol kapıları atanamadı — panel şablon portuyla çalışır (sonra: girginospanel-server kapi kur)"
+fi
 cp "$A/nginx/_panel.conf"    /etc/nginx/conf.d/_panel.conf
 cp "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf
 cp "$A/nginx/php-fpm.conf"    /etc/nginx/conf.d/php-fpm.conf 2>/dev/null
@@ -311,8 +325,12 @@ command -v girginospanel-waf-setup >/dev/null 2>&1 && girginospanel-waf-setup >/
 
 # ============ 12) Panel başlat (migration startup'ta koşar) ============
 step "12) Panel başlatılıyor"
+# 🔴 ÖNCE nginx: panelin açılış Heal'i (rol kapısı listen'ları, kapı başlığı, proxy
+# gizlisi) nginx'i reload eder. nginx henüz kalkmamışsa panel doğrulanmış değişikliği
+# uygulayamaz ve rol kapıları bakım döngüsüne (15 dk) kadar gecikir.
+systemctl enable --now nginx >/dev/null 2>&1
 systemctl enable --now girginospanel >/dev/null 2>&1; sleep 3
-systemctl enable --now nginx >/dev/null 2>&1; systemctl restart nginx >/dev/null 2>&1
+systemctl restart nginx >/dev/null 2>&1
 if systemctl is-active --quiet girginospanel; then ok "girginospanel ACTIVE"; else journalctl -u girginospanel --no-pager -n 20; die "panel başlamadı"; fi
 
 # 🔴 Whitelabel çekirdek/ücretsiz — panelle BİRLİKTE gelir: otomatik kur.
@@ -352,15 +370,27 @@ command -v girginospanel-repair >/dev/null 2>&1 && girginospanel-repair --quiet 
 # ============ 15) DOĞRULAMA ============
 step "15) Doğrulama"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/null)
-API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
+# Panel portunu VARSAYMA: kapı modunda admin kapısı; değilse vhost'un ilk genel listen'ı.
+PPORT=$("$KAPI_CLI" kapi port admin 2>/dev/null) \
+  || PPORT=$(grep -hoE '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null | grep -oE '[0-9]+' | head -1)
+PPORT=${PPORT:-8443}
+CODE=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PPORT/" 2>/dev/null)
+API=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PPORT/api/v1/domains" 2>/dev/null)
 echo -e "  servisler: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel | tr '\n' ' ')"
-echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
+echo -e "  panel :$PPORT → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
 echo -e "  araçlar: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)   ·   composer $(command -v composer >/dev/null && echo ✓ || echo ✗)   ·   apache/httpd $(systemctl is-active httpd)"
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel kurulumu tamamlandı${c_0}"
-echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:8443${c_0}"
+if _kb=$("$KAPI_CLI" kapi port bayi 2>/dev/null) && _km=$("$KAPI_CLI" kapi port musteri 2>/dev/null); then
+  echo -e "   Yönetici (admin): ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}   ← bu adresi GİZLİ tutun"
+  echo -e "   Bayi:             ${c_b}https://${IP:-SUNUCU_IP}:$_kb${c_0}"
+  echo -e "   Müşteri:          ${c_b}https://${IP:-SUNUCU_IP}:$_km${c_0}"
+  echo -e "   ${c_y}!${c_0} Bulut sağlayıcınızın güvenlik duvarı varsa bu üç portu (TCP $PPORT, $_kb, $_km) orada da açın."
+  "$KAPI_CLI" kapi durum 2>/dev/null | grep -E '^  eski' || true
+else
+  echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}"
+fi
 echo -e "   Kullanıcı: ${c_b}root${c_0}   Parola: ${c_b}bu sunucunun root parolası${c_0}"
 echo -e "   (panel admin girişi sunucu root parolasını /etc/shadow hash'i ile doğrular)"
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"

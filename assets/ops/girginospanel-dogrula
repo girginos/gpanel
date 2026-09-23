@@ -282,6 +282,32 @@ esac
 fi
 
 # ══════════════════════════════════════════════════════════════════════
+# Role gates (ADR-GP-001): admin / reseller / customer enter through SEPARATE ports.
+# Each gate port must answer its OWN type through nginx (listen -> map -> header ->
+# proxy secret -> backend trust). If the chain is broken the panel fails SAFE (gate
+# rules off = single-port behaviour, nobody is locked out) — it still works, but role
+# separation is GONE, so this is a WARNING, not a critical. kapi.json is read directly:
+# the panel binary is NOT executed (an old binary would start a server on unknown args).
+_kapi_json=/etc/girginospanel/kapi.json
+kapi_portu() { grep -oE "\"$1\": *[0-9]+" "$_kapi_json" 2>/dev/null | grep -oE '[0-9]+$' | head -1; }
+if [ -f "$_kapi_json" ]; then
+  bas "Role gates"
+  for _kr in admin:yonetim bayi:yonetim musteri:musteri; do
+    _rol=${_kr%%:*}; _bek=${_kr#*:}; _kp=$(kapi_portu "$_rol")
+    if [ -z "$_kp" ]; then
+      uyar "gate $_rol" "COULD NOT MEASURE (no port in $_kapi_json)"
+      continue
+    fi
+    _tip=$(curl -sk --max-time 8 "https://127.0.0.1:$_kp/api/v1/kapi" 2>/dev/null | grep -oE '"tip":"[a-z]+"' | cut -d'"' -f4)
+    if [ "$_tip" = "$_bek" ]; then
+      gec "gate $_rol :$_kp" "$_tip"
+    else
+      uyar "gate $_rol :$_kp" "expected '$_bek', got '${_tip:-no answer}' — role separation OFF (single-port behaviour)"
+    fi
+  done
+fi
+
+# ══════════════════════════════════════════════════════════════════════
 bas "Catch-all vhosts"
 # 🔴 Because the port 80 catch-all document root was not created, `try_files` entered an
 # infinite internal redirect and returned 500 (4/4 servers in the fleet). 5xx = broken.

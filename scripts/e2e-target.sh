@@ -15,7 +15,14 @@
 # ════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
-API="https://127.0.0.1:8443/api/v1"
+# Rol kapilari (ADR-GP-001): panel portunu VARSAYMA. Kapi modunda E2E admin kapisindan
+# konusur (jeton kpi=admin); degilse vhost'un ilk genel listen'i.
+KAPI_JSON=/etc/girginospanel/kapi.json
+kapi_portu(){ grep -oE "\"$1\": *[0-9]+" "$KAPI_JSON" 2>/dev/null | grep -oE '[0-9]+$' | head -1; }
+PPORT=$(kapi_portu admin)
+[ -n "$PPORT" ] || PPORT=$(grep -hoE '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null | grep -oE '[0-9]+' | head -1)
+PPORT=${PPORT:-8443}
+API="https://127.0.0.1:$PPORT/api/v1"
 DOM="e2ekontrol.com"
 SK="c_e2ekontrol"
 ZONE="/var/named/${DOM}.zone"
@@ -60,8 +67,8 @@ baslik "A · Kurulum sagligi (taze kurulum regresyonlari)"
 
 systemctl is-active --quiet girginospanel && ok "panel servisi active" || no "panel servisi calismiyor"
 
-KOD=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 https://127.0.0.1:8443/giris)
-[ "$KOD" = "200" ] && ok "panel :8443 giris sayfasi 200" || no "panel :8443 -> HTTP $KOD"
+KOD=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 "https://127.0.0.1:$PPORT/giris")
+[ "$KOD" = "200" ] && ok "panel :$PPORT giris sayfasi 200" || no "panel :$PPORT -> HTTP $KOD"
 
 if [ -s /var/log/girginospanel-install.log ]; then
   ok "kurulum ayrinti logu var ($(wc -l < /var/log/girginospanel-install.log) satir)"
@@ -266,6 +273,55 @@ else
   atla "G blogu (frontend-dist yok)"
 fi
 
+
+baslik "K · Rol kapilari (ADR-GP-001)"
+
+kod(){ curl -sk --max-time 30 -o /dev/null -w '%{http_code}' "$@"; }
+kapi_tipi(){ curl -sk --max-time 10 "https://127.0.0.1:$1/api/v1/kapi" | alan tip; }
+if [ -f "$KAPI_JSON" ]; then
+  KA=$(kapi_portu admin); KB=$(kapi_portu bayi); KM=$(kapi_portu musteri)
+  for kt in "admin:$KA:yonetim" "bayi:$KB:yonetim" "musteri:$KM:musteri"; do
+    r=${kt%%:*}; x=${kt#*:}; p=${x%%:*}; bek=${x#*:}; t=$(kapi_tipi "$p")
+    [ "$t" = "$bek" ] && ok "$r kapisi :$p -> $t" || no "$r kapisi :$p tipi '$t' ($bek beklenir) - zincir kopuk, rol ayrimi KAPALI"
+  done
+  GOVDE='{"username":"e2e-yok","password":"e2e-yok"}'
+  K1=$(kod -X POST -H 'Content-Type: application/json' -d "$GOVDE" "https://127.0.0.1:$KM/api/v1/auth/login")
+  [ "$K1" = "404" ] && ok "musteri kapisinda yonetici girisi YOK (404, varlik sizdirmaz)" || no "musteri kapisinda /auth/login -> HTTP $K1 (404 beklenir)"
+  K2=$(kod -X POST -H 'Content-Type: application/json' -d "$GOVDE" "https://127.0.0.1:$KA/api/v1/musteri/login")
+  [ "$K2" = "404" ] && ok "admin kapisinda musteri girisi YOK (404)" || no "admin kapisinda /musteri/login -> HTTP $K2 (404 beklenir)"
+  K3=$(kod -H "Authorization: Bearer $JETON" "$API/domains")
+  [ "$K3" = "200" ] && ok "admin jetonu kendi kapisinda gecerli (200)" || no "admin jetonu admin kapisinda HTTP $K3"
+  for p in "$KB" "$KM"; do
+    K4=$(kod -H "Authorization: Bearer $JETON" "https://127.0.0.1:$p/api/v1/domains")
+    [ "$K4" = "401" ] && ok "admin jetonu :$p kapisinda REDDEDILDI (401 - token kapiya bagli)" || no "admin jetonu :$p kapisinda HTTP $K4 - calinan token tasinabilir"
+  done
+  K5=$(kod -H "Authorization: Bearer $JETON" -H "X-GP-Kapi: admin" "https://127.0.0.1:$KM/api/v1/domains")
+  [ "$K5" = "401" ] && ok "istemcinin sahte X-GP-Kapi basligi ETKISIZ (nginx ezer)" || no "sahte X-GP-Kapi kabul edildi (HTTP $K5)"
+  BACK=$(grep -oE '^PANEL_LISTEN=.*' /etc/girginospanel/env 2>/dev/null | cut -d= -f2- | tr -d ' ')
+  BACK=${BACK:-127.0.0.1:8080}; case "$BACK" in :*) BACK="127.0.0.1$BACK" ;; 0.0.0.0:*) BACK="127.0.0.1:${BACK##*:}" ;; esac
+  K6=$(kod -H "Authorization: Bearer $JETON" -H "X-GP-Kapi: admin" "http://$BACK/api/v1/domains")
+  [ "$K6" = "401" ] && ok "nginx'i atlayan dogrudan backend istegi kapi SECEMEZ (401)" || no "dogrudan backend + sahte kapi -> HTTP $K6"
+  ESKI=$(tr -d ' \n' < "$KAPI_JSON" | grep -oE '"eski_portlar":\[[0-9,]*\]' | grep -oE '[0-9]+' | head -1)
+  if [ -n "$ESKI" ]; then
+    [ "$(kapi_tipi "$ESKI")" = "karma" ] && ok "eski kapi :$ESKI karma (gecis suresince her rol)" || no "eski kapi :$ESKI tipi '$(kapi_tipi "$ESKI")'"
+    JK=$(python3 /root/.e2e-jeton.py --kapisiz 2>/dev/null)
+    K7=$(kod -H "Authorization: Bearer $JK" "https://127.0.0.1:$ESKI/api/v1/domains")
+    [ "$K7" = "200" ] && ok "eski kapida gecis-oncesi (bagsiz) oturum gecerli - kimse atilmaz" || no "eski kapida bagsiz jeton HTTP $K7"
+    K8=$(kod -H "Authorization: Bearer $JETON" "https://127.0.0.1:$ESKI/api/v1/domains")
+    [ "$K8" = "401" ] && ok "admin kapisi jetonu eski kapida REDDEDILDI" || no "admin kapisi jetonu eski kapida HTTP $K8"
+  else
+    atla "eski kapi yok (taze kurulum ya da gecis tamamlanmis)"
+  fi
+  KF=$(curl "${H[@]}" "$API/firewall" | python3 -c "import json,sys; print(' '.join(map(str,json.load(sys.stdin).get('korumali_portlar',[]))))" 2>/dev/null)
+  case " $KF " in
+    *" $KA "*) ok "admin kapisi firewall'da korumali (kapatilamaz)" ;;
+    *)         no "admin kapisi korumali portlarda YOK ($KF) - admin kendini kilitleyebilir" ;;
+  esac
+elif grep -qE '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null; then
+  no "kapi.json yok - web modundaki panelde rol kapilari kurulmamis"
+else
+  atla "rol kapilari (panel yalniz loopback'te - masaustu modu)"
+fi
 
 baslik "H · Sifreli teslim + lisans zorlamasi"
 

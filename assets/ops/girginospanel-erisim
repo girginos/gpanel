@@ -2,11 +2,13 @@
 # girginospanel-erisim — panel erişim modunu SSH'tan yönet.
 #
 # Panele iki türlü girilir:
-#   web       : panel portu (varsayılan 9443) firewall'da DIŞARI AÇIK.
+#   web       : panel portu firewall'da DIŞARI AÇIK.
 #               Herhangi bir tarayıcıdan girilir.
 #   masaustu  : panel portu dışarı KAPALI. Panele yalnız GirginOS AI masaüstü
 #               uygulaması, SSH (22) üzerinden kurduğu tünelle erişir.
 #               En sıkı kurulum: panel arayüzü internete hiç açılmaz.
+#   Rol kapıları (ADR-GP-001) kuruluysa "panel portu" ADMIN kapısıdır: masaüstü
+#   modu yalnız yönetici yüzeyini kapatır, bayi/müşteri kapıları açık kalır.
 #
 # Kullanım:
 #   girginospanel-erisim durum
@@ -26,11 +28,28 @@ err()  { echo -e "  ${c_r}✗${c_0} $*" >&2; }
 
 DURUM_DOSYA=/etc/girginospanel/erisim-modu
 
-# ---- panel portunu bul (nginx listen satırından) ----
+KAPI_AYAR=/etc/girginospanel/kapi.json
+
+# ---- rol kapıları (ADR-GP-001) ----
+# Kapı modunda "panel portu" = ADMIN kapısı: masaüstü modu yalnız yönetici yüzeyini
+# internetten çeker; bayi/müşteri kapıları açık kalır (kullanıcılar etkilenmez).
+# kapi.json doğrudan okunur — panel ikilisi ÇALIŞTIRILMAZ (eski bir ikili bilinmeyen
+# argümanla sunucuyu başlatırdı).
+kapi_portu() { # rol
+  grep -oE "\"$1\": *[0-9]+" "$KAPI_AYAR" 2>/dev/null | grep -oE '[0-9]+$' | head -1
+}
+kapi_eski_portlari() {
+  tr -d ' \n' < "$KAPI_AYAR" 2>/dev/null | grep -oE '"eski_portlar":\[[0-9,]*\]' | grep -oE '[0-9]+' | tr '\n' ' '
+}
+
+# ---- panel portunu bul (kapı modunda admin kapısı; değilse nginx listen satırından) ----
 panel_portu() {
   local p
-  p=$(grep -hoE '^\s*listen\s+([0-9]+)\s+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null \
-      | grep -oE '[0-9]+' | head -1)
+  p=$(kapi_portu admin)
+  if [ -z "$p" ]; then
+    p=$(grep -hoE '^\s*listen\s+([0-9]+)\s+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null \
+        | grep -oE '[0-9]+' | head -1)
+  fi
   echo "${p:-8443}"
 }
 
@@ -235,6 +254,10 @@ cmd_durum() {
   local port sshp be
   port=$(panel_portu); sshp=$(ssh_portu); be=$(fw_backend)
   say "${c_b}GirginOSPanel erişim durumu${c_0}"
+  if [ -n "$(kapi_portu admin)" ]; then
+    say "  rol kapıları    : admin $port · bayi $(kapi_portu bayi) · müşteri $(kapi_portu musteri) (bayi/müşteri bu moddan etkilenmez)"
+    [ -n "$(kapi_eski_portlari)" ] && warn "eski kapı açık: $(kapi_eski_portlari)— yönetici girişi oradan da mümkün"
+  fi
   say "  panel portu     : $port"
   say "  SSH portu       : $sshp"
   say "  firewall arka uç: $be"
@@ -319,6 +342,13 @@ cmd_masaustu() {
     err "UYARI: panel içeriden de yanıt vermiyor — SSH tüneli çalışmayabilir!"
   fi
   ok "Panele artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
+  if [ -n "$(kapi_portu admin)" ]; then
+    ok "bayi (:$(kapi_portu bayi)) ve müşteri (:$(kapi_portu musteri)) kapıları AÇIK kalır — yalnız yönetici yüzeyi kapandı"
+    if [ -n "$(kapi_eski_portlari)" ]; then
+      warn "eski kapı ($(kapi_eski_portlari)) geçiş süresince her rolü, yöneticiyi de kabul eder."
+      warn "yönetici yüzeyini tamamen kapatmak için: girginospanel-server kapi eski-kapat"
+    fi
+  fi
   say ""
   say "  Masaüstü uygulamasında:  gPanel → +  → 'SSH tüneli ile bağlan' işaretle"
   say "  Sunucu: $(dis_ip)   Panel portu: $port   SSH portu: $sshp"

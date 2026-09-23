@@ -67,6 +67,9 @@ var (
 	}
 	kapiProxyGizli = httpx.ProxySecret
 	kapiVhostIzin  = gizliVhostIzniSertlestir // gerçek yola chmod/chgrp — testte no-op
+	kapiNginxAktif = func() bool {
+		return exec.Command("systemctl", "is-active", "--quiet", "nginx").Run() == nil
+	}
 )
 
 // kapiMu: açılış uzlaştırması ile periyodik bakım aynı anda koşmasın.
@@ -299,6 +302,13 @@ func kapiNginxUygula(dosyalar []nginxDosya) bool {
 		geriAl()
 		log.Printf("🔴 kapi: nginx -t başarısız, geri alındı: %s", kirpKapi(o))
 		return false
+	}
+	// nginx durmuşsa (taze kurulumda panel nginx'ten önce kalkabilir) reload düşer; ama
+	// yapılandırma doğrulandı — geri almak doğru değişikliği atmak olurdu. nginx
+	// kalktığında bu dosyalarla başlar.
+	if !kapiNginxAktif() {
+		log.Printf("kapi: nginx çalışmıyor — doğrulanan yapılandırma nginx başlayınca geçerli olur")
+		return true
 	}
 	if o, e := kapiNginxKomut("systemctl", "reload", "nginx"); e != nil {
 		geriAl()

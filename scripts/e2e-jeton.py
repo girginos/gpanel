@@ -2,7 +2,11 @@
 # E2E test jetonu — panele PAROLA GIRMEDEN API dogrulamasi icin.
 # Sunucunun KENDI JWT sirriyla imzalar (root erisimi zaten var); hicbir sir
 # disari cikmaz, hicbir kimlik bilgisi bir giris formuna girilmez.
-import base64, hashlib, hmac, json, re, subprocess, sys, time
+#
+# Rol kapilari (ADR-GP-001): kapi modunda token alindigi kapiya baglidir ("kpi").
+# E2E admin kapisindan konusur -> kpi=admin. `--kapisiz`: gecis oncesi (bagsiz)
+# token — eski kapi testleri icin.
+import base64, hashlib, hmac, json, os, re, subprocess, sys, time
 
 def b64u(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=")
@@ -35,6 +39,8 @@ iat = max(int(time.time()), gecersiz + 1)
 basl = {"alg": "HS256", "typ": "JWT"}
 govde = {"uid": int(uid), "usr": kadi, "rol": "admin",
          "iat": iat, "exp": iat + 7200, "iss": "girginospanel"}
+if "--kapisiz" not in sys.argv[1:] and os.path.exists("/etc/girginospanel/kapi.json"):
+    govde["kpi"] = "admin"
 imzasiz = b64u(json.dumps(basl, separators=(",", ":")).encode()) + b"." + \
           b64u(json.dumps(govde, separators=(",", ":")).encode())
 imza = hmac.new(sir.encode(), imzasiz, hashlib.sha256).digest()
