@@ -67,6 +67,15 @@ func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string,
 	return tok.SignedString(secret)
 }
 
+// 🔴 STRICT DECODING NEDEN: HMAC-SHA256 imzası 32 bayt = 43 base64url karakterdir ve
+// son karakterin alt 2 biti DOLGUDUR. Gevşek çözücü bu bitleri yok sayar; yani aynı
+// token'ın birden çok METİN gösterimi olur (token malleability). Ölçüldü: son
+// karakteri değiştirilen 1600 token'dan 96'sı (≈1/16, hepsi 'Y'→'a') "kurcalanmış
+// ama geçerli" kabul edildi ve kurcalama testi rastgele %6 düşüyordu. Bugün oturum
+// iptali zaman damgası tabanlı olduğu için sömürülemez; ama token METNİNE bağlı bir
+// iptal/önbellek/hız-sınırı eklendiği gün atlatılabilirdi. RFC 4648 §3.5.
+var jwtAyristiriciSecenekleri = []jwt.ParserOption{jwt.WithStrictDecoding()}
+
 func Parse(secret []byte, raw string) (*Claims, error) {
 	if raw == "" {
 		return nil, errors.New("boş token")
@@ -77,7 +86,7 @@ func Parse(secret []byte, raw string) (*Claims, error) {
 			return nil, errors.New("beklenmeyen alg")
 		}
 		return secret, nil
-	})
+	}, jwtAyristiriciSecenekleri...)
 	if err != nil || !tok.Valid {
 		return nil, errors.New("geçersiz token")
 	}
@@ -118,7 +127,7 @@ func ParseMusteri(secret []byte, raw string) (*MusteriClaims, error) {
 			return nil, jwt.ErrSignatureInvalid
 		}
 		return secret, nil
-	})
+	}, jwtAyristiriciSecenekleri...)
 	if err != nil {
 		return nil, err
 	}

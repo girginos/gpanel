@@ -8,6 +8,7 @@ package auth
 // musteriye gitmesin). httptest gerekmez — dogrudan paket API sozlesmesi.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -137,5 +138,45 @@ func TestMusteriTokenAdminOlarakReddedilir(t *testing.T) {
 	}
 	if _, err := Parse(ct_secret, tok); err == nil {
 		t.Fatal("GUVENLIK: musteri token admin olarak KABUL edildi (tip karisikligi)")
+	}
+}
+
+// dolguVaryanti: token'in son base64url karakterinin YALNIZ dolgu bitlerini
+// degistirir. 32 baytlik imza 43 karakterdir; son karakterin alt 2 biti dolgudur,
+// yani gevsek cozucu bu varyanti ORIJINALLE BAYT-BAYT AYNI imzaya cozer.
+// TestAdminTokenKurcalanmisReddedilir bu durumu ancak son karakter 'Y' oldugunda
+// (~1/16) tetikliyordu → test rastgele dusuyordu. Bu yardimci onu HER SEFERINDE
+// tetikler: token malleability'nin deterministik kaniti.
+func dolguVaryanti(t *testing.T, tok string) string {
+	t.Helper()
+	const b64url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	v := strings.IndexByte(b64url, tok[len(tok)-1])
+	if v < 0 || v&3 != 0 {
+		t.Fatalf("beklenmeyen imza sonu %q (dolgu bitleri sifir olmali)", tok[len(tok)-1])
+	}
+	return tok[:len(tok)-1] + string(b64url[v|1])
+}
+
+// NEGATIF: ayni imzanin dolgu-biti varyanti REDDEDILMELI (strict decoding).
+func TestAdminTokenDolguVaryantiReddedilir(t *testing.T) {
+	tok, err := Issue(ct_secret, 3600, 1, "root", "admin")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, err := Parse(ct_secret, dolguVaryanti(t, tok)); err == nil {
+		t.Fatal("GUVENLIK: token'in dolgu-biti varyanti KABUL edildi (token malleability)")
+	}
+	if _, err := Parse(ct_secret, tok); err != nil {
+		t.Fatalf("orijinal token gecerli kalmali: %v", err)
+	}
+}
+
+func TestMusteriTokenDolguVaryantiReddedilir(t *testing.T) {
+	tok, _, err := GenerateMusteri(ct_secret, MusteriClaims{FTPHesapID: 7, DomainID: 42}, 3600)
+	if err != nil {
+		t.Fatalf("GenerateMusteri: %v", err)
+	}
+	if _, err := ParseMusteri(ct_secret, dolguVaryanti(t, tok)); err == nil {
+		t.Fatal("GUVENLIK: musteri token'inin dolgu-biti varyanti KABUL edildi")
 	}
 }
