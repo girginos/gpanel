@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/hesaplar"
@@ -88,33 +86,4 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		"alan_adi":  alanAdi,
 		"kullanici": req.Kullanici,
 	})
-}
-
-// CheckScope: handler içinde manuel scope kontrolü. Admin ise allow.
-// Müşteri token ise URL'deki {id} ile token.DomainID eşleşmeli.
-func CheckScope(r *http.Request, secret []byte, urlDomainIDParam string) (bool, error) {
-	authH := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authH, "Bearer ") {
-		return false, errors.New("yetkilendirme gerekli")
-	}
-	raw := strings.TrimPrefix(authH, "Bearer ")
-	// Önce admin claims dene
-	if _, err := auth.Parse(secret, raw); err == nil {
-		return true, nil // admin
-	}
-	// Sonra musteri claims dene
-	mc, err := auth.ParseMusteri(secret, raw)
-	if err != nil {
-		return false, errors.New("geçersiz token")
-	}
-	if urlDomainIDParam == "" {
-		// Bu endpoint'te domain ID scope yok ama müşteri yine kısıtlı (ör: /domains listesi)
-		return false, errors.New("müşteri bu endpoint'e erişemez")
-	}
-	id, _ := strconv.ParseInt(urlDomainIDParam, 10, 64)
-	if id != mc.DomainID {
-		return false, errors.New("bu domain'e erişim yok")
-	}
-	_ = time.Now
-	return false, nil // musteri, scoped ok
 }
