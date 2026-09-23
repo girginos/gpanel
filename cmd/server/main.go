@@ -41,6 +41,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/ipyonetim"
 	"girginospanel/internal/istatistik"
+	"girginospanel/internal/kapi"
 	"girginospanel/internal/kaynak"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/laravel"
@@ -98,6 +99,11 @@ var version = surum.Panel
 var hostUygulamalariAcik = false
 
 func main() {
+	// Kapı CLI'ı config.Load()'dan ÖNCE: kurulum/güncelleme betikleri düz kabuktan çağırır
+	// (systemd EnvironmentFile yüklü değil); kapı işlemleri dosya düzeyindedir. Bkz. kapi.go.
+	if len(os.Args) > 1 && os.Args[1] == "kapi" {
+		os.Exit(kapiCLI(os.Args[2:]))
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -459,10 +465,13 @@ func main() {
 		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
 		r.With(middleware.GirisLimiti).Post("/auth/login", authH.Login)
 		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
+		// Panel kapısı tipi (kimliksiz): arayüzün giriş formu seçimi + açılış ölçümü.
+		r.Get("/kapi", kapi.TipHandler)
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
+			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
 			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
@@ -950,6 +959,11 @@ func main() {
 			log.Fatalf("listen: %v", err)
 		}
 	}()
+
+	// Kapı zincirini (nginx listen → map → başlık → X-Gosp-Proxy güveni) backend ayağa
+	// kalkınca uçtan uca ölçer; yalnız doğrulanırsa zorlama açık kalır. 15 dk'da bir
+	// uzlaştırma + ölçüm tekrarlanır (eski kapının süresi dolunca kapanır).
+	provisioner.KapiDogrulaBaslat(context.Background(), 15*time.Minute)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
