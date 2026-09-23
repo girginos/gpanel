@@ -53,6 +53,13 @@ var (
 
 // Ayar — session_idle_minutes değerini oku, cache'li. Kayıt yoksa 0 (=kapalı).
 func Ayar(db *sql.DB) int {
+	// DB yok (DB bağlanmadan önceki erken açılış / test): özellik KAPALI sayılır —
+	// middleware.oturumGecerli'nin "scopeDB nil ise kontrol atlanır" sözleşmesiyle
+	// aynı fail-open. Koruma yokken nil pointer paniği veriyordu (RequireAuth'un
+	// admin yolu bu yüzden DB'siz hiç test edilemiyordu).
+	if db == nil {
+		return 0
+	}
 	ayarMu.RLock()
 	if ayarBiliyor && time.Since(ayarZaman) < ayarCacheTTL {
 		v := ayarCache
@@ -152,7 +159,8 @@ func IdleMi(db *sql.DB, uid int64, tokenIat int64) bool {
 //
 // Async çağrılmalı — DB latency'si isteğin yanıt süresine binmesin.
 func SonAktiviteGuncelle(db *sql.DB, uid int64) {
-	if uid <= 0 {
+	// 🔴 goroutine'de çağrılır: burada nil pointer paniği tüm süreci çökertir.
+	if uid <= 0 || db == nil {
 		return
 	}
 	now := time.Now()
