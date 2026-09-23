@@ -48,3 +48,18 @@ func gizliVekilBasligi(r *http.Request, sec string) bool {
 	got := strings.TrimSpace(r.Header.Get("X-Gosp-Proxy"))
 	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(sec)) == 1
 }
+
+// NginxtenMi: istek GERCEKTEN bizim nginx'imizden mi (loopback + paylasimli gizli)?
+//
+// 🔴 ClientIP'ten FARKI: gizli kurulu degilse ClientIP "eski loopback-guven"
+// davranisina duser (ilk acilista kimse kilitlenmesin diye). Bu fonksiyon ise YETKI
+// karari veren cagiranlar icindir (panel kapisi): kanit yoksa false. Ayni kutudaki
+// bir kiraci sureci de 127.0.0.1'den :8080'e baglanabilir; tek ayirt edici nginx'in
+// ekledigi, kiracinin okuyamadigi gizlidir.
+func NginxtenMi(r *http.Request) bool {
+	if !yerelVekil(hostOnly(r.RemoteAddr)) {
+		return false
+	}
+	sec := ProxySecret()
+	return sec != "" && gizliVekilBasligi(r, sec)
+}
