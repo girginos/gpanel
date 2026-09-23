@@ -511,7 +511,7 @@ fi
 
 
 # ============ 7) PANEL SSL (self-signed) ============
-step "7) Panel SSL (:8443 self-signed)"
+step "7) Panel SSL (self-signed)"
 if [ ! -f /etc/ssl/girginospanel/panel.crt ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout /etc/ssl/girginospanel/panel.key -out /etc/ssl/girginospanel/panel.crt \
@@ -527,6 +527,21 @@ step "8) nginx (panel vhost + phpMyAdmin + perf)"
 # if we add it here too, nginx -t blows up with "duplicate directive".
 grep -q "client_max_body_size 10240m" /etc/nginx/nginx.conf || \
   sed -i '/^http {/a\    client_max_body_size 10240m;' /etc/nginx/nginx.conf
+# Role gates (ADR-GP-001): administrator / reseller / customer reach the panel on
+# SEPARATE, per-install random ports. Fresh install: ports are assigned. Installing
+# over an existing panel: today's port(s) become the "old gate", which stays open until
+# the administrator signs in once through the new admin gate (no lockout). An existing
+# kapi.json is KEPT. 🔴 BEFORE the template overwrites _panel.conf: the transition reads
+# today's public ports from it. nginx itself is shaped by the panel's startup Heal
+# (role listens + gate header + map).
+KAPI_CLI=/opt/girginospanel/bin/girginospanel-server
+if [ -f /etc/nginx/conf.d/_panel.conf ]; then
+  "$KAPI_CLI" kapi gecis && ok "role gates: existing install (ports kept / transition)" \
+    || warn "role gates could not be prepared — panel keeps a single port (later: girginospanel-server kapi gecis)"
+else
+  "$KAPI_CLI" kapi kur && ok "role gates: random ports assigned" \
+    || warn "role gates could not be assigned — panel uses the template port (later: girginospanel-server kapi kur)"
+fi
 install -m 0644 "$A/nginx/_panel.conf" /etc/nginx/conf.d/_panel.conf || die "_panel.conf could not be installed"
 install -m 0644 "$A/nginx/_default80.conf" /etc/nginx/conf.d/_default80.conf || die "_default80.conf could not be installed"
 install -m 0644 "$A/nginx/php-fpm.conf" /etc/nginx/conf.d/php-fpm.conf || die "nginx php-fpm.conf could not be installed"
@@ -924,9 +939,13 @@ step "12) Starting panel"
 # the things the provisioner guarantees on each startup (catch-all doc
 # roots, cache zone, WAF sync) are NOT RE-CREATED. The operator
 # sees "ACTIVE" and assumes the new version is in effect.
+# 🔴 nginx FIRST: the panel's startup Heal (role gate listens, gate header, proxy
+# secret) reloads nginx. If nginx is not up yet the panel cannot apply its verified
+# config right away and the role gates wait for the maintenance loop (15 min).
+systemctl enable --now nginx >/dev/null 2>&1
 systemctl enable girginospanel >/dev/null 2>&1
 systemctl restart girginospanel >/dev/null 2>&1; sleep 3
-systemctl enable --now nginx >/dev/null 2>&1; systemctl restart nginx >/dev/null 2>&1
+systemctl restart nginx >/dev/null 2>&1
 if ! systemctl is-active --quiet girginospanel; then
   journalctl -u girginospanel --no-pager -n 20; die "panel did not start"
 fi
@@ -1039,10 +1058,14 @@ fi
 # ============ 15) VERIFICATION ============
 step "15) Verification"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-CODE=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/ 2>/dev/null)
-API=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/api/v1/domains 2>/dev/null)
+# Do NOT assume the panel port: role gates → the admin gate; otherwise the vhost's first public listen.
+PPORT=$("$KAPI_CLI" kapi port admin 2>/dev/null) \
+  || PPORT=$(grep -hoE '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null | grep -oE '[0-9]+' | head -1)
+PPORT=${PPORT:-8443}
+CODE=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PPORT/" 2>/dev/null)
+API=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PPORT/api/v1/domains" 2>/dev/null)
 echo -e "  services: $(systemctl is-active mariadb nginx valkey php-fpm named pure-ftpd girginospanel crond | tr '\n' ' ')"
-echo -e "  panel :8443 → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
+echo -e "  panel :$PPORT → HTTP $CODE   ·   API (auth) → HTTP $API   ·   DNS :53 → $(systemctl is-active named)   ·   FTP :21 → $(systemctl is-active pure-ftpd)"
 echo -e "  tools: SSL/acme.sh $([ -x /root/.acme.sh/acme.sh ] && echo ✓ || echo ✗)   ·   firewall/nft $(command -v nft >/dev/null && echo ✓ || echo ✗)   ·   unzip/zip $(command -v unzip >/dev/null && command -v zip >/dev/null && echo ✓ || echo ✗)   ·   composer $(command -v composer >/dev/null && echo ✓ || echo ✗)   ·   apache/httpd $(systemctl is-active httpd)"
 # The security components added today are summarized BEFORE the SUCCESS BANNER:
 # if one is missing the operator notices before seeing "install complete".
@@ -1093,7 +1116,15 @@ fi
 echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel installation complete${c_0}"
-echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:8443${c_0}"
+if _kb=$("$KAPI_CLI" kapi port bayi 2>/dev/null) && _km=$("$KAPI_CLI" kapi port musteri 2>/dev/null); then
+  echo -e "   Administrator: ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}   ← keep this address PRIVATE"
+  echo -e "   Reseller:      ${c_b}https://${IP:-SUNUCU_IP}:$_kb${c_0}"
+  echo -e "   Customer:      ${c_b}https://${IP:-SUNUCU_IP}:$_km${c_0}"
+  echo -e "   ${c_y}!${c_0} If your cloud provider has a firewall, open these ports there too (TCP $PPORT, $_kb, $_km)."
+  "$KAPI_CLI" kapi durum 2>/dev/null | grep -E '^  eski' || true
+else
+  echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}"
+fi
 echo -e "   Username: ${c_b}root${c_0}   Password: ${c_b}this server's root password${c_0}"
 echo -e "   (panel admin login verifies the server root password against the /etc/shadow hash)"
 if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ] && ! findmnt -no OPTIONS / 2>/dev/null | grep -qwE 'usrquota|uquota|quota'; then
