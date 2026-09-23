@@ -31,6 +31,10 @@ func TestKapiCLIKullanimHatalari(t *testing.T) {
 		{"uzat"},
 		{"uzat", "0"},
 		{"port"},
+		{"rol-port"},
+		{"rol-port", "root"},
+		{"rol-port", "admin", "abc"},
+		{"rol-port", "musteri", "0"},
 	} {
 		if kod := kapiCLI(args); kod != 2 {
 			t.Errorf("kapiCLI(%v)=%d, beklenen 2 (kullanım)", args, kod)

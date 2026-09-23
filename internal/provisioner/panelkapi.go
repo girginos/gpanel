@@ -35,10 +35,19 @@ import (
 	"girginospanel/internal/portyonetim"
 )
 
+// KapiGenelPortUzlastir: her başarılı uzlaştırmadan sonra panelin genel portu (genel)
+// ve canlı genel portları (canli) ile çağrılır; main bağlar. Panelin genel portunda
+// barınan başka şeyleri (uygulama subdomain vhost'ları, GitHub webhook adresleri)
+// canlı olmayan porttan genel porta taşır. DURUMSUZDUR: bir taşıma başarısız olursa
+// sonraki uzlaştırma yeniden dener. Açılıştaki ilk uzlaştırma da yakalasın diye
+// provisioner.Init'ten ÖNCE bağlanmalıdır.
+var KapiGenelPortUzlastir func(genel int, canli map[int]bool)
+
 // Dikişler: testler geçici dizin + sahte nginx/firewall ile koşar.
 var (
 	kapiVhostYolu    = panelVhostPath
 	kapiCatchallYolu = "/etc/nginx/conf.d/_panel_catchall.conf"
+	kapiAcmeYolu     = "/etc/nginx/conf.d/_panel_acme.conf" // panelhost.AcmeVhostPath
 	kapiMapYolu      = kapi.MapYolu
 	kapiAyarYolu     = kapi.AyarYolu
 	kapiNginxKomut   = func(ad string, arg ...string) ([]byte, error) {
@@ -74,6 +83,24 @@ func HealPanelKapiOnStartup() {
 	kapi.ZorlamaAyarla(kapiUzlastir(time.Now().Unix()))
 }
 
+// KapiSimdiUygula: kapı ayarı panelden değiştikten sonra nginx'i HEMEN uyumlar ve
+// zinciri uçtan uca ölçer (15 dakikalık bakımı beklemeden). Zincir kurulamazsa zorlama
+// kapanır (kilitlenme yok, eski davranış) ve hata döner.
+func KapiSimdiUygula(ctx context.Context) error {
+	kapiMu.Lock()
+	acilabilir := kapiUzlastir(time.Now().Unix())
+	kapiMu.Unlock()
+	if !acilabilir {
+		kapiZorlamaYaz(false, "uzlaştırma")
+		return errors.New("nginx kapı ayarına uyumlanamadı — kapı kuralları devre dışı (panel günlüğüne bakın)")
+	}
+	kapiOlcVeAyarla(ctx, 3)
+	if !kapi.ZorlamaAktif() {
+		return errors.New("kapı zinciri ölçülemedi — kapı kuralları devre dışı (panel günlüğüne bakın)")
+	}
+	return nil
+}
+
 // kapiUzlastir: nginx'i ayara getirir. Dönüş: zorlama açılabilir mi (ayar geçerli,
 // başlık her çapada, nginx doğrulandı, proxy gizlisi kurulu).
 func kapiUzlastir(simdi int64) bool {
@@ -97,13 +124,10 @@ func kapiUzlastir(simdi int64) bool {
 		log.Printf("🔴 kapi: _panel.conf uzlaştırılamadı: %v — zorlama KAPALI", err)
 		return false
 	}
-	dosyalar := []nginxDosya{
+	dosyalar := append([]nginxDosya{
 		{kapiVhostYolu, origB, []byte(yeni)},
 		kapiMapDosyasi(kapi.MapIcerigi(a, simdi)),
-	}
-	if c, ok := kapiCatchallDosyasi(kapi.GenelPortlar(yeni)); ok {
-		dosyalar = append(dosyalar, c)
-	}
+	}, kapiYanDosyalar(yeni, a)...)
 	if !kapiNginxUygula(dosyalar) {
 		return false
 	}
@@ -120,10 +144,8 @@ func kapiUzlastir(simdi int64) bool {
 			tut[p] = true
 		}
 		if kaldirilmis, silinen := kapi.GenelListenKaldir(yeni, tut); len(silinen) > 0 {
-			d := []nginxDosya{{kapiVhostYolu, []byte(yeni), []byte(kaldirilmis)}}
-			if c, ok := kapiCatchallDosyasi(kapi.GenelPortlar(kaldirilmis)); ok {
-				d = append(d, c)
-			}
+			d := append([]nginxDosya{{kapiVhostYolu, []byte(yeni), []byte(kaldirilmis)}},
+				kapiYanDosyalar(kaldirilmis, a)...)
 			if kapiNginxUygula(d) {
 				kapiVhostIzin()
 				son = kaldirilmis
@@ -136,16 +158,25 @@ func kapiUzlastir(simdi int64) bool {
 			}
 		}
 		if len(a.EskiPortlar) > 0 && !a.EskiAcik(simdi) {
+			dusuldu := false
+			// Koşul TAZE ayarda yeniden denetlenir: bu uzlaştırma sürerken panelden admin
+			// portu değişmiş olabilir (yeni eski port eklenir, kanıt sıfırlanır); bayat
+			// kopyaya göre silmek, doğrulanmamış yeni admin portuyla kilitlenme demekti.
 			if e := kapi.Guncelle(kapiAyarYolu, func(x *kapi.Ayar) error {
-				x.EskiPortlar, x.EskiBitis = nil, 0
+				if len(x.EskiPortlar) > 0 && !x.EskiAcik(simdi) {
+					x.EskiPortlar, x.EskiBitis = nil, 0
+					dusuldu = true
+				}
 				return nil
 			}); e != nil {
 				log.Printf("kapi: eski portlar ayardan düşülemedi: %v", e)
-			} else {
+			} else if dusuldu {
 				log.Printf("kapi: geçiş tamamlandı — eski portlar kapandı")
 			}
 		}
 	}
+
+	kapiGenelPortuYay(son, a)
 
 	if !kapi.BaslikTamMi(son) {
 		log.Printf("🔴 kapi: kapı başlığı her proxy location'ında değil — zorlama KAPALI")
@@ -193,13 +224,39 @@ func kapiMapDosyasi(icerik string) nginxDosya {
 	return nginxDosya{kapiMapYolu, eski, []byte(icerik)}
 }
 
-// kapiCatchallDosyasi: panelhost'un catchall'ı varsa listen'larını portlara eşitler.
-func kapiCatchallDosyasi(portlar []int) (nginxDosya, bool) {
-	eski, err := os.ReadFile(kapiCatchallYolu)
-	if err != nil {
-		return nginxDosya{}, false // panelhost yapılandırılmamış
+// kapiYanDosyalar: panel vhost'u conf olacakken onunla BİRLİKTE uyumlanması gereken
+// panelhost dosyaları (yalnız varsa): catchall'ın listen'ları genel portlara, :80
+// mini vhost'unun HTTPS yönlendirmesi genel panel portuna. Hepsi tek kapiNginxUygula
+// işleminde yazılır → biri düşerse hepsi geri alınır.
+func kapiYanDosyalar(conf string, a *kapi.Ayar) []nginxDosya {
+	var out []nginxDosya
+	if eski, err := os.ReadFile(kapiCatchallYolu); err == nil {
+		ipv6 := kapi.IPv6Etkin(conf) || kapi.IPv6Etkin(string(eski))
+		yeni := kapi.CatchallUzlastir(string(eski), kapi.GenelPortlar(conf), ipv6)
+		out = append(out, nginxDosya{kapiCatchallYolu, eski, []byte(yeni)})
 	}
-	return nginxDosya{kapiCatchallYolu, eski, []byte(kapi.CatchallUzlastir(string(eski), portlar))}, true
+	if eski, err := os.ReadFile(kapiAcmeYolu); err == nil {
+		yeni := kapi.AcmeYonlendirmeUzlastir(string(eski), kapi.GenelPanelPortu(conf, a))
+		out = append(out, nginxDosya{kapiAcmeYolu, eski, []byte(yeni)})
+	}
+	return out
+}
+
+// kapiGenelPortuYay: genel panel portunu ona bağlı dış bileşenlere (KapiGenelPortUzlastir)
+// bildirir. Genel port yoksa (hepsi loopback) dokunulmaz.
+func kapiGenelPortuYay(conf string, a *kapi.Ayar) {
+	if KapiGenelPortUzlastir == nil {
+		return
+	}
+	genel := kapi.GenelPanelPortu(conf, a)
+	if genel == 0 {
+		return
+	}
+	canli := map[int]bool{}
+	for _, p := range kapi.GenelPortlar(conf) {
+		canli[p] = true
+	}
+	KapiGenelPortUzlastir(genel, canli)
 }
 
 // kapiNginxUygula: değişen dosyaları yazar, `nginx -t` ile doğrular, başarısızsa

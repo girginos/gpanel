@@ -31,6 +31,8 @@ const kapiKullanim = `Kullanım: girginospanel-server kapi <komut>
   gecis [gün]      mevcut kurulumdan geçiş: bugünkü port(lar) eski kapı olur
   durum [--json]   kapı ayarını göster
   port <rol>       yalnız port numarası (admin|bayi|musteri) — betikler için
+  rol-port <rol> [port]  rolün kapı portunu değiştir (port yoksa rastgele); admin
+                   portu değişirse önceki port, yeni porttan girilene dek açık kalır
   uzat <gün>       eski kapının açık kalma süresini uzat
   eski-kapat       eski kapıyı şimdi kapat (admin yeni kapıdan girmiş olmalı)
   eski-kapat --zorla   admin doğrulaması olmadan kapat (kilitlenme riski SİZDE)
@@ -66,6 +68,21 @@ func kapiCLI(args []string) int {
 			return 2
 		}
 		return kapiPort(args[1])
+	case "rol-port":
+		if len(args) < 2 || !kapiRolMu(args[1]) {
+			fmt.Fprintln(os.Stderr, kapiKullanim)
+			return 2
+		}
+		port := 0
+		if len(args) > 2 {
+			n, err := strconv.Atoi(args[2])
+			if err != nil || n < 1 {
+				fmt.Fprintln(os.Stderr, "port pozitif bir tam sayı olmalı")
+				return 2
+			}
+			port = n
+		}
+		return kapiRolPort(args[1], port)
 	case "uzat":
 		n := 0
 		if len(args) > 1 {
@@ -83,15 +100,20 @@ func kapiCLI(args []string) int {
 	return 2
 }
 
-// kapiPortUygun: yasaklı değil ve sistemde dinlenmiyor (`ss` bir kez çalışır).
+// kapiPortUygun: yasaklı değil, sistemde dinlenmiyor, firewall'da kapalı/kısıtlı değil
+// (anlık görüntüler bir kez alınır).
 func kapiPortUygun() func(int) bool {
-	mesgul := portyonetim.SistemdePortlar()
-	return func(p int) bool {
-		if yasak, _ := portyonetim.PortYasakMi(p); yasak {
-			return false
+	sorun := portyonetim.KapiPortDenetleyici()
+	return func(p int) bool { return sorun(p) == "" }
+}
+
+func kapiRolMu(rol string) bool {
+	for _, r := range kapi.Roller {
+		if r == rol {
+			return true
 		}
-		return !mesgul[p]
 	}
+	return false
 }
 
 // kapiMevcut: ayar varsa (true, 0); yoksa (false, 0); okunamıyorsa (false, 1).
@@ -204,19 +226,29 @@ func kapiPort(rol string) int {
 	return 0
 }
 
+func kapiRolPort(rol string, yeni int) int {
+	eski, atanan, err := portyonetim.KapiRolPortuAta(rol, yeni)
+	switch {
+	case errors.Is(err, kapi.ErrYok):
+		fmt.Fprintln(os.Stderr, "kapı modu yapılandırılmamış")
+		return 3
+	case errors.Is(err, kapi.ErrAyniPort):
+		fmt.Println(err.Error())
+		return 0
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "rol portu değiştirilemedi: %v\n", err)
+		return 1
+	}
+	fmt.Printf("%s kapısı: %d → %d\n", rol, eski, atanan)
+	if rol == kapi.Admin {
+		fmt.Printf("önceki admin portu :%d, yeni admin kapısından giriş yapılana dek AÇIK kalır\n", eski)
+	}
+	panelYenidenBaslat()
+	return 0
+}
+
 func kapiUzat(gun int) int {
-	err := kapi.Guncelle(kapi.AyarYolu, func(a *kapi.Ayar) error {
-		if len(a.EskiPortlar) == 0 {
-			return errors.New("açık eski kapı yok")
-		}
-		taban := time.Now().Unix()
-		if a.EskiBitis > taban {
-			taban = a.EskiBitis
-		}
-		a.EskiBitis = taban + int64(gun)*86400
-		return nil
-	})
-	if err != nil {
+	if err := kapi.EskiUzat(kapi.AyarYolu, gun, time.Now().Unix()); err != nil {
 		fmt.Fprintf(os.Stderr, "uzatılamadı: %v\n", err)
 		return 1
 	}
@@ -226,26 +258,12 @@ func kapiUzat(gun int) int {
 }
 
 func kapiEskiKapat(zorla bool) int {
-	err := kapi.Guncelle(kapi.AyarYolu, func(a *kapi.Ayar) error {
-		if len(a.EskiPortlar) == 0 {
-			return errors.New("açık eski kapı yok")
-		}
-		if a.AdminDogrulandi == 0 && !zorla {
-			return fmt.Errorf("admin YENİ admin kapısından (:%d) henüz hiç giriş yapmadı. Sağlayıcı "+
-				"firewall'u o portu kesiyorsa eski kapıyı kapatmak herkesi kilitler. Önce yeni adresten "+
-				"giriş yapın ya da riski üstlenip --zorla kullanın", a.Admin)
-		}
-		if zorla {
-			// Eski portlar ayardan düşer → Heal onları "beklenmeyen genel listen" olarak
-			// kaldırır (yine de admin kapısının dinlediği doğrulanmadan KALDIRMAZ).
-			a.EskiPortlar, a.EskiBitis = nil, 0
-			return nil
-		}
-		a.EskiBitis = time.Now().Unix()
-		return nil
-	})
-	if err != nil {
+	if err := kapi.EskiKapat(kapi.AyarYolu, zorla, time.Now().Unix()); err != nil {
 		fmt.Fprintf(os.Stderr, "eski kapı kapatılamadı: %v\n", err)
+		var adh *kapi.AdminDogrulanmadiHatasi
+		if errors.As(err, &adh) {
+			fmt.Fprintln(os.Stderr, "(zorla: girginospanel-server kapi eski-kapat --zorla)")
+		}
 		return 1
 	}
 	fmt.Println("eski kapı kapatılıyor")

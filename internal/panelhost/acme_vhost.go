@@ -8,7 +8,9 @@ package panelhost
 import (
 	"fmt"
 	"os"
-	"regexp"
+	"strconv"
+
+	"girginospanel/internal/kapi"
 )
 
 const acmeVhostSablon = `# OTOMATİK ÜRETİLDİ — panelhost.AcmeVhostYaz
@@ -62,18 +64,15 @@ func AcmeVhostSil() error {
 	return os.Remove(AcmeVhostPath)
 }
 
-// PanelPort — panel vhost'unun dinledigi HTTPS portu (_panel.conf'tan okunur).
+// PanelPort — panelin herkese açık HTTPS portu (_panel.conf'tan okunur).
 // 🔴 NEDEN: port sabit 8443 varsayiliyordu; kurulumda cakisma olursa panel baska
 // porta (or. 7443) tasinir ve HTTP->HTTPS yonlendirmesi YANLIS porta gider
-// (panel acilmaz). Okunamazsa 8443'e duser.
+// (panel acilmaz). Kapı modunda müşteri kapısı döner — ilk listen satırı admin
+// kapısı olabilir; yönlendirme/webhook adresi onu herkese sızdırırdı (ADR-GP-001).
+// Okunamazsa 8443'e duser.
 func PanelPort() string {
-	b, err := os.ReadFile(PanelVhostPath)
-	if err == nil {
-		if m := rePanelListen.FindSubmatch(b); len(m) >= 2 {
-			return string(m[1])
-		}
+	if p := kapi.GenelPanelPortuOku(PanelVhostPath); p > 0 {
+		return strconv.Itoa(p)
 	}
 	return "8443"
 }
-
-var rePanelListen = regexp.MustCompile(`(?m)^\s*listen\s+(\d+)\s+ssl`)

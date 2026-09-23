@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -270,7 +271,45 @@ func SubdomainVhostlariPortGuncelle(eskiPort, yeniPort int) error {
 	if eskiPort == yeniPort {
 		return nil
 	}
-	entries, err := os.ReadDir(SubdomainVhostDir)
+	return subdomainPortlariYenidenYaz(func(p int) int {
+		if p == eskiPort {
+			return yeniPort
+		}
+		return p
+	})
+}
+
+// SubdomainVhostlariCanliPortaTasi — rol kapıları (ADR-GP-001) uzlaştırmasının
+// DURUMSUZ karşılığı: panelin canlı genel portlarından birinde dinlemeyen uygulama
+// vhost'u genel porta taşınır (ör. geçiş bitip 8443 kapanınca → müşteri kapısı).
+// Olay kaçırılsa (açılış, başarısız reload) bile sonraki uzlaştırma düzeltir.
+// 1024 altındaki portlara (80/443) dokunulmaz: panel portu orada OLAMAZ (PortYasakMi);
+// elle oraya taşınmış bir vhost bilinçli seçimdir.
+func SubdomainVhostlariCanliPortaTasi(genel int, canli map[int]bool) error {
+	if genel <= 0 || !canli[genel] {
+		return nil
+	}
+	return subdomainPortlariYenidenYaz(func(p int) int {
+		if canli[p] || p < 1024 {
+			return p
+		}
+		return genel
+	})
+}
+
+// Dikişler (testler): vhost dizini ve nginx komutu.
+var (
+	subdomainDizini = SubdomainVhostDir
+	subdomainNginx  = func(arg ...string) ([]byte, error) {
+		return exec.Command("nginx", arg...).CombinedOutput()
+	}
+)
+
+// subdomainPortlariYenidenYaz: her gpanel-app-*.conf'taki `listen P ssl` (v4+v6)
+// portunu donustur(P) ile değiştirir; değişen varsa `nginx -t` + reload, başarısızsa
+// TAM geri alma.
+func subdomainPortlariYenidenYaz(donustur func(port int) int) error {
+	entries, err := os.ReadDir(subdomainDizini)
 	if err != nil {
 		return fmt.Errorf("vhost dir okunamadı: %w", err)
 	}
@@ -279,10 +318,29 @@ func SubdomainVhostlariPortGuncelle(eskiPort, yeniPort int) error {
 		icerik []byte
 	}
 	var yedekler []yedek
+	geriAl := func() {
+		for _, y := range yedekler {
+			_ = os.WriteFile(y.yol, y.icerik, 0644)
+		}
+	}
+	yenidenYaz := func(re *regexp.Regexp, s string) string {
+		return re.ReplaceAllStringFunc(s, func(m string) string {
+			p := re.FindStringSubmatch(m)
+			if len(p) < 4 {
+				return m
+			}
+			eski, err := strconv.Atoi(p[2])
+			if err != nil {
+				return m
+			}
+			if yeni := donustur(eski); yeni != eski {
+				return p[1] + strconv.Itoa(yeni) + p[3]
+			}
+			return m
+		})
+	}
 
 	guncellenen := 0
-	eskiStr := fmt.Sprintf("%d", eskiPort)
-	yeniStr := fmt.Sprintf("%d", yeniPort)
 	for _, e := range entries {
 		ad := e.Name()
 		if !strings.HasPrefix(ad, "gpanel-app-") || !strings.HasSuffix(ad, ".conf") {
@@ -291,36 +349,19 @@ func SubdomainVhostlariPortGuncelle(eskiPort, yeniPort int) error {
 		if strings.HasSuffix(ad, "-acme.conf") {
 			continue
 		}
-		yol := filepath.Join(SubdomainVhostDir, ad)
+		yol := filepath.Join(subdomainDizini, ad)
 		b, err := os.ReadFile(yol)
 		if err != nil {
 			continue
 		}
 		s := string(b)
-		// Regex-based replace — sadece eskiPort match'lerini değiştir.
-		// Suggestion (yedek optimize): değişmeyen dosyaları backup listesine ekleme.
-		yeniS := reListenV4Sub.ReplaceAllStringFunc(s, func(m string) string {
-			p := reListenV4Sub.FindStringSubmatch(m)
-			if len(p) >= 4 && p[2] == eskiStr {
-				return p[1] + yeniStr + p[3]
-			}
-			return m
-		})
-		yeniS = reListenV6Sub.ReplaceAllStringFunc(yeniS, func(m string) string {
-			p := reListenV6Sub.FindStringSubmatch(m)
-			if len(p) >= 4 && p[2] == eskiStr {
-				return p[1] + yeniStr + p[3]
-			}
-			return m
-		})
+		yeniS := yenidenYaz(reListenV6Sub, yenidenYaz(reListenV4Sub, s))
 		if yeniS == s {
-			continue // bu vhost eskiPort'u kullanmıyor — yedek dahi eklenmez
+			continue // bu vhost etkilenmiyor — yedek dahi eklenmez
 		}
 		yedekler = append(yedekler, yedek{yol, b})
 		if err := atomicYaz(yol, []byte(yeniS), 0644); err != nil {
-			for _, y := range yedekler {
-				_ = os.WriteFile(y.yol, y.icerik, 0644)
-			}
+			geriAl()
 			return fmt.Errorf("vhost yaz fail (%s): %w — geri alındı", yol, err)
 		}
 		guncellenen++
@@ -329,18 +370,14 @@ func SubdomainVhostlariPortGuncelle(eskiPort, yeniPort int) error {
 		return nil // hiç subdomain vhost yok
 	}
 	// nginx -t başarısızsa TAM rollback
-	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
-		for _, y := range yedekler {
-			_ = os.WriteFile(y.yol, y.icerik, 0644)
-		}
-		_, _ = exec.Command("nginx", "-s", "reload").CombinedOutput()
+	if out, err := subdomainNginx("-t"); err != nil {
+		geriAl()
+		_, _ = subdomainNginx("-s", "reload")
 		return fmt.Errorf("nginx -t fail: %s — geri alındı", strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command("nginx", "-s", "reload").CombinedOutput(); err != nil {
-		for _, y := range yedekler {
-			_ = os.WriteFile(y.yol, y.icerik, 0644)
-		}
-		_, _ = exec.Command("nginx", "-s", "reload").CombinedOutput()
+	if out, err := subdomainNginx("-s", "reload"); err != nil {
+		geriAl()
+		_, _ = subdomainNginx("-s", "reload")
 		return fmt.Errorf("nginx reload fail: %s — geri alındı", strings.TrimSpace(string(out)))
 	}
 	return nil

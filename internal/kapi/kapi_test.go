@@ -344,7 +344,7 @@ func TestCatchallUzlastir(t *testing.T) {
     server_name _;
     return 444;
 }`
-	yeni := CatchallUzlastir(catchall, []int{21001, 22002})
+	yeni := CatchallUzlastir(catchall, []int{21001, 22002}, true)
 	if strings.Contains(yeni, "8443") {
 		t.Error("eski port catchall'dan çıkmalı")
 	}
@@ -353,8 +353,70 @@ func TestCatchallUzlastir(t *testing.T) {
 			t.Errorf("catchall eksik: %q\n%s", s, yeni)
 		}
 	}
-	if CatchallUzlastir(yeni, []int{21001, 22002}) != yeni {
+	if CatchallUzlastir(yeni, []int{21001, 22002}, true) != yeni {
 		t.Error("CatchallUzlastir idempotent olmalı")
+	}
+	// IPv6 kanıtı yoksa [::] satırı YAZILMAZ (IPv6'sız çekirdekte nginx -t düşerdi).
+	if v4 := CatchallUzlastir(catchall, []int{21001}, false); strings.Contains(v4, "[::]") {
+		t.Errorf("ipv6=false iken [::] satırı olmamalı:\n%s", v4)
+	}
+}
+
+// erisim masaüstü catchall'ı: loopback ve yorumlu satırlar KORUNUR (operatörün seçimi).
+func TestCatchallUzlastirLoopbackKorunur(t *testing.T) {
+	catchall := `server {
+    listen 127.0.0.1:9443 ssl default_server;
+    # [erisim:masaustu] listen [::]:9443 ssl default_server;
+    server_name _;
+    return 444;
+}`
+	yeni := CatchallUzlastir(catchall, []int{21001}, false)
+	for _, s := range []string{"listen 127.0.0.1:9443 ssl default_server;", "# [erisim:masaustu] listen [::]:9443", "listen 21001 ssl default_server;"} {
+		if !strings.Contains(yeni, s) {
+			t.Errorf("eksik: %q\n%s", s, yeni)
+		}
+	}
+	if CatchallUzlastir(catchall, nil, false) != catchall {
+		t.Error("genel port yoksa loopback catchall DEĞİŞMEMELİ")
+	}
+}
+
+func TestIPv6Etkin(t *testing.T) {
+	if !IPv6Etkin(sablonConf) {
+		t.Error("şablonda etkin IPv6 var")
+	}
+	if IPv6Etkin("    listen 8443 ssl;\n    # [erisim:masaustu] listen [::]:8443 ssl;") {
+		t.Error("yorumlu IPv6 kanıt DEĞİLDİR")
+	}
+}
+
+func TestGenelPanelPortu(t *testing.T) {
+	a := ornekAyar()
+	gecis := "listen 8443 ssl;\nlisten 21001 ssl; # gp-kapi\nlisten 22002 ssl; # gp-kapi\nlisten 23003 ssl; # gp-kapi"
+	if p := GenelPanelPortu(gecis, a); p != 23003 {
+		t.Errorf("müşteri kapısı canlıysa o dönmeli, got %d", p)
+	}
+	// Müşteri henüz eklenmemiş (Heal başarısız): admin/bayi DEĞİL, eski port.
+	yarim := "listen 21001 ssl; # gp-kapi\nlisten 8443 ssl;\nlisten 22002 ssl; # gp-kapi"
+	if p := GenelPanelPortu(yarim, a); p != 8443 {
+		t.Errorf("admin/bayi ASLA genel port olmamalı, got %d", p)
+	}
+	if p := GenelPanelPortu("listen 21001 ssl;\nlisten 22002 ssl;", a); p != 0 {
+		t.Errorf("yalnız admin/bayi varsa 0 (çağıran varsayılana düşer), got %d", p)
+	}
+	if p := GenelPanelPortu("listen 127.0.0.1:9443 ssl;\nlisten 7443 ssl;", nil); p != 7443 {
+		t.Errorf("kapı yokken ilk GENEL listen, got %d", p)
+	}
+}
+
+func TestAcmeYonlendirmeUzlastir(t *testing.T) {
+	acme := "    location / {\n        return 301 https://$server_name:8443$request_uri;\n    }"
+	yeni := AcmeYonlendirmeUzlastir(acme, 23003)
+	if !strings.Contains(yeni, "return 301 https://$server_name:23003$request_uri;") {
+		t.Errorf("yönlendirme portu güncellenmeli:\n%s", yeni)
+	}
+	if AcmeYonlendirmeUzlastir(yeni, 23003) != yeni || AcmeYonlendirmeUzlastir(acme, 0) != acme {
+		t.Error("idempotent olmalı; port 0 → dokunma")
 	}
 }
 

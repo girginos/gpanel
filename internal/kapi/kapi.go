@@ -77,7 +77,10 @@ type Ayar struct {
 	// da kapanırsa herkes kilitlenir. Dışarıdan erişilebilirliğin tek gerçek kanıtı,
 	// admin'in o porttan gerçekten girmiş olmasıdır.
 	AdminDogrulandi int64 `json:"admin_dogrulandi,omitempty"`
-	Olusturma       int64 `json:"olusturma,omitempty"`
+	// AdminPortDegisti: admin portunun son değiştiği an. Bundan sonraki kısa bir süre
+	// admin girişleri kanıt SAYILMAZ (bkz. adminKanitBekleme).
+	AdminPortDegisti int64 `json:"admin_port_degisti,omitempty"`
+	Olusturma        int64 `json:"olusturma,omitempty"`
 }
 
 // RolPortu: rolün kapı portu (bilinmeyen rol → 0).
@@ -301,6 +304,13 @@ func GirisIzinli(istekKapi, rol string) bool {
 
 var adminKaydedildi atomic.Bool
 
+// adminKanitBekleme (sn): admin portu değiştikten sonra bu süre içinde gelen "admin
+// kapısı" girişleri kanıt SAYILMAZ. nginx reload'u zariftir: reload'dan ÖNCE eski
+// admin portundan giren bir istek hâlâ "admin" başlığıyla işlenebilir. Onu yeni portun
+// kanıtı saymak, yeni port dışarıdan kapalıyken eski portu kapattırıp admin'i
+// kilitleyebilirdi.
+const adminKanitBekleme = 30
+
 // AdminGirisiniKaydet: admin'in YENİ admin kapısından başarılı girişini kaydeder —
 // eski kapının kapanabilmesi için tek gerçek dış-erişilebilirlik kanıtı (bkz.
 // Ayar.AdminDogrulandi). Dosyaya yalnız ilk seferde yazar; sonrası bellekten döner.
@@ -313,17 +323,25 @@ func AdminGirisiniKaydet(yol string, simdi int64) error {
 	if err != nil {
 		return err
 	}
-	if a.AdminDogrulandi == 0 {
+	kayitli := a.AdminDogrulandi != 0
+	if !kayitli {
 		if err := Guncelle(yol, func(x *Ayar) error {
-			if x.AdminDogrulandi == 0 {
+			switch {
+			case x.AdminDogrulandi != 0:
+				kayitli = true
+			case simdi-x.AdminPortDegisti >= adminKanitBekleme:
 				x.AdminDogrulandi = simdi
+				kayitli = true
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
 	}
-	adminKaydedildi.Store(true)
+	// Bekleme içinde kaydedilmediyse bayrak KALKMAZ: sonraki giriş yeniden dener.
+	if kayitli {
+		adminKaydedildi.Store(true)
+	}
 	return nil
 }
 

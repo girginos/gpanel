@@ -8,9 +8,10 @@ package portyonetim
 import (
 	"bufio"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
+
+	"girginospanel/internal/kapi"
 )
 
 const (
@@ -21,9 +22,12 @@ const (
 
 type Durum struct {
 	BackendPort int    `json:"backend_port"` // 8080
-	DisPort     int    `json:"dis_port"`     // 8443
+	DisPort     int    `json:"dis_port"`     // 8443 (kapı modunda: genel/müşteri kapısı)
 	Uygulama    string `json:"uygulama"`     // panel binary path
 	AktifIs     *Is    `json:"aktif_is,omitempty"`
+	// Kapi: rol kapıları (ADR-GP-001) yapılandırılmışsa dolu. Kapı modunda dış port
+	// tek başına değiştirilemez; rol portları ayrı yönetilir.
+	Kapi *KapiDurum `json:"kapi,omitempty"`
 }
 
 // BackendPortOku — /etc/girginospanel/env içinden PANEL_LISTEN'i parse et.
@@ -51,19 +55,11 @@ func BackendPortOku() int {
 	return 8080
 }
 
-var reListen = regexp.MustCompile(`(?m)^\s*listen\s+(?:\[::\]:)?(\d+)\s+ssl\b`)
-
-// DisPortOku — nginx panel vhost'undaki "listen X ssl" satırından port.
+// DisPortOku — panelin herkese açık dış portu (vhost'un genel listen'ı; kapı modunda
+// müşteri kapısı — admin/bayi portu ASLA). Uygulama subdomain vhost'ları ve {panelport}
+// şablonları bunu kullanır. Bulunamazsa 8443.
 func DisPortOku() int {
-	b, err := os.ReadFile(VhostYolu)
-	if err != nil {
-		return 8443
-	}
-	m := reListen.FindStringSubmatch(string(b))
-	if len(m) < 2 {
-		return 8443
-	}
-	if p, e := strconv.Atoi(m[1]); e == nil && p > 0 {
+	if p := kapi.GenelPanelPortuOku(VhostYolu); p > 0 {
 		return p
 	}
 	return 8443
@@ -76,5 +72,6 @@ func DurumGetir() Durum {
 		DisPort:     DisPortOku(),
 		Uygulama:    "/opt/girginospanel/bin/girginospanel-server",
 		AktifIs:     isSnapshot(),
+		Kapi:        KapiDurumGetir(),
 	}
 }

@@ -131,6 +131,21 @@ func main() {
 	gizli.SaglikKontrol(d)              // anahtar gercekten cozuyor mu (sessiz bozulma uyarisi)
 	gizli.PMATokenSupur(d, time.Minute) // suresi gecmis pma token satirlari birikmesin
 
+	// Rol kapıları (ADR-GP-001): panelin genel portu değişince (geçiş bitince, rol portu
+	// değişince) ona bağlı adresler canlı porta taşınır. Init'teki ilk kapı uzlaştırması
+	// da yakalasın diye Init'ten ÖNCE bağlanır.
+	provisioner.KapiGenelPortUzlastir = func(genel int, canli map[int]bool) {
+		if err := hostuyg.SubdomainVhostlariCanliPortaTasi(genel, canli); err != nil {
+			log.Printf("kapi: uygulama vhost'ları genel porta taşınamadı: %v", err)
+		}
+		// GitHub API'ye ağ çağrısı yapar: uzlaştırma (kilit altında, açılışta) beklemesin.
+		go githubpkg.WebhookPortlariniUzlastir(context.Background(), d, genel, canli)
+	}
+	portyonetim.KapiUygula = provisioner.KapiSimdiUygula
+	guvenlikduvari.EkKorumaliPortlar = func() []int {
+		return kapi.PanelPortlari(portyonetim.VhostYolu, time.Now().Unix())
+	}
+
 	provisioner.Init(d) // askıya-alma tutarlılığı için provisioner'a DB handle'ı ver
 	middleware.Init(d)  // musteri-scope askiya-alma kontrolu icin DB handle
 
@@ -264,6 +279,10 @@ func main() {
 		Aktor: func(r *http.Request) (int64, bool) {
 			uid, _ := middleware.Aktor(r)
 			return uid, uid > 0
+		},
+		Denetle: func(r *http.Request, eylem, hedef, detay string, basarili bool) {
+			uid, kul := middleware.Aktor(r)
+			httpx.Denetim(d, r, uid, kul, eylem, hedef, detay, 0, basarili)
 		},
 	}
 	go func() { _ = ipyonetim.PersistYaz(context.Background(), d) }()
@@ -549,6 +568,10 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/portlar/gecmis", portYonetimH.Gecmis)
 			r.With(middleware.AdminOnly).Post("/portlar/backend", portYonetimH.BackendDegistir)
 			r.With(middleware.AdminOnly).Post("/portlar/dis", portYonetimH.DisDegistir)
+			// Rol kapıları (ADR-GP-001)
+			r.With(middleware.AdminOnly).Post("/portlar/kapi/rol", portYonetimH.KapiRol)
+			r.With(middleware.AdminOnly).Post("/portlar/kapi/uzat", portYonetimH.KapiUzat)
+			r.With(middleware.AdminOnly).Post("/portlar/kapi/eski-kapat", portYonetimH.KapiEskiKapat)
 			// Host uygulamaları — GEÇİCİ KAPALI (hostUygulamalariAcik)
 			if hostUygulamalariAcik {
 				r.With(middleware.AdminOnly).Get("/hostuyg/katalog", hostuygH.Katalog)

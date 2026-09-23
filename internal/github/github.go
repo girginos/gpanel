@@ -22,7 +22,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const apiBase = "https://api.github.com"
+// apiBase: GitHub REST kökü (testlerde sahte sunucuya çevrilir).
+var apiBase = "https://api.github.com"
 
 type Handlers struct {
 	DB *sql.DB

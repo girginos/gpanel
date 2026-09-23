@@ -1,26 +1,56 @@
 package portyonetim
 
 // HTTP endpoint'leri:
-//   GET  /admin/portlar               — durum + aktif iş
+//   GET  /admin/portlar               — durum + aktif iş (+ kapı özeti)
 //   POST /admin/portlar/backend       — backend port değiştir (async)
-//   POST /admin/portlar/dis           — dış port değiştir (async)
+//   POST /admin/portlar/dis           — dış port değiştir (async; kapı modunda reddedilir)
 //   GET  /admin/portlar/is            — aktif iş durumu (polling)
 //   GET  /admin/portlar/gecmis        — cp_port_gecmisi (son 20)
 //   GET  /admin/portlar/yasakli       — yasaklı portlar listesi (UI için)
+//   POST /admin/portlar/kapi/...      — rol kapıları (bkz. kapi.go)
 
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
 type Handler struct {
 	DB    *sql.DB
 	Aktor func(r *http.Request) (int64, bool)
+	// Denetle: güvenlik açısından önemli işlemleri audit_log'a yazar (main bağlar;
+	// nil → yazılmaz).
+	Denetle func(r *http.Request, eylem, hedef, detay string, basarili bool)
 }
 
 type degistirGovde struct {
 	YeniPort int `json:"yeni_port"`
+}
+
+func (h *Handler) aktorUID(r *http.Request) *int64 {
+	if h.Aktor == nil {
+		return nil
+	}
+	if u, ok := h.Aktor(r); ok {
+		return &u
+	}
+	return nil
+}
+
+func (h *Handler) denetle(r *http.Request, eylem, hedef, detay string, basarili bool) {
+	if h.Denetle != nil {
+		h.Denetle(r, eylem, hedef, detay, basarili)
+	}
+}
+
+// degisiklikHataYaz: eşzamanlı iş çakışması 409, diğerleri 400.
+func degisiklikHataYaz(w http.ResponseWriter, err error) {
+	if errors.Is(err, errDegisiklikSuruyor) || errors.Is(err, errIPIsiSuruyor) || errors.Is(err, errKapiModu) {
+		hataYaz(w, http.StatusConflict, err.Error())
+		return
+	}
+	hataYaz(w, http.StatusBadRequest, err.Error())
 }
 
 func (h *Handler) Durum(w http.ResponseWriter, _ *http.Request) {
@@ -46,26 +76,12 @@ func (h *Handler) YasakliListele(w http.ResponseWriter, _ *http.Request) {
 
 func (h *Handler) BackendDegistir(w http.ResponseWriter, r *http.Request) {
 	var g degistirGovde
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&g); err != nil {
-		hataYaz(w, 400, "geçersiz gövde: "+err.Error())
+	if !govdeCoz(w, r, &g) {
 		return
 	}
-	var uid *int64
-	if h.Aktor != nil {
-		if u, ok := h.Aktor(r); ok {
-			uid = &u
-		}
-	}
-	is, err := BackendPortDegistir(r.Context(), h.DB, g.YeniPort, uid)
+	is, err := BackendPortDegistir(r.Context(), h.DB, g.YeniPort, h.aktorUID(r))
 	if err != nil {
-		// Kilit durumu → 409
-		if err.Error() == "başka bir port değişikliği devam ediyor" {
-			hataYaz(w, 409, err.Error())
-			return
-		}
-		hataYaz(w, 400, err.Error())
+		degisiklikHataYaz(w, err)
 		return
 	}
 	jsonYaz(w, 202, map[string]any{"ok": true, "is": is})
@@ -73,25 +89,12 @@ func (h *Handler) BackendDegistir(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DisDegistir(w http.ResponseWriter, r *http.Request) {
 	var g degistirGovde
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&g); err != nil {
-		hataYaz(w, 400, "geçersiz gövde: "+err.Error())
+	if !govdeCoz(w, r, &g) {
 		return
 	}
-	var uid *int64
-	if h.Aktor != nil {
-		if u, ok := h.Aktor(r); ok {
-			uid = &u
-		}
-	}
-	is, err := DisPortDegistir(r.Context(), h.DB, g.YeniPort, uid)
+	is, err := DisPortDegistir(r.Context(), h.DB, g.YeniPort, h.aktorUID(r))
 	if err != nil {
-		if err.Error() == "başka bir port değişikliği devam ediyor" {
-			hataYaz(w, 409, err.Error())
-			return
-		}
-		hataYaz(w, 400, err.Error())
+		degisiklikHataYaz(w, err)
 		return
 	}
 	jsonYaz(w, 202, map[string]any{"ok": true, "is": is})

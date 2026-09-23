@@ -280,25 +280,45 @@ func MapIcerigi(a *Ayar, simdi int64) string {
 	return b.String()
 }
 
-// CatchallUzlastir: panelhost'un yakala-hepsi (bilinmeyen Host → 444) bloğunun
-// listen satırlarını panelin genel portlarıyla eşitler.
+// IPv6Etkin: dosyada ETKİN (yorumsuz) bir IPv6 listen var mı? IPv6'sız çekirdekte
+// `listen [::]:p` `nginx -t`'yi düşürür; IPv6 satırı yalnız bu kanıtla eklenir.
+func IPv6Etkin(conf string) bool {
+	for _, d := range Dinlemeler(strings.Split(conf, "\n")) {
+		if d.IPv6 && !d.Yorum {
+			return true
+		}
+	}
+	return false
+}
+
+// CatchallUzlastir: panelhost'un yakala-hepsi (bilinmeyen Host → 444) bloğunun GENEL
+// listen satırlarını panelin genel portlarıyla eşitler. Loopback (erisim masaüstü) ve
+// yorumlu satırlara DOKUNMAZ. IPv6 satırı yalnız ipv6 true ise yazılır.
 //
 // 🔴 NEDEN: catchall eskiden TEK porta (panelin ilk listen'ı) kuruluyordu. Rol
 // portlarında catchall olmazsa panel bloğu o portun örtük varsayılanı olur ve
 // bilinmeyen Host'lar da panele ulaşır — panelhost'un tüm koruması rol
 // portlarında SESSİZCE devre dışı kalırdı.
-func CatchallUzlastir(catchall string, portlar []int) string {
+func CatchallUzlastir(catchall string, portlar []int, ipv6 bool) string {
 	satirlar := strings.Split(catchall, "\n")
+	genel := map[int]bool{}
+	for _, d := range Dinlemeler(satirlar) {
+		if d.Genel() {
+			genel[d.Satir] = true
+		}
+	}
 	idx := -1
 	girinti := "    "
 	var out []string
-	for _, ln := range satirlar {
+	for i, ln := range satirlar {
 		if m := listenRe.FindStringSubmatch(ln); m != nil && !strings.HasPrefix(strings.TrimSpace(ln), "#") {
 			if idx < 0 {
 				idx = len(out)
 				girinti = m[1]
 			}
-			continue // tüm eski listen'lar atılır, ilk konumlarına yenileri yazılır
+			if genel[i] {
+				continue // genel listen'lar atılır, ilk listen konumuna yenileri yazılır
+			}
 		}
 		out = append(out, ln)
 	}
@@ -307,13 +327,53 @@ func CatchallUzlastir(catchall string, portlar []int) string {
 	}
 	var yeni []string
 	for _, p := range portlar {
-		yeni = append(yeni,
-			fmt.Sprintf("%slisten %d ssl default_server;", girinti, p),
-			fmt.Sprintf("%slisten [::]:%d ssl default_server;", girinti, p))
+		yeni = append(yeni, fmt.Sprintf("%slisten %d ssl default_server;", girinti, p))
+		if ipv6 {
+			yeni = append(yeni, fmt.Sprintf("%slisten [::]:%d ssl default_server;", girinti, p))
+		}
 	}
 	sonuc := make([]string, 0, len(out)+len(yeni))
 	sonuc = append(sonuc, out[:idx]...)
 	sonuc = append(sonuc, yeni...)
 	sonuc = append(sonuc, out[idx:]...)
 	return strings.Join(sonuc, "\n")
+}
+
+// GenelPanelPortu: panelin HERKESE AÇIK portu — :80→HTTPS yönlendirmesi, uygulama
+// subdomain vhost'ları ve webhook adresleri bunu kullanır. Kapı modunda canlıysa
+// müşteri kapısı; değilse admin/bayi OLMAYAN ilk genel port (ör. geçişteki 8443).
+// Admin/bayi kapısı ASLA dönmez: yönlendirme ya da paylaşılan bir uygulama adresi
+// gizli yönetici portunu herkese sızdırırdı. Kapı yoksa ilk genel listen. Yoksa 0.
+func GenelPanelPortu(conf string, a *Ayar) int {
+	genel := GenelPortlar(conf)
+	if a == nil {
+		if len(genel) > 0 {
+			return genel[0]
+		}
+		return 0
+	}
+	for _, p := range genel {
+		if p == a.Musteri {
+			return p
+		}
+	}
+	for _, p := range genel {
+		if p != a.Admin && p != a.Bayi {
+			return p
+		}
+	}
+	return 0
+}
+
+// acmeYonRe: panelhost'un :80 mini vhost'undaki HTTPS yönlendirmesi (portu grup 2).
+var acmeYonRe = regexp.MustCompile(`(return\s+301\s+https://\$server_name:)(\d+)(\$request_uri;)`)
+
+// AcmeYonlendirmeUzlastir: :80 mini vhost'unun (panel hostname'i) HTTPS yönlendirme
+// portunu port'a eşitler. Tarayıcıya "http://panel.alan.adi" yazan kullanıcı genel
+// panel portuna gider; eski port kapandıktan sonra ölü adrese yönlenmez.
+func AcmeYonlendirmeUzlastir(acme string, port int) string {
+	if port <= 0 {
+		return acme
+	}
+	return acmeYonRe.ReplaceAllString(acme, "${1}"+strconv.Itoa(port)+"${3}")
 }

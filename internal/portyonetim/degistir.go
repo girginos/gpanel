@@ -43,6 +43,14 @@ const (
 	YedekMaxSayi      = 5 // her dosya icin son N yedek tutulur
 )
 
+// Eşzamanlılık hataları (HTTP 409). errors.Is ile ayırt edilir — metin karşılaştırması
+// değil: handler eskiden Türkçe metni ASCII hatayla karşılaştırıyordu, 409 dalı hiç
+// çalışmıyordu.
+var (
+	errDegisiklikSuruyor = errors.New("başka bir port değişikliği devam ediyor")
+	errIPIsiSuruyor      = errors.New("IP yönetimi işlemi devam ediyor — port değişikliği bekletildi")
+)
+
 // BackendPortDegistir — asagida validasyon; sonra DETACH helper cagirir.
 // DisPortDegistiSonrasi — main.go set eder: dış port değişikliği başarılı
 // olduğunda hostuyg subdomain vhost'larını güncellemek için.
@@ -60,12 +68,12 @@ func BackendPortDegistir(ctx context.Context, db *sql.DB, yeniPort int, aktorUID
 		return nil, fmt.Errorf("port %d baska bir servis tarafindan kullaniliyor", yeniPort)
 	}
 	if !TipKilitle("backend") {
-		return nil, errors.New("baska bir port degisikligi devam ediyor")
+		return nil, errDegisiklikSuruyor
 	}
 	// Cross-package lock — IP admin isleri sirasinda restart olmasin
 	if !ipyonetim.YazKilitTryLock() {
 		TipSerbest("backend")
-		return nil, errors.New("IP yonetimi islemi devam ediyor — port degisikligi bekletildi")
+		return nil, errIPIsiSuruyor
 	}
 	is := isBaslat("backend", eski, yeniPort)
 	go backendYurutDetach(context.Background(), db, is, eski, yeniPort, aktorUID)
@@ -73,7 +81,14 @@ func BackendPortDegistir(ctx context.Context, db *sql.DB, yeniPort int, aktorUID
 }
 
 // DisPortDegistir — nginx :listen degisikligi, panel restart YOK.
+//
+// 🔴 Kapı modunda REDDEDİLİR: tek "dış port" yoktur; nginxListenDegistir ilk eşleşen
+// listen'ı yeniden yazıp bir rol kapısını ya da açık eski kapıyı sessizce taşırdı.
+// Rol portları KapiRolDegistir ile değişir.
 func DisPortDegistir(ctx context.Context, db *sql.DB, yeniPort int, aktorUID *int64) (*Is, error) {
+	if kapiModu() {
+		return nil, errKapiModu
+	}
 	if yasak, aciklama := PortYasakMi(yeniPort); yasak {
 		return nil, fmt.Errorf("port %d yasak: %s", yeniPort, aciklama)
 	}
@@ -85,7 +100,7 @@ func DisPortDegistir(ctx context.Context, db *sql.DB, yeniPort int, aktorUID *in
 		return nil, fmt.Errorf("port %d baska bir servis tarafindan kullaniliyor", yeniPort)
 	}
 	if !TipKilitle("dis") {
-		return nil, errors.New("baska bir port degisikligi devam ediyor")
+		return nil, errDegisiklikSuruyor
 	}
 	is := isBaslat("dis", eski, yeniPort)
 	go disYurut(context.Background(), db, is, eski, yeniPort, aktorUID)
@@ -394,11 +409,19 @@ func itoa(i int) string { return fmt.Sprintf("%d", i) }
 ============================================================ */
 
 func gecmisYaz(db *sql.DB, is *Is, aktor *int64) {
+	gecmisSatirYaz(db, is.Tip, is.EskiPort, is.YeniPort, is.Basarili, is.Rollback, is.SonHata, aktor)
+}
+
+// gecmisSatirYaz: cp_port_gecmisi'ne tek satır (tip ≤16 karakter: backend|dis|kapi-*).
+func gecmisSatirYaz(db *sql.DB, tip string, eski, yeni int, basarili, rollback bool, hata string, aktor *int64) {
+	if db == nil {
+		return
+	}
 	ctx, iptal := context.WithTimeout(context.Background(), 5*time.Second)
 	defer iptal()
 	_, _ = db.ExecContext(ctx,
 		`INSERT INTO cp_port_gecmisi
 			(tip, eski_port, yeni_port, basarili, rollback, son_hata, aktor_uid)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		is.Tip, is.EskiPort, is.YeniPort, is.Basarili, is.Rollback, is.SonHata, aktor)
+		tip, eski, yeni, basarili, rollback, hata, aktor)
 }

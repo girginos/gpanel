@@ -68,16 +68,22 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	t.Helper()
 	s := &kapiSahte{dir: t.TempDir(), dinliyor: true, gizli: "gizli"}
 	eskiVhost, eskiCatch, eskiMap, eskiAyar := kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu
+	eskiAcme, eskiYay := kapiAcmeYolu, KapiGenelPortUzlastir
 	eskiKomut, eskiAc, eskiKapat := kapiNginxKomut, kapiFwAc, kapiFwKapat
 	eskiDinl, eskiGizli, eskiIzin := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin
 	t.Cleanup(func() {
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
+		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
 		kapiNginxKomut, kapiFwAc, kapiFwKapat = eskiKomut, eskiAc, eskiKapat
 		kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin = eskiDinl, eskiGizli, eskiIzin
 		kapi.ZorlamaAyarla(false)
 	})
+	// 🔴 HER yol geçici dizine: kapiNginxUygula dosya YAZAR; gerçek /etc yolunda kalan
+	// tek bir dikiş testi canlı nginx dosyasını değiştirirdi.
 	kapiVhostYolu = filepath.Join(s.dir, "_panel.conf")
 	kapiCatchallYolu = filepath.Join(s.dir, "_panel_catchall.conf")
+	kapiAcmeYolu = filepath.Join(s.dir, "_panel_acme.conf")
+	KapiGenelPortUzlastir = nil
 	kapiMapYolu = filepath.Join(s.dir, "00-gosp-kapi.conf")
 	kapiAyarYolu = filepath.Join(s.dir, "kapi.json")
 	kapiNginxKomut = func(ad string, arg ...string) ([]byte, error) {
@@ -333,6 +339,102 @@ func TestKapiHealCatchallRolPortlarinaGenisler(t *testing.T) {
 	}
 	if strings.Contains(c, "8443") {
 		t.Error("kaldırılan 8443 catchall'dan da çıkmalı")
+	}
+}
+
+// IPv4-yalnız sunucu: catchall'a [::] satırı YAZILMAZ (nginx -t IPv6'sız çekirdekte düşerdi).
+func TestKapiHealCatchallIPv6Kanitsiz(t *testing.T) {
+	v4 := strings.ReplaceAll(kapiTestSablon, "    listen [::]:8443 ssl default_server;\n", "")
+	kapiTestKur(t, v4, rolAyar())
+	catch := strings.ReplaceAll(kapiTestCatchall, "    listen [::]:8443 ssl default_server;\n", "")
+	if err := os.WriteFile(kapiCatchallYolu, []byte(catch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kapiUzlastir(1000)
+	if c := oku(t, kapiCatchallYolu); strings.Contains(c, "[::]") || !strings.Contains(c, "listen 23003 ssl default_server;") {
+		t.Fatalf("IPv6 kanıtı yokken [::] olmamalı, rol portları olmalı:\n%s", c)
+	}
+}
+
+// :80 → HTTPS yönlendirmesi genel panel portuna (müşteri) gider; ASLA admin portuna
+// (http://panel.alan.adi yazan herkese gizli portu söylerdi) ve kapanan eski porta değil.
+func TestKapiHealAcmeYonlendirmesi(t *testing.T) {
+	a := rolAyar()
+	a.EskiPortlar, a.EskiBitis = []int{8443}, 5000
+	kapiTestKur(t, kapiTestCanli, a)
+	acme := "server {\n    listen 80;\n    location / {\n        return 301 https://$server_name:8443$request_uri;\n    }\n}"
+	if err := os.WriteFile(kapiAcmeYolu, []byte(acme), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kapiUzlastir(1000)
+	if c := oku(t, kapiAcmeYolu); !strings.Contains(c, "https://$server_name:23003$request_uri;") {
+		t.Fatalf("yönlendirme müşteri kapısına gitmeli:\n%s", c)
+	}
+}
+
+// Genel port bağımlıları (uygulama vhost'ları, webhook'lar) durumsuz yayınla taşınır:
+// geçişte eski port canlıdır (taşınmaz), eski kapanınca canlı küme onu İÇERMEZ.
+func TestKapiHealGenelPortYayilir(t *testing.T) {
+	a := rolAyar()
+	a.EskiPortlar, a.EskiBitis = []int{8443}, 500
+	kapiTestKur(t, kapiTestCanli, a)
+	var genel int
+	var canli map[int]bool
+	KapiGenelPortUzlastir = func(g int, c map[int]bool) { genel, canli = g, c }
+
+	kapiUzlastir(1000) // süre doldu ama admin doğrulamadı → eski açık
+	if genel != 23003 || !canli[8443] || !canli[23003] {
+		t.Fatalf("geçişte: genel=müşteri, 8443 canlı olmalı: genel=%d canli=%v", genel, canli)
+	}
+	_ = kapi.Guncelle(kapiAyarYolu, func(x *kapi.Ayar) error { x.AdminDogrulandi = 900; return nil })
+	kapiUzlastir(1000)
+	if genel != 23003 || canli[8443] {
+		t.Fatalf("eski kapanınca 8443 canlı SAYILMAMALI (taşınsın): genel=%d canli=%v", genel, canli)
+	}
+	if canli[9443] {
+		t.Error("loopback (erisim) portu genel canlı sayılmamalı")
+	}
+}
+
+// Uzlaştırma sürerken panelden admin portu değişirse (yeni eski port + kanıt sıfır),
+// eski portları düşürme kararı BAYAT kopyaya göre verilmemeli: doğrulanmamış yeni admin
+// portuyla önceki admin portunu kapatmak kilitlenmedir.
+func TestKapiHealEskiDusurmeTazeAyaraBakar(t *testing.T) {
+	a := rolAyar()
+	a.EskiPortlar, a.EskiBitis, a.AdminDogrulandi = []int{8443}, 500, 400
+	kapiTestKur(t, kapiTestCanli, a)
+	degisti := false
+	kapiPortDinliyor = func(int) bool {
+		if !degisti { // aşama 2'nin başında eşzamanlı panel isteği
+			degisti = true
+			if _, err := kapi.RolPortuDegistir(kapiAyarYolu, kapi.Admin, 24004, 1000); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return true
+	}
+	kapiUzlastir(1000)
+	b, err := kapi.Oku(kapiAyarYolu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !iceriyor(b.EskiPortlar, 21001) || b.AdminDogrulandi != 0 {
+		t.Fatalf("eşzamanlı eklenen eski admin portu SİLİNMEMELİ: %+v", b)
+	}
+}
+
+func TestKapiSimdiUygula(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	eski := kapiTipOlcucu
+	t.Cleanup(func() { kapiTipOlcucu = eski })
+	yanit := map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}
+	kapiTipOlcucu = func(_ context.Context, port, _ int) (string, error) { return yanit[port], nil }
+	if err := KapiSimdiUygula(context.Background()); err != nil || !kapi.ZorlamaAktif() {
+		t.Fatalf("başarılı uygulama: err=%v zorlama=%v", err, kapi.ZorlamaAktif())
+	}
+	yanit[22002] = "karma"
+	if err := KapiSimdiUygula(context.Background()); err == nil || kapi.ZorlamaAktif() {
+		t.Fatal("ölçüm düşerse hata dönmeli ve zorlama KAPANMALI")
 	}
 }
 

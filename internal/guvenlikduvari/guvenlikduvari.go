@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,70 @@ var korumaliPortlar = map[int]bool{
 	8080: true, // panel API
 	8443: true, // panel UI
 	53:   true, // DNS (named)
+}
+
+// EkKorumaliPortlar: çalışma anında korunan ek portlar — panelin GERÇEK dış portları
+// (taşınmış dış port, rol kapıları, açık eski kapı; ADR-GP-001). main bağlar; nil →
+// yalnız statik liste. 🔴 Statik 8443 tek başına yetmez: kapı portları rastgeledir,
+// korunmazsa admin kendi panel kapısını "kapat" kuralıyla kilitleyebilirdi.
+var EkKorumaliPortlar func() []int
+
+func korumaliMi(p int) bool {
+	if korumaliPortlar[p] {
+		return true
+	}
+	if EkKorumaliPortlar != nil {
+		for _, k := range EkKorumaliPortlar() {
+			if k == p {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// korumaliListe: statik + dinamik korunan portlar (artan, tekrarsız).
+func korumaliListe() []int {
+	set := map[int]bool{}
+	for p := range korumaliPortlar {
+		set[p] = true
+	}
+	if EkKorumaliPortlar != nil {
+		for _, p := range EkKorumaliPortlar() {
+			set[p] = true
+		}
+	}
+	out := make([]int, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// kapatRe: kalıcı ruleset'te herkese kapatan TCP satırı ("kapat" ve port-kısıtlı
+// whitelist'in allowlist drop'u aynı biçimdedir: "\t\ttcp dport N drop").
+var kapatRe = regexp.MustCompile(`(?m)^\s*tcp dport (\d+) drop\s*$`)
+
+// KapatilanPortlar: panel firewall'unun herkese KAPATTIĞI ya da IP'ye KISITLADIĞI TCP
+// portları (kalıcı ruleset'ten; DB gerekmez — kurulum CLI'ı da kullanır). Yeni bir panel
+// kapısı bu portlardan seçilmez: seçilseydi kimse (ya da yalnız bir IP) erişemezdi.
+func KapatilanPortlar() map[int]bool {
+	return kapatilanPortlar(kuralDosya)
+}
+
+func kapatilanPortlar(yol string) map[int]bool {
+	out := map[int]bool{}
+	b, err := os.ReadFile(yol)
+	if err != nil {
+		return out
+	}
+	for _, m := range kapatRe.FindAllStringSubmatch(string(b), -1) {
+		if p, err := strconv.Atoi(m[1]); err == nil {
+			out[p] = true
+		}
+	}
+	return out
 }
 
 // firewallSablonlari: tek-tıkla uygulanan hazır kural paketleri (yaygın açık portları kapat).
@@ -105,11 +170,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = rows.Err()
-	korumali := make([]int, 0, len(korumaliPortlar))
-	for p := range korumaliPortlar {
-		korumali = append(korumali, p)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kurallar": out, "korumali_portlar": korumali})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kurallar": out, "korumali_portlar": korumaliListe()})
 }
 
 // POST /firewall  {tip, ip, port, protokol, aciklama}
@@ -151,7 +212,7 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadRequest, "kapatılacak port belirtin")
 			return
 		}
-		if korumaliPortlar[req.Port] {
+		if korumaliMi(req.Port) {
 			httpx.WriteError(w, http.StatusBadRequest,
 				fmt.Sprintf("port %d kritik (SSH/web/panel/DNS) — kapatılamaz, aksi halde sunucuya erişim kaybolur", req.Port))
 			return
@@ -200,7 +261,7 @@ func (h *Handlers) Sablon(w http.ResponseWriter, r *http.Request) {
 	}
 	eklenen := 0
 	for _, k := range kurallar {
-		if korumaliPortlar[k.Port] { // güvenlik: şablonda kritik port olmamalı ama yine de atla
+		if korumaliMi(k.Port) { // güvenlik: şablonda kritik port olmamalı ama yine de atla
 			continue
 		}
 		var n int
