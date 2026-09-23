@@ -1,6 +1,9 @@
 package kapi
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // ErrDisariyaKapali: panelin hiç genel listen'ı yok (erisim masaüstü modu — operatör
 // paneli bilinçli olarak yalnız SSH tüneline açmış). Geçiş 3 yeni GENEL port açıp bu
@@ -28,9 +31,16 @@ func GecisAyari(panelConf string, uygun func(int) bool, simdi int64, gun int) (*
 	if gun < 1 {
 		gun = VarsayilanGecisGun
 	}
+	// Rol portu, panel bloğunda İZİ olan HİÇBİR porta düşmemeli: genel (eski kapı),
+	// yalnız-loopback (SSH tüneli) ve erisim'in yoruma aldığı satırlar. Uzlastir izi
+	// olan portu "bilinçli yönetiliyor" sayıp listen EKLEMEZ → oraya düşen rol kapısı
+	// hiç genel dinlenmezdi. `ss` bunu her zaman yakalamaz (nginx dosyayı henüz
+	// yüklememiş / yorumlu satır). KapiRolPortuAta da YerelPortlar'ı aynı nedenle hariç tutar.
 	haric := map[int]bool{}
-	for _, p := range eski {
-		haric[p] = true
+	for _, d := range Dinlemeler(strings.Split(panelConf, "\n")) {
+		if d.Port > 0 {
+			haric[d.Port] = true
+		}
 	}
 	ad, by, mu, err := RolPortlariSec(uygun, haric)
 	if err != nil {

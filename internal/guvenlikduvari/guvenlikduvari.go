@@ -66,6 +66,11 @@ func korumaliMi(p int) bool {
 	return false
 }
 
+// kapatilamazMesaj: korumalı porta "kapat" reddinin metni — Ekle ve Durum aynı yanıtı verir.
+func kapatilamazMesaj(port int) string {
+	return fmt.Sprintf("port %d kritik (SSH/web/panel/DNS) — kapatılamaz, aksi halde sunucuya erişim kaybolur", port)
+}
+
 // korumaliListe: statik + dinamik korunan portlar (artan, tekrarsız).
 func korumaliListe() []int {
 	set := map[int]bool{}
@@ -213,8 +218,7 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if korumaliMi(req.Port) {
-			httpx.WriteError(w, http.StatusBadRequest,
-				fmt.Sprintf("port %d kritik (SSH/web/panel/DNS) — kapatılamaz, aksi halde sunucuya erişim kaybolur", req.Port))
+			httpx.WriteError(w, http.StatusBadRequest, kapatilamazMesaj(req.Port))
 			return
 		}
 		req.IP = "" // kapat = herkesten
@@ -310,6 +314,25 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	ak := 0
 	if req.Aktif {
 		ak = 1
+		// RK-KILIT-01: pasif bir "kapat" kuralı, pasifken panel kapısı (rastgele rol kapısı /
+		// açık eski port) olmuş bir porta ait olabilir; yeniden etkinleştirmek o kapıyı herkese
+		// kapatırdı → Ekle'deki korumanın aynısı. Pasife almak her zaman güvenli: denetlenmez.
+		var tip string
+		var port int
+		err := h.DB.QueryRowContext(r.Context(),
+			`SELECT tip, port FROM firewall_kurallari WHERE id=?`, id).Scan(&tip, &port)
+		if errors.Is(err, sql.ErrNoRows) {
+			httpx.WriteError(w, http.StatusNotFound, "kural bulunamadı")
+			return
+		}
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "kural okunamadı")
+			return
+		}
+		if tip == "kapat" && korumaliMi(port) {
+			httpx.WriteError(w, http.StatusBadRequest, kapatilamazMesaj(port))
+			return
+		}
 	}
 	if _, err := h.DB.ExecContext(r.Context(), `UPDATE firewall_kurallari SET aktif=? WHERE id=?`, ak, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "güncellenemedi")
@@ -322,25 +345,60 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// fwKural: rebuild'in DB'den okuduğu aktif kural (ruleset üretiminin girdisi).
+type fwKural struct {
+	ID       int64
+	Tip, IP  string
+	Port     int
+	Protokol string
+}
+
 // rebuild: aktif kurallardan nft ruleset üret, önce "nft -c" ile doğrula, sonra uygula + kalıcı yaz.
 func (h *Handlers) rebuild() error {
-	rows, err := h.DB.Query(`SELECT tip, ip, port, protokol FROM firewall_kurallari WHERE aktif=1 ORDER BY
+	rows, err := h.DB.Query(`SELECT id, tip, ip, port, protokol FROM firewall_kurallari WHERE aktif=1 ORDER BY
 		FIELD(tip,'whitelist','kapat','ban'), id`)
 	if err != nil {
 		return err
 	}
+	var kurallar []fwKural
+	for rows.Next() {
+		var k fwKural
+		if err := rows.Scan(&k.ID, &k.Tip, &k.IP, &k.Port, &k.Protokol); err != nil {
+			continue
+		}
+		kurallar = append(kurallar, k)
+	}
+	_ = rows.Err()
+	rows.Close()
+
+	// Korunan kümesi TEK anlık görüntü: dinamik liste (kapı portları) her kural için
+	// yeniden okunmaz, tüm ruleset aynı kapı durumuna göre üretilir.
+	korunan := map[int]bool{}
+	for _, p := range korumaliListe() {
+		korunan[p] = true
+	}
+	ruleset, atlanan := rulesetUret(kurallar, func(p int) bool { return korunan[p] })
+	for _, k := range atlanan {
+		log.Printf("firewall: kural #%d atlandı — %s port %d korumalı (panel kapısı/kritik), 'kapat' uygulanmaz",
+			k.ID, k.Protokol, k.Port)
+	}
+	return rulesetUygula(ruleset)
+}
+
+// rulesetUret: aktif kurallardan nft ruleset'i üretir (saf; DB/nft yok). Korumalı porta ait
+// "kapat" kuralları YAZILMAZ, atlanan olarak döner (RK-KILIT-01): kural DB'ye Durum/Ekle
+// korumasından önce girmiş ya da port SONRADAN panel kapısı olmuş olabilir; kapıyı herkese
+// kapatan bir drop, zincirde panelin sona eklediği accept'ten önce gelip onu ezerdi.
+func rulesetUret(kurallar []fwKural, korumali func(int) bool) ([]byte, []fwKural) {
 	var wl, kapat, ban []string
+	var atlanan []fwKural
 	// kisitla: port-belirtili whitelist kuralı o portu ALLOWLIST moduna alır.
 	// Yani "ip saddr X dport P accept" satırlarının ardına "proto dport P drop"
 	// eklenir → o porta SADECE izinli IP'ler erişir, diğer herkes engellenir.
 	// Anahtar "proto/port" → deterministik çıktı için sıralanır.
 	kisitla := map[string]bool{}
-	for rows.Next() {
-		var tip, ip, proto string
-		var port int
-		if err := rows.Scan(&tip, &ip, &port, &proto); err != nil {
-			continue
-		}
+	for _, k := range kurallar {
+		tip, ip, port, proto := k.Tip, k.IP, k.Port, k.Protokol
 		switch tip {
 		case "whitelist":
 			wl = append(wl, "\t\t"+saddr(ip)+dport(proto, port)+"accept")
@@ -348,13 +406,15 @@ func (h *Handlers) rebuild() error {
 				kisitla[proto+"/"+strconv.Itoa(port)] = true
 			}
 		case "kapat":
+			if korumali(port) {
+				atlanan = append(atlanan, k)
+				continue
+			}
 			kapat = append(kapat, "\t\t"+proto+" dport "+strconv.Itoa(port)+" drop")
 		case "ban":
 			ban = append(ban, "\t\t"+saddr(ip)+dport(proto, port)+"drop")
 		}
 	}
-	_ = rows.Err()
-	rows.Close()
 
 	// allowlist drop'ları: izinli IP accept'lerinden SONRA, kapat/ban'dan ÖNCE gelir.
 	// (established,related + lo en üstte olduğu için canlı oturum/SSH asla kopmaz.)
@@ -393,8 +453,14 @@ func (h *Handlers) rebuild() error {
 		b.WriteString(r + "\n")
 	}
 	b.WriteString("\t}\n}\n")
+	return b.Bytes(), atlanan
+}
 
-	ruleset := b.Bytes()
+// rulesetUygula: üretilen ruleset'i doğrular, uygular ve kalıcı yazar. Test dikişi —
+// testler bunu değiştirir; gerçek nft/etc'ye asla inmemeli.
+var rulesetUygula = uygulaVeKaydet
+
+func uygulaVeKaydet(ruleset []byte) error {
 	// 1) doğrula (check) — bozuk ruleset uygulanmaz
 	if out, err := nftCheck(ruleset); err != nil {
 		return fmt.Errorf("nft doğrulama: %s", strings.TrimSpace(out))

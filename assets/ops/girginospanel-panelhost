@@ -31,6 +31,8 @@ PANEL_PORT="${PANEL_PORTLARI%% *}"
 [ -n "$PANEL_PORT" ] || PANEL_PORT=8443
 [ -n "$PANEL_PORTLARI" ] || PANEL_PORTLARI="$PANEL_PORT"
 CATCH_CONF=/etc/nginx/conf.d/_panel_catchall.conf
+# Rol kapıları (ADR-GP-001) doğruluk kaynağı: dosya varsa panel kapı modundadır.
+KAPI_JSON=/etc/girginospanel/kapi.json
 CERT=/etc/ssl/girginospanel/panel.crt
 KEY=/etc/ssl/girginospanel/panel.key
 
@@ -185,12 +187,82 @@ ayarla() {
   ok "uygulandı → server_name: $izinli"
 }
 
+# kapi_portu <rol>: kapi.json'dan rol portu. Panel ikilisi ÇALIŞTIRILMAZ (erisim/dogrula
+# ile aynı düz okuma — eski bir ikili bilinmeyen argümanla sunucuyu başlatırdı).
+kapi_portu() { grep -oE "\"$1\": *[0-9]+" "$KAPI_JSON" 2>/dev/null | grep -oE '[0-9]+$' | head -1; }
+
+# kapi_eksikleri <conf>: dosyada kapı düzeninden EKSİK olanları satır satır yazar (boş =
+# tam). Rol portunun HERHANGİ bir listen izi (genel, loopback ya da erisim'in yoruma
+# aldığı) yeter — panelin Heal'i de portu böyle "yönetiliyor" sayar (kapi.Uzlastir).
+kapi_eksikleri() {
+  local conf="$1" rol p
+  grep -q 'proxy_set_header X-GP-Kapi ' "$conf" 2>/dev/null || echo "X-GP-Kapi başlığı"
+  for rol in admin bayi musteri; do
+    p=$(kapi_portu "$rol")
+    [ -n "$p" ] || continue
+    grep -qE "listen[[:space:]]+([^[:space:];]*:)?${p}([[:space:];]|\$)" "$conf" 2>/dev/null \
+      || echo "$rol kapısı listen :$p"
+  done
+}
+
+# kapi_yeniden_uygula: kapı düzenini HEMEN geri getirir. nginx'e kendimiz yazmıyoruz:
+# kapı düzeninin TEK uygulayıcısı panelin açılış Heal'idir (EKLEYİCİ: eksik rol listen'ı
+# + X-GP-Kapi başlığı; nginx -t + geri alma + uçtan uca ölçüm onda). Zincir kurulamazsa
+# Heal zorlamayı KAPATIR → tek-port davranışı, kimse kilitli kalmaz. `kapi rol-port`
+# CLI'ı da aynı yolu kullanır (panelYenidenBaslat).
+# NOT: panelin kendisi bu betiği `sifirla` ile çağırırsa restart onu da öldürür — bugün
+# yalnız operatör CLI'ı çağırıyor.
+kapi_yeniden_uygula() {
+  if ! systemctl is-active --quiet girginospanel; then
+    uyar "panel çalışmıyor — kapı düzeni bir sonraki açılışta uygulanır (panel kapalıyken kimse kilitlenmez)"
+    return 0
+  fi
+  if ! systemctl restart girginospanel; then
+    uyar "panel yeniden başlatılamadı — kapıyı elle uygula: systemctl restart girginospanel"
+    return 1
+  fi
+  # 🔴 ÖLÇ, İDDİA ETME: Heal'in dosyayı gerçekten uyumladığını gör.
+  local i eksik=""
+  for i in $(seq 1 15); do
+    eksik=$(kapi_eksikleri "$PANEL_CONF")
+    if [ -z "$eksik" ]; then
+      ok "kapı düzeni yeniden uygulandı (panel açılış uzlaştırması)"
+      return 0
+    fi
+    sleep 1
+  done
+  uyar "panel yeniden başlatıldı ama kapı düzeni _panel.conf'ta hâlâ eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
+  uyar "panel bu durumda kapı kurallarını KAPATIR (tek-port davranışı) — bak: journalctl -u girginospanel -n 40"
+  return 1
+}
+
 sifirla() {
   local son; son=$(ls -t "$PANEL_CONF".yedek.* 2>/dev/null | head -1)
   [ -n "$son" ] || dur "geri alınacak yedek yok"
+  # 🔴 KAPI MODU (ADR-GP-001): yedek rol kapısı geçişinden ÖNCE alınmışsa rol listen'ları
+  # ve X-GP-Kapi satırı içermez. Yalnız geri yükleyip bıraksaydık panel belleğindeki
+  # zorlama AÇIK kalırdı → bakım uzlaştırmasına dek (≤15 dk) giriş 404, API 401: TÜM
+  # roller kilitli. Reddetmek de çözüm değil (sifirla bir kurtarma aracı); yedeği geri
+  # yükleyip kapıyı hemen yeniden uyguluyoruz. sifirla yalnız isim kısıtlamasını (server_name
+  # + yakala-hepsi) geri alır; kapı düzeni kapi.json'dan yeniden türetilir.
+  local kapi=0 eksik=""
+  if [ -f "$KAPI_JSON" ]; then
+    kapi=1
+    eksik=$(kapi_eksikleri "$son")
+    if [ -n "$eksik" ]; then
+      uyar "yedek rol kapısı düzeninden ÖNCE alınmış — eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
+      uyar "kapı düzeni kapi.json'dan hemen yeniden uygulanacak (panel açılış uzlaştırması)"
+    fi
+  fi
   cp -a "$son" "$PANEL_CONF"; rm -f "$CATCH_CONF"
   nginx -t >/dev/null 2>&1 || dur "nginx -t başarısız"
   systemctl reload nginx && ok "eski yapılandırmaya dönüldü ($son)"
+  local rc=$?
+  # reload düşse bile uygula: dosya artık yedek; bir sonraki herhangi bir reload onu yükler.
+  if [ "$kapi" = 1 ]; then
+    kapi_yeniden_uygula || rc=1
+  fi
+  return "$rc"
 }
 
 case "${1:-durum}" in

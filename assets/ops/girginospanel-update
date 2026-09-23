@@ -53,6 +53,8 @@ SCRIPTS="$PREFIX/src/scripts"
 DBBK=/usr/local/bin/girginospanel-db-backup   # panel DB dump aracı (assets/ops'tan kurulur)
 DBDIR=/var/backups/girginospanel/db           # dump'ların yeri (kardeş dizinler = domain yedeği)
 PREDUMP=""                                    # güncelleme öncesi dump yolu (rollback'te geri yüklenir)
+KAPI_JSON=/etc/girginospanel/kapi.json        # rol kapıları (ADR-GP-001) doğruluk kaynağı
+KAPI_YENI=0                                   # 1 = kapi.json'u BU koşu (10c) yarattı → rollback kaldırır
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -578,13 +580,20 @@ fi
 # az 60 gün VE admin yeni admin kapısından bir kez girene dek açık kalır. RESTART'TAN
 # ÖNCE: yeni binary'nin açılış Heal'i uygular (tek restart). İdempotent (geçiş
 # yapılmışsa dokunmaz); yalnız loopback'te dinleyen (erisim masaüstü) sunucu atlanır.
-# Rollback olursa eski binary kapi.json'u tanımaz → davranış değişmez.
-if [ ! -f /etc/girginospanel/kapi.json ]; then
+# 🔴 ROLLBACK: eski ikili kapi.json'u tanımaz AMA erisim/dogrula onu DOĞRUDAN okur ve
+# sunucuyu kapı modunda sanır (dogrula olmayan kapıları ölçer, erisim admin kapısını
+# "panel portu" alır). Bu yüzden kapi.json'u BU koşu yarattıysa KAPI_YENI=1 işaretlenir ve
+# geri alma dalı onu kaldırır (yedekleyerek); önceden var olan kapi.json'a DOKUNULMAZ.
+if [ ! -f "$KAPI_JSON" ]; then
   if "$BIN" kapi gecis >/dev/null 2>&1; then
-    [ -f /etc/girginospanel/kapi.json ] && ok "rol kapıları geçişi hazırlandı (panel açılışında uygulanır)"
+    if [ -f "$KAPI_JSON" ]; then
+      ok "rol kapıları geçişi hazırlandı (panel açılışında uygulanır)"
+    fi
   else
     warn "rol kapıları geçişi yapılamadı — panel tek portla devam eder (sonra: girginospanel-server kapi gecis)"
   fi
+  # Önceden yoktu; şimdi varsa BU koşu yarattı (gecis hata dönse bile yazmış olabilir).
+  if [ -f "$KAPI_JSON" ]; then KAPI_YENI=1; fi
 fi
 
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
@@ -681,6 +690,21 @@ else
   # migration'ın EKLEDİĞİ tablolar dump'ta olmadığı için kalır (eski binary onları
   # görmez, zararsız). Kolon/veri değişiklikleri geri alınır.
   systemctl stop girginospanel >/dev/null 2>&1 || true
+
+  # 10c'nin BU koşuda yarattığı kapi.json'u geri al (panel DURMUŞKEN: yeni ikilinin
+  # Heal'i dosyayı yeniden yazamasın). Önceden var olan kapi.json'a DOKUNULMAZ.
+  # Yeni ikilinin Heal'i sağlık kontrolünden önce koştuysa nginx'teki rol listen'ları /
+  # kapı başlığı (ve firewall'da açılan portlar) kalır: eski ikili başlığı yok sayar, o
+  # portlar da aynı (kapısız) panele çıkar — tek-port davranışı.
+  if [ "$KAPI_YENI" = 1 ] && [ -f "$KAPI_JSON" ]; then
+    KAPI_GERI="$KAPI_JSON.geri-alindi.$(date +%Y%m%d%H%M%S)"
+    if mv -f "$KAPI_JSON" "$KAPI_GERI"; then
+      ok "bu güncellemenin yarattığı kapi.json geri alındı (yedek: $KAPI_GERI) — tek-port davranışı"
+    else
+      warn "kapi.json geri alınamadı — erisim/dogrula kapı modunda sanır; elle: mv $KAPI_JSON $KAPI_GERI"
+    fi
+  fi
+
   if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
     if zcat "$PREDUMP" | mysql; then
       ok "DB güncelleme öncesi yedeğe geri yüklendi ($PREDUMP)"

@@ -26,9 +26,13 @@ ok()   { echo -e "  ${c_g}✓${c_0} $*"; }
 warn() { echo -e "  ${c_y}!${c_0} $*"; }
 err()  { echo -e "  ${c_r}✗${c_0} $*" >&2; }
 
-DURUM_DOSYA=/etc/girginospanel/erisim-modu
+# Yollar: GOSP_* yalnız kum havuzu testleri içindir (varsayılanlar gerçek sistem yolları).
+DURUM_DOSYA=${GOSP_ERISIM_MODU:-/etc/girginospanel/erisim-modu}
 
-KAPI_AYAR=/etc/girginospanel/kapi.json
+KAPI_AYAR=${GOSP_KAPI_AYAR:-/etc/girginospanel/kapi.json}
+# Panelin zorlama bayrağının dosya yansıması ("acik" | "kapali"; tmpfs — açılışta ölçüm
+# bitene dek YOKTUR). Bkz. internal/provisioner/panelkapi.go kapiZorlamaDosyasi.
+KAPI_ZORLAMA=${GOSP_KAPI_ZORLAMA:-/run/girginospanel/kapi-zorlama}
 
 # ---- rol kapıları (ADR-GP-001) ----
 # Kapı modunda "panel portu" = ADMIN kapısı: masaüstü modu yalnız yönetici yüzeyini
@@ -42,12 +46,60 @@ kapi_eski_portlari() {
   tr -d ' \n' < "$KAPI_AYAR" 2>/dev/null | grep -oE '"eski_portlar":\[[0-9,]*\]' | grep -oE '[0-9]+' | tr '\n' ' '
 }
 
+# ---- kapı zorlaması GERÇEKTEN açık mı? (RK-OPS-06) ----
+# 🔴 kapi.json'da admin portu olması rol ayrımının İŞLEDİĞİ anlamına GELMEZ. Panel
+# nginx→panel zincirini ölçemezse zorlamayı kapatır (güvenli başarısızlık = eski tek-port
+# davranışı): o sırada bayi, müşteri ve eski kapıların HER BİRİ yönetici girişini de kabul
+# eder — admin kapısını loopback'e çekmek yönetici yüzeyini KAPATMAZ. Bu yüzden "yalnız
+# yönetici yüzeyi kapandı" demeden önce iki bağımsız ölçüm:
+#   1) panelin bayrağı: $KAPI_ZORLAMA = "acik"
+#   2) üretim yolu: müşteri kapısında yönetici giriş ucu YOKTUR → 404. Zorlama kapalıyken
+#      aynı istek 400 döner (boş gövde). Gövde '{}': kimlik bilgisi gönderilmez; denetim
+#      kaydı ve kaba-kuvvet sayacı etkilenmez (sayaç yalnız 401'i sayar).
+# İkisi birlikte doğrulanmadıkça başarı İDDİA EDİLMEZ; ölçülemeyen = doğrulanmamış.
+# Çıktı: KAPI_ZORLAMA_DURUM = acik | kapali | olculemedi, KAPI_ZORLAMA_OLCUM = ayrıntı.
+KAPI_ZORLAMA_DURUM=""; KAPI_ZORLAMA_OLCUM=""
+kapi_zorlama_olc() { # -> 0 yalnız zorlama KANITLI açıksa
+  local bayrak mp kod b_ac=0 b_kapali=0 u_ac=0 u_kapali=0 bd ud
+  bayrak=$(head -c 32 "$KAPI_ZORLAMA" 2>/dev/null | tr -d '[:space:]')
+  case "$bayrak" in
+    acik)   b_ac=1;     bd="bayrak: acik" ;;
+    kapali) b_kapali=1; bd="bayrak: KAPALI ($KAPI_ZORLAMA)" ;;
+    "")     bd="bayrak okunamadı ($KAPI_ZORLAMA yok — panel ölçümü bitmedi ya da eski sürüm)" ;;
+    *)      bd="bayrak tanınmadı ('${bayrak//[!a-zA-Z0-9_-]/?}')" ;;
+  esac
+  mp=$(kapi_portu musteri)
+  if [ -z "$mp" ]; then
+    ud="müşteri kapı portu $KAPI_AYAR içinde yok — giriş ucu ölçülemedi"
+  else
+    kod=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' -X POST \
+          -H 'Content-Type: application/json' --data '{}' \
+          "https://127.0.0.1:$mp/api/v1/auth/login" 2>/dev/null)
+    case "$kod" in
+      404)         u_ac=1;     ud="müşteri kapısı :$mp yönetici girişi: 404 (uç yok)" ;;
+      400|401|200) u_kapali=1; ud="müşteri kapısı :$mp yönetici girişi: HTTP $kod — uç AÇIK" ;;
+      ""|000)      ud="müşteri kapısı :$mp bağlanılamadı — giriş ucu ölçülemedi" ;;
+      *)           ud="müşteri kapısı :$mp HTTP $kod — giriş ucu ölçülemedi" ;;
+    esac
+  fi
+  KAPI_ZORLAMA_OLCUM="$bd · $ud"
+  if [ $b_ac -eq 1 ] && [ $u_ac -eq 1 ]; then
+    KAPI_ZORLAMA_DURUM=acik; return 0
+  fi
+  if [ $b_kapali -eq 1 ] || [ $u_kapali -eq 1 ]; then
+    KAPI_ZORLAMA_DURUM=kapali
+  else
+    KAPI_ZORLAMA_DURUM=olculemedi
+  fi
+  return 1
+}
+
 # ---- panel portunu bul (kapı modunda admin kapısı; değilse nginx listen satırından) ----
 panel_portu() {
   local p
   p=$(kapi_portu admin)
   if [ -z "$p" ]; then
-    p=$(grep -hoE '^\s*listen\s+([0-9]+)\s+ssl' /etc/nginx/conf.d/_panel.conf 2>/dev/null \
+    p=$(grep -hoE '^\s*listen\s+([0-9]+)\s+ssl' "$PANEL_CONF" 2>/dev/null \
         | grep -oE '[0-9]+' | head -1)
   fi
   echo "${p:-8443}"
@@ -165,8 +217,8 @@ port_kapat() { # port -> accept kurallarını sil + DROP ekle
 # dış arayüzde dinlenmez — TCP el sıkışması bile olmaz, API dahil hiçbir şeye
 # dışarıdan ulaşılamaz. SSH tüneli sunucunun İÇİNDEN 127.0.0.1'e bağlandığı
 # için masaüstü uygulaması çalışmaya devam eder.
-PANEL_CONF=/etc/nginx/conf.d/_panel.conf
-CATCHALL_CONF=/etc/nginx/conf.d/_panel_catchall.conf
+PANEL_CONF=${GOSP_PANEL_CONF:-/etc/nginx/conf.d/_panel.conf}
+CATCHALL_CONF=${GOSP_CATCHALL_CONF:-/etc/nginx/conf.d/_panel_catchall.conf}
 
 nginx_loopback_mi() { # port
   grep -qE "^\s*listen\s+127\.0\.0\.1:$1\s+ssl" "$PANEL_CONF" 2>/dev/null
@@ -341,9 +393,26 @@ cmd_masaustu() {
   else
     err "UYARI: panel içeriden de yanıt vermiyor — SSH tüneli çalışmayabilir!"
   fi
-  ok "Panele artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
-  if [ -n "$(kapi_portu admin)" ]; then
-    ok "bayi (:$(kapi_portu bayi)) ve müşteri (:$(kapi_portu musteri)) kapıları AÇIK kalır — yalnız yönetici yüzeyi kapandı"
+  if [ -z "$(kapi_portu admin)" ]; then
+    ok "Panele artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
+  else
+    # 🔴 Kapı modunda başarı iddiası ÖLÇÜME bağlı (RK-OPS-06): zorlama kapalıyken
+    # bayi/müşteri/eski kapılar root girişini de kabul eder.
+    if kapi_zorlama_olc; then
+      ok "Yönetici yüzeyine artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
+      ok "bayi (:$(kapi_portu bayi)) ve müşteri (:$(kapi_portu musteri)) kapıları AÇIK kalır — yalnız yönetici yüzeyi kapandı"
+      ok "zorlama ölçüldü: $KAPI_ZORLAMA_OLCUM"
+    else
+      if [ "$KAPI_ZORLAMA_DURUM" = "kapali" ]; then
+        err "UYARI: zorlama kapalı: yönetici girişi bayi/müşteri portlarında açık olabilir"
+      else
+        err "UYARI: zorlama DOĞRULANAMADI: yönetici girişi bayi/müşteri portlarında açık olabilir"
+      fi
+      err "  ölçüm: $KAPI_ZORLAMA_OLCUM"
+      err "  Yönetici yüzeyi KAPANMIŞ SAYILMAZ: admin kapısı loopback'te, ancak zorlama açılana dek"
+      err "  bayi (:$(kapi_portu bayi)), müşteri (:$(kapi_portu musteri)) ve eski kapılar yönetici girişini de kabul eder."
+      err "  Neden için: journalctl -u girginospanel | grep kapi   ·   girginospanel-dogrula (Role gates)"
+    fi
     if [ -n "$(kapi_eski_portlari)" ]; then
       warn "eski kapı ($(kapi_eski_portlari)) geçiş süresince her rolü, yöneticiyi de kabul eder."
       warn "yönetici yüzeyini tamamen kapatmak için: girginospanel-server kapi eski-kapat"

@@ -24,14 +24,22 @@ var (
 // ProxySecret: kalici gizliyi (varsa) doner; yoksa "". SALT-OKUR, uretmez —
 // uretim+nginx-senkron provisioner Heal'inin isi (fail-safe siralama icin).
 func ProxySecret() string {
-	proxyOnce.Do(func() {
-		if b, err := os.ReadFile(ProxySecretPath); err == nil {
-			if t := strings.TrimSpace(string(b)); len(t) >= 32 {
-				proxyVal = t
-			}
-		}
-	})
+	proxyOnce.Do(func() { proxyVal = proxyGizliOku(ProxySecretPath) })
 	return proxyVal
+}
+
+// proxyGizliOku: yol'daki gizliyi (kırpılmış) döner; dosya yoksa/okunamıyorsa ya da
+// 32 karakterden kısaysa "" (zayıf/yarım yazılmış gizliye güvenilmez). Yol parametre →
+// testler gerçek /etc/girginospanel/proxy.secret'a dokunmadan sınar.
+func proxyGizliOku(yol string) string {
+	b, err := os.ReadFile(yol)
+	if err != nil {
+		return ""
+	}
+	if t := strings.TrimSpace(string(b)); len(t) >= 32 {
+		return t
+	}
+	return ""
 }
 
 // NewProxySecret: 256-bit rastgele hex gizli uretir (provisioner Heal kullanir).
@@ -57,9 +65,15 @@ func gizliVekilBasligi(r *http.Request, sec string) bool {
 // bir kiraci sureci de 127.0.0.1'den :8080'e baglanabilir; tek ayirt edici nginx'in
 // ekledigi, kiracinin okuyamadigi gizlidir.
 func NginxtenMi(r *http.Request) bool {
+	return nginxtenMiGizli(r, ProxySecret())
+}
+
+// nginxtenMiGizli: NginxtenMi'nin SAF çekirdeği — gizli parametre olarak gelir (G/Ç yok),
+// böylece güven zincirinin kökü makinedeki gizli dosyasından bağımsız, deterministik
+// sınanır. Boş gizli (kurulu değil) → false: yetki kararında kanıt yoksa güven yok.
+func nginxtenMiGizli(r *http.Request, gizli string) bool {
 	if !yerelVekil(hostOnly(r.RemoteAddr)) {
 		return false
 	}
-	sec := ProxySecret()
-	return sec != "" && gizliVekilBasligi(r, sec)
+	return gizli != "" && gizliVekilBasligi(r, gizli)
 }

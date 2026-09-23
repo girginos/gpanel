@@ -24,6 +24,8 @@ export type KapiDurum = {
   eski_bitis: number
   eski_acik: boolean
   admin_dogrulandi: number
+  // Bayi/müşteri kapısından (o rolün son port değişikliğinden beri) ilk dış giriş; 0/yok = görülmedi.
+  ilk_giris?: { bayi?: number; musteri?: number }
   zorlama: boolean
   hata?: string
 }
@@ -95,6 +97,15 @@ const EN: Record<string, string> = {
     'Nobody has signed in at the new administrator address yet. If your provider firewall blocks the new port and the old address closes too, you will NOT reach the panel at all (fixable only over SSH). If unsure, sign in at the new address first.',
   'Zorla kapat': 'Force close',
   'Kapat': 'Close',
+  'Değişiklik kaydedildi': 'Change saved',
+  'Kapı zorlaması şu an kapalı — panel tek-port davranışında, bu sekmedeki mevcut adres çalışmaya devam eder. Kapı kuralları, zorlama doğrulandığında devreye girer.':
+    'Gate enforcement is currently off — the panel behaves as a single port and the current address in this tab keeps working. Gate rules take effect once enforcement is verified.',
+  'Geçersiz süre': 'Invalid duration',
+  '1–365 arası tam gün sayısı girin.': 'Enter a whole number of days between 1 and 365.',
+  'Yeni kapıdan ilk giriş:': 'First sign-in on the new gate:',
+  'Yeni kapıdan henüz giriş yok': 'No sign-in on the new gate yet',
+  '{0}: yeni kapıdan henüz hiç giriş görülmedi — bu kullanıcılar hâlâ eski adresi kullanıyor olabilir.':
+    '{0}: no sign-in has been seen on the new gate yet — these users may still be using the old address.',
 }
 
 export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; onDegisti: () => void }) {
@@ -117,6 +128,8 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     { rol: 'bayi', etiket: cevir('Bayi'), not: cevir('Bayilerinize verin'), port: kapi.bayi },
     { rol: 'musteri', etiket: cevir('Müşteri'), not: cevir('Müşterilerinize verin'), port: kapi.musteri },
   ]
+  // Rolün yeni kapısından ilk giriş (unix sn; 0 = görülmedi). Yönetici için admin_dogrulandi.
+  const ilkGiris = (rol: Rol): number => (rol === 'admin' ? kapi.admin_dogrulandi : kapi.ilk_giris?.[rol] || 0)
 
   async function kopyala(metin: string) {
     try {
@@ -149,10 +162,17 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
       setDuzenlenen(null)
       setYeniPort('')
       toast.basari(cevir('Kapı portu değişti'), `${etiket}: ${r.data.eski_port} → ${r.data.yeni_port}`)
+      // Sonraki adım yanıta göre: uyarı varsa kurallar uygulanamadı (yeni port dinlenmiyor
+      // olabilir) → yalnız uyarı; zorlama kapalıysa panel tek-port davranışında, mevcut adres
+      // çalışır → yalnız bilgi. Yeni yönetici adresine davet YALNIZ uyarısız + zorlama açıkken.
       if (r.data.uyari) {
         await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari })
-      }
-      if (rol === 'admin') {
+      } else if (!r.data.zorlama) {
+        await dialog.bilgi({
+          baslik: cevir('Değişiklik kaydedildi'),
+          mesaj: cevir('Kapı zorlaması şu an kapalı — panel tek-port davranışında, bu sekmedeki mevcut adres çalışmaya devam eder. Kapı kuralları, zorlama doğrulandığında devreye girer.'),
+        })
+      } else if (rol === 'admin') {
         const yeni = adres(r.data.yeni_port)
         const git = await dialog.onay({
           baslik: cevir('Yeni yönetici adresi'),
@@ -173,8 +193,11 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
   }
 
   async function uzat() {
-    const g = parseInt(gun, 10)
-    if (!(g >= 1 && g <= 365)) return
+    const g = Number(gun.trim())
+    if (!Number.isInteger(g) || g < 1 || g > 365) {
+      toast.hata(cevir('Geçersiz süre'), cevir('1–365 arası tam gün sayısı girin.'))
+      return
+    }
     setMesgul(true)
     try {
       const r = await api.post<{ uyari?: string }>('/portlar/kapi/uzat', { gun: g })
@@ -189,15 +212,21 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
   }
 
   async function kapat(zorla: boolean) {
+    // Kapanış yalnız yönetici doğrulamasına bağlı; eski kapı açıkken yeni kapısından hiç
+    // giriş görülmeyen bayi/müşteri rolleri onay metninde BİLDİRİLİR (engellemez).
+    const girissiz = kapi.eski_acik ? roller.filter((r) => r.rol !== 'admin' && !ilkGiris(r.rol)) : []
+    const rolUyarisi = girissiz.length
+      ? ' ' + cevirT(cevir('{0}: yeni kapıdan henüz hiç giriş görülmedi — bu kullanıcılar hâlâ eski adresi kullanıyor olabilir.'), girissiz.map((r) => r.etiket).join(', '))
+      : ''
     const ok = await dialog.onay(zorla
       ? {
           baslik: cevir('Yönetici doğrulaması OLMADAN kapatılsın mı?'),
-          mesaj: cevir('Yeni yönetici adresinden henüz hiç giriş yapılmadı. Sağlayıcınızın güvenlik duvarı yeni portu kesiyorsa eski adres de kapanınca panele HİÇ ulaşamazsınız (yalnız SSH ile düzeltilir). Emin değilseniz önce yeni adresten giriş yapın.'),
+          mesaj: cevir('Yeni yönetici adresinden henüz hiç giriş yapılmadı. Sağlayıcınızın güvenlik duvarı yeni portu kesiyorsa eski adres de kapanınca panele HİÇ ulaşamazsınız (yalnız SSH ile düzeltilir). Emin değilseniz önce yeni adresten giriş yapın.') + rolUyarisi,
           onayEtiketi: cevir('Zorla kapat'), iptalEtiketi: cevir('Vazgeç'), tehlike: true,
         }
       : {
           baslik: cevir('Geçiş kapısı şimdi kapatılsın mı?'),
-          mesaj: cevir('Eski adresi kullanmaya devam eden kullanıcılar panele o adresten ulaşamaz.'),
+          mesaj: cevir('Eski adresi kullanmaya devam eden kullanıcılar panele o adresten ulaşamaz.') + rolUyarisi,
           onayEtiketi: cevir('Kapat'), iptalEtiketi: cevir('Vazgeç'), tehlike: true,
         })
     if (!ok) return
@@ -268,6 +297,16 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
                 {duzenlenen === r.rol ? cevir('Vazgeç') : cevir('Değiştir')}
               </Button>
             </div>
+            {r.rol !== 'admin' && (
+              <p className={`mt-1.5 text-[11px] ${ilkGiris(r.rol) ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                {ilkGiris(r.rol) ? (
+                  <>
+                    {cevir('Yeni kapıdan ilk giriş:')}{' '}
+                    <span className="font-medium tabular-nums">{tarihSaat(ilkGiris(r.rol))}</span>
+                  </>
+                ) : cevir('Yeni kapıdan henüz giriş yok')}
+              </p>
+            )}
             {duzenlenen === r.rol && (
               <form onSubmit={(ev) => void rolDegistir(ev, r.rol, r.etiket)} className="mt-3">
                 <label htmlFor={`kapi-port-${r.rol}`} className="block text-xs font-medium text-slate-600 dark:text-slate-400">

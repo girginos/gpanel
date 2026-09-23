@@ -29,8 +29,14 @@ api.interceptors.response.use(
 )
 
 export function apiHata(err: unknown, varsayilan = 'Beklenmeyen bir hata oluştu'): string {
-  const e = err as AxiosError<{ hata?: string }>
-  if (e?.response?.data?.hata) return e.response.data.hata
+  const e = err as AxiosError<{ hata?: unknown; error?: unknown }>
+  // Ortak gövde {"hata": …} (httpx.WriteError); bazı paketler (portyonetim, hostuyg,
+  // panelhost, ipyonetim…) {"error": …} döner — okunmazsa 409 gerekçesi gibi sunucu
+  // mesajı kaybolup "Request failed with status code 409" görünürdü.
+  const govde = e?.response?.data
+  for (const m of [govde?.hata, govde?.error]) {
+    if (typeof m === 'string' && m !== '') return m
+  }
   // Axios'un ham İngilizce taşıyıcı hataları ("Network Error", "timeout of
   // 0ms exceeded") Türkçe panelde kullanıcıya hiçbir şey anlatmıyordu.
   const kod = (e as { code?: string })?.code
