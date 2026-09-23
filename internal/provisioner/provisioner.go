@@ -66,6 +66,7 @@ func Init(d *sql.DB) {
 	HealPanelVhostHeadersOnStartup()
 	HealPanelIndexNoCacheOnStartup() // Cloud-fix: panel SPA (index.html) no-cache → bayat UI önlenir
 	HealPanelProxyTrustOnStartup()   // :8080 proxy-gizli + pma-redeem deny + slowloris timeout
+	HealPanelKapiOnStartup()         // ADR-GP-001 rol kapıları (proxy gizlisine dayanır → ondan SONRA)
 	ensurePMAStartup()               // Cloud-fix: phpMyAdmin GCP/socket (pma-signon.php + token + pool socket + config host=localhost)
 	HealVhostsOnStartup()
 	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)

@@ -237,26 +237,53 @@ func ZorlamaAyarla(b bool) { zorlama.Store(b) }
 // nginxtenMi: testlerde değiştirilebilir güven kontrolü.
 var nginxtenMi = httpx.NginxtenMi
 
-// Istek: isteğin geldiği kapı.
-//   - zorlama kapalı → "" (eski davranış: tek kapı, her rol)
-//   - istek nginx'ten geldiği kanıtlanamıyor → Bilinmeyen (doğrudan :8080 = reddet)
-//   - başlık yok / çoklu / tanımsız değer → Bilinmeyen
-func Istek(r *http.Request) string {
-	if !ZorlamaAktif() {
-		return ""
-	}
+// KanitliKapi: nginx'ten geldiği KANITLANAN isteğin kapısı — zorlamadan bağımsız.
+// Kanıt yoksa, başlık yok/çoklu ya da tanımsızsa "". Açılış ölçümü bunu kullanır:
+// zorlama açılmadan ÖNCE zincirin uçtan uca çalıştığı ölçülebilsin.
+func KanitliKapi(r *http.Request) string {
 	if !nginxtenMi(r) {
-		return Bilinmeyen
+		return ""
 	}
 	v := r.Header.Values(Baslik)
 	if len(v) != 1 {
-		return Bilinmeyen
+		return ""
 	}
 	switch k := strings.TrimSpace(v[0]); k {
 	case Admin, Bayi, Musteri, Eski:
 		return k
 	}
+	return ""
+}
+
+// Istek: isteğin geldiği kapı (yetki kararları bunu kullanır).
+//   - zorlama kapalı → "" (eski davranış: tek kapı, her rol)
+//   - kanıtsız istek (doğrudan :8080) / başlık yok / çoklu / tanımsız → Bilinmeyen
+func Istek(r *http.Request) string {
+	if !ZorlamaAktif() {
+		return ""
+	}
+	if k := KanitliKapi(r); k != "" {
+		return k
+	}
 	return Bilinmeyen
+}
+
+// TipHandler: GET /api/v1/kapi (kimlik doğrulamasız). Arayüz hangi giriş formunu
+// göstereceğini buradan öğrenir: "musteri" | "yonetim" | "karma".
+//
+// 🔴 Admin ve bayi kapıları AYNI yanıtı alır ("yonetim"): hangi portun yönetici
+// portu olduğu bu uçtan ayırt EDİLEMEZ. Müşteri portunun müşteri portu olduğu zaten
+// gösterdiği arayüzden bellidir. Açılış ölçümü de (provisioner) bu ucu kullanır.
+func TipHandler(w http.ResponseWriter, r *http.Request) {
+	tip := "karma"
+	switch KanitliKapi(r) {
+	case Musteri:
+		tip = "musteri"
+	case Admin, Bayi:
+		tip = "yonetim"
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"tip": tip})
 }
 
 // GirisIzinli: bu kapıdan bu rol giriş yapabilir mi?
