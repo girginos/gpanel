@@ -2,7 +2,8 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 // gosp-mobil-v1
-// gosp-tailux-rail-v1  (iki katmanli sidebar: ikon rayi + etiketli panel)
+// gosp-tailux-rail-v1  (iki katmanli sidebar: ikon rayi + etiketli panel — yonetici)
+// gosp-tek-katman-v1   (bayi + musteri: tek katman, kategoriler alt alta)
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { useEklentiler } from '@/lib/eklenti'
@@ -51,6 +52,13 @@ const ICONS = {
   sunucu:      'M4 5h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zM4 13h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4a1 1 0 011-1zM7 8h.01M7 16h.01',
   bildirim:    'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
   yedek:       'M4 7v10c0 1.105 3.582 2 8 2s8-.895 8-2V7M4 7c0 1.105 3.582 2 8 2s8-.895 8-2M4 7c0-1.105 3.582-2 8-2s8 .895 8 2m0 5c0 1.105-3.582 2-8 2s-8-.895-8-2',
+  // Müşteri menüsü (tek katman) — her öğe kendi işini anlatan ikonla
+  klasor:      'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
+  aktarim:     'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4',
+  katman:      'M12 3l9 5-9 5-9-5 9-5zm-9 10l9 5 9-5M3 18l9 5 9-5',
+  dal:         'M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9',
+  saat:        'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+  arsiv:       'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4',
 }
 
 
@@ -71,7 +79,7 @@ const MENU_EN: Record<string, string> = {
   'PHP Ayarları': 'PHP Settings', 'Yedekler': 'Backups', 'Günlükler': 'Logs',
   'Zamanlanmış Görevler': 'Cron Jobs', 'Git Deploy': 'Git Deploy', 'Laravel': 'Laravel',
   'Apache & nginx': 'Apache & nginx', 'Hosting Hesapları': 'Hosting Accounts',
-  'Genel Bakış': 'Overview', 'Domainim': 'My Domain',
+  'Genel Bakış': 'Overview',
   'Hosting Planlarım': 'My Hosting Plans',
   'Profil ve Tercihler': 'Profile & Preferences',
   // Grup başlıkları
@@ -79,7 +87,9 @@ const MENU_EN: Record<string, string> = {
   'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings',
   'Profilim': 'My Profile', 'Genel': 'General',
   'Bildirimler': 'Notifications', 'Yedek Yönetimi': 'Backup Management',
-  'Menüyü kapat': 'Close menu', 'adet': 'items',
+  'Dosyalar ve Veriler': 'Files & Data', 'Web ve Uygulamalar': 'Web & Apps',
+  'Alan Adı ve Güvenlik': 'Domain & Security', 'Otomasyon ve Kayıtlar': 'Automation & Logs',
+  'Menüyü kapat': 'Close menu', 'adet': 'items', 'Ana menü': 'Main menu',
 }
 
 // Ray'de kendi ikonunu URETMEYEN bolum: adanmis ev dugmesi onu temsil eder.
@@ -146,7 +156,6 @@ const BOLUM_IKON: Record<string, string> = {
   'Sunucu Yönetimi': ICONS.sunucu,
   'Profilim': ICONS.profil,
   'Ayarlar': ICONS.araclar,
-  'Domainim': ICONS.domain,
 }
 
 // Rota parcasi inerken icerik alaninda gosterilir (kabuk ayakta kalir).
@@ -204,22 +213,32 @@ export default function DashboardLayout() {
     }
   }, [mobilAcik])
 
-  // Musteri navigasyonu — sadece kendi domain'i
+  // Musteri navigasyonu — sadece kendi domain'i. Tek düz liste (13 öğe) yerine
+  // işe göre kategoriler: kullanıcı aradığını başlıktan bulur.
+  const md = `/abonelikler/${musteriDomainID}`
   const MUSTERI_NAV: NavGroup[] = [
-    { baslik: 'Domainim', items: [
-      { to: `/abonelikler/${musteriDomainID}`, etiket: 'Genel Bakış', ikon: ICONS.home },
-      { to: `/abonelikler/${musteriDomainID}/dosyalar`, etiket: 'Dosya Yöneticisi', ikon: ICONS.domain },
-      { to: `/abonelikler/${musteriDomainID}/veritabanlari`, etiket: 'Veritabanları', ikon: ICONS.plan },
-      { to: `/abonelikler/${musteriDomainID}/ftp`, etiket: 'FTP Hesapları', ikon: ICONS.bayi },
-      { to: `/abonelikler/${musteriDomainID}/php`, etiket: 'PHP Ayarları', ikon: ICONS.araclar },
-      { to: `/abonelikler/${musteriDomainID}/web-sunucu`, etiket: 'Apache & nginx', ikon: ICONS.araclar },
-      { to: `/abonelikler/${musteriDomainID}/laravel`, etiket: 'Laravel', ikon: ICONS.eklenti },
-      { to: `/abonelikler/${musteriDomainID}/dns`, etiket: 'DNS Ayarları', ikon: ICONS.domain },
-      { to: `/abonelikler/${musteriDomainID}/ssl`, etiket: 'SSL/TLS', ikon: ICONS.kilit },
-      { to: `/abonelikler/${musteriDomainID}/cron`, etiket: 'Zamanlanmış Görevler', ikon: ICONS.izleme },
-      { to: `/abonelikler/${musteriDomainID}/git`, etiket: 'Git Deploy', ikon: ICONS.eklenti },
-      { to: `/abonelikler/${musteriDomainID}/gunlukler`, etiket: 'Günlükler', ikon: ICONS.istatistik },
-      { to: `/abonelikler/${musteriDomainID}/yedekler`, etiket: 'Yedekler', ikon: ICONS.araclar },
+    { baslik: GENEL, items: [
+      { to: md, etiket: 'Genel Bakış', ikon: ICONS.home },
+    ]},
+    { baslik: 'Dosyalar ve Veriler', items: [
+      { to: `${md}/dosyalar`, etiket: 'Dosya Yöneticisi', ikon: ICONS.klasor },
+      { to: `${md}/veritabanlari`, etiket: 'Veritabanları', ikon: ICONS.yedek },
+      { to: `${md}/ftp`, etiket: 'FTP Hesapları', ikon: ICONS.aktarim },
+      { to: `${md}/yedekler`, etiket: 'Yedekler', ikon: ICONS.arsiv },
+    ]},
+    { baslik: 'Web ve Uygulamalar', items: [
+      { to: `${md}/php`, etiket: 'PHP Ayarları', ikon: ICONS.eklenti },
+      { to: `${md}/web-sunucu`, etiket: 'Apache & nginx', ikon: ICONS.sunucu },
+      { to: `${md}/laravel`, etiket: 'Laravel', ikon: ICONS.katman },
+      { to: `${md}/git`, etiket: 'Git Deploy', ikon: ICONS.dal },
+    ]},
+    { baslik: 'Alan Adı ve Güvenlik', items: [
+      { to: `${md}/dns`, etiket: 'DNS Ayarları', ikon: ICONS.domain },
+      { to: `${md}/ssl`, etiket: 'SSL/TLS', ikon: ICONS.kilit },
+    ]},
+    { baslik: 'Otomasyon ve Kayıtlar', items: [
+      { to: `${md}/cron`, etiket: 'Zamanlanmış Görevler', ikon: ICONS.saat },
+      { to: `${md}/gunlukler`, etiket: 'Günlükler', ikon: ICONS.denetim },
     ]},
   ]
 
@@ -292,6 +311,65 @@ export default function DashboardLayout() {
     </svg>
   )
 
+  // ── Tek katmanli sidebar (bayi + müşteri) ───────────────────────────────
+  // Yönetici menüsü geniş (5 bölüm, ~20 öğe): ray gezinmeyi toplar. Bayi ve
+  // müşteri menüsü kısa — ray yalnız fazladan bir tık ekliyordu. Onlarda tüm
+  // kategoriler başlıklarıyla ALT ALTA, tek panelde görünür.
+  const tekKatman = isMusteri || isReseller
+  const tumOgeler = aktifNav.flatMap(g => g.items)
+
+  // Bir öğenin yolu başka bir öğenin ÖNEKİyse tam eşleşme ister (müşteri "Genel
+  // Bakış" = /abonelikler/ID, diğerleri /abonelikler/ID/...); yoksa her alt
+  // sayfada o da seçili görünürdü.
+  const tamEslesme = (it: NavItem, kume: NavItem[]) =>
+    it.to === '/' || kume.some(o => o.to !== it.to && o.to.startsWith(it.to + '/'))
+
+  const ogeCiz = (it: NavItem, kume: NavItem[]) => (
+    <li key={it.to}>
+      <NavLink
+        to={it.to}
+        end={tamEslesme(it, kume)}
+        onClick={() => setMobilAcik(false)}
+        className={({ isActive }) =>
+          `group relative flex items-center px-3 py-2 rounded-lg text-[14px] transition-all duration-150 ${
+            isActive
+              ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'
+          }`
+        }
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && (
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-brand-600 dark:bg-brand-400" aria-hidden />
+            )}
+            <svg className={`w-[18px] h-[18px] mr-3 shrink-0 transition ${
+              isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+            }`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
+            </svg>
+            <span className="whitespace-nowrap truncate">{cevir(it.etiket)}</span>
+            {it.sayac && sayac[it.sayac] ? (
+              <span
+                className={`ml-auto pl-2 shrink-0 text-[13px] tabular-nums transition ${
+                  isActive
+                    ? 'text-brand-700 dark:text-brand-300 font-medium'
+                    : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+                }`}
+                aria-label={`${sayac[it.sayac]} ${cevir('adet')}`}
+              >
+                {sayac[it.sayac]}
+              </span>
+            ) : null}
+            {it.rozet ? (
+              <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{cevir(it.rozet)}</span>
+            ) : null}
+          </>
+        )}
+      </NavLink>
+    </li>
+  )
+
   return (
     <div className="min-h-screen flex items-start bg-gray-50 dark:bg-dark-900">
       {/* Mobil perde — yalnız çekmece açıkken ve < lg genişlikte */}
@@ -304,7 +382,8 @@ export default function DashboardLayout() {
       )}
 
       {/*
-        Iki katman: [ikon rayi 72px] + [etiketli panel 248px].
+        Yönetici: iki katman — [ikon rayi 68px] + [etiketli panel 248px].
+        Bayi / müşteri: tek katman — tüm kategoriler alt alta [panel 256px].
         < lg : ekran disina kaydirilmis cekmece (hamburger ile acilir)
         >= lg: yapiskan
       */}
@@ -314,7 +393,8 @@ export default function DashboardLayout() {
           mobilAcik ? 'translate-x-0' : '-translate-x-full'
         } lg:sticky lg:top-0 lg:translate-x-0 lg:self-start`}
       >
-        {/* ── IKON RAYI ── */}
+        {/* ── IKON RAYI (yalnız iki katmanda) ── */}
+        {!tekKatman && (
         <aside className="w-[68px] shrink-0 h-screen flex flex-col items-center bg-white dark:bg-dark-900 border-r border-slate-200 dark:border-dark-600 py-3 gap-1">
           {/* Ray isareti — KARE bir simge.
                Burada LOGO KULLANILMAZ. Marka logosu cogunlukla YATAYdir;
@@ -385,9 +465,10 @@ export default function DashboardLayout() {
             })}
           </div>
         </aside>
+        )}
 
         {/* ── ETIKETLI PANEL ── */}
-        <div className="w-[248px] shrink-0 h-screen flex flex-col bg-white dark:bg-dark-800 border-r border-slate-200 dark:border-dark-600">
+        <div className={`${tekKatman ? 'w-64' : 'w-[248px]'} shrink-0 h-screen flex flex-col bg-white dark:bg-dark-800 border-r border-slate-200 dark:border-dark-600`}>
           {/* Baslik: panel adi + kapat (mobil) */}
           <div className="h-[60px] flex items-center px-5 border-b border-slate-200 dark:border-dark-600">
             {/* MARKA LOGOSU BURADA — genis basligin yeri.
@@ -432,64 +513,36 @@ export default function DashboardLayout() {
             </button>
           </div>
 
-          {/* Aktif bolumun etiketli ogeleri */}
-          <nav className="flex-1 px-2.5 py-3 overflow-y-auto">
-            <div className="px-2.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              {cevir(gosterilenBaslik)}
-            </div>
-            <ul className="space-y-0.5">
-              {gosterilenBolum?.items.map(it => {
-                const ustPath = gosterilenBolum.items.some(
-                  it2 => it2.to !== it.to && it2.to.startsWith(it.to + '/')
-                )
+          {tekKatman ? (
+            /* Tek katman: tüm kategoriler alt alta, her biri başlığıyla */
+            <nav aria-label={cevir('Ana menü')} className="flex-1 px-2.5 py-3 overflow-y-auto">
+              {aktifNav.filter(g => g.items.length > 0).map((g, i) => {
+                const baslikId = `gosp-menu-grup-${i}`
                 return (
-                  <li key={it.to}>
-                    <NavLink
-                      to={it.to}
-                      end={it.to === '/' || ustPath}
-                      onClick={() => setMobilAcik(false)}
-                      className={({ isActive }) =>
-                        `group relative flex items-center px-3 py-2 rounded-lg text-[14px] transition-all duration-150 ${
-                          isActive
-                            ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
-                            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'
-                        }`
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          {isActive && (
-                            <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-brand-600 dark:bg-brand-400" aria-hidden />
-                          )}
-                          <svg className={`w-[18px] h-[18px] mr-3 shrink-0 transition ${
-                            isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
-                          }`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
-                          </svg>
-                          <span className="whitespace-nowrap truncate">{cevir(it.etiket)}</span>
-                          {it.sayac && sayac[it.sayac] ? (
-                            <span
-                              className={`ml-auto pl-2 shrink-0 text-[13px] tabular-nums transition ${
-                                isActive
-                                  ? 'text-brand-700 dark:text-brand-300 font-medium'
-                                  : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
-                              }`}
-                              aria-label={`${sayac[it.sayac]} ${cevir('adet')}`}
-                            >
-                              {sayac[it.sayac]}
-                            </span>
-                          ) : null}
-                          {it.rozet ? (
-                            <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{cevir(it.rozet)}</span>
-                          ) : null}
-                        </>
-                      )}
-                    </NavLink>
-                  </li>
+                  <div key={g.baslik || i} className="mb-4 last:mb-0">
+                    {g.baslik && (
+                      <p id={baslikId} className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        {cevir(g.baslik)}
+                      </p>
+                    )}
+                    <ul className="space-y-0.5" aria-labelledby={g.baslik ? baslikId : undefined}>
+                      {g.items.map(it => ogeCiz(it, tumOgeler))}
+                    </ul>
+                  </div>
                 )
               })}
-            </ul>
-          </nav>
+            </nav>
+          ) : (
+            /* İki katman: rayda seçili bölümün etiketli öğeleri */
+            <nav className="flex-1 px-2.5 py-3 overflow-y-auto">
+              <div className="px-2.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {cevir(gosterilenBaslik)}
+              </div>
+              <ul className="space-y-0.5">
+                {gosterilenBolum?.items.map(it => ogeCiz(it, gosterilenBolum.items))}
+              </ul>
+            </nav>
+          )}
         </div>
       </div>
 
