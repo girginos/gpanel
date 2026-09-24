@@ -12,6 +12,8 @@ import { useAuth } from '@/store/auth'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
 import DilSecici from '@/components/DilSecici'
+import { Button } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
 
 type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 type AramaDomain = { id: number; alan_adi: string; sistem_kullanici: string }
@@ -109,7 +111,7 @@ const CMP_EN: Record<string, string> = {
   "yeni": "new",
   "Tümünü okundu": "Mark all read",
   "Bildirim yok": "No notifications",
-  "Tümünü göster →": "Show all →",
+  "Tümünü göster": "Show all",
   "Hesap menüsü": "Account menu",
   "Çıkış Yap": "Log out",
 }
@@ -134,11 +136,12 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   // Açılınca artık otomatik OKUNDU YAPMAZ — okunmamışlar dropdown'da görünsün.
   function bildirimAc() { setBAcik(v => !v) }
   async function bildirimTumOkundu() {
+    setOkunduYapiliyor(true)
     try {
       await api.post('/bildirimler/0/okundu', {})
       setBildirimler(list => list.map(b => ({ ...b, okundu: true })))
       setOkunmamis(0)
-    } catch { /* sessiz */ }
+    } catch { /* sessiz */ } finally { setOkunduYapiliyor(false) }
   }
   function bildirimGit(b: Bildirim) {
     setBAcik(false)
@@ -164,6 +167,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
   const [okunmamis, setOkunmamis] = useState(0)
   const [bAcik, setBAcik] = useState(false)
+  const [okunduYapiliyor, setOkunduYapiliyor] = useState(false)
   const bRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -241,17 +245,20 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   return (
     <header className="h-[60px] bg-white/85 dark:bg-dark-800/85 backdrop-blur-md border-b border-slate-200 dark:border-dark-600 flex items-center px-3 sm:px-4 sticky top-0 z-30 gap-2 sm:gap-4">
       {/* Hamburger — yalnız < lg; kenar çubuğu orada çekmeceye dönüşüyor */}
-      <button
+      <Button
+        isIcon
+        variant="flat"
         onClick={onMenuAc}
-        className="lg:hidden -ml-1 p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-dark-700 rounded-md transition flex-shrink-0"
+        className="-ml-1 size-9 rounded-full lg:hidden"
         aria-label={cevir(cevir("Menüyü aç"))}
+        title={cevir("Menüyü aç")}
         aria-expanded={!!menuAcik}
         aria-controls="gosp-kenar-cubugu"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
-      </button>
+      </Button>
 
       {/* Dar ekranda ortalama boşluğu yok; lg'de eski ortalanmış arama korunur */}
       <div className="hidden lg:block flex-1" />
@@ -310,8 +317,9 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
 
       <div className="flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1">
         <DilSecici />
-        <button onClick={temaDegistir}
-          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded-md transition"
+        <Button isIcon variant="flat" onClick={temaDegistir}
+          className="size-9 rounded-full"
+          aria-label={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}
           title={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}>
           {tema === 'dark' ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
@@ -326,16 +334,16 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           )}
-        </button>
+        </Button>
         <div className="relative" ref={bRef}>
-        <button onClick={bildirimAc} className="relative inline-flex p-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-dark-700 rounded-md transition" title={cevir("Bildirimler")}>
+        <Button isIcon variant="flat" onClick={bildirimAc} className="relative size-9 rounded-full" aria-label={cevir("Bildirimler")} title={cevir("Bildirimler")}>
           {okunmamis > 0 && (
             <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
           )}
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
-        </button>
+        </Button>
           {bAcik && (
             <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50">
               <div className="px-4 py-2.5 border-b border-slate-100 dark:border-dark-600 flex items-center justify-between sticky top-0 bg-white dark:bg-dark-700 z-10">
@@ -343,7 +351,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                   {cevir("Bildirimler")}{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} {cevir("yeni")}</span>}
                 </span>
                 {okunmamis > 0 && (
-                  <button onClick={bildirimTumOkundu} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Tümünü okundu")}</button>
+                  <Button boyut="sm" variant="flat" color="primary" ikon={I.onay} onClick={bildirimTumOkundu} yukleniyor={okunduYapiliyor} className="-mr-2">{cevir("Tümünü okundu")}</Button>
                 )}
               </div>
               {bildirimler.length === 0 ? (
@@ -369,8 +377,9 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               ))}
               {bildirimler.length > 0 && (
                 <button onClick={() => { setBAcik(false); navigate('/bildirimler') }}
-                  className="w-full text-center px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600/50 sticky bottom-0 bg-white dark:bg-dark-700 border-t border-slate-100 dark:border-dark-600">
-                  {cevir(cevir("Tümünü göster →"))}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600/50 sticky bottom-0 bg-white dark:bg-dark-700 border-t border-slate-100 dark:border-dark-600">
+                  {cevir(cevir("Tümünü göster"))}
+                  <Ikon d={I.ileri} className="size-3.5 shrink-0" />
                 </button>
               )}
             </div>

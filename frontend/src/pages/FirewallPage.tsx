@@ -10,6 +10,7 @@ import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Kural = {
   id: number; tip: 'ban' | 'whitelist' | 'kapat'; ip: string; port: number
@@ -182,7 +183,7 @@ export default function FirewallPage() {
   useEffect(yukle, [])
 
   async function sablonUygula(s: typeof SABLONLAR[number]) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" şablonu uygulansın mı?\nKapatılacak port(lar): {1}\nBu portlara internetten erişim engellenir."), cevir(s.ad), s.portlar), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" şablonu uygulansın mı?\nKapatılacak port(lar): {1}\nBu portlara internetten erişim engellenir."), cevir(s.ad), s.portlar), ton: 'tehlike', onayIkonu: I.kilit }))) return
     setHata(null); setBasari(null); setMesgul('sablon:' + s.key)
     try {
       const { data } = await api.post('/firewall/sablon', { sablon: s.key })
@@ -220,7 +221,7 @@ export default function FirewallPage() {
 
   async function sil(k: Kural) {
     const ozet = k.tip === 'kapat' ? cevirT(cevir("port {0} kapatma"), k.port) : `${k.ip}${k.port ? ':' + k.port : ''} ${k.tip}`
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" kuralı silinsin mi?"), ozet), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" kuralı silinsin mi?"), ozet), ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setBasari(null); setMesgul('sil:' + k.id)
     try { await api.delete(`/firewall/${k.id}`); yukle() }
     catch (err) {
@@ -364,20 +365,22 @@ export default function FirewallPage() {
 
         {/* korumalı port — kural reddedilir; ekleme kapalı */}
         {korumaliSecildi && (
-          <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-200">
-            <strong>{cevir("Dikkat:")}</strong> {cevirT(cevir("Port {0} kritik portlar listesinde — bu port kapatılamaz. Başka bir port girin."), port)}
-          </div>
+          <UyariKutusu ton="tehlike" className="mt-2">
+            <span className="text-xs"><strong>{cevir("Dikkat:")}</strong> {cevirT(cevir("Port {0} kritik portlar listesinde — bu port kapatılamaz. Başka bir port girin."), port)}</span>
+          </UyariKutusu>
         )}
 
         {/* dinamik IP uyarısı — allowlist kısıt aktifken */}
         {kisitUyari && (
-          <div className="mt-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
+          <UyariKutusu ton="uyari" className="mt-2">
+            <span className="text-xs">
             <strong>{cevir("Dikkat:")}</strong> {cevir("Bu port artık yalnızca yukarıdaki IP'ye açılacak. IP'niz")} <strong>{cevir("dinamikse")}</strong> {cevir("(ev/mobil internet gibi değişebilen), IP değişince bu porta erişimi kaybedersiniz.")}
             {cevir("SSH (22) açık kaldığı için kilitlenirseniz sunucuya SSH ile girip bu kuralı silebilirsiniz — ya da sabit (statik) bir IP kullanın.")}
-          </div>
+            </span>
+          </UyariKutusu>
         )}
 
-        <Button type="submit" color="primary" disabled={mesgul === 'manuel' || korumaliSecildi} className="mt-3 text-sm">
+        <Button type="submit" color="primary" ikon={I.arti} yukleniyor={mesgul === 'manuel'} disabled={korumaliSecildi} className="mt-3">
           {mesgul === 'manuel' ? cevir("Uygulanıyor…") : cevir("Kuralı Ekle ve Uygula")}
         </Button>
       </form>
@@ -387,7 +390,7 @@ export default function FirewallPage() {
       <div className="lg:bg-white dark:lg:bg-dark-700/60 lg:border lg:border-slate-200 dark:lg:border-dark-600/60 lg:rounded-lg lg:overflow-hidden">
         <div className="flex items-center justify-between px-0 lg:px-4 py-3 border-b border-slate-100 dark:border-dark-600/60">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Aktif Kurallar")} {!yuk && <span className="text-slate-400 font-normal">· {kurallar.length}</span>}</h3>
-          <Button variant="outlined" onClick={yukle} disabled={yuk} className="text-xs px-2.5 py-1"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} className="h-3.5 w-3.5" />{cevir("Yenile")}</span></Button>
+          <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle} yukleniyor={yuk}>{cevir("Yenile")}</Button>
         </div>
         {/* Mobilde yatay kaydırma yok — satırlar kart olarak diziliyor. */}
         <div className="lg:overflow-x-auto">
@@ -430,7 +433,7 @@ export default function FirewallPage() {
                       <span className="text-xs text-slate-500 dark:text-slate-400 text-right lg:text-left break-words">{k.aciklama || '—'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Button color="error" variant="outlined" disabled={!!mesgul} onClick={() => sil(k)} className="text-xs px-2.5 py-1">{mesgul === 'sil:' + k.id ? '…' : cevir("Sil")}</Button>
+                      <Button color="error" variant="soft" boyut="sm" ikon={I.cop} disabled={!!mesgul} yukleniyor={mesgul === 'sil:' + k.id} onClick={() => sil(k)}>{cevir("Sil")}</Button>
                     </td>
                   </tr>
                 ))

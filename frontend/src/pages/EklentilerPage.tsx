@@ -21,7 +21,9 @@ import Modal from '@/components/Modal'
 import { eklentiDegisti } from '@/lib/eklenti'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
+import { Ikon as IkonSvg, I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Adim = { ad: string; etiket: string; durum: string; mesaj: string; sure: string }
 type KurulumDurum = {
@@ -139,7 +141,7 @@ const EKL_EN: Record<string, string> = {
   "ikili düz metin paketten kuruldu (şifreli paket yok)": "binary installed from plaintext package (no encrypted package)",
   "Ücretsiz 1 Ay Dene": "Try Free for 1 Month",
   "Şu anda kurulabilecek bir eklenti bulunmuyor.": "No add-on is currently available to install.",
-  "← Eklentilere dön": "← Back to add-ons",
+  "Eklentilere dön": "Back to add-ons",
   "Emin misiniz?": "Are you sure?",
   "\"{0}\" lisansı kaldırılacak ve eklenti kapatılacak.": "The \"{0}\" license will be removed and the add-on turned off.",
   "\"{0}\" eklentisi devre dışı bırakılacak.": "The \"{0}\" add-on will be disabled.",
@@ -152,7 +154,7 @@ const EKL_EN: Record<string, string> = {
   "Tekrar dene": "Try again",
   "Sunucu Kodu": "Server Code",
   "Lisans alabilmek için bu sunucunun hesabınıza kayıtlı olması gerekir.": "To obtain a license, this server must be registered to your account.",
-  "Kopyalandı ✓": "Copied ✓",
+  "Kopyalandı": "Copied",
   "Kopyala": "Copy",
   "Doğrulanıyor…": "Verifying…",
   "İşleniyor…": "Processing…",
@@ -261,21 +263,20 @@ function KurulumIzi({ ku }: { ku: KurulumDurum }) {
   return (
     <div className="mt-3 space-y-1.5">
       {ku.durum === 'hata' && (
-        <div className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-700 dark:text-rose-300">
-          <span className="font-medium">{cevir("Kurulum başarısız")}</span>
+        <UyariKutusu ton="tehlike" baslik={cevir("Kurulum başarısız")}>
           {(hatali?.mesaj || ku.hata) && (
-            <div className="mt-0.5 line-clamp-3 break-words">{hatali?.mesaj || ku.hata}</div>
+            <div className="line-clamp-3 break-words text-xs">{hatali?.mesaj || ku.hata}</div>
           )}
-        </div>
+        </UyariKutusu>
       )}
       {uyarilar.length > 0 && (
-        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <UyariKutusu ton="uyari">
           {uyarilar.slice(0, 2).map((a, i) => (
-            <div key={i} className="line-clamp-2 break-words">
-              <span className="font-mono mr-1.5">!</span>{a.mesaj || a.etiket}
+            <div key={i} className="line-clamp-2 break-words text-xs">
+              {a.mesaj || a.etiket}
             </div>
           ))}
-        </div>
+        </UyariKutusu>
       )}
     </div>
   )
@@ -351,15 +352,14 @@ function KurulumPaneli({ kurulumlar, kucuk, setKucuk, onGizle, onYukseklik }: {
           {cevir("Kurulum ilerlemesi")}
           {suren > 0 && <span className="ml-1 text-slate-400">({suren})</span>}
         </span>
-        <button type="button" onClick={() => setKucuk(!kucuk)}
+        <Button isIcon variant="flat" onClick={() => setKucuk(!kucuk)}
           aria-label={kucuk ? cevir("Büyüt") : cevir("Küçült")}
-          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600
-                     focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
-                     dark:hover:bg-dark-600 dark:hover:text-slate-200">
+          title={kucuk ? cevir("Büyüt") : cevir("Küçült")}
+          className="size-8 rounded-full">
           <svg className={`h-4 w-4 transition-transform ${kucuk ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
+        </Button>
       </div>
 
       {!kucuk && (
@@ -379,15 +379,9 @@ function KurulumPaneli({ kurulumlar, kucuk, setKucuk, onGizle, onYukseklik }: {
                   {/* Bitmiş kurulum kapatılabilir; SÜREN kurulum kapatılamaz —
                       kullanıcı ilerlemeyi kaybetmesin. */}
                   {bitti && (
-                    <button type="button" onClick={() => onGizle(kart.eklenti_ad)}
-                      aria-label={cevir("Kapat")}
-                      className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600
-                                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
-                                 dark:hover:text-slate-200">
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                    <Button isIcon variant="flat" ikon={I.kapat} onClick={() => onGizle(kart.eklenti_ad)}
+                      aria-label={cevir("Kapat")} title={cevir("Kapat")}
+                      className="size-8 rounded-full" />
                   )}
                 </div>
                 <IlerlemeCubugu ku={ku} />
@@ -411,12 +405,13 @@ function KurulumPaneli({ kurulumlar, kucuk, setKucuk, onGizle, onYukseklik }: {
                   <ul className="max-h-52 space-y-1 overflow-y-auto rounded bg-slate-50 p-2 dark:bg-dark-900">
                     {ku.adimlar.map((a, i) => (
                       <li key={i} className="text-xs">
-                        <span className={`mr-1.5 font-mono ${
+                        <span className={`mr-1.5 ${
                           a.durum === 'tamam' ? 'text-emerald-600 dark:text-emerald-400'
                             : a.durum === 'calisiyor' ? 'text-sky-600 dark:text-sky-400'
                               : a.durum === 'uyari' ? 'text-amber-600 dark:text-amber-400'
                                 : 'text-rose-600 dark:text-rose-400'}`}>
-                          {a.durum === 'tamam' ? '✓' : a.durum === 'calisiyor' ? '…' : a.durum === 'uyari' ? '!' : '×'}
+                          <IkonSvg d={a.durum === 'tamam' ? I.onay : a.durum === 'calisiyor' ? I.saat : a.durum === 'uyari' ? I.uyari : I.kapat}
+                            className="inline-block size-3.5 align-[-2px]" />
                         </span>
                         <span className="text-slate-700 dark:text-slate-200">{a.etiket}</span>
                         {a.sure && <span className="text-slate-400"> ({a.sure})</span>}
@@ -645,7 +640,7 @@ export default function EklentilerPage() {
       : cevirT(cevir('"{0}" lisansı kaldırılacak ve eklenti kapatılacak.'), k.ad) + '\n\n' +
         cevir('Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar girdiğinizde kaldığı yerden devam eder.')
     if (!(await onay({ baslik: cevir('Emin misiniz?'),
-      mesaj: govde + '\n\n' + cevir('Devam edilsin mi?'), ton: 'tehlike' }))) return
+      mesaj: govde + '\n\n' + cevir('Devam edilsin mi?'), ton: 'tehlike', onayIkonu: k.cekirdek ? I.ban : I.cop }))) return
     setIslem(k.eklenti_ad); setIslemHata(null); setBasari(null)
     try {
       const { data } = await api.delete(`/eklenti/${k.eklenti_ad}/lisans`)
@@ -730,9 +725,9 @@ export default function EklentilerPage() {
 
       {/* Sunucu Kodu (kullanıcı isteğiyle kaldırıldı — lisans ekranı sade). */}
       {katalog?.uyari && (
-        <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <UyariKutusu ton="uyari" className="mb-4">
           {katalog.uyari}
-        </div>
+        </UyariKutusu>
       )}
       {/* ── Yükleniyor ── */}
       {yuk && !katalog && (
@@ -750,13 +745,14 @@ export default function EklentilerPage() {
 
       {/* ── Hata (asla sessizce boş göstermeyiz) ── */}
       {hata && (
-        <div className="rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 p-5">
-          <p className="text-sm font-medium text-rose-800 dark:text-rose-200">{cevir("Eklenti kataloğu yüklenemedi")}</p>
-          <p className="text-sm text-rose-700 dark:text-rose-300 mt-1">{hata}</p>
-          <Button color="error" onClick={() => cek()} className="mt-3 px-3 py-1.5 text-sm">
-            {cevir("Tekrar dene")}
-          </Button>
-        </div>
+        <UyariKutusu ton="tehlike" baslik={cevir("Eklenti kataloğu yüklenemedi")}>
+          {hata}
+          <div className="mt-3">
+            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={() => cek()} yukleniyor={yuk}>
+              {cevir("Tekrar dene")}
+            </Button>
+          </div>
+        </UyariKutusu>
       )}
 
       {/* ── Boş ── */}
@@ -770,7 +766,9 @@ export default function EklentilerPage() {
       {!hata && slug && !yuk && !secili && (
         <div className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-10 text-center">
           <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Böyle bir eklenti bulunamadı.")}</p>
-          <Link to="/eklentiler" className="mt-3 inline-block text-sm text-brand-600 dark:text-brand-400 hover:underline">{cevir("← Eklentilere dön")}</Link>
+          <Link to="/eklentiler" className={butonSinifi({ variant: 'flat', boyut: 'sm', className: 'mt-3' })}>
+            <IkonSvg d={I.geri} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />{cevir("Eklentilere dön")}
+          </Link>
         </div>
       )}
       {secili && (
@@ -817,9 +815,11 @@ export default function EklentilerPage() {
             </div>
             <Button
               color="primary"
+              ikon={I.disket}
               onClick={lisansKaydet}
-              disabled={girisMesgul || !girisAnahtar.trim()}
-              className="shrink-0 px-5 py-2.5 text-sm"
+              yukleniyor={girisMesgul}
+              disabled={!girisAnahtar.trim()}
+              className="shrink-0"
             >
               {girisMesgul ? cevir("Kaydediliyor…") : cevir("Lisansı Kaydet")}
             </Button>
@@ -881,8 +881,17 @@ export default function EklentilerPage() {
       />
 
       {/* ── Lisans anahtarı modalı ── */}
-      <Modal acik={!!modalKart} baslik={cevirT(cevir("{0} — Lisansı Gir"), modalKart?.ad || '')} onKapat={() => { setModalKart(null); setAnahtar('') }}>
-        <form onSubmit={e => { e.preventDefault(); lisansGonder() }}>
+      <Modal acik={!!modalKart} baslik={cevirT(cevir("{0} — Lisansı Gir"), modalKart?.ad || '')} onKapat={() => { setModalKart(null); setAnahtar('') }}
+        kapatilamaz={!!islem}
+        alt={<>
+          <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => { setModalKart(null); setAnahtar('') }} disabled={!!islem}>
+            {cevir("Vazgeç")}
+          </Button>
+          <Button type="submit" form="gosp-lisans-form" color="primary" ikon={I.oynat} disabled={!anahtar.trim()} yukleniyor={!!islem}>
+            {islem ? cevir('Doğrulanıyor…') : cevir("Doğrula ve Kur")}
+          </Button>
+        </>}>
+        <form id="gosp-lisans-form" onSubmit={e => { e.preventDefault(); lisansGonder() }}>
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
             {cevir(cevir("Satın aldığınız lisans anahtarını girin. Anahtar doğrulandıktan sonra eklenti bu sunucuya otomatik kurulur."))}
           </p>
@@ -898,16 +907,6 @@ export default function EklentilerPage() {
             className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           />
           {islemHata && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{islemHata}</p>}
-          <div className="mt-4 flex justify-end gap-2">
-            <Button type="button" variant="outlined" onClick={() => { setModalKart(null); setAnahtar('') }}
-              className="px-3 py-2 text-sm">
-              {cevir("Vazgeç")}
-            </Button>
-            <Button type="submit" color="primary" disabled={!anahtar.trim() || !!islem}
-              className="px-4 py-2 text-sm">
-              {islem ? cevir('Doğrulanıyor…') : cevir("Doğrula ve Kur")}
-            </Button>
-          </div>
         </form>
       </Modal>
     </div>
@@ -995,8 +994,7 @@ function Eylem({ k, mesgul, onLisans, onKaldir, onDogrula, onKur }: { k: Kart } 
   if (kapsamda && kurulabilir) {
     return (
       <div className="flex flex-wrap gap-2">
-        <Button color="primary" onClick={onKur} disabled={mesgul}
-          className="px-3 py-1.5 text-[13px]">
+        <Button color="primary" boyut="sm" ikon={k.kurulu ? I.onay : I.oynat} onClick={onKur} yukleniyor={mesgul}>
           {mesgul ? cevir('Kuruluyor…') : (k.kurulu ? cevir("Yeniden Etkinleştir") : cevir("Kur"))}
         </Button>
       </div>
@@ -1016,19 +1014,17 @@ function Eylem({ k, mesgul, onLisans, onKaldir, onDogrula, onKur }: { k: Kart } 
     return (
       <div className="flex flex-wrap gap-2">
         <Link to={AYAR_YOLU[k.eklenti_ad]}
-          className="px-3 py-1.5 text-[13px] rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition">
-          {cevir("Yapılandır")}
+          className={butonSinifi({ color: 'primary', boyut: 'sm' })}>
+          <IkonSvg d={I.ayar} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />{cevir("Yapılandır")}
         </Link>
         {/* Çekirdek üründe doğrulanacak bir lisans yoktur; onun yerine geri
             alma yolu sunulur (bugün whitelabel kartında hiç yoktu). */}
         {k.cekirdek ? (
-          <Button color="error" variant="outlined" onClick={onKaldir} disabled={mesgul}
-            className="px-3 py-1.5 text-[13px]">
+          <Button color="error" variant="soft" boyut="sm" ikon={I.ban} onClick={onKaldir} yukleniyor={mesgul}>
             {cevir("Devre Dışı Bırak")}
           </Button>
         ) : (
-          <Button variant="outlined" onClick={onDogrula} disabled={mesgul}
-            className="px-3 py-1.5 text-[13px]">
+          <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={onDogrula} yukleniyor={mesgul}>
             {mesgul ? cevir('İşleniyor…') : cevir("Lisansı Doğrula")}
           </Button>
         )}
@@ -1038,15 +1034,13 @@ function Eylem({ k, mesgul, onLisans, onKaldir, onDogrula, onKur }: { k: Kart } 
   if (k.lisans.var) {
     return (
       <div className="flex flex-wrap gap-2">
-        <Button variant="outlined" onClick={onDogrula} disabled={mesgul}
-          className="px-3 py-1.5 text-[13px]">
+        <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={onDogrula} yukleniyor={mesgul}>
           {mesgul ? cevir('İşleniyor…') : cevir("Lisansı Doğrula")}
         </Button>
         {/* Suite lisansinda tek eklentinin "lisansini kaldirmak" anlamsiz:
             anahtar hepsini kapsiyor. Bunun yerine eklenti kaldirilir. */}
         {!k.lisans.suite && (
-          <Button color="error" variant="outlined" onClick={onKaldir} disabled={mesgul}
-            className="px-3 py-1.5 text-[13px]">
+          <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={onKaldir} disabled={mesgul}>
             {cevir("Lisansı Kaldır")}
           </Button>
         )}
@@ -1058,8 +1052,7 @@ function Eylem({ k, mesgul, onLisans, onKaldir, onDogrula, onKur }: { k: Kart } 
   // doğru yere yönlendiririz (ör. lisans süresi dolmuş bir kart).
   return (
     <div className="flex flex-wrap gap-2">
-      <Button color="primary" onClick={onLisans} disabled={mesgul}
-        className="px-3 py-1.5 text-[13px]">
+      <Button color="primary" boyut="sm" ikon={I.anahtar} onClick={onLisans} disabled={mesgul}>
         {cevir("Lisansı Yenile")}
       </Button>
     </div>
@@ -1090,9 +1083,9 @@ function LisansOzet({ l }: { l: LisansDurum }) {
   return (
     <div className="mt-3 space-y-1 text-xs">
       {l.son_hata && (
-        <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-rose-700 dark:text-rose-400">
-          {cevir("Not:")} {l.son_hata}
-        </div>
+        <UyariKutusu ton="tehlike">
+          <span className="text-xs">{cevir("Not:")} {l.son_hata}</span>
+        </UyariKutusu>
       )}
       {/*
         Kopya uyarisi. Kirmizi DEGIL kehribar: hizmet calisiyor, lisans gecerli.
@@ -1100,9 +1093,9 @@ function LisansOzet({ l }: { l: LisansDurum }) {
         lisans sunucusundan gelir; burada yorumlanmaz.
       */}
       {l.uyari && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400">
-          {l.uyari}
-        </div>
+        <UyariKutusu ton="uyari">
+          <span className="text-xs">{l.uyari}</span>
+        </UyariKutusu>
       )}
     </div>
   )
@@ -1115,7 +1108,7 @@ function Adimlar({ ku }: { ku: KurulumDurum }) {
     uyari: 'text-amber-600 dark:text-amber-400',
     hata: 'text-rose-600 dark:text-rose-400',
   }
-  const isaret: Record<string, string> = { tamam: '✓', calisiyor: '…', uyari: '!', hata: '×' }
+  const isaret: Record<string, string> = { tamam: I.onay, calisiyor: I.saat, uyari: I.uyari, hata: I.kapat }
 
   const uyarilar = ku.adimlar.filter((a) => a.durum === 'uyari')
   const hatalar = ku.adimlar.filter((a) => a.durum === 'hata')
@@ -1159,22 +1152,25 @@ function Adimlar({ ku }: { ku: KurulumDurum }) {
         "her şey yolunda" der, gerçek başka olurdu.
       */}
       {katlanabilir && uyarilar.length > 0 && (
-        <div className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 space-y-1">
-          {uyarilar.map((a, i) => (
-            <div key={i} className="text-xs text-amber-700 dark:text-amber-400">
-              <span className="font-mono mr-2">!</span>
-              <span className="font-medium">{a.etiket}</span>
-              {a.mesaj && <div className="mt-0.5 ml-6 whitespace-pre-wrap break-words">{a.mesaj}</div>}
-            </div>
-          ))}
-        </div>
+        <UyariKutusu ton="uyari" className="mt-2">
+          <div className="space-y-1">
+            {uyarilar.map((a, i) => (
+              <div key={i} className="text-xs">
+                <span className="font-medium">{a.etiket}</span>
+                {a.mesaj && <div className="mt-0.5 whitespace-pre-wrap break-words">{a.mesaj}</div>}
+              </div>
+            ))}
+          </div>
+        </UyariKutusu>
       )}
 
       {acik && (
         <ul className={`space-y-1.5 ${katlanabilir ? 'mt-2' : ''}`}>
           {ku.adimlar.map((a, i) => (
             <li key={i} className="text-xs">
-              <span className={`font-mono mr-2 ${renk[a.durum] || 'text-slate-400'}`}>{isaret[a.durum] || '·'}</span>
+              <span className={`mr-2 ${renk[a.durum] || 'text-slate-400'}`}>
+                {isaret[a.durum] ? <IkonSvg d={isaret[a.durum]} className="inline-block size-3.5 align-[-2px]" /> : '·'}
+              </span>
               <span className="text-slate-700 dark:text-slate-200">{a.etiket}</span>
               {a.sure && <span className="text-slate-400 dark:text-slate-500"> ({a.sure})</span>}
               {a.mesaj && (a.durum === 'hata' || a.durum === 'uyari') && (
@@ -1271,9 +1267,7 @@ function Detay({ k, ...e }: { k: Kart } & Eylemler) {
           <ul className="space-y-1.5">
             {(k.ozellikler || []).map((o, i) => (
               <li key={i} className="flex gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
+                <IkonSvg d={I.onay} className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />
                 <span>{o}</span>
               </li>
             ))}

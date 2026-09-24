@@ -9,8 +9,9 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import YedekGenelAyar from '@/components/YedekGenelAyar'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
 import { useToast } from '@/components/Toast'
+import { useDialog } from '@/components/Dialog'
 
 const BACKUP_EN: Record<string, string> = {
   'Anasayfa': 'Home',
@@ -31,7 +32,7 @@ const BACKUP_EN: Record<string, string> = {
   'Henüz iş yok. “Tüm Domainleri Şimdi Yedekle” ile başlayın.': 'No jobs yet. Start with “Back Up All Domains Now”.',
   'Domain bazlı yedekler (granüler dosya/DB geri yükleme)': 'Per-domain backups (granular file/DB restore)',
   'yedek': 'backups',
-  'Yönet →': 'Manage →',
+  'Yönet': 'Manage',
   'İş': 'Job',
   'şu an:': 'now:',
   'geri': 'restore',
@@ -123,8 +124,7 @@ export default function BackupYonetimiPage() {
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
         <div className="ml-auto flex items-center gap-2">
-          <Button color="primary" onClick={tumunuYedekle} yukleniyor={yedekliyor} disabled={calisan}
-            className="px-3.5 py-2 text-sm">
+          <Button color="primary" ikon={I.oynat} onClick={tumunuYedekle} yukleniyor={yedekliyor} disabled={calisan}>
             {yedekliyor ? cevir('Başlatılıyor…') : calisan ? cevir('Bir iş sürüyor…') : cevir('Tüm Domainleri Şimdi Yedekle')}
           </Button>
         </div>
@@ -150,7 +150,9 @@ export default function BackupYonetimiPage() {
               <div key={d.domain_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <span className="font-medium text-slate-800 dark:text-slate-200">{d.alan_adi}</span>
                 <span className="font-mono text-xs text-slate-400">{d.sayi} {cevir("yedek")} · {d.sayi ? fmtByte(d.toplam_b) : '—'}</span>
-                <Link to={`/abonelikler/${d.domain_id}/yedekler`} className="ml-auto text-xs px-2.5 py-1 border border-slate-200 dark:border-dark-600 rounded-md text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600">{cevir("Yönet →")}</Link>
+                <Link to={`/abonelikler/${d.domain_id}/yedekler`} className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'ml-auto' })}>
+                  {cevir("Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
+                </Link>
               </div>
             ))}
           </div>
@@ -163,10 +165,15 @@ export default function BackupYonetimiPage() {
 function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
   const pct = j.toplam ? Math.round((j.tamamlanan / j.toplam) * 100) : (j.durum === 'tamam' ? 100 : 0)
   const [durduruluyor, setDurduruluyor] = useState(false)
+  const dialog = useDialog()
   async function durdur(e: React.MouseEvent) {
     // Satirin tamami <Link> — tiklamayi yut, yoksa is detayina gider.
     e.preventDefault(); e.stopPropagation()
-    if (!window.confirm(cevir('İşi durdurmak istediğinize emin misiniz? Süren yedek yarıda kesilir, yarım dosya silinir. Tamamlanan yedekler korunur.'))) return
+    if (!(await dialog.onay({
+      baslik: cevir('Durdur'),
+      mesaj: cevir('İşi durdurmak istediğinize emin misiniz? Süren yedek yarıda kesilir, yarım dosya silinir. Tamamlanan yedekler korunur.'),
+      onayEtiketi: cevir('Durdur'), ton: 'tehlike', onayIkonu: I.durdur,
+    }))) return
     setDurduruluyor(true)
     try { await api.post(`/admin/backups/jobs/${j.id}/durdur`); onDurdur(j.id) }
     finally { setDurduruluyor(false) }
@@ -193,29 +200,31 @@ function JobSatir({ j, onDurdur }: { j: Job; onDurdur: (id: number) => void }) {
         {j.durum === 'calisiyor' && (
           <Button
             color="error"
-            variant="outlined"
+            variant="soft"
+            boyut="sm"
+            ikon={I.durdur}
             type="button"
             onClick={durdur}
-            disabled={durduruluyor}
+            yukleniyor={durduruluyor}
             title={cevir('Durdur')}
-            className="px-2.5 py-1 text-xs"
           >
             {durduruluyor ? cevir('Durduruluyor…') : cevir('Durdur')}
           </Button>
         )}
-        <span className="text-slate-300 dark:text-slate-600 text-xs">→</span>
+        <Ikon d={I.ileri} className="size-4 shrink-0 text-slate-300 dark:text-slate-600" />
       </div>
     </Link>
   )
 }
 
 export function DurumIkon({ durum, kucuk }: { durum: string; kucuk?: boolean }) {
-  const s = kucuk ? 'w-4 h-4 text-xs' : 'w-6 h-6 text-sm'
-  if (durum === 'calisiyor') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 animate-pulse`}>◔</span>
-  if (durum === 'iptal') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400`}>■</span>
-  if (durum === 'tamam') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400`}>✓</span>
-  if (durum === 'kismi') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400`}>!</span>
-  return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400`}>✕</span>
+  const s = kucuk ? 'w-4 h-4' : 'w-6 h-6'
+  const ik = kucuk ? 'size-2.5' : 'size-3.5'
+  if (durum === 'calisiyor') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 animate-pulse`}><Ikon d={I.saat} className={ik} /></span>
+  if (durum === 'iptal') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400`}><Ikon d={I.durdur} className={ik} /></span>
+  if (durum === 'tamam') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400`}><Ikon d={I.onay} className={ik} /></span>
+  if (durum === 'kismi') return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400`}><Ikon d={I.uyari} className={ik} /></span>
+  return <span className={`${s} shrink-0 inline-flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400`}><Ikon d={I.kapat} className={ik} /></span>
 }
 export function IslemRozet({ islem, mod }: { islem: string; mod: string }) {
   const geri = islem === 'geri'

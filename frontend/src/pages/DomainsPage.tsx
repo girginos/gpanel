@@ -13,8 +13,11 @@ import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, butonSinifi } from '@/components/ui'
 import type { Color } from '@/components/ui'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
+import type { Ton } from '@/components/tonlar'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -70,12 +73,8 @@ function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
     <a href={`${ssl ? 'https' : 'http'}://${ad}`} target="_blank" rel="noopener noreferrer"
        title={cevirT(cevir("{0} sitesini yeni sekmede aç"), ad)} aria-label={cevirT(cevir("{0} sitesini yeni sekmede aç"), ad)}
        onClick={e => e.stopPropagation()}
-       className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-dark-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-           strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden="true">
-        <path d="M14 4h6v6" /><path d="M20 4l-8.5 8.5" />
-        <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
-      </svg>
+       className={butonSinifi({ variant: 'flat', isIcon: true, className: 'size-6 rounded-md' })}>
+      <Ikon d={I.harici} className="size-3.5" />
     </a>
   )
 }
@@ -129,7 +128,7 @@ const DOMAINS_EN: Record<string, string> = {
   "Yeni Domain Oluştur": "Create New Domain",
   "Yeni parola işlem sonucunda gösterilir": "New password is shown after the operation",
   "Yeni plan limitleri (disk, inode, FPM) her domaine uygulanır.": "New plan limits (disk, inode, FPM) apply to every domain.",
-  "Yönet →": "Manage →",
+  "Yönet": "Manage",
   "Yükleniyor…": "Loading…",
   "geri dönüşsüz": "irreversible",
   "kısmen tamamlandı": "partially completed",
@@ -160,11 +159,11 @@ const DOMAINS_EN: Record<string, string> = {
   "Sil": "Delete",
   "Domain ara...": "Search domain...",
   "{0} sitesini yeni sekmede aç": "Open site {0} in a new tab",
-  "✓ \"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.": "✓ \"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account, MySQL DB and DNS zone are ready.",
-  "✓ \"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.": "✓ \"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account and DNS zone are ready.",
+  "\"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.": "\"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account, MySQL DB and DNS zone are ready.",
+  "\"{0}\" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.": "\"{0}\" created — Linux user, nginx vhost, PHP-FPM pool, FTP account and DNS zone are ready.",
   "güncelleme almıyor": "no longer updated",
   "{0} domainin TÜM DNS kayıtları silinip şablondan yeniden oluşturulacak. Özel kayıtlar (MX, TXT, doğrulama kayıtları) KAYBOLUR.": "ALL DNS records of {0} domain(s) will be deleted and recreated from the template. Custom records (MX, TXT, verification records) WILL BE LOST.",
-  "✓ {0} domain \"{1}\" durumuna geçirildi": "✓ {0} domain(s) switched to \"{1}\" status",
+  "{0} domain \"{1}\" durumuna geçirildi": "{0} domain(s) switched to \"{1}\" status",
   "domain etkilenecek.": "domain(s) will be affected.",
   "Bayi (sahip)": "Reseller (owner)",
   "Ana hesap (admin)": "Main account (admin)",
@@ -224,6 +223,9 @@ export default function DomainsPage() {
   const [topluHedefPlan, setTopluHedefPlan] = useState(0)
   const [isleniyor, setIsleniyor] = useState(false)
   const [silOnay, setSilOnay] = useState(false)
+  // Hangi toplu eylemin sürdüğü — yalnız ilgili butonda dönen gösterge için.
+  const [durumBekleyen, setDurumBekleyen] = useState<'' | 'aktif' | 'pasif'>('')
+  const [topluBasliyor, setTopluBasliyor] = useState('')
 
   const [planlar, setPlanlar] = useState<Plan[]>([])
   const [phpSurumler, setPhpSurumler] = useState<PHPVer[]>([])
@@ -344,8 +346,8 @@ export default function DomainsPage() {
       setOlusturmaSonuc(r.data)
       // Metin davranisla ortusmeli: DB yalniz kutu isaretliyse olusturulur.
       const m = cevirT(cevir(fSqlOlustur
-        ? '✓ "{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.'
-        : '✓ "{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.'), alanAdi)
+        ? '"{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı, MySQL DB ve DNS zone hazır.'
+        : '"{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.'), alanAdi)
       setBasari(m)
       toast.basari(cevir("Oluşturuldu"), m)
       setTimeout(() => setBasari(null), 8000)
@@ -438,7 +440,7 @@ export default function DomainsPage() {
     setSecili(new Set()); setSubSecili(new Set())
     const toplam = gorevler.length
     if (basarisizlar.length === 0) {
-      const m = `✓ ${basarili}/${toplam} ${cevir("kayıt silindi")}`
+      const m = `${basarili}/${toplam} ${cevir("kayıt silindi")}`
       setBasari(m); toast.basari(m)
     } else {
       // Sessiz catch{} yerine: hangileri basarisiz oldu, YUZEYE CIKAR.
@@ -459,8 +461,9 @@ export default function DomainsPage() {
     if (tip === 'dns_reset' && !(await onay({
       baslik: cevir("DNS kayıtları sıfırlansın mı?"),
       mesaj: cevirT(cevir("{0} domainin TÜM DNS kayıtları silinip şablondan yeniden oluşturulacak. Özel kayıtlar (MX, TXT, doğrulama kayıtları) KAYBOLUR."), ids.length),
-      ton: 'tehlike',
+      ton: 'tehlike', onayIkonu: I.sifirla,
     }))) return
+    setTopluBasliyor(tip)
     try {
       const { data } = await api.post<{ is_id: number }>('/domains/toplu/is', { tip, ids, ...(ek || {}) })
       setTopluIsID(data.is_id); setTopluModal('')
@@ -469,14 +472,15 @@ export default function DomainsPage() {
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
     }
+    finally { setTopluBasliyor('') }
   }
 
   async function durumDegistir(yeniDurum: 'aktif' | 'pasif') {
-    setIsleniyor(true); setHata(null)
+    setIsleniyor(true); setHata(null); setDurumBekleyen(yeniDurum)
     const ids = Array.from(secili)
     try {
       await api.post('/domains/toplu/durum', { ids, durum: yeniDurum })
-      const m = cevirT(cevir('✓ {0} domain "{1}" durumuna geçirildi'), ids.length, yeniDurum)
+      const m = cevirT(cevir('{0} domain "{1}" durumuna geçirildi'), ids.length, yeniDurum)
       setBasari(m)
       toast.basari(m)
       setTimeout(() => setBasari(null), 4000)
@@ -486,7 +490,7 @@ export default function DomainsPage() {
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
     }
-    finally { setIsleniyor(false) }
+    finally { setIsleniyor(false); setDurumBekleyen('') }
   }
 
   return (
@@ -506,9 +510,8 @@ export default function DomainsPage() {
             className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none" />
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-500">{filtreli.length} / {items.length}</span>
-        <Button color="primary" onClick={olusturAc}
-          className="ml-auto gap-1.5 text-sm px-3 py-1.5">
-          <span className="text-base leading-none">+</span> {cevir("Yeni Domain")}
+        <Button color="primary" ikon={I.arti} onClick={olusturAc} className="ml-auto">
+          {cevir("Yeni Domain")}
         </Button>
       </div>
 
@@ -523,39 +526,31 @@ export default function DomainsPage() {
             {secili.size + subSecili.size} {cevir("seçili")}{subSecili.size > 0 ? ` (${subSecili.size} ${cevir("alt alan")})` : ''}
           </span>
           {secili.size > 0 && <>
-            <Button color="success" variant="soft" onClick={() => durumDegistir('aktif')} disabled={isleniyor}
-              className="text-xs px-3 py-1.5 gap-1.5">
-              <Ikon d={I.oynat} /> {cevir("Aktif Et")}
+            <Button variant="outlined" boyut="sm" ikon={I.oynat} onClick={() => durumDegistir('aktif')} disabled={isleniyor} yukleniyor={durumBekleyen === 'aktif'}>
+              {cevir("Aktif Et")}
             </Button>
-            <Button color="warning" variant="soft" onClick={() => durumDegistir('pasif')} disabled={isleniyor}
-              className="text-xs px-3 py-1.5 gap-1.5">
-              <Ikon d={I.durakla} /> {cevir("Pasif Et")}
+            <Button variant="outlined" boyut="sm" ikon={I.durakla} onClick={() => durumDegistir('pasif')} disabled={isleniyor} yukleniyor={durumBekleyen === 'pasif'}>
+              {cevir("Pasif Et")}
             </Button>
           </>}
           {secili.size > 0 && <>
-            <Button color="error" variant="soft" onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5">
+            <Button color="error" variant="soft" boyut="sm" ikon={I.sifirla} onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0} yukleniyor={topluBasliyor === 'dns_reset'}>
               {cevir(cevir("DNS varsayılana sıfırla"))}
             </Button>
-            <Button color="primary" variant="soft" onClick={() => topluBaslat('ssl_kur')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5">
+            <Button variant="outlined" boyut="sm" ikon={I.kalkan} onClick={() => topluBaslat('ssl_kur')} disabled={isleniyor || topluIsID > 0} yukleniyor={topluBasliyor === 'ssl_kur'}>
               {cevir("SSL kur (Let's Encrypt)")}
             </Button>
-            <Button variant="outlined" onClick={() => setTopluModal('sahip')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5">
+            <Button variant="outlined" boyut="sm" ikon={I.kullanici} onClick={() => setTopluModal('sahip')} disabled={isleniyor || topluIsID > 0}>
               {cevir(cevir("Sahip değiştir"))}
             </Button>
-            <Button variant="outlined" onClick={() => setTopluModal('plan')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5">
+            <Button variant="outlined" boyut="sm" ikon={I.kalem} onClick={() => setTopluModal('plan')} disabled={isleniyor || topluIsID > 0}>
               {cevir(cevir("Plan değiştir"))}
             </Button>
           </>}
-          <Button color="error" onClick={() => setSilOnay(true)} disabled={isleniyor}
-            className="text-xs px-3 py-1.5 gap-1.5">
-            <Ikon d={I.cop} /> {cevir("Sil")} ({secili.size + subSecili.size})
+          <Button color="error" boyut="sm" ikon={I.cop} onClick={() => setSilOnay(true)} disabled={isleniyor}>
+            {cevir("Sil")} ({secili.size + subSecili.size})
           </Button>
-          <Button variant="flat" onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}
-            className="text-xs px-3 py-1.5">
+          <Button variant="outlined" boyut="sm" ikon={I.kapat} onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}>
             {cevir(cevir("Seçimi temizle"))}
           </Button>
         </div>
@@ -640,8 +635,12 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${d.id}/subdomainler`} className={`${T.aksiyon} lg:mr-2`}>+ Subdomain</Link>
-                      <Link to={`/abonelikler/${d.id}`} className={`${T.aksiyonBirincil} ml-auto lg:ml-0`}>{cevir("Yönet →")}</Link>
+                      <Link to={`/abonelikler/${d.id}/subdomainler`} className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'lg:mr-2' })}>
+                        <Ikon d={I.arti} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />Subdomain
+                      </Link>
+                      <Link to={`/abonelikler/${d.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm', className: 'ml-auto lg:ml-0' })}>
+                        {cevir("Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
+                      </Link>
                     </td>
                   </tr>
                 )
@@ -685,7 +684,9 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className={T.aksiyonBirincil}>{cevir("Yönet →")}</Link>
+                      <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm' })}>
+                        {cevir("Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
+                      </Link>
                     </td>
                   </tr>
                 ))
@@ -698,10 +699,16 @@ export default function DomainsPage() {
       )}
 
       {/* Domain Oluştur Modal */}
-      {olusturAcik && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !olusturuluyor && setOlusturAcik(false)}>
-          <form onSubmit={olusturGonder} className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yeni Domain Oluştur")}</h3>
+      <Modal acik={olusturAcik} baslik={cevir("Yeni Domain Oluştur")} onKapat={() => setOlusturAcik(false)} kapatilamaz={olusturuluyor} genislik="lg"
+        alt={<>
+          <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}>{cevir("İptal")}</Button>
+          <Button type="submit" form="gosp-domain-olustur" color="primary" ikon={I.arti} yukleniyor={olusturuluyor} disabled={!fAlanAdi.trim()}>
+            {olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
+          </Button>
+        </>}>
+          {/* Modal gövdesi kaydırılabilir (overflow) — AramaliSecim açılır listesi gövdeye
+              sığsın diye liste açıkken alta yer açılır (yalnız CSS, :has). */}
+          <form id="gosp-domain-olustur" onSubmit={olusturGonder} className="has-[[role=listbox]]:pb-56">
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               {cevir(cevir("Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik kurulur."))}
             </p>
@@ -770,24 +777,14 @@ export default function DomainsPage() {
                 <span className="block text-xs text-slate-400 dark:text-slate-500">{cevir("İstemezseniz kapalı bırakın — sonradan Veritabanları sekmesinden açabilirsiniz.")}</span>
               </span>
             </label>
-
-            <div className="flex justify-end gap-2 mt-5">
-              <Button type="button" variant="outlined" onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}
-                className="px-3 py-1.5 text-sm">{cevir("İptal")}</Button>
-              <Button type="submit" color="primary" yukleniyor={olusturuluyor} disabled={!fAlanAdi.trim()}
-                className="px-4 py-1.5 text-sm">
-                {olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
-              </Button>
-            </div>
           </form>
-        </div>
-      )}
+      </Modal>
 
       {/* Oluşturma Sonucu Modal (FTP + DB parolaları) */}
-      {olusturmaSonuc && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setOlusturmaSonuc(null)}>
-          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-lg p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-emerald-700 dark:text-emerald-300 mb-1"><span className="inline-flex items-center gap-2"><Ikon d={I.onay} className="h-5 w-5" /> {cevir("Domain Oluşturuldu")}</span></h3>
+      <Modal acik={!!olusturmaSonuc} baslik={cevir("Domain Oluşturuldu")} ton="basari" onKapat={() => setOlusturmaSonuc(null)} genislik="lg"
+        alt={<Button color="primary" ikon={I.onay} onClick={() => setOlusturmaSonuc(null)}>{cevir("Tamam")}</Button>}>
+        {olusturmaSonuc && (
+          <div>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               <span className="font-mono text-slate-700 dark:text-slate-300">{olusturmaSonuc.alan_adi}</span> {cevir("sağlamlandı. Aşağıdaki parolalar")} <strong>sadece bir kez</strong> gösterilir — güvenli bir yere kaydedin.
             </p>
@@ -814,30 +811,35 @@ export default function DomainsPage() {
                 {cevir(cevir("Sistem kullanıcısı:"))} <span className="font-mono">{olusturmaSonuc.sistem_kullanici}</span>
               </div>
             </div>
-
-            <div className="flex justify-end mt-5">
-              <Button color="primary" onClick={() => setOlusturmaSonuc(null)}
-                className="px-4 py-1.5 text-sm">{cevir("Tamam")}</Button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       {/* Toplu Sil Onay */}
       {/* topluHedefModal — sahip/plan hedefi secimi (async is bundan sonra baslar) */}
-      {topluModal !== '' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setTopluModal('')}>
-          <div className="w-full max-w-md rounded-lg bg-white p-5 dark:bg-dark-700" onClick={e => e.stopPropagation()}>
-            <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">
-              {topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
-            </h3>
+      <Modal acik={topluModal !== ''} baslik={topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
+        onKapat={() => setTopluModal('')} kapatilamaz={topluBasliyor === 'sahip' || topluBasliyor === 'plan'}
+        alt={<>
+          <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setTopluModal('')}>{cevir("Vazgeç")}</Button>
+          <Button type="button" color="primary" ikon={I.onay}
+            disabled={topluModal === 'plan' && topluHedefPlan <= 0}
+            yukleniyor={topluBasliyor === 'sahip' || topluBasliyor === 'plan'}
+            onClick={() => topluModal === 'sahip'
+              ? topluBaslat('sahip', { reseller_id: topluHedefBayi, customer_id: topluHedefMusteri })
+              : topluBaslat('plan', { plan_id: topluHedefPlan })}>
+            {cevir("Uygula")} ({secili.size})
+          </Button>
+        </>}>
+          <div className="has-[[role=listbox]]:pb-64">
             <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{secili.size} {cevir("domain etkilenecek.")}</p>
             {topluModal === 'sahip' && (
-              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+              <UyariKutusu ton="uyari" className="mb-4">
+                <span className="text-xs leading-relaxed">
                 {cevir("Devir eski sahibin erişimini keser: FTP/SSH parolası yenilenir, açık müşteri")}{' '}
                 {cevir("oturumları düşer, Git webhook anahtarı değişir, SSH anahtarları arşivlenir, uzak yedek hedefi ve GitHub bağlantısı kaldırılır.")}
                 <b className="font-semibold"> {cevir("Yeni parola işlem sonucunda gösterilir")}</b> {cevir("— kaydedin.")}
-              </div>
+                </span>
+              </UyariKutusu>
             )}
             {topluModal === 'sahip' ? (
               <div className="space-y-3">
@@ -884,26 +886,17 @@ export default function DomainsPage() {
                 <span className="mt-1 block text-[11px] text-slate-400">{cevir("Yeni plan limitleri (disk, inode, FPM) her domaine uygulanır.")}</span>
               </label>
             )}
-            <div className="mt-5 flex justify-end gap-2">
-              <Button type="button" variant="outlined" onClick={() => setTopluModal('')}
-                className="px-3.5 py-2 text-sm">{cevir("Vazgeç")}</Button>
-              <Button type="button" color="primary"
-                disabled={topluModal === 'plan' && topluHedefPlan <= 0}
-                onClick={() => topluModal === 'sahip'
-                  ? topluBaslat('sahip', { reseller_id: topluHedefBayi, customer_id: topluHedefMusteri })
-                  : topluBaslat('plan', { plan_id: topluHedefPlan })}
-                className="px-3.5 py-2 text-sm font-semibold">
-                {cevir("Uygula")} ({secili.size})
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+      </Modal>
 
-      {silOnay && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setSilOnay(false)}>
-          <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-red-700 dark:text-red-300 mb-2"><span className="inline-flex items-center gap-2"><Ikon d={I.uyari} className="h-5 w-5" /> {cevir("Toplu Silme")}</span></h3>
+      <Modal acik={silOnay} baslik={cevir("Toplu Silme")} ton="tehlike" onKapat={() => setSilOnay(false)}
+        alt={<>
+          <Button variant="outlined" ikon={I.kapat} onClick={() => setSilOnay(false)}>{cevir("İptal")}</Button>
+          <Button color="error" ikon={I.cop} onClick={topluSil} yukleniyor={isleniyor}>
+            {cevir("Evet, Sil")}
+          </Button>
+        </>}>
+          <div>
             <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
               <span className="font-semibold">{secili.size}</span> domain{subSecili.size > 0 ? <> + <span className="font-semibold">{subSecili.size}</span> {cevir("alt alan")}</> : ''} {cevir("ve tüm bağımlı kaynakları (Linux kullanıcı, ev dizini, DB, FTP, vhost, DNS zone)")} <strong>{cevir("geri dönüşsüz")}</strong> {cevir("silinecek.")}
             </p>
@@ -919,17 +912,8 @@ export default function DomainsPage() {
               })}
               {subSecili.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {subSecili.size - 8} {cevir("alt alan daha…")}</li>}
             </ul>
-            <div className="flex justify-end gap-2">
-              <Button variant="outlined" onClick={() => setSilOnay(false)}
-                className="px-3 py-1.5 text-sm">{cevir("İptal")}</Button>
-              <Button color="error" onClick={topluSil} disabled={isleniyor}
-                className="px-3 py-1.5 text-sm">
-                {cevir("Evet, Sil")}
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+      </Modal>
     </div>
   )
 }
@@ -955,8 +939,7 @@ function KopyaSatir({ e, v, kopyala, parola }: { e: string; v: string; kopyala: 
         {parola && !acik ? '••••••••••' : v}
       </code>
       {parola && (
-        <Button type="button" variant="outlined" onClick={() => setAcik(s => !s)}
-          className="text-[10px] px-2 py-1 rounded-md">
+        <Button type="button" variant="outlined" boyut="sm" ikon={acik ? I.gozKapali : I.goz} onClick={() => setAcik(s => !s)}>
           {acik ? cevir('Gizle') : cevir("Göster")}
         </Button>
       )}
@@ -977,6 +960,7 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   }
   const [d, setD] = useState<Durum | null>(null)
   const [kapandi, setKapandi] = useState(false)
+  const [iptalEdiliyor, setIptalEdiliyor] = useState(false)
 
   useEffect(() => {
     let dur = false
@@ -1000,37 +984,36 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   }
   const yuzde = d.toplam > 0 ? Math.round((d.tamamlanan / d.toplam) * 100) : 0
   const bitti = d.durum !== 'calisiyor'
-  // Dinamik `border-${renk}-200` sınıfları Tailwind'in kaynak taramasında
-  // üretilmiyordu; durum → tam sınıf eşlemesi (yeşil/kırmızı/amber/marka).
-  const kutuSinif = d.durum === 'tamam'
-    ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800/60 dark:bg-emerald-900/20'
-    : d.durum === 'hata'
-      ? 'border-red-200 bg-red-50 dark:border-red-800/60 dark:bg-red-900/20'
-      : d.durum === 'kismi'
-        ? 'border-amber-200 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-900/20'
-        : 'border-brand-200 bg-brand-50 dark:border-brand-800/60 dark:bg-brand-900/20'
+  // Durum → ortak ton (tonlar.ts): kutunun rengi ve ikonu tondan gelir.
+  const ton: Exclude<Ton, 'soru'> = d.durum === 'tamam' ? 'basari'
+    : d.durum === 'hata' ? 'tehlike'
+      : d.durum === 'kismi' ? 'uyari'
+        : 'bilgi'
 
   async function iptalEt() {
+    setIptalEdiliyor(true)
     try { await api.post(`/domains/toplu/is/iptal?id=${isID}`) } catch { /* */ }
+    finally { setIptalEdiliyor(false) }
   }
 
   return (
-    <div className={`mb-3 rounded-lg border px-4 py-3 ${kutuSinif}`}>
+    <UyariKutusu ton={ton} className="mb-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
             {ADLAR[d.tip] || d.tip} — {bitti ? (d.durum === 'tamam' ? cevir('tamamlandı') : d.durum === 'kismi' ? cevir('kısmen tamamlandı') : d.durum) : cevir('çalışıyor')}
           </p>
           <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
-            {d.tamamlanan}/{d.toplam} · ✓ {d.basari} {cevir("başarılı")}{d.hata > 0 ? ` · ✗ ${d.hata} ${cevir("hata")}` : ''}
+            {d.tamamlanan}/{d.toplam} · <span className="inline-flex items-center gap-0.5 align-middle"><Ikon d={I.onay} className="size-3 shrink-0" />{d.basari} {cevir("başarılı")}</span>
+            {d.hata > 0 && <> · <span className="inline-flex items-center gap-0.5 align-middle"><Ikon d={I.kapat} className="size-3 shrink-0" />{d.hata} {cevir("hata")}</span></>}
             {!bitti && d.aktif_domain ? cevirT(cevir(" · şu an: {0}"), d.aktif_domain) : ''}
           </p>
         </div>
         {bitti
-          ? <Button type="button" onClick={() => { setKapandi(true); onBitti() }}
-              className="shrink-0 px-3 py-1.5 text-xs">{cevir("Kapat")}</Button>
-          : <Button type="button" color="error" variant="soft" onClick={iptalEt}
-              className="shrink-0 px-3 py-1.5 text-xs">{cevir("Durdur")}</Button>}
+          ? <Button type="button" variant="outlined" boyut="sm" ikon={I.kapat} onClick={() => { setKapandi(true); onBitti() }}
+              className="shrink-0">{cevir("Kapat")}</Button>
+          : <Button type="button" color="error" variant="soft" boyut="sm" ikon={I.durdur} onClick={iptalEt} yukleniyor={iptalEdiliyor}
+              className="shrink-0">{cevir("Durdur")}</Button>}
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-dark-600">
         <div className={`h-full rounded-full transition-all duration-500 ${bitti && d.durum === 'tamam' ? 'bg-emerald-500' : bitti && d.durum === 'hata' ? 'bg-red-500' : 'bg-brand-500'}`}
@@ -1048,16 +1031,12 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
               <li key={i} className={parola
                 ? 'text-emerald-700 dark:text-emerald-300 font-mono select-all'
                 : uyari ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}>
-                {parola
-                  ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]"><path d="M15.75 7.5a3.75 3.75 0 10-3.4 3.73L6 17.6V21h3.4l.9-.9v-1.8h1.8l1.2-1.2v-1.8h1.4l1.05-1.05A3.75 3.75 0 0015.75 7.5z"/></svg>
-                  : uyari
-                    ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]"><path d="M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z"/></svg>
-                    : '✗'} {x}
+                <Ikon d={parola ? I.anahtar : uyari ? I.uyari : I.kapat} className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]" /> {x}
               </li>
             )
           })}
         </ul>
       )}
-    </div>
+    </UyariKutusu>
   )
 }
