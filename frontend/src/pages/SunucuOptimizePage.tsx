@@ -10,6 +10,7 @@ import { api } from '@/lib/api'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { useDialog } from '@/components/Dialog'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Sunucu Optimize v2 — sistem panosu + servis-bazlı analiz + öneri + uygula + yedek/rollback.
@@ -153,9 +154,8 @@ export default function SunucuOptimizePage() {
             {cevir("Her uygulama önce yedek alır, servisi -t doğrular, sonra reload eder.")}
           </p>
         </div>
-        <Button variant="outlined" yukleniyor={yukleniyor} onClick={yukle}
-          className="px-3 py-1.5 text-sm">
-          {yukleniyor ? cevir("Analiz ediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} />{cevir("Yeniden analiz et")}</span>}
+        <Button variant="outlined" yukleniyor={yukleniyor} onClick={yukle} ikon={I.yenile}>
+          {yukleniyor ? cevir("Analiz ediliyor…") : cevir("Yeniden analiz et")}
         </Button>
       </div>
 
@@ -264,7 +264,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
     if (!(await onay({
       baslik: cevir("Emin misiniz?"),
       mesaj: cevirT(cevir("\"{0}\" değişikliğini geri al?\n\nServis {1} edilecek."), ozet, analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'),
-      ton: 'tehlike',
+      ton: 'tehlike', onayIkonu: I.geriAl,
     }))) return
     setGeriAlId(yedekID)
     try {
@@ -317,10 +317,10 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
         </div>
         {sirali.length > 0 && (
           <div className="flex items-center gap-2">
-            {secili.size < sirali.length && <button onClick={tumunuSec} className="text-xs text-slate-600 hover:underline">{cevir("Tümünü seç")}</button>}
-            {secili.size > 0 && <button onClick={tumunuBirak} className="text-xs text-slate-600 hover:underline">{cevir("Temizle")}</button>}
-            <Button color="success" onClick={uygula} disabled={secili.size === 0} yukleniyor={uyguluyor}
-              className="px-3.5 py-1.5 text-sm">
+            {secili.size < sirali.length && <Button variant="flat" boyut="sm" ikon={I.onay} onClick={tumunuSec}>{cevir("Tümünü seç")}</Button>}
+            {secili.size > 0 && <Button variant="flat" boyut="sm" ikon={I.kapat} onClick={tumunuBirak}>{cevir("Temizle")}</Button>}
+            <Button color="primary" onClick={uygula} disabled={secili.size === 0} yukleniyor={uyguluyor}
+              boyut="sm" ikon={I.onay}>
               {uyguluyor ? cevir("Uygulanıyor…") : cevirT(cevir("Uygula ({0})"), secili.size)}
             </Button>
           </div>
@@ -334,15 +334,9 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
       )}
 
       {(analiz.son_uygulama?.length || 0) > 0 && (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-900 dark:text-emerald-200 uppercase tracking-wider mb-2">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 12l2 2 4-4M12 22C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10z" />
-            </svg>
-            {cevir("Son uygulananlar")}
-          </div>
-          <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mb-2 -mt-1">
-            {cevir("Değişiklik ters tepti mi? Yanındaki")} <span className="font-mono">↶ {cevir("Geri al")}</span> {cevir("ile tek tıkla eski hale döndür.")}
+        <UyariKutusu ton="basari" className="mb-4" baslik={cevir("Son uygulananlar")}>
+          <div className="text-[11px] mb-2">
+            {cevir("Değişiklik ters tepti mi? Yanındaki")} <span className="inline-flex items-center gap-0.5 font-mono"><Ikon d={I.geriAl} className="size-3 shrink-0" /> {cevir("Geri al")}</span> {cevir("ile tek tıkla eski hale döndür.")}
           </div>
           <div className="space-y-2">
             {analiz.son_uygulama!.map(u => (
@@ -359,27 +353,24 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
                     <span className="text-[10px] text-slate-500">{u.tarih}</span>
                     {u.geri_alindi
                       ? <span className="text-[10px] text-slate-400 italic">{cevir("geri alındı")}</span>
-                      : <Button color="warning" variant="outlined" yukleniyor={geriAlId === u.yedek_id} onClick={() => geriAlUygulama(u.yedek_id, u.uygulananlar)}
-                          className="text-[10px] px-2 py-0.5 whitespace-nowrap">
-                          ↶ {cevir("Geri al")}
+                      : <Button color="warning" variant="soft" boyut="sm" ikon={I.geriAl} yukleniyor={geriAlId === u.yedek_id} onClick={() => geriAlUygulama(u.yedek_id, u.uygulananlar)}
+                          className="whitespace-nowrap">
+                          {cevir("Geri al")}
                         </Button>}
                   </div>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </UyariKutusu>
       )}
 
       {(analiz.log_sinyal?.length || 0) > 0 && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wider mb-1.5">
-            <IcSearch className="w-3.5 h-3.5" /> Log/Metric {cevir("sinyalleri")}
-          </div>
-          <ul className="text-sm text-amber-800 dark:text-amber-100 space-y-0.5 list-disc pl-5">
+        <UyariKutusu ton="uyari" className="mb-4" baslik={<>Log/Metric {cevir("sinyalleri")}</>}>
+          <ul className="space-y-0.5 list-disc pl-5">
             {analiz.log_sinyal.map((s, i) => <li key={i}>{s}</li>)}
           </ul>
-        </div>
+        </UyariKutusu>
       )}
 
       {sirali.length === 0 && !analiz.not_yok && (
@@ -451,12 +442,12 @@ function YedeklerBolumu() {
   useEffect(() => { if (acik) void yukle() }, [acik])
 
   const geriYukle = async (id: number) => {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Bu yedeği geri yükle ve servisi reload et?") }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Bu yedeği geri yükle ve servisi reload et?"), ton: 'uyari', onayIkonu: I.geriAl }))) return
     setGeriId(id)
     try {
       await api.post('/optimize/rollback', { yedek_id: id })
       await yukle()
-    } catch (e: any) { await bilgi({ baslik: cevir("İşlem başarısız"), mesaj: cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")) }) }
+    } catch (e: any) { await bilgi({ baslik: cevir("İşlem başarısız"), mesaj: cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")), ton: 'tehlike' }) }
     finally { setGeriId(null) }
   }
 
@@ -468,7 +459,7 @@ function YedeklerBolumu() {
           <span className="font-medium">{cevir("Yedek geçmişi")}</span>
           {yedekler && <span className="text-xs text-slate-500">({yedekler.length})</span>}
         </div>
-        <span className="text-slate-400">{acik ? '▴' : '▾'}</span>
+        <Ikon d={I.asagi} className={`size-4 shrink-0 text-slate-400 transition-transform ${acik ? 'rotate-180' : ''}`} />
       </button>
       {acik && yedekler && (
         <div className="border-t border-slate-200 dark:border-dark-600 p-4">
@@ -490,7 +481,7 @@ function YedeklerBolumu() {
                       <td className="py-2 text-right">
                         {y.rolled_back
                           ? <span className="text-xs text-slate-400">{cevir("geri alındı")}</span>
-                          : <Button color="warning" variant="outlined" yukleniyor={geriId === y.id} onClick={() => geriYukle(y.id)} className="text-xs px-2 py-1">{cevir("Geri yükle")}</Button>}
+                          : <Button color="warning" variant="soft" boyut="sm" ikon={I.geriAl} yukleniyor={geriId === y.id} onClick={() => geriYukle(y.id)}>{cevir("Geri yükle")}</Button>}
                       </td>
                     </tr>
                   ))}
@@ -615,14 +606,6 @@ function IcBulb(p: SvgP) {
     <svg {...svgProps} {...p} className={`w-5 h-5 ${p.className || ''}`}>
       <path d="M12 2.5a6 6 0 00-3.5 10.9V16a1 1 0 001 1h5a1 1 0 001-1v-2.6A6 6 0 0012 2.5z" />
       <path d="M10 20h4M10.5 22h3" />
-    </svg>
-  )
-}
-function IcSearch(p: SvgP) {
-  return (
-    <svg {...svgProps} {...p} className={p.className || ''}>
-      <circle cx="10.5" cy="10.5" r="6.5" />
-      <path d="M21 21l-6-6" />
     </svg>
   )
 }

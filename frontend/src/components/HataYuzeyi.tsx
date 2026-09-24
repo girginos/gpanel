@@ -6,6 +6,9 @@ import { useTranslation } from 'react-i18next'
 // DashboardLayout'ta bir kez mount edilir.
 import { useEffect, useState } from 'react'
 import { hataAbone, hataKapat, type HataKaydi } from '@/lib/hata'
+import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { TONLAR, tonSinifi } from '@/components/tonlar'
 
 
 const CMP_EN: Record<string, string> = {
@@ -28,28 +31,22 @@ export default function HataYuzeyi() {
       {kayitlar.map((k) => (
         <div
           key={k.id}
-          className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/25 px-3 py-2 shadow-lg"
+          className={`${tonSinifi('tehlike')} flex items-start gap-2 rounded-lg border border-this/30 bg-white py-2 pe-1.5 ps-3 shadow-lg dark:border-this-lighter/25 dark:bg-dark-700`}
         >
-          <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-            <path
-              fillRule="evenodd"
-              d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-8-5a1 1 0 00-1 1v4a1 1 0 002 0V6a1 1 0 00-1-1zm0 9a1 1 0 100-2 1 1 0 000 2z"
-              clipRule="evenodd"
-            />
-          </svg>
+          <Ikon d={TONLAR.tehlike.ikon} className="mt-0.5 size-4 shrink-0 text-this dark:text-this-lighter" />
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium text-red-800 dark:text-red-200">{k.baglam}</div>
-            <div className="text-xs text-red-700 dark:text-red-300 break-words">{k.mesaj}</div>
+            <div className="text-xs font-medium text-this-darker dark:text-this-lighter">{k.baglam}</div>
+            <div className="break-words text-xs text-gray-700 dark:text-dark-100">{k.mesaj}</div>
           </div>
-          <button
+          <Button
+            isIcon
+            variant="flat"
+            ikon={I.kapat}
             onClick={() => hataKapat(k.id)}
-            className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200"
+            className="-my-1 size-8 rounded-full"
             aria-label={cevir("Kapat")}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
-          </button>
+            title={cevir("Kapat")}
+          />
         </div>
       ))}
     </div>

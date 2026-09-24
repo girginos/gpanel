@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
+import { Button } from '@/components/ui'
 import CodeMirror, { EditorView } from '@uiw/react-codemirror'
 import { html } from '@codemirror/lang-html'
 import { css } from '@codemirror/lang-css'
@@ -139,12 +140,15 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
   const baytSayi = new TextEncoder().encode(icerik).length
 
   return (
+    // Arka plan + giriş animasyonu Modal ile aynı (z-[100], gosp-fade/gosp-modal-in, bulanık
+    // backdrop); tam ekran düzeni editöre özgü. Editör yüzeyi temadan bağımsız hep koyu:
+    // `dark` sınıfı içerideki Button'ların koyu görünümünü seçer.
     <div
-      className={`fixed inset-0 z-50 bg-black/50 flex items-center justify-center ${tamEkran ? '' : 'p-4'}`}
+      className={`gosp-fade fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 backdrop-blur-sm dark:bg-black/50 ${tamEkran ? '' : 'p-4'}`}
       onClick={onKapat}
     >
       <div
-        className={`bg-dark-800 shadow-2xl flex flex-col text-slate-100 ${tamEkran ? 'w-full h-full' : 'w-full h-[85vh] rounded-lg overflow-hidden'}`}
+        className={`dark gosp-modal-in bg-dark-800 shadow-2xl flex flex-col text-slate-100 ${tamEkran ? 'w-full h-full' : 'w-full h-[85vh] rounded-lg overflow-hidden'}`}
         onClick={e => e.stopPropagation()}
       >
         {/* Üst bar */}
@@ -175,28 +179,35 @@ export default function KodEditor({ yol, icerik, onChange, onKaydet, onKapat }: 
             >
               {DILLER.map(d => <option key={d.kod} value={d.kod}>{cevir(d.ad)}</option>)}
             </select>
-            <button
+            <Button
+              isIcon
+              variant="flat"
+              ikon={tamEkran ? I.kucult : I.tamEkran}
               onClick={() => setTamEkran(!tamEkran)}
-              className="text-xs px-2 py-1 bg-dark-600 hover:bg-slate-600 text-slate-100 rounded"
+              className="size-8"
+              aria-label={tamEkran ? cevir('Pencerele') : cevir('Tam ekran')}
               title={tamEkran ? cevir('Pencerele') : cevir('Tam ekran')}
-            >
-              {tamEkran ? '⛶' : '⛶'}
-            </button>
-            <button
+            />
+            <Button
+              color="primary"
+              boyut="sm"
+              ikon={I.disket}
               onClick={kaydet}
-              disabled={kayitDurum === 'kaydediliyor' || kayitDurum === 'temiz'}
-              className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-dark-600 disabled:text-slate-500 text-white rounded font-medium"
+              yukleniyor={kayitDurum === 'kaydediliyor'}
+              disabled={kayitDurum === 'temiz'}
               title="Ctrl+S"
             >
-              <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} />{cevir("Kaydet")}</span>
-            </button>
-            <button
+              {cevir("Kaydet")}
+            </Button>
+            <Button
+              variant="outlined"
+              boyut="sm"
+              ikon={I.kapat}
               onClick={onKapat}
-              className="text-xs px-3 py-1 bg-dark-600 hover:bg-slate-600 text-slate-100 rounded"
               title="ESC"
             >
               {cevir("Kapat")}
-            </button>
+            </Button>
           </div>
         </div>
 

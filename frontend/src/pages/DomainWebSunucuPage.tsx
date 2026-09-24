@@ -11,6 +11,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Ayarlar = {
   hdr_x_content_type: boolean
@@ -76,11 +77,13 @@ const WEBSRV_EN: Record<string, string> = {
   "nginx kenarda TLS terminatörü, Apache (10080) arkada vhost'u servis eder. .htaccess tam desteği — Joomla, eski WP, legacy CMS'ler için.": "nginx as the edge TLS terminator, Apache (10080) serves the vhost behind it. Full .htaccess support — for Joomla, old WP, legacy CMSs.",
   "Kamera/mikrofon/konum API'lerini varsayılan kapat": "Disable camera/microphone/location APIs by default",
   "HTTP linkleri otomatik HTTPS'e yükselt": "Automatically upgrade HTTP links to HTTPS",
-  "✓ Web sunucusu \"{0}\" olarak değiştirildi": "✓ Web server changed to \"{0}\"",
-  "✓ Belge kökü \"public_html/{0}\" olarak ayarlandı": "✓ Document root set to \"public_html/{0}\"",
+  "Web sunucusu \"{0}\" olarak değiştirildi": "Web server changed to \"{0}\"",
+  "Belge kökü \"public_html/{0}\" olarak ayarlandı": "Document root set to \"public_html/{0}\"",
+  "Belge kökü public_html köküne ayarlandı": "Document root set to the public_html root",
+  "Ayarlar uygulandı, nginx yeniden yüklendi": "Settings applied, nginx reloaded",
   "Güvenlik başlıkları ve özel direktifler. Kaydedince nginx vhost yeniden render edilir.": "Security headers and custom directives. When saved, the nginx vhost is re-rendered.",
   "nginx kenarda TLS terminatörü olarak kalır; alttaki seçim domain'in arkasını çalışan motora yönlendirir.": "nginx stays at the edge as the TLS terminator; the selection below routes the domain's backend to the running engine.",
-  "● Aktif": "● Active",
+  "Aktif": "Active",
   ". Laravel, Symfony gibi": ". Frameworks like Laravel, Symfony",
   "'yi bir alt klasörde tutar — o klasörü buraya yazın.": " keep in a subfolder — write that folder here.",
   "· Kaydedince nginx vhost anında yeniden render edilir.": "· When saved, the nginx vhost is re-rendered instantly.",
@@ -179,7 +182,7 @@ export default function DomainWebSunucuPage() {
     try {
       await api.put(`/domains/${id}/web-backend`, { backend: yeni })
       setBackend(yeni)
-      const m = cevirT(cevir("✓ Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni)
+      const m = cevirT(cevir("Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni)
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 4000)
@@ -199,8 +202,8 @@ export default function DomainWebSunucuPage() {
       const r = await api.put<{ alt_dizin: string }>(`/domains/${id}/web-root`, { alt_dizin: webRoot.trim() })
       setWebRoot(r.data.alt_dizin); setWebRootKayitli(r.data.alt_dizin)
       const m = r.data.alt_dizin
-        ? cevirT(cevir("✓ Belge kökü \"public_html/{0}\" olarak ayarlandı"), r.data.alt_dizin)
-        : cevir("✓ Belge kökü public_html köküne ayarlandı")
+        ? cevirT(cevir("Belge kökü \"public_html/{0}\" olarak ayarlandı"), r.data.alt_dizin)
+        : cevir("Belge kökü public_html köküne ayarlandı")
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 4000)
@@ -218,8 +221,8 @@ export default function DomainWebSunucuPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/domains/${id}/nginx-settings`, { ayarlar: a })
-      setBasari(cevir("✓ Ayarlar uygulandı, nginx yeniden yüklendi"))
-      toast.basari(cevir("Kaydedildi"), cevir("✓ Ayarlar uygulandı, nginx yeniden yüklendi"))
+      setBasari(cevir("Ayarlar uygulandı, nginx yeniden yüklendi"))
+      toast.basari(cevir("Kaydedildi"), cevir("Ayarlar uygulandı, nginx yeniden yüklendi"))
       yukle()
     } catch (e) {
       const m = apiHata(e, cevir("Kaydetme başarısız"))
@@ -277,7 +280,7 @@ export default function DomainWebSunucuPage() {
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-lg leading-none">{b.ikon}</span>
-                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>}
+                  {aktif && <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300"><span className="inline-block size-2 rounded-full bg-emerald-500" aria-hidden />{cevir("Aktif")}</span>}
                 </div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(b.ad)}</div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1.5 leading-snug">{cevir(b.aciklama)}</div>
@@ -313,7 +316,7 @@ export default function DomainWebSunucuPage() {
           </div>
           <Button color="primary" onClick={webRootKaydet}
             disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli} yukleniyor={webRootKaydediliyor}
-            className="px-5 py-2 text-sm whitespace-nowrap">
+            ikon={I.disket} className="whitespace-nowrap">
             {webRootKaydediliyor ? cevir("Uygulanıyor…") : cevir("Belge Kökünü Kaydet")}
           </Button>
         </div>
@@ -325,8 +328,8 @@ export default function DomainWebSunucuPage() {
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Algılanan klasörler:")}</span>
             {webRootAdaylar.map(x => (
-              <Button key={x} variant="outlined" onClick={() => setWebRoot(x)}
-                className="px-2 py-0.5 text-[11px] font-mono">
+              <Button key={x} variant="outlined" boyut="sm" ikon={I.klasor} onClick={() => setWebRoot(x)}
+                className="font-mono">
                 {x}
               </Button>
             ))}
@@ -334,7 +337,7 @@ export default function DomainWebSunucuPage() {
         )}
 
         <div className="mt-3 flex items-start gap-2 px-2.5 py-2 bg-slate-50 dark:bg-dark-800/40 rounded-md">
-          <span className="text-xs text-slate-400 dark:text-slate-500 mt-px">↳</span>
+          <Ikon d={I.ileri} className="mt-px size-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
           <div className="text-xs text-slate-600 dark:text-slate-400 min-w-0">
             <span className="text-slate-400 dark:text-slate-500">{cevir("Etkin kök:")} </span>
             <code className="font-mono break-all text-slate-700 dark:text-slate-300">public_html{webRoot.trim() ? '/' + webRoot.trim().replace(/^\/+|\/+$/g, '') : ''}</code>
@@ -345,10 +348,12 @@ export default function DomainWebSunucuPage() {
         </div>
       </div>
 
-      <div className="mb-5 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-        <strong>HSTS</strong>{cevir(" yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.")}
-        {cevir(cevir("Ayarlar değiştiğinde"))} <code className="font-mono">nginx -t</code> + <code className="font-mono">reload</code> {cevir("otomatik tetiklenir — sıfır kesinti.")}
-      </div>
+      <UyariKutusu ton="uyari" className="mb-5">
+        <span className="text-xs">
+          <strong>HSTS</strong>{cevir(" yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.")}
+          {cevir(cevir("Ayarlar değiştiğinde"))} <code className="font-mono">nginx -t</code> + <code className="font-mono">reload</code> {cevir("otomatik tetiklenir — sıfır kesinti.")}
+        </span>
+      </UyariKutusu>
 
       {yuk || !a ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (
         <>
@@ -468,11 +473,11 @@ export default function DomainWebSunucuPage() {
 
           <div className="flex gap-3 mt-6">
             <Button color="primary" onClick={kaydet} disabled={isleniyor} yukleniyor={isleniyor}
-              className="px-6 py-2.5 text-sm">
-              {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
+              ikon={I.disket}>
+              {isleniyor ? cevir("Uygulanıyor…") : cevir("Kaydet ve Uygula")}
             </Button>
-            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 text-sm">
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor} yukleniyor={yuk}
+              ikon={I.yenile}>
               {cevir(cevir("Yeniden Yükle"))}
             </Button>
           </div>

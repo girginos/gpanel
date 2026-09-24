@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 
@@ -44,8 +45,7 @@ const KatIkon = ({ kategori }: { kategori: string }) => (
 const BILDIRIM_EN: Record<string, string> = {
   "Okunmamış bildirim yok.": "No unread notifications.",
   "az önce": "just now",
-  "○ Yalnız okunmamış": "○ Unread only",
-  "● Yalnız okunmamış": "● Unread only",
+  "Yalnız okunmamış": "Unread only",
   "dk önce": "min ago",
   "sa önce": "h ago",
   "gün önce": "d ago",
@@ -73,6 +73,7 @@ export default function BildirimlerPage() {
   const [, setHata] = useState<string | null>(null)
   const [sadeceOkunmamis, setSadeceOkunmamis] = useState(false)
   const [kat, setKat] = useState('') // '' = tümü (istemci tarafı süzülür)
+  const [isaretleniyor, setIsaretleniyor] = useState(false)
 
   function yukle() {
     setHata(null)
@@ -85,7 +86,9 @@ export default function BildirimlerPage() {
   useEffect(() => { setYuk(true); yukle() }, [sadeceOkunmamis])
 
   async function tumOkundu() {
+    setIsaretleniyor(true)
     try { await api.post('/bildirimler/0/okundu', {}); setListe(l => l.map(b => ({ ...b, okundu: true }))) } catch { /* sessiz */ }
+    finally { setIsaretleniyor(false) }
   }
   function git(b: Bildirim) {
     if (!b.okundu) {
@@ -117,8 +120,7 @@ export default function BildirimlerPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bildirimler")}</h1>
           {okunmamisSayi > 0 && (
-            <Button variant="outlined" onClick={tumOkundu}
-              className="px-3 py-2 text-sm">
+            <Button variant="outlined" onClick={tumOkundu} ikon={I.onay} yukleniyor={isaretleniyor}>
               {cevir("Tümünü okundu işaretle")} ({okunmamisSayi})
             </Button>
           )}
@@ -127,12 +129,13 @@ export default function BildirimlerPage() {
         {/* Filtreler */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button onClick={() => setSadeceOkunmamis(v => !v)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border transition ${
               sadeceOkunmamis
                 ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
                 : 'border-slate-200 dark:border-dark-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-dark-700'
             }`}>
-            {sadeceOkunmamis ? cevir("● Yalnız okunmamış") : cevir("○ Yalnız okunmamış")}
+            <span className={`inline-block size-2 rounded-full ${sadeceOkunmamis ? 'bg-current' : 'border border-current'}`} aria-hidden />
+            {cevir("Yalnız okunmamış")}
           </button>
           <span className="w-px h-5 bg-slate-200 dark:bg-dark-600 mx-1" />
           {cip('', cevir("Tümü"))}
