@@ -37,6 +37,9 @@ type Dinleme struct {
 	IPv6     bool // [..] adresi
 	Loopback bool // 127.x / ::1 / localhost — yalnız yerel (erisim masaüstü / tünel)
 	Yorum    bool // erisim'in yoruma aldığı satır (etkin DEĞİL ama "port bilinçli kapalı")
+	// Adresli: belirli bir (joker ve loopback OLMAYAN) adrese bağlı — ör. iç ağ/VPN IP'si.
+	// Operatörün bilinçli ağ kısıtlamasıdır; rol kapıları bunu joker listen'la aşmamalı.
+	Adresli bool
 }
 
 // Genel: dış arayüzlerde dinleyen ETKİN satır mı?
@@ -67,6 +70,25 @@ func adresAyristir(adr string) (port int, ipv6, loopback bool) {
 	return p, ipv6, loopback
 }
 
+// adresBagli: listen adresi belirli bir arayüze mi bağlı? Joker (boş, *, 0.0.0.0, [::])
+// ve loopback değilse evet.
+func adresBagli(adr string) bool {
+	adr = strings.TrimSuffix(adr, ";")
+	host := ""
+	if strings.HasPrefix(adr, "[") {
+		if i := strings.Index(adr, "]:"); i >= 0 {
+			host = adr[1:i]
+		}
+	} else if i := strings.LastIndex(adr, ":"); i >= 0 {
+		host = adr[:i]
+	}
+	switch host {
+	case "", "*", "0.0.0.0", "::", "localhost", "::1":
+		return false
+	}
+	return !strings.HasPrefix(host, "127.")
+}
+
 // Dinlemeler: dosyadaki tüm listen satırları (etkin + erisim-yorumlu).
 func Dinlemeler(satirlar []string) []Dinleme {
 	var out []Dinleme
@@ -82,7 +104,7 @@ func Dinlemeler(satirlar []string) []Dinleme {
 		}
 		if m := listenRe.FindStringSubmatch(ln); m != nil {
 			p, v6, lb := adresAyristir(m[2])
-			out = append(out, Dinleme{Satir: i, Port: p, IPv6: v6, Loopback: lb})
+			out = append(out, Dinleme{Satir: i, Port: p, IPv6: v6, Loopback: lb, Adresli: adresBagli(m[2])})
 		}
 	}
 	return out
@@ -313,8 +335,8 @@ func YerelPortlar(conf string, a *Ayar, simdi int64) []int {
 //
 // 🔴 a == nil (kapı modu kapalı) iken de $gp_kapi TANIMLI kalır: tanımsız bir nginx
 // değişkeni `nginx -t`'yi GLOBAL düşürür — hiçbir domain reload edilemez (bkz.
-// provisioner.uygulamaUpgradeMapEnsure). Değer "" iken nginx başlığı HİÇ göndermez
-// ve istemcinin gönderdiğini de siler.
+// provisioner.uygulamaUpgradeMapEnsure). Mod kapalıyken başlık satırları da silinir
+// (KapiBasliginiSil); $gp_kapi yalnız atıf kalmışsa `nginx -t` düşmesin diye tanımlıdır.
 //
 // Zorlama açıkken varsayılan "bilinmeyen": haritada olmayan bir porttan gelen
 // (yanlış yapılandırma) istek sessizce "eski" gibi davranmaz, reddedilir.

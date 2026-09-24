@@ -7,7 +7,8 @@ package main
 // kabuktan çağırır; systemd'nin EnvironmentFile'ı (PANEL_JWT_SECRET vb.) orada
 // yüklü değildir. Kapı işlemleri yalnız dosya düzeyindedir (kapi.json +
 // _panel.conf) — DB ve sır gerekmez. nginx'e dokunmaz: uygulama, panel açılışındaki
-// Heal'in işidir (tek uygulayıcı, tek doğrulama yolu).
+// Heal'in işidir (tek uygulayıcı, tek doğrulama yolu). Yazılan kapı portları SELinux'ta
+// burada etiketlenir (semanage saniyeler sürer; panel açılışı beklemesin).
 
 import (
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 	"girginospanel/internal/kapi"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/portyonetim"
+	"girginospanel/internal/provisioner"
 )
 
 const kapiKullanim = `Kullanım: girginospanel-server kapi <komut>
@@ -37,6 +39,8 @@ const kapiKullanim = `Kullanım: girginospanel-server kapi <komut>
   uzat <gün>       eski kapının açık kalma süresini uzat
   eski-kapat       eski kapıyı şimdi kapat (admin yeni kapıdan girmiş olmalı)
   eski-kapat --zorla   admin doğrulaması olmadan kapat (kilitlenme riski SİZDE)
+  selinux          kapı portlarını SELinux'ta http_port_t yap (kur/gecis/rol-port
+                   bunu kendileri yapar; önceden geçmiş sunucular ve elle kullanım için)
 Çıkış: 0 tamam · 1 hata · 2 kullanım · 3 kapı modu yapılandırılmamış`
 
 // Dikişler (testler): CLI gerçek kapi.json'a, _panel.conf'a ve systemctl'e dokunmasın.
@@ -46,6 +50,8 @@ var (
 	kapiPanelConf    = "/etc/nginx/conf.d/_panel.conf"
 	kapiPortUygunluk = kapiPortUygun
 	kapiRolPortuAta  = portyonetim.KapiRolPortuAta
+	// kapiSELinuxHazirla: yazılan kapı portlarını panel başlamadan etiketler (0/1/3).
+	kapiSELinuxHazirla = provisioner.KapiSELinuxHazirla
 	// panelYenidenBaslat: değişikliği hemen uygulamak için (Heal açılışta koşar).
 	panelYenidenBaslat = func() {
 		if exec.Command("systemctl", "is-active", "--quiet", "girginospanel").Run() != nil {
@@ -114,6 +120,8 @@ func kapiCLI(args []string) int {
 		return kapiUzat(n)
 	case "eski-kapat":
 		return kapiEskiKapat(len(args) > 1 && args[1] == "--zorla")
+	case "selinux":
+		return kapiSELinux()
 	}
 	fmt.Fprintln(os.Stderr, kapiKullanim)
 	return 2
@@ -168,6 +176,7 @@ func kapiKur() int {
 	}
 	fmt.Println("kapı portları atandı (panel açılışında uygulanır):")
 	kapiYazdir(a)
+	kapiEtiketle()
 	return 0
 }
 
@@ -191,6 +200,10 @@ func kapiGecis(gun int) int {
 		fmt.Println(err.Error() + " — web moduna geçince `girginospanel-server kapi gecis` ile tekrar deneyin")
 		return 0 // hata değil: operatörün bilinçli seçimi korundu
 	}
+	if errors.Is(err, kapi.ErrAdreseBagli) {
+		fmt.Println(err.Error())
+		return 0 // hata değil: iç ağ/VPN adresine bağlı panel olduğu gibi kalır
+	}
 	if err == nil {
 		err = kapi.Yaz(kapiCLIAyarYolu, a)
 	}
@@ -200,6 +213,7 @@ func kapiGecis(gun int) int {
 	}
 	fmt.Println("kapı geçişi hazırlandı (panel açılışında uygulanır):")
 	kapiYazdir(a)
+	kapiEtiketle()
 	return 0
 }
 
@@ -262,8 +276,39 @@ func kapiRolPort(rol string, yeni int) int {
 	if rol == kapi.Admin {
 		fmt.Printf("önceki admin portu :%d, yeni admin kapısından giriş yapılana dek AÇIK kalır\n", eski)
 	}
+	kapiEtiketle()
 	panelYenidenBaslat()
 	return 0
+}
+
+// kapiSELinux: `kapi selinux` — önceden kapı moduna geçmiş sunucular, yeniden başlatma
+// sonrası (/run önbelleği silinir) ve elle kullanım için.
+func kapiSELinux() int {
+	switch kod := kapiSELinuxHazirla(); kod {
+	case 0:
+		fmt.Println("kapı portları SELinux'ta hazır (ya da SELinux kapalı)")
+		return 0
+	case 3:
+		fmt.Fprintln(os.Stderr, "kapı modu yapılandırılmamış")
+		return 3
+	default:
+		kapiEtiketUyarisi()
+		return 1
+	}
+}
+
+// kapiEtiketle: kur/gecis/rol-port yazdıktan sonra yeni portları etiketler. Başarısızlık
+// komutu düşürmez: ayar yazıldı, panel etiketsiz porta listen YAZMAZ (eski davranış,
+// kilitlenme yok) — operatör uyarılır.
+func kapiEtiketle() {
+	if kapiSELinuxHazirla() == 1 {
+		kapiEtiketUyarisi()
+	}
+}
+
+func kapiEtiketUyarisi() {
+	fmt.Fprintln(os.Stderr, "🔴 SELinux Enforcing: kapı portları http_port_t yapılamadı — panel kapı düzenini "+
+		"UYGULAMAZ (eski davranış sürer). Günlükteki portu düzeltip `girginospanel-server kapi selinux` çalıştırın.")
 }
 
 func kapiUzat(gun int) int {

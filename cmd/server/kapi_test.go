@@ -30,17 +30,18 @@ func TestKapiAdresURL(t *testing.T) {
 }
 
 // cliOrtami: CLI dikişlerini geçici dizine ve sahtelere çevirir — hiçbir test gerçek
-// kapi.json'a, _panel.conf'a, `ss`/firewall'a ya da systemctl'e dokunamaz.
-// Dönen sayaç panelYenidenBaslat çağrılarını sayar.
+// kapi.json'a, _panel.conf'a, `ss`/firewall'a, semanage'a ya da systemctl'e dokunamaz.
+// Dönen sayaç panelYenidenBaslat çağrılarını sayar; SELinux hazırlığı 0 döner (kapalı).
 func cliOrtami(t *testing.T) (dir string, yenidenBaslat *int) {
 	t.Helper()
 	dir = t.TempDir()
-	eskiYol, eskiConf, eskiUygun, eskiAta, eskiBaslat :=
-		kapiCLIAyarYolu, kapiPanelConf, kapiPortUygunluk, kapiRolPortuAta, panelYenidenBaslat
+	eskiYol, eskiConf, eskiUygun, eskiAta, eskiBaslat, eskiSE :=
+		kapiCLIAyarYolu, kapiPanelConf, kapiPortUygunluk, kapiRolPortuAta, panelYenidenBaslat, kapiSELinuxHazirla
 	t.Cleanup(func() {
-		kapiCLIAyarYolu, kapiPanelConf, kapiPortUygunluk, kapiRolPortuAta, panelYenidenBaslat =
-			eskiYol, eskiConf, eskiUygun, eskiAta, eskiBaslat
+		kapiCLIAyarYolu, kapiPanelConf, kapiPortUygunluk, kapiRolPortuAta, panelYenidenBaslat, kapiSELinuxHazirla =
+			eskiYol, eskiConf, eskiUygun, eskiAta, eskiBaslat, eskiSE
 	})
+	kapiSELinuxHazirla = func() int { return 0 }
 	kapiCLIAyarYolu = filepath.Join(dir, "kapi.json")
 	kapiPanelConf = filepath.Join(dir, "_panel.conf")
 	kapiPortUygunluk = func() func(int) bool { return func(int) bool { return true } }
@@ -133,6 +134,66 @@ func TestKapiCLIGecis(t *testing.T) {
 	}
 	if _, err := os.Stat(kapiCLIAyarYolu); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("masaüstü modunda ayar yazılmamalı: %v", err)
+	}
+
+	// İç ağ/VPN adresine bağlı panel: joker rol kapıları bu kısıtlamayı kaldırırdı → atlanır.
+	cliOrtami(t)
+	vpn := "server {\n    listen 10.8.0.1:8443 ssl;\n}\n"
+	if err := os.WriteFile(kapiPanelConf, []byte(vpn), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if kod := kapiCLI([]string{"gecis"}); kod != 0 {
+		t.Fatalf("adrese bağlı panelde gecis hata değil (0), got %d", kod)
+	}
+	if _, err := os.Stat(kapiCLIAyarYolu); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("adrese bağlı panelde ayar yazılmamalı: %v", err)
+	}
+}
+
+// selinux: çıkış kodu hazırlığınkiyle aynı. kur/gecis/rol-port yazdıktan sonra etiketler;
+// Enforcing'de etiketlenememek komutu düşürmez (panel etiketsiz porta listen yazmaz).
+func TestKapiCLISELinux(t *testing.T) {
+	for _, kod := range []int{0, 1, 3} {
+		cliOrtami(t)
+		kapiSELinuxHazirla = func() int { return kod }
+		if got := kapiCLI([]string{"selinux"}); got != kod {
+			t.Errorf("selinux: hazırlık %d → çıkış %d", kod, got)
+		}
+	}
+
+	_, baslat := cliOrtami(t)
+	var sira []string
+	kapiSELinuxHazirla = func() int {
+		if _, err := os.Stat(kapiCLIAyarYolu); err != nil {
+			t.Error("etiketleme kapi.json yazıldıktan SONRA olmalı")
+		}
+		sira = append(sira, "etiket")
+		return 1
+	}
+	if kod := kapiCLI([]string{"kur"}); kod != 0 || len(sira) != 1 {
+		t.Fatalf("kur etiketlemeli ve etiket hatasında da 0 dönmeli: kod=%d etiket=%d", kod, len(sira))
+	}
+	if kod := kapiCLI([]string{"kur"}); kod != 0 || len(sira) != 1 {
+		t.Fatalf("mevcut ayarda kur yeniden etiketlememeli: kod=%d etiket=%d", kod, len(sira))
+	}
+	kapiRolPortuAta = func(string, int) (int, int, error) { return 23003, 24004, nil }
+	panelYenidenBaslat = func() { sira = append(sira, "baslat"); *baslat++ }
+	if kod := kapiCLI([]string{"rol-port", kapi.Musteri}); kod != 0 {
+		t.Fatalf("rol-port 0 dönmeli, got %d", kod)
+	}
+	if len(sira) != 3 || sira[1] != "etiket" || sira[2] != "baslat" {
+		t.Fatalf("rol-port panel yeniden başlamadan ÖNCE etiketlemeli: %v", sira)
+	}
+
+	cliOrtami(t)
+	n := 0
+	kapiSELinuxHazirla = func() int { n++; return 0 }
+	conf := "server {\n    listen 8443 ssl default_server;\n}\n"
+	if err := os.WriteFile(kapiPanelConf, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if kod := kapiCLI([]string{"gecis"}); kod != 0 || n != 1 {
+		t.Fatalf("gecis etiketlemeli: kod=%d etiket=%d", kod, n)
 	}
 }
 

@@ -10,6 +10,11 @@ import (
 // seçimi sessizce tersine çevireceği için yapılmaz.
 var ErrDisariyaKapali = errors.New("panel dışarıya kapalı (erisim masaüstü modu) — kapı geçişi atlandı")
 
+// ErrAdreseBagli: panel belirli bir adrese (ör. iç ağ/VPN IP'si) bağlı. Rol kapıları
+// joker listen'la (tüm arayüzler) eklenir; geçiş operatörün bu ağ kısıtlamasını —
+// yönetici yüzeyi dahil — sessizce kaldırırdı. Elle yapılandırılmalı.
+var ErrAdreseBagli = errors.New("panel belirli bir adrese bağlı (iç ağ/VPN IP'si) — kapı geçişi atlandı: rol kapıları tüm arayüzlerde açılıp bu kısıtlamayı kaldırırdı")
+
 // KurulumAyari: taze kurulum için rol portları. Eski kapı yoktur: şablonun 8443'ü
 // Heal tarafından "beklenmeyen genel listen" olarak kaldırılır (kullanıcı yok).
 func KurulumAyari(uygun func(int) bool, simdi int64) (*Ayar, error) {
@@ -27,6 +32,11 @@ func GecisAyari(panelConf string, uygun func(int) bool, simdi int64, gun int) (*
 	eski := GenelPortlar(panelConf)
 	if len(eski) == 0 {
 		return nil, ErrDisariyaKapali
+	}
+	for _, d := range Dinlemeler(strings.Split(panelConf, "\n")) {
+		if d.Genel() && d.Adresli {
+			return nil, ErrAdreseBagli
+		}
 	}
 	if gun < 1 {
 		gun = VarsayilanGecisGun

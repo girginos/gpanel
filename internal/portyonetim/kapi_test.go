@@ -23,6 +23,7 @@ type kapiPYSahte struct {
 	uygHata    error
 	denetim    []string
 	disBasladi bool
+	masaustu   bool
 }
 
 func kapiPYKur(t *testing.T, a *kapi.Ayar) *kapiPYSahte {
@@ -30,10 +31,13 @@ func kapiPYKur(t *testing.T, a *kapi.Ayar) *kapiPYSahte {
 	s := &kapiPYSahte{mesgul: map[int]bool{}, fw: map[int]bool{}, selinux: map[int]string{}}
 	eskiYol, eskiSis, eskiFw, eskiUyg := kapiAyarYolu, kapiSistemPortu, kapiFwKapaliPort, KapiUygula
 	eskiSE, eskiFtp, eskiConf, eskiDis := kapiSELinux, kapiFtpPasif, kapiPanelConf, disBaslat
+	eskiMasa := kapiMasaustu
 	t.Cleanup(func() {
 		kapiAyarYolu, kapiSistemPortu, kapiFwKapaliPort, KapiUygula = eskiYol, eskiSis, eskiFw, eskiUyg
 		kapiSELinux, kapiFtpPasif, kapiPanelConf, disBaslat = eskiSE, eskiFtp, eskiConf, eskiDis
+		kapiMasaustu = eskiMasa
 	})
+	kapiMasaustu = func() bool { return s.masaustu }
 	kapiAyarYolu = filepath.Join(t.TempDir(), "kapi.json")
 	kapiSistemPortu = func() map[int]bool {
 		c := map[int]bool{}
@@ -133,14 +137,36 @@ func TestKapiRolPortuAtaEskiPortuDevralir(t *testing.T) {
 	}
 }
 
-// Yalnız-loopback tünel portu (erisim masaüstü; nginx dinliyor → ss "meşgul") panelin
-// kendi portudur: yönetici kapısı yapılabilir (tünel yolunu geri kazanmanın yolu).
+// Yalnız-loopback tünel portu (erisim masaüstü; nginx dinliyor → ss "meşgul") YALNIZ
+// masaüstü modunda yönetici kapısı olabilir. Bayi/müşteri (ve web modunda yönetici) oraya
+// taşınsa Heal genel listen eklemez, eski portu kaldırır → rolün kullanıcıları kilitlenir.
 func TestKapiRolPortuAtaYerelPort(t *testing.T) {
 	s := kapiPYKur(t, rolAyari())
 	s.conf = "server {\n    listen 127.0.0.1:9443 ssl;\n    listen 21001 ssl;\n}"
 	s.mesgul[9443] = true
+	for _, rol := range []string{kapi.Bayi, kapi.Musteri, kapi.Admin} {
+		if _, _, err := KapiRolPortuAta(rol, 9443); err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+			t.Errorf("web modunda %s kapısı tünel portuna taşınamamalı, got %v", rol, err)
+		}
+	}
+	if a, _ := kapi.Oku(kapiAyarYolu); a.Admin != 21001 || a.Bayi != 22002 || a.Musteri != 23003 {
+		t.Fatalf("reddedilen istekler ayarı değiştirmemeli: %+v", a)
+	}
+	s.masaustu = true
+	if _, _, err := KapiRolPortuAta(kapi.Musteri, 9443); err == nil {
+		t.Fatal("masaüstü modunda da müşteri kapısı tünel portuna taşınamamalı")
+	}
 	if _, _, err := KapiRolPortuAta(kapi.Admin, 9443); err != nil {
-		t.Fatalf("panelin loopback tünel portu meşgul sayılmamalı: %v", err)
+		t.Fatalf("masaüstü modunda yönetici kapısı tünel portu olabilmeli: %v", err)
+	}
+	// Rastgele seçim tünel portunu hiçbir zaman seçmez.
+	s2 := kapiPYKur(t, rolAyari())
+	s2.conf = "server {\n    listen 127.0.0.1:25555 ssl;\n}"
+	for i := 0; i < 20; i++ {
+		_, y, err := KapiRolPortuAta(kapi.Bayi, 0)
+		if err != nil || y == 25555 {
+			t.Fatalf("rastgele seçim tünel portunu seçmemeli: %d %v", y, err)
+		}
 	}
 }
 
@@ -172,6 +198,9 @@ func TestKapiRolHandler(t *testing.T) {
 	if sonuc.EskiPort != 23003 || sonuc.YeniPort != 24004 || sonuc.Uyari != "" {
 		t.Fatalf("sonuç: %+v", sonuc)
 	}
+	if !sonuc.Uygulandi {
+		t.Fatal("hatasız uygulama uygulandi=true dönmeli")
+	}
 	if s.uygula != 1 {
 		t.Fatal("değişiklik HEMEN uygulanmalı")
 	}
@@ -184,8 +213,26 @@ func TestKapiRolHandler(t *testing.T) {
 	rr = httptest.NewRecorder()
 	h.KapiRol(rr, httptest.NewRequest("POST", "/", strings.NewReader(`{"rol":"bayi","yeni_port":25005}`)))
 	_ = json.Unmarshal(rr.Body.Bytes(), &sonuc)
-	if rr.Code != 200 || sonuc.Uyari == "" {
-		t.Fatalf("uygulama hatası uyarı olarak dönmeli: %d %+v", rr.Code, sonuc)
+	if rr.Code != 200 || sonuc.Uyari == "" || sonuc.Uygulandi {
+		t.Fatalf("uygulanamayan değişiklik uyarı + uygulandi=false dönmeli: %d %+v", rr.Code, sonuc)
+	}
+	// Uygulandı ama zincir doğrulanamadı: arayüz farklı başlık gösterir.
+	s.uygHata = &kapi.UygulamaHatasi{Uygulandi: true, Mesaj: "kapı zinciri ölçülemedi"}
+	rr = httptest.NewRecorder()
+	h.KapiRol(rr, httptest.NewRequest("POST", "/", strings.NewReader(`{"rol":"bayi","yeni_port":27007}`)))
+	sonuc = KapiRolSonuc{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &sonuc)
+	if rr.Code != 200 || sonuc.Uyari == "" || !sonuc.Uygulandi {
+		t.Fatalf("uygulandı-doğrulanamadı: uyarı + uygulandi=true dönmeli: %d %+v", rr.Code, sonuc)
+	}
+	// Uygulayıcı "uygulanmadı" dediyse (nginx eski hâlinde) arayüz bunu ayırabilmeli.
+	s.uygHata = &kapi.UygulamaHatasi{Mesaj: "nginx kapı ayarına uyumlanamadı"}
+	rr = httptest.NewRecorder()
+	h.KapiRol(rr, httptest.NewRequest("POST", "/", strings.NewReader(`{"rol":"bayi","yeni_port":28008}`)))
+	sonuc = KapiRolSonuc{Uygulandi: true}
+	_ = json.Unmarshal(rr.Body.Bytes(), &sonuc)
+	if rr.Code != 200 || sonuc.Uyari == "" || sonuc.Uygulandi {
+		t.Fatalf("uygulanamadı: uyarı + uygulandi=false dönmeli: %d %+v", rr.Code, sonuc)
 	}
 
 	rr = httptest.NewRecorder()

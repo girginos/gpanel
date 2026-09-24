@@ -101,8 +101,12 @@ type Ayar struct {
 	// IlkGiris: bayi/müşteri kapısından ilk başarılı dış giriş (rol → unix sn). Kapanış
 	// şartı DEĞİLDİR (hiç müşterisi olmayan sunucuda eski kapı sonsuza dek açık kalırdı);
 	// arayüz, eski kapıyı kapatmadan önce hangi rolün yeni kapısının kullanıldığını gösterir.
-	IlkGiris  map[string]int64 `json:"ilk_giris,omitempty"`
-	Olusturma int64            `json:"olusturma,omitempty"`
+	IlkGiris map[string]int64 `json:"ilk_giris,omitempty"`
+	// OncekiAdmin: son değişiklikten önceki admin portu. Yeni admin portu dışarıdan
+	// erişilemez çıkarsa admin, çalıştığı bilinen bu porta doğrulama beklemeden DÖNEBİLİR
+	// (ErrEskiDevralma'nın istisnası — o port zaten dinleniyor, dönüş kimseyi kilitlemez).
+	OncekiAdmin int   `json:"onceki_admin,omitempty"`
+	Olusturma   int64 `json:"olusturma,omitempty"`
 }
 
 // RolPortu: rolün kapı portu (bilinmeyen rol → 0).
@@ -300,8 +304,7 @@ func kanitliKapiPort(r *http.Request) (string, int) {
 	return "", 0
 }
 
-// KanitliKapi: kanitliKapiPort'un yalnız kapı adı. Açılış ölçümü bunu kullanır:
-// zorlama açılmadan ÖNCE zincirin uçtan uca çalıştığı ölçülebilsin.
+// KanitliKapi: kanitliKapiPort'un yalnız kapı adı (zorlamadan bağımsız). Istek kullanır.
 func KanitliKapi(r *http.Request) string {
 	k, _ := kanitliKapiPort(r)
 	return k

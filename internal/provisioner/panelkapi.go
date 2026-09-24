@@ -33,9 +33,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -176,25 +178,43 @@ func KapiSimdiUygula(ctx context.Context) error {
 	ctx, iptal := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer iptal()
 	kapiMu.Lock()
-	acilabilir := kapiUzlastir(time.Now().Unix())
+	acilabilir, uygulandi := kapiUzlastirDetay(time.Now().Unix())
 	kapiMu.Unlock()
 	if !acilabilir {
 		kapiZorlamaYaz(false, "uzlaştırma")
-		return errors.New("nginx kapı ayarına uyumlanamadı — kapı kuralları devre dışı (panel günlüğüne bakın)")
+		if uygulandi {
+			return &kapi.UygulamaHatasi{Uygulandi: true, Mesaj: "değişiklik nginx'e uygulandı ama kapı zinciri kurulamadı — kapı kuralları devre dışı (panel günlüğüne bakın)"}
+		}
+		return &kapi.UygulamaHatasi{Mesaj: "nginx kapı ayarına uyumlanamadı — kapı kuralları devre dışı (panel günlüğüne bakın)"}
 	}
-	kapiOlcVeAyarla(ctx, 3)
-	if !kapi.ZorlamaAktif() {
-		return errors.New("kapı zinciri ölçülemedi — kapı kuralları devre dışı (panel günlüğüne bakın)")
+	switch kapiOlcVeAyarla(ctx, 3) {
+	case olcumTamam:
+		return nil
+	case olcumBelirsiz:
+		select {
+		case kapiYenidenOlc <- struct{}{}:
+		default:
+		}
+		return &kapi.UygulamaHatasi{Uygulandi: true, Mesaj: "kapı zinciri şu an ölçülemedi (geçici hata) — kapı kuralları önceki durumunda; ölçüm kısa aralıkla yinelenecek"}
+	default:
+		return &kapi.UygulamaHatasi{Uygulandi: true, Mesaj: "kapı zinciri ölçülemedi — kapı kuralları devre dışı (panel günlüğüne bakın)"}
 	}
-	return nil
 }
 
 // kapiUzlastir: nginx'i ayara getirir. Dönüş: zorlama açılabilir mi (ayar geçerli,
 // proxy gizlisi kurulu, gizli-bağlı başlık her çapada, nginx doğrulandı).
 func kapiUzlastir(simdi int64) bool {
+	acilabilir, _ := kapiUzlastirDetay(simdi)
+	return acilabilir
+}
+
+// kapiUzlastirDetay: kapiUzlastir + değişikliğin nginx'e UYGULANIP uygulanmadığı (aşama 1
+// yazıldı ve yüklendi mi). Arayüz "uygulandı ama doğrulanamadı" ile "hiç uygulanamadı
+// (nginx eski hâlinde)" durumlarını bununla ayırır.
+func kapiUzlastirDetay(simdi int64) (acilabilir, uygulandi bool) {
 	origB, err := os.ReadFile(kapiVhostYolu)
 	if err != nil {
-		return false // panel bu host'ta kurulu değil
+		return false, false // panel bu host'ta kurulu değil
 	}
 	orig := string(origB)
 	a, err := kapi.Oku(kapiAyarYolu)
@@ -203,14 +223,14 @@ func kapiUzlastir(simdi int64) bool {
 			log.Printf("🔴 kapi: %v — kapı modu KAPALI kalıyor (eski davranış)", err)
 		}
 		kapiKapaliTemizle(orig)
-		return false
+		return false, false
 	}
 	// Başlık değeri gizliyi taşır (kapi.KapiSatiri); gizli yoksa kapı kanıtlanamaz.
 	// Hiçbir dosyaya dokunulmaz: yarım uygulanmış kapı düzeni, uygulanmamıştan kötüdür.
 	gizli := kapiProxyGizli()
 	if gizli == "" {
 		log.Printf("🔴 kapi: proxy gizlisi kurulu değil — kapı başlığı yazılamaz, zorlama KAPALI")
-		return false
+		return false, false
 	}
 
 	// Kapı portları listen'a yazılmadan ÖNCE SELinux'ta http_port_t olmalı (bkz.
@@ -219,26 +239,42 @@ func kapiUzlastir(simdi int64) bool {
 	etiketTamam, yeniEtiket := kapiPortlariEtiketle(portlar)
 	if !etiketTamam {
 		log.Printf("🔴 kapi: SELinux Enforcing ve kapı portları http_port_t yapılamadı — nginx'e YAZILMADI (restart'ta açılmazdı), zorlama KAPALI")
-		return false
+		return false, false
+	}
+	if kapiDisaridanEtiketlendi() {
+		yeniEtiket = true
 	}
 
 	// ── Aşama 1: EKLEYİCİ ──────────────────────────────────────────────
 	yeni, err := kapi.Uzlastir(orig, a, simdi, kapi.Secenek{Gizli: gizli, AdminLoopback: kapiMasaustu()})
 	if err != nil {
 		log.Printf("🔴 kapi: _panel.conf uzlaştırılamadı: %v — zorlama KAPALI", err)
-		return false
+		return false, false
 	}
+	// Harita silinmiş ama vhost hâlâ $gp_kapi'ye atıf yapıyorsa `nginx -t` GLOBAL düşer;
+	// taban kontrolü onarımı engellemesin diye harita yazımı onarım sayılır.
+	_, haritaErr := os.Stat(kapiMapYolu)
+	haritaOnarim := errors.Is(haritaErr, os.ErrNotExist) && strings.Contains(orig, "$gp_kapi")
 	dosyalar := append([]nginxDosya{
 		{yol: kapiVhostYolu, eski: origB, yeni: []byte(yeni)},
-		kapiMapDosyasi(kapi.MapIcerigi(a, simdi, kapi.YerelPortlar(yeni, a, simdi))),
+		kapiMapDosyasi(kapi.MapIcerigi(a, simdi, kapi.YerelPortlar(yeni, a, simdi)), haritaOnarim),
 	}, kapiYanDosyalar(yeni, a)...)
 	// Yeni etiketlenen port: dosyalar değişmese de reload gerekir (önceden bind edilemeyen
 	// port şimdi bağlansın).
 	if !kapiNginxUygula(dosyalar, portlar, yeniEtiket) {
-		return false
+		return false, false
 	}
 	kapiVhostIzin() // yeniden yazılan dosya da 0640 root:nginx kalsın
 	kapiFwRolPortlariniAc(yeni, a, simdi)
+
+	// Bayi/müşteri kapısı dışarıda dinlenmiyorsa (yalnız loopback izi olan porta atanmış —
+	// ör. elle düzenlenmiş kapi.json) eski/beklenmeyen genel portları KALDIRMA: o rolün
+	// kullanıcılarının son yolu olabilir. Kapı kanıtlı ama dışarıdan erişilemez → zorlama da
+	// açılmaz (eski davranış, kilitlenme yok).
+	if kapali := kapiDisaKapaliRoller(yeni, a); len(kapali) > 0 {
+		log.Printf("🔴 kapi: %s kapısı dışarıda dinlenmiyor (yalnız loopback izi) — kaldırma yapılmadı, zorlama KAPALI", strings.Join(kapali, ", "))
+		return false, true
+	}
 
 	// ── Aşama 2: KALDIRMA (korumalı) ───────────────────────────────────
 	son := yeni
@@ -252,7 +288,7 @@ func kapiUzlastir(simdi int64) bool {
 		if kaldirilmis, silinen := kapi.GenelListenKaldir(yeni, tut); len(silinen) > 0 {
 			d := append([]nginxDosya{
 				{yol: kapiVhostYolu, eski: []byte(yeni), yeni: []byte(kaldirilmis)},
-				kapiMapDosyasi(kapi.MapIcerigi(a, simdi, kapi.YerelPortlar(kaldirilmis, a, simdi))),
+				kapiMapDosyasi(kapi.MapIcerigi(a, simdi, kapi.YerelPortlar(kaldirilmis, a, simdi)), false),
 			}, kapiYanDosyalar(kaldirilmis, a)...)
 			if kapiNginxUygula(d, portlar, false) {
 				kapiVhostIzin()
@@ -288,9 +324,23 @@ func kapiUzlastir(simdi int64) bool {
 
 	if !kapi.BaslikTamMi(son, gizli) {
 		log.Printf("🔴 kapi: kapı başlığı her proxy location'ında değil — zorlama KAPALI")
-		return false
+		return false, true
 	}
-	return true
+	return true, true
+}
+
+// kapiDisaKapaliRoller: conf'ta GENEL dinlenmeyen bayi/müşteri kapıları ("bayi :P").
+// Yönetici kapısı sayılmaz: masaüstü modunda (ve operatörün erisim ile kapattığı web
+// modunda) yalnız loopback'te dinlemesi bilinçlidir.
+func kapiDisaKapaliRoller(conf string, a *kapi.Ayar) []string {
+	genel := kapi.GenelPortlar(conf)
+	var out []string
+	for _, rol := range []string{kapi.Bayi, kapi.Musteri} {
+		if p := a.RolPortu(rol); !slices.Contains(genel, p) {
+			out = append(out, fmt.Sprintf("%s :%d", rol, p))
+		}
+	}
+	return out
 }
 
 // kapiKapaliTemizle: kapı modu kapalıyken kapı izlerini temizler. Hiç iz yoksa
@@ -303,7 +353,9 @@ func kapiKapaliTemizle(conf string) {
 	if temiz == conf && mapErr != nil {
 		return
 	}
-	d := []nginxDosya{{yol: kapiVhostYolu, eski: []byte(conf), yeni: []byte(temiz)}}
+	// Harita silinmiş ama başlık satırları $gp_kapi'ye atıf yapıyorsa `nginx -t` zaten
+	// düşüktür: satırları kaldırmak onarımdır (taban kontrolü engellemesin).
+	d := []nginxDosya{{yol: kapiVhostYolu, eski: []byte(conf), yeni: []byte(temiz), onarim: mapErr != nil}}
 	if mapErr == nil {
 		// Map kalır ama boş varsayılanla: $gp_kapi tanımlı kalsın (başka bir yerde
 		// atıf kalmışsa `nginx -t` global düşmesin).
@@ -316,18 +368,21 @@ func kapiKapaliTemizle(conf string) {
 
 // nginxDosya: uygulanacak bir nginx dosya değişikliği. eski == nil → dosya yoktu.
 // ozel: dosya yazıldıktan sonra kapiOzelIzin ile 0640 root:nginx yapılır.
+// onarim: bu değişiklik ÖNCEDEN bozuk bir `nginx -t`'yi düzeltmesi beklenen onarımdır
+// (silinmiş kapı haritası) — taban kontrolü onu engellemez; yazımdan sonraki `nginx -t`
+// yine geçmezse her şey geri alınır.
 type nginxDosya struct {
-	yol        string
-	eski, yeni []byte
-	ozel       bool
+	yol          string
+	eski, yeni   []byte
+	ozel, onarim bool
 }
 
-func kapiMapDosyasi(icerik string) nginxDosya {
+func kapiMapDosyasi(icerik string, onarim bool) nginxDosya {
 	eski, err := os.ReadFile(kapiMapYolu)
 	if err != nil {
 		eski = nil
 	}
-	return nginxDosya{yol: kapiMapYolu, eski: eski, yeni: []byte(icerik), ozel: true}
+	return nginxDosya{yol: kapiMapYolu, eski: eski, yeni: []byte(icerik), ozel: true, onarim: onarim}
 }
 
 // kapiYanDosyalar: panel vhost'u conf olacakken onunla BİRLİKTE uyumlanması gereken
@@ -397,8 +452,11 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 		return true
 	}
 	if o, e := kapiNginxKomut("nginx", "-t"); e != nil {
-		log.Printf("🔴 kapi: nginx -t değişiklikten ÖNCE zaten başarısız — uygulanmadı: %s", kirpKapi(o))
-		return false
+		if !slices.ContainsFunc(degisen, func(d nginxDosya) bool { return d.onarim }) {
+			log.Printf("🔴 kapi: nginx -t değişiklikten ÖNCE zaten başarısız — uygulanmadı: %s", kirpKapi(o))
+			return false
+		}
+		log.Printf("kapi: nginx -t değişiklikten önce başarısız (silinmiş kapı haritası?) — onarım deneniyor: %s", kirpKapi(o))
 	}
 	geriAl := func() {
 		for _, d := range degisen {
@@ -508,41 +566,100 @@ func KapiDogrulaBaslat(ctx context.Context, aralik time.Duration) {
 				log.Printf("🔴 kapi bakım döngüsü panikledi, durduruldu: %v", r)
 			}
 		}()
-		kapiOlcVeAyarla(ctx, 20)
-		t := time.NewTicker(aralik)
-		defer t.Stop()
+		sonuc := kapiOlcVeAyarla(ctx, 20)
+		ardisik := 0
 		for {
+			if sonuc == olcumTamam {
+				ardisik = 0
+			} else {
+				ardisik++
+			}
+			bekle := aralik
+			if sonuc != olcumTamam && kapiModuVar() {
+				bekle = kapiGeriCekilme(ardisik, aralik)
+			}
+			t := time.NewTimer(bekle)
 			select {
 			case <-ctx.Done():
+				t.Stop()
 				return
+			case <-kapiYenidenOlc:
+				// Panelden uygulanan değişiklik ölçülemedi: tam aralığı bekleme, kısa
+				// geri çekilmeyle yeniden dene.
+				t.Stop()
+				sonuc, ardisik = olcumBelirsiz, 0
+				continue
 			case <-t.C:
-				kapiMu.Lock()
-				acilabilir := kapiUzlastir(time.Now().Unix())
-				kapiMu.Unlock()
-				if !acilabilir {
-					kapiZorlamaYaz(false, "uzlaştırma")
-					continue
-				}
-				kapiOlcVeAyarla(ctx, 3)
 			}
+			kapiMu.Lock()
+			acilabilir := kapiUzlastir(time.Now().Unix())
+			kapiMu.Unlock()
+			if !acilabilir {
+				kapiZorlamaYaz(false, "uzlaştırma")
+				sonuc = olcumKopuk
+				continue
+			}
+			sonuc = kapiOlcVeAyarla(ctx, 3)
 		}
 	}()
+}
+
+// kapiYenidenOlc: bakım döngüsüne "kısa aralıkla yeniden ölç" dürtüsü (KapiSimdiUygula'nın
+// ölçümü belirsiz kaldığında). Tamponlu: dürtü kaybolmaz, birikmez.
+var kapiYenidenOlc = make(chan struct{}, 1)
+
+// kapiModuVar: kapi.json var mı? Kapı modu yapılandırılmamış sunucuda (geçiş yapılmamış,
+// masaüstü modunda atlanmış) bakım döngüsü kısa aralığa GEÇMEZ.
+func kapiModuVar() bool {
+	_, err := os.Stat(kapiAyarYolu)
+	return err == nil
+}
+
+// kapiGeriCekilme: zorlama kapalıyken ya da ölçüm belirsizken bir sonraki deneme — rol
+// ayrımı devre dışı ya da doğrulanmamış; 15 dakika beklemek fail-open penceresini uzatırdı.
+// 1 dk'dan başlar, her ardışık başarısızlıkta ikiye katlanır, en çok aralik.
+func kapiGeriCekilme(ardisik int, aralik time.Duration) time.Duration {
+	d := time.Minute
+	for i := 1; i < ardisik && d < aralik; i++ {
+		d *= 2
+	}
+	if d > aralik {
+		d = aralik
+	}
+	return d
 }
 
 // kapiOlcMu: ölçümler SIRAYLA koşar ve ayarı kilit altında okur — eşzamanlı iki ölçümden
 // bayat ayarla başlayanın sonucu, tazesininkini ezemez (son koşan en güncel ayarı ölçer).
 var kapiOlcMu sync.Mutex
 
+// olcumSonucu: bir ölçüm turunun sonucu.
+type olcumSonucu int
+
+const (
+	olcumTamam    olcumSonucu = iota // üç kapı da kanıtlı ve beklenen tipte → zorlama AÇIK
+	olcumKopuk                       // kesin başarısızlık → zorlama KAPALI
+	olcumBelirsiz                    // geçici hata ya da kesinti → zorlama DEĞİŞMEDİ
+)
+
+// errOlcumBelirsiz: ölçüm SONUÇ VERMEDİ (geçici: 429/502/503/504, zaman aşımı, bağlantı
+// kopması). Zincirin kopuk olduğunu KANITLAMAZ: aynı kutudaki yetkisiz bir süreç panelin
+// 127.0.0.1 için IP-başı bağlantı sınırını doldurarak ölçümü düşürebilir — bunu "kopuk"
+// saymak, rol ayrımını dışarıdan kapattırma (fail-open) yolu olurdu. Kesin olanlar:
+// bağlantı reddi (portta dinleyen yok), kanıtı tutmayan ya da beklenmeyen yanıt.
+var errOlcumBelirsiz = errors.New("ölçüm belirsiz (geçici hata)")
+
 // kapiOlcVeAyarla: üç rol portunu da ölçer; YALNIZ hepsi beklenen tipi kanıtlı olarak
-// dönerse zorlama açık kalır/açılır. deneme: backend henüz dinlemiyorsa kaç kez denensin.
-// Bağlam iptal edilirse (kapanış) sonuç kesin değildir: zorlama DEĞİŞTİRİLMEZ.
-func kapiOlcVeAyarla(ctx context.Context, deneme int) {
+// dönerse zorlama açık kalır/açılır, kesin bir başarısızlıkta kapanır. deneme: backend
+// henüz dinlemiyorsa kaç kez denensin. Belirsiz sonuç ya da bağlam iptali (kapanış,
+// istemci kopması) zorlamayı DEĞİŞTİRMEZ.
+func kapiOlcVeAyarla(ctx context.Context, deneme int) olcumSonucu {
 	kapiOlcMu.Lock()
 	defer kapiOlcMu.Unlock()
 	a, err := kapi.Oku(kapiAyarYolu)
 	if err != nil {
 		kapiZorlamaYaz(false, "ayar yok")
-		return
+		return olcumKopuk
 	}
 	beklenen := []struct {
 		port      int
@@ -552,15 +669,20 @@ func kapiOlcVeAyarla(ctx context.Context, deneme int) {
 		tip, err := kapiTipOlcucu(ctx, b.port, b.kapi, deneme)
 		if ctx.Err() != nil {
 			log.Printf("kapi: ölçüm yarıda kesildi (%v) — zorlama değiştirilmedi", ctx.Err())
-			return
+			return olcumBelirsiz
+		}
+		if errors.Is(err, errOlcumBelirsiz) {
+			log.Printf("kapi: ölçüm :%d belirsiz (%v) — zorlama değiştirilmedi, kısa aralıkla yinelenecek", b.port, err)
+			return olcumBelirsiz
 		}
 		if err != nil || tip != b.tip {
 			log.Printf("🔴 kapi: ölçüm :%d beklenen=%s alınan=%q hata=%v — zorlama KAPALI (eski davranış)", b.port, b.tip, tip, err)
 			kapiZorlamaYaz(false, "ölçüm")
-			return
+			return olcumKopuk
 		}
 	}
 	kapiZorlamaYaz(true, "ölçüm")
+	return olcumTamam
 }
 
 // kapiZorlamaDosyasi: zorlama durumunun sistem araçlarına yansıması ("acik" | "kapali").
@@ -625,7 +747,11 @@ func kapiTipOlc(ctx context.Context, port int, kapiAdi string, deneme int) (stri
 		req.Header.Set(kapi.OlcumBaslik, nonce)
 		resp, err := istemci.Do(req)
 		if err != nil {
-			son = err
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				son = err // kesin: portta dinleyen yok
+			} else {
+				son = fmt.Errorf("%w: %v", errOlcumBelirsiz, err) // zaman aşımı, kopma
+			}
 			continue
 		}
 		var v struct {
@@ -635,6 +761,10 @@ func kapiTipOlc(ctx context.Context, port int, kapiAdi string, deneme int) (stri
 		derr := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&v)
 		resp.Body.Close()
 		switch {
+		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout:
+			// Aşırı yük / sınır (limit_conn 503) / backend henüz ayakta değil: sonuç yok.
+			son = fmt.Errorf("%w: HTTP %d", errOlcumBelirsiz, resp.StatusCode)
 		case resp.StatusCode != http.StatusOK || derr != nil:
 			son = fmt.Errorf("HTTP %d", resp.StatusCode)
 		case !hmac.Equal([]byte(v.Kanit), []byte(kapi.OlcumKaniti(gizli, nonce, kapiAdi, port))):
