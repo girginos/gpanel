@@ -232,7 +232,7 @@ export default function PortYonetimPage() {
 
           <div className="mx-auto max-w-2xl">
             {durum.kapi ? (
-              <PanelKapilari kapi={durum.kapi} onDegisti={() => void yukle()} />
+              <PanelKapilari kapi={durum.kapi} onDegisti={yukle} />
             ) : (
             <form onSubmit={disUygula} className="rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
               <h2 className="mb-1 text-base font-semibold">{cevir("Dış SSL portu")}</h2>
