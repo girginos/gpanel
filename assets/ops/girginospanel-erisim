@@ -303,12 +303,23 @@ dis_ip() {
 }
 
 cmd_durum() {
-  local port sshp be
+  local port sshp be kapi=0 zorlama_acik=0
   port=$(panel_portu); sshp=$(ssh_portu); be=$(fw_backend)
   say "${c_b}GirginOSPanel erişim durumu${c_0}"
   if [ -n "$(kapi_portu admin)" ]; then
+    kapi=1
     say "  rol kapıları    : admin $port · bayi $(kapi_portu bayi) · müşteri $(kapi_portu musteri) (bayi/müşteri bu moddan etkilenmez)"
     [ -n "$(kapi_eski_portlari)" ] && warn "eski kapı açık: $(kapi_eski_portlari)— yönetici girişi oradan da mümkün"
+    # 🔴 SON-OPS-5: kapı modunda "masaustu" sonucu zorlamaya BAĞLI — zorlama kapalıyken
+    # bayi/müşteri/eski kapıların her biri yönetici girişini de kabul eder (RK-OPS-06).
+    if kapi_zorlama_olc; then
+      zorlama_acik=1
+      ok "kapı zorlaması  : AÇIK (ölçüldü: $KAPI_ZORLAMA_OLCUM)"
+    elif [ "$KAPI_ZORLAMA_DURUM" = "kapali" ]; then
+      warn "kapı zorlaması  : KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir ($KAPI_ZORLAMA_OLCUM)"
+    else
+      warn "kapı zorlaması  : ÖLÇÜLEMEDİ — rol ayrımı doğrulanmadı ($KAPI_ZORLAMA_OLCUM)"
+    fi
   fi
   say "  panel portu     : $port"
   say "  SSH portu       : $sshp"
@@ -329,7 +340,13 @@ cmd_durum() {
   fi
   # 3) gerçek sonuç
   if nginx_loopback_mi "$port" || ! port_acik_mi "$port"; then
-    ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+    if [ "$kapi" = 0 ]; then
+      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+    elif [ "$zorlama_acik" = 1 ]; then
+      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (yönetici yüzeyine yalnız SSH tüneliyle girilir; bayi/müşteri kapıları açık — zorlama ölçüldü)"
+    else
+      warn "SONUÇ → mod: ${c_b}masaustu${c_0} (yalnız admin kapısı loopback'te; zorlama KAPALI/ölçülemedi — yönetici girişi bayi/müşteri/eski kapılarda açık olabilir)"
+    fi
   else
     ok "SONUÇ → mod: ${c_b}web${c_0} (tarayıcıdan girilebilir)"
   fi
