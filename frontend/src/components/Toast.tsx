@@ -14,6 +14,8 @@ import type { ReactNode } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
+import { Ikon } from './Ikon'
+import { TONLAR, tonSinifi, type Ton } from './tonlar'
 
 const TOAST_EN: Record<string, string> = {
   'Kapat': 'Close',
@@ -57,11 +59,14 @@ const SURE: Record<ToastTip, number> = {
   hata: 6800, // hata okunacak kadar dursun
 }
 
+// Renk + ikon diyalog/modal/uyarı kutusuyla AYNI ton haritasından (tonlar.ts). Beyaz metin
+// okunsun diye uyarı ve hata tonun koyu adımında.
+const TON: Record<ToastTip, Ton> = { basari: 'basari', hata: 'tehlike', uyari: 'uyari', bilgi: 'bilgi' }
 const RENK: Record<ToastTip, string> = {
-  basari: 'bg-emerald-600',
-  hata: 'bg-rose-600',
-  uyari: 'bg-amber-500',
-  bilgi: 'bg-blue-600',
+  basari: `${tonSinifi('basari')} bg-this`,
+  hata: `${tonSinifi('tehlike')} bg-this-darker`,
+  uyari: `${tonSinifi('uyari')} bg-this-darker`,
+  bilgi: `${tonSinifi('bilgi')} bg-this`,
 }
 
 export function ToastSaglayici({ children }: { children: ReactNode }) {
@@ -117,7 +122,7 @@ function ToastSatir({ kayit, kapat }: { kayit: ToastKaydi; kapat: () => void }) 
       }`}
     >
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/15">
-        <Ikon tip={kayit.tip} />
+        <Ikon d={TONLAR[TON[kayit.tip]].ikon} className="h-5 w-5" />
       </span>
 
       {/* 🔴 Metin KIRPILMAZ, SARAR: başlık `truncate` idi ve tek satıra sığmayan
@@ -147,13 +152,3 @@ function ToastSatir({ kayit, kapat }: { kayit: ToastKaydi; kapat: () => void }) 
   )
 }
 
-function Ikon({ tip }: { tip: ToastTip }) {
-  const p = tip === 'basari' ? 'M20 6L9 17l-5-5'
-    : tip === 'hata' ? 'M12 8v5M12 16.5h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z'
-      : tip === 'uyari' ? 'M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z'
-        : 'M12 16v-5M12 8h.01M12 21a9 9 0 100-18 9 9 0 000 18z'
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={tip === 'basari' ? 2.8 : 1.9}
-      strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true"><path d={p} /></svg>
-  )
-}

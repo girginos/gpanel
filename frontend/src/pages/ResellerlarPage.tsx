@@ -160,7 +160,7 @@ export default function ResellerlarPage() {
   }
 
   async function sil(x: Reseller) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}`, ton: 'tehlike' }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/resellers/${x.id}`); setOk(cevir('Bayi silindi.')); toast.basari(cevir('Bayi silindi.')); yukle() }
     catch (err) {

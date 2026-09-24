@@ -86,7 +86,7 @@ export default function DomainSubdomainlerPage() {
   }
 
   async function sil(s: Sub) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz."), s.tam_ad), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz."), s.tam_ad), ton: 'tehlike' }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/subdomain/${s.id}`); yukle() }
     catch (err) {

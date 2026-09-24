@@ -604,7 +604,7 @@ export default function DomainDNSPage() {
         acik={!!silinecek}
         baslik={cevir("DNS kaydını sil")}
         mesaj={cevirT(cevir("\"{0} {1} {2}\" silinsin mi?"), silinecek?.ad, silinecek?.tip, silinecek?.deger.slice(0,40))}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
@@ -614,7 +614,7 @@ export default function DomainDNSPage() {
         acik={topluSilOnay}
         baslik={cevir("Seçili DNS kayıtlarını sil")}
         mesaj={cevirT(cevir("{0} DNS kaydı kalıcı olarak silinecek. Bu işlem geri alınamaz. Devam edilsin mi?"), secili.size)}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevirT(cevir("Evet, {0} kaydı sil"), secili.size)}
         onOnay={topluSil}
         onIptal={() => setTopluSilOnay(false)}
@@ -624,7 +624,7 @@ export default function DomainDNSPage() {
         acik={dnssecKapatOnay}
         baslik={cevir("DNSSEC'i kapat")}
         mesaj={cevir("ÖNEMLİ: DNSSEC'i kapatmadan ÖNCE alan adı operatörünüzden (registrar) DS kaydını SİLİN ve TTL süresi kadar bekleyin. Aksi halde alan adınız çözümlenemez hale gelir (SERVFAIL). DS kaydını sildiyseniz devam edin.")}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("DS'i sildim, kapat")}
         onOnay={() => dnssecDegistir(false)}
         onIptal={() => setDnssecKapatOnay(false)}

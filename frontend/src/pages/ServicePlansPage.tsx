@@ -184,7 +184,7 @@ export default function ServicePlansPage() {
         acik={!!silinecek}
         baslik={cevir("Planı sil")}
         mesaj={`"${silinecek?.ad}" ${cevir("planı silinsin mi?")}`}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}

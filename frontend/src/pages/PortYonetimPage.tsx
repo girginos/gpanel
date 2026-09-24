@@ -10,6 +10,7 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import PanelKapilari, { type KapiDurum } from '@/components/PanelKapilari'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Port Değiştirme — admin only.
@@ -74,7 +75,7 @@ const PORT_EN: Record<string, string> = {
   "Port değişikliği devam ediyor:": "Port change in progress:",
   "Yasaklı portlar": "Banned ports",
   "sistem": "system",
-  "🔴 UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir.": "🔴 WARNING: After the change the panel address becomes https://server:{0}. Your current tab will break. If curl-verify fails it is AUTOMATICALLY REVERTED. The panel AUTOMATICALLY opens the new port in the firewall and AUTOMATICALLY removes the old one. The cloud provider firewall (Hetzner Cloud etc.) is a separate layer — you must open it there manually.",
+  "UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir.": "WARNING: After the change the panel address becomes https://server:{0}. Your current tab will break. If curl-verify fails it is AUTOMATICALLY REVERTED. The panel AUTOMATICALLY opens the new port in the firewall and AUTOMATICALLY removes the old one. The cloud provider firewall (Hetzner Cloud etc.) is a separate layer — you must open it there manually.",
   "Dış SSL portu {0} → {1} olsun mu?": "Change external SSL port {0} → {1}?",
   "örn. {0}": "e.g. {0}",
   "Curl-verify sadece": "Curl-verify is only run from",
@@ -89,7 +90,7 @@ const PORT_EN: Record<string, string> = {
   "başarısız": "failed",
   "geri alındı": "reverted",
   "İstek başarısız": "Request failed",
-  "🔴 Firewall + lockout uyarısı": "🔴 Firewall + lockout warning",
+  "Firewall + lockout uyarısı": "Firewall + lockout warning",
   "İşlem başarısız": "Operation failed",
   "Panele rol başına ayrı portlardan girilir: yönetici, bayi ve müşteri.": "The panel is reached on a separate port per role: administrator, reseller and customer.",
   "Dış port": "External port",
@@ -163,8 +164,8 @@ export default function PortYonetimPage() {
     if (!p) return
     const ok = await dialog.onay({
       baslik: cevirT(cevir("Dış SSL portu {0} → {1} olsun mu?"), durum?.dis_port, p),
-      mesaj: cevirT(cevir("🔴 UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir."), p),
-      onayEtiketi: cevir("Uygula"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      mesaj: cevirT(cevir("UYARI: Değişiklik sonrası panel adresi https://sunucu:{0} olur. Mevcut sekmeniz kırılır. Curl-verify başarısız olursa OTOMATİK GERI ALINIR. Panel yeni portu firewall'da OTOMATİK açar, eski portu OTOMATİK siler. Bulut sağlayıcı FW (Hetzner Cloud vb.) ayrı katmandır — orayı elle açman gerekir."), p),
+      onayEtiketi: cevir("Uygula"), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike',
     })
     if (!ok) return
     setGonderiliyor('dis')
@@ -188,13 +189,12 @@ export default function PortYonetimPage() {
 
       <div className="mt-4 mb-6">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Port Değiştirme")}</h1>
-        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          <div className="font-medium">{cevir("🔴 Firewall + lockout uyarısı")}</div>
-          <ul className="mt-1 space-y-0.5 text-xs list-disc pl-5">
+        <UyariKutusu ton="uyari" baslik={cevir("Firewall + lockout uyarısı")} className="mt-3">
+          <ul className="list-disc space-y-0.5 pl-5 text-xs">
             <li>{cevir("Curl-verify sadece")} <code className="font-mono">127.0.0.1</code>{cevir("'dan yapılır — firewalld / nftables / Hetzner Cloud FW yeni portu engelliyorsa yerel test geçer, dışardan erişemezsiniz. Yeni port için firewall'ı ÖNCEDEN açın.")}</li>
             <li>{cevir("Bağlantı düşerse durum için: SSH'tan")} <code className="font-mono">journalctl -u girginospanel</code> {cevir("veya panel geri geldiğinde geçmiş tablosu.")}</li>
           </ul>
-        </div>
+        </UyariKutusu>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
           {durum?.kapi ? cevir("Panele rol başına ayrı portlardan girilir: yönetici, bayi ve müşteri.") : (
             <>

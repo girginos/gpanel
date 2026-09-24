@@ -264,7 +264,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
     if (!(await onay({
       baslik: cevir("Emin misiniz?"),
       mesaj: cevirT(cevir("\"{0}\" değişikliğini geri al?\n\nServis {1} edilecek."), ozet, analiz.kod === 'mariadb' ? 'RESTART' : 'RELOAD'),
-      tehlike: true,
+      ton: 'tehlike',
     }))) return
     setGeriAlId(yedekID)
     try {

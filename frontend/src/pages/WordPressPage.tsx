@@ -128,7 +128,7 @@ export default function WordPressPage() {
     const _msj = _kok
       ? cevirT(cevir("{0} kök dizinindeki WordPress kaldırılsın mı?\nWordPress dosyaları ve veritabanı silinir; dizin ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz."), t.alan_adi)
       : cevirT(cevir("{0}{1} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz."), t.alan_adi, t.dizin)
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: _msj, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: _msj, ton: 'tehlike' }))) return
     const key = t.domain_id + t.dizin
     setMesgul(key); setHata(null)
     try {

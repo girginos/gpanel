@@ -112,7 +112,7 @@ export default function DomainMailAliasPage() {
   }
 
   async function sil(a: Alias) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?"), a.kaynak, a.hedef), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?"), a.kaynak, a.hedef), ton: 'tehlike' }))) return
     setIsleniyor(true); setHata(null)
     try {
       await api.delete(`/eklenti/mail/aliaslar/${a.id}`)

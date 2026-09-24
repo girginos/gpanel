@@ -221,7 +221,7 @@ export default function PanelHostPage() {
       const yine = await dialog.onay({
         baslik: cevir("DNS eşleşmiyor"),
         mesaj: cevir("Hostname bu sunucuya çözülmüyor. Yine de deneyeyim mi? (Betik kilitlenmeyi önlemek için değişikliği REDDEDECEK.)"),
-        onayEtiketi: cevir("Yine de dene"), tehlike: true,
+        onayEtiketi: cevir("Yine de dene"), ton: 'tehlike',
       })
       if (!yine) return
     }

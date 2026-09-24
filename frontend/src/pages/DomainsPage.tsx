@@ -459,7 +459,7 @@ export default function DomainsPage() {
     if (tip === 'dns_reset' && !(await onay({
       baslik: cevir("DNS kayıtları sıfırlansın mı?"),
       mesaj: cevirT(cevir("{0} domainin TÜM DNS kayıtları silinip şablondan yeniden oluşturulacak. Özel kayıtlar (MX, TXT, doğrulama kayıtları) KAYBOLUR."), ids.length),
-      tehlike: true,
+      ton: 'tehlike',
     }))) return
     try {
       const { data } = await api.post<{ is_id: number }>('/domains/toplu/is', { tip, ids, ...(ek || {}) })

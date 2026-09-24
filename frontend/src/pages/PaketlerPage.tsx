@@ -237,7 +237,7 @@ export default function PaketlerPage() {
     finally { setIsleniyor(null) }
   }
   async function kaldir(paket: string) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`, ton: 'tehlike' }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kaldir', { paket })

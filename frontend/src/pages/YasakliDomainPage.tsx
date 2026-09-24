@@ -228,7 +228,7 @@ export default function YasakliDomainPage() {
     const ok = await dialog.onay({
       baslik: cevirT(cevir("{0} kaydı sil?"), kumeArr.length),
       mesaj: cevirT(cevir("Seçili {0} alan adı yasak listesinden kaldırılacak. Bu alan adlarına YENİ vhost açılışına yeniden izin verilecek. Mevcut siteler etkilenmez."), kumeArr.length),
-      onayEtiketi: cevir('Sil'), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      onayEtiketi: cevir('Sil'), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike',
     })
     if (!ok) return
     setSiliniyor(true)
@@ -264,7 +264,7 @@ export default function YasakliDomainPage() {
     const ok = await dialog.onay({
       baslik: cevirT(cevir("{0}{1} yasağını kaldır?"), k.domain, kapsam),
       mesaj: cevir("Bu alan adına ve alt-domainlerine YENİ vhost açılışına yeniden izin verilecek. Mevcut domainler etkilenmez."),
-      onayEtiketi: cevir("Kaldır"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      onayEtiketi: cevir("Kaldır"), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike',
     })
     if (!ok) return
     try {

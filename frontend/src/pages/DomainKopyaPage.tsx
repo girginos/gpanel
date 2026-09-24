@@ -55,7 +55,7 @@ export default function DomainKopyaPage() {
   }
 
   async function sil(k: Kopya) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, tehlike: true }))) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, ton: 'tehlike' }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/kopya/${k.ad}`); yukle() }
     catch (e) { const m = apiHata(e, 'Silinemedi'); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }

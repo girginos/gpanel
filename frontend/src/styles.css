@@ -144,8 +144,10 @@ html.dark body {
   .btn-base {
     @apply inline-flex cursor-pointer items-center justify-center text-center font-medium tracking-wide outline-hidden transition-all duration-200 focus:outline-hidden disabled:cursor-not-allowed disabled:select-none focus-visible:ring-2 focus-visible:ring-primary-600/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-primary-400/60 dark:focus-visible:ring-offset-dark-800;
   }
+  /* Basma geri bildirimi: kısa bir "içe basılma" (yalnız etkin butonda; hareket
+     azaltma tercihinde yok). transition-all .btn-base'ten gelir. */
   .btn {
-    @apply rounded-lg px-5 py-2 disabled:opacity-70 dark:disabled:opacity-60;
+    @apply rounded-lg px-5 py-2 disabled:opacity-70 dark:disabled:opacity-60 enabled:active:scale-[.97] motion-reduce:transition-none motion-reduce:enabled:active:scale-100;
   }
 
   .badge-base, .tag-base {

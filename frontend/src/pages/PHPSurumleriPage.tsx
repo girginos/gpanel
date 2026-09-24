@@ -168,7 +168,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
       return
     }
     if (aktifOp) { (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.") })); return }
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("PHP {0} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?"), s.surum), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("PHP {0} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?"), s.surum), ton: 'tehlike' }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })

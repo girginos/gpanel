@@ -645,7 +645,7 @@ export default function EklentilerPage() {
       : cevirT(cevir('"{0}" lisansı kaldırılacak ve eklenti kapatılacak.'), k.ad) + '\n\n' +
         cevir('Posta kutularınız, alan adlarınız ve ayarlarınız SİLİNMEZ — lisansı tekrar girdiğinizde kaldığı yerden devam eder.')
     if (!(await onay({ baslik: cevir('Emin misiniz?'),
-      mesaj: govde + '\n\n' + cevir('Devam edilsin mi?'), tehlike: true }))) return
+      mesaj: govde + '\n\n' + cevir('Devam edilsin mi?'), ton: 'tehlike' }))) return
     setIslem(k.eklenti_ad); setIslemHata(null); setBasari(null)
     try {
       const { data } = await api.delete(`/eklenti/${k.eklenti_ad}/lisans`)

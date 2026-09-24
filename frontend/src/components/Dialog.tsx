@@ -9,15 +9,21 @@
 //
 // KULLANIM (hook, söz-tabanlı — native API ile birebir aynı akış):
 //   const { onay, sor, bilgi } = useDialog()
-//   if (!(await onay({ baslik: 'Silinsin mi?', mesaj: '…', tehlike: true }))) return
+//   if (!(await onay({ baslik: 'Silinsin mi?', mesaj: '…', ton: 'tehlike', onayIkonu: I.cop }))) return
 //   const p = await sor({ baslik: 'Yeni parola', tur: 'password' })  // iptal → null
-//   await bilgi({ baslik: 'Bitti', mesaj: '…' })
+//   await bilgi({ baslik: 'Bitti', mesaj: '…', ton: 'basari' })
+//
+// RENK TONDAN GELİR (tonlar.ts): onay/sor varsayılanı 'soru', bilgi varsayılanı 'bilgi'.
+// Kısmi başarı/geri alınabilir risk 'uyari', yıkıcı eylem ya da hata 'tehlike'.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
 import { Button } from './ui'
+import { I } from './Ikon'
+import { TONLAR, type Ton } from './tonlar'
+import { TonRozeti } from './UyariKutusu'
 
 const DIALOG_EN: Record<string, string> = {
   "Vazgeç": "Cancel",
@@ -33,7 +39,9 @@ interface OnaySecenek {
   mesaj?: ReactNode
   onayEtiketi?: string
   iptalEtiketi?: string
-  tehlike?: boolean
+  ton?: Ton
+  // onayIkonu — onay butonunun ikonu (vars. onay işareti; silmede I.cop vb.).
+  onayIkonu?: string
 }
 interface SorSecenek extends OnaySecenek {
   varsayilan?: string
@@ -66,17 +74,6 @@ export function useDialog(): DialogAPI {
     bilgi: async (s) => { window.alert([s.baslik, typeof s.mesaj === 'string' ? s.mesaj : ''].filter(Boolean).join('\n\n')) },
   }
 }
-
-const IkonUyari = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
-  </svg>
-)
-const IkonSoru = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-)
 
 export function DialogSaglayici({ children }: { children: ReactNode }) {
   useTranslation() // dil re-render aboneligi
@@ -126,7 +123,7 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
   }, [istek, deger])
 
   const s = istek?.secenek
-  const tehlike = !!s?.tehlike
+  const ton: Ton = s?.ton ?? (istek?.tur === 'bilgi' ? 'bilgi' : 'soru')
 
   return (
     <Ctx.Provider value={api}>
@@ -137,15 +134,10 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
           <div className="gosp-modal-in w-full max-w-md rounded-lg bg-white p-6 shadow-soft dark:bg-dark-700 dark:shadow-none"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 shrink-0 rounded-lg flex items-center justify-center ${
-                tehlike
-                  ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                  : 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300'}`}>
-                {tehlike ? <IkonUyari /> : <IkonSoru />}
-              </div>
+              <TonRozeti ton={ton} />
               <div className="min-w-0 flex-1">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{s.baslik}</h3>
-                {s.mesaj && <div className="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400 break-words">{s.mesaj}</div>}
+                <h3 className="text-base font-semibold text-gray-800 dark:text-dark-50">{s.baslik}</h3>
+                {s.mesaj && <div className="mt-1.5 break-words text-sm leading-relaxed text-gray-600 dark:text-dark-200">{s.mesaj}</div>}
               </div>
             </div>
 
@@ -156,17 +148,18 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
                 value={deger}
                 onChange={e => setDeger(e.target.value)}
                 placeholder={s.yerTutucu}
-                className="mt-4 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400"
+                className="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:border-primary-600 focus:outline-hidden dark:border-dark-450 dark:bg-dark-800 dark:text-dark-50 dark:focus:border-primary-500"
               />
             )}
 
-            <div className="mt-5 flex gap-2">
+            {/* Ortak modal alt çubuğu: mobilde ana eylem üstte, geniş ekranda sağa yaslı. */}
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               {istek.tur !== 'bilgi' && (
-                <Button variant="outlined" onClick={iptal} className="flex-1 px-4 py-2.5 text-sm">
+                <Button variant="outlined" onClick={iptal} ikon={I.kapat}>
                   {s.iptalEtiketi || cevir('Vazgeç')}
                 </Button>
               )}
-              <Button ref={onayRef} color={tehlike ? 'error' : 'primary'} onClick={tamam} className="flex-1 px-4 py-2.5 text-sm">
+              <Button ref={onayRef} color={TONLAR[ton].buton} onClick={tamam} ikon={s.onayIkonu ?? I.onay}>
                 {s.onayEtiketi || (istek.tur === 'bilgi' ? cevir('Tamam') : cevir('Onayla'))}
               </Button>
             </div>

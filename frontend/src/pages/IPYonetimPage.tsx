@@ -108,7 +108,7 @@ export default function IPYonetimPage() {
     const ok = await dialog.onay({
       baslik: cevir("{ip} silinsin mi?").replace('{ip}', s.ip),
       mesaj: cevir("Bu IP sunucudan kaldırılacak ({dev}/{cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.").replace('{dev}', s.iface).replace('{cidr}', String(s.cidr)),
-      onayEtiketi: cevir("Sil"), iptalEtiketi: cevir("Vazgeç"), tehlike: true,
+      onayEtiketi: cevir("Sil"), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike',
     })
     if (!ok) return
     try {

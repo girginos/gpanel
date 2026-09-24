@@ -305,7 +305,7 @@ export default function DomainFilesPage() {
   }
 
   async function sil(e: Entry) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: cevirT(cevir('"{0}" silinsin mi? Bu işlem geri alınamaz.'), e.adi), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: cevirT(cevir('"{0}" silinsin mi? Bu işlem geri alınamaz.'), e.adi), ton: 'tehlike' }))) return
     try {
       await api.delete(`${base}/files`, { params: { yol: e.yol } })
       setAgacYenileme(x => x + 1)

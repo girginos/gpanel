@@ -408,7 +408,7 @@ export default function MailKutuDetayPage() {
   }
   async function kutuSil() {
     if (!kutu) return
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?"), kutu.email), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?"), kutu.email), ton: 'tehlike' }))) return
     setIsleniyor(true); setHata(null)
     try { await api.delete(`/eklenti/mail/hesaplar/${kutu.id}`); navigate(`/abonelikler/${id}/mail/kutular`) }
     catch (e) { const m = apiHata(e, cevir("Silinemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setIsleniyor(false) }

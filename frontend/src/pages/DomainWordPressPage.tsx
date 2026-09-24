@@ -300,7 +300,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
     const msj = kok
       ? cevir("Kök dizindeki WordPress kaldırılsın mı?\nWordPress dosyaları (wp-admin, wp-includes, wp-content, wp-*.php) ve veritabanı silinir.\nDizinin kendisi ve sizin eklediğiniz diğer dosyalar korunur. Geri alınamaz.")
       : cevirT(cevir("{0} altındaki WordPress silinsin mi?\nBu dizindeki tüm dosyalar ve veritabanı kaldırılır. Geri alınamaz."), dizin)
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: msj, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: msj, ton: 'tehlike' }))) return
     setMesgul('sil'); setHata(null)
     try {
       // 🔴 Yanıt ATILMAMALI. Dosyalar silinse bile veritabanı

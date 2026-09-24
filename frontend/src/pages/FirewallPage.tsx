@@ -182,7 +182,7 @@ export default function FirewallPage() {
   useEffect(yukle, [])
 
   async function sablonUygula(s: typeof SABLONLAR[number]) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" şablonu uygulansın mı?\nKapatılacak port(lar): {1}\nBu portlara internetten erişim engellenir."), cevir(s.ad), s.portlar), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" şablonu uygulansın mı?\nKapatılacak port(lar): {1}\nBu portlara internetten erişim engellenir."), cevir(s.ad), s.portlar), ton: 'tehlike' }))) return
     setHata(null); setBasari(null); setMesgul('sablon:' + s.key)
     try {
       const { data } = await api.post('/firewall/sablon', { sablon: s.key })
@@ -220,7 +220,7 @@ export default function FirewallPage() {
 
   async function sil(k: Kural) {
     const ozet = k.tip === 'kapat' ? cevirT(cevir("port {0} kapatma"), k.port) : `${k.ip}${k.port ? ':' + k.port : ''} ${k.tip}`
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" kuralı silinsin mi?"), ozet), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" kuralı silinsin mi?"), ozet), ton: 'tehlike' }))) return
     setHata(null); setBasari(null); setMesgul('sil:' + k.id)
     try { await api.delete(`/firewall/${k.id}`); yukle() }
     catch (err) {

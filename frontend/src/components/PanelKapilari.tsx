@@ -8,6 +8,7 @@ import { useAuth } from '@/store/auth'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Badge, Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 /*
  * Panel kapıları (ADR-GP-001) — Port Yönetimi'nin kapı modu kartı.
@@ -220,7 +221,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
           ? cevir('Yönetici kapısı yalnız SSH tüneliyle erişilir: değişiklikten sonra masaüstü uygulamasında Panel portunu yeni porta çevirin.')
           : cevir('Bulut sağlayıcınızın güvenlik duvarı varsa yeni portu orada da açın.'),
       ].join(' '),
-      onayEtiketi: cevir('Portu değiştir'), iptalEtiketi: cevir('Vazgeç'), tehlike: rol !== 'admin',
+      onayEtiketi: cevir('Portu değiştir'), iptalEtiketi: cevir('Vazgeç'), ton: rol !== 'admin' ? 'tehlike' : 'soru',
     })
     if (!ok) return
     setMesgul(true)
@@ -245,7 +246,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
       if (uygulandi) toast.basari(cevir('Kapı portu değişti'), `${etiket}: ${d.eski_port} → ${d.yeni_port}`)
       if (!uygulandi) {
         // Kaydedildi ama nginx eski hâlinde: eski adresler çalışmaya devam eder.
-        await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: d.uyari || '' })
+        await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: d.uyari || '', ton: 'uyari' })
       } else if (d.uyari || !d.zorlama) {
         // Uygulandı ama kapı zinciri doğrulanamadı (zorlama kapalı → panel tek-port davranışında).
         // Bayi/müşteri için önceki port bu uzlaştırmada KAPANDI; yöneticinin eski portu geçiş
@@ -256,6 +257,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         await dialog.bilgi({
           baslik: cevir('Port değişti — kapı kuralları şu an doğrulanamadı'),
           mesaj: [d.uyari, ek].filter(Boolean).join(' '),
+          ton: 'uyari',
         })
       }
       if (uygulandi && d.zorlama && rol === 'admin') {
@@ -279,13 +281,13 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
       await dialog.bilgi({
         baslik: cevir('Yeni yönetici portu'),
         mesaj: `${cevirT(cevir('Masaüstü uygulamasında Panel portunu :{0} yapın.'), yeniPort)} ${cevir('Bu sekmedeki oturum sona erdi. Eski port, yeni porttan bir kez giriş yapana dek geçiş kapısı olarak açık kalır.')}`,
-        onayEtiketi: cevir('Oturumu kapat'),
+        onayEtiketi: cevir('Oturumu kapat'), ton: 'basari', onayIkonu: I.cikis,
       })
     } else {
       const git = await dialog.onay({
         baslik: cevir('Yeni yönetici adresi'),
         mesaj: `${cevir('Bu sekmedeki oturum sona erecek. Yeni adreste giriş yapın:')} ${yeni}`,
-        onayEtiketi: cevir('Yeni adrese git'), iptalEtiketi: cevir('Oturumu kapat'),
+        onayEtiketi: cevir('Yeni adrese git'), iptalEtiketi: cevir('Oturumu kapat'), ton: 'basari', onayIkonu: I.ileri,
       })
       if (git) {
         window.location.assign(yeni)
@@ -319,7 +321,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     try {
       const r = await api.post<{ uyari?: string }>('/portlar/kapi/uzat', { gun: g }, KAPI_ISTEK)
       toast.basari(cevir('Geçiş süresi uzatıldı'), `+${g} ${cevir('gün')}`)
-      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari })
+      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari, ton: 'uyari' })
       void onDegisti()
     } catch (e) {
       if (sonucBelirsiz(e)) await sonucuDogrula(false)
@@ -340,19 +342,19 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
       ? {
           baslik: cevir('Yönetici doğrulaması OLMADAN kapatılsın mı?'),
           mesaj: cevir('Yeni yönetici adresinden henüz hiç giriş yapılmadı. Sağlayıcınızın güvenlik duvarı yeni portu kesiyorsa eski adres de kapanınca panele HİÇ ulaşamazsınız (yalnız SSH ile düzeltilir). Emin değilseniz önce yeni adresten giriş yapın.') + rolUyarisi,
-          onayEtiketi: cevir('Zorla kapat'), iptalEtiketi: cevir('Vazgeç'), tehlike: true,
+          onayEtiketi: cevir('Zorla kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike',
         }
       : {
           baslik: cevir('Geçiş kapısı şimdi kapatılsın mı?'),
           mesaj: cevir('Eski adresi kullanmaya devam eden kullanıcılar panele o adresten ulaşamaz.') + rolUyarisi,
-          onayEtiketi: cevir('Kapat'), iptalEtiketi: cevir('Vazgeç'), tehlike: true,
+          onayEtiketi: cevir('Kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike',
         })
     if (!ok) return
     setMesgul(true)
     try {
       const r = await api.post<{ uyari?: string }>('/portlar/kapi/eski-kapat', { zorla }, KAPI_ISTEK)
       toast.basari(cevir('Geçiş kapısı kapatılıyor'))
-      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari })
+      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari, ton: 'uyari' })
       void onDegisti()
     } catch (e) {
       if (sonucBelirsiz(e)) await sonucuDogrula(false)

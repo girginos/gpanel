@@ -264,7 +264,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
   }
 
   async function ioncubeKaldir() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("IonCube Loader PHP {0}'ten kaldırılacak. Devam?"), aktifSurum), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("IonCube Loader PHP {0}'ten kaldırılacak. Devam?"), aktifSurum), ton: 'tehlike' }))) return
     setYuk(true); setHata(null)
     try {
       await api.post('/php-extensions/ioncube-kaldir', { surum: aktifSurum })

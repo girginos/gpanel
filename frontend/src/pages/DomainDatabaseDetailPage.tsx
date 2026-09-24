@@ -187,7 +187,7 @@ export default function DomainDatabaseDetailPage() {
         acik={silOnay}
         baslik={cevir("Veritabanını sil")}
         mesaj={cevirT(cevir("\"{0}\" veritabanı ve kullanıcısı kalıcı silinecek. Bu işlem geri alınamaz!"), db?.db_adi)}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilOnay(false)}

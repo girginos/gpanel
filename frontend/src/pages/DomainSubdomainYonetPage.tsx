@@ -159,7 +159,7 @@ export default function DomainSubdomainYonetPage() {
 
   async function sil() {
     if (!d) return
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz."), d.tam_ad), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz."), d.tam_ad), ton: 'tehlike' }))) return
     try {
       await api.delete(`/domains/${id}/subdomain/${sid}`)
       navigate(`/abonelikler/${id}/subdomainler`)

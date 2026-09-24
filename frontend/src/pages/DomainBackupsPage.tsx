@@ -233,7 +233,7 @@ export default function DomainBackupsPage() {
   }
 
   async function destSil() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), ton: 'tehlike' }))) return
     setDestKayit(true)
     try {
       await api.delete(`/domains/${id}/backup-destination`)
@@ -662,7 +662,7 @@ export default function DomainBackupsPage() {
         acik={!!silinecek}
         baslik={cevir("Yedek dosyasını sil")}
         mesaj={cevirT(cevir("\"{0}\" silinsin mi?"), silinecek?.dosya)}
-        tehlikeli onayMetni={cevir("Evet, sil")}
+        ton="tehlike" onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
       />

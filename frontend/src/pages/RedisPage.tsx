@@ -113,7 +113,7 @@ export default function RedisPage() {
     finally { setMesgul(false) }
   }
   async function kapat() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), ton: 'tehlike' }))) return
     setHata(null); setBasari(null); setMesgul(true)
     try {
       await api.delete(`/domains/${id}/redis`)

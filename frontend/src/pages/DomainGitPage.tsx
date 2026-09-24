@@ -196,7 +196,7 @@ export default function DomainGitPage() {
   }
 
   async function ghDisconnect() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), ton: 'tehlike' }))) return
     try {
       await api.delete(`/domains/${id}/github`)
       setGhConn({ yok: true })
@@ -479,7 +479,7 @@ export default function DomainGitPage() {
         acik={klonOnay}
         baslik={cevir("İlk klonlama")}
         mesaj={cevirT(cevir("Hedef dizin ({0}) içeriği TAMAMEN silinip repodaki {1} branch'i klonlanacak. Devam edilsin mi?"), targetDir, branch)}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("Evet, klonla")}
         onOnay={klonla}
         onIptal={() => setKlonOnay(false)}
@@ -489,7 +489,7 @@ export default function DomainGitPage() {
         acik={silinecek}
         baslik={cevir("Repo bağlantısını kaldır")}
         mesaj={cevir("Panel'deki kayıt silinecek (klonlanmış dosyalar diskte kalır).")}
-        tehlikeli
+        ton="tehlike"
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(false)}

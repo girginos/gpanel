@@ -205,7 +205,7 @@ function RuntimeAdim({ secilenRuntimeler, setSecilenRuntimeler }: {
 
   async function kaldir(e: RuntimeEk) {
     if (kaldiran) return
-    if (!(await onay({ baslik: cevir("Kaldır"), mesaj: cevirT(cevir("{0} sunucudan kaldırılacak. Devam?"), e.ad), tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Kaldır"), mesaj: cevirT(cevir("{0} sunucudan kaldırılacak. Devam?"), e.ad), ton: 'tehlike' }))) return
     setKaldiran(e.anahtar)
     try {
       const { data } = await api.post('/runtimeler/kaldir', { anahtar: e.anahtar })

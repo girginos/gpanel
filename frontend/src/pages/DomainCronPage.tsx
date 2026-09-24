@@ -158,7 +158,7 @@ export default function DomainCronPage() {
   }
 
   async function sil(g: Gorev) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: `"${g.komut.slice(0, 60)}..." ${cevir("görevi silinsin mi?")}`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: `"${g.komut.slice(0, 60)}..." ${cevir("görevi silinsin mi?")}`, ton: 'tehlike' }))) return
     try {
       await api.delete(`/domains/${id}/cron/${g.idx}`)
       yukle()

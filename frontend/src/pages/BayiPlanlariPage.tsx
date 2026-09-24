@@ -85,7 +85,7 @@ export default function BayiPlanlariPage() {
 
   function yeniAc() { nav('/bayi-planlari/yeni') }   // modal yerine OZEL SAYFA (ilke ayarlari icin)
   async function sil(p: Paket) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, tehlike: true }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, ton: 'tehlike' }))) return
     setHata(null); setOk(null)
     try {
       await api.delete(`/reseller-plans/${p.id}`)
