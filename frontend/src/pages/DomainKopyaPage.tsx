@@ -9,6 +9,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Card } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Kopya = { ad: string; boyut_mb: number; tarih: string }
 
@@ -22,6 +24,7 @@ const DKOPYA_EN: Record<string, string> = {
   "Kopyalanıyor…": "Copying…",
   "Yedekle ve Geri Yükle": "Backup and Restore",
   "public_html içeriğinden yeni bir kopya oluştur.": "Create a new copy from the public_html contents.",
+  "Aboneliğe dön": "Back to subscription",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DKOPYA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -55,7 +58,7 @@ export default function DomainKopyaPage() {
   }
 
   async function sil(k: Kopya) {
-    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: 'Emin misiniz?', mesaj: `Kopya silinsin mi?\n${k.ad} (${k.boyut_mb} MB)`, ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setOk(null)
     try { await api.delete(`/domains/${id}/kopya/${k.ad}`); yukle() }
     catch (e) { const m = apiHata(e, 'Silinemedi'); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
@@ -74,14 +77,13 @@ export default function DomainKopyaPage() {
           {cevir(cevir("Sitenizin dosyalarının zaman-damgalı bir anlık-görüntüsünü"))} <span className="font-mono">~/kopyalar/</span> {cevir("altında oluşturur — değişiklik yapmadan önce güvenli bir yedek noktası.")}
         </p>
 
-        <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg p-4 mb-4 text-xs text-amber-800 dark:text-amber-300">
-          Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
-        </div>
+        <UyariKutusu ton="uyari" className="mb-4">
+          <span className="text-xs">Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}</span>
+        </UyariKutusu>
 
         <Card className="bg-white dark:bg-dark-700 p-5 mb-5 shadow-xs flex items-center justify-between">
           <div className="text-sm text-slate-600 dark:text-slate-300">{cevir("public_html içeriğinden yeni bir kopya oluştur.")}</div>
-          <Button color="primary" onClick={olustur} yukleniyor={olusturuyor}
-            className="px-4 py-2 text-sm">
+          <Button color="primary" ikon={I.kopya} onClick={olustur} yukleniyor={olusturuyor}>
             {olusturuyor ? 'Kopyalanıyor…' : cevir("Kopya Oluştur")}
           </Button>
         </Card>
@@ -92,7 +94,7 @@ export default function DomainKopyaPage() {
             <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
           ) : liste.length === 0 ? (
             <div className="text-center py-8">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7 mx-auto mb-2 text-slate-300 dark:text-slate-600"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+              <Ikon d={I.klasor} className="h-7 w-7 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
               <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kopya yok.")}</p>
             </div>
           ) : (
@@ -103,14 +105,14 @@ export default function DomainKopyaPage() {
                     <div className="font-mono text-sm text-slate-700 dark:text-slate-200">{k.ad}</div>
                     <div className="text-xs text-slate-400">{k.tarih} · {k.boyut_mb} MB</div>
                   </div>
-                  <Button color="error" variant="soft" onClick={() => sil(k)} className="text-xs px-2.5 py-1 rounded-md">{cevir("Sil")}</Button>
+                  <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(k)}>{cevir("Sil")}</Button>
                 </li>
               ))}
             </ul>
           )}
         </Card>
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

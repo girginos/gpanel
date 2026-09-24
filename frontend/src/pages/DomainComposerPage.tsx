@@ -7,6 +7,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici: string; dizin: string }
 
@@ -19,7 +21,8 @@ const COMPOSER_EN: Record<string, string> = {
   "Anasayfa": "Home",
   "dizininde": "directory, running as user",
   "olarak çalışır.": ".",
-  "✓ composer.json bulundu": "✓ composer.json found",
+  "composer.json bulundu": "composer.json found",
+  "Aboneliğe dön": "Back to subscription",
   "composer.json yok": "composer.json not found",
   "vendor/paket veya vendor/paket:^1.2": "vendor/package or vendor/package:^1.2",
   "İşlem başarısız": "Operation failed",
@@ -73,9 +76,9 @@ export default function DomainComposerPage() {
         </p>
 
         {!d.kurulu ? (
-          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-5 text-sm text-amber-800 dark:text-amber-200">
+          <UyariKutusu ton="uyari">
             {cevir(cevir("Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor."))}
-          </div>
+          </UyariKutusu>
         ) : (
           <>
             <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
@@ -83,22 +86,23 @@ export default function DomainComposerPage() {
                 <div>
                   <span className="text-xs font-mono text-slate-500">{d.surum}</span>
                   <Badge variant="soft" color={d.composer_json ? 'success' : 'neutral'} className="ml-2">
-                    {d.composer_json ? cevir('✓ composer.json bulundu') : cevir('composer.json yok')}
+                    {d.composer_json && <Ikon d={I.onay} className="size-3 shrink-0 me-1" />}
+                    {d.composer_json ? cevir('composer.json bulundu') : cevir('composer.json yok')}
                   </Badge>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button color="primary" disabled={!!calisan} yukleniyor={calisan === 'install'} onClick={() => calistir('install')} className="px-3 py-1.5 text-sm">install</Button>
-                <Button color="primary" disabled={!!calisan} yukleniyor={calisan === 'update'} onClick={() => calistir('update')} className="px-3 py-1.5 text-sm">update</Button>
-                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'dump-autoload'} onClick={() => calistir('dump-autoload')} className="px-3 py-1.5 text-sm">dump-autoload</Button>
-                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'validate'} onClick={() => calistir('validate')} className="px-3 py-1.5 text-sm">validate</Button>
-                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'show'} onClick={() => calistir('show')} className="px-3 py-1.5 text-sm">show</Button>
+                <Button color="primary" boyut="sm" ikon={I.oynat} disabled={!!calisan} yukleniyor={calisan === 'install'} onClick={() => calistir('install')}>install</Button>
+                <Button color="primary" boyut="sm" ikon={I.indir} disabled={!!calisan} yukleniyor={calisan === 'update'} onClick={() => calistir('update')}>update</Button>
+                <Button variant="outlined" boyut="sm" ikon={I.terminal} disabled={!!calisan} yukleniyor={calisan === 'dump-autoload'} onClick={() => calistir('dump-autoload')}>dump-autoload</Button>
+                <Button variant="outlined" boyut="sm" ikon={I.yenile} disabled={!!calisan} yukleniyor={calisan === 'validate'} onClick={() => calistir('validate')}>validate</Button>
+                <Button variant="outlined" boyut="sm" ikon={I.goz} disabled={!!calisan} yukleniyor={calisan === 'show'} onClick={() => calistir('show')}>show</Button>
               </div>
               <div className="mt-3 flex gap-2">
                 <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
                   className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
-                <Button color="primary" disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'require'} onClick={() => calistir('require', paket.trim())} className="px-3 py-1.5 text-sm">require</Button>
-                <Button color="error" variant="soft" disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'remove'} onClick={() => calistir('remove', paket.trim())} className="px-3 py-1.5 text-sm">remove</Button>
+                <Button color="primary" boyut="sm" ikon={I.arti} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'require'} onClick={() => calistir('require', paket.trim())}>require</Button>
+                <Button color="error" variant="soft" boyut="sm" ikon={I.cop} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'remove'} onClick={() => calistir('remove', paket.trim())}>remove</Button>
               </div>
             </div>
 
@@ -110,7 +114,7 @@ export default function DomainComposerPage() {
           </>
         )}
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

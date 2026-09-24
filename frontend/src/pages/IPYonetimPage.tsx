@@ -7,7 +7,9 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, Badge } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * IP Yönetimi — admin only.
@@ -108,14 +110,14 @@ export default function IPYonetimPage() {
     const ok = await dialog.onay({
       baslik: cevir("{ip} silinsin mi?").replace('{ip}', s.ip),
       mesaj: cevir("Bu IP sunucudan kaldırılacak ({dev}/{cidr}). Bu IP'ye yönlendirilen tüm trafik düşer. Reboot sonrası da yüklenmez.").replace('{dev}', s.iface).replace('{cidr}', String(s.cidr)),
-      onayEtiketi: cevir("Sil"), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike',
+      onayEtiketi: cevir("Sil"), iptalEtiketi: cevir("Vazgeç"), ton: 'tehlike', onayIkonu: I.cop,
     })
     if (!ok) return
     try {
       await api.delete('/ipler/' + encodeURIComponent(s.ip))
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Silinemedi"), mesaj: apiHata(e, cevir("Silme hatası")) })
+      await dialog.bilgi({ baslik: cevir("Silinemedi"), mesaj: apiHata(e, cevir("Silme hatası")), ton: 'tehlike' })
     }
   }
 
@@ -139,7 +141,7 @@ export default function IPYonetimPage() {
       {yukleniyor ? (
         <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
+        <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
       ) : liste && (
         <>
           {/* Ekleme formu */}
@@ -170,8 +172,7 @@ export default function IPYonetimPage() {
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100" />
               </div>
               <div className="flex items-end">
-                <Button type="submit" color="primary" disabled={gonderiliyor || !taslakIP.trim()}
-                  className="h-[38px] px-4 text-sm">
+                <Button type="submit" color="primary" ikon={I.arti} yukleniyor={gonderiliyor} disabled={!taslakIP.trim()}>
                   {gonderiliyor ? cevir("Ekleniyor…") : cevir("Ekle")}
                 </Button>
               </div>
@@ -199,18 +200,17 @@ export default function IPYonetimPage() {
                       <td className="px-3 py-2.5 font-mono text-slate-600 dark:text-slate-400">{s.iface} / {s.cidr}</td>
                       <td className="px-3 py-2.5">
                         {s.primary_mi ? (
-                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">primary</span>
+                          <Badge variant="soft" color="info">primary</Badge>
                         ) : s.panel_ip ? (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">panel</span>
+                          <Badge variant="soft" color="success">panel</Badge>
                         ) : (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-dark-700 dark:text-slate-300">{cevir("kullanıcı")}</span>
+                          <Badge variant="soft">{cevir("kullanıcı")}</Badge>
                         )}
                       </td>
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{s.label || '—'}</td>
                       <td className="px-3 py-2.5 text-right">
                         {s.silinebilir ? (
-                          <Button color="error" variant="flat" onClick={() => sil(s)}
-                            className="px-2.5 py-1 text-xs">
+                          <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(s)}>
                             {cevir("Sil")}
                           </Button>
                         ) : (

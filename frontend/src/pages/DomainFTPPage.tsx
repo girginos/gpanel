@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 
@@ -22,7 +23,7 @@ const FTP_EN: Record<string, string> = {
   "Parola Sıfırlama": "Password Reset",
   "Parola sıfırlama başarısız": "Password reset failed",
   "Yeni FTP parolası girin": "Enter new FTP password",
-  "✓ FTP parolası güncellendi": "✓ FTP password updated",
+  "FTP parolası güncellendi": "FTP password updated",
   "İşlem başarısız": "Operation failed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (FTP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -49,7 +50,7 @@ export default function DomainFTPPage() {
     try {
       await api.put(`/domains/${id}/ftp/password`, { parola: ozelPw })
       setOzelPw('')
-      toast.basari(cevir("✓ FTP parolası güncellendi"))
+      toast.basari(cevir("FTP parolası güncellendi"))
     } catch (e) {
       const m = apiHata(e, cevir("Parola sıfırlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally {
@@ -87,7 +88,7 @@ export default function DomainFTPPage() {
                 placeholder={cevir("Yeni FTP parolası girin")}
                 className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
               />
-              <Button onClick={() => parolaSifirla()} yukleniyor={isleniyor} disabled={!ozelPw} color="primary" className="px-3 py-2 text-sm">{cevir("Bu Parolayı Ayarla")}</Button>
+              <Button onClick={() => parolaSifirla()} yukleniyor={isleniyor} disabled={!ozelPw} color="primary" ikon={I.disket}>{cevir("Bu Parolayı Ayarla")}</Button>
             </div>
           </div>
 

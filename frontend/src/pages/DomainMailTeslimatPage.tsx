@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { I } from '@/components/Ikon'
 import type { Domain } from '@/components/domainTipi'
 
 type Kayit = {
@@ -93,9 +94,7 @@ export default function DomainMailTeslimatPage() {
       ]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300">{cevir("E-Posta Teslimat Takibi")}</h1>
-        <Button onClick={() => yukle(domain)} yukleniyor={yenileniyor} variant="outlined"
-          className="gap-1.5 text-sm px-3 py-1.5">
-          {!yenileniyor && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+        <Button onClick={() => yukle(domain)} yukleniyor={yenileniyor} variant="outlined" ikon={I.yenile}>
           {cevir("Yenile")}
         </Button>
       </div>

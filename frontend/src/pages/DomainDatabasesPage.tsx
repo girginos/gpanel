@@ -13,6 +13,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
 import { useToast } from '@/components/Toast'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 export type DB = {
@@ -24,7 +26,6 @@ export type DB = {
 const DB_EN: Record<string, string> = {
   "(boş bırakırsanız panel üretir)": "(leave empty and the panel generates one)",
   "İşlem başarısız": "Operation failed",
-  "+ Yeni Veritabanı": "+ New Database",
   "Alan adı bilgisi alınamadı": "Failed to get domain info",
   "Bilgileri güvenli bir yere kaydedin. Parolayı sonra düz metin göremeyebilirsiniz:": "Save this info somewhere safe. You may not be able to see the password in plain text later:",
   "Henüz veritabanı yok": "No databases yet",
@@ -53,10 +54,10 @@ const DB_EN: Record<string, string> = {
   "Özel parola (boş bırakırsanız rastgele)": "Custom password (random if left empty)",
   "Üret": "Generate",
   "İptal": "Cancel",
-  "✓ Parola güncellendi": "✓ Password updated",
-  "✓ Kullanıcı oluşturuldu": "✓ User created",
+  "Parola güncellendi": "Password updated",
+  "Kullanıcı oluşturuldu": "User created",
   "Parolayı Güncelle": "Update Password",
-  "✓ Veritabanı oluşturuldu": "✓ Database created",
+  "Veritabanı oluşturuldu": "Database created",
   "Anasayfa": "Home",
   "Yenile": "Refresh",
   "veritabanı": "databases",
@@ -132,8 +133,8 @@ export default function DomainDatabasesPage() {
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5"><Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link></p>}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Button onClick={() => setEkleAcik(true)} color="primary" className="px-3.5 py-2 text-sm">{cevir("+ Yeni Veritabanı")}</Button>
-        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm">↻ {cevir("Yenile")}</Button>
+        <Button onClick={() => setEkleAcik(true)} color="primary" ikon={I.arti}>{cevir("Yeni Veritabanı")}</Button>
+        <Button onClick={yukle} variant="outlined" ikon={I.yenile} yukleniyor={yuk}>{cevir("Yenile")}</Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{dbler.length} {cevir("veritabanı")}</span>
       </div>
 
@@ -268,20 +269,23 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
   const inputCls = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-slate-900 dark:text-slate-100 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none disabled:opacity-50'
 
   return (
-    <Modal acik={true} baslik={cevir("Yeni Veritabanı")} onKapat={sonuc ? onTamam : onKapat} genislik="lg">
+    <Modal acik={true} baslik={cevir("Yeni Veritabanı")} onKapat={sonuc ? onTamam : onKapat} genislik="lg"
+      ton={sonuc ? 'basari' : undefined} kapatilamaz={isleniyor}
+      alt={sonuc
+        ? <Button onClick={onTamam} color="primary" ikon={I.onay}>{cevir("Tamam")}</Button>
+        : <>
+            <Button onClick={onKapat} disabled={isleniyor} variant="outlined" ikon={I.kapat}>{cevir("İptal")}</Button>
+            <Button onClick={olustur} yukleniyor={isleniyor} color="primary" ikon={I.arti}>{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</Button>
+          </>}>
       {sonuc ? (
-        <div className="space-y-4">
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md p-4 space-y-3">
-            <p className="text-sm text-emerald-800 dark:text-emerald-200 font-medium">{cevir("✓ Veritabanı oluşturuldu")}</p>
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">{cevir("Bilgileri güvenli bir yere kaydedin. Parolayı sonra düz metin göremeyebilirsiniz:")}</p>
+        <UyariKutusu ton="basari" baslik={cevir("Veritabanı oluşturuldu")}>
+          <div className="space-y-3">
+            <p className="text-xs">{cevir("Bilgileri güvenli bir yere kaydedin. Parolayı sonra düz metin göremeyebilirsiniz:")}</p>
             <SonucSatir e={cevir("Veritabanı")} v={sonuc.db_adi} />
             <SonucSatir e={cevir("Kullanıcı")} v={sonuc.db_kullanici} />
             <SonucSatir e={cevir("Parola")} v={sonuc.db_parola} />
           </div>
-          <div className="flex justify-end">
-            <Button onClick={onTamam} color="primary" className="px-4 py-2 text-sm">{cevir("Tamam")}</Button>
-          </div>
-        </div>
+        </UyariKutusu>
       ) : (
         <div className="space-y-5">
           {/* Otomatik toggle */}
@@ -301,7 +305,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                   <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
                   <input value={dbSonek} onChange={e => setDbSonek(e.target.value.toLowerCase())} placeholder="blog" className={inputCls + ' rounded-l-none'} />
                 </div>
-                <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 font-mono">→ {dbAdiOnizleme}</p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 font-mono"><Ikon d={I.ileri} className="size-3 shrink-0" />{dbAdiOnizleme}</p>
               </div>
 
               {/* DB kullanıcısı */}
@@ -324,7 +328,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                       <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 text-sm font-mono select-none">{onek}</span>
                       <input value={kullaniciSonek} onChange={e => setKullaniciSonek(e.target.value.toLowerCase())} placeholder="bloguser" className={inputCls + ' rounded-l-none'} />
                     </div>
-                    <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 font-mono">→ {kullaniciOnizleme}</p>
+                    <p className="mt-1 flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 font-mono"><Ikon d={I.ileri} className="size-3 shrink-0" />{kullaniciOnizleme}</p>
                   </>
                 ) : (
                   <select value={mevcutKullanici} onChange={e => setMevcutKullanici(e.target.value)} className={inputCls}>
@@ -339,18 +343,13 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Parola")} <span className="text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız panel üretir)")}</span></label>
                   <div className="flex gap-2">
                     <input type="text" value={parola} onChange={e => setParola(e.target.value)} placeholder={cevir("En az 12 karakter, harf+rakam")} className={inputCls} />
-                    <Button type="button" onClick={() => setParola(uretGucluParola())} color="primary" variant="outlined" className="whitespace-nowrap px-3 py-2 text-sm">{cevir("Üret")}</Button>
+                    <Button onClick={() => setParola(uretGucluParola())} variant="outlined" ikon={I.anahtar} className="whitespace-nowrap">{cevir("Üret")}</Button>
                   </div>
                   {parolaGucSorunu && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{cevir("Parola en az 12 karakter ve harf+rakam karışık olmalı.")}</p>}
                 </div>
               )}
             </div>
           )}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-            <Button onClick={olustur} yukleniyor={isleniyor} color="primary" className="px-4 py-2 text-sm">{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</Button>
-          </div>
         </div>
       )}
     </Modal>
@@ -361,9 +360,9 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
   const [ok, setOk] = useState(false)
   return (
     <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-xs text-emerald-700 dark:text-emerald-300">{e}</span>
-      <code className="flex-1 bg-white dark:bg-dark-700 px-3 py-1.5 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{v}</code>
-      <Button onClick={() => { navigator.clipboard.writeText(v); setOk(true); setTimeout(() => setOk(false), 1500) }} color="success" variant="soft" className="px-2.5 py-1.5 text-xs">{ok ? '✓' : cevir("Kopyala")}</Button>
+      <span className="w-24 shrink-0 text-xs text-slate-500 dark:text-dark-200">{e}</span>
+      <code className="flex-1 bg-white dark:bg-dark-700 px-3 py-1.5 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-slate-200 dark:border-dark-500 break-all">{v}</code>
+      <Button onClick={() => { navigator.clipboard.writeText(v); setOk(true); setTimeout(() => setOk(false), 1500) }} color={ok ? 'success' : 'neutral'} variant="outlined" boyut="sm" ikon={ok ? I.onay : I.kopya} className="shrink-0">{cevir("Kopyala")}</Button>
     </div>
   )
 }
@@ -395,7 +394,7 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
       const body: Record<string, string> = { parola: ozelPw }
       if (kullaniciYok) body.kullanici = yeniKullanici.trim()
       await api.put(`/databases/${db.id}/password`, body)
-      toast.basari(cevir(kullaniciYok ? "✓ Kullanıcı oluşturuldu" : "✓ Parola güncellendi"))
+      toast.basari(cevir(kullaniciYok ? "Kullanıcı oluşturuldu" : "Parola güncellendi"))
       onTamam()
     } catch (e) {
       const m = apiHata(e, cevir("Sıfırlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
@@ -405,13 +404,18 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   }
 
   return (
-    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={onKapat} genislik="md">
+    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={onKapat} genislik="md"
+      kapatilamaz={isleniyor}
+      alt={<>
+        <Button onClick={onKapat} disabled={isleniyor} variant="outlined" ikon={I.kapat}>{cevir("İptal")}</Button>
+        <Button onClick={() => sifirla()} yukleniyor={isleniyor} disabled={ozelPw.length < 6} color="primary" ikon={kullaniciYok ? I.arti : I.disket}>{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</Button>
+      </>}>
         <div className="space-y-4">
           {kullaniciYok ? (
             <>
-              <div className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              <UyariKutusu ton="uyari">
                 {cevir("Bu veritabanının MySQL kullanıcısı yok. Yedekten geri yüklenen veritabanlarında olur — yedek yalnızca şema ve veri içerir, kullanıcı ile yetkiler içermez.")}
-              </div>
+              </UyariKutusu>
               <div>
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1" htmlFor="yeni-db-kullanici">{cevir("Kullanıcı adı")}</label>
                 <input
@@ -440,10 +444,6 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
               placeholder={cevir("En az 6 karakter")}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
             />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-            <Button onClick={() => sifirla()} yukleniyor={isleniyor} disabled={ozelPw.length < 6} color="primary" className="px-4 py-2 text-sm">{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</Button>
           </div>
         </div>
     </Modal>

@@ -10,6 +10,9 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
+import { I } from '@/components/Ikon'
 
 type Paket = {
   adi: string; surum?: string; aciklama?: string;
@@ -21,7 +24,7 @@ type Grup = { ad: string; ikon: string; paketler: string[]; aciklama: string }
 type Sekme = 'ara' | 'kurulu'
 
 /* Stroke SVG ikon seti — panelin monokrom diline uygun, emoji YOK */
-const I = {
+const PI = {
   wrench:   'M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26',
   code:     'M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5',
   bolt:     'm3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z',
@@ -40,27 +43,27 @@ const I = {
 }
 
 const HAZIR_GRUPLAR: Grup[] = [
-  { ad: 'Geliştirme Araçları', ikon: I.wrench, aciklama: 'gcc, make, autoconf, automake, libtool, kernel-devel',
+  { ad: 'Geliştirme Araçları', ikon: PI.wrench, aciklama: 'gcc, make, autoconf, automake, libtool, kernel-devel',
     paketler: ['gcc', 'gcc-c++', 'make', 'autoconf', 'automake', 'libtool', 'kernel-devel'] },
-  { ad: 'Python', ikon: I.code, aciklama: 'Python 3 + pip + venv + devel başlıkları',
+  { ad: 'Python', ikon: PI.code, aciklama: 'Python 3 + pip + venv + devel başlıkları',
     paketler: ['python3', 'python3-pip', 'python3-devel', 'python3-virtualenv'] },
-  { ad: 'Node.js + npm', ikon: I.bolt, aciklama: 'Node.js LTS + npm',
+  { ad: 'Node.js + npm', ikon: PI.bolt, aciklama: 'Node.js LTS + npm',
     paketler: ['nodejs', 'npm'] },
-  { ad: 'Go', ikon: I.cube, aciklama: 'Golang derleyici',
+  { ad: 'Go', ikon: PI.cube, aciklama: 'Golang derleyici',
     paketler: ['golang'] },
-  { ad: 'Java', ikon: I.beaker, aciklama: 'OpenJDK 21 LTS + Maven',
+  { ad: 'Java', ikon: PI.beaker, aciklama: 'OpenJDK 21 LTS + Maven',
     paketler: ['java-21-openjdk', 'java-21-openjdk-devel', 'maven'] },
-  { ad: 'Rust', ikon: I.cog, aciklama: 'Rust + cargo',
+  { ad: 'Rust', ikon: PI.cog, aciklama: 'Rust + cargo',
     paketler: ['rust', 'cargo'] },
-  { ad: 'Container / VM', ikon: I.server, aciklama: 'Docker uyumlu — podman + buildah + skopeo',
+  { ad: 'Container / VM', ikon: PI.server, aciklama: 'Docker uyumlu — podman + buildah + skopeo',
     paketler: ['podman', 'buildah', 'skopeo'] },
-  { ad: 'Sistem Araçları', ikon: I.terminal, aciklama: 'CLI üretkenlik araçları',
+  { ad: 'Sistem Araçları', ikon: PI.terminal, aciklama: 'CLI üretkenlik araçları',
     paketler: ['htop', 'ncdu', 'jq', 'tmux', 'vim-enhanced', 'git', 'rsync', 'mtr', 'iftop', 'iotop'] },
-  { ad: 'Resim İşleme', ikon: I.photo, aciklama: 'ImageMagick + WebP + optimizasyon',
+  { ad: 'Resim İşleme', ikon: PI.photo, aciklama: 'ImageMagick + WebP + optimizasyon',
     paketler: ['ImageMagick', 'libwebp-tools', 'optipng', 'jpegoptim'] },
-  { ad: 'DB İstemcileri', ikon: I.database, aciklama: 'PostgreSQL + Redis CLI',
+  { ad: 'DB İstemcileri', ikon: PI.database, aciklama: 'PostgreSQL + Redis CLI',
     paketler: ['postgresql', 'redis'] },
-  { ad: 'Güvenlik', ikon: I.shield, aciklama: 'GnuPG, OpenSSL, fail2ban',
+  { ad: 'Güvenlik', ikon: PI.shield, aciklama: 'GnuPG, OpenSSL, fail2ban',
     paketler: ['gnupg2', 'openssl', 'fail2ban'] },
 ]
 
@@ -179,7 +182,7 @@ export default function PaketlerPage() {
     const onayMesaji = suankiKurulu
       ? `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`
       : `"${paket}" ${cevir("paketi sunucuya kurulacak. Devam?")}`
-    if (!(await onay({ baslik: cevir('Onay gerekiyor'), mesaj: onayMesaji }))) return
+    if (!(await onay({ baslik: cevir('Onay gerekiyor'), mesaj: onayMesaji, ...(suankiKurulu ? { ton: 'tehlike' as const, onayIkonu: I.cop } : {}) }))) return
 
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
@@ -237,7 +240,7 @@ export default function PaketlerPage() {
     finally { setIsleniyor(null) }
   }
   async function kaldir(paket: string) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`, ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${paket}" ${cevir("paketi KALDIRILACAK. Devam?")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
     setIsleniyor(paket); setHata(null); setBasari(null)
     try {
       const r = await api.post('/paketler/kaldir', { paket })
@@ -276,17 +279,15 @@ export default function PaketlerPage() {
             {cevir("DNF üzerinden sunucu paketleri ve derleyici ortamları.")}
           </p>
         </div>
-        <div className="inline-flex items-center gap-2 self-start rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700
-                        dark:border-amber-900/40 dark:bg-amber-900/15 dark:text-amber-300">
-          <Ikon d={I.shield} className="h-4 w-4 shrink-0" />
-          <span>{cevir("Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır")}</span>
-        </div>
+        <UyariKutusu ton="uyari" className="self-start">
+          <span className="text-xs">{cevir("Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır")}</span>
+        </UyariKutusu>
       </div>
 
       {/* Hızlı Kurulum Grupları */}
       <section aria-labelledby="grup-baslik" className="mb-6">
         <div className="mb-3 flex items-center gap-2">
-          <Ikon d={I.box} className="h-4 w-4 text-slate-400" />
+          <Ikon d={PI.box} className="h-4 w-4 text-slate-400" />
           <h2 id="grup-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             {cevir("Hızlı Kurulum Grupları")}
           </h2>
@@ -321,7 +322,7 @@ export default function PaketlerPage() {
                       <span className="text-emerald-600 dark:text-emerald-400">{kuruluSayi}</span>/{g.paketler.length}
                     </span>
                   )}
-                  <Ikon d={I.chevron}
+                  <Ikon d={PI.chevron}
                     className={`h-4 w-4 shrink-0 text-slate-400 transition-transform dark:text-slate-500 ${open ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -371,7 +372,7 @@ export default function PaketlerPage() {
       {/* Paket Arama */}
       <section aria-labelledby="ara-baslik">
         <div className="mb-3 flex items-center gap-2">
-          <Ikon d={I.search} className="h-4 w-4 text-slate-400" />
+          <Ikon d={PI.search} className="h-4 w-4 text-slate-400" />
           <h2 id="ara-baslik" className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             {cevir("Paket Ara")}
           </h2>
@@ -395,7 +396,7 @@ export default function PaketlerPage() {
           {/* Arama kutusu */}
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
-              <Ikon d={I.search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Ikon d={PI.search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input type="text" value={q} onChange={e => setQ(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && ara()}
                 placeholder={sekme === 'ara' ? cevir('örn: mongodb, redis, nodejs, gcc, htop') : cevir("kurulu paket adı veya açıklama")}
@@ -404,8 +405,7 @@ export default function PaketlerPage() {
                            placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
                            dark:border-dark-600 dark:bg-dark-900/50 dark:text-slate-100" />
             </div>
-            <Button onClick={ara} disabled={yuk || !q.trim()} color="primary"
-              className="gap-2 px-5 py-2 text-sm">
+            <Button onClick={ara} yukleniyor={yuk} disabled={!q.trim()} color="primary" ikon={I.ara}>
               {yuk ? cevir('Aranıyor…') : cevir('Ara')}
             </Button>
           </div>
@@ -413,7 +413,7 @@ export default function PaketlerPage() {
           {/* Sonuçlar */}
           {arandi && !yuk && sonuc.length === 0 && (
             <div role="status" className="py-10 text-center">
-              <Ikon d={I.search} className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
+              <Ikon d={PI.search} className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">"{q}" {cevir("için sonuç bulunamadı.")}</p>
             </div>
           )}
@@ -444,14 +444,14 @@ export default function PaketlerPage() {
                       {p.aciklama && <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{p.aciklama}</div>}
                     </div>
                     {p.kurulu ? (
-                      <Button onClick={() => kaldir(p.adi)} disabled={p.korunan || isleniyor === p.adi}
-                        color="error" variant="outlined"
-                        className="shrink-0 px-3 py-1.5 text-xs">
+                      <Button onClick={() => kaldir(p.adi)} disabled={p.korunan} yukleniyor={isleniyor === p.adi}
+                        color="error" variant="soft" boyut="sm" ikon={I.cop}
+                        className="shrink-0">
                         {isleniyor === p.adi ? cevir('Kaldırılıyor…') : cevir("Kaldır")}
                       </Button>
                     ) : (
-                      <Button onClick={() => kur(p.adi)} disabled={isleniyor === p.adi} color="primary"
-                        className="shrink-0 px-3 py-1.5 text-xs">
+                      <Button onClick={() => kur(p.adi)} yukleniyor={isleniyor === p.adi} color="primary" boyut="sm" ikon={I.oynat}
+                        className="shrink-0">
                         {isleniyor === p.adi ? cevir('Kuruluyor…') : cevir('Kur')}
                       </Button>
                     )}
@@ -464,31 +464,14 @@ export default function PaketlerPage() {
       </section>
 
       {/* Çıktı modalı */}
-      {outputModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          onClick={() => setOutputModal(null)}>
-          <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-dark-800"
-            onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-dark-600">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{outputModal.baslik}</h3>
-              <Button onClick={() => setOutputModal(null)} aria-label={cevir("Kapat")}
-                variant="flat" isIcon
-                className="p-1">
-                <Ikon d="M6 18 18 6M6 6l12 12" className="h-4 w-4" />
-              </Button>
-            </div>
-            <pre className="flex-1 overflow-auto bg-dark-900 p-4 text-xs font-mono leading-relaxed text-slate-100 whitespace-pre-wrap">
-              {outputModal.output || cevir("(çıktı yok)")}
-            </pre>
-            <div className="border-t border-slate-200 px-4 py-2.5 text-right dark:border-dark-600">
-              <Button onClick={() => setOutputModal(null)} color="primary"
-                className="px-4 py-1.5 text-sm">
-                {cevir("Kapat")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal acik={!!outputModal} baslik={outputModal?.baslik ?? ''} ton="basari" genislik="lg" onKapat={() => setOutputModal(null)}
+        alt={<Button onClick={() => setOutputModal(null)} color="primary" ikon={I.kapat}>{cevir("Kapat")}</Button>}>
+        {outputModal && (
+          <pre className="max-h-[60vh] overflow-auto rounded-lg bg-dark-900 p-4 text-xs font-mono leading-relaxed text-slate-100 whitespace-pre-wrap">
+            {outputModal.output || cevir("(çıktı yok)")}
+          </pre>
+        )}
+      </Modal>
     </div>
   )
 }

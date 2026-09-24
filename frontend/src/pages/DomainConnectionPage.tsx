@@ -11,23 +11,20 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Card } from '@/components/ui'
+import Modal from '@/components/Modal'
 
 
 const CONN_EN: Record<string, string> = {
   "İşlem başarısız": "Operation failed",
   "Değer üstüne tıkla → otomatik kopyalanır": "Click a value → it's copied automatically",
-  "FTP yönetimine git →": "Go to FTP management →",
+  "FTP yönetimine git": "Go to FTP management",
   "Panoya kopyalanamadı": "Failed to copy to clipboard",
-  "Parola üretilemedi": "Failed to generate password",
   "Sistem kullanıcısı": "System user",
-  "Tekrar üret": "Regenerate",
   "Tıkla → kopyala": "Click → copy",
-  "Veritabanları yönetimine git →": "Go to database management →",
+  "Veritabanları yönetimine git": "Go to database management",
   "Web kökü": "Web root",
-  "Yeni parola üret": "Generate new password",
   "veritabanı yok": "no database",
-  "Parolayı şimdi kopyalayın — bu pencereyi kapattıktan sonra tekrar göremeyebilirsiniz.": "Copy the password now — you may not see it again after closing this window.",
-  "Yeni parola üretildi": "New password generated",
+  "Parola güncellendi": "Password updated",
   "Türkçe": "English",
   "Anasayfa": "Home",
   "Domainler": "Domains",
@@ -42,7 +39,6 @@ const CONN_EN: Record<string, string> = {
   "Parolası": "Password",
   "Kullanıcı:": "User:",
   "Kapat": "Close",
-  "Üretiliyor…": "Generating…",
   "Kopyalandı": "Copied",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CONN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -129,25 +125,25 @@ export default function DomainConnectionPage() {
 
       {domain && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <Kart baslik="FTP / SFTP" renk="sky" ikon="M3 16V8a2 2 0 012-2h6l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2z">
+          <Kart baslik="FTP / SFTP" renk="sky" ikon={I.klasor}>
             <Sat e={cevir(cevir("Sunucu"))} d={domain.ftp_host} onKopya={kopyala} kopya={kopya} />
             <Sat e="Port" d="21" onKopya={kopyala} kopya={kopya} />
             <Sat e={cevir("Kullanıcı adı")} d={domain.ftp_user} onKopya={kopyala} kopya={kopya} mono />
             <Parola e={cevir("Parola")} id={id!} tip="ftp" onAc={() => setParolaModal({ tip: 'ftp' })} />
             <Sat e={cevir("Ev dizini")} d={`/home/${domain.sistem_kullanici}`} onKopya={kopyala} kopya={kopya} mono />
-            <Link to={`/abonelikler/${id}/ftp`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("FTP yönetimine git →")}</Link>
+            <Link to={`/abonelikler/${id}/ftp`} className="mt-2 flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("FTP yönetimine git")}<Ikon d={I.ileri} className="size-4 shrink-0" /></Link>
           </Kart>
 
-          <Kart baslik="MySQL / MariaDB" renk="violet" ikon="M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3z">
+          <Kart baslik="MySQL / MariaDB" renk="violet" ikon={I.db}>
             <Sat e={cevir(cevir("Sunucu"))} d={domain.db_host} onKopya={kopyala} kopya={kopya} />
             <Sat e="Port" d="3306" onKopya={kopyala} kopya={kopya} />
             <Sat e={cevir("Veritabanı")} d={domain.db_adi} onKopya={kopyala} kopya={kopya} mono />
             <Sat e={cevir("Kullanıcı adı")} d={domain.db_user} onKopya={kopyala} kopya={kopya} mono />
             <Parola e={cevir("Parola")} id={id!} tip="db" onAc={() => setParolaModal({ tip: 'db' })} />
-            <Link to={`/abonelikler/${id}/veritabanlari`} className="block mt-2 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("Veritabanları yönetimine git →")}</Link>
+            <Link to={`/abonelikler/${id}/veritabanlari`} className="mt-2 flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{cevir("Veritabanları yönetimine git")}<Ikon d={I.ileri} className="size-4 shrink-0" /></Link>
           </Kart>
 
-          <Kart baslik="Web" renk="amber" ikon="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" cift>
+          <Kart baslik="Web" renk="amber" ikon={I.kure} cift>
             <Sat e={cevir("Web kökü")} d={domain.web_root} onKopya={kopyala} kopya={kopya} mono />
             <Sat e="IPv4" d={domain.ipv4} onKopya={kopyala} kopya={kopya} mono />
             <Sat e={cevir("Sistem kullanıcısı")} d={domain.sistem_kullanici} onKopya={kopyala} kopya={kopya} mono />
@@ -180,9 +176,7 @@ function Kart({ baslik, renk, ikon, children, cift }: { baslik: string; renk: st
     <Card className={`bg-white dark:bg-dark-700 p-5 ${cift ? 'lg:col-span-2' : ''}`}>
       <div className="flex items-center gap-2 mb-3">
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${bg[renk]}`}>
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
-            <path strokeLinecap="round" strokeLinejoin="round" d={ikon} />
-          </svg>
+          <Ikon d={ikon} className="w-5 h-5" />
         </div>
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{baslik}</h3>
       </div>
@@ -220,11 +214,8 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
       <dt className="text-slate-500 dark:text-slate-500 text-xs uppercase tracking-wider">{e}</dt>
       <dd className="text-right">
-        <Button
-          onClick={onAc}
-          className="text-xs px-3 py-1 gap-1 rounded-md"
-        >
-          <Ikon d={I.anahtar} /> {cevir(cevir("Şifreyi Göster / Yenile"))}
+        <Button variant="outlined" boyut="sm" ikon={I.anahtar} onClick={onAc}>
+          {cevir(cevir("Şifreyi Göster / Yenile"))}
         </Button>
       </dd>
     </div>
@@ -251,7 +242,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
         if (!main) throw new Error(cevir("veritabanı yok"))
         await api.put(`/databases/${main.id}/password`, { parola })
       }
-      toast.basari(cevir("✓ Parola güncellendi"))
+      toast.basari(cevir("Parola güncellendi"))
       onKapat()
     } catch (e) { const m = apiHata(e, cevir("Parola güncellenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setIsleniyor(false) }
@@ -261,34 +252,26 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
   const tipAd = tip === 'ftp' ? 'FTP' : cevir("Veritabanı")
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onKapat}>
-      <div className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={ev => ev.stopPropagation()}>
-        <div className="flex items-center gap-2 mb-3">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6"><path d="M15.75 7.5a3.75 3.75 0 10-3.4 3.73L6 17.6V21h3.4l.9-.9v-1.8h1.8l1.2-1.2v-1.8h1.4l1.05-1.05A3.75 3.75 0 0015.75 7.5z"/></svg>
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{tipAd} {cevir("Parolası")}</h3>
-        </div>
+    <Modal acik baslik={`${tipAd} ${cevir("Parolası")}`} onKapat={onKapat} kapatilamaz={isleniyor}
+      alt={<>
+        <Button variant="outlined" ikon={I.kapat} onClick={onKapat} disabled={isleniyor}>
+          {cevir("Kapat")}
+        </Button>
+        <Button color="primary" ikon={I.disket} onClick={kaydet} disabled={parola.trim().length < 8} yukleniyor={isleniyor}>
+          {isleniyor ? cevir('Kaydediliyor…') : cevir("Parolayı güncelle")}
+        </Button>
+      </>}>
         <div className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-4 bg-slate-50 dark:bg-dark-800 px-3 py-2 rounded">
           <span className="text-slate-500 dark:text-slate-500">{cevir("Kullanıcı:")}</span> <code className="font-mono text-slate-900 dark:text-slate-100">{user}</code>
         </div>
 
         {/* Yeni parola — kullanıcı yazar, gösterilmez (write-only) */}
-        <div className="mb-4">
+        <div>
           <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Yeni parola")}</label>
           <input type="password" value={parola} onChange={e => setParola(e.target.value)} autoComplete="new-password"
             placeholder={cevir("Yeni parola girin (≥8)")}
             className="w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm" />
         </div>
-
-        <div className="flex gap-2 justify-end mt-4">
-          <Button variant="outlined" onClick={onKapat} className="px-3 py-1.5 text-sm">
-            {cevir("Kapat")}
-          </Button>
-          <Button color="primary" onClick={kaydet} disabled={parola.trim().length < 8} yukleniyor={isleniyor}
-            className="px-3 py-1.5 text-sm">
-            {isleniyor ? cevir('Kaydediliyor…') : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Parolayı güncelle")}</span>}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

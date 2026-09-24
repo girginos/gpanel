@@ -8,6 +8,8 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { useDialog } from '@/components/Dialog'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import { Button, Badge } from '@/components/ui'
 
 type Kural = { id: number; tip: 'izin' | 'red'; cidr: string; aciklama: string; sira: number }
@@ -244,6 +246,7 @@ export default function DomainErisimPage() {
   const [, setHata] = useState<string | null>(null)
   const [, setBasari] = useState<string | null>(null)
   const toast = useToast()
+  const dialog = useDialog()
 
   // 🔴 sadeceKurallar: kural ekleme/silme sonrasi SADECE liste tazelenir.
   //
@@ -313,7 +316,7 @@ export default function DomainErisimPage() {
   }
 
   async function kuralSil(kid: number) {
-    if (!window.confirm(cevir("Kural silinsin mi?"))) return
+    if (!(await dialog.onay({ baslik: cevir("Kural silinsin mi?"), onayEtiketi: cevir("Sil"), ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setBasari(null); setIsleniyor(true)
     try {
       await api.delete(`${temel}/kural/${kid}`)
@@ -420,35 +423,25 @@ export default function DomainErisimPage() {
             <>
               {/* ── Kilitlenme uyarisi ─────────────────────────────────── */}
               {kilitRiski && (
-                <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg">
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-red-600 dark:text-red-400 mt-0.5"><Ikon d={I.uyari} className="h-5 w-5" /></span>
-                    <div>
-                      <div className="text-sm font-bold text-red-800 dark:text-red-200">{cevir("Kendinizi kilitleyeceksiniz")}</div>
-                      <div className="text-xs text-red-700 dark:text-red-300 mt-1">
-                        {cevirT(cevir(varsayilan === 'red'
-                          ? "Şu anki IP adresiniz ({0}) izin listesinde yok. Kaydederseniz bu siteye erişiminizi kaybedersiniz."
-                          : "Şu anki IP adresiniz ({0}) reddedilenler arasında. Kaydederseniz bu siteye erişiminizi kaybedersiniz."), benimIP)}
-                      </div>
-                      {varsayilan === 'red' && (
-                        <Button type="button" color="primary" onClick={() => { setYeniTip('izin'); kuralEkle(benimIP) }}
-                          className="mt-2 gap-1.5 min-h-[44px] px-3 text-xs font-semibold">
-                          <Ikon d={I.arti} className="h-4 w-4" />{cevir("Kendi IP'mi ekle")}
-                        </Button>
-                      )}
-                    </div>
+                <UyariKutusu ton="tehlike" className="mb-4" baslik={cevir("Kendinizi kilitleyeceksiniz")}>
+                  <div className="text-xs">
+                    {cevirT(cevir(varsayilan === 'red'
+                      ? "Şu anki IP adresiniz ({0}) izin listesinde yok. Kaydederseniz bu siteye erişiminizi kaybedersiniz."
+                      : "Şu anki IP adresiniz ({0}) reddedilenler arasında. Kaydederseniz bu siteye erişiminizi kaybedersiniz."), benimIP)}
                   </div>
-                </div>
+                  {varsayilan === 'red' && (
+                    <Button color="primary" boyut="sm" ikon={I.arti} onClick={() => { setYeniTip('izin'); kuralEkle(benimIP) }}
+                      className="mt-2">
+                      {cevir("Kendi IP'mi ekle")}
+                    </Button>
+                  )}
+                </UyariKutusu>
               )}
 
               {/* ── "/0" etkisizlik uyarisi ─────────────────────────────── */}
               {(etkisiz || tamKapali) && (etkisiz ? hepsiniKapsayan : hepsiniEngelleyen) && (
-                <div className="mb-4 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg">
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-amber-600 dark:text-amber-400 mt-0.5"><Ikon d={I.uyari} className="h-5 w-5" /></span>
-                    <div>
-                      <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">{etkisiz ? cevir("Bu kural kısıtlamayı etkisiz kılıyor") : cevir("Bu kural herkesi engelliyor")}</div>
-                      <div className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                <UyariKutusu ton="uyari" className="mb-4" baslik={etkisiz ? cevir("Bu kural kısıtlamayı etkisiz kılıyor") : cevir("Bu kural herkesi engelliyor")}>
+                      <div className="text-xs">
 {/* 🔴 Gövde MODA GÖRE. Önceki sürümde başlık moda göre değişiyor ama
                           gövde sabit beyaz-liste metni kalıyordu: kara listede
                           "Bu kural herkesi engelliyor" başlığının altında
@@ -461,24 +454,16 @@ export default function DomainErisimPage() {
                           (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).cidr,
                           (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).aciklama || cevir("açıklama yok"))}
                       </div>
-                    </div>
-                  </div>
-                </div>
+                </UyariKutusu>
               )}
 
               {/* ── CDN uyarisi ────────────────────────────────────────── */}
               {y.vekil_sayisi === 0 && (
-                <div className="mb-4 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-amber-600 dark:text-amber-400 mt-0.5"><Ikon d={I.bulut} className="h-5 w-5" /></span>
-                    <div>
-                      <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">{cevir("CDN arkasındaysanız bu kısıtlama yanlış çalışır")}</div>
-                      <div className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                        {cevir("Sunucuda güvenilir vekil aralığı tanımlı değil. Siteniz Cloudflare gibi bir CDN arkasındaysa nginx ziyaretçinin değil CDN'in IP'sini görür — kurallarınız yanlış adrese uygulanır. Yöneticinizin güvenilir vekil aralıklarını tanımlaması gerekir.")}
-                      </div>
-                    </div>
+                <UyariKutusu ton="uyari" className="mb-4" baslik={cevir("CDN arkasındaysanız bu kısıtlama yanlış çalışır")}>
+                  <div className="text-xs">
+                    {cevir("Sunucuda güvenilir vekil aralığı tanımlı değil. Siteniz Cloudflare gibi bir CDN arkasındaysa nginx ziyaretçinin değil CDN'in IP'sini görür — kurallarınız yanlış adrese uygulanır. Yöneticinizin güvenilir vekil aralıklarını tanımlaması gerekir.")}
                   </div>
-                </div>
+                </UyariKutusu>
               )}
 
               {/* ── Mod secici ─────────────────────────────────────────── */}
@@ -527,21 +512,20 @@ export default function DomainErisimPage() {
                   <input value={yeniAciklama} onChange={e => setYeniAciklama(e.target.value)}
                     placeholder={cevir("Açıklama (isteğe bağlı)")}
                     className="min-h-[44px] px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100 flex-1 min-w-[160px]" />
-                  <Button type="button" color="primary"
+                  <Button color="primary" ikon={I.arti}
                     disabled={!kuralBicimiGecerli(yeniCidr)}
                     yukleniyor={isleniyor}
                     onClick={() => kuralEkle()}
-                    className="gap-1.5 min-h-[44px] px-4 text-sm font-semibold">
-                    <Ikon d={I.arti} className="h-4 w-4" />{isleniyor ? cevir("Ekleniyor…") : cevir("Ekle")}
+                    className="self-stretch">
+                    {isleniyor ? cevir("Ekleniyor…") : cevir("Ekle")}
                   </Button>
                 </div>
                 {benimIP && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <Ikon d={I.kure} className="h-4 w-4" />
                     {cevir("Şu anki IP adresiniz")}: <code className="font-mono text-slate-800 dark:text-slate-200">{benimIP}</code>
-                    <Button type="button" variant="outlined" onClick={() => { setYeniTip('izin'); setYeniCidr(benimIP) }}
-                      className="gap-1 min-h-[44px] px-2.5 text-xs">
-                      <Ikon d={I.arti} className="h-3.5 w-3.5" />{cevir("Kendi IP'mi ekle")}
+                    <Button variant="outlined" boyut="sm" ikon={I.arti} onClick={() => { setYeniTip('izin'); setYeniCidr(benimIP) }}>
+                      {cevir("Kendi IP'mi ekle")}
                     </Button>
                   </div>
                 )}
@@ -565,11 +549,9 @@ export default function DomainErisimPage() {
                             <td className="py-2 pr-3 font-mono text-slate-900 dark:text-slate-100 whitespace-nowrap">{k.cidr}</td>
                             <td className="py-2 pr-3 text-slate-500 dark:text-slate-400">{k.aciklama}</td>
                             <td className="py-2 text-right">
-                              <Button type="button" color="error" variant="soft" isIcon onClick={() => kuralSil(k.id)} disabled={isleniyor}
-                                aria-label={cevir("Sil")}
-                                className="size-11">
-                                <Ikon d={I.cop} className="h-4 w-4" />
-                              </Button>
+                              <Button color="error" variant="flat" isIcon ikon={I.cop} onClick={() => kuralSil(k.id)} disabled={isleniyor}
+                                aria-label={cevir("Sil")} title={cevir("Sil")}
+                                className="size-8" />
                             </td>
                           </tr>
                         ))}
@@ -579,28 +561,24 @@ export default function DomainErisimPage() {
                 </div>
               </Kart>
 
-              <p className="mb-4 px-3 py-2 bg-slate-50 dark:bg-dark-700/60 border border-slate-200 dark:border-dark-600 rounded-lg text-xs text-slate-600 dark:text-slate-400 flex items-start gap-2">
-                <span className="mt-0.5 text-slate-400"><Ikon d={I.bilgi} className="h-4 w-4" /></span>
-                {cevir("Let's Encrypt doğrulaması bu kısıtlamadan muaftır; sertifikanız yenilenmeye devam eder.")}
-              </p>
+              <UyariKutusu ton="bilgi" className="mb-4">
+                <span className="text-xs">{cevir("Let's Encrypt doğrulaması bu kısıtlamadan muaftır; sertifikanız yenilenmeye devam eder.")}</span>
+              </UyariKutusu>
             </>
           )}
 
           {y && (aktif !== y.aktif || varsayilan !== y.varsayilan) && (
-            <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
-              <Ikon d={I.bilgi} className="h-4 w-4" />
-              {cevir("Kaydedilmemiş değişiklik var — Kaydet'e basmadan uygulanmaz.")}
-            </div>
+            <UyariKutusu ton="uyari" className="mb-3">
+              <span className="text-xs">{cevir("Kaydedilmemiş değişiklik var — Kaydet'e basmadan uygulanmaz.")}</span>
+            </UyariKutusu>
           )}
 
           <div className="flex gap-2">
-            <Button type="button" color="primary" onClick={kaydet} yukleniyor={isleniyor}
-              className="gap-2 min-h-[44px] px-5 text-sm font-semibold">
-              <Ikon d={I.disket} className="h-4 w-4" />{isleniyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
+            <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={isleniyor}>
+              {isleniyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
             </Button>
-            <Button type="button" variant="outlined" onClick={() => yukle()} disabled={isleniyor}
-              className="gap-2 min-h-[44px] px-4 text-sm">
-              <Ikon d={I.yenile} className="h-4 w-4" />{cevir("Yeniden Yükle")}
+            <Button variant="outlined" ikon={I.yenile} onClick={() => yukle()} disabled={isleniyor}>
+              {cevir("Yeniden Yükle")}
             </Button>
           </div>
         </>
