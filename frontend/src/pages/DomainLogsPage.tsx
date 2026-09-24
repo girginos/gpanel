@@ -11,6 +11,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type LogDosya = { anahtar: string; etiket: string; yol: string; boyut_b: number; degisme: string; mevcut: boolean }
@@ -65,7 +66,7 @@ export default function DomainLogsPage() {
   const [aktif, setAktif] = useState<string>('access')
   const [satirlar, setSatirlar] = useState<string[]>([])
   const [canli, setCanli] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [otoScroll, setOtoScroll] = useState(true)
   const [gorunum, setGorunum] = useState<'tablo' | 'ham'>('tablo')
   const [arama, setArama] = useState('')
@@ -153,8 +154,9 @@ export default function DomainLogsPage() {
             })
           }
         }
-      } catch (e: any) {
-        if (e.name !== 'AbortError') { setHata(e.message); toast.hata(cevir("İşlem başarısız"), e.message) }
+      } catch (e) {
+        const err = e as Error
+        if (err.name !== 'AbortError') { setHata(err.message); toast.hata(cevir("İşlem başarısız"), err.message) }
       }
     })()
     return () => ctrl.abort()
@@ -223,29 +225,29 @@ export default function DomainLogsPage() {
             <input type="checkbox" checked={otoScroll} onChange={e => setOtoScroll(e.target.checked)} className="rounded" />
             {cevir(cevir("Otomatik kaydır"))}
           </label>
-          <button
+          <Button
             onClick={() => setCanli(c => !c)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
-              canli
-                ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50'
-                : 'bg-emerald-600 text-white hover:bg-emerald-700'
-            }`}
+            color={canli ? 'error' : 'success'}
+            variant={canli ? 'soft' : 'filled'}
+            className="px-3 py-1.5 text-xs"
           >
             {canli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.durdur} /> {cevir("Durdur")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Canlı Takip")}</span>}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={ilkYukle}
             disabled={canli}
-            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md transition disabled:opacity-50"
+            variant="outlined"
+            className="px-3 py-1.5 text-xs"
           >
             <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Son 200")}</span>
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setSatirlar([])}
-            className="px-3 py-1.5 text-xs font-medium bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md transition"
+            variant="outlined"
+            className="px-3 py-1.5 text-xs"
           >
             {cevir("Temizle")}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -259,14 +261,16 @@ export default function DomainLogsPage() {
             value={arama}
             onChange={e => setArama(e.target.value)}
             placeholder={cevir("Ara — IP, yol, durum kodu, tarayıcı…")}
-            className="w-full pl-8 pr-8 py-1.5 text-sm bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
+            className="w-full pl-8 pr-9 py-1.5 text-sm bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
           />
           {arama && (
-            <button
+            <Button
               onClick={() => setArama('')}
               aria-label={cevir("Aramayı temizle")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none"
-            >×</button>
+              variant="flat"
+              isIcon
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 size-8 rounded-md text-lg leading-none"
+            >×</Button>
           )}
         </div>
         {arama && (
@@ -410,7 +414,7 @@ function grupla(satirlar: string[]): { bas: string; devam: string[] }[] {
 // ozetMesaj: ham nginx error mesajini Plesk gibi kisaltir — FastCGI/stderr
 // gurultusu, upstream/client kuyrugu atilir; ozde PHP hata + tur kalir.
 function ozetMesaj(msg: string): string {
-  let s = msg
+  const s = msg
     .replace(/^\d+#\d+:\s*\*\d+\s*/, '')                 // "248518#248518: *121302 "
     .replace(/FastCGI sent in stderr:\s*/i, '')
     .replace(/PHP message:\s*/i, '')

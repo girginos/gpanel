@@ -7,6 +7,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type KV ={ ad: string; sayi: number }
 type Gun = { tarih: string; istek: number }
@@ -85,7 +86,7 @@ export default function DomainStatsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
           </div>
-          <button onClick={yukle} className="self-start sm:self-auto shrink-0 text-sm px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-dark-700"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
+          <Button onClick={yukle} variant="outlined" className="self-start sm:self-auto shrink-0 text-sm px-3 py-1.5"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (

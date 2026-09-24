@@ -14,6 +14,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type Yedek = { id: number; domain_id: number; tip: string; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
@@ -368,7 +369,7 @@ export default function DomainBackupsPage() {
 
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yedekler")}</h1>
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
-        <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
+        <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
         {' · '}home + MySQL dump = tar.gz · {sched.freq === 'none'
           ? cevir("Otomatik yedek kapalı")
           : cevirT(cevir("{0} {1}:00 · son {2} oto-yedek korunur"), sched.freq === 'daily' ? cevir("Günlük") : cevir("Haftalık"), String(sched.hour).padStart(2,'0'), sched.retention)}
@@ -398,9 +399,9 @@ export default function DomainBackupsPage() {
             }
             const m = meta[f]
             const renk: Record<string,string> = {
-              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-dark-700 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700',
-              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20': 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20',
-              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'   : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/20',
+              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:border-dark-300 dark:bg-dark-600 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:hover:border-dark-450 dark:hover:bg-dark-600',
+              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20': 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/20',
+              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'   : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:hover:border-indigo-700 dark:hover:bg-indigo-900/20',
             }
             return (
               <button key={f} type="button" disabled={schedKayit || aktif}
@@ -454,11 +455,10 @@ export default function DomainBackupsPage() {
             </p>
           </div>
           {!dest.yok && dest.son_durum && (
-            <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded ${
-              dest.son_durum === 'basarili' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' :
-              dest.son_durum === 'hata' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-              'bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400 dark:text-slate-500'
-            }`}>{dest.son_durum === 'basarili' ? cevir('● Son: başarılı') : dest.son_durum === 'hata' ? cevir('✗ Son: hata') : dest.son_durum}</span>
+            <Badge variant="soft" color={dest.son_durum === 'basarili' ? 'success' : dest.son_durum === 'hata' ? 'error' : 'neutral'}
+              className="shrink-0 text-[10px] uppercase tracking-wider font-semibold">
+              {dest.son_durum === 'basarili' ? cevir('● Son: başarılı') : dest.son_durum === 'hata' ? cevir('✗ Son: hata') : dest.son_durum}
+            </Badge>
           )}
         </div>
 
@@ -480,7 +480,7 @@ export default function DomainBackupsPage() {
                 return (
                   <button key={t} type="button"
                     onClick={() => setDestForm(f => ({...f, tip: t, port: t === 'sftp' ? 22 : 21}))}
-                    className={`flex-1 text-xs px-3 py-2 rounded border ${aktif ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-semibold' : 'border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700'}`}>
+                    className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${aktif ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-semibold' : 'border-slate-200 dark:border-dark-600 text-slate-700 dark:text-dark-100 hover:bg-slate-50 dark:hover:bg-dark-600'}`}>
                     {t === 'sftp' ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> SFTP (port 22)</span> : <span className="inline-flex items-center gap-1.5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M4.9 16.1a10 10 0 010-14.2m2.83 2.83a6 6 0 000 8.48M12 12h.01m4.24 4.24a10 10 0 000-14.2m-2.83 2.83a6 6 0 010 8.48M12 12l-3 9m6 0l-3-9"/></svg> FTP (port 21)</span>}
                   </button>
                 )
@@ -528,33 +528,33 @@ export default function DomainBackupsPage() {
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {destTest && (
-              <span className={`text-xs px-2 py-1 rounded font-medium ${destTest.ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`}>
+              <Badge variant="soft" color={destTest.ok ? 'success' : 'error'} className="text-xs leading-snug">
                 {destTest.ok ? cevir('✓ Bağlantı OK') : '✗ ' + (destTest.hata?.slice(0, 80) || cevir('Hata'))}
-              </span>
+              </Badge>
             )}
-            <button type="button" onClick={destBaglantiTesti} disabled={destKayit || !destForm.host || !destForm.kullanici}
-              className="text-xs px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 disabled:opacity-50">
+            <Button onClick={destBaglantiTesti} disabled={destKayit || !destForm.host || !destForm.kullanici}
+              variant="outlined" className="text-xs px-3 py-1.5">
               {destKayit ? cevir("Test ediliyor…") : cevir("Bağlantı Testi")}
-            </button>
-            <button type="button" onClick={destKaydet} disabled={destKayit || !destForm.host || !destForm.kullanici}
-              className="text-xs px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded font-medium">
+            </Button>
+            <Button onClick={destKaydet} disabled={destKayit || !destForm.host || !destForm.kullanici}
+              color="primary" className="text-xs px-3 py-1.5">
               {cevir("Kaydet")}
-            </button>
+            </Button>
             {!dest.yok && (
-              <button type="button" onClick={destSil} disabled={destKayit}
-                className="text-xs px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 rounded">
+              <Button onClick={destSil} disabled={destKayit}
+                color="error" variant="outlined" className="text-xs px-3 py-1.5">
                 {cevir("Hedefi sil")}
-              </button>
+              </Button>
             )}
           </div>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={olustur} disabled={isleniyor} className="px-3.5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+        <Button onClick={olustur} yukleniyor={isleniyor} color="primary" className="px-3.5 py-2 text-sm">
           {isleniyor ? cevir("Yedekleniyor…") : cevir("+ Şimdi Yedekle")}
-        </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
+        </Button>
+        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} {cevir("yedek")}</span>
       </div>
 
@@ -613,24 +613,23 @@ export default function DomainBackupsPage() {
                       kullanıcı "yedeğim var" sanıp İndir'e basınca 500
                       alıyordu. Liste, elindekini değil GERÇEĞİ göstermeli. */}
                   {y.mevcut === 'yok' && (
-                    <span className="ml-2 inline-block rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                    <Badge variant="soft" color="error" className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold">
                       {cevir("DOSYA YOK")}
-                    </span>
+                    </Badge>
                   )}
                   {/* 🔴 "uzakta" DEĞİL "uzakta (doğrulanmadı)".
                       Sunucu bu değeri kaydın `notlar` etiketinden okuyor; ağa
                       çıkmıyor. Kesin bilgi gibi göstermek, hiçbir yerde
                       olmayan bir yedeği geçerli sandırırdı. */}
                   {y.mevcut === 'uzak_iddia' && (
-                    <span className="ml-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                    <Badge variant="soft" color="warning" className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold">
                       {cevir("uzakta (doğrulanmadı)")}
-                    </span>
+                    </Badge>
                   )}
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Tip")}>
-                  <span className={`text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
-                    y.tip === 'planli' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400 dark:text-slate-500'
-                  }`}>{y.tip === 'planli' ? cevir('Planlı') : y.tip}</span>
+                  <Badge variant="soft" color={y.tip === 'planli' ? 'info' : 'neutral'}
+                    className="px-1.5 py-0.5 uppercase tracking-wider font-semibold">{y.tip === 'planli' ? cevir('Planlı') : y.tip}</Badge>
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Boyut")}>
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span>
@@ -641,15 +640,22 @@ export default function DomainBackupsPage() {
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   {/* İndirme YEREL dosyayı okur; uzağa taşınmış kayıt
                       indirilemez, açık bırakmak 500 üretirdi. */}
-                  <button
-                    onClick={() => indir(y)}
-                    disabled={y.mevcut !== 'yerel'}
+                  {/* Tailux .btn-base disabled'da pointer-events:none → title
+                      butonda görünmez; açıklama sarmalayıcıda tutulur. */}
+                  <span
+                    className={`inline-block ${y.mevcut !== 'yerel' ? 'cursor-not-allowed' : ''}`}
                     title={y.mevcut === 'yok' ? cevir("Yedek dosyası bulunamadı")
                       : y.mevcut === 'uzak_iddia' ? cevir("Yedek uzak depoya taşınmış — önce geri getirilmeli") : undefined}
-                    className="text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 dark:bg-brand-900/20 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  >{cevir("İndir")}</button>
-                  <button onClick={() => setGeriYukle(y)} className="text-sm text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 dark:bg-amber-900/20 px-2 py-1 rounded"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Geri Yükle")}</span></button>
-                  <button onClick={() => setSilinecek(y)} className="text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 px-2 py-1 rounded">{cevir("Sil")}</button>
+                  >
+                    <Button
+                      onClick={() => indir(y)}
+                      disabled={y.mevcut !== 'yerel'}
+                      color="primary" variant="flat"
+                      className="text-sm px-2 py-1 disabled:opacity-40"
+                    >{cevir("İndir")}</Button>
+                  </span>
+                  <Button onClick={() => setGeriYukle(y)} color="warning" variant="flat" className="text-sm px-2 py-1"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Geri Yükle")}</span></Button>
+                  <Button onClick={() => setSilinecek(y)} color="error" variant="soft" className="text-sm px-2 py-1">{cevir("Sil")}</Button>
                 </td>
               </tr>
             ))}
@@ -733,7 +739,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
   })()
 
   function toggle(y: string) {
-    setSecili(prev => { const n = new Set(prev); n.has(y) ? n.delete(y) : n.add(y); return n })
+    setSecili(prev => { const n = new Set(prev); if (n.has(y)) n.delete(y); else n.add(y); return n })
   }
 
   async function gonder() {
@@ -767,8 +773,8 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
 
   const secBtn = (aktif: boolean) =>
     `text-left rounded-lg border px-3 py-2 transition ${aktif
-      ? 'border-dark-700 dark:border-slate-100 bg-dark-800 dark:bg-slate-100 text-white dark:text-slate-900'
-      : 'border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 hover:border-slate-400 dark:hover:border-slate-500'}`
+      ? 'border-primary-600 bg-primary-600 text-white dark:border-primary-500'
+      : 'border-slate-200 dark:border-dark-500 bg-white dark:bg-dark-700 hover:border-slate-400 dark:hover:border-dark-400'}`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -783,7 +789,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
             {MODLAR.map(m => (
               <button key={m.deger} type="button" onClick={() => setMod(m.deger)} className={secBtn(mod === m.deger)}>
                 <div className="text-sm font-medium">{m.etiket}</div>
-                <div className={`text-[11px] mt-0.5 ${mod === m.deger ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400 dark:text-slate-500'}`}>{m.aciklama}</div>
+                <div className={`text-[11px] mt-0.5 ${mod === m.deger ? 'text-white/75' : 'text-slate-400 dark:text-dark-300'}`}>{m.aciklama}</div>
               </button>
             ))}
           </div>
@@ -824,11 +830,11 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
               <div className="flex gap-2">
                 <button type="button" onClick={() => setHedef('klasor')} className={`flex-1 ${secBtn(hedef === 'klasor')}`}>
                   <div className="text-sm font-medium">{cevir("Ayrı klasöre")}</div>
-                  <div className={`text-[11px] ${hedef === 'klasor' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>{cevir("geri-yukleme-…/ (hiçbir şey ezilmez)")}</div>
+                  <div className={`text-[11px] ${hedef === 'klasor' ? 'text-white/75' : 'text-slate-400 dark:text-dark-300'}`}>{cevir("geri-yukleme-…/ (hiçbir şey ezilmez)")}</div>
                 </button>
                 <button type="button" onClick={() => setHedef('yerinde')} className={`flex-1 ${secBtn(hedef === 'yerinde')}`}>
                   <div className="text-sm font-medium">{cevir("Yerinde")}</div>
-                  <div className={`text-[11px] ${hedef === 'yerinde' ? 'text-white/70 dark:text-slate-900/70' : 'text-slate-400'}`}>{cevir("orijinal konuma (üzerine yaz)")}</div>
+                  <div className={`text-[11px] ${hedef === 'yerinde' ? 'text-white/75' : 'text-slate-400 dark:text-dark-300'}`}>{cevir("orijinal konuma (üzerine yaz)")}</div>
                 </button>
               </div>
             </div>
@@ -868,12 +874,12 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
         </div>
 
         <div className="px-5 py-3 border-t border-slate-200 dark:border-dark-600 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={busy}
-            className="rounded-lg border border-slate-200 dark:border-dark-600 px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-dark-700">{cevir("İptal")}</button>
-          <button type="button" onClick={gonder} disabled={busy}
-            className="rounded-lg bg-dark-800 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+          <Button onClick={onClose} disabled={busy}
+            variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+          <Button onClick={gonder} yukleniyor={busy}
+            color="primary" className="px-4 py-2 text-sm">
             {busy ? cevir("Geri yükleniyor…") : cevir("Geri Yükle")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

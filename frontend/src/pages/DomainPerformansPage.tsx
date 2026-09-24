@@ -6,6 +6,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Oge = { ad: string; aktif: boolean; deger: string; ayar: string; aciklama: string }
 type Oneri = { metin: string; onem: string; ayar: string }
@@ -71,7 +72,7 @@ export default function DomainPerformansPage() {
           <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs flex flex-col items-center justify-center">
             <div className="relative w-28 h-28">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                <circle cx="18" cy="18" r="15.9" fill="none" className="stroke-slate-100 dark:stroke-slate-700" strokeWidth="3" />
+                <circle cx="18" cy="18" r="15.9" fill="none" className="stroke-slate-100 dark:stroke-dark-500" strokeWidth="3" />
                 <circle cx="18" cy="18" r="15.9" fill="none" stroke={skorHex[skorRenk]} strokeWidth="3" strokeLinecap="round"
                   strokeDasharray={`${o.skor} 100`} />
               </svg>
@@ -97,7 +98,7 @@ export default function DomainPerformansPage() {
                     </div>
                     <p className="text-[11px] text-slate-400 ml-4 truncate">{og.aciklama}</p>
                   </div>
-                  {og.ayar && <button onClick={() => git(og.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Ayarla →")}</button>}
+                  {og.ayar && <Button onClick={() => git(og.ayar)} color="primary" variant="flat" className="shrink-0 text-xs px-2 py-1">{cevir("Ayarla →")}</Button>}
                 </div>
               ))}
             </div>
@@ -112,7 +113,7 @@ export default function DomainPerformansPage() {
               <li key={i} className="flex items-start gap-2 text-sm">
                 <span className={`mt-0.5 ${onemRenk[n.onem] || 'text-slate-400'}`}>●</span>
                 <span className="text-slate-600 dark:text-slate-300 flex-1">{n.metin}</span>
-                {n.ayar && <button onClick={() => git(n.ayar)} className="shrink-0 text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir("Git →")}</button>}
+                {n.ayar && <Button onClick={() => git(n.ayar)} color="primary" variant="flat" className="shrink-0 text-xs px-2 py-1">{cevir("Git →")}</Button>}
               </li>
             ))}
           </ul>
