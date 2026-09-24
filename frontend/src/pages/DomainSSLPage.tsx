@@ -11,6 +11,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import IlerlemePaneli, { type IlerlemeIsi } from '@/components/IlerlemePaneli'
+import { Button, Badge } from '@/components/ui'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string; ssl: boolean; ssl_bitis?: string }
 type SSLDurum = {
@@ -331,21 +332,21 @@ export default function DomainSSLPage() {
           {durum && (
             durum.aktif && durum.kaynak === 'letsencrypt' ? (
               // Yalnız GERÇEK CA (Let's Encrypt) = tarayıcıda güvenilir → yeşil Korumalı.
-              <span className="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <Badge color="success" variant="soft" className="gap-1.5 uppercase font-semibold tracking-wider">
+                <span className="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
                 {cevir(cevir("Korumalı"))}
-              </span>
+              </Badge>
             ) : durum.aktif ? (
               // Self-signed: şifreli AMA tarayıcı güvenmez → yeşil DEĞİL, amber cevir("Öz-imzalı").
-              <span className="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              <Badge color="warning" variant="soft" className="gap-1.5 uppercase font-semibold tracking-wider">
+                <span className="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
                 {cevir("Öz-imzalı")}
-              </span>
+              </Badge>
             ) : (
-              <span className="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded uppercase font-semibold tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              <Badge color="warning" variant="soft" className="gap-1.5 uppercase font-semibold tracking-wider">
+                <span className="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
                 {cevir(cevir("Korumasız"))}
-              </span>
+              </Badge>
             )
           )}
         </div>
@@ -355,13 +356,15 @@ export default function DomainSSLPage() {
           <div className="space-y-2 text-sm">
             <Sat e={cevir("Kaynak")} d={durum.kaynak === 'letsencrypt' ? "Let's Encrypt" : cevir("Self-signed (öz-imzalı)")} />
             {durum.bitis_iso && <Sat e={cevir("Bitiş")} d={new Date(durum.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'long' })} />}
-            <button
+            <Button
+              color="error"
+              variant="outlined"
               onClick={disable}
               disabled={isleniyor || isDurum === 'calisiyor'}
-              className="mt-4 px-4 py-2 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 disabled:opacity-50 rounded-md text-sm font-medium transition"
+              className="mt-4 px-4 text-sm"
             >
               {cevir("SSL'i Kaldır (HTTP'ye dön)")}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">
@@ -393,13 +396,14 @@ export default function DomainSSLPage() {
               <li>{cevir("✓ Anında kurulur")}</li>
               <li>{cevir("✗ Tarayıcıda \"güvenli değil\" uyarısı")}</li>
             </ul>
-            <button
+            <Button
+              color="primary"
               onClick={() => issue('self-signed')}
-              disabled={isleniyor || isDurum === 'calisiyor'}
-              className="w-full px-4 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md transition"
+              yukleniyor={isleniyor || isDurum === 'calisiyor'}
+              className="w-full px-4 py-2.5 text-sm"
             >
               {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Self-Signed Kur")}
-            </button>
+            </Button>
           </div>
 
           <div className="bg-white dark:bg-dark-700 border border-emerald-200 dark:border-emerald-800 rounded-lg p-6">
@@ -426,13 +430,14 @@ export default function DomainSSLPage() {
                 </span>
               </label>
             )}
-            <button
+            <Button
+              color="success"
               onClick={() => issue('letsencrypt')}
-              disabled={isleniyor || isDurum === 'calisiyor'}
-              className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-md transition"
+              yukleniyor={isleniyor || isDurum === 'calisiyor'}
+              className="w-full px-4 py-2.5 text-sm"
             >
               {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Let's Encrypt Sertifikası Al")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -455,30 +460,31 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
   const mailSatirlar = kapsam.kapsamlar.filter(k => k.grup === 'mail')
   // Varsayilan: tum mail alt-alanlari TIKLI; kullanici gereksizi kaldirir.
   const [secili, setSecili] = useState<Set<string>>(() => new Set(mailSatirlar.map(k => onek(k.host))))
-  const secTogglee = (p: string) => setSecili(s => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n })
+  const secTogglee = (p: string) => setSecili(s => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
   const rozet = (d: KapsamSatir) => {
     if (d.durum === 'kurulu') {
-      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{cevir("Kurulu")}</span>
+      return <Badge color="success" variant="soft" className="shrink-0 gap-1.5 font-semibold"><span className="size-1.5 rounded-full bg-current" aria-hidden="true" />{cevir("Kurulu")}</Badge>
     }
     if (d.durum === 'dns_yok') {
-      return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-slate-100 dark:bg-dark-600/50 text-slate-500 dark:text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-400" />{cevir("DNS yok")}</span>
+      return <Badge variant="soft" className="shrink-0 gap-1.5 font-semibold"><span className="size-1.5 rounded-full bg-current" aria-hidden="true" />{cevir("DNS yok")}</Badge>
     }
-    return <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{cevir("Eksik")}</span>
+    return <Badge color="warning" variant="soft" className="shrink-0 gap-1.5 font-semibold"><span className="size-1.5 rounded-full bg-current" aria-hidden="true" />{cevir("Eksik")}</Badge>
   }
   return (
     <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-6 mb-5">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Sertifika Kapsamı")}</h2>
         {onDnsYenile && (
-          <button
+          <Button
             type="button"
+            variant="outlined"
             onClick={onDnsYenile}
             title={cevir("DNS önbelleğini temizle ve kayıtları kamu DNS'ten yeniden oku")}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-600/50 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600 transition"
+            className="gap-2 px-3.5 text-sm"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
             {cevir("DNS'i yenile")}
-          </button>
+          </Button>
         )}
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
@@ -494,7 +500,7 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{cevir(d.etiket)}</span>
-                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600/50 text-slate-500 dark:text-slate-400">{d.grup === 'mail' ? cevir("Posta") : 'Web'}</span>
+                  <Badge variant="soft" className="px-1.5 py-0.5 text-[11px] font-normal">{d.grup === 'mail' ? cevir("Posta") : 'Web'}</Badge>
                 </div>
                 <div className="text-xs font-mono text-slate-400 dark:text-slate-500 truncate">{d.host}</div>
                 {d.durum !== 'kurulu' && d.aciklama && (
@@ -512,7 +518,7 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
       {mailSatirlar.length > 0 && onKur && (
         <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <span className="text-xs text-amber-800 dark:text-amber-200">{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
-          <button disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</button>
+          <Button color="primary" disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0 px-3 text-xs">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</Button>
         </div>
       )}
     </div>

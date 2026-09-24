@@ -8,6 +8,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Kural = { id: number; tip: 'izin' | 'red'; cidr: string; aciklama: string; sira: number }
 type Yanit = {
@@ -430,10 +431,10 @@ export default function DomainErisimPage() {
                           : "Şu anki IP adresiniz ({0}) reddedilenler arasında. Kaydederseniz bu siteye erişiminizi kaybedersiniz."), benimIP)}
                       </div>
                       {varsayilan === 'red' && (
-                        <button type="button" onClick={() => { setYeniTip('izin'); kuralEkle(benimIP) }}
-                          className="mt-2 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold">
+                        <Button type="button" color="primary" onClick={() => { setYeniTip('izin'); kuralEkle(benimIP) }}
+                          className="mt-2 gap-1.5 min-h-[44px] px-3 text-xs font-semibold">
                           <Ikon d={I.arti} className="h-4 w-4" />{cevir("Kendi IP'mi ekle")}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -526,21 +527,22 @@ export default function DomainErisimPage() {
                   <input value={yeniAciklama} onChange={e => setYeniAciklama(e.target.value)}
                     placeholder={cevir("Açıklama (isteğe bağlı)")}
                     className="min-h-[44px] px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100 flex-1 min-w-[160px]" />
-                  <button type="button"
-                    disabled={isleniyor || !kuralBicimiGecerli(yeniCidr)}
+                  <Button type="button" color="primary"
+                    disabled={!kuralBicimiGecerli(yeniCidr)}
+                    yukleniyor={isleniyor}
                     onClick={() => kuralEkle()}
-                    className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold">
+                    className="gap-1.5 min-h-[44px] px-4 text-sm font-semibold">
                     <Ikon d={I.arti} className="h-4 w-4" />{isleniyor ? cevir("Ekleniyor…") : cevir("Ekle")}
-                  </button>
+                  </Button>
                 </div>
                 {benimIP && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <Ikon d={I.kure} className="h-4 w-4" />
                     {cevir("Şu anki IP adresiniz")}: <code className="font-mono text-slate-800 dark:text-slate-200">{benimIP}</code>
-                    <button type="button" onClick={() => { setYeniTip('izin'); setYeniCidr(benimIP) }}
-                      className="inline-flex items-center gap-1 min-h-[44px] px-2.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-600 font-medium">
+                    <Button type="button" variant="outlined" onClick={() => { setYeniTip('izin'); setYeniCidr(benimIP) }}
+                      className="gap-1 min-h-[44px] px-2.5 text-xs">
                       <Ikon d={I.arti} className="h-3.5 w-3.5" />{cevir("Kendi IP'mi ekle")}
-                    </button>
+                    </Button>
                   </div>
                 )}
 
@@ -555,22 +557,19 @@ export default function DomainErisimPage() {
                         {kurallar.map(k => (
                           <tr key={k.id} className="border-b border-slate-100 dark:border-dark-600 last:border-0">
                             <td className="py-2 pr-3 w-[92px]">
-                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold ${
-                                k.tip === 'izin'
-                                  ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-                                  : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>
+                              <Badge color={k.tip === 'izin' ? 'success' : 'error'} variant="soft" className="gap-1 text-[11px] font-semibold">
                                 <Ikon d={k.tip === 'izin' ? I.onay : I.ban} className="h-3.5 w-3.5" />
                                 {k.tip === 'izin' ? cevir("İzin ver") : cevir("Reddet")}
-                              </span>
+                              </Badge>
                             </td>
                             <td className="py-2 pr-3 font-mono text-slate-900 dark:text-slate-100 whitespace-nowrap">{k.cidr}</td>
                             <td className="py-2 pr-3 text-slate-500 dark:text-slate-400">{k.aciklama}</td>
                             <td className="py-2 text-right">
-                              <button type="button" onClick={() => kuralSil(k.id)} disabled={isleniyor}
+                              <Button type="button" color="error" variant="soft" isIcon onClick={() => kuralSil(k.id)} disabled={isleniyor}
                                 aria-label={cevir("Sil")}
-                                className="inline-flex items-center justify-center h-11 w-11 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 disabled:opacity-50">
+                                className="size-11">
                                 <Ikon d={I.cop} className="h-4 w-4" />
-                              </button>
+                              </Button>
                             </td>
                           </tr>
                         ))}
@@ -595,14 +594,14 @@ export default function DomainErisimPage() {
           )}
 
           <div className="flex gap-2">
-            <button type="button" onClick={kaydet} disabled={isleniyor}
-              className="inline-flex items-center gap-2 min-h-[44px] px-5 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold">
+            <Button type="button" color="primary" onClick={kaydet} yukleniyor={isleniyor}
+              className="gap-2 min-h-[44px] px-5 text-sm font-semibold">
               <Ikon d={I.disket} className="h-4 w-4" />{isleniyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
-            </button>
-            <button type="button" onClick={() => yukle()} disabled={isleniyor}
-              className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-600 text-sm font-medium text-slate-700 dark:text-slate-200">
+            </Button>
+            <Button type="button" variant="outlined" onClick={() => yukle()} disabled={isleniyor}
+              className="gap-2 min-h-[44px] px-4 text-sm">
               <Ikon d={I.yenile} className="h-4 w-4" />{cevir("Yeniden Yükle")}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -610,7 +609,7 @@ export default function DomainErisimPage() {
   )
 }
 
-function Kart({ baslik, children }: { baslik: string; children: any }) {
+function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>

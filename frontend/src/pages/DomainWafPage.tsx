@@ -10,6 +10,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Mod = 'devral' | 'kapali' | 'engelle' | 'denetle'
 type Ayar = { mod: Mod; paranoya: number }
@@ -172,15 +173,11 @@ export default function DomainWafPage() {
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Etkin Durum:")}</span>
               {y.efektif.aktif ? (
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                  y.efektif.engine === 'On'
-                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                }`}>
+                <Badge color={y.efektif.engine === 'On' ? 'success' : 'info'} variant="soft" className="gap-1.5 px-2.5 font-semibold">
                   ● {y.efektif.engine === 'On' ? cevir("Aktif · Engelleme") : cevir("Aktif · Denetleme")} · {cevir("Paranoya")} {y.efektif.paranoya}
-                </span>
+                </Badge>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400">{cevir("○ Pasif")}</span>
+                <Badge variant="soft" className="gap-1.5 px-2.5 font-semibold">{cevir("○ Pasif")}</Badge>
               )}
               <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
                 {cevir("Plan varsayılanı")} ({y.plan.ad || '—'}):{' '}
@@ -237,14 +234,14 @@ export default function DomainWafPage() {
           </Kart>
 
           <div className="flex gap-3 mt-6">
-            <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+            <Button color="primary" onClick={kaydet} yukleniyor={isleniyor}
+              className="px-6 py-2.5 text-sm">
               {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
-            </button>
-            <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+            </Button>
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
+              className="px-4 py-2.5 text-sm">
               {cevir("Yeniden Yükle")}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -252,7 +249,7 @@ export default function DomainWafPage() {
   )
 }
 
-function Kart({ baslik, children }: { baslik: string; children: any }) {
+function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>

@@ -9,6 +9,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
@@ -94,13 +95,8 @@ const IK = {
   geri: 'M9 15L3 9l6-6M3 9h12a6 6 0 010 12h-3',
   cop: 'M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v11a2 2 0 01-2 2h-4a2 2 0 01-2-2V7',
 }
-// Buton stilleri — tutarlı, erişilebilir odak halkası.
-const BTN = {
-  tehlikeCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700/70 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 focus:outline-none focus:ring-2 focus:ring-red-400/40 transition whitespace-nowrap',
-  notr: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-600 focus:outline-none focus:ring-2 focus:ring-slate-400/30 transition whitespace-nowrap',
-  onayCizgi: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 transition whitespace-nowrap',
-  tehlikeDolu: 'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-red-600 hover:bg-red-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 transition whitespace-nowrap',
-}
+// Satır içi buton ölçüsü (Tailux Button) — 32px dokunma hedefi, tek satır.
+const SATIR_BTN = 'gap-1 px-2.5 text-xs whitespace-nowrap'
 
 // G-AV marka logosu — GirginOS'un KENDİ antivirüs motoru. (Imunify lisanslı bir
 // markadır; hiçbir yerde kullanılmaz.) Gerçek, dolgulu kalkan SVG — jenerik
@@ -187,16 +183,16 @@ export default function DomainAntivirusPage() {
   async function geriYukle(k: KarantinaKayit) {
     if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: cevirT(cevir("Dosya orijinal konumuna geri yüklensin mi?\n{0}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)"), k.orijinal_yol) }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/geri-yukle`, {}); kyukle(); yukle() }
-    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
+    catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   async function karSil(k: KarantinaKayit) {
     if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: cevirT(cevir("Karantinadaki dosya KALICI silinsin mi?\n{0}\n\n(Geri alınamaz.)"), k.orijinal_yol) }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle(); yukle() }
-    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
+    catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   async function karIncele(k: KarantinaKayit) {
     try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? cevir("[ikili dosya]") : data.icerik, kesik: data.kesik }) }
-    catch (e: any) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
+    catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
   if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
@@ -263,9 +259,9 @@ export default function DomainAntivirusPage() {
               </div>}
             </div>
             <div className="flex gap-2">
-              <button onClick={tara} disabled={tarariyor}
-                className="px-4 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
-                {tarariyor ? cevir("Taranıyor…") : cevir("Şimdi Tara")}</button>
+              <Button color="primary" onClick={tara} yukleniyor={tarariyor}
+                className="px-4 text-sm">
+                {tarariyor ? cevir("Taranıyor…") : cevir("Şimdi Tara")}</Button>
             </div>
           </div>
           {tarariyor && (
@@ -307,16 +303,16 @@ export default function DomainAntivirusPage() {
                         <td className={T.hucre} data-etiket={cevir("İmza")}>
                           <span className="text-slate-700 dark:text-slate-200 text-right lg:text-left break-all">{b.imza}</span>
                         </td>
-                        <td className={T.hucre} data-etiket={cevir("Motor")}><span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{b.motor}</span></td>
+                        <td className={T.hucre} data-etiket={cevir("Motor")}><Badge variant="soft">{b.motor}</Badge></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
-                          {b.karantina ? <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</span>
-                            : <span className="text-xs text-red-600 dark:text-red-400">{cevir("Aktif")}</span>}
+                          {b.karantina ? <Badge color="warning" variant="soft" className="gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</Badge>
+                            : <Badge color="error" variant="soft">{cevir("Aktif")}</Badge>}
                         </td>
                         <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
                           {!b.karantina && (
-                            <button onClick={() => karantina(b)} className={`${BTN.tehlikeCizgi} lg:ml-auto`}>
+                            <Button color="error" variant="soft" onClick={() => karantina(b)} className={`${SATIR_BTN} lg:ml-auto`}>
                               <Svg d={IK.kilit} /> {cevir("Karantinaya al")}
-                            </button>
+                            </Button>
                           )}
                         </td>
                       </tr>
@@ -350,17 +346,17 @@ export default function DomainAntivirusPage() {
                         <td className={`${T.hucreBaslik} lg:min-w-[22rem]`}><YolKutu yol={k.orijinal_yol} /></td>
                         <td className={T.hucre} data-etiket={cevir("Tespit")}><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
-                          {k.durum === 'karantina' ? <span className="text-xs text-amber-600 dark:text-amber-400 inline-flex items-center gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</span>
-                            : k.durum === 'geri_yuklendi' ? <span className="text-xs text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"><Svg d={IK.geri} /> {cevir("Geri yüklendi")}</span>
-                            : <span className="text-xs text-slate-400 inline-flex items-center gap-1"><Svg d={IK.cop} /> {cevir("Silindi")}</span>}
+                          {k.durum === 'karantina' ? <Badge color="warning" variant="soft" className="gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</Badge>
+                            : k.durum === 'geri_yuklendi' ? <Badge color="success" variant="soft" className="gap-1"><Svg d={IK.geri} /> {cevir("Geri yüklendi")}</Badge>
+                            : <Badge variant="soft" className="gap-1"><Svg d={IK.cop} /> {cevir("Silindi")}</Badge>}
                         </td>
                         <td className={T.hucre} data-etiket={cevir("Tarih")}><span className="text-xs text-slate-400">{k.tarih}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>
                           {k.durum === 'karantina' && k.mevcut && (
                             <span className="flex flex-wrap gap-1.5 lg:justify-end">
-                              <button onClick={() => karIncele(k)} className={BTN.notr}><Svg d={IK.ara} /> {cevir("İncele")}</button>
-                              <button onClick={() => geriYukle(k)} className={BTN.onayCizgi}><Svg d={IK.geri} /> {cevir("Geri yükle")}</button>
-                              <button onClick={() => karSil(k)} className={BTN.tehlikeDolu}><Svg d={IK.cop} /> {cevir("Sil")}</button>
+                              <Button variant="outlined" onClick={() => karIncele(k)} className={SATIR_BTN}><Svg d={IK.ara} /> {cevir("İncele")}</Button>
+                              <Button color="success" variant="soft" onClick={() => geriYukle(k)} className={SATIR_BTN}><Svg d={IK.geri} /> {cevir("Geri yükle")}</Button>
+                              <Button color="error" variant="soft" onClick={() => karSil(k)} className={SATIR_BTN}><Svg d={IK.cop} /> {cevir("Sil")}</Button>
                             </span>
                           )}
                         </td>
@@ -379,7 +375,7 @@ export default function DomainAntivirusPage() {
             <div className="bg-white dark:bg-dark-700 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
               <div className="px-4 py-3 border-b border-slate-200 dark:border-dark-600 flex items-center justify-between">
                 <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
-                <button onClick={() => setInceleModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
+                <Button variant="flat" isIcon onClick={() => setInceleModal(null)} aria-label={cevir("Kapat")} className="size-8 shrink-0 text-lg">×</Button>
               </div>
               {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">{cevir("Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.")}</div>}
               <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>

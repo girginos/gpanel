@@ -8,6 +8,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Kayit = { id: number; yol: string; kullanici: string; created_at: string }
 
@@ -49,8 +50,8 @@ export default function DomainSifreKorumaPage() {
   const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
   const [liste, setListe] = useState<Kayit[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setOk] = useState<string | null>(null)
   const [yol, setYol] = useState('/gizli')
   const [kullanici, setKullanici] = useState('')
   const [parola, setParola] = useState('')
@@ -131,9 +132,9 @@ export default function DomainSifreKorumaPage() {
             </label>
           </div>
           <p className="text-[11px] text-slate-400 mt-2">{cevir("Yol")} <span className="font-mono">/</span> {cevir("ile başlamalı (örn.")} <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). {cevir("Aynı yola birden fazla kullanıcı ekleyebilirsiniz.")}</p>
-          <button disabled={kaydediyor} className="mt-3 px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
+          <Button type="submit" color="primary" yukleniyor={kaydediyor} className="mt-3 px-4 text-sm">
             {kaydediyor ? cevir("Ekleniyor…") : cevir("Koruma Ekle")}
-          </button>
+          </Button>
         </form>
 
         {/* Mevcut korumalar */}
@@ -159,7 +160,7 @@ export default function DomainSifreKorumaPage() {
                     {ks.map(k => (
                       <li key={k.id} className="flex items-center justify-between px-3 py-2">
                         <span className="text-sm text-slate-600 dark:text-slate-300">{k.kullanici}</span>
-                        <button onClick={() => sil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">{cevir("Kaldır")}</button>
+                        <Button color="error" variant="soft" onClick={() => sil(k)} className="px-2.5 text-xs">{cevir("Kaldır")}</Button>
                       </li>
                     ))}
                   </ul>

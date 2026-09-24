@@ -6,6 +6,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Durum = {
   alan_adi: string
@@ -61,7 +62,7 @@ export default function DomainSSHPage() {
   const [yuk, setYuk] = useState(true)
   const [isleniyor, setIsleniyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [anahtar, setAnahtar] = useState('')
 
   function yukle() {
@@ -125,12 +126,10 @@ export default function DomainSSHPage() {
               <span className="font-mono">{d.alan_adi}</span> {cevir("hesabı için kabuk (shell) erişimi.")}
             </p>
           </div>
-          <span className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-            d.aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-300'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${d.aktif ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+          <Badge color={d.aktif ? 'success' : 'neutral'} variant="soft" className="shrink-0 gap-1.5 px-2.5 font-semibold">
+            <span className="size-2 rounded-full bg-current" aria-hidden="true" />
             {d.aktif ? cevir("SSH AÇIK") : cevir("SSH KAPALI")}
-          </span>
+          </Badge>
         </div>
 
         {/* Durum + toggle */}
@@ -144,15 +143,15 @@ export default function DomainSSHPage() {
               </p>
             </div>
             {d.aktif ? (
-              <button onClick={() => toggle(false)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 py-2 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 text-sm font-medium rounded-lg">
+              <Button color="error" variant="outlined" onClick={() => toggle(false)} disabled={isleniyor || d.is_demo}
+                className="shrink-0 px-4 text-sm">
                 {cevir("SSH'i Kapat")}
-              </button>
+              </Button>
             ) : (
-              <button onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
+              <Button color="primary" onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
+                className="shrink-0 px-4 text-sm">
                 {cevir("SSH'i Aç")}
-              </button>
+              </Button>
             )}
           </div>
           {d.is_demo && <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">{cevir("Demo domainde SSH değiştirilemez.")}</p>}
@@ -170,7 +169,7 @@ export default function DomainSSHPage() {
             <label className="text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Bağlantı komutu")}</label>
             <div className="mt-1 flex items-center gap-2">
               <code className="flex-1 px-3 py-2 bg-dark-800 text-slate-100 rounded-lg text-xs font-mono overflow-x-auto">{sshKomut}</code>
-              <button onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 text-xs px-2.5 py-2 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-dark-600">{cevir("Kopyala")}</button>
+              <Button variant="outlined" onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 px-2.5 text-xs">{cevir("Kopyala")}</Button>
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{cevir("Parola:")} <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
@@ -194,10 +193,10 @@ export default function DomainSSHPage() {
           />
           <div className="mt-3 flex items-center justify-between">
             <p className="text-xs text-slate-400">{cevir("Boş bırakıp kaydederseniz tüm anahtarlar silinir.")}</p>
-            <button onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
-              className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-lg">
+            <Button color="primary" onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
+              className="shrink-0 px-4 text-sm">
               {cevir("Anahtarı Kaydet")}
-            </button>
+            </Button>
           </div>
         </div>
 
