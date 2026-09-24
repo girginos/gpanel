@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useState } from 'react'
+import { Button } from '@/components/ui'
 
 export type ToolbarButton = { etiket: string; onClick?: () => void; disabled?: boolean; ipucu?: string }
 
@@ -15,28 +16,30 @@ export default function ListToolbar({
   return (
     <div className="flex items-center gap-2 mb-4 flex-wrap">
       {birincil && (
-        <button
+        <Button
+          color="primary"
           onClick={birincil.onClick}
           disabled={birincil.disabled}
           title={birincil.ipucu}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-60 text-sm font-medium rounded-full shadow-sm shadow-brand-600/30 disabled:shadow-none transition"
+          className="gap-1.5 px-3.5 py-2 text-sm disabled:pointer-events-auto disabled:cursor-not-allowed"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {birincil.etiket}
-        </button>
+        </Button>
       )}
       {(butonlar || []).map((b, i) => (
-        <button
+        <Button
           key={i}
+          variant="outlined"
           onClick={b.onClick}
           disabled={b.disabled}
           title={b.ipucu}
-          className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 disabled:opacity-50 disabled:bg-slate-100 dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-full transition"
+          className="px-3 py-2 text-sm disabled:pointer-events-auto disabled:cursor-not-allowed"
         >
           {b.etiket}
-        </button>
+        </Button>
       ))}
       {arananSetter !== undefined && (
         <div className="ml-auto relative">

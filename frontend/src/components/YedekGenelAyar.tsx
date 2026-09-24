@@ -3,6 +3,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { api, apiHata } from '@/lib/api'
+import { Button } from '@/components/ui'
 
 // Sistem geneli yedek ayarlari: ana salter + disk korumasi + GLOBAL uzak hedef.
 // Eskiden otomatik yedegi topluca kapatmanin yolu yoktu ve uzak hedef YALNIZ domain
@@ -260,19 +261,19 @@ export default function YedekGenelAyar() {
                 </p>
               )}
 
-              <button type="button" onClick={test} disabled={testEdiyor}
-                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600/40 disabled:opacity-50">
+              <Button variant="outlined" onClick={test} yukleniyor={testEdiyor}
+                className="px-3 py-1.5 text-sm">
                 {testEdiyor ? cevir('Test ediliyor…') : cevir('Bağlantıyı Test Et')}
-              </button>
+              </Button>
             </div>
           )}
         </div>
 
         <div className="pt-1">
-          <button type="button" onClick={kaydet} disabled={kaydediyor}
-            className="px-3.5 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+          <Button color="primary" onClick={kaydet} yukleniyor={kaydediyor}
+            className="px-3.5 py-2 text-sm">
             {kaydediyor ? cevir('Kaydediliyor…') : cevir('Kaydet')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

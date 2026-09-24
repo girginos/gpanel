@@ -123,10 +123,10 @@ export default function BackupYonetimiPage() {
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={tumunuYedekle} disabled={yedekliyor || calisan}
-            className="px-3.5 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+          <Button color="primary" onClick={tumunuYedekle} yukleniyor={yedekliyor} disabled={calisan}
+            className="px-3.5 py-2 text-sm">
             {yedekliyor ? cevir('Başlatılıyor…') : calisan ? cevir('Bir iş sürüyor…') : cevir('Tüm Domainleri Şimdi Yedekle')}
-          </button>
+          </Button>
         </div>
       </div>
 

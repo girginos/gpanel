@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Modal from './Modal'
+import { Button } from '@/components/ui'
 
 const PHP_FALLBACK = ['7.4', '8.1', '8.2', '8.3', '8.4']
 
@@ -168,21 +169,23 @@ export default function AddDomainModal({
         {basari && <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            type="button"
+          <Button
+            variant="outlined"
             onClick={onKapat}
             disabled={yukleniyor}
-            className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 rounded-md text-sm transition"
+            className="px-4 py-2 text-sm"
           >
             {cevir("İptal")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            disabled={yukleniyor || !alanAdi.trim()}
-            className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 rounded-md text-sm font-medium transition"
+            color="primary"
+            yukleniyor={yukleniyor}
+            disabled={!alanAdi.trim()}
+            className="px-4 py-2 text-sm"
           >
             {yukleniyor ? cevir('Sağlanıyor…') : cevir('Domain Ekle')}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

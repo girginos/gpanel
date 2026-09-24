@@ -138,7 +138,7 @@ function ToastSatir({ kayit, kapat }: { kayit: ToastKaydi; kapat: () => void }) 
         onClick={(e) => { e.stopPropagation(); kapat() }}
         aria-label={cevir('Bildirimi kapat')}
         title={cevir('Kapat')}
-        className="absolute -right-1.5 -top-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-slate-900/90 text-white opacity-0 ring-1 ring-white/25 transition-opacity sm:group-hover:opacity-100"
+        className="absolute -right-1.5 -top-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-dark-900/90 text-white opacity-0 ring-1 ring-white/25 transition-opacity sm:group-hover:opacity-100"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round"
           className="h-2.5 w-2.5" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12" /></svg>

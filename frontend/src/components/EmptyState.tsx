@@ -1,5 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
+import { Button } from '@/components/ui'
+
 export default function EmptyState({
   baslik, aciklama, buton,
 }: {
@@ -28,17 +30,18 @@ export default function EmptyState({
       <h3 className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">{baslik}</h3>
       {aciklama && <p className="text-sm text-slate-500 dark:text-slate-500 max-w-md mb-5">{aciklama}</p>}
       {buton && (
-        <button
+        <Button
+          color="primary"
           onClick={buton.onClick}
           disabled={buton.disabled}
           title={buton.ipucu}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-full shadow-xs disabled:shadow-none transition"
+          className="gap-1.5 px-4 py-2 text-sm disabled:pointer-events-auto disabled:cursor-not-allowed"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {buton.etiket}
-        </button>
+        </Button>
       )}
     </div>
   )

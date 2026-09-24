@@ -163,9 +163,9 @@ export default function BayiPlanlariPage() {
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Bayi Planları") }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayi Planları")}</h1>
-        <button onClick={yeniAc} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white rounded-md font-medium">
+        <Button color="primary" onClick={yeniAc} className="gap-1.5 text-sm px-3 py-1.5">
           <span className="text-base leading-none">+</span> {cevir("Yeni Bayi Planı")}
-        </button>
+        </Button>
       </div>
       <p className="text-sm text-slate-500 mb-4">
         {cevir("Bayilere satacağınız hazır limit paketleri.")} <Link to="/bayiler" className="text-brand-600 dark:text-brand-400 hover:underline">{cevir("Bayi oluştururken")}</Link> {cevir("paket seçilir, limitler otomatik atanır.")}
@@ -242,7 +242,7 @@ export default function BayiPlanlariPage() {
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <Button variant="outlined" type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-              <button type="submit" disabled={kaydet} className="px-4 py-2 text-sm bg-dark-800 dark:bg-dark-600 text-white rounded-md font-medium disabled:opacity-50">{kaydet ? '…' : cevir('Kaydet')}</button>
+              <Button type="submit" color="primary" disabled={kaydet} className="px-4 py-2 text-sm">{kaydet ? '…' : cevir('Kaydet')}</Button>
             </div>
           </form>
         </div>
