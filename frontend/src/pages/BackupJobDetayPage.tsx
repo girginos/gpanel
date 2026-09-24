@@ -7,6 +7,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, butonSinifi } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
 import { Job, DurumIkon, IslemRozet, TurRozet, fmtByte } from '@/pages/BackupYonetimiPage'
 
 type Kalem = { backup_id: number; domain_id: number; alan_adi: string; sistem_kullanici: string; boyut_b: number; tip: string }
@@ -31,7 +33,7 @@ const BJOB_EN: Record<string, string> = {
   "Yalnız Dosyalar": "Files Only",
   "Yalnız SQL": "SQL Only",
   "detaylı": "detailed",
-  "← İş listesi": "← Job list",
+  "İş listesi": "Job list",
   "Sağdaki “Seçili” listesine en az bir domain taşıyın": "Move at least one domain to the “Selected” list on the right",
   "Anasayfa": "Home",
   "İş #{0}": "Job #{0}",
@@ -124,15 +126,17 @@ export default function BackupJobDetayPage() {
               <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("İş #")}{j.id}</h1>
               <IslemRozet islem={j.islem} mod={j.mod} />
               <TurRozet tur={j.tur} />
-              <Link to="/backup-yonetimi" className="ml-auto text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{cevir("← İş listesi")}</Link>
+              <Link to="/backup-yonetimi" className={butonSinifi({ variant: 'flat', boyut: 'sm', className: 'ml-auto' })}>
+                <Ikon d={I.geri} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />{cevir("İş listesi")}
+              </Link>
             </div>
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
               <span>{j.tamamlanan}/{j.toplam} {cevir("tamamlandı")}{j.durum === 'calisiyor' && j.aktif_domain ? cevirT(cevir(" · şu an: {0}"), j.aktif_domain) : ''}</span>
               <span>{cevir("Başlangıç:")} <span className="font-mono">{j.baslangic}</span></span>
               {j.bitis && <span>{cevir("Bitiş:")} <span className="font-mono">{j.bitis}</span></span>}
               {j.boyut_b > 0 && <span>{cevir("Boyut:")} <span className="font-mono">{fmtByte(j.boyut_b)}</span></span>}
-              {j.basari > 0 && <span className="text-emerald-600 dark:text-emerald-400">✓ {j.basari} {cevir("başarılı")}</span>}
-              {j.hata > 0 && <span className="text-red-600 dark:text-red-400">✕ {j.hata} {cevir("hata")}</span>}
+              {j.basari > 0 && <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Ikon d={I.onay} className="size-3.5 shrink-0" />{j.basari} {cevir("başarılı")}</span>}
+              {j.hata > 0 && <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400"><Ikon d={I.kapat} className="size-3.5 shrink-0" />{j.hata} {cevir("hata")}</span>}
               {j.baslatan && <span>{cevir("Başlatan:")} {j.baslatan}</span>}
             </div>
             {/* Çalışırken canlı ilerleme çubuğu + bildirim (bitince gizlenir). */}
@@ -180,10 +184,10 @@ export default function BackupJobDetayPage() {
                     <input type="checkbox" checked={temiz} onChange={e => setTemiz(e.target.checked)} /> {cevir("temiz (ezerek)")}
                   </label>
                 )}
-                <button onClick={geriYukle} disabled={gonderiliyor || secili.size === 0}
-                  className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-dark-800 dark:bg-slate-100 text-white dark:text-slate-900 font-medium disabled:opacity-50">
+                <Button color="primary" boyut="sm" ikon={I.geriAl} onClick={geriYukle} yukleniyor={gonderiliyor} disabled={secili.size === 0}
+                  className="ml-auto">
                   {gonderiliyor ? cevir("Başlatılıyor…") : cevirT(cevir("Seçilenleri Geri Yükle ({0})"), secili.size)}
-                </button>
+                </Button>
               </div>
               <TransferListe items={kalemler} secili={secili} onDegis={setSecili} />
               <p className="text-[11px] text-slate-400 mt-2">{cevir("Domainleri soldan sağa taşıyın (tıklayın ya da başlıktaki kutuyla tümünü taşıyın). Yalnız")} <b>{cevir("Seçili")}</b> {cevir("listesindekiler geri yüklenir. Dosya/DB bazlı hassas geri yükleme için “detaylı”.")}</p>
@@ -248,11 +252,11 @@ function Sutun({ baslik, adet, items, ara, setAra, yon, onTasi, onHepsi, bosMeti
         {items.map(k => (
           <button key={k.domain_id} onClick={() => onTasi(k.domain_id)}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-brand-50 dark:hover:bg-brand-900/20 group">
-            {yon === 'sol' && <span className="text-slate-300 dark:text-slate-600 group-hover:text-brand-500">‹</span>}
+            {yon === 'sol' && <Ikon d={I.geri} className="size-3.5 shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-brand-500" />}
             <span className="text-slate-700 dark:text-slate-300 truncate">{k.alan_adi}</span>
             <span className="ml-auto font-mono text-[11px] text-slate-400">{fmtByte(k.boyut_b)}</span>
             <Link to={`/abonelikler/${k.domain_id}/yedekler`} onClick={e => e.stopPropagation()} className="text-[11px] text-brand-600 dark:text-brand-400 hover:underline shrink-0">{cevir("detaylı")}</Link>
-            {yon === 'sag' && <span className="text-slate-300 dark:text-slate-600 group-hover:text-brand-500">›</span>}
+            {yon === 'sag' && <Ikon d={I.ileri} className="size-3.5 shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-brand-500" />}
           </button>
         ))}
       </div>

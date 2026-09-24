@@ -9,7 +9,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
 
 type Sub = { id: number; alt_ad: string; tam_ad: string; php_surum: string; docroot: string; created_at: string }
 
@@ -39,6 +39,7 @@ const SUBD_EN: Record<string, string> = {
   "Subdomain Ekle": "Add Subdomain",
   "Mevcut Subdomainler": "Existing Subdomains",
   "Let's Encrypt SSL kur": "Install Let's Encrypt SSL",
+  "Aboneliğe dön": "Back to subscription",
   "Subdomain hemen web sunucusunda tanımlanır. Erişim için alan adınızın DNS'i (A kaydı) bu sunucuya yönlendirilmiş olmalıdır.": "The subdomain is defined on the web server immediately. For access, your domain's DNS (A record) must point to this server.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SUBD_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -55,6 +56,7 @@ export default function DomainSubdomainlerPage() {
   const [, setOk] = useState<string | null>(null)
   const [altAd, setAltAd] = useState('')
   const [kaydediyor, setKaydediyor] = useState(false)
+  const [silinen, setSilinen] = useState<number | null>(null)
 
   function yukle() {
     if (!id) return
@@ -86,14 +88,15 @@ export default function DomainSubdomainlerPage() {
   }
 
   async function sil(s: Sub) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz."), s.tam_ad), ton: 'tehlike' }))) return
-    setHata(null); setOk(null)
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz."), s.tam_ad), ton: 'tehlike', onayIkonu: I.cop }))) return
+    setHata(null); setOk(null); setSilinen(s.id)
     try { await api.delete(`/domains/${id}/subdomain/${s.id}`); yukle() }
     catch (err) {
       const m = apiHata(err, cevir("Silinemedi"))
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
     }
+    finally { setSilinen(null) }
   }
 
   const [sslMesgul, setSslMesgul] = useState<number | null>(null)
@@ -133,8 +136,7 @@ export default function DomainSubdomainlerPage() {
             <input value={altAd} onChange={e => setAltAd(e.target.value.toLowerCase())} required placeholder="blog"
               className="mt-1 w-48 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </label>
-          <Button type="submit" color="primary" disabled={!altAd.trim()} yukleniyor={kaydediyor}
-            className="px-4 py-2 text-sm">
+          <Button type="submit" color="primary" ikon={I.arti} disabled={!altAd.trim()} yukleniyor={kaydediyor}>
             {kaydediyor ? cevir("Oluşturuluyor…") : cevir("Subdomain Ekle")}
           </Button>
         </div>
@@ -158,15 +160,13 @@ export default function DomainSubdomainlerPage() {
                     <div className="text-[11px] text-slate-400 font-mono truncate">{s.docroot} · PHP {s.php_surum}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                    <Button color="primary" variant="soft" onClick={() => sslKur(s, 'letsencrypt')} disabled={sslMesgul === s.id} title={cevir("Let's Encrypt SSL kur")}
-                      className="text-xs px-2.5 py-1 rounded-md">
-                      {sslMesgul === s.id ? '…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> Let's Encrypt</span>}
+                    <Button color="primary" variant="soft" boyut="sm" ikon={I.kalkan} onClick={() => sslKur(s, 'letsencrypt')} yukleniyor={sslMesgul === s.id} title={cevir("Let's Encrypt SSL kur")}>
+                      Let's Encrypt
                     </Button>
-                    <Button variant="outlined" onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title={cevir("Öz-imzalı SSL kur")}
-                      className="text-xs px-2.5 py-1 rounded-md">
+                    <Button variant="outlined" boyut="sm" ikon={I.kalkan} onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title={cevir("Öz-imzalı SSL kur")}>
                       {cevir("öz-imza")}
                     </Button>
-                    <Button color="error" variant="soft" onClick={() => sil(s)} className="text-xs px-2.5 py-1 rounded-md">{cevir("Sil")}</Button>
+                    <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(s)} yukleniyor={silinen === s.id}>{cevir("Sil")}</Button>
                   </div>
                 </li>
               ))}
@@ -177,7 +177,11 @@ export default function DomainSubdomainlerPage() {
         </p>
       </div>
 
-      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+      <div className="mt-4">
+        <Link to={`/abonelikler/${id}`} className={butonSinifi({ variant: 'flat', boyut: 'sm' })}>
+          <Ikon d={I.geri} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />{cevir("Aboneliğe dön")}
+        </Link>
+      </div>
     </div>
   )
 }

@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { api, apiHata } from '@/lib/api'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Sistem geneli yedek ayarlari: ana salter + disk korumasi + GLOBAL uzak hedef.
 // Eskiden otomatik yedegi topluca kapatmanin yolu yoktu ve uzak hedef YALNIZ domain
@@ -161,8 +163,8 @@ export default function YedekGenelAyar() {
       </div>
 
       <div className="p-4 space-y-5">
-        {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">{hata}</div>}
-        {basari && <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">{basari}</div>}
+        {hata && <UyariKutusu ton="tehlike">{hata}</UyariKutusu>}
+        {basari && <UyariKutusu ton="basari">{basari}</UyariKutusu>}
 
         {/* Ana salter */}
         <div className="flex items-start gap-3">
@@ -261,8 +263,7 @@ export default function YedekGenelAyar() {
                 </p>
               )}
 
-              <Button variant="outlined" onClick={test} yukleniyor={testEdiyor}
-                className="px-3 py-1.5 text-sm">
+              <Button variant="outlined" ikon={I.yenile} onClick={test} yukleniyor={testEdiyor}>
                 {testEdiyor ? cevir('Test ediliyor…') : cevir('Bağlantıyı Test Et')}
               </Button>
             </div>
@@ -270,8 +271,7 @@ export default function YedekGenelAyar() {
         </div>
 
         <div className="pt-1">
-          <Button color="primary" onClick={kaydet} yukleniyor={kaydediyor}
-            className="px-3.5 py-2 text-sm">
+          <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={kaydediyor}>
             {kaydediyor ? cevir('Kaydediliyor…') : cevir('Kaydet')}
           </Button>
         </div>

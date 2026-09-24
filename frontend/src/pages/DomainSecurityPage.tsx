@@ -10,6 +10,8 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import type { Color } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Domaine ÖZEL güvenlik sayfası — bir domainin bilinen açıklarını listeler.
@@ -131,7 +133,7 @@ export default function DomainSecurityPage() {
       await api.post('/websec/rescan?domain_id=' + domainID, {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")) })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'tehlike' })
     } finally { setTaranıyor(false) }
   }
 
@@ -166,8 +168,7 @@ export default function DomainSecurityPage() {
             )}
           </div>
         </div>
-        <Button color="primary" onClick={domainTara} yukleniyor={taranıyor || taraniyorMu}
-          className="px-4 text-sm">
+        <Button color="primary" ikon={I.oynat} onClick={domainTara} yukleniyor={taranıyor || taraniyorMu}>
           {taraniyorMu ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
         </Button>
       </div>
@@ -186,11 +187,16 @@ export default function DomainSecurityPage() {
       {yukleniyor && !ilk.current ? (
         <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
+        <UyariKutusu ton="tehlike">
+          {hata}
+          <div className="mt-2">
+            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle} yukleniyor={yukleniyor}>{cevir("Tekrar dene")}</Button>
+          </div>
+        </UyariKutusu>
       ) : sayfa.items.length === 0 ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 py-10 text-center text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <UyariKutusu ton="basari">
           {taraniyorMu ? cevir("Taranıyor…") : (filtre ? cevir("Bu filtreyle açık yok.") : cevir("Bu domainde bilinen açık bulunmadı."))}
-        </div>
+        </UyariKutusu>
       ) : (
         <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-dark-600">
           <div className="overflow-x-auto">
@@ -218,7 +224,7 @@ export default function DomainSecurityPage() {
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[13px] whitespace-nowrap">
                       <span className="text-slate-900 dark:text-slate-100">{b.installed_version}</span>
-                      {b.fixed_in && <span className="ml-1 text-emerald-600 dark:text-emerald-400">→ {b.fixed_in}</span>}
+                      {b.fixed_in && <span className="ml-1 inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Ikon d={I.ileri} className="size-3 shrink-0" />{b.fixed_in}</span>}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[12px] text-slate-700 dark:text-slate-300 whitespace-nowrap">{b.cve_id}</td>
                     <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400">{b.title}</td>

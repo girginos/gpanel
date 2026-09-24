@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge, butonSinifi } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import type { Domain } from '@/components/domainTipi'
@@ -53,7 +54,7 @@ const MAILAYAR_EN: Record<string, string> = {
   "Sağlıklı": "Healthy",
   "Uyarılı": "Warning",
   "Önerilen DNS Kayıtları": "Recommended DNS Records",
-  "✓ kopyalandı": "✓ copied",
+  "kopyalandı": "copied",
   "Türkçe": "English",
   "Ad": "Name",
   "Bağlantı Bilgileri": "Connection Details",
@@ -76,7 +77,7 @@ const MAILAYAR_EN: Record<string, string> = {
   "Gelen (IMAP)": "Incoming (IMAP)",
   "Gelen (POP3)": "Incoming (POP3)",
   "Giden (SMTP)": "Outgoing (SMTP)",
-  "✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin": "✓ Outlook & Thunderbird auto-setup active — just enter email + password in the client",
+  "Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin": "Outlook & Thunderbird auto-setup active — just enter email + password in the client",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILAYAR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -146,10 +147,8 @@ export default function DomainMailAyarlarPage() {
             onClick={analizEt}
             yukleniyor={analizEdiliyor}
             color="primary"
-            className="gap-2 text-sm px-4 py-2">
-            {analizEdiliyor ? cevir("Analiz ediliyor…") : (
-              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>{cevir("Analiz Et")}</>
-            )}
+            ikon={I.oynat}>
+            {analizEdiliyor ? cevir("Analiz ediliyor…") : cevir("Analiz Et")}
           </Button>
         </div>
 
@@ -163,7 +162,7 @@ export default function DomainMailAyarlarPage() {
         {monitor && (
           <>
             <div className="flex items-center gap-4 mb-4 flex-wrap">
-              <div className={`text-lg font-bold ${g?.renk}`}>● {g ? cevir(g.etiket) : ''}</div>
+              <div className={`inline-flex items-center gap-2 text-lg font-bold ${g?.renk}`}><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{g ? cevir(g.etiket) : ''}</div>
               <div className="flex items-center gap-2 text-xs">
                 <Badge variant="soft" color={DURUM_RENK.ok}>{monitor.ozet.ok} OK</Badge>
                 <Badge variant="soft" color={DURUM_RENK.uyari}>{monitor.ozet.uyari} {cevir("Uyarı")}</Badge>
@@ -205,12 +204,13 @@ export default function DomainMailAyarlarPage() {
             <SunucuKart baslik={cevir("Giden (SMTP)")} host={baglanti.smtp.host} port={baglanti.smtp.port} g={baglanti.smtp.guvenlik} />
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
-            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className={butonSinifi({ variant: 'outlined', className: 'gap-1.5 px-3 py-1.5 text-sm' })}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6m-9 6V4" /></svg>
+            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className={butonSinifi({ variant: 'outlined' })}>
               {cevir("Webmail'i Aç")}
+              <Ikon d={I.harici} className="size-4 shrink-0 ms-2 -me-1" />
             </a>
             <Badge variant="soft" color="info" className="gap-1.5 px-3 py-1.5 rounded-lg leading-snug text-left">
-              {cevir("✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin")}
+              <Ikon d={I.onay} className="size-3.5 shrink-0" />
+              {cevir("Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin")}
             </Badge>
           </div>
         </section>
@@ -257,7 +257,7 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
                     title={cevir("Kopyalamak için tıklayın")}
                     className="group text-left font-mono text-xs text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-dark-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded px-2 py-1 break-all w-full transition-colors">
                     {r.deger}
-                    <span className="ml-1.5 text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? cevir("✓ kopyalandı") : cevir("kopyala")}</span>
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-sans text-brand-500 opacity-0 group-hover:opacity-100">{kopyalanan === r.deger ? <><Ikon d={I.onay} className="size-3 shrink-0" />{cevir("kopyalandı")}</> : cevir("kopyala")}</span>
                   </button>
                   <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{r.aciklama}</div>
                 </td>

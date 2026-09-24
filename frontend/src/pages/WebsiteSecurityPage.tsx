@@ -8,6 +8,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Website Security Monitor — admin.
@@ -185,7 +187,7 @@ export default function WebsiteSecurityPage() {
       await api.post('/websec/rescan', {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Rescan hatası")) })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Rescan hatası")), ton: 'tehlike' })
     } finally { setTaranıyor(false) }
   }
 
@@ -195,7 +197,7 @@ export default function WebsiteSecurityPage() {
       await api.post('/websec/rescan?domain_id=' + id, {})
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")) })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'tehlike' })
     } finally { setTarananDomain(null) }
   }
 
@@ -251,9 +253,9 @@ export default function WebsiteSecurityPage() {
         </div>
         <Button
           color="primary"
+          ikon={I.oynat}
           onClick={tumunuTara}
-          disabled={taranıyor || status?.running}
-          className="px-4 py-2 text-sm"
+          yukleniyor={taranıyor || !!status?.running}
         >
           {status?.running ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Tümünü Tara"))}
         </Button>
@@ -279,9 +281,9 @@ export default function WebsiteSecurityPage() {
             <div><div className="text-xs text-slate-500">{cevir("Toplam bulgu")}</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
           {status.last_error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-              {cevir("Son hata:")} {status.last_error}
-            </div>
+            <UyariKutusu ton="tehlike" className="mt-3">
+              <span className="text-xs">{cevir("Son hata:")} {status.last_error}</span>
+            </UyariKutusu>
           )}
         </div>
       )}
@@ -310,7 +312,12 @@ export default function WebsiteSecurityPage() {
       {yukleniyor && !ilkYuklendi.current ? (
         <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata} <button onClick={yukle} className="underline">{cevir("Tekrar dene")}</button></div>
+        <UyariKutusu ton="tehlike">
+          {hata}
+          <div className="mt-2">
+            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle} yukleniyor={yukleniyor}>{cevir("Tekrar dene")}</Button>
+          </div>
+        </UyariKutusu>
       ) : listelenen.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-400">
           {arama || appFiltre ? cevir("Bu arama/filtreyle domain yok.") : cevir("Domain bulunamadı.")}
@@ -350,11 +357,13 @@ export default function WebsiteSecurityPage() {
                       <td className="px-3 py-2.5 text-right">
                         <Button
                           variant="outlined"
+                          boyut="sm"
+                          ikon={I.oynat}
                           onClick={(e) => { e.stopPropagation(); void domainTara(u.domain_id) }}
-                          disabled={status?.running || tarananDomain === u.domain_id || u.durum === 'taraniyor'}
-                          className="px-2 py-1 text-xs"
+                          yukleniyor={tarananDomain === u.domain_id}
+                          disabled={status?.running || u.durum === 'taraniyor'}
                         >
-                          {tarananDomain === u.domain_id ? '…' : cevir("Tara")}
+                          {cevir("Tara")}
                         </Button>
                       </td>
                     </tr>
