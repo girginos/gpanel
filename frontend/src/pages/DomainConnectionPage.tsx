@@ -10,6 +10,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge, Card } from '@/components/ui'
 
 
 const CONN_EN: Record<string, string> = {
@@ -173,12 +174,12 @@ export default function DomainConnectionPage() {
 
 function Kart({ baslik, renk, ikon, children, cift }: { baslik: string; renk: string; ikon: string; children: React.ReactNode; cift?: boolean }) {
   const bg: Record<string, string> = {
-    sky: 'bg-sky-100 text-sky-700',
+    sky: 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300',
     violet: 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300',
     amber: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   }
   return (
-    <div className={`bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 ${cift ? 'lg:col-span-2' : ''}`}>
+    <Card className={`bg-white dark:bg-dark-700 p-5 ${cift ? 'lg:col-span-2' : ''}`}>
       <div className="flex items-center gap-2 mb-3">
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${bg[renk]}`}>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
@@ -188,7 +189,7 @@ function Kart({ baslik, renk, ikon, children, cift }: { baslik: string; renk: st
         <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{baslik}</h3>
       </div>
       <dl className="space-y-2 text-sm">{children}</dl>
-    </div>
+    </Card>
   )
 }
 
@@ -207,9 +208,9 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
           {d}
         </span>
         {kopyalandi && (
-          <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-medium animate-pulse">
+          <Badge color="success" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 animate-pulse">
             {cevir(cevir("Kopyalandı"))}
-          </span>
+          </Badge>
         )}
       </dd>
     </div>
@@ -221,12 +222,12 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
       <dt className="text-slate-500 dark:text-slate-500 text-xs uppercase tracking-wider">{e}</dt>
       <dd className="text-right">
-        <button
+        <Button
           onClick={onAc}
-          className="text-xs px-3 py-1 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium transition inline-flex items-center gap-1"
+          className="text-xs px-3 py-1 gap-1 rounded-md"
         >
           <Ikon d={I.anahtar} /> {cevir(cevir("Şifreyi Göster / Yenile"))}
-        </button>
+        </Button>
       </dd>
     </div>
   )
@@ -281,13 +282,13 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
         </div>
 
         <div className="flex gap-2 justify-end mt-4">
-          <button onClick={onKapat} className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">
+          <Button variant="outlined" onClick={onKapat} className="px-3 py-1.5 text-sm">
             {cevir("Kapat")}
-          </button>
-          <button onClick={kaydet} disabled={isleniyor || parola.trim().length < 8}
-            className="px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium">
+          </Button>
+          <Button color="primary" onClick={kaydet} disabled={parola.trim().length < 8} yukleniyor={isleniyor}
+            className="px-3 py-1.5 text-sm">
             {isleniyor ? cevir('Kaydediliyor…') : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Parolayı güncelle")}</span>}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -296,12 +297,12 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
 
 function KopyaButton({ text, renk }: { text: string; renk: 'amber' | 'emerald' }) {
   const [k, setK] = useState(false)
-  const bg: Record<string, string> = {
-    amber: 'bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 text-amber-800 dark:text-amber-200',
-    emerald: 'bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200',
-  }
+  // Eski amber/emerald renk anahtarı → Tailux Button rengi.
+  const renkler = { amber: 'warning', emerald: 'success' } as const
   return (
-    <button
+    <Button
+      color={renkler[renk]}
+      variant="soft"
       onClick={() => {
         const ok = panoYaz(text)
         if (ok) {
@@ -309,9 +310,9 @@ function KopyaButton({ text, renk }: { text: string; renk: 'amber' | 'emerald' }
           setTimeout(() => setK(false), 1500)
         }
       }}
-      className={`text-[10px] px-2 py-1 rounded font-medium transition ${bg[renk]} ${k ? 'ring-2 ring-emerald-400' : ''}`}
+      className={`text-[10px] px-2 py-1 rounded-md ${k ? 'ring-2 ring-emerald-400' : ''}`}
     >
       {k ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> {cevir("Kopyalandı")}</span> : cevir('Kopyala')}
-    </button>
+    </Button>
   )
 }

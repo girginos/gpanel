@@ -8,6 +8,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Card } from '@/components/ui'
 
 type Kopya = { ad: string; boyut_mb: number; tarih: string }
 
@@ -77,15 +78,15 @@ export default function DomainKopyaPage() {
           Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
         </div>
 
-        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5 shadow-xs flex items-center justify-between">
+        <Card className="bg-white dark:bg-dark-700 p-5 mb-5 shadow-xs flex items-center justify-between">
           <div className="text-sm text-slate-600 dark:text-slate-300">{cevir("public_html içeriğinden yeni bir kopya oluştur.")}</div>
-          <button onClick={olustur} disabled={olusturuyor}
-            className="px-4 py-2 text-sm font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-lg disabled:opacity-50">
+          <Button color="primary" onClick={olustur} yukleniyor={olusturuyor}
+            className="px-4 py-2 text-sm">
             {olusturuyor ? 'Kopyalanıyor…' : cevir("Kopya Oluştur")}
-          </button>
-        </div>
+          </Button>
+        </Card>
 
-        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 shadow-xs">
+        <Card className="bg-white dark:bg-dark-700 p-5 shadow-xs">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Mevcut kopyalar</h3>
           {yuk ? (
             <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
@@ -102,12 +103,12 @@ export default function DomainKopyaPage() {
                     <div className="font-mono text-sm text-slate-700 dark:text-slate-200">{k.ad}</div>
                     <div className="text-xs text-slate-400">{k.tarih} · {k.boyut_mb} MB</div>
                   </div>
-                  <button onClick={() => sil(k)} className="text-xs text-red-600 dark:text-red-400 hover:underline">{cevir("Sil")}</button>
+                  <Button color="error" variant="soft" onClick={() => sil(k)} className="text-xs px-2.5 py-1 rounded-md">{cevir("Sil")}</Button>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </Card>
 
         <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
       </div>

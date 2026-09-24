@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { Button, Badge, Card } from '@/components/ui'
 
 type Limit = { kullanim: number; limit: number }
 export type Ozet = {
@@ -53,7 +54,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
 
   if (yuk) {
     return (
-      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
+      <Card className="bg-white dark:bg-dark-700 p-5">
         {/*
           🔴 KOYU TEMADA GÖRÜNÜR OLMALI. Önceki hâlde çubuklar `dark:bg-dark-700`
           idi — kartın kendi arka planıyla AYNI renk. Sonuç: yükleme sırasında
@@ -67,7 +68,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
             <div key={i} className="h-3 bg-slate-100 dark:bg-dark-600 rounded animate-pulse" />
           ))}
         </div>
-      </div>
+      </Card>
     )
   }
   if (!ozet) {
@@ -75,26 +76,26 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
     // açıklamasız bir boşluk bırakıyordu; kullanıcı bunu "yükleniyor" sanıp
     // bekliyordu. Başarısızlık, bekleyiş gibi görünmemeli.
     return (
-      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 text-sm text-slate-500 dark:text-slate-400">
+      <Card className="bg-white dark:bg-dark-700 p-5 text-sm text-slate-500 dark:text-slate-400">
         <div className="mb-2">{cevir("Kaynak bilgisi alınamadı.")}</div>
-        <button onClick={yukle} className="text-brand-600 dark:text-brand-400 hover:underline">
+        <Button variant="outlined" onClick={yukle} className="text-xs px-3 py-1.5">
           {cevir("Yeniden dene")}
-        </button>
-      </div>
+        </Button>
+      </Card>
     )
   }
 
   return (
     <div className="space-y-3">
       {/* Plan + Özet */}
-      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
+      <Card className="bg-white dark:bg-dark-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Paket ve Kaynaklar")}</h3>
-          <button onClick={yukle} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" title={cevir("Yenile")}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+          <Button variant="flat" isIcon onClick={yukle} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-          </button>
+          </Button>
         </div>
 
         <div className="mb-3 pb-3 border-b border-slate-100 dark:border-dark-600 flex items-start justify-between gap-3">
@@ -127,10 +128,10 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
         <Bar etiket={cevir("FTP Hesabı")} k={ozet.ftp_sayisi.kullanim} l={ozet.ftp_sayisi.limit} birim={cevir("hesap")} renk="amber" />
         <Bar etiket={cevir("E-posta Kutusu")} k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim={cevir("kutu")} renk="rose" />
         <Bar etiket="Subdomain" k={ozet.domain_sayi.kullanim} l={ozet.domain_sayi.limit} birim="domain" renk="violet" />
-      </div>
+      </Card>
 
       {/* Yapılandırma Özeti */}
-      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
+      <Card className="bg-white dark:bg-dark-700 p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Yapılandırma")}</h3>
         <Sat e={cevir("IP Adresi")} d={ozet.ipv4 || '—'} mono />
         <Sat e={cevir("Sistem Kullanıcısı")} d={ozet.sk} mono />
@@ -141,20 +142,22 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           d={
             ozet.ssl_aktif
               ? <span className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  <span className="text-emerald-700 dark:text-emerald-300 text-xs font-medium">{cevir("Aktif")}</span>
+                  <Badge color="success" variant="soft" className="text-xs px-2 py-0.5 gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden="true" />
+                    {cevir("Aktif")}
+                  </Badge>
                   {ozet.ssl_bitis && <span className="text-slate-400 dark:text-slate-500 text-[10px]">→ {ozet.ssl_bitis}</span>}
                 </span>
-              : <span className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                  <span className="text-slate-500 dark:text-slate-500 text-xs">{cevir("Yok")}</span>
-                </span>
+              : <Badge variant="soft" className="text-xs px-2 py-0.5 gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50" aria-hidden="true" />
+                  {cevir("Yok")}
+                </Badge>
           }
         />
-      </div>
+      </Card>
 
       {/* İlave Sayaclar */}
-      <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
+      <Card className="bg-white dark:bg-dark-700 p-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sayaçlar")}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-3">
           <Mini etiket={cevir(cevir("DNS kayıt"))} deger={ozet.dns_kayit} />
@@ -162,7 +165,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           <Mini etiket={cevir("Yedek")} deger={ozet.yedek_sayisi} />
           <Mini etiket={cevir("Yedek boyutu")} deger={`${ozet.yedek_mb} MB`} />
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Sub = { id: number; alt_ad: string; tam_ad: string; php_surum: string; docroot: string; created_at: string }
 
@@ -132,9 +133,10 @@ export default function DomainSubdomainlerPage() {
             <input value={altAd} onChange={e => setAltAd(e.target.value.toLowerCase())} required placeholder="blog"
               className="mt-1 w-48 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
           </label>
-          <button disabled={kaydediyor || !altAd.trim()} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-lg disabled:opacity-50">
+          <Button type="submit" color="primary" disabled={!altAd.trim()} yukleniyor={kaydediyor}
+            className="px-4 py-2 text-sm">
             {kaydediyor ? cevir("Oluşturuluyor…") : cevir("Subdomain Ekle")}
-          </button>
+          </Button>
         </div>
         <p className="text-[11px] text-slate-400 mt-2">{cevir("Küçük harf, rakam ve tire. Örn:")} <span className="font-mono">blog</span>, <span className="font-mono">shop</span>, <span className="font-mono">api</span>.</p>
       </form>
@@ -156,15 +158,15 @@ export default function DomainSubdomainlerPage() {
                     <div className="text-[11px] text-slate-400 font-mono truncate">{s.docroot} · PHP {s.php_surum}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                    <button onClick={() => sslKur(s, 'letsencrypt')} disabled={sslMesgul === s.id} title={cevir("Let's Encrypt SSL kur")}
-                      className="text-xs px-2.5 py-1 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-50">
+                    <Button color="primary" variant="soft" onClick={() => sslKur(s, 'letsencrypt')} disabled={sslMesgul === s.id} title={cevir("Let's Encrypt SSL kur")}
+                      className="text-xs px-2.5 py-1 rounded-md">
                       {sslMesgul === s.id ? '…' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> Let's Encrypt</span>}
-                    </button>
-                    <button onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title={cevir("Öz-imzalı SSL kur")}
-                      className="text-xs px-2 py-1 border border-slate-300 dark:border-dark-600 text-slate-500 rounded-md hover:bg-slate-100 dark:hover:bg-dark-700 disabled:opacity-50">
+                    </Button>
+                    <Button variant="outlined" onClick={() => sslKur(s, 'self-signed')} disabled={sslMesgul === s.id} title={cevir("Öz-imzalı SSL kur")}
+                      className="text-xs px-2.5 py-1 rounded-md">
                       {cevir("öz-imza")}
-                    </button>
-                    <button onClick={() => sil(s)} className="text-xs px-2.5 py-1 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">{cevir("Sil")}</button>
+                    </Button>
+                    <Button color="error" variant="soft" onClick={() => sil(s)} className="text-xs px-2.5 py-1 rounded-md">{cevir("Sil")}</Button>
                   </div>
                 </li>
               ))}
