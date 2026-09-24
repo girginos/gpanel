@@ -55,6 +55,12 @@ DBDIR=/var/backups/girginospanel/db           # dump'ların yeri (kardeş dizinl
 PREDUMP=""                                    # güncelleme öncesi dump yolu (rollback'te geri yüklenir)
 KAPI_JSON=/etc/girginospanel/kapi.json        # rol kapıları (ADR-GP-001) doğruluk kaynağı
 KAPI_YENI=0                                   # 1 = kapi.json'u BU koşu (10c) yarattı → rollback kaldırır
+# Restart sonrası sağlık penceresi (sn) ve çöküş sonrası kararlılık (ardışık başarılı yoklama).
+# GOSP_SAGLIK_SN yalnız kum havuzu testleri içindir.
+SAGLIK_SN=${GOSP_SAGLIK_SN:-120}
+case "$SAGLIK_SN" in ''|*[!0-9]*) SAGLIK_SN=120 ;; esac
+SAGLIK_KARARLI=5
+SAGLIK_GECEN=""                               # sağlık penceresinde geçen süre (rapor için)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -105,6 +111,101 @@ kapi_adresleri() {
     warn "eski adres, admin YENİ admin adresinden bir kez giriş yapana dek kapanmaz"
   fi
   warn "bulut sağlayıcınızın güvenlik duvarı varsa TCP $a, $b, $m portlarını orada da açın"
+}
+
+# kapi_selinux_etiketle: kapı portlarını restart'tan ÖNCE SELinux'ta http_port_t yapar
+# (`girginospanel-server kapi selinux`; etiketleri /run/girginospanel/kapi-selinux
+# önbelleğine yazar → yeni panelin açılış Heal'i önbellekteki portlar için semanage
+# KOŞMAZ). 🔴 SON-OPS-1: etiketleme eskiden YALNIZ açılış Heal'indeydi ve Heal
+# ListenAndServe'den ÖNCE koşar: `semanage port -l` + port başına `semanage port -a`
+# (181'de 3-12 sn) bitmeden /healthz'e yanıt veren yoktu, kısa sağlık penceresi
+# sağlıklı güncellemeyi geri alıyordu. Önceden kapı moduna geçmiş sunucular da dahil
+# (önbellek tmpfs'te: reboot'ta silinir) kapi.json varsa HER güncellemede çağrılır.
+# Güncellemeyi ASLA durdurmaz (her yolda 0 döner): etiketlenemeyen port güvenli
+# başarısızlıktır — panel kapı düzenini uygulamaz, tek-port davranışı sürer.
+# $BIN burada YENİ ikilidir (adım 6'da kuruldu); eski ikili bilinmeyen kapı alt
+# komutunda kullanım yazıp 2 döner (sunucu başlatmaz).
+kapi_selinux_etiketle() {
+  [ -f "$KAPI_JSON" ] || return 0
+  local rc=0 cikti portlar
+  if command -v timeout >/dev/null 2>&1; then
+    cikti=$(timeout 300 "$BIN" kapi selinux 2>&1) || rc=$?
+  else
+    cikti=$("$BIN" kapi selinux 2>&1) || rc=$?
+  fi
+  case "$rc" in
+    0) ok "kapı portları SELinux için hazır (http_port_t ya da SELinux kapalı) — açılış semanage beklemez" ;;
+    3) : ;;   # kapı modu yapılandırılmamış (kapi.json yok/okunamadı) — sessiz
+    *)
+      portlar=$(tr -d ' \t\r\n' < "$KAPI_JSON" 2>/dev/null \
+        | grep -oE '"(admin|bayi|musteri)":[0-9]+|"eski_portlar":\[[0-9,]*\]' \
+        | grep -oE '[0-9]+' | sort -un | tr '\n' ' ') || portlar=""
+      portlar=${portlar% }
+      case "$rc" in
+        1)   warn "kapı portları SELinux'ta etiketlenemedi — panel kapı düzenini uygulamaz, eski tek-port davranışı sürer; elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
+        124) warn "kapı portları SELinux etiketlemesi 300 sn'de bitmedi (kapi selinux zaman aşımı) — etiketleme panel açılışına kalır; elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
+        *)   warn "kapi selinux çalıştırılamadı (çıkış $rc — ikili komutu tanımıyor?) — etiketleme panel açılışına kalır (açılış yavaşlayabilir); elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
+      esac
+      if [ -n "$cikti" ]; then
+        printf '%s\n' "$cikti" | tail -n 8 | sed 's/^/      /' || true
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# saglik_bekle: restart sonrası panel ACTIVE + /healthz bekler; 0 = sağlıklı.
+# 🔴 SON-OPS-1: pencere eskiden 6×2 sn ≈ 12 sn idi. Yeni ikili ListenAndServe'den ÖNCE
+# açılış Heal'lerini koşar (kapı uzlaştırması: SELinux etiket denetimi, nginx -t /
+# reload / dinleme ölçümü; ilk kurulumda migration'lar); o sürede /healthz'e yanıt veren
+# YOKTUR. Sağlıklı bir güncelleme "sağlıksız" sayılıp GERİ ALINIYORDU (ikili + DB: dump
+# ile restart arasındaki yazmalar kaybolur) ve her yeniden denemede aynısı oluyordu.
+# Şimdi en fazla SAGLIK_SN (120) sn; başarıda HEMEN çıkar.
+# Çöküş döngüsü yine yakalanır: birim Restart=always → çöken süreç yeniden başlar ve
+# NRestarts artar. Artış RAPORLANIR ve süreç ancak SAGLIK_KARARLI ardışık yoklamada
+# (≈10 sn) yeniden başlamadan /healthz verirse sağlıklı sayılır — arada bir yanıt
+# veren çöküş döngüsü uzun pencerede "sağlıklı" geçmesin. Süre dolarsa 1 → geri alma.
+saglik_bekle() {
+  local bas son nr0 nr nr_son yb=0 kararli=0
+  bas=$SECONDS; son=$((SECONDS + SAGLIK_SN))
+  nr0=$(systemctl show -p NRestarts --value girginospanel 2>/dev/null) || nr0=""
+  case "$nr0" in ''|*[!0-9]*) nr0="" ;; esac
+  nr_son=$nr0
+  echo "  /healthz bekleniyor (en fazla ${SAGLIK_SN} sn — açılış uzlaştırması ListenAndServe'den önce koşar)…"
+  while [ "$SECONDS" -lt "$son" ]; do
+    sleep 2
+    if [ -n "$nr0" ]; then
+      nr=$(systemctl show -p NRestarts --value girginospanel 2>/dev/null) || nr=""
+      case "$nr" in ''|*[!0-9]*) nr="" ;; esac
+      if [ -n "$nr" ] && [ "$nr" != "$nr_son" ]; then
+        # ilk yeniden başlamada uyar (döngüde her turda satır basma; toplam sonda raporlanır)
+        if [ "$yb" = 0 ]; then
+          warn "panel süreci bekleme sırasında YENİDEN BAŞLADI (NRestarts $nr0 → $nr) — çöküyor olabilir: journalctl -u girginospanel -n 40"
+        fi
+        nr_son=$nr; yb=1; kararli=0
+      fi
+    fi
+    if systemctl is-active --quiet girginospanel && curl -fsS --max-time 5 "$PANEL_HEALTH" >/dev/null 2>&1; then
+      if [ "$yb" = 0 ]; then
+        SAGLIK_GECEN=$((SECONDS - bas)); return 0
+      fi
+      kararli=$((kararli + 1))
+      if [ "$kararli" -ge "$SAGLIK_KARARLI" ]; then
+        SAGLIK_GECEN=$((SECONDS - bas))
+        warn "panel bekleme sırasında çöküp yeniden başladı (NRestarts $nr0 → $nr_son), sonra ${SAGLIK_KARARLI} yoklama boyunca kararlı kaldı — sağlıklı sayıldı; neden: journalctl -u girginospanel -n 80"
+        return 0
+      fi
+    else
+      kararli=0
+    fi
+  done
+  SAGLIK_GECEN=$((SECONDS - bas))
+  if [ "$yb" = 1 ]; then
+    warn "panel ${SAGLIK_GECEN} sn içinde kararlı açılmadı ve bekleme boyunca çöküp yeniden başladı (NRestarts $nr0 → $nr_son) — çöküş döngüsü"
+  else
+    warn "panel ${SAGLIK_GECEN} sn içinde ACTIVE + /healthz vermedi ($PANEL_HEALTH)"
+  fi
+  return 1
 }
 
 [ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
@@ -273,7 +374,8 @@ if [ "$DRY" = 1 ]; then
   echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
   echo "  • $DBBK + /etc/systemd/system/girginospanel-db-backup.{service,timer} (timer enable --now)"
   echo "  • migration'lardan ÖNCE panel DB dump'ı → $DBDIR  (DRY-RUN'da dump ALINMAZ)"
-  echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR)"
+  echo "  • kapi.json varsa restart'tan ÖNCE: girginospanel-server kapi selinux (kapı portları http_port_t)"
+  echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR; /healthz en fazla ${SAGLIK_SN} sn beklenir)"
   exit 0
 fi
 
@@ -596,20 +698,22 @@ if [ ! -f "$KAPI_JSON" ]; then
   if [ -f "$KAPI_JSON" ]; then KAPI_YENI=1; fi
 fi
 
+# 10d) Kapı portlarının SELinux etiketi — 10c'den SONRA, restart'tan ÖNCE (SON-OPS-1).
+# Yeni geçişin portları da, önceden kapı modundaki sunucunun portları da burada etiketlenir;
+# açılış Heal'i yalnız önbelleği doğrular. Etiketlenemezse uyarır, güncellemeyi DURDURMAZ.
+kapi_selinux_etiketle
+
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
 step "Yeniden başlatılıyor"
 systemctl restart girginospanel
 HEALTHY=0
-for i in 1 2 3 4 5 6; do
-  sleep 2
-  if systemctl is-active --quiet girginospanel && curl -fsS "$PANEL_HEALTH" >/dev/null 2>&1; then HEALTHY=1; break; fi
-done
+if saglik_bekle; then HEALTHY=1; fi
 
 if [ "$HEALTHY" = 1 ]; then
   systemctl reload nginx >/dev/null 2>&1 || true
   echo "$RELHASH" > "$MARKER" 2>/dev/null || true   # bu release'i uygulandı olarak işaretle
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
-  ok "panel ACTIVE + /healthz OK"
+  ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} sn)"
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
 
   # 11a) FTP kimlik-modu uyumu (pure-ftpd MYSQLCrypt) — 🔴 updater eskiden FTP

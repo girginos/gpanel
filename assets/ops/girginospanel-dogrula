@@ -291,6 +291,56 @@ fi
 # GOSP_* path overrides exist only for sandbox tests; the defaults are the real paths.
 _kapi_json=${GOSP_KAPI_AYAR:-/etc/girginospanel/kapi.json}
 kapi_portu() { grep -oE "\"$1\": *[0-9]+" "$_kapi_json" 2>/dev/null | grep -oE '[0-9]+$' | head -1; }
+# The panel's enforcement flag as a file ("acik" | "kapali"; tmpfs, written by the startup
+# Heal and every measurement). See internal/provisioner/panelkapi.go kapiZorlamaDosyasi.
+_kapi_zorlama=${GOSP_KAPI_ZORLAMA:-/run/girginospanel/kapi-zorlama}
+
+# kapi_zorlama_olc: is gate enforcement REALLY on? (SON-OPS-2; same logic as
+# girginospanel-erisim kapi_zorlama_olc.) The type measurement above CANNOT tell: the
+# panel answers a loopback measurement with the real gate type even when enforcement is
+# OFF (kapi.go: ZorlamaAktif() || istemciLoopback), while at the same time the reseller,
+# customer and legacy gates accept the ADMIN login. Two independent measurements:
+#   1) the panel's flag file says "acik"
+#   2) production path: the customer gate has NO admin login endpoint -> 404. With
+#      enforcement off the same request returns 400 (empty body). Body '{}': no
+#      credentials are sent; audit log and brute-force counter are untouched (401 only).
+# Only both together count as ON. Sets _kz_durum = acik | kapali | olculemedi and
+# _kz_olcum = details (plain ASCII/UTF-8 text, no quotes — safe for --json).
+_kz_durum=""; _kz_olcum=""
+kapi_zorlama_olc() { # -> 0 only if enforcement is PROVEN on
+  local bayrak mp kod b_ac=0 b_kapali=0 u_ac=0 u_kapali=0 bd ud
+  bayrak=$(head -c 32 "$_kapi_zorlama" 2>/dev/null | tr -d '[:space:]')
+  case "$bayrak" in
+    acik)   b_ac=1;     bd="flag: acik" ;;
+    kapali) b_kapali=1; bd="flag: KAPALI ($_kapi_zorlama)" ;;
+    "")     bd="flag unreadable ($_kapi_zorlama missing - panel measurement not done or old version)" ;;
+    *)      bd="flag not recognised (${bayrak//[!a-zA-Z0-9_-]/?})" ;;
+  esac
+  mp=$(kapi_portu musteri)
+  if [ -z "$mp" ]; then
+    ud="no customer gate port in $_kapi_json - login endpoint not measured"
+  else
+    kod=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' -X POST \
+          -H 'Content-Type: application/json' --data '{}' \
+          "https://127.0.0.1:$mp/api/v1/auth/login" 2>/dev/null)
+    case "$kod" in
+      404)         u_ac=1;     ud="customer gate :$mp admin login: 404 (no endpoint)" ;;
+      400|401|200) u_kapali=1; ud="customer gate :$mp admin login: HTTP $kod - endpoint OPEN" ;;
+      ""|000)      ud="customer gate :$mp could not connect - login endpoint not measured" ;;
+      *)           ud="customer gate :$mp HTTP ${kod//[!0-9]/?} - login endpoint not measured" ;;
+    esac
+  fi
+  _kz_olcum="$bd · $ud"
+  if [ $b_ac -eq 1 ] && [ $u_ac -eq 1 ]; then
+    _kz_durum=acik; return 0
+  fi
+  if [ $b_kapali -eq 1 ] || [ $u_kapali -eq 1 ]; then
+    _kz_durum=kapali
+  else
+    _kz_durum=olculemedi
+  fi
+  return 1
+}
 # http_port_t_kapsar: is tcp port $2 inside http_port_t in `semanage port -l` output $1?
 # Entries are single ports or ranges ("80, 443, 8000-8010"); the policy line and the local
 # customization line are both considered (same parse as portyonetim.SELinuxPortDurumu).
@@ -322,6 +372,17 @@ if [ -f "$_kapi_json" ]; then
       uyar "gate $_rol :$_kp" "expected '$_bek', got '${_tip:-no answer}' — role separation OFF (single-port behaviour)"
     fi
   done
+
+  # 🔴 A correct type is NOT enforcement (SON-OPS-2): measured from loopback, the three
+  # gates above pass even while enforcement is OFF and the reseller/customer/legacy gates
+  # accept the admin login. Measure enforcement separately; unmeasurable != passed (rule 2).
+  if kapi_zorlama_olc; then
+    gec "gate enforcement" "ON — $_kz_olcum"
+  elif [ "$_kz_durum" = "kapali" ]; then
+    uyar "gate enforcement" "role separation OFF (enforcement KAPALI) — admin login is accepted on the reseller/customer/legacy gates: $_kz_olcum"
+  else
+    uyar "gate enforcement" "role separation COULD NOT MEASURE (ölçülemedi) — not counted as passed; admin login may be open on the reseller/customer/legacy gates: $_kz_olcum"
+  fi
 
   # 🔴 Gate ports vs SELinux (RK-OPS-01). In Enforcing, nginx (httpd_t) can only bind
   # ports labelled http_port_t; random gate ports default to unreserved_port_t. A reload
