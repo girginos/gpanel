@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import type { Domain } from '@/components/DomainList'
@@ -13,10 +14,12 @@ type Kayit = {
   durum: string; relay: string; detay: string
 }
 
-const DURUM: Record<string, { renk: string; etiket: string }> = {
-  sent: { renk: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300', etiket: 'Teslim' },
-  bounced: { renk: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', etiket: 'Reddedildi' },
-  deferred: { renk: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', etiket: 'Ertelendi' },
+// Teslimat durumu → Tailux Badge rengi + etiket.
+type RozetRenk = 'success' | 'error' | 'warning' | 'neutral'
+const DURUM: Record<string, { renk: RozetRenk; etiket: string }> = {
+  sent: { renk: 'success', etiket: 'Teslim' },
+  bounced: { renk: 'error', etiket: 'Reddedildi' },
+  deferred: { renk: 'warning', etiket: 'Ertelendi' },
 }
 
 const MAILTES_EN: Record<string, string> = {
@@ -40,7 +43,7 @@ const MAILTES_EN: Record<string, string> = {
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILTES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 function rozet(durum: string) {
-  return DURUM[durum] || { renk: 'bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300', etiket: durum }
+  return DURUM[durum] || { renk: 'neutral' as RozetRenk, etiket: durum }
 }
 
 export default function DomainMailTeslimatPage() {
@@ -49,7 +52,7 @@ export default function DomainMailTeslimatPage() {
   const toast = useToast()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [kayitlar, setKayitlar] = useState<Kayit[] | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [yenileniyor, setYenileniyor] = useState(false)
 
   useEffect(() => {
@@ -90,19 +93,19 @@ export default function DomainMailTeslimatPage() {
       ]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300">{cevir("E-Posta Teslimat Takibi")}</h1>
-        <button onClick={() => yukle(domain)} disabled={yenileniyor}
-          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:hover:bg-dark-600/50 text-slate-700 dark:text-slate-200 disabled:opacity-60">
-          <svg className={`w-4 h-4 ${yenileniyor ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+        <Button onClick={() => yukle(domain)} yukleniyor={yenileniyor} variant="outlined"
+          className="gap-1.5 text-sm px-3 py-1.5">
+          {!yenileniyor && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
           {cevir("Yenile")}
-        </button>
+        </Button>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{domain.alan_adi} {cevir("gönderilen/alınan son e-postaların teslimat durumu (sunucu günlüğünden).")}</p>
 
       {kayitlar && kayitlar.length > 0 && (
         <div className="flex items-center gap-2 mb-3 text-xs">
-          <span className={`px-2 py-0.5 rounded ${DURUM.sent.renk}`}>{sayac('sent')} {cevir("Teslim")}</span>
-          <span className={`px-2 py-0.5 rounded ${DURUM.deferred.renk}`}>{sayac('deferred')} {cevir("Ertelendi")}</span>
-          <span className={`px-2 py-0.5 rounded ${DURUM.bounced.renk}`}>{sayac('bounced')} {cevir("Reddedildi")}</span>
+          <Badge variant="soft" color={DURUM.sent.renk}>{sayac('sent')} {cevir("Teslim")}</Badge>
+          <Badge variant="soft" color={DURUM.deferred.renk}>{sayac('deferred')} {cevir("Ertelendi")}</Badge>
+          <Badge variant="soft" color={DURUM.bounced.renk}>{sayac('bounced')} {cevir("Reddedildi")}</Badge>
         </div>
       )}
 
@@ -129,7 +132,7 @@ export default function DomainMailTeslimatPage() {
                       <td className="px-4 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-xs">{k.zaman}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={k.gonderen}>{k.gonderen || '—'}</td>
                       <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-[180px] truncate" title={k.alici}>{k.alici}</td>
-                      <td className="px-4 py-2"><span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${r.renk}`}>{cevir(r.etiket)}</span></td>
+                      <td className="px-4 py-2"><Badge variant="soft" color={r.renk} className="text-[10px] font-bold px-2 py-0.5 uppercase">{cevir(r.etiket)}</Badge></td>
                       <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 max-w-[240px] truncate" title={k.detay}>{k.detay}</td>
                     </tr>
                   )

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
+import { Button } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
@@ -131,8 +132,8 @@ export default function DomainDatabasesPage() {
       {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5"><Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link></p>}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={() => setEkleAcik(true)} className="px-3.5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">{cevir("+ Yeni Veritabanı")}</button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md">↻ {cevir("Yenile")}</button>
+        <Button onClick={() => setEkleAcik(true)} color="primary" className="px-3.5 py-2 text-sm">{cevir("+ Yeni Veritabanı")}</Button>
+        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm">↻ {cevir("Yenile")}</Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{dbler.length} {cevir("veritabanı")}</span>
       </div>
 
@@ -192,7 +193,7 @@ export default function DomainDatabasesPage() {
 export function uretGucluParola(n = 20): string {
   const harf = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
   const buf = new Uint32Array(n)
-  ;(window.crypto || (window as any).msCrypto).getRandomValues(buf)
+  ;(window.crypto || (window as unknown as { msCrypto: Crypto }).msCrypto).getRandomValues(buf)
   let s = ''
   for (let i = 0; i < n; i++) s += harf[buf[i] % harf.length]
   return s
@@ -278,7 +279,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
             <SonucSatir e={cevir("Parola")} v={sonuc.db_parola} />
           </div>
           <div className="flex justify-end">
-            <button onClick={onTamam} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm rounded-md">{cevir("Tamam")}</button>
+            <Button onClick={onTamam} color="primary" className="px-4 py-2 text-sm">{cevir("Tamam")}</Button>
           </div>
         </div>
       ) : (
@@ -338,7 +339,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Parola")} <span className="text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız panel üretir)")}</span></label>
                   <div className="flex gap-2">
                     <input type="text" value={parola} onChange={e => setParola(e.target.value)} placeholder={cevir("En az 12 karakter, harf+rakam")} className={inputCls} />
-                    <button type="button" onClick={() => setParola(uretGucluParola())} className="whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 border border-brand-600 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-sm rounded-md">{cevir("Üret")}</button>
+                    <Button type="button" onClick={() => setParola(uretGucluParola())} color="primary" variant="outlined" className="whitespace-nowrap px-3 py-2 text-sm">{cevir("Üret")}</Button>
                   </div>
                   {parolaGucSorunu && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{cevir("Parola en az 12 karakter ve harf+rakam karışık olmalı.")}</p>}
                 </div>
@@ -347,8 +348,8 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 rounded-md text-sm">{cevir("İptal")}</button>
-            <button onClick={olustur} disabled={isleniyor} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</button>
+            <Button onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+            <Button onClick={olustur} yukleniyor={isleniyor} color="primary" className="px-4 py-2 text-sm">{isleniyor ? cevir("Oluşturuluyor…") : cevir("Oluştur")}</Button>
           </div>
         </div>
       )}
@@ -362,7 +363,7 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
     <div className="flex items-center gap-2">
       <span className="w-24 shrink-0 text-xs text-emerald-700 dark:text-emerald-300">{e}</span>
       <code className="flex-1 bg-white dark:bg-dark-700 px-3 py-1.5 font-mono text-sm text-slate-900 dark:text-slate-100 rounded border border-emerald-200 dark:border-emerald-800 break-all">{v}</code>
-      <button onClick={() => { navigator.clipboard.writeText(v); setOk(true); setTimeout(() => setOk(false), 1500) }} className="px-2.5 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs rounded">{ok ? '✓' : cevir("Kopyala")}</button>
+      <Button onClick={() => { navigator.clipboard.writeText(v); setOk(true); setTimeout(() => setOk(false), 1500) }} color="success" variant="soft" className="px-2.5 py-1.5 text-xs">{ok ? '✓' : cevir("Kopyala")}</Button>
     </div>
   )
 }
@@ -441,8 +442,8 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 rounded-md text-sm">{cevir("İptal")}</button>
-            <button onClick={() => sifirla()} disabled={isleniyor || ozelPw.length < 6} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</button>
+            <Button onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+            <Button onClick={() => sifirla()} yukleniyor={isleniyor} disabled={ozelPw.length < 6} color="primary" className="px-4 py-2 text-sm">{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</Button>
           </div>
         </div>
     </Modal>
