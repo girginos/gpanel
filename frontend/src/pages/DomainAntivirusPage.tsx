@@ -211,11 +211,8 @@ export default function DomainAntivirusPage() {
     >
       {etiket}
       {rozet > 0 && (
-        <span className={`ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold ${
-          vurgu === 'kirmizi' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-          : vurgu === 'kehribar' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-          : 'bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300'
-        }`}>{rozet}</span>
+        <Badge variant="soft" color={vurgu === 'kirmizi' ? 'error' : vurgu === 'kehribar' ? 'warning' : 'neutral'}
+          className="ml-2 min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold">{rozet}</Badge>
       )}
     </button>
   )

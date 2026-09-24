@@ -403,14 +403,14 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
                 </div>
                 <button
                   onClick={() => { setMenuAcik(false); navigate('/profil') }}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700"
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600/50"
                 >
                   {cevir("Profil ve Tercihler")}
                 </button>
                 <div className="border-t border-slate-100 dark:border-dark-600 my-1"></div>
                 <button
                   onClick={onCikis}
-                  className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20"
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                 >
                   {cevir(cevir("Çıkış Yap"))}
                 </button>

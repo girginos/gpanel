@@ -250,6 +250,7 @@ export default function WebsiteSecurityPage() {
           </div>
         </div>
         <Button
+          color="primary"
           onClick={tumunuTara}
           disabled={taranıyor || status?.running}
           className="px-4 py-2 text-sm"

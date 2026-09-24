@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
+import { Button, Badge, Card } from '@/components/ui'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
 // AYRI bir PHP-FPM havuzu render edilir (bağımsız memory_limit/upload/pm.* vb.).
@@ -19,7 +20,8 @@ type Ayar = {
   ek_direktifler: string; debug_mode: boolean
 }
 
-const kart = 'rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-4 md:p-5'
+// Kart çerçevesi (border + rounded-lg) Tailux <Card> bileşeninden gelir.
+const kart = 'bg-white dark:bg-dark-700 p-4 md:p-5'
 const etk = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
 const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm'
 
@@ -76,14 +78,14 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
   )
 
   return (
-    <div className={`${kart} md:col-span-2`}>
-      <button onClick={() => setAcik(v => !v)} className="w-full flex items-center justify-between text-left">
+    <Card className={`${kart} md:col-span-2`}>
+      <button onClick={() => setAcik(v => !v)} aria-expanded={acik} className="w-full flex items-center justify-between text-left">
         <div>
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("PHP Ayarları")}</h2>
           <p className="text-xs text-slate-500 mt-0.5">{cevir("Bellek, yükleme boyutu, hata gösterimi ve FPM havuz limitleri — domain gibi tam özelleştirme.")}</p>
         </div>
         <span className="flex items-center gap-2">
-          {ozel && <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">{cevir("ayrı havuz")}</span>}
+          {ozel && <Badge variant="soft" color="info" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{cevir("ayrı havuz")}</Badge>}
           <span className="text-slate-400 text-lg">{acik ? '−' : '+'}</span>
         </span>
       </button>
@@ -144,13 +146,13 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           <div className="flex justify-end">
-            <button onClick={kaydet} disabled={kaydediliyor}
-              className="px-4 py-2 rounded-md bg-dark-800 dark:bg-dark-600 text-white text-sm font-medium disabled:opacity-40">
+            <Button color="primary" onClick={kaydet} yukleniyor={kaydediliyor}
+              className="px-4 py-2 text-sm">
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("PHP ayarlarını kaydet")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
-    </div>
+    </Card>
   )
 }

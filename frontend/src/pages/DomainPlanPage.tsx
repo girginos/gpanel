@@ -8,7 +8,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button, Badge, Card } from '@/components/ui'
+import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -262,7 +262,7 @@ export default function DomainPlanPage() {
                 )}
                 {mevcut && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
-                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                        className={butonSinifi({ variant: 'outlined', className: 'px-3 py-1.5 text-sm' })}>
                     {cevir("Tüm ayarlar")}
                   </Link>
                 )}
@@ -324,7 +324,7 @@ export default function DomainPlanPage() {
             <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-dark-600">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">{cevir("Tanımlı plan yok")}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Önce bir hosting planı oluşturun.")}</p>
-              <Link to="/araclar/paketler" className="mt-4 inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">{cevir("Planlara git")}</Link>
+              <Link to="/araclar/paketler" className={butonSinifi({ color: 'primary', className: 'mt-4 px-3 py-1.5 text-sm' })}>{cevir("Planlara git")}</Link>
             </div>
           ) : (
             <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

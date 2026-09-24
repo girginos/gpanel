@@ -43,7 +43,6 @@ const CONN_EN: Record<string, string> = {
   "Kullanıcı:": "User:",
   "Kapat": "Close",
   "Üretiliyor…": "Generating…",
-  "Kopyala": "Copy",
   "Kopyalandı": "Copied",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CONN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -165,7 +164,6 @@ export default function DomainConnectionPage() {
           ftpUser={domain?.ftp_user || ''}
           dbUser={domain?.db_user || ''}
           onKapat={() => setParolaModal(null)}
-          onKopya={kopyala}
         />
       )}
     </div>
@@ -233,8 +231,8 @@ function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => v
   )
 }
 
-function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }:
-  { tip: 'ftp' | 'db'; domainId: string; ftpUser: string; dbUser: string; onKapat: () => void; onKopya: (s: string) => void }) {
+function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
+  { tip: 'ftp' | 'db'; domainId: string; ftpUser: string; dbUser: string; onKapat: () => void }) {
   const toast = useToast()
   const [parola, setParola] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
@@ -292,27 +290,5 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat, onKopya }
         </div>
       </div>
     </div>
-  )
-}
-
-function KopyaButton({ text, renk }: { text: string; renk: 'amber' | 'emerald' }) {
-  const [k, setK] = useState(false)
-  // Eski amber/emerald renk anahtarı → Tailux Button rengi.
-  const renkler = { amber: 'warning', emerald: 'success' } as const
-  return (
-    <Button
-      color={renkler[renk]}
-      variant="soft"
-      onClick={() => {
-        const ok = panoYaz(text)
-        if (ok) {
-          setK(true)
-          setTimeout(() => setK(false), 1500)
-        }
-      }}
-      className={`text-[10px] px-2 py-1 rounded-md ${k ? 'ring-2 ring-emerald-400' : ''}`}
-    >
-      {k ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> {cevir("Kopyalandı")}</span> : cevir('Kopyala')}
-    </Button>
   )
 }

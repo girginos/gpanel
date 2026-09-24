@@ -10,16 +10,15 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
-import ResourceCard from '@/components/ResourceCard'
 import DomainKaynakKart from '@/components/DomainKaynakKart'
 import DomainPano from "@/components/DomainPano"
 import ToolCard from '@/components/ToolCard'
 import EklentiEkrani from '@/components/EklentiEkrani'
 import LisansAskida from '@/components/LisansAskida'
-import type { Domain } from '@/components/DomainList'
+import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge, Card } from '@/components/ui'
+import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 
 // 🔴 TEK KAYNAK. Önceki sürümde geri yükleme, elle yazılmış bir `v === '...'`
 // zinciriyle doğruluyordu ve yeni sekme eklenince ORAYA yazmak unutuldu:
@@ -391,7 +390,7 @@ function WebSitePreview({ alanAdi, ssl }: { alanAdi: string; ssl: boolean }) {
             <div className="text-xs font-semibold text-white truncate">{alanAdi}</div>
           </div>
           <a href={url} target="_blank" rel="noreferrer"
-            className="shrink-0 inline-flex items-center gap-1 text-[11px] bg-white/90 hover:bg-white text-slate-900 px-2 py-1 rounded-md font-medium transition">
+            className={butonSinifi({ className: 'shrink-0 gap-1 px-2 py-1 text-[11px] rounded-md' })}>
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
@@ -578,7 +577,7 @@ function AppTab({ domain }: { domain: Domain }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <a href={u.yonetim_url} target="_blank" rel="noreferrer"
-                    className="rounded-md bg-dark-800 text-white text-xs px-3 py-1.5 hover:bg-dark-700">
+                    className={butonSinifi({ color: 'primary', className: 'text-xs px-3 py-1.5' })}>
                     {cevir("Yönetim Paneli →")}
                   </a>
                   <Button color="error" variant="soft" onClick={() => sil(u.id, u.ad)}

@@ -93,7 +93,7 @@ function TreeNode({
       <div
         onClick={() => onSec(yol)}
         className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer transition ${
-          seciliMi ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300'
+          seciliMi ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:hover:bg-dark-600/50 text-slate-700 dark:text-slate-300'
         }`}
         style={{ paddingLeft: 8 + derinlik * 14 }}
         title={yol}

@@ -351,7 +351,7 @@ export default function DomainGitPage() {
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Branch</label>
                     <select value={ghSelectedBranch} onChange={e => setGhSelectedBranch(e.target.value)}
                       disabled={!ghSelectedRepo}
-                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-dark-700 disabled:bg-slate-50 dark:bg-dark-800">
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono bg-white dark:bg-dark-700 disabled:bg-slate-50 dark:disabled:bg-dark-800">
                       {!ghSelectedBranch && <option value="">{cevir("— seç —")}</option>}
                       {ghBranches.map(b => <option key={b} value={b}>{b}</option>)}
                       {ghSelectedBranch && !ghBranches.includes(ghSelectedBranch) && <option value={ghSelectedBranch}>{ghSelectedBranch}</option>}

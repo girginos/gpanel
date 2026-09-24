@@ -33,8 +33,37 @@ const neutralVariants: Record<Variant, string> = {
   flat: 'hover:bg-gray-300/20 focus:bg-gray-300/20 text-gray-700 active:bg-gray-300/25 dark:text-dark-200 dark:hover:bg-dark-300/10 dark:focus:bg-dark-300/10 dark:active:bg-dark-300/20',
 }
 
+// Renkli butonlarda klavye odak halkası butonun kendi rengini alır (.btn-base
+// varsayılanı primary — nötr butonlar onu kullanır). Yalnız :focus-visible.
+const odakHalkasi = 'focus-visible:ring-this/60 dark:focus-visible:ring-this-lighter/60'
+
 function cx(...a: Array<string | false | null | undefined>): string {
   return a.filter(Boolean).join(' ')
+}
+
+export type ButtonGorunum = {
+  color?: Color
+  variant?: Variant
+  isIcon?: boolean
+  isGlow?: boolean
+  unstyled?: boolean
+  className?: string
+}
+
+// butonSinifi — Button görünümünün TEK kaynağı. Buton gibi görünmesi gereken
+// <a>/<Link> öğeleri de bunu kullanır: <a className={butonSinifi({ color: 'primary' })}>.
+// eslint-disable-next-line react-refresh/only-export-components
+export function butonSinifi({ color = 'neutral', variant = 'filled', isIcon = false, isGlow = false, unstyled = false, className }: ButtonGorunum = {}): string {
+  return cx(
+    'btn-base',
+    !unstyled && 'btn',
+    !unstyled && isIcon && 'shrink-0 p-0',
+    !unstyled && (color === 'neutral'
+      ? cx(neutralVariants[variant], isGlow && 'dark:shadow-dark-450/5 shadow-lg shadow-gray-200/50')
+      : cx(THIS[color], variants[variant], odakHalkasi, isGlow && 'shadow-soft shadow-this/50 dark:shadow-this/50 dark:shadow-lg')),
+    unstyled && color !== 'neutral' && THIS[color],
+    className,
+  )
 }
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -69,16 +98,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type || 'button'}
       disabled={disabled || yukleniyor}
       aria-busy={yukleniyor || undefined}
-      className={cx(
-        'btn-base',
-        !unstyled && 'btn',
-        !unstyled && isIcon && 'shrink-0 p-0',
-        !unstyled && (color === 'neutral'
-          ? cx(neutralVariants[variant], isGlow && 'dark:shadow-dark-450/5 shadow-lg shadow-gray-200/50')
-          : cx(THIS[color], variants[variant], isGlow && 'shadow-soft shadow-this/50 dark:shadow-this/50 dark:shadow-lg')),
-        unstyled && color !== 'neutral' && THIS[color],
-        className,
-      )}
+      className={butonSinifi({ color, variant, isIcon, isGlow, unstyled, className })}
       {...rest}
     >
       {yukleniyor && <Yukleyici />}

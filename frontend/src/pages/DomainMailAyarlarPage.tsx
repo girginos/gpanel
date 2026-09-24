@@ -5,10 +5,10 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, butonSinifi } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import type { Domain } from '@/components/DomainList'
+import type { Domain } from '@/components/domainTipi'
 
 type Kontrol = { ad: string; durum: 'ok' | 'uyari' | 'hata' | 'bilgi'; mesaj: string }
 type Kategori = { ad: string; kontroller: Kontrol[] }
@@ -205,7 +205,7 @@ export default function DomainMailAyarlarPage() {
             <SunucuKart baslik={cevir("Giden (SMTP)")} host={baglanti.smtp.host} port={baglanti.smtp.port} g={baglanti.smtp.guvenlik} />
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
-            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-dark-600 hover:bg-slate-50 dark:hover:bg-dark-600/50 text-slate-700 dark:text-slate-200">
+            <a href={baglanti.webmail} target="_blank" rel="noreferrer" className={butonSinifi({ variant: 'outlined', className: 'gap-1.5 px-3 py-1.5 text-sm' })}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6m-9 6V4" /></svg>
               {cevir("Webmail'i Aç")}
             </a>

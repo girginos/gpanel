@@ -7,7 +7,7 @@ import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
-import type { Domain } from '@/components/DomainList'
+import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 

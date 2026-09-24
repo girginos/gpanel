@@ -14,17 +14,17 @@
   min-height: 100%;
 }
 .gp-dash *, .gp-dash *::before, .gp-dash *::after { box-sizing: border-box; }
-.gp-dash button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+/* Ham <button> sıfırlaması `@layer base`'te: katmansız kalırsa Tailux <Button>'un
+   (components/utilities katmanı) renk/kenarlık/yazı sınıflarını ezer. */
+@layer base {
+  .gp-dash button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+}
 
 /* ── sayfa başlığı ── */
 .gp-dash .page-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 12px; }
 .gp-dash .page-title h1 { font-size: 24px; margin: 0 0 5px; letter-spacing: -.5px; color: #e8eef8; }
 .gp-dash .page-title p { margin: 0; color: #64748b; font-size: 13px; }
 .gp-dash .title-actions { display: flex; gap: 8px; }
-.gp-dash .primary { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-radius: 9px; background: #2563eb; color: #fff; font-size: 13px; font-weight: 600; }
-.gp-dash .primary:hover { background: #1d4ed8; }
-.gp-dash .secondary { background: #101722; border: 1px solid rgba(255, 255, 255, .07); border-radius: 9px; padding: 8px 11px; color: #9aa8ba; font-size: 13px; display: flex; align-items: center; gap: 6px; }
-.gp-dash .secondary:hover { background: #16202e; }
 
 /* ── stat kartları ── */
 .gp-dash .stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }

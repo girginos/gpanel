@@ -10,7 +10,7 @@ import SubPHPAyarlari from '@/components/SubPHPAyarlari'
 import SubWebAyarlari from '@/components/SubWebAyarlari'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge, Card } from '@/components/ui'
+import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 
 type Detay = {
   id: number; alt_ad: string; tam_ad: string; php_surum: string
@@ -199,7 +199,7 @@ export default function DomainSubdomainYonetPage() {
             </div>
             <div className="flex items-center gap-2">
               <a href={`${sslAktif ? 'https' : 'http'}://${d.tam_ad}`} target="_blank" rel="noreferrer"
-                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600">
+                className={butonSinifi({ variant: 'outlined', className: 'text-sm px-3 py-1.5' })}>
                 {cevir("Ziyaret Et")} &#8599;
               </a>
               <Button color="error" onClick={sil}

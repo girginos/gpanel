@@ -10,6 +10,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import { useMarka } from '@/lib/marka'
 import BayiOzet from '@/components/BayiOzet'
+import { Button } from '@/components/ui'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, Box, CheckCircle2, Cloud, Cpu,
@@ -338,9 +339,11 @@ export default function HomePage() {
           <h1>{selamla()}{ad ? `, ${ad}` : ''}</h1>
           <p>{s ? `${s.sistem.hostname} · ${fmtUptime(s.uptime_sn)}` : cevir('Altyapınızın genel durumunu ve kaynaklarını yönetin.')}</p>
         </div>
-        <div className="title-actions">
-          <button className="secondary" onClick={yenile}><RefreshCw size={14} /> {cevir('Yenile')}</button>
-          <button className="primary" onClick={() => navigate('/domainler?yeni=1')}><Plus size={16} /> {cevir('Domain Ekle')}</button>
+        {/* Pano her temada koyu bir ada: `dark` sınıfı Tailux butonlarının koyu
+            varyantını açık temada da seçtirir (koyu zeminde okunur). */}
+        <div className="title-actions dark">
+          <Button variant="outlined" onClick={yenile} className="gap-1.5 px-3 py-2 text-[13px]"><RefreshCw size={14} /> {cevir('Yenile')}</Button>
+          <Button color="primary" onClick={() => navigate('/domainler?yeni=1')} className="gap-1.5 px-3.5 py-2 text-[13px] font-semibold"><Plus size={16} /> {cevir('Domain Ekle')}</Button>
         </div>
       </div>
 

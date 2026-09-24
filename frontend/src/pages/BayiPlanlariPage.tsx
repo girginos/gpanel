@@ -18,17 +18,12 @@ type Paket = {
   fiyat_kurus: number; varsayilan: boolean; bayi_sayisi: number; olusturulma: string
 }
 
-const bos = { ad: '', aciklama: '', max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0, fiyat_kurus: 0, varsayilan: false }
-
 
 const BPLAN_EN: Record<string, string> = {
   "Türkçe": "English",
-  "0 = limitsiz. Plan güncellenince MEVCUT bayilerin limitleri değişmez; bayiyi düzenleyip planı yeniden seçin.": "0 = unlimited. Updating a plan does not change EXISTING resellers' limits; edit the reseller and reselect the plan.",
   "Bayi Planı Oluştur": "Create Reseller Plan",
   "Bayilerinize satacağınız limit paketlerini tanımlayın (ör. Bronz: 10 hosting / 5 GB). Bayi oluştururken tek tıkla atanır.": "Define the limit packages you'll sell to your resellers (e.g. Bronze: 10 hosting / 5 GB). Assigned with one click when creating a reseller.",
-  "Fiyat (kuruş) — 0 = belirtilmemiş": "Price (cents) — 0 = unspecified",
   "Henüz bayi planı yok": "No reseller plans yet",
-  "Paket güncellendi.": "Package updated.",
   "Yeni Bayi Planı": "New Reseller Plan",
   "Bayi Planları": "Reseller Plans",
   "Bayilere satacağınız hazır limit paketleri.": "Ready-made limit packages to sell to your resellers.",
@@ -38,7 +33,6 @@ const BPLAN_EN: Record<string, string> = {
   "Hosting Planları": "Hosting Plans",
   "sayfasını kullanın.": "use the page.",
   "İşlem başarısız": "Operation failed",
-  "Kaydedildi": "Saved",
   "Yükleniyor…": "Loading…",
   "Plan": "Plan",
   "Bayi": "Reseller",
@@ -46,26 +40,15 @@ const BPLAN_EN: Record<string, string> = {
   "varsayılan": "default",
   "Düzenle": "Edit",
   "Sil": "Delete",
-  "Plan adı": "Plan name",
-  "Açıklama": "Description",
-  "Başlangıç paketi": "Starter package",
-  "Varsayılan plan": "Default plan",
-  "İptal": "Cancel",
-  "Kaydet": "Save",
   "Disk": "Disk",
   "Trafik": "Traffic",
   "Fiyat": "Price",
-  "Disk (MB)": "Disk (MB)",
-  "Trafik (MB)": "Traffic (MB)",
-  "Max hosting": "Max hosting",
   "Limitsiz": "Unlimited",
-  "paketi oluşturuldu.": "package created.",
   "Emin misiniz?": "Are you sure?",
   "paketi silinsin mi?": "package be deleted?",
   "Paket silindi.": "Package deleted.",
   "Silinemedi": "Could not delete",
   "Anasayfa": "Home",
-  "Bronz Bayi": "Bronze Reseller",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -89,9 +72,6 @@ export default function BayiPlanlariPage() {
   // Hata/basari artik sag ust toast'ta gosterilir; state'ler mantik icin duruyor.
   const [, setHata] = useState<string | null>(null)
   const [, setOk] = useState<string | null>(null)
-  const [modal, setModal] = useState<'yeni' | Paket | null>(null)
-  const [form, setForm] = useState<any>(bos)
-  const [kaydet, setKaydet] = useState(false)
 
   function yukle() {
     setYuk(true)
@@ -104,41 +84,6 @@ export default function BayiPlanlariPage() {
   useEffect(yukle, [])
 
   function yeniAc() { nav('/bayi-planlari/yeni') }   // modal yerine OZEL SAYFA (ilke ayarlari icin)
-  function duzenleAc(p: Paket) {
-    setForm({ ad: p.ad, aciklama: p.aciklama, max_domain: p.max_domain, max_disk_mb: p.max_disk_mb,
-      max_trafik_mb: p.max_trafik_mb, fiyat_kurus: p.fiyat_kurus, varsayilan: p.varsayilan })
-    setModal(p); setHata(null); setOk(null)
-  }
-
-  async function gonder(e: React.FormEvent) {
-    e.preventDefault(); setHata(null); setOk(null); setKaydet(true)
-    const body = {
-      ad: form.ad, aciklama: form.aciklama,
-      max_domain: Number(form.max_domain), max_disk_mb: Number(form.max_disk_mb),
-      max_trafik_mb: Number(form.max_trafik_mb), fiyat_kurus: Number(form.fiyat_kurus),
-      varsayilan: !!form.varsayilan,
-    }
-    try {
-      if (modal === 'yeni') {
-        await api.post('/reseller-plans', body)
-        const m = `"${form.ad}" ${cevir("paketi oluşturuldu.")}`
-        setOk(m)
-        toast.basari(cevir("Kaydedildi"), m)
-      }
-      else if (modal) {
-        await api.put(`/reseller-plans/${modal.id}`, body)
-        setOk(cevir("Paket güncellendi."))
-        toast.basari(cevir("Paket güncellendi."))
-      }
-      setModal(null); yukle()
-    } catch (err) {
-      const m = apiHata(err, cevir("İşlem başarısız"))
-      setHata(m)
-      toast.hata(cevir("İşlem başarısız"), m)
-    }
-    finally { setKaydet(false) }
-  }
-
   async function sil(p: Paket) {
     if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, tehlike: true }))) return
     setHata(null); setOk(null)
@@ -154,9 +99,6 @@ export default function BayiPlanlariPage() {
       toast.hata(cevir("İşlem başarısız"), m)
     }
   }
-
-  const inp = 'w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm bg-white dark:bg-dark-800 focus:border-brand-500 outline-none'
-  const lbl = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -215,36 +157,6 @@ export default function BayiPlanlariPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {modal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !kaydet && setModal(null)}>
-          <form onSubmit={gonder} className="bg-white dark:bg-dark-700 rounded-lg w-full max-w-md p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">{modal === 'yeni' ? cevir('Yeni Bayi Planı') : `${cevir('Plan')} — ${modal.ad}`}</h2>
-            <div className="space-y-3">
-              <div><label className={lbl}>{cevir("Plan adı")}</label>
-                <input className={inp} value={form.ad} onChange={e => setForm({ ...form, ad: e.target.value })} placeholder={cevir("Bronz Bayi")} autoFocus required /></div>
-              <div><label className={lbl}>{cevir("Açıklama")}</label>
-                <input className={inp} value={form.aciklama} onChange={e => setForm({ ...form, aciklama: e.target.value })} placeholder={cevir("Başlangıç paketi")} /></div>
-              <div className="grid grid-cols-3 gap-2">
-                <div><label className={lbl}>{cevir("Max hosting")}</label><input className={inp} type="number" min={0} value={form.max_domain} onChange={e => setForm({ ...form, max_domain: e.target.value })} /></div>
-                <div><label className={lbl}>{cevir("Disk (MB)")}</label><input className={inp} type="number" min={0} value={form.max_disk_mb} onChange={e => setForm({ ...form, max_disk_mb: e.target.value })} /></div>
-                <div><label className={lbl}>{cevir("Trafik (MB)")}</label><input className={inp} type="number" min={0} value={form.max_trafik_mb} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
-              </div>
-              <div><label className={lbl}>{cevir("Fiyat (kuruş) — 0 = belirtilmemiş")}</label>
-                <input className={inp} type="number" min={0} value={form.fiyat_kurus} onChange={e => setForm({ ...form, fiyat_kurus: e.target.value })} placeholder="49900 = 499,00 ₺" /></div>
-              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                <input type="checkbox" checked={!!form.varsayilan} onChange={e => setForm({ ...form, varsayilan: e.target.checked })} />
-                {cevir("Varsayılan plan")}
-              </label>
-              <p className="text-[11px] text-slate-400">{cevir("0 = limitsiz. Plan güncellenince MEVCUT bayilerin limitleri değişmez; bayiyi düzenleyip planı yeniden seçin.")}</p>
-            </div>
-            <div className="flex justify-end gap-2 mt-5">
-              <Button variant="outlined" type="button" onClick={() => setModal(null)} disabled={kaydet} className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-              <Button type="submit" color="primary" disabled={kaydet} className="px-4 py-2 text-sm">{kaydet ? '…' : cevir('Kaydet')}</Button>
-            </div>
-          </form>
         </div>
       )}
     </div>
