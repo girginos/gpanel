@@ -15,6 +15,8 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
+import type { Color } from '@/components/ui'
 
 type Kayit = {
   id: number
@@ -49,6 +51,18 @@ const DEGER_IPUCU: Record<string, string> = {
   TLSA:  'kullanım seçici eşleşme veri — ör. 3 1 1 0B9FA5A59EED715C26C1020C…',
   SSHFP: 'algoritma tip parmak-izi — ör. 4 2 123456789ABCDEF…',
   NAPTR: 'order pref "flags" "servis" "regexp" replacement',
+}
+
+// Kayıt tipi rozet rengi — tip grubuna göre (adres / takma ad / posta-servis /
+// güvenlik). Renk yalnız yardımcı; tip adı rozet metninde her zaman yazılı.
+function tipRenk(tip: string): Color {
+  switch (tip) {
+    case 'A': case 'AAAA': return 'primary'
+    case 'CNAME': case 'PTR': case 'NS': return 'info'
+    case 'MX': case 'SRV': case 'NAPTR': return 'secondary'
+    case 'CAA': case 'DS': case 'TLSA': case 'SSHFP': return 'success'
+    default: return 'neutral'
+  }
 }
 
 
@@ -388,9 +402,9 @@ export default function DomainDNSPage() {
                 </label>
               ))}
               <div className="col-span-2 md:col-span-4 flex justify-end">
-                <button disabled={soaKaydediyor} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md disabled:opacity-50">
+                <Button type="submit" color="primary" yukleniyor={soaKaydediyor} className="px-4 text-sm">
                   {soaKaydediyor ? cevir("Kaydediliyor…") : cevir("SOA Kaydet")}
-                </button>
+                </Button>
               </div>
             </form>
           )}
@@ -405,22 +419,22 @@ export default function DomainDNSPage() {
                 <Ikon d={I.kilit} /> DNSSEC
                 {dnssec.aktif ? (
                   dnssec.imzali
-                    ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-medium">{cevir("imzalı")}</span>
-                    : <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">{cevir("imzalanıyor…")}</span>
+                    ? <Badge color="success" variant="soft">{cevir("imzalı")}</Badge>
+                    : <Badge color="warning" variant="soft">{cevir("imzalanıyor…")}</Badge>
                 ) : (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400 font-medium">{cevir("kapalı")}</span>
+                  <Badge variant="soft">{cevir("kapalı")}</Badge>
                 )}
               </div>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{cevir("Zone imzalama (BIND inline-signing). Açtıktan sonra oluşan DS kaydını alan adı operatörünüze girin.")}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {dnssec.aktif && (
-                <button onClick={dnssecDurumYenile} className="px-2.5 py-1.5 text-xs bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Durum")}</span></button>
+                <Button variant="outlined" onClick={dnssecDurumYenile} className="gap-1.5 px-3 text-xs"><Ikon d={I.yenile} /> {cevir("Durum")}</Button>
               )}
               {dnssec.aktif ? (
-                <button disabled={dnssecIsliyor} onClick={() => setDnssecKapatOnay(true)} className="px-3 py-1.5 text-sm bg-white dark:bg-dark-700 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition disabled:opacity-50">{cevir("Kapat")}</button>
+                <Button color="error" variant="outlined" yukleniyor={dnssecIsliyor} onClick={() => setDnssecKapatOnay(true)} className="px-3 py-1.5 text-sm">{cevir("Kapat")}</Button>
               ) : (
-                <button disabled={dnssecIsliyor} onClick={() => dnssecDegistir(true)} className="px-3 py-1.5 text-sm bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 font-medium rounded-md transition disabled:opacity-50">{dnssecIsliyor ? cevir("Etkinleştiriliyor…") : cevir("Etkinleştir")}</button>
+                <Button color="primary" yukleniyor={dnssecIsliyor} onClick={() => dnssecDegistir(true)} className="px-3 py-1.5 text-sm">{dnssecIsliyor ? cevir("Etkinleştiriliyor…") : cevir("Etkinleştir")}</Button>
               )}
             </div>
           </div>
@@ -432,8 +446,8 @@ export default function DomainDNSPage() {
                   {dnssec.ds.map((d, i) => (
                     <div key={i} className="flex items-center gap-2 mb-1">
                       <code className="flex-1 text-xs font-mono bg-slate-50 dark:bg-dark-800 border border-slate-200 dark:border-dark-600 rounded px-2 py-1 break-all text-slate-800 dark:text-slate-200">{d}</code>
-                      <button onClick={() => { navigator.clipboard?.writeText(d); setDsKopyalandi(true); setTimeout(() => setDsKopyalandi(false), 1500) }}
-                        className="px-2 py-1 text-xs bg-white dark:bg-dark-700 hover:bg-slate-50 dark:hover:bg-dark-600 border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 rounded transition whitespace-nowrap">{dsKopyalandi ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> {cevir("Kopyalandı")}</span> : cevir("Kopyala")}</button>
+                      <Button variant="outlined" onClick={() => { navigator.clipboard?.writeText(d); setDsKopyalandi(true); setTimeout(() => setDsKopyalandi(false), 1500) }}
+                        className="shrink-0 px-2.5 text-xs whitespace-nowrap">{dsKopyalandi ? <span className="inline-flex items-center gap-1"><Ikon d={I.onay} /> {cevir("Kopyalandı")}</span> : cevir("Kopyala")}</Button>
                     </div>
                   ))}
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{cevir("Bu DS kaydını alan adınızın operatöründe (registrar) DNSSEC/DS alanına girin. Yayılması TTL süresi kadar sürebilir.")}</p>
@@ -450,26 +464,28 @@ export default function DomainDNSPage() {
       )}
 
       <div className="grid grid-cols-2 gap-2 mb-4 sm:flex sm:flex-wrap sm:items-center">
-        <button
+        <Button
+          color="primary"
           onClick={() => setDuzenle({} as Kayit)}
-          className="col-span-2 sm:col-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 whitespace-nowrap bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-xs transition"
+          className="col-span-2 sm:col-auto gap-1.5 px-3.5 whitespace-nowrap text-sm"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {cevir(cevir("Kayıt Ekle"))}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="outlined"
           onClick={sablonUygula}
-          className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"
+          className="px-3 whitespace-nowrap text-sm"
           title={cevir("A/MX/TXT/NS varsayılan kayıtlarını ekler (idempotent)")}
         >
           <span className="sm:hidden inline-flex items-center gap-1.5"><Ikon d={I.pano} /> {cevir("Şablon Uygula")}</span>
           <span className="hidden sm:inline-flex items-center gap-1.5"><Ikon d={I.pano} /> {cevir("Varsayılan Şablonu Uygula")}</span>
-        </button>
-        <button onClick={yukle} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
-        <button onClick={disaAktar} title={cevir("DNS kayıtlarını BIND zone dosyası olarak indir")} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> {cevir("Dışa Aktar")}</span></button>
-        <button onClick={() => setIceAcik(true)} title={cevir("BIND zone dosyası yükle")} className="inline-flex items-center justify-center whitespace-nowrap px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yukle} /> {cevir("İçe Aktar")}</span></button>
+        </Button>
+        <Button variant="outlined" onClick={yukle} className="gap-1.5 px-3 whitespace-nowrap text-sm"><Ikon d={I.yenile} /> {cevir("Yenile")}</Button>
+        <Button variant="outlined" onClick={disaAktar} title={cevir("DNS kayıtlarını BIND zone dosyası olarak indir")} className="gap-1.5 px-3 whitespace-nowrap text-sm"><Ikon d={I.indir} /> {cevir("Dışa Aktar")}</Button>
+        <Button variant="outlined" onClick={() => setIceAcik(true)} title={cevir("BIND zone dosyası yükle")} className="gap-1.5 px-3 whitespace-nowrap text-sm"><Ikon d={I.yukle} /> {cevir("İçe Aktar")}</Button>
         <span className="col-span-2 text-right sm:col-auto sm:ml-auto sm:text-left text-sm text-slate-500 dark:text-slate-500">{kayitlar.length} {cevir("kayıt")}</span>
       </div>
 
@@ -478,15 +494,15 @@ export default function DomainDNSPage() {
           <div className="space-y-4">
             <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Standart BIND zone dosyası (.zone / .txt) yükleyin. Kayıtlar bu domaine aktarılır; sonra zone doğrulanıp yeniden yüklenir.")}</p>
             <input type="file" accept=".zone,.txt,.db,.bind,text/plain" onChange={e => setIceDosya(e.target.files?.[0] || null)}
-              className="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-0 file:bg-dark-800 file:text-white dark:file:bg-dark-600 hover:file:bg-dark-700 file:cursor-pointer" />
+              className="block w-full text-sm text-slate-600 dark:text-slate-300 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:font-medium file:bg-gray-150 file:text-gray-900 hover:file:bg-gray-200 dark:file:bg-surface-2 dark:file:text-dark-50 dark:hover:file:bg-surface-1 file:cursor-pointer" />
             <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer">
               <input type="checkbox" checked={iceDegistir} onChange={e => setIceDegistir(e.target.checked)} className="rounded" />
               {cevir(cevir("Mevcut kayıtların üzerine yaz — işaretlenmezse birleştirilir (yeni kayıtlar eklenir)"))}
             </label>
             {iceDegistir && <p className="text-[11px] text-amber-600 dark:text-amber-400">{cevir("Bu domainin TÜM mevcut DNS kayıtları silinip dosyadakilerle değiştirilecek. Önce “Dışa Aktar” ile yedek almanız önerilir.")}</p>}
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setIceAcik(false)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-700 rounded-md transition">{cevir("İptal")}</button>
-              <button disabled={!iceDosya || iceYuk} onClick={iceAktar} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md transition disabled:opacity-50">{iceYuk ? cevir("Aktarılıyor…") : cevir("İçe Aktar")}</button>
+              <Button variant="outlined" onClick={() => setIceAcik(false)} className="px-4 text-sm">{cevir("İptal")}</Button>
+              <Button color="primary" disabled={!iceDosya} yukleniyor={iceYuk} onClick={iceAktar} className="px-4 text-sm">{iceYuk ? cevir("Aktarılıyor…") : cevir("İçe Aktar")}</Button>
             </div>
           </div>
         </Modal>
@@ -495,10 +511,10 @@ export default function DomainDNSPage() {
         <div className="mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-brand-800 dark:text-brand-200">{secili.size} {cevir("kayıt seçildi")}</span>
           <div className="ml-auto flex items-center gap-2 flex-wrap">
-            <button onClick={() => topluDurum(true)} className="px-3 py-1.5 text-sm bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition">{cevir("Aktif Yap")}</button>
-            <button onClick={() => topluDurum(false)} className="px-3 py-1.5 text-sm bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-600 transition">{cevir("Pasif Yap")}</button>
-            <button onClick={() => setTopluSilOnay(true)} className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-md transition">{cevir("Seçilenleri Sil")} ({secili.size})</button>
-            <button onClick={() => setSecili(new Set())} className="px-2 py-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition">{cevir("Seçimi Temizle")}</button>
+            <Button color="success" variant="outlined" onClick={() => topluDurum(true)} className="px-3 py-1.5 text-sm">{cevir("Aktif Yap")}</Button>
+            <Button variant="outlined" onClick={() => topluDurum(false)} className="px-3 py-1.5 text-sm">{cevir("Pasif Yap")}</Button>
+            <Button color="error" onClick={() => setTopluSilOnay(true)} className="px-3 py-1.5 text-sm">{cevir("Seçilenleri Sil")} ({secili.size})</Button>
+            <Button variant="flat" onClick={() => setSecili(new Set())} className="px-2.5 py-1.5 text-sm">{cevir("Seçimi Temizle")}</Button>
           </div>
         </div>
       )}
@@ -511,9 +527,9 @@ export default function DomainDNSPage() {
         ) : kayitlar.length === 0 ? (
           <div className="py-12 text-center">
             <p className="text-sm text-slate-500 dark:text-slate-500 mb-3">{cevir("Henüz DNS kaydı yok.")}</p>
-            <button onClick={sablonUygula} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md">
+            <Button color="primary" onClick={sablonUygula} className="px-4 text-sm">
               {cevir("Varsayılan Şablonu Uygula")}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="lg:overflow-x-auto">
@@ -544,7 +560,7 @@ export default function DomainDNSPage() {
                     {/* Birincil tanımlayıcı: kayıt adı — mobilde kart başlığı olur. */}
                     <td className={`${T.hucreBaslik} font-mono break-all lg:break-normal lg:whitespace-nowrap`}>{k.ad}</td>
                     <td className={T.hucre} data-etiket={cevir("Tip")}>
-                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-dark-700 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">{k.tip}</span>
+                      <Badge color={tipRenk(k.tip)} variant="soft" className="font-mono font-semibold">{k.tip}</Badge>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Değer")}>
                       <span className="text-sm font-mono text-slate-800 dark:text-slate-200 break-all text-right lg:text-left">{k.deger}</span>
@@ -557,14 +573,14 @@ export default function DomainDNSPage() {
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
                       {k.aktif ? (
-                        <span className="text-xs text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{cevir("Aktif")}</span>
+                        <Badge color="success" variant="soft" className="gap-1"><span className="size-1.5 rounded-full bg-current" aria-hidden="true" />{cevir("Aktif")}</Badge>
                       ) : (
-                        <span className="text-xs text-slate-500 dark:text-slate-500">{cevir("Pasif")}</span>
+                        <Badge variant="soft">{cevir("Pasif")}</Badge>
                       )}
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                      <button onClick={() => setDuzenle(k)} className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-dark-700">{cevir("Düzenle")}</button>
-                      <button onClick={() => setSilinecek(k)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30">{cevir("Sil")}</button>
+                      <Button variant="flat" onClick={() => setDuzenle(k)} className="px-2.5 py-1.5 text-sm">{cevir("Düzenle")}</Button>
+                      <Button color="error" variant="soft" onClick={() => setSilinecek(k)} className="px-2.5 py-1.5 text-sm">{cevir("Sil")}</Button>
                     </td>
                   </tr>
                 ))}
@@ -701,8 +717,8 @@ function KayitModal({ mevcut, domainId, ipv4, onKapat, onKayit }: {
         {hata && <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">{hata}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onKapat} className="px-4 py-2 border border-slate-200 dark:border-dark-600 rounded-md text-sm">{cevir("İptal")}</button>
-          <button type="submit" disabled={isleniyor || !form.deger.trim()} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded-md">{isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Güncelle"))}</button>
+          <Button type="button" variant="outlined" onClick={onKapat} className="px-4 text-sm">{cevir("İptal")}</Button>
+          <Button type="submit" color="primary" disabled={!form.deger.trim()} yukleniyor={isleniyor} className="px-4 text-sm">{isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Güncelle"))}</Button>
         </div>
       </form>
     </Modal>

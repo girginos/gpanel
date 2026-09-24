@@ -8,6 +8,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
+import type { Color } from '@/components/ui'
 
 /*
  * Domaine ÖZEL güvenlik sayfası — bir domainin bilinen açıklarını listeler.
@@ -38,19 +40,21 @@ type Uygulama = {
 }
 type EnvanterYanit = { toplam: number; items: Uygulama[]; desteklenmeyen: number }
 
-const SEV_RENK: Record<string, string> = {
-  critical: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
-  high:     'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
-  medium:   'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
-  low:      'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300',
+// Şiddet → Tailux Badge. Kritik dolu (en güçlü vurgu), diğerleri soft; şiddet
+// adı rozet metninde her zaman yazılı (renk tek başına anlam taşımaz).
+const SEV_ROZET: Record<string, { color: Color; variant: 'filled' | 'soft' }> = {
+  critical: { color: 'error',   variant: 'filled' },
+  high:     { color: 'error',   variant: 'soft' },
+  medium:   { color: 'warning', variant: 'soft' },
+  low:      { color: 'neutral', variant: 'soft' },
 }
-const APP_META: Record<string, { ad: string; renk: string }> = {
-  'wordpress':    { ad: 'WordPress',    renk: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300' },
-  'nodejs':       { ad: 'Node.js',      renk: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' },
-  'php-composer': { ad: 'PHP Composer', renk: 'bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300' },
+const APP_META: Record<string, { ad: string; renk: Color }> = {
+  'wordpress':    { ad: 'WordPress',    renk: 'info' },
+  'nodejs':       { ad: 'Node.js',      renk: 'success' },
+  'php-composer': { ad: 'PHP Composer', renk: 'secondary' },
 }
 const appAd = (t: string) => APP_META[t]?.ad ?? (t || '—')
-const appRenk = (t: string) => APP_META[t]?.renk ?? 'bg-slate-100 text-slate-700 dark:bg-dark-700 dark:text-slate-300'
+const appRenk = (t: string): Color => APP_META[t]?.renk ?? 'neutral'
 
 
 const SEC_EN: Record<string, string> = {
@@ -135,7 +139,7 @@ export default function DomainSecurityPage() {
   const taraniyorMu = uyg.some((u) => u.durum === 'taraniyor')
   const sev = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 }
-    for (const b of sayfa.items) if (b.severity in c) (c as any)[b.severity]++
+    for (const b of sayfa.items) if (b.severity in c) (c as Record<string, number>)[b.severity]++
     return c
   }, [sayfa.items])
 
@@ -151,21 +155,21 @@ export default function DomainSecurityPage() {
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{alanAdi}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {uyg.map((u) => (
-              <span key={u.app_type} className={`rounded px-2 py-0.5 text-xs ${appRenk(u.app_type)}`}>
+              <Badge key={u.app_type} color={appRenk(u.app_type)} variant="soft" className="font-normal">
                 {appAd(u.app_type)}{u.app_version ? ' ' + u.app_version : ''} · {u.paket_sayisi} {cevir("paket")}
-              </span>
+              </Badge>
             ))}
             {taraniyorMu && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> {cevir("Taranıyor…")}
-              </span>
+              <Badge color="info" variant="soft" className="gap-1.5 text-[11px]">
+                <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden="true" /> {cevir("Taranıyor…")}
+              </Badge>
             )}
           </div>
         </div>
-        <button onClick={domainTara} disabled={taranıyor || taraniyorMu}
-          className="rounded-lg bg-dark-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-dark-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+        <Button color="primary" onClick={domainTara} yukleniyor={taranıyor || taraniyorMu}
+          className="px-4 text-sm">
           {taraniyorMu ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
-        </button>
+        </Button>
       </div>
 
       {/* Şiddet filtresi */}
@@ -204,13 +208,13 @@ export default function DomainSecurityPage() {
                 {sayfa.items.map((b) => (
                   <tr key={b.id} className="bg-white dark:bg-dark-900">
                     <td className="px-3 py-2.5">
-                      <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${SEV_RENK[b.severity] || SEV_RENK.low}`}>
+                      <Badge color={(SEV_ROZET[b.severity] || SEV_ROZET.low).color} variant={(SEV_ROZET[b.severity] || SEV_ROZET.low).variant} className="whitespace-nowrap text-[11px]">
                         {b.severity || '—'}{b.cvss > 0 ? ' · ' + b.cvss.toFixed(1) : ''}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-[13px] break-all">{b.package_name}</div>
-                      <span className={`mt-0.5 inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${appRenk(b.app_type)}`}>{appAd(b.app_type)}</span>
+                      <Badge color={appRenk(b.app_type)} variant="soft" className="mt-0.5 whitespace-nowrap px-1.5 py-0.5 text-[10px]">{appAd(b.app_type)}</Badge>
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[13px] whitespace-nowrap">
                       <span className="text-slate-900 dark:text-slate-100">{b.installed_version}</span>
