@@ -13,6 +13,8 @@ import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
+import type { Color } from '@/components/ui'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -48,13 +50,17 @@ function SahipHucre({ ad, tur }: { ad?: string; tur?: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0">
       <span className="text-slate-700 dark:text-slate-300 truncate">{ad}</span>
-      <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold shrink-0 ${
-        bayi ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
-             : 'bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400'}`}>
+      <Badge color={bayi ? 'primary' : 'neutral'} variant="soft"
+        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 font-semibold shrink-0">
         {bayi ? cevir('bayi') : cevir('yönetici')}
-      </span>
+      </Badge>
     </span>
   )
+}
+
+// Domain durumu → Tailux Badge rengi (aktif: success, diğerleri: nötr).
+function durumRenk(durum: string): Color {
+  return durum === 'aktif' ? 'success' : 'neutral'
 }
 
 // Siteyi yeni sekmede acar. Sertifika varsa https, yoksa http denenir.
@@ -500,10 +506,10 @@ export default function DomainsPage() {
             className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none" />
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-500">{filtreli.length} / {items.length}</span>
-        <button onClick={olusturAc}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm px-3 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded-md font-medium shadow-xs">
+        <Button color="primary" onClick={olusturAc}
+          className="ml-auto gap-1.5 text-sm px-3 py-1.5">
           <span className="text-base leading-none">+</span> {cevir("Yeni Domain")}
-        </button>
+        </Button>
       </div>
 
       {topluIsID > 0 && (
@@ -512,46 +518,46 @@ export default function DomainsPage() {
 
       {/* Toplu işlem barı */}
       {(secili.size + subSecili.size) > 0 && (
-        <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+        <div className="mb-3 px-3 py-2 bg-primary-50 dark:bg-primary-900/15 border border-primary-200 dark:border-primary-800/60 rounded-lg flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-primary-800 dark:text-primary-200">
             {secili.size + subSecili.size} {cevir("seçili")}{subSecili.size > 0 ? ` (${subSecili.size} ${cevir("alt alan")})` : ''}
           </span>
           {secili.size > 0 && <>
-            <button onClick={() => durumDegistir('aktif')} disabled={isleniyor}
-              className="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded">
-              <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Aktif Et")}</span>
-            </button>
-            <button onClick={() => durumDegistir('pasif')} disabled={isleniyor}
-              className="text-xs px-3 py-1.5 bg-slate-600 hover:bg-dark-600 text-white rounded">
-              <span className="inline-flex items-center gap-1.5"><Ikon d={I.durakla} /> {cevir("Pasif Et")}</span>
-            </button>
+            <Button color="success" variant="soft" onClick={() => durumDegistir('aktif')} disabled={isleniyor}
+              className="text-xs px-3 py-1.5 gap-1.5">
+              <Ikon d={I.oynat} /> {cevir("Aktif Et")}
+            </Button>
+            <Button color="warning" variant="soft" onClick={() => durumDegistir('pasif')} disabled={isleniyor}
+              className="text-xs px-3 py-1.5 gap-1.5">
+              <Ikon d={I.durakla} /> {cevir("Pasif Et")}
+            </Button>
           </>}
           {secili.size > 0 && <>
-            <button onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded">
+            <Button color="error" variant="soft" onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0}
+              className="text-xs px-3 py-1.5">
               {cevir(cevir("DNS varsayılana sıfırla"))}
-            </button>
-            <button onClick={() => topluBaslat('ssl_kur')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded">
+            </Button>
+            <Button color="primary" variant="soft" onClick={() => topluBaslat('ssl_kur')} disabled={isleniyor || topluIsID > 0}
+              className="text-xs px-3 py-1.5">
               {cevir("SSL kur (Let's Encrypt)")}
-            </button>
-            <button onClick={() => setTopluModal('sahip')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded">
+            </Button>
+            <Button variant="outlined" onClick={() => setTopluModal('sahip')} disabled={isleniyor || topluIsID > 0}
+              className="text-xs px-3 py-1.5">
               {cevir(cevir("Sahip değiştir"))}
-            </button>
-            <button onClick={() => setTopluModal('plan')} disabled={isleniyor || topluIsID > 0}
-              className="text-xs px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded">
+            </Button>
+            <Button variant="outlined" onClick={() => setTopluModal('plan')} disabled={isleniyor || topluIsID > 0}
+              className="text-xs px-3 py-1.5">
               {cevir(cevir("Plan değiştir"))}
-            </button>
+            </Button>
           </>}
-          <button onClick={() => setSilOnay(true)} disabled={isleniyor}
-            className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium">
-            <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> {cevir("Sil")} ({secili.size + subSecili.size})</span>
-          </button>
-          <button onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}
-            className="text-xs px-3 py-1.5 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:bg-amber-900/30 rounded">
+          <Button color="error" onClick={() => setSilOnay(true)} disabled={isleniyor}
+            className="text-xs px-3 py-1.5 gap-1.5">
+            <Ikon d={I.cop} /> {cevir("Sil")} ({secili.size + subSecili.size})
+          </Button>
+          <Button variant="flat" onClick={() => { setSecili(new Set()); setSubSecili(new Set()) }} disabled={isleniyor}
+            className="text-xs px-3 py-1.5">
             {cevir(cevir("Seçimi temizle"))}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -603,7 +609,7 @@ export default function DomainsPage() {
                         {d.alan_adi}
                       </Link>
                       <SiteAc ad={d.alan_adi} ssl={d.ssl} />
-                      {d.is_demo && <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">DEMO</span>}
+                      {d.is_demo && <Badge color="warning" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5">DEMO</Badge>}
                       </span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
@@ -618,7 +624,7 @@ export default function DomainsPage() {
                       {!d.plan_ad
                         ? <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                         : (/—\s*Özel\s*$/.test(d.plan_ad) || d.plan_ad.trim() === cevir("Özel"))
-                          ? <span title={d.plan_ad} className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-dark-600 dark:bg-dark-700 dark:text-slate-300">{cevir("Özel")}</span>
+                          ? <Badge title={d.plan_ad} variant="outlined" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Özel")}</Badge>
                           : <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span>}
                     </td>
                     <td className={T.hucre} data-etiket="PHP">
@@ -628,9 +634,7 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(d.boyut_kb)}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
-                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
-                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-700 text-slate-500 dark:text-slate-400'
-                      }`}>{d.durum}</span>
+                      <Badge color={durumRenk(d.durum)} variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{d.durum}</Badge>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
@@ -654,7 +658,7 @@ export default function DomainsPage() {
                         <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline">└─</span>
                         <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{sd.tam_ad}</Link>
                         <SiteAc ad={sd.tam_ad} ssl={d.ssl} />
-                        <span className="text-[9px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded align-middle">{cevir("alt alan")}</span>
+                        <Badge color="info" variant="soft" className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 align-middle">{cevir("alt alan")}</Badge>
                       </span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
@@ -675,7 +679,7 @@ export default function DomainsPage() {
                       <span className="text-slate-300 dark:text-slate-600">—</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
-                      <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">{cevir("aktif")}</span>
+                      <Badge color="success" variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{cevir("aktif")}</Badge>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma || '-'}</span>
@@ -768,18 +772,12 @@ export default function DomainsPage() {
             </label>
 
             <div className="flex justify-end gap-2 mt-5">
-              <button type="button" onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}
-                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
-              <button type="submit" disabled={olusturuluyor || !fAlanAdi.trim()}
-                className="px-4 py-1.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm rounded font-medium inline-flex items-center gap-2">
-                {olusturuluyor && (
-                  <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.3"/>
-                    <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3"/>
-                  </svg>
-                )}
+              <Button type="button" variant="outlined" onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}
+                className="px-3 py-1.5 text-sm">{cevir("İptal")}</Button>
+              <Button type="submit" color="primary" yukleniyor={olusturuluyor} disabled={!fAlanAdi.trim()}
+                className="px-4 py-1.5 text-sm">
                 {olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -818,8 +816,8 @@ export default function DomainsPage() {
             </div>
 
             <div className="flex justify-end mt-5">
-              <button onClick={() => setOlusturmaSonuc(null)}
-                className="px-4 py-1.5 bg-dark-600 hover:bg-dark-700 text-white text-sm rounded">{cevir("Tamam")}</button>
+              <Button color="primary" onClick={() => setOlusturmaSonuc(null)}
+                className="px-4 py-1.5 text-sm">{cevir("Tamam")}</Button>
             </div>
           </div>
         </div>
@@ -887,16 +885,16 @@ export default function DomainsPage() {
               </label>
             )}
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setTopluModal('')}
-                className="rounded-lg border border-slate-300 px-3.5 py-2 text-sm dark:border-slate-600 dark:text-slate-200">{cevir("Vazgeç")}</button>
-              <button type="button"
+              <Button type="button" variant="outlined" onClick={() => setTopluModal('')}
+                className="px-3.5 py-2 text-sm">{cevir("Vazgeç")}</Button>
+              <Button type="button" color="primary"
                 disabled={topluModal === 'plan' && topluHedefPlan <= 0}
                 onClick={() => topluModal === 'sahip'
                   ? topluBaslat('sahip', { reseller_id: topluHedefBayi, customer_id: topluHedefMusteri })
                   : topluBaslat('plan', { plan_id: topluHedefPlan })}
-                className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
+                className="px-3.5 py-2 text-sm font-semibold">
                 {cevir("Uygula")} ({secili.size})
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -922,12 +920,12 @@ export default function DomainsPage() {
               {subSecili.size > 8 && <li className="text-slate-400 dark:text-slate-500 italic">+ {subSecili.size - 8} {cevir("alt alan daha…")}</li>}
             </ul>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setSilOnay(false)}
-                className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-sm rounded">{cevir("İptal")}</button>
-              <button onClick={topluSil} disabled={isleniyor}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded font-medium">
+              <Button variant="outlined" onClick={() => setSilOnay(false)}
+                className="px-3 py-1.5 text-sm">{cevir("İptal")}</Button>
+              <Button color="error" onClick={topluSil} disabled={isleniyor}
+                className="px-3 py-1.5 text-sm">
                 {cevir("Evet, Sil")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -957,10 +955,10 @@ function KopyaSatir({ e, v, kopyala, parola }: { e: string; v: string; kopyala: 
         {parola && !acik ? '••••••••••' : v}
       </code>
       {parola && (
-        <button type="button" onClick={() => setAcik(s => !s)}
-          className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700">
+        <Button type="button" variant="outlined" onClick={() => setAcik(s => !s)}
+          className="text-[10px] px-2 py-1 rounded-md">
           {acik ? cevir('Gizle') : cevir("Göster")}
-        </button>
+        </Button>
       )}
       {kopyalandi && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">{cevir("Kopyalandı")}</span>}
     </div>
@@ -1002,14 +1000,22 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   }
   const yuzde = d.toplam > 0 ? Math.round((d.tamamlanan / d.toplam) * 100) : 0
   const bitti = d.durum !== 'calisiyor'
-  const renk = d.durum === 'tamam' ? 'emerald' : d.durum === 'hata' ? 'red' : d.durum === 'kismi' ? 'amber' : 'brand'
+  // Dinamik `border-${renk}-200` sınıfları Tailwind'in kaynak taramasında
+  // üretilmiyordu; durum → tam sınıf eşlemesi (yeşil/kırmızı/amber/marka).
+  const kutuSinif = d.durum === 'tamam'
+    ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800/60 dark:bg-emerald-900/20'
+    : d.durum === 'hata'
+      ? 'border-red-200 bg-red-50 dark:border-red-800/60 dark:bg-red-900/20'
+      : d.durum === 'kismi'
+        ? 'border-amber-200 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-900/20'
+        : 'border-brand-200 bg-brand-50 dark:border-brand-800/60 dark:bg-brand-900/20'
 
   async function iptalEt() {
     try { await api.post(`/domains/toplu/is/iptal?id=${isID}`) } catch { /* */ }
   }
 
   return (
-    <div className={`mb-3 rounded-lg border px-4 py-3 border-${renk}-200 bg-${renk}-50 dark:border-${renk}-800/60 dark:bg-${renk}-900/20`}>
+    <div className={`mb-3 rounded-lg border px-4 py-3 ${kutuSinif}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -1021,10 +1027,10 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
           </p>
         </div>
         {bitti
-          ? <button type="button" onClick={() => { setKapandi(true); onBitti() }}
-              className="shrink-0 rounded-lg bg-dark-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-dark-700">{cevir("Kapat")}</button>
-          : <button type="button" onClick={iptalEt}
-              className="shrink-0 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300">{cevir("Durdur")}</button>}
+          ? <Button type="button" onClick={() => { setKapandi(true); onBitti() }}
+              className="shrink-0 px-3 py-1.5 text-xs">{cevir("Kapat")}</Button>
+          : <Button type="button" color="error" variant="soft" onClick={iptalEt}
+              className="shrink-0 px-3 py-1.5 text-xs">{cevir("Durdur")}</Button>}
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-dark-600">
         <div className={`h-full rounded-full transition-all duration-500 ${bitti && d.durum === 'tamam' ? 'bg-emerald-500' : bitti && d.durum === 'hata' ? 'bg-red-500' : 'bg-brand-500'}`}

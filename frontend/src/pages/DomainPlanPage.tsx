@@ -8,6 +8,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge, Card } from '@/components/ui'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -228,13 +229,13 @@ export default function DomainPlanPage() {
       ) : (
         <>
           {/* Mevcut plan + aksiyonlar */}
-          <div className="mb-5 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800 p-4">
+          <Card className="mb-5 bg-white dark:bg-dark-800 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Mevcut plan")}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{mevcut?.ad || domain?.plan_ad || cevir("Plan atanmamış")}</span>
-                  {ozelMi && <span className="text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Bu hostinge özel")}</span>}
+                  {ozelMi && <Badge color="primary" variant="soft" className="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5">{cevir("Bu hostinge özel")}</Badge>}
                 </div>
                 {mevcut && (
                   <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
@@ -248,15 +249,16 @@ export default function DomainPlanPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {ozelMi ? (
-                  <button type="button" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
-                          className="inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                  <Button type="button" color="primary" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
+                          className="px-3 py-1.5 text-sm">
                     {cevir("Limitleri özelleştir")}
-                  </button>
+                  </Button>
                 ) : (
-                  <button type="button" onClick={ozelPlan} disabled={isleniyor !== null}
-                          className="inline-flex items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                  <Button type="button" color="primary" onClick={ozelPlan} disabled={isleniyor !== null}
+                          yukleniyor={isleniyor === 'ozel'}
+                          className="px-3 py-1.5 text-sm">
                     {isleniyor === 'ozel' ? cevir('Oluşturuluyor…') : cevir("Tek tıkla özel plan")}
-                  </button>
+                  </Button>
                 )}
                 {mevcut && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
@@ -271,7 +273,7 @@ export default function DomainPlanPage() {
                 ? cevir("Bu plan yalnız bu hostinge ait — limitlerini değiştirmek başka hiçbir hostingi etkilemez.")
                 : cevir("Bu plan başka hostingler tarafından da kullanılıyor olabilir. Limitleri yalnız bu hosting için değiştirmek üzere önce “Tek tıkla özel plan” oluşturun.")}
             </p>
-          </div>
+          </Card>
 
           {/* Satır-içi özelleştirme paneli */}
           {taslak && (
@@ -302,14 +304,15 @@ export default function DomainPlanPage() {
                 </Alan>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={kaydet} disabled={isleniyor !== null}
-                        className="inline-flex items-center rounded-md bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                <Button type="button" color="primary" onClick={kaydet} disabled={isleniyor !== null}
+                        yukleniyor={isleniyor === 'kaydet'}
+                        className="px-3.5 py-2 text-sm">
                   {isleniyor === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet ve uygula')}
-                </button>
-                <button type="button" onClick={() => setTaslak(null)} disabled={isleniyor !== null}
-                        className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-dark-700 disabled:opacity-60">
+                </Button>
+                <Button type="button" variant="outlined" onClick={() => setTaslak(null)} disabled={isleniyor !== null}
+                        className="px-3.5 py-2 text-sm">
                   {cevir("Vazgeç")}
-                </button>
+                </Button>
                 <Link to={`/araclar/paketler/${taslak.id}`} className="inline-flex items-center px-1 py-2 text-sm text-brand-700 dark:text-brand-300 hover:underline">
                   {cevir("Gelişmiş ayarlar (WAF, nginx, IO) →")}
                 </Link>
@@ -334,7 +337,7 @@ export default function DomainPlanPage() {
                     <div>
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{p.ad}</h3>
-                        {bu && <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Aktif")}</span>}
+                        {bu && <Badge color="primary" variant="soft" className="shrink-0 text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5">{cevir("Aktif")}</Badge>}
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{p.aciklama || cevir("Açıklama yok")}</p>
                     </div>
@@ -351,20 +354,19 @@ export default function DomainPlanPage() {
                         <>
                           <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
                           {ozelMi && (
-                            <button type="button" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
-                                    className="shrink-0 rounded-md border border-brand-300 dark:border-brand-700 px-3 py-1.5 text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-950/40 disabled:opacity-60">
+                            <Button type="button" color="primary" variant="outlined" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
+                                    className="shrink-0 px-3 py-1.5 text-sm">
                               {cevir("Düzenle")}
-                            </button>
+                            </Button>
                           )}
                         </>
                       ) : (
-                        <button type="button" onClick={() => planUygula(p)} disabled={isleniyor !== null}
-                                className={`w-full rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-slate-900 ${
-                                  yon === 'düşür'
-                                    ? 'bg-slate-600 hover:bg-dark-600 focus-visible:ring-slate-500'
-                                    : 'bg-brand-600 hover:bg-brand-700 focus-visible:ring-brand-500'}`}>
+                        <Button type="button" color={yon === 'düşür' ? 'neutral' : 'primary'}
+                                onClick={() => planUygula(p)} disabled={isleniyor !== null}
+                                yukleniyor={isleniyor === p.id}
+                                className="w-full px-3 py-1.5 text-sm">
                           {isleniyor === p.id ? cevir('Uygulanıyor…') : yon === 'yükselt' ? cevir('↑ Yükselt') : yon === 'düşür' ? cevir('↓ Düşür') : cevir("Bu plana geç")}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </li>

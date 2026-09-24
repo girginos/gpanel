@@ -10,6 +10,7 @@ import SubPHPAyarlari from '@/components/SubPHPAyarlari'
 import SubWebAyarlari from '@/components/SubWebAyarlari'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge, Card } from '@/components/ui'
 
 type Detay = {
   id: number; alt_ad: string; tam_ad: string; php_surum: string
@@ -168,7 +169,8 @@ export default function DomainSubdomainYonetPage() {
     }
   }
 
-  const kart = 'rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700 p-5'
+  // Kart çerçevesi (border + rounded-lg) Tailux <Card> bileşeninden gelir.
+  const kart = 'bg-white dark:bg-dark-700 p-5'
   const etiket = 'text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500'
 
   return (
@@ -191,7 +193,7 @@ export default function DomainSubdomainYonetPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{d.tam_ad}</h1>
-                <span className="text-[10px] uppercase tracking-wider bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded">{cevir("alt alan")}</span>
+                <Badge color="info" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5">{cevir("alt alan")}</Badge>
               </div>
               <p className="text-sm text-slate-500 mt-1">{d.parent_ad} {cevir("alan adinin alt alani · kendi yonetim paneli")}</p>
             </div>
@@ -200,10 +202,10 @@ export default function DomainSubdomainYonetPage() {
                 className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600">
                 {cevir("Ziyaret Et")} &#8599;
               </a>
-              <button onClick={sil}
-                className="text-sm px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-medium">
+              <Button color="error" onClick={sil}
+                className="text-sm px-3 py-1.5">
                 {cevir("Sil")}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -264,7 +266,7 @@ export default function DomainSubdomainYonetPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className={kart}>
+            <Card className={kart}>
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">{cevir("Genel Bilgi")}</h2>
               <dl className="space-y-2.5 text-sm">
                 <div className="flex justify-between gap-3"><dt className={etiket}>Docroot</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400 text-right break-all">{d.docroot.replace(/^\/home\/[^/]+/, '~')}</dd></div>
@@ -272,9 +274,9 @@ export default function DomainSubdomainYonetPage() {
                 <div className="flex justify-between gap-3"><dt className={etiket}>DNS (A)</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.alt_ad} &rarr; {d.ipv4 || '-'}</dd></div>
                 <div className="flex justify-between gap-3"><dt className={etiket}>{cevir("Olusturulma")}</dt><dd className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.created_at || '-'}</dd></div>
               </dl>
-            </div>
+            </Card>
 
-            <div className={kart}>
+            <Card className={kart}>
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">{cevir("PHP Surumu")}</h2>
               <p className="text-xs text-slate-500 mb-3">{cevir("Bu alt alanin PHP-FPM havuzunu bagimsiz secebilirsiniz.")}</p>
               <div className="flex items-center gap-2">
@@ -283,41 +285,42 @@ export default function DomainSubdomainYonetPage() {
                   {phpler.map(p => <option key={p.surum} value={p.surum}>PHP {p.surum}{/default|appstream/i.test(p.aciklama || '') ? cevir(" (varsayılan)") : ''}</option>)}
                   {phpler.length === 0 && <option value={d.php_surum}>PHP {d.php_surum}</option>}
                 </select>
-                <button onClick={phpDegistir} disabled={phpKaydet || yeniPHP === d.php_surum}
-                  className="px-3 py-2 rounded-md bg-dark-800 dark:bg-dark-600 text-white text-sm font-medium disabled:opacity-40">
+                <Button color="primary" onClick={phpDegistir} disabled={yeniPHP === d.php_surum}
+                  yukleniyor={phpKaydet}
+                  className="px-3 py-2 text-sm">
                   {phpKaydet ? '...' : cevir("Kaydet")}
-                </button>
+                </Button>
               </div>
               <p className="text-[11px] text-slate-400 mt-2">{cevir("Aktif:")} PHP {d.php_surum}</p>
-            </div>
+            </Card>
 
             <SubPHPAyarlari domainId={String(id)} sid={String(sid)} />
 
-            <div className={`${kart} md:col-span-2`}>
+            <Card className={`${kart} md:col-span-2`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{cevir("SSL / TLS Sertifikasi")}</h2>
-                <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${sslAktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400'}`}>
+                <Badge color={sslAktif ? 'success' : 'neutral'} variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">
                   {sslAktif == null ? '...' : sslAktif ? cevir("Aktif") : cevir("Yok")}
-                </span>
+                </Badge>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={() => sslKur('letsencrypt')} disabled={sslMesgul}
-                  className="text-sm px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-40">
+                <Button color="primary" onClick={() => sslKur('letsencrypt')} disabled={sslMesgul}
+                  className="text-sm px-3 py-1.5">
                   {cevir("Let's Encrypt Kur")}
-                </button>
-                <button onClick={() => sslKur('self-signed')} disabled={sslMesgul}
-                  className="text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600 disabled:opacity-40">
+                </Button>
+                <Button variant="outlined" onClick={() => sslKur('self-signed')} disabled={sslMesgul}
+                  className="text-sm px-3 py-1.5">
                   {cevir("Oz-imzali")}
-                </button>
+                </Button>
                 {sslAktif && (
-                  <button onClick={sslKaldir} disabled={sslMesgul}
-                    className="text-sm px-3 py-1.5 rounded-md border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 ml-auto">
+                  <Button color="error" variant="soft" onClick={sslKaldir} disabled={sslMesgul}
+                    className="text-sm px-3 py-1.5 ml-auto">
                     {cevir("Kaldir")}
-                  </button>
+                  </Button>
                 )}
               </div>
               <p className="text-[11px] text-slate-400 mt-2">{cevirT(cevir("Let's Encrypt icin {0} A kaydinin bu sunucuya ({1}) cozumlenmesi gerekir."), d.tam_ad, d.ipv4)}</p>
-            </div>
+            </Card>
 
             <SubWebAyarlari domainId={String(id)} sid={String(sid)} />
           </div>
