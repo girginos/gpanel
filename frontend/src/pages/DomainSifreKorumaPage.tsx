@@ -39,6 +39,7 @@ const SIFRE_EN: Record<string, string> = {
   "Şifre Korumalı Dizinler": "Password Protected Directories",
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
+  "Aboneliğe dön": "Back to subscription",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SIFRE_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -56,6 +57,7 @@ export default function DomainSifreKorumaPage() {
   const [kullanici, setKullanici] = useState('')
   const [parola, setParola] = useState('')
   const [kaydediyor, setKaydediyor] = useState(false)
+  const [siliniyor, setSiliniyor] = useState<number | null>(null)
 
   function yukle() {
     if (!id) return
@@ -83,8 +85,8 @@ export default function DomainSifreKorumaPage() {
   }
 
   async function sil(k: Kayit) {
-    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: `"${k.kullanici}" ${cevir("kullanıcısını")} ${k.yol} ${cevir("korumasından kaldır?")}` }))) return
-    setHata(null); setOk(null)
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: `"${k.kullanici}" ${cevir("kullanıcısını")} ${k.yol} ${cevir("korumasından kaldır?")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
+    setHata(null); setOk(null); setSiliniyor(k.id)
     try {
       await api.delete(`${base}/koruma/${k.id}`)
       yukle()
@@ -92,7 +94,7 @@ export default function DomainSifreKorumaPage() {
       const m = apiHata(err, cevir("Silinemedi"))
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
-    }
+    } finally { setSiliniyor(null) }
   }
 
   // yol -> o yola ait kullanıcılar
@@ -132,7 +134,7 @@ export default function DomainSifreKorumaPage() {
             </label>
           </div>
           <p className="text-[11px] text-slate-400 mt-2">{cevir("Yol")} <span className="font-mono">/</span> {cevir("ile başlamalı (örn.")} <span className="font-mono">/gizli</span>, <span className="font-mono">/admin</span>). {cevir("Aynı yola birden fazla kullanıcı ekleyebilirsiniz.")}</p>
-          <Button type="submit" color="primary" yukleniyor={kaydediyor} className="mt-3 px-4 text-sm">
+          <Button type="submit" color="primary" yukleniyor={kaydediyor} ikon={I.arti} className="mt-3">
             {kaydediyor ? cevir("Ekleniyor…") : cevir("Koruma Ekle")}
           </Button>
         </form>
@@ -160,7 +162,7 @@ export default function DomainSifreKorumaPage() {
                     {ks.map(k => (
                       <li key={k.id} className="flex items-center justify-between px-3 py-2">
                         <span className="text-sm text-slate-600 dark:text-slate-300">{k.kullanici}</span>
-                        <Button color="error" variant="soft" onClick={() => sil(k)} className="px-2.5 text-xs">{cevir("Kaldır")}</Button>
+                        <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(k)} yukleniyor={siliniyor === k.id}>{cevir("Kaldır")}</Button>
                       </li>
                     ))}
                   </ul>
@@ -170,7 +172,7 @@ export default function DomainSifreKorumaPage() {
           )}
         </div>
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

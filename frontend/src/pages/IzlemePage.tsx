@@ -10,25 +10,8 @@ import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
-import { T } from '@/lib/tablo'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
-
-type CPU = { yuzde: number; cekirdek: number; yuk_1dk: number; yuk_5dk: number; yuk_15dk: number }
-type Bellek = { toplam_kb: number; kullanilan_kb: number; bos_kb: number; yuzde: number }
-type Swap = { toplam_kb: number; kullanilan_kb: number; yuzde: number }
-type Disk = { toplam_byte: number; kullanilan_byte: number; bos_byte: number; yuzde: number; mount: string; fs?: string }
-type Ag = { arayuz: string; rx_bytes_sn: number; tx_bytes_sn: number; rx_toplam_byte: number; tx_toplam_byte: number }
-type Servis = { ad: string; etiket: string; aktif: boolean }
-type SistemInfo = { hostname: string; ip: string; os_adi: string; kernel: string; cpu_modeli: string; cpu_cekirdek: number; panel_surum: string }
-
-type Usage = {
-  sistem: SistemInfo; cpu: CPU; bellek: Bellek; swap: Swap
-  disk: Disk; diskler: Disk[]; ag: Ag; servisler: Servis[]
-  uptime_sn: number
-}
-
-type Process = { pid: number; user: string; cpu_yuzde: number; mem_yuzde: number; komut: string }
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; durum: string }
 
@@ -38,9 +21,6 @@ type Health = {
   hata?: string; sema: string; ssl?: SSLBilgi; boyut_byte: number; server?: string
 }
 
-type Nokta = { t: number; cpu: number; mem: number; swap: number; load: number; rx: number; tx: number }
-
-const MAX_NOKTA = 60 // 60 sample × 5s = 5 dakika
 const POLL_MS = 5000
 
 
@@ -69,7 +49,7 @@ const IZL_EN: Record<string, string> = {
   "Çekirdek (kernel)": "Kernel",
   "İşlemci": "Processor",
   "Panel sürümü": "Panel version",
-  "Siteyi aç ↗": "Open site ↗",
+  "Siteyi aç": "Open site",
   "Sorgulanıyor…": "Querying…",
   "Sunucu Günlükleri": "Server Logs",
   "Süreç listesi alınamadı": "Failed to get process list",
@@ -146,213 +126,6 @@ function SekmeButon({ aktif, onClick, children }: { aktif: boolean; onClick: () 
 }
 
 // ============================================================================
-// SUNUCU İZLEME
-// ============================================================================
-function SunucuIzleme() {
-  const toast = useToast()
-  const [u, setU] = useState<Usage | null>(null)
-  // Hata artık sağ üst toast ile gösteriliyor; state yalnız akış için tutuluyor.
-  const [, setHata] = useState<string | null>(null)
-  // 5sn'lik yoklama aynı hatayı tekrar tekrar toast'lamasın.
-  const sonHataRef = useRef<string | null>(null)
-  const [noktalar, setNoktalar] = useState<Nokta[]>([])
-  const [procs, setProcs] = useState<Process[]>([])
-  const [procSort, setProcSort] = useState<'cpu' | 'mem'>('cpu')
-
-  useEffect(() => {
-    function yukle() {
-      api.get<Usage>('/system/usage').then(r => {
-        setU(r.data)
-        sonHataRef.current = null
-        setNoktalar(prev => {
-          const n: Nokta = {
-            t: Date.now(),
-            cpu: r.data.cpu.yuzde,
-            mem: r.data.bellek.yuzde,
-            swap: r.data.swap.yuzde || 0,
-            load: Math.min(100, (r.data.cpu.yuk_1dk / Math.max(1, r.data.cpu.cekirdek)) * 100),
-            rx: r.data.ag.rx_bytes_sn || 0,
-            tx: r.data.ag.tx_bytes_sn || 0,
-          }
-          const yeni = [...prev, n]
-          return yeni.length > MAX_NOKTA ? yeni.slice(-MAX_NOKTA) : yeni
-        })
-      }).catch(e => {
-        const m = apiHata(e)
-        setHata(m)
-        if (sonHataRef.current !== m) { sonHataRef.current = m; toast.hata(cevir("İşlem başarısız"), m) }
-      })
-    }
-    yukle()
-    const t = setInterval(yukle, POLL_MS)
-    return () => clearInterval(t)
-  }, [])
-
-  useEffect(() => {
-    function yukleProcs() {
-      api.get<Process[]>(`/system/processes?n=15&sirala=${procSort}`).then(r => setProcs(r.data)).catch(hataYakala(cevir("Süreç listesi alınamadı")))
-    }
-    yukleProcs()
-    const t = setInterval(yukleProcs, POLL_MS * 2)
-    return () => clearInterval(t)
-  }, [procSort])
-
-  return (
-    <>
-      {/* Snapshot grid */}
-      {u && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <Snap baslik="CPU" deger={u.cpu.yuzde.toFixed(1) + '%'} alt={`${u.cpu.cekirdek} ${cevir("çekirdek")}`} renk="indigo" />
-          <Snap baslik={cevir(cevir("Bellek"))} deger={u.bellek.yuzde.toFixed(1) + '%'}
-            alt={`${(u.bellek.kullanilan_kb/1024).toFixed(0)} / ${(u.bellek.toplam_kb/1024).toFixed(0)} MB`} renk="emerald" />
-          <Snap baslik={cevir("Yük (1dk)")} deger={u.cpu.yuk_1dk.toFixed(2)}
-            alt={cevirT(cevir("5dk {0} · 15dk {1}"), u.cpu.yuk_5dk.toFixed(2), u.cpu.yuk_15dk.toFixed(2))} renk="amber" />
-          <Snap baslik="Disk (/)" deger={u.disk.yuzde.toFixed(1) + '%'}
-            alt={`${fmtByte(u.disk.kullanilan_byte)} / ${fmtByte(u.disk.toplam_byte)}`} renk="violet" />
-        </div>
-      )}
-
-      {/* Sistem künyesi — İstatistikler sayfası kaldırıldı, OS/kernel/işlemci
-          yalnız orada gösteriliyordu. Veri zaten `u.sistem`'de geliyordu. */}
-      {u && (
-        <div className="mb-5">
-          <Kart baslik={cevir("Sistem Bilgisi")}>
-            <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
-              {([
-                [cevir("Sunucu adı"), u.sistem.hostname],
-                [cevir("İşletim sistemi"), u.sistem.os_adi],
-                [cevir("Çekirdek (kernel)"), u.sistem.kernel],
-                [cevir("İşlemci"), `${u.sistem.cpu_modeli} · ${u.sistem.cpu_cekirdek} ${cevir("çekirdek")}`],
-                [cevir("Panel sürümü"), u.sistem.panel_surum],
-              ] as [string, string][]).map(([et, deger]) => (
-                <div key={et} className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-1 last:border-0 dark:border-dark-600">
-                  <dt className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{et}</dt>
-                  <dd className="truncate text-right font-mono text-xs text-slate-800 dark:text-slate-200" title={deger}>{deger}</dd>
-                </div>
-              ))}
-            </dl>
-          </Kart>
-        </div>
-      )}
-
-      {/* Çok serili çizgi grafik */}
-      <Kart baslik={cevir("Sistem Kaynakları")} sag={cevirT(cevir("{0}/{1} örnek · {2}dk"), noktalar.length, MAX_NOKTA, (noktalar.length*POLL_MS/1000/60).toFixed(1))}>
-        <div className="flex items-center gap-4 mb-2 text-xs">
-          <Lej renk="bg-indigo-500" et="CPU" />
-          <Lej renk="bg-emerald-500" et={cevir("Bellek")} />
-          <Lej renk="bg-violet-500" et="Swap" />
-          <Lej renk="bg-amber-500" et={cevir("Yük (norm)")} />
-        </div>
-        <CokSeriliGrafik noktalar={noktalar} alanlar={[
-          { anahtar: 'cpu', renk: '#6366f1' },
-          { anahtar: 'mem', renk: '#10b981' },
-          { anahtar: 'swap', renk: '#8b5cf6' },
-          { anahtar: 'load', renk: '#f59e0b' },
-        ]} yMaks={100} ekstra="(%)" />
-      </Kart>
-
-      <div className="h-5" />
-
-      {/* Ağ trafiği grafiği */}
-      <Kart baslik={cevir("Ağ Trafiği")} sag={u?.ag?.arayuz ? cevirT(cevir("Arayüz: {0}"), u.ag.arayuz) : ''}>
-        <div className="flex items-center gap-4 mb-2 text-xs">
-          <Lej renk="bg-sky-500" et="↓ RX (KB/s)" />
-          <Lej renk="bg-pink-500" et="↑ TX (KB/s)" />
-        </div>
-        <CokSeriliGrafik
-          noktalar={noktalar.map(n => ({ ...n, rx: n.rx/1024, tx: n.tx/1024 }))}
-          alanlar={[
-            { anahtar: 'rx', renk: '#0ea5e9' },
-            { anahtar: 'tx', renk: '#ec4899' },
-          ]}
-          yMaks={Math.max(10, ...noktalar.map(n => Math.max(n.rx, n.tx)/1024) ) * 1.2}
-          ekstra="KB/s"
-        />
-      </Kart>
-
-      <div className="h-5" />
-
-      {/* Servisler */}
-      {u && (
-        <Kart baslik={cevir("Servisler")} sag={`${u.servisler.filter(s => s.aktif).length}/${u.servisler.length} ${cevir("aktif")}`}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-            {u.servisler.map(s => (
-              <div key={s.ad} className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs ${
-                s.aktif ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${s.aktif ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-slate-800 dark:text-slate-200 truncate">{s.etiket}</div>
-                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-500 truncate">{s.ad}</div>
-                </div>
-                <span className={`text-[10px] font-semibold uppercase ${s.aktif ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
-                  {s.aktif ? cevir("Aktif") : cevir("Kapalı")}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Kart>
-      )}
-
-      <div className="h-5" />
-
-      {/* Top processes */}
-      <Kart baslik={cevir("En Yoğun İşlemler")} tabloMod sag={
-        <div className="flex flex-wrap items-center gap-1">
-          <Button onClick={() => setProcSort('cpu')} color={procSort === 'cpu' ? 'primary' : 'neutral'}
-            className="text-[11px] px-2 py-1">CPU</Button>
-          <Button onClick={() => setProcSort('mem')} color={procSort === 'mem' ? 'success' : 'neutral'}
-            className="text-[11px] px-2 py-1">{cevir(cevir("Bellek"))}</Button>
-        </div>
-      }>
-        {/* Mobilde her satır bir kart; >= lg gerçek tablo olarak kalır. */}
-        <div className="lg:overflow-x-auto">
-          <table className={`${T.tablo} text-sm`}>
-          <thead className={`${T.baslikGrubu} border-b border-slate-200 dark:border-dark-600`}>
-            <tr>
-              <th className={`${T.baslik} lg:w-16`}>PID</th>
-              <th className={T.baslik}>{cevir("Kullanıcı")}</th>
-              <th className={`${T.baslik} text-right lg:w-16`}>CPU%</th>
-              <th className={`${T.baslik} text-right lg:w-16`}>MEM%</th>
-              <th className={T.baslik}>{cevir("Komut")}</th>
-            </tr>
-          </thead>
-          <tbody className={`${T.govde} lg:divide-y lg:divide-slate-100 dark:lg:divide-dark-600`}>
-            {procs.length === 0 && (
-              <tr className={T.satir}><td colSpan={5} className={T.hucreDurum}>{cevir("Yükleniyor…")}</td></tr>
-            )}
-            {procs.map(p => (
-              <tr key={p.pid} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700`}>
-                {/* Birincil tanımlayıcı: PID — mobilde kart başlığı olur, etiket istemez. */}
-                <td className={`${T.hucreBaslik} font-mono lg:font-normal lg:text-slate-600 dark:lg:text-slate-400`}>
-                  {/* lg:text-xs td üzerinde işlemiyordu: T.hucreBaslik zaten lg:text-sm veriyor ve
-                      ikisi de aynı kırılımda olduğu için CSS sırasına göre text-sm kazanıyordu.
-                      Span'e taşındı — doğrudan sınıf, td'den gelen kalıtımı yener. */}
-                  <span className="lg:text-xs">{p.pid}</span>
-                </td>
-                <td className={`${T.hucre} lg:max-w-[120px] lg:truncate`} data-etiket={cevir("Kullanıcı")}>
-                  <span className="font-mono text-xs text-slate-700 dark:text-slate-300 text-right lg:text-left break-all">{p.user}</span>
-                </td>
-                <td className={`${T.hucre} lg:text-right`} data-etiket="CPU%">
-                  <span className={`font-mono text-xs ${p.cpu_yuzde >= 50 ? 'text-red-600 dark:text-red-400 font-semibold' : p.cpu_yuzde >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.cpu_yuzde.toFixed(1)}</span>
-                </td>
-                <td className={`${T.hucre} lg:text-right`} data-etiket="MEM%">
-                  <span className={`font-mono text-xs ${p.mem_yuzde >= 30 ? 'text-red-600 dark:text-red-400 font-semibold' : p.mem_yuzde >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>{p.mem_yuzde.toFixed(1)}</span>
-                </td>
-                <td className={`${T.hucre} lg:max-w-md lg:truncate`} data-etiket={cevir("Komut")} title={p.komut}>
-                  <span className="font-mono text-xs text-slate-800 dark:text-slate-200 text-right lg:text-left break-all lg:break-normal">{p.komut}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      </Kart>
-    </>
-  )
-}
-
-// ============================================================================
 // DOMAIN BAZLI İZLEME
 // ============================================================================
 function DomainIzleme() {
@@ -418,14 +191,13 @@ function DomainIzleme() {
             {domains.map(d => <option key={d.id} value={d.id}>{d.alan_adi}</option>)}
           </select>
           {secili && (
-            <Button onClick={() => probet(secili)} disabled={hSorgulaniyor}
-              className="text-sm px-3 py-2">
-              {hSorgulaniyor ? cevir("Sorgulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Sağlık Probe")}</span>}
+            <Button onClick={() => probet(secili)} yukleniyor={hSorgulaniyor} variant="outlined" ikon={I.yenile}>
+              {hSorgulaniyor ? cevir("Sorgulanıyor…") : cevir("Sağlık Probe")}
             </Button>
           )}
           {seciliDomain && (
             <a href={`https://${seciliDomain.alan_adi}`} target="_blank" rel="noreferrer"
-              className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">{cevir("Siteyi aç ↗")}</a>
+              className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300">{cevir("Siteyi aç")}<Ikon d={I.harici} className="size-3.5 shrink-0" /></a>
           )}
         </div>
       </Kart>
@@ -509,7 +281,7 @@ function SunucuLoglari() {
             <Button key={k} onClick={() => setKaynak(k)}
               color={kaynak === k ? 'primary' : 'neutral'}
               variant={kaynak === k ? 'filled' : 'outlined'}
-              className="px-3 py-1.5 text-xs">
+              boyut="sm">
               {cevir(LOG_KAYNAK_ET[k] || k)}
             </Button>
           ))}
@@ -521,7 +293,7 @@ function SunucuLoglari() {
             className="px-2 py-1.5 text-xs border border-slate-200 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-slate-600 dark:text-slate-300">
             {[100, 200, 500, 1000].map(n => <option key={n} value={n}>{cevir("son")} {n}</option>)}
           </select>
-          <Button onClick={() => yukle()} disabled={yuk} variant="outlined" className="px-3 py-1.5 text-xs"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
+          <Button onClick={() => yukle()} yukleniyor={yuk} variant="outlined" boyut="sm" ikon={I.yenile}>{cevir("Yenile")}</Button>
         </div>
       </div>
       <div ref={scrollRef} className="bg-dark-800 border border-dark-600 rounded-lg overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all h-[min(60vh,320px)] sm:h-[420px] lg:h-[560px]">
@@ -557,60 +329,6 @@ function Kart({ baslik, children, sag, tabloMod }: { baslik: string; children: R
     </div>
   )
 }
-function Snap({ baslik, deger, alt, renk }: { baslik: string; deger: string; alt?: string; renk: string }) {
-  const m: Record<string, string> = {
-    indigo: 'border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20',
-    emerald: 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20',
-    amber: 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20',
-    violet: 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20',
-  }
-  return (
-    <div className={`border rounded-lg p-3 ${m[renk]}`}>
-      <div className="text-xs text-slate-500 dark:text-slate-500 uppercase tracking-wider">{baslik}</div>
-      <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1 font-mono">{deger}</div>
-      {alt && <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">{alt}</div>}
-    </div>
-  )
-}
-function Lej({ renk, et }: { renk: string; et: string }) {
-  return <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 dark:text-slate-500"><span className={`w-3 h-3 rounded ${renk}`}></span>{et}</span>
-}
-
-function CokSeriliGrafik({
-  noktalar, alanlar, yMaks, ekstra,
-}: {
-  noktalar: any[]; alanlar: { anahtar: string; renk: string }[]; yMaks: number; ekstra?: string
-}) {
-  const W = 1000, H = 180, P = 8
-  const innerW = W - P * 2, innerH = H - P * 2
-  if (noktalar.length < 2) {
-    return <div className="text-xs text-slate-400 dark:text-slate-500 italic py-12 text-center">{cevir("Veri toplanıyor…")}</div>
-  }
-  function path(anahtar: string) {
-    return noktalar.map((n, i) => {
-      const x = P + (innerW * i) / Math.max(1, MAX_NOKTA - 1)
-      const v = Math.max(0, Math.min(yMaks, n[anahtar] || 0))
-      const y = P + innerH - (v / yMaks) * innerH
-      return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1)
-    }).join(' ')
-  }
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[180px]" preserveAspectRatio="none">
-      {/* grid */}
-      {[0, 25, 50, 75, 100].map(p => {
-        const y = P + innerH - (p / 100) * innerH
-        return <line key={p} x1={P} y1={y} x2={W - P} y2={y} stroke="#f1f5f9" strokeWidth="1" />
-      })}
-      {alanlar.map(a => (
-        <path key={a.anahtar} d={path(a.anahtar)} stroke={a.renk} strokeWidth="2" fill="none" />
-      ))}
-      {/* y axis labels */}
-      <text x={P + 2} y={P + 10} fontSize="9" fill="#94a3b8">{yMaks.toFixed(0)}{ekstra || ''}</text>
-      <text x={P + 2} y={H - P + 1} fontSize="9" fill="#94a3b8">0</text>
-    </svg>
-  )
-}
-
 function SaglikKart({ h }: { h: Health }) {
   const ok = h.erisilebilir && h.durum_kodu >= 200 && h.durum_kodu < 400
   return (
@@ -668,12 +386,4 @@ function YanitKart({ h }: { h: Health }) {
       </div>
     </div>
   )
-}
-
-function fmtByte(b: number): string {
-  if (b < 1024) return b + ' B'
-  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
-  if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB'
-  if (b < 1024 * 1024 * 1024 * 1024) return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB'
-  return (b / 1024 / 1024 / 1024 / 1024).toFixed(2) + ' TB'
 }

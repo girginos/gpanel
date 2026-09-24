@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { Card } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // /system/usage GERÇEK şekli (iç içe) — IzlemePage ile aynı.
 type Usage = {
@@ -29,7 +30,7 @@ const ISTAT_EN: Record<string, string> = {
   "Çekirdek (kernel)": "Kernel",
   "İşlemci": "Processor",
   "İşletim sistemi": "Operating system",
-  "● Canlı (10sn)": "● Live (10s)",
+  "Canlı (10sn)": "Live (10s)",
   "Anasayfa": "Home",
   "İstatistikler": "Statistics",
   "çekirdek": "cores",
@@ -90,11 +91,11 @@ export default function IstatistiklerPage() {
       ]} />
       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("İstatistikler")}</h1>
-        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{cevir("● Canlı (10sn)")}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium"><span className="inline-block size-2 rounded-full bg-emerald-500" aria-hidden />{cevir("Canlı (10sn)")}</span>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">{cevir("Sunucu kaynak kullanımı, domain sayıları, sistem özeti.")}</p>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
+      {hata && <UyariKutusu ton="tehlike" className="mb-3">{hata}</UyariKutusu>}
 
       {/* Sistem metrik 4 kart */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { cevirT } from '@/lib/cevirT'
+import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { tonSinifi, type Ton } from '@/components/tonlar'
 
 // Sağ altta SABİT ilerleme penceresi — uzun süren, adım-adım işler için.
 //
@@ -102,6 +105,10 @@ function shimmerStiliniEkle() {
   document.head.appendChild(st)
 }
 
+// Adım durumu → ton (renk) ve ikon. Bilinmeyen durum hata sayılır (eski davranış).
+const ADIM_TON: Record<string, Ton> = { tamam: 'basari', calisiyor: 'bilgi', uyari: 'uyari', hata: 'tehlike' }
+const ADIM_IKON: Record<string, string> = { tamam: I.onay, calisiyor: I.yenile, uyari: I.uyari, hata: I.kapat }
+
 export function IlerlemeCubugu({ is }: { is: IlerlemeIsi }) {
   useEffect(() => { shimmerStiliniEkle() }, [])
   const calisiyor = is.durum === 'calisiyor'
@@ -185,15 +192,11 @@ export default function IlerlemePaneli({ isler, kucuk, setKucuk, onGizle, onYuks
           {panelBaslik}
           {suren > 0 && isler.length > 1 && <span className="ml-1 text-slate-400">({suren})</span>}
         </span>
-        <button type="button" onClick={() => setKucuk(!kucuk)}
+        <Button isIcon variant="flat" onClick={() => setKucuk(!kucuk)}
+          ikon={kucuk ? I.yukari : I.asagi}
           aria-label={kucuk ? cevir("Büyüt") : cevir("Küçült")}
-          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600
-                     focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
-                     dark:hover:bg-dark-600 dark:hover:text-slate-200">
-          <svg className={`h-4 w-4 transition-transform ${kucuk ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+          title={kucuk ? cevir("Büyüt") : cevir("Küçült")}
+          className="-me-1 size-8 rounded-full" />
       </div>
 
       {!kucuk && (
@@ -213,15 +216,11 @@ export default function IlerlemePaneli({ isler, kucuk, setKucuk, onGizle, onYuks
                   {/* Bitmiş iş kapatılabilir; SÜREN iş kapatılamaz — kullanıcı
                       ilerlemeyi kaybetmesin. */}
                   {bitti && onGizle && (
-                    <button type="button" onClick={() => onGizle(is.anahtar)}
+                    <Button isIcon variant="flat" onClick={() => onGizle(is.anahtar)}
+                      ikon={I.kapat}
                       aria-label={cevir("Kapat")}
-                      className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600
-                                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
-                                 dark:hover:text-slate-200">
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                      title={cevir("Kapat")}
+                      className="-my-1.5 size-8 rounded-full" />
                   )}
                 </div>
                 <IlerlemeCubugu is={is} />
@@ -236,21 +235,18 @@ export default function IlerlemePaneli({ isler, kucuk, setKucuk, onGizle, onYuks
                   <span className="shrink-0 text-xs tabular-nums text-slate-400" aria-hidden>{gecenSure(is.basladi, is.bitti)}</span>
                 </div>
 
-                <button type="button"
-                  onClick={() => setAcikGunluk(acikGunluk === is.anahtar ? null : is.anahtar)}
-                  className="text-xs text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 dark:text-brand-400">
+                <Button variant="flat" color="primary" boyut="sm"
+                  ikon={acikGunluk === is.anahtar ? I.gozKapali : I.goz}
+                  onClick={() => setAcikGunluk(acikGunluk === is.anahtar ? null : is.anahtar)}>
                   {cevir("Ayrıntılı günlük")}
-                </button>
+                </Button>
                 {acikGunluk === is.anahtar && (
                   <ul className="max-h-52 space-y-1 overflow-y-auto rounded bg-slate-50 p-2 dark:bg-dark-900">
                     {is.adimlar.map((a, i) => (
                       <li key={i} className="text-xs">
-                        <span className={`mr-1.5 font-mono ${
-                          a.durum === 'tamam' ? 'text-emerald-600 dark:text-emerald-400'
-                            : a.durum === 'calisiyor' ? 'text-sky-600 dark:text-sky-400'
-                              : a.durum === 'uyari' ? 'text-amber-600 dark:text-amber-400'
-                                : 'text-rose-600 dark:text-rose-400'}`}>
-                          {a.durum === 'tamam' ? '✓' : a.durum === 'calisiyor' ? '…' : a.durum === 'uyari' ? '!' : '×'}
+                        <span className={`${tonSinifi(ADIM_TON[a.durum] || 'tehlike')} mr-1.5 inline-block align-[-2px] text-this dark:text-this-lighter`}>
+                          <Ikon d={ADIM_IKON[a.durum] || I.kapat}
+                            className={`size-3.5 ${a.durum === 'calisiyor' ? 'animate-spin motion-reduce:animate-none' : ''}`} />
                         </span>
                         <span className="text-slate-700 dark:text-slate-200">{a.etiket}</span>
                         {a.sure && <span className="text-slate-400"> ({a.sure})</span>}

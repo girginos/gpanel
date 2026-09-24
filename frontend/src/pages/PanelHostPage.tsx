@@ -9,6 +9,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Panel Hostname & SSL — admin.
@@ -71,7 +72,7 @@ const PHOST_EN: Record<string, string> = {
   "İzinli isimler:": "Allowed names:",
   "— (IP ile erişim)": "— (access via IP)",
   "DNS uyuşmuyor. Çözülen:": "DNS mismatch. Resolved:",
-  "✓ DNS bu sunucuya çözülüyor:": "✓ DNS resolves to this server:",
+  "DNS bu sunucuya çözülüyor:": "DNS resolves to this server:",
   "Yine de dene": "Try anyway",
   "Let's Encrypt kur?": "Install Let's Encrypt?",
   "DNS kontrol → hostname uygula → Let's Encrypt sertifikası; hepsi sırayla çalışır (30-90 sn). LE haftalık limit: 5 başarısız/hafta.": "DNS check → apply hostname → Let's Encrypt certificate; all run in sequence (30-90 s). LE weekly limit: 5 failures/week.",
@@ -85,8 +86,8 @@ const PHOST_EN: Record<string, string> = {
   "Kuruluyor…": "Installing…",
   "Let's Encrypt Kur": "Install Let's Encrypt",
   "Başlatılamadı": "Could not start",
-  "✓ SSL kuruldu.": "✓ SSL installed.",
-  "Yeni adreste paneli aç →": "Open the panel at the new address →",
+  "SSL kuruldu.": "SSL installed.",
+  "Yeni adreste paneli aç": "Open the panel at the new address",
   "Paneline özel bir alan adı bağla ve Let's Encrypt sertifikası kur. Kilitlenme koruması:": "Bind a custom domain to your panel and install a Let's Encrypt certificate. Lockout protection:",
   "Betik yok:": "Script missing:",
   "/usr/local/bin/girginospanel-panelhost kurulmamış. Hostname değişimi çalışmayacak.": "/usr/local/bin/girginospanel-panelhost is not installed. Hostname change will not work.",
@@ -97,14 +98,14 @@ const PHOST_EN: Record<string, string> = {
   "Bitiş:": "Expiry:",
   "gün": "days",
   "Yakala-hepsi (bilinmeyen host → 444)": "Catch-all (unknown host → 444)",
-  "✓ Aktif": "✓ Active",
-  "✗ Yok": "✗ None",
+  "Aktif": "Active",
+  "Yok": "None",
   "Yeni Hostname": "New Hostname",
   "Registrar'da A kaydını sunucunun IP'sine çevir.": "Point the A record to the server's IP at your registrar.",
   "SSL Kuruluyor": "Installing SSL",
   "bekleniyor…": "waiting…",
   "Hata:": "Error:",
-  "✓ İşlem başarılı": "✓ Operation successful",
+  "İşlem başarılı": "Operation successful",
   "sn": "s",
   // Backend iş adımları (statik) — SSL kurucu terminal çıktısı
   "girginospanel-panelhost betiği bulunamadı": "girginospanel-panelhost script not found",
@@ -221,7 +222,7 @@ export default function PanelHostPage() {
       const yine = await dialog.onay({
         baslik: cevir("DNS eşleşmiyor"),
         mesaj: cevir("Hostname bu sunucuya çözülmüyor. Yine de deneyeyim mi? (Betik kilitlenmeyi önlemek için değişikliği REDDEDECEK.)"),
-        onayEtiketi: cevir("Yine de dene"), ton: 'tehlike',
+        onayEtiketi: cevir("Yine de dene"), ton: 'tehlike', onayIkonu: I.oynat,
       })
       if (!yine) return
     }
@@ -229,7 +230,7 @@ export default function PanelHostPage() {
     const ok = await dialog.onay({
       baslik: cevir("Let's Encrypt kur?"),
       mesaj: cevir("DNS kontrol → hostname uygula → Let's Encrypt sertifikası; hepsi sırayla çalışır (30-90 sn). LE haftalık limit: 5 başarısız/hafta."),
-      onayEtiketi: cevir("Kur"),
+      onayEtiketi: cevir("Kur"), onayIkonu: I.kalkan,
     })
     if (!ok) return
     setAktifIs(null)
@@ -238,7 +239,7 @@ export default function PanelHostPage() {
       const ap = (await api.post<{ is_id: string }>('/panel-host/apply', { hostname: taslak })).data
       const apSon = await isBekle(ap.is_id)
       if (apSon.durum !== 'bitti') {
-        await dialog.bilgi({ baslik: cevir("Hostname uygulanamadı"), mesaj: apSon.hata || cevir("Hostname uygulama başarısız — SSL adımı atlandı.") })
+        await dialog.bilgi({ baslik: cevir("Hostname uygulanamadı"), mesaj: apSon.hata || cevir("Hostname uygulama başarısız — SSL adımı atlandı."), ton: 'tehlike' })
         return
       }
       // 5) Let's Encrypt kur → bitene kadar bekle
@@ -251,12 +252,12 @@ export default function PanelHostPage() {
         setYeniLink(url)
         window.open(url, '_blank', 'noopener')
       } else {
-        await dialog.bilgi({ baslik: cevir("SSL kurulamadı"), mesaj: ssSon.hata || cevir("Let's Encrypt sertifikası alınamadı.") })
+        await dialog.bilgi({ baslik: cevir("SSL kurulamadı"), mesaj: ssSon.hata || cevir("Let's Encrypt sertifikası alınamadı."), ton: 'tehlike' })
       }
     } catch (e) {
       // Bileşen unmount → bekleme iptal edildi: sessizce çık (dialog/setState yok).
       if (isBekleAbortRef.current?.signal.aborted) return
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Kurulum hatası")) })
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Kurulum hatası")), ton: 'tehlike' })
     }
   }
 
@@ -286,14 +287,14 @@ export default function PanelHostPage() {
         <>
           {/* Ön koşul kontrol */}
           {!d.betik_var && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+            <UyariKutusu ton="tehlike" className="mb-4">
               <b>{cevir("Betik yok:")}</b> {cevir("/usr/local/bin/girginospanel-panelhost kurulmamış. Hostname değişimi çalışmayacak.")}
-            </div>
+            </UyariKutusu>
           )}
           {!d.acme_var && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+            <UyariKutusu ton="uyari" className="mb-4">
               <b>{cevir("acme.sh yüklü değil:")}</b> {cevir("Let's Encrypt SSL kurma bu sunucuda yapılamaz. `curl https://get.acme.sh | sh` ile kur.")}
-            </div>
+            </UyariKutusu>
           )}
 
           {/* Mevcut durum kartı */}
@@ -339,7 +340,7 @@ export default function PanelHostPage() {
               </div>
               <div>
                 <div className="text-xs text-slate-500">{cevir("Yakala-hepsi (bilinmeyen host → 444)")}</div>
-                <div className="mt-0.5 text-sm">{d.durum.catchall_kurulu ? cevir('✓ Aktif') : cevir('✗ Yok')}</div>
+                <div className="mt-0.5 inline-flex items-center gap-1 text-sm"><Ikon d={d.durum.catchall_kurulu ? I.onay : I.kapat} className="size-4 shrink-0" />{d.durum.catchall_kurulu ? cevir('Aktif') : cevir('Yok')}</div>
               </div>
             </div>
           </div>
@@ -355,27 +356,25 @@ export default function PanelHostPage() {
                 className="flex-1 min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 dark:border-dark-600 dark:bg-dark-900 dark:text-slate-100"
                 autoComplete="off" spellCheck={false}
               />
-              <Button type="submit" disabled={!d.acme_var || dnsKontrol || !taslak.trim() || aktifIs?.durum === 'kosuyor'}
-                color="success" variant="soft"
-                className="px-4 py-2 text-sm">
-                <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />{dnsKontrol ? cevir("DNS kontrol…") : aktifIs?.durum === 'kosuyor' ? cevir("Kuruluyor…") : cevir("Let's Encrypt Kur")}</span>
+              <Button type="submit" disabled={!d.acme_var || !taslak.trim()}
+                yukleniyor={dnsKontrol || aktifIs?.durum === 'kosuyor'}
+                color="primary" ikon={I.kalkan}>
+                {dnsKontrol ? cevir("DNS kontrol…") : aktifIs?.durum === 'kosuyor' ? cevir("Kuruluyor…") : cevir("Let's Encrypt Kur")}
               </Button>
             </div>
 
             {dnsSonuc && (
-              <div className={`mt-3 rounded-lg border p-3 text-sm ${dnsSonuc.eslesme
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300'
-                : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+              <UyariKutusu ton={dnsSonuc.eslesme ? 'basari' : 'uyari'} className="mt-3">
                 {dnsSonuc.eslesme
-                  ? <>{cevir("✓ DNS bu sunucuya çözülüyor:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ')}</span></>
+                  ? <>{cevir("DNS bu sunucuya çözülüyor:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ')}</span></>
                   : <>{cevir("DNS uyuşmuyor. Çözülen:")} <span className="font-mono">{dnsSonuc.cozulen.join(', ') || cevir("hiç")}</span> · {cevir("Sunucu:")} <span className="font-mono">{dnsSonuc.sunucu_ip4.join(', ')}</span>. {cevir("Registrar'da A kaydını sunucunun IP'sine çevir.")}</>}
-              </div>
+              </UyariKutusu>
             )}
 
             {yeniLink && (
-              <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                {cevir("✓ SSL kuruldu.")} <a href={yeniLink} target="_blank" rel="noopener noreferrer" className="font-medium underline">{cevir("Yeni adreste paneli aç →")}</a>
-              </div>
+              <UyariKutusu ton="basari" className="mt-3">
+                {cevir("SSL kuruldu.")} <a href={yeniLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium underline">{cevir("Yeni adreste paneli aç")}<Ikon d={I.harici} className="size-3.5 shrink-0" /></a>
+              </UyariKutusu>
             )}
           </form>
 
@@ -398,20 +397,20 @@ export default function PanelHostPage() {
                 {aktifIs.adimlar.map((a, i) => (
                   <div key={i} className={a.basari ? 'text-slate-700 dark:text-slate-300' : 'text-red-700 dark:text-red-400'}>
                     <span className="text-slate-400">{new Date(a.zaman).toLocaleTimeString('tr-TR', { hour12: false })}</span>{' '}
-                    {a.basari ? '✓' : '✗'} {cevir(a.mesaj)}
+                    <Ikon d={a.basari ? I.onay : I.kapat} className="inline-block size-3.5 align-[-2px]" /> {cevir(a.mesaj)}
                   </div>
                 ))}
                 {aktifIs.adimlar.length === 0 && <div className="text-slate-500">{cevir("bekleniyor…")}</div>}
               </div>
               {aktifIs.hata && (
-                <div className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                <UyariKutusu ton="tehlike" className="mt-2">
                   {cevir("Hata:")} {aktifIs.hata}
-                </div>
+                </UyariKutusu>
               )}
               {aktifIs.durum === 'bitti' && (
-                <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-                  {cevir("✓ İşlem başarılı")} ({Math.round((new Date(aktifIs.bitis).getTime() - new Date(aktifIs.basla).getTime()) / 1000)} {cevir("sn")})
-                </div>
+                <UyariKutusu ton="basari" className="mt-2">
+                  {cevir("İşlem başarılı")} ({Math.round((new Date(aktifIs.bitis).getTime() - new Date(aktifIs.basla).getTime()) / 1000)} {cevir("sn")})
+                </UyariKutusu>
               )}
             </div>
           )}

@@ -39,6 +39,7 @@ const DSTATS_EN: Record<string, string> = {
   "istek": "requests",
   "En Aktif IP'ler": "Most Active IPs",
   "Veri yok.": "No data.",
+  "Aboneliğe dön": "Back to subscription",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DSTATS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -86,7 +87,7 @@ export default function DomainStatsPage() {
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
           </div>
-          <Button onClick={yukle} variant="outlined" className="self-start sm:self-auto shrink-0 text-sm px-3 py-1.5"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
+          <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile} className="self-start sm:self-auto shrink-0">{cevir("Yenile")}</Button>
         </div>
 
         {!o.log_var || o.toplam_istek === 0 ? (
@@ -160,7 +161,7 @@ export default function DomainStatsPage() {
           </>
         )}
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

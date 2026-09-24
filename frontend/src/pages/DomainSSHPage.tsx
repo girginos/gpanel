@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
 type Durum = {
   alan_adi: string
@@ -49,8 +50,9 @@ const SSH_EN: Record<string, string> = {
   "SSH erişimi kapatıldı.": "SSH access disabled.",
   "Şu an bir anahtar tanımlı.": "A key is currently defined.",
   "— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.": "— Synced automatically while SSH is on. Alternatively you can add an SSH public key below.",
-  "✓ SSH anahtarları temizlendi.": "✓ SSH keys cleared.",
-  "✓ SSH anahtarı kaydedildi.": "✓ SSH key saved.",
+  "SSH anahtarları temizlendi.": "SSH keys cleared.",
+  "SSH anahtarı kaydedildi.": "SSH key saved.",
+  "Aboneliğe dön": "Back to subscription",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SSH_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -64,6 +66,8 @@ export default function DomainSSHPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [, setBasari] = useState<string | null>(null)
   const [anahtar, setAnahtar] = useState('')
+  // Yalnız görünüm: isleniyor iki işte ortak — spinner tetikleyen butonda dönsün.
+  const [islem, setIslem] = useState<'toggle' | 'anahtar' | null>(null)
 
   function yukle() {
     if (!id) return
@@ -93,7 +97,7 @@ export default function DomainSSHPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/ssh/anahtar`, { anahtar })
-      const m = data.anahtar_var ? cevir("✓ SSH anahtarı kaydedildi.") : cevir("✓ SSH anahtarları temizlendi.")
+      const m = data.anahtar_var ? cevir("SSH anahtarı kaydedildi.") : cevir("SSH anahtarları temizlendi.")
       setBasari(m)
       toast.basari(m)
       setTimeout(() => setBasari(null), 4000)
@@ -143,13 +147,13 @@ export default function DomainSSHPage() {
               </p>
             </div>
             {d.aktif ? (
-              <Button color="error" variant="outlined" onClick={() => toggle(false)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 text-sm">
+              <Button color="error" variant="soft" onClick={() => { setIslem('toggle'); toggle(false) }} disabled={isleniyor || d.is_demo}
+                yukleniyor={isleniyor && islem === 'toggle'} ikon={I.kilit} className="shrink-0">
                 {cevir("SSH'i Kapat")}
               </Button>
             ) : (
-              <Button color="primary" onClick={() => toggle(true)} disabled={isleniyor || d.is_demo}
-                className="shrink-0 px-4 text-sm">
+              <Button color="primary" onClick={() => { setIslem('toggle'); toggle(true) }} disabled={isleniyor || d.is_demo}
+                yukleniyor={isleniyor && islem === 'toggle'} ikon={I.kilitAcik} className="shrink-0">
                 {cevir("SSH'i Aç")}
               </Button>
             )}
@@ -169,7 +173,7 @@ export default function DomainSSHPage() {
             <label className="text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Bağlantı komutu")}</label>
             <div className="mt-1 flex items-center gap-2">
               <code className="flex-1 px-3 py-2 bg-dark-800 text-slate-100 rounded-lg text-xs font-mono overflow-x-auto">{sshKomut}</code>
-              <Button variant="outlined" onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0 px-2.5 text-xs">{cevir("Kopyala")}</Button>
+              <Button variant="outlined" boyut="sm" ikon={I.kopya} onClick={() => navigator.clipboard?.writeText(sshKomut)} className="shrink-0">{cevir("Kopyala")}</Button>
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{cevir("Parola:")} <strong>{cevir("FTP hesabınızla aynı")}</strong> {cevir("— SSH açıkken otomatik eşitlenir. Alternatif olarak aşağıya SSH genel anahtarı ekleyebilirsiniz.")}</p>
@@ -193,15 +197,15 @@ export default function DomainSSHPage() {
           />
           <div className="mt-3 flex items-center justify-between">
             <p className="text-xs text-slate-400">{cevir("Boş bırakıp kaydederseniz tüm anahtarlar silinir.")}</p>
-            <Button color="primary" onClick={anahtarKaydet} disabled={isleniyor || d.is_demo}
-              className="shrink-0 px-4 text-sm">
+            <Button color="primary" onClick={() => { setIslem('anahtar'); anahtarKaydet() }} disabled={isleniyor || d.is_demo}
+              yukleniyor={isleniyor && islem === 'anahtar'} ikon={I.disket} className="shrink-0">
               {cevir("Anahtarı Kaydet")}
             </Button>
           </div>
         </div>
 
         <div className="mt-4">
-          <Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link>
+          <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link>
         </div>
       </div>
     </div>

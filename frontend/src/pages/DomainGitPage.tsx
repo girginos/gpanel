@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
+import { I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -89,7 +89,7 @@ const GIT_EN: Record<string, string> = {
   "Repo ve branch seçin": "Select repo and branch",
   "İlk klonlama": "Initial clone",
   "PAT ile bağlan → repo'larını listele → tek tıkla dağıtım + otomatik webhook.": "Connect with a PAT → list your repos → one-click deploy + auto webhook.",
-  "● Otomatik Dağıtım": "● Auto Deploy",
+  "Otomatik Dağıtım": "Auto Deploy",
   "başarılı": "successful",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (GIT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -120,6 +120,9 @@ export default function DomainGitPage() {
   const [ghSelectedBranch, setGhSelectedBranch] = useState('')
   const [ghAutoDeploy, setGhAutoDeploy] = useState(true)
   const [ghYukluyor, setGhYukluyor] = useState(false)
+  const [ghKaldiriliyor, setGhKaldiriliyor] = useState(false)
+  // Yalnız görünüm: isleniyor üç işte ortak — spinner tetikleyen butonda dönsün.
+  const [gitIslem, setGitIslem] = useState<'bagla' | 'klon' | 'pull' | null>(null)
 
   function yukle() {
     if (!id) return
@@ -196,7 +199,8 @@ export default function DomainGitPage() {
   }
 
   async function ghDisconnect() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("GitHub bağlantısı kaldırılacak. Webhook varsa silinir, mevcut repo dosyaları etkilenmez."), ton: 'tehlike', onayIkonu: I.cop }))) return
+    setGhKaldiriliyor(true)
     try {
       await api.delete(`/domains/${id}/github`)
       setGhConn({ yok: true })
@@ -207,7 +211,7 @@ export default function DomainGitPage() {
       toast.basari(cevir("GitHub bağlantısı kaldırıldı"))
     } catch (e) {
       const m = apiHata(e); toast.hata(cevir("İşlem başarısız"), m)
-    }
+    } finally { setGhKaldiriliyor(false) }
   }
 
   async function bagla() {
@@ -258,7 +262,7 @@ export default function DomainGitPage() {
       await api.delete(`/domains/${id}/git`)
       setRepo(null); setSilinecek(false); toast.basari(cevir("Repo bağlantısı kaldırıldı"))
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e), ton: 'tehlike' }))
     }
   }
 
@@ -296,7 +300,7 @@ export default function DomainGitPage() {
                 </div>
               </div>
               {ghConn.login && (
-                <Button color="error" variant="soft" onClick={ghDisconnect} className="text-xs px-2.5 py-1.5">{cevir("Bağlantıyı kaldır")}</Button>
+                <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={ghDisconnect} yukleniyor={ghKaldiriliyor}>{cevir("Bağlantıyı kaldır")}</Button>
               )}
             </div>
 
@@ -309,7 +313,7 @@ export default function DomainGitPage() {
                     placeholder="ghp_..." autoComplete="off"
                     className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
                   <Button color="primary" onClick={ghConnect} disabled={ghYukluyor || !ghToken.trim()} yukleniyor={ghYukluyor}
-                    className="px-4 py-2 text-sm">
+                    ikon={I.link}>
                     {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bağlan")}
                   </Button>
                 </div>
@@ -329,7 +333,7 @@ export default function DomainGitPage() {
                     <div className="text-xs text-slate-500 dark:text-slate-500 font-mono">@{ghConn.login}</div>
                   </div>
                   {ghConn.webhook_url && (
-                    <Badge variant="soft" color="success" className="text-[10px] uppercase tracking-wider font-semibold">{cevir("● Otomatik Dağıtım")}</Badge>
+                    <Badge variant="soft" color="success" className="gap-1 text-[10px] uppercase tracking-wider font-semibold"><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Otomatik Dağıtım")}</Badge>
                   )}
                 </div>
 
@@ -365,7 +369,7 @@ export default function DomainGitPage() {
                     {cevir("Push'ta otomatik dağıtım (webhook kurulur)")}
                   </label>
                   <Button color="primary" onClick={ghUse} disabled={ghYukluyor || !ghSelectedRepo || !ghSelectedBranch} yukleniyor={ghYukluyor}
-                    className="px-4 py-2 text-sm">
+                    ikon={I.onay}>
                     {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bu Repo'yu Kullan")}
                   </Button>
                 </div>
@@ -402,22 +406,25 @@ export default function DomainGitPage() {
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono" />
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button color="primary" onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Button color="primary" onClick={() => { setGitIslem('bagla'); bagla() }} disabled={isleniyor || !repoUrl}
+                  yukleniyor={isleniyor && gitIslem === 'bagla'} ikon={repo ? I.disket : I.link}>
                   {repo ? cevir("Güncelle") : cevir("Bağla")}
                 </Button>
                 {repo && (
-                  <Button color="warning" variant="soft" onClick={() => setKlonOnay(true)} disabled={isleniyor} yukleniyor={isleniyor} className="px-4 py-2 text-sm">
-                    <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> {cevir("Klonla (hedef temizlenir)")}</span>
+                  <Button color="warning" variant="soft" onClick={() => { setGitIslem('klon'); setKlonOnay(true) }} disabled={isleniyor}
+                    yukleniyor={isleniyor && gitIslem === 'klon'} ikon={I.indir}>
+                    {cevir("Klonla (hedef temizlenir)")}
                   </Button>
                 )}
                 {repo && (
-                  <Button color="success" onClick={pull} disabled={isleniyor} yukleniyor={isleniyor} className="px-4 py-2 text-sm">
-                    <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Pull</span>
+                  <Button variant="outlined" onClick={() => { setGitIslem('pull'); pull() }} disabled={isleniyor}
+                    yukleniyor={isleniyor && gitIslem === 'pull'} ikon={I.yenile}>
+                    Pull
                   </Button>
                 )}
                 {repo && (
-                  <Button color="error" variant="soft" onClick={() => setSilinecek(true)} className="ml-auto px-4 py-2 text-sm">
+                  <Button color="error" variant="soft" onClick={() => setSilinecek(true)} ikon={I.cop} className="ml-auto">
                     {cevir("Bağlantıyı Kaldır")}
                   </Button>
                 )}
@@ -431,7 +438,7 @@ export default function DomainGitPage() {
               <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Deploy Key (Public)</h3>
-                  <Button onClick={() => kopyala(repo.deploy_key_pub)} className="text-xs px-2.5 py-1.5">{cevir("Kopyala")}</Button>
+                  <Button onClick={() => kopyala(repo.deploy_key_pub)} variant="outlined" boyut="sm" ikon={I.kopya}>{cevir("Kopyala")}</Button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">GitHub → Repository → Settings → Deploy keys → Add deploy key — {cevir("bu anahtarı yapıştırın (Allow write access GEREKMEZ).")}</p>
                 <textarea readOnly value={repo.deploy_key_pub} rows={3}
@@ -480,6 +487,7 @@ export default function DomainGitPage() {
         baslik={cevir("İlk klonlama")}
         mesaj={cevirT(cevir("Hedef dizin ({0}) içeriği TAMAMEN silinip repodaki {1} branch'i klonlanacak. Devam edilsin mi?"), targetDir, branch)}
         ton="tehlike"
+        onayIkonu={I.indir}
         onayMetni={cevir("Evet, klonla")}
         onOnay={klonla}
         onIptal={() => setKlonOnay(false)}
@@ -490,6 +498,7 @@ export default function DomainGitPage() {
         baslik={cevir("Repo bağlantısını kaldır")}
         mesaj={cevir("Panel'deki kayıt silinecek (klonlanmış dosyalar diskte kalır).")}
         ton="tehlike"
+        onayIkonu={I.cop}
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(false)}
@@ -503,7 +512,7 @@ function Sat({ e, d, onCopy }: { e: string; d: string; onCopy?: (s: string) => v
     <div className="flex items-center gap-3">
       <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 w-28">{e}</span>
       <code className="flex-1 text-xs bg-slate-50 dark:bg-dark-800 px-2 py-1 rounded font-mono break-all">{d}</code>
-      {onCopy && <Button isIcon onClick={() => onCopy(d)} aria-label={cevir("Kopyala")} className="size-8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M8 8V5a2 2 0 012-2h9a2 2 0 012 2v9a2 2 0 01-2 2h-3M5 8h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2z"/></svg></Button>}
+      {onCopy && <Button isIcon variant="flat" ikon={I.kopya} onClick={() => onCopy(d)} aria-label={cevir("Kopyala")} title={cevir("Kopyala")} className="size-8" />}
     </div>
   )
 }

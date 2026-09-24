@@ -11,6 +11,8 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -31,7 +33,6 @@ const BACKUP_EN: Record<string, string> = {
   "(boş bırakırsanız mevcut korunur)": "(leave empty to keep the current one)",
   "İşlem başarısız": "Operation failed",
   "Kaydedildi": "Saved",
-  "+ Şimdi Yedekle": "+ Back Up Now",
   "Ayrı klasöre": "To a separate folder",
   "Bağlantı Testi": "Connection Test",
   "Belirli dosya/klasörleri geri al": "Restore specific files/folders",
@@ -74,9 +75,9 @@ const BACKUP_EN: Record<string, string> = {
   "Çalışma saati (yerel)": "Run time (local)",
   "Üzerine yaz": "Overwrite",
   "Şimdi Yedekle": "Back Up Now",
-  "● Son: başarılı": "● Last: successful",
-  "✓ Bağlantı OK": "✓ Connection OK",
-  "✗ Son: hata": "✗ Last: error",
+  "Son: başarılı": "Last: successful",
+  "Bağlantı OK": "Connection OK",
+  "Son: hata": "Last: error",
   "Hata": "Error",
   "seçili": "selected",
   "Tip": "Type",
@@ -115,7 +116,7 @@ const BACKUP_EN: Record<string, string> = {
   "Aktif (her yedek bu hedefe gönderilsin)": "Active (send every backup to this target)",
   "Test ediliyor…": "Testing…",
   "Hedefi sil": "Delete target",
-  "● Aktif": "● Active",
+  "Aktif": "Active",
   "Yedekleniyor…": "Backing up…",
   "hazırlanıyor": "preparing",
   "veritabanları alınıyor": "dumping databases",
@@ -173,6 +174,8 @@ export default function DomainBackupsPage() {
   const [destForm, setDestForm] = useState({ tip: 'sftp' as 'ftp'|'sftp', host: '', port: 22, kullanici: '', parola: '', uzak_dizin: '/', aktif: false })
   const [destKayit, setDestKayit] = useState(false)
   const [destTest, setDestTest] = useState<{ ok: boolean; hata?: string } | null>(null)
+  // Yalnız görünüm: destKayit üç işte ortak — spinner tetikleyen butonda dönsün.
+  const [destIslem, setDestIslem] = useState<'test' | 'kaydet' | 'sil' | null>(null)
 
   const yukleNesli = useRef(0)
   function yukle() {
@@ -233,7 +236,7 @@ export default function DomainBackupsPage() {
   }
 
   async function destSil() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Uzak yedek hedefi silinsin mi? Mevcut yedekler etkilenmez, sadece bundan sonraki otomatik gönderim durur."), ton: 'tehlike', onayIkonu: I.cop }))) return
     setDestKayit(true)
     try {
       await api.delete(`/domains/${id}/backup-destination`)
@@ -317,7 +320,7 @@ export default function DomainBackupsPage() {
       // temizlendiğini sanıyordu. (Uzak kopya silinemezse sunucu 409 döner
       // ve aşağıdaki catch dalı çalışır.)
       if (data?.uyari) {
-        await bilgi({ baslik: cevir("Kısmen silindi"), mesaj: data.uyari })
+        await bilgi({ baslik: cevir("Kısmen silindi"), mesaj: data.uyari, ton: 'uyari' })
       }
     } catch (e) {
       // 🔴 KULLANICI KİLİTLENMEZ. Uzak depo erişilemezse sunucu 409 döner ve
@@ -330,20 +333,21 @@ export default function DomainBackupsPage() {
         const devam = await onay({
           baslik: cevir("Uzak kopya silinemedi"),
           mesaj: (y.data.hata || '') + ' ' + cevir("Yine de yedek kaydını silmek istiyor musunuz? Uzak depodaki dosya KALACAK ve orada yer kaplamaya devam edecek."),
+          ton: 'tehlike', onayIkonu: I.cop,
         })
         if (devam) {
           try {
             const { data } = await api.delete<{ uyari?: string }>(
               `/domains/${id}/backups/${silinecek.id}?uzagi_yoksay=1`)
             setSilinecek(null); yukle()
-            if (data?.uyari) await bilgi({ baslik: cevir("Silindi"), mesaj: data.uyari })
+            if (data?.uyari) await bilgi({ baslik: cevir("Silindi"), mesaj: data.uyari, ton: 'uyari' })
           } catch (e2) {
-            await bilgi({ baslik: cevir("Yedek silinemedi"), mesaj: apiHata(e2) })
+            await bilgi({ baslik: cevir("Yedek silinemedi"), mesaj: apiHata(e2), ton: 'tehlike' })
           }
         }
         return
       }
-      (await bilgi({ baslik: cevir("Yedek silinemedi"), mesaj: apiHata(e) }))
+      (await bilgi({ baslik: cevir("Yedek silinemedi"), mesaj: apiHata(e), ton: 'tehlike' }))
     }
   }
 
@@ -409,7 +413,7 @@ export default function DomainBackupsPage() {
                 className={`text-left p-3 border rounded-lg transition disabled:cursor-default ${renk[m.renk]}`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-base leading-none">{m.ikon}</span>
-                  {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">{cevir("● Aktif")}</span>}
+                  {aktif && <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300"><span className="inline-block size-2 rounded-full bg-emerald-500" aria-hidden />{cevir("Aktif")}</span>}
                 </div>
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ad}</div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1 leading-snug">{m.aciklama}</div>
@@ -456,8 +460,9 @@ export default function DomainBackupsPage() {
           </div>
           {!dest.yok && dest.son_durum && (
             <Badge variant="soft" color={dest.son_durum === 'basarili' ? 'success' : dest.son_durum === 'hata' ? 'error' : 'neutral'}
-              className="shrink-0 text-[10px] uppercase tracking-wider font-semibold">
-              {dest.son_durum === 'basarili' ? cevir('● Son: başarılı') : dest.son_durum === 'hata' ? cevir('✗ Son: hata') : dest.son_durum}
+              className="shrink-0 gap-1 text-[10px] uppercase tracking-wider font-semibold">
+              {dest.son_durum === 'basarili' ? <><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir('Son: başarılı')}</>
+                : dest.son_durum === 'hata' ? <><Ikon d={I.kapat} className="size-3 shrink-0" />{cevir('Son: hata')}</> : dest.son_durum}
             </Badge>
           )}
         </div>
@@ -466,7 +471,9 @@ export default function DomainBackupsPage() {
           <div className="mb-3 text-xs text-slate-500 dark:text-slate-500">
             {cevir("Son yükleme:")} <span className="font-mono">{dest.son_yukleme}</span>
             {dest.son_durum === 'hata' && dest.son_hata && (
-              <div className="mt-1 text-[11px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2 font-mono whitespace-pre-wrap">{dest.son_hata}</div>
+              <UyariKutusu ton="tehlike" className="mt-1">
+                <span className="font-mono text-[11px] whitespace-pre-wrap">{dest.son_hata}</span>
+              </UyariKutusu>
             )}
           </div>
         )}
@@ -528,21 +535,25 @@ export default function DomainBackupsPage() {
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {destTest && (
-              <Badge variant="soft" color={destTest.ok ? 'success' : 'error'} className="text-xs leading-snug">
-                {destTest.ok ? cevir('✓ Bağlantı OK') : '✗ ' + (destTest.hata?.slice(0, 80) || cevir('Hata'))}
+              <Badge variant="soft" color={destTest.ok ? 'success' : 'error'} className="gap-1 text-xs leading-snug">
+                <Ikon d={destTest.ok ? I.onay : I.kapat} className="size-3.5 shrink-0" />
+                {destTest.ok ? cevir('Bağlantı OK') : (destTest.hata?.slice(0, 80) || cevir('Hata'))}
               </Badge>
             )}
-            <Button onClick={destBaglantiTesti} disabled={destKayit || !destForm.host || !destForm.kullanici}
-              variant="outlined" className="text-xs px-3 py-1.5">
-              {destKayit ? cevir("Test ediliyor…") : cevir("Bağlantı Testi")}
+            <Button onClick={() => { setDestIslem('test'); destBaglantiTesti() }} disabled={destKayit || !destForm.host || !destForm.kullanici}
+              yukleniyor={destKayit && destIslem === 'test'}
+              variant="outlined" boyut="sm" ikon={I.yenile}>
+              {destKayit && destIslem === 'test' ? cevir("Test ediliyor…") : cevir("Bağlantı Testi")}
             </Button>
-            <Button onClick={destKaydet} disabled={destKayit || !destForm.host || !destForm.kullanici}
-              color="primary" className="text-xs px-3 py-1.5">
+            <Button onClick={() => { setDestIslem('kaydet'); destKaydet() }} disabled={destKayit || !destForm.host || !destForm.kullanici}
+              yukleniyor={destKayit && destIslem === 'kaydet'}
+              color="primary" boyut="sm" ikon={I.disket}>
               {cevir("Kaydet")}
             </Button>
             {!dest.yok && (
-              <Button onClick={destSil} disabled={destKayit}
-                color="error" variant="outlined" className="text-xs px-3 py-1.5">
+              <Button onClick={() => { setDestIslem('sil'); destSil() }} disabled={destKayit}
+                yukleniyor={destKayit && destIslem === 'sil'}
+                color="error" variant="soft" boyut="sm" ikon={I.cop}>
                 {cevir("Hedefi sil")}
               </Button>
             )}
@@ -551,10 +562,10 @@ export default function DomainBackupsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Button onClick={olustur} yukleniyor={isleniyor} color="primary" className="px-3.5 py-2 text-sm">
-          {isleniyor ? cevir("Yedekleniyor…") : cevir("+ Şimdi Yedekle")}
+        <Button onClick={olustur} yukleniyor={isleniyor} color="primary" ikon={I.arti}>
+          {isleniyor ? cevir("Yedekleniyor…") : cevir("Şimdi Yedekle")}
         </Button>
-        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
+        <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile}>{cevir("Yenile")}</Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} {cevir("yedek")}</span>
       </div>
 
@@ -645,11 +656,11 @@ export default function DomainBackupsPage() {
                     disabled={y.mevcut !== 'yerel'}
                     title={y.mevcut === 'yok' ? cevir("Yedek dosyası bulunamadı")
                       : y.mevcut === 'uzak_iddia' ? cevir("Yedek uzak depoya taşınmış — önce geri getirilmeli") : undefined}
-                    color="primary" variant="flat"
-                    className="text-sm px-2 py-1 disabled:opacity-40"
+                    variant="outlined" boyut="sm" ikon={I.indir}
+                    className="disabled:opacity-40"
                   >{cevir("İndir")}</Button>
-                  <Button onClick={() => setGeriYukle(y)} color="warning" variant="flat" className="text-sm px-2 py-1"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Geri Yükle")}</span></Button>
-                  <Button onClick={() => setSilinecek(y)} color="error" variant="soft" className="text-sm px-2 py-1">{cevir("Sil")}</Button>
+                  <Button onClick={() => setGeriYukle(y)} color="warning" variant="soft" boyut="sm" ikon={I.geriAl}>{cevir("Geri Yükle")}</Button>
+                  <Button onClick={() => setSilinecek(y)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
                 </td>
               </tr>
             ))}
@@ -662,7 +673,7 @@ export default function DomainBackupsPage() {
         acik={!!silinecek}
         baslik={cevir("Yedek dosyasını sil")}
         mesaj={cevirT(cevir("\"{0}\" silinsin mi?"), silinecek?.dosya)}
-        ton="tehlike" onayMetni={cevir("Evet, sil")}
+        ton="tehlike" onayIkonu={I.cop} onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
       />
@@ -771,14 +782,15 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
       : 'border-slate-200 dark:border-dark-500 bg-white dark:bg-dark-700 hover:border-slate-400 dark:hover:border-dark-400'}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-lg bg-white dark:bg-dark-800 border border-slate-200 dark:border-dark-600 shadow-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-dark-600">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Yedekten geri yükle")}</h3>
-          <p className="mt-0.5 text-xs font-mono text-slate-500 dark:text-slate-400 break-all">{yedek.dosya}</p>
-        </div>
-
-        <div className="px-5 py-4 overflow-y-auto space-y-4">
+    <Modal acik baslik={cevir("Yedekten geri yükle")} onKapat={onClose} genislik="lg" kapatilamaz={busy}
+      alt={<>
+        <Button onClick={onClose} disabled={busy} variant="outlined" ikon={I.kapat}>{cevir("İptal")}</Button>
+        <Button onClick={gonder} yukleniyor={busy} color="primary" ikon={I.geriAl}>
+          {busy ? cevir("Geri yükleniyor…") : cevir("Geri Yükle")}
+        </Button>
+      </>}>
+        <div className="space-y-4">
+          <p className="-mt-1 text-xs font-mono text-slate-500 dark:text-slate-400 break-all">{yedek.dosya}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {MODLAR.map(m => (
               <button key={m.deger} type="button" onClick={() => setMod(m.deger)} className={secBtn(mod === m.deger)}>
@@ -789,12 +801,14 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
           </div>
 
           {(mod === 'tam' || mod === 'dosyalar') && (
-            <label className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-3 cursor-pointer">
-              <input type="checkbox" checked={temiz} onChange={e => setTemiz(e.target.checked)} className="mt-0.5" />
-              <span className="text-xs text-amber-800 dark:text-amber-200">
-                <b>{cevir("Temiz geri yükleme")}</b>{cevir(" — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.")}
-              </span>
-            </label>
+            <UyariKutusu ton="uyari">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={temiz} onChange={e => setTemiz(e.target.checked)} className="mt-0.5" />
+                <span className="text-xs">
+                  <b>{cevir("Temiz geri yükleme")}</b>{cevir(" — yedekte olmayan dosyaları SİL. Kapalıyken (önerilen) aktif uygulama korunur, yalnız yedektekiler üzerine yazılır.")}
+                </span>
+              </label>
+            </UyariKutusu>
           )}
 
           {mod === 'veritabani' && (
@@ -866,17 +880,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
             </div>
           )}
         </div>
-
-        <div className="px-5 py-3 border-t border-slate-200 dark:border-dark-600 flex justify-end gap-2">
-          <Button onClick={onClose} disabled={busy}
-            variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-          <Button onClick={gonder} yukleniyor={busy}
-            color="primary" className="px-4 py-2 text-sm">
-            {busy ? cevir("Geri yükleniyor…") : cevir("Geri Yükle")}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 

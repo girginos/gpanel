@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
+import { I, Ikon } from '@/components/Ikon'
 
 const BAYIOZET_EN: Record<string, string> = {
   "Türkçe": "English",
@@ -21,7 +22,7 @@ const BAYIOZET_EN: Record<string, string> = {
   "Sınırsız": "Unlimited",
   "Kendi planlarım": "My plans",
   "Planları yönet": "Manage plans",
-  "DNS şablonum ✓": "My DNS template ✓",
+  "DNS şablonum": "My DNS template",
   "DNS şablonu yok": "No DNS template",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BAYIOZET_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -112,8 +113,8 @@ export default function BayiOzet() {
           <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{o.plan_adet}</div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
             <Link to="/hizmet-planlari" className="text-brand-700 dark:text-brand-300 hover:underline">{cevir("Planları yönet")}</Link>
-            <Link to="/araclar/dns-sablonu" className={o.dns_sablon_ozel ? 'text-emerald-600 dark:text-emerald-400 hover:underline' : 'text-slate-500 dark:text-slate-400 hover:underline'}>
-              {o.dns_sablon_ozel ? cevir('DNS şablonum ✓') : cevir('DNS şablonu yok')}
+            <Link to="/araclar/dns-sablonu" className={`inline-flex items-center gap-1 ${o.dns_sablon_ozel ? 'text-emerald-600 dark:text-emerald-400 hover:underline' : 'text-slate-500 dark:text-slate-400 hover:underline'}`}>
+              {o.dns_sablon_ozel ? <>{cevir('DNS şablonum')}<Ikon d={I.onay} className="size-3.5 shrink-0" /></> : cevir('DNS şablonu yok')}
             </Link>
           </div>
         </div>

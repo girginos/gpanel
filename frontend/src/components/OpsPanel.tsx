@@ -16,6 +16,7 @@ import {
   Area, AreaChart, CartesianGrid, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Activity, Cpu, Gauge, HardDrive, MemoryStick, Network, RefreshCw } from 'lucide-react'
+import { I, Ikon as SvgIkon } from '@/components/Ikon'
 
 const OPS_EN: Record<string, string> = {
   'Zaman aralığı': 'Time range', 'Yenileme': 'Refresh', 'Kapalı': 'Off', 'Canlı': 'Live', 'Duruk': 'Paused',
@@ -140,7 +141,7 @@ function Ipucu({ active, payload, label, bicim }: any) {
 }
 
 function Panel({ baslik, ikon: Ikon, sag, genis, children }: {
-  baslik: string; ikon: any; sag?: string; genis?: boolean; children: React.ReactNode
+  baslik: string; ikon: any; sag?: React.ReactNode; genis?: boolean; children: React.ReactNode
 }) {
   return (
     <section className={`ops-panel${genis ? ' genis' : ''}`}>
@@ -214,7 +215,7 @@ export default function OpsPanel() {
     { ad: cevir('Disk'), ikon: HardDrive, deger: yuzde(son.disk), alt: '/', renk: esik(son.disk, 80, 92) },
     { ad: cevir('Swap'), ikon: Gauge, deger: yuzde(son.swap), alt: `${cevir('tepe')} ${yuzde(istat(n.map(x => x.swap)).max)}`, renk: esik(son.swap, 25, 60) },
     { ad: cevir('Yük (1dk)'), ikon: Activity, deger: son.yuk1.toFixed(2), alt: `${cevir('çekirdek sınırı')} ${cekirdek}`, renk: cekirdek ? esik((son.yuk1 / cekirdek) * 100, 80, 110) : 'var(--ops-dim)' },
-    { ad: cevir('Ağ'), ikon: Network, deger: hiz(son.rx_bps + son.tx_bps), alt: `↓${hiz(son.rx_bps)} ↑${hiz(son.tx_bps)}`, renk: 'var(--ops-ok)' },
+    { ad: cevir('Ağ'), ikon: Network, deger: hiz(son.rx_bps + son.tx_bps), alt: <><SvgIkon d={I.asagi} className="inline size-2.5 align-[-1px]" />{hiz(son.rx_bps)} <SvgIkon d={I.yukari} className="inline size-2.5 align-[-1px]" />{hiz(son.tx_bps)}</>, renk: 'var(--ops-ok)' },
   ] : []
 
   const eksenStil = { fill: '#6b7c92', fontSize: 11 }
@@ -364,7 +365,7 @@ export default function OpsPanel() {
           </Panel>
 
           {/* Ağ — aynalanmış (gelen yukarı / giden aşağı) */}
-          <Panel baslik={cevir('Ağ Trafiği')} ikon={Network} genis sag={`↓ ${cevir('Gelen')} · ↑ ${cevir('Giden')}`}>
+          <Panel baslik={cevir('Ağ Trafiği')} ikon={Network} genis sag={<><SvgIkon d={I.asagi} className="inline size-3 align-[-2px]" /> {cevir('Gelen')} · <SvgIkon d={I.yukari} className="inline size-3 align-[-2px]" /> {cevir('Giden')}</>}>
             <div className="ops-chart">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={d} margin={{ top: 4, right: 10, left: 0, bottom: 0 }}>

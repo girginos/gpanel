@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
+import { I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -70,6 +70,7 @@ export default function DomainLogsPage() {
   const [otoScroll, setOtoScroll] = useState(true)
   const [gorunum, setGorunum] = useState<'tablo' | 'ham'>('tablo')
   const [arama, setArama] = useState('')
+  const [okunuyor, setOkunuyor] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -95,6 +96,7 @@ export default function DomainLogsPage() {
   async function ilkYukle() {
     if (!id || !aktif) return
     const _n = ++ilkYukleNesli.current
+    setOkunuyor(true)
     try {
       const { data } = await api.get<ReadResp>(`${base}/logs/oku`, { params: { dosya: aktif, son: 200 } })
       if (_n !== ilkYukleNesli.current) return
@@ -103,6 +105,8 @@ export default function DomainLogsPage() {
     } catch (e) {
       if (_n !== ilkYukleNesli.current) return
       const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    } finally {
+      if (_n === ilkYukleNesli.current) setOkunuyor(false)
     }
   }
   useEffect(() => {
@@ -227,24 +231,28 @@ export default function DomainLogsPage() {
           </label>
           <Button
             onClick={() => setCanli(c => !c)}
-            color={canli ? 'error' : 'success'}
+            color={canli ? 'error' : 'primary'}
             variant={canli ? 'soft' : 'filled'}
-            className="px-3 py-1.5 text-xs"
+            boyut="sm"
+            ikon={canli ? I.durdur : I.oynat}
           >
-            {canli ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.durdur} /> {cevir("Durdur")}</span> : <span className="inline-flex items-center gap-1.5"><Ikon d={I.oynat} /> {cevir("Canlı Takip")}</span>}
+            {canli ? cevir("Durdur") : cevir("Canlı Takip")}
           </Button>
           <Button
             onClick={ilkYukle}
             disabled={canli}
+            yukleniyor={okunuyor}
             variant="outlined"
-            className="px-3 py-1.5 text-xs"
+            boyut="sm"
+            ikon={I.yenile}
           >
-            <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Son 200")}</span>
+            {cevir("Son 200")}
           </Button>
           <Button
             onClick={() => setSatirlar([])}
             variant="outlined"
-            className="px-3 py-1.5 text-xs"
+            boyut="sm"
+            ikon={I.ban}
           >
             {cevir("Temizle")}
           </Button>
@@ -267,10 +275,12 @@ export default function DomainLogsPage() {
             <Button
               onClick={() => setArama('')}
               aria-label={cevir("Aramayı temizle")}
+              title={cevir("Aramayı temizle")}
               variant="flat"
               isIcon
-              className="absolute right-0.5 top-1/2 -translate-y-1/2 size-8 rounded-md text-lg leading-none"
-            >×</Button>
+              ikon={I.kapat}
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 size-8 rounded-md"
+            />
           )}
         </div>
         {arama && (
