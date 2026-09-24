@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/DomainList'
 import { useDialog } from '@/components/Dialog'
@@ -159,12 +160,12 @@ export default function DomainMailKutularPage() {
   const [domain, setDomain] = useState<Domain | null>(null)
   const [mailDomain, setMailDomain] = useState<MailDomain | null | undefined>(undefined) // undefined=yükleniyor, null=yok
   const [kutular, setKutular] = useState<Kutu[] | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   // Webmail tek-tık giriş kullanılamıyorsa SEBEBİ kalıcı olarak gösterilir.
   // 🔴 Sessiz başarısızlık YASAK: kullanıcı butona basıp hiçbir şey olmamasını
   // değil, cevir("neden olmadığını") görmeli.
   const [webmailKapali, setWebmailKapali] = useState<string | null>(null)
-  const [bildirim, setBildirim] = useState<string | null>(null)
+  const [, setBildirim] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   const [uretilen, setUretilen] = useState<{ email: string; parola: string } | null>(null)
   const [kopyalandi, setKopyalandi] = useState(false)
@@ -283,9 +284,6 @@ export default function DomainMailKutularPage() {
     </div>
   )
 
-  const btnSec = 'inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-dark-600/60 disabled:opacity-50 transition-colors'
-  const btnPri = 'inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white shadow-xs shadow-brand-600/20 disabled:opacity-50 transition-colors'
-
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
       <Breadcrumb items={[
@@ -315,10 +313,10 @@ export default function DomainMailKutularPage() {
         <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-8 text-center">
           <div className="w-12 h-12 mx-auto mb-3 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300"><Ikon.zarf className="w-6 h-6" /></div>
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{cevir("Bu domain için mail servisi henüz kurulmadı.")}</p>
-          <button onClick={mailDomainOlustur} disabled={isleniyor}
-            className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-60">
+          <Button onClick={mailDomainOlustur} yukleniyor={isleniyor} color="primary"
+            className="text-sm px-4 py-2">
             {isleniyor ? cevir("Kuruluyor…") : cevir("Mail Servisini Kur")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -341,10 +339,11 @@ export default function DomainMailKutularPage() {
                 <div className="flex items-center gap-1.5">
                   <input type="text" value={yeniParola} onChange={e => setYeniParola(e.target.value)} required minLength={6} placeholder={cevir("parola veya üret →")}
                     className="w-full min-w-0 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
-                  <button type="button" onClick={() => setYeniParola(guicluParola())} title={cevir("Güçlü parola üret")}
-                    className="shrink-0 inline-flex items-center gap-1 text-xs font-medium px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:border-slate-300 dark:hover:bg-dark-600/60 transition-colors">
+                  <Button type="button" onClick={() => setYeniParola(guicluParola())} title={cevir("Güçlü parola üret")}
+                    variant="outlined"
+                    className="shrink-0 gap-1 text-xs px-2.5 py-2">
                     <Ikon.anahtar className="w-3.5 h-3.5" />{cevir("Üret")}
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div className="w-28">
@@ -352,8 +351,8 @@ export default function DomainMailKutularPage() {
                 <input type="number" min={0} value={yeniQuota} onChange={e => setYeniQuota(+e.target.value)}
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
-              <button type="submit" disabled={isleniyor}
-                className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2 rounded-lg disabled:opacity-60 transition-colors">{cevir("Ekle")}</button>
+              <Button type="submit" disabled={isleniyor} color="primary"
+                className="text-sm px-5 py-2">{cevir("Ekle")}</Button>
             </div>
           </form>
 
@@ -394,7 +393,7 @@ export default function DomainMailKutularPage() {
                               ? <Ikon.onay className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                               : <Ikon.kopya className="w-3.5 h-3.5 shrink-0 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />}
                           </button>
-                          {!k.aktif && <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 uppercase">{cevir("Askıda")}</span>}
+                          {!k.aktif && <Badge color="warning" variant="soft" className="shrink-0 text-[10px] uppercase">{cevir("Askıda")}</Badge>}
                         </div>
                       </div>
                       {/* Kota barı — satırın ortasında */}
@@ -403,15 +402,18 @@ export default function DomainMailKutularPage() {
                       </div>
                       {/* Aksiyonlar */}
                       <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
-                        <button onClick={() => webmailGiris(k)} disabled={isleniyor || !k.aktif || !!webmailKapali} title={webmailKapali ? cevir("Webmail kullanılamıyor:") + ' ' + webmailKapali : k.aktif ? cevir("Webmail'e tek tıkla giriş") : cevir("Askıdaki kutuya giriş yapılamaz")} className={btnPri}>
+                        <Button onClick={() => webmailGiris(k)} disabled={isleniyor || !k.aktif || !!webmailKapali} title={webmailKapali ? cevir("Webmail kullanılamıyor:") + ' ' + webmailKapali : k.aktif ? cevir("Webmail'e tek tıkla giriş") : cevir("Askıdaki kutuya giriş yapılamaz")}
+                          color="primary" className="gap-2 text-sm px-4 py-2.5">
                           <Ikon.giris className="w-4 h-4" />{cevir("Giriş")}
-                        </button>
-                        <button onClick={() => parolaUret(k)} disabled={isleniyor} title={cevir("Yeni güçlü parola üret (şifre sıfırla)")} className={btnSec}>
+                        </Button>
+                        <Button onClick={() => parolaUret(k)} disabled={isleniyor} title={cevir("Yeni güçlü parola üret (şifre sıfırla)")}
+                          variant="outlined" className="gap-2 text-sm px-4 py-2.5">
                           <Ikon.anahtar className="w-4 h-4" />{cevir("Şifre sıfırla")}
-                        </button>
-                        <button onClick={() => navigate(`/abonelikler/${id}/mail/kutular/${k.id}`)} title={cevir("Kutu detayları: oto-yanıt, iletim, taşıma, entegrasyon, içe/dışa aktar")} className={btnSec}>
+                        </Button>
+                        <Button onClick={() => navigate(`/abonelikler/${id}/mail/kutular/${k.id}`)} title={cevir("Kutu detayları: oto-yanıt, iletim, taşıma, entegrasyon, içe/dışa aktar")}
+                          variant="outlined" className="gap-2 text-sm px-4 py-2.5">
                           <Ikon.ayar className="w-4 h-4" />{cevir("Detaylar")}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </li>
@@ -435,14 +437,14 @@ export default function DomainMailKutularPage() {
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 font-mono text-sm bg-slate-100 dark:bg-dark-800 rounded-lg px-3 py-2.5 break-all select-all text-slate-800 dark:text-slate-100">{uretilen.parola}</code>
-              <button
+              <Button
                 onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }}
-                className="shrink-0 text-xs font-medium px-3 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                color="primary" className="shrink-0 text-xs px-3 py-2.5">
                 {kopyalandi ? '✓ ' + cevir("Kopyalandı") : cevir("Kopyala")}
-              </button>
+              </Button>
             </div>
-            <button onClick={() => setUretilen(null)}
-              className="mt-4 w-full text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600 transition-colors">{cevir("Kapat")}</button>
+            <Button onClick={() => setUretilen(null)}
+              variant="outlined" className="mt-4 w-full text-sm px-4 py-2">{cevir("Kapat")}</Button>
           </div>
         </div>
       )}

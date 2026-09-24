@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/DomainList'
 import { useDialog } from '@/components/Dialog'
@@ -57,8 +58,8 @@ export default function DomainMailAliasPage() {
   const [domain, setDomain] = useState<Domain | null>(null)
   const [mailDomain, setMailDomain] = useState<MailDomain | null | undefined>(undefined)
   const [aliaslar, setAliaslar] = useState<Alias[] | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
-  const [bildirim, setBildirim] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBildirim] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
 
   // Form
@@ -172,8 +173,8 @@ export default function DomainMailAliasPage() {
                 <input type="email" value={hedef} onChange={e => setHedef(e.target.value)} required placeholder={cevir("hedef@ornek.com")}
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
-              <button type="submit" disabled={isleniyor}
-                className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2 rounded-lg disabled:opacity-60 transition-colors">{cevir("Ekle")}</button>
+              <Button type="submit" disabled={isleniyor} color="primary"
+                className="text-sm px-5 py-2">{cevir("Ekle")}</Button>
             </div>
             <label className="mt-3 inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
               <input type="checkbox" checked={catchall} onChange={e => setCatchall(e.target.checked)} disabled={catchallVar && !catchall}
@@ -197,12 +198,12 @@ export default function DomainMailAliasPage() {
                   return (
                     <li key={a.id} className="px-5 py-3.5 flex items-center gap-3 flex-wrap hover:bg-slate-50/70 dark:hover:bg-dark-600/20 transition-colors">
                       <span className="font-mono text-sm text-slate-800 dark:text-slate-200">
-                        {isCatch ? <span className="inline-flex items-center gap-1.5">{a.kaynak}<span className="text-[10px] font-sans font-medium px-1.5 py-0.5 rounded bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300 uppercase">Catch-all</span></span> : a.kaynak}
+                        {isCatch ? <span className="inline-flex items-center gap-1.5">{a.kaynak}<Badge color="primary" variant="soft" className="text-[10px] font-sans px-1.5 py-0.5 uppercase">Catch-all</Badge></span> : a.kaynak}
                       </span>
                       <span className="text-slate-400">→</span>
                       <span className="font-mono text-sm text-slate-600 dark:text-slate-300">{a.hedef}</span>
-                      <button onClick={() => sil(a)} disabled={isleniyor}
-                        className="ml-auto text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-800/70 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors">{cevir("Sil")}</button>
+                      <Button onClick={() => sil(a)} disabled={isleniyor} color="error" variant="soft"
+                        className="ml-auto text-xs px-2.5 py-1.5">{cevir("Sil")}</Button>
                     </li>
                   )
                 })}

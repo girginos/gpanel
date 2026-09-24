@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import type { Domain } from '@/components/DomainList'
@@ -25,11 +26,12 @@ type Baglanti = {
   webmail: string; autoconfig: string; autodiscover: string; kullanici_adi: string
 }
 
-const DURUM_RENK: Record<string, string> = {
-  ok: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
-  uyari: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
-  hata: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-  bilgi: 'bg-slate-100 dark:bg-dark-600/50 text-slate-600 dark:text-slate-300',
+// Kontrol durumu → Tailux Badge rengi.
+const DURUM_RENK: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
+  ok: 'success',
+  uyari: 'warning',
+  hata: 'error',
+  bilgi: 'neutral',
 }
 const GENEL: Record<string, { renk: string; etiket: string }> = {
   saglikli: { renk: 'text-emerald-600 dark:text-emerald-400', etiket: 'Sağlıklı' },
@@ -86,7 +88,7 @@ export default function DomainMailAyarlarPage() {
   const [baglanti, setBaglanti] = useState<Baglanti | null>(null)
   const [monitor, setMonitor] = useState<Monitor | null>(null)
   const [analizEdiliyor, setAnalizEdiliyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
 
   useEffect(() => {
     let iptal = false
@@ -140,16 +142,15 @@ export default function DomainMailAyarlarPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Mail Sunucu Sağlığı")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">{cevir("Servisler, portlar, DNS, TLS, DKIM, itibar, kara liste, teslimat — hepsini kontrol eder.")}</p>
           </div>
-          <button
+          <Button
             onClick={analizEt}
-            disabled={analizEdiliyor}
-            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-60 transition">
-            {analizEdiliyor ? (
-              <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>{cevir("Analiz ediliyor…")}</>
-            ) : (
+            yukleniyor={analizEdiliyor}
+            color="primary"
+            className="gap-2 text-sm px-4 py-2">
+            {analizEdiliyor ? cevir("Analiz ediliyor…") : (
               <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>{cevir("Analiz Et")}</>
             )}
-          </button>
+          </Button>
         </div>
 
         {!monitor && !analizEdiliyor && (
@@ -164,10 +165,10 @@ export default function DomainMailAyarlarPage() {
             <div className="flex items-center gap-4 mb-4 flex-wrap">
               <div className={`text-lg font-bold ${g?.renk}`}>● {g ? cevir(g.etiket) : ''}</div>
               <div className="flex items-center gap-2 text-xs">
-                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.ok}`}>{monitor.ozet.ok} OK</span>
-                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.uyari}`}>{monitor.ozet.uyari} {cevir("Uyarı")}</span>
-                <span className={`px-2 py-0.5 rounded ${DURUM_RENK.hata}`}>{monitor.ozet.hata} {cevir("Hata")}</span>
-                {!!monitor.ozet.bilgi && <span className={`px-2 py-0.5 rounded ${DURUM_RENK.bilgi}`}>{monitor.ozet.bilgi} {cevir("Bilgi")}</span>}
+                <Badge variant="soft" color={DURUM_RENK.ok}>{monitor.ozet.ok} OK</Badge>
+                <Badge variant="soft" color={DURUM_RENK.uyari}>{monitor.ozet.uyari} {cevir("Uyarı")}</Badge>
+                <Badge variant="soft" color={DURUM_RENK.hata}>{monitor.ozet.hata} {cevir("Hata")}</Badge>
+                {!!monitor.ozet.bilgi && <Badge variant="soft" color={DURUM_RENK.bilgi}>{monitor.ozet.bilgi} {cevir("Bilgi")}</Badge>}
               </div>
               <span className="text-xs text-slate-400 ml-auto">IP {monitor.ip} · {monitor.olusturma}</span>
             </div>
@@ -178,7 +179,7 @@ export default function DomainMailAyarlarPage() {
                   <ul className="space-y-1.5">
                     {kat.kontroller.map((k, i) => (
                       <li key={i} className="flex items-start gap-2 text-sm">
-                        <span className={`shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${DURUM_RENK[k.durum]}`}>{k.durum}</span>
+                        <Badge variant="soft" color={DURUM_RENK[k.durum] ?? 'neutral'} className="shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 uppercase">{k.durum}</Badge>
                         <span className="min-w-0">
                           <span className="text-slate-800 dark:text-slate-200 font-medium">{k.ad}</span>
                           <span className="text-slate-500 dark:text-slate-400"> — {k.mesaj}</span>
@@ -208,9 +209,9 @@ export default function DomainMailAyarlarPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6m-9 6V4" /></svg>
               {cevir("Webmail'i Aç")}
             </a>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 text-xs">
+            <Badge variant="soft" color="info" className="gap-1.5 px-3 py-1.5 rounded-lg leading-snug text-left">
               {cevir("✓ Outlook & Thunderbird otomatik kurulum aktif — istemciye sadece e-posta + parola girin")}
-            </span>
+            </Badge>
           </div>
         </section>
       )}
@@ -250,7 +251,7 @@ function DnsKayitlariKart({ domain }: { domain: string }) {
             {kayitlar.map((r, i) => (
               <tr key={i} className="align-top">
                 <td className="py-2.5 pr-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.ad}</td>
-                <td className="py-2.5 pr-3"><span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{r.tip}</span></td>
+                <td className="py-2.5 pr-3"><Badge variant="soft" className="text-[11px] px-1.5 py-0.5">{r.tip}</Badge></td>
                 <td className="py-2.5">
                   <button onClick={() => { navigator.clipboard?.writeText(r.deger); setKopyalanan(r.deger); setTimeout(() => setKopyalanan(null), 1500) }}
                     title={cevir("Kopyalamak için tıklayın")}

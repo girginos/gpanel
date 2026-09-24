@@ -8,6 +8,7 @@ import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
+import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
@@ -185,16 +186,17 @@ export default function DomainCronPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button
+        <Button
           onClick={() => setModalGorev('yeni')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 text-sm font-medium rounded-md shadow-xs transition"
+          color="primary"
+          className="gap-1.5 px-3.5 py-2 text-sm"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
           {cevir("Görev Ekle")}
-        </button>
-        <button onClick={yukle} className="px-3 py-2 bg-white dark:bg-dark-700 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 text-sm rounded-md transition"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></button>
+        </Button>
+        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{gorevler.length} {cevir("görev")}</span>
       </div>
 
@@ -228,16 +230,16 @@ export default function DomainCronPage() {
                   </td>
                   <td className={T.hucreBaslik}>
                     <div className="flex items-center gap-2">
-                      {!g.etkin && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-dark-600 text-slate-600 dark:text-slate-300">{cevir("Pasif")}</span>}
-                      {g.tip && g.tip !== 'komut' && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">{g.tip === 'php' ? `PHP ${g.php_surum || ''}` : g.tip}</span>}
+                      {!g.etkin && <Badge variant="soft" className="text-[10px] uppercase px-1.5 py-0.5">{cevir("Pasif")}</Badge>}
+                      {g.tip && g.tip !== 'komut' && <Badge color="primary" variant="soft" className="text-[10px] uppercase px-1.5 py-0.5">{g.tip === 'php' ? `PHP ${g.php_surum || ''}` : g.tip}</Badge>}
                       <span className="font-mono text-slate-800 dark:text-slate-200 break-all lg:break-normal lg:truncate lg:max-w-md" title={g.komut}>{g.komut}</span>
                     </div>
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
                   <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                    <button onClick={() => calistir(g)} disabled={calisan === g.idx} className="text-sm text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition disabled:opacity-50" title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? cevir("Çalışıyor…") : cevir("Çalıştır")}</button>
-                    <button onClick={() => setModalGorev(g)} className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 px-2 py-1 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 transition">{cevir("Düzenle")}</button>
-                    <button onClick={() => sil(g)} className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:text-red-300 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 transition">{cevir("Sil")}</button>
+                    <Button onClick={() => calistir(g)} yukleniyor={calisan === g.idx} color="success" variant="flat" className="px-2.5 py-1.5 text-sm" title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? cevir("Çalışıyor…") : cevir("Çalıştır")}</Button>
+                    <Button onClick={() => setModalGorev(g)} color="primary" variant="flat" className="px-2.5 py-1.5 text-sm">{cevir("Düzenle")}</Button>
+                    <Button onClick={() => sil(g)} color="error" variant="soft" className="px-2.5 py-1.5 text-sm">{cevir("Sil")}</Button>
                   </td>
                 </tr>
               ))}
@@ -390,10 +392,11 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Zamanlama")}</label>
           <div className="flex flex-wrap gap-1.5 mb-2">
             {ON_AYARLAR.map(p => (
-              <button key={p.etiket} type="button" onClick={() => uygulaPreset(p.secim)}
-                className="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-dark-600/60 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-brand-100 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 hover:border-brand-300 dark:hover:border-brand-700 rounded-md transition">
+              <Button key={p.etiket} type="button" onClick={() => uygulaPreset(p.secim)}
+                variant="outlined"
+                className="px-2.5 py-1 text-xs rounded-md">
                 {cevir(p.etiket)}
-              </button>
+              </Button>
             ))}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -427,10 +430,10 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onKapat} disabled={isleniyor} className="px-4 py-2 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 rounded-md text-sm">{cevir("İptal")}</button>
-          <button type="submit" disabled={isleniyor} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+          <Button type="button" onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
+          <Button type="submit" yukleniyor={isleniyor} color="primary" className="px-4 py-2 text-sm">
             {isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Kaydet"))}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
