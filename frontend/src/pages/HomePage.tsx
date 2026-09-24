@@ -4,17 +4,18 @@ import '@/dashboard.css'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useRef, useState, type ElementType } from 'react'
+import { useEffect, useRef, useState, type ElementType, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import { useMarka } from '@/lib/marka'
 import BayiOzet from '@/components/BayiOzet'
 import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, Box, CheckCircle2, Cloud, Cpu,
-  Database, Globe, HardDrive, MemoryStick, Network, Plus, RefreshCw, Server, ShieldCheck, Users, Zap,
+  HardDrive, MemoryStick, Network, Server, ShieldCheck,
 } from 'lucide-react'
 
 // ── Tipler ──
@@ -45,9 +46,7 @@ const H_EN: Record<string, string> = {
   'Mükemmel': 'Excellent', 'İyi': 'Good', 'Dikkat': 'Attention', 'Kritik': 'Critical',
   'Disk Durumu': 'Disk Status', 'Sağlıklı': 'Healthy', 'Ağ Bağlantısı': 'Network', 'İzolasyon': 'Isolation',
   'Sağlam': 'Intact', 'Çalışma Süresi': 'Uptime', 'Gerçek Zamanlı Trafik': 'Real-Time Traffic',
-  'Gelen Trafik': 'Incoming', 'Giden Trafik': 'Outgoing', 'Hızlı İşlemler': 'Quick Actions',
-  'Yedekleme': 'Backup', 'DNS Şablonu': 'DNS Template', 'Bayiler': 'Resellers', 'Eklentiler': 'Plugins',
-  'Optimize': 'Optimize', 'Bildirimler': 'Notifications', 'Tümü': 'All', 'Bildirim yok': 'No notifications',
+  'Gelen Trafik': 'Incoming', 'Giden Trafik': 'Outgoing', 'Bildirimler': 'Notifications', 'Tümü': 'All', 'Bildirim yok': 'No notifications',
   'Depolama Kullanımı': 'Storage Usage', 'Kullanılan': 'Used', 'Yedekler': 'Backups',
   'Diğer kullanım': 'Other usage', 'Boş alan': 'Free space', 'Depolama yönetimine git': 'Go to storage management',
   'Host dizini': 'Host directory', 'SQL dizini': 'SQL directory', 'Yedek dizini': 'Backup directory',
@@ -159,7 +158,9 @@ function Card({ title, icon: Icon, action, onAction, children }:
     <section className="card">
       <div className="card-head">
         <div className="card-title">{Icon && <Icon size={17} />}<span>{title}</span></div>
-        {action && <button className="ghost-button" onClick={onAction}>{action}</button>}
+        {action && (onAction
+          ? <Button color="primary" variant="flat" boyut="sm" ikonSonda={I.ileri} onClick={onAction}>{action}</Button>
+          : <span className="ghost-button">{action}</span>)}
       </div>
       {children}
     </section>
@@ -314,36 +315,33 @@ export default function HomePage() {
     return { t: `${Math.abs(d)}%`, down: d < 0 }
   }
   const tCpu = trend('cpu'), tMem = trend('bellek'), tDsk = trend('disk')
-  const trafTrend = (k: 'gelen' | 'giden') => {
+  const trafTrend = (k: 'gelen' | 'giden'): ReactNode => {
     if (gercek.current < 3) return '—'
     const g = trafikBuf.slice(-gercek.current)
     const a = g[0][k] || 1, b = g[g.length - 1][k]
-    return `${b >= a ? '↗' : '↘'} ${Math.abs(((b - a) / a) * 100).toFixed(1)}%`
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <Ikon d={b >= a ? I.yukari : I.asagi} className="size-3 shrink-0" />
+        {Math.abs(((b - a) / a) * 100).toFixed(1)}%
+      </span>
+    )
   }
 
-  const eylemler: [ElementType, string, string][] = [
-    [Globe, cevir('Domain Ekle'), '/domainler?yeni=1'],
-    [Database, cevir('Yedekleme'), '/backup-yonetimi'],
-    [Network, cevir('DNS Şablonu'), '/araclar/dns-sablonu'],
-    [Users, cevir('Bayiler'), '/bayiler'],
-    [Box, cevir('Eklentiler'), '/eklentiler'],
-    [Zap, cevir('Optimize'), '/araclar/optimize'],
-  ]
   const bIkon = (sev: string) => sev === 'kritik' ? { I: AlertTriangle, c: 'sev-kritik' } : sev === 'uyari' ? { I: AlertTriangle, c: 'sev-uyari' } : { I: Cloud, c: '' }
   const ad = (kullanici?.ad_soyad || kullanici?.adi || '').trim()
 
   return (
-    <div className="gp-dash">
+    // Pano her temada koyu bir ada: kökteki `dark` sınıfı Tailux butonlarının koyu
+    // varyantını açık temada da seçtirir (başlık, kart başlığı — koyu zeminde okunur).
+    <div className="gp-dash dark">
       <div className="page-title">
         <div>
           <h1>{selamla()}{ad ? `, ${ad}` : ''}</h1>
           <p>{s ? `${s.sistem.hostname} · ${fmtUptime(s.uptime_sn)}` : cevir('Altyapınızın genel durumunu ve kaynaklarını yönetin.')}</p>
         </div>
-        {/* Pano her temada koyu bir ada: `dark` sınıfı Tailux butonlarının koyu
-            varyantını açık temada da seçtirir (koyu zeminde okunur). */}
-        <div className="title-actions dark">
-          <Button variant="outlined" onClick={yenile} className="gap-1.5 px-3 py-2 text-[13px]"><RefreshCw size={14} /> {cevir('Yenile')}</Button>
-          <Button color="primary" onClick={() => navigate('/domainler?yeni=1')} className="gap-1.5 px-3.5 py-2 text-[13px] font-semibold"><Plus size={16} /> {cevir('Domain Ekle')}</Button>
+        <div className="title-actions">
+          <Button variant="outlined" ikon={I.yenile} onClick={yenile}>{cevir('Yenile')}</Button>
+          <Button color="primary" ikon={I.arti} onClick={() => navigate('/domainler?yeni=1')}>{cevir('Domain Ekle')}</Button>
         </div>
       </div>
 
@@ -507,7 +505,7 @@ export default function HomePage() {
             <span className="depo-bos">
               <b>{fmtByte(Math.max(0, diskTop - diskKul))}</b> {cevir('boş')} · {fmtByte(diskTop)} {cevir('toplam')}
             </span>
-            <button onClick={() => navigate('/backup-yonetimi')}>{cevir('Depolama yönetimine git')} →</button>
+            <button type="button" className="inline-flex items-center gap-1" onClick={() => navigate('/backup-yonetimi')}>{cevir('Depolama yönetimine git')}<Ikon d={I.ileri} className="size-3.5 shrink-0" /></button>
           </div>
         </Card>
 

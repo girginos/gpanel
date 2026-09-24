@@ -20,6 +20,8 @@ interface Props {
 const CMP_EN: Record<string, string> = {
   "Türkçe": "English",
   "yükleniyor…": "loading…",
+  "Daralt": "Collapse",
+  "Genişlet": "Expand",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -100,7 +102,10 @@ function TreeNode({
       >
         {altVar ? (
           <button
+            type="button"
             onClick={chevronTikla}
+            aria-label={acik ? cevir("Daralt") : cevir("Genişlet")}
+            aria-expanded={acik}
             className="w-4 h-4 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300"
           >
             <svg

@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Alt alan web-sunucu ayarları — domain paritesi: backend (php-fpm/apache/static),
 // nginx fastcgi/browser cache, client_max_body, güvenlik başlıkları, ek direktifler.
@@ -38,6 +40,7 @@ const SWA_EN: Record<string, string> = {
   "FastCGI önbellek (dk)": "FastCGI cache (min)",
   "HSTS (yalnız SSL)": "HSTS (SSL only)",
   "Ek nginx direktifleri (server bağlamı)": "Extra nginx directives (server context)",
+  "Web sunucu ayarları kaydedildi ve vhost yeniden yazıldı.": "Web server settings saved and the vhost was rewritten.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SWA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -64,7 +67,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
     setKaydediliyor(true); setMesaj(null)
     try {
       await api.put(`/domains/${domainId}/subdomain/${sid}/web-sunucu`, { backend, nginx: n })
-      setMesaj({ t: 'ok', m: cevir("✓ Web sunucu ayarları kaydedildi ve vhost yeniden yazıldı.") })
+      setMesaj({ t: 'ok', m: cevir("Web sunucu ayarları kaydedildi ve vhost yeniden yazıldı.") })
     } catch (e) {
       setMesaj({ t: 'hata', m: apiHata(e) })
     } finally { setKaydediliyor(false) }
@@ -93,7 +96,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
       {acik && (
         <div className="mt-4 space-y-5">
           {mesaj && (
-            <div className={`text-sm px-3 py-2 rounded-md ${mesaj.t === 'ok' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>{mesaj.m}</div>
+            <UyariKutusu ton={mesaj.t === 'ok' ? 'basari' : 'tehlike'}>{mesaj.m}</UyariKutusu>
           )}
 
           <div>
@@ -150,8 +153,7 @@ export default function SubWebAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           <div className="flex justify-end">
-            <Button color="primary" onClick={kaydet} yukleniyor={kaydediliyor}
-              className="px-4 py-2 text-sm">
+            <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={kaydediliyor}>
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("Web sunucu ayarlarını kaydet")}
             </Button>
           </div>

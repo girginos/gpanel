@@ -19,6 +19,9 @@ import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
+import { I, Ikon } from '@/components/Ikon'
 
 // 🔴 TEK KAYNAK. Önceki sürümde geri yükleme, elle yazılmış bir `v === '...'`
 // zinciriyle doğruluyordu ve yeni sekme eklenince ORAYA yazmak unutuldu:
@@ -76,8 +79,8 @@ const SUBD2_EN: Record<string, string> = {
   "host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.": "is a host-level application, cannot be installed from the tenant panel.",
   "yakında": "coming soon",
   "Önizleme yalnızca HTTPS sitelerde gösterilir": "Preview is shown only on HTTPS sites",
-  "✓ Askı kaldırıldı — site tekrar erişilebilir.": "✓ Suspension lifted — the site is accessible again.",
-  "✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.": "✓ Account suspended — the site now returns a 503 maintenance page.",
+  "Askı kaldırıldı — site tekrar erişilebilir.": "Suspension lifted — the site is accessible again.",
+  "Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.": "Account suspended — the site now returns a 503 maintenance page.",
   "Onay gerekiyor": "Confirmation required",
   "\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?": "\"{0}\" will be suspended — the site will become inaccessible (503). Continue?",
   "Anasayfa": "Home",
@@ -99,7 +102,7 @@ const SUBD2_EN: Record<string, string> = {
   "Öne Çıkan": "Featured",
   "Kurulu Uygulamalar ({0})": "Installed Applications ({0})",
   "Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç.": "No applications installed yet. Choose from the catalog below.",
-  "Yönetim Paneli →": "Admin Panel →",
+  "Yönetim Paneli": "Admin Panel",
   "Katalog ({0})": "Catalog ({0})",
   "Admin'den kurulur": "Installed from Admin",
   "Kur": "Install",
@@ -177,11 +180,11 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi) }))) return
+    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
-      const iyi = askiyaAl ? cevir("✓ Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("✓ Askı kaldırıldı — site tekrar erişilebilir.")
+      const iyi = askiyaAl ? cevir("Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("Askı kaldırıldı — site tekrar erişilebilir.")
       setBildirim(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBildirim(null), 6000)
@@ -197,7 +200,7 @@ export default function SubscriptionDetailPage() {
   if (hata && !domain) return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: cevir("Hata") }]} />
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4 text-sm text-red-700 dark:text-red-300">{hata}</div>
+      <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
     </div>
   )
 
@@ -260,16 +263,17 @@ export default function SubscriptionDetailPage() {
               <div className="fixed inset-0 z-10" onClick={() => setMenuAcik(false)} />
               <div className="absolute right-0 mt-1 z-20 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg py-1 text-sm">
                 <button
+                  type="button"
                   onClick={askiToggle}
                   className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-dark-600/60 ${domain.askida ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
                   {domain.askida ? (
                     <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
+                      <Ikon d={I.kilitAcik} className="w-4 h-4 shrink-0" />
                       {cevir("Askıdan Al (Geri Getir)")}
                     </>
                   ) : (
                     <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6M9 3h6a2 2 0 012 2v0H7v0a2 2 0 012-2z" /></svg>
+                      <Ikon d={I.kilit} className="w-4 h-4 shrink-0" />
                       {cevir("Hesabı Askıya Al")}
                     </>
                   )}
@@ -305,11 +309,7 @@ export default function SubscriptionDetailPage() {
           <Card className="bg-white dark:bg-dark-700 p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("İstatistikler")}</h3>
-              <Button variant="flat" isIcon className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </Button>
+              <Button variant="flat" isIcon ikon={I.yenile} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")} />
             </div>
             <div className="space-y-2.5 text-sm">
               <Stat e={cevir("Disk alanı")}    d={diskMB != null ? `${diskMB} MB` : '…'} />
@@ -379,7 +379,7 @@ function WebSitePreview({ alanAdi, ssl }: { alanAdi: string; ssl: boolean }) {
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-            <svg className="w-9 h-9 text-white/40 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+            <Ikon d={I.gozKapali} className="w-9 h-9 text-white/40 mb-2" />
             <div className="text-[11px] text-white/60">{cevir("Önizleme yalnızca HTTPS sitelerde gösterilir")}</div>
             <div className="text-[10px] text-white/40 mt-0.5">{cevir("SSL etkinleştirilince otomatik görünür")}</div>
           </div>
@@ -390,11 +390,9 @@ function WebSitePreview({ alanAdi, ssl }: { alanAdi: string; ssl: boolean }) {
             <div className="text-xs font-semibold text-white truncate">{alanAdi}</div>
           </div>
           <a href={url} target="_blank" rel="noreferrer"
-            className={butonSinifi({ className: 'shrink-0 gap-1 px-2 py-1 text-[11px] rounded-md' })}>
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
+            className={butonSinifi({ boyut: 'sm', className: 'shrink-0' })}>
             {cevir("Aç")}
+            <Ikon d={I.harici} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
           </a>
         </div>
       </div>
@@ -504,6 +502,7 @@ function AppTab({ domain }: { domain: Domain }) {
   const [gonderiliyor, setGonderiliyor] = React.useState(false)
   const [hata, setHata] = React.useState<string | null>(null)
   const toast = useToast()
+  const dialog = useDialog()
 
   const yukle = async () => {
     setYukleniyor(true); setHata(null)
@@ -539,11 +538,11 @@ function AppTab({ domain }: { domain: Domain }) {
     } finally { setGonderiliyor(false) }
   }
   const sil = async (kayitID: number, ad: string) => {
-    if (!confirm(cevirT(cevir("{0} silinsin mi? Dosyalar + DB kaybolur."), ad))) return
+    if (!(await dialog.onay({ baslik: cevirT(cevir("{0} silinsin mi? Dosyalar + DB kaybolur."), ad), onayEtiketi: cevir("Sil"), ton: 'tehlike', onayIkonu: I.cop }))) return
     try {
       await api.delete(`/domains/${domain.id}/uygulamalar/${kayitID}`)
       await yukle()
-    } catch (e: any) { alert(e?.response?.data?.error || cevir("Silinemedi")) }
+    } catch (e: any) { await dialog.bilgi({ baslik: e?.response?.data?.error || cevir("Silinemedi"), ton: 'tehlike' }) }
   }
 
   if (yukleniyor) return <div className="py-8 text-center text-slate-500">{cevir("Yükleniyor…")}</div>
@@ -577,11 +576,11 @@ function AppTab({ domain }: { domain: Domain }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <a href={u.yonetim_url} target="_blank" rel="noreferrer"
-                    className={butonSinifi({ color: 'primary', className: 'text-xs px-3 py-1.5' })}>
-                    {cevir("Yönetim Paneli →")}
+                    className={butonSinifi({ color: 'primary', boyut: 'sm' })}>
+                    {cevir("Yönetim Paneli")}
+                    <Ikon d={I.harici} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
                   </a>
-                  <Button color="error" variant="soft" onClick={() => sil(u.id, u.ad)}
-                    className="text-xs px-2.5 py-1.5">{cevir("Sil")}</Button>
+                  <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(u.id, u.ad)}>{cevir("Sil")}</Button>
                 </div>
               </Card>
             ))}
@@ -614,11 +613,13 @@ function AppTab({ domain }: { domain: Domain }) {
               <p className="text-xs text-slate-600 mb-3">{t.Aciklama}</p>
               <Button
                 color="primary"
+                boyut="sm"
+                ikon={t.NativeApp ? I.kilit : I.oynat}
                 onClick={() => t.NativeApp
-                  ? alert(t.Ad + ' ' + cevir("host seviyesinde bir uygulamadır, tenant panelinden kurulamaz."))
+                  ? void dialog.bilgi({ baslik: t.Ad + ' ' + cevir("host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.") })
                   : setKurTaslak({kod: t.Kod, ad: t.Ad, ikon: t.Ikon, alt_dizin: t.Kod})}
                 disabled={t.NativeApp}
-                className="w-full text-xs py-1.5">
+                className="w-full">
                 {t.NativeApp ? cevir("Admin'den kurulur") : cevir("Kur")}
               </Button>
             </Card>
@@ -626,29 +627,26 @@ function AppTab({ domain }: { domain: Domain }) {
         </div>
       </section>
 
-      {kurTaslak && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setKurTaslak(null) }}>
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-dark-800 p-5 shadow-xl">
-            <h3 className="text-lg font-semibold mb-4">{kurTaslak.ikon} {kurTaslak.ad} {cevir("Kur")}</h3>
+      <Modal acik={!!kurTaslak} baslik={kurTaslak ? `${kurTaslak.ikon} ${kurTaslak.ad} ${cevir("Kur")}` : ''}
+        onKapat={() => setKurTaslak(null)} kapatilamaz={gonderiliyor}
+        alt={<>
+          <Button variant="outlined" ikon={I.kapat} onClick={() => setKurTaslak(null)} disabled={gonderiliyor}>{cevir("Vazgeç")}</Button>
+          <Button color="primary" ikon={I.oynat} onClick={kur} yukleniyor={gonderiliyor}>
+            {gonderiliyor ? cevir("Kuruluyor…") : cevir("Kur")}
+          </Button>
+        </>}>
+        {kurTaslak && (
+          <>
             <label className="block text-xs font-medium text-slate-600 mb-1">{cevir("Alt dizin (public_html/... altına)")}</label>
             <input value={kurTaslak.alt_dizin} onChange={(e) => setKurTaslak({...kurTaslak, alt_dizin: e.target.value})}
               placeholder={cevir("boş = kök, blog, shop vb.")}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-dark-900 dark:border-dark-600" />
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-slate-500">
               {cevir("Site:")} <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
             </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="flat" onClick={() => setKurTaslak(null)}
-                className="px-3 py-1.5 text-sm">{cevir("Vazgeç")}</Button>
-              <Button color="primary" onClick={kur} yukleniyor={gonderiliyor}
-                className="px-3 py-1.5 text-sm">
-                {gonderiliyor ? cevir("Kuruluyor…") : cevir("Kur")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   )
 }

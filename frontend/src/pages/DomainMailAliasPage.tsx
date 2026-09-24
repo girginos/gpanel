@@ -10,6 +10,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { I, Ikon } from '@/components/Ikon'
 
 type MailDomain = { id: number; ad: string; kutu_sayisi: number }
 type Alias = { id: number; domain_id: number; kaynak: string; hedef: string }
@@ -27,10 +28,10 @@ const MAILALIAS_EN: Record<string, string> = {
   "Takma adlar alınamadı": "Failed to get aliases",
   "Yeni Yönlendirme": "New Forwarding",
   "Yönlendirmeler": "Forwardings",
-  "✓ Yönlendirme silindi.": "✓ Forwarding deleted.",
+  "Yönlendirme silindi.": "Forwarding deleted.",
   "Türkçe": "English",
   "Domain yüklenemedi": "Failed to load domain",
-  "✓ {0} → {1} eklendi.": "✓ {0} → {1} added.",
+  "{0} → {1} eklendi.": "{0} → {1} added.",
   "Takma ad eklenemedi": "Failed to add alias",
   "Emin misiniz?": "Are you sure?",
   "\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?": "The forwarding \"{0} → {1}\" will be deleted. Are you sure?",
@@ -102,7 +103,7 @@ export default function DomainMailAliasPage() {
     setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post('/eklenti/mail/aliaslar', { domain_id: mailDomain.id, kaynak: src, hedef: hedef.trim().toLowerCase() })
-      const m = cevirT(cevir("✓ {0} → {1} eklendi."), src, hedef)
+      const m = cevirT(cevir("{0} → {1} eklendi."), src, hedef)
       setBildirim(m)
       toast.basari(cevir("Kaydedildi"), m)
       setKaynak(''); setHedef(''); setCatchall(false)
@@ -112,12 +113,12 @@ export default function DomainMailAliasPage() {
   }
 
   async function sil(a: Alias) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?"), a.kaynak, a.hedef), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0} → {1}\" yönlendirmesi silinecek. Emin misiniz?"), a.kaynak, a.hedef), ton: 'tehlike', onayIkonu: I.cop }))) return
     setIsleniyor(true); setHata(null)
     try {
       await api.delete(`/eklenti/mail/aliaslar/${a.id}`)
-      setBildirim(cevir("✓ Yönlendirme silindi."))
-      toast.basari(cevir("✓ Yönlendirme silindi."))
+      setBildirim(cevir("Yönlendirme silindi."))
+      toast.basari(cevir("Yönlendirme silindi."))
       if (mailDomain) yukle(mailDomain.id)
     } catch (e) { const m = apiHata(e, cevir("Silinemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
     finally { setIsleniyor(false) }
@@ -167,14 +168,13 @@ export default function DomainMailAliasPage() {
                   </div>
                 )}
               </div>
-              <div className="text-slate-400 pb-2 hidden sm:block">→</div>
+              <div className="text-slate-400 pb-2.5 hidden sm:block"><Ikon d={I.ileri} className="size-4" /></div>
               <div className="flex-1 min-w-[220px]">
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">{cevir("Hedef adres (nereye gitsin)")}</label>
                 <input type="email" value={hedef} onChange={e => setHedef(e.target.value)} required placeholder={cevir("hedef@ornek.com")}
                   className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400" />
               </div>
-              <Button type="submit" disabled={isleniyor} color="primary"
-                className="text-sm px-5 py-2">{cevir("Ekle")}</Button>
+              <Button type="submit" disabled={isleniyor} color="primary" ikon={I.arti}>{cevir("Ekle")}</Button>
             </div>
             <label className="mt-3 inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
               <input type="checkbox" checked={catchall} onChange={e => setCatchall(e.target.checked)} disabled={catchallVar && !catchall}
@@ -200,10 +200,10 @@ export default function DomainMailAliasPage() {
                       <span className="font-mono text-sm text-slate-800 dark:text-slate-200">
                         {isCatch ? <span className="inline-flex items-center gap-1.5">{a.kaynak}<Badge color="primary" variant="soft" className="text-[10px] font-sans px-1.5 py-0.5 uppercase">Catch-all</Badge></span> : a.kaynak}
                       </span>
-                      <span className="text-slate-400">→</span>
+                      <span className="text-slate-400"><Ikon d={I.ileri} className="size-4" /></span>
                       <span className="font-mono text-sm text-slate-600 dark:text-slate-300">{a.hedef}</span>
-                      <Button onClick={() => sil(a)} disabled={isleniyor} color="error" variant="soft"
-                        className="ml-auto text-xs px-2.5 py-1.5">{cevir("Sil")}</Button>
+                      <Button onClick={() => sil(a)} disabled={isleniyor} color="error" variant="soft" boyut="sm" ikon={I.cop}
+                        className="ml-auto">{cevir("Sil")}</Button>
                     </li>
                   )
                 })}

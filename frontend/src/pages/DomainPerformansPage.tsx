@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
 type Oge = { ad: string; aktif: boolean; deger: string; ayar: string; aciklama: string }
 type Oneri = { metin: string; onem: string; ayar: string }
@@ -23,9 +24,10 @@ const DPERF_EN: Record<string, string> = {
   "Domainler": "Domains",
   "Performans": "Performance",
   "Performans Skoru": "Performance Score",
-  "Ayarla →": "Configure →",
+  "Ayarla": "Configure",
   "Öneriler": "Recommendations",
-  "Git →": "Go →",
+  "Git": "Go",
+  "Aboneliğe dön": "Back to subscription",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DPERF_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -53,7 +55,7 @@ export default function DomainPerformansPage() {
   const skorRenk = o.skor >= 80 ? 'emerald' : o.skor >= 60 ? 'amber' : 'rose'
   const skorHex: Record<string, string> = { emerald: '#10b981', amber: '#f59e0b', rose: '#f43f5e' }
   const git = (slug: string) => navigate(`/abonelikler/${id}/${slug}`)
-  const onemRenk: Record<string, string> = { yuksek: 'text-rose-500', orta: 'text-amber-500', bilgi: 'text-emerald-500' }
+  const onemRenk: Record<string, string> = { yuksek: 'bg-rose-500', orta: 'bg-amber-500', bilgi: 'bg-emerald-500' }
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
@@ -98,7 +100,7 @@ export default function DomainPerformansPage() {
                     </div>
                     <p className="text-[11px] text-slate-400 ml-4 truncate">{og.aciklama}</p>
                   </div>
-                  {og.ayar && <Button onClick={() => git(og.ayar)} color="primary" variant="flat" className="shrink-0 text-xs px-2 py-1">{cevir("Ayarla →")}</Button>}
+                  {og.ayar && <Button onClick={() => git(og.ayar)} color="primary" variant="flat" boyut="sm" ikonSonda={I.ileri} className="shrink-0">{cevir("Ayarla")}</Button>}
                 </div>
               ))}
             </div>
@@ -111,15 +113,15 @@ export default function DomainPerformansPage() {
           <ul className="space-y-2">
             {o.oneriler.map((n, i) => (
               <li key={i} className="flex items-start gap-2 text-sm">
-                <span className={`mt-0.5 ${onemRenk[n.onem] || 'text-slate-400'}`}>●</span>
+                <span className={`mt-1.5 inline-block size-2 shrink-0 rounded-full ${onemRenk[n.onem] || 'bg-slate-400'}`} aria-hidden />
                 <span className="text-slate-600 dark:text-slate-300 flex-1">{n.metin}</span>
-                {n.ayar && <Button onClick={() => git(n.ayar)} color="primary" variant="flat" className="shrink-0 text-xs px-2 py-1">{cevir("Git →")}</Button>}
+                {n.ayar && <Button onClick={() => git(n.ayar)} color="primary" variant="flat" boyut="sm" ikonSonda={I.ileri} className="shrink-0">{cevir("Git")}</Button>}
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="text-sm text-brand-600 dark:text-brand-400">{cevir("← Aboneliğe dön")}</Link></div>
+        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
       </div>
     </div>
   )

@@ -5,6 +5,9 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { useDialog } from '@/components/Dialog'
+import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Dashboard güvenlik-açığı (CVE) widget'ı.
 // Backend: GET /system/cve (cache'li dnf updateinfo özeti) · POST /system/cve/guncelle
@@ -210,13 +213,10 @@ export default function CveWidget() {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={yenidenTara}
-          disabled={taraniyor || guncelleniyor}
-          className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-dark-700 dark:hover:text-slate-200">
+        <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yenidenTara}
+          yukleniyor={taraniyor} disabled={guncelleniyor} className="shrink-0">
           {taraniyor ? cevir("Taranıyor…") : cevir("Yeniden tara")}
-        </button>
+        </Button>
       </div>
 
       {/* güncelleme her durumda üstte görünür (yükleme/temiz dahil) */}
@@ -237,41 +237,35 @@ export default function CveWidget() {
 
       {/* KernelCare aktif — çekirdek canlı yamalı */}
       {!kcCalisiyor && veri?.kernelcare?.aktif && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-700 dark:border-emerald-800/50 dark:bg-emerald-900/15 dark:text-emerald-300">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0"><path d={SHIELD} /><path d={CHECK} /></svg>
-          <span>
-            <strong>{cevir(cevir("Çekirdek canlı yamalı (KernelCare)."))}</strong> {cevir(cevir("Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı."))}
+        <UyariKutusu ton="basari" className="mb-3" baslik={cevir(cevir("Çekirdek canlı yamalı (KernelCare)."))}>
+          <span className="text-xs">
+            {cevir(cevir("Çekirdek güvenlik açıkları sunucu yeniden başlatılmadan kapatıldı."))}
             {veri.kernelcare.efektif_kernel ? <> {cevir(cevir("Efektif çekirdek:"))} <span className="font-mono">{veri.kernelcare.efektif_kernel}</span>.</> : null}
             {veri.kernelcare.yamali_cve?.length ? <> {veri.kernelcare.yamali_cve.length} {cevir("CVE canlı yamalı.")}</> : null}
           </span>
-        </div>
+        </UyariKutusu>
       )}
 
       {/* KernelCare kurulu ama lisans kayıtlı değil */}
       {!kcCalisiyor && veri?.kernelcare?.kurulu && !veri.kernelcare.kayitli && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
-          <span><strong>{cevir(cevir("KernelCare kurulu ancak lisans kayıtlı değil."))}</strong> {cevir(cevir("Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli."))}</span>
-        </div>
+        <UyariKutusu ton="uyari" className="mb-3" baslik={cevir(cevir("KernelCare kurulu ancak lisans kayıtlı değil."))}>
+          <span className="text-xs">{cevir(cevir("Rebootsuz çekirdek yaması için TuxCare lisans anahtarıyla kaydedilmeli."))}</span>
+        </UyariKutusu>
       )}
 
       {/* yeniden başlatma gerekli — yamalı çekirdek kurulu ama henüz etkin değil */}
       {!guncelleniyor && veri?.reboot_gerekli && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/15 dark:text-amber-300">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
-          <span>
-            <strong>{cevir("Yeniden başlatma gerekli.")}</strong> {cevir("Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor — aşağıdaki açıkların çoğu çekirdek kaynaklı ve")} <strong>{cevir("sunucu yeniden başlatılana kadar")}</strong> {cevir("açık görünür.")}
+        <UyariKutusu ton="uyari" className="mb-3" baslik={cevir("Yeniden başlatma gerekli.")}>
+          <span className="text-xs">
+            {cevir("Güvenlik yamalı yeni çekirdek kurulu ancak sistem hâlâ eski çekirdekle çalışıyor — aşağıdaki açıkların çoğu çekirdek kaynaklı ve")} <strong>{cevir("sunucu yeniden başlatılana kadar")}</strong> {cevir("açık görünür.")}
             {cevir("Bakım penceresinde reboot önerilir.")}
           </span>
-        </div>
+        </UyariKutusu>
       )}
 
       {/* gövde */}
       {hata ? (
-        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] text-red-700 dark:border-red-900/50 dark:bg-red-900/15 dark:text-red-300">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="mt-0.5 h-3.5 w-3.5 shrink-0"><path strokeLinecap="round" d="M12 9v3.75m0 3.75h.008M10.36 3.6 2.26 17.66A1.5 1.5 0 0 0 3.56 19.9h16.88a1.5 1.5 0 0 0 1.3-2.25L13.64 3.6a1.5 1.5 0 0 0-2.6 0Z" /></svg>
-          <span>{hata}</span>
-        </div>
+        <UyariKutusu ton="tehlike"><span className="text-xs">{hata}</span></UyariKutusu>
       ) : veri === null ? (
         <div className="flex items-center justify-center gap-2 py-6 text-xs text-slate-400">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-600 dark:border-t-transparent" />
@@ -280,7 +274,7 @@ export default function CveWidget() {
       ) : temiz ? (
         <div className="flex flex-col items-center gap-1.5 py-5 text-center">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-900/25">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-emerald-500"><path d="M20 6 9 17l-5-5" /></svg>
+            <Ikon d={I.onay} className="h-5 w-5 text-emerald-500" />
           </span>
           <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Sistem güncel")}</p>
           <p className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Bilinen bir güvenlik açığı yok")}</p>
@@ -320,25 +314,17 @@ export default function CveWidget() {
 
           {/* aksiyon (güncelleme sürerken banner yukarıda gösterilir) */}
           {!guncelleniyor && (
-            <button
-              type="button"
-              onClick={guncelle}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2.5 text-[13px] font-semibold text-white shadow-xs transition-colors hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
+            <Button color="primary" ikon={I.kalkan} onClick={guncelle} className="w-full">
               {cevir(cevir("Güvenlik güncellemelerini kur"))}
-            </button>
+            </Button>
           )}
           {/* KernelCare — rebootsuz canlı çekirdek yaması aksiyonu */}
           {!kcCalisiyor && veri.kernelcare?.kurulu && veri.kernelcare.kayitli && (
-            <button
-              type="button"
-              onClick={canliYamala}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-[13px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-emerald-800/60 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d={SHIELD} /><path d={CHECK} /></svg>
+            <Button variant="outlined" ikon={I.kalkan} onClick={canliYamala} className="mt-2 w-full">
               {cevir(cevir("Canlı çekirdek yamalarını güncelle (reboot yok)"))}
-            </button>
+            </Button>
           )}
-          {mesaj && <p className="mt-2 text-center text-[11px] font-medium text-emerald-600 dark:text-emerald-400">{mesaj}</p>}
+          {mesaj && <UyariKutusu ton="basari" className="mt-2"><span className="text-xs">{mesaj}</span></UyariKutusu>}
         </>
       )}
     </div>
