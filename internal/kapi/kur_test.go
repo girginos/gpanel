@@ -129,3 +129,22 @@ func TestGecisAyariDisariyaKapaliAtlanir(t *testing.T) {
 		t.Fatalf("ErrDisariyaKapali beklenir, got %v", err)
 	}
 }
+
+// Belirli bir adrese (iç ağ/VPN IP'si) bağlı panel: rol kapıları joker listen'la eklenir,
+// geçiş bu kısıtlamayı — yönetici yüzeyi dahil — sessizce kaldırırdı → atlanır.
+func TestGecisAyariAdreseBagliAtlanir(t *testing.T) {
+	conf := "server {\n    listen 10.8.0.1:8443 ssl;\n}"
+	if _, err := GecisAyari(conf, nil, 1000, 30); !errors.Is(err, ErrAdreseBagli) {
+		t.Fatalf("ErrAdreseBagli beklenir, got %v", err)
+	}
+	// Joker ve loopback adresler "adresli" değildir.
+	for adr, bek := range map[string]bool{
+		"8443": false, "0.0.0.0:8443": false, "*:8443": false, "[::]:8443": false,
+		"127.0.0.1:9443": false, "[::1]:9443": false, "localhost:9443": false,
+		"10.8.0.1:8443": true, "[fd00::1]:8443": true, "203.0.113.5:8443;": true,
+	} {
+		if got := adresBagli(adr); got != bek {
+			t.Errorf("adresBagli(%q)=%v beklenen %v", adr, got, bek)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,10 @@ import (
 // çağrılamaz (import döngüsü).
 var KapiUygula func(ctx context.Context) error
 
+// GenelHost: sunucunun genel adresi (main bağlar). Arayüz, tarayıcı SSH tünelinden
+// (127.0.0.1) bağlıyken bayi/müşteri adreslerini bununla kurar. nil → "".
+var GenelHost func() string
+
 // Dikişler (testler).
 var (
 	kapiAyarYolu     = kapi.AyarYolu
@@ -35,6 +40,7 @@ var (
 	kapiFwKapaliPort = guvenlikduvari.KapatilanPortlar
 	kapiSELinux      = selinuxDenetci
 	kapiFtpPasif     = ftpPasifAraligi
+	kapiMasaustu     = kapi.MasaustuModu
 	kapiPanelConf    = func() string {
 		b, _ := os.ReadFile(VhostYolu)
 		return string(b)
@@ -82,9 +88,11 @@ type KapiDurum struct {
 	// kapanmadan önce hangi rolün yeni kapısının gerçekten kullanıldığını gösterir.
 	IlkGiris map[string]int64 `json:"ilk_giris"`
 	// Masaustu: erisim masaüstü modu — yönetici kapısı yalnız SSH tünelinden.
-	Masaustu bool   `json:"masaustu"`
-	Zorlama  bool   `json:"zorlama"`
-	Hata     string `json:"hata,omitempty"`
+	Masaustu bool `json:"masaustu"`
+	// GenelHost: sunucunun genel adresi (bkz. GenelHost); boş olabilir.
+	GenelHost string `json:"genel_host"`
+	Zorlama   bool   `json:"zorlama"`
+	Hata      string `json:"hata,omitempty"`
 }
 
 // KapiDurumGetir: kapı modu kapalıysa nil. Ayar okunamıyorsa yalnız Hata dolu döner
@@ -108,9 +116,17 @@ func KapiDurumGetir() *KapiDurum {
 		EskiPortlar: eski, EskiBitis: a.EskiBitis, EskiAcik: a.EskiAcik(simdi),
 		AdminDogrulandi: a.AdminDogrulandi,
 		IlkGiris:        ilk,
-		Masaustu:        kapi.MasaustuModu(),
+		Masaustu:        kapiMasaustu(),
+		GenelHost:       genelHost(),
 		Zorlama:         kapi.ZorlamaAktif(),
 	}
+}
+
+func genelHost() string {
+	if GenelHost == nil {
+		return ""
+	}
+	return GenelHost()
 }
 
 // KapiPortDenetleyici: bir portun kapı portu OLAMAMA nedenini döner ("" = uygun).
@@ -151,6 +167,10 @@ type KapiRolSonuc struct {
 	EskiPort int    `json:"eski_port"`
 	YeniPort int    `json:"yeni_port"`
 	Zorlama  bool   `json:"zorlama"`
+	// Uygulandi: değişiklik nginx'e uygulandı mı. Uyari doluyken ayrım önemlidir:
+	// true → port değişti ama kapı zinciri doğrulanamadı (bayi/müşteri için önceki port
+	// kapanmış olabilir); false → yalnız kaydedildi, nginx eski hâlinde.
+	Uygulandi bool `json:"uygulandi"`
 	// Uyari: ayar kaydedildi ama nginx'e uygulanamadı/ölçülemedi (bakım döngüsü yeniden
 	// dener; bu sırada kapı kuralları devre dışıdır, kimse kilitlenmez).
 	Uyari string `json:"uyari,omitempty"`
@@ -175,18 +195,27 @@ func KapiRolPortuAta(rol string, yeni int) (eski, atanan int, err error) {
 			return 0, 0, fmt.Errorf("port %d zaten %s kapısı", yeni, r)
 		}
 	}
-	// Panelin kendi portları: açık eski kapı ve yalnız-loopback tünel portu (nginx onları
-	// dinlediği için `ss` "meşgul" der) — elle seçilebilir, rastgele seçilmez.
-	kendi := append(append([]int{}, a.EskiPortlar...), kapi.YerelPortlar(kapiPanelConf(), a, time.Now().Unix())...)
+	// Panelin kendi portları (nginx onları dinlediği için `ss` "meşgul" der): açık eski kapı
+	// elle devralınabilir. Yalnız-loopback tünel portu ise YALNIZ masaüstü modunda yönetici
+	// kapısı olabilir: Heal izi olan porta genel listen eklemez — bayi/müşteri (ya da web
+	// modunda yönetici) kapısı oraya taşınsa dışarıdan erişilemez, eski portu ise kaldırılırdı.
+	yerel := kapi.YerelPortlar(kapiPanelConf(), a, time.Now().Unix())
+	kendi := append([]int{}, a.EskiPortlar...)
+	tunelIzinli := rol == kapi.Admin && kapiMasaustu()
+	if tunelIzinli {
+		kendi = append(kendi, yerel...)
+	}
 	sorun := KapiPortDenetleyici(kendi...)
 	if yeni == 0 {
 		haric := map[int]bool{a.Admin: true, a.Bayi: true, a.Musteri: true}
-		for _, p := range kendi {
+		for _, p := range append(kendi, yerel...) {
 			haric[p] = true
 		}
 		if yeni, err = kapi.RastgelePortSec(func(p int) bool { return sorun(p) == "" }, haric); err != nil {
 			return 0, 0, err
 		}
+	} else if !tunelIzinli && slices.Contains(yerel, yeni) {
+		return 0, 0, fmt.Errorf("port %d yalnız 127.0.0.1'de dinleniyor (SSH tüneli yolu) — %s kapısı dışarıdan erişilemezdi", yeni, rol)
 	} else if s := sorun(yeni); s != "" {
 		return 0, 0, errors.New(s)
 	}
@@ -210,9 +239,19 @@ func KapiRolDegistir(ctx context.Context, db *sql.DB, rol string, yeni int, akto
 	if uygErr != nil {
 		sonuc.Uyari = uygErr.Error()
 	}
+	sonuc.Uygulandi = uygulandiMi(uygErr)
 	sonuc.Zorlama = kapi.ZorlamaAktif()
 	gecmisSatirYaz(db, "kapi-"+rol, eski, yeni, uygErr == nil, false, sonuc.Uyari, aktor)
 	return sonuc, nil
+}
+
+// uygulandiMi: uygulama hatası değişikliğin nginx'e uygulandığını mı söylüyor?
+func uygulandiMi(err error) bool {
+	if err == nil {
+		return true
+	}
+	var uh *kapi.UygulamaHatasi
+	return errors.As(err, &uh) && uh.Uygulandi
 }
 
 func kapiUygula(ctx context.Context) error {
@@ -296,7 +335,8 @@ func (h *Handler) KapiEskiKapat(w http.ResponseWriter, r *http.Request) {
 // (ayar kaydedildi, bakım döngüsü yeniden dener) ama uyarı olarak döner.
 func kapiUygulaYanit(w http.ResponseWriter, r *http.Request) {
 	yanit := map[string]any{"ok": true}
-	if err := kapiUygula(r.Context()); err != nil {
+	err := kapiUygula(r.Context())
+	if err != nil {
 		yanit["uyari"] = err.Error()
 	}
 	yanit["kapi"] = KapiDurumGetir()

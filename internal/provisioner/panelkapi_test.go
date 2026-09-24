@@ -81,8 +81,9 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	eskiDinl, eskiGizli, eskiIzin, eskiAktif := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif
 	eskiMasa, eskiOzel := kapiMasaustu, kapiOzelIzin
 	eskiSEMod, eskiSEListe, eskiSEEtiket, eskiEtiketli := kapiSELinuxModu, kapiSELinuxListe, kapiSELinuxEtiket, kapiEtiketli
-	eskiZDosya := kapiZorlamaDosyasi
+	eskiZDosya, eskiOnb, eskiOkundu := kapiZorlamaDosyasi, kapiSELinuxOnbellek, kapiOnbellekOkundu
 	t.Cleanup(func() {
+		kapiSELinuxOnbellek, kapiOnbellekOkundu = eskiOnb, eskiOkundu
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
 		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
 		kapiNginxKomut, kapiFwAc, kapiFwKapat = eskiKomut, eskiAc, eskiKapat
@@ -99,6 +100,7 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	kapiSELinuxEtiket = func(int) error { t.Error("semanage etiketi beklenmiyordu"); return nil }
 	kapiEtiketli = map[int]bool{}
 	kapiZorlamaDosyasi = filepath.Join(s.dir, "run", "kapi-zorlama")
+	kapiSELinuxOnbellek, kapiOnbellekOkundu = filepath.Join(s.dir, "run", "kapi-selinux"), false
 	// 🔴 HER yol geçici dizine: kapiNginxUygula dosya YAZAR; gerçek /etc yolunda kalan
 	// tek bir dikiş testi canlı nginx dosyasını değiştirirdi.
 	kapiVhostYolu = filepath.Join(s.dir, "_panel.conf")
@@ -1005,5 +1007,112 @@ func TestKapiTipOlcGizliYoksaOlcmez(t *testing.T) {
 	kapiProxyGizli = func() string { return "" }
 	if _, err := kapiTipOlc(context.Background(), port, kapi.Admin, 1); err == nil {
 		t.Fatal("gizli yokken ölçüm hata dönmeli")
+	}
+}
+
+// Geçici hata (limit_conn 503, aşırı yük, backend henüz ayakta değil) sonuç DEĞİLDİR:
+// yerel bir süreç IP-başı bağlantı sınırını doldurup ölçümü düşürerek rol ayrımını
+// kapattıramasın. Bağlantı reddi (portta dinleyen yok) ise kesindir.
+func TestKapiTipOlcGeciciHataBelirsiz(t *testing.T) {
+	for _, kod := range []int{http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		port := olcumSunucusu(t, func(_ int32, _ string, _ int, w http.ResponseWriter) {
+			w.WriteHeader(kod)
+		})
+		if _, err := kapiTipOlc(context.Background(), port, kapi.Admin, 2); !errors.Is(err, errOlcumBelirsiz) {
+			t.Errorf("HTTP %d belirsiz sayılmalı, got %v", kod, err)
+		}
+	}
+	// Kanıtsız 200 kesin başarısızlıktır (belirsiz DEĞİL).
+	port := olcumSunucusu(t, func(_ int32, _ string, _ int, w http.ResponseWriter) {
+		fmt.Fprint(w, `{"tip":"yonetim"}`)
+	})
+	if _, err := kapiTipOlc(context.Background(), port, kapi.Admin, 1); err == nil || errors.Is(err, errOlcumBelirsiz) {
+		t.Fatalf("kanıtsız yanıt kesin başarısızlık olmalı, got %v", err)
+	}
+	// Bağlantı reddi: dinleyen yok → kesin.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bos := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	if _, err := kapiTipOlc(context.Background(), bos, kapi.Admin, 1); err == nil || errors.Is(err, errOlcumBelirsiz) {
+		t.Fatalf("bağlantı reddi kesin başarısızlık olmalı, got %v", err)
+	}
+	// Bağlantı kabul edilip kesilirse (yük altında nginx/çekirdek): sonuç yok → belirsiz.
+	kes, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kes.Close() })
+	go func() {
+		for {
+			c, err := kes.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	if _, err := kapiTipOlc(context.Background(), kes.Addr().(*net.TCPAddr).Port, kapi.Admin, 1); !errors.Is(err, errOlcumBelirsiz) {
+		t.Fatalf("kopan bağlantı belirsiz sayılmalı, got %v", err)
+	}
+}
+
+// Belirsiz ölçüm zorlamayı hiçbir yönde DEĞİŞTİRMEZ; kesin başarısızlık kapatır.
+func TestKapiOlcBelirsizZorlamayiDegistirmez(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	eski := kapiTipOlcucu
+	t.Cleanup(func() { kapiTipOlcucu = eski })
+	kapiTipOlcucu = func(context.Context, int, string, int) (string, error) {
+		return "", fmt.Errorf("%w: HTTP 503", errOlcumBelirsiz)
+	}
+	for _, bas := range []bool{true, false} {
+		kapi.ZorlamaAyarla(bas)
+		if s := kapiOlcVeAyarla(context.Background(), 1); s != olcumBelirsiz || kapi.ZorlamaAktif() != bas {
+			t.Fatalf("belirsiz ölçüm (başlangıç %v): sonuç=%v zorlama=%v", bas, s, kapi.ZorlamaAktif())
+		}
+	}
+	kapiTipOlcucu = func(context.Context, int, string, int) (string, error) { return "", errors.New("connection refused") }
+	kapi.ZorlamaAyarla(true)
+	if s := kapiOlcVeAyarla(context.Background(), 1); s != olcumKopuk || kapi.ZorlamaAktif() {
+		t.Fatalf("kesin başarısızlık zorlamayı kapatmalı: sonuç=%v zorlama=%v", s, kapi.ZorlamaAktif())
+	}
+}
+
+// Panelden uygulanan değişikliğin ölçümü belirsizse: hata "önceki durumunda" der ve
+// bakım döngüsü kısa aralıkla yeniden ölçsün diye dürtülür.
+func TestKapiSimdiUygulaBelirsiz(t *testing.T) {
+	kapiTestKur(t, kapiTestSablon, rolAyar())
+	eski := kapiTipOlcucu
+	t.Cleanup(func() { kapiTipOlcucu = eski })
+	for len(kapiYenidenOlc) > 0 {
+		<-kapiYenidenOlc
+	}
+	kapiTipOlcucu = func(context.Context, int, string, int) (string, error) {
+		return "", fmt.Errorf("%w: zaman aşımı", errOlcumBelirsiz)
+	}
+	kapi.ZorlamaAyarla(true)
+	err := KapiSimdiUygula(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "önceki durumunda") || !kapi.ZorlamaAktif() {
+		t.Fatalf("belirsiz: hata=%v zorlama=%v", err, kapi.ZorlamaAktif())
+	}
+	select {
+	case <-kapiYenidenOlc:
+	default:
+		t.Fatal("bakım döngüsü kısa aralıkla yeniden ölçmeye dürtülmeli")
+	}
+}
+
+func TestKapiGeriCekilme(t *testing.T) {
+	ar := 15 * time.Minute
+	for n, bek := range map[int]time.Duration{0: time.Minute, 1: time.Minute, 2: 2 * time.Minute, 3: 4 * time.Minute,
+		4: 8 * time.Minute, 5: 15 * time.Minute, 60: 15 * time.Minute} {
+		if got := kapiGeriCekilme(n, ar); got != bek {
+			t.Errorf("ardışık=%d → %v beklenir, got %v", n, bek, got)
+		}
+	}
+	if got := kapiGeriCekilme(3, 30*time.Second); got != 30*time.Second {
+		t.Errorf("aralık bir dakikadan kısaysa aralığı aşmamalı, got %v", got)
 	}
 }

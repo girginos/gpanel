@@ -3,6 +3,7 @@ package kapi
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -130,5 +131,33 @@ func TestEskiKapat(t *testing.T) {
 	}
 	if a, _ := Oku(yol); a.EskiAcik(500) {
 		t.Fatal("kapatma sonrası EskiAcik false olmalı")
+	}
+}
+
+// Yeni admin portu dışarıdan erişilemez çıktıysa admin, çalıştığı bilinen ÖNCEKİ admin
+// portuna doğrulama beklemeden dönebilmeli (o port zaten dinleniyor; kimse kilitlenmez).
+// Başka bir rolün aynı portu devralması ve admin'in BAŞKA bir eski portu alması ise
+// doğrulama olmadan reddedilmeye devam eder.
+func TestRolPortuDegistirOncekiAdmineDonus(t *testing.T) {
+	yol := filepath.Join(t.TempDir(), "kapi.json")
+	a := ornekAyar()
+	a.AdminDogrulandi = 50
+	a.EskiPortlar, a.EskiBitis = []int{8443}, 1_000_000
+	_ = Yaz(yol, a)
+	if _, err := RolPortuDegistir(yol, Admin, 25005, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RolPortuDegistir(yol, Musteri, 21001, 1001); !errors.Is(err, ErrEskiDevralma) {
+		t.Fatalf("başka rol önceki admin portunu doğrulamadan devralamamalı, got %v", err)
+	}
+	if _, err := RolPortuDegistir(yol, Admin, 8443, 1001); !errors.Is(err, ErrEskiDevralma) {
+		t.Fatalf("admin BAŞKA bir eski portu doğrulamadan devralamamalı, got %v", err)
+	}
+	if _, err := RolPortuDegistir(yol, Admin, 21001, 1002); err != nil {
+		t.Fatalf("önceki admin portuna dönüş serbest olmalı: %v", err)
+	}
+	b, _ := Oku(yol)
+	if b.Admin != 21001 || b.OncekiAdmin != 25005 || !slices.Contains(b.EskiPortlar, 25005) || slices.Contains(b.EskiPortlar, 21001) {
+		t.Fatalf("dönüş sonrası ayar: %+v", b)
 	}
 }

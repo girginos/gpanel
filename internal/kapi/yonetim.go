@@ -56,6 +56,16 @@ func EskiKapat(yol string, zorla bool, simdi int64) error {
 	})
 }
 
+// UygulamaHatasi: kapı ayarı yazıldı ama uygulama tamamlanamadı. Uygulandi: değişiklik
+// nginx'e UYGULANDI mı (true → kapı zinciri yalnız doğrulanamadı; bayi/müşteri için önceki
+// port kapanmış olabilir), false → nginx eski hâlinde, bakım döngüsü yeniden dener.
+type UygulamaHatasi struct {
+	Uygulandi bool
+	Mesaj     string
+}
+
+func (e *UygulamaHatasi) Error() string { return e.Mesaj }
+
 // ErrAyniPort: istenen port rolün zaten kullandığı port.
 var ErrAyniPort = errors.New("rol zaten bu portta — değişiklik yok")
 
@@ -93,13 +103,17 @@ func RolPortuDegistir(yol, rol string, yeni int, simdi int64) (eski int, err err
 				kalan = append(kalan, p)
 			}
 		}
-		if len(kalan) != len(a.EskiPortlar) && a.AdminDogrulandi == 0 {
+		// İstisna: admin, çalıştığı bilinen önceki admin portuna dönüyor — o port zaten
+		// dinleniyor; dönüş hiçbir geçiş kapısını kapatmaz, kimseyi kilitlemez.
+		geriDonus := rol == Admin && yeni == a.OncekiAdmin
+		if len(kalan) != len(a.EskiPortlar) && a.AdminDogrulandi == 0 && !geriDonus {
 			return ErrEskiDevralma
 		}
 		a.EskiPortlar = kalan
 		switch rol {
 		case Admin:
 			a.Admin = yeni
+			a.OncekiAdmin = eski
 			a.EskiPortlar = append(a.EskiPortlar, eski)
 			if a.EskiBitis < simdi {
 				a.EskiBitis = simdi
