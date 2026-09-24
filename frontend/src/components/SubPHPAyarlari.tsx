@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
 // AYRI bir PHP-FPM havuzu render edilir (bağımsız memory_limit/upload/pm.* vb.).
@@ -28,6 +30,7 @@ const inp = 'w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border
 
 const CMP_EN: Record<string, string> = {
   "FPM Havuzu": "FPM Pool",
+  "Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.": "Settings saved — a separate FPM pool is active for this subdomain.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -56,7 +59,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
     try {
       const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: a })
       setOzel(r.data.ozel_havuz)
-      setMesaj({ t: 'ok', m: cevir("✓ Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.") })
+      setMesaj({ t: 'ok', m: cevir("Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.") })
     } catch (e) {
       setMesaj({ t: 'hata', m: apiHata(e) })
     } finally { setKaydediliyor(false) }
@@ -93,7 +96,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
       {acik && (
         <div className="mt-4 space-y-5">
           {mesaj && (
-            <div className={`text-sm px-3 py-2 rounded-md ${mesaj.t === 'ok' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>{mesaj.m}</div>
+            <UyariKutusu ton={mesaj.t === 'ok' ? 'basari' : 'tehlike'}>{mesaj.m}</UyariKutusu>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div><label className={etk}>memory_limit</label>{txt('memory_limit')}</div>
@@ -146,8 +149,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
           </div>
 
           <div className="flex justify-end">
-            <Button color="primary" onClick={kaydet} yukleniyor={kaydediliyor}
-              className="px-4 py-2 text-sm">
+            <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={kaydediliyor}>
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("PHP ayarlarını kaydet")}
             </Button>
           </div>

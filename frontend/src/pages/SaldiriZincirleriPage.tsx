@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Olay = { kaynak: string; asama: string; asama_ad: string; seviye: string; ozet: string; tarih: string }
 type Zincir = {
@@ -82,9 +84,8 @@ export default function SaldiriZincirleriPage() {
         </div>
 
         {aktifKritik > 0 && (
-          <div className="mt-3 mb-4 px-4 py-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
-            <span className="font-mono">● {aktifKritik} {cevir("etkin kritik saldırı zinciri")}</span>
-          </div>
+          <UyariKutusu ton="tehlike" className="mt-3 mb-4"
+            baslik={<span className="font-mono">{aktifKritik} {cevir("etkin kritik saldırı zinciri")}</span>} />
         )}
 
         {yuk ? (
@@ -125,7 +126,7 @@ export default function SaldiriZincirleriPage() {
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d={ASAMA_IKON[a] || ''} /></svg>
                             {z.asama_ad[i] || a}
                           </span>
-                          {i < z.asamalar.length - 1 && <span className={`text-sm ${kritik ? 'text-red-400' : 'text-amber-400'}`}>→</span>}
+                          {i < z.asamalar.length - 1 && <span className={kritik ? 'text-red-400' : 'text-amber-400'}><Ikon d={I.ileri} className="size-3.5" /></span>}
                         </span>
                       ))}
                     </div>

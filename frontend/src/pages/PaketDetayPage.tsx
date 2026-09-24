@@ -9,6 +9,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
 
 type Plan = {
@@ -71,7 +72,7 @@ const PKTDET_EN: Record<string, string> = {
   "Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.": "New domains on this plan are installed with these nginx settings. Additional directives are validated with “nginx -t” on save.",
   "Ek nginx Direktifleri": "Additional nginx Directives",
   "# Örnek:\nadd_header X-Robots-Tag \"noindex\" always;\nlocation = /saglik { return 200 \"ok\"; }": "# Example:\nadd_header X-Robots-Tag \"noindex\" always;\nlocation = /saglik { return 200 \"ok\"; }",
-  "ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ": "ⓘ When you click Save, the directives are tested in a temporary server block with ",
+  "Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ": "When you click Save, the directives are tested in a temporary server block with ",
   " ile test edilir. Geçersizse plan ": " . If invalid, the plan is ",
   "kaydedilmez": "not saved",
   " ve nginx'in hata çıktısı yukarıda gösterilir.": " and nginx's error output is shown above.",
@@ -82,7 +83,7 @@ const PKTDET_EN: Record<string, string> = {
   "Denetle (yalnızca kaydet)": "Detect (log only)",
   "Paranoya Seviyesi": "Paranoia Level",
   "Seviye 2 (Orta)": "Level 2 (Medium)",
-  "ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ": "ⓘ After a change, the vhosts of domains bound to this plan are automatically re-rendered in the background (nginx -t protected, zero downtime). If the module is not installed on the server, the setting is stored and activated with ",
+  "Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ": "After a change, the vhosts of domains bound to this plan are automatically re-rendered in the background (nginx -t protected, zero downtime). If the module is not installed on the server, the setting is stored and activated with ",
   " ile etkinleşir.": " .",
   "Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.": "After the plan is updated, the relevant domain's cgroup + quota + MySQL limits are updated with “Reapply”.",
   "Uygulanıyor…": "Applying…",
@@ -124,8 +125,8 @@ const PKTDET_EN: Record<string, string> = {
   "Yükleme Boyutu Limiti (MB)": "Upload Size Limit (MB)",
   "nginx client_max_body_size — dosya yükleme üst sınırı": "nginx client_max_body_size — file upload cap",
   "server{} bloğuna eklenir; kaydederken doğrulanır.": "Added to the server{} block; validated on save.",
-  "✓ Uygulandı": "✓ Applied",
-  "✗ Başarısız": "✗ Failed",
+  "Uygulandı": "Applied",
+  "Başarısız": "Failed",
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
 }
@@ -248,8 +249,8 @@ export default function PaketDetayPage() {
               {plan.aciklama || cevir("Açıklama yok")} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
             </p>
           </div>
-          <Button onClick={kaydet} disabled={isleniyor} color="primary"
-            className="shrink-0 px-4 py-2 text-sm">
+          <Button onClick={kaydet} yukleniyor={isleniyor} color="primary" ikon={I.disket}
+            className="shrink-0">
             {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
           </Button>
         </div>
@@ -396,8 +397,9 @@ export default function PaketDetayPage() {
               className={inp + ' font-mono text-xs leading-relaxed'}
             />
           </Alan>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {cevir("ⓘ Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ")}<code className="font-mono">nginx -t</code>{cevir(" ile test edilir. Geçersizse plan ")}<strong>{cevir("kaydedilmez")}</strong>{cevir(" ve nginx'in hata çıktısı yukarıda gösterilir.")}
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
+            <span>{cevir("Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ")}<code className="font-mono">nginx -t</code>{cevir(" ile test edilir. Geçersizse plan ")}<strong>{cevir("kaydedilmez")}</strong>{cevir(" ve nginx'in hata çıktısı yukarıda gösterilir.")}</span>
           </p>
         </Kart>
 
@@ -425,8 +427,9 @@ export default function PaketDetayPage() {
               </select>
             </Alan>
           </div>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {cevir("ⓘ Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
+            <span>{cevir("Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}</span>
           </p>
         </Kart>
 
@@ -466,15 +469,13 @@ export default function PaketDetayPage() {
                         <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{d.olusturulma}</span>
                       </td>
                       <td className={`${T.hucreAksiyon} lg:text-right`}>
-                        <button type="button" onClick={() => domainicinYenidenUygula(d.id)} disabled={uygulananID !== null}
-                          className={`text-xs px-2 py-1 border rounded-md disabled:opacity-60 transition ${
-                            sonucID?.id === d.id
-                              ? (sonucID.ok
-                                  ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20'
-                                  : 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20')
-                              : 'border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700'}`}>
-                          {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('✓ Uygulandı') : cevir("✗ Başarısız")) : cevir('Yeniden Uygula')}
-                        </button>
+                        <Button type="button" onClick={() => domainicinYenidenUygula(d.id)} disabled={uygulananID !== null}
+                          yukleniyor={uygulananID === d.id} boyut="sm"
+                          color={sonucID?.id === d.id ? (sonucID.ok ? 'success' : 'error') : 'neutral'}
+                          variant={sonucID?.id === d.id ? 'soft' : 'outlined'}
+                          ikon={sonucID?.id === d.id ? (sonucID.ok ? I.onay : I.kapat) : I.yenile}>
+                          {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('Uygulandı') : cevir("Başarısız")) : cevir('Yeniden Uygula')}
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -508,7 +509,7 @@ function Alan({ etiket, ipucu, span, children }: { etiket: string; ipucu?: strin
   return (
     <label className={`block ${span === 2 ? 'sm:col-span-2' : ''}`}>
       <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{etiket}</span>
-      {ipucu && <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-1 cursor-help" title={ipucu}>ⓘ</span>}
+      {ipucu && <span className="ml-1 inline-flex align-middle text-slate-400 dark:text-slate-500 cursor-help" title={ipucu}><Ikon d={I.bilgi} className="size-3" /></span>}
       <div className="mt-1.5">{children}</div>
     </label>
   )

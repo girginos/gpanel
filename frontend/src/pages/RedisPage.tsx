@@ -9,6 +9,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Durum = {
   aktif: boolean
@@ -35,7 +37,7 @@ const REDIS_EN: Record<string, string> = {
   "Etkinleştiriliyor…": "Enabling…",
   "Etkinleştirince izole bir ACL kullanıcısı + bağlantı bilgisi oluşturulur.": "Enabling creates an isolated ACL user + connection info.",
   "Kapatılamadı": "Failed to disable",
-  "Kopyalandı ✓": "Copied ✓",
+  "Kopyalandı": "Copied",
   "Redis Cache Etkinleştir": "Enable Redis Cache",
   "Redis cache etkinleştirildi. WordPress dışı uygulamalar için aşağıdaki bilgileri tanımlayın.": "Redis cache enabled. Define the info below for non-WordPress applications.",
   "Redis cache kapatıldı.": "Redis cache disabled.",
@@ -43,7 +45,7 @@ const REDIS_EN: Record<string, string> = {
   "Redis cache etkinleştirildi ve {0} WordPress kurulumu otomatik bağlandı — ekstra bir şey yapmanıza gerek yok.": "Redis cache enabled and {0} WordPress installation(s) connected automatically — you don't need to do anything extra.",
   "Emin misiniz?": "Are you sure?",
   "Anasayfa": "Home",
-  "● Aktif": "● Active",
+  "Aktif": "Active",
   "Bu domaine": "For this domain, an",
   "izole (kendine ait) bir Redis nesne cache'i": "isolated (dedicated) Redis object cache",
   "tahsis eder — WordPress ve dinamik uygulamalar veritabanı yükünü azaltıp hızlanır. Diğer siteler bu cache'e erişemez.": "is allocated — WordPress and dynamic apps reduce database load and speed up. Other sites cannot access this cache.",
@@ -113,7 +115,7 @@ export default function RedisPage() {
     finally { setMesgul(false) }
   }
   async function kapat() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), ton: 'tehlike', onayIkonu: I.durdur }))) return
     setHata(null); setBasari(null); setMesgul(true)
     try {
       await api.delete(`/domains/${id}/redis`)
@@ -148,8 +150,8 @@ export default function RedisPage() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-amber-500"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" /></svg>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Redis Cache</h1>
         {d && (
-          <Badge color={d.aktif ? 'success' : 'neutral'} variant="soft" className="text-xs px-2 py-0.5">
-            {d.aktif ? cevir("● Aktif") : cevir("Kapalı")}
+          <Badge color={d.aktif ? 'success' : 'neutral'} variant="soft" className="gap-1.5 text-xs px-2 py-0.5">
+            {d.aktif ? <><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Aktif")}</> : cevir("Kapalı")}
           </Badge>
         )}
       </div>
@@ -164,7 +166,7 @@ export default function RedisPage() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7 mx-auto mb-2 text-slate-400"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" /></svg>
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">{cevir("Bu domain için Redis cache kapalı.")}</p>
           <p className="text-xs text-slate-400 mb-4">{cevir("Etkinleştirince izole bir ACL kullanıcısı + bağlantı bilgisi oluşturulur.")}</p>
-          <Button onClick={ac} disabled={mesgul} className="px-4 py-2 text-sm">
+          <Button onClick={ac} yukleniyor={mesgul} color="primary" ikon={I.onay}>
             {mesgul ? cevir("Etkinleştiriliyor…") : cevir("Redis Cache Etkinleştir")}
           </Button>
         </div>
@@ -174,14 +176,16 @@ export default function RedisPage() {
           <div className="bg-white dark:bg-dark-700/60 border border-slate-200 dark:border-dark-600/60 rounded-lg overflow-hidden mb-4">
             <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir("Bağlantı Bilgisi")}</h3>
-              <Button onClick={kapat} disabled={mesgul} color="error" variant="outlined" className="text-xs px-2.5 py-1">
+              <Button onClick={kapat} yukleniyor={mesgul} color="error" variant="soft" boyut="sm" ikon={I.durdur}>
                 {cevir("Kapat")}
               </Button>
             </div>
             <div className="divide-y divide-slate-100 dark:divide-dark-600/60">
               {sir && (
-                <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-500/10">
-                  <p className="text-xs text-amber-700 dark:text-amber-400">{cevir("Bu parola yalnızca şimdi gösteriliyor — güvenli bir yere kaydedin. Sayfadan ayrıldığınızda tekrar gösterilemez.")}</p>
+                <div className="px-4 py-2.5">
+                  <UyariKutusu ton="uyari">
+                    <p className="text-xs">{cevir("Bu parola yalnızca şimdi gösteriliyor — güvenli bir yere kaydedin. Sayfadan ayrıldığınızda tekrar gösterilemez.")}</p>
+                  </UyariKutusu>
                 </div>
               )}
               <SatirKopya etiket={cevir("Sunucu")} deger={`${d.host}:${d.port}`} onKopya={kopyala} kopyalandi={kopyalandi} />
@@ -210,11 +214,11 @@ export default function RedisPage() {
                 </button>
                 {snippetAcikGercek && (
                   <span className="flex items-center gap-2 shrink-0">
-                    <button type="button" onClick={() => setSnippetGoster(g => !g)} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                    <Button variant="outlined" boyut="sm" ikon={snippetGoster ? I.gozKapali : I.goz} onClick={() => setSnippetGoster(g => !g)}>
                       {snippetGoster ? cevir("gizle") : cevir("göster")}
-                    </button>
-                    <Button onClick={() => kopyala(sir!.wp_snippet, 'wp')} className="text-xs px-2.5 py-1">
-                      {kopyalandi === 'wp' ? cevir("Kopyalandı ✓") : cevir("Kopyala")}
+                    </Button>
+                    <Button variant="outlined" boyut="sm" ikon={kopyalandi === 'wp' ? I.onay : I.kopya} onClick={() => kopyala(sir!.wp_snippet, 'wp')}>
+                      {kopyalandi === 'wp' ? cevir("Kopyalandı") : cevir("Kopyala")}
                     </Button>
                   </span>
                 )}
@@ -247,12 +251,12 @@ function SatirKopya({ etiket, deger, gizli, baslangicGoster, onKopya, kopyalandi
       <span className="text-xs text-slate-500 dark:text-slate-400 w-28 shrink-0">{etiket}</span>
       <span className="flex-1 font-mono text-xs text-slate-800 dark:text-slate-200 truncate">{gorunen}</span>
       {gizli && (
-        <button onClick={() => setGoster(g => !g)} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+        <Button variant="outlined" boyut="sm" ikon={goster ? I.gozKapali : I.goz} onClick={() => setGoster(g => !g)}>
           {goster ? cevir("gizle") : cevir("göster")}
-        </button>
+        </Button>
       )}
-      <Button onClick={() => onKopya(deger, etiket)} variant="outlined" className="text-xs px-2 py-0.5">
-        {kopyalandi === etiket ? '✓' : cevir("kopyala")}
+      <Button onClick={() => onKopya(deger, etiket)} variant="outlined" boyut="sm" ikon={kopyalandi === etiket ? I.onay : I.kopya}>
+        {kopyalandi === etiket ? cevir("Kopyalandı") : cevir("kopyala")}
       </Button>
     </div>
   )

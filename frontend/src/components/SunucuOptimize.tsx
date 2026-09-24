@@ -3,6 +3,9 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Sunucu optimizasyonu kartı — sistem paket güncellemesi (dnf/yum -y update) +
 // MariaDB/nginx/PHP performans ayarı. İş arka planda (ayrı systemd unit) koşar;
@@ -81,7 +84,7 @@ export default function SunucuOptimize() {
   return (
     <div className="mb-6 p-4 border rounded-lg bg-sky-50 dark:bg-sky-900/15 border-sky-200 dark:border-sky-800/50">
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0 bg-sky-100 dark:bg-sky-900/40">🚀</div>
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"><Ikon d={I.roket} className="size-5" /></div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Sunucuyu Optimize Et")}</span>
@@ -91,7 +94,7 @@ export default function SunucuOptimize() {
             {cevir("Sistem paketlerini günceller (")}<code className="text-[11px]">dnf -y update</code>{cevir(") ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.")}
           </div>
 
-          {hata && <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">{hata}</div>}
+          {hata && <UyariKutusu ton="tehlike" className="mt-2"><span className="text-xs">{hata}</span></UyariKutusu>}
 
           {calisiyor && (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
@@ -106,20 +109,18 @@ export default function SunucuOptimize() {
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {!onay ? (
-              <button onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}
-                className="text-xs px-3 py-1.5 rounded-lg bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 hover:opacity-90 transition font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+              <Button color="primary" boyut="sm" ikon={I.simsek} onClick={() => setOnay(true)} disabled={calisiyor || baslatiliyor}>
                 {cevir("Paketleri güncelle ve optimize et")}
-              </button>
+              </Button>
             ) : (
               <>
                 <span className="text-xs text-slate-600 dark:text-slate-300">{cevir("Sistem paketleri güncellenecek ve servisler yeniden ayarlanacak. Onaylıyor musunuz?")}</span>
-                <button onClick={baslat} disabled={baslatiliyor}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 transition font-medium disabled:opacity-40">
+                <Button color="primary" boyut="sm" ikon={I.oynat} onClick={baslat} yukleniyor={baslatiliyor}>
                   {baslatiliyor ? cevir("Başlatılıyor…") : cevir("Evet, başlat")}
-                </button>
-                <button onClick={() => setOnay(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-700 transition">
+                </Button>
+                <Button variant="outlined" boyut="sm" ikon={I.kapat} onClick={() => setOnay(false)}>
                   {cevir("Vazgeç")}
-                </button>
+                </Button>
               </>
             )}
           </div>

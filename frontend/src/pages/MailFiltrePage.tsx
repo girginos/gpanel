@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
 type Filtre = { whitelist: string; blacklist: string; ip_blocklist: string; asn_blocklist: string }
 type AsnCozum = { asn: string; prefiks_sayisi: number; kaynak: string; uyari?: string }
@@ -27,7 +28,7 @@ const MFILT_EN: Record<string, string> = {
   "çözülemedi": "could not resolve",
   "önbellek": "cache",
   "önbellekten": "from cache",
-  "✓ canlı": "✓ live",
+  "canlı": "live",
   "Türkçe": "English",
   "Buradaki IP/ağlardan gelen tüm SMTP bağlantıları reddedilir (kimlik doğrulamış kullanıcılar hariç).": "All SMTP connections from the IPs/networks here are rejected (except authenticated users).",
   "Gönderen (e-posta/domain) ve bağlanan istemci (IP, CIDR ağ veya tüm ASN) bazında kabul/engelleme kuralları.": "Accept/block rules based on sender (email/domain) and connecting client (IP, CIDR network, or entire ASN).",
@@ -36,7 +37,7 @@ const MFILT_EN: Record<string, string> = {
   "Toplam": "Total",
   "duyurduğu tüm IP blokları": "all IP blocks it announces",
   "otomatik çözülüp engellenir.": "are automatically resolved and blocked.",
-  "✓ Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor.": "✓ Filters saved and applied to Postfix. A total of {0} IPs/networks are blocked.",
+  "Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor.": "Filters saved and applied to Postfix. A total of {0} IPs/networks are blocked.",
   "Kaydedilemedi": "Failed to save",
   "ASN girdikten sonra o otonom sistemin": "After entering an ASN,",
   "etkilenmez": "not affected",
@@ -94,7 +95,7 @@ export default function MailFiltrePage() {
         setHata(m)
         toast.hata(cevir("Kısmen uygulandı"), m)
       } else {
-        const m = cevirT(cevir("✓ Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor."), r.data.toplam_cidr)
+        const m = cevirT(cevir("Filtreler kaydedildi ve Postfix'e uygulandı. Toplam {0} IP/ağ engelleniyor."), r.data.toplam_cidr)
         setBildirim(m)
         toast.basari(cevir("Kaydedildi"), m)
       }
@@ -177,7 +178,7 @@ export default function MailFiltrePage() {
                               <span className="text-slate-500">{c.prefiks_sayisi} {cevir("prefiks")}</span>
                               {c.kaynak === cevir("önbellek")
                                 ? <span className="text-amber-600 dark:text-amber-400" title={c.uyari}>{cevir("önbellekten")}</span>
-                                : <span className="text-emerald-600 dark:text-emerald-400">{cevir("✓ canlı")}</span>}
+                                : <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Ikon d={I.onay} className="size-3 shrink-0" />{cevir("canlı")}</span>}
                             </>}
                       </li>
                     ))}
@@ -188,8 +189,7 @@ export default function MailFiltrePage() {
           </section>
 
           <div className="flex justify-end">
-            <Button onClick={kaydet} disabled={kaydediliyor} color="primary"
-              className="text-sm px-6 py-2.5">
+            <Button onClick={kaydet} yukleniyor={kaydediliyor} color="primary" ikon={I.disket}>
               {kaydediliyor ? cevir("Uygulanıyor…") : cevir("Kaydet ve Uygula")}
             </Button>
           </div>

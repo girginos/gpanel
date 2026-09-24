@@ -1,8 +1,10 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { Button } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
-export type ToolbarButton = { etiket: string; onClick?: () => void; disabled?: boolean; ipucu?: string }
+// ikon — butonun solundaki eylem ikonu (I.* — components/Ikon); birincil buton varsayılan I.arti.
+export type ToolbarButton = { etiket: string; onClick?: () => void; disabled?: boolean; ipucu?: string; ikon?: string }
 
 export default function ListToolbar({
   birincil, butonlar, arananSetter, aranan,
@@ -20,11 +22,8 @@ export default function ListToolbar({
           onClick={birincil.onClick}
           disabled={birincil.disabled}
           title={birincil.ipucu}
-          className="gap-1.5 px-3.5 py-2 text-sm"
+          ikon={birincil.ikon ?? I.arti}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
           {birincil.etiket}
         </Button>
       )}
@@ -35,16 +34,14 @@ export default function ListToolbar({
           onClick={b.onClick}
           disabled={b.disabled}
           title={b.ipucu}
-          className="px-3 py-2 text-sm"
+          ikon={b.ikon}
         >
           {b.etiket}
         </Button>
       ))}
       {arananSetter !== undefined && (
         <div className="ml-auto relative">
-          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Ikon d={I.ara} className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
             value={aranan || ''}

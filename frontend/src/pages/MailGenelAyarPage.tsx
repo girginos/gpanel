@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 type Ayar = {
   max_mesaj_mb: number
@@ -31,7 +32,6 @@ const MGENEL_EN: Record<string, string> = {
   "Sağlık analizinde kontrol edilecek DNSBL bölgeleri. Noktalı virgül veya virgülle ayırın.": "DNSBL zones to check in health analysis. Separate with semicolons or commas.",
   "Spam/kötüye kullanımı önler. 0 = sınırsız. En kısıtlayıcı olan uygulanır. Domain planı özel limit belirlemişse o öncelikli olur.": "Prevents spam/abuse. 0 = unlimited. The most restrictive one applies. If a domain plan sets a specific limit it takes precedence.",
   "Sunucu genelinde geçerli mail ayarları (tüm domainler için varsayılan).": "Server-wide mail settings (default for all domains).",
-  "✓ Ayarlar kaydedildi ve sunucuya uygulandı.": "✓ Settings saved and applied to the server.",
   "Türkçe": "English",
   "Kaydedilemedi": "Failed to save",
   "Mesaj Boyutu": "Message Size",
@@ -86,7 +86,7 @@ export default function MailGenelAyarPage() {
     setKaydediliyor(true); setHata(null); setBildirim(null)
     try {
       await api.put('/eklenti/mail/genel-ayarlar', a)
-      setBildirim(cevir("✓ Ayarlar kaydedildi ve sunucuya uygulandı."))
+      setBildirim(cevir("Ayarlar kaydedildi ve sunucuya uygulandı."))
       toast.basari(cevir("Kaydedildi"), cevir("Ayarlar kaydedildi ve sunucuya uygulandı."))
     } catch (e) {
       const m = apiHata(e, cevir("Kaydedilemedi"))
@@ -132,8 +132,7 @@ export default function MailGenelAyarPage() {
           </section>
 
           <div className="flex justify-end">
-            <Button onClick={kaydet} disabled={kaydediliyor} color="primary"
-              className="text-sm px-6 py-2.5">
+            <Button onClick={kaydet} yukleniyor={kaydediliyor} color="primary" ikon={I.disket}>
               {kaydediliyor ? cevir("Kaydediliyor…") : cevir("Kaydet ve Uygula")}
             </Button>
           </div>

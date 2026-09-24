@@ -120,7 +120,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
         if (dur) return
         setOpLog(r.data.log || '')
         if (!r.data.calisiyor) {
-          const ok = `✓ PHP ${aktifOp.surum} ${aktifOp.islem === 'kaldir' ? cevir("kaldırıldı") : cevir("kuruldu")}`
+          const ok = `PHP ${aktifOp.surum} ${aktifOp.islem === 'kaldir' ? cevir("kaldırıldı") : cevir("kuruldu")}`
           setBasari(ok)
           toast.basari(ok)
           setTimeout(() => setBasari(null), 6000)
@@ -149,8 +149,8 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
   }
 
   async function kur(s: Surum) {
-    if (aktifOp) { (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.") })); return }
-    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("PHP {0} ({1}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?"), s.surum, s.kaynak) }))) return
+    if (aktifOp) { (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin."), ton: 'uyari' })); return }
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("PHP {0} ({1}) için 14 paket kurulacak (fpm + cli + mysqlnd + 12 ekstension). Devam?"), s.surum, s.kaynak), onayIkonu: I.oynat }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kur', { surum: s.surum, kaynak: s.kaynak })
@@ -164,11 +164,11 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
 
   async function kaldir(s: Surum) {
     if (s.kaynak === 'appstream') {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("AppStream PHP sistem default'u, kaldırılamaz") }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("AppStream PHP sistem default'u, kaldırılamaz"), ton: 'uyari' }))
       return
     }
-    if (aktifOp) { (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin.") })); return }
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("PHP {0} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?"), s.surum), ton: 'tehlike' }))) return
+    if (aktifOp) { (await bilgi({ baslik: cevir("Bilgi"), mesaj: cevir("Zaten bir PHP işlemi sürüyor — bitmesini bekleyin."), ton: 'uyari' })); return }
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("PHP {0} (Remi) ve TÜM ekstension'ları KALDIRILACAK.\nBu sürümü kullanan domain varsa işlem reddedilir. Devam?"), s.surum), ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setBasari(null); setOpLog('')
     try {
       await api.post('/php-surumler/kaldir', { surum: s.surum, kaynak: s.kaynak })
@@ -228,7 +228,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
         {(['tumu', 'yuklu', 'yuklenebilir'] as const).map(f => (
           <Button key={f} onClick={() => setFiltre(f)}
             color={filtre === f ? 'primary' : 'neutral'} variant={filtre === f ? 'filled' : 'outlined'}
-            className="px-3 py-1 text-sm">
+            boyut="sm">
             {f === 'tumu' ? cevir("Tümü") : f === 'yuklu' ? cevirT(cevir("Yüklü ({0})"), yukluSayi) : cevirT(cevir("Yüklenebilir ({0})"), surumler.length - yukluSayi)}
           </Button>
         ))}
