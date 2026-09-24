@@ -9,6 +9,7 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Badge, Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
  * Panel kapıları (ADR-GP-001) — Port Yönetimi'nin kapı modu kartı.
@@ -308,6 +309,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         cevir('Sunucudan yanıt alınamadı (zaman aşımı ya da bağlantı kesintisi); işlem sunucuda yine de tamamlanmış olabilir. Kartta görünen portlar sunucudan yeniden okundu — tekrar denemeden önce kontrol edin.'),
         yonetici ? cevir('Yönetici portu değiştiyse bu sekmedeki oturum sona erer: bu adresten yeniden giriş yaptığınızda yeni yönetici adresiniz gösterilir.') : '',
       ].filter(Boolean).join(' '),
+      ton: 'uyari',
     })
   }
 
@@ -342,12 +344,12 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
       ? {
           baslik: cevir('Yönetici doğrulaması OLMADAN kapatılsın mı?'),
           mesaj: cevir('Yeni yönetici adresinden henüz hiç giriş yapılmadı. Sağlayıcınızın güvenlik duvarı yeni portu kesiyorsa eski adres de kapanınca panele HİÇ ulaşamazsınız (yalnız SSH ile düzeltilir). Emin değilseniz önce yeni adresten giriş yapın.') + rolUyarisi,
-          onayEtiketi: cevir('Zorla kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike',
+          onayEtiketi: cevir('Zorla kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike', onayIkonu: I.kilit,
         }
       : {
           baslik: cevir('Geçiş kapısı şimdi kapatılsın mı?'),
           mesaj: cevir('Eski adresi kullanmaya devam eden kullanıcılar panele o adresten ulaşamaz.') + rolUyarisi,
-          onayEtiketi: cevir('Kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike',
+          onayEtiketi: cevir('Kapat'), iptalEtiketi: cevir('Vazgeç'), ton: 'tehlike', onayIkonu: I.kilit,
         })
     if (!ok) return
     setMesgul(true)
@@ -366,10 +368,9 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
 
   if (kapi.hata) {
     return (
-      <section className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
-        <h2 className="text-base font-semibold">{cevir('Kapı ayarı okunamadı')}</h2>
-        <p className="mt-1 font-mono text-xs">{kapi.hata}</p>
-      </section>
+      <UyariKutusu ton="tehlike" baslik={cevir('Kapı ayarı okunamadı')}>
+        <p className="font-mono text-xs">{kapi.hata}</p>
+      </UyariKutusu>
     )
   }
 
@@ -385,10 +386,12 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         {cevir('Yönetici, bayi ve müşteri panele ayrı portlardan girer. Yanlış kapıda giriş formu yoktur; oturum yalnız alındığı kapıda geçerlidir.')}
       </p>
       {!kapi.zorlama && (
-        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          {cevir('Kapı kuralları şu an devre dışı: nginx zinciri doğrulanamadı, panel tek-port davranışında (kimse kilitlenmez). Ayrıntı:')}{' '}
-          <code className="font-mono">journalctl -u girginospanel | grep kapi</code>
-        </p>
+        <UyariKutusu ton="uyari" className="mt-3">
+          <p className="text-xs">
+            {cevir('Kapı kuralları şu an devre dışı: nginx zinciri doğrulanamadı, panel tek-port davranışında (kimse kilitlenmez). Ayrıntı:')}{' '}
+            <code className="font-mono">journalctl -u girginospanel | grep kapi</code>
+          </p>
+        </UyariKutusu>
       )}
 
       <ul className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-dark-600 dark:border-dark-600">
@@ -415,8 +418,9 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
                 </span>
               )}
               <Button
-                type="button" color="neutral" variant="outlined"
-                className="ml-auto px-3 py-1 text-xs"
+                type="button" color="neutral" variant="outlined" boyut="sm"
+                ikon={duzenlenen === r.rol ? I.kapat : I.kalem}
+                className="ml-auto"
                 disabled={mesgul}
                 onClick={() => { setDuzenlenen(duzenlenen === r.rol ? null : r.rol); setYeniPort('') }}
                 aria-expanded={duzenlenen === r.rol}
@@ -447,7 +451,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
                     aria-describedby={`kapi-port-${r.rol}-yardim`}
                     className="w-36 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm dark:border-dark-600 dark:bg-dark-900"
                   />
-                  <Button type="submit" color={r.rol === 'admin' ? 'primary' : 'error'} disabled={mesgul} yukleniyor={mesgul} className="px-3 py-1.5 text-sm">
+                  <Button type="submit" color={r.rol === 'admin' ? 'primary' : 'error'} boyut="sm" ikon={I.onay} disabled={mesgul} yukleniyor={mesgul}>
                     {cevir('Portu değiştir')}
                   </Button>
                 </div>
@@ -500,10 +504,10 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
                 {cevir('gün')}
               </span>
             </label>
-            <Button type="button" color="warning" variant="soft" disabled={mesgul} onClick={() => void uzat()} className="px-3 py-1.5 text-sm">
+            <Button type="button" color="warning" variant="soft" boyut="sm" ikon={I.saat} disabled={mesgul} onClick={() => void uzat()}>
               {cevir('Uzat')}
             </Button>
-            <Button type="button" color="error" variant="soft" disabled={mesgul || !kapi.admin_dogrulandi} onClick={() => void kapat(false)} className="px-3 py-1.5 text-sm">
+            <Button type="button" color="error" variant="soft" boyut="sm" ikon={I.kilit} disabled={mesgul || !kapi.admin_dogrulandi} onClick={() => void kapat(false)}>
               {cevir('Şimdi kapat')}
             </Button>
             {!kapi.admin_dogrulandi && (

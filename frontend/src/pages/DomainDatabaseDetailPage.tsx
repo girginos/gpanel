@@ -8,7 +8,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialog } from '@/components/Dialog'
@@ -37,7 +38,7 @@ const DBDETAIL_EN: Record<string, string> = {
   "Anasayfa": "Home",
   "Sunucu": "Server",
   "Gizle": "Hide",
-  "✓ Kopyalandı": "✓ Copied",
+  "Kopyalandı": "Copied",
   "Kopyala": "Copy",
   "Optimize ediliyor…": "Optimizing…",
   "Evet, sil": "Yes, delete",
@@ -94,7 +95,7 @@ export default function DomainDatabaseDetailPage() {
       if (hedef.origin !== window.location.origin) return
       window.open(hedef.href, '_blank', 'noopener')
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("phpMyAdmin token alınamadı")) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("phpMyAdmin token alınamadı")), ton: 'tehlike' }))
     }
   }
 
@@ -103,7 +104,7 @@ export default function DomainDatabaseDetailPage() {
     if (!(await onay({
       baslik: cevir("Veritabanını Optimize Et"),
       mesaj: cevirT(cevir("\"{0}\" içindeki tüm tablolar optimize edilecek (fragmentasyon giderilir, kullanılmayan alan geri kazanılır). Devam edilsin mi?"), db.db_adi),
-      onayEtiketi: cevir("Optimize Et"),
+      onayEtiketi: cevir("Optimize Et"), onayIkonu: I.simsek,
     }))) return
     setOptCalisiyor(true)
     try {
@@ -114,10 +115,11 @@ export default function DomainDatabaseDetailPage() {
         mesaj: kaz > 0
           ? cevirT(cevir("\"{0}\" optimize edildi. {1} alan geri kazanıldı ({2} → {3})."), db.db_adi, boyutFmt(kaz), boyutFmt(Number(data?.once_bayt || 0)), boyutFmt(Number(data?.sonra_bayt || 0)))
           : cevirT(cevir("\"{0}\" optimize edildi. Tablolar zaten derli topluydu."), db.db_adi),
+        ton: 'basari',
       })
       yukle()
     } catch (e) {
-      await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Optimize başarısız")) })
+      await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Optimize başarısız")), ton: 'tehlike' })
     } finally {
       setOptCalisiyor(false)
     }
@@ -130,7 +132,7 @@ export default function DomainDatabaseDetailPage() {
       setSilOnay(false)
       nav(`/abonelikler/${id}/veritabanlari`)
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Silme başarısız")) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Silme başarısız")), ton: 'tehlike' }))
     }
   }
 
@@ -144,13 +146,13 @@ export default function DomainDatabaseDetailPage() {
       ]} />
 
       <div className="flex items-center gap-3 mb-5">
-        <Link to={`/abonelikler/${id}/veritabanlari`} className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" title={cevir("Listeye dön")}>
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+        <Link to={`/abonelikler/${id}/veritabanlari`} className={butonSinifi({ variant: 'flat', isIcon: true, className: 'size-8 rounded-full' })} title={cevir("Listeye dön")} aria-label={cevir("Listeye dön")}>
+          <Ikon d={I.geri} className="size-4" />
         </Link>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 font-mono truncate">{db?.db_adi || cevir("Veritabanı")}</h1>
       </div>
 
-      {hata && <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-red-700 dark:text-red-300">{hata}</div>}
+      {hata && <UyariKutusu ton="tehlike" className="mb-3">{hata}</UyariKutusu>}
       {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : db && (
         <div className="space-y-4">
           {/* Bağlantı bilgileri */}
@@ -170,10 +172,10 @@ export default function DomainDatabaseDetailPage() {
           <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("İşlemler")}</h2>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={pmaAc} color="info" variant="soft" className="gap-1.5 px-3 py-2 text-sm"><Ikon d={I.kilitAcik} className="h-4 w-4" /> {cevir("phpMyAdmin'de Aç")}</Button>
-              <Button onClick={() => setPwReset(true)} color="primary" variant="soft" className="gap-1.5 px-3 py-2 text-sm"><Ikon d={I.anahtar} className="h-4 w-4" /> {db.db_kullanici ? cevir("Parola Sıfırla") : cevir("Kullanıcı Oluştur")}</Button>
-              <Button onClick={optimizeEt} yukleniyor={optCalisiyor} color="success" variant="soft" className="gap-1.5 px-3 py-2 text-sm">{!optCalisiyor && <Ikon d={I.simsek} className="h-4 w-4" />} {optCalisiyor ? cevir("Optimize ediliyor…") : cevir("Optimize Et")}</Button>
-              <Button onClick={() => setSilOnay(true)} color="error" variant="soft" className="gap-1.5 px-3 py-2 text-sm ml-auto"><Ikon d={I.cop} className="h-4 w-4" /> {cevir("Sil")}</Button>
+              <Button onClick={pmaAc} variant="outlined" ikon={I.db} ikonSonda={I.harici}>{cevir("phpMyAdmin'de Aç")}</Button>
+              <Button onClick={() => setPwReset(true)} variant="outlined" ikon={db.db_kullanici ? I.anahtar : I.kullaniciArti}>{db.db_kullanici ? cevir("Parola Sıfırla") : cevir("Kullanıcı Oluştur")}</Button>
+              <Button onClick={optimizeEt} yukleniyor={optCalisiyor} variant="outlined" ikon={I.simsek}>{optCalisiyor ? cevir("Optimize ediliyor…") : cevir("Optimize Et")}</Button>
+              <Button onClick={() => setSilOnay(true)} color="error" variant="soft" ikon={I.cop} className="ml-auto">{cevir("Sil")}</Button>
             </div>
           </div>
         </div>
@@ -188,6 +190,7 @@ export default function DomainDatabaseDetailPage() {
         baslik={cevir("Veritabanını sil")}
         mesaj={cevirT(cevir("\"{0}\" veritabanı ve kullanıcısı kalıcı silinecek. Bu işlem geri alınamaz!"), db?.db_adi)}
         ton="tehlike"
+        onayIkonu={I.cop}
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilOnay(false)}

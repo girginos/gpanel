@@ -7,6 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import { useMarka, logoURL, bannerURL, VARSAYILAN as MARKA_VARSAYILAN } from '@/lib/marka'
 import { Button, Input } from '@/components/ui'
+import { I } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
 import GlobeBanner from '@/components/GlobeBanner'
 
@@ -190,7 +191,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <Button type="submit" color="primary" disabled={yukleniyor} className="w-full py-2.5">
+          <Button type="submit" color="primary" yukleniyor={yukleniyor} ikon={ikiFa ? I.kalkan : I.kilitAcik} className="w-full">
             {yukleniyor ? cevir('Giriş yapılıyor…') : ikiFa ? cevir('Doğrula ve giriş yap') : cevir("Giriş yap")}
           </Button>
         </form>

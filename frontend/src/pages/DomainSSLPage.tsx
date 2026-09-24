@@ -12,6 +12,8 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import IlerlemePaneli, { type IlerlemeIsi } from '@/components/IlerlemePaneli'
 import { Button, Badge } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string; ssl: boolean; ssl_bitis?: string }
 type SSLDurum = {
@@ -58,11 +60,11 @@ const SSL_EN: Record<string, string> = {
   "Self-Signed Sertifika": "Self-Signed Certificate",
   "Sunucu tarafından öz-imzalı bir sertifika oluşturur. Tarayıcı uyarısı verir ama bağlantı şifrelidir.": "Creates a self-signed certificate on the server. The browser shows a warning but the connection is encrypted.",
   "Test/dev ortamı için uygun.": "Suitable for test/dev environments.",
-  "✗ Tarayıcıda \"güvenli değil\" uyarısı": "✗ \"Not secure\" warning in the browser",
+  "Tarayıcıda \"güvenli değil\" uyarısı": "\"Not secure\" warning in the browser",
   "Kuruluyor…": "Installing…",
   "Self-Signed Kur": "Install Self-Signed",
   "Resmi Let's Encrypt sertifikası, tüm tarayıcılarda otomatik güvenilir. 90 günde bir otomatik yenilenir.": "Official Let's Encrypt certificate, automatically trusted in all browsers. Auto-renews every 90 days.",
-  "✓ Otomatik yenileme (cron)": "✓ Automatic renewal (cron)",
+  "Otomatik yenileme (cron)": "Automatic renewal (cron)",
   "için ayrı sertifika alınıp IMAP/POP/SMTP + webmail'e kurulur.": "a separate certificate is obtained and installed for IMAP/POP/SMTP + webmail.",
   "Let's Encrypt Sertifikası Al": "Get Let's Encrypt Certificate",
   "Kurulu": "Installed",
@@ -104,9 +106,9 @@ const SSL_EN: Record<string, string> = {
   "Öz-imzalı": "Self-signed",
   "Let's Encrypt (Ücretsiz)": "Let's Encrypt (Free)",
   "Alan adı bu sunucuya DNS ile yönelmiş olmalı": "The domain must point to this server via DNS",
-  "✓ Anında kurulur": "✓ Installs instantly",
-  "✓ DNS bağımlılığı yok": "✓ No DNS dependency",
-  "✓ Tarayıcılarda yeşil kilit": "✓ Green padlock in browsers",
+  "Anında kurulur": "Installs instantly",
+  "DNS bağımlılığı yok": "No DNS dependency",
+  "Tarayıcılarda yeşil kilit": "Green padlock in browsers",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SSL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 // ceviriAciklama — backend'in DINAMIK kapsam aciklamalarini (host/IP gomulu) EN'e
@@ -265,7 +267,7 @@ export default function DomainSSLPage() {
   }
 
   async function disable() {
-    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("SSL kaldırılsın mı? Site HTTP'ye dönecek.") }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("SSL kaldırılsın mı? Site HTTP'ye dönecek."), ton: 'tehlike', onayIkonu: I.cop }))) return
     setIsleniyor(true); setHata(null); setBasari(null); setUyari(null)
     try {
       await api.delete(`/domains/${id}/ssl`)
@@ -321,7 +323,7 @@ export default function DomainSSLPage() {
         </p>
       )}
 
-      {uyari && <div className="mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-800 dark:text-amber-300">{uyari}</div>}
+      {uyari && <UyariKutusu ton="uyari" className="mb-3">{uyari}</UyariKutusu>}
       {/* Adım listesi SAĞ ALT PANELE taşındı — sayfanın içinde büyüyüp
           altındaki kartları itmesin. Panel return'ün sonunda. */}
 
@@ -358,10 +360,12 @@ export default function DomainSSLPage() {
             {durum.bitis_iso && <Sat e={cevir("Bitiş")} d={new Date(durum.bitis_iso).toLocaleDateString('tr-TR', { dateStyle: 'long' })} />}
             <Button
               color="error"
-              variant="outlined"
+              variant="soft"
               onClick={disable}
               disabled={isleniyor || isDurum === 'calisiyor'}
-              className="mt-4 px-4 text-sm"
+              yukleniyor={isleniyor}
+              ikon={I.cop}
+              className="mt-4"
             >
               {cevir("SSL'i Kaldır (HTTP'ye dön)")}
             </Button>
@@ -392,15 +396,16 @@ export default function DomainSSLPage() {
               {cevir(cevir("Test/dev ortamı için uygun."))}
             </p>
             <ul className="text-xs text-slate-500 dark:text-slate-500 mb-4 space-y-1">
-              <li>{cevir("✓ DNS bağımlılığı yok")}</li>
-              <li>{cevir("✓ Anında kurulur")}</li>
-              <li>{cevir("✗ Tarayıcıda \"güvenli değil\" uyarısı")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.onay} className="h-3.5 w-3.5 mt-px shrink-0 text-success dark:text-success-lighter" />{cevir("DNS bağımlılığı yok")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.onay} className="h-3.5 w-3.5 mt-px shrink-0 text-success dark:text-success-lighter" />{cevir("Anında kurulur")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.kapat} className="h-3.5 w-3.5 mt-px shrink-0 text-error dark:text-error-lighter" />{cevir("Tarayıcıda \"güvenli değil\" uyarısı")}</li>
             </ul>
             <Button
               color="primary"
               onClick={() => issue('self-signed')}
               yukleniyor={isleniyor || isDurum === 'calisiyor'}
-              className="w-full px-4 py-2.5 text-sm"
+              ikon={I.kalkan}
+              className="w-full"
             >
               {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Self-Signed Kur")}
             </Button>
@@ -417,9 +422,9 @@ export default function DomainSSLPage() {
               {cevir("Resmi Let's Encrypt sertifikası, tüm tarayıcılarda otomatik güvenilir. 90 günde bir otomatik yenilenir.")}
             </p>
             <ul className="text-xs text-slate-500 dark:text-slate-500 mb-4 space-y-1">
-              <li>{cevir("✓ Tarayıcılarda yeşil kilit")}</li>
-              <li>{cevir("✓ Otomatik yenileme (cron)")}</li>
-              <li className="flex items-start gap-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 mt-px shrink-0 text-amber-500"><path d="M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z"/></svg>{cevir("Alan adı bu sunucuya DNS ile yönelmiş olmalı")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.onay} className="h-3.5 w-3.5 mt-px shrink-0 text-success dark:text-success-lighter" />{cevir("Tarayıcılarda yeşil kilit")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.onay} className="h-3.5 w-3.5 mt-px shrink-0 text-success dark:text-success-lighter" />{cevir("Otomatik yenileme (cron)")}</li>
+              <li className="flex items-start gap-1"><Ikon d={I.uyari} className="h-3.5 w-3.5 mt-px shrink-0 text-warning dark:text-warning-lighter" />{cevir("Alan adı bu sunucuya DNS ile yönelmiş olmalı")}</li>
             </ul>
             {mailAktif && (
               <label className="flex items-start gap-2 mb-4 p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 cursor-pointer">
@@ -431,10 +436,11 @@ export default function DomainSSLPage() {
               </label>
             )}
             <Button
-              color="success"
+              color="primary"
               onClick={() => issue('letsencrypt')}
               yukleniyor={isleniyor || isDurum === 'calisiyor'}
-              className="w-full px-4 py-2.5 text-sm"
+              ikon={I.kalkan}
+              className="w-full"
             >
               {(isleniyor || isDurum === 'calisiyor') ? cevir("Kuruluyor…") : cevir("Let's Encrypt Sertifikası Al")}
             </Button>
@@ -480,9 +486,9 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
             variant="outlined"
             onClick={onDnsYenile}
             title={cevir("DNS önbelleğini temizle ve kayıtları kamu DNS'ten yeniden oku")}
-            className="gap-2 px-3.5 text-sm"
+            boyut="sm"
+            ikon={I.yenile}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
             {cevir("DNS'i yenile")}
           </Button>
         )}
@@ -516,10 +522,12 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
         ))}
       </div>
       {mailSatirlar.length > 0 && onKur && (
-        <div className="mt-4 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <span className="text-xs text-amber-800 dark:text-amber-200">{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
-          <Button color="primary" disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0 px-3 text-xs">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</Button>
-        </div>
+        <UyariKutusu ton="uyari" className="mt-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span className="text-xs">{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
+            <Button color="primary" boyut="sm" ikon={I.kalkan} disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</Button>
+          </div>
+        </UyariKutusu>
       )}
     </div>
   )

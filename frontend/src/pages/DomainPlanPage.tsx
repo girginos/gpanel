@@ -9,6 +9,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -28,7 +29,7 @@ const DPLAN_EN: Record<string, string> = {
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
   "Türkçe": "English",
-  "✓ Limitler kaydedildi ve bu hostinge uygulandı.": "✓ Limits saved and applied to this hosting.",
+  "Limitler kaydedildi ve bu hostinge uygulandı.": "Limits saved and applied to this hosting.",
   "Domainler": "Domains",
   "Hosting Planı": "Hosting Plan",
   "Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin.": "Upgrade or downgrade this hosting's package, or create a plan specific to this hosting and set its limits yourself.",
@@ -37,7 +38,7 @@ const DPLAN_EN: Record<string, string> = {
   "Veritabanı": "Database",
   "PHP sürümü": "PHP version",
   "Vazgeç": "Cancel",
-  "Gelişmiş ayarlar (WAF, nginx, IO) →": "Advanced settings (WAF, nginx, IO) →",
+  "Gelişmiş ayarlar (WAF, nginx, IO)": "Advanced settings (WAF, nginx, IO)",
   "Aktif": "Active",
   "Düzenle": "Edit",
   "Mevcut plan": "Current plan",
@@ -85,8 +86,8 @@ const DPLAN_EN: Record<string, string> = {
   "yükselt": "increase",
   "Önce bir hosting planı oluşturun.": "Create a hosting plan first.",
   "Özel plan oluşturulamadı": "Failed to create custom plan",
-  "↑ Yükselt": "↑ Upgrade",
-  "↓ Düşür": "↓ Downgrade",
+  "Yükselt": "Upgrade",
+  "Düşür": "Downgrade",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -146,7 +147,7 @@ export default function DomainPlanPage() {
     setIsleniyor(p.id); setHata(null); setBasari(null); setTaslak(null)
     try {
       await api.put(`/domains/${id}/plan`, { plan_id: p.id })
-      const m = `✓ "${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`
+      const m = `"${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       yukle()
@@ -164,7 +165,7 @@ export default function DomainPlanPage() {
       const { data } = await api.post<{ plan_id: number; ad: string; zaten_ozel?: boolean }>(`/domains/${id}/ozel-plan`, {})
       const m = data.zaten_ozel
         ? `"${data.ad}" ${cevir("zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.")}`
-        : `✓ "${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`
+        : `"${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       const { data: pl } = await api.get<{ plan: Plan }>(`/plans/${data.plan_id}`)
@@ -196,8 +197,8 @@ export default function DomainPlanPage() {
       await api.put(`/plans/${taslak.id}`, taslak)
       // Plan kaydı limitleri hostinge KENDİLİĞİNDEN uygulamaz — yeniden atayarak uygula.
       await api.put(`/domains/${id}/plan`, { plan_id: taslak.id })
-      setBasari(cevir("✓ Limitler kaydedildi ve bu hostinge uygulandı."))
-      toast.basari(cevir("Kaydedildi"), cevir("✓ Limitler kaydedildi ve bu hostinge uygulandı."))
+      setBasari(cevir("Limitler kaydedildi ve bu hostinge uygulandı."))
+      toast.basari(cevir("Kaydedildi"), cevir("Limitler kaydedildi ve bu hostinge uygulandı."))
       setTaslak(null)
       yukle()
     } catch (e) {
@@ -249,20 +250,19 @@ export default function DomainPlanPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {ozelMi ? (
-                  <Button type="button" color="primary" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
-                          className="px-3 py-1.5 text-sm">
+                  <Button type="button" color="primary" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}>
                     {cevir("Limitleri özelleştir")}
                   </Button>
                 ) : (
                   <Button type="button" color="primary" onClick={ozelPlan} disabled={isleniyor !== null}
-                          yukleniyor={isleniyor === 'ozel'}
-                          className="px-3 py-1.5 text-sm">
+                          yukleniyor={isleniyor === 'ozel'} ikon={I.arti}>
                     {isleniyor === 'ozel' ? cevir('Oluşturuluyor…') : cevir("Tek tıkla özel plan")}
                   </Button>
                 )}
                 {mevcut && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
-                        className={butonSinifi({ variant: 'outlined', className: 'px-3 py-1.5 text-sm' })}>
+                        className={butonSinifi({ variant: 'outlined' })}>
+                    <Ikon d={I.ayar} className="size-4 shrink-0 -ms-1 me-2" />
                     {cevir("Tüm ayarlar")}
                   </Link>
                 )}
@@ -305,16 +305,15 @@ export default function DomainPlanPage() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button type="button" color="primary" onClick={kaydet} disabled={isleniyor !== null}
-                        yukleniyor={isleniyor === 'kaydet'}
-                        className="px-3.5 py-2 text-sm">
+                        yukleniyor={isleniyor === 'kaydet'} ikon={I.disket}>
                   {isleniyor === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet ve uygula')}
                 </Button>
-                <Button type="button" variant="outlined" onClick={() => setTaslak(null)} disabled={isleniyor !== null}
-                        className="px-3.5 py-2 text-sm">
+                <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setTaslak(null)} disabled={isleniyor !== null}>
                   {cevir("Vazgeç")}
                 </Button>
                 <Link to={`/araclar/paketler/${taslak.id}`} className="inline-flex items-center px-1 py-2 text-sm text-brand-700 dark:text-brand-300 hover:underline">
-                  {cevir("Gelişmiş ayarlar (WAF, nginx, IO) →")}
+                  {cevir("Gelişmiş ayarlar (WAF, nginx, IO)")}
+                  <Ikon d={I.ileri} className="size-4 shrink-0 ms-1.5" />
                 </Link>
               </div>
             </div>
@@ -324,7 +323,7 @@ export default function DomainPlanPage() {
             <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-dark-600">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">{cevir("Tanımlı plan yok")}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Önce bir hosting planı oluşturun.")}</p>
-              <Link to="/araclar/paketler" className={butonSinifi({ color: 'primary', className: 'mt-4 px-3 py-1.5 text-sm' })}>{cevir("Planlara git")}</Link>
+              <Link to="/araclar/paketler" className={butonSinifi({ color: 'primary', className: 'mt-4' })}>{cevir("Planlara git")}<Ikon d={I.ileri} className="size-4 shrink-0 ms-2 -me-1" /></Link>
             </div>
           ) : (
             <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -354,8 +353,8 @@ export default function DomainPlanPage() {
                         <>
                           <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
                           {ozelMi && (
-                            <Button type="button" color="primary" variant="outlined" onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
-                                    className="shrink-0 px-3 py-1.5 text-sm">
+                            <Button type="button" variant="outlined" boyut="sm" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
+                                    className="shrink-0">
                               {cevir("Düzenle")}
                             </Button>
                           )}
@@ -363,9 +362,10 @@ export default function DomainPlanPage() {
                       ) : (
                         <Button type="button" color={yon === 'düşür' ? 'neutral' : 'primary'}
                                 onClick={() => planUygula(p)} disabled={isleniyor !== null}
-                                yukleniyor={isleniyor === p.id}
-                                className="w-full px-3 py-1.5 text-sm">
-                          {isleniyor === p.id ? cevir('Uygulanıyor…') : yon === 'yükselt' ? cevir('↑ Yükselt') : yon === 'düşür' ? cevir('↓ Düşür') : cevir("Bu plana geç")}
+                                yukleniyor={isleniyor === p.id} boyut="sm"
+                                ikon={yon === 'yükselt' ? I.yukari : yon === 'düşür' ? I.asagi : I.onay}
+                                className="w-full">
+                          {isleniyor === p.id ? cevir('Uygulanıyor…') : yon === 'yükselt' ? cevir('Yükselt') : yon === 'düşür' ? cevir('Düşür') : cevir("Bu plana geç")}
                         </Button>
                       )}
                     </div>

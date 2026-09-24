@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
+import { I, Ikon } from '@/components/Ikon'
 
 type Limit = { kullanim: number; limit: number }
 export type Ozet = {
@@ -78,7 +79,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
     return (
       <Card className="bg-white dark:bg-dark-700 p-5 text-sm text-slate-500 dark:text-slate-400">
         <div className="mb-2">{cevir("Kaynak bilgisi alınamadı.")}</div>
-        <Button variant="outlined" onClick={yukle} className="text-xs px-3 py-1.5">
+        <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle}>
           {cevir("Yeniden dene")}
         </Button>
       </Card>
@@ -91,11 +92,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       <Card className="bg-white dark:bg-dark-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Paket ve Kaynaklar")}</h3>
-          <Button variant="flat" isIcon onClick={yukle} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </Button>
+          <Button variant="flat" isIcon ikon={I.yenile} onClick={yukle} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")} />
         </div>
 
         <div className="mb-3 pb-3 border-b border-slate-100 dark:border-dark-600 flex items-start justify-between gap-3">
@@ -106,12 +103,10 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           {/* Plan aksiyonu: yükseltme / düşürme / bu hostinge özel plan — hepsi plan sayfasında */}
           <Link
             to={`/abonelikler/${domainId}/plan`}
-            className={butonSinifi({ variant: 'outlined', className: 'shrink-0 gap-1.5 px-2.5 py-1.5 text-xs' })}
+            className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'shrink-0' })}
             title={cevir(cevir("Planı yükselt, düşür veya bu hostinge özel plan oluştur"))}
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L4 7m3-3l3 3m7 1v12m0 0l3-3m-3 3l-3-3" />
-            </svg>
+            <Ikon d={I.kalem} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />
             {cevir(cevir("Değiştir"))}
           </Link>
         </div>
@@ -146,7 +141,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
                     <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden="true" />
                     {cevir("Aktif")}
                   </Badge>
-                  {ozet.ssl_bitis && <span className="text-slate-400 dark:text-slate-500 text-[10px]">→ {ozet.ssl_bitis}</span>}
+                  {ozet.ssl_bitis && <span className="inline-flex items-center gap-1 text-slate-400 dark:text-slate-500 text-[10px]"><Ikon d={I.ileri} className="size-3" />{ozet.ssl_bitis}</span>}
                 </span>
               : <Badge variant="soft" className="text-xs px-2 py-0.5 gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50" aria-hidden="true" />

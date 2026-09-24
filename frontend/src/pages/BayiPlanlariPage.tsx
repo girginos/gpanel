@@ -11,6 +11,7 @@ import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 type Paket = {
   id: number; ad: string; aciklama: string
@@ -85,7 +86,7 @@ export default function BayiPlanlariPage() {
 
   function yeniAc() { nav('/bayi-planlari/yeni') }   // modal yerine OZEL SAYFA (ilke ayarlari icin)
   async function sil(p: Paket) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${p.ad}" ${cevir('paketi silinsin mi?')}`, ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setOk(null)
     try {
       await api.delete(`/reseller-plans/${p.id}`)
@@ -105,8 +106,8 @@ export default function BayiPlanlariPage() {
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Bayi Planları") }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayi Planları")}</h1>
-        <Button color="primary" onClick={yeniAc} className="gap-1.5 text-sm px-3 py-1.5">
-          <span className="text-base leading-none">+</span> {cevir("Yeni Bayi Planı")}
+        <Button color="primary" ikon={I.arti} onClick={yeniAc}>
+          {cevir("Yeni Bayi Planı")}
         </Button>
       </div>
       <p className="text-sm text-slate-500 mb-4">
@@ -149,8 +150,8 @@ export default function BayiPlanlariPage() {
                     <td className={T.hucre} data-etiket={cevir("Fiyat")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtFiyat(p.fiyat_kurus)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Bayi")}><span className="text-slate-700 dark:text-slate-300">{p.bayi_sayisi}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <button onClick={() => nav(`/bayi-planlari/${p.id}`)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 lg:mr-3">{cevir("Düzenle")}</button>
-                      <button onClick={() => sil(p)} className="text-xs text-red-600 dark:text-red-400 hover:text-red-700">{cevir("Sil")}</button>
+                      <Button variant="outlined" boyut="sm" ikon={I.kalem} onClick={() => nav(`/bayi-planlari/${p.id}`)} className="lg:mr-2">{cevir("Düzenle")}</Button>
+                      <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(p)}>{cevir("Sil")}</Button>
                     </td>
                   </tr>
                 ))}
