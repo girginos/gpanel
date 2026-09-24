@@ -6,6 +6,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Durum = { kurulu: boolean; surum: string; composer_json: boolean; kullanici: string; dizin: string }
 
@@ -58,8 +59,6 @@ export default function DomainComposerPage() {
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
   if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
 
-  const btnBase = 'px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50'
-
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="max-w-3xl mx-auto">
@@ -83,23 +82,23 @@ export default function DomainComposerPage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <span className="text-xs font-mono text-slate-500">{d.surum}</span>
-                  <span className={`ml-2 text-xs ${d.composer_json ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                  <Badge variant="soft" color={d.composer_json ? 'success' : 'neutral'} className="ml-2">
                     {d.composer_json ? cevir('✓ composer.json bulundu') : cevir('composer.json yok')}
-                  </span>
+                  </Badge>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button disabled={!!calisan} onClick={() => calistir('install')} className={`${btnBase} bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'install' ? '…' : 'install'}</button>
-                <button disabled={!!calisan} onClick={() => calistir('update')} className={`${btnBase} bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100`}>{calisan === 'update' ? '…' : 'update'}</button>
-                <button disabled={!!calisan} onClick={() => calistir('dump-autoload')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>dump-autoload</button>
-                <button disabled={!!calisan} onClick={() => calistir('validate')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>validate</button>
-                <button disabled={!!calisan} onClick={() => calistir('show')} className={`${btnBase} border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700`}>show</button>
+                <Button color="primary" disabled={!!calisan} yukleniyor={calisan === 'install'} onClick={() => calistir('install')} className="px-3 py-1.5 text-sm">install</Button>
+                <Button color="primary" disabled={!!calisan} yukleniyor={calisan === 'update'} onClick={() => calistir('update')} className="px-3 py-1.5 text-sm">update</Button>
+                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'dump-autoload'} onClick={() => calistir('dump-autoload')} className="px-3 py-1.5 text-sm">dump-autoload</Button>
+                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'validate'} onClick={() => calistir('validate')} className="px-3 py-1.5 text-sm">validate</Button>
+                <Button variant="outlined" disabled={!!calisan} yukleniyor={calisan === 'show'} onClick={() => calistir('show')} className="px-3 py-1.5 text-sm">show</Button>
               </div>
               <div className="mt-3 flex gap-2">
                 <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
                   className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
-                <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('require', paket.trim())} className={`${btnBase} bg-emerald-600 hover:bg-emerald-700 text-white`}>require</button>
-                <button disabled={!!calisan || !paket.trim()} onClick={() => calistir('remove', paket.trim())} className={`${btnBase} border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`}>remove</button>
+                <Button color="primary" disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'require'} onClick={() => calistir('require', paket.trim())} className="px-3 py-1.5 text-sm">require</Button>
+                <Button color="error" variant="soft" disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'remove'} onClick={() => calistir('remove', paket.trim())} className="px-3 py-1.5 text-sm">remove</Button>
               </div>
             </div>
 

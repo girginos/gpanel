@@ -9,6 +9,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
 
@@ -138,8 +139,8 @@ export default function DomainPHPPage() {
   const [secili, setSurum] = useState<string>('')
   const [a, setA] = useState<Ayarlar | null>(null)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   const [dlog, setDlog] = useState<string[]>([])
   const [dlogYuk, setDlogYuk] = useState(false)
@@ -234,7 +235,7 @@ export default function DomainPHPPage() {
                       className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-mono transition ${
                         sec
                           ? 'bg-white dark:bg-dark-700 shadow-xs text-slate-900 dark:text-slate-100 ring-1 ring-brand-300'
-                          : 'text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100 hover:bg-white dark:bg-dark-700/60'
+                          : 'text-slate-600 dark:text-dark-200 hover:text-slate-900 dark:hover:text-dark-50 hover:bg-white dark:hover:bg-dark-700/60'
                       }`}>
                       <span className="font-semibold">PHP {s.surum}</span>
                       {s.eol && <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>EOL</span>}
@@ -248,17 +249,17 @@ export default function DomainPHPPage() {
                 if (!s) return null
                 const akt = yanit.php_surum === secili
                 return (
-                  <span className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
+                  <div className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
                     <span>{s.aciklama}</span>
                     {s.eol && (
-                      <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-semibold" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>{cevir("güncelleme almıyor")}</span>
+                      <Badge variant="soft" color="warning" className="text-[10px] uppercase tracking-wider font-semibold" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>{cevir("güncelleme almıyor")}</Badge>
                     )}
                     {akt ? (
-                      <span className="text-[10px] uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Aktif")}</span>
+                      <Badge variant="soft" color="success" className="text-[10px] uppercase tracking-wider font-semibold">{cevir("Aktif")}</Badge>
                     ) : (
-                      <span className="text-[10px] uppercase tracking-wider bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Kaydet ile uygula")}</span>
+                      <Badge variant="soft" color="warning" className="text-[10px] uppercase tracking-wider font-semibold">{cevir("Kaydet ile uygula")}</Badge>
                     )}
-                  </span>
+                  </div>
                 )
               })()}
             </div>
@@ -315,17 +316,17 @@ export default function DomainPHPPage() {
           {/* PHP Debug Modu — master switch */}
           <Kart baslik={cevir("PHP Debug Modu")}>
             <div className="flex items-start gap-4">
-              <button onClick={() => P('debug_mode', !a.debug_mode)}
-                className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+              <button onClick={() => P('debug_mode', !a.debug_mode)} role="switch" aria-checked={a.debug_mode} aria-label={cevir("Debug modu")}
+                className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                 title={a.debug_mode ? cevir("Debug modunu kapat") : cevir("Debug modunu ac")}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${a.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Debug modu")}</span>
-                  <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${a.debug_mode ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-400'}`}>
+                  <Badge variant="soft" color={a.debug_mode ? 'warning' : 'neutral'} className="text-[10px] uppercase tracking-wider font-semibold">
                     {a.debug_mode ? cevir("Acik") : cevir("Kapali")}
-                  </span>
+                  </Badge>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 leading-relaxed">
                   {cevir("Acikken PHP hatalarini ekrana yazdirir ve olumcul (fatal) hatalari guvenilir sekilde yakalayip")}
@@ -347,14 +348,14 @@ export default function DomainPHPPage() {
                 {cevir("En yeni fatal hatalar ustte. Kaynak: ")}<code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code>{cevir(" (son 200 satir).")}
               </p>
               <div className="flex gap-2 shrink-0">
-                <button onClick={debugLogYukle} disabled={dlogYuk}
-                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-xs rounded-md disabled:opacity-60">
+                <Button variant="outlined" onClick={debugLogYukle} disabled={dlogYuk}
+                  className="px-3 py-1.5 text-xs">
                   <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span>
-                </button>
-                <button onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
-                  className="px-3 py-1.5 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs rounded-md disabled:opacity-40">
+                </Button>
+                <Button color="error" variant="soft" onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
+                  className="px-3 py-1.5 text-xs">
                   <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> {cevir("Temizle")}</span>
-                </button>
+                </Button>
               </div>
             </div>
             {dlogYuk ? (
@@ -407,9 +408,9 @@ export default function DomainPHPPage() {
             </div>
             <div className="flex flex-wrap gap-1">
               {(yanit.moduller || []).map(m => (
-                <span key={m} className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                <Badge key={m} variant="soft" color="success" className="text-[11px] font-mono">
                   {m}
-                </span>
+                </Badge>
               ))}
             </div>
           </Kart>
@@ -457,9 +458,9 @@ export default function DomainPHPPage() {
               }
               const renkMap: Record<string, string> = {
                 red: 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
-                orange: 'border-orange-200 bg-orange-50/40',
+                orange: 'border-orange-200 dark:border-orange-800 bg-orange-50/40 dark:bg-orange-900/20',
                 amber: 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20',
-                sky: 'border-sky-200 bg-sky-50 dark:bg-sky-900/20',
+                sky: 'border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/20',
                 violet: 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20',
               }
 
@@ -472,8 +473,8 @@ export default function DomainPHPPage() {
                     return (
                       <div key={g.renk} className={`border rounded-lg p-3 ${renkMap[g.renk]}`}>
                         <div className="flex items-start gap-3">
-                          <button onClick={() => grupTogga(g)}
-                            className={`shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                          <button onClick={() => grupTogga(g)} aria-label={cevir(g.ad)}
+                            className={`shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
                               blokeli ? 'bg-red-500' : (karisik ? 'bg-amber-400' : 'bg-emerald-500')
                             }`}
                             title={blokeli ? cevir("Tümünü aç (etkin yap)") : (karisik ? cevir("Tümünü kapat") : cevir("Tümünü kapat (engelle)"))}>
@@ -484,11 +485,9 @@ export default function DomainPHPPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2">
                               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir(g.ad)}</span>
-                              <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium ${
-                                blokeli ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' : (karisik ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300')
-                              }`}>
+                              <Badge variant="soft" color={blokeli ? 'error' : (karisik ? 'warning' : 'success')} className="text-[10px] uppercase tracking-wider">
                                 {blokeli ? cevir("Bloke") : (karisik ? cevir("Karışık") : cevir("Aktif"))}
-                              </span>
+                              </Badge>
                             </div>
                             <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 font-mono mt-0.5 break-all">
                               {g.fonk.join(', ')}
@@ -523,14 +522,14 @@ export default function DomainPHPPage() {
 
           {/* Kaydet */}
           <div className="flex gap-3 mt-6">
-            <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+            <Button color="primary" onClick={kaydet} disabled={isleniyor} yukleniyor={isleniyor}
+              className="px-6 py-2.5 text-sm">
               {isleniyor ? cevir("Kaydediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
-            </button>
-            <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+            </Button>
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
+              className="px-4 py-2.5 text-sm">
               {cevir(cevir("İptal / Yeniden Yükle"))}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -539,7 +538,7 @@ export default function DomainPHPPage() {
 }
 
 // ----- helper components -----
-function Kart({ baslik, children }: { baslik: string; children: any }) {
+function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
@@ -547,16 +546,16 @@ function Kart({ baslik, children }: { baslik: string; children: any }) {
     </div>
   )
 }
-function Grid({ children }: { children: any }) {
+function Grid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">{children}</div>
 }
-function Etiket({ children }: { children: any }) {
+function Etiket({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">{children}</label>
 }
 function Ipucu({ t }: { t: string }) {
   return <span title={t} className="inline-block ml-1 text-slate-400 dark:text-slate-500 cursor-help"><Ikon d={I.bilgi} className="inline-block h-3.5 w-3.5 align-middle" /></span>
 }
-function Tek({ e, h, children }: { e: string; h: string; children: any }) {
+function Tek({ e, h, children }: { e: string; h: string; children: React.ReactNode }) {
   return (
     <div className="mt-3">
       <Etiket>{e} <Ipucu t={h} /></Etiket>
@@ -564,7 +563,7 @@ function Tek({ e, h, children }: { e: string; h: string; children: any }) {
     </div>
   )
 }
-function Sec({ etiket, yardim, children }: { etiket: string; yardim: string; children: any }) {
+function Sec({ etiket, yardim, children }: { etiket: string; yardim: string; children: React.ReactNode }) {
   return (
     <div>
       <Etiket>{etiket} <Ipucu t={yardim} /></Etiket>
@@ -592,7 +591,7 @@ function Txt({ value, onChange, mono, placeholder }: { value: string; onChange: 
 function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <Sec etiket={etiket} yardim={yardim}>
-      <button onClick={() => onChange(!value)}
+      <button onClick={() => onChange(!value)} aria-pressed={value} aria-label={etiket}
         className={`px-3 py-2 rounded-md text-sm font-mono w-full text-left transition border ${value ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>
         {value ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.onay} /> On</span> : '○ Off'}
       </button>

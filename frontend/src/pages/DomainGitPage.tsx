@@ -13,6 +13,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string }
 type Repo = {
@@ -295,7 +296,7 @@ export default function DomainGitPage() {
                 </div>
               </div>
               {ghConn.login && (
-                <button onClick={ghDisconnect} className="text-xs px-2 py-1 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 rounded">{cevir("Bağlantıyı kaldır")}</button>
+                <Button color="error" variant="soft" onClick={ghDisconnect} className="text-xs px-2.5 py-1.5">{cevir("Bağlantıyı kaldır")}</Button>
               )}
             </div>
 
@@ -307,10 +308,10 @@ export default function DomainGitPage() {
                     onChange={e => setGhToken(e.target.value)}
                     placeholder="ghp_..." autoComplete="off"
                     className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-                  <button onClick={ghConnect} disabled={ghYukluyor || !ghToken.trim()}
-                    className="px-4 py-2 bg-dark-800 hover:bg-dark-700 disabled:bg-slate-400 text-white text-sm font-medium rounded">
+                  <Button color="primary" onClick={ghConnect} disabled={ghYukluyor || !ghToken.trim()} yukleniyor={ghYukluyor}
+                    className="px-4 py-2 text-sm">
                     {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bağlan")}
-                  </button>
+                  </Button>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-2">
                   <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noreferrer"
@@ -328,7 +329,7 @@ export default function DomainGitPage() {
                     <div className="text-xs text-slate-500 dark:text-slate-500 font-mono">@{ghConn.login}</div>
                   </div>
                   {ghConn.webhook_url && (
-                    <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">{cevir("● Otomatik Dağıtım")}</span>
+                    <Badge variant="soft" color="success" className="text-[10px] uppercase tracking-wider font-semibold">{cevir("● Otomatik Dağıtım")}</Badge>
                   )}
                 </div>
 
@@ -363,10 +364,10 @@ export default function DomainGitPage() {
                     <input type="checkbox" checked={ghAutoDeploy} onChange={e => setGhAutoDeploy(e.target.checked)} className="cursor-pointer"/>
                     {cevir("Push'ta otomatik dağıtım (webhook kurulur)")}
                   </label>
-                  <button onClick={ghUse} disabled={ghYukluyor || !ghSelectedRepo || !ghSelectedBranch}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded">
+                  <Button color="primary" onClick={ghUse} disabled={ghYukluyor || !ghSelectedRepo || !ghSelectedBranch} yukleniyor={ghYukluyor}
+                    className="px-4 py-2 text-sm">
                     {ghYukluyor ? cevir("Bağlanıyor…") : cevir("Bu Repo'yu Kullan")}
-                  </button>
+                  </Button>
                 </div>
 
                 {ghConn.webhook_url && (
@@ -402,23 +403,23 @@ export default function DomainGitPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+                <Button color="primary" onClick={bagla} disabled={isleniyor || !repoUrl} className="px-4 py-2 text-sm">
                   {repo ? cevir("Güncelle") : cevir("Bağla")}
-                </button>
+                </Button>
                 {repo && (
-                  <button onClick={() => setKlonOnay(true)} disabled={isleniyor} className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 text-amber-800 dark:text-amber-200 text-sm font-medium rounded-md">
-                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> {cevir("Klonla (hedef temizlenir)")}</span>}
-                  </button>
+                  <Button color="warning" variant="soft" onClick={() => setKlonOnay(true)} disabled={isleniyor} yukleniyor={isleniyor} className="px-4 py-2 text-sm">
+                    <span className="inline-flex items-center gap-1.5"><Ikon d={I.indir} /> {cevir("Klonla (hedef temizlenir)")}</span>
+                  </Button>
                 )}
                 {repo && (
-                  <button onClick={pull} disabled={isleniyor} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-md">
-                    {isleniyor ? '...' : <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Pull</span>}
-                  </button>
+                  <Button color="success" onClick={pull} disabled={isleniyor} yukleniyor={isleniyor} className="px-4 py-2 text-sm">
+                    <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> Pull</span>
+                  </Button>
                 )}
                 {repo && (
-                  <button onClick={() => setSilinecek(true)} className="ml-auto px-4 py-2 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 dark:bg-red-900/20 text-sm rounded-md">
+                  <Button color="error" variant="soft" onClick={() => setSilinecek(true)} className="ml-auto px-4 py-2 text-sm">
                     {cevir("Bağlantıyı Kaldır")}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -430,7 +431,7 @@ export default function DomainGitPage() {
               <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Deploy Key (Public)</h3>
-                  <button onClick={() => kopyala(repo.deploy_key_pub)} className="text-xs px-2 py-1 bg-slate-100 dark:bg-dark-700 hover:bg-brand-100 dark:bg-brand-900/30 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 rounded">{cevir("Kopyala")}</button>
+                  <Button onClick={() => kopyala(repo.deploy_key_pub)} className="text-xs px-2.5 py-1.5">{cevir("Kopyala")}</Button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">GitHub → Repository → Settings → Deploy keys → Add deploy key — {cevir("bu anahtarı yapıştırın (Allow write access GEREKMEZ).")}</p>
                 <textarea readOnly value={repo.deploy_key_pub} rows={3}
@@ -502,7 +503,7 @@ function Sat({ e, d, onCopy }: { e: string; d: string; onCopy?: (s: string) => v
     <div className="flex items-center gap-3">
       <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-500 w-28">{e}</span>
       <code className="flex-1 text-xs bg-slate-50 dark:bg-dark-800 px-2 py-1 rounded font-mono break-all">{d}</code>
-      {onCopy && <button onClick={() => onCopy(d)} className="text-xs px-2 py-1 bg-slate-100 dark:bg-dark-700 hover:bg-brand-100 dark:bg-brand-900/30 rounded"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M8 8V5a2 2 0 012-2h9a2 2 0 012 2v9a2 2 0 01-2 2h-3M5 8h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2z"/></svg></button>}
+      {onCopy && <Button isIcon onClick={() => onCopy(d)} aria-label={cevir("Kopyala")} className="size-8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M8 8V5a2 2 0 012-2h9a2 2 0 012 2v9a2 2 0 01-2 2h-3M5 8h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2z"/></svg></Button>}
     </div>
   )
 }
