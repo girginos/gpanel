@@ -110,7 +110,8 @@ fi
 if [ "$KURU" = "1" ]; then echo "[--kuru] Deneme modu: hiçbir şey değiştirilmedi."; exit 0; fi
 
 # 🔴 Yeni IP gerçekten bir arayüzde mi? Değilse UYAR (engelleme — önceden hazırlanmış olabilir).
-if ! ip -4 addr 2>/dev/null | grep -qF "$YENI"; then
+# grep -q DEĞİL: pipefail altında `ip` SIGPIPE ile ölür → IP arayüzdeyken yanlış uyarı.
+if ! ip -4 addr 2>/dev/null | grep -F "$YENI" >/dev/null; then
   echo "⚠ UYARI: $YENI hiçbir ağ arayüzünde görünmüyor. Değişiklik yapılacak ama"
   echo "  trafik gelmesi için IP'nin arayüze eklenmiş olması gerekir."
 fi

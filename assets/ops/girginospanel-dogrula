@@ -389,9 +389,33 @@ if [ -f "$_kapi_json" ]; then
   # silently keeps the old sockets (systemctl reload only signals and returns 0) and the
   # NEXT nginx restart does not come up at all -> EVERY site goes down. `nginx -t` does not
   # catch it (it opens no sockets). The panel labels the ports before writing the listen
-  # lines (Heal); this measures the result. Checked ports = exactly what nginx binds: the
-  # three role ports + the legacy ports while they are still open (kapi.Ayar.EskiAcik:
-  # listed AND (now < eski_bitis OR admin_dogrulandi == 0)).
+  # lines (Heal); this measures the result. Candidate ports: the three role ports + the
+  # legacy ports while they are still open (kapi.Ayar.EskiAcik: listed AND (now <
+  # eski_bitis OR admin_dogrulandi == 0)).
+  # 🔴 CRITICAL only for a port nginx really BINDS (an active listen line in _panel.conf).
+  # When labelling fails the panel deliberately does NOT write the gate listens (safe
+  # state: single-port behaviour, the next nginx restart is unaffected) — girginospanel-
+  # update says exactly that ("kapı portları SELinux'ta etiketlenemedi …"). Calling that a
+  # critical made the update end in "VERIFICATION FAILED" for a safe server. Unlabelled but
+  # not bound = gate layout not applied -> WARNING. Loopback listens (127.0.0.1:P, [::1]:P)
+  # DO count: SELinux name_bind is checked on the PORT type whatever the address, so an
+  # unlabelled loopback admin gate (erisim desktop mode) also stops nginx on restart.
+  # Commented lines (erisim's "# [erisim:masaustu] listen …") are not bound. If _panel.conf
+  # is unreadable nothing can be proven "not bound": every candidate counts (old behaviour).
+  _panel_conf=${GOSP_PANEL_CONF:-/etc/nginx/conf.d/_panel.conf}
+  _dinlenen=""; _dinlenen_ok=0
+  if [ -r "$_panel_conf" ]; then
+    _dinlenen_ok=1
+    # awk/sort read ALL input -> no SIGPIPE under pipefail (rule 4).
+    _dinlenen=" $(sed -E 's/#.*//' "$_panel_conf" 2>/dev/null \
+      | awk '$1 == "listen" { a = $2; sub(/;.*/, "", a); sub(/^.*:/, "", a); if (a ~ /^[0-9]+$/) print a }' \
+      | sort -un | tr '\n' ' ')"
+  fi
+  port_dinleniyor() { # port -> 0 if an active listen line binds it (or it cannot be proven otherwise)
+    [ "$_dinlenen_ok" = 1 ] || return 0
+    case "$_dinlenen" in *" $1 "*) return 0 ;; esac
+    return 1
+  }
   _kj=$(tr -d ' \t\r\n' < "$_kapi_json" 2>/dev/null)
   _kports=""
   for _rol in admin bayi musteri; do
@@ -412,19 +436,30 @@ if [ -f "$_kapi_json" ]; then
         uyar "gate SELinux labels" "Enforcing but no semanage — COULD NOT MEASURE (not counted as passed)"
       else
         _spl=$(semanage port -l 2>/dev/null)
-        _say=0; _etiketsiz=""
+        _say=0; _etiketsiz=""; _yazilmamis=""
         for _k in $_kports; do
           _say=$((_say+1))
-          http_port_t_kapsar "$_spl" "${_k%%:*}" || _etiketsiz="$_etiketsiz :${_k%%:*}(${_k#*:})"
+          http_port_t_kapsar "$_spl" "${_k%%:*}" && continue
+          if port_dinleniyor "${_k%%:*}"; then
+            _etiketsiz="$_etiketsiz :${_k%%:*}(${_k#*:})"
+          else
+            _yazilmamis="$_yazilmamis :${_k%%:*}(${_k#*:})"
+          fi
         done
         if [ -z "$_spl" ]; then
           uyar "gate SELinux labels" "semanage port -l gave no output — COULD NOT MEASURE (not counted as passed)"
         elif [ "$_say" -eq 0 ]; then
           uyar "gate SELinux labels" "no gate port readable from $_kapi_json — COULD NOT MEASURE"
-        elif [ -n "$_etiketsiz" ]; then
-          dus "gate SELinux labels" "Enforcing and NOT http_port_t:$_etiketsiz — nginx cannot bind them, the next nginx restart FAILS (all sites down). Fix: systemctl restart girginospanel (Heal labels them) or semanage port -a -t http_port_t -p tcp <port>"
         else
-          gec "gate SELinux labels" "$_say/$_say gate ports http_port_t (Enforcing)"
+          if [ -n "$_etiketsiz" ]; then
+            dus "gate SELinux labels" "Enforcing and NOT http_port_t:$_etiketsiz — bound by a listen line in _panel.conf, nginx cannot bind them, the next nginx restart FAILS (all sites down). Fix: girginospanel-server kapi selinux (or semanage port -a -t http_port_t -p tcp <port>)"
+          fi
+          if [ -n "$_yazilmamis" ]; then
+            uyar "gate SELinux labels" "kapı düzeni uygulanmadı — SELinux etiketi eksik; girginospanel-server kapi selinux. Enforcing and NOT http_port_t:$_yazilmamis — no listen line binds them (the panel did not apply the gate layout: single-port behaviour, nginx restart unaffected)"
+          fi
+          if [ -z "$_etiketsiz" ] && [ -z "$_yazilmamis" ]; then
+            gec "gate SELinux labels" "$_say/$_say gate ports http_port_t (Enforcing)"
+          fi
         fi
       fi ;;
     Permissive|Disabled)

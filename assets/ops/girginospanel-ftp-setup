@@ -105,7 +105,8 @@ fi
 # 7) firewall — 21 + passive range (nft girginos_fw varsa)
 if command -v nft >/dev/null 2>&1 && nft list table inet girginos_fw >/dev/null 2>&1; then
   for p in 21 "30000-30100"; do
-    nft list chain inet girginos_fw input 2>/dev/null | grep -q "dport $p accept" || \
+    # grep -q DEĞİL: pipefail altında nft SIGPIPE → "yok" → aynı kural tekrar eklenirdi.
+    nft list chain inet girginos_fw input 2>/dev/null | grep "dport $p accept" >/dev/null || \
       nft add rule inet girginos_fw input tcp dport $p accept 2>/dev/null
   done
   ok "nft: port 21 + passive 30000-30100 açık"
