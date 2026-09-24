@@ -1,5 +1,5 @@
-export { Button } from './Button'
-export type { ButtonProps, Color, Variant } from './Button'
+export { Button, butonSinifi } from './Button'
+export type { ButtonProps, ButtonGorunum, Color, Variant } from './Button'
 export { Card } from './Card'
 export type { CardProps, CardSkin } from './Card'
 export { Badge } from './Badge'

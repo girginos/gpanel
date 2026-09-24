@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useNavigate } from 'react-router-dom'
-import type { Domain } from './DomainList'
+import type { Domain } from './domainTipi'
 import ToolCard from './ToolCard'
 
 const ICONS = {

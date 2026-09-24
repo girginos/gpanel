@@ -7,7 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import type { Domain } from '@/components/DomainList'
+import type { Domain } from '@/components/domainTipi'
 
 type Kayit = {
   zaman: string; qid: string; gonderen: string; alici: string

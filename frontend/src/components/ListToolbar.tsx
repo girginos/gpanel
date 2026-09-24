@@ -1,6 +1,5 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useState } from 'react'
 import { Button } from '@/components/ui'
 
 export type ToolbarButton = { etiket: string; onClick?: () => void; disabled?: boolean; ipucu?: string }
@@ -21,7 +20,7 @@ export default function ListToolbar({
           onClick={birincil.onClick}
           disabled={birincil.disabled}
           title={birincil.ipucu}
-          className="gap-1.5 px-3.5 py-2 text-sm disabled:pointer-events-auto disabled:cursor-not-allowed"
+          className="gap-1.5 px-3.5 py-2 text-sm"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -36,7 +35,7 @@ export default function ListToolbar({
           onClick={b.onClick}
           disabled={b.disabled}
           title={b.ipucu}
-          className="px-3 py-2 text-sm disabled:pointer-events-auto disabled:cursor-not-allowed"
+          className="px-3 py-2 text-sm"
         >
           {b.etiket}
         </Button>

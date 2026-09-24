@@ -136,8 +136,13 @@ html.dark body {
 
 /* ── Tailux bileşen sınıfları (components katmanı — utility'ler bunları ezebilsin) ── */
 @layer components {
+  /* gPanel farkları (Tailux'ta yok):
+     - Klavye odağı: yalnız :focus-visible'da halka (fare tıklamasında görünmez).
+       Varsayılan renk primary; renkli Button'lar kendi `this` rengini verir (Button.tsx).
+     - Devre dışı: Tailux `pointer-events-none` title ipucunu gizliyordu; tıklamayı
+       zaten `disabled` engeller → imleç not-allowed, ipucu görünür. */
   .btn-base {
-    @apply inline-flex cursor-pointer items-center justify-center text-center font-medium tracking-wide outline-hidden transition-all duration-200 focus:outline-hidden disabled:pointer-events-none disabled:select-none;
+    @apply inline-flex cursor-pointer items-center justify-center text-center font-medium tracking-wide outline-hidden transition-all duration-200 focus:outline-hidden disabled:cursor-not-allowed disabled:select-none focus-visible:ring-2 focus-visible:ring-primary-600/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-primary-400/60 dark:focus-visible:ring-offset-dark-800;
   }
   .btn {
     @apply rounded-lg px-5 py-2 disabled:opacity-70 dark:disabled:opacity-60;
@@ -187,8 +192,10 @@ html.dark body {
   --brand-950: 23 37 84;
 }
 
-/* odak halkası (Tailux mavisi) */
-:focus-visible {
+/* odak halkası (Tailux mavisi). Katmansız kural her katmanı ezer; .btn-base kendi
+   halkasını çizer (yukarıda) — burada hariç tutulmazsa çift gösterge + 4px köşe
+   yuvarlaklığı butonun rounded-lg/full köşesini ezer. */
+:focus-visible:not(.btn-base) {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
   border-radius: 4px;

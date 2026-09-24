@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { Button, Badge, Card } from '@/components/ui'
+import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 
 type Limit = { kullanim: number; limit: number }
 export type Ozet = {
@@ -106,7 +106,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           {/* Plan aksiyonu: yükseltme / düşürme / bu hostinge özel plan — hepsi plan sayfasında */}
           <Link
             to={`/abonelikler/${domainId}/plan`}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-dark-600 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600/60 hover:border-slate-300 dark:hover:border-slate-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            className={butonSinifi({ variant: 'outlined', className: 'shrink-0 gap-1.5 px-2.5 py-1.5 text-xs' })}
             title={cevir(cevir("Planı yükselt, düşür veya bu hostinge özel plan oluştur"))}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">

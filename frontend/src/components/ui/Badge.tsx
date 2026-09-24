@@ -1,4 +1,5 @@
-// Tailux Badge — gPanel uyarlaması, birebir sınıflar.
+// Tailux Badge — gPanel uyarlaması, birebir sınıflar. Tailux'tan tek fark: <div> değil
+// <span> üretir (inline-flex görünüm aynı) — <button>/<p> içinde geçerli HTML.
 import { forwardRef, HTMLAttributes, ReactNode } from 'react'
 import type { Color } from './Button'
 
@@ -20,15 +21,15 @@ const neutralVariants: Record<Variant, string> = {
 }
 function cx(...a: Array<string | false | null | undefined>) { return a.filter(Boolean).join(' ') }
 
-export type BadgeProps = HTMLAttributes<HTMLDivElement> & {
+export type BadgeProps = HTMLAttributes<HTMLSpanElement> & {
   color?: Color; variant?: Variant; unstyled?: boolean; children?: ReactNode
 }
 
-export const Badge = forwardRef<HTMLDivElement, BadgeProps>(function Badge(
+export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
   { className, children, color = 'neutral', variant = 'filled', unstyled = false, ...rest }, ref,
 ) {
   return (
-    <div
+    <span
       ref={ref}
       className={cx(
         'badge-base',
@@ -38,7 +39,7 @@ export const Badge = forwardRef<HTMLDivElement, BadgeProps>(function Badge(
       {...rest}
     >
       {children}
-    </div>
+    </span>
   )
 })
 

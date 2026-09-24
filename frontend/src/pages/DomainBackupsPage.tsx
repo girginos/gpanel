@@ -640,20 +640,14 @@ export default function DomainBackupsPage() {
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   {/* İndirme YEREL dosyayı okur; uzağa taşınmış kayıt
                       indirilemez, açık bırakmak 500 üretirdi. */}
-                  {/* Tailux .btn-base disabled'da pointer-events:none → title
-                      butonda görünmez; açıklama sarmalayıcıda tutulur. */}
-                  <span
-                    className={`inline-block ${y.mevcut !== 'yerel' ? 'cursor-not-allowed' : ''}`}
+                  <Button
+                    onClick={() => indir(y)}
+                    disabled={y.mevcut !== 'yerel'}
                     title={y.mevcut === 'yok' ? cevir("Yedek dosyası bulunamadı")
                       : y.mevcut === 'uzak_iddia' ? cevir("Yedek uzak depoya taşınmış — önce geri getirilmeli") : undefined}
-                  >
-                    <Button
-                      onClick={() => indir(y)}
-                      disabled={y.mevcut !== 'yerel'}
-                      color="primary" variant="flat"
-                      className="text-sm px-2 py-1 disabled:opacity-40"
-                    >{cevir("İndir")}</Button>
-                  </span>
+                    color="primary" variant="flat"
+                    className="text-sm px-2 py-1 disabled:opacity-40"
+                  >{cevir("İndir")}</Button>
                   <Button onClick={() => setGeriYukle(y)} color="warning" variant="flat" className="text-sm px-2 py-1"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Geri Yükle")}</span></Button>
                   <Button onClick={() => setSilinecek(y)} color="error" variant="soft" className="text-sm px-2 py-1">{cevir("Sil")}</Button>
                 </td>

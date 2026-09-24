@@ -10,7 +10,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, butonSinifi } from '@/components/ui'
 
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string }
@@ -345,7 +345,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         <div className="flex items-center gap-2 shrink-0">
           {kurulum.admin_url && (
             <a href={kurulum.admin_url} target="_blank" rel="noreferrer"
-              className="btn-base btn this:primary bg-this text-white hover:bg-this-darker focus:bg-this-darker active:bg-this-darker/90 gap-1 px-3.5 py-2 text-xs">
+              className={butonSinifi({ color: 'primary', className: 'gap-1 px-3.5 py-2 text-xs' })}>
               {cevir(cevir("Yönetim paneli"))} <span className="opacity-70">↗</span>
             </a>
           )}
@@ -372,7 +372,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
                 ? 'bg-white dark:bg-dark-600 text-slate-900 dark:text-slate-100 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
               {t.ad}
-              {!!rozet[t.k] && rozet[t.k] > 0 && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-semibold align-middle">{rozet[t.k]}</span>}
+              {!!rozet[t.k] && rozet[t.k] > 0 && <Badge variant="soft" color="warning" className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-semibold align-middle">{rozet[t.k]}</Badge>}
             </button>
           ))}
         </div>

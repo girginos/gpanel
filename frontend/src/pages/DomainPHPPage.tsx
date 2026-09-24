@@ -249,7 +249,7 @@ export default function DomainPHPPage() {
                 if (!s) return null
                 const akt = yanit.php_surum === secili
                 return (
-                  <div className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
                     <span>{s.aciklama}</span>
                     {s.eol && (
                       <Badge variant="soft" color="warning" className="text-[10px] uppercase tracking-wider font-semibold" title={cevir("Bu sürüm artık güvenlik güncellemesi almıyor (EOL)")}>{cevir("güncelleme almıyor")}</Badge>
@@ -259,7 +259,7 @@ export default function DomainPHPPage() {
                     ) : (
                       <Badge variant="soft" color="warning" className="text-[10px] uppercase tracking-wider font-semibold">{cevir("Kaydet ile uygula")}</Badge>
                     )}
-                  </div>
+                  </span>
                 )
               })()}
             </div>
