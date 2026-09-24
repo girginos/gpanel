@@ -6,6 +6,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useAuth } from '@/store/auth'
 import { Button, Badge } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Ben = {
   id: number; adi: string; rol: string; eposta: string; ad_soyad: string
@@ -36,7 +38,7 @@ const SETT_EN: Record<string, string> = {
   "Yeni parola en az 8 karakter olmalı.": "The new password must be at least 8 characters.",
   "Yeni parolalar eşleşmiyor.": "The new passwords do not match.",
   "İki Adımlı Doğrulama (2FA)": "Two-Factor Authentication (2FA)",
-  "○ Kapalı": "○ Off",
+  "Kapalı": "Off",
   "Kaydedilemedi": "Could not save",
   "Bilgiler kaydedildi.": "Information saved.",
   "Tercihler kaydedildi.": "Preferences saved.",
@@ -52,7 +54,7 @@ const SETT_EN: Record<string, string> = {
   "Yeni parola (tekrar)": "New password (again)",
   "Değiştiriliyor…": "Changing…",
   "Durum:": "Status:",
-  "● Aktif": "● Active",
+  "Aktif": "Active",
   "2FA QR kodu": "2FA QR code",
   "2) Uygulamadaki 6 haneli kodu girin:": "2) Enter the 6-digit code from the app:",
   "Doğrulanıyor…": "Verifying…",
@@ -89,12 +91,10 @@ function Girdi({ etiket, ...p }: { etiket: string } & React.InputHTMLAttributes<
   )
 }
 
+// Sayfa içi sonuç kutusu — ortak ton dili (UyariKutusu): ok → basari, err → tehlike.
 function Uyari({ tip, mesaj }: { tip: 'ok' | 'err'; mesaj: string }) {
   if (!mesaj) return null
-  const c = tip === 'ok'
-    ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-    : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
-  return <div className={`text-sm px-3 py-2 rounded-lg border ${c}`}>{mesaj}</div>
+  return <UyariKutusu ton={tip === 'ok' ? 'basari' : 'tehlike'} className="py-2">{mesaj}</UyariKutusu>
 }
 
 export default function SettingsPage() {
@@ -184,7 +184,7 @@ export default function SettingsPage() {
       <div className="space-y-5">
         {/* 1) Hesap Bilgileri */}
         <Kart baslik={cevir("Hesap Bilgileri")} aciklama={cevir("Ad soyad ve e-posta adresinizi düzenleyin.")}
-          ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}
+          ikon={<Ikon d={I.kullanici} className="size-5" />}
           cocuk={
             <form onSubmit={profilKaydet} className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
@@ -200,7 +200,7 @@ export default function SettingsPage() {
                 <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder={cevir("ornek@site.com")} />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <Button type="submit" disabled={pYuk} className="px-4 py-2 text-sm">{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</Button>
+                <Button type="submit" color="primary" yukleniyor={pYuk} ikon={I.disket}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</Button>
                 <Uyari tip="ok" mesaj={pOk} /><Uyari tip="err" mesaj={pErr} />
               </div>
             </form>
@@ -208,7 +208,7 @@ export default function SettingsPage() {
 
         {/* 2) Parola */}
         <Kart baslik={cevir("Parola")} aciklama={cevir("Bu, sunucunun root parolasını değiştirir (SSH erişimi dahil).")}
-          ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+          ikon={<Ikon d={I.kilit} className="size-5" />}
           cocuk={
             <form onSubmit={parolaDegistir} className="space-y-4">
               <Girdi etiket={cevir("Mevcut parola")} type="password" value={mevcut} onChange={e => setMevcut(e.target.value)} autoComplete="current-password" />
@@ -217,7 +217,7 @@ export default function SettingsPage() {
                 <Girdi etiket={cevir("Yeni parola (tekrar)")} type="password" value={yeni2} onChange={e => setYeni2(e.target.value)} autoComplete="new-password" />
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <Button type="submit" disabled={paYuk || !mevcut || !yeni} className="px-4 py-2 text-sm">{paYuk ? cevir("Değiştiriliyor…") : cevir("Parolayı Değiştir")}</Button>
+                <Button type="submit" color="primary" yukleniyor={paYuk} disabled={!mevcut || !yeni} ikon={I.kalem}>{paYuk ? cevir("Değiştiriliyor…") : cevir("Parolayı Değiştir")}</Button>
                 <Uyari tip="ok" mesaj={paOk} /><Uyari tip="err" mesaj={paErr} />
               </div>
             </form>
@@ -225,18 +225,18 @@ export default function SettingsPage() {
 
         {/* 3) 2FA */}
         <Kart baslik={cevir("İki Adımlı Doğrulama (2FA)")} aciklama={cevir("Girişte parolaya ek olarak authenticator uygulamasından 6 haneli kod ister.")}
-          ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>}
+          ikon={<Ikon d={I.kalkan} className="size-5" />}
           cocuk={
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <span className="text-sm text-slate-600 dark:text-slate-400">{cevir("Durum:")}</span>
                 {ben?.iki_fa
-                  ? <Badge color="success" variant="soft" className="text-xs font-semibold px-2.5 py-1">{cevir("● Aktif")}</Badge>
-                  : <Badge variant="soft" className="text-xs font-semibold px-2.5 py-1">{cevir("○ Kapalı")}</Badge>}
+                  ? <Badge color="success" variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Aktif")}</Badge>
+                  : <Badge variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-slate-400 dark:bg-dark-300" aria-hidden />{cevir("Kapalı")}</Badge>}
               </div>
 
               {!ben?.iki_fa && !f2Kur && (
-                <Button onClick={f2Baslat} className="px-4 py-2 text-sm">{cevir("2FA'yı Etkinleştir")}</Button>
+                <Button onClick={f2Baslat} color="primary" ikon={I.kalkan}>{cevir("2FA'yı Etkinleştir")}</Button>
               )}
 
               {!ben?.iki_fa && f2Kur && (
@@ -252,22 +252,22 @@ export default function SettingsPage() {
                   <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Tarayamıyorsanız, elle giriş için gizli anahtar:")}</p>
                   <div className="flex items-center gap-2 flex-wrap">
                     <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
-                    <Button type="button" variant="outlined" onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }} className="text-xs px-2.5 py-1.5">{cevir("Kopyala")}</Button>
+                    <Button type="button" variant="outlined" boyut="sm" ikon={I.kopya} onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }}>{cevir("Kopyala")}</Button>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-500 break-all">{cevir("veya bağlantı:")} <span className="font-mono">{f2Kur.otpauth}</span></p>
                   <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("2) Uygulamadaki 6 haneli kodu girin:")}</p>
                   <div className="flex items-center gap-3 flex-wrap">
                     <input value={f2Kod} onChange={e => setF2Kod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
                       className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
-                    <Button type="submit" disabled={f2Yuk || f2Kod.length !== 6} className="px-4 py-2 text-sm">{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</Button>
-                    <button type="button" onClick={() => setF2Kur(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{cevir("İptal")}</button>
+                    <Button type="submit" color="primary" yukleniyor={f2Yuk} disabled={f2Kod.length !== 6} ikon={I.onay}>{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</Button>
+                    <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kur(null)}>{cevir("İptal")}</Button>
                   </div>
                   <Uyari tip="err" mesaj={f2Err} />
                 </form>
               )}
 
               {ben?.iki_fa && !f2Kapat && (
-                <Button color="error" variant="outlined" onClick={() => { setF2Kapat(true); setF2Err('') }} className="px-4 py-2 text-sm">{cevir("2FA'yı Kapat")}</Button>
+                <Button color="error" variant="soft" ikon={I.ban} onClick={() => { setF2Kapat(true); setF2Err('') }}>{cevir("2FA'yı Kapat")}</Button>
               )}
               {ben?.iki_fa && f2Kapat && (
                 <form onSubmit={f2KapatOnay} className="space-y-3 border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/10">
@@ -275,8 +275,8 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3 flex-wrap">
                     <input value={kapatKod} onChange={e => setKapatKod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
                       className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none" />
-                    <Button type="submit" color="error" disabled={f2Yuk || kapatKod.length !== 6} className="px-4 py-2 text-sm">{cevir("Kapat")}</Button>
-                    <button type="button" onClick={() => setF2Kapat(false)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{cevir("Vazgeç")}</button>
+                    <Button type="submit" color="error" yukleniyor={f2Yuk} disabled={kapatKod.length !== 6} ikon={I.ban}>{cevir("Kapat")}</Button>
+                    <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kapat(false)}>{cevir("Vazgeç")}</Button>
                   </div>
                   <Uyari tip="err" mesaj={f2Err} />
                 </form>
@@ -286,7 +286,7 @@ export default function SettingsPage() {
 
         {/* 4) Tercihler */}
         <Kart baslik={cevir("Tercihler")} aciklama={cevir("Panel görünüm ve dil tercihleri.")}
-          ikon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
+          ikon={<Ikon d={I.ayar} className="size-5" />}
           cocuk={
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
@@ -304,7 +304,7 @@ export default function SettingsPage() {
                 </label>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <Button onClick={tercihKaydet} disabled={tYuk} className="px-4 py-2 text-sm">{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</Button>
+                <Button onClick={tercihKaydet} color="primary" yukleniyor={tYuk} ikon={I.disket}>{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</Button>
                 <Uyari tip="ok" mesaj={tOk} />
               </div>
             </div>

@@ -8,7 +8,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
 
 type Paket = {
   id?: number; ad: string; aciklama: string
@@ -270,12 +271,11 @@ export default function BayiPlaniDuzenlePage() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        <Button color="primary" type="submit" disabled={kaydediyor}
-                className="px-4 py-2 text-sm">
+        <Button color="primary" type="submit" yukleniyor={kaydediyor} ikon={yeni ? I.arti : I.disket}>
           {kaydediyor ? cevir('Kaydediliyor…') : yeni ? cevir('Planı oluştur') : cevir('Kaydet')}
         </Button>
-        <Link to="/bayi-planlari"
-              className="inline-flex items-center rounded-md border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-700">
+        <Link to="/bayi-planlari" className={butonSinifi({ variant: 'outlined' })}>
+          <Ikon d={I.kapat} className="size-4 shrink-0 -ms-1 me-2" />
           {cevir("İptal")}
         </Link>
       </div>

@@ -82,7 +82,7 @@ export default function CPanelGirisPage() {
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm focus:border-brand-500 outline-none" />
           </div>
           <Button type="submit" color="primary" yukleniyor={yuk} disabled={!kullanici || !parola}
-            className="w-full px-4 py-2.5">
+            ikonSonda={I.ileri} className="w-full">
             {yuk ? t('ortak.yukleniyor') : t('giris.girisYap')}
           </Button>
         </form>

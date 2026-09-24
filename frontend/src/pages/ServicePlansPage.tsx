@@ -14,7 +14,8 @@ import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, butonSinifi } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
 
 type Plan = {
   id: number
@@ -111,7 +112,7 @@ export default function ServicePlansPage() {
       await api.delete(`/plans/${silinecek.id}`)
       setSilinecek(null); yukle()
     } catch (e) {
-      (await bilgi({ baslik: cevir('Bilgi'), mesaj: apiHata(e, cevir("Silme başarısız")) }))
+      (await bilgi({ baslik: cevir('Bilgi'), mesaj: apiHata(e, cevir("Silme başarısız")), ton: 'tehlike' }))
     }
   }
 
@@ -161,10 +162,11 @@ export default function ServicePlansPage() {
               </dl>
 
               <div className="mt-4 flex gap-2">
-                <Link to={`/araclar/paketler/${p.id}`} className="flex-1 inline-flex items-center justify-center text-center text-sm font-medium px-3 py-1.5 rounded-md border border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-300 hover:bg-brand-500/20 hover:border-brand-500/50 transition">
+                <Link to={`/araclar/paketler/${p.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm', className: 'flex-1' })}>
                   {cevir("Detay & Kaynak Limitleri")}
+                  <Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
                 </Link>
-                <Button onClick={() => setSilinecek(p)} color="error" variant="soft" className="text-sm px-3 py-1.5">{cevir("Sil")}</Button>
+                <Button onClick={() => setSilinecek(p)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
               </div>
             </div>
           ))}
@@ -185,6 +187,7 @@ export default function ServicePlansPage() {
         baslik={cevir("Planı sil")}
         mesaj={`"${silinecek?.ad}" ${cevir("planı silinsin mi?")}`}
         ton="tehlike"
+        onayIkonu={I.cop}
         onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
@@ -267,8 +270,12 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
   }
 
   return (
-    <Modal acik={true} baslik={yeni ? cevir('Yeni Plan') : cevir("Planı Düzenle")} onKapat={onKapat} genislik="lg">
-      <form onSubmit={gonder} className="space-y-4">
+    <Modal acik={true} baslik={yeni ? cevir('Yeni Plan') : cevir("Planı Düzenle")} onKapat={onKapat} genislik="lg" kapatilamaz={isleniyor}
+      alt={<>
+        <Button type="button" variant="outlined" onClick={onKapat} disabled={isleniyor} ikon={I.kapat}>{cevir("İptal")}</Button>
+        <Button type="submit" form="hizmet-plani-formu" color="primary" yukleniyor={isleniyor} disabled={!form.ad.trim()} ikon={yeni ? I.arti : I.disket}>{isleniyor ? cevir('Kaydediliyor…') : (yeni ? cevir('Ekle') : cevir("Güncelle"))}</Button>
+      </>}>
+      <form id="hizmet-plani-formu" onSubmit={gonder} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Alan etiket={cevir("Plan adı")} value={form.ad} setVal={v => setForm({ ...form, ad: v })} required />
           <Alan etiket={cevir("Açıklama")} value={form.aciklama} setVal={v => setForm({ ...form, aciklama: v })} />
@@ -306,11 +313,6 @@ function PlanModal({ plan, surumler, onKapat, onKayit }: { plan: Plan; surumler:
           {cevir("Yeni domainlerde varsayılan plan")}
         </label>
         <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("0 = sınırsız. Disk/trafik MB cinsindendir. Bu plandaki yeni domainler seçili PHP sürümüyle kurulur.")}</p>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="outlined" onClick={onKapat} className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-          <Button type="submit" disabled={isleniyor || !form.ad.trim()} className="px-4 py-2 text-sm">{isleniyor ? cevir('Kaydediliyor…') : (yeni ? cevir('Ekle') : cevir("Güncelle"))}</Button>
-        </div>
       </form>
     </Modal>
   )

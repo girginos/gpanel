@@ -5,6 +5,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
+import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 const BREADCRUMB_EN: Record<string, string> = {
   "Sayfa yolu": "Page path",
@@ -33,16 +35,15 @@ export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
       className="flex items-center gap-1 text-sm mb-3 text-slate-500 dark:text-slate-500 overflow-x-auto [&>*]:shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       aria-label={cevir("Sayfa yolu")}
     >
-      <button
-        type="button"
+      <Button
+        isIcon
+        variant="flat"
+        ikon={I.geri}
         onClick={geri}
-        className="lg:hidden -ml-1.5 mr-0.5 p-1.5 rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-dark-700 transition"
+        className="lg:hidden -ml-1.5 mr-0.5 size-8"
         aria-label={cevir("Geri dön")}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-      </button>
+        title={cevir("Geri dön")}
+      />
 
       {items.map((it, i) => {
         const son = i === items.length - 1

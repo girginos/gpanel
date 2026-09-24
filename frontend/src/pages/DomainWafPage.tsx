@@ -11,6 +11,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Mod = 'devral' | 'kapali' | 'engelle' | 'denetle'
 type Ayar = { mod: Mod; paranoya: number }
@@ -25,13 +26,13 @@ type Yanit = {
 }
 
 const MODLAR: { key: Mod; ad: string; ikon: React.ReactNode; aciklama: string; renk: string }[] = [
-  { key: 'devral', ad: 'Plandan Devral', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M9 14L4 9l5-5M4 9h11a4 4 0 010 8h-2"/></svg>,
+  { key: 'devral', ad: 'Plandan Devral', ikon: <Ikon d={I.geriAl} className="inline-block h-4 w-4 align-[-3px]" />,
     aciklama: 'Bu domain, bağlı olduğu hizmet planının WAF varsayılanını kullanır.', renk: 'slate' },
-  { key: 'engelle', ad: 'Engelle', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M12 3l7 2.6v5.2c0 4.3-3 7-7 8.2-4-1.2-7-3.9-7-8.2V5.6L12 3z"/></svg>,
+  { key: 'engelle', ad: 'Engelle', ikon: <Ikon d={I.kalkan} className="inline-block h-4 w-4 align-[-3px]" />,
     aciklama: 'Kötü amaçlı istekler (SQLi, XSS, RCE…) 403 ile bloklanır. SecRuleEngine On.', renk: 'emerald' },
-  { key: 'denetle', ad: 'Denetle', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zM12 15a3 3 0 100-6 3 3 0 000 6z"/></svg>,
+  { key: 'denetle', ad: 'Denetle', ikon: <Ikon d={I.goz} className="inline-block h-4 w-4 align-[-3px]" />,
     aciklama: 'İstekler bloklanmaz; yalnızca eşleşen kurallar audit log’a yazılır. DetectionOnly — kural ayarlamak için ideal.', renk: 'indigo' },
-  { key: 'kapali', ad: 'Kapalı', ikon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 align-[-3px]"><path d="M4.9 4.9l14.2 14.2M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>,
+  { key: 'kapali', ad: 'Kapalı', ikon: <Ikon d={I.ban} className="inline-block h-4 w-4 align-[-3px]" />,
     aciklama: 'WAF bu domain için tamamen devre dışı (plan açık olsa bile).', renk: 'rose' },
 ]
 
@@ -50,7 +51,7 @@ const WAF_EN: Record<string, string> = {
   "Engelle": "Block",
   "Denetle": "Audit",
   "Kapalı": "Off",
-  "✓ WAF uygulandı — {0} modu, paranoya {1}": "✓ WAF applied — {0} mode, paranoia {1}",
+  "WAF uygulandı — {0} modu, paranoya {1}": "WAF applied — {0} mode, paranoia {1}",
   "Engelleme": "Blocking",
   "Denetleme": "Auditing",
   "Kaydedildi": "Saved",
@@ -63,7 +64,7 @@ const WAF_EN: Record<string, string> = {
   "Aktif · Engelleme": "Active · Blocking",
   "Aktif · Denetleme": "Active · Auditing",
   "Paranoya": "Paranoia",
-  "○ Pasif": "○ Passive",
+  "Pasif": "Passive",
   "Plan varsayılanı": "Plan default",
   "WAF Modu": "WAF Mode",
   "Paranoya Seviyesi (CRS)": "Paranoia Level (CRS)",
@@ -91,8 +92,8 @@ const WAF_EN: Record<string, string> = {
   "Web Uygulama Güvenlik Duvarı (WAF)": "Web Application Firewall (WAF)",
   "Yüksek — agresif. Uygulamaya göre ayarlama (exclusion) gerekebilir.": "High — aggressive. May need per-application tuning (exclusions).",
   "İstekler bloklanmaz; yalnızca eşleşen kurallar audit log’a yazılır. DetectionOnly — kural ayarlamak için ideal.": "Requests are not blocked; only matching rules are written to the audit log. DetectionOnly — ideal for tuning rules.",
-  "● Seçili": "● Selected",
-  "✓ Ayar kaydedildi — WAF bu domain için pasif": "✓ Setting saved — WAF is passive for this domain",
+  "Seçili": "Selected",
+  "Ayar kaydedildi — WAF bu domain için pasif": "Setting saved — WAF is passive for this domain",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WAF_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -129,8 +130,8 @@ export default function DomainWafPage() {
       const r = await api.put<{ efektif: Efektif; modul_yuklu: boolean }>(`/domains/${id}/waf`, { ayar })
       const ef = r.data.efektif
       const mesaj = ef.aktif
-        ? cevirT(cevir("✓ WAF uygulandı — {0} modu, paranoya {1}"), ef.engine === 'On' ? cevir("Engelleme") : cevir("Denetleme"), ef.paranoya)
-        : cevir("✓ Ayar kaydedildi — WAF bu domain için pasif")
+        ? cevirT(cevir("WAF uygulandı — {0} modu, paranoya {1}"), ef.engine === 'On' ? cevir("Engelleme") : cevir("Denetleme"), ef.paranoya)
+        : cevir("Ayar kaydedildi — WAF bu domain için pasif")
       setBasari(mesaj)
       toast.basari(cevir("Kaydedildi"), mesaj)
       yukle()
@@ -158,10 +159,12 @@ export default function DomainWafPage() {
       </p>}
 
       {y && !y.modul_yuklu && (
-        <div className="mb-5 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-          <strong>{cevir("ModSecurity modülü sunucuda kurulu değil.")}</strong> {cevir("Ayarlar kaydedilir ancak WAF uygulanmaz.")}
-          {cevir("Sunucuda")} <code className="font-mono">girginospanel-waf-setup</code> {cevir("çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).")}
-        </div>
+        <UyariKutusu ton="uyari" className="mb-5" baslik={cevir("ModSecurity modülü sunucuda kurulu değil.")}>
+          <p className="text-xs">
+            {cevir("Ayarlar kaydedilir ancak WAF uygulanmaz.")}
+            {cevir("Sunucuda")} <code className="font-mono">girginospanel-waf-setup</code> {cevir("çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).")}
+          </p>
+        </UyariKutusu>
       )}
 
       {yuk || !ayar || !y ? (
@@ -174,10 +177,11 @@ export default function DomainWafPage() {
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Etkin Durum:")}</span>
               {y.efektif.aktif ? (
                 <Badge color={y.efektif.engine === 'On' ? 'success' : 'info'} variant="soft" className="gap-1.5 px-2.5 font-semibold">
-                  ● {y.efektif.engine === 'On' ? cevir("Aktif · Engelleme") : cevir("Aktif · Denetleme")} · {cevir("Paranoya")} {y.efektif.paranoya}
+                  <span className="inline-block size-2 rounded-full bg-current" aria-hidden />
+                  {y.efektif.engine === 'On' ? cevir("Aktif · Engelleme") : cevir("Aktif · Denetleme")} · {cevir("Paranoya")} {y.efektif.paranoya}
                 </Badge>
               ) : (
-                <Badge variant="soft" className="gap-1.5 px-2.5 font-semibold">{cevir("○ Pasif")}</Badge>
+                <Badge variant="soft" className="gap-1.5 px-2.5 font-semibold"><span className="inline-block size-2 rounded-full bg-slate-400 dark:bg-dark-300" aria-hidden />{cevir("Pasif")}</Badge>
               )}
               <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
                 {cevir("Plan varsayılanı")} ({y.plan.ad || '—'}):{' '}
@@ -202,7 +206,7 @@ export default function DomainWafPage() {
                     className={`text-left p-4 border rounded-lg transition ${renk[m.renk]}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ikon} {cevir(m.ad)}</span>
-                      {aktif && <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">{cevir("● Seçili")}</span>}
+                      {aktif && <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400"><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Seçili")}</span>}
                     </div>
                     <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">{cevir(m.aciklama)}</div>
                   </button>
@@ -234,12 +238,10 @@ export default function DomainWafPage() {
           </Kart>
 
           <div className="flex gap-3 mt-6">
-            <Button color="primary" onClick={kaydet} yukleniyor={isleniyor}
-              className="px-6 py-2.5 text-sm">
-              {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
+            <Button color="primary" onClick={kaydet} yukleniyor={isleniyor} ikon={I.disket}>
+              {isleniyor ? cevir("Uygulanıyor…") : cevir("Kaydet ve Uygula")}
             </Button>
-            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 text-sm">
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor} ikon={I.yenile}>
               {cevir("Yeniden Yükle")}
             </Button>
           </div>

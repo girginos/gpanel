@@ -1,6 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
 
 export default function EmptyState({
   baslik, aciklama, buton,
@@ -35,11 +36,8 @@ export default function EmptyState({
           onClick={buton.onClick}
           disabled={buton.disabled}
           title={buton.ipucu}
-          className="gap-1.5 px-4 py-2 text-sm"
+          ikon={I.arti}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
           {buton.etiket}
         </Button>
       )}

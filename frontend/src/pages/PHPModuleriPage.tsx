@@ -5,13 +5,14 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
+import { I } from '@/components/Ikon'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Surum = { surum: string; ini_dir: string; service: string }
 type Ext = { adi: string; aktif: boolean; ini_dosya: string }
@@ -161,8 +162,8 @@ const PHPMOD_EN: Record<string, string> = {
   "gRPC uzak yordam çağrısı": "gRPC remote procedure call",
   "Çok baytlı dize işleme": "Multi-byte string handling",
   "Önbellek & Performans": "Cache & Performance",
-  "⊗ IonCube Kaldır": "⊗ Remove IonCube",
-  "✓ IonCube kaldırıldı": "✓ IonCube removed",
+  "IonCube Kaldır": "Remove IonCube",
+  "IonCube kaldırıldı": "IonCube removed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (PHPMOD_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -233,7 +234,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
     const yeniAktif = !e.aktif
     try {
       await api.put('/php-extensions/toggle', { surum: aktifSurum, ini_dosya: e.ini_dosya, aktif: yeniAktif })
-      const m = `✓ ${e.adi} ${yeniAktif ? cevir("aktif edildi") : cevir("devre dışı")} · ${cevir("PHP-FPM yeniden başlatıldı")}`
+      const m = `${e.adi} ${yeniAktif ? cevir("aktif edildi") : cevir("devre dışı")} · ${cevir("PHP-FPM yeniden başlatıldı")}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 3000)
@@ -250,7 +251,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
     setYuk(true); setHata(null)
     try {
       const r = await api.post('/php-extensions/ioncube-kur', { surum: aktifSurum })
-      const m = `✓ ${cevir("IonCube kuruldu")} — ${r.data.yuklendi ? 'LOADED' : cevir("ini yazıldı ancak runtime'da görünmedi")}`
+      const m = `${cevir("IonCube kuruldu")} — ${r.data.yuklendi ? 'LOADED' : cevir("ini yazıldı ancak runtime'da görünmedi")}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       setTimeout(() => setBasari(null), 5000)
@@ -264,12 +265,12 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
   }
 
   async function ioncubeKaldir() {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("IonCube Loader PHP {0}'ten kaldırılacak. Devam?"), aktifSurum), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("IonCube Loader PHP {0}'ten kaldırılacak. Devam?"), aktifSurum), ton: 'tehlike', onayIkonu: I.cop }))) return
     setYuk(true); setHata(null)
     try {
       await api.post('/php-extensions/ioncube-kaldir', { surum: aktifSurum })
-      setBasari(cevir("✓ IonCube kaldırıldı"))
-      toast.basari(cevir("✓ IonCube kaldırıldı"))
+      setBasari(cevir("IonCube kaldırıldı"))
+      toast.basari(cevir("IonCube kaldırıldı"))
       setTimeout(() => setBasari(null), 3000); yukle()
     } catch (err) {
       const m = apiHata(err, cevir("IonCube kaldırma başarısız"))
@@ -326,9 +327,10 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-1">
         {!gomulu && <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("PHP Modülleri")}</h1>}
         <Button onClick={() => ioncubeKurlu ? ioncubeKaldir() : ioncubeKur()}
-          color="warning"
-          className="px-3 py-2 sm:px-4 text-xs sm:text-sm whitespace-nowrap self-start">
-          {ioncubeKurlu ? cevir("⊗ IonCube Kaldır") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} />{cevir("IonCube Loader Yükle")}</span>}
+          color={ioncubeKurlu ? 'error' : 'primary'} yukleniyor={yuk}
+          ikon={ioncubeKurlu ? I.cop : I.kilit}
+          className="whitespace-nowrap self-start">
+          {ioncubeKurlu ? cevir("IonCube Kaldır") : cevir("IonCube Loader Yükle")}
         </Button>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
@@ -358,9 +360,9 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
       </div>
 
       {(secilenler?.length ?? 0) > 0 && (
-        <div className="mb-3 px-3 py-2 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md text-sm text-brand-700 dark:text-brand-300">
+        <UyariKutusu ton="bilgi" className="mb-3">
           {secilenler!.length} {cevir("eklenti kurulmak üzere seçildi —")} <strong>{cevir("Özet")}</strong> {cevir(cevir("adımında tümü birlikte kurulur."))}
-        </div>
+        </UyariKutusu>
       )}
 
       {yuk ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (

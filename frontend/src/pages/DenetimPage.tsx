@@ -89,8 +89,8 @@ const DEN_EN: Record<string, string> = {
   "Eylem": "Action",
   "Hedef": "Target",
   "Sayfa": "Page",
-  "Sonraki →": "Next →",
-  "← Önceki": "← Previous",
+  "Sonraki": "Next",
+  "Önceki": "Previous",
   "başarılı": "successful",
   "yönetici": "admin",
   "bayi": "reseller",
@@ -304,14 +304,12 @@ export default function DenetimPage() {
 
       {toplam > limit && (
         <div className="flex items-center justify-between gap-3">
-          <Button variant="outlined" onClick={() => setSayfa(s => Math.max(0, s - 1))} disabled={sayfa === 0}
-            className="px-3 py-1.5 text-sm">
-            {cevir(cevir("← Önceki"))}
+          <Button variant="outlined" boyut="sm" ikon={I.geri} onClick={() => setSayfa(s => Math.max(0, s - 1))} disabled={sayfa === 0}>
+            {cevir("Önceki")}
           </Button>
           <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">{cevir("Sayfa")} {sayfa + 1} / {sonSayfa + 1}</span>
-          <Button variant="outlined" onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}
-            className="px-3 py-1.5 text-sm">
-            {cevir("Sonraki →")}
+          <Button variant="outlined" boyut="sm" ikonSonda={I.ileri} onClick={() => setSayfa(s => Math.min(sonSayfa, s + 1))} disabled={sayfa >= sonSayfa}>
+            {cevir("Sonraki")}
           </Button>
         </div>
       )}
