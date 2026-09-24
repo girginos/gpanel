@@ -10,6 +10,9 @@ import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { Ikon, I } from '@/components/Ikon'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Bulgu = { dosya: string; imza: string; motor: string; karantina: number }
 type Tarama = { id: number; durum: string; motor: string; taranan: number; enfekte: number; baslangic: string; bitis: string }
@@ -34,7 +37,7 @@ const DOMAV_EN: Record<string, string> = {
   "Dosya orijinal konumuna geri yüklensin mi?\n{0}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)": "Restore the file to its original location?\n{0}\n\n(Safe if a false positive; if truly malicious it puts the site at risk again.)",
   "Karantinadaki dosya KALICI silinsin mi?\n{0}\n\n(Geri alınamaz.)": "Permanently delete the quarantined file?\n{0}\n\n(Cannot be undone.)",
   "[ikili dosya]": "[binary file]",
-  "← Aboneliğe dön": "← Back to subscription",
+  "Aboneliğe dön": "Back to subscription",
   "dizini GirginOS'un kendi motoruyla taranır: kural zinciri + webshell heuristiği.": "directory is scanned with GirginOS's own engine: rule chain + webshell heuristics.",
   "Motor:": "Engine:",
   "Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.": "Antivirus is under development — temporarily disabled (coming soon). No scanning, no false positives.",
@@ -83,20 +86,10 @@ function YolKutu({ yol }: { yol: string }) {
   )
 }
 
-// Küçük tek-path ikon (buton içi).
-const Svg = ({ d, className = 'w-3.5 h-3.5' }: { d: string; className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} className={className}>
-    <path strokeLinecap="round" strokeLinejoin="round" d={d} />
-  </svg>
-)
-const IK = {
-  kilit: 'M8 11V7a4 4 0 118 0v4m-9 0h10a1 1 0 011 1v7a1 1 0 01-1 1H7a1 1 0 01-1-1v-7a1 1 0 011-1z',
-  ara: 'M21 21l-4.35-4.35M11 18a7 7 0 110-14 7 7 0 010 14z',
-  geri: 'M9 15L3 9l6-6M3 9h12a6 6 0 010 12h-3',
-  cop: 'M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v11a2 2 0 01-2 2h-4a2 2 0 01-2-2V7',
-}
-// Satır içi buton ölçüsü (Tailux Button) — 32px dokunma hedefi, tek satır.
-const SATIR_BTN = 'gap-1 px-2.5 text-xs whitespace-nowrap'
+// Rozet içi küçük ikon (paylaşılan set — components/Ikon).
+const RozetIkon = ({ d }: { d: string }) => <Ikon d={d} className="size-3.5 shrink-0" />
+// Satır içi buton: boyut="sm" (Tailux) + tek satır.
+const SATIR_BTN = 'whitespace-nowrap'
 
 // G-AV marka logosu — GirginOS'un KENDİ antivirüs motoru. (Imunify lisanslı bir
 // markadır; hiçbir yerde kullanılmaz.) Gerçek, dolgulu kalkan SVG — jenerik
@@ -170,7 +163,7 @@ export default function DomainAntivirusPage() {
   }
 
   async function karantina(b: Bulgu) {
-    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("Dosya karantinaya alınsın mı?\n{0}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)"), b.dosya) }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("Dosya karantinaya alınsın mı?\n{0}\n\n(Dosya ~/.karantina altına taşınır ve erişilemez hâle gelir.)"), b.dosya), ton: 'uyari', onayIkonu: I.kilit }))) return
     setHata(null)
     try { await api.post(`/domains/${id}/antivirus/karantina`, { dosya: b.dosya }); yukle(); kyukle() }
     catch (e) { const m = apiHata(e, cevir("Karantinaya alınamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
@@ -181,12 +174,12 @@ export default function DomainAntivirusPage() {
     try { const { data } = await api.get<{ kayitlar: KarantinaKayit[] }>(`/domains/${id}/antivirus/karantina/liste`); setKliste(data.kayitlar || []); setKlHata(false) } catch { setKlHata(true) }
   }
   async function geriYukle(k: KarantinaKayit) {
-    if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: cevirT(cevir("Dosya orijinal konumuna geri yüklensin mi?\n{0}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)"), k.orijinal_yol) }))) return
+    if (!(await onay({ baslik: cevir("Geri yükleme"), mesaj: cevirT(cevir("Dosya orijinal konumuna geri yüklensin mi?\n{0}\n\n(Yanlış pozitifse güvenli; gerçek zararlıysa siteyi tekrar riske atar.)"), k.orijinal_yol), ton: 'uyari', onayIkonu: I.geriAl }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/geri-yukle`, {}); kyukle(); yukle() }
     catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
   async function karSil(k: KarantinaKayit) {
-    if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: cevirT(cevir("Karantinadaki dosya KALICI silinsin mi?\n{0}\n\n(Geri alınamaz.)"), k.orijinal_yol) }))) return
+    if (!(await onay({ baslik: cevir("Kalıcı silme"), mesaj: cevirT(cevir("Karantinadaki dosya KALICI silinsin mi?\n{0}\n\n(Geri alınamaz.)"), k.orijinal_yol), ton: 'tehlike', onayIkonu: I.cop }))) return
     try { await api.post(`/domains/${id}/antivirus/karantina/${k.id}/sil`, {}); kyukle(); yukle() }
     catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
@@ -220,15 +213,15 @@ export default function DomainAntivirusPage() {
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="w-full">
-        <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline mb-2">{cevir("← Aboneliğe dön")}</Link>
+        <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline mb-2"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link>
         <Breadcrumb items={[
           { etiket: cevir("Anasayfa"), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
           { etiket: cevir("Antivirüs") },
         ]} />
-        <div className="mb-4 rounded-lg border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="inline-block h-4 w-4 mr-1.5 align-[-3px]"><path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a1.5 1.5 0 011.5 1.5v6a1.5 1.5 0 01-1.5 1.5H6.75a1.5 1.5 0 01-1.5-1.5v-6a1.5 1.5 0 011.5-1.5z"/></svg>{cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
-        </div>
+        <UyariKutusu ton="uyari" className="mb-4">
+          {cevir("Antivirüs geliştiriliyor — geçici olarak devre dışı (yakında). Tarama yapılmaz, yanlış-pozitif üretmez.")}
+        </UyariKutusu>
 
         {/* Başlık — gerçek G-AV logo görseli */}
         <div className="flex items-start gap-3 mb-4">
@@ -256,8 +249,7 @@ export default function DomainAntivirusPage() {
               </div>}
             </div>
             <div className="flex gap-2">
-              <Button color="primary" onClick={tara} yukleniyor={tarariyor}
-                className="px-4 text-sm">
+              <Button color="primary" onClick={tara} yukleniyor={tarariyor} ikon={I.oynat}>
                 {tarariyor ? cevir("Taranıyor…") : cevir("Şimdi Tara")}</Button>
             </div>
           </div>
@@ -302,13 +294,13 @@ export default function DomainAntivirusPage() {
                         </td>
                         <td className={T.hucre} data-etiket={cevir("Motor")}><Badge variant="soft">{b.motor}</Badge></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
-                          {b.karantina ? <Badge color="warning" variant="soft" className="gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</Badge>
+                          {b.karantina ? <Badge color="warning" variant="soft" className="gap-1"><RozetIkon d={I.kilit} /> {cevir("Karantinada")}</Badge>
                             : <Badge color="error" variant="soft">{cevir("Aktif")}</Badge>}
                         </td>
                         <td className={`${T.hucreAksiyon} lg:text-right ${b.karantina ? 'hidden lg:table-cell' : ''}`}>
                           {!b.karantina && (
-                            <Button color="error" variant="soft" onClick={() => karantina(b)} className={`${SATIR_BTN} lg:ml-auto`}>
-                              <Svg d={IK.kilit} /> {cevir("Karantinaya al")}
+                            <Button color="error" variant="soft" boyut="sm" ikon={I.kilit} onClick={() => karantina(b)} className={`${SATIR_BTN} lg:ml-auto`}>
+                              {cevir("Karantinaya al")}
                             </Button>
                           )}
                         </td>
@@ -325,7 +317,7 @@ export default function DomainAntivirusPage() {
         {sekme === 'karantina' && (
           <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 sm:p-5 shadow-xs">
             {klHata && kliste.length === 0 && (
-              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2 py-2">{cevir("Karantina listesi yüklenemedi.")} <button onClick={kyukle} className="underline">{cevir("Yeniden dene")}</button></div>
+              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2 py-2">{cevir("Karantina listesi yüklenemedi.")} <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={kyukle}>{cevir("Yeniden dene")}</Button></div>
             )}
             {!klHata && kliste.length === 0 ? (
               <div className="text-center py-10 text-sm text-slate-500 dark:text-slate-400">{cevir("Karantinada dosya yok.")}</div>
@@ -343,17 +335,17 @@ export default function DomainAntivirusPage() {
                         <td className={`${T.hucreBaslik} lg:min-w-[22rem]`}><YolKutu yol={k.orijinal_yol} /></td>
                         <td className={T.hucre} data-etiket={cevir("Tespit")}><span className="text-xs text-slate-600 dark:text-slate-300 break-all">{k.imza} <span className="text-slate-400">({k.puan})</span></span></td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
-                          {k.durum === 'karantina' ? <Badge color="warning" variant="soft" className="gap-1"><Svg d={IK.kilit} /> {cevir("Karantinada")}</Badge>
-                            : k.durum === 'geri_yuklendi' ? <Badge color="success" variant="soft" className="gap-1"><Svg d={IK.geri} /> {cevir("Geri yüklendi")}</Badge>
-                            : <Badge variant="soft" className="gap-1"><Svg d={IK.cop} /> {cevir("Silindi")}</Badge>}
+                          {k.durum === 'karantina' ? <Badge color="warning" variant="soft" className="gap-1"><RozetIkon d={I.kilit} /> {cevir("Karantinada")}</Badge>
+                            : k.durum === 'geri_yuklendi' ? <Badge color="success" variant="soft" className="gap-1"><RozetIkon d={I.geriAl} /> {cevir("Geri yüklendi")}</Badge>
+                            : <Badge variant="soft" className="gap-1"><RozetIkon d={I.cop} /> {cevir("Silindi")}</Badge>}
                         </td>
                         <td className={T.hucre} data-etiket={cevir("Tarih")}><span className="text-xs text-slate-400">{k.tarih}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>
                           {k.durum === 'karantina' && k.mevcut && (
                             <span className="flex flex-wrap gap-1.5 lg:justify-end">
-                              <Button variant="outlined" onClick={() => karIncele(k)} className={SATIR_BTN}><Svg d={IK.ara} /> {cevir("İncele")}</Button>
-                              <Button color="success" variant="soft" onClick={() => geriYukle(k)} className={SATIR_BTN}><Svg d={IK.geri} /> {cevir("Geri yükle")}</Button>
-                              <Button color="error" variant="soft" onClick={() => karSil(k)} className={SATIR_BTN}><Svg d={IK.cop} /> {cevir("Sil")}</Button>
+                              <Button variant="outlined" boyut="sm" ikon={I.goz} onClick={() => karIncele(k)} className={SATIR_BTN}>{cevir("İncele")}</Button>
+                              <Button color="success" variant="soft" boyut="sm" ikon={I.geriAl} onClick={() => geriYukle(k)} className={SATIR_BTN}>{cevir("Geri yükle")}</Button>
+                              <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => karSil(k)} className={SATIR_BTN}>{cevir("Sil")}</Button>
                             </span>
                           )}
                         </td>
@@ -367,18 +359,15 @@ export default function DomainAntivirusPage() {
         )}
 
         {/* İnceleme modalı — dosya ÇALIŞTIRILMADAN düz metin gösterilir */}
-        {inceleModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setInceleModal(null)}>
-            <div className="bg-white dark:bg-dark-700 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
-              <div className="px-4 py-3 border-b border-slate-200 dark:border-dark-600 flex items-center justify-between">
-                <span className="text-sm font-mono text-slate-700 dark:text-slate-200 break-all">{inceleModal.ad}</span>
-                <Button variant="flat" isIcon onClick={() => setInceleModal(null)} aria-label={cevir("Kapat")} className="size-8 shrink-0 text-lg">×</Button>
-              </div>
-              {inceleModal.kesik && <div className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">{cevir("Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.")}</div>}
-              <pre className="p-4 overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
-            </div>
-          </div>
-        )}
+        <Modal acik={!!inceleModal} genislik="xl" onKapat={() => setInceleModal(null)} baslik={cevir("İncele")}>
+          {inceleModal && (
+            <>
+              <div className="mb-3 font-mono text-sm break-all text-slate-700 dark:text-slate-200">{inceleModal.ad}</div>
+              {inceleModal.kesik && <UyariKutusu ton="uyari" className="mb-3">{cevir("Kesik gösterim — yalnızca ilk 64 KB. Dosya daha uzun; kalanı görünmüyor.")}</UyariKutusu>}
+              <pre className="overflow-auto text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">{inceleModal.icerik}</pre>
+            </>
+          )}
+        </Modal>
       </div>
     </div>
   )

@@ -6,6 +6,8 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
 
 type Row = {
@@ -125,13 +127,15 @@ export default function DNSSablonuPage() {
         {' '}{cevir("Değişiklikleriniz anında geçerli olur.")}
       </p>
 
-      <div className="mb-4 px-3.5 py-2.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-lg text-xs text-brand-800 dark:text-brand-200">
-        <strong>{cevir("Yer tutucular:")}</strong>{' '}
-        <code className="font-mono">{'{DOMAIN}'}</code> {cevir("alan adı")} ·{' '}
-        <code className="font-mono">{'{IP}'}</code> {cevir("sunucu IP")} ·{' '}
-        <code className="font-mono">{'{SELECTOR}'}</code> {cevir("DKIM seçici")} ·{' '}
-        <code className="font-mono">{'{DKIM}'}</code> {cevir("otomatik üretilen DKIM public key (TXT)")}
-      </div>
+      <UyariKutusu ton="bilgi" className="mb-4">
+        <p className="text-xs">
+          <strong>{cevir("Yer tutucular:")}</strong>{' '}
+          <code className="font-mono">{'{DOMAIN}'}</code> {cevir("alan adı")} ·{' '}
+          <code className="font-mono">{'{IP}'}</code> {cevir("sunucu IP")} ·{' '}
+          <code className="font-mono">{'{SELECTOR}'}</code> {cevir("DKIM seçici")} ·{' '}
+          <code className="font-mono">{'{DKIM}'}</code> {cevir("otomatik üretilen DKIM public key (TXT)")}
+        </p>
+      </UyariKutusu>
 
       {yuk ? (
         <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
@@ -182,9 +186,7 @@ export default function DNSSablonuPage() {
                         <input type="checkbox" checked={r.aktif} onChange={e => setRow(i, { aktif: e.target.checked })} className="cursor-pointer w-4 h-4 accent-brand-600" />
                       </td>
                       <td className={`${T.hucreAksiyon} lg:text-center`}>
-                        <Button color="error" variant="flat" isIcon onClick={() => satirSil(i)} title={cevir("Satırı sil")} className="p-1">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </Button>
+                        <Button color="error" variant="flat" isIcon ikon={I.cop} onClick={() => satirSil(i)} title={cevir("Satırı sil")} aria-label={cevir("Satırı sil")} className="size-8" />
                       </td>
                     </tr>
                   ))}
@@ -196,8 +198,7 @@ export default function DNSSablonuPage() {
               </table>
             </div>
             <div className="py-2.5 lg:px-3 lg:border-t lg:border-slate-100 dark:lg:border-dark-600">
-              <Button variant="outlined" onClick={satirEkle} className="gap-1.5 text-sm px-3 py-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+              <Button variant="outlined" boyut="sm" ikon={I.arti} onClick={satirEkle}>
                 {cevir("Kayıt Ekle")}
               </Button>
             </div>
@@ -233,10 +234,10 @@ export default function DNSSablonuPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button color="primary" onClick={kaydet} disabled={kaydediyor} className="gap-2 text-sm px-4 py-2">
+            <Button color="primary" onClick={kaydet} yukleniyor={kaydediyor} ikon={I.disket}>
               {kaydediyor ? cevir("Kaydediliyor…") : cevir("Şablonu Kaydet")}
             </Button>
-            <Button variant="outlined" onClick={yukle} className="text-sm px-4 py-2">{cevir("Geri Al")}</Button>
+            <Button variant="outlined" onClick={yukle} ikon={I.geriAl}>{cevir("Geri Al")}</Button>
           </div>
         </>
       )}

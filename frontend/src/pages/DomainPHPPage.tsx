@@ -10,6 +10,7 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
 
@@ -74,6 +75,7 @@ const PHP_EN: Record<string, string> = {
   "En yeni fatal hatalar ustte. Kaynak: ": "Newest fatal errors on top. Source: ",
   " (son 200 satir).": " (last 200 lines).",
   "Temizle": "Clear",
+  "Sunucu Modüllerini Yönet": "Manage Server Modules",
   "Yukleniyor…": "Loading…",
   "Henuz kayitli fatal hata yok. Bir hata olusursa burada gorunur.": "No fatal errors recorded yet. If an error occurs it will appear here.",
   "Debug modu kapali. Fatal hatalarin kaydedilmesi icin yukaridan debug modunu acip kaydedin.": "Debug mode is off. To record fatal errors, turn on debug mode above and save.",
@@ -160,7 +162,7 @@ export default function DomainPHPPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: a })
-      const m = `✓ ${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`
+      const m = `${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       yukle()
@@ -215,10 +217,12 @@ export default function DomainPHPPage() {
         {' · '}{cevir("Sistem kullanıcısı:")}{' '}<code className="font-mono">{yanit.sk}</code>
       </p>}
 
-      <div className="mb-5 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
-        {cevir("Burada belirlediğiniz ayarlar PHP-FPM havuzuna (")}<code className="font-mono">php_admin_value/flag</code>{cevir(") yazılır. Web sitesindeki ")}<code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
-        {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
-      </div>
+      <UyariKutusu ton="bilgi" className="mb-5">
+        <p className="text-xs">
+          {cevir("Burada belirlediğiniz ayarlar PHP-FPM havuzuna (")}<code className="font-mono">php_admin_value/flag</code>{cevir(") yazılır. Web sitesindeki ")}<code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
+          {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
+        </p>
+      </UyariKutusu>
 
 
       {yuk || !a || !yanit ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (
@@ -335,9 +339,11 @@ export default function DomainPHPPage() {
               </div>
             </div>
             {a.debug_mode && (
-              <div className="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-xs text-amber-800 dark:text-amber-200">
+              <UyariKutusu ton="uyari" className="mt-3">
+                <p className="text-xs">
                 {cevir("Debug modu acikken ")}<strong>display_errors</strong>{cevir(" ve ")}<strong>error_reporting = E_ALL</strong>{cevir(" zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ")}<strong>{cevir("kapatin")}</strong>{cevir(". Degisiklik ")}<strong>{cevir("Kaydet")}</strong>{cevir("'ten sonra uygulanir.")}
-              </div>
+                </p>
+              </UyariKutusu>
             )}
           </Kart>
 
@@ -348,13 +354,11 @@ export default function DomainPHPPage() {
                 {cevir("En yeni fatal hatalar ustte. Kaynak: ")}<code className="font-mono">/home/{yanit.sk}/.gpanel/php_debug.log</code>{cevir(" (son 200 satir).")}
               </p>
               <div className="flex gap-2 shrink-0">
-                <Button variant="outlined" onClick={debugLogYukle} disabled={dlogYuk}
-                  className="px-3 py-1.5 text-xs">
-                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span>
+                <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={debugLogYukle} yukleniyor={dlogYuk}>
+                  {cevir("Yenile")}
                 </Button>
-                <Button color="error" variant="soft" onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}
-                  className="px-3 py-1.5 text-xs">
-                  <span className="inline-flex items-center gap-1.5"><Ikon d={I.cop} /> {cevir("Temizle")}</span>
+                <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={debugLogTemizle} disabled={dlogYuk || dlog.length === 0}>
+                  {cevir("Temizle")}
                 </Button>
               </div>
             </div>
@@ -402,8 +406,8 @@ export default function DomainPHPPage() {
               <p className="text-xs text-slate-500 dark:text-slate-500">
                 PHP {yanit.php_surum} {cevir("için yüklü")} <strong>{yanit.moduller?.length || 0}</strong> {cevir("modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.")}
               </p>
-              <Link to="/sistem/php-modulleri" className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
-                {cevir(cevir("↗ Sunucu Modüllerini Yönet"))}
+              <Link to="/sistem/php-modulleri" className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
+                {cevir("Sunucu Modüllerini Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0" />
               </Link>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -522,12 +526,10 @@ export default function DomainPHPPage() {
 
           {/* Kaydet */}
           <div className="flex gap-3 mt-6">
-            <Button color="primary" onClick={kaydet} disabled={isleniyor} yukleniyor={isleniyor}
-              className="px-6 py-2.5 text-sm">
-              {isleniyor ? cevir("Kaydediliyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
+            <Button color="primary" onClick={kaydet} yukleniyor={isleniyor} ikon={I.disket}>
+              {isleniyor ? cevir("Kaydediliyor…") : cevir("Kaydet ve Uygula")}
             </Button>
-            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 text-sm">
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor} ikon={I.geriAl}>
               {cevir(cevir("İptal / Yeniden Yükle"))}
             </Button>
           </div>
@@ -593,7 +595,7 @@ function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: s
     <Sec etiket={etiket} yardim={yardim}>
       <button onClick={() => onChange(!value)} aria-pressed={value} aria-label={etiket}
         className={`px-3 py-2 rounded-md text-sm font-mono w-full text-left transition border ${value ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-dark-800 border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-400 dark:text-slate-500'}`}>
-        {value ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.onay} /> On</span> : '○ Off'}
+        {value ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.onay} /> On</span> : <span className="inline-flex items-center gap-1.5"><span className="inline-block size-2 rounded-full bg-slate-400 dark:bg-dark-300" aria-hidden /> Off</span>}
       </button>
     </Sec>
   )

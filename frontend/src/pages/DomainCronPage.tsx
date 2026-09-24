@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useRef, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
+import { I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -149,21 +149,21 @@ export default function DomainCronPage() {
       const baslik = data.ok ? cevir("Görev çalıştı") : cevir("Görev hata verdi")
       const cikti = (data.cikti || '').trim() || cevir("(çıktı yok)")
       const hataStr = data.hata ? '\n\n' + cevir("Hata:") + ' ' + data.hata : ''
-      await bilgi({ baslik, mesaj: `$ ${data.komut}\n\n${cikti}${hataStr}` })
+      await bilgi({ baslik, mesaj: `$ ${data.komut}\n\n${cikti}${hataStr}`, ton: data.ok ? 'basari' : 'tehlike' })
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Çalıştırma başarısız")) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Çalıştırma başarısız")), ton: 'tehlike' }))
     } finally {
       setCalisan(null)
     }
   }
 
   async function sil(g: Gorev) {
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: `"${g.komut.slice(0, 60)}..." ${cevir("görevi silinsin mi?")}`, ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: `"${g.komut.slice(0, 60)}..." ${cevir("görevi silinsin mi?")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
     try {
       await api.delete(`/domains/${id}/cron/${g.idx}`)
       yukle()
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Silme başarısız")) }))
+      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("Silme başarısız")), ton: 'tehlike' }))
     }
   }
 
@@ -189,14 +189,11 @@ export default function DomainCronPage() {
         <Button
           onClick={() => setModalGorev('yeni')}
           color="primary"
-          className="gap-1.5 px-3.5 py-2 text-sm"
+          ikon={I.arti}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
           {cevir("Görev Ekle")}
         </Button>
-        <Button onClick={yukle} variant="outlined" className="px-3 py-2 text-sm"><span className="inline-flex items-center gap-1.5"><Ikon d={I.yenile} /> {cevir("Yenile")}</span></Button>
+        <Button onClick={yukle} variant="outlined" ikon={I.yenile} yukleniyor={yukleniyor}>{cevir("Yenile")}</Button>
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{gorevler.length} {cevir("görev")}</span>
       </div>
 
@@ -237,9 +234,9 @@ export default function DomainCronPage() {
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
                   <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                    <Button onClick={() => calistir(g)} yukleniyor={calisan === g.idx} color="success" variant="flat" className="px-2.5 py-1.5 text-sm" title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? cevir("Çalışıyor…") : cevir("Çalıştır")}</Button>
-                    <Button onClick={() => setModalGorev(g)} color="primary" variant="flat" className="px-2.5 py-1.5 text-sm">{cevir("Düzenle")}</Button>
-                    <Button onClick={() => sil(g)} color="error" variant="soft" className="px-2.5 py-1.5 text-sm">{cevir("Sil")}</Button>
+                    <Button onClick={() => calistir(g)} yukleniyor={calisan === g.idx} color="success" variant="flat" boyut="sm" ikon={I.oynat} title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? cevir("Çalışıyor…") : cevir("Çalıştır")}</Button>
+                    <Button onClick={() => setModalGorev(g)} color="primary" variant="flat" boyut="sm" ikon={I.kalem}>{cevir("Düzenle")}</Button>
+                    <Button onClick={() => sil(g)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
                   </td>
                 </tr>
               ))}
@@ -326,8 +323,14 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
   }
 
   return (
-    <Modal acik={true} baslik={yeni ? cevir("Yeni Zamanlanmış Görev") : cevir("Görevi Düzenle")} onKapat={onKapat} genislik="lg">
-      <form onSubmit={gonder} className="space-y-4">
+    <Modal acik={true} baslik={yeni ? cevir("Yeni Zamanlanmış Görev") : cevir("Görevi Düzenle")} onKapat={onKapat} genislik="lg" kapatilamaz={isleniyor}
+      alt={<>
+        <Button type="button" onClick={onKapat} disabled={isleniyor} variant="outlined" ikon={I.kapat}>{cevir("İptal")}</Button>
+        <Button type="submit" form="cron-gorev-formu" yukleniyor={isleniyor} color="primary" ikon={yeni ? I.arti : I.disket}>
+          {isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Kaydet"))}
+        </Button>
+      </>}>
+      <form id="cron-gorev-formu" onSubmit={gonder} className="space-y-4">
         {/* Etkin */}
         <label className="flex items-center gap-2.5 cursor-pointer select-none">
           <input type="checkbox" checked={etkin} onChange={e => setEtkin(e.target.checked)} className="h-4 w-4 accent-brand-600" />
@@ -393,8 +396,7 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <div className="flex flex-wrap gap-1.5 mb-2">
             {ON_AYARLAR.map(p => (
               <Button key={p.etiket} type="button" onClick={() => uygulaPreset(p.secim)}
-                variant="outlined"
-                className="px-2.5 py-1 text-xs rounded-md">
+                variant="outlined" boyut="sm">
                 {cevir(p.etiket)}
               </Button>
             ))}
@@ -427,13 +429,6 @@ function CronModal({ gorev, domainId, onKapat, onKaydedildi }: {
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{cevir("Açıklama")} <span className="font-normal text-slate-400 dark:text-slate-500">{cevir("(opsiyonel)")}</span></label>
           <input value={yorum} onChange={e => setYorum(e.target.value)} placeholder={cevir("örn. Her gece yedek scripti")}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-md text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" onClick={onKapat} disabled={isleniyor} variant="outlined" className="px-4 py-2 text-sm">{cevir("İptal")}</Button>
-          <Button type="submit" yukleniyor={isleniyor} color="primary" className="px-4 py-2 text-sm">
-            {isleniyor ? cevir("Kaydediliyor…") : (yeni ? cevir("Ekle") : cevir("Kaydet"))}
-          </Button>
         </div>
       </form>
     </Modal>

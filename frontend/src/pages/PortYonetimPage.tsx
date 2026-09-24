@@ -11,6 +11,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import PanelKapilari, { type KapiDurum } from '@/components/PanelKapilari'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { Ikon, I } from '@/components/Ikon'
 
 /*
  * Port Değiştirme — admin only.
@@ -174,7 +175,7 @@ export default function PortYonetimPage() {
       setYeniDis('')
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Hata"), mesaj: apiHata(e, cevir("İstek başarısız")) })
+      await dialog.bilgi({ baslik: cevir("Hata"), mesaj: apiHata(e, cevir("İstek başarısız")), ton: 'tehlike' })
     } finally { setGonderiliyor(null) }
   }
 
@@ -210,24 +211,25 @@ export default function PortYonetimPage() {
       {yukleniyor ? (
         <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir("Yükleniyor…")}</div>
       ) : hata ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{hata}</div>
+        <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
       ) : durum && (
         <>
           {/* Aktif iş barı */}
           {aktifCalisiyor && durum.aktif_is && (
-            <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+            <UyariKutusu ton="uyari" className="mb-6"
+              baslik={<span className="inline-flex items-center gap-2">
+                <span className="inline-block size-2 animate-pulse rounded-full bg-current" aria-hidden />
                 {cevir("Port değişikliği devam ediyor:")} {durum.aktif_is.tip} {durum.aktif_is.eski_port} → {durum.aktif_is.yeni_port}
-              </div>
+              </span>}>
               <ol className="space-y-1 text-xs">
                 {durum.aktif_is.adimlar.map((a, i) => (
-                  <li key={i} className={a.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
-                    {a.ok ? '✓' : '✗'} {a.etiket}{a.bilgi ? ` — ${a.bilgi}` : ''}
+                  <li key={i} className={`flex items-start gap-1.5 ${a.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <Ikon d={a.ok ? I.onay : I.kapat} className="mt-px size-3.5 shrink-0" />
+                    <span>{a.etiket}{a.bilgi ? ` — ${a.bilgi}` : ''}</span>
                   </li>
                 ))}
               </ol>
-            </div>
+            </UyariKutusu>
           )}
 
           <div className="mx-auto max-w-2xl">
@@ -246,7 +248,7 @@ export default function PortYonetimPage() {
                 min={1024} max={65535} placeholder={cevirT(cevir("örn. {0}"), durum.dis_port === 8443 ? 9443 : 8443)}
                 className="mb-4 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-dark-600 dark:bg-dark-900" />
               <Button type="submit" color="error" disabled={!!gonderiliyor || !!aktifCalisiyor || !yeniDis}
-                className="w-full px-4 py-2 text-sm">
+                yukleniyor={gonderiliyor === 'dis'} ikon={I.kalem} className="w-full">
                 {gonderiliyor === 'dis' ? cevir("Uygulanıyor…") : cevir("Dış portu değiştir")}
               </Button>
             </form>

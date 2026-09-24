@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
 
 /*
@@ -146,8 +148,8 @@ export default function OturumAyarPage() {
                 key={v}
                 type="button"
                 variant="outlined"
+                boyut="sm"
                 onClick={() => setTaslak(String(v))}
-                className="px-2 py-1 text-xs"
               >
                 {v}
               </Button>
@@ -155,8 +157,8 @@ export default function OturumAyarPage() {
             <Button
               type="button"
               variant="outlined"
+              boyut="sm"
               onClick={() => setTaslak('0')}
-              className="px-2 py-1 text-xs"
               title={cevir("Kapat")}
             >
               {cevir("Kapat")}
@@ -168,8 +170,9 @@ export default function OturumAyarPage() {
             <Button
               type="submit"
               color="primary"
-              disabled={!degistiMi || gonderiliyor}
-              className="px-4 py-2 text-sm"
+              disabled={!degistiMi}
+              yukleniyor={gonderiliyor}
+              ikon={I.disket}
             >
               {gonderiliyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
             </Button>
@@ -182,9 +185,9 @@ export default function OturumAyarPage() {
         </form>
       )}
 
-      <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-        <strong>{cevir("Not:")}</strong> {cevirT(cevir("Bu, JWT mutlak süresinden ayrı bir kavramdır. Kullanıcı her istekle boşta sayacını sıfırlar; hareketsiz kalırsa {0} dakika sonra otomatik çıkış olur. Değişiklik yeni istekten itibaren geçerlidir; hâlihazırda aktif olan kullanıcılar etkilenmez, ancak boşta kalırlarsa yeni eşik uygulanır."), mevcut ?? '?')}
-      </div>
+      <UyariKutusu ton="bilgi" className="mt-5">
+        <p className="text-xs"><strong>{cevir("Not:")}</strong> {cevirT(cevir("Bu, JWT mutlak süresinden ayrı bir kavramdır. Kullanıcı her istekle boşta sayacını sıfırlar; hareketsiz kalırsa {0} dakika sonra otomatik çıkış olur. Değişiklik yeni istekten itibaren geçerlidir; hâlihazırda aktif olan kullanıcılar etkilenmez, ancak boşta kalırlarsa yeni eşik uygulanır."), mevcut ?? '?')}</p>
+      </UyariKutusu>
     </div>
   )
 }

@@ -5,7 +5,12 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, butonSinifi } from '@/components/ui'
+// Paylaşılan ikon seti (buton ikonları). Aşağıdaki yerel `Ikon` nesnesi yalnız
+// sekme/başlık süs ikonları için kalır; butonlar setten beslenir (tek dil).
+import { Ikon as SetIkon, I } from '@/components/Ikon'
+import Modal from '@/components/Modal'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
@@ -134,11 +139,11 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "İçe Aktar": "Import",
   "İçe aktarma başarısız": "Import failed",
   "— bu parola yalnızca şimdi gösteriliyor, güvenli bir yere kaydedin.": "— this password is shown only now, save it somewhere safe.",
-  "← Mail Kutularına dön": "← Back to Mailboxes",
+  "Mail Kutularına dön": "Back to Mailboxes",
   "Önce bağlantıyı doğrulayın": "Verify the connection first",
-  "✓ Kota onarıldı ve yeniden hesaplandı.": "✓ Quota repaired and recalculated.",
-  "✓ Parola güncellendi.": "✓ Password updated.",
-  "✓ Taşıma başladı — ilerleme aşağıda görünecek.": "✓ Migration started — progress will appear below.",
+  "Kota onarıldı ve yeniden hesaplandı.": "Quota repaired and recalculated.",
+  "Parola güncellendi.": "Password updated.",
+  "Taşıma başladı — ilerleme aşağıda görünecek.": "Migration started — progress will appear below.",
   "Türkçe": "English",
   "Onay gerekiyor": "Confirmation required",
   "Eski hesap": "Old account",
@@ -147,11 +152,11 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur.": "Generate a new strong password for {0}? The current password will be invalidated.",
   "{0} için yeni parola (min 6):": "New password for {0} (min 6):",
   "\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?": "The mailbox \"{0}\" and ALL its emails will be permanently deleted. Are you sure?",
-  "✓ İçe aktarıldı — {0} mesaj eklendi.": "✓ Imported — {0} messages added.",
-  "✓ İçe aktarıldı.": "✓ Imported.",
+  "İçe aktarıldı — {0} mesaj eklendi.": "Imported — {0} messages added.",
+  "İçe aktarıldı.": "Imported.",
   "Webmail girişi açılamadı": "Failed to open webmail login",
   "Domain yüklenemedi": "Failed to load domain",
-  "✓ Yedek indiriliyor.": "✓ Downloading backup.",
+  "Yedek indiriliyor.": "Downloading backup.",
   "Mail Entegrasyonu": "Mail Integration",
   "Otomatik yanıt": "Auto-reply",
   "Outlook, Thunderbird, telefon vb. istemcilere bu bilgileri girin. Kullanıcı adı ve parola tüm sunucularda aynıdır.": "Enter these details in clients like Outlook, Thunderbird, phone, etc. The username and password are the same on all servers.",
@@ -210,19 +215,12 @@ function guicluParola(uzunluk = 16) {
 }
 
 const Ikon = {
-  giris: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>,
-  anahtar: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4-2a6 6 0 01-7.743 5.743L11 14H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>,
-  kalem: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-  yenile: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
-  duraklat: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-  oynat: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   cevap: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>,
   ilet: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H10a7 7 0 00-7 7v0" /></svg>,
   tasima: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" /></svg>,
   disari: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
   iceri: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>,
   fis: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
-  kopya: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>,
   onay: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
   ayar: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
 }
@@ -239,9 +237,9 @@ function KopyaSatir({ etiket, deger }: { etiket: string; deger: string }) {
       <Button
         onClick={() => { navigator.clipboard?.writeText(deger); setOk(true); setTimeout(() => setOk(false), 1500) }}
         title={cevir("Kopyala")}
-        color={ok ? 'success' : 'neutral'} variant="outlined"
-        className="shrink-0 gap-1 text-xs px-2 py-1.5">
-        {ok ? <><Ikon.onay className="w-3.5 h-3.5" />{cevir("Kopyalandı")}</> : <><Ikon.kopya className="w-3.5 h-3.5" />{cevir("Kopyala")}</>}
+        color={ok ? 'success' : 'neutral'} variant="outlined" boyut="sm" ikon={ok ? I.onay : I.kopya}
+        className="shrink-0">
+        {ok ? cevir("Kopyalandı") : cevir("Kopyala")}
       </Button>
     </div>
   )
@@ -366,11 +364,11 @@ export default function MailKutuDetayPage() {
   async function aktifDegistir() {
     if (!kutu) return
     const yeni = !kutu.aktif
-    if (!yeni && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("{0} askıya alınacak — giriş yapamaz (postalar korunur). Emin misiniz?"), kutu.email) }))) return
+    if (!yeni && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("{0} askıya alınacak — giriş yapamaz (postalar korunur). Emin misiniz?"), kutu.email), ton: 'uyari', onayIkonu: I.kilit }))) return
     setIsleniyor(true); setHata(null)
     try {
       await api.put(`/eklenti/mail/hesaplar/${kutu.id}/aktif`, { aktif: yeni })
-      setKutu({ ...kutu, aktif: yeni }); bildir(`✓ ${kutu.email} ${yeni ? cevir("aktifleştirildi") : cevir("askıya alındı")}.`)
+      setKutu({ ...kutu, aktif: yeni }); bildir(`${kutu.email} ${yeni ? cevir("aktifleştirildi") : cevir("askıya alındı")}.`)
     } catch (e) { const m = apiHata(e, cevir("Durum değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function kotaOnar() {
@@ -378,12 +376,12 @@ export default function MailKutuDetayPage() {
     setIsleniyor(true); setHata(null)
     try {
       const r = await api.post<{ kullanilan_bytes: number }>(`/eklenti/mail/hesaplar/${kutu.id}/kota-onar`)
-      setKutu({ ...kutu, kullanilan_bytes: r.data.kullanilan_bytes }); bildir(cevir("✓ Kota onarıldı ve yeniden hesaplandı."))
+      setKutu({ ...kutu, kullanilan_bytes: r.data.kullanilan_bytes }); bildir(cevir("Kota onarıldı ve yeniden hesaplandı."))
     } catch (e) { const m = apiHata(e, cevir("Kota onarılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function parolaUret() {
     if (!kutu) return
-    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur."), kutu.email) }))) return
+    if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("{0} için yeni güçlü parola üretilsin mi? Mevcut parola geçersiz olur."), kutu.email), ton: 'uyari', onayIkonu: I.anahtar }))) return
     setIsleniyor(true); setHata(null)
     try {
       const r = await api.post<{ email: string; parola: string }>(`/eklenti/mail/hesaplar/${kutu.id}/parola-uret`)
@@ -395,7 +393,7 @@ export default function MailKutuDetayPage() {
     const p = (await sor({ baslik: cevirT(cevir("{0} için yeni parola (min 6):"), kutu.email) }))
     if (!p) return
     setIsleniyor(true); setHata(null)
-    try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/parola`, { parola: p }); bildir(cevir("✓ Parola güncellendi.")) }
+    try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/parola`, { parola: p }); bildir(cevir("Parola güncellendi.")) }
     catch (e) { const m = apiHata(e, cevir("Parola değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   async function webmailGiris() {
@@ -408,7 +406,7 @@ export default function MailKutuDetayPage() {
   }
   async function kutuSil() {
     if (!kutu) return
-    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?"), kutu.email), ton: 'tehlike' }))) return
+    if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("\"{0}\" posta kutusu ve TÜM e-postaları kalıcı silinecek. Emin misiniz?"), kutu.email), ton: 'tehlike', onayIkonu: I.cop }))) return
     setIsleniyor(true); setHata(null)
     try { await api.delete(`/eklenti/mail/hesaplar/${kutu.id}`); navigate(`/abonelikler/${id}/mail/kutular`) }
     catch (e) { const m = apiHata(e, cevir("Silinemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); setIsleniyor(false) }
@@ -419,7 +417,7 @@ export default function MailKutuDetayPage() {
     if (!kutu) return
     if (oto.aktif && !oto.mesaj.trim()) { const v = cevir("Otomatik yanıt için mesaj boş olamaz"); setHata(v); toast.hata(v); return }
     setIsleniyor(true); setHata(null)
-    try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/otomatik-yanit`, oto); bildir(`✓ ${cevir("Otomatik yanıt")} ${oto.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`) }
+    try { await api.put(`/eklenti/mail/hesaplar/${kutu.id}/otomatik-yanit`, oto); bildir(`${cevir("Otomatik yanıt")} ${oto.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`) }
     catch (e) { const m = apiHata(e, cevir("Otomatik yanıt kaydedilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
 
@@ -431,7 +429,7 @@ export default function MailKutuDetayPage() {
     try {
       const r = await api.put<Iletim & { durum: string }>(`/eklenti/mail/hesaplar/${kutu.id}/iletim`, iletim)
       setIletim({ aktif: r.data.aktif, hedef: r.data.hedef || '', kopya: r.data.kopya })
-      bildir(`✓ ${cevir("İletim")} ${r.data.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`)
+      bildir(`${cevir("İletim")} ${r.data.aktif ? cevir("açıldı") : cevir("kapatıldı")}.`)
     } catch (e) { const m = apiHata(e, cevir("İletim kaydedilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
 
@@ -445,7 +443,7 @@ export default function MailKutuDetayPage() {
       const a = document.createElement('a')
       a.href = url; a.download = `${kutu.email.replace('@', '_at_')}-maildir.tar.gz`
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
-      bildir(cevir("✓ Yedek indiriliyor."))
+      bildir(cevir("Yedek indiriliyor."))
     } catch (e) { const m = apiHata(e, cevir("Dışa aktarma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
   const dosyaRef = useRef<HTMLInputElement | null>(null)
@@ -456,7 +454,7 @@ export default function MailKutuDetayPage() {
       const fd = new FormData(); fd.append('dosya', dosya)
       const r = await api.post<{ eklenen: number }>(`/eklenti/mail/hesaplar/${kutu.id}/iceri-aktar`, fd, { timeout: 300_000 })
       const n = r.data.eklenen
-      bildir(n >= 0 ? cevirT(cevir("✓ İçe aktarıldı — {0} mesaj eklendi."), n) : cevir("✓ İçe aktarıldı."))
+      bildir(n >= 0 ? cevirT(cevir("İçe aktarıldı — {0} mesaj eklendi."), n) : cevir("İçe aktarıldı."))
       kutuYukle(mailDomain!.id)
     } catch (e) { const m = apiHata(e, cevir("İçe aktarma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false); if (dosyaRef.current) dosyaRef.current.value = '' }
   }
@@ -518,7 +516,7 @@ export default function MailKutuDetayPage() {
     setIsleniyor(true); setHata(null)
     try {
       await api.post(`/eklenti/mail/hesaplar/${kutu.id}/tasima`, tasima)
-      bildir(cevir("✓ Taşıma başladı — ilerleme aşağıda görünecek."))
+      bildir(cevir("Taşıma başladı — ilerleme aşağıda görünecek."))
       tasimaDurumCek(kutu.id) // 'calisiyor' görünce polling'i kendi başlatır
     } catch (e) { const m = apiHata(e, cevir("Taşıma başlatılamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) } finally { setIsleniyor(false) }
   }
@@ -547,7 +545,6 @@ export default function MailKutuDetayPage() {
     </div>
   )
 
-  const btnPri = 'inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white shadow-xs shadow-brand-600/20 disabled:opacity-50 transition-colors'
   const kart = 'bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-xs'
   const etiket = 'block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5'
   const girdi = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-400'
@@ -588,20 +585,15 @@ export default function MailKutuDetayPage() {
 
   // Uyarı şeridi — 2. ve 3. adımda aynı bileşen (kullanıcı parolayı DENEMEDEN görür).
   const UyariSeridi = () => saglayiciUyarisi ? (
-    <div className={`mt-3 rounded-lg border px-4 py-3 text-xs leading-relaxed ${saglayiciUyarisi.agir
-      ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
-      : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'}`}>
-      <div className="font-semibold mb-1 flex items-center gap-1.5">{saglayiciUyarisi.agir
-        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M4.9 4.9l14.2 14.2M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>
-        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 9v4m0 4h.01M10.3 3.6L2.3 17.6A1.5 1.5 0 003.6 20h16.8a1.5 1.5 0 001.3-2.4L13.6 3.6a1.5 1.5 0 00-2.6 0z"/></svg>}{saglayiciUyarisi.baslik}</div>
-      <p>{saglayiciUyarisi.metin}</p>
+    <UyariKutusu ton={saglayiciUyarisi.agir ? 'tehlike' : 'uyari'} baslik={saglayiciUyarisi.baslik} className="mt-3">
+      <p className="text-xs leading-relaxed">{saglayiciUyarisi.metin}</p>
       {saglayiciUyarisi.pst && (
-        <Button onClick={() => setSekme('aktar')} color="error"
-          className="mt-2.5 gap-1.5 text-xs px-3 py-1.5">
-          <Ikon.iceri className="w-3.5 h-3.5" />{cevir(".pst içe aktarmaya git")}
+        <Button onClick={() => setSekme('aktar')} color="primary" boyut="sm" ikon={I.yukle}
+          className="mt-2.5">
+          {cevir(".pst içe aktarmaya git")}
         </Button>
       )}
-    </div>
+    </UyariKutusu>
   ) : null
 
   // adimTamam — o adım "Devam" için yeterli mi (ileri gitmeyi kapıda tutar).
@@ -632,7 +624,10 @@ export default function MailKutuDetayPage() {
       {kutu === null ? (
         <div className={`${kart} p-8 text-center`}>
           <p className="text-sm text-slate-500 dark:text-slate-300 mb-4">{cevir("Posta kutusu bulunamadı.")}</p>
-          <Link to={`/abonelikler/${id}/mail/kutular`} className={btnPri}>{cevir("← Mail Kutularına dön")}</Link>
+          <Link to={`/abonelikler/${id}/mail/kutular`} className={butonSinifi({ color: 'primary' })}>
+            <SetIkon d={I.geri} className="size-4 shrink-0 -ms-1 me-2" />
+            {cevir("Mail Kutularına dön")}
+          </Link>
         </div>
       ) : (
         <>
@@ -655,15 +650,14 @@ export default function MailKutuDetayPage() {
               <div className="flex-1 min-w-0 flex items-center gap-2 lg:justify-center">
                 <KotaBar kullanilan={kutu.kullanilan_bytes} kota={kutu.quota_bytes} />
                 <Button onClick={kotaOnar} disabled={isleniyor} title={cevir("Kotayı onar / yeniden hesapla")}
-                  isIcon variant="outlined"
-                  className="shrink-0 h-8 w-8">
-                  <Ikon.yenile className="w-4 h-4" />
-                </Button>
+                  aria-label={cevir("Kotayı onar / yeniden hesapla")}
+                  isIcon variant="flat" ikon={I.yenile}
+                  className="shrink-0 size-8" />
               </div>
               <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
-                <Button onClick={webmailGiris} disabled={isleniyor || !kutu.aktif} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.giris className="w-4 h-4" />{cevir("Giriş")}</Button>
-                <Button onClick={aktifDegistir} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
-                  {kutu.aktif ? <><Ikon.duraklat className="w-4 h-4" />{cevir("Askıya al")}</> : <><Ikon.oynat className="w-4 h-4" />{cevir("Aktifleştir")}</>}
+                <Button onClick={webmailGiris} disabled={isleniyor || !kutu.aktif} color="primary" boyut="sm" ikonSonda={I.harici}>{cevir("Giriş")}</Button>
+                <Button onClick={aktifDegistir} disabled={isleniyor} variant="outlined" boyut="sm" ikon={kutu.aktif ? I.kilit : I.kilitAcik}>
+                  {kutu.aktif ? cevir("Askıya al") : cevir("Aktifleştir")}
                 </Button>
               </div>
             </div>
@@ -732,14 +726,14 @@ export default function MailKutuDetayPage() {
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Parola")}</h3>
                 <p className="text-xs text-slate-400 mb-3">{cevir("Kutunun IMAP/SMTP/webmail parolasını sıfırlayın.")}</p>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Button onClick={parolaUret} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.anahtar className="w-3.5 h-3.5" />{cevir("Güçlü parola üret")}</Button>
-                  <Button onClick={parolaElle} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5"><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Elle değiştir")}</Button>
+                  <Button onClick={parolaUret} disabled={isleniyor} color="primary" boyut="sm" ikon={I.anahtar}>{cevir("Güçlü parola üret")}</Button>
+                  <Button onClick={parolaElle} disabled={isleniyor} variant="outlined" boyut="sm" ikon={I.kalem}>{cevir("Elle değiştir")}</Button>
                 </div>
               </div>
               <div className="border-t border-red-100 dark:border-red-900/40 pt-5">
                 <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">{cevir("Tehlikeli Bölge")}</h3>
                 <p className="text-xs text-slate-400 mb-3">{cevir("Posta kutusu ve içindeki tüm e-postalar kalıcı olarak silinir. Geri alınamaz.")}</p>
-                <Button onClick={kutuSil} disabled={isleniyor} color="error" variant="outlined" className="gap-1.5 text-xs px-3 py-2"><Ikon.kalem className="w-3.5 h-3.5" />{cevir("Posta kutusunu sil")}</Button>
+                <Button onClick={kutuSil} disabled={isleniyor} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Posta kutusunu sil")}</Button>
               </div>
             </div>
           )}
@@ -757,7 +751,7 @@ export default function MailKutuDetayPage() {
                 <div><label className={etiket}>{cevir("Konu")}</label><input value={oto.konu} onChange={e => setOto(o => ({ ...o, konu: e.target.value }))} maxLength={255} placeholder={cevir("Ofis dışındayım")} className={girdi} /></div>
                 <div><label className={etiket}>{cevir("Mesaj")}</label><textarea value={oto.mesaj} onChange={e => setOto(o => ({ ...o, mesaj: e.target.value }))} rows={5} maxLength={8000} placeholder={cevir("Merhaba, şu an ofis dışındayım. En kısa sürede dönüş yapacağım.")} className={`${girdi} resize-y`} /></div>
               </div>
-              <div className="mt-4"><Button onClick={otoKaydet} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Kaydet")}</Button></div>
+              <div className="mt-4"><Button onClick={otoKaydet} yukleniyor={isleniyor} color="primary" boyut="sm" ikon={I.disket}>{cevir("Kaydet")}</Button></div>
             </div>
           )}
 
@@ -778,7 +772,7 @@ export default function MailKutuDetayPage() {
                 </label>
                 <p className="text-[11px] text-slate-400">{cevir("Kopya kapalıysa gelen posta yalnızca hedefe iletilir, bu kutuda tutulmaz.")}</p>
               </div>
-              <div className="mt-4"><Button onClick={iletimKaydet} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Kaydet")}</Button></div>
+              <div className="mt-4"><Button onClick={iletimKaydet} yukleniyor={isleniyor} color="primary" boyut="sm" ikon={I.disket}>{cevir("Kaydet")}</Button></div>
             </div>
           )}
 
@@ -788,7 +782,7 @@ export default function MailKutuDetayPage() {
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Mail Taşıma (Uzaktan içe çekme)")}</h3>
               <p className="text-xs text-slate-400 mb-4">{cevir("Başka bir sunucudaki IMAP kutusundan tüm mailleri bu kutuya kopyalar (imapsync). Kaynak kutu değişmez.")}</p>
               {tasimaDurum?.imapsync === false && (
-                <div className="mb-4 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-800 dark:text-amber-300">{cevir("Bu sunucuda")} <span className="font-mono">imapsync</span> {cevir("kurulu değil — taşıma kullanılamıyor. Sunucuya")} <span className="font-mono">imapsync</span> {cevir("kurulmalı.")}</div>
+                <UyariKutusu ton="uyari" className="mb-4"><p className="text-xs">{cevir("Bu sunucuda")} <span className="font-mono">imapsync</span> {cevir("kurulu değil — taşıma kullanılamıyor. Sunucuya")} <span className="font-mono">imapsync</span> {cevir("kurulmalı.")}</p></UyariKutusu>
               )}
 
               {/* ADIM ÇUBUĞU — tamamlanan adıma tıklanarak geri dönülebilir */}
@@ -799,7 +793,7 @@ export default function MailKutuDetayPage() {
                     <li key={s.n} className="flex items-center gap-2">
                       <button type="button" onClick={() => gecildi && setAdim(s.n)} disabled={!gecildi}
                         className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-colors ${gecildi ? 'bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer' : aktif ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-dark-600 text-slate-400'}`}>
-                        {gecildi ? '✓' : s.n}
+                        {gecildi ? <SetIkon d={I.onay} className="size-3.5" /> : s.n}
                       </button>
                       <span className={aktif ? 'font-medium text-slate-700 dark:text-slate-200' : 'text-slate-400'}>{cevir(s.ad)}</span>
                       {i < ADIMLAR.length - 1 && <span className="w-6 h-px bg-slate-200 dark:bg-dark-600" />}
@@ -814,7 +808,7 @@ export default function MailKutuDetayPage() {
                     {cevir(cevir("Kaldığınız yerden devam ediyorsunuz — form 24 saat saklanır."))}
                     <span className="text-slate-400"> {cevir("Güvenlik gereği parolalar saklanmaz, yeniden girin.")}</span>
                   </span>
-                  <button onClick={taslagiTemizle} className="shrink-0 font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">{cevir("Temizle")}</button>
+                  <Button onClick={taslagiTemizle} variant="flat" boyut="sm" ikon={I.sifirla} className="shrink-0">{cevir("Temizle")}</Button>
                 </div>
               )}
 
@@ -846,12 +840,10 @@ export default function MailKutuDetayPage() {
                     <span className="font-mono text-slate-700 dark:text-slate-200">{tasima.kullanici}</span> {cevir("için eski sunucuyu seçin.")}
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Button onClick={sunucuKesfet} disabled={kesfediliyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5">
-                      {kesfediliyor
-                        ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />{cevir("Aranıyor…")}</>
-                        : <><Ikon.ayar className="w-4 h-4" />{cevir("Sunucuyu otomatik bul")}</>}
+                    <Button onClick={sunucuKesfet} yukleniyor={kesfediliyor} color="primary" boyut="sm" ikon={I.ara}>
+                      {kesfediliyor ? cevir("Aranıyor…") : cevir("Sunucuyu otomatik bul")}
                     </Button>
-                    <Button onClick={() => { setElle(v => !v); setAdaylar(null) }} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
+                    <Button onClick={() => { setElle(v => !v); setAdaylar(null) }} variant="outlined" boyut="sm" ikon={elle ? I.geriAl : I.kalem}>
                       {elle ? cevir("Otomatik moda dön") : cevir("Elle gireceğim")}
                     </Button>
                   </div>
@@ -925,20 +917,18 @@ export default function MailKutuDetayPage() {
                   </div>
 
                   {dogrulama && (
-                    <div className={`mt-3 px-3 py-2 rounded-lg text-xs border ${dogrulama.ok
-                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'}`}>
-                      {dogrulama.ok ? `✓ ${dogrulama.mesaj}` : cevirT(cevir("Bağlanılamadı: {0}"), dogrulama.hata)}
-                    </div>
+                    <UyariKutusu ton={dogrulama.ok ? 'basari' : 'tehlike'} className="mt-3">
+                      <p className="text-xs">{dogrulama.ok ? dogrulama.mesaj : cevirT(cevir("Bağlanılamadı: {0}"), dogrulama.hata)}</p>
+                    </UyariKutusu>
                   )}
 
                   <div className="mt-4 flex items-center gap-2 flex-wrap">
-                    <Button onClick={baglantiDogrula} disabled={dogrulaniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5">
+                    <Button onClick={baglantiDogrula} yukleniyor={dogrulaniyor} variant="outlined" boyut="sm" ikon={I.yenile}>
                       {dogrulaniyor ? cevir("Doğrulanıyor…") : dogrulama?.ok ? cevir("Yeniden doğrula") : cevir("Bağlantıyı doğrula")}
                     </Button>
-                    <Button onClick={tasimaBaslat} disabled={isleniyor || tasimaDurum?.durum === 'calisiyor' || !dogrulama?.ok || !tasima.hedef_parola} color="primary" className="text-xs px-3.5 py-2 gap-1.5"
+                    <Button onClick={tasimaBaslat} yukleniyor={isleniyor} disabled={tasimaDurum?.durum === 'calisiyor' || !dogrulama?.ok || !tasima.hedef_parola} color="primary" boyut="sm" ikon={I.tasi}
                       title={!dogrulama?.ok ? 'Önce bağlantıyı doğrulayın' : cevir("Taşımayı başlat")}>
-                      <Ikon.tasima className="w-4 h-4" />{tasimaDurum?.durum === 'calisiyor' ? cevir("Taşınıyor…") : cevir("Taşımayı başlat")}
+                      {tasimaDurum?.durum === 'calisiyor' ? cevir("Taşınıyor…") : cevir("Taşımayı başlat")}
                     </Button>
                   </div>
                 </div>
@@ -947,11 +937,11 @@ export default function MailKutuDetayPage() {
               {/* GEZİNME — ileri/geri */}
               <div className="mt-5 pt-4 border-t border-slate-100 dark:border-dark-600 flex items-center justify-between gap-2">
                 <Button onClick={() => setAdim(a => Math.max(1, a - 1))} disabled={adim === 1}
-                  variant="outlined" className={`text-xs px-3 py-2 gap-1.5 ${adim === 1 ? 'invisible' : ''}`}>{cevir("← Geri")}</Button>
+                  variant="outlined" boyut="sm" ikon={I.geri} className={adim === 1 ? 'invisible' : ''}>{cevir("Geri")}</Button>
                 {adim < 3 ? (
                   <Button onClick={() => setAdim(a => a + 1)} disabled={!adimTamam(adim)}
                     title={adimTamam(adim) ? '' : adim === 1 ? 'E-posta ve parolayı girin' : cevir("Bir sunucu seçin ya da elle girin")}
-                    color="primary" className="text-xs px-3.5 py-2 gap-1.5">{cevir("Devam →")}</Button>
+                    color="primary" boyut="sm" ikonSonda={I.ileri}>{cevir("Devam")}</Button>
                 ) : <span />}
               </div>
 
@@ -961,7 +951,7 @@ export default function MailKutuDetayPage() {
                   <div className="flex items-center gap-2 text-sm">
                     {tasimaDurum.durum === 'calisiyor' && <span className="w-3.5 h-3.5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />}
                     {tasimaDurum.durum === 'tamam' && <Ikon.onay className="w-4 h-4 text-emerald-500" />}
-                    {tasimaDurum.durum === 'hata' && <span className="text-red-500">!</span>}
+                    {tasimaDurum.durum === 'hata' && <SetIkon d={I.tehlike} className="size-4 shrink-0 text-red-500" />}
                     <span className="font-medium text-slate-700 dark:text-slate-200">{tasimaDurum.durum === 'calisiyor' ? cevir("Taşınıyor") : tasimaDurum.durum === 'tamam' ? cevir("Tamamlandı") : cevir("Hata")}</span>
                     {typeof tasimaDurum.aktarilan === 'number' && tasimaDurum.aktarilan > 0 && <span className="text-xs text-slate-400 tabular-nums">· {tasimaDurum.aktarilan} {cevir("mesaj")}</span>}
                   </div>
@@ -982,14 +972,14 @@ export default function MailKutuDetayPage() {
                 <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.disari className="w-5 h-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Dışa Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4">{cevir("Kutunun tüm postalarını")} <span className="font-mono">.tar.gz</span> (Maildir) {cevir("olarak indir. Yedekleme veya başka kutuya taşımak için.")}</p>
-                <Button onClick={disariAktar} disabled={isleniyor} color="primary" className="text-xs px-3.5 py-2 gap-1.5"><Ikon.disari className="w-3.5 h-3.5" />{cevir("Yedeği indir")}</Button>
+                <Button onClick={disariAktar} disabled={isleniyor} color="primary" boyut="sm" ikon={I.indir}>{cevir("Yedeği indir")}</Button>
               </div>
               <div className={`${kart} p-5`}>
                 <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.iceri className="w-5 h-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("İçe Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4"><span className="font-mono">.tar.gz</span> {cevir("(Maildir yedeği) veya")} <span className="font-mono">.mbox</span> {cevir("yükleyin. Mevcut postalar korunur, üzerine eklenir.")}</p>
                 <input ref={dosyaRef} type="file" accept=".tar.gz,.tgz,.mbox,.eml" onChange={e => { const f = e.target.files?.[0]; if (f) iceriAktar(f) }} className="hidden" />
-                <Button onClick={() => dosyaRef.current?.click()} disabled={isleniyor} variant="outlined" className="text-xs px-3 py-2 gap-1.5"><Ikon.iceri className="w-3.5 h-3.5" />{cevir("Dosya seç ve yükle")}</Button>
+                <Button onClick={() => dosyaRef.current?.click()} disabled={isleniyor} variant="outlined" boyut="sm" ikon={I.yukle}>{cevir("Dosya seç ve yükle")}</Button>
               </div>
             </div>
           )}
@@ -997,22 +987,18 @@ export default function MailKutuDetayPage() {
       )}
 
       {/* Üretilen parola modalı */}
-      {uretilen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setUretilen(null)}>
-          <div className="bg-white dark:bg-dark-700 rounded-lg p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-dark-600" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400"><Ikon.anahtar className="w-5 h-5" /></div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Yeni parola üretildi")}</h3>
-            </div>
+      <Modal acik={!!uretilen} baslik={cevir("Yeni parola üretildi")} ton="basari" genislik="sm" onKapat={() => setUretilen(null)}
+        alt={<Button onClick={() => setUretilen(null)} variant="outlined" ikon={I.kapat}>{cevir("Kapat")}</Button>}>
+        {uretilen && (
+          <>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4"><span className="font-mono text-slate-700 dark:text-slate-300">{uretilen.email}</span> {cevir("— bu parola yalnızca şimdi gösteriliyor, güvenli bir yere kaydedin.")}</p>
             <div className="flex items-center gap-2">
               <code className="flex-1 font-mono text-sm bg-slate-100 dark:bg-dark-800 rounded-lg px-3 py-2.5 break-all select-all text-slate-800 dark:text-slate-100">{uretilen.parola}</code>
-              <Button onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }} color="primary" className="shrink-0 text-xs px-3 py-2.5">{kopyalandi ? '✓ ' + cevir("Kopyalandı") : cevir("Kopyala")}</Button>
+              <Button onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }} color="primary" boyut="sm" ikon={kopyalandi ? I.onay : I.kopya} className="shrink-0">{kopyalandi ? cevir("Kopyalandı") : cevir("Kopyala")}</Button>
             </div>
-            <Button onClick={() => setUretilen(null)} variant="outlined" className="mt-4 w-full text-sm px-4 py-2">{cevir("Kapat")}</Button>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   )
 }
