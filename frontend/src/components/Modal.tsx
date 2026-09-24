@@ -6,7 +6,7 @@
 //     alt={<Button color="primary" ikon={I.onay} onClick={kapat}>Tamam</Button>}>
 //     …içerik…
 //   </Modal>
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { Ton } from './tonlar'
 import { TonRozeti } from './UyariKutusu'
@@ -28,6 +28,7 @@ export default function Modal({
   // kapatilamaz — işlem sürerken Esc/arka plan/X kapatmasın (ör. kaydediliyor).
   kapatilamaz?: boolean
 }) {
+  const baslikId = useId()
   const kokRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   // onKapat her çizimde yeni fonksiyon olabilir: etkiyi yeniden kurmasın diye ref'te tut.
@@ -40,11 +41,12 @@ export default function Modal({
     const onceki = document.activeElement as HTMLElement | null
     const eski = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    // Açılışta odak panelin içine: ilk giriş alanı, yoksa panelin kendisi.
+    // Açılışta odak panelin içine: ilk METİN girişi (onay kutusu/radyo değil — onlara
+    // odaklanmak kullanıcıyı formun ortasına atar), yoksa panelin kendisi.
     const t = window.setTimeout(() => {
       const p = panelRef.current
       if (!p || p.contains(document.activeElement)) return
-      const ilkGirdi = p.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])')
+      const ilkGirdi = p.querySelector<HTMLElement>('input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
       ;(ilkGirdi || p).focus()
     }, 30)
     function tus(e: KeyboardEvent) {
@@ -78,14 +80,14 @@ export default function Modal({
 
   return (
     <div ref={kokRef} className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true"
-      aria-label={typeof baslik === 'string' ? baslik : undefined}>
+      aria-labelledby={baslikId}>
       <div className="gosp-fade absolute inset-0 bg-gray-900/50 backdrop-blur-sm dark:bg-black/50" onClick={kapat} aria-hidden />
       <div ref={panelRef} tabIndex={-1}
         className={`gosp-modal-in relative flex max-h-[90vh] w-full ${w} flex-col overflow-hidden rounded-lg bg-white shadow-soft outline-hidden dark:bg-dark-700 dark:shadow-none`}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-dark-500">
           <div className="flex min-w-0 items-center gap-3">
             {ton && <TonRozeti ton={ton} kucuk />}
-            <h3 className="truncate text-base font-medium text-gray-800 dark:text-dark-50">{baslik}</h3>
+            <h3 id={baslikId} className="truncate text-base font-medium text-gray-800 dark:text-dark-50">{baslik}</h3>
           </div>
           <button
             type="button"
