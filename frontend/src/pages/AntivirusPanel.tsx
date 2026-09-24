@@ -570,10 +570,10 @@ export default function AntivirusPanel() {
                         <td className={T.hucre} data-etiket={cevir("Aktif bulgu")}><span className={dm.aktif_bulgu > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-slate-400'}>{dm.aktif_bulgu}</span></td>
                         <td className={T.hucre} data-etiket={cevir("Karantina")}><span className={dm.karantina > 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-400'}>{dm.karantina}</span></td>
                         <td className={`${T.hucreAksiyon} lg:text-right`}>
-                          <button onClick={() => domainTara(dm)} disabled={tarananDom.has(dm.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white rounded-lg disabled:opacity-50 whitespace-nowrap">
-                            {tarananDom.has(dm.id) ? <><span className="inline-block w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" /> {cevir("Taranıyor…")}</> : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> {cevir("Tara")}</>}
-                          </button>
+                          <Button color="primary" onClick={() => domainTara(dm)} yukleniyor={tarananDom.has(dm.id)}
+                            className="gap-1.5 px-3 py-1.5 text-xs whitespace-nowrap">
+                            {tarananDom.has(dm.id) ? cevir("Taranıyor…") : <><Ikon ad="bolt" className="w-3.5 h-3.5" /> {cevir("Tara")}</>}
+                          </Button>
                         </td>
                       </tr>
                     ))}

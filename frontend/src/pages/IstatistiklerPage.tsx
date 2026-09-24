@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
+import { Card } from '@/components/ui'
 
 // /system/usage GERÇEK şekli (iç içe) — IzlemePage ile aynı.
 type Usage = {
@@ -112,7 +113,7 @@ export default function IstatistiklerPage() {
 
       {/* Sistem özeti + sayaçlar */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+        <Card className="bg-white dark:bg-dark-700 p-4">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Sistem")}</h3>
           <div className="space-y-1.5 text-sm">
             <Satir e={cevir("Sunucu adı")} d={u?.sistem?.hostname || '–'} />
@@ -122,8 +123,8 @@ export default function IstatistiklerPage() {
             <Satir e="Swap" d={u?.swap ? `${n(u.swap.yuzde).toFixed(1)}% · ${fmt(n(u.swap.kullanilan_kb) * 1024)} / ${fmt(n(u.swap.toplam_kb) * 1024)}` : '–'} />
             <Satir e={cevir("Panel sürümü")} d={u?.sistem?.panel_surum || '–'} />
           </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+        </Card>
+        <Card className="bg-white dark:bg-dark-700 p-4">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{cevir("Domainler")}</h3>
           <div className="space-y-1.5 text-sm">
             <Satir e={cevir(cevir("Toplam domain"))} d={s ? String(s.domain) : '–'} />
@@ -132,7 +133,7 @@ export default function IstatistiklerPage() {
             } />
             <Satir e={cevir(cevir("Pasif domain"))} d={String(s ? s.domain - s.domain_aktif : 0)} />
           </div>
-        </div>
+        </Card>
       </div>
 
       <div className="text-xs text-slate-400 dark:text-slate-500 text-center mt-6">
@@ -148,20 +149,20 @@ function Metrik({ baslik, deger, alt, renk, oran }: { baslik: string; deger: str
     violet: 'bg-violet-500', amber: 'bg-amber-500',
   }
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+    <Card className="bg-white dark:bg-dark-700 p-4">
       <div className="text-xs text-slate-500 dark:text-slate-500 uppercase tracking-wider">{baslik}</div>
       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">{deger}</div>
       <div className="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5 truncate">{alt}</div>
-      <div className="mt-2 h-1.5 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
+      <div className="mt-2 h-1.5 bg-slate-100 dark:bg-dark-500 rounded overflow-hidden">
         <div className={`h-full ${renkMap[renk]} transition-all`} style={{ width: Math.min(100, Math.max(0, oran)) + '%' }} />
       </div>
-    </div>
+    </Card>
   )
 }
 
 function Satir({ e, d }: { e: string; d: any }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1 border-b border-slate-50 dark:border-slate-700/40 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-1 border-b border-slate-50 dark:border-dark-600 last:border-0">
       <span className="text-xs text-slate-500 dark:text-slate-500 shrink-0">{e}</span>
       <span className="text-xs font-mono text-slate-800 dark:text-slate-200 text-right truncate">{d}</span>
     </div>

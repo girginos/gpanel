@@ -1,6 +1,7 @@
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
+import { Button } from '@/components/ui'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 export type Domain = {
@@ -46,14 +47,14 @@ export default function DomainList({
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Domainler {!yukleniyor && <span className="text-slate-400 dark:text-slate-500 font-normal">({items.length})</span>}
         </h3>
-        <button
-          type="button"
-          className="text-xs px-2 py-1 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 rounded font-medium shadow-xs transition"
+        <Button
+          color="primary"
+          className="text-xs px-2.5 py-1 disabled:pointer-events-auto disabled:cursor-not-allowed"
           title="F2'de aktif olacak"
           disabled
         >
           + Domain Ekle
-        </button>
+        </Button>
       </div>
 
       <ul className="max-h-[640px] overflow-auto divide-y divide-slate-100 dark:divide-dark-600">

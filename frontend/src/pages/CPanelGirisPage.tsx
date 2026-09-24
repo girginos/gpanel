@@ -8,6 +8,7 @@ import { Ikon, I } from '@/components/Ikon'
 import { useNavigate } from 'react-router-dom'
 import { apiHata } from '@/lib/api'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 import { useAuth } from '@/store/auth'
 import axios from 'axios'
 
@@ -80,10 +81,10 @@ export default function CPanelGirisPage() {
               autoComplete="current-password" required
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded font-mono text-sm focus:border-brand-500 outline-none" />
           </div>
-          <button type="submit" disabled={yuk || !kullanici || !parola}
-            className="w-full px-4 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 font-medium rounded-md">
+          <Button type="submit" color="primary" yukleniyor={yuk} disabled={!kullanici || !parola}
+            className="w-full px-4 py-2.5">
             {yuk ? t('ortak.yukleniyor') : t('giris.girisYap')}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
