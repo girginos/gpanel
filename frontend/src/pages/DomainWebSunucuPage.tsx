@@ -10,6 +10,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui'
 
 type Ayarlar = {
   hdr_x_content_type: boolean
@@ -264,9 +265,9 @@ export default function DomainWebSunucuPage() {
             const b = BACKEND_BILGI[k]
             const aktif = backend === k
             const renkler: Record<string, string> = {
-              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 dark:bg-emerald-900/20',
-              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'    : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/20',
-              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:bg-dark-700 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700',
+              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20',
+              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'    : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20',
+              slate:   aktif ? 'border-slate-500 dark:border-dark-400 bg-slate-100 dark:bg-dark-600 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:hover:bg-dark-800',
             }
             return (
               <button key={k} type="button"
@@ -310,11 +311,11 @@ export default function DomainWebSunucuPage() {
               className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100 outline-none"
             />
           </div>
-          <button type="button" onClick={webRootKaydet}
-            disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli}
-            className="px-5 py-2 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-50 text-sm font-medium rounded-md whitespace-nowrap">
+          <Button color="primary" onClick={webRootKaydet}
+            disabled={webRootKaydediliyor || webRoot.trim() === webRootKayitli} yukleniyor={webRootKaydediliyor}
+            className="px-5 py-2 text-sm whitespace-nowrap">
             {webRootKaydediliyor ? cevir("Uygulanıyor…") : cevir("Belge Kökünü Kaydet")}
-          </button>
+          </Button>
         </div>
         <datalist id="webroot-adaylar">
           {webRootAdaylar.map(x => <option key={x} value={x} />)}
@@ -324,10 +325,10 @@ export default function DomainWebSunucuPage() {
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-slate-400 dark:text-slate-500">{cevir("Algılanan klasörler:")}</span>
             {webRootAdaylar.map(x => (
-              <button key={x} type="button" onClick={() => setWebRoot(x)}
-                className="px-2 py-0.5 text-[11px] font-mono rounded border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition">
+              <Button key={x} variant="outlined" onClick={() => setWebRoot(x)}
+                className="px-2 py-0.5 text-[11px] font-mono">
                 {x}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -466,14 +467,14 @@ export default function DomainWebSunucuPage() {
           </Kart>
 
           <div className="flex gap-3 mt-6">
-            <button onClick={kaydet} disabled={isleniyor}
-              className="px-6 py-2.5 bg-dark-800 hover:bg-dark-700 dark:bg-dark-600 dark:hover:bg-slate-600 text-white dark:text-slate-100 disabled:opacity-60 text-sm font-medium rounded-md">
+            <Button color="primary" onClick={kaydet} disabled={isleniyor} yukleniyor={isleniyor}
+              className="px-6 py-2.5 text-sm">
               {isleniyor ? cevir("Uygulanıyor…") : <span className="inline-flex items-center gap-1.5"><Ikon d={I.disket} /> {cevir("Kaydet ve Uygula")}</span>}
-            </button>
-            <button onClick={yukle} disabled={isleniyor}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:bg-dark-800 dark:hover:bg-dark-700 text-slate-700 dark:text-slate-300 text-sm rounded-md">
+            </Button>
+            <Button variant="outlined" onClick={yukle} disabled={isleniyor}
+              className="px-4 py-2.5 text-sm">
               {cevir(cevir("Yeniden Yükle"))}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -481,7 +482,7 @@ export default function DomainWebSunucuPage() {
   )
 }
 
-function Kart({ baslik, children }: { baslik: string; children: any }) {
+function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
@@ -493,10 +494,10 @@ function Kart({ baslik, children }: { baslik: string; children: any }) {
 function SatirToggle({ etiket, deger, aciklama, acik, onToggle }:
   { etiket: string; deger: string; aciklama: string; acik: boolean; onToggle: () => void }) {
   return (
-    <div className="flex items-start gap-3 py-2 border-b border-slate-50 last:border-0">
-      <button onClick={onToggle}
-        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition ${
-          acik ? 'bg-emerald-500' : 'bg-slate-300'
+    <div className="flex items-start gap-3 py-2 border-b border-slate-50 dark:border-dark-600/50 last:border-0">
+      <button onClick={onToggle} role="switch" aria-checked={acik} aria-label={etiket}
+        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
+          acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
         }`}>
         <span className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-dark-700 shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
       </button>

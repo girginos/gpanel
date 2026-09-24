@@ -10,6 +10,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { Button, Badge } from '@/components/ui'
 
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string }
@@ -98,7 +99,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || OR
 
 export default function DomainWordPressPage() {
   useTranslation() // dil re-render aboneligi
-  const { onay, bilgi } = useDialog()
+  useDialog()
   const toast = useToast()
   const { id, sid } = useParams()
   const base = sid ? `/domains/${id}/subdomain/${sid}/wordpress` : `/domains/${id}/wordpress`
@@ -165,10 +166,10 @@ export default function DomainWordPressPage() {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{cevir("Sürüm, eklenti, tema ve kullanıcıları tek yerden yönetin.")}</p>
         </div>
         {!bosDurum && !formAcik && (
-          <button onClick={() => { setFormAcik(true); setSonuc(null) }}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 text-sm font-medium hover:bg-dark-700 dark:hover:bg-slate-600 transition">
+          <Button color="primary" onClick={() => { setFormAcik(true); setSonuc(null) }}
+            className="w-full sm:w-auto gap-1.5 px-4 py-2.5 text-sm">
             <span className="text-base leading-none">+</span> {cevir("Yeni WordPress")}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -266,8 +267,8 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
   const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, cevir("Önbellek temizlendi."))
   const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, cevir("Çekirdek onarımı tamamlandı."), durumYukle)
 
-  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, cevirT(cevir("{0} güncellendi."), ad), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
-  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Tümü güncellendi."), () => { tur === 'eklenti' ? setEklentiler(null) : setTemalar(null) })
+  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, cevirT(cevir("{0} güncellendi."), ad), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
+  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Tümü güncellendi."), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
   const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? cevir("devre dışı bırakıldı") : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
   const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, cevirT(cevir("{0} etkinleştirildi."), p.name), () => setTemalar(null))
 
@@ -344,11 +345,11 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         <div className="flex items-center gap-2 shrink-0">
           {kurulum.admin_url && (
             <a href={kurulum.admin_url} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-full bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 text-xs font-medium hover:bg-dark-700 dark:hover:bg-slate-600 transition">
+              className="btn-base btn this:primary bg-this text-white hover:bg-this-darker focus:bg-this-darker active:bg-this-darker/90 gap-1 px-3.5 py-2 text-xs">
               {cevir(cevir("Yönetim paneli"))} <span className="opacity-70">↗</span>
             </a>
           )}
-          {<button disabled={!!mesgul} onClick={sil} className="px-3 py-2 rounded-full border border-slate-200 dark:border-dark-600 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 dark:hover:border-red-800 dark:hover:text-red-400 disabled:opacity-50 transition">{mesgul === 'sil' ? '…' : cevir("Kaldır")}</button>}
+          {<Button color="error" variant="soft" disabled={!!mesgul} yukleniyor={mesgul === 'sil'} onClick={sil} className="px-3 py-2 text-xs">{cevir("Kaldır")}</Button>}
         </div>
       </div>
 
@@ -422,24 +423,19 @@ function Metrik({ label, v, pill }: { label: string; v: string; pill?: { t: stri
   )
 }
 
+// StatusPill — eski renk adlari Tailux Badge rengine eslenir.
+const PILL_RENK = { green: 'success', amber: 'warning', red: 'error', slate: 'neutral' } as const
 function StatusPill({ t, c }: { t: string; c: 'green' | 'amber' | 'red' | 'slate' }) {
-  const cls = {
-    green: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-300',
-    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-300',
-    red: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300',
-    slate: 'bg-slate-100 dark:bg-dark-600 text-slate-500 dark:text-slate-300',
-  }[c]
-  return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${cls}`}>{t}</span>
+  return <Badge variant="soft" color={PILL_RENK[c]} className="shrink-0">{t}</Badge>
 }
 
 function Btn({ onClick, bekle, children, tur }: { onClick: () => void; bekle: boolean; children: React.ReactNode; tur?: 'primary' | 'outline' }) {
-  const cls = tur === 'primary'
-    ? 'bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 hover:bg-dark-700 dark:hover:bg-slate-600 border-transparent'
-    : 'bg-white dark:bg-dark-700 border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-600/50'
   return (
-    <button onClick={onClick} disabled={bekle} className={`text-sm px-4 py-2 rounded-full border font-medium disabled:opacity-50 transition ${cls}`}>
+    <Button onClick={onClick} disabled={bekle} yukleniyor={bekle}
+      color={tur === 'primary' ? 'primary' : 'neutral'} variant={tur === 'primary' ? 'filled' : 'outlined'}
+      className="text-sm px-4 py-2">
       {bekle ? cevir('İşleniyor…') : children}
-    </button>
+    </Button>
   )
 }
 
@@ -465,7 +461,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
       {guncellenebilir > 0 && (
         <div className="flex items-center justify-between mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-100 dark:border-amber-800/50">
           <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">{guncellenebilir} {cevir("güncelleme mevcut")}</span>
-          <button disabled={!!mesgul} onClick={onTumu} className="text-sm px-4 py-1.5 rounded-full bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 font-medium hover:bg-dark-700 dark:hover:bg-slate-600 disabled:opacity-50 transition">{mesgul === `${tur}:tum` ? '…' : cevir("Tümünü güncelle")}</button>
+          <Button color="primary" disabled={!!mesgul} yukleniyor={mesgul === `${tur}:tum`} onClick={onTumu} className="text-sm px-4 py-1.5">{cevir("Tümünü güncelle")}</Button>
         </div>
       )}
       <div className="divide-y divide-slate-100 dark:divide-dark-600/50">
@@ -484,9 +480,9 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {guncel && <button disabled={!!mesgul} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-medium disabled:opacity-50 transition">{mesgul === `${tur}:${p.name}` ? '…' : cevir("Güncelle")}</button>}
-                {onTogle && <button disabled={!!mesgul} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600/50 disabled:opacity-50 transition">{mesgul === `ekl:${p.name}` ? '…' : aktif ? cevir('Devre dışı bırak') : cevir("Etkinleştir")}</button>}
-                {onAktif && !aktif && <button disabled={!!mesgul} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600/50 disabled:opacity-50 transition">{mesgul === `tema:${p.name}` ? '…' : cevir("Etkinleştir")}</button>}
+                {guncel && <Button color="primary" disabled={!!mesgul} yukleniyor={mesgul === `${tur}:${p.name}`} onClick={() => onGuncelle(p)} className="text-xs px-3 py-1.5">{cevir("Güncelle")}</Button>}
+                {onTogle && <Button variant="outlined" disabled={!!mesgul} yukleniyor={mesgul === `ekl:${p.name}`} onClick={() => onTogle(p)} className="text-xs px-3 py-1.5">{aktif ? cevir('Devre dışı bırak') : cevir("Etkinleştir")}</Button>}
+                {onAktif && !aktif && <Button variant="outlined" disabled={!!mesgul} yukleniyor={mesgul === `tema:${p.name}`} onClick={() => onAktif(p)} className="text-xs px-3 py-1.5">{cevir("Etkinleştir")}</Button>}
                 {onAktif && aktif && <StatusPill t={cevir("Aktif tema")} c="green" />}
               </div>
             </div>
@@ -516,7 +512,7 @@ function KullaniciListe({ liste, mesgul, onReset }: { liste: Kullanici[] | null;
               <div className="text-xs text-slate-400 truncate">{u.user_email}</div>
             </div>
           </div>
-          <button disabled={!!mesgul} onClick={() => onReset(u)} className="text-xs px-3 py-1.5 rounded-full border border-slate-200 dark:border-dark-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-dark-600/50 disabled:opacity-50 transition shrink-0">{mesgul === `pw:${u.ID}` ? '…' : cevir("Parola sıfırla")}</button>
+          <Button color="error" variant="soft" disabled={!!mesgul} yukleniyor={mesgul === `pw:${u.ID}`} onClick={() => onReset(u)} className="text-xs px-3 py-1.5 shrink-0">{cevir("Parola sıfırla")}</Button>
         </div>
       ))}
     </div>
@@ -534,7 +530,7 @@ function KurulumFormu(p: {
     <form onSubmit={p.kur} className="rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Yeni WordPress kurulumu")}</h3>
-        {p.kapat && <button type="button" onClick={p.kapat} className="text-xs text-slate-400 hover:text-slate-600"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> {cevir("Kapat")}</span></button>}
+        {p.kapat && <Button type="button" variant="flat" onClick={p.kapat} className="px-2.5 py-1.5 text-xs"><span className="inline-flex items-center gap-1.5"><Ikon d={I.kapat} /> {cevir("Kapat")}</span></Button>}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Girdi et={cevir("Site başlığı")} v={p.baslik} set={p.setBaslik} zorunlu ph={cevir("Benim Blogum")} />
@@ -542,9 +538,9 @@ function KurulumFormu(p: {
         <Girdi et={cevir("Admin kullanıcı")} v={p.adminK} set={p.setAdminK} zorunlu mono ph={cevir("örn. site-yoneticisi")} />
         <Girdi et={cevir("Admin e-posta")} v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
       </div>
-      <button disabled={p.kuruyor || !p.adminK.trim()} className="mt-5 px-5 py-2.5 rounded-full bg-dark-800 dark:bg-dark-600 text-white dark:text-slate-100 text-sm font-medium hover:bg-dark-700 dark:hover:bg-slate-600 disabled:opacity-50 transition">
+      <Button type="submit" color="primary" disabled={p.kuruyor || !p.adminK.trim()} yukleniyor={p.kuruyor} className="mt-5 px-5 py-2.5 text-sm">
         {p.kuruyor ? cevir('Kuruluyor… (~30 sn)') : cevir('WordPress kur')}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -566,7 +562,7 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
     <div className="mb-5 rounded-lg border border-emerald-100 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-900/15 p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">WordPress {s.surum} {cevir("kuruldu")}</div>
-        <button onClick={kapat} className="text-xs text-emerald-600/70 hover:text-emerald-700"><Ikon d={I.kapat} /></button>
+        <Button color="success" variant="flat" isIcon onClick={kapat} aria-label={cevir("Kapat")} className="size-8"><Ikon d={I.kapat} /></Button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
         <Satir et="Site" v={s.site_url} link />
@@ -577,8 +573,8 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
             <span className="text-xs text-slate-400 shrink-0 w-16">{cevir("Parola")}</span>
             <span className="flex items-center gap-2 min-w-0">
               <span className="text-sm text-slate-800 dark:text-slate-100 font-mono break-all">{parola}</span>
-              <button type="button" onClick={() => navigator.clipboard?.writeText(parola)}
-                className="shrink-0 text-xs px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/30 transition">{cevir("Kopyala")}</button>
+              <Button color="success" variant="outlined" onClick={() => navigator.clipboard?.writeText(parola)}
+                className="shrink-0 text-xs px-2.5 py-1">{cevir("Kopyala")}</Button>
             </span>
           </div>
         )}
