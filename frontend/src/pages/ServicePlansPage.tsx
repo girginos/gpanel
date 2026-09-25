@@ -35,6 +35,11 @@ type Plan = {
   nginx_ek_direktifler: string
   varsayilan: boolean
   olusturulma: string
+  // Sunucu görünüm işaretleri: bayiye sahibi olmadığı (kökün paylaşılan) plan
+  // yalnız seçim özetiyle döner — düzenleme/silme öğeleri yalnız sahibine.
+  global?: boolean
+  duzenlenebilir?: boolean
+  ozet?: boolean
 }
 type Surum = { surum: string; aciklama?: string }
 
@@ -50,6 +55,9 @@ const SVCPLAN_EN: Record<string, string> = {
   "MB/ay": "MB/month",
   "MB": "MB",
   "Detay & Kaynak Limitleri": "Detail & Resource Limits",
+  "Detay": "Details",
+  "Paylaşılan": "Shared",
+  "Paylaşılan plan: hostinglerinize atayabilirsiniz; yalnız yönetici düzenler.": "Shared plan: you can assign it to your hostings; only the administrator can edit it.",
   "planı silinsin mi?": "be deleted?",
   "Evet, sil": "Yes, delete",
   "Yeni Plan": "New Plan",
@@ -140,13 +148,17 @@ export default function ServicePlansPage() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {items.map(p => (
+          {items.map(p => {
+            // Eski sunucu yanıtında işaret yoksa düzenlenebilir say (geri uyum).
+            const duzenlenebilir = p.duzenlenebilir !== false
+            return (
             <div key={p.id} className={`bg-white dark:bg-dark-700 border rounded-lg p-5 shadow-xs ${p.varsayilan ? 'border-brand-400 ring-2 ring-brand-100 dark:ring-brand-900/40' : 'border-slate-200 dark:border-dark-600'}`}>
               <div className="flex items-start justify-between mb-2">
                 <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                     {p.ad}
                     {p.varsayilan && <span className="text-[10px] uppercase tracking-wider bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Varsayılan")}</span>}
+                    {!duzenlenebilir && <span title={cevir("Paylaşılan plan: hostinglerinize atayabilirsiniz; yalnız yönetici düzenler.")} className="text-[10px] uppercase tracking-wider bg-slate-100 dark:bg-dark-600/60 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded font-semibold">{cevir("Paylaşılan")}</span>}
                   </h3>
                   {p.aciklama && <p className="text-sm text-slate-500 dark:text-slate-500 mt-0.5">{p.aciklama}</p>}
                 </div>
@@ -163,13 +175,14 @@ export default function ServicePlansPage() {
 
               <div className="mt-4 flex gap-2">
                 <Link to={`/araclar/paketler/${p.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm', className: 'flex-1' })}>
-                  {cevir("Detay & Kaynak Limitleri")}
+                  {duzenlenebilir ? cevir("Detay & Kaynak Limitleri") : cevir("Detay")}
                   <Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
                 </Link>
-                <Button onClick={() => setSilinecek(p)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
+                {duzenlenebilir && <Button onClick={() => setSilinecek(p)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
