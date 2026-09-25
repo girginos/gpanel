@@ -5,16 +5,29 @@ import { useMarka, logoURL } from '@/lib/marka'
 import { useTranslation } from 'react-i18next'
 import DilSecici from '@/components/DilSecici'
 import { Ikon, I } from '@/components/Ikon'
-import { useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiHata } from '@/lib/api'
+import { useKapiTipi } from '@/lib/kapi'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { useAuth } from '@/store/auth'
 import axios from 'axios'
 
+const CPG_EN: Record<string, string> = {
+  'Yönetici ya da bayi misiniz?': 'Administrator or reseller?',
+  'Yönetim girişi': 'Management sign-in',
+}
+
 export default function CPanelGirisPage() {
   const marka = useMarka()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const cevir = (tr: string): string => (i18n.language === 'en' ? CPG_EN[tr] || tr : tr)
+  // Karma kapıda (kapı modu kapalı / geçiş kapısı) bu form, aynı tarayıcıda son oturumu
+  // müşteri olan yönetici/bayiye de açılabilir (GuardedRoute '/'): yönetim formuna çıkış
+  // bağlantısı olmadan tek yol adres çubuğuydu (MFE-1). Rol kapısında (tip 'musteri')
+  // bağlantı gösterilmez — orada yönetici girişi yok, /giris buraya geri çevrilir.
+  const kapi = useKapiTipi()
+  const loc = useLocation()
   const toast = useToast()
   const [kullanici, setKullanici] = useState('')
   const [parola, setParola] = useState('')
@@ -86,6 +99,16 @@ export default function CPanelGirisPage() {
             {yuk ? t('ortak.yukleniyor') : t('giris.girisYap')}
           </Button>
         </form>
+        {kapi === 'karma' && (
+          <p className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">
+            {cevir('Yönetici ya da bayi misiniz?')}{' '}
+            {/* ?next= korunur: yönetici giriş sonrası istediği yola döner. */}
+            <Link to={'/giris' + loc.search}
+              className="font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 dark:text-brand-300">
+              {cevir('Yönetim girişi')}
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   )

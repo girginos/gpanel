@@ -183,7 +183,7 @@ export default function AramaliSecim({
   function klavye(e: TusOlayi) {
     if (e.key === 'ArrowDown') { e.preventDefault(); vurgula(Math.min(vurgu + 1, filtreli.length - 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); vurgula(Math.max(vurgu - 1, 0)) }
-    else if (e.key === 'Enter') { e.preventDefault(); if (filtreli[vurgu]) sec(filtreli[vurgu].id) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (!yukleniyor && filtreli[vurgu]) sec(filtreli[vurgu].id) }
   }
 
   // Esc listeyi kapatır ve olayı DURDURUR: Modal Esc'i window'da dinler; olay oraya
@@ -199,7 +199,9 @@ export default function AramaliSecim({
     if (acik && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); kapat(false) }
   }
 
-  const aktifId = acik && filtreli[vurgu] ? `${listeId}-${vurgu}` : undefined
+  // Yüklenirken liste yalnız "Yükleniyor…" satırını çizer (id'li seçenek YOK): etkin öğe
+  // bildirilmez (boşa düşen IDREF) ve Enter görünmeyen bir seçeneği seçmez (TX16-2).
+  const aktifId = acik && !yukleniyor && filtreli[vurgu] ? `${listeId}-${vurgu}` : undefined
 
   return (
     <div className="relative" ref={kokRef}>
@@ -239,7 +241,7 @@ export default function AramaliSecim({
               className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
           </div>
-          <ul id={listeId} className="max-h-56 min-h-0 overflow-auto overscroll-contain py-1" role="listbox">
+          <ul id={listeId} className="max-h-56 min-h-0 overflow-auto overscroll-contain py-1" role="listbox" aria-busy={yukleniyor || undefined}>
             {yukleniyor ? (
               <li className="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</li>
             ) : filtreli.length === 0 ? (

@@ -58,6 +58,7 @@ const H_EN: Record<string, string> = {
   'Yükleniyor…': 'Loading…', 'az önce': 'just now', 'dk önce': 'min ago', 'sa önce': 'h ago',
   'Günaydın': 'Good morning', 'İyi günler': 'Good afternoon', 'İyi akşamlar': 'Good evening', 'İyi geceler': 'Good night',
   'Servis bilgisi yok': 'No service data', 'Veri bekleniyor…': 'Waiting for data…', 'Veri alınamadı': 'Data unavailable',
+  'Veri yok': 'No data',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (H_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -304,9 +305,13 @@ export default function HomePage() {
         { ad: cevir('Diğer kullanım'), deger: Math.max(0, diskKul - yB), renk: '#10b981' },
       ]
   const depoPay = depoSeg.reduce((a, x) => a + x.deger, 0) || 1
-  const skor = s ? Math.max(0, Math.min(100, 100 - servisDown * 12 - (diskY > 90 ? 15 : diskY > 80 ? 6 : 0) - izo * 20 - (s.cpu.yuzde > 92 ? 8 : 0))) : 0
-  const skorRenk = skor >= 85 ? '#10b981' : skor >= 60 ? '#f59e0b' : '#f43f5e'
-  const skorAd = skor >= 85 ? cevir('Mükemmel') : skor >= 60 ? cevir('İyi') : skor >= 40 ? cevir('Dikkat') : cevir('Kritik')
+  // Sağlık skoru servis listesi YOKKEN hesaplanmaz: servisDown 0−0=0 ile halka 100/"Mükemmel"
+  // (yeşil) derdi — aynı karttaki "Servisler: veri yok" satırıyla çelişir. Liste boş gelmesi
+  // pratikte systemd'ye ulaşılamadığı, yani sistemin tam sağlıksız olduğu an → halka nötr.
+  const skorBilinir = !!s && servisBilinir
+  const skor = s && skorBilinir ? Math.max(0, Math.min(100, 100 - servisDown * 12 - (diskY > 90 ? 15 : diskY > 80 ? 6 : 0) - izo * 20 - (s.cpu.yuzde > 92 ? 8 : 0))) : 0
+  const skorRenk = !skorBilinir ? '#64748b' : skor >= 85 ? '#10b981' : skor >= 60 ? '#f59e0b' : '#f43f5e'
+  const skorAd = !skorBilinir ? cevir('Veri yok') : skor >= 85 ? cevir('Mükemmel') : skor >= 60 ? cevir('İyi') : skor >= 40 ? cevir('Dikkat') : cevir('Kritik')
 
   // Trend YALNIZ gerçek örneklerden (seed sahte yüzde üretmesin)
   const trend = (k: 'cpu' | 'bellek' | 'disk') => {
@@ -425,7 +430,7 @@ export default function HomePage() {
         <Card title={cevir('Sistem Sağlığı')} icon={ShieldCheck}>
           <div className="health">
             <div className="health-ring" style={{ background: `conic-gradient(${skorRenk} 0 ${skor}%, #18232e ${skor}%)` }}>
-              <div><strong>{s ? skor : '—'}</strong><small style={{ color: skorRenk }}>{s ? skorAd : ''}</small></div>
+              <div><strong>{skorBilinir ? skor : '—'}</strong><small style={{ color: skorRenk }}>{s ? skorAd : ''}</small></div>
             </div>
             <div className="health-list">
               {/* ok: true = sağlıklı (✓), false = uyarı, null = veri yok (nötr, ✓ YOK) */}
