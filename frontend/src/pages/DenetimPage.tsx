@@ -59,7 +59,7 @@ const DEN_EN: Record<string, string> = {
   "Hosting askıya alındı": "Hosting suspended",
   "Hosting oluşturuldu": "Hosting created",
   "Kayıtlarda ara": "Search records",
-  "Kendi hosting hesaplarınızda yapılan işlemler. Yönetici bir işlem yaptığında da burada görünür.": "Operations on your own hosting accounts. Also appears here when an admin performs an operation.",
+  "Yalnızca sizin yaptığınız işlemler.": "Only the operations you performed.",
   "Kullanıcı, hedef, IP veya eylem ara…": "Search user, target, IP or action…",
   "Parola değişimi": "Password change",
   "Plan değiştirildi": "Plan changed",
@@ -187,7 +187,7 @@ export default function DenetimPage() {
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Denetim Kaydı")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           {bayiMi
-            ? cevir("Kendi hosting hesaplarınızda yapılan işlemler. Yönetici bir işlem yaptığında da burada görünür.")
+            ? cevir("Yalnızca sizin yaptığınız işlemler.")
             : cevir("Sunucudaki tüm panel işlemleri — kök ve bayiler dâhil. Kapsam süzgeciyle tek bir bayiye daraltabilirsiniz.")}
         </p>
       </div>
@@ -196,7 +196,7 @@ export default function DenetimPage() {
         <label className="sr-only" htmlFor="denetim-ara">{cevir("Kayıtlarda ara")}</label>
         <div className="relative min-w-[200px] flex-1">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+            <Ikon d={I.ara} className="h-4 w-4" />
           </span>
           <input id="denetim-ara" value={ara} onChange={e => { setSayfa(0); setAra(e.target.value) }}
             placeholder={cevir("Kullanıcı, hedef, IP veya eylem ara…")}
