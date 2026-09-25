@@ -14,6 +14,12 @@
 # doğrulanır; çözülmüyorsa değişiklik UYGULANMAZ.
 set -uo pipefail
 
+# 🔴 AYRIŞTIRMA İÇİN LC_ALL=C ZORUNLU (dogrula/update/repair/gpanel ile aynı kural).
+# tr_TR collation'ında `a-z` aralığı `i` harfini KAPSAMAZ: kapi_zincir_olc'un
+# grep -oE '"tip":"[a-z]+"' ayrıştırması "yonetim"/"musteri"de kesilir → tip boş →
+# sağlam zincirde bile "ÖLÇÜLEMEDİ" + rc=1 (kum havuzunda LANG=tr_TR.UTF-8 ile ölçüldü).
+export LC_ALL=C
+
 # Yollar: GOSP_* yalnız kum havuzu testleri içindir (varsayılanlar gerçek sistem yolları).
 PANEL_CONF=${GOSP_PANEL_CONF:-/etc/nginx/conf.d/_panel.conf}
 

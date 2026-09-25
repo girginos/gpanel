@@ -10,6 +10,11 @@
 #   WP: WP_REDIS_PASSWORD=array(sk,pass) + phpredis + selective flush + drop-in elle kopya
 set -uo pipefail
 
+# 🔴 LC_ALL=C ZORUNLU: tr_TR'de `[[ =~ ^[a-z0-9_]... ]]` aralığı `i` harfini KAPSAMAZ →
+# içinde `i` geçen her sistem kullanıcısı (ör. girginos) "gecersiz kullanici adi" ile
+# reddediliyordu (kum havuzunda LANG=tr_TR.UTF-8 ile ölçüldü).
+export LC_ALL=C
+
 SK="${1:?kullanim: $0 <sistem_kullanici> [off]}"
 ACTION="${2:-on}"
 HOST=127.0.0.1; PORT=6379
