@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"girginospanel/internal/kapi"
 )
@@ -64,7 +66,8 @@ func TestKapiHealHaritaSilinmisseOnarir(t *testing.T) {
 	if s.rSayac == 0 {
 		t.Fatal("onarım nginx'e yüklenmeli (reload)")
 	}
-	// İlgisiz bozukluk (harita olsa da düşen nginx -t) onarım sayılmaz: geri alınır.
+	// İlgisiz bozukluk (harita yazıldıktan sonra da düşen nginx -t) onarım sayılmaz: geri
+	// alınır. Harita VARKEN taban bozuksa hiç yazılmaması: TestKapiHealHaritaVarkenTabanBozukYazilmaz.
 	s2 := kapiTestKur(t, izli, rolAyar())
 	s2.nginxT = func(int) error { return errors.New("başka vhost bozuk") }
 	if kapiUzlastir(1000) {
@@ -136,6 +139,9 @@ func TestKapiSELinuxHazirla(t *testing.T) {
 	}
 	kapiEtiketli, kapiOnbellekOkundu = map[int]bool{}, false
 	kapiSELinuxListe = func() (string, error) { return "unreserved_port_t tcp 1024-32767\n", nil }
+	// Önceki (başarısız ama kısmen etiketleyen) çağrının işareti silinir: iddia yalnız BU
+	// başarılı çağrının bıraktığı işaretle geçebilsin (3. inceleme HS-4/M3).
+	_ = os.Remove(kapiSELinuxOnbellek + ".yukle")
 	if kod := KapiSELinuxHazirla(); kod != 0 {
 		t.Fatalf("etiketlenebilir portlar → 0, got %d", kod)
 	}
@@ -150,8 +156,93 @@ func TestKapiSELinuxHazirla(t *testing.T) {
 	if s.rSayac != onceki+1 {
 		t.Fatalf("işaret reload ettirmeli: %d → %d", onceki, s.rSayac)
 	}
-	if _, err := os.Stat(kapiSELinuxOnbellek + ".yukle"); !errors.Is(err, os.ErrNotExist) {
+	if kapiYukleBekliyor() {
 		t.Fatal("işaret tüketilmeli")
+	}
+}
+
+// kapiYukleBekliyor: "yeniden yükle" işareti (CLI'ın bıraktığı ya da Heal'in aldığı) duruyor mu?
+func kapiYukleBekliyor() bool {
+	for _, y := range []string{kapiSELinuxOnbellek + ".yukle", kapiSELinuxOnbellek + ".yukle.isleniyor"} {
+		if _, err := os.Stat(y); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HS-4/M4: port ZATEN http_port_t ise (reboot sonrası ilk açılış, önceden etiketlenmiş
+// portlar) doğrulanan port da önbelleğe yazılır — yoksa her açılış semanage koşturur
+// (SON-OPS-1: güncelleyicinin sağlık penceresi). Etiket eklenmediği için işaret YOK.
+func TestKapiSELinuxZatenEtiketliOnbellegeYazilir(t *testing.T) {
+	for ad, hazirla := range map[string]func() bool{
+		"açılış Heal'i": func() bool { return kapiUzlastir(1000) },
+		"CLI":           func() bool { return KapiSELinuxHazirla() == 0 },
+	} {
+		t.Run(ad, func(t *testing.T) {
+			kapiTestKur(t, kapiTestSablon, rolAyar())
+			kapiSELinuxModu = func() string { return "enforcing" }
+			liste := 0
+			kapiSELinuxListe = func() (string, error) {
+				liste++
+				return "http_port_t tcp 80, 443, 21001, 22002, 23003\nunreserved_port_t tcp 1024-32767\n", nil
+			}
+			kapiSELinuxEtiket = func(int) error { t.Error("zaten etiketli port yeniden etiketlenmemeli"); return nil }
+			if !hazirla() || liste != 1 {
+				t.Fatalf("hazırlık: liste=%d", liste)
+			}
+			if got := strings.Fields(oku(t, kapiSELinuxOnbellek)); strings.Join(got, ",") != "21001,22002,23003" {
+				t.Fatalf("zaten etiketli portlar da önbelleğe yazılmalı: %v", got)
+			}
+			if kapiYukleBekliyor() {
+				t.Fatal("etiket eklenmedi → yeniden yükleme işareti olmamalı")
+			}
+			// Yeniden başlatma: bellek boş, önbellek yerinde → açılış semanage koşturmaz.
+			kapiEtiketli, kapiOnbellekOkundu = map[int]bool{}, false
+			kapiSELinuxListe = func() (string, error) { t.Error("önbellekteki portlar için semanage koşmamalı"); return "", nil }
+			if !kapiUzlastir(1000) {
+				t.Fatal("önbellekle uzlaştırma açılabilir dönmeli")
+			}
+		})
+	}
+}
+
+// HS-3: harita onarımı istisnası DAR — yalnız harita GERÇEKTEN yokken. Harita varken (içeriği
+// değişecek olsa bile) ve kapı modu kapalıyken (harita var, başlık satırları kalmış) taban
+// `nginx -t` düşükse HİÇBİR dosyaya dokunulmaz: yazıp geri almak da yazmaktır. Vhost
+// $gp_kapi içerir (kapı modundaki her sunucu gibi) — istisnanın gevşemesi burada görünür.
+func TestKapiHealHaritaVarkenTabanBozukYazilmaz(t *testing.T) {
+	// Eski gizliyle yazılmış kapı düzeni: vhost'un başlık satırları da değişecek.
+	izli, err := kapi.Uzlastir(kapiTestSablon, rolAyar(), 0, kapi.Secenek{Gizli: strings.Repeat("f", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ad, ayar := range map[string]*kapi.Ayar{"kapı modu açık": rolAyar(), "kapı modu kapalı": nil} {
+		t.Run(ad, func(t *testing.T) {
+			s := kapiTestKur(t, izli, ayar)
+			// Var olan harita, Heal'in yazacağından FARKLI (yoksa değişiklik olmaz, istisna ölçülmez).
+			if err := os.WriteFile(kapiMapYolu, []byte("map $server_port $gp_kapi {\n    default bilinmeyen;\n}\n"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			s.nginxT = func(int) error { return errors.New("başka bir vhost bozuk") }
+			eskiZaman := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+			for _, y := range []string{kapiVhostYolu, kapiMapYolu} {
+				if err := os.Chtimes(y, eskiZaman, eskiZaman); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if kapiUzlastir(1000) {
+				t.Fatal("taban bozukken zorlama açılmamalı")
+			}
+			for _, y := range []string{kapiVhostYolu, kapiMapYolu} {
+				if fi, err := os.Stat(y); err != nil || !fi.ModTime().Equal(eskiZaman) {
+					t.Fatalf("%s: harita varken taban bozuksa HİÇ yazılmamalı (onarım istisnası yalnız silinmiş harita için)", filepath.Base(y))
+				}
+			}
+			if s.tSayac != 1 {
+				t.Fatalf("yalnız taban `nginx -t` koşmalı, koşan=%d", s.tSayac)
+			}
+		})
 	}
 }
 
