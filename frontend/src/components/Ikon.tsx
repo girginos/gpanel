@@ -2,9 +2,10 @@
 // Kullanim: <Ikon d={I.kilit} /> · <Ikon d={I.cop} className="h-5 w-5" />
 // [[feedback_consistent_icon_style]]: emoji degil, gercek SVG; her yerde ayni stil.
 
-export function Ikon({ d, className = 'h-4 w-4' }: { d: string; className?: string }) {
+// kalinlik — çizgi kalınlığı (vars. 1.7); ör. alt menüde aktif sekme 2.2 ile vurgulanır.
+export function Ikon({ d, className = 'h-4 w-4', kalinlik = 1.7 }: { d: string; className?: string; kalinlik?: number }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={kalinlik}
       strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
       {d.split('|').map((p, i) => <path key={i} d={p} />)}
     </svg>
@@ -88,6 +89,16 @@ export const I: Record<string, string> = {
   giris: 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4|M10 17l5-5-5-5|M15 12H3',
   degistir: 'M21 16l-4 4-4-4|M17 20V4|M3 8l4-4 4 4|M7 4v16',
   silgi: 'M7 21l-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21|M22 21H7|M5 11l9 9',
+  // Üst çubuk, tema, bildirim ve posta eylemleri.
+  menu: 'M4 6h16|M4 12h16|M4 18h16',
+  ay: 'M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z',
+  gunes: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z|M12 2v2|M12 20v2|M4.93 4.93l1.41 1.41|M17.66 17.66l1.41 1.41|M2 12h2|M20 12h2|M6.34 17.66l-1.41 1.41|M19.07 4.93l-1.41 1.41',
+  monitor: 'M20 3H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z|M8 21h8|M12 17v4',
+  zil: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9|M10.3 21a1.94 1.94 0 0 0 3.4 0',
+  eksi: 'M5 12h14',
+  yanitla: 'M9 17l-5-5 5-5|M20 18v-2a4 4 0 0 0-4-4H4',
+  ilet: 'M15 17l5-5-5-5|M4 18v-2a4 4 0 0 1 4-4h12',
+  yukselt: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z|M16 12l-4-4-4 4|M12 16V8',
   git: 'M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-1-2.6c3-.3 6.2-1.5 6.2-6.8a5.3 5.3 0 0 0-1.5-3.7 5 5 0 0 0-.1-3.7s-1.2-.3-3.9 1.4a13.4 13.4 0 0 0-7 0C5.4 1.7 4.2 2 4.2 2a5 5 0 0 0-.1 3.7 5.3 5.3 0 0 0-1.5 3.7c0 5.3 3.2 6.5 6.2 6.8a3.4 3.4 0 0 0-1 2.6V22',
 }
 

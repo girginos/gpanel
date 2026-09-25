@@ -15,7 +15,7 @@ export function TonRozeti({ ton, kucuk = false, className = '' }: { ton: Ton; ku
   )
 }
 
-export function UyariKutusu({ ton = 'bilgi', baslik, children, className = '', opak = false, onKapat, kapatEtiketi = 'Kapat' }: {
+export function UyariKutusu({ ton = 'bilgi', baslik, children, className = '', opak = false, kucuk = false, onKapat, kapatEtiketi = 'Kapat' }: {
   ton?: Exclude<Ton, 'soru'>
   baslik?: ReactNode
   children?: ReactNode
@@ -23,6 +23,8 @@ export function UyariKutusu({ ton = 'bilgi', baslik, children, className = '', o
   // opak — içeriğin üstünde yüzen katmanlarda (ör. sabit hata bandı) yarı saydam zemin
   // okunmaz: panel zemini + ton kenarı + ton şeridi.
   opak?: boolean
+  // kucuk — yoğun yerlerde (kart içi, form altı) küçük yazı + küçük ikon.
+  kucuk?: boolean
   // onKapat — verilirse sağ üstte kapatma düğmesi çizilir.
   onKapat?: () => void
   kapatEtiketi?: string
@@ -33,9 +35,9 @@ export function UyariKutusu({ ton = 'bilgi', baslik, children, className = '', o
   return (
     <div
       role={ton === 'tehlike' ? 'alert' : undefined}
-      className={`${tonSinifi(ton)} flex gap-3 rounded-lg border p-3 text-sm ${zemin} ${className}`}
+      className={`${tonSinifi(ton)} flex rounded-lg border ${kucuk ? 'gap-2 p-2.5 text-xs' : 'gap-3 p-3 text-sm'} ${zemin} ${className}`}
     >
-      <Ikon d={TONLAR[ton].ikon} className="mt-0.5 size-5 shrink-0 text-this-darker dark:text-this-lighter" />
+      <Ikon d={TONLAR[ton].ikon} className={`shrink-0 text-this-darker dark:text-this-lighter ${kucuk ? 'size-4' : 'mt-0.5 size-5'}`} />
       <div className="min-w-0 flex-1">
         {baslik && <div className="font-semibold text-this-darker dark:text-this-lighter">{baslik}</div>}
         {children && <div className={`${baslik ? 'mt-1 ' : ''}text-gray-700 dark:text-dark-100`}>{children}</div>}
