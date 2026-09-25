@@ -276,10 +276,20 @@ func kapiUzlastirUygula(simdi int64) (acilabilir, uygulandi bool) {
 	}, kapiYanDosyalar(yeni, a)...)
 	// Yeni etiketlenen port: dosyalar değişmese de reload gerekir (önceden bind edilemeyen
 	// port şimdi bağlansın).
-	if !kapiNginxUygula(dosyalar, portlar, yeniEtiket) {
+	tamam, ertelendi := kapiNginxUygula(dosyalar, portlar, yeniEtiket)
+	switch {
+	case tamam:
+		kapiYukleIsaretiTuket()
+	case ertelendi:
+		// Dosyalar zaten istenen hâlde; yapılamayan YALNIZ işaretin zorladığı reload (taban
+		// `nginx -t` ilgisiz bir vhost yüzünden düşük / reload hatası). Bu "açılamaz" DEĞİL:
+		// nginx dokunulmamış yapılandırmasıyla çalışıyor, zincir ölçülebilir — kararı uçtan uca
+		// ölçüm verir (etiketli port bağlanmadıysa ölçüm kopuk bulur). Kapatmak, ilgisiz vhost
+		// bozuk kaldıkça rol ayrımını süresiz kapalı tutardı. İşaret korunur: sonraki Heal yine yükler.
+		log.Printf("kapi: bekleyen yeniden yükleme yapılamadı (dosya değişikliği yok) — işaret korunuyor, karar uçtan uca ölçümde")
+	default:
 		return false, false // işaret (varsa) kalır: sonraki Heal yine yeniden yükler
 	}
-	kapiYukleIsaretiTuket()
 	kapiVhostIzin() // yeniden yazılan dosya da 0640 root:nginx kalsın
 	kapiFwRolPortlariniAc(yeni, a, simdi)
 
@@ -306,7 +316,7 @@ func kapiUzlastirUygula(simdi int64) (acilabilir, uygulandi bool) {
 				{yol: kapiVhostYolu, eski: []byte(yeni), yeni: []byte(kaldirilmis)},
 				kapiMapDosyasi(kapi.MapIcerigi(a, simdi, kapi.YerelPortlar(kaldirilmis, a, simdi)), false),
 			}, kapiYanDosyalar(kaldirilmis, a)...)
-			if kapiNginxUygula(d, portlar, false) {
+			if ok, _ := kapiNginxUygula(d, portlar, false); ok {
 				kapiVhostIzin()
 				son = kaldirilmis
 				for _, p := range silinen {
@@ -377,7 +387,7 @@ func kapiKapaliTemizle(conf string) {
 		// atıf kalmışsa `nginx -t` global düşmesin).
 		d = append(d, nginxDosya{yol: kapiMapYolu, eski: mapB, yeni: []byte(kapi.MapIcerigi(nil, 0, nil)), ozel: true})
 	}
-	if kapiNginxUygula(d, nil, false) {
+	if ok, _ := kapiNginxUygula(d, nil, false); ok {
 		kapiVhostIzin()
 	}
 }
@@ -449,7 +459,13 @@ func kapiGenelPortuYay(conf string, a *kapi.Ayar) {
 // gönderir; master yeni portu bind edemezse (SELinux, port çakışması) SESSİZCE eski
 // yapılandırmada kalır — dosyadaki yapılandırmayla bir sonraki nginx restart'ı ise hiç
 // açılmaz (tüm siteler). Bu yüzden portlar ölçülür, uygulanamayan değişiklik geri alınır.
-func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) bool {
+//
+// Dönüş: tamam — değişiklik (varsa) uygulandı, reload ve port ölçümü geçti. ertelendi
+// (yalnız tamam=false iken) — HİÇBİR dosya değişmiyordu ve yalnız zorlaReload'un istediği
+// reload YAPILAMADI (taban `nginx -t` ya da reload komutu düştü): nginx dokunulmamış
+// yapılandırmasıyla çalışıyor, bu bir uygulama hatası değil (çağıran kararı ölçüme bırakır).
+// Reload yapılıp portların bağlanmadığı ÖLÇÜLDÜYSE ertelenmiş sayılmaz: zincir kopuktur.
+func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) (tamam, ertelendi bool) {
 	var degisen []nginxDosya
 	for _, d := range dosyalar {
 		if !bytes.Equal(d.eski, d.yeni) {
@@ -465,12 +481,12 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 		}
 	}
 	if len(degisen) == 0 && !zorlaReload {
-		return true
+		return true, false
 	}
 	if o, e := kapiNginxKomut("nginx", "-t"); e != nil {
 		if !slices.ContainsFunc(degisen, func(d nginxDosya) bool { return d.onarim }) {
 			log.Printf("🔴 kapi: nginx -t değişiklikten ÖNCE zaten başarısız — uygulanmadı: %s", kirpKapi(o))
-			return false
+			return false, len(degisen) == 0
 		}
 		log.Printf("kapi: nginx -t değişiklikten önce başarısız (silinmiş kapı haritası?) — onarım deneniyor: %s", kirpKapi(o))
 	}
@@ -491,7 +507,7 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 		if e := os.WriteFile(d.yol, d.yeni, izin); e != nil {
 			geriAl()
 			log.Printf("🔴 kapi: %s yazılamadı: %v — geri alındı", d.yol, e)
-			return false
+			return false, false
 		}
 		if d.ozel {
 			kapiOzelIzin(d.yol) // var olan dosyanın izni WriteFile'la değişmez
@@ -501,7 +517,7 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 		if o, e := kapiNginxKomut("nginx", "-t"); e != nil {
 			geriAl()
 			log.Printf("🔴 kapi: nginx -t başarısız, geri alındı: %s", kirpKapi(o))
-			return false
+			return false, false
 		}
 	}
 	// nginx durmuşsa (taze kurulumda panel nginx'ten önce kalkabilir) reload düşer; ama
@@ -509,13 +525,17 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 	// kalktığında bu dosyalarla başlar.
 	if !kapiNginxAktif() {
 		log.Printf("kapi: nginx çalışmıyor — doğrulanan yapılandırma nginx başlayınca geçerli olur")
-		return true
+		return true, false
 	}
 	if o, e := kapiNginxKomut("systemctl", "reload", "nginx"); e != nil {
+		if len(degisen) == 0 { // geri alınacak bir şey yok: nginx önceki (aynı) yapılandırmada
+			log.Printf("🔴 kapi: nginx reload başarısız (dosya değişikliği yok): %s", kirpKapi(o))
+			return false, true
+		}
 		geriAl()
 		_, _ = kapiNginxKomut("systemctl", "reload", "nginx")
 		log.Printf("🔴 kapi: nginx reload başarısız, geri alındı: %s", kirpKapi(o))
-		return false
+		return false, false
 	}
 	var dinlenmeyen []int
 	for _, p := range dinlenecek {
@@ -533,9 +553,9 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 		// yeniden doğrulanır (eksikse etiketlenir) — önbelleğe körü körüne güvenilmez.
 		kapiEtiketUnut(dinlenmeyen)
 		log.Printf("🔴 kapi: nginx yapılandırmayı YÜKLEYEMEDİ — :%v nginx'e bağlı değil (SELinux etiketi? port çakışması?) — değişiklik geri alındı", dinlenmeyen)
-		return false
+		return false, false
 	}
-	return true
+	return true, false
 }
 
 // kapiFwRolPortlariniAc: GENEL dinlenen rol portlarını (+ açık eski portları) açar.
