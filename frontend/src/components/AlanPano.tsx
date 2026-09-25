@@ -1,8 +1,10 @@
 // Alan adı panosu — abonelik 'Pano' sekmesinde araç kartlarının (DomainPano) üstünde,
 // root panosu kalitesinde ama TEMAYA UYUMLU (açık + koyu; Tailux Card/Button/Badge,
 // tonlar.ts renkleri, Ikon seti) bir alan adı özeti. Müşteri, bayi ve yönetici aynı
-// sayfayı açar: tüm uçlar MusteriScope / rol kapsamlıdır; bildirimler istemcide
-// domain_id ile süzülür (uçta domain süzgeci yok).
+// sayfayı açar: tüm uçlar MusteriScope / rol kapsamlıdır. Bildirimler SUNUCUDA süzülür:
+// GET /bildirimler?domain_id=<id> (çağıranın kapsamı İÇİNDE ek süzgeç; geçersiz/yabancı
+// kimlik → boş liste). Parametreyi yok sayan eski arka uca karşı BildirimKart istemcide
+// domain_id süzgecini güvenlik ağı olarak korur.
 //
 // 🔴 ÇEKİM KURALLARI (maliyet — musteri-bulgular MP-09):
 //  - /kaynak burada ÇEKİLMEZ: SubscriptionDetailPage tek kez çeker, prop ile gelir
@@ -40,7 +42,7 @@ export default function AlanPano({ domain, kaynak, etkin = true }: {
   const saglik = useUc<Saglik>(`/domains/${id}/health`)
   const ssl = useUc<SSLDurum>(`/domains/${id}/ssl`)
   const yedek = useUc<Yedek[]>(`/domains/${id}/backups`)
-  const bildirim = useUc<BildirimYanit>('/bildirimler')
+  const bildirim = useUc<BildirimYanit>(`/bildirimler?domain_id=${id}`)
   const trafik = useUc<TrafikGecmis>(`/domains/${id}/trafik-gecmis?ay=12`)
   const canli = useCanli(id, etkin)
 

@@ -11,6 +11,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { useRol, yoneticiMi } from '@/lib/rol'
 
 type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
 
@@ -137,6 +138,9 @@ export default function DomainPHPPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const toast = useToast()
+  // 'Sunucu Modüllerini Yönet' → /sistem/php-modulleri → PHP sunucu sihirbazı; uçları
+  // (/php-surumler, /runtimeler, /php-extensions …) AdminOnly → yalnız yönetici görür.
+  const yonetici = yoneticiMi(useRol())
   const [yanit, setYanit] = useState<Yanit | null>(null)
   const [secili, setSurum] = useState<string>('')
   const [a, setA] = useState<Ayarlar | null>(null)
@@ -402,9 +406,11 @@ export default function DomainPHPPage() {
               <p className="text-xs text-slate-500 dark:text-slate-500">
                 PHP {yanit.php_surum} {cevir("için yüklü")} <strong>{yanit.moduller?.length || 0}</strong> {cevir("modül. Modüller sunucu seviyesindedir — tek bir domain için ayrı kapatılamaz, server-wide yönetilir.")}
               </p>
-              <Link to="/sistem/php-modulleri" className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
-                {cevir("Sunucu Modüllerini Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0" />
-              </Link>
+              {yonetici && (
+                <Link to="/sistem/php-modulleri" className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium whitespace-nowrap">
+                  {cevir("Sunucu Modüllerini Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0" />
+                </Link>
+              )}
             </div>
             <div className="flex flex-wrap gap-1">
               {(yanit.moduller || []).map(m => (
