@@ -114,7 +114,9 @@ export default function PortYonetimPage() {
   const dialog = useDialog()
   const toast = useToast()
 
-  const yukle = async () => {
+  // true = durum okundu. PanelKapilari yanıtsız kalan bir değişiklikten sonra "yeniden
+  // okundu" diyebilmek için buna bakar (hata burada yutulur, fırlatılmaz).
+  const yukle = async (): Promise<boolean> => {
     setHata(null)
     try {
       const [d, g] = await Promise.all([
@@ -123,9 +125,11 @@ export default function PortYonetimPage() {
       ])
       setDurum(d.data)
       setGecmis(g.data.items)
+      return true
     } catch (e) {
       const m = apiHata(e, cevir("Yüklenemedi"))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      return false
     }
     finally { setYukleniyor(false) }
   }

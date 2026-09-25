@@ -52,6 +52,8 @@ type KapiRolSonuc = {
   uygulandi: boolean
   uyari?: string
 }
+// uzat / eski-kapat yanıtı. uygulandi, KapiRolSonuc'taki anlamda; eski arka uç göndermez.
+type KapiUygulaSonuc = { ok?: boolean; uyari?: string; uygulandi?: boolean }
 
 // Kapı değişikliğini sunucu istekten KOPUK tamamlar (nginx uyumlama + zincir ölçümü, en çok
 // ~2 dk). Genel 30 sn istemci sınırı sonucu beklemeden keser ve uygulanmış bir değişikliği
@@ -116,6 +118,19 @@ const EN: Record<string, string> = {
     'No response from the server (timeout or connection loss); the operation may still have completed on the server. The ports shown on the card were reloaded from the server — check them before trying again.',
   'Yönetici portu değiştiyse bu sekmedeki oturum sona erer: bu adresten yeniden giriş yaptığınızda yeni yönetici adresiniz gösterilir.':
     'If the administrator port changed, the session in this tab ends: sign in again at this address and your new administrator address will be shown.',
+  'Sonuç doğrulanamadı — güncel durum okunamadı': 'Could not verify the result — current state could not be read',
+  'Sunucudan yanıt alınamadı (zaman aşımı ya da bağlantı kesintisi); işlem sunucuda yine de tamamlanmış olabilir. Güncel durum da okunamadı: bağlantı düzelince sayfayı yenileyip portları kontrol edin, sonra gerekirse yeniden deneyin.':
+    'No response from the server (timeout or connection loss); the operation may still have completed on the server. The current state could not be read either: once the connection is back, reload the page and check the ports before trying again.',
+  'Bu sekmedeki oturum sona erdi': 'The session in this tab has ended',
+  'Sunucudan yanıt alınamadı ve bu sekmedeki oturum artık geçerli değil; işlem tamamlanmış, yönetici portu değişmiş olabilir. Bu adresten yeniden giriş yapın — port değiştiyse yeni yönetici adresiniz gösterilir.':
+    'No response from the server, and the session in this tab is no longer valid; the operation may have completed and the administrator port may have changed. Sign in again at this address — if the port changed, your new administrator address will be shown.',
+  'Bu sekme geçiş kapısından (eski adres) bağlı; buradaki oturum sürer. Eski adres, yeni yönetici adresinden bir kez giriş yapana dek açık kalır.':
+    'This tab is connected through the transition gate (old address), so the session here continues. The old address stays open until you sign in once at the new administrator address.',
+  'Yeni yönetici adresi: {0}': 'New administrator address: {0}',
+  'Değişiklik uygulandı — kapı kuralları şu an doğrulanamadı': 'The change was applied — gate rules could not be verified right now',
+  'Değişiklik kaydedildi — uygulandığı doğrulanamadı': 'The change was saved — it could not be verified that it was applied',
+  'Eski adresin kapatılması uygulandı; geçiş kapısının güncel durumu kartta görünür.':
+    'Closing the old address has been applied; the card shows the current state of the transition gate.',
   'Yeni yönetici adresi': 'New administrator address',
   'Bu sekmedeki oturum sona erecek. Yeni adreste giriş yapın:': 'The session in this tab will end. Sign in at the new address:',
   'Yeni adrese git': 'Go to the new address',
@@ -163,7 +178,9 @@ const EN: Record<string, string> = {
     '{0}: no sign-in has been seen on the new gate yet — these users may still be using the old address.',
 }
 
-export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; onDegisti: () => void | Promise<void> }) {
+// onDegisti: durumu sunucudan yeniden okur; true = okundu (yanıtsız kalan bir değişiklikten
+// sonra "yeniden okundu" yalnız buna dayanarak söylenir).
+export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; onDegisti: () => Promise<boolean> }) {
   const { i18n } = useTranslation()
   const cevir = (tr: string) => (i18n.language === 'en' ? EN[tr] || tr : tr)
   const dialog = useDialog()
@@ -185,6 +202,10 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     if (rol === 'admin') return kapi.masaustu ? null : `https://${urlHost(tarayiciHost)}:${p}`
     return disHost ? `https://${urlHost(disHost)}:${p}` : null
   }
+  // Bu sekmenin bağlı olduğu SUNUCU portu; bilinemiyorsa null. Loopback'te (SSH tüneli)
+  // adres çubuğundaki port yerel yönlendirme portudur, sunucudaki kapıyı söylemez.
+  const sekmePortu = (): number | null =>
+    LOOPBACK.test(tarayiciHost) ? null : Number(window.location.port) || 443
   const yerel = i18n.language === 'en' ? 'en-GB' : 'tr-TR'
   const tarih = (ts: number) => new Date(ts * 1000).toLocaleDateString(yerel)
   const tarihSaat = (ts: number) => new Date(ts * 1000).toLocaleString(yerel)
@@ -262,6 +283,16 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         })
       }
       if (uygulandi && d.zorlama && rol === 'admin') {
+        // Sekme GEÇİŞ (eski) kapısındaysa jetonu o kapıya bağlıdır; kapı açık kaldıkça oturum
+        // sürer, bitmiş saymak geçerli oturumu boşuna kapatırdı. Yeni port bu sekmenin portuysa
+        // (geri dönüş) o port artık yönetici kapısıdır → eski-kapı jetonu orada geçersiz.
+        // Sekme portu bilinmiyorsa (tünel) ya da kapısı belirsizse: oturum bitti sayılır.
+        const sp = sekmePortu()
+        if (sp !== null && sp !== d.yeni_port && kapi.eski_portlar.includes(sp)) {
+          await gecisKapisindanDevam(d.yeni_port)
+          void onDegisti()
+          return
+        }
         await yoneticiOturumuBitti(d.yeni_port)
         return
       }
@@ -275,6 +306,8 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
   // kapı olan bu portta geçersiz. /portlar'ı yeniden okumak 401 → "geçersiz oturum" hata
   // tostuyla girişe atardı; bu yüzden "sayfada kal" yok, oturum bilinçli kapatılır (TopBar
   // çıkış akışı). Bu adres geçiş kapısı olarak açık kalır: yeniden girene yeni adresi gösterilir.
+  // Yeni adrese gitmeden önce de çıkılır: jeton hiçbir kapıda işe yaramaz ve yeni adres bu
+  // sekmenin kökeniyse (geri dönüş) localStorage'da kalıp yeniden yüklemede 401 döngüsü yapardı.
   async function yoneticiOturumuBitti(yeniPort: number) {
     const yeni = adres('admin', yeniPort)
     if (yeni === null) {
@@ -291,6 +324,7 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         onayEtiketi: cevir('Yeni adrese git'), iptalEtiketi: cevir('Oturumu kapat'), ton: 'basari', onayIkonu: I.ileri,
       })
       if (git) {
+        cikis()
         window.location.assign(yeni)
         return
       }
@@ -299,19 +333,74 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     navigate('/giris', { replace: true })
   }
 
-  // İstek yanıtsız kaldı (zaman aşımı/ağ): sonuç bilinmiyor. "Başarısız" demek yanlış olabilir
-  // (bayi/müşteri kapısı taşınmış, kullanıcılara haber verilmemiş olur) → durumu yeniden oku.
-  async function sonucuDogrula(yonetici: boolean) {
-    await onDegisti()
+  // Sekme geçiş kapısında, oturumu geçerli: yeni yönetici adresi yalnız bildirilir.
+  async function gecisKapisindanDevam(yeniPort: number) {
+    const yeni = adres('admin', yeniPort)
     await dialog.bilgi({
-      baslik: cevir('Sonuç doğrulanıyor — güncel durum yeniden okundu'),
+      baslik: cevir('Yeni yönetici adresi'),
       mesaj: [
-        cevir('Sunucudan yanıt alınamadı (zaman aşımı ya da bağlantı kesintisi); işlem sunucuda yine de tamamlanmış olabilir. Kartta görünen portlar sunucudan yeniden okundu — tekrar denemeden önce kontrol edin.'),
-        yonetici ? cevir('Yönetici portu değiştiyse bu sekmedeki oturum sona erer: bu adresten yeniden giriş yaptığınızda yeni yönetici adresiniz gösterilir.') : '',
+        cevir('Bu sekme geçiş kapısından (eski adres) bağlı; buradaki oturum sürer. Eski adres, yeni yönetici adresinden bir kez giriş yapana dek açık kalır.'),
+        yeni === null
+          ? cevirT(cevir('Masaüstü uygulamasında Panel portunu :{0} yapın.'), yeniPort)
+          : cevirT(cevir('Yeni yönetici adresi: {0}'), yeni),
+      ].join(' '),
+      ton: 'basari',
+    })
+  }
+
+  // İstek yanıtsız kaldı (zaman aşımı/ağ): sonuç bilinmiyor. "Başarısız" demek yanlış olabilir
+  // (bayi/müşteri kapısı taşınmış, kullanıcılara haber verilmemiş olur) → durumu yeniden oku;
+  // "yeniden okundu" yalnız okuma GERÇEKTEN başarılıysa denir.
+  // Yönetici: portu değişmişse bu sekmenin jetonu artık geçersiz olabilir; /portlar'ı olağan
+  // yoldan okumak 401 → yanıt engelleyicisinde çıkış + "geçersiz oturum" hata tostu demekti.
+  // Önce 401'i hata saymayan bir yoklama (validateStatus → engelleyiciye düşmez): 401 ise
+  // oturum bilinçli kapatılır, 200 ise olağan okuma, yanıtsızsa okunmaz.
+  async function sonucuDogrula(yonetici: boolean) {
+    const ipucu = yonetici ? cevir('Yönetici portu değiştiyse bu sekmedeki oturum sona erer: bu adresten yeniden giriş yaptığınızda yeni yönetici adresiniz gösterilir.') : ''
+    let okundu: boolean
+    if (yonetici) {
+      const durum = await api.get('/portlar', { validateStatus: (s) => s === 200 || s === 401 })
+        .then((r) => r.status, () => 0)
+      if (durum === 401) {
+        await dialog.bilgi({
+          baslik: cevir('Bu sekmedeki oturum sona erdi'),
+          mesaj: cevir('Sunucudan yanıt alınamadı ve bu sekmedeki oturum artık geçerli değil; işlem tamamlanmış, yönetici portu değişmiş olabilir. Bu adresten yeniden giriş yapın — port değiştiyse yeni yönetici adresiniz gösterilir.'),
+          onayEtiketi: cevir('Oturumu kapat'), ton: 'uyari', onayIkonu: I.cikis,
+        })
+        cikis()
+        navigate('/giris', { replace: true })
+        return
+      }
+      okundu = durum === 200 && await onDegisti()
+    } else {
+      okundu = await onDegisti()
+    }
+    await dialog.bilgi({
+      baslik: okundu ? cevir('Sonuç doğrulanıyor — güncel durum yeniden okundu') : cevir('Sonuç doğrulanamadı — güncel durum okunamadı'),
+      mesaj: [
+        okundu
+          ? cevir('Sunucudan yanıt alınamadı (zaman aşımı ya da bağlantı kesintisi); işlem sunucuda yine de tamamlanmış olabilir. Kartta görünen portlar sunucudan yeniden okundu — tekrar denemeden önce kontrol edin.')
+          : cevir('Sunucudan yanıt alınamadı (zaman aşımı ya da bağlantı kesintisi); işlem sunucuda yine de tamamlanmış olabilir. Güncel durum da okunamadı: bağlantı düzelince sayfayı yenileyip portları kontrol edin, sonra gerekirse yeniden deneyin.'),
+        ipucu,
       ].filter(Boolean).join(' '),
       ton: 'uyari',
     })
   }
+
+  // uzat / eski-kapat yanıtındaki uygulama uyarısı. uygulandi: true → değişiklik nginx'e
+  // uygulandı, yalnız kapı zinciri doğrulanamadı; false → yalnız kaydedildi. Eski arka uç
+  // alanı göndermez: uyarı varken hangisi olduğu bilinmez → ne "uygulandı" ne "uygulanamadı".
+  async function uygulamaUyarisi(r: KapiUygulaSonuc, uygulandiNotu = '') {
+    if (!r.uyari) return
+    await dialog.bilgi({
+      baslik: r.uygulandi === true ? cevir('Değişiklik uygulandı — kapı kuralları şu an doğrulanamadı')
+        : r.uygulandi === false ? cevir('Değişiklik kaydedildi ama uygulanamadı')
+          : cevir('Değişiklik kaydedildi — uygulandığı doğrulanamadı'),
+      mesaj: [r.uyari, r.uygulandi === true ? uygulandiNotu : ''].filter(Boolean).join(' '),
+      ton: 'uyari',
+    })
+  }
+  const uygulanmadi = (r: KapiUygulaSonuc) => !!r.uyari && r.uygulandi === false
 
   async function uzat() {
     const g = Number(gun.trim())
@@ -321,9 +410,9 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     }
     setMesgul(true)
     try {
-      const r = await api.post<{ uyari?: string }>('/portlar/kapi/uzat', { gun: g }, KAPI_ISTEK)
-      toast.basari(cevir('Geçiş süresi uzatıldı'), `+${g} ${cevir('gün')}`)
-      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari, ton: 'uyari' })
+      const r = (await api.post<KapiUygulaSonuc>('/portlar/kapi/uzat', { gun: g }, KAPI_ISTEK)).data
+      if (!uygulanmadi(r)) toast.basari(cevir('Geçiş süresi uzatıldı'), `+${g} ${cevir('gün')}`)
+      await uygulamaUyarisi(r)
       void onDegisti()
     } catch (e) {
       if (sonucBelirsiz(e)) await sonucuDogrula(false)
@@ -354,9 +443,11 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
     if (!ok) return
     setMesgul(true)
     try {
-      const r = await api.post<{ uyari?: string }>('/portlar/kapi/eski-kapat', { zorla }, KAPI_ISTEK)
-      toast.basari(cevir('Geçiş kapısı kapatılıyor'))
-      if (r.data.uyari) await dialog.bilgi({ baslik: cevir('Değişiklik kaydedildi ama uygulanamadı'), mesaj: r.data.uyari, ton: 'uyari' })
+      const r = (await api.post<KapiUygulaSonuc>('/portlar/kapi/eski-kapat', { zorla }, KAPI_ISTEK)).data
+      if (!uygulanmadi(r)) toast.basari(cevir('Geçiş kapısı kapatılıyor'))
+      // "Uygulandı" = aşama 1 nginx'e yazıldı; eski portun listen'dan kaldırılması korumalıdır
+      // (atlanabilir) → "kapandı" diye kesinlenmez, güncel durum kartta.
+      await uygulamaUyarisi(r, cevir('Eski adresin kapatılması uygulandı; geçiş kapısının güncel durumu kartta görünür.'))
       void onDegisti()
     } catch (e) {
       if (sonucBelirsiz(e)) await sonucuDogrula(false)
