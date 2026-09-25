@@ -2,7 +2,7 @@ package hostuyg
 
 // Fleet monitoring — kurulu app'lerin canlı kaynak metrikleri.
 //
-// systemd cgroup v2 üzerinden:
+// systemd cgroup v2 üzerinden (okuyucu: internal/cgroup — paneldeki tek cgroup okuma noktası):
 //   /sys/fs/cgroup/system.slice/<unit>.service/memory.current  → RAM byte
 //   /sys/fs/cgroup/system.slice/<unit>.service/memory.peak      → peak RAM
 //   /sys/fs/cgroup/system.slice/<unit>.service/cpu.stat         → CPU usec
@@ -24,9 +24,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-const CGroupKok = "/sys/fs/cgroup/system.slice"
+	"girginospanel/internal/cgroup"
+)
 
 type Metrik struct {
 	UygulamaID     int64     `json:"uygulama_id"`
@@ -46,16 +46,9 @@ type Metrik struct {
 	Zaman          time.Time `json:"zaman"`
 }
 
-// CPU delta cache — anlık % ölçümü için 2 örnek arası fark.
-type cpuSample struct {
-	toplamUsec int64
-	zaman      time.Time
-}
-
-var (
-	cpuSamplesMu sync.Mutex
-	cpuSamples   = map[string]cpuSample{}
-)
+// CPU delta — anlık % için unit başına son örnek. 500ms'den kısa aralık gürültülü:
+// taban güncellenmez, son hesaplanan % döner (henüz yoksa 0 = bilinmiyor).
+var cpuOrnek = &cgroup.Ornekleyici{EnAz: 500 * time.Millisecond}
 
 // Disk kullanımı cache — `du -sb` pahalı (500ms+ Grafana gibi 500MB app'ler
 // için). 5dk TTL — disk boyutu yavaş değişir, canlı doğruluk gerekmez.
@@ -74,9 +67,7 @@ const diskCacheTTL = 5 * time.Minute
 // MetrikCacheSil — Kaldır sonrası cleanup (CPU sample + disk cache).
 // Handler kaldirYurut sonrası çağırır; MetrikTumu de eksik unit'leri temizler.
 func MetrikCacheSil(unitAd, kurulumYolu string) {
-	cpuSamplesMu.Lock()
-	delete(cpuSamples, unitAd)
-	cpuSamplesMu.Unlock()
+	cpuOrnek.Sil(unitAd)
 	if kurulumYolu != "" {
 		diskCacheMu.Lock()
 		delete(diskCacheM, kurulumYolu)
@@ -91,45 +82,26 @@ func MetrikTopla(ctx context.Context, k *UygulamaKayit) Metrik {
 		UnitAd:     k.SystemdUnit,
 		Zaman:      time.Now(),
 	}
-	cgYol := filepath.Join(CGroupKok, k.SystemdUnit+".service")
+	cgYol := cgroup.ServisDizin(k.SystemdUnit)
 	m.CGroupYol = cgYol
 
-	m.BellekByte = intOku(filepath.Join(cgYol, "memory.current"))
-	m.BellekPeakByte = intOku(filepath.Join(cgYol, "memory.peak"))
-	m.TaskSayisi = int(intOku(filepath.Join(cgYol, "pids.current")))
-	if v := stringOku(filepath.Join(cgYol, "pids.max")); v != "" {
-		if v == "max" {
-			m.TaskMax = -1 // frontend "∞" render
-		} else {
-			m.TaskMax, _ = strconv.Atoi(v)
-		}
+	// Okunamayan dosya → 0 (eski davranış).
+	m.BellekByte, _ = cgroup.Deger(filepath.Join(cgYol, "memory.current"))
+	m.BellekPeakByte, _ = cgroup.Deger(filepath.Join(cgYol, "memory.peak"))
+	gorev, _ := cgroup.Deger(filepath.Join(cgYol, "pids.current"))
+	m.TaskSayisi = int(gorev)
+	if v, ok := cgroup.Deger(filepath.Join(cgYol, "pids.max")); ok {
+		m.TaskMax = int(v) // "max" → cgroup.Sinirsiz (-1): frontend "∞" render
 	}
-	m.CPUToplamUsec = cpuStatOku(filepath.Join(cgYol, "cpu.stat"))
 
-	// CPU% — son örnekle delta (mutex ile paralel-safe)
-	// dt < 500ms ise gürültülü — sayacı güncelleme, önceki değeri koru.
-	cpuSamplesMu.Lock()
-	if prev, ok := cpuSamples[k.SystemdUnit]; ok && m.CPUToplamUsec > 0 {
-		dt := m.Zaman.Sub(prev.zaman).Microseconds()
-		if dt >= 500_000 { // 500ms minimum sample aralığı
-			delta := m.CPUToplamUsec - prev.toplamUsec
-			if delta >= 0 {
-				m.CPUYuzde = float64(delta) * 100.0 / float64(dt)
-			}
-			cpuSamples[k.SystemdUnit] = cpuSample{
-				toplamUsec: m.CPUToplamUsec,
-				zaman:      m.Zaman,
-			}
-		}
-		// dt < 500ms → sample güncellenmez, CPUYuzde=0 (bilinmiyor)
-	} else {
-		// İlk baseline
-		cpuSamples[k.SystemdUnit] = cpuSample{
-			toplamUsec: m.CPUToplamUsec,
-			zaman:      m.Zaman,
-		}
+	// CPU% — son örnekle delta (Ornekleyici kilitli, paralel-safe). İlk örnek,
+	// sayaç geri gitmesi ya da okunamayan cpu.stat → 0 (bilinmiyor).
+	s := cgroup.Sayac{Zaman: m.Zaman}
+	s.CPUUsec, s.CPUVar = cgroup.CPUUsec(cgYol)
+	m.CPUToplamUsec = s.CPUUsec
+	if h := cpuOrnek.Hesapla(k.SystemdUnit, s); h.CPUYuzde != nil {
+		m.CPUYuzde = *h.CPUYuzde
 	}
-	cpuSamplesMu.Unlock()
 
 	// systemctl show — durum + uptime + restart
 	sysCtx, iptal := context.WithTimeout(ctx, 3*time.Second)
@@ -208,13 +180,7 @@ func MetrikTumu(ctx context.Context, db *sql.DB) []Metrik {
 	for _, k := range kayitlar {
 		dbUnit[k.SystemdUnit] = true
 	}
-	cpuSamplesMu.Lock()
-	for unit := range cpuSamples {
-		if !dbUnit[unit] {
-			delete(cpuSamples, unit)
-		}
-	}
-	cpuSamplesMu.Unlock()
+	cpuOrnek.Suz(func(unit string) bool { return dbUnit[unit] })
 	out := make([]Metrik, len(kayitlar))
 	// Sıralı: du komutu 2s timeout, N app için sequential
 	// (paralel du IO yükü). Kabul edilebilir.
@@ -225,46 +191,6 @@ func MetrikTumu(ctx context.Context, db *sql.DB) []Metrik {
 }
 
 /* ---- yardımcılar ---- */
-
-func intOku(yol string) int64 {
-	b, err := os.ReadFile(yol)
-	if err != nil {
-		return 0
-	}
-	s := strings.TrimSpace(string(b))
-	if s == "max" {
-		return -1
-	}
-	v, _ := strconv.ParseInt(s, 10, 64)
-	return v
-}
-
-func stringOku(yol string) string {
-	b, err := os.ReadFile(yol)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-// cpu.stat format:
-//
-//	usage_usec 12345
-//	user_usec 6789
-//	system_usec 4567
-func cpuStatOku(yol string) int64 {
-	b, err := os.ReadFile(yol)
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if strings.HasPrefix(line, "usage_usec ") {
-			v, _ := strconv.ParseInt(strings.TrimPrefix(line, "usage_usec "), 10, 64)
-			return v
-		}
-	}
-	return 0
-}
 
 func kisaSure(d time.Duration) string {
 	if d < time.Minute {

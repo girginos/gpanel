@@ -5,10 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"math"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
@@ -42,6 +45,18 @@ type Ozet struct {
 	InodeKullanim int64 `json:"inode_kullanim"`
 	InodeLimit    int64 `json:"inode_limit"`
 
+	// DBMB: alan adının tüm veritabanlarının toplam boyutu (MB, data+index,
+	// information_schema). Ölçülemezse (mysql soketi yok, sorgu hatası) alan YOK.
+	// Veritabanı yoksa 0 (ölçülmüş sıfır).
+	DBMB *float64 `json:"db_mb,omitempty"`
+
+	// EpostaOlculmuyor: eposta_sayi.kullanim gerçek bir sayım DEĞİL (sabit 0).
+	// Posta kutuları mail eklentisinin kendi veritabanında (mailserver.virtual_users);
+	// panelin DB kullanıcısının orada yetkisi yok. Çekirdeğin eklentiyle konuştuğu
+	// yol (soket API'si, bkz. domains/mailsync.go) lisanssız sunucuda "lisans_yok"
+	// döner ve /kaynak'a 6 sn'lik bir dış çağrı eklerdi. Ön yüz bu bayrakla çubuğu gizler.
+	EpostaOlculmuyor bool `json:"eposta_olculmuyor"`
+
 	// Bonus sayaclar (limit yok)
 	DNSKayit    int64 `json:"dns_kayit"`
 	CronIs      int64 `json:"cron_is"`
@@ -67,25 +82,48 @@ func duMB(home string) int64 {
 	return n
 }
 
-// dbTotalMB: panel kullanicisinin db'lerinin toplam boyutu MB
-func dbTotalMB(ctx context.Context, db *sql.DB, dbUsers []string) int64 {
-	if len(dbUsers) == 0 {
-		return 0
+// reDBAdi: sorguya gömülecek veritabanı adı allowlist'i (panel <sk>_… / wp_… üretir).
+var reDBAdi = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+
+// mysqlKok: root soketinden tek sorgu (-N -B: başlıksız, sekmeyle ayrılmış). Panelin
+// DB kullanıcısı yalnız `panel`.* yetkisine sahip. information_schema.tables ona
+// kiracı veritabanlarının tablolarını GÖSTERMEZ, toplam hep 0 çıkardı. ListDatabases
+// de aynı nedenle root soketini kullanır. Testte geçici veritabanına çevrilir.
+var mysqlKok = func(ctx context.Context, sorgu string) ([]byte, error) {
+	return exec.CommandContext(ctx, "mysql", "-N", "-B", "-e", sorgu).Output()
+}
+
+// dbBoyutMB: verilen veritabanlarının toplam boyutu (MB, 2 ondalık). ok=false →
+// ölçülemedi (alan yanıttan çıkar). Boş liste → (0, true).
+func dbBoyutMB(ctx context.Context, adlar []string) (float64, bool) {
+	if len(adlar) == 0 {
+		return 0, true
 	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(dbUsers)), ",")
-	args := make([]any, len(dbUsers))
-	for i, u := range dbUsers {
-		args[i] = u
+	var in strings.Builder
+	for i, ad := range adlar {
+		// Ad sorguya gömülür (CLI parametre bağlamaz). Biçim dışı tek ad bile
+		// varsa kısmi toplam vermek yerine ölçülemedi denir.
+		if !reDBAdi.MatchString(ad) {
+			log.Printf("kaynak: db boyutu ölçülmedi, biçim dışı veritabanı adı %q", ad)
+			return 0, false
+		}
+		if i > 0 {
+			in.WriteByte(',')
+		}
+		in.WriteString("'" + ad + "'")
 	}
-	// information_schema'dan toplam (data+index)
-	q := `SELECT COALESCE(SUM((data_length+index_length))/1024/1024, 0)
-	      FROM information_schema.tables
-	      WHERE table_schema IN (
-	          SELECT db_name FROM panel.db_accounts WHERE db_user IN (` + placeholders + `)
-	      )`
-	var mb float64
-	_ = db.QueryRowContext(ctx, q, args...).Scan(&mb)
-	return int64(mb)
+	ctx, iptal := context.WithTimeout(ctx, 5*time.Second)
+	defer iptal()
+	out, err := mysqlKok(ctx, "SELECT COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema IN ("+in.String()+")")
+	if err != nil {
+		log.Printf("kaynak: db boyutu sorgusu başarısız: %v", err)
+		return 0, false
+	}
+	bayt, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || bayt < 0 {
+		return 0, false
+	}
+	return math.Round(bayt/(1024*1024)*100) / 100, true
 }
 
 func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
@@ -175,28 +213,42 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	o.TrafikMB.Kullanim = trafikKB / 1024
 	o.TrafikMB.Limit = trafikKota
 
-	// DB sayısı + toplam boyut
-	rows, err := h.DB.QueryContext(ctx, `SELECT db_user FROM db_accounts WHERE domain_id=?`, id)
-	dbUsers := []string{}
-	if err == nil {
+	// DB sayısı + toplam boyut. Liste eksik okunduysa boyut verilmez (kısmi toplam
+	// gerçek boyut gibi görünürdü).
+	dbAdlari := []string{}
+	listeTam := false
+	if rows, err := h.DB.QueryContext(ctx, `SELECT db_name FROM db_accounts WHERE domain_id=?`, id); err == nil {
+		listeTam = true
 		for rows.Next() {
-			var u string
-			if rows.Scan(&u) == nil {
-				dbUsers = append(dbUsers, u)
+			var ad string
+			if rows.Scan(&ad) != nil {
+				listeTam = false
+				continue
 			}
+			dbAdlari = append(dbAdlari, ad)
+		}
+		if rows.Err() != nil {
+			listeTam = false
 		}
 		rows.Close()
 	}
-	o.DBSayisi.Kullanim = int64(len(dbUsers))
+	o.DBSayisi.Kullanim = int64(len(dbAdlari))
 	o.DBSayisi.Limit = maxDB
+	if listeTam {
+		if mb, ok := dbBoyutMB(ctx, dbAdlari); ok {
+			o.DBMB = &mb
+		}
+	}
 
 	// FTP sayısı
 	_ = h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ftp_accounts WHERE domain_id=?`, id).Scan(&o.FTPSayisi.Kullanim)
 	o.FTPSayisi.Limit = maxFTP
 
-	// E-posta (modül yok şu an — 0)
+	// E-posta: çekirdekte sayım kaynağı yok (bkz. Ozet.EpostaOlculmuyor). 0 bir
+	// ölçüm değildir; bayrak ön yüze bunu söyler. Limit plandan gelir.
 	o.EpostaSayi.Kullanim = 0
 	o.EpostaSayi.Limit = maxEmail
+	o.EpostaOlculmuyor = true
 
 	// Domain sayısı: bu zaten 1 — ama abonelik kapsamında subdomain'leri saymak gerek
 	// (Plesk modeli: subscription primary + 0 subdomain) — şimdilik kendisi = 1
@@ -227,10 +279,6 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 		log.Printf("kaynak: yedek sayaci sorgusu basarisiz (domain=%d): %v", id, qerr)
 	}
 	o.YedekMB = o.YedekMB / (1024 * 1024) // byte → MB
-
-	// DB total MB (kullanim göstergesi için DiskMB.Kullanim'a EKLEME — ayrı tutalim)
-	// (Şu an DiskMB sadece home; DB ayrı disk üzerinde olabilir, gerek yok)
-	_ = dbTotalMB // future use
 
 	httpx.WriteJSON(w, http.StatusOK, o)
 }

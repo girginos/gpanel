@@ -7,12 +7,19 @@ package istatistik
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"girginospanel/internal/httpx"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // StartTrafikAggregator: panel başlangıcında çağrılır, kendi goroutine'inde periyodik toplar.
@@ -139,6 +146,88 @@ func refreshTrafikKB(db *sql.DB, domainID int64) {
 	var byt int64
 	_ = db.QueryRow(`SELECT bytes FROM domain_trafik WHERE domain_id=? AND yil_ay=?`, domainID, ay).Scan(&byt)
 	_, _ = db.Exec(`UPDATE domains SET trafik_kb=? WHERE id=?`, byt/1024, domainID)
+}
+
+// AyTrafik: domain_trafik'in tek aylık kovası.
+type AyTrafik struct {
+	Ay      string `json:"ay"` // "2026-09"
+	GelenB  int64  `json:"gelen_b"`
+	GidenB  int64  `json:"giden_b"`
+	ToplamB int64  `json:"toplam_b"`
+}
+
+// TrafikGecmisi: GET /domains/{id}/trafik-gecmis yanıtı (eskiden yeniye).
+type TrafikGecmisi struct {
+	Kalemler []AyTrafik `json:"kalemler"`
+	// GelenOlculmuyor: sayaç yalnız nginx $body_bytes_sent'i (sunucudan istemciye
+	// giden yanıt gövdesi) toplar; gelen istek baytı hiçbir yerde ölçülmüyor. gelen_b
+	// bu yüzden 0'dır ve ölçüm DEĞİLDİR (toplam_b = giden_b). Ön yüz gelen serisini çizmemeli.
+	GelenOlculmuyor bool `json:"gelen_olculmuyor"`
+}
+
+// TrafikGecmis: son `ay` ayın (1..24, varsayılan 12) aylık trafiği; kovası olmayan
+// ay 0. "Bu ay" refreshTrafikKB ile aynı (UTC). Yetki: rota MusteriScope arkasında.
+func (h *Handlers) TrafikGecmis(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	ay := 12
+	if s := r.URL.Query().Get("ay"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > 24 {
+			httpx.WriteError(w, http.StatusBadRequest, "ay 1 ile 24 arasında olmalı")
+			return
+		}
+		ay = n
+	}
+	ctx := r.Context()
+	var bir int
+	err := h.DB.QueryRowContext(ctx, `SELECT 1 FROM domains WHERE id=?`, id).Scan(&bir)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	if err != nil {
+		log.Printf("trafik geçmişi: domain okunamadı (id=%d): %v", id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "domain okunamadı")
+		return
+	}
+	kalemler, err := aylikTrafik(ctx, h.DB, id, ay, time.Now().UTC())
+	if err != nil {
+		log.Printf("trafik geçmişi (domain=%d): %v", id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "trafik geçmişi okunamadı")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, TrafikGecmisi{Kalemler: kalemler, GelenOlculmuyor: true})
+}
+
+// aylikTrafik: simdi'nin ayı dahil geriye `ay` ay; eksik aylar 0, eskiden yeniye.
+func aylikTrafik(ctx context.Context, db *sql.DB, domainID int64, ay int, simdi time.Time) ([]AyTrafik, error) {
+	bas := time.Date(simdi.Year(), simdi.Month()-time.Month(ay-1), 1, 0, 0, 0, 0, time.UTC)
+	kalemler := make([]AyTrafik, ay)
+	sira := make(map[string]int, ay)
+	for i := range kalemler {
+		k := bas.AddDate(0, i, 0).Format("2006-01")
+		kalemler[i].Ay = k
+		sira[k] = i
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT yil_ay, bytes FROM domain_trafik WHERE domain_id=? AND yil_ay BETWEEN ? AND ?`,
+		domainID, kalemler[0].Ay, kalemler[ay-1].Ay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var yilAy string
+		var bayt int64
+		if err := rows.Scan(&yilAy, &bayt); err != nil {
+			return nil, err
+		}
+		if i, ok := sira[yilAy]; ok {
+			kalemler[i].GidenB = bayt
+			kalemler[i].ToplamB = bayt
+		}
+	}
+	return kalemler, rows.Err()
 }
 
 // parseTrafikSatir: combined log satırından (ay 'YYYY-MM', bytes) çıkarır.
