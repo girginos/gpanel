@@ -18,6 +18,7 @@ import type { Color } from '@/components/ui'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
+import { useRol, yoneticiMi } from '@/lib/rol'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -38,11 +39,6 @@ type OlusturmaSonuc = {
   alan_adi: string; sistem_kullanici: string; ftp_user: string; ftp_host: string
   db_host: string; db_user: string; db_adi: string
   olusturulan_parolalar: { ftp: string; db: string }
-}
-
-// Panel sahibi mi? Bayi yalniz kendi domainlerini gordugu icin kolon ona kapali.
-function panelSahibiMi() {
-  try { return JSON.parse(localStorage.getItem('gosp.user') || '{}').rol === 'admin' } catch { return false }
 }
 
 // Domaini kimin actigini gosterir: ad soyad (yoksa kullanici adi) + rol rozeti.
@@ -204,7 +200,15 @@ export default function DomainsPage() {
 
   const { sor, onay } = useDialog()
   const toast = useToast()
-  const sahipKolonu = panelSahibiMi()
+  // Rol TEK kaynaktan (useAuth kullanici.rol). Panel sahibi değilse (bayi):
+  //  - sahip kolonu yok (bayi yalnız kendi hesaplarını görür),
+  //  - AdminOnly toplu işler (POST/GET /domains/toplu/is, GET /domains/toplu/aktif) ve
+  //    sahip modalının /resellers + /customers çekimi YOK. Bayide kalan toplu eylemler
+  //    kapsamlı uçlardır: POST /domains/toplu/durum (AdminVeyaReseller, handler bayinin
+  //    reseller_id'siyle süzer), DELETE /domains/{id} (SahipYonetim),
+  //    DELETE /domains/{id}/subdomain/{sid} (MusteriScope → bayi sahipliği).
+  const yonetici = yoneticiMi(useRol())
+  const sahipKolonu = yonetici
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
   const [yuk, setYuk] = useState(true)
@@ -254,6 +258,9 @@ export default function DomainsPage() {
   }
   useEffect(() => {
     let iptal = false
+    // Sahip/plan modalı yalnız yöneticide açılır; bayi oturumunda AdminOnly
+    // /resellers ve /customers hiç istenmez.
+    if (!yonetici) return
     if (topluModal === 'sahip') {
       api.get('/resellers').then(r => { if (iptal) return; setTopluBayiler((r.data?.bayiler || r.data || []) as never) }).catch(() => {})
       api.get('/customers').then(r => { if (iptal) return; setTopluMusteriler((r.data?.musteriler || r.data || []) as never) }).catch(() => {})
@@ -263,17 +270,19 @@ export default function DomainsPage() {
       modalVeriYukle()
     }
     return () => { iptal = true }
-  }, [topluModal])
+  }, [topluModal, yonetici])
 
   useEffect(yukle, [])
   // SSL degisimi nginx reload tetikleyip sayfayi yenileyebilir → devam eden isi bul.
+  // Toplu işler (ve bu yoklama) AdminOnly: bayi oturumunda istek atılmaz.
   useEffect(() => {
+    if (!yonetici) return
     let iptal = false
     api.get<{ is_id: number }>('/domains/toplu/aktif')
       .then(r => { if (iptal) return; if (r.data.is_id > 0) setTopluIsID(r.data.is_id) })
       .catch(() => { /* sessiz */ })
     return () => { iptal = true }
-  }, [])
+  }, [yonetici])
 
   // Alt alanlar da toplu seçime dahil — sol kutucukla seçilir, "🗑 Sil" ile domainlerle
   // birlikte silinir (kendi endpoint'i). Domain seçimiyle çakışmasın diye AYRI set.
@@ -457,7 +466,7 @@ export default function DomainsPage() {
   // etkilerse bile is DB'de surer ve panel kaldigi yerden takip eder).
   async function topluBaslat(tip: 'dns_reset' | 'ssl_kur' | 'sahip' | 'plan', ek?: Record<string, unknown>) {
     const ids = Array.from(secili)
-    if (!ids.length) return
+    if (!ids.length || !yonetici) return
     if (tip === 'dns_reset' && !(await onay({
       baslik: cevir("DNS kayıtları sıfırlansın mı?"),
       mesaj: cevirT(cevir("{0} domainin TÜM DNS kayıtları silinip şablondan yeniden oluşturulacak. Özel kayıtlar (MX, TXT, doğrulama kayıtları) KAYBOLUR."), ids.length),
@@ -515,7 +524,7 @@ export default function DomainsPage() {
         </Button>
       </div>
 
-      {topluIsID > 0 && (
+      {yonetici && topluIsID > 0 && (
         <TopluIsPaneli isID={topluIsID} onBitti={() => { setTopluIsID(0); setSecili(new Set()); yukle() }} />
       )}
 
@@ -533,7 +542,8 @@ export default function DomainsPage() {
               {cevir("Pasif Et")}
             </Button>
           </>}
-          {secili.size > 0 && <>
+          {/* DNS/SSL/sahip/plan → POST /domains/toplu/is (AdminOnly): yalnız yönetici. */}
+          {yonetici && secili.size > 0 && <>
             <Button color="error" variant="soft" boyut="sm" ikon={I.sifirla} onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0} yukleniyor={topluBasliyor === 'dns_reset'}>
               {cevir(cevir("DNS varsayılana sıfırla"))}
             </Button>
@@ -815,7 +825,7 @@ export default function DomainsPage() {
 
       {/* Toplu Sil Onay */}
       {/* topluHedefModal — sahip/plan hedefi secimi (async is bundan sonra baslar) */}
-      <Modal acik={topluModal !== ''} baslik={topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
+      <Modal acik={yonetici && topluModal !== ''} baslik={topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
         onKapat={() => setTopluModal('')} kapatilamaz={topluBasliyor === 'sahip' || topluBasliyor === 'plan'}
         alt={<>
           <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setTopluModal('')}>{cevir("Vazgeç")}</Button>

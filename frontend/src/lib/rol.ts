@@ -6,12 +6,18 @@
 // `girginospanel.musteri` bayrağı bugün eşdeğer ama yeni kapılar ona bağlanmaz:
 // users.role ENUM'u 'user' içeriyor, giriş yolu genişlerse eşdeğerlik bozulur.
 //
-// Yalnız 'user' rolünü etkiler — yönetici ve bayi davranışı değişmez.
+// Müşteri kapıları yalnız 'user' rolünü etkiler. Yönetici-yalnız (AdminOnly) uca giden
+// arayüz öğeleri yoneticiMi ile çizilir: bayi ve müşteri onları görmez (bayi kapsam kuralı).
 import { useAuth, KEY_MUSTERI_DOM, sonOturumMusteri, type Kullanici } from '@/store/auth'
 
 export type Rol = Kullanici['rol']
 
 export const musteriMi = (rol: Rol | null | undefined): boolean => rol === 'user'
+
+// Panel sahibi (yönetici) mi? Sunucu tarafında AdminOnly olan uçlara giden düğme,
+// bağlantı ve yoklamalar YALNIZ bunun true olduğu oturumda çizilir/çağrılır.
+// Bilinmeyen/boş rol yönetici SAYILMAZ (kapalı varsayılan).
+export const yoneticiMi = (rol: Rol | null | undefined): boolean => rol === 'admin'
 
 export function useRol(): Rol | undefined {
   return useAuth((s) => s.kullanici?.rol)

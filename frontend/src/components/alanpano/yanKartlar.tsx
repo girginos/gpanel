@@ -65,7 +65,9 @@ export function BildirimKart({ bildirim, domainId, className = '' }: { bildirim:
       sag={<AyrintiLink to="/bildirimler">{cevir('Tümü')}</AyrintiLink>}>
       <Durumlu uc={bildirim} iskelet={<Iskelet yukseklik="" satir={6} />}>
         {(y) => {
-          // Uçta domain süzgeci yok (rol kapsamlı, en yeni 200) → istemcide domain_id ile süzülür.
+          // Uç ?domain_id ile SUNUCUDA süzer (AlanPano). Eski arka uç parametreyi yok sayıp
+          // kapsamdaki en yeni 200 kaydı döndürürse bu istemci süzgeci güvenlik ağıdır:
+          // başka alan adının bildirimi bu kartta asla çizilmez.
           const liste = (y.bildirimler ?? []).filter((b) => b.domain_id === domainId).slice(0, 5)
           if (!liste.length) return <BosDurum ikon={I.zil} baslik={cevir('Bu alan adı için bildirim yok')} />
           return (

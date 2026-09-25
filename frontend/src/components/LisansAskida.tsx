@@ -1,17 +1,18 @@
 import { Link } from 'react-router-dom'
 import { butonSinifi } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
-import { useRol } from '@/lib/rol'
+import { useRol, yoneticiMi } from '@/lib/rol'
 
 // Lisans askıda / süresi dolmuş bir eklentinin sekmesinde YÖNETİM YERİNE
 // gösterilen landing. 🔴 Eklenti bundle'ı MOUNT EDİLMEZ — yönetim arayüzü hiç
 // yüklenmez, dolayısıyla kullanıcı ürünü yönetemez. Gerçek engel zaten
 // SERVER-SIDE'dır (eklenti proxy'si aktif=0 => 402); bu ekran yalnızca sekme
 // kaybolmak yerine NEDEN'i söyler + yenileme yolunu verir.
-// Müşteri (rol 'user') lisansı yenileyemez: yönetici bağlantıları (/eklentiler,
-// lisans portalı) ona gösterilmez, hizmet sağlayıcısına yönlendirilir.
+// Lisansı yalnız panel sahibi (yönetici) yenileyebilir: /eklentiler'in kataloğu
+// (/eklenti-katalog) AdminOnly, lisans portalı panel sahibinin hesabıdır. Bayi ve
+// müşteri yönetici bağlantılarını görmez, hizmet sağlayıcısına yönlendirilir.
 export default function LisansAskida({ baslik }: { baslik: string }) {
-  const musteri = useRol() === 'user'
+  const yonetici = yoneticiMi(useRol())
   return (
     <div className="mx-auto mt-6 max-w-xl rounded-xl border border-amber-300/60 bg-amber-50 p-8 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/20">
@@ -21,7 +22,7 @@ export default function LisansAskida({ baslik }: { baslik: string }) {
       <p className="mx-auto mt-2 max-w-md text-sm text-amber-800/90 dark:text-amber-300/90">
         Bu eklentinin lisansı şu anda askıda: süresi dolmuş, ödeme bekliyor veya başka bir sunucuya taşınmış olabilir. Yönetim, lisans yenilenene kadar kullanılamaz.
       </p>
-      {musteri ? (
+      {!yonetici ? (
         <p className="mx-auto mt-3 max-w-md text-sm font-medium text-amber-900 dark:text-amber-200">
           Bu hizmet için lütfen hizmet sağlayıcınızla iletişime geçin.
         </p>
