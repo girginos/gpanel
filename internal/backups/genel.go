@@ -373,7 +373,7 @@ func YerelDosyaHazirla(ctx context.Context, db *sql.DB, sk, dosya string) (strin
 	}
 	g := genelAyarOku(ctx, db)
 	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
-		return "", fmt.Errorf("yedek dosyası diskte bulunamadı")
+		return "", errYedekDiskteYok
 	}
 	// Indirmeden once yer var mi: dolu diske indirip paneli dusurmeyelim.
 	if g.MinBosGB > 0 {

@@ -116,16 +116,38 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		e.Aktif, e.UI, e.MusteriErisim = aktif == 1, ui == 1, mus == 1
 		out = append(out, e)
 	}
-	if musteriMi {
-		suzulmus := out[:0]
-		for _, e := range out {
-			if e.MusteriErisim {
-				suzulmus = append(suzulmus, e)
-			}
-		}
-		out = suzulmus
+	if c := middleware.ClaimsFrom(r); c == nil || c.Role != "admin" {
+		out = istemciListesi(out, musteriMi)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// istemciListesi — yönetici OLMAYAN oturumun (bayi, müşteri) göreceği eklenti listesi.
+//
+// 🔴 KAPSAM (GL-08 / BAYI-UI-05): liste eskiden yalnız müşteride süzülüyordu;
+// bayi cp_eklentiler'in TAMAMINI — yalnız yöneticiye ait eklentiler (katalog:
+// SadeceAdmin, ör. marka) dahil — etiket, sürüm, sağlık ve menü bilgisiyle
+// alıyordu: kökün hangi ücretli eklentileri kurduğu, sürümleri ve arıza durumu.
+//
+//   - Satırlar: yalnız bu oturumun GİREBİLECEĞİ eklentiler — rolKapisi ile aynı
+//     kural (SadeceAdmin → yok; müşteride ayrıca musteri_erisim=1 şart).
+//   - Alanlar: bayi/müşteri ön yüzü bu uçtan YALNIZ `ad` ve `aktif` okur
+//     (lib/eklenti.ts useEklentiAktif/useEklentiler, DashboardLayout kuruluMu,
+//     SubscriptionDetail mail/calistirici, DomainPlan/DomainSSL/PaketDetay/
+//     ServicePlans/BayiPlaniDuzenle mail kapısı). Öteki alanlar SİLİNMEZ,
+//     BOŞALTILIR: yanıt biçimi (anahtar kümesi) herkes için aynı kalır.
+func istemciListesi(l []Eklenti, musteriMi bool) []Eklenti {
+	out := make([]Eklenti, 0, len(l))
+	for _, e := range l {
+		if u, ok := lisans.YerelBul(e.Ad); ok && u.SadeceAdmin {
+			continue
+		}
+		if musteriMi && !e.MusteriErisim {
+			continue
+		}
+		out = append(out, Eklenti{Ad: e.Ad, Aktif: e.Aktif})
+	}
+	return out
 }
 
 // Bundle — eklentinin frontend bundle'ı (/eklentiler/{ad}/app.js).

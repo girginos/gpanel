@@ -24,6 +24,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/phpsurum"
 	"girginospanel/internal/provisioner"
 
@@ -392,6 +393,16 @@ type Handlers struct {
 // tumSurumler — sürüm keşfi (dnf/php exec). Testler sahte veriyle değiştirir.
 var tumSurumler = phpsurum.TumSurumler
 
+// PutAyarlar'ın dış etkili adımları (pool yazımı + php-fpm reload, vhost render +
+// sunucu geneli `nginx -t`). Testler sahteyle değiştirir: hata yolları ana
+// makinenin php-fpm/nginx yapılandırmasına dokunmadan sınanır.
+var (
+	tenantFPMAktif  = provisioner.TenantFPMActive
+	tenantFPMUygula = provisioner.EnableTenantFPM
+	havuzUygula     = ApplyToFilesystem
+	vhostUygula     = provisioner.ApplyVhostForDomain
+)
+
 // istemciSurumleri — istemciye dönen sürüm listesini oturuma göre süzer.
 //
 // 🔴 NEDEN (B11): PHP-FPM pool/soket dizinleri ve servis adları sunucunun iç
@@ -558,24 +569,28 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	// (paylaşılan /etc/php-fpm.d/<sk>.conf DEĞİL). EnableTenantFPM idempotenttir:
 	// pool'u DB ayarlarından yeniden render eder, servisi restart eder, nginx'i
 	// per-tenant socket'e re-render eder. Başarısızlıkta paylaşılan düzene rollback.
+	// 🔴 Bu adımların hataları ham `nginx -t` / `systemctl` çıktısı taşır:
+	// sunucu geneli yapılandırma, komşu kiracıların vhost/sertifika yolları,
+	// paylaşılan servis adları. Yönetici olmayana genel metin, ayrıntı günlüğe
+	// (F1; bkz. nginxset.SunucuHatasi). Yöneticinin gördüğü metin değişmedi.
 	var socket string
-	if provisioner.TenantFPMActive(sk) {
-		s, err := provisioner.EnableTenantFPM(h.DB, id, sk, surum)
+	if tenantFPMAktif(sk) {
+		s, err := tenantFPMUygula(h.DB, id, sk, surum)
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "per-tenant fpm: "+err.Error())
+			httpx.WriteError(w, http.StatusInternalServerError, "per-tenant fpm: "+nginxset.SunucuHatasi(r, "php", id, err))
 			return
 		}
 		socket = s
 	} else {
-		s, err := ApplyToFilesystem(sk, surum, req.Ayarlar)
+		s, err := havuzUygula(sk, surum, req.Ayarlar)
 		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "pool yaz: "+err.Error())
+			httpx.WriteError(w, http.StatusInternalServerError, "pool yaz: "+nginxset.SunucuHatasi(r, "php", id, err))
 			return
 		}
 		socket = s
 		// nginx vhost'u yeni socket'le yeniden render et + reload (kritik!)
-		if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, surum); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "nginx vhost: "+err.Error())
+		if err := vhostUygula(h.DB, id, socket, surum); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "nginx vhost: "+nginxset.SunucuHatasi(r, "php", id, err))
 			return
 		}
 	}

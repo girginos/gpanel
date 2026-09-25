@@ -316,9 +316,9 @@ func (h *Handlers) Icerik(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik")
 		return
 	}
-	abs, hazirErr := YerelDosyaHazirla(r.Context(), h.DB, sk, dosya)
+	abs, hazirErr := yedekHazirla(r.Context(), h.DB, sk, dosya)
 	if hazirErr != nil {
-		httpx.WriteError(w, http.StatusNotFound, hazirErr.Error())
+		httpx.WriteError(w, http.StatusNotFound, hazirlikHatasi(r, id, hazirErr))
 		return
 	}
 

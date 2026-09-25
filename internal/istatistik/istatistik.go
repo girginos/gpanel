@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 
@@ -191,16 +192,43 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 	for i := len(a.son) - 1; i >= 0 && len(o.SonIstekler) < 20; i-- {
 		o.SonIstekler = append(o.SonIstekler, a.son[i])
 	}
-	gk := make([]string, 0, len(a.gunler))
-	for k := range a.gunler {
-		gk = append(gk, k)
-	}
-	sort.Strings(gk)
-	if len(gk) > 7 {
-		gk = gk[len(gk)-7:]
-	}
-	for _, k := range gk {
-		o.Gunluk = append(o.Gunluk, Gun{k, a.gunler[k]})
-	}
+	o.Gunluk = sonGunler(a.gunler, 7)
 	httpx.WriteJSON(w, http.StatusOK, o)
+}
+
+// logGunBicimi — access.log zaman damgasının gün kısmı ("25/Sep/2026").
+const logGunBicimi = "02/Jan/2006"
+
+// sonGunler — gün → istek sayısı haritasından GERÇEK TARİHE göre en yeni n günü
+// eskiden yeniye sıralı döner (Tarih metni logdaki biçimiyle kalır).
+//
+// 🔴 NEDEN: eskiden anahtarlar METİN olarak ("dd/Mon/yyyy") sıralanıp son 7'si
+// alınıyordu. Metin sırası önce güne bakar: "30/Sep/2026" > "01/Oct/2026",
+// "31/Dec/2025" > "01/Jan/2026" → ay/yıl sınırında en yeni günler atılıp eski
+// ayın günleri "son 7 gün" diye gösteriliyordu. Çözülemeyen (bozuk) anahtar en
+// eski sayılır; yeterince gün varsa ilk kesilen odur.
+func sonGunler(gunler map[string]int, n int) []Gun {
+	type gt struct {
+		metin string
+		t     time.Time
+	}
+	l := make([]gt, 0, len(gunler))
+	for k := range gunler {
+		t, _ := time.Parse(logGunBicimi, k) // hata → sıfır zaman (en eski)
+		l = append(l, gt{k, t})
+	}
+	sort.Slice(l, func(i, j int) bool {
+		if !l[i].t.Equal(l[j].t) {
+			return l[i].t.Before(l[j].t)
+		}
+		return l[i].metin < l[j].metin
+	})
+	if len(l) > n {
+		l = l[len(l)-n:]
+	}
+	var out []Gun
+	for _, g := range l {
+		out = append(out, Gun{g.metin, gunler[g.metin]})
+	}
+	return out
 }

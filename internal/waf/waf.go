@@ -15,10 +15,15 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// wafUygula — vhost yeniden render (sunucu geneli `nginx -t` + reload). Testler
+// sahteyle değiştirir: hata yolu ana makinenin nginx'ine dokunmadan sınanır.
+var wafUygula = provisioner.WAFUygula
 
 type Handlers struct {
 	DB *sql.DB
@@ -168,9 +173,11 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vhost'u yeniden render et — nginx -t gate + rollback koruyor. Modul yoksa graceful atlanir.
-	if err := provisioner.WAFUygula(h.DB, id); err != nil {
+	// 🔴 Ham hata `nginx -t` çıktısını (komşu kiracıların vhost/sertifika
+	// yolları) taşır → yönetici olmayana genel metin, ayrıntı günlüğe (F1).
+	if err := wafUygula(h.DB, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"WAF ayarı kaydedildi ancak vhost render başarısız (nginx değişmedi): "+err.Error())
+			"WAF ayarı kaydedildi ancak vhost render başarısız (nginx değişmedi): "+nginxset.SunucuHatasi(r, "waf", id, err))
 		return
 	}
 

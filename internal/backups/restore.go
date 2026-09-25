@@ -18,6 +18,31 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// yedekHazirla — geri yükleme/içerik uçlarının yerel dosya hazırlığı (gerekirse
+// GENEL uzak hedeften lftp ile indirme). Testler sahteyle değiştirir: hata yolu
+// ağa/lftp'ye çıkmadan sınanır.
+var yedekHazirla = YerelDosyaHazirla
+
+// errYedekDiskteYok — yerel kopya yok ve uzak hedef kapalı: kullanıcıya olduğu
+// gibi söylenebilen tek hazırlık hatası (sunucuya dair ayrıntı taşımaz).
+var errYedekDiskteYok = errors.New("yedek dosyası diskte bulunamadı")
+
+// hazirlikHatasi — YerelDosyaHazirla hatasını istemciye dönecek metne çevirir.
+//
+// 🔴 KAPSAM (YK-02): hata, YÖNETİCİNİN sistem geneli uzak yedek hedefinden
+// indirmenin HAM lftp çıktısını taşır ("uzaktan indirme: cd: Access failed:
+// 550 ... (/admin-deposu/sunucu181/2026-09-24)", çözülemeyen host adı) ya da
+// sunucunun boş disk miktarını. Bu uçlar MusteriScope ile bayiye ve müşteriye
+// açık; ham metin kökün uzak deposunun host adını ve dizin şemasını sızdırıyordu.
+// Delete'teki ilkeyle aynı: ayrıntı günlüğe ve YALNIZ yöneticiye.
+func hazirlikHatasi(r *http.Request, domainID int64, err error) string {
+	log.Printf("yedek: dosya hazırlanamadı (domain=%d): %v", domainID, err)
+	if middleware.RolFrom(r) == "admin" || errors.Is(err, errYedekDiskteYok) {
+		return err.Error()
+	}
+	return "yedek dosyası hazırlanamadı (uzak yedek deposundan alınamadı) — ayrıntı sunucu günlüğüne yazıldı; sorun sürerse yöneticinize başvurun"
+}
+
 // restoreIstek: geri yükleme gövdesi (tüm alanlar opsiyonel; boş gövde = mod "tam").
 type restoreIstek struct {
 	Mod     string   `json:"mod"`      // tam | dosyalar | veritabani | dosya | db
@@ -91,9 +116,9 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Yedek uzak hedefteyse burada indirilir; yuzde KESIN (beklenen boyut bilinir).
-	abs, err := YerelDosyaHazirla(r.Context(), h.DB, sk, dosya)
+	abs, err := yedekHazirla(r.Context(), h.DB, sk, dosya)
 	if err != nil {
-		httpx.WriteError(w, http.StatusNotFound, err.Error())
+		httpx.WriteError(w, http.StatusNotFound, hazirlikHatasi(r, id, err))
 		return
 	}
 	IlerlemeAsama(id, "arşiv açılıyor", 0)
