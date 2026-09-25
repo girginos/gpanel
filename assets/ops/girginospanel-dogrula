@@ -862,6 +862,101 @@ else
   dus "service listening" "$_port_ok/$_port_top$(printf "$_port_hata")"
 fi
 
+bas "FTP"
+# 🔴 On 181 pure-ftpd was DOWN for 3 weeks (enabled but inactive — an offsite-backup FTP
+# test stopped it and nobody started it again) AND the live pureftpd-mysql.conf said
+# `MYSQLCrypt cleartext` while every active account stored a $6$ crypt hash, i.e. EVERY FTP
+# login got 530. Panel login is separate from FTP, so the panel looked healthy and no check
+# caught either. Measured here: service up, FTP port bound, credential mode matches the
+# at-rest format of the active ftp_accounts rows. Only COUNTS and the $6$ prefix are read —
+# password/hash CONTENT is never selected or printed.
+#   • pure-ftpd not installed (no unit) -> skipped: not every server offers FTP.
+#   • deliberately switched off (disabled/masked AND inactive) -> WARNING only: a critical
+#     here would fail the update gate on every server that chose not to run FTP.
+#   • otherwise not running / port not bound / mode mismatch -> CRITICAL.
+# pure-ftpd MYSQLCrypt: `crypt` verifies $6$ (as does `any` = crypt/md5/password — NOT
+# cleartext); `cleartext` compares the stored string as-is. GOSP_* = sandbox tests only.
+_pf_mysql=${GOSP_PUREFTPD_MYSQL_CONF:-/etc/pure-ftpd/pureftpd-mysql.conf}
+_pf_conf=${GOSP_PUREFTPD_CONF:-/etc/pure-ftpd/pure-ftpd.conf}
+_pf_load=$(systemctl show -p LoadState --value pure-ftpd.service 2>/dev/null); _pf_load=${_pf_load%%$'\n'*}
+if [ "$_pf_load" != "loaded" ] && [ "$_pf_load" != "masked" ]; then
+  if [ $KISA -eq 0 ] && [ $JSON -eq 0 ]; then
+    echo "  (FTP: pure-ftpd not installed — skipped)"
+  fi
+else
+  _pf_akt=$(servis pure-ftpd)
+  _pf_en=$(systemctl is-enabled pure-ftpd 2>/dev/null); _pf_en=${_pf_en%%$'\n'*}
+  _pf_kapali=0
+  if [ "$_pf_akt" = "active" ]; then
+    gec "pure-ftpd" "active (${_pf_en:-unit state unknown})"
+  else
+    case "$_pf_en" in
+      disabled|masked|masked-runtime)
+        _pf_kapali=1
+        uyar "pure-ftpd" "$_pf_akt + $_pf_en — FTP deliberately off? panel FTP accounts cannot log in (to serve FTP: systemctl enable --now pure-ftpd)" ;;
+      *)
+        dus "pure-ftpd" "$_pf_akt but ${_pf_en:-unit state unknown} — FTP is DOWN, every panel FTP account fails (systemctl start pure-ftpd; journalctl -u pure-ftpd -n 40)" ;;
+    esac
+  fi
+
+  if [ "$_pf_kapali" = 0 ]; then
+    # FTP port: `Bind [host,]port` in pure-ftpd.conf, else 21. Measured from the socket
+    # (same rule as "Service -> port mapping": active is not the same as listening).
+    _pf_port=$(sed -E 's/#.*//' "$_pf_conf" 2>/dev/null | awk 'tolower($1)=="bind"{v=$2} END{print v}')
+    _pf_port=${_pf_port##*,}
+    case "$_pf_port" in ''|*[!0-9]*) _pf_port=21 ;; esac
+    if [ "$_pf_akt" = "active" ]; then
+      _pf_ss=$(ss -tlnH 2>/dev/null)
+      if [ -z "$_pf_ss" ]; then
+        uyar "FTP port" "COULD NOT MEASURE (ss gave no output) — not counted as passed"
+      elif printf '%s\n' "$_pf_ss" | awk -v s=":$_pf_port" '{ if (substr($4, length($4) - length(s) + 1) == s) f = 1 } END { exit(f ? 0 : 1) }'; then
+        gec "FTP port" ":$_pf_port listening"
+      else
+        dus "FTP port" "pure-ftpd active but :$_pf_port NOT LISTENING — FTP clients cannot connect (journalctl -u pure-ftpd -n 40)"
+      fi
+    fi
+
+    # Credential mode vs at-rest format (the 530-for-everyone class).
+    if [ ! -f "$_pf_mysql" ]; then
+      dus "FTP auth mode" "$_pf_mysql MISSING — pure-ftpd has no panel account backend, every FTP login fails (girginospanel-ftp-setup)"
+    elif [ ! -r "$_pf_mysql" ]; then
+      uyar "FTP auth mode" "COULD NOT MEASURE ($_pf_mysql unreadable) — not counted as passed"
+    else
+      _pf_mod=$(awk 'tolower($1)=="mysqlcrypt"{print tolower($2); exit}' "$_pf_mysql" 2>/dev/null)
+      _pf_h6='$6$'; _pf_hn=""; _pf_pn=""
+      if [ -n "$_PANEL_MYSQL" ]; then
+        _pf_hn=$($_PANEL_MYSQL -e "SELECT COUNT(*) FROM ftp_accounts WHERE status='active' AND password_md5 LIKE '${_pf_h6}%'" 2>/dev/null)
+        _pf_pn=$($_PANEL_MYSQL -e "SELECT COUNT(*) FROM ftp_accounts WHERE status='active' AND password_md5 <> '' AND password_md5 NOT LIKE '${_pf_h6}%'" 2>/dev/null)
+      fi
+      case "$_pf_hn$_pf_pn" in *[!0-9]*) _pf_hn="" ;; esac
+      if [ -z "$_pf_hn" ] || [ -z "$_pf_pn" ]; then
+        uyar "FTP auth mode" "COULD NOT MEASURE (ftp_accounts unreadable via panel DSN) — MYSQLCrypt ${_pf_mod:-not set}, not counted as passed"
+      elif [ -z "$_pf_mod" ]; then
+        uyar "FTP auth mode" "MYSQLCrypt NOT SET in $_pf_mysql — COULD NOT VERIFY against $_pf_hn \$6\$ / $_pf_pn other active account(s) (expected: crypt)"
+      elif [ "$_pf_hn" -gt 0 ]; then
+        case "$_pf_mod" in
+          crypt|any) gec "FTP auth mode" "MYSQLCrypt $_pf_mod · $_pf_hn active \$6\$ account(s)" ;;
+          *) dus "FTP auth mode" "MYSQLCrypt $_pf_mod but $_pf_hn active account(s) store \$6\$ crypt hashes — EVERY FTP login fails with 530. Fix: MYSQLCrypt crypt in $_pf_mysql + systemctl restart pure-ftpd (girginospanel-update reconciles it)" ;;
+        esac
+        if [ "$_pf_pn" -gt 0 ]; then
+          uyar "FTP account format" "$_pf_pn of $((_pf_hn + _pf_pn)) active account(s) NOT stored as \$6\$ — they fail under MYSQLCrypt $_pf_mod (the panel re-hashes legacy plaintext on start: systemctl restart girginospanel)"
+        fi
+      elif [ "$_pf_pn" -gt 0 ]; then
+        # Legacy server: all active accounts still plaintext (panel sifreheal has not run).
+        case "$_pf_mod" in
+          cleartext) gec "FTP auth mode" "MYSQLCrypt cleartext · $_pf_pn active legacy plaintext account(s)" ;;
+          *) dus "FTP auth mode" "MYSQLCrypt $_pf_mod but all $_pf_pn active account(s) are plaintext — EVERY FTP login fails with 530 (the panel re-hashes them on start: systemctl restart girginospanel, then girginospanel-update)" ;;
+        esac
+      else
+        case "$_pf_mod" in
+          crypt|any) gec "FTP auth mode" "MYSQLCrypt $_pf_mod · no active FTP accounts" ;;
+          *) uyar "FTP auth mode" "MYSQLCrypt $_pf_mod with no active FTP accounts — new accounts are stored as \$6\$ and will fail with 530 (set MYSQLCrypt crypt + systemctl restart pure-ftpd)" ;;
+        esac
+      fi
+    fi
+  fi
+fi
+
 bas "SQL schema (derived from migrations)"
 # 🔴 The expected schema is NOT MAINTAINED BY HAND — it is DERIVED from the migration
 # files. A hand-maintained list inevitably goes stale and falls into "the check exists but

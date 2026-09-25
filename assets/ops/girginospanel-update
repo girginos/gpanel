@@ -86,14 +86,24 @@ step() { echo -e "${c_b}══ $* ══${c_0}"; }
 # (girginospanel-port-swap.sh) saglikli bir sunucuda saglik kontrolunu HIC
 # gecirmez ve asagidaki rollback dalini tetikler: eski binary + GUNCELLEME
 # ONCESI DB geri yuklenir. Yani tamamen saglikli bir panelde VERI GERI SARMA.
-PANEL_HEALTH_ADRES=$(grep -oE '^PANEL_LISTEN=.*' /etc/girginospanel/env 2>/dev/null | cut -d= -f2- | tr -d ' ')
+# 🔴 OPS-1: set -e + pipefail altında `X=$(boru hattı)` boru hattı düşerse betiği HİÇBİR
+# mesaj basmadan bitirir. PANEL_LISTEN satırı olmayan env'de grep 1 döner → güncelleyici
+# tek satır yazmadan exit 1 veriyordu; `|| X=""` varsayılana düşürür.
+PANEL_HEALTH_ADRES=$(grep -oE '^PANEL_LISTEN=.*' /etc/girginospanel/env 2>/dev/null | cut -d= -f2- | tr -d ' ') || PANEL_HEALTH_ADRES=""
 PANEL_HEALTH_ADRES=${PANEL_HEALTH_ADRES:-127.0.0.1:8080}
 case "$PANEL_HEALTH_ADRES" in
   :*)        PANEL_HEALTH_ADRES="127.0.0.1$PANEL_HEALTH_ADRES" ;;
   0.0.0.0:*) PANEL_HEALTH_ADRES="127.0.0.1:${PANEL_HEALTH_ADRES##*:}" ;;
 esac
 PANEL_HEALTH="http://$PANEL_HEALTH_ADRES/healthz"
-surum() { curl -fsS "$PANEL_HEALTH" 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4; }
+# surum: çalışan panelin sürümü; panel kapalı/yanıtsızsa BOŞ çıktı ve 0 (asla hata değil).
+# 🔴 OPS-1: eskiden panel kapalıyken curl düşüyor, grep boş girdiyle 1 dönüyor, pipefail
+# boru hattını 1 sayıyordu → `CURVER=$(surum)` basit atama olduğundan set -e betiği
+# SESSİZCE bitiriyordu: güncelleyici (--dry-run dahil) tam da onarması gereken durumda
+# (panel kapalı) hiç çalışmıyordu; restart sonrası `NEWVER=$(surum)` de aynı yoldan,
+# MARKER yazıldıktan sonra doğrulamasız ölebiliyordu. --max-time: asılı panel güncelleyiciyi
+# sonsuza dek bekletmesin.
+surum() { curl -fsS --max-time 5 "$PANEL_HEALTH" 2>/dev/null | grep -oE '"surum":"[^"]*"' | cut -d'"' -f4 || true; }
 
 # kapi_adresleri: rol kapısı adreslerini gösterir (kapı modu yoksa sessiz). Otomatik
 # geçişten sonra yöneticinin YENİ admin adresini öğrendiği yer burası + eski kapıdaki
@@ -127,7 +137,7 @@ kapi_adresleri() {
 # komutunda kullanım yazıp 2 döner (sunucu başlatmaz).
 kapi_selinux_etiketle() {
   [ -f "$KAPI_JSON" ] || return 0
-  local rc=0 cikti portlar
+  local rc=0 cikti portlar kj ebit adog eski
   if command -v timeout >/dev/null 2>&1; then
     cikti=$(timeout 300 "$BIN" kapi selinux 2>&1) || rc=$?
   else
@@ -137,9 +147,21 @@ kapi_selinux_etiketle() {
     0) ok "kapı portları SELinux için hazır (http_port_t ya da SELinux kapalı) — açılış semanage beklemez" ;;
     3) : ;;   # kapı modu yapılandırılmamış (kapi.json yok/okunamadı) — sessiz
     *)
-      portlar=$(tr -d ' \t\r\n' < "$KAPI_JSON" 2>/dev/null \
-        | grep -oE '"(admin|bayi|musteri)":[0-9]+|"eski_portlar":\[[0-9,]*\]' \
-        | grep -oE '[0-9]+' | sort -un | tr '\n' ' ') || portlar=""
+      # 🔴 OPS-4: YALNIZ üst düzey alanlar. İç içe nesneler (ilk_giris: rol → unix zaman
+      # damgası, anahtarları "bayi"/"musteri") ÖNCE atılır; yoksa "bayi":1758700000 "kapı
+      # portu" diye basılıyor, operatör semanage'i geçersiz portla deniyordu. Eski portlar
+      # `kapi selinux` ile AYNI kuralla (kapi.Ayar.PortHaritasi → EskiAcik: listede VE
+      # (şimdi < eski_bitis YA DA admin_dogrulandi == 0)) — kapanmış eski port listelenmez.
+      kj=$(tr -d ' \t\r\n' < "$KAPI_JSON" 2>/dev/null | sed -E 's/"[A-Za-z0-9_]+":\{[^{}]*\}//g') || kj=""
+      portlar=$(printf '%s' "$kj" | grep -oE '"(admin|bayi|musteri)":[0-9]+' | grep -oE '[0-9]+$') || portlar=""
+      ebit=$(printf '%s' "$kj" | grep -oE '"eski_bitis":[0-9]+' | grep -oE '[0-9]+$') || ebit=0
+      adog=$(printf '%s' "$kj" | grep -oE '"admin_dogrulandi":[0-9]+' | grep -oE '[0-9]+$') || adog=0
+      if [ "$(date +%s)" -lt "${ebit:-0}" ] || [ "${adog:-0}" -eq 0 ]; then
+        eski=$(printf '%s' "$kj" | grep -oE '"eski_portlar":\[[0-9,]*\]' | grep -oE '[0-9]+') || eski=""
+        portlar="$portlar $eski"
+      fi
+      # $portlar TIRNAKSIZ: bilinçli bölme (yalnız rakam — glob yok), her port bir satır.
+      portlar=$(printf '%s\n' $portlar | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ') || portlar=""
       portlar=${portlar% }
       case "$rc" in
         1)   warn "kapı portları SELinux'ta etiketlenemedi — panel kapı düzenini uygulamaz, eski tek-port davranışı sürer; elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
@@ -206,6 +228,33 @@ saglik_bekle() {
     warn "panel ${SAGLIK_GECEN} sn içinde ACTIVE + /healthz vermedi ($PANEL_HEALTH)"
   fi
   return 1
+}
+
+# ftp_servis_canlandir: pure-ftpd ETKİN (enabled) ama ÇALIŞMIYORSA başlatmayı dener ve
+# sonucu uyarıyla raporlar. 🔴 FTP-1: 181'de pure-ftpd 3 hafta DURDU (enabled ama
+# inactive, çıkış 0 — yedek-offsite FTP testi servisi durdurup geri başlatmamıştı); 11a
+# yalnız MYSQLCrypt'e bakıyor, dogrula'da FTP denetimi yoktu → kimse görmedi.
+# Bilerek kapatılmış kurulum (disabled / masked), static/indirect birim ve pure-ftpd'siz
+# sunucu: DOKUNULMAZ. Güncellemeyi ASLA durdurmaz (her yolda 0; set -e altında her komut
+# koşul içinde ya da korumalı).
+ftp_servis_canlandir() {
+  local en
+  en=$(systemctl is-enabled pure-ftpd 2>/dev/null || true)
+  en=${en%%$'\n'*}
+  case "$en" in
+    enabled|enabled-runtime) : ;;
+    *) return 0 ;;
+  esac
+  if systemctl is-active --quiet pure-ftpd; then return 0; fi
+  if systemctl start pure-ftpd >/dev/null 2>&1; then
+    sleep 1   # hemen çöken süreci "başladı" sayma (ftp-setup ile aynı bekleme)
+  fi
+  if systemctl is-active --quiet pure-ftpd; then
+    warn "pure-ftpd etkin (enabled) ama ÇALIŞMIYORDU — başlatıldı; o süre boyunca TÜM FTP girişleri başarısızdı (neden: journalctl -u pure-ftpd -n 40)"
+  else
+    warn "pure-ftpd etkin (enabled) ama ÇALIŞMIYOR ve başlatılamadı — TÜM FTP girişleri başarısız; elle: systemctl start pure-ftpd · journalctl -u pure-ftpd -n 40"
+  fi
+  return 0
 }
 
 [ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
@@ -735,15 +784,19 @@ if [ "$HEALTHY" = 1 ]; then
     # $6$ mevcut (ya da tablo boş) → crypt; TÜM aktif hesaplar düz-metin (sifreheal
     # koşmamış) → cleartext, çalışan düz-metin FTP'yi KIRMA.
     if [ "$_hn" -eq 0 ] && [ "$_pn" -gt 0 ]; then _want=cleartext; else _want=crypt; fi
-    _cur=$(awk 'tolower($1)=="mysqlcrypt"{print $2; exit}' "$PFCONF")
+    # set -e: okuma/yazma hatası güncellemeyi SESSİZCE bitirmesin (MARKER zaten yazıldı).
+    _cur=$(awk 'tolower($1)=="mysqlcrypt"{print $2; exit}' "$PFCONF" 2>/dev/null) || _cur=""
+    _yazildi=1
     if [ "$_cur" != "$_want" ]; then
       cp -a "$PFCONF" "$PFCONF.bak-$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
       if grep -qiE '^[[:space:]]*MYSQLCrypt[[:space:]]' "$PFCONF"; then
-        sed -ri "s/^([[:space:]]*MYSQLCrypt[[:space:]]+).*/\1$_want/" "$PFCONF"
+        sed -ri "s/^([[:space:]]*MYSQLCrypt[[:space:]]+).*/\1$_want/" "$PFCONF" || _yazildi=0
       else
-        printf 'MYSQLCrypt      %s\n' "$_want" >> "$PFCONF"
+        printf 'MYSQLCrypt      %s\n' "$_want" >> "$PFCONF" || _yazildi=0
       fi
-      if systemctl is-active --quiet pure-ftpd; then
+      if [ "$_yazildi" = 0 ]; then
+        warn "MYSQLCrypt $_want YAZILAMADI ($PFCONF) — FTP kimlik modu uyumsuz kalabilir; elle düzeltip: systemctl restart pure-ftpd"
+      elif systemctl is-active --quiet pure-ftpd; then
         systemctl restart pure-ftpd >/dev/null 2>&1 \
           && ok "FTP kimlik modu düzeltildi: MYSQLCrypt ${_cur:-yok} → $_want (pure-ftpd restart)" \
           || warn "MYSQLCrypt $_want yazıldı ama pure-ftpd restart BAŞARISIZ — elle: systemctl restart pure-ftpd"
@@ -759,6 +812,8 @@ if [ "$HEALTHY" = 1 ]; then
       && ok "pure-ftpd config yoktu → girginospanel-ftp-setup ile kuruldu" \
       || warn "pure-ftpd config yok + girginospanel-ftp-setup HATA — elle: girginospanel-ftp-setup"
   fi
+  # Kimlik modu hizalandıktan SONRA: etkin ama durmuş pure-ftpd'yi başlat (FTP-1).
+  ftp_servis_canlandir
 
 # 🔴 Guncelleme "tamam" demeden ONCE uretim davranisini olc. Eskiden
 # updater servis ayakta diye tamam diyordu; wp-cli bozuk, SELinux
