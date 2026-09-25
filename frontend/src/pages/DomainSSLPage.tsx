@@ -522,9 +522,9 @@ function KapsamKarti({ kapsam, onKur, onDnsYenile }: { kapsam: KapsamResp; onKur
         ))}
       </div>
       {mailSatirlar.length > 0 && onKur && (
-        <UyariKutusu ton="uyari" className="mt-4">
+        <UyariKutusu ton="uyari" className="mt-4" kucuk>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <span className="text-xs">{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
+            <span>{cevir("Seçili posta alt-alanlarına Let's Encrypt sertifikası kurulur. Kullanmadıklarını (ör. Outlook yoksa autodiscover) işaretten kaldırabilirsin.")}</span>
             <Button color="primary" boyut="sm" ikon={I.kalkan} disabled={secili.size === 0} onClick={() => onKur([...secili])} className="shrink-0">{cevir("Seçili alt-alanlara SSL kur")} ({secili.size})</Button>
           </div>
         </UyariKutusu>

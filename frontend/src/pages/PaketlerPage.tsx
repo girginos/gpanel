@@ -279,8 +279,8 @@ export default function PaketlerPage() {
             {cevir("DNF üzerinden sunucu paketleri ve derleyici ortamları.")}
           </p>
         </div>
-        <UyariKutusu ton="uyari" className="self-start">
-          <span className="text-xs">{cevir("Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır")}</span>
+        <UyariKutusu ton="uyari" className="self-start" kucuk>
+          {cevir("Kritik paketler (kernel, bash, openssh, nginx, mariadb…) korumalıdır")}
         </UyariKutusu>
       </div>
 

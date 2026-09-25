@@ -18,8 +18,14 @@
   min-height: 100%;
   font-variant-numeric: tabular-nums;
 }
-.gp-ops *, .gp-ops *::before, .gp-ops *::after { box-sizing: border-box; }
-.gp-ops button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+/* Sıfırlama kuralları `@layer base`'de: katmansız bir kural HER katmanı (Tailwind
+   utilities dahil) ezer — `.gp-ops button { border:0; color:inherit }` burada ortak
+   <Button>'un kenarlık/renk/yazı sınıflarını siliyordu. base katmanında Tailwind
+   preflight'ın üstünde, bileşen ve utility sınıflarının altında kalır. */
+@layer base {
+  .gp-ops *, .gp-ops *::before, .gp-ops *::after { box-sizing: border-box; }
+  .gp-ops button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+}
 
 /* ── araç çubuğu ── */
 .gp-ops .ops-bar {

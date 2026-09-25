@@ -281,8 +281,8 @@ export default function WebsiteSecurityPage() {
             <div><div className="text-xs text-slate-500">{cevir("Toplam bulgu")}</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
           {status.last_error && (
-            <UyariKutusu ton="tehlike" className="mt-3">
-              <span className="text-xs">{cevir("Son hata:")} {status.last_error}</span>
+            <UyariKutusu ton="tehlike" className="mt-3" kucuk>
+              {cevir("Son hata:")} {status.last_error}
             </UyariKutusu>
           )}
         </div>

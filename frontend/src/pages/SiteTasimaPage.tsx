@@ -640,8 +640,8 @@ export default function SiteTasimaPage() {
               ) : (
                 <div className="block sm:col-span-2 lg:col-span-4">
                   <span className={labelCls}>{cevir("Panel anahtarı — kaynak sunucuda tek komut çalıştırın")}</span>
-                  <UyariKutusu ton="uyari">
-                    <p className="mb-2 text-xs leading-relaxed">
+                  <UyariKutusu ton="uyari" kucuk>
+                    <p className="mb-2 leading-relaxed">
                       {cevir("Kaynak sunucu")} <strong>{cevir("parola girişini kapatmış")}</strong>{cevir(" olabilir (Plesk'te sık). Bunun yerine panel kendi anahtarını kullanır — parola gerekmez.")}
                       {cevir("Aşağıdaki komutu")} <strong>{cevir("kaynak sunucuda")}</strong> ({host || cevir('kaynak')}) <strong>{cevir("bir kez")}</strong> {cevir("çalıştırın, sonra “Siteleri keşfet”e basın:")}
                     </p>
@@ -667,8 +667,8 @@ export default function SiteTasimaPage() {
             </div>
 
             {testSonuc && (
-              <UyariKutusu ton="basari" className="mt-4">
-                <p className="break-words text-xs">{testSonuc}</p>
+              <UyariKutusu ton="basari" className="mt-4" kucuk>
+                <p className="break-words">{testSonuc}</p>
               </UyariKutusu>
             )}
 
@@ -766,8 +766,8 @@ export default function SiteTasimaPage() {
             </div>
 
             {ustune && (
-              <UyariKutusu ton="uyari" className="mt-4">
-                <p className="text-xs"><strong className="font-semibold">{cevir("Dikkat:")}</strong> {cevir("“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.")}</p>
+              <UyariKutusu ton="uyari" className="mt-4" kucuk>
+                <strong className="font-semibold">{cevir("Dikkat:")}</strong> {cevir("“Mevcut siteyi ez” açık — aynı alan adına sahip sitelerin dosya ve veritabanları üzerine yazılacak. Önce yedek önerilir.")}
               </UyariKutusu>
             )}
 
@@ -786,8 +786,8 @@ export default function SiteTasimaPage() {
         <div className="space-y-5">
           {uretilenKimlikler.length > 0 && (
             <Kart>
-              <UyariKutusu ton="uyari" baslik={cevir("Oluşturulan sahip hesapları — parolaları KAYDEDİN")}>
-                <p className="mb-2 text-xs">
+              <UyariKutusu ton="uyari" baslik={cevir("Oluşturulan sahip hesapları — parolaları KAYDEDİN")} kucuk>
+                <p className="mb-2">
                   {cevir(cevir("Kaynaktaki reseller/müşteri hesapları planlarıyla oluşturuldu. Reseller parolaları YALNIZ ŞİMDİ gösterilir (bir daha görünmez) — sahiplere siz iletin."))}
                 </p>
                 <div className="overflow-x-auto">

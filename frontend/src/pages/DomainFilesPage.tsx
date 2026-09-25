@@ -815,9 +815,7 @@ export default function DomainFilesPage() {
       {siruklemeSayaci > 0 && (
         <div className="absolute inset-0 z-30 border-2 border-dashed border-brand-500 bg-brand-50 dark:bg-brand-900/20 backdrop-blur-sm rounded-lg flex items-center justify-center pointer-events-none">
           <div className="text-center">
-            <svg className="w-14 h-14 mx-auto text-brand-600 dark:text-brand-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
+            <Ikon d={I.indir} kalinlik={1.5} className="mx-auto mb-2 size-14 text-brand-600 dark:text-brand-400" />
             <div className="text-lg font-semibold text-brand-700 dark:text-brand-300">{cevir("Dosyaları buraya bırak")}</div>
             <div className="text-sm text-brand-600 dark:text-brand-400/80 mt-1">{cevir("Hedef dizin:")} <code className="font-mono bg-white dark:bg-dark-700/60 px-1.5 py-0.5 rounded">{yol}</code></div>
           </div>
@@ -867,13 +865,9 @@ export default function DomainFilesPage() {
       <div className="flex items-center gap-1.5 mb-3 flex-wrap relative">
         {/* + dropdown (Yeni Dosya / Klasör / Upload) */}
         <div className="relative">
-          <Button onClick={() => setYeniMenuAcik(v => !v)} color="primary" ikon={I.arti}
+          <Button onClick={() => setYeniMenuAcik(v => !v)} color="primary" ikon={I.arti} ikonSonda={I.chevronAsagi}
             aria-expanded={yeniMenuAcik}>
-            <span>{cevir("Yeni")}</span>
-            {/* Açılır menü oku: ikon setinde karşılığı (chevron) yok — mevcut svg korunur. */}
-            <svg className="ms-1.5 -me-1 w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M5.516 7.548c.436-.446 1.043-.481 1.576 0L10 10.405l2.908-2.857c.533-.481 1.141-.446 1.576 0 .436.445.408 1.197 0 1.615-.406.418-3.695 3.629-3.695 3.629a1.105 1.105 0 01-1.576 0S5.924 9.581 5.516 9.163c-.409-.418-.436-1.17 0-1.615z" />
-            </svg>
+            {cevir("Yeni")}
           </Button>
           {yeniMenuAcik && (
             <div className="absolute right-0 sm:right-auto sm:left-0 max-w-[calc(100vw-2rem)] z-40 mt-1 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg min-w-[180px] py-1">
@@ -998,9 +992,7 @@ export default function DomainFilesPage() {
                         onClick={() => e.tip === 'dosya' && editorAc(e)}
                         className="flex items-center gap-2 text-slate-800 dark:text-slate-200 text-left hover:text-brand-600 dark:hover:text-brand-400"
                       >
-                        <svg className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
+                        <Ikon d={I.dosya} className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
                         <span>{e.adi}</span>
                       </button>
                     )}
@@ -1027,11 +1019,8 @@ export default function DomainFilesPage() {
                       className="size-8 rounded-md"
                       title={cevir("İşlemler")}
                       aria-label={cevirT(cevir("{0} işlemleri"), e.adi)}
-                    >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
-                      </svg>
-                    </Button>
+                      ikon={I.dikeyNokta}
+                    />
                   </td>
                 </tr>
               ))}

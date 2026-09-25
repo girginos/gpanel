@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { I } from '@/components/Ikon'
+import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
@@ -252,7 +252,7 @@ export default function DomainLogsPage() {
             onClick={() => setSatirlar([])}
             variant="outlined"
             boyut="sm"
-            ikon={I.ban}
+            ikon={I.silgi}
           >
             {cevir("Temizle")}
           </Button>
@@ -262,9 +262,7 @@ export default function DomainLogsPage() {
       {/* Arama */}
       <div className="flex items-center gap-2 mb-2">
         <div className="relative flex-1 max-w-md">
-          <svg className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-          </svg>
+          <Ikon d={I.ara} kalinlik={2} className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <input
             value={arama}
             onChange={e => setArama(e.target.value)}

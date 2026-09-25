@@ -391,8 +391,8 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         {tab === 'genel' && (
           <div>
             <div className="flex flex-wrap gap-2">
-              {durum?.guncelleme_var && <Btn onClick={surumGuncelle} bekle={mesgul === 'surum'} tur="primary" ikon={I.yenile}>{cevir("Sürümü güncelle")} · v{durum.hedef_surum}</Btn>}
-              <Btn onClick={tumunuGuncelle} bekle={mesgul === 'tumu'} tur={durum?.guncelleme_var ? 'outline' : 'primary'} ikon={I.yenile}>{cevir("Tümünü güncelle")}</Btn>
+              {durum?.guncelleme_var && <Btn onClick={surumGuncelle} bekle={mesgul === 'surum'} tur="primary" ikon={I.yukselt}>{cevir("Sürümü güncelle")} · v{durum.hedef_surum}</Btn>}
+              <Btn onClick={tumunuGuncelle} bekle={mesgul === 'tumu'} tur={durum?.guncelleme_var ? 'outline' : 'primary'} ikon={I.yukselt}>{cevir("Tümünü güncelle")}</Btn>
               <Btn onClick={bakimTogle} bekle={mesgul === 'bakim'} ikon={durum?.bakim ? I.kilitAcik : I.kilit}>{durum?.bakim ? cevir('Bakım modunu kapat') : cevir("Bakım moduna al")}</Btn>
               <Btn onClick={cacheTemizle} bekle={mesgul === 'cache'} ikon={I.cop}>{cevir("Önbelleği temizle")}</Btn>
               <Btn onClick={onar} bekle={mesgul === 'onar'} ikon={I.arac}>{cevir("Çekirdeği onar")}</Btn>
@@ -470,7 +470,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
         <UyariKutusu ton="uyari" className="mb-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium">{guncellenebilir} {cevir("güncelleme mevcut")}</span>
-            <Button color="primary" boyut="sm" ikon={I.yenile} disabled={!!mesgul} yukleniyor={mesgul === `${tur}:tum`} onClick={onTumu}>{cevir("Tümünü güncelle")}</Button>
+            <Button color="primary" boyut="sm" ikon={I.yukselt} disabled={!!mesgul} yukleniyor={mesgul === `${tur}:tum`} onClick={onTumu}>{cevir("Tümünü güncelle")}</Button>
           </div>
         </UyariKutusu>
       )}
@@ -490,7 +490,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {guncel && <Button color="primary" boyut="sm" ikon={I.yenile} disabled={!!mesgul} yukleniyor={mesgul === `${tur}:${p.name}`} onClick={() => onGuncelle(p)}>{cevir("Güncelle")}</Button>}
+                {guncel && <Button color="primary" boyut="sm" ikon={I.yukselt} disabled={!!mesgul} yukleniyor={mesgul === `${tur}:${p.name}`} onClick={() => onGuncelle(p)}>{cevir("Güncelle")}</Button>}
                 {onTogle && <Button variant="outlined" boyut="sm" ikon={aktif ? I.ban : I.onay} disabled={!!mesgul} yukleniyor={mesgul === `ekl:${p.name}`} onClick={() => onTogle(p)}>{aktif ? cevir('Devre dışı bırak') : cevir("Etkinleştir")}</Button>}
                 {onAktif && !aktif && <Button variant="outlined" boyut="sm" ikon={I.onay} disabled={!!mesgul} yukleniyor={mesgul === `tema:${p.name}`} onClick={() => onAktif(p)}>{cevir("Etkinleştir")}</Button>}
                 {onAktif && aktif && <StatusPill t={cevir("Aktif tema")} c="green" />}

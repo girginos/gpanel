@@ -167,7 +167,7 @@ export default function DomainDatabasesPage() {
                 <td className={`${T.hucre} text-right`} data-etiket={cevir("Boyut")}><span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">{boyutFmt(d.boyut)}</span></td>
                 <td className={`${T.hucreAksiyon} lg:text-right`}>
                   <span className="inline-flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Yönet")}
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                    <Ikon d={I.chevronSag} className="size-4 shrink-0" />
                   </span>
                 </td>
               </tr>

@@ -7,7 +7,7 @@ import { api, apiHata } from '@/lib/api'
 import { useAuth } from '@/store/auth'
 import { useMarka, logoURL, bannerURL, VARSAYILAN as MARKA_VARSAYILAN } from '@/lib/marka'
 import { Button, Input } from '@/components/ui'
-import { I } from '@/components/Ikon'
+import { Ikon, I } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
 import GlobeBanner from '@/components/GlobeBanner'
 
@@ -29,18 +29,6 @@ const LOGINP_EN: Record<string, string> = {
   "İki adımlı doğrulama kodu": "Two-factor authentication code",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (LOGINP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
-
-// Prefix ikonları (gerçek SVG)
-const IkonKullanici = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
-    <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.25a7.5 7.5 0 0115 0" />
-  </svg>
-)
-const IkonKilit = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
-    <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a1.5 1.5 0 011.5 1.5v6a1.5 1.5 0 01-1.5 1.5H6.75a1.5 1.5 0 01-1.5-1.5v-6a1.5 1.5 0 011.5-1.5z" />
-  </svg>
-)
 
 export default function LoginPage() {
   const m = useMarka()
@@ -154,7 +142,7 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="space-y-4">
           <Input
-            prefix={<IkonKullanici />}
+            prefix={<Ikon d={I.kullanici} className="size-[18px]" />}
             type="text"
             placeholder="User"
             value={kullanici}
@@ -165,7 +153,7 @@ export default function LoginPage() {
             classNames={{ input: 'py-2.5' }}
           />
           <Input
-            prefix={<IkonKilit />}
+            prefix={<Ikon d={I.kilit} className="size-[18px]" />}
             type="password"
             placeholder="Şifre"
             value={parola}
@@ -191,7 +179,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <Button type="submit" color="primary" yukleniyor={yukleniyor} ikon={ikiFa ? I.kalkan : I.kilitAcik} className="w-full">
+          <Button type="submit" color="primary" yukleniyor={yukleniyor} ikon={ikiFa ? I.kalkan : I.giris} className="w-full">
             {yukleniyor ? cevir('Giriş yapılıyor…') : ikiFa ? cevir('Doğrula ve giriş yap') : cevir("Giriş yap")}
           </Button>
         </form>

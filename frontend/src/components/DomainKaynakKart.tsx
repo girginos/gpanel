@@ -106,7 +106,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
             className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'shrink-0' })}
             title={cevir(cevir("Planı yükselt, düşür veya bu hostinge özel plan oluştur"))}
           >
-            <Ikon d={I.kalem} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />
+            <Ikon d={I.degistir} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />
             {cevir(cevir("Değiştir"))}
           </Link>
         </div>

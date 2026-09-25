@@ -365,18 +365,16 @@ export default function FirewallPage() {
 
         {/* korumalı port — kural reddedilir; ekleme kapalı */}
         {korumaliSecildi && (
-          <UyariKutusu ton="tehlike" className="mt-2">
-            <span className="text-xs"><strong>{cevir("Dikkat:")}</strong> {cevirT(cevir("Port {0} kritik portlar listesinde — bu port kapatılamaz. Başka bir port girin."), port)}</span>
+          <UyariKutusu ton="tehlike" className="mt-2" kucuk>
+            <strong>{cevir("Dikkat:")}</strong> {cevirT(cevir("Port {0} kritik portlar listesinde — bu port kapatılamaz. Başka bir port girin."), port)}
           </UyariKutusu>
         )}
 
         {/* dinamik IP uyarısı — allowlist kısıt aktifken */}
         {kisitUyari && (
-          <UyariKutusu ton="uyari" className="mt-2">
-            <span className="text-xs">
+          <UyariKutusu ton="uyari" className="mt-2" kucuk>
             <strong>{cevir("Dikkat:")}</strong> {cevir("Bu port artık yalnızca yukarıdaki IP'ye açılacak. IP'niz")} <strong>{cevir("dinamikse")}</strong> {cevir("(ev/mobil internet gibi değişebilen), IP değişince bu porta erişimi kaybedersiniz.")}
             {cevir("SSH (22) açık kaldığı için kilitlenirseniz sunucuya SSH ile girip bu kuralı silebilirsiniz — ya da sabit (statik) bir IP kullanın.")}
-            </span>
           </UyariKutusu>
         )}
 

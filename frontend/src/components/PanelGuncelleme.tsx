@@ -172,7 +172,7 @@ export default function PanelGuncelleme() {
             <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{cevir("Sürüm kontrolü kapalı")} (PANEL_SURUM_KONTROL=0)</div>
           )}
 
-          {hata && <UyariKutusu ton="tehlike" className="mt-2"><span className="text-xs">{hata}</span></UyariKutusu>}
+          {hata && <UyariKutusu ton="tehlike" className="mt-2" kucuk>{hata}</UyariKutusu>}
 
           {calisiyor && (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
@@ -182,16 +182,16 @@ export default function PanelGuncelleme() {
           )}
 
           {!calisiyor && sonuc === 'tamam' && (
-            <UyariKutusu ton="basari" className="mt-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
+            <UyariKutusu ton="basari" className="mt-2" kucuk>
+              <div className="flex flex-wrap items-center gap-2">
                 <span><span className="font-semibold">{cevir("Güncelleme tamamlandı")}</span> {cevir("— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.")}</span>
                 <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={() => window.location.reload()} className="ml-auto">{cevir("Sayfayı yenile")}</Button>
               </div>
             </UyariKutusu>
           )}
           {!calisiyor && sonuc === 'hata' && (
-            <UyariKutusu ton="tehlike" className="mt-2">
-              <span className="text-xs"><span className="font-semibold">{cevir("Güncelleme başarısız")}</span> {cevir("— aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).")}</span>
+            <UyariKutusu ton="tehlike" className="mt-2" kucuk>
+              <span className="font-semibold">{cevir("Güncelleme başarısız")}</span> {cevir("— aşağıdaki günlüğü inceleyin (yeni sürüm sağlıksızsa otomatik geri alınmıştır).")}
             </UyariKutusu>
           )}
 

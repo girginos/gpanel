@@ -374,10 +374,8 @@ export default function DomainDNSPage() {
         </p>
       )}
 
-      <UyariKutusu ton="bilgi" className="mb-4">
-        <p className="text-xs">
-          <strong>{cevir("Bilgi:")}</strong> {cevir("Bu sunucu")} <strong>authoritative DNS</strong>{cevir("'tir (BIND) — kayıtlar kaydedildiği anda yayınlanır. Domainin çalışması için alan adı operatöründe NS kayıtlarını bu sunucunun")} <span className="font-mono">ns1.{domain?.alan_adi || 'alaniniz'}</span> / <span className="font-mono">ns2.{domain?.alan_adi || 'alaniniz'}</span> {cevir("adreslerine yönlendirin.")}
-        </p>
+      <UyariKutusu ton="bilgi" className="mb-4" kucuk>
+        <strong>{cevir("Bilgi:")}</strong> {cevir("Bu sunucu")} <strong>authoritative DNS</strong>{cevir("'tir (BIND) — kayıtlar kaydedildiği anda yayınlanır. Domainin çalışması için alan adı operatöründe NS kayıtlarını bu sunucunun")} <span className="font-mono">ns1.{domain?.alan_adi || 'alaniniz'}</span> / <span className="font-mono">ns2.{domain?.alan_adi || 'alaniniz'}</span> {cevir("adreslerine yönlendirin.")}
       </UyariKutusu>
 
       {soa && (
