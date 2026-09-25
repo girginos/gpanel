@@ -123,13 +123,16 @@ kur() { # $1 = paket adi
 }
 
 # base PHP
+# 🔴 `php -m | grep -q` DEĞİL (yukarıdaki semanage notuyla aynı sınıf): CLI php modül
+# listesini satır satır yazar; grep -q erken çıkınca php SIGPIPE ile ölür, pipefail
+# koşulu yanlış yapar → imagick VARKEN "kurulamadı". grep -q'suz, >/dev/null.
 if command -v php >/dev/null 2>&1; then
-  if php -m 2>/dev/null | grep -qi '^imagick$'; then
+  if php -m 2>/dev/null | grep -i '^imagick$' >/dev/null; then
     ok "base PHP: imagick var"
   else
     kur php-pecl-imagick
     if [ $DRY -eq 0 ]; then
-      php -m 2>/dev/null | grep -qi '^imagick$' && ok "base PHP: imagick kuruldu" \
+      php -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "base PHP: imagick kuruldu" \
         || { uyar "base PHP: imagick kurulamadı"; HATA=1; }
     fi
   fi
@@ -142,13 +145,13 @@ for dizin in /etc/opt/remi/php*; do
   bin="/usr/bin/$v"
   [ -x "$bin" ] || bin="/opt/remi/$v/root/usr/bin/php"
   [ -x "$bin" ] || continue
-  if "$bin" -m 2>/dev/null | grep -qi '^imagick$'; then
+  if "$bin" -m 2>/dev/null | grep -i '^imagick$' >/dev/null; then
     ok "$v: imagick var"
     continue
   fi
   kur "${v}-php-pecl-imagick-im7"
   if [ $DRY -eq 0 ]; then
-    "$bin" -m 2>/dev/null | grep -qi '^imagick$' && ok "$v: imagick kuruldu" \
+    "$bin" -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "$v: imagick kuruldu" \
       || { uyar "$v: imagick kurulamadı (paket yok olabilir)"; HATA=1; }
   fi
 done

@@ -14,7 +14,8 @@
 # doğrulanır; çözülmüyorsa değişiklik UYGULANMAZ.
 set -uo pipefail
 
-PANEL_CONF=/etc/nginx/conf.d/_panel.conf
+# Yollar: GOSP_* yalnız kum havuzu testleri içindir (varsayılanlar gerçek sistem yolları).
+PANEL_CONF=${GOSP_PANEL_CONF:-/etc/nginx/conf.d/_panel.conf}
 
 # 🔴 PANEL PORTU DINAMIK: betik eskiden 8443 varsayiyordu. Panel portu
 # degistirilmisse (ornek: 8443 doluydu -> 7443) dogrulama "https://127.0.0.1:8443"
@@ -30,9 +31,22 @@ PANEL_PORT="${PANEL_PORTLARI%% *}"
 [ -n "$PANEL_PORT" ] || PANEL_PORT="$(ss -ltnH 2>/dev/null | grep -oE ':(7443|8443)' | head -1 | tr -d ':')"
 [ -n "$PANEL_PORT" ] || PANEL_PORT=8443
 [ -n "$PANEL_PORTLARI" ] || PANEL_PORTLARI="$PANEL_PORT"
-CATCH_CONF=/etc/nginx/conf.d/_panel_catchall.conf
+CATCH_CONF=${GOSP_CATCHALL_CONF:-/etc/nginx/conf.d/_panel_catchall.conf}
 # Rol kapıları (ADR-GP-001) doğruluk kaynağı: dosya varsa panel kapı modundadır.
-KAPI_JSON=/etc/girginospanel/kapi.json
+KAPI_JSON=${GOSP_KAPI_AYAR:-/etc/girginospanel/kapi.json}
+# Panelin zorlama bayrağının dosya yansıması ("acik" | "kapali"; tmpfs). Açılış Heal'i
+# yazar, ölçümler günceller. Bkz. internal/provisioner/panelkapi.go kapiZorlamaDosyasi.
+KAPI_ZORLAMA=${GOSP_KAPI_ZORLAMA:-/run/girginospanel/kapi-zorlama}
+# Backend /healthz — girginospanel-update ile AYNI okuma: PANEL_LISTEN env'den, varsayma.
+PANEL_HEALTH_ADRES=$(grep -oE '^PANEL_LISTEN=.*' "${GOSP_PANEL_ENV:-/etc/girginospanel/env}" 2>/dev/null | cut -d= -f2- | tr -d ' ')
+PANEL_HEALTH_ADRES=${PANEL_HEALTH_ADRES:-127.0.0.1:8080}
+case "$PANEL_HEALTH_ADRES" in
+  :*)        PANEL_HEALTH_ADRES="127.0.0.1$PANEL_HEALTH_ADRES" ;;
+  0.0.0.0:*) PANEL_HEALTH_ADRES="127.0.0.1:${PANEL_HEALTH_ADRES##*:}" ;;
+esac
+PANEL_HEALTH="http://$PANEL_HEALTH_ADRES/healthz"
+SAGLIK_SN=${GOSP_SAGLIK_SN:-120}
+case "$SAGLIK_SN" in ''|*[!0-9]*) SAGLIK_SN=120 ;; esac
 CERT=/etc/ssl/girginospanel/panel.crt
 KEY=/etc/ssl/girginospanel/panel.key
 
@@ -221,19 +235,47 @@ kapi_yeniden_uygula() {
     uyar "panel yeniden başlatılamadı — kapıyı elle uygula: systemctl restart girginospanel"
     return 1
   fi
-  # 🔴 ÖLÇ, İDDİA ETME: Heal'in dosyayı gerçekten uyumladığını gör.
-  local i eksik=""
-  for i in $(seq 1 15); do
-    eksik=$(kapi_eksikleri "$PANEL_CONF")
-    if [ -z "$eksik" ]; then
-      ok "kapı düzeni yeniden uygulandı (panel açılış uzlaştırması)"
-      return 0
+  # 🔴 ÖNCE Heal'in BİTMESİNİ bekle (SON-OPS-3). Açılış Heal'i provisioner.Init içinde,
+  # ListenAndServe'den ÖNCE koşar ve dosyayı önce YAZAR, sonra nginx -t / reload / dinleme
+  # ölçümüne geçer; tutmazsa GERİ ALIR ve zorlamayı kapatır. Dosyayı Heal sürerken yoklamak
+  # yazma ile geri alma arasındaki anı görüp yanlış "✓ uygulandı" diyordu; Heal (SELinux
+  # etiket denetimi dahil) 15 sn'yi aşınca da yanlış "eksik". /healthz yanıt veriyorsa Heal
+  # bitmiştir (restart eski süreci durdurup döner: yanıt yeni süreçten gelir).
+  local son eksik bayrak rc=0
+  son=$((SECONDS + SAGLIK_SN))
+  until curl -fsS --max-time 5 -o /dev/null "$PANEL_HEALTH" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$son" ]; then
+      uyar "panel yeniden başlatıldı ama /healthz ${SAGLIK_SN} sn içinde yanıt vermedi ($PANEL_HEALTH) — açılış uzlaştırması bitmedi, kapı düzeni ÖLÇÜLEMEDİ"
+      uyar "bak: journalctl -u girginospanel -n 40   ·   sonra: girginospanel-dogrula (Role gates)"
+      return 1
     fi
-    sleep 1
+    sleep 2
   done
-  uyar "panel yeniden başlatıldı ama kapı düzeni _panel.conf'ta hâlâ eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
-  uyar "panel bu durumda kapı kurallarını KAPATIR (tek-port davranışı) — bak: journalctl -u girginospanel -n 40"
-  return 1
+  # 🔴 ÖLÇ, İDDİA ETME: Heal bitti — dosyayı BİR KEZ denetle.
+  eksik=$(kapi_eksikleri "$PANEL_CONF")
+  if [ -n "$eksik" ]; then
+    uyar "panel açıldı ama kapı düzeni _panel.conf'ta eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
+    uyar "panel bu durumda kapı kurallarını KAPATIR (tek-port davranışı) — bak: journalctl -u girginospanel -n 40"
+    rc=1
+  else
+    ok "kapı düzeni yeniden uygulandı (panel açılış uzlaştırması tamamlandı)"
+  fi
+  # Zorlama bayrağı: düzen dosyada tam olsa da zincir kurulamadıysa Heal zorlamayı KAPATIR.
+  bayrak=$(head -c 32 "$KAPI_ZORLAMA" 2>/dev/null | tr -d '[:space:]')
+  case "$bayrak" in
+    acik)
+      ok "kapı zorlaması: AÇIK (panel bayrağı; uçtan uca ölçüm: girginospanel-dogrula → Role gates)" ;;
+    kapali)
+      uyar "kapı zorlaması: KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (neden: journalctl -u girginospanel | grep kapi)"
+      rc=1 ;;
+    "")
+      uyar "kapı zorlaması: ÖLÇÜLEMEDİ ($KAPI_ZORLAMA yok/okunamadı) — rol ayrımı doğrulanmadı"
+      rc=1 ;;
+    *)
+      uyar "kapı zorlaması: bayrak tanınmadı ('${bayrak//[!a-zA-Z0-9_-]/?}') — rol ayrımı doğrulanmadı"
+      rc=1 ;;
+  esac
+  return "$rc"
 }
 
 sifirla() {

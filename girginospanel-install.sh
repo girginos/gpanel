@@ -90,7 +90,8 @@ dnf install -y epel-release >/dev/null 2>&1 && ok "EPEL"
 # 🔴 EPEL REQUIRED: unrar, clamav-freshclam, sshpass come from EPEL. If it can't be added
 # the SINGLE `dnf install` below returns non-zero entirely, no package installs and
 # the ROOT CAUSE of the "base package install" error stays invisible.
-rpm -q epel-release >/dev/null 2>&1 || dnf repolist enabled 2>/dev/null | grep -qi epel \
+# grep -q NOT: under pipefail dnf dies of SIGPIPE when grep exits early -> false "no EPEL" -> die.
+rpm -q epel-release >/dev/null 2>&1 || dnf repolist enabled 2>/dev/null | grep -i epel >/dev/null \
   || die "EPEL repo could not be added — unrar/clamav-freshclam/sshpass cannot install"
 rpm -q remi-release >/dev/null 2>&1 || dnf install -y https://rpms.remirepo.net/enterprise/remi-release-10.rpm >/dev/null 2>&1
 rpm -q remi-release >/dev/null 2>&1 && ok "Remi" || die "Remi could not be added"
@@ -801,7 +802,8 @@ if [ -f /etc/httpd/conf/httpd.conf ]; then
   elif ! grep -qE "^Listen 127.0.0.1:10080" /etc/httpd/conf/httpd.conf; then
     echo "Listen 127.0.0.1:10080" >> /etc/httpd/conf/httpd.conf
   fi
-  semanage port -l 2>/dev/null | grep -qE "http_port_t.*\b10080\b" || \
+  # grep -q NOT: semanage (Python) dies of BrokenPipe under pipefail -> label re-added every run.
+  semanage port -l 2>/dev/null | grep -E "http_port_t.*\b10080\b" >/dev/null || \
     semanage port -a -t http_port_t -p tcp 10080 2>/dev/null || \
     semanage port -m -t http_port_t -p tcp 10080 2>/dev/null
   if apachectl configtest >/dev/null 2>&1; then
@@ -944,7 +946,35 @@ step "12) Starting panel"
 # config right away and the role gates wait for the maintenance loop (15 min).
 systemctl enable --now nginx >/dev/null 2>&1
 systemctl enable girginospanel >/dev/null 2>&1
-systemctl restart girginospanel >/dev/null 2>&1; sleep 3
+systemctl restart girginospanel >/dev/null 2>&1
+# 🔴 WAIT FOR THE BACKEND, not a fixed 3 s. The startup Heal (role gates: nginx -t,
+# `systemctl reload nginx`, listen measurement, rollback on failure) runs inside
+# provisioner.Init BEFORE ListenAndServe; migrations run before it. Restarting nginx in
+# the middle of that raced the Heal's reload/measurement (a lost race = gate layout rolled
+# back, enforcement OFF until the 15 min maintenance loop). /healthz answering = Heal
+# done. Address derived from PANEL_LISTEN exactly like girginospanel-update/-panelhost.
+# At most 120 s; if it never answers: warn and CONTINUE (the install must not stop here —
+# the is-active check below and girginospanel-dogrula judge the panel).
+_ph=$(grep -oE '^PANEL_LISTEN=.*' "${GOSP_PANEL_ENV:-/etc/girginospanel/env}" 2>/dev/null | cut -d= -f2- | tr -d ' ')
+_ph=${_ph:-127.0.0.1:8080}
+case "$_ph" in
+  :*)        _ph="127.0.0.1$_ph" ;;
+  0.0.0.0:*) _ph="127.0.0.1:${_ph##*:}" ;;
+esac
+_ph="http://$_ph/healthz"
+_hz_sn=${GOSP_SAGLIK_SN:-120}
+case "$_hz_sn" in ''|*[!0-9]*) _hz_sn=120 ;; esac
+_hz_bas=$SECONDS; _hz_ok=0
+while :; do
+  if curl -fsS --max-time 5 -o /dev/null "$_ph" 2>/dev/null; then _hz_ok=1; break; fi
+  [ $((SECONDS - _hz_bas)) -ge "$_hz_sn" ] && break
+  sleep 2
+done
+if [ "$_hz_ok" = 1 ]; then
+  ok "panel backend /healthz OK after $((SECONDS - _hz_bas)) s (startup Heal finished)"
+else
+  warn "panel backend /healthz did not answer within ${_hz_sn} s ($_ph) — continuing; role gates may wait for the maintenance loop (journalctl -u girginospanel -n 40)"
+fi
 systemctl restart nginx >/dev/null 2>&1
 if ! systemctl is-active --quiet girginospanel; then
   journalctl -u girginospanel --no-pager -n 20; die "panel did not start"

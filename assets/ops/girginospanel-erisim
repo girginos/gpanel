@@ -133,9 +133,15 @@ nft_politika() { # -> accept | drop
     | grep -oE 'policy [a-z]+' | awk '{print $2}' | head -1
 }
 
+# 🔴 `komut | grep -q` KULLANMA (set -o pipefail): grep -q ilk eşleşmede çıkar, üreten
+# komut (nft/iptables/ss) çıktısının kalanını yazarken SIGPIPE ile ölür ve pipefail boru
+# hattını BAŞARISIZ sayar → eşleşme VAR iken "yok" (ör. drop kuralı görülmez → port "AÇIK",
+# SONUÇ yanlış mod; ss'te doğru değişiklik "soket bağlanmadı" diye GERİ ALINIR). Kum
+# havuzunda çok parçalı yazan nft ile ölçüldü. grep'i -q'suz, >/dev/null ile kullan (tüm
+# girdiyi okur); `head` gibi erken çıkanları da boru ortasında kullanma.
 drop_kurali_var() { # port
   local t; t=$(nft_tablo)
-  nft list chain inet "$t" input 2>/dev/null | grep -qE "dport $1 (drop|reject)"
+  nft list chain inet "$t" input 2>/dev/null | grep -E "dport $1 (drop|reject)" >/dev/null
 }
 
 port_acik_mi() { # port
@@ -148,13 +154,13 @@ port_acik_mi() { # port
         drop_kurali_var "$1" && return 1 || return 0
       else
         # Politika drop: açık ACCEPT kuralı gerekir
-        nft list chain inet "$(nft_tablo)" input 2>/dev/null | grep -q "dport $1 accept"
+        nft list chain inet "$(nft_tablo)" input 2>/dev/null | grep "dport $1 accept" >/dev/null
       fi ;;
-    firewalld) firewall-cmd --list-ports 2>/dev/null | grep -qw "$1/tcp" ;;
+    firewalld) firewall-cmd --list-ports 2>/dev/null | grep -w "$1/tcp" >/dev/null ;;
     iptables)
-      iptables -L INPUT -n 2>/dev/null | grep -qE "DROP.*dpt:$1" && return 1
-      if iptables -L INPUT -n 2>/dev/null | head -2 | grep -q "policy ACCEPT"; then return 0; fi
-      iptables -L INPUT -n 2>/dev/null | grep -qE "ACCEPT.*dpt:$1" ;;
+      iptables -L INPUT -n 2>/dev/null | grep -E "DROP.*dpt:$1" >/dev/null && return 1
+      if iptables -L INPUT -n 2>/dev/null | sed -n '1,2p' | grep "policy ACCEPT" >/dev/null; then return 0; fi
+      iptables -L INPUT -n 2>/dev/null | grep -E "ACCEPT.*dpt:$1" >/dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -173,7 +179,7 @@ port_ac() { # port  -> DROP kuralını kaldır (ve gerekirse accept ekle)
       done
       # Politika drop ise ayrıca accept gerekir
       if [ "$pol" != "accept" ]; then
-        nft list chain inet "$t" input 2>/dev/null | grep -q "dport $1 accept" || \
+        nft list chain inet "$t" input 2>/dev/null | grep "dport $1 accept" >/dev/null || \
           printf 'add rule inet %s input tcp dport %s accept comment "gpanel-erisim acik %s"\n' "$t" "$1" "$1" | nft -f -
       fi ;;
     firewalld) firewall-cmd --permanent --add-port="$1/tcp" >/dev/null && firewall-cmd --reload >/dev/null ;;
@@ -272,7 +278,7 @@ nginx_listen_ayarla() { # port mod
   # Soket gerçekten istenen adrese bağlandı mı? Bağlanmadıysa geri al.
   local beklenen
   if [ "$mod" = "loopback" ]; then beklenen="127.0.0.1:$port"; else beklenen="0.0.0.0:$port"; fi
-  if ! ss -tln 2>/dev/null | grep -q "$beklenen"; then
+  if ! ss -tln 2>/dev/null | grep -F "$beklenen" >/dev/null; then
     err "soket beklenen adrese ($beklenen) bağlanmadı — geri alınıyor"
     nginx_geri_al "$ts"; systemctl restart nginx >/dev/null 2>&1
     return 1
@@ -303,12 +309,23 @@ dis_ip() {
 }
 
 cmd_durum() {
-  local port sshp be
+  local port sshp be kapi=0 zorlama_acik=0
   port=$(panel_portu); sshp=$(ssh_portu); be=$(fw_backend)
   say "${c_b}GirginOSPanel erişim durumu${c_0}"
   if [ -n "$(kapi_portu admin)" ]; then
+    kapi=1
     say "  rol kapıları    : admin $port · bayi $(kapi_portu bayi) · müşteri $(kapi_portu musteri) (bayi/müşteri bu moddan etkilenmez)"
     [ -n "$(kapi_eski_portlari)" ] && warn "eski kapı açık: $(kapi_eski_portlari)— yönetici girişi oradan da mümkün"
+    # 🔴 SON-OPS-5: kapı modunda "masaustu" sonucu zorlamaya BAĞLI — zorlama kapalıyken
+    # bayi/müşteri/eski kapıların her biri yönetici girişini de kabul eder (RK-OPS-06).
+    if kapi_zorlama_olc; then
+      zorlama_acik=1
+      ok "kapı zorlaması  : AÇIK (ölçüldü: $KAPI_ZORLAMA_OLCUM)"
+    elif [ "$KAPI_ZORLAMA_DURUM" = "kapali" ]; then
+      warn "kapı zorlaması  : KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir ($KAPI_ZORLAMA_OLCUM)"
+    else
+      warn "kapı zorlaması  : ÖLÇÜLEMEDİ — rol ayrımı doğrulanmadı ($KAPI_ZORLAMA_OLCUM)"
+    fi
   fi
   say "  panel portu     : $port"
   say "  SSH portu       : $sshp"
@@ -329,7 +346,13 @@ cmd_durum() {
   fi
   # 3) gerçek sonuç
   if nginx_loopback_mi "$port" || ! port_acik_mi "$port"; then
-    ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+    if [ "$kapi" = 0 ]; then
+      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+    elif [ "$zorlama_acik" = 1 ]; then
+      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (yönetici yüzeyine yalnız SSH tüneliyle girilir; bayi/müşteri kapıları açık — zorlama ölçüldü)"
+    else
+      warn "SONUÇ → mod: ${c_b}masaustu${c_0} (yalnız admin kapısı loopback'te; zorlama KAPALI/ölçülemedi — yönetici girişi bayi/müşteri/eski kapılarda açık olabilir)"
+    fi
   else
     ok "SONUÇ → mod: ${c_b}web${c_0} (tarayıcıdan girilebilir)"
   fi
@@ -379,7 +402,7 @@ cmd_masaustu() {
   # 3) DOĞRULA: dışarıdan gerçekten kapalı mı, içeriden hâlâ açık mı?
   # Soket adresi TEK GÜVENİLİR ölçü: sunucudan kendi dış IP'sine yapılan
   # istek `lo` üzerinden gider, firewall kuralı atlanır (yanlış-pozitif).
-  if ss -tln 2>/dev/null | grep -qE "(0\\.0\\.0\\.0|\\[::\\]):$port "; then
+  if ss -tln 2>/dev/null | grep -E "(0\\.0\\.0\\.0|\\[::\\]):$port " >/dev/null; then
     err "UYARI: nginx hâlâ TÜM arayüzlerde dinliyor — elle kontrol et!"
     ss -tlnp 2>/dev/null | grep ":$port " >&2
   else
