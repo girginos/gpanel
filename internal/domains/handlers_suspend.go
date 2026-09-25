@@ -10,6 +10,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -128,11 +129,11 @@ func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida boo
 	}
 
 	// vhost'u yeniden render et (askida durumu DB'den okunur)
-	if err := provisioner.RerenderVhost(h.DB, id); err != nil {
+	if err := vhostYenidenCiz(h.DB, id); err != nil {
 		// DB güncellendi ama vhost render başarısız → geri al ki tutarlı kalsın
 		_, _ = h.DB.ExecContext(r.Context(),
 			`UPDATE domains SET askida=?, durum=? WHERE id=?`, 1-ak, map[bool]string{true: "aktif", false: "pasif"}[askida], id)
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+nginxset.SunucuHatasi(r, "domains.aski", id, err))
 		return
 	}
 

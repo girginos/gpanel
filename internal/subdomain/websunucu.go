@@ -12,9 +12,19 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
+)
+
+// Dış etkili adımlar (sunucu geneli `nginx -t` / `httpd -t`, vhost yazımı +
+// reload). Testler sahteyle değiştirir: hata yolları ana makineye dokunmadan
+// sınanır. Hataları istemciye nginxset.DirektifHatasi / SunucuHatasi ile döner
+// (komşu kiracıların sertifika/vhost yolları yalnız yöneticiye).
+var (
+	webDirektifDogrula = provisioner.ValidateNginxDirectives
+	webVhostYenidenKur = rebuildVhostDB
 )
 
 // ── Alt alan web-sunucu ayarları (domain nginx_settings + web_backend paritesi) ──
@@ -342,8 +352,9 @@ func (h *Handlers) WebPut(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "izin verilmeyen nginx direktifi: "+kotu)
 		return
 	}
-	if err := provisioner.ValidateNginxDirectives(req.Nginx.EkDirektifler); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif hatası: "+err.Error())
+	if err := webDirektifDogrula(req.Nginx.EkDirektifler); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest,
+			"nginx direktif hatası: "+nginxset.DirektifHatasi(r, "subdomain.web-sunucu", id, err, req.Nginx.EkDirektifler))
 		return
 	}
 	backend := strings.TrimSpace(req.Backend)
@@ -362,8 +373,8 @@ func (h *Handlers) WebPut(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "backend kaydedilemedi")
 		return
 	}
-	if err := h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, php); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+	if err := webVhostYenidenKur(r.Context(), h.DB, sid, sk, altAd, tamAd, php); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.web-sunucu", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "backend": backend})

@@ -77,6 +77,36 @@ var nginxYasakDirektif = map[string]bool{
 	"ssl_certificate": true, "ssl_certificate_key": true, "ssl_trusted_certificate": true,
 	"error_log": true, "access_log": true, "fastcgi_param": true,
 	"auth_basic_user_file": true, "secure_link_secret": true,
+	// Dosya yolu alan öteki direktifler (bayi kapsamı) — sonek kuralına
+	// (nginxYolSoneki) uymayanlar. Ayrıntı: nginxYolSoneki.
+	"ssl_session_ticket_key": true,
+	"ssl_conf_command":       true, // OpenSSL komutları da dosya yolu alabilir
+	"xslt_stylesheet":        true, "xml_entities": true,
+}
+
+// nginxYolSoneki — adı bu soneklerle biten direktifler dosya/dizin yolu alır:
+// ssl_dhparam, ssl_crl, ssl_client_certificate, ssl_password_file,
+// ssl_stapling_file, proxy_ssl_*/grpc_ssl_*/uwsgi_ssl_* sertifika-anahtar-CRL-
+// parola dosyaları, *_temp_path, *_store.
+//
+// 🔴 NEDEN: `nginx -t` bu yolları yapılandırma yüklenirken açar/oluşturur ve
+// hata metni "dosya yok" ile "var ama okunamadı/geçersiz"i ayırır. Kiracı
+// metnine izin verilseydi direktif doğrulama ucu, bayinin başka bir kiracının
+// dosya yolunun varlığını sınayabildiği bir kâhine dönerdi. Liste yerine sonek:
+// modül önekli türevler (ör. grpc_ssl_crl) ayrıca eklenmeden de yakalanır.
+var nginxYolSoneki = []string{
+	"_certificate", "_certificate_key", "_crl", "_dhparam",
+	"_temp_path", "_store", "_file", // _file: *_password_file, *_stapling_file, *_user_file
+}
+
+// dosyaYoluDirektifi — ad, dosya yolu alan bir direktif mi?
+func dosyaYoluDirektifi(ad string) bool {
+	for _, s := range nginxYolSoneki {
+		if strings.HasSuffix(ad, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // TehlikeliNginxDirektifi: tenant ek_direktifler icinde yasak (LFD/SSRF/RCE) bir
@@ -133,7 +163,7 @@ func TehlikeliNginxDirektifi(direktifler string) string {
 		// Direktif adindaki tirnaklari da soy (nginx bunlari zaten reddeder ama
 		// denylist de gormeli): "alias" → alias.
 		name := strings.ToLower(strings.Trim(f[0], "\"'"))
-		if nginxYasakDirektif[name] ||
+		if nginxYasakDirektif[name] || dosyaYoluDirektifi(name) ||
 			strings.Contains(name, "_by_lua") ||
 			strings.HasPrefix(name, "lua_") ||
 			strings.HasPrefix(name, "js_") ||

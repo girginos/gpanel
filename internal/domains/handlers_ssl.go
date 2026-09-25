@@ -14,7 +14,7 @@ import (
 
 	"girginospanel/internal/dnsutil"
 	"girginospanel/internal/httpx"
-	"girginospanel/internal/provisioner"
+	"girginospanel/internal/nginxset"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -238,8 +238,8 @@ func (h *Handlers) SSLDisable(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo abonelik dokunulamaz")
 		return
 	}
-	if err := provisioner.DisableSSL(alanAdi, sk, phpSurum, backend); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "SSL kapat: "+err.Error())
+	if err := sslKapat(alanAdi, sk, phpSurum, backend); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "SSL kapat: "+nginxset.SunucuHatasi(r, "domains.ssl-kapat", id, err))
 		return
 	}
 	if _, err := h.DB.ExecContext(r.Context(),

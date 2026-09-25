@@ -20,6 +20,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -71,6 +72,34 @@ func kisaHata(err error) string {
 		m = m[:180] + "…"
 	}
 	return m
+}
+
+// erisimUygula — vhost render + SUNUCU GENELİ `nginx -t` + reload (testler
+// sahteyle değiştirir; ana makinenin nginx'ine dokunulmaz).
+var erisimUygula = provisioner.ErisimKisitUygula
+
+// istemciHatasi — render hatasının istemciye dönen metni.
+//
+// 🔴 kisaHata yalnız İLK "/etc/nginx" sonrasını kesiyordu; `nginx -t` çıktısında
+// ondan ÖNCE gelen satırlar (sunucu geneli ssl_stapling uyarıları: komşu
+// kiracıların alan adları ve /etc/pki/girginospanel/<başka-alan>/… yolları)
+// bayiye ve müşteriye aynen dönüyordu. Yönetici önceki metni birebir görür;
+// öteki roller genel mesaj alır, ayrıntı günlüğe yazılır (nginxset.SunucuHatasi).
+func istemciHatasi(r *http.Request, id int64, err error) string {
+	if middleware.RolFrom(r) == "admin" {
+		return kisaHata(err)
+	}
+	return nginxset.SunucuHatasi(r, "erisim", id, err)
+}
+
+// denetimHatasi — denetim kaydının ayrıntısı. Denetim kaydı işlemi yapana
+// (bayiye) /denetim'de aynen gösterilir; ham çıktı yalnız yönetici eylemlerinde
+// saklanır (ayrıntı zaten istemciHatasi ile günlüğe yazıldı).
+func denetimHatasi(r *http.Request, err error) string {
+	if middleware.RolFrom(r) == "admin" {
+		return err.Error()
+	}
+	return nginxset.SunucuHatasiGenel
 }
 
 type Kural struct {
@@ -182,7 +211,7 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := provisioner.ErisimKisitUygula(h.DB, id); err != nil {
+	if err := erisimUygula(h.DB, id); err != nil {
 		// 🔴 GERI AL. Onceki surum DB'yi birakip 500 donuyordu; sonuc
 		// "basarisizlik" degil ERTELEME oluyordu: kullanici hata gorurken
 		// kayit DB'de kaliyor ve ILGISIZ bir tetikleyici (WAF degisimi, PHP
@@ -192,12 +221,12 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 			`INSERT INTO domain_erisim_kisit (domain_id, aktif, varsayilan) VALUES (?,?,?)
 			 ON DUPLICATE KEY UPDATE aktif=VALUES(aktif), varsayilan=VALUES(varsayilan)`,
 			id, eskiAktif, eskiVarsayilan); e == nil {
-			_ = provisioner.ErisimKisitUygula(h.DB, id) // eski hâli geri uygula
+			_ = erisimUygula(h.DB, id) // eski hâli geri uygula
 		}
 		h.denetle(r, id, "erisim.ayar", strconv.FormatInt(id, 10),
-			"render basarisiz, GERI ALINDI: "+err.Error(), false)
+			"render basarisiz, GERI ALINDI: "+denetimHatasi(r, err), false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"ayar uygulanamadı, önceki durum geri yüklendi: "+kisaHata(err))
+			"ayar uygulanamadı, önceki durum geri yüklendi: "+istemciHatasi(r, id, err))
 		return
 	}
 	h.denetle(r, id, "erisim.ayar", strconv.FormatInt(id, 10),
@@ -286,18 +315,18 @@ func (h *Handlers) KuralEkle(w http.ResponseWriter, r *http.Request) {
 	}
 	kid, _ := res.LastInsertId()
 
-	if err := provisioner.ErisimKisitUygula(h.DB, id); err != nil {
+	if err := erisimUygula(h.DB, id); err != nil {
 		// Telafi: eklenen satiri geri al ve onceki hâli yeniden uygula.
 		// Aksi halde nginx'in reddettigi bir deger DB'de kalir ve o domainin
 		// SONRAKI TUM render'larini (SSL yenilemesi dahil) kalici olarak
 		// dusurur -- denetimde uctan uca olculdu.
 		_, _ = h.DB.ExecContext(r.Context(),
 			`DELETE FROM domain_erisim_kurallari WHERE id=? AND domain_id=?`, kid, id)
-		_ = provisioner.ErisimKisitUygula(h.DB, id)
+		_ = erisimUygula(h.DB, id)
 		h.denetle(r, id, "erisim.kural.ekle", strconv.FormatInt(id, 10),
 			"render basarisiz, GERI ALINDI: "+tip+" "+cidr, false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"kural uygulanamadı, eklenmedi: "+kisaHata(err))
+			"kural uygulanamadı, eklenmedi: "+istemciHatasi(r, id, err))
 		return
 	}
 	h.denetle(r, id, "erisim.kural.ekle", strconv.FormatInt(id, 10),
@@ -331,19 +360,19 @@ func (h *Handlers) KuralSil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "kural bulunamadı")
 		return
 	}
-	if err := provisioner.ErisimKisitUygula(h.DB, id); err != nil {
+	if err := erisimUygula(h.DB, id); err != nil {
 		// Telafi: silinen kurali geri koy (silme, korumayi GENISLETEBILIR;
 		// basarisiz bir silme sessizce yururluge girmemeli).
 		if yCidr != "" {
 			_, _ = h.DB.ExecContext(r.Context(),
 				`INSERT INTO domain_erisim_kurallari (id, domain_id, tip, cidr, aciklama, sira)
 				 VALUES (?,?,?,?,?,?)`, kid, id, yTip, yCidr, yAciklama, ySira)
-			_ = provisioner.ErisimKisitUygula(h.DB, id)
+			_ = erisimUygula(h.DB, id)
 		}
 		h.denetle(r, id, "erisim.kural.sil", strconv.FormatInt(id, 10),
 			"render basarisiz, GERI ALINDI: kural_id="+strconv.FormatInt(kid, 10), false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"kural silinemedi, geri yüklendi: "+kisaHata(err))
+			"kural silinemedi, geri yüklendi: "+istemciHatasi(r, id, err))
 		return
 	}
 	h.denetle(r, id, "erisim.kural.sil", strconv.FormatInt(id, 10),
