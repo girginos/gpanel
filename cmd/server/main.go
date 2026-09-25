@@ -1226,6 +1226,8 @@ func semaDogrula(d *sql.DB) {
 		{"service_plans", "mail_kutu_kota_mb"},
 		{"cp_ayarlar", "anahtar"},
 		{"cp_eklentiler", "ad"},
+		// 0105: bildirim okundu kaydı görüntüleyene göre — yoksa zil/bildirim listesi 500 verir.
+		{"cp_bildirim_okundu", "okuyan_tur"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
