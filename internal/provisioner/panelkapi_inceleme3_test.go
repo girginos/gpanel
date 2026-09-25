@@ -4,7 +4,8 @@ package provisioner
 // ölçüm uzlaştırmanın kararını aşamaz (OLC-1), zorlama kapanınca bakım döngüsü dürtülür
 // (OLC-2), zorlama bayrağı + /run dosyası tek kilit altında ve atomik (OLC-3), SELinux
 // onarım komutu gerçeği ölçer ve bağlanamayan port önbellekten düşer (HS-1), "yeniden yükle"
-// işareti yalnız başarılı uygulamadan sonra tüketilir (HS-2).
+// işareti yalnız başarılı uygulamadan sonra tüketilir (HS-2); işaretin zorladığı reload
+// yapılamadı diye rol ayrımı kapanmaz, karar ölçümün (4. doğrulama, OLC-ISARET-1).
 
 import (
 	"context"
@@ -357,11 +358,19 @@ func yukleIsaretiBirak(t *testing.T) {
 // tetikler); taban `nginx -t`, reload ya da port bağlama düşerse işaret kalır, sorun geçince
 // sonraki Heal yine yükler — yoksa CLI'ın etiketlediği portlar ilgisiz bir reload'a dek
 // bağlanmazdı.
+//
+// OLC-ISARET-1: yalnız işaretin zorladığı reload YAPILAMADIYSA (taban `nginx -t`, reload
+// komutu) bu "açılamaz" değildir — nginx dokunulmamış yapılandırmasıyla çalışır, kararı uçtan
+// uca ölçüm verir. Reload yapılıp portların nginx'e bağlanmadığı ÖLÇÜLDÜYSE zincir gerçekten
+// kopuktur: açılamaz.
 func TestKapiYukleIsaretiBasaridanSonraTuketilir(t *testing.T) {
-	for ad, boz := range map[string]func(s *kapiSahte){
-		"taban nginx -t":  func(s *kapiSahte) { s.nginxT = func(int) error { return errors.New("başka vhost bozuk") } },
-		"reload hatası":   func(s *kapiSahte) { s.reloadHata = func(int) error { return errors.New("reload failed") } },
-		"port bağlanmadı": func(s *kapiSahte) { s.dinliyor = false },
+	for ad, k := range map[string]struct {
+		boz        func(s *kapiSahte)
+		acilabilir bool
+	}{
+		"taban nginx -t":  {func(s *kapiSahte) { s.nginxT = func(int) error { return errors.New("başka vhost bozuk") } }, true},
+		"reload hatası":   {func(s *kapiSahte) { s.reloadHata = func(int) error { return errors.New("reload failed") } }, true},
+		"port bağlanmadı": {func(s *kapiSahte) { s.dinliyor = false }, false},
 	} {
 		t.Run(ad, func(t *testing.T) {
 			s := kapiTestKur(t, kapiTestSablon, rolAyar())
@@ -369,9 +378,9 @@ func TestKapiYukleIsaretiBasaridanSonraTuketilir(t *testing.T) {
 				t.Fatal("ön koşul: dosyalar uygulanmalı")
 			}
 			yukleIsaretiBirak(t)
-			boz(s)
-			if kapiUzlastir(1000) {
-				t.Fatal("uygulama düşerken açılabilir olmamalı")
+			k.boz(s)
+			if got := kapiUzlastir(1000); got != k.acilabilir {
+				t.Fatalf("yükleme düşerken açılabilir=%v, beklenen=%v (yalnız zorlanan reload yapılamadıysa karar ölçümde; bağlanmadığı ölçülen port kopukluktur)", got, k.acilabilir)
 			}
 			if !kapiYukleBekliyor() {
 				t.Fatal("başarısız uygulamada işaret KALMALI")
@@ -383,6 +392,110 @@ func TestKapiYukleIsaretiBasaridanSonraTuketilir(t *testing.T) {
 			}
 			if kapiYukleBekliyor() {
 				t.Fatal("başarılı uygulamadan sonra işaret tüketilmeli")
+			}
+		})
+	}
+}
+
+// OLC-ISARET-1: kapı düzeni uygulanmış, zincir sağlam, zorlama ölçümle AÇIK. Sonra bir
+// "yeniden yükle" işareti bekler (ör. `kapi selinux` onarımı panel dışında silinen etiketi
+// yeniden ekledi) ve ilgisiz bir vhost `nginx -t`'yi global düşürür (ya da reload düşer).
+// Dosyalarda değişiklik yok: yapılamayan yalnız işaretin zorladığı reload. Bakım turları
+// rol ayrımını KAPATMAMALI — nginx dokunulmamış yapılandırmasıyla çalışıyor, karar uçtan uca
+// ölçümün (zincir gerçekten koparsa ölçüm kapatır). İşaret korunur; sorun geçince sonraki
+// Heal yeniden yükler ve tüketir.
+func TestKapiYukleIsaretiIlgisizTabanHatasindaOlcumKarar(t *testing.T) {
+	for ad, boz := range map[string]func(s *kapiSahte, v bool){
+		"taban nginx -t": func(s *kapiSahte, v bool) {
+			s.nginxT = nil
+			if v {
+				s.nginxT = func(int) error { return errors.New("başka vhost bozuk (silinmiş sertifika)") }
+			}
+		},
+		"reload hatası": func(s *kapiSahte, v bool) {
+			s.reloadHata = nil
+			if v {
+				s.reloadHata = func(int) error { return errors.New("reload failed") }
+			}
+		},
+	} {
+		t.Run(ad, func(t *testing.T) {
+			s := kapiTestKur(t, kapiTestSablon, rolAyar())
+			olcHata, _ := kapiTestOlcucu(t)
+			if !kapiUzlastir(1000) || kapiOlcVeAyarla(context.Background(), 1) != olcumTamam || !kapi.ZorlamaAktif() {
+				t.Fatal("ön koşul: uzlaştırma + ölçüm TAMAM, zorlama açık")
+			}
+			yukleIsaretiBirak(t)
+			boz(s, true)
+			conf := oku(t, kapiVhostYolu)
+			for tur := 1; tur <= 5; tur++ { // bakım döngüsü turu: uzlaştır → (açılabilirse) ölç
+				if !kapiUzlastir(1000) {
+					t.Fatalf("tur %d: yalnız işaretin zorladığı reload yapılamadı diye \"açılamaz\" denmemeli (zorlama=%v)", tur, kapi.ZorlamaAktif())
+				}
+				if r := kapiOlcVeAyarla(context.Background(), 1); r != olcumTamam || !kapi.ZorlamaAktif() {
+					t.Fatalf("tur %d: zincir sağlam — ölçüm zorlamayı AÇIK tutmalı: sonuç=%v zorlama=%v", tur, r, kapi.ZorlamaAktif())
+				}
+				if !kapiYukleBekliyor() {
+					t.Fatalf("tur %d: yapılamayan yeniden yükleme için işaret KORUNMALI", tur)
+				}
+			}
+			if oku(t, kapiVhostYolu) != conf {
+				t.Fatal("dosyalarda değişiklik yoktu — _panel.conf değişmemeli")
+			}
+			// Karar ölçümün: zincir gerçekten koparsa (ör. etiketli port bağlanmamış) ölçüm kapatır.
+			olcHata.Store(true)
+			if !kapiUzlastir(1000) || kapiOlcVeAyarla(context.Background(), 1) != olcumKopuk || kapi.ZorlamaAktif() {
+				t.Fatalf("kopuk zinciri ölçüm kapatmalı: zorlama=%v", kapi.ZorlamaAktif())
+			}
+			olcHata.Store(false)
+			boz(s, false)
+			onceki := s.rSayac
+			if !kapiUzlastir(1000) || s.rSayac != onceki+1 || kapiYukleBekliyor() {
+				t.Fatalf("sorun geçince işaret reload ettirip tüketilmeli: reload %d → %d, işaret=%v", onceki, s.rSayac, kapiYukleBekliyor())
+			}
+			if kapiOlcVeAyarla(context.Background(), 1) != olcumTamam || !kapi.ZorlamaAktif() {
+				t.Fatal("onarımdan sonra ölçüm zorlamayı yeniden açmalı")
+			}
+		})
+	}
+}
+
+// OLC-ISARET-1 (sınır): GERÇEK bir dosya değişikliği uygulanamıyorsa davranış DEĞİŞMEZ —
+// işaret beklese de: taban `nginx -t` düşükse dosyaya hiç dokunulmaz, reload düşerse her şey
+// geri alınıp eski yapılandırma yeniden yüklenir; ikisinde de "açılamaz" denir ve işaret kalır.
+func TestKapiYukleIsaretiDosyaDegisikligiDuserseKapatir(t *testing.T) {
+	for ad, k := range map[string]struct {
+		boz    func(s *kapiSahte)
+		reload int // beklenen `systemctl reload nginx` sayısı
+	}{
+		"taban nginx -t": {func(s *kapiSahte) { s.nginxT = func(int) error { return errors.New("başka vhost bozuk") } }, 0},
+		"reload hatası": {func(s *kapiSahte) {
+			s.reloadHata = func(n int) error {
+				if n == 1 {
+					return errors.New("reload failed")
+				}
+				return nil
+			}
+		}, 2},
+	} {
+		t.Run(ad, func(t *testing.T) {
+			s := kapiTestKur(t, kapiTestSablon, rolAyar())
+			yukleIsaretiBirak(t)
+			k.boz(s)
+			if kapiUzlastir(1000) {
+				t.Fatal("dosya değişikliği uygulanamadıysa açılabilir denmemeli")
+			}
+			if oku(t, kapiVhostYolu) != kapiTestSablon {
+				t.Fatal("_panel.conf özgün hâlinde kalmalı")
+			}
+			if _, err := os.Stat(kapiMapYolu); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("önceden olmayan map dosyası kalmamalı")
+			}
+			if s.rSayac != k.reload {
+				t.Fatalf("reload sayısı %d, beklenen %d", s.rSayac, k.reload)
+			}
+			if !kapiYukleBekliyor() {
+				t.Fatal("başarısız uygulamada işaret KALMALI")
 			}
 		})
 	}
@@ -420,8 +533,10 @@ func TestKapiYukleIsaretiHealSirasindaYenisiKorunur(t *testing.T) {
 }
 
 // HS-2 (Heal'in kendi etiketi): eski sürümün etiketsiz listen'ları dosyada; Heal portları
-// kendisi etiketler ama uygulayamaz (taban nginx -t). Portlar artık önbellekte olsa da
+// kendisi etiketler ama yükleyemez (taban nginx -t). Portlar artık önbellekte olsa da
 // sonraki Heal yine yeniden yüklemeli (dosya değişikliği yok — reload'u yalnız işaret tetikler).
+// Yüklenemeyen yeniden yükleme "açılamaz" değildir (OLC-ISARET-1): etiketsiz port nginx'e
+// bağlı değilse bunu uçtan uca ölçüm bulur.
 func TestKapiHealKendiEtiketiReloadBekler(t *testing.T) {
 	s := kapiTestKur(t, kapiTestSablon, rolAyar())
 	if !kapiUzlastir(1000) { // SELinux kapalıyken uygulandı (etiketsiz listen'lar)
@@ -431,8 +546,8 @@ func TestKapiHealKendiEtiketiReloadBekler(t *testing.T) {
 	kapiSELinuxListe = func() (string, error) { return "unreserved_port_t tcp 1024-32767\n", nil }
 	kapiSELinuxEtiket = func(int) error { return nil }
 	s.nginxT = func(int) error { return errors.New("başka vhost bozuk") }
-	if kapiUzlastir(1000) {
-		t.Fatal("taban bozukken açılabilir olmamalı")
+	if !kapiUzlastir(1000) || !kapiYukleBekliyor() {
+		t.Fatalf("taban bozuk, dosya değişikliği yok: karar ölçümde (açılabilir) ve işaret korunmalı (işaret=%v)", kapiYukleBekliyor())
 	}
 	s.nginxT = nil
 	kapiSELinuxListe = func() (string, error) {

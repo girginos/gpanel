@@ -189,6 +189,8 @@ func kapiYukleIsaretiBirak() {
 // Alınan işaret YALNIZ başarılı uygulamadan sonra silinir (kapiYukleIsaretiTuket) — taban
 // `nginx -t`, reload ya da port ölçümü düşerse (ya da panel bu arada yeniden başlarsa)
 // sonraki Heal yine yükler; yoksa etiketlenen portlar ilgisiz bir reload'a dek bağlanmazdı.
+// Kalıcı işaret rol ayrımını KAPATMAZ: dosya değişikliği yokken yalnız onun zorladığı reload
+// yapılamazsa (ilgisiz vhost `nginx -t`'yi düşürdü) karar uçtan uca ölçümündür (OLC-ISARET-1).
 func kapiYukleIsaretiAl() bool {
 	isaret := kapiSELinuxOnbellek + ".yukle"
 	if os.Rename(isaret, isaret+".isleniyor") == nil {
