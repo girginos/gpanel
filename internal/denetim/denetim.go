@@ -1,14 +1,17 @@
 // Package denetim: audit_log okuma ucu.
 //
-// GORUNURLUK KURALI (tek yerde, atlanamaz):
+// GORUNURLUK KURALI (tek yerde, atlanamaz — bkz. kapsamKur):
 //   - kok (admin) → TUM kayitlar; istege bagli kapsam suzgeci
-//   - bayi        → YALNIZ kendi kapsami (audit_log.reseller_id = kendi users.id)
-//     Bu kosul istemciden gelen parametreyle DEGISTIRILEMEZ.
+//   - bayi        → YALNIZ KENDI YAPTIKLARI (audit_log.actor_user_id = kendi users.id).
+//     Kapsamindaki bir hostingde kokun, musterinin ya da sistemin yaptigi islemler
+//     bayiye GOSTERILMEZ (kullanici karari 2026-09-25). Bu kosul istemciden gelen
+//     parametreyle DEGISTIRILEMEZ.
 package denetim
 
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,9 +19,53 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/auth"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 )
+
+// claimsAl: istegin kimligi (testler degistirir; uretimde middleware.ClaimsFrom).
+var claimsAl = middleware.ClaimsFrom
+
+// errKapsam: yonetici kapsam parametresi cozulemedi.
+var errKapsam = errors.New("geçersiz kapsam")
+
+// bayiMi: bayi jetonu mu (rol ya da sahiplik anahtari — ikisinden biri yeter; biri
+// eksik kalsa bile bayi yonetici gorunurlugune DUSMEZ).
+func bayiMi(c *auth.Claims) bool {
+	return c != nil && (c.Role == "reseller" || c.ResellerID > 0)
+}
+
+// kapsamKur: "kim neyi gorebilir" kosullari. Bayi → yalniz kendi yaptiklari; istemcinin
+// kapsam parametresi YOK SAYILIR. Yonetici → kap "" hepsi, "kok" panel sahibi kapsami,
+// sayi → o bayinin kapsami (kok dahil o kapsamdaki tum islemler).
+func kapsamKur(c *auth.Claims, kap string) ([]string, []any, error) {
+	kosul := []string{"1=1"}
+	args := []any{}
+	if bayiMi(c) {
+		if c.UserID <= 0 {
+			// Kimliksiz bayi jetonu: hicbir sey gostermemek, baskasininkini
+			// gostermekten iyidir.
+			return append(kosul, "1=0"), args, nil
+		}
+		return append(kosul, "a.actor_user_id=?"), append(args, c.UserID), nil
+	}
+	switch kap = strings.TrimSpace(kap); {
+	case kap == "":
+	case kap == "kok":
+		kosul = append(kosul, "a.reseller_id=0")
+	default:
+		n, err := strconv.ParseInt(kap, 10, 64)
+		if err != nil || n <= 0 {
+			// Cozulemeyen kapsam sessizce "hepsi" olmasin — kullanici yanlis
+			// veriye baktigini anlamaz.
+			return nil, nil, errKapsam
+		}
+		kosul = append(kosul, "a.reseller_id=?")
+		args = append(args, n)
+	}
+	return kosul, args, nil
+}
 
 type Handlers struct {
 	DB *sql.DB
@@ -53,29 +100,16 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	// Kosullar IKI kumede: kapsam (kim neyi gorebilir) + filtre (kullanici secimi).
 	// Eylem listesi YALNIZ kapsamla uretilir; aksi halde bir eylem secildiginde
 	// acilir liste tek secenege iner ve kullanici baska eyleme gecemezdi.
-	kapsamKosul := []string{"1=1"}
-	kapsamArgs := []any{}
-
-	// 🔴 Kapsam zorlamasi: bayi icin istemci parametresi YOK SAYILIR.
-	rid := middleware.ResellerIDFrom(r)
-	if rid > 0 {
-		kapsamKosul = append(kapsamKosul, "a.reseller_id=?")
-		kapsamArgs = append(kapsamArgs, rid)
-	} else if kap := strings.TrimSpace(q.Get("kapsam")); kap != "" {
-		switch {
-		case kap == "kok":
-			kapsamKosul = append(kapsamKosul, "a.reseller_id=0")
-		default:
-			n, err := strconv.ParseInt(kap, 10, 64)
-			if err != nil || n <= 0 {
-				// Cozulemeyen kapsam sessizce "hepsi" olmasin — kullanici yanlis
-				// veriye baktigini anlamaz.
-				httpx.WriteError(w, http.StatusBadRequest, "geçersiz kapsam")
-				return
-			}
-			kapsamKosul = append(kapsamKosul, "a.reseller_id=?")
-			kapsamArgs = append(kapsamArgs, n)
-		}
+	// 🔴 Kapsam zorlamasi: bayi icin istemci parametresi YOK SAYILIR (kapsamKur).
+	c := claimsAl(r)
+	kapsamKosul, kapsamArgs, err := kapsamKur(c, q.Get("kapsam"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var rid int64
+	if bayiMi(c) {
+		rid = c.ResellerID
 	}
 	kosul := append([]string{}, kapsamKosul...)
 	args := append([]any{}, kapsamArgs...)
@@ -157,7 +191,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"toplam": toplam, "limit": limit, "offset": offset,
 		"kayitlar": out, "eylemler": eylemler,
-		"kapsam": map[string]any{"bayi_mi": rid > 0, "bayi_id": rid},
+		"kapsam": map[string]any{"bayi_mi": bayiMi(c), "bayi_id": rid},
 	})
 }
 
