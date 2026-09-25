@@ -45,7 +45,8 @@ func GecisAyari(panelConf string, uygun func(int) bool, simdi int64, gun int) (*
 	// yalnız-loopback (SSH tüneli) ve erisim'in yoruma aldığı satırlar. Uzlastir izi
 	// olan portu "bilinçli yönetiliyor" sayıp listen EKLEMEZ → oraya düşen rol kapısı
 	// hiç genel dinlenmezdi. `ss` bunu her zaman yakalamaz (nginx dosyayı henüz
-	// yüklememiş / yorumlu satır). KapiRolPortuAta da YerelPortlar'ı aynı nedenle hariç tutar.
+	// yüklememiş / yorumlu satır). KapiRolPortuAta da izi olan portları aynı nedenle hariç
+	// tutar (haritadan bağımsız — açık eski kapı portu da yalnız loopback'te olabilir).
 	haric := map[int]bool{}
 	for _, d := range Dinlemeler(strings.Split(panelConf, "\n")) {
 		if d.Port > 0 {
