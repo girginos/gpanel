@@ -219,11 +219,58 @@ kapi_eksikleri() {
   done
 }
 
+# kapi_zincir_olc: her rol portu nginx ÜZERİNDEN kendi tipini dönüyor mu (admin/bayi →
+# yonetim, musteri → musteri)? dogrula → Role gates ile AYNI ölçüm: loopback istemci,
+# zorlama kapalı olsa bile başlığı KANITLI isteğe gerçek tipi alır; X-GP-Kapi başlığı
+# yok/gizlisi tutmuyor/map yanlışsa "karma" ya da yanlış tip döner = zincir kopuk.
+# Açılış reload'undan kalan eski işçiler kısa süre eski düzenle yanıt verebilir: port
+# başına en çok 5 deneme × 2 sn. Sonuç _kz_zincir = tamam | kopuk | olculemedi,
+# _kz_zincir_ayr = ayrıntı (yalnız port/tip; gizli ya da başlık değeri basılmaz).
+_kz_zincir=""; _kz_zincir_ayr=""
+kapi_zincir_olc() {
+  local kr rol bek p tip i kopuk="" olcsuz=""
+  for kr in admin:yonetim bayi:yonetim musteri:musteri; do
+    rol=${kr%%:*}; bek=${kr#*:}; p=$(kapi_portu "$rol")
+    if [ -z "$p" ]; then olcsuz="$olcsuz $rol(port yok)"; continue; fi
+    tip=""
+    for i in 1 2 3 4 5; do
+      tip=$(curl -sk --max-time 5 "https://127.0.0.1:$p/api/v1/kapi" 2>/dev/null \
+        | grep -oE '"tip":"[a-z]+"' | cut -d'"' -f4) || tip=""
+      [ "$tip" = "$bek" ] && break
+      [ "$i" = 5 ] || sleep 2
+    done
+    if [ "$tip" = "$bek" ]; then continue; fi
+    if [ -n "$tip" ]; then kopuk="$kopuk $rol :$p=$tip(beklenen $bek)"; else olcsuz="$olcsuz $rol :$p(yanıt yok)"; fi
+  done
+  if [ -n "$kopuk" ]; then _kz_zincir=kopuk; _kz_zincir_ayr="${kopuk# }${olcsuz:+ ·${olcsuz}}"; return 1; fi
+  if [ -n "$olcsuz" ]; then _kz_zincir=olculemedi; _kz_zincir_ayr="${olcsuz# }"; return 1; fi
+  _kz_zincir=tamam; _kz_zincir_ayr="3/3 kapı kendi tipini dönüyor"
+  return 0
+}
+
+# kapi_giris_olc: üretim yolunda zorlama gerçekten AÇIK mı? Müşteri kapısında yönetici
+# giriş ucu YOKTUR → 404; zorlama kapalıyken aynı istek 400/401 döner (dogrula/erisim
+# kapi_zorlama_olc ile aynı). Gövde '{}': kimlik bilgisi gönderilmez (denetim günlüğü ve
+# kaba-kuvvet sayacı etkilenmez). Çıktı: acik | kapali | olculemedi (+ HTTP kodu).
+kapi_giris_olc() {
+  local mp kod
+  mp=$(kapi_portu musteri)
+  [ -n "$mp" ] || { echo "olculemedi (müşteri kapısı portu yok)"; return 0; }
+  kod=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' -X POST \
+        -H 'Content-Type: application/json' --data '{}' \
+        "https://127.0.0.1:$mp/api/v1/auth/login" 2>/dev/null) || true
+  case "$kod" in
+    404)         echo "acik (müşteri kapısı :$mp yönetici girişi 404)" ;;
+    400|401|200) echo "kapali (müşteri kapısı :$mp yönetici girişi HTTP $kod — uç AÇIK)" ;;
+    *)           echo "olculemedi (müşteri kapısı :$mp HTTP ${kod:-000})" ;;
+  esac
+}
+
 # kapi_yeniden_uygula: kapı düzenini HEMEN geri getirir. nginx'e kendimiz yazmıyoruz:
 # kapı düzeninin TEK uygulayıcısı panelin açılış Heal'idir (EKLEYİCİ: eksik rol listen'ı
-# + X-GP-Kapi başlığı; nginx -t + geri alma + uçtan uca ölçüm onda). Zincir kurulamazsa
-# Heal zorlamayı KAPATIR → tek-port davranışı, kimse kilitli kalmaz. `kapi rol-port`
-# CLI'ı da aynı yolu kullanır (panelYenidenBaslat).
+# + X-GP-Kapi başlığı; nginx -t + geri alma + dinleme ölçümü onda). Zincir kopuksa
+# panelin uçtan uca ölçümü (KapiDogrulaBaslat) zorlamayı KAPATIR → tek-port davranışı,
+# kimse kilitli kalmaz. `kapi rol-port` CLI'ı da aynı yolu kullanır (panelYenidenBaslat).
 # NOT: panelin kendisi bu betiği `sifirla` ile çağırırsa restart onu da öldürür — bugün
 # yalnız operatör CLI'ı çağırıyor.
 kapi_yeniden_uygula() {
@@ -241,7 +288,7 @@ kapi_yeniden_uygula() {
   # yazma ile geri alma arasındaki anı görüp yanlış "✓ uygulandı" diyordu; Heal (SELinux
   # etiket denetimi dahil) 15 sn'yi aşınca da yanlış "eksik". /healthz yanıt veriyorsa Heal
   # bitmiştir (restart eski süreci durdurup döner: yanıt yeni süreçten gelir).
-  local son eksik bayrak rc=0
+  local son eksik bayrak giris rc=0
   son=$((SECONDS + SAGLIK_SN))
   until curl -fsS --max-time 5 -o /dev/null "$PANEL_HEALTH" 2>/dev/null; do
     if [ "$SECONDS" -ge "$son" ]; then
@@ -260,16 +307,32 @@ kapi_yeniden_uygula() {
   else
     ok "kapı düzeni yeniden uygulandı (panel açılış uzlaştırması tamamlandı)"
   fi
-  # Zorlama bayrağı: düzen dosyada tam olsa da zincir kurulamadıysa Heal zorlamayı KAPATIR.
+  # 🔴 OPS-3: BAYRAĞA TEK BAŞINA GÜVENME. Açılış Heal'i bayrağı uçtan uca ölçümden ÖNCE
+  # iyimser "acik" yazar; panelin ölçümü (KapiDogrulaBaslat) ListenAndServe'den SONRA
+  # başlar ve kopuk zincirde "kapali" kararı ~1 dk (20 deneme × 3 sn) sürer. /healthz'den
+  # hemen sonra okunan "acik" bu yüzden kanıt DEĞİL: kopuk zincirde (ör. proxy gizlisi
+  # kaymış → tip "karma") da "AÇIK" + rc=0 veriyordu. Zinciri ve zorlamayı BURADA ölç.
+  if ! kapi_zincir_olc; then
+    if [ "$_kz_zincir" = kopuk ]; then
+      uyar "kapı zinciri KOPUK: $_kz_zincir_ayr — panel ölçümü zorlamayı KAPATIR (≈1 dk): rol ayrımı olmaz, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (neden: journalctl -u girginospanel | grep kapi)"
+    else
+      uyar "kapı zinciri ÖLÇÜLEMEDİ: $_kz_zincir_ayr — rol ayrımı doğrulanmadı (sonra: girginospanel-dogrula → Role gates)"
+    fi
+    return 1
+  fi
   bayrak=$(head -c 32 "$KAPI_ZORLAMA" 2>/dev/null | tr -d '[:space:]')
-  case "$bayrak" in
-    acik)
-      ok "kapı zorlaması: AÇIK (panel bayrağı; uçtan uca ölçüm: girginospanel-dogrula → Role gates)" ;;
-    kapali)
-      uyar "kapı zorlaması: KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (neden: journalctl -u girginospanel | grep kapi)"
+  giris=$(kapi_giris_olc)
+  case "$bayrak:${giris%% *}" in
+    acik:acik)
+      ok "kapı zorlaması: AÇIK — ölçüldü: $_kz_zincir_ayr · ${giris#* } · panel bayrağı acik" ;;
+    kapali:*|*:kapali)
+      uyar "kapı zorlaması: KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (bayrak: ${bayrak:-yok} · ${giris#* }; neden: journalctl -u girginospanel | grep kapi)"
       rc=1 ;;
-    "")
-      uyar "kapı zorlaması: ÖLÇÜLEMEDİ ($KAPI_ZORLAMA yok/okunamadı) — rol ayrımı doğrulanmadı"
+    :*)
+      uyar "kapı zorlaması: ÖLÇÜLEMEDİ ($KAPI_ZORLAMA yok/okunamadı · ${giris#* }) — rol ayrımı doğrulanmadı"
+      rc=1 ;;
+    acik:*)
+      uyar "kapı zorlaması: ÖLÇÜLEMEDİ (bayrak acik ama ${giris#* }) — rol ayrımı doğrulanmadı"
       rc=1 ;;
     *)
       uyar "kapı zorlaması: bayrak tanınmadı ('${bayrak//[!a-zA-Z0-9_-]/?}') — rol ayrımı doğrulanmadı"
