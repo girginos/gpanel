@@ -52,7 +52,7 @@ func (h *Handlers) AskiUygula(ctx context.Context, id int64, askida bool, kaynak
 		`UPDATE domains SET askida=?, durum=?, askida_kaynak=? WHERE id=?`, ak, durum, kaynak, id); err != nil {
 		return alanAdi, err
 	}
-	if err := provisioner.RerenderVhost(h.DB, id); err != nil {
+	if err := vhostYenidenCiz(h.DB, id); err != nil {
 		// DB ile nginx ayrismasin: geri al.
 		_, _ = h.DB.ExecContext(ctx, `UPDATE domains SET askida=?, durum=? WHERE id=?`,
 			1-ak, map[bool]string{true: "aktif", false: "pasif"}[askida], id)

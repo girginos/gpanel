@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/php"
 	"girginospanel/internal/provisioner"
 
@@ -26,8 +27,18 @@ import (
 // Part 3 bu fonksiyonu nginx ayarları + backend paritesiyle genişletir.
 // rebuildVhost — Handlers uzerinden kisayol.
 func (h *Handlers) rebuildVhost(ctx context.Context, sid int64, sk, altAd, tamAd, phpSurum string) error {
-	return rebuildVhostDB(ctx, h.DB, sid, sk, altAd, tamAd, phpSurum)
+	return vhostYenidenKur(ctx, h.DB, sid, sk, altAd, tamAd, phpSurum)
 }
+
+// vhostYenidenKur — alt alan vhost'unu yeniden kurar (php-fpm havuzu +
+// `httpd -t` + sunucu geneli `nginx -t` + reload). Testler sahteyle değiştirir:
+// hata metninin kime ne döndüğü ana makineye dokunmadan sınanır.
+//
+// 🔴 Hatası istemciye nginxset.SunucuHatasi ile döner: `nginx -t` çıktısı
+// nginxHata ile gizli olsa da `httpd -t` (apache backend'li alt alan: komşu
+// kiracıların /etc/httpd/conf.d/sub_apache_<sk>_… yolları), php-fpm ve reload
+// çıktıları ham taşınır.
+var vhostYenidenKur = rebuildVhostDB
 
 // rebuildVhostDB — alt alan vhost'unun TEK ureticisi.
 //
@@ -218,7 +229,7 @@ func (h *Handlers) PHPAyarPut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, surum); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.php-ayar", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "php_surum": surum, "ozel_havuz": true})

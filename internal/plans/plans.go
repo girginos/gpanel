@@ -14,10 +14,20 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// direktifDogrula — plan ek direktiflerini SUNUCU GENELİ `nginx -t` ile sınar
+// (/etc/nginx/conf.d altına geçici dosya yazar). Testler sahteyle değiştirir:
+// hata yolları ana makinenin nginx'ine dokunmadan sınanır.
+//
+// 🔴 Hatası istemciye nginxset.DirektifHatasi ile döner: çıktı öteki
+// kiracıların sertifika/vhost yollarını taşır; bayi (AdminVeyaReseller) yalnız
+// KENDİ direktiflerine ait [emerg] satırlarını görür, yönetici ham çıktıyı.
+var direktifDogrula = provisioner.ValidateNginxDirectives
 
 type Plan struct {
 	ID                 int64  `json:"id"`
@@ -241,8 +251,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
 		return
 	}
-	if err := provisioner.ValidateNginxDirectives(p.NginxEkDirektifler); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())
+	if err := direktifDogrula(p.NginxEkDirektifler); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+nginxset.DirektifHatasi(r, "plans.olustur", 0, err, p.NginxEkDirektifler))
 		return
 	}
 	ridC := middleware.ResellerIDFrom(r)
@@ -345,8 +355,8 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
 		return
 	}
-	if err := provisioner.ValidateNginxDirectives(p.NginxEkDirektifler); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+err.Error())
+	if err := direktifDogrula(p.NginxEkDirektifler); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+nginxset.DirektifHatasi(r, "plans.guncelle", 0, err, p.NginxEkDirektifler))
 		return
 	}
 	v := 0

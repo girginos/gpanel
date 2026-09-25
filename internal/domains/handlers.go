@@ -408,7 +408,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	pr, err := saglama(req.AlanAdi, req.PHPSurum)
 	if err != nil {
 		log.Printf("provision %q başarısız: %v", req.AlanAdi, err)
-		httpx.WriteError(w, http.StatusInternalServerError, "sağlama başarısız: "+err.Error())
+		// Sağlama SUNUCU GENELİ `nginx -t` / `php-fpm -t` / reload çalıştırır;
+		// çıktısı komşu kiracıların vhost/havuz yollarını taşır (bayi bu uca
+		// erişir). Yönetici metni aynen; öteki roller genel mesaj.
+		httpx.WriteError(w, http.StatusInternalServerError, "sağlama başarısız: "+nginxset.SunucuHatasi(r, "domains.olustur", 0, err))
 		return
 	}
 

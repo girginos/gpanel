@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -99,7 +100,7 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 	}
 	// vhost'u yeniden yaz — alt alanın ayrı FPM havuzu varsa yeni sürüme taşınır.
 	if err := h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, php); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.php", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "php_surum": php})
