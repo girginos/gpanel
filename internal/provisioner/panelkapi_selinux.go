@@ -13,6 +13,14 @@ package provisioner
 // Bu yüzden CLI (kapi kur/gecis/rol-port/selinux) portları panel başlamadan etiketler ve
 // doğrulanan portlar /run önbelleğine yazılır; açılış yalnız önbellekte olmayan portlar
 // için semanage koşturur.
+//
+// 🔴 ÖNBELLEK İDDİADIR, ÖLÇÜM DEĞİL: etiket aynı önyüklemede panel dışında silinebilir
+// (semanage port -d / import). Bu yüzden (1) CLI önbelleğe HİÇ güvenmez — her çağrıda
+// semanage listesinden ölçer, önbelleği ölçülen gerçeğe göre yeniden yazar (dogrula'nın
+// önerdiği `kapi selinux` onarımı "hazır" deyip hiçbir şey yapmadan geçmesin; güncelleyici
+// de her güncellemede restart'tan önce onu koşturur); (2) nginx'in bağlayamadığı port
+// önbellekten düşer (kapiEtiketUnut), sonraki Heal onu semanage ile yeniden doğrular.
+// Yalnız açılış Heal'i hız için önbelleğe güvenir.
 
 import (
 	"errors"
@@ -34,11 +42,12 @@ var (
 	kapiSELinuxListe  = portyonetim.SELinuxPortListesi
 	kapiSELinuxEtiket = portyonetim.SELinuxHttpEtiketle
 	// kapiEtiketli: http_port_t olduğu doğrulanan portlar. kapiMu altında kullanılır
-	// (yalnız kapiUzlastir'dan çağrılır); her uzlaştırmada semanage koşmasın.
+	// (kapiUzlastir, kapiNginxUygula, KapiSELinuxHazirla); her uzlaştırmada semanage koşmasın.
 	kapiEtiketli = map[int]bool{}
 	// kapiSELinuxOnbellek: bu önyüklemede doğrulanan portlar (tmpfs — yeniden başlatmada
 	// silinir, etiket değişmiş olabilir). CLI ile panel paylaşır. "<yol>.yukle" işareti:
-	// etiket panel DIŞINDA eklendi, sonraki Heal nginx'i yeniden yüklemeli.
+	// etiket eklendi ama nginx henüz yeniden yüklenmedi — sonraki Heal yüklemeli
+	// (kapiYukleIsaretiAl / kapiYukleIsaretiTuket).
 	kapiSELinuxOnbellek = "/run/girginospanel/kapi-selinux"
 	kapiOnbellekOkundu  bool
 )
@@ -46,12 +55,21 @@ var (
 // kapiPortlariEtiketle: nginx'in bind edeceği kapı portlarını SELinux'ta http_port_t yapar.
 //   - tamam=false → Enforcing'de etiketlenemeyen port var: listen YAZILMAMALI.
 //     Permissive'de etiketleme hatası engellemez (bind serbest), yalnız günlüğe düşer.
-//   - yeni=true → bu çağrıda etiket eklendi: dosyalar değişmese de reload gerekir.
+//   - yeni=true → bu çağrıda etiket eklendi: dosyalar değişmese de reload gerekir
+//     ("yeniden yükle" işareti de bırakılır: reload bu turda düşerse sonraki Heal yükler).
 //
 // Başka bir servise ayrılmış portun türü DEĞİŞTİRİLMEZ (o servisi bozabilirdi); seçim
 // zaten böyle portları eler (portyonetim.KapiPortDenetleyici), elle yazılan ayar için
 // günlük operatöre portu değiştirmesini söyler.
 func kapiPortlariEtiketle(portlar []int) (tamam, yeni bool) {
+	return kapiPortlariEtiketleOlc(portlar, false)
+}
+
+// kapiPortlariEtiketleOlc: olc=true → bellek/önbellek "etiketli" dese de HER port semanage
+// listesinden ölçülür (CLI onarımı); ölçümde http_port_t olmadığı görülen port bellekten ve
+// önbellekten DÜŞER (yeniden etiketlenirse geri girer). Liste okunamazsa önbelleğe dokunulmaz
+// (ölçülemeyen durum için ne ekleme ne silme).
+func kapiPortlariEtiketleOlc(portlar []int, olc bool) (tamam, yeni bool) {
 	mod := kapiSELinuxModu()
 	if mod == "" {
 		return true, false
@@ -64,7 +82,7 @@ func kapiPortlariEtiketle(portlar []int) (tamam, yeni bool) {
 	}
 	var eksik []int
 	for _, p := range portlar {
-		if !kapiEtiketli[p] {
+		if olc || !kapiEtiketli[p] {
 			eksik = append(eksik, p)
 		}
 	}
@@ -81,26 +99,53 @@ func kapiPortlariEtiketle(portlar []int) (tamam, yeni bool) {
 	degisti := false
 	for _, p := range eksik {
 		http, baska := portyonetim.SELinuxPortDurumu(liste, p)
-		switch {
-		case http:
-			kapiEtiketli[p], degisti = true, true
-		case baska != "":
+		if http {
+			if !kapiEtiketli[p] {
+				kapiEtiketli[p], degisti = true, true
+			}
+			continue
+		}
+		// Ölçüldü: http_port_t DEĞİL. Bellek/önbellek "etiketli" diyorsa yanlıştır (etiket
+		// panel dışında silinmiş) — düşer; aşağıda yeniden etiketlenirse geri girer.
+		if kapiEtiketli[p] {
+			delete(kapiEtiketli, p)
+			degisti = true
+		}
+		if baska != "" {
 			log.Printf("🔴 kapi: :%d SELinux'ta %s servisine ayrılmış — http_port_t yapılmadı; bu kapı portunu değiştirin", p, baska)
 			tamam = tamam && !zorunlu
-		default:
-			if e := kapiSELinuxEtiket(p); e != nil {
-				log.Printf("🔴 kapi: :%d SELinux http_port_t yapılamadı: %v", p, e)
-				tamam = tamam && !zorunlu
-				continue
-			}
-			log.Printf("kapi: :%d SELinux'ta http_port_t olarak etiketlendi (nginx bind edebilsin)", p)
-			kapiEtiketli[p], degisti, yeni = true, true, true
+			continue
+		}
+		if e := kapiSELinuxEtiket(p); e != nil {
+			log.Printf("🔴 kapi: :%d SELinux http_port_t yapılamadı: %v", p, e)
+			tamam = tamam && !zorunlu
+			continue
+		}
+		log.Printf("kapi: :%d SELinux'ta http_port_t olarak etiketlendi (nginx bind edebilsin)", p)
+		kapiEtiketli[p], degisti, yeni = true, true, true
+	}
+	if degisti {
+		kapiOnbellekYaz()
+	}
+	if yeni {
+		kapiYukleIsaretiBirak()
+	}
+	return tamam, yeni
+}
+
+// kapiEtiketUnut: nginx'in bağlayamadığı portları "doğrulanmış" kümesinden (ve önbellekten)
+// çıkarır — sonraki Heal onları semanage ile yeniden ölçer. kapiMu altında.
+func kapiEtiketUnut(portlar []int) {
+	degisti := false
+	for _, p := range portlar {
+		if kapiEtiketli[p] {
+			delete(kapiEtiketli, p)
+			degisti = true
 		}
 	}
 	if degisti {
 		kapiOnbellekYaz()
 	}
-	return tamam, yeni
 }
 
 func kapiOnbellekOku() []int {
@@ -132,23 +177,43 @@ func kapiOnbellekYaz() {
 	}
 }
 
-// kapiDisaridanEtiketlendi: CLI panel dışında yeni etiket eklediyse işareti tüketir.
-// true → nginx o portları ancak yeniden yüklemede bağlar (dosyalar değişmemiş olabilir).
-func kapiDisaridanEtiketlendi() bool {
-	isaret := kapiSELinuxOnbellek + ".yukle"
-	if _, err := os.Stat(isaret); err != nil {
-		return false
+// kapiYukleIsaretiBirak: "etiket eklendi, nginx yeniden yüklenmeli" işareti.
+func kapiYukleIsaretiBirak() {
+	if err := os.MkdirAll(filepath.Dir(kapiSELinuxOnbellek), 0o755); err == nil {
+		_ = os.WriteFile(kapiSELinuxOnbellek+".yukle", nil, 0o644)
 	}
-	_ = os.Remove(isaret)
-	return true
+}
+
+// kapiYukleIsaretiAl: bekleyen "yeniden yükle" işareti var mı? Varsa ".isleniyor" adına
+// taşınır: bu Heal sürerken CLI'ın bırakacağı YENİ işaret ayrı dosyada kalır, silinmez.
+// Alınan işaret YALNIZ başarılı uygulamadan sonra silinir (kapiYukleIsaretiTuket) — taban
+// `nginx -t`, reload ya da port ölçümü düşerse (ya da panel bu arada yeniden başlarsa)
+// sonraki Heal yine yükler; yoksa etiketlenen portlar ilgisiz bir reload'a dek bağlanmazdı.
+func kapiYukleIsaretiAl() bool {
+	isaret := kapiSELinuxOnbellek + ".yukle"
+	if os.Rename(isaret, isaret+".isleniyor") == nil {
+		return true
+	}
+	_, err := os.Stat(isaret + ".isleniyor")
+	return err == nil
+}
+
+// kapiYukleIsaretiTuket: nginx yeni etiketli portlarla BAŞARIYLA yüklendi (ya da çalışmıyor
+// ve başlarken bağlayacak) — alınan işaret silinir.
+func kapiYukleIsaretiTuket() {
+	_ = os.Remove(kapiSELinuxOnbellek + ".yukle.isleniyor")
 }
 
 // KapiSELinuxHazirla: CLI (`girginospanel-server kapi selinux`; kur, gecis ve rol-port da
 // çağırır) — kapi.json'daki kapı portlarını panel başlamadan ÖNCE http_port_t yapar ve
 // önbelleğe yazar; panel açılışı semanage koşturmaz. Yeni etiket eklendiyse sonraki Heal
 // nginx'i yeniden yüklesin diye işaret bırakır.
-// Dönüş: 0 etiketli ya da gerekmiyor, 1 Enforcing'de etiketlenemedi (panel kapı düzenini
-// uygulamaz — güvenli), 3 kapı modu yapılandırılmamış.
+//
+// 🔴 ONARIM KOMUTU ÖLÇER: önbelleğe güvenmez (etiket panel dışında silinmiş olabilir —
+// dogrula tam bunu yakalayıp bu komutu önerir); her port semanage listesinden doğrulanır,
+// önbellek ölçülen duruma getirilir. CLI açılış sağlık penceresinde koşmaz: süre sorunu yok.
+// Dönüş: 0 etiketli ya da gerekmiyor, 1 Enforcing'de etiketlenemedi/doğrulanamadı (panel
+// kapı düzenini uygulamaz — güvenli), 3 kapı modu yapılandırılmamış.
 func KapiSELinuxHazirla() int {
 	a, err := kapi.Oku(kapiAyarYolu)
 	if errors.Is(err, kapi.ErrYok) {
@@ -161,11 +226,9 @@ func KapiSELinuxHazirla() int {
 	if kapiSELinuxModu() == "" {
 		return 0
 	}
-	tamam, yeni := kapiPortlariEtiketle(kapi.SiraliPortlar(a.PortHaritasi(time.Now().Unix())))
-	if yeni {
-		_ = os.WriteFile(kapiSELinuxOnbellek+".yukle", nil, 0o644)
-	}
-	if !tamam {
+	kapiMu.Lock()
+	defer kapiMu.Unlock()
+	if tamam, _ := kapiPortlariEtiketleOlc(kapi.SiraliPortlar(a.PortHaritasi(time.Now().Unix())), true); !tamam {
 		return 1
 	}
 	return 0

@@ -82,7 +82,18 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	eskiMasa, eskiOzel := kapiMasaustu, kapiOzelIzin
 	eskiSEMod, eskiSEListe, eskiSEEtiket, eskiEtiketli := kapiSELinuxModu, kapiSELinuxListe, kapiSELinuxEtiket, kapiEtiketli
 	eskiZDosya, eskiOnb, eskiOkundu := kapiZorlamaDosyasi, kapiSELinuxOnbellek, kapiOnbellekOkundu
+	kapiKararAyarla := func(v bool) {
+		kapiZorlamaMu.Lock()
+		kapiAcilabilir = v
+		kapiZorlamaMu.Unlock()
+	}
+	kapiZorlamaMu.Lock()
+	eskiKarar := kapiAcilabilir
+	kapiZorlamaMu.Unlock()
+	// Her test "henüz uzlaştırma yok" ile başlar: ölçüm, uzlaştırma açılabilir demeden açamaz.
+	kapiKararAyarla(false)
 	t.Cleanup(func() {
+		kapiKararAyarla(eskiKarar)
 		kapiSELinuxOnbellek, kapiOnbellekOkundu = eskiOnb, eskiOkundu
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
 		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
@@ -467,6 +478,9 @@ func TestKapiZorlamaDosyasi(t *testing.T) {
 // Yarıda kesilen ölçüm (istemci koptu / kapanış) kesin değildir: zorlamayı KAPATMAZ.
 func TestKapiOlcIptalZorlamayiDegistirmez(t *testing.T) {
 	kapiTestKur(t, kapiTestSablon, rolAyar())
+	if !kapiUzlastir(1000) { // ölçüm yalnız "açılabilir" kararından sonra karar verir
+		t.Fatal("ön koşul: uzlaştırma açılabilir")
+	}
 	eski := kapiTipOlcucu
 	t.Cleanup(func() { kapiTipOlcucu = eski })
 	kapiTipOlcucu = func(ctx context.Context, _ int, _ string, _ int) (string, error) { return "", ctx.Err() }
@@ -894,6 +908,9 @@ func TestKapiHealErisimLoopbackPortunaDelikAcmaz(t *testing.T) {
 
 func TestKapiOlcVeAyarla(t *testing.T) {
 	kapiTestKur(t, kapiTestSablon, rolAyar())
+	if !kapiUzlastir(1000) {
+		t.Fatal("ön koşul: uzlaştırma açılabilir")
+	}
 	eski := kapiTipOlcucu
 	t.Cleanup(func() { kapiTipOlcucu = eski })
 	yanit := map[int]string{21001: "yonetim", 22002: "yonetim", 23003: "musteri"}
@@ -1062,6 +1079,9 @@ func TestKapiTipOlcGeciciHataBelirsiz(t *testing.T) {
 // Belirsiz ölçüm zorlamayı hiçbir yönde DEĞİŞTİRMEZ; kesin başarısızlık kapatır.
 func TestKapiOlcBelirsizZorlamayiDegistirmez(t *testing.T) {
 	kapiTestKur(t, kapiTestSablon, rolAyar())
+	if !kapiUzlastir(1000) {
+		t.Fatal("ön koşul: uzlaştırma açılabilir")
+	}
 	eski := kapiTipOlcucu
 	t.Cleanup(func() { kapiTipOlcucu = eski })
 	kapiTipOlcucu = func(context.Context, int, string, int) (string, error) {
