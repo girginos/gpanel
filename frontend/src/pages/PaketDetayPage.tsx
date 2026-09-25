@@ -26,6 +26,9 @@ type Plan = {
   fastcgi_cache: boolean; client_max_body_mb: number; nginx_ek_direktifler: string
   waf_enabled: boolean; waf_mode: string; waf_paranoia: number
   varsayilan: boolean; olusturulma: string
+  // Sunucu görünüm işaretleri: bayiye sahibi olmadığı plan (kökün paylaşılan
+  // planı) yalnız seçim özetiyle ve düzenlenemez döner — iç ayarlar gelmez.
+  global?: boolean; duzenlenebilir?: boolean; ozet?: boolean; domain_id?: number
 }
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; durum: string; olusturulma: string }
 type GetResp = { plan: Plan; domain_sayisi: number }
@@ -126,6 +129,12 @@ const PKTDET_EN: Record<string, string> = {
   "nginx client_max_body_size — dosya yükleme üst sınırı": "nginx client_max_body_size — file upload cap",
   "server{} bloğuna eklenir; kaydederken doğrulanır.": "Added to the server{} block; validated on save.",
   "Uygulandı": "Applied",
+  "Paylaşılan plan": "Shared plan",
+  "Salt okunur": "Read-only",
+  "Kotalar": "Quotas",
+  "Trafik": "Traffic",
+  "Kutu Depolama": "Mailbox Storage",
+  "Bu plan yönetici tarafından tanımlanır: hostinglerinize atayabilir, düzenleyemezsiniz.": "This plan is defined by the administrator: you can assign it to your hostings but cannot edit it.",
   "Başarısız": "Failed",
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
@@ -220,6 +229,8 @@ export default function PaketDetayPage() {
 
   if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
   if (!plan) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Plan bulunamadı")}</div></div>
+  // Düzenleme yalnız planın sahibine (sunucu işareti; eski yanıtta işaret yoksa düzenlenebilir).
+  const salt = plan.duzenlenebilir === false
 
   // Kurulu PHP sürümleri + planın mevcut değeri (kurulu olmasa da görünsün)
   const phpOpts = Array.from(new Set([
@@ -246,14 +257,43 @@ export default function PaketDetayPage() {
               {plan.varsayilan && <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Varsayılan")}</span>}
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-              {plan.aciklama || cevir("Açıklama yok")} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
+              {salt ? cevir("Paylaşılan plan") : (plan.aciklama || cevir("Açıklama yok"))} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
             </p>
           </div>
-          <Button onClick={kaydet} yukleniyor={isleniyor} color="primary" ikon={I.disket}
-            className="shrink-0">
-            {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
-          </Button>
+          {salt ? (
+            <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-slate-100 dark:bg-dark-600/60 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{cevir("Salt okunur")}</span>
+          ) : (
+            <Button onClick={kaydet} yukleniyor={isleniyor} color="primary" ikon={I.disket}
+              className="shrink-0">
+              {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
+            </Button>
+          )}
         </div>
+
+        {/* Paylaşılan plan (bayi): yalnız seçim özeti — iç ayarlar sunucudan gelmez */}
+        {salt && (
+          <Kart baslik={cevir("Kotalar")} ikon={<Ikon d={I.bilgi} className="h-5 w-5" />} alt={cevir("Bu plan yönetici tarafından tanımlanır: hostinglerinize atayabilir, düzenleyemezsiniz.")}>
+            <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
+              <OzetSat e="Disk" d={ozetMb(plan.disk_kota_mb)} />
+              <OzetSat e={cevir("Trafik")} d={ozetMb(plan.trafik_kota_mb)} />
+              <OzetSat e="CPU %" d={ozetAdet(plan.cpu_yuzde)} />
+              <OzetSat e="RAM" d={ozetMb(plan.ram_mb)} />
+              <OzetSat e="Domain" d={ozetAdet(plan.max_domain)} />
+              <OzetSat e={cevir("Veritabanı")} d={ozetAdet(plan.max_db)} />
+              <OzetSat e={cevir("FTP Hesabı")} d={ozetAdet(plan.max_ftp)} />
+              <OzetSat e={cevir("PHP Sürümü")} d={plan.php_surum || '—'} />
+              {mailAktif && (
+                <>
+                  <OzetSat e={cevir("E-posta Kutusu")} d={ozetAdet(plan.max_email)} />
+                  <OzetSat e={cevir("Saatlik Gönderim")} d={ozetAdet(plan.saatlik_mail_limiti)} />
+                  <OzetSat e={cevir("Kutu Depolama")} d={ozetMb(plan.mail_kutu_kota_mb)} />
+                </>
+              )}
+            </dl>
+          </Kart>
+        )}
+
+        {!salt && (<>
 
         {/* Genel */}
         <Kart baslik={cevir("Genel")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}>
@@ -432,6 +472,7 @@ export default function PaketDetayPage() {
             <span>{cevir("Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}</span>
           </p>
         </Kart>
+        </>)}
 
         {/* Atanmış domainler */}
         <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
@@ -485,6 +526,25 @@ export default function PaketDetayPage() {
           )}
         </Kart>
       </div>
+    </div>
+  )
+}
+
+// Paylaşılan plan özeti: alan yoksa "—", 0 = sınırsız (plan konvansiyonu).
+function ozetMb(v?: number) {
+  if (v === undefined || v === null) return '—'
+  if (v <= 0) return cevir('sınırsız')
+  return v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`
+}
+function ozetAdet(v?: number) {
+  if (v === undefined || v === null) return '—'
+  return v <= 0 ? cevir('sınırsız') : v.toLocaleString('tr-TR')
+}
+function OzetSat({ e, d }: { e: string; d: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-slate-500 dark:text-slate-400">{e}</dt>
+      <dd className="mt-0.5 font-mono text-slate-900 dark:text-slate-100">{d}</dd>
     </div>
   )
 }

@@ -112,12 +112,18 @@ func dt_geciciDB(t *testing.T) *sql.DB {
 			status VARCHAR(16) NOT NULL DEFAULT 'active',
 			max_domain INT NULL, max_disk_mb INT NULL
 		) ENGINE=InnoDB`,
+		// alan_adi + plan_id: devir planı yeni sahibin kapsamına alır (GL-03,
+		// plans.DevirPlanTasi) — canlı şemadaki gibi.
 		`CREATE TABLE domains (
 			id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+			alan_adi VARCHAR(253) NOT NULL DEFAULT '',
 			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
 			customer_id BIGINT UNSIGNED NULL,
-			boyut_kb BIGINT NULL
+			boyut_kb BIGINT NULL,
+			plan_id BIGINT UNSIGNED NULL,
+			KEY ix_domains_plan (plan_id)
 		) ENGINE=InnoDB`,
+		dt_servicePlansDDL,
 		// 0003 + 0089 (token_gecersiz_ts) + 0104 (password_md5 VARCHAR(255))
 		`CREATE TABLE ftp_accounts (
 			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

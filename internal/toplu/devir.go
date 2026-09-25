@@ -42,6 +42,7 @@ import (
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	bayikilit "girginospanel/internal/kilit"
+	"girginospanel/internal/plans"
 	"github.com/go-sql-driver/mysql"
 	"golang.org/x/sys/unix"
 )
@@ -191,6 +192,22 @@ func (h *Handlers) devirTx(ctx context.Context, did, eskiRID int64, resellerID, 
 	if customerID != nil {
 		if _, err := tx.ExecContext(ctx, "UPDATE domains SET customer_id=NULLIF(?,0) WHERE id=?", *customerID, did); err != nil {
 			return nil, fmt.Errorf("sahiplik (müşteri): %w", err)
+		}
+	}
+
+	// ── 1b) Plan: yeni sahibin kapsamına (GL-03) ──────────────────────────
+	// Eskiden hosting eski bayinin planında kalıyordu; eski bayi o planı
+	// düzenleyerek yeni sahibin sitesinin CPU/RAM/process/yavaş-sorgu KILL
+	// eşiğini değiştirebiliyordu (governor değeri canlı okur). Efektif limitler
+	// DEĞİŞMEZ (birebir kopya ya da özel planın sahipliği taşınır — ayrıntı
+	// plans.DevirPlanTasi). Erişim kesme adımıdır: hata devri DÜŞÜRÜR.
+	if resellerID != nil {
+		not, err := plans.DevirPlanTasi(ctx, tx, did, *resellerID)
+		if err != nil {
+			return nil, fmt.Errorf("plan devri: %w", err)
+		}
+		if not != "" {
+			uyarilar = append(uyarilar, not)
 		}
 	}
 

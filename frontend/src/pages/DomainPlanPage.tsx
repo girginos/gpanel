@@ -18,6 +18,9 @@ type Plan = {
   max_db: number; max_ftp: number; max_email: number; saatlik_mail_limiti: number; mail_kutu_kota_mb: number
   cpu_yuzde: number; ram_mb: number; inode_kota: number; php_surum: string
   varsayilan: boolean
+  // Sunucu görünüm işaretleri: bayiye sahibi olmadığı (kökün paylaşılan) plan
+  // yalnız seçim özetiyle ve düzenlenemez döner; domain_id = hostinge özel plan.
+  ozet?: boolean; duzenlenebilir?: boolean; domain_id?: number
   [k: string]: unknown // PUT'ta bilinmeyen alanlar KAYBOLMASIN (waf, io, nginx…)
 }
 type Domain = { id: number; alan_adi: string; plan_id?: number; plan_ad?: string }
@@ -88,6 +91,7 @@ const DPLAN_EN: Record<string, string> = {
   "Önce bir hosting planı oluşturun.": "Create a hosting plan first.",
   "Özel plan oluşturulamadı": "Failed to create custom plan",
   "Yükselt": "Upgrade",
+  "Paylaşılan plan": "Shared plan",
   "Düşür": "Downgrade",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -144,7 +148,9 @@ export default function DomainPlanPage() {
   // Bu plan yalnız bu hostinge mi ait? (adı "<alan_adı> — Özel" ile başlıyorsa)
   // 🔴 LOGIC: backend plan adını her zaman Türkçe "<domain> — Özel" olarak üretir;
   // ceviri UYGULANMAZ, aksi halde EN modda eşleşme bozulur.
-  const ozelMi = !!(mevcut && domain && mevcut.ad.startsWith(`${domain.alan_adi} — Özel`))
+  const ozelMi = !!(mevcut && domain && (mevcut.domain_id === domain.id || mevcut.ad.startsWith(`${domain.alan_adi} — Özel`)))
+  // Düzenleme/“Tüm ayarlar” yalnız planın sahibine (eski yanıtta işaret yoksa düzenlenebilir).
+  const mevcutDuzenlenebilir = mevcut?.duzenlenebilir !== false
 
   async function planUygula(p: Plan) {
     if (!id) return
@@ -253,17 +259,17 @@ export default function DomainPlanPage() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {ozelMi ? (
+                {ozelMi ? (mevcutDuzenlenebilir && (
                   <Button type="button" color="primary" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}>
                     {cevir("Limitleri özelleştir")}
                   </Button>
-                ) : (
+                )) : (
                   <Button type="button" color="primary" onClick={ozelPlan} disabled={isleniyor !== null}
                           yukleniyor={isleniyor === 'ozel'} ikon={I.arti}>
                     {isleniyor === 'ozel' ? cevir('Oluşturuluyor…') : cevir("Tek tıkla özel plan")}
                   </Button>
                 )}
-                {mevcut && (
+                {mevcut && mevcutDuzenlenebilir && (
                   <Link to={`/araclar/paketler/${mevcut.id}`}
                         className={butonSinifi({ variant: 'outlined' })}>
                     <Ikon d={I.ayar} className="size-4 shrink-0 -ms-1 me-2" />
@@ -345,7 +351,7 @@ export default function DomainPlanPage() {
                         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{p.ad}</h3>
                         {bu && <Badge color="primary" variant="soft" className="shrink-0 text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5">{cevir("Aktif")}</Badge>}
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{p.aciklama || cevir("Açıklama yok")}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{p.ozet ? cevir("Paylaşılan plan") : (p.aciklama || cevir("Açıklama yok"))}</p>
                     </div>
                     <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
                       <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Disk")} </dt><dd className="inline font-medium">{mb(p.disk_kota_mb)}</dd></div>
@@ -359,7 +365,7 @@ export default function DomainPlanPage() {
                       {bu ? (
                         <>
                           <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
-                          {ozelMi && (
+                          {ozelMi && mevcutDuzenlenebilir && (
                             <Button type="button" variant="outlined" boyut="sm" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
                                     className="shrink-0">
                               {cevir("Düzenle")}

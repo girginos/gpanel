@@ -17,6 +17,7 @@ import (
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -37,14 +38,18 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	// Plan var mı doğrula (+ reseller ise plan sahipligi: kendi plani veya global)
 	rid := middleware.ResellerIDFrom(r)
 	if req.PlanID != nil {
-		var planRid int64
+		var planVar int
 		if err := h.DB.QueryRowContext(r.Context(),
-			`SELECT reseller_id FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planRid); err != nil {
+			`SELECT 1 FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planVar); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
 			return
 		}
-		if rid > 0 && planRid != 0 && planRid != rid {
-			httpx.WriteError(w, http.StatusForbidden, "bu plana erişiminiz yok")
+		// Bayi kapsamı TEK kaynaktan (plans/kapsam.go; yönetici kısıtsız). Eskiden
+		// `reseller_id==0` her planı geçiriyordu: kökün başka bir hostinge ÖZEL planı
+		// (sınırsız kotalar, kökün nginx direktifleri) bayinin hostingine
+		// bağlanabiliyordu (GL-04); özel plan yalnız ait olduğu hostinge bağlanır.
+		if err := plans.BaglanabilirMi(r.Context(), h.DB, rid, *req.PlanID, id); err != nil {
+			httpx.WriteError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		// Reseller: yeni planin disk kotasi bayi havuzunu asmasin (mevcut domainin
