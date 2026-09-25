@@ -3,22 +3,16 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '@/lib/api'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
+import { useUc, type Uc } from '@/components/alanpano/useUc'
+import type { KaynakOzet } from '@/components/alanpano/tipler'
+import { mb } from '@/components/alanpano/bicim'
 
-type Limit = { kullanim: number; limit: number }
-export type Ozet = {
-  alan_adi: string; sk: string; plan_adi: string; php_surum: string
-  ipv4: string; ssl_aktif: boolean; ssl_bitis?: string
-  disk_mb: Limit; trafik_mb: Limit
-  db_sayisi: Limit; ftp_sayisi: Limit; eposta_sayi: Limit; domain_sayi: Limit
-  inode_kullanim: number; inode_limit: number
-  dns_kayit: number; cron_is: number
-  yedek_sayisi: number; yedek_mb: number
-}
+// /kaynak yanıtı — tek tanım alanpano/tipler.ts'te (db_mb, eposta_olculmuyor dahil).
+export type Ozet = KaynakOzet
 
 
 const CMP_EN: Record<string, string> = {
@@ -36,24 +30,22 @@ const CMP_EN: Record<string, string> = {
   "Yedek boyutu": "Backup size",
   "Kaynak bilgisi alınamadı.": "Could not load resource info.",
   "Yeniden dene": "Retry",
+  "DB boyutu": "DB size",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-export default function DomainKaynakKart({ domainId }: { domainId: number | string }) {
+// kaynak — üst sayfa /kaynak'ı zaten çekiyorsa durumu buradan verir (sayfa başına TEK
+// çekim; bkz. SubscriptionDetailPage). Verilmezse kart kendi çekimini yapar (eski davranış).
+export default function DomainKaynakKart({ domainId, kaynak }: { domainId: number | string; kaynak?: Uc<Ozet> }) {
   useTranslation() // dil re-render aboneligi
-  const [ozet, setOzet] = useState<Ozet | null>(null)
-  const [yuk, setYuk] = useState(true)
+  // Kontrollü kullanımda (kaynak verildi) url null → kendi isteği YOK.
+  const ic = useUc<Ozet>(kaynak ? null : `/domains/${domainId}/kaynak`)
+  const k = kaynak ?? ic
+  const ozet = k.veri
+  const yukle = () => { void k.yenile() }
 
-  function yukle() {
-    setYuk(true)
-    api.get<Ozet>(`/domains/${domainId}/kaynak`)
-      .then(r => setOzet(r.data))
-      .catch(() => setOzet(null))
-      .finally(() => setYuk(false))
-  }
-  useEffect(yukle, [domainId])
-
-  if (yuk) {
+  // Yenileme sırasında eldeki veri korunur (yalnız düğme döner); iskelet yalnız ilk yüklemede.
+  if (!ozet && k.yukleniyor) {
     return (
       <Card className="bg-white dark:bg-dark-700 p-5">
         {/*
@@ -79,7 +71,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
     return (
       <Card className="bg-white dark:bg-dark-700 p-5 text-sm text-slate-500 dark:text-slate-400">
         <div className="mb-2">{cevir("Kaynak bilgisi alınamadı.")}</div>
-        <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle}>
+        <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle} yukleniyor={k.yukleniyor}>
           {cevir("Yeniden dene")}
         </Button>
       </Card>
@@ -92,7 +84,7 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
       <Card className="bg-white dark:bg-dark-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Paket ve Kaynaklar")}</h3>
-          <Button variant="flat" isIcon ikon={I.yenile} onClick={yukle} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")} />
+          <Button variant="flat" isIcon ikon={I.yenile} onClick={yukle} yukleniyor={k.yukleniyor} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")} />
         </div>
 
         <div className="mb-3 pb-3 border-b border-slate-100 dark:border-dark-600 flex items-start justify-between gap-3">
@@ -121,7 +113,10 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
         <Bar etiket={cevir(cevir("Trafik (aylık)"))} k={ozet.trafik_mb.kullanim} l={ozet.trafik_mb.limit} birim="MB" renk="sky" />
         <Bar etiket={cevir("Veritabanı")} k={ozet.db_sayisi.kullanim} l={ozet.db_sayisi.limit} birim="DB" renk="emerald" />
         <Bar etiket={cevir("FTP Hesabı")} k={ozet.ftp_sayisi.kullanim} l={ozet.ftp_sayisi.limit} birim={cevir("hesap")} renk="amber" />
-        <Bar etiket={cevir("E-posta Kutusu")} k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim={cevir("kutu")} renk="rose" />
+        {/* E-posta sayacının gerçek kaynağı yoksa (eposta_olculmuyor) çubuk hep 0 gösterirdi — gizlenir. */}
+        {!ozet.eposta_olculmuyor && (
+          <Bar etiket={cevir("E-posta Kutusu")} k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim={cevir("kutu")} renk="rose" />
+        )}
         <Bar etiket="Subdomain" k={ozet.domain_sayi.kullanim} l={ozet.domain_sayi.limit} birim="domain" renk="violet" />
       </Card>
 
@@ -159,6 +154,8 @@ export default function DomainKaynakKart({ domainId }: { domainId: number | stri
           <Mini etiket={cevir(cevir("Cron işi"))} deger={ozet.cron_is} />
           <Mini etiket={cevir("Yedek")} deger={ozet.yedek_sayisi} />
           <Mini etiket={cevir("Yedek boyutu")} deger={`${ozet.yedek_mb} MB`} />
+          {/* DB boyutu ölçülemezse arka uç alanı hiç göndermez → gizli. */}
+          {typeof ozet.db_mb === 'number' && <Mini etiket={cevir("DB boyutu")} deger={mb(ozet.db_mb)} />}
         </div>
       </Card>
     </div>
@@ -209,7 +206,7 @@ function fmt(n: number) {
   if (n >= 1024) return (n / 1024).toFixed(1) + 'k'
   return String(n)
 }
-function Sat({ e, d, mono }: { e: string; d: any; mono?: boolean }) {
+function Sat({ e, d, mono }: { e: string; d: ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-dark-600 last:border-0">
       <span className="text-xs text-slate-500 dark:text-slate-500">{e}</span>
