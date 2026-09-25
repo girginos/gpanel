@@ -134,7 +134,13 @@ func istekOkuyan(r *http.Request) (okuyan, bool) {
 	return okuyan{}, false
 }
 
-// Liste — GET /api/v1/bildirimler?sadece_okunmamis=1&kategori=antivirus
+// Liste — GET /api/v1/bildirimler?sadece_okunmamis=1&kategori=antivirus&domain_id=42
+//
+// domain_id: çağıranın görünürlük kapsamı İÇİNDE ek süzgeçtir (müşteri/alan adı
+// panosu tek alan adının bildirimlerini ister). Kapsamla AND'lenir, asla
+// genişletmez: kapsam dışı ya da var olmayan alan adı → boş liste. Geçersiz değer
+// (sayı değil / ≤0) → boş liste (kapsamın tamamına düşülmez). `okunmamis`
+// sayacı parametreden bağımsızdır: rozet her zaman kapsamın tamamını sayar.
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	o, ok := istekOkuyan(r)
 	if !ok {
@@ -152,7 +158,19 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		kosuller = append(kosuller, "b.kategori=?")
 		arg = append(arg, k)
 	}
-	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (gorunurluk() rol ifadesi + "k.bildirim_id IS NULL" + "b.kategori=?") birleştirir; kullanıcı değerleri (kategori, kimlik) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
+	if v := r.URL.Query().Get("domain_id"); v != "" {
+		did, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || did <= 0 {
+			// 🔴 Geçersiz süzgeç "süzgeçsiz" sayılmaz: çağıran tek alan adını
+			// istedi; kapsamın tamamını dönmek yanlış alan adının bildirimlerini
+			// o alan adınınmış gibi gösterirdi.
+			kosuller = append(kosuller, "1=0")
+		} else {
+			kosuller = append(kosuller, "b.domain_id=?")
+			arg = append(arg, did)
+		}
+	}
+	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (gorunurluk() rol ifadesi + "k.bildirim_id IS NULL" + "b.kategori=?" + "b.domain_id=?" / "1=0") birleştirir; kullanıcı değerleri (kategori, domain_id, kimlik) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
 	q := `SELECT b.id, b.seviye, b.kategori, b.baslik, b.mesaj, b.domain_id, b.ref_tur, b.ref_id,
 	             k.bildirim_id IS NOT NULL,
 	             DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i:%s')
@@ -163,7 +181,10 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.DB.QueryContext(r.Context(), q, arg...) //nolint:gosec // G701: q yalnız SABİT parçalardan kurulur (bkz. yukarı); istek değerleri ? ile bağlanır.
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		// Ham SQL hatası (tablo/şema/kilit ayrıntısı) istemciye gitmez; ayrıntı günlükte
+		// (Okundu ile aynı ilke).
+		log.Printf("bildirim: liste okunamadı (%s #%d): %v", o.tur, o.id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "bildirimler alınamadı, lütfen tekrar deneyin")
 		return
 	}
 	defer rows.Close()

@@ -6,14 +6,157 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// Dış etkili adımlar (sunucu geneli `nginx -t`, vhost yazımı + reload). Testler
+// sahteyle değiştirir: hata yolları ana makinenin nginx'ine dokunmadan sınanır.
+var (
+	direktifDogrula = provisioner.ValidateNginxDirectives
+	vhostUygula     = provisioner.ApplyVhostForDomain
+)
+
+// ── İstemciye dönen web sunucusu hata metinleri (F1) ─────────────────────────
+//
+// 🔴 NEDEN: `nginx -t` TEK bir alan adını değil SUNUCUNUN TÜM yapılandırmasını
+// sınar; çıktısı öteki kiracıların satırlarını taşır: sunucu genelindeki
+// `ssl_stapling on` yüzünden her SSL'li alan adı için
+// `"ssl_stapling" ignored ... certificate "/etc/pki/girginospanel/<başka-alan>/..."`
+// uyarısı, küresel bozulmada komşunun `/etc/nginx/conf.d/dom_<sk>.conf:N` yolu.
+// Bu çıktı nginx-settings / WAF / PHP kayıt uçlarından bayiye ve müşteriye
+// AYNEN dönüyordu: kök hesabın ve öteki bayilerin alan adları, sertifika
+// yolları ve sistem kullanıcı adları. Ayrıntı artık günlüğe yazılır; yönetici
+// (sunucunun sahibi) yanıtta ayrıntıyı görmeye devam eder — o veri zaten
+// onundur ve arıza ayıklamak için gereklidir (backups.Delete ile aynı ilke).
+
+// SunucuHatasiGenel — yönetici olmayana ham ayrıntı yerine dönen metin.
+const SunucuHatasiGenel = "sunucu yapılandırması uygulanamadı — ayrıntı sunucu günlüğüne yazıldı; sorun sürerse yöneticinize başvurun"
+
+// SunucuHatasi — vhost render / `nginx -t` / reload / php-fpm uygulama hatasını
+// istemciye dönecek metne çevirir. Ayrıntıyı HER ZAMAN günlüğe yazar; yanıtta
+// yalnız yöneticiye verir. Çağıranın öneki (ör. "vhost: ") korunur, böylece
+// yöneticinin gördüğü metin öncekiyle birebir aynı kalır.
+func SunucuHatasi(r *http.Request, kaynak string, domainID int64, err error) string {
+	log.Printf("%s: sunucu yapılandırması uygulanamadı (domain=%d): %v", kaynak, domainID, err)
+	if middleware.RolFrom(r) == "admin" {
+		return err.Error()
+	}
+	return SunucuHatasiGenel
+}
+
+// DirektifHatasiGenel — yönetici olmayana, kendi direktiflerine ait satır
+// ayıklanamadığında dönen metin.
+const DirektifHatasiGenel = "direktifler web sunucusu doğrulamasından geçmedi — sözdizimini ve kullanılan değişken adlarını kontrol edin"
+
+// DirektifHatasi — ek direktif doğrulama (`nginx -t`) hatasını istemciye dönecek
+// metne çevirir. Yönetici ham çıktıyı görür. Öteki roller yalnız KENDİ
+// direktiflerine ait hata satırlarını görür (bkz. DirektifHatasiOzet); böylece
+// sözdizimi hatası hâlâ düzeltilebilir kalır ama komşu yapılandırma sızmaz.
+func DirektifHatasi(r *http.Request, kaynak string, domainID int64, err error, direktifler string) string {
+	log.Printf("%s: ek direktif doğrulaması başarısız (domain=%d): %v", kaynak, domainID, err)
+	if middleware.RolFrom(r) == "admin" {
+		return err.Error()
+	}
+	if oz := DirektifHatasiOzet(err.Error(), direktifler); oz != "" {
+		return oz
+	}
+	return DirektifHatasiGenel
+}
+
+// mutlakYolRe — metindeki mutlak dosya yolu adayları.
+var mutlakYolRe = regexp.MustCompile(`/[^\s"'<>;,()]+`)
+
+// direktifYeri — provisioner.ValidateNginxDirectives geçici dosyanın yolunu bu
+// etiketle değiştirir; bu etiketi taşıyan satır YALNIZ kiracının kendi
+// direktiflerini içeren geçici server bloğundan gelir.
+const direktifYeri = "(direktifler)"
+
+// DirektifHatasiOzet — `nginx -t` çıktısından YALNIZ kiracının kendi
+// direktiflerine ait hata satırlarını ayıklar; yoksa "" döner.
+//
+// Kural (ret varsayılan):
+//   - Yalnız "[emerg]" satırları: uyarılar ([warn]) komşuların satırlarıdır
+//     (ör. her SSL'li alan adının stapling uyarısı).
+//   - Satır ya kiracının geçici dosyasını gösterir ("(direktifler)") ya da hiç
+//     dosya konumu taşımaz VE en az bir tırnaklı değer içerir VE her tırnaklı
+//     değer kiracının kendi metninde AYRI BİR SÖZCÜK olarak geçer (ör.
+//     `unknown "x" variable` — x, kiracının yazdığı $x). Sözcük eşleşmesi,
+//     kiracının kısa bir alt dizgiyle komşunun adlarını yoklamasını önler.
+//   - Kalan satırlardaki, kiracının kendi metninde geçmeyen her mutlak yol
+//     "(yol)" ile değiştirilir.
+func DirektifHatasiOzet(cikti, direktifler string) string {
+	var tut []string
+	for _, s := range strings.Split(cikti, "\n") {
+		s = strings.TrimSpace(s)
+		if !strings.Contains(s, "[emerg]") {
+			continue
+		}
+		if !strings.Contains(s, direktifYeri) {
+			if strings.Contains(s, " in /") || !tirnaklilarKendi(s, direktifler) {
+				continue
+			}
+		}
+		s = mutlakYolRe.ReplaceAllStringFunc(s, func(y string) string {
+			if strings.Contains(direktifler, y) {
+				return y
+			}
+			return "(yol)"
+		})
+		tut = append(tut, s)
+	}
+	oz := strings.Join(tut, "\n")
+	if len(oz) > 400 {
+		oz = oz[:400] + "…"
+	}
+	return oz
+}
+
+// tirnaklilarKendi — satırda en az bir tırnaklı değer var ve HER biri kiracının
+// metninde ayrı bir sözcük olarak geçiyor mu?
+func tirnaklilarKendi(satir, direktifler string) bool {
+	parca := strings.Split(satir, `"`)
+	if len(parca) < 3 {
+		return false
+	}
+	for i := 1; i < len(parca); i += 2 {
+		if !sozcukVar(direktifler, parca[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sozcukVar — metin, s'yi iki yanı harf/rakam/alt çizgi OLMAYAN bir konumda içeriyor mu?
+func sozcukVar(metin, s string) bool {
+	if s == "" {
+		return false
+	}
+	kelimeHarfi := func(b byte) bool {
+		return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+	}
+	for bas := 0; ; {
+		i := strings.Index(metin[bas:], s)
+		if i < 0 {
+			return false
+		}
+		i += bas
+		son := i + len(s)
+		if (i == 0 || !kelimeHarfi(metin[i-1])) && (son == len(metin) || !kelimeHarfi(metin[son])) {
+			return true
+		}
+		bas = i + 1
+	}
+}
 
 type Settings struct {
 	HdrXContentType bool `json:"hdr_x_content_type"`
@@ -156,8 +299,9 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+bad+"' direktifine izin verilmiyor")
 		return
 	}
-	if err := provisioner.ValidateNginxDirectives(req.Ayarlar.EkDirektifler); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz nginx direktifi: "+err.Error())
+	if err := direktifDogrula(req.Ayarlar.EkDirektifler); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest,
+			"geçersiz nginx direktifi: "+DirektifHatasi(r, "nginxset", id, err, req.Ayarlar.EkDirektifler))
 		return
 	}
 	if err := Save(r.Context(), h.DB, id, req.Ayarlar); err != nil {
@@ -169,8 +313,8 @@ func (h *Handlers) Kaydet(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "socket: "+err.Error())
 		return
 	}
-	if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, php); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost: "+err.Error())
+	if err := vhostUygula(h.DB, id, socket, php); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "vhost: "+SunucuHatasi(r, "nginxset", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -192,6 +192,7 @@ type extractIs struct {
 	Toplam int    // arşivdeki üye sayısı (0 = henüz sayılıyor)
 	Cikan  int    // şu ana dek çıkarılan üye
 	Hata   string
+	sahip  string // tenant sistem kullanıcısı — ilerlemeyi yalnız sahibi görsün
 	bitti  time.Time
 }
 
@@ -224,13 +225,35 @@ func extractIsTemizle() {
 	}
 }
 
+// extractIsBaslat: yeni çıkarma işini SAHİBİYLE (tenant sistem kullanıcısı)
+// haritaya kaydeder; ilerleme ucu yalnız sahibine gösterir (bkz. ExtractProgress).
+func extractIsBaslat(sahip string) (string, *extractIs) {
+	extractIsTemizle()
+	isID := extractIsID()
+	is := &extractIs{Durum: "calisiyor", sahip: sahip}
+	extractIslerMu.Lock()
+	extractIsler[isID] = is
+	extractIslerMu.Unlock()
+	return isID, is
+}
+
 // ExtractProgress: GET .../files/extract-progress?id=<is_id>
 func (h *Handlers) ExtractProgress(w http.ResponseWriter, r *http.Request) {
+	_, sk, err := h.home(r)
+	if err != nil {
+		httpx.WriteError(w, statusFromErr(err), err.Error())
+		return
+	}
 	id := r.URL.Query().Get("id")
 	extractIslerMu.Lock()
 	is := extractIsler[id]
 	extractIslerMu.Unlock()
-	if is == nil {
+	// 🔴 Sahip kontrolü (YK-04; ArchiveProgress ile aynı desen): iş haritası
+	// SUNUCU GENELİDİR ve eskiden yalnız ?id= ile aranıyordu. is_id sızarsa
+	// (günlük, vekil kaydı, tarayıcı geçmişi) başka bir kiracı/bayi KENDİ alan
+	// adının URL'si üzerinden yabancı işin durumunu ve hata metnini (yabancı
+	// kiracının dosya yolları) okuyabilirdi. Yabancı iş "yok" ile aynı yanıtı alır.
+	if is == nil || is.sahip != sk {
 		httpx.WriteError(w, http.StatusNotFound, "iş bulunamadı (bitmiş olabilir)")
 		return
 	}
@@ -297,12 +320,7 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 	// ── ASENKRON: büyük arşivde (100k+ üye) senkron HTTP dakikalarca askıda
 	// kalıyordu, kullanıcı hiçbir şey görmüyordu. İş goroutine'de yürür; yanıt
 	// hemen is_id döner, UI /extract-progress ile ilerlemeyi izler.
-	extractIsTemizle()
-	isID := extractIsID()
-	is := &extractIs{Durum: "calisiyor"}
-	extractIslerMu.Lock()
-	extractIsler[isID] = is
-	extractIslerMu.Unlock()
+	isID, is := extractIsBaslat(sk)
 
 	basarisiz := func(msg string) {
 		is.mu.Lock()

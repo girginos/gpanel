@@ -21,11 +21,16 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
 
 const clamBin = "/usr/bin/clamscan"
+
+// freshclamYolu — imza güncelleyicinin yolu (değişken: testler zararsız bir
+// betikle değiştirir; ana makinenin imza veritabanına dokunulmaz).
+var freshclamYolu = "/usr/bin/freshclam"
 
 // 🔴 avYakinda — Antivirus "yakinda": motor kararli olana dek tarama endpointleri
 // DEVRE DISI (yanlis-pozitif firtinasi cozulene dek). Geri acmak: false + reship.
@@ -112,7 +117,18 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	dbulgular := h.bulgularDomain(r.Context(), id)
 	resp["bulgular"] = dbulgular
 
-	// Son tarama: önce domain-özel, yoksa son HOST-geneli (domain_id=0) tarama.
+	// Son tarama: önce domain-özel; yoksa YALNIZ YÖNETİCİYE son HOST-geneli
+	// (domain_id=0) tarama.
+	//
+	// 🔴 KAPSAM (AV-DURUM-HOST-META / YK-03): host-geneli taramanın satırı
+	// SUNUCUNUN verisidir — `taranan` /home altındaki TÜM kiracıların (kök ve
+	// öteki bayiler dahil) toplam dosya sayısı, id/zamanlar kökün taramasınınki.
+	// Bu uç MusteriScope ile bayiye ve müşteriye açık; fallback eskiden onlara
+	// da düşüyor ve arayüz sunucu toplamını "bu alan adının N dosyası" diye
+	// gösteriyordu. Yönetici olmayan yalnız KENDİ alan adının taramasını görür;
+	// yoksa son_tarama boş kalır ("henüz taranmadı"). Bulgular yukarıda zaten
+	// domain_id ile kendi alan adından okunur; host taramasının bu alan adında
+	// bulduğu şeyler aşağıdaki "tarama kaydı yok ama bulgu var" dalında görünür.
 	var sid int64
 	var durum, motor, bas string
 	var bitis sql.NullString
@@ -121,7 +137,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, durum, motor, taranan, enfekte, baslangic, bitis
 		   FROM av_taramalar WHERE domain_id=? ORDER BY id DESC LIMIT 1`, id).
 		Scan(&sid, &durum, &motor, &taranan, &enfekte, &bas, &bitis)
-	if err != nil {
+	if err != nil && middleware.RolFrom(r) == "admin" {
 		err = h.DB.QueryRowContext(r.Context(),
 			`SELECT id, durum, motor, taranan, enfekte, baslangic, bitis
 			   FROM av_taramalar WHERE domain_id=0 AND durum='tamam' ORDER BY id DESC LIMIT 1`).
@@ -326,7 +342,7 @@ func (h *Handlers) Karantina(w http.ResponseWriter, r *http.Request) {
 
 // POST /domains/{id}/antivirus/imza-guncelle  → freshclam
 func (h *Handlers) ImzaGuncelle(w http.ResponseWriter, r *http.Request) {
-	if _, err := os.Stat("/usr/bin/freshclam"); err != nil {
+	if _, err := os.Stat(freshclamYolu); err != nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "freshclam kurulu değil")
 		return
 	}
@@ -337,10 +353,20 @@ func (h *Handlers) ImzaGuncelle(w http.ResponseWriter, r *http.Request) {
 	defer atomic.StoreInt32(&scanning, 0)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/freshclam").CombinedOutput()
+	out, err := exec.CommandContext(ctx, freshclamYolu).CombinedOutput()
 	cikti := string(out)
 	if len(cikti) > 4000 {
 		cikti = cikti[len(cikti)-4000:]
+	}
+	// 🔴 Ham freshclam çıktısı SUNUCU GENELİdir (imza veritabanı sürümleri,
+	// ayna adresleri, vekil/ağ hataları) ve bu uç MusteriScope ile bayiye ve
+	// müşteriye açık. Yalnız yönetici görür; ötekilere anahtar boş döner (yanıt
+	// biçimi aynı), ayrıntı günlüğe yazılır.
+	if middleware.RolFrom(r) != "admin" {
+		if err != nil {
+			log.Printf("antivirus: freshclam başarısız: %v: %s", err, strings.TrimSpace(cikti))
+		}
+		cikti = ""
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": err == nil, "imza_tarihi": newestClamDB(), "cikti": cikti,
