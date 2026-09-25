@@ -21,10 +21,18 @@ import (
 	"time"
 
 	"girginospanel/internal/dns"
+	"girginospanel/internal/domains"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/phpsurum"
 	"girginospanel/internal/provisioner"
+)
+
+// saglama / saglamaGeriAl: sistem hesabı + vhost kurulumu (testler değiştirir —
+// ret yollarının useradd/nginx yan etkisine HİÇ ulaşmadığını kanıtlamak için).
+var (
+	saglama       = provisioner.Provision
+	saglamaGeriAl = provisioner.Deprovision
 )
 
 // AktarSonuc — bir hesabin tasima ciktisi.
@@ -90,6 +98,21 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		}
 		log("hedefte mevcut domain bulundu, uzerine yaziliyor (id=%d, kok=%s)", mevcutID, webRoot)
 	} else {
+		// 🔴 PER-DOMAIN SAHİPLİK: sahiplik taşıma açıksa bu domainin KENDİ sahibini
+		// (SahipEsle[hs.SahipLogin]) kullan; yoksa Ayarlar varsayılanına düş (admin
+		// seçimi / admin-sahipli). Böylece her site kaynaktaki reseller/müşterisine gider.
+		resellerID, customerID := ay.ResellerID, ay.CustomerID
+		if hs.SahipLogin != "" && ay.SahipEsle != nil {
+			if hedef, ok := ay.SahipEsle[hs.SahipLogin]; ok {
+				resellerID, customerID = hedef.ResellerID, hedef.CustomerID
+			}
+		}
+		// 🔴 Ad-alanı (GL-02): domains.Create ile AYNI kural — oluşacak domainin
+		// sahibine (resellerID) göre başka kiracının alt/üst adı, alt alan adı, panel
+		// adları reddedilir. Sağlamadan ÖNCE (yan etkisiz); INSERT'te kilitle yeniden.
+		if err := domains.AdAlaniDenetle(ctx, h.DB, alanAdi, resellerID); err != nil {
+			return nil, fmt.Errorf("ad alanı: %w", err)
+		}
 		istenen := php
 		php = kuruluPHPSec(php)
 		if php != istenen {
@@ -98,7 +121,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 				fmt.Sprintf("PHP %s yok → %s", istenen, php))
 		}
 		log("sistem hesabi olusturuluyor (php %s)…", php)
-		pr, err := provisioner.Provision(alanAdi, php)
+		pr, err := saglama(alanAdi, php)
 		if err != nil {
 			return nil, fmt.Errorf("saglama: %w", err)
 		}
@@ -109,27 +132,22 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		dbUser, dbAdi := sk+"_db", sk+"_main"
 		// 🔴 durum='pasif': surec yarida olurse (panel restart) yarim domain
 		// "aktif" gorunmesin. Basarida 'aktif'e cevrilir.
-		// 🔴 PER-DOMAIN SAHİPLİK: sahiplik taşıma açıksa bu domainin KENDİ sahibini
-		// (SahipEsle[hs.SahipLogin]) kullan; yoksa Ayarlar varsayılanına düş (admin
-		// seçimi / admin-sahipli). Böylece her site kaynaktaki reseller/müşterisine gider.
-		resellerID, customerID := ay.ResellerID, ay.CustomerID
-		if hs.SahipLogin != "" && ay.SahipEsle != nil {
-			if hedef, ok := ay.SahipEsle[hs.SahipLogin]; ok {
-				resellerID, customerID = hedef.ResellerID, hedef.CustomerID
-			}
-		}
 		// Sahiplik hedefi geçerli mi (bayi=reseller users satırı, müşteri=customers).
 		if err := h.sahiplikDogrula(ctx, resellerID, customerID); err != nil {
-			_ = provisioner.Deprovision(alanAdi, sk)
+			_ = saglamaGeriAl(alanAdi, sk)
 			return nil, err
 		}
-		res, err := h.DB.ExecContext(ctx,
-			`INSERT INTO domains (alan_adi, sistem_kullanici, php_surum, ipv4, ftp_host,
-			   db_host, db_user, db_adi, web_root, durum, plan_id, web_backend, reseller_id, customer_id)
-			 VALUES (?,?,?,?,?,'localhost',?,?,?, 'pasif', NULLIF(?,0), 'php-fpm', ?, NULLIF(?,0))`,
-			alanAdi, sk, php, h.sunucuIP(), h.sunucuIP(), dbUser, dbAdi, pr.WebRoot, ay.PlanID, resellerID, customerID)
-		if err != nil {
-			_ = provisioner.Deprovision(alanAdi, sk)
+		var res sql.Result
+		if err := domains.AdAlaniEkle(ctx, h.DB, alanAdi, resellerID, func() error {
+			var e error
+			res, e = h.DB.ExecContext(ctx,
+				`INSERT INTO domains (alan_adi, sistem_kullanici, php_surum, ipv4, ftp_host,
+				   db_host, db_user, db_adi, web_root, durum, plan_id, web_backend, reseller_id, customer_id)
+				 VALUES (?,?,?,?,?,'localhost',?,?,?, 'pasif', NULLIF(?,0), 'php-fpm', ?, NULLIF(?,0))`,
+				alanAdi, sk, php, h.sunucuIP(), h.sunucuIP(), dbUser, dbAdi, pr.WebRoot, ay.PlanID, resellerID, customerID)
+			return e
+		}); err != nil {
+			_ = saglamaGeriAl(alanAdi, sk)
 			return nil, fmt.Errorf("domain kaydi: %w", err)
 		}
 		sonuc.DomainID, _ = res.LastInsertId()

@@ -1,6 +1,13 @@
-// template.go — Merkezi (sunucu geneli) düzenlenebilir DNS şablonu + DKIM anahtar üretimi.
+// template.go — Düzenlenebilir DNS şablonu + DKIM anahtar üretimi.
 // Domain eklerken ve "Varsayılan Şablonu Uygula" butonunda bu şablon DİNAMİK okunur.
 // Placeholder'lar: {DOMAIN} alan adı, {IP} domain IPv4, {SELECTOR} DKIM seçici, {DKIM} DKIM public TXT.
+//
+// KAPSAM (tek yerde — bkz. sablonKapsami):
+//   - kayıt satırları (dns_template): yönetici → sunucu geneli (reseller_id=0);
+//     bayi → YALNIZ kendi satırları (reseller_id = kendi users.id).
+//   - meta (dns_template_meta id=1: SOA + DKIM): SUNUCU GENELİ, tek satır; kökün ve
+//     tüm bayilerin domainlerine uygulanır → YALNIZ yönetici görür ve yazar. Bayinin
+//     gönderdiği meta YOK SAYILIR (GL-01 / B-01 / BAYI-UI-01).
 package dns
 
 import (
@@ -19,9 +26,35 @@ import (
 	"path/filepath"
 	"strings"
 
+	"girginospanel/internal/auth"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 )
+
+// sablonKapsami: DNS şablonu uçlarında çağıranın kapsamı.
+//
+//	yönetici → rid 0 (sunucu geneli satırlar) + meta okur/yazar
+//	bayi     → rid = kendi users.id; meta YOK (ne görür ne yazar)
+//
+// Bayi, rol YA DA sahiplik anahtarından biriyle tanınır (biri eksik kalsa bile
+// yönetici kapsamına DÜŞMEZ). Kimliksiz bayi jetonu (anahtar 0) ok=false alır:
+// aksi halde rid=0 ile `DELETE FROM dns_template WHERE reseller_id=0` sunucu
+// geneli şablonu silerdi.
+func sablonKapsami(c *auth.Claims) (rid int64, yonetici, ok bool) {
+	if c == nil {
+		return 0, false, false
+	}
+	if c.Role == "reseller" || c.ResellerID > 0 {
+		if c.ResellerID <= 0 {
+			return 0, false, false
+		}
+		return c.ResellerID, false, true
+	}
+	if c.Role == "admin" {
+		return 0, true, true
+	}
+	return 0, false, false
+}
 
 // TemplateRow: şablondaki tek kayıt satırı.
 type TemplateRow struct {
@@ -139,6 +172,8 @@ func LoadTemplateFor(ctx context.Context, db *sql.DB, resellerID int64) ([]Templ
 }
 
 // LoadTemplateMeta: SOA + DKIM ayarlarını okur (yoksa makul default).
+// SUNUCU GENELİ tek satır (id=1) — her kiracının domainine uygulanır; yalnız
+// yönetici yazar (PutTemplate).
 func LoadTemplateMeta(ctx context.Context, db *sql.DB) TemplateMeta {
 	m := TemplateMeta{SOARefresh: 3600, SOARetry: 900, SOAExpire: 1209600, SOAMinimum: 3600, SOATTL: 3600, DKIMSelector: "default", DKIMAktif: true}
 	var dk int
@@ -259,28 +294,48 @@ func appendUnique(path, line string) {
 	_, _ = f.WriteString(line + "\n")
 }
 
-// GetTemplate: GET /dns-template (admin) — şablon satırları + meta.
+// GetTemplate: GET /dns-template — şablon satırları (+ yalnız yöneticiye meta).
+// Bayinin kendi şablonu yoksa LoadTemplateFor sunucu geneli satırlara düşer: bunlar
+// bayinin domainlerine FİİLEN uygulanan satırlardır (her domainin kayıtlarında zaten
+// görünür), bayi kaydedince kendi kopyası oluşur. Meta ise bayiye DÖNMEZ.
 func (h *Handlers) GetTemplate(w http.ResponseWriter, r *http.Request) {
-	rid := middleware.ResellerIDFrom(r)
+	rid, yonetici, ok := sablonKapsami(middleware.ClaimsFrom(r))
+	if !ok {
+		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
+		return
+	}
 	rows, err := LoadTemplateFor(r.Context(), h.DB, rid)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"kayitlar": rows,
-		"meta":     LoadTemplateMeta(r.Context(), h.DB),
-	})
+	yanit := map[string]any{"kayitlar": rows}
+	if yonetici {
+		yanit["meta"] = LoadTemplateMeta(r.Context(), h.DB)
+	}
+	httpx.WriteJSON(w, http.StatusOK, yanit)
 }
 
-// PutTemplate: PUT /dns-template (admin) — şablonu tümüyle değiştirir (replace-all) + meta güncelle.
+// PutTemplate: PUT /dns-template — çağıranın şablon satırlarını tümüyle değiştirir
+// (replace-all); yönetici ise sunucu geneli meta'yı da günceller.
+//
+// 🔴 Bayinin gönderdiği meta YOK SAYILIR (403 değil): meta sunucu geneli tek satırdır,
+// bayi arayüzü artık göndermez; eski (önbellekteki) bir bayi istemcisi gönderse bile
+// kendi satırlarını kaydedebilsin diye istek reddedilmez, yanıt meta_yok_sayildi ile
+// bildirir. ESKİ HAL: meta rid'e bakılmadan id=1'e yazılıyordu → bayi, kökün ve tüm
+// bayilerin yeni domainlerinin SOA/DKIM'ini değiştirebiliyordu (GL-01).
 func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Kayitlar []TemplateRow `json:"kayitlar"`
-		Meta     TemplateMeta  `json:"meta"`
+		Meta     *TemplateMeta `json:"meta"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	rid, yonetici, ok := sablonKapsami(middleware.ClaimsFrom(r))
+	if !ok {
+		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
 	}
 	tx, err := h.DB.BeginTx(r.Context(), nil)
@@ -289,7 +344,6 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
-	rid := middleware.ResellerIDFrom(r)
 	if _, err := tx.ExecContext(r.Context(), `DELETE FROM dns_template WHERE reseller_id=?`, rid); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -321,42 +375,51 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	m := req.Meta
-	if strings.TrimSpace(m.DKIMSelector) == "" {
-		m.DKIMSelector = "default"
-	}
-	if m.SOARefresh <= 0 {
-		m.SOARefresh = 3600
-	}
-	if m.SOARetry <= 0 {
-		m.SOARetry = 900
-	}
-	if m.SOAExpire <= 0 {
-		m.SOAExpire = 1209600
-	}
-	if m.SOAMinimum <= 0 {
-		m.SOAMinimum = 3600
-	}
-	if m.SOATTL <= 0 {
-		m.SOATTL = 3600
-	}
-	dk := 1
-	if !m.DKIMAktif {
-		dk = 0
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		`INSERT INTO dns_template_meta(id, soa_refresh, soa_retry, soa_expire, soa_minimum, soa_ttl, dkim_selector, dkim_aktif)
-		 VALUES(1,?,?,?,?,?,?,?)
-		 ON DUPLICATE KEY UPDATE soa_refresh=VALUES(soa_refresh), soa_retry=VALUES(soa_retry),
-		   soa_expire=VALUES(soa_expire), soa_minimum=VALUES(soa_minimum), soa_ttl=VALUES(soa_ttl),
-		   dkim_selector=VALUES(dkim_selector), dkim_aktif=VALUES(dkim_aktif)`,
-		m.SOARefresh, m.SOARetry, m.SOAExpire, m.SOAMinimum, m.SOATTL, m.DKIMSelector, dk); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
+	yanit := map[string]any{"ok": true}
+	if yonetici {
+		// Yönetici davranışı DEĞİŞMEDİ: meta gönderilmezse sıfır değerler → varsayılanlar.
+		var m TemplateMeta
+		if req.Meta != nil {
+			m = *req.Meta
+		}
+		if strings.TrimSpace(m.DKIMSelector) == "" {
+			m.DKIMSelector = "default"
+		}
+		if m.SOARefresh <= 0 {
+			m.SOARefresh = 3600
+		}
+		if m.SOARetry <= 0 {
+			m.SOARetry = 900
+		}
+		if m.SOAExpire <= 0 {
+			m.SOAExpire = 1209600
+		}
+		if m.SOAMinimum <= 0 {
+			m.SOAMinimum = 3600
+		}
+		if m.SOATTL <= 0 {
+			m.SOATTL = 3600
+		}
+		dk := 1
+		if !m.DKIMAktif {
+			dk = 0
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT INTO dns_template_meta(id, soa_refresh, soa_retry, soa_expire, soa_minimum, soa_ttl, dkim_selector, dkim_aktif)
+			 VALUES(1,?,?,?,?,?,?,?)
+			 ON DUPLICATE KEY UPDATE soa_refresh=VALUES(soa_refresh), soa_retry=VALUES(soa_retry),
+			   soa_expire=VALUES(soa_expire), soa_minimum=VALUES(soa_minimum), soa_ttl=VALUES(soa_ttl),
+			   dkim_selector=VALUES(dkim_selector), dkim_aktif=VALUES(dkim_aktif)`,
+			m.SOARefresh, m.SOARetry, m.SOAExpire, m.SOAMinimum, m.SOATTL, m.DKIMSelector, dk); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if req.Meta != nil {
+		yanit["meta_yok_sayildi"] = true
 	}
 	if err := tx.Commit(); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, yanit)
 }

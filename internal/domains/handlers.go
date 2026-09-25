@@ -294,8 +294,33 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 	return nil
 }
 
+// saglama / saglamaGeriAl: sistem hesabı + vhost kurulumu (testler değiştirir —
+// ret yollarının useradd/nginx yan etkisine HİÇ ulaşmadığını kanıtlamak için).
+var (
+	saglama       = provisioner.Provision
+	saglamaGeriAl = provisioner.Deprovision
+)
+
+// adAlaniYaz: ad-alanı denetiminin sonucunu HTTP'ye çevirir. Bayiye giden metin
+// başka kiracının adını/sahibini içermez; ayrıntı yalnız yöneticiye.
+func adAlaniYaz(w http.ResponseWriter, r *http.Request, err error) {
+	var ah *AdAlaniHatasi
+	if errors.As(err, &ah) {
+		httpx.WriteError(w, http.StatusConflict, ah.Mesaj(middleware.RolFrom(r) == "admin" && middleware.ResellerIDFrom(r) == 0))
+		return
+	}
+	log.Printf("domains.Create: ad alanı denetlenemedi: %v", err)
+	httpx.WriteError(w, http.StatusInternalServerError, "alan adı denetlenemedi")
+}
+
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	rid := middleware.ResellerIDFrom(r) // >0 ise reseller olusturuyor
+	// Kimliksiz bayi jetonu (rol reseller, anahtar 0) KÖK adına hosting açmasın:
+	// aşağıdaki kapsam kapıları ve ad-alanı kuralı rid>0 ile bayiyi tanır.
+	if middleware.RolFrom(r) == "reseller" && rid <= 0 {
+		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
+		return
+	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
@@ -351,10 +376,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var existing int64
-	err := h.DB.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE alan_adi=?`, req.AlanAdi).Scan(&existing)
-	if err == nil {
-		httpx.WriteError(w, http.StatusConflict, "bu alan adı zaten kayıtlı")
+	// 🔴 Ad-alanı (GL-02 / YK-01): birebir kayıt + başka kiracının alt/üst adı +
+	// alt alan adı + panel adları. Sağlamadan ÖNCE (yan etkisiz ret); INSERT anında
+	// kilit altında yeniden denetlenir (AdAlaniEkle).
+	if err := AdAlaniDenetle(r.Context(), h.DB, req.AlanAdi, rid); err != nil {
+		adAlaniYaz(w, r, err)
 		return
 	}
 
@@ -363,7 +389,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	pr, err := provisioner.Provision(req.AlanAdi, req.PHPSurum)
+	pr, err := saglama(req.AlanAdi, req.PHPSurum)
 	if err != nil {
 		log.Printf("provision %q başarısız: %v", req.AlanAdi, err)
 		httpx.WriteError(w, http.StatusInternalServerError, "sağlama başarısız: "+err.Error())
@@ -381,15 +407,25 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		dbUser, dbName = "", ""
 	}
 
-	// 2) domains satırı
-	res, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO domains(alan_adi, sistem_kullanici, php_surum, ssl_aktif, durum, ipv4,
-		   ftp_host, ftp_user, db_host, db_user, db_adi, web_root, is_demo, reseller_id)
-		 VALUES(?,?,?,0,'aktif',?,?,?, 'localhost',?,?,?, 0, ?)`,
-		req.AlanAdi, pr.SistemKullanici, req.PHPSurum, h.IPv4,
-		h.IPv4, pr.SistemKullanici, dbUser, dbName, pr.WebRoot, rid)
-	if err != nil {
-		_ = provisioner.Deprovision(req.AlanAdi, pr.SistemKullanici)
+	// 2) domains satırı — ad-alanı denetimiyle AYNI kilit altında (sağlama sürerken
+	// başka kiracı üst/alt adı açmış olabilir).
+	var res sql.Result
+	if err := AdAlaniEkle(r.Context(), h.DB, req.AlanAdi, rid, func() error {
+		var e error
+		res, e = h.DB.ExecContext(r.Context(),
+			`INSERT INTO domains(alan_adi, sistem_kullanici, php_surum, ssl_aktif, durum, ipv4,
+			   ftp_host, ftp_user, db_host, db_user, db_adi, web_root, is_demo, reseller_id)
+			 VALUES(?,?,?,0,'aktif',?,?,?, 'localhost',?,?,?, 0, ?)`,
+			req.AlanAdi, pr.SistemKullanici, req.PHPSurum, h.IPv4,
+			h.IPv4, pr.SistemKullanici, dbUser, dbName, pr.WebRoot, rid)
+		return e
+	}); err != nil {
+		_ = saglamaGeriAl(req.AlanAdi, pr.SistemKullanici)
+		var ah *AdAlaniHatasi
+		if errors.As(err, &ah) {
+			adAlaniYaz(w, r, err)
+			return
+		}
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kayıt başarısız: "+err.Error())
 		return
 	}

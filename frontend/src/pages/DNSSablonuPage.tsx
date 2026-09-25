@@ -9,6 +9,7 @@ import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
+import { useRol } from '@/lib/rol'
 
 type Row = {
   id?: number
@@ -60,6 +61,8 @@ const DNSTPL_EN: Record<string, string> = {
   "DNS Şablonu": "DNS Template",
   "Kayıt Ekle": "Add Record",
   "Merkezi DNS Şablonu": "Central DNS Template",
+  "DNS Şablonum": "My DNS Template",
+  "Yalnızca sizin hosting hesaplarınıza uygulanır; SOA ve DKIM ayarlarını sunucu yöneticisi yönetir.": "Applies only to your hosting accounts; SOA and DKIM settings are managed by the server administrator.",
   "Satırı sil": "Delete row",
   "Varsayılan Şablonu Uygula": "Apply Default Template",
   "Şablon kaydedilemedi": "Failed to save template",
@@ -71,6 +74,10 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (DNSTPL_EN[tr] |
 
 export default function DNSSablonuPage() {
   useTranslation() // dil re-render aboneligi
+  // SOA/DKIM (meta) SUNUCU GENELİ tek ayardır — yalnız yönetici görür ve kaydeder.
+  // Bayi yalnız kendi kayıt satırlarını yönetir; sunucu ona meta döndürmez, bayinin
+  // gönderdiği meta yok sayılır (GL-01 / BAYI-UI-01).
+  const yonetici = useRol() === 'admin'
   const [rows, setRows] = useState<Row[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
   const [yuk, setYuk] = useState(true)
@@ -81,8 +88,8 @@ export default function DNSSablonuPage() {
 
   function yukle() {
     setYuk(true)
-    api.get<{ kayitlar: Row[]; meta: Meta }>('/dns-template')
-      .then(r => { setRows(r.data.kayitlar || []); setMeta(r.data.meta) })
+    api.get<{ kayitlar: Row[]; meta?: Meta }>('/dns-template')
+      .then(r => { setRows(r.data.kayitlar || []); setMeta(r.data.meta ?? null) })
       .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
@@ -99,10 +106,10 @@ export default function DNSSablonuPage() {
   }
 
   async function kaydet() {
-    if (!meta) return
+    if (yonetici && !meta) return
     setHata(null); setBasari(null); setKaydediyor(true)
     try {
-      await api.put('/dns-template', { kayitlar: rows, meta })
+      await api.put('/dns-template', yonetici ? { kayitlar: rows, meta } : { kayitlar: rows })
       const iyi = cevir("Şablon kaydedildi. Yeni domainler ve") + ' “' + cevir("Varsayılan Şablonu Uygula") + '” ' + cevir("bu şablonu kullanır.")
       setBasari(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
@@ -121,10 +128,11 @@ export default function DNSSablonuPage() {
   return (
     <div className="px-6 md:px-8 py-6">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' }, { etiket: cevir("DNS Şablonu") }]} />
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Merkezi DNS Şablonu")}</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir(yonetici ? "Merkezi DNS Şablonu" : "DNS Şablonum")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         {cevir("Yeni bir domain eklendiğinde ve")} <span className="font-medium">{cevir("Varsayılan Şablonu Uygula")}</span> {cevir("butonuna basıldığında bu şablon uygulanır.")}
         {' '}{cevir("Değişiklikleriniz anında geçerli olur.")}
+        {!yonetici && <>{' '}{cevir("Yalnızca sizin hosting hesaplarınıza uygulanır; SOA ve DKIM ayarlarını sunucu yöneticisi yönetir.")}</>}
       </p>
 
       <UyariKutusu ton="bilgi" className="mb-4">
@@ -204,8 +212,8 @@ export default function DNSSablonuPage() {
             </div>
           </div>
 
-          {/* Meta: SOA + DKIM */}
-          {meta && (
+          {/* Meta: SOA + DKIM — sunucu geneli, YALNIZ yönetici */}
+          {yonetici && meta && (
             <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-5">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("SOA & DKIM Parametreleri")}</h2>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
