@@ -28,6 +28,7 @@ package toplu
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +42,7 @@ import (
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	bayikilit "girginospanel/internal/kilit"
+	"github.com/go-sql-driver/mysql"
 	"golang.org/x/sys/unix"
 )
 
@@ -90,86 +92,34 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 	if yeniParola == "" {
 		return nil, fmt.Errorf("güvenli parola üretilemedi (crypto/rand) — devir iptal")
 	}
+	// 🔴 FTP-DEVIR-DUZMETIN: ftp_accounts.password_md5 AT-REST $6$ crypt'tir —
+	// Pure-FTPd `MYSQLCrypt crypt` crypt(girilen, saklanan) == saklanan diye
+	// doğrular. Eski kod DÜZ METİN yazıyordu → yeni sahip kendisine gösterilen
+	// parolayla FTP'de 530 alıyordu (panel girişi FTPParolaDogrula'nın düz-metin
+	// geri dönüşüyle çalıştığı için hata gizleniyordu). FTPCreate/FTPUpdatePassword
+	// ile aynı hash; düz parola yalnız sonuc.YeniFTPParola'da (yöneticiye gösterim).
+	// Hash (openssl) transaction'dan ÖNCE: işlem kısa kalsın, üretilemezse devir hiç başlamasın.
+	parolaHash := hesaplar.FTPParolaHash(yeniParola)
+	if !hesaplar.IsFTPHash(parolaHash) {
+		return nil, fmt.Errorf("FTP parola hash'i üretilemedi — devir iptal")
+	}
 
-	// ── 1) Sahiplik (transaction) ──────────────────────────────────────────
-	// NOT: reseller_id şeması NOT NULL DEFAULT 0'dır (0 = ana hesap/admin);
-	// customer_id ise NULL kabul eder. Eski kod ikisine de NULLIF(?,0)
-	// uyguluyordu → "Ana hesap" hedefiyle her devir Error 1048 ile DÜŞÜYORDU
-	// (STRICT_TRANS_TABLES). Artık her kolon kendi semantiğiyle yazılır.
-	tx, err := h.DB.BeginTx(ctx, nil)
-	if err != nil {
+	// ── 1-6) Sahiplik + kimlik rotasyonu (TEK transaction) ─────────────────
+	// 🔴 BLD-1: InnoDB kilitlenmesinde (1213) kurban işlem TÜMÜYLE geri alınır.
+	// Eskiden bu hata bir adımda uyarıya çevrilip Commit'e gidiliyordu; Commit boş
+	// dönüyor, devir "başarılı" sayılıyor, yöneticiye hiç yazılmamış parola
+	// gösteriliyor, eski sahip erişimini koruyordu. Artık işlemi bozan her hata
+	// devri düşürür ve kilit çakışmasında işlemin TAMAMI baştan denenir.
+	var txUyari []string
+	if err := bildirim.KilitDenemeli(ctx, func() error {
+		var e error
+		txUyari, e = h.devirTx(ctx, did, eskiRID.Int64, resellerID, customerID, parolaHash)
+		return e
+	}); err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	if resellerID != nil {
-		if _, err := tx.ExecContext(ctx, "UPDATE domains SET reseller_id=? WHERE id=?", *resellerID, did); err != nil {
-			return nil, fmt.Errorf("sahiplik (bayi): %w", err)
-		}
-	}
-	if customerID != nil {
-		if _, err := tx.ExecContext(ctx, "UPDATE domains SET customer_id=NULLIF(?,0) WHERE id=?", *customerID, did); err != nil {
-			return nil, fmt.Errorf("sahiplik (müşteri): %w", err)
-		}
-	}
-
-	// ── 2) Müşteri oturumlarını düşür + FTP PAROLASINI ROTASYONA SOK ────────
-	// İkisi de transaction içinde ve domain_id anahtarıyla: müşteri girişi
-	// (ftp_accounts.username+password_md5) devirden sonra ESKİ parolayla
-	// yapılamamalı. Eski kod parolayı WHERE username=? ile ayrı çağrıda
-	// döndürüyor ve RowsAffected'a bakmıyordu → username desync'inde SESSİZCE
-	// no-op olur, denetime "döndürüldü=true" yazılır, eski sahip girmeye devam
-	// ederdi. Artık domain_id ile, transaction içinde, satır sayısı doğrulanarak.
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE ftp_accounts SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE domain_id=?", did); err != nil {
-		return nil, fmt.Errorf("oturum düşürme: %w", err)
-	}
-	res, err := tx.ExecContext(ctx,
-		"UPDATE ftp_accounts SET password_md5=? WHERE domain_id=?", yeniParola, did)
-	if err != nil {
-		return nil, fmt.Errorf("FTP parola rotasyonu: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Bu domain için FTP hesabı yok/eşleşmedi: erişim kesilemez, devri durdur.
-		return nil, fmt.Errorf("FTP hesabı bulunamadı (domain_id=%d) — erişim kesilemez, devir iptal", did)
-	}
+	sonuc.Uyarilar = append(sonuc.Uyarilar, txUyari...)
 	sonuc.YeniFTPParola = yeniParola
-
-	// ── 3) Git webhook secret'ı yenile ─────────────────────────────────────
-	// Kimlik doğrulamasız uç; eski secret elde kaldığı sürece kod push'lanabilir.
-	yeniWH := hesaplar.RandomParola(32)
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE git_repos SET webhook_secret=?, webhook_secret_hash=? WHERE domain_id=?",
-		gizli.SaklaBagli(yeniWH, "webhook"), gizli.Sha256Hex(yeniWH), did); err != nil {
-		uyar("git webhook secret yenilenemedi: %v", err)
-	}
-
-	// ── 4) Offsite yedek hedefini pasifleştir ──────────────────────────────
-	// Silmiyoruz: yeni sahip neyin durduğunu görsün, ama kimlik bilgisi kalmasın.
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE backup_destinations SET aktif=0, parola='' WHERE domain_id=?", did); err != nil {
-		uyar("uzak yedek hedefi pasifleştirilemedi: %v", err)
-	}
-
-	// ── 5) GitHub bağlantısını (PAT) kopar ─────────────────────────────────
-	if _, err := tx.ExecContext(ctx, "DELETE FROM github_connections WHERE domain_id=?", did); err != nil {
-		uyar("github bağlantısı koparılamadı: %v", err)
-	}
-
-	// ── 6) Açık bildirimleri yeni sahibe taşı ──────────────────────────────
-	// Eski sahibin okudukları onda kalır (geçmiş onun dönemine ait). "Açık"
-	// ölçütü ve "Ana hesap" (0) → NULL dönüşümü bildirim paketinde (B4: eskiden
-	// reseller_id=0 yazılıyor, bildirimler yöneticiden de eski bayiden de
-	// kayboluyordu).
-	if resellerID != nil {
-		if err := bildirim.SahipDevri(ctx, tx, did, eskiRID.Int64, *resellerID); err != nil {
-			uyar("bildirimler taşınamadı: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("devir kaydedilemedi: %w", err)
-	}
 
 	// ── 7) SSH/SFTP sistem parolasını FTP ile eşitle ───────────────────────
 	// FTP parolası (panel + FTP girişi) transaction'da GARANTİ değişti. Sistem
@@ -205,6 +155,119 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 		httpx.DomainKapsam(h.DB, did), true)
 
 	return sonuc, nil
+}
+
+// devirTx — devrin DB adımları (1-6), TEK transaction'da. Her çağrı işlemi
+// baştan açar; bildirim.KilitDenemeli kilit çakışmasında bunu yeniden koşar.
+// Hata dönerse HİÇBİR değişiklik kalıcı değildir (Rollback).
+func (h *Handlers) devirTx(ctx context.Context, did, eskiRID int64, resellerID, customerID *int64, parolaHash string) ([]string, error) {
+	var uyarilar []string
+	// Best-effort adım: yalnız o ifadeyi etkileyen sunucu hatası uyarıya çevrilir;
+	// işlemi bozan hata (kilitlenme, bağlantı) devri düşürür.
+	enIyiCaba := func(err error, adim string) error {
+		if adimHatasiYutulabilir(err) {
+			uyarilar = append(uyarilar, fmt.Sprintf("%s: %v", adim, err))
+			return nil
+		}
+		return fmt.Errorf("%s: %w", adim, err)
+	}
+
+	// ── 1) Sahiplik ────────────────────────────────────────────────────────
+	// NOT: reseller_id şeması NOT NULL DEFAULT 0'dır (0 = ana hesap/admin);
+	// customer_id ise NULL kabul eder. Eski kod ikisine de NULLIF(?,0)
+	// uyguluyordu → "Ana hesap" hedefiyle her devir Error 1048 ile DÜŞÜYORDU
+	// (STRICT_TRANS_TABLES). Artık her kolon kendi semantiğiyle yazılır.
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if resellerID != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE domains SET reseller_id=? WHERE id=?", *resellerID, did); err != nil {
+			return nil, fmt.Errorf("sahiplik (bayi): %w", err)
+		}
+	}
+	if customerID != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE domains SET customer_id=NULLIF(?,0) WHERE id=?", *customerID, did); err != nil {
+			return nil, fmt.Errorf("sahiplik (müşteri): %w", err)
+		}
+	}
+
+	// ── 2) Müşteri oturumlarını düşür + FTP PAROLASINI ROTASYONA SOK ────────
+	// İkisi de transaction içinde ve domain_id anahtarıyla: müşteri girişi
+	// (ftp_accounts.username+password_md5) devirden sonra ESKİ parolayla
+	// yapılamamalı. Eski kod parolayı WHERE username=? ile ayrı çağrıda
+	// döndürüyor ve RowsAffected'a bakmıyordu → username desync'inde SESSİZCE
+	// no-op olur, denetime "döndürüldü=true" yazılır, eski sahip girmeye devam
+	// ederdi. Artık domain_id ile, transaction içinde, satır sayısı doğrulanarak.
+	// password_md5'e $6$ crypt hash'i yazılır (düz metin DEĞİL — bkz. devret).
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE ftp_accounts SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE domain_id=?", did); err != nil {
+		return nil, fmt.Errorf("oturum düşürme: %w", err)
+	}
+	res, err := tx.ExecContext(ctx,
+		"UPDATE ftp_accounts SET password_md5=? WHERE domain_id=?", parolaHash, did)
+	if err != nil {
+		return nil, fmt.Errorf("FTP parola rotasyonu: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Bu domain için FTP hesabı yok/eşleşmedi: erişim kesilemez, devri durdur.
+		return nil, fmt.Errorf("FTP hesabı bulunamadı (domain_id=%d) — erişim kesilemez, devir iptal", did)
+	}
+
+	// ── 3) Git webhook secret'ı yenile ─────────────────────────────────────
+	// Kimlik doğrulamasız uç; eski secret elde kaldığı sürece kod push'lanabilir.
+	yeniWH := hesaplar.RandomParola(32)
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE git_repos SET webhook_secret=?, webhook_secret_hash=? WHERE domain_id=?",
+		gizli.SaklaBagli(yeniWH, "webhook"), gizli.Sha256Hex(yeniWH), did); err != nil {
+		if e := enIyiCaba(err, "git webhook secret yenilenemedi"); e != nil {
+			return nil, e
+		}
+	}
+
+	// ── 4) Offsite yedek hedefini pasifleştir ──────────────────────────────
+	// Silmiyoruz: yeni sahip neyin durduğunu görsün, ama kimlik bilgisi kalmasın.
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE backup_destinations SET aktif=0, parola='' WHERE domain_id=?", did); err != nil {
+		if e := enIyiCaba(err, "uzak yedek hedefi pasifleştirilemedi"); e != nil {
+			return nil, e
+		}
+	}
+
+	// ── 5) GitHub bağlantısını (PAT) kopar ─────────────────────────────────
+	if _, err := tx.ExecContext(ctx, "DELETE FROM github_connections WHERE domain_id=?", did); err != nil {
+		if e := enIyiCaba(err, "github bağlantısı koparılamadı"); e != nil {
+			return nil, e
+		}
+	}
+
+	// ── 6) Açık bildirimleri yeni sahibe taşı ──────────────────────────────
+	// Eski sahibin okudukları onda kalır (geçmiş onun dönemine ait). "Açık"
+	// ölçütü ve "Ana hesap" (0) → NULL dönüşümü bildirim paketinde (B4: eskiden
+	// reseller_id=0 yazılıyor, bildirimler yöneticiden de eski bayiden de
+	// kayboluyordu). Hata devri DÜŞÜRÜR (BLD-1): kilitlenmede tx çoktan geri
+	// alınmıştır; uyarıya çevirip Commit etmek geri alınmış devri başarılı gösterir.
+	if resellerID != nil {
+		if err := bildirim.SahipDevri(ctx, tx, did, eskiRID, *resellerID); err != nil {
+			return nil, fmt.Errorf("bildirim devri: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("devir kaydedilemedi: %w", err)
+	}
+	return uyarilar, nil
+}
+
+// adimHatasiYutulabilir — best-effort bir transaction adımının hatası yalnız O
+// İFADEYİ mi etkiledi (ör. 1146 tablo yok)? Kilit çakışması (1213 tüm işlemi
+// geri alır, 1205 işlemi yarım bırakır) ve sunucu dışı hatalar (bağlantı koptu,
+// ctx iptal — işlemin durumu bilinmez) yutulamaz.
+func adimHatasiYutulabilir(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && !bildirim.KilitCakismasi(err)
 }
 
 // bayiKotaKapisi — hedef bayinin domain/disk kotası devri kaldırıyor mu?

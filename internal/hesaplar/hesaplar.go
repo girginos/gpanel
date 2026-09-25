@@ -264,8 +264,11 @@ func MySQLDropAllForDomain(db *sql.DB, domainID int64) error {
 }
 
 // SyncSSHPassword: sistem (SSH) hesabının parolasını FTP parolasıyla eşitler.
-// FTP parolası ftp_accounts.password_md5 sütununda cleartext tutulur
-// (Pure-FTPd MYSQLCrypt cleartext) — böylece SSH parolası = FTP parolası olur.
+// FTP parolası ftp_accounts.password_md5 sütununda $6$ crypt hash'i olarak
+// tutulur (Pure-FTPd MYSQLCrypt crypt) ve /etc/shadow'a aynen yazılır — böylece
+// SSH parolası = FTP parolası olur. 🔴 password_md5'e DÜZ METİN YAZMAYIN: FTP
+// 530 verir (crypt(girilen, düz) ≠ düz). Yazıcılar FTPParolaHash kullanmalı
+// (FTPCreate, FTPUpdatePassword, toplu devir, sifreheal).
 func SyncSSHPassword(db *sql.DB, sistemKullanici string) error {
 	if !strings.HasPrefix(sistemKullanici, "c_") {
 		return fmt.Errorf("güvenlik: c_ prefiksli olmayan kullanıcı")

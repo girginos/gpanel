@@ -35,10 +35,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-sql-driver/mysql"
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
@@ -196,45 +202,148 @@ func (h *Handlers) Okundu(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err := okunduYaz(r.Context(), h.DB, o, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		// Ham SQL hatası (tablo/kilit ayrıntısı) istemciye gitmez; ayrıntı günlükte.
+		log.Printf("bildirim: okundu yazılamadı (%s #%d, id=%d): %v", o.tur, o.id, id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "bildirimler güncellenemedi, lütfen tekrar deneyin")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// KilitDenemeSayisi — KilitDenemeli'nin bir işlemi en fazla kaç kez BAŞTAN koştuğu.
+const KilitDenemeSayisi = 4
+
+// KilitCakismasi — err, işlemin baştan yeniden denenmesi gereken bir InnoDB kilit
+// hatası mı? 1213 (kilitlenme): InnoDB kurban seçtiği işlemin TAMAMINI geri alır;
+// aynı bağlantıda sonraki ifadeler autocommit'te koşar ve Commit boş döner — hata
+// yutulursa geri alınan değişiklik "başarılı" görünür (BLD-1). 1205 (kilit
+// beklemesi aşımı): yalnız ifade geri alınır ama işlem yarımdır.
+func KilitCakismasi(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && (me.Number == 1213 || me.Number == 1205)
+}
+
+// KilitDenemeli — fn'i kilit çakışmasında (KilitCakismasi) en fazla
+// KilitDenemeSayisi kez, artan ve rastgele beklemeyle yeniden koşar. fn HER
+// çağrıda kendi transaction'ını baştan açıp kapatmalıdır (geri alınmış işlemin
+// devamı yoktur). Diğer hatalar ve ctx iptali hemen döner.
+func KilitDenemeli(ctx context.Context, fn func() error) error {
+	for deneme := 1; ; deneme++ {
+		err := fn()
+		if err == nil || !KilitCakismasi(err) || deneme >= KilitDenemeSayisi {
+			return err
+		}
+		// Görünür olsun: sık görülürse kilit sırası yeniden bozulmuştur.
+		log.Printf("db: kilit çakışması (deneme %d/%d), işlem yeniden deneniyor: %v", deneme, KilitDenemeSayisi, err)
+		bekle := time.Duration(deneme*15+rand.IntN(25)) * time.Millisecond //nolint:gosec // G404: yeniden deneme titreşimi; güvenlikle ilgisi yok.
+		t := time.NewTimer(bekle)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return err
+		case <-t.C:
+		}
+	}
+}
+
+// okunduParca — tek ifadedeki en fazla kimlik (yer tutucu sınırının çok altında).
+const okunduParca = 500
+
+// pkGuncelle — kilitlenmiş satırları YALNIZ birincil anahtarla güncelleme başı.
+// 🔴 FORCE INDEX (PRIMARY) şart: "id IN (…)" listesi tablonun büyük kısmını
+// tutunca iyileştirici tam tarama seçiyor (EXPLAIN: type=index) ve REPEATABLE-READ'de
+// UPDATE taradığı HER satırı X kilitliyor — başka kapsamların satırları dahil;
+// ayrık kapsamlı eşzamanlı "tümünü okundu"lar kilitlenmeye düşüyordu. Aynı
+// nedenle "okundu = 0" gibi ek koşul yazılmaz (idx_bildirim_okundu taranırdı).
+// PRIMARY her şemada vardır; ipucu hiçbir kurulumda hata veremez.
+const pkGuncelle = `UPDATE cp_bildirim FORCE INDEX (PRIMARY) SET `
+
 // okunduYaz — görüntüleyenin okundu kayıtları + "en az biri okudu" sütunu, tek
-// işlemde. id=0 → görünür hepsi. INSERT IGNORE: eşzamanlı iki "tümünü okundu"
-// yinelenen anahtarda düşmesin.
+// işlemde. id=0 → görünür hepsi. Kilit çakışmasında işlem baştan denenir.
 //
 // 🔴 Kapsam ŞART: aksi hâlde bir kullanıcı görmediği bildirimi (başka kiracının)
 // okundu işaretleyebilirdi. Kayıt yalnız görünür satırlar için yazılır.
 func okunduYaz(ctx context.Context, db *sql.DB, o okuyan, id int64) error {
-	kos, scopeArg := o.gorunurluk()
-	okK, okArg := o.okumadi()
-	hedef := ""
-	var hedefArg []any
+	return KilitDenemeli(ctx, func() error { return okunduYazTek(ctx, db, o, id) })
+}
+
+// okunduYazTek — okunduYaz'ın tek denemesi.
+//
+// 🔴 KİLİT SIRASI (BLD-1/BLD-2): eski sürüm önce INSERT IGNORE…SELECT ile
+// cp_bildirim satırlarına PAYLAŞIMLI (S) kilit alıp ardından UPDATE ile aynı
+// satırlarda DIŞLAYICI (X) kilide yükseltiyordu. Aynı satırları isteyen ikinci
+// bir işlem (eşzamanlı "tümünü okundu", bayi+müşteri, sahiplik devrinin
+// SahipDevri'si) ile bu S→X yükseltmesi kilitlenme (1213) üretiyordu: okundu
+// isteği 500 alıyor, devir ise sessizce geri alınıyordu. "INSERT IGNORE" bunu
+// önlemez — düşülen yer yinelenen anahtar değil kilittir.
+//
+// Artık: (1) kapsamdaki satırlar TEK taramada, en baştan X kilitlenir (SELECT …
+// FOR UPDATE) — aynı satırları isteyen işlemler burada sıraya girer, yükseltme
+// yok; (2) okundu kayıtları kilitli kimliklerle VALUES'tan yazılır — tabloyu
+// NOT EXISTS ile tarayıp kilitlemek (paylaşımlı aralık kilidi) yok, yinelenen
+// satırı INSERT IGNORE atlar; (3) bayrak birincil anahtarla güncellenir.
+func okunduYazTek(ctx context.Context, db *sql.DB, o okuyan, id int64) error {
+	kos, arg := o.gorunurluk()
 	if id != 0 {
-		hedef = " AND b.id = ?"
-		hedefArg = []any{id}
+		kos += " AND b.id = ?"
+		arg = append(append([]any{}, arg...), id)
 	}
-	isaretArg := append([]any{o.tur, o.id}, scopeArg...)
-	isaretArg = append(append(isaretArg, okArg...), hedefArg...)
-	bayrakArg := append(append([]any{}, scopeArg...), hedefArg...)
-	isaretQ := `INSERT IGNORE INTO cp_bildirim_okundu (bildirim_id, okuyan_tur, okuyan_id) SELECT b.id, ?, ? FROM cp_bildirim b WHERE ` + kos + ` AND ` + okK + hedef //nolint:gosec // G202: kos/okK/hedef SABİT ifadeler (gorunurluk/okumadi/" AND b.id = ?"); değerler ? ile bağlanır.
-	bayrakQ := `UPDATE cp_bildirim b SET b.okundu = 1 WHERE ` + kos + ` AND b.okundu = 0` + hedef                                                                     //nolint:gosec // G202: kos/hedef SABİT ifadeler; değerler ? ile bağlanır.
+	kilitQ := `SELECT b.id FROM cp_bildirim b WHERE ` + kos + ` FOR UPDATE` //nolint:gosec // G202: kos SABİT ifade (gorunurluk + " AND b.id = ?"); değerler ? ile bağlanır.
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, isaretQ, isaretArg...); err != nil { //nolint:gosec // G701: isaretQ SABİT parçalardan; değerler ? ile bağlanır.
+	idler, err := kimlikler(ctx, tx, kilitQ, arg...)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, bayrakQ, bayrakArg...); err != nil { //nolint:gosec // G701: bayrakQ SABİT parçalardan; değerler ? ile bağlanır.
-		return err
+	for bas := 0; bas < len(idler); bas += okunduParca {
+		parca := idler[bas:min(bas+okunduParca, len(idler))]
+		yer := strings.TrimSuffix(strings.Repeat("?,", len(parca)), ",")
+		degerler := make([]any, 0, 3*len(parca))
+		for _, b := range parca {
+			degerler = append(degerler, b, o.tur, o.id)
+		}
+		isaretQ := `INSERT IGNORE INTO cp_bildirim_okundu (bildirim_id, okuyan_tur, okuyan_id) VALUES ` + //nolint:gosec // G202: yalnız "(?,?,?)" yer tutucu tekrarı; değerler ? ile bağlanır.
+			strings.TrimSuffix(strings.Repeat("(?,?,?),", len(parca)), ",")
+		if _, err := tx.ExecContext(ctx, isaretQ, degerler...); err != nil { //nolint:gosec // G701: isaretQ yalnız yer tutuculardan; değerler ? ile bağlanır.
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, pkGuncelle+`okundu = 1 WHERE id IN (`+yer+`)`, idAny(parca)...); err != nil { //nolint:gosec // G202/G701: yalnız yer tutucular; kimlikler ? ile bağlanır.
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+// kimlikler — tek sütunlu (BIGINT) sorgunun sonuçları.
+func kimlikler(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, sorgu string, arg ...any) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, sorgu, arg...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func idAny(l []int64) []any {
+	out := make([]any, len(l))
+	for i, v := range l {
+		out[i] = v
+	}
+	return out
 }
 
 // Yaz — modül-içi kullanım (AV, SSL, ...): bildirim oluştur. domainID>0 ise
@@ -327,20 +436,78 @@ func ayniOkunmamis(db *sql.DB, o okuyan, kategori, baslik, refTur string, refID 
 // bayiden de kayboluyordu.
 //
 // ex genelde devrin transaction'ıdır (*sql.Tx) — sahiplik ile birlikte taşınır.
+// Hata döndüğünde çağıran devri BAŞARISIZ saymalıdır: kilitlenme (1213) tüm
+// transaction'ı geri almıştır (bkz. KilitCakismasi).
+//
+// 🔴 KİLİT SIRASI (BLD-1): okunduYazTek ile aynı ilke — önce ilgili cp_bildirim
+// satırları X kilitlenir, cp_bildirim_okundu KİLİTSİZ okunur, sonra birincil
+// anahtarla güncellenir. Eski tek UPDATE, NOT EXISTS alt sorgusuyla
+// cp_bildirim_okundu'ya paylaşımlı aralık kilitleri koyuyordu; aynı aralığa okundu
+// kaydı ekleyen eşzamanlı bir "tümünü okundu" ile kilitlenme döngüsü kurulabiliyordu.
+//
+// Kilitsiz okuma neden doğru: cp_bildirim_okundu → cp_bildirim yabancı anahtarı,
+// bir satıra okundu kaydı ekleyen her işlemin o cp_bildirim satırında paylaşımlı
+// kilidi commit'e dek tutmasını gerektirir; X kilidini aldığımız anda o satırın
+// bütün okundu kayıtları commit edilmiştir ya da yenisi bizim commit'imizi bekler.
+// REPEATABLE-READ'de okuma görüntüsü işlemdeki ilk kilitsiz okumada açılır —
+// devret'te bu okuma, yani kilitlerden sonra. (Çağıran daha önce kilitsiz okuma
+// yapmışsa arada okunan bir bildirim yeni sahibe taşınabilir; zararsız: domain artık onun.)
 func SahipDevri(ctx context.Context, ex interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, domainID, eskiResellerID, yeniResellerID int64) error {
 	if domainID <= 0 || eskiResellerID == yeniResellerID {
 		return nil
 	}
 	eski := sahipOkuyan(eskiResellerID)
 	kos, arg := eski.gorunurluk()
-	okK, okArg := eski.okumadi()
-	args := append([]any{yeniResellerID, domainID}, arg...)
-	args = append(args, okArg...)
-	q := `UPDATE cp_bildirim b SET b.reseller_id = NULLIF(?, 0) WHERE b.domain_id = ? AND ` + kos + ` AND ` + okK //nolint:gosec // G202: kos/okK SABİT ifadeler; değerler ? ile bağlanır.
-	_, err := ex.ExecContext(ctx, q, args...)                                                                     //nolint:gosec // G701: q SABİT parçalardan; değerler ? ile bağlanır.
-	return err
+	// 🔴 DİZİN SIRASI: satırlar idx_bildirim_reseller üzerinden (eski sahibin
+	// aralığı) kilitlenir — eski sahibin "tümünü okundu"su da AYNI dizini aynı
+	// sırada tarar (önce dizin kaydı, sonra satır). idx_bildirim_domain ya da
+	// index_merge ile kilitlenince devir önce SATIRI tutup ardından reseller_id
+	// değişikliği için DİZİN kaydını istiyordu; okuyan tersini yapıyordu → 1213.
+	// Ayrıca domainin başka sahiplerden kalma geçmiş satırlarına (yeni sahibin
+	// okuduğu aralık) hiç dokunulmaz. Dizin (0082) yoksa ipucusuz sorguya düşülür.
+	kilitQ := `SELECT b.id FROM cp_bildirim b FORCE INDEX (idx_bildirim_reseller) WHERE b.domain_id = ? AND ` + kos + ` FOR UPDATE` //nolint:gosec // G202: kos SABİT ifade (gorunurluk); değerler ? ile bağlanır.
+	kilitArg := append([]any{domainID}, arg...)
+	idler, err := kimlikler(ctx, ex, kilitQ, kilitArg...)
+	var me *mysql.MySQLError
+	if errors.As(err, &me) && me.Number == 1176 { // ER_KEY_DOES_NOT_EXITS: dizin yok (şema kayması)
+		idler, err = kimlikler(ctx, ex, strings.Replace(kilitQ, ` FORCE INDEX (idx_bildirim_reseller)`, ``, 1), kilitArg...)
+	}
+	if err != nil || len(idler) == 0 {
+		return err
+	}
+	okunan := map[int64]bool{}
+	for bas := 0; bas < len(idler); bas += okunduParca {
+		parca := idler[bas:min(bas+okunduParca, len(idler))]
+		yer := strings.TrimSuffix(strings.Repeat("?,", len(parca)), ",")
+		l, err := kimlikler(ctx, ex,
+			`SELECT bildirim_id FROM cp_bildirim_okundu WHERE okuyan_tur = ? AND okuyan_id = ? AND bildirim_id IN (`+yer+`)`, //nolint:gosec // G202: yalnız yer tutucular; değerler ? ile bağlanır.
+			append([]any{eski.tur, eski.id}, idAny(parca)...)...)
+		if err != nil {
+			return err
+		}
+		for _, v := range l {
+			okunan[v] = true
+		}
+	}
+	// "Açık" = eski sahibin henüz okumadığı; okudukları onun döneminin geçmişi olarak onda kalır.
+	var acik []int64
+	for _, v := range idler {
+		if !okunan[v] {
+			acik = append(acik, v)
+		}
+	}
+	for bas := 0; bas < len(acik); bas += okunduParca {
+		parca := acik[bas:min(bas+okunduParca, len(acik))]
+		yer := strings.TrimSuffix(strings.Repeat("?,", len(parca)), ",")
+		if _, err := ex.ExecContext(ctx, pkGuncelle+`reseller_id = NULLIF(?, 0) WHERE id IN (`+yer+`)`, //nolint:gosec // G202/G701: yalnız yer tutucular; değerler ? ile bağlanır.
+			append([]any{yeniResellerID}, idAny(parca)...)...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func joinAnd(l []string) string {
