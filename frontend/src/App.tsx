@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { useAuth, girisYolu } from '@/store/auth'
-import { musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
+import { useAuth, depoBaskaOturumda } from '@/store/auth'
+import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
 import KapiGiris from '@/components/KapiGiris'
@@ -86,9 +86,9 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
     // Gelmek istenen yolu koru; giriş sonrası oraya DÖN (login'de bırakma).
     const hedef = loc.pathname + loc.search
     const next = hedef && hedef !== '/' ? `?next=${encodeURIComponent(hedef)}` : ''
-    // Son oturum müşteriyse (çıkış, süre dolması, 401) müşteri giriş formu:
-    // kapı modu kapalı (karma) kurulumda /giris yönetici formunu gösterirdi.
-    return <Navigate to={`${girisYolu()}${next}`} replace />
+    // Son oturum müşteriyse (çıkış, süre dolması, 401) ve hedef müşteriye ait
+    // olabilirse müşteri giriş formu; yönetici/bayi yolları her zaman /giris.
+    return <Navigate to={`${girisYolu(loc.pathname)}${next}`} replace />
   }
   return <>{children}</>
 }
@@ -112,7 +112,16 @@ function RolKapisi() {
 
 function BozukMusteriOturumu() {
   const cikis = useAuth((s) => s.cikis)
-  useEffect(() => { cikis() }, [cikis])
+  const hidrate = useAuth((s) => s.hidrate)
+  useEffect(() => {
+    // Yeniden koşuda (StrictMode, yeniden çizim) karar zaten verilmişse dokunma.
+    if (useAuth.getState().kullanici?.rol !== 'user' || musteriDomainID() !== null) return
+    // Depo başka sekmenin oturumundaysa (aynı kökende sonradan giriş yapıp müşteri
+    // bayraklarını sildi) bu sekmenin müşteri oturumu bozuk değil BAYATTIR: depoya
+    // dokunulmaz, sekme depodaki oturumu benimser (MFE-2). Gerçekten bozuksa çıkış.
+    if (depoBaskaOturumda()) hidrate()
+    else cikis()
+  }, [cikis, hidrate])
   return null
 }
 

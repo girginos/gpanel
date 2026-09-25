@@ -176,6 +176,13 @@ const EN: Record<string, string> = {
   'Yeni kapıdan henüz giriş yok': 'No sign-in on the new gate yet',
   '{0}: yeni kapıdan henüz hiç giriş görülmedi — bu kullanıcılar hâlâ eski adresi kullanıyor olabilir.':
     '{0}: no sign-in has been seen on the new gate yet — these users may still be using the old address.',
+  'Bu sekmenin adresi artık {0} kapısı': "This tab's address is now the {0} gate",
+  'Bu sekme geçiş kapısından (eski adres) bağlıydı; o port artık {0} kapısı ve buradaki yönetici oturumu sona erdi.':
+    'This tab was connected through the transition gate (old address); that port is now the {0} gate and the administrator session here has ended.',
+  'Yönetici adresinizden giriş yapın:': 'Sign in at your administrator address:',
+  'Yönetici adresine git': 'Go to the administrator address',
+  'Yönetici kapısı yalnız SSH tüneliyle erişilir: masaüstü uygulamasından giriş yapın.':
+    'The administrator gate is reachable only through the SSH tunnel: sign in from the desktop app.',
 }
 
 // onDegisti: durumu sunucudan yeniden okur; true = okundu (yanıtsız kalan bir değişiklikten
@@ -296,10 +303,49 @@ export default function PanelKapilari({ kapi, onDegisti }: { kapi: KapiDurum; on
         await yoneticiOturumuBitti(d.yeni_port)
         return
       }
+      // RKUI-3: bu sekmenin portu (geçiş kapısı) artık bayi/müşteri kapısı — yönetici yeni
+      // adresini doğruladıysa sunucu eski portu role devreder. Sekmenin jetonu o kapıda
+      // geçersiz: /portlar'ı yeniden okumak 401 → "geçersiz oturum" hata tostu ve bu porttaki
+      // (sunucunun 404'lediği) yönetici formu demekti. Oturum bilinçli kapatılır.
+      if (uygulandi && d.zorlama && rol !== 'admin' && sekmePortu() === d.yeni_port) {
+        await sekmeRoleDevredildi(etiket)
+        return
+      }
       void onDegisti()
     } finally {
       setMesgul(false)
     }
+  }
+
+  // Bu sekmenin adresi bayi/müşteri kapısı oldu: yönetici adresine yönlendirilir (yönetici
+  // portu bu işlemde değişmedi → kapi.admin). Çıkış yönlendirmeden ÖNCE: jeton hiçbir
+  // kapıda işe yaramaz. "Oturumu kapat" TAM yükleme ile girişe gider: kapı tipi sayfa
+  // açılışında önbelleğe alındı ("karma"); SPA içi /giris bu porttaki yönetici formunu
+  // gösterirdi, yeni yükleme kapıyı yeniden sorar ve bu kapının kendi formunu açar.
+  async function sekmeRoleDevredildi(etiket: string) {
+    const yoneticiAdresi = adres('admin', kapi.admin)
+    const baslik = cevirT(cevir('Bu sekmenin adresi artık {0} kapısı'), etiket)
+    const neden = cevirT(cevir('Bu sekme geçiş kapısından (eski adres) bağlıydı; o port artık {0} kapısı ve buradaki yönetici oturumu sona erdi.'), etiket)
+    if (yoneticiAdresi === null) {
+      await dialog.bilgi({
+        baslik,
+        mesaj: `${neden} ${cevir('Yönetici kapısı yalnız SSH tüneliyle erişilir: masaüstü uygulamasından giriş yapın.')}`,
+        onayEtiketi: cevir('Oturumu kapat'), ton: 'uyari', onayIkonu: I.cikis,
+      })
+    } else {
+      const gec = await dialog.onay({
+        baslik,
+        mesaj: `${neden} ${cevir('Yönetici adresinizden giriş yapın:')} ${yoneticiAdresi}`,
+        onayEtiketi: cevir('Yönetici adresine git'), iptalEtiketi: cevir('Oturumu kapat'), ton: 'uyari', onayIkonu: I.ileri,
+      })
+      if (gec) {
+        cikis()
+        window.location.assign(yoneticiAdresi)
+        return
+      }
+    }
+    cikis()
+    window.location.assign('/giris')
   }
 
   // Yönetici portu uygulandı ve zorlama açık: bu sekmenin yönetici-kapısı jetonu artık "eski"

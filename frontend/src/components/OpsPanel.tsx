@@ -247,8 +247,14 @@ export default function OpsPanel() {
           <i />{yenileSn ? cevir('Canlı') : cevir('Duruk')}
           {sonCekim ? ` · ${sonCekim.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
         </span>
-        <Button isIcon variant="outlined" ikon={I.yenile} yukleniyor={cekiyor} onClick={cek}
-          title={cevir('Şimdi yenile')} aria-label={cevir('Şimdi yenile')} className="size-8" />
+        {/* yukleniyor prop'u BİLEREK yok: düğmeyi devre dışı bırakır, odaktaki düğme devre
+            dışı kalınca tarayıcı odağı <body>'ye atar — her elle ve otomatik yenilemede klavye/
+            ekran okuyucu kullanıcısı yerini kaybederdi (TX16-1). Çakışmayı mesgul ref'i önlüyor;
+            yüklenirken yalnız ikon döner ve aria-busy bildirilir. */}
+        <Button isIcon variant="outlined" onClick={cek} aria-busy={cekiyor || undefined}
+          title={cevir('Şimdi yenile')} aria-label={cevir('Şimdi yenile')} className="size-8">
+          <SvgIkon d={I.yenile} className={`size-4 shrink-0${cekiyor ? ' animate-spin' : ''}`} />
+        </Button>
       </div>
 
       {/* tek-değer kutuları */}

@@ -7,7 +7,7 @@
 // users.role ENUM'u 'user' içeriyor, giriş yolu genişlerse eşdeğerlik bozulur.
 //
 // Yalnız 'user' rolünü etkiler — yönetici ve bayi davranışı değişmez.
-import { useAuth, KEY_MUSTERI_DOM, type Kullanici } from '@/store/auth'
+import { useAuth, KEY_MUSTERI_DOM, sonOturumMusteri, type Kullanici } from '@/store/auth'
 
 export type Rol = Kullanici['rol']
 
@@ -45,6 +45,22 @@ export function musteriYoluIzinli(yol: string, domainID: number): boolean {
   if (MUSTERI_SERBEST.has(y)) return true
   const kok = `/abonelikler/${domainID}`
   return y === kok || y.startsWith(kok + '/')
+}
+
+// Oturumu olmayan ziyaretçinin gideceği giriş formu (GuardedRoute). Kapı modu açıkken
+// KapiGiris zaten doğru forma çevirir; bu, kapı modu kapalı (karma) kurulum içindir.
+// Son oturum müşteriyse YALNIZ müşteriye ait olabilecek hedefler (/, bir abonelik yolu,
+// /profil, /bildirimler …) müşteri formuna gider; yönetici/bayi yolları (/araclar/…,
+// /domainler …) HER ZAMAN /giris'e — aynı tarayıcıdaki yönetici müşteri izine kilitlenmez
+// (MFE-1). '/' için müşteri formunda "Yönetim girişi" bağlantısı var (CPanelGirisPage).
+// Oturum açılınca domain kimliği silindiğinden abonelik yolu yalnız BİÇİMİYLE tanınır.
+export function girisYolu(hedef: string): '/giris' | '/cp/giris' {
+  return sonOturumMusteri() && musteriYoluOlabilir(hedef) ? '/cp/giris' : '/giris'
+}
+
+export function musteriYoluOlabilir(yol: string): boolean {
+  const y = yol.length > 1 ? yol.replace(/\/+$/, '') : yol
+  return y === '' || y === '/' || MUSTERI_SERBEST.has(y) || /^\/abonelikler\/[1-9][0-9]{0,14}(\/|$)/.test(y)
 }
 
 // Kırıntı (Breadcrumb) merkezi eşlemesi — 60+ sayfaya tek tek dokunmadan:

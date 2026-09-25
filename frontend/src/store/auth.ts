@@ -37,15 +37,23 @@ function sonOturumYaz(tip: OturumTipi) {
   try { localStorage.setItem(KEY_SON_OTURUM, tip) } catch { /* yoksay */ }
 }
 
-// Oturum bitince gidilecek giriş formu. Kapı modu açıkken KapiGiris zaten doğru
-// forma çevirir; bu, kapı modu kapalı (karma) kurulumda müşterinin yönetici
-// formunu görmemesi içindir.
-export function girisYolu(): '/giris' | '/cp/giris' {
+// Bu tarayıcıda son açılan oturum müşteri oturumu muydu? Tek başına giriş formunu
+// SEÇMEZ: karar hedef yolla birlikte verilir (lib/rol.ts girisYolu) — yoksa aynı
+// tarayıcıdaki yönetici/bayi, çıkışı olmayan müşteri formuna kilitlenirdi (MFE-1).
+export function sonOturumMusteri(): boolean {
   try {
-    return localStorage.getItem(KEY_SON_OTURUM) === 'musteri' ? '/cp/giris' : '/giris'
+    return localStorage.getItem(KEY_SON_OTURUM) === 'musteri'
   } catch {
-    return '/giris'
+    return false
   }
+}
+
+// Depodaki (localStorage) oturum bu sekmenin bellekteki oturumundan FARKLI mı? Aynı
+// kökende başka bir sekme bu sekmeden sonra giriş yaptıysa depo artık onundur.
+export function depoBaskaOturumda(): boolean {
+  let t: string | null = null
+  try { t = localStorage.getItem(KEY_TOKEN) } catch { return false }
+  return t !== null && t !== useAuth.getState().token
 }
 
 function musteriBayrakSil() {
@@ -111,14 +119,19 @@ export const useAuth = create<AuthState>((set, get) => ({
     return { kullanici: k }
   }),
   cikis: () => {
-    if (get().kullanici?.rol === 'user') sonOturumYaz('musteri')
-    localStorage.removeItem(KEY_TOKEN)
-    localStorage.removeItem(KEY_USER)
-    localStorage.removeItem(KEY_EXP)
-    musteriBayrakSil()
+    // 🔴 Depo başka bir sekmenin oturumunu taşıyorsa ona DOKUNULMAZ: bu sekmenin çıkışı
+    // yalnız kendi (bellekteki) oturumunu kapatır. Aksi hâlde bayat bir müşteri sekmesinin
+    // çıkışı (401, rol kapısı, Çıkış) sonradan giriş yapan yöneticinin oturumunu siler ve
+    // son-oturum izini 'musteri'ye çevirirdi (MFE-2).
+    if (!depoBaskaOturumda()) {
+      if (get().kullanici?.rol === 'user') sonOturumYaz('musteri')
+      localStorage.removeItem(KEY_TOKEN)
+      localStorage.removeItem(KEY_USER)
+      localStorage.removeItem(KEY_EXP)
+      musteriBayrakSil()
+    }
     set({ token: null, kullanici: null, bitis: null })
   },
-  hidrate: () => {
-    /* ilkDurum() ilk render'da yapıyor */
-  },
+  // Belleği depodaki oturumla yeniden eşitler (ilk durum açılışta ilkDurum() ile okunur).
+  hidrate: () => set(ilkDurum()),
 }))
