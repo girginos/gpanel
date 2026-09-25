@@ -13,6 +13,7 @@ package domains
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -24,7 +25,24 @@ import (
 
 	"girginospanel/internal/dns"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
+)
+
+// Dış etkili adımlar (sertifika çekimi/üretimi + vhost render + SUNUCU GENELİ
+// `nginx -t`; posta sunucusu, webmail vhost'u, DKIM). Testler sahteyle
+// değiştirir: ilerleme kaydına ne yazıldığı ve kime ne gösterildiği ana
+// makineye (acme.sh, nginx, posta eklentisi, named) dokunmadan sınanır.
+var (
+	sslSelfSigned   = provisioner.EnableSelfSigned
+	sslLetsEncrypt  = provisioner.EnableLetsEncrypt
+	mailSertAl      = provisioner.MailSertifikaAl
+	mailSertGonder  = provisioner.MailSertifikaGonder
+	mailVarsayilan  = provisioner.MailVarsayilanKur
+	webmailVhostYaz = provisioner.WebmailVhostDomainYaz
+	mailDKIMAl      = provisioner.MailDKIMTXTAl
+	mailDKIMYayinla = dns.MailDKIMYayinla
 )
 
 // SSLAdim — tek SSL adımı.
@@ -34,6 +52,10 @@ type SSLAdim struct {
 	Durum  string `json:"durum"` // bekliyor|calisiyor|tamam|uyari|hata
 	Mesaj  string `json:"mesaj"`
 	Sure   string `json:"sure"`
+
+	// genel — yönetici OLMAYAN okuyucuya Mesaj yerine gösterilen metin (bkz.
+	// Goruntu). Ham araç çıktısı taşımaz.
+	genel string
 }
 
 // sslIsi — bir domain için SSL kurulum oturumu.
@@ -59,6 +81,9 @@ type sslIsi struct {
 	// altında kalır: çubuk %99'da durur, iş bitince arayüz 100'e çeker.
 	// Eksik göstermek, olmayan bir ilerlemeyi uydurmaktan iyidir.
 	Toplam int
+
+	// hataGenel — yönetici olmayan okuyucuya Hata yerine gösterilen metin.
+	hataGenel string
 }
 
 // SSLGoruntu — kilitsiz JSON kopyası.
@@ -73,12 +98,29 @@ type SSLGoruntu struct {
 	Toplam   int       `json:"toplam"`
 }
 
-func (k *sslIsi) Goruntu() SSLGoruntu {
+// Goruntu — oturumun okuyucuya dönecek kopyası.
+//
+// 🔴 Adım mesajları ve iş hatası HAM araç çıktısı taşır: vhost render → SUNUCU
+// GENELİ `nginx -t` (komşu kiracıların /etc/pki/girginospanel/<alan>/…
+// sertifika ve dom_<sk>.conf yolları), webmail vhost'u, posta eklentisi,
+// varsayılan posta sertifikası, named. Kayıt, işi BAŞLATANDAN bağımsız olarak
+// alan adına erişen herkesçe okunur (yönetici başlatır → bayi/müşteri izler;
+// bayi başlatır → yönetici izler). Bu yüzden süzme YAZARKEN başlatanın rolüne
+// göre değil, OKURKEN okuyanın rolüne göre yapılır: yazarken hem ham hem genel
+// metin saklanır, ham metin yalnız yöneticiye verilir (arıza ayıklama).
+func (k *sslIsi) Goruntu(yonetici bool) SSLGoruntu {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	a := make([]SSLAdim, len(k.Adimlar))
 	copy(a, k.Adimlar)
-	g := SSLGoruntu{DomainID: k.DomainID, AlanAdi: k.AlanAdi, Durum: k.Durum, Hata: k.Hata, Adimlar: a, Toplam: k.Toplam}
+	hata := k.Hata
+	if !yonetici {
+		for i := range a {
+			a[i].Mesaj = a[i].genel
+		}
+		hata = k.hataGenel
+	}
+	g := SSLGoruntu{DomainID: k.DomainID, AlanAdi: k.AlanAdi, Durum: k.Durum, Hata: hata, Adimlar: a, Toplam: k.Toplam}
 	if !k.Basladi.IsZero() {
 		g.Basladi = k.Basladi.UTC().Format(time.RFC3339)
 	}
@@ -88,8 +130,28 @@ func (k *sslIsi) Goruntu() SSLGoruntu {
 	return g
 }
 
+// sslUyari — HAM araç çıktısı taşıyan UYARI (iş durmaz). ham: öncekiyle
+// birebir aynı metin (yönetici görür, günlüğe yazılır); genel: aynı önek, ham
+// çıktının yerinde günlük notu (öteki okuyucular görür).
+type sslUyari struct{ ham, genel string }
+
+func (u *sslUyari) Error() string { return u.ham }
+
+// sslUyariHam — "onek: <ham hata><ek>" uyarısı. ek: güvenli sonek (ör. kiracının
+// kendi atlanan alt adları) — iki metinde de aynen kalır.
+func sslUyariHam(onek string, e error, ek string) (string, bool, error) {
+	return "", true, &sslUyari{
+		ham:   onek + ": " + e.Error() + ek,
+		genel: onek + " — ayrıntı sunucu günlüğüne yazıldı" + ek,
+	}
+}
+
 // adim — adımı işler; fn (mesaj, uyari, err) döner. err → 'hata' + iş durur;
 // uyari=true → 'uyari' + iş DEVAM eder (mail SSL web SSL'i bloklamaz).
+//
+// 🔴 Ham araç çıktısı taşıyan uyarı DÜZ mesajla dönmez: sslUyariHam ile döner
+// (err = *sslUyari → uyarı; ham yalnız yöneticiye). Düz uyarı/tamam mesajı
+// herkese gösterilir; hata adımının metni yalnız yöneticiye (bkz. Goruntu).
 func (k *sslIsi) adim(ad, etiket string, fn func() (string, bool, error)) error {
 	k.mu.Lock()
 	k.Adimlar = append(k.Adimlar, SSLAdim{Ad: ad, Etiket: etiket, Durum: "calisiyor"})
@@ -100,16 +162,27 @@ func (k *sslIsi) adim(ad, etiket string, fn func() (string, bool, error)) error 
 	basla := time.Now()
 	mesaj, uyari, err := fn()
 	sure := time.Since(basla).Round(100 * time.Millisecond).String()
+	genel := ""
+	var uy *sslUyari
+	if errors.As(err, &uy) {
+		mesaj, genel, uyari, err = uy.ham, uy.genel, true, nil
+	}
 
 	k.mu.Lock()
 	k.Adimlar[i].Sure = sure
 	switch {
 	case err != nil:
 		k.Adimlar[i].Durum, k.Adimlar[i].Mesaj = "hata", sslKirp(err.Error(), 800)
+		k.Adimlar[i].genel = nginxset.SunucuHatasiGenel
 	case uyari:
+		if genel == "" {
+			genel = mesaj
+		}
 		k.Adimlar[i].Durum, k.Adimlar[i].Mesaj = "uyari", sslKirp(mesaj, 800)
+		k.Adimlar[i].genel = sslKirp(genel, 800)
 	default:
 		k.Adimlar[i].Durum, k.Adimlar[i].Mesaj = "tamam", sslKirp(mesaj, 800)
+		k.Adimlar[i].genel = k.Adimlar[i].Mesaj
 	}
 	k.mu.Unlock()
 
@@ -133,9 +206,9 @@ func (k *sslIsi) bitir(err error) {
 	k.mu.Lock()
 	k.Bitti = time.Now()
 	if err != nil {
-		k.Durum, k.Hata = "hata", sslKirp(err.Error(), 400)
+		k.Durum, k.Hata, k.hataGenel = "hata", sslKirp(err.Error(), 400), nginxset.SunucuHatasiGenel
 	} else {
-		k.Durum, k.Hata = "tamam", ""
+		k.Durum, k.Hata, k.hataGenel = "tamam", "", ""
 	}
 	k.mu.Unlock()
 }
@@ -214,9 +287,9 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 		err := k.adim("cert", etiket, func() (string, bool, error) {
 			var e error
 			if tip == "self-signed" {
-				certYol, keyYol, e = provisioner.EnableSelfSigned(alanAdi, sk, phpSurum, backend)
+				certYol, keyYol, e = sslSelfSigned(alanAdi, sk, phpSurum, backend)
 			} else {
-				certYol, keyYol, e = provisioner.EnableLetsEncrypt(alanAdi, sk, phpSurum, backend)
+				certYol, keyYol, e = sslLetsEncrypt(alanAdi, sk, phpSurum, backend)
 			}
 			if e != nil {
 				return "", false, e
@@ -268,13 +341,13 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 				dogruTamam := k.adim("mail-dogrula",
 					"Posta alt-alanları doğrulanıyor ve sertifika alınıyor (mail, webmail, smtp, imap, pop, autoconfig, autodiscover)",
 					func() (string, bool, error) {
-						c, key, kapsam, atlanan, e := provisioner.MailSertifikaAl(alanAdi, sk, mailAltlar)
+						c, key, kapsam, atlanan, e := mailSertAl(alanAdi, sk, mailAltlar)
 						if e != nil {
-							m := "posta sertifikası alınamadı: " + e.Error()
+							ek := ""
 							if len(atlanan) > 0 {
-								m += " | atlanan: " + strings.Join(atlanan, ", ")
+								ek = " | atlanan: " + strings.Join(atlanan, ", ")
 							}
-							return m, true, nil // uyari — web SSL etkilenmez
+							return sslUyariHam("posta sertifikası alınamadı", e, ek) // uyari — web SSL etkilenmez
 						}
 						mc, mk = c, key
 						m := "kapsam: " + strings.Join(kapsam, ", ")
@@ -286,21 +359,21 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 
 				if dogruTamam && mc != "" {
 					_ = k.adim("mail-kur", "Sertifika posta sunucusuna kuruluyor", func() (string, bool, error) {
-						if e := provisioner.MailSertifikaGonder(alanAdi, mc, mk); e != nil {
-							return "sertifika alındı ama posta sunucusuna gönderilemedi: " + e.Error(), true, nil
+						if e := mailSertGonder(alanAdi, mc, mk); e != nil {
+							return sslUyariHam("sertifika alındı ama posta sunucusuna gönderilemedi", e, "")
 						}
 						// Varsayılan (SNI-siz) sertifikayı da geçerli yap: Outlook gibi
 						// SNI göndermeyen istemciler self-signed görüp şifre soruyordu.
-						if degisti, e := provisioner.MailVarsayilanKur(mc, mk); e != nil {
-							return "posta SNI sertifikası kuruldu; varsayılan (SNI-siz) güncellenemedi: " + e.Error(), true, nil
+						if degisti, e := mailVarsayilan(mc, mk); e != nil {
+							return sslUyariHam("posta SNI sertifikası kuruldu; varsayılan (SNI-siz) güncellenemedi", e, "")
 						} else if degisti {
 							return "posta sunucusu sertifikaya geçirildi (SNI + varsayılan — SNI göndermeyen istemciler de güvenli)", false, nil
 						}
 						return "posta sunucusu (IMAP/POP/SMTP) sertifikaya geçirildi", false, nil
 					})
 					_ = k.adim("webmail", "Webmail ve otomatik kurulum (autodiscover) yapılandırılıyor", func() (string, bool, error) {
-						if e := provisioner.WebmailVhostDomainYaz(alanAdi, mc, mk); e != nil {
-							return "webmail vhost güncellenemedi: " + e.Error(), true, nil
+						if e := webmailVhostYaz(alanAdi, mc, mk); e != nil {
+							return sslUyariHam("webmail vhost güncellenemedi", e, "")
 						}
 						return "webmail.<d>, autoconfig ve autodiscover güvenli sertifikayla yapılandırıldı", false, nil
 					})
@@ -308,15 +381,15 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 					// mail._domainkey key'ini panel DNS'e yayınla (uyumsuz default._domainkey
 					// kaldırılır). Aksi halde alıcı public key'i bulamaz, DKIM doğrulanamaz.
 					_ = k.adim("dkim-dns", "DKIM imzası DNS'e yayınlanıyor (mail._domainkey)", func() (string, bool, error) {
-						txt, e := provisioner.MailDKIMTXTAl(alanAdi)
+						txt, e := mailDKIMAl(alanAdi)
 						if e != nil {
-							return "DKIM anahtarı eklentiden alınamadı: " + e.Error(), true, nil
+							return sslUyariHam("DKIM anahtarı eklentiden alınamadı", e, "")
 						}
 						if txt == "" {
 							return "eklenti DKIM anahtarı vermedi — DNS'e yazılmadı", true, nil
 						}
-						if e := dns.MailDKIMYayinla(ctx, h.DB, id, txt); e != nil {
-							return "DKIM DNS'e yazılamadı: " + e.Error(), true, nil
+						if e := mailDKIMYayinla(ctx, h.DB, id, txt); e != nil {
+							return sslUyariHam("DKIM DNS'e yazılamadı", e, "")
 						}
 						return "DKIM public key mail._domainkey olarak yayınlandı (imzalayan gerçek anahtar)", false, nil
 					})
@@ -338,5 +411,5 @@ func (h *Handlers) SSLIlerleme(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"durum": "yok"})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, k.Goruntu())
+	httpx.WriteJSON(w, http.StatusOK, k.Goruntu(middleware.RolFrom(r) == "admin"))
 }

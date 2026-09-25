@@ -27,6 +27,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -89,6 +90,31 @@ func kisaHata(err error) string {
 		m = m[:180] + "…"
 	}
 	return m
+}
+
+// erisimIstemciHatasi — render hatasının istemciye dönen metni.
+//
+// 🔴 kisaHata yalnız İLK "/etc/nginx" sonrasını kesiyordu; ondan ÖNCE gelen ya
+// da hiç "/etc/nginx" içermeyen ham çıktı (apache backend'li alt alanın
+// SUNUCU GENELİ `httpd -t` satırları: komşu kiracıların
+// /etc/httpd/conf.d/sub_apache_<sk>_… yolları; php-fpm/reload çıktısı) bayiye
+// ve müşteriye aynen dönüyordu. Yönetici önceki metni birebir görür; öteki
+// roller genel mesaj alır, ayrıntı günlüğe yazılır (internal/erisim ile aynı).
+func erisimIstemciHatasi(r *http.Request, id int64, err error) string {
+	if middleware.RolFrom(r) == "admin" {
+		return kisaHata(err)
+	}
+	return nginxset.SunucuHatasi(r, "subdomain.erisim", id, err)
+}
+
+// erisimDenetimHatasi — denetim kaydının ayrıntısı. Denetim kaydı işlemi yapana
+// (bayiye) /denetim'de aynen gösterilir; ham çıktı yalnız yönetici eylemlerinde
+// saklanır (ayrıntı zaten erisimIstemciHatasi ile günlüğe yazıldı).
+func erisimDenetimHatasi(r *http.Request, err error) string {
+	if middleware.RolFrom(r) == "admin" {
+		return err.Error()
+	}
+	return nginxset.SunucuHatasiGenel
 }
 
 // GET /domains/{id}/subdomain/{sid}/erisim
@@ -174,9 +200,9 @@ func (h *Handlers) ErisimKaydet(w http.ResponseWriter, r *http.Request) {
 			_ = h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, php)
 		}
 		h.erisimDenetle(r, domainID, "altalan.erisim.ayar", tamAd,
-			"render basarisiz, GERI ALINDI: "+err.Error(), false)
+			"render basarisiz, GERI ALINDI: "+erisimDenetimHatasi(r, err), false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"ayar uygulanamadı, önceki durum geri yüklendi: "+kisaHata(err))
+			"ayar uygulanamadı, önceki durum geri yüklendi: "+erisimIstemciHatasi(r, domainID, err))
 		return
 	}
 	h.erisimDenetle(r, domainID, "altalan.erisim.ayar", tamAd,
@@ -249,7 +275,7 @@ func (h *Handlers) ErisimKuralEkle(w http.ResponseWriter, r *http.Request) {
 		h.erisimDenetle(r, domainID, "altalan.erisim.kural.ekle", tamAd,
 			"render basarisiz, GERI ALINDI: "+tip+" "+cidr, false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"kural uygulanamadı, eklenmedi: "+kisaHata(err))
+			"kural uygulanamadı, eklenmedi: "+erisimIstemciHatasi(r, domainID, err))
 		return
 	}
 	h.erisimDenetle(r, domainID, "altalan.erisim.kural.ekle", tamAd, tip+" "+cidr, true)
@@ -292,7 +318,7 @@ func (h *Handlers) ErisimKuralSil(w http.ResponseWriter, r *http.Request) {
 		h.erisimDenetle(r, domainID, "altalan.erisim.kural.sil", tamAd,
 			"render basarisiz, GERI ALINDI: kural_id="+strconv.FormatInt(kid, 10), false)
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"kural silinemedi, geri yüklendi: "+kisaHata(err))
+			"kural silinemedi, geri yüklendi: "+erisimIstemciHatasi(r, domainID, err))
 		return
 	}
 	h.erisimDenetle(r, domainID, "altalan.erisim.kural.sil", tamAd,

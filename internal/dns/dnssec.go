@@ -71,9 +71,9 @@ func (h *Handlers) PostDNSSEC(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	if zerr := zoneYaz(r.Context(), h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone(dnssec) domain=%d: %v", id, zerr)
-		httpx.WriteError(w, http.StatusInternalServerError, "zone güncellenemedi: "+zerr.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "zone güncellenemedi: "+zoneHatasi(r, id, zerr))
 		return
 	}
 	out := DNSSECDurum{Aktif: req.Aktif}

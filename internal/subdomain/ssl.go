@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
@@ -20,7 +21,12 @@ import (
 // Subdomain SSL: self-signed veya Let's Encrypt. Parent domain ile AYNI mantık
 // (openssl / acme.sh --webroot /var/www/_acme) ama subdomain vhost'una (sub_*.conf) uygulanır.
 
-func sslDir(sk string) string { return "/home/" + sk + "/ssl" }
+func sslDir(sk string) string { return evKoku + "/" + sk + "/ssl" }
+
+// acmeKoku — ACME HTTP-01 kökünü hazırlayıp döner (/var/www/acme + config home
+// izinleri, restorecon). Testler sahteyle değiştirir (ana makineye dokunulmaz).
+var acmeKoku = provisioner.AcmeWebroot
+
 func sslSid(r *http.Request) int64 {
 	v, _ := strconv.ParseInt(chi.URLParam(r, "sid"), 10, 64)
 	return v
@@ -105,42 +111,42 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 		// DEGIL. Kiracinin yazabildigi bir koke "allow all" vermek, erisim
 		// kisitlamasini atlatma kapisi acar (olculdu). Vhost tarafi da AYNI
 		// koku gosteriyor; ikisi birlikte degismeli.
-		_ = provisioner.AcmeWebroot()
-		_, _ = exec.Command("restorecon", "-R", filepath.Join(docroot, ".well-known")).CombinedOutput()
-		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
-			"--config-home", provisioner.AcmeConfigHome(), "--webroot", provisioner.AcmeWebroot(),
-			"-d", tamAd, "--keylength", "ec-256").CombinedOutput(); err != nil {
+		_ = acmeKoku()
+		_, _ = komut("restorecon", "-R", filepath.Join(docroot, ".well-known"))
+		if out, err := komut("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
+			"--config-home", provisioner.AcmeConfigHome(), "--webroot", acmeKoku(),
+			"-d", tamAd, "--keylength", "ec-256"); err != nil {
 			// 🔴 acme.sh çıkış kodu 2 = RENEW_SKIP: geçerli cert ZATEN var, yenileme gerekmiyor.
 			// Bu HATA DEĞİL — mevcut cert'i install-cert ile yerleştirmeye devam et. Aksi halde
 			// (eski hata) ikinci kurulumda "Let's Encrypt alınamadı" yanılgısı verip panel SSL'i
 			// hiç kurmuyordu. Yalnız DİĞER çıkış kodları (DNS/challenge hatası) gerçek başarısızlık.
 			if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 {
 				httpx.WriteError(w, http.StatusBadRequest,
-					"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+strings.TrimSpace(string(out)))
+					"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+komutHatasi(r, "subdomain.ssl-le", id, out))
 				return
 			}
 		}
-		if out, err := exec.Command("/root/.acme.sh/acme.sh", "--install-cert", "--config-home", provisioner.AcmeConfigHome(), "-d", tamAd, "--ecc",
+		if out, err := komut("/root/.acme.sh/acme.sh", "--install-cert", "--config-home", provisioner.AcmeConfigHome(), "-d", tamAd, "--ecc",
 			"--key-file", key, "--fullchain-file", crt,
-			"--reloadcmd", "systemctl reload nginx").CombinedOutput(); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "cert yerleştirilemedi: "+strings.TrimSpace(string(out)))
+			"--reloadcmd", "systemctl reload nginx"); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "cert yerleştirilemedi: "+komutHatasi(r, "subdomain.ssl-kur", id, out))
 			return
 		}
 	default: // self-signed
-		if out, err := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+		if out, err := komut("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
 			"-days", "365", "-keyout", key, "-out", crt,
-			"-subj", "/CN="+tamAd, "-addext", "subjectAltName=DNS:"+tamAd).CombinedOutput(); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "openssl: "+strings.TrimSpace(string(out)))
+			"-subj", "/CN="+tamAd, "-addext", "subjectAltName=DNS:"+tamAd); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "openssl: "+komutHatasi(r, "subdomain.ssl-openssl", id, out))
 			return
 		}
 	}
-	_ = exec.Command("chown", "-R", sk+":"+sk, sslDir(sk)).Run()
-	_ = exec.Command("restorecon", "-R", sslDir(sk)).Run()
+	_, _ = komut("chown", "-R", sk+":"+sk, sslDir(sk))
+	_, _ = komut("restorecon", "-R", sslDir(sk))
 
 	// vhost'u yeniden yaz — cert artık var, rebuildVhost HTTPS bloğunu üretir;
 	// alt alanın özel PHP havuzu + nginx/backend ayarları KORUNUR.
 	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "tam_ad": tamAd, "tip": tip})
@@ -167,7 +173,7 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(key)
 	// cert gitti → rebuildVhost HTTP bloğunu üretir; özel ayarlar KORUNUR.
 	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl-kaldir", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

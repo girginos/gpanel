@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/subdomain"
 
@@ -26,6 +27,16 @@ type Handlers struct {
 }
 
 const htpasswdDir = "/etc/nginx/htpasswd" //nolint:gosec // G101 yanlış-pozitif: gömülü sır DEĞİL, bir DİZİN yolu (ad "htpasswd"→"passwd" regex'e takılıyor); .htpasswd dosyaları çalışma anında burada üretilir.
+
+// Dış etkili adımlar (.htpasswd dizini + htpasswd komutu, vhost yeniden
+// render + sunucu geneli `nginx -t` + reload). Testler sahteyle değiştirir:
+// hata yolları ana makinenin /etc/nginx dizinine ve nginx'ine dokunmadan
+// sınanır. Üretimde değerler SABİTTİR.
+var (
+	htpasswdKok   = htpasswdDir
+	htpasswdKomut = func(arg ...string) ([]byte, error) { return exec.Command("htpasswd", arg...).CombinedOutput() }
+	korumaRender  = (*Handlers).korumaUygula
+)
 
 var (
 	reYol  = regexp.MustCompile(`^/[A-Za-z0-9._/-]{0,200}$`)
@@ -139,7 +150,7 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "parola 4-128 karakter olmalı")
 		return
 	}
-	if err := os.MkdirAll(htpasswdDir, 0o755); err != nil {
+	if err := os.MkdirAll(htpasswdKok, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "htpasswd dizini oluşturulamadı")
 		return
 	}
@@ -147,13 +158,13 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 	if subID > 0 {
 		ad += "_s" + strconv.FormatInt(subID, 10)
 	}
-	dosya := htpasswdDir + "/" + ad + "_" + sanitize(yol)
+	dosya := htpasswdKok + "/" + ad + "_" + sanitize(yol)
 	flag := "-bB"
 	if _, e := os.Stat(dosya); e != nil {
 		flag = "-cbB" // yeni dosya oluştur
 	}
 	// argv EXPLICIT — parola/kullanıcı shell'e uğramaz
-	if out, err := exec.Command("htpasswd", flag, dosya, req.Kullanici, req.Parola).CombinedOutput(); err != nil {
+	if out, err := htpasswdKomut(flag, dosya, req.Kullanici, req.Parola); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "htpasswd: "+strings.TrimSpace(string(out)))
 		return
 	}
@@ -168,15 +179,18 @@ func (h *Handlers) Ekle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.korumaUygula(id, sk, surum, subID); err != nil {
+	if err := korumaRender(h, id, sk, surum, subID); err != nil {
 		// vhost doğrulanamadı → eklediğimizi geri al, htpasswd'den de kaldır, tekrar render
 		_, _ = h.DB.Exec(`DELETE FROM korumali_dizinler WHERE domain_id=? AND subdomain_id=? AND yol=? AND kullanici=?`, id, subID, yol, req.Kullanici)
-		_ = exec.Command("htpasswd", "-D", dosya, req.Kullanici).Run()
+		_, _ = htpasswdKomut("-D", dosya, req.Kullanici)
 		if kalan := h.kullaniciSayisi(id, subID, yol); kalan == 0 {
 			_ = os.Remove(dosya)
 		}
-		_ = h.korumaUygula(id, sk, surum, subID)
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx yapılandırması doğrulanamadı: "+err.Error())
+		_ = korumaRender(h, id, sk, surum, subID)
+		// Render hatası SUNUCU GENELİ `nginx -t` çıktısı taşır (komşu kiracıların
+		// sertifika/vhost yolları): yönetici aynen, öteki roller genel mesaj.
+		httpx.WriteError(w, http.StatusInternalServerError,
+			"nginx yapılandırması doğrulanamadı: "+nginxset.SunucuHatasi(r, "sifrekoruma.ekle", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -202,12 +216,13 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi")
 		return
 	}
-	_ = exec.Command("htpasswd", "-D", dosya, kullanici).Run()
+	_, _ = htpasswdKomut("-D", dosya, kullanici)
 	if h.kullaniciSayisi(id, subID, yol) == 0 {
 		_ = os.Remove(dosya) // bu yol için başka kullanıcı kalmadı → location bloğu da düşecek
 	}
-	if err := h.korumaUygula(id, sk, surum, subID); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx yeniden yüklenemedi: "+err.Error())
+	if err := korumaRender(h, id, sk, surum, subID); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError,
+			"nginx yeniden yüklenemedi: "+nginxset.SunucuHatasi(r, "sifrekoruma.sil", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

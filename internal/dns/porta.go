@@ -190,8 +190,8 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	zoneUyari := ""
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
-		zoneUyari = "kayıtlar kaydedildi ancak zone doğrulaması uyarı verdi: " + zerr.Error()
+	if zerr := zoneYaz(r.Context(), h.DB, id); zerr != nil {
+		zoneUyari = "kayıtlar kaydedildi ancak zone doğrulaması uyarı verdi: " + zoneHatasi(r, id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,

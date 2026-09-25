@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"girginospanel/internal/nginxset"
 )
 
 const (
@@ -152,6 +156,37 @@ func nextSerial(old uint32) uint32 {
 	return base
 }
 
+// zoneGecersizHatasi — named-checkzone YALNIZ bu alan adının zone dosyasını
+// sınar; çıktısı kiracının KENDİ kayıtlarını anlatır ve istemciye aynen
+// gösterilir (kaydını düzeltebilsin). Metin öncekiyle birebir aynı.
+type zoneGecersizHatasi struct{ alan, cikti string }
+
+func (e *zoneGecersizHatasi) Error() string {
+	return fmt.Sprintf("zone geçersiz (%s): %s", e.alan, e.cikti)
+}
+
+// zoneYaz — zone yazımı + named-checkzone + SUNUCU GENELİ include
+// (named-checkconf) + reload. Testler sahteyle değiştirir: hata metninin kime
+// ne döndüğü /var/named ve named'e dokunmadan sınanır.
+var zoneYaz = WriteZone
+
+// zoneHatasi — WriteZone hatasının istemciye dönen metni.
+//
+// 🔴 updateZoneIncludes SUNUCUDAKİ TÜM zone'ları tek include dosyasında
+// named-checkconf ile sınar; çıktısı komşu kiracıların zone adlarını ve
+// /var/named/<başka-alan>.zone yollarını taşır. Bu metin DNSSEC ve zone içe
+// aktarma uçlarından (MusteriScope) bayiye/müşteriye ham dönüyordu. Artık
+// yalnız kendi zone'unun named-checkzone hatası herkese aynen döner; öteki
+// hatalar yönetici olmayana genel mesaj, ayrıntı günlüğe (nginxset.SunucuHatasi).
+// Yöneticinin gördüğü metin değişmedi.
+func zoneHatasi(r *http.Request, domainID int64, err error) string {
+	var zg *zoneGecersizHatasi
+	if errors.As(err, &zg) {
+		return err.Error()
+	}
+	return nginxset.SunucuHatasi(r, "dns.zone", domainID, err)
+}
+
 func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	var alanAdi string
 	if err := db.QueryRowContext(ctx, `SELECT alan_adi FROM domains WHERE id=?`, domainID).Scan(&alanAdi); err != nil {
@@ -205,7 +240,7 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	}
 	if out, err := exec.Command("named-checkzone", alanAdi, tmpPath).CombinedOutput(); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("zone geçersiz (%s): %s", alanAdi, strings.TrimSpace(string(out)))
+		return &zoneGecersizHatasi{alan: alanAdi, cikti: strings.TrimSpace(string(out))}
 	}
 	// .bak yedeği: atomik-rename mevcut dosyanın üzerine yazar; taşımadan ÖNCE bir kopya
 	// bırak ki hatalı bir düzenlemeden geri dönüş (veya denetim) mümkün olsun.

@@ -5,6 +5,7 @@ package subdomain
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"girginospanel/internal/dns"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/php"
 	"girginospanel/internal/provisioner"
 
@@ -49,8 +51,26 @@ func (h *Handlers) parent(r *http.Request) (id int64, sk, alanAdi, phpSurum stri
 	return id, sk, alanAdi, phpSurum, isDemo == 1, true
 }
 
-func docrootOf(sk, tamAd string) string { return "/home/" + sk + "/subdomains/" + tamAd }
-func confPath(sk, altAd string) string  { return "/etc/nginx/conf.d/sub_" + sk + "_" + altAd + ".conf" }
+// Dış etkili adımlar (ev dizini, nginx conf.d, dış komutlar: `nginx -t`,
+// systemctl, chown/chcon/restorecon, acme.sh, openssl). Testler sahteyle
+// değiştirir: hata yolları ana makinenin /home, /etc/nginx dizinlerine ve
+// servislerine dokunmadan sınanır. Üretimde değerler SABİTTİR.
+var (
+	evKoku     = "/home"
+	nginxConfD = "/etc/nginx/conf.d"
+	komut      = func(ad string, arg ...string) ([]byte, error) { return exec.Command(ad, arg...).CombinedOutput() }
+)
+
+// komutHatasi — root olarak çalışan dış komutun (sunucu geneli `nginx -t`,
+// acme.sh: panelin ACME hesap dizini/çıktısı, openssl) HAM çıktısının istemciye
+// dönen metni: yönetici aynen görür (arıza ayıklama); öteki roller genel mesaj,
+// ayrıntı günlüğe (nginxset.SunucuHatasi — bayi kapsamı).
+func komutHatasi(r *http.Request, kaynak string, id int64, out []byte) string {
+	return nginxset.SunucuHatasi(r, kaynak, id, errors.New(strings.TrimSpace(string(out))))
+}
+
+func docrootOf(sk, tamAd string) string { return evKoku + "/" + sk + "/subdomains/" + tamAd }
+func confPath(sk, altAd string) string  { return nginxConfD + "/sub_" + sk + "_" + altAd + ".conf" }
 
 // GET /domains/{id}/subdomain
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
@@ -140,8 +160,8 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		_ = os.WriteFile(filepath.Join(docroot, "index.html"),
 			[]byte(provisioner.WelcomeHTML(tamAd)), 0o644)
 	}
-	_ = exec.Command("chown", "-R", sk+":"+sk, "/home/"+sk+"/subdomains").Run()
-	_ = exec.Command("chcon", "-R", "-t", "httpd_sys_content_t", docroot).Run()
+	_, _ = komut("chown", "-R", sk+":"+sk, evKoku+"/"+sk+"/subdomains")
+	_, _ = komut("chcon", "-R", "-t", "httpd_sys_content_t", docroot)
 
 	// nginx server bloğu
 	conf := confPath(sk, altAd)
@@ -149,19 +169,19 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
 		return
 	}
-	_ = exec.Command("restorecon", conf).Run()
-	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
+	_, _ = komut("restorecon", conf)
+	if out, err := komut("nginx", "-t"); err != nil {
 		_ = os.Remove(conf) // rollback: bozuk conf'u kaldır (çalışan nginx etkilenmez)
-		_ = exec.Command("nginx", "-t").Run()
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+strings.TrimSpace(string(out)))
+		_, _ = komut("nginx", "-t")
+		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+komutHatasi(r, "subdomain.olustur", id, out))
 		return
 	}
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	_, _ = komut("systemctl", "reload", "nginx")
 
 	if _, err := h.DB.Exec(`INSERT INTO subdomanlar (domain_id, alt_ad, tam_ad, php_surum) VALUES (?,?,?,?)`,
 		id, altAd, tamAd, phpSurum); err != nil {
 		_ = os.Remove(conf)
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
+		_, _ = komut("systemctl", "reload", "nginx")
 		httpx.WriteError(w, http.StatusInternalServerError, "kayıt eklenemedi")
 		return
 	}
@@ -206,7 +226,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	subApacheSil(sk, altAd) // apache backend vhost'u (varsa) kaldır
 	// docroot sil (guard: subdomains altında + tam_ad eşleşmeli)
 	docroot := docrootOf(sk, tamAd)
-	base := "/home/" + sk + "/subdomains/"
+	base := evKoku + "/" + sk + "/subdomains/"
 	if strings.HasPrefix(docroot, base) && filepath.Clean(docroot) != filepath.Clean(base) {
 		_ = os.RemoveAll(docroot)
 	}
