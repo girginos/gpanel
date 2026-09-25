@@ -25,6 +25,7 @@ import (
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 
@@ -332,8 +333,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	if req.PlanID == nil {
 		var defID int64
 		// Reseller ise ONCE kendi varsayilan plani, yoksa global (reseller_id=0).
+		// Yalnız KATALOG planı (domain_id IS NULL): bir hostinge özel plan
+		// "varsayılan" işaretli olsa bile yeni hostinge otomatik bağlanmaz.
 		if e := h.DB.QueryRowContext(r.Context(),
-			`SELECT id FROM service_plans WHERE varsayilan=1 AND reseller_id IN (?,0) ORDER BY reseller_id DESC, id LIMIT 1`, rid).Scan(&defID); e == nil && defID > 0 {
+			`SELECT id FROM service_plans WHERE varsayilan=1 AND domain_id IS NULL AND reseller_id IN (?,0) ORDER BY reseller_id DESC, id LIMIT 1`, rid).Scan(&defID); e == nil && defID > 0 {
 			req.PlanID = &defID
 		}
 	}
@@ -341,13 +344,12 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	if rid > 0 {
 		req.CustomerID = nil // reseller musteri atayamaz (Faz 2 kapsami)
 		if req.PlanID != nil {
-			var planRid int64
-			if e := h.DB.QueryRowContext(r.Context(), `SELECT reseller_id FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planRid); e != nil {
-				httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
-				return
-			}
-			if planRid != 0 && planRid != rid {
-				httpx.WriteError(w, http.StatusForbidden, "bu plana erişiminiz yok")
+			// Plan kapsamı TEK kaynaktan (plans.BaglanabilirMi — SetPlan ile aynı): bayi
+			// yalnız görebildiği KATALOG planını yeni hostinge bağlar; kökün ya da başka
+			// kiracının hostinge ÖZEL planı (alan adı + tüm limitler) seçilemez. Var olmayan
+			// plan da aynı 403 — plan kimliklerinin varlığı sızdırılmaz.
+			if err := plans.BaglanabilirMi(r.Context(), h.DB, rid, *req.PlanID, 0); err != nil {
+				httpx.WriteError(w, http.StatusForbidden, err.Error())
 				return
 			}
 		}
