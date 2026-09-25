@@ -348,11 +348,9 @@ export default function DomainWebSunucuPage() {
         </div>
       </div>
 
-      <UyariKutusu ton="uyari" className="mb-5">
-        <span className="text-xs">
-          <strong>HSTS</strong>{cevir(" yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.")}
-          {cevir(cevir("Ayarlar değiştiğinde"))} <code className="font-mono">nginx -t</code> + <code className="font-mono">reload</code> {cevir("otomatik tetiklenir — sıfır kesinti.")}
-        </span>
+      <UyariKutusu ton="uyari" className="mb-5" kucuk>
+        <strong>HSTS</strong>{cevir(" yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.")}
+        {cevir(cevir("Ayarlar değiştiğinde"))} <code className="font-mono">nginx -t</code> + <code className="font-mono">reload</code> {cevir("otomatik tetiklenir — sıfır kesinti.")}
       </UyariKutusu>
 
       {yuk || !a ? <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div> : (

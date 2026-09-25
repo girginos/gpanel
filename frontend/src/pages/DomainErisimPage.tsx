@@ -423,8 +423,8 @@ export default function DomainErisimPage() {
             <>
               {/* ── Kilitlenme uyarisi ─────────────────────────────────── */}
               {kilitRiski && (
-                <UyariKutusu ton="tehlike" className="mb-4" baslik={cevir("Kendinizi kilitleyeceksiniz")}>
-                  <div className="text-xs">
+                <UyariKutusu ton="tehlike" className="mb-4" baslik={cevir("Kendinizi kilitleyeceksiniz")} kucuk>
+                  <div>
                     {cevirT(cevir(varsayilan === 'red'
                       ? "Şu anki IP adresiniz ({0}) izin listesinde yok. Kaydederseniz bu siteye erişiminizi kaybedersiniz."
                       : "Şu anki IP adresiniz ({0}) reddedilenler arasında. Kaydederseniz bu siteye erişiminizi kaybedersiniz."), benimIP)}
@@ -440,29 +440,25 @@ export default function DomainErisimPage() {
 
               {/* ── "/0" etkisizlik uyarisi ─────────────────────────────── */}
               {(etkisiz || tamKapali) && (etkisiz ? hepsiniKapsayan : hepsiniEngelleyen) && (
-                <UyariKutusu ton="uyari" className="mb-4" baslik={etkisiz ? cevir("Bu kural kısıtlamayı etkisiz kılıyor") : cevir("Bu kural herkesi engelliyor")}>
-                      <div className="text-xs">
-{/* 🔴 Gövde MODA GÖRE. Önceki sürümde başlık moda göre değişiyor ama
-                          gövde sabit beyaz-liste metni kalıyordu: kara listede
-                          "Bu kural herkesi engelliyor" başlığının altında
-                          "kısıtlama fiilen kapalıdır" yazıyordu — aynı kutuda
-                          birbirinin tersi iki cümle, üstelik herkesi kilitleyen
-                          bir ayarı "kapalı" diye güvenceye çeviriyordu. */}
-                        {cevirT(cevir(etkisiz
-                          ? "Listedeki {0} kuralı tüm adresleri kapsıyor ({1}). Beyaz liste modunda bu, herkesin girebileceği anlamına gelir — kısıtlama fiilen kapalıdır."
-                          : "Listedeki {0} kuralı tüm adresleri kapsıyor ({1}). Kara liste modunda bu, siteye HİÇ KİMSENİN erişemeyeceği anlamına gelir."),
-                          (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).cidr,
-                          (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).aciklama || cevir("açıklama yok"))}
-                      </div>
+                <UyariKutusu ton="uyari" className="mb-4" baslik={etkisiz ? cevir("Bu kural kısıtlamayı etkisiz kılıyor") : cevir("Bu kural herkesi engelliyor")} kucuk>
+                  {/* 🔴 Gövde MODA GÖRE. Önceki sürümde başlık moda göre değişiyor ama
+                     gövde sabit beyaz-liste metni kalıyordu: kara listede
+                     "Bu kural herkesi engelliyor" başlığının altında
+                     "kısıtlama fiilen kapalıdır" yazıyordu — aynı kutuda
+                     birbirinin tersi iki cümle, üstelik herkesi kilitleyen
+                     bir ayarı "kapalı" diye güvenceye çeviriyordu. */}
+                  {cevirT(cevir(etkisiz
+                    ? "Listedeki {0} kuralı tüm adresleri kapsıyor ({1}). Beyaz liste modunda bu, herkesin girebileceği anlamına gelir — kısıtlama fiilen kapalıdır."
+                    : "Listedeki {0} kuralı tüm adresleri kapsıyor ({1}). Kara liste modunda bu, siteye HİÇ KİMSENİN erişemeyeceği anlamına gelir."),
+                    (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).cidr,
+                    (etkisiz ? hepsiniKapsayan! : hepsiniEngelleyen!).aciklama || cevir("açıklama yok"))}
                 </UyariKutusu>
               )}
 
               {/* ── CDN uyarisi ────────────────────────────────────────── */}
               {y.vekil_sayisi === 0 && (
-                <UyariKutusu ton="uyari" className="mb-4" baslik={cevir("CDN arkasındaysanız bu kısıtlama yanlış çalışır")}>
-                  <div className="text-xs">
-                    {cevir("Sunucuda güvenilir vekil aralığı tanımlı değil. Siteniz Cloudflare gibi bir CDN arkasındaysa nginx ziyaretçinin değil CDN'in IP'sini görür — kurallarınız yanlış adrese uygulanır. Yöneticinizin güvenilir vekil aralıklarını tanımlaması gerekir.")}
-                  </div>
+                <UyariKutusu ton="uyari" className="mb-4" baslik={cevir("CDN arkasındaysanız bu kısıtlama yanlış çalışır")} kucuk>
+                  {cevir("Sunucuda güvenilir vekil aralığı tanımlı değil. Siteniz Cloudflare gibi bir CDN arkasındaysa nginx ziyaretçinin değil CDN'in IP'sini görür — kurallarınız yanlış adrese uygulanır. Yöneticinizin güvenilir vekil aralıklarını tanımlaması gerekir.")}
                 </UyariKutusu>
               )}
 
@@ -561,15 +557,15 @@ export default function DomainErisimPage() {
                 </div>
               </Kart>
 
-              <UyariKutusu ton="bilgi" className="mb-4">
-                <span className="text-xs">{cevir("Let's Encrypt doğrulaması bu kısıtlamadan muaftır; sertifikanız yenilenmeye devam eder.")}</span>
+              <UyariKutusu ton="bilgi" className="mb-4" kucuk>
+                {cevir("Let's Encrypt doğrulaması bu kısıtlamadan muaftır; sertifikanız yenilenmeye devam eder.")}
               </UyariKutusu>
             </>
           )}
 
           {y && (aktif !== y.aktif || varsayilan !== y.varsayilan) && (
-            <UyariKutusu ton="uyari" className="mb-3">
-              <span className="text-xs">{cevir("Kaydedilmemiş değişiklik var — Kaydet'e basmadan uygulanmaz.")}</span>
+            <UyariKutusu ton="uyari" className="mb-3" kucuk>
+              {cevir("Kaydedilmemiş değişiklik var — Kaydet'e basmadan uygulanmaz.")}
             </UyariKutusu>
           )}
 

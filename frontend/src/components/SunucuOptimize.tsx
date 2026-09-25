@@ -94,7 +94,7 @@ export default function SunucuOptimize() {
             {cevir("Sistem paketlerini günceller (")}<code className="text-[11px]">dnf -y update</code>{cevir(") ve MariaDB / nginx / PHP ayarlarını sunucu kaynağına göre yeniden ayarlar. İş arka planda çalışır — uzun sürebilir ve servisleri kısa süre etkileyebilir.")}
           </div>
 
-          {hata && <UyariKutusu ton="tehlike" className="mt-2"><span className="text-xs">{hata}</span></UyariKutusu>}
+          {hata && <UyariKutusu ton="tehlike" className="mt-2" kucuk>{hata}</UyariKutusu>}
 
           {calisiyor && (
             <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-xs text-sky-700 dark:text-sky-300">

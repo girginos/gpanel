@@ -9,7 +9,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
-import { I } from '@/components/Ikon'
+import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Durum = {
@@ -147,7 +147,7 @@ export default function RedisPage() {
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: 'Redis Cache' }]} />
       <div className="flex items-center gap-3 mb-1">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-amber-500"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" /></svg>
+        <Ikon d={I.simsek} className="size-6 shrink-0 text-amber-500" />
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Redis Cache</h1>
         {d && (
           <Badge color={d.aktif ? 'success' : 'neutral'} variant="soft" className="gap-1.5 text-xs px-2 py-0.5">
@@ -163,7 +163,7 @@ export default function RedisPage() {
         <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
       ) : !d?.aktif ? (
         <div className="bg-white dark:bg-dark-700/60 border border-slate-200 dark:border-dark-600/60 rounded-lg p-6 text-center">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7 mx-auto mb-2 text-slate-400"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" /></svg>
+          <Ikon d={I.simsek} className="mx-auto mb-2 size-7 text-slate-400" />
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">{cevir("Bu domain için Redis cache kapalı.")}</p>
           <p className="text-xs text-slate-400 mb-4">{cevir("Etkinleştirince izole bir ACL kullanıcısı + bağlantı bilgisi oluşturulur.")}</p>
           <Button onClick={ac} yukleniyor={mesgul} color="primary" ikon={I.onay}>
@@ -183,8 +183,8 @@ export default function RedisPage() {
             <div className="divide-y divide-slate-100 dark:divide-dark-600/60">
               {sir && (
                 <div className="px-4 py-2.5">
-                  <UyariKutusu ton="uyari">
-                    <p className="text-xs">{cevir("Bu parola yalnızca şimdi gösteriliyor — güvenli bir yere kaydedin. Sayfadan ayrıldığınızda tekrar gösterilemez.")}</p>
+                  <UyariKutusu ton="uyari" kucuk>
+                    {cevir("Bu parola yalnızca şimdi gösteriliyor — güvenli bir yere kaydedin. Sayfadan ayrıldığınızda tekrar gösterilemez.")}
                   </UyariKutusu>
                 </div>
               )}
@@ -207,9 +207,9 @@ export default function RedisPage() {
           {sir?.wp_snippet && (
             <div className="bg-white dark:bg-dark-700/60 border border-slate-200 dark:border-dark-600/60 rounded-lg overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 flex items-center justify-between gap-2">
-                <button type="button" onClick={() => setSnippetAcik(!snippetAcikGercek)}
+                <button type="button" onClick={() => setSnippetAcik(!snippetAcikGercek)} aria-expanded={snippetAcikGercek}
                   className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  <span className={`text-slate-400 transition-transform ${snippetAcikGercek ? 'rotate-90' : ''}`}>›</span>
+                  <Ikon d={I.chevronSag} className={`size-4 shrink-0 text-slate-400 transition-transform ${snippetAcikGercek ? 'rotate-90' : ''}`} />
                   {otoBagli ? cevir("Diğer uygulamalar için elle kurulum") : cevir("WordPress kurulumu")}
                 </button>
                 {snippetAcikGercek && (

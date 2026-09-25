@@ -185,8 +185,8 @@ export default function OturumAyarPage() {
         </form>
       )}
 
-      <UyariKutusu ton="bilgi" className="mt-5">
-        <p className="text-xs"><strong>{cevir("Not:")}</strong> {cevirT(cevir("Bu, JWT mutlak süresinden ayrı bir kavramdır. Kullanıcı her istekle boşta sayacını sıfırlar; hareketsiz kalırsa {0} dakika sonra otomatik çıkış olur. Değişiklik yeni istekten itibaren geçerlidir; hâlihazırda aktif olan kullanıcılar etkilenmez, ancak boşta kalırlarsa yeni eşik uygulanır."), mevcut ?? '?')}</p>
+      <UyariKutusu ton="bilgi" className="mt-5" kucuk>
+        <strong>{cevir("Not:")}</strong> {cevirT(cevir("Bu, JWT mutlak süresinden ayrı bir kavramdır. Kullanıcı her istekle boşta sayacını sıfırlar; hareketsiz kalırsa {0} dakika sonra otomatik çıkış olur. Değişiklik yeni istekten itibaren geçerlidir; hâlihazırda aktif olan kullanıcılar etkilenmez, ancak boşta kalırlarsa yeni eşik uygulanır."), mevcut ?? '?')}
       </UyariKutusu>
     </div>
   )

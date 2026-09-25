@@ -825,7 +825,7 @@ export default function AntivirusPanel() {
           {inceleModal && (
             <div className="space-y-3">
               <div className="break-all font-mono text-sm text-slate-700 dark:text-slate-200">{inceleModal.ad}</div>
-              {inceleModal.kesik && <UyariKutusu ton="uyari"><span className="text-xs">{cevir("Kesik gösterim — yalnızca ilk 64 KB.")}</span></UyariKutusu>}
+              {inceleModal.kesik && <UyariKutusu ton="uyari" kucuk>{cevir("Kesik gösterim — yalnızca ilk 64 KB.")}</UyariKutusu>}
               <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-50 p-4 font-mono text-xs text-slate-800 whitespace-pre-wrap break-all dark:bg-dark-800 dark:text-slate-200">{inceleModal.icerik}</pre>
             </div>
           )}

@@ -298,12 +298,10 @@ export default function YasakliDomainPage() {
       </div>
 
       {/* Bilgilendirme */}
-      <UyariKutusu ton="bilgi" className="mb-6">
-        <span className="text-xs">
+      <UyariKutusu ton="bilgi" className="mb-6" kucuk>
         <strong>{cevir("Phishing koruması.")}</strong> {cevir(cevir("Alt-domainler dahil seçeneği açıkken"))}
         <code className="mx-1 rounded bg-this/10 px-1 py-0.5 font-mono text-[11px] dark:bg-this-lighter/15">sahibinden.com</code>
         {cevir(cevir("eklendiğinde"))} <code className="rounded bg-this/10 px-1 py-0.5 font-mono text-[11px] dark:bg-this-lighter/15">login.sahibinden.com</code> {cevir("gibi tüm alt-domainler de otomatik engellenir.")}
-        </span>
       </UyariKutusu>
 
       {/* Ekleme formu */}

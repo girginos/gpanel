@@ -6,9 +6,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import { Button, Badge, butonSinifi } from '@/components/ui'
-// Paylaşılan ikon seti (buton ikonları). Aşağıdaki yerel `Ikon` nesnesi yalnız
-// sekme/başlık süs ikonları için kalır; butonlar setten beslenir (tek dil).
-import { Ikon as SetIkon, I } from '@/components/Ikon'
+// Paylaşılan ikon seti: butonlar, sekmeler ve başlık ikonları aynı setten (tek dil).
+import { Ikon, I } from '@/components/Ikon'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -70,7 +69,7 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "Bir sunucu seçin ya da elle girin": "Select a server or enter manually",
   "Bu domain için mail servisi kurulu değil.": "Mail service is not installed for this domain.",
   "Bu hesap parolayla taşınamaz": "This account cannot be migrated with a password",
-  "Bunun yerine Outlook'ta Dosya → Aç ve Dışa Aktar → Dışa aktar ile bir .pst dosyası oluşturup içe aktarın.": "Instead, in Outlook use File → Open & Export → Export to create a .pst file and import it.",
+  "Bunun yerine Outlook’ta Dosya → Aç ve Dışa Aktar → Dışa aktar ile bir .pst dosyası oluşturup içe aktarın.": "Instead, in Outlook use File → Open & Export → Export to create a .pst file and import it.",
   "Dosya seç ve yükle": "Select and upload file",
   "Doğrula & başlat": "Verify & start",
   "Doğrulama başarısız": "Verification failed",
@@ -85,7 +84,7 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "Gelen her postaya otomatik yanıt gönderilir (aynı kişiye günde bir kez).": "An automatic reply is sent to every incoming message (once per day to the same person).",
   "Gelen postayı başka adres(ler)e ilet. Birden çok hedefi virgülle ayırın.": "Forward incoming mail to other address(es). Separate multiple targets with commas.",
   "Gmail normal parolayı kabul etmez": "Gmail does not accept the normal password",
-  "Google hesabınızda 2 Adımlı Doğrulama'yı açın, ardından bir “Uygulama Şifresi” üretip parola alanına ONU yazın. Hesabın kendi parolası çalışmaz.": "Enable 2-Step Verification on your Google account, then generate an “App Password” and enter THAT in the password field. The account's own password won't work.",
+  "Google hesabınızda 2 Adımlı Doğrulama’yı açın, ardından bir “Uygulama Şifresi” üretip parola alanına ONU yazın. Hesabın kendi parolası çalışmaz.": "Enable 2-Step Verification on your Google account, then generate an “App Password” and enter THAT in the password field. The account's own password won't work.",
   "Güvenlik gereği parolalar saklanmaz, yeniden girin.": "For security, passwords are not stored, enter again.",
   "Hedef kutu parolası": "Target mailbox password",
   "Hesap güvenlik ayarlarından bir “Uygulama Şifresi” üretip parola alanına onu yazın.": "Generate an “App Password” from the account security settings and enter it in the password field.",
@@ -197,6 +196,7 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   ".pst içe aktarmaya git": "Go to .pst import",
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
+  "Temizle": "Clear",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (MAILKUTUDETAY_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -212,17 +212,6 @@ function guicluParola(uzunluk = 16) {
   const alfabe = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%*-_'
   const arr = new Uint32Array(uzunluk); crypto.getRandomValues(arr)
   let s = ''; for (let i = 0; i < uzunluk; i++) s += alfabe[arr[i] % alfabe.length]; return s
-}
-
-const Ikon = {
-  cevap: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>,
-  ilet: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H10a7 7 0 00-7 7v0" /></svg>,
-  tasima: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" /></svg>,
-  disari: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
-  iceri: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>,
-  fis: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
-  onay: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
-  ayar: (p: { className?: string }) => <svg className={p.className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
 }
 
 // Tek-tık kopyalanabilir değer satırı (entegrasyon kartı).
@@ -585,8 +574,8 @@ export default function MailKutuDetayPage() {
 
   // Uyarı şeridi — 2. ve 3. adımda aynı bileşen (kullanıcı parolayı DENEMEDEN görür).
   const UyariSeridi = () => saglayiciUyarisi ? (
-    <UyariKutusu ton={saglayiciUyarisi.agir ? 'tehlike' : 'uyari'} baslik={saglayiciUyarisi.baslik} className="mt-3">
-      <p className="text-xs leading-relaxed">{saglayiciUyarisi.metin}</p>
+    <UyariKutusu ton={saglayiciUyarisi.agir ? 'tehlike' : 'uyari'} baslik={saglayiciUyarisi.baslik} className="mt-3" kucuk>
+      <p className="leading-relaxed">{saglayiciUyarisi.metin}</p>
       {saglayiciUyarisi.pst && (
         <Button onClick={() => setSekme('aktar')} color="primary" boyut="sm" ikon={I.yukle}
           className="mt-2.5">
@@ -603,12 +592,12 @@ export default function MailKutuDetayPage() {
     return true
   }
 
-  const sekmeler: { k: typeof sekme; ad: string; ikon: (p: { className?: string }) => JSX.Element }[] = [
-    { k: 'genel', ad: cevir("Genel"), ikon: Ikon.ayar },
-    { k: 'oto', ad: cevir("Oto-Yanıt"), ikon: Ikon.cevap },
-    { k: 'iletim', ad: cevir("İletim"), ikon: Ikon.ilet },
-    { k: 'tasima', ad: cevir("Taşıma"), ikon: Ikon.tasima },
-    { k: 'aktar', ad: cevir("İçe / Dışa Aktar"), ikon: Ikon.disari },
+  const sekmeler: { k: typeof sekme; ad: string; ikon: string }[] = [
+    { k: 'genel', ad: cevir("Genel"), ikon: I.ayar },
+    { k: 'oto', ad: cevir("Oto-Yanıt"), ikon: I.yanitla },
+    { k: 'iletim', ad: cevir("İletim"), ikon: I.ilet },
+    { k: 'tasima', ad: cevir("Taşıma"), ikon: I.degistir },
+    { k: 'aktar', ad: cevir("İçe / Dışa Aktar"), ikon: I.indir },
   ]
 
   return (
@@ -625,7 +614,7 @@ export default function MailKutuDetayPage() {
         <div className={`${kart} p-8 text-center`}>
           <p className="text-sm text-slate-500 dark:text-slate-300 mb-4">{cevir("Posta kutusu bulunamadı.")}</p>
           <Link to={`/abonelikler/${id}/mail/kutular`} className={butonSinifi({ color: 'primary' })}>
-            <SetIkon d={I.geri} className="size-4 shrink-0 -ms-1 me-2" />
+            <Ikon d={I.geri} className="size-4 shrink-0 -ms-1 me-2" />
             {cevir("Mail Kutularına dön")}
           </Link>
         </div>
@@ -637,7 +626,7 @@ export default function MailKutuDetayPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
               <div className="flex items-center gap-3 min-w-0 lg:w-[320px] lg:shrink-0">
                 <div className="w-11 h-11 shrink-0 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300">
-                  <Ikon.cevap className="w-5 h-5" />
+                  <Ikon d={I.yanitla} className="size-5" />
                 </div>
                 <div className="flex items-center gap-2 min-w-0">
                   <h1 className={`font-mono text-lg font-semibold truncate ${kutu.aktif ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 line-through'}`}>{kutu.email}</h1>
@@ -668,7 +657,7 @@ export default function MailKutuDetayPage() {
             {sekmeler.map(s => (
               <button key={s.k} onClick={() => setSekme(s.k)}
                 className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${sekme === s.k ? 'border-brand-500 text-brand-700 dark:text-brand-300' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
-                <s.ikon className="w-4 h-4" />{s.ad}
+                <Ikon d={s.ikon} className="size-4 shrink-0" />{s.ad}
               </button>
             ))}
           </div>
@@ -679,7 +668,7 @@ export default function MailKutuDetayPage() {
               {/* Mail entegrasyonu — istemci kurulum bilgileri (tek tık kopya) */}
               <div>
                 <div className="flex items-center gap-2.5 mb-1">
-                  <div className="w-9 h-9 shrink-0 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300"><Ikon.fis className="w-5 h-5" /></div>
+                  <div className="w-9 h-9 shrink-0 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300"><Ikon d={I.simsek} className="size-5" /></div>
                   <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Mail Entegrasyonu")}</h3>
                 </div>
                 <p className="text-xs text-slate-400 mb-4">
@@ -782,7 +771,7 @@ export default function MailKutuDetayPage() {
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Mail Taşıma (Uzaktan içe çekme)")}</h3>
               <p className="text-xs text-slate-400 mb-4">{cevir("Başka bir sunucudaki IMAP kutusundan tüm mailleri bu kutuya kopyalar (imapsync). Kaynak kutu değişmez.")}</p>
               {tasimaDurum?.imapsync === false && (
-                <UyariKutusu ton="uyari" className="mb-4"><p className="text-xs">{cevir("Bu sunucuda")} <span className="font-mono">imapsync</span> {cevir("kurulu değil — taşıma kullanılamıyor. Sunucuya")} <span className="font-mono">imapsync</span> {cevir("kurulmalı.")}</p></UyariKutusu>
+                <UyariKutusu ton="uyari" className="mb-4" kucuk>{cevir("Bu sunucuda")} <span className="font-mono">imapsync</span> {cevir("kurulu değil — taşıma kullanılamıyor. Sunucuya")} <span className="font-mono">imapsync</span> {cevir("kurulmalı.")}</UyariKutusu>
               )}
 
               {/* ADIM ÇUBUĞU — tamamlanan adıma tıklanarak geri dönülebilir */}
@@ -793,7 +782,7 @@ export default function MailKutuDetayPage() {
                     <li key={s.n} className="flex items-center gap-2">
                       <button type="button" onClick={() => gecildi && setAdim(s.n)} disabled={!gecildi}
                         className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-colors ${gecildi ? 'bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer' : aktif ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-dark-600 text-slate-400'}`}>
-                        {gecildi ? <SetIkon d={I.onay} className="size-3.5" /> : s.n}
+                        {gecildi ? <Ikon d={I.onay} className="size-3.5" /> : s.n}
                       </button>
                       <span className={aktif ? 'font-medium text-slate-700 dark:text-slate-200' : 'text-slate-400'}>{cevir(s.ad)}</span>
                       {i < ADIMLAR.length - 1 && <span className="w-6 h-px bg-slate-200 dark:bg-dark-600" />}
@@ -917,8 +906,8 @@ export default function MailKutuDetayPage() {
                   </div>
 
                   {dogrulama && (
-                    <UyariKutusu ton={dogrulama.ok ? 'basari' : 'tehlike'} className="mt-3">
-                      <p className="text-xs">{dogrulama.ok ? dogrulama.mesaj : cevirT(cevir("Bağlanılamadı: {0}"), dogrulama.hata)}</p>
+                    <UyariKutusu ton={dogrulama.ok ? 'basari' : 'tehlike'} className="mt-3" kucuk>
+                      {dogrulama.ok ? dogrulama.mesaj : cevirT(cevir("Bağlanılamadı: {0}"), dogrulama.hata)}
                     </UyariKutusu>
                   )}
 
@@ -927,7 +916,7 @@ export default function MailKutuDetayPage() {
                       {dogrulaniyor ? cevir("Doğrulanıyor…") : dogrulama?.ok ? cevir("Yeniden doğrula") : cevir("Bağlantıyı doğrula")}
                     </Button>
                     <Button onClick={tasimaBaslat} yukleniyor={isleniyor} disabled={tasimaDurum?.durum === 'calisiyor' || !dogrulama?.ok || !tasima.hedef_parola} color="primary" boyut="sm" ikon={I.tasi}
-                      title={!dogrulama?.ok ? 'Önce bağlantıyı doğrulayın' : cevir("Taşımayı başlat")}>
+                      title={!dogrulama?.ok ? cevir("Önce bağlantıyı doğrulayın") : cevir("Taşımayı başlat")}>
                       {tasimaDurum?.durum === 'calisiyor' ? cevir("Taşınıyor…") : cevir("Taşımayı başlat")}
                     </Button>
                   </div>
@@ -940,7 +929,7 @@ export default function MailKutuDetayPage() {
                   variant="outlined" boyut="sm" ikon={I.geri} className={adim === 1 ? 'invisible' : ''}>{cevir("Geri")}</Button>
                 {adim < 3 ? (
                   <Button onClick={() => setAdim(a => a + 1)} disabled={!adimTamam(adim)}
-                    title={adimTamam(adim) ? '' : adim === 1 ? 'E-posta ve parolayı girin' : cevir("Bir sunucu seçin ya da elle girin")}
+                    title={adimTamam(adim) ? '' : adim === 1 ? cevir("E-posta ve parolayı girin") : cevir("Bir sunucu seçin ya da elle girin")}
                     color="primary" boyut="sm" ikonSonda={I.ileri}>{cevir("Devam")}</Button>
                 ) : <span />}
               </div>
@@ -950,8 +939,8 @@ export default function MailKutuDetayPage() {
                 <div className="mt-4 rounded-lg border border-slate-200 dark:border-dark-600 bg-slate-50/60 dark:bg-dark-800/30 p-4">
                   <div className="flex items-center gap-2 text-sm">
                     {tasimaDurum.durum === 'calisiyor' && <span className="w-3.5 h-3.5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />}
-                    {tasimaDurum.durum === 'tamam' && <Ikon.onay className="w-4 h-4 text-emerald-500" />}
-                    {tasimaDurum.durum === 'hata' && <SetIkon d={I.tehlike} className="size-4 shrink-0 text-red-500" />}
+                    {tasimaDurum.durum === 'tamam' && <Ikon d={I.onay} className="size-4 shrink-0 text-emerald-500" />}
+                    {tasimaDurum.durum === 'hata' && <Ikon d={I.tehlike} className="size-4 shrink-0 text-red-500" />}
                     <span className="font-medium text-slate-700 dark:text-slate-200">{tasimaDurum.durum === 'calisiyor' ? cevir("Taşınıyor") : tasimaDurum.durum === 'tamam' ? cevir("Tamamlandı") : cevir("Hata")}</span>
                     {typeof tasimaDurum.aktarilan === 'number' && tasimaDurum.aktarilan > 0 && <span className="text-xs text-slate-400 tabular-nums">· {tasimaDurum.aktarilan} {cevir("mesaj")}</span>}
                   </div>
@@ -969,13 +958,13 @@ export default function MailKutuDetayPage() {
           {sekme === 'aktar' && (
             <div className="grid sm:grid-cols-2 gap-4">
               <div className={`${kart} p-5`}>
-                <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.disari className="w-5 h-5" /></div>
+                <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon d={I.indir} className="size-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Dışa Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4">{cevir("Kutunun tüm postalarını")} <span className="font-mono">.tar.gz</span> (Maildir) {cevir("olarak indir. Yedekleme veya başka kutuya taşımak için.")}</p>
                 <Button onClick={disariAktar} disabled={isleniyor} color="primary" boyut="sm" ikon={I.indir}>{cevir("Yedeği indir")}</Button>
               </div>
               <div className={`${kart} p-5`}>
-                <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon.iceri className="w-5 h-5" /></div>
+                <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-300 mb-3"><Ikon d={I.yukle} className="size-5" /></div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("İçe Aktar")}</h3>
                 <p className="text-xs text-slate-400 mb-4"><span className="font-mono">.tar.gz</span> {cevir("(Maildir yedeği) veya")} <span className="font-mono">.mbox</span> {cevir("yükleyin. Mevcut postalar korunur, üzerine eklenir.")}</p>
                 <input ref={dosyaRef} type="file" accept=".tar.gz,.tgz,.mbox,.eml" onChange={e => { const f = e.target.files?.[0]; if (f) iceriAktar(f) }} className="hidden" />

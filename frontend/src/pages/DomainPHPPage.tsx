@@ -217,11 +217,9 @@ export default function DomainPHPPage() {
         {' · '}{cevir("Sistem kullanıcısı:")}{' '}<code className="font-mono">{yanit.sk}</code>
       </p>}
 
-      <UyariKutusu ton="bilgi" className="mb-5">
-        <p className="text-xs">
-          {cevir("Burada belirlediğiniz ayarlar PHP-FPM havuzuna (")}<code className="font-mono">php_admin_value/flag</code>{cevir(") yazılır. Web sitesindeki ")}<code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
-          {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
-        </p>
+      <UyariKutusu ton="bilgi" className="mb-5" kucuk>
+        {cevir("Burada belirlediğiniz ayarlar PHP-FPM havuzuna (")}<code className="font-mono">php_admin_value/flag</code>{cevir(") yazılır. Web sitesindeki ")}<code className="font-mono">.htaccess</code>, <code className="font-mono">.user.ini</code> {cevir("bunları override edebilir.")}
+        {cevir(cevir("Kaydedince PHP-FPM otomatik yeniden başlatılır — site indirilmez."))}
       </UyariKutusu>
 
 
@@ -339,10 +337,8 @@ export default function DomainPHPPage() {
               </div>
             </div>
             {a.debug_mode && (
-              <UyariKutusu ton="uyari" className="mt-3">
-                <p className="text-xs">
+              <UyariKutusu ton="uyari" className="mt-3" kucuk>
                 {cevir("Debug modu acikken ")}<strong>display_errors</strong>{cevir(" ve ")}<strong>error_reporting = E_ALL</strong>{cevir(" zorlanir; hata detaylari ziyaretcilere gorunebilir. Yalnizca sorun giderirken acin, canli sitede ")}<strong>{cevir("kapatin")}</strong>{cevir(". Degisiklik ")}<strong>{cevir("Kaydet")}</strong>{cevir("'ten sonra uygulanir.")}
-                </p>
               </UyariKutusu>
             )}
           </Kart>

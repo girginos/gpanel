@@ -159,11 +159,9 @@ export default function DomainWafPage() {
       </p>}
 
       {y && !y.modul_yuklu && (
-        <UyariKutusu ton="uyari" className="mb-5" baslik={cevir("ModSecurity modülü sunucuda kurulu değil.")}>
-          <p className="text-xs">
-            {cevir("Ayarlar kaydedilir ancak WAF uygulanmaz.")}
-            {cevir("Sunucuda")} <code className="font-mono">girginospanel-waf-setup</code> {cevir("çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).")}
-          </p>
+        <UyariKutusu ton="uyari" className="mb-5" baslik={cevir("ModSecurity modülü sunucuda kurulu değil.")} kucuk>
+          {cevir("Ayarlar kaydedilir ancak WAF uygulanmaz.")}
+          {cevir("Sunucuda")} <code className="font-mono">girginospanel-waf-setup</code> {cevir("çalıştırıldığında otomatik etkinleşir (mevcut siteler etkilenmez).")}
         </UyariKutusu>
       )}
 

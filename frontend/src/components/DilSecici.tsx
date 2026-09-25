@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DILLER } from '@/lib/i18n'
+import { Ikon, I } from '@/components/Ikon'
 
 // Bayrak — inline SVG bayrak. 🔴 EMOJI bayrak (🇹🇷/🇬🇧) Windows Chrome/Edge'de
 // render OLMAZ (regional-indicator glyph yok → "TR"/"GB" harfleri görünür).
@@ -60,16 +61,14 @@ export default function DilSecici() {
       <button
         type="button"
         onClick={() => setAcik(a => !a)}
+        aria-expanded={acik}
         aria-label={t('dil.degistir')}
         title={t('dil.degistir')}
         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-dark-600 transition-colors"
       >
         <Bayrak kod={aktif.kod} />
         <span className="hidden sm:inline">{aktif.kod.toUpperCase()}</span>
-        <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${acik ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
-        </svg>
+        <Ikon d={I.chevronAsagi} kalinlik={2} className={`size-3.5 shrink-0 text-slate-400 transition-transform ${acik ? 'rotate-180' : ''}`} />
       </button>
 
       {acik && (

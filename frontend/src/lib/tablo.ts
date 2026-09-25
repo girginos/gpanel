@@ -84,34 +84,6 @@ export const T = {
     'absolute right-3 top-3 z-10 lg:static lg:table-cell ' +
     'lg:px-3 lg:py-2.5 lg:w-10 lg:text-center',
 
-  // İşlem düğmeleri.
-  //
-  // 🔴 DÜZ BAĞLANTI DEĞİL, DÜĞME. "İşlemler" sütunundaki eylemler düz metin
-  // bağlantısıydı; tablodaki diğer metinlerden ayırt edilemiyor, tıklanabilir
-  // oldukları ancak imleç üzerine gelince anlaşılıyordu. Kenarlıklı bir yüzey,
-  // "buraya basılır"ı bakışta söyler ve dokunmatik hedefi de büyütür.
-  //
-  // İkincil (çerçeveli) ve birincil (dolgulu) iki biçim: bir satırda birden
-  // çok eylem varken hepsi aynı ağırlıkta olursa hangisinin ASIL eylem olduğu
-  // kaybolur — "Yönet" birincil, "+ Subdomain" ikincildir.
-  aksiyon:
-    'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ' +
-    'border border-slate-200 dark:border-dark-600 ' +
-    'text-slate-600 dark:text-slate-300 ' +
-    'hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 ' +
-    'dark:hover:bg-dark-600/60 dark:hover:text-slate-100 dark:hover:border-slate-600 ' +
-    'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 ' +
-    'transition-colors',
-
-  aksiyonBirincil:
-    'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold ' +
-    'border border-brand-200 dark:border-brand-500/30 ' +
-    'text-brand-700 dark:text-brand-300 bg-brand-50/70 dark:bg-brand-500/10 ' +
-    'hover:bg-brand-100 hover:border-brand-300 ' +
-    'dark:hover:bg-brand-500/20 dark:hover:border-brand-500/50 ' +
-    'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 ' +
-    'transition-colors',
-
   // Boş/yükleniyor durumu (colSpan'lı tek hücre).
   hucreDurum:
     'block lg:table-cell py-10 text-center text-sm ' +

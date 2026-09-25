@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
-import { I } from '@/components/Ikon'
+import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
@@ -89,7 +89,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
         </div>
         <span className="flex items-center gap-2">
           {ozel && <Badge variant="soft" color="info" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{cevir("ayrı havuz")}</Badge>}
-          <span className="text-slate-400 text-lg">{acik ? '−' : '+'}</span>
+          <Ikon d={acik ? I.eksi : I.arti} className="size-5 shrink-0 text-slate-400" />
         </span>
       </button>
 

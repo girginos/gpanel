@@ -263,16 +263,16 @@ function KurulumIzi({ ku }: { ku: KurulumDurum }) {
   return (
     <div className="mt-3 space-y-1.5">
       {ku.durum === 'hata' && (
-        <UyariKutusu ton="tehlike" baslik={cevir("Kurulum başarısız")}>
+        <UyariKutusu ton="tehlike" kucuk baslik={cevir("Kurulum başarısız")}>
           {(hatali?.mesaj || ku.hata) && (
-            <div className="line-clamp-3 break-words text-xs">{hatali?.mesaj || ku.hata}</div>
+            <div className="line-clamp-3 break-words">{hatali?.mesaj || ku.hata}</div>
           )}
         </UyariKutusu>
       )}
       {uyarilar.length > 0 && (
-        <UyariKutusu ton="uyari">
+        <UyariKutusu ton="uyari" kucuk>
           {uyarilar.slice(0, 2).map((a, i) => (
-            <div key={i} className="line-clamp-2 break-words text-xs">
+            <div key={i} className="line-clamp-2 break-words">
               {a.mesaj || a.etiket}
             </div>
           ))}
@@ -353,13 +353,11 @@ function KurulumPaneli({ kurulumlar, kucuk, setKucuk, onGizle, onYukseklik }: {
           {suren > 0 && <span className="ml-1 text-slate-400">({suren})</span>}
         </span>
         <Button isIcon variant="flat" onClick={() => setKucuk(!kucuk)}
+          ikon={kucuk ? I.chevronYukari : I.chevronAsagi}
           aria-label={kucuk ? cevir("Büyüt") : cevir("Küçült")}
           title={kucuk ? cevir("Büyüt") : cevir("Küçült")}
-          className="size-8 rounded-full">
-          <svg className={`h-4 w-4 transition-transform ${kucuk ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </Button>
+          aria-expanded={!kucuk}
+          className="size-8 rounded-full" />
       </div>
 
       {!kucuk && (
@@ -1083,8 +1081,8 @@ function LisansOzet({ l }: { l: LisansDurum }) {
   return (
     <div className="mt-3 space-y-1 text-xs">
       {l.son_hata && (
-        <UyariKutusu ton="tehlike">
-          <span className="text-xs">{cevir("Not:")} {l.son_hata}</span>
+        <UyariKutusu ton="tehlike" kucuk>
+          {cevir("Not:")} {l.son_hata}
         </UyariKutusu>
       )}
       {/*
@@ -1093,8 +1091,8 @@ function LisansOzet({ l }: { l: LisansDurum }) {
         lisans sunucusundan gelir; burada yorumlanmaz.
       */}
       {l.uyari && (
-        <UyariKutusu ton="uyari">
-          <span className="text-xs">{l.uyari}</span>
+        <UyariKutusu ton="uyari" kucuk>
+          {l.uyari}
         </UyariKutusu>
       )}
     </div>
@@ -1132,12 +1130,9 @@ function Adimlar({ ku }: { ku: KurulumDurum }) {
   return (
     <div className="mt-3 rounded-lg border border-slate-200 dark:border-dark-600 bg-slate-50 dark:bg-dark-800/50 p-3">
       {katlanabilir ? (
-        <button type="button" onClick={() => setAcik((v) => !v)}
+        <button type="button" onClick={() => setAcik((v) => !v)} aria-expanded={acik}
           className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-slate-500 hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-400 transition">
-          <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${acik ? 'rotate-90' : ''}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+          <IkonSvg d={I.chevronSag} className={`size-3.5 shrink-0 transition-transform ${acik ? 'rotate-90' : ''}`} />
           <span>{cevir("Kurulum günlüğü")}</span>
           <span className="text-slate-400 dark:text-slate-500">({ku.adimlar.length} {cevir("adım · tamamlandı")})</span>
         </button>

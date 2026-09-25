@@ -706,9 +706,7 @@ export default function DomainsPage() {
             {olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
           </Button>
         </>}>
-          {/* Modal gövdesi kaydırılabilir (overflow) — AramaliSecim açılır listesi gövdeye
-              sığsın diye liste açıkken alta yer açılır (yalnız CSS, :has). */}
-          <form id="gosp-domain-olustur" onSubmit={olusturGonder} className="has-[[role=listbox]]:pb-56">
+          <form id="gosp-domain-olustur" onSubmit={olusturGonder}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               {cevir(cevir("Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik kurulur."))}
             </p>
@@ -830,11 +828,11 @@ export default function DomainsPage() {
             {cevir("Uygula")} ({secili.size})
           </Button>
         </>}>
-          <div className="has-[[role=listbox]]:pb-64">
+          <div>
             <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{secili.size} {cevir("domain etkilenecek.")}</p>
             {topluModal === 'sahip' && (
-              <UyariKutusu ton="uyari" className="mb-4">
-                <span className="text-xs leading-relaxed">
+              <UyariKutusu ton="uyari" className="mb-4" kucuk>
+                <span className="leading-relaxed">
                 {cevir("Devir eski sahibin erişimini keser: FTP/SSH parolası yenilenir, açık müşteri")}{' '}
                 {cevir("oturumları düşer, Git webhook anahtarı değişir, SSH anahtarları arşivlenir, uzak yedek hedefi ve GitHub bağlantısı kaldırılır.")}
                 <b className="font-semibold"> {cevir("Yeni parola işlem sonucunda gösterilir")}</b> {cevir("— kaydedin.")}

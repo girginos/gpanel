@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { Ikon, I } from '@/components/Ikon'
 
 type Entry = { adi: string; yol: string; tip: 'klasor' | 'dosya' | 'sembolik' }
 type ListResp = { yol: string; icerik: Entry[] }
@@ -106,14 +107,9 @@ function TreeNode({
             onClick={chevronTikla}
             aria-label={acik ? cevir("Daralt") : cevir("Genişlet")}
             aria-expanded={acik}
-            className="w-4 h-4 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 dark:text-slate-300"
+            className="flex size-4 items-center justify-center text-gray-400 hover:text-gray-700 dark:text-dark-300 dark:hover:text-dark-100"
           >
-            <svg
-              className={`w-3 h-3 transition-transform ${acik ? 'rotate-90' : ''}`}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+            <Ikon d={I.chevronSag} kalinlik={2.5} className={`size-3 transition-transform ${acik ? 'rotate-90' : ''}`} />
           </button>
         ) : (
           <span className="w-4" />

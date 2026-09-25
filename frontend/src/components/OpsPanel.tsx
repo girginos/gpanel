@@ -15,8 +15,9 @@ import { api } from '@/lib/api'
 import {
   Area, AreaChart, CartesianGrid, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { Activity, Cpu, Gauge, HardDrive, MemoryStick, Network, RefreshCw } from 'lucide-react'
+import { Activity, Cpu, Gauge, HardDrive, MemoryStick, Network } from 'lucide-react'
 import { I, Ikon as SvgIkon } from '@/components/Ikon'
+import { Button } from '@/components/ui'
 
 const OPS_EN: Record<string, string> = {
   'Zaman aralığı': 'Time range', 'Yenileme': 'Refresh', 'Kapalı': 'Off', 'Canlı': 'Live', 'Duruk': 'Paused',
@@ -162,6 +163,8 @@ export default function OpsPanel() {
   const [hata, setHata] = useState<string | null>(null)
   const [sonCekim, setSonCekim] = useState<Date | null>(null)
   const mesgul = useRef(false)
+  // Yenile düğmesinin dönen ikonu için (mesgul ref'i yeniden çizim tetiklemez).
+  const [cekiyor, setCekiyor] = useState(false)
 
   const cek = useCallback(() => {
     // 🔴 Ust uste binmeyi ONLE: 7 gunluk sorgu yavas donebilir; 10 sn'lik
@@ -173,10 +176,11 @@ export default function OpsPanel() {
     // sayfa kalici olarak "Veri toplaniyor" ekraninda kalirdi.
     if (mesgul.current) return
     mesgul.current = true
+    setCekiyor(true)
     api.get<Yanit>(`/system/load-history?saat=${saat}`)
       .then((r) => { setVeri(r.data); setHata(null); setSonCekim(new Date()) })
       .catch(() => setHata(cevir('Geçmiş alınamadı')))
-      .finally(() => { mesgul.current = false })
+      .finally(() => { mesgul.current = false; setCekiyor(false) })
   }, [saat])
 
   useEffect(() => { cek() }, [cek])
@@ -223,7 +227,9 @@ export default function OpsPanel() {
   const xEksen = <XAxis dataKey="t" axisLine={false} tickLine={false} tick={eksenStil} interval="preserveStartEnd" minTickGap={44} />
 
   return (
-    <div className="gp-ops">
+    // `dark`: OPS yüzeyi her temada koyu (kendi --ops-* tokenları) — içindeki Tailux
+    // bileşenleri (Button) açık temada da koyu varyantlarıyla çizilsin.
+    <div className="gp-ops dark">
       {/* araç çubuğu */}
       <div className="ops-bar">
         <span className="ops-label">{cevir('Zaman aralığı')}</span>
@@ -241,9 +247,8 @@ export default function OpsPanel() {
           <i />{yenileSn ? cevir('Canlı') : cevir('Duruk')}
           {sonCekim ? ` · ${sonCekim.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
         </span>
-        <button className="ops-select" onClick={cek} title={cevir('Şimdi yenile')} aria-label={cevir('Şimdi yenile')}>
-          <RefreshCw size={13} />
-        </button>
+        <Button isIcon variant="outlined" ikon={I.yenile} yukleniyor={cekiyor} onClick={cek}
+          title={cevir('Şimdi yenile')} aria-label={cevir('Şimdi yenile')} className="size-8" />
       </div>
 
       {/* tek-değer kutuları */}

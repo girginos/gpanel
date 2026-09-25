@@ -77,8 +77,8 @@ export default function DomainKopyaPage() {
           {cevir(cevir("Sitenizin dosyalarının zaman-damgalı bir anlık-görüntüsünü"))} <span className="font-mono">~/kopyalar/</span> {cevir("altında oluşturur — değişiklik yapmadan önce güvenli bir yedek noktası.")}
         </p>
 
-        <UyariKutusu ton="uyari" className="mb-4">
-          <span className="text-xs">Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}</span>
+        <UyariKutusu ton="uyari" className="mb-4" kucuk>
+          Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
         </UyariKutusu>
 
         <Card className="bg-white dark:bg-dark-700 p-5 mb-5 shadow-xs flex items-center justify-between">

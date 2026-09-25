@@ -250,7 +250,7 @@ export default function WordPressPage() {
                             {cevir("Yönetim")}
                             <Ikon d={I.harici} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
                           </a>
-                          <Button color={eski ? 'warning' : 'neutral'} variant={eski ? 'filled' : 'outlined'} boyut="sm" ikon={I.yukari}
+                          <Button color={eski ? 'warning' : 'neutral'} variant={eski ? 'filled' : 'outlined'} boyut="sm" ikon={I.yukselt}
                             disabled={!!mesgul} yukleniyor={mesgul === key} onClick={() => guncelle(t)}>
                             {eski ? cevirT(cevir("Güncelle → v{0}"), t.son_surum) : cevir("Güncelle")}
                           </Button>
