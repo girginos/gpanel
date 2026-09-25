@@ -165,7 +165,33 @@ func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma hatası: "+err.Error())
 		return
 	}
+	if middleware.MusteriClaimsFrom(r) != nil {
+		httpx.WriteJSON(w, http.StatusOK, musteriGorunumu(d))
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, d)
+}
+
+// musteriDomain — müşteri oturumunda GET /domains/{id} yanıtı: Domain'in aynısı,
+// yalnız sahiplik alanları (sahip_ad, sahip_tur, reseller_id) JSON'da HİÇ yok.
+// Aynı JSON adlı sığ alanlar gömülü Domain'dekileri gölgeler; nil + omitempty →
+// anahtar yazılmaz.
+//
+// 🔴 NEDEN (B8): müşteri, yöneticinin ya da bayisinin adını/giriş adını (kokAdi,
+// users.full_name/username) ve bayi kimliğini öğreniyordu. Müşteri ön yüzü bu
+// alanları kullanmıyor (yalnız yönetici/bayi DomainsPage'i, o da /domains
+// listesinden). Yönetici ve bayi yanıtı değişmez.
+type musteriDomain struct {
+	Domain
+	SahipAd    *struct{} `json:"sahip_ad,omitempty"`
+	SahipTur   *struct{} `json:"sahip_tur,omitempty"`
+	ResellerID *struct{} `json:"reseller_id,omitempty"`
+}
+
+func musteriGorunumu(d Domain) musteriDomain {
+	// Gölgelemeye ek olarak değerler de silinir: etiketler ileride değişse bile sızmaz.
+	d.SahipAd, d.SahipTur, d.ResellerID = "", "", 0
+	return musteriDomain{Domain: d}
 }
 
 type createReq struct {

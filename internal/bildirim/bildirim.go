@@ -7,17 +7,32 @@
 //
 // 🔴🔴 İZOLASYON: bir hosting hesabındaki zararlı dosya bildirimi YALNIZ o
 // domainin SAHİBİNE görünür. Root/admin BAŞKA kiracının tespitini görmez;
-// başka resellerlar da görmez. Görünürlük `kapsam()` ile role göre süzülür:
+// başka resellerlar da görmez. Görünürlük `okuyan.gorunurluk()` ile role göre
+// süzülür:
 //
-//	admin    → yalnız panel-geneli bildirimler (reseller_id IS NULL)
+//	admin    → yalnız panel-geneli / ana hesap bildirimleri (reseller_id NULL ya da 0)
 //	reseller → yalnız KENDİ domainleri (reseller_id = kendi uid)
 //	müşteri  → yalnız KENDİ domaini (domain_id = token domaini)
 //
 // Bu süzgeç OLMADAN cp_bildirim küresel okunuyordu → tam sunucu yolu dahil her
 // kiracının tespiti admin bell'ine düşüyordu (gizlilik sızıntısı).
+//
+// 🔴🔴 OKUNDU GÖRÜNTÜLEYENE AİTTİR (cp_bildirim_okundu, göç 0105): bir domain
+// bildirimini hem müşteri hem sahip (bayi ya da yönetici) görür. Okundu eskiden
+// satırdaki TEK bir sütundu → müşteri "tümünü okundu" deyince bayinin/yöneticinin
+// "Yedek başarısız", "Saldırı zinciri" rozetleri de düşüyordu (ele geçirilmiş bir
+// müşteri hesabı sahibin kritik uyarısını susturabiliyordu). Artık her
+// görüntüleyenin (rol + kimlik) kendi okundu kaydı var; bir rolün eylemi başka
+// rolün uyarı durumunu değiştirmez.
+//
+// cp_bildirim.okundu sütunu KALIR ama anlamı "en az bir görüntüleyen okudu"dur:
+// ekranda gösterilmez, yalnız "satır kapandı, yeni olay yeni satır açsın" diye
+// bakan yazıcılar içindir (cmd/gosp-avajan AV toplama). Kimin okuduğu
+// cp_bildirim_okundu'dadır.
 package bildirim
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -40,53 +55,107 @@ type Bildirim struct {
 	DomainID *int64 `json:"domain_id"`
 	RefTur   string `json:"ref_tur"`
 	RefID    int64  `json:"ref_id"`
-	Okundu   bool   `json:"okundu"`
+	Okundu   bool   `json:"okundu"` // İSTEYEN görüntüleyen için
 	Tarih    string `json:"tarih"`
 }
 
-// kapsam — istek sahibinin rolüne göre cp_bildirim görünürlük WHERE parçası.
-// ok=false → kimlik yok/yetkisiz. Döndürülen kosul TEK bir SQL ifadesidir;
-// argümanları arg ile gelir (admin'de argümansız).
-func kapsam(r *http.Request) (kosul string, arg []any, ok bool) {
+// Görüntüleyen türleri (cp_bildirim_okundu.okuyan_tur).
+const (
+	okuyanAdmin   = "admin"
+	okuyanBayi    = "bayi"
+	okuyanMusteri = "musteri"
+
+	// yoneticiID — sistem tarafının (Yaz ön-işareti, 0105 göçü) yönetici kimliği.
+	// auth.Login yönetici jetonunu HER ZAMAN uid=1 ("root") ile üretir; HTTP
+	// tarafı jetondaki UserID'yi kullanır, bugün ikisi aynıdır.
+	yoneticiID int64 = 1
+)
+
+// okuyan — bildirimi GÖRÜNTÜLEYEN kimlik; okundu durumu bu anahtarla tutulur.
+//
+//	admin   → id = users.id (jetondaki UserID)
+//	bayi    → id = kendi users.id (jetondaki ResellerID)
+//	müşteri → id = domains.id (jetondaki DomainID; o domainin tüm müşteri girişleri ortak)
+type okuyan struct {
+	tur string
+	id  int64
+}
+
+// sahipOkuyan — domainin sahibi olan görüntüleyen (reseller_id 0 = ana hesap/yönetici).
+func sahipOkuyan(resellerID int64) okuyan {
+	if resellerID > 0 {
+		return okuyan{okuyanBayi, resellerID}
+	}
+	return okuyan{okuyanAdmin, yoneticiID}
+}
+
+// gorunurluk — bu kimliğin görebildiği cp_bildirim satırları (takma ad `b`).
+// Döndürülen koşul TEK bir SQL ifadesidir; değerler arg ile bağlanır.
+func (o okuyan) gorunurluk() (string, []any) {
+	switch o.tur {
+	case okuyanAdmin:
+		// Admin YALNIZ sahipsiz (panel-geneli) ve ana hesap bildirimlerini görür;
+		// kiracı/bayi domain bildirimleri sahibine aittir (admin AV panelinden izler).
+		// reseller_id=0: eski sürümün "Ana hesap"a devirde yazdığı değer (B4) —
+		// 0105 göçü NULL'a çeker; bu kol yine de kaçağı yöneticiden saklamaz.
+		return "(b.reseller_id IS NULL OR b.reseller_id = 0)", nil
+	case okuyanBayi:
+		return "b.reseller_id = ?", []any{o.id}
+	default:
+		return "b.domain_id = ?", []any{o.id}
+	}
+}
+
+// okumadi — "`b` satırını bu kimlik henüz okumadı" koşulu.
+func (o okuyan) okumadi() (string, []any) {
+	return `NOT EXISTS (SELECT 1 FROM cp_bildirim_okundu k
+		WHERE k.bildirim_id = b.id AND k.okuyan_tur = ? AND k.okuyan_id = ?)`, []any{o.tur, o.id}
+}
+
+// istekOkuyan — isteğin sahibi. ok=false → kimlik yok/yetkisiz.
+func istekOkuyan(r *http.Request) (okuyan, bool) {
 	if c := middleware.ClaimsFrom(r); c != nil {
 		switch c.Role {
 		case "admin":
-			// Admin YALNIZ sahipsiz (panel-geneli) bildirimleri görür; kiracı/domain
-			// bildirimleri sahibine aittir. Kiracı zararlısını admin buradan GÖRMEZ
-			// (admin AV panelinden izler).
-			return "reseller_id IS NULL", nil, true
+			return okuyan{okuyanAdmin, c.UserID}, true
 		case "reseller":
-			return "reseller_id = ?", []any{c.ResellerID}, true
+			return okuyan{okuyanBayi, c.ResellerID}, true
 		}
 	}
 	if mc := middleware.MusteriClaimsFrom(r); mc != nil {
-		return "domain_id = ?", []any{mc.DomainID}, true
+		return okuyan{okuyanMusteri, mc.DomainID}, true
 	}
-	return "", nil, false
+	return okuyan{}, false
 }
 
 // Liste — GET /api/v1/bildirimler?sadece_okunmamis=1&kategori=antivirus
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
-	kos, scopeArg, ok := kapsam(r)
+	o, ok := istekOkuyan(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
 	}
+	kos, scopeArg := o.gorunurluk()
 	kosuller := []string{kos}
-	arg := append([]any{}, scopeArg...)
+	// İlk iki argüman LEFT JOIN'in (bu görüntüleyenin okundu kaydı), sonra WHERE.
+	arg := append([]any{o.tur, o.id}, scopeArg...)
 	if r.URL.Query().Get("sadece_okunmamis") == "1" {
-		kosuller = append(kosuller, "okundu=0")
+		kosuller = append(kosuller, "k.bildirim_id IS NULL")
 	}
 	if k := r.URL.Query().Get("kategori"); k != "" {
-		kosuller = append(kosuller, "kategori=?")
+		kosuller = append(kosuller, "b.kategori=?")
 		arg = append(arg, k)
 	}
-	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (kos=kapsam() rol ifadesi + "okundu=0" + "kategori=?") birleştirir; kullanıcı değerleri (kategori) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
-	q := `SELECT id, seviye, kategori, baslik, mesaj, domain_id, ref_tur, ref_id, okundu,
-	             DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
-	        FROM cp_bildirim WHERE ` + joinAnd(kosuller) + ` ORDER BY created_at DESC LIMIT 200`
+	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (gorunurluk() rol ifadesi + "k.bildirim_id IS NULL" + "b.kategori=?") birleştirir; kullanıcı değerleri (kategori, kimlik) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
+	q := `SELECT b.id, b.seviye, b.kategori, b.baslik, b.mesaj, b.domain_id, b.ref_tur, b.ref_id,
+	             k.bildirim_id IS NOT NULL,
+	             DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i:%s')
+	        FROM cp_bildirim b
+	        LEFT JOIN cp_bildirim_okundu k
+	          ON k.bildirim_id = b.id AND k.okuyan_tur = ? AND k.okuyan_id = ?
+	       WHERE ` + joinAnd(kosuller) + ` ORDER BY b.created_at DESC, b.id DESC LIMIT 200`
 
-	rows, err := h.DB.QueryContext(r.Context(), q, arg...)
+	rows, err := h.DB.QueryContext(r.Context(), q, arg...) //nolint:gosec // G701: q yalnız SABİT parçalardan kurulur (bkz. yukarı); istek değerleri ? ile bağlanır.
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -105,34 +174,67 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, b)
 	}
-	// Okunmamış sayısı — AYNI kapsam (badge yalnız kendi bildirimlerini saymalı).
+	// Okunmamış sayısı — AYNI kapsam + BU görüntüleyenin okundu kaydı (badge yalnız
+	// kendi bildirimlerini ve kendi okumasını saymalı).
+	okK, okArg := o.okumadi()
+	sayArg := append(append([]any{}, scopeArg...), okArg...)
+	sayQ := `SELECT COUNT(*) FROM cp_bildirim b WHERE ` + kos + ` AND ` + okK //nolint:gosec // G202: kos/okK SABİT ifadeler (gorunurluk/okumadi); değerler ? ile bağlanır.
 	var okunmamis int
-	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM cp_bildirim WHERE `+kos+` AND okundu=0`, scopeArg...).Scan(&okunmamis)
+	_ = h.DB.QueryRowContext(r.Context(), sayQ, sayArg...).Scan(&okunmamis) //nolint:gosec // G701: sayQ SABİT parçalardan; değerler ? ile bağlanır.
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"bildirimler": out, "okunmamis": okunmamis})
 }
 
 // Okundu — POST /api/v1/bildirimler/{id}/okundu  (id=0 → kapsamdaki hepsi)
+//
+// Yalnız İSTEYEN görüntüleyen için okundu kaydı yazar; aynı satırı gören öteki
+// rolün (müşteri ↔ bayi/yönetici) durumu değişmez.
 func (h *Handlers) Okundu(w http.ResponseWriter, r *http.Request) {
-	kos, scopeArg, ok := kapsam(r)
+	o, ok := istekOkuyan(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
 	}
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var err error
-	if id == 0 {
-		// 🔴 Kapsam ŞART: aksi hâlde bir kullanıcı HERKESİN bildirimini okundu yapardı.
-		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND okundu=0`, scopeArg...) //nolint:gosec // G202: kos = kapsam() SABİT rol ifadesi (reseller_id IS NULL | reseller_id = ? | domain_id = ?); değerler scopeArg ile ? bağlanır.
-	} else {
-		args := append(append([]any{}, scopeArg...), id)
-		_, err = h.DB.Exec(`UPDATE cp_bildirim SET okundu=1 WHERE `+kos+` AND id=?`, args...) //nolint:gosec // G202: kos = kapsam() SABİT rol ifadesi; id ve scopeArg değerleri ? ile bağlanır.
-	}
-	if err != nil {
+	if err := okunduYaz(r.Context(), h.DB, o, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// okunduYaz — görüntüleyenin okundu kayıtları + "en az biri okudu" sütunu, tek
+// işlemde. id=0 → görünür hepsi. INSERT IGNORE: eşzamanlı iki "tümünü okundu"
+// yinelenen anahtarda düşmesin.
+//
+// 🔴 Kapsam ŞART: aksi hâlde bir kullanıcı görmediği bildirimi (başka kiracının)
+// okundu işaretleyebilirdi. Kayıt yalnız görünür satırlar için yazılır.
+func okunduYaz(ctx context.Context, db *sql.DB, o okuyan, id int64) error {
+	kos, scopeArg := o.gorunurluk()
+	okK, okArg := o.okumadi()
+	hedef := ""
+	var hedefArg []any
+	if id != 0 {
+		hedef = " AND b.id = ?"
+		hedefArg = []any{id}
+	}
+	isaretArg := append([]any{o.tur, o.id}, scopeArg...)
+	isaretArg = append(append(isaretArg, okArg...), hedefArg...)
+	bayrakArg := append(append([]any{}, scopeArg...), hedefArg...)
+	isaretQ := `INSERT IGNORE INTO cp_bildirim_okundu (bildirim_id, okuyan_tur, okuyan_id) SELECT b.id, ?, ? FROM cp_bildirim b WHERE ` + kos + ` AND ` + okK + hedef //nolint:gosec // G202: kos/okK/hedef SABİT ifadeler (gorunurluk/okumadi/" AND b.id = ?"); değerler ? ile bağlanır.
+	bayrakQ := `UPDATE cp_bildirim b SET b.okundu = 1 WHERE ` + kos + ` AND b.okundu = 0` + hedef                                                                     //nolint:gosec // G202: kos/hedef SABİT ifadeler; değerler ? ile bağlanır.
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, isaretQ, isaretArg...); err != nil { //nolint:gosec // G701: isaretQ SABİT parçalardan; değerler ? ile bağlanır.
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, bayrakQ, bayrakArg...); err != nil { //nolint:gosec // G701: bayrakQ SABİT parçalardan; değerler ? ile bağlanır.
+		return err
+	}
+	return tx.Commit()
 }
 
 // Yaz — modül-içi kullanım (AV, SSL, ...): bildirim oluştur. domainID>0 ise
@@ -143,29 +245,102 @@ func Yaz(db *sql.DB, seviye, kategori, baslik, mesaj string, domainID int64, ref
 		return
 	}
 	var dom, rid any
+	gorenler := []okuyan{sahipOkuyan(0)}
 	if domainID > 0 {
 		dom = domainID
 		var r int64
 		if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
 			rid = r // reseller-sahipli; 0 ise admin-sahipli → NULL (admin görür)
 		}
+		gorenler = []okuyan{sahipOkuyan(r), {okuyanMusteri, domainID}}
 	}
-	// 🔴 DEDUP: aynı (kategori, başlık, ref, domain) OKUNMAMIŞ bildirim zaten
-	// varsa YENİDEN YAZMA. Kalıcı bir durum (swap yok, SSL hatası, ...) her
-	// panel açılışında / monitoring turunda yeni kayıt üretip bildirim merkezini
-	// spam'liyordu (kullanıcı 11 özdeş "Swap alanı yok" gördü). Kullanıcı okundu
-	// işaretlerse ve durum sürerse tekrar uyarılır (kabul edilebilir). Farklı
-	// olaylar (farklı başlık/ref/domain) BİRLEŞTİRİLMEZ — yalnız birebir tekrar.
-	var mevcut int
-	if db.QueryRow(
-		`SELECT COUNT(*) FROM cp_bildirim
-		  WHERE okundu=0 AND kategori=? AND baslik=? AND ref_tur=? AND ref_id=? AND domain_id <=> ?`,
-		kategori, baslik, refTur, refID, dom).Scan(&mevcut) == nil && mevcut > 0 {
+	// 🔴 DEDUP (görüntüleyene göre): aynı (kategori, başlık, ref, domain) bildirimi
+	// yeni satırı görecek HERKES hâlâ okunmamış tutuyorsa YENİDEN YAZMA. Kalıcı
+	// bir durum (swap yok, SSL hatası, ...) her panel açılışında / monitoring
+	// turunda yeni kayıt üretip bildirim merkezini spam'liyordu (kullanıcı 11
+	// özdeş "Swap alanı yok" gördü). Farklı olaylar (farklı başlık/ref/domain)
+	// BİRLEŞTİRİLMEZ — yalnız birebir tekrar.
+	//
+	// Okuyan ve durum sürüyorsa YALNIZ o yeniden uyarılır: yeni satır yazılır ve
+	// elinde hâlâ okunmamış kopyası olan görüntüleyen için baştan okundu işaretlenir
+	// (rozetine ikinci kopya binmez). "Hâlâ okunmamış" GÜNCEL sahibin gördüğü
+	// satırlara bakar: devirden kalmış, sahibin göremediği bir satır yöneticiyi/bayiyi
+	// artık susturmaz (B4).
+	var bekleyen []okuyan
+	for _, o := range gorenler {
+		var n int
+		if err := ayniOkunmamis(db, o, kategori, baslik, refTur, refID, dom).Scan(&n); err != nil {
+			// cp_bildirim_okundu okunamıyor (0105 göçü uygulanmamış?) → eski ortak
+			// sütunla tekilleştir: bildirim merkezi her turda spam'lenmesin.
+			if db.QueryRow(`SELECT COUNT(*) FROM cp_bildirim
+			  WHERE okundu=0 AND kategori=? AND baslik=? AND ref_tur=? AND ref_id=? AND domain_id <=> ?`,
+				kategori, baslik, refTur, refID, dom).Scan(&n) == nil && n > 0 {
+				return
+			}
+			bekleyen = nil
+			break
+		}
+		if n > 0 {
+			bekleyen = append(bekleyen, o)
+		}
+	}
+	if len(bekleyen) == len(gorenler) {
 		return
 	}
-	_, _ = db.Exec(
+	res, err := db.Exec(
 		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id, ref_tur, ref_id)
 		 VALUES (?,?,?,?,?,?,?,?)`, seviye, kategori, baslik, mesaj, dom, rid, refTur, refID)
+	if err != nil {
+		return
+	}
+	yeni, err := res.LastInsertId()
+	if err != nil || yeni <= 0 {
+		return
+	}
+	for _, o := range bekleyen {
+		_, _ = db.Exec(`INSERT IGNORE INTO cp_bildirim_okundu (bildirim_id, okuyan_tur, okuyan_id) VALUES (?,?,?)`,
+			yeni, o.tur, o.id)
+	}
+}
+
+// ayniOkunmamis — o görüntüleyenin gördüğü ve henüz okumadığı birebir aynı
+// bildirimlerin sayısı (COUNT satırı).
+func ayniOkunmamis(db *sql.DB, o okuyan, kategori, baslik, refTur string, refID int64, dom any) *sql.Row {
+	kos, arg := o.gorunurluk()
+	okK, okArg := o.okumadi()
+	args := append([]any{kategori, baslik, refTur, refID, dom}, arg...)
+	args = append(args, okArg...)
+	q := `SELECT COUNT(*) FROM cp_bildirim b WHERE b.kategori=? AND b.baslik=? AND b.ref_tur=? AND b.ref_id=? AND b.domain_id <=> ? AND ` + kos + ` AND ` + okK //nolint:gosec // G202: kos/okK SABİT ifadeler; değerler ? ile bağlanır.
+	return db.QueryRow(q, args...)                                                                                                                              //nolint:gosec // G701: q SABİT parçalardan; değerler ? ile bağlanır.
+}
+
+// SahipDevri — domainin bayi sahipliği eskiResellerID → yeniResellerID
+// değişirken (toplu "sahip" işlemi, internal/toplu/devir.go) AÇIK bildirimleri
+// yeni sahibe taşır. 0 = ana hesap (yönetici).
+//
+// "Açık" = ESKİ SAHİBİN henüz okumadığı ve hâlâ onun gördüğü satır. Eski sahibin
+// okudukları onun döneminin geçmişi olarak onda kalır; müşterinin okuması sahibin
+// açık uyarısını kapatmaz (B3 ile aynı ilke).
+//
+// 🔴 B4: yeni sahip "Ana hesap" (0) iken reseller_id=0 YAZILMAZ, NULL yazılır —
+// yöneticinin kapsamı NULL'dur; 0 yazılınca bildirimler yöneticiden de eski
+// bayiden de kayboluyordu.
+//
+// ex genelde devrin transaction'ıdır (*sql.Tx) — sahiplik ile birlikte taşınır.
+func SahipDevri(ctx context.Context, ex interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, domainID, eskiResellerID, yeniResellerID int64) error {
+	if domainID <= 0 || eskiResellerID == yeniResellerID {
+		return nil
+	}
+	eski := sahipOkuyan(eskiResellerID)
+	kos, arg := eski.gorunurluk()
+	okK, okArg := eski.okumadi()
+	args := append([]any{yeniResellerID, domainID}, arg...)
+	args = append(args, okArg...)
+	q := `UPDATE cp_bildirim b SET b.reseller_id = NULLIF(?, 0) WHERE b.domain_id = ? AND ` + kos + ` AND ` + okK //nolint:gosec // G202: kos/okK SABİT ifadeler; değerler ? ile bağlanır.
+	_, err := ex.ExecContext(ctx, q, args...)                                                                     //nolint:gosec // G701: q SABİT parçalardan; değerler ? ile bağlanır.
+	return err
 }
 
 func joinAnd(l []string) string {

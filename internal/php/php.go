@@ -389,9 +389,32 @@ type Handlers struct {
 	DB *sql.DB
 }
 
+// tumSurumler — sürüm keşfi (dnf/php exec). Testler sahte veriyle değiştirir.
+var tumSurumler = phpsurum.TumSurumler
+
+// istemciSurumleri — istemciye dönen sürüm listesini oturuma göre süzer.
+//
+// 🔴 NEDEN (B11): PHP-FPM pool/soket dizinleri ve servis adları sunucunun iç
+// yapısıdır; /php/versions ise rol kapısı olmadan her oturuma açık. Bunları
+// YALNIZ yönetici görür. Müşteri/bayi ön yüzü yalnız surum/aciklama/eol kullanır
+// (DomainPHPPage, DomainPlanPage, DomainSubdomainYonetPage, DomainsPage,
+// PaketDetayPage, ServicePlansPage). Alanlar SİLİNMEZ, BOŞALTILIR: yanıt biçimi
+// (anahtar kümesi) herkes için aynı kalır.
+func istemciSurumleri(r *http.Request, l []Surum) []Surum {
+	if middleware.RolFrom(r) == "admin" {
+		return l
+	}
+	out := make([]Surum, len(l))
+	for i, s := range l {
+		s.PoolDir, s.SockDir, s.Service = "", "", ""
+		out[i] = s
+	}
+	return out
+}
+
 // Versions: kurulu sürümler — dinamik discover
 func (h *Handlers) Versions(w http.ResponseWriter, r *http.Request) {
-	all := phpsurum.TumSurumler()
+	all := tumSurumler()
 	yuklu := []Surum{}
 	gorulen := map[string]bool{}
 	for _, s := range all {
@@ -416,7 +439,7 @@ func (h *Handlers) Versions(w http.ResponseWriter, r *http.Request) {
 			EOL: s.EOL,
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, yuklu)
+	httpx.WriteJSON(w, http.StatusOK, istemciSurumleri(r, yuklu))
 }
 
 // GetAyarlar: domain'in PHP ayarlari + mevcut sürüm
@@ -443,8 +466,9 @@ func (h *Handlers) GetAyarlar(w http.ResponseWriter, r *http.Request) {
 		"php_surum": surum,
 		"ayarlar":   s,
 		"moduller":  moduller,
-		"surumler": func() []Surum {
-			all := phpsurum.TumSurumler()
+		// Aynı iç yollar burada da müşteriye açık (MusteriScope) — aynı süzgeç.
+		"surumler": istemciSurumleri(r, func() []Surum {
+			all := tumSurumler()
 			yuklu := []Surum{}
 			gorulen := map[string]bool{}
 			for _, ds := range all {
@@ -459,7 +483,7 @@ func (h *Handlers) GetAyarlar(w http.ResponseWriter, r *http.Request) {
 				yuklu = append(yuklu, Surum{Surum: ds.Surum, PoolDir: ds.PoolDir, SockDir: ds.SockDir, Service: ds.Service, Aciklama: ac})
 			}
 			return yuklu
-		}(),
+		}()),
 	})
 }
 

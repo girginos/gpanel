@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/bildirim"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
@@ -156,10 +157,12 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 	}
 
 	// ── 6) Açık bildirimleri yeni sahibe taşı ──────────────────────────────
-	// Kapanmış olanlar eski sahipte kalır (geçmiş onun dönemine ait).
+	// Eski sahibin okudukları onda kalır (geçmiş onun dönemine ait). "Açık"
+	// ölçütü ve "Ana hesap" (0) → NULL dönüşümü bildirim paketinde (B4: eskiden
+	// reseller_id=0 yazılıyor, bildirimler yöneticiden de eski bayiden de
+	// kayboluyordu).
 	if resellerID != nil {
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE cp_bildirim SET reseller_id=? WHERE domain_id=? AND okundu=0", *resellerID, did); err != nil {
+		if err := bildirim.SahipDevri(ctx, tx, did, eskiRID.Int64, *resellerID); err != nil {
 			uyar("bildirimler taşınamadı: %v", err)
 		}
 	}
