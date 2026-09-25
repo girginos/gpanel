@@ -10,6 +10,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
+import { useRol } from '@/lib/rol'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -115,6 +116,9 @@ export default function DomainPlanPage() {
   const [taslak, setTaslak] = useState<Plan | null>(null)
   // Mail eklentisi aktif+ödemeli ise posta limiti alanları görünür.
   const [mailAktif, setMailAktif] = useState(false)
+  // Müşteri plan tanımlayamaz (/plans AdminVeyaReseller); boş durumdaki
+  // 'Planlara git' ona gösterilmez.
+  const musteri = useRol() === 'user'
 
   function yukle() {
     if (!id) return
@@ -323,7 +327,10 @@ export default function DomainPlanPage() {
             <div role="status" className="text-center py-12 rounded-lg border border-dashed border-slate-300 dark:border-dark-600">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">{cevir("Tanımlı plan yok")}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{cevir("Önce bir hosting planı oluşturun.")}</p>
-              <Link to="/araclar/paketler" className={butonSinifi({ color: 'primary', className: 'mt-4' })}>{cevir("Planlara git")}<Ikon d={I.ileri} className="size-4 shrink-0 ms-2 -me-1" /></Link>
+              {/* Hosting planları /hizmet-planlari'dedir (/araclar/paketler RPM paket yöneticisi). */}
+              {!musteri && (
+                <Link to="/hizmet-planlari" className={butonSinifi({ color: 'primary', className: 'mt-4' })}>{cevir("Planlara git")}<Ikon d={I.ileri} className="size-4 shrink-0 ms-2 -me-1" /></Link>
+              )}
             </div>
           ) : (
             <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

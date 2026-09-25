@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
+import { musteriDomainID } from '@/lib/rol'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
 import DilSecici from '@/components/DilSecici'
@@ -47,6 +48,25 @@ const SAYFALAR: SayfaTanim[] = [
   { etiket: 'Panel Güncelleme', yol: '/araclar/guncelleme', anahtar: ['güncelleme', 'guncelleme', 'update', 'panel güncelle', 'sürüm', 'surum'] },
 ]
 
+// Müşteri (rol 'user') araması: YALNIZ kendi aboneliğinin sekmeleri (menüsüyle aynı).
+// Yukarıdaki HERKES sayfaları (Domainler, Planlar, DNS Şablonu, Denetim) müşteriye
+// 403 döndüğü için müşteri listesinde yok; domain/alt alan araması da yapılmaz.
+const MUSTERI_SAYFALAR: { etiket: string; alt: string; anahtar: string[] }[] = [
+  { etiket: 'Genel Bakış', alt: '', anahtar: ['genel', 'bakış', 'bakis', 'pano', 'özet', 'ozet', 'overview', 'dashboard'] },
+  { etiket: 'Dosya Yöneticisi', alt: 'dosyalar', anahtar: ['dosya', 'file', 'yükle', 'yukle', 'public_html'] },
+  { etiket: 'Veritabanları', alt: 'veritabanlari', anahtar: ['veritabanı', 'veritabani', 'database', 'db', 'mysql', 'sql'] },
+  { etiket: 'FTP Hesapları', alt: 'ftp', anahtar: ['ftp', 'parola', 'şifre', 'sifre'] },
+  { etiket: 'Yedekler', alt: 'yedekler', anahtar: ['yedek', 'backup', 'geri yükle', 'geri yukle', 'restore'] },
+  { etiket: 'PHP Ayarları', alt: 'php', anahtar: ['php', 'sürüm', 'surum', 'version', 'ini'] },
+  { etiket: 'Apache & nginx', alt: 'web-sunucu', anahtar: ['apache', 'nginx', 'web sunucu', 'htaccess', 'yönlendirme', 'yonlendirme'] },
+  { etiket: 'Laravel', alt: 'laravel', anahtar: ['laravel', 'artisan', 'kuyruk', 'queue'] },
+  { etiket: 'Git Deploy', alt: 'git', anahtar: ['git', 'deploy', 'github', 'repo'] },
+  { etiket: 'DNS Ayarları', alt: 'dns', anahtar: ['dns', 'kayıt', 'kayit', 'mx', 'txt', 'cname', 'zone'] },
+  { etiket: 'SSL/TLS', alt: 'ssl', anahtar: ['ssl', 'tls', 'https', 'sertifika', 'lets encrypt'] },
+  { etiket: 'Zamanlanmış Görevler', alt: 'cron', anahtar: ['cron', 'zamanlanmış', 'zamanlanmis', 'görev', 'gorev'] },
+  { etiket: 'Günlükler', alt: 'gunlukler', anahtar: ['günlük', 'gunluk', 'log', 'erişim', 'erisim', 'hata'] },
+]
+
 // ── Bildirim yardımcıları ──
 const goreliZaman = (t: string) => {
   // Backend zaman damgalari UTC ama timezone-suz ("2026-08-22 14:14:45").
@@ -67,13 +87,7 @@ const sevBg = (s: string) =>
     : s === 'uyari' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
       : 'bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
 const KatIkon = ({ kategori }: { kategori: string }) => (
-  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9}>
-    <path strokeLinecap="round" strokeLinejoin="round" d={
-      kategori === 'antivirus'
-        ? 'M9 12l2 2 4-4m5.6-4A12 12 0 0112 2.9 12 12 0 013.4 6 12 12 0 003 9c0 5.6 3.8 10.3 9 11.6 5.2-1.3 9-6 9-11.6 0-1-.1-2-.4-3z'
-        : 'M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1'
-    } />
-  </svg>
+  <Ikon d={kategori === 'antivirus' ? I.kalkan : I.zil} kalinlik={1.9} className="w-4 h-4" />
 )
 
 
@@ -114,6 +128,21 @@ const CMP_EN: Record<string, string> = {
   "Tümünü göster": "Show all",
   "Hesap menüsü": "Account menu",
   "Çıkış Yap": "Log out",
+  "Genel Bakış": "Overview",
+  "Dosya Yöneticisi": "File Manager",
+  "Veritabanları": "Databases",
+  "FTP Hesapları": "FTP Accounts",
+  "Yedekler": "Backups",
+  "PHP Ayarları": "PHP Settings",
+  "Apache & nginx": "Apache & nginx",
+  "Laravel": "Laravel",
+  "Git Deploy": "Git Deploy",
+  "DNS Ayarları": "DNS Settings",
+  "SSL/TLS": "SSL/TLS",
+  "Zamanlanmış Görevler": "Cron Jobs",
+  "Günlükler": "Logs",
+  "Ara: sayfa (ör. yedek, dns, ssl)…": "Search: page (e.g. backup, dns, ssl)…",
+  "Hosting kullanıcısı": "Hosting user",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -122,6 +151,8 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const kullanici = useAuth((s) => s.kullanici)
   const cikis = useAuth((s) => s.cikis)
   const navigate = useNavigate()
+  // Rol tek kaynaktan (useAuth kullanici.rol); 'user' = hosting müşterisi.
+  const musteri = kullanici?.rol === 'user'
   async function bildirimYukle() {
     try {
       const { data } = await api.get<{ bildirimler: Bildirim[]; okunmamis: number }>('/bildirimler')
@@ -152,7 +183,9 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
     }
     // Domainli bildirim → O DOMAİNİN kendi AV sayfasına; yoksa panel-geneli merkezî.
     if (b.domain_id) { navigate(`/abonelikler/${b.domain_id}/imunify`); return }
-    if (b.kategori === 'antivirus') { navigate('/antivirus'); return }
+    // Domain'siz bildirim yönetici merkezine gider; müşteride o sayfa yok (rol kapısı
+    // yine kendi aboneliğine çevirirdi) — müşteride yalnız okundu işaretlenir.
+    if (b.kategori === 'antivirus' && !musteri) { navigate('/antivirus'); return }
   }
   const [menuAcikProfil, setMenuAcik] = useState(false)
   const [tema, setTema] = useState<Theme>(getTheme())
@@ -187,7 +220,9 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   }, [])
 
   function veriYukle() {
-    if (veri.current) return
+    // Müşteri domain/alt alan listesi alamaz (/domains, /subdomains → 403); araması
+    // yalnız kendi sayfalarıdır — boşuna istek atılmaz.
+    if (veri.current || musteri) return
     Promise.all([
       api.get<AramaDomain[]>('/domains').then(r => r.data).catch(() => []),
       api.get<AramaSub[]>('/subdomains').then(r => r.data).catch(() => []),
@@ -198,6 +233,18 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   const s = q.trim().toLowerCase()
   const sonuclar: Sonuc[] = (() => {
     if (!s) return []
+    if (musteri) {
+      const id = musteriDomainID()
+      if (id === null) return []
+      const kok = `/abonelikler/${id}`
+      return MUSTERI_SAYFALAR
+        .filter(x => x.etiket.toLowerCase().includes(s) || cevir(x.etiket).toLowerCase().includes(s) || x.anahtar.some(k => k.includes(s)))
+        .slice(0, 8)
+        .map<Sonuc>(x => {
+          const yol = x.alt ? `${kok}/${x.alt}` : kok
+          return { tip: 'sayfa', ad: cevir(x.etiket), alt: yol, yol, key: 'm' + yol }
+        })
+    }
     // 1) Sayfalar (statik, veri yüklenmese de anında) — rol filtreli
     const p = SAYFALAR
       .filter(x => (x.roller ? x.roller.includes(rol) : rol === 'admin'))
@@ -227,7 +274,8 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
     if (e.key === 'ArrowUp') { e.preventDefault(); setAktif(i => Math.max(i - 1, 0)); return }
     if (e.key === 'Enter') {
       if (sonuclar[aktif]) git(sonuclar[aktif].yol)
-      else if (s) navigate('/domainler')
+      // Yedek (eşleşme yok → domain listesi) yalnız yönetici/bayi: müşteride /domainler yok.
+      else if (s && !musteri) navigate('/domainler')
     }
   }
 
@@ -238,8 +286,11 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
   }
 
   function onCikis() {
+    // Hedef cikis()'ten ÖNCE belirlenir: cikis() müşteri bayraklarını siliyor.
+    // Müşteri kendi giriş formuna döner (karma kapıda /giris yönetici formudur).
+    const hedef = musteri ? '/cp/giris' : '/giris'
     cikis()
-    navigate('/giris', { replace: true })
+    navigate(hedef, { replace: true })
   }
 
   return (
@@ -255,9 +306,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
         aria-expanded={!!menuAcik}
         aria-controls="gosp-kenar-cubugu"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
+        <Ikon d={I.menu} kalinlik={1.8} className="w-5 h-5" />
       </Button>
 
       {/* Dar ekranda ortalama boşluğu yok; lg'de eski ortalanmış arama korunur */}
@@ -265,16 +314,14 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
 
       <div className="flex-1 lg:flex-none w-full lg:max-w-xl min-w-0" ref={kutuRef}>
         <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Ikon d={I.ara} kalinlik={1.8} className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
           <input
             type="text"
             value={q}
             onChange={(e) => { setQ(e.target.value); setAktif(0); setAcik(true); veriYukle() }}
             onFocus={() => { veriYukle(); if (q) setAcik(true) }}
             onKeyDown={tusla}
-            placeholder={cevir(cevir("Ara: domain, alt alan, sayfa (ör. yedek, firewall)…"))}
+            placeholder={musteri ? cevir("Ara: sayfa (ör. yedek, dns, ssl)…") : cevir(cevir("Ara: domain, alt alan, sayfa (ör. yedek, firewall)…"))}
             aria-label={cevir("Ara")}
             role="combobox"
             aria-expanded={acik && sonuclar.length > 0}
@@ -321,28 +368,14 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
           className="size-9 rounded-full"
           aria-label={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}
           title={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}>
-          {tema === 'dark' ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-            </svg>
-          ) : tema === 'light' ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          )}
+          <Ikon d={tema === 'dark' ? I.ay : tema === 'light' ? I.gunes : I.monitor} kalinlik={1.8} className="w-5 h-5" />
         </Button>
         <div className="relative" ref={bRef}>
         <Button isIcon variant="flat" onClick={bildirimAc} className="relative size-9 rounded-full" aria-label={cevir("Bildirimler")} title={cevir("Bildirimler")}>
           {okunmamis > 0 && (
             <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
           )}
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
+          <Ikon d={I.zil} kalinlik={1.8} className="w-5 h-5" />
         </Button>
           {bAcik && (
             <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50">
@@ -356,7 +389,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               </div>
               {bildirimler.length === 0 ? (
                 <div className="px-4 py-10 text-center">
-                  <svg className="w-9 h-9 mx-auto mb-2 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1" /></svg>
+                  <Ikon d={I.zil} kalinlik={1.5} className="w-9 h-9 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
                   <p className="text-sm text-slate-400 dark:text-slate-500">{cevir("Bildirim yok")}</p>
                 </div>
               ) : bildirimler.map(b => (
@@ -397,9 +430,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
             </div>
             {/* İsim dar ekranda gizli — avatar zaten kimliği taşıyor */}
             <span className="hidden md:inline text-sm font-medium text-slate-700 dark:text-slate-300 max-w-[12rem] truncate">{kullanici?.ad_soyad || kullanici?.adi}</span>
-            <svg className="hidden sm:block w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
+            <Ikon d={I.chevronAsagi} kalinlik={2} className="hidden sm:block w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
           </button>
 
           {menuAcikProfil && (
@@ -408,7 +439,7 @@ export default function TopBar({ onMenuAc, menuAcik }: { onMenuAc?: () => void; 
               <div className="absolute right-0 mt-1 w-56 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50 py-1">
                 <div className="px-3 py-2 border-b border-slate-100 dark:border-dark-600">
                   <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{kullanici?.ad_soyad || kullanici?.adi}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-500 capitalize">{kullanici?.rol}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-500 capitalize">{musteri ? cevir("Hosting kullanıcısı") : kullanici?.rol}</div>
                 </div>
                 <button
                   onClick={() => { setMenuAcik(false); navigate('/profil') }}

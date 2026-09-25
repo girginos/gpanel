@@ -1,6 +1,7 @@
-import { Suspense, lazy } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { useAuth } from '@/store/auth'
+import { Suspense, lazy, useEffect } from 'react'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { useAuth, girisYolu } from '@/store/auth'
+import { musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
 import KapiGiris from '@/components/KapiGiris'
@@ -85,9 +86,34 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
     // Gelmek istenen yolu koru; giriş sonrası oraya DÖN (login'de bırakma).
     const hedef = loc.pathname + loc.search
     const next = hedef && hedef !== '/' ? `?next=${encodeURIComponent(hedef)}` : ''
-    return <Navigate to={`/giris${next}`} replace />
+    // Son oturum müşteriyse (çıkış, süre dolması, 401) müşteri giriş formu:
+    // kapı modu kapalı (karma) kurulumda /giris yönetici formunu gösterirdi.
+    return <Navigate to={`${girisYolu()}${next}`} replace />
   }
   return <>{children}</>
+}
+
+// 🔴 ROL KAPISI (yalnız 'user' = hosting müşterisi). Karar ROTA düzeyinde: sayfa
+// bileşeni hiç mount edilmez (HomePage içinde <Navigate> dönmek yetmezdi — efekti
+// yine koşar, 4 yönetici ucuna 403 attırırdı). İzin listesi dışındaki her yol
+// (/, bilinmeyenler, /domainler, /abonelikler, başka abonelik…) müşterinin kendi
+// aboneliğine gider. Yönetici ve bayi için kapı şeffaftır — davranış değişmez.
+function RolKapisi() {
+  const musteri = useAuth((s) => s.kullanici?.rol === 'user')
+  const { pathname } = useLocation()
+  if (!musteri) return <Outlet />
+  const id = musteriDomainID()
+  // domain_id boş/bozuk: yönlendirme döngü kurardı (/abonelikler/ → kapı → …) —
+  // oturum kapatılır, GuardedRoute müşteri giriş formuna götürür.
+  if (id === null) return <BozukMusteriOturumu />
+  if (!musteriYoluIzinli(pathname, id)) return <Navigate to={`/abonelikler/${id}`} replace />
+  return <Outlet />
+}
+
+function BozukMusteriOturumu() {
+  const cikis = useAuth((s) => s.cikis)
+  useEffect(() => { cikis() }, [cikis])
+  return null
 }
 
 // Parca yuklenirken gosterilen ara ekran. Sade tutuldu: kabuk zaten ayakta,
@@ -116,7 +142,9 @@ export default function App() {
           </GuardedRoute>
         }
       >
-        <Route index                       element={<HomePage />} />
+        {/* Rol kapısı: altındaki TÜM rotalar müşteride izin listesinden geçer (yeni rota = varsayılan yasak). */}
+        <Route element={<RolKapisi />}>
+        <Route index                      element={<HomePage />} />
         <Route path="domainler"            element={<DomainsPage />} />
         <Route path="bayiler"              element={<ResellerlarPage />} />
         <Route path="denetim"              element={<DenetimPage />} />
@@ -208,6 +236,7 @@ export default function App() {
         <Route path="profil"          element={<SettingsPage />} />
         <Route path="parola-degistir" element={<Navigate to="/profil" replace />} />
         <Route path="ayarlar"         element={<Navigate to="/profil" replace />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

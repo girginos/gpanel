@@ -23,10 +23,35 @@ const KEY_USER  = 'gosp.user'
 const KEY_EXP   = 'gosp.exp'
 
 const KEY_MUSTERI      = 'girginospanel.musteri'
-const KEY_MUSTERI_DOM  = 'girginospanel.musteri.domain_id'
+export const KEY_MUSTERI_DOM  = 'girginospanel.musteri.domain_id'
 const KEY_MUSTERI_ALAN = 'girginospanel.musteri.alan_adi'
 
+// 🔴 SON OTURUM TİPİ — cikis()/musteriBayrakSil() bunu SİLMEZ. Oturum düşünce
+// (süre doldu → ilkDurum, ya da 401 → cikis) müşteri bayrakları GuardedRoute
+// çalışmadan önce siliniyor; müşteriyi yönetici formuna (/giris) değil kendi giriş
+// formuna (/cp/giris) göndermek için tek iz budur. Her girişte üzerine yazılır.
+const KEY_SON_OTURUM = 'girginospanel.son_oturum'
+type OturumTipi = 'musteri' | 'yonetim'
+
+function sonOturumYaz(tip: OturumTipi) {
+  try { localStorage.setItem(KEY_SON_OTURUM, tip) } catch { /* yoksay */ }
+}
+
+// Oturum bitince gidilecek giriş formu. Kapı modu açıkken KapiGiris zaten doğru
+// forma çevirir; bu, kapı modu kapalı (karma) kurulumda müşterinin yönetici
+// formunu görmemesi içindir.
+export function girisYolu(): '/giris' | '/cp/giris' {
+  try {
+    return localStorage.getItem(KEY_SON_OTURUM) === 'musteri' ? '/cp/giris' : '/giris'
+  } catch {
+    return '/giris'
+  }
+}
+
 function musteriBayrakSil() {
+  // Bu sürümden ÖNCE açılmış müşteri oturumunda son-oturum izi yok: bayrak
+  // silinmeden önce ize çevrilir (süre dolunca yine /cp/giris'e gidilsin).
+  if (localStorage.getItem(KEY_MUSTERI) === '1') sonOturumYaz('musteri')
   localStorage.removeItem(KEY_MUSTERI)
   localStorage.removeItem(KEY_MUSTERI_DOM)
   localStorage.removeItem(KEY_MUSTERI_ALAN)
@@ -58,13 +83,14 @@ function ilkDurum() {
   }
 }
 
-export const useAuth = create<AuthState>((set) => ({
+export const useAuth = create<AuthState>((set, get) => ({
   ...ilkDurum(),
   giris: (token, kullanici, bitis) => {
     localStorage.setItem(KEY_TOKEN, token)
     localStorage.setItem(KEY_USER, JSON.stringify(kullanici))
     localStorage.setItem(KEY_EXP, String(bitis))
     musteriBayrakSil()
+    sonOturumYaz('yonetim')
     set({ token, kullanici, bitis })
   },
   girisMusteri: (token, bitis, domainID, alanAdi, kullaniciAdi) => {
@@ -75,6 +101,7 @@ export const useAuth = create<AuthState>((set) => ({
     localStorage.setItem(KEY_MUSTERI, '1')
     localStorage.setItem(KEY_MUSTERI_DOM, String(domainID))
     localStorage.setItem(KEY_MUSTERI_ALAN, alanAdi)
+    sonOturumYaz('musteri')
     set({ token, kullanici: synth, bitis })
   },
   guncelleAd: (adSoyad) => set((s) => {
@@ -84,6 +111,7 @@ export const useAuth = create<AuthState>((set) => ({
     return { kullanici: k }
   }),
   cikis: () => {
+    if (get().kullanici?.rol === 'user') sonOturumYaz('musteri')
     localStorage.removeItem(KEY_TOKEN)
     localStorage.removeItem(KEY_USER)
     localStorage.removeItem(KEY_EXP)

@@ -16,6 +16,7 @@ import HataYuzeyi from './HataYuzeyi'
 import KapiAdresSeridi from './KapiAdresSeridi'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
+import { rolAnaSayfa, useRol } from '@/lib/rol'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -179,6 +180,8 @@ export default function DashboardLayout() {
   try { _rol = JSON.parse(localStorage.getItem('gosp.user') || '{}').rol || '' } catch { /* okunamadi */ }
   const isReseller = _rol === 'reseller'
   const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('girginospanel.musteri.domain_id') || '' : ''
+  // Logo hedefi rolün ana sayfası (müşteri → kendi aboneliği); rol tek kaynaktan.
+  const anaSayfa = rolAnaSayfa(useRol())
 
   const [sayac, setSayac] = useState<Sayaclar>({})
   useEffect(() => {
@@ -485,7 +488,7 @@ export default function DashboardLayout() {
                 sayilir (alt="") -- aksi halde ekran okuyucu ayni adi iki kez
                 okurdu. Odak halkasi gorunur. */}
             <NavLink
-              to="/"
+              to={anaSayfa}
               end
               onClick={() => setMobilAcik(false)}
               aria-label={marka.panel_adi}

@@ -16,6 +16,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { TonRozeti } from '@/components/UyariKutusu'
+import { rolAnaSayfa } from '@/lib/rol'
 
 const HATASINIRI_EN: Record<string, string> = {
   "Bu sayfa görüntülenemedi": "This page could not be displayed",
@@ -63,7 +64,7 @@ export class HataSiniri extends Component<Props, State> {
             <Button color="primary" ikon={I.yenile} onClick={() => window.location.reload()}>
               {cevir("Sayfayı yenile")}
             </Button>
-            <Button variant="outlined" ikon={I.geri} onClick={() => { window.location.href = '/' }}>
+            <Button variant="outlined" ikon={I.geri} onClick={() => { window.location.href = rolAnaSayfa() }}>
               {cevir("Anasayfaya dön")}
             </Button>
           </div>

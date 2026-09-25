@@ -6,7 +6,8 @@ import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui'
-import { I } from '@/components/Ikon'
+import { I, Ikon } from '@/components/Ikon'
+import { kirintiEsle, rolAnaSayfa, useRol } from '@/lib/rol'
 
 const BREADCRUMB_EN: Record<string, string> = {
   "Sayfa yolu": "Page path",
@@ -19,13 +20,18 @@ export type BreadcrumbItem = { etiket: string; href?: string }
 export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
   useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
+  const rol = useRol()
+  // Rol eşlemesi MERKEZDE (60+ sayfa aynı kalıbı kullanıyor): müşteride 'Anasayfa'
+  // kendi aboneliğine gider, yönetici listesi 'Domainler' atılır; bayi ve müşteride
+  // yönetici-yalnız 'Araçlar ve Ayarlar' atılır. Bkz. lib/rol.ts kirintiEsle.
+  const ogeler = kirintiEsle(items, rol)
 
   // Mobilde tarayıcı geri tuşu her zaman elde değil (tam ekran/PWA, tek elle
   // kullanım). Kırıntı yolunun başına açık bir geri düğmesi koyuyoruz.
-  // Geçmiş boşsa (doğrudan link ile girilmişse) anasayfaya düşer.
+  // Geçmiş boşsa (doğrudan link ile girilmişse) rolün ana sayfasına düşer.
   function geri() {
     if (window.history.length > 1) navigate(-1)
-    else navigate('/')
+    else navigate(rolAnaSayfa(rol))
   }
 
   // İz uzun olduğunda mobilde son parçaya kaydır: kullanıcı nerede olduğunu
@@ -45,8 +51,8 @@ export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
         title={cevir("Geri dön")}
       />
 
-      {items.map((it, i) => {
-        const son = i === items.length - 1
+      {ogeler.map((it, i) => {
+        const son = i === ogeler.length - 1
         return (
           <div key={i} className="flex items-center">
             {it.href && !son ? (
@@ -63,9 +69,7 @@ export default function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
               </span>
             )}
             {!son && (
-              <svg className="w-4 h-4 mx-1.5 text-slate-300 dark:text-slate-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
+              <Ikon d={I.chevronSag} kalinlik={2} className="w-4 h-4 mx-1.5 text-slate-300 dark:text-slate-600 shrink-0" />
             )}
           </div>
         )

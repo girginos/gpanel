@@ -17,14 +17,13 @@ const BG: Record<Renk, string> = {
 }
 
 export default function ToolCard({
-  etiket, aciklama, ikon, ikonNode, renk = 'slate', faz, uyari, to, onClick,
+  etiket, aciklama, ikon, ikonNode, renk = 'slate', uyari, to, onClick,
 }: {
   etiket: string
   aciklama?: string
   ikon?: string
   ikonNode?: React.ReactNode // gerçek marka logosu vb. (fill-tabanlı SVG) — ikon yerine
   renk?: Renk
-  faz?: string
   uyari?: string
   to?: string
   onClick?: () => void
@@ -46,11 +45,6 @@ export default function ToolCard({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">
           <span className="truncate">{etiket}</span>
-          {faz && (
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 px-1 py-0.5 rounded">
-              {faz}
-            </span>
-          )}
         </div>
         {aciklama && <div className="text-xs text-slate-500 dark:text-slate-500 truncate mt-0.5">{aciklama}</div>}
         {uyari && <div className="text-[11px] text-red-600 dark:text-red-400 truncate mt-0.5">{uyari}</div>}
