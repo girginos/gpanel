@@ -8,10 +8,12 @@ import React from "react"
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
-import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import DomainKaynakKart from '@/components/DomainKaynakKart'
 import DomainPano from "@/components/DomainPano"
+import AlanPano from '@/components/AlanPano'
+import { useUc } from '@/components/alanpano/useUc'
+import type { KaynakOzet } from '@/components/alanpano/tipler'
 import ToolCard from '@/components/ToolCard'
 import EklentiEkrani from '@/components/EklentiEkrani'
 import LisansAskida from '@/components/LisansAskida'
@@ -50,7 +52,7 @@ const SUBD2_EN: Record<string, string> = {
   "Aylık trafik": "Monthly traffic",
   "Başka aboneliğe geç": "Switch to another subscription",
   "Daha fazla işlem": "More actions",
-  "Disk kullanımı alınamadı": "Failed to get disk usage",
+  "Kaynak bilgisi alınamadı": "Could not load resource info",
   "Gönderim/teslimat günlüğü": "Sending/delivery log",
   "Güvenlik başlıkları, ek direktifler": "Security headers, extra directives",
   "Posta kutusu ekle/yönet": "Add/manage mailboxes",
@@ -111,11 +113,22 @@ export default function SubscriptionDetailPage() {
     } catch { /* yok say */ }
     return 'dashboard'
   })
+  // Alan adı panosu (AlanPano) Pano sekmesi İLK açıldığında bağlanır ve sonra bağlı
+  // kalır (başka sekmede gizlenir): sekme değiştirip dönmek pahalı uçları (/istatistik,
+  // /health …) yeniden çekmesin. Başka sekmeyle açılan sayfada Pano'ya girilmezse hiç
+  // çekilmez.
+  const [panoAcildi, setPanoAcildi] = useState(tab === 'dashboard')
   const setTab = (t: Tab) => {
     setTabState(t)
+    if (t === 'dashboard') setPanoAcildi(true)
     try { localStorage.setItem('gosp.abonelik.tab', t) } catch { /* yok say */ }
   }
-  const [diskMB, setDiskMB] = useState<number | null>(null)
+  // 🔴 /kaynak sayfa başına TEK çekim (kota kapalıyken `du -sm`, 0.7–2 sn): burada
+  // çekilir; AlanPano, sağdaki DomainKaynakKart ve soldaki 'İstatistikler' kartı aynı
+  // durumu prop ile paylaşır. Üç 'Yenile' de bu tek yenileyiciyi çağırır (uçuştaki
+  // istek varken ikinci istek gitmez).
+  const kaynak = useUc<KaynakOzet>(id ? `/domains/${id}/kaynak` : null, cevir("Kaynak bilgisi alınamadı"))
+  const diskMB = kaynak.veri ? kaynak.veri.disk_mb.kullanim : null
   const [menuAcik, setMenuAcik] = useState(false)
   const [isleniyor, setIsleniyor] = useState(false)
   const [bildirim, setBildirim] = useState<string | null>(null)
@@ -139,23 +152,15 @@ export default function SubscriptionDetailPage() {
       .catch(e => { if (_n !== domainYukleNesli.current) return; const m = apiHata(e, cevir("Abonelik yüklenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
   }
 
-  const diskYukle = () => api.get<{ disk_mb: { kullanim: number } }>(`/domains/${id}/kaynak`)
-
   // İstatistikler kartının 'Yenile'si (önceden onClick'siz ölü düğmeydi): kartın
   // gösterdiği iki kaynağı — domain (trafik, PHP, oluşturulma) ve disk kullanımı —
   // yeniden çeker. Elle tetiklenir: /kaynak `du` çalıştırabilir, döngüye konmaz.
-  // Yanıt gelmeden sayfa değişirse (nesil arttı) eski disk değeri yazılmaz.
+  // Yanıt gelmeden sayfa değişirse eski değer yazılmaz (domain: nesil; kaynak: useUc oturumu).
   async function istatistikYenile() {
     if (!id) return
     setYenileniyor(true)
-    const domainIstek = domainYukle()
-    const n = domainYukleNesli.current
     try {
-      const [, k] = await Promise.all([
-        domainIstek,
-        diskYukle().catch(e => { hataYakala(cevir("Disk kullanımı alınamadı"))(e); return null }),
-      ])
-      if (k && n === domainYukleNesli.current) setDiskMB(k.data.disk_mb.kullanim)
+      await Promise.all([domainYukle(), kaynak.yenile()])
     } finally { setYenileniyor(false) }
   }
 
@@ -163,9 +168,6 @@ export default function SubscriptionDetailPage() {
     let iptal = false
     if (!id) return
     void domainYukle()
-    diskYukle()
-      .then(r => { if (iptal) return; setDiskMB(r.data.disk_mb.kullanim) })
-      .catch(e => { if (!iptal) hataYakala(cevir("Disk kullanımı alınamadı"))(e) })
     // Mail eklentisi aktif+ödemeli ise Mail sekmesini göster.
     api.get<{ ad: string; aktif: boolean }[]>('/eklentiler')
       .then(r => {
@@ -302,6 +304,13 @@ export default function SubscriptionDetailPage() {
           Onun yerine eklentinin kendi sağ paneli var (servis durumu, port,
           disk) — yani bilgi kaybolmuyor, uygulamaya ÖZEL hâle geliyor. */}
       <div className={tab === 'gelistirici' ? '' : 'grid grid-cols-12 gap-5'}>
+        {/* Alan adı panosu: Pano sekmesinde araç kartlarının (DomainPano) ÜSTÜNDE, tam
+            genişlik. Başka sekmede gizli ama bağlı (veri korunur, canlı yoklama durur). */}
+        {panoAcildi && (
+          <div className="col-span-12 min-w-0" hidden={tab !== 'dashboard'}>
+            <AlanPano key={domain.id} domain={domain} kaynak={kaynak} etkin={tab === 'dashboard'} />
+          </div>
+        )}
         {tab !== 'gelistirici' && (
         <aside className="col-span-12 lg:col-span-3 space-y-4">
           <WebSitePreview alanAdi={domain.alan_adi} ssl={domain.ssl} />
@@ -312,7 +321,7 @@ export default function SubscriptionDetailPage() {
               <Button variant="flat" isIcon ikon={I.yenile} onClick={istatistikYenile} yukleniyor={yenileniyor} className="size-8 rounded-full" title={cevir("Yenile")} aria-label={cevir("Yenile")} />
             </div>
             <div className="space-y-2.5 text-sm">
-              <Stat e={cevir("Disk alanı")}    d={diskMB != null ? `${diskMB} MB` : '…'} />
+              <Stat e={cevir("Disk alanı")}    d={diskMB != null ? `${diskMB} MB` : kaynak.hata ? '—' : '…'} />
               <Stat e={cevir("Aylık trafik")}  d={`${Math.round(domain.trafik_kb / 1024)} MB`} />
               <Stat e={cevir("Oluşturulma")}   d={domain.olusturulma} />
               <Stat e={cevir("PHP sürümü")}    d={domain.php_surum} />
@@ -350,7 +359,7 @@ export default function SubscriptionDetailPage() {
 
         {tab !== 'gelistirici' && (
           <aside className="col-span-12 lg:col-span-3">
-            <DomainKaynakKart domainId={domain.id} />
+            <DomainKaynakKart domainId={domain.id} kaynak={kaynak} />
           </aside>
         )}
       </div>
