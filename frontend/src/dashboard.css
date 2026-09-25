@@ -14,10 +14,13 @@
   min-height: 100%;
 }
 .gp-dash *, .gp-dash *::before, .gp-dash *::after { box-sizing: border-box; }
-/* Ham <button> sıfırlaması `@layer base`'te: katmansız kalırsa Tailux <Button>'un
-   (components/utilities katmanı) renk/kenarlık/yazı sınıflarını ezer. */
+/* Ham <button> kuralları `@layer base`'te: katmansız kalırsa Tailux <Button>'un
+   (components/utilities katmanı) renk/kenarlık/yazı sınıflarını ezer — katmansız
+   kural özgüllükten bağımsız olarak her katmanı yener. Sekme şeridi (.tabs) ham
+   <button> kalır; aynı katmanda özgüllüğü yüksek olduğu için preflight'ı yine yener. */
 @layer base {
   .gp-dash button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  .gp-dash .tabs button { background: transparent; color: #64748b; padding: 0 0 8px; font-size: 12px; }
 }
 
 /* ── sayfa başlığı ── */
@@ -57,10 +60,11 @@
 
 /* ── sekmeler + grafik ── */
 .gp-dash .tabs { display: flex; gap: 20px; padding: 13px 16px 0; }
-.gp-dash .tabs button { background: transparent; color: #64748b; padding: 0 0 8px; font-size: 12px; }
 .gp-dash .tabs .selected { color: #60a5fa; border-bottom: 2px solid #3b82f6; }
 .gp-dash .chart { height: 245px; padding: 6px 10px 10px 4px; }
 .gp-dash .traffic-chart { height: 180px; }
+/* Gerçek örnek gelmeden grafik yerine boş durum (uydurma "seed" eğrisi YOK). */
+.gp-dash .chart-bos { height: 100%; display: grid; place-items: center; border-radius: 9px; background: rgba(255, 255, 255, .02); border: 1px dashed rgba(255, 255, 255, .06); color: #58677c; font-size: 12px; }
 
 /* ── sunucu/servis listesi ── */
 .gp-dash .server-list { padding: 3px 0; max-height: 340px; overflow-y: auto; }
@@ -94,6 +98,7 @@
 .gp-dash .health-list span { font-size: 11px; color: #748299; }
 .gp-dash .health-list b { font-size: 11px; color: #34d399; display: flex; gap: 4px; align-items: center; }
 .gp-dash .health-list b.warn { color: #fb923c; }
+.gp-dash .health-list b.yok { color: #64748b; }
 
 /* ── trafik ── */
 .gp-dash .traffic-top { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 14px 14px 0; }
@@ -121,13 +126,6 @@
 .gp-dash .depo-alt { border-top: 1px solid rgba(255, 255, 255, .045); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .gp-dash .depo-bos { font-size: 12px; color: #718097; white-space: nowrap; }
 .gp-dash .depo-bos b { color: #cbd5e1; font-weight: 600; }
-.gp-dash .depo-alt button { color: #4e9aff; font-size: 12px; background: transparent; }
-
-/* ── hızlı işlemler ── */
-.gp-dash .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px; }
-.gp-dash .quick-grid button { padding: 16px 7px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .06); background: #0e151f; display: flex; flex-direction: column; align-items: center; gap: 7px; color: #60a5fa; transition: background .15s, border-color .15s; }
-.gp-dash .quick-grid button:hover { background: #122039; border-color: rgba(59, 130, 246, .25); }
-.gp-dash .quick-grid span { font-size: 11px; color: #7f8da0; text-align: center; }
 
 /* ── bildirimler ── */
 .gp-dash .alerts > div { display: flex; gap: 10px; padding: 15px; border-bottom: 1px solid rgba(255, 255, 255, .045); }
@@ -144,6 +142,7 @@
 .gp-dash .dash-footer > div { display: flex; align-items: center; gap: 7px; color: #8a98aa; margin-right: auto; }
 .gp-dash .online-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 9px rgba(52, 211, 153, .8); }
 .gp-dash .online-dot.warn { background: #fb923c; box-shadow: 0 0 9px rgba(251, 146, 60, .8); }
+.gp-dash .online-dot.yok { background: #475569; box-shadow: none; }
 .gp-dash .blue { color: #60a5fa !important; }
 
 /* ── duyarlı ── */

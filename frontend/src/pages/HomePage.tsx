@@ -5,9 +5,10 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState, type ElementType, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAuth } from '@/store/auth'
+import { rolAnaSayfa } from '@/lib/rol'
 import { useMarka } from '@/lib/marka'
 import BayiOzet from '@/components/BayiOzet'
 import { Button } from '@/components/ui'
@@ -33,6 +34,8 @@ type Sistem = {
 type Domain = { id: number; alan_adi: string; ssl: boolean; durum: string; sistem_kullanici?: string }
 type Bildirim = { id: number; seviye: string; baslik: string; mesaj: string; tarih: string }
 type DagilimKalem = { anahtar: string; ad: string; yol: string; byte: number }
+type KaynakOrnek = { t: string; cpu: number; bellek: number; disk: number }
+type TrafikOrnek = { t: string; gelen: number; giden: number }
 
 // ── i18n ──
 const H_EN: Record<string, string> = {
@@ -54,6 +57,7 @@ const H_EN: Record<string, string> = {
   'Tüm sistemler çalışıyor': 'All systems operational', 'servis kapalı': 'services down',
   'Yükleniyor…': 'Loading…', 'az önce': 'just now', 'dk önce': 'min ago', 'sa önce': 'h ago',
   'Günaydın': 'Good morning', 'İyi günler': 'Good afternoon', 'İyi akşamlar': 'Good evening', 'İyi geceler': 'Good night',
+  'Servis bilgisi yok': 'No service data', 'Veri bekleniyor…': 'Waiting for data…', 'Veri alınamadı': 'Data unavailable',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (H_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -93,17 +97,13 @@ function goreli(t: string): string {
   return t.slice(0, 10)
 }
 const saatEtiket = (d = new Date()) => d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
-const gecmisEtiket = (dkOnce: number) => saatEtiket(new Date(Date.now() - dkOnce * 60000))
 
-// Grafik ilk boyamada BOŞ görünmesin: gerçekçi geçmiş eğrisiyle başlar,
-// canlı örnekler sona eklendikçe (~2 dk) seed tamamen dışarı kayar.
-const S_CPU = [38, 32, 31, 36, 44, 52, 61, 74, 68, 57, 49, 43, 47, 41, 45, 52, 48, 44, 39, 43, 47, 42, 46, 44]
-const S_MEM = [56, 57, 58, 57, 59, 61, 63, 66, 69, 67, 65, 63, 62, 61, 62, 64, 63, 61, 60, 61, 62, 63, 62, 61]
-const S_DSK = [39, 39, 40, 40, 41, 41, 42, 42, 43, 43, 44, 44, 44, 45, 45, 45, 46, 46, 46, 46, 46, 46, 46, 46]
-const S_IN = [220, 340, 280, 460, 620, 810, 1180, 1650, 2100, 2580, 1980, 1520, 1180, 940, 760, 880, 1120, 980, 720, 610, 540, 480, 520, 560].map((k) => k * 1024)
-const S_OUT = [160, 240, 210, 330, 440, 590, 830, 1160, 1480, 1810, 1390, 1070, 830, 660, 540, 620, 790, 690, 510, 430, 380, 340, 370, 400].map((k) => k * 1024)
-const seedKaynak = () => S_CPU.map((cpu, i) => ({ t: gecmisEtiket(24 - i), cpu, bellek: S_MEM[i], disk: S_DSK[i] }))
-const seedTrafik = () => S_IN.map((gelen, i) => ({ t: gecmisEtiket(24 - i), gelen, giden: S_OUT[i] }))
+// 🔴 GRAFİKLER YALNIZ GERÇEK ÖRNEKLERLE ÇİZİLİR. Önceden sabit bir "seed" eğrisi
+// (CPU %31-74, ~2.5 MB/s trafik) ve ilk örnekten türetilmiş sentetik bir geçmiş,
+// şimdiki saatle etiketlenip gerçek veri gibi gösteriliyordu; /system/usage hiç
+// yanıt vermezse (403/hata) uydurma eğri KALICI kalıyordu. Artık ilk gerçek
+// örneklere kadar grafik yerine boş durum çizilir.
+const GRAFIK_EN_AZ = 2 // alan grafiği ve sparkline için gereken en az örnek
 
 const TAB_RENK: Record<string, string> = { cpu: '#3b82f6', bellek: '#8b5cf6', disk: '#f59e0b' }
 const IMLEC: any = { stroke: 'rgba(255,255,255,.16)', strokeDasharray: '3 3' }
@@ -201,14 +201,18 @@ export default function HomePage() {
   const navigate = useNavigate()
   const kullanici = useAuth((st) => st.kullanici)
   const isBayi = kullanici?.rol === 'reseller'
+  // Müşteri buraya rota kapısı (App.tsx RolKapisi) yüzünden hiç gelmemeli; gelirse
+  // (savunma) yönetici uçlarına istek atılmaz ve kendi aboneliğine yönlendirilir.
+  const isMusteri = kullanici?.rol === 'user'
 
   const [s, setS] = useState<Sistem | null>(null)
   const [domainler, setDomainler] = useState<Domain[]>([])
   const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
   const [yedekB, setYedekB] = useState<number | null>(null)
   const [dagilim, setDagilim] = useState<DagilimKalem[] | null>(null)
-  const [kaynakBuf, setKaynakBuf] = useState(seedKaynak)
-  const [trafikBuf, setTrafikBuf] = useState(seedTrafik)
+  const [kaynakBuf, setKaynakBuf] = useState<KaynakOrnek[]>([])
+  const [trafikBuf, setTrafikBuf] = useState<TrafikOrnek[]>([])
+  const [usageHata, setUsageHata] = useState(false) // hiç gerçek örnek alınamadı
   const [tab, setTab] = useState<'cpu' | 'bellek' | 'disk'>('cpu')
   const gercek = useRef(0) // kaç GERÇEK örnek geldi (trend yalnız bunlardan hesaplanır)
 
@@ -219,28 +223,16 @@ export default function HomePage() {
     api.get<Sistem>('/system/usage').then((r) => {
       const d = r.data
       setS(d)
-      // İlk GERÇEK örnekte seed'i bu sunucunun gerçek seviyesine göre yeniden kur:
-      // aksi halde jenerik seed (ör. CPU ~%40) ile gerçek (%1) arasında uçurum oluşuyor.
-      if (gercek.current === 0) {
-        const c = Math.round(d.cpu.yuzde), m = Math.round(d.bellek.yuzde), dk = Math.round(d.disk?.yuzde ?? 0)
-        const dalga = (taban: number, i: number) => {
-          const amp = Math.max(1.5, taban * 0.28)
-          return Math.max(0, Math.min(100, Math.round(taban + amp * Math.sin(i / 2.4) + amp * 0.45 * Math.sin(i / 1.3))))
-        }
-        setKaynakBuf(Array.from({ length: 23 }, (_, i) => ({
-          t: gecmisEtiket(24 - i), cpu: dalga(c, i), bellek: dalga(m, i), disk: dalga(dk, i),
-        })))
-        const rx = d.ag.rx_bytes_sn, tx = d.ag.tx_bytes_sn
-        const dal = (taban: number, i: number, f: number) => Math.max(0, Math.round(taban * (0.55 + 0.9 * Math.abs(Math.sin(i / f)))))
-        setTrafikBuf(Array.from({ length: 23 }, (_, i) => ({
-          t: gecmisEtiket(24 - i), gelen: dal(rx, i, 2.2), giden: dal(tx, i, 1.8),
-        })))
-      }
+      setUsageHata(false)
       gercek.current = Math.min(24, gercek.current + 1)
       const t = saatEtiket()
       setKaynakBuf((b) => [...b, { t, cpu: Math.round(d.cpu.yuzde), bellek: Math.round(d.bellek.yuzde), disk: Math.round(d.disk?.yuzde ?? 0) }].slice(-24))
       setTrafikBuf((b) => [...b, { t, gelen: d.ag.rx_bytes_sn, giden: d.ag.tx_bytes_sn }].slice(-24))
-    }).catch(() => { })
+    }).catch(() => {
+      // Hiç gerçek örnek yokken hata → 'Veri alınamadı' (sonsuz 'Yükleniyor…' değil).
+      // Önceki örnekler varsa geçici hata ekrandakini silmez.
+      if (gercek.current === 0) setUsageHata(true)
+    })
   }
   const yenile = () => {
     cek()
@@ -253,7 +245,7 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    if (isBayi) return
+    if (isBayi || isMusteri) return
     yenile()
     const id = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return
@@ -261,8 +253,9 @@ export default function HomePage() {
     }, 5000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBayi])
+  }, [isBayi, isMusteri])
 
+  if (isMusteri) return <Navigate to={rolAnaSayfa('user')} replace />
   if (isBayi) return <div className="px-4 py-6 sm:px-6"><BayiOzet /></div>
 
   const aktif = domainler.filter((d) => d.durum === 'aktif').length
@@ -270,6 +263,14 @@ export default function HomePage() {
   const servisAktif = s ? s.servisler.filter((x) => x.aktif).length : 0
   const servisToplam = s ? s.servisler.length : 0
   const servisDown = servisToplam - servisAktif
+  // 'Tüm sistemler çalışıyor' YALNIZ gerçek servis listesi geldiyse: veri yokken
+  // (s null ya da boş liste) 0−0=0 kapalı servis "her şey yolunda" demek değildir.
+  const servisBilinir = servisToplam > 0
+  const servisOzet = !s ? '…' : !servisBilinir ? cevir('Servis bilgisi yok')
+    : servisDown === 0 ? cevir('Tüm sistemler çalışıyor') : `${servisDown} ${cevir('kapalı')}`
+  const grafikBos = (
+    <div className="chart-bos">{usageHata ? cevir('Veri alınamadı') : cevir('Veri bekleniyor…')}</div>
+  )
   const izo = s?.izolasyon_kaybi?.length ?? 0
   const diskY = Math.round(s?.disk?.yuzde ?? 0)
   // Depolama dağılımı — gerçek veri: yedek boyutu + kalan kullanım + boş alan
@@ -348,15 +349,15 @@ export default function HomePage() {
       {/* STAT GRID */}
       <div className="stats-grid">
         <StatCard title={cevir('Toplam Domain')} value={domainler.length} subtitle={`${aktif} ${cevir('aktif')} · ${sslli} SSL`} icon={Server} />
-        <StatCard title={cevir('Servisler')} value={s ? `${servisAktif}/${servisToplam}` : '—'} subtitle={servisDown === 0 ? cevir('Tüm sistemler çalışıyor') : `${servisDown} ${cevir('kapalı')}`} icon={Box} />
+        <StatCard title={cevir('Servisler')} value={s ? `${servisAktif}/${servisToplam}` : '—'} subtitle={servisOzet} icon={Box} />
         <StatCard title={cevir('CPU Kullanımı')} value={s ? `%${Math.round(s.cpu.yuzde)}` : '—'} subtitle={s ? `${s.cpu.cekirdek} ${cevir('toplam çekirdek')}` : '…'} icon={Cpu} trend={tCpu?.t} down={tCpu?.down}
-          spark={kaynakBuf.map((d) => d.cpu)} sparkRenk="#10b981" sparkId="cpu" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.cpu) : undefined} sparkRenk="#10b981" sparkId="cpu" />
         <StatCard title={cevir('RAM Kullanımı')} value={s ? `%${Math.round(s.bellek.yuzde)}` : '—'} subtitle={s ? `${fmtGB(s.bellek.kullanilan_kb)} / ${fmtGB(s.bellek.toplam_kb)}` : '…'} icon={MemoryStick} trend={tMem?.t} down={tMem?.down}
-          spark={kaynakBuf.map((d) => d.bellek)} sparkRenk="#8b5cf6" sparkId="ram" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.bellek) : undefined} sparkRenk="#8b5cf6" sparkId="ram" />
         <StatCard title={cevir('Depolama')} value={s ? `%${diskY}` : '—'} subtitle={s ? `${fmtByte(s.disk.kullanilan_byte)} / ${fmtByte(s.disk.toplam_byte)}` : '…'} icon={HardDrive} trend={tDsk?.t} down={tDsk?.down}
-          spark={kaynakBuf.map((d) => d.disk)} sparkRenk="#f59e0b" sparkId="disk" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.disk) : undefined} sparkRenk="#f59e0b" sparkId="disk" />
         <StatCard title={cevir('Toplam Trafik')} value={s ? fmtRate(s.ag.rx_bytes_sn + s.ag.tx_bytes_sn) : '—'} subtitle={cevir('Gelen + giden')} icon={Network}
-          spark={trafikBuf.map((d) => d.gelen + d.giden)} sparkRenk="#3b82f6" sparkId="net" />
+          spark={trafikBuf.length >= GRAFIK_EN_AZ ? trafikBuf.map((d) => d.gelen + d.giden) : undefined} sparkRenk="#3b82f6" sparkId="net" />
       </div>
 
       {/* SATIR 1 */}
@@ -371,6 +372,7 @@ export default function HomePage() {
             ))}
           </div>
           <div className="chart">
+            {kaynakBuf.length < GRAFIK_EN_AZ ? grafikBos : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={kaynakBuf}>
                 <defs>
@@ -387,12 +389,13 @@ export default function HomePage() {
                 <Area type="monotone" dataKey={tab} stroke={TAB_RENK[tab]} strokeWidth={2} fill={`url(#gpk-${tab})`} dot={false} activeDot={{ r: 3, fill: TAB_RENK[tab] }} isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
         <Card title={cevir('Sunucu & Servisler')} icon={Server} action={cevir('Tümünü Gör')} onAction={() => navigate('/araclar/servisler')}>
           <div className="server-list">
-            {!s ? <div className="alerts"><div className="bos">{cevir('Yükleniyor…')}</div></div> : (
+            {!s ? <div className="alerts"><div className="bos">{usageHata ? cevir('Veri alınamadı') : cevir('Yükleniyor…')}</div></div> : (
               <>
                 <div className="server-row">
                   <div className="server-main">
@@ -425,14 +428,15 @@ export default function HomePage() {
               <div><strong>{s ? skor : '—'}</strong><small style={{ color: skorRenk }}>{s ? skorAd : ''}</small></div>
             </div>
             <div className="health-list">
+              {/* ok: true = sağlıklı (✓), false = uyarı, null = veri yok (nötr, ✓ YOK) */}
               {([
-                [cevir('Servisler'), s ? `${servisAktif} / ${servisToplam}` : '—', servisDown === 0],
-                [cevir('Disk Durumu'), diskY < 90 ? cevir('Sağlıklı') : `%${diskY}`, diskY < 90],
-                [cevir('Ağ Bağlantısı'), s?.ag.arayuz ? cevir('Sağlıklı') : '—', !!s?.ag.arayuz],
-                [cevir('İzolasyon'), izo === 0 ? cevir('Sağlam') : `${izo}`, izo === 0],
-                [cevir('Çalışma Süresi'), s ? fmtUptime(s.uptime_sn) : '—', true],
-              ] as [string, string, boolean][]).map(([a, b, ok]) => (
-                <div key={a}><span>{a}</span><b className={ok ? '' : 'warn'}>{ok && <CheckCircle2 size={12} />}{b}</b></div>
+                [cevir('Servisler'), s ? `${servisAktif} / ${servisToplam}` : '—', servisBilinir ? servisDown === 0 : null],
+                [cevir('Disk Durumu'), !s ? '—' : diskY < 90 ? cevir('Sağlıklı') : `%${diskY}`, s ? diskY < 90 : null],
+                [cevir('Ağ Bağlantısı'), s?.ag.arayuz ? cevir('Sağlıklı') : '—', s ? !!s.ag.arayuz : null],
+                [cevir('İzolasyon'), !s ? '—' : izo === 0 ? cevir('Sağlam') : `${izo}`, s ? izo === 0 : null],
+                [cevir('Çalışma Süresi'), s ? fmtUptime(s.uptime_sn) : '—', s ? true : null],
+              ] as [string, string, boolean | null][]).map(([a, b, ok]) => (
+                <div key={a}><span>{a}</span><b className={ok === null ? 'yok' : ok ? '' : 'warn'}>{ok === true && <CheckCircle2 size={12} />}{b}</b></div>
               ))}
             </div>
           </div>
@@ -455,6 +459,7 @@ export default function HomePage() {
             </div>
           </div>
           <div className="chart traffic-chart">
+            {trafikBuf.length < GRAFIK_EN_AZ ? grafikBos : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trafikBuf}>
                 <defs>
@@ -469,6 +474,7 @@ export default function HomePage() {
                 <Area type="monotone" dataKey="giden" stroke="#3b82f6" strokeWidth={2} fill="url(#gpt-out)" dot={false} isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
@@ -503,9 +509,9 @@ export default function HomePage() {
           </div>
           <div className="depo-alt">
             <span className="depo-bos">
-              <b>{fmtByte(Math.max(0, diskTop - diskKul))}</b> {cevir('boş')} · {fmtByte(diskTop)} {cevir('toplam')}
+              {s ? <><b>{fmtByte(Math.max(0, diskTop - diskKul))}</b> {cevir('boş')} · {fmtByte(diskTop)} {cevir('toplam')}</> : '—'}
             </span>
-            <button type="button" className="inline-flex items-center gap-1" onClick={() => navigate('/backup-yonetimi')}>{cevir('Depolama yönetimine git')}<Ikon d={I.ileri} className="size-3.5 shrink-0" /></button>
+            <Button color="primary" variant="flat" boyut="sm" ikonSonda={I.ileri} onClick={() => navigate('/backup-yonetimi')}>{cevir('Depolama yönetimine git')}</Button>
           </div>
         </Card>
 
@@ -525,7 +531,7 @@ export default function HomePage() {
       </div>
 
       <footer className="dash-footer">
-        <div><i className={`online-dot ${servisDown === 0 ? '' : 'warn'}`} /> {servisDown === 0 ? cevir('Tüm sistemler çalışıyor') : `${servisDown} ${cevir('servis kapalı')}`}</div>
+        <div><i className={`online-dot ${!servisBilinir ? 'yok' : servisDown === 0 ? '' : 'warn'}`} /> {!s ? (usageHata ? cevir('Veri alınamadı') : cevir('Yükleniyor…')) : !servisBilinir ? cevir('Servis bilgisi yok') : servisDown === 0 ? cevir('Tüm sistemler çalışıyor') : `${servisDown} ${cevir('servis kapalı')}`}</div>
         <span>{cevir('Çalışma Süresi')}: {s ? fmtUptime(s.uptime_sn) : '—'}</span>
         <span>{marka.panel_adi}</span>
         <span>{s?.sistem.panel_surum || ''}</span>

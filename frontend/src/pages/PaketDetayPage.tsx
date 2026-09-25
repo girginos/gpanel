@@ -234,7 +234,7 @@ export default function PaketDetayPage() {
         <Breadcrumb items={[
           { etiket: cevir('Anasayfa'), href: '/' },
           { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
-          { etiket: cevir("Hizmet Planları"), href: '/araclar/paketler' },
+          { etiket: cevir("Hizmet Planları"), href: '/hizmet-planlari' },
           { etiket: plan.ad },
         ]} />
 

@@ -2,12 +2,14 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useAuth } from '@/store/auth'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, butonSinifi } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { musteriDomainID, useRol } from '@/lib/rol'
 
 type Ben = {
   id: number; adi: string; rol: string; eposta: string; ad_soyad: string
@@ -64,6 +66,12 @@ const SETT_EN: Record<string, string> = {
   "Dil": "Language",
   "Tercihleri Kaydet": "Save Preferences",
   "Parola": "Password",
+  "Bu, panel giriş parolanızı değiştirir.": "This changes your panel login password.",
+  "Parola değiştirildi.": "Password changed.",
+  "Hesap bilgileriniz ve panel giriş parolanız.": "Your account information and panel login password.",
+  "Hosting kullanıcısı": "Hosting user",
+  "Panel giriş parolanız, aboneliğinizin FTP hesabının parolasıdır; FTP Hesapları sayfasından değiştirilir.": "Your panel login password is the password of your subscription's FTP account; it is changed on the FTP Accounts page.",
+  "FTP Hesaplarına git": "Go to FTP accounts",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SETT_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -100,6 +108,18 @@ function Uyari({ tip, mesaj }: { tip: 'ok' | 'err'; mesaj: string }) {
 export default function SettingsPage() {
   useTranslation() // dil re-render aboneligi
   const guncelleAd = useAuth((s) => s.guncelleAd)
+  // Rol tek kaynaktan (useAuth kullanici.rol). /me'nin 'rol' alanı yalnız rozet metni.
+  //  - admin: parola = sunucunun root parolası (auth/profile.go)
+  //  - bayi: arka uç root'a DOKUNMAZ, yalnız bayinin panel parolası değişir
+  //  - müşteri: PUT /me, /me/parola, /me/2fa/* AdminVeyaReseller → 403. Müşterinin panel
+  //    parolası FTP hesabının parolasıdır (musteri/login ftp_accounts'u doğrular) ve
+  //    FTP sayfasındaki PUT /domains/{id}/ftp/password ile değişir. O uç mevcut parolayı
+  //    SORMAZ; buradaki "Mevcut parola" formunu ona bağlamak yanıltıcı olurdu — bu
+  //    yüzden müşteride çalışmayan formlar gizlenir, parola için FTP sayfasına yönlendirilir.
+  const rol = useRol()
+  const musteri = rol === 'user'
+  const rootMu = rol === 'admin'
+  const musteriDID = musteri ? musteriDomainID() : null
   const [ben, setBen] = useState<Ben | null>(null)
   const [yukHata, setYukHata] = useState('')
 
@@ -114,7 +134,7 @@ export default function SettingsPage() {
   const [f2Kapat, setF2Kapat] = useState(false); const [kapatKod, setKapatKod] = useState('')
 
   const [tema, setTema] = useState('system'); const [dil, setDil] = useState('tr')
-  const [tOk, setTOk] = useState(''); const [tYuk, setTYuk] = useState(false)
+  const [tOk, setTOk] = useState(''); const [tErr, setTErr] = useState(''); const [tYuk, setTYuk] = useState(false)
 
   function yukle() {
     api.get<Ben>('/me').then(r => {
@@ -140,7 +160,7 @@ export default function SettingsPage() {
     setPaYuk(true)
     try {
       await api.post('/me/parola', { mevcut, yeni })
-      setPaOk(cevir("Parola değiştirildi. (Sunucu root parolası güncellendi.)"))
+      setPaOk(rootMu ? cevir("Parola değiştirildi. (Sunucu root parolası güncellendi.)") : cevir("Parola değiştirildi."))
       setMevcut(''); setYeni(''); setYeni2(''); setTimeout(() => setPaOk(''), 5000)
     } catch (e) { setPaErr(apiHata(e, cevir("Parola değiştirilemedi"))) } finally { setPaYuk(false) }
   }
@@ -164,12 +184,12 @@ export default function SettingsPage() {
   }
 
   async function tercihKaydet() {
-    setTOk(''); setTYuk(true)
+    setTOk(''); setTErr(''); setTYuk(true)
     try {
       await api.put('/me', { ad_soyad: ad, eposta, tercih_tema: tema, tercih_dil: dil })
       try { localStorage.setItem('gosp.tema', tema) } catch { /* yoksay */ }
       setTOk(cevir("Tercihler kaydedildi.")); setTimeout(() => setTOk(''), 3000)
-    } catch { setTOk('') } finally { setTYuk(false) }
+    } catch (e) { setTErr(apiHata(e, cevir("Kaydedilemedi"))) } finally { setTYuk(false) }
   }
 
   const secretGruplu = f2Kur ? (f2Kur.secret.match(/.{1,4}/g) || []).join(' ') : ''
@@ -178,12 +198,12 @@ export default function SettingsPage() {
     <div className="px-6 md:px-8 py-6">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Profil ve Tercihler") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Profil ve Tercihler")}</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{cevir("Hesap bilgileriniz, parola, iki adımlı doğrulama ve panel tercihleri.")}</p>
+      <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{musteri ? cevir("Hesap bilgileriniz ve panel giriş parolanız.") : cevir("Hesap bilgileriniz, parola, iki adımlı doğrulama ve panel tercihleri.")}</p>
       {yukHata && <div className="mb-4"><Uyari tip="err" mesaj={yukHata} /></div>}
 
       <div className="space-y-5">
         {/* 1) Hesap Bilgileri */}
-        <Kart baslik={cevir("Hesap Bilgileri")} aciklama={cevir("Ad soyad ve e-posta adresinizi düzenleyin.")}
+        <Kart baslik={cevir("Hesap Bilgileri")} aciklama={musteri ? undefined : cevir("Ad soyad ve e-posta adresinizi düzenleyin.")}
           ikon={<Ikon d={I.kullanici} className="size-5" />}
           cocuk={
             <form onSubmit={profilKaydet} className="space-y-4">
@@ -192,24 +212,41 @@ export default function SettingsPage() {
                 <div>
                   <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Rol / Durum")}</span>
                   <div className="flex gap-2 pt-1.5">
-                    <Badge color="primary" variant="soft" className="text-[11px] uppercase tracking-wider px-2 py-1 font-semibold">{ben?.rol || 'admin'}</Badge>
+                    <Badge color="primary" variant="soft" className="text-[11px] uppercase tracking-wider px-2 py-1 font-semibold">{musteri ? cevir("Hosting kullanıcısı") : ben?.rol || 'admin'}</Badge>
                     <Badge color="success" variant="soft" className="text-[11px] uppercase tracking-wider px-2 py-1 font-semibold">{ben?.durum || 'active'}</Badge>
                   </div>
                 </div>
-                <Girdi etiket={cevir("Ad Soyad")} value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
-                <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder={cevir("ornek@site.com")} />
+                {!musteri && (
+                  <>
+                    <Girdi etiket={cevir("Ad Soyad")} value={ad} onChange={e => setAd(e.target.value)} placeholder={cevir("Adınız Soyadınız")} />
+                    <Girdi etiket={cevir("E-posta")} type="email" value={eposta} onChange={e => setEposta(e.target.value)} placeholder={cevir("ornek@site.com")} />
+                  </>
+                )}
               </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button type="submit" color="primary" yukleniyor={pYuk} ikon={I.disket}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</Button>
-                <Uyari tip="ok" mesaj={pOk} /><Uyari tip="err" mesaj={pErr} />
-              </div>
+              {!musteri && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button type="submit" color="primary" yukleniyor={pYuk} ikon={I.disket}>{pYuk ? cevir("Kaydediliyor…") : cevir("Kaydet")}</Button>
+                  <Uyari tip="ok" mesaj={pOk} /><Uyari tip="err" mesaj={pErr} />
+                </div>
+              )}
             </form>
           } />
 
         {/* 2) Parola */}
-        <Kart baslik={cevir("Parola")} aciklama={cevir("Bu, sunucunun root parolasını değiştirir (SSH erişimi dahil).")}
+        <Kart baslik={cevir("Parola")}
+          aciklama={musteri ? undefined : rootMu ? cevir("Bu, sunucunun root parolasını değiştirir (SSH erişimi dahil).") : cevir("Bu, panel giriş parolanızı değiştirir.")}
           ikon={<Ikon d={I.kilit} className="size-5" />}
-          cocuk={
+          cocuk={musteri ? (
+            <div className="space-y-4">
+              <UyariKutusu ton="bilgi">{cevir("Panel giriş parolanız, aboneliğinizin FTP hesabının parolasıdır; FTP Hesapları sayfasından değiştirilir.")}</UyariKutusu>
+              {musteriDID !== null && (
+                <Link to={`/abonelikler/${musteriDID}/ftp`} className={butonSinifi({ color: 'primary' })}>
+                  {cevir("FTP Hesaplarına git")}
+                  <Ikon d={I.ileri} className="size-4 shrink-0 ms-2 -me-1" />
+                </Link>
+              )}
+            </div>
+          ) : (
             <form onSubmit={parolaDegistir} className="space-y-4">
               <Girdi etiket={cevir("Mevcut parola")} type="password" value={mevcut} onChange={e => setMevcut(e.target.value)} autoComplete="current-password" />
               <div className="grid sm:grid-cols-2 gap-4">
@@ -221,94 +258,98 @@ export default function SettingsPage() {
                 <Uyari tip="ok" mesaj={paOk} /><Uyari tip="err" mesaj={paErr} />
               </div>
             </form>
-          } />
+          )} />
 
-        {/* 3) 2FA */}
-        <Kart baslik={cevir("İki Adımlı Doğrulama (2FA)")} aciklama={cevir("Girişte parolaya ek olarak authenticator uygulamasından 6 haneli kod ister.")}
-          ikon={<Ikon d={I.kalkan} className="size-5" />}
-          cocuk={
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-600 dark:text-slate-400">{cevir("Durum:")}</span>
-                {ben?.iki_fa
-                  ? <Badge color="success" variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Aktif")}</Badge>
-                  : <Badge variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-slate-400 dark:bg-dark-300" aria-hidden />{cevir("Kapalı")}</Badge>}
-              </div>
+        {/* 3) 2FA — müşteride yok (uçlar AdminVeyaReseller) */}
+        {!musteri && (
+          <Kart baslik={cevir("İki Adımlı Doğrulama (2FA)")} aciklama={cevir("Girişte parolaya ek olarak authenticator uygulamasından 6 haneli kod ister.")}
+            ikon={<Ikon d={I.kalkan} className="size-5" />}
+            cocuk={
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">{cevir("Durum:")}</span>
+                  {ben?.iki_fa
+                    ? <Badge color="success" variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir("Aktif")}</Badge>
+                    : <Badge variant="soft" className="gap-1.5 text-xs font-semibold px-2.5 py-1"><span className="inline-block size-2 rounded-full bg-slate-400 dark:bg-dark-300" aria-hidden />{cevir("Kapalı")}</Badge>}
+                </div>
 
-              {!ben?.iki_fa && !f2Kur && (
-                <Button onClick={f2Baslat} color="primary" ikon={I.kalkan}>{cevir("2FA'yı Etkinleştir")}</Button>
-              )}
+                {!ben?.iki_fa && !f2Kur && (
+                  <Button onClick={f2Baslat} color="primary" ikon={I.kalkan}>{cevir("2FA'yı Etkinleştir")}</Button>
+                )}
 
-              {!ben?.iki_fa && f2Kur && (
-                <form onSubmit={f2Etkinlestir} className="space-y-3 border border-slate-200 dark:border-dark-600 rounded-lg p-4 bg-slate-50 dark:bg-dark-800">
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:")}</p>
-                  {f2Kur.qr_data_uri && (
-                    <div className="flex flex-col items-center gap-2 py-1">
-                      <img src={f2Kur.qr_data_uri} alt={cevir("2FA QR kodu")} width={256} height={256}
-                        className="w-64 h-64 rounded-lg bg-white p-3 border border-slate-200 dark:border-dark-600 shadow-xs" />
-                      <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Authenticator uygulamanızla tarayın")}</p>
+                {!ben?.iki_fa && f2Kur && (
+                  <form onSubmit={f2Etkinlestir} className="space-y-3 border border-slate-200 dark:border-dark-600 rounded-lg p-4 bg-slate-50 dark:bg-dark-800">
+                    <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("1) Authenticator uygulamanıza (Google Authenticator, Authy, Microsoft Authenticator) ekleyin:")}</p>
+                    {f2Kur.qr_data_uri && (
+                      <div className="flex flex-col items-center gap-2 py-1">
+                        <img src={f2Kur.qr_data_uri} alt={cevir("2FA QR kodu")} width={256} height={256}
+                          className="w-64 h-64 rounded-lg bg-white p-3 border border-slate-200 dark:border-dark-600 shadow-xs" />
+                        <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Authenticator uygulamanızla tarayın")}</p>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Tarayamıyorsanız, elle giriş için gizli anahtar:")}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
+                      <Button type="button" variant="outlined" boyut="sm" ikon={I.kopya} onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }}>{cevir("Kopyala")}</Button>
                     </div>
-                  )}
-                  <p className="text-xs text-slate-500 dark:text-slate-500">{cevir("Tarayamıyorsanız, elle giriş için gizli anahtar:")}</p>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <code className="font-mono text-sm px-3 py-2 rounded-lg bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-800 dark:text-slate-100 tracking-widest select-all">{secretGruplu}</code>
-                    <Button type="button" variant="outlined" boyut="sm" ikon={I.kopya} onClick={() => { navigator.clipboard?.writeText(f2Kur.secret) }}>{cevir("Kopyala")}</Button>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-500 break-all">{cevir("veya bağlantı:")} <span className="font-mono">{f2Kur.otpauth}</span></p>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("2) Uygulamadaki 6 haneli kodu girin:")}</p>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <input value={f2Kod} onChange={e => setF2Kod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
-                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
-                    <Button type="submit" color="primary" yukleniyor={f2Yuk} disabled={f2Kod.length !== 6} ikon={I.onay}>{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</Button>
-                    <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kur(null)}>{cevir("İptal")}</Button>
-                  </div>
-                  <Uyari tip="err" mesaj={f2Err} />
-                </form>
-              )}
+                    <p className="text-[11px] text-slate-500 dark:text-slate-500 break-all">{cevir("veya bağlantı:")} <span className="font-mono">{f2Kur.otpauth}</span></p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("2) Uygulamadaki 6 haneli kodu girin:")}</p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <input value={f2Kod} onChange={e => setF2Kod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
+                        className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 focus:border-brand-500 outline-none" />
+                      <Button type="submit" color="primary" yukleniyor={f2Yuk} disabled={f2Kod.length !== 6} ikon={I.onay}>{f2Yuk ? cevir("Doğrulanıyor…") : cevir("Doğrula ve Aç")}</Button>
+                      <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kur(null)}>{cevir("İptal")}</Button>
+                    </div>
+                    <Uyari tip="err" mesaj={f2Err} />
+                  </form>
+                )}
 
-              {ben?.iki_fa && !f2Kapat && (
-                <Button color="error" variant="soft" ikon={I.ban} onClick={() => { setF2Kapat(true); setF2Err('') }}>{cevir("2FA'yı Kapat")}</Button>
-              )}
-              {ben?.iki_fa && f2Kapat && (
-                <form onSubmit={f2KapatOnay} className="space-y-3 border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/10">
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("Kapatmak için authenticator kodunu girin:")}</p>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <input value={kapatKod} onChange={e => setKapatKod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
-                      className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none" />
-                    <Button type="submit" color="error" yukleniyor={f2Yuk} disabled={kapatKod.length !== 6} ikon={I.ban}>{cevir("Kapat")}</Button>
-                    <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kapat(false)}>{cevir("Vazgeç")}</Button>
-                  </div>
-                  <Uyari tip="err" mesaj={f2Err} />
-                </form>
-              )}
-            </div>
-          } />
+                {ben?.iki_fa && !f2Kapat && (
+                  <Button color="error" variant="soft" ikon={I.ban} onClick={() => { setF2Kapat(true); setF2Err('') }}>{cevir("2FA'yı Kapat")}</Button>
+                )}
+                {ben?.iki_fa && f2Kapat && (
+                  <form onSubmit={f2KapatOnay} className="space-y-3 border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/10">
+                    <p className="text-sm text-slate-700 dark:text-slate-300">{cevir("Kapatmak için authenticator kodunu girin:")}</p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <input value={kapatKod} onChange={e => setKapatKod(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric"
+                        className="w-32 px-3 py-2 text-center text-lg font-mono tracking-[0.3em] bg-white dark:bg-dark-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none" />
+                      <Button type="submit" color="error" yukleniyor={f2Yuk} disabled={kapatKod.length !== 6} ikon={I.ban}>{cevir("Kapat")}</Button>
+                      <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setF2Kapat(false)}>{cevir("Vazgeç")}</Button>
+                    </div>
+                    <Uyari tip="err" mesaj={f2Err} />
+                  </form>
+                )}
+              </div>
+            } />
+        )}
 
-        {/* 4) Tercihler */}
-        <Kart baslik={cevir("Tercihler")} aciklama={cevir("Panel görünüm ve dil tercihleri.")}
-          ikon={<Ikon d={I.ayar} className="size-5" />}
-          cocuk={
-            <div className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <label className="block">
-                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Tema")}</span>
-                  <select value={tema} onChange={e => setTema(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
-                    <option value="system">{cevir("Sistem")}</option><option value="light">{cevir("Açık")}</option><option value="dark">{cevir("Koyu")}</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Dil")}</span>
-                  <select value={dil} onChange={e => setDil(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
-                    <option value="tr">{cevir("Türkçe")}</option><option value="en">English</option>
-                  </select>
-                </label>
+        {/* 4) Tercihler — müşteride yok (PUT /me 403); tema/dil üst çubuktan değişir */}
+        {!musteri && (
+          <Kart baslik={cevir("Tercihler")} aciklama={cevir("Panel görünüm ve dil tercihleri.")}
+            ikon={<Ikon d={I.ayar} className="size-5" />}
+            cocuk={
+              <div className="space-y-4">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <label className="block">
+                    <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Tema")}</span>
+                    <select value={tema} onChange={e => setTema(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
+                      <option value="system">{cevir("Sistem")}</option><option value="light">{cevir("Açık")}</option><option value="dark">{cevir("Koyu")}</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Dil")}</span>
+                    <select value={dil} onChange={e => setDil(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-100 outline-none">
+                      <option value="tr">{cevir("Türkçe")}</option><option value="en">English</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button onClick={tercihKaydet} color="primary" yukleniyor={tYuk} ikon={I.disket}>{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</Button>
+                  <Uyari tip="ok" mesaj={tOk} /><Uyari tip="err" mesaj={tErr} />
+                </div>
               </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button onClick={tercihKaydet} color="primary" yukleniyor={tYuk} ikon={I.disket}>{tYuk ? cevir("Kaydediliyor…") : cevir("Tercihleri Kaydet")}</Button>
-                <Uyari tip="ok" mesaj={tOk} />
-              </div>
-            </div>
-          } />
+            } />
+        )}
       </div>
     </div>
   )
