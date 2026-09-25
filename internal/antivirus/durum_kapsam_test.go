@@ -4,7 +4,7 @@ package antivirus
 // GET /domains/{id}/antivirus, alan adının KENDİ taraması yokken kökün sunucu
 // geneli (domain_id=0) taramasının meta verisini (taranan = tüm kiracıların
 // dosya toplamı, id, zamanlar) bayiye/müşteriye DÖNDÜRMEZ; yönetici görmeye
-// devam eder. Ek: imza güncellemesinin ham freshclam çıktısı yalnız yöneticiye.
+// devam eder. Ek: imza güncellemesi (sunucu geneli freshclam) yalnız yöneticiye.
 //
 // Gerçek RequireAuth + imzalı jetonlar; DB sahtedb (sorgu parçası → hazır satır).
 
@@ -151,19 +151,25 @@ func TestDurum_KendiTaramasiHerRoldeGorunur(t *testing.T) {
 	}
 }
 
-// Ham freshclam çıktısı (sunucu geneli: ayna adresi, imza sürümleri) yalnız yöneticiye.
-func TestImzaGuncelle_HamCiktiYalnizYoneticiye(t *testing.T) {
+// İmza güncellemesi SUNUCU GENELİ bir eylemdir (freshclam tüm sunucunun imza
+// veritabanını günceller): bayi ve müşteri kendi alan adı kimliğiyle bile
+// TETİKLEYEMEZ (403, freshclam hiç çalışmaz); yönetici çalıştırır ve ham çıktıyı
+// (ayna adresi, imza sürümleri) görür. Rota da AdminOnly (cmd/server rota testi);
+// bu test handler içindeki ikinci kilidi sınar.
+func TestImzaGuncelle_YalnizYonetici(t *testing.T) {
 	admin, bayi, musteri := avt_tokenlar(t)
-	betik := filepath.Join(t.TempDir(), "freshclam")
+	dizin := t.TempDir()
+	betik := filepath.Join(dizin, "freshclam")
+	isaret := filepath.Join(dizin, "calisti")
 	const iz = "ayna.sunucu-ic.ornek"
-	if err := os.WriteFile(betik, []byte("#!/bin/sh\necho 'daily.cvd database is up-to-date (mirror: "+iz+")'\n"), 0o755); err != nil {
+	if err := os.WriteFile(betik, []byte("#!/bin/sh\ntouch '"+isaret+"'\necho 'daily.cvd database is up-to-date (mirror: "+iz+")'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	eski := freshclamYolu
 	t.Cleanup(func() { freshclamYolu = eski })
 	freshclamYolu = betik
 
-	cagir := func(tok string) map[string]any {
+	cagir := func(tok string) (int, string) {
 		t.Helper()
 		r := chi.NewRouter()
 		r.With(middleware.RequireAuth(avt_sir)).Post("/domains/{id}/antivirus/imza-guncelle", (&Handlers{}).ImzaGuncelle)
@@ -171,29 +177,32 @@ func TestImzaGuncelle_HamCiktiYalnizYoneticiye(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+tok)
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("imza-guncelle: %d %s", rec.Code, rec.Body.String())
-		}
-		var m map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
-			t.Fatal(err)
-		}
-		return m
+		return rec.Code, rec.Body.String()
 	}
 	for rol, tok := range map[string]string{"bayi": bayi, "müşteri": musteri} {
-		m := cagir(tok)
-		c, ok := m["cikti"]
-		if !ok {
-			t.Errorf("%s: cikti anahtarı kalmalı (yanıt biçimi aynı)", rol)
+		kod, govde := cagir(tok)
+		if kod != http.StatusForbidden {
+			t.Errorf("%s: 403 beklenirdi (sunucu geneli eylem): %d %s", rol, kod, govde)
 		}
-		if s, _ := c.(string); s != "" {
-			t.Errorf("%s: ham freshclam çıktısı dönmemeli: %q", rol, s)
+		if strings.Contains(govde, iz) {
+			t.Errorf("%s: ham freshclam çıktısı dönmemeli: %s", rol, govde)
 		}
-		if m["ok"] != true {
-			t.Errorf("%s: ok=true olmalı: %v", rol, m)
+		if _, err := os.Stat(isaret); err == nil {
+			t.Fatalf("%s: freshclam ÇALIŞMAMALIYDI", rol)
 		}
 	}
-	if s, _ := cagir(admin)["cikti"].(string); !strings.Contains(s, iz) {
-		t.Errorf("yönetici ham çıktıyı görmeli: %q", s)
+	kod, govde := cagir(admin)
+	if kod != http.StatusOK {
+		t.Fatalf("yönetici: 200 beklenirdi: %d %s", kod, govde)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(govde), &m); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := m["cikti"].(string); !strings.Contains(s, iz) || m["ok"] != true {
+		t.Errorf("yönetici freshclam'ı çalıştırıp ham çıktıyı görmeli: %v", m)
+	}
+	if _, err := os.Stat(isaret); err != nil {
+		t.Error("yönetici isteğinde freshclam çalışmalıydı")
 	}
 }

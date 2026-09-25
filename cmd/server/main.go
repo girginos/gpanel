@@ -708,7 +708,7 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/geri-yukle", avH.KarantinaGeriYukle)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/sil", avH.KarantinaSil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/karantina/{bid}/incele", avH.KarantinaIncele)
-				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/imza-guncelle", avH.ImzaGuncelle)
+				r.With(middleware.AdminOnly).Post("/domains/{id}/antivirus/imza-guncelle", avH.ImzaGuncelle) // sunucu geneli freshclam: yalnız yönetici
 				r.With(middleware.MusteriScope).Get("/domains/{id}/kopya", kopyaH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/kopya", kopyaH.Olustur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/kopya/{ad}", kopyaH.Sil)

@@ -25,6 +25,7 @@ import (
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/nginxset"
 	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
@@ -300,6 +301,19 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 var (
 	saglama       = provisioner.Provision
 	saglamaGeriAl = provisioner.Deprovision
+)
+
+// Vhost render + SUNUCU GENELİ `nginx -t` + reload yapan dış etkili adımlar
+// (testler sahteyle değiştirir: hata metninin kime ne döndüğü ana makinenin
+// nginx'ine dokunmadan sınanır). Hataları istemciye nginxset.SunucuHatasi ile
+// döner: `nginx -t` çıktısı komşu kiracıların sertifika/vhost yollarını taşır;
+// yönetici ayrıntıyı aynen görür, öteki roller genel mesaj (ayrıntı günlükte).
+var (
+	phpSurumUygula  = provisioner.SetPHPVersion
+	vhostUygulaAlan = provisioner.ApplyVhostForDomain
+	vhostYenidenCiz = provisioner.RerenderVhost
+	webKokDogrula   = provisioner.WebRootMutlak
+	sslKapat        = provisioner.DisableSSL
 )
 
 // adAlaniYaz: ad-alanı denetiminin sonucunu HTTP'ye çevirir. Bayiye giden metin
@@ -715,9 +729,9 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin PHP sürümü değiştirilemez")
 		return
 	}
-	socket, err := provisioner.SetPHPVersion(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
+	socket, err := phpSurumUygula(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+nginxset.SunucuHatasi(r, "domains.php", id, err))
 		return
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
@@ -839,7 +853,8 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	// 2) Vhost'u yeniden uygula (nginx + apache yöneticisi web_backend'i DB'den okur)
 	socket, _ := provisioner.PHPSocketFor(sk, phpSurum)
-	if err := provisioner.ApplyVhostForDomain(h.DB, id, socket, phpSurum); err != nil {
+	if err := vhostUygulaAlan(h.DB, id, socket, phpSurum); err != nil {
+		hata := nginxset.SunucuHatasi(r, "domains.web-backend", id, err)
 		// 🔴 DB'Yİ GERİ AL. Aksi halde DB "php-fpm" derken disk proxy vhost'unu
 		// servis eder; daha kötüsü, bundan sonraki HER arka plan render'ı (SSL
 		// yenilemesi dahil) DB'den yeni değeri okuyup aynı hataya düşer ve o
@@ -848,12 +863,12 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 			if _, gerr := h.DB.ExecContext(r.Context(),
 				`UPDATE domains SET web_backend=? WHERE id=?`, eskiBackend, id); gerr != nil {
 				httpx.WriteError(w, http.StatusInternalServerError,
-					"vhost render: "+err.Error()+" — DB geri alınamadı: "+gerr.Error())
+					"vhost render: "+hata+" — DB geri alınamadı: "+gerr.Error())
 				return
 			}
 		}
 		httpx.WriteError(w, http.StatusInternalServerError,
-			"vhost render: "+err.Error()+" (backend değişikliği geri alındı)")
+			"vhost render: "+hata+" (backend değişikliği geri alındı)")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -912,7 +927,7 @@ func (h *Handlers) SetWebRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// doğrula + mutlak yol (traversal/cross-tenant/symlink kapalı, dizin var olmalı)
-	abs, verr := provisioner.WebRootMutlak(sk, req.AltDizin)
+	abs, verr := webKokDogrula(sk, req.AltDizin)
 	if verr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
 		return
@@ -923,8 +938,8 @@ func (h *Handlers) SetWebRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// vhost yeniden render (nginx -t + rollback İÇERİDE — bozuk config diske kalmaz)
-	if err := provisioner.RerenderVhost(h.DB, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+err.Error())
+	if err := vhostYenidenCiz(h.DB, id); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "vhost render: "+nginxset.SunucuHatasi(r, "domains.web-root", id, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

@@ -341,7 +341,17 @@ func (h *Handlers) Karantina(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /domains/{id}/antivirus/imza-guncelle  → freshclam
+//
+// 🔴 YALNIZ YÖNETİCİ. freshclam SUNUCU GENELİ imza veritabanını günceller
+// (tek alan adına ait değil; tarama kilidini de tutar ve ayna sunucularına
+// istek atar). Uç MusteriScope arkasındaydı: bayi ve müşteri kendi alan adı
+// kimliğiyle sunucu geneli eylemi tetikleyebiliyordu. Rota AdminOnly'dir
+// (cmd/server/main.go); bu denetim, rota kaydı gevşerse diye ikinci kilittir.
 func (h *Handlers) ImzaGuncelle(w http.ResponseWriter, r *http.Request) {
+	if middleware.RolFrom(r) != "admin" {
+		httpx.WriteError(w, http.StatusForbidden, "sadece yöneticiler için")
+		return
+	}
 	if _, err := os.Stat(freshclamYolu); err != nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "freshclam kurulu değil")
 		return
@@ -358,16 +368,8 @@ func (h *Handlers) ImzaGuncelle(w http.ResponseWriter, r *http.Request) {
 	if len(cikti) > 4000 {
 		cikti = cikti[len(cikti)-4000:]
 	}
-	// 🔴 Ham freshclam çıktısı SUNUCU GENELİdir (imza veritabanı sürümleri,
-	// ayna adresleri, vekil/ağ hataları) ve bu uç MusteriScope ile bayiye ve
-	// müşteriye açık. Yalnız yönetici görür; ötekilere anahtar boş döner (yanıt
-	// biçimi aynı), ayrıntı günlüğe yazılır.
-	if middleware.RolFrom(r) != "admin" {
-		if err != nil {
-			log.Printf("antivirus: freshclam başarısız: %v: %s", err, strings.TrimSpace(cikti))
-		}
-		cikti = ""
-	}
+	// Ham freshclam çıktısı SUNUCU GENELİdir (imza veritabanı sürümleri, ayna
+	// adresleri, vekil/ağ hataları); uç artık yalnız yöneticiye açık.
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": err == nil, "imza_tarihi": newestClamDB(), "cikti": cikti,
 	})
