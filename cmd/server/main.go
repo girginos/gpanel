@@ -152,7 +152,8 @@ func main() {
 	ipv4 := detectIPv4()
 	log.Printf("server ipv4: %s", ipv4)
 	// Arayüz SSH tünelinden (127.0.0.1) bağlıyken bayi/müşteri adresini bununla kurar.
-	portyonetim.GenelHost = func() string { return ipv4 }
+	// ipv4 DEĞİL: NAT arkasında o özel IP'dir (dışarıdan erişilemez) — bkz. genelHostBul.
+	portyonetim.GenelHost = genelHostBul
 
 	if err := domains.SeedIfEmpty(context.Background(), d, ipv4); err != nil {
 		log.Printf("seed warn: %v", err)

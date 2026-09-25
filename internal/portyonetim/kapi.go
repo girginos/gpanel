@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -196,31 +195,66 @@ func KapiRolPortuAta(rol string, yeni int) (eski, atanan int, err error) {
 		}
 	}
 	// Panelin kendi portları (nginx onları dinlediği için `ss` "meşgul" der): açık eski kapı
-	// elle devralınabilir. Yalnız-loopback tünel portu ise YALNIZ masaüstü modunda yönetici
-	// kapısı olabilir: Heal izi olan porta genel listen eklemez — bayi/müşteri (ya da web
-	// modunda yönetici) kapısı oraya taşınsa dışarıdan erişilemez, eski portu ise kaldırılırdı.
-	yerel := kapi.YerelPortlar(kapiPanelConf(), a, time.Now().Unix())
+	// elle devralınabilir. DIŞARIDA DİNLENMEYEN port (yalnız loopback / erisim-yorumlu izi
+	// var — SSH tüneli yolu) ise YALNIZ masaüstü modunda yönetici kapısı olabilir: Heal izi
+	// olan porta genel listen eklemez — bayi/müşteri (ya da web modunda yönetici) kapısı
+	// oraya taşınsa dışarıdan erişilemez, eski portu ise kaldırılırdı.
+	izli, disKapali := panelPortIzleri(kapiPanelConf())
 	kendi := append([]int{}, a.EskiPortlar...)
 	tunelIzinli := rol == kapi.Admin && kapiMasaustu()
 	if tunelIzinli {
-		kendi = append(kendi, yerel...)
+		for p := range disKapali {
+			kendi = append(kendi, p)
+		}
 	}
 	sorun := KapiPortDenetleyici(kendi...)
 	if yeni == 0 {
+		// Rastgele seçim izi olan HİÇBİR porta düşmez (kapi.GecisAyari ile aynı kural).
 		haric := map[int]bool{a.Admin: true, a.Bayi: true, a.Musteri: true}
-		for _, p := range append(kendi, yerel...) {
+		for _, p := range kendi {
+			haric[p] = true
+		}
+		for p := range izli {
 			haric[p] = true
 		}
 		if yeni, err = kapi.RastgelePortSec(func(p int) bool { return sorun(p) == "" }, haric); err != nil {
 			return 0, 0, err
 		}
-	} else if !tunelIzinli && slices.Contains(yerel, yeni) {
-		return 0, 0, fmt.Errorf("port %d yalnız 127.0.0.1'de dinleniyor (SSH tüneli yolu) — %s kapısı dışarıdan erişilemezdi", yeni, rol)
+	} else if !tunelIzinli && disKapali[yeni] {
+		return 0, 0, fmt.Errorf("port %d dışarıda dinlenmiyor (yalnız 127.0.0.1 / SSH tüneli yolu) — %s kapısı dışarıdan erişilemezdi", yeni, rol)
 	} else if s := sorun(yeni); s != "" {
 		return 0, 0, errors.New(s)
 	}
 	eski, err = kapi.RolPortuDegistir(kapiAyarYolu, rol, yeni, time.Now().Unix())
 	return eski, yeni, err
+}
+
+// panelPortIzleri: panel bloğundaki portlar — izli: HERHANGİ bir listen izi olan (genel,
+// loopback ya da erisim'in yoruma aldığı); disKapali: izi olup GENEL (etkin, loopback
+// olmayan) satırı OLMAYAN, yani dışarıdan dinlenmeyen.
+//
+// 🔴 KAPI HARİTASINDAN BAĞIMSIZ: kapi.YerelPortlar haritadaki portları dışlar; açık eski
+// kapı portu da ("eski") yalnız loopback'te dinleniyor olabilir (masaüstü modunda
+// 127.0.0.1'e çekilmiş önceki yönetici portu). Harita üzerinden bakmak bu portu "genel"
+// sanıp bayi/müşteri kapısının oraya taşınmasına izin veriyordu (KP-1).
+func panelPortIzleri(conf string) (izli, disKapali map[int]bool) {
+	izli, genel := map[int]bool{}, map[int]bool{}
+	for _, d := range kapi.Dinlemeler(strings.Split(conf, "\n")) {
+		if d.Port == 0 {
+			continue
+		}
+		izli[d.Port] = true
+		if d.Genel() {
+			genel[d.Port] = true
+		}
+	}
+	disKapali = map[int]bool{}
+	for p := range izli {
+		if !genel[p] {
+			disKapali[p] = true
+		}
+	}
+	return izli, disKapali
 }
 
 // KapiRolDegistir: bir rolün kapı portunu değiştirir ve hemen uygular. yeni == 0 →
@@ -333,12 +367,17 @@ func (h *Handler) KapiEskiKapat(w http.ResponseWriter, r *http.Request) {
 
 // kapiUygulaYanit: ayar yazıldıktan sonra uygular; uygulama hatası isteği BOZMAZ
 // (ayar kaydedildi, bakım döngüsü yeniden dener) ama uyarı olarak döner.
+// Yanıt: {ok, uyari?, uygulandi, kapi}. uygulandi HER ZAMAN yazılır (KapiRolSonuc ile
+// aynı anlam): uyari doluyken true → değişiklik nginx'e uygulandı ama kapı zinciri
+// doğrulanamadı (eski-kapat'ta eski adres gerçekten kapanmış olabilir); false → yalnız
+// kaydedildi, nginx eski hâlinde.
 func kapiUygulaYanit(w http.ResponseWriter, r *http.Request) {
 	yanit := map[string]any{"ok": true}
 	err := kapiUygula(r.Context())
 	if err != nil {
 		yanit["uyari"] = err.Error()
 	}
+	yanit["uygulandi"] = uygulandiMi(err)
 	yanit["kapi"] = KapiDurumGetir()
 	jsonYaz(w, 200, yanit)
 }

@@ -170,6 +170,75 @@ func TestKapiRolPortuAtaYerelPort(t *testing.T) {
 	}
 }
 
+// KP-1: açık eski kapı portu da yalnız loopback'te dinleniyor olabilir (masaüstü modunda
+// 127.0.0.1'e çekilmiş eski yönetici portu). Harita onu "eski" saydığı için tünel denetimi
+// eskiden atlanıyordu: bayi/müşteri kapısı oraya taşınır, Heal izi olan porta genel listen
+// eklemez → yeni adres dışarıdan erişilemez, zorlama her uzlaştırmada KAPALI kalırdı.
+// erisim'in yoruma aldığı iz de aynıdır (Heal listen eklemez; `ss` görmez).
+func TestKapiRolPortuAtaAcikEskiLoopbackPort(t *testing.T) {
+	a := &kapi.Ayar{Admin: 25005, Bayi: 22002, Musteri: 23003, EskiPortlar: []int{8443, 21001},
+		EskiBitis: 9_999_999_999, AdminDogrulandi: 1, OncekiAdmin: 21001}
+	s := kapiPYKur(t, a)
+	s.conf = "server {\n    listen 8443 ssl;\n    listen 127.0.0.1:21001 ssl; # gp-kapi\n" +
+		"    # [erisim:masaustu] listen [::]:21001 ssl; # gp-kapi\n    listen 127.0.0.1:25005 ssl; # gp-kapi\n" +
+		"    listen 22002 ssl; # gp-kapi\n    listen 23003 ssl; # gp-kapi\n" +
+		"    # [erisim:masaustu] listen [::]:24004 ssl;\n}"
+	for _, p := range []int{8443, 21001, 25005, 22002, 23003} {
+		s.mesgul[p] = true // nginx dinliyor → ss "meşgul" (yorumlu 24004'ü görmez)
+	}
+	for _, masaustu := range []bool{true, false} {
+		s.masaustu = masaustu
+		for _, rol := range []string{kapi.Bayi, kapi.Musteri} {
+			for _, p := range []int{21001, 24004} {
+				if _, _, err := KapiRolPortuAta(rol, p); err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+					t.Errorf("masaustu=%v: %s kapısı dışarıda dinlenmeyen :%d'e taşınamamalı, got %v", masaustu, rol, p, err)
+				}
+			}
+		}
+	}
+	s.masaustu = false
+	if _, _, err := KapiRolPortuAta(kapi.Admin, 21001); err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Errorf("web modunda yönetici kapısı yalnız loopback'teki açık eski porta taşınamamalı, got %v", err)
+	}
+	if g, _ := kapi.Oku(kapiAyarYolu); g.Admin != 25005 || g.Bayi != 22002 || g.Musteri != 23003 || len(g.EskiPortlar) != 2 {
+		t.Fatalf("reddedilen istekler ayarı değiştirmemeli: %+v", g)
+	}
+	// Aşırı ret yok: GENEL dinlenen açık eski port devralınabilir kalır; masaüstü modunda
+	// yönetici tünel yolundaki önceki portuna dönebilir.
+	if _, _, err := KapiRolPortuAta(kapi.Musteri, 8443); err != nil {
+		t.Fatalf("genel dinlenen açık eski port müşteri kapısı olabilmeli: %v", err)
+	}
+	s.masaustu = true
+	if _, _, err := KapiRolPortuAta(kapi.Admin, 21001); err != nil {
+		t.Fatalf("masaüstü modunda yönetici kapısı loopback'teki açık eski porta dönebilmeli: %v", err)
+	}
+	if g, _ := kapi.Oku(kapiAyarYolu); g.Admin != 21001 || g.Musteri != 8443 {
+		t.Fatalf("kabul edilen değişiklikler yazılmalı: %+v", g)
+	}
+}
+
+// Rastgele seçim panel bloğunda İZİ olan hiçbir porta düşmez — erisim'in yoruma aldığı
+// satır dahil (`ss` onu görmez; Heal oraya listen eklemez). Aralıkta yalnız üç aday
+// bırakılır: seçim her seferinde izsiz olana düşmeli.
+func TestKapiRolPortuAtaRastgeleIzliPortuSecmez(t *testing.T) {
+	s := kapiPYKur(t, rolAyari())
+	s.conf = "server {\n    listen 21001 ssl;\n    # [erisim:masaustu] listen [::]:20101 ssl;\n" +
+		"    listen 127.0.0.1:20102 ssl;\n}"
+	for p := kapi.PortAltSinir; p <= kapi.PortUstSinir; p++ {
+		if p != 20101 && p != 20102 && p != 20103 {
+			s.mesgul[p] = true
+		}
+	}
+	for i := 0; i < 24; i++ {
+		if err := kapi.Yaz(kapiAyarYolu, rolAyari()); err != nil {
+			t.Fatal(err)
+		}
+		if _, y, err := KapiRolPortuAta(kapi.Bayi, 0); err != nil || y != 20103 {
+			t.Fatalf("rastgele seçim izi olan porta düşmemeli (beklenen 20103): %d %v", y, err)
+		}
+	}
+}
+
 func TestDisPortDegistirKapiModundaReddedilir(t *testing.T) {
 	s := kapiPYKur(t, rolAyari())
 	if _, err := DisPortDegistir(context.Background(), nil, 7443, nil); !errors.Is(err, errKapiModu) {
@@ -289,6 +358,55 @@ func TestKapiEskiHandlerlari(t *testing.T) {
 	}
 	if strings.Join(s.denetim, ",") != "kapi.eski_uzat|eski,kapi.eski_kapat|eski" {
 		t.Fatalf("denetim: %v", s.denetim)
+	}
+
+	// UI2-2: yanıt `uygulandi`yı HER ZAMAN taşır — uyarı doluyken arayüz "uygulandı ama
+	// doğrulanamadı" (eski kapı gerçekten kapanmış olabilir) ile "kaydedildi ama uygulanamadı"
+	// (nginx eski hâlinde) durumlarını ancak bununla ayırır.
+	a.AdminDogrulandi = 1
+	if err := kapi.Yaz(kapiAyarYolu, a); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		ad        string
+		hata      error
+		uygulandi bool
+	}{
+		{"hatasız", nil, true},
+		{"düz hata", errors.New("kapı uygulayıcısı bağlı değil"), false},
+		{"uygulandı-doğrulanamadı", &kapi.UygulamaHatasi{Uygulandi: true, Mesaj: "kapı zinciri şu an ölçülemedi"}, true},
+		{"uygulanamadı", &kapi.UygulamaHatasi{Mesaj: "nginx kapı ayarına uyumlanamadı"}, false},
+	}
+	uclar := []struct {
+		ad    string
+		cagir func(http.ResponseWriter, *http.Request)
+		govde string
+	}{
+		{"uzat", h.KapiUzat, `{"gun":1}`},
+		{"eski-kapat", h.KapiEskiKapat, `{"zorla":false}`},
+	}
+	for _, u := range uclar {
+		for _, c := range cases {
+			s.uygHata = c.hata
+			rr := httptest.NewRecorder()
+			u.cagir(rr, httptest.NewRequest("POST", "/", strings.NewReader(u.govde)))
+			var y struct {
+				Ok        bool       `json:"ok"`
+				Uyari     string     `json:"uyari"`
+				Uygulandi *bool      `json:"uygulandi"`
+				Kapi      *KapiDurum `json:"kapi"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &y); err != nil || rr.Code != 200 {
+				t.Fatalf("%s/%s: %d %s", u.ad, c.ad, rr.Code, rr.Body)
+			}
+			if y.Uygulandi == nil {
+				t.Fatalf("%s/%s: yanıtta uygulandi alanı YOK: %s", u.ad, c.ad, rr.Body)
+			}
+			if *y.Uygulandi != c.uygulandi || !y.Ok || y.Kapi == nil || (y.Uyari == "") != (c.hata == nil) {
+				t.Errorf("%s/%s: uygulandi=%v (beklenen %v) ok=%v uyari=%q kapi=%v",
+					u.ad, c.ad, *y.Uygulandi, c.uygulandi, y.Ok, y.Uyari, y.Kapi != nil)
+			}
+		}
 	}
 }
 
