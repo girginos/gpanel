@@ -196,6 +196,63 @@ func TestStatusKokDegismedi(t *testing.T) {
 	}
 }
 
+// taramaKur — TaraDomains'in bellek durumunu (kosuyor + taranEden) test süresince
+// kurar; t.Cleanup önceki durumu geri yükler. Boş küme + kosu = tam tarama.
+func taramaKur(t *testing.T, kosu bool, ids ...int64) {
+	t.Helper()
+	kosmaMu.Lock()
+	eskiKosu, eskiKume := kosuyor, taranEden
+	kosuyor = kosu
+	taranEden = map[int64]bool{}
+	for _, id := range ids {
+		taranEden[id] = true
+	}
+	kosmaMu.Unlock()
+	t.Cleanup(func() {
+		kosmaMu.Lock()
+		kosuyor, taranEden = eskiKosu, eskiKume
+		kosmaMu.Unlock()
+	})
+}
+
+// 🔴 Durum alanı sızmaz: başka kiracının domaini (11, bayi 8) kısmi taranırken bayi 7
+// kendi domaininde (10) "taraniyor", durum kartında running=true GÖRMEZ — görseydi
+// başkasının tarama zamanını öğrenirdi. Kendi domaini taranırken ve tam taramada (boş
+// küme = tüm domainler, onunkiler dahil) görür; tarama yokken görmez.
+func TestTaraniyorDurumuYalnizKendiDomaini(t *testing.T) {
+	for _, c := range []struct {
+		ad      string
+		kosu    bool
+		taranan []int64
+		durum   string
+		running bool
+	}{
+		{"başka kiracının kısmi taraması", true, []int64{11}, "beklemede", false},
+		{"kendi domaininin kısmi taraması", true, []int64{10}, "taraniyor", true},
+		{"tam tarama", true, nil, "taraniyor", true},
+		{"tarama yok", false, nil, "beklemede", false},
+	} {
+		kuyrukKur(t)
+		taramaKur(t, c.kosu, c.taranan...)
+		kimlikKur(t, bayiJeton)
+		sd, db := sahtedb.Yeni()
+		sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", int64(0)})
+		sd.Satirlar("LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id", []any{int64(10), ""})
+		h := &Handler{DB: db}
+
+		rr := istek(t, h.Apps, "GET", "/websec/apps", "")
+		var a envanterYanit
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &a) != nil || len(a.Items) != 1 || a.Items[0].Durum != c.durum {
+			t.Fatalf("%s: apps durumu %q beklenirdi: %d %s", c.ad, c.durum, rr.Code, rr.Body)
+		}
+		rr = istek(t, h.Status, "GET", "/websec/status", "")
+		var y bayiDurumYanit
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &y) != nil || y.Running != c.running {
+			t.Fatalf("%s: running=%v beklenirdi: %d %s", c.ad, c.running, rr.Code, rr.Body)
+		}
+	}
+}
+
 // Apps: bayide d.reseller_id=? süzgeci; domain_id süzgeci; geçersiz domain_id hiçbir
 // satır; kökte süzgeç yok.
 func TestAppsKapsamVeDomainSuzgeci(t *testing.T) {

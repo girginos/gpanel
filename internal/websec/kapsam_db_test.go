@@ -369,8 +369,9 @@ func TestDB_DevirSonrasiEskiSahipGormez(t *testing.T) {
 }
 
 // Tarama uçları (bayi, gerçek SQL): yabancı ile olmayan domain kod+gövde BAYT BAYT
-// aynı ve kuyruk boş; rescan-many karışık liste 404 + kuyruk boş; "Domainlerimi
-// Tara" yalnız kendi domainlerini kuyruğa alır; tetikleme denetime bayinin kapsamıyla.
+// aynı ve kuyruk boş; rescan-many karışık liste ve tek yabancı id 404 + kuyruk ve
+// denetim boş; "Domainlerimi Tara" yalnız kendi domainlerini kuyruğa alır; tetikleme
+// denetime bayinin kapsamıyla.
 func TestDB_BayiTaramaKapsami(t *testing.T) {
 	db := wsGeciciDB(t)
 	wsTohum(t, db)
@@ -388,6 +389,14 @@ func TestDB_BayiTaramaKapsami(t *testing.T) {
 	karisik := istek(t, h.RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[10,11]}`)
 	if karisik.Code != 404 || karisik.Body.String() != olmayan.Body.String() {
 		t.Fatalf("karışık liste tamamı 404: %d %s", karisik.Code, karisik.Body)
+	}
+	// Tek elemanlı liste: yabancı id (11) olmayan id (999) ile bayt bayt aynı 404.
+	tekYabanci := istek(t, h.RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[11]}`)
+	tekOlmayan := istek(t, h.RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[999]}`)
+	if tekYabanci.Code != 404 || tekYabanci.Code != tekOlmayan.Code ||
+		tekYabanci.Body.String() != tekOlmayan.Body.String() || tekYabanci.Body.String() != olmayan.Body.String() {
+		t.Fatalf("tek yabancı id (%d %s) olmayanla (%d %s) aynı 404 olmalı",
+			tekYabanci.Code, tekYabanci.Body, tekOlmayan.Code, tekOlmayan.Body)
 	}
 	if k.tamMi() || k.bekleyenSayisi() != 0 || wsDenetimSayisi(t, db) != 0 {
 		t.Fatal("reddedilen istek kuyruğa/denetime girmemeli")

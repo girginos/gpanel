@@ -200,6 +200,25 @@ func TestRescanManyBayiKarisikListe404(t *testing.T) {
 		t.Fatal("hiçbiri kuyruğa girmemeli")
 	}
 
+	// Tek elemanlı liste: sahiplik denetimi liste boyundan bağımsız — tek yabancı id
+	// (11) olmayan id (999) ile bayt bayt aynı 404'ü alır, kuyruğa/denetime girmez.
+	sd1, db1 := sahtedb.Yeni()
+	sd1.Satirlar("SELECT COUNT(*) FROM domains d WHERE d.id IN", []any{int64(0)})
+	h1 := &Handler{DB: db1}
+	yabanci := istek(t, h1.RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[11]}`)
+	olmayan := istek(t, h1.RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[999]}`)
+	if yabanci.Code != 404 || strings.TrimSpace(yabanci.Body.String()) != `{"error":"domain bulunamadı"}` ||
+		yabanci.Code != olmayan.Code || yabanci.Body.String() != olmayan.Body.String() {
+		t.Fatalf("tek yabancı id (%d %s) olmayanla (%d %s) aynı 404 olmalı",
+			yabanci.Code, yabanci.Body, olmayan.Code, olmayan.Body)
+	}
+	if !sd1.Sorgulandi("WHERE d.id IN (?) AND d.reseller_id=?") {
+		t.Fatal("tek id'de de sahiplik sayımı kapsam süzgeci taşımalı")
+	}
+	if k.tamMi() || k.bekleyenSayisi() != 0 || sd1.Yurutuldu("audit_log") {
+		t.Fatal("tek yabancı id kuyruğa/denetime girmemeli")
+	}
+
 	sd2, db2 := sahtedb.Yeni()
 	sd2.Satirlar("SELECT COUNT(*) FROM domains d WHERE d.id IN", []any{int64(2)})
 	rr = istek(t, (&Handler{DB: db2}).RescanMany, "POST", "/websec/rescan-many", `{"domain_ids":[10,11]}`)
@@ -260,7 +279,9 @@ func TestBayiSogumasiDevirdeYeniSahibeGecmez(t *testing.T) {
 	}
 }
 
-// "Domainlerimi Tara" bayi başına 30 dk'da bir.
+// "Domainlerimi Tara" bayi başına 30 dk'da bir. Sınır bayiler arasında AYRIDIR: bayi
+// 7'nin basışı bayi 8'i engellemez, bayi 8'in basışı bayi 7'nin kalan süresini
+// değiştirmez (429 süresi hep bayinin kendi basışından — başkasının tarama zamanı sızmaz).
 func TestBayiTumunuTara30Dk(t *testing.T) {
 	k := kuyrukKur(t)
 	simdi := saatKur(t)
@@ -276,9 +297,17 @@ func TestBayiTumunuTara30Dk(t *testing.T) {
 		t.Fatalf("ilk: %d %s", kod, g)
 	}
 	k.sonrakiIs()
-	*simdi = simdi.Add(16 * time.Minute) // domain soğuması bitti, bayi aralığı bitmedi
+	*simdi = simdi.Add(5 * time.Minute)
+	if n, bekle := k.bayiEkle(8, []int64{20, 21}, true); n != 2 || bekle != 0 {
+		t.Fatalf("bayi 7'nin basışı bayi 8'i engellememeli: sirada=%d bekle=%v", n, bekle)
+	}
+	k.sonrakiIs()
+	*simdi = simdi.Add(11 * time.Minute) // domain soğuması bitti, bayi aralığı bitmedi
 	if kod, g := tara(); kod != 429 || g != `{"error":"14 dk sonra tekrar deneyin"}` {
-		t.Fatalf("30 dk içinde 429: %d %s", kod, g)
+		t.Fatalf("30 dk içinde 429 (bayi 8'in basışı süreyi değiştirmez): %d %s", kod, g)
+	}
+	if n, bekle := k.bayiEkle(8, []int64{20, 21}, true); n != 0 || bekle != 19*time.Minute {
+		t.Fatalf("bayi 8'in süresi kendi basışından: sirada=%d bekle=%v", n, bekle)
 	}
 	*simdi = simdi.Add(14 * time.Minute)
 	if kod, g := tara(); kod != 202 || g != `{"sirada":2}` {
@@ -310,10 +339,12 @@ func TestBayiKuyrukPayi(t *testing.T) {
 }
 
 // Zamanlayıcının tam taraması bayi kuyruğu doluyken ve bir tarama sürerken ATLANMAZ:
-// sıradaki iş odur; tam tarama bekleyen kısmi işleri de kapsar.
+// sıradaki iş odur; tam tarama bekleyen kısmi işleri de kapsar ve bekleyenleri
+// BOŞALTIR — boşaltmasa bayi domainleri kalıcı "sirada" görünür, 50'lik pay dolu
+// sayılır ve domainler ("zaten sırada" sayıldığından) bir daha kuyruğa giremezdi.
 func TestTamTaramaBayiKuyruguYuzundenAtlanmaz(t *testing.T) {
 	k := kuyrukKur(t)
-	saatKur(t)
+	simdi := saatKur(t)
 	var ids []int64
 	for i := int64(1); i <= 50; i++ {
 		ids = append(ids, i)
@@ -329,6 +360,16 @@ func TestTamTaramaBayiKuyruguYuzundenAtlanmaz(t *testing.T) {
 	}
 	if _, ok := k.sonrakiIs(); ok {
 		t.Fatal("tam tarama bekleyen kısmi işleri kapsar; ayrıca koşmamalı")
+	}
+	if n := k.bekleyenSayisi(); n != 0 {
+		t.Fatalf("tam tarama sonrası bekleyen kalmamalı: %d", n)
+	}
+	*simdi = simdi.Add(domainSoguma + time.Minute)
+	if n, bekle := k.bayiEkle(7, ids, false); n != bayiKuyrukSiniri || bekle != 0 {
+		t.Fatalf("soğuma bitince pay yeniden 50: sirada=%d bekle=%v", n, bekle)
+	}
+	if is, ok := k.sonrakiIs(); !ok || is.tam || !reflect.DeepEqual(is.ids, ids) {
+		t.Fatalf("domainler yeniden kuyruğa girip taranmalı: %+v %v", is, ok)
 	}
 }
 
