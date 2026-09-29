@@ -104,10 +104,11 @@ func wpKurulumIncele(ctx context.Context, sk, path string) (*WPKurulum, error) {
 	return k, nil
 }
 
-// WPKurulumlariBul — tüm domainleri gezip WP kurulumlarını topla.
-func WPKurulumlariBul(ctx context.Context, db *sql.DB) ([]WPKurulum, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, sistem_kullanici, alan_adi FROM domains ORDER BY alan_adi`)
+// WPKurulumlariBul — domainleri gezip WP kurulumlarını topla (ids boş = tüm
+// domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
+func WPKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]WPKurulum, error) {
+	sorgu, args := kesifSorgusu(ids)
+	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
 	if err != nil {
 		return nil, err
 	}

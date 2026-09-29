@@ -385,9 +385,11 @@ func semverIlk(s string) string {
 	return semverReg.FindString(s)
 }
 
-// NodejsKurulumlariBul — tüm domainlerdeki Node.js uygulamalarını topla.
-func NodejsKurulumlariBul(ctx context.Context, db *sql.DB) ([]nodejsKurulum, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, sistem_kullanici, alan_adi FROM domains ORDER BY alan_adi`)
+// NodejsKurulumlariBul — domainlerdeki Node.js uygulamalarını topla (ids boş =
+// tüm domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
+func NodejsKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]nodejsKurulum, error) {
+	sorgu, args := kesifSorgusu(ids)
+	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
 	if err != nil {
 		return nil, err
 	}

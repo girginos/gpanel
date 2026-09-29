@@ -105,9 +105,11 @@ func composerLockOku(p string) []phpPaket {
 	return out
 }
 
-// PhpKurulumlariBul — tüm domainlerdeki PHP Composer uygulamalarını topla.
-func PhpKurulumlariBul(ctx context.Context, db *sql.DB) ([]phpKurulum, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, sistem_kullanici, alan_adi FROM domains ORDER BY alan_adi`)
+// PhpKurulumlariBul — domainlerdeki PHP Composer uygulamalarını topla (ids boş =
+// tüm domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
+func PhpKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]phpKurulum, error) {
+	sorgu, args := kesifSorgusu(ids)
+	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
 	if err != nil {
 		return nil, err
 	}
