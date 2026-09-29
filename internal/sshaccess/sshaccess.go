@@ -7,12 +7,17 @@
 package sshaccess
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +26,7 @@ import (
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -66,9 +72,217 @@ func currentShell(sk string) string {
 	return ""
 }
 
+// ---- Kiracı ~/.ssh ağacında symlink-güvenli işlemler ----
+//
+// /home/<sk> kiracıya ait (0710) ve ~/.ssh'i kiracı yönetir: FTP/SSH/PHP ile
+// `.ssh` ya da `.ssh/authorized_keys` yerine /root/.ssh/… gösteren bir
+// sembolik bağ ya da sabit bağ koyabilir. Panel root olarak sözcüksel yolla
+// (MkdirAll + WriteFile + `chown -R` + `restorecon -R`) çalıştığında yazım bu
+// bağın hedefine gidiyordu: yönetici kiracının anahtarını kaydettiğinde
+// /root/.ssh/authorized_keys ezilir (izin root:0600 korunur, StrictModes geçer)
+// → kiracı root olarak SSH ile girer.
+//
+// ÇÖZÜM (toplu/devir_symlink.go homeAltiAc ve files/safeio.go writeBeneath ile
+// aynı teknik): ev dizini O_NOFOLLOW ile pinlenir; `.ssh` Mkdirat + Openat
+// (O_DIRECTORY|O_NOFOLLOW) ile ev fd'sine göre açılır; authorized_keys pinli
+// dizinde geçici dosyaya (O_EXCL) yazılıp Renameat ile yerine konur — rename
+// hedefteki dizin girdisini değiştirir, bir symlink ya da sabit bağın gösterdiği
+// inode'a ASLA yazmaz (denetim ile rename arasındaki yarışta bile). Sahiplik fd
+// üzerinden Fchown ile verilir (`chown -R` yok), etiket yalnız pinli fd'nin
+// kernel'in çözdüğü yolu ev altındaysa ve özyinelemesiz verilir.
+
+// Test dikişleri — yalnız _test.go değiştirir; üretimde gerçek değerler.
+var (
+	// evKoku: kiracı ev dizinlerinin kökü (/home/<sk>).
+	evKoku = "/home"
+	// kimlikCoz: sk → uid/gid.
+	kimlikCoz = kimlikCozGercek
+	// restoreconCalistir: TEK bir yolu özyinelemesiz yeniden etiketler.
+	restoreconCalistir = func(yol string) { _ = exec.Command("restorecon", yol).Run() }
+	// geciciAd: authorized_keys'in yazıldığı geçici dosyanın adı (tahmin edilemez).
+	geciciAd = func() string {
+		b := make([]byte, 8)
+		_, _ = rand.Read(b)
+		return ".authorized_keys.gosp-" + hex.EncodeToString(b)
+	}
+)
+
+// errGuvensizYol: ev dizini, ~/.ssh ya da authorized_keys sembolik bağ, sabit bağ
+// ya da beklenmeyen türde — hedefe dokunulmadan reddedildi.
+var errGuvensizYol = errors.New("güvenli olmayan yol: ev dizini, ~/.ssh ya da authorized_keys sembolik/sabit bağ ya da beklenmeyen türde")
+
+func kimlikCozGercek(sk string) (uid, gid int, err error) {
+	u, err := user.Lookup(sk)
+	if err != nil {
+		return -1, -1, err
+	}
+	if uid, err = strconv.Atoi(u.Uid); err != nil {
+		return -1, -1, err
+	}
+	if gid, err = strconv.Atoi(u.Gid); err != nil {
+		return -1, -1, err
+	}
+	return uid, gid, nil
+}
+
+// guvensizMi: O_NOFOLLOW'un symlink'e (ELOOP) ya da dizin beklenirken başka türe
+// (ENOTDIR) çarpmasını errGuvensizYol'a çevirir.
+func guvensizMi(err error) error {
+	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+		return fmt.Errorf("%w (%v)", errGuvensizYol, err)
+	}
+	return err
+}
+
+// evAc: /home/<sk>'yı symlink izlemeden dizin olarak açar (fd'yi çağıran kapatır).
+func evAc(sk string) (int, error) {
+	if sk == "" || sk == "." || sk == ".." || strings.ContainsRune(sk, '/') {
+		return -1, errGuvensizYol
+	}
+	fd, err := unix.Open(filepath.Join(evKoku, sk), unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, guvensizMi(err)
+	}
+	return fd, nil
+}
+
+// sshDiziniAc: ~/.ssh'yi yoksa 0700 oluşturur, ev fd'sine göre symlink izlemeden
+// açar ve sahipliğini fd üzerinden kiracıya verir (fd'yi çağıran kapatır).
+func sshDiziniAc(evFd, uid, gid int) (int, error) {
+	if err := unix.Mkdirat(evFd, ".ssh", 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+		return -1, err
+	}
+	fd, err := unix.Openat(evFd, ".ssh", unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, guvensizMi(err)
+	}
+	if err := unix.Fchown(fd, uid, gid); err != nil {
+		unix.Close(fd)
+		return -1, err
+	}
+	return fd, nil
+}
+
+func fdYolu(fd int) (string, error) {
+	return os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+}
+
+// restoreconFd: pinli fd'nin kernel'in çözdüğü gerçek yolu hâlâ kiracının evi
+// altındaysa o TEK yolu özyinelemesiz yeniden etiketler (files/safeio.go
+// restoreconFd ile aynı kemer). Kiracı dizini ev dışına taşıdıysa etiketleme yok.
+func restoreconFd(evFd, fd int) {
+	ev, err := fdYolu(evFd)
+	if err != nil {
+		return
+	}
+	yol, err := fdYolu(fd)
+	if err != nil || !strings.HasPrefix(yol, ev+"/") {
+		return
+	}
+	restoreconCalistir(yol)
+}
+
+// sshDiziniHazirla: Ayarla(aktif=true) için ~/.ssh iskeleti (symlink-güvenli).
+func sshDiziniHazirla(sk string) error {
+	uid, gid, err := kimlikCoz(sk)
+	if err != nil {
+		return fmt.Errorf("kullanıcı kimliği: %w", err)
+	}
+	evFd, err := evAc(sk)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(evFd)
+	sshFd, err := sshDiziniAc(evFd, uid, gid)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(sshFd)
+	restoreconFd(evFd, sshFd)
+	return nil
+}
+
+// authorizedKeysYaz: ~/.ssh/authorized_keys'i govde ile symlink/sabit bağ
+// güvenli biçimde değiştirir; sahiplik kiracı, izin 0600.
+func authorizedKeysYaz(sk string, govde []byte) error {
+	uid, gid, err := kimlikCoz(sk)
+	if err != nil {
+		return fmt.Errorf("kullanıcı kimliği: %w", err)
+	}
+	evFd, err := evAc(sk)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(evFd)
+	sshFd, err := sshDiziniAc(evFd, uid, gid)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(sshFd)
+
+	// Var olan authorized_keys yalnız tek bağlantılı normal dosyaysa kabul edilir.
+	// Sembolik bağ, sabit bağ (Nlink>1), dizin, FIFO → saldırı işareti: reddet.
+	var st unix.Stat_t
+	if err := unix.Fstatat(sshFd, "authorized_keys", &st, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 {
+			return errGuvensizYol
+		}
+	} else if !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+
+	tmp := geciciAd()
+	// O_EXCL: ad önceden varsa (kiracının koyduğu symlink dahil) izlemeden EEXIST.
+	tfd, err := unix.Openat(sshFd, tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, 0o600)
+	if err != nil {
+		return err
+	}
+	tf := os.NewFile(uintptr(tfd), tmp)
+	defer tf.Close()
+	yazErr := func() error {
+		if _, e := tf.Write(govde); e != nil {
+			return e
+		}
+		if e := unix.Fchown(tfd, uid, gid); e != nil {
+			return e
+		}
+		return tf.Sync()
+	}()
+	if yazErr != nil {
+		_ = unix.Unlinkat(sshFd, tmp, 0)
+		return yazErr
+	}
+	if err := unix.Renameat(sshFd, tmp, sshFd, "authorized_keys"); err != nil {
+		_ = unix.Unlinkat(sshFd, tmp, 0)
+		return err
+	}
+	restoreconFd(evFd, sshFd)
+	restoreconFd(evFd, tfd) // rename sonrası fd'nin yolu .ssh/authorized_keys
+	return nil
+}
+
+// anahtarVar: ~/.ssh/authorized_keys normal ve boş olmayan bir dosya mı?
+// Yol boyunca HİÇBİR symlink izlenmez: eskiden root olarak os.Stat symlink'i
+// izleyip ev dışındaki bir dosyanın varlığını (GET MusteriScope) sızdırıyordu.
 func anahtarVar(sk string) bool {
-	st, err := os.Stat(filepath.Join("/home", sk, ".ssh", "authorized_keys"))
-	return err == nil && st.Size() > 0
+	evFd, err := evAc(sk)
+	if err != nil {
+		return false
+	}
+	defer unix.Close(evFd)
+	fd, err := unix.Openat2(evFd, ".ssh/authorized_keys", &unix.OpenHow{
+		Flags:   unix.O_PATH | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+	})
+	if err != nil {
+		return false
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return false
+	}
+	return st.Mode&unix.S_IFMT == unix.S_IFREG && st.Size > 0
 }
 
 func (h *Handlers) yukle(r *http.Request) (id int64, sk, alanAdi string, demo bool, ok bool) {
@@ -134,11 +348,11 @@ func (h *Handlers) Ayarla(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Aktif {
-		// ~/.ssh iskeleti (anahtar yüklemeye hazır)
-		dir := filepath.Join("/home", sk, ".ssh")
-		_ = os.MkdirAll(dir, 0700)
-		_ = exec.Command("chown", "-R", sk+":"+sk, dir).Run()
-		_ = exec.Command("restorecon", "-R", dir).Run()
+		// ~/.ssh iskeleti (anahtar yüklemeye hazır) — symlink-güvenli: eski
+		// MkdirAll + `chown -R` + `restorecon -R` kiracının bağlarını izliyordu.
+		if err := sshDiziniHazirla(sk); err != nil {
+			log.Printf("SSH: %s için ~/.ssh hazırlanamadı: %v", sk, err)
+		}
 		// SSH parolasını FTP parolasıyla eşitle (parola = FTP)
 		_ = hesaplar.SyncSSHPassword(h.DB, sk)
 		// Chroot jail kur + gosp-ssh grubuna ekle (kendi home'una hapset)
@@ -197,22 +411,19 @@ func (h *Handlers) AnahtarKaydet(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	dir := filepath.Join("/home", sk, ".ssh")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, ".ssh dizini: "+err.Error())
-		return
-	}
-	ak := filepath.Join(dir, "authorized_keys")
 	body := ""
 	if anahtar != "" {
 		body = anahtar + "\n"
 	}
-	if err := os.WriteFile(ak, []byte(body), 0600); err != nil {
+	if err := authorizedKeysYaz(sk, []byte(body)); err != nil {
+		if errors.Is(err, errGuvensizYol) {
+			log.Printf("🔴 SSH anahtarı YAZILMADI (%s): %v — olası symlink/sabit bağ saldırısı", sk, err)
+			httpx.WriteError(w, http.StatusConflict, "authorized_keys yazılmadı: "+err.Error()+". Hesaptaki bağ kaldırılmalı.")
+			return
+		}
 		httpx.WriteError(w, http.StatusInternalServerError, "authorized_keys yazılamadı: "+err.Error())
 		return
 	}
-	_ = exec.Command("chown", "-R", sk+":"+sk, dir).Run()
-	_ = exec.Command("restorecon", "-R", dir).Run()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "anahtar_var": anahtar != ""})
 }
 
