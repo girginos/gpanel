@@ -11,6 +11,8 @@ package domains
 //  2. Toplu durum (POST /domains/toplu/durum, AdminVeyaReseller): AskiUygula
 //     hatası (vhost render → `nginx -t`) bayinin yanıtına da denetim kaydına da
 //     girmez — yalnız sayaç döner, ayrıntı günlüğe.
+//  3. Posta SSL'i (kiracının KENDİ alanı) sunucu GENELİ varsayılan (SNI'sız)
+//     posta sertifikasına dokunmaz — bkz. TestPostaSSL_KiraciYolu_*.
 //
 // Dış etkili adımlar (sslSelfSigned, sslLetsEncrypt, posta/webmail/DKIM
 // dikişleri, vhostYenidenCiz) sahte — ana makineye dokunulmaz. DB sahtedb.
@@ -21,8 +23,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,11 +65,11 @@ func si_temizle(t *testing.T, id int64) {
 // (varsayılan: hepsi başarılı; sertifika yolları var olmayan dosyalar).
 func si_dikisler(t *testing.T) {
 	t.Helper()
-	e1, e2, e3, e4, e5, e6, e7, e8 := sslSelfSigned, sslLetsEncrypt, mailSertAl, mailSertGonder,
-		mailVarsayilan, webmailVhostYaz, mailDKIMAl, mailDKIMYayinla
+	e1, e2, e3, e4, e6, e7, e8 := sslSelfSigned, sslLetsEncrypt, mailSertAl, mailSertGonder,
+		webmailVhostYaz, mailDKIMAl, mailDKIMYayinla
 	t.Cleanup(func() {
 		sslSelfSigned, sslLetsEncrypt, mailSertAl, mailSertGonder = e1, e2, e3, e4
-		mailVarsayilan, webmailVhostYaz, mailDKIMAl, mailDKIMYayinla = e5, e6, e7, e8
+		webmailVhostYaz, mailDKIMAl, mailDKIMYayinla = e6, e7, e8
 	})
 	yok := t.TempDir() + "/yok"
 	sslSelfSigned = func(string, string, string, string) (string, string, error) { return yok + ".crt", yok + ".key", nil }
@@ -72,7 +78,6 @@ func si_dikisler(t *testing.T) {
 		return yok + "-mail.crt", yok + "-mail.key", []string{"mail." + alan}, nil, nil
 	}
 	mailSertGonder = func(string, string, string) error { return nil }
-	mailVarsayilan = func(string, string) (bool, error) { return false, nil }
 	webmailVhostYaz = func(string, string, string) error { return nil }
 	mailDKIMAl = func(string) (string, error) { return "v=DKIM1; k=rsa; p=AAAA", nil }
 	mailDKIMYayinla = func(context.Context, *sql.DB, int64, string) error { return nil }
@@ -160,7 +165,7 @@ func TestSSLIlerleme_SertifikaHatasi_OkuyanRolunaGoreSuzulur(t *testing.T) {
 }
 
 // Posta SSL adımlarının UYARILARI (iş devam eder): ham ayrıntı (webmail vhost'u
-// → `nginx -t`, posta eklentisi, varsayılan posta sertifikası, DKIM/DNS) yalnız
+// → `nginx -t`, posta eklentisi, DKIM/DNS) yalnız
 // yöneticiye; bayi/müşteri öneki + kendi alt alanlarını görür.
 func TestSSLIlerleme_PostaUyarilari_HamYalnizYoneticiye(t *testing.T) {
 	tok := sh_tokenlar(t)
@@ -195,13 +200,13 @@ func TestSSLIlerleme_PostaUyarilari_HamYalnizYoneticiye(t *testing.T) {
 			},
 		},
 		{
-			ad: "varsayilan-dkimyayinla",
+			// (Eskiden bu durum "varsayılan (SNI-siz) güncellenemedi" uyarısını da
+			// sınardı; kiracı akışı artık varsayılana hiç dokunmaz.)
+			ad: "dkimyayinla",
 			kur: func() {
-				mailVarsayilan = func(string, string) (bool, error) { return false, sh_ham }
 				mailDKIMYayinla = func(context.Context, *sql.DB, int64, string) error { return sh_ham }
 			},
 			admin: map[string]string{
-				"mail-kur": "posta SNI sertifikası kuruldu; varsayılan (SNI-siz) güncellenemedi: " + ham,
 				"dkim-dns": "DKIM DNS'e yazılamadı: " + ham,
 			},
 		},
@@ -292,5 +297,139 @@ func TestTopluDurum_AskiHatasi_YanitaVeDenetimeHamGirmez(t *testing.T) {
 				t.Errorf("%s: denetim/DB kaydında yabancı iz %q var", rol, iz)
 			}
 		}
+	}
+}
+
+// 🔴 GÜVENLİK REGRESYONU (kiracı → sunucu geneli durum). domains paketi
+// müşteri/bayi kapsamlı uçları (MusteriScope arkasındaki /domains/{id}/ssl/…)
+// barındırır; sunucunun VARSAYILAN (SNI'sız) posta sertifikasını
+// (/etc/pki/mail/mail.crt+key — dovecot/postfix ve paylaşımlı webmail 443
+// vhost'u, yani TÜM kiracılar) yazan hiçbir işleve başvuramaz. Eskiden
+// sslBaslat'ın mail-kur adımı provisioner.MailVarsayilanKur'u başlatanın
+// rolünü bilmeden çağırıyordu: varsayılan self-signed/süresi dolmuşsa kendi
+// alanına LE posta SSL'i isteyen İLK kiracının mail.<alan> sertifikası
+// sunucunun kimliği oluyor ve kalıcılaşıyordu. Varsayılanın tek kaynağı panel
+// host sertifikasıdır (panelhost SSL akışı — AdminOnly — ve nöbetçi).
+//
+// Denetim yapısaldır (AST): paketin üretim dosyalarında provisioner'ın
+// MailVarsayilan* işlevlerine (içe aktarma takma adı ne olursa olsun) ya da
+// "/etc/pki/mail" yoluna tek bir başvuru bile olamaz.
+func TestPostaSSL_KiraciYolu_SunucuVarsayilaninaBasvurmaz(t *testing.T) {
+	const provYol = `"girginospanel/internal/provisioner"`
+	girdiler, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	taranan := 0
+	for _, g := range girdiler {
+		ad := g.Name()
+		if g.IsDir() || !strings.HasSuffix(ad, ".go") || strings.HasSuffix(ad, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, ad, nil, 0)
+		if err != nil {
+			t.Fatalf("%s ayrıştırılamadı: %v", ad, err)
+		}
+		taranan++
+		yerel := map[string]bool{}
+		for _, im := range f.Imports {
+			if im.Path.Value != provYol {
+				continue
+			}
+			if im.Name != nil {
+				yerel[im.Name.Name] = true
+			} else {
+				yerel["provisioner"] = true
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.SelectorExpr:
+				if id, ok := x.X.(*ast.Ident); ok && yerel[id.Name] && strings.HasPrefix(x.Sel.Name, "MailVarsayilan") {
+					t.Errorf("%s: %s.%s — kiracı kapsamlı SSL akışı sunucu geneli varsayılan posta sertifikasına dokunamaz",
+						fset.Position(x.Pos()), id.Name, x.Sel.Name)
+				}
+			case *ast.BasicLit:
+				if x.Kind == token.STRING && strings.Contains(x.Value, "/etc/pki/mail") {
+					t.Errorf("%s: %s — kiracı kapsamlı paket varsayılan posta sertifikası dizinine başvuramaz",
+						fset.Position(x.Pos()), x.Value)
+				}
+			}
+			return true
+		})
+	}
+	if taranan < 5 {
+		t.Fatalf("domains üretim dosyası bulunamadı (taranan=%d) — test boş koşuyor", taranan)
+	}
+}
+
+// Meşru davranış korunur: müşteri, bayi ve yönetici kendi alanına LE + posta
+// SSL'i kurduğunda posta sertifikası o alanın SNI'sı için posta eklentisine
+// gönderilir (mail-kur "tamam"), webmail vhost'u yazılır, iş "tamam" biter.
+// Adım metinleri sunucu geneli varsayılan sertifikadan söz etmez (eski "SNI +
+// varsayılan" iletisi kiracı akışında artık OLUŞAMAZ).
+func TestPostaSSL_KiraciYolu_YalnizKendiSNIKurulur(t *testing.T) {
+	// SSLIssue(letsencrypt) yerel çözümleyici önbelleğini temizler (rndc,
+	// unbound-control, resolvectl): PATH boş dizin → canlı makineye etki yok.
+	t.Setenv("PATH", t.TempDir())
+	tok := sh_tokenlar(t)
+	for i, rol := range []string{"müşteri", "bayi", "admin"} {
+		t.Run(rol, func(t *testing.T) {
+			id := int64(960 + i)
+			ids := strconv.FormatInt(id, 10)
+			si_dikisler(t)
+			si_temizle(t, id)
+			var mc, mk string
+			mailSertAl = func(alan, _ string, _ []string) (string, string, []string, []string, error) {
+				mc, mk = "/var/lib/girginospanel/mail-certs/"+alan+"/fullchain.pem", "/var/lib/girginospanel/mail-certs/"+alan+"/key.pem"
+				return mc, mk, []string{"mail." + alan}, nil, nil
+			}
+			var gonderilen, webmail []string
+			mailSertGonder = func(alan, c, k string) error {
+				gonderilen = append(gonderilen, alan+"|"+c+"|"+k)
+				return nil
+			}
+			webmailVhostYaz = func(alan, c, k string) error {
+				webmail = append(webmail, alan+"|"+c+"|"+k)
+				return nil
+			}
+			_, db := si_db()
+
+			r := chi.NewRouter()
+			r.With(middleware.RequireAuth(sh_sir)).Post("/domains/{id}/ssl/issue", (&Handlers{DB: db}).SSLIssue)
+			req := httptest.NewRequest(http.MethodPost, "/domains/"+ids+"/ssl/issue", strings.NewReader(`{"tip":"letsencrypt"}`))
+			req.Header.Set("Authorization", "Bearer "+tok[rol])
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("issue: 202 beklenirdi: %d %s", rec.Code, rec.Body.String())
+			}
+			si_isBekle(t, id)
+
+			want := "bayialan.test|" + mc + "|" + mk
+			if len(gonderilen) != 1 || gonderilen[0] != want {
+				t.Fatalf("posta sertifikası alanın SNI'sı için eklentiye BİR kez gönderilmeli: %q (beklenen %q)", gonderilen, want)
+			}
+			if len(webmail) != 1 || webmail[0] != want {
+				t.Fatalf("webmail vhost'u alanın sertifikasıyla yazılmalı: %q", webmail)
+			}
+			govde, g := si_ilerleme(t, db, ids, tok["admin"])
+			if g.Durum != "tamam" {
+				t.Fatalf("iş tamam bitmeli: %s", govde)
+			}
+			var kur *SSLAdim
+			for j := range g.Adimlar {
+				if g.Adimlar[j].Ad == "mail-kur" {
+					kur = &g.Adimlar[j]
+				}
+			}
+			if kur == nil || kur.Durum != "tamam" {
+				t.Fatalf("mail-kur adımı tamam olmalı: %s", govde)
+			}
+			if strings.Contains(strings.ToLower(govde), "varsayılan") {
+				t.Errorf("kiracı akışının adımları sunucu geneli varsayılandan söz etmemeli: %s", govde)
+			}
+		})
 	}
 }

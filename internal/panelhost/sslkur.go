@@ -30,6 +30,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"girginospanel/internal/provisioner"
 )
 
 func SslKurAsync(hostname string) *Is {
@@ -259,6 +261,20 @@ func sslKurKos(is *Is, hostname string) {
 			}
 		}
 	}
+	// 8) Posta sunucusunun varsayılan (SNI'sız) sertifikası = panel host
+	// sertifikası (TEK meşru kaynak; kiracı SSL akışı ona dokunmaz — bkz.
+	// provisioner/mail_varsayilan.go). Kurulumda konan kopya tek seferlikti ve
+	// yenilenmiyordu; burada (yalnız yönetici — AdminOnly uç) eşitlenir:
+	// süresi dolan eski kopya ya da eski sürümün oraya yazdığı bir kiracı
+	// sertifikası panel sertifikasıyla değiştirilir. Acme yenilemeleri için
+	// nöbetçi: provisioner.MailVarsayilanNobetci. Posta kurulu değilse no-op;
+	// ölümcül değil.
+	if degisti, e := provisioner.MailVarsayilanPaneldenEsitle(); e != nil {
+		is.AdimEkle("posta sunucusunun varsayılan (SNI'sız) sertifikası güncellenemedi: "+e.Error(), false)
+	} else if degisti {
+		is.AdimEkle("posta sunucusunun varsayılan (SNI'sız) sertifikası panel sertifikasına geçirildi", true)
+	}
+
 	// Başarı — rate-limit sayacını sıfırla
 	RateLimitBasari(hostname)
 	is.Bitir("")
