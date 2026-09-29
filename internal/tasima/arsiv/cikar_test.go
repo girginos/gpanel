@@ -261,9 +261,14 @@ func TestCikar_Gercek(t *testing.T) {
 	}
 }
 
-// TestCikar_KiraciDACKatmani: çıkarıcı KİRACI kimliğinde koşar. Kiracı hedef kökte
-// komşuyu gösteren bir bağ kurmuş olsa bile tar o dizine yazamaz (EACCES); kurban
-// ağacı bayt bayt aynı kalır.
+// TestCikar_KiraciDACKatmani: çıkarıcı KİRACI kimliğinde koşar. İki durum:
+//   - kiracı hedef kökte komşuyu gösteren bir bağ kurmuş: GNU tar 1.35 -C dışına
+//     çözülen yolu kendisi de reddeder (openat2 RESOLVE_BENEATH, EXDEV), kiracı
+//     kimliği ikinci katmandır;
+//   - hedef kökün İÇİNDE kök sahipli bir alan var (göç kalıntısı): tar'ın beneath
+//     denetimi burayı korumaz, yalnız kiracı kimliği (EACCES) korur.
+//
+// Her iki ağaç da bayt bayt aynı kalır.
 func TestCikar_KiraciDACKatmani(t *testing.T) {
 	o := yeniOrtam(t)
 	kurbanDir := kurban(t, o.base)
@@ -281,9 +286,19 @@ func TestCikar_KiraciDACKatmani(t *testing.T) {
 	if err := os.Lchown(filepath.Join(kok, "wp"), o.uid, o.gid); err != nil {
 		t.Fatal(err)
 	}
+	kilitli := filepath.Join(kok, "kilitli")
+	if err := os.Mkdir(kilitli, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kilitli, "gizli.txt"), []byte(gizliKok), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	onceKilitli := agacOzeti(t, kilitli)
 	a, err := acT(t, gzUret(t, tarUret(t,
 		uyeT{ad: secimOnek + "/wp/gizli.txt", veri: "EZILDI"},
 		uyeT{ad: secimOnek + "/wp/kabuk.php", veri: "<?php system($_GET[1]);"},
+		uyeT{ad: secimOnek + "/kilitli/gizli.txt", veri: "EZILDI"},
+		uyeT{ad: secimOnek + "/kilitli/kabuk.php", veri: "<?php system($_GET[1]);"},
 	)), Sinirlar{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -293,6 +308,9 @@ func TestCikar_KiraciDACKatmani(t *testing.T) {
 	}
 	if sonra := agacOzeti(t, kurbanDir); !reflect.DeepEqual(once, sonra) {
 		t.Fatalf("kurban ağacı değişti:\nönce  %q\nsonra %q", once, sonra)
+	}
+	if sonra := agacOzeti(t, kilitli); !reflect.DeepEqual(onceKilitli, sonra) {
+		t.Fatalf("kök sahipli alan değişti:\nönce  %q\nsonra %q", onceKilitli, sonra)
 	}
 }
 

@@ -106,7 +106,8 @@ func TestAc_SymlinkVeUstDizinReddi(t *testing.T) {
 	if err := os.Symlink(dis, filepath.Join(home, "bag")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(home, "gercek"), filepath.Join(home, "icbag")); err != nil {
+	// Göreli ve ev içinde kalan bağ: RESOLVE_BENEATH tek başına bunu izlerdi.
+	if err := os.Symlink("gercek", filepath.Join(home, "icbag")); err != nil {
 		t.Fatal(err)
 	}
 
