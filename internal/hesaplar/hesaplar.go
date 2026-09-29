@@ -169,7 +169,9 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 		if err := rows.Scan(&baska); err != nil {
 			return true, err
 		}
-		if kokunKendisiMi(ad, baska) || adKokAgirligi(ad, baska) > kendi {
+		// Komsunun kokunun kendisi (ad == kok) burada agirlikla yakalanir: kendi
+		// kokumuz ada esit degilse (yukarida) ancak adin daha kisa bir oneki olabilir.
+		if adKokAgirligi(ad, baska) > kendi {
 			return true, nil
 		}
 	}
