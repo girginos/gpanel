@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"girginospanel/internal/gizli"
-	"os/exec"
 	"strings"
 )
 
@@ -18,6 +17,13 @@ func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
 	// (ör. admin_wp_vvzhh) meşru olduğu halde reddediyordu — sahiplik zaten çağıran
 	// handler'da (YonetimSahibi + db_accounts lookup) doğrulanır. Burada dbUser'ın
 	// panel-kaydı olduğunu teyit et: root/sistem kullanıcısına ALTER'ı yine engeller.
+	// 🔴 "Panel-kayıtlı" TEK BAŞINA YETMEZ: db_accounts.db_user'a 'root'/'panel'
+	// gibi bir ad yazılabiliyordu (boş-kullanıcılı DB'ye serbest ad, yedekten
+	// kimlik kurtarmada kiracı config'inden okunan DB_USER). Sunucu geneli hesaba
+	// ALTER USER, kayıt ne derse desin, GÖNDERİLMEZ.
+	if SistemDBHesabiMi(dbUser) {
+		return ErrSistemDBHesabi
+	}
 	var kayitli int
 	if e := panelDB.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_user=?`, dbUser).Scan(&kayitli); e != nil || kayitli == 0 {
 		return fmt.Errorf("güvenlik: panel-kayıtlı olmayan DB kullanıcısı reddedildi")
@@ -33,7 +39,7 @@ func MySQLChangePassword(panelDB *sql.DB, dbUser, yeniPw string) error {
 		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(yeniPw)),
 		"FLUSH PRIVILEGES;",
 	}
-	out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput()
+	out, err := mysqlKomut("-e", strings.Join(stmts, " ")).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("mysql alter: %s: %w", strings.TrimSpace(string(out)), err)
 	}

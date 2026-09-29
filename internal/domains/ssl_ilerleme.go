@@ -34,12 +34,20 @@ import (
 // `nginx -t`; posta sunucusu, webmail vhost'u, DKIM). Testler sahteyle
 // değiştirir: ilerleme kaydına ne yazıldığı ve kime ne gösterildiği ana
 // makineye (acme.sh, nginx, posta eklentisi, named) dokunmadan sınanır.
+//
+// 🔴 Sunucunun VARSAYILAN (SNI'sız) posta sertifikası (provisioner.MailVarsayilan*,
+// /etc/pki/mail/mail.crt+key) bu listede YOK ve bu paketten ÇAĞRILMAZ: o,
+// SUNUCU GENELİ bir kimliktir (dovecot/postfix + paylaşımlı webmail vhost'u —
+// bütün kiracılar). Bu paketteki SSL uçları müşteri/bayi kapsamlıdır
+// (MusteriScope); kiracı yalnız KENDİ alanının SNI sertifikasını kurar.
+// Varsayılanın tek kaynağı panel host sertifikasıdır (panelhost SSL akışı,
+// AdminOnly + provisioner.MailVarsayilanNobetci). Yapısal regresyon testi:
+// TestPostaSSL_KiraciYolu_SunucuVarsayilaninaBasvurmaz.
 var (
 	sslSelfSigned   = provisioner.EnableSelfSigned
 	sslLetsEncrypt  = provisioner.EnableLetsEncrypt
 	mailSertAl      = provisioner.MailSertifikaAl
 	mailSertGonder  = provisioner.MailSertifikaGonder
-	mailVarsayilan  = provisioner.MailVarsayilanKur
 	webmailVhostYaz = provisioner.WebmailVhostDomainYaz
 	mailDKIMAl      = provisioner.MailDKIMTXTAl
 	mailDKIMYayinla = dns.MailDKIMYayinla
@@ -103,7 +111,7 @@ type SSLGoruntu struct {
 // 🔴 Adım mesajları ve iş hatası HAM araç çıktısı taşır: vhost render → SUNUCU
 // GENELİ `nginx -t` (komşu kiracıların /etc/pki/girginospanel/<alan>/…
 // sertifika ve dom_<sk>.conf yolları), webmail vhost'u, posta eklentisi,
-// varsayılan posta sertifikası, named. Kayıt, işi BAŞLATANDAN bağımsız olarak
+// named. Kayıt, işi BAŞLATANDAN bağımsız olarak
 // alan adına erişen herkesçe okunur (yönetici başlatır → bayi/müşteri izler;
 // bayi başlatır → yönetici izler). Bu yüzden süzme YAZARKEN başlatanın rolüne
 // göre değil, OKURKEN okuyanın rolüne göre yapılır: yazarken hem ham hem genel
@@ -362,13 +370,11 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 						if e := mailSertGonder(alanAdi, mc, mk); e != nil {
 							return sslUyariHam("sertifika alındı ama posta sunucusuna gönderilemedi", e, "")
 						}
-						// Varsayılan (SNI-siz) sertifikayı da geçerli yap: Outlook gibi
-						// SNI göndermeyen istemciler self-signed görüp şifre soruyordu.
-						if degisti, e := mailVarsayilan(mc, mk); e != nil {
-							return sslUyariHam("posta SNI sertifikası kuruldu; varsayılan (SNI-siz) güncellenemedi", e, "")
-						} else if degisti {
-							return "posta sunucusu sertifikaya geçirildi (SNI + varsayılan — SNI göndermeyen istemciler de güvenli)", false, nil
-						}
+						// 🔴 Yalnız bu alanın SNI sertifikası. Varsayılan (SNI'sız)
+						// sertifika SUNUCU GENELİDİR; kiracının sertifikası oraya
+						// YAZILMAZ (eskiden ilk LE posta SSL'i isteyen kiracı sunucunun
+						// kimliğini ele geçiriyordu). Varsayılan panel host
+						// sertifikasından beslenir (bkz. dosya başındaki not).
 						return "posta sunucusu (IMAP/POP/SMTP) sertifikaya geçirildi", false, nil
 					})
 					_ = k.adim("webmail", "Webmail ve otomatik kurulum (autodiscover) yapılandırılıyor", func() (string, bool, error) {

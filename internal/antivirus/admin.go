@@ -7,6 +7,7 @@ package antivirus
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -95,7 +96,8 @@ func (h *Handlers) AdminKarantinaListe(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []kar{}
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT b.id, COALESCE(d.alan_adi,''), b.domain_id, b.orijinal_yol, b.karantina_yol,
+		`SELECT b.id, COALESCE(d.alan_adi,''), b.domain_id, COALESCE(d.sistem_kullanici,''),
+		        b.orijinal_yol, b.karantina_yol,
 		        b.imza, b.seviye, b.puan, b.durum,
 		        COALESCE(DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i:%s'),'')
 		   FROM av_bulgular b LEFT JOIN domains d ON d.id=b.domain_id
@@ -106,16 +108,27 @@ func (h *Handlers) AdminKarantinaListe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	uidler := map[string]int{} // sk → uid (-1: çözümlenemedi)
 	for rows.Next() {
 		var k kar
-		var karYol string
-		if rows.Scan(&k.ID, &k.Alan, &k.DomainID, &k.OrijinalYol, &karYol,
+		var sk, karYol string
+		if rows.Scan(&k.ID, &k.Alan, &k.DomainID, &sk, &k.OrijinalYol, &karYol,
 			&k.Imza, &k.Seviye, &k.Puan, &k.Durum, &k.Tarih) != nil {
 			continue
 		}
-		if karYol != "" {
-			if _, e := os.Stat(karYol); e == nil {
-				k.Mevcut = true
+		// os.Stat YOK: yol kiracı evindedir, kiracı symlink koyabilir. Mevcut
+		// yalnız kiracının evinde, kiracıya ait düzenli dosya için true.
+		if karYol != "" && strings.HasPrefix(sk, "c_") {
+			uid, bilinen := uidler[sk]
+			if !bilinen {
+				uid = -1
+				if u, _, ok := kiraciUID(sk); ok {
+					uid = u
+				}
+				uidler[sk] = uid
+			}
+			if uid >= 0 {
+				k.Mevcut, _ = karantinaBilgi("/home/"+sk, karYol, uid)
 			}
 		}
 		out = append(out, k)
@@ -161,10 +174,7 @@ func (h *Handlers) AdminKarantinaGeriYukle(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, http.StatusBadRequest, "karantina/orijinal yol kayıtlı değil")
 		return
 	}
-	if _, err := os.Lstat(kar); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "karantina dosyası bulunamadı")
-		return
-	}
+	// Varlık denetimi guvenliGeriTasi içinde pinlenmiş dir-fd'ye göre (ENOENT → 400).
 	uid, gid, uok := kiraciUID(sk)
 	if !uok {
 		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
@@ -175,8 +185,10 @@ func (h *Handlers) AdminKarantinaGeriYukle(w http.ResponseWriter, r *http.Reques
 		switch {
 		case os.IsExist(err):
 			httpx.WriteError(w, http.StatusConflict, "orijinal konumda zaten bir dosya var — elle çözün")
-		case err == errGuvenliYol:
-			httpx.WriteError(w, http.StatusBadRequest, "hedef yol güvenli değil (symlink/ev dışı) — geri yüklenmedi")
+		case errors.Is(err, os.ErrNotExist):
+			httpx.WriteError(w, http.StatusBadRequest, "karantina dosyası bulunamadı")
+		case errors.Is(err, errGuvenliYol):
+			httpx.WriteError(w, http.StatusBadRequest, "yol güvenli değil (symlink/ev dışı/kiracıya ait olmayan dosya) — geri yüklenmedi")
 		default:
 			httpx.WriteError(w, http.StatusInternalServerError, "geri yüklenemedi: "+err.Error())
 		}
@@ -214,7 +226,12 @@ func (h *Handlers) AdminKarantinaIncele(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, http.StatusNotFound, "bulgu bulunamadı")
 		return
 	}
-	f, err := guvenliAc("/home/"+sk, kar)
+	uid, _, uok := kiraciUID(sk)
+	if !uok {
+		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
+		return
+	}
+	f, err := guvenliAc("/home/"+sk, kar, uid)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya açılamadı (silinmiş olabilir)")
 		return

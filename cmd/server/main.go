@@ -290,6 +290,10 @@ func main() {
 	}
 	go func() { _ = ipyonetim.PersistYaz(context.Background(), d) }()
 	go panelhost.TemizleLoop() // async iş kayıtları temizleyici
+	// Posta varsayılan (SNI'sız) sertifikası = panel host sertifikası: acme
+	// yenilemesinden sonra (reloadcmd yalnız nginx) kopyayı eşitler; eski
+	// sürümün varsayılana yazdığı kiracı sertifikasını geri alır.
+	go provisioner.MailVarsayilanNobetci(context.Background())
 	// Website Security Monitor — 6 saatlik arka plan tarama.
 	go websec.Dongusu(context.Background(), d)
 	domainyasakH := &domainyasak.Handler{

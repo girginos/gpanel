@@ -19,6 +19,54 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// MariaDB hesap islemleri (root soket) icin dikisler. Uretimde hesaplar
+// fonksiyonlari; testler sahtesini koyar (canli MariaDB'ye dokunmaz).
+var (
+	dbKullaniciEkle  = hesaplar.MySQLKullaniciEkle
+	dbParolaDegistir = hesaplar.MySQLChangePassword
+)
+
+// adKullanilamaz: "kullanicisi olmayan DB" dalinda ad reddi — TEK genel mesaj.
+// Nedeni (sistem hesabi / baska kiracinin ad alani / baska kayitta / MariaDB'de
+// var) ayirt EDILMEZ: aksi halde bayi baska kiracilar ve sunucu hesaplari
+// hakkinda ad yoklamasi yapabilirdi.
+const adKullanilamaz = "bu kullanıcı adı kullanılamaz (sistem hesabı, başka bir hostinge ait ya da zaten mevcut) — başka bir ad seçin"
+
+// dbKullaniciAdSahibi: DB kullanici adi HANGI hostingin ad alaninda? Panel
+// kiraci DB kullanicilarini `<onek>_…` (onek = sk'nin c_'siz hali; CreateDatabase,
+// Create) ya da `<sk>_…` (tasima) biciminde adlandirir. En UZUN eslesen onek
+// sahibi belirler: c_foo'nun "foo_" alani c_foo_bar'in "foo_bar_" alanini da
+// kapsar, "foo_bar_x" c_foo_bar'indir. Hicbir hostinge ait olmayan ad (wpu_*,
+// tasinmis orijinal adlar) icin 0; ayni uzunlukta iki sahip varsa -1 (belirsiz).
+func dbKullaniciAdSahibi(ctx context.Context, db *sql.DB, ad string) (int64, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, sistem_kullanici FROM domains WHERE sistem_kullanici<>''`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var sahip int64
+	enUzun := 0
+	for rows.Next() {
+		var id int64
+		var sk string
+		if err := rows.Scan(&id, &sk); err != nil {
+			return 0, err
+		}
+		for _, onek := range []string{sk, strings.TrimPrefix(sk, "c_")} {
+			if onek == "" || (ad != onek && !strings.HasPrefix(ad, onek+"_")) {
+				continue
+			}
+			switch {
+			case len(onek) > enUzun:
+				enUzun, sahip = len(onek), id
+			case len(onek) == enUzun && sahip != id:
+				sahip = -1
+			}
+		}
+	}
+	return sahip, rows.Err()
+}
+
 type setDBPwReq struct {
 	Parola string `json:"parola"`
 	// Kullanici: YALNIZ db_user bos oldugunda (kullanicisi olmayan veritabani)
@@ -92,14 +140,44 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı adı")
 			return
 		}
-		// Baska bir DB kaydinin kullanicisiyla CAKISMASIN (yetki sizmasi).
+		// 🔴 DEVRALMA KAPISI. Ad serbest (uygulamanin wp-config/.env'deki
+		// DB_USER'i girilebilsin diye); bu yuzden adin bu hostinge "yeni" ve
+		// "sahipsiz ya da kendi" oldugu AYRICA kanitlanir. Eskiden yalniz desen +
+		// db_accounts cakismasi bakiliyordu; 'root', 'mysql', 'panel', 'pma',
+		// 'pureftpd' gibi panelin kaydetmedigi SUNUCU hesaplari geciyor ve
+		// asagidaki CREATE-OR-ALTER onlarin parolasini bayinin degerine cekiyordu.
+		// (1) Sunucu geneli hesap adi ASLA.
+		if hesaplar.SistemDBHesabiMi(yeni) {
+			httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
+			return
+		}
+		// (2) Baska bir DB kaydinin kullanicisiyla CAKISMASIN (yetki sizmasi).
 		var cakisma int
 		if e := h.DB.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND id<>?`, yeni, dbid).Scan(&cakisma); e != nil || cakisma > 0 {
-			httpx.WriteError(w, http.StatusConflict, "bu kullanıcı adı başka bir veritabanında kullanılıyor")
+			httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
 			return
 		}
-		if err := hesaplar.MySQLKullaniciEkle(dbName, yeni, req.Parola); err != nil {
+		// (3) Baska hostingin AD ALANI kapatilamaz: o kiracinin panelden sonra
+		// acacagi <onek>_ek<id> / <onek>_db / c_<sk>_db kullanicisi CREATE-OR-ALTER
+		// ile bu kayda baglanir, bayi de kendi kaydindan parolayi sifirlayip
+		// kurbanin DB'sine erisirdi.
+		sahip, e := dbKullaniciAdSahibi(r.Context(), h.DB, yeni)
+		if e != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "ad alanı denetlenemedi")
+			return
+		}
+		if sahip != 0 && sahip != domainID {
+			httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
+			return
+		}
+		// (4) MariaDB'de zaten var olan hesap (herhangi host) devralinmaz —
+		// MySQLKullaniciEkle YALNIZ yeni hesap olusturur (ErrDBKullaniciMevcut).
+		if err := dbKullaniciEkle(dbName, yeni, req.Parola); err != nil {
+			if errors.Is(err, hesaplar.ErrDBKullaniciMevcut) || errors.Is(err, hesaplar.ErrSistemDBHesabi) {
+				httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
+				return
+			}
 			httpx.WriteError(w, http.StatusInternalServerError, "kullanıcı oluşturulamadı: "+err.Error())
 			return
 		}
@@ -111,7 +189,11 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		}
 		dbUser = yeni
 		islem = "db.kullanici-olustur"
-	} else if err := hesaplar.MySQLChangePassword(h.DB, dbUser, req.Parola); err != nil {
+	} else if err := dbParolaDegistir(h.DB, dbUser, req.Parola); err != nil {
+		if errors.Is(err, hesaplar.ErrSistemDBHesabi) {
+			httpx.WriteError(w, http.StatusForbidden, "sistem veritabanı hesabının parolası panelden değiştirilemez")
+			return
+		}
 		httpx.WriteError(w, http.StatusInternalServerError, "parola değişimi: "+err.Error())
 		return
 	}

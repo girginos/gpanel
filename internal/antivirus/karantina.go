@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sys/unix"
@@ -38,11 +39,13 @@ type karantinaKayit struct {
 
 // KarantinaListe — GET /domains/{id}/antivirus/karantina/liste
 func (h *Handlers) KarantinaListe(w http.ResponseWriter, r *http.Request) {
-	id, _, _, ok := h.domain(r)
+	id, sk, _, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
+	// Kiracı çözümlenemezse hiçbir kayıt "mevcut" gösterilmez (fail-closed).
+	uid, _, uok := kiraciUID(sk)
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT id, orijinal_yol, karantina_yol, imza, seviye, puan, durum,
 		        DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s')
@@ -61,11 +64,11 @@ func (h *Handlers) KarantinaListe(w http.ResponseWriter, r *http.Request) {
 			&k.Seviye, &k.Puan, &k.Durum, &k.Tarih) != nil {
 			continue
 		}
-		if k.KarantinaYol != "" {
-			if fi, err := os.Stat(k.KarantinaYol); err == nil {
-				k.Mevcut = true
-				k.Boyut = fi.Size()
-			}
+		// 🔴 os.Stat YOK: karantina yolu kiracının evindedir ve kiracı girdiyi
+		// (ya da .karantina'nın kendisini) symlink yapabilir; root'un izleyen
+		// stat'ı ev dışındaki herhangi bir yol için var/boyut kâhini olurdu.
+		if uok && k.KarantinaYol != "" {
+			k.Mevcut, k.Boyut = karantinaBilgi("/home/"+sk, k.KarantinaYol, uid)
 		}
 		out = append(out, k)
 	}
@@ -124,10 +127,8 @@ func (h *Handlers) KarantinaGeriYukle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "karantina/orijinal yol kayıtlı değil — geri yüklenemez")
 		return
 	}
-	if _, err := os.Lstat(kar); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "karantina dosyası bulunamadı (elle silinmiş olabilir)")
-		return
-	}
+	// Varlık denetimi guvenliGeriTasi içinde, pinlenmiş dir-fd'ye göre yapılır
+	// (ENOENT → aşağıda 400). Burada os.Lstat(kar) ara bileşenleri izlerdi.
 	uid, gid, uok := kiraciUID(sk)
 	if !uok {
 		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
@@ -145,8 +146,10 @@ func (h *Handlers) KarantinaGeriYukle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, os.ErrExist):
 			httpx.WriteError(w, http.StatusConflict, "orijinal konumda zaten bir dosya var — elle çözün")
+		case errors.Is(err, os.ErrNotExist):
+			httpx.WriteError(w, http.StatusBadRequest, "karantina dosyası bulunamadı (elle silinmiş olabilir)")
 		case errors.Is(err, errGuvenliYol):
-			httpx.WriteError(w, http.StatusBadRequest, "hedef yol güvenli değil (symlink/ev dışı) — geri yüklenmedi")
+			httpx.WriteError(w, http.StatusBadRequest, "yol güvenli değil (symlink/ev dışı/kiracıya ait olmayan dosya) — geri yüklenmedi")
 		default:
 			httpx.WriteError(w, http.StatusInternalServerError, "geri yüklenemedi: "+err.Error())
 		}
@@ -202,7 +205,12 @@ func (h *Handlers) KarantinaIncele(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "bulgu bu domaine ait değil")
 		return
 	}
-	f, err := guvenliAc("/home/"+sk, kar)
+	uid, _, uok := kiraciUID(sk)
+	if !uok {
+		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
+		return
+	}
+	f, err := guvenliAc("/home/"+sk, kar, uid)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "dosya açılamadı (silinmiş olabilir)")
 		return
@@ -288,8 +296,14 @@ func evAltDirAc(home, hedefDir string, uid, gid int, eksikOlustur bool) (int, er
 					unix.Close(dirFd)
 					return -1, e
 				}
-				_ = unix.Fchownat(dirFd, parca, uid, gid, unix.AT_SYMLINK_NOFOLLOW)
 				next, err = unix.Openat(dirFd, parca, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+				// Sahiplik ADA göre değil AÇILMIŞ fd'ye göre verilir: mkdirat ile
+				// fchownat arasında kiracı adı başka bir nesneyle (ör. hard-link)
+				// değiştirse bile chown yalnız O_DIRECTORY|O_NOFOLLOW ile açılan
+				// dizine uygulanır.
+				if err == nil {
+					_ = unix.Fchown(next, uid, gid)
+				}
 			}
 			if err != nil {
 				unix.Close(dirFd)
@@ -308,16 +322,72 @@ func evAltDirAc(home, hedefDir string, uid, gid int, eksikOlustur bool) (int, er
 	return dirFd, nil
 }
 
+// yarisKancasi — YALNIZ testler için: rename ile izin/sahiplik işlemi arasındaki
+// yarış penceresini (kiracının hedef adı symlink'le değiştirmesi) belirlenimci
+// olarak yeniden üretmeye yarar. Üretimde nil'dir.
+var yarisKancasi func(asama string)
+
+// kiraciDosyaAc — dirFd altındaki ad'ı SYMLINK İZLEMEDEN açar ve yalnız
+// KİRACIYA AİT (st_uid == uid) DÜZENLİ dosyayı kabul eder; aksi errGuvenliYol.
+//
+// 🔴 NEDEN sahiplik: .karantina'nın üst dizini (/home/<sk>) kiracıya aittir;
+// kiracı .karantina'yı yeniden adlandırıp kendi dizinini koyabilir ve içine
+// evindeki root'a ait bir dosyayı (ör. root:root 0640 yapılandırma) taşıyabilir.
+// Panel root olarak böyle bir inode'u okur/chown'lar/chmod'larsa kiracıya ait
+// olmayanı ona verir. Yalnız kiracının kendi inode'u üzerinde işlem yapmak, root
+// işleminin kiracının zaten yapabileceğinden fazlasını yapamamasını sağlar.
+// O_NONBLOCK: ad bir FIFO ise açılış sonsuza dek beklemesin (S_ISREG ile reddedilir).
+func kiraciDosyaAc(dirFd int, ad string, uid int) (int, unix.Stat_t, error) {
+	var st unix.Stat_t
+	fd, err := unix.Openat(dirFd, ad, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		// ELOOP: son bileşen symlink. ENXIO: soket. İkisi de kötü-yol işaretidir.
+		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ENXIO) {
+			return -1, st, errGuvenliYol
+		}
+		return -1, st, err
+	}
+	if err := unix.Fstat(fd, &st); err != nil {
+		unix.Close(fd)
+		return -1, st, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || int(st.Uid) != uid {
+		unix.Close(fd)
+		return -1, st, errGuvenliYol
+	}
+	return fd, st, nil
+}
+
 // guvenliGeriTasi — kar dosyasını orij'e symlink-güvenli taşır. Root ayrıcalığı
 // altında bile kiracı-denetimli yol üzerinden ev DIŞINA yazımı engeller: hem
 // kaynak hem hedef dizin openat(O_NOFOLLOW) ile kiracı evine çapalanır, taşıma
-// ve izin/sahiplik işlemleri pinlenmiş dir-fd'lere göre yapılır (TOCTOU-güvenli).
+// pinlenmiş dir-fd'lere göre yapılır.
+//
+// 🔴 İzin/sahiplik YOLA göre DEĞİL, taşımadan ÖNCE açılıp doğrulanmış dosya
+// fd'sine göre verilir. Eski kod Fchmodat(destFd, destBase, 0644, 0) kullanıyordu:
+// flags=0 düz fchmodat son bileşendeki symlink'i İZLER. Karantina girdisi symlink
+// ise (kiracı .karantina'yı denetler) ya da rename ile chmod arasında kiracı
+// hedef adı symlink'le değiştirirse root, ev dışındaki bir dosyayı 0644 yapıyordu.
 func guvenliGeriTasi(home, kar, orij string, uid, gid int) error {
 	destDir := filepath.Dir(orij)
 	destBase := filepath.Base(orij)
 	karDir := filepath.Dir(kar)
 	karBase := filepath.Base(kar)
 
+	// 1) Kaynağı sabitle: kiracının .karantina'sındaki GERÇEK, kiracıya ait
+	// düzenli dosya (symlink/FIFO/dizin/başkasının dosyası reddedilir).
+	karFd, err := evAltDirAc(home, karDir, uid, gid, false)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(karFd)
+	srcFd, _, err := kiraciDosyaAc(karFd, karBase, uid)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(srcFd)
+
+	// 2) Hedef dizin (eksik ara dizinler kiracı adına oluşturulur).
 	destFd, err := evAltDirAc(home, destDir, uid, gid, true)
 	if err != nil {
 		return err
@@ -330,37 +400,130 @@ func guvenliGeriTasi(home, kar, orij string, uid, gid int) error {
 		return os.ErrExist
 	}
 
-	karFd, err := evAltDirAc(home, karDir, uid, gid, false)
-	if err != nil {
-		return err
-	}
-	defer unix.Close(karFd)
-
+	// 3) Taşı (renameat son bileşeni izlemez).
 	if err := unix.Renameat(karFd, karBase, destFd, destBase); err != nil {
 		return err
 	}
-	// İzin/sahiplik: pinlenmiş hedef dir-fd'ye göre; symlink yeniden devreye
-	// giremez çünkü destBase az önce rename ile konan gerçek dosyadır.
-	_ = unix.Fchmodat(destFd, destBase, 0o644, 0)
-	_ = unix.Fchownat(destFd, destBase, uid, gid, unix.AT_SYMLINK_NOFOLLOW)
+	if yarisKancasi != nil {
+		yarisKancasi("geri-tasi")
+	}
+	// 4) Sahiplik + izin: doğrulanmış inode'un fd'si üzerinden. Hedef adda şu an
+	// ne olduğu (kiracının koyduğu bir symlink dahil) önemsizdir. chown, setuid/
+	// setgid bitlerini temizler; ardından 0644.
+	if err := unix.Fchown(srcFd, uid, gid); err != nil {
+		log.Printf("antivirus guvenliGeriTasi: sahiplik verilemedi (%s): %v", orij, err)
+	}
+	if err := unix.Fchmod(srcFd, 0o644); err != nil {
+		log.Printf("antivirus guvenliGeriTasi: izin verilemedi (%s): %v", orij, err)
+	}
 	return nil
+}
+
+// karantinaDizinAc — <home>/.karantina'yı SYMLINK İZLEMEDEN açar; yoksa root'a
+// ait 0700 olarak oluşturur. .karantina symlink ise (kiracı değiştirmiş) ELOOP/
+// ENOTDIR → errGuvenliYol. Dönen fd'yi çağıran KAPATMALI.
+func karantinaDizinAc(home string) (int, error) {
+	homeFd, err := evAltDirAc(home, home, 0, 0, false)
+	if err != nil {
+		return -1, err
+	}
+	defer unix.Close(homeFd)
+	const ad = ".karantina"
+	fd, err := unix.Openat(homeFd, ad, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) {
+		if e := unix.Mkdirat(homeFd, ad, 0o700); e != nil && !errors.Is(e, unix.EEXIST) {
+			return -1, e
+		}
+		fd, err = unix.Openat(homeFd, ad, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	}
+	if err != nil {
+		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+			return -1, errGuvenliYol
+		}
+		return -1, err
+	}
+	return fd, nil
+}
+
+// karantinayaTasi — kaynak dosyayı (kiracı evinde) <home>/.karantina'ya taşır ve
+// izinlerini 0000 yapar; karantina yolunu döner.
+//
+// 🔴 Eski el ile karantina yolu root olarak os.Lstat → os.MkdirAll → os.Rename →
+// os.Chmod çağırıyordu: Lstat yalnız son bileşeni denetler (symlink'i REDDETMEZ,
+// yalnız dizini), MkdirAll/Rename ara bileşenleri ve .karantina'nın kendisini
+// izler, os.Chmod ise taşınan symlink'i İZLER. Kiracı public_html'inde ev dışını
+// gösteren bir symlink'i karantinaya aldırarak root'a herhangi bir dosyayı
+// (ör. /etc/passwd) chmod 0 yaptırabiliyordu. Artık: dizinler O_NOFOLLOW zinciriyle
+// pinlenir, kaynak kiracıya ait düzenli dosya olarak AÇILIP doğrulanır, taşıma
+// renameat ile, izin açık fd üzerinden fchmod ile verilir.
+func karantinayaTasi(home, kaynak string, uid int, an time.Time) (string, error) {
+	home = filepath.Clean(home)
+	kaynak = filepath.Clean(kaynak)
+	ad := filepath.Base(kaynak)
+
+	srcDirFd, err := evAltDirAc(home, filepath.Dir(kaynak), 0, 0, false)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(srcDirFd)
+	fd, _, err := kiraciDosyaAc(srcDirFd, ad, uid)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(fd)
+
+	qFd, err := karantinaDizinAc(home)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(qFd)
+
+	hedefAd := an.Format("20060102_150405") + "_" + ad
+	if err := unix.Renameat(srcDirFd, ad, qFd, hedefAd); err != nil { // aynı FS → atomik
+		return "", err
+	}
+	if yarisKancasi != nil {
+		yarisKancasi("karantina")
+	}
+	// Çalıştırılamaz/okunamaz: yol değil, doğrulanmış inode'un fd'si.
+	if err := unix.Fchmod(fd, 0); err != nil {
+		log.Printf("antivirus karantinayaTasi: izin 0000 yapılamadı (%s): %v", kaynak, err)
+	}
+	return filepath.Join(home, ".karantina", hedefAd), nil
+}
+
+// karantinaBilgi — kayıttaki karantina yolunu SYMLINK İZLEMEDEN yoklar. Yalnız
+// kiracı evinde (O_NOFOLLOW dizin zinciri) ve kiracıya ait DÜZENLİ bir dosya ise
+// (true, boyut) döner; symlink/başkasının dosyası/ev dışı → (false, 0).
+func karantinaBilgi(home, yol string, uid int) (bool, int64) {
+	dirFd, err := evAltDirAc(home, filepath.Dir(filepath.Clean(yol)), 0, 0, false)
+	if err != nil {
+		return false, 0
+	}
+	defer unix.Close(dirFd)
+	var st unix.Stat_t
+	if unix.Fstatat(dirFd, filepath.Base(yol), &st, unix.AT_SYMLINK_NOFOLLOW) != nil {
+		return false, 0
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || int(st.Uid) != uid {
+		return false, 0
+	}
+	return true, st.Size
 }
 
 // guvenliAc — kar dosyasini SYMLINK-GUVENLI acar. .karantina'nin ust dizini
 // (/home/<sk>) kiraciya aittir; kiraci .karantina'yi silip yerine symlink
 // koyabilir (CWE-59). evAltDirAc ile hedef kiraci evine capalanir + son bilesen
-// O_NOFOLLOW ile acilir → symlink ise ELOOP/ENOTDIR → reddedilir.
-func guvenliAc(home, yol string) (*os.File, error) {
+// kiraciDosyaAc ile O_NOFOLLOW acilir → symlink/FIFO/baskasinin dosyasi reddedilir
+// (root'un kiraciya ait olmayan bir dosyayi ona okutmasi engellenir).
+func guvenliAc(home, yol string, uid int) (*os.File, error) {
 	dirFd, err := evAltDirAc(home, filepath.Dir(yol), 0, 0, false)
 	if err != nil {
 		return nil, err
 	}
 	defer unix.Close(dirFd)
-	fd, err := unix.Openat(dirFd, filepath.Base(yol), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	fd, _, err := kiraciDosyaAc(dirFd, filepath.Base(yol), uid)
 	if err != nil {
-		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
-			return nil, errGuvenliYol
-		}
 		return nil, err
 	}
 	return os.NewFile(uintptr(fd), yol), nil
