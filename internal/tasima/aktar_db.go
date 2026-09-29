@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdlog "log"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 
 	"girginospanel/internal/hesaplar"
 )
@@ -26,7 +28,16 @@ type dbHedef struct{ Ad, Kul string }
 // paylasan CANLI siteler kopardi); hesaplar.MySQLCreateDB artik yalniz-yeni
 // semantikle calisir ve var olan kullaniciya hic dokunmaz.
 func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap, sk, webRoot string,
-	sonuc *AktarSonuc, log func(string, ...any)) (map[string]dbHedef, string, error) {
+	kapsam Kapsam, sonuc *AktarSonuc, log func(string, ...any)) (map[string]dbHedef, string, error) {
+
+	// 🔴 BAYİ + KUM HAVUZU ZORUNLU: bayi taşıması ancak içe aktarma istemcisi
+	// --sandbox destekliyorsa yürütülür. Desteklemeyen bir istemcide düşman dökümün
+	// dosya sistemine erişme (\!, system, LOAD DATA LOCAL, source) yolu yalnız satır
+	// süzgeci + --binary-mode ile kapatılır; bu, kök için kabul edilir ama bir bayinin
+	// kiracı sınırını aşma riskini taşıyamayız → bayi işi kapalı.
+	if kapsam.Bayi() && !sandboxKontrol() {
+		return nil, "", errBayiSandboxYok
+	}
 
 	// hedefKul: FALLBACK yolunun panel kullanicisi (<sk>_db; bkz. tasimaKullanicisiSec).
 	// Ilk ihtiyacta secilir. Parolasini bilinen yeni bir degere ayarlamak ZORUNLU: aksi
@@ -42,6 +53,13 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 	// kullanilir, aksi halde <sk> onekli benzersiz ada + config rewrite'a düsülür.
 	kimlikler := configtenDBKimlik(webRoot)
 
+	// 🔴 ORİJİNAL DB KİMLİĞİ YOLU BAYİDE KAPALI: bu yol, kaynağın wp-config'inden
+	// okunan (DÜŞMAN) ad/kullanıcı/parolayı hedefte doğrudan kullanır. Kök için
+	// (kendi sunucusu, kendi kiracıları) kabul edilir; bir bayide kaynaktan gelen
+	// serbest ad başka kiracının ad-alanına düşme riskini artırır → her zaman
+	// <sk> önekli benzersiz ad + config yeniden yazımı.
+	orijIzin := !kapsam.Bayi()
+
 	esleme := map[string]dbHedef{}
 	kuruldu := false
 	var basarisiz []string
@@ -51,7 +69,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			continue
 		}
 		// --- ORIJINAL kimlikle taşıma (config degismez) ---
-		if orij, ok := kimlikler[kaynakDB]; ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
+		if orij, ok := kimlikler[kaynakDB]; orijIzin && ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
 			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
 				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
 			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
@@ -367,14 +385,32 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	}
 	defer gz.Close()
 
-	imp := exec.CommandContext(ctx, "mysql", "--defaults-extra-file="+cnfAd,
-		"--default-character-set=utf8mb4", hedefDB)
+	// 🔴 KISITLI İÇE AKTARMA İSTEMCİSİ: --sandbox dosya sistemine erişen istemci
+	// komutlarını, --binary-mode piped girdide TÜM istemci komutlarını (\!, system,
+	// source, \u) devre dışı bırakır, --local-infile=0 LOAD DATA LOCAL'i kapatır.
+	// Bunlar --sandbox'sız istemcilerde (root yolu) tek başına yetmez; satır süzgeci
+	// (dumpFiltre) ikinci kat savunmadır.
+	imp := exec.CommandContext(ctx, "mysql", importArgs(cnfAd, hedefDB)...)
 	filtre := &dumpFiltre{}
 	imp.Stdin = filtre.Sar(io.LimitReader(gz, maxAcilimBayt))
 	var ieb strings.Builder
 	imp.Stderr = &ieb
-	if err := imp.Run(); err != nil {
-		return fmt.Errorf("import: %s", kisalt(temizHata(ieb.String(), ""), 200))
+	runHatasi := imp.Run()
+	filtre.Bekle() // okuyucuyu kapatır: mysql erken çıktıysa süzgeç takılı kalmaz
+	// 🔴 GÜVENLİK REDDİ ÖNCE: düşman döküm güvenli olmayan bir istemci komutu (\!,
+	// system, source, \u, LOAD DATA LOCAL) içeriyorsa akış kesilmiştir. Genel neden
+	// döndür; döküm içeriği / import stderr'i çağırana SIZMAZ.
+	if filtre.Reddedildi {
+		stdlog.Printf("tasima: içe aktarma reddedildi (hedef=%s): güvenli olmayan istemci komutu", hedefDB)
+		return fmt.Errorf("içe aktarma reddedildi: kaynak döküm güvenli olmayan komut içeriyor")
+	}
+	if runHatasi != nil {
+		// 🔴 IMPORT STDERR HAM DÖNMEZ: mysql import hatası düşman dökümden SQL/veri
+		// parçaları taşır (satır numarası + ham satır). Ayrıntı sunucu günlüğüne;
+		// çağırana yalnız genel metin (nginxset.SunucuHatasiGenel ile aynı ilke).
+		stdlog.Printf("tasima: DB içe aktarma hatası (hedef=%s): %s",
+			hedefDB, kisalt(temizHata(ieb.String(), ""), 500))
+		return fmt.Errorf("içe aktarma başarısız (ayrıntı sunucu günlüğüne yazıldı)")
 	}
 	// 🔴 mysqldump ciktisini "-- Dump completed" ile bitirir. Damga yoksa dump
 	// yarim kalmistir (uzak hata, kopan baglanti, kilitli tablo…).
@@ -382,6 +418,52 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 		return fmt.Errorf("dump yarim kaldi (kaynak sunucuda mysqldump hata verdi)")
 	}
 	return nil
+}
+
+// importArgs — kısıtlı içe aktarma istemcisinin argümanları. --sandbox yalnız
+// istemci destekliyorsa eklenir (kök yolu desteklemeyen istemcide çalışmaya devam
+// eder; bayi yolu veritabanlariniAktar'da zaten reddedilmiştir).
+//
+// 🔴 --defaults-file (İLK argüman olmak ZORUNDA) DIŞLAYICIDIR: yalnız kısıtlı
+// kullanıcının cnf'i okunur. --defaults-extra-file ise genel dosyalardan SONRA ama
+// ~/.my.cnf'ten ÖNCE okunur; panel root olarak çalıştığından yöneticinin
+// /root/.my.cnf'indeki [client] user/password kısıtlı kimliği EZER ve düşman döküm
+// ROOT yetkisiyle içe aktarılırdı (başka kiracının DB'sine, mysql.user'a yazma).
+func importArgs(cnfAd, hedefDB string) []string {
+	a := []string{
+		"--defaults-file=" + cnfAd,
+		"--default-character-set=utf8mb4",
+		"--binary-mode",
+		"--local-infile=0",
+	}
+	if sandboxKontrol() {
+		a = append(a, "--sandbox")
+	}
+	return append(a, hedefDB)
+}
+
+// sandboxKontrol — içe aktarma istemcisi --sandbox destekliyor mu (testler değiştirir).
+var sandboxKontrol = mysqlSandboxDestekli
+
+// errBayiSandboxYok — bayi işi, istemci --sandbox desteklemediği için kapalı. Metin
+// sabittir ve kiracı verisi içermez → bayiye aynen gösterilir (bayiyeAcikHatalar).
+var errBayiSandboxYok = errors.New("bu sunucudaki içe aktarma istemcisi güvenli kum havuzunu (--sandbox) desteklemiyor; bayi taşıması kapalı")
+
+var (
+	sandboxBirKez    sync.Once
+	sandboxDestekli  bool
+	reSandboxSecenek = regexp.MustCompile(`(?m)^\s*--sandbox\b`)
+)
+
+// mysqlSandboxDestekli — yerel `mysql` istemcisi --sandbox seçeneğini tanıyor mu?
+// `mysql --help --verbose` seçenek listesini tarar (ağa/DB'ye bağlanmaz). Sonuç
+// süreç ömrü boyunca önbelleklenir.
+func mysqlSandboxDestekli() bool {
+	sandboxBirKez.Do(func() {
+		out, _ := exec.Command("mysql", "--no-defaults", "--help", "--verbose").CombinedOutput()
+		sandboxDestekli = reSandboxSecenek.Match(out)
+	})
+	return sandboxDestekli
 }
 
 func cnfYaz(kul, pw string) (string, error) {
@@ -422,18 +504,35 @@ func (w *sinirliYazici) Write(p []byte) (int, error) {
 
 var reDefiner = regexp.MustCompile("(?i)/\\*![0-9]* *DEFINER *= *[^*]*\\*/|DEFINER *= *`[^`]*`@`[^`]*`")
 
-// dumpFiltre — DEFINER yan tumcelerini soker (kisitli import kullanicisi
-// baskasi adina DEFINER atayamaz) ve dump-sonu damgasini izler.
-type dumpFiltre struct{ Tamam bool }
+var errDumpReddi = errors.New("dump güvenli olmayan istemci komutu içeriyor")
+
+// dumpFiltre — DEFINER yan tumcelerini soker (kisitli import kullanicisi baskasi
+// adina DEFINER atayamaz), dump-sonu damgasini izler ve düşman bir dökümün
+// dosya sistemine erişen mysql İSTEMCİ komutlarını (satır başında etkili)
+// yakalarsa akışı KESİP reddeder (Reddedildi=true).
+type dumpFiltre struct {
+	Tamam      bool
+	Reddedildi bool
+	okur       *io.PipeReader
+	bitti      chan struct{}
+}
 
 func (d *dumpFiltre) Sar(r io.Reader) io.Reader {
+	d.bitti = make(chan struct{})
 	pr, pw := io.Pipe()
+	d.okur = pr
 	go func() {
+		defer close(d.bitti)
 		defer pw.Close()
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 1<<20), 32<<20)
 		for sc.Scan() {
 			satir := sc.Text()
+			if tehlikeliDumpSatiri(satir) {
+				d.Reddedildi = true
+				_ = pw.CloseWithError(errDumpReddi)
+				return
+			}
 			if strings.Contains(satir, dumpBitisIz) {
 				d.Tamam = true
 			}
@@ -446,6 +545,57 @@ func (d *dumpFiltre) Sar(r io.Reader) io.Reader {
 		}
 	}()
 	return pr
+}
+
+// Bekle — tüketici (imp.Run) döndükten SONRA çağrılır: okuyucu ucunu kapatır ve
+// süzme goroutine'i bitene kadar bekler; ardından Reddedildi/Tamam alanları yarış
+// olmadan okunur. (exec.Cmd.Wait stdin kopyalayıcısını bekler → Run döndükten sonra
+// okuyucuyu okuyan kalmaz, kapatmak güvenlidir.)
+//
+// 🔴 Okuyucuyu kapatmak ZORUNLU: mysql girdinin tamamını okumadan çıkarsa (ilk SQL
+// hatası — ör. MySQL 8 dökümündeki utf8mb4_0900_ai_ci —, iptal, hesapTimeout) io.Pipe'ın
+// okuyanı kalmaz ve goroutine pw.Write'ta SONSUZA DEK takılırdı → HesapAktar dönmez,
+// tek global iş yuvası (aktifIsID) panel yeniden başlatılana kadar kilitlenirdi.
+// Kapalı okuyucuda pw.Write io.ErrClosedPipe alır, goroutine döner.
+func (d *dumpFiltre) Bekle() {
+	if d.bitti == nil {
+		return
+	}
+	_ = d.okur.Close()
+	<-d.bitti
+}
+
+// tehlikeliDumpSatiri — satır (baştaki boşluk atılınca) dosya sistemine erişen
+// bir mysql İSTEMCİ komutuyla mı başlıyor? Bu komutlar yalnız satır başında etkili
+// olur; gerçek `mysqldump` çıktısı bunları HİÇ üretmez (yalnız SQL + `--`/`/*!*/`
+// yorumları) → meşru dökümde yanlış-pozitif yok, düşman dökümde yakalanır.
+//
+//	\!  → kabuk komutu · \.  → dosya kaynak · \u  → veritabanı seç
+//	system … → kabuk komutu · source … → dosya kaynak
+//	LOAD DATA … LOCAL … → yerel dosya okuma (--local-infile=0 zaten kapatır)
+func tehlikeliDumpSatiri(satir string) bool {
+	t := strings.TrimLeft(satir, " \t")
+	if strings.HasPrefix(t, `\!`) || strings.HasPrefix(t, `\.`) || strings.HasPrefix(t, `\u`) {
+		return true
+	}
+	lt := strings.ToLower(t)
+	if istemciKomutBasi(lt, "system") || istemciKomutBasi(lt, "source") {
+		return true
+	}
+	if strings.HasPrefix(lt, "load data") && strings.Contains(lt, "local") {
+		return true
+	}
+	return false
+}
+
+// istemciKomutBasi — lt, kelime ile başlayıp ardından sınır (boşluk/tab/satır sonu)
+// mu geliyor? "sourced_table" gibi meşru tanımlayıcıları yanlış yakalamamak için.
+func istemciKomutBasi(lt, kelime string) bool {
+	if !strings.HasPrefix(lt, kelime) {
+		return false
+	}
+	rest := lt[len(kelime):]
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
 }
 
 // geciciImportKullanicisi — YALNIZ hedefDB uzerinde yetkili gecici kullanici.
