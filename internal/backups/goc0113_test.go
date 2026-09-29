@@ -1,8 +1,9 @@
 package backups
 
 // goc0113_test.go — 0113_yedek_uzak_hedefler göçü: iki (üç) kez koşunca
-// idempotent, veriyi korur; şema kısıtları (tekillik, CHECK, CASCADE, tek etkin
-// anahtar) gerçekten çalışır.
+// idempotent, veriyi korur; şema kısıtları (tekillik, CHECK, hedef silinince
+// CASCADE, yedek/domain silinince SET NULL = sahipsiz kopya, hibrit age alıcısı,
+// tek etkin anahtar) gerçekten çalışır.
 //
 // Gerçek MariaDB gerekir: YALNIZ geçici sunucu (GOSP_TEST_GECICI_DSN); yoksa
 // DB'li testler ATLANIR. Test kendi açtığı gosp_test_goc0113_<zaman>
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -179,16 +181,22 @@ func TestGoc0113_IdempotentVeKisitlar(t *testing.T) {
 	g113_red(t, db, "aynı sahipte aynı ad", `INSERT INTO backup_hedefler (ad, tur, ayar, sirlar) VALUES ('minio', 'webdav', '{}', '')`)
 
 	// Kopyalar: genel/domain kaynaklı kopya hedef_id NULL iken de TEKİL.
-	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, uzak_ad) VALUES (10, 'genel', '2026-08-25/c_x.tar.gz')`)
-	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, uzak_ad) VALUES (10, 'domain', 'c_x.tar.gz')`)
-	g113_red(t, db, "yinelenen genel kopya", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak) VALUES (10, 'genel')`)
-	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, hedef_id) VALUES (10, 'hedef', 5), (10, 'hedef', 6), (11, 'hedef', 5)`)
-	g113_red(t, db, "yinelenen hedef kopyası", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, hedef_id) VALUES (10, 'hedef', 5)`)
-	g113_red(t, db, "hedef kaynağı hedef_id'siz", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak) VALUES (11, 'hedef')`)
-	g113_red(t, db, "genel kaynak hedef_id'li", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, hedef_id) VALUES (11, 'genel', 5)`)
-	g113_red(t, db, "geçersiz kaynak", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak) VALUES (11, 'ftp')`)
-	g113_red(t, db, "olmayan yedek", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak) VALUES (999, 'genel')`)
-	g113_red(t, db, "olmayan hedef", `INSERT INTO backup_uzak_kopyalar (backup_id, kaynak, hedef_id) VALUES (11, 'hedef', 999)`)
+	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, uzak_ad) VALUES (10, 1, 'genel', '2026-08-25/c_x.tar.gz')`)
+	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, uzak_ad) VALUES (10, 1, 'domain', 'c_x.tar.gz')`)
+	g113_red(t, db, "yinelenen genel kopya", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak) VALUES (10, 1, 'genel')`)
+	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, hedef_id) VALUES (10, 1, 'hedef', 5), (10, 1, 'hedef', 6), (11, 1, 'hedef', 5)`)
+	g113_red(t, db, "yinelenen hedef kopyası", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, hedef_id) VALUES (10, 1, 'hedef', 5)`)
+	g113_red(t, db, "hedef kaynağı hedef_id'siz", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak) VALUES (11, 1, 'hedef')`)
+	g113_red(t, db, "genel kaynak hedef_id'li", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, hedef_id) VALUES (11, 1, 'genel', 5)`)
+	g113_red(t, db, "geçersiz kaynak", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak) VALUES (11, 1, 'ftp')`)
+	g113_red(t, db, "olmayan yedek", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak) VALUES (999, 1, 'genel')`)
+	g113_red(t, db, "olmayan hedef", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, hedef_id) VALUES (11, 1, 'hedef', 999)`)
+	g113_red(t, db, "geçersiz kopya durumu", `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, durum) VALUES (11, 1, 'domain', 'bilinmez')`)
+	// domain_id zorunlu (sahipsiz kopyanın domain hedefini bulmak için); sql_mode'dan bağımsız şema denetimi.
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME = 'backup_uzak_kopyalar' AND COLUMN_NAME = 'domain_id' AND IS_NULLABLE = 'NO' AND COLUMN_DEFAULT IS NULL`); n != 1 {
+		t.Errorf("domain_id NOT NULL ve varsayılansız olmalı")
+	}
 
 	// Göç veri varken yeniden koşar ve veriye dokunmaz.
 	g113_uygula(t, db)
@@ -201,10 +209,53 @@ func TestGoc0113_IdempotentVeKisitlar(t *testing.T) {
 	if n := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar`); n != 3 {
 		t.Errorf("hedef silme CASCADE: %d kayıt kaldı, beklenen 3", n)
 	}
-	// Yedek silinince tüm kopya kayıtları gider.
+
+	// 🔴 Yerel yedek satırı silinince kopya kayıtları KALIR, sahipsiz olur (backup_id NULL).
+	// backups.go'daki uzagi_yoksay=1 ve lftp-yok yolları uzak kopyayı silmeden
+	// DELETE FROM backups yapıyor: CASCADE olsaydı uzaktaki dosya iz bırakmadan kalırdı.
+	g113_exec(t, db, `UPDATE backup_uzak_kopyalar SET durum='tamam', sha256_sifreli=REPEAT('a', 64) WHERE backup_id=10`)
 	g113_exec(t, db, `DELETE FROM backups WHERE id=10`)
 	if n := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar WHERE backup_id=10`); n != 0 {
-		t.Errorf("yedek silme CASCADE: %d kayıt kaldı", n)
+		t.Errorf("silinen yedeğe bağlı %d kayıt kaldı", n)
+	}
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar WHERE backup_id IS NULL AND domain_id=1
+		AND durum='tamam' AND sha256_sifreli=REPEAT('a', 64) AND kaynak IN ('genel', 'domain', 'hedef')`); n != 3 {
+		t.Errorf("yedek silinince sahipsiz kopya sayısı %d, beklenen 3 (kayıt ve alanları korunmalı)", n)
+	}
+	var uzakAd string
+	if err := db.QueryRow(`SELECT uzak_ad FROM backup_uzak_kopyalar WHERE backup_id IS NULL AND kaynak='genel'`).Scan(&uzakAd); err != nil || uzakAd != "2026-08-25/c_x.tar.gz" {
+		t.Errorf("sahipsiz kopyanın uzak adı korunmadı: %q %v", uzakAd, err)
+	}
+	// Aynı kaynaktan İKİNCİ sahipsiz kopya: UNIQUE NULL'ları eşit saysaydı SET NULL
+	// ve dolayısıyla DELETE FROM backups hata verirdi.
+	g113_exec(t, db, `INSERT INTO backups (id, domain_id, dosya) VALUES (12, 1, 'c_z.tar.gz')`)
+	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, uzak_ad) VALUES (12, 1, 'genel', 'c_z.tar.gz')`)
+	g113_exec(t, db, `DELETE FROM backups WHERE id=12`)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar WHERE backup_id IS NULL AND kaynak='genel'`); n != 2 {
+		t.Errorf("iki sahipsiz genel kopya bekleniyordu, %d", n)
+	}
+	g113_exec(t, db, `UPDATE backup_uzak_kopyalar SET durum='sahipsiz' WHERE backup_id IS NULL`)
+	// Domain silinince (domains → backups CASCADE) kopyalar yine sahipsiz kalır.
+	g113_exec(t, db, `INSERT INTO backup_uzak_kopyalar (backup_id, domain_id, kaynak, hedef_id) VALUES (11, 1, 'hedef', 6)`)
+	onceki := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar`)
+	g113_exec(t, db, `DELETE FROM domains WHERE id=1`)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backup_uzak_kopyalar WHERE backup_id IS NULL AND domain_id=1`); n != onceki {
+		t.Errorf("domain silinince %d/%d kopya kaydı sahipsiz kaldı", n, onceki)
+	}
+
+	// Şifre anahtarları: gerçek hibrit (ML-KEM-768 + X25519) alıcı dizgesi alici kolonuna sığar.
+	hibrit, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hAlici := hibrit.Recipient().String()
+	if len(hAlici) <= 128 {
+		t.Fatalf("hibrit alıcı beklenenden kısa (%d): test varsayımı bozuk", len(hAlici))
+	}
+	g113_exec(t, db, `INSERT INTO backup_sifre_anahtarlari (parmak, alici, gizli_anahtar, durum) VALUES ('ph', ?, 'sifreli', 'emekli')`, hAlici)
+	var geri string
+	if err := db.QueryRow(`SELECT alici FROM backup_sifre_anahtarlari WHERE parmak='ph'`).Scan(&geri); err != nil || geri != hAlici {
+		t.Errorf("hibrit alıcı (%d karakter) kesildi ya da okunamadı: %d karakter geri geldi, %v", len(hAlici), len(geri), err)
 	}
 
 	// Şifre anahtarları: aynı anda en çok BİR etkin.

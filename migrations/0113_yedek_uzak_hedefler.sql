@@ -43,19 +43,33 @@ CREATE TABLE IF NOT EXISTS backup_hedefler (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- backup_uzak_kopyalar
+--   backup_id       yerel yedek satırı. Yerel satır silinince kopya kaydı SİLİNMEZ, backup_id
+--                   NULL olur (ON DELETE SET NULL). backup_id NULL = SAHİPSİZ uzak kopya.
+--                   Neden: backups satırını uzak kopyayı silmeden silen yollar var
+--                   (uzagi_yoksay=1, lftp yok, domain silme CASCADE). Kopya kaydı da silinseydi
+--                   uzaktaki dosya iz bırakmadan kalırdı. Ayrıca uzak saklama yerelden uzun olabilir.
+--                   FK eylemi durum kolonunu DEĞİŞTİRMEZ (MariaDB'de FK eylemi tetikleyici
+--                   çalıştırmaz). Orkestratör sahipsizleri backup_id IS NULL ile bulur, uzak
+--                   saklama kuralına göre siler ya da durum sahipsiz yapıp raporlar.
+--   domain_id       yedeğin domaini (backups.domain_id kopyası). Sahipsiz kopyada domain
+--                   hedefini (backup_destinations) ve arayüz sahibini bulmak için gerekir.
+--                   FK YOK: domain silinince de kayıt kalır.
 --   kaynak          genel (backup_genel_ayar) | domain (backup_destinations) | hedef (backup_hedefler)
 --   hedef_id        yalnız kaynak hedef iken dolu. Hedef silinince kopya kayıtları da silinir
---                   (uzaktaki dosyalar kökün deposunda kalır).
+--                   (kimlik bilgisi de gittiği için uzaktaki dosyaya artık erişilemez, dosya
+--                   kökün deposunda kalır).
 --   hedef_anahtar   COALESCE(hedef_id, 0): NULL değerler UNIQUE'te birbirine eşit
 --                   sayılmadığı için genel/domain kaynaklı kopyanın tekilliği bununla sağlanır.
---   uzak_ad         hedef tabanına göre göreli ad (hedef.AdDogrula, en çok 512 bayt)
---   durum           bekliyor | yukleniyor | tamam | hata | siliniyor
+--   uzak_ad         hedef tabanına göre göreli NİHAİ ad (hedef.AdDogrula, en çok 512 bayt).
+--                   Yarım yüklemelerin geçici adları (hedef.UzakGeciciAd) burada TUTULMAZ.
+--   durum           bekliyor | yukleniyor | tamam | hata | siliniyor | sahipsiz
 --   deneme, sonraki_deneme  kalıcı kuyruk (yeniden deneme zamanı)
 --   sha256_sifreli, anahtar_parmak  şifreli dosyanın özeti ve şifreleyen anahtarın parmak izi
 --   son_dogrulama   haftalık rastgele uzak kopya doğrulamasının son zamanı
 CREATE TABLE IF NOT EXISTS backup_uzak_kopyalar (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  backup_id       BIGINT UNSIGNED NOT NULL,
+  backup_id       BIGINT UNSIGNED NULL DEFAULT NULL,
+  domain_id       BIGINT UNSIGNED NOT NULL,
   kaynak          VARCHAR(8)      NOT NULL,
   hedef_id        BIGINT UNSIGNED NULL DEFAULT NULL,
   hedef_anahtar   BIGINT UNSIGNED AS (COALESCE(hedef_id, 0)) PERSISTENT,
@@ -74,16 +88,21 @@ CREATE TABLE IF NOT EXISTS backup_uzak_kopyalar (
   UNIQUE KEY uk_uzak_kopya (backup_id, kaynak, hedef_anahtar),
   KEY idx_uzak_kopya_kuyruk (durum, sonraki_deneme),
   KEY idx_uzak_kopya_hedef (hedef_id),
-  CONSTRAINT fk_uzak_kopya_backup FOREIGN KEY (backup_id) REFERENCES backups (id) ON DELETE CASCADE,
+  KEY idx_uzak_kopya_domain (domain_id),
+  CONSTRAINT fk_uzak_kopya_backup FOREIGN KEY (backup_id) REFERENCES backups (id) ON DELETE SET NULL,
   CONSTRAINT fk_uzak_kopya_hedef FOREIGN KEY (hedef_id) REFERENCES backup_hedefler (id) ON DELETE CASCADE,
   CONSTRAINT ck_uzak_kopya_kaynak CHECK (kaynak IN ('genel', 'domain', 'hedef')),
-  CONSTRAINT ck_uzak_kopya_hedef CHECK ((kaynak = 'hedef') = (hedef_id IS NOT NULL))
+  CONSTRAINT ck_uzak_kopya_hedef CHECK ((kaynak = 'hedef') = (hedef_id IS NOT NULL)),
+  CONSTRAINT ck_uzak_kopya_durum CHECK (durum IN ('bekliyor', 'yukleniyor', 'tamam', 'hata', 'siliniyor', 'sahipsiz'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- backup_sifre_anahtarlari
 --   parmak          age alıcısının (genel anahtar) SHA-256 parmak izi, küçük harf hex
---   alici           age genel anahtarı (age1...), gizli değil
---   gizli_anahtar   gizli.SaklaBagli(AGE-SECRET-KEY-1..., parmak) ile parmağa bağlı şifreli
+--   alici           age genel anahtarı, gizli değil. TEXT: yeni anahtarlar hibrit
+--                   (ML-KEM-768 + X25519, age1pq1..., yaklaşık 2000 karakter), eski/elle
+--                   eklenen X25519 anahtarları kısa (age1..., 62 karakter)
+--   gizli_anahtar   gizli.SaklaBagli(AGE-SECRET-KEY-PQ-1... ya da AGE-SECRET-KEY-1..., parmak)
+--                   ile parmağa bağlı şifreli
 --   durum           bekliyor (kurtarma dosyası onaylanmadı, şifreleme ETKİN DEĞİL) | etkin | emekli
 --                   emekli anahtar yalnız eski yedekleri çözmek için tutulur
 --   etkin_tekil     yalnız durum etkin iken 1, diğerlerinde NULL: UNIQUE ile aynı anda
@@ -92,7 +111,7 @@ CREATE TABLE IF NOT EXISTS backup_uzak_kopyalar (
 CREATE TABLE IF NOT EXISTS backup_sifre_anahtarlari (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   parmak              VARCHAR(64)     NOT NULL,
-  alici               VARCHAR(128)    NOT NULL,
+  alici               TEXT            NOT NULL,
   gizli_anahtar       TEXT            NOT NULL,
   durum               VARCHAR(16)     NOT NULL DEFAULT 'bekliyor',
   etkin_tekil         TINYINT UNSIGNED AS (IF(durum = 'etkin', 1, NULL)) PERSISTENT,
