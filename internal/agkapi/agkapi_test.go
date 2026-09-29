@@ -301,3 +301,81 @@ func TestHTTPTransport_VekilYok(t *testing.T) {
 		t.Fatal("DialContext kapıya bağlı olmalı")
 	}
 }
+
+// metadataUclari — hiçbir seçenekle AÇILMAMASI gereken uçlar: bağlantı-yerel,
+// sağlayıcıların belgelenmiş IPv6 metadata/DNS uçları (ULA), herkese açık
+// aralıktaki Azure 168.63.129.16 ve NAT64/6to4 içine gömülü biçimleri.
+var metadataUclari = []string{
+	"169.254.169.254", "169.254.170.2", "fe80::1",
+	"fd00:ec2::254", "fd00:ec2::253", "fd20:ce::254",
+	"168.63.129.16", "::ffff:168.63.129.16", "64:ff9b::a83f:8110",
+	"100.100.100.200", "192.0.0.192",
+	"64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1",
+}
+
+var tumUzay = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+
+// "Metadata her durumda red": katı, iç ağ izni, tüm uzay IzinliAglar ve
+// hepsi birden (KendiAdresIzni dahili) — Denetle, Coz (literal + isim), YonlendirmeGuard. DialContext
+// BİLEREK yok: kapı delinirse test gerçek bir dış adrese bağlanmaya kalkardı
+// (DialContext'in literal ve isim yolları aynı izinli()'yi çağırır).
+func TestMetadata_HerYoldaRed(t *testing.T) {
+	for _, s := range metadataUclari {
+		if !MetadataMi(net.ParseIP(s)) {
+			t.Errorf("MetadataMi(%s) = false", s)
+		}
+	}
+	kipler := map[string]Secenek{
+		"kati":         {},
+		"ic_ag":        {IcAgIzni: true},
+		"izinli_tum":   {IzinliAglar: tumUzay},
+		"ic_ag+izinli": {IcAgIzni: true, IzinliAglar: tumUzay},
+		"hepsi":        {IcAgIzni: true, KendiAdresIzni: true, IzinliAglar: tumUzay},
+	}
+	for kipAd, kip := range kipler {
+		for _, s := range metadataUclari {
+			ip := net.ParseIP(s)
+			kip.Cozucu = func(context.Context, string) ([]net.IPAddr, error) { return []net.IPAddr{{IP: ip}}, nil }
+			k := Yeni(kip)
+			if err := k.Denetle(ip); !errors.Is(err, ErrReddedildi) {
+				t.Errorf("%s: Denetle(%s) reddetmedi: %v", kipAd, s, err)
+			}
+			if _, err := k.Coz(context.Background(), s); !errors.Is(err, ErrReddedildi) {
+				t.Errorf("%s: Coz(literal %s) reddetmedi: %v", kipAd, s, err)
+			}
+			if _, err := k.Coz(context.Background(), "metadata.ornek.test"); !errors.Is(err, ErrReddedildi) {
+				t.Errorf("%s: Coz(isim → %s) reddetmedi: %v", kipAd, s, err)
+			}
+			r, _ := http.NewRequest(http.MethodGet, "http://"+net.JoinHostPort(s, "80")+"/", nil)
+			if err := k.YonlendirmeGuard(r, nil); !errors.Is(err, ErrReddedildi) {
+				t.Errorf("%s: YonlendirmeGuard(%s) reddetmedi: %v", kipAd, s, err)
+			}
+		}
+	}
+}
+
+// Sunucunun GERÇEK arayüzlerindeki herkese açık adresler katı ve iç ağ
+// modunda reddedilir (dikişsiz uçtan uca; makinede herkese açık adres yoksa atlanır).
+func TestKendiAdres_GercekArayuz(t *testing.T) {
+	adresler, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatalf("arayüz adresleri: %v", err)
+	}
+	var acik []net.IP
+	for _, a := range adresler {
+		if n, ok := a.(*net.IPNet); ok && !IPDahiliMi(n.IP) {
+			acik = append(acik, n.IP)
+		}
+	}
+	if len(acik) == 0 {
+		t.Skip("bu makinede herkese açık arayüz adresi yok")
+	}
+	for _, kip := range []Secenek{{}, {IcAgIzni: true}} {
+		k := Yeni(kip)
+		for _, ip := range acik {
+			if err := k.Denetle(ip); !errors.Is(err, ErrReddedildi) {
+				t.Errorf("IcAgIzni=%v: sunucunun kendi herkese açık adresi %s REDDEDİLMELİYDİ: %v", kip.IcAgIzni, ip, err)
+			}
+		}
+	}
+}

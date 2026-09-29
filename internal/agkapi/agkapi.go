@@ -11,14 +11,20 @@
 // çözümleme-anı DNS-rebinding'i de kapanır.
 //
 // Mantık ilk olarak internal/monitor/ssrf_guard.go'da yazıldı; yedek hedefleri de
-// aynı kapıyı kullansın diye buraya taşındı. Monitor katı modda (Secenek{})
-// kullanır ve davranışı değişmez.
+// aynı kapıyı kullansın diye buraya taşındı. Monitor katı modda, yalnız
+// KendiAdresIzni açık olarak kullanır ve davranışı değişmez.
 //
 // "İç ağa izin" (Secenek.IcAgIzni): kökün LAN'daki bir SMB/MinIO sunucusu
 // meşru bir yedek hedefi olabilir. Bu seçenek YALNIZ özel (RFC 1918 / ULA) ve
 // CGNAT aralıklarını açar; loopback, bağlantı-yerel ve bulut metadata adresleri
-// (169.254.169.254, fd00:ec2::254, 100.100.100.200, 192.0.0.192 ...) HER
-// DURUMDA reddedilir.
+// (169.254.169.254, fd00:ec2::254, fd20:ce::254, 168.63.129.16 ...) HER
+// DURUMDA reddedilir — kararda adresin herkese açık/dahili sınıflamasından
+// ÖNCE ve hiçbir seçenekle açılmadan.
+//
+// Sunucunun KENDİ adresleri (tüm arayüz IP'leri, herkese açık olanlar dahil)
+// loopback gibi reddedilir: yoksa bir kullanıcı sunucunun herkese açık IP'sini
+// (ya da ona çözülen bir adı) yazarak panelin 0.0.0.0'a bağlı servislerine
+// kendi içinden ulaşırdı. Yalnız Secenek.KendiAdresIzni (monitor) bunu açar.
 package agkapi
 
 import (
@@ -28,6 +34,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 )
 
@@ -73,11 +80,24 @@ var ozelCIDRler = cidrler(
 	"100::/64",        // discard-only (RFC 6666)
 )
 
-// metadataCIDRler — iç ağa izin verilse de reddedilen bulut metadata uçları.
-// IPv4/IPv6 bağlantı-yerel aralıkların tamamı (IsLinkLocalUnicast) ayrıca
-// reddedilir; buradakiler o aralıkların DIŞINDA kalan bilinen uçlardır.
+// metadataCIDRler — iç ağa izin verilse de reddedilen bulut metadata/platform
+// DNS uçları. IPv4/IPv6 bağlantı-yerel aralıkların tamamı (IsLinkLocalUnicast)
+// ayrıca reddedilir; buradakiler o aralıkların DIŞINDA kalan, sağlayıcının
+// kendi belgesinde yayımlanmış uçlardır (resmî belgesi bulunamayan aday
+// EKLENMEDİ). IPv6 uçları ULA'dır (fc00::/7): katı modda zaten dahili sayılır,
+// ama IcAgIzni/IzinliAglar ULA'yı açtığı için burada ayrıca adıyla kapatılır.
+// 168.63.129.16 herkese açık aralıktadır: izinli() metadata denetimini adres
+// sınıflamasından ÖNCE yapmasının somut nedeni budur.
 var metadataCIDRler = cidrler(
-	"fd00:ec2::254/128",  // AWS IMDS (IPv6)
+	// AWS IMDS (IPv6, Nitro) — docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+	"fd00:ec2::254/128",
+	// AWS Route 53 Resolver (VPC DNS, IPv6, Nitro) — docs.aws.amazon.com/whitepapers/latest/ipv6-on-aws/designing-dns-for-ipv6.html
+	"fd00:ec2::253/128",
+	// GCP metadata sunucusu (yalnız-IPv6 VM) — docs.cloud.google.com/compute/docs/metadata/overview
+	"fd20:ce::254/128",
+	// Azure platform uç noktası (WireServer, Azure DNS, DHCP, sağlık yoklaması;
+	// herkese açık aralıkta sanal IP) — learn.microsoft.com/azure/virtual-network/what-is-ip-address-168-63-129-16
+	"168.63.129.16/32",
 	"100.100.100.200/32", // Alibaba Cloud metadata
 	"192.0.0.192/32",     // Oracle Cloud (eski) metadata
 )
@@ -179,6 +199,14 @@ type Secenek struct {
 	// Cozucu — isim çözümleyici (nil → net.DefaultResolver.LookupIPAddr).
 	// Testlerde sahte DNS yanıtı vermek için.
 	Cozucu func(ctx context.Context, host string) ([]net.IPAddr, error)
+	// KendiAdresIzni — sunucunun kendi arayüz adreslerine bağlanmaya izin.
+	// Varsayılan (false): kendi adresler loopback gibi reddedilir (katı ve iç
+	// ağ modunda). YALNIZ domain sağlık probe'u (monitor) açar: panelin
+	// barındırdığı alan adları olağan durumda sunucunun kendi herkese açık
+	// IP'sine çözülür ve probe'un işi tam da onları yoklamaktır. Seçenek yalnız
+	// kendi adres denetimini kaldırır; kendi adres loopback/özel ise dahili
+	// kuralı yine uygulanır (katı modda red) — taşımadan önceki davranış.
+	KendiAdresIzni bool
 }
 
 // Kapi — yapılandırılmış SSRF kapısı. Eşzamanlı kullanım güvenlidir.
@@ -210,23 +238,92 @@ func (k *Kapi) izinliAgda(ip net.IP) bool {
 	return false
 }
 
-// izinli — IP'ye bağlanılabilir mi?
+// izinli — IP'ye bağlanılabilir mi? Denetle, Coz, DialContext ve
+// YonlendirmeGuard'ın TEK karar noktası. Sıra önemlidir:
+//  1. metadata/bağlantı-yerel, belirtilmemiş, multicast: HER DURUMDA red,
+//     adresin herkese açık/dahili sınıflamasından ÖNCE (herkese açık aralıktaki
+//     168.63.129.16 "herkese açık → izinli" kısa yoluna düşmesin); hiçbir
+//     seçenek açmaz.
+//  2. IzinliAglar: açık önek listesi (testte loopback) — kendi adresleri de açar.
+//  3. sunucunun kendi adresleri: KendiAdresIzni yoksa red (loopback gibi).
+//  4. herkese açık → izin; dahili → yalnız IcAgIzni ile özel/CGNAT.
 func (k *Kapi) izinli(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
 	ip = normalize(ip)
-	if !IPDahiliMi(ip) {
-		return true
-	}
-	// Dahili: hiçbir seçenekle açılmayanlar önce.
 	if MetadataMi(ip) || ip.IsUnspecified() || ip.IsMulticast() {
 		return false
 	}
 	if k.izinliAgda(ip) {
 		return true
 	}
+	if !k.sec.KendiAdresIzni && kendiAdresiMi(ip) {
+		return false
+	}
+	if !IPDahiliMi(ip) {
+		return true
+	}
 	return k.sec.IcAgIzni && icAgMi(ip)
+}
+
+// kendiAdresleriOku — sunucunun arayüz adresleri. Testler dikiş olarak
+// değiştirir (kendiOnbellek.mu altında).
+var kendiAdresleriOku = net.InterfaceAddrs
+
+// kendiAdresOmru — önbellek ömrü: arayüze eklenen yeni IP en geç bu süre
+// sonra kapıya yansır (her bağlantıda arayüz taraması yapılmaz).
+const kendiAdresOmru = 30 * time.Second
+
+var kendiOnbellek struct {
+	mu    sync.Mutex
+	kume  map[netip.Addr]struct{}
+	zaman time.Time
+}
+
+// kendiAdresKumesi — önbellekli arayüz adresleri. Okuma hatasında son bilinen
+// küme kullanılır; hiç okunamamışsa ok=false (çağıran güvenli tarafta reddeder).
+func kendiAdresKumesi() (map[netip.Addr]struct{}, bool) {
+	o := &kendiOnbellek
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.kume != nil && time.Since(o.zaman) < kendiAdresOmru {
+		return o.kume, true
+	}
+	adresler, err := kendiAdresleriOku()
+	if err != nil {
+		return o.kume, o.kume != nil
+	}
+	kume := make(map[netip.Addr]struct{}, len(adresler))
+	for _, a := range adresler {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if na, ok := netip.AddrFromSlice(ip); ok {
+			kume[na.Unmap()] = struct{}{}
+		}
+	}
+	o.kume, o.zaman = kume, time.Now()
+	return kume, true
+}
+
+// kendiAdresiMi — IP sunucunun kendi arayüz adreslerinden biri mi? Arayüzler
+// hiç okunamadıysa güvenli tarafta true (red).
+func kendiAdresiMi(ip net.IP) bool {
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	kume, ok := kendiAdresKumesi()
+	if !ok {
+		return true
+	}
+	_, kendi := kume[a.Unmap()]
+	return kendi
 }
 
 // Denetle — IP'ye bağlanmaya izin var mı? Red → ErrReddedildi ile eşleşen hata.

@@ -13,6 +13,17 @@
 // Mantık internal/agkapi'ye taşındı (yedek hedefleri de aynı kapıyı kullanır).
 // Probe KATI modda kalır: iç ağ izni YOK, 5 sn bağlantı zaman aşımı, keep-alive
 // kapalı — taşımadan önceki ssrfDialer ile birebir aynı.
+//
+// KendiAdresIzni: agkapi sunucunun KENDİ arayüz adreslerini varsayılan olarak
+// loopback gibi reddeder (yedek hedefi gibi kullanıcı adresleri panelin kendi
+// servislerine yönelemesin). Probe BİLEREK açar — eski davranış korunur:
+// probe'un hedefi bu panelin barındırdığı alan adıdır ve o ad olağan durumda
+// sunucunun kendi herkese açık IP'sine çözülür; red, her yerel sitenin sağlık
+// raporunu "erişilemez" yapardı. Sınır: URL sabit https://<alan_adi> ya da
+// http://<alan_adi> (FQDN-regex, port/yol yok), salt GET, kimlik bilgisi yok;
+// loopback/özel/metadata yine reddedilir. Açık kalan: bir site kendi IP'sinin
+// başka bir portuna yönlendirirse (ör. :8443) probe onu da yoklar — bu da
+// taşımadan önceki davranıştır.
 package monitor
 
 import (
@@ -25,7 +36,7 @@ import (
 )
 
 // probeKapisi — probe Transport'unun TEK çıkış kapısı.
-var probeKapisi = agkapi.Yeni(agkapi.Secenek{BaglantiZamanasimi: 5 * time.Second, KeepAlive: -1})
+var probeKapisi = agkapi.Yeni(agkapi.Secenek{BaglantiZamanasimi: 5 * time.Second, KeepAlive: -1, KendiAdresIzni: true})
 
 // ipDahiliMi — IP loopback/özel/link-local(=metadata)/multicast/rezerve mi?
 func ipDahiliMi(ip net.IP) bool { return agkapi.IPDahiliMi(ip) }

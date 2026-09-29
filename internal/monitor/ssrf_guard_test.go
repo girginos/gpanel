@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"girginospanel/internal/agkapi"
 )
 
 func TestIpDahiliMi(t *testing.T) {
@@ -57,5 +59,38 @@ func TestGuvenliDialContext_LocalhostIsimRed(t *testing.T) {
 	if c, err := guvenliDialContext(context.Background(), "tcp", "localhost:80"); err == nil {
 		c.Close()
 		t.Error("localhost dahiliye cozulup reddedilmeliydi")
+	}
+}
+
+// Probe, sunucunun KENDİ herkese açık adreslerini yoklayabilmeli (panelin
+// barındırdığı alan adları oraya çözülür): KendiAdresIzni olmadan agkapi'nin
+// katı kapısı aynı adresleri REDDEDER — seçenek gerçekten iş görüyor. Makinede
+// herkese açık arayüz adresi yoksa atlanır.
+func TestProbeKapisi_KendiAdresIzni(t *testing.T) {
+	adresler, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatalf("arayüz adresleri: %v", err)
+	}
+	var acik []net.IP
+	for _, a := range adresler {
+		if n, ok := a.(*net.IPNet); ok && !ipDahiliMi(n.IP) {
+			acik = append(acik, n.IP)
+		}
+	}
+	if len(acik) == 0 {
+		t.Skip("bu makinede herkese açık arayüz adresi yok")
+	}
+	kati := agkapi.Yeni(agkapi.Secenek{})
+	for _, ip := range acik {
+		if err := probeKapisi.Denetle(ip); err != nil {
+			t.Errorf("probe kendi herkese açık adresini (%s) yoklayabilmeli: %v", ip, err)
+		}
+		if err := kati.Denetle(ip); err == nil {
+			t.Errorf("varsayılan kapı kendi adresi (%s) reddetmeliydi", ip)
+		}
+	}
+	// Kendi adres izni loopback'i AÇMAZ.
+	if err := probeKapisi.Denetle(net.ParseIP("127.0.0.1")); err == nil {
+		t.Error("probe kapısı loopback'i açtı")
 	}
 }
