@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"girginospanel/internal/dns"
 )
@@ -14,19 +16,27 @@ import (
 // DNS aktarimi
 // ---------------------------------------------------------------------------
 
+// dnsTohumla / dnsZoneYaz: panel varsayilan DNS kayitlari (sablon, DKIM) ve zone
+// dosyasi yazimi (/var/named + named-checkzone + rndc). Testler degistirir —
+// ice aktarma suzgecinin DB'ye ne biraktigi canli DNS'e dokunmadan sinanir.
+var (
+	dnsTohumla = dns.SeedDefaults
+	dnsZoneYaz = dns.WriteZone
+)
+
 // kaynakUstunTipler — kaynagin degeri panel varsayilanini EZMELIDIR. MX/TXT
 // (SPF, DKIM, DMARC) mustericinin e-posta akisidir; varsayilanla degistirilirse
 // tasima aninda tum e-posta durur.
 var kaynakUstunTipler = map[string]bool{"MX": true, "TXT": true, "CNAME": true, "SRV": true, "CAA": true}
 
 func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alanAdi string, log func(string, ...any)) (int, error) {
-	if _, err := dns.SeedDefaults(ctx, h.DB, domainID, alanAdi, h.sunucuIP()); err != nil {
+	if _, err := dnsTohumla(ctx, h.DB, domainID, alanAdi, h.sunucuIP()); err != nil {
 		log("uyari: DNS varsayilanlari yazilamadi: %v", err)
 	}
 
 	kayitlar := kaynakZoneOku(ctx, k, alanAdi)
 	if len(kayitlar) == 0 {
-		if err := dns.WriteZone(ctx, h.DB, domainID); err != nil {
+		if err := dnsZoneYaz(ctx, h.DB, domainID); err != nil {
 			return 0, err
 		}
 		return 0, fmt.Errorf("kaynak DNS kayitlari okunamadi")
@@ -43,7 +53,7 @@ func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alan
 		eskiIP = k.Host
 	}
 
-	eklenen := 0
+	eklenen, reddedilen := 0, 0
 	temizlenen := map[string]bool{}
 	for _, kt := range kayitlar {
 		if kt.Tip == "AAAA" || kt.Tip == "NS" {
@@ -52,6 +62,14 @@ func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alan
 		deger := kt.Deger
 		if kt.Tip == "A" && (deger == eskiIP || kt.Ad == "@" || kt.Ad == "www") {
 			deger = yeniIP
+		}
+		// 🔴 Kaynak zone'u GUVENILMEZ girdidir: tip/ad/deger zone dosyasina satir
+		// olarak yazilir. Dogrulama HER DB isleminden ONCE — CNAME ve kaynak-ustun
+		// dallari ayni addaki mevcut kayitlari SILER; gecersiz kayit hicbir seyi
+		// silmemeli.
+		if !zoneKaydiGecerli(alanAdi, kt.Tip, kt.Ad, deger) {
+			reddedilen++
+			continue
 		}
 		anahtar := kt.Ad + "|" + kt.Tip
 		if kt.Tip == "CNAME" {
@@ -103,11 +121,54 @@ func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alan
 			eklenen++
 		}
 	}
-	if err := dns.WriteZone(ctx, h.DB, domainID); err != nil {
+	if reddedilen > 0 {
+		// Kaynak metni gunluge BASILMAZ (satir sonu / denetim karakteri tasiyabilir).
+		log("uyari: DNS: %d kayit gecersiz tip/ad/deger nedeniyle aktarilmadi", reddedilen)
+	}
+	if err := dnsZoneYaz(ctx, h.DB, domainID); err != nil {
 		return eklenen, fmt.Errorf("zone yazilamadi: %w", err)
 	}
 	log("DNS: %d kayit aktarildi", eklenen)
 	return eklenen, nil
+}
+
+// dnsEtiketRe — kayit adinin TEK etiketi: harf, rakam, alt cizgi (_dmarc,
+// _domainkey, _sip._tcp) ve ic tire; 1-63 bayt (RFC 1035 2.3.4, RFC 8552).
+var dnsEtiketRe = regexp.MustCompile(`^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$`)
+
+// zoneKaydiGecerli — kaynaktan okunan kayit zone dosyasina yazilabilir mi.
+// dns.WriteZone tip/ad/degeri satira OLDUGU GIBI yazar; burada:
+//   - panelin elle kayit kurali (dns.KayitAlanlariGecerli: satir sonu, '$' yonergesi),
+//   - degerde denetim karakteri yok (NUL, ESC, CR, LF …),
+//   - tip tasinabilir listede (ayristiricidan bagimsiz: bu kapi TEK yazma yolu),
+//   - ad ya '@' ya da noktali etiketler; yalniz ilk etiket '*' (joker) olabilir.
+//     Bosluk, '$INCLUDE', '/', bos etiket ve sondaki nokta (zone disi mutlak ad)
+//     reddedilir; ad + alan adi 253 bayti asamaz.
+func zoneKaydiGecerli(alanAdi, tip, ad, deger string) bool {
+	if dns.KayitAlanlariGecerli(ad, deger) != nil {
+		return false
+	}
+	if strings.IndexFunc(deger, unicode.IsControl) >= 0 {
+		return false
+	}
+	if !tasinabilirTipler[tip] {
+		return false
+	}
+	if ad == "@" {
+		return true
+	}
+	if len(ad)+1+len(alanAdi) > 253 {
+		return false
+	}
+	for i, etiket := range strings.Split(ad, ".") {
+		if i == 0 && etiket == "*" {
+			continue
+		}
+		if !dnsEtiketRe.MatchString(etiket) {
+			return false
+		}
+	}
+	return true
 }
 
 // kaynakZoneOku — kaynagin DNS kayitlarini uzaktan okur (yalniz okuma; DB'ye ve
