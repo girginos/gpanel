@@ -248,50 +248,86 @@ func TestBagimlilik_OAuth2PKCE(t *testing.T) {
 	}
 }
 
-// age: X25519 gidiş-dönüş; yanlış anahtar ve 1 bayt bozulma reddedilir; gizli
-// anahtar maskeleme deseniyle günlükten silinir.
+// age: X25519 ve hibrit (ML-KEM-768 + X25519) gidiş-dönüş; yanlış anahtar ve
+// 1 bayt bozulma reddedilir; gizli anahtar maskeleme deseniyle günlükten silinir.
+//
+// KARAR (Y1 sifrele): yeni anahtarlar HİBRİT üretilir. age v1.3 hibrit alıcıyı
+// "standart age genel anahtarı" sayıyor; uzak yedekler uzun yaşar ("şimdi topla,
+// sonra çöz" riski). Bedeli: alıcı ~2000 karakter (backup_sifre_anahtarlari.alici
+// TEXT) ve kurtarma dosyasını elle açmak için age >= v1.3 gerekir. X25519 ve
+// hibrit alıcılar AYNI dosyada karıştırılamaz (aşağıda sınanıyor): anahtar
+// döndürmede eski anahtar yalnız çözmek için tutulur.
 func TestBagimlilik_AgeGidisDonus(t *testing.T) {
-	kimlik, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
+	type anahtar struct {
+		kimlik    age.Identity
+		alici     age.Recipient
+		gizli     string
+		genel     string
+		gizliOnek string
+		genelOnek string
 	}
-	alici := kimlik.Recipient()
-	if !strings.HasPrefix(alici.String(), "age1") || !strings.HasPrefix(kimlik.String(), "AGE-SECRET-KEY-1") {
-		t.Fatalf("anahtar biçimi: %s", alici)
-	}
-	duz := bytes.Repeat([]byte("yedek-içeriği-ğüşıöç "), 50000) // ~1 MiB, birden çok age parçası
-	var sifreli bytes.Buffer
-	w, err := age.Encrypt(&sifreli, alici)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(duz); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	coz := func(veri []byte, k age.Identity) ([]byte, error) {
-		r, err := age.Decrypt(bytes.NewReader(veri), k)
+	x25519 := func() anahtar {
+		k, err := age.GenerateX25519Identity()
 		if err != nil {
-			return nil, err
+			t.Fatal(err)
 		}
-		return io.ReadAll(r)
+		return anahtar{k, k.Recipient(), k.String(), k.Recipient().String(), "AGE-SECRET-KEY-1", "age1"}
 	}
-	acik, err := coz(sifreli.Bytes(), kimlik)
-	if err != nil || !bytes.Equal(acik, duz) {
-		t.Fatalf("gidiş-dönüş: %v", err)
+	hibrit := func() anahtar {
+		k, err := age.GenerateHybridIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return anahtar{k, k.Recipient(), k.String(), k.Recipient().String(), "AGE-SECRET-KEY-PQ-1", "age1pq1"}
 	}
-	yanlis, _ := age.GenerateX25519Identity()
-	if _, err := coz(sifreli.Bytes(), yanlis); err == nil {
-		t.Error("yanlış anahtarla çözüldü")
+	for _, tur := range []struct {
+		ad  string
+		yap func() anahtar
+	}{{"x25519", x25519}, {"hibrit", hibrit}} {
+		t.Run(tur.ad, func(t *testing.T) {
+			a := tur.yap()
+			if !strings.HasPrefix(a.genel, a.genelOnek) || !strings.HasPrefix(a.gizli, a.gizliOnek) {
+				t.Fatalf("anahtar biçimi: %.20s / %.20s", a.genel, a.gizli)
+			}
+			t.Logf("%s: alıcı %d karakter, gizli anahtar %d karakter", tur.ad, len(a.genel), len(a.gizli))
+			duz := bytes.Repeat([]byte("yedek-içeriği-ğüşıöç "), 50000) // ~1 MiB, birden çok age parçası
+			var sifreli bytes.Buffer
+			w, err := age.Encrypt(&sifreli, a.alici)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write(duz); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			coz := func(veri []byte, k age.Identity) ([]byte, error) {
+				r, err := age.Decrypt(bytes.NewReader(veri), k)
+				if err != nil {
+					return nil, err
+				}
+				return io.ReadAll(r)
+			}
+			acik, err := coz(sifreli.Bytes(), a.kimlik)
+			if err != nil || !bytes.Equal(acik, duz) {
+				t.Fatalf("gidiş-dönüş: %v", err)
+			}
+			if _, err := coz(sifreli.Bytes(), tur.yap().kimlik); err == nil {
+				t.Error("yanlış anahtarla çözüldü")
+			}
+			bozuk := bytes.Clone(sifreli.Bytes())
+			bozuk[len(bozuk)/2] ^= 1
+			if _, err := coz(bozuk, a.kimlik); err == nil {
+				t.Error("1 bayt bozulmuş şifreli dosya çözüldü")
+			}
+			parca := a.gizli[len(a.gizli)-24:]
+			if m := hedef.Maskele("anahtar: " + a.gizli); strings.Contains(m, parca) {
+				t.Errorf("age gizli anahtarı maskelenmedi: %.60s", m)
+			}
+		})
 	}
-	bozuk := bytes.Clone(sifreli.Bytes())
-	bozuk[len(bozuk)/2] ^= 1
-	if _, err := coz(bozuk, kimlik); err == nil {
-		t.Error("1 bayt bozulmuş şifreli dosya çözüldü")
-	}
-	if m := hedef.Maskele("anahtar: " + kimlik.String()); strings.Contains(m, kimlik.String()[16:]) {
-		t.Errorf("age gizli anahtarı maskelenmedi: %s", m)
+	if _, err := age.Encrypt(io.Discard, x25519().alici, hibrit().alici); err == nil {
+		t.Error("X25519 ve hibrit alıcı aynı dosyada karıştırılabildi (kuantum korumasını düşürür)")
 	}
 }

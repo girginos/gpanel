@@ -47,8 +47,10 @@ var maskeDesenleri = []struct {
 	{regexp.MustCompile(`(?i)(şifre|sifre)("?\s*[:=]\s*"?)([^\s"'&,;]+)`), "${1}${2}" + MaskeIsareti},
 	// OAuth yetki kodu URL'de.
 	{regexp.MustCompile(`([?&]code=)[^&\s"']+`), "${1}" + MaskeIsareti},
-	// age gizli anahtarı.
-	{regexp.MustCompile(`AGE-SECRET-KEY-1[0-9A-Z]+`), "AGE-SECRET-KEY-" + MaskeIsareti},
+	// age gizli anahtarları (Bech32; HRP'nin sonu "-", ayırıcı "1"): X25519
+	// "AGE-SECRET-KEY-1...", hibrit ML-KEM-768+X25519 "AGE-SECRET-KEY-PQ-1..." ve
+	// eklenti kimlikleri "AGE-PLUGIN-<AD>-1...". Bech32 tümü küçük harf de geçerli.
+	{regexp.MustCompile(`(?i)(AGE-(?:SECRET-KEY|PLUGIN)-)(?:[0-9A-Z]+-)*1[0-9A-Z]+`), "${1}" + MaskeIsareti},
 	// AWS erişim anahtarı kimliği.
 	{regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`), MaskeIsareti},
 	// Google erişim/yenileme jetonları, Dropbox kısa ömürlü jetonu.

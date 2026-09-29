@@ -49,6 +49,10 @@ func TestMaskele_Desenler(t *testing.T) {
 		ozelSon   = sahte("-----END ", "OPENSSH ", "PRIVATE ", "KEY-----")
 		pkcs8Bas  = sahte("-----BEGIN ", "PRIVATE ", "KEY-----")
 		ageAnahtr = sahte("AGE-SECRET-", "KEY-1", strings.Repeat("Q", 40))
+		// Hibrit (ML-KEM-768 + X25519) gizli anahtar: HRP "AGE-SECRET-KEY-PQ-".
+		agePQ     = sahte("AGE-SECRET-", "KEY-PQ-1", strings.Repeat("R", 58))
+		ageKucuk  = strings.ToLower(sahte("AGE-SECRET-", "KEY-1", strings.Repeat("S", 40)))
+		agePlugin = sahte("AGE-", "PLUGIN-", "YUBIKEY-1", strings.Repeat("T", 40))
 	)
 	durumlar := []struct{ girdi, yasak string }{
 		{"dial sftp://kullanici:Gizli123@depo.ornek:22 failed", "Gizli123"},
@@ -63,6 +67,10 @@ func TestMaskele_Desenler(t *testing.T) {
 		{"password=hunter2 user=x", "hunter2"},
 		{"şifre: çokgizli123 yanlış", "çokgizli123"},
 		{"anahtar " + ageAnahtr + " sızdı", "QQQQQQQQQQ"},
+		{"anahtar " + agePQ + " sızdı", "RRRRRRRRRR"},
+		{"kimlik dosyası: " + agePQ, "RRRRRRRRRR"},
+		{"anahtar " + ageKucuk + " sızdı", "ssssssssss"},
+		{"eklenti " + agePlugin + " sızdı", "TTTTTTTTTT"},
 		{"jeton " + sahte("ya29", ".", "SahteErisim-_") + " geçersiz", "SahteErisim"},
 		{"jeton " + sahte("sl", ".", "SAHTEkisaomurlujetondegeri") + " geçersiz", "SAHTEkisaomurlu"},
 		{ozelBas + "\nc2FodGUtYW5haHRhcg\n" + ozelSon, "c2FodGUtYW5haHRhcg"},
