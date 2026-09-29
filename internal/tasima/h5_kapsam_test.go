@@ -101,6 +101,12 @@ func TestHesapAktarBayiKapsam_SahipKapsamdan(t *testing.T) {
 	if errA == nil {
 		t.Errorf("başka bayinin alt adı bayi kapsamında reddedilmeliydi")
 	}
+	// 🔴 KAPSAMLI HATA: bayiye AdAlaniHatasi'nın ham tipi/ayrıntısı (komşunun adı,
+	// sahibi) SIZMAMALI — genel mesaja düzlenmiş olmalı (hataMetni defer'i).
+	var ahA *domains.AdAlaniHatasi
+	if errors.As(errA, &ahA) {
+		t.Errorf("bayiye AdAlaniHatasi tipi sızdı (hata metni süzülmedi): %v", errA)
+	}
 	if len(*saglanan) != 0 || *gercek != 0 {
 		t.Errorf("ret sağlamadan önce olmalı: sahte=%v gerçek=%d", *saglanan, *gercek)
 	}
