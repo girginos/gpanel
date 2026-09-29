@@ -21,6 +21,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -40,6 +41,10 @@ type Kaynak struct {
 	Kullanici string
 	Parola    string // duz metin YALNIZ bellekte; DB'ye sifreli yazilir
 	Anahtar   string // SSH ozel anahtari (opsiyonel, paroleye alternatif)
+
+	// kabuk — uzak çalıştırma dikişi (bkz. kabuk.go). nil → gerçek ssh/rsync;
+	// testler kaydedici sahte takar (ağa çıkılmaz).
+	kabuk uzakKabuk
 }
 
 // Ayarlar — tasima davranisi (JSON olarak tasima_isleri.ayarlar icinde).
@@ -237,6 +242,9 @@ func (k *Kaynak) anahtarYaz() (yol string, temizle func(), err error) {
 // uzakKomut bu paket tarafindan uretilen SABIT sablondur; degisken deger
 // iceriyorsa shQuote()'tan gecmis olmalidir.
 func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.Calistir(ctx, uzakKomut)
+	}
 	anahtar, temizle, err := k.anahtarYaz()
 	if err != nil {
 		return "", fmt.Errorf("anahtar yazilamadi: %w", err)
@@ -268,6 +276,9 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 // RsyncCek — uzak dizini yerele kopyalar. uzakYol/yerelYol cagiran tarafindan
 // dogrulanmis olmalidir.
 func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra ...string) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.RsyncCek(ctx, uzakYol, yerelYol, ekstra...)
+	}
 	anahtar, temizle, err := k.anahtarYaz()
 	if err != nil {
 		return "", err
@@ -311,6 +322,39 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 		return sb.String(), fmt.Errorf("dosya kopyalama (rsync) hatasi: %s", k.sshHataYorumla(eb.String()))
 	}
 	return sb.String(), nil
+}
+
+// AkisCalistir — uzak sunucuda komut calistirir; stdout BELLEGE ALINMADAN w'ye
+// akar (buyuk dump'lar). Dondurur: ham (maskesiz) stderr + cmd.Run hatasi;
+// yorumlama/maskeleme cagirana aittir. Anahtar dosyasi yazilamazsa komut
+// baslamaz ve hata *akisHazirlikHatasi olur. uzakKomut bu paketin SABIT
+// sablonudur; degisken deger iceriyorsa shQuote()'tan gecmis olmalidir.
+func (k *Kaynak) AkisCalistir(ctx context.Context, uzakKomut string, w io.Writer) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.AkisCalistir(ctx, uzakKomut, w)
+	}
+	anahtar, temizle, err := k.anahtarYaz()
+	if err != nil {
+		return "", &akisHazirlikHatasi{err: err}
+	}
+	defer temizle()
+
+	args := k.sshOrtakArgs(anahtar)
+	args = append(args, "-l", k.Kullanici, "--", k.Host, uzakKomut)
+
+	var cmd *exec.Cmd
+	if anahtar == "" {
+		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
+		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+	} else {
+		cmd = exec.CommandContext(ctx, "ssh", args...)
+		cmd.Env = os.Environ()
+	}
+	var eb strings.Builder
+	cmd.Stdout = w
+	cmd.Stderr = &eb
+	runErr := cmd.Run()
+	return eb.String(), runErr
 }
 
 // BaglantiTesti — kimlik dogru mu, uzak panel tipi beklenen mi?

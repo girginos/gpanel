@@ -706,35 +706,18 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	uzak := "if command -v bash >/dev/null 2>&1; then bash -o pipefail -c " + shQuote(ic) +
 		"; else " + ic + "; fi"
 
-	anahtar, temizle, err := k.anahtarYaz()
-	if err != nil {
-		tmp.Close()
-		return err
-	}
-	defer temizle()
-
-	args := k.sshOrtakArgs(anahtar)
-	args = append(args, "-l", k.Kullanici, "--", k.Host, uzak)
-
-	var cmd *exec.Cmd
-	if anahtar == "" {
-		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
-	} else {
-		cmd = exec.CommandContext(ctx, "ssh", args...)
-		cmd.Env = os.Environ()
-	}
-	var eb strings.Builder
 	sayan := &sinirliYazici{alt: tmp, kalan: maxDumpBayt}
-	cmd.Stdout = sayan
-	cmd.Stderr = &eb
-	runErr := cmd.Run()
+	eb, runErr := k.AkisCalistir(ctx, uzak, sayan)
 	tmp.Close()
+	var hazirlik *akisHazirlikHatasi
+	if errors.As(runErr, &hazirlik) {
+		return hazirlik.err
+	}
 	if sayan.asildi {
 		return fmt.Errorf("dump boyut sinirini asti (%d GB)", maxDumpBayt>>30)
 	}
 	if runErr != nil {
-		return fmt.Errorf("dump: %s", kisalt(temizHata(eb.String(), k.Parola), 200))
+		return fmt.Errorf("dump: %s", kisalt(temizHata(eb, k.Parola), 200))
 	}
 	st, err := os.Stat(tmpAd)
 	if err != nil || st.Size() == 0 {
@@ -1223,27 +1206,7 @@ func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alan
 		log("uyari: DNS varsayilanlari yazilamadi: %v", err)
 	}
 
-	q := shQuote(alanAdi)
-	var kayitlar []zoneKayit
-
-	// Plesk DNS'i zone DOSYASINDA degil kendi deposunda tutar → `plesk bin dns
-	// --info` ile cekilir (FQDN TYPE [pri] deger bicimi). cPanel/DA icin ham
-	// BIND zone dosyasi okunur.
-	if k.Tip == "plesk" {
-		if ham, err := k.Calistir(ctx, "plesk bin dns --info "+q+" 2>/dev/null"); err == nil {
-			kayitlar = pleskDNSAyristir(ham, alanAdi)
-		}
-	}
-	if len(kayitlar) == 0 {
-		komut := "cat /var/named/" + q + ".db 2>/dev/null || " +
-			"cat /var/named/run-root/var/named/" + q + ".db 2>/dev/null || " +
-			"cat /var/lib/named/var/named/" + q + ".db 2>/dev/null || " +
-			"cat /etc/bind/db." + q + " 2>/dev/null || " +
-			"cat /var/named/data/" + q + ".db 2>/dev/null"
-		if ham, err := k.Calistir(ctx, komut); err == nil && strings.TrimSpace(ham) != "" {
-			kayitlar = zoneAyristir(ham, alanAdi)
-		}
-	}
+	kayitlar := kaynakZoneOku(ctx, k, alanAdi)
 	if len(kayitlar) == 0 {
 		if err := dns.WriteZone(ctx, h.DB, domainID); err != nil {
 			return 0, err
@@ -1327,6 +1290,33 @@ func (h *Handlers) dnsAktar(ctx context.Context, k *Kaynak, domainID int64, alan
 	}
 	log("DNS: %d kayit aktarildi", eklenen)
 	return eklenen, nil
+}
+
+// kaynakZoneOku — kaynagin DNS kayitlarini uzaktan okur (yalniz okuma; DB'ye ve
+// yerel zone'a dokunmaz). Okunamazsa bos doner.
+func kaynakZoneOku(ctx context.Context, k *Kaynak, alanAdi string) []zoneKayit {
+	q := shQuote(alanAdi)
+	var kayitlar []zoneKayit
+
+	// Plesk DNS'i zone DOSYASINDA degil kendi deposunda tutar → `plesk bin dns
+	// --info` ile cekilir (FQDN TYPE [pri] deger bicimi). cPanel/DA icin ham
+	// BIND zone dosyasi okunur.
+	if k.Tip == "plesk" {
+		if ham, err := k.Calistir(ctx, "plesk bin dns --info "+q+" 2>/dev/null"); err == nil {
+			kayitlar = pleskDNSAyristir(ham, alanAdi)
+		}
+	}
+	if len(kayitlar) == 0 {
+		komut := "cat /var/named/" + q + ".db 2>/dev/null || " +
+			"cat /var/named/run-root/var/named/" + q + ".db 2>/dev/null || " +
+			"cat /var/lib/named/var/named/" + q + ".db 2>/dev/null || " +
+			"cat /etc/bind/db." + q + " 2>/dev/null || " +
+			"cat /var/named/data/" + q + ".db 2>/dev/null"
+		if ham, err := k.Calistir(ctx, komut); err == nil && strings.TrimSpace(ham) != "" {
+			kayitlar = zoneAyristir(ham, alanAdi)
+		}
+	}
+	return kayitlar
 }
 
 type zoneKayit struct {
