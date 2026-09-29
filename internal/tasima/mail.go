@@ -5,6 +5,14 @@
 // kutular gPanel mail eklentisine (yerel UNIX soket) oluşturulur, ardından maildir
 // verisi rsync ile taşınır (/var/qmail/mailnames/<d>/<n>/Maildir/ → /var/vmail/<d>/<n>/).
 //
+// 🔴 Kaynaktan gelen HER ŞEY güvenilmezdir (kutu adları, parolalar, maildir içeriği):
+//   - kutu adı ^[a-z0-9][a-z0-9._+-]{0,63}$ ve ".." yasak (mailYerelGecerli);
+//   - hedef dizin filepath.Rel ile alan dizininin tek bileşenli çocuğu, var olan
+//     alan/kutu dizini sembolik bağ değil (mailHedefDizin, Lstat);
+//   - sieve betikleri ve dovecot iç dosyaları taşınmaz (mailRsyncHaric);
+//   - eklenti çağrıları domain sahibinin kimliğiyle yapılır (mailKimlikSahibe);
+//   - kutu açmadan plan limitleri eklentiye senkronlanır, kutu kotası plandan.
+//
 // 🔴 Mail eklentisi (paralı) kurulu+etkin değilse hata döner → adım "taşınamadı"
 // uyarısı bırakır, site taşımanın geri kalanı ETKİLENMEZ.
 package tasima
@@ -15,26 +23,82 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	"girginospanel/internal/domains"
 )
 
 // mailEklentiSoket — core→eklenti güvenilir yerel kanal (aynı kutu, out-of-process).
-const mailEklentiSoket = "/run/girginospanel/eklenti-mail.sock"
+// Değişken: testler sahte eklentiyi geçici bir sokete bağlar.
+var mailEklentiSoket = "/run/girginospanel/eklenti-mail.sock"
+
+// vmailKok — Dovecot mail_location = maildir:/var/vmail/%d/%n kökü (testler değiştirir).
+var vmailKok = "/var/vmail"
+
+// reMailYerel — içe aktarılan kutu adının (e-postanın @ öncesi) izinli biçimi. Ad
+// hem yerel yola (/var/vmail/<alan>/<ad>) hem uzak rsync yoluna girer.
+var reMailYerel = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,63}$`)
+
+// mailRsyncHaric — maildir aktarımında TAŞINMAYANLAR. Dovecot iç dosyaları
+// (dovecot*, maildirsize) hedefte yeniden üretilir. 🔴 Sieve betikleri (.dovecot.sieve
+// etkin betik, .dovecot.svbin derlenmişi, sieve betik dizini) kaynağın denetimindeki
+// KURALLARDIR (yönlendirme, otomatik yanıt, sunucu eklentileriyle program çalıştırma):
+// taşınsalar hedefte vmail kimliğiyle yürürlerdi. Kutunun sieve'ini eklenti kendi
+// ayarlarından üretir.
+var mailRsyncHaric = []string{
+	"--exclude=dovecot*", "--exclude=maildirsize",
+	"--exclude=.dovecot.sieve", "--exclude=.dovecot.svbin", "--exclude=sieve",
+}
 
 type mailHesap struct {
 	Yerel  string // e-postanın @ öncesi (mail_name)
 	Parola string // düz metin (mail_auth_view) — boşsa çağıran yeni üretir
 }
 
+// mailKimlik — eklentiye iletilen güvenilir kimlik başlıkları (eklenti.go Proxy
+// deseni: X-Gosp-Rol / X-Gosp-Uid / X-Gosp-Sahip). Eklenti bayi rolünde her uçta
+// hedef domainin X-Gosp-Sahip listesinde olmasını şart koşar; admin kısıtsızdır.
+type mailKimlik struct {
+	Rol   string // "admin" | "reseller"
+	Uid   int64  // bayi: users.id
+	Sahip string // bayi: boşlukla ayrılmış alan adları
+}
+
+// mailKimlikSahibe — domain bir bayiye aitse eklenti çağrıları BAYİ kimliğiyle ve
+// kapsam YALNIZ bu alan adı olacak şekilde yapılır (en az yetki: sabit admin
+// başlığı eklentinin sahiplik kilidini devre dışı bırakıyordu). Kökün ve kökün
+// müşterilerinin domainleri admin (eklentide müşteri rolü kutu açamaz).
+func mailKimlikSahibe(resellerID int64, alanAdi string) mailKimlik {
+	if resellerID > 0 {
+		return mailKimlik{Rol: "reseller", Uid: resellerID, Sahip: alanAdi}
+	}
+	return mailKimlik{Rol: "admin"}
+}
+
+func (m mailKimlik) basliklar(req *http.Request) {
+	req.Header.Set("X-Gosp-Rol", m.Rol)
+	if m.Uid > 0 {
+		req.Header.Set("X-Gosp-Uid", strconv.FormatInt(m.Uid, 10))
+	}
+	if m.Sahip != "" {
+		req.Header.Set("X-Gosp-Sahip", m.Sahip)
+	}
+}
+
 // mailEklentiPOST — mail eklentisine yerel soket üzerinden JSON POST'lar.
-func mailEklentiPOST(ctx context.Context, yol string, govde any) (int, []byte, error) {
+func mailEklentiPOST(ctx context.Context, kim mailKimlik, yol string, govde any) (int, []byte, error) {
 	b, _ := json.Marshal(govde)
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", mailEklentiSoket)
@@ -45,7 +109,7 @@ func mailEklentiPOST(ctx context.Context, yol string, govde any) (int, []byte, e
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Gosp-Rol", "admin")
+	kim.basliklar(req)
 	resp, err := cl.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -56,7 +120,7 @@ func mailEklentiPOST(ctx context.Context, yol string, govde any) (int, []byte, e
 }
 
 // mailEklentiGET — mail eklentisinden yerel soket uzerinden JSON GET okur.
-func mailEklentiGET(ctx context.Context, yol string) (int, []byte, error) {
+func mailEklentiGET(ctx context.Context, kim mailKimlik, yol string) (int, []byte, error) {
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", mailEklentiSoket)
 	}}
@@ -65,7 +129,7 @@ func mailEklentiGET(ctx context.Context, yol string) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("X-Gosp-Rol", "admin")
+	kim.basliklar(req)
 	resp, err := cl.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -75,27 +139,123 @@ func mailEklentiGET(ctx context.Context, yol string) (int, []byte, error) {
 	return resp.StatusCode, rb, nil
 }
 
-// mailDomainVar — domain mail eklentisinde tanimli mi (GET /domainler).
+// eklentiHata — eklenti hata yanıtından ({"hata":"..."}) kısa, tek satırlık metin;
+// ham gövde iletiye/günlüğe taşınmaz.
+func eklentiHata(kod int, govde []byte) string {
+	var y struct {
+		Hata string `json:"hata"`
+	}
+	if json.Unmarshal(govde, &y) == nil && y.Hata != "" {
+		return fmt.Sprintf("%d: %s", kod, kisalt(temizHata(y.Hata), 120))
+	}
+	return fmt.Sprintf("HTTP %d", kod)
+}
+
+// mailDomainID — domainin mail eklentisindeki kimliği (GET /domainler); yoksa 0.
 // Yanit sekli: {"domainler":[{"id":N,"ad":"...","kutu_sayisi":N}]}.
-func mailDomainVar(ctx context.Context, alanAdi string) bool {
-	kod, govde, err := mailEklentiGET(ctx, "/domainler")
-	if err != nil || kod != 200 {
-		return false
+func mailDomainID(ctx context.Context, kim mailKimlik, alanAdi string) (int, error) {
+	kod, govde, err := mailEklentiGET(ctx, kim, "/domainler")
+	if err != nil {
+		return 0, err
+	}
+	if kod != http.StatusOK {
+		return 0, fmt.Errorf("domain listesi: %s", eklentiHata(kod, govde))
 	}
 	var yanit struct {
 		Domainler []struct {
+			ID int    `json:"id"`
 			Ad string `json:"ad"`
 		} `json:"domainler"`
 	}
 	if json.Unmarshal(govde, &yanit) != nil {
-		return false
+		return 0, errors.New("domain listesi okunamadı")
 	}
 	for _, d := range yanit.Domainler {
 		if strings.EqualFold(d.Ad, alanAdi) {
-			return true
+			return d.ID, nil
 		}
 	}
-	return false
+	return 0, nil
+}
+
+// mailKutulari — domainin eklentide ZATEN var olan kutuları (GET /hesaplar).
+// 🔴 "Zaten var" kararı VARLIKTAN verilir, yanıt kodundan/metninden DEĞİL: eklenti
+// kutu limiti dolunca da 409 döner (çift kayıtta 500) — eski 409/"zaten" eşleşmesi
+// açılamayan kutuyu "var" sayıp hesabı olmayan maildir'e veri yazıyordu.
+func mailKutulari(ctx context.Context, kim mailKimlik, mailDomainID int) (map[string]bool, error) {
+	kod, govde, err := mailEklentiGET(ctx, kim, "/hesaplar?domain="+strconv.Itoa(mailDomainID))
+	if err != nil {
+		return nil, err
+	}
+	if kod != http.StatusOK {
+		return nil, fmt.Errorf("kutu listesi: %s", eklentiHata(kod, govde))
+	}
+	var yanit struct {
+		Hesaplar []struct {
+			Email string `json:"email"`
+		} `json:"hesaplar"`
+	}
+	if json.Unmarshal(govde, &yanit) != nil {
+		return nil, errors.New("kutu listesi okunamadı")
+	}
+	m := make(map[string]bool, len(yanit.Hesaplar))
+	for _, h := range yanit.Hesaplar {
+		m[strings.ToLower(h.Email)] = true
+	}
+	return m, nil
+}
+
+// mailYerelGecerli — içe aktarılan kutu adı kabul edilebilir mi.
+func mailYerelGecerli(s string) bool {
+	return reMailYerel.MatchString(s) && !strings.Contains(s, "..")
+}
+
+// mailHedefDizin — kutunun yerel maildir'i (/var/vmail/<alan>/<kutu>) ve alan
+// dizini. Ad kuralından BAĞIMSIZ ikinci kilit (her kaynak türü bu yoldan geçer):
+// iki bileşen de tek ve kanonik olmalı; var olan alan/kutu dizini sembolik bağ ya
+// da dizin-dışı bir öğe olamaz (Lstat) — yoksa root'un MkdirAll/rsync/chown'u bağı
+// izleyip komşu kutuya ya da sistem yoluna yazardı.
+func mailHedefDizin(alanAdi, yerel string) (domainDir, hedef string, err error) {
+	if domainDir, err = dogrudanCocuk(vmailKok, alanAdi); err != nil {
+		return "", "", err
+	}
+	if hedef, err = dogrudanCocuk(domainDir, yerel); err != nil {
+		return "", "", err
+	}
+	for _, y := range []string{domainDir, hedef} {
+		if err := dizinVeyaYok(y); err != nil {
+			return "", "", err
+		}
+	}
+	return domainDir, hedef, nil
+}
+
+// dogrudanCocuk — kok'un TEK bileşenli doğrudan çocuğu. filepath.Rel kanonik
+// göreli yolu verir: girdiyle birebir aynı değilse ("a/../b", "b/", "./b", "") ya
+// da tek bileşen değilse (".", "..", "a/b") ret.
+func dogrudanCocuk(kok, ad string) (string, error) {
+	yol := filepath.Join(kok, ad)
+	rel, err := filepath.Rel(kok, yol)
+	if err != nil || rel != ad || rel != filepath.Base(rel) || rel == "." || rel == ".." {
+		return "", fmt.Errorf("güvensiz yol bileşeni %.64q", ad)
+	}
+	return yol, nil
+}
+
+// dizinVeyaYok — yol yoksa nil (MkdirAll oluşturur); varsa sembolik bağ OLMAYAN
+// gerçek bir dizin olmalı (Lstat bağı izlemez).
+func dizinVeyaYok(yol string) error {
+	fi, err := os.Lstat(yol)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%q dizin değil ya da sembolik bağ", filepath.Base(yol))
+	}
+	return nil
 }
 
 // mailAktar — domainin kutularını + mail verisini kaynaktan taşır. Döndürür:
@@ -111,57 +271,94 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log
 		return 0, []string{"Posta: kaynakta kutu yok — taşınmadı"}, nil
 	}
 
+	// Hedef domain satırı: gPanel kimliği (limit senkronu), sahibi (eklenti
+	// kimliği) ve planın kutu başına kotası — kaynaktan/istekten DEĞİL satırdan.
+	var domainID, resellerID int64
+	var kotaMB int
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT d.id, d.reseller_id, COALESCE(p.mail_kutu_kota_mb,0)
+		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.alan_adi=?`,
+		alanAdi).Scan(&domainID, &resellerID, &kotaMB); err != nil {
+		return 0, nil, fmt.Errorf("hedef domain okunamadı: %w", err)
+	}
+	kim := mailKimlikSahibe(resellerID, alanAdi)
+
 	// Mail domainini gPanel'de GARANTI et — ZATEN VARSA dokunma (idempotent).
 	// 🔴 Mail eklentisi domainEkle duplicate'te 409 DEGIL 500 doner; koda guvenme,
 	// once VARLIGA bak (GET /domainler), yoksa ekle, sonra tekrar dogrula. Onceden
 	// mevcut domain (ornek: islam-tr.org zaten kayitli) tum posta adimini "taşınamadı"
 	// yapiyordu; keşif kutulari BULMUS olsa bile.
-	if !mailDomainVar(ctx, alanAdi) {
-		kod, govde, err := mailEklentiPOST(ctx, "/domainler", map[string]string{"ad": alanAdi})
+	mid, err := mailDomainID(ctx, kim, alanAdi)
+	if err != nil {
+		return 0, nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
+	}
+	if mid == 0 {
+		kod, govde, err := mailEklentiPOST(ctx, kim, "/domainler", map[string]string{"ad": alanAdi})
 		if err != nil {
 			return 0, nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
 		}
-		if kod != 200 && kod != 201 && !mailDomainVar(ctx, alanAdi) {
-			return 0, nil, fmt.Errorf("mail domaini eklenemedi (%d): %s", kod, strings.TrimSpace(string(govde)))
+		if mid, err = mailDomainID(ctx, kim, alanAdi); err != nil || mid == 0 {
+			return 0, nil, fmt.Errorf("mail domaini eklenemedi (%s)", eklentiHata(kod, govde))
 		}
+	}
+
+	// 🔴 Kutu AÇMADAN plan limitleri eklentiye: kutu sayısı sınırı (max_email) ve
+	// kutu başına kota eklentide uygulanır. Yeni mail domaininde limit yoktu →
+	// kaynak kaç kutu verirse sınırsız kotayla açılıyordu.
+	domains.MailKutuLimitSenkron(ctx, h.DB, domainID, alanAdi)
+
+	mevcut, err := mailKutulari(ctx, kim, mid)
+	if err != nil {
+		return 0, nil, fmt.Errorf("mevcut posta kutuları okunamadı: %w", err)
 	}
 
 	sayi := 0
 	for _, hs := range hesaplar {
+		if !mailYerelGecerli(hs.Yerel) {
+			uyarilar = append(uyarilar, fmt.Sprintf("Posta: geçersiz kutu adı atlandı: %.64q", hs.Yerel))
+			continue
+		}
 		email := hs.Yerel + "@" + alanAdi
-		parola := hs.Parola
-		if len(parola) < 6 {
-			parola = rastgeleParola(16)
-			uyarilar = append(uyarilar, "Posta: "+email+" kaynak parolası alınamadı — yeni parola üretildi")
+		domainDir, hedef, err := mailHedefDizin(alanAdi, hs.Yerel)
+		if err != nil {
+			log("Posta: %s atlandı: %v", email, err)
+			uyarilar = append(uyarilar, "Posta: "+email+" hedef dizini güvenli değil — atlandı")
+			continue
 		}
 
-		kod, govde, err := mailEklentiPOST(ctx, "/hesaplar", map[string]any{
-			"email": email, "parola": parola, "quota_mb": 0,
-		})
-		if err != nil {
-			uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı (bağlantı)")
-			continue
-		}
-		zatenVar := kod == 409 || strings.Contains(strings.ToLower(string(govde)), "zaten")
-		if kod != 201 && !zatenVar {
-			uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı: "+strings.TrimSpace(string(govde)))
-			continue
+		if !mevcut[email] {
+			parola := hs.Parola
+			if len(parola) < 6 {
+				parola = rastgeleParola(16)
+				uyarilar = append(uyarilar, "Posta: "+email+" kaynak parolası alınamadı — yeni parola üretildi")
+			}
+			// Kota PLANDAN (0 = sınırsız); kaynak belirlemez.
+			kod, govde, err := mailEklentiPOST(ctx, kim, "/hesaplar", map[string]any{
+				"email": email, "parola": parola, "quota_mb": kotaMB,
+			})
+			if err != nil {
+				uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı (bağlantı)")
+				continue
+			}
+			if kod != http.StatusCreated {
+				uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı ("+eklentiHata(kod, govde)+")")
+				continue
+			}
 		}
 
 		// Maildir verisini taşı: Plesk (qmail düzeni) → gPanel (dovecot maildir).
-		domainDir := "/var/vmail/" + alanAdi
 		uzak := "/var/qmail/mailnames/" + alanAdi + "/" + hs.Yerel + "/Maildir/"
-		yerel := domainDir + "/" + hs.Yerel + "/"
-		if err := os.MkdirAll(yerel, 0o700); err != nil {
+		if err := os.MkdirAll(hedef, 0o700); err != nil {
 			uyarilar = append(uyarilar, "Posta: "+email+" hedef maildir hazırlanamadı")
-		} else if _, err := k.RsyncCek(ctx, uzak, yerel, "--exclude=dovecot*", "--exclude=maildirsize"); err != nil {
+		} else if _, err := k.RsyncCek(ctx, uzak, hedef+"/", mailRsyncHaric...); err != nil {
 			uyarilar = append(uyarilar, "Posta: "+email+" mesajları kısmen/hiç taşınamadı")
 		}
 		// 🔴 Sahiplik: DOMAIN dizini + kutu dizini vmail:vmail. MkdirAll domain parent'ını
 		// root:root 0700 yaratır → vmail(dovecot) TRAVERSE EDEMEZ → sieve+teslim "Permission
-		// denied". Yalnız leaf'i chown YETMEZ; parent'ı da düzelt.
+		// denied". Yalnız leaf'i chown YETMEZ; parent'ı da düzelt. Kutu yolu sonda "/"
+		// OLMADAN verilir: -R (varsayılan -P) bağı izlemez, "/" ise çözdürürdü.
 		_ = exec.CommandContext(ctx, "chown", "vmail:vmail", domainDir).Run()
-		_ = exec.CommandContext(ctx, "chown", "-R", "vmail:vmail", yerel).Run()
+		_ = exec.CommandContext(ctx, "chown", "-R", "vmail:vmail", hedef).Run()
 
 		sayi++
 		log("Posta: %s taşındı", email)
