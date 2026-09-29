@@ -126,8 +126,11 @@ func ta_kalkan(t *testing.T, oncesi func()) (saglanan, geriAlinan *[]string, ger
 }
 
 func ta_aktar(h *Handlers, alan string, rid int64) error {
+	// Kök (admin) kapsamı: rid, Ayarlar.ResellerID üzerinden atanan sahiptir
+	// (kökün bir bayiye/kendine site açması). Kapsam{} = Yonetici → hata metni ve
+	// davranış mevcut haliyle korunur.
 	_, err := h.HesapAktar(context.Background(), &Kaynak{}, Hesap{AlanAdi: alan, PHPSurum: "8.3"},
-		Ayarlar{ResellerID: rid}, func(string, ...any) {})
+		Ayarlar{ResellerID: rid}, Kapsam{}, func(string, ...any) {})
 	return err
 }
 

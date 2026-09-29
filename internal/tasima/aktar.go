@@ -42,22 +42,31 @@ type AktarSonuc struct {
 //   - Veritabani parolasi domain basina BIR KEZ uretilir; mevcut DB kullanicisi
 //     varsa parolasi DEGISTIRILMEZ (canli siteyi olduruyordu).
 //   - Veritabani adimi basarisiz olursa kalem BASARILI sayilmaz.
-func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, log func(string, ...any)) (*AktarSonuc, error) {
+func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (sonuc *AktarSonuc, geriHata error) {
 	ctx, iptal := context.WithTimeout(ctx, hesapTimeout)
 	defer iptal()
 
-	sonuc := &AktarSonuc{}
+	// 🔴 KAPSAMLI HATA: dönen HER hata kapsama göre süzülür. Kök ham hatayı görür
+	// (mevcut davranış birebir); bayiye komşu kiracının adı / sistem yolu / araç
+	// çıktısı sızmaz (bkz. hataMetni).
+	defer func() {
+		if geriHata != nil {
+			geriHata = hataMetni(kapsam.Yonetici(), geriHata)
+		}
+	}()
+
+	sonuc = &AktarSonuc{}
 	alanAdi := strings.ToLower(strings.TrimSpace(hs.AlanAdi))
 	if !reAlanAdi.MatchString(alanAdi) || !strings.Contains(alanAdi, ".") {
 		return nil, fmt.Errorf("gecersiz alan adi")
 	}
 
 	// --- 1. Hedef kontrolu -------------------------------------------------
-	var mevcutID int64
+	var mevcutID, mevcutRID int64
 	var mevcutSK, mevcutKok string
 	err := h.DB.QueryRowContext(ctx,
-		`SELECT id, sistem_kullanici, COALESCE(web_root,'') FROM domains WHERE alan_adi=?`,
-		alanAdi).Scan(&mevcutID, &mevcutSK, &mevcutKok)
+		`SELECT id, sistem_kullanici, COALESCE(web_root,''), reseller_id FROM domains WHERE alan_adi=?`,
+		alanAdi).Scan(&mevcutID, &mevcutSK, &mevcutKok, &mevcutRID)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("hedef kontrolu: %w", err)
 	}
@@ -72,6 +81,12 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 	}
 
 	if mevcutID > 0 {
+		// 🔴 BAYİ ÜZERİNE YAZMA — SAHİP EŞİTLİĞİ: bir bayi yalnız KENDİ hesabındaki
+		// bir domainin üzerine yazabilir. Aksi halde komşunun (kökün ya da başka
+		// bayinin) sitesine dosya/DB yazardı. Kök (Yonetici) için sınır yok.
+		if kapsam.Bayi() && mevcutRID != kapsam.RID {
+			return nil, fmt.Errorf("hedef alan adı bu hesaba ait değil")
+		}
 		if !ay.Ustune {
 			return nil, fmt.Errorf("hedefte '%s' zaten var (uzerine yazma kapali)", alanAdi)
 		}
@@ -84,13 +99,21 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		}
 		log("hedefte mevcut domain bulundu, uzerine yaziliyor (id=%d, kok=%s)", mevcutID, webRoot)
 	} else {
-		// 🔴 PER-DOMAIN SAHİPLİK: sahiplik taşıma açıksa bu domainin KENDİ sahibini
-		// (SahipEsle[hs.SahipLogin]) kullan; yoksa Ayarlar varsayılanına düş (admin
-		// seçimi / admin-sahipli). Böylece her site kaynaktaki reseller/müşterisine gider.
-		resellerID, customerID := ay.ResellerID, ay.CustomerID
-		if hs.SahipLogin != "" && ay.SahipEsle != nil {
-			if hedef, ok := ay.SahipEsle[hs.SahipLogin]; ok {
-				resellerID, customerID = hedef.ResellerID, hedef.CustomerID
+		// 🔴 SAHİP SEÇİMİ KAPSAMLA BELİRLENİR:
+		//   - Bayi işi (RID>0): site YALNIZ bayinin KENDİ hesabına açılır. Gövdeden
+		//     gelen ResellerID/CustomerID ve kaynaktan gelen SahipEsle YOK SAYILIR
+		//     (aksi halde bayi siteyi başka kiracıya atardı). CustomerID=0.
+		//   - Kök işi (RID=0): sahiplik taşıma açıksa domainin KENDİ sahibini
+		//     (SahipEsle[hs.SahipLogin]) kullan; yoksa Ayarlar varsayılanına düş.
+		var resellerID, customerID int64
+		if kapsam.Bayi() {
+			resellerID, customerID = kapsam.RID, 0
+		} else {
+			resellerID, customerID = ay.ResellerID, ay.CustomerID
+			if hs.SahipLogin != "" && ay.SahipEsle != nil {
+				if hedef, ok := ay.SahipEsle[hs.SahipLogin]; ok {
+					resellerID, customerID = hedef.ResellerID, hedef.CustomerID
+				}
 			}
 		}
 		// 🔴 Ad-alanı (GL-02): domains.Create ile AYNI kural — oluşacak domainin
@@ -183,7 +206,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		}
 	}
 	if ay.Veritabani && len(hs.DBler) > 0 {
-		esleme, dbPw, dbHata := h.veritabanlariniAktar(ctx, k, hs, sk, webRoot, sonuc, log)
+		esleme, dbPw, dbHata := h.veritabanlariniAktar(ctx, k, hs, sk, webRoot, kapsam, sonuc, log)
 		if dbHata != nil {
 			// 🔴 DB adimi basarisizsa kalem BASARILI sayilmaz — sessiz basari
 			// mustericinin sitesini bos veritabaniyla yayina alir.
