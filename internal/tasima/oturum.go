@@ -11,6 +11,7 @@ package tasima
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,11 +27,15 @@ const oturumTTL = 2 * time.Hour
 
 // oturumKaydet — keşif sonrası oturumu kalıcılaştır. Aynı host+kullanıcı için
 // önceki 'oturum' satırı DEĞİŞTİRİLİR (tek taze oturum). Döner: oturum id (0=hata).
+// Oturum yalnız kolaylıktır, keşif yanıtı yine döner; ama hata YUTULMAZ, günlüğe
+// yazılır (0109 öncesi gpanel kaynağı ENUM'a takılıp her keşifte sessizce 0 dönüyordu).
 func (h *Handlers) oturumKaydet(g kaynakGirdi, hesaplar []Hesap) int64 {
 	k := g.kaynak()
 	// Aynı kaynak için eski oturumları temizle (biriktirme yok).
-	_, _ = h.DB.Exec(`DELETE FROM tasima_isleri
-		WHERE durum='oturum' AND kaynak_host=? AND kaynak_kullanici=?`, k.Host, k.Kullanici)
+	if _, err := h.DB.Exec(`DELETE FROM tasima_isleri
+		WHERE durum='oturum' AND kaynak_host=? AND kaynak_kullanici=?`, k.Host, k.Kullanici); err != nil {
+		log.Printf("tasima: eski oturum silinemedi (tip=%q): %v", k.Tip, err)
+	}
 
 	kesifJSON, _ := json.Marshal(hesaplar)
 	parolaSif := ""
@@ -49,6 +54,7 @@ func (h *Handlers) oturumKaydet(g kaynakGirdi, hesaplar []Hesap) int64 {
 		k.Tip, k.Host, k.Port, k.Kullanici, parolaSif, anahtarSif,
 		len(hesaplar), string(kesifJSON), int(oturumTTL.Seconds()))
 	if err != nil {
+		log.Printf("tasima: oturum kaydedilemedi (tip=%q): %v", k.Tip, err)
 		return 0
 	}
 	id, _ := res.LastInsertId()

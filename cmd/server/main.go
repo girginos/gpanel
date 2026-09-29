@@ -1238,6 +1238,11 @@ func semaDogrula(d *sql.DB) {
 		{"cp_eklentiler", "ad"},
 		// 0105: bildirim okundu kaydı görüntüleyene göre — yoksa zil/bildirim listesi 500 verir.
 		{"cp_bildirim_okundu", "okuyan_tur"},
+		// 0109: taşıma kapsamı (sahip_rid süzgeci, başlatan) + kuyruk kalemi + kaynak anahtarı.
+		{"tasima_isleri", "sahip_rid"},
+		{"tasima_isleri", "baslatan_uid"},
+		{"tasima_kalemleri", "hesap_json"},
+		{"tasima_kaynak_ayar", "kod"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
