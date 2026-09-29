@@ -19,7 +19,7 @@ func (h *Handlers) EnvOku(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	icerik, rerr := envOku(appDir)
+	icerik, rerr := envOku(sk, appDir)
 	if rerr != nil {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"var": false, "icerik": ""})
 		return

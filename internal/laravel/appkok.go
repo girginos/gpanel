@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -94,13 +94,13 @@ func (h *Handlers) AppAdaylar(w http.ResponseWriter, r *http.Request) {
 		"adaylar":            adaylar,
 		"otomatik_algilandi": otomatik,
 		"kurulu":             artisan,
-		"eksikler":           laravelEksikler(appDir, artisan, composerJSON),
+		"eksikler":           laravelEksikler(sk, appDir, artisan, composerJSON),
 	})
 }
 
 // laravelEksikler — uygulamanin calismasi icin eksik bilesenler (frontend "Otomatik
 // hazirla" butonunu bunlara gore gosterir).
-func laravelEksikler(appDir string, artisan, composerJSON bool) []string {
+func laravelEksikler(sk, appDir string, artisan, composerJSON bool) []string {
 	var eks []string
 	if !artisan {
 		return eks // Laravel degil — eksik listesi anlamsiz
@@ -108,12 +108,12 @@ func laravelEksikler(appDir string, artisan, composerJSON bool) []string {
 	if _, err := os.Stat(filepath.Join(appDir, "vendor", "autoload.php")); err != nil {
 		eks = append(eks, "vendor")
 	}
-	if _, err := os.Stat(filepath.Join(appDir, ".env")); err != nil {
+	// .env root olarak yalnız symlink izlemeden okunur (envOku) — .env symlink'iyle
+	// başka dosyanın içeriği hakkında bilgi (APP_KEY var/yok) sızdırılamaz.
+	if s, err := envOku(sk, appDir); err != nil {
 		eks = append(eks, "env")
-	} else if b, err := os.ReadFile(filepath.Join(appDir, ".env")); err == nil {
-		if !strings.Contains(string(b), "APP_KEY=base64:") {
-			eks = append(eks, "app_key")
-		}
+	} else if !strings.Contains(s, "APP_KEY=base64:") {
+		eks = append(eks, "app_key")
 	}
 	for _, d := range []string{"storage", filepath.Join("bootstrap", "cache")} {
 		p := filepath.Join(appDir, d)
@@ -186,7 +186,9 @@ func (h *Handlers) SetAppRoot(w http.ResponseWriter, r *http.Request) {
 //	izin/sahiplik  → storage + bootstrap/cache tenant'a, .env 0600
 //	onbellek       → config/route/view cache temizle (eski sunucu yollari)
 //
-// Hepsi TENANT kullanicisi olarak calisir; root ayricaligi kullanilmaz.
+// Komutlar (composer/artisan/.env yazımı/mkdir) TENANT kullanicisi olarak calisir.
+// Root'ta kalan dosya işlemleri (.env.example/.env okuma, .env chmod, göç kalıntısı
+// chown, önbellek silme) ev köküne çapalı ve symlink izlemeden yapılır (evAlti*).
 func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 	id, sk, phpSurum, demo, ok := h.lookup(r)
 	if !ok {
@@ -216,18 +218,27 @@ func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 		adimlar = append(adimlar, map[string]any{"adim": ad, "ok": ok, "not": not})
 	}
 
-	// 1) .env yoksa ornekten uret
-	envYol := filepath.Join(appDir, ".env")
-	if _, e := os.Stat(envYol); e != nil {
-		if b, e2 := os.ReadFile(filepath.Join(appDir, ".env.example")); e2 == nil {
-			if e3 := envYaz(sk, appDir, string(b)); e3 == nil {
-				kaydet(".env oluşturuldu", true, ".env.example kopyalandı")
-			} else {
-				kaydet(".env oluşturuldu", false, e3.Error())
-			}
-		} else {
-			kaydet(".env oluşturuldu", false, ".env.example yok")
-		}
+	// 🔴 Root'un bu dizindeki DOSYALAR üzerindeki tüm işlemleri ev köküne çapalı ve
+	// symlink izlemeden yapılır (evAlti* yardımcıları, runner.go). Eskiden os.ReadFile/
+	// os.Chmod/os.Remove/chown -R yol ile root olarak symlink izlerdi → tenant'ın
+	// .env.example/.env/bootstrap symlink'iyle başka tenant'ın ya da sistemin dosyası
+	// okunur, izni değişir, silinir ya da tenant'a devredilirdi.
+	home, appRel, err := evGoreli(sk, appDir)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	uid, gid, err := tenantKimlik(sk)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "sistem kullanıcısı bulunamadı")
+		return
+	}
+
+	// 1) .env yoksa ornekten uret (.env.example yalnız kiracıya ait düzenli dosyaysa)
+	if calisti, ok1, not := envOrnektenUret(home, appRel, uid, func(icerik string) error {
+		return envYaz(sk, appDir, icerik)
+	}); calisti {
+		kaydet(".env oluşturuldu", ok1, not)
 	}
 	// 2) vendor yoksa composer install
 	if _, e := os.Stat(filepath.Join(appDir, "vendor", "autoload.php")); e != nil {
@@ -235,38 +246,40 @@ func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 		kaydet("composer install", ok2, sonSatirKisa(out))
 	}
 	// 3) APP_KEY yoksa uret
-	if b, e := os.ReadFile(envYol); e == nil && !strings.Contains(string(b), "APP_KEY=base64:") {
+	if s, e := envOku(sk, appDir); e == nil && !strings.Contains(s, "APP_KEY=base64:") {
 		out, ok2 := TenantExec(ctx, sk, appDir, php, "artisan", "key:generate", "--force")
 		kaydet("APP_KEY üretildi", ok2, sonSatirKisa(out))
 	}
 	// 4) APP_URL'i hedef domaine cek
-	if b, e := os.ReadFile(envYol); e == nil && alanAdi != "" {
-		yeni := reAppURL.ReplaceAllString(string(b), "APP_URL=https://"+alanAdi)
-		if yeni != string(b) {
+	if s, e := envOku(sk, appDir); e == nil && alanAdi != "" {
+		yeni := reAppURL.ReplaceAllString(s, "APP_URL=https://"+alanAdi)
+		if yeni != s {
 			if e2 := envYaz(sk, appDir, yeni); e2 == nil {
 				kaydet("APP_URL güncellendi", true, "https://"+alanAdi)
 			}
 		}
 	}
-	_ = os.Chmod(envYol, 0o600)
-	// 5) izin/sahiplik
-	for _, d := range []string{"storage", filepath.Join("bootstrap", "cache")} {
-		p := filepath.Join(appDir, d)
-		_ = os.MkdirAll(p, 0o775)
-		_ = exec.Command("chown", "-R", sk+":"+sk, p).Run()
+	_ = evAltiChmod(home, path.Join(appRel, ".env"), uid, 0o600)
+	// 5) izin/sahiplik — eksik dizin symlink-güvenli yaratılıp tenant'a verilir; göç
+	// kalıntısı root-sahipli içerik symlink-güvenli özyinelemeli chown ile tenant'a geçer.
+	izinOK, izinNot := true, "storage + bootstrap/cache"
+	for _, d := range []string{"storage", path.Join("bootstrap", "cache")} {
+		_ = evAltiMkdirHepsi(home, path.Join(appRel, d), uid, gid)
+		if e := evAltiSahiplikVer(home, path.Join(appRel, d), uid, gid); e != nil {
+			izinOK, izinNot = false, d+": "+e.Error()
+		}
 	}
-	kaydet("izinler ayarlandı", true, "storage + bootstrap/cache")
+	kaydet("izinler ayarlandı", izinOK, izinNot)
 	// 6) onbellek temizligi (eski sunucu yollari)
-	for _, c := range []string{"config.php", "services.php", "packages.php", "routes-v7.php"} {
-		_ = os.Remove(filepath.Join(appDir, "bootstrap", "cache", c))
-	}
+	_ = evAltiSil(home, path.Join(appRel, "bootstrap", "cache"),
+		[]string{"config.php", "services.php", "packages.php", "routes-v7.php"})
 	out, ok2 := TenantExec(ctx, sk, appDir, php, "artisan", "optimize:clear")
 	kaydet("önbellek temizlendi", ok2, sonSatirKisa(out))
 
 	artisan, _ := laravelKurulu(appDir)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "adimlar": adimlar, "kurulu": artisan,
-		"eksikler": laravelEksikler(appDir, artisan, true),
+		"eksikler": laravelEksikler(sk, appDir, artisan, true),
 	})
 }
 

@@ -9,16 +9,22 @@ package laravel
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
+	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -259,28 +265,287 @@ func gecerliRepoURL(u string) bool {
 	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "git@") || strings.HasPrefix(u, "ssh://")
 }
 
-// envOku: appRoot/.env oku. O_NOFOLLOW + düzenli-dosya + LimitReader → tenant'ın
-// .env'i /etc/girginospanel/env veya başka tenant .env'ine symlink'lemesiyle root'un
-// panel sırlarını/cross-tenant okuması VE /dev/zero OOM'u reddedilir (denetim #2/#5).
-func envOku(appDir string) (string, error) {
-	p := filepath.Join(appDir, ".env")
-	fi, err := os.Lstat(p)
+// envMaxBoyut: .env / .env.example okuma tavanı (OOM savunması).
+const envMaxBoyut = 2 << 20
+
+// envOku: appRoot/.env oku. Yol /home/<sk> köküne çapalı openat2 ile, HİÇBİR bileşende
+// symlink izlenmeden açılır (evAltiDosyaOku) → tenant'ın .env'i ya da uygulama dizininin
+// bir ara bileşenini /etc/girginospanel/env veya başka tenant dizinine symlink'lemesiyle
+// (kontrol-kullanım yarışı dahil) root'un panel sırlarını/cross-tenant okuması VE
+// /dev/zero OOM'u reddedilir (denetim #2/#5). Sahiplik denetlenmez (eski davranış).
+func envOku(sk, appDir string) (string, error) {
+	home, rel, err := evGoreli(sk, appDir)
 	if err != nil {
 		return "", err
 	}
-	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf(".env düzenli bir dosya değil")
-	}
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	b, err := evAltiDosyaOku(home, path.Join(rel, ".env"), -1, envMaxBoyut)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// ---- Ev köküne çapalı, symlink İZLEMEYEN root dosya işlemleri ----
+//
+// guvenliAppDir yalnız uygulama DİZİNİNİN string'ini kontrol anında doğrular. Root'un
+// sonradan o dizindeki DOSYALAR üzerinde yol (string) ile yaptığı os.ReadFile/os.Chmod/
+// os.Remove/chown işlemleri hem son bileşendeki hem ara bileşenlerdeki symlink'leri izler;
+// tenant bu dizinde symlink oluşturabildiği (ve kontrolden sonra takas edebildiği) için
+// root başka tenant'ın ya da sistemin dosyasına yönlendirilebilir. Aşağıdaki yardımcılar
+// yolu ev köküne göre openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS) ile TEK atomik adımda
+// çözer ve işlemi fd/*at-syscall üzerinden yapar (aynı teknik: internal/files/safeio.go,
+// internal/toplu/devir_symlink.go).
+
+// evAltiResolve: yol boyunca hiçbir symlink izlenmez, ev kökünün dışına çıkılamaz.
+const evAltiResolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS
+
+// sahiplikMaxDerinlik: özyinelemeli chown'da en çok dizin derinliği (fd tükenmesi savunması).
+const sahiplikMaxDerinlik = 64
+
+// evGoreli: /home/<sk>/... mutlak uygulama dizinini (ev kökü, köke göre yol) ikilisine ayırır.
+func evGoreli(sk, appDir string) (home, rel string, err error) {
+	if !gecerliSK(sk) {
+		return "", "", fmt.Errorf("geçersiz kullanıcı")
+	}
+	home = "/home/" + sk
+	abs := filepath.Clean(appDir)
+	if abs == home {
+		return home, ".", nil
+	}
+	if !strings.HasPrefix(abs, home+"/") {
+		return "", "", fmt.Errorf("dizin ev dizini dışında")
+	}
+	return home, strings.TrimPrefix(abs, home+"/"), nil
+}
+
+// tenantKimlik: sistem kullanıcısının uid/gid'i.
+func tenantKimlik(sk string) (uid, gid int, err error) {
+	u, err := user.Lookup(sk)
+	if err != nil {
+		return 0, 0, err
+	}
+	if uid, err = strconv.Atoi(u.Uid); err != nil {
+		return 0, 0, err
+	}
+	if gid, err = strconv.Atoi(u.Gid); err != nil {
+		return 0, 0, err
+	}
+	return uid, gid, nil
+}
+
+// evAltiAc: rel'i home köküne göre, yol boyunca HİÇBİR symlink izlemeden ve home dışına
+// çıkmadan açar; ham fd döner (çağıran kapatmalı). Home'un kendisi O_NOFOLLOW ile açılır
+// (/home root'a aittir; tenant ev girdisini takas edemez).
+func evAltiAc(home, rel string, flags int) (int, error) {
+	hf, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	defer unix.Close(hf)
+	p := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if p == "" {
+		p = "."
+	}
+	how := &unix.OpenHow{Flags: uint64(flags) | unix.O_CLOEXEC, Resolve: evAltiResolve}
+	return unix.Openat2(hf, p, how)
+}
+
+// fdDuzenliVeSahip: açılmış fd DÜZENLİ dosya mı ve (sahipUID >= 0 ise) sahibi sahipUID mi?
+// Denetim yol üzerinden değil, açılmış inode üzerinden yapılır (yarışa bağışık).
+func fdDuzenliVeSahip(fd int, ad string, sahipUID int) error {
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return fmt.Errorf("%s düzenli bir dosya değil", ad)
+	}
+	if sahipUID >= 0 && int(st.Uid) != sahipUID {
+		return fmt.Errorf("%s kiracıya ait değil", ad)
+	}
+	return nil
+}
+
+// evAltiDosyaOku: home altındaki rel dosyasını symlink izlemeden okur. Yalnız düzenli
+// dosya (FIFO/dizin/aygıt reddi), sahipUID >= 0 ise yalnız o uid'ye ait dosya, en çok max
+// bayt (fazlası hata — sessiz kesme geri-yazımda veriyi bozardı).
+func evAltiDosyaOku(home, rel string, sahipUID int, max int64) ([]byte, error) {
+	fd, err := evAltiAc(home, rel, unix.O_RDONLY|unix.O_NONBLOCK)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path.Base(rel))
+	defer f.Close()
+	if err := fdDuzenliVeSahip(fd, path.Base(rel), sahipUID); err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("%s çok büyük", path.Base(rel))
+	}
+	return b, nil
+}
+
+// evAltiChmod: symlink izlemeden, yalnız sahipUID'ye ait düzenli dosyada Fchmod.
+func evAltiChmod(home, rel string, sahipUID int, mode uint32) error {
+	fd, err := evAltiAc(home, rel, unix.O_RDONLY|unix.O_NONBLOCK)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := fdDuzenliVeSahip(fd, path.Base(rel), sahipUID); err != nil {
+		return err
+	}
+	return unix.Fchmod(fd, mode)
+}
+
+// evAltiSil: relDir dizinini symlink izlemeden açıp içindeki adları Unlinkat ile siler
+// (Unlinkat son bileşen symlink'ini izlemez; dizinleri silmez). Olmayan dosya hata değil.
+func evAltiSil(home, relDir string, adlar []string) error {
+	dfd, err := evAltiAc(home, relDir, unix.O_DIRECTORY|unix.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dfd)
+	var ilk error
+	for _, ad := range adlar {
+		if ad == "" || ad == "." || ad == ".." || strings.Contains(ad, "/") {
+			continue
+		}
+		if err := unix.Unlinkat(dfd, ad, 0); err != nil && !errors.Is(err, unix.ENOENT) && ilk == nil {
+			ilk = err
+		}
+	}
+	return ilk
+}
+
+// evAltiMkdirHepsi: `mkdir -p home/rel`in symlink-güvenli karşılığı. Her bileşen home'dan
+// başlayarak O_NOFOLLOW ile açılır (bileşen symlink ise ELOOP → durur, dışarıda dizin
+// yaratılmaz); eksik bileşen Mkdirat ile yaratılıp fd üzerinden tenant'a verilir. Göç
+// kalıntısı root-sahipli üst dizinde (ör. bootstrap/) de çalışır.
+func evAltiMkdirHepsi(home, rel string, uid, gid int) error {
+	fd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	p := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if p == "" {
+		unix.Close(fd)
+		return nil
+	}
+	for _, parca := range strings.Split(p, "/") {
+		yeni := false
+		if err := unix.Mkdirat(fd, parca, 0o755); err == nil {
+			yeni = true
+		} else if !errors.Is(err, unix.EEXIST) {
+			unix.Close(fd)
+			return err
+		}
+		nfd, err := unix.Openat(fd, parca, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		unix.Close(fd)
+		if err != nil {
+			return err
+		}
+		if yeni {
+			_ = unix.Fchown(nfd, uid, gid)
+		}
+		fd = nfd
+	}
+	unix.Close(fd)
+	return nil
+}
+
+// evAltiSahiplikVer: `chown -R uid:gid home/rel`in symlink-güvenli karşılığı. Kök dizin
+// openat2 ile çapalanır; alt ağaç fd üzerinden yürünür: dizinler O_NOFOLLOW ile açılır,
+// symlink'lerin YALNIZ kendisi (lchown) değiştirilir, hedefleri asla. Başka yerde de
+// bağlı (Nlink>1) ve kiracıya ait olmayan dosyalar atlanır (hardlink ile başka inode'u
+// kiracıya devretme savunması).
+func evAltiSahiplikVer(home, rel string, uid, gid int) error {
+	fd, err := evAltiAc(home, rel, unix.O_DIRECTORY|unix.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	d := os.NewFile(uintptr(fd), path.Base(rel))
+	defer d.Close()
+	return sahiplikAgaci(d, uid, gid, 0)
+}
+
+func sahiplikAgaci(d *os.File, uid, gid, derinlik int) error {
+	if derinlik > sahiplikMaxDerinlik {
+		return fmt.Errorf("dizin ağacı çok derin")
+	}
+	dfd := int(d.Fd())
+	if err := unix.Fchown(dfd, uid, gid); err != nil {
+		return err
+	}
+	adlar, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	var ilk error
+	not := func(e error) {
+		if e != nil && ilk == nil {
+			ilk = e
+		}
+	}
+	for _, ad := range adlar {
+		var st unix.Stat_t
+		if err := unix.Fstatat(dfd, ad, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			continue // yarışta kaybolmuş olabilir
+		}
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFDIR:
+			cfd, err := unix.Openat(dfd, ad, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+			if err != nil {
+				continue // bu arada symlink'e takas edildiyse ELOOP/ENOTDIR → atla
+			}
+			c := os.NewFile(uintptr(cfd), ad)
+			not(sahiplikAgaci(c, uid, gid, derinlik+1))
+			c.Close()
+		case unix.S_IFLNK:
+			not(unix.Fchownat(dfd, ad, uid, gid, unix.AT_SYMLINK_NOFOLLOW)) // yalnız link
+		default:
+			if st.Nlink > 1 && int(st.Uid) != uid {
+				continue
+			}
+			not(unix.Fchownat(dfd, ad, uid, gid, unix.AT_SYMLINK_NOFOLLOW))
+		}
+	}
+	return ilk
+}
+
+// envOrnektenUret: uygulama dizininde .env YOKSA .env.example'dan üretir.
+// .env.example root tarafından yalnız ev köküne çapalı, symlink izlenmeden ve yalnız
+// KİRACIYA AİT (uid) düzenli dosya ise okunur; içerik yaz() ile yazılır (üretimde envYaz:
+// tenant uid'siyle tee). Eskiden düz os.ReadFile(.env.example) root olarak symlink izlerdi
+// → root'un okuyabildiği her dosya (başka tenant .env'i, /etc/girginospanel/env) tenant'ın
+// .env'ine kopyalanıp GET /laravel/env ile okunabilirdi.
+// Dönüş: calisti=false → .env zaten var (adım kaydı yok).
+func envOrnektenUret(home, appRel string, uid int, yaz func(string) error) (calisti, ok bool, not string) {
+	dfd, err := evAltiAc(home, appRel, unix.O_DIRECTORY|unix.O_RDONLY)
+	if err != nil {
+		return true, false, "uygulama dizini açılamadı: " + err.Error()
+	}
+	var st unix.Stat_t
+	e := unix.Fstatat(dfd, ".env", &st, unix.AT_SYMLINK_NOFOLLOW)
+	unix.Close(dfd)
+	if e == nil {
+		return false, true, "" // .env (symlink dahil) zaten var → dokunma
+	}
+	b, err := evAltiDosyaOku(home, path.Join(appRel, ".env.example"), uid, envMaxBoyut)
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return true, false, ".env.example yok"
+		}
+		return true, false, ".env.example okunamadı: " + err.Error()
+	}
+	if err := yaz(string(b)); err != nil {
+		return true, false, err.Error()
+	}
+	return true, true, ".env.example kopyalandı"
 }
 
 // envYaz: .env'i TENANT OLARAK yaz (runuser tee) → doğru sahiplik + uid-confined

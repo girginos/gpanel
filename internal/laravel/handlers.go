@@ -144,7 +144,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"kurulu":             artisan,
 		"otomatik_algilandi": otomatikAlgilandi,
-		"eksikler":           laravelEksikler(appDir, artisan, composerJSON),
+		"eksikler":           laravelEksikler(sk, appDir, artisan, composerJSON),
 		"kayit_var":          k.Mevcut,
 		"app_root":           appRoot,
 		"kullanici":          sk,
