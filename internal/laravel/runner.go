@@ -330,6 +330,8 @@ const sahiplikMaxDerinlik = 64
 
 // evKoku: kiracı ev dizinlerinin kökü. Yalnız testler değiştirir (t.TempDir sahte evi);
 // üretimde daima /home. evAlti* çağıran her yol ev kökünü evGoreli/evDizini'den alır.
+// Bu dosyadaki ve gorevkuyruk.go'daki (cronDizini) dikişlerin üretim değeri ve test dışı
+// kodda yeniden bağlanmaması TestKaynakKoruma_DikisDegerleri ile kilitli.
 var evKoku = "/home"
 
 // kimlikBul: sistem kullanıcısı → uid/gid. Test dikişi (üretimde tenantKimlik).
@@ -659,9 +661,12 @@ func envOrnektenUret(home, appRel string, uid int, yaz func(string) error) (cali
 	return true, true, ".env.example kopyalandı"
 }
 
-// envYazici: PUT /laravel/env'in yazıcısı. Test dikişi (handler testleri runuser
-// çalıştırmaz); üretimde daima envYaz. Kaynak koruma testi değerin envYaz olduğunu ve
-// test dışı kodda yeniden atanmadığını kilitler.
+// envYazici: PUT /laravel/env'in yazıcısı. Test dikişi: handler testleri
+// (handler_davranis_test.go) onu sahteyle değiştirir ki runuser çalışmasın; üretimde daima
+// envYaz. Kilitler: TestKaynakKoruma_DikisDegerleri değerin tam `envYaz` olduğunu ve test
+// dışı kodda hiçbir yolla (atama/init/&/gölge/linkname) yeniden bağlanmadığını;
+// TestKaynakKoruma_RootDosyaIslemleriCapali Handlers.EnvYaz'ın buradan yazdığını ve
+// dikişin gösterdiği fonksiyona inerek yol tabanlı root işlemi olmadığını denetler.
 var envYazici = envYaz
 
 // envYaz: .env'i TENANT OLARAK yaz (runuser tee) → doğru sahiplik + uid-confined

@@ -13,6 +13,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path"
 	"path/filepath"
@@ -452,18 +453,24 @@ type kaynakGovde struct {
 
 type paketKaynak struct {
 	fset      *token.FileSet
+	dosyalar  []*ast.File            // test dışı dosyalar
 	fonk      map[string]kaynakGovde // "ad" ya da "Alici.ad"
 	yontem    map[string][]string    // yöntem adı → anahtarlar
 	tehlikeli map[string]bool        // paket düzeyinde yasak seçiciye takma ad (var x = os.ReadFile)
+	takma     map[string][]string    // paket düzeyi var → initializer'ındaki adlar (var envYazici = envYaz)
 }
 
 // paketKaynagiOku: paketin test dışı .go dosyalarını ayrıştırır. Ayrıca paket düzeyinde
 // bir yasak seçiciye (os.ReadFile gibi) takma ad veren tanımlayıcıları toplar: aksi halde
 // `var dosyaOku = os.ReadFile; ... dosyaOku(p)` ile handler yol tabanlı okumayı gizleyebilir
 // (denetim boşluğu a). os.Stat/os.Lstat takma adı serbesttir (yalnız varlık yoklaması).
+// Her paket düzeyi var'ın initializer'ındaki adlar da (takma) toplanır: geçişli tarama bir
+// dikiş/takma ad çağrısında onun GÖSTERDİĞİ fonksiyona iner (`var envYazici = kokYaz` →
+// kokYaz taranır); yoksa dikiş üzerinden root yazıcıya bağlanmak taramayı atlatırdı.
 func paketKaynagiOku(t *testing.T) paketKaynak {
 	t.Helper()
-	p := paketKaynak{fset: token.NewFileSet(), fonk: map[string]kaynakGovde{}, yontem: map[string][]string{}, tehlikeli: map[string]bool{}}
+	p := paketKaynak{fset: token.NewFileSet(), fonk: map[string]kaynakGovde{}, yontem: map[string][]string{},
+		tehlikeli: map[string]bool{}, takma: map[string][]string{}}
 	dosyalar, err := filepath.Glob("*.go")
 	if err != nil || len(dosyalar) == 0 {
 		t.Fatalf("kaynak bulunamadı: %v", err)
@@ -473,10 +480,11 @@ func paketKaynagiOku(t *testing.T) paketKaynak {
 		if strings.HasSuffix(d, "_test.go") {
 			continue
 		}
-		f, err := parser.ParseFile(p.fset, d, nil, 0)
+		f, err := parser.ParseFile(p.fset, d, nil, parser.ParseComments)
 		if err != nil {
 			t.Fatal(err)
 		}
+		p.dosyalar = append(p.dosyalar, f)
 		paket := map[string]string{}
 		for _, im := range f.Imports {
 			yol := strings.Trim(im.Path.Value, `"`)
@@ -502,6 +510,20 @@ func paketKaynagiOku(t *testing.T) paketKaynak {
 							for _, ad := range vs.Names {
 								p.tehlikeli[ad.Name] = true
 							}
+						}
+					}
+					for i, ad := range vs.Names {
+						degerler := vs.Values
+						if len(vs.Values) == len(vs.Names) {
+							degerler = vs.Values[i : i+1]
+						}
+						for _, deger := range degerler {
+							ast.Inspect(deger, func(n ast.Node) bool {
+								if id, ok := n.(*ast.Ident); ok {
+									p.takma[ad.Name] = append(p.takma[ad.Name], id.Name)
+								}
+								return true
+							})
 						}
 					}
 				}
@@ -579,6 +601,30 @@ func (p paketKaynak) incele(g kaynakGovde, izinli func(string) bool) (cagri, adl
 	return cagri, adlar, ihlal
 }
 
+// referanslar: gövdede ÇAĞRILMADAN değer olarak kullanılan adlar — çıplak tanımlayıcılar
+// (`f := kokYaz; f(...)`) ve içe aktarma olmayan seçiciler (`m := h.kokYaz`). Geçişli
+// tarama bunlara da iner: yoksa bir fonksiyonu değer olarak alıp çağırmak taramayı
+// atlatırdı. Aşırı yaklaşım zararsızdır (yalnız paket fonksiyonu/yöntemi/var adları izlenir).
+func (p paketKaynak) referanslar(g kaynakGovde) map[string]bool {
+	ref := map[string]bool{}
+	secici := map[*ast.Ident]bool{}
+	ast.Inspect(g.fd.Body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.SelectorExpr:
+			secici[x.Sel] = true
+			if id, ok := x.X.(*ast.Ident); !ok || g.paket[id.Name] == "" {
+				ref[x.Sel.Name] = true
+			}
+		case *ast.Ident:
+			if !secici[x] {
+				ref[x.Name] = true
+			}
+		}
+		return true
+	})
+	return ref
+}
+
 // Kiracının denetlediği yollarda root olarak çalışan fonksiyonlar ve paket içinde onlardan
 // erişilen HER fonksiyon yol tabanlı os/ioutil/exec/unix/syscall kullanamaz; yalnız varlık
 // yoklaması (os.Stat/os.Lstat) serbesttir. Dosya işlemi ancak çapalı yardımcılar (evAlti*,
@@ -590,11 +636,13 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 	// çalışır (envYaz/TenantExec: runuser — TestKaynakKoruma_KiraciCapali kilitler) ya da
 	// yalnız kök-sahipli sistem yoluna yazar (cronYaz/cronSil: id türevli — aynı test
 	// kilitler) ya da ev köküne çapalı fd tabanlıdır (evAlti*: fd-tabanlı test kilitler).
+	// Dikişler (envYazici, kimlikBul) burada DEĞİL: tarama onların gösterdiği fonksiyona
+	// iner (takma) ve değerleri TestKaynakKoruma_DikisDegerleri ile kilitlidir.
 	guvenli := map[string]bool{
 		"evAltiAc": true, "evAltiDosyaOku": true, "evAltiChmod": true, "evAltiSil": true,
 		"evAltiMkdirHepsi": true, "evAltiSahiplikVer": true, "sahiplikAgaci": true, "sahiplikGirdi": true,
 		"fdDuzenliVeSahip": true, "envOrnektenUret": true, "dizinBos": true, "yokHatasi": true,
-		"envYaz": true, "envYazici": true, "TenantExec": true, "tenantExecEnv": true, "tenantKimlik": true,
+		"envYaz": true, "TenantExec": true, "tenantExecEnv": true, "tenantKimlik": true,
 		"cronYaz": true, "cronSil": true,
 	}
 	// Handler kiracı kimliğini/ev yolunu kendisi kurmaz, çapalı yardımcıları doğrudan
@@ -617,8 +665,10 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 		{"laravelEksikler", []string{"envOku"}, nil},
 		{"Handlers.EnvOku", []string{"envOku"}, nil},
 		// EnvYaz üzerine yazmadan ÖNCE envYazilabilir çağırmalı (güvensiz .env'i ezmeyi
-		// engeller) ve yazımı envYazici seam'i üzerinden yapmalı; envYaz'a doğrudan dönerse
-		// (ve envYazilabilir silinirse) burada düşer.
+		// engeller) ve yazımı envYazici dikişi üzerinden yapmalı (handler testleri onu
+		// sahteler); envYaz'a doğrudan dönerse ya da envYazilabilir silinirse burada düşer.
+		// Dikişin değeri (envYaz) TestKaynakKoruma_DikisDegerleri ile kilitli; geçişli
+		// tarama dikişin gösterdiği fonksiyona da iner.
 		{"Handlers.EnvYaz", []string{"envYazilabilir", "envYazici"}, []string{"envYaz"}},
 		{"ensureLogDir", []string{"evDizini", "kimlikBul", "evAltiMkdirHepsi"}, nil},
 		// Schedule: kiracının denetlediği ~/logs'a root dokunuşu YALNIZ ensureLogDir
@@ -655,9 +705,24 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 				t.Errorf("%s: %s doğrudan kullanılmamalı (dosya işlemi yalnız çapalı/kiracı yardımcıları üzerinden)", k.kok, y)
 			}
 		}
-		// Geçişli tarama: kökten paket içinde erişilen her fonksiyon.
+		// Geçişli tarama: kökten paket içinde erişilen her fonksiyon — çağrılan ya da değer
+		// olarak alınan (referanslar) fonksiyon/yöntem ve paket düzeyi var'ın (dikiş/takma
+		// ad) initializer'ında gösterilen fonksiyon.
 		ziyaret := map[string]bool{}
 		kuyruk := []string{k.kok}
+		izle := func(ad string) {
+			hedef := append([]string(nil), p.yontem[ad]...)
+			if _, ok := p.fonk[ad]; ok {
+				hedef = append(hedef, ad)
+			} else if _, ok := p.takma[ad]; ok {
+				hedef = append(hedef, ad)
+			}
+			for _, h := range hedef {
+				if !guvenli[h] && !ziyaret[h] {
+					kuyruk = append(kuyruk, h)
+				}
+			}
+		}
 		for len(kuyruk) > 0 {
 			a := kuyruk[0]
 			kuyruk = kuyruk[1:]
@@ -665,7 +730,18 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 				continue
 			}
 			ziyaret[a] = true
-			c, adlarA, ihlal := p.incele(p.fonk[a], serbest)
+			g, ok := p.fonk[a]
+			if !ok {
+				// Paket düzeyi var (ör. envYazici): gösterdiği adlara in.
+				if p.tehlikeli[a] {
+					t.Errorf("%s üzerinden paket düzeyi yasak-seçici takma adı %q erişiliyor", k.kok, a)
+				}
+				for _, ad := range p.takma[a] {
+					izle(ad)
+				}
+				continue
+			}
+			c, adlarA, ihlal := p.incele(g, serbest)
 			for _, i := range ihlal {
 				t.Errorf("%s (%s üzerinden erişiliyor): yol tabanlı %s", a, k.kok, i)
 			}
@@ -676,15 +752,10 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 				}
 			}
 			for ad := range c {
-				hedef := append([]string(nil), p.yontem[ad]...)
-				if _, ok := p.fonk[ad]; ok {
-					hedef = append(hedef, ad)
-				}
-				for _, h := range hedef {
-					if !guvenli[h] && !ziyaret[h] {
-						kuyruk = append(kuyruk, h)
-					}
-				}
+				izle(ad)
+			}
+			for ad := range p.referanslar(g) {
+				izle(ad)
 			}
 		}
 	}
@@ -765,6 +836,129 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 			}
 			if len(ce.Args) == 0 || !cagriAdi(ce.Args[0], "cronDPath") {
 				t.Errorf("%s: %s yol argümanı cronDPath(...) değil (kök dışına yazma riski)", ad, sel)
+			}
+			return true
+		})
+	}
+}
+
+// TestKaynakKoruma_DikisDegerleri: test dikişleri (testlerin sahtelediği paket düzeyi
+// değişkenler) üretimde DAİMA güvenli değerlerinde kalmalı. Her biri test dışı kodda TAM
+// BİR KEZ, beklenen initializer ile tanımlanır ve test dışı kodda hiçbir yolla yeniden
+// bağlanamaz: atama (init() ve paket düzeyi kapanışlar dahil), ++/--, adres alma (&x →
+// *p = ...), range/select/type-switch hedefi, yerel gölgeleme (x := / var x / parametre /
+// alıcı adı) ya da go:linkname. Aksi halde ör. `var envYazici = kokYaz` veya
+// `func init() { envYazici = kokYaz }` ile PUT /laravel/env root olarak symlink izleyen bir
+// yazıcıya bağlanırdı; davranış testleri dikişi sahteyle değiştirdiği için bunu göremez.
+func TestKaynakKoruma_DikisDegerleri(t *testing.T) {
+	beklenen := map[string]string{
+		"envYazici":    "envYaz",       // kiracı uid'siyle runuser tee (KiraciCapali kilitler)
+		"kimlikBul":    "tenantKimlik", // user.Lookup
+		"evKoku":       `"/home"`,
+		"cronDizini":   "cronDDizin",
+		"cronDDizin":   `"/etc/cron.d"`,
+		"yarisKancasi": "", // üretimde nil
+	}
+	p := paketKaynagiOku(t)
+	tanim := map[string]int{}
+	ustDuzey := map[*ast.Ident]bool{}
+	for _, f := range p.dosyalar {
+		for _, dc := range f.Decls {
+			gd, ok := dc.(*ast.GenDecl)
+			if !ok || (gd.Tok != token.VAR && gd.Tok != token.CONST) {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, ad := range vs.Names {
+					b, izlenen := beklenen[ad.Name]
+					if !izlenen {
+						continue
+					}
+					ustDuzey[ad] = true
+					tanim[ad.Name]++
+					deger := ""
+					switch {
+					case len(vs.Values) == len(vs.Names):
+						deger = types.ExprString(vs.Values[i])
+					case len(vs.Values) != 0:
+						deger = "<çoklu değer>"
+					}
+					if deger != b {
+						t.Errorf("%s: dikiş %s = %q, üretimde %q olmalı", p.fset.Position(ad.Pos()), ad.Name, deger, b)
+					}
+				}
+			}
+		}
+	}
+	for ad := range beklenen {
+		if tanim[ad] != 1 {
+			t.Errorf("dikiş %s test dışı kodda paket düzeyinde %d kez tanımlı; tam 1 olmalı", ad, tanim[ad])
+		}
+	}
+	bagla := func(e ast.Expr, nasil string) {
+		for {
+			pe, ok := e.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			e = pe.X
+		}
+		if id, ok := e.(*ast.Ident); ok && !ustDuzey[id] {
+			if _, izlenen := beklenen[id.Name]; izlenen {
+				t.Errorf("%s: dikiş %s test dışı kodda %s (yalnız testler değiştirebilir)", p.fset.Position(id.Pos()), id.Name, nasil)
+			}
+		}
+	}
+	alanlar := func(fl *ast.FieldList, nasil string) {
+		if fl == nil {
+			return
+		}
+		for _, f := range fl.List {
+			for _, ad := range f.Names {
+				bagla(ad, nasil)
+			}
+		}
+	}
+	for _, f := range p.dosyalar {
+		for _, cg := range f.Comments {
+			for _, c := range cg.List {
+				if strings.HasPrefix(c.Text, "//go:linkname") {
+					t.Errorf("%s: go:linkname test dışı kodda yasak (dikişler dışarıdan bağlanabilir)", p.fset.Position(c.Pos()))
+				}
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.AssignStmt:
+				for _, l := range x.Lhs {
+					bagla(l, "atanıyor/gölgeleniyor")
+				}
+			case *ast.IncDecStmt:
+				bagla(x.X, "değiştiriliyor")
+			case *ast.UnaryExpr:
+				if x.Op == token.AND {
+					bagla(x.X, "adresi alınıyor")
+				}
+			case *ast.RangeStmt:
+				if x.Key != nil {
+					bagla(x.Key, "range hedefi")
+				}
+				if x.Value != nil {
+					bagla(x.Value, "range hedefi")
+				}
+			case *ast.ValueSpec:
+				for _, ad := range x.Names {
+					bagla(ad, "yeniden tanımlanıyor (gölge)")
+				}
+			case *ast.FuncDecl:
+				alanlar(x.Recv, "alıcı adıyla gölgeleniyor")
+			case *ast.FuncType:
+				alanlar(x.Params, "parametreyle gölgeleniyor")
+				alanlar(x.Results, "sonuç adıyla gölgeleniyor")
 			}
 			return true
 		})

@@ -65,7 +65,9 @@ func ensureLogDir(sk string) error {
 
 // ---- Zamanlanmış görev (schedule:run — dakikada bir, /etc/cron.d) ----
 
-// cronDizini: cron.d dizini. Yalnız testler değiştirir (t.TempDir); üretimde /etc/cron.d.
+// cronDizini: cron.d dizini. Yalnız testler değiştirir (t.TempDir; handler_davranis_test.go);
+// üretimde /etc/cron.d — değeri ve test dışı kodda yeniden bağlanmaması
+// TestKaynakKoruma_DikisDegerleri ile kilitli.
 var cronDizini = cronDDizin
 
 func cronDPath(id int64) string { return cronDizini + "/girginos-laravel-" + fmt.Sprint(id) }
@@ -110,7 +112,8 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 	// 🔴 Kiracının denetlediği yollarda root dosya işlemi YALNIZ ensureLogDir üzerinden
 	// (ev köküne çapalı, symlink izlemeden). Bu gövdede ve buradan erişilen fonksiyonlarda
 	// yol tabanlı os/exec (MkdirAll, chown, os.Chown ...) kaynak koruma testiyle yasak;
-	// davranış handler testinde (geçici DB + sahte ev) kilitli.
+	// davranış TestScheduleHandler_LogDiziniVeCron'da (bellek içi sahte DB + sahte ev +
+	// cronDizini dikişi) kilitli.
 	if req.Aktif {
 		home, err := evDizini(sk)
 		if err != nil {
