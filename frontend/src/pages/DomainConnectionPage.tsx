@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { parolaUret, panoyaKopyala } from '@/lib/parola'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
@@ -40,6 +41,22 @@ const CONN_EN: Record<string, string> = {
   "Kullanıcı:": "User:",
   "Kapat": "Close",
   "Kopyalandı": "Copied",
+  "Oluştur": "Generate",
+  "Güçlü parola oluştur": "Generate strong password",
+  "Parolayı göster": "Show password",
+  "Parolayı gizle": "Hide password",
+  "Göster": "Show",
+  "Gizle": "Hide",
+  "Parolayı kopyala": "Copy password",
+  "Kopyala": "Copy",
+  "Parola panoya kopyalandı": "Password copied to clipboard",
+  "Kaydetmeden önce kopyalayın — kaydedildikten sonra bir daha görüntülenemez.": "Copy it before saving — it cannot be viewed again after it is saved.",
+  "“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.": "Use “Generate” to create a strong 16-character password.",
+  "Yeni parola": "New password",
+  "Yeni parola girin (≥8)": "Enter a new password (≥8)",
+  "Parola en az 8 karakter olmalı": "Password must be at least 8 characters",
+  "Parola güncellenemedi": "Failed to update password",
+  "Parolayı güncelle": "Update password",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CONN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -227,11 +244,23 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
   const toast = useToast()
   const [parola, setParola] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
-  const [, setHata] = useState<string | null>(null)
+  const [goster, setGoster] = useState(false)
+  const [kopyalandi, setKopyalandi] = useState(false)
+
+  // Kripto-rastgele 16 karakter (lib/parola: karıştırılan 0/O, 1/l harfleri yok). Üretilince
+  // AÇIK gösterilir: kullanıcı kaydetmeden önce görüp kopyalayabilsin — kayıttan sonra
+  // parola bir daha görüntülenemez.
+  function uret() {
+    setParola(parolaUret(16)); setGoster(true); setKopyalandi(false)
+  }
+  async function kopyala() {
+    if (await panoyaKopyala(parola)) { setKopyalandi(true); setTimeout(() => setKopyalandi(false), 2000) }
+    else toast.hata(cevir("İşlem başarısız"), cevir("Panoya kopyalanamadı"))
+  }
 
   async function kaydet() {
     if (parola.trim().length < 8) { toast.hata(cevir("İşlem başarısız"), cevir("Parola en az 8 karakter olmalı")); return }
-    setIsleniyor(true); setHata(null)
+    setIsleniyor(true)
     try {
       if (tip === 'ftp') {
         await api.put(`/domains/${domainId}/ftp/password`, { parola })
@@ -244,7 +273,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
       }
       toast.basari(cevir("Parola güncellendi"))
       onKapat()
-    } catch (e) { const m = apiHata(e, cevir("Parola güncellenemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
+    } catch (e) { toast.hata(cevir("İşlem başarısız"), apiHata(e, cevir("Parola güncellenemedi"))) }
     finally { setIsleniyor(false) }
   }
 
@@ -265,12 +294,32 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
           <span className="text-slate-500 dark:text-slate-500">{cevir("Kullanıcı:")}</span> <code className="font-mono text-slate-900 dark:text-slate-100">{user}</code>
         </div>
 
-        {/* Yeni parola — kullanıcı yazar, gösterilmez (write-only) */}
+        {/* Yeni parola — yazılır ya da "Oluştur" ile üretilir; sunucu kaydettikten sonra
+            geri okunamaz (write-only), bu yüzden kopyalama burada. */}
         <div>
-          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Yeni parola")}</label>
-          <input type="password" value={parola} onChange={e => setParola(e.target.value)} autoComplete="new-password"
-            placeholder={cevir("Yeni parola girin (≥8)")}
-            className="w-full px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm" />
+          <label htmlFor="yeni-parola" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Yeni parola")}</label>
+          <div className="flex gap-2">
+            <input id="yeni-parola" type={goster ? 'text' : 'password'} value={parola}
+              onChange={e => { setParola(e.target.value); setKopyalandi(false) }} autoComplete="new-password"
+              placeholder={cevir("Yeni parola girin (≥8)")} spellCheck={false}
+              className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm font-mono" />
+            <Button type="button" variant="outlined" ikon={I.anahtar} onClick={uret} disabled={isleniyor}
+              className="shrink-0" title={cevir("Güçlü parola oluştur")}>
+              {cevir("Oluştur")}
+            </Button>
+            <Button type="button" variant="outlined" isIcon ikon={goster ? I.gozKapali : I.goz}
+              onClick={() => setGoster(v => !v)} className="shrink-0 w-10"
+              aria-label={goster ? cevir("Parolayı gizle") : cevir("Parolayı göster")}
+              title={goster ? cevir("Gizle") : cevir("Göster")} />
+            <Button type="button" variant="outlined" isIcon ikon={I.kopya} disabled={!parola} onClick={kopyala}
+              className="shrink-0 w-10" aria-label={cevir("Parolayı kopyala")} title={cevir("Kopyala")} />
+          </div>
+          <p className="text-[11px] mt-1 min-h-4 text-slate-400 dark:text-slate-500" aria-live="polite">
+            {kopyalandi
+              ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Ikon d={I.onay} className="size-3 shrink-0" />{cevir("Parola panoya kopyalandı")}</span>
+              : parola ? cevir("Kaydetmeden önce kopyalayın — kaydedildikten sonra bir daha görüntülenemez.")
+              : cevir("“Oluştur” ile 16 karakterlik güçlü parola üretebilirsiniz.")}
+          </p>
         </div>
     </Modal>
   )
