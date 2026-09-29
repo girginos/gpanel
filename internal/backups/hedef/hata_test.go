@@ -99,6 +99,8 @@ func TestSinifla(t *testing.T) {
 		{errors.New("uzaktan indirme: open: yedek-deposu.gecersiz-ornek.invalid: Name or service not known"), KategoriAg},
 		{errors.New("lftp: Login failed: 530 Login incorrect."), KategoriKimlik},
 		{errors.New("user@host: Permission denied (publickey,password)."), KategoriKimlik},
+		{errors.New("curl: (67) Access denied: 530"), KategoriKimlik},
+		{errors.New("get: Access failed: 550 Failed to open file. (c_x.tar.gz)"), KategoriBulunamadi},
 		{errors.New("put: Access failed: 553 Could not create file. (Permission denied)"), KategoriErisim},
 		{errors.New("Host key verification failed."), KategoriTLS},
 		{errors.New("Fatal error: Certificate verification: Not trusted"), KategoriTLS},
