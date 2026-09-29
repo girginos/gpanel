@@ -22,17 +22,22 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/maphash"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +49,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/sys/unix"
 
+	"girginospanel/internal/antivirus"
 	"girginospanel/internal/avayar"
 	"girginospanel/internal/avmotor"
 	"girginospanel/internal/wpsaglama"
@@ -138,6 +144,9 @@ type ajan struct {
 	yuk      int64 // atomik: sistem load1 × 100 (dinamik throttle)
 	domCache *domainCache
 	kaynak   string // panel | ajan-zamanli | ajan-izle
+	// karantina — oto-karantina işlevi. nil → karantinaAl (gerçek /home). Test
+	// dikişi: testler t.TempDir kökü + sahte uid ile karantinaAlEv verir.
+	karantina func(yol string) (string, error)
 
 	mu           sync.Mutex
 	atlanan      int // RapidScan: degismedigi icin atlanan dosya
@@ -373,13 +382,41 @@ func (a *ajan) dosyaIsle(yol string) {
 		}
 		return
 	}
-	a.bulguKaydet(yol, b)
+	a.bulguKaydet(yol, b, kipTam)
+}
+
+// bulguKip — bir bulgunun kaynağına ne kadar güvenildiği; kayıt davranışını belirler.
+type bulguKip int
+
+const (
+	// kipTam — doğrulanmış tespit: oto-karantina (ayar açıksa) + kiracı alanına kayıt.
+	kipTam bulguKip = iota
+	// kipKarantinasiz — yol GERÇEK (Go yürüyüşünden) ama taşınmaz: kontrol
+	// karakterli ad; kiracı alanına kaydedilir, elle incelenir.
+	kipKarantinasiz
+	// kipDogrulanamadi — clamscan çıktısı kendi özetiyle uyuşmadı: satırların
+	// dosyalara bire bir karşılık geldiğine güvenilemez → taşınmaz, KİRACIYA
+	// ATFEDİLMEZ (domain_id=0, yalnız yönetici görür).
+	kipDogrulanamadi
+)
+
+func (k bulguKip) otoKarantina() bool  { return k == kipTam }
+func (k bulguKip) kiraciyaAtfet() bool { return k != kipDogrulanamadi }
+
+// bulguDomain — bulgunun yazılacağı domain_id. Doğrulanamayan bulgu hiçbir
+// kiracıya yazılmaz (0 = panel-geneli/yönetici).
+func (a *ajan) bulguDomain(yol string, kip bulguKip) int64 {
+	if !kip.kiraciyaAtfet() || a.domCache == nil {
+		return 0
+	}
+	return a.domCache.domainID(yol)
 }
 
 // bulguKaydet — tespit edilen bulguyu kaydeder: panel listesi (+json) ve otonom
 // modda (--izle / zamanli --tara) oto-karantina + DB + bildirim + attack-chain
-// olayi. Hem avmotor hem clamav yolu bunu ortak kullanir.
-func (a *ajan) bulguKaydet(yol string, b avmotor.Bulgu) {
+// olayi. Hem avmotor hem clamav yolu bunu ortak kullanir; kip kaynağın
+// güvenilirliğini taşır (bkz. bulguKip).
+func (a *ajan) bulguKaydet(yol string, b avmotor.Bulgu, kip bulguKip) {
 	a.mu.Lock()
 	a.bulunan++
 	a.bulgular = append(a.bulgular, b)
@@ -397,19 +434,20 @@ func (a *ajan) bulguKaydet(yol string, b avmotor.Bulgu) {
 	// alinmaz -- silmek/tasimak siteyi bozar. Cekirdek tespiti RAPORLANIR;
 	// operator `wp core verify-checksums` ile onarir.
 	karantinaYol := ""
-	if a.ayar.OtoKarantina && !cekirdekDosya(yol) {
-		if h, err := karantinaAl(yol); err != nil {
-			log.Printf("karantina basarisiz %s: %v", yol, err)
+	if kip.otoKarantina() && a.ayar.OtoKarantina && !cekirdekDosya(yol) {
+		kar := a.karantina
+		if kar == nil {
+			kar = karantinaAl
+		}
+		if h, err := kar(yol); err != nil {
+			log.Printf("karantina basarisiz %s: %v", gosterim(yol), err)
 		} else {
 			karantinaYol = h
 		}
 	}
 
 	// 🔴 DB'YE YAZ: panel görsün. Tarama kaydı yoksa (DB yok) sessizce atlanır.
-	var domID int64
-	if a.domCache != nil {
-		domID = a.domCache.domainID(yol)
-	}
+	domID := a.bulguDomain(yol, kip)
 	bulguID := bulguYaz(a.db, a.taramaID, domID, b, karantinaYol)
 
 	// 🔴 BİLDİRİM: müşteriye/panele akıt. domID>0 → müşteri, 0 → panel-geneli.
@@ -427,9 +465,10 @@ func (a *ajan) bulguKaydet(yol string, b avmotor.Bulgu) {
 		baslik = alan + " alanında zararlı dosya " + eylem
 	}
 	// SEL KORUMASI: domain başına okunmamış TEK toplu bildirim (bkz. db.go).
-	bildirimYazAVToplu(a.db, seviye, baslik, filepath.Base(yol), domID, bulguID)
+	// Ad gosterim() ile: kontrol karakterli ad bildirim metnine ham girmez.
+	bildirimYazAVToplu(a.db, seviye, baslik, gosterim(filepath.Base(yol)), domID, bulguID)
 	// FAZ2 attack-chain: zararlı dosya = File Write aşaması.
-	olayYaz(a.db, domID, "dosya", "dosya_yazma", "kritik", filepath.Base(yol), yol, 0, "av_bulgu", bulguID)
+	olayYaz(a.db, domID, "dosya", "dosya_yazma", "kritik", gosterim(filepath.Base(yol)), yol, 0, "av_bulgu", bulguID)
 }
 
 // clamBin — clamscan yolu (clamav modu).
@@ -451,58 +490,384 @@ func (a *ajan) clamavTarama(kokler []string) {
 		a.ozetYaz(basla, kokler)
 		return
 	}
-	haric := a.ayar.HaricListesi()
-	for _, kok := range kokler {
-		a.clamKok(kok, haric)
-	}
+	a.clamIsle(kokler, a.ayar.HaricListesi())
 	if !a.json {
 		taramaBitir(a.db, a.taramaID, a.taranan, a.bulunan)
 	}
 	a.ozetYaz(basla, kokler)
 }
 
-// clamKok — tek kok icin clamscan -r calistirir; FOUND satirlarini bulguKaydet'e
-// verir, "Scanned files:" ozetinden taranan sayisini toplar.
-func (a *ajan) clamKok(kok string, haric []string) {
-	args := []string{"-r", "-i", "--stdout", "--max-filesize=25M", "--max-scansize=1024M"}
-	for _, h := range haric {
-		if h != "" {
-			args = append(args, "--exclude-dir="+h)
+// ── clamav: Go yürüyüşü + --file-list + doğrulanmış çıktı ──────────────────
+//
+// 🔴 NEDEN `clamscan -r <kök>` DEĞİL: clamscan 1.4.3 dosya adlarını KAÇIŞLAMADAN
+// basar ve eski ayrıştırıcı çıktıyı "\n" ile bölüp SON ": "'dan öncesini yol
+// sayıyordu. Adında satır sonu olan bir dizin, çıktıya başka bir kiracının meşru
+// dosyası için ek bir "<yol>: <imza> FOUND" satırı ekleyebiliyordu (gözden geçirmede
+// /tmp'de doğrulandı): kiraciBul o yoldan KURBANIN sk'sini türetiyor, dosya kurbana
+// ait olduğu için fd-sabitli karantina da geçiyordu → root kurbanın dosyasını
+// .karantina'ya alıp 0000 yapıyor, kurbanın alanına sahte bulgu/bildirim/olay
+// yazıyordu. Artık:
+//  1. Yürüyüş Go'da (symlink izlemez, haricMi ile); adında kontrol karakteri olan
+//     girdi clamscan'e HİÇ verilmez, gerçek yoluyla ayrı KRİTİK bulgu olur
+//     (oto-karantina yok). Listedeki her yol çıktıda tam bir satırdır.
+//  2. Yollar --file-list ile verilir; ~1 KiB'ı aşanlar (liste satırı bölünür)
+//     konumsal argümanla ayrı koşuda.
+//  3. Yalnız listeye yazılmış yol kabul edilir; kayıttan önce Lstat ile hâlâ
+//     düzenli dosya olmalı.
+//  4. FOUND satır sayısı clamscan'in SON "Infected files: N" özetiyle
+//     karşılaştırılır; uyuşmazlık ya da özet yoksa o koşuda oto-karantina
+//     tümden kapanır, bulgular kiracıya atfedilmez ve yönetici alarmı üretilir.
+
+// clamSatirSiniri — --file-list'e yazılan en uzun yol (bayt).
+//
+// 🔴 clamscan dosya listesini ~1 KiB'lık satır tamponuyla okur: daha uzun satır
+// İKİYE bölünür ve her parça ayrı yol sayılır; sondaki \r de atılır (181, clamscan
+// 1.4.3: 1082 baytlık yol bölündü, "…cr.php\r" → "…cr.php"). Sınırı aşan yol
+// listeye yazılmaz, konumsal argümanla taranır.
+const clamSatirSiniri = 1000
+
+// clamArgBayt — konumsal argüman koşusu başına en çok yol baytı (ARG_MAX'ın çok altında).
+const clamArgBayt = 256 << 10
+
+// clamOrtakArg — her koşunun ortak bayrakları. -r ve --exclude-dir YOK: yürüyüş ve
+// hariç tutma Go'da (haricMi segment/önek; --exclude-dir alt-dize regex'iydi).
+// Symlink izlenmez: listedeki bir ad taramadan önce symlink'e çevrilirse atlanır.
+var clamOrtakArg = []string{"-i", "--stdout", "--max-filesize=25M", "--max-scansize=1024M",
+	"--follow-file-symlinks=0", "--follow-dir-symlinks=0"}
+
+// clamListeDizini — dosya listesinin yazıldığı root'a özel dizin (test dikişi).
+var clamListeDizini = filepath.Dir(rapidYol)
+
+// clamCalistir — clamscan'i çalıştırır, YALNIZ stdout'u döner (test dikişi: testler
+// exec yerine hazır çıktı verir). Çıkış kodu kullanılmaz (1 = bulgu, 2 = erişim
+// hatası; ikisinde de özet basılır) — karar özetten verilir.
+var clamCalistir = func(args []string) []byte {
+	cmd := exec.Command(clamBin, args...)
+	var out, hata bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &hata
+	_ = cmd.Run()
+	if hata.Len() > 0 {
+		log.Printf("clamscan stderr: %s", gosterim(kisalt(strings.TrimSpace(hata.String()), 500)))
+	}
+	return out.Bytes()
+}
+
+// kontrolKarakterli — dizgede C0 kontrol baytı (\n, \r, \t …) ya da DEL var mı.
+// Bayt düzeyinde: UTF-8'de <0x20 bayt çok baytlı dizinin parçası olamaz.
+func kontrolKarakterli(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7f {
+			return true
 		}
 	}
-	args = append(args, kok)
-	out, _ := exec.Command(clamBin, args...).CombinedOutput()
-	for _, satir := range strings.Split(string(out), "\n") {
-		satir = strings.TrimSpace(satir)
-		if strings.HasPrefix(satir, "Scanned files:") {
-			if n, e := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(satir, "Scanned files:"))); e == nil {
-				a.mu.Lock()
-				a.taranan += n
-				a.analizEdilen += n
-				a.mu.Unlock()
+	return false
+}
+
+// gosterim — kontrol karakterli adı günlük/bildirim için kaçışlar (satır sahteciliği yok).
+func gosterim(s string) string {
+	if kontrolKarakterli(s) {
+		return strconv.QuoteToASCII(s)
+	}
+	return s
+}
+
+// yolKumesi — clamscan'e verilen yolların tohumlu 64-bit özetleri (sıralı dilim).
+// Yol başına 8 bayt: /home'da milyonlarca dosya olabilir, tam dizge kümesi yüzlerce
+// MB tutardı. Tohum süreç başına rastgeledir (hash/maphash); dışarıdan çakışma
+// üretilemez. Bu denetim derinlemesine savunmadır: satır bütünlüğünü asıl sağlayan,
+// listeye kontrol karakterli adın hiç girmemesidir.
+type yolKumesi struct {
+	tohum maphash.Seed
+	h     []uint64
+}
+
+func yeniYolKumesi() *yolKumesi { return &yolKumesi{tohum: maphash.MakeSeed()} }
+
+func (k *yolKumesi) ekle(y string) { k.h = append(k.h, maphash.String(k.tohum, y)) }
+
+// sirala — eklemeler bitince bir kez; icerir ikili arama yapar.
+func (k *yolKumesi) sirala() { slices.Sort(k.h) }
+
+func (k *yolKumesi) icerir(y string) bool {
+	_, ok := slices.BinarySearch(k.h, maphash.String(k.tohum, y))
+	return ok
+}
+
+// clamListe — bir kökün Go yürüyüşü.
+type clamListe struct {
+	kume    *yolKumesi // listeye yazılan + uzun yollar
+	sayi    int        // --file-list'e yazılan yol sayısı
+	uzun    []string   // clamSatirSiniri'ni aşan yollar (konumsal argümanla)
+	kontrol []string   // adında kontrol karakteri olan girdiler (clamscan'e VERİLMEZ)
+}
+
+// clamListele — kökü yürür (symlink izlemez, haricMi ile hariç tutar) ve düzenli
+// dosyaları w'ye satır satır yazar. Kontrol karakterli bir DİZİN bir kez
+// raporlanır ve altına inilmez (altındaki her yol da o karakteri taşır).
+func clamListele(kok string, haric []string, w io.Writer) (clamListe, error) {
+	l := clamListe{kume: yeniYolKumesi()}
+	bw := bufio.NewWriter(w)
+	var yazHata error
+	_ = filepath.WalkDir(kok, func(yol string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // okunamayan dizini atla, taramayı durdurma
+		}
+		if haricMi(yol, haric) {
+			if d.IsDir() {
+				return filepath.SkipDir
 			}
+			return nil
+		}
+		if kontrolKarakterli(yol) {
+			l.kontrol = append(l.kontrol, yol)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		l.kume.ekle(yol)
+		if len(yol) > clamSatirSiniri {
+			l.uzun = append(l.uzun, yol)
+			return nil
+		}
+		if _, e := bw.WriteString(yol + "\n"); e != nil {
+			yazHata = e
+			return filepath.SkipAll
+		}
+		l.sayi++
+		return nil
+	})
+	if yazHata == nil {
+		yazHata = bw.Flush()
+	}
+	l.kume.sirala()
+	return l, yazHata
+}
+
+// argPartileri — yolları toplam bayt sınırını aşmayan partilere böler.
+func argPartileri(yollar []string, sinir int) [][]string {
+	var out [][]string
+	var cur []string
+	n := 0
+	for _, y := range yollar {
+		if len(cur) > 0 && n+len(y)+1 > sinir {
+			out = append(out, cur)
+			cur, n = nil, 0
+		}
+		cur = append(cur, y)
+		n += len(y) + 1
+	}
+	if len(cur) > 0 {
+		out = append(out, cur)
+	}
+	return out
+}
+
+// clamBulgu — clamscan'in bildirdiği tek tespit.
+type clamBulgu struct{ yol, imza string }
+
+// clamCikti — tek clamscan koşusunun ayrıştırması.
+type clamCikti struct {
+	bulgular   []clamBulgu // FOUND satırı + yol listede
+	reddedilen []string    // FOUND satırı ama yol listede değil / ayrıştırılamadı
+	found      int         // " FOUND" ile biten satır sayısı (bulgular + reddedilen)
+	taranan    int         // SON "Scanned files: N"
+	enfekte    int         // SON "Infected files: N"
+	ozetVar    bool        // "Infected files:" satırı okundu mu
+}
+
+// tutarli — FOUND satır sayısı clamscan'in kendi özetiyle uyuşuyor mu. Uyuşmazlık
+// (fazla satır = sahte satır; özet yok = çıktı yarıda kesildi) → çıktıya güvenilmez.
+func (c clamCikti) tutarli() bool { return c.ozetVar && c.found == c.enfekte }
+
+// clamCiktiAyristir — `clamscan -i --stdout` çıktısını SAF olarak ayrıştırır (exec
+// yok). Yol, satırdaki SON ": "'dan öncesidir (imza adlarında ": " yok; yolda
+// olabilir: "…/a: b.php: İmza FOUND"). Yalnız listede olan yol kabul edilir.
+func clamCiktiAyristir(cikti []byte, listede func(string) bool) clamCikti {
+	var c clamCikti
+	for _, satir := range strings.Split(string(cikti), "\n") {
+		if n, ok := ozetSayi(satir, "Scanned files:"); ok {
+			c.taranan = n
+			continue
+		}
+		if n, ok := ozetSayi(satir, "Infected files:"); ok {
+			c.enfekte, c.ozetVar = n, true
 			continue
 		}
 		if !strings.HasSuffix(satir, " FOUND") {
 			continue
 		}
+		c.found++
 		i := strings.LastIndex(satir, ": ")
 		if i <= 0 {
+			c.reddedilen = append(c.reddedilen, satir)
 			continue
 		}
 		yol := satir[:i]
-		imza := strings.TrimSuffix(satir[i+2:], " FOUND")
-		if haricMi(yol, haric) {
+		if !listede(yol) {
+			c.reddedilen = append(c.reddedilen, yol)
 			continue
 		}
-		a.bulguKaydet(yol, avmotor.Bulgu{
-			Dosya:    yol,
+		c.bulgular = append(c.bulgular, clamBulgu{yol: yol, imza: strings.TrimSuffix(satir[i+2:], " FOUND")})
+	}
+	return c
+}
+
+// ozetSayi — "Onek: N" biçimli özet satırından N.
+func ozetSayi(satir, onek string) (int, bool) {
+	if !strings.HasPrefix(satir, onek) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(satir, onek)))
+	return n, err == nil
+}
+
+// clamKokSonuc — bir kökün doğrulanmış clamav sonucu.
+type clamKokSonuc struct {
+	bulgular   []clamBulgu
+	kontrol    []string
+	reddedilen int
+	tutarli    bool
+}
+
+// clamKok — kökü Go'da yürür, düzenli dosyaları --file-list ile (uzunları konumsal
+// argümanla) clamscan'e verir ve çıktıyı doğrular. Kayıt/karantina clamIsle'de.
+func (a *ajan) clamKok(kok string, haric []string) clamKokSonuc {
+	s := clamKokSonuc{tutarli: true}
+	// Kök GERÇEK mutlak yola çevrilir: clamscan bulguyu çözülmüş yolla basar
+	// (1.4.3'te ara dizin symlink'i üzerinden verilen yol, gerçek yoluyla basıldı);
+	// listedeki yollar da gerçek olmalı ki eşleşsin. Kökün altında WalkDir symlink
+	// izlemez. Mutlak yol ayrıca konumsal argümanın "-" ile başlamasını önler.
+	gercek, err := filepath.Abs(kok)
+	if err == nil {
+		gercek, err = filepath.EvalSymlinks(gercek)
+	}
+	if err != nil {
+		log.Printf("clamav: kök çözümlenemedi %s: %v", gosterim(kok), err)
+		return s
+	}
+	if err := os.MkdirAll(clamListeDizini, 0o700); err != nil {
+		log.Printf("clamav: liste dizini hazırlanamadı: %v — kök taranmadı: %s", err, gosterim(kok))
+		s.tutarli = false
+		return s
+	}
+	f, err := os.CreateTemp(clamListeDizini, "clam-liste-*")
+	if err != nil {
+		log.Printf("clamav: dosya listesi açılamadı: %v — kök taranmadı: %s", err, gosterim(kok))
+		s.tutarli = false
+		return s
+	}
+	defer os.Remove(f.Name())
+	liste, err := clamListele(gercek, haric, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		log.Printf("clamav: dosya listesi yazılamadı: %v — kök taranmadı: %s", err, gosterim(kok))
+		s.tutarli = false
+		return s
+	}
+	s.kontrol = liste.kontrol
+
+	var kosular []clamCikti
+	if liste.sayi > 0 {
+		args := append(slices.Clone(clamOrtakArg), "--file-list="+f.Name())
+		kosular = append(kosular, clamCiktiAyristir(clamCalistir(args), liste.kume.icerir))
+	}
+	// --file-list verilince clamscan konumsal argümanları YOK SAYAR (1.4.3'te
+	// ölçüldü) → uzun yollar ayrı koşu(lar)da.
+	for _, parti := range argPartileri(liste.uzun, clamArgBayt) {
+		args := append(slices.Clone(clamOrtakArg), parti...)
+		kosular = append(kosular, clamCiktiAyristir(clamCalistir(args), liste.kume.icerir))
+	}
+
+	for _, c := range kosular {
+		a.mu.Lock()
+		a.taranan += c.taranan
+		a.analizEdilen += c.taranan
+		a.mu.Unlock()
+		if !c.tutarli() {
+			s.tutarli = false
+		}
+		s.reddedilen += len(c.reddedilen)
+		for _, r := range c.reddedilen {
+			log.Printf("clamav: listede olmayan yol reddedildi: %s", gosterim(r))
+		}
+		for _, b := range c.bulgular {
+			// Kayıttan önce yol hâlâ düzenli dosya olarak var olmalı (Lstat, izlemez).
+			if fi, e := os.Lstat(b.yol); e != nil || !fi.Mode().IsRegular() {
+				log.Printf("clamav: bulgu yolu artık düzenli dosya değil, kaydedilmedi: %s", gosterim(b.yol))
+				continue
+			}
+			s.bulgular = append(s.bulgular, b)
+		}
+	}
+	return s
+}
+
+// clamIsle — tüm kökleri tarar, koşunun TAMAMINI doğruladıktan SONRA kaydeder:
+// herhangi bir kökte özet uyuşmazsa bu koşunun hiçbir bulgusu oto-karantinaya
+// girmez ve kiracıya atfedilmez (kipDogrulanamadi) + yönetici alarmı.
+func (a *ajan) clamIsle(kokler, haric []string) {
+	tutarli := true
+	reddedilen := 0
+	var bulgular []clamBulgu
+	var kontrol []string
+	for _, kok := range kokler {
+		s := a.clamKok(kok, haric)
+		tutarli = tutarli && s.tutarli
+		reddedilen += s.reddedilen
+		bulgular = append(bulgular, s.bulgular...)
+		kontrol = append(kontrol, s.kontrol...)
+	}
+	kip, kural := kipTam, "clamav"
+	if !tutarli {
+		kip, kural = kipDogrulanamadi, "clamav-dogrulanamadi"
+		a.clamAlarm(len(bulgular), reddedilen)
+	}
+	for _, y := range kontrol {
+		a.bulguKaydet(y, kontrolBulgusu(y), kipKarantinasiz)
+	}
+	for _, b := range bulgular {
+		a.bulguKaydet(b.yol, avmotor.Bulgu{
+			Dosya:    b.yol,
 			Puan:     100,
 			Seviye:   avmotor.SeviyeKritik,
-			Aciklama: imza,
-			Kurallar: []string{"clamav"},
-		})
+			Aciklama: b.imza,
+			Kurallar: []string{kural},
+		}, kip)
 	}
+}
+
+// kontrolBulgusu — adında kontrol karakteri olan girdi. Satır tabanlı liste/çıktı
+// bozulacağı için clamscan'e verilemez; meşru yazılım böyle ad üretmez ve bu,
+// tarayıcı çıktısını sahtelemenin ön koşuludur → KRİTİK, GERÇEK yoluyla,
+// oto-karantina YOK (elle incelenir).
+func kontrolBulgusu(yol string) avmotor.Bulgu {
+	return avmotor.Bulgu{
+		Dosya:    yol,
+		Puan:     100,
+		Seviye:   avmotor.SeviyeKritik,
+		Aciklama: "Adında kontrol karakteri var, taranamadı (elle inceleyin): " + strconv.QuoteToASCII(filepath.Base(yol)),
+		Kurallar: []string{"clamav-ad-kontrol"},
+	}
+}
+
+// clamAlarm — clamscan çıktısı özetle doğrulanamadı: günlük + panel-geneli yönetici
+// bildirimi (domain_id=0). Durumsuz (--json) modda yalnız günlük (stderr; panelin
+// okuduğu stdout JSON'u bozulmaz).
+func (a *ajan) clamAlarm(bulgu, reddedilen int) {
+	msg := fmt.Sprintf("clamscan çıktısı kendi özetiyle uyuşmadı ya da özet yok (bulgu=%d, listede olmayan=%d). "+
+		"Bu taramada oto-karantina UYGULANMADI; bulgular kiracıya atfedilmeden yalnız yöneticiye kaydedildi.", bulgu, reddedilen)
+	log.Printf("UYARI: %s", msg)
+	if a.json {
+		return
+	}
+	bildirimYaz(a.db, "kritik", "Antivirüs: tarayıcı çıktısı doğrulanamadı", msg, 0, "av_tarama", a.taramaID)
 }
 
 // cekirdekDosya — WordPress cekirdek agacinda mi (karantina istisnasi).
@@ -523,7 +888,7 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 	fmt.Printf("tarandı: %d dosya (analiz: %d · rapidscan atlanan: %d) · bulgu: %d · süre: %s · kapsam: %s\n",
 		a.taranan, a.analizEdilen, a.atlanan, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
 	for _, b := range a.bulgular {
-		fmt.Printf("  [%s puan=%d] %s\n      %s\n", b.Seviye, b.Puan, b.Dosya, b.Aciklama)
+		fmt.Printf("  [%s puan=%d] %s\n      %s\n", b.Seviye, b.Puan, gosterim(b.Dosya), gosterim(b.Aciklama))
 	}
 	if a.bulunan == 0 {
 		fmt.Println("  temiz — eşiği aşan dosya yok")
@@ -615,7 +980,7 @@ func (a *ajan) izleyiciCalistir() {
 				a.bulgular = nil
 				a.bulunan = 0
 				a.mu.Unlock()
-				log.Printf("TESPİT [%s puan=%d] %s — %s", son.Seviye, son.Puan, son.Dosya, son.Aciklama)
+				log.Printf("TESPİT [%s puan=%d] %s — %s", son.Seviye, son.Puan, gosterim(son.Dosya), gosterim(son.Aciklama))
 			}
 		}
 	}
@@ -706,43 +1071,57 @@ func wpKokBul(yol string) string {
 	return ""
 }
 
-// karantinaAl — dosyayı kiracının .karantina dizinine taşır.
+// karantinaAl — dosyayı kiracının .karantina dizinine taşır, HEDEF YOLU döner
+// (geri yükleme için DB'ye yazılır). Boş string = karantina yapılamadı.
 //
 // 🔴 AYNI dosya sisteminde rename: kopyala-sil DEĞİL. Kopyalama sırasında
 // saldırgan dosyayı çalıştırmaya devam edebilir ve büyük dosyada yarış oluşur.
 // rename atomiktir. Ayrıca izinler 0000'a çekilir — karantinadaki bir dosya
 // yanlışlıkla servis edilmemeli.
-// karantinaAl — dosyayı .karantina'ya taşır, HEDEF YOLU döner (geri yükleme
-// için DB'ye yazılır). Boş string = karantina yapılamadı.
+//
+// 🔴 SYMLINK/TOCTOU: ajan ROOT çalışır; yol tarama anında görülür, işlem anında
+// YENİDEN çözülür ve tamamı kiracının mülküdür (ara dizinler + .karantina + dosya).
+// Eski os.MkdirAll/os.Rename/os.Chmod zinciri symlink izliyordu: kiracı arada bir
+// ara dizini ya da .karantina'yı ev dışına symlink yapınca root başka kiracının
+// dosyasını taşıyor, son bileşen symlink ise os.Chmod hedefini 0000 yapıyordu.
+// Artık elle karantina ile AYNI fd-sabitli yardımcı (antivirus.KarantinayaTasi)
+// kullanılır; yalnız kiracıya ait düzenli dosya taşınır, gerisi reddedilir
+// (bulgu yine kaydedilir, eylem "tespit edildi" kalır).
 func karantinaAl(yol string) (string, error) {
-	sk, home := kiraciBul(yol)
+	return karantinaAlEv(evKoku, yol, antivirus.KiraciUID, time.Now())
+}
+
+// evKoku — kiracı ev dizinlerinin kökü (root-yönetimli; /home/<sk> güven çapası).
+const evKoku = "/home"
+
+// karantinaAlEv — karantinaAl'ın dikişli gövdesi: ev kökü ve sk→uid çözücü
+// testlerde t.TempDir ve sahte uid ile verilir (gerçek kullanıcı araması yok).
+func karantinaAlEv(kok, yol string, uidCoz func(sk string) (int, int, bool), an time.Time) (string, error) {
+	sk, home := kiraciBul(kok, yol)
 	if sk == "" {
 		return "", fmt.Errorf("kiracı bulunamadı: %s", yol)
 	}
-	qdir := filepath.Join(home, ".karantina")
-	if err := os.MkdirAll(qdir, 0o700); err != nil {
-		return "", err
+	// Fail-closed: uid yoksa "kiracıya ait dosya" şartı uygulanamaz → taşıma yok.
+	uid, _, ok := uidCoz(sk)
+	if !ok {
+		return "", fmt.Errorf("kiracı kullanıcısı çözümlenemedi: %s", sk)
 	}
-	hedef := filepath.Join(qdir, fmt.Sprintf("%d-%s", time.Now().Unix(), filepath.Base(yol)))
-	if err := os.Rename(yol, hedef); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(hedef, 0o000); err != nil {
-		return hedef, err
-	}
-	return hedef, nil
+	return antivirus.KarantinayaTasi(home, yol, uid, an)
 }
 
-func kiraciBul(yol string) (sk, home string) {
-	p := filepath.ToSlash(yol)
-	if !strings.HasPrefix(p, "/home/") {
+// kiraciBul — yol <kok>/c_*/... altındaysa (sk, <kok>/<sk>) döner. YALNIZ sözcüksel
+// eşleme: dosya sistemine güven KarantinayaTasi'nin O_NOFOLLOW zincirindedir.
+func kiraciBul(kok, yol string) (sk, home string) {
+	kok = filepath.Clean(kok)
+	p := filepath.Clean(yol)
+	if !strings.HasPrefix(p, kok+"/") {
 		return "", ""
 	}
-	parca := strings.Split(strings.TrimPrefix(p, "/home/"), "/")
+	parca := strings.SplitN(strings.TrimPrefix(p, kok+"/"), "/", 2)
 	if len(parca) < 2 || !strings.HasPrefix(parca[0], "c_") {
 		return "", ""
 	}
-	return parca[0], "/home/" + parca[0]
+	return parca[0], kok + "/" + parca[0]
 }
 
 func dbAc() (*sql.DB, error) {

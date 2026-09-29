@@ -60,15 +60,15 @@ func yeniDomainCache(db *sql.DB) *domainCache {
 }
 
 func (c *domainCache) domainID(yol string) int64 {
-	if c.db == nil {
-		return 0
-	}
 	sk := skCikar(yol)
 	if sk == "" {
 		return 0
 	}
 	if id, ok := c.skID[sk]; ok {
 		return id
+	}
+	if c.db == nil {
+		return 0
 	}
 	var id int64
 	_ = c.db.QueryRow(`SELECT id FROM domains WHERE sistem_kullanici=? LIMIT 1`, sk).Scan(&id)

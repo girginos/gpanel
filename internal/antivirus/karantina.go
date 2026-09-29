@@ -492,6 +492,24 @@ func karantinayaTasi(home, kaynak string, uid int, an time.Time) (string, error)
 	return filepath.Join(home, ".karantina", hedefAd), nil
 }
 
+// KarantinayaTasi — karantinayaTasi'nin dışa açık girişi: gosp-avajan'ın
+// oto-karantinası elle karantina ile AYNI fd-sabitli yolu kullanır (dizinler
+// O_NOFOLLOW zinciriyle home'a çapalanır, kaynak kiracıya (uid) ait düzenli dosya
+// olarak açılıp doğrulanır, taşıma renameat, izin fchmod(fd, 0) ile). Ajan da ROOT
+// çalışır ve yol tarama anında görülüp işlem anında yeniden çözülür: yola dayalı
+// os.MkdirAll/os.Rename/os.Chmod, kiracının arada koyduğu symlink'i izleyip ev
+// dışındaki bir dosyayı taşır ya da 0000 yapardı. home root-yönetimli ev kökü
+// (/home/<sk>) olmalı; uid o kiracının uid'i (bkz. KiraciUID).
+func KarantinayaTasi(home, kaynak string, uid int, an time.Time) (string, error) {
+	return karantinayaTasi(home, kaynak, uid, an)
+}
+
+// KiraciUID — sk sistem kullanıcısının uid/gid'i; çözümlenemezse ok=false
+// (fail-closed: sahiplik şartı uygulanamıyorsa karantina yapılmaz).
+func KiraciUID(sk string) (uid, gid int, ok bool) {
+	return kiraciUID(sk)
+}
+
 // karantinaBilgi — kayıttaki karantina yolunu SYMLINK İZLEMEDEN yoklar. Yalnız
 // kiracı evinde (O_NOFOLLOW dizin zinciri) ve kiracıya ait DÜZENLİ bir dosya ise
 // (true, boyut) döner; symlink/başkasının dosyası/ev dışı → (false, 0).
