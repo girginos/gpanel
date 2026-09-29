@@ -69,6 +69,15 @@ func TestKendiAdres_KatiVeIcAgdaRed(t *testing.T) {
 	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2", "127.0.0.1", "10.20.30.40"} {
 		red(kati, "katı", s)
 	}
+	// Yardımcı tek başına da (normalize edilmemiş 16 baytlık v4 dahil) doğru.
+	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2"} {
+		if !kendiAdresiMi(net.ParseIP(s)) {
+			t.Errorf("kendiAdresiMi(%s) = false", s)
+		}
+	}
+	if kendiAdresiMi(net.ParseIP("95.216.10.21")) {
+		t.Error("kendiAdresiMi(95.216.10.21) = true")
+	}
 	// Aynı alt ağdaki komşu kendi adres DEĞİLDİR.
 	acik(kati, "katı", "95.216.10.21")
 	acik(kati, "katı", "2a01:4f9:3a:1234::3")
