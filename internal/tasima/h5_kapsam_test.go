@@ -314,9 +314,18 @@ func TestHesapAktarGeriAlma_SaglamaSonrasiHata(t *testing.T) {
 		{"geri-kok.test", Kapsam{}, "kaynak web kok dizini gecersiz"},
 		{"geri-bayi.test", Kapsam{RID: 7}, tasimaHataGenel},
 	} {
-		_, err := h.HesapAktar(context.Background(), &Kaynak{},
-			Hesap{AlanAdi: c.alan, PHPSurum: "8.3", WebRoot: "goreli/yol"},
-			Ayarlar{Dosyalar: true}, c.kapsam, func(string, ...any) {})
+		// Panik test ikilisini düşürmesin: yakalanıp bu vakanın hatası olarak raporlanır.
+		var err error
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Errorf("%s: geri alma paniği: %v", c.alan, p)
+				}
+			}()
+			_, err = h.HesapAktar(context.Background(), &Kaynak{},
+				Hesap{AlanAdi: c.alan, PHPSurum: "8.3", WebRoot: "goreli/yol"},
+				Ayarlar{Dosyalar: true}, c.kapsam, func(string, ...any) {})
+		}()
 		if err == nil || err.Error() != c.beklenen {
 			t.Errorf("%s: %q beklenirdi, alınan %v", c.alan, c.beklenen, err)
 		}
