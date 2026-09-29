@@ -21,4 +21,6 @@ export type Domain = {
   notlar?: string
   ssh_erisim?: boolean
   askida?: boolean
+  // Hizmet planının adı (plan atanmamışsa yok) — internal/domains Domain.PlanAd.
+  plan_ad?: string
 }

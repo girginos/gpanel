@@ -5,6 +5,8 @@
 // Neden: mobilde en sık kullanılan 3-4 hedefe ve birincil eyleme başparmakla
 // erişilebilir bir yer gerekiyor. Menü sekmesi, çubuğa sığmayan her şey için
 // mevcut çekmeceyi açar — yani hiçbir sayfa erişilemez hâle gelmez.
+// Hosting müşterisinde (rol 'user') çekmece yok: tüm araçlar ana sayfasında; çubuk
+// ana sayfa + en sık üç araç + bildirimlerdir (Menü sekmesi çizilmez).
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/lib/i18n'
@@ -14,7 +16,7 @@ import { musteriDomainID, useRol } from '@/lib/rol'
 const NAV_EN: Record<string, string> = {
   'Anasayfa': 'Home', 'Domainler': 'Domains', 'İzleme': 'Monitoring',
   'Planlar': 'Plans',
-  'Genel': 'Overview', 'Dosyalar': 'Files', 'Veritabanı': 'Database',
+  'Dosyalar': 'Files', 'Veritabanı': 'Database', 'Bildirimler': 'Notifications',
   'Yedekler': 'Backups', 'Yeni': 'New', 'Menü': 'Menu',
   'Alt gezinme': 'Bottom navigation',
   'Yeni domain oluştur': 'Create new domain',
@@ -32,6 +34,7 @@ const IK = {
   dosya:  'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
   veri:   'M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3zM4 7v10c0 1.657 3.582 3 8 3s8-1.343 8-3V7',
   yedek:  'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+  zil:    'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
 }
 
 export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
@@ -60,11 +63,14 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
     { to: '/hizmet-planlari', etiket: 'Planlar', ikon: IK.plan },
   ]
 
+  // Müşteri: ana sayfa (tüm araçlar) + en sık üç araç + bildirimler. Menü sekmesi
+  // yok: çekmece müşteride çizilmez, ana sayfa zaten her aracı taşır.
   const musteriSekmeler: Sekme[] = [
-    { to: `/abonelikler/${domainID}`, etiket: 'Genel', ikon: IK.home, end: true },
+    { to: `/abonelikler/${domainID}`, etiket: 'Anasayfa', ikon: IK.home, end: true },
     { to: `/abonelikler/${domainID}/dosyalar`, etiket: 'Dosyalar', ikon: IK.dosya },
     { to: `/abonelikler/${domainID}/veritabanlari`, etiket: 'Veritabanı', ikon: IK.veri },
     { to: `/abonelikler/${domainID}/yedekler`, etiket: 'Yedekler', ikon: IK.yedek },
+    { to: '/bildirimler', etiket: 'Bildirimler', ikon: IK.zil },
   ]
 
   const sekmeler = isMusteri ? musteriSekmeler : isBayi ? bayiSekmeler : yoneticiSekmeler
@@ -114,6 +120,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
         </button>
       )}
 
+      {!isMusteri && (
       <button
         type="button"
         onClick={onMenuAc}
@@ -125,6 +132,7 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
         <Ikon d={I.menu} className="w-[22px] h-[22px] flex-shrink-0" />
         <span className="text-[10px] leading-none">{cevir('Menü')}</span>
       </button>
+      )}
     </nav>
   )
 }
