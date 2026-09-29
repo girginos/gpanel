@@ -79,6 +79,32 @@ func envanterSolmaTemizle(ctx context.Context, db *sql.DB, esik any, appTypes []
 	}
 }
 
+// domainTaramaYaz: bu turda taranan domainlere son_tarama damgası (0112). Envanterin
+// "desteklenmiyor" (tarandı, uygulama yok) ile "beklemede" (henüz taranmadı) ayrımı
+// buradan gelir — eskiden sunucu geneli last_success'ten geliyordu ve son taramadan
+// SONRA açılan domain de "desteklenmiyor" görünüyordu. Kısmi taramada listedeki
+// domainler (keşif tam onları sorguladı); tam taramada (domainIDs boş) tarama
+// başladıktan (gecenSn önce) SONRA açılan domainler damgalanmaz: keşif onları
+// görmedi. Eşik DB saatiyle kurulur (NOW() - INTERVAL): Go/MariaDB saat dilimi karışmaz.
+func domainTaramaYaz(ctx context.Context, db *sql.DB, domainIDs []int64, gecenSn int64) {
+	sorgu := `INSERT INTO cp_websec_domain_tarama (domain_id, son_tarama)
+		SELECT d.id, NOW() FROM domains d WHERE `
+	var args []any
+	if len(domainIDs) > 0 {
+		sorgu += `d.id IN (` + yerTutucu(len(domainIDs)) + `)` //nolint:gosec // G202: yerTutucu yalnız "?" üretir; id'ler args ile bağlanır.
+		for _, id := range domainIDs {
+			args = append(args, id)
+		}
+	} else {
+		sorgu += `(d.olusturulma IS NULL OR d.olusturulma <= NOW() - INTERVAL ? SECOND)`
+		args = append(args, gecenSn)
+	}
+	sorgu += ` ON DUPLICATE KEY UPDATE son_tarama = VALUES(son_tarama)`
+	if _, err := db.ExecContext(ctx, sorgu, args...); err != nil { //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?"; değerler args ile bağlanır.
+		log.Printf("websec: domain tarama kaydı yazılamadı: %v", err)
+	}
+}
+
 type envanterSatir struct {
 	DomainID    int64  `json:"domain_id"`
 	AlanAdi     string `json:"alan_adi"`
@@ -112,24 +138,19 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 
 	// Domain başına "taranıyor" için canlı tarama durumu (bellek).
 	kosuyor, taranSet := TaramaDurumu()
-	// Hiç tam tarama tamamlandı mı? — "desteklenmiyor" (görüldü, app yok) ile
-	// "beklemede" (henüz taranmadı) ayrımı için.
-	var taramaOldu bool
-	{
-		var ls sql.NullString
-		_ = h.DB.QueryRowContext(r.Context(),
-			`SELECT last_success FROM cp_websec_status WHERE id=1`).Scan(&ls)
-		taramaOldu = ls.Valid && ls.String != ""
-	}
 
+	// taranmis: domainin kendi tarama kaydı var mı (0112) — "desteklenmiyor"
+	// (görüldü, app yok) ile "beklemede" (henüz taranmadı) ayrımı için.
 	rows, err := h.DB.QueryContext(r.Context(), `
 		SELECT d.id, COALESCE(d.alan_adi,''),
 		       COALESCE(a.app_type,''), COALESCE(a.install_path,''),
 		       COALESCE(a.app_version,''), COALESCE(a.paket_sayisi,0),
 		       COALESCE(a.bulgu_sayisi,0),
-		       COALESCE(DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s'),'')
+		       COALESCE(DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s'),''),
+		       (t.domain_id IS NOT NULL)
 		  FROM domains d
 		  LEFT JOIN cp_websec_apps a ON a.domain_id = d.id
+		  LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id
 		 ORDER BY (a.app_type IS NULL) ASC, a.bulgu_sayisi DESC, d.alan_adi ASC`)
 	if err != nil {
 		hataMesaji(w, 500, err.Error())
@@ -139,8 +160,9 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 	desteklenmeyen := 0
 	for rows.Next() {
 		var s envanterSatir
+		var taranmis bool
 		if err := rows.Scan(&s.DomainID, &s.AlanAdi, &s.AppType, &s.InstallPath,
-			&s.AppVersion, &s.PaketSayisi, &s.BulguSayisi, &s.SonTarama); err != nil {
+			&s.AppVersion, &s.PaketSayisi, &s.BulguSayisi, &s.SonTarama, &taranmis); err != nil {
 			hataMesaji(w, 500, err.Error())
 			return
 		}
@@ -151,7 +173,7 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 			s.Durum = "acik"
 		case s.AppType != "":
 			s.Durum = "temiz"
-		case taramaOldu:
+		case taranmis:
 			s.Durum = "desteklenmiyor"
 			desteklenmeyen++
 		default:

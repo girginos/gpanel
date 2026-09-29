@@ -303,6 +303,11 @@ WPloop:
 	} else {
 		log.Printf("websec: solma temizliği atlandı — hiçbir feed başarılı yanıt vermedi (network outage şüphesi)")
 	}
+	// Domain başına tarama damgası — yalnız tarama YARIDA kesilmediyse: ctx iptali
+	// keşfi/feed'i yarım bırakır, o domainlere "tarandı" demek yanlış olur.
+	if ctx.Err() == nil {
+		domainTaramaYaz(yazCtx, db, domainIDs, sure/1000+1)
+	}
 
 	ozet := ozetiHesapla(yazCtx, db)
 	// 🔴 Tekil taramada scanned_apps/duration_ms güncellenmez — bunlar SON
