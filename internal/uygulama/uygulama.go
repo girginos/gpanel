@@ -364,10 +364,21 @@ func uygulamaDBKur(ctx context.Context, db *sql.DB, a KurArgs,
 	dbAdi := a.DBAdi
 	if dbAdi == "" {
 		// Sunucu uretir: <sk>_<kod>_<domainID> — hem sahiplik hem benzersizlik.
-		dbAdi = fmt.Sprintf("%s_%s_%d", a.Domain.SK, a.Tarif.Kod, a.Domain.ID)
-		if len(dbAdi) > 64 {
-			dbAdi = dbAdi[:64]
+		temel := fmt.Sprintf("%s_%s_%d", a.Domain.SK, a.Tarif.Kod, a.Domain.ID)
+		if len(temel) > 64 {
+			temel = temel[:64]
 		}
+		// 🔴 ONEK CAKISMASI (DoS): en uzun kok kurali bu adi, adi '<kurban>-<kod>' olan
+		// domainin ad-alanina dusurur (shop.com'un c_shop_joomla_<id>'si →
+		// shop-joomla.com, c_shop_joomla). Eskiden asagidaki kapi o domain acildigi anda
+		// kurbanin varsayilan kurulumunu reddediyordu; turetilmis adi kurban degistiremez.
+		// Ad kurbanin KENDI ad-alaninda (ve MariaDB/panelde serbest) secilir.
+		secilen, err := hesaplar.KendiAdAlanindaAdSec(ctx, db, a.Domain.ID, temel,
+			func(ad string) (bool, error) { return hesaplar.AdSerbestMi(ctx, db, ad) })
+		if err != nil {
+			return "", nil, fmt.Errorf("veritabani adi otomatik uretilemedi — db_adi verin")
+		}
+		dbAdi = secilen
 	}
 	if !hesaplar.MusteriDBKimlikGecerli(a.Domain.SK, dbAdi) {
 		return "", nil, fmt.Errorf("db_adi '%s' bu hesaba ait degil — '%s' veya '%s_' ile baslamali",

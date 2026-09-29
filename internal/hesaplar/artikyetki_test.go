@@ -360,6 +360,8 @@ func TestDBHesabiBaglanabilirMi(t *testing.T) {
 		{"yeni ad, ad-alanı dışı (wpu_)", "wpu_" + on, "localhost", true},
 		{"yeni ad, komşunun ad-alanı", on + "_x_yeni", "localhost", false},
 		{"yeni ad, komşunun ad-alanı (büyük harf)", strings.ToUpper(on + "_x_yeni"), "localhost", false},
+		{"yeni ad, kendi tam sk'sının kendisi (sınır adı)", "c_" + on, "localhost", false},
+		{"yeni ad, kendi c'siz kökünün kendisi (sınır adı)", on, "localhost", false},
 		{"yeni ad, % host", on + "_uzak", "%", true},
 		{"geçersiz host", on + "_yeni", "a'b", false},
 		{"geçersiz ad", "a'b", "localhost", false},

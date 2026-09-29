@@ -415,7 +415,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// DB adi/kullanici cPanel gibi: c_ ONEKSIZ temiz slug (c_girgin -> girgin_).
+	// DB adi/kullanici cPanel gibi: c_ ONEKSIZ temiz slug (c_girgin -> girgin_). Bunlar
+	// TEMEL adlardir; komsunun ad-alanina dusuyorsa saglamaDBKur kendi ad-alaninda secer.
 	dbPrefix := strings.TrimPrefix(pr.SistemKullanici, "c_")
 	dbUser := dbPrefix + "_db"
 	dbName := dbPrefix + "_main"
@@ -492,20 +493,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// dosya yükler, DB'yi sonra Databases sekmesinden açar → varsayılan KAPALI.
 	dbPass := ""
 	if req.SqlOlustur {
-		dbPass = hesaplar.RandomParola(24)
-		if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
-			log.Printf("MySQL create %q hata: %v", dbName, err)
-			// 🔴 HAYALET AD: MySQLCreateDB yalniz-yeni; ad baskasinca tutulmussa (onceden
-			// kapma, eski kalinti) ya da DB olusamadiysa domains.db_user/db_adi'da var
-			// olmayan (ya da BASKASINA ait) bir ad yazili kalir, parola da yanitta doner.
-			// Kullanici o adla baglanmaya calisir; panel baska yerlerde bu alanlari
-			// "domainin DB'si" diye okur. Alanlari temizle, parolayi yanitta dondurme.
-			if _, uerr := h.DB.ExecContext(r.Context(),
-				`UPDATE domains SET db_user='', db_adi='' WHERE id=?`, id); uerr != nil {
-				log.Printf("MySQL create %q: domains db alanlari temizlenemedi: %v", dbName, uerr)
-			}
-			dbPass = ""
-		}
+		dbPass = h.saglamaDBKur(r.Context(), id, dbName, dbUser)
 	}
 
 	// 4.5) HTTPS-ZORUNLU uzanti (.app/.dev/.page...) → sertifikayi HEMEN dene.
@@ -546,6 +534,51 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	resp.OluşturulanParolalar.FTP = ftpPass
 	resp.OluşturulanParolalar.DB = dbPass
 	httpx.WriteJSON(w, http.StatusCreated, resp)
+}
+
+// saglamaDBKur: saglamadaki varsayilan veritabani (<onek>_main) + kullanici (<onek>_db).
+// Donus: olusan kullanicinin parolasi; DB olusmadiysa "" (domains.db_user/db_adi
+// temizlenir).
+//
+// 🔴 ONEK CAKISMASI (DoS): en uzun kok kurali shop.com'un (onek "shop") shop_db'sini
+// shop-db.com'a (c'siz koku shop_db) verir. Eskiden ad sabitti: shop-db.com adi onceden
+// acinca kurbanin varsayilan DB'si yalniz-yeni MySQLCreateDB'de reddediliyor, hosting
+// DB'siz kaliyordu. Adlar artik kurbanin KENDI ad-alaninda (ve MariaDB/panelde serbest)
+// secilir (shop_db2 …); secilen ad domains satirina yazilir.
+//
+// 🔴 HAYALET AD: MySQLCreateDB yalniz-yeni; ad baskasinca tutulmussa (yaris, eski
+// kalinti) ya da DB olusamadiysa domains.db_user/db_adi'da var olmayan (ya da BASKASINA
+// ait) bir ad yazili kalir, parola da yanitta doner. Kullanici o adla baglanmaya calisir;
+// panel baska yerlerde bu alanlari "domainin DB'si" diye okur. Alanlar temizlenir,
+// parola yanitta donmez.
+func (h *Handlers) saglamaDBKur(ctx context.Context, id int64, dbName, dbUser string) string {
+	serbest := func(ad string) (bool, error) { return hesaplar.AdSerbestMi(ctx, h.DB, ad) }
+	kul, err := hesaplar.KendiAdAlanindaAdSec(ctx, h.DB, id, dbUser, serbest)
+	ad := ""
+	if err == nil {
+		ad, err = hesaplar.KendiAdAlanindaAdSec(ctx, h.DB, id, dbName, serbest)
+	}
+	if err == nil && (kul != dbUser || ad != dbName) {
+		_, err = h.DB.ExecContext(ctx, `UPDATE domains SET db_user=?, db_adi=? WHERE id=?`, kul, ad, id)
+	}
+	parola := ""
+	if err == nil {
+		if parola = hesaplar.RandomParola(24); parola == "" {
+			err = errors.New("güvenli parola üretilemedi")
+		}
+	}
+	if err == nil {
+		err = hesaplar.MySQLCreateDB(h.DB, id, ad, kul, parola)
+	}
+	if err != nil {
+		log.Printf("MySQL create %q/%q hata: %v", dbName, dbUser, err)
+		if _, uerr := h.DB.ExecContext(ctx,
+			`UPDATE domains SET db_user='', db_adi='' WHERE id=?`, id); uerr != nil {
+			log.Printf("MySQL create %q: domains db alanlari temizlenemedi: %v", dbName, uerr)
+		}
+		return ""
+	}
+	return parola
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {

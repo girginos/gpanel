@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -529,6 +530,14 @@ func TestDBAdiBaskaKiracininMi(t *testing.T) {
 		{3, "c_" + on, true},                          // kökün kendisi
 		{1, "c_" + on + "_wp_7", false},               // tam-sk sahibi kendi adında
 		{3, "c_c_" + on + "_db", false},               // domain 3 kendi tam-sk ad-alanında
+		// 🔴 KÖKÜN KENDİSİ kimsenin değil — çağıranın KENDİ kökü dahil (sınır adı: kısa
+		// köklü komşunun türettiği adın ta kendisi olabilir).
+		{1, "c_" + on, true},
+		{1, on, true},
+		{1, strings.ToUpper(on), true},
+		{2, "c_" + on + "_x", true},
+		{2, on + "_x", true},
+		{3, "c_c_" + on, true},
 	} {
 		baska, err := DBAdiBaskaKiracininMi(context.Background(), o.panel, c.domain, c.ad)
 		if err != nil {
@@ -623,5 +632,132 @@ func TestDBKullanicisiVarMi(t *testing.T) {
 	}
 	if !DBKullanicisiVarMi("a'b") {
 		t.Errorf("geçersiz ad fail-closed (var) sayılmalı")
+	}
+}
+
+// 🔴 DAHA UZUN KÖKLÜ KOMŞU (inceleme probu nc7'nin tersi): kurban domain 1 (c_<on>,
+// shop.com) iken domain 4 = c_<on>_joomla (shop-joomla.com) ve domain 5 = c_<on>_db
+// (shop-db.com). En uzun kök kuralı kurbanın TÜRETTİĞİ adları (uygulama
+// c_<on>_joomla_1, taşıma c_<on>_db, sağlama <on>_db) bu komşulara verir.
+//   - Komşu kendi kökünün KENDİSİNİ (c_<on>_db / <on>_db) açıp kurbanı kilitleyemez.
+//   - Kurbanın türetilmiş adları KendiAdAlanindaAdSec ile kendi ad-alanında seçilir:
+//     seçilen ad kurbanındır (DBAdiBaskaKiracininMi false) ve hiçbir komşuya düşmez.
+func TestKendiAdAlanindaAdSec_UzunKokluKomsu(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	ctx := context.Background()
+	if _, err := o.panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (4, ?), (5, ?)`,
+		"c_"+on+"_joomla", "c_"+on+"_db"); err != nil {
+		t.Fatal(err)
+	}
+	// (b)'nin tersi: shop-db.com kendi tam sk'sını / c'siz kökünü AD olarak açamaz.
+	for _, ad := range []string{"c_" + on + "_db", on + "_db", "C_" + strings.ToUpper(on) + "_DB"} {
+		if b, err := DBAdiBaskaKiracininMi(ctx, o.panel, 5, ad); err != nil || !b {
+			t.Errorf("domain 5 kendi kökünün kendisini (%q) açabiliyor (%v, %v) — kurbanın taşıma/sağlama adı", ad, b, err)
+		}
+	}
+	if b, err := DBAdiBaskaKiracininMi(ctx, o.panel, 5, "c_"+on+"_db_site"); err != nil || b {
+		t.Errorf("domain 5 kendi ad-alanındaki adı kullanamıyor (%v, %v)", b, err)
+	}
+
+	serbest := func(ad string) (bool, error) { return AdSerbestMi(ctx, o.panel, ad) }
+	sec := func(temel string, musait func(string) (bool, error)) string {
+		t.Helper()
+		ad, err := KendiAdAlanindaAdSec(ctx, o.panel, 1, temel, musait)
+		if err != nil {
+			t.Fatalf("%q için ad seçilemedi: %v", temel, err)
+		}
+		if b, err := DBAdiBaskaKiracininMi(ctx, o.panel, 1, ad); err != nil || b {
+			t.Errorf("%q için seçilen %q kurbanın değil (%v, %v)", temel, ad, b, err)
+		}
+		for _, komsu := range []string{"c_" + on + "_joomla", "c_" + on + "_db", "c_" + on + "_x"} {
+			if adKokAgirligi(ad, komsu) > adKokAgirligi(ad, "c_"+on) {
+				t.Errorf("%q için seçilen %q komşu %s'e düşüyor", temel, ad, komsu)
+			}
+		}
+		return ad
+	}
+	// (a) uygulama varsayılanı, (b) taşıma kullanıcısı, sağlama kullanıcısı: komşuya düşen
+	// temel bırakılır; kendi kökte alt çizgisiz yedek.
+	for temel, beklenen := range map[string]string{
+		"c_" + on + "_joomla_1": "c_" + on + "_joomla1",
+		"c_" + on + "_db":       "c_" + on + "_db2",
+		on + "_db":              on + "_db2",
+		on + "_main":            on + "_main", // kimsenin ad-alanında değil → temel
+	} {
+		if ad := sec(temel, serbest); ad != beklenen {
+			t.Errorf("%q: %q beklenir, alınan %q", temel, beklenen, ad)
+		}
+	}
+	// İlk yedek de BİREBİR başka bir domainin kökü (shop-joomla1.com) → sayaç.
+	if _, err := o.panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (6, ?)`, "c_"+on+"_joomla1"); err != nil {
+		t.Fatal(err)
+	}
+	if ad := sec("c_"+on+"_joomla_1", serbest); ad != "c_"+on+"_joomla12" {
+		t.Errorf("birebir kök yakalaması aşılmadı: %q", ad)
+	}
+	// Yedek ad MariaDB'de / panelde kullanımda → sonraki sayı.
+	o.kokExec(t, "CREATE USER '"+on+"_db2'@'localhost' IDENTIFIED BY 'DoluParola12345'")
+	if ad := sec(on+"_db", serbest); ad != on+"_db3" {
+		t.Errorf("kullanımdaki yedek atlanmadı: %q", ad)
+	}
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,?,?,'x')`,
+		"c_"+on+"_db2", strings.ToUpper(on)+"_zz"); err != nil {
+		t.Fatal(err)
+	}
+	if ad := sec("c_"+on+"_db", serbest); ad != "c_"+on+"_db3" {
+		t.Errorf("panelde kayıtlı yedek atlanmadı: %q", ad)
+	}
+	// Sayaç adlarının HEPSİ tutulmuşsa (her biri açılabilir) rastgele ek: öngörülemez.
+	sayacli := regexp.MustCompile(`^c_` + on + `_db[0-9]*$`)
+	ad := sec("c_"+on+"_db", func(a string) (bool, error) { return !sayacli.MatchString(a), nil })
+	if !regexp.MustCompile(`^c_` + on + `_db[a-z0-9]{6}$`).MatchString(ad) {
+		t.Errorf("rastgele ekli yedek beklenir, alınan %q", ad)
+	}
+	// Fail-closed: bilinmeyen domain, ölçüm hatası, hiçbir kendi köke düşmeyen temel.
+	if _, err := KendiAdAlanindaAdSec(ctx, o.panel, 12345, on+"_db", serbest); err == nil {
+		t.Errorf("bilinmeyen domain için ad seçildi")
+	}
+	if _, err := KendiAdAlanindaAdSec(ctx, o.panel, 1, on+"_q_db", func(string) (bool, error) {
+		return false, errors.New("ölçüm hatası")
+	}); err == nil {
+		t.Errorf("ölçüm hatası yutuldu")
+	}
+	if _, err := KendiAdAlanindaAdSec(ctx, o.panel, 1, "c_"+on+"_x_db", serbest); err != nil {
+		t.Errorf("komşunun (domain 2) adı temel olsa da kendi kökte yedek seçilmeliydi: %v", err)
+	}
+	if _, err := KendiAdAlanindaAdSec(ctx, o.panel, 1, "wpx_"+on, func(string) (bool, error) { return false, nil }); !errors.Is(err, ErrAdSecilemedi) {
+		t.Errorf("kendi köke düşmeyen dolu temel için ErrAdSecilemedi beklenir: %v", err)
+	}
+}
+
+// AdSerbestMi: panel kaydı (harf duyarsız), MariaDB hesabı (herhangi host), şema.
+func TestAdSerbestMi(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	ctx := context.Background()
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,?,?,'x')`,
+		on+"_kayitli", strings.ToUpper(on+"_kayitliu")); err != nil {
+		t.Fatal(err)
+	}
+	o.kokExec(t, "CREATE USER '"+on+"_uzak'@'127.0.0.1' IDENTIFIED BY 'UzakParola12345'")
+	t.Cleanup(func() { _, _ = o.kok.Exec("DROP USER IF EXISTS '" + on + "_uzak'@'127.0.0.1'") })
+	o.kokExec(t, "CREATE DATABASE `"+on+"_sema`")
+	for ad, serbest := range map[string]bool{
+		on + "_kayitli":               false, // db_name
+		on + "_kayitliu":              false, // db_user (büyük harfli kayıt)
+		strings.ToUpper(on + "_uzak"): false, // başka host'ta hesap, harf duyarsız
+		on + "_sema":                  false,
+		on + "_bos":                   true,
+		"a'b":                         false,
+		strings.Repeat("a", 65):       false,
+	} {
+		got, err := AdSerbestMi(ctx, o.panel, ad)
+		if err != nil {
+			t.Fatalf("%q: %v", ad, err)
+		}
+		if got != serbest {
+			t.Errorf("%q: serbest=%v beklenir, alınan %v", ad, serbest, got)
+		}
 	}
 }

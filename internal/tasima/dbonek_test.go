@@ -11,6 +11,7 @@ package tasima
 // `mysql` CLI çağrıları PATH'e konan sarmalayıcıyla YALNIZ geçici sunucuya gider.
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -232,5 +233,77 @@ func TestPanelKullanicisiylaOlustur(t *testing.T) {
 	_ = o.kok.QueryRow(`SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?`, yeniDB).Scan(&dbSayi)
 	if dbSayi != 0 {
 		t.Errorf("reddedilen taşımada yeni DB %q oluşturuldu", yeniDB)
+	}
+}
+
+// 🔴 DAHA UZUN KÖKLÜ KOMŞU (inceleme (b)): <on>-db.test (tam sk'sı c_<on>_db) kurbanın
+// taşıma kullanıcısıyla (<sk>_db = c_<on>_db) AYNI adı taşır. Eskiden hedef kullanıcı
+// sabitti; komşunun sahibi adı açınca kurbanın taşıması hiç DB aktaramıyordu. Artık:
+//   - taşıma kullanıcısı kurbanın KENDİ ad-alanında seçilir (c_<on>_db2) ve gerçekten
+//     oluşturulup DB'ye bağlanabilir;
+//   - üstüne taşımada panelde yalnız bu domaine kayıtlı kullanıcı yeniden seçilir;
+//   - komşunun (daha uzun kökün) ad-alanına düşen hedef DB adı ve orijinal kimlik
+//     kullanılmaz.
+func TestTasimaAdlari_UzunKokluKomsu(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	sk := "c_" + on
+	ctx := context.Background()
+
+	// Komşu yokken: temel ad.
+	if kul, err := o.h.tasimaKullanicisiSec(ctx, 1, sk); err != nil || kul != sk+"_db" {
+		t.Fatalf("komşusuz taşıma kullanıcısı %s_db beklenir: %q %v", sk, kul, err)
+	}
+	if _, err := o.h.DB.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (3, ?), (4, ?)`,
+		sk+"_db", sk+"_joomla"); err != nil {
+		t.Fatal(err)
+	}
+	kul, err := o.h.tasimaKullanicisiSec(ctx, 1, sk)
+	if err != nil || kul != sk+"_db2" {
+		t.Fatalf("komşunun köküne düşen taşıma kullanıcısı için %s_db2 beklenir: %q %v", sk, kul, err)
+	}
+	// Gerçek oluşturma: kullanıcı + DB oluşur, bağlanılır, satır kurbanın domain_id'siyle.
+	hedef, err := o.h.benzersizHedefDB(ctx, 1, sk, "src_wp", "src")
+	if err != nil || hedef != sk+"_wp" {
+		t.Fatalf("hedef DB %s_wp beklenir: %q %v", sk, hedef, err)
+	}
+	if err := o.h.panelKullanicisiylaOlustur(1, hedef, kul, "TasimaParola12345"); err != nil {
+		t.Fatalf("kendi ad-alanındaki taşıma kullanıcısı oluşturulamadı: %v", err)
+	}
+	if !o.baglanir(kul, "TasimaParola12345", hedef) {
+		t.Errorf("seçilen taşıma kullanıcısı DB'ye bağlanamıyor")
+	}
+	// Üstüne taşıma: panelde yalnız bu domaine kayıtlı → aynı ad yeniden seçilir.
+	if kul2, err := o.h.tasimaKullanicisiSec(ctx, 1, sk); err != nil || kul2 != kul {
+		t.Errorf("üstüne taşımada kendi kullanıcısı yeniden seçilmedi: %q %v", kul2, err)
+	}
+	// Başka domaine kayıtlı / kayıtsız var olan ad atlanır.
+	if _, err := o.h.DB.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (2,?,?,'x')`,
+		sk+"_x_kayit", kul); err != nil {
+		t.Fatal(err)
+	}
+	if kul3, err := o.h.tasimaKullanicisiSec(ctx, 1, sk); err != nil || kul3 != sk+"_db3" {
+		t.Errorf("iki domaine kayıtlı ad atlanmadı (%s_db3 beklenir): %q %v", sk, kul3, err)
+	}
+
+	// Hedef DB: "<sk>_joomla_x" komşu c_<on>_joomla'nın ad-alanında → kendi kökte kompakt ad.
+	if hedef, err := o.h.benzersizHedefDB(ctx, 1, sk, "src_joomla_x", "src"); err != nil || hedef != sk+"_joomlax" {
+		t.Errorf("komşunun ad-alanına düşen hedef DB için %s_joomlax beklenir: %q %v", sk, hedef, err)
+	}
+	// Orijinal kimlik: komşunun ad-alanındaki ad kullanılmaz, ad-alanı dışı ad kullanılır.
+	for ad, uygun := range map[string]bool{
+		sk + "_db":        false, // komşunun kökünün kendisi
+		sk + "_joomla_7":  false,
+		on + "_db":        false, // komşunun c'siz kökü
+		"src_wp":          true,
+		sk + "_kendi":     true,
+		"C_" + on + "_DB": false,
+	} {
+		if got := o.h.kendiAdAlaniUygun(ctx, 1, ad); got != uygun {
+			t.Errorf("kendiAdAlaniUygun(%q)=%v beklenir %v", ad, got, uygun)
+		}
+	}
+	if o.h.kendiAdAlaniUygun(ctx, 999, "src_wp") {
+		t.Errorf("bilinmeyen domain uygun sayıldı (fail-closed olmalı)")
 	}
 }

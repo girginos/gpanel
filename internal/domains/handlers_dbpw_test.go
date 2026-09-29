@@ -95,7 +95,8 @@ func dp_exec(t *testing.T, db *sql.DB, q string, args ...any) {
 //	          (bayi 3) boş-kullanıcılı DB'si, 210 root.test'in
 //	          boş-kullanıcılı DB'si, 300 kurbanın kayıtlı kullanıcısı (kurban_db),
 //	          301 kurbanın boş-kullanıcılı DB'si, 302 kurbanın ad alanı DIŞINDA
-//	          kayıtlı kullanıcısı (wpu_kurban1 — WordPress kurulumu adı).
+//	          kayıtlı kullanıcısı (wpu_kurban1 — WordPress kurulumu adı), 310/311
+//	          bayi2-ek.test'in (bayi 3, uzun kök) boş-kullanıcılı DB'leri.
 func dp_db(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("GOSP_TEST_GECICI_DSN")
@@ -147,7 +148,8 @@ func dp_db(t *testing.T) *sql.DB {
 			(203,20,'bayi2_geri4','',''),
 			(210,21,'root_geri','',''), (220,22,'c_c_bayi2_geri','',''), (221,22,'c_c_bayi2_geri2','',''),
 			(300,30,'kurban_main','kurban_db',''), (301,30,'kurban_bos','',''),
-			(302,30,'wp_kurban1','wpu_kurban1','')`,
+			(302,30,'wp_kurban1','wpu_kurban1',''),
+			(310,31,'bayi2_ek_geri','',''), (311,31,'bayi2_ek_geri2','','')`,
 	} {
 		dp_exec(t, db, q)
 	}
@@ -264,6 +266,29 @@ func TestSetDatabasePassword_BosKullanici_YabanciAdDevralinamaz(t *testing.T) {
 			t.Errorf("eşit kök (%q): MariaDB katmanına inildi ya da kayıt değişti", kul)
 		}
 	}
+	// 🔴 KÖKÜN KENDİSİ (inceleme (b)): bayi2-ek.test (c_bayi2_ek, bayi 3) kendi tam
+	// sk'sını / c'siz kökünü açamaz — bunlar kısa köklü bayi2.test'in türettiği adlar
+	// (taşıma c_bayi2_<ek>, sağlama bayi2_<ek>) biçimindedir; açılırsa kurbanın
+	// taşıması/sağlaması kilitlenirdi. Bayi 2 de kendi kökünün kendisini açamaz.
+	for _, c := range []struct {
+		bayi int64
+		dbid int64
+		kul  string
+	}{
+		{3, 310, "c_bayi2_ek"},
+		{3, 310, "bayi2_ek"},
+		{3, 310, "C_BAYI2_EK"},
+		{2, 200, "c_bayi2"},
+		{2, 200, "bayi2"},
+	} {
+		once := sahte.sayi()
+		if kod, govde := dp_istek(t, h, dp_bayi(t, c.bayi), c.dbid, c.kul); kod != http.StatusConflict {
+			t.Errorf("kökün kendisi (%q): 409 beklenir, alınan %d %s", c.kul, kod, govde)
+		}
+		if sahte.sayi() != once || dp_dbUser(t, h.DB, c.dbid) != "" {
+			t.Errorf("kökün kendisi (%q): MariaDB katmanına inildi ya da kayıt değişti", c.kul)
+		}
+	}
 	if u := dp_dbUser(t, h.DB, 300); u != "kurban_db" {
 		t.Errorf("kurbanın kaydı değişti: %q", u)
 	}
@@ -320,6 +345,8 @@ func TestSetDatabasePassword_BosKullanici_MesruAdlar(t *testing.T) {
 		// kullanabilir; c-bayi2.test ise kendi tam-sk ad-alanında serbesttir.
 		{2, 203, "bayi2_geri4", "c_bayi2_db"},
 		{3, 221, "c_c_bayi2_geri2", "c_c_bayi2_db"},
+		// Uzun köklü kiracı kökünün kendisini değil, kendi ad-alanındaki adı kullanır.
+		{3, 311, "bayi2_ek_geri2", "c_bayi2_ek_db"},
 	} {
 		kod, govde := dp_istek(t, h, dp_bayi(t, c.bayi), c.dbid, c.kul)
 		if kod != http.StatusOK {

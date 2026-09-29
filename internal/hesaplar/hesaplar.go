@@ -125,6 +125,22 @@ func MusteriDBKimlikGecerli(sk, s string) bool {
 // (DBAdAlaniKullanimda). Yalniz eski (duzeltme oncesi) ciftlerde c_'siz kok sahibinin o
 // ad-alaninda yeni ad acmasi reddedilir.
 //
+// 🔴 KOKUN KENDISI (sinir adi): ad bir domainin kokune BIREBIR esitse (shop-db.com →
+// c_shop_db: tam sk'si "c_shop_db", c'siz koku "shop_db") o ad AYNI ANDA kisa koklu
+// komsunun (shop.com: "c_shop_", "shop_") ad-alanindadir ve komsunun TURETTIGI adlarin
+// ta kendisidir (tasima kullanicisi <sk>_db = c_shop_db, saglama <onek>_db = shop_db).
+// En uzun kok kurali onu uzun koke verdigi icin shop-db.com adi (kendi koku diye) acip
+// kurbanin tasimasini / saglamasini kilitleyebiliyordu. Boyle ad KIMSENIN degildir:
+// cagiranin KENDI koku olsa bile true doner (kiraci bu adla DB/kullanici acamaz,
+// baglayamaz). Panel turettigi adlarda koku hep "<kok>_<ek>" bicimde kullanir; kokun
+// kendisini hicbir akis uretmez.
+//
+// Kisa koklu kiracinin DAHA UZUN bir koke dusen turetilmis adlari (c_shop_joomla_<id> →
+// shop-joomla.com) bu kuralla baskasinindir; o adlari kullanan sunucu akislari adi
+// KendiAdAlanindaAdSec ile kiracinin kendi ad-alaninda secer. Ad-alanlarini sk
+// tahsisinde tamamen ORTUSMEZ yapmak mumkun degil: c.com → c_c, c'siz koku "c" ve
+// butun sk'lar "c_" ile baslar (her yeni sk mevcut bir koku uzatir).
+//
 // Karsilastirma BUYUK/KUCUK HARF DUYARSIZDIR (bkz. adKokAgirligi): kokler hep kucuk
 // harftir ama kullanici/DB adi A-Z tasiyabilir (yedekten kurtarilan wp-config, tasima,
 // "kullanici ekle"). MariaDB "GIRGIN_X_DB"yi ayri hesap sayar; panel ise db_accounts'u
@@ -138,6 +154,9 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
 		return true, err
 	}
+	if kokunKendisiMi(ad, sk) {
+		return true, nil
+	}
 	kendi := adKokAgirligi(ad, sk)
 	rows, err := db.QueryContext(ctx,
 		`SELECT sistem_kullanici FROM domains WHERE id<>? AND sistem_kullanici<>''`, domainID)
@@ -150,7 +169,7 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 		if err := rows.Scan(&baska); err != nil {
 			return true, err
 		}
-		if adKokAgirligi(ad, baska) > kendi {
+		if kokunKendisiMi(ad, baska) || adKokAgirligi(ad, baska) > kendi {
 			return true, nil
 		}
 	}
@@ -173,7 +192,152 @@ func skKokleri(sk string) []string {
 	return kokler
 }
 
-// adKokAgirligi: ad, sk'nin koklerinden birine dusuyorsa eslesen EN AGIR kokun agirligi;
+// kokunKendisiMi: ad, sk'nin koklerinden birine BIREBIR esit mi (harf duyarsiz)?
+func kokunKendisiMi(ad, sk string) bool {
+	ad = strings.ToLower(ad)
+	for _, kok := range skKokleri(sk) {
+		if ad == kok {
+			return true
+		}
+	}
+	return false
+}
+
+// ErrAdSecilemedi: KendiAdAlanindaAdSec domainin kendi ad-alaninda kullanilabilir ad
+// bulamadi (ya da temel ad domainin hicbir kokune dusmuyor).
+var ErrAdSecilemedi = errors.New("kendi ad alanında kullanılabilir veritabanı adı bulunamadı")
+
+// KendiAdAlanindaAdSec: sunucunun TURETTIGI varsayilan DB/kullanici adi (saglama
+// <onek>_db / <onek>_main, tasima <sk>_db / <sk>_<sonek>, uygulama <sk>_<kod>_<id>) icin
+// ad secer: temel ad domainin kendi ad-alanindaysa (DBAdiBaskaKiracininMi false) ve
+// musait ise temel; degilse temelin dustugu KENDI kok altinda yedek ad.
+//
+// 🔴 ONEK CAKISMASI — KOMSUNUN ONGORULEBILIR ADLARINI KILITLEME (DoS): en uzun kok
+// kurali kurbanin (shop.com, c_shop) turettigi adlari, adi '<kurban>-<ek>' olan domainin
+// ad-alanina dusurur: uygulama c_shop_joomla_<id> → shop-joomla.com (c_shop_joomla);
+// tasima c_shop_db ve saglama shop_db → shop-db.com (tam sk'si / c'siz koku). O domain
+// acildigi anda kurbanin varsayilan adla kurulumu reddediliyor, sahibi adi onceden
+// acarsa kurbanin tasimasi kilitleniyordu. Turetilmis adi kurban SECEMEZ; sunucu onu
+// kurbanin kendi ad-alaninda secer.
+//
+// Yedek bicimi "<kok>_<kompakt><ek>": kompakt = temelin kokten sonraki kismi, yalniz
+// [a-z0-9] — ALT CIZGI YOK. Baska bir kok bu adi ancak BIREBIR esitlikle yakalayabilir
+// (onek yakalamasi "<kok2>_" ister; kokten sonra alt cizgi yok, daha kisa kokler ise
+// kendi kokumuzden kisadir); sayac ekleri bunu asar, son asamadaki rastgele ek de onceden
+// acilamaz. Olcum hatasi = hata (fail-closed; cagiran ad kullanmaz).
+func KendiAdAlanindaAdSec(ctx context.Context, db *sql.DB, domainID int64, temel string,
+	musait func(ad string) (bool, error)) (string, error) {
+	var sk string
+	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
+		return "", fmt.Errorf("ad seçimi: domain okunamadı: %w", err)
+	}
+	denendi := map[string]bool{}
+	dene := func(ad string) (bool, error) {
+		if ad == "" || denendi[ad] || !GecerliDBKimlik(ad) || SistemDBHesabiMi(ad) {
+			return false, nil
+		}
+		denendi[ad] = true
+		if baska, err := DBAdiBaskaKiracininMi(ctx, db, domainID, ad); err != nil {
+			return false, err
+		} else if baska {
+			return false, nil
+		}
+		return musait(ad)
+	}
+	if ok, err := dene(temel); err != nil {
+		return "", err
+	} else if ok {
+		return temel, nil
+	}
+	kucuk := strings.ToLower(temel)
+	kok, kalan := "", ""
+	for _, k := range skKokleri(sk) {
+		if len(k) > len(kok) && strings.HasPrefix(kucuk, k+"_") {
+			kok, kalan = k, kucuk[len(k)+1:]
+		}
+	}
+	if kok == "" {
+		return "", ErrAdSecilemedi
+	}
+	kompakt := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, kalan)
+	if kompakt == "" {
+		kompakt = "db"
+	}
+	aday := func(ek string) string {
+		k := kompakt
+		sinir := 64 - len(kok) - 1 - len(ek)
+		if sinir < 1 {
+			return ""
+		}
+		if len(k) > sinir {
+			k = k[:sinir]
+		}
+		return kok + "_" + k + ek
+	}
+	for i := 1; i <= 9; i++ {
+		ek := ""
+		if i > 1 {
+			ek = strconv.Itoa(i)
+		}
+		a := aday(ek)
+		if ok, err := dene(a); err != nil {
+			return "", err
+		} else if ok {
+			return a, nil
+		}
+	}
+	// Sayac ekleri de dolu: her biri baska bir domainin kokune birebir esit ya da
+	// kullanimda olabilir (tek tek acilabilir). Rastgele ek onceden kapilamaz.
+	for i := 0; i < 8; i++ {
+		r := strings.ToLower(RandomParola(6))
+		if r == "" {
+			return "", fmt.Errorf("ad seçimi: güvenli rastgele üretim başarısız")
+		}
+		a := aday(r)
+		if ok, err := dene(a); err != nil {
+			return "", err
+		} else if ok {
+			return a, nil
+		}
+	}
+	return "", ErrAdSecilemedi
+}
+
+// AdSerbestMi: ad panelde (db_accounts db_name/db_user) ve MariaDB'de (sema; HERHANGI
+// host'ta hesap) HIC kullanilmiyor mu? Harf duyarsiz (temkinli: "C_X_DB" varken
+// "c_x_db" serbest sayilmaz). Olcum hatasi = err (cagiran adi KULLANMAMALI).
+func AdSerbestMi(ctx context.Context, db *sql.DB, ad string) (bool, error) {
+	if !GecerliDBKimlik(ad) {
+		return false, nil
+	}
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM db_accounts WHERE LOWER(db_name)=LOWER(?) OR LOWER(db_user)=LOWER(?)`, ad, ad).Scan(&n); err != nil {
+		return false, fmt.Errorf("ad sorgusu (panel): %w", err)
+	}
+	if n > 0 {
+		return false, nil
+	}
+	k := sqlKac(strings.ToLower(ad))
+	out, err := mysqlKomut("-N", "-B", "-e", kacisModu+
+		" SELECT (SELECT COUNT(*) FROM mysql.user WHERE LOWER(User)='"+k+"')"+
+		" + (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE LOWER(SCHEMA_NAME)='"+k+"');").Output()
+	if err != nil {
+		return false, fmt.Errorf("ad sorgusu (MariaDB): %w", err)
+	}
+	m, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return false, fmt.Errorf("ad sorgusu (MariaDB): beklenmeyen çıktı")
+	}
+	return m == 0, nil
+}
+
+// adKokAgirligi:ad, sk'nin koklerinden birine dusuyorsa eslesen EN AGIR kokun agirligi;
 // hicbirine dusmuyorsa 0. Agirlik = 2*len(kok) (+1 kok sk'nin KENDISIYSE): daha uzun kok
 // kazanir; ayni kok dizgesi iki domainde ise (esit uzunluk) onu TAM sk olarak tasiyan
 // kazanir. Harf duyarsiz (bkz. DBAdiBaskaKiracininMi).

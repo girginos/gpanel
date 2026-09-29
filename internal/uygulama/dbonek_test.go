@@ -69,6 +69,7 @@ func dbo_ortam(t *testing.T) (*sql.DB, *sql.DB, string) {
 	}
 	t.Cleanup(func() {
 		_, _ = kok.Exec("DROP DATABASE IF EXISTS `c_" + on + "_var`")
+		_, _ = kok.Exec("DROP DATABASE IF EXISTS `c_" + on + "_joomla_1`")
 		_, _ = kok.Exec("DROP DATABASE IF EXISTS " + ad)
 	})
 	pcfg := cfg.Clone()
@@ -81,6 +82,10 @@ func dbo_ortam(t *testing.T) (*sql.DB, *sql.DB, string) {
 	for _, q := range []string{
 		`CREATE TABLE domains (id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
 			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '') ENGINE=InnoDB`,
+		// otomatik ad seçimi (hesaplar.AdSerbestMi) panel kaydına da bakar
+		`CREATE TABLE db_accounts (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			domain_id BIGINT UNSIGNED NOT NULL, db_name VARCHAR(64) NOT NULL UNIQUE,
+			db_user VARCHAR(64) NOT NULL, db_pass_plain VARCHAR(255) NOT NULL) ENGINE=InnoDB`,
 		fmt.Sprintf(`INSERT INTO domains (id, sistem_kullanici) VALUES (1,'c_%s'), (2,'c_%s_x')`, on, on),
 	} {
 		if _, err := panel.Exec(q); err != nil {
@@ -172,5 +177,42 @@ func TestUygulamaDBKur_OnekCakismasiVeGeriAlma(t *testing.T) {
 	uzun := Domain{ID: 2, SK: "c_" + on + "_x", AlanAdi: on + "-x.test"}
 	if _, _, err := uygulamaDBKur(ctx, panel, KurArgs{Domain: uzun, Tarif: tarif, DBAdi: "c_" + on + "_x_joom"}, s.mysqlOlustur, s.mysqlDrop); err != nil {
 		t.Errorf("uzun önekli kiracı kendi DB adını kullanamadı: %v", err)
+	}
+
+	// (7) 🔴 DAHA UZUN KÖKLÜ KOMŞU: <on>-joomla.test (c_<on>_joomla) açıldı. Varsayılan ad
+	// c_<on>_joomla_1 artık onun ad-alanında; kurban adı SEÇEMEZ → eskiden kurulum hiç
+	// kapma gerekmeden reddediliyordu. Ad kurbanın kendi ad-alanında seçilir.
+	if _, err := panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (4, ?)`, "c_"+on+"_joomla"); err != nil {
+		t.Fatal(err)
+	}
+	s = &dboSahte{}
+	ad, _, err = uygulamaDBKur(ctx, panel, KurArgs{Domain: dom, Tarif: tarif}, s.mysqlOlustur, s.mysqlDrop)
+	if err != nil {
+		t.Fatalf("uzun köklü komşu varken varsayılan kurulum reddedildi: %v", err)
+	}
+	if ad != "c_"+on+"_joomla1" || len(s.olustur) != 1 || s.olustur[0] != ad+"/"+ad {
+		t.Errorf("kendi ad-alanında yedek ad beklenir (c_%s_joomla1): ad=%q olustur=%v", on, ad, s.olustur)
+	}
+	if b, err := hesaplar.DBAdiBaskaKiracininMi(ctx, panel, 1, ad); err != nil || b {
+		t.Errorf("seçilen %q kurbanın ad-alanında değil (%v, %v)", ad, b, err)
+	}
+	// Komşu kendi kökünün kendisini (tam sk) DB adı olarak da açamaz.
+	s = &dboSahte{}
+	komsu := Domain{ID: 4, SK: "c_" + on + "_joomla", AlanAdi: on + "-joomla.test"}
+	if _, _, err := uygulamaDBKur(ctx, panel, KurArgs{Domain: komsu, Tarif: tarif, DBAdi: "c_" + on + "_joomla"}, s.mysqlOlustur, s.mysqlDrop); err == nil || len(s.olustur) != 0 {
+		t.Errorf("komşu kökünün kendisini DB adı olarak açtı (err=%v, olustur=%v)", err, s.olustur)
+	}
+
+	// (8) Varsayılan ad kendi ad-alanında ama ZATEN VAR (ikinci kurulum / artık) → sonraki ad.
+	if _, err := panel.Exec(`DELETE FROM domains WHERE id=4`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kok.Exec("CREATE DATABASE `c_" + on + "_joomla_1`"); err != nil {
+		t.Fatal(err)
+	}
+	s = &dboSahte{}
+	ad, _, err = uygulamaDBKur(ctx, panel, KurArgs{Domain: dom, Tarif: tarif}, s.mysqlOlustur, s.mysqlDrop)
+	if err != nil || ad != "c_"+on+"_joomla1" {
+		t.Errorf("var olan varsayılan ad için yedek beklenir: ad=%q err=%v", ad, err)
 	}
 }

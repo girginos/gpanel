@@ -126,8 +126,11 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		// (3) Baska hostingin AD ALANI kapatilamaz: o kiracinin panelden sonra
 		// acacagi <onek>_ek<id> / <onek>_db / c_<sk>_db kullanicisi bu kayda
 		// baglanir, bayi de kendi kaydindan parolayi sifirlayip kurbanin DB'sine
-		// erisirdi. Kural (en uzun kok; esit kokte tam-sk sahibi) TEK yerde:
-		// hesaplar.DBAdiBaskaKiracininMi (CreateDatabase / geri yukleme ile ayni).
+		// erisirdi. Kural (en uzun kok; esit kokte tam-sk sahibi; bir domainin
+		// kokunun KENDISI — kendi tam sk'si ya da c'siz koku dahil — hic kimsenin)
+		// TEK yerde: hesaplar.DBAdiBaskaKiracininMi (CreateDatabase / uygulama /
+		// geri yukleme ile ayni). shop-db.com (c_shop_db) bu dalda "c_shop_db" /
+		// "shop_db" acarak shop.com'un tasima/saglama adini kilitleyemez.
 		// Olcum hatasi = red (fail-closed).
 		if baska, e := hesaplar.DBAdiBaskaKiracininMi(r.Context(), h.DB, domainID, yeni); e != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "ad alanı denetlenemedi")

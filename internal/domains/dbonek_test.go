@@ -20,6 +20,7 @@ package domains
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -361,6 +362,11 @@ func TestSetDatabasePassword_VarOlanHesabiDevralamaz(t *testing.T) {
 	for _, c := range []struct{ ad, kul string }{
 		{"MariaDB'de var olan kayıtsız hesap", on + "_kayitsiz"},
 		{"komşunun ad-alanı (kapma)", on + "_x_kapma"},
+		// 🔴 Kökün KENDİSİ (kendi tam sk'sı / c'siz kökü): kısa köklü bir komşunun
+		// türettiği adın ta kendisi olabilir (shop-db.com'un c_shop_db'si).
+		{"kendi tam sk'sının kendisi", "c_" + on},
+		{"kendi c'siz kökünün kendisi", on},
+		{"komşunun c'siz kökünün kendisi", on + "_x"},
 	} {
 		o.ddlSifirla(t)
 		kod, govde := o.istek(t, http.MethodPut, yol, map[string]any{"parola": "SaldirganParola123", "kullanici": c.kul})
@@ -405,5 +411,66 @@ func TestSetDatabasePassword_VarOlanHesabiDevralamaz(t *testing.T) {
 	}
 	if !o.baglanir(on+"_geriu", "YeniGeriParola123", geriDB) {
 		t.Errorf("yeni parola uygulanmadı")
+	}
+}
+
+// 🔴 SAĞLAMA VARSAYILANI + DAHA UZUN KÖKLÜ KOMŞU (inceleme (a)/(b)): <on>-db.test
+// (c_<on>_db, c'siz kökü "<on>_db") varken domain 1'in varsayılan kullanıcısı <on>_db o
+// komşunun kökünün kendisidir. Eskiden ad sabitti: komşu adı açınca kurbanın varsayılan
+// DB'si yalnız-yeni oluşturmada reddediliyor, hosting DB'siz kalıyordu. Artık ad kurbanın
+// kendi ad-alanında seçilir, domains satırına yazılır ve gerçekten oluşur.
+func TestSaglamaDBKur_UzunKokluKomsu(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	ctx := context.Background()
+	for _, q := range []string{
+		`ALTER TABLE domains ADD db_user VARCHAR(64) NOT NULL DEFAULT '', ADD db_adi VARCHAR(64) NOT NULL DEFAULT ''`,
+		fmt.Sprintf(`INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (3,'%s-db.test','c_%s_db')`, on, on),
+		fmt.Sprintf(`UPDATE domains SET db_user='%s_db', db_adi='%s_main' WHERE id=1`, on, on),
+	} {
+		if _, err := o.h.DB.Exec(q); err != nil {
+			t.Fatalf("şema: %v\n%s", err, q)
+		}
+	}
+	// Komşu kendi c'siz kökünü önceden açmış olsa bile (eski veri) kurban etkilenmez.
+	o.kokExec(t, "CREATE USER '"+on+"_db'@'localhost' IDENTIFIED BY 'KomsuParola12345'")
+
+	parola := o.h.saglamaDBKur(ctx, 1, on+"_main", on+"_db")
+	if parola == "" {
+		t.Fatalf("uzun köklü komşu varken varsayılan DB oluşturulamadı")
+	}
+	var kul, ad string
+	if err := o.h.DB.QueryRow(`SELECT db_user, db_adi FROM domains WHERE id=1`).Scan(&kul, &ad); err != nil {
+		t.Fatal(err)
+	}
+	if kul != on+"_db2" || ad != on+"_main" {
+		t.Errorf("domains satırı: %s_db2/%s_main beklenir, alınan %q/%q", on, on, kul, ad)
+	}
+	if !o.baglanir(kul, parola, ad) {
+		t.Errorf("seçilen kullanıcı varsayılan DB'ye bağlanamıyor")
+	}
+	if !o.baglanir(on+"_db", "KomsuParola12345", "") {
+		t.Errorf("komşunun hesabı değişti")
+	}
+	var n int
+	if err := o.h.DB.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE domain_id=1 AND db_name=? AND db_user=?`, ad, kul).Scan(&n); err != nil || n != 1 {
+		t.Errorf("db_accounts satırı yazılmadı (%d, %v)", n, err)
+	}
+
+	// Oluşturma yapılamazsa (ad seçilemedi) hayalet ad kalmaz, parola dönmez.
+	if _, err := o.h.DB.Exec(fmt.Sprintf(`UPDATE domains SET db_user='%s_x_db', db_adi='%s_x_main' WHERE id=2`, on, on)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.h.DB.Exec(`UPDATE domains SET sistem_kullanici='' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	if p := o.h.saglamaDBKur(ctx, 2, on+"_x_main", on+"_x_db"); p != "" {
+		t.Errorf("ad seçilemediği halde parola döndü")
+	}
+	if err := o.h.DB.QueryRow(`SELECT db_user, db_adi FROM domains WHERE id=2`).Scan(&kul, &ad); err != nil {
+		t.Fatal(err)
+	}
+	if kul != "" || ad != "" {
+		t.Errorf("başarısız sağlamada hayalet ad kaldı: %q/%q", kul, ad)
 	}
 }
