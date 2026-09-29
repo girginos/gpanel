@@ -517,6 +517,58 @@ func TestDbKullanicilariUygula_YabanciHesapFiltrelenir(t *testing.T) {
 	}
 }
 
+// 🔴 domainDBleri'nin spekülatif <sk>_main'i: <on>-main.test (tam sk c_<on>_main) varken
+// c_<on>_main o komşunun kökünün KENDİSİDİR (düzeltme öncesi uygulama DBAdi=sk ile tam bu
+// adla DB açılabiliyordu). Domain 1'in yedeği onu dökmemeli, "üzerine geri yükle" onu
+// ezmemeli. Başka domaine kayıtlı <sk>_main de alınmaz; komşusuz eski davranış korunur.
+func TestDomainDBleri_SpekulatifAnaDB(t *testing.T) {
+	o := bdo_ortam(t)
+	on := o.on
+	sk := "c_" + on
+	ana := sk + "_main"
+	icinde := func() bool {
+		for _, n := range domainDBleri(o.panel, 1, sk) {
+			if n == ana {
+				return true
+			}
+		}
+		return false
+	}
+	if !icinde() {
+		t.Fatalf("komşusuz <sk>_main listelenmedi (eski davranış bozuldu)")
+	}
+	// (a) komşunun kökünün kendisi: listede yok, üzerine geri yükleme reddedilir.
+	if _, err := o.panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (3, ?)`, ana); err != nil {
+		t.Fatal(err)
+	}
+	o.kokExec(t, "CREATE DATABASE `"+ana+"`")
+	o.kokExec(t, "CREATE TABLE `"+ana+"`.komsu_t (id INT)")
+	o.kokExec(t, "INSERT INTO `"+ana+"`.komsu_t VALUES (7)")
+	if icinde() {
+		t.Errorf("komşunun kökünün kendisi (%s) domain 1'in DB listesinde — yedeğe girer", ana)
+	}
+	if _, err := birDBGeriYukle(o.panel, 1, arsiv(t, ana), sk, ana, ""); err == nil {
+		t.Errorf("domain 1 komşunun %s veritabanının üzerine geri yükleyebildi", ana)
+	}
+	if o.sayi(t, o.kok, "SELECT COUNT(*) FROM `"+ana+"`.komsu_t WHERE id=7") != 1 {
+		t.Errorf("komşunun verisi değişti")
+	}
+	// (b) başka domaine kayıtlı <sk>_main (komşu domain yok).
+	if _, err := o.panel.Exec(`DELETE FROM domains WHERE id=3`); err != nil {
+		t.Fatal(err)
+	}
+	if !icinde() {
+		t.Fatalf("komşu silinince <sk>_main yeniden listelenmeli")
+	}
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (2,?,?,'x')`,
+		ana, on+"_x_db"); err != nil {
+		t.Fatal(err)
+	}
+	if icinde() {
+		t.Errorf("başka domaine kayıtlı %s domain 1'in DB listesinde", ana)
+	}
+}
+
 func TestSatirHesabi(t *testing.T) {
 	for _, c := range []struct {
 		s, kul, host string

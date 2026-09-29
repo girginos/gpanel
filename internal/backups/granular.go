@@ -43,7 +43,8 @@ func sistemDBmi(n string) bool {
 	return false
 }
 
-// domainDBleri: domaine ait TUM veritabani adlari (ana <sk>_main + db_accounts satirlari).
+// domainDBleri: domaine ait TUM veritabani adlari (ana <sk>_main — yalniz kendi
+// ad-alanindaysa — + db_accounts satirlari).
 // Sadece gecerli-kimlik + sistem-disi adlar doner (whitelist kaynagi).
 func domainDBleri(db *sql.DB, domainID int64, sk string) []string {
 	set := map[string]bool{}
@@ -55,7 +56,19 @@ func domainDBleri(db *sql.DB, domainID int64, sk string) []string {
 			out = append(out, n)
 		}
 	}
-	add(sk + "_main")
+	// 🔴 Spekulatif (panelde kayitsiz olabilen eski) <sk>_main YALNIZ bu domainin
+	// ad-alanindaysa ve baska domaine kayitli degilse: ad bir komsunun kokunun KENDISI
+	// olabilir (shop.com'un c_shop_main'i = shop-main.com'un tam sk'si; duzeltme oncesi o
+	// kiraci uygulama DBAdi=sk ile tam bu adla DB acabiliyordu). Aksi halde shop.com'un
+	// yedegi komsunun DB'sini doker, "uzerine geri yukle" onu ezerdi. Bu domaine kayitliysa
+	// asagidaki sorgu zaten ekler. Olcum hatasi = eklenmez (fail-closed).
+	ana := sk + "_main"
+	if baska, err := hesaplar.DBAdiBaskaKiracininMi(context.Background(), db, domainID, ana); err == nil && !baska {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_name=? AND domain_id<>?`, ana, domainID).Scan(&n); err == nil && n == 0 {
+			add(ana)
+		}
+	}
 	if rows, err := db.Query(`SELECT db_name FROM db_accounts WHERE domain_id=?`, domainID); err == nil {
 		defer rows.Close()
 		for rows.Next() {
