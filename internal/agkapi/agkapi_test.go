@@ -96,12 +96,14 @@ func TestDenetle_IzinliAglarMetadataAcmaz(t *testing.T) {
 	k := Yeni(Secenek{IzinliAglar: []netip.Prefix{
 		netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"), netip.MustParsePrefix("169.254.0.0/16"),
 	}})
-	for _, s := range []string{"169.254.169.254", "fd00:ec2::254", "100.100.100.200", "fe80::1", "0.0.0.0", "224.0.0.1"} {
+	// NAT64/6to4 içine gömülü metadata da açılmaz (::/0 izinli olsa bile).
+	for _, s := range []string{"169.254.169.254", "fd00:ec2::254", "100.100.100.200", "fe80::1", "0.0.0.0", "224.0.0.1",
+		"64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "64:ff9b::6464:64c8"} {
 		if err := k.Denetle(net.ParseIP(s)); err == nil {
 			t.Errorf("IzinliAglar %s adresini AÇMAMALIYDI", s)
 		}
 	}
-	for _, s := range []string{"127.0.0.1", "10.1.2.3", "::1"} {
+	for _, s := range []string{"127.0.0.1", "10.1.2.3", "::1", "64:ff9b::808:808"} {
 		if err := k.Denetle(net.ParseIP(s)); err != nil {
 			t.Errorf("IzinliAglar ile %s açılmalıydı: %v", s, err)
 		}
@@ -109,6 +111,24 @@ func TestDenetle_IzinliAglarMetadataAcmaz(t *testing.T) {
 	kl := Yeni(Secenek{IzinliAglar: testAglari})
 	if err := kl.Denetle(net.ParseIP("10.1.2.3")); err == nil {
 		t.Error("yalnız loopback izinliyken 10.1.2.3 açıldı")
+	}
+}
+
+func TestMetadataMi(t *testing.T) {
+	evet := []string{"169.254.169.254", "169.254.170.2", "fe80::1", "fd00:ec2::254", "100.100.100.200", "192.0.0.192",
+		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "ff02::1"}
+	for _, s := range evet {
+		if !MetadataMi(net.ParseIP(s)) {
+			t.Errorf("metadata/bağlantı-yerel SAYILMALI: %s", s)
+		}
+	}
+	if !MetadataMi(nil) {
+		t.Error("nil güvenli tarafta metadata sayılmalı")
+	}
+	for _, s := range []string{"8.8.8.8", "10.0.0.1", "127.0.0.1", "64:ff9b::808:808", "2002:808:808::1", "fd12::1"} {
+		if MetadataMi(net.ParseIP(s)) {
+			t.Errorf("metadata SAYILMAMALI: %s", s)
+		}
 	}
 }
 
