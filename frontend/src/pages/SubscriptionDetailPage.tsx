@@ -11,7 +11,6 @@ import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import DomainKaynakKart from '@/components/DomainKaynakKart'
 import DomainPano from "@/components/DomainPano"
-import AlanPano from '@/components/AlanPano'
 import { useUc } from '@/components/alanpano/useUc'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
 import ToolCard from '@/components/ToolCard'
@@ -113,20 +112,16 @@ export default function SubscriptionDetailPage() {
     } catch { /* yok say */ }
     return 'dashboard'
   })
-  // Alan adı panosu (AlanPano) Pano sekmesi İLK açıldığında bağlanır ve sonra bağlı
-  // kalır (başka sekmede gizlenir): sekme değiştirip dönmek pahalı uçları (/istatistik,
-  // /health …) yeniden çekmesin. Başka sekmeyle açılan sayfada Pano'ya girilmezse hiç
-  // çekilmez.
-  const [panoAcildi, setPanoAcildi] = useState(tab === 'dashboard')
   const setTab = (t: Tab) => {
     setTabState(t)
-    if (t === 'dashboard') setPanoAcildi(true)
     try { localStorage.setItem('gosp.abonelik.tab', t) } catch { /* yok say */ }
   }
   // 🔴 /kaynak sayfa başına TEK çekim (kota kapalıyken `du -sm`, 0.7–2 sn): burada
-  // çekilir; AlanPano, sağdaki DomainKaynakKart ve soldaki 'İstatistikler' kartı aynı
-  // durumu prop ile paylaşır. Üç 'Yenile' de bu tek yenileyiciyi çağırır (uçuştaki
-  // istek varken ikinci istek gitmez).
+  // çekilir; sağdaki DomainKaynakKart ve soldaki 'İstatistikler' kartı aynı durumu
+  // prop ile paylaşır. İki 'Yenile' de bu tek yenileyiciyi çağırır (uçuştaki istek
+  // varken ikinci istek gitmez).
+  // Not: Pano sekmesinin üstündeki alan adı özet panosu (AlanPano) 2026-09-29'da
+  // kaldırıldı (kullanıcı kararı; bu tür widget'lar bayi panosuna taşınacak).
   const kaynak = useUc<KaynakOzet>(id ? `/domains/${id}/kaynak` : null, cevir("Kaynak bilgisi alınamadı"))
   const diskMB = kaynak.veri ? kaynak.veri.disk_mb.kullanim : null
   const [menuAcik, setMenuAcik] = useState(false)
@@ -304,13 +299,6 @@ export default function SubscriptionDetailPage() {
           Onun yerine eklentinin kendi sağ paneli var (servis durumu, port,
           disk) — yani bilgi kaybolmuyor, uygulamaya ÖZEL hâle geliyor. */}
       <div className={tab === 'gelistirici' ? '' : 'grid grid-cols-12 gap-5'}>
-        {/* Alan adı panosu: Pano sekmesinde araç kartlarının (DomainPano) ÜSTÜNDE, tam
-            genişlik. Başka sekmede gizli ama bağlı (veri korunur, canlı yoklama durur). */}
-        {panoAcildi && (
-          <div className="col-span-12 min-w-0" hidden={tab !== 'dashboard'}>
-            <AlanPano key={domain.id} domain={domain} kaynak={kaynak} etkin={tab === 'dashboard'} />
-          </div>
-        )}
         {tab !== 'gelistirici' && (
         <aside className="col-span-12 lg:col-span-3 space-y-4">
           <WebSitePreview alanAdi={domain.alan_adi} ssl={domain.ssl} />
