@@ -142,26 +142,11 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 	nodeFeedOK := false
 	phpFeedOK := false
 
-	// 1) WP kurulumlarını bul (domainID > 0 ise sadece o domain)
-	kurulumlar, err := WPKurulumlariBul(ctx, db)
+	// 1) WP kurulumlarını bul (domainIDs doluysa keşif YALNIZ o domainlerde koşar)
+	kurulumlar, err := WPKurulumlariBul(ctx, db, domainIDs)
 	if err != nil {
 		hataYaz(db, err)
 		return err
-	}
-	if len(domainIDs) > 0 {
-		set := make(map[int64]struct{}, len(domainIDs))
-		for _, id := range domainIDs {
-			if id > 0 {
-				set[id] = struct{}{}
-			}
-		}
-		var filt []WPKurulum
-		for _, k := range kurulumlar {
-			if _, ok := set[k.DomainID]; ok {
-				filt = append(filt, k)
-			}
-		}
-		kurulumlar = filt
 	}
 	toplamApp = len(kurulumlar)
 
@@ -230,21 +215,8 @@ WPloop:
 	}
 
 	// 3) Node.js — package-lock.json / package.json → OSV npm
-	nodeKur, err := NodejsKurulumlariBul(ctx, db)
+	nodeKur, err := NodejsKurulumlariBul(ctx, db, domainIDs)
 	if err == nil {
-		if len(domainIDs) > 0 {
-			set := make(map[int64]struct{}, len(domainIDs))
-			for _, id := range domainIDs {
-				set[id] = struct{}{}
-			}
-			var f []nodejsKurulum
-			for _, k := range nodeKur {
-				if _, ok := set[k.DomainID]; ok {
-					f = append(f, k)
-				}
-			}
-			nodeKur = f
-		}
 		toplamApp += len(nodeKur)
 		for _, k := range nodeKur {
 			if ctx.Err() != nil {
@@ -260,21 +232,8 @@ WPloop:
 	}
 
 	// 4) PHP Composer — composer.lock → OSV Packagist
-	phpKur, err := PhpKurulumlariBul(ctx, db)
+	phpKur, err := PhpKurulumlariBul(ctx, db, domainIDs)
 	if err == nil {
-		if len(domainIDs) > 0 {
-			set := make(map[int64]struct{}, len(domainIDs))
-			for _, id := range domainIDs {
-				set[id] = struct{}{}
-			}
-			var f []phpKurulum
-			for _, k := range phpKur {
-				if _, ok := set[k.DomainID]; ok {
-					f = append(f, k)
-				}
-			}
-			phpKur = f
-		}
 		toplamApp += len(phpKur)
 		for _, k := range phpKur {
 			if ctx.Err() != nil {
@@ -374,6 +333,26 @@ WPloop:
 		toplamApp, kapsam, toplamBulgu, ozet.Critical, ozet.High, sure)
 	_ = force
 	return nil
+}
+
+// kesifSorgusu — üç tarayıcının (WP/Node/PHP) domain keşif sorgusu. ids boş →
+// TÜM domainler (tam tarama); dolu → YALNIZ o domainler: tek domain taransa da
+// keşif (wp-cli, dosya okuma) filonun tamamında koşmasın.
+func kesifSorgusu(ids []int64) (string, []any) {
+	sorgu := `SELECT id, sistem_kullanici, alan_adi FROM domains`
+	var args []any
+	if len(ids) > 0 {
+		sorgu += ` WHERE id IN (` + yerTutucu(len(ids)) + `)` //nolint:gosec // G202: yerTutucu yalnız "?" üretir; id'ler args ile bağlanır.
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	return sorgu + ` ORDER BY alan_adi`, args
+}
+
+// yerTutucu — n adet "?" (IN listesi için). Değerler her zaman args ile bağlanır.
+func yerTutucu(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 func hataYaz(db *sql.DB, err error) {
