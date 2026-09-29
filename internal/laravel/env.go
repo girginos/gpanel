@@ -2,6 +2,7 @@ package laravel
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"girginospanel/internal/httpx"
@@ -19,9 +20,15 @@ func (h *Handlers) EnvOku(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	icerik, rerr := envOku(appDir)
-	if rerr != nil {
+	icerik, rerr := envOku(sk, appDir)
+	if errors.Is(rerr, errEnvYok) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"var": false, "icerik": ""})
+		return
+	}
+	if rerr != nil {
+		// Dosya var olabilir ama güvenle okunamadı (ör. uygulama dizini ev içi symlink
+		// üzerinden): boş içerik DÖNME — düzenleyici onu kaydedip gerçek .env'i ezerdi.
+		httpx.WriteError(w, http.StatusConflict, rerr.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"var": true, "icerik": icerik})
@@ -50,7 +57,12 @@ func (h *Handlers) EnvYaz(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := envYaz(sk, appDir, req.Icerik); err != nil {
+	// Mevcut .env güvenle okunamıyorsa yazma (düzenleyicide boş görünmüş olabilir).
+	if err := envYazilabilir(sk, appDir); err != nil {
+		httpx.WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err := envYazici(sk, appDir, req.Icerik); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
