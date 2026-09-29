@@ -440,14 +440,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			continue
 		}
 		// --- ORIJINAL kimlikle taşıma (config degismez) ---
-		// 🔴 Orijinal ad/kullanici BASKA bir kiracinin ad-alanina duserse (kaynak sunucuda
-		// secilmis serbest adlar: "c_shop_db", "shop_joomla_…") kullanilmaz — o kiracinin
-		// turettigi adlari onceden tutardi; benzersiz (kendi ad-alani) yola dusulur.
-		if orij, ok := kimlikler[kaynakDB]; ok && orij.Kul != "" && orij.Pw != "" &&
-			reDBAd.MatchString(orij.Kul) && h.dbAdiMusaitMi(ctx, kaynakDB) &&
-			!h.dbKullanicisiVarMi(ctx, orij.Kul) &&
-			h.kendiAdAlaniUygun(ctx, sonuc.DomainID, kaynakDB) &&
-			h.kendiAdAlaniUygun(ctx, sonuc.DomainID, orij.Kul) {
+		if orij, ok := kimlikler[kaynakDB]; ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
 			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
 				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
 			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
@@ -548,6 +541,18 @@ func (h *Handlers) tasimaKullanicisiSec(ctx context.Context, domainID int64, sk 
 func (h *Handlers) kendiAdAlaniUygun(ctx context.Context, domainID int64, ad string) bool {
 	baska, err := hesaplar.DBAdiBaskaKiracininMi(ctx, h.DB, domainID, ad)
 	return err == nil && !baska
+}
+
+// orijinalKimlikKullanilir: kaynak DB ORIJINAL ad/kullanici/parolasiyla (wp-config
+// degismeden) tasinabilir mi? Ad ve kullanici hedefte hic yok olmali.
+//
+// 🔴 Orijinal ad/kullanici BASKA bir kiracinin ad-alanina duserse (kaynak sunucuda
+// secilmis serbest adlar: "c_shop_db", "shop_joomla_…") kullanilmaz — o kiracinin
+// turettigi adlari onceden tutardi; benzersiz (kendi ad-alani) yola dusulur.
+func (h *Handlers) orijinalKimlikKullanilir(ctx context.Context, domainID int64, kaynakDB string, orij dbKimlik) bool {
+	return orij.Kul != "" && orij.Pw != "" && reDBAd.MatchString(orij.Kul) &&
+		h.dbAdiMusaitMi(ctx, kaynakDB) && !h.dbKullanicisiVarMi(ctx, orij.Kul) &&
+		h.kendiAdAlaniUygun(ctx, domainID, kaynakDB) && h.kendiAdAlaniUygun(ctx, domainID, orij.Kul)
 }
 
 func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {

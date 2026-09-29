@@ -306,4 +306,21 @@ func TestTasimaAdlari_UzunKokluKomsu(t *testing.T) {
 	if o.h.kendiAdAlaniUygun(ctx, 999, "src_wp") {
 		t.Errorf("bilinmeyen domain uygun sayıldı (fail-closed olmalı)")
 	}
+	// Orijinal kimlik kararı (veritabanlariniAktar'ın kullandığı kapı): DB adı ya da
+	// kullanıcı komşunun ad-alanındaysa orijinal yol kullanılmaz.
+	for _, c := range []struct {
+		db, kul string
+		uygun   bool
+	}{
+		{"src_wp", "src_wpu", true},
+		{sk + "_db", "src_wpu", false},       // DB adı komşunun kökünün kendisi
+		{sk + "_joomla_3", "src_wpu", false}, // DB adı komşunun ad-alanında
+		{"src_wp", sk + "_db", false},        // kullanıcı komşunun kökünün kendisi
+		{"src_wp", on + "_joomla_u", false},  // kullanıcı komşunun c'siz ad-alanında
+		{"src_wp", "", false},
+	} {
+		if got := o.h.orijinalKimlikKullanilir(ctx, 1, c.db, dbKimlik{Kul: c.kul, Pw: "OrijParola123"}); got != c.uygun {
+			t.Errorf("orijinalKimlikKullanilir(%q, %q)=%v beklenir %v", c.db, c.kul, got, c.uygun)
+		}
+	}
 }
