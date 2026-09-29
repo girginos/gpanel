@@ -495,6 +495,16 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		dbPass = hesaplar.RandomParola(24)
 		if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
 			log.Printf("MySQL create %q hata: %v", dbName, err)
+			// 🔴 HAYALET AD: MySQLCreateDB yalniz-yeni; ad baskasinca tutulmussa (onceden
+			// kapma, eski kalinti) ya da DB olusamadiysa domains.db_user/db_adi'da var
+			// olmayan (ya da BASKASINA ait) bir ad yazili kalir, parola da yanitta doner.
+			// Kullanici o adla baglanmaya calisir; panel baska yerlerde bu alanlari
+			// "domainin DB'si" diye okur. Alanlari temizle, parolayi yanitta dondurme.
+			if _, uerr := h.DB.ExecContext(r.Context(),
+				`UPDATE domains SET db_user='', db_adi='' WHERE id=?`, id); uerr != nil {
+				log.Printf("MySQL create %q: domains db alanlari temizlenemedi: %v", dbName, uerr)
+			}
+			dbPass = ""
 		}
 	}
 
@@ -1137,9 +1147,11 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Sahiplik: seçilen kullanıcı GERÇEKTEN bu domaine ait olmalı (önek garantisi).
+			// BINARY: MariaDB hesap adı harf duyarlı; kendi "GIRGIN_X_DB" satırı komşunun
+			// "girgin_x_db"sini seçtirmemeli.
 			var n int
 			_ = h.DB.QueryRowContext(r.Context(),
-				`SELECT COUNT(*) FROM db_accounts WHERE domain_id=? AND db_user=?`, id, req.MevcutKullanici).Scan(&n)
+				`SELECT COUNT(*) FROM db_accounts WHERE domain_id=? AND BINARY db_user=?`, id, req.MevcutKullanici).Scan(&n)
 			if n == 0 {
 				httpx.WriteError(w, http.StatusBadRequest, "seçilen kullanıcı bu domaine ait değil")
 				return
@@ -1236,7 +1248,7 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		}
 		// Mevcut kullanıcının parolasını yanıtta göster (müşteri zaten sahibi).
 		_ = h.DB.QueryRowContext(r.Context(),
-			`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbKullanici).Scan(&parola)
+			`SELECT db_pass_plain FROM db_accounts WHERE domain_id=? AND BINARY db_user=? LIMIT 1`, id, dbKullanici).Scan(&parola)
 		parola = gizli.CozBagli(parola, dbKullanici) // yanitta ACIK deger doner (musteri baglanacak)
 	} else {
 		// MySQLCreateDB YALNIZ-YENİ: kullanıcı/DB denetimden sonra (yarışla) oluştuysa
@@ -1289,17 +1301,13 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin DB'si silinemez")
 		return
 	}
-	// Kullanıcı başka DB'lerde de kullanılıyorsa (mevcut-kullanıcı modu) sadece DB'yi
-	// düşür — kullanıcıyı koru (aksi halde paylaşan diğer DB'lerin erişimi kırılır).
-	var paylasim int
-	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND db_name<>?`, dbUser, dbName).Scan(&paylasim)
-	if paylasim > 0 {
-		if err := hesaplar.MySQLDropDBKeepUser(h.DB, dbName); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
-			return
-		}
-	} else if err := hesaplar.MySQLDropDB(h.DB, dbName, dbUser); err != nil {
+	// Kullanıcı DROP USER ile YALNIZ güvenle bu domainin hesabıysa düşer; başka DB'lerde de
+	// kullanılıyorsa (mevcut-kullanıcı modu), başka domaine kayıtlıysa, sistem/servis hesabıysa
+	// ya da yetkileri bu domainin dışına taşıyorsa yalnız DB (ve o ada bağlı yetkiler) düşer.
+	// 🔴 Eskiden "başka satırda yok" (paylasim=0) yetiyordu: yedekten kurtarılan wp-config ile
+	// satıra yazdırılmış "roundcube"/"pma"/"pureftpd" ya da komşunun kayıtsız kullanıcısı
+	// DROP USER ile düşüyordu (sunucu geneli webmail/phpMyAdmin/FTP kesintisi).
+	if err := hesaplar.MySQLDropDBSahipli(h.DB, domainID, dbName, dbUser); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
 		return
 	}

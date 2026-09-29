@@ -50,10 +50,12 @@ func MySQLChangePassword(panelDB *sql.DB, domainID int64, dbUser, yeniPw string)
 	if err != nil {
 		return fmt.Errorf("mysql alter: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	// panel metadata güncelle
+	// panel metadata güncelle — BINARY: harf duyarsız eşleşme, komşunun büyük/küçük harf
+	// varyantlı satırının (ayrı MariaDB hesabı) db_pass_plain'ini de çağıranın parolasıyla
+	// eziyordu. kullaniciYalnizBuDomainde'den geçen ad yalnız bu domainin satırlarına uyar.
 	if _, err := panelDB.Exec(
-		`UPDATE db_accounts SET db_pass_plain=? WHERE db_user=?`,
-		gizli.SaklaBagli(yeniPw, dbUser), dbUser); err != nil {
+		`UPDATE db_accounts SET db_pass_plain=? WHERE domain_id=? AND BINARY db_user=?`,
+		gizli.SaklaBagli(yeniPw, dbUser), domainID, dbUser); err != nil {
 		return fmt.Errorf("metadata: %w", err)
 	}
 	return nil
@@ -75,12 +77,26 @@ var reGrantNesne = regexp.MustCompile("^`([^`]+)`[.](?:[*]|`[^`]+`)$")
 //
 // Hic kimseye kayitli olmayan VE var olmayan semadaki artik yetki (DB silinip kullanici
 // tutuldugunda kalan satir) yok sayilir: erisim vermez, mesru parola degisimini bozmamali.
+// (Boyle bir ad sonra yeniden olusturulursa MySQLCreateDB / geri yukleme o satiri siler —
+// bkz. yetkiKalintisiniTemizle.)
 func hesapYetkileriBuDomainde(panelDB *sql.DB, domainID int64, dbUser string) error {
-	out, err := exec.Command("mysql", "-N", "-B", "-r", "-e",
-		"SHOW GRANTS FOR '"+sqlKac(dbUser)+"'@'localhost'").Output()
-	if err != nil {
-		return fmt.Errorf("güvenlik: DB kullanıcısının yetkileri okunamadı: %w", err)
+	_, err := hesapYetkiSayimi(panelDB, domainID, dbUser, "localhost")
+	return err
+}
+
+// hesapYetkiSayimi: hesapYetkileriBuDomainde'nin host'lu hali; hesap kurallara uyuyorsa
+// bu domaine kayitli veritabanlarindaki yetki satiri SAYISINI doner (DBHesabiBaglanabilirMi
+// bunu "hesap bu domaine ait" kaniti olarak kullanir).
+func hesapYetkiSayimi(panelDB *sql.DB, domainID int64, dbUser, host string) (int, error) {
+	if !GecerliDBKimlik(dbUser) || !reDBHost.MatchString(host) {
+		return 0, fmt.Errorf("güvenlik: geçersiz DB hesap adı")
 	}
+	out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", kacisModu+
+		" SHOW GRANTS FOR '"+sqlKac(dbUser)+"'@'"+sqlKac(host)+"'").Output()
+	if err != nil {
+		return 0, fmt.Errorf("güvenlik: DB kullanıcısının yetkileri okunamadı: %w", err)
+	}
+	sayi := 0
 	for _, satir := range strings.Split(string(out), "\n") {
 		satir = strings.TrimSpace(satir)
 		if satir == "" {
@@ -89,39 +105,41 @@ func hesapYetkileriBuDomainde(panelDB *sql.DB, domainID int64, dbUser string) er
 		on := strings.Index(satir, " ON ")
 		to := strings.LastIndex(satir, " TO ")
 		if !strings.HasPrefix(satir, "GRANT ") || on < 0 || to < on {
-			return fmt.Errorf("güvenlik: DB kullanıcısının rol ya da çözümlenemeyen yetkisi var — yönetici incelemesi gerekli")
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısının rol ya da çözümlenemeyen yetkisi var — yönetici incelemesi gerekli")
 		}
 		yetki := strings.TrimSpace(satir[len("GRANT "):on])
 		nesne := strings.TrimSpace(satir[on+len(" ON ") : to])
 		if nesne == "*.*" {
 			if yetki != "USAGE" {
-				return fmt.Errorf("güvenlik: DB kullanıcısının sunucu geneli yetkisi var — yönetici incelemesi gerekli")
+				return 0, fmt.Errorf("güvenlik: DB kullanıcısının sunucu geneli yetkisi var — yönetici incelemesi gerekli")
 			}
 			continue
 		}
 		m := reGrantNesne.FindStringSubmatch(nesne)
 		if m == nil {
-			return fmt.Errorf("güvenlik: DB kullanıcısının çözümlenemeyen (proxy/rutin) yetkisi var — yönetici incelemesi gerekli")
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısının çözümlenemeyen (proxy/rutin) yetkisi var — yönetici incelemesi gerekli")
 		}
 		ad := strings.NewReplacer(`\_`, "_", `\%`, "%").Replace(m[1])
 		if !GecerliDBKimlik(ad) { // kacissiz % (joker) ya da gecersiz ad
-			return fmt.Errorf("güvenlik: DB kullanıcısının jokerli/geçersiz veritabanı yetkisi var — yönetici incelemesi gerekli")
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısının jokerli/geçersiz veritabanı yetkisi var — yönetici incelemesi gerekli")
 		}
+		// BINARY: MariaDB DB adlari (lower_case_table_names=0) harf duyarlidir.
 		var bu, baska int
 		if err := panelDB.QueryRow(
-			`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE db_name=?`,
+			`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE BINARY db_name=?`,
 			domainID, domainID, ad).Scan(&bu, &baska); err != nil {
-			return fmt.Errorf("güvenlik: DB kullanıcısının yetkileri doğrulanamadı: %w", err)
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısının yetkileri doğrulanamadı: %w", err)
 		}
 		if baska > 0 {
-			return fmt.Errorf("güvenlik: DB kullanıcısı başka bir domainin veritabanında yetkili")
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısı başka bir domainin veritabanında yetkili")
 		}
 		if bu > 0 {
+			sayi++
 			continue
 		}
 		if varMi, err := semaVarMi(ad); err != nil || varMi {
-			return fmt.Errorf("güvenlik: DB kullanıcısı bu domaine ait olmayan bir veritabanında yetkili")
+			return 0, fmt.Errorf("güvenlik: DB kullanıcısı bu domaine ait olmayan bir veritabanında yetkili")
 		}
 	}
-	return nil
+	return sayi, nil
 }

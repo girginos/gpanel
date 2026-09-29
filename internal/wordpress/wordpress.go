@@ -572,7 +572,7 @@ func wpKokTemizle(sk, dir string) error {
 func (h *Handlers) dbKullaniciAl(ctx context.Context, dbName string, domainID int64) string {
 	var u string
 	_ = h.DB.QueryRowContext(ctx,
-		`SELECT db_user FROM db_accounts WHERE db_name=? AND domain_id=?`,
+		`SELECT db_user FROM db_accounts WHERE BINARY db_name=? AND domain_id=?`,
 		dbName, domainID).Scan(&u)
 	return u
 }
@@ -588,13 +588,17 @@ func (h *Handlers) dbKullaniciAl(ctx context.Context, dbName string, domainID in
 //
 // Kullanici adi belirlenemezse (eski kurulum, kayit yok) yalniz DB dusurulur
 // — tahmin ederek rastgele bir MySQL kullanicisi SILMEYIZ.
+//
+// 🔴 Satirdaki kullanici da KOSULSUZ guvenilir degil: yedekten geri yuklemede kiracinin
+// wp-config'inden kurtarilan ad satira yazilabiliyordu (komsunun kullanicisi, roundcube,
+// pma…); eskiden burada KOSULSUZ MySQLDropDB → DROP USER calisiyordu. MySQLDropDBSahipli
+// kullaniciyi yalniz guvenle bu domainin hesabiysa dusurur, aksi halde yalniz DB'yi.
 func (h *Handlers) wpDBDusur(ctx context.Context, dbName string, domainID int64) error {
 	dbUser := h.dbKullaniciAl(ctx, dbName, domainID)
 	if dbUser == "" {
 		log.Printf("wordpress sil: %s icin db_accounts'ta kullanici yok — yalniz DB dusuruluyor", dbName)
-		return hesaplar.MySQLDropDBKeepUser(h.DB, dbName)
 	}
-	return hesaplar.MySQLDropDB(h.DB, dbName, dbUser)
+	return hesaplar.MySQLDropDBSahipli(h.DB, domainID, dbName, dbUser)
 }
 
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
@@ -722,10 +726,12 @@ func dropIzinli(dbName string, domainID int64, sahip func(string, int64) (bool, 
 
 // dbSahipMi: dbName GERÇEKTEN bu domain'e ait mi? db_accounts sahiplik kontrolü. Panel'in
 // oluşturduğu WP DB'leri hesaplar.MySQLCreateDB ile domain_id'li db_accounts'a kaydedilir.
+// BINARY: wp-config'teki "wp_ABC" kayıtlı "wp_abc" ile eşleşip AYRI bir MariaDB şemasını
+// (DB adları harf duyarlı) düşürtmemeli.
 func (h *Handlers) dbSahipMi(ctx context.Context, dbName string, domainID int64) (bool, error) {
 	var n int
 	err := h.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM db_accounts WHERE db_name=? AND domain_id=?`, dbName, domainID).Scan(&n)
+		`SELECT COUNT(*) FROM db_accounts WHERE BINARY db_name=? AND domain_id=?`, dbName, domainID).Scan(&n)
 	return n > 0, err
 }
 

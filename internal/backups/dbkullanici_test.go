@@ -1,6 +1,7 @@
 package backups
 
 import (
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,18 +9,26 @@ import (
 	"testing"
 )
 
-// Gercek MariaDB gerektirir (root socket auth). Yoksa test atlanir.
+// Gercek MariaDB gerektirir: YALNIZ gecici sunucu (GOSP_TEST_GECICI_DSN; bkz.
+// dbonek_test.go bdo_ortam). 🔴 Eskiden duz `mysql` (root socket) kullaniliyordu:
+// 181'de go test bu testleri CANLI MariaDB'de kosup gp_t_dbkul/gp_t_kul olusturuyor,
+// hatta gp_t_kul'a gecici olarak GRANT SELECT ON *.* veriyordu.
 const (
 	tDB  = "gp_t_dbkul"
 	tKul = "gp_t_kul"
 	tPw  = "S3cr3t-Parola!x"
 )
 
-func mysqlVarMi(t *testing.T) {
+// mysqlVarMi: gecici sunucu + mysql sarmalayicisi + panel semasi; tDB domain 1'e
+// (kullanicisi tKul) kayitli — arsivdeki hesap bu domainin hesabi sayilir.
+func mysqlVarMi(t *testing.T) *sql.DB {
 	t.Helper()
-	if err := exec.Command("mysql", "-e", "SELECT 1").Run(); err != nil {
-		t.Skip("mysql erisimi yok, atlaniyor")
+	o := bdo_ortam(t)
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,?,?,'')`,
+		tDB, tKul); err != nil {
+		t.Fatal(err)
 	}
+	return o.panel
 }
 
 func temizle() {
@@ -40,7 +49,7 @@ func kur(t *testing.T) {
 // TestKullaniciYazUygula: yedege giren kullanici, silindikten sonra arsivden
 // GERI GELMELI ve parolasi calismaya devam ETMELI.
 func TestKullaniciYazUygula(t *testing.T) {
-	mysqlVarMi(t)
+	panel := mysqlVarMi(t)
 	kur(t)
 	defer temizle()
 
@@ -80,7 +89,7 @@ func TestKullaniciYazUygula(t *testing.T) {
 	if kullaniciVarMi(t) {
 		t.Fatal("negatif kontrol: kullanici silinmedi, testin geri kalani anlamsiz")
 	}
-	n, err := dbKullanicilariUygula(dir, map[string]bool{tDB: true})
+	n, err := dbKullanicilariUygula(panel, 1, dir, map[string]bool{tDB: true})
 	if err != nil || n == 0 {
 		t.Fatalf("uygula: n=%d err=%v", n, err)
 	}
@@ -98,7 +107,7 @@ func TestKullaniciYazUygula(t *testing.T) {
 // TestGlobalYetkiReddedilir: NEGATIF KONTROL. Arsivden gelen bir GRANT asla
 // global yetki kazandiramaz — ne yazarken dosyaya girer, ne okurken uygulanir.
 func TestGlobalYetkiReddedilir(t *testing.T) {
-	mysqlVarMi(t)
+	panel := mysqlVarMi(t)
 	kur(t)
 	defer temizle()
 
@@ -127,7 +136,7 @@ func TestGlobalYetkiReddedilir(t *testing.T) {
 	_ = os.WriteFile(yol, append(ham, []byte(kotu)...), 0600)
 
 	_ = mysqlCalistir("REVOKE SELECT ON *.* FROM '" + tKul + "'@'localhost';")
-	if _, err := dbKullanicilariUygula(dir, map[string]bool{tDB: true}); err != nil {
+	if _, err := dbKullanicilariUygula(panel, 1, dir, map[string]bool{tDB: true}); err != nil {
 		t.Fatalf("uygula: %v", err)
 	}
 	out, _ := exec.Command("mysql", "-N", "-B", "-e",

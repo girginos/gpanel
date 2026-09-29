@@ -116,6 +116,13 @@ func MusteriDBKimlikGecerli(sk, s string) bool {
 // cagirani ENGELLEMEZ; aksi halde o kiraci hic DB acamazdi. Oradaki olasi ad
 // cakismasini yalniz-yeni semantik (MySQLCreateDB: var olan kimlige dokunmaz) kapatir.
 //
+// Karsilastirma BUYUK/KUCUK HARF DUYARSIZDIR (bkz. adKokUzunlugu): kokler hep kucuk
+// harftir ama kullanici/DB adi A-Z tasiyabilir (yedekten kurtarilan wp-config, tasima,
+// "kullanici ekle"). MariaDB "GIRGIN_X_DB"yi ayri hesap sayar; panel ise db_accounts'u
+// utf8mb4_unicode_ci ile karsilastirir (db_name UNIQUE'i de harf duyarsiz). Duyarli
+// karsilastirma komsunun ad-alanindaki buyuk harfli varyanti serbest birakir ve o varyant
+// komsunun sorgularina karisirdi.
+//
 // Hata (DB okunamadi) durumunda true + err doner: cagiran REDDETMELI (fail-closed).
 func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad string) (bool, error) {
 	var sk string
@@ -145,8 +152,9 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 }
 
 // adKokUzunlugu: ad, sk'nin koklerinden ({sk, c_'siz sk}) birine dusuyorsa eslesen
-// EN UZUN kokun uzunlugu; hicbirine dusmuyorsa 0.
+// EN UZUN kokun uzunlugu; hicbirine dusmuyorsa 0. Harf duyarsiz (bkz. DBAdiBaskaKiracininMi).
 func adKokUzunlugu(ad, sk string) int {
+	ad, sk = strings.ToLower(ad), strings.ToLower(sk)
 	en := 0
 	for _, kok := range []string{sk, strings.TrimPrefix(sk, "c_")} {
 		if kok == "" {
@@ -257,10 +265,15 @@ func DBKullanicisiVarMi(dbUser string) bool {
 // kosul, duzeltme oncesi surumlerde onek cakismasiyla komsunun kullanicisini kendi
 // domain_id'siyle yazdirmis (bkz. MySQLCreateDB) kayitlar uzerinden sonraki parola /
 // GRANT islemlerinin komsuya uzanmasini keser.
+//
+// 🔴 BINARY: MariaDB hesap adlari harf DUYARLIDIR ("GIRGIN_X_DB" ayri hesaptir) ama
+// db_accounts utf8mb4_unicode_ci'dir. Duyarsiz "db_user=?" saldirganin satirina
+// yazdirdigi buyuk harfli varyanti komsunun "girgin_x_db"si ile ayni sayiyor ve
+// komsunun kendi parola degisimini "birden cok domaine kayitli" diye kilitliyordu.
 func kullaniciYalnizBuDomainde(db *sql.DB, domainID int64, dbUser string) error {
 	var bu, baska int
 	if err := db.QueryRow(
-		`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE db_user=?`,
+		`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE BINARY db_user=?`,
 		domainID, domainID, dbUser).Scan(&bu, &baska); err != nil {
 		return fmt.Errorf("güvenlik: DB kullanıcısının sahipliği doğrulanamadı: %w", err)
 	}
@@ -271,6 +284,292 @@ func kullaniciYalnizBuDomainde(db *sql.DB, domainID int64, dbUser string) error 
 		return fmt.Errorf("güvenlik: DB kullanıcısı birden çok domaine kayıtlı — yönetici incelemesi gerekli")
 	}
 	return nil
+}
+
+// KullaniciYalnizBuDomainde: kullaniciYalnizBuDomainde'nin paket disi (yedekten geri
+// yukleme) cagiranlar icin hali.
+func KullaniciYalnizBuDomainde(db *sql.DB, domainID int64, dbUser string) error {
+	return kullaniciYalnizBuDomainde(db, domainID, dbUser)
+}
+
+// SemaVarMi: semaVarMi'nin paket disi hali (olculemezse err; cagiran fail-closed karar verir).
+func SemaVarMi(dbName string) (bool, error) {
+	if !GecerliDBKimlik(dbName) {
+		return false, fmt.Errorf("güvenlik: geçersiz veritabanı adı")
+	}
+	return semaVarMi(dbName)
+}
+
+// SistemDBHesabiMi: panelin / sunucunun KENDI MariaDB hesaplari. Hicbir kiraci akisi bu
+// adlari bir db_accounts satirina yazamaz, onlara GRANT veremez, onlari DUSUREMEZ.
+// Liste yalniz ilk savunma hattidir; asil kapi hesabin YETKILERINE bakar
+// (DBHesabiBaglanabilirMi / MySQLDropDBSahipli → hesapYetkileriBuDomainde): listede
+// olmayan bir servis hesabi da kendi (bu domaine ait olmayan) semasindaki yetkisi
+// yuzunden reddedilir.
+func SistemDBHesabiMi(u string) bool {
+	l := strings.ToLower(strings.TrimSpace(u))
+	if l == "" || strings.HasPrefix(l, "mysql.") || strings.HasPrefix(l, "mariadb.") {
+		return true
+	}
+	switch l {
+	case "root", "debian-sys-maint", "panel", "pma", "phpmyadmin", "pureftpd", "roundcube",
+		"roundcubemail", "postfix", "dovecot", "pdns", "powerdns", "girginospanel", "mysql", "mariadb":
+		return true
+	}
+	return false
+}
+
+// reDBHost: MariaDB hesap host'u (localhost, 127.0.0.1, %, alan adi, IPv6). Tirnak/ters
+// bolu/bosluk YOK → sorguya guvenle girer.
+var reDBHost = regexp.MustCompile(`\A[A-Za-z0-9._%:-]{1,255}\z`)
+
+// kacisModu: mysql CLI oturumunda NO_BACKSLASH_ESCAPES'i kaldirir; asagidaki sorgular
+// '\\_' kacisina ve sqlKac'a dayanir (sql_mode'dan BAGIMSIZ dogru calismali).
+const kacisModu = "SET SESSION sql_mode=REPLACE(@@SESSION.sql_mode,'NO_BACKSLASH_ESCAPES','');"
+
+// dbHesabiVarMi: '<kul>'@'<host>' MariaDB'de var mi? Olculemezse err.
+func dbHesabiVarMi(kul, host string) (bool, error) {
+	if !GecerliDBKimlik(kul) || !reDBHost.MatchString(host) {
+		return true, fmt.Errorf("güvenlik: geçersiz hesap adı")
+	}
+	out, err := exec.Command("mysql", "-N", "-B", "-e", kacisModu+
+		" SELECT COUNT(*) FROM mysql.user WHERE User='"+sqlKac(kul)+"' AND Host='"+sqlKac(host)+"'").Output()
+	if err != nil {
+		return true, err
+	}
+	return strings.TrimSpace(string(out)) != "0", nil
+}
+
+// DBHesabiBaglanabilirMi: yedekten geri yuklemenin (kimlikTamamla, kullanicilar.sql)
+// '<kul>'@'<host>' hesabini bu domainin db_accounts satirina YAZMASI ya da ona bu domainin
+// veritabaninda GRANT vermesi guvenli mi? nil = guvenli.
+//
+// 🔴 Hesap adi kiracinin YAZABILDIGI dosyadan (wp-config.php/.env) ya da arsivdeki yetki
+// dokumunden gelir. Eskiden tek suzgec root/debian-sys-maint/panel listesiydi:
+//   - komsunun kullanicisi satira yaziliyordu → komsunun parola degisimi ve mevcut-kullanici
+//     modu "birden cok domaine kayitli" diye KILITLENIYORDU (kiracilar arasi DoS);
+//   - roundcube/pma/pureftpd gibi servis hesaplari satira yaziliyordu → DB silme / WP
+//     kaldirma o hesabi DROP USER ile dusuruyordu (sunucu geneli kesinti);
+//   - komsunun ad-alanindaki YENI bir ad (buyuk harfli varyant dahil) olusturuluyordu.
+//
+// Kurallar: sistem hesabi degil; BASKA domaine kayitli degil (BINARY); hesap VARSA
+// yetkileri yalniz bu domainin DB'lerinde (hesapYetkiSayimi) VE bu domaine ait oldugunun
+// en az bir kaniti var (bu domainde satiri ya da bu domainin DB'sinde yetkisi) — yalniz
+// USAGE'li yabanci (izleme/servis) hesap baglanamaz; hesap YOKSA ad baska kiracinin
+// ad-alanina dusmemeli. Olcum hatasi = red (fail-closed).
+func DBHesabiBaglanabilirMi(ctx context.Context, db *sql.DB, domainID int64, kul, host string) error {
+	if host == "" {
+		host = "localhost"
+	}
+	if !GecerliDBKimlik(kul) || SistemDBHesabiMi(kul) || !reDBHost.MatchString(host) {
+		return fmt.Errorf("güvenlik: bu DB hesabı bağlanamaz (sistem hesabı ya da geçersiz ad)")
+	}
+	var bu, baska int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE BINARY db_user=?`,
+		domainID, domainID, kul).Scan(&bu, &baska); err != nil {
+		return fmt.Errorf("güvenlik: DB hesabının sahipliği doğrulanamadı: %w", err)
+	}
+	if baska > 0 {
+		return fmt.Errorf("güvenlik: DB hesabı başka bir domaine kayıtlı")
+	}
+	varMi, err := dbHesabiVarMi(kul, host)
+	if err != nil {
+		return fmt.Errorf("güvenlik: DB hesabı doğrulanamadı: %w", err)
+	}
+	if !varMi {
+		if b, err := DBAdiBaskaKiracininMi(ctx, db, domainID, kul); err != nil || b {
+			return fmt.Errorf("güvenlik: DB hesap adı başka bir kiracının ad alanında")
+		}
+		return nil
+	}
+	n, err := hesapYetkiSayimi(db, domainID, kul, host)
+	if err != nil {
+		return err
+	}
+	if bu == 0 && n == 0 {
+		return fmt.Errorf("güvenlik: DB hesabı bu domaine ait değil")
+	}
+	return nil
+}
+
+// yetkiDesenCoz: mysql.db Db desenindeki \_ ve \% kacislarini cozer (SQL tarafindaki
+// REPLACE(REPLACE(Db,'\\_','_'),'\\%','%') ile ayni).
+func yetkiDesenCoz(desen string) string {
+	return strings.NewReplacer(`\_`, "_", `\%`, "%").Replace(desen)
+}
+
+// kacissizYuzdeVar: mysql.db deseninde kacissiz (joker) '%' var mi?
+func kacissizYuzdeVar(desen string) bool {
+	for i := 0; i < len(desen); i++ {
+		switch desen[i] {
+		case '\\':
+			i++
+		case '%':
+			return true
+		}
+	}
+	return false
+}
+
+// yetkiKalintisiniTemizle: dbName ADINA bagli yetki satirlarini (mysql.db, tables_priv,
+// columns_priv, procs_priv) siler.
+//
+// 🔴 ARTIK GRANT: DROP DATABASE yetki satirlarini SILMEZ; ayni ad sonra yeniden
+// olusturuldugunda eski satir yeni DB'ye ANINDA uzanir. Zincir (kod okumasiyla kuruldu):
+// kisa onekli kiraci komsunun ongorulebilir adini (girgin_x_main, <sk>_<kod>_<id>)
+// kendi ana kullanicisiyla acar (yedekten "yeni ada geri yukle"), DB'yi siler (mevcut-
+// kullanici modu → MySQLDropDBKeepUser, REVOKE YOK), komsu o adla DB actiginda
+// saldirganin kullanicisi komsunun DB'sinde ALL yetkiye sahip olur. YENI olusturulan
+// (CREATE DATABASE basarili = ad yeni) bir DB'de mesru onceki yetki OLAMAZ; dusurulen
+// bir DB'nin yetkisi de kalmamalidir.
+//
+// Tam eslesen satirlar (kacisli "a\_b", kacissiz "a_b" ya da karisik) silinir. koru != ""
+// ise '<koru>'@'localhost' satirlari korunur (yedekten geri yuklemede DB'nin kayitli
+// sahibi). yeniDB iken ada JOKERLE uzanan baska bir desen (kacissiz '_' ile baska ad icin
+// yazilmis eski satir) varsa: silmek o adin sahibini bozar, birakmak yeni DB'ye sizdirir
+// → hata (fail-closed, yonetici incelemesi). Kacissiz '%' iceren desenleri kiraci
+// akislari uretemez (GecerliDBKimlik); yoneticinin bilincli genis yetkisi sayilir ve
+// yalniz gunluge yazilir.
+func yetkiKalintisiniTemizle(dbName, koru string, yeniDB bool) error {
+	if !GecerliDBKimlik(dbName) || (koru != "" && !GecerliDBKimlik(koru)) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı ya da kullanıcı adı")
+	}
+	ad := sqlKac(dbName)
+	if yeniDB {
+		out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", kacisModu+
+			" SELECT Db FROM mysql.db WHERE CAST('"+ad+"' AS BINARY) LIKE CAST(Db AS BINARY)").Output()
+		if err != nil {
+			return fmt.Errorf("güvenlik: eski yetkiler okunamadı: %w", err)
+		}
+		for _, desen := range strings.Split(string(out), "\n") {
+			desen = strings.TrimRight(desen, "\r")
+			if desen == "" || yetkiDesenCoz(desen) == dbName {
+				continue
+			}
+			if kacissizYuzdeVar(desen) {
+				log.Printf("hesaplar: %s adina uzanan genis yetki deseni (%s) korundu", dbName, desen)
+				continue
+			}
+			return fmt.Errorf("güvenlik: bu ada jokerle uzanan eski bir yetki var — yönetici incelemesi gerekli")
+		}
+	}
+	haric := ""
+	if koru != "" {
+		haric = " AND NOT (User='" + sqlKac(koru) + "' AND Host='localhost')"
+	}
+	return mysqlCalistir(kacisModu,
+		`DELETE FROM mysql.db WHERE REPLACE(REPLACE(Db,'\\_','_'),'\\%','%')='`+ad+`'`+haric+`;`,
+		`DELETE FROM mysql.tables_priv WHERE Db='`+ad+`'`+haric+`;`,
+		`DELETE FROM mysql.columns_priv WHERE Db='`+ad+`'`+haric+`;`,
+		`DELETE FROM mysql.procs_priv WHERE Db='`+ad+`'`+haric+`;`,
+		"FLUSH PRIVILEGES;")
+}
+
+// YeniDBYetkiKalintisiniTemizle: yeni olusturulmus (ya da yedekten geri yuklemede YENI
+// acilmis) dbName'in eski yetki satirlarini siler; koru = korunacak kayitli sahip
+// ('<koru>'@'localhost', bos = yok). Jokerle uzanan eski desen varsa hata (bkz.
+// yetkiKalintisiniTemizle) — cagiran DB'yi kullanima ACMAMALIDIR.
+func YeniDBYetkiKalintisiniTemizle(dbName, koru string) error {
+	return yetkiKalintisiniTemizle(dbName, koru, true)
+}
+
+// MySQLDropDBSahipli: domainID'ye KAYITLI veritabanini dusurur. Kullaniciya DROP USER
+// YALNIZ hesabin guvenle bu domaine ait oldugu kanitlanirsa uygulanir; aksi halde yalniz
+// DB dusurulur (yetki satirlari yine silinir — MySQLDropDBKeepUser).
+//
+// 🔴 Eskiden DeleteDatabase "kullanici baska satirda yok" ise, wpDBDusur ise HER ZAMAN
+// MySQLDropDB (DROP USER) calistiriyordu. Satirdaki kullanici kiracinin yazabildigi
+// kaynaktan (yedekten kurtarilan wp-config) gelebildigi icin roundcube / pma / pureftpd
+// ya da komsunun kayitsiz kullanicisi DROP USER ile dusuruluyordu (sunucu geneli webmail
+// / FTP / phpMyAdmin kesintisi; komsunun sitesi). Uygulama kaldirma (uygulama.Sil) ise
+// kaydi HIC denetlemeden DB + kullaniciyi dusuruyordu.
+//
+// DB bu domaine kayitli degilse HICBIR SEY dusurulmez (hata).
+func MySQLDropDBSahipli(db *sql.DB, domainID int64, dbName, dbUser string) error {
+	if !GecerliDBKimlik(dbName) {
+		return fmt.Errorf("güvenlik: geçersiz veritabanı adı")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE domain_id=? AND BINARY db_name=?`,
+		domainID, dbName).Scan(&n); err != nil {
+		return fmt.Errorf("güvenlik: veritabanı sahipliği doğrulanamadı: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("güvenlik: veritabanı bu domaine kayıtlı değil — düşürülmedi")
+	}
+	if err := kullaniciDusurulebilir(db, domainID, dbName, dbUser); err != nil {
+		if dbUser != "" {
+			log.Printf("hesaplar: %s düşürülüyor, DB kullanıcısı %s KORUNDU: %v", dbName, dbUser, err)
+		}
+		return MySQLDropDBKeepUser(db, dbName)
+	}
+	return MySQLDropDB(db, dbName, dbUser)
+}
+
+// kullaniciDusurulebilir: dbName dusurulurken dbUser'a DROP USER uygulanabilir mi?
+// Sistem hesabi degil; baska DB satirinda gecmiyor (mevcut-kullanici modu — onlari
+// bozma); panelde yalniz bu domaine kayitli; MariaDB yetkileri yalniz bu domainin
+// veritabanlarinda.
+func kullaniciDusurulebilir(db *sql.DB, domainID int64, dbName, dbUser string) error {
+	if dbUser == "" || !GecerliDBKimlik(dbUser) || SistemDBHesabiMi(dbUser) {
+		return fmt.Errorf("güvenlik: sistem hesabı ya da geçersiz ad")
+	}
+	var paylasim int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE BINARY db_user=? AND BINARY db_name<>?`,
+		dbUser, dbName).Scan(&paylasim); err != nil {
+		return fmt.Errorf("güvenlik: paylaşım ölçülemedi: %w", err)
+	}
+	if paylasim > 0 {
+		return fmt.Errorf("kullanıcı başka veritabanlarında da kullanılıyor")
+	}
+	if err := kullaniciYalnizBuDomainde(db, domainID, dbUser); err != nil {
+		return err
+	}
+	return hesapYetkileriBuDomainde(db, domainID, dbUser)
+}
+
+// DBAdAlaniKullanimda: yeni bir sistem kullanicisinin (sk) DB ad-alani ({sk, c_'siz sk}
+// koklerine esit ya da "<kok>_" ile baslayan adlar) panelde (db_accounts) ya da MariaDB'de
+// (hesap, yetki satiri, sema) ZATEN kullaniliyor mu? Yeni domain henuz hicbir sey
+// sahiplenmedigi icin bulunan her ad BASKA birine aittir.
+//
+// 🔴 ONCEDEN KAPMA: ad-alani kapisi (DBAdiBaskaKiracininMi) yalniz VAR OLAN domainlere
+// bakar. Kisa onekli kiraci (c_girgin) girgin-x.com henuz yokken "girgin_x_main" /
+// "girgin_x_db" adlarini acabilir; girgin-x.com c_girgin_x olarak saglaninca varsayilan
+// DB'si yalniz-yeni MySQLCreateDB'de reddedilir (DB'siz domain) ya da artik yetkiyle
+// saldirgana acilirdi. provisioner.BenzersizKullanici bu durumda sonraki sayi ekine
+// (c_girgin_x2) gecer. Harf duyarsiz (muhafazakar). Olcum hatasi "kullanimda degil"
+// sayilir: cagiran bir dongudur (fail-closed sonsuz dongu olurdu); asil koruma yalniz-yeni
+// olusturma + yetki kalintisi temizligidir.
+func DBAdAlaniKullanimda(db *sql.DB, sk string) bool {
+	for _, kok := range []string{sk, strings.TrimPrefix(sk, "c_")} {
+		kok = strings.ToLower(kok)
+		if !GecerliDBKimlik(kok) {
+			continue
+		}
+		desen := strings.ReplaceAll(kok, "_", `\_`) + `\_%`
+		if db != nil {
+			var n int
+			if err := db.QueryRow(
+				`SELECT COUNT(*) FROM db_accounts WHERE db_name=? OR db_name LIKE ? OR db_user=? OR db_user LIKE ?`,
+				kok, desen, kok, desen).Scan(&n); err == nil && n > 0 {
+				return true
+			}
+		}
+		k, d := sqlKac(kok), sqlKac(desen)
+		q := kacisModu + " SELECT" +
+			" (SELECT COUNT(*) FROM mysql.user WHERE LOWER(User)='" + k + "' OR LOWER(User) LIKE '" + d + "')" +
+			" + (SELECT COUNT(*) FROM mysql.db WHERE LOWER(REPLACE(Db,'\\\\_','_'))='" + k +
+			"' OR LOWER(REPLACE(Db,'\\\\_','_')) LIKE '" + d + "')" +
+			" + (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE LOWER(SCHEMA_NAME)='" + k +
+			"' OR LOWER(SCHEMA_NAME) LIKE '" + d + "')"
+		if out, err := exec.Command("mysql", "-N", "-B", "-e", q).Output(); err == nil &&
+			strings.TrimSpace(string(out)) != "0" {
+			return true
+		}
+	}
+	return false
 }
 
 // MySQLCreateDB: MariaDB'de YENI veritabani + YENI kullanici olustur + GRANT, sonra
@@ -307,7 +606,15 @@ func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) er
 	}
 	hepsiniGeriAl := func() {
 		_ = mysqlCalistir(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName))
+		_ = yetkiKalintisiniTemizle(dbName, "", false)
 		kullaniciGeriAl()
+	}
+	// 2b) Ad YENI (CREATE DATABASE basarili) → bu ada bagli eski yetki satirlari artiktir
+	// (onceden kapilip MySQLDropDBKeepUser ile silinmis ad, eski surum kalintisi). Silinmezse
+	// eski kullanici bu yeni DB'ye ANINDA erisir. Jokerli eski desen → fail-closed.
+	if err := yetkiKalintisiniTemizle(dbName, "", true); err != nil {
+		hepsiniGeriAl()
+		return err
 	}
 	// 3) GRANT
 	if err := mysqlCalistir(
@@ -343,8 +650,11 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 	// NOT: deger at-rest sifreli olabilir; asagida gizli.Sakla ile yeniden
 	// saklanir ve Sakla zaten-sifreli degere DOKUNMAZ → cift sifreleme olmaz.
 	var pass string
+	// 🔴 domain_id + BINARY: harf duyarsiz "db_user=? LIMIT 1" komsunun buyuk/kucuk harf
+	// varyantli satirindan parolayi okuyup bu domainin satirina kopyalayabilirdi.
 	if err := db.QueryRow(
-		`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbUser).Scan(&pass); err != nil {
+		`SELECT db_pass_plain FROM db_accounts WHERE domain_id=? AND BINARY db_user=? LIMIT 1`,
+		domainID, dbUser).Scan(&pass); err != nil {
 		return fmt.Errorf("mevcut kullanıcı parolası bulunamadı: %w", err)
 	}
 	// DB — YALNIZ yoksa olusur: var olan (baskasinin olabilecek) bir DB'ye GRANT verilmez.
@@ -354,8 +664,13 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 	// Buradan sonra DB BU cagrinin: duserse yetki + DB geri alinir (DROP DATABASE
 	// mysql.db yetki satirini SILMEZ; kalirsa ayni adla sonra acilan DB'ye uzanir).
 	geriAl := func() {
-		_ = mysqlCalistir(fmt.Sprintf("REVOKE ALL PRIVILEGES ON `%s`.* FROM '%s'@'localhost';", GrantDBKac(dbName), dbUser))
 		_ = mysqlCalistir(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName))
+		_ = yetkiKalintisiniTemizle(dbName, "", false)
+	}
+	// Ad YENI → eski yetki satirlari artiktir (bkz. MySQLCreateDB 2b).
+	if err := yetkiKalintisiniTemizle(dbName, "", true); err != nil {
+		geriAl()
+		return err
 	}
 	// Mevcut kullaniciya GRANT (CREATE/ALTER USER YOK → parola korunur).
 	if err := mysqlCalistir(
@@ -374,7 +689,8 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 	return nil
 }
 
-// MySQLDropDB: DB ve user kaldir + metadata sil
+// MySQLDropDB: DB ve user kaldir + metadata sil. DROP USER KOSULSUZDUR: kiraci akislari
+// MySQLDropDBSahipli kullanir (kullanicinin bu domaine ait oldugunu kanitlar).
 func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
 	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
@@ -387,13 +703,24 @@ func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
 	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	_, err := db.Exec(`DELETE FROM db_accounts WHERE db_name=?`, dbName)
+	// Baska hesaplarin bu ada bagli yetkileri de gider (bkz. yetkiKalintisiniTemizle).
+	// Duserse satir KALIR: yeniden silme denemesi temizligi tamamlar.
+	if err := yetkiKalintisiniTemizle(dbName, "", false); err != nil {
+		return fmt.Errorf("yetki kalıntısı temizlenemedi: %w", err)
+	}
+	_, err := db.Exec(`DELETE FROM db_accounts WHERE BINARY db_name=?`, dbName)
 	return err
 }
 
-// MySQLDropDBKeepUser: yalniz DB'yi kaldir + metadata satirini sil; kullaniciya DOKUNMA.
+// MySQLDropDBKeepUser: yalniz DB'yi kaldir + metadata satirini sil; kullaniciyi DUSURME.
 // Kullanici baska DB'lerde de kullaniliyorsa (mevcut-kullanici modu) onlari bozmamak icin
 // tek-DB silmede kullanilir.
+//
+// 🔴 ARTIK GRANT: eskiden yalniz DROP DATABASE calisiyordu, REVOKE yoktu; kullanicinin
+// (ve baska hesaplarin) bu ada bagli mysql.db satiri KALIYORDU. Ayni ad sonra (komsu
+// tarafindan) yeniden olusturulunca eski kullanici o DB'de ANINDA ALL yetkiye sahip
+// oluyordu. Simdi bu ada bagli tum yetki satirlari silinir; kullanicinin BASKA DB'lerdeki
+// yetkileri korunur.
 func MySQLDropDBKeepUser(db *sql.DB, dbName string) error {
 	if !GecerliDBKimlik(dbName) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı")
@@ -402,7 +729,10 @@ func MySQLDropDBKeepUser(db *sql.DB, dbName string) error {
 		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName)).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	_, err := db.Exec(`DELETE FROM db_accounts WHERE db_name=?`, dbName)
+	if err := yetkiKalintisiniTemizle(dbName, "", false); err != nil {
+		return fmt.Errorf("yetki kalıntısı temizlenemedi: %w", err)
+	}
+	_, err := db.Exec(`DELETE FROM db_accounts WHERE BINARY db_name=?`, dbName)
 	return err
 }
 
@@ -424,15 +754,11 @@ func MySQLDropAllForDomain(db *sql.DB, domainID int64) error {
 	rows.Close()
 	for _, c := range liste {
 		// 🔴 Kullanici BASKA bir domainin satirinda da geciyorsa (duzeltme oncesi onek
-		// cakismasiyla komsunun kullanicisini kendi satirina yazdirmis eski kayit)
-		// DROP USER komsunun sitesini dusururdu: yalniz bu domainin DB'sini kaldir.
-		var baska int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND domain_id<>?`,
-			c.kul, domainID).Scan(&baska); err != nil || baska > 0 {
-			_ = MySQLDropDBKeepUser(db, c.ad)
-			continue
-		}
-		_ = MySQLDropDB(db, c.ad, c.kul)
+		// cakismasiyla komsunun kullanicisini kendi satirina yazdirmis eski kayit), bir
+		// sistem/servis hesabiysa ya da yetkileri bu domainin disina tasiyorsa DROP USER
+		// komsunun sitesini / sunucu geneli servisi dusururdu: MySQLDropDBSahipli yalniz
+		// DB'yi kaldirir. Paylasilan (mevcut-kullanici modu) kullanici son DB'sinde duser.
+		_ = MySQLDropDBSahipli(db, domainID, c.ad, c.kul)
 	}
 	return nil
 }
