@@ -90,7 +90,9 @@ const SEC_EN: Record<string, string> = {
   "İşlem başarısız": "Operation failed",
   "Sırada": "Queued",
   "Tarama sıraya alındı": "Scan queued",
-  "Kuyrukta {0} domain var.": "{0} domain(s) in the queue.",
+  "Bu domain tarama sırasında.": "This domain is queued for scanning.",
+  "Tarama başlatıldı": "Scan started",
+  "Sonuçlar tarama bitince burada görünür.": "Results appear here when the scan finishes.",
   "Tarama sınırı": "Scan limit",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -157,7 +159,9 @@ export default function DomainSecurityPage() {
     try {
       const r = await api.post<TaramaYanit>('/websec/rescan?domain_id=' + domainID, {})
       const n = r.data?.sirada
-      if (typeof n === 'number' && n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("Kuyrukta {0} domain var."), n))
+      // Bayi: {sirada: n} (yalnız kendi domainleri); kök: {started: true} — sirada yok.
+      if (typeof n === 'number') { if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevir("Bu domain tarama sırasında.")) }
+      else toast.bilgi(cevir("Tarama başlatıldı"), cevir("Sonuçlar tarama bitince burada görünür."))
       await yukle()
     } catch (e) {
       const kod = durumKodu(e)

@@ -117,8 +117,10 @@ const WSEC_EN: Record<string, string> = {
   "Domainlerimi Tara": "Scan My Domains",
   "Sırada": "Queued",
   "Tarama sıraya alındı": "Scan queued",
-  "Kuyrukta {0} domain var.": "{0} domain(s) in the queue.",
-  "Sıraya alınacak domain yok.": "No domains to queue.",
+  "{0} domaininiz tarama sırasında.": "{0} of your domains are queued for scanning.",
+  "Taranacak domaininiz yok.": "You have no domains to scan.",
+  "Tarama başlatıldı": "Scan started",
+  "Sonuçlar tarama bitince burada görünür.": "Results appear here when the scan finishes.",
   "Tarama sınırı": "Scan limit",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
@@ -216,9 +218,13 @@ export default function WebsiteSecurityPage() {
     try {
       const r = await api.post<TaramaYanit>(yol, {})
       const n = r.data?.sirada
+      // Bayi yanıtı {sirada: n} — n YALNIZ bu isteğin kendi domainlerinden sırada bekleyenler
+      // (ortak kuyruğun uzunluğu değil). Kök yanıtında sirada yok ({started: true}).
       if (typeof n === 'number') {
-        if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("Kuyrukta {0} domain var."), n))
-        else toast.bilgi(cevir("Sıraya alınacak domain yok."))
+        if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("{0} domaininiz tarama sırasında."), n))
+        else toast.bilgi(cevir("Taranacak domaininiz yok."))
+      } else {
+        toast.bilgi(cevir("Tarama başlatıldı"), cevir("Sonuçlar tarama bitince burada görünür."))
       }
       await yukle()
     } catch (e) {
@@ -273,7 +279,7 @@ export default function WebsiteSecurityPage() {
           <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
             {yonetici
               ? cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")
-              : cevir("Hesaplarınızdaki domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")}
+              : cevir("Hesaplarınızdaki domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")}{' '}
             {cevir("Bir domainin açıkları için satırına tıklayın.")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
