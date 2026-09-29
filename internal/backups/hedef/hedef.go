@@ -117,8 +117,13 @@ type Hedef interface {
 	Test(ctx context.Context) error
 	// Yukle — yerel dosyayı uzak ada yükler; aynı ad varsa üzerine yazar.
 	// YetenekAtomikYukle: hata/iptal ⇒ nihai adda dosya YOK. Geçici dosya
-	// gerekiyorsa adı UzakGeciciAd ile AYNI dizinde üretilir ve hata/iptalde
-	// ayrı kısa bir bağlamla silinmeye çalışılır (bkz. gecici.go).
+	// gerekiyorsa adı UzakGeciciAd ile AYNI dizinde üretilir. Hata/iptalde
+	// geçici dosyayı silme denemesi Yukle DÖNMEDEN ÖNCE ve SENKRON yapılır
+	// (arka plan goroutine'i yok: Yukle döndükten sonra Listele(dizin/) onu
+	// görmemeli) ve iptal edilmiş olabilecek ctx ile DEĞİL,
+	// context.WithoutCancel(ctx) + kısa zaman aşımıyla (ör. 30 sn) çağrılır.
+	// Silme de başarısızsa dönen hata yüklemenin kendi hatasıdır; kalan geçici
+	// dosyayı orkestratörün 24 saat temizliği bulur (bkz. gecici.go).
 	Yukle(ctx context.Context, yerelYol, uzakAd string, sec YukleSecenek) error
 	// Listele — önek eşleşen DOSYALARI döner (alt dizinlere inmez): önekin
 	// dizin kısmındaki doğrudan çocuklar, adı önekin son bileşeniyle başlayanlar.

@@ -154,6 +154,37 @@ func TestLftpHedef_HataMaskeliKategorili(t *testing.T) {
 	}
 }
 
+// Indir ve Sil yolları da parolayı maskeye verir: lftp çıktısı parolayı ÇIPLAK
+// (desen maskesinin tanımadığı "kullanıcı,parola" biçiminde) yansıtsa bile ne
+// Error()'da ne Ayrinti()'de görünür. Yalnız birebir sır maskesi yakalayabilir.
+func TestLftpHedef_IndirSilParolaMaskeli(t *testing.T) {
+	lh_kur(t)
+	h := lh_hedef(t, "sftp")
+	t.Setenv("GOSP_SAHTE_CIKIS", "1")
+	t.Setenv("GOSP_SAHTE_CIKTI", "open -u yedekci,"+lh_nobetci+" failed; Login failed: 530 Login incorrect")
+	denetle := func(islem string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: hata bekleniyordu", islem)
+		}
+		var hh *hedef.Hata
+		if !errors.As(err, &hh) || err.Error() != hh.Error() {
+			t.Fatalf("%s: yalın *hedef.Hata değil: %T %v", islem, err, err)
+		}
+		if hh.Kategori != hedef.KategoriKimlik {
+			t.Errorf("%s: kategori %q", islem, hh.Kategori)
+		}
+		if strings.Contains(err.Error(), lh_nobetci) || strings.Contains(hh.Ayrinti(), lh_nobetci) {
+			t.Errorf("%s: parola sızdı (Error ya da Ayrinti)", islem)
+		}
+		if !strings.Contains(hh.Ayrinti(), "Login failed") {
+			t.Errorf("%s: ayrıntı tanı bilgisini kaybetti: %q", islem, hh.Ayrinti())
+		}
+	}
+	denetle("indir", h.Indir(context.Background(), "2026-08-25/c_x.tar.gz", filepath.Join(t.TempDir(), "inen.tar.gz")))
+	denetle("sil", h.Sil(context.Background(), "2026-08-25/c_x.tar.gz"))
+}
+
 // İndirme önce geçici ada; başarısızlıkta nihai ad OLUŞMAZ ve kalıntı kalmaz.
 func TestLftpHedef_IndirAtomik(t *testing.T) {
 	o := lh_kur(t)

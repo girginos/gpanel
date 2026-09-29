@@ -88,6 +88,41 @@ func TestSarmala(t *testing.T) {
 	}
 }
 
+// Yalın *Hata (sırlar verilmeden kurulmuş, ham metninde sır var) Sarmala'ya
+// sırlarla verilince ayrıntı YİNE maskelenir — işlem adı boş ve dolu iki dal
+// da. Girdi değişmez, kategori ve errors.Is korunur.
+func TestSarmala_YalinHataSirlariUygular(t *testing.T) {
+	for _, islem := range []string{"", "indir"} {
+		ham := fmt.Errorf("530 Login incorrect (%s): %w", nobetciSir, errNobetci)
+		yalin := YeniHata(KategoriKimlik, islem, ham)
+		if !strings.Contains(yalin.Ayrinti(), nobetciSir) {
+			t.Fatalf("hazırlık: sırsız kurulan hatanın ayrıntısı sırrı taşımalıydı: %q", yalin.Ayrinti())
+		}
+		s := Sarmala("yukle", yalin, nobetciSir)
+		var h *Hata
+		if !errors.As(s, &h) || s.Error() != h.Error() {
+			t.Fatalf("islem=%q: yalın *Hata dönmeliydi: %T %v", islem, s, s)
+		}
+		if strings.Contains(h.Ayrinti(), nobetciSir) {
+			t.Errorf("islem=%q: çağıranın verdiği sır ayrıntıya UYGULANMADI: %q", islem, h.Ayrinti())
+		}
+		if !strings.Contains(h.Ayrinti(), "Login incorrect") {
+			t.Errorf("islem=%q: ayrıntı tanı bilgisini kaybetti: %q", islem, h.Ayrinti())
+		}
+		if h.Kategori != KategoriKimlik || !errors.Is(s, errNobetci) {
+			t.Errorf("islem=%q: kategori/errors.Is kayboldu: %v", islem, s)
+		}
+		if !strings.Contains(yalin.Ayrinti(), nobetciSir) || yalin.Islem != islem {
+			t.Errorf("islem=%q: Sarmala girdiyi değiştirdi", islem)
+		}
+	}
+	// Sır verilmezse aynı *Hata döner (gereksiz kopya yok).
+	y := YeniHata(KategoriAg, "sil", errors.New("timeout"))
+	if s := Sarmala("sil", y); s != error(y) {
+		t.Error("sırsız ve işlem adı dolu yalın *Hata aynen dönmeliydi")
+	}
+}
+
 // opakHata — iç hatayı Unwrap eden ama Error()'ında göstermeyen SDK sarmalayıcısı
 // benzetimi: kategori metin kuralıyla DEĞİL, tür bilgisiyle bulunmalı.
 type opakHata struct{ ic error }

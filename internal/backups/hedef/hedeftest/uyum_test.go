@@ -299,6 +299,36 @@ func (s sarilmisHata) Yukle(ctx context.Context, yerel, ad string, sec hedef.Yuk
 	return nil
 }
 
+// dizinListesiEksik — dizin listesi ("dizin/") ilk dosyayı atlar; tam ad
+// sorgusu doğrudur (yalnız dizin listesinin eksiksizlik denetimi yakalar).
+type dizinListesiEksik struct{ *Bellek }
+
+func (d dizinListesiEksik) Listele(ctx context.Context, onek string) ([]hedef.Nesne, error) {
+	l, err := d.Bellek.Listele(ctx, onek)
+	if strings.HasSuffix(onek, "/") && len(l) > 0 {
+		l = l[1:]
+	}
+	return l, err
+}
+
+// tamAdGizleyen — tam ad sorgusunda dosyanın kendisini döndürmez (ör. öneki
+// "ad/" diye sorgulayan hatalı sağlayıcı istemcisi); dizin listesi doğrudur.
+type tamAdGizleyen struct{ *Bellek }
+
+func (g tamAdGizleyen) Listele(ctx context.Context, onek string) ([]hedef.Nesne, error) {
+	l, err := g.Bellek.Listele(ctx, onek)
+	if strings.HasSuffix(onek, "/") {
+		return l, err
+	}
+	out := l[:0]
+	for _, n := range l {
+		if n.Ad != onek {
+			out = append(out, n)
+		}
+	}
+	return out, err
+}
+
 func bellekVaryant(f func(b *Bellek)) *Bellek {
 	b := YeniBellek()
 	f(b)
@@ -347,6 +377,12 @@ func TestUyum_BozukUygulamalarYakalanir(t *testing.T) {
 		{"Test depoya gitmiyor", testHepBasarili{YeniBellek()}, "test_erisim"},
 		{"sarılmış hata (iptal)", sarilmisHata{YeniBellek()}, "iptal_ortada"},
 		{"sarılmış hata (yanlış sha)", sarilmisHata{YeniBellek()}, "yanlis_sha"},
+		// Y0 ikinci inceleme: eşzamanlı yükleme denetimi.
+		{"eşzamanlı yükleme kaybı (nil döner, nihai ad yok)", bellekVaryant(func(b *Bellek) { b.eszamanliKayip = true }), "eszamanli_yukleme"},
+		{"ortak geçici ad + özet denetimi yok (karışık içerik)", bellekVaryant(func(b *Bellek) { b.ortakGecici = true; b.shaDenetimsiz = true }), "eszamanli_yukleme"},
+		{"eşzamanlı başarıda geçici dosya kalıyor", bellekVaryant(func(b *Bellek) { b.eszamanliGeciciBirak = true }), "eszamanli_yukleme"},
+		{"tam ad sorgusu dosyayı göstermiyor", tamAdGizleyen{YeniBellek()}, "eszamanli_yukleme"},
+		{"dizin listesi eksik", dizinListesiEksik{YeniBellek()}, "eszamanli_yukleme"},
 	}
 	for _, d := range durumlar {
 		if h := denemeKos(t, d.h, d.deneme); len(h) == 0 {

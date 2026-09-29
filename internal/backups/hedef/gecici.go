@@ -7,8 +7,10 @@ package hedef
 // türden bağımsız yazılamazdı. Sözleşme:
 //   - Geçici dosya gerekiyorsa adı UzakGeciciAd ile üretilir ve nihai adla AYNI
 //     dizindedir (Listele(dizin/) onu görür, yeniden adlandırma dizin içidir).
-//   - Yukle hata/iptal ile biterse geçici dosyayı ayrı, kısa ömürlü bir bağlamla
-//     (context.WithoutCancel + zaman aşımı) silmeyi dener.
+//   - Yukle hata/iptal ile biterse geçici dosyayı silmeyi Yukle DÖNMEDEN ÖNCE,
+//     SENKRON (arka plan goroutine'i değil) ve ayrı, kısa ömürlü bir bağlamla
+//     (context.WithoutCancel(ctx) + zaman aşımı) dener; dönen hata yüklemenin
+//     hatasıdır (silme hatası dönüşü değiştirmez).
 //   - Silinemeyen (bağlantı koptu, süreç öldü) geçici dosya GeciciMi ile tanınır;
 //     orkestratör GeciciZamani (ya da Nesne.Degisim) 24 saati geçince siler.
 //   - Sağlayıcının kendi atomik yüklemesi (S3 çok parçalı) görünür dosya

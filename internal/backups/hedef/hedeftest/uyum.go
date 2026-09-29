@@ -536,21 +536,28 @@ func denemeEszamanli(t sinayici, o *ortam) {
 		yollar[i], shalar[i] = dosyaUret(t, boyut, uint64(30+i))
 	}
 
-	// 1) Aynı dizinde FARKLI adlar: hepsi başarılı ve içerikler karışmamış.
+	// 1) Aynı dizinde FARKLI adlar: hepsi başarılı, her biri nihai adında
+	// (nil dönüp dosyayı kaybeden yükleme yakalanır) ve içerikler karışmamış.
 	farkli := make([]string, n)
 	for i := range farkli {
 		farkli[i] = o.ad(fmt.Sprintf("eszamanli/farkli-%d.age", i))
 	}
-	for i, err := range eszamanliYukle(o, yollar, shalar, farkli, boyut) {
+	farkliHata := eszamanliYukle(o, yollar, shalar, farkli, boyut)
+	for i, err := range farkliHata {
 		if err != nil {
 			t.Errorf("eşzamanlı yükleme (farklı ad) %d başarısız: %v", i, err)
 			hataDenetle(t, o, err, "eşzamanlı yükleme")
 		}
 	}
 	for i, ad := range farkli {
-		if _, ok := bul(t, o, ad); ok {
-			dogrula(t, o, ad, shalar[i], boyut)
+		if farkliHata[i] != nil {
+			continue
 		}
+		if _, ok := bul(t, o, ad); !ok {
+			t.Errorf("eşzamanlı yükleme (farklı ad) %d nil döndü ama %q Listele'de YOK (yükleme kayboldu)", i, ad)
+			continue
+		}
+		dogrula(t, o, ad, shalar[i], boyut)
 	}
 
 	// 2) AYNI ada eşzamanlı yüklemeler: en az biri başarılı, kalan içerik
@@ -576,15 +583,35 @@ func denemeEszamanli(t sinayici, o *ortam) {
 		}
 	}
 
-	// 3) Dizinde yalnız 3 farklı + 1 aynı ad kalır; yarım/geçici dosya yok.
+	// 3) Dizin listesi TAM olarak başarılı yüklemelerin adlarını içerir: her
+	// beklenen ad listede (eksik dizin listesi yakalanır), fazladan dosya ve
+	// yarım/geçici dosya yok.
 	if o.h.Yetenekler().Var(hedef.YetenekOnekListele) {
 		liste, err := o.h.Listele(o.ctx, o.onek+"eszamanli/")
 		if err != nil {
 			t.Fatalf("Listele(eszamanli/): %v", err)
 		}
+		var beklenenSira []string
+		for i, ad := range farkli {
+			if farkliHata[i] == nil {
+				beklenenSira = append(beklenenSira, ad)
+			}
+		}
+		if len(basarili) > 0 {
+			beklenenSira = append(beklenenSira, ayni)
+		}
 		beklenen := map[string]bool{ayni: true}
 		for _, ad := range farkli {
 			beklenen[ad] = true
+		}
+		listede := map[string]bool{}
+		for _, nes := range liste {
+			listede[nes.Ad] = true
+		}
+		for _, ad := range beklenenSira {
+			if !listede[ad] {
+				t.Errorf("eşzamanlı yüklemeler sonrası başarılı %q dizin listesinde (Listele(eszamanli/)) YOK", ad)
+			}
 		}
 		for _, nes := range liste {
 			if !beklenen[nes.Ad] {

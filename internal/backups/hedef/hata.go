@@ -106,20 +106,32 @@ func (h *Hata) Is(hedef error) bool {
 }
 
 // Sarmala — herhangi bir hatayı *Hata'ya çevirir (nil → nil). err zaten yalın
-// bir *Hata ise aynen döner; *Hata'yı SARAN bir hata ise (fmt.Errorf("...%w"))
-// dış metin sızmasın diye yeni *Hata kurulur (kategori korunur, ayrıntı dış
-// metnin maskelenmiş hali olur). Diğer hatalar Sinifla ile sınıflanır.
+// bir *Hata ise kategorisi ve nedeni korunur, ama çağıranın verdiği sırlar
+// ayrıntıya YİNE uygulanır (hata sırlar verilmeden kurulmuş olabilir; ham
+// parola Ayrinti()'de kalmasın) ve işlem adı boşsa doldurulur — girdi
+// değişmez, gerekiyorsa kopya döner. *Hata'yı SARAN bir hata ise
+// (fmt.Errorf("...%w")) dış metin sızmasın diye yeni *Hata kurulur (kategori
+// korunur, ayrıntı dış metnin maskelenmiş hali olur). Diğer hatalar Sinifla
+// ile sınıflanır.
 func Sarmala(islem string, err error, sirlar ...string) error {
 	if err == nil {
 		return nil
 	}
 	if h, ok := err.(*Hata); ok {
-		if h.Islem == "" && islemRe.MatchString(islem) {
-			c := *h
-			c.Islem = islem
-			return &c
+		islemAta := h.Islem == "" && islemRe.MatchString(islem)
+		maskeli := h.ayrinti
+		if len(sirlar) > 0 {
+			maskeli = Maskele(h.ayrinti, sirlar...)
 		}
-		return h
+		if !islemAta && maskeli == h.ayrinti {
+			return h
+		}
+		c := *h
+		c.ayrinti = maskeli
+		if islemAta {
+			c.Islem = islem
+		}
+		return &c
 	}
 	var ic *Hata
 	if errors.As(err, &ic) {

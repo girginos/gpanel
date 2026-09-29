@@ -51,6 +51,14 @@ type Bellek struct {
 	geciciBirak  bool // hata/iptalde geçici dosya silinmez
 	ortakGecici  bool // dizin başına TEK sabit geçici ad (eşzamanlı yüklemeler birbirini bozar)
 	sirSizdir    bool // ham hata nedeni sır ile maskelenmeden sarılır
+	// shaDenetimsiz — sunucu tarafı özet denetimi yok (ortakGecici ile karışık
+	// içerik BAŞARI olarak döner).
+	shaDenetimsiz bool
+	// eszamanliKayip — nihai ad yalnız o an süren TEK yükleme iken yazılır:
+	// eşzamanlı yüklemeler nil döner ama dosya kaybolur.
+	eszamanliKayip bool
+	// eszamanliGeciciBirak — eşzamanlı başarıda geçici ad da listede kalır.
+	eszamanliGeciciBirak bool
 }
 
 // YeniBellek — boş sahte hedef.
@@ -287,7 +295,7 @@ func (b *Bellek) Yukle(ctx context.Context, yerelYol, uzakAd string, sec hedef.Y
 	switch {
 	case kopyaHata != nil:
 		sonuc = b.sarmala("yukle", kopyaHata)
-	case sec.Sha256 != "" && !strings.EqualFold(sec.Sha256, ozet):
+	case !b.shaDenetimsiz && sec.Sha256 != "" && !strings.EqualFold(sec.Sha256, ozet):
 		// Sunucu tarafı özet denetimi: depoya ulaşan veri beklenen değil.
 		sonuc = b.yeniHata(hedef.KategoriBilinmeyen, "yukle", errors.New("sha256 uyuşmuyor (aktarım bozuk)"))
 	}
@@ -297,10 +305,16 @@ func (b *Bellek) Yukle(ctx context.Context, yerelYol, uzakAd string, sec hedef.Y
 		}
 		return sonuc
 	}
+	if b.eszamanliKayip && b.suren > 1 {
+		if b.nesneler[gecici] == dug {
+			delete(b.nesneler, gecici)
+		}
+		return nil // BOZUK: başarı bildirir, nihai ad yazılmaz
+	}
 	dug.sha = ozet
 	dug.degisim = time.Now()
 	b.nesneler[uzakAd] = dug // yeniden adlandırma: düğüm taşınır
-	if gecici != uzakAd && b.nesneler[gecici] == dug {
+	if gecici != uzakAd && b.nesneler[gecici] == dug && !(b.eszamanliGeciciBirak && b.suren > 1) {
 		delete(b.nesneler, gecici)
 	}
 	return nil
