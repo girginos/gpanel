@@ -302,22 +302,27 @@ func (h *Handlers) Karantina(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "yol domain dizini dışında")
 		return
 	}
-	fi, err := os.Lstat(clean)
-	if err != nil || fi.IsDir() {
-		httpx.WriteError(w, http.StatusBadRequest, "dosya bulunamadı")
+	uid, _, uok := kiraciUID(sk)
+	if !uok {
+		httpx.WriteError(w, http.StatusInternalServerError, "kiracı kullanıcı çözümlenemedi")
 		return
 	}
-	qdir := home + "/.karantina"
-	if err := os.MkdirAll(qdir, 0o700); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "karantina dizini oluşturulamadı")
+	// 🔴 SYMLINK-GÜVENLİ taşıma (karantinayaTasi): panel ROOT çalışır ve yol
+	// tamamen kiracının mülküdür. Eski os.Lstat/MkdirAll/Rename/Chmod zinciri
+	// symlink izliyordu → root, ev dışındaki bir dosyayı taşıyabilir ya da
+	// chmod 0 yapabilirdi (kiracılar arası / sistem geneli DoS).
+	hedef, err := karantinayaTasi(home, clean, uid, time.Now())
+	if err != nil {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			httpx.WriteError(w, http.StatusBadRequest, "dosya bulunamadı")
+		case errors.Is(err, errGuvenliYol):
+			httpx.WriteError(w, http.StatusBadRequest, "yol güvenli değil (symlink/dizin/kiracıya ait olmayan dosya) — karantinaya alınmadı")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, "taşınamadı: "+err.Error())
+		}
 		return
 	}
-	hedef := filepath.Join(qdir, time.Now().Format("20060102_150405")+"_"+filepath.Base(clean))
-	if err := os.Rename(clean, hedef); err != nil { // aynı dosya-sistemi → atomik; fuser/rm YOK
-		httpx.WriteError(w, http.StatusInternalServerError, "taşınamadı: "+err.Error())
-		return
-	}
-	_ = os.Chmod(hedef, 0o000) // çalıştırılamaz/okunamaz
 	// 🔴 durum/orijinal_yol/karantina_yol'u DA yaz: yeni karantina yönetimi
 	// (liste/geri-yükle/sil/incele) bu alanlara bakar. Yalnız karantina=1 yazmak
 	// dosyayı taşır ama panelde "Karantina" bölümünde GÖRÜNMEZ → geri yüklenemez.

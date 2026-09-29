@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"girginospanel/internal/gizli"
-	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -19,12 +18,20 @@ import (
 func MySQLChangePassword(panelDB *sql.DB, domainID int64, dbUser, yeniPw string) error {
 	// 🔴 GÜVENLİK: dbUser panel-yönetimli bir DB kullanıcısı OLMALI (db_accounts'ta
 	// kayıtlı). Eski "c_ prefix" şartı, ORİJİNAL adla taşınan DB kullanıcılarını
-	// (ör. admin_wp_vvzhh) meşru olduğu halde reddediyordu. Eskiden yalnız "db_accounts'ta
-	// kayıtlı mı" bakılıyordu; hangi domaine kayıtlı olduğu DENETLENMİYORDU. Önek
-	// çakışmasıyla (bkz. MySQLCreateDB) komşunun kullanıcısını kendi domain_id'siyle
-	// yazdırmış bir satır, bu uç üzerinden komşunun parolasını yeniden değiştirmeye
-	// yetiyordu. Artık kullanıcı YALNIZ çağıranın domainine kayıtlı olmalı; başka bir
-	// domainin satırında da geçiyorsa (eski devralma kaydı) reddedilir.
+	// (ör. admin_wp_vvzhh) meşru olduğu halde reddediyordu.
+	// 🔴 "Panel-kayıtlı" TEK BAŞINA YETMEZ: db_accounts.db_user'a 'root'/'panel'
+	// gibi bir ad yazılabiliyordu (boş-kullanıcılı DB'ye serbest ad, yedekten
+	// kimlik kurtarmada kiracı config'inden okunan DB_USER). Sunucu geneli hesaba
+	// ALTER USER, kayıt ne derse desin, GÖNDERİLMEZ (panel DB'sine de bakılmadan).
+	if SistemDBHesabiMi(dbUser) {
+		return ErrSistemDBHesabi
+	}
+	// Eskiden yalnız "db_accounts'ta kayıtlı mı" bakılıyordu; hangi domaine kayıtlı
+	// olduğu DENETLENMİYORDU. Önek çakışmasıyla (bkz. MySQLCreateDB) komşunun
+	// kullanıcısını kendi domain_id'siyle yazdırmış bir satır, bu uç üzerinden komşunun
+	// parolasını yeniden değiştirmeye yetiyordu. Artık kullanıcı YALNIZ çağıranın
+	// domainine kayıtlı olmalı; başka bir domainin satırında da geçiyorsa (eski devralma
+	// kaydı) reddedilir.
 	if err := kullaniciYalnizBuDomainde(panelDB, domainID, dbUser); err != nil {
 		return err
 	}
@@ -46,7 +53,7 @@ func MySQLChangePassword(panelDB *sql.DB, domainID int64, dbUser, yeniPw string)
 		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(yeniPw)),
 		"FLUSH PRIVILEGES;",
 	}
-	out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput()
+	out, err := mysqlKomut("-e", strings.Join(stmts, " ")).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("mysql alter: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -91,7 +98,7 @@ func hesapYetkiSayimi(panelDB *sql.DB, domainID int64, dbUser, host string) (int
 	if !GecerliDBKimlik(dbUser) || !reDBHost.MatchString(host) {
 		return 0, fmt.Errorf("güvenlik: geçersiz DB hesap adı")
 	}
-	out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", kacisModu+
+	out, err := mysqlKomut("-N", "-B", "-r", "-e", kacisModu+
 		" SHOW GRANTS FOR '"+sqlKac(dbUser)+"'@'"+sqlKac(host)+"'").Output()
 	if err != nil {
 		return 0, fmt.Errorf("güvenlik: DB kullanıcısının yetkileri okunamadı: %w", err)

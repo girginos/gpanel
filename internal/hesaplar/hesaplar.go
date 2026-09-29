@@ -11,6 +11,7 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -192,6 +193,75 @@ func ParolaGecerli(pw string) bool {
 	return !strings.ContainsAny(pw, "\r\n\x00")
 }
 
+var (
+	// ErrSistemDBHesabi: ad sunucu geneli bir MariaDB hesabina ait (root, mysql,
+	// panel, pma, pureftpd, roundcube …). Panel bu hesaplari ASLA olusturmaz,
+	// parolalarini ASLA degistirmez, kiraci DB'sine ASLA baglamaz.
+	ErrSistemDBHesabi = errors.New("güvenlik: sistem/servis veritabanı hesabı kullanılamaz")
+	// ErrDBKullaniciMevcut: MariaDB'de bu adla (herhangi bir host'ta) hesap zaten var.
+	// ErrDBKimlikMevcut'un ozel halidir (errors.Is ikisini de tanir): yalniz-yeni
+	// olusturucularin "var olana dokunulmadi" sinifi tek bir kontrolle yakalanir.
+	ErrDBKullaniciMevcut = fmt.Errorf("%w (bu adla bir MariaDB hesabı)", ErrDBKimlikMevcut)
+)
+
+// sistemDBHesaplari: sunucu geneli MariaDB hesaplari (kucuk harf). Kaynak:
+// girginospanel-install.sh (panel, pma), scripts/girginospanel-ftp-setup
+// (pureftpd), posta/webmail kurulumu (mailadmin, mailuser, roundcube) ve
+// MariaDB'nin kendi hesaplari. Kurulumu HENUZ yapilmamis servislerin adlari da
+// burada: kiraci adi once "kapip" sonraki kurulumun CREATE USER IF NOT EXISTS +
+// GRANT'iyle o servisin veritabanina yetki devralamasin.
+//
+// mailuser / mailadmin (181'de hem @localhost hem @127.0.0.1): hicbir kiraci ad-alanina
+// dusmezler; yedekten kurtarmada (DBHesabiBaglanabilirMi) tek engel bu listedir.
+var sistemDBHesaplari = map[string]bool{
+	"root": true, "mysql": true, "mariadb": true, "debian-sys-maint": true,
+	"panel": true, "girginospanel": true, "pma": true, "phpmyadmin": true,
+	"pureftpd": true, "pure-ftpd": true,
+	"roundcube": true, "roundcubemail": true,
+	"mailadmin": true, "mailuser": true, "postfix": true, "dovecot": true,
+	"pdns": true, "powerdns": true,
+}
+
+// SistemDBHesabiMi: ad sunucu geneli (kiraciya ait OLMAYAN) bir MariaDB hesabi mi?
+// Buyuk/kucuk harf duyarsiz (temkinli): "Root" da reddedilir.
+//
+// Hicbir kiraci akisi bu adlari bir db_accounts satirina yazamaz, onlara GRANT veremez,
+// onlari DUSUREMEZ, parolalarini degistiremez. Liste yalniz ilk savunma hattidir; asil
+// kapi hesabin YETKILERINE bakar (DBHesabiBaglanabilirMi / MySQLDropDBSahipli →
+// hesapYetkileriBuDomainde): listede olmayan bir servis hesabi da kendi (bu domaine ait
+// olmayan) semasindaki yetkisi yuzunden reddedilir.
+func SistemDBHesabiMi(u string) bool {
+	l := strings.ToLower(strings.TrimSpace(u))
+	if l == "" || strings.HasPrefix(l, "mysql.") || strings.HasPrefix(l, "mariadb.") {
+		return true
+	}
+	return sistemDBHesaplari[l]
+}
+
+// mysqlKomut: ROOT soket kimligiyle mysql CLI. Uretimde DEGISMEZ; yalniz testler
+// gecici MariaDB'ye yonlendirir (canli sunucunun hesaplarina dokunmamak icin).
+var mysqlKomut = func(args ...string) *exec.Cmd { return exec.Command("mysql", args...) }
+
+// mysqlHesapVarMi: MariaDB'de bu ADLA — HERHANGI bir host'ta — hesap (ya da rol)
+// var mi? Yalniz 'x'@'localhost' sayilmaz: 'svc'@'%' varken ayni adla
+// 'svc'@'localhost' olusturmak yerel baglantilarda servisi GOLGELER (daha ozgul
+// host kazanir). Ad GecerliDBKimlik'ten gecmeli (tirnak yok → SQLi yok).
+func mysqlHesapVarMi(dbUser string) (bool, error) {
+	if !GecerliDBKimlik(dbUser) {
+		return false, fmt.Errorf("güvenlik: geçersiz kullanıcı adı")
+	}
+	out, err := mysqlKomut("-N", "-B", "-e",
+		"SELECT COUNT(*) FROM mysql.user WHERE User='"+sqlKac(dbUser)+"'").Output()
+	if err != nil {
+		return false, fmt.Errorf("mysql hesap sorgusu: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return false, fmt.Errorf("mysql hesap sorgusu: beklenmeyen çıktı")
+	}
+	return n > 0, nil
+}
+
 // FTPCreate: ftp_accounts tablosuna kayit ekler; parola at-rest $6$ crypt hash olarak saklanir (password_md5 sutunu, Pure-FTPd MYSQLCrypt crypt)
 func FTPCreate(db *sql.DB, domainID int64, sistemKullanici, parola string, uidN, gidN int) error {
 	home := "/home/" + sistemKullanici
@@ -231,33 +301,31 @@ func FTPDelete(db *sql.DB, sistemKullanici string) error {
 // "geri alma" adina DUSURMEMELIDIR: kimlik baska bir kiraciya ait olabilir.
 var ErrDBKimlikMevcut = errors.New("veritabanı ya da kullanıcı zaten var")
 
-// mysqlCalistir: root-socket mysql CLI ile ifade(ler) calistirir. Var olan kullanici
-// (ERROR 1396 — CREATE USER) ya da veritabani (ERROR 1007 — CREATE DATABASE) hatasi
-// ErrDBKimlikMevcut'a sarilir.
+// mysqlCalistir: root-socket mysql CLI (mysqlKomut dikisi) ile ifade(ler) calistirir.
+// Var olan kullanici (ERROR 1396 — CREATE USER) ErrDBKullaniciMevcut'a, var olan
+// veritabani (ERROR 1007 — CREATE DATABASE) ErrDBKimlikMevcut'a sarilir (ikisi de
+// errors.Is(err, ErrDBKimlikMevcut)).
 func mysqlCalistir(ifadeler ...string) error {
-	out, err := exec.Command("mysql", "-e", strings.Join(ifadeler, " ")).CombinedOutput()
+	out, err := mysqlKomut("-e", strings.Join(ifadeler, " ")).CombinedOutput()
 	if err == nil {
 		return nil
 	}
 	cikti := strings.TrimSpace(string(out))
-	if strings.Contains(cikti, "ERROR 1396") || strings.Contains(cikti, "ERROR 1007") {
+	switch {
+	case strings.Contains(cikti, "ERROR 1396"):
+		return fmt.Errorf("%w: %s", ErrDBKullaniciMevcut, cikti)
+	case strings.Contains(cikti, "ERROR 1007"):
 		return fmt.Errorf("%w: %s", ErrDBKimlikMevcut, cikti)
 	}
 	return fmt.Errorf("mysql exec: %s: %w", cikti, err)
 }
 
-// DBKullanicisiVarMi: MariaDB'de '<dbUser>'@'localhost' hesabi var mi? Gecersiz ad ya
-// da olculemeyen durum "var" sayilir (fail-closed): cagiran adi REDDETMELI.
+// DBKullanicisiVarMi: MariaDB'de bu ADLA — HERHANGI bir host'ta — hesap var mi (bkz.
+// mysqlHesapVarMi: 'svc'@'%' varken 'svc'@'localhost' olusturmak servisi golgeler)?
+// Gecersiz ad ya da olculemeyen durum "var" sayilir (fail-closed): cagiran adi REDDETMELI.
 func DBKullanicisiVarMi(dbUser string) bool {
-	if !GecerliDBKimlik(dbUser) {
-		return true
-	}
-	out, err := exec.Command("mysql", "-N", "-B", "-e",
-		"SELECT COUNT(*) FROM mysql.user WHERE User='"+sqlKac(dbUser)+"' AND Host='localhost'").Output()
-	if err != nil {
-		return true
-	}
-	return strings.TrimSpace(string(out)) != "0"
+	varMi, err := mysqlHesapVarMi(dbUser)
+	return err != nil || varMi
 }
 
 // kullaniciYalnizBuDomainde: dbUser panelde (db_accounts) YALNIZ domainID'ye mi
@@ -300,25 +368,6 @@ func SemaVarMi(dbName string) (bool, error) {
 	return semaVarMi(dbName)
 }
 
-// SistemDBHesabiMi: panelin / sunucunun KENDI MariaDB hesaplari. Hicbir kiraci akisi bu
-// adlari bir db_accounts satirina yazamaz, onlara GRANT veremez, onlari DUSUREMEZ.
-// Liste yalniz ilk savunma hattidir; asil kapi hesabin YETKILERINE bakar
-// (DBHesabiBaglanabilirMi / MySQLDropDBSahipli → hesapYetkileriBuDomainde): listede
-// olmayan bir servis hesabi da kendi (bu domaine ait olmayan) semasindaki yetkisi
-// yuzunden reddedilir.
-func SistemDBHesabiMi(u string) bool {
-	l := strings.ToLower(strings.TrimSpace(u))
-	if l == "" || strings.HasPrefix(l, "mysql.") || strings.HasPrefix(l, "mariadb.") {
-		return true
-	}
-	switch l {
-	case "root", "debian-sys-maint", "panel", "pma", "phpmyadmin", "pureftpd", "roundcube",
-		"roundcubemail", "postfix", "dovecot", "pdns", "powerdns", "girginospanel", "mysql", "mariadb":
-		return true
-	}
-	return false
-}
-
 // reDBHost: MariaDB hesap host'u (localhost, 127.0.0.1, %, alan adi, IPv6). Tirnak/ters
 // bolu/bosluk YOK → sorguya guvenle girer.
 var reDBHost = regexp.MustCompile(`\A[A-Za-z0-9._%:-]{1,255}\z`)
@@ -332,7 +381,7 @@ func dbHesabiVarMi(kul, host string) (bool, error) {
 	if !GecerliDBKimlik(kul) || !reDBHost.MatchString(host) {
 		return true, fmt.Errorf("güvenlik: geçersiz hesap adı")
 	}
-	out, err := exec.Command("mysql", "-N", "-B", "-e", kacisModu+
+	out, err := mysqlKomut("-N", "-B", "-e", kacisModu+
 		" SELECT COUNT(*) FROM mysql.user WHERE User='"+sqlKac(kul)+"' AND Host='"+sqlKac(host)+"'").Output()
 	if err != nil {
 		return true, err
@@ -437,7 +486,7 @@ func yetkiKalintisiniTemizle(dbName, koru string, yeniDB bool) error {
 	}
 	ad := sqlKac(dbName)
 	if yeniDB {
-		out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", kacisModu+
+		out, err := mysqlKomut("-N", "-B", "-r", "-e", kacisModu+
 			" SELECT Db FROM mysql.db WHERE CAST('"+ad+"' AS BINARY) LIKE CAST(Db AS BINARY)").Output()
 		if err != nil {
 			return fmt.Errorf("güvenlik: eski yetkiler okunamadı: %w", err)
@@ -564,7 +613,7 @@ func DBAdAlaniKullanimda(db *sql.DB, sk string) bool {
 			"' OR LOWER(REPLACE(Db,'\\\\_','_')) LIKE '" + d + "')" +
 			" + (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE LOWER(SCHEMA_NAME)='" + k +
 			"' OR LOWER(SCHEMA_NAME) LIKE '" + d + "')"
-		if out, err := exec.Command("mysql", "-N", "-B", "-e", q).Output(); err == nil &&
+		if out, err := mysqlKomut("-N", "-B", "-e", q).Output(); err == nil &&
 			strings.TrimSpace(string(out)) != "0" {
 			return true
 		}
@@ -700,7 +749,7 @@ func MySQLDropDB(db *sql.DB, dbName, dbUser string) error {
 		fmt.Sprintf("DROP USER IF EXISTS '%s'@'localhost';", dbUser),
 		"FLUSH PRIVILEGES;",
 	}
-	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
+	if out, err := mysqlKomut("-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	// Baska hesaplarin bu ada bagli yetkileri de gider (bkz. yetkiKalintisiniTemizle).
@@ -725,7 +774,7 @@ func MySQLDropDBKeepUser(db *sql.DB, dbName string) error {
 	if !GecerliDBKimlik(dbName) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı")
 	}
-	if out, err := exec.Command("mysql", "-e",
+	if out, err := mysqlKomut("-e",
 		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName)).CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql drop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -827,7 +876,7 @@ func DBVarMi(dbName string) bool {
 // semaVarMi: DBVarMi'nin hata donduren hali (olcum yapilamadiysa err != nil);
 // fail-closed karar vermesi gereken cagiranlar icin.
 func semaVarMi(dbName string) (bool, error) {
-	out, err := exec.Command("mysql", "-N", "-e",
+	out, err := mysqlKomut("-N", "-e",
 		"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='"+sqlKac(dbName)+"'").Output()
 	if err != nil {
 		return false, err
@@ -844,6 +893,14 @@ func semaVarMi(dbName string) (bool, error) {
 //
 // Kullanim yeri: veritabani var ama kullanicisi YOK durumu — DB panelden silinip
 // yedekten geri yuklendiginde olusur (yedekte MySQL kullanicisi/GRANT bulunmaz).
+//
+// 🔴 YALNIZ YENI HESAP. Eski surum CREATE USER IF NOT EXISTS + kosulsuz ALTER USER
+// yapiyordu (upsert): var olan hesapta CREATE no-op, ALTER ise o hesabin
+// parolasini cagiranin degerine cekiyordu → bayi, db_user'i bos bir DB kaydi
+// uzerinden root/mysql/panel/servis ya da baska kiracinin kayitsiz hesabini ele
+// geciriyordu. Simdi: sistem hesabi → ErrSistemDBHesabi; ad MariaDB'de HERHANGI
+// bir host'ta varsa → ErrDBKullaniciMevcut; olusturma IF NOT EXISTS'siz (yaris
+// penceresinde hesap belirirse CREATE 1396 ile duser, GRANT calismaz).
 func MySQLKullaniciEkle(dbName, dbUser, dbPass string) error {
 	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
@@ -851,12 +908,23 @@ func MySQLKullaniciEkle(dbName, dbUser, dbPass string) error {
 	if !ParolaGecerli(dbPass) {
 		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
 	}
-	// 🔴 YALNIZ-YENI kullanici (bkz. MySQLCreateDB): eskiden CREATE USER IF NOT EXISTS +
-	// kosulsuz ALTER USER, verilen ad VAR OLAN bir hesapsa (komsunun DB kullanicisi,
-	// hatta root/panel hesabi) parolasini cagiranin sectigi degere ceviriyordu.
+	if SistemDBHesabiMi(dbUser) {
+		return ErrSistemDBHesabi
+	}
+	varMi, err := mysqlHesapVarMi(dbUser)
+	if err != nil {
+		return err // belirsizlik = olusturma YOK (fail-closed)
+	}
+	if varMi {
+		return ErrDBKullaniciMevcut
+	}
+	// IF NOT EXISTS YOK: yaris penceresinde hesap belirirse ERROR 1396 →
+	// ErrDBKullaniciMevcut (mysqlCalistir), var olan hesaba dokunulmaz.
 	if err := mysqlCalistir(fmt.Sprintf("CREATE USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass))); err != nil {
 		return err
 	}
+	// Hesap BU cagrida olusturuldu → yetki. GRANT duserse az once olusturulan
+	// hesap geri alinir (yetim hesap sonraki denemeyi "zaten var" ile kilitlemesin).
 	if err := mysqlCalistir(
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
 		"FLUSH PRIVILEGES;"); err != nil {
@@ -911,7 +979,7 @@ func HealGrantJokerleri(ctx context.Context, db *sql.DB) {
 		q := fmt.Sprintf(
 			"SELECT 1 FROM mysql.db WHERE User='%s' AND Host='localhost' AND Db='%s' LIMIT 1",
 			c.kul, c.ad)
-		out, err := exec.Command("mysql", "-N", "-B", "-r", "-e", q).Output()
+		out, err := mysqlKomut("-N", "-B", "-r", "-e", q).Output()
 		if err != nil {
 			log.Printf("grant-joker heal: durum sorgusu hata (%s): %v", c.ad, err)
 			hata++
@@ -926,7 +994,7 @@ func HealGrantJokerleri(ctx context.Context, db *sql.DB) {
 			"REVOKE ALL PRIVILEGES ON `%s`.* FROM '%s'@'localhost'; "+
 				"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
 			c.ad, c.kul, esc, c.kul)
-		if o, e := exec.Command("mysql", "-e", stmt).CombinedOutput(); e != nil {
+		if o, e := mysqlKomut("-e", stmt).CombinedOutput(); e != nil {
 			log.Printf("grant-joker heal HATA (%s): %s: %v", c.ad, strings.TrimSpace(string(o)), e)
 			hata++
 			continue

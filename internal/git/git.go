@@ -2,6 +2,7 @@
 package git
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -100,47 +101,171 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func deployKeyDir(sk string) string {
-	return "/home/" + sk + "/.ssh"
+// ----- Kiracı ev dizininde dosya işlemleri (CWE-59 link-following) -----
+//
+// 🔴 GÜVENLİK: /home/<sk> kiracının YAZABİLDİĞİ güvenilmez bir ağaçtır; kiracı orada
+// FTP/SSH/PHP ile symlink kurabilir. Panel ROOT çalışır. Eskiden bu pakette hedef
+// temizliği (ReadDir+RemoveAll), MkdirAll, `chown sk:sk dst`, deploy key okuma/üretme ve
+// ~/.ssh/config yazımı ROOT olarak, sözcüksel (filepath.Join) yollar üzerinden
+// yapılıyordu → çekirdek ara/son bileşen symlink'lerini root adına izliyordu:
+//   - public_html → /home/<komşu>: komşunun sitesi root olarak silinir, sahipliği kiracıya geçer;
+//   - ~/.ssh → /root/.ssh ya da .pub → herhangi bir dosya: içerik root olarak okunup
+//     deploy_key_pub olarak kiracıya DÖNER;
+//   - ~/.ssh/config → herhangi bir dosya: root üzerine yazar + chown ile kiracıya verir.
+// Çözüm (kök neden): TÜM dosya işlemleri kiracı KİMLİĞİNDE (sudo -u / runuser) yapılır —
+// kiracı kendi evinde zaten ne yapabiliyorsa panel onun adına yalnız onu yapar; komşunun
+// 0710 evine ya da sistem dosyalarına çekirdek DAC erişim vermez (symlink'i ne zaman
+// değiştirirse değiştirsin: TOCTOU bu bariyeri aşamaz). Ek olarak (savunma derinliği +
+// açık hata) symlink bileşenli yollar önceden reddedilir; root'ta kalan tek adım
+// (restorecon, etiketi politika varsayılanına döndürür) yalnız symlink'siz yolda çalışır.
+
+// evKoku: kiracı ev dizinlerinin kökü. Yalnız testte t.TempDir'e çevrilir.
+var evKoku = "/home"
+
+func evDizini(sk string) string { return filepath.Join(evKoku, sk) }
+
+// reSK: sistem kullanıcısı adı (c_<slug>[n]). "/" ve "." içeremez → ev yolu /home dışına
+// taşınamaz.
+var reSK = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+func gecerliSK(sk string) bool { return reSK.MatchString(sk) }
+
+// kiraciCalistir: komutu kiracı (sk) kimliğiyle SHELL OLMADAN (argv) çalıştırır; panel
+// ortamı verilmez. stdout ve stderr AYRI döner (deploy key okuması sudo uyarılarıyla
+// kirlenmesin). stdin nil değilse komuta verilir. Testte kaydedici sahteyle değiştirilir.
+var kiraciCalistir = kiraciCalistirGercek
+
+func kiraciCalistirGercek(sk, cwd string, stdin []byte, argv ...string) (string, string, error) {
+	calistir := func(ad string, args, env []string) (string, string, error) {
+		cmd := exec.Command(ad, args...)
+		if cwd != "" {
+			cmd.Dir = cwd
+		}
+		if env != nil {
+			cmd.Env = env
+		}
+		if stdin != nil {
+			cmd.Stdin = bytes.NewReader(stdin)
+		}
+		var so, se bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &so, &se
+		err := cmd.Run()
+		return so.String(), se.String(), err
+	}
+	o, e, err := calistir("sudo", append([]string{"-u", sk, "-H", "--"}, argv...), nil)
+	if err != nil {
+		o, e, err = calistir("runuser", append([]string{"-u", sk, "--"}, argv...), []string{
+			"HOME=" + evDizini(sk),
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		})
+	}
+	return o, e, err
 }
 
-// generateDeployKey: ssh-keygen -t ed25519 ile no-passphrase key uretir, /home/<sk>/.ssh/'a yazar
-func generateDeployKey(sk string) (pubKey string, err error) {
-	dir := deployKeyDir(sk)
-	_ = os.MkdirAll(dir, 0700)
-	priv := filepath.Join(dir, "gospanel_deploy")
-	pub := priv + ".pub"
+// restoreconCalistir: SELinux etiketini politika varsayılanına döndürür (root). Testte
+// kaydediciyle değiştirilir. Doğrudan değil restoreconKiraci üzerinden çağrılır.
+var restoreconCalistir = func(yol string) {
+	_, _ = exec.Command("restorecon", "-R", yol).CombinedOutput()
+}
 
-	if _, err := os.Stat(pub); err == nil {
-		// Mevcut key kullan
-		b, _ := os.ReadFile(pub)
-		return strings.TrimSpace(string(b)), nil
+// restoreconKiraci: home/parcalar yolunda root restorecon — yol symlink bileşeni
+// içeriyorsa ATLANIR (root aracı kiracı dışına yönlendirilmesin).
+func restoreconKiraci(home string, parcalar ...string) {
+	if rErr := yolSymlinksiz(home, parcalar...); rErr != nil {
+		return
 	}
-	_, _ = exec.Command("rm", "-f", priv, pub).CombinedOutput()
-	out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "deploy@girginospanel/"+sk, "-f", priv).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("ssh-keygen: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	// chown + perms
-	_, _ = exec.Command("chown", "-R", sk+":"+sk, dir).CombinedOutput()
-	_ = os.Chmod(priv, 0600)
-	_ = os.Chmod(pub, 0644)
+	restoreconCalistir(filepath.Join(append([]string{home}, parcalar...)...))
+}
 
-	// ssh config'e github.com için bu key'i bağla (per-user, ~/.ssh/config)
-	cfg := filepath.Join(dir, "config")
-	cfgBody := `Host github.com
+// yolSymlinksiz: home ve home/parcalar[0]/…/parcalar[n] bileşenlerinden HİÇBİRİ symlink
+// değil. Var olmayan ilk bileşende durur (kalanı kiracı kimliğiyle oluşturulacak).
+// Yalnız Lstat kullanır (root hiçbir içerik okumaz). Tek başına TOCTOU'ya açıktır —
+// asıl bariyer işlemlerin kiracı kimliğinde yapılmasıdır.
+func yolSymlinksiz(home string, parcalar ...string) error {
+	hfi, herr := os.Lstat(home)
+	if herr != nil || !hfi.IsDir() { // Lstat: symlink hiçbir zaman IsDir değildir
+		return errors.New("ev dizini güvenli değil (yok ya da symlink)")
+	}
+	yol := home
+	for _, p := range parcalar {
+		yol = filepath.Join(yol, p)
+		fi, lerr := os.Lstat(yol)
+		if errors.Is(lerr, os.ErrNotExist) {
+			return nil
+		}
+		if lerr != nil {
+			return fmt.Errorf("yol denetlenemedi: %s", p)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("yol symlink içeriyor, reddedildi: %s", p)
+		}
+	}
+	return nil
+}
+
+// reDeployPub: yanıta/DB'ye yalnız TEK SATIR ed25519 ortak anahtarı döner.
+var reDeployPub = regexp.MustCompile(`^ssh-ed25519 [A-Za-z0-9+/]+={0,3}( [ -~]*)?$`)
+
+// pubOkuArgv: ortak anahtarı kiracı olarak, en çok 4 KiB okuyan komut (ed25519 .pub ~100 B).
+func pubOkuArgv(pub string) []string { return []string{"head", "-c", "4096", "--", pub} }
+
+const sshConfigGovde = `Host github.com
     HostName github.com
     User git
     IdentityFile ~/.ssh/gospanel_deploy
     StrictHostKeyChecking no
     UserKnownHostsFile=/dev/null
 `
-	_ = os.WriteFile(cfg, []byte(cfgBody), 0600)
-	_, _ = exec.Command("chown", sk+":"+sk, cfg).CombinedOutput()
-	_, _ = exec.Command("restorecon", "-R", dir).CombinedOutput()
 
-	b, _ := os.ReadFile(pub)
-	return strings.TrimSpace(string(b)), nil
+// generateDeployKey: ssh-keygen -t ed25519 ile no-passphrase key üretir, ~/.ssh/'a yazar.
+// Tüm dosya işlemleri KİRACI kimliğinde (bkz. yukarıdaki güvenlik notu).
+func generateDeployKey(sk string) (pubKey string, err error) {
+	if !gecerliSK(sk) {
+		return "", errors.New("geçersiz sistem kullanıcısı")
+	}
+	home := evDizini(sk)
+	dir := filepath.Join(home, ".ssh")
+	priv := filepath.Join(dir, "gospanel_deploy")
+	pub := priv + ".pub"
+	cfg := filepath.Join(dir, "config")
+
+	// Açık ret (savunma derinliği): ~/.ssh, anahtar dosyaları ve config symlink olamaz.
+	for _, ad := range []string{"gospanel_deploy", "gospanel_deploy.pub", "config"} {
+		if kErr := yolSymlinksiz(home, ".ssh", ad); kErr != nil {
+			return "", fmt.Errorf("~/.ssh/%s: %w", ad, kErr)
+		}
+	}
+	if o, e, mErr := kiraciCalistir(sk, home, nil, "mkdir", "-p", "-m", "0700", "--", dir); mErr != nil {
+		return "", fmt.Errorf("~/.ssh oluşturulamadı: %s: %w", strings.TrimSpace(o+e), mErr)
+	}
+	// Mevcut anahtar: kiracı olarak oku (boyut sınırlı: yol yarışla /dev/zero'ya çevrilse
+	// bile panel belleği şişmez); yalnız geçerli ed25519 ortak anahtarı kabul et.
+	if o, _, cErr := kiraciCalistir(sk, home, nil, pubOkuArgv(pub)...); cErr == nil {
+		if mevcut := strings.TrimSpace(o); reDeployPub.MatchString(mevcut) {
+			return mevcut, nil
+		}
+	}
+	if o, e, rErr := kiraciCalistir(sk, home, nil, "rm", "-f", "--", priv, pub); rErr != nil {
+		return "", fmt.Errorf("eski anahtar silinemedi: %s: %w", strings.TrimSpace(o+e), rErr)
+	}
+	if o, e, kgErr := kiraciCalistir(sk, home, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+		"-C", "deploy@girginospanel/"+sk, "-f", priv); kgErr != nil {
+		return "", fmt.Errorf("ssh-keygen: %s: %w", strings.TrimSpace(o+e), kgErr)
+	}
+	// ssh config'e github.com için bu key'i bağla (per-user, ~/.ssh/config) — kiracı yazar.
+	// (tee içeriği stdout'a da yansıtır; kullanılmaz.)
+	if _, e, tErr := kiraciCalistir(sk, home, []byte(sshConfigGovde), "tee", "--", cfg); tErr != nil {
+		return "", fmt.Errorf("~/.ssh/config yazılamadı: %s: %w", strings.TrimSpace(e), tErr)
+	}
+	_, _, _ = kiraciCalistir(sk, home, nil, "chmod", "0600", "--", cfg)
+	restoreconKiraci(home, ".ssh")
+
+	o, _, err := kiraciCalistir(sk, home, nil, pubOkuArgv(pub)...)
+	yeni := strings.TrimSpace(o)
+	if err != nil || !reDeployPub.MatchString(yeni) {
+		return "", errors.New("deploy key ortak anahtarı okunamadı")
+	}
+	return yeni, nil
 }
 
 var (
@@ -148,16 +273,30 @@ var (
 	reBranch    = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 )
 
-// gecerliTargetDir: komut-enjeksiyon + path-traversal engelle
-func gecerliTargetDir(td string) bool {
+// hedefParcalari: target_dir'i doğrular ve ev dizinine göre bileşenlerine ayırır.
+// Komut-enjeksiyon + path-traversal + 🔴 ev kökü/gizli dizin: boş, "." ya da ".." bileşen
+// ("." , "a//b", "a/./b") ve "." ile başlayan (gizli: .ssh, .git, .config …) bileşen
+// reddedilir → hedef ASLA ev kökü (tüm ev silinirdi) ya da gizli dizin olamaz. Sondaki
+// "/" tolere edilir (eski kayıtlar "public_html/" olabilir).
+func hedefParcalari(td string) ([]string, bool) {
 	td = strings.TrimSpace(td)
-	if td == "" || len(td) > 128 {
-		return false
+	if len(td) > 128 || !reTargetDir.MatchString(td) {
+		return nil, false
 	}
-	if strings.HasPrefix(td, "/") || strings.Contains(td, "..") {
-		return false
+	// Mutlak yol ("/etc" → ilk bileşen boş) ve ".." bileşeni de aşağıda reddedilir.
+	parcalar := strings.Split(strings.TrimRight(td, "/"), "/")
+	for _, p := range parcalar {
+		if p == "" || strings.HasPrefix(p, ".") {
+			return nil, false
+		}
 	}
-	return reTargetDir.MatchString(td)
+	return parcalar, true
+}
+
+// gecerliTargetDir: komut-enjeksiyon + path-traversal + ev kökü/gizli dizin engelle
+func gecerliTargetDir(td string) bool {
+	_, ok := hedefParcalari(td)
+	return ok
 }
 
 // gecerliBranch: git branch/ref adi dogrulama
@@ -183,43 +322,18 @@ func gecerliRepoURL(u string) bool {
 	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "git@") || strings.HasPrefix(u, "ssh://")
 }
 
-// temizleDizinIcerigi: dizin icerigini SHELL OLMADAN sil (dotfile dahil)
-func temizleDizinIcerigi(dst string) {
-	entries, err := os.ReadDir(dst)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		_ = os.RemoveAll(filepath.Join(dst, e.Name()))
-	}
-}
-
-// runAsUserArgs: komutu sk kullanicisi olarak SHELL OLMADAN (argv) calistir; panel env verilmez
+// runAsUserArgs: komutu sk kullanicisi olarak SHELL OLMADAN (argv) calistir; panel env
+// verilmez. stdout+stderr birlikte döner (git günlüğü için).
 func runAsUserArgs(sk, cwd string, argv ...string) (string, error) {
-	sudoArgs := append([]string{"-u", sk, "-H", "--"}, argv...)
-	cmd := exec.Command("sudo", sudoArgs...)
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		ruArgs := append([]string{"-u", sk, "--"}, argv...)
-		cmd2 := exec.Command("runuser", ruArgs...)
-		if cwd != "" {
-			cmd2.Dir = cwd
-		}
-		cmd2.Env = []string{
-			"HOME=/home/" + sk,
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		}
-		out, err = cmd2.CombinedOutput()
-	}
-	return string(out), err
+	o, e, err := kiraciCalistir(sk, cwd, nil, argv...)
+	return o + e, err
 }
 
-// gitClone: ilk kez klonla (target_dir varsa silinir)
+// gitClone: ilk kez klonla (target_dir varsa İÇERİĞİ silinir — uyarı UI'da).
+// Temizlik + oluşturma KİRACI kimliğinde (eskiden root: ReadDir+RemoveAll, MkdirAll, chown).
 func gitClone(sk, repoURL, branch, targetDir string) (sha string, log string, err error) {
-	if !gecerliTargetDir(targetDir) {
+	parcalar, ok := hedefParcalari(targetDir)
+	if !ok {
 		return "", "", errors.New("geçersiz hedef dizin")
 	}
 	if !gecerliBranch(branch) {
@@ -228,12 +342,23 @@ func gitClone(sk, repoURL, branch, targetDir string) (sha string, log string, er
 	if !gecerliRepoURL(repoURL) {
 		return "", "", errors.New("geçersiz repo URL")
 	}
-	home := "/home/" + sk
-	dst := filepath.Join(home, targetDir)
-	// hedef temizle (ama public_html varsa içerik kaybolur — uyarı UI'da)
-	temizleDizinIcerigi(dst)
-	_ = os.MkdirAll(dst, 0755)
-	_, _ = exec.Command("chown", sk+":"+sk, dst).CombinedOutput()
+	if !gecerliSK(sk) {
+		return "", "", errors.New("geçersiz sistem kullanıcısı")
+	}
+	home := evDizini(sk)
+	dst := filepath.Join(append([]string{home}, parcalar...)...)
+	if hedefErr := yolSymlinksiz(home, parcalar...); hedefErr != nil {
+		return "", "", hedefErr
+	}
+	if o, e, mkErr := kiraciCalistir(sk, home, nil, "mkdir", "-p", "--", dst); mkErr != nil {
+		return "", strings.TrimSpace(o + e), fmt.Errorf("hedef dizin oluşturulamadı: %w", mkErr)
+	}
+	// İçeriği sil (dotfile dahil), dizinin kendisi (izin/ACL/setgid) korunur. find -P
+	// (varsayılan) başlangıç noktası symlink ise içine inmez.
+	if o, e, tmErr := kiraciCalistir(sk, home, nil, "find", dst, "-mindepth", "1", "-maxdepth", "1",
+		"-exec", "rm", "-rf", "--", "{}", "+"); tmErr != nil {
+		return "", strings.TrimSpace(o + e), fmt.Errorf("hedef dizin temizlenemedi: %w", tmErr)
+	}
 
 	out, err := runAsUserArgs(sk, home, "git", "clone", "--depth", "1", "--branch", branch, "--", repoURL, dst)
 	log = out
@@ -242,21 +367,28 @@ func gitClone(sk, repoURL, branch, targetDir string) (sha string, log string, er
 	}
 	shaOut, _ := runAsUserArgs(sk, dst, "git", "-C", dst, "rev-parse", "HEAD")
 	sha = strings.TrimSpace(shaOut)
-	_, _ = exec.Command("restorecon", "-R", dst).CombinedOutput()
+	restoreconKiraci(home, parcalar...)
 	return sha, log, nil
 }
 
-// gitPull: mevcut repo'da pull yap
+// gitPull: mevcut repo'da pull yap (Pull + Webhook). .git varlığı kiracı kimliğinde denetlenir.
 func gitPull(sk, targetDir, branch string) (sha string, log string, err error) {
-	if !gecerliTargetDir(targetDir) {
+	parcalar, ok := hedefParcalari(targetDir)
+	if !ok {
 		return "", "", errors.New("geçersiz hedef dizin")
 	}
 	if !gecerliBranch(branch) {
 		return "", "", errors.New("geçersiz branch adı")
 	}
-	home := "/home/" + sk
-	dst := filepath.Join(home, targetDir)
-	if _, err := os.Stat(filepath.Join(dst, ".git")); err != nil {
+	if !gecerliSK(sk) {
+		return "", "", errors.New("geçersiz sistem kullanıcısı")
+	}
+	home := evDizini(sk)
+	dst := filepath.Join(append([]string{home}, parcalar...)...)
+	if depoErr := yolSymlinksiz(home, parcalar...); depoErr != nil {
+		return "", "", depoErr
+	}
+	if _, _, gdErr := kiraciCalistir(sk, home, nil, "test", "-d", filepath.Join(dst, ".git")); gdErr != nil {
 		return "", "", errors.New("hedef dizin git deposu değil; önce 'klonla' kullanın")
 	}
 	out, err := runAsUserArgs(sk, dst, "git", "-C", dst, "fetch", "origin", branch)
@@ -270,7 +402,7 @@ func gitPull(sk, targetDir, branch string) (sha string, log string, err error) {
 	}
 	shaOut, _ := runAsUserArgs(sk, dst, "git", "-C", dst, "rev-parse", "HEAD")
 	sha = strings.TrimSpace(shaOut)
-	_, _ = exec.Command("restorecon", "-R", dst).CombinedOutput()
+	restoreconKiraci(home, parcalar...)
 	return sha, log, nil
 }
 
