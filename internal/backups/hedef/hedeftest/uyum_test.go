@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,47 @@ func (s shaYanlis) Listele(ctx context.Context, onek string) ([]hedef.Nesne, err
 	return l, err
 }
 
+// listeleIptalYoksay / indirIptalYoksay / silIptalYoksay — ilgili işlem bağlamı
+// yok sayar (her biri yalnız KENDİ denetimiyle yakalanmalı).
+type listeleIptalYoksay struct{ *Bellek }
+
+func (l listeleIptalYoksay) Listele(_ context.Context, onek string) ([]hedef.Nesne, error) {
+	return l.Bellek.Listele(context.Background(), onek)
+}
+
+type indirIptalYoksay struct{ *Bellek }
+
+func (i indirIptalYoksay) Indir(_ context.Context, ad, yerel string) error {
+	return i.Bellek.Indir(context.Background(), ad, yerel)
+}
+
+type silIptalYoksay struct{ *Bellek }
+
+func (s silIptalYoksay) Sil(_ context.Context, ad string) error {
+	return s.Bellek.Sil(context.Background(), ad)
+}
+
+// hamHata — dosya yokken *hedef.Hata yerine ham hata döner; kategorisi yine
+// doğru çıkar (errors.Is fs.ErrNotExist) ama metni (depo yolu) Error()'a girer.
+type hamHata struct{ *Bellek }
+
+func (h hamHata) Indir(ctx context.Context, ad, yerel string) error {
+	if _, ok := h.Icerik(ad); !ok {
+		return fmt.Errorf("open /depo/gizli-yol/%s: %w", ad, fs.ErrNotExist)
+	}
+	return h.Bellek.Indir(ctx, ad, yerel)
+}
+
+// gecersizKategori — *hedef.Hata'yı alanlarıyla elle kurar, tanımsız kategori.
+type gecersizKategori struct{ *Bellek }
+
+func (g gecersizKategori) Yukle(ctx context.Context, yerel, ad string, sec hedef.YukleSecenek) error {
+	if err := g.Bellek.Yukle(ctx, yerel, ad, sec); err != nil {
+		return &hedef.Hata{Kategori: "uydurma", Islem: "yukle"}
+	}
+	return nil
+}
+
 // testHepBasarili — Test depoya hiç gitmeden nil döner.
 type testHepBasarili struct{ *Bellek }
 
@@ -256,6 +298,12 @@ func TestUyum_BozukUygulamalarYakalanir(t *testing.T) {
 		{"önek listeleyemeyen", onekListelemeyen{YeniBellek()}, "yetenekler"},
 		// İlk turda neg_control'den KAÇAN dört denetimin bozuk karşılıkları.
 		{"iptal Canceled olarak tanınmıyor", iptalTanimsiz{YeniBellek()}, "iptal_ortada"},
+		{"iptal Canceled olarak tanınmıyor (önceden)", iptalTanimsiz{YeniBellek()}, "iptal_onceden"},
+		{"Listele iptali yok sayıyor", listeleIptalYoksay{YeniBellek()}, "iptal_onceden"},
+		{"Indir iptali yok sayıyor", indirIptalYoksay{YeniBellek()}, "iptal_onceden"},
+		{"Sil iptali yok sayıyor", silIptalYoksay{YeniBellek()}, "iptal_onceden"},
+		{"ham (Hata olmayan) hata", hamHata{YeniBellek()}, "gidis_donus"},
+		{"tanımsız kategori", gecersizKategori{YeniBellek()}, "yanlis_sha"},
 		{"önceden iptalde sessiz nil", onceIptalSessiz{YeniBellek()}, "iptal_onceden"},
 		{"dizin listesi alt dizine iniyor", dizindeOzyinelemeli{YeniBellek()}, "onek_listeleme"},
 		{"sunucu sha yanlış", shaYanlis{YeniBellek()}, "gidis_donus"},
