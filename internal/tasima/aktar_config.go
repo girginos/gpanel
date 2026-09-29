@@ -2,10 +2,10 @@ package tasima
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 )
 
 // ---------------------------------------------------------------------------
@@ -172,97 +172,102 @@ func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 // 🔴 Yalnizca BILINEN ANAHTARLARIN degeri degistirilir. Onceki surum metinde
 // "<hesap>_" gecen her yeri degistiriyordu: DB adini kullanici adiyla eziyor ve
 // icinde apostrof olan PHP dosyalarini sozdizimsel olarak BOZUYORDU.
+//
+// 🔴 webRoot kiracının ağacıdır (kiracı her bileşeni bağa çevirebilir): dosyalar
+// ev köküne KİLİTLİ os.Root altında, yalnız kiracının kendi düzenli dosyasıysa
+// okunup atomik yenilenir (kiraciDosyasiAc). Eskiden kök yol üzerinden okuyup
+// yazıyordu → public_html komşu evine bağlıysa KOMŞUNUN yapılandırması ezilirdi.
 func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, kaynakHesap, yeniPw string, log func(string, ...any)) int {
 	if len(esleme) == 0 {
 		return 0
 	}
+	ki, kok, err := kiraciYolu(webRoot)
+	if err != nil {
+		log("uyari: yapilandirma guncellenmedi: web koku kiraci ev dizininde degil")
+		return 0
+	}
+	uid, _, err := uidGid(ki.Kul)
+	if err != nil {
+		log("uyari: yapilandirma guncellenmedi: sistem kullanicisi bulunamadi")
+		return 0
+	}
+	ev, err := ki.EvAc()
+	if err != nil {
+		log("uyari: yapilandirma guncellenmedi: ev dizini acilamadi")
+		return 0
+	}
+	defer ev.Close()
+
+	sayac := 0
+	for _, rel := range yapilandirmaAdaylari {
+		d, err := kiraciDosyasiAc(ev, path.Join(kok, rel), uid)
+		if err != nil {
+			continue
+		}
+		ham, err := d.Oku(yapilandirmaMaxBayt)
+		if err != nil {
+			d.Kapat()
+			continue
+		}
+		yeni := yapilandirmaDegistir(string(ham), esleme, yeniPw)
+		if yeni == string(ham) {
+			d.Kapat()
+			continue
+		}
+		if err := yedekYaz(webRoot, rel, ham); err != nil {
+			log("uyari: %s yedegi alinamadi, dosya degistirilmedi: %v", rel, err)
+			d.Kapat()
+			continue
+		}
+		if err := d.Degistir([]byte(yeni), d.izin()); err == nil {
+			sayac++
+			log("yapilandirma guncellendi: %s", rel)
+		}
+		d.Kapat()
+	}
+	return sayac
+}
+
+// yapilandirmaDegistir — yapılandırma metnindeki DB adı/kullanıcı/parola
+// değerlerini eşlemeye göre yeniler (yalnız bilinen anahtarlar).
+func yapilandirmaDegistir(ham string, esleme map[string]dbHedef, yeniPw string) string {
 	var hedefKul string
 	adEsleme := map[string]string{}
 	for eski, hedef := range esleme {
 		adEsleme[eski] = hedef.Ad
 		hedefKul = hedef.Kul
 	}
-
-	sayac := 0
-	for _, rel := range yapilandirmaAdaylari {
-		yol := filepath.Join(webRoot, rel)
-		st, err := os.Lstat(yol)
-		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {
-			continue
+	yeni := ham
+	for _, a := range dbAdAnahtarlari {
+		yeni = anahtarDegeriDegistirMap(yeni, a, adEsleme)
+	}
+	if hedefKul != "" {
+		for _, a := range dbKulAnahtarlari {
+			yeni = anahtarDegeriDegistir(yeni, a, hedefKul, "")
 		}
-		ham, err := os.ReadFile(yol)
-		if err != nil {
-			continue
+	}
+	if yeniPw != "" {
+		for _, a := range dbPwAnahtarlari {
+			yeni = anahtarDegeriDegistir(yeni, a, yeniPw, "")
 		}
-		yeni := string(ham)
-		for _, a := range dbAdAnahtarlari {
-			yeni = anahtarDegeriDegistirMap(yeni, a, adEsleme)
+	}
+	// XenForo ($config['db'][...]) — generic anahtar tanımaz. YALNIZ orijinal DB
+	// adı hedefte çakışıp yeniden adlandırıldığında gerekir (aksi halde orijinal
+	// kimlik korunur, config zaten doğrudur). username/password + eşlenen dbname.
+	if strings.Contains(yeni, "'db'") || strings.Contains(yeni, "\"db\"") {
+		if cur := xenforoDBOku(yeni, "dbname"); cur != "" {
+			if hedef, ok := esleme[cur]; ok && hedef.Ad != "" && hedef.Ad != cur {
+				yeni = xenforoDBYaz(yeni, "dbname", hedef.Ad)
+			}
 		}
 		if hedefKul != "" {
-			for _, a := range dbKulAnahtarlari {
-				yeni = anahtarDegeriDegistir(yeni, a, hedefKul, "")
-			}
+			yeni = xenforoDBYaz(yeni, "username", hedefKul)
 		}
 		if yeniPw != "" {
-			for _, a := range dbPwAnahtarlari {
-				yeni = anahtarDegeriDegistir(yeni, a, yeniPw, "")
-			}
-		}
-		// XenForo ($config['db'][...]) — generic anahtar tanımaz. YALNIZ orijinal DB
-		// adı hedefte çakışıp yeniden adlandırıldığında gerekir (aksi halde orijinal
-		// kimlik korunur, config zaten doğrudur). username/password + eşlenen dbname.
-		if strings.Contains(yeni, "'db'") || strings.Contains(yeni, "\"db\"") {
-			if cur := xenforoDBOku(yeni, "dbname"); cur != "" {
-				if hedef, ok := esleme[cur]; ok && hedef.Ad != "" && hedef.Ad != cur {
-					yeni = xenforoDBYaz(yeni, "dbname", hedef.Ad)
-				}
-			}
-			if hedefKul != "" {
-				yeni = xenforoDBYaz(yeni, "username", hedefKul)
-			}
-			if yeniPw != "" {
-				yeni = xenforoDBYaz(yeni, "password", yeniPw)
-			}
-		}
-		if yeni == string(ham) {
-			continue
-		}
-		if err := yedekYaz(webRoot, rel, ham); err != nil {
-			log("uyari: %s yedegi alinamadi, dosya degistirilmedi: %v", rel, err)
-			continue
-		}
-		if err := atomikYaz(yol, []byte(yeni), st); err == nil {
-			sayac++
-			log("yapilandirma guncellendi: %s", rel)
+			yeni = xenforoDBYaz(yeni, "password", yeniPw)
 		}
 	}
-	return sayac
-}
-
-// atomikYaz — ayni dizine gecici yaz + rename. Yarida cokme yarim
-// wp-config.php birakmasin; sahiplik/izin korunur.
-func atomikYaz(yol string, veri []byte, st os.FileInfo) error {
-	dizin := filepath.Dir(yol)
-	tmp, err := os.CreateTemp(dizin, ".gosp_cfg_*")
-	if err != nil {
-		return err
-	}
-	ad := tmp.Name()
-	if _, err := tmp.Write(veri); err != nil {
-		tmp.Close()
-		os.Remove(ad)
-		return err
-	}
-	tmp.Close()
-	_ = os.Chmod(ad, st.Mode().Perm())
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		_ = os.Chown(ad, int(sys.Uid), int(sys.Gid))
-	}
-	if err := os.Rename(ad, yol); err != nil {
-		os.Remove(ad)
-		return err
-	}
-	return nil
+	return yeni
 }
 
 var reAnahtarSatir = regexp.MustCompile(`^(\s*)(?:define\s*\(\s*)?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*(?:,|=>|=|:)\s*(.*)$`)
