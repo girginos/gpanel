@@ -2,10 +2,78 @@ package kaynaklimit
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
+
+// 🔴 Governor sorgu sahibinin planını harf DUYARLI ve tek-domain koşuluyla okur: eski
+// sürümden kalan büyük harfli varyant satır ('K_X_DB', düşük limitli başka kiracının
+// planı) komşunun 'k_x_db' sorgularına uygulanıp KILL QUERY attırmamalı; iki domainin
+// satırında geçen (devralınmış) ad için hiçbir plan uygulanmaz.
+// Yalnız GEÇİCİ MariaDB (GOSP_TEST_GECICI_DSN); mysql CLI / KILL çağrılmaz.
+func TestGovernorLimiti_HarfVaryantiVeCokDomain(t *testing.T) {
+	dsn := os.Getenv("GOSP_TEST_GECICI_DSN")
+	if dsn == "" {
+		t.Skip("GOSP_TEST_GECICI_DSN yok — DB'li test atlandı")
+	}
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("DSN çözülemedi: %v", err)
+	}
+	cfg.DBName = ""
+	kok, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kok.Close()
+	ad := fmt.Sprintf("gosp_test_gov_%d", time.Now().UnixNano())
+	if _, err := kok.Exec("CREATE DATABASE " + ad + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = kok.Exec("DROP DATABASE IF EXISTS " + ad) })
+	cfg.DBName = ad
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range []string{
+		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, db_max_query_seconds INT NULL)`,
+		`CREATE TABLE domains (id BIGINT PRIMARY KEY, plan_id BIGINT NULL)`,
+		`CREATE TABLE db_accounts (id BIGINT AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT NOT NULL,
+			db_name VARCHAR(64) NOT NULL UNIQUE, db_user VARCHAR(64) NOT NULL)`,
+		`INSERT INTO service_plans VALUES (10, 1), (20, 30)`,
+		`INSERT INTO domains VALUES (1, 10), (2, 20)`,
+		`INSERT INTO db_accounts (domain_id, db_name, db_user) VALUES
+			(1, 'k_saldiri', 'K_X_DB'), (2, 'k_x_main', 'k_x_db'), (2, 'k_x_blog', 'k_x_db'),
+			(1, 'k_eski', 'iki_db'), (2, 'k_x_iki', 'iki_db')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("şema: %v\n%s", err, q)
+		}
+	}
+	for _, c := range []struct {
+		kul   string
+		limit int
+		ok    bool
+	}{
+		{"k_x_db", 30, true}, // kurbanın kendi planı (varyant satır karışmaz; iki DB aynı domain)
+		{"K_X_DB", 1, true},  // varyant hesabın kendi planı
+		{"iki_db", 0, false}, // iki domaine kayıtlı → sahibi belirsiz → KILL yok
+		{"yok_db", 0, false}, // panelde kayıtsız
+	} {
+		limit, ok := governorLimiti(db, c.kul)
+		if limit != c.limit || ok != c.ok {
+			t.Errorf("governorLimiti(%q) = (%d,%v), beklenen (%d,%v)", c.kul, limit, ok, c.limit, c.ok)
+		}
+	}
+}
 
 // TestKotaLimitArgs: xfs_quota arg-slice'ının doğru kurulduğunu (soft=hard*0.95, 0=sınırsız,
 // -u user quota, kök mount) DOĞRULAR. Shell yok — arg-slice bütünlüğü kritiktir.

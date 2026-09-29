@@ -483,6 +483,10 @@ func dbImport(dbName, sqlPath, koru string) error {
 	return nil
 }
 
+// geriYuklemeAdRet: panelde bu domaine kayitli olmayan bir arsiv DB'sinin yeniden
+// kaydi reddedildiginde kiraciya donen TEK metin (nedeni ayirt etmez; bkz. tumDBGeriYukle).
+const geriYuklemeAdRet = "reddedildi (bu ad bu hosting için yeniden kaydedilemiyor — tekil geri yüklemeyle farklı bir ada yükleyin ya da yöneticiye başvurun)"
+
 // tumDBGeriYukle: arsivdeki DB'lerden domaine ait olanlari import eder (mod=tam / veritabani).
 // filter != "" ise yalniz o DB. Domaine ait olmayan / sistem DB'leri atlanir.
 func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[string]string {
@@ -511,8 +515,13 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 			// geri yuklendi). Arsiv zaten BU domainin yedegi oldugu icin icindeki DB
 			// adi tanim geregi bu domaine aittir. Tek gercek risk, adin BASKA bir
 			// domaine kayitli olmasi — o durumda REDDEDILIR.
+			// 🔴 Uc ret nedeni (baska domaine kayitli / baska kiracinin ad-alani / panelde
+			// kayitsiz var olan sema) kiraciya AYNI genel metinle doner: ayri metinler
+			// arsive yazilan adlarla komsu kayitlarinin ve semalarinin VARLIGINI
+			// yoklatirdi (arsiv disaridan gelebilir). Ayrinti yalniz sunucu gunlugunde.
 			if baskaDomaininMi(db, name, domainID) {
-				res = append(res, map[string]string{"db": name, "durum": "reddedildi (başka bir domaine kayıtlı)"})
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (başka domaine kayıtlı)", sk, name)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
 				continue
 			}
 			// 🔴 Kayitli olmamak SAHIPLIK degildir (onek cakismasi): ad simdi BASKA bir
@@ -520,15 +529,15 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 			// girgin-x.com) yeniden acmak komsunun adini kapar ve DB silinince artik
 			// yetkiyle komsuya uzanirdi. Olcum hatasi = red.
 			if b, err := hesaplar.DBAdiBaskaKiracininMi(context.Background(), db, domainID, name); err != nil || b {
-				res = append(res, map[string]string{"db": name,
-					"durum": "reddedildi (ad başka bir kiracının ad alanında — tekil geri yüklemeyle farklı bir ada yükleyin)"})
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (başka kiracının ad-alanı ya da ölçüm hatası: %v)", sk, name, err)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
 				continue
 			}
 			// Panelde kayitsiz ama sunucuda VAR olan sema kimin oldugu bilinmeyen bir
 			// DB'dir: ustune yazilmaz, sahiplenilmez.
 			if v, err := hesaplar.SemaVarMi(name); err != nil || v {
-				res = append(res, map[string]string{"db": name,
-					"durum": "reddedildi (sunucuda panelde kayıtsız aynı adlı bir veritabanı var — yönetici incelemesi gerekli)"})
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (panelde kayıtsız şema var ya da ölçüm hatası: %v)", sk, name, err)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
 				continue
 			}
 			// Yeniden kayit bir DB EKLER: plan limiti atlanmamali (sil → yeni ac → geri yukle).

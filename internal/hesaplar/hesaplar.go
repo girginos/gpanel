@@ -112,12 +112,20 @@ func MusteriDBKimlikGecerli(sk, s string) bool {
 //
 // Kural (en uzun kok kazanir): her domainin kokleri {sk, c_'siz sk}; ad bir koke
 // esitse ya da "<kok>_" ile basliyorsa o koke duser. Adin dustugu bir kok BASKA bir
-// domainin ve cagiranin kendi eslesen kokunden UZUNSA ad baskasinindir. Esit uzunluk
-// (ayni kok dizgesi — c-foo.com'un "c_foo" oneki ile foo.com'un "c_foo" sk'si)
-// cagirani ENGELLEMEZ; aksi halde o kiraci hic DB acamazdi. Oradaki olasi ad
-// cakismasini yalniz-yeni semantik (MySQLCreateDB: var olan kimlige dokunmaz) kapatir.
+// domainin ve cagiranin kendi eslesen kokunden UZUNSA ad baskasinindir.
 //
-// Karsilastirma BUYUK/KUCUK HARF DUYARSIZDIR (bkz. adKokUzunlugu): kokler hep kucuk
+// 🔴 ESIT KOK (ayni kok dizgesi iki domainde): c-shop.com → sk c_c_shop, c_'siz koku
+// "c_shop" = shop.com'un TAM sk'si. Eskiden esitlik cagirani engellemiyordu: c-shop.com
+// shop.com'un tam-sk ad-alanindaki ongorulebilir adlari (tasima kullanicisi <sk>_db =
+// c_shop_db, uygulama DB'si <sk>_<kod>_<id>) onceden kapip kurbanin tasimasini /
+// uygulama kurulumunu kilitleyebiliyordu. Artik esit uzunlukta kok, onu TAM sk olarak
+// tasiyan domainindir (tam-sk adlari tasima/uygulama yollarinca TURETILIR, c_'siz kok
+// ise yalniz CreateDatabase oneki). Yeni domainlerde bu durum hic olusmaz:
+// provisioner.BenzersizKullanici, koku mevcut bir domainin kokune esit sk vermez
+// (DBAdAlaniKullanimda). Yalniz eski (duzeltme oncesi) ciftlerde c_'siz kok sahibinin o
+// ad-alaninda yeni ad acmasi reddedilir.
+//
+// Karsilastirma BUYUK/KUCUK HARF DUYARSIZDIR (bkz. adKokAgirligi): kokler hep kucuk
 // harftir ama kullanici/DB adi A-Z tasiyabilir (yedekten kurtarilan wp-config, tasima,
 // "kullanici ekle"). MariaDB "GIRGIN_X_DB"yi ayri hesap sayar; panel ise db_accounts'u
 // utf8mb4_unicode_ci ile karsilastirir (db_name UNIQUE'i de harf duyarsiz). Duyarli
@@ -130,7 +138,7 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
 		return true, err
 	}
-	kendi := adKokUzunlugu(ad, sk)
+	kendi := adKokAgirligi(ad, sk)
 	rows, err := db.QueryContext(ctx,
 		`SELECT sistem_kullanici FROM domains WHERE id<>? AND sistem_kullanici<>''`, domainID)
 	if err != nil {
@@ -142,7 +150,7 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 		if err := rows.Scan(&baska); err != nil {
 			return true, err
 		}
-		if adKokUzunlugu(ad, baska) > kendi {
+		if adKokAgirligi(ad, baska) > kendi {
 			return true, nil
 		}
 	}
@@ -152,17 +160,36 @@ func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad s
 	return false, nil
 }
 
-// adKokUzunlugu: ad, sk'nin koklerinden ({sk, c_'siz sk}) birine dusuyorsa eslesen
-// EN UZUN kokun uzunlugu; hicbirine dusmuyorsa 0. Harf duyarsiz (bkz. DBAdiBaskaKiracininMi).
-func adKokUzunlugu(ad, sk string) int {
+// skKokleri: sk'nin DB ad-alani kokleri {sk, c_'siz sk} (kucuk harf, bos/tekrar yok).
+func skKokleri(sk string) []string {
+	sk = strings.ToLower(sk)
+	kokler := []string{}
+	if sk != "" {
+		kokler = append(kokler, sk)
+	}
+	if k := strings.TrimPrefix(sk, "c_"); k != "" && k != sk {
+		kokler = append(kokler, k)
+	}
+	return kokler
+}
+
+// adKokAgirligi: ad, sk'nin koklerinden birine dusuyorsa eslesen EN AGIR kokun agirligi;
+// hicbirine dusmuyorsa 0. Agirlik = 2*len(kok) (+1 kok sk'nin KENDISIYSE): daha uzun kok
+// kazanir; ayni kok dizgesi iki domainde ise (esit uzunluk) onu TAM sk olarak tasiyan
+// kazanir. Harf duyarsiz (bkz. DBAdiBaskaKiracininMi).
+func adKokAgirligi(ad, sk string) int {
 	ad, sk = strings.ToLower(ad), strings.ToLower(sk)
 	en := 0
-	for _, kok := range []string{sk, strings.TrimPrefix(sk, "c_")} {
-		if kok == "" {
+	for _, kok := range skKokleri(sk) {
+		if ad != kok && !strings.HasPrefix(ad, kok+"_") {
 			continue
 		}
-		if (ad == kok || strings.HasPrefix(ad, kok+"_")) && len(kok) > en {
-			en = len(kok)
+		a := 2 * len(kok)
+		if kok == sk {
+			a++
+		}
+		if a > en {
+			en = a
 		}
 	}
 	return en
@@ -427,6 +454,12 @@ func DBHesabiBaglanabilirMi(ctx context.Context, db *sql.DB, domainID int64, kul
 		return fmt.Errorf("güvenlik: DB hesabı doğrulanamadı: %w", err)
 	}
 	if !varMi {
+		// Ad bu host'ta yok ama BASKA bir host'ta varsa ('svc'@'127.0.0.1', 'svc'@'%'):
+		// '<kul>'@'<host>' olusturmak o hesabi yerel baglantilarda GOLGELER (daha ozgul
+		// host kazanir) — servis hesabi SistemDBHesabiMi listesinde olmasa bile.
+		if baskaHostta, err := mysqlHesapVarMi(kul); err != nil || baskaHostta {
+			return fmt.Errorf("güvenlik: DB hesap adı başka bir host'ta kullanılıyor")
+		}
 		if b, err := DBAdiBaskaKiracininMi(ctx, db, domainID, kul); err != nil || b {
 			return fmt.Errorf("güvenlik: DB hesap adı başka bir kiracının ad alanında")
 		}
@@ -591,34 +624,101 @@ func kullaniciDusurulebilir(db *sql.DB, domainID int64, dbName, dbUser string) e
 // (c_girgin_x2) gecer. Harf duyarsiz (muhafazakar). Olcum hatasi "kullanimda degil"
 // sayilir: cagiran bir dongudur (fail-closed sonsuz dongu olurdu); asil koruma yalniz-yeni
 // olusturma + yetki kalintisi temizligidir.
+//
+// 🔴 ESIT KOK: yeni sk'nin bir koku mevcut bir domainin kokune ESITSE (c-shop.com →
+// c_c_shop, c_'siz koku "c_shop" = shop.com'un sk'si; ya da tersi) iki kiraci ayni
+// ad-alanini paylasirdi — ad uzunlugu kurali bu durumu ayiramaz. Boyle sk kullanimda
+// sayilir (c_c_shop2).
+//
+// Bulunan adlar EN UZUN KOK kuralina gore suzulur: yeni kokun ad-alanina dusen ama
+// mevcut DAHA UZUN bir koke ait olan ad (girgin-x.com varken eklenen girgin.com icin
+// "girgin_x_main") yeni domainin degildir, kullanim sayilmaz (c_girgin2'ye gereksiz gecis
+// yok). LIKE sorgulari ESCAPE '!' kullanir: '\_' kacisi sql_mode'a bagli ORTUK
+// varsayilan kacis karakterine dayaniyordu (NO_BACKSLASH_ESCAPES altinda MariaDB bugun
+// '\' varsayilanini yine koruyor — testte olculdu — ama bu belgelenmis bir garanti
+// degil; bozulursa sorgu hic eslesmez = fail-open). Acik ESCAPE kipten bagimsizdir.
 func DBAdAlaniKullanimda(db *sql.DB, sk string) bool {
-	for _, kok := range []string{sk, strings.TrimPrefix(sk, "c_")} {
-		kok = strings.ToLower(kok)
-		if !GecerliDBKimlik(kok) {
-			continue
+	aday := strings.ToLower(sk)
+	var mevcut []string
+	if db != nil {
+		if rows, err := db.Query(`SELECT sistem_kullanici FROM domains WHERE sistem_kullanici<>''`); err == nil {
+			for rows.Next() {
+				var s string
+				if rows.Scan(&s) == nil {
+					mevcut = append(mevcut, strings.ToLower(s))
+				}
+			}
+			rows.Close()
 		}
-		desen := strings.ReplaceAll(kok, "_", `\_`) + `\_%`
-		if db != nil {
-			var n int
-			if err := db.QueryRow(
-				`SELECT COUNT(*) FROM db_accounts WHERE db_name=? OR db_name LIKE ? OR db_user=? OR db_user LIKE ?`,
-				kok, desen, kok, desen).Scan(&n); err == nil && n > 0 {
-				return true
+	}
+	for _, s := range mevcut {
+		for _, a := range skKokleri(aday) {
+			for _, b := range skKokleri(s) {
+				if a == b {
+					return true
+				}
 			}
 		}
-		k, d := sqlKac(kok), sqlKac(desen)
-		q := kacisModu + " SELECT" +
-			" (SELECT COUNT(*) FROM mysql.user WHERE LOWER(User)='" + k + "' OR LOWER(User) LIKE '" + d + "')" +
-			" + (SELECT COUNT(*) FROM mysql.db WHERE LOWER(REPLACE(Db,'\\\\_','_'))='" + k +
-			"' OR LOWER(REPLACE(Db,'\\\\_','_')) LIKE '" + d + "')" +
-			" + (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE LOWER(SCHEMA_NAME)='" + k +
-			"' OR LOWER(SCHEMA_NAME) LIKE '" + d + "')"
-		if out, err := mysqlKomut("-N", "-B", "-e", q).Output(); err == nil &&
-			strings.TrimSpace(string(out)) != "0" {
+	}
+	for _, ad := range adAlaniAdlari(db, aday) {
+		baskasi := 0
+		for _, s := range mevcut {
+			if w := adKokAgirligi(ad, s); w > baskasi {
+				baskasi = w
+			}
+		}
+		if w := adKokAgirligi(ad, aday); w > 0 && w >= baskasi {
 			return true
 		}
 	}
 	return false
+}
+
+// likeKac: LIKE deseni icin '!' kacisi (sorgu "ESCAPE '!'" ile kullanilir; sql_mode'dan
+// bagimsiz).
+func likeKac(s string) string {
+	return strings.NewReplacer("!", "!!", "_", "!_", "%", "!%").Replace(s)
+}
+
+// adAlaniAdlari: sk'nin koklerine esit ya da "<kok>_" ile baslayan, panelde (db_accounts
+// db_name/db_user) ya da MariaDB'de (hesap, yetki satiri, sema) bulunan adlar. Olcum hatasi
+// o kaynagi atlar (bkz. DBAdAlaniKullanimda).
+func adAlaniAdlari(db *sql.DB, sk string) []string {
+	var adlar []string
+	for _, kok := range skKokleri(sk) {
+		if !GecerliDBKimlik(kok) {
+			continue
+		}
+		desen := likeKac(kok) + "!_%"
+		if db != nil {
+			if rows, err := db.Query(
+				`SELECT db_name, db_user FROM db_accounts WHERE db_name=? OR db_name LIKE ? ESCAPE '!' OR db_user=? OR db_user LIKE ? ESCAPE '!'`,
+				kok, desen, kok, desen); err == nil {
+				for rows.Next() {
+					var a, u string
+					if rows.Scan(&a, &u) == nil {
+						adlar = append(adlar, a, u)
+					}
+				}
+				rows.Close()
+			}
+		}
+		k, d := sqlKac(kok), sqlKac(desen)
+		q := kacisModu +
+			" SELECT User FROM mysql.user WHERE LOWER(User)='" + k + "' OR LOWER(User) LIKE '" + d + "' ESCAPE '!';" +
+			" SELECT REPLACE(Db,'\\\\_','_') FROM mysql.db WHERE LOWER(REPLACE(Db,'\\\\_','_'))='" + k +
+			"' OR LOWER(REPLACE(Db,'\\\\_','_')) LIKE '" + d + "' ESCAPE '!';" +
+			" SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE LOWER(SCHEMA_NAME)='" + k +
+			"' OR LOWER(SCHEMA_NAME) LIKE '" + d + "' ESCAPE '!';"
+		if out, err := mysqlKomut("-N", "-B", "-r", "-e", q).Output(); err == nil {
+			for _, s := range strings.Split(string(out), "\n") {
+				if s = strings.TrimSpace(s); s != "" {
+					adlar = append(adlar, s)
+				}
+			}
+		}
+	}
+	return adlar
 }
 
 // MySQLCreateDB: MariaDB'de YENI veritabani + YENI kullanici olustur + GRANT, sonra

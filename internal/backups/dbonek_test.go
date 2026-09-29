@@ -336,6 +336,62 @@ func TestTumDBGeriYukle_KayitliSahipKorunur(t *testing.T) {
 	}
 }
 
+// 🔴 kayitliSahip: satırdaki kullanıcı BAŞKA bir domainin satırında da geçiyorsa (düzeltme
+// öncesi önek çakışmasıyla devralınmış hesap — saldırgan parolasını biliyor) yeni açılan
+// şemada "kayıtlı sahip" diye KORUNMAZ; eski yetkisi silinir. Aksi halde kurban kendi
+// DB'sini geri yüklediğinde saldırganın bildiği hesap kurbanın verisine yeniden erişirdi.
+func TestTumDBGeriYukle_CokDomainliSahipKorunmaz(t *testing.T) {
+	o := bdo_ortam(t)
+	on := o.on
+	kul, dbAdi := o.kurbanKur(t, "KurbanParola123") // domain 2: <on>_x_main / <on>_x_db
+	// Eski devralma kaydı: kurbanın kullanıcısı saldırganın (domain 1) satırında da.
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,?,?,'x')`,
+		on+"_eski", kul); err != nil {
+		t.Fatal(err)
+	}
+	o.kokExec(t, "DROP DATABASE `"+dbAdi+"`") // şema kayıp; mysql.db yetki satırı KALIR
+	if !o.yetkiVar(t, kul, dbAdi) {
+		t.Fatalf("ön koşul: DROP DATABASE sonrası yetki satırı kalmalıydı")
+	}
+	res := tumDBGeriYukle(o.panel, 2, arsiv(t, dbAdi), "c_"+on+"_x", "")
+	if len(res) != 1 || !strings.HasPrefix(res[0]["durum"], "geri yüklendi") {
+		t.Fatalf("kurbanın kendi DB'sinin geri yüklenmesi düştü: %v", res)
+	}
+	if o.yetkiVar(t, kul, dbAdi) || o.baglanir(kul, "KurbanParola123", dbAdi) {
+		t.Errorf("iki domaine kayıtlı (devralınmış) hesabın yetkisi yeni açılan şemada KORUNDU")
+	}
+}
+
+// Yeniden kayıt reddinin üç nedeni (başka domaine kayıtlı / başka kiracının ad-alanı /
+// panelde kayıtsız var olan şema) kiracıya AYNI metinle döner: arşive yazılan adlarla
+// komşunun kayıtları ve şemaları yoklanamaz.
+func TestTumDBGeriYukle_RetMetniSizdirmaz(t *testing.T) {
+	o := bdo_ortam(t)
+	on := o.on
+	_, kurbanDB := o.kurbanKur(t, "KurbanParola123") // domain 2'ye kayıtlı
+	komsuAd := on + "_x_yedek"                       // komşunun ad-alanı (kayıtsız)
+	varolan := on + "_varolan"                       // kendi ad-alanı, kayıtsız ama sunucuda var
+	o.kokExec(t, "CREATE DATABASE `"+varolan+"`")
+	durum := map[string]string{}
+	for _, r := range tumDBGeriYukle(o.panel, 1, arsiv(t, kurbanDB, komsuAd, varolan), "c_"+on, "") {
+		durum[r["db"]] = r["durum"]
+	}
+	for _, ad := range []string{kurbanDB, komsuAd, varolan} {
+		d := durum[ad]
+		if !strings.HasPrefix(d, "reddedildi") {
+			t.Fatalf("%s reddedilmedi: %q", ad, d)
+		}
+		if d != durum[kurbanDB] {
+			t.Errorf("ret metinleri nedene göre farklı (varlık sızıntısı): %q ≠ %q", d, durum[kurbanDB])
+		}
+		for _, sizinti := range []string{"kiracı", "domaine kayıtlı", "kayıtsız", "ad alanı"} {
+			if strings.Contains(d, sizinti) {
+				t.Errorf("%s ret metni nedeni sızdırıyor (%q): %q", ad, sizinti, d)
+			}
+		}
+	}
+}
+
 // 🔴 BULGU 3: kimlikTamamla yabancı hesabı satıra yazmaz / ona GRANT vermez.
 func TestKimlikTamamla_YabanciHesap(t *testing.T) {
 	o := bdo_ortam(t)

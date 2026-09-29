@@ -16,6 +16,7 @@ package hesaplar
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -333,6 +334,11 @@ func TestDBHesabiBaglanabilirMi(t *testing.T) {
 		on+"_x_iki", iki); err != nil {
 		t.Fatal(err)
 	}
+	// Yalnız 127.0.0.1'de var olan servis hesabı (181'de mailuser/mailadmin gibi); hiçbir
+	// kiracı ad-alanına düşmez. '<ad>'@'localhost' oluşturmak onu yerel bağlantıda gölgeler.
+	golge := on + "svc2"
+	o.kokExec(t, "CREATE USER '"+golge+"'@'127.0.0.1' IDENTIFIED BY 'GolgeParola12345'")
+	t.Cleanup(func() { _, _ = o.kok.Exec("DROP USER IF EXISTS '" + golge + "'@'127.0.0.1'") })
 
 	for _, c := range []struct {
 		ad, kul, host string
@@ -341,6 +347,9 @@ func TestDBHesabiBaglanabilirMi(t *testing.T) {
 		{"sistem hesabı root", "root", "localhost", false},
 		{"sistem hesabı pma", "pma", "localhost", false},
 		{"sistem hesabı roundcube", "RoundCube", "localhost", false},
+		{"sistem hesabı mailuser (ad-alanı dışı)", "mailuser", "localhost", false},
+		{"sistem hesabı mailadmin (ad-alanı dışı)", "mailadmin", "localhost", false},
+		{"başka host'ta var olan hesap adı (gölgeleme)", golge, "localhost", false},
 		{"komşuya kayıtlı hesap", kurban, "localhost", false},
 		{"iki domaine kayıtlı hesap (eski devralma kaydı)", iki, "localhost", false},
 		{"kendi şemasında yetkili servis hesabı", svc, "localhost", false},
@@ -405,6 +414,96 @@ func TestDBAdAlaniKullanimda(t *testing.T) {
 	}
 	if DBAdAlaniKullanimda(o.panel, "c_"+on+"_tt") || DBAdAlaniKullanimda(o.panel, "c_"+on+"_q9") {
 		t.Errorf("ilgisiz ad-alanı kullanımda sayıldı")
+	}
+}
+
+// 🔴 EŞİT KÖK: yeni sk'nın bir kökü mevcut bir domainin köküne EŞİTSE (c-shop.com →
+// c_c_shop, c'siz kökü "c_shop" = shop.com'un sk'sı; ya da tersi) iki kiracı aynı
+// ad-alanını paylaşırdı → sk kullanımda sayılır. Ad kullanımı olmasa bile.
+func TestDBAdAlaniKullanimda_EsitKok(t *testing.T) {
+	o := dbo_ortam(t) // domain 1 = c_<on>, domain 2 = c_<on>_x
+	on := o.on
+	if !DBAdAlaniKullanimda(o.panel, "c_c_"+on) {
+		t.Errorf("c_c_%s: c'siz kökü domain 1'in sk'sına eşit — kullanımda sayılmalı", on)
+	}
+	if !DBAdAlaniKullanimda(o.panel, "c_c_"+on+"_x") {
+		t.Errorf("c_c_%s_x: c'siz kökü domain 2'nin sk'sına eşit — kullanımda sayılmalı", on)
+	}
+	// Ters yön: c_c_<on>y varken yeni c_<on>y (tam sk'sı mevcudun c'siz köküne eşit).
+	if _, err := o.panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (3, ?)`, "c_c_"+on+"y"); err != nil {
+		t.Fatal(err)
+	}
+	if !DBAdAlaniKullanimda(o.panel, "c_"+on+"y") {
+		t.Errorf("c_%sy: tam sk'sı c_c_%sy'nin c'siz köküne eşit — kullanımda sayılmalı", on, on)
+	}
+	// Eşitlik yoksa (yalnız önek benzerliği) kullanımda değil.
+	if DBAdAlaniKullanimda(o.panel, "c_c_"+on+"z") || DBAdAlaniKullanimda(o.panel, "c_"+on+"yy") {
+		t.Errorf("kökü hiçbir domainle eşit olmayan sk kullanımda sayıldı")
+	}
+}
+
+// En uzun kök kuralı: yeni kısa kökün ad-alanına düşen ama mevcut DAHA UZUN bir köke ait
+// adlar yeni domainin değildir → gereksiz sayı eki (girgin.com → c_girgin2) yok. Kısa
+// köke ait (önceden kapılmış) ad ise hâlâ kullanım sayılır.
+func TestDBAdAlaniKullanimda_EnUzunKok(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	uzun := on + "n_x" // mevcut uzun kök (<on>n-x.test → c_<on>n_x)
+	if _, err := o.panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (5, ?)`, "c_"+uzun); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (5,?,?,'x')`,
+		uzun+"_main", uzun+"_db"); err != nil {
+		t.Fatal(err)
+	}
+	o.kokExec(t, "CREATE USER '"+uzun+"_db'@'localhost' IDENTIFIED BY 'UzunParola12345'")
+	o.kokExec(t, "CREATE DATABASE `"+uzun+"_main`")
+	o.kokExec(t, "GRANT ALL PRIVILEGES ON `"+GrantDBKac(uzun+"_main")+"`.* TO '"+uzun+"_db'@'localhost'")
+	if DBAdAlaniKullanimda(o.panel, "c_"+on+"n") {
+		t.Errorf("c_%sn: yalnız daha uzun köke (c_%s) ait adlar var — kullanımda sayılmamalı", on, uzun)
+	}
+	// Kısa kökün kendi ad-alanında (uzun köke düşmeyen) önceden açılmış ad → kullanımda.
+	o.kokExec(t, "CREATE DATABASE `"+on+"n_zz`")
+	if !DBAdAlaniKullanimda(o.panel, "c_"+on+"n") {
+		t.Errorf("c_%sn: kendi ad-alanındaki %sn_zz şeması görülmedi", on, on)
+	}
+}
+
+// Panel sorgusu NO_BACKSLASH_ESCAPES açık bir bağlantıda da önceden kapılmış adı bulmalı.
+// Not (ölçüldü): MariaDB bu kipte de LIKE'ın örtük '\' kaçışını koruyor, yani eski
+// "LIKE '<kök>\_%'" burada da eşleşiyordu; sorgu artık örtük varsayılana değil açık
+// ESCAPE '!' yan tümcesine dayanır. Bu test o yan tümcenin kaldırılmasını yakalar.
+func TestDBAdAlaniKullanimda_NoBackslashEscapes(t *testing.T) {
+	o := dbo_ortam(t)
+	on := o.on
+	if _, err := o.panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,?,?,'x')`,
+		on+"_e_main", on+"_e_db"); err != nil {
+		t.Fatal(err)
+	}
+	c := o.cfg.Clone()
+	var ad string
+	if err := o.panel.QueryRow(`SELECT DATABASE()`).Scan(&ad); err != nil {
+		t.Fatal(err)
+	}
+	c.DBName = ad
+	p := map[string]string{}
+	for k, v := range c.Params {
+		p[k] = v
+	}
+	p["sql_mode"] = "'NO_BACKSLASH_ESCAPES'"
+	c.Params = p
+	nbe, err := sql.Open("mysql", c.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nbe.Close()
+	nbe.SetMaxOpenConns(1)
+	var kip string
+	if err := nbe.QueryRow(`SELECT @@SESSION.sql_mode`).Scan(&kip); err != nil || !strings.Contains(kip, "NO_BACKSLASH_ESCAPES") {
+		t.Fatalf("NO_BACKSLASH_ESCAPES oturumu kurulamadı (%q, %v)", kip, err)
+	}
+	if !DBAdAlaniKullanimda(nbe, "c_"+on+"_e") {
+		t.Errorf("NO_BACKSLASH_ESCAPES açıkken panel kaydındaki önceden kapılmış ad görülmedi (fail-open)")
 	}
 }
 

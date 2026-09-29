@@ -519,8 +519,16 @@ func TestDBAdiBaskaKiracininMi(t *testing.T) {
 		{2, on + "_x_db", false},       // komşu kendi adında
 		{2, on + "_db", true},          // uzun önekli kiracı da kısa önekli komşunun adını alamaz
 		{1, "wp_" + on, false},         // hiçbir köke düşmeyen ad
-		{3, "c_" + on + "_db", false},  // eşit kök ("c_<on>" = domain 1'in sk'sı) engellemez
 		{3, "c_" + on + "_x_db", true}, // domain 2'nin tam-sk kökü daha uzun
+		// 🔴 EŞİT KÖK: domain 3'ün (c_c_<on>) c'siz kökü "c_<on>" = domain 1'in TAM sk'sı.
+		// Kök, onu tam sk olarak taşıyan domain 1'indir: domain 3 onun taşıma kullanıcısını
+		// (c_<on>_db) ve uygulama DB'sini (c_<on>_<kod>_<id>) önceden kapamaz.
+		{3, "c_" + on + "_db", true},
+		{3, "c_" + on + "_wp_7", true},
+		{3, "C_" + strings.ToUpper(on) + "_DB", true}, // büyük harf varyantı
+		{3, "c_" + on, true},                          // kökün kendisi
+		{1, "c_" + on + "_wp_7", false},               // tam-sk sahibi kendi adında
+		{3, "c_c_" + on + "_db", false},               // domain 3 kendi tam-sk ad-alanında
 	} {
 		baska, err := DBAdiBaskaKiracininMi(context.Background(), o.panel, c.domain, c.ad)
 		if err != nil {

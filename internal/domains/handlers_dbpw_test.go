@@ -90,8 +90,9 @@ func dp_exec(t *testing.T, db *sql.DB, q string, args ...any) {
 //	domains : 20 bayi2.test (c_bayi2, bayi 2)   21 root.test (c_root, bayi 2)
 //	          30 kurban.test (c_kurban, bayi 3) 31 bayi2-ek.test (c_bayi2_ek, bayi 3)
 //	          22 c-bayi2.test (c_c_bayi2, bayi 3 — c'siz öneki "c_bayi2", bayi2'nin
-//	          sk'siyle AYNI uzunlukta eşleşir → belirsiz ad alanı)
-//	db_accounts: 200/201/202 bayi2'nin boş-kullanıcılı DB'leri, 210 root.test'in
+//	          sk'siyle AYNI kök → eşit kökte TAM-sk sahibi (bayi2) kazanır)
+//	db_accounts: 200/201/202 bayi2'nin boş-kullanıcılı DB'leri, 220 c-bayi2.test'in
+//	          (bayi 3) boş-kullanıcılı DB'si, 210 root.test'in
 //	          boş-kullanıcılı DB'si, 300 kurbanın kayıtlı kullanıcısı (kurban_db),
 //	          301 kurbanın boş-kullanıcılı DB'si, 302 kurbanın ad alanı DIŞINDA
 //	          kayıtlı kullanıcısı (wpu_kurban1 — WordPress kurulumu adı).
@@ -143,7 +144,8 @@ func dp_db(t *testing.T) *sql.DB {
 			(30,'kurban.test','c_kurban',3), (31,'bayi2-ek.test','c_bayi2_ek',3)`,
 		`INSERT INTO db_accounts (id, domain_id, db_name, db_user, db_pass_plain) VALUES
 			(200,20,'bayi2_geri','',''), (201,20,'bayi2_geri2','',''), (202,20,'bayi2_geri3','',''),
-			(210,21,'root_geri','',''),
+			(203,20,'bayi2_geri4','',''),
+			(210,21,'root_geri','',''), (220,22,'c_c_bayi2_geri','',''), (221,22,'c_c_bayi2_geri2','',''),
 			(300,30,'kurban_main','kurban_db',''), (301,30,'kurban_bos','',''),
 			(302,30,'wp_kurban1','wpu_kurban1','')`,
 	} {
@@ -237,7 +239,6 @@ func TestSetDatabasePassword_BosKullanici_YabanciAdDevralinamaz(t *testing.T) {
 		{"başka kiracının ad alanı (önek_)", 200, "kurban_wp"},
 		{"başka kiracının ad alanı (c_sk_ — taşıma adı)", 200, "c_kurban_db"},
 		{"daha özgül önek başka kiracıda (bayi2_ek_ ⊂ bayi2_)", 200, "bayi2_ek_wp"},
-		{"belirsiz ad alanı (c_bayi2_ = bayi2 sk'si = c_c_bayi2'nin öneki)", 200, "c_bayi2_db"},
 	} {
 		once := sahte.sayi()
 		kod, govde := dp_istek(t, h, bayi, c.dbid, c.kul)
@@ -249,6 +250,18 @@ func TestSetDatabasePassword_BosKullanici_YabanciAdDevralinamaz(t *testing.T) {
 		}
 		if u := dp_dbUser(t, h.DB, c.dbid); u != "" {
 			t.Errorf("%s (%q): panel kaydı değişti: db_user=%q", c.ad, c.kul, u)
+		}
+	}
+	// 🔴 EŞİT KÖK: c-bayi2.test (c_c_bayi2, bayi 3) c'siz kökü "c_bayi2" ile bayi2'nin
+	// TAM-sk ad-alanına (taşıma adı c_bayi2_db, uygulama c_bayi2_<kod>_<id>) giremez.
+	bayi3 := dp_bayi(t, 3)
+	for _, kul := range []string{"c_bayi2_db", "c_bayi2_wp_5", "C_BAYI2_DB"} {
+		once := sahte.sayi()
+		if kod, govde := dp_istek(t, h, bayi3, 220, kul); kod != http.StatusConflict {
+			t.Errorf("eşit kök (%q): 409 beklenir, alınan %d %s", kul, kod, govde)
+		}
+		if sahte.sayi() != once || dp_dbUser(t, h.DB, 220) != "" {
+			t.Errorf("eşit kök (%q): MariaDB katmanına inildi ya da kayıt değişti", kul)
 		}
 	}
 	if u := dp_dbUser(t, h.DB, 300); u != "kurban_db" {
@@ -295,16 +308,20 @@ func TestSetDatabasePassword_BaskaBayininKaydi404(t *testing.T) {
 // (wpu_*) ile kullanıcı oluşur, panel kaydı güncellenir.
 func TestSetDatabasePassword_BosKullanici_MesruAdlar(t *testing.T) {
 	h, sahte := dp_kur(t)
-	bayi := dp_bayi(t, 2)
 	for _, c := range []struct {
+		bayi   int64
 		dbid   int64
 		dbName string
 		kul    string
 	}{
-		{201, "bayi2_geri2", "bayi2_blog"},
-		{202, "bayi2_geri3", "wpu_ab12cd"},
+		{2, 201, "bayi2_geri2", "bayi2_blog"},
+		{2, 202, "bayi2_geri3", "wpu_ab12cd"},
+		// Eşit kökte (c_bayi2 = c_c_bayi2'nin c'siz kökü) TAM-sk sahibi kendi taşıma adını
+		// kullanabilir; c-bayi2.test ise kendi tam-sk ad-alanında serbesttir.
+		{2, 203, "bayi2_geri4", "c_bayi2_db"},
+		{3, 221, "c_c_bayi2_geri2", "c_c_bayi2_db"},
 	} {
-		kod, govde := dp_istek(t, h, bayi, c.dbid, c.kul)
+		kod, govde := dp_istek(t, h, dp_bayi(t, c.bayi), c.dbid, c.kul)
 		if kod != http.StatusOK {
 			t.Errorf("%q: 200 beklenir, alınan %d %s", c.kul, kod, govde)
 			continue

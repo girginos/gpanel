@@ -101,4 +101,31 @@ func TestBenzersizKullanici_DBAdAlaniKapilmissa(t *testing.T) {
 	if u := BenzersizKullanici(on + "-r.test"); u != "c_"+on+"_r2" {
 		t.Errorf("MariaDB'de önceden açılmış kullanıcı atlanmadı: %q", u)
 	}
+
+	// 🔴 EŞİT KÖK: c-<on>.test → c_c_<on>; c'siz kökü "c_<on>" = domain 1'in (<on>.test) TAM
+	// sk'sı. Tahsis edilseydi CreateDatabase öneki "c_<on>" olur, kurbanın taşıma kullanıcısı
+	// (c_<on>_db) ve uygulama DB'leri (c_<on>_<kod>_<id>) önceden kapılabilirdi.
+	if u := BenzersizKullanici("c-" + on + ".test"); u != "c_c_"+on+"2" {
+		t.Errorf("eşit köklü sk tahsis edildi (c_c_%s2 beklenir): %q", on, u)
+	}
+	// Ters yön: c-<on>v.test (c_c_<on>v) varken <on>v.test → c_<on>v kökü eşit → c_<on>v2.
+	if _, err := panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (2, ?)`, "c_c_"+on+"v"); err != nil {
+		t.Fatal(err)
+	}
+	if u := BenzersizKullanici(on + "v.test"); u != "c_"+on+"v2" {
+		t.Errorf("ters yön eşit köklü sk tahsis edildi (c_%sv2 beklenir): %q", on, u)
+	}
+
+	// En uzun kök: <on>w-x.test (c_<on>w_x) ve onun <on>w_x_* adları varken <on>w.test
+	// gereksiz sayı eki almaz (o adlar daha uzun köke aittir, yeni domainin değildir).
+	if _, err := panel.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (3, ?)`, "c_"+on+"w_x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := panel.Exec(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (3,?,?,'x')`,
+		on+"w_x_main", on+"w_x_db"); err != nil {
+		t.Fatal(err)
+	}
+	if u := BenzersizKullanici(on + "w.test"); u != "c_"+on+"w" {
+		t.Errorf("daha uzun köke ait adlar yüzünden gereksiz sayı eki: %q", u)
+	}
 }
