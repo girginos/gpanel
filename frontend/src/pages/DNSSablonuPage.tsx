@@ -61,7 +61,7 @@ const DNSTPL_EN: Record<string, string> = {
   "DNS Şablonu": "DNS Template",
   "Kayıt Ekle": "Add Record",
   "Merkezi DNS Şablonu": "Central DNS Template",
-  "DNS Şablonum": "My DNS Template",
+  "DNS Şablonları": "DNS Templates",
   "Yalnızca sizin hosting hesaplarınıza uygulanır; SOA ve DKIM ayarlarını sunucu yöneticisi yönetir.": "Applies only to your hosting accounts; SOA and DKIM settings are managed by the server administrator.",
   "Satırı sil": "Delete row",
   "Varsayılan Şablonu Uygula": "Apply Default Template",
@@ -82,15 +82,13 @@ export default function DNSSablonuPage() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [yuk, setYuk] = useState(true)
   const [kaydediyor, setKaydediyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
   const toast = useToast()
 
   function yukle() {
     setYuk(true)
     api.get<{ kayitlar: Row[]; meta?: Meta }>('/dns-template')
       .then(r => { setRows(r.data.kayitlar || []); setMeta(r.data.meta ?? null) })
-      .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .catch(e => toast.hata(cevir("İşlem başarısız"), apiHata(e)))
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [])
@@ -107,18 +105,13 @@ export default function DNSSablonuPage() {
 
   async function kaydet() {
     if (yonetici && !meta) return
-    setHata(null); setBasari(null); setKaydediyor(true)
+    setKaydediyor(true)
     try {
       await api.put('/dns-template', yonetici ? { kayitlar: rows, meta } : { kayitlar: rows })
-      const iyi = cevir("Şablon kaydedildi. Yeni domainler ve") + ' “' + cevir("Varsayılan Şablonu Uygula") + '” ' + cevir("bu şablonu kullanır.")
-      setBasari(iyi)
-      toast.basari(cevir("Kaydedildi"), iyi)
-      setTimeout(() => setBasari(null), 5000)
+      toast.basari(cevir("Kaydedildi"), cevir("Şablon kaydedildi. Yeni domainler ve") + ' “' + cevir("Varsayılan Şablonu Uygula") + '” ' + cevir("bu şablonu kullanır."))
       yukle()
     } catch (e) {
-      const m = apiHata(e, cevir("Şablon kaydedilemedi"))
-      setHata(m)
-      toast.hata(cevir("İşlem başarısız"), m)
+      toast.hata(cevir("İşlem başarısız"), apiHata(e, cevir("Şablon kaydedilemedi")))
     }
     finally { setKaydediyor(false) }
   }
@@ -128,7 +121,7 @@ export default function DNSSablonuPage() {
   return (
     <div className="px-6 md:px-8 py-6">
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' }, { etiket: cevir("DNS Şablonu") }]} />
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir(yonetici ? "Merkezi DNS Şablonu" : "DNS Şablonum")}</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir(yonetici ? "Merkezi DNS Şablonu" : "DNS Şablonları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
         {cevir("Yeni bir domain eklendiğinde ve")} <span className="font-medium">{cevir("Varsayılan Şablonu Uygula")}</span> {cevir("butonuna basıldığında bu şablon uygulanır.")}
         {' '}{cevir("Değişiklikleriniz anında geçerli olur.")}

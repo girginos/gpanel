@@ -73,9 +73,12 @@ export const T = {
     'text-slate-900 dark:text-slate-100',
 
   // Aksiyon/buton hücresi: mobilde tam genişlik, üstte ince ayraç.
+  // 🔴 Masaüstünde dolgu SİMETRİK olmalı: eskiden `lg:pt-0 lg:py-3` birlikteydi;
+  // tek kenarlı `pt` çok kenarlı `py`'den sonra üretildiği için üst dolgu 0,
+  // alt 12px kalıyor ve butonlar satır ortasının ~6px üstünde duruyordu.
   hucreAksiyon:
     'flex flex-wrap items-center gap-2 pt-2.5 mt-1.5 lg:table-cell ' +
-    'lg:pt-0 lg:mt-0 lg:px-3 lg:py-3 lg:whitespace-nowrap ' +
+    'lg:mt-0 lg:px-3 lg:py-3 lg:pt-3 lg:whitespace-nowrap ' +
     'border-t border-slate-100 dark:border-dark-600/60 lg:border-t-0',
 
   // Seçim kutusu: mobilde kartın sağ üstüne sabitlenir (gizlenirse toplu

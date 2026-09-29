@@ -75,15 +75,14 @@ const MENU_EN: Record<string, string> = {
   'Güvenlik Duvarı': 'Firewall', 'İzleme': 'Monitoring',
   'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus', 'Yakında': 'Soon', 'Tehdit İstihbaratı': 'Threat Intelligence', 'Uygulama Çalıştırıcı': 'Application Runner',
   'Saldırı Zincirleri': 'Attack Chains', 'Denetim Kaydı': 'Audit Log',
-  'Denetim Kaydım': 'My Audit Log', 'Mail Sunucu': 'Mail Server',
+  'Mail Sunucu': 'Mail Server',
   'Dosya Yöneticisi': 'File Manager', 'Veritabanları': 'Databases',
   'FTP Hesapları': 'FTP Accounts', 'DNS Ayarları': 'DNS Settings',
-  'DNS Şablonum': 'My DNS Template', 'SSL/TLS': 'SSL/TLS',
+  'DNS Şablonları': 'DNS Templates', 'SSL/TLS': 'SSL/TLS',
   'PHP Ayarları': 'PHP Settings', 'Yedekler': 'Backups', 'Günlükler': 'Logs',
   'Zamanlanmış Görevler': 'Cron Jobs', 'Git Deploy': 'Git Deploy', 'Laravel': 'Laravel',
-  'Apache & nginx': 'Apache & nginx', 'Hosting Hesapları': 'Hosting Accounts',
+  'Apache & nginx': 'Apache & nginx',
   'Genel Bakış': 'Overview',
-  'Hosting Planlarım': 'My Hosting Plans',
   'Profil ve Tercihler': 'Profile & Preferences',
   // Grup başlıkları
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
@@ -142,12 +141,12 @@ const RESELLER_NAV: NavGroup[] = [
   // yalnizca baslik veriliyor ki panel Anasayfa'yi takip etsin.
   { baslik: GENEL, items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
   { baslik: 'Barındırma Hizmetleri', items: [
-    { to: '/domainler',       etiket: 'Hosting Hesapları', ikon: ICONS.domain, sayac: 'domainler' },
-    { to: '/hizmet-planlari', etiket: 'Hosting Planlarım', ikon: ICONS.plan, sayac: 'hizmet_planlari' },
+    { to: '/domainler',       etiket: 'Domainler', ikon: ICONS.domain, sayac: 'domainler' },
+    { to: '/hizmet-planlari', etiket: 'Planlar',   ikon: ICONS.plan, sayac: 'hizmet_planlari' },
   ]},
   { baslik: 'Ayarlar', items: [
-    { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonum',        ikon: ICONS.domain },
-    { to: '/denetim',             etiket: 'Denetim Kaydım',      ikon: ICONS.denetim },
+    { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonları',      ikon: ICONS.domain },
+    { to: '/denetim',             etiket: 'Denetim Kaydı',       ikon: ICONS.denetim },
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
   ]},
 ]
