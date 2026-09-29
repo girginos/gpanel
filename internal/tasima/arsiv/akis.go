@@ -50,6 +50,8 @@ func (s *sayac) Read(p []byte) (int, error) {
 // oranli: r'den okunan baytı sayar; esik aşıldıktan sonra okunan / arşiv dosyasından
 // okunan (ham) oranı sınırı geçerse ErrBomba döner. Bir geçişte iki kez kullanılır:
 // açılmış akış (sıkıştırma bombası) ve tar.Reader'ın verdiği üye verisi (seyrek üye).
+// Aşımın olduğu okumada veri VERİLMEZ (0, ErrBomba): io.ReadFull tampon dolunca
+// yanındaki hatayı yutar (tar başlık okuması, üst veri), aşım böyle kaçmasın.
 type oranli struct {
 	r          io.Reader
 	ham        *sayac
@@ -61,7 +63,7 @@ func (o *oranli) Read(p []byte) (int, error) {
 	n, err := o.r.Read(p)
 	o.n += int64(n)
 	if o.n > o.esik && o.n > o.oran*o.ham.n.Load() {
-		return n, ErrBomba
+		return 0, ErrBomba
 	}
 	return n, err
 }

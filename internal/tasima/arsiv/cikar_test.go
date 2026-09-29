@@ -233,6 +233,10 @@ func TestSeyrekUye(t *testing.T) {
 			}
 		})
 	}
+	// Envanterde belleğe alınan üst veri de aynı yoldan okunur (4 MiB tavanın altında).
+	if _, err := acT(t, seyrekUret(t, "cpmove-u/cp/u", 3<<20), dar, ustVeriSec); !errors.Is(err, ErrBomba) {
+		t.Fatalf("üst veri: ErrBomba beklendi, gelen %v", err)
+	}
 }
 
 // TestCikar_Butce: seçim kiracının bütçesini aşarsa hiçbir şeye dokunulmadan ErrKota;
