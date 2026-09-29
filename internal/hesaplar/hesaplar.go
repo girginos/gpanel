@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"girginospanel/internal/gizli"
 	"log"
@@ -98,6 +99,66 @@ func MusteriDBKimlikGecerli(sk, s string) bool {
 	return s == sk || strings.HasPrefix(s, sk+"_")
 }
 
+// DBAdiBaskaKiracininMi: ad (veritabani YA DA DB kullanici adi) BASKA bir kiracinin
+// DB ad-alanina mi dusuyor?
+//
+// 🔴 ONEK CAKISMASI: kiraci ad-alani "<kok>_..." bicimindedir; kok sistem
+// kullanicisindan turer (c_girgin → "girgin"; tasima/uygulama yollari tam sk'yi da
+// kullanir: "c_girgin_db"). SlugFromDomain tireyi alt cizgiye cevirdigi ve sonekte
+// '_' serbest oldugu icin ad-alanlari IC ICE gecer: girgin.com'un ("girgin") "x_db"
+// soneki, girgin-x.com'un ("girgin_x") varsayilan kullanicisi "girgin_x_db" ile AYNI
+// addir. Zorunlu onek bu yuzden sahiplik kaniti DEGILDIR.
+//
+// Kural (en uzun kok kazanir): her domainin kokleri {sk, c_'siz sk}; ad bir koke
+// esitse ya da "<kok>_" ile basliyorsa o koke duser. Adin dustugu bir kok BASKA bir
+// domainin ve cagiranin kendi eslesen kokunden UZUNSA ad baskasinindir. Esit uzunluk
+// (ayni kok dizgesi — c-foo.com'un "c_foo" oneki ile foo.com'un "c_foo" sk'si)
+// cagirani ENGELLEMEZ; aksi halde o kiraci hic DB acamazdi. Oradaki olasi ad
+// cakismasini yalniz-yeni semantik (MySQLCreateDB: var olan kimlige dokunmaz) kapatir.
+//
+// Hata (DB okunamadi) durumunda true + err doner: cagiran REDDETMELI (fail-closed).
+func DBAdiBaskaKiracininMi(ctx context.Context, db *sql.DB, domainID int64, ad string) (bool, error) {
+	var sk string
+	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
+		return true, err
+	}
+	kendi := adKokUzunlugu(ad, sk)
+	rows, err := db.QueryContext(ctx,
+		`SELECT sistem_kullanici FROM domains WHERE id<>? AND sistem_kullanici<>''`, domainID)
+	if err != nil {
+		return true, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var baska string
+		if err := rows.Scan(&baska); err != nil {
+			return true, err
+		}
+		if adKokUzunlugu(ad, baska) > kendi {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return true, err
+	}
+	return false, nil
+}
+
+// adKokUzunlugu: ad, sk'nin koklerinden ({sk, c_'siz sk}) birine dusuyorsa eslesen
+// EN UZUN kokun uzunlugu; hicbirine dusmuyorsa 0.
+func adKokUzunlugu(ad, sk string) int {
+	en := 0
+	for _, kok := range []string{sk, strings.TrimPrefix(sk, "c_")} {
+		if kok == "" {
+			continue
+		}
+		if (ad == kok || strings.HasPrefix(ad, kok+"_")) && len(kok) > en {
+			en = len(kok)
+		}
+	}
+	return en
+}
+
 // GrantDBKac: GRANT/REVOKE'ta backtick'li DB ADI icin LIKE-joker kacisi.
 // 🔴 MySQL/MariaDB, GRANT ... ON `db`.* ifadesindeki db adinda `_` ve `%`
 // karakterlerini backtick icinde OLSA BILE joker sayar. DB adlari <slug>_<sonek>
@@ -156,39 +217,127 @@ func FTPDelete(db *sql.DB, sistemKullanici string) error {
 	return err
 }
 
-// MySQLCreateDB: MariaDB'de yeni veritabani + kullanici olustur + GRANT, sonra db_accounts'a kaydet
+// ErrDBKimlikMevcut: istenen veritabani ya da DB kullanicisi MariaDB'de ZATEN VAR.
+// Yalniz-yeni olusturucular (MySQLCreateDB, MySQLCreateDBForUser, MySQLKullaniciEkle)
+// var olan kimlige HIC DOKUNMADAN bu hatayla doner. Cagiran bu durumda o kimligi
+// "geri alma" adina DUSURMEMELIDIR: kimlik baska bir kiraciya ait olabilir.
+var ErrDBKimlikMevcut = errors.New("veritabanı ya da kullanıcı zaten var")
+
+// mysqlCalistir: root-socket mysql CLI ile ifade(ler) calistirir. Var olan kullanici
+// (ERROR 1396 — CREATE USER) ya da veritabani (ERROR 1007 — CREATE DATABASE) hatasi
+// ErrDBKimlikMevcut'a sarilir.
+func mysqlCalistir(ifadeler ...string) error {
+	out, err := exec.Command("mysql", "-e", strings.Join(ifadeler, " ")).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	cikti := strings.TrimSpace(string(out))
+	if strings.Contains(cikti, "ERROR 1396") || strings.Contains(cikti, "ERROR 1007") {
+		return fmt.Errorf("%w: %s", ErrDBKimlikMevcut, cikti)
+	}
+	return fmt.Errorf("mysql exec: %s: %w", cikti, err)
+}
+
+// DBKullanicisiVarMi: MariaDB'de '<dbUser>'@'localhost' hesabi var mi? Gecersiz ad ya
+// da olculemeyen durum "var" sayilir (fail-closed): cagiran adi REDDETMELI.
+func DBKullanicisiVarMi(dbUser string) bool {
+	if !GecerliDBKimlik(dbUser) {
+		return true
+	}
+	out, err := exec.Command("mysql", "-N", "-B", "-e",
+		"SELECT COUNT(*) FROM mysql.user WHERE User='"+sqlKac(dbUser)+"' AND Host='localhost'").Output()
+	if err != nil {
+		return true
+	}
+	return strings.TrimSpace(string(out)) != "0"
+}
+
+// kullaniciYalnizBuDomainde: dbUser panelde (db_accounts) YALNIZ domainID'ye mi
+// kayitli? En az bir satir bu domainde olmali, BASKA domainde satir olmamali. Ikinci
+// kosul, duzeltme oncesi surumlerde onek cakismasiyla komsunun kullanicisini kendi
+// domain_id'siyle yazdirmis (bkz. MySQLCreateDB) kayitlar uzerinden sonraki parola /
+// GRANT islemlerinin komsuya uzanmasini keser.
+func kullaniciYalnizBuDomainde(db *sql.DB, domainID int64, dbUser string) error {
+	var bu, baska int
+	if err := db.QueryRow(
+		`SELECT COALESCE(SUM(domain_id=?),0), COALESCE(SUM(domain_id<>?),0) FROM db_accounts WHERE db_user=?`,
+		domainID, domainID, dbUser).Scan(&bu, &baska); err != nil {
+		return fmt.Errorf("güvenlik: DB kullanıcısının sahipliği doğrulanamadı: %w", err)
+	}
+	if bu == 0 {
+		return fmt.Errorf("güvenlik: DB kullanıcısı bu domaine kayıtlı değil")
+	}
+	if baska > 0 {
+		return fmt.Errorf("güvenlik: DB kullanıcısı birden çok domaine kayıtlı — yönetici incelemesi gerekli")
+	}
+	return nil
+}
+
+// MySQLCreateDB: MariaDB'de YENI veritabani + YENI kullanici olustur + GRANT, sonra
+// db_accounts'a kaydet.
+//
+// 🔴 YALNIZ-YENI SEMANTIK (DB kullanici oneki cakismasi): eskiden "CREATE USER IF NOT
+// EXISTS" + kosulsuz "ALTER USER ... IDENTIFIED BY" + "CREATE DATABASE IF NOT EXISTS"
+// ile "olustur YA DA DEGISTIR" calisiyordu. Ad-alanlari ic ice gectigi icin (bkz.
+// DBAdiBaskaKiracininMi) kisa onekli kiraci komsunun "<onek>_db" kullanicisini kendi
+// soneki gibi verip parolasini sectigi degere ceviriyor, kendi DB'sini ona GRANT
+// ediyor ve satiri kendi domain_id'siyle yazdiriyordu (kiracilar arasi hesap ele
+// gecirme). Simdi: CREATE USER (IF NOT EXISTS YOK) → kullanici varsa ERROR 1396 ile
+// DURUR, hicbir sey degismez; CREATE DATABASE (IF NOT EXISTS YOK) → DB varsa yeni
+// kullanici geri alinir. Sonraki adimlardan biri duserse YALNIZ bu cagrinin
+// olusturdugu DB + kullanici geri alinir. Var olan (sahipligi dogrulanmis) bir
+// kullaniciya DB baglamak MySQLCreateDBForUser'in, parolasini degistirmek
+// MySQLChangePassword'un isidir.
 func MySQLCreateDB(db *sql.DB, domainID int64, dbName, dbUser, dbPass string) error {
 	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
 	}
-	// 1) MariaDB'de DB + user create (root socket auth ile)
-	stmts := []string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
-		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
-		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
+	// 1) Kullanici — YALNIZ yoksa olusur (root socket auth ile).
+	if err := mysqlCalistir(fmt.Sprintf("CREATE USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass))); err != nil {
+		return err
+	}
+	// Buradan sonra kullanici BU cagrinin: sonraki bir adim duserse geri alinir.
+	kullaniciGeriAl := func() {
+		_ = mysqlCalistir(fmt.Sprintf("DROP USER IF EXISTS '%s'@'localhost';", dbUser))
+	}
+	// 2) Veritabani — YALNIZ yoksa olusur (var olan DB'ye GRANT verilmez).
+	if err := mysqlCalistir(fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName)); err != nil {
+		kullaniciGeriAl()
+		return err
+	}
+	hepsiniGeriAl := func() {
+		_ = mysqlCalistir(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName))
+		kullaniciGeriAl()
+	}
+	// 3) GRANT
+	if err := mysqlCalistir(
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
-		"FLUSH PRIVILEGES;",
+		"FLUSH PRIVILEGES;"); err != nil {
+		hepsiniGeriAl()
+		return err
 	}
-	sql := strings.Join(stmts, " ")
-	if out, err := exec.Command("mysql", "-e", sql).CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-
-	// 2) panel DB metadata
-	_, err := db.Exec(
+	// 4) panel DB metadata
+	if _, err := db.Exec(
 		`INSERT INTO db_accounts(domain_id, db_name, db_user, db_pass_plain, db_host)
 		 VALUES(?,?,?,?, 'localhost')`,
-		domainID, dbName, dbUser, gizli.SaklaBagli(dbPass, dbUser))
-	return err
+		domainID, dbName, dbUser, gizli.SaklaBagli(dbPass, dbUser)); err != nil {
+		hepsiniGeriAl()
+		return err
+	}
+	return nil
 }
 
-// MySQLCreateDBForUser: yeni DB olustur + MEVCUT bir DB-kullanicisina GRANT ver
+// MySQLCreateDBForUser: YENI DB olustur + MEVCUT bir DB-kullanicisina GRANT ver
 // (kullanicinin parolasina DOKUNMAZ — baska DB'leri bozmaz). db_accounts'a bu domain+db
 // icin mevcut kullanicinin parolasiyla (db_pass_plain) yeni satir ekler.
-// Cagiran, dbUser'in bu domaine ait oldugunu ONCEDEN dogrulamalidir (sahiplik + onek).
+// Kullanici panelde YALNIZ bu domaine kayitli olmali (kullaniciYalnizBuDomainde);
+// cagiranin ayrica onek/sahiplik denetimi yapmasi beklenir.
 func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) error {
 	if !GecerliDBKimlik(dbName) || !GecerliDBKimlik(dbUser) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı veya kullanıcısı")
+	}
+	if err := kullaniciYalnizBuDomainde(db, domainID, dbUser); err != nil {
+		return err
 	}
 	// Mevcut kullanicinin parolasi (yeni db_accounts satiri icin — phpMyAdmin SSO).
 	// NOT: deger at-rest sifreli olabilir; asagida gizli.Sakla ile yeniden
@@ -198,20 +347,31 @@ func MySQLCreateDBForUser(db *sql.DB, domainID int64, dbName, dbUser string) err
 		`SELECT db_pass_plain FROM db_accounts WHERE db_user=? LIMIT 1`, dbUser).Scan(&pass); err != nil {
 		return fmt.Errorf("mevcut kullanıcı parolası bulunamadı: %w", err)
 	}
-	// DB olustur + mevcut kullaniciya GRANT (CREATE/ALTER USER YOK → parola korunur).
-	stmts := []string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName),
+	// DB — YALNIZ yoksa olusur: var olan (baskasinin olabilecek) bir DB'ye GRANT verilmez.
+	if err := mysqlCalistir(fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", dbName)); err != nil {
+		return err
+	}
+	// Buradan sonra DB BU cagrinin: duserse yetki + DB geri alinir (DROP DATABASE
+	// mysql.db yetki satirini SILMEZ; kalirsa ayni adla sonra acilan DB'ye uzanir).
+	geriAl := func() {
+		_ = mysqlCalistir(fmt.Sprintf("REVOKE ALL PRIVILEGES ON `%s`.* FROM '%s'@'localhost';", GrantDBKac(dbName), dbUser))
+		_ = mysqlCalistir(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName))
+	}
+	// Mevcut kullaniciya GRANT (CREATE/ALTER USER YOK → parola korunur).
+	if err := mysqlCalistir(
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
-		"FLUSH PRIVILEGES;",
+		"FLUSH PRIVILEGES;"); err != nil {
+		geriAl()
+		return err
 	}
-	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	_, err := db.Exec(
+	if _, err := db.Exec(
 		`INSERT INTO db_accounts(domain_id, db_name, db_user, db_pass_plain, db_host)
 		 VALUES(?,?,?,?, 'localhost')`,
-		domainID, dbName, dbUser, gizli.SaklaGecis(pass, dbUser))
-	return err
+		domainID, dbName, dbUser, gizli.SaklaGecis(pass, dbUser)); err != nil {
+		geriAl()
+		return err
+	}
+	return nil
 }
 
 // MySQLDropDB: DB ve user kaldir + metadata sil
@@ -252,13 +412,27 @@ func MySQLDropAllForDomain(db *sql.DB, domainID int64) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type cift struct{ ad, kul string }
+	var liste []cift
 	for rows.Next() {
-		var dbName, dbUser string
-		if err := rows.Scan(&dbName, &dbUser); err != nil {
+		var c cift
+		if err := rows.Scan(&c.ad, &c.kul); err != nil {
 			continue
 		}
-		_ = MySQLDropDB(db, dbName, dbUser)
+		liste = append(liste, c)
+	}
+	rows.Close()
+	for _, c := range liste {
+		// 🔴 Kullanici BASKA bir domainin satirinda da geciyorsa (duzeltme oncesi onek
+		// cakismasiyla komsunun kullanicisini kendi satirina yazdirmis eski kayit)
+		// DROP USER komsunun sitesini dusururdu: yalniz bu domainin DB'sini kaldir.
+		var baska int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_user=? AND domain_id<>?`,
+			c.kul, domainID).Scan(&baska); err != nil || baska > 0 {
+			_ = MySQLDropDBKeepUser(db, c.ad)
+			continue
+		}
+		_ = MySQLDropDB(db, c.ad, c.kul)
 	}
 	return nil
 }
@@ -320,12 +494,19 @@ func DBVarMi(dbName string) bool {
 	if !GecerliDBKimlik(dbName) {
 		return false
 	}
+	v, _ := semaVarMi(dbName)
+	return v
+}
+
+// semaVarMi: DBVarMi'nin hata donduren hali (olcum yapilamadiysa err != nil);
+// fail-closed karar vermesi gereken cagiranlar icin.
+func semaVarMi(dbName string) (bool, error) {
 	out, err := exec.Command("mysql", "-N", "-e",
 		"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='"+sqlKac(dbName)+"'").Output()
 	if err != nil {
-		return false
+		return false, err
 	}
-	return strings.TrimSpace(string(out)) != ""
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // MySQLKullaniciEkle: MEVCUT bir veritabanina kullanici + yetki ekler.
@@ -344,14 +525,17 @@ func MySQLKullaniciEkle(dbName, dbUser, dbPass string) error {
 	if !ParolaGecerli(dbPass) {
 		return fmt.Errorf("güvenlik: parola geçersiz karakter içeriyor")
 	}
-	stmts := []string{
-		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
-		fmt.Sprintf("ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass)),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
-		"FLUSH PRIVILEGES;",
+	// 🔴 YALNIZ-YENI kullanici (bkz. MySQLCreateDB): eskiden CREATE USER IF NOT EXISTS +
+	// kosulsuz ALTER USER, verilen ad VAR OLAN bir hesapsa (komsunun DB kullanicisi,
+	// hatta root/panel hesabi) parolasini cagiranin sectigi degere ceviriyordu.
+	if err := mysqlCalistir(fmt.Sprintf("CREATE USER '%s'@'localhost' IDENTIFIED BY '%s';", dbUser, sqlKac(dbPass))); err != nil {
+		return err
 	}
-	if out, err := exec.Command("mysql", "-e", strings.Join(stmts, " ")).CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql exec: %s: %w", strings.TrimSpace(string(out)), err)
+	if err := mysqlCalistir(
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';", GrantDBKac(dbName), dbUser),
+		"FLUSH PRIVILEGES;"); err != nil {
+		_ = mysqlCalistir(fmt.Sprintf("DROP USER IF EXISTS '%s'@'localhost';", dbUser)) // bu cagrinin kullanicisi
+		return err
 	}
 	return nil
 }

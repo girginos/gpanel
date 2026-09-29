@@ -99,8 +99,25 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusConflict, "bu kullanıcı adı başka bir veritabanında kullanılıyor")
 			return
 		}
+		// 🔴 VAR OLAN HESABI DEVRALMA: panelde kayıtlı olmayan ama MariaDB'de var olan
+		// bir ad (komşunun kayıtsız kullanıcısı, root, panelin kendi DB hesabı…) eskiden
+		// MySQLKullaniciEkle'nin koşulsuz ALTER USER'ıyla çağıranın parolasına dönüyordu.
+		// Ayrıca ad BAŞKA kiracının ad-alanına düşmemeli (önek çakışması; bkz.
+		// hesaplar.DBAdiBaskaKiracininMi) — aksi halde komşunun gelecekteki adı kapılır.
+		if baska, e := hesaplar.DBAdiBaskaKiracininMi(r.Context(), h.DB, domainID, yeni); e != nil || baska {
+			httpx.WriteError(w, http.StatusConflict, "bu kullanıcı adı kullanılamaz — farklı bir ad seçin")
+			return
+		}
+		if hesaplar.DBKullanicisiVarMi(yeni) {
+			httpx.WriteError(w, http.StatusConflict, "bu kullanıcı adı zaten var")
+			return
+		}
 		if err := hesaplar.MySQLKullaniciEkle(dbName, yeni, req.Parola); err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "kullanıcı oluşturulamadı: "+err.Error())
+			kod := http.StatusInternalServerError
+			if errors.Is(err, hesaplar.ErrDBKimlikMevcut) {
+				kod = http.StatusConflict // denetimle oluşturma arasında yarış
+			}
+			httpx.WriteError(w, kod, "kullanıcı oluşturulamadı: "+err.Error())
 			return
 		}
 		if _, err := h.DB.ExecContext(r.Context(),
@@ -111,7 +128,7 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		}
 		dbUser = yeni
 		islem = "db.kullanici-olustur"
-	} else if err := hesaplar.MySQLChangePassword(h.DB, dbUser, req.Parola); err != nil {
+	} else if err := hesaplar.MySQLChangePassword(h.DB, domainID, dbUser, req.Parola); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "parola değişimi: "+err.Error())
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -409,18 +410,18 @@ type dbHedef struct{ Ad, Kul string }
 
 // veritabanlariniAktar — tum kaynak DB'lerini tasir.
 //
-// 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Mevcut
-// kullanicinin parolasi DEGISTIRILMEZ: hesaplar.MySQLCreateDB kosulsuz
-// "ALTER USER … IDENTIFIED BY" calistiriyor; bu, ayni kullaniciyi paylasan
-// CANLI sitelerin baglantisini aninda koparir.
+// 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Orijinal
+// kimlik yolunda mevcut kullanicinin parolasi DEGISTIRILMEZ (ayni kullaniciyi
+// paylasan CANLI siteler kopardi); hesaplar.MySQLCreateDB artik yalniz-yeni
+// semantikle calisir ve var olan kullaniciya hic dokunmaz.
 func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap, sk, webRoot string,
 	sonuc *AktarSonuc, log func(string, ...any)) (map[string]dbHedef, string, error) {
 
 	hedefKul := sk + "_db"
-	// <sk>_db bu domaine OZEL kullanicidir (sk domain basina benzersiz) → parolasini
-	// bilinen yeni bir degere ayarlamak GUVENLI ve ZORUNLU: aksi halde wp-config'e
-	// yazacak parolamiz olmaz ve site "Access denied" verir. MySQLCreateDB, kullanici
-	// varsa CREATE-OR-ALTER ile parolayi dbPw'ye esitler.
+	// <sk>_db bu domainin panel kullanicisidir → parolasini bilinen yeni bir degere
+	// ayarlamak ZORUNLU: aksi halde wp-config'e yazacak parolamiz olmaz ve site
+	// "Access denied" verir. Kullanici zaten varsa (ustune tasima) bu YALNIZ panelde
+	// bu domaine kayitliysa yapilir — bkz. panelKullanicisiylaOlustur.
 	dbPw := hesaplar.RandomParola(24)
 
 	// 🔴 ORIJINAL kimlik tercihi: DB adi+kullanici+parola AYNI kalirsa wp-config
@@ -463,7 +464,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 		log("veritabani: %s → %s", kaynakDB, hedefAd)
 
 		if !kuruldu {
-			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, hedefAd, hedefKul, dbPw); err != nil {
+			if err := h.panelKullanicisiylaOlustur(sonuc.DomainID, hedefAd, hedefKul, dbPw); err != nil {
 				log("uyari: %s olusturulamadi: %v", hedefAd, err)
 				basarisiz = append(basarisiz, kaynakDB)
 				continue
@@ -488,6 +489,25 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 		return esleme, dbPw, fmt.Errorf("veritabani aktarilamadi: %s", strings.Join(basarisiz, ", "))
 	}
 	return esleme, dbPw, nil
+}
+
+// panelKullanicisiylaOlustur: FALLBACK yolunun ilk DB'si + <sk>_db panel kullanicisi.
+//   - Kullanici YOKSA: hesaplar.MySQLCreateDB (yalniz-yeni) ile olusur.
+//   - VARSA ve panelde YALNIZ bu domaine kayitliysa (ustune tasima / yeniden deneme):
+//     parolasi sahiplik dogrulanarak (MySQLChangePassword) dbPw'ye cekilir, DB ona
+//     baglanir (MySQLCreateDBForUser).
+//   - VARSA ama bu domaine ait DEGILSE (onek cakismasiyla baska kiracinin adi, ya da
+//     kayitsiz artik): REDDEDILIR. Eskiden MySQLCreateDB'nin kosulsuz ALTER USER'i
+//     bu kullaniciyi sessizce devraliyordu.
+func (h *Handlers) panelKullanicisiylaOlustur(domainID int64, hedefAd, hedefKul, dbPw string) error {
+	err := hesaplar.MySQLCreateDB(h.DB, domainID, hedefAd, hedefKul, dbPw)
+	if !errors.Is(err, hesaplar.ErrDBKimlikMevcut) {
+		return err
+	}
+	if perr := hesaplar.MySQLChangePassword(h.DB, domainID, hedefKul, dbPw); perr != nil {
+		return fmt.Errorf("%w (%v)", err, perr)
+	}
+	return hesaplar.MySQLCreateDBForUser(h.DB, domainID, hedefAd, hedefKul)
 }
 
 func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {
