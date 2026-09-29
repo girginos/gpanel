@@ -295,7 +295,11 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 		// kaynakta olmayan her sey silinir. 'ustune' modunda hedef MUSTERININ
 		// CANLI dizinidir — uploads/, public/ gibi klasorler geri donusu
 		// olmadan yok oluyordu (kanary testiyle dogrulandi).
-		"-a", "--numeric-ids",
+		// 🔴 Aygıt/özel dosya ve sahiplik TAŞINMAZ (-a'dan SONRA gelmeli): root
+		// rsync kaynaktaki aygıt düğümünü (ör. ham disk) mknod eder, çağıranın
+		// chown -R'si onu kiracıya verir; fifo/soket de gelir. -o/-g yabancı
+		// uid/gid'i hedefe yazar. Sahiplik taşınmadığından --numeric-ids yok.
+		"-a", "--no-D", "--no-o", "--no-g",
 		"--timeout=120", "--partial",
 		// Tenant izolasyonu: uzaktaki setuid/setgid bitleri TASINMAZ.
 		"--no-perms", "--chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r",
