@@ -113,8 +113,8 @@ func guvenliAppDir(sk, appRoot string) (string, error) {
 	if strings.HasPrefix(ar, ".") || strings.Contains(ar, "/.") {
 		return "", fmt.Errorf("gizli dizin seçilemez")
 	}
-	base := "/home/" + sk
-	abs := filepath.Clean("/home/" + sk + "/" + ar)
+	base := evKoku + "/" + sk
+	abs := filepath.Clean(base + "/" + ar)
 	if abs != base && !strings.HasPrefix(abs, base+"/") {
 		return "", fmt.Errorf("dizin ev dizini dışına çıkamaz")
 	}
@@ -268,22 +268,47 @@ func gecerliRepoURL(u string) bool {
 // envMaxBoyut: .env / .env.example okuma tavanı (OOM savunması).
 const envMaxBoyut = 2 << 20
 
+// errEnvYok: .env (ya da uygulama dizini) gerçekten YOK. envOku'nun diğer hataları
+// (yolda symlink → ELOOP, düzenli olmayan dosya, boyut tavanı) "yok" DEĞİLDİR: dosya
+// büyük olasılıkla vardır ama root onu güvenle okuyamaz. Bunları "boş .env" gibi
+// göstermek düzenleyicide kaydedilince gerçek .env'in ezilmesine yol açardı.
+var errEnvYok = errors.New(".env yok")
+
+// errEnvGuvensiz: .env var olabilir ama güvenle okunamadı (EnvOku/EnvYaz 409 döner).
+var errEnvGuvensiz = errors.New(".env güvenle okunamadı (yolda sembolik bağlantı, düzenli olmayan dosya ya da boyut tavanı); panel düzenleyicisi bu dosyayı göstermez ve üzerine yazmaz — dosyayı FTP/SSH ile düzenleyin")
+
 // envOku: appRoot/.env oku. Yol /home/<sk> köküne çapalı openat2 ile, HİÇBİR bileşende
 // symlink izlenmeden açılır (evAltiDosyaOku) → tenant'ın .env'i ya da uygulama dizininin
 // bir ara bileşenini /etc/girginospanel/env veya başka tenant dizinine symlink'lemesiyle
 // (kontrol-kullanım yarışı dahil) root'un panel sırlarını/cross-tenant okuması VE
 // /dev/zero OOM'u reddedilir (denetim #2/#5). Sahiplik denetlenmez (eski davranış).
+// Dönüş hatası: yalnız gerçekten yoksa errEnvYok; diğer her durumda errEnvGuvensiz'i
+// saran hata (çağıran "yok" ile "okunamadı"yı ayırt eder).
 // Davranış otomatik_dosya_test.go'da (evKoku sahte ev) ve kaynak koruma testinde kilitli.
 func envOku(sk, appDir string) (string, error) {
 	home, rel, err := evGoreli(sk, appDir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", errEnvGuvensiz, err)
 	}
 	b, err := evAltiDosyaOku(home, path.Join(rel, ".env"), -1, envMaxBoyut)
 	if err != nil {
-		return "", err
+		if yokHatasi(err) {
+			return "", errEnvYok
+		}
+		return "", fmt.Errorf("%w: %v", errEnvGuvensiz, err)
 	}
 	return string(b), nil
+}
+
+// envYazilabilir: PUT /laravel/env öncesi denetim. Mevcut .env root tarafından güvenle
+// okunamıyorsa (errEnvGuvensiz) yazım REDDEDİLİR: düzenleyici onu boş göstermiş olabilir
+// ve kiracı-tee symlink'i izleyerek gerçek dosyanın üzerine yazardı. Yoksa ya da
+// okunabiliyorsa nil.
+func envYazilabilir(sk, appDir string) error {
+	if _, err := envOku(sk, appDir); err != nil && !errors.Is(err, errEnvYok) {
+		return err
+	}
+	return nil
 }
 
 // ---- Ev köküne çapalı, symlink İZLEMEYEN root dosya işlemleri ----
@@ -309,6 +334,23 @@ var evKoku = "/home"
 
 // kimlikBul: sistem kullanıcısı → uid/gid. Test dikişi (üretimde tenantKimlik).
 var kimlikBul = tenantKimlik
+
+// yarisKancasi: YALNIZ testler atar (üretimde nil). Denetim ile işlem arasındaki pencerede
+// çağrılır; testler burada adı takas ederek (renameat2 RENAME_EXCHANGE) yarışı
+// deterministik yeniden üretir. asama: "mkdir" (Mkdirat → Openat arası), "sahiplik"
+// (girdi açılıp denetlendikten sonra, chown'dan önce).
+var yarisKancasi func(asama string, dfd int, ad string)
+
+func yarisNoktasi(asama string, dfd int, ad string) {
+	if yarisKancasi != nil {
+		yarisKancasi(asama, dfd, ad)
+	}
+}
+
+// yokHatasi: hata "yol yok" mu (ENOENT; ara bileşen dizin değil → ENOTDIR)?
+func yokHatasi(err error) bool {
+	return errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR)
+}
 
 // evDizini: <evKoku>/<sk> (sk c_ ile başlamalı).
 func evDizini(sk string) (string, error) {
@@ -437,11 +479,32 @@ func evAltiSil(home, relDir string, adlar []string) error {
 	return ilk
 }
 
+// dizinBos: fd'nin gösterdiği dizinde "." ve ".." dışında girdi var mı? fd'nin okuma
+// konumunu ilerletir (çağıran fd'yi yalnız *at çağrılarının kökü olarak kullanır).
+func dizinBos(fd int) (bool, error) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := unix.Getdents(fd, buf)
+		if err != nil {
+			return false, err
+		}
+		if n <= 0 {
+			return true, nil
+		}
+		if _, sayi, _ := unix.ParseDirent(buf[:n], 1, nil); sayi > 0 {
+			return false, nil
+		}
+	}
+}
+
 // evAltiMkdirHepsi: `mkdir -p home/rel`in symlink-güvenli karşılığı. Her bileşen home'dan
 // başlayarak O_NOFOLLOW ile açılır (bileşen symlink ise ELOOP → durur, dışarıda dizin
 // yaratılmaz); eksik bileşen Mkdirat ile yaratılıp fd üzerinden tenant'a verilir ve izni
 // (umask'tan bağımsız) mode yapılır. Var olan bileşenin sahipliğine/iznine dokunulmaz.
 // Göç kalıntısı root-sahipli üst dizinde (ör. bootstrap/) de çalışır.
+// Yarış: Mkdirat ile Openat arasında kiracı adı aynı üst dizindeki başka (ör. root
+// sahipli, dolu) bir dizinle takas edebilir; yeni yarattığımız dizin BOŞ olmak zorunda
+// olduğundan açılan dizin boş değilse sahiplik VERİLMEZ, hata döner.
 func evAltiMkdirHepsi(home, rel string, uid, gid int, mode uint32) error {
 	fd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -460,12 +523,23 @@ func evAltiMkdirHepsi(home, rel string, uid, gid int, mode uint32) error {
 			unix.Close(fd)
 			return err
 		}
+		if yeni {
+			yarisNoktasi("mkdir", fd, parca)
+		}
 		nfd, err := unix.Openat(fd, parca, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		unix.Close(fd)
 		if err != nil {
 			return err
 		}
 		if yeni {
+			bos, berr := dizinBos(nfd)
+			if berr == nil && !bos {
+				berr = fmt.Errorf("%s: yeni yaratılan dizin yerinde değil (ad takası)", parca)
+			}
+			if berr != nil {
+				unix.Close(nfd)
+				return berr
+			}
 			err = unix.Fchown(nfd, uid, gid)
 			if err == nil {
 				err = unix.Fchmod(nfd, mode)
@@ -515,29 +589,43 @@ func sahiplikAgaci(d *os.File, uid, gid, derinlik int) error {
 		}
 	}
 	for _, ad := range adlar {
-		var st unix.Stat_t
-		if err := unix.Fstatat(dfd, ad, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			continue // yarışta kaybolmuş olabilir
-		}
-		switch st.Mode & unix.S_IFMT {
-		case unix.S_IFDIR:
-			cfd, err := unix.Openat(dfd, ad, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
-			if err != nil {
-				continue // bu arada symlink'e takas edildiyse ELOOP/ENOTDIR → atla
-			}
-			c := os.NewFile(uintptr(cfd), ad)
-			not(sahiplikAgaci(c, uid, gid, derinlik+1))
-			c.Close()
-		case unix.S_IFLNK:
-			not(unix.Fchownat(dfd, ad, uid, gid, unix.AT_SYMLINK_NOFOLLOW)) // yalnız link
-		default:
-			if st.Nlink > 1 && int(st.Uid) != uid {
-				continue
-			}
-			not(unix.Fchownat(dfd, ad, uid, gid, unix.AT_SYMLINK_NOFOLLOW))
-		}
+		not(sahiplikGirdi(dfd, ad, uid, gid, derinlik))
 	}
 	return ilk
+}
+
+// sahiplikGirdi: dfd altındaki TEK girdi. Ad yalnız BİR KEZ çözülür: O_PATH|O_NOFOLLOW
+// ile inode'a fd alınır (symlink ise linkin kendisi); tür/Nlink/sahip denetimi ve chown
+// AYNI fd üzerinden yapılır (Fstatat/Fchownat AT_EMPTY_PATH). Eskiden ad Fstatat ile
+// denetlenip Fchownat ile yeniden çözülüyordu; arada ad takasıyla (RENAME_EXCHANGE)
+// denetlenmemiş bir hardlink'in sahipliği devredilebiliyordu.
+func sahiplikGirdi(dfd int, ad string, uid, gid, derinlik int) error {
+	fd, err := unix.Openat(dfd, ad, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil // yarışta kaybolmuş olabilir
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if err := unix.Fstatat(fd, "", &st, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil
+	}
+	if st.Mode&unix.S_IFMT == unix.S_IFDIR {
+		// Aynı inode'u okumak için yeniden aç ("." — ad yeniden çözülmez).
+		cfd, err := unix.Openat(fd, ".", unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return nil
+		}
+		c := os.NewFile(uintptr(cfd), ad)
+		defer c.Close()
+		return sahiplikAgaci(c, uid, gid, derinlik+1)
+	}
+	// Başka yerde de bağlı (Nlink>1) ve kiracıya ait olmayan inode (dosya ya da symlink)
+	// devredilmez: hardlink ile yabancı inode'un sahipliğini alma savunması.
+	if st.Nlink > 1 && int(st.Uid) != uid {
+		return nil
+	}
+	yarisNoktasi("sahiplik", dfd, ad)
+	return unix.Fchownat(fd, "", uid, gid, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW)
 }
 
 // envOrnektenUret: uygulama dizininde .env YOKSA .env.example'dan üretir.
@@ -571,8 +659,14 @@ func envOrnektenUret(home, appRel string, uid int, yaz func(string) error) (cali
 	return true, true, ".env.example kopyalandı"
 }
 
+// envYazici: PUT /laravel/env'in yazıcısı. Test dikişi (handler testleri runuser
+// çalıştırmaz); üretimde daima envYaz. Kaynak koruma testi değerin envYaz olduğunu ve
+// test dışı kodda yeniden atanmadığını kilitler.
+var envYazici = envYaz
+
 // envYaz: .env'i TENANT OLARAK yaz (runuser tee) → doğru sahiplik + uid-confined
 // (tenant kendi izinleri dışına yazamaz; root symlink-follow felaketi YOK).
+// Kaynak koruma testi: yalnız exec.Command("runuser", "-u", sk, ...) — root yazımı yasak.
 func envYaz(sk, appDir, icerik string) error {
 	if len(icerik) > 5<<20 {
 		return fmt.Errorf(".env çok büyük")

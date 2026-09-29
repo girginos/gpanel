@@ -108,6 +108,7 @@ const LARAVEL_EN: Record<string, string> = {
   "npm komutu çalıştır": "Run npm command",
   "Üst": "Up",
   ".env henüz yok — kaydedince oluşturulur.": "No .env yet — created when you save.",
+  ".env okunamadı": ".env could not be read",
   "Sunucuda Node.js kurulu değil.": "Node.js is not installed on the server.",
   "Laravel uygulaması kuruldu": "Laravel application installed",
 }
@@ -328,6 +329,9 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
   { id: string; d: Durum; onDegisti: () => void; onBildir: (m: string) => void; onHata: (m: string) => void }) {
   const [env, setEnv] = useState<string | null>(null)
   const [envVar, setEnvVar] = useState(true)
+  // .env okunamadıysa (ör. yolda sembolik bağlantı → 409) düzenleyici GÖSTERİLMEZ:
+  // boş içerik kaydedilince gerçek .env'in üzerine yazılırdı.
+  const [envHata, setEnvHata] = useState('')
   const [kaydediliyor, setKaydediliyor] = useState(false)
 
   const [appRoot, setAppRoot] = useState(d.app_root || 'public_html')
@@ -339,8 +343,8 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
   useEffect(() => {
     let iptal = false
     api.get<{ var: boolean; icerik: string }>(`/domains/${id}/laravel/env`)
-      .then(r => { if (iptal) return; setEnvVar(r.data.var); setEnv(r.data.icerik) })
-      .catch(() => { if (!iptal) setEnv('') })
+      .then(r => { if (iptal) return; setEnvHata(''); setEnvVar(r.data.var); setEnv(r.data.icerik) })
+      .catch(e => { if (iptal) return; setEnv(null); setEnvHata(apiHata(e, cevir(".env okunamadı"))) })
     api.get<{ mevcut: string; adaylar: string[] }>(`/domains/${id}/laravel/app-adaylar`)
       .then(r => { if (iptal) return; setAppRoot(r.data.mevcut); setAppKayitli(r.data.mevcut); setAppAdaylar(r.data.adaylar || []) })
       .catch(e => { if (!iptal) hataYakala(cevir("Laravel uygulama adayları alınamadı"))(e) })
@@ -360,7 +364,7 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
   }
 
   async function envKaydet() {
-    if (env === null) return
+    if (env === null || envHata) return
     setKaydediliyor(true); onHata('')
     try {
       await api.put(`/domains/${id}/laravel/env`, { icerik: env })
@@ -448,7 +452,9 @@ function KontrolPaneli({ id, d, onDegisti, onBildir, onHata }:
 
       {/* .env editörü */}
       <Kart baslik={cevir("Ortam Değişkenleri (.env)")}>
-        {env === null ? (
+        {envHata ? (
+          <UyariKutusu ton="tehlike"><span className="whitespace-pre-wrap">{envHata}</span></UyariKutusu>
+        ) : env === null ? (
           <div className="text-sm text-slate-400 dark:text-slate-500 py-4">{cevir("Yükleniyor…")}</div>
         ) : (
           <>

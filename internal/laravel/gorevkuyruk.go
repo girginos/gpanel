@@ -2,6 +2,7 @@ package laravel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -64,7 +65,24 @@ func ensureLogDir(sk string) error {
 
 // ---- Zamanlanmış görev (schedule:run — dakikada bir, /etc/cron.d) ----
 
-func cronDPath(id int64) string { return cronDDizin + "/girginos-laravel-" + fmt.Sprint(id) }
+// cronDizini: cron.d dizini. Yalnız testler değiştirir (t.TempDir); üretimde /etc/cron.d.
+var cronDizini = cronDDizin
+
+func cronDPath(id int64) string { return cronDizini + "/girginos-laravel-" + fmt.Sprint(id) }
+
+// cronYaz / cronSil: Schedule'ın root olarak dokunduğu TEK dosya cron.d/girginos-laravel-<id>
+// (root'a ait sistem dizini; yol yalnız domain id'sinden türetilir, kiracı denetleyemez).
+// Kaynak koruma testi: buradaki her os çağrısının yolu cronDPath(id) olmalı.
+func cronYaz(id int64, govde string) error {
+	return os.WriteFile(cronDPath(id), []byte(govde), 0o644)
+}
+
+func cronSil(id int64) error {
+	if err := os.Remove(cronDPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
 
 // POST /domains/{id}/laravel/schedule  {"aktif":true}
 func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
@@ -89,19 +107,27 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	p := cronDPath(id)
+	// 🔴 Kiracının denetlediği yollarda root dosya işlemi YALNIZ ensureLogDir üzerinden
+	// (ev köküne çapalı, symlink izlemeden). Bu gövdede ve buradan erişilen fonksiyonlarda
+	// yol tabanlı os/exec (MkdirAll, chown, os.Chown ...) kaynak koruma testiyle yasak;
+	// davranış handler testinde (geçici DB + sahte ev) kilitli.
 	if req.Aktif {
+		home, err := evDizini(sk)
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err := ensureLogDir(sk); err != nil {
 			// cron satırı yine yazılır: >> yönlendirmesini cron KİRACI olarak yapar.
 			log.Printf("laravel schedule: log dizini hazırlanamadı (domain=%d): %v", id, err)
 		}
-		logF := "/home/" + sk + "/" + logAltDizin + "/laravel-schedule.log"
+		logF := home + "/" + logAltDizin + "/laravel-schedule.log"
 		// cron.d formatı: dk sa gün ay haftagünü KULLANICI komut
 		line := fmt.Sprintf("* * * * * %s %s %s/artisan schedule:run >> %s 2>&1\n",
 			sk, phpBin(phpSurum), appDir, logF)
 		body := "# girginos Laravel Toolkit — zamanlanmış görev (domain " + fmt.Sprint(id) + ")\n" +
 			"PATH=" + sistemPATH + "\n" + line
-		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+		if err := cronYaz(id, body); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "cron yazılamadı: "+err.Error())
 			return
 		}
@@ -109,7 +135,7 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 			log.Printf("laravel schedule: schedule_enabled=1 yazılamadı (domain=%d): %v — cron kuruldu ama panel durumu güncellenmedi", id, err)
 		}
 	} else {
-		_ = os.Remove(p)
+		_ = cronSil(id)
 		if _, err := h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=0 WHERE domain_id=?`, id); err != nil {
 			log.Printf("laravel schedule: schedule_enabled=0 yazılamadı (domain=%d): %v — cron kaldırıldı ama panel durumu güncellenmedi", id, err)
 		}

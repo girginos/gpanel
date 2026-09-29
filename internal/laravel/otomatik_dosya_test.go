@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -450,19 +451,24 @@ type kaynakGovde struct {
 }
 
 type paketKaynak struct {
-	fset   *token.FileSet
-	fonk   map[string]kaynakGovde // "ad" ya da "Alici.ad"
-	yontem map[string][]string    // yöntem adı → anahtarlar
+	fset      *token.FileSet
+	fonk      map[string]kaynakGovde // "ad" ya da "Alici.ad"
+	yontem    map[string][]string    // yöntem adı → anahtarlar
+	tehlikeli map[string]bool        // paket düzeyinde yasak seçiciye takma ad (var x = os.ReadFile)
 }
 
-// paketKaynagiOku: paketin test dışı .go dosyalarını ayrıştırır.
+// paketKaynagiOku: paketin test dışı .go dosyalarını ayrıştırır. Ayrıca paket düzeyinde
+// bir yasak seçiciye (os.ReadFile gibi) takma ad veren tanımlayıcıları toplar: aksi halde
+// `var dosyaOku = os.ReadFile; ... dosyaOku(p)` ile handler yol tabanlı okumayı gizleyebilir
+// (denetim boşluğu a). os.Stat/os.Lstat takma adı serbesttir (yalnız varlık yoklaması).
 func paketKaynagiOku(t *testing.T) paketKaynak {
 	t.Helper()
-	p := paketKaynak{fset: token.NewFileSet(), fonk: map[string]kaynakGovde{}, yontem: map[string][]string{}}
+	p := paketKaynak{fset: token.NewFileSet(), fonk: map[string]kaynakGovde{}, yontem: map[string][]string{}, tehlikeli: map[string]bool{}}
 	dosyalar, err := filepath.Glob("*.go")
 	if err != nil || len(dosyalar) == 0 {
 		t.Fatalf("kaynak bulunamadı: %v", err)
 	}
+	serbestTakma := func(sel string) bool { return sel == "os.Stat" || sel == "os.Lstat" }
 	for _, d := range dosyalar {
 		if strings.HasSuffix(d, "_test.go") {
 			continue
@@ -484,6 +490,23 @@ func paketKaynagiOku(t *testing.T) paketKaynak {
 			paket[ad] = yol
 		}
 		for _, dc := range f.Decls {
+			// Paket düzeyi var: initializer'ında yasak seçici varsa adı "tehlikeli".
+			if gd, ok := dc.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				for _, spec := range gd.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, deger := range vs.Values {
+						if yasakSeciciVar(deger, paket, serbestTakma) {
+							for _, ad := range vs.Names {
+								p.tehlikeli[ad.Name] = true
+							}
+						}
+					}
+				}
+				continue
+			}
 			fd, ok := dc.(*ast.FuncDecl)
 			if !ok || fd.Body == nil {
 				continue
@@ -503,6 +526,22 @@ func paketKaynagiOku(t *testing.T) paketKaynak {
 		}
 	}
 	return p
+}
+
+// yasakSeciciVar: ifade (ya da alt ifadesi) yasak bir paketin seçicisi mi (serbest hariç)?
+func yasakSeciciVar(e ast.Expr, paket map[string]string, serbest func(string) bool) bool {
+	bulundu := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if se, ok := n.(*ast.SelectorExpr); ok {
+			if id, ok := se.X.(*ast.Ident); ok {
+				if yol := paket[id.Name]; yasakPaketYol[yol] && !serbest(path.Base(yol)+"."+se.Sel.Name) {
+					bulundu = true
+				}
+			}
+		}
+		return !bulundu
+	})
+	return bulundu
 }
 
 // incele: gövdedeki (kapanışlar dahil) çağrı adları, kullanılan adlar (çağrı, seçici,
@@ -547,11 +586,16 @@ func (p paketKaynak) incele(g kaynakGovde, izinli func(string) bool) (cagri, adl
 // çalışan yardımcılar (envYaz, TenantExec) üzerinden yapılır; bunların içine inilmez.
 func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 	serbest := func(s string) bool { return s == "os.Stat" || s == "os.Lstat" }
+	// guvenli: geçişli taramada İÇİNE İNİLMEYEN yardımcılar. Her biri ya kiracı uid'siyle
+	// çalışır (envYaz/TenantExec: runuser — TestKaynakKoruma_KiraciCapali kilitler) ya da
+	// yalnız kök-sahipli sistem yoluna yazar (cronYaz/cronSil: id türevli — aynı test
+	// kilitler) ya da ev köküne çapalı fd tabanlıdır (evAlti*: fd-tabanlı test kilitler).
 	guvenli := map[string]bool{
 		"evAltiAc": true, "evAltiDosyaOku": true, "evAltiChmod": true, "evAltiSil": true,
-		"evAltiMkdirHepsi": true, "evAltiSahiplikVer": true, "sahiplikAgaci": true,
-		"fdDuzenliVeSahip": true, "envOrnektenUret": true,
-		"envYaz": true, "TenantExec": true, "tenantExecEnv": true, "tenantKimlik": true,
+		"evAltiMkdirHepsi": true, "evAltiSahiplikVer": true, "sahiplikAgaci": true, "sahiplikGirdi": true,
+		"fdDuzenliVeSahip": true, "envOrnektenUret": true, "dizinBos": true, "yokHatasi": true,
+		"envYaz": true, "envYazici": true, "TenantExec": true, "tenantExecEnv": true, "tenantKimlik": true,
+		"cronYaz": true, "cronSil": true,
 	}
 	// Handler kiracı kimliğini/ev yolunu kendisi kurmaz, çapalı yardımcıları doğrudan
 	// çağırmaz: yalnız otomatikDosya yöntemleri.
@@ -569,12 +613,31 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 		{"otomatikDosya.izinler", []string{"evAltiMkdirHepsi", "evAltiSahiplikVer"}, nil},
 		{"otomatikDosya.onbellekSil", []string{"evAltiSil"}, nil},
 		{"envOku", []string{"evGoreli", "evAltiDosyaOku"}, nil},
+		{"envYazilabilir", []string{"envOku"}, nil},
 		{"laravelEksikler", []string{"envOku"}, nil},
 		{"Handlers.EnvOku", []string{"envOku"}, nil},
-		{"Handlers.EnvYaz", []string{"envYaz"}, nil},
+		// EnvYaz üzerine yazmadan ÖNCE envYazilabilir çağırmalı (güvensiz .env'i ezmeyi
+		// engeller) ve yazımı envYazici seam'i üzerinden yapmalı; envYaz'a doğrudan dönerse
+		// (ve envYazilabilir silinirse) burada düşer.
+		{"Handlers.EnvYaz", []string{"envYazilabilir", "envYazici"}, []string{"envYaz"}},
 		{"ensureLogDir", []string{"evDizini", "kimlikBul", "evAltiMkdirHepsi"}, nil},
+		// Schedule: kiracının denetlediği ~/logs'a root dokunuşu YALNIZ ensureLogDir
+		// üzerinden; kök dosyası YALNIZ cronYaz/cronSil (id türevli yol). Eski os.Stat/
+		// os.MkdirAll/os.Chown/chown -R veya ensureLogDir'in silinmesi burada düşer.
+		{"Handlers.Schedule", []string{"ensureLogDir"}, []string{"evAltiMkdirHepsi", "evAltiSahiplikVer", "kimlikBul"}},
 	}
 	p := paketKaynagiOku(t)
+	// Paket düzeyinde yasak seçiciye takma ad (var x = os.ReadFile) HİÇ olmamalı: meşru
+	// gerekçesi yok ve transitif çağrı taramasını (Ident çağrısı) atlatmak için kullanılır
+	// (denetim boşluğu a). Böyle bir ad ayrıca aşağıdaki transitif taramada da yakalanır.
+	if len(p.tehlikeli) > 0 {
+		adlar := make([]string, 0, len(p.tehlikeli))
+		for a := range p.tehlikeli {
+			adlar = append(adlar, a)
+		}
+		sort.Strings(adlar)
+		t.Errorf("paket düzeyi yasak-seçici takma adı bulundu (yol tabanlı os/exec/unix'i gizler): %v", adlar)
+	}
 	for _, k := range kurallar {
 		g, ok := p.fonk[k.kok]
 		if !ok {
@@ -589,7 +652,7 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 		}
 		for _, y := range k.yasak {
 			if adlar[y] {
-				t.Errorf("%s: %s doğrudan kullanılmamalı (dosya işlemi yalnız otomatikDosya üzerinden)", k.kok, y)
+				t.Errorf("%s: %s doğrudan kullanılmamalı (dosya işlemi yalnız çapalı/kiracı yardımcıları üzerinden)", k.kok, y)
 			}
 		}
 		// Geçişli tarama: kökten paket içinde erişilen her fonksiyon.
@@ -602,9 +665,15 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 				continue
 			}
 			ziyaret[a] = true
-			c, _, ihlal := p.incele(p.fonk[a], serbest)
+			c, adlarA, ihlal := p.incele(p.fonk[a], serbest)
 			for _, i := range ihlal {
 				t.Errorf("%s (%s üzerinden erişiliyor): yol tabanlı %s", a, k.kok, i)
+			}
+			// Paket düzeyi yasak-seçici takma adı (var x = os.ReadFile) çağrısı/kullanımı.
+			for ad := range adlarA {
+				if p.tehlikeli[ad] {
+					t.Errorf("%s (%s üzerinden erişiliyor): paket düzeyi yasak-seçici takma adı %q kullanılıyor", a, k.kok, ad)
+				}
 			}
 			for ad := range c {
 				hedef := append([]string(nil), p.yontem[ad]...)
@@ -621,6 +690,111 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 	}
 }
 
+// TestKaynakKoruma_KiraciCapali: guvenli listesindeki "içine inilmeyen" yazıcıların KENDİSİ
+// güvenli mi? İki sınıf: (1) kiracı uid'siyle çalışanlar (envYaz/envYazici) — yol tabanlı
+// root os yazımı (os.WriteFile/os.Create/os.OpenFile/os.Chmod/os.Chown/os.Remove/os.Mkdir*)
+// YASAK, tek exec hedefi "runuser" olmalı; (2) yalnız kök yoluna yazanlar (cronYaz/cronSil) —
+// her os yol argümanı cronDPath(...) çağrısı olmalı. Denetim boşluğu (b): envYaz gizlice
+// root os.WriteFile(dst,...) yaparsa bir üst test onu (guvenli, taranmıyor) yakalamıyordu.
+func TestKaynakKoruma_KiraciCapali(t *testing.T) {
+	p := paketKaynagiOku(t)
+	yasakYazSel := map[string]bool{
+		"os.WriteFile": true, "os.Create": true, "os.OpenFile": true, "os.Chmod": true,
+		"os.Chown": true, "os.Lchown": true, "os.Remove": true, "os.RemoveAll": true,
+		"os.Mkdir": true, "os.MkdirAll": true, "os.Rename": true, "os.Symlink": true, "os.Link": true,
+		"os.ReadFile": true, "ioutil.WriteFile": true, "ioutil.ReadFile": true,
+	}
+	// (1) runuser ile kiracı olarak çalışanlar.
+	for _, ad := range []string{"envYaz", "TenantExec", "tenantExecEnv"} {
+		g, ok := p.fonk[ad]
+		if !ok {
+			t.Errorf("%s bulunamadı", ad)
+			continue
+		}
+		var execCagri int
+		ast.Inspect(g.fd.Body, func(n ast.Node) bool {
+			ce, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			se, ok := ce.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			id, ok := se.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			sel := path.Base(g.paket[id.Name]) + "." + se.Sel.Name
+			if yasakYazSel[sel] {
+				t.Errorf("%s: kiracı-çapalı yazıcı yol tabanlı root %s yapıyor", ad, sel)
+			}
+			if (sel == "exec.Command" || sel == "exec.CommandContext") && !execHedefRunuser(ce) {
+				t.Errorf("%s: exec hedefi \"runuser\" değil (kiracıya düşürme atlanmış olabilir)", ad)
+			}
+			return true
+		})
+		_ = execCagri
+	}
+	// (2) yalnız kök (id türevli) yola yazanlar: her os çağrısının yol argümanı cronDPath(...).
+	for _, ad := range []string{"cronYaz", "cronSil"} {
+		g, ok := p.fonk[ad]
+		if !ok {
+			t.Errorf("%s bulunamadı", ad)
+			continue
+		}
+		ast.Inspect(g.fd.Body, func(n ast.Node) bool {
+			ce, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			se, ok := ce.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			id, ok := se.X.(*ast.Ident)
+			if !ok || g.paket[id.Name] == "" {
+				return true
+			}
+			sel := path.Base(g.paket[id.Name]) + "." + se.Sel.Name
+			if !yasakPaketYol[g.paket[id.Name]] {
+				return true
+			}
+			if serbest := sel == "os.Stat" || sel == "os.Lstat"; serbest {
+				return true
+			}
+			if len(ce.Args) == 0 || !cagriAdi(ce.Args[0], "cronDPath") {
+				t.Errorf("%s: %s yol argümanı cronDPath(...) değil (kök dışına yazma riski)", ad, sel)
+			}
+			return true
+		})
+	}
+}
+
+// execHedefRunuser: exec.Command/CommandContext ilk (ya da CommandContext için ikinci) arg
+// sabit "runuser" mı?
+func execHedefRunuser(ce *ast.CallExpr) bool {
+	idx := 0
+	if se, ok := ce.Fun.(*ast.SelectorExpr); ok && se.Sel.Name == "CommandContext" {
+		idx = 1
+	}
+	if len(ce.Args) <= idx {
+		return false
+	}
+	bl, ok := ce.Args[idx].(*ast.BasicLit)
+	return ok && bl.Kind == token.STRING && strings.Trim(bl.Value, "\"`") == "runuser"
+}
+
+// cagriAdi: ifade `ad(...)` biçiminde bir çağrı mı?
+func cagriAdi(e ast.Expr, ad string) bool {
+	ce, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	id, ok := ce.Fun.(*ast.Ident)
+	return ok && id.Name == ad
+}
+
 // Çapalı yardımcılar YALNIZ fd/*at tabanlı syscall kullanır: açılıştan sonra yol ile
 // (os.Remove/os.Chmod/os.ReadFile/unix.Unlink/...) işlem yapmak, açma ile işlem arasında
 // ara bileşenin symlink'e takası yarışını geri getirir — bu fark statik testte görünmez,
@@ -632,6 +806,7 @@ func TestKaynakKoruma_CapaliYardimcilarFdTabanli(t *testing.T) {
 		"unix.Open":  true, "unix.Openat2": true, "unix.Openat": true, "unix.Close": true,
 		"unix.Fstat": true, "unix.Fstatat": true, "unix.Fchmod": true, "unix.Fchown": true,
 		"unix.Fchownat": true, "unix.Unlinkat": true, "unix.Mkdirat": true,
+		"unix.Getdents": true, "unix.ParseDirent": true,
 		"unix.OpenHow": true, "unix.Stat_t": true, "unix.ENOENT": true, "unix.EEXIST": true,
 	}
 	sabit := []string{"unix.O_", "unix.RESOLVE_", "unix.S_IF", "unix.AT_"}
@@ -648,7 +823,7 @@ func TestKaynakKoruma_CapaliYardimcilarFdTabanli(t *testing.T) {
 	}
 	p := paketKaynagiOku(t)
 	for _, ad := range []string{"evAltiAc", "evAltiDosyaOku", "evAltiChmod", "evAltiSil", "evAltiMkdirHepsi",
-		"evAltiSahiplikVer", "sahiplikAgaci", "fdDuzenliVeSahip", "envOrnektenUret"} {
+		"evAltiSahiplikVer", "sahiplikAgaci", "sahiplikGirdi", "dizinBos", "fdDuzenliVeSahip", "envOrnektenUret"} {
 		g, ok := p.fonk[ad]
 		if !ok {
 			t.Errorf("%s bulunamadı (yeniden adlandırıldıysa bu koruma testini güncelle)", ad)
