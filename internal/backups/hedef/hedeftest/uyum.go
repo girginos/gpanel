@@ -2,12 +2,15 @@
 // ve bellek içi sahte hedef (Bellek). Yalnız testlerden içe aktarılır.
 //
 // Her yeni hedef türü kendi testinde (httptest ya da geçici yerel sunucuya
-// karşı) Uyum'u çağırır:
+// karşı) Uyum'u, hedefi kurarken kullandığı TÜM sırlarla (parola, gizli anahtar,
+// jeton — nöbetçi değerler) çağırır:
 //
-//	func TestS3Uyum(t *testing.T) { hedeftest.Uyum(t, s3Hedefi(t)) }
+//	func TestS3Uyum(t *testing.T) { hedeftest.Uyum(t, s3Hedefi(t, nobet), nobet) }
 //
 // Uyum, hedefin tabanında rastgele bir "gosp-uyum-<hex>/" alt dizininde çalışır
-// ve sonunda oluşturduğu her dosyayı siler.
+// ve sonunda oluşturduğu her dosyayı siler. Denetlediği her hata dönüşünde:
+// doğrudan *hedef.Hata (sarılmamış), geçerli kategori ve Error()/Ayrinti()'de
+// sır YOK.
 package hedeftest
 
 import (
@@ -16,8 +19,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	mrand "math/rand/v2"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,22 +45,28 @@ type sinayici interface {
 }
 
 type ortam struct {
-	h    hedef.Hedef
-	onek string
-	ctx  context.Context
-	kisa bool
+	h      hedef.Hedef
+	onek   string
+	ctx    context.Context
+	kisa   bool
+	sirlar []string
 
 	mu    sync.Mutex
 	adlar map[string]bool
 }
 
-func yeniOrtam(t *testing.T, h hedef.Hedef) *ortam {
+func yeniOrtam(t *testing.T, h hedef.Hedef, sirlar ...string) *ortam {
 	t.Helper()
 	var rnd [6]byte
 	_, _ = rand.Read(rnd[:])
 	ctx, iptal := context.WithTimeout(context.Background(), 20*time.Minute)
 	o := &ortam{h: h, onek: "gosp-uyum-" + hex.EncodeToString(rnd[:]) + "/", ctx: ctx,
 		kisa: testing.Short(), adlar: map[string]bool{}}
+	for _, s := range sirlar {
+		if strings.TrimSpace(s) != "" {
+			o.sirlar = append(o.sirlar, s)
+		}
+	}
 	t.Cleanup(func() {
 		defer iptal()
 		o.mu.Lock()
@@ -85,10 +96,11 @@ type deneme struct {
 	f  func(t sinayici, o *ortam)
 }
 
-// Uyum — h'nin hedef.Hedef sözleşmesine uyduğunu doğrular.
-func Uyum(t *testing.T, h hedef.Hedef) {
+// Uyum — h'nin hedef.Hedef sözleşmesine uyduğunu doğrular. sirlar: hedefin
+// kurulumunda kullanılan nöbetçi sırlar; hiçbir hata metnine sızmamalı.
+func Uyum(t *testing.T, h hedef.Hedef, sirlar ...string) {
 	t.Helper()
-	o := yeniOrtam(t, h)
+	o := yeniOrtam(t, h, sirlar...)
 	for _, d := range denemeler() {
 		t.Run(d.ad, func(t *testing.T) { d.f(t, o) })
 	}
@@ -108,6 +120,7 @@ func denemeler() []deneme {
 		{"yanlis_sha", denemeYanlisSha},
 		{"gecersiz_ad", denemeGecersizAd},
 		{"olmayan_sil", denemeOlmayanSil},
+		{"eszamanli_yukleme", denemeEszamanli},
 	}
 }
 
@@ -174,6 +187,12 @@ func gidisDonus(t sinayici, o *ortam, ad string, boyut int64, tohum uint64) {
 	t.Helper()
 	yerel, sha := dosyaUret(t, boyut, tohum)
 	yukle(t, o, yerel, ad, sha, boyut)
+	dogrula(t, o, ad, sha, boyut)
+}
+
+// dogrula — uzaktaki ad: Listele'de boyut (+ varsa sunucu sha) ve indirilen sha.
+func dogrula(t sinayici, o *ortam, ad, sha string, boyut int64) {
+	t.Helper()
 	n, ok := bul(t, o, ad)
 	if !ok {
 		t.Fatalf("yüklenen %q Listele'de yok", ad)
@@ -205,12 +224,65 @@ func yokOlmali(t sinayici, o *ortam, ad, neden string) {
 	} else if k := hedef.KategoriAl(err); k != hedef.KategoriBulunamadi {
 		t.Errorf("%s: olmayan dosyada kategori %q, beklenen bulunamadi (%v)", neden, k, err)
 	}
-	var h *hedef.Hata
-	if err != nil && !errors.As(err, &h) {
-		t.Errorf("%s: hata *hedef.Hata değil: %T", neden, err)
-	}
+	hataDenetle(t, o, err, neden+": Indir")
 	if _, serr := os.Stat(inen); serr == nil {
 		t.Errorf("%s: başarısız Indir yerel dosya bıraktı", neden)
+	}
+}
+
+// hataDenetle — hata dönüşü sözleşmesi (err nil ise bir şey yapmaz): doğrudan
+// *hedef.Hata (saran hata dış metni Error()'a sokar), geçerli kategori ve
+// Error()/Ayrinti()'de nöbetçi sır YOK. Sır değeri çıktıya YAZILMAZ.
+func hataDenetle(t sinayici, o *ortam, err error, neden string) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	metinler := []string{err.Error()}
+	var h *hedef.Hata
+	if errors.As(err, &h) {
+		if err.Error() != h.Error() {
+			t.Errorf("%s: *hedef.Hata SARILMIŞ, dış metin Error()'a giriyor: %q", neden, err.Error())
+		}
+		if !h.Kategori.Gecerli() {
+			t.Errorf("%s: geçersiz kategori %q", neden, h.Kategori)
+		}
+		metinler = append(metinler, h.Ayrinti())
+	} else {
+		t.Errorf("%s: hata *hedef.Hata değil (%T): ham metin Error()'a sızabilir", neden, err)
+	}
+	for i, s := range o.sirlar {
+		for _, m := range metinler {
+			if strings.Contains(m, s) || strings.Contains(m, url.QueryEscape(s)) {
+				t.Errorf("%s: %d. nöbetçi sır hata metnine SIZDI (Error ya da Ayrinti)", neden, i+1)
+				break
+			}
+		}
+	}
+}
+
+// dizinBos — başarısız yüklemeden sonra dizinde (Listele(dizin/)) HİÇBİR dosya
+// kalmamalı: ne nihai ad ne de temizlenmemiş geçici dosya. YetenekOnekListele
+// yoksa denetlenemez (yetenekler denemesi zaten düşer).
+func dizinBos(t sinayici, o *ortam, dizin, neden string) {
+	t.Helper()
+	if !o.h.Yetenekler().Var(hedef.YetenekOnekListele) {
+		return
+	}
+	liste, err := o.h.Listele(o.ctx, o.onek+dizin+"/")
+	if err != nil {
+		t.Errorf("%s: Listele(%s/): %v", neden, dizin, err)
+		return
+	}
+	for _, n := range liste {
+		if hedef.GeciciMi(n.Ad) {
+			t.Errorf("%s: yarım geçici dosya TEMİZLENMEDİ: %q", neden, n.Ad)
+		} else {
+			t.Errorf("%s: dizinde fazladan dosya KALDI (geçici ise hedef.UzakGeciciAd kullanılmalı): %q", neden, n.Ad)
+		}
+		o.mu.Lock()
+		o.adlar[n.Ad] = true // Uyum sonunda temizlensin
+		o.mu.Unlock()
 	}
 }
 
@@ -224,6 +296,9 @@ func denemeYetenekler(t sinayici, o *ortam) {
 	if !y.Var(hedef.YetenekIlerleme) {
 		t.Errorf("sözleşme: YetenekIlerleme zorunlu (iptal ve arayüz ilerlemesi); yetenekler: %s", y)
 	}
+	if !y.Var(hedef.YetenekOnekListele) {
+		t.Errorf("sözleşme: YetenekOnekListele zorunlu (yarım dosya temizliği ve sahipsiz dosya raporu); yetenekler: %s", y)
+	}
 	if strings.TrimSpace(o.h.Tur()) == "" {
 		t.Errorf("Tur boş")
 	}
@@ -233,6 +308,17 @@ func denemeTest(t sinayici, o *ortam) {
 	if err := o.h.Test(o.ctx); err != nil {
 		t.Errorf("Test: %v", err)
 	}
+	// Test gerçekten depoya gidiyorsa iptal edilmiş bağlamla BAŞARAMAZ ("hiçbir
+	// şey yapmadan nil" dönen Test yakalanır).
+	ctx, iptal := context.WithCancel(o.ctx)
+	iptal()
+	err := o.h.Test(ctx)
+	if err == nil {
+		t.Errorf("iptal edilmiş bağlamla Test başarı döndü (erişimi gerçekten sınamıyor)")
+	} else if !errors.Is(err, context.Canceled) {
+		t.Errorf("iptal edilmiş Test hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
+	}
+	hataDenetle(t, o, err, "iptal edilmiş Test")
 }
 
 func denemeGidisDonus(t sinayici, o *ortam) {
@@ -301,7 +387,7 @@ func denemeBuyuk(t sinayici, o *ortam) {
 func denemeIptalOrtada(t sinayici, o *ortam) {
 	const boyut = 8 << 20
 	yerel, sha := dosyaUret(t, boyut, 6)
-	ad := o.ad("iptal/ortada.age")
+	ad := o.ad("iptal-ortada/yedek.age")
 	ctx, iptal := context.WithCancel(o.ctx)
 	defer iptal()
 	// Ilerleme uygulamanın kendi goroutine'inden çağrılabilir → atomik bayrak.
@@ -319,18 +405,55 @@ func denemeIptalOrtada(t sinayici, o *ortam) {
 	} else if !errors.Is(err, context.Canceled) {
 		t.Errorf("iptal hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
 	}
+	hataDenetle(t, o, err, "ortada iptal: Yukle")
 	yokOlmali(t, o, ad, "ortada iptal")
+	dizinBos(t, o, "iptal-ortada", "ortada iptal")
 }
 
 func denemeIptalOnceden(t sinayici, o *ortam) {
 	yerel, sha := dosyaUret(t, 1<<20, 7)
-	ad := o.ad("iptal/onceden.age")
+	ad := o.ad("iptal-onceden/yedek.age")
 	ctx, iptal := context.WithCancel(o.ctx)
 	iptal()
-	if err := o.h.Yukle(ctx, yerel, ad, hedef.YukleSecenek{Sha256: sha}); err == nil {
+	err := o.h.Yukle(ctx, yerel, ad, hedef.YukleSecenek{Sha256: sha})
+	if err == nil {
 		t.Errorf("iptal edilmiş bağlamla Yukle başarı döndü")
+	} else if !errors.Is(err, context.Canceled) {
+		t.Errorf("iptal edilmiş Yukle hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
 	}
+	hataDenetle(t, o, err, "önceden iptal: Yukle")
 	yokOlmali(t, o, ad, "önceden iptal")
+	dizinBos(t, o, "iptal-onceden", "önceden iptal")
+
+	// Diğer işlemler de iptal edilmiş bağlama uyar; iptal edilen Sil dosyayı silmez.
+	var2 := o.ad("iptal-onceden/var.age")
+	yerel2, sha2 := dosyaUret(t, 2048, 17)
+	yukle(t, o, yerel2, var2, sha2, 2048)
+	if _, err := o.h.Listele(ctx, o.onek+"iptal-onceden/"); err == nil || !errors.Is(err, context.Canceled) {
+		t.Errorf("iptal edilmiş Listele: errors.Is(context.Canceled) beklenirdi: %v", err)
+	} else {
+		hataDenetle(t, o, err, "önceden iptal: Listele")
+	}
+	inen := filepath.Join(t.TempDir(), "iptal.bin")
+	if err := o.h.Indir(ctx, var2, inen); err == nil || !errors.Is(err, context.Canceled) {
+		t.Errorf("iptal edilmiş Indir: errors.Is(context.Canceled) beklenirdi: %v", err)
+	} else {
+		hataDenetle(t, o, err, "önceden iptal: Indir")
+	}
+	if _, serr := os.Stat(inen); serr == nil {
+		t.Errorf("iptal edilmiş Indir yerel dosya bıraktı")
+	}
+	if err := o.h.Sil(ctx, var2); err == nil {
+		t.Errorf("iptal edilmiş bağlamla Sil başarı döndü")
+	} else {
+		hataDenetle(t, o, err, "önceden iptal: Sil")
+	}
+	if _, ok := bul(t, o, var2); !ok {
+		t.Errorf("iptal edilmiş Sil dosyayı SİLDİ")
+	}
+	if err := o.h.Sil(o.ctx, var2); err != nil {
+		t.Fatalf("Sil: %v", err)
+	}
 }
 
 func denemeYanlisSha(t sinayici, o *ortam) {
@@ -339,12 +462,15 @@ func denemeYanlisSha(t sinayici, o *ortam) {
 		return
 	}
 	yerel, _ := dosyaUret(t, 4096, 8)
-	ad := o.ad("sha/yanlis.age")
+	ad := o.ad("sha-yanlis/yedek.age")
 	yanlis := strings.Repeat("0", 64)
-	if err := o.h.Yukle(o.ctx, yerel, ad, hedef.YukleSecenek{Sha256: yanlis}); err == nil {
+	err := o.h.Yukle(o.ctx, yerel, ad, hedef.YukleSecenek{Sha256: yanlis})
+	if err == nil {
 		t.Errorf("yanlış sha256 ile Yukle başarı döndü")
 	}
+	hataDenetle(t, o, err, "yanlış sha256: Yukle")
 	yokOlmali(t, o, ad, "yanlış sha256")
+	dizinBos(t, o, "sha-yanlis", "yanlış sha256")
 }
 
 func denemeGecersizAd(t sinayici, o *ortam) {
@@ -355,12 +481,18 @@ func denemeGecersizAd(t sinayici, o *ortam) {
 		if err := o.h.Yukle(o.ctx, yerel, ad, hedef.YukleSecenek{}); err == nil {
 			t.Errorf("geçersiz ad Yukle'de KABUL edildi: %q", ad)
 			_ = o.h.Sil(o.ctx, ad)
+		} else {
+			hataDenetle(t, o, err, "geçersiz ad: Yukle")
 		}
 		if err := o.h.Indir(o.ctx, ad, filepath.Join(t.TempDir(), "x")); err == nil {
 			t.Errorf("geçersiz ad Indir'de KABUL edildi: %q", ad)
+		} else {
+			hataDenetle(t, o, err, "geçersiz ad: Indir")
 		}
 		if err := o.h.Sil(o.ctx, ad); err == nil {
 			t.Errorf("geçersiz ad Sil'de KABUL edildi: %q", ad)
+		} else {
+			hataDenetle(t, o, err, "geçersiz ad: Sil")
 		}
 	}
 }
@@ -372,5 +504,112 @@ func denemeOlmayanSil(t sinayici, o *ortam) {
 	liste, err := o.h.Listele(o.ctx, o.onek+"hic-olmadi/yok")
 	if err != nil || len(liste) != 0 {
 		t.Errorf("olmayan önek: boş liste ve nil hata beklenirdi: %v %v", liste, err)
+	}
+}
+
+// eszamanliYukle — yüklemeleri AYNI ANDA yürütür. Her yükleme ilk Ilerleme
+// çağrısında diğerlerini bekler (en çok 2 sn): böylece hepsi aktarımın ORTASINDA
+// üst üste biner. Yüklemeleri kendi içinde sıraya sokan uygulama da meşrudur
+// (bekleme süre dolunca sürer).
+func eszamanliYukle(o *ortam, yollar, shalar, adlar []string, boyut int64) []error {
+	n := len(adlar)
+	hepsi := make(chan struct{})
+	var sayac atomic.Int32
+	hatalar := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var ilk atomic.Bool
+			hatalar[i] = o.h.Yukle(o.ctx, yollar[i], adlar[i], hedef.YukleSecenek{Boyut: boyut, Sha256: shalar[i],
+				Ilerleme: func(aktarilan int64) {
+					if aktarilan <= 0 || !ilk.CompareAndSwap(false, true) {
+						return
+					}
+					if int(sayac.Add(1)) == n {
+						close(hepsi)
+					}
+					bekle := time.NewTimer(2 * time.Second)
+					defer bekle.Stop()
+					select {
+					case <-hepsi:
+					case <-bekle.C:
+					case <-o.ctx.Done():
+					}
+				}})
+		}(i)
+	}
+	wg.Wait()
+	return hatalar
+}
+
+func denemeEszamanli(t sinayici, o *ortam) {
+	const n = 3
+	const boyut = 256<<10 + 11
+	yollar := make([]string, n)
+	shalar := make([]string, n)
+	for i := range yollar {
+		yollar[i], shalar[i] = dosyaUret(t, boyut, uint64(30+i))
+	}
+
+	// 1) Aynı dizinde FARKLI adlar: hepsi başarılı ve içerikler karışmamış.
+	farkli := make([]string, n)
+	for i := range farkli {
+		farkli[i] = o.ad(fmt.Sprintf("eszamanli/farkli-%d.age", i))
+	}
+	for i, err := range eszamanliYukle(o, yollar, shalar, farkli, boyut) {
+		if err != nil {
+			t.Errorf("eşzamanlı yükleme (farklı ad) %d başarısız: %v", i, err)
+			hataDenetle(t, o, err, "eşzamanlı yükleme")
+		}
+	}
+	for i, ad := range farkli {
+		if _, ok := bul(t, o, ad); ok {
+			dogrula(t, o, ad, shalar[i], boyut)
+		}
+	}
+
+	// 2) AYNI ada eşzamanlı yüklemeler: en az biri başarılı, kalan içerik
+	// başarılı yüklemelerden BİRİNİN tam hali (karışım değil). Sağlayıcı
+	// yarışanlardan birini hatayla reddedebilir (ör. oran sınırı).
+	ayni := o.ad("eszamanli/ayni.age")
+	basarili := map[string]bool{}
+	for i, err := range eszamanliYukle(o, yollar, shalar, []string{ayni, ayni, ayni}, boyut) {
+		if err == nil {
+			basarili[shalar[i]] = true
+		} else {
+			hataDenetle(t, o, err, "eşzamanlı yükleme (aynı ad)")
+		}
+	}
+	if len(basarili) == 0 {
+		t.Errorf("aynı ada eşzamanlı %d yüklemenin HİÇBİRİ başarılı olmadı", n)
+	} else {
+		inen := filepath.Join(t.TempDir(), "ayni.bin")
+		if err := o.h.Indir(o.ctx, ayni, inen); err != nil {
+			t.Errorf("Indir(aynı ad): %v", err)
+		} else if got := dosyaSha(t, inen); !basarili[got] {
+			t.Errorf("aynı ada eşzamanlı yüklemeler KARIŞTI: kalan içerik hiçbir başarılı yüklemeye eşit değil")
+		}
+	}
+
+	// 3) Dizinde yalnız 3 farklı + 1 aynı ad kalır; yarım/geçici dosya yok.
+	if o.h.Yetenekler().Var(hedef.YetenekOnekListele) {
+		liste, err := o.h.Listele(o.ctx, o.onek+"eszamanli/")
+		if err != nil {
+			t.Fatalf("Listele(eszamanli/): %v", err)
+		}
+		beklenen := map[string]bool{ayni: true}
+		for _, ad := range farkli {
+			beklenen[ad] = true
+		}
+		for _, nes := range liste {
+			if !beklenen[nes.Ad] {
+				t.Errorf("eşzamanlı yüklemeler sonrası fazladan dosya (geçici=%v): %q", hedef.GeciciMi(nes.Ad), nes.Ad)
+				o.mu.Lock()
+				o.adlar[nes.Ad] = true
+				o.mu.Unlock()
+			}
+		}
 	}
 }

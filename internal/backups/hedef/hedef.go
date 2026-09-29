@@ -42,7 +42,8 @@ const (
 	// (orkestratör manifesti en son yükleyerek "tamam" işaretler).
 	YetenekAtomikYukle Yetenek = 1 << iota
 	// YetenekOnekListele — Listele dizin içi ad önekiyle çoklu sonuç döner;
-	// yoksa yalnız TAM ad sorgusu desteklenir.
+	// yoksa yalnız TAM ad sorgusu desteklenir. hedeftest.Uyum bunu ZORUNLU tutar:
+	// yarım dosya temizliği ve sahipsiz dosya raporu dizin listelemeye dayanır.
 	YetenekOnekListele
 	// YetenekSunucuSha256 — Nesne.Sha256 sağlayıcının kendi özetinden gelir.
 	YetenekSunucuSha256
@@ -98,10 +99,15 @@ type YukleSecenek struct {
 	Ilerleme func(aktarilan int64)
 }
 
-// Hedef — bir uzak depo. Uygulamalar eşzamanlı kullanıma güvenli olmalıdır.
+// Hedef — bir uzak depo. Uygulamalar eşzamanlı kullanıma güvenli olmalıdır
+// (aynı ya da farklı adlara eşzamanlı Yukle dahil).
 //
-// Tüm hata dönüşleri *Hata'dır (ya da onu sarar): Error() yalnız kategori taşır,
-// ham sağlayıcı metni maskelenip Hata.Ayrinti()'de kalır.
+// Tüm hata dönüşleri DOĞRUDAN *Hata'dır (YeniHata/Sarmala; err.Error() ==
+// (*Hata).Error()): Error() yalnız işlem + kategori taşır, ham sağlayıcı metni
+// kimlik bilgileri verilerek maskelenip Hata.Ayrinti()'de kalır. *Hata'yı saran
+// bir hata (fmt.Errorf("...: %w")) dış metni Error()'a sokacağı için sözleşme
+// dışıdır. İptal edilen bağlamın hatası errors.Is(err, context.Canceled) ile
+// tanınır. hedeftest.Uyum bunların hepsini denetler.
 type Hedef interface {
 	// Tur — kayıt defterindeki tür adı ("s3", "webdav", "ftp" ...).
 	Tur() string
@@ -110,13 +116,17 @@ type Hedef interface {
 	// Test — erişimi uçtan uca kanıtlar: dizin oluştur → yaz → oku → sil.
 	Test(ctx context.Context) error
 	// Yukle — yerel dosyayı uzak ada yükler; aynı ad varsa üzerine yazar.
-	// YetenekAtomikYukle: hata/iptal ⇒ nihai adda dosya YOK.
+	// YetenekAtomikYukle: hata/iptal ⇒ nihai adda dosya YOK. Geçici dosya
+	// gerekiyorsa adı UzakGeciciAd ile AYNI dizinde üretilir ve hata/iptalde
+	// ayrı kısa bir bağlamla silinmeye çalışılır (bkz. gecici.go).
 	Yukle(ctx context.Context, yerelYol, uzakAd string, sec YukleSecenek) error
 	// Listele — önek eşleşen DOSYALARI döner (alt dizinlere inmez): önekin
 	// dizin kısmındaki doğrudan çocuklar, adı önekin son bileşeniyle başlayanlar.
 	// Tam ad da bir önektir ("x.age" → "x.age.manifest.json" de gelebilir):
 	// çağıran Ad eşitliğine bakmalı. YetenekOnekListele yoksa yalnız tam ad
-	// sorgusu desteklenir. Eşleşme yoksa boş liste, hata DEĞİL.
+	// sorgusu desteklenir. Eşleşme yoksa boş liste, hata DEĞİL. Yarım
+	// yüklemelerin geçici dosyaları da (GeciciMi) listelenir: temizlik onları
+	// buradan bulur, çağıran ayıklar.
 	Listele(ctx context.Context, onek string) ([]Nesne, error)
 	// Indir — uzak dosyayı yerelYol'a yazar. Hata/iptal ⇒ yerelYol'a yarım
 	// içerik düşmez (geçici ad + yeniden adlandırma; bkz. AtomikYaz).
