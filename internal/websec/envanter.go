@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"strconv"
 )
 
 // ── UYGULAMA ENVANTERI ──────────────────────────────────────────────────────
@@ -126,21 +127,36 @@ type envanterYanit struct {
 	Desteklenmeyen int `json:"desteklenmeyen"`
 }
 
-// Apps: GET /api/v1/websec/apps — PANELDEKİ HER domain'in güvenlik durumu.
+// Apps: GET /api/v1/websec/apps[?domain_id=] — görünür HER domain'in güvenlik durumu.
 //
 // 🔴 SÜRÜCÜ TABLO = domains (cp_websec_apps DEĞİL). Önceden yalnız app'i tespit
 // edilmiş domain'ler listeleniyordu → "panelde 9 domain var, monitörde 3 görünüyor"
 // tutarsızlığı. Artık her domain bir satır alır; app'i olmayanlar da durum'la görünür
 // (taranıyor / desteklenmiyor / beklemede). Bir domain'in birden çok app'i varsa
 // (nadiren) app başına satır döner — "Taranan uygulamalar" semantiği korunur.
+//
+// Kapsam (kapsam.go): kök tüm domainleri, bayi YALNIZ kendi domainlerini görür.
+// domain_id süzgeci domain sayfası içindir; geçersiz değer hiçbir satır döndürmez,
+// yabancı domain ile olmayan domain aynı boş yanıtı alır.
 func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 	y := envanterYanit{Items: []envanterSatir{}}
+	k := kapsamAl(r)
+	where, args := k.kosul()
+	if dom := r.URL.Query().Get("domain_id"); dom != "" {
+		if n, e := strconv.ParseInt(dom, 10, 64); e == nil && n > 0 {
+			where += " AND d.id=?"
+			args = append(args, n)
+		} else {
+			where += " AND 1=0"
+		}
+	}
 
 	// Domain başına "taranıyor" için canlı tarama durumu (bellek).
 	kosuyor, taranSet := TaramaDurumu()
 
 	// taranmis: domainin kendi tarama kaydı var mı (0112) — "desteklenmiyor"
 	// (görüldü, app yok) ile "beklemede" (henüz taranmadı) ayrımı için.
+	//nolint:gosec // G202/G701: where yalnız sabit parçalar + "?" (kapsam.kosul, d.id=?); değerler args ile bağlanır.
 	rows, err := h.DB.QueryContext(r.Context(), `
 		SELECT d.id, COALESCE(d.alan_adi,''),
 		       COALESCE(a.app_type,''), COALESCE(a.install_path,''),
@@ -151,9 +167,10 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		  FROM domains d
 		  LEFT JOIN cp_websec_apps a ON a.domain_id = d.id
 		  LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id
-		 ORDER BY (a.app_type IS NULL) ASC, a.bulgu_sayisi DESC, d.alan_adi ASC`)
+		 WHERE 1=1`+where+`
+		 ORDER BY (a.app_type IS NULL) ASC, a.bulgu_sayisi DESC, d.alan_adi ASC`, args...)
 	if err != nil {
-		hataMesaji(w, 500, err.Error())
+		k.hata(w, err)
 		return
 	}
 	defer rows.Close()
@@ -163,7 +180,7 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		var taranmis bool
 		if err := rows.Scan(&s.DomainID, &s.AlanAdi, &s.AppType, &s.InstallPath,
 			&s.AppVersion, &s.PaketSayisi, &s.BulguSayisi, &s.SonTarama, &taranmis); err != nil {
-			hataMesaji(w, 500, err.Error())
+			k.hata(w, err)
 			return
 		}
 		switch {
@@ -183,7 +200,7 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 	}
 	// 🔴 rows.Err() KONTROL EDILMELI: kopan sorgu sessizce KISMİ liste döndürür.
 	if err := rows.Err(); err != nil {
-		hataMesaji(w, 500, err.Error())
+		k.hata(w, err)
 		return
 	}
 	y.Toplam = len(y.Items)

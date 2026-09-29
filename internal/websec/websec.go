@@ -371,10 +371,17 @@ type Ozet struct {
 }
 
 func ozetiHesapla(ctx context.Context, db *sql.DB) Ozet {
+	o, _ := ozetSay(ctx, db, `SELECT severity, COUNT(*) FROM cp_websec_findings GROUP BY severity`)
+	return o
+}
+
+// ozetSay — (severity, sayı) satırları döndüren sorgudan Ozet. Sunucu geneli
+// (ozetiHesapla) ve bayi kapsamlı durum kartı aynı toplamayı kullanır.
+func ozetSay(ctx context.Context, db *sql.DB, sorgu string, args ...any) (Ozet, error) {
 	var o Ozet
-	rows, err := db.QueryContext(ctx, `SELECT severity, COUNT(*) FROM cp_websec_findings GROUP BY severity`)
+	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + kapsam.kosul (yalnız "?"); değerler args ile bağlanır.
 	if err != nil {
-		return o
+		return o, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -395,10 +402,10 @@ func ozetiHesapla(ctx context.Context, db *sql.DB) Ozet {
 			o.Low = n
 		}
 	}
-	return o
+	return o, rows.Err()
 }
 
-/* ---------------- HTTP Handler'lar (AdminOnly) ---------------- */
+/* ---------------- HTTP Handler'lar (kök + bayi; kapsam: kapsam.go) ---------------- */
 
 type Handler struct {
 	DB *sql.DB
@@ -423,7 +430,32 @@ type durumYanit struct {
 	AppSayaclari map[string]int `json:"app_sayaclari"`
 }
 
-func (h *Handler) Status(w http.ResponseWriter, _ *http.Request) {
+// bayiDurumYanit — bayinin durum kartı. Sunucu geneli alanlar (scanned_apps,
+// duration_ms, last_error, next_estimate, app_sayaclari) AYRI TİP sayesinde yanıtta
+// hiç yer almaz. last_run = last_success = kendi domainlerinin en yeni taraması;
+// running = kendi domaini taranıyor.
+type bayiDurumYanit struct {
+	Running       bool     `json:"running"`
+	LastRun       *string  `json:"last_run"`
+	LastSuccess   *string  `json:"last_success"`
+	TotalFindings int      `json:"total_findings"`
+	Critical      int      `json:"critical"`
+	High          int      `json:"high"`
+	Medium        int      `json:"medium"`
+	Low           int      `json:"low"`
+	Ekosistemler  []string `json:"ekosistemler"`
+}
+
+// ekosistemler — aktif tarayıcı ekosistemleri (sabit; sayfa chip'leri).
+func ekosistemler() []string {
+	return []string{"wordpress", "nodejs", "php-composer"}
+}
+
+func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	if k := kapsamAl(r); k.bayi {
+		h.bayiDurum(w, r, k)
+		return
+	}
 	var y durumYanit
 	var lastRun, lastSuccess, lastErr sql.NullString
 	var running int
@@ -455,7 +487,7 @@ func (h *Handler) Status(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	// Ekosistem listesi + sayaçlar
-	y.Ekosistemler = []string{"wordpress", "nodejs", "php-composer"}
+	y.Ekosistemler = ekosistemler()
 	y.AppSayaclari = map[string]int{}
 	if rows, e := h.DB.Query(`SELECT app_type, COUNT(*) FROM cp_websec_findings GROUP BY app_type`); e == nil {
 		defer rows.Close()
@@ -467,6 +499,62 @@ func (h *Handler) Status(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 	}
+	jsonYaz(w, 200, y)
+}
+
+// bayiDurum — bayinin durum kartı: YALNIZ kendi domainlerinden hesaplanır.
+// cp_websec_status (tek satır, sunucu geneli) HİÇ okunmaz.
+func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
+	kosul, args := k.kosul()
+	y := bayiDurumYanit{Ekosistemler: ekosistemler()}
+
+	kosuyor, taranSet := TaramaDurumu()
+	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+	rows, err := h.DB.QueryContext(r.Context(), `
+		SELECT d.id, COALESCE(DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s'),'')
+		  FROM domains d
+		  LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id
+		 WHERE 1=1`+kosul, args...)
+	if err != nil {
+		k.hata(w, err)
+		return
+	}
+	defer rows.Close()
+	enYeni := ""
+	for rows.Next() {
+		var id int64
+		var son string
+		if err := rows.Scan(&id, &son); err != nil {
+			k.hata(w, err)
+			return
+		}
+		// Sabit biçim (YYYY-AA-GG SS:DD:ss) — metin karşılaştırması zaman sırasıdır.
+		if son > enYeni {
+			enYeni = son
+		}
+		if kosuyor && (len(taranSet) == 0 || taranSet[id]) {
+			y.Running = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		k.hata(w, err)
+		return
+	}
+	if enYeni != "" {
+		y.LastRun, y.LastSuccess = &enYeni, &enYeni
+	}
+
+	o, err := ozetSay(r.Context(), h.DB, `
+		SELECT f.severity, COUNT(*)
+		  FROM cp_websec_findings f
+		  JOIN domains d ON d.id = f.domain_id
+		 WHERE 1=1`+kosul+`
+		 GROUP BY f.severity`, args...)
+	if err != nil {
+		k.hata(w, err)
+		return
+	}
+	y.TotalFindings, y.Critical, y.High, y.Medium, y.Low = o.Toplam, o.Critical, o.High, o.Medium, o.Low
 	jsonYaz(w, 200, y)
 }
 
@@ -512,9 +600,10 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// WHERE koşulları — hem count hem list için ortak
-	where := ""
-	var args []any
+	// WHERE koşulları — hem count hem list için ortak. İlk parça KAPSAM: bayide
+	// d.reseller_id=? (yabancı domain_id → olmayanla aynı boş liste); kökte boş.
+	k := kapsamAl(r)
+	where, args := k.kosul()
 	if sev != "" {
 		where += " AND f.severity=?"
 		args = append(args, sev)
@@ -541,13 +630,14 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	// 1) Toplam sayı
 	var toplam int
 	sayiSorgu := `SELECT COUNT(*) FROM cp_websec_findings f LEFT JOIN domains d ON d.id=f.domain_id WHERE 1=1 AND d.id IS NOT NULL` + where
-	if err := h.DB.QueryRow(sayiSorgu, args...).Scan(&toplam); err != nil {
-		hataMesaji(w, 500, err.Error())
+	if err := h.DB.QueryRow(sayiSorgu, args...).Scan(&toplam); err != nil { //nolint:gosec // G701: where = kapsam.kosul + SABİT süzgeç parçaları; tüm değerler args ile ? bağlanır.
+		k.hata(w, err)
 		return
 	}
 
 	// 2) Sayfa verisi
 	offset := (sayfa - 1) * boyut
+	//nolint:gosec // G202: where = kapsam.kosul + SABİT süzgeç parçaları; tüm değerler args ile ? bağlanır.
 	listeSorgu := `SELECT f.id, f.domain_id, COALESCE(d.alan_adi,''), f.app_type,
 	                 f.package_name, f.installed_version, f.cve_id,
 	                 f.severity, IFNULL(f.cvss,0), COALESCE(f.title,''),
@@ -560,9 +650,9 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	listArgs := append([]any{}, args...)
 	listArgs = append(listArgs, boyut, offset)
 
-	rows, err := h.DB.Query(listeSorgu, listArgs...)
+	rows, err := h.DB.Query(listeSorgu, listArgs...) //nolint:gosec // G701: listeSorgu yukarıda SABİT parçalardan; değerler ? ile bağlanır.
 	if err != nil {
-		hataMesaji(w, 500, err.Error())
+		k.hata(w, err)
 		return
 	}
 	defer rows.Close()

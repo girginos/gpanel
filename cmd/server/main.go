@@ -536,10 +536,11 @@ func main() {
 			// Oturum boşta süresi
 			r.Get("/settings/session-idle", oturumbostaH.Get) // herkes okur
 			r.With(middleware.AdminOnly).Put("/settings/session-idle", oturumbostaH.Put)
-			// Website Security Monitor
-			r.With(middleware.AdminOnly).Get("/websec/status", websecH.Status)
-			r.With(middleware.AdminOnly).Get("/websec/findings", websecH.Findings)
-			r.With(middleware.AdminOnly).Get("/websec/apps", websecH.Apps)
+			// Website Security Monitor — kök tüm sunucu, bayi YALNIZ kendi domainleri
+			// (kapsamı handler zorlar: internal/websec/kapsam.go).
+			r.With(middleware.AdminVeyaReseller).Get("/websec/status", websecH.Status)
+			r.With(middleware.AdminVeyaReseller).Get("/websec/findings", websecH.Findings)
+			r.With(middleware.AdminVeyaReseller).Get("/websec/apps", websecH.Apps)
 			r.With(middleware.AdminOnly).Get("/antivirus/ayarlar", avAyarH.Getir)
 			r.With(middleware.AdminOnly).Put("/antivirus/ayarlar", avAyarH.Kaydet)
 			// Bildirimler: rol-kapsamli (internal/bildirim.kapsam) — admin=panel-geneli,
