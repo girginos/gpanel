@@ -44,13 +44,22 @@ func monitorQueue(unit string) (string, bool) {
 	return "", true
 }
 
-// ensureLogDir: /home/sk/logs (tenant sahipli)
-func ensureLogDir(sk string) {
-	d := "/home/" + sk + "/" + logAltDizin
-	if _, err := os.Stat(d); err != nil {
-		_ = os.MkdirAll(d, 0750)
-		_ = exec.Command("chown", sk+":"+sk, d).Run()
+// ensureLogDir: <evKoku>/<sk>/logs yoksa yaratır ve kiracıya verir (0750). Eskiden root
+// yol ile os.Stat + os.MkdirAll + `chown sk:sk <yol>` (-h yok → symlink izler) yapıyordu;
+// kiracının denetlediği bu yol yoklama ile chown arasında değiştirilebildiği için root'un
+// sahiplik devri ev dışına yönlendirilebilirdi. Artık ev kökünden O_NOFOLLOW ile
+// Mkdirat+Openat yapılır, sahiplik yalnız YENİ yaratılan dizinin fd'sine verilir
+// (evAltiMkdirHepsi); var olan girdiye (dizin ya da symlink) dokunulmaz.
+func ensureLogDir(sk string) error {
+	home, err := evDizini(sk)
+	if err != nil {
+		return err
 	}
+	uid, gid, err := kimlikBul(sk)
+	if err != nil || uid <= 0 || gid <= 0 {
+		return errKimlikYok
+	}
+	return evAltiMkdirHepsi(home, logAltDizin, uid, gid, 0o750)
 }
 
 // ---- Zamanlanmış görev (schedule:run — dakikada bir, /etc/cron.d) ----
@@ -82,7 +91,10 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 	}
 	p := cronDPath(id)
 	if req.Aktif {
-		ensureLogDir(sk)
+		if err := ensureLogDir(sk); err != nil {
+			// cron satırı yine yazılır: >> yönlendirmesini cron KİRACI olarak yapar.
+			log.Printf("laravel schedule: log dizini hazırlanamadı (domain=%d): %v", id, err)
+		}
 		logF := "/home/" + sk + "/" + logAltDizin + "/laravel-schedule.log"
 		// cron.d formatı: dk sa gün ay haftagünü KULLANICI komut
 		line := fmt.Sprintf("* * * * * %s %s %s/artisan schedule:run >> %s 2>&1\n",

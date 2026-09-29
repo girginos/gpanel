@@ -370,7 +370,7 @@ func TestEvAltiMkdirHepsi(t *testing.T) {
 		t.Fatal(err)
 	}
 	symlinkKur(t, bsHedef, filepath.Join(e.app, "bootstrap"))
-	if err := evAltiMkdirHepsi(e.home, "public_html/bootstrap/cache", tu, tg); err == nil {
+	if err := evAltiMkdirHepsi(e.home, "public_html/bootstrap/cache", tu, tg, 0o755); err == nil {
 		t.Fatal("ara bileşen symlink'li yol için hata bekleniyordu")
 	}
 	if _, err := os.Lstat(filepath.Join(bsHedef, "cache")); !errors.Is(err, os.ErrNotExist) {
@@ -381,7 +381,7 @@ func TestEvAltiMkdirHepsi(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(e2.app, "bootstrap"), 0o755); err != nil { // root-sahipli
 		t.Fatal(err)
 	}
-	if err := evAltiMkdirHepsi(e2.home, "public_html/bootstrap/cache", tu, tg); err != nil {
+	if err := evAltiMkdirHepsi(e2.home, "public_html/bootstrap/cache", tu, tg, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if u := uidOf(t, filepath.Join(e2.app, "bootstrap", "cache"), true); u != tu {

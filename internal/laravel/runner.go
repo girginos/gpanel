@@ -273,6 +273,7 @@ const envMaxBoyut = 2 << 20
 // bir ara bileşenini /etc/girginospanel/env veya başka tenant dizinine symlink'lemesiyle
 // (kontrol-kullanım yarışı dahil) root'un panel sırlarını/cross-tenant okuması VE
 // /dev/zero OOM'u reddedilir (denetim #2/#5). Sahiplik denetlenmez (eski davranış).
+// Davranış otomatik_dosya_test.go'da (evKoku sahte ev) ve kaynak koruma testinde kilitli.
 func envOku(sk, appDir string) (string, error) {
 	home, rel, err := evGoreli(sk, appDir)
 	if err != nil {
@@ -302,12 +303,26 @@ const evAltiResolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS
 // sahiplikMaxDerinlik: özyinelemeli chown'da en çok dizin derinliği (fd tükenmesi savunması).
 const sahiplikMaxDerinlik = 64
 
-// evGoreli: /home/<sk>/... mutlak uygulama dizinini (ev kökü, köke göre yol) ikilisine ayırır.
-func evGoreli(sk, appDir string) (home, rel string, err error) {
-	if !gecerliSK(sk) {
-		return "", "", fmt.Errorf("geçersiz kullanıcı")
+// evKoku: kiracı ev dizinlerinin kökü. Yalnız testler değiştirir (t.TempDir sahte evi);
+// üretimde daima /home. evAlti* çağıran her yol ev kökünü evGoreli/evDizini'den alır.
+var evKoku = "/home"
+
+// kimlikBul: sistem kullanıcısı → uid/gid. Test dikişi (üretimde tenantKimlik).
+var kimlikBul = tenantKimlik
+
+// evDizini: <evKoku>/<sk> (sk c_ ile başlamalı).
+func evDizini(sk string) (string, error) {
+	if !gecerliSK(sk) || strings.Contains(sk, "/") {
+		return "", fmt.Errorf("geçersiz kullanıcı")
 	}
-	home = "/home/" + sk
+	return evKoku + "/" + sk, nil
+}
+
+// evGoreli: <evKoku>/<sk>/... mutlak uygulama dizinini (ev kökü, köke göre yol) ikilisine ayırır.
+func evGoreli(sk, appDir string) (home, rel string, err error) {
+	if home, err = evDizini(sk); err != nil {
+		return "", "", err
+	}
 	abs := filepath.Clean(appDir)
 	if abs == home {
 		return home, ".", nil
@@ -424,9 +439,10 @@ func evAltiSil(home, relDir string, adlar []string) error {
 
 // evAltiMkdirHepsi: `mkdir -p home/rel`in symlink-güvenli karşılığı. Her bileşen home'dan
 // başlayarak O_NOFOLLOW ile açılır (bileşen symlink ise ELOOP → durur, dışarıda dizin
-// yaratılmaz); eksik bileşen Mkdirat ile yaratılıp fd üzerinden tenant'a verilir. Göç
-// kalıntısı root-sahipli üst dizinde (ör. bootstrap/) de çalışır.
-func evAltiMkdirHepsi(home, rel string, uid, gid int) error {
+// yaratılmaz); eksik bileşen Mkdirat ile yaratılıp fd üzerinden tenant'a verilir ve izni
+// (umask'tan bağımsız) mode yapılır. Var olan bileşenin sahipliğine/iznine dokunulmaz.
+// Göç kalıntısı root-sahipli üst dizinde (ör. bootstrap/) de çalışır.
+func evAltiMkdirHepsi(home, rel string, uid, gid int, mode uint32) error {
 	fd, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return err
@@ -438,7 +454,7 @@ func evAltiMkdirHepsi(home, rel string, uid, gid int) error {
 	}
 	for _, parca := range strings.Split(p, "/") {
 		yeni := false
-		if err := unix.Mkdirat(fd, parca, 0o755); err == nil {
+		if err := unix.Mkdirat(fd, parca, mode); err == nil {
 			yeni = true
 		} else if !errors.Is(err, unix.EEXIST) {
 			unix.Close(fd)
@@ -450,7 +466,14 @@ func evAltiMkdirHepsi(home, rel string, uid, gid int) error {
 			return err
 		}
 		if yeni {
-			_ = unix.Fchown(nfd, uid, gid)
+			err = unix.Fchown(nfd, uid, gid)
+			if err == nil {
+				err = unix.Fchmod(nfd, mode)
+			}
+			if err != nil {
+				unix.Close(nfd)
+				return err
+			}
 		}
 		fd = nfd
 	}

@@ -2,6 +2,7 @@ package laravel
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path"
@@ -176,6 +177,68 @@ func (h *Handlers) SetAppRoot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// errKimlikYok: kiracının sistem kullanıcısı çözülemedi ya da root/sistem kimliğine çıktı.
+var errKimlikYok = errors.New("sistem kullanıcısı bulunamadı")
+
+// onbellekDosyalari: 6. adımda bootstrap/cache içinden silinen (eski sunucu yollu) dosyalar.
+var onbellekDosyalari = []string{"config.php", "services.php", "packages.php", "routes-v7.php"}
+
+// otomatikDosya: OtomatikHazirla'nın ROOT olarak yaptığı TÜM dosya işlemleri (1. adım .env
+// üretimi, .env 0600, 5. adım dizin/sahiplik, 6. adım önbellek silme). Her yöntem ev köküne
+// çapalı ve symlink izlemeden çalışır (evAlti*, runner.go); DB/runuser gerektirmez, bu
+// yüzden t.TempDir sahte evinde uçtan uca test edilir. Handler dosya işlemini yalnız bu
+// tip üzerinden yapar; kiracı uid'si handler'a hiç inmez (yalnız bu yapıda taşınır).
+type otomatikDosya struct {
+	home, appRel string // <evKoku>/<sk> ve köke göre uygulama dizini
+	uid, gid     int    // kiracı kimliği (sahiplik denetimi + devir)
+}
+
+// otomatikDosyaHazirla: sk + mutlak uygulama dizini → otomatikDosya. Uygulama dizini ev
+// dışındaysa hata; kimlik çözülemez ya da root/sistem kimliğine (<=0) çıkarsa errKimlikYok
+// (uid 0 ile sahiplik denetimi root dosyalarını "kiracıya ait" sayardı).
+func otomatikDosyaHazirla(sk, appDir string) (otomatikDosya, error) {
+	home, rel, err := evGoreli(sk, appDir)
+	if err != nil {
+		return otomatikDosya{}, err
+	}
+	uid, gid, err := kimlikBul(sk)
+	if err != nil || uid <= 0 || gid <= 0 {
+		return otomatikDosya{}, errKimlikYok
+	}
+	return otomatikDosya{home: home, appRel: rel, uid: uid, gid: gid}, nil
+}
+
+// envUret: 1. adım — .env yoksa .env.example'dan (yalnız kiracıya ait düzenli dosya,
+// symlink izlenmez); içerik yaz ile (üretimde envYaz: kiracı uid'siyle tee) yazılır.
+func (o otomatikDosya) envUret(yaz func(string) error) (calisti, ok bool, not string) {
+	return envOrnektenUret(o.home, o.appRel, o.uid, yaz)
+}
+
+// envKilitle: .env → 0600; yalnız kiracıya ait düzenli dosyada (symlink hedefi değişmez).
+func (o otomatikDosya) envKilitle() error {
+	return evAltiChmod(o.home, path.Join(o.appRel, ".env"), o.uid, 0o600)
+}
+
+// izinler: 5. adım — storage + bootstrap/cache eksikse symlink-güvenli yaratılır, ağaç
+// symlink-güvenli özyinelemeli chown ile kiracıya devredilir.
+func (o otomatikDosya) izinler() (ok bool, not string) {
+	ok, not = true, "storage + bootstrap/cache"
+	for _, d := range []string{"storage", path.Join("bootstrap", "cache")} {
+		rel := path.Join(o.appRel, d)
+		_ = evAltiMkdirHepsi(o.home, rel, o.uid, o.gid, 0o755)
+		if e := evAltiSahiplikVer(o.home, rel, o.uid, o.gid); e != nil {
+			ok, not = false, d+": "+e.Error()
+		}
+	}
+	return ok, not
+}
+
+// onbellekSil: 6. adım — bootstrap/cache içindeki onbellekDosyalari (Unlinkat; ara bileşen
+// symlink'i izlenmez, dosya symlink'se yalnız link silinir).
+func (o otomatikDosya) onbellekSil() error {
+	return evAltiSil(o.home, path.Join(o.appRel, "bootstrap", "cache"), onbellekDosyalari)
+}
+
 // OtomatikHazirla: POST /domains/{id}/laravel/otomatik-hazirla
 // Algilanan Laravel uygulamasinin EKSIK bilesenlerini tamamlar:
 //
@@ -188,7 +251,8 @@ func (h *Handlers) SetAppRoot(w http.ResponseWriter, r *http.Request) {
 //
 // Komutlar (composer/artisan/.env yazımı/mkdir) TENANT kullanicisi olarak calisir.
 // Root'ta kalan dosya işlemleri (.env.example/.env okuma, .env chmod, göç kalıntısı
-// chown, önbellek silme) ev köküne çapalı ve symlink izlemeden yapılır (evAlti*).
+// chown, önbellek silme) yalnız otomatikDosya/envOku üzerinden, ev köküne çapalı ve
+// symlink izlemeden yapılır (evAlti*).
 func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 	id, sk, phpSurum, demo, ok := h.lookup(r)
 	if !ok {
@@ -218,24 +282,24 @@ func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 		adimlar = append(adimlar, map[string]any{"adim": ad, "ok": ok, "not": not})
 	}
 
-	// 🔴 Root'un bu dizindeki DOSYALAR üzerindeki tüm işlemleri ev köküne çapalı ve
-	// symlink izlemeden yapılır (evAlti* yardımcıları, runner.go). Eskiden os.ReadFile/
+	// 🔴 Root'un bu dizindeki DOSYALAR üzerindeki tüm işlemleri YALNIZ otomatikDosya
+	// üzerinden (ev köküne çapalı, symlink izlemeden) yapılır. Eskiden os.ReadFile/
 	// os.Chmod/os.Remove/chown -R yol ile root olarak symlink izlerdi → tenant'ın
 	// .env.example/.env/bootstrap symlink'iyle başka tenant'ın ya da sistemin dosyası
-	// okunur, izni değişir, silinir ya da tenant'a devredilirdi.
-	home, appRel, err := evGoreli(sk, appDir)
+	// okunur, izni değişir, silinir ya da tenant'a devredilirdi. Bu gövdede yol tabanlı
+	// os.*/exec çağrısı kaynak koruma testiyle yasaktır (otomatik_dosya_test.go).
+	od, err := otomatikDosyaHazirla(sk, appDir)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	uid, gid, err := tenantKimlik(sk)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "sistem kullanıcısı bulunamadı")
+		kod := http.StatusBadRequest
+		if errors.Is(err, errKimlikYok) {
+			kod = http.StatusInternalServerError
+		}
+		httpx.WriteError(w, kod, err.Error())
 		return
 	}
 
 	// 1) .env yoksa ornekten uret (.env.example yalnız kiracıya ait düzenli dosyaysa)
-	if calisti, ok1, not := envOrnektenUret(home, appRel, uid, func(icerik string) error {
+	if calisti, ok1, not := od.envUret(func(icerik string) error {
 		return envYaz(sk, appDir, icerik)
 	}); calisti {
 		kaydet(".env oluşturuldu", ok1, not)
@@ -259,20 +323,13 @@ func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	_ = evAltiChmod(home, path.Join(appRel, ".env"), uid, 0o600)
+	_ = od.envKilitle()
 	// 5) izin/sahiplik — eksik dizin symlink-güvenli yaratılıp tenant'a verilir; göç
 	// kalıntısı root-sahipli içerik symlink-güvenli özyinelemeli chown ile tenant'a geçer.
-	izinOK, izinNot := true, "storage + bootstrap/cache"
-	for _, d := range []string{"storage", path.Join("bootstrap", "cache")} {
-		_ = evAltiMkdirHepsi(home, path.Join(appRel, d), uid, gid)
-		if e := evAltiSahiplikVer(home, path.Join(appRel, d), uid, gid); e != nil {
-			izinOK, izinNot = false, d+": "+e.Error()
-		}
-	}
+	izinOK, izinNot := od.izinler()
 	kaydet("izinler ayarlandı", izinOK, izinNot)
 	// 6) onbellek temizligi (eski sunucu yollari)
-	_ = evAltiSil(home, path.Join(appRel, "bootstrap", "cache"),
-		[]string{"config.php", "services.php", "packages.php", "routes-v7.php"})
+	_ = od.onbellekSil()
 	out, ok2 := TenantExec(ctx, sk, appDir, php, "artisan", "optimize:clear")
 	kaydet("önbellek temizlendi", ok2, sonSatirKisa(out))
 
