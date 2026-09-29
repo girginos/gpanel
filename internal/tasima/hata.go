@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"girginospanel/internal/domains"
+	"girginospanel/internal/plans"
 )
 
 // Kapsam — bir taşıma işinin YÜRÜTME kapsamı. İşin sahibi (sahip_rid) sütunundan
@@ -29,16 +30,31 @@ func (kp Kapsam) Yonetici() bool { return kp.RID == 0 }
 
 // tasimaHataGenel — bayiye (yönetici olmayana) dönen, iç ayrıntı içermeyen metin.
 // Ayrıntı (başka kiracının adı, sistem yolu, uzak/yerel araç çıktısı) yalnız
-// yöneticiye ve sunucu günlüğüne gider (nginxset.SunucuHatasiGenel ile aynı ilke).
+// yöneticiye gider ve bayi hatasında HER ZAMAN sunucu günlüğüne yazılır
+// (HesapAktar) — nginxset.SunucuHatasi ile aynı ilke.
+//
+// nginxset.SunucuHatasiGenel yeniden KULLANILMADI: metni "sunucu yapılandırması
+// uygulanamadı" der; taşıma hatalarının çoğu (dosya/DB aktarımı, sağlama, üzerine
+// yazma reddi) yapılandırma hatası değildir → bayiyi yanlış yönlendirirdi.
 const tasimaHataGenel = "taşıma sırasında bir hata oluştu; ayrıntı sunucu günlüğüne yazıldı, sorun sürerse yöneticinize başvurun"
+
+// bayiyeAcikHatalar — bayiye metniyle AYNEN gösterilen ret nedenleri: sabit metin,
+// başka kiracının adı/kimliği ya da sistem yolu içermez ve bayinin kendi
+// düzeltebileceği (ya da yöneticisine soracağı) durumu anlatır. Sarılı gelse de
+// (fmt.Errorf %w) yalnız SABİT hata döner — sarmalayıcının bağlamı sızmaz.
+var bayiyeAcikHatalar = []error{
+	errBayiSandboxYok,
+	plans.ErrPlanKapsamDisi,
+	plans.ErrOzelPlanBaskaHosting,
+}
 
 // hataMetni — bir taşıma hatasını KAPSAMA göre metne çevirir.
 //
 //   - Yönetici (kök): hatayı OLDUĞU GİBİ döndürür (tip ve zincir korunur; errors.As
 //     ile AdAlaniHatasi hâlâ bulunur) → mevcut davranış birebir.
-//   - Bayi: AdAlaniHatasi ise güvenli genel mesajını (Mesaj(false)); başka her hata
-//     için sabit genel metni döndürür — komşu kiracının adı, sistem yolu ya da araç
-//     çıktısı bayiye SIZMAZ.
+//   - Bayi: AdAlaniHatasi ise güvenli genel mesajını (Mesaj(false)); bayiyeAcikHatalar
+//     ise o sabit hatayı; başka her hata için sabit genel metni döndürür — komşu
+//     kiracının adı, sistem yolu ya da araç çıktısı bayiye SIZMAZ.
 func hataMetni(yonetici bool, err error) error {
 	if err == nil {
 		return nil
@@ -49,6 +65,11 @@ func hataMetni(yonetici bool, err error) error {
 	var ah *domains.AdAlaniHatasi
 	if errors.As(err, &ah) {
 		return errors.New(ah.Mesaj(false))
+	}
+	for _, acik := range bayiyeAcikHatalar {
+		if errors.Is(err, acik) {
+			return acik
+		}
 	}
 	return errors.New(tasimaHataGenel)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	stdlog "log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,14 +12,17 @@ import (
 	"girginospanel/internal/domains"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 )
 
-// saglama / saglamaGeriAl: sistem hesabı + vhost kurulumu (testler değiştirir —
-// ret yollarının useradd/nginx yan etkisine HİÇ ulaşmadığını kanıtlamak için).
+// saglama / saglamaGeriAl / limitUygula: sistem hesabı + vhost kurulumu ve plan
+// limitleri (systemd slice, kiracı FPM) — testler değiştirir; ret ve geri alma
+// yollarının useradd/nginx/systemd yan etkisine HİÇ ulaşmadığını kanıtlamak için.
 var (
 	saglama       = provisioner.Provision
 	saglamaGeriAl = provisioner.Deprovision
+	limitUygula   = kaynaklimit.UygulaHepsi
 )
 
 // AktarSonuc — bir hesabin tasima ciktisi.
@@ -42,20 +46,34 @@ type AktarSonuc struct {
 //   - Veritabani parolasi domain basina BIR KEZ uretilir; mevcut DB kullanicisi
 //     varsa parolasi DEGISTIRILMEZ (canli siteyi olduruyordu).
 //   - Veritabani adimi basarisiz olursa kalem BASARILI sayilmaz.
-func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (sonuc *AktarSonuc, geriHata error) {
+//
+// 🔴 KAPSAMLI HATA: dönen HER hata kapsama göre süzülür. Kök ham hatayı görür
+// (mevcut davranış birebir); bayiye komşu kiracının adı / sistem yolu / araç
+// çıktısı sızmaz (bkz. hataMetni). Bayi hatasının HAM hâli sunucu günlüğüne
+// yazılır: bayiye dönen genel metin bunu söyler, kök arızayı oradan ayıklar.
+//
+// Süzme bu ince sarmalayıcıdadır, iç fonksiyonda adlandırılmış dönüşle DEĞİL:
+// `return nil, err` adlandırılmış sonucu ertelenmiş fonksiyonlardan ÖNCE nil'ler;
+// geri alma defer'i (sonuc.DomainID) nil işaretçiye düşer, yeni açılan hesap
+// (domain satırı, sistem kullanıcısı, vhost) geri alınmadan öksüz kalırdı.
+func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
+	sonuc, err := h.hesapAktarIc(ctx, k, hs, ay, kapsam, log)
+	if err != nil {
+		if kapsam.Bayi() {
+			stdlog.Printf("tasima: kalem hatası (bayi=%d alan=%q): %s",
+				kapsam.RID, kisalt(hs.AlanAdi, 253), kisalt(temizHata(err.Error()), 1000))
+		}
+		return nil, hataMetni(kapsam.Yonetici(), err)
+	}
+	return sonuc, nil
+}
+
+// hesapAktarIc — HesapAktar'ın gövdesi; hatayı HAM döndürür (süzme çağıranda).
+func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
 	ctx, iptal := context.WithTimeout(ctx, hesapTimeout)
 	defer iptal()
 
-	// 🔴 KAPSAMLI HATA: dönen HER hata kapsama göre süzülür. Kök ham hatayı görür
-	// (mevcut davranış birebir); bayiye komşu kiracının adı / sistem yolu / araç
-	// çıktısı sızmaz (bkz. hataMetni).
-	defer func() {
-		if geriHata != nil {
-			geriHata = hataMetni(kapsam.Yonetici(), geriHata)
-		}
-	}()
-
-	sonuc = &AktarSonuc{}
+	sonuc := &AktarSonuc{}
 	alanAdi := strings.ToLower(strings.TrimSpace(hs.AlanAdi))
 	if !reAlanAdi.MatchString(alanAdi) || !strings.Contains(alanAdi, ".") {
 		return nil, fmt.Errorf("gecersiz alan adi")
@@ -116,6 +134,15 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 				}
 			}
 		}
+		// 🔴 PLAN KAPSAMI (bayi): gövdeden gelen PlanID domains.Create ile AYNI kuralla
+		// (plans.BaglanabilirMi) denetlenir — bayi başka bayinin planını ya da bir
+		// hostinge ÖZEL planı (kökünkü dahil) yeni siteye bağlayamaz; bağlasaydı limitler
+		// (kaynaklimit) o plandan uygulanırdı. Sağlamadan ÖNCE (yan etkisiz).
+		if kapsam.Bayi() && ay.PlanID != 0 {
+			if err := plans.BaglanabilirMi(ctx, h.DB, kapsam.RID, ay.PlanID, 0); err != nil {
+				return nil, fmt.Errorf("plan: %w", err)
+			}
+		}
 		// 🔴 Ad-alanı (GL-02): domains.Create ile AYNI kural — oluşacak domainin
 		// sahibine (resellerID) göre başka kiracının alt/üst adı, alt alan adı, panel
 		// adları reddedilir. Sağlamadan ÖNCE (yan etkisiz); INSERT'te kilitle yeniden.
@@ -162,7 +189,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 		sonuc.DomainID, _ = res.LastInsertId()
 
 		limCtx, limIptal := context.WithTimeout(context.Background(), 5*time.Minute)
-		if err := kaynaklimit.UygulaHepsi(limCtx, h.DB, sonuc.DomainID); err != nil {
+		if err := limitUygula(limCtx, h.DB, sonuc.DomainID); err != nil {
 			log("uyari: kaynak limitleri uygulanamadi: %v", err)
 			sonuc.Uyarilar = append(sonuc.Uyarilar, "Limitler uygulanamadı")
 		}
@@ -185,7 +212,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 			if _, err := h.DB.Exec(`DELETE FROM domains WHERE id=?`, sonuc.DomainID); err != nil {
 				log("UYARI: geri alma sirasinda domain kaydi silinemedi (id=%d): %v", sonuc.DomainID, err)
 			}
-			_ = provisioner.Deprovision(alanAdi, sk)
+			_ = saglamaGeriAl(alanAdi, sk)
 		}
 	}()
 

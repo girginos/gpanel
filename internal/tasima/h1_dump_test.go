@@ -11,9 +11,13 @@ package tasima
 // Ağa/canlı sisteme/DB'ye dokunmaz (saf birim testleri).
 
 import (
+	"context"
+	"errors"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func drainFiltre(t *testing.T, girdi string) (*dumpFiltre, string) {
@@ -59,6 +63,51 @@ func TestDumpFiltreDusmanDokumReddedilir(t *testing.T) {
 	}
 	if f.Tamam {
 		t.Errorf("reddedilen döküm 'tamam' işaretlendi")
+	}
+}
+
+// 🔴 REGRESYON (kilitlenme): tüketici (mysql) girdinin tamamını okumadan çıkarsa —
+// ilk SQL hatası ya da ctx iptali/zaman aşımı — Bekle yine DÖNMELİ. Dönmezse
+// HesapAktar asılı kalır, tek global iş yuvası (aktifIsID) kilitlenir. Girdi, işletim
+// sistemi borusu (64 KiB) + io.Pipe tamponundan büyük olmalı ki süzgeç pw.Write'ta
+// beklesin; dbAktar'daki sıra (Stdin=Sar, Run, Bekle) birebir izlenir.
+func TestDumpFiltreErkenCikanTuketici(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh yok")
+	}
+	satir := "INSERT INTO `t` VALUES ('" + strings.Repeat("x", 1000) + "');\n"
+	buyuk := strings.Repeat(satir, 2048) // ~2 MB
+	for _, c := range []struct {
+		ad    string
+		komut func(ctx context.Context) *exec.Cmd
+	}{
+		// mysql ilk SQL hatasında (--force yok) girdinin kalanını okumadan çıkar.
+		{"erken hata çıkışı", func(ctx context.Context) *exec.Cmd {
+			return exec.CommandContext(ctx, "sh", "-c", "head -c 10 >/dev/null; exit 1")
+		}},
+		// ctx iptali / hesapTimeout alt süreci öldürür (girdi hiç okunmaz).
+		{"ctx iptali", func(ctx context.Context) *exec.Cmd {
+			return exec.CommandContext(ctx, "sleep", "30")
+		}},
+	} {
+		ctx, iptal := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		f := &dumpFiltre{}
+		cmd := c.komut(ctx)
+		cmd.Stdin = f.Sar(strings.NewReader(buyuk))
+		if err := cmd.Run(); err == nil {
+			t.Errorf("%s: alt süreç hatayla dönmeliydi", c.ad)
+		}
+		iptal()
+		dondu := make(chan struct{})
+		go func() { f.Bekle(); close(dondu) }()
+		select {
+		case <-dondu:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s: Bekle dönmedi — süzgeç goroutine'i pw.Write'ta takıldı", c.ad)
+		}
+		if f.Tamam || f.Reddedildi {
+			t.Errorf("%s: yarım akış tamam/red işaretlenmemeli (tamam=%v red=%v)", c.ad, f.Tamam, f.Reddedildi)
+		}
 	}
 }
 
@@ -116,8 +165,15 @@ func TestImportArgs(t *testing.T) {
 	if !icerir("--local-infile=0") {
 		t.Errorf("--local-infile=0 eksik: %v", a)
 	}
-	if !icerir("--defaults-extra-file=/var/tmp/x.cnf") {
-		t.Errorf("--defaults-extra-file eksik: %v", a)
+	// 🔴 --defaults-file İLK argüman ve DIŞLAYICI: --defaults-extra-file'da yöneticinin
+	// /root/.my.cnf'i sonradan okunur, kısıtlı kimliği root ile ezerdi.
+	if a[0] != "--defaults-file=/var/tmp/x.cnf" {
+		t.Errorf("ilk argüman --defaults-file olmalı: %v", a)
+	}
+	for _, x := range a {
+		if strings.HasPrefix(x, "--defaults-extra-file") || x == "--no-defaults" {
+			t.Errorf("kapsayıcı olmayan seçenek dosyası argümanı: %v", a)
+		}
 	}
 	// 181'de istemci --sandbox destekler → bayrak eklenmeli. (neg_control: bayrak
 	// eklemesi silinirse burada yakalanır.)
@@ -135,7 +191,7 @@ func TestVeritabanlariBayiSandboxKapali(t *testing.T) {
 	h := &Handlers{} // nil DB: gate DB'den önce döner
 	_, _, err := h.veritabanlariniAktar(nil, &Kaynak{}, Hesap{DBler: []string{"gecersiz ad!"}},
 		"c_x", "", Kapsam{RID: 7}, &AktarSonuc{}, func(string, ...any) {})
-	if err == nil || !strings.Contains(err.Error(), "sandbox") {
+	if !errors.Is(err, errBayiSandboxYok) {
 		t.Fatalf("desteklenmeyen istemcide bayi işi sandbox hatası vermeli, alınan: %v", err)
 	}
 

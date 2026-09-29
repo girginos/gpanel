@@ -36,7 +36,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 	// süzgeci + --binary-mode ile kapatılır; bu, kök için kabul edilir ama bir bayinin
 	// kiracı sınırını aşma riskini taşıyamayız → bayi işi kapalı.
 	if kapsam.Bayi() && !sandboxKontrol() {
-		return nil, "", fmt.Errorf("bu sunucudaki içe aktarma istemcisi güvenli kum havuzunu (--sandbox) desteklemiyor; bayi taşıması kapalı")
+		return nil, "", errBayiSandboxYok
 	}
 
 	// hedefKul: FALLBACK yolunun panel kullanicisi (<sk>_db; bkz. tasimaKullanicisiSec).
@@ -396,7 +396,7 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	var ieb strings.Builder
 	imp.Stderr = &ieb
 	runHatasi := imp.Run()
-	filtre.Bekle()
+	filtre.Bekle() // okuyucuyu kapatır: mysql erken çıktıysa süzgeç takılı kalmaz
 	// 🔴 GÜVENLİK REDDİ ÖNCE: düşman döküm güvenli olmayan bir istemci komutu (\!,
 	// system, source, \u, LOAD DATA LOCAL) içeriyorsa akış kesilmiştir. Genel neden
 	// döndür; döküm içeriği / import stderr'i çağırana SIZMAZ.
@@ -423,9 +423,15 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 // importArgs — kısıtlı içe aktarma istemcisinin argümanları. --sandbox yalnız
 // istemci destekliyorsa eklenir (kök yolu desteklemeyen istemcide çalışmaya devam
 // eder; bayi yolu veritabanlariniAktar'da zaten reddedilmiştir).
+//
+// 🔴 --defaults-file (İLK argüman olmak ZORUNDA) DIŞLAYICIDIR: yalnız kısıtlı
+// kullanıcının cnf'i okunur. --defaults-extra-file ise genel dosyalardan SONRA ama
+// ~/.my.cnf'ten ÖNCE okunur; panel root olarak çalıştığından yöneticinin
+// /root/.my.cnf'indeki [client] user/password kısıtlı kimliği EZER ve düşman döküm
+// ROOT yetkisiyle içe aktarılırdı (başka kiracının DB'sine, mysql.user'a yazma).
 func importArgs(cnfAd, hedefDB string) []string {
 	a := []string{
-		"--defaults-extra-file=" + cnfAd,
+		"--defaults-file=" + cnfAd,
 		"--default-character-set=utf8mb4",
 		"--binary-mode",
 		"--local-infile=0",
@@ -438,6 +444,10 @@ func importArgs(cnfAd, hedefDB string) []string {
 
 // sandboxKontrol — içe aktarma istemcisi --sandbox destekliyor mu (testler değiştirir).
 var sandboxKontrol = mysqlSandboxDestekli
+
+// errBayiSandboxYok — bayi işi, istemci --sandbox desteklemediği için kapalı. Metin
+// sabittir ve kiracı verisi içermez → bayiye aynen gösterilir (bayiyeAcikHatalar).
+var errBayiSandboxYok = errors.New("bu sunucudaki içe aktarma istemcisi güvenli kum havuzunu (--sandbox) desteklemiyor; bayi taşıması kapalı")
 
 var (
 	sandboxBirKez    sync.Once
@@ -503,12 +513,14 @@ var errDumpReddi = errors.New("dump güvenli olmayan istemci komutu içeriyor")
 type dumpFiltre struct {
 	Tamam      bool
 	Reddedildi bool
+	okur       *io.PipeReader
 	bitti      chan struct{}
 }
 
 func (d *dumpFiltre) Sar(r io.Reader) io.Reader {
 	d.bitti = make(chan struct{})
 	pr, pw := io.Pipe()
+	d.okur = pr
 	go func() {
 		defer close(d.bitti)
 		defer pw.Close()
@@ -535,12 +547,22 @@ func (d *dumpFiltre) Sar(r io.Reader) io.Reader {
 	return pr
 }
 
-// Bekle — süzme goroutine'i bitene kadar bekler. imp.Run() döndükten SONRA
-// çağrılır ki Reddedildi/Tamam alanları yarış olmadan okunabilsin.
+// Bekle — tüketici (imp.Run) döndükten SONRA çağrılır: okuyucu ucunu kapatır ve
+// süzme goroutine'i bitene kadar bekler; ardından Reddedildi/Tamam alanları yarış
+// olmadan okunur. (exec.Cmd.Wait stdin kopyalayıcısını bekler → Run döndükten sonra
+// okuyucuyu okuyan kalmaz, kapatmak güvenlidir.)
+//
+// 🔴 Okuyucuyu kapatmak ZORUNLU: mysql girdinin tamamını okumadan çıkarsa (ilk SQL
+// hatası — ör. MySQL 8 dökümündeki utf8mb4_0900_ai_ci —, iptal, hesapTimeout) io.Pipe'ın
+// okuyanı kalmaz ve goroutine pw.Write'ta SONSUZA DEK takılırdı → HesapAktar dönmez,
+// tek global iş yuvası (aktifIsID) panel yeniden başlatılana kadar kilitlenirdi.
+// Kapalı okuyucuda pw.Write io.ErrClosedPipe alır, goroutine döner.
 func (d *dumpFiltre) Bekle() {
-	if d.bitti != nil {
-		<-d.bitti
+	if d.bitti == nil {
+		return
 	}
+	_ = d.okur.Close()
+	<-d.bitti
 }
 
 // tehlikeliDumpSatiri — satır (baştaki boşluk atılınca) dosya sistemine erişen
