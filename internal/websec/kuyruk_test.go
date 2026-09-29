@@ -241,6 +241,25 @@ func TestBayiDomainSogumasi429(t *testing.T) {
 	}
 }
 
+// Soğuma isteyen bayiye aittir: devirden sonra yeni sahip, eski sahibin 15 dk
+// içindeki isteği yüzünden 429 almaz (ve kalan süreden onu öğrenemez).
+func TestBayiSogumasiDevirdeYeniSahibeGecmez(t *testing.T) {
+	k := kuyrukKur(t)
+	simdi := saatKur(t)
+	if n, bekle := k.bayiEkle(7, []int64{10}, false); n != 1 || bekle != 0 {
+		t.Fatalf("eski sahip: %d %v", n, bekle)
+	}
+	k.sonrakiIs()
+	*simdi = simdi.Add(3 * time.Minute)
+	if n, bekle := k.bayiEkle(8, []int64{10}, false); n != 1 || bekle != 0 {
+		t.Fatalf("yeni sahip eski sahibin soğumasını görmemeli: sirada=%d bekle=%v", n, bekle)
+	}
+	k.sonrakiIs()
+	if n, bekle := k.bayiEkle(8, []int64{10}, false); n != 0 || bekle != domainSoguma {
+		t.Fatalf("yeni sahibin kendi soğuması: sirada=%d bekle=%v", n, bekle)
+	}
+}
+
 // "Domainlerimi Tara" bayi başına 30 dk'da bir.
 func TestBayiTumunuTara30Dk(t *testing.T) {
 	k := kuyrukKur(t)

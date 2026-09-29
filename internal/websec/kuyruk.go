@@ -49,15 +49,23 @@ type kuyruk struct {
 	tam      bool                // tam tarama istendi
 	sira     []int64             // bekleyen domainler, geliş sırası
 	bekleyen map[int64]int64     // domain → kuyruğa alan bayi (0 = kök)
-	sonIstek map[int64]time.Time // bayi soğuması: domain → son kuyruğa alınış
+	sonIstek map[int64]bayiIstek // bayi soğuması: domain → son kuyruğa alış
 	sonTumu  map[int64]time.Time // bayi → son "Domainlerimi Tara"
 	tetik    chan struct{}       // işçiyi uyandırır (kapasite 1, bloklamaz)
+}
+
+// bayiIstek — domain soğuması KİMİN isteğine ait: soğuma yalnız aynı bayiye
+// uygulanır. Devirden sonra yeni sahip, eski sahibin isteğinin süresini (429
+// metninden) öğrenemez; kalan süre hep bayinin kendi verisidir.
+type bayiIstek struct {
+	rid int64
+	t   time.Time
 }
 
 func yeniKuyruk() *kuyruk {
 	return &kuyruk{
 		bekleyen: map[int64]int64{},
-		sonIstek: map[int64]time.Time{},
+		sonIstek: map[int64]bayiIstek{},
 		sonTumu:  map[int64]time.Time{},
 		tetik:    make(chan struct{}, 1),
 	}
@@ -142,8 +150,8 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 			sirada++
 			continue
 		}
-		if t, ok := k.sonIstek[id]; ok {
-			if kalan := domainSoguma - simdi.Sub(t); kalan > 0 {
+		if onceki, ok := k.sonIstek[id]; ok && onceki.rid == rid {
+			if kalan := domainSoguma - simdi.Sub(onceki.t); kalan > 0 {
 				if soguma == 0 || kalan < soguma {
 					soguma = kalan
 				}
@@ -155,7 +163,7 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 			continue
 		}
 		k.ekleKilitli(id, rid)
-		k.sonIstek[id] = simdi
+		k.sonIstek[id] = bayiIstek{rid: rid, t: simdi}
 		bayiBekleyen++
 		sirada++
 		eklenen++
@@ -178,8 +186,8 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 
 // budaKilitli — süresi geçmiş soğuma kayıtlarını atar (bellek sınırlı kalsın).
 func (k *kuyruk) budaKilitli(simdi time.Time) {
-	for id, t := range k.sonIstek {
-		if simdi.Sub(t) >= domainSoguma {
+	for id, onceki := range k.sonIstek {
+		if simdi.Sub(onceki.t) >= domainSoguma {
 			delete(k.sonIstek, id)
 		}
 	}
