@@ -88,6 +88,13 @@ func TestSarmala(t *testing.T) {
 	}
 }
 
+// opakHata — iç hatayı Unwrap eden ama Error()'ında göstermeyen SDK sarmalayıcısı
+// benzetimi: kategori metin kuralıyla DEĞİL, tür bilgisiyle bulunmalı.
+type opakHata struct{ ic error }
+
+func (o opakHata) Error() string { return "istek başarısız" }
+func (o opakHata) Unwrap() error { return o.ic }
+
 func TestSinifla(t *testing.T) {
 	opRed := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
 	durumlar := []struct {
@@ -115,6 +122,10 @@ func TestSinifla(t *testing.T) {
 		{errors.New("STATUS_LOGON_FAILURE"), KategoriKimlik},
 		{errors.New("tamamen yeni bir hata"), KategoriBilinmeyen},
 		{fmt.Errorf("dial: %w", agkapi.ErrReddedildi), KategoriErisim},
+		{opakHata{ic: agkapi.ErrReddedildi}, KategoriErisim},
+		{opakHata{ic: context.DeadlineExceeded}, KategoriAg},
+		{opakHata{ic: fs.ErrNotExist}, KategoriBulunamadi},
+		{opakHata{ic: x509.HostnameError{}}, KategoriTLS},
 		{context.DeadlineExceeded, KategoriAg},
 		{context.Canceled, KategoriBilinmeyen},
 		{fmt.Errorf("stat: %w", fs.ErrNotExist), KategoriBulunamadi},
