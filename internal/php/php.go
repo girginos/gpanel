@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -607,13 +606,18 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// debugLogPath: sk icin SABIT debug log yolu (path traversal yok — sk domain
-// kaydindan gelir + c_ prefix dogrulanir; disaridan gelen deger pathe girmez).
-func debugLogPath(sk string) (string, error) {
-	if sk == "" || !strings.HasPrefix(sk, "c_") {
+// debugLogEvKok: kiraci ev dizinlerinin koku (testler t.TempDir ile degistirir).
+var debugLogEvKok = "/home"
+
+// debugLogEv: sk'nin EV dizini (debug log bunun altindaki .gpanel/php_debug.log'dur).
+// sk domain kaydindan gelir; c_ oneki + TEK yol bileseni ('/' yok) dogrulanir.
+// 🔴 Ev kiraci-sahiplidir (GUVENILMEZ ust dizin): dosyaya yol uzerinden DEGIL,
+// debugLogAc'in symlink-izlemeyen dir-fd zinciriyle erisilir (bkz. debuglog.go).
+func debugLogEv(sk string) (string, error) {
+	if sk == "" || !strings.HasPrefix(sk, "c_") || strings.ContainsRune(sk, '/') {
 		return "", fmt.Errorf("geçersiz sistem kullanıcısı")
 	}
-	return "/home/" + sk + "/.gpanel/php_debug.log", nil
+	return debugLogEvKok + "/" + sk, nil
 }
 
 // GetDebugLog: GET /domains/{id}/php/debug-log — per-domain PHP debug log'un son 200 satiri.
@@ -626,41 +630,13 @@ func (h *Handlers) GetDebugLog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	p, perr := debugLogPath(sk)
+	ev, perr := debugLogEv(sk)
 	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
-	f, ferr := os.Open(p)
-	if ferr != nil {
-		// dosya yok / okunamiyor → bos liste (debug hic tetiklenmemis olabilir)
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": []string{}})
-		return
-	}
-	defer f.Close()
-	// DoS-guvenli: tum dosyayi belleğe okuma; sadece dosya SONUNDAN son ~64KB seek-oku.
-	const tailBytes = 64 * 1024
-	var data []byte
-	if st, serr := f.Stat(); serr == nil && st.Size() > tailBytes {
-		buf := make([]byte, tailBytes)
-		if _, e := f.ReadAt(buf, st.Size()-tailBytes); e == nil || e == io.EOF {
-			if i := bytes.IndexByte(buf, '\n'); i >= 0 {
-				buf = buf[i+1:] // ilk kismi satiri at
-			}
-			data = buf
-		}
-	} else {
-		data, _ = io.ReadAll(f)
-	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = []string{}
-	}
-	const maxLines = 200
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": lines})
+	// dosya yok / guvensiz (symlink, yanlis sahip, tur) → bos liste
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"satirlar": debugLogSatirlar(ev)})
 }
 
 // ClearDebugLog: DELETE /domains/{id}/php/debug-log — debug log'u truncate eder.
@@ -672,15 +648,13 @@ func (h *Handlers) ClearDebugLog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	p, perr := debugLogPath(sk)
+	ev, perr := debugLogEv(sk)
 	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
-	// truncate (dosya yoksa sessiz — zaten bos)
-	if f, err := os.OpenFile(p, os.O_TRUNC|os.O_WRONLY, 0644); err == nil {
-		_ = f.Close()
-	}
+	// truncate (dosya yoksa sessiz — zaten bos; guvensizse DOKUNULMAZ)
+	_ = debugLogKes(ev)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
