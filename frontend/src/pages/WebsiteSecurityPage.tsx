@@ -1,40 +1,47 @@
+import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { useRol, yoneticiMi } from '@/lib/rol'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
-import { I } from '@/components/Ikon'
+import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 /*
- * Website Security Monitor — admin.
+ * Website Security Monitor — yönetici + bayi.
  *
- * Panel'deki TÜM domainleri 6 saatte bir tarar. Bu sayfa artık DOMAIN ODAKLI:
- * her domain bir satır (durum: taranıyor / N açık / temiz / uygulama yok / beklemede).
+ * Tarayıcı panel'deki TÜM domainleri 6 saatte bir tarar. Yönetici sunucu genelini,
+ * bayi YALNIZ kendi hesaplarındaki domainleri görür: kapsamı sunucu zorlar (sayaç,
+ * liste, durum dahil); sayfa bayide yönetici-yalnız alanları (taranan uygulama, son
+ * hata) çizmez. Bu sayfa DOMAIN ODAKLI:
+ * her domain bir satır (durum: taranıyor / sırada / N açık / temiz / uygulama yok / beklemede).
  * Açıkların kendisi domaine ÖZEL sayfada listelenir (/website-security/domain/:id)
  * — böylece domain listesi ile açık listesi artık alt alta yığılmaz.
  */
 
+// Bayi yanıtında scanned_apps / duration_ms / last_error / app_sayaclari YOK
+// (sunucu geneli bilgi) — bu yüzden opsiyonel.
 type Status = {
   running: boolean
   last_run: string | null
   last_success: string | null
   total_findings: number
   critical: number; high: number; medium: number; low: number
-  scanned_apps: number
-  duration_ms: number
-  last_error: string | null
-  next_estimate: string
+  scanned_apps?: number
+  duration_ms?: number
+  last_error?: string | null
+  next_estimate?: string
   ekosistemler?: string[] | null
   app_sayaclari?: Record<string, number> | null
 }
 
-// Panel'deki her domain'in güvenlik durumu.
+// Görünen her domain'in (yönetici: tümü, bayi: kendi) güvenlik durumu.
 type Uygulama = {
   domain_id: number
   alan_adi: string
@@ -44,8 +51,14 @@ type Uygulama = {
   paket_sayisi: number
   bulgu_sayisi: number
   son_tarama: string
-  durum: string // taraniyor | acik | temiz | desteklenmiyor | beklemede
+  durum: string // taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede
 }
+
+// Tarama isteğinin yanıtı: kuyruğa alınınca 202 {sirada: n}.
+type TaramaYanit = { sirada?: number }
+
+const durumKodu = (e: unknown): number | undefined =>
+  (e as { response?: { status?: number } })?.response?.status
 
 type EnvanterYanit = {
   toplam: number
@@ -100,6 +113,13 @@ const WSEC_EN: Record<string, string> = {
   "Tümünü Tara": "Scan All",
   "Tür:": "Type:",
   "İşlem başarısız": "Operation failed",
+  "Hesaplarınızdaki domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.": "Scans the domains in your accounts every 6 hours and matches them against known CVE vulnerabilities.",
+  "Domainlerimi Tara": "Scan My Domains",
+  "Sırada": "Queued",
+  "Tarama sıraya alındı": "Scan queued",
+  "Kuyrukta {0} domain var.": "{0} domain(s) in the queue.",
+  "Sıraya alınacak domain yok.": "No domains to queue.",
+  "Tarama sınırı": "Scan limit",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -109,6 +129,12 @@ function DurumRozet({ u }: { u: Uygulama }) {
       return (
         <Badge color="info" variant="soft" className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" /> {cevir("Taranıyor…")}
+        </Badge>
+      )
+    case 'sirada':
+      return (
+        <Badge color="info" variant="soft" className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium">
+          <Ikon d={I.saat} className="size-3 shrink-0" /> {cevir("Sırada")}
         </Badge>
       )
     case 'acik':
@@ -153,6 +179,8 @@ export default function WebsiteSecurityPage() {
   const toast = useToast()
   const nav = useNavigate()
   const ilkYuklendi = useRef(false)
+  // Bayi (ve bilinmeyen rol) yönetici-yalnız öğeleri görmez; veri kapsamını sunucu zorlar.
+  const yonetici = yoneticiMi(useRol())
 
   const yukle = async () => {
     if (!ilkYuklendi.current) setYukleniyor(true)
@@ -173,32 +201,45 @@ export default function WebsiteSecurityPage() {
   }
   useEffect(() => { void yukle() }, [])
 
-  // Tarama aktifse 5sn'de bir tazele — domain durumları canlı güncellensin.
+  // Tarama aktifse (ya da sırada domain varsa) 5sn'de bir tazele — domain durumları canlı güncellensin.
   useEffect(() => {
-    const canli = status?.running || (envanter?.items.some((u) => u.durum === 'taraniyor') ?? false)
+    const canli = status?.running || (envanter?.items.some((u) => u.durum === 'taraniyor' || u.durum === 'sirada') ?? false)
     if (!canli) return
     const t = setInterval(yukle, 5000)
     return () => clearInterval(t)
   }, [status?.running, envanter])
 
-  const tumunuTara = async () => {
-    setTaranıyor(true)
+  // Tarama isteği (yönetici ve bayi aynı uç). Kuyruğa alınınca 202 {sirada: n} → bildirim;
+  // 429 = bayi tarama sınırı (sunucu mesajı "N dk sonra tekrar deneyin"); 404 = domain
+  // yok ya da başkasının (ikisi aynı yanıt) → liste bayat, tazelenir.
+  const taramaIste = async (yol: string, varsayilanHata: string) => {
     try {
-      await api.post('/websec/rescan', {})
+      const r = await api.post<TaramaYanit>(yol, {})
+      const n = r.data?.sirada
+      if (typeof n === 'number') {
+        if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("Kuyrukta {0} domain var."), n))
+        else toast.bilgi(cevir("Sıraya alınacak domain yok."))
+      }
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Rescan hatası")), ton: 'tehlike' })
-    } finally { setTaranıyor(false) }
+      const kod = durumKodu(e)
+      if (kod === 429) {
+        await dialog.bilgi({ baslik: cevir("Tarama sınırı"), mesaj: apiHata(e, varsayilanHata), ton: 'uyari' })
+        return
+      }
+      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, varsayilanHata), ton: 'tehlike' })
+      if (kod === 404) await yukle()
+    }
+  }
+
+  const tumunuTara = async () => {
+    setTaranıyor(true)
+    try { await taramaIste('/websec/rescan', cevir("Rescan hatası")) } finally { setTaranıyor(false) }
   }
 
   const domainTara = async (id: number) => {
     setTarananDomain(id)
-    try {
-      await api.post('/websec/rescan?domain_id=' + id, {})
-      await yukle()
-    } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'tehlike' })
-    } finally { setTarananDomain(null) }
+    try { await taramaIste('/websec/rescan?domain_id=' + id, cevir("Tarama hatası")) } finally { setTarananDomain(null) }
   }
 
   const zamanFmt = (s: string | null) => {
@@ -230,7 +271,9 @@ export default function WebsiteSecurityPage() {
             Website Security Monitor
           </h1>
           <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-            {cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")}
+            {yonetici
+              ? cevir("Barındırılan tüm domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")
+              : cevir("Hesaplarınızdaki domainleri 6 saatte bir tarar, bilinen CVE zafiyetleriyle eşleştirir.")}
             {cevir("Bir domainin açıkları için satırına tıklayın.")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -257,11 +300,11 @@ export default function WebsiteSecurityPage() {
           onClick={tumunuTara}
           yukleniyor={taranıyor || !!status?.running}
         >
-          {status?.running ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Tümünü Tara"))}
+          {status?.running ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir(yonetici ? "Tümünü Tara" : "Domainlerimi Tara"))}
         </Button>
       </div>
 
-      {/* Sayaç kartları — global şiddet toplamları (görüntü) */}
+      {/* Sayaç kartları — şiddet toplamları (yönetici: sunucu geneli, bayi: kendi domainleri; kapsam sunucuda) */}
       {status && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           <SayacKart etiket={cevir("Kritik")} sayi={status.critical} renk={SEV_RENK.critical} />
@@ -274,13 +317,16 @@ export default function WebsiteSecurityPage() {
       {/* Durum */}
       {status && (
         <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-3 text-sm ${yonetici ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
             <div><div className="text-xs text-slate-500">{cevir("Son tarama")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
             <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
-            <div><div className="text-xs text-slate-500">{cevir("Taranan uygulama")}</div><div className="mt-0.5 font-medium">{status.scanned_apps}</div></div>
+            {/* Taranan uygulama + son hata sunucu geneli bilgidir: yalnız yöneticide */}
+            {yonetici && (
+              <div><div className="text-xs text-slate-500">{cevir("Taranan uygulama")}</div><div className="mt-0.5 font-medium">{status.scanned_apps ?? '—'}</div></div>
+            )}
             <div><div className="text-xs text-slate-500">{cevir("Toplam bulgu")}</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
-          {status.last_error && (
+          {yonetici && status.last_error && (
             <UyariKutusu ton="tehlike" className="mt-3" kucuk>
               {cevir("Son hata:")} {status.last_error}
             </UyariKutusu>
@@ -361,7 +407,9 @@ export default function WebsiteSecurityPage() {
                           ikon={I.oynat}
                           onClick={(e) => { e.stopPropagation(); void domainTara(u.domain_id) }}
                           yukleniyor={tarananDomain === u.domain_id}
-                          disabled={status?.running || u.durum === 'taraniyor'}
+                          // Yönetici ucu tek kilitli (tarama sürerken 409) → tarama boyunca kapalı;
+                          // bayi isteği kuyruğa girer, yalnız zaten sırada/taranan satır kapalı.
+                          disabled={(yonetici && status?.running) || u.durum === 'taraniyor' || u.durum === 'sirada'}
                         >
                           {cevir("Tara")}
                         </Button>

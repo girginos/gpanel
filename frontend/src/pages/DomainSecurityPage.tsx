@@ -3,7 +3,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -16,6 +16,9 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 /*
  * Domaine ÖZEL güvenlik sayfası — bir domainin bilinen açıklarını listeler.
  * /website-security/domain/:id · Website Security Monitor'den satıra tıklanınca gelinir.
+ * Yönetici ve bayi aynı sayfayı kullanır; kapsamı sunucu zorlar. Bayiye başka kiracının
+ * domaini olmayan domainle AYNI görünür (boş envanter + 0 bulgu, tarama 404) →
+ * ikisi de "Domain bulunamadı".
  */
 
 type Bulgu = {
@@ -38,9 +41,16 @@ type Sayfa = { toplam: number; sayfa: number; sayfa_boyut: number; items: Bulgu[
 
 type Uygulama = {
   domain_id: number; alan_adi: string; app_type: string; install_path: string
-  app_version: string; paket_sayisi: number; bulgu_sayisi: number; son_tarama: string; durum: string
+  app_version: string; paket_sayisi: number; bulgu_sayisi: number; son_tarama: string
+  durum: string // taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede
 }
 type EnvanterYanit = { toplam: number; items: Uygulama[]; desteklenmeyen: number }
+
+// Tarama isteğinin yanıtı: kuyruğa alınınca 202 {sirada: n}.
+type TaramaYanit = { sirada?: number }
+
+const durumKodu = (e: unknown): number | undefined =>
+  (e as { response?: { status?: number } })?.response?.status
 
 // Şiddet → Tailux Badge. Kritik dolu (en güçlü vurgu), diğerleri soft; şiddet
 // adı rozet metninde her zaman yazılı (renk tek başına anlam taşımaz).
@@ -78,6 +88,10 @@ const SEC_EN: Record<string, string> = {
   "Bu filtreyle açık yok.": "No vulnerabilities with this filter.",
   "Tarama hatası": "Scan error",
   "İşlem başarısız": "Operation failed",
+  "Sırada": "Queued",
+  "Tarama sıraya alındı": "Scan queued",
+  "Kuyrukta {0} domain var.": "{0} domain(s) in the queue.",
+  "Tarama sınırı": "Scan limit",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (SEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -85,6 +99,7 @@ export default function DomainSecurityPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams<{ id: string }>()
   const domainID = Number(id)
+  const gecerliID = Number.isSafeInteger(domainID) && domainID > 0
   const [sayfa, setSayfa] = useState<Sayfa>({ toplam: 0, sayfa: 1, sayfa_boyut: 50, items: [] })
   const [uyg, setUyg] = useState<Uygulama[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
@@ -92,8 +107,10 @@ export default function DomainSecurityPage() {
   const [filtre, setFiltre] = useState('')
   const [aktifSayfa, setAktifSayfa] = useState(1)
   const [taranıyor, setTaranıyor] = useState(false)
+  const [bulunamadi, setBulunamadi] = useState(false)
   const dialog = useDialog()
   const toast = useToast()
+  const nav = useNavigate()
   const ilk = useRef(false)
 
   const yukle = async () => {
@@ -104,13 +121,19 @@ export default function DomainSecurityPage() {
       if (filtre) params.set('severity', filtre)
       const [p, env] = await Promise.all([
         api.get<Sayfa>('/websec/findings?' + params.toString()),
-        api.get<EnvanterYanit>('/websec/apps'),
+        api.get<EnvanterYanit>('/websec/apps?domain_id=' + domainID),
       ])
+      const toplam = p.data.toplam ?? 0
       setSayfa({
-        toplam: p.data.toplam ?? 0, sayfa: p.data.sayfa ?? 1,
+        toplam, sayfa: p.data.sayfa ?? 1,
         sayfa_boyut: p.data.sayfa_boyut ?? 100, items: Array.isArray(p.data.items) ? p.data.items : [],
       })
-      setUyg((env.data.items ?? []).filter((u) => u.domain_id === domainID))
+      // Sunucu ?domain_id= ile süzer; istemci süzgeci süzgeçsiz (eski) yanıtta da doğru kalır.
+      const bunun = (env.data.items ?? []).filter((u) => u.domain_id === domainID)
+      setUyg(bunun)
+      // Görünen her domain envanterde (uygulaması olmasa da) en az bir satır alır. Satır da
+      // bulgu da yoksa domain ya yok ya başkasının — ikisi aynı görünüm.
+      setBulunamadi(bunun.length === 0 && toplam === 0)
       ilk.current = true
     } catch (e) {
       const m = apiHata(e, cevir("Yüklenemedi"))
@@ -118,32 +141,57 @@ export default function DomainSecurityPage() {
       toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
-  useEffect(() => { if (domainID > 0) void yukle() }, [domainID, filtre, aktifSayfa])
+  useEffect(() => { if (gecerliID) void yukle() }, [domainID, gecerliID, filtre, aktifSayfa])
 
-  // Taranıyorsa canlı tazele
+  // Taranıyor ya da sıradaysa canlı tazele
   useEffect(() => {
-    if (!uyg.some((u) => u.durum === 'taraniyor')) return
+    if (!uyg.some((u) => u.durum === 'taraniyor' || u.durum === 'sirada')) return
     const t = setInterval(yukle, 5000)
     return () => clearInterval(t)
   }, [uyg])
 
+  // Kuyruğa alınınca 202 {sirada: n}; 429 = bayi tarama sınırı (sunucu mesajı);
+  // 404 = domain yok ya da başkasının (aynı yanıt) → "Domain bulunamadı" görünümü.
   const domainTara = async () => {
     setTaranıyor(true)
     try {
-      await api.post('/websec/rescan?domain_id=' + domainID, {})
+      const r = await api.post<TaramaYanit>('/websec/rescan?domain_id=' + domainID, {})
+      const n = r.data?.sirada
+      if (typeof n === 'number' && n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("Kuyrukta {0} domain var."), n))
       await yukle()
     } catch (e) {
-      await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'tehlike' })
+      const kod = durumKodu(e)
+      if (kod === 404) setBulunamadi(true)
+      else if (kod === 429) await dialog.bilgi({ baslik: cevir("Tarama sınırı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'uyari' })
+      else await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, cevir("Tarama hatası")), ton: 'tehlike' })
     } finally { setTaranıyor(false) }
   }
 
   const alanAdi = uyg[0]?.alan_adi || sayfa.items[0]?.alan_adi || `#${domainID}`
   const taraniyorMu = uyg.some((u) => u.durum === 'taraniyor')
+  const siradaMu = !taraniyorMu && uyg.some((u) => u.durum === 'sirada')
   const sev = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 }
     for (const b of sayfa.items) if (b.severity in c) (c as Record<string, number>)[b.severity]++
     return c
   }, [sayfa.items])
+
+  if (!gecerliID || bulunamadi) {
+    return (
+      <div className="w-full px-4 py-6 md:px-6 md:py-8">
+        <Breadcrumb items={[
+          { etiket: 'Website Security Monitor', href: '/website-security' },
+          { etiket: `#${id ?? ''}` },
+        ]} />
+        <UyariKutusu ton="uyari" className="mt-4">
+          {cevir("Domain bulunamadı.")}
+          <div className="mt-2">
+            <Button variant="outlined" boyut="sm" ikon={I.geri} onClick={() => nav('/website-security')}>{cevir("Listeye dön")}</Button>
+          </div>
+        </UyariKutusu>
+      </div>
+    )
+  }
 
   return (
     <div className="w-full px-4 py-6 md:px-6 md:py-8">
@@ -166,10 +214,15 @@ export default function DomainSecurityPage() {
                 <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden="true" /> {cevir("Taranıyor…")}
               </Badge>
             )}
+            {siradaMu && (
+              <Badge color="info" variant="soft" className="gap-1.5 text-[11px]">
+                <Ikon d={I.saat} className="size-3 shrink-0" /> {cevir("Sırada")}
+              </Badge>
+            )}
           </div>
         </div>
-        <Button color="primary" ikon={I.oynat} onClick={domainTara} yukleniyor={taranıyor || taraniyorMu}>
-          {taraniyorMu ? cevir("Taranıyor…") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
+        <Button color="primary" ikon={I.oynat} onClick={domainTara} yukleniyor={taranıyor || taraniyorMu || siradaMu}>
+          {taraniyorMu ? cevir("Taranıyor…") : siradaMu ? cevir("Sırada") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
         </Button>
       </div>
 

@@ -86,7 +86,7 @@ const MENU_EN: Record<string, string> = {
   'Profil ve Tercihler': 'Profile & Preferences',
   // Grup başlıkları
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
-  'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings',
+  'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings', 'Güvenlik': 'Security',
   'Profilim': 'My Profile', 'Genel': 'General',
   'Bildirimler': 'Notifications', 'Yedek Yönetimi': 'Backup Management',
   'Dosyalar ve Veriler': 'Files & Data', 'Web ve Uygulamalar': 'Web & Apps',
@@ -144,6 +144,11 @@ const RESELLER_NAV: NavGroup[] = [
     { to: '/domainler',       etiket: 'Domainler', ikon: ICONS.domain, sayac: 'domainler' },
     { to: '/hizmet-planlari', etiket: 'Planlar',   ikon: ICONS.plan, sayac: 'hizmet_planlari' },
   ]},
+  // Website Security Monitor bayide YALNIZ kendi domainlerini gösterir; kapsamı
+  // sunucu (websec handler'ları) zorlar, menü yalnız kapıyı açar.
+  { baslik: 'Güvenlik', items: [
+    { to: '/website-security', etiket: 'Website Security Monitor', ikon: ICONS.websec },
+  ]},
   { baslik: 'Ayarlar', items: [
     { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonları',      ikon: ICONS.domain },
     { to: '/denetim',             etiket: 'Denetim Kaydı',       ikon: ICONS.denetim },
@@ -157,6 +162,7 @@ const BOLUM_IKON: Record<string, string> = {
   'Planlar': ICONS.plan,
   'Sunucu Yönetimi': ICONS.sunucu,
   'Profilim': ICONS.profil,
+  'Güvenlik': ICONS.firewall,
   'Ayarlar': ICONS.araclar,
 }
 
