@@ -124,6 +124,126 @@ func TestLaravel_FifoEnvTakilmaz(t *testing.T) {
 	yrOzetKarsilastir(t, "fifo", once, yrOzet(t, env))
 }
 
+// yrFifoSerbest — FIFO'yu okuyucu olarak açarken takılmış çağrıyı, sonuç gelene
+// dek yazıcı açarak serbest bırakır (bekleyen okuyucu varken O_NONBLOCK yazıcı
+// açılır): takılan test süresiz asılı kalmaz, hata olarak raporlanır.
+func yrFifoSerbest[T any](fifo string, bitti <-chan T) T {
+	for {
+		if fd, err := unix.Open(fifo, unix.O_WRONLY|unix.O_NONBLOCK, 0); err == nil {
+			unix.Close(fd)
+		}
+		select {
+		case v := <-bitti:
+			return v
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// Yapılandırma adayının DİZİN bileşeni FIFO (doğrudan ya da ev içi bağla):
+// açılışı takılmaz (eskiden os.Root.Open son bileşeni O_DIRECTORY'siz açıp
+// yazıcı bekliyordu → tek taşıma yuvası panel yeniden başlayana dek dolu),
+// aday atlanır ve sonraki meşru aday yine işlenir (okuyucular dahil).
+func TestYapilandirma_FifoDizinTakilmaz(t *testing.T) {
+	for _, sn := range []string{"doğrudan", "ev içi bağ"} {
+		t.Run(sn, func(t *testing.T) {
+			o := yrYeniOrtam(t)
+			ph := filepath.Join(o.ev, "public_html")
+			for _, d := range []string{ph, filepath.Join(ph, "app"), filepath.Join(ph, "sites"), filepath.Join(ph, "sites", "default")} {
+				o.dizin(t, d)
+			}
+			// app/etc/env.php'den SONRAKİ aday: meşru, kiracının kendi dosyası.
+			o.dosya(t, filepath.Join(ph, "sites", "default", "settings.php"), "<?php\ndefine( 'DB_NAME', 'eski_db' );\n", 0o640)
+			fifo := filepath.Join(ph, "app", "etc")
+			if sn != "doğrudan" {
+				fifo = filepath.Join(o.ev, "boru")
+				o.bag(t, "../../boru", filepath.Join(ph, "app", "etc"))
+			}
+			if err := unix.Mkfifo(fifo, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Lchown(fifo, o.uid, o.gid); err != nil {
+				t.Fatal(err)
+			}
+
+			type sonuc struct {
+				bulunan []string
+				yazilan int
+			}
+			bitti := make(chan sonuc, 1)
+			go func() {
+				b := configtenDBBul(ph)
+				bitti <- sonuc{b, (&Handlers{}).configYenidenYaz(ph, yrEsleme, "", yrYeniPw, yrLog(t))}
+			}()
+			var s sonuc
+			select {
+			case s = <-bitti:
+			case <-time.After(20 * time.Second):
+				t.Error("FIFO dizin bileşeninde takıldı (20 sn)")
+				s = yrFifoSerbest(fifo, bitti)
+			}
+			if len(s.bulunan) != 1 || s.bulunan[0] != "eski_db" || s.yazilan != 1 {
+				t.Errorf("FIFO adayından sonraki meşru aday işlenmedi: bulunan=%v yazılan=%d", s.bulunan, s.yazilan)
+			}
+		})
+	}
+}
+
+// Okuyucular (configtenDBBul/configtenDBKimlik) da ev kilidinde: bağla ya da
+// sabit bağla komşunun yapılandırmasındaki DB adı/kullanıcı/parola bu hesaba
+// OKUNMAZ; ev dışı web kökünde hiçbir şey okunmaz. Meşru durumda kiracının
+// kendi yapılandırması okunur (test boşuna geçmiyor).
+func TestYapilandirma_OkuyucularKomsuyuOkumaz(t *testing.T) {
+	senaryolar := []struct {
+		ad string
+		// kur: web kökünü döndürür (komsu = komşunun public_html'i).
+		kur   func(t *testing.T, o yrOrtam, ph, komsu string) string
+		mesru bool
+	}{
+		{"public_html komşuya bağ", func(t *testing.T, o yrOrtam, ph, komsu string) string {
+			o.bag(t, komsu, ph)
+			return ph
+		}, false},
+		{"wp-config komşuya bağ", func(t *testing.T, o yrOrtam, ph, komsu string) string {
+			o.dizin(t, ph)
+			o.bag(t, filepath.Join(komsu, "wp-config.php"), filepath.Join(ph, "wp-config.php"))
+			return ph
+		}, false},
+		{"wp-config komşuya sabit bağ", func(t *testing.T, o yrOrtam, ph, komsu string) string {
+			o.dizin(t, ph)
+			if err := os.Link(filepath.Join(komsu, "wp-config.php"), filepath.Join(ph, "wp-config.php")); err != nil {
+				t.Fatal(err)
+			}
+			return ph
+		}, false},
+		{"ev kökü dışı web kökü", func(t *testing.T, o yrOrtam, ph, komsu string) string {
+			d := t.TempDir()
+			o.dosya(t, filepath.Join(d, "wp-config.php"), "<?php\ndefine( 'DB_NAME', 'eski_db' );\ndefine( 'DB_USER', 'eski_kul' );\ndefine( 'DB_PASSWORD', 'eski_pw' );\n", 0o644)
+			return d
+		}, false},
+		{"meşru: kiracının kendi yapılandırması", func(t *testing.T, o yrOrtam, ph, komsu string) string {
+			o.dizin(t, ph)
+			o.dosya(t, filepath.Join(ph, "wp-config.php"), "<?php\ndefine( 'DB_NAME', 'eski_db' );\ndefine( 'DB_USER', 'eski_kul' );\ndefine( 'DB_PASSWORD', 'eski_pw' );\n", 0o640)
+			return ph
+		}, true},
+	}
+	for _, sn := range senaryolar {
+		t.Run(sn.ad, func(t *testing.T) {
+			o := yrYeniOrtam(t)
+			webRoot := sn.kur(t, o, filepath.Join(o.ev, "public_html"), o.komsu(t))
+			bulunan := configtenDBBul(webRoot)
+			kimlik := configtenDBKimlik(webRoot)
+			okundu := len(bulunan) == 1 && bulunan[0] == "eski_db" && kimlik["eski_db"] == dbKimlik{Kul: "eski_kul", Pw: "eski_pw"}
+			if sn.mesru && !okundu {
+				t.Errorf("kiracının kendi yapılandırması okunmadı: bulunan=%v kimlik=%d", bulunan, len(kimlik))
+			}
+			if !sn.mesru && (len(bulunan) != 0 || len(kimlik) != 0) {
+				t.Errorf("başkasının yapılandırması okundu: bulunan=%v kimlik=%d", bulunan, len(kimlik))
+			}
+		})
+	}
+}
+
 // Meşru: kiracının yapılandırması yeniden yazılır; sahip, izin, tek bağlantı
 // korunur, özgün içerik yedeklenir.
 func TestYapilandirma_KiracininDosyasiYenilenir(t *testing.T) {

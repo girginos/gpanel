@@ -211,7 +211,12 @@ type kiraciDosyasi struct {
 func kiraciDosyasiAc(ev *os.Root, rel string, uid int) (*kiraciDosyasi, error) {
 	rel = path.Clean(rel)
 	// Dizin ev köküne KİLİTLİ çözülür: yol boyunca ev dışına çıkan bağ reddedilir.
-	dizin, err := ev.Open(path.Dir(rel))
+	// 🔴 O_DIRECTORY: os.Root son bileşeni yalnız O_NOFOLLOW ile açar; dizin
+	// yerine FIFO (doğrudan ya da ev içi bağla) olursa openat bir yazıcı bekleyip
+	// SÜRESİZ takılırdı (bağlam iptali kesemez; tek taşıma yuvası kilitli kalır).
+	// O_DIRECTORY ile çekirdek açmadan önce ENOTDIR döner; ev içi bağ çözümü
+	// (ENOTDIR/ELOOP → os.Root bağı kök içinde izler) korunur.
+	dizin, err := ev.OpenFile(path.Dir(rel), os.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
 		return nil, err
 	}

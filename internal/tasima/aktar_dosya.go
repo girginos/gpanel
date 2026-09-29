@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"girginospanel/internal/kiraci"
@@ -99,13 +100,27 @@ func ozelDosyaUyar(n int, sonuc *AktarSonuc, log func(string, ...any)) {
 }
 
 // ---------------------------------------------------------------------------
-// Hazırlık alanı: uzak rsync → (kök, 0700) → süz + devret → kiracı rsync
+// Hazırlık alanı: uzak rsync → sarmalayıcı (kök, 0700) içine → süz + devret →
+// kiracı rsync
 // ---------------------------------------------------------------------------
 
 // hazirlikKoku — uzak rsync'in indiği alan: kiracı ağaçlarının DIŞINDA ama
 // /home ile aynı dosya sisteminde. Kök sahipli 0711: kiracı listeleyemez,
 // yalnız kendisine devredilmiş iş dizinine adıyla girer. Testler değiştirir.
 var hazirlikKoku = "/home/.gosp-tasima"
+
+// hazirlikIcerik — iş dizininin (sarmalayıcı) içindeki rsync hedefi.
+//
+// 🔴 Uzak rsync kök olarak `-a` ile koşar; sahiplik taşındığında (--numeric-ids)
+// hedef dizinin KENDİ sahibini ve alt girdilerin sahiplerini KAYNAK seçer
+// (181'de ölçüldü: 0700 0:0 açılan hedef aktarımdan sonra 4242:4242). Seçilen
+// uid yerel bir hesaba denk gelirse o hesap devirden önce ağaca girip ara
+// dizini bağa çevirebilir; kökün yol tabanlı devir yürüyüşü (lchown) bağı
+// izlerdi. Bu yüzden rsync hedefi sarmalayıcının İÇİNDEDİR: rsync sarmalayıcıya
+// dokunmaz, sarmalayıcı devrin sonuna kadar yalnız kökündür (0700) → rsync
+// bayraklarından (sahiplik taşınsa da taşınmasa da) bağımsız olarak içerikte ne
+// sahip/izin olursa olsun başka hiçbir hesap içeri giremez.
+const hazirlikIcerik = "d"
 
 // hazirlikOmru — adındaki zamandan bu kadar eski hazırlık dizini yarıda kalmış
 // (panel yeniden başlamış) bir işindir: canlı bir kalem hesapTimeout'u aşamaz.
@@ -115,9 +130,10 @@ const hazirlikOmru = hesapTimeout + time.Hour
 var lchown = os.Lchown
 
 // dizinAktar — uzak dizini kiracının ev'e göre hedefRel dizinine iki adımda taşır:
-//  1. kök, uzak rsync'i YALNIZ kendisinin erişebildiği yeni hazırlık dizinine
-//     (0700) çeker — bu sırada kiracı hiçbir şeye dokunamaz, kök kiracı
-//     ağacında yol çözmez;
+//  1. kök, uzak rsync'i YALNIZ kendisinin erişebildiği yeni iş dizininin
+//     (sarmalayıcı, 0700) içine (hazirlikIcerik) çeker — bu sırada kiracı ya da
+//     kaynağın sahip yaptığı herhangi bir yerel hesap hiçbir şeye dokunamaz,
+//     kök kiracı ağacında yol çözmez;
 //  2. içerik süzülüp kiracıya devredilir (hazirlikDevret) ve KİRACI kimliğinde
 //     rsync ile hedefe yerleştirilir: kiracının kurduğu bağlar/takaslar
 //     çekirdeğin DAC'ı ile kiracının kendi yetkisine iner; dosyalar doğrudan
@@ -134,10 +150,11 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 	}
 	defer os.RemoveAll(hazirlik)
 
-	if _, err := k.RsyncCek(ctx, uzak+"/", hazirlik+"/", ekstra...); err != nil {
+	icerik := filepath.Join(hazirlik, hazirlikIcerik)
+	if _, err := k.RsyncCek(ctx, uzak+"/", icerik+"/", ekstra...); err != nil {
 		return 0, 0, err
 	}
-	bayt, _ := dizinBoyut(hazirlik)
+	bayt, _ := dizinBoyut(icerik)
 	atlanan, err := hazirlikDevret(hazirlik, uid, gid)
 	if err != nil {
 		return bayt, atlanan, fmt.Errorf("hazirlik alani kiraciya devredilemedi")
@@ -148,7 +165,7 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 	}
 	// Hata metnine yalnız çıkış kodu girer (stderr panel yollarını içerir).
 	if err := ki.Komut(ctx, "rsync", "-a", "--no-perms", "--no-owner", "--no-group",
-		hazirlik+"/", hedef+"/").Run(); err != nil {
+		icerik+"/", hedef+"/").Run(); err != nil {
 		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (rsync: %v)", err)
 	}
 	_ = ki.Komut(ctx, "restorecon", "-R", hedef).Run()
@@ -156,9 +173,10 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 }
 
 // hazirlikAc — hazırlık kökünü (kök sahipli 0711) sağlar, yarıda kalmış eski
-// dizinleri süpürür ve bu aktarıma özel yeni dizini (0700, yalnız kök) açar.
-// Adı <sk>-<unix zaman>-<rastgele>: zaman damgasını kök yazar, kiracı (dizin
-// devredildikten sonra bile) adı değiştiremez → süpürme ona güvenir.
+// dizinleri süpürür ve bu aktarıma özel yeni iş dizinini (sarmalayıcı: 0700,
+// yalnız kök) açar. Adı <sk>-<unix zaman>-<rastgele>: zaman damgasını kök
+// yazar, kiracı (dizin devredildikten sonra bile) adı değiştiremez → süpürme
+// ona güvenir.
 func hazirlikAc(ki kiraci.Kiraci, simdi time.Time) (string, error) {
 	if err := os.MkdirAll(hazirlikKoku, 0o711); err != nil {
 		return "", err
@@ -188,18 +206,30 @@ func hazirlikSupur(simdi time.Time) {
 	}
 }
 
-// hazirlikDevret — kök rsync'in doldurduğu hazırlık dizinini kiracıya devreder.
+// hazirlikDevret — kök rsync'in doldurduğu iş dizinini (sarmalayıcı) kiracıya
+// devreder.
 //
-// Kiracı dizine ancak EN SON adımda (hazırlık dizininin kendi sahipliği)
-// girebilir; o ana kadar ağaç yalnız köke açıktır (0700), bu yüzden yol tabanlı
-// yürüyüş yarışsızdır. Aygıt/fifo/soket SİLİNİR: kiracıya devredilen bir aygıt
-// düğümü ham disk/bellek erişimi demektir (kaynak rsync -a ile yaratabilir).
-// Kalan girdilerin (dizin/dosya/bağ) sahipliği bağ İZLENMEDEN kiracıya geçer;
-// uzak uid'ler (--numeric-ids) böylece silinir. Döner: silinen özel dosya sayısı.
-func hazirlikDevret(dizin string, uid, gid int) (int, error) {
+// Önkoşul, işe başlamadan DOĞRULANIR: sarmalayıcı hâlâ panelin (kök) bağ
+// olmayan 0700 dizinidir — değilse içerik yarışa açıktır, devir yapılmaz
+// (kapalı hata). Böylece ağaca ancak EN SON adımda (sarmalayıcının kendi
+// sahipliği) kiracı girebilir; o ana kadar içerikteki sahip/izinler ne olursa
+// olsun başka hesap içeri giremez ve yol tabanlı yürüyüş yarışsızdır.
+// Aygıt/fifo/soket SİLİNİR: kiracıya devredilen bir aygıt düğümü ham
+// disk/bellek erişimi demektir (kaynak rsync -a ile yaratabilir). Kalan
+// girdilerin (dizin/dosya/bağ, içerik dizininin kendisi dahil) sahipliği bağ
+// İZLENMEDEN kiracıya geçer; kaynaktan gelen uid'ler böylece silinir.
+// Döner: silinen özel dosya sayısı.
+func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
+	fi, err := os.Lstat(sarmalayici)
+	if err != nil {
+		return 0, err
+	}
+	if fi.Mode() != fs.ModeDir|0o700 || fi.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+		return 0, fmt.Errorf("hazirlik sarmalayicisi yalniz panele acik degil")
+	}
 	var yollar []string
 	atlanan := 0
-	err := filepath.WalkDir(dizin, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(filepath.Join(sarmalayici, hazirlikIcerik), func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -213,12 +243,11 @@ func hazirlikDevret(dizin string, uid, gid int) (int, error) {
 	if err != nil {
 		return atlanan, err
 	}
-	// yollar[0] hazırlık dizininin kendisidir (WalkDir kökü önce verir).
-	for _, p := range yollar[1:] {
+	for _, p := range yollar {
 		if err := lchown(p, uid, gid); err != nil {
 			return atlanan, err
 		}
 	}
 	// EN SON: kiracıya kapıyı açan adım (bundan önce içeri giremez).
-	return atlanan, lchown(dizin, uid, gid)
+	return atlanan, lchown(sarmalayici, uid, gid)
 }

@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -225,19 +226,45 @@ func yrOzetKarsilastir(t *testing.T, ad string, once, sonra map[string]yrGirdi) 
 // Sahte uzak sunucu
 // ---------------------------------------------------------------------------
 
-type yrRsyncCagri struct {
-	uzak, yerel string
-	mod         fs.FileMode
-	uid         uint32
+// yrYabanciUID — kaynak sunucunun seçtiği, hedefte hesabı olmayan sayısal uid.
+const yrYabanciUID = 4242
+
+// yrSahip — bir yolun (bağ izlenmeden) türü+izni ve sahibi.
+type yrSahip struct {
+	mod fs.FileMode
+	uid uint32
 }
 
-// yrUzak — uzakKabuk sahtesi: RsyncCek, kökün rsync'ini taklit eder (kök
-// olarak, hedef yoldaki bağları izleyerek yazar); hedef dizinin o anki
-// izin/sahibini kaydeder.
+func yrSahipAl(p string) yrSahip {
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return yrSahip{}
+	}
+	return yrSahip{fi.Mode(), fi.Sys().(*syscall.Stat_t).Uid}
+}
+
+// yrRsyncCagri — bir uzak rsync: sarmalayıcının (yerel yolun üst dizini)
+// aktarım öncesi/sonrası durumu ve yerel yolun aktarım sonrası sahibi.
+type yrRsyncCagri struct {
+	uzak, yerel         string
+	sarmOnce, sarmSonra yrSahip
+	hedef               yrSahip
+}
+
+// yrUzak — uzakKabuk sahtesi. RsyncCek kök rsync'ini GERÇEK rsync ile taklit
+// eder: kaynak ağacı geçici bir dizinde üretilir, kökü (".") kokUID'e verilir
+// ve `rsync -a --numeric-ids` (tasima.go RsyncCek'in sahiplik taşıyan çekirdeği;
+// S paketinden bağımsız en kötü durum) ile yerel yola çekilir — gerçek
+// aktarımdaki gibi yerel yolun KENDİSİ de kaynağın seçtiği uid'e geçer.
 type yrUzak struct {
 	t        *testing.T
 	agaclar  map[string]func(t *testing.T, dizin string)
+	kokUID   int
 	cagrilar []yrRsyncCagri
+}
+
+func yrYeniUzak(t *testing.T, kokUID int) *yrUzak {
+	return &yrUzak{t: t, kokUID: kokUID, agaclar: map[string]func(*testing.T, string){yrUzakKok: yrKaynakDocroot, yrUzakUyg: yrKaynakUygulama}}
 }
 
 func (s *yrUzak) Calistir(context.Context, string) (string, error) {
@@ -248,20 +275,23 @@ func (s *yrUzak) AkisCalistir(context.Context, string, io.Writer) (string, error
 	return "", errors.New("beklenmedik uzak akis")
 }
 
-func (s *yrUzak) RsyncCek(_ context.Context, uzakYol, yerelYol string, _ ...string) (string, error) {
-	c := yrRsyncCagri{uzak: uzakYol, yerel: yerelYol}
-	if fi, err := os.Lstat(strings.TrimSuffix(yerelYol, "/")); err == nil {
-		c.mod, c.uid = fi.Mode(), fi.Sys().(*syscall.Stat_t).Uid
-	}
-	s.cagrilar = append(s.cagrilar, c)
+func (s *yrUzak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, _ ...string) (string, error) {
 	uret, ok := s.agaclar[strings.TrimSuffix(uzakYol, "/")]
 	if !ok {
 		return "", errors.New("rsync: uzak dizin yok")
 	}
-	if err := os.MkdirAll(yerelYol, 0o755); err != nil {
+	yerel := strings.TrimSuffix(yerelYol, "/")
+	c := yrRsyncCagri{uzak: uzakYol, yerel: yerel, sarmOnce: yrSahipAl(filepath.Dir(yerel))}
+	kaynak := s.t.TempDir()
+	uret(s.t, kaynak)
+	if err := os.Lchown(kaynak, s.kokUID, s.kokUID); err != nil {
 		return "", err
 	}
-	uret(s.t, yerelYol)
+	if out, err := exec.CommandContext(ctx, "rsync", "-a", "--numeric-ids", kaynak+"/", yerelYol).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("rsync: %v: %s", err, out)
+	}
+	c.sarmSonra, c.hedef = yrSahipAl(filepath.Dir(yerel)), yrSahipAl(yerel)
+	s.cagrilar = append(s.cagrilar, c)
 	return "", nil
 }
 
@@ -271,7 +301,7 @@ func (s *yrUzak) RsyncCek(_ context.Context, uzakYol, yerelYol string, _ ...stri
 func yrKaynakDocroot(t *testing.T, d string) {
 	yrYaz(t, filepath.Join(d, "index.php"), "<?php require __DIR__.'/../uygulama/vendor/autoload.php';\n", 0o644)
 	yrYaz(t, filepath.Join(d, "alt", "dosya.txt"), "icerik\n", 0o644)
-	if err := os.Lchown(filepath.Join(d, "alt", "dosya.txt"), 4242, 4242); err != nil {
+	if err := os.Lchown(filepath.Join(d, "alt", "dosya.txt"), yrYabanciUID, yrYabanciUID); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("alt/dosya.txt", filepath.Join(d, "bag")); err != nil {
@@ -320,7 +350,7 @@ func TestDosyalariAktar_KiraciKimligindeYerlesir(t *testing.T) {
 	o := yrYeniOrtam(t)
 	ph := filepath.Join(o.ev, "public_html")
 	o.dizin(t, ph)
-	s := &yrUzak{t: t, agaclar: map[string]func(*testing.T, string){yrUzakKok: yrKaynakDocroot, yrUzakUyg: yrKaynakUygulama}}
+	s := yrYeniUzak(t, yrYabanciUID)
 	sonuc := &AktarSonuc{}
 
 	err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
@@ -329,14 +359,23 @@ func TestDosyalariAktar_KiraciKimligindeYerlesir(t *testing.T) {
 		t.Fatalf("dosyalariAktar: %v", err)
 	}
 
-	// Uzak rsync YALNIZ kökün erişebildiği hazırlık dizinine indi.
+	// Uzak rsync YALNIZ kökün erişebildiği sarmalayıcının içine indi; sarmalayıcı
+	// aktarımdan SONRA da kök/0700 (rsync -a yalnız kendi hedefinin sahibini değiştirir).
 	if len(s.cagrilar) != 2 {
 		t.Fatalf("uzak rsync çağrıları: %+v", s.cagrilar)
 	}
 	for _, c := range s.cagrilar {
-		d := strings.TrimSuffix(c.yerel, "/")
-		if filepath.Dir(d) != hazirlikKoku || !c.mod.IsDir() || c.mod.Perm() != 0o700 || c.uid != 0 {
-			t.Errorf("uzak rsync hazırlık alanına (kök, 0700) inmedi: %+v", c)
+		if filepath.Dir(filepath.Dir(c.yerel)) != hazirlikKoku || filepath.Base(c.yerel) != hazirlikIcerik {
+			t.Errorf("uzak rsync hazırlık sarmalayıcısının içine inmedi: %+v", c)
+		}
+		for _, d := range []yrSahip{c.sarmOnce, c.sarmSonra} {
+			if d.mod != fs.ModeDir|0o700 || d.uid != 0 {
+				t.Errorf("sarmalayıcı aktarım boyunca kök/0700 değil: %+v", c)
+			}
+		}
+		// Fikstür anlamlı: gerçek rsync -a hedefin KENDİSİNİ kaynağın uid'ine verdi.
+		if c.hedef.uid != yrYabanciUID {
+			t.Errorf("sahte kaynak hedef dizinin sahipliğini taşımadı: %+v", c)
 		}
 	}
 	yrHazirlikBos(t)
@@ -425,7 +464,7 @@ func TestDosyalariAktar_BaglarKurbaniDegistirmez(t *testing.T) {
 			o := yrYeniOrtam(t)
 			webRoot, kurban := sn.kur(t, o)
 			once := yrOzet(t, kurban)
-			s := &yrUzak{t: t, agaclar: map[string]func(*testing.T, string){yrUzakKok: yrKaynakDocroot, yrUzakUyg: yrKaynakUygulama}}
+			s := yrYeniUzak(t, yrYabanciUID)
 			sonuc := &AktarSonuc{}
 
 			err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
@@ -439,26 +478,81 @@ func TestDosyalariAktar_BaglarKurbaniDegistirmez(t *testing.T) {
 	}
 }
 
+// Kaynak sunucu, rsync -a --numeric-ids ile hazırlık hedefinin sahipliğini
+// YEREL bir hesabın uid'ine verir (burada nobody); o hesap kök rsync ile devir
+// arasındaki pencerede — kökün devir yürüyüşü yolları topladıktan SONRA — ara
+// dizini kurbana bağa çevirmeye çalışır. Bağ izlenseydi kökün lchown'ı KURBANI
+// kiracıya verirdi. Sarmalayıcı devrin sonuna kadar yalnız kökün olduğu için
+// saldırgan içeri giremez; taşıma yine de başarıyla biter.
+func TestDosyalariAktar_YabanciSahipliHazirlikKurbaniDegistirmez(t *testing.T) {
+	o := yrYeniOrtam(t)
+	ph := filepath.Join(o.ev, "public_html")
+	o.dizin(t, ph)
+	kurban := filepath.Join(o.base, "kurban")
+	yrYaz(t, filepath.Join(kurban, "dosya.txt"), yrKurbanIci, 0o644)
+	once := yrOzet(t, kurban)
+
+	s := yrYeniUzak(t, o.uid)
+	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: func(t *testing.T, d string) {
+		yrYaz(t, filepath.Join(d, "alt", "dosya.txt"), "icerik\n", 0o644)
+	}}
+	var saldiri error
+	saldirildi := false
+	onceki := lchown
+	lchown = func(p string, u, g int) error {
+		err := onceki(p, u, g)
+		if !saldirildi {
+			saldirildi = true
+			hedef := s.cagrilar[len(s.cagrilar)-1].yerel
+			saldiri = exec.Command("runuser", "-u", "nobody", "--", "sh", "-c",
+				`mv -- "$1/alt" "$1/alt.eski" && ln -s -- "$2" "$1/alt"`, "sh", hedef, kurban).Run()
+		}
+		return err
+	}
+	t.Cleanup(func() { lchown = onceki })
+
+	err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
+		Ayarlar{Dosyalar: true}, yrSK, ph, yrAlan, &AktarSonuc{}, yrLog(t))
+	if err != nil {
+		t.Errorf("dosyalariAktar: %v", err)
+	}
+	if len(s.cagrilar) != 1 || s.cagrilar[0].hedef.uid != uint32(o.uid) {
+		t.Fatalf("fikstür: rsync hedefi saldırgan uid'ine geçmedi: %+v", s.cagrilar)
+	}
+	if !saldirildi || saldiri == nil {
+		t.Errorf("saldırgan devir sırasında hazırlık ağacına girebildi (saldırı=%v, denendi=%v)", saldiri, saldirildi)
+	}
+	yrOzetKarsilastir(t, "yabancı sahipli hazırlık", once, yrOzet(t, kurban))
+	if b, err := os.ReadFile(filepath.Join(ph, "alt", "dosya.txt")); err != nil || string(b) != "icerik\n" {
+		t.Errorf("içerik yerleşmedi: %q (%v)", b, err)
+	}
+	yrHazirlikBos(t)
+}
+
 // ---------------------------------------------------------------------------
 // Hazırlık alanı
 // ---------------------------------------------------------------------------
 
-// Devir: özel dosyalar silinir, sahiplik bağ İZLENMEDEN geçer, hazırlık
-// dizininin kendisi (kiracıya kapıyı açan adım) EN SON devredilir.
-func TestHazirlikDevret(t *testing.T) {
-	o := yrYeniOrtam(t)
-	kurban := filepath.Join(o.base, "kurban.txt")
-	yrYaz(t, kurban, yrKurbanIci, 0o640)
-	once := yrOzet(t, kurban)
+// yrSarmalayici — hazirlikAc ile açılmış iş dizini ve içindeki rsync hedefi.
+func yrSarmalayici(t *testing.T) (sarm, icerik string) {
+	t.Helper()
+	ki, err := kiraciAl(yrSK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sarm, err = hazirlikAc(ki, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	icerik = filepath.Join(sarm, hazirlikIcerik)
+	if err := os.Mkdir(icerik, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sarm, icerik
+}
 
-	dizin := filepath.Join(o.base, "hazirlik")
-	if err := os.Mkdir(dizin, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	yrKaynakDocroot(t, dizin)
-	if err := os.Symlink(kurban, filepath.Join(dizin, "mutlak")); err != nil {
-		t.Fatal(err)
-	}
+// yrLchownKaydet — lchown çağrılarını sırayla kaydeder (gerçek çağrı yapılır).
+func yrLchownKaydet(t *testing.T) *[]string {
 	var sira []string
 	onceki := lchown
 	lchown = func(p string, u, g int) error {
@@ -466,15 +560,32 @@ func TestHazirlikDevret(t *testing.T) {
 		return onceki(p, u, g)
 	}
 	t.Cleanup(func() { lchown = onceki })
+	return &sira
+}
 
-	atlanan, err := hazirlikDevret(dizin, o.uid, o.gid)
+// Devir: özel dosyalar silinir, sahiplik bağ İZLENMEDEN geçer (içerik dizininin
+// kendisi dahil), sarmalayıcı (kiracıya kapıyı açan adım) EN SON devredilir.
+func TestHazirlikDevret(t *testing.T) {
+	o := yrYeniOrtam(t)
+	kurban := filepath.Join(o.base, "kurban.txt")
+	yrYaz(t, kurban, yrKurbanIci, 0o640)
+	once := yrOzet(t, kurban)
+
+	sarm, icerik := yrSarmalayici(t)
+	yrKaynakDocroot(t, icerik)
+	if err := os.Symlink(kurban, filepath.Join(icerik, "mutlak")); err != nil {
+		t.Fatal(err)
+	}
+	sira := yrLchownKaydet(t)
+
+	atlanan, err := hazirlikDevret(sarm, o.uid, o.gid)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if atlanan < 1 {
 		t.Errorf("özel dosya silinmedi (atlanan=%d)", atlanan)
 	}
-	for p, g := range yrOzet(t, dizin) {
+	for p, g := range yrOzet(t, sarm) {
 		if g.Tur != 0 && g.Tur != fs.ModeDir && g.Tur != fs.ModeSymlink {
 			t.Errorf("özel dosya kiracıya devredildi: %s (%v)", p, g.Tur)
 		}
@@ -483,13 +594,51 @@ func TestHazirlikDevret(t *testing.T) {
 		}
 	}
 	yrOzetKarsilastir(t, "bağ hedefi", once, yrOzet(t, kurban))
-	if len(sira) == 0 || sira[len(sira)-1] != dizin {
-		t.Fatalf("hazırlık dizini en son devredilmedi: %q", sira)
+	if len(*sira) == 0 || (*sira)[len(*sira)-1] != sarm {
+		t.Fatalf("sarmalayıcı en son devredilmedi: %q", *sira)
 	}
-	for _, p := range sira[:len(sira)-1] {
-		if p == dizin {
-			t.Fatalf("hazırlık dizini içerik devrinden ÖNCE kiracıya açıldı: %q", sira)
+	for _, p := range (*sira)[:len(*sira)-1] {
+		if p == sarm {
+			t.Fatalf("sarmalayıcı içerik devrinden ÖNCE kiracıya açıldı: %q", *sira)
 		}
+	}
+}
+
+// Önkoşul kapalı hata: sarmalayıcı artık yalnız panelin 0700 dizini değilse
+// (içerik yarışa açık) devir YAPILMAZ, hiçbir girdinin sahibi değişmez.
+func TestHazirlikDevret_SarmalayiciAcilmissaReddeder(t *testing.T) {
+	for _, sn := range []struct {
+		ad  string
+		boz func(t *testing.T, o yrOrtam, sarm string) error
+	}{
+		{"yabancı sahip", func(t *testing.T, o yrOrtam, sarm string) error {
+			return os.Lchown(sarm, o.uid, o.gid)
+		}},
+		{"izin genişlemiş", func(t *testing.T, o yrOrtam, sarm string) error {
+			return os.Chmod(sarm, 0o711)
+		}},
+		{"sarmalayıcı yerine bağ", func(t *testing.T, o yrOrtam, sarm string) error {
+			if err := os.Rename(sarm, sarm+".gercek"); err != nil {
+				return err
+			}
+			return os.Symlink(sarm+".gercek", sarm)
+		}},
+	} {
+		t.Run(sn.ad, func(t *testing.T) {
+			o := yrYeniOrtam(t)
+			sarm, icerik := yrSarmalayici(t)
+			yrYaz(t, filepath.Join(icerik, "alt", "dosya.txt"), "icerik\n", 0o644)
+			if err := sn.boz(t, o, sarm); err != nil {
+				t.Fatal(err)
+			}
+			sira := yrLchownKaydet(t)
+			if _, err := hazirlikDevret(sarm, o.uid, o.gid); err == nil {
+				t.Error("yalnız panele açık olmayan sarmalayıcı devredildi")
+			}
+			if len(*sira) != 0 {
+				t.Errorf("reddedilen devirde sahiplik değişti: %q", *sira)
+			}
+		})
 	}
 }
 

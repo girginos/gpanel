@@ -1,9 +1,8 @@
 package tasima
 
 import (
-	"os"
+	"errors"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -51,23 +50,51 @@ func xenforoDBYaz(icerik, key, val string) string {
 	return re.ReplaceAllString(icerik, `${1}'`+val+`'`)
 }
 
-// configtenDBBul — kopyalanan site yapilandirmasindan (wp-config.php/.env/…) DB
-// ADLARINI cikarir. Kesif DB listesi bos kaldiginda YEDEK yol: gercek DB adi
-// yapilandirmada yazilidir ve kaynakta da AYNI isimdir → dokumu oradan alinir.
-// Yalniz reDBAd'e uyan, sistemDB olmayan adlar dondurulur (guvenlik).
-func configtenDBBul(webRoot string) []string {
-	gorulen := map[string]bool{}
-	var out []string
+// kiraciYapilandirmalari — webRoot altındaki bilinen yapılandırma dosyalarını
+// (yapilandirmaAdaylari sırasıyla) okur ve her biri için f'i çağırır; d f
+// dönene kadar açıktır (f onu yerine yazabilir).
+//
+// 🔴 webRoot kiracının ağacıdır (kiracı her bileşeni bağa/FIFO'ya çevirebilir):
+// dosyalar ev köküne KİLİTLİ os.Root altında, yalnız kiracının kendi düzenli ve
+// tek bağlantılı dosyasıysa açılır (kiraciDosyasiAc). Uygun olmayan aday
+// sessizce atlanır. webRoot bir kiracı evinde değilse hiçbir dosya açılmadan
+// hata döner (okuyucular için "yapılandırma yok" demektir).
+func kiraciYapilandirmalari(webRoot string, f func(rel string, d *kiraciDosyasi, ham []byte)) error {
+	ki, kok, err := kiraciYolu(webRoot)
+	if err != nil {
+		return errors.New("web koku kiraci ev dizininde degil")
+	}
+	uid, _, err := uidGid(ki.Kul)
+	if err != nil {
+		return errors.New("sistem kullanicisi bulunamadi")
+	}
+	ev, err := ki.EvAc()
+	if err != nil {
+		return errors.New("ev dizini acilamadi")
+	}
+	defer ev.Close()
 	for _, rel := range yapilandirmaAdaylari {
-		yol := filepath.Join(webRoot, rel)
-		st, err := os.Lstat(yol)
-		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {
-			continue
-		}
-		ham, err := os.ReadFile(yol)
+		d, err := kiraciDosyasiAc(ev, path.Join(kok, rel), uid)
 		if err != nil {
 			continue
 		}
+		if ham, err := d.Oku(yapilandirmaMaxBayt); err == nil {
+			f(rel, d, ham)
+		}
+		d.Kapat()
+	}
+	return nil
+}
+
+// configtenDBBul — kopyalanan site yapilandirmasindan (wp-config.php/.env/…) DB
+// ADLARINI cikarir. Kesif DB listesi bos kaldiginda YEDEK yol: gercek DB adi
+// yapilandirmada yazilidir ve kaynakta da AYNI isimdir → dokumu oradan alinir.
+// Yalniz reDBAd'e uyan, sistemDB olmayan adlar dondurulur (guvenlik). Dosyalar
+// kiraciYapilandirmalari ile okunur: kök komşunun yapılandırmasını okuyamaz.
+func configtenDBBul(webRoot string) []string {
+	gorulen := map[string]bool{}
+	var out []string
+	_ = kiraciYapilandirmalari(webRoot, func(_ string, _ *kiraciDosyasi, ham []byte) {
 		for _, satir := range strings.Split(string(ham), "\n") {
 			m := reAnahtarSatir.FindStringSubmatch(satir)
 			if m == nil {
@@ -96,7 +123,7 @@ func configtenDBBul(webRoot string) []string {
 			gorulen[xa] = true
 			out = append(out, xa)
 		}
-	}
+	})
 	return out
 }
 
@@ -113,18 +140,11 @@ type dbKimlik struct{ Kul, Pw string }
 
 // configtenDBKimlik — kopyalanan yapilandirmadan DB adi -> {kullanici, parola}.
 // DB'yi ORIJINAL kimligiyle tasimak icin (wp-config DEGISMESIN, ad kisa kalsin).
+// Dosyalar kiraciYapilandirmalari ile okunur: bağla komşunun DB kimliği
+// (ad/kullanıcı/parola) okunup bu hesaba aktarılamaz.
 func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 	out := map[string]dbKimlik{}
-	for _, rel := range yapilandirmaAdaylari {
-		yol := filepath.Join(webRoot, rel)
-		st, err := os.Lstat(yol)
-		if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<20 {
-			continue
-		}
-		ham, err := os.ReadFile(yol)
-		if err != nil {
-			continue
-		}
+	_ = kiraciYapilandirmalari(webRoot, func(_ string, _ *kiraciDosyasi, ham []byte) {
 		ad, kul, pw := "", "", ""
 		for _, satir := range strings.Split(string(ham), "\n") {
 			m := reAnahtarSatir.FindStringSubmatch(satir)
@@ -163,7 +183,7 @@ func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 				out[ad] = dbKimlik{Kul: kul, Pw: pw}
 			}
 		}
-	}
+	})
 	return out
 }
 
@@ -175,55 +195,30 @@ func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 //
 // 🔴 webRoot kiracının ağacıdır (kiracı her bileşeni bağa çevirebilir): dosyalar
 // ev köküne KİLİTLİ os.Root altında, yalnız kiracının kendi düzenli dosyasıysa
-// okunup atomik yenilenir (kiraciDosyasiAc). Eskiden kök yol üzerinden okuyup
-// yazıyordu → public_html komşu evine bağlıysa KOMŞUNUN yapılandırması ezilirdi.
+// okunup atomik yenilenir (kiraciYapilandirmalari). Eskiden kök yol üzerinden
+// okuyup yazıyordu → public_html komşu evine bağlıysa KOMŞUNUN yapılandırması
+// ezilirdi.
 func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, kaynakHesap, yeniPw string, log func(string, ...any)) int {
 	if len(esleme) == 0 {
 		return 0
 	}
-	ki, kok, err := kiraciYolu(webRoot)
-	if err != nil {
-		log("uyari: yapilandirma guncellenmedi: web koku kiraci ev dizininde degil")
-		return 0
-	}
-	uid, _, err := uidGid(ki.Kul)
-	if err != nil {
-		log("uyari: yapilandirma guncellenmedi: sistem kullanicisi bulunamadi")
-		return 0
-	}
-	ev, err := ki.EvAc()
-	if err != nil {
-		log("uyari: yapilandirma guncellenmedi: ev dizini acilamadi")
-		return 0
-	}
-	defer ev.Close()
-
 	sayac := 0
-	for _, rel := range yapilandirmaAdaylari {
-		d, err := kiraciDosyasiAc(ev, path.Join(kok, rel), uid)
-		if err != nil {
-			continue
-		}
-		ham, err := d.Oku(yapilandirmaMaxBayt)
-		if err != nil {
-			d.Kapat()
-			continue
-		}
+	err := kiraciYapilandirmalari(webRoot, func(rel string, d *kiraciDosyasi, ham []byte) {
 		yeni := yapilandirmaDegistir(string(ham), esleme, yeniPw)
 		if yeni == string(ham) {
-			d.Kapat()
-			continue
+			return
 		}
 		if err := yedekYaz(webRoot, rel, ham); err != nil {
 			log("uyari: %s yedegi alinamadi, dosya degistirilmedi: %v", rel, err)
-			d.Kapat()
-			continue
+			return
 		}
 		if err := d.Degistir([]byte(yeni), d.izin()); err == nil {
 			sayac++
 			log("yapilandirma guncellendi: %s", rel)
 		}
-		d.Kapat()
+	})
+	if err != nil {
+		log("uyari: yapilandirma guncellenmedi: %v", err)
 	}
 	return sayac
 }
