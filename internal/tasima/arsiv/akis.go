@@ -47,8 +47,9 @@ func (s *sayac) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// oranli: açılmış akışı sayar; esik aşıldıktan sonra açılmış/sıkıştırılmış oranı
-// sınırı geçerse ErrBomba döner. ham nil → sıkıştırmasız arşiv (oran yok).
+// oranli: r'den okunan baytı sayar; esik aşıldıktan sonra okunan / arşiv dosyasından
+// okunan (ham) oranı sınırı geçerse ErrBomba döner. Bir geçişte iki kez kullanılır:
+// açılmış akış (sıkıştırma bombası) ve tar.Reader'ın verdiği üye verisi (seyrek üye).
 type oranli struct {
 	r          io.Reader
 	ham        *sayac
@@ -59,7 +60,7 @@ type oranli struct {
 func (o *oranli) Read(p []byte) (int, error) {
 	n, err := o.r.Read(p)
 	o.n += int64(n)
-	if o.ham != nil && o.n > o.esik && o.n > o.oran*o.ham.n.Load() {
+	if o.n > o.esik && o.n > o.oran*o.ham.n.Load() {
 		return n, ErrBomba
 	}
 	return n, err
@@ -73,7 +74,8 @@ type gecis struct {
 	s        Sinirlar
 	f        *os.File
 	acik     *oranli
-	tr       *tar.Reader
+	tr       *tar.Reader // yalnız Next; üye verisi veri'den okunur
+	veri     *oranli     // tar.Reader'ın verdiği üye verisi
 	alt      *exec.Cmd
 	altCikis io.ReadCloser
 	beklenen []Uye
@@ -110,7 +112,7 @@ func (a *Arsiv) gecisAc(ctx context.Context, beklenen []Uye) (*gecis, error) {
 	case bytes.HasPrefix(sihir, zstdSihir):
 		acik, err = g.acici(zstdArgv, br)
 	default:
-		acik, ham = br, nil
+		acik = br // sıkıştırmasız: açılmış akış ham akışı geçemez
 	}
 	if err != nil {
 		f.Close()
@@ -118,6 +120,10 @@ func (a *Arsiv) gecisAc(ctx context.Context, beklenen []Uye) (*gecis, error) {
 	}
 	g.acik = &oranli{r: acik, ham: ham, oran: a.s.BombaOrani, esik: a.s.BombaEsik}
 	g.tr = tar.NewReader(g.acik)
+	// Üye verisi de aynı orana tabi: PAX seyrek üyede (GNU.sparse.*) tür '0' ve boyut
+	// mantıksaldır, delikleri tar.Reader sıfırla doldurur. Açılmış akış birkaç yüz bayt
+	// kalırken üye verisi (ve süzülmüş akışta seyrek olmayan dosya) istenen boyuta çıkar.
+	g.veri = &oranli{r: g.tr, ham: ham, oran: a.s.BombaOrani, esik: a.s.BombaEsik}
 	return g, nil
 }
 

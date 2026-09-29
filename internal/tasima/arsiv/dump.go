@@ -38,7 +38,7 @@ func (a *Arsiv) DumpAc(ctx context.Context, ad string, max int64) (io.ReadCloser
 type dumpOkuyucu struct{ g *gecis }
 
 func (d *dumpOkuyucu) Read(p []byte) (int, error) {
-	n, err := d.g.tr.Read(p)
+	n, err := d.g.veri.Read(p)
 	if err != nil && err != io.EOF {
 		err = d.g.hata(err)
 	}

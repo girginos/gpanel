@@ -9,14 +9,17 @@
 //   - Üye adı mutlak / ".." / ters bölü / 4096+ bayt / 64+ bileşen → arşiv reddedilir.
 //   - Aynı ad iki kez (ikisi de dizin değilse) → ret: tar'da sonraki öncekini ezer;
 //     envanterin okuduğu üst veri ile çıkarılan içerik ayrışamasın.
-//   - Çıkarmada dizin + düzenli dosya yazılır; symlink yalnız göreli ve seçili kökün
-//     içinde çözülüyorsa (backups/granular.go restoreArsivTara politikası, kök = seçim),
-//     hardlink yalnız seçimde daha önce yazılmış düzenli dosyaya; bir bağın altından
-//     geçen yol, aygıt, fifo ve tanınmayan tür ATLANIR ve raporlanır. setuid/setgid/
-//     sticky silinir; uid/gid/kullanıcı adı/xattr yok sayılır.
+//   - Çıkarmada dizin + düzenli dosya yazılır; symlink yalnız göreli, seçili kökün
+//     içinde kalan ve seçimdeki hiçbir bağdan geçmeyen hedefle (sıradan bağımsız; bağ
+//     zinciri sözcüksel denetimi aşamaz), hardlink yalnız seçimde daha önce yazılmış
+//     düzenli dosyaya; seçimdeki bir bağın altından geçen yol, aygıt, fifo ve tanınmayan
+//     tür ATLANIR ve raporlanır. setuid/setgid/sticky silinir; uid/gid/kullanıcı adı/
+//     xattr yok sayılır. Çıkarılan bağlar kiracıya aittir ve ev içinde kalabilir: bu
+//     ağaçta root olarak çalışan tüketici yolu evalti.Ac ile (RESOLVE_NO_SYMLINKS) açar;
+//     os.OpenRoot ev içindeki bağları izlediği için yetmez.
 //   - Sınırlar: bildirilen toplam boyut, üye sayısı, ad baytı, belleğe alınan üst veri
-//     (≤ 4 MiB), döküm (çağıranın sınırı), açılmış/sıkıştırılmış oranı, hedefte boş
-//     disk + inode ön denetimi.
+//     (≤ 4 MiB), döküm (çağıranın sınırı), arşiv dosyasına göre açılmış akış VE üye
+//     verisi oranı (seyrek üye), kiracı bütçesi (Hedef.Butce), hedefte boş disk + inode.
 //   - gzip/bzip2 süreç içinde (Go); xz/zstd alt süreçte, panel root ise nobody
 //     kimliğinde, bellek sınırlı, yalnız stdin → stdout.
 //   - Yazma: `runuser -u <sk> -- tar -x --no-same-owner --no-same-permissions -f - -C
@@ -44,6 +47,7 @@ var (
 	ErrDegisti  = errors.New("arşiv: okuma sırasında içerik değişti")
 	ErrYok      = errors.New("arşiv: üye bulunamadı ya da düzenli dosya değil")
 	ErrDisk     = errors.New("arşiv: hedefte yeterli boş alan yok")
+	ErrKota     = errors.New("arşiv: seçim kiracının kalan disk hakkını aşıyor")
 	ErrCikarma  = errors.New("arşiv: çıkarma başarısız")
 	ErrGecersiz = errors.New("arşiv: geçersiz hedef")
 )
@@ -54,8 +58,8 @@ type Sinirlar struct {
 	UyeSayisi   int   // üye sayısı
 	AdBayt      int64 // envanterde tutulan ad + bağ hedefi baytı (başlık bombası)
 	UstVeriBayt int64 // belleğe alınan üst veri toplamı (en çok 4 MiB)
-	BombaOrani  int64 // açılmış / sıkıştırılmış bayt oranı üst sınırı
-	BombaEsik   int64 // oran denetiminin başladığı açılmış bayt
+	BombaOrani  int64 // (açılmış akış ya da üye verisi) / arşiv dosyası bayt oranı üst sınırı
+	BombaEsik   int64 // oran denetiminin başladığı okunan bayt
 	DiskPayi    int64 // Cikar: seçimin üstüne hedefte boş kalması gereken bayt
 }
 
@@ -148,7 +152,7 @@ func Ac(ctx context.Context, yol string, s Sinirlar, ustVeriMi func(ad string) b
 				return nil, ErrUstVeri
 			}
 			b := make([]byte, u.Boyut)
-			if _, err := io.ReadFull(g.tr, b); err != nil {
+			if _, err := io.ReadFull(g.veri, b); err != nil {
 				return nil, g.hata(err)
 			}
 			a.UstVeri[u.Ad] = b

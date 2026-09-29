@@ -17,7 +17,14 @@ import (
 type Hedef struct {
 	SK  string // kiracı sistem kullanıcısı (c_...)
 	Kok string // ev dizinine göre göreli dizin; "" → ev dizininin kendisi
+	// Butce: seçimin kiracıda kaplayabileceği en çok bayt (çağıran: kiracının kalan disk
+	// hakkı). Sıfır değer boş olmayan hiçbir seçime izin vermez; sınırsız plan için
+	// ButceSinirsiz verilir (o zaman yalnız sunucunun boş alanı denetlenir).
+	Butce int64
 }
+
+// ButceSinirsiz: Hedef.Butce için "kiracı disk hakkı sınırsız".
+const ButceSinirsiz int64 = -1
 
 // Atlanan: yazılmayan üye ve nedeni.
 type Atlanan struct {
@@ -60,11 +67,19 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 	if err != nil {
 		return nil, fmt.Errorf("%w: kiracı", ErrGecersiz)
 	}
+	// Kiracı bütçesi sunucu boş alanından ÖNCE denetlenir. secim bildirilen boyutlardan
+	// (seyrek üyede mantıksal boyut) hesaplanır ve yazılacak baytın üst sınırıdır: akışa
+	// giden her dosya tam bildirilen boyutta, seyrek olmayan biçimde yazılır. Bütçesi
+	// yeten kiracı ErrDisk'e ancak sunucunun boş alanı kendi kalan hakkının altındaysa
+	// ulaşır.
+	bayt, uye := a.secim(onek)
+	if h.Butce != ButceSinirsiz && bayt > h.Butce {
+		return nil, ErrKota
+	}
 	uid, gid, err := evalti.Kimlik(h.SK)
 	if err != nil {
 		return nil, fmt.Errorf("%w: kiracı kimliği çözülemedi", ErrGecersiz)
 	}
-	bayt, uye := a.secim(onek)
 	if err := diskYeterli(home, bayt+a.s.DiskPayi, uye); err != nil {
 		return nil, err
 	}
@@ -178,7 +193,7 @@ func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor) er
 	iy := &izliYazici{w: w}
 	bw := bufio.NewWriterSize(iy, 256<<10)
 	tw := tar.NewWriter(bw)
-	s := &suzgec{onek: onek, bag: map[string]bool{}, dosya: map[string]bool{}, r: r}
+	s := &suzgec{onek: onek, baglar: bagAgaciKur(a.Uyeler, onek), dosya: map[string]bool{}, r: r}
 	yazmaHatasi := func(err error) error {
 		if iy.err != nil {
 			return fmt.Errorf("%w (%v)", ErrCikarma, iy.err)
@@ -201,7 +216,7 @@ func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor) er
 			return yazmaHatasi(err)
 		}
 		if yeni.Typeflag == tar.TypeReg {
-			if _, err := io.Copy(tw, g.tr); err != nil {
+			if _, err := io.Copy(tw, g.veri); err != nil {
 				return yazmaHatasi(err)
 			}
 		}
@@ -222,24 +237,10 @@ func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor) er
 
 // suzgec: tek bir çıkarma geçişinin yazma kararları.
 type suzgec struct {
-	onek  string
-	bag   map[string]bool // yazılan symlink'ler (seçime göre ad)
-	dosya map[string]bool // yazılan düzenli dosyalar (hardlink hedefi olabilir)
-	r     *Rapor
-}
-
-// bagAltinda: rel, bu geçişte yazılmış bir symlink'in altından mı geçiyor?
-// (tar böyle bir üyeyi bağı izleyerek yazardı.)
-func (s *suzgec) bagAltinda(rel string) bool {
-	if len(s.bag) == 0 {
-		return false
-	}
-	for i := 0; i < len(rel); i++ {
-		if rel[i] == '/' && s.bag[rel[:i]] {
-			return true
-		}
-	}
-	return false
+	onek   string
+	baglar *bagAgaci       // seçimdeki TÜM symlink'ler (envanterden; sıradan bağımsız)
+	dosya  map[string]bool // yazılan düzenli dosyalar (hardlink hedefi olabilir)
+	r      *Rapor
 }
 
 // karar: üye yazılacaksa çıkarıcıya gidecek temiz başlık, değilse nil (atlananlar
@@ -251,7 +252,7 @@ func (s *suzgec) karar(u Uye, hdr *tar.Header) *tar.Header {
 	if !ok || rel == "" {
 		return nil // seçim dışı ya da seçimin kök dizininin kendisi
 	}
-	if s.bagAltinda(rel) {
+	if s.baglar.bagAltinda(rel) {
 		s.r.atla(rel, "bağ üzerinden geçen yol")
 		return nil
 	}
@@ -273,14 +274,13 @@ func (s *suzgec) karar(u Uye, hdr *tar.Header) *tar.Header {
 		s.r.Dosya++
 		s.r.Bayt += u.Boyut
 	case tar.TypeSymlink:
-		if !bagKokIcinde(rel, u.Hedef) {
-			s.r.atla(rel, "mutlak ya da seçili kök dışına bağ")
+		if neden := s.baglar.bagNedeni(rel, u.Hedef); neden != "" {
+			s.r.atla(rel, neden)
 			return nil
 		}
 		yeni.Typeflag = tar.TypeSymlink
 		yeni.Linkname = u.Hedef
 		yeni.Mode = 0o777
-		s.bag[rel] = true
 		s.r.Bag++
 	case tar.TypeLink:
 		// Hedef normalize edilip seçime göre göreli ada çevrilir; yalnız bu geçişte daha

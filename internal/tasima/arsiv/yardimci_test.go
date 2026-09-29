@@ -9,11 +9,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +83,54 @@ func tarUret(t *testing.T, uyeler ...uyeT) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// paxKaydi: "<uzunluk> anahtar=değer\n"; uzunluk kendi basamaklarını da sayar.
+func paxKaydi(k, v string) string {
+	govde := " " + k + "=" + v + "\n"
+	n := len(govde)
+	for {
+		m := len(govde) + len(strconv.Itoa(n))
+		if m == n {
+			return strconv.Itoa(n) + govde
+		}
+		n = m
+	}
+}
+
+// seyrekUret: tek üyeli düz tar; üye PAX seyrek dosyadır (GNU.sparse 0.1 kayıtları;
+// GNU tar --format=pax --sparse ile aynı anlam): arşivde 1 bayt veri, mantıksal boyutu
+// `mantiksal`, gerisi delik. archive/tar Writer GNU.sparse.* kayıtlarını yazmadığından
+// kayıtlar aynı uzunlukta bir "comment" yer tutucusunun yerine konur (PAX veri bloğu
+// başlık sağlamasına girmez).
+func seyrekUret(t *testing.T, ad string, mantiksal int64) []byte {
+	t.Helper()
+	kayitlar := paxKaydi("GNU.sparse.map", "0,1") + paxKaydi("GNU.sparse.name", ad) +
+		paxKaydi("GNU.sparse.numblocks", "1") + paxKaydi("GNU.sparse.size", strconv.FormatInt(mantiksal, 10))
+	var yer, deger string
+	for k := 1; len(yer) < len(kayitlar); k++ {
+		deger = strings.Repeat("x", k)
+		yer = paxKaydi("comment", deger)
+	}
+	if len(yer) != len(kayitlar) {
+		t.Fatalf("yer tutucu %d bayt, kayıtlar %d bayt", len(yer), len(kayitlar))
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: ad, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1,
+		ModTime: testZaman, PAXRecords: map[string]string{"comment": deger}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("X")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(buf.Bytes(), []byte(yer)) != 1 {
+		t.Fatal("yer tutucu kayıt arşivde bulunamadı")
+	}
+	return bytes.Replace(buf.Bytes(), []byte(yer), []byte(kayitlar), 1)
 }
 
 func gzUret(t *testing.T, b []byte) []byte {
@@ -199,6 +251,69 @@ func kotuUyeler() []uyeT {
 		{ad: "cpmove-u/homedir/public_html/sonra.txt", veri: "sonra"},
 	}
 }
+
+// zincirUyeleri: her hedefi sözcüksel olarak seçili kökün içinde kalan, diskte ise bağ
+// zinciriyle kökün üstüne (kök → ev → ... → /) ve oradan /etc/hostname'e çözülen bağlar
+// (inceleme bulgusu). d/l/k.txt bir bağın altından geçer.
+func zincirUyeleri() []uyeT {
+	u := []uyeT{
+		{ad: secimOnek + "/d/", tur: tar.TypeDir},
+		{ad: secimOnek + "/d/l", tur: tar.TypeSymlink, hedef: ".."},
+		{ad: secimOnek + "/d/l/k.txt", veri: "BAGDAN"},
+		{ad: secimOnek + "/u1", tur: tar.TypeSymlink, hedef: "d/l/.."},
+	}
+	for i := 2; i <= 30; i++ {
+		u = append(u, uyeT{ad: fmt.Sprintf("%s/u%d", secimOnek, i), tur: tar.TypeSymlink, hedef: fmt.Sprintf("u%d/..", i-1)})
+	}
+	return append(u, uyeT{ad: secimOnek + "/x", tur: tar.TypeSymlink, hedef: "u30/etc/hostname"})
+}
+
+// ters: üyeleri ters sırada verir (bağ, kendisinden geçen bağlardan SONRA gelir).
+func ters(u []uyeT) []uyeT {
+	r := make([]uyeT, len(u))
+	for i := range u {
+		r[len(u)-1-i] = u[i]
+	}
+	return r
+}
+
+// akisOku: süzülmüş akıştaki üyelerin başlıkları ve içerikleri.
+func akisOku(t *testing.T, r io.Reader) (map[string]*tar.Header, map[string]string) {
+	t.Helper()
+	basliklar, icerik := map[string]*tar.Header{}, map[string]string{}
+	tr := tar.NewReader(r)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return basliklar, icerik
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(tr)
+		basliklar[h.Name], icerik[h.Name] = h, string(b)
+	}
+}
+
+// sayanYazici: yazılan baytı sayar, saklamaz.
+type sayanYazici struct{ n int64 }
+
+func (s *sayanYazici) Write(p []byte) (int, error) {
+	s.n += int64(len(p))
+	return len(p), nil
+}
+
+func siraliAdlar(basliklar map[string]*tar.Header) []string {
+	adlar := make([]string, 0, len(basliklar))
+	for ad := range basliklar {
+		adlar = append(adlar, ad)
+	}
+	sort.Strings(adlar)
+	return adlar
+}
+
+// sinirsizHedef: test kiracısında bütçe sınırı olmayan çıkarma hedefi.
+func sinirsizHedef(kok string) Hedef { return Hedef{SK: testSK, Kok: kok, Butce: ButceSinirsiz} }
 
 // ortam: kiracı yerine ayrıcalıksız nobody; ev kökü t.TempDir (canlı /home'a dokunulmaz).
 type ortam struct {
