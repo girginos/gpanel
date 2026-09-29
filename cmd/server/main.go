@@ -242,8 +242,12 @@ func main() {
 		MySQLOlustur: func(domainID int64, dbAd, dbUser, dbSifre string) error {
 			return hesaplar.MySQLCreateDB(d, domainID, dbAd, dbUser, dbSifre)
 		},
-		MySQLDrop: func(_ int64, dbAd, dbUser string) error {
-			return hesaplar.MySQLDropDB(d, dbAd, dbUser)
+		// 🔴 domainID YOK SAYILIYORDU: uygulama kaldirma, kurulum kaydindaki db_adi'yi
+		// bu domaine kayitli mi bakmadan DROP DATABASE + DROP USER ediyordu (kayit
+		// silinmis, ad baskasinca yeniden acilmis olabilir). Sahipli surum yalniz bu
+		// domaine kayitli DB'yi, kullaniciyi da yalniz guvenle bu domaininse dusurur.
+		MySQLDrop: func(domainID int64, dbAd, dbUser string) error {
+			return hesaplar.MySQLDropDBSahipli(d, domainID, dbAd, dbUser)
 		},
 		DomainAl: func(r *http.Request) (uygulama.Domain, error) {
 			idStr := chi.URLParam(r, "id")

@@ -648,6 +648,28 @@ func SlowQueryWatchdog(ctx context.Context, db *sql.DB) {
 	}
 }
 
+// governorLimiti: MariaDB kullanicisi → db_accounts → domain → plan.db_max_query_seconds.
+// ok=false: kullanici panelde kayitli degil YA DA birden cok domaine kayitli (sahibi
+// belirsiz → KILL yok).
+//
+// 🔴 BINARY + tek domain: db_user UNIQUE degil (0036) ve db_accounts harf duyarsiz
+// (utf8mb4_unicode_ci); MariaDB hesap adlari ise harf DUYARLI. Eski "a.db_user=? LIMIT 1"
+// komsunun 'girgin_x_db' sorgularina, eski bir surumden kalan 'GIRGIN_X_DB' satirinin
+// (baska kiracinin, dusuk limitli planinin) db_max_query_seconds degerini uygulayip KILL
+// QUERY atabiliyordu. Ayni ad iki domainin satirinda geciyorsa (duzeltme oncesi onek
+// cakismasiyla devralinmis kayit) hangi planin gecerli oldugu bilinmez → dokunulmaz.
+func governorLimiti(db *sql.DB, user string) (int, bool) {
+	var n, limit int
+	if err := db.QueryRow(
+		`SELECT COUNT(DISTINCT a.domain_id), COALESCE(MAX(COALESCE(p.db_max_query_seconds,0)),0)
+		 FROM db_accounts a JOIN domains d ON d.id=a.domain_id
+		 LEFT JOIN service_plans p ON p.id=d.plan_id
+		 WHERE BINARY a.db_user=?`, user).Scan(&n, &limit); err != nil || n != 1 {
+		return 0, false
+	}
+	return limit, true
+}
+
 // governorScanOnce: tek tarama. root ile processlist okur (panel DB-kullanıcısı
 // PROCESS/CONNECTION ADMIN'e sahip olmayabilir), limiti aşan tenant sorgularını öldürür.
 func governorScanOnce(db *sql.DB) {
@@ -670,15 +692,9 @@ func governorScanOnce(db *sql.DB) {
 		if e1 != nil || e2 != nil || secs <= 0 || dbGovernorUserAtlanir(user) {
 			continue
 		}
-		// user → db_accounts → domain → plan.db_max_query_seconds (db_user UNIQUE → tek satır).
-		var limit int
-		qerr := db.QueryRow(
-			`SELECT COALESCE(p.db_max_query_seconds,0)
-			 FROM db_accounts a JOIN domains d ON d.id=a.domain_id
-			 LEFT JOIN service_plans p ON p.id=d.plan_id
-			 WHERE a.db_user=? LIMIT 1`, user).Scan(&limit)
-		if qerr != nil || limit <= 0 || secs <= limit {
-			continue // db_accounts'ta değil / limit yok / henüz aşmadı
+		limit, ok := governorLimiti(db, user)
+		if !ok || limit <= 0 || secs <= limit {
+			continue // db_accounts'ta değil / sahibi belirsiz / limit yok / henüz aşmadı
 		}
 		if kout, kerr := exec.Command("mysql", "-uroot", "-e", fmt.Sprintf("KILL QUERY %d", id)).CombinedOutput(); kerr != nil {
 			log.Printf("Governor: %s KILL başarısız (id=%d): %s: %v", user, id, strings.TrimSpace(string(kout)), kerr)

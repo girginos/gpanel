@@ -194,7 +194,7 @@ func TestMySQLChangePassword_SistemHesabi_MysqlCagrilmaz(t *testing.T) {
 	for i, ad := range []string{"root", "mysql", "panel", "pma"} {
 		dk_exec(t, panel, `INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (20, ?, ?, '')`,
 			fmt.Sprintf("bayi2_geri%d", i), ad)
-		err := MySQLChangePassword(panel, ad, "Saldirgan-Parola-1")
+		err := MySQLChangePassword(panel, 20, ad, "Saldirgan-Parola-1")
 		if !errors.Is(err, ErrSistemDBHesabi) {
 			t.Errorf("%q: ErrSistemDBHesabi beklenir, alınan: %v", ad, err)
 		}

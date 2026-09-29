@@ -18,6 +18,7 @@
 package backups
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -60,17 +61,11 @@ func gecerliParolaMi(pw string) bool {
 	return true
 }
 
-// sistemKullanicisiMi: asla yedeklenmeyecek/geri yuklenmeyecek hesaplar.
+// sistemKullanicisiMi: asla yedeklenmeyecek/geri yuklenmeyecek hesaplar. Tek liste
+// hesaplar.SistemDBHesabiMi'dir (eskiden burada yalniz root/debian-sys-maint/panel vardi;
+// roundcube/pma/pureftpd satira yazilip DROP USER ile dusurulebiliyordu).
 func sistemKullanicisiMi(u string) bool {
-	l := strings.ToLower(u)
-	if strings.HasPrefix(l, "mysql.") || strings.HasPrefix(l, "mariadb.") {
-		return true
-	}
-	switch l {
-	case "root", "debian-sys-maint", "", "panel":
-		return true
-	}
-	return false
+	return hesaplar.SistemDBHesabiMi(u)
 }
 
 // mysqlSorgu: root socket auth ile sorgu (sekmeli satirlar).
@@ -224,14 +219,80 @@ func sqlKacis(s string) string {
 	return strings.ReplaceAll(s, `'`, `\'`)
 }
 
+// tirnakliAl: r'nin basindaki 'deger' ya da `deger`'i ayirir.
+func tirnakliAl(r string) (deger, kalan string, ok bool) {
+	if r == "" || (r[0] != '\'' && r[0] != '`') {
+		return "", "", false
+	}
+	son := strings.IndexByte(r[1:], r[0])
+	if son < 0 {
+		return "", "", false
+	}
+	return r[1 : 1+son], r[2+son:], true
+}
+
+// satirHesabi: kullanicilar.sql ifadesinin HEDEF hesabi. Bicimler:
+// "CREATE USER IF NOT EXISTS <hesap> ..." ve "GRANT <yetki> ON <nesne> TO <hesap> ...";
+// <nesne> = *.* | `db`.* | `db`.`tablo`, <hesap> = 'k'@'h' ya da `k`@`h`. Hesap, nesneden
+// HEMEN sonraki " TO "dan okunur (sondaki parola hash'i icindeki metne bakilmaz).
+// Cozumlenemeyen satir = red (fail-closed).
+func satirHesabi(s string) (kul, host string, ok bool) {
+	kalan := ""
+	if strings.HasPrefix(s, "CREATE USER IF NOT EXISTS ") {
+		kalan = s[len("CREATE USER IF NOT EXISTS "):]
+	} else {
+		i := strings.Index(s, " ON ")
+		if !strings.HasPrefix(s, "GRANT ") || i < 0 {
+			return "", "", false
+		}
+		r := s[i+len(" ON "):]
+		if strings.HasPrefix(r, "*.*") {
+			r = r[len("*.*"):]
+		} else {
+			var tamam bool
+			if _, r, tamam = tirnakliAl(r); !tamam || !strings.HasPrefix(r, ".") {
+				return "", "", false
+			}
+			r = r[1:]
+			if strings.HasPrefix(r, "*") {
+				r = r[1:]
+			} else if _, r, tamam = tirnakliAl(r); !tamam {
+				return "", "", false
+			}
+		}
+		if !strings.HasPrefix(r, " TO ") {
+			return "", "", false
+		}
+		kalan = r[len(" TO "):]
+	}
+	kul, r, tamam := tirnakliAl(kalan)
+	if !tamam || !strings.HasPrefix(r, "@") {
+		return "", "", false
+	}
+	host, _, tamam = tirnakliAl(r[1:])
+	if !tamam {
+		return "", "", false
+	}
+	return kul, host, true
+}
+
 // dbKullanicilariUygula: arsivdeki kullanicilar.sql dosyasini UYGULAR.
 // Her ifade YENIDEN dogrulanir: dosya arsivden gelir, arsiv disaridan gelmis
 // olabilir (site tasima). Yazarken suzmek YETMEZ; okurken de suzulur.
-func dbKullanicilariUygula(dbDir string, izin map[string]bool) (int, error) {
+//
+// 🔴 HESAP SAHIPLIGI: ifadenin hedef hesabi hesaplar.DBHesabiBaglanabilirMi'den
+// gecmelidir. Eskiden yalniz yetki/nesne suzuluyordu: arsivdeki "GRANT ... TO
+// 'komsu_kullanici'" komsunun hesabina bu kiracinin DB'sinde yetki ekliyor (komsunun
+// parola degisimi "baska domainin veritabaninda yetkili" diye kilitleniyordu), USAGE
+// satirindaki "IDENTIFIED BY PASSWORD" ise VAR OLAN bir hesabin parolasini arsivdeki
+// hash'e ceviriyordu. Karar hesap basina ILK satirda verilir ve saklanir (CREATE USER
+// satiri hesabi olusturduktan sonra GRANT satiri "var ama yetkisiz" diye reddedilmesin).
+func dbKullanicilariUygula(db *sql.DB, domainID int64, dbDir string, izin map[string]bool) (int, error) {
 	ham, err := os.ReadFile(filepath.Join(dbDir, kullaniciDosyaAdi))
 	if err != nil {
 		return 0, err
 	}
+	kararlar := map[string]error{}
 	n := 0
 	for _, satir := range strings.Split(string(ham), "\n") {
 		s := strings.TrimSpace(satir)
@@ -255,6 +316,21 @@ func dbKullanicilariUygula(dbDir string, izin map[string]bool) (int, error) {
 		case grantSuzgeci(s, izin):
 		default:
 			log.Printf("backup: kullanicilar.sql reddedilen ifade: %.80s", s)
+			continue
+		}
+		kul, host, ok := satirHesabi(s)
+		if !ok {
+			log.Printf("backup: kullanicilar.sql hesabı çözümlenemeyen ifade reddedildi: %.80s", s)
+			continue
+		}
+		anahtar := kul + "\x00" + host
+		karar, bilinen := kararlar[anahtar]
+		if !bilinen {
+			karar = hesaplar.DBHesabiBaglanabilirMi(context.Background(), db, domainID, kul, host)
+			kararlar[anahtar] = karar
+		}
+		if karar != nil {
+			log.Printf("backup: kullanicilar.sql ifadesi reddedildi (hesap %.40s): %v", kul, karar)
 			continue
 		}
 		if err := mysqlCalistir(s + ";"); err != nil {
@@ -290,9 +366,19 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 		log.Printf("backup: kimlik kurtarma reddedildi (geçersiz db adı): %.60s", dbName)
 		return ""
 	}
-	if h := dbHesaplari(dbName); len(h) > 0 {
-		panelKaydiGuncelle(db, domainID, dbName, h[0].K, "")
-		return "kullanıcı " + h[0].K + " geri yüklendi"
+	// 🔴 HESAP SAHIPLIGI (hesaplar.DBHesabiBaglanabilirMi): satira yazilan kullanici
+	// sonra parola degisimi, mevcut-kullanici modu ve DB silmede (DROP USER) "bu domainin
+	// hesabi" diye kullanilir. Eskiden bu DB'ye yetkili ILK hesap / wp-config'teki ad
+	// kosulsuz yaziliyordu: komsunun kullanicisi (komsu kilitlenir), roundcube/pma/pureftpd
+	// (DB silinince DROP USER → sunucu geneli kesinti), komsunun ad-alaninda yeni bir ad.
+	ctx := context.Background()
+	for _, h := range dbHesaplari(dbName) {
+		if err := hesaplar.DBHesabiBaglanabilirMi(ctx, db, domainID, h.K, h.H); err != nil {
+			log.Printf("backup: %s icin %s@%s panel kaydina baglanmadi: %v", dbName, h.K, h.H, err)
+			continue
+		}
+		panelKaydiGuncelle(db, domainID, dbName, h.K, "")
+		return "kullanıcı " + h.K + " geri yüklendi"
 	}
 
 	kul, parola, kaynak := uygulamaKimligi(sk, dbName)
@@ -309,6 +395,13 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 	if !gecerliParolaMi(parola) {
 		log.Printf("backup: kimlik kurtarma reddedildi (geçersiz parola biçimi): %.60s", dbName)
 		return ""
+	}
+	// Ad kiracinin yazabildigi dosyadan: VAR OLAN bir hesapsa (CREATE USER IF NOT EXISTS
+	// no-op olur) o hesap bu domainin olmali; YOKSA baska kiracinin ad-alaninda olmamali.
+	// Yanit adin kime ait oldugunu sizdirmaz.
+	if err := hesaplar.DBHesabiBaglanabilirMi(ctx, db, domainID, kul, "localhost"); err != nil {
+		log.Printf("backup: %s icin %s dosyasindaki kullanici baglanmadi: %v", dbName, kaynak, err)
+		return "kullanıcı site yapılandırmasından kurtarılamadı — Veritabanları bölümünden tanımlayın"
 	}
 	// 🔴 GUVENLIK: NO_BACKSLASH_ESCAPES sql_mode ACIKSA sqlKacis'in \' kacisi kirilir
 	// (backslash literal olur → tirnak string'i kapatir → SQLi). Bu oturumda o modu
@@ -332,23 +425,27 @@ func kimlikTamamla(db *sql.DB, domainID int64, sk, dbName string) string {
 func panelKaydiGuncelle(db *sql.DB, domainID int64, dbName, kul, parola string) {
 	if parola != "" {
 		if _, err := db.Exec(`UPDATE db_accounts SET db_user=?, db_pass_plain=?
-			WHERE domain_id=? AND db_name=?`,
+			WHERE domain_id=? AND BINARY db_name=?`,
 			kul, gizli.SaklaGecis(parola, kul), domainID, dbName); err != nil {
 			log.Printf("backup: panel db_accounts guncellenemedi (domain=%d db=%s): %v", domainID, dbName, err)
 		}
 		return
 	}
 	if _, err := db.Exec(`UPDATE db_accounts SET db_user=?
-		WHERE domain_id=? AND db_name=? AND (db_user='' OR db_user IS NULL)`,
+		WHERE domain_id=? AND BINARY db_name=? AND (db_user='' OR db_user IS NULL)`,
 		kul, domainID, dbName); err != nil {
 		log.Printf("backup: panel db_accounts kullanici guncellenemedi (domain=%d db=%s): %v", domainID, dbName, err)
 	}
 }
 
+// evKoku: kiraci ev dizinlerinin koku (testler t.TempDir ile degistirir; canli /home'a
+// dokunmadan wp-config kurtarma yolu sinanir).
+var evKoku = "/home"
+
 // uygulamaKimligi: /home/<sk> altindaki uygulama yapilandirmasinda dbName'i
 // arar; eslesirse kullanici/parola dondurur.
 func uygulamaKimligi(sk, dbName string) (kul, parola, kaynak string) {
-	kok := filepath.Join("/home", sk)
+	kok := filepath.Join(evKoku, sk)
 	for _, aday := range adayYapilandirmalar(kok) {
 		ham, err := guvenliOku(kok, aday, 512*1024)
 		if err != nil {

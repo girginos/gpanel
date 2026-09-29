@@ -24,6 +24,7 @@ import (
 	"girginospanel/internal/archivex"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kota"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -42,7 +43,8 @@ func sistemDBmi(n string) bool {
 	return false
 }
 
-// domainDBleri: domaine ait TUM veritabani adlari (ana <sk>_main + db_accounts satirlari).
+// domainDBleri: domaine ait TUM veritabani adlari (ana <sk>_main — yalniz kendi
+// ad-alanindaysa — + db_accounts satirlari).
 // Sadece gecerli-kimlik + sistem-disi adlar doner (whitelist kaynagi).
 func domainDBleri(db *sql.DB, domainID int64, sk string) []string {
 	set := map[string]bool{}
@@ -54,7 +56,19 @@ func domainDBleri(db *sql.DB, domainID int64, sk string) []string {
 			out = append(out, n)
 		}
 	}
-	add(sk + "_main")
+	// 🔴 Spekulatif (panelde kayitsiz olabilen eski) <sk>_main YALNIZ bu domainin
+	// ad-alanindaysa ve baska domaine kayitli degilse: ad bir komsunun kokunun KENDISI
+	// olabilir (shop.com'un c_shop_main'i = shop-main.com'un tam sk'si; duzeltme oncesi o
+	// kiraci uygulama DBAdi=sk ile tam bu adla DB acabiliyordu). Aksi halde shop.com'un
+	// yedegi komsunun DB'sini doker, "uzerine geri yukle" onu ezerdi. Bu domaine kayitliysa
+	// asagidaki sorgu zaten ekler. Olcum hatasi = eklenmez (fail-closed).
+	ana := sk + "_main"
+	if baska, err := hesaplar.DBAdiBaskaKiracininMi(context.Background(), db, domainID, ana); err == nil && !baska {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM db_accounts WHERE db_name=? AND domain_id<>?`, ana, domainID).Scan(&n); err == nil && n == 0 {
+			add(ana)
+		}
+	}
 	if rows, err := db.Query(`SELECT db_name FROM db_accounts WHERE domain_id=?`, domainID); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -442,8 +456,9 @@ func arsivDBDosyalari(tmp, sk string) map[string]string {
 	return out
 }
 
-// dbImport: bir .sql dosyasini verilen DB'ye import eder.
-func dbImport(dbName, sqlPath string) error {
+// dbImport: bir .sql dosyasini verilen DB'ye import eder. koru: DB yeni acilirsa eski
+// yetki temizliginden korunacak kayitli sahip (bkz. kayitliSahip; bos = yok).
+func dbImport(dbName, sqlPath, koru string) error {
 	// 🔴 GUVENLIK (fail-closed): dbName arsiv icindeki DOSYA ADINDAN gelebilir
 	// (arsivDBDosyalari HIC dogrulamaz) ve panel kaydi silinmis DB kurtarma
 	// yolunda (tumDBGeriYukle, sahip[name] yokken) whitelist'e ugramadan buraya
@@ -453,12 +468,25 @@ func dbImport(dbName, sqlPath string) error {
 	if !hesaplar.GecerliDBKimlik(dbName) || sistemDBmi(dbName) {
 		return fmt.Errorf("güvenlik: geçersiz veritabanı adı reddedildi")
 	}
+	vardi, err := hesaplar.SemaVarMi(dbName)
+	if err != nil {
+		return fmt.Errorf("veritabanı durumu okunamadı")
+	}
 	// 🔴 Hedef DB yoksa OLUSTUR. Eskiden dogrudan `mysql <ad> < dump` calisiyordu;
 	// veritabani silinmisse "Unknown database" ile patliyordu — yani tam da geri
 	// yuklemeye EN COK ihtiyac duyulan durumda (DB kaybi) restore imkansizdi.
 	if out, err := exec.Command("bash", "-c",
 		fmt.Sprintf("mysql -e %s", shq("CREATE DATABASE IF NOT EXISTS `"+dbName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))).CombinedOutput(); err != nil {
 		return fmt.Errorf("veritabanı oluşturulamadı: %s", strings.TrimSpace(string(out)))
+	}
+	if !vardi {
+		// 🔴 ARTIK GRANT: ad YENI acildi → bu ada bagli eski yetki satirlari (baskasinin
+		// onceden kapip MySQLDropDBKeepUser ile birakmis oldugu satir dahil) yeni DB'ye
+		// uzanirdi. Kayitli sahip korunur; jokerli eski desen varsa DB kullanima ACILMAZ.
+		if err := hesaplar.YeniDBYetkiKalintisiniTemizle(dbName, koru); err != nil {
+			_, _ = exec.Command("mysql", "-e", "DROP DATABASE IF EXISTS `"+dbName+"`").CombinedOutput()
+			return err
+		}
 	}
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("mysql %s < %s 2>&1", shq(dbName), shq(sqlPath)))
 	out, err := cmd.CombinedOutput()
@@ -467,6 +495,10 @@ func dbImport(dbName, sqlPath string) error {
 	}
 	return nil
 }
+
+// geriYuklemeAdRet: panelde bu domaine kayitli olmayan bir arsiv DB'sinin yeniden
+// kaydi reddedildiginde kiraciya donen TEK metin (nedeni ayirt etmez; bkz. tumDBGeriYukle).
+const geriYuklemeAdRet = "reddedildi (bu ad bu hosting için yeniden kaydedilemiyor — tekil geri yüklemeyle farklı bir ada yükleyin ya da yöneticiye başvurun)"
 
 // tumDBGeriYukle: arsivdeki DB'lerden domaine ait olanlari import eder (mod=tam / veritabani).
 // filter != "" ise yalniz o DB. Domaine ait olmayan / sistem DB'leri atlanir.
@@ -496,13 +528,43 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 			// geri yuklendi). Arsiv zaten BU domainin yedegi oldugu icin icindeki DB
 			// adi tanim geregi bu domaine aittir. Tek gercek risk, adin BASKA bir
 			// domaine kayitli olmasi — o durumda REDDEDILIR.
+			// 🔴 Uc ret nedeni (baska domaine kayitli / baska kiracinin ad-alani / panelde
+			// kayitsiz var olan sema) kiraciya AYNI genel metinle doner: ayri metinler
+			// arsive yazilan adlarla komsu kayitlarinin ve semalarinin VARLIGINI
+			// yoklatirdi (arsiv disaridan gelebilir). Ayrinti yalniz sunucu gunlugunde.
 			if baskaDomaininMi(db, name, domainID) {
-				res = append(res, map[string]string{"db": name, "durum": "reddedildi (başka bir domaine kayıtlı)"})
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (başka domaine kayıtlı)", sk, name)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
+				continue
+			}
+			// 🔴 Kayitli olmamak SAHIPLIK degildir (onek cakismasi): ad simdi BASKA bir
+			// kiracinin ad-alanina dusuyorsa (girgin.com'un eski "girgin_x_main"i →
+			// girgin-x.com) yeniden acmak komsunun adini kapar ve DB silinince artik
+			// yetkiyle komsuya uzanirdi. Olcum hatasi = red.
+			if b, err := hesaplar.DBAdiBaskaKiracininMi(context.Background(), db, domainID, name); err != nil || b {
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (başka kiracının ad-alanı ya da ölçüm hatası: %v)", sk, name, err)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
+				continue
+			}
+			// Panelde kayitsiz ama sunucuda VAR olan sema kimin oldugu bilinmeyen bir
+			// DB'dir: ustune yazilmaz, sahiplenilmez.
+			if v, err := hesaplar.SemaVarMi(name); err != nil || v {
+				log.Printf("restore %s: %q yeniden kaydı reddedildi (panelde kayıtsız şema var ya da ölçüm hatası: %v)", sk, name, err)
+				res = append(res, map[string]string{"db": name, "durum": geriYuklemeAdRet})
+				continue
+			}
+			// Yeniden kayit bir DB EKLER: plan limiti atlanmamali (sil → yeni ac → geri yukle).
+			if err := kota.CheckDBEklenebilir(context.Background(), db, domainID); err != nil {
+				res = append(res, map[string]string{"db": name, "durum": "reddedildi (" + err.Error() + ")"})
 				continue
 			}
 			yenidenKayit = true
 		}
-		if err := dbImport(name, p); err != nil {
+		koru := ""
+		if !yenidenKayit {
+			koru = kayitliSahip(db, domainID, name)
+		}
+		if err := dbImport(name, p, koru); err != nil {
 			res = append(res, map[string]string{"db": name, "durum": "hata: " + err.Error()})
 			continue
 		}
@@ -538,7 +600,7 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 		for _, n := range yuklenen {
 			izin[n] = true
 		}
-		if n, err := dbKullanicilariUygula(filepath.Join(tmp, "__db__"), izin); err == nil && n > 0 {
+		if n, err := dbKullanicilariUygula(db, domainID, filepath.Join(tmp, "__db__"), izin); err == nil && n > 0 {
 			log.Printf("restore %s: %d kullanici/yetki ifadesi uygulandi", sk, n)
 		}
 		for _, name := range yuklenen {
@@ -559,6 +621,21 @@ func baskaDomaininMi(db *sql.DB, dbName string, domainID int64) bool {
 		return true // olcemiyorsak REDDET (fail-closed)
 	}
 	return n > 0
+}
+
+// kayitliSahip: bu domainde name icin kayitli DB kullanicisi — YALNIZ panelde bu domaine
+// kayitliysa; aksi halde "". Geri yuklemede yeni acilan semanin eski yetki temizliginde
+// korunur (sahibin mesru yetkisi silinip site kopmasin).
+func kayitliSahip(db *sql.DB, domainID int64, name string) string {
+	var u string
+	if err := db.QueryRow(`SELECT db_user FROM db_accounts WHERE domain_id=? AND BINARY db_name=? LIMIT 1`,
+		domainID, name).Scan(&u); err != nil || u == "" {
+		return ""
+	}
+	if !hesaplar.GecerliDBKimlik(u) || hesaplar.KullaniciYalnizBuDomainde(db, domainID, u) != nil {
+		return ""
+	}
+	return u
 }
 
 // DBSonucOzeti: tumDBGeriYukle sonucunu sayilara ve okunur mesaja cevirir.
@@ -597,7 +674,7 @@ func birDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, srcDB, hedefDB string) 
 		if sistemDBmi(srcDB) || !sahip[srcDB] {
 			return "", fmt.Errorf("‘%s’ bu domaine ait değil", srcDB)
 		}
-		if err := dbImport(srcDB, sqlPath); err != nil {
+		if err := dbImport(srcDB, sqlPath, kayitliSahip(db, domainID, srcDB)); err != nil {
 			return "", err
 		}
 		return "‘" + srcDB + "’ üzerine geri yüklendi", nil
@@ -609,11 +686,24 @@ func birDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, srcDB, hedefDB string) 
 	if sahip[hedefDB] {
 		return "", fmt.Errorf("‘%s’ zaten var; üzerine yazmak için hedefi boş bırakın", hedefDB)
 	}
+	// 🔴 ONEK CAKISMASI: "<sk>_" oneki sahiplik kaniti DEGIL — c_girgin'in "c_girgin_x_…"
+	// adi var olan c_girgin_x'in tam-sk ad-alanidir (uygulama varsayilani
+	// <sk>_<kod>_<id>, tasima <sk>_<sonek> tahmin edilebilir). Eskiden bu yol komsunun
+	// gelecekteki adini saldirganin ana kullanicisina GRANT'li aciyordu; DB silinince
+	// (mevcut-kullanici modu) yetki satiri kalip komsu o adi actiginda ona uzaniyordu.
+	// Olcum hatasi = red (fail-closed). Yanit komsunun adini/varligini sizdirmaz.
+	if b, err := hesaplar.DBAdiBaskaKiracininMi(context.Background(), db, domainID, hedefDB); err != nil || b {
+		return "", fmt.Errorf("bu hedef adı kullanılamaz — farklı bir ad seçin")
+	}
+	// Yeni ada geri yukleme bir DB EKLER: plan limiti atlanmamali.
+	if err := kota.CheckDBEklenebilir(context.Background(), db, domainID); err != nil {
+		return "", err
+	}
 	dbUser := tenantAnaKullanici(db, domainID, sk)
 	if err := hesaplar.MySQLCreateDBForUser(db, domainID, hedefDB, dbUser); err != nil {
 		return "", fmt.Errorf("hedef DB oluşturulamadı: %w", err)
 	}
-	if err := dbImport(hedefDB, sqlPath); err != nil {
+	if err := dbImport(hedefDB, sqlPath, ""); err != nil {
 		return "", err
 	}
 	return "yeni ‘" + hedefDB + "’ veritabanına geri yüklendi", nil

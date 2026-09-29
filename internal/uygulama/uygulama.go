@@ -304,48 +304,17 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 	// DB — MVP: kullanıcı wizard'da manual girer. mysqlOlustur nil ise skip.
 	dbAdi := ""
 	if a.Tarif.DBGerek && mysqlOlustur != nil {
-		// 🔴 AD-UZAYI ZORUNLU: DB adi tenant'in sistem kullanicisiyla
-		// baslamak ZORUNDA. Aksi halde musteri baska bir tenant'in DB adini
-		// verip `ALTER USER ... IDENTIFIED BY` ile onun parolasini sifirlayabilir
-		// (CREATE ... IF NOT EXISTS sessizce no-op olur, sonraki adimlar calisir).
-		dbAdi = a.DBAdi
-		if dbAdi == "" {
-			// Sunucu uretir: <sk>_<kod>_<domainID> — hem sahiplik hem benzersizlik.
-			dbAdi = fmt.Sprintf("%s_%s_%d", a.Domain.SK, a.Tarif.Kod, a.Domain.ID)
-			if len(dbAdi) > 64 {
-				dbAdi = dbAdi[:64]
-			}
+		ad, geriAl, err := uygulamaDBKur(ctx, db, a, mysqlOlustur, mysqlDrop)
+		if err != nil {
+			return nil, err
 		}
-		if !hesaplar.MusteriDBKimlikGecerli(a.Domain.SK, dbAdi) {
-			return nil, fmt.Errorf("db_adi '%s' bu hesaba ait degil — '%s' veya '%s_' ile baslamali",
-				dbAdi, a.Domain.SK, a.Domain.SK)
-		}
-		// Zaten VAR olan bir DB'yi devralma: ayni ad-uzayinda bile olsa
-		// mevcut bir DB'nin parolasini sessizce degistirmek yanlis olur.
-		if hesaplar.DBVarMi(dbAdi) {
-			return nil, fmt.Errorf("veritabani '%s' zaten var — farkli bir ad secin", dbAdi)
-		}
-		dbSifre := a.DBSifre
-		if dbSifre == "" {
-			dbSifre = randomStr(24)
-			if dbSifre == "" {
-				return nil, errors.New("guvenli parola uretilemedi (entropi okunamadi) — kurulum durduruldu")
-			}
-		}
-		// 🔴 domainID SART: db_accounts.domain_id -> domains(id) FK'si var.
-		// 0 gecilirse "foreign key constraint fails" ile patlar AMA MariaDB
-		// tarafinda veritabani ZATEN OLUSMUS olur -> oksuz DB kalir.
-		// Defer'i cagridan ONCE kur: mysqlOlustur yarida patlarsa (MariaDB
-		// tarafi olustu ama db_accounts INSERT'i dustu gibi) DB oksuz kalmasin.
+		dbAdi = ad
+		// Geri alma YALNIZ olusturma basarili olduktan sonra kurulur (bkz. uygulamaDBKur).
 		defer func() {
-			if kurulumTamam || mysqlDrop == nil {
-				return
+			if !kurulumTamam {
+				geriAl()
 			}
-			_ = mysqlDrop(a.Domain.ID, dbAdi, dbAdi)
 		}()
-		if err := mysqlOlustur(a.Domain.ID, dbAdi, dbAdi, dbSifre); err != nil {
-			return nil, fmt.Errorf("DB: %w", err)
-		}
 	}
 
 	// Yönetim URL üret
@@ -373,6 +342,77 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 		Surum: a.Tarif.Surum, AltDizin: sub, YonetimURL: yonetimURL, DBAdi: dbAdi,
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+// uygulamaDBKur: tarifin istedigi DB'yi (ad = kullanici adi) ad-alani + devralma
+// kapilarindan gecirip olusturur. Donen geriAl YALNIZ bu cagrinin olusturdugu DB'yi
+// dusurur ve yalniz mysqlOlustur BASARILI olduysa nil degildir.
+//
+// 🔴 Eskiden geri-alma defer'i mysqlOlustur'dan ONCE kuruluyordu: olusturma, ad ZATEN
+// VAR oldugu icin reddedilse bile (hesaplar.MySQLCreateDB artik yalniz-yeni; var olan
+// kullaniciya dokunmaz) defer `DROP USER <ad>` kosup VAR OLAN — baska kiraciya ait
+// olabilecek — kullaniciyi siliyordu. Yarim kalan olusturmayi (MariaDB tarafi olustu,
+// db_accounts INSERT'i dustu gibi) MySQLCreateDB kendisi geri alir.
+func uygulamaDBKur(ctx context.Context, db *sql.DB, a KurArgs,
+	mysqlOlustur func(domainID int64, dbAd, dbUser, dbSifre string) error,
+	mysqlDrop func(domainID int64, dbAd, dbUser string) error,
+) (string, func(), error) {
+	// 🔴 AD-UZAYI ZORUNLU: DB adi tenant'in sistem kullanicisiyla
+	// baslamak ZORUNDA. Aksi halde musteri baska bir tenant'in DB adini
+	// verip `ALTER USER ... IDENTIFIED BY` ile onun parolasini sifirlayabilir
+	// (CREATE ... IF NOT EXISTS sessizce no-op olur, sonraki adimlar calisir).
+	dbAdi := a.DBAdi
+	if dbAdi == "" {
+		// Sunucu uretir: <sk>_<kod>_<domainID> — hem sahiplik hem benzersizlik.
+		temel := fmt.Sprintf("%s_%s_%d", a.Domain.SK, a.Tarif.Kod, a.Domain.ID)
+		if len(temel) > 64 {
+			temel = temel[:64]
+		}
+		// 🔴 ONEK CAKISMASI (DoS): en uzun kok kurali bu adi, adi '<kurban>-<kod>' olan
+		// domainin ad-alanina dusurur (shop.com'un c_shop_joomla_<id>'si →
+		// shop-joomla.com, c_shop_joomla). Eskiden asagidaki kapi o domain acildigi anda
+		// kurbanin varsayilan kurulumunu reddediyordu; turetilmis adi kurban degistiremez.
+		// Ad kurbanin KENDI ad-alaninda (ve MariaDB/panelde serbest) secilir.
+		secilen, err := hesaplar.KendiAdAlanindaAdSec(ctx, db, a.Domain.ID, temel,
+			func(ad string) (bool, error) { return hesaplar.AdSerbestMi(ctx, db, ad) })
+		if err != nil {
+			return "", nil, fmt.Errorf("veritabani adi otomatik uretilemedi — db_adi verin")
+		}
+		dbAdi = secilen
+	}
+	if !hesaplar.MusteriDBKimlikGecerli(a.Domain.SK, dbAdi) {
+		return "", nil, fmt.Errorf("db_adi '%s' bu hesaba ait degil — '%s' veya '%s_' ile baslamali",
+			dbAdi, a.Domain.SK, a.Domain.SK)
+	}
+	// 🔴 ONEK CAKISMASI: "<sk>_" onekiyle baslamak sahiplik kaniti DEGIL — alt
+	// cizgili sk'larda ad-alanlari ic ice gecer (c_girgin'in "c_girgin_x_db"si,
+	// c_girgin_x'in tasima kullanicisidir). Ad baska kiracinin ad-alanina duserse red.
+	if baska, err := hesaplar.DBAdiBaskaKiracininMi(ctx, db, a.Domain.ID, dbAdi); err != nil || baska {
+		return "", nil, fmt.Errorf("db_adi '%s' kullanilamaz — farkli bir ad secin", dbAdi)
+	}
+	// Zaten VAR olan bir DB'yi devralma: ayni ad-uzayinda bile olsa
+	// mevcut bir DB'nin parolasini sessizce degistirmek yanlis olur.
+	if hesaplar.DBVarMi(dbAdi) {
+		return "", nil, fmt.Errorf("veritabani '%s' zaten var — farkli bir ad secin", dbAdi)
+	}
+	dbSifre := a.DBSifre
+	if dbSifre == "" {
+		dbSifre = randomStr(24)
+		if dbSifre == "" {
+			return "", nil, errors.New("guvenli parola uretilemedi (entropi okunamadi) — kurulum durduruldu")
+		}
+	}
+	// 🔴 domainID SART: db_accounts.domain_id -> domains(id) FK'si var (0 gecilirse
+	// INSERT duser; MySQLCreateDB o durumda MariaDB tarafini kendisi geri alir).
+	if err := mysqlOlustur(a.Domain.ID, dbAdi, dbAdi, dbSifre); err != nil {
+		return "", nil, fmt.Errorf("DB: %w", err)
+	}
+	geriAl := func() {
+		if mysqlDrop != nil {
+			_ = mysqlDrop(a.Domain.ID, dbAdi, dbAdi)
+		}
+	}
+	return dbAdi, geriAl, nil
 }
 
 // Liste — bir domain için tüm kurulu uygulamalar.

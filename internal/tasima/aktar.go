@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -409,18 +410,19 @@ type dbHedef struct{ Ad, Kul string }
 
 // veritabanlariniAktar — tum kaynak DB'lerini tasir.
 //
-// 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Mevcut
-// kullanicinin parolasi DEGISTIRILMEZ: hesaplar.MySQLCreateDB kosulsuz
-// "ALTER USER … IDENTIFIED BY" calistiriyor; bu, ayni kullaniciyi paylasan
-// CANLI sitelerin baglantisini aninda koparir.
+// 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Orijinal
+// kimlik yolunda mevcut kullanicinin parolasi DEGISTIRILMEZ (ayni kullaniciyi
+// paylasan CANLI siteler kopardi); hesaplar.MySQLCreateDB artik yalniz-yeni
+// semantikle calisir ve var olan kullaniciya hic dokunmaz.
 func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap, sk, webRoot string,
 	sonuc *AktarSonuc, log func(string, ...any)) (map[string]dbHedef, string, error) {
 
-	hedefKul := sk + "_db"
-	// <sk>_db bu domaine OZEL kullanicidir (sk domain basina benzersiz) → parolasini
-	// bilinen yeni bir degere ayarlamak GUVENLI ve ZORUNLU: aksi halde wp-config'e
-	// yazacak parolamiz olmaz ve site "Access denied" verir. MySQLCreateDB, kullanici
-	// varsa CREATE-OR-ALTER ile parolayi dbPw'ye esitler.
+	// hedefKul: FALLBACK yolunun panel kullanicisi (<sk>_db; bkz. tasimaKullanicisiSec).
+	// Ilk ihtiyacta secilir. Parolasini bilinen yeni bir degere ayarlamak ZORUNLU: aksi
+	// halde wp-config'e yazacak parolamiz olmaz ve site "Access denied" verir. Kullanici
+	// zaten varsa (ustune tasima) bu YALNIZ panelde bu domaine kayitliysa yapilir — bkz.
+	// panelKullanicisiylaOlustur.
+	hedefKul := ""
 	dbPw := hesaplar.RandomParola(24)
 
 	// 🔴 ORIJINAL kimlik tercihi: DB adi+kullanici+parola AYNI kalirsa wp-config
@@ -438,9 +440,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			continue
 		}
 		// --- ORIJINAL kimlikle taşıma (config degismez) ---
-		if orij, ok := kimlikler[kaynakDB]; ok && orij.Kul != "" && orij.Pw != "" &&
-			reDBAd.MatchString(orij.Kul) && h.dbAdiMusaitMi(ctx, kaynakDB) &&
-			!h.dbKullanicisiVarMi(ctx, orij.Kul) {
+		if orij, ok := kimlikler[kaynakDB]; ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
 			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
 				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
 			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
@@ -454,7 +454,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			}
 		}
 		// --- FALLBACK: benzersiz ad + panel kullanicisi + config rewrite ---
-		hedefAd, err := h.benzersizHedefDB(ctx, sk, kaynakDB, hs.KaynakHesap)
+		hedefAd, err := h.benzersizHedefDB(ctx, sonuc.DomainID, sk, kaynakDB, hs.KaynakHesap)
 		if err != nil {
 			log("uyari: %s icin hedef ad uretilemedi: %v", kaynakDB, err)
 			basarisiz = append(basarisiz, kaynakDB)
@@ -463,7 +463,16 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 		log("veritabani: %s → %s", kaynakDB, hedefAd)
 
 		if !kuruldu {
-			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, hedefAd, hedefKul, dbPw); err != nil {
+			if hedefKul == "" {
+				kul, err := h.tasimaKullanicisiSec(ctx, sonuc.DomainID, sk)
+				if err != nil {
+					log("uyari: %s icin panel kullanicisi secilemedi: %v", kaynakDB, err)
+					basarisiz = append(basarisiz, kaynakDB)
+					continue
+				}
+				hedefKul = kul
+			}
+			if err := h.panelKullanicisiylaOlustur(sonuc.DomainID, hedefAd, hedefKul, dbPw); err != nil {
 				log("uyari: %s olusturulamadi: %v", hedefAd, err)
 				basarisiz = append(basarisiz, kaynakDB)
 				continue
@@ -488,6 +497,62 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 		return esleme, dbPw, fmt.Errorf("veritabani aktarilamadi: %s", strings.Join(basarisiz, ", "))
 	}
 	return esleme, dbPw, nil
+}
+
+// panelKullanicisiylaOlustur: FALLBACK yolunun ilk DB'si + <sk>_db panel kullanicisi.
+//   - Kullanici YOKSA: hesaplar.MySQLCreateDB (yalniz-yeni) ile olusur.
+//   - VARSA ve panelde YALNIZ bu domaine kayitliysa (ustune tasima / yeniden deneme):
+//     parolasi sahiplik dogrulanarak (MySQLChangePassword) dbPw'ye cekilir, DB ona
+//     baglanir (MySQLCreateDBForUser).
+//   - VARSA ama bu domaine ait DEGILSE (onek cakismasiyla baska kiracinin adi, ya da
+//     kayitsiz artik): REDDEDILIR. Eskiden MySQLCreateDB'nin kosulsuz ALTER USER'i
+//     bu kullaniciyi sessizce devraliyordu.
+func (h *Handlers) panelKullanicisiylaOlustur(domainID int64, hedefAd, hedefKul, dbPw string) error {
+	err := hesaplar.MySQLCreateDB(h.DB, domainID, hedefAd, hedefKul, dbPw)
+	if !errors.Is(err, hesaplar.ErrDBKimlikMevcut) {
+		return err
+	}
+	if perr := hesaplar.MySQLChangePassword(h.DB, domainID, hedefKul, dbPw); perr != nil {
+		return fmt.Errorf("%w (%v)", err, perr)
+	}
+	return hesaplar.MySQLCreateDBForUser(h.DB, domainID, hedefAd, hedefKul)
+}
+
+// tasimaKullanicisiSec: FALLBACK yolunun panel kullanicisi. Temel ad <sk>_db.
+//
+// 🔴 ONEK CAKISMASI (DoS): en uzun kok kurali shop.com'un (c_shop) c_shop_db'sini
+// shop-db.com'a (tam sk'si c_shop_db) verir. Eskiden <sk>_db sabitti: shop-db.com'un
+// sahibi adi onceden acinca kurbanin tasimasi panelKullanicisiylaOlustur'da
+// (MySQLCreateDB 1396 → MySQLChangePassword → "bu domaine kayitli degil") duruyor, hic
+// DB aktarilamiyordu. Artik ad kurbanin KENDI ad-alaninda secilir (c_shop_db2 …). Ad
+// panelde YALNIZ bu domaine kayitliysa (ustune tasima) yeniden kullanilir; degilse
+// MariaDB'de ve panelde hic kullanilmayan bir ad gerekir.
+func (h *Handlers) tasimaKullanicisiSec(ctx context.Context, domainID int64, sk string) (string, error) {
+	return hesaplar.KendiAdAlanindaAdSec(ctx, h.DB, domainID, sk+"_db", func(ad string) (bool, error) {
+		if hesaplar.KullaniciYalnizBuDomainde(h.DB, domainID, ad) == nil {
+			return true, nil
+		}
+		return hesaplar.AdSerbestMi(ctx, h.DB, ad)
+	})
+}
+
+// kendiAdAlaniUygun: ad BASKA bir kiracinin ad-alanina dusmuyor mu (bkz.
+// hesaplar.DBAdiBaskaKiracininMi)? Olcum hatasi = uygun degil (fail-closed).
+func (h *Handlers) kendiAdAlaniUygun(ctx context.Context, domainID int64, ad string) bool {
+	baska, err := hesaplar.DBAdiBaskaKiracininMi(ctx, h.DB, domainID, ad)
+	return err == nil && !baska
+}
+
+// orijinalKimlikKullanilir: kaynak DB ORIJINAL ad/kullanici/parolasiyla (wp-config
+// degismeden) tasinabilir mi? Ad ve kullanici hedefte hic yok olmali.
+//
+// 🔴 Orijinal ad/kullanici BASKA bir kiracinin ad-alanina duserse (kaynak sunucuda
+// secilmis serbest adlar: "c_shop_db", "shop_joomla_…") kullanilmaz — o kiracinin
+// turettigi adlari onceden tutardi; benzersiz (kendi ad-alani) yola dusulur.
+func (h *Handlers) orijinalKimlikKullanilir(ctx context.Context, domainID int64, kaynakDB string, orij dbKimlik) bool {
+	return orij.Kul != "" && orij.Pw != "" && reDBAd.MatchString(orij.Kul) &&
+		h.dbAdiMusaitMi(ctx, kaynakDB) && !h.dbKullanicisiVarMi(ctx, orij.Kul) &&
+		h.kendiAdAlaniUygun(ctx, domainID, kaynakDB) && h.kendiAdAlaniUygun(ctx, domainID, orij.Kul)
 }
 
 func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {
@@ -520,7 +585,12 @@ func (h *Handlers) dbKullanicisiVarMi(ctx context.Context, kul string) bool {
 // benzersizHedefDB — "olduser_wp" → "<sk>_wp". 64 karakter sinirinda KIRPMAK
 // yerine cakisma denetler ve sayac eki verir; kirpma iki farkli kaynak DB'yi
 // ayni hedefe indirip birini sessizce dusuruyordu.
-func (h *Handlers) benzersizHedefDB(ctx context.Context, sk, kaynakDB, kaynakHesap string) (string, error) {
+//
+// 🔴 ONEK CAKISMASI: "<sk>_<sonek>" baska bir kiracinin DAHA UZUN kokune dusebilir
+// (shop.com'a tasinan "joomla_x" → c_shop_joomla_x = shop-joomla.com'un ad-alani).
+// Boyle aday atlanir; temel baska kiracidaysa "<temel>_<n>" adaylarinin hepsi de
+// oradadir → kendi ad-alaninda kompakt ad (hesaplar.KendiAdAlanindaAdSec).
+func (h *Handlers) benzersizHedefDB(ctx context.Context, domainID int64, sk, kaynakDB, kaynakHesap string) (string, error) {
 	sonek := kaynakDB
 	if kaynakHesap != "" && strings.HasPrefix(kaynakDB, kaynakHesap+"_") {
 		sonek = strings.TrimPrefix(kaynakDB, kaynakHesap+"_")
@@ -536,6 +606,18 @@ func (h *Handlers) benzersizHedefDB(ctx context.Context, sk, kaynakDB, kaynakHes
 		sonek = "db"
 	}
 	temel := sk + "_" + sonek
+	// Benzersizlik HEM gercek sema HEM panel kaydindan (db_accounts) kontrol
+	// edilmeli: MySQLCreateDB, db_accounts.db_name UNIQUE'e carpar; yalniz
+	// information_schema bakmak yeniden-tasimada 1062 Duplicate verir.
+	musait := func(aday string) (bool, error) {
+		var n int
+		if err := h.DB.QueryRowContext(ctx,
+			`SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name=?)
+			      + (SELECT COUNT(*) FROM db_accounts WHERE db_name=?)`, aday, aday).Scan(&n); err != nil {
+			return false, err
+		}
+		return n == 0, nil
+	}
 	for i := 0; i < 50; i++ {
 		aday := temel
 		if i > 0 {
@@ -551,18 +633,25 @@ func (h *Handlers) benzersizHedefDB(ctx context.Context, sk, kaynakDB, kaynakHes
 				aday = fmt.Sprintf("%s_%d", temel[:kes-2], i+1)
 			}
 		}
-		// Benzersizlik HEM gercek sema HEM panel kaydindan (db_accounts) kontrol
-		// edilmeli: MySQLCreateDB, db_accounts.db_name UNIQUE'e carpar; yalniz
-		// information_schema bakmak yeniden-tasimada 1062 Duplicate verir.
-		var n int
-		_ = h.DB.QueryRowContext(ctx,
-			`SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name=?)
-			      + (SELECT COUNT(*) FROM db_accounts WHERE db_name=?)`, aday, aday).Scan(&n)
-		if n == 0 {
+		if baska, err := hesaplar.DBAdiBaskaKiracininMi(ctx, h.DB, domainID, aday); err != nil {
+			return "", err
+		} else if baska {
+			if i == 0 {
+				break // temel baska kiracida → "<temel>_<n>" de onda
+			}
+			continue
+		}
+		if ok, err := musait(aday); err != nil {
+			return "", err
+		} else if ok {
 			return aday, nil
 		}
 	}
-	return "", fmt.Errorf("benzersiz veritabani adi uretilemedi")
+	ad, err := hesaplar.KendiAdAlanindaAdSec(ctx, h.DB, domainID, temel, musait)
+	if err != nil {
+		return "", fmt.Errorf("benzersiz veritabani adi uretilemedi: %w", err)
+	}
+	return ad, nil
 }
 
 // ---------------------------------------------------------------------------

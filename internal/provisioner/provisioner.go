@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+
+	"girginospanel/internal/hesaplar"
 )
 
 var (
@@ -295,7 +297,13 @@ func BenzersizKullanici(alanAdi string) string {
 	return u
 }
 
-// kullaniciKullanimda: bu sistem_kullanici DB'de kayitli mi VEYA /home altinda var mi.
+// kullaniciKullanimda: bu sistem_kullanici DB'de kayitli mi, /home altinda var mi VEYA
+// DB ad-alani ("<u>_…", "<c_'siz u>_…") zaten baskasinca kullaniliyor mu.
+//
+// 🔴 Son kosul (onek cakismasi): kisa onekli kiraci c_girgin, girgin-x.com henuz yokken
+// "girgin_x_main" / "girgin_x_db" adlarini acabilir (ad-alani kapisi yalniz VAR OLAN
+// domainlere bakar). girgin-x.com yine c_girgin_x alsaydi varsayilan DB'si yalniz-yeni
+// olusturmada reddedilir, ad saldirganda kalirdi. Artik c_girgin_x2'ye gecilir.
 func kullaniciKullanimda(u string) bool {
 	if pkgDB != nil {
 		var n int
@@ -309,7 +317,7 @@ func kullaniciKullanimda(u string) bool {
 	if _, err := os.Stat("/home/" + u); err == nil {
 		return true
 	}
-	return false
+	return hesaplar.DBAdAlaniKullanimda(pkgDB, u)
 }
 
 func normalizePHP(v string) string {

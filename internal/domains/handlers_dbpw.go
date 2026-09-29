@@ -32,41 +32,6 @@ var (
 // hakkinda ad yoklamasi yapabilirdi.
 const adKullanilamaz = "bu kullanıcı adı kullanılamaz (sistem hesabı, başka bir hostinge ait ya da zaten mevcut) — başka bir ad seçin"
 
-// dbKullaniciAdSahibi: DB kullanici adi HANGI hostingin ad alaninda? Panel
-// kiraci DB kullanicilarini `<onek>_…` (onek = sk'nin c_'siz hali; CreateDatabase,
-// Create) ya da `<sk>_…` (tasima) biciminde adlandirir. En UZUN eslesen onek
-// sahibi belirler: c_foo'nun "foo_" alani c_foo_bar'in "foo_bar_" alanini da
-// kapsar, "foo_bar_x" c_foo_bar'indir. Hicbir hostinge ait olmayan ad (wpu_*,
-// tasinmis orijinal adlar) icin 0; ayni uzunlukta iki sahip varsa -1 (belirsiz).
-func dbKullaniciAdSahibi(ctx context.Context, db *sql.DB, ad string) (int64, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, sistem_kullanici FROM domains WHERE sistem_kullanici<>''`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	var sahip int64
-	enUzun := 0
-	for rows.Next() {
-		var id int64
-		var sk string
-		if err := rows.Scan(&id, &sk); err != nil {
-			return 0, err
-		}
-		for _, onek := range []string{sk, strings.TrimPrefix(sk, "c_")} {
-			if onek == "" || (ad != onek && !strings.HasPrefix(ad, onek+"_")) {
-				continue
-			}
-			switch {
-			case len(onek) > enUzun:
-				enUzun, sahip = len(onek), id
-			case len(onek) == enUzun && sahip != id:
-				sahip = -1
-			}
-		}
-	}
-	return sahip, rows.Err()
-}
-
 type setDBPwReq struct {
 	Parola string `json:"parola"`
 	// Kullanici: YALNIZ db_user bos oldugunda (kullanicisi olmayan veritabani)
@@ -159,22 +124,26 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// (3) Baska hostingin AD ALANI kapatilamaz: o kiracinin panelden sonra
-		// acacagi <onek>_ek<id> / <onek>_db / c_<sk>_db kullanicisi CREATE-OR-ALTER
-		// ile bu kayda baglanir, bayi de kendi kaydindan parolayi sifirlayip
-		// kurbanin DB'sine erisirdi.
-		sahip, e := dbKullaniciAdSahibi(r.Context(), h.DB, yeni)
-		if e != nil {
+		// acacagi <onek>_ek<id> / <onek>_db / c_<sk>_db kullanicisi bu kayda
+		// baglanir, bayi de kendi kaydindan parolayi sifirlayip kurbanin DB'sine
+		// erisirdi. Kural (en uzun kok; esit kokte tam-sk sahibi; bir domainin
+		// kokunun KENDISI — kendi tam sk'si ya da c'siz koku dahil — hic kimsenin)
+		// TEK yerde: hesaplar.DBAdiBaskaKiracininMi (CreateDatabase / uygulama /
+		// geri yukleme ile ayni). shop-db.com (c_shop_db) bu dalda "c_shop_db" /
+		// "shop_db" acarak shop.com'un tasima/saglama adini kilitleyemez.
+		// Olcum hatasi = red (fail-closed).
+		if baska, e := hesaplar.DBAdiBaskaKiracininMi(r.Context(), h.DB, domainID, yeni); e != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "ad alanı denetlenemedi")
 			return
-		}
-		if sahip != 0 && sahip != domainID {
+		} else if baska {
 			httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
 			return
 		}
 		// (4) MariaDB'de zaten var olan hesap (herhangi host) devralinmaz —
-		// MySQLKullaniciEkle YALNIZ yeni hesap olusturur (ErrDBKullaniciMevcut).
+		// MySQLKullaniciEkle YALNIZ yeni hesap olusturur (ErrDBKullaniciMevcut; yaris
+		// penceresinde CREATE 1396 da ayni hata).
 		if err := dbKullaniciEkle(dbName, yeni, req.Parola); err != nil {
-			if errors.Is(err, hesaplar.ErrDBKullaniciMevcut) || errors.Is(err, hesaplar.ErrSistemDBHesabi) {
+			if errors.Is(err, hesaplar.ErrDBKimlikMevcut) || errors.Is(err, hesaplar.ErrSistemDBHesabi) {
 				httpx.WriteError(w, http.StatusConflict, adKullanilamaz)
 				return
 			}
@@ -189,7 +158,7 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		}
 		dbUser = yeni
 		islem = "db.kullanici-olustur"
-	} else if err := dbParolaDegistir(h.DB, dbUser, req.Parola); err != nil {
+	} else if err := dbParolaDegistir(h.DB, domainID, dbUser, req.Parola); err != nil {
 		if errors.Is(err, hesaplar.ErrSistemDBHesabi) {
 			httpx.WriteError(w, http.StatusForbidden, "sistem veritabanı hesabının parolası panelden değiştirilemez")
 			return
