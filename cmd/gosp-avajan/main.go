@@ -44,6 +44,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/sys/unix"
 
+	"girginospanel/internal/antivirus"
 	"girginospanel/internal/avayar"
 	"girginospanel/internal/avmotor"
 	"girginospanel/internal/wpsaglama"
@@ -706,43 +707,57 @@ func wpKokBul(yol string) string {
 	return ""
 }
 
-// karantinaAl — dosyayı kiracının .karantina dizinine taşır.
+// karantinaAl — dosyayı kiracının .karantina dizinine taşır, HEDEF YOLU döner
+// (geri yükleme için DB'ye yazılır). Boş string = karantina yapılamadı.
 //
 // 🔴 AYNI dosya sisteminde rename: kopyala-sil DEĞİL. Kopyalama sırasında
 // saldırgan dosyayı çalıştırmaya devam edebilir ve büyük dosyada yarış oluşur.
 // rename atomiktir. Ayrıca izinler 0000'a çekilir — karantinadaki bir dosya
 // yanlışlıkla servis edilmemeli.
-// karantinaAl — dosyayı .karantina'ya taşır, HEDEF YOLU döner (geri yükleme
-// için DB'ye yazılır). Boş string = karantina yapılamadı.
+//
+// 🔴 SYMLINK/TOCTOU: ajan ROOT çalışır; yol tarama anında görülür, işlem anında
+// YENİDEN çözülür ve tamamı kiracının mülküdür (ara dizinler + .karantina + dosya).
+// Eski os.MkdirAll/os.Rename/os.Chmod zinciri symlink izliyordu: kiracı arada bir
+// ara dizini ya da .karantina'yı ev dışına symlink yapınca root başka kiracının
+// dosyasını taşıyor, son bileşen symlink ise os.Chmod hedefini 0000 yapıyordu.
+// Artık elle karantina ile AYNI fd-sabitli yardımcı (antivirus.KarantinayaTasi)
+// kullanılır; yalnız kiracıya ait düzenli dosya taşınır, gerisi reddedilir
+// (bulgu yine kaydedilir, eylem "tespit edildi" kalır).
 func karantinaAl(yol string) (string, error) {
-	sk, home := kiraciBul(yol)
+	return karantinaAlEv(evKoku, yol, antivirus.KiraciUID, time.Now())
+}
+
+// evKoku — kiracı ev dizinlerinin kökü (root-yönetimli; /home/<sk> güven çapası).
+const evKoku = "/home"
+
+// karantinaAlEv — karantinaAl'ın dikişli gövdesi: ev kökü ve sk→uid çözücü
+// testlerde t.TempDir ve sahte uid ile verilir (gerçek kullanıcı araması yok).
+func karantinaAlEv(kok, yol string, uidCoz func(sk string) (int, int, bool), an time.Time) (string, error) {
+	sk, home := kiraciBul(kok, yol)
 	if sk == "" {
 		return "", fmt.Errorf("kiracı bulunamadı: %s", yol)
 	}
-	qdir := filepath.Join(home, ".karantina")
-	if err := os.MkdirAll(qdir, 0o700); err != nil {
-		return "", err
+	// Fail-closed: uid yoksa "kiracıya ait dosya" şartı uygulanamaz → taşıma yok.
+	uid, _, ok := uidCoz(sk)
+	if !ok {
+		return "", fmt.Errorf("kiracı kullanıcısı çözümlenemedi: %s", sk)
 	}
-	hedef := filepath.Join(qdir, fmt.Sprintf("%d-%s", time.Now().Unix(), filepath.Base(yol)))
-	if err := os.Rename(yol, hedef); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(hedef, 0o000); err != nil {
-		return hedef, err
-	}
-	return hedef, nil
+	return antivirus.KarantinayaTasi(home, yol, uid, an)
 }
 
-func kiraciBul(yol string) (sk, home string) {
-	p := filepath.ToSlash(yol)
-	if !strings.HasPrefix(p, "/home/") {
+// kiraciBul — yol <kok>/c_*/... altındaysa (sk, <kok>/<sk>) döner. YALNIZ sözcüksel
+// eşleme: dosya sistemine güven KarantinayaTasi'nin O_NOFOLLOW zincirindedir.
+func kiraciBul(kok, yol string) (sk, home string) {
+	kok = filepath.Clean(kok)
+	p := filepath.Clean(yol)
+	if !strings.HasPrefix(p, kok+"/") {
 		return "", ""
 	}
-	parca := strings.Split(strings.TrimPrefix(p, "/home/"), "/")
+	parca := strings.SplitN(strings.TrimPrefix(p, kok+"/"), "/", 2)
 	if len(parca) < 2 || !strings.HasPrefix(parca[0], "c_") {
 		return "", ""
 	}
-	return parca[0], "/home/" + parca[0]
+	return parca[0], kok + "/" + parca[0]
 }
 
 func dbAc() (*sql.DB, error) {

@@ -13,6 +13,15 @@ Slice=girginos-av.slice
 ExecStart=/usr/local/bin/girginospanel-avajan --tara
 Nice=10
 IOSchedulingClass=idle
+# 🔴 Derinlemesine savunma (avizle ile aynı çizgi): ajan ROOT çalışır ve zamanlı
+# taramada oto-karantina yapabilir; yazma yüzeyi yalnız karantina (/home) ve
+# ajanın kendi durum dosyaları (rapidscan/kural/wpsaglama önbelleği,
+# /var/lib/girginospanel) ile sınırlı. Okuma kapsamı değişmez (kapsam=sunucu → /).
+# clamscan geçici dosyaları özel /tmp'ye yazar.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home -/var/lib/girginospanel
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
