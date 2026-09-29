@@ -261,6 +261,17 @@ func hataDenetle(t sinayici, o *ortam, err error, neden string) {
 	}
 }
 
+// iptalDenetle — iptal edilmiş bağlamla yapılan işlemin hatası: nil DEĞİL ve
+// errors.Is(err, context.Canceled) (tek koşul: nil de Canceled değildir). Ayrıca
+// hataDenetle. Orkestratör iptali ağ arızasından böyle ayırır (yeniden denemez).
+func iptalDenetle(t sinayici, o *ortam, err error, neden string) {
+	t.Helper()
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("%s: iptal edilmiş bağlamla nil ya da Canceled olmayan hata döndü (errors.Is(context.Canceled) beklenir): %v", neden, err)
+	}
+	hataDenetle(t, o, err, neden)
+}
+
 // dizinBos — başarısız yüklemeden sonra dizinde (Listele(dizin/)) HİÇBİR dosya
 // kalmamalı: ne nihai ad ne de temizlenmemiş geçici dosya. YetenekOnekListele
 // yoksa denetlenemez (yetenekler denemesi zaten düşer).
@@ -312,13 +323,7 @@ func denemeTest(t sinayici, o *ortam) {
 	// şey yapmadan nil" dönen Test yakalanır).
 	ctx, iptal := context.WithCancel(o.ctx)
 	iptal()
-	err := o.h.Test(ctx)
-	if err == nil {
-		t.Errorf("iptal edilmiş bağlamla Test başarı döndü (erişimi gerçekten sınamıyor)")
-	} else if !errors.Is(err, context.Canceled) {
-		t.Errorf("iptal edilmiş Test hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
-	}
-	hataDenetle(t, o, err, "iptal edilmiş Test")
+	iptalDenetle(t, o, o.h.Test(ctx), "iptal edilmiş Test (nil ise erişimi gerçekten sınamıyor)")
 }
 
 func denemeGidisDonus(t sinayici, o *ortam) {
@@ -400,12 +405,7 @@ func denemeIptalOrtada(t sinayici, o *ortam) {
 	if !araDeger.Load() {
 		t.Errorf("Ilerleme aktarım SIRASINDA hiç çağrılmadı — ortada iptal sınanamadı")
 	}
-	if err == nil {
-		t.Errorf("aktarım ortasında iptal edilen Yukle başarı döndü")
-	} else if !errors.Is(err, context.Canceled) {
-		t.Errorf("iptal hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
-	}
-	hataDenetle(t, o, err, "ortada iptal: Yukle")
+	iptalDenetle(t, o, err, "ortada iptal: Yukle")
 	yokOlmali(t, o, ad, "ortada iptal")
 	dizinBos(t, o, "iptal-ortada", "ortada iptal")
 }
@@ -415,13 +415,7 @@ func denemeIptalOnceden(t sinayici, o *ortam) {
 	ad := o.ad("iptal-onceden/yedek.age")
 	ctx, iptal := context.WithCancel(o.ctx)
 	iptal()
-	err := o.h.Yukle(ctx, yerel, ad, hedef.YukleSecenek{Sha256: sha})
-	if err == nil {
-		t.Errorf("iptal edilmiş bağlamla Yukle başarı döndü")
-	} else if !errors.Is(err, context.Canceled) {
-		t.Errorf("iptal edilmiş Yukle hatası errors.Is(context.Canceled) ile tanınmalı: %v", err)
-	}
-	hataDenetle(t, o, err, "önceden iptal: Yukle")
+	iptalDenetle(t, o, o.h.Yukle(ctx, yerel, ad, hedef.YukleSecenek{Sha256: sha}), "önceden iptal: Yukle")
 	yokOlmali(t, o, ad, "önceden iptal")
 	dizinBos(t, o, "iptal-onceden", "önceden iptal")
 
@@ -429,25 +423,14 @@ func denemeIptalOnceden(t sinayici, o *ortam) {
 	var2 := o.ad("iptal-onceden/var.age")
 	yerel2, sha2 := dosyaUret(t, 2048, 17)
 	yukle(t, o, yerel2, var2, sha2, 2048)
-	if _, err := o.h.Listele(ctx, o.onek+"iptal-onceden/"); err == nil || !errors.Is(err, context.Canceled) {
-		t.Errorf("iptal edilmiş Listele: errors.Is(context.Canceled) beklenirdi: %v", err)
-	} else {
-		hataDenetle(t, o, err, "önceden iptal: Listele")
-	}
+	_, lerr := o.h.Listele(ctx, o.onek+"iptal-onceden/")
+	iptalDenetle(t, o, lerr, "önceden iptal: Listele")
 	inen := filepath.Join(t.TempDir(), "iptal.bin")
-	if err := o.h.Indir(ctx, var2, inen); err == nil || !errors.Is(err, context.Canceled) {
-		t.Errorf("iptal edilmiş Indir: errors.Is(context.Canceled) beklenirdi: %v", err)
-	} else {
-		hataDenetle(t, o, err, "önceden iptal: Indir")
-	}
+	iptalDenetle(t, o, o.h.Indir(ctx, var2, inen), "önceden iptal: Indir")
 	if _, serr := os.Stat(inen); serr == nil {
 		t.Errorf("iptal edilmiş Indir yerel dosya bıraktı")
 	}
-	if err := o.h.Sil(ctx, var2); err == nil {
-		t.Errorf("iptal edilmiş bağlamla Sil başarı döndü")
-	} else {
-		hataDenetle(t, o, err, "önceden iptal: Sil")
-	}
+	iptalDenetle(t, o, o.h.Sil(ctx, var2), "önceden iptal: Sil")
 	if _, ok := bul(t, o, var2); !ok {
 		t.Errorf("iptal edilmiş Sil dosyayı SİLDİ")
 	}

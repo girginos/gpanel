@@ -220,16 +220,46 @@ func (l listeleIptalYoksay) Listele(_ context.Context, onek string) ([]hedef.Nes
 	return l.Bellek.Listele(context.Background(), onek)
 }
 
-type indirIptalYoksay struct{ *Bellek }
+// indirIptalTanimsiz — iptalde yerel dosya bırakmaz ama hatası Canceled değil.
+type indirIptalTanimsiz struct{ *Bellek }
 
-func (i indirIptalYoksay) Indir(_ context.Context, ad, yerel string) error {
-	return i.Bellek.Indir(context.Background(), ad, yerel)
+func (i indirIptalTanimsiz) Indir(ctx context.Context, ad, yerel string) error {
+	if ctx.Err() != nil {
+		return hedef.YeniHata(hedef.KategoriAg, "indir", errors.New("bağlantı kesildi"))
+	}
+	return i.Bellek.Indir(ctx, ad, yerel)
 }
 
-type silIptalYoksay struct{ *Bellek }
+// indirIptaldeDosyaBirakir — hatası Canceled ama yerel dosyayı yine de yazar.
+type indirIptaldeDosyaBirakir struct{ *Bellek }
 
-func (s silIptalYoksay) Sil(_ context.Context, ad string) error {
-	return s.Bellek.Sil(context.Background(), ad)
+func (i indirIptaldeDosyaBirakir) Indir(ctx context.Context, ad, yerel string) error {
+	if ctx.Err() != nil {
+		_ = i.Bellek.Indir(context.Background(), ad, yerel)
+		return hedef.Sarmala("indir", ctx.Err())
+	}
+	return i.Bellek.Indir(ctx, ad, yerel)
+}
+
+// silIptalSessiz — iptalde silmez ama nil döner.
+type silIptalSessiz struct{ *Bellek }
+
+func (s silIptalSessiz) Sil(ctx context.Context, ad string) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return s.Bellek.Sil(ctx, ad)
+}
+
+// silIptaldeSiler — hatası Canceled ama dosyayı yine de siler.
+type silIptaldeSiler struct{ *Bellek }
+
+func (s silIptaldeSiler) Sil(ctx context.Context, ad string) error {
+	if ctx.Err() != nil {
+		_ = s.Bellek.Sil(context.Background(), ad)
+		return hedef.Sarmala("sil", ctx.Err())
+	}
+	return s.Bellek.Sil(ctx, ad)
 }
 
 // hamHata — dosya yokken *hedef.Hata yerine ham hata döner; kategorisi yine
@@ -300,8 +330,10 @@ func TestUyum_BozukUygulamalarYakalanir(t *testing.T) {
 		{"iptal Canceled olarak tanınmıyor", iptalTanimsiz{YeniBellek()}, "iptal_ortada"},
 		{"iptal Canceled olarak tanınmıyor (önceden)", iptalTanimsiz{YeniBellek()}, "iptal_onceden"},
 		{"Listele iptali yok sayıyor", listeleIptalYoksay{YeniBellek()}, "iptal_onceden"},
-		{"Indir iptali yok sayıyor", indirIptalYoksay{YeniBellek()}, "iptal_onceden"},
-		{"Sil iptali yok sayıyor", silIptalYoksay{YeniBellek()}, "iptal_onceden"},
+		{"Indir iptali Canceled bildirmiyor", indirIptalTanimsiz{YeniBellek()}, "iptal_onceden"},
+		{"Indir iptalde yerel dosya bırakıyor", indirIptaldeDosyaBirakir{YeniBellek()}, "iptal_onceden"},
+		{"Sil iptalde sessiz nil", silIptalSessiz{YeniBellek()}, "iptal_onceden"},
+		{"Sil iptalde yine de siliyor", silIptaldeSiler{YeniBellek()}, "iptal_onceden"},
 		{"ham (Hata olmayan) hata", hamHata{YeniBellek()}, "gidis_donus"},
 		{"tanımsız kategori", gecersizKategori{YeniBellek()}, "yanlis_sha"},
 		{"önceden iptalde sessiz nil", onceIptalSessiz{YeniBellek()}, "iptal_onceden"},
