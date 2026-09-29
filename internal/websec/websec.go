@@ -1,12 +1,13 @@
 package websec
 
 // Çekirdek zamanlayıcı + toplayıcı. Panel açılışında Dongusu() bir goroutine
-// olarak başlatılır; her 6 saatte bir tarama yapar. İlk tarama açılıştan
-// 5 dk sonra (panel'in ısınmasını bekle).
+// olarak başlatılır: tarama kuyruğunun TEK işçisini başlatır (kuyruk.go) ve her
+// 6 saatte bir tam tarama ister. İlk tam tarama açılıştan 5 dk sonra (panel'in
+// ısınmasını bekle). HTTP uçları taramayı doğrudan başlatmaz, kuyruğa yazar.
 //
-// 🔴 Aynı anda birden çok tarama koşmasın — running bayrağı hem DB'de hem
-// bellekte tutulur. DB bayrağı reboot sonrası korunur; bellek bayrağı aynı
-// process içinde tekrarlı tetiklemeyi önler.
+// 🔴 Aynı anda birden çok tarama koşmasın — tek işçi + running bayrağı (DB ve
+// bellek). DB bayrağı reboot sonrası korunur; bellek bayrağı aynı process içinde
+// tekrarlı tetiklemeyi önler.
 
 import (
 	"context"
@@ -21,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"girginospanel/internal/httpx"
 )
 
 const (
@@ -53,10 +56,13 @@ func TaramaDurumu() (bool, map[int64]bool) {
 // Dongusu — arka plan zamanlayıcısı. Blocking; goroutine olarak çağır.
 func Dongusu(ctx context.Context, db *sql.DB) {
 	// 🔴 STARTUP RECONCILIATION: panel process kill/crash olursa DB'de
-	// running=1 sonsuza dek kalır → "tarama zaten çalışıyor" 409'u.
+	// running=1 sonsuza dek kalır → durum kartı hep "taranıyor" gösterir.
 	// Açılışta bir kez sıfırla — bellek bayrağı (kosuyor) zaten reset,
 	// DB damgasını da hizala.
 	_, _ = db.Exec(`UPDATE cp_websec_status SET running=0 WHERE running=1`)
+
+	// Tek işçi açılıştan itibaren çalışır: elle istekler açılış gecikmesini beklemez.
+	go kuy.isci(ctx, db)
 
 	// Açılış gecikmesi — panel yeni açıldıysa migration/init akışı bitsin.
 	select {
@@ -64,11 +70,10 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 		return
 	case <-time.After(acilisGecikmesi):
 	}
+	kuy.tamIste()
 
-	if err := Tara(ctx, db, false); err != nil {
-		log.Printf("websec: açılış taraması atlandı: %v", err)
-	}
-
+	// Her tur tam tarama İSTER (bayrak): o an bir tarama sürüyor ya da kuyrukta
+	// bayi istekleri bekliyor olsa da tur atlanmaz, işçi sıradaki iş olarak koşar.
 	tk := time.NewTicker(varsayilanPeriyot)
 	defer tk.Stop()
 	for {
@@ -76,34 +81,16 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 		case <-ctx.Done():
 			return
 		case <-tk.C:
-			if err := Tara(ctx, db, false); err != nil {
-				log.Printf("websec: periyodik tarama atlandı: %v", err)
-			}
+			kuy.tamIste()
 		}
 	}
-}
-
-// Tara — bir tam tarama koşusu. force=true yalnız elle tetiklemede kullanılır
-// (throttle atlatır). Zaten koşuyorsa hemen döner.
-//
-// Geriye-uyumlu — Yeni imzayı `TaraDomain` ile genişlettim; eski çağrı yerleri
-// bu sarmalayıcıya bağlı kaldı, tüm domainleri tarar.
-func Tara(ctx context.Context, db *sql.DB, force bool) error {
-	return TaraDomain(ctx, db, force, 0)
-}
-
-// TaraDomain — tek domain wrapper (geriye-uyumlu).
-func TaraDomain(ctx context.Context, db *sql.DB, force bool, domainID int64) error {
-	if domainID <= 0 {
-		return TaraDomains(ctx, db, force, nil)
-	}
-	return TaraDomains(ctx, db, force, []int64{domainID})
 }
 
 // TaraDomains — filtre listesi verilirse yalnız o domain'ler taranır.
 // nil/boş liste → tüm filo (klasik full-scan). Kilit TEK çağrı boyunca
 // tutulur — bu yüzden N domain için N çağrı YERINE bir liste geçirilmeli.
-func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64) error {
+// Yalnız kuyruk işçisi çağırır (isCalistir): kısmi iş boş listeyle koşmaz.
+func TaraDomains(ctx context.Context, db *sql.DB, domainIDs []int64) error {
 	kosmaMu.Lock()
 	if kosuyor {
 		kosmaMu.Unlock()
@@ -117,7 +104,7 @@ func TaraDomains(ctx context.Context, db *sql.DB, force bool, domainIDs []int64)
 		}
 	}
 	kosmaMu.Unlock()
-	// DB damgası kilit ALTINDA değil — DB yavaşsa Rescan handler'ları da
+	// DB damgası kilit ALTINDA değil — DB yavaşsa durum okuyan handler'lar da
 	// bloke olur. Kilit yalnız bellek bayrağı için; DB damgası best-effort.
 	_, _ = db.ExecContext(ctx, `UPDATE cp_websec_status SET running=1, last_run=NOW() WHERE id=1`)
 
@@ -336,7 +323,6 @@ WPloop:
 	}
 	log.Printf("websec: tarama tamam — %d uygulama%s, %d bulgu (critical=%d, high=%d), %d ms",
 		toplamApp, kapsam, toplamBulgu, ozet.Critical, ozet.High, sure)
-	_ = force
 	return nil
 }
 
@@ -433,7 +419,7 @@ type durumYanit struct {
 // bayiDurumYanit — bayinin durum kartı. Sunucu geneli alanlar (scanned_apps,
 // duration_ms, last_error, next_estimate, app_sayaclari) AYRI TİP sayesinde yanıtta
 // hiç yer almaz. last_run = last_success = kendi domainlerinin en yeni taraması;
-// running = kendi domaini taranıyor.
+// running = kendi domaini sırada ya da taranıyor.
 type bayiDurumYanit struct {
 	Running       bool     `json:"running"`
 	LastRun       *string  `json:"last_run"`
@@ -509,6 +495,7 @@ func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
 	y := bayiDurumYanit{Ekosistemler: ekosistemler()}
 
 	kosuyor, taranSet := TaramaDurumu()
+	bekleyen := kuy.bekleyenKume()
 	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
 	rows, err := h.DB.QueryContext(r.Context(), `
 		SELECT d.id, COALESCE(DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s'),'')
@@ -532,7 +519,7 @@ func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
 		if son > enYeni {
 			enYeni = son
 		}
-		if kosuyor && (len(taranSet) == 0 || taranSet[id]) {
+		if (kosuyor && (len(taranSet) == 0 || taranSet[id])) || bekleyen[id] {
 			y.Running = true
 		}
 	}
@@ -673,27 +660,27 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	jsonYaz(w, 200, bulguYanit{Toplam: toplam, Sayfa: sayfa, SayfaBoyut: boyut, Items: items})
 }
 
+// Rescan — POST /websec/rescan[?domain_id=]. Tarama başlatılmaz, kuyruğa yazılır
+// (kuyruk.go) ve 202 döner; meşgulken 409 yok, istek sıraya girer.
+// Kök: domain_id verilirse yalnız o domain, yoksa tam tarama (yanıt biçimi aynı).
+// Bayi: bkz. bayiRescan.
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
-	kosmaMu.Lock()
-	kosuyorMu := kosuyor
-	kosmaMu.Unlock()
-	if kosuyorMu {
-		hataMesaji(w, 409, "tarama zaten çalışıyor")
+	q := r.URL.Query().Get("domain_id")
+	if k := kapsamAl(r); k.bayi {
+		h.bayiRescan(w, r, k, q)
 		return
 	}
-	// domain_id query parametresi verilirse yalnız o domain taranır.
 	var domainID int64
-	if q := r.URL.Query().Get("domain_id"); q != "" {
+	if q != "" {
 		if v, e := strconv.ParseInt(q, 10, 64); e == nil && v > 0 {
 			domainID = v
 		}
 	}
-	// Async — API cevabı hemen dön, tarama arka planda
-	go func() {
-		if err := TaraDomain(context.Background(), h.DB, true, domainID); err != nil {
-			log.Printf("websec: elle tarama başarısız (domain=%d): %v", domainID, err)
-		}
-	}()
+	if domainID > 0 {
+		kuy.kokEkle([]int64{domainID})
+	} else {
+		kuy.tamIste()
+	}
 	jsonYaz(w, 202, map[string]any{"started": true, "domain_id": domainID, "at": time.Now().Format(time.RFC3339)})
 }
 
@@ -701,16 +688,10 @@ type rescanManyGovde struct {
 	DomainIDs []int64 `json:"domain_ids"`
 }
 
-// RescanMany — birden çok domain'i tek çağrıda tara. Frontend'de "seçili
+// RescanMany — birden çok domain'i tek çağrıda kuyruğa yaz. Frontend'de "seçili
 // satırları tara" akışını karşılar. Boş liste → 400.
+// Bayi: listede TEK yabancı/olmayan id varsa TAMAMI 404, hiçbiri kuyruğa girmez.
 func (h *Handler) RescanMany(w http.ResponseWriter, r *http.Request) {
-	kosmaMu.Lock()
-	kosuyorMu := kosuyor
-	kosmaMu.Unlock()
-	if kosuyorMu {
-		hataMesaji(w, 409, "tarama zaten çalışıyor")
-		return
-	}
 	var g rescanManyGovde
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -740,12 +721,123 @@ func (h *Handler) RescanMany(w http.ResponseWriter, r *http.Request) {
 		hataMesaji(w, 413, "tek seferde en fazla 200 domain taranabilir")
 		return
 	}
-	go func() {
-		if err := TaraDomains(context.Background(), h.DB, true, temiz); err != nil {
-			log.Printf("websec: elle toplu tarama başarısız (%d domain): %v", len(temiz), err)
+	if k := kapsamAl(r); k.bayi {
+		kosul, args := k.kosul()
+		sArgs := make([]any, 0, len(temiz)+len(args))
+		for _, id := range temiz {
+			sArgs = append(sArgs, id)
 		}
-	}()
+		sArgs = append(sArgs, args...)
+		var n int
+		//nolint:gosec // G202/G701: yalnız "?" yer tutucular + kapsam.kosul; değerler args ile bağlanır.
+		if err := h.DB.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM domains d WHERE d.id IN (`+yerTutucu(len(temiz))+`)`+kosul, sArgs...).Scan(&n); err != nil {
+			k.hata(w, err)
+			return
+		}
+		if n != len(temiz) {
+			hataMesaji(w, 404, "domain bulunamadı")
+			return
+		}
+		h.bayiKuyruga(w, r, k, temiz, false, 0, fmt.Sprintf("%d domain", len(temiz)))
+		return
+	}
+	kuy.kokEkle(temiz)
 	jsonYaz(w, 202, map[string]any{"started": true, "count": len(temiz), "at": time.Now().Format(time.RFC3339)})
+}
+
+// bayiRescan — bayinin tarama isteği. domain_id verilirse YALNIZ kendi domaini:
+// yabancı, olmayan ve geçersiz id aynı 404'ü alır. Verilmezse ("Domainlerimi Tara")
+// domain listesi SUNUCUDA kapsamdan çıkarılır; domaini yoksa 202 {"sirada":0} ve
+// hiçbir şey kuyruğa girmez — liste boş gidip tam taramaya (nil = tüm sunucu) dönmez.
+func (h *Handler) bayiRescan(w http.ResponseWriter, r *http.Request, k kapsam, q string) {
+	if q != "" {
+		id, err := strconv.ParseInt(q, 10, 64)
+		if err != nil || id <= 0 {
+			hataMesaji(w, 404, "domain bulunamadı")
+			return
+		}
+		kosul, args := k.kosul()
+		var ad string
+		//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+		err = h.DB.QueryRowContext(r.Context(),
+			`SELECT d.alan_adi FROM domains d WHERE d.id=?`+kosul, append([]any{id}, args...)...).Scan(&ad)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			hataMesaji(w, 404, "domain bulunamadı")
+		case err != nil:
+			k.hata(w, err)
+		default:
+			h.bayiKuyruga(w, r, k, []int64{id}, false, id, ad)
+		}
+		return
+	}
+	ids, err := h.bayiDomainleri(r.Context(), k)
+	if err != nil {
+		k.hata(w, err)
+		return
+	}
+	if len(ids) == 0 {
+		jsonYaz(w, 202, map[string]int{"sirada": 0})
+		return
+	}
+	h.bayiKuyruga(w, r, k, ids, true, 0, fmt.Sprintf("%d domain", len(ids)))
+}
+
+// bayiDomainleri — "Domainlerimi Tara" adayları: bayinin domainleri, en uzun süredir
+// taranmayan önce (kuyruk payı listeyi keserse sonraki basışta kalanlar gelir).
+func (h *Handler) bayiDomainleri(ctx context.Context, k kapsam) ([]int64, error) {
+	kosul, args := k.kosul()
+	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT d.id FROM domains d
+		  LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id
+		 WHERE 1=1`+kosul+`
+		 ORDER BY t.son_tarama IS NOT NULL, t.son_tarama, d.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// bayiKuyruga — sahipliği DOĞRULANMIŞ domainleri bayi sınırlarıyla kuyruğa yazar ve
+// denetime işler (websec.tara). Yanıt: 202 {"sirada": n} ya da
+// 429 {"error": "N dk sonra tekrar deneyin"} (süre yalnız bayinin kendi isteklerinden).
+func (h *Handler) bayiKuyruga(w http.ResponseWriter, r *http.Request, k kapsam, ids []int64, tumu bool, domainID int64, hedef string) {
+	sirada, bekle := kuy.bayiEkle(k.rid, ids, tumu)
+	if bekle > 0 {
+		hataMesaji(w, http.StatusTooManyRequests, fmt.Sprintf("%d dk sonra tekrar deneyin", dakikaYukari(bekle)))
+		return
+	}
+	var uid int64
+	kul := ""
+	if c := claimsAl(r); c != nil {
+		uid, kul = c.UserID, c.Username
+	}
+	detay := fmt.Sprintf("sirada=%d", sirada)
+	if domainID > 0 {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "websec.tara", hedef, detay, domainID, true)
+	} else {
+		httpx.Denetim(h.DB, r, uid, kul, "websec.tara", hedef, detay, k.rid, true)
+	}
+	jsonYaz(w, http.StatusAccepted, map[string]int{"sirada": sirada})
+}
+
+// dakikaYukari — süreyi yukarı yuvarlanmış tam dakikaya çevirir (en az 1).
+func dakikaYukari(d time.Duration) int {
+	if n := int((d + time.Minute - 1) / time.Minute); n > 1 {
+		return n
+	}
+	return 1
 }
 
 func jsonYaz(w http.ResponseWriter, kod int, v any) {

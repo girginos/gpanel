@@ -563,8 +563,10 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/antivirus/domainler", avH.AdminDomainler)
 			r.With(middleware.AdminOnly).Post("/antivirus/domainler/{id}/tara", avH.Tara)
 			r.With(middleware.AdminOnly).Get("/antivirus/domainler/{id}/tara/{sid}", avH.TaraDurum)
-			r.With(middleware.AdminOnly).Post("/websec/rescan", websecH.Rescan)
-			r.With(middleware.AdminOnly).Post("/websec/rescan-many", websecH.RescanMany)
+			// Website Security Monitor taraması: kuyruğa yazar; bayi YALNIZ kendi domainleri,
+			// sınırlarla (kapsam + sınır handler'da: internal/websec).
+			r.With(middleware.AdminVeyaReseller).Post("/websec/rescan", websecH.Rescan)
+			r.With(middleware.AdminVeyaReseller).Post("/websec/rescan-many", websecH.RescanMany)
 			// Panel Hostname & SSL (admin only)
 			r.With(middleware.AdminOnly).Get("/panel-host", panelhostH.Durum)
 			r.With(middleware.AdminOnly).Post("/panel-host/dns", panelhostH.DNS)

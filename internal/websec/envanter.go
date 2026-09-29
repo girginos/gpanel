@@ -115,7 +115,7 @@ type envanterSatir struct {
 	PaketSayisi int    `json:"paket_sayisi"`
 	BulguSayisi int    `json:"bulgu_sayisi"`
 	SonTarama   string `json:"son_tarama"`
-	// Durum: taraniyor | acik | temiz | desteklenmiyor | beklemede.
+	// Durum: taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede.
 	// Her domain'e bir durum verir; frontend rozet + yönlendirme buradan.
 	Durum string `json:"durum"`
 }
@@ -132,7 +132,7 @@ type envanterYanit struct {
 // 🔴 SÜRÜCÜ TABLO = domains (cp_websec_apps DEĞİL). Önceden yalnız app'i tespit
 // edilmiş domain'ler listeleniyordu → "panelde 9 domain var, monitörde 3 görünüyor"
 // tutarsızlığı. Artık her domain bir satır alır; app'i olmayanlar da durum'la görünür
-// (taranıyor / desteklenmiyor / beklemede). Bir domain'in birden çok app'i varsa
+// (taranıyor / sırada / desteklenmiyor / beklemede). Bir domain'in birden çok app'i varsa
 // (nadiren) app başına satır döner — "Taranan uygulamalar" semantiği korunur.
 //
 // Kapsam (kapsam.go): kök tüm domainleri, bayi YALNIZ kendi domainlerini görür.
@@ -151,8 +151,9 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Domain başına "taranıyor" için canlı tarama durumu (bellek).
+	// Domain başına "taranıyor"/"sirada" için canlı tarama durumu ve kuyruk (bellek).
 	kosuyor, taranSet := TaramaDurumu()
+	bekleyen := kuy.bekleyenKume()
 
 	// taranmis: domainin kendi tarama kaydı var mı (0112) — "desteklenmiyor"
 	// (görüldü, app yok) ile "beklemede" (henüz taranmadı) ayrımı için.
@@ -186,6 +187,8 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case kosuyor && (len(taranSet) == 0 || taranSet[s.DomainID]):
 			s.Durum = "taraniyor"
+		case bekleyen[s.DomainID]:
+			s.Durum = "sirada"
 		case s.AppType != "" && s.BulguSayisi > 0:
 			s.Durum = "acik"
 		case s.AppType != "":
