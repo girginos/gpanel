@@ -180,11 +180,12 @@ func TestHesapAktarBayiUstuneYaz_SahipEsitligi(t *testing.T) {
 
 // Üzerine yazma: domains.web_root ya da sistem_kullanici (DB bozulması) hedef
 // kiracının ev dizini İÇİNİ göstermiyorsa (başka kiracının evi, '..' ile çıkış,
-// sistem yolu, evin kendisi, geçersiz kullanıcı) üzerine yazma HİÇBİR adımdan
-// önce reddedilir — kök için de. Aksi halde dosya/yapılandırma/DB adımları
-// (configYenidenYaz, okuyucular) kiracıyı web kökü dizgesinden türettiği için
-// o yabancı evde çalışırdı. Kiracının kendi alt dizini (Laravel public) ve boş
-// web_root (public_html'e düşer) kabul edilir.
+// sistem yolu, evin kendisi, geçersiz kullanıcı — web_root boşken de) üzerine
+// yazma HİÇBİR adımdan önce reddedilir — kök için de. Aksi halde dosya/
+// yapılandırma/DB adımları (configYenidenYaz, okuyucular) kiracıyı web kökü
+// dizgesinden türettiği için o yabancı evde çalışırdı. Kiracının kendi alt
+// dizini (alt klasördeki Laravel public) ve boş web_root (public_html'e düşer)
+// kabul edilir.
 func TestHesapAktarUstuneYaz_WebKokuKiracininEvindeOlmali(t *testing.T) {
 	h := h5_bayiOrtam(t)
 	saglanan, _, gercek := ta_kalkan(t, nil)
@@ -196,7 +197,9 @@ func TestHesapAktarUstuneYaz_WebKokuKiracininEvindeOlmali(t *testing.T) {
 			(53,'evin.bayi7.test','c_ez7d','/home/c_ez7d',7),
 			(54,'onek.bayi7.test','c_ez7e','/home/c_ez7e2/public_html',7),
 			(55,'sksiz.bayi7.test','','/home/c_ez7f/public_html',7),
-			(60,'laravel.bayi7.test','c_ez7g','/home/c_ez7g/public_html/public',7),
+			(56,'sksizbos.bayi7.test','','',7),
+			(57,'skbozuk.bayi7.test','C_Ez7i','',7),
+			(60,'laravel.bayi7.test','c_ez7g','/home/c_ez7g/public_html/uyg/public',7),
 			(61,'bos.bayi7.test','c_ez7h','',7)`,
 	} {
 		if _, err := h.DB.Exec(q); err != nil {
@@ -205,7 +208,7 @@ func TestHesapAktarUstuneYaz_WebKokuKiracininEvindeOlmali(t *testing.T) {
 	}
 	for _, kapsam := range []Kapsam{{RID: 7}, {}} {
 		for _, alan := range []string{"komsu.bayi7.test", "kacis.bayi7.test", "sistem.bayi7.test",
-			"evin.bayi7.test", "onek.bayi7.test", "sksiz.bayi7.test"} {
+			"evin.bayi7.test", "onek.bayi7.test", "sksiz.bayi7.test", "sksizbos.bayi7.test", "skbozuk.bayi7.test"} {
 			if _, err := h.HesapAktar(context.Background(), &Kaynak{}, Hesap{AlanAdi: alan},
 				Ayarlar{Ustune: true}, kapsam, func(string, ...any) {}); err == nil {
 				t.Errorf("%s (kapsam %+v): kiracı evi dışını gösteren web_root ile üzerine yazma reddedilmeliydi", alan, kapsam)
