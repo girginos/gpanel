@@ -40,16 +40,29 @@ var askiAdimlari = func() hesapaski.Adimlar {
 
 // AskiUygula: tek bir hosting hesabına askıyı uygular/kaldırır — TEK yol
 // (hesapaski.Uygula). Tekil uç ve TOPLU işlem aynı makineyi kullanır; bayi
-// zinciri de (hesapaski.BayiUygula) aynı Uygula'dan geçer.
+// zinciri de (hesapaski.BayiUygula) aynı Uygula'dan geçer. Uygula istek
+// bağlamından bağımsız koşar: istemci kopsa da işlem yarıda kalmaz.
 func (h *Handlers) AskiUygula(ctx context.Context, id int64, askida bool, kaynak string) (string, error) {
 	return askiAdimlari().Uygula(ctx, h.DB, id, askida, kaynak)
 }
 
+// elleAskiKaynagi — elle askının kaynağı isteği yapana göre: kök (yönetici)
+// ya da bayi. Bayi kökün askısını kaldıramaz (hesapaski.ErrKokAskisi); yönetici
+// olmayan her rol bayi sayılır (SahipYonetim / AdminVeyaReseller başka rolü
+// zaten geçirmez).
+func elleAskiKaynagi(r *http.Request) string {
+	if middleware.RolFrom(r) == "admin" {
+		return hesapaski.KaynakKok
+	}
+	return hesapaski.KaynakBayiElle
+}
+
 func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida bool) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Elle alınan askı 'manuel' — bayi zinciri bunu ezmez; bayi durum kuralları
-	// (bayi askıdayken tek tek askıya alma/açma yok) Uygula içinde.
-	alanAdi, err := h.AskiUygula(r.Context(), id, askida, hesapaski.KaynakManuel)
+	// Elle alınan askı — bayi zinciri bunu ezmez; bayi durum kuralları (bayi
+	// askıdayken tek tek askıya alma/açma yok) ve kök askısı kuralı Uygula içinde
+	// (hesap kilidi altında okunan kaynağa göre).
+	alanAdi, err := h.AskiUygula(r.Context(), id, askida, elleAskiKaynagi(r))
 	uid, kul := middleware.Aktor(r)
 	eylem := "hosting.askidan_al"
 	if askida {
@@ -62,7 +75,7 @@ func (h *Handlers) askiToggle(w http.ResponseWriter, r *http.Request, askida boo
 	case errors.Is(err, sql.ErrNoRows):
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
-	case errors.Is(err, hesapaski.ErrDemo):
+	case errors.Is(err, hesapaski.ErrDemo), errors.Is(err, hesapaski.ErrKokAskisi):
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
 	case errors.Is(err, hesapaski.ErrBayiAskida), errors.Is(err, hesapaski.ErrBayiAskidaAcilamaz):

@@ -16,6 +16,9 @@
 //     Hesabın PHP kodunu FPM dışında çalıştıran Laravel kuyruk işleyicisi
 //     (systemd, Restart=always) ve zamanlanmış görevi (cron.d) de kapanır
 //     (laravel.HesapAski); askıda açılamazlar.
+//   - uygulamalar: hesabın kendi systemd birimleri (User=<sk>: Uygulama
+//     Çalıştırıcı eklentisinin Node/Python/konteyner birimleri dahil) durur ve
+//     askıda hiçbir yoldan başlayamaz (provisioner.HesapBirimleriAski).
 //   - cron: crontab spool'dan çıkarılır + hesabın süreçleri öldürülür (mevcut);
 //     askıda panelden cron yazılamaz.
 //   - girişler: FTP ve müşteri paneli (ftp_accounts.status), SSH/SFTP (hesap
@@ -29,7 +32,9 @@
 //
 // Eşzamanlılık: Uygula hesap başına kilitlidir (kilit.Hesap); tekil/toplu yol
 // bayi durum denetimini ve uygulamayı bayi kilidi (kilit.Bayi — bayi zinciri,
-// hosting oluşturma ve silme ile aynı) altında yapar. Açılış süpürmesi
+// hosting oluşturma ve silme ile aynı) altında yapar. Uygula istek bağlamından
+// bağımsız koşar (istemci kopması / HTTP zaman aşımı işlemi yarıda kesmez);
+// yalnız kendi üst süresi vardır. Açılış süpürmesi
 // (AskidakileriUygula) askıdaki her hesaba adımları yeniden uygular: bu dal
 // yayına girmeden askıya alınmış hesaplar ve yarım kalmış işlemler uzlaşır.
 //
@@ -45,6 +50,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kilit"
@@ -54,18 +60,51 @@ import (
 	"girginospanel/internal/subdomain"
 )
 
-// Askı kaynakları (domains.askida_kaynak). Bayi zinciri geri açarken YALNIZ
-// kendi askıya aldıklarını ('bayi') açar; elle askıya alınan ('manuel') kalır.
+// Askı kaynakları (domains.askida_kaynak, VARCHAR(8)) — askıyı KİM aldı:
+//   - KaynakKok: kök (panel yöneticisi) elle. DB değeri 'manuel': 0048 göçünden
+//     beri elle alınan HER askı bu değerle yazıldı, kimin aldığı ayırt edilemez →
+//     kökün sayılır (kullanıcı kararı 2026-09-29). Değer bu yüzden korunur, göç
+//     gerekmez. Bayi AÇAMAZ (ErrKokAskisi).
+//   - KaynakBayiElle: bayi kendi hostingini elle; bayi de kök de açabilir.
+//   - KaynakBayi: bayi zinciri (bayinin kendisi askıya alındı). Zincir geri
+//     açarken YALNIZ bunları açar; elle alınanlar (kök/bayi) kalır.
 const (
-	KaynakManuel = "manuel"
-	KaynakBayi   = "bayi"
+	KaynakKok      = "manuel"
+	KaynakBayiElle = "bayi_el"
+	KaynakBayi     = "bayi"
 )
 
+// bayiAcabilir — bu kaynaktaki askıyı bayi kaldırabilir mi? Tanınmayan / boş
+// kaynak kökün sayılır.
+func bayiAcabilir(kaynak string) bool { return kaynak == KaynakBayiElle || kaynak == KaynakBayi }
+
+// Üst süreler. Uygula istek bağlamından BAĞIMSIZ koşar (context.WithoutCancel):
+// istemci kopunca ya da HTTP zaman aşımı (chimw.Timeout) dolunca iptal olan
+// istek bağlamı adımların ortasında kesip DB ile gerçek durumu ayrıştırırdı.
+// Güvenli tarafa dönüş yazımları (DB'yi geri alma, yeniden askıya alma) işlemin
+// kendi süresi dolmuş olsa bile ayrı bir bağlamla (kurtarmaSuresi) yapılır.
+// Üretimde değerler SABİTTİR; testler kısaltır.
 var (
+	islemSuresi    = 10 * time.Minute
+	kurtarmaSuresi = 2 * time.Minute
+)
+
+// kurtarmaBaglami — güvenli tarafa dönüş için işlem bağlamının iptalinden /
+// süresinden bağımsız yeni bağlam.
+func kurtarmaBaglami(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), kurtarmaSuresi)
+}
+
+var (
+	// ErrKokAskisi: bayi, kökün (ya da kaynağı ayırt edilemeyen eski) askısını
+	// kaldıramaz.
+	ErrKokAskisi = errors.New("hesap yönetici tarafından askıya alındı — yalnız yönetici askıdan alabilir")
+	// ErrKaynak: tanınmayan askı kaynağı (programlama hatası; hiçbir şey yapılmaz).
+	ErrKaynak = errors.New("geçersiz askı kaynağı")
 	// ErrDemo: demo abonelik askıya alınamaz / askı işlemine girmez.
 	ErrDemo = errors.New("demo abonelik askıya alınamaz")
 	// ErrBayiAskida: bayi askıdayken hosting TEK TEK askıya alınamaz — kaynak
-	// 'manuel'e dönerdi ve bayi geri açılınca zincir onu atlardı (site sessizce
+	// elle askıya dönerdi ve bayi geri açılınca zincir onu atlardı (site sessizce
 	// kapalı kalırdı).
 	ErrBayiAskida = errors.New("bayi zaten askıda — hosting hâlihazırda kapalı")
 	// ErrBayiAskidaAcilamaz: bayisi askıdaki hosting TEK TEK açılamaz — askıdaki
@@ -108,6 +147,7 @@ type Adimlar struct {
 	SSHGiris      func(sk string, kilit bool) error
 	DBKullanici   func(db *sql.DB, domainID int64, kilit bool) error
 	Birimler      func(ctx context.Context, db *sql.DB, domainID int64, askida bool) error
+	Uygulamalar   func(sk string, askida bool) error
 	CalismaZamani func(sk string, askida bool)
 }
 
@@ -121,6 +161,7 @@ func Varsayilan() Adimlar {
 		SSHGiris:      sshaccess.HesapGirisKilidi,
 		DBKullanici:   hesaplar.DBKullanicilariKilit,
 		Birimler:      laravel.HesapAski,
+		Uygulamalar:   provisioner.HesapBirimleriAski,
 		CalismaZamani: provisioner.SuspendUserRuntime,
 	}
 }
@@ -181,27 +222,35 @@ func ftpDurum(ctx context.Context, db *sql.DB, id int64, askida bool) error {
 }
 
 // Uygula — hosting hesabına askıyı uygular (askida=true) ya da kaldırır.
-// kaynak: KaynakManuel (tekil/toplu; bayi durum kuralları uygulanır) ya da
-// KaynakBayi (bayi zinciri). İdempotenttir: iki kez askıya alma/askıdan alma
-// her adımı yeniden uygular, zarar vermez.
+// kaynak: KaynakKok / KaynakBayiElle (tekil/toplu; bayi durum kuralları
+// uygulanır, bayi kökün askısını açamaz) ya da KaynakBayi (bayi zinciri).
+// İdempotenttir: iki kez askıya alma/askıdan alma her adımı yeniden uygular,
+// zarar vermez.
 //
 // Sıra: DB durumu → ana vhost (ilk adım; düşerse DB eski hâline döner, hiçbir
 // şey değişmemiştir — bayi zincirinin askıya alması hariç, bkz. aşağısı) →
 // kalan adımlar. Kalan adımlardan biri düşerse ötekiler yine uygulanır ve
 // KismiHata döner (güvenli taraf: hesap askıda sayılır).
 //
-// Kilitler (sıra: bayi → hesap): tekil/toplu yol (KaynakManuel) bayi durumunu
+// ctx'in YALNIZ değerleri kullanılır; iptali/süresi değil (bkz. islemSuresi).
+//
+// Kilitler (sıra: bayi → hesap): tekil/toplu yol (elle kaynaklar) bayi durumunu
 // ve uygulamayı kilit.Bayi altında yapar — bayi zinciri (reseller, kilit.Bayi'yi
 // tutarak BayiUygula'yı çağırır) araya girip "bayi aktif" okumasını bayatlatamaz.
 // Hesap kilidi (kilit.Hesap) aynı hesaba eşzamanlı askı işlemlerini serileştirir:
 // askıya almanın adımları askıdan almanın durumYaz'ından SONRA koşup DB "açık"
 // derken havuzları/girişleri kapalı bırakamaz.
 func (a Adimlar) Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak string) (string, error) {
+	if kaynak != KaynakKok && kaynak != KaynakBayiElle && kaynak != KaynakBayi {
+		return "", ErrKaynak
+	}
+	ctx, iptal := context.WithTimeout(context.WithoutCancel(ctx), islemSuresi)
+	defer iptal()
 	on, err := satirOku(ctx, db, id)
 	if err != nil {
 		return "", err
 	}
-	if kaynak == KaynakManuel {
+	if kaynak != KaynakBayi {
 		bk := kilit.Bayi(on.bayi)
 		bk.Lock()
 		defer bk.Unlock()
@@ -222,7 +271,7 @@ func (a Adimlar) uygulaKilitli(ctx context.Context, db *sql.DB, id int64, askida
 	if h.isDemo == 1 {
 		return alanAdi, ErrDemo
 	}
-	if kaynak == KaynakManuel {
+	if kaynak != KaynakBayi {
 		var bayiDurum string
 		if e := db.QueryRowContext(ctx,
 			`SELECT u.status FROM domains d JOIN users u ON u.id=d.reseller_id WHERE d.id=?`, id).
@@ -233,27 +282,51 @@ func (a Adimlar) uygulaKilitli(ctx context.Context, db *sql.DB, id int64, askida
 			return alanAdi, ErrBayiAskidaAcilamaz
 		}
 	}
+	if kaynak == KaynakBayiElle && eskiAskida == 1 && !bayiAcabilir(eskiKaynak) {
+		// 🔴 Kökün askısını bayi AÇAMAZ (kullanıcı kararı 2026-09-29); kilit
+		// altında okunan kaynağa göre. Yeniden askıya alma (idempotent) ise
+		// kaynağı bayininkine İNDİRMEZ — yoksa bayi ardından açabilirdi.
+		if !askida {
+			return alanAdi, ErrKokAskisi
+		}
+		kaynak = eskiKaynak
+	}
 
 	if err := durumYaz(ctx, db, id, askida, kaynak); err != nil {
 		return alanAdi, err
 	}
 	// 1) Ana vhost — askı durumunu DB'den okur (tek kaynak).
 	if err := a.AnaVhost(db, id); err != nil {
+		kctx, kiptal := kurtarmaBaglami(ctx)
+		defer kiptal()
 		if askida && kaynak == KaynakBayi {
 			// 🔴 Bayi zinciri GERİ ALMAZ (zincirin önceki davranışı): bayi
 			// askıdayken hosting tek tek askıya alınamaz (ErrBayiAskida), geri
 			// alınsaydı askıdaki bayinin altında yayında site kalırdı. Güvenli
 			// taraf: hesap askıda sayılır, kalan adımlar uygulanır; ana vhost bir
 			// sonraki başarılı render'da 503 olur.
-			hatalar := append([]error{fmt.Errorf("ana vhost: %w", err)}, a.kapat(ctx, db, id, sk, surum)...)
+			hatalar := append([]error{fmt.Errorf("ana vhost: %w", err)}, a.kapat(kctx, db, id, sk, surum)...)
 			return alanAdi, &KismiHata{Askida: true, Hatalar: hatalar}
 		}
 		// DB ile nginx ayrışmasın: render eski dosyayı geri koydu, DB de dönsün.
-		_ = durumYaz(ctx, db, id, eskiAskida == 1, eskiKaynak)
+		if gerr := durumYaz(kctx, db, id, eskiAskida == 1, eskiKaynak); gerr != nil {
+			log.Printf("🔴 hesap askısı: domain %d ana vhost uygulanamadı VE DB durumu geri alınamadı (DB askida=%v, vhost eski hâlinde): %v", id, askida, gerr)
+			return alanAdi, &KismiHata{Askida: askida, Hatalar: []error{
+				fmt.Errorf("ana vhost: %w", err), fmt.Errorf("askı durumu geri alınamadı: %w", gerr)}}
+		}
 		return alanAdi, &VhostHatasi{Err: err}
 	}
 	if askida {
-		if hatalar := a.kapat(ctx, db, id, sk, surum); len(hatalar) > 0 {
+		hatalar := a.kapat(ctx, db, id, sk, surum)
+		if len(hatalar) > 0 && ctx.Err() != nil {
+			// Üst süre adımların ortasında doldu: DB "askıda" derken açık adım
+			// kalmasın — kapatma adımları (idempotent) kurtarma bağlamıyla bir kez
+			// daha uygulanır.
+			kctx, kiptal := kurtarmaBaglami(ctx)
+			defer kiptal()
+			hatalar = a.kapat(kctx, db, id, sk, surum)
+		}
+		if len(hatalar) > 0 {
 			return alanAdi, &KismiHata{Askida: true, Hatalar: hatalar}
 		}
 		return alanAdi, nil
@@ -267,15 +340,23 @@ func (a Adimlar) uygulaKilitli(ctx context.Context, db *sql.DB, id int64, askida
 		return alanAdi, &KismiHata{Askida: false, Hatalar: hatalar}
 	}
 	// 🔴 Güvenli taraf: askıdan alma yarım kaldı → hesap askıda kalır. DB askıya,
-	// bütün adımlar askı hâline (idempotent) döndürülür.
+	// bütün adımlar askı hâline (idempotent) döndürülür — işlemin süresi dolmuş
+	// olsa da (kurtarma bağlamı).
 	log.Printf("hesap askısı: domain %d askıdan alınamadı, yeniden askıya alınıyor: %v", id, errors.Join(hatalar...))
-	if err := durumYaz(ctx, db, id, true, eskiKaynak); err != nil {
+	kctx, kiptal := kurtarmaBaglami(ctx)
+	defer kiptal()
+	if err := durumYaz(kctx, db, id, true, eskiKaynak); err != nil {
+		// DB "açık" diyor ve geri yazılamıyor: adımları kapatmak gerçeği DB'den
+		// AYRIŞTIRIRDI (DB açık der, site PHP'siz, girişler kilitli). Olduğu gibi
+		// bırakılır ve hesap AÇIK raporlanır; yönetici yeniden dener.
+		log.Printf("🔴 hesap askısı: domain %d askıdan alma yarım kaldı VE askı durumu geri yazılamadı — DB açık, bazı adımlar kapalı: %v", id, err)
 		hatalar = append(hatalar, fmt.Errorf("askı durumu geri yazılamadı: %w", err))
+		return alanAdi, &KismiHata{Askida: false, Hatalar: hatalar}
 	}
 	if err := a.AnaVhost(db, id); err != nil {
 		hatalar = append(hatalar, fmt.Errorf("ana vhost yeniden askıya alınamadı: %w", err))
 	}
-	hatalar = append(hatalar, a.kapat(ctx, db, id, sk, surum)...)
+	hatalar = append(hatalar, a.kapat(kctx, db, id, sk, surum)...)
 	return alanAdi, &KismiHata{Askida: true, Hatalar: hatalar}
 }
 
@@ -289,9 +370,12 @@ func (a Adimlar) kapat(ctx context.Context, db *sql.DB, id int64, sk, surum stri
 	}
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, true))
-	// İşleyiciler DB kilidinden ÖNCE durur: kilitli DB'ye bağlanamayıp çökme
-	// döngüsüne girmesinler.
+	// İşleyiciler ve uygulamalar DB kilidinden ÖNCE durur: kilitli DB'ye
+	// bağlanamayıp çökme döngüsüne girmesinler.
 	ekle("kuyruk işleyicisi / zamanlanmış görev", a.Birimler(ctx, db, id, true))
+	if hesapKullanicisi(sk) {
+		ekle("uygulamalar", a.Uygulamalar(sk, true))
+	}
 	ekle("veritabanı kullanıcıları", a.DBKullanici(db, id, true))
 	if hesapKullanicisi(sk) {
 		havuzlar, err := a.AltHavuzlar(ctx, db, id, sk)
@@ -321,7 +405,12 @@ func (a Adimlar) ac(ctx context.Context, db *sql.DB, id int64, sk, surum string)
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, false))
 	ekle("veritabanı kullanıcıları", a.DBKullanici(db, id, false))
-	// İşleyiciler DB kilidi açıldıktan SONRA başlar.
+	// Uygulamalar ve işleyiciler DB kilidi açıldıktan SONRA başlar. Uygulama
+	// adımı kuyruk işleyicisinden ÖNCE: işleyici birimi de User=<sk>'dir; askı
+	// koruması kalkmadan başlatılırsa systemd koşulu yüzünden başlamazdı.
+	if hesapKullanicisi(sk) {
+		ekle("uygulamalar", a.Uygulamalar(sk, false))
+	}
 	ekle("kuyruk işleyicisi / zamanlanmış görev", a.Birimler(ctx, db, id, false))
 	if hesapKullanicisi(sk) {
 		ekle("SSH/SFTP girişi", a.SSHGiris(sk, false))
@@ -337,8 +426,8 @@ func hesapKullanicisi(sk string) bool { return strings.HasPrefix(sk, "c_") }
 // BayiUygula — bir bayinin TÜM hosting hesaplarına askıyı zincirleme uygular ya
 // da kaldırır; her hesap Uygula'dan (KaynakBayi) geçer.
 //
-// 🔴 GERİ AÇARKEN yalnız askida_kaynak='bayi' olanlar açılır: tek tek (manuel)
-// askıya alınmış hesaplar bayi geri açılınca yanlışlıkla yayına dönmez. Demo
+// 🔴 GERİ AÇARKEN yalnız askida_kaynak='bayi' olanlar açılır: tek tek (elle —
+// kök ya da bayi) askıya alınmış hesaplar bayi geri açılınca yanlışlıkla yayına dönmez. Demo
 // abonelikler zincire GİRMEZ. Döner: (başarılı, başarısız, hata). Başarısız > 0
 // ise çağıran bunu kullanıcıya ve denetim kaydına yansıtmalı.
 func (a Adimlar) BayiUygula(ctx context.Context, db *sql.DB, resellerID int64, askida bool) (int, int, error) {

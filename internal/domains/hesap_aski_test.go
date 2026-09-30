@@ -44,6 +44,7 @@ func ha_adimlar(t *testing.T, phpHata error) *[]string {
 			SSHGiris:      func(string, bool) error { not("ssh"); return nil },
 			DBKullanici:   func(*sql.DB, int64, bool) error { not("db"); return nil },
 			Birimler:      func(context.Context, *sql.DB, int64, bool) error { not("birim"); return nil },
+			Uygulamalar:   func(string, bool) error { not("uyg"); return nil },
 			CalismaZamani: func(string, bool) { not("cron") },
 		}
 	}
@@ -67,7 +68,7 @@ func TestAskiyaAl_HesapDuzeyindeTekYol(t *testing.T) {
 	if kod != http.StatusOK {
 		t.Fatalf("200 beklenirdi: %d %s", kod, govde)
 	}
-	if got := strings.Join(*cagri, " "); got != "ana alt birim db php(true) ssh cron" {
+	if got := strings.Join(*cagri, " "); got != "ana alt birim uyg db php(true) ssh cron" {
 		t.Fatalf("hesabın tüm adımları uygulanmalı: %s", got)
 	}
 }
@@ -147,5 +148,49 @@ func TestSetPHP_HesapAskida_Reddedilir(t *testing.T) {
 	kod, govde := sh_cagir(t, d, sh_tokenlar(t)["bayi"])
 	if kod != http.StatusConflict || !strings.Contains(sh_hataMetni(t, govde), "hesap askıda") {
 		t.Fatalf("409 'hesap askıda' beklenirdi: %d %s", kod, govde)
+	}
+}
+
+// 🔴 Bayi kökün askısını KALDIRAMAZ (kullanıcı kararı 2026-09-29) — tekil ve
+// TOPLU; yönetici kaldırır. Elle askının kaynağı isteği yapanın rolüdür, karar
+// hesapaski'de kilit altında okunan kaynağa göre verilir. 'manuel' (ayırt
+// edilemeyen eski elle askılar dahil) kökün sayılır.
+func TestAskidanAl_KokAskisi_BayiAcamaz(t *testing.T) {
+	cagri := ha_adimlar(t, nil)
+	tok := sh_tokenlar(t)
+	kokAskisi := func(sd *sahtedb.DB) {
+		sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum",
+			[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(1), "manuel", int64(7)})
+	}
+	d := sh_durum{ad: "AskidanAl", yontem: http.MethodPost, yol: "/domains/42/askidan-al", desen: "/domains/{id}/askidan-al",
+		isle: func(h *Handlers) http.HandlerFunc { return h.AskidanAl }, satirlar: kokAskisi}
+	kod, govde := sh_cagir(t, d, tok["bayi"])
+	if kod != http.StatusForbidden || !strings.Contains(sh_hataMetni(t, govde), "yalnız yönetici askıdan alabilir") {
+		t.Fatalf("bayi: 403 'yalnız yönetici' beklenirdi: %d %s", kod, govde)
+	}
+	if len(*cagri) != 0 {
+		t.Fatalf("reddedilen istekte hiçbir adım çalışmamalı: %v", *cagri)
+	}
+	if kod, govde := sh_cagir(t, d, tok["admin"]); kod != http.StatusOK {
+		t.Fatalf("yönetici kökün askısını kaldırabilmeli: %d %s", kod, govde)
+	}
+
+	*cagri = nil
+	sd, db := sahtedb.Yeni()
+	kokAskisi(sd)
+	sd.Satirlar("SELECT COALESCE(reseller_id,0) FROM domains", []any{int64(7)})
+	r := chi.NewRouter()
+	r.With(middleware.RequireAuth(sh_sir)).Post("/domains/toplu/durum", (&Handlers{DB: db}).TopluDurum)
+	req := httptest.NewRequest(http.MethodPost, "/domains/toplu/durum", strings.NewReader(`{"ids":[42],"durum":"aktif"}`))
+	req.Header.Set("Authorization", "Bearer "+tok["bayi"])
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	var m map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	if m["atlanan"] != float64(1) || m["guncellenen"] != float64(0) {
+		t.Fatalf("bayinin toplu açması kökün askısını atlamalı: %s", rec.Body.String())
+	}
+	if len(*cagri) != 0 || sd.Yurutuldu("UPDATE domains SET askida") {
+		t.Fatalf("toplu: kökün askısına dokunulmamalı: %v", *cagri)
 	}
 }
