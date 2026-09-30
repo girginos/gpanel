@@ -78,7 +78,6 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Bu sürüm artık güvenlik güncellemesi almıyor.': 'This version no longer gets security updates.',
   'Sistem kullanıcısı': 'System user',
   'IP adresi': 'IP address',
-  'Belge kökü': 'Document root',
   'Son yedek': 'Last backup',
   'Hiç alınmadı': 'Never',
   'Okunamadı': 'Unavailable',

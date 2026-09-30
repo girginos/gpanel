@@ -17,7 +17,6 @@ export type Domain = {
   db_host: string
   db_user: string
   db_adi: string
-  web_root: string
   notlar?: string
   ssh_erisim?: boolean
   askida?: boolean

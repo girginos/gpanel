@@ -20,11 +20,14 @@ type Oturum = { iptal: boolean; istek: Promise<void> | null }
 
 export type Uc<T> = UcDurumu<T> & { yenile: () => Promise<void> }
 
-// Askıdaki alan adı: MusteriScope müşteri token'ına TÜM uçlarda 403 + bu mesajı döner
-// (internal/middleware/domain_aski.go). Bu bir "istek başarısız" değil hesap durumudur:
-// genel hata bildirimi basılmaz, sayfa dostça açıklama çizer (yeniden denemek işe yaramaz).
-const ASKI_MESAJI = 'hesap askıya alınmış'
-export const askiYaniti = (d: { hata: string | null; hataKodu?: number | null }): boolean => d.hataKodu === 403 && d.hata === ASKI_MESAJI
+// Askıdaki hesap: müşteri token'ı TÜM uçlarda 403 + askı mesajı alır. İki kapı var:
+//   RequireAuth → musteri_oturum.go  "hesabınız askıya alınmış" (askıya alma
+//     ftp_accounts.status='suspended' yazar; her istekte ilk bu yakalar)
+//   MusteriScope → domain_aski.go    "hesap askıya alınmış" (domains.askida=1)
+// Bu bir "istek başarısız" değil hesap durumudur: genel hata bildirimi basılmaz, sayfa
+// dostça açıklama çizer (yeniden denemek işe yaramaz).
+const ASKI_MESAJLARI: ReadonlySet<string> = new Set(['hesabınız askıya alınmış', 'hesap askıya alınmış'])
+export const askiYaniti = (d: { hata: string | null; hataKodu?: number | null }): boolean => d.hataKodu === 403 && d.hata !== null && ASKI_MESAJLARI.has(d.hata)
 
 const hataKoduOku = (e: unknown): number | null => (e as { response?: { status?: number } })?.response?.status ?? null
 

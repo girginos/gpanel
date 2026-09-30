@@ -131,11 +131,6 @@ function GenelBilgi({ domainId, domain, kaynak, ssl, yedekler, phpEol }: { domai
             {domain.ipv4}
           </BilgiSatiri>
         )}
-        {domain.web_root && (
-          <BilgiSatiri etiket={cevir('Belge kökü')} kopya={domain.web_root} mono>
-            {domain.web_root}
-          </BilgiSatiri>
-        )}
         <BilgiSatiri etiket={cevir('Son yedek')}>{sonYedek}</BilgiSatiri>
         {domain.olusturulma && <BilgiSatiri etiket={cevir('Oluşturulma')}>{tarihBicim(domain.olusturulma)}</BilgiSatiri>}
       </dl>

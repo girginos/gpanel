@@ -15,7 +15,8 @@
 //   Uyarı (bildirim)   GET /bildirimler                 (müşteri yalnız kendi domaini)
 //   Eklenti kapıları   GET /eklentiler                  (müşteriye yalnız açık olanlar)
 // Yönetici uçları ÇAĞRILMAZ (403 alan istek bırakılmaz). İstisna: askıdaki hesapta
-// MusteriScope TÜM uçlara 403 + askı mesajı döner → sayfa AskiKutusu çizer (hata değil).
+// TÜM uçlar 403 + askı mesajı döner (RequireAuth / MusteriScope, bkz. useUc askiYaniti)
+// → sayfa AskiKutusu çizer (hata değil).
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
