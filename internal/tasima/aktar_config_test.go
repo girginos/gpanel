@@ -92,12 +92,14 @@ func yrConfigYaz(t *testing.T, o yrOrtam, ph string) {
 
 func yrLaravel(t *testing.T, o yrOrtam, ph string) {
 	t.Helper()
-	yrLaravelDizin(t, o, "public_html")
+	laravelSonrasiDuzelt(o.ev, "public_html", yrAlan, o.uid, yrLog(t))
 }
 
-func yrLaravelDizin(t *testing.T, o yrOrtam, dizin string) {
-	t.Helper()
-	laravelSonrasiDuzelt(o.ev, dizin, yrAlan, o.uid, yrLog(t))
+// yrLaravelGunluk — laravelSonrasiDuzelt'i koşar, iş günlüğünü döndürür.
+func yrLaravelGunluk(o yrOrtam, dizin string) []string {
+	var gunluk []string
+	laravelSonrasiDuzelt(o.ev, dizin, yrAlan, o.uid, func(f string, a ...any) { gunluk = append(gunluk, fmt.Sprintf(f, a...)) })
+	return gunluk
 }
 
 // Ev İÇİNDE kalan bağ da izlenmez: kiracı evinde kök sahipli bir alan (burada
@@ -141,7 +143,13 @@ func TestYapilandirma_EvIciKokAlaninaBagIzlenmez(t *testing.T) {
 				}
 			}
 			o.bag(t, ".kok/uyg", filepath.Join(o.ev, "uyg"))
-		}, func(t *testing.T, o yrOrtam, ph string) { yrLaravelDizin(t, o, "uyg") }},
+		}, func(t *testing.T, o yrOrtam, ph string) {
+			// Bağlı dizin Laravel SAYILMAZ: günlük kök alanında artisan olup
+			// olmadığını da söylemez.
+			if g := yrLaravelGunluk(o, "uyg"); len(g) != 0 {
+				t.Errorf("bağlı uygulama dizini Laravel sayıldı: %q", g)
+			}
+		}},
 	}
 	for _, sn := range senaryolar {
 		t.Run(sn.ad, func(t *testing.T) {
@@ -156,6 +164,28 @@ func TestYapilandirma_EvIciKokAlaninaBagIzlenmez(t *testing.T) {
 			sn.calis(t, o, ph)
 			yrOzetKarsilastir(t, sn.ad, once, yrOzet(t, kok))
 		})
+	}
+}
+
+// artisan bağı izlenmez: kiracının artisan'ı kökün okuyabildiği bir yolu
+// gösterdiğinde Laravel tespiti (ve bayiye açılan iş günlüğü) o yolun VAR olup
+// olmadığına göre değişmez — kök dosyalarının varlığı sızmaz.
+func TestLaravel_ArtisanBagiVarlikSizdirmaz(t *testing.T) {
+	gunlukler := map[string][]string{}
+	for _, hedef := range []string{"var", "yok"} {
+		o := yrYeniOrtam(t)
+		gizli := filepath.Join(o.base, "kokgizli")
+		yrYaz(t, filepath.Join(gizli, "var"), "KOK", 0o600)
+		if err := os.Chmod(gizli, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ph := filepath.Join(o.ev, "public_html")
+		o.dizin(t, ph)
+		o.bag(t, filepath.Join(gizli, hedef), filepath.Join(ph, "artisan"))
+		gunlukler[hedef] = yrLaravelGunluk(o, "public_html")
+	}
+	if !reflect.DeepEqual(gunlukler["var"], gunlukler["yok"]) {
+		t.Errorf("artisan bağının hedefinin varlığı günlüğe yansıdı:\n var: %q\n yok: %q", gunlukler["var"], gunlukler["yok"])
 	}
 }
 
