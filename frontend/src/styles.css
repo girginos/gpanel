@@ -123,6 +123,12 @@ html {
   text-rendering: optimizeLegibility;
 }
 html.dark { color-scheme: dark; }
+/* Panel (DashboardLayout <main>) içinde kısa ve uzun sayfa arasında geçerken klasik
+   kaydırma çubuğu (Windows/Linux, 15 px) gelip gitmesin: gelirse ortalı sayfa kabuğu
+   7,5 px sola kayar, kabuk genişliği 15 px daralır — sayfadan sayfaya içerik "zıplar".
+   Yalnız panelde: giriş/askı gibi tam ekran sayfalarda boş şerit bırakılmaz.
+   Kaplamalı çubuklu sistemlerde (macOS, mobil) etkisizdir. */
+html:has(main) { scrollbar-gutter: stable; }
 html, body, #root { min-height: 100%; }
 
 body {

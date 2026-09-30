@@ -178,6 +178,8 @@ export default function App() {
             kullanan sayfalar; içerik genişliği yine --container-sayfa'dır:
             • index (HomePage): koyu pano adası (.gp-dash) içerik alanını baştan
               sona kaplar; içerik dashboard.css'te aynı genişlikte ortalanır.
+              Bayi dalı (BayiOzet) koyu pano değildir: HomePage onu SayfaCercevesi
+              ile her panel sayfası gibi kabukta çizer.
             • abonelikler/:id müşteri dalı (MusteriAnaSayfa): üst çubuğa yapışık tam
               genişlik uyarı bandı; bant içeriği ve sayfa max-w-sayfa ile ortalanır.
               Yönetici/bayi dalı AbonelikSayfasi içinde SayfaCercevesi ile sarılır.

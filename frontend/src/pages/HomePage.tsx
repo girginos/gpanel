@@ -11,6 +11,7 @@ import { useAuth } from '@/store/auth'
 import { rolAnaSayfa } from '@/lib/rol'
 import { useMarka } from '@/lib/marka'
 import BayiOzet from '@/components/BayiOzet'
+import { SayfaCercevesi } from '@/components/SayfaKabugu'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -257,7 +258,9 @@ export default function HomePage() {
   }, [isBayi, isMusteri])
 
   if (isMusteri) return <Navigate to={rolAnaSayfa('user')} replace />
-  if (isBayi) return <div className="px-4 py-6 sm:px-6"><BayiOzet /></div>
+  // Rota KabukDisi bloğunda (yöneticinin tam zemin koyu panosu); bayi özeti ise her
+  // panel sayfası gibi tek sayfa kabuğunda çizilir (ortalı, sabit genişlik).
+  if (isBayi) return <SayfaCercevesi><BayiOzet /></SayfaCercevesi>
 
   const aktif = domainler.filter((d) => d.durum === 'aktif').length
   const sslli = domainler.filter((d) => d.ssl).length
