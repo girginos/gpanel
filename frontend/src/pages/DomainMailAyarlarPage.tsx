@@ -117,7 +117,7 @@ export default function DomainMailAyarlarPage() {
   }
 
   if (!domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
@@ -126,7 +126,7 @@ export default function DomainMailAyarlarPage() {
   const g = monitor ? GENEL[monitor.genel_durum] : null
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

@@ -115,14 +115,13 @@ export default function DomainSSHPage() {
     } finally { setIsleniyor(false) }
   }
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
-  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!d) return <div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div>
 
   const sshKomut = `ssh ${d.kullanici}@${d.ssh_host} -p ${d.ssh_port}`
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-3xl mx-auto">
+    <div>
         <Breadcrumb items={[
           { etiket: cevir("Anasayfa"), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
@@ -224,7 +223,6 @@ export default function DomainSSHPage() {
         <div className="mt-4">
           <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link>
         </div>
-      </div>
     </div>
   )
 }
