@@ -55,7 +55,7 @@ func yrYeniOrtam(t *testing.T) yrOrtam {
 	if os.Geteuid() != 0 {
 		t.Skip("runuser ile kiracı kimliği için root gerekli")
 	}
-	for _, b := range []string{"runuser", "rsync", "mkdir"} {
+	for _, b := range []string{"runuser", "rsync", "mkdir", "cp", "find"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s yok: %v", b, err)
 		}
@@ -307,6 +307,9 @@ func yrKaynakDocroot(t *testing.T, d string) {
 	if err := os.Symlink("alt/dosya.txt", filepath.Join(d, "bag")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("alt", filepath.Join(d, "dizinbag")); err != nil {
+		t.Fatal(err)
+	}
 	if err := unix.Mkfifo(filepath.Join(d, "boru"), 0o666); err != nil {
 		t.Fatal(err)
 	}
@@ -398,8 +401,10 @@ func TestDosyalariAktar_KiraciKimligindeYerlesir(t *testing.T) {
 			t.Errorf("geçici yapılandırma dosyası kaldı: %s", p)
 		}
 	}
-	if g := agac["public_html/bag"]; g.Tur != fs.ModeSymlink || g.Icerik != "alt/dosya.txt" {
-		t.Errorf("ağaç içi bağ korunmadı: %+v", g)
+	for bag, hedef := range map[string]string{"public_html/bag": "alt/dosya.txt", "public_html/dizinbag": "alt"} {
+		if g := agac[bag]; g.Tur != fs.ModeSymlink || g.Icerik != hedef {
+			t.Errorf("ağaç içi bağ korunmadı: %s %+v", bag, g)
+		}
 	}
 
 	// Laravel düzeltmesi (docroot dışı uygulama): APP_URL, .env 0600, önbellek.
@@ -699,8 +704,9 @@ func yrParcaliKaynak(t *testing.T, d string) {
 }
 
 // yrKotaSayaci — bayt sayacı (sahte kota): kok altında uid'e ait düzenli
-// dosyaların toplam boyutunu (disk kotasının saydığı gibi SAHİBE göre; hazırlık
-// alanı dahil) dur çağrılana dek sürekli ölçer. dur: en yüksek değer, örnek sayısı.
+// dosyaların toplam boyutunu disk kotasının saydığı gibi ölçer — SAHİBE göre
+// (hazırlık alanı dahil) ve INODE başına (sabit bağlar bir kez) — dur çağrılana
+// dek sürekli. dur: en yüksek değer, örnek sayısı.
 func yrKotaSayaci(kok string, uid int) (dur func() (int64, int)) {
 	bitti := make(chan struct{})
 	sonuc := make(chan [2]int64, 1)
@@ -708,11 +714,18 @@ func yrKotaSayaci(kok string, uid int) (dur func() (int64, int)) {
 		var tepe, ornek int64
 		for {
 			var top int64
+			gorulen := map[[2]uint64]bool{}
 			_ = filepath.WalkDir(kok, func(_ string, d fs.DirEntry, err error) error {
 				if err != nil || !d.Type().IsRegular() {
 					return nil
 				}
-				if fi, err := d.Info(); err == nil && fi.Sys().(*syscall.Stat_t).Uid == uint32(uid) {
+				fi, err := d.Info()
+				if err != nil {
+					return nil
+				}
+				st := fi.Sys().(*syscall.Stat_t)
+				if anahtar := [2]uint64{uint64(st.Dev), st.Ino}; st.Uid == uint32(uid) && !gorulen[anahtar] {
+					gorulen[anahtar] = true
 					top += fi.Size()
 				}
 				return nil
@@ -733,47 +746,91 @@ func yrKotaSayaci(kok string, uid int) (dur func() (int64, int)) {
 	}
 }
 
-// Kota tek kat: devirle hazırlık içeriği kiracının kotasına yazılır; yerleşim
-// aynı içeriği bir kez daha yazıp sonra hazırlığı silseydi tepe kullanım
-// mevcut+2S olurdu (gerçek kotada ~Q/2 üstü siteler EDQUOT → kalem düşer, hesap
-// geri alınır). Tepe mevcut+S+(rsync boru hattında uçuştaki içerik; 181'de
-// ölçülen ~7 MB, S'den bağımsız tampon) olmalı: sınır mevcut+1,5S.
+// Kota tek kat: devirle hazırlık içeriği (S) kiracının kotasına yazılır.
+// Yerleşim içeriği kopyalasaydı tepe mevcut+2S, rsync --remove-source-files ile
+// taşısaydı mevcut+S+en büyük dosya olurdu (gerçek kotada boyutu tek bir büyük
+// dosyanın belirlediği site EDQUOT → kalem düşer, hesap geri alınır). Hedefte
+// olmayan girdiler sabit bağla yerleşir: tepe TAM mevcut+S. Üzerine yazma
+// kipinde hedefte zaten var olan dosya kopyalanır: pay en çok o dosya kadardır;
+// içeriği güncellenir, izni korunur.
 func TestDosyalariAktar_KotaTekKat(t *testing.T) {
-	o := yrYeniOrtam(t)
-	ph := filepath.Join(o.ev, "public_html")
-	o.dizin(t, ph)
-	const mevcut = 1 << 20
-	o.dosya(t, filepath.Join(o.ev, "mevcut.bin"), strings.Repeat("m", mevcut), 0o644)
-	s := yrYeniUzak(t, yrYabanciUID)
-	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: yrParcaliKaynak}
-
-	dur := yrKotaSayaci(o.base, o.uid)
-	err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
-		Ayarlar{Dosyalar: true}, yrSK, ph, yrAlan, &AktarSonuc{}, yrLog(t))
-	tepe, ornek := dur()
-	if err != nil {
-		t.Fatalf("dosyalariAktar: %v", err)
-	}
-	t.Logf("tepe kiracı kullanımı %d bayt (mevcut %d + S %d), %d örnek", tepe, mevcut, yrParcaS, ornek)
-	if tepe < mevcut+yrParcaS || ornek < 2 {
-		t.Fatalf("sayaç yerleşimi görmedi: tepe=%d örnek=%d", tepe, ornek)
-	}
-	if sinir := int64(mevcut + yrParcaS + yrParcaS/2); tepe > sinir {
-		t.Errorf("kota iki kat: tepe %d > mevcut+1,5S %d (mevcut+2S=%d)", tepe, sinir, mevcut+2*yrParcaS)
-	}
-	n := 0
-	for p, g := range yrOzet(t, ph) {
-		if strings.HasSuffix(p, ".bin") {
-			n++
-			if g.UID != uint32(o.uid) {
-				t.Errorf("%s kiracıya ait değil", p)
+	const (
+		mevcut = 1 << 20
+		buyuk  = 24 << 20 // tek büyük dosya (yedek zip/video)
+		ortak  = 8 << 20  // hedefte zaten var olan dosyanın eski boyutu
+	)
+	parca := strings.Repeat("k", yrParcaBoyut)
+	for _, sn := range []struct {
+		ad     string
+		kaynak func(t *testing.T, d string)
+		S      int64
+		dosya  int   // yerleşmesi beklenen .bin sayısı
+		ortak  bool  // hedefte ortak.bin (eski, 0600) önceden var
+		pay    int64 // kopyaya kalan dosyalardan en büyüğü
+	}{
+		{"parçalı", yrParcaliKaynak, yrParcaS, yrParcaSayi, false, 0},
+		{"tek büyük dosya", func(t *testing.T, d string) {
+			yrYaz(t, filepath.Join(d, "yedek", "site.bin"), strings.Repeat("b", buyuk), 0o644)
+			for i := range 4 {
+				yrYaz(t, filepath.Join(d, fmt.Sprintf("dosya%d.bin", i)), parca, 0o644)
 			}
-		}
+		}, buyuk + 4*yrParcaBoyut, 5, false, 0},
+		{"üzerine yazma", func(t *testing.T, d string) {
+			yrParcaliKaynak(t, d)
+			yrYaz(t, filepath.Join(d, "ortak.bin"), strings.Repeat("n", ortak+1), 0o644)
+		}, yrParcaS + ortak + 1, yrParcaSayi + 1, true, ortak + 1},
+	} {
+		t.Run(sn.ad, func(t *testing.T) {
+			o := yrYeniOrtam(t)
+			ph := filepath.Join(o.ev, "public_html")
+			o.dizin(t, ph)
+			var once int64 = mevcut
+			o.dosya(t, filepath.Join(o.ev, "mevcut.bin"), strings.Repeat("m", mevcut), 0o644)
+			if sn.ortak {
+				o.dosya(t, filepath.Join(ph, "ortak.bin"), strings.Repeat("e", ortak), 0o600)
+				once += ortak
+			}
+			s := yrYeniUzak(t, yrYabanciUID)
+			s.agaclar = map[string]func(*testing.T, string){yrUzakKok: sn.kaynak}
+
+			dur := yrKotaSayaci(o.base, o.uid)
+			err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
+				Ayarlar{Dosyalar: true}, yrSK, ph, yrAlan, &AktarSonuc{}, yrLog(t))
+			tepe, ornek := dur()
+			if err != nil {
+				t.Fatalf("dosyalariAktar: %v", err)
+			}
+			t.Logf("tepe kiracı kullanımı %d bayt (önce %d + S %d + pay %d), %d örnek", tepe, once, sn.S, sn.pay, ornek)
+			if tepe < once+sn.S || ornek < 2 {
+				t.Fatalf("sayaç yerleşimi görmedi: tepe=%d örnek=%d", tepe, ornek)
+			}
+			if sinir := once + sn.S + sn.pay; tepe > sinir {
+				t.Errorf("kota tek kat değil: tepe %d > %d (fazla %d bayt)", tepe, sinir, tepe-sinir)
+			}
+			n := 0
+			for p, g := range yrOzet(t, ph) {
+				if strings.HasSuffix(p, ".bin") {
+					n++
+					if g.UID != uint32(o.uid) {
+						t.Errorf("%s kiracıya ait değil", p)
+					}
+				}
+			}
+			if n != sn.dosya {
+				t.Errorf("%d dosya yerleşti, beklenen %d", n, sn.dosya)
+			}
+			if sn.ortak {
+				b, err := os.ReadFile(filepath.Join(ph, "ortak.bin"))
+				if err != nil || len(b) != ortak+1 || b[0] != 'n' {
+					t.Errorf("hedefte var olan dosya güncellenmedi: %d bayt (%v)", len(b), err)
+				}
+				if g := yrSahipAl(filepath.Join(ph, "ortak.bin")); g.mod != 0o600 {
+					t.Errorf("hedefte var olan dosyanın izni korunmadı: %v", g.mod)
+				}
+			}
+			yrHazirlikBos(t)
+		})
 	}
-	if n != yrParcaSayi {
-		t.Errorf("%d dosya yerleşti, beklenen %d", n, yrParcaSayi)
-	}
-	yrHazirlikBos(t)
 }
 
 // yrSurec — /proc/<pid>/status'tan ad, durum harfi, üst pid ve gerçek uid.
@@ -818,13 +875,16 @@ func yrTestinTorunu(pid int) bool {
 	return false
 }
 
-// yrKiraciRsyncDondur — kiracının (uid) bu testten türeyen rsync süreçlerini
-// SIGSTOP ile dondurur: kiracının kendi uid'indeki yerleşim sürecine
-// yapabildiği. dur: taramayı bitirir, dondurulanları SIGKILL ile kapatır,
+// yrYerlesimSurecleri — yerleşimin süreye bağlı kiracı adımları (dosya yerleşimi).
+var yrYerlesimSurecleri = map[string]bool{"cp": true, "find": true, "rsync": true}
+
+// yrKiraciYerlesimDondur — kiracının (uid) bu testten türeyen yerleşim
+// süreçlerini (cp/find/rsync) SIGSTOP ile dondurur: kiracının kendi uid'indeki
+// yerleşim sürecine yapabildiği. dur: taramayı bitirir, dondurulanları SIGKILL ile kapatır,
 // testten türeyen ve hâlâ durmuş (T) süreçleri SIGCONT ile sürdürür (çocuğu
 // durunca kendini de durduran kök runuser dahil) ve dondurulan sayısını döner:
 // test asılı süreç bırakmaz.
-func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
+func yrKiraciYerlesimDondur(t *testing.T, uid int) (dur func() int) {
 	bitti := make(chan struct{})
 	sonuc := make(chan []int, 1)
 	go func() {
@@ -849,7 +909,7 @@ func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 				if fi, err := os.Stat("/proc/" + g.Name()); err != nil || fi.Sys().(*syscall.Stat_t).Uid != uint32(uid) {
 					continue
 				}
-				if ad, _, _, u := yrSurec(pid); ad == "rsync" && u == uid && yrTestinTorunu(pid) && unix.Kill(pid, unix.SIGSTOP) == nil {
+				if ad, _, _, u := yrSurec(pid); yrYerlesimSurecleri[ad] && u == uid && yrTestinTorunu(pid) && unix.Kill(pid, unix.SIGSTOP) == nil {
 					donmus[pid] = true
 				}
 			}
@@ -865,7 +925,7 @@ func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 		close(bitti)
 		l := <-sonuc
 		for _, pid := range l {
-			if ad, _, _, u := yrSurec(pid); ad == "rsync" && u == uid {
+			if ad, _, _, u := yrSurec(pid); yrYerlesimSurecleri[ad] && u == uid {
 				_ = unix.Kill(pid, unix.SIGKILL)
 			}
 		}
@@ -887,20 +947,25 @@ func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 	return dur
 }
 
-// Kiracı kendi uid'indeki yerleşim rsync'ini SIGSTOP ile dondurur: adım kendi
+// Kiracı kendi uid'indeki yerleşim sürecini SIGSTOP ile dondurur: adım kendi
 // süresiyle kesilir (hesap bağlamının 3 saatini beklemez), kalem hata ile biter,
-// hazırlık alanı temizlenir.
+// hazırlık alanı temizlenir. Kaynak kalabalıktır (4000 girdi): sabit bağla
+// yerleşim hızlıdır, dondurucu adımı ancak süreç yaşarken yakalayabilir.
 func TestDosyalariAktar_KiraciDondurursaAdimKesilir(t *testing.T) {
 	o := yrYeniOrtam(t)
 	ph := filepath.Join(o.ev, "public_html")
 	o.dizin(t, ph)
 	s := yrYeniUzak(t, yrYabanciUID)
-	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: yrParcaliKaynak}
+	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: func(t *testing.T, d string) {
+		for i := range 4000 {
+			yrYaz(t, filepath.Join(d, fmt.Sprintf("p%02d", i%40), fmt.Sprintf("f%04d.txt", i)), "x\n", 0o644)
+		}
+	}}
 	eski := yerlesimSuresi
 	yerlesimSuresi = func(int64) time.Duration { return 2 * time.Second }
 	t.Cleanup(func() { yerlesimSuresi = eski })
 
-	dur := yrKiraciRsyncDondur(t, o.uid)
+	dur := yrKiraciYerlesimDondur(t, o.uid)
 	bitti := make(chan error, 1)
 	go func() {
 		bitti <- (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
@@ -920,7 +985,7 @@ func TestDosyalariAktar_KiraciDondurursaAdimKesilir(t *testing.T) {
 		t.Fatal("donmuş kiracı süreci yerleşimi süresiz bekletti (60 sn)")
 	}
 	if donmus == 0 {
-		t.Fatalf("fikstür: kiracının rsync'i dondurulamadı (hata=%v)", err)
+		t.Fatalf("fikstür: kiracının yerleşim süreci dondurulamadı (hata=%v)", err)
 	}
 	if err == nil || !strings.Contains(err.Error(), errYerlesimSuresi.Error()) {
 		t.Errorf("donmuş yerleşim süre hatasıyla bitmedi: %v", err)
@@ -961,6 +1026,37 @@ func TestDosyalariAktar_OkunamayanModlarTasinir(t *testing.T) {
 		}
 		if g := yrSahipAl(p); g.uid != uint32(o.uid) {
 			t.Errorf("%s kiracıya ait değil: %+v", rel, g)
+		}
+	}
+	yrHazirlikBos(t)
+}
+
+// Sabit bağla yerleşen girdi kaynağın inode'unu (iznini) taşır: kaynaktan gelen
+// herkese yazılabilir ve özel bitli (setuid/setgid/sticky) izinler kiracı
+// ağacına AYNEN geçmemeli — rsync --no-perms'in 022 umask'la yeni dosyada
+// ürettiği biçime süzülür (grup/diğer yazma ve özel bitler atılır).
+func TestDosyalariAktar_IzinlerSuzulur(t *testing.T) {
+	o := yrYeniOrtam(t)
+	ph := filepath.Join(o.ev, "public_html")
+	o.dizin(t, ph)
+	s := yrYeniUzak(t, yrYabanciUID)
+	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: func(t *testing.T, d string) {
+		yrYaz(t, filepath.Join(d, "suid"), "#!/bin/sh\n", 0o4777)
+		yrYaz(t, filepath.Join(d, "herkes.txt"), "herkes\n", 0o666)
+		yrYaz(t, filepath.Join(d, "ortak", "ic.txt"), "ic\n", 0o2775)
+		if err := os.Chmod(filepath.Join(d, "ortak"), 0o3777); err != nil {
+			t.Fatal(err)
+		}
+	}}
+
+	err := (&Handlers{}).dosyalariAktar(context.Background(), yrKaynak(s), Hesap{WebRoot: yrUzakKok},
+		Ayarlar{Dosyalar: true}, yrSK, ph, yrAlan, &AktarSonuc{}, yrLog(t))
+	if err != nil {
+		t.Fatalf("dosyalariAktar: %v", err)
+	}
+	for rel, bekle := range map[string]fs.FileMode{"suid": 0o755, "herkes.txt": 0o644, "ortak/ic.txt": 0o755, "ortak": fs.ModeDir | 0o755} {
+		if g := yrSahipAl(filepath.Join(ph, rel)); g.mod != bekle || g.uid != uint32(o.uid) {
+			t.Errorf("%s: izin %v uid %d, beklenen %v kiracı", rel, g.mod, g.uid, bekle)
 		}
 	}
 	yrHazirlikBos(t)

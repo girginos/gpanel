@@ -172,27 +172,41 @@ func kiraciAdim(ctx context.Context, sure time.Duration, ki kiraci.Kiraci, argv 
 //     kaynağın sahip yaptığı herhangi bir yerel hesap hiçbir şeye dokunamaz,
 //     kök kiracı ağacında yol çözmez;
 //  2. içerik süzülüp kiracıya devredilir (hazirlikDevret) ve KİRACI kimliğinde
-//     rsync ile hedefe yerleştirilir: kiracının kurduğu bağlar/takaslar
-//     çekirdeğin DAC'ı ile kiracının kendi yetkisine iner; dosyalar doğrudan
-//     kiracıya ait oluşur (chown yok, disk kotası kiracıya işler).
+//     hedefe yerleştirilir: kiracının kurduğu bağlar/takaslar çekirdeğin DAC'ı
+//     ile kiracının kendi yetkisine iner; dosyalar doğrudan kiracıya ait olur
+//     (chown yok, disk kotası kiracıya işler).
 //
-// 🔴 KOTA TEK KAT: devirle birlikte hazırlık içeriği (S bayt, N inode) kiracının
-// kotasına yazılır; kiracı rsync'i aynı içeriği bir kez daha yazsaydı tepe
-// kullanım mevcut+2S olurdu → ~Q/2 üstü siteler EDQUOT ile düşer, yeni hesap geri
-// alınırdı. Bu yüzden yerleşim --remove-source-files ile TAŞIR: her dosya hedefe
-// yazılıp doğrulandıktan sonra hazırlıktan silinir → tepe ≈ mevcut + S + rsync
-// boru hattında uçuştaki içerik (181'de 32 MB'lık 64 dosyada ~7 MB; S'ye değil
-// tamponlara bağlı); boşalan dizinleri iş sonunda hazırlık silinirken kök süpürür.
-// Aynı fs içinde yeniden adlandırma (rename) seçilmedi: yalnız hedef yokken/boşken
-// uygulanır (sağlanan public_html ve üzerine yazma kipinde hedef dolu → yine bu
-// yol gerekir), --no-perms'in yeni dosyalardaki izin süzmesini (umask, özel
-// bitler) atlayıp kaynağın izinlerini aynen kiracı ağacına taşır ve farklı
-// bağlama noktasında EXDEV geri dönüşü ister; tek kod yolu tüm kipleri kapsar,
-// tepe farkı yalnız boru hattındaki birkaç MB'tır.
+// 🔴 KOTA TEK KAT: devirle birlikte hazırlık içeriği (S bayt) kiracının kotasına
+// yazılır. Yerleşim içeriği KOPYALASAYDI tepe kullanım mevcut+2S olurdu; rsync
+// --remove-source-files ile taşımak bile yetmez: kaynak dosya ancak hedefteki
+// kopyası tamamlanınca silinir → tepe mevcut + S + en büyük dosya (181'de 64 MB'lık
+// tek dosyada ölçüldü) — boyutu tek bir yedek zip/videonun belirlediği site kotanın
+// yarısını aşınca EDQUOT ile düşer, yeni hesap geri alınır. Bu yüzden yerleşim
+// hedefte OLMAYAN girdileri kopyalamaz, aynı inode'a SABİT BAĞ kurar (kota
+// artmaz; hazırlık kökü /home ile aynı dosya sistemindedir):
+//
+//	a. `cp -R -P -l -n`: yeni dosya/bağlar sabit bağla, yeni dizinler yaratılarak
+//	   yerleşir; -n hedefte var olana dokunmaz, -P kaynaktaki sembolik bağı İZLEMEZ
+//	   (izlense bağ hedefi — ör. dizin — kopyalanırdı). Çıkış kodu yalnız süre
+//	   aşımında belirleyicidir: bağlanamayan her girdi (EXDEV, çakışma; bazı
+//	   coreutils sürümleri -n atlamasını da hata sayar) c adımında KOPYA ile
+//	   yerleşir, sonucu orada denetlenir;
+//	b. bağlanan girdilerin hazırlıktaki adları silinir (bağ sayısı > 1): rsync
+//	   kaynağıyla hedefi aynı inode olan dosyayı --remove-source-files ile silmeyi
+//	   reddeder (23);
+//	c. rsync --remove-source-files kalanları (üzerine yazma kipinde hedefte var
+//	   olan dosyalar, bağlanamayanlar) yerleştirir ve bağlanmış ağacı doğrular.
+//
+// Tepe: mevcut + S (+ c'ye kalan dosyalardan en büyüğü: hedefte zaten var olan
+// ya da bağlanamayan bir dosya). Sabit bağ kaynağın izinlerini taşır — bu yüzden
+// izinler devirden önce --no-perms'in yeni dosyada üreteceği biçime süzülür
+// (hazirlikIzinSuz) — ve SELinux etiketini de taşır (hazırlığın user_home_t'si):
+// hedefin etiketini sonda kiracı kimliğindeki restorecon verir (SELinux
+// yoksa komut da yoktur; hata yok sayılır).
 //
 // Hedefte SİLME yapılmaz (üzerine yazma modunda hedef canlı sitedir); var olan
-// dosyaların izni korunur (--no-perms). Döner: kaynaktan aktarılan bayt,
-// devredilmeden silinen özel dosya sayısı.
+// dosyaların içeriği güncellenir, izni korunur (--no-perms). Döner: kaynaktan
+// aktarılan bayt, devredilmeden silinen özel dosya sayısı.
 func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, uzak, hedefRel string, ekstra ...string) (int64, int, error) {
 	hedef := filepath.Join(ki.Ev, hedefRel)
 	hazirlik, err := hazirlikAc(ki, time.Now())
@@ -216,6 +230,12 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 	}
 	// Hata metnine yalnız çıkış kodu girer (stderr panel yollarını içerir).
 	sure := yerlesimSuresi(bayt)
+	if err := kiraciAdim(ctx, sure, ki, "cp", "-R", "-P", "-l", "-n", "--", icerik+"/.", hedef+"/"); errors.Is(err, errYerlesimSuresi) {
+		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (cp: %v)", err)
+	}
+	if err := kiraciAdim(ctx, sure, ki, "find", icerik, "-mindepth", "1", "!", "-type", "d", "-links", "+1", "-delete"); err != nil {
+		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (find: %v)", err)
+	}
 	if err := kiraciAdim(ctx, sure, ki, "rsync", "-a", "--no-perms", "--no-owner", "--no-group",
 		"--remove-source-files", icerik+"/", hedef+"/"); err != nil {
 		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (rsync: %v)", err)
@@ -270,9 +290,11 @@ func hazirlikSupur(simdi time.Time) {
 // disk/bellek erişimi demektir (kaynak rsync -a ile yaratabilir). Kalan
 // girdilerin (dizin/dosya/bağ, içerik dizininin kendisi dahil) sahipliği bağ
 // İZLENMEDEN kiracıya geçer; kaynaktan gelen uid'ler böylece silinir.
-// Sahibin okuyamadığı modlar (0000 dosya, u+x'siz dizin) devirden önce sahibe
-// açılır (hazirlikSahibeAc): aksi halde kiracı rsync'i okuyamayıp 23 ile çıkar,
-// kalem düşer. Döner: silinen özel dosya sayısı.
+// İzinler devirden önce süzülür (hazirlikIzinSuz): sahibin okuyamadığı modlar
+// (0000 dosya, u+x'siz dizin) sahibe açılır — aksi halde kiracı yerleşimi
+// okuyamayıp 23 ile çıkar, kalem düşer — ve sabit bağla yerleşen girdiler
+// kaynağın izinlerini taşıdığından grup/diğer yazma ile özel bitler atılır.
+// Döner: silinen özel dosya sayısı.
 func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 	fi, err := os.Lstat(sarmalayici)
 	if err != nil {
@@ -289,10 +311,10 @@ func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 		}
 		switch t := d.Type(); {
 		case t.IsDir():
-			// rwx: okuma/geçme + yerleşimin (--remove-source-files) dosya silmesi.
-			err = hazirlikSahibeAc(p, d, 0o700)
+			// rwx: okuma/geçme + yerleşimin hazırlıktan ad silmesi.
+			err = hazirlikIzinSuz(p, d, 0o700)
 		case t.IsRegular():
-			err = hazirlikSahibeAc(p, d, 0o400)
+			err = hazirlikIzinSuz(p, d, 0o400)
 		case t&fs.ModeSymlink != 0:
 		default:
 			atlanan++
@@ -315,18 +337,20 @@ func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 	return atlanan, lchown(sarmalayici, uid, gid)
 }
 
-// hazirlikSahibeAc — hazırlıktaki dizin ya da düzenli dosyaya (bağ DEĞİL: tür
-// Lstat'tan) sahibin gerek bitlerini ekler; diğer bitler korunur. Yol tabanlı
-// chmod yalnız sarmalayıcı hâlâ kökün 0700 dizini iken (hazirlikDevret önkoşulu)
-// güvenlidir: başka hiçbir hesap girdiyi bağa çeviremez.
-func hazirlikSahibeAc(p string, d fs.DirEntry, gerek fs.FileMode) error {
+// hazirlikIzinSuz — hazırlıktaki dizin ya da düzenli dosyanın (bağ DEĞİL: tür
+// Lstat'tan) iznini, rsync --no-perms'in 022 umask'la yeni dosyada ürettiği
+// biçime getirir: sahibin gerek bitleri eklenir, grup/diğer yazma ve özel bitler
+// (setuid/setgid/sticky) atılır. Yol tabanlı chmod yalnız sarmalayıcı hâlâ kökün
+// 0700 dizini iken (hazirlikDevret önkoşulu) güvenlidir: başka hiçbir hesap
+// girdiyi bağa çeviremez.
+func hazirlikIzinSuz(p string, d fs.DirEntry, gerek fs.FileMode) error {
 	fi, err := d.Info()
 	if err != nil {
 		return err
 	}
-	m := fi.Mode()
-	if m.Perm()&gerek == gerek {
+	yeni := (fi.Mode().Perm() | gerek) &^ 0o022
+	if fi.Mode()&(fs.ModePerm|fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) == yeni {
 		return nil
 	}
-	return os.Chmod(p, m.Perm()|gerek|m&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky))
+	return os.Chmod(p, yeni)
 }
