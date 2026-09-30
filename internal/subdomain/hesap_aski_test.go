@@ -24,6 +24,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
+
+	"girginospanel/internal/provisioner"
 )
 
 const (
@@ -321,4 +323,59 @@ func TestHesapAskida_AltAlanGidisDonus_AyniVhost(t *testing.T) {
 	if sonra := kur(); sonra != once {
 		t.Fatalf("askıdan alınınca vhost askı öncesiyle AYNI olmalı:\n--- önce\n%s\n--- sonra\n%s", once, sonra)
 	}
+}
+
+// 🔴 Olustur askı okuması + vhost + kayıt eklemeyi render kilidi ALTINDA yapar:
+// kilit tutulurken (hesap askısının durum yazımı bu arada olur) oluşturma
+// hiçbir şey yazmaz; kilit bırakılınca GÜNCEL askıyı okur ve alt alan 503 doğar.
+// (Eskiden askı kilitsiz okunuyordu: araya giren askı yeni alt alanı yayında bırakıyordu.)
+func TestOlustur_RenderKilidiAltinda_GuncelAskiyiOkur(t *testing.T) {
+	db := ha_db(t)
+	ha_dikisler(t)
+	birak := provisioner.RenderKilidiAl()
+	bitti := make(chan struct{})
+	var kod int
+	var govde string
+	go func() {
+		defer close(bitti)
+		kod, govde = ha_cagir(t, db, http.MethodPost, "/domains/{id}/subdomain",
+			fmt.Sprintf("/domains/%d/subdomain", ha_domID), `{"alt_ad":"yaris"}`,
+			func(h *Handlers) http.HandlerFunc { return h.Olustur })
+	}()
+	time.Sleep(300 * time.Millisecond)
+	_, yazildi := os.Lstat(confPath(ha_sk, "yaris"))
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM subdomanlar WHERE alt_ad='yaris'`).Scan(&n)
+	ha_askiya(t, db, 1) // hesap askısı durumu kilit tutulurken yazıldı
+	birak()
+	<-bitti
+	if yazildi == nil || n != 0 {
+		t.Fatalf("kilit tutulurken vhost/kayıt yazılmamalı (conf=%v kayıt=%d)", yazildi == nil, n)
+	}
+	if kod != http.StatusOK {
+		t.Fatalf("oluşturma 200 beklenirdi: %d %s", kod, govde)
+	}
+	ha_askiVhostu(t, ha_conf(t, "yaris"), "yaris."+ha_alan)
+}
+
+// Hesap askısı alt alan listesini render kilidi ALTINDA okur: askı yazıldıktan
+// sonra kilidi tutan bir oluşturmanın eklediği alt alan da listeye girer ve 503 olur.
+func TestAltAlanVhostlari_ListeKilitAltinda(t *testing.T) {
+	db := ha_db(t)
+	ha_dikisler(t)
+	ha_askiya(t, db, 1)
+	birak := provisioner.RenderKilidiAl()
+	hata := make(chan error, 1)
+	go func() { hata <- AltAlanVhostlariniYenidenKur(context.Background(), db, ha_domID) }()
+	time.Sleep(300 * time.Millisecond)
+	// Kilidi tutan "oluşturma": askıyı okumadan yayında vhost + kayıt yazdı.
+	ha_altEkle(t, db, "gec")
+	if err := os.WriteFile(confPath(ha_sk, "gec"), []byte("server { fastcgi_pass yayinda; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	birak()
+	if err := <-hata; err != nil {
+		t.Fatal(err)
+	}
+	ha_askiVhostu(t, ha_conf(t, "gec"), "gec."+ha_alan)
 }

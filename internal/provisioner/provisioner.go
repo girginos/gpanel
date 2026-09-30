@@ -17,6 +17,7 @@ import (
 	"text/template"
 
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/sshaccess"
 )
 
 var (
@@ -1114,6 +1115,15 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		opts.PHPSocket = tenantSocket(sk)
 	}
 
+	// 🔴 Kilit, askı durumu OKUNMADAN alınır (eskiden yalnız yazma+reload'u
+	// sarıyordu): kilitten önce "askıda değil" okuyan eşzamanlı bir render (SSL
+	// yenileme, erişim nöbetçisi, SetPHP) hesap askısının 503'ünün ÜSTÜNE yayında
+	// vhost yazıp DB askıdayken siteyi açabiliyordu. Kilit altında okunan durum,
+	// yazılan dosyanın son hâlidir: askıyı yazan işlem ya önce biter (burada
+	// "askıda" okunur) ya da sonra kendi render'ını yapar.
+	renderKilidi.Lock()
+	defer renderKilidi.Unlock()
+
 	// Askıya-alma tutarlılığı: HER render hesabın askı durumunu tek kaynaktan okur.
 	if err := vhostAskiDurumu(&opts, sk); err != nil {
 		return err
@@ -1160,10 +1170,7 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	} else if err := vhostTmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("template render: %w", err)
 	}
-	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi).
-	renderKilidi.Lock()
-	defer renderKilidi.Unlock()
-
+	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi; yukarida alindi).
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	// Fail-safe: bozuk config diske kalirsa sonraki nginx -t/reload TUM nginx'i dusurur.
 	// Eski icerigi yedekle; nginx -t patlarsa geri yukle.
@@ -1375,6 +1382,13 @@ func Deprovision(alanAdi, sk string) error {
 
 	if !strings.HasPrefix(sk, "c_") {
 		return fmt.Errorf("güvenlik: c_ prefix'li olmayan kullanıcı silinmez")
+	}
+	// Hesap askısı artıkları (sk YENİDEN KULLANILABİLİR): askıda silinen hesabın
+	// saklanan crontab'ı ve SSH süresi yeni kiracıya miras kalmasın — aynı sk'yi
+	// alan hesap askıdan alınınca eski kiracının crontab'ı onun adına çalışırdı.
+	if gecerliSKAdi(sk) {
+		_ = os.Remove(filepath.Join(cronAskiDeposu, sk))
+		sshaccess.AskiArtiginiSil(sk)
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
@@ -1926,6 +1940,9 @@ func HealHomePerms() {
 	}
 }
 
+// cronAskiDeposu — askıdaki hesabın crontab'ının saklandığı dizin (spool dışında).
+const cronAskiDeposu = "/var/lib/girginospanel/cron-suspended"
+
 // SuspendUserRuntime: askıya alınan tenant'ın çalışan süreçlerini ve crontab'ını yönetir.
 //
 //	suspend=true  → crontab'ı cron spool'undan çıkar (crond çalıştırmaz) + tüm tenant
@@ -1937,13 +1954,12 @@ func SuspendUserRuntime(sk string, suspend bool) {
 	if !strings.HasPrefix(sk, "c_") {
 		return // güvenlik: yalnız tenant user
 	}
-	const suspendStore = "/var/lib/girginospanel/cron-suspended"
 	cronSpool := "/var/spool/cron/" + sk
-	stored := filepath.Join(suspendStore, sk)
+	stored := filepath.Join(cronAskiDeposu, sk)
 
 	if suspend {
 		if _, err := os.Stat(cronSpool); err == nil {
-			_ = os.MkdirAll(suspendStore, 0o700)
+			_ = os.MkdirAll(cronAskiDeposu, 0o700)
 			if err := os.Rename(cronSpool, stored); err != nil {
 				log.Printf("suspend runtime: crontab taşıma (%s): %v", sk, err)
 			}

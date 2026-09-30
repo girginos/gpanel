@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"girginospanel/internal/php"
+	"girginospanel/internal/provisioner"
 )
 
 // altAlan — hesabın bir alt alan adı kaydı.
@@ -46,8 +47,15 @@ func altAlanlar(ctx context.Context, db *sql.DB, domainID int64) ([]altAlan, err
 // kaynaktan okunur: hesap askıdaysa hepsi 503 olur; askıdan alınca her biri
 // kendi ayarlarıyla (PHP havuzu, SSL, web sunucu, erişim/koruma) aynen döner.
 // Bir alt alan düşse bile ötekiler denenir; hatalar birlikte döner.
+//
+// 🔴 Liste render kilidi ALTINDA okunur: Olustur askı okuması + vhost + kayıt
+// eklemeyi aynı kilitte yapar. Askı DB'ye yazıldıktan sonra alınan bu liste ya
+// yeni alt alanı içerir (burada 503'e çevrilir) ya da Olustur kilidi sonra alıp
+// "askıda" okur. (Üretici kilidi kendisi aldığı için liste okununca bırakılır.)
 func AltAlanVhostlariniYenidenKur(ctx context.Context, db *sql.DB, domainID int64) error {
+	birak := provisioner.RenderKilidiAl()
 	liste, err := altAlanlar(ctx, db, domainID)
+	birak()
 	if err != nil {
 		return err
 	}

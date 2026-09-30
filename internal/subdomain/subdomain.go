@@ -152,25 +152,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü sunucuda kurulu değil: "+phpSurum)
 		return
 	}
-	// 🔴 Hesap askıdaysa (tek kaynak) yeni alt alan adı da 503 askı vhost'uyla
-	// doğar — askıdaki hesaba yayında bir alan adı eklenemez. Askıdan alınca
-	// hesap askısı tüm alt alan adlarını tek üreticiden yeniden kurar.
-	askida, aerr := hesaplar.HesapAskida(r.Context(), h.DB, sk)
-	if aerr != nil {
-		log.Printf("subdomain %s: %v", tamAd, aerr)
-		httpx.WriteError(w, http.StatusInternalServerError, "hesap askı durumu okunamadı")
-		return
-	}
 	docroot := docrootOf(sk, tamAd)
-	govde := vhost(tamAd, docroot, socket, "")
-	if askida {
-		g, gerr := provisioner.AskiVhostGovde(tamAd, tamAd, "", "")
-		if gerr != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
-			return
-		}
-		govde = g
-	}
 	if err := os.MkdirAll(docroot, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "docroot oluşturulamadı")
 		return
@@ -183,26 +165,58 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	_, _ = komut("chown", "-R", sk+":"+sk, evKoku+"/"+sk+"/subdomains")
 	_, _ = komut("chcon", "-R", "-t", "httpd_sys_content_t", docroot)
 
-	// nginx server bloğu
-	conf := confPath(sk, altAd)
-	if err := os.WriteFile(conf, []byte(govde), 0o644); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
-		return
-	}
-	_, _ = komut("restorecon", conf)
-	if out, err := komut("nginx", "-t"); err != nil {
-		_ = os.Remove(conf) // rollback: bozuk conf'u kaldır (çalışan nginx etkilenmez)
-		_, _ = komut("nginx", "-t")
-		httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+komutHatasi(r, "subdomain.olustur", id, out))
-		return
-	}
-	_, _ = komut("systemctl", "reload", "nginx")
+	// 🔴 Askı okuması, vhost yazımı ve subdomanlar kaydı TEK render kilidi altında.
+	// Hesap askısı alt alan listesini de bu kilit altında okur
+	// (AltAlanVhostlariniYenidenKur): askı DB'ye yazıldıktan sonra ya burada
+	// "askıda" okunur (503 doğar) ya da kayıt listeye girer ve askı onu 503'e
+	// çevirir. Eskiden askı okunduktan sonra saniyeler süren chown/chcon ve kayıt
+	// ekleme arasında askı araya girerse yeni alt alan YAYINDA kalıyordu.
+	kaydedildi := func() bool {
+		birak := provisioner.RenderKilidiAl()
+		defer birak()
+		// Hesap askıdaysa (tek kaynak) yeni alt alan adı 503 askı vhost'uyla doğar;
+		// askıdan alınca hesap askısı tüm alt alan adlarını tek üreticiden yeniden kurar.
+		askida, aerr := hesaplar.HesapAskida(r.Context(), h.DB, sk)
+		if aerr != nil {
+			log.Printf("subdomain %s: %v", tamAd, aerr)
+			httpx.WriteError(w, http.StatusInternalServerError, "hesap askı durumu okunamadı")
+			return false
+		}
+		govde := vhost(tamAd, docroot, socket, "")
+		if askida {
+			g, gerr := provisioner.AskiVhostGovde(tamAd, tamAd, "", "")
+			if gerr != nil {
+				httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
+				return false
+			}
+			govde = g
+		}
 
-	if _, err := h.DB.Exec(`INSERT INTO subdomanlar (domain_id, alt_ad, tam_ad, php_surum) VALUES (?,?,?,?)`,
-		id, altAd, tamAd, phpSurum); err != nil {
-		_ = os.Remove(conf)
+		// nginx server bloğu
+		conf := confPath(sk, altAd)
+		if err := os.WriteFile(conf, []byte(govde), 0o644); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
+			return false
+		}
+		_, _ = komut("restorecon", conf)
+		if out, err := komut("nginx", "-t"); err != nil {
+			_ = os.Remove(conf) // rollback: bozuk conf'u kaldır (çalışan nginx etkilenmez)
+			_, _ = komut("nginx", "-t")
+			httpx.WriteError(w, http.StatusInternalServerError, "nginx doğrulanamadı: "+komutHatasi(r, "subdomain.olustur", id, out))
+			return false
+		}
 		_, _ = komut("systemctl", "reload", "nginx")
-		httpx.WriteError(w, http.StatusInternalServerError, "kayıt eklenemedi")
+
+		if _, err := h.DB.Exec(`INSERT INTO subdomanlar (domain_id, alt_ad, tam_ad, php_surum) VALUES (?,?,?,?)`,
+			id, altAd, tamAd, phpSurum); err != nil {
+			_ = os.Remove(conf)
+			_, _ = komut("systemctl", "reload", "nginx")
+			httpx.WriteError(w, http.StatusInternalServerError, "kayıt eklenemedi")
+			return false
+		}
+		return true
+	}()
+	if !kaydedildi {
 		return
 	}
 	// DNS A kaydı (parent zone'a) + zone yaz

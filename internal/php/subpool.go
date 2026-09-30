@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"girginospanel/internal/provisioner"
 )
 
 // SubPoolName: alt alan havuz/pool adı. Pool bölümü adıdır (Linux kullanıcısı DEĞİL).
@@ -191,6 +193,9 @@ func RemoveNamedPool(poolName string) {
 			_ = os.Remove(p)
 			seen[sb.Service] = true
 		}
+		// Hesap askıdayken saklanan kopya (yüklenmez → reload gerekmez): kalırsa
+		// aynı id'li havuz askıdan alınınca geri yüklenirdi.
+		_ = os.Remove(p + provisioner.AskiHavuzEki)
 	}
 	for svc := range seen {
 		_, _ = exec.Command("systemctl", "reload-or-restart", svc).CombinedOutput()

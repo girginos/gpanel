@@ -95,3 +95,12 @@ func HesapGirisKilidi(sk string, kilit bool) error {
 	_ = os.Remove(depo)
 	return nil
 }
+
+// AskiArtiginiSil — hesap silinirken askı öncesi SSH süresi deposunu kaldırır
+// (sk yeniden kullanılabilir; bkz. provisioner.Deprovision).
+func AskiArtiginiSil(sk string) {
+	if !gecerliSK(sk) {
+		return
+	}
+	_ = os.Remove(filepath.Join(girisDepo, sk))
+}

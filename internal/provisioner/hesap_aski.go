@@ -70,10 +70,10 @@ func AskiVhostGovde(alanAdi, sunucuAdlari, certPath, keyPath string) (string, er
 
 // ── PHP-FPM havuzlarının askısı ─────────────────────────────────────────────
 
-// askiHavuzEki — askıdaki hesabın paylaşılan-master havuz dosyası bu ekle
+// AskiHavuzEki — askıdaki hesabın paylaşılan-master havuz dosyası bu ekle
 // saklanır: php-fpm yalnız "*.conf" içerir (.bak ile aynı ilke) → havuz YÜKLENMEZ,
 // içerik ise bayt bayt korunur ve askıdan alınınca aynen geri gelir.
-const askiHavuzEki = ".askida"
+const AskiHavuzEki = ".askida"
 
 // Dış etkili adımlar (systemctl, restorecon, havuz dizinleri, per-tenant
 // servis durumu). Testler sahteyle değiştirir: ana makinenin php-fpm'ine ve
@@ -162,7 +162,7 @@ func paylasilanHavuzlarAski(adlar []string, askida bool) error {
 		degisti := false
 		for _, ad := range adlar {
 			etkin := filepath.Join(dizin, ad+".conf")
-			sakli := etkin + askiHavuzEki
+			sakli := etkin + AskiHavuzEki
 			kaynak, hedef := etkin, sakli
 			if !askida {
 				kaynak, hedef = sakli, etkin
@@ -199,6 +199,31 @@ func paylasilanHavuzlarAski(adlar []string, askida bool) error {
 		}
 	}
 	return errors.Join(hatalar...)
+}
+
+// askiHavuzArtiklariniSil — hesap silinirken askıda saklanan havuz dosyalarını
+// (<sk>.conf.askida ve alt alan <sk>_s<id>.conf.askida) her paylaşılan master
+// dizininden kaldırır. 🔴 sk YENİDEN KULLANILABİLİR (Deprovision): artık kalırsa
+// aynı sk'yi alan yeni kiracı askıdan alınınca eski kiracının havuzu (.askida →
+// .conf) paylaşılan master'a yüklenirdi. Yüklenmeyen dosyalar olduğundan reload
+// gerekmez.
+func askiHavuzArtiklariniSil(sk string) {
+	if !strings.HasPrefix(sk, "c_") || !gecerliSKAdi(sk) {
+		return
+	}
+	for dizin := range askiHavuzDizini() {
+		adaylar, _ := filepath.Glob(filepath.Join(dizin, sk+"_s*.conf"+AskiHavuzEki))
+		adaylar = append(adaylar, filepath.Join(dizin, sk+".conf"+AskiHavuzEki))
+		for _, yol := range adaylar {
+			ad := strings.TrimSuffix(filepath.Base(yol), ".conf"+AskiHavuzEki)
+			if !gecerliHavuzAdi(sk, ad) {
+				continue
+			}
+			if err := os.Remove(yol); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Printf("hesap silme: askıdaki havuz artığı silinemedi (%s): %v", ad, err)
+			}
+		}
+	}
 }
 
 // tenantFPMAski — per-tenant FPM servisini durdurur+devre dışı bırakır / geri açar.

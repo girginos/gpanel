@@ -271,7 +271,7 @@ func TestPHPHavuzAski_PaylasilanHavuz_GidisDonus(t *testing.T) {
 	}
 	ha_yok(t, ana1)
 	ha_yok(t, alt1)
-	if ha_oku(t, ana1+askiHavuzEki) != "[c_hapool]\npm = static\n" || ha_oku(t, alt1+askiHavuzEki) != "[c_hapool_s7]\n" {
+	if ha_oku(t, ana1+AskiHavuzEki) != "[c_hapool]\npm = static\n" || ha_oku(t, alt1+AskiHavuzEki) != "[c_hapool_s7]\n" {
 		t.Fatal("askıdaki havuz içeriği korunmalı")
 	}
 	if ha_oku(t, komsu) != "[c_hapoolx]\n" || ha_oku(t, bak) != "[yedek]\n" {
@@ -294,7 +294,7 @@ func TestPHPHavuzAski_PaylasilanHavuz_GidisDonus(t *testing.T) {
 	if ha_oku(t, ana1) != "[c_hapool]\npm = static\n" || ha_oku(t, alt1) != "[c_hapool_s7]\n" {
 		t.Fatal("askıdan alınca havuzlar bayt bayt geri gelmeli")
 	}
-	ha_yok(t, ana1+askiHavuzEki)
+	ha_yok(t, ana1+AskiHavuzEki)
 	ha_komutVar(t, h, "systemctl reload-or-restart php-fpm")
 }
 
@@ -303,14 +303,14 @@ func TestPHPHavuzAski_IkiKopya_GuncelKalir(t *testing.T) {
 	h := ha_havuzDikis(t, false, nil)
 	ana := filepath.Join(h.dizin1, ha_sk+".conf")
 	ha_yaz(t, ana, "yeni\n")
-	ha_yaz(t, ana+askiHavuzEki, "eski\n")
+	ha_yaz(t, ana+AskiHavuzEki, "eski\n")
 	if err := PHPHavuzAski(nil, 1, ha_sk, "8.3", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if ha_oku(t, ana) != "yeni\n" {
 		t.Fatal("güncel havuz korunmalı")
 	}
-	ha_yok(t, ana+askiHavuzEki)
+	ha_yok(t, ana+AskiHavuzEki)
 }
 
 // Per-tenant FPM: askıda disable --now (açılışta da başlamaz), askıdan alınca
@@ -348,5 +348,79 @@ func TestPHPHavuzAski_YabanciHavuzReddedilir(t *testing.T) {
 	}
 	if ha_oku(t, komsu) != "x" || len(*h.komutlar) != 0 {
 		t.Fatal("reddedilen istekte hiçbir şeye dokunulmamalı")
+	}
+}
+
+// Askıdan almada per-tenant servis başlar ama SOKET oluşmazsa paylaşılan düzene
+// güvenli dönüş yapılır (yoksa site 502'de kalırdı).
+func TestPHPHavuzAski_PerTenant_SoketYoksaPaylasilana(t *testing.T) {
+	h := ha_havuzDikis(t, true, nil)
+	askiSoketBekle = func(string) bool { return false }
+	if err := PHPHavuzAski(nil, 1, ha_sk, "8.3", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	ha_komutVar(t, h, "systemctl enable --now php-fpm-c_hapool.service")
+	if *h.paylasilana != 1 {
+		t.Fatal("soket oluşmazsa paylaşılan düzene dönülmeli")
+	}
+	for _, k := range *h.komutlar {
+		if strings.HasPrefix(k, "restorecon") {
+			t.Fatalf("başarısız başlatmada soket dizini etiketlenmemeli: %v", *h.komutlar)
+		}
+	}
+}
+
+// Askıya alırken per-tenant servis durdurulurken watchdog "ölü servis" sanıp
+// yeniden başlatmasın: disable anında sk uçuşta (fpmInflight) işaretli, sonra değil.
+func TestPHPHavuzAski_PerTenant_DurdururkenUcusta(t *testing.T) {
+	h := ha_havuzDikis(t, true, nil)
+	ucusta := false
+	askiKomut = func(ad string, arg ...string) ([]byte, error) {
+		k := ad + " " + strings.Join(arg, " ")
+		*h.komutlar = append(*h.komutlar, k)
+		if strings.HasPrefix(k, "systemctl disable --now php-fpm-") {
+			_, ucusta = fpmInflight.Load(ha_sk)
+		}
+		return nil, nil
+	}
+	if err := PHPHavuzAski(nil, 1, ha_sk, "8.3", nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if !ucusta {
+		t.Fatal("durdurma sırasında hesap uçuşta işaretli olmalı (watchdog dokunmasın)")
+	}
+	if _, kaldi := fpmInflight.Load(ha_sk); kaldi {
+		t.Fatal("işaret işlem bitince kalkmalı")
+	}
+}
+
+// Hesap silinirken askıda saklanan havuzlar (ana + alt alan) her master dizininden
+// gider; başka hesabın (önek benzeri dahil) dosyalarına ve yüklü havuzlara dokunulmaz.
+func TestAskiHavuzArtiklariniSil(t *testing.T) {
+	h := ha_havuzDikis(t, false, nil)
+	silinecek := []string{
+		filepath.Join(h.dizin1, ha_sk+".conf"+AskiHavuzEki),
+		filepath.Join(h.dizin1, ha_sk+"_s7.conf"+AskiHavuzEki),
+		filepath.Join(h.dizin2, ha_sk+"_s12.conf"+AskiHavuzEki),
+	}
+	kalacak := []string{
+		filepath.Join(h.dizin1, ha_sk+"x.conf"+AskiHavuzEki), // başka hesap (önek benzeri)
+		filepath.Join(h.dizin1, "c_diger.conf"+AskiHavuzEki),
+		filepath.Join(h.dizin2, "c_diger_s3.conf"),
+	}
+	for _, y := range append(append([]string{}, silinecek...), kalacak...) {
+		ha_yaz(t, y, "x")
+	}
+	askiHavuzArtiklariniSil(ha_sk)
+	for _, y := range silinecek {
+		ha_yok(t, y)
+	}
+	for _, y := range kalacak {
+		if ha_oku(t, y) != "x" {
+			t.Fatalf("%s değişmemeli", y)
+		}
+	}
+	if len(*h.komutlar) != 0 {
+		t.Fatalf("yüklü olmayan dosyalar için reload gerekmez: %v", *h.komutlar)
 	}
 }

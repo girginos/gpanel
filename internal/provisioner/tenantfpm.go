@@ -1625,6 +1625,8 @@ func TeardownTenantFPM(sk string) {
 			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
 		}
 	}
+	// Askıda silinen hesabın saklanan (.askida) havuzları da gider.
+	askiHavuzArtiklariniSil(sk)
 	// C: domain silindi -> "izolasyon kaybi" uyarisi bayat kalmasin.
 	izolasyonKaybiTemizle(sk)
 }
