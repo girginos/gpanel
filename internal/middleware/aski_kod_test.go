@@ -86,6 +86,31 @@ func TestAskiKodu_AbonelikAskisi(t *testing.T) {
 	askiBekle(t, mwDo(h, http.MethodGet, "/domains/42", "Bearer "+mwMusteriToken(t, 5, 42, mwSecret)))
 }
 
+// redYaz'dan geçen ama askı OLMAYAN 403'ler ("hesap bulunamadı": oturum_cache.go ve
+// musteri_oturum.go) kodsuz kalır. redYaz yalnız 403 durumuna bakıp koda çevirirse silinmiş
+// hesabın oturumu da askı sayfasına düşerdi; ayrım (403 + HesapAskidaMesaj) mesajdadır.
+func TestAskiKodu_HesapBulunamadiKodsuz(t *testing.T) {
+	h := askiRouter(t)
+
+	// Bayi: users satırı yok → 403 "hesap bulunamadı", kodsuz.
+	oturumSorguFn = func(context.Context, int64) (bool, string, int64, error) { return false, "", 0, nil }
+	tok, err := auth.IssueResellerAt(mwSecret, 3600, 7, "bayi7", 7, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := mwDo(h, http.MethodGet, "/domains/42", "Bearer "+tok)
+	if b := govdeOku(t, rec); rec.Code != http.StatusForbidden || b.Kod != "" || b.Hata != "hesap bulunamadı" {
+		t.Fatalf("bayi hesap-yok 403 kodsuz olmalı: %d %q", rec.Code, rec.Body)
+	}
+
+	// Müşteri: ftp_accounts satırı yok → 403 "hesap bulunamadı", kodsuz.
+	musteriSorguFn = func(context.Context, int64) (bool, string, int64, error) { return false, "", 0, nil }
+	rec = mwDo(h, http.MethodGet, "/domains/42", "Bearer "+mwMusteriToken(t, 5, 42, mwSecret))
+	if b := govdeOku(t, rec); rec.Code != http.StatusForbidden || b.Kod != "" || b.Hata != "hesap bulunamadı" {
+		t.Fatalf("müşteri hesap-yok 403 kodsuz olmalı: %d %q", rec.Code, rec.Body)
+	}
+}
+
 // Askı dışı redler kodsuz kalır: ön yüz onları askı sayfasına çevirmemeli.
 func TestAskiKodu_AskiDisiRedlerKodsuz(t *testing.T) {
 	h := askiRouter(t)
