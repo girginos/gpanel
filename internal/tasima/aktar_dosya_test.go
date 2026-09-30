@@ -1064,14 +1064,25 @@ func TestDosyalariAktar_IzinlerSuzulur(t *testing.T) {
 	o.dizin(t, ph)
 	s := yrYeniUzak(t, yrYabanciUID)
 	s.agaclar = map[string]func(*testing.T, string){yrUzakKok: func(t *testing.T, d string) {
-		yrYaz(t, filepath.Join(d, "suid"), "#!/bin/sh\n", 0o4777)
-		yrYaz(t, filepath.Join(d, "herkes.txt"), "herkes\n", 0o666)
-		yrYaz(t, filepath.Join(d, "ortak", "ic.txt"), "ic\n", 0o2775)
-		// Grup-çalıştırmasız setgid ve sticky'yi dosyada chown silmez.
-		yrYaz(t, filepath.Join(d, "kilit"), "kilit\n", 0o2644)
-		yrYaz(t, filepath.Join(d, "yapiskan"), "yapiskan\n", 0o1644)
-		if err := os.Chmod(filepath.Join(d, "ortak"), 0o3777); err != nil {
+		// Go'da özel bitler izin sayısında değil ayrı bayraklardadır (0o4777 setuid DEĞİLDİR).
+		for ad, mod := range map[string]fs.FileMode{
+			"suid":         0o777 | fs.ModeSetuid,
+			"herkes.txt":   0o666,
+			"ortak/ic.txt": 0o775 | fs.ModeSetgid,
+			// Grup-çalıştırmasız setgid ve sticky'yi dosyada chown silmez.
+			"kilit":    0o644 | fs.ModeSetgid,
+			"yapiskan": 0o644 | fs.ModeSticky,
+		} {
+			yrYaz(t, filepath.Join(d, ad), ad+"\n", mod)
+		}
+		if err := os.Chmod(filepath.Join(d, "ortak"), 0o777|fs.ModeSetgid|fs.ModeSticky); err != nil {
 			t.Fatal(err)
+		}
+		// Fikstür anlamlı: özel bitler gerçekten kaynakta.
+		for _, ad := range []string{"suid", "kilit", "yapiskan", "ortak"} {
+			if fi, err := os.Lstat(filepath.Join(d, ad)); err != nil || fi.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) == 0 {
+				t.Fatalf("fikstür: %s özel bitsiz: %v %v", ad, fi, err)
+			}
 		}
 	}}
 
