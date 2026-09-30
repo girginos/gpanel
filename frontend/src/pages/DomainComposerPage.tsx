@@ -59,63 +59,61 @@ export default function DomainComposerPage() {
     } finally { setCalisan(null) }
   }
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
-  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!d) return <div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div>
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-3xl mx-auto">
-        <Breadcrumb items={[
-          { etiket: cevir('Anasayfa'), href: '/' },
-          { etiket: cevir("Domainler"), href: '/domainler' },
-          { etiket: 'Composer' },
-        ]} />
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Composer</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          <span className="font-mono">{d.dizin}</span> {cevir("dizininde")} <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
-        </p>
+    <div>
+      <Breadcrumb items={[
+        { etiket: cevir('Anasayfa'), href: '/' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: 'Composer' },
+      ]} />
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">PHP Composer</h1>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+        <span className="font-mono">{d.dizin}</span> {cevir("dizininde")} <span className="font-mono">{d.kullanici}</span> {cevir("olarak çalışır.")}
+      </p>
 
-        {!d.kurulu ? (
-          <UyariKutusu ton="uyari">
-            {cevir(cevir("Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor."))}
-          </UyariKutusu>
-        ) : (
-          <>
-            <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <span className="text-xs font-mono text-slate-500">{d.surum}</span>
-                  <Badge variant="soft" color={d.composer_json ? 'success' : 'neutral'} className="ml-2">
-                    {d.composer_json && <Ikon d={I.onay} className="size-3 shrink-0 me-1" />}
-                    {d.composer_json ? cevir('composer.json bulundu') : cevir('composer.json yok')}
-                  </Badge>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button color="primary" boyut="sm" ikon={I.oynat} disabled={!!calisan} yukleniyor={calisan === 'install'} onClick={() => calistir('install')}>install</Button>
-                <Button color="primary" boyut="sm" ikon={I.indir} disabled={!!calisan} yukleniyor={calisan === 'update'} onClick={() => calistir('update')}>update</Button>
-                <Button variant="outlined" boyut="sm" ikon={I.terminal} disabled={!!calisan} yukleniyor={calisan === 'dump-autoload'} onClick={() => calistir('dump-autoload')}>dump-autoload</Button>
-                <Button variant="outlined" boyut="sm" ikon={I.yenile} disabled={!!calisan} yukleniyor={calisan === 'validate'} onClick={() => calistir('validate')}>validate</Button>
-                <Button variant="outlined" boyut="sm" ikon={I.goz} disabled={!!calisan} yukleniyor={calisan === 'show'} onClick={() => calistir('show')}>show</Button>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
-                  className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
-                <Button color="primary" boyut="sm" ikon={I.arti} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'require'} onClick={() => calistir('require', paket.trim())}>require</Button>
-                <Button color="error" variant="soft" boyut="sm" ikon={I.cop} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'remove'} onClick={() => calistir('remove', paket.trim())}>remove</Button>
+      {!d.kurulu ? (
+        <UyariKutusu ton="uyari">
+          {cevir(cevir("Composer sunucuda kurulu değil. Yönetici tarafından kurulması gerekiyor."))}
+        </UyariKutusu>
+      ) : (
+        <>
+          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4 shadow-xs">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <span className="text-xs font-mono text-slate-500">{d.surum}</span>
+                <Badge variant="soft" color={d.composer_json ? 'success' : 'neutral'} className="ml-2">
+                  {d.composer_json && <Ikon d={I.onay} className="size-3 shrink-0 me-1" />}
+                  {d.composer_json ? cevir('composer.json bulundu') : cevir('composer.json yok')}
+                </Badge>
               </div>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button color="primary" boyut="sm" ikon={I.oynat} disabled={!!calisan} yukleniyor={calisan === 'install'} onClick={() => calistir('install')}>install</Button>
+              <Button color="primary" boyut="sm" ikon={I.indir} disabled={!!calisan} yukleniyor={calisan === 'update'} onClick={() => calistir('update')}>update</Button>
+              <Button variant="outlined" boyut="sm" ikon={I.terminal} disabled={!!calisan} yukleniyor={calisan === 'dump-autoload'} onClick={() => calistir('dump-autoload')}>dump-autoload</Button>
+              <Button variant="outlined" boyut="sm" ikon={I.yenile} disabled={!!calisan} yukleniyor={calisan === 'validate'} onClick={() => calistir('validate')}>validate</Button>
+              <Button variant="outlined" boyut="sm" ikon={I.goz} disabled={!!calisan} yukleniyor={calisan === 'show'} onClick={() => calistir('show')}>show</Button>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input value={paket} onChange={e => setPaket(e.target.value)} placeholder={cevir("vendor/paket veya vendor/paket:^1.2")}
+                className="flex-1 px-3 py-1.5 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+              <Button color="primary" boyut="sm" ikon={I.arti} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'require'} onClick={() => calistir('require', paket.trim())}>require</Button>
+              <Button color="error" variant="soft" boyut="sm" ikon={I.cop} disabled={!!calisan || !paket.trim()} yukleniyor={calisan === 'remove'} onClick={() => calistir('remove', paket.trim())}>remove</Button>
+            </div>
+          </div>
 
-            {cikti && (
-              <div className="bg-dark-800 rounded-lg p-4 shadow-xs">
-                <pre className="text-xs font-mono text-slate-100 whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{cikti}</pre>
-              </div>
-            )}
-          </>
-        )}
+          {cikti && (
+            <div className="bg-dark-800 rounded-lg p-4 shadow-xs">
+              <pre className="text-xs font-mono text-slate-100 whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{cikti}</pre>
+            </div>
+          )}
+        </>
+      )}
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
-      </div>
+      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
     </div>
   )
 }

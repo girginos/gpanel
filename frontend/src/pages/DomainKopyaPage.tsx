@@ -65,55 +65,53 @@ export default function DomainKopyaPage() {
   }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-3xl mx-auto">
-        <Breadcrumb items={[
-          { etiket: 'Anasayfa', href: '/' },
-          { etiket: cevir("Domainler"), href: '/domainler' },
-          { etiket: 'Web Sitesini Kopyala' },
-        ]} />
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Web Sitesini Kopyala</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          {cevir(cevir("Sitenizin dosyalarının zaman-damgalı bir anlık-görüntüsünü"))} <span className="font-mono">~/kopyalar/</span> {cevir("altında oluşturur — değişiklik yapmadan önce güvenli bir yedek noktası.")}
-        </p>
+    <div>
+      <Breadcrumb items={[
+        { etiket: 'Anasayfa', href: '/' },
+        { etiket: cevir("Domainler"), href: '/domainler' },
+        { etiket: 'Web Sitesini Kopyala' },
+      ]} />
+      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">Web Sitesini Kopyala</h1>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+        {cevir(cevir("Sitenizin dosyalarının zaman-damgalı bir anlık-görüntüsünü"))} <span className="font-mono">~/kopyalar/</span> {cevir("altında oluşturur — değişiklik yapmadan önce güvenli bir yedek noktası.")}
+      </p>
 
-        <UyariKutusu ton="uyari" className="mb-4" kucuk>
-          Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
-        </UyariKutusu>
+      <UyariKutusu ton="uyari" className="mb-4" kucuk>
+        Bu araç yalnızca <b>{cevir(cevir("dosyaları"))}</b> {cevir(cevir("kopyalar (veritabanı dahil değildir). Tam yedek için"))} <b>{cevir("Yedekle ve Geri Yükle")}</b> {cevir(cevir("aracını kullanın."))}
+      </UyariKutusu>
 
-        <Card className="bg-white dark:bg-dark-700 p-5 mb-5 shadow-xs flex items-center justify-between">
-          <div className="text-sm text-slate-600 dark:text-slate-300">{cevir("public_html içeriğinden yeni bir kopya oluştur.")}</div>
-          <Button color="primary" ikon={I.kopya} onClick={olustur} yukleniyor={olusturuyor}>
-            {olusturuyor ? 'Kopyalanıyor…' : cevir("Kopya Oluştur")}
-          </Button>
-        </Card>
+      <Card className="bg-white dark:bg-dark-700 p-5 mb-5 shadow-xs flex items-center justify-between">
+        <div className="text-sm text-slate-600 dark:text-slate-300">{cevir("public_html içeriğinden yeni bir kopya oluştur.")}</div>
+        <Button color="primary" ikon={I.kopya} onClick={olustur} yukleniyor={olusturuyor}>
+          {olusturuyor ? 'Kopyalanıyor…' : cevir("Kopya Oluştur")}
+        </Button>
+      </Card>
 
-        <Card className="bg-white dark:bg-dark-700 p-5 shadow-xs">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Mevcut kopyalar</h3>
-          {yuk ? (
-            <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
-          ) : liste.length === 0 ? (
-            <div className="text-center py-8">
-              <Ikon d={I.klasor} className="h-7 w-7 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-              <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kopya yok.")}</p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-50 dark:divide-dark-600/50">
-              {liste.map(k => (
-                <li key={k.ad} className="flex items-center justify-between py-2.5">
-                  <div>
-                    <div className="font-mono text-sm text-slate-700 dark:text-slate-200">{k.ad}</div>
-                    <div className="text-xs text-slate-400">{k.tarih} · {k.boyut_mb} MB</div>
-                  </div>
-                  <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(k)}>{cevir("Sil")}</Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+      <Card className="bg-white dark:bg-dark-700 p-5 shadow-xs">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Mevcut kopyalar</h3>
+        {yuk ? (
+          <div className="text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
+        ) : liste.length === 0 ? (
+          <div className="text-center py-8">
+            <Ikon d={I.klasor} className="h-7 w-7 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+            <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kopya yok.")}</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-50 dark:divide-dark-600/50">
+            {liste.map(k => (
+              <li key={k.ad} className="flex items-center justify-between py-2.5">
+                <div>
+                  <div className="font-mono text-sm text-slate-700 dark:text-slate-200">{k.ad}</div>
+                  <div className="text-xs text-slate-400">{k.tarih} · {k.boyut_mb} MB</div>
+                </div>
+                <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(k)}>{cevir("Sil")}</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
-      </div>
+      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
     </div>
   )
 }

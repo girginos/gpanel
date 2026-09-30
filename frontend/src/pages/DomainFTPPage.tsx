@@ -59,7 +59,7 @@ export default function DomainFTPPage() {
   }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[900px]">
+    <div>
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '...', href: `/abonelikler/${id}` },
