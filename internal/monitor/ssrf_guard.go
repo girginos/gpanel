@@ -21,9 +21,16 @@
 // sunucunun kendi herkese açık IP'sine çözülür; red, her yerel sitenin sağlık
 // raporunu "erişilemez" yapardı. Sınır: URL sabit https://<alan_adi> ya da
 // http://<alan_adi> (FQDN-regex, port/yol yok), salt GET, kimlik bilgisi yok;
-// loopback/özel/metadata yine reddedilir. Açık kalan: bir site kendi IP'sinin
-// başka bir portuna yönlendirirse (ör. :8443) probe onu da yoklar — bu da
-// taşımadan önceki davranıştır.
+// loopback/özel/metadata yine reddedilir.
+//
+// Kendi adres YALNIZ 80/443'te açıktır: bağlantı (ilk istek ya da yönlendirme)
+// başka bir porta gidiyorsa kendi adres izni OLMAYAN kapı kullanılır. Yoksa
+// barındırılan bir site kendi IP'sinin başka bir portuna (ör. :8443 panel ya
+// da yalnız 0.0.0.0'a bağlı iç servis) yönlendirip probe'u kör port taramasına
+// çevirebilirdi. Karar dial ANINDA, çözülen IP üzerinden verilir: isimle
+// verilen hedef de (kendi IP'ye çözülen ad) kapsanır. Kendi-adres kümesinin
+// sınırı (yalnız arayüz adresleri; 1:1 NAT/floating IP ve local route
+// önekleri kapsanmaz) için bkz. agkapi paket belgesi.
 package monitor
 
 import (
@@ -35,19 +42,69 @@ import (
 	"girginospanel/internal/agkapi"
 )
 
+// probeKapilari — probe'un iki kapısı: standart portlar (80/443) için kendi
+// adres izinli, diğer portlar için izinsiz. Başka her ayar aynı (katı mod,
+// 5 sn bağlantı zaman aşımı, keep-alive kapalı).
+type probeKapilari struct {
+	standart *agkapi.Kapi
+	diger    *agkapi.Kapi
+}
+
+// yeniProbeKapilari — ayar nil değilse ortak Secenek'i değiştirir (testler
+// Cozucu/KendiAdresKaynagi dikişi verir); KendiAdresIzni burada belirlenir.
+func yeniProbeKapilari(ayar func(*agkapi.Secenek)) *probeKapilari {
+	sec := agkapi.Secenek{BaglantiZamanasimi: 5 * time.Second, KeepAlive: -1}
+	if ayar != nil {
+		ayar(&sec)
+	}
+	std, dgr := sec, sec
+	std.KendiAdresIzni, dgr.KendiAdresIzni = true, false
+	return &probeKapilari{standart: agkapi.Yeni(std), diger: agkapi.Yeni(dgr)}
+}
+
+// kapi — porta göre kapı: yalnız 80 ve 443 kendi adrese izinli.
+func (p *probeKapilari) kapi(port string) *agkapi.Kapi {
+	if port == "80" || port == "443" {
+		return p.standart
+	}
+	return p.diger
+}
+
+// DialContext — "çöz → doğrula → aynı IP'ye bağlan" (bkz. agkapi.Kapi.DialContext).
+func (p *probeKapilari) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	return p.kapi(port).DialContext(ctx, network, addr)
+}
+
+// YonlendirmeGuard — 5-yönlendirme sınırı + IP-literal izinsiz hedefe erken
+// red; port URL'de yoksa şemanın varsayılanı (isim→kendi adres:port zaten
+// DialContext'te yakalanır).
+func (p *probeKapilari) YonlendirmeGuard(req *http.Request, via []*http.Request) error {
+	port := req.URL.Port()
+	if port == "" {
+		switch req.URL.Scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+	return p.kapi(port).YonlendirmeGuard(req, via)
+}
+
 // probeKapisi — probe Transport'unun TEK çıkış kapısı.
-var probeKapisi = agkapi.Yeni(agkapi.Secenek{BaglantiZamanasimi: 5 * time.Second, KeepAlive: -1, KendiAdresIzni: true})
+var probeKapisi = yeniProbeKapilari(nil)
 
-// ipDahiliMi — IP loopback/özel/link-local(=metadata)/multicast/rezerve mi?
-func ipDahiliMi(ip net.IP) bool { return agkapi.IPDahiliMi(ip) }
-
-// guvenliDialContext — "çöz → doğrula → aynı IP'ye bağlan" (bkz. agkapi.Kapi.DialContext).
+// guvenliDialContext — probe Transport'unun DialContext'i.
 func guvenliDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	return probeKapisi.DialContext(ctx, network, addr)
 }
 
 // yonlendirmeGuard — CheckRedirect: 5-yönlendirme sınırı KORUNUR; ayrıca
-// IP-literal dahili hedefe erken red (isim→dahili zaten guvenliDialContext'te).
+// IP-literal dahili hedefe ve kendi adresin standart dışı portuna erken red.
 func yonlendirmeGuard(req *http.Request, via []*http.Request) error {
 	return probeKapisi.YonlendirmeGuard(req, via)
 }

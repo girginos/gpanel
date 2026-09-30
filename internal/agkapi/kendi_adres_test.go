@@ -33,7 +33,11 @@ func kendiAdresleriniAyarla(t *testing.T, f func() ([]net.Addr, error)) {
 	t.Cleanup(func() { dikisDegistir(eski) })
 }
 
-// sabitAdresler — CIDR biçimli arayüz adresleri döndüren dikiş; sayac okuma sayısını tutar.
+// SabitAdresler — arayüz adresleri döndüren dikiş; sayac okuma sayısını tutar.
+// "a.b.c.d/n" v4 CIDR'ler Linux'taki net.InterfaceAddrs gibi 16 BAYTLIK IP
+// (net.IPv4 → ::ffff:a.b.c.d) + 4 baytlık maskeyle üretilir: kendi-adres
+// kümesindeki Unmap normalizasyonu gerçek arayüze bağlı olmadan sınanır.
+// Öneksiz "a.b.c.d" 4 baytlık *net.IPAddr olarak üretilir (diğer dal).
 func sabitAdresler(sayac *atomic.Int64, cidrler ...string) func() ([]net.Addr, error) {
 	return func() ([]net.Addr, error) {
 		if sayac != nil {
@@ -41,15 +45,36 @@ func sabitAdresler(sayac *atomic.Int64, cidrler ...string) func() ([]net.Addr, e
 		}
 		out := make([]net.Addr, 0, len(cidrler))
 		for _, c := range cidrler {
+			if !strings.Contains(c, "/") {
+				out = append(out, &net.IPAddr{IP: net.IP(netip.MustParseAddr(c).AsSlice())})
+				continue
+			}
 			p := netip.MustParsePrefix(c)
+			if p.Addr().Is4() {
+				b := p.Addr().As4()
+				out = append(out, &net.IPNet{IP: net.IPv4(b[0], b[1], b[2], b[3]), Mask: net.CIDRMask(p.Bits(), 32)})
+				continue
+			}
 			out = append(out, &net.IPNet{IP: net.IP(p.Addr().AsSlice()), Mask: net.CIDRMask(p.Bits(), p.Addr().BitLen())})
 		}
 		return out, nil
 	}
 }
 
-// Sunucunun arayüzleri: loopback, bir herkese açık v4 + v6 ve bir özel LAN adresi.
-var ornekArayuzler = []string{"127.0.0.1/8", "::1/128", "95.216.10.20/26", "2a01:4f9:3a:1234::2/64", "10.20.30.40/24"}
+// Sunucunun arayüzleri: loopback, bir herkese açık v4 (Linux biçimi, 16 bayt)
+// + v6, bir özel LAN adresi ve 4 baytlık *net.IPAddr olarak ikinci bir herkese açık v4.
+var ornekArayuzler = []string{"127.0.0.1/8", "::1/128", "95.216.10.20/26", "2a01:4f9:3a:1234::2/64", "10.20.30.40/24", "95.216.10.30"}
+
+// Dikiş gerçekten Linux biçimini üretiyor (yoksa Unmap testi boşa döner).
+func TestSabitAdresler_LinuxBicimi(t *testing.T) {
+	adresler, _ := sabitAdresler(nil, "95.216.10.20/26", "95.216.10.30")()
+	if n, ok := adresler[0].(*net.IPNet); !ok || len(n.IP) != net.IPv6len || len(n.Mask) != net.IPv4len {
+		t.Fatalf("v4 CIDR 16 baytlık IP + 4 baytlık maske olmalı: %#v", adresler[0])
+	}
+	if a, ok := adresler[1].(*net.IPAddr); !ok || len(a.IP) != net.IPv4len {
+		t.Fatalf("öneksiz v4 4 baytlık *net.IPAddr olmalı: %#v", adresler[1])
+	}
+}
 
 func TestKendiAdres_KatiVeIcAgdaRed(t *testing.T) {
 	kendiAdresleriniAyarla(t, sabitAdresler(nil, ornekArayuzler...))
@@ -66,17 +91,28 @@ func TestKendiAdres_KatiVeIcAgdaRed(t *testing.T) {
 		}
 	}
 	kati := Yeni(Secenek{})
-	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2", "127.0.0.1", "10.20.30.40"} {
+	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2", "127.0.0.1", "10.20.30.40", "95.216.10.30"} {
 		red(kati, "katı", s)
 	}
-	// Yardımcı tek başına da (normalize edilmemiş 16 baytlık v4 dahil) doğru.
-	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2"} {
+	// Yardımcı tek başına da (normalize edilmemiş 16 baytlık v4 ve IPv6 içine
+	// gömülü biçimler dahil) doğru. 95.216.10.20 = 5fd8:0a14.
+	gomuluKendi := []string{
+		"::5fd8:a14", "::ffff:0:5fd8:a14", "64:ff9b::5fd8:a14", "64:ff9b:1::5fd8:a14",
+		"64:ff9b:1:5fd8:a:1400::", "2002:5fd8:a14::1",
+	}
+	for _, s := range append([]string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2", "95.216.10.30"}, gomuluKendi...) {
 		if !kendiAdresiMi(net.ParseIP(s)) {
 			t.Errorf("kendiAdresiMi(%s) = false", s)
 		}
 	}
-	if kendiAdresiMi(net.ParseIP("95.216.10.21")) {
-		t.Error("kendiAdresiMi(95.216.10.21) = true")
+	for _, s := range []string{"95.216.10.21", "::5fd8:a15", "64:ff9b:1::5fd8:a15", "::"} {
+		if kendiAdresiMi(net.ParseIP(s)) {
+			t.Errorf("kendiAdresiMi(%s) = true", s)
+		}
+	}
+	for _, s := range gomuluKendi {
+		red(kati, "katı", s)
+		red(Yeni(Secenek{IcAgIzni: true}), "iç ağ", s)
 	}
 	// Aynı alt ağdaki komşu kendi adres DEĞİLDİR.
 	acik(kati, "katı", "95.216.10.21")
@@ -187,5 +223,37 @@ func TestKendiAdres_OkumaHatasi(t *testing.T) {
 	}
 	if err := k.Denetle(net.ParseIP("95.216.10.20")); !errors.Is(err, ErrReddedildi) {
 		t.Errorf("bayat kümedeki kendi adres reddedilmeli: %v", err)
+	}
+}
+
+// Secenek.KendiAdresKaynagi: kapı başına dikiş (monitor testleri bununla
+// gerçek arayüzden bağımsız kurar). Paylaşılan önbelleğe dokunmaz, her
+// denetimde okunur; okuma hatası güvenli tarafta red.
+func TestKendiAdres_KapiKaynagi(t *testing.T) {
+	var okuma atomic.Int64
+	kaynak := sabitAdresler(&okuma, "95.216.10.20/26", "2a01:4f9:3a:1234::2/64")
+	k := Yeni(Secenek{KendiAdresKaynagi: kaynak})
+	for _, s := range []string{"95.216.10.20", "::ffff:95.216.10.20", "2a01:4f9:3a:1234::2", "64:ff9b:1::5fd8:a14"} {
+		if err := k.Denetle(net.ParseIP(s)); !errors.Is(err, ErrReddedildi) {
+			t.Errorf("kaynaktaki kendi adres %s reddedilmeliydi: %v", s, err)
+		}
+	}
+	if err := k.Denetle(net.ParseIP("95.216.10.21")); err != nil {
+		t.Errorf("kaynakta olmayan adres açık olmalı: %v", err)
+	}
+	if n := okuma.Load(); n != 5 {
+		t.Errorf("kaynak her denetimde okunmalı: %d okuma (5 beklenirdi)", n)
+	}
+	if err := Yeni(Secenek{KendiAdresKaynagi: kaynak, KendiAdresIzni: true}).Denetle(net.ParseIP("95.216.10.20")); err != nil {
+		t.Errorf("KendiAdresIzni kaynaktaki adresi açmalı: %v", err)
+	}
+	hatali := Yeni(Secenek{KendiAdresKaynagi: func() ([]net.Addr, error) { return nil, errors.New("okunamadı") }})
+	if err := hatali.Denetle(net.ParseIP("8.8.8.8")); !errors.Is(err, ErrReddedildi) {
+		t.Errorf("kaynak okunamazken red bekleniyordu: %v", err)
+	}
+	// Kapı kaynağı paylaşılan önbelleği etkilemez.
+	kendiAdresleriniAyarla(t, sabitAdresler(nil, "127.0.0.1/8"))
+	if err := Yeni(Secenek{}).Denetle(net.ParseIP("95.216.10.20")); err != nil {
+		t.Errorf("paylaşılan kümede olmayan adres açık olmalı: %v", err)
 	}
 }

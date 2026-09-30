@@ -25,6 +25,14 @@
 // loopback gibi reddedilir: yoksa bir kullanıcı sunucunun herkese açık IP'sini
 // (ya da ona çözülen bir adı) yazarak panelin 0.0.0.0'a bağlı servislerine
 // kendi içinden ulaşırdı. Yalnız Secenek.KendiAdresIzni (monitor) bunu açar.
+// SINIR (açık kalan): kendi-adres kümesi YALNIZ arayüz adresleridir
+// (net.InterfaceAddrs, 30 sn önbellek). Arayüzde görünmeyen adresler
+// kapsanmaz: 1:1 NAT arkasındaki bulut elastic/floating IP ve yük dengeleyici
+// VIP'i (hairpin NAT ile panelin 0.0.0.0'a bağlı servislerine dönebilir) ile
+// yerel yönlendirme tablosundaki local önekler (AnyIP: "ip route add local
+// <önek> dev lo"). Hetzner adanmış filoda IP arayüzde durduğu için bugün
+// pratik etkisi düşük; gerekirse panelin yapılandırılmış herkese açık IP'leri
+// ve "table local" önekleri ek kaynak olarak katılmalı.
 package agkapi
 
 import (
@@ -67,7 +75,15 @@ func cidrler(araliklar ...string) []*net.IPNet {
 // ozelCIDRler — net.IP predikatlarının (IsPrivate/IsLoopback/IsLinkLocal*/
 // IsMulticast/IsUnspecified) KAPSAMADIĞI ek dahili/rezerve aralıklar.
 // Metadata (169.254.169.254) zaten IsLinkLocalUnicast'e takılır.
+//
+// 🔴 IPv6 içine IPv4 gömen TÜM biçimler dahilidir (gömülü adres ağda bir
+// çevirici/tünel üzerinden iç IPv4 ağına dönüşebilir); gömülü adres ayrıca
+// gomuluV4ler ile çıkarılıp metadata ve kendi-adres denetiminden geçirilir.
+// "::ffff:0:0/96" (IPv4-eşlemli) burada YOK: normalize onu saf v4'e indirir
+// (ayrıca Go net.IPNet bu öneki 0.0.0.0/0 gibi eşler — eklemek tüm v4'ü
+// dahili yapardı).
 var ozelCIDRler = cidrler(
+	"0.0.0.0/8",       // "bu ağ" (RFC 1122); IsUnspecified yalnız 0.0.0.0'ı kapsar, Linux 0/8'i atayabilir
 	"100.64.0.0/10",   // CGNAT (RFC 6598) — IsPrivate kapsamaz
 	"192.0.0.0/24",    // IETF protokol tahsisi
 	"192.0.2.0/24",    // TEST-NET-1
@@ -75,9 +91,13 @@ var ozelCIDRler = cidrler(
 	"198.51.100.0/24", // TEST-NET-2
 	"203.0.113.0/24",  // TEST-NET-3
 	"240.0.0.0/4",     // rezerve (255.255.255.255 dahil)
-	"64:ff9b::/96",    // NAT64 — gömülü v4
+	"64:ff9b::/96",    // NAT64 iyi bilinen önek (RFC 6052) — gömülü v4
+	"64:ff9b:1::/48",  // NAT64 yerel kullanım öneki (RFC 8215) — gömülü v4
+	"::/96",           // IPv4-uyumlu (::a.b.c.d, RFC 4291 kullanımdan kalktı) — gömülü v4
+	"::ffff:0:0:0/96", // IPv4-çevrilmiş SIIT (::ffff:0:a.b.c.d, RFC 2765) — gömülü v4
 	"2002::/16",       // 6to4 — gömülü v4
 	"100::/64",        // discard-only (RFC 6666)
+	"fec0::/10",       // site-local (RFC 3879 kullanımdan kalktı; eski yığınlarda iç ağ)
 )
 
 // metadataCIDRler — iç ağa izin verilse de reddedilen bulut metadata/platform
@@ -140,25 +160,59 @@ func IPDahiliMi(ip net.IP) bool {
 	return icinde(ip, ozelCIDRler)
 }
 
-// gomuluV4 — NAT64 (64:ff9b::/96) ve 6to4 (2002::/16) adreslerindeki gömülü
-// IPv4'ü döner (yoksa nil).
-func gomuluV4(ip net.IP) net.IP {
+// v4 — ip16'nın verilen dört baytından IPv4 (4 bayt).
+func v4(ip16 net.IP, a, b, c, d int) net.IP {
+	return net.IPv4(ip16[a], ip16[b], ip16[c], ip16[d]).To4()
+}
+
+// gomuluV4ler — IPv6 adresine gömülü IPv4 aday(lar)ı (yoksa nil):
+//   - 64:ff9b::/96 (NAT64 iyi bilinen; 64:ff9b::/32'nin tahsis edilmemiş
+//     geri kalanı da), ::/96 (IPv4-uyumlu), ::ffff:0:0:0/96
+//     (SIIT): son 4 bayt. :: ve ::1 HARİÇ (belirtilmemiş/loopback olarak
+//     zaten sınıflanır; 0.0.0.0/0.0.0.1 adayı üretmesinler).
+//   - 64:ff9b:1::/48 (RFC 8215 yerel NAT64): işletmeci öneki /48../96 arası
+//     herhangi bir uzunlukta kullanabilir; RFC 6052 düzeni uzunluğa göre
+//     değişir (bayt 8 = u-oktet, atlanır). Hangisinin kullanıldığı bilinemez
+//     → /48 (6,7,9,10), /56 (7,9,10,11), /64 (9,10,11,12) ve /96 (12-15)
+//     düzenlerinin HEPSİ aday; biri metadata/kendi adresse red (güvenli taraf).
+//   - 2002::/16 (6to4): bayt 2-5.
+func gomuluV4ler(ip net.IP) []net.IP {
 	ip16 := ip.To16()
-	if ip16 == nil || ip.To4() != nil {
+	if ip16 == nil || ip.To4() != nil || ip.IsUnspecified() || ip.IsLoopback() {
 		return nil
 	}
-	if ip16[0] == 0x00 && ip16[1] == 0x64 && ip16[2] == 0xff && ip16[3] == 0x9b {
-		return net.IPv4(ip16[12], ip16[13], ip16[14], ip16[15]).To4()
+	sifir := func(bas, son int) bool {
+		for _, b := range ip16[bas:son] {
+			if b != 0 {
+				return false
+			}
+		}
+		return true
 	}
-	if ip16[0] == 0x20 && ip16[1] == 0x02 {
-		return net.IPv4(ip16[2], ip16[3], ip16[4], ip16[5]).To4()
+	nat64 := ip16[0] == 0x00 && ip16[1] == 0x64 && ip16[2] == 0xff && ip16[3] == 0x9b
+	switch {
+	case nat64 && ip16[4] == 0x00 && ip16[5] == 0x01: // 64:ff9b:1::/48
+		return []net.IP{
+			v4(ip16, 6, 7, 9, 10),
+			v4(ip16, 7, 9, 10, 11),
+			v4(ip16, 9, 10, 11, 12),
+			v4(ip16, 12, 13, 14, 15),
+		}
+	case nat64: // 64:ff9b::/96 (ve /32'nin geri kalanı — önceki davranış)
+		return []net.IP{v4(ip16, 12, 13, 14, 15)}
+	case sifir(0, 12): // ::/96 (IPv4-uyumlu)
+		return []net.IP{v4(ip16, 12, 13, 14, 15)}
+	case sifir(0, 8) && ip16[8] == 0xff && ip16[9] == 0xff && sifir(10, 12): // ::ffff:0:0:0/96 (SIIT)
+		return []net.IP{v4(ip16, 12, 13, 14, 15)}
+	case ip16[0] == 0x20 && ip16[1] == 0x02: // 2002::/16 (6to4)
+		return []net.IP{v4(ip16, 2, 3, 4, 5)}
 	}
 	return nil
 }
 
 // MetadataMi — adres bulut metadata ucu ya da bağlantı-yerel mi? Bu adresler
-// hiçbir seçenekle (IcAgIzni, IzinliAglar) açılmaz. NAT64/6to4 içine gömülü
-// metadata adresi de yakalanır.
+// hiçbir seçenekle (IcAgIzni, IzinliAglar) açılmaz. IPv6 içine gömülü
+// (NAT64 iyi bilinen/yerel, IPv4-uyumlu, SIIT, 6to4) metadata adresi de yakalanır.
 func MetadataMi(ip net.IP) bool {
 	if ip == nil {
 		return true
@@ -170,8 +224,10 @@ func MetadataMi(ip net.IP) bool {
 	if icinde(ip, metadataCIDRler) {
 		return true
 	}
-	if g := gomuluV4(ip); g != nil {
-		return MetadataMi(g)
+	for _, g := range gomuluV4ler(ip) {
+		if MetadataMi(g) {
+			return true
+		}
 	}
 	return false
 }
@@ -207,6 +263,11 @@ type Secenek struct {
 	// kendi adres denetimini kaldırır; kendi adres loopback/özel ise dahili
 	// kuralı yine uygulanır (katı modda red) — taşımadan önceki davranış.
 	KendiAdresIzni bool
+	// KendiAdresKaynagi — sunucunun kendi adreslerinin kaynağı (nil →
+	// net.InterfaceAddrs, paylaşılan 30 sn önbellekle). Verilirse her denetimde
+	// çağrılır (önbelleksiz). Testlerde, gerçek arayüzden bağımsız sahte adres
+	// kümesi vermek için (Cozucu gibi bir dikiş); üretim kodu nil bırakır.
+	KendiAdresKaynagi func() ([]net.Addr, error)
 }
 
 // Kapi — yapılandırılmış SSRF kapısı. Eşzamanlı kullanım güvenlidir.
@@ -258,7 +319,7 @@ func (k *Kapi) izinli(ip net.IP) bool {
 	if k.izinliAgda(ip) {
 		return true
 	}
-	if !k.sec.KendiAdresIzni && kendiAdresiMi(ip) {
+	if !k.sec.KendiAdresIzni && k.kendiAdresiMi(ip) {
 		return false
 	}
 	if !IPDahiliMi(ip) {
@@ -294,6 +355,13 @@ func kendiAdresKumesi() (map[netip.Addr]struct{}, bool) {
 	if err != nil {
 		return o.kume, o.kume != nil
 	}
+	o.kume, o.zaman = adresKumesi(adresler), time.Now()
+	return o.kume, true
+}
+
+// adresKumesi — arayüz adreslerinden karşılaştırma kümesi. Linux v4 arayüz
+// adresini 16 baytlık (::ffff:a.b.c.d) verir: Unmap ile saf v4'e indirilir.
+func adresKumesi(adresler []net.Addr) map[netip.Addr]struct{} {
 	kume := make(map[netip.Addr]struct{}, len(adresler))
 	for _, a := range adresler {
 		var ip net.IP
@@ -307,23 +375,49 @@ func kendiAdresKumesi() (map[netip.Addr]struct{}, bool) {
 			kume[na.Unmap()] = struct{}{}
 		}
 	}
-	o.kume, o.zaman = kume, time.Now()
-	return kume, true
+	return kume
 }
 
-// kendiAdresiMi — IP sunucunun kendi arayüz adreslerinden biri mi? Arayüzler
-// hiç okunamadıysa güvenli tarafta true (red).
-func kendiAdresiMi(ip net.IP) bool {
+// kumede — ip (ya da içine gömülü IPv4 adaylarından biri) kümede mi?
+func kumede(ip net.IP, kume map[netip.Addr]struct{}) bool {
 	a, ok := netip.AddrFromSlice(ip)
 	if !ok {
 		return true
 	}
+	if _, kendi := kume[a.Unmap()]; kendi {
+		return true
+	}
+	for _, g := range gomuluV4ler(ip) {
+		if ga, ok := netip.AddrFromSlice(g); ok {
+			if _, kendi := kume[ga.Unmap()]; kendi {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// kendiAdresiMi — IP (ya da içine gömülü IPv4) sunucunun kendi arayüz
+// adreslerinden biri mi? Arayüzler hiç okunamadıysa güvenli tarafta true (red).
+func kendiAdresiMi(ip net.IP) bool {
 	kume, ok := kendiAdresKumesi()
 	if !ok {
 		return true
 	}
-	_, kendi := kume[a.Unmap()]
-	return kendi
+	return kumede(ip, kume)
+}
+
+// kendiAdresiMi — kapının adres kaynağıyla (Secenek.KendiAdresKaynagi ya da
+// önbellekli arayüzler) kendi adres denetimi.
+func (k *Kapi) kendiAdresiMi(ip net.IP) bool {
+	if k.sec.KendiAdresKaynagi == nil {
+		return kendiAdresiMi(ip)
+	}
+	adresler, err := k.sec.KendiAdresKaynagi()
+	if err != nil {
+		return true
+	}
+	return kumede(ip, adresKumesi(adresler))
 }
 
 // Denetle — IP'ye bağlanmaya izin var mı? Red → ErrReddedildi ile eşleşen hata.

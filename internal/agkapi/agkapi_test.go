@@ -30,6 +30,11 @@ func TestIPDahiliMi(t *testing.T) {
 		"240.0.0.1", "255.255.255.255", // rezerve/broadcast
 		"198.18.0.1",                              // benchmark
 		"64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", // NAT64 / 6to4 gömülü
+		"0.1.2.3", "0.255.255.255", // "bu ağ" 0.0.0.0/8 (yalnız 0.0.0.0 belirtilmemiş)
+		"64:ff9b:1::a00:1", "64:ff9b:1:a00:0:100::", "64:ff9b:1:ffff::1", // RFC 8215 yerel NAT64 (/96 ve /48 düzeni)
+		"::7f00:1", "::a00:1", "::a9fe:a9fe", "::808:808", // IPv4-uyumlu ::/96
+		"::ffff:0:a00:1", "::ffff:0:808:808", // SIIT ::ffff:0:0:0/96
+		"fec0::1", "feff::1", // site-local fec0::/10
 	}
 	for _, s := range dahili {
 		if ip := net.ParseIP(s); ip == nil || !IPDahiliMi(ip) {
@@ -39,7 +44,10 @@ func TestIPDahiliMi(t *testing.T) {
 	if !IPDahiliMi(nil) {
 		t.Error("nil IP guvenli tarafta dahili sayilmali")
 	}
-	public := []string{"8.8.8.8", "1.1.1.1", "148.251.169.181", "2606:4700:4700::1111", "93.184.216.34"}
+	// "1.0.0.1" 0/8'in hemen dışı. v4 public adresler Go'nun ::ffff:0:0/96 →
+	// 0.0.0.0/0 eşlemesine karşı da korur (o önek ozelCIDRler'e eklenirse tüm
+	// v4 dahili olurdu).
+	public := []string{"8.8.8.8", "1.1.1.1", "148.251.169.181", "2606:4700:4700::1111", "93.184.216.34", "1.0.0.1", "::ffff:8.8.8.8"}
 	for _, s := range public {
 		if ip := net.ParseIP(s); ip == nil || IPDahiliMi(ip) {
 			t.Errorf("public SAYILMALI ama dahili sayildi: %s", s)
@@ -83,6 +91,8 @@ func TestDenetle_IcAgIzni(t *testing.T) {
 		"169.254.169.254", "169.254.170.2", "fe80::1", "fd00:ec2::254", "100.100.100.200", "192.0.0.192",
 		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1",
 		"127.0.0.1", "::1", "0.0.0.0", "::", "224.0.0.1", "ff02::1", "255.255.255.255",
+		// Gömülü özel IPv4 iç ağ izniyle AÇILMAZ (izin yalnız doğrudan RFC 1918/ULA/CGNAT).
+		"64:ff9b:1::a00:1", "64:ff9b:1:a00:0:100::", "::a00:1", "::ffff:0:a00:1", "0.1.2.3", "fec0::1",
 	}
 	for _, s := range kapali {
 		if err := k.Denetle(net.ParseIP(s)); err == nil {
@@ -116,7 +126,12 @@ func TestDenetle_IzinliAglarMetadataAcmaz(t *testing.T) {
 
 func TestMetadataMi(t *testing.T) {
 	evet := []string{"169.254.169.254", "169.254.170.2", "fe80::1", "fd00:ec2::254", "100.100.100.200", "192.0.0.192",
-		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "ff02::1"}
+		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "ff02::1",
+		// RFC 8215 yerel NAT64: /96, /48 (6,7,9,10), /56 (7,9,10,11), /64 (9,10,11,12) düzenleri
+		"64:ff9b:1::a9fe:a9fe", "64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1:a9:fe:a9fe::", "64:ff9b:1:0:a9:fea9:fe00:0",
+		"::a9fe:a9fe", "::ffff:0:a9fe:a9fe", // IPv4-uyumlu / SIIT
+		"::a83f:8110", "::ffff:0:a83f:8110", "64:ff9b:1:a83f:81:1000::", // gömülü Azure 168.63.129.16
+	}
 	for _, s := range evet {
 		if !MetadataMi(net.ParseIP(s)) {
 			t.Errorf("metadata/bağlantı-yerel SAYILMALI: %s", s)
@@ -125,7 +140,8 @@ func TestMetadataMi(t *testing.T) {
 	if !MetadataMi(nil) {
 		t.Error("nil güvenli tarafta metadata sayılmalı")
 	}
-	for _, s := range []string{"8.8.8.8", "10.0.0.1", "127.0.0.1", "64:ff9b::808:808", "2002:808:808::1", "fd12::1"} {
+	for _, s := range []string{"8.8.8.8", "10.0.0.1", "127.0.0.1", "64:ff9b::808:808", "2002:808:808::1", "fd12::1",
+		"::", "::1", "::808:808", "::ffff:0:808:808", "64:ff9b:1::808:808", "64:ff9b:1:808:8:800::", "0.1.2.3"} {
 		if MetadataMi(net.ParseIP(s)) {
 			t.Errorf("metadata SAYILMAMALI: %s", s)
 		}
@@ -304,13 +320,17 @@ func TestHTTPTransport_VekilYok(t *testing.T) {
 
 // metadataUclari — hiçbir seçenekle AÇILMAMASI gereken uçlar: bağlantı-yerel,
 // sağlayıcıların belgelenmiş IPv6 metadata/DNS uçları (ULA), herkese açık
-// aralıktaki Azure 168.63.129.16 ve NAT64/6to4 içine gömülü biçimleri.
+// aralıktaki Azure 168.63.129.16 ve IPv6 içine gömülü biçimleri (NAT64 iyi
+// bilinen/yerel, 6to4, IPv4-uyumlu, SIIT).
 var metadataUclari = []string{
 	"169.254.169.254", "169.254.170.2", "fe80::1",
 	"fd00:ec2::254", "fd00:ec2::253", "fd20:ce::254",
 	"168.63.129.16", "::ffff:168.63.129.16", "64:ff9b::a83f:8110",
 	"100.100.100.200", "192.0.0.192",
 	"64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1",
+	// RFC 8215 yerel NAT64 (/96 ve /48 düzeni), IPv4-uyumlu, SIIT
+	"64:ff9b:1::a9fe:a9fe", "64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1:a83f:81:1000::",
+	"::a9fe:a9fe", "::a83f:8110", "::ffff:0:a9fe:a9fe", "::ffff:0:a83f:8110",
 }
 
 var tumUzay = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
@@ -375,6 +395,36 @@ func TestKendiAdres_GercekArayuz(t *testing.T) {
 		for _, ip := range acik {
 			if err := k.Denetle(ip); !errors.Is(err, ErrReddedildi) {
 				t.Errorf("IcAgIzni=%v: sunucunun kendi herkese açık adresi %s REDDEDİLMELİYDİ: %v", kip.IcAgIzni, ip, err)
+			}
+		}
+	}
+}
+
+// gomuluV4ler: her biçim doğru baytları (4 bayt) çıkarır; :: ve ::1 aday üretmez.
+func TestGomuluV4ler(t *testing.T) {
+	durumlar := map[string][]string{
+		"64:ff9b::a00:1":        {"10.0.0.1"},
+		"2002:a00:1::1":         {"10.0.0.1"},
+		"::a00:1":               {"10.0.0.1"},
+		"::ffff:0:a00:1":        {"10.0.0.1"},
+		"64:ff9b:1:a00:0:100::": {"10.0.0.1", "0.0.1.0", "0.1.0.0", "0.0.0.0"},
+		"64:ff9b:1::a00:1":      {"0.0.0.0", "0.0.0.0", "0.0.0.10", "10.0.0.1"},
+		"::":                    nil,
+		"::1":                   nil,
+		"10.0.0.1":              nil,
+		"::ffff:10.0.0.1":       nil,
+		"2606:4700:4700::1111":  nil,
+		"fd00:ec2::254":         nil,
+	}
+	for s, bek := range durumlar {
+		got := gomuluV4ler(net.ParseIP(s))
+		if len(got) != len(bek) {
+			t.Errorf("gomuluV4ler(%s) = %v, beklenen %v", s, got, bek)
+			continue
+		}
+		for i := range bek {
+			if len(got[i]) != net.IPv4len || !got[i].Equal(net.ParseIP(bek[i])) {
+				t.Errorf("gomuluV4ler(%s)[%d] = %v, beklenen %s (4 bayt)", s, i, got[i], bek[i])
 			}
 		}
 	}

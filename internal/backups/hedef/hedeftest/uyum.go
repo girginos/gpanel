@@ -553,6 +553,11 @@ func denemeEszamanli(t sinayici, o *ortam) {
 		if farkliHata[i] != nil {
 			continue
 		}
+		// Korunan kural "sessiz atlama yok": nil dönen her yükleme doğrulanır.
+		// Bu Errorf kaldırılırsa dogrula'nın "Listele'de yok" Fatalf'ı aynı
+		// durumu yine yakalar (neg_control: `false && !ok` KAÇAR); asıl gerileme
+		// eski `if ok { dogrula }` biçimine dönmek olurdu (neg_control yakalar).
+		// Satır, kaybı hangi eşzamanlı yüklemenin yaşadığını söyleyen mesaj için.
 		if _, ok := bul(t, o, ad); !ok {
 			t.Errorf("eşzamanlı yükleme (farklı ad) %d nil döndü ama %q Listele'de YOK (yükleme kayboldu)", i, ad)
 			continue
