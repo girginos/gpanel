@@ -22,9 +22,42 @@ api.interceptors.request.use((cfg) => {
 // eşleştirilir; askı dışı 403'ler (başka kiracı, yetki yok) kodsuzdur.
 export const HESAP_ASKIDA = 'hesap_askida'
 
+function askiKodluMu(durum: number | undefined, govde: unknown): boolean {
+  return durum === 403 && (govde as { kod?: unknown } | null | undefined)?.kod === HESAP_ASKIDA
+}
+
 export function hesapAskidaMi(err: unknown): boolean {
   const y = (err as AxiosError<{ kod?: unknown }>)?.response
-  return y?.status === 403 && y.data?.kod === HESAP_ASKIDA
+  return askiKodluMu(y?.status, y?.data)
+}
+
+// Açık oturumda hesap askıya alındı: uygulama tam ekran askı sayfasına geçer.
+//
+// gonderilenToken = askı yanıtını alan isteğin gittiği token. Yalnız o token HÂLÂ güncel
+// oturumsa geçilir: kullanıcı askı sayfasında "Çıkış yap" dedikten (ya da başka hesapla
+// girdikten) sonra yolda kalmış eski bir isteğin yanıtı bayrağı yeniden kaldırmasın.
+// Token'sız istek (giriş formları) burada işlem görmez — formlar askıya kendileri geçer.
+export function askiyaGecIstekten(gonderilenToken: string | null | undefined): void {
+  if (!gonderilenToken) return
+  const a = useAuth.getState()
+  if (a.token !== gonderilenToken) return
+  useHesapAski.getState().askiyaGec(a.kullanici?.rol === 'user' ? 'musteri' : 'yonetim')
+}
+
+// Düz fetch yanıtı için aynı yol (dosya/yedek indirme, canlı log akışı axios'tan geçmez).
+// Yanıt gövdesi tüketilmez (clone). true → yanıt askı 403'ü (çağıran işi bırakmalı).
+export async function fetchAskiKontrol(res: Response, gonderilenToken: string | null | undefined): Promise<boolean> {
+  if (res.status !== 403) return false
+  const govde: unknown = await res.clone().json().catch(() => null)
+  if (!askiKodluMu(res.status, govde)) return false
+  askiyaGecIstekten(gonderilenToken)
+  return true
+}
+
+// İstek hangi token'la gittiyse (Authorization: Bearer …) onu döndürür; yoksa null.
+function istekTokeni(cfg: AxiosError['config']): string | null {
+  const v = (cfg?.headers as unknown as Record<string, unknown> | undefined)?.Authorization
+  return typeof v === 'string' && v.startsWith('Bearer ') ? v.slice(7) : null
 }
 
 api.interceptors.response.use(
@@ -34,8 +67,7 @@ api.interceptors.response.use(
       const s = useAuth.getState()
       if (s.token) s.cikis()
     } else if (hesapAskidaMi(err)) {
-      // Açık oturumda hesap askıya alındı: uygulama tam ekran askı sayfasına geçer.
-      useHesapAski.getState().askiyaGec(useAuth.getState().kullanici?.rol === 'user' ? 'musteri' : 'yonetim')
+      askiyaGecIstekten(istekTokeni(err.config))
     }
     return Promise.reject(err)
   },

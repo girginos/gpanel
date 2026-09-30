@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
@@ -130,6 +130,7 @@ export default function DomainLogsPage() {
           headers: { Authorization: `Bearer ${tok}` },
           signal: ctrl.signal,
         })
+        if (await fetchAskiKontrol(res, tok)) { setCanli(false); return } // askı: sayfa değişir
         if (!res.ok || !res.body) {
           const m = cevirT(cevir("stream başlamadı (HTTP {0})"), res.status)
           setHata(m)

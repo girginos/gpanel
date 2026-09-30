@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import DizinAgac from '@/components/DizinAgac'
@@ -655,8 +655,10 @@ export default function DomainFilesPage() {
     const url = `/api/v1${base}/files/indir?yol=${encodeURIComponent(e.yol)}`
     // Header'lı GET tarayıcıdan; en basit: ayrı fetch + blob
     fetch(url, { headers: { Authorization: `Bearer ${tok}` } })
-      .then(r => r.blob())
+      // Askı 403'ü: askı sayfasına geçilir; hata gövdesi dosya diye indirilmez.
+      .then(async r => ((await fetchAskiKontrol(r, tok)) ? null : r.blob()))
       .then(blob => {
+        if (!blob) return
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
         a.download = e.adi

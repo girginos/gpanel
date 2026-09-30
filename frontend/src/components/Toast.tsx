@@ -77,6 +77,16 @@ export function ToastSaglayici({ children }: { children: ReactNode }) {
 
   useEffect(() => () => { zamanlayicilar.current.forEach((t) => window.clearTimeout(t)) }, [])
 
+  // Askıya geçişte ekrandaki bildirimler de temizlenir: panelden kalan toast'lar tam ekran
+  // askı sayfasının üstünde asılı kalmasın (yenileri aşağıda ekle() içinde engellenir).
+  const askida = useHesapAski((s) => s.askida)
+  useEffect(() => {
+    if (!askida) return
+    zamanlayicilar.current.forEach((t) => window.clearTimeout(t))
+    zamanlayicilar.current = []
+    setKayitlar([])
+  }, [askida])
+
   const kapat = useCallback((id: number) => {
     setKayitlar((l) => l.map((k) => (k.id === id ? { ...k, cikiyor: true } : k)))
     const t = window.setTimeout(() => setKayitlar((l) => l.filter((k) => k.id !== id)), 220)
