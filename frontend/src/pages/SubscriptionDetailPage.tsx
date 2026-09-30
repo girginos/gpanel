@@ -63,10 +63,10 @@ const SUBD2_EN: Record<string, string> = {
   "host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.": "is a host-level application, cannot be installed from the tenant panel.",
   "yakında": "coming soon",
   "Önizleme yalnızca HTTPS sitelerde gösterilir": "Preview is shown only on HTTPS sites",
-  "Askı kaldırıldı — site tekrar erişilebilir.": "Suspension lifted — the site is accessible again.",
-  "Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.": "Account suspended — the site now returns a 503 maintenance page.",
+  "Askı kaldırıldı — hesap askı öncesi hâline döndü.": "Suspension lifted — the account is back to its previous state.",
+  "Hesap askıya alındı — tüm alan adları 503 askı sayfası döndürüyor.": "Account suspended — all domains now return the 503 suspension page.",
   "Onay gerekiyor": "Confirmation required",
-  "\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?": "\"{0}\" will be suspended — the site will become inaccessible (503). Continue?",
+  "\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, FTP, SSH ve veritabanı girişleri kapanır. Devam edilsin mi?": "The \"{0}\" account will be suspended — all of its domains (subdomains included) will return 503; PHP, cron, FTP, SSH and database logins will be disabled. Continue?",
   "Anasayfa": "Home",
   "Hata": "Error",
   "Askıdan Al (Geri Getir)": "Unsuspend (Restore)",
@@ -179,11 +179,11 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
+    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, FTP, SSH ve veritabanı girişleri kapanır. Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
-      const iyi = askiyaAl ? cevir("Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("Askı kaldırıldı — site tekrar erişilebilir.")
+      const iyi = askiyaAl ? cevir("Hesap askıya alındı — tüm alan adları 503 askı sayfası döndürüyor.") : cevir("Askı kaldırıldı — hesap askı öncesi hâline döndü.")
       setBildirim(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBildirim(null), 6000)
