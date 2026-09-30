@@ -219,7 +219,7 @@ export default function DomainPlanPage() {
   const phpSecenek = Array.from(new Set([...(surumler.map(s => s.surum)), taslak?.php_surum].filter(Boolean) as string[]))
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: domain?.alan_adi || '…', href: `/abonelikler/${id}` },

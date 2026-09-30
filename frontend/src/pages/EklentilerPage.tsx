@@ -702,7 +702,7 @@ export default function EklentilerPage() {
     // 🔴 Panel açıkken ALT DOLGU. Sabit pencere sağ altta duruyor; dolgu
     // olmasaydı ızgaranın son satırındaki kartın "Ayrıntılar"/"Kur" düğmelerini
     // örterdi — düzen şikâyeti yer değiştirmiş olurdu.
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto"
+    <div
       style={panelYuksek > 0 ? { paddingBottom: panelYuksek + 32 } : undefined}>
       <Breadcrumb items={
         secili

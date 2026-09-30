@@ -267,7 +267,7 @@ export default function PanelHostPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
+    <div>
       <Breadcrumb items={[
         { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
         { etiket: 'Panel Hostname & SSL' },
