@@ -178,31 +178,34 @@ func kiraciAdim(ctx context.Context, sure time.Duration, ki kiraci.Kiraci, argv 
 //
 // 🔴 KOTA TEK KAT: devirle birlikte hazırlık içeriği (S bayt) kiracının kotasına
 // yazılır. Yerleşim içeriği KOPYALASAYDI tepe kullanım mevcut+2S olurdu; rsync
-// --remove-source-files ile taşımak bile yetmez: kaynak dosya ancak hedefteki
-// kopyası tamamlanınca silinir → tepe mevcut + S + en büyük dosya (181'de 64 MB'lık
-// tek dosyada ölçüldü) — boyutu tek bir yedek zip/videonun belirlediği site kotanın
-// yarısını aşınca EDQUOT ile düşer, yeni hesap geri alınır. Bu yüzden yerleşim
-// hedefte OLMAYAN girdileri kopyalamaz, aynı inode'a SABİT BAĞ kurar (kota
-// artmaz; hazırlık kökü /home ile aynı dosya sistemindedir):
+// --remove-source-files ile taşımak da yetmez: kaynak dosya ancak hedefteki
+// kopyası tamamlanıp onayı göndericiye ulaşınca silinir ve onaylar birkaç dosya
+// geriden gelir (181'de ~11 dosya) → tepe mevcut + S + en büyük dosya ve
+// ardındakiler (64 MB'lık tek dosyada +68 MB ölçüldü): boyutu tek bir yedek
+// zip/videonun belirlediği site kotanın yarısını aşınca EDQUOT ile düşer, yeni
+// hesap geri alınır. Bu yüzden yerleşim hedefte OLMAYAN girdileri kopyalamaz,
+// aynı inode'a SABİT BAĞ kurar (kota artmaz; hazırlık kökü /home ile aynı dosya
+// sistemindedir):
 //
 //	a. `cp -R -P -l -n`: yeni dosya/bağlar sabit bağla, yeni dizinler yaratılarak
 //	   yerleşir; -n hedefte var olana dokunmaz, -P kaynaktaki sembolik bağı İZLEMEZ
-//	   (izlense bağ hedefi — ör. dizin — kopyalanırdı). Çıkış kodu yalnız süre
-//	   aşımında belirleyicidir: bağlanamayan her girdi (EXDEV, çakışma; bazı
+//	   (izlense bağın hedefi — ör. bir dizin — kopyalanırdı). Çıkış kodu yalnız
+//	   süre aşımında belirleyicidir: bağlanamayan her girdi (EXDEV, çakışma; bazı
 //	   coreutils sürümleri -n atlamasını da hata sayar) c adımında KOPYA ile
 //	   yerleşir, sonucu orada denetlenir;
-//	b. bağlanan girdilerin hazırlıktaki adları silinir (bağ sayısı > 1): rsync
-//	   kaynağıyla hedefi aynı inode olan dosyayı --remove-source-files ile silmeyi
+//	b. bağlanan girdilerin hazırlıktaki adları silinir (bağ sayısı > 1): rsync,
+//	   kaynağı hedefle aynı inode olan dosyayı --remove-source-files ile silmeyi
 //	   reddeder (23);
-//	c. rsync --remove-source-files kalanları (üzerine yazma kipinde hedefte var
-//	   olan dosyalar, bağlanamayanlar) yerleştirir ve bağlanmış ağacı doğrular.
+//	c. rsync --remove-source-files kalanları (üzerine yazma kipinde hedefte zaten
+//	   var olan dosyalar, bağlanamayanlar) yerleştirir, bağlanmış ağacı doğrular.
 //
-// Tepe: mevcut + S (+ c'ye kalan dosyalardan en büyüğü: hedefte zaten var olan
-// ya da bağlanamayan bir dosya). Sabit bağ kaynağın izinlerini taşır — bu yüzden
-// izinler devirden önce --no-perms'in yeni dosyada üreteceği biçime süzülür
-// (hazirlikIzinSuz) — ve SELinux etiketini de taşır (hazırlığın user_home_t'si):
-// hedefin etiketini sonda kiracı kimliğindeki restorecon verir (SELinux
-// yoksa komut da yoktur; hata yok sayılır).
+// Tepe: mevcut + S; c'ye kalan dosyalar için en çok yeni içeriklerinin toplamı
+// kadar pay (kaynakları yol boyunca silindiğinden pratikte ~11 dosyalık pencere).
+// Sabit bağ kaynağın izinlerini taşır — bu yüzden izinler devirden önce
+// --no-perms'in yeni dosyada üreteceği biçime süzülür (hazirlikIzinSuz) — ve
+// SELinux etiketini de taşır (hazırlığın user_home_t'si): hedefin etiketini
+// sonda kiracı kimliğindeki restorecon verir (SELinux yoksa komut da yoktur;
+// hata yok sayılır).
 //
 // Hedefte SİLME yapılmaz (üzerine yazma modunda hedef canlı sitedir); var olan
 // dosyaların içeriği güncellenir, izni korunur (--no-perms). Döner: kaynaktan

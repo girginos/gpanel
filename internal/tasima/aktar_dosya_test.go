@@ -747,26 +747,32 @@ func yrKotaSayaci(kok string, uid int) (dur func() (int64, int)) {
 }
 
 // Kota tek kat: devirle hazırlık içeriği (S) kiracının kotasına yazılır.
-// Yerleşim içeriği kopyalasaydı tepe mevcut+2S, rsync --remove-source-files ile
-// taşısaydı mevcut+S+en büyük dosya olurdu (gerçek kotada boyutu tek bir büyük
+// Yerleşim içeriği kopyalasaydı tepe mevcut+2S; rsync --remove-source-files ile
+// taşısaydı da kaynağı kopyadan birkaç dosya geriden sildiği için tepe mevcut+S+
+// (en büyük dosya ve ardındakiler) olurdu (gerçek kotada boyutu tek bir büyük
 // dosyanın belirlediği site EDQUOT → kalem düşer, hesap geri alınır). Hedefte
 // olmayan girdiler sabit bağla yerleşir: tepe TAM mevcut+S. Üzerine yazma
-// kipinde hedefte zaten var olan dosya kopyalanır: pay en çok o dosya kadardır;
-// içeriği güncellenir, izni korunur.
+// kipinde hedefte zaten var olan dosyalar kopyalanır: pay en çok yeni
+// içeriklerinin toplamıdır ve --remove-source-files kaynakları yol boyunca
+// sildiğinden toplama ERİŞİLMEZ; içerikleri güncellenir, izinleri korunur.
 func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 	const (
 		mevcut = 1 << 20
 		buyuk  = 24 << 20 // tek büyük dosya (yedek zip/video)
-		ortak  = 8 << 20  // hedefte zaten var olan dosyanın eski boyutu
+		ortak  = 1 << 20  // hedefte zaten var olan dosyaların yeni boyutu
 	)
+	var ortaklar []string
+	for i := range 32 {
+		ortaklar = append(ortaklar, fmt.Sprintf("ortak%02d.bin", i))
+	}
 	parca := strings.Repeat("k", yrParcaBoyut)
 	for _, sn := range []struct {
 		ad     string
 		kaynak func(t *testing.T, d string)
 		S      int64
 		dosya  int   // yerleşmesi beklenen .bin sayısı
-		ortak  bool  // hedefte ortak.bin (eski, 0600) önceden var
-		pay    int64 // kopyaya kalan dosyalardan en büyüğü
+		ortak  bool  // hedefte ortaklar (eski 1 bayt, 0600) önceden var
+		pay    int64 // kopyaya kalan dosyaların toplamı
 	}{
 		{"parçalı", yrParcaliKaynak, yrParcaS, yrParcaSayi, false, 0},
 		{"tek büyük dosya", func(t *testing.T, d string) {
@@ -777,8 +783,10 @@ func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 		}, buyuk + 4*yrParcaBoyut, 5, false, 0},
 		{"üzerine yazma", func(t *testing.T, d string) {
 			yrParcaliKaynak(t, d)
-			yrYaz(t, filepath.Join(d, "ortak.bin"), strings.Repeat("n", ortak+1), 0o644)
-		}, yrParcaS + ortak + 1, yrParcaSayi + 1, true, ortak + 1},
+			for _, ad := range ortaklar {
+				yrYaz(t, filepath.Join(d, ad), strings.Repeat("n", ortak), 0o644)
+			}
+		}, yrParcaS + int64(len(ortaklar))*ortak, yrParcaSayi + len(ortaklar), true, int64(len(ortaklar)) * ortak},
 	} {
 		t.Run(sn.ad, func(t *testing.T) {
 			o := yrYeniOrtam(t)
@@ -787,8 +795,10 @@ func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 			var once int64 = mevcut
 			o.dosya(t, filepath.Join(o.ev, "mevcut.bin"), strings.Repeat("m", mevcut), 0o644)
 			if sn.ortak {
-				o.dosya(t, filepath.Join(ph, "ortak.bin"), strings.Repeat("e", ortak), 0o600)
-				once += ortak
+				for _, ad := range ortaklar {
+					o.dosya(t, filepath.Join(ph, ad), "e", 0o600)
+					once++
+				}
 			}
 			s := yrYeniUzak(t, yrYabanciUID)
 			s.agaclar = map[string]func(*testing.T, string){yrUzakKok: sn.kaynak}
@@ -806,6 +816,8 @@ func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 			}
 			if sinir := once + sn.S + sn.pay; tepe > sinir {
 				t.Errorf("kota tek kat değil: tepe %d > %d (fazla %d bayt)", tepe, sinir, tepe-sinir)
+			} else if sn.ortak && tepe == sinir {
+				t.Errorf("kopyalanan dosyaların kaynağı yerleşim boyunca silinmedi: tepe = önce+S+toplam = %d", tepe)
 			}
 			n := 0
 			for p, g := range yrOzet(t, ph) {
@@ -820,12 +832,14 @@ func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 				t.Errorf("%d dosya yerleşti, beklenen %d", n, sn.dosya)
 			}
 			if sn.ortak {
-				b, err := os.ReadFile(filepath.Join(ph, "ortak.bin"))
-				if err != nil || len(b) != ortak+1 || b[0] != 'n' {
-					t.Errorf("hedefte var olan dosya güncellenmedi: %d bayt (%v)", len(b), err)
-				}
-				if g := yrSahipAl(filepath.Join(ph, "ortak.bin")); g.mod != 0o600 {
-					t.Errorf("hedefte var olan dosyanın izni korunmadı: %v", g.mod)
+				for _, ad := range ortaklar {
+					b, err := os.ReadFile(filepath.Join(ph, ad))
+					if err != nil || len(b) != ortak || b[0] != 'n' {
+						t.Errorf("hedefte var olan %s güncellenmedi: %d bayt (%v)", ad, len(b), err)
+					}
+					if g := yrSahipAl(filepath.Join(ph, ad)); g.mod != 0o600 {
+						t.Errorf("hedefte var olan %s dosyasının izni korunmadı: %v", ad, g.mod)
+					}
 				}
 			}
 			yrHazirlikBos(t)
@@ -989,6 +1003,11 @@ func TestDosyalariAktar_KiraciDondurursaAdimKesilir(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), errYerlesimSuresi.Error()) {
 		t.Errorf("donmuş yerleşim süre hatasıyla bitmedi: %v", err)
+	}
+	// Süre aşımı yerleşimi bitirir: sonraki kiracı adımı koşmaz (koşsaydı
+	// dondurucu onu da yakalardı).
+	if donmus != 1 {
+		t.Errorf("süre aşımından sonra %d kiracı adımı daha koştu", donmus-1)
 	}
 	yrHazirlikBos(t)
 }
