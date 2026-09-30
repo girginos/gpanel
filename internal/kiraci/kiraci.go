@@ -1,0 +1,90 @@
+// Package kiraci — panelin (kök) bir kiracının (hosting sistem kullanıcısı)
+// ev ağacında çalışmasının ortak yaprak deseni.
+//
+// 🔴 GÜVENLİK MODELİ (CWE-59 bağ izleme / kiracılar arası):
+// Ev ağacı kiracının KENDİ denetimindedir: FTP/SSH/PHP/cron ile her bileşeni
+// sembolik bağa çevirebilir, denetimden sonra takas edebilir. Bu yüzden kök bu
+// ağaçta YOL DİZGESİYLE dosya işlemi yapmaz:
+//   - kopyalama/oluşturma KİRACI kimliğinde koşar (Komut: runuser -u <kul> --,
+//     kabuk yok, panel ortamı yok); çekirdek her erişimde DAC'ı uygular →
+//     kiracı yalnız zaten erişebildiğine erişir, TOCTOU penceresi yoktur;
+//   - kökte kalması gereken okuma/yazma ev dizinine KİLİTLİ os.Root üzerinden
+//     yapılır (EvAc): ev dışına çıkan bağ reddedilir.
+//
+// <EvKoku> kök sahiplidir; kiracı buradaki kendi girdisini (ev dizinini) takas
+// edemez → <EvKoku>/<sk> güvenilir bir çapadır.
+//
+// Öncüller: sitekopya.kiraciKomut ve archivex.runuserKomut (ayrı işte bu pakete
+// geçirilir). Paket yapraktır: panelin başka paketini içe aktarmaz.
+package kiraci
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"syscall"
+	"time"
+)
+
+// EvKoku — kiracı ev dizinlerinin kökü (provisioner: useradd -d /home/<sk>).
+const EvKoku = "/home"
+
+// iptalBekleme — bağlam iptalinde SIGTERM'den sonra sürecin kapanması için süre;
+// dolunca Go süreci öldürür (runuser SIGKILL'i çocuğa iletemez).
+const iptalBekleme = 15 * time.Second
+
+// reSK — panelin ürettiği sistem kullanıcıları (provisioner.BenzersizKullanici:
+// "c_" + [a-z0-9_], en çok 32). Yol bileşenine ve runuser argv'sine girer.
+var reSK = regexp.MustCompile(`^c_[a-z0-9_]{1,30}$`)
+
+// ErrEvDisi — yol kiracının ev dizininin İÇİNDE değil (ev'in kendisi ya da dışı).
+var ErrEvDisi = errors.New("yol kiracı ev dizininin içinde değil")
+
+// GecerliSK — sk panelin ürettiği bir sistem kullanıcısı adı mı?
+func GecerliSK(sk string) bool { return reSK.MatchString(sk) }
+
+// Kiraci — işlem yapılacak kiracı.
+type Kiraci struct {
+	// Kul — runuser -u değeri: kiracının işletim sistemi kullanıcısı (üretimde sk).
+	Kul string
+	// Ev — ev dizini (mutlak): Komut'un HOME'u, EvAc'ın ve Goreli'nin çapası.
+	Ev string
+}
+
+// Komut — argv'yi kiracı kimliğinde çalıştıracak komutu hazırlar: runuser -u
+// <Kul> -- argv (kabuk yok; argv[0] PATH'te aranır), panel ortamı AKTARILMAZ
+// (yalnız PATH/HOME/LANG — panel sırları çocuğa sızmaz), çalışma dizini "/".
+// Bağlam iptalinde önce SIGTERM (runuser çocuğa iletir), takılırsa iptalBekleme
+// sonunda Go süreci öldürür.
+func (k Kiraci) Komut(ctx context.Context, argv ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "runuser", append([]string{"-u", k.Kul, "--"}, argv...)...)
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=" + k.Ev,
+		"LANG=C",
+	}
+	cmd.Dir = "/"
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = iptalBekleme
+	return cmd
+}
+
+// Goreli — mutlak yolun ev dizinine göreli karşılığı (EvAc köküne verilecek
+// biçim). Yol temizlenir; ev'in kendisi, ev dışı ya da göreli yol → ErrEvDisi.
+// Yalnız DİZGE denetimidir: yolun bileşenleri bağ olabilir, onları çözmek
+// EvAc'ın (os.Root) ya da kiracı kimliğinin işidir.
+func (k Kiraci) Goreli(yol string) (string, error) {
+	rel, err := filepath.Rel(k.Ev, filepath.Clean(yol))
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return "", ErrEvDisi
+	}
+	return rel, nil
+}
+
+// EvAc — ev dizinine KİLİTLİ os.Root: altındaki her yol openat ile bileşen
+// bileşen çözülür, ev dışına çıkan bağ (mutlak ya da ..) reddedilir. Çağıran
+// kapatır.
+func (k Kiraci) EvAc() (*os.Root, error) { return os.OpenRoot(k.Ev) }
