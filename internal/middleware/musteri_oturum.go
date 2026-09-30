@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/httpx"
 )
 
 type musteriDurum struct {
@@ -57,7 +58,7 @@ func musteriCacheOku(fhid int64, now time.Time) (musteriDurum, bool) {
 // aynı kararı kullanır.
 func musteriKarar(mc *auth.MusteriClaims, durum string, gecersizTS int64) (int, string) {
 	if durum != "active" {
-		return http.StatusForbidden, "hesabınız askıya alınmış"
+		return http.StatusForbidden, httpx.HesapAskidaMesaj // askı → redYaz kodlu yazar
 	}
 	if gecersizTS > 0 && mc.IssuedAt != nil && mc.IssuedAt.Unix() < gecersizTS {
 		return http.StatusUnauthorized, "oturum sonlandırıldı, tekrar giriş yapın"
