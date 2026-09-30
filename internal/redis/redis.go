@@ -7,14 +7,17 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
@@ -32,7 +35,41 @@ const (
 	redisPort = 6379
 )
 
-func adminPass() string { return os.Getenv("PANEL_REDIS_ADMIN_PASS") }
+// adminParola — Valkey yönetici parolası. config.Load onu (PANEL_REDIS_ADMIN_PASS)
+// okuyup süreç ortamından SİLER; main AdminParolaAyarla ile buraya verir.
+// Ortamdan okunmaz: silinmiş olur ve ortamda kalsaydı her çocuk süreç miras alırdı.
+var adminParola atomic.Value // string
+
+// AdminParolaAyarla: başlangıçta config'ten okunan yönetici parolasını verir.
+func AdminParolaAyarla(p string) { adminParola.Store(p) }
+
+func adminPass() string {
+	p, _ := adminParola.Load().(string)
+	return p
+}
+
+// kiraciCalistir: argv'yi kiracı (sk) kimliğinde, panel ortamı OLMADAN (yalnız
+// PATH/HOME/LANG) çalıştırır; birleşik çıktı döner. Kiracının dosyalarına dokunan
+// her komut (wp-cli, cp, rm) bundan geçer. (Hotfix: entegrasyondaki kiraci.Komut'un
+// eşdeğeri; main'de kiraci paketi yok.)
+func kiraciCalistir(sk string, argv ...string) ([]byte, error) {
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, errKiraciKomut
+	}
+	if u, err := user.Lookup(sk); err != nil || u.Uid == "0" {
+		return nil, errKiraciKomut
+	}
+	cmd := exec.Command("runuser", append([]string{"-u", sk, "--"}, argv...)...)
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/home/" + sk,
+		"LANG=C",
+	}
+	cmd.Dir = "/"
+	return cmd.CombinedOutput()
+}
+
+var errKiraciKomut = errors.New("kiracı komutu: geçersiz kullanıcı ya da boş komut")
 
 // cli: valkey-cli'yi admin parolasıyla çalıştırır (parola argv'de değil, REDISCLI_AUTH env'de).
 func cli(args ...string) (string, error) {
@@ -72,10 +109,10 @@ func disableUser(sk string) {
 
 const wpBin = "/usr/local/bin/wp"
 
+// wpKomut: wp-cli'yi kiracı kimliğinde çalıştırır. wp-cli kiracının wp-config.php'sini
+// ve eklentilerini YÜKLER (kiracı PHP'si) → panel ortamı ASLA verilmez (kiraciCalistir).
 func wpKomut(sk string, args ...string) ([]byte, error) {
-	full := append([]string{"-u", sk, "--", "env", "HOME=/home/" + sk,
-		"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)
-	return exec.Command("runuser", full...).CombinedOutput()
+	return kiraciCalistir(sk, append([]string{"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)...)
 }
 
 // wpDizinler: <sk>/public_html + bir seviye alt dizinlerde wp-config.php olan WP kurulumları.
@@ -110,7 +147,7 @@ func wpBagla(sk, pass string) int {
 		// 🔴 VERİ-KAYBI GUARD: `wp config set` wp-config'i truncate+rewrite eder;
 		// disk/kota dolunca 0 bayta düşer. Önce yedekle, işlem sonunda boş/bozuk
 		// kaldıysa yedekten geri yükle (aşağıda).
-		_, _ = exec.Command("runuser", "-u", sk, "--", "cp", "-p", cfg, bak).CombinedOutput()
+		_, _ = kiraciCalistir(sk, "cp", "-p", cfg, bak)
 		set := func(k, v string, raw bool) {
 			a := []string{"config", "set", k, v, "--type=constant", "--path=" + dir}
 			if raw {
@@ -135,17 +172,17 @@ func wpBagla(sk, pass string) int {
 		// drop-in'i elle kur (wp redis enable'ın flushdb'sini atla)
 		src := filepath.Join(dir, "wp-content/plugins/redis-cache/includes/object-cache.php")
 		dst := filepath.Join(dir, "wp-content/object-cache.php")
-		if _, err := exec.Command("runuser", "-u", sk, "--", "cp", "-f", src, dst).CombinedOutput(); err != nil {
+		if _, err := kiraciCalistir(sk, "cp", "-f", src, dst); err != nil {
 			continue
 		}
 		// 🔴 GUARD DEVAMI: wp-config boş/okunamaz kaldıysa (disk dolu → truncate)
 		// yedekten geri yükle. Başarılıysa yedeği sil.
 		if st, e := os.Stat(cfg); e != nil || st.Size() == 0 {
-			_, _ = exec.Command("runuser", "-u", sk, "--", "cp", "-p", bak, cfg).CombinedOutput()
-			_, _ = exec.Command("runuser", "-u", sk, "--", "rm", "-f", bak).CombinedOutput()
+			_, _ = kiraciCalistir(sk, "cp", "-p", bak, cfg)
+			_, _ = kiraciCalistir(sk, "rm", "-f", bak)
 			continue // bu kurulum başarısız — wp-config kurtarıldı, Redis bağlanmadı
 		}
-		_, _ = exec.Command("runuser", "-u", sk, "--", "rm", "-f", bak).CombinedOutput()
+		_, _ = kiraciCalistir(sk, "rm", "-f", bak)
 		// bağlantı doğrula — status "Connected" içeriyorsa başarılı say
 		if out, err := wpKomut(sk, "redis", "status", "--path="+dir); err == nil && strings.Contains(string(out), "Connected") {
 			n++
@@ -158,8 +195,8 @@ func wpBagla(sk, pass string) int {
 // `wp redis disable` KULLANILMAZ (o da flushdb deneyebilir); drop-in elle silinir.
 func wpCozdur(sk string) {
 	for _, dir := range wpDizinler(sk) {
-		_, _ = exec.Command("runuser", "-u", sk, "--", "rm", "-f",
-			filepath.Join(dir, "wp-content/object-cache.php")).CombinedOutput()
+		_, _ = kiraciCalistir(sk, "rm", "-f",
+			filepath.Join(dir, "wp-content/object-cache.php"))
 		for _, k := range []string{"WP_REDIS_HOST", "WP_REDIS_PORT", "WP_REDIS_USERNAME",
 			"WP_REDIS_PASSWORD", "WP_REDIS_PREFIX", "WP_REDIS_SELECTIVE_FLUSH", "WP_REDIS_CLIENT", "WP_CACHE"} {
 			_, _ = wpKomut(sk, "config", "delete", k, "--path="+dir)

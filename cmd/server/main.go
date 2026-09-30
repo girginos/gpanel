@@ -98,10 +98,13 @@ var version = surum.Panel
 var hostUygulamalariAcik = false
 
 func main() {
+	// config.Load panel sırlarını okuduktan sonra süreç ortamından SİLER: hiçbir çocuk
+	// süreç (kök ya da kiracı kimliğinde) onları miras alamaz. Sırlar yalnız cfg'den geçer.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	redis.AdminParolaAyarla(cfg.RedisAdminPass)
 	d, err := db.Open(cfg.DBDsn)
 	if err != nil {
 		// Reboot/MariaDB gecikmesinde ANINDA log.Fatalf ile olmek yerine bekle+tekrar dene.
