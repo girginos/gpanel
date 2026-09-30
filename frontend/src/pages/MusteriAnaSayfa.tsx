@@ -14,22 +14,21 @@
 //   PHP desteği        GET /php/versions                (eol)
 //   Uyarı (bildirim)   GET /bildirimler                 (müşteri yalnız kendi domaini)
 //   Eklenti kapıları   GET /eklentiler                  (müşteriye yalnız açık olanlar)
-// Yönetici uçları ÇAĞRILMAZ (403 alan istek bırakılmaz). İstisna: askıdaki hesapta
-// TÜM uçlar 403 + askı mesajı döner (RequireAuth / MusteriScope, bkz. useUc askiYaniti)
-// → sayfa AskiKutusu çizer (hata değil).
+// Yönetici uçları ÇAĞRILMAZ (403 alan istek bırakılmaz). Askıdaki hesap bu sayfayı hiç
+// görmez: ilk askı 403'ünde (kod hesap_askida) uygulama HesapAskidaPage'e geçer (lib/api).
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
-import { askiYaniti, useUc } from '@/components/alanpano/useUc'
+import { useUc } from '@/components/alanpano/useUc'
 import { kaydet, oku } from '@/lib/kalici'
 import { MUSTERI_ARACLAR, eklentiKapisi } from '@/components/musteri-ana/araclar'
 import AracIzgarasi from '@/components/musteri-ana/AracIzgarasi'
 import BilgiPaneli from '@/components/musteri-ana/BilgiPaneli'
 import UyariBandi from '@/components/musteri-ana/UyariBandi'
-import { AskiKutusu, YenidenDene } from '@/components/musteri-ana/ortak'
+import { YenidenDene } from '@/components/musteri-ana/ortak'
 import { cevir, cevirF } from '@/components/musteri-ana/dil'
 import { alanSatirlari, eolSurumleri, sslDurumu, uyarilariTuret } from '@/components/musteri-ana/hesap'
 import type { AltAlan, BildirimYaniti, EklentiKaydi, PhpSurum, Yedek } from '@/components/musteri-ana/tipler'
@@ -86,14 +85,10 @@ export default function MusteriAnaSayfa() {
       <div className="@container/sayfa">
         <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
           <h1 className="sr-only">{cevir('Ana sayfa')}</h1>
-          {askiYaniti(domain) ? (
-            <AskiKutusu />
-          ) : (
-            <UyariKutusu ton="tehlike" baslik={cevir('Hesap bilgileri alınamadı')}>
-              <p>{domain.hata}</p>
-              <YenidenDene uc={domain} className="mt-3" />
-            </UyariKutusu>
-          )}
+          <UyariKutusu ton="tehlike" baslik={cevir('Hesap bilgileri alınamadı')}>
+            <p>{domain.hata}</p>
+            <YenidenDene uc={domain} className="mt-3" />
+          </UyariKutusu>
         </div>
       </div>
     )

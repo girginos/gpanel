@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import { useAuth } from '@/store/auth'
+import { useHesapAski } from '@/store/hesapAski'
 
 const baseURL = (import.meta.env.VITE_API_BASE as string) || '/api/v1'
 
@@ -17,12 +18,24 @@ api.interceptors.request.use((cfg) => {
   return cfg
 })
 
+// Askıdaki hesabın ortak 403'ü (sunucu: httpx.WriteHesapAskida). Metin değil KOD
+// eşleştirilir; askı dışı 403'ler (başka kiracı, yetki yok) kodsuzdur.
+export const HESAP_ASKIDA = 'hesap_askida'
+
+export function hesapAskidaMi(err: unknown): boolean {
+  const y = (err as AxiosError<{ kod?: unknown }>)?.response
+  return y?.status === 403 && y.data?.kod === HESAP_ASKIDA
+}
+
 api.interceptors.response.use(
   (r) => r,
   (err: AxiosError<{ hata?: string }>) => {
     if (err.response?.status === 401) {
       const s = useAuth.getState()
       if (s.token) s.cikis()
+    } else if (hesapAskidaMi(err)) {
+      // Açık oturumda hesap askıya alındı: uygulama tam ekran askı sayfasına geçer.
+      useHesapAski.getState().askiyaGec(useAuth.getState().kullanici?.rol === 'user' ? 'musteri' : 'yonetim')
     }
     return Promise.reject(err)
   },

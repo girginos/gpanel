@@ -13,9 +13,9 @@ import { useAuth } from '@/store/auth'
 import { musteriDomainID } from '@/lib/rol'
 import { MUSTERI_ARACLAR, aracCevir, aracEslesir, aramaSozcukleri, eklentiKapisi } from '@/components/musteri-ana/araclar'
 import { eklentileriGetir, type EklentiKayit } from '@/lib/eklenti'
-import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
 import DilSecici from '@/components/DilSecici'
+import TemaDugmesi from '@/components/TemaDugmesi'
 import { Button } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 
@@ -113,7 +113,6 @@ const CMP_EN: Record<string, string> = {
   "Ara: domain, alt alan, sayfa (ör. yedek, firewall)…": "Search: domain, subdomain, page (e.g. backup, firewall)…",
   "Ara": "Search",
   "Yükleniyor…": "Loading…",
-  "Tema: {0} — tıkla değiştir": "Theme: {0} — click to change",
   "Bildirimler": "Notifications",
   "yeni": "new",
   "Tümünü okundu": "Mark all read",
@@ -177,7 +176,6 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
     if (b.kategori === 'antivirus' && !musteri) { navigate('/antivirus'); return }
   }
   const [menuAcikProfil, setMenuAcik] = useState(false)
-  const [tema, setTema] = useState<Theme>(getTheme())
 
   // ── Global arama ──
   const [q, setQ] = useState('')
@@ -203,12 +201,6 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   const [bAcik, setBAcik] = useState(false)
   const [okunduYapiliyor, setOkunduYapiliyor] = useState(false)
   const bRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const h = (e: Event) => setTema((e as CustomEvent<Theme>).detail)
-    window.addEventListener('gosp:theme-change', h)
-    return () => window.removeEventListener('gosp:theme-change', h)
-  }, [])
 
   // dışarı tıklama → kapat
   useEffect(() => {
@@ -300,12 +292,6 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
       // Yedek (eşleşme yok → domain listesi) yalnız yönetici/bayi: müşteride /domainler yok.
       else if (s && !musteri) navigate('/domainler')
     }
-  }
-
-  function temaDegistir() {
-    const siradaki: Theme = tema === 'light' ? 'dark' : tema === 'dark' ? 'system' : 'light'
-    setTheme(siradaki)
-    setTema(siradaki)
   }
 
   function onCikis() {
@@ -436,12 +422,7 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
           yapışık durur); aksi hâlde (ana sayfa, geniş ekran) sağ küme sağa itilir. */}
       <div className={`${darIkon ? 'max-sm:ms-0' : ''} ms-auto flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1`}>
         <DilSecici />
-        <Button isIcon variant="flat" onClick={temaDegistir}
-          className="size-9 rounded-full"
-          aria-label={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}
-          title={cevirT(cevir("Tema: {0} — tıkla değiştir"), tema)}>
-          <Ikon d={tema === 'dark' ? I.ay : tema === 'light' ? I.gunes : I.monitor} kalinlik={1.8} className="w-5 h-5" />
-        </Button>
+        <TemaDugmesi />
         <div className="relative" ref={bRef}>
         <Button isIcon variant="flat" onClick={bildirimAc} className="relative size-9 rounded-full" aria-label={cevir("Bildirimler")} title={cevir("Bildirimler")}>
           {okunmamis > 0 && (

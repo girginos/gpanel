@@ -20,17 +20,6 @@ type Oturum = { iptal: boolean; istek: Promise<void> | null }
 
 export type Uc<T> = UcDurumu<T> & { yenile: () => Promise<void> }
 
-// Askıdaki hesap: müşteri token'ı TÜM uçlarda 403 + askı mesajı alır. İki kapı var:
-//   RequireAuth → musteri_oturum.go  "hesabınız askıya alınmış" (askıya alma
-//     ftp_accounts.status='suspended' yazar; her istekte ilk bu yakalar)
-//   MusteriScope → domain_aski.go    "hesap askıya alınmış" (domains.askida=1)
-// Bu bir "istek başarısız" değil hesap durumudur: genel hata bildirimi basılmaz, sayfa
-// dostça açıklama çizer (yeniden denemek işe yaramaz).
-const ASKI_MESAJLARI: ReadonlySet<string> = new Set(['hesabınız askıya alınmış', 'hesap askıya alınmış'])
-export const askiYaniti = (d: { hata: string | null; hataKodu?: number | null }): boolean => d.hataKodu === 403 && d.hata !== null && ASKI_MESAJLARI.has(d.hata)
-
-const hataKoduOku = (e: unknown): number | null => (e as { response?: { status?: number } })?.response?.status ?? null
-
 export function useUc<T>(url: string | null, hataBaglam?: string): Uc<T> {
   const [durum, setDurum] = useState<UcDurumu<T>>({ veri: null, yukleniyor: url != null, hata: null })
   const oturum = useRef<Oturum | null>(null)
@@ -45,13 +34,12 @@ export function useUc<T>(url: string | null, hataBaglam?: string): Uc<T> {
     if (o.istek) return o.istek
     setDurum((d) => (d.yukleniyor ? d : { ...d, yukleniyor: true }))
     const p = api.get<T>(url)
-      .then((r) => { if (!o.iptal) setDurum({ veri: r.data, yukleniyor: false, hata: null, hataKodu: null }) })
+      .then((r) => { if (!o.iptal) setDurum({ veri: r.data, yukleniyor: false, hata: null }) })
       .catch((e: unknown) => {
         if (o.iptal) return
-        const hata = apiHata(e)
-        const hataKodu = hataKoduOku(e)
-        setDurum((d) => ({ veri: d.veri, yukleniyor: false, hata, hataKodu }))
-        if (baglam.current && !askiYaniti({ hata, hataKodu })) hataBildir(baglam.current, e)
+        setDurum((d) => ({ veri: d.veri, yukleniyor: false, hata: apiHata(e) }))
+        // Askı 403'ünü hataBildir kendisi yutar (uygulama zaten askı sayfasına geçti).
+        if (baglam.current) hataBildir(baglam.current, e)
       })
       .finally(() => { if (o.istek === p) o.istek = null })
     o.istek = p

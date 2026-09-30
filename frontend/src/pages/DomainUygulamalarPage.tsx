@@ -9,8 +9,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import Breadcrumb from '@/components/Breadcrumb'
 import UygulamaKatalogu from '@/components/UygulamaKatalogu'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { askiYaniti, useUc } from '@/components/alanpano/useUc'
-import { AskiKutusu } from '@/components/musteri-ana/ortak'
+import { useUc } from '@/components/alanpano/useUc'
 import type { Domain } from '@/components/domainTipi'
 
 const UYGSAYFA_EN: Record<string, string> = {
@@ -41,8 +40,6 @@ export default function DomainUygulamalarPage() {
         <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">{cevir('Hazır uygulamaları tek tıkla kurun ve kurulu uygulamaları yönetin.')}</p>
         {d ? (
           <UygulamaKatalogu domain={d} />
-        ) : askiYaniti(domain) ? (
-          <AskiKutusu />
         ) : domain.hata ? (
           <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
         ) : (

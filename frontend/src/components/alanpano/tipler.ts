@@ -20,5 +20,4 @@ export type KaynakOzet = {
 }
 
 // Bir ucun ön yüzdeki durumu: veri yenilenirken eskisi korunur (yukleniyor + veri).
-// hataKodu: son hatanın HTTP durumu (yanıt yoksa null) — ör. askı (403) ayırt edilsin.
-export type UcDurumu<T> = { veri: T | null; yukleniyor: boolean; hata: string | null; hataKodu?: number | null }
+export type UcDurumu<T> = { veri: T | null; yukleniyor: boolean; hata: string | null }

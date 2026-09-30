@@ -16,6 +16,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
 import { Ikon } from './Ikon'
 import { TONLAR, tonSinifi, type Ton } from './tonlar'
+import { useHesapAski } from '@/store/hesapAski'
 
 const TOAST_EN: Record<string, string> = {
   'Kapat': 'Close',
@@ -83,6 +84,9 @@ export function ToastSaglayici({ children }: { children: ReactNode }) {
   }, [])
 
   const ekle = useCallback((tip: ToastTip, baslik: string, mesaj?: string) => {
+    // Askı sayfası açıkken panelden geriye kalan (uçuştaki) isteklerin bildirimleri
+    // tam ekran sayfanın üstüne düşmesin.
+    if (useHesapAski.getState().askida) return
     const id = ++sayacRef.current
     // En fazla 4 bildirim: toplu işlemde ekran dolmasın (en eskisi düşer).
     setKayitlar((l) => [...l.slice(-3), { id, tip, baslik, mesaj }])

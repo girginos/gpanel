@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth, depoBaskaOturumda } from '@/store/auth'
+import { useHesapAski } from '@/store/hesapAski'
+import HesapAskidaPage from '@/pages/HesapAskidaPage'
 import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
@@ -148,6 +150,10 @@ function SayfaYukleniyor() {
 }
 
 export default function App() {
+  // Askıdaki hesap (giriş formu ya da açık oturumdaki ilk askı yanıtı, bkz. lib/api):
+  // panelin hiçbir rotası/kabuğu çizilmez — yalnız tam ekran askı sayfası.
+  const askida = useHesapAski((s) => s.askida)
+  if (askida) return <HesapAskidaPage />
   return (
     <Suspense fallback={<SayfaYukleniyor />}>
     <Routes>

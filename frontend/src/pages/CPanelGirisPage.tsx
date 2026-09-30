@@ -6,11 +6,12 @@ import { useTranslation } from 'react-i18next'
 import DilSecici from '@/components/DilSecici'
 import { Ikon, I } from '@/components/Ikon'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { apiHata } from '@/lib/api'
+import { apiHata, hesapAskidaMi } from '@/lib/api'
 import { useKapiTipi } from '@/lib/kapi'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { useAuth } from '@/store/auth'
+import { useHesapAski } from '@/store/hesapAski'
 import axios from 'axios'
 
 const CPG_EN: Record<string, string> = {
@@ -47,6 +48,12 @@ export default function CPanelGirisPage() {
       nav('/abonelikler/' + domain_id, { replace: true })
       setTimeout(() => window.location.reload(), 100)
     } catch (e) {
+      // Parola doğru ama hesap askıda: form hatası yerine tam ekran askı sayfası
+      // (sunucu askıyı yalnız doğru parolayla bildirir).
+      if (hesapAskidaMi(e)) {
+        useHesapAski.getState().askiyaGec('musteri')
+        return
+      }
       const baslik = t('giris.hata')
       const mesaj = apiHata(e, baslik)
       setHata(mesaj)

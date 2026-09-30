@@ -91,9 +91,8 @@ export function uyarilariTuret(g: Girdi): Uyari[] {
   const { domain: d, kaynak: k, simdi } = g
   const kok = `/abonelikler/${g.domainId}`
   const l: Uyari[] = []
-  // Askı burada madde DEĞİLDİR: askıdaki alan adında müşteri token'ı tüm uçlarda 403
-  // alır, domain hiç yüklenmez; sayfa bunu hata yolunda ayırt edip açıklama çizer
-  // (MusteriAnaSayfa AskiKutusu).
+  // Askı burada madde DEĞİLDİR: askıdaki hesap paneli hiç görmez — ilk askı 403'ünde
+  // (kod hesap_askida) uygulama tam ekran HesapAskidaPage'e geçer (lib/api).
   if (d) {
     const ssl = sslDurumu(d, simdi)
     const sslEylem = { ikon: I.kilit, yol: `${kok}/ssl` }

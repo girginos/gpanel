@@ -12,7 +12,7 @@
 //
 // Kullanim:  .catch(hataYakala('PHP surumleri alinamadi'))
 
-import { apiHata } from './api'
+import { apiHata, hesapAskidaMi } from './api'
 
 export type HataKaydi = { id: number; baglam: string; mesaj: string }
 
@@ -55,6 +55,8 @@ export function hataBildir(baglam: string, err: unknown) {
   // ustune bir de "yetkisiz" uyarisi basmak yaniltici olur.
   const durum = (err as { response?: { status?: number } })?.response?.status
   if (durum === 401) return
+  // Askı da bir istek hatası değil hesap durumudur: uygulama askı sayfasına geçti.
+  if (hesapAskidaMi(err)) return
 
   const simdi = Date.now()
   const son = sonGosterim.get(baglam) ?? 0

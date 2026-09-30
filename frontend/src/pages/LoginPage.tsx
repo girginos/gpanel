@@ -3,8 +3,9 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, hesapAskidaMi } from '@/lib/api'
 import { useAuth } from '@/store/auth'
+import { useHesapAski } from '@/store/hesapAski'
 import { useMarka, logoURL, bannerURL, VARSAYILAN as MARKA_VARSAYILAN } from '@/lib/marka'
 import { Button, Input } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
@@ -72,6 +73,11 @@ export default function LoginPage() {
       const hedef = next.startsWith('/') && !next.startsWith('//') ? next : '/'
       navigate(hedef, { replace: true })
     } catch (err) {
+      // Parola doğru ama (bayi) hesap askıda: form hatası yerine tam ekran askı sayfası.
+      if (hesapAskidaMi(err)) {
+        useHesapAski.getState().askiyaGec('yonetim')
+        return
+      }
       const baslik = cevir("Giriş başarısız")
       const m = apiHata(err, baslik)
       setHata(m)

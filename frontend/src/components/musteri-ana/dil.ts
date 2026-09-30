@@ -14,8 +14,6 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Yeniden dene': 'Try again',
   'Ana sayfa': 'Home',
   '{0} — ana sayfa': '{0} — home',
-  'Hesabınız şu anda askıda olduğu için panel araçları kullanılamıyor. Askının nedeni ve hesabınızın yeniden açılması için hizmet sağlayıcınızla görüşün.':
-    'Panel tools are unavailable while your account is suspended. Contact your hosting provider to learn why and to have your account reactivated.',
   // Araç ızgarası
   'Araçlar': 'Tools',
   '{0} araç · {1} kategori': '{0} tools · {1} categories',
@@ -67,7 +65,6 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Durum': 'Status',
   'Aktif': 'Active',
   'Pasif': 'Inactive',
-  'Askıda': 'Suspended',
   'Yok': 'None',
   'Süresi doldu': 'Expired',
   '{0} gün kaldı': '{0} days left',
@@ -124,9 +121,6 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Daralt': 'Collapse',
   'Gizle': 'Hide',
   'Uyarıyı gizle: {0}': 'Hide alert: {0}',
-  'Hesabınız askıya alındı': 'Your account is suspended',
-  'Siteniz ziyaretçilere bakım sayfası gösteriyor. Ayrıntı için hizmet sağlayıcınızla iletişime geçin.':
-    'Your site shows visitors a maintenance page. Contact your hosting provider for details.',
   '{0} HTTPS ile korunmuyor': '{0} is not protected by HTTPS',
   'Ziyaretçiler tarayıcıda "güvenli değil" uyarısı görür.': 'Visitors see a “Not secure” warning in their browser.',
   'SSL kur': 'Install SSL',

@@ -98,15 +98,10 @@ function GenelBilgi({ domainId, domain, kaynak, ssl, yedekler, phpEol }: { domai
           </a>
         </BilgiSatiri>
         <BilgiSatiri etiket={cevir('Durum')}>
-          {domain.askida ? (
-            <Badge color="error" variant="soft" className="px-1.5 py-0.5 text-tiny-plus">
-              {cevir('Askıda')}
-            </Badge>
-          ) : (
-            <Badge color={domain.durum === 'aktif' ? 'success' : 'neutral'} variant="soft" className="px-1.5 py-0.5 text-tiny-plus">
-              {durumAdi(domain.durum)}
-            </Badge>
-          )}
+          {/* Askı burada çizilmez: askıdaki hesap paneli hiç görmez (HesapAskidaPage). */}
+          <Badge color={domain.durum === 'aktif' ? 'success' : 'neutral'} variant="soft" className="px-1.5 py-0.5 text-tiny-plus">
+            {durumAdi(domain.durum)}
+          </Badge>
         </BilgiSatiri>
         <BilgiSatiri etiket="SSL">
           <SslRozeti ssl={ssl} />
