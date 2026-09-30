@@ -19,6 +19,7 @@ import (
 	"girginospanel/internal/backups"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/gizli"
+	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
@@ -776,6 +777,11 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	socket, err := phpSurumUygula(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
+	if errors.Is(err, hesaplar.ErrHesapAskida) {
+		// Hiçbir şeye dokunulmadı (havuz askıda başlatılmaz).
+		httpx.WriteError(w, http.StatusConflict, "hesap askıda — PHP sürümü askıdan alındıktan sonra değiştirilebilir")
+		return
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+nginxset.SunucuHatasi(r, "domains.php", id, err))
 		return
@@ -1391,7 +1397,7 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		alanAdi, err := h.AskiUygula(r.Context(), id, askida, "manuel")
+		alanAdi, err := h.AskiUygula(r.Context(), id, askida, hesapaski.KaynakManuel)
 		if err != nil {
 			log.Printf("toplu durum: domain %d: %v", id, err)
 			atlanan++
