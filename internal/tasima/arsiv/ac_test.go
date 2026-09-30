@@ -132,6 +132,13 @@ func TestAc_TekrarlananUye(t *testing.T) {
 
 func TestAc_Sinirlar(t *testing.T) {
 	ust := uyeT{ad: "cpmove-u/cp/u", veri: strings.Repeat("u", 20)}
+	// Üç bağ, adlarında toplam 6 bileşen; dizin ve düzenli dosya bağ sayılmaz.
+	ucBag := []uyeT{
+		{ad: "d/", tur: tar.TypeDir}, {ad: "d/f"},
+		{ad: "d/l", tur: tar.TypeSymlink, hedef: "f"},
+		{ad: "d/e/m", tur: tar.TypeSymlink, hedef: "../f"},
+		{ad: "n", tur: tar.TypeSymlink, hedef: "d"},
+	}
 	cases := []struct {
 		ad     string
 		s      Sinirlar
@@ -144,6 +151,8 @@ func TestAc_Sinirlar(t *testing.T) {
 		{"uye-sayisi", Sinirlar{UyeSayisi: 3}, []uyeT{{ad: "a"}, {ad: "b"}, {ad: "c"}, {ad: "d"}}, ErrSinir},
 		{"toplam", Sinirlar{ToplamBayt: 100}, []uyeT{{ad: "a", boyut: 60}, {ad: "b", boyut: 60}}, ErrSinir},
 		{"ad-bayti", Sinirlar{AdBayt: 30}, []uyeT{{ad: strings.Repeat("a", 20)}, {ad: strings.Repeat("b", 20)}}, ErrSinir},
+		{"bag-sayisi", Sinirlar{BagSayisi: 2}, ucBag, ErrSinir},
+		{"bag-bilesen", Sinirlar{BagBilesen: 5}, ucBag, ErrSinir},
 	}
 	for _, c := range cases {
 		t.Run(c.ad, func(t *testing.T) {
@@ -158,6 +167,13 @@ func TestAc_Sinirlar(t *testing.T) {
 	}
 	if _, err := acT(t, tarUret(t, uyeT{ad: "a"}, uyeT{ad: "b"}, uyeT{ad: "c"}), Sinirlar{UyeSayisi: 3}, nil); err != nil {
 		t.Fatalf("sınıra eşit üye sayısı kabul edilmeli: %v", err)
+	}
+	if _, err := acT(t, tarUret(t, ucBag...), Sinirlar{BagSayisi: 3, BagBilesen: 6}, nil); err != nil {
+		t.Fatalf("sınıra eşit bağ sayısı ve bileşen kabul edilmeli: %v", err)
+	}
+	// Bileşen tavanı çağıranın sınırıyla da aşılamaz (bağ ağacı belleği + int32 indeks).
+	if got := (Sinirlar{BagBilesen: 1 << 40}).tamamla().BagBilesen; got != maxBagBilesen {
+		t.Fatalf("BagBilesen tavanı uygulanmadı: %d", got)
 	}
 }
 

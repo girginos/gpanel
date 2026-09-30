@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -142,6 +143,14 @@ func TestBagNedeni(t *testing.T) {
 		{"x", "c/d/e/../f", bagZincir},
 		{"c/d/y", "e", bagZincir}, // kardeş bağ
 		{"c/d/y", "../../a/l", bagZincir},
+		// "." bileşeni atlanır, yığına ağaçta olmayan bir dizin olarak itilmez: itilseydi
+		// ardından gelen ".." onu düşürür ve kökün üstüne çıkış görünmezdi.
+		{"x", "./..", bagDisari},
+		{"a/y", "./../..", bagDisari},
+		{"a/y", ".././..", bagDisari},
+		{"x", "a/./l", bagZincir},
+		{"a/y", "./l", bagZincir},
+		{"a/y", "./..", ""},
 	} {
 		if got := k.bagNedeni(c.rel, c.hedef); got != c.want {
 			t.Errorf("bagNedeni(%q, %q) = %q, beklenen %q", c.rel, c.hedef, got, c.want)
@@ -150,6 +159,95 @@ func TestBagNedeni(t *testing.T) {
 	for rel, want := range map[string]bool{"a/l/k": true, "b/x/y": true, "a/l": false, "a/f": false, "c/d/f": false, "q": false} {
 		if got := k.bagAltinda(rel); got != want {
 			t.Errorf("bagAltinda(%q) = %v, beklenen %v", rel, got, want)
+		}
+	}
+}
+
+// TestBagAgaci_Bellek: inceleme bulgusu (bellek DoS). Eski ağaç (düğüm başına ayrı
+// yapı + harita) 181'de düğüm başına ~267 B tutuyordu; 500K üye / 64 MiB ad sınırında
+// ~23,5M düğüm → ~6 GB. En kötü fikstür: her bileşeni ayrı düğüm olan bağlar, bileşen
+// toplamı varsayılan sınıra TAM eşit (bir bağ daha Ac'deki sayaçta reddedilir). Ağacın
+// kurulurken ayırdığı TOPLAM bellek (tepe bunun altındadır) 256 MiB'ı geçmemeli.
+func TestBagAgaci_Bellek(t *testing.T) {
+	s := Sinirlar{}.tamamla()
+	const derinlik = 50
+	var sayac bagSayaci
+	uyeler := make([]Uye, 0, s.BagBilesen/derinlik+1)
+	ekle := func(ad string) {
+		if err := sayac.ekle(ad, s); err != nil {
+			t.Fatalf("fikstür sınır içinde olmalı: %v", err)
+		}
+		uyeler = append(uyeler, Uye{Ad: ad, Tur: tar.TypeSymlink, Hedef: "."})
+	}
+	kuyruk := strings.Repeat("/a", derinlik-1)
+	for i := 0; sayac.bilesen+derinlik <= s.BagBilesen; i++ {
+		ekle(fmt.Sprintf("b%07d%s", i, kuyruk))
+	}
+	if kalan := s.BagBilesen - sayac.bilesen; kalan > 0 {
+		ekle("son" + strings.Repeat("/a", kalan-1))
+	}
+	if err := sayac.ekle("fazla", s); !errors.Is(err, ErrSinir) {
+		t.Fatalf("sınırın bir üstü reddedilmeli: %v", err)
+	}
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	k := bagAgaciKur(uyeler, "")
+	runtime.ReadMemStats(&m1)
+	ayrilan := m1.TotalAlloc - m0.TotalAlloc
+	dugum := len(k.bag) - 1
+	t.Logf("bağ=%d düğüm=%d ayrılan=%d MiB (düğüm başına %d B)", len(uyeler), dugum, ayrilan>>20, ayrilan/uint64(dugum))
+	if dugum != s.BagBilesen {
+		t.Fatalf("fikstür en kötü durum değil: %d düğüm, sınır %d", dugum, s.BagBilesen)
+	}
+	if ayrilan > 256<<20 {
+		t.Fatalf("bağ ağacı %d MiB ayırdı (en çok 256 MiB)", ayrilan>>20)
+	}
+	if !k.bagAltinda(uyeler[0].Ad+"/f") || k.bagNedeni("x", uyeler[1].Ad+"/..") != bagZincir {
+		t.Fatal("ağaç bağları tanımıyor")
+	}
+}
+
+// TestSecim_SabitBeklenen: bütçe kâhini korumanın kendi hesabı (a.secim) DEĞİL, elle
+// hesaplanmış sabitlerdir. Üye başına (boyut/4096 + 1) blok; seçimin kök dizini ve
+// seçim dışı üyeler sayılmaz.
+func TestSecim_SabitBeklenen(t *testing.T) {
+	a, err := acT(t, gzUret(t, tarUret(t,
+		uyeT{ad: secimOnek + "/", tur: tar.TypeDir},                        // sayılmaz
+		uyeT{ad: secimOnek + "/bos.txt"},                                   // 0 B      → 4096
+		uyeT{ad: secimOnek + "/bir.txt", veri: "x"},                        // 1 B      → 4096
+		uyeT{ad: secimOnek + "/tam.bin", boyut: 4096},                      // 4096 B   → 8192
+		uyeT{ad: secimOnek + "/buyuk.bin", boyut: 8 << 20},                 // 8 MiB    → 8 MiB + 4096
+		uyeT{ad: secimOnek + "/d/", tur: tar.TypeDir},                      // dizin    → 4096
+		uyeT{ad: secimOnek + "/l", tur: tar.TypeSymlink, hedef: "bir.txt"}, // bağ      → 4096
+		uyeT{ad: "cpmove-u/disarida.bin", boyut: 1 << 20},                  // seçim dışı
+	)), Sinirlar{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		wantBayt int64 = 8_417_280 // 4096·4 + 8192 + 8_392_704
+		wantUye        = 6
+	)
+	if bayt, uye := a.secim(secimOnek); bayt != wantBayt || uye != wantUye {
+		t.Fatalf("secim = %d bayt / %d üye, beklenen %d / %d", bayt, uye, wantBayt, wantUye)
+	}
+	// Aynı sabitlerle Cikar: bütçe sınırın bir altında (ya da tek 8 MiB'lık üyeye
+	// yetmeyen iki blok) ErrKota; tam sınırda bütçe geçer ve kiracı çözümüne (ErrGecersiz,
+	// ev kökü yok) ulaşır.
+	eski := evalti.EvKoku
+	evalti.EvKoku = filepath.Join(t.TempDir(), "yok")
+	t.Cleanup(func() { evalti.EvKoku = eski })
+	for _, c := range []struct {
+		butce int64
+		want  error
+	}{
+		{2 * 4096, ErrKota},
+		{wantBayt - 1, ErrKota},
+		{wantBayt, ErrGecersiz},
+	} {
+		if _, err := a.Cikar(context.Background(), secimOnek, Hedef{SK: testSK, Kok: "public_html", Butce: c.butce}); !errors.Is(err, c.want) {
+			t.Errorf("bütçe %d: %v beklendi, gelen %v", c.butce, c.want, err)
 		}
 	}
 }

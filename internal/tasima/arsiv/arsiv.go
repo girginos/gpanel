@@ -17,7 +17,8 @@
 //     xattr yok sayılır. Çıkarılan bağlar kiracıya aittir ve ev içinde kalabilir: bu
 //     ağaçta root olarak çalışan tüketici yolu evalti.Ac ile (RESOLVE_NO_SYMLINKS) açar;
 //     os.OpenRoot ev içindeki bağları izlediği için yetmez.
-//   - Sınırlar: bildirilen toplam boyut, üye sayısı, ad baytı, belleğe alınan üst veri
+//   - Sınırlar: bildirilen toplam boyut, üye sayısı, ad baytı, bağ sayısı ve bağ adı
+//     bileşenleri (bağ ağacının belleği), belleğe alınan üst veri
 //     (≤ 4 MiB), döküm (çağıranın sınırı), arşiv dosyasına göre açılmış akış VE üye
 //     verisi oranı (seyrek üye), kiracı bütçesi (Hedef.Butce), hedefte boş disk + inode.
 //   - gzip/bzip2 süreç içinde (Go); xz/zstd alt süreçte, panel root ise nobody
@@ -34,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 var (
@@ -61,9 +63,41 @@ type Sinirlar struct {
 	BombaOrani  int64 // (açılmış akış ya da üye verisi) / arşiv dosyası bayt oranı üst sınırı
 	BombaEsik   int64 // oran denetiminin başladığı okunan bayt
 	DiskPayi    int64 // Cikar: seçimin üstüne hedefte boş kalması gereken bayt
+	BagSayisi   int   // symlink üye sayısı
+	BagBilesen  int   // symlink adlarının toplam bileşen sayısı (bağ ağacı düğümü; en çok maxBagBilesen)
 }
 
 const maxUstVeri = 4 << 20
+
+// Bağ ağacı sınırları (Cikar her geçişte seçimdeki bağlardan bir ad ağacı kurar, bkz.
+// bagAgaci). Ağacın düğüm sayısı bağ adlarının toplam bileşen sayısını geçemez.
+//   - maxBagBilesen: varsayılan ve tavan. En kötü fikstürde (her bileşen ayrı düğüm)
+//     ağaç 181'de (go1.26.5, amd64) 189 MiB ayırdı (düğüm başına 56 B; eski yapı 267 B);
+//     TestBagAgaci_Bellek 256 MiB'ı kilitler. Önceden ayrılan harita yuvaları 2'nin
+//     kuvvetine yuvarlanır: 2^22 yuvanın 7/8'i (~3,67M) aşılınca bellek iki katına
+//     (~380 MiB) sıçrar, tavan bunun altında. int32 düğüm indeksini de korur.
+//   - varsayilanBagSayi: bağ sayısı bileşen sayısını geçemediği için bellek sınırı
+//     değildir; olağan dışı arşivi erken ve adıyla reddeden politika sınırıdır. pnpm
+//     ağırlıklı meşru bir hesap on binlerce bağ taşır; varsayılan bunun çok üstünde.
+const (
+	maxBagBilesen     = 3_500_000
+	varsayilanBagSayi = 400_000
+)
+
+// bagSayaci: envanterdeki symlink sayısı ve adlarının toplam bileşen sayısı.
+type bagSayaci struct{ bag, bilesen int }
+
+func (b *bagSayaci) ekle(ad string, s Sinirlar) error {
+	b.bag++
+	if b.bag > s.BagSayisi {
+		return fmt.Errorf("%w: sembolik bağ sayısı", ErrSinir)
+	}
+	b.bilesen += strings.Count(ad, "/") + 1
+	if b.bilesen > s.BagBilesen {
+		return fmt.Errorf("%w: sembolik bağ adlarının bileşen sayısı", ErrSinir)
+	}
+	return nil
+}
 
 func (s Sinirlar) tamamla() Sinirlar {
 	if s.ToplamBayt <= 0 {
@@ -86,6 +120,12 @@ func (s Sinirlar) tamamla() Sinirlar {
 	}
 	if s.DiskPayi <= 0 {
 		s.DiskPayi = 512 << 20
+	}
+	if s.BagSayisi <= 0 {
+		s.BagSayisi = varsayilanBagSayi
+	}
+	if s.BagBilesen <= 0 || s.BagBilesen > maxBagBilesen {
+		s.BagBilesen = maxBagBilesen
 	}
 	return s
 }
@@ -119,6 +159,7 @@ func Ac(ctx context.Context, yol string, s Sinirlar, ustVeriMi func(ad string) b
 	}
 	defer g.kapat()
 	var adBayt, ustBayt int64
+	var baglar bagSayaci
 	for {
 		u, _, err := g.sonraki()
 		if err == io.EOF {
@@ -137,6 +178,11 @@ func Ac(ctx context.Context, yol string, s Sinirlar, ustVeriMi func(ad string) b
 		adBayt += int64(len(u.Ad) + len(u.Hedef))
 		if adBayt > a.s.AdBayt {
 			return nil, fmt.Errorf("%w: üye adları", ErrSinir)
+		}
+		if u.Tur == tar.TypeSymlink {
+			if err := baglar.ekle(u.Ad, a.s); err != nil {
+				return nil, err
+			}
 		}
 		if j, onceden := a.indeks[u.Ad]; onceden {
 			if u.Tur != tar.TypeDir || a.Uyeler[j].Tur != tar.TypeDir {

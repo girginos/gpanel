@@ -70,53 +70,81 @@ func altinda(ad, onek string) (string, bool) {
 // bağın yazılıp yazılmayacağından bağımsız olarak envanterden bir kez kurulur; yalnız
 // bir bağa giden dizinler düğümdür. Yürüme adımı yalnız bileşen adını özetler → bir bağın
 // denetimi hedef + ad uzunluğunda doğrusal.
+//
+// Bellek: düğüm başına tek harita girdisi ve bir bayt. Düğüm int32 indekstir (0 = seçili
+// kök); kenar adı envanterdeki adın alt dizgesidir (kopya yok). Düğüm sayısı seçimdeki
+// bağ adlarının toplam bileşen sayısını geçemez; o da Ac'de Sinirlar.BagBilesen ile
+// sınırlıdır (TestBagAgaci_Bellek en kötü fikstürü ölçer).
 type bagAgaci struct {
-	alt map[string]*bagAgaci
-	bag bool
+	cocuklar map[bagKenar]int32
+	bag      []bool // düğüm → seçimde symlink mi
 }
 
+type bagKenar struct {
+	ust int32
+	ad  string
+}
+
+// yokDugum: ağaçta olmayan dizin; çocuğu da yokDugum'dur.
+const yokDugum int32 = -1
+
 func bagAgaciKur(uyeler []Uye, onek string) *bagAgaci {
-	k := &bagAgaci{}
-	for _, u := range uyeler {
+	secilen := func(u Uye) (string, bool) {
 		rel, ok := altinda(u.Ad, onek)
-		if !ok || rel == "" || u.Tur != tar.TypeSymlink {
+		return rel, ok && rel != "" && u.Tur == tar.TypeSymlink
+	}
+	// Düğüm sayısının üst sınırıyla önceden ayrılır: büyüyen haritanın eski tabloları
+	// ölçülen toplam ayırmayı yaklaşık iki katına çıkarıyordu.
+	n := 0
+	for _, u := range uyeler {
+		if rel, ok := secilen(u); ok {
+			n += strings.Count(rel, "/") + 1
+		}
+	}
+	k := &bagAgaci{cocuklar: make(map[bagKenar]int32, n), bag: make([]bool, 1, n+1)}
+	for _, u := range uyeler {
+		rel, ok := secilen(u)
+		if !ok {
 			continue
 		}
-		d := k
-		for _, p := range strings.Split(rel, "/") {
-			if d.alt == nil {
-				d.alt = map[string]*bagAgaci{}
-			}
-			c := d.alt[p]
-			if c == nil {
-				c = &bagAgaci{}
-				d.alt[p] = c
+		d := int32(0)
+		for kalan, devam := rel, true; devam; { // Cut: Split'in dilimini ayırmaz
+			var p string
+			p, kalan, devam = strings.Cut(kalan, "/")
+			c, bulundu := k.cocuklar[bagKenar{d, p}]
+			if !bulundu {
+				c = int32(len(k.bag))
+				k.bag = append(k.bag, false)
+				k.cocuklar[bagKenar{d, p}] = c
 			}
 			d = c
 		}
-		d.bag = true
+		k.bag[d] = true
 	}
 	return k
 }
 
-// cocuk: p adlı alt düğüm; ağaçta yoksa nil (nil düğümün çocuğu da nil).
-func (d *bagAgaci) cocuk(p string) *bagAgaci {
-	if d == nil {
-		return nil
+// cocuk: d'nin p adlı alt düğümü; ağaçta yoksa yokDugum.
+func (k *bagAgaci) cocuk(d int32, p string) int32 {
+	if d == yokDugum {
+		return yokDugum
 	}
-	return d.alt[p]
+	if c, ok := k.cocuklar[bagKenar{d, p}]; ok {
+		return c
+	}
+	return yokDugum
 }
 
 // bagAltinda: rel'in üst bileşenlerinden (rel'in kendisi hariç) biri seçimde bağ mı?
 // (tar böyle bir üyeyi bağı izleyerek yazardı.)
 func (k *bagAgaci) bagAltinda(rel string) bool {
 	parcalar := strings.Split(rel, "/")
-	d := k
+	d := int32(0)
 	for _, p := range parcalar[:len(parcalar)-1] {
-		if d = d.cocuk(p); d == nil {
+		if d = k.cocuk(d, p); d == yokDugum {
 			return false
 		}
-		if d.bag {
+		if k.bag[d] {
 			return true
 		}
 	}
@@ -141,10 +169,10 @@ func (k *bagAgaci) bagNedeni(rel, hedef string) string {
 	if hedef == "" || path.IsAbs(hedef) || strings.Contains(hedef, `\`) {
 		return bagDisari
 	}
-	yigin := []*bagAgaci{k} // yigin[0] seçili kök; nil = ağaçta olmayan dizin
+	yigin := []int32{0} // yigin[0] seçili kök; yokDugum = ağaçta olmayan dizin
 	parcalar := strings.Split(rel, "/")
 	for _, p := range parcalar[:len(parcalar)-1] {
-		yigin = append(yigin, yigin[len(yigin)-1].cocuk(p))
+		yigin = append(yigin, k.cocuk(yigin[len(yigin)-1], p))
 	}
 	for _, p := range strings.Split(hedef, "/") {
 		switch p {
@@ -157,8 +185,8 @@ func (k *bagAgaci) bagNedeni(rel, hedef string) string {
 			yigin = yigin[:len(yigin)-1]
 			continue
 		}
-		c := yigin[len(yigin)-1].cocuk(p)
-		if c != nil && c.bag {
+		c := k.cocuk(yigin[len(yigin)-1], p)
+		if c != yokDugum && k.bag[c] {
 			return bagZincir
 		}
 		yigin = append(yigin, c)
