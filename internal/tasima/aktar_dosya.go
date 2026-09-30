@@ -134,10 +134,13 @@ var lchown = os.Lchown
 //
 // 🔴 Yerleşim KİRACI kimliğinde koşar: kiracı kendi sürecini SIGSTOP ile
 // dondurabilir. Tek sınır hesap bağlamı (hesapTimeout) olsaydı tek taşıma yuvası
-// saatlerce dolu kalırdı. Her adım kendi süresiyle kesilir (kiraci.Komut önce
-// SIGTERM, sonra öldürür; donmuş süreci de runuser SIGKILL'le kapatır):
+// saatlerce dolu kalırdı. Çocuğu durunca kök runuser da kendini durdurur
+// (181'de ölçüldü: runuser durum T), SIGTERM beklemede kalır; adım süresi
+// dolunca kiraci.Komut iptalBekleme sonunda runuser'ı SIGKILL'le kapatır ve
+// adım hata ile döner (durmuş kiracı süreci kiracının kendi sorunudur). Süre:
 // sabit taban + boyuta orantılı pay (yerel diskten diske kopyaya göre çok
-// kötümser hız), hesap bağlamının yarısıyla sınırlı.
+// kötümser hız), hesap bağlamının yarısıyla sınırlı; gerçek üst sınır
+// süre + iptalBekleme.
 const (
 	yerlesimTaban = 10 * time.Minute
 	yerlesimHizi  = 10 << 20 // bayt/sn

@@ -776,11 +776,11 @@ func TestDosyalariAktar_KotaTekKat(t *testing.T) {
 	yrHazirlikBos(t)
 }
 
-// yrSurec — /proc/<pid>/status'tan ad, üst pid ve gerçek uid.
-func yrSurec(pid int) (ad string, ppid, uid int) {
+// yrSurec — /proc/<pid>/status'tan ad, durum harfi, üst pid ve gerçek uid.
+func yrSurec(pid int) (ad, durum string, ppid, uid int) {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
 	if err != nil {
-		return "", 0, -1
+		return "", "", 0, -1
 	}
 	uid = -1
 	for _, s := range strings.Split(string(b), "\n") {
@@ -792,19 +792,21 @@ func yrSurec(pid int) (ad string, ppid, uid int) {
 		switch k {
 		case "Name":
 			ad = f[0]
+		case "State":
+			durum = f[0]
 		case "PPid":
 			ppid, _ = strconv.Atoi(f[0])
 		case "Uid":
 			uid, _ = strconv.Atoi(f[0])
 		}
 	}
-	return ad, ppid, uid
+	return ad, durum, ppid, uid
 }
 
 // yrTestinTorunu — pid bu test sürecinden türemiş mi (en çok 8 kuşak)?
 func yrTestinTorunu(pid int) bool {
 	for range 8 {
-		_, ppid, _ := yrSurec(pid)
+		_, _, ppid, _ := yrSurec(pid)
 		if ppid == os.Getpid() {
 			return true
 		}
@@ -818,8 +820,10 @@ func yrTestinTorunu(pid int) bool {
 
 // yrKiraciRsyncDondur — kiracının (uid) bu testten türeyen rsync süreçlerini
 // SIGSTOP ile dondurur: kiracının kendi uid'indeki yerleşim sürecine
-// yapabildiği. dur: taramayı bitirir, dondurulanları SIGKILL ile kapatır ve
-// sayısını döner (test asılı süreç bırakmaz).
+// yapabildiği. dur: taramayı bitirir, dondurulanları SIGKILL ile kapatır,
+// testten türeyen ve hâlâ durmuş (T) süreçleri SIGCONT ile sürdürür (çocuğu
+// durunca kendini de durduran kök runuser dahil) ve dondurulan sayısını döner:
+// test asılı süreç bırakmaz.
 func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 	bitti := make(chan struct{})
 	sonuc := make(chan []int, 1)
@@ -845,7 +849,7 @@ func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 				if fi, err := os.Stat("/proc/" + g.Name()); err != nil || fi.Sys().(*syscall.Stat_t).Uid != uint32(uid) {
 					continue
 				}
-				if ad, _, u := yrSurec(pid); ad == "rsync" && u == uid && yrTestinTorunu(pid) && unix.Kill(pid, unix.SIGSTOP) == nil {
+				if ad, _, _, u := yrSurec(pid); ad == "rsync" && u == uid && yrTestinTorunu(pid) && unix.Kill(pid, unix.SIGSTOP) == nil {
 					donmus[pid] = true
 				}
 			}
@@ -861,8 +865,19 @@ func yrKiraciRsyncDondur(t *testing.T, uid int) (dur func() int) {
 		close(bitti)
 		l := <-sonuc
 		for _, pid := range l {
-			if ad, _, u := yrSurec(pid); ad == "rsync" && u == uid {
+			if ad, _, _, u := yrSurec(pid); ad == "rsync" && u == uid {
 				_ = unix.Kill(pid, unix.SIGKILL)
+			}
+		}
+		girdiler, _ := os.ReadDir("/proc")
+		for _, g := range girdiler {
+			pid, err := strconv.Atoi(g.Name())
+			if err != nil {
+				continue
+			}
+			if ad, durum, _, u := yrSurec(pid); durum == "T" && yrTestinTorunu(pid) {
+				t.Logf("durmuş süreç sürdürülüyor: %s pid=%d uid=%d", ad, pid, u)
+				_ = unix.Kill(pid, unix.SIGCONT)
 			}
 		}
 		n = len(l)
