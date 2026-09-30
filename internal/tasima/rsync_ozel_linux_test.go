@@ -1,7 +1,8 @@
 package tasima
 
 // rsync_ozel_linux_test.go — RsyncCek'in GERÇEK yolu (kabuk == nil): kaynak sunucudaki
-// aygıt düğümü, fifo, soket ve yabancı uid/gid hedefe TAŞINMAZ.
+// aygıt düğümü, fifo, soket ve yabancı uid/gid hedefe TAŞINMAZ. Aynı düzenek (sahteSSH)
+// aktar_dosya_rsync_linux_test.go'daki uçtan uca yerleşim testinde de kullanılır.
 //
 // Ağa çıkılmaz: PATH'in başına sshpass ve ssh taklitleri konur. sshpass taklidi -e ile
 // SSHPASS'ı denetleyip rsync'i çalıştırır; ssh taklidi host'a kadarki ssh bayraklarını
@@ -24,25 +25,79 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestRsyncCekOzelDosyaVeSahiplikTasimaz(t *testing.T) {
-	const (
-		host       = "192.0.2.10" // TEST-NET-1: yalnız ssh taklidinin tanıdığı ad
-		yabanciUID = 12345
-		yabanciGID = 23456
-	)
-	if os.Geteuid() != 0 {
-		t.Skip("mknod/chown için root gerekir")
-	}
+// sahteSSHHost — ssh taklidinin tanıdığı tek ad (TEST-NET-1; ağa çıkılmaz).
+const sahteSSHHost = "192.0.2.10"
+
+// sahteSSH — PATH'in başına sshpass ve ssh taklitlerini koyar (bkz. dosya başı).
+// Döner: ssh taklidinin son argv'sinin ve sshpass'a gelen yerel rsync argv'lerinin
+// (her çağrı "----" satırıyla biter) kayıt dosyaları.
+func sahteSSH(t *testing.T) (sshArgv, rsyncArgv string) {
+	t.Helper()
 	if _, err := exec.LookPath("rsync"); err != nil {
 		t.Skip("rsync yok")
 	}
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh yok")
 	}
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sshArgv, rsyncArgv = filepath.Join(tmp, "ssh.argv"), filepath.Join(tmp, "rsync.argv")
+	for ad, betik := range map[string]string{
+		"sshpass": `#!/bin/sh
+if [ "$1" != -e ] || [ -z "$SSHPASS" ]; then echo 'sshpass taklidi: -e/SSHPASS yok' >&2; exit 3; fi
+shift
+printf '%s\n' "$@" ---- >> '` + rsyncArgv + `'
+exec "$@"
+`,
+		"ssh": `#!/bin/sh
+printf '%s\n' "$@" > '` + sshArgv + `'
+while [ $# -gt 0 ]; do
+	a=$1
+	shift
+	if [ "$a" = '` + sahteSSHHost + `' ]; then exec /bin/sh -c "$*"; fi
+done
+echo 'ssh taklidi: host yok' >&2
+exit 255
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(bin, ad), []byte(betik), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return sshArgv, rsyncArgv
+}
+
+// sahteSSHUzakKomut — ssh taklidine rsync gönderici komutu gerçekten gitti mi?
+func sahteSSHUzakKomut(t *testing.T, sshArgv string) {
+	t.Helper()
+	argv, err := os.ReadFile(sshArgv)
+	if err != nil {
+		t.Fatalf("ssh taklidi çağrılmadı: %v", err)
+	}
+	for _, parca := range []string{"\n" + sahteSSHHost + "\nrsync\n", "\n--server\n", "\n--sender\n"} {
+		if !strings.Contains(string(argv), parca) {
+			t.Fatalf("ssh taklidine beklenen uzak komut gitmedi (%q yok):\n%s", parca, argv)
+		}
+	}
+}
+
+func TestRsyncCekOzelDosyaVeSahiplikTasimaz(t *testing.T) {
+	const (
+		yabanciUID = 12345
+		yabanciGID = 23456
+	)
+	if os.Geteuid() != 0 {
+		t.Skip("mknod/chown için root gerekir")
+	}
+	sshArgv, _ := sahteSSH(t)
 
 	tmp := t.TempDir()
-	bin, kaynak, hedef := filepath.Join(tmp, "bin"), filepath.Join(tmp, "kaynak"), filepath.Join(tmp, "hedef")
-	for _, d := range []string{bin, kaynak, filepath.Join(kaynak, "alt"), hedef} {
+	kaynak, hedef := filepath.Join(tmp, "kaynak"), filepath.Join(tmp, "hedef")
+	for _, d := range []string{kaynak, filepath.Join(kaynak, "alt"), hedef} {
 		if err := os.Mkdir(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -53,22 +108,6 @@ func TestRsyncCekOzelDosyaVeSahiplikTasimaz(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-
-	sshArgv := filepath.Join(tmp, "ssh.argv")
-	yaz(filepath.Join(bin, "sshpass"), "#!/bin/sh\n"+
-		"if [ \"$1\" != -e ] || [ -z \"$SSHPASS\" ]; then echo 'sshpass taklidi: -e/SSHPASS yok' >&2; exit 3; fi\n"+
-		"shift\n"+
-		"exec \"$@\"\n", 0o755)
-	yaz(filepath.Join(bin, "ssh"), "#!/bin/sh\n"+
-		"printf '%s\\n' \"$@\" > '"+sshArgv+"'\n"+
-		"while [ $# -gt 0 ]; do\n"+
-		"\ta=$1\n"+
-		"\tshift\n"+
-		"\tif [ \"$a\" = '"+host+"' ]; then exec /bin/sh -c \"$*\"; fi\n"+
-		"done\n"+
-		"echo 'ssh taklidi: host yok' >&2\n"+
-		"exit 255\n", 0o755)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	// Sahte kaynak ağacı: meşru içerik (dosya, alt dizin, göreli bağ) + aygıt düğümleri
 	// (1:3 = null eşdeğeri, 7:250 = kullanılmayan loop), fifo ve soket; HEPSİ yabancı uid/gid.
@@ -109,7 +148,7 @@ func TestRsyncCekOzelDosyaVeSahiplikTasimaz(t *testing.T) {
 		t.Fatalf("fikstür kurulamadı: %v", err)
 	}
 
-	k := &Kaynak{Tip: "plesk", Host: host, Port: 22, Kullanici: "root", Parola: "taklit-parola"}
+	k := &Kaynak{Tip: "plesk", Host: sahteSSHHost, Port: 22, Kullanici: "root", Parola: "taklit-parola"}
 	ctx, iptal := context.WithTimeout(context.Background(), 60*time.Second)
 	defer iptal()
 	if _, err := k.RsyncCek(ctx, kaynak+"/", hedef+"/"); err != nil {
@@ -117,15 +156,7 @@ func TestRsyncCekOzelDosyaVeSahiplikTasimaz(t *testing.T) {
 	}
 
 	// Aktarım gerçekten ssh taklidi → yerel rsync gönderici üzerinden koştu.
-	argv, err := os.ReadFile(sshArgv)
-	if err != nil {
-		t.Fatalf("ssh taklidi çağrılmadı: %v", err)
-	}
-	for _, parca := range []string{"\n" + host + "\nrsync\n", "\n--server\n", "\n--sender\n"} {
-		if !strings.Contains(string(argv), parca) {
-			t.Fatalf("ssh taklidine beklenen uzak komut gitmedi (%q yok):\n%s", parca, argv)
-		}
-	}
+	sahteSSHUzakKomut(t, sshArgv)
 
 	// Meşru içerik geldi (test boşuna geçmiyor).
 	for ad, beklenen := range map[string]string{"normal.txt": "merhaba", "alt/ic.txt": "ic"} {
