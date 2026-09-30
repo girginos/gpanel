@@ -121,6 +121,8 @@ const CMP_EN: Record<string, string> = {
   "Çıkış Yap": "Log out",
   "Ara: sayfa (ör. yedek, dns, ssl)…": "Search: page (e.g. backup, dns, ssl)…",
   "Hosting kullanıcısı": "Hosting user",
+  "Aramayı aç": "Open search",
+  "Aramayı kapat": "Close search",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -180,8 +182,16 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   const [acik, setAcik] = useState(false)
   const [aktif, setAktif] = useState(0)
   const veri = useRef<{ domains: AramaDomain[]; subler: AramaSub[] } | null>(null)
-  const [yuklendi, setYuklendi] = useState(false)
+  // Değeri okunmaz; yalnız veri.current dolunca yeniden çizim tetikler.
+  const [, setYuklendi] = useState(false)
   const kutuRef = useRef<HTMLDivElement>(null)
+  // Dar ekran (< sm) + marka (müşteri: hamburger yerine marka bağlantısı): marka ile sağ
+  // küme arasında arama kutusuna yazı alanı kalmıyordu (375px'de ~20-40px, pl-9 = 36px).
+  // Orada kutu yerine ikon düğmesi çizilir; tıklayınca arama üst çubuğu tam genişlik kaplar.
+  const darMod = !!marka
+  const [darAcik, setDarAcik] = useState(false)
+  const girdiRef = useRef<HTMLInputElement>(null)
+  const darDugmeRef = useRef<HTMLButtonElement>(null)
   const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
   const [okunmamis, setOkunmamis] = useState(0)
   const [bAcik, setBAcik] = useState(false)
@@ -197,12 +207,20 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   // dışarı tıklama → kapat
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) setAcik(false)
+      if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) { setAcik(false); setDarAcik(false) }
       if (bRef.current && !bRef.current.contains(e.target as Node)) setBAcik(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
+
+  // Dar arama açılınca girdiye odak. Kapanış: sonuç seçimi (git), Escape, kapat düğmesi
+  // ya da kutu dışına tıklama (alt çubuk gezinmesi dahil — yukarıdaki mousedown).
+  useEffect(() => { if (darAcik) girdiRef.current?.focus() }, [darAcik])
+  function darKapat() {
+    setDarAcik(false); setAcik(false)
+    requestAnimationFrame(() => darDugmeRef.current?.focus())
+  }
 
   function veriYukle() {
     // Müşteri domain/alt alan listesi alamaz (/domains, /subdomains → 403); araması
@@ -251,12 +269,12 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   })()
 
   function git(yol: string) {
-    setAcik(false); setQ('')
+    setAcik(false); setQ(''); setDarAcik(false)
     navigate(yol)
   }
 
   function tusla(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') { setAcik(false); return }
+    if (e.key === 'Escape') { if (darAcik) darKapat(); else setAcik(false); return }
     if (e.key === 'ArrowDown') { e.preventDefault(); setAktif(i => Math.min(i + 1, sonuclar.length - 1)); return }
     if (e.key === 'ArrowUp') { e.preventDefault(); setAktif(i => Math.max(i - 1, 0)); return }
     if (e.key === 'Enter') {
@@ -298,17 +316,44 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
         </Button>
       )}
 
-      {/* Dar ekranda marka en çok %40 yer kaplar (logo oranını koruyarak küçülür). */}
-      {marka && <div className="flex min-w-0 max-w-[40%] shrink-0 items-center sm:max-w-none [&_img]:max-w-full">{marka}</div>}
+      {/* Dar ekranda marka en çok %40 yer kaplar ve gerekirse daha da küçülür (sağ küme
+          sabit genişlikte; logo oranını koruyarak küçülür, yazı markası kısaltılır). */}
+      {marka && <div className="flex min-w-0 max-w-[40%] items-center sm:max-w-none [&_img]:max-w-full">{marka}</div>}
 
       {/* Dar ekranda ortalama boşluğu yok; lg'de eski ortalanmış arama korunur */}
       <div className="hidden lg:block flex-1" />
 
+      {/* < sm + marka: arama kutusu yerine ikon; açılınca kutu üst çubuğu kaplar. */}
+      {!aramaGizli && darMod && !darAcik && (
+        <Button
+          ref={darDugmeRef}
+          isIcon
+          variant="flat"
+          onClick={() => setDarAcik(true)}
+          className="ms-auto size-9 rounded-full sm:hidden"
+          aria-label={cevir("Aramayı aç")}
+          title={cevir("Aramayı aç")}
+          aria-expanded={false}
+          aria-controls="gosp-ust-arama"
+        >
+          <Ikon d={I.ara} kalinlik={1.8} className="w-5 h-5" />
+        </Button>
+      )}
+
       {!aramaGizli && (
-      <div className="flex-1 lg:flex-none w-full lg:max-w-xl min-w-0" ref={kutuRef}>
-        <div className="relative">
+      <div
+        id="gosp-ust-arama"
+        ref={kutuRef}
+        className={`flex-1 lg:flex-none w-full lg:max-w-xl min-w-0 ${darMod
+          ? (darAcik
+            ? 'max-sm:absolute max-sm:inset-0 max-sm:z-40 max-sm:flex max-sm:items-center max-sm:gap-2 max-sm:bg-white max-sm:px-3 max-sm:dark:bg-dark-800'
+            : 'max-sm:hidden')
+          : ''}`}
+      >
+        <div className="relative min-w-0 flex-1">
           <Ikon d={I.ara} kalinlik={1.8} className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
           <input
+            ref={girdiRef}
             type="text"
             value={q}
             onChange={(e) => { setQ(e.target.value); setAktif(0); setAcik(true); veriYukle() }}
@@ -353,6 +398,18 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
             </div>
           )}
         </div>
+        {darMod && darAcik && (
+          <Button
+            isIcon
+            variant="flat"
+            onClick={darKapat}
+            className="size-9 shrink-0 rounded-full sm:hidden"
+            aria-label={cevir("Aramayı kapat")}
+            title={cevir("Aramayı kapat")}
+          >
+            <Ikon d={I.kapat} kalinlik={1.8} className="w-5 h-5" />
+          </Button>
+        )}
       </div>
       )}
 
