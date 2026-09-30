@@ -1267,7 +1267,9 @@ func waitForSocket(path string, timeout time.Duration) bool {
 // veya domain silindiginde (TeardownTenantFPM) otomatik temizlenir -> bayat uyari yok.
 // audit_log satiri KALICIDIR (gecmis kanit), sentinel ANLIK DURUMDUR.
 
-const izolasyonSentinelDir = "/etc/girginospanel/izolasyon-kaybi"
+// izolasyonSentinelDir — üretimde SABİT; testler geçici dizine çevirir (askı
+// kapısı testi kapı delinirse ana makinenin /etc'sine yazmasın).
+var izolasyonSentinelDir = "/etc/girginospanel/izolasyon-kaybi"
 
 func izolasyonSentinelPath(sk string) string {
 	return filepath.Join(izolasyonSentinelDir, sk)

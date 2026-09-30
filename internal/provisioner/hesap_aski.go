@@ -99,13 +99,30 @@ func paylasilanHavuzDizinleri() map[string]string {
 }
 
 // gecerliHavuzAdi — havuz adı dosya adına girer: hesabın kendisi (sk) ya da
-// hesabın alt alan havuzu (sk + "_s" + id). Başka hesabın havuzuna dokunulmaz.
+// hesabın alt alan havuzu (php.SubPoolName: sk + "_s" + id; id ondalık, baştaki
+// sıfırsız). 🔴 TAM eşleşme: önek denetimi komşu kiracıyı yakalardı — c_shop için
+// "c_shop_store" (shop-store.com) ya da "c_shop_s5x" hesabın havuzu DEĞİLDİR.
 func gecerliHavuzAdi(sk, ad string) bool {
 	if !gecerliSKAdi(ad) {
 		return false
 	}
-	return ad == sk || strings.HasPrefix(ad, sk+"_s")
+	if ad == sk {
+		return true
+	}
+	id, ok := strings.CutPrefix(ad, sk+"_s")
+	if !ok || id == "" || id[0] == '0' {
+		return false
+	}
+	for _, c := range id {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
+
+// askiHesapVar — ad bir sistem kullanıcısı (yaşayan hesap) mı? Testler sahteler.
+var askiHesapVar = userExists
 
 // PHPHavuzAski — hesabın TÜM PHP-FPM havuzlarını askıya alır (askida=true) ya da
 // geri getirir. İdempotenttir.
@@ -207,6 +224,13 @@ func paylasilanHavuzlarAski(adlar []string, askida bool) error {
 // aynı sk'yi alan yeni kiracı askıdan alınınca eski kiracının havuzu (.askida →
 // .conf) paylaşılan master'a yüklenirdi. Yüklenmeyen dosyalar olduğundan reload
 // gerekmez.
+//
+// 🔴 Kiracılar arası silme yok: glob adayları gecerliHavuzAdi ile TAM süzülür
+// (c_shop silinirken c_shop_store.conf.askida'ya dokunulmaz). Ayrıca alt havuz
+// adı sk_s<id> başka bir hesabın adıyla çakışabilir (foo.com → c_foo'nun 5
+// numaralı alt havuzu, foo-s5.com → c_foo_s5 hesabı: ikisi de c_foo_s5.conf):
+// o ada sahip hesap yaşıyorsa dosya ONUN sayılır ve silinmez (en kötü ihtimalle
+// artık kalır, komşunun askıdaki havuzu kaybolmaz).
 func askiHavuzArtiklariniSil(sk string) {
 	if !strings.HasPrefix(sk, "c_") || !gecerliSKAdi(sk) {
 		return
@@ -216,7 +240,7 @@ func askiHavuzArtiklariniSil(sk string) {
 		adaylar = append(adaylar, filepath.Join(dizin, sk+".conf"+AskiHavuzEki))
 		for _, yol := range adaylar {
 			ad := strings.TrimSuffix(filepath.Base(yol), ".conf"+AskiHavuzEki)
-			if !gecerliHavuzAdi(sk, ad) {
+			if !gecerliHavuzAdi(sk, ad) || (ad != sk && askiHesapVar(ad)) {
 				continue
 			}
 			if err := os.Remove(yol); err != nil && !errors.Is(err, os.ErrNotExist) {

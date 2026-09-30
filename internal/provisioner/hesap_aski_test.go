@@ -424,3 +424,120 @@ func TestAskiHavuzArtiklariniSil(t *testing.T) {
 		t.Fatalf("yüklü olmayan dosyalar için reload gerekmez: %v", *h.komutlar)
 	}
 }
+
+// 🔴 Kiracılar arası silme yok: foo.com (c_foo) silinirken foo-s5.com (c_foo_s5)
+// ve foo-store.com (c_foo_store) hesaplarının askıda saklanan havuzlarına
+// dokunulmaz. c_foo_s5.conf.askida hem c_foo'nun 5 numaralı alt havuzu hem
+// c_foo_s5 hesabının ana havuzu olabilir: o hesap yaşıyorsa ONUNDUR.
+func TestAskiHavuzArtiklariniSil_KomsuKiraci(t *testing.T) {
+	h := ha_havuzDikis(t, false, nil)
+	eski := askiHesapVar
+	t.Cleanup(func() { askiHesapVar = eski })
+	askiHesapVar = func(ad string) bool { return ad == "c_foo_s5" || ad == "c_foo_store" }
+	silinecek := []string{
+		filepath.Join(h.dizin1, "c_foo.conf"+AskiHavuzEki),
+		filepath.Join(h.dizin2, "c_foo_s7.conf"+AskiHavuzEki),
+	}
+	kalacak := []string{
+		filepath.Join(h.dizin1, "c_foo_s5.conf"+AskiHavuzEki),    // yaşayan komşu hesap c_foo_s5
+		filepath.Join(h.dizin1, "c_foo_store.conf"+AskiHavuzEki), // komşu hesap c_foo_store
+		filepath.Join(h.dizin2, "c_foo_s5_s2.conf"+AskiHavuzEki), // komşunun alt havuzu
+		filepath.Join(h.dizin2, "c_foo_s07.conf"+AskiHavuzEki),   // php.SubPoolName üretmez
+		filepath.Join(h.dizin2, "c_foo_s9x.conf"+AskiHavuzEki),
+	}
+	for _, y := range append(append([]string{}, silinecek...), kalacak...) {
+		ha_yaz(t, y, "x")
+	}
+	askiHavuzArtiklariniSil("c_foo")
+	for _, y := range silinecek {
+		ha_yok(t, y)
+	}
+	for _, y := range kalacak {
+		if ha_oku(t, y) != "x" {
+			t.Fatalf("%s silinmemeli", y)
+		}
+	}
+}
+
+// Havuz adı TAM eşleşir: hesabın kendisi ya da sk_s<id>.
+func TestGecerliHavuzAdi_TamEslesme(t *testing.T) {
+	for ad, w := range map[string]bool{
+		"c_shop": true, "c_shop_s1": true, "c_shop_s120": true,
+		"c_shop_store": false, "c_shop_s": false, "c_shop_s07": false, "c_shop_s5x": false,
+		"c_shop_s5_s2": false, "c_shopx": false, "c_diger_s3": false,
+	} {
+		if g := gecerliHavuzAdi("c_shop", ad); g != w {
+			t.Errorf("gecerliHavuzAdi(c_shop, %q) = %v, beklenen %v", ad, g, w)
+		}
+	}
+}
+
+// Hesap silinirken alt alan vhost'ları: "sub_c_shop_*" deseni komşu
+// c_shop_store'un dosyalarını da yakalardı — yalnız c_shop'unkiler.
+func TestHesabinAltVhostlari_KomsuyaDokunmaz(t *testing.T) {
+	d := t.TempDir()
+	for _, ad := range []string{"sub_c_shop_blog.conf", "sub_c_shop_www-2.conf", "sub_c_shop_store_blog.conf",
+		"sub_c_shopx_a.conf", "dom_c_shop.conf"} {
+		ha_yaz(t, filepath.Join(d, ad), "x")
+	}
+	var got []string
+	for _, y := range hesabinAltVhostlari(d, "c_shop") {
+		got = append(got, filepath.Base(y))
+	}
+	if strings.Join(got, ",") != "sub_c_shop_blog.conf,sub_c_shop_www-2.conf" {
+		t.Fatalf("yalnız hesabın alt alan vhost'ları: %v", got)
+	}
+	if hesabinAltVhostlari(d, "c_*") != nil {
+		t.Fatal("geçersiz sk ile desen kurulmamalı")
+	}
+}
+
+// Silinen alan adının günlükleri: shop.com silinirken shop.com.tr'ninkiler kalır.
+func TestAlanAdiGunlukleri_KomsuyaDokunmaz(t *testing.T) {
+	d := t.TempDir()
+	for _, ad := range []string{"shop.com.access.log", "shop.com.error.log", "shop.com.access.log-20260101.gz",
+		"shop.com.tr.access.log", "blog.shop.com.access.log"} {
+		ha_yaz(t, filepath.Join(d, ad), "x")
+	}
+	var got []string
+	for _, y := range alanAdiGunlukleri(d, "shop.com") {
+		got = append(got, filepath.Base(y))
+	}
+	if strings.Join(got, ",") != "shop.com.access.log,shop.com.access.log-20260101.gz,shop.com.error.log" {
+		t.Fatalf("yalnız alan adının kendi günlükleri: %v", got)
+	}
+}
+
+// Paylaşılana dönüş (RollbackToSharedFPM) ve unit drift onarımı askıdaki
+// hesapta HİÇBİR şeye dokunmaz (servisi yeniden başlatır / paylaşılan havuzu
+// geri getirirdi → askı delinirdi). Kapı delinse bile ana makineye dokunulmasın:
+// komutlar sahte PATH'ten, unit ve sentinel dizinleri geçici.
+func TestHesapAskiKapisi_PaylasilanaDonusVeDriftOnarimiReddeder(t *testing.T) {
+	db := ha_panel(t)
+	sahte := t.TempDir()
+	for _, k := range []string{"systemctl", "restorecon", "nginx"} {
+		if err := os.WriteFile(filepath.Join(sahte, k), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", sahte)
+	e1, e2 := tenantUnitDir, izolasyonSentinelDir
+	t.Cleanup(func() { tenantUnitDir, izolasyonSentinelDir = e1, e2 })
+	tenantUnitDir, izolasyonSentinelDir = t.TempDir(), t.TempDir()
+	unit := tenantUnitPath(ha_sk)
+	ha_yaz(t, unit, "eski-birim\n")
+	ha_askiya(t, db, 1)
+
+	if err := RollbackToSharedFPM(db, 1, ha_sk, "8.3", "test"); !errors.Is(err, hesaplar.ErrHesapAskida) {
+		t.Fatalf("RollbackToSharedFPM askıda reddetmeli: %v", err)
+	}
+	if RepairTenantUnitDrift(1, ha_sk, "8.3") {
+		t.Fatal("RepairTenantUnitDrift askıdaki hesaba dokunmamalı")
+	}
+	if ha_oku(t, unit) != "eski-birim\n" {
+		t.Fatal("askıdaki hesabın unit dosyası değişmemeli / silinmemeli")
+	}
+	if ents, _ := os.ReadDir(izolasyonSentinelDir); len(ents) != 0 {
+		t.Fatal("askıda izolasyon kaybı işaretlenmemeli")
+	}
+}
