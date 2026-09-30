@@ -11,7 +11,8 @@ import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { musteriDomainID } from '@/lib/rol'
-import { MUSTERI_ARACLAR, aracCevir, aracEslesir, aramaSozcukleri } from '@/components/musteri-ana/araclar'
+import { MUSTERI_ARACLAR, aracCevir, aracEslesir, aramaSozcukleri, eklentiKapisi } from '@/components/musteri-ana/araclar'
+import { eklentileriGetir, type EklentiKayit } from '@/lib/eklenti'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { api } from '@/lib/api'
 import DilSecici from '@/components/DilSecici'
@@ -53,9 +54,10 @@ const SAYFALAR: SayfaTanim[] = [
 // Müşteri (rol 'user') araması: YALNIZ ana sayfasındaki araç kataloğu (TEK KAYNAK:
 // components/musteri-ana/araclar). Yukarıdaki HERKES sayfaları (Domainler, Planlar,
 // DNS Şablonu, Denetim) müşteriye 403 döndüğü için müşteri listesinde yok; domain/alt
-// alan araması da yapılmaz. Eklentiye bağlı araçlar (mail vb.) burada aranmaz: eklenti
-// durumunu ana sayfa bilir, üst çubuk ölü bağlantı önermez. Ana sayfanın kendi araması
-// olduğundan orada bu kutu çizilmez.
+// alan araması da yapılmaz. Eklentiye bağlı araçlar (mail vb.) ana sayfayla AYNI kapıdan
+// geçer (araclar.ts eklentiKapisi): arama ilk açıldığında TEK bir GET /eklentiler çekilir;
+// liste gelmeden ya da alınamazsa eklenti aracı önerilmez (ölü bağlantı yok). Ana
+// sayfanın kendi araması olduğundan orada bu kutu çizilmez.
 const MUSTERI_ANA_ANAHTAR = ['ana sayfa', 'anasayfa', 'araçlar', 'genel', 'pano', 'özet', 'home', 'tools', 'dashboard']
 
 // ── Bildirim yardımcıları ──
@@ -184,12 +186,16 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   const veri = useRef<{ domains: AramaDomain[]; subler: AramaSub[] } | null>(null)
   // Değeri okunmaz; yalnız veri.current dolunca yeniden çizim tetikler.
   const [, setYuklendi] = useState(false)
+  // Müşteri: eklenti listesi (arama ilk kullanıldığında bir kez; null = henüz yok).
+  const [eklentiler, setEklentiler] = useState<EklentiKayit[] | null>(null)
+  const eklentiIstendi = useRef(false)
   const kutuRef = useRef<HTMLDivElement>(null)
   // Dar ekran (< sm) + marka (müşteri: hamburger yerine marka bağlantısı): marka ile sağ
   // küme arasında arama kutusuna yazı alanı kalmıyordu (375px'de ~20-40px, pl-9 = 36px).
   // Orada kutu yerine ikon düğmesi çizilir; tıklayınca arama üst çubuğu tam genişlik kaplar.
   const darMod = !!marka
   const [darAcik, setDarAcik] = useState(false)
+  const darIkon = !aramaGizli && darMod && !darAcik
   const girdiRef = useRef<HTMLInputElement>(null)
   const darDugmeRef = useRef<HTMLButtonElement>(null)
   const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
@@ -217,6 +223,9 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   // Dar arama açılınca girdiye odak. Kapanış: sonuç seçimi (git), Escape, kapat düğmesi
   // ya da kutu dışına tıklama (alt çubuk gezinmesi dahil — yukarıdaki mousedown).
   useEffect(() => { if (darAcik) girdiRef.current?.focus() }, [darAcik])
+  // Rota değişince (geri tuşu, kısayol, alt çubuk) dar arama kapanır: yoksa sonraki araç
+  // sayfasına üst çubuğu kaplamış hâlde taşınırdı.
+  useEffect(() => { setDarAcik(false); setAcik(false) }, [konum.pathname])
   function darKapat() {
     setDarAcik(false); setAcik(false)
     requestAnimationFrame(() => darDugmeRef.current?.focus())
@@ -224,8 +233,16 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
 
   function veriYukle() {
     // Müşteri domain/alt alan listesi alamaz (/domains, /subdomains → 403); araması
-    // yalnız kendi sayfalarıdır — boşuna istek atılmaz.
-    if (veri.current || musteri) return
+    // yalnız kendi sayfalarıdır — boşuna istek atılmaz. Yalnız eklenti kapısı için
+    // müşteriye açık GET /eklentiler bir kez çekilir. Hata (ör. askıdaki hesapta 403):
+    // eklenti aracı önerilmez; her tuşta yeniden istek atılmaz (sayfa yenilenince tekrar).
+    if (musteri) {
+      if (eklentiIstendi.current) return
+      eklentiIstendi.current = true
+      eklentileriGetir().then(setEklentiler).catch(() => { /* kapı kapalı kalır */ })
+      return
+    }
+    if (veri.current) return
     Promise.all([
       api.get<AramaDomain[]>('/domains').then(r => r.data).catch(() => []),
       api.get<AramaSub[]>('/subdomains').then(r => r.data).catch(() => []),
@@ -242,8 +259,9 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
       const ana: Sonuc[] = MUSTERI_ANA_ANAHTAR.some(k => k.includes(s))
         ? [{ tip: 'sayfa', ad: aracCevir('Ana sayfa'), alt: musteriKok, yol: musteriKok, key: 'm' + musteriKok }]
         : []
+      const kapi = eklentiKapisi(eklentiler)
       const araclar = MUSTERI_ARACLAR
-        .filter(a => !a.eklenti && aracEslesir(a, sozcukler))
+        .filter(a => kapi(a) && aracEslesir(a, sozcukler))
         .map<Sonuc>(a => {
           const yol = `${musteriKok}/${a.yol}`
           return { tip: 'sayfa', ad: aracCevir(a.ad), alt: yol, yol, key: 'm' + yol }
@@ -324,7 +342,7 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
       <div className="hidden lg:block flex-1" />
 
       {/* < sm + marka: arama kutusu yerine ikon; açılınca kutu üst çubuğu kaplar. */}
-      {!aramaGizli && darMod && !darAcik && (
+      {darIkon && (
         <Button
           ref={darDugmeRef}
           isIcon
@@ -371,10 +389,11 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
           {acik && s.length > 0 && (
             <div id="gosp-arama-sonuc" role="listbox"
               className="absolute left-0 right-0 mt-1 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-auto">
-              {sonuclar.length === 0 && !veri.current && (
+              {/* Müşteri araması yerel katalogdur (yüklenecek bir şey yok): boşsa doğrudan "sonuç yok". */}
+              {sonuclar.length === 0 && !veri.current && !musteri && (
                 <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
               )}
-              {sonuclar.length === 0 && veri.current && (
+              {sonuclar.length === 0 && (veri.current || musteri) && (
                 <div className="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{cevirT("\"{0}\" için sonuç yok", q)}</div>
               )}
               {sonuclar.map((r, i) => (
@@ -413,7 +432,9 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
       </div>
       )}
 
-      <div className="ms-auto flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1">
+      {/* ms-auto yalnız bir öğede: dar ikon çizildiğinde boşluğu o alır (ikon sağ kümeye
+          yapışık durur); aksi hâlde (ana sayfa, geniş ekran) sağ küme sağa itilir. */}
+      <div className={`${darIkon ? 'max-sm:ms-0' : ''} ms-auto flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1`}>
         <DilSecici />
         <Button isIcon variant="flat" onClick={temaDegistir}
           className="size-9 rounded-full"

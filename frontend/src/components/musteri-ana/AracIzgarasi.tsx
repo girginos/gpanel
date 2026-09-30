@@ -11,7 +11,7 @@ import { kaydet, oku } from '@/lib/kalici'
 import { KATEGORILER, aracCevir, aracEslesir, aracHedefi, aramaSozcukleri, sade } from './araclar'
 import type { KategoriKodu, MusteriArac } from './araclar'
 import { DOKUN, Dugme, KapsamKaresi, TurRozeti } from './ortak'
-import { cevir, cevirF } from './dil'
+import { cevir, cevirF, cevirSayili } from './dil'
 import { okTusuylaGez, useDisariKapat } from './yardimci'
 import type { AlanSatiri } from './tipler'
 
@@ -245,7 +245,8 @@ export default function AracIzgarasi({
 
       <div className="mb-4 flex flex-col gap-3 @xl/ana:flex-row @xl/ana:items-end @xl/ana:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-dark-50">{cevir('Araçlar')}</h1>
+          {/* Sayfanın h1'i MusteriAnaSayfa'da (görünmez, en başta); burası bölüm başlığı. */}
+          <h2 className="text-xl font-semibold text-gray-800 dark:text-dark-50">{cevir('Araçlar')}</h2>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-dark-300">{cevirF('{0} araç · {1} kategori', araclar.length, kategoriSayisi)}</p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 @xl/ana:w-auto">
@@ -319,13 +320,13 @@ export default function AracIzgarasi({
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {aramaVar ? cevirF('“{0}” için {1} sonuç', arama.trim(), aracSonucu + alanSonucu.length) : duyuru}
+        {aramaVar ? cevirSayili('“{0}” için {1} sonuç', aracSonucu + alanSonucu.length, arama.trim(), aracSonucu + alanSonucu.length) : duyuru}
       </p>
 
       {aramaVar && (aracSonucu > 0 || alanSonucu.length > 0) && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
           <p className="text-gray-600 dark:text-dark-200">
-            {cevirF('“{0}” için {1} sonuç', arama.trim(), aracSonucu + alanSonucu.length)}
+            {cevirSayili('“{0}” için {1} sonuç', aracSonucu + alanSonucu.length, arama.trim(), aracSonucu + alanSonucu.length)}
             <span className="ms-2 hidden text-xs text-gray-500 @xl/ana:inline dark:text-dark-300">{cevir('Enter ilk sonucu açar')}</span>
           </p>
           <Dugme variant="flat" boyut="sm" ikon={I.kapat} onClick={() => aramayaDon('')}>
@@ -336,7 +337,7 @@ export default function AracIzgarasi({
 
       {alanSonucu.length > 0 && (
         <Card className="mb-3 bg-white dark:bg-dark-700">
-          <h2 className="border-b border-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-800 dark:border-dark-600 dark:text-dark-50">{cevir('Alan adları')}</h2>
+          <h3 className="border-b border-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-800 dark:border-dark-600 dark:text-dark-50">{cevir('Alan adları')}</h3>
           <ul className="p-1.5">
             {alanSonucu.map((s) => (
               <li key={s.anahtar}>
@@ -364,7 +365,7 @@ export default function AracIzgarasi({
           <span className="mx-auto grid size-12 place-items-center rounded-full bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-dark-200">
             <Ikon d={I.ara} className="size-5" />
           </span>
-          <h2 className="mt-3 text-sm font-semibold text-gray-800 dark:text-dark-50">{cevirF('“{0}” ile eşleşen araç yok', arama.trim())}</h2>
+          <h3 className="mt-3 text-sm font-semibold text-gray-800 dark:text-dark-50">{cevirF('“{0}” ile eşleşen araç yok', arama.trim())}</h3>
           <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500 dark:text-dark-300">{cevir('Başka bir sözcük deneyin ya da kapsam süzgecini kaldırın.')}</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {cevir('ssl, yedek, dns, php, veritabanı')
@@ -410,7 +411,7 @@ export default function AracIzgarasi({
             return (
               <section key={k.kod} aria-labelledby={baslikId}>
                 <Card className="@container bg-white dark:bg-dark-700">
-                  <h2 id={baslikId}>
+                  <h3 id={baslikId}>
                     {aramaVar ? (
                       <div className="flex items-center gap-2 px-3 py-2">{ic}</div>
                     ) : (
@@ -425,7 +426,7 @@ export default function AracIzgarasi({
                         <Ikon d={I.chevronAsagi} className={`size-4 shrink-0 text-gray-400 transition-transform dark:text-dark-300 ${acik ? 'rotate-180' : ''}`} />
                       </button>
                     )}
-                  </h2>
+                  </h3>
                   <div id={govdeId} className={acik ? 'border-t border-gray-100 p-2 dark:border-dark-600' : 'hidden'}>
                     {k.liste.length > 0 ? (
                       <div className="grid grid-cols-2 gap-1 @lg:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5">

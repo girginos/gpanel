@@ -12,6 +12,10 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Hesap bilgileri alınamadı': 'Could not load account information',
   'Kaynak bilgisi alınamadı': 'Could not load resource information',
   'Yeniden dene': 'Try again',
+  'Ana sayfa': 'Home',
+  '{0} — ana sayfa': '{0} — home',
+  'Hesabınız şu anda askıda olduğu için panel araçları kullanılamıyor. Askının nedeni ve hesabınızın yeniden açılması için hizmet sağlayıcınızla görüşün.':
+    'Panel tools are unavailable while your account is suspended. Contact your hosting provider to learn why and to have your account reactivated.',
   // Araç ızgarası
   'Araçlar': 'Tools',
   '{0} araç · {1} kategori': '{0} tools · {1} categories',
@@ -62,6 +66,7 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'yeni sekmede açılır': 'opens in a new tab',
   'Durum': 'Status',
   'Aktif': 'Active',
+  'Pasif': 'Inactive',
   'Askıda': 'Suspended',
   'Yok': 'None',
   'Süresi doldu': 'Expired',
@@ -154,10 +159,41 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
 
 export const cevir = (tr: string): string => (i18n.language === 'en' ? (MUSTERI_ANA_EN[tr] || ARAC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-export const cevirF = (tr: string, ...d: Array<string | number>): string => d.reduce<string>((s, v, i) => s.split(`{${i}}`).join(String(v)), cevir(tr))
+const doldur = (kalip: string, d: Array<string | number>): string => d.reduce<string>((s, v, i) => s.split(`{${i}}`).join(String(v)), kalip)
+
+export const cevirF = (tr: string, ...d: Array<string | number>): string => doldur(cevir(tr), d)
+
+// EN tekil kalıplar: sayı 1 iken (Intl 'one') MUSTERI_ANA_EN'deki çoğul kalıp yerine
+// bunlar kullanılır ("1 domains" değil "1 domain"). TR'de sayıyla ad tekil kalır.
+const EN_TEKIL: Record<string, string> = {
+  '{0} alan adı': '{0} domain',
+  '“{0}” için {1} sonuç': '{1} result for “{0}”',
+  '1 ana alan adı · {0} alt alan adı': '1 primary domain · {0} subdomain',
+  '{0} gün kaldı': '{0} day left',
+  'Geçerli · {0} gün': 'Valid · {0} day',
+  'SSL {0} gün içinde bitiyor': 'SSL expires in {0} day',
+  '{0} SSL sertifikası {1} gün içinde bitiyor': 'SSL certificate for {0} expires in {1} day',
+  'Son yedek {0} gün önce alındı': 'Last backup was {0} day ago',
+}
+
+// Sayıya göre tekil/çoğul seçen cevirF: `n` kalıbı seçer, `d` yer tutucuları doldurur.
+export const cevirSayili = (tr: string, n: number, ...d: Array<string | number>): string =>
+  doldur(i18n.language === 'en' && EN_TEKIL[tr] && new Intl.PluralRules('en').select(n) === 'one' ? EN_TEKIL[tr] : cevir(tr), d)
 
 const yerel = (): string => (i18n.language === 'en' ? 'en-US' : 'tr-TR')
 
 export const sayi = (n: number): string => (Number.isFinite(n) ? n : 0).toLocaleString(yerel())
 
 export const oran = (n: number): string => (i18n.language === 'en' ? `${n}%` : `%${n}`)
+
+// Sunucunun duvar saati tarihleri ('YYYY-MM-DD' ya da 'YYYY-MM-DD HH:MM') → yerel biçim.
+// Saat dilimi dönüşümü YAPILMAZ (değer olduğu gibi okunur, yalnız biçimlenir); okunamayan
+// değer olduğu gibi döner.
+export function tarihBicim(t: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(t)
+  if (!m) return t
+  const saatli = m[4] !== undefined
+  const d = new Date(+m[1], +m[2] - 1, +m[3], saatli ? +m[4] : 0, saatli ? +m[5] : 0)
+  if (!Number.isFinite(d.getTime())) return t
+  return d.toLocaleString(yerel(), saatli ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' })
+}

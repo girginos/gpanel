@@ -47,8 +47,8 @@ export default function AltNavBar({ onMenuAc }: { onMenuAc: () => void }) {
   const isBayi = rol === 'reseller'
   const domainID = musteriDomainID() ?? ''
 
-  // Yönetici: birincil eylem "yeni domain". Müşteri domain oluşturamaz —
-  // onun için orta eylem yok, düz 4 sekme + menü.
+  // Yönetici ve bayi: 3 sekme + birincil eylem "yeni domain" + Menü (çekmece).
+  // Müşteri domain oluşturamaz ve çekmecesi yok: 5 düz sekme (aşağıda), eylem/Menü yok.
   const yoneticiSekmeler: Sekme[] = [
     { to: '/', etiket: 'Anasayfa', ikon: IK.home, end: true },
     { to: '/domainler', etiket: 'Domainler', ikon: IK.domain },

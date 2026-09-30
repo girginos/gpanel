@@ -9,7 +9,8 @@ import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import EklentiEkrani from '@/components/EklentiEkrani'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { useUc } from '@/components/alanpano/useUc'
+import { askiYaniti, useUc } from '@/components/alanpano/useUc'
+import { AskiKutusu } from '@/components/musteri-ana/ortak'
 import type { Domain } from '@/components/domainTipi'
 
 const GELISTIRICI_EN: Record<string, string> = {
@@ -26,7 +27,9 @@ export default function DomainGelistiriciPage() {
   if (!d) {
     return (
       <div className="px-4 py-4 sm:px-6 sm:py-5">
-        {domain.hata ? (
+        {askiYaniti(domain) ? (
+          <AskiKutusu />
+        ) : domain.hata ? (
           <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
         ) : (
           <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir('Yükleniyor…')}</div>

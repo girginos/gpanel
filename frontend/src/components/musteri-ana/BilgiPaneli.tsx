@@ -12,13 +12,17 @@ import { tonSinifi } from '@/components/tonlar'
 import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
 import type { Uc } from '@/components/alanpano/useUc'
-import { BaglantiDugme, KartBasligi, KopyaDugmesi, TurRozeti } from './ortak'
-import { cevir, cevirF, oran } from './dil'
+import { BaglantiDugme, KartBasligi, KopyaDugmesi, TurRozeti, YenidenDene } from './ortak'
+import { cevir, cevirF, cevirSayili, oran, tarihBicim } from './dil'
 import { KULLANIM_ESIK, gecerliYedekler, kullanimSatirlari, yuzde } from './hesap'
 import type { SslDurumu } from './hesap'
 import type { AlanSatiri, Yedek } from './tipler'
 
 const siteAdresi = (ad: string, https: boolean) => `${https ? 'https' : 'http'}://${ad}`
+
+// domains.durum ENUM('aktif','pasif') — bilinen değer çevrilir, bilinmeyen olduğu gibi.
+const DURUM_AD: Record<string, string> = { aktif: 'Aktif', pasif: 'Pasif' }
+const durumAdi = (d: string): string => (DURUM_AD[d] ? cevir(DURUM_AD[d]) : d)
 
 function BilgiSatiri({ etiket, children, kopya, mono = false }: { etiket: string; children: ReactNode; kopya?: string; mono?: boolean }) {
   return (
@@ -47,8 +51,8 @@ function SslRozeti({ ssl }: { ssl: SslDurumu }) {
       : ssl.tur === 'doldu'
         ? ['error', cevir('Süresi doldu')]
         : ssl.tur === 'bitiyor'
-          ? ['warning', cevirF('{0} gün kaldı', ssl.gun ?? 0)]
-          : ['success', ssl.gun !== null ? cevirF('Geçerli · {0} gün', ssl.gun) : cevir('Geçerli')]
+          ? ['warning', cevirSayili('{0} gün kaldı', ssl.gun ?? 0, ssl.gun ?? 0)]
+          : ['success', ssl.gun !== null ? cevirSayili('Geçerli · {0} gün', ssl.gun, ssl.gun) : cevir('Geçerli')]
   return (
     <Badge color={renk} variant="soft" className="px-1.5 py-0.5 text-tiny-plus">
       {metin}
@@ -64,7 +68,7 @@ function GenelBilgi({ domainId, domain, kaynak, ssl, yedekler, phpEol }: { domai
   const sonYedek = (() => {
     if (!yedekler.veri) return yedekler.hata ? cevir('Okunamadı') : '…'
     const g = gecerliYedekler(yedekler.veri)
-    return g.length ? g[0].olusturma : cevir('Hiç alınmadı')
+    return g.length ? tarihBicim(g[0].olusturma) : cevir('Hiç alınmadı')
   })()
   const https = ssl.tur === 'gecerli' || ssl.tur === 'bitiyor'
   return (
@@ -100,7 +104,7 @@ function GenelBilgi({ domainId, domain, kaynak, ssl, yedekler, phpEol }: { domai
             </Badge>
           ) : (
             <Badge color={domain.durum === 'aktif' ? 'success' : 'neutral'} variant="soft" className="px-1.5 py-0.5 text-tiny-plus">
-              {domain.durum === 'aktif' ? cevir('Aktif') : domain.durum}
+              {durumAdi(domain.durum)}
             </Badge>
           )}
         </BilgiSatiri>
@@ -133,7 +137,7 @@ function GenelBilgi({ domainId, domain, kaynak, ssl, yedekler, phpEol }: { domai
           </BilgiSatiri>
         )}
         <BilgiSatiri etiket={cevir('Son yedek')}>{sonYedek}</BilgiSatiri>
-        {domain.olusturulma && <BilgiSatiri etiket={cevir('Oluşturulma')}>{domain.olusturulma}</BilgiSatiri>}
+        {domain.olusturulma && <BilgiSatiri etiket={cevir('Oluşturulma')}>{tarihBicim(domain.olusturulma)}</BilgiSatiri>}
       </dl>
       <div className="border-t border-gray-100 dark:border-dark-600">
         <button
@@ -222,9 +226,7 @@ function Kullanim({ kaynak }: { kaynak: Uc<KaynakOzet> }) {
         ) : (
           <div className="px-4 py-4 text-sm text-gray-600 dark:text-dark-200">
             <p>{cevir('Kullanım bilgisi alınamadı.')}</p>
-            <Button variant="outlined" boyut="sm" ikon={I.yenile} className="mt-3" onClick={() => void kaynak.yenile()}>
-              {cevir('Yeniden dene')}
-            </Button>
+            <YenidenDene uc={kaynak} className="mt-3" />
           </div>
         )
       ) : (
@@ -291,7 +293,7 @@ function durumIsareti(satir: AlanSatiri, ssl: SslDurumu): Isaret | null {
   if (satir.tur === 'ana') {
     if (ssl.tur === 'yok') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL yok') }
     if (ssl.tur === 'doldu') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL süresi doldu') }
-    if (ssl.tur === 'bitiyor') return { ton: 'uyari', ikon: I.uyari, metin: cevirF('SSL {0} gün içinde bitiyor', ssl.gun ?? 0) }
+    if (ssl.tur === 'bitiyor') return { ton: 'uyari', ikon: I.uyari, metin: cevirSayili('SSL {0} gün içinde bitiyor', ssl.gun ?? 0, ssl.gun ?? 0) }
     return { ton: 'basari', ikon: I.kilit, metin: cevir('SSL geçerli') }
   }
   if (satir.phpEol) return { ton: 'uyari', ikon: I.uyari, metin: cevirF('PHP {0} — desteği bitti', satir.php) }
@@ -393,13 +395,11 @@ function AlanListesi({
       {altlar.hata && !altlar.veri ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600 dark:border-dark-600 dark:text-dark-200">
           <span>{cevir('Alt alan adları alınamadı.')}</span>
-          <Button variant="flat" boyut="sm" ikon={I.yenile} yukleniyor={altlar.yukleniyor} onClick={() => void altlar.yenile()}>
-            {cevir('Yeniden dene')}
-          </Button>
+          <YenidenDene uc={altlar} />
         </div>
       ) : (
         <p className="border-t border-gray-100 px-4 py-2.5 text-xs tabular-nums text-gray-500 dark:border-dark-600 dark:text-dark-300">
-          {altlar.veri ? cevirF('1 ana alan adı · {0} alt alan adı', altSayisi) : cevir('Alt alan adları yükleniyor…')}
+          {altlar.veri ? cevirSayili('1 ana alan adı · {0} alt alan adı', altSayisi, altSayisi) : cevir('Alt alan adları yükleniyor…')}
         </p>
       )}
     </Card>
@@ -435,7 +435,7 @@ export default function BilgiPaneli({
   const k = kaynak.veri
   const liste = k ? kullanimSatirlari(k) : []
   const yakin = liste.some((s) => s.x.limit > 0 && yuzde(s.x) >= KULLANIM_ESIK)
-  const ozet = [domain.alan_adi, k && k.disk_mb.limit > 0 ? `${cevir('Disk')} ${oran(yuzde(k.disk_mb))}` : null, cevirF('{0} alan adı', satirlar.length)].filter(Boolean).join(' · ')
+  const ozet = [domain.alan_adi, k && k.disk_mb.limit > 0 ? `${cevir('Disk')} ${oran(yuzde(k.disk_mb))}` : null, cevirSayili('{0} alan adı', satirlar.length, satirlar.length)].filter(Boolean).join(' · ')
   return (
     <div>
       <button

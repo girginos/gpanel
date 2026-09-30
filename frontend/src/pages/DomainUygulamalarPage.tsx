@@ -9,13 +9,15 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import Breadcrumb from '@/components/Breadcrumb'
 import UygulamaKatalogu from '@/components/UygulamaKatalogu'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { useUc } from '@/components/alanpano/useUc'
+import { askiYaniti, useUc } from '@/components/alanpano/useUc'
+import { AskiKutusu } from '@/components/musteri-ana/ortak'
 import type { Domain } from '@/components/domainTipi'
 
 const UYGSAYFA_EN: Record<string, string> = {
   'Uygulama Kurulumu': 'App Installer',
   'Hazır uygulamaları tek tıkla kurun ve kurulu uygulamaları yönetin.': 'Install ready-made applications in one click and manage installed ones.',
   'Alan adı bilgisi alınamadı': 'Could not load domain information',
+  'Anasayfa': 'Home',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (UYGSAYFA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -39,6 +41,8 @@ export default function DomainUygulamalarPage() {
         <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">{cevir('Hazır uygulamaları tek tıkla kurun ve kurulu uygulamaları yönetin.')}</p>
         {d ? (
           <UygulamaKatalogu domain={d} />
+        ) : askiYaniti(domain) ? (
+          <AskiKutusu />
         ) : domain.hata ? (
           <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
         ) : (

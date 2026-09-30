@@ -13,6 +13,11 @@
 // Kapsam modeli: 'hesap' = sistem kullanıcısının tamamı (gri kare), 'alan' = alan adına
 // özel (mavi kare + küre). Alan adına özel araç, alt alan adı seçiliyken `altYol`u varsa
 // o alt alan adının sayfasında açılır; yoksa ana alan adında (ipucu bunu söyler).
+// `altYol` YALNIZ alt alan adı sayfasında o aracın karşılığı gerçekten varsa verilir.
+// '' = alt alan adı yönetim sayfası (DomainSubdomainYonetPage): PHP sürümü + php.ini
+// (php), SSL (ssl) ve web sunucusu — backend, nginx önbellek, güvenlik başlıkları, ek
+// direktifler (web-sunucu → SubWebAyarlari, GET/PUT /domains/{id}/subdomain/{sid}/web-sunucu,
+// MusteriScope). DNS, WAF vb. için alt alan adı karşılığı yok → ana alan adında açılır.
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 
@@ -183,6 +188,16 @@ export function aracEslesir(a: MusteriArac, sozcukler: string[]): boolean {
 }
 
 export const aramaSozcukleri = (q: string): string[] => sade(q.trim()).split(/\s+/).filter(Boolean)
+
+// Eklenti kapısı — ana sayfa ve üst çubuk araması AYNI süzgeci kullanır (GET /eklentiler,
+// müşteriye yalnız açık olanlar). Liste yoksa (henüz gelmedi / alınamadı) eklenti aracı
+// önerilmez. Mail: yalnız aktifken araçlar; çalıştırıcı: kuruluysa (askıyı sayfası söyler).
+export function eklentiKapisi(liste: ReadonlyArray<{ ad: string; aktif: boolean }> | null): (a: MusteriArac) => boolean {
+  const l = liste ?? []
+  const mailAktif = l.some((e) => e.ad === 'mail' && e.aktif)
+  const calistiriciKurulu = l.some((e) => e.ad === 'calistirici')
+  return (a) => !a.eklenti || (a.eklenti === 'mail' ? mailAktif : calistiriciKurulu)
+}
 
 // Aracın açılacağı yol. Alt alan adı seçiliyse ve aracın alt alan sayfası varsa oraya.
 export function aracHedefi(a: MusteriArac, domainId: number | string, altId?: number | null): { yol: string; altAlanda: boolean } {

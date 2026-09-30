@@ -3,6 +3,8 @@
 // bileşen müşterinin /abonelikler/{id}/uygulamalar sayfasında da çizilir (DomainUygulamalarPage).
 // Uçlar: GET /uygulamalar/katalog (oturum yeter), GET/POST/DELETE /domains/{id}/uygulamalar
 // (MusteriScope). Davranış taşımadan önceki sekmeyle aynıdır.
+// Simge: sunucunun Ikon alanı emoji (internal/uygulama) — ÇİZİLMEZ (emoji yok kuralı);
+// LogoURL varsa logo, yoksa ya da yüklenemezse nötr uygulama simgesi (I.kutu).
 import { useCallback, useEffect, useState } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
@@ -11,7 +13,7 @@ import { api, apiHata } from '@/lib/api'
 import ToolCard from '@/components/ToolCard'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge, Card, butonSinifi } from '@/components/ui'
+import { Button, Badge, Card, Input, butonSinifi } from '@/components/ui'
 import Modal from '@/components/Modal'
 import { I, Ikon } from '@/components/Ikon'
 
@@ -57,7 +59,9 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
   const [katalog, setKatalog] = useState<KatalogOgesi[]>([])
   const [kurulu, setKurulu] = useState<KuruluUygulama[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
-  const [kurTaslak, setKurTaslak] = useState<{ kod: string; ad: string; ikon: string; alt_dizin: string } | null>(null)
+  const [kurTaslak, setKurTaslak] = useState<{ kod: string; ad: string; alt_dizin: string } | null>(null)
+  // Yüklenemeyen logolar: yerine nötr simge çizilir (boş yer kalmasın).
+  const [kirikLogo, setKirikLogo] = useState<Set<string>>(() => new Set())
   const [gonderiliyor, setGonderiliyor] = useState(false)
   const toast = useToast()
   const dialog = useDialog()
@@ -104,11 +108,11 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
     } catch (e) { await dialog.bilgi({ baslik: apiHata(e, cevir('Silinemedi')), ton: 'tehlike' }) }
   }
 
-  if (yukleniyor) return <div className="py-8 text-center text-slate-500">{cevir('Yükleniyor…')}</div>
+  if (yukleniyor) return <div className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">{cevir('Yükleniyor…')}</div>
   return (
     <div className="space-y-6">
       <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
           {cevir('Öne Çıkan')}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -118,20 +122,20 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
       </section>
 
       <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
           {cevirT(cevir('Kurulu Uygulamalar ({0})'), kurulu.length)}
         </h3>
         {kurulu.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500">
+          <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500 dark:border-dark-500 dark:text-slate-400">
             {cevir('Henüz uygulama kurulu değil. Aşağıdaki katalogdan seç.')}
           </div>
         ) : (
           <div className="space-y-2">
             {kurulu.map((u) => (
-              <Card key={u.id} className="flex items-center justify-between bg-white dark:bg-dark-800 p-3">
-                <div className="flex-1">
-                  <div className="font-medium">{u.ad} <span className="text-xs text-slate-500">v{u.surum}</span></div>
-                  <div className="text-xs text-slate-500 font-mono">/{u.alt_dizin || ''} · DB: {u.db_adi || '—'}</div>
+              <Card key={u.id} className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-dark-800 p-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-800 dark:text-slate-100">{u.ad} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">v{u.surum}</span></div>
+                  <div className="truncate text-xs text-slate-500 dark:text-slate-400 font-mono">/{u.alt_dizin || ''} · DB: {u.db_adi || '—'}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <a href={u.yonetim_url} target="_blank" rel="noreferrer"
@@ -148,35 +152,37 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
       </section>
 
       <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
           {cevirT(cevir('Katalog ({0})'), katalog.length)}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {katalog.map((t) => (
             <Card key={t.Kod} className="bg-white dark:bg-dark-800 p-3">
               <div className="flex items-start gap-2 mb-2">
-                {t.LogoURL ? (
-                  <img src={t.LogoURL} alt={t.Ad} className="w-8 h-8 object-contain shrink-0"
-                    onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                {t.LogoURL && !kirikLogo.has(t.Kod) ? (
+                  <img src={t.LogoURL} alt="" className="size-8 object-contain shrink-0"
+                    onError={() => setKirikLogo((s) => new Set(s).add(t.Kod))} />
                 ) : (
-                  <span className="text-2xl">{t.Ikon}</span>
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 dark:bg-dark-600 dark:text-slate-200" aria-hidden="true">
+                    <Ikon d={I.kutu} className="size-[18px]" />
+                  </span>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{t.Ad}</div>
-                  <div className="text-[10px] text-slate-500">v{t.Surum} · {t.Kategori}</div>
+                  <div className="font-medium truncate text-slate-800 dark:text-slate-100">{t.Ad}</div>
+                  <div className="text-tiny-plus text-slate-500 dark:text-slate-400">v{t.Surum} · {t.Kategori}</div>
                 </div>
                 {t.NativeApp && (
-                  <Badge color="warning" variant="soft" className="text-[9px] px-1.5 py-0.5 whitespace-nowrap">{cevir('yakında')}</Badge>
+                  <Badge color="warning" variant="soft" className="text-tiny-plus px-1.5 py-0.5 whitespace-nowrap">{cevir('yakında')}</Badge>
                 )}
               </div>
-              <p className="text-xs text-slate-600 mb-3">{t.Aciklama}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mb-3">{t.Aciklama}</p>
               <Button
                 color="primary"
                 boyut="sm"
                 ikon={t.NativeApp ? I.kilit : I.oynat}
                 onClick={() => t.NativeApp
                   ? void dialog.bilgi({ baslik: t.Ad + ' ' + cevir('host seviyesinde bir uygulamadır, tenant panelinden kurulamaz.') })
-                  : setKurTaslak({ kod: t.Kod, ad: t.Ad, ikon: t.Ikon, alt_dizin: t.Kod })}
+                  : setKurTaslak({ kod: t.Kod, ad: t.Ad, alt_dizin: t.Kod })}
                 disabled={t.NativeApp}
                 className="w-full">
                 {t.NativeApp ? cevir("Admin'den kurulur") : cevir('Kur')}
@@ -186,7 +192,7 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
         </div>
       </section>
 
-      <Modal acik={!!kurTaslak} baslik={kurTaslak ? `${kurTaslak.ikon} ${kurTaslak.ad} ${cevir('Kur')}` : ''}
+      <Modal acik={!!kurTaslak} baslik={kurTaslak ? `${kurTaslak.ad} ${cevir('Kur')}` : ''}
         onKapat={() => setKurTaslak(null)} kapatilamaz={gonderiliyor}
         alt={<>
           <Button variant="outlined" ikon={I.kapat} onClick={() => setKurTaslak(null)} disabled={gonderiliyor}>{cevir('Vazgeç')}</Button>
@@ -196,11 +202,16 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
         </>}>
         {kurTaslak && (
           <>
-            <label className="block text-xs font-medium text-slate-600 mb-1">{cevir('Alt dizin (public_html/... altına)')}</label>
-            <input value={kurTaslak.alt_dizin} onChange={(e) => setKurTaslak({ ...kurTaslak, alt_dizin: e.target.value })}
+            <Input
+              label={cevir('Alt dizin (public_html/... altına)')}
+              value={kurTaslak.alt_dizin}
+              onChange={(e) => setKurTaslak({ ...kurTaslak, alt_dizin: e.target.value })}
               placeholder={cevir('boş = kök, blog, shop vb.')}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm mb-4 dark:bg-dark-900 dark:border-dark-600" />
-            <p className="text-xs text-slate-500">
+              autoComplete="off"
+              spellCheck={false}
+              classNames={{ root: 'mb-4', input: 'font-mono text-sm' }}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {cevir('Site:')} <span className="font-mono">https://{domain.alan_adi}/{kurTaslak.alt_dizin}</span>
             </p>
           </>

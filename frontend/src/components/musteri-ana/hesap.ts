@@ -5,7 +5,7 @@ import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet, Limit } from '@/components/alanpano/tipler'
 import { I } from '@/components/Ikon'
 import { mb } from '@/components/alanpano/bicim'
-import { cevir, cevirF, oran, sayi } from './dil'
+import { cevir, cevirF, cevirSayili, oran, sayi } from './dil'
 import type { AltAlan, AlanSatiri, BildirimYaniti, PhpSurum, Uyari, UyariTonu, Yedek } from './tipler'
 
 export const SSL_UYARI_GUN = 14 // bu kadar gün (ve altı) kalan sertifika uyarı verir
@@ -91,15 +91,10 @@ export function uyarilariTuret(g: Girdi): Uyari[] {
   const { domain: d, kaynak: k, simdi } = g
   const kok = `/abonelikler/${g.domainId}`
   const l: Uyari[] = []
+  // Askı burada madde DEĞİLDİR: askıdaki alan adında müşteri token'ı tüm uçlarda 403
+  // alır, domain hiç yüklenmez; sayfa bunu hata yolunda ayırt edip açıklama çizer
+  // (MusteriAnaSayfa AskiKutusu).
   if (d) {
-    if (d.askida) {
-      l.push({
-        id: 'askida',
-        ton: 'tehlike',
-        baslik: cevir('Hesabınız askıya alındı'),
-        aciklama: cevir('Siteniz ziyaretçilere bakım sayfası gösteriyor. Ayrıntı için hizmet sağlayıcınızla iletişime geçin.'),
-      })
-    }
     const ssl = sslDurumu(d, simdi)
     const sslEylem = { ikon: I.kilit, yol: `${kok}/ssl` }
     if (ssl.tur === 'yok') {
@@ -122,7 +117,7 @@ export function uyarilariTuret(g: Girdi): Uyari[] {
       l.push({
         id: `ssl-bitiyor-${d.ssl_bitis}`,
         ton: 'uyari',
-        baslik: cevirF('{0} SSL sertifikası {1} gün içinde bitiyor', d.alan_adi, ssl.gun ?? 0),
+        baslik: cevirSayili('{0} SSL sertifikası {1} gün içinde bitiyor', ssl.gun ?? 0, d.alan_adi, ssl.gun ?? 0),
         aciklama: cevir('Otomatik yenileme gecikmiş olabilir; durumu SSL sayfasından kontrol edin.'),
         eylem: { ...sslEylem, etiket: cevir('SSL sayfasını aç') },
       })
@@ -169,7 +164,7 @@ export function uyarilariTuret(g: Girdi): Uyari[] {
         l.push({
           id: `yedek-eski-${gecerli[0].id}`,
           ton: 'bilgi',
-          baslik: cevirF('Son yedek {0} gün önce alındı', gun),
+          baslik: cevirSayili('Son yedek {0} gün önce alındı', gun, gun),
           aciklama: cevir('Düzenli yedek için otomatik yedeklemeyi açabilirsiniz.'),
           eylem: { ...yedekEylem, etiket: cevir('Yedekler') },
         })

@@ -6,6 +6,7 @@ import { Badge, Button, butonSinifi } from '@/components/ui'
 import type { ButtonProps, Color, Variant } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
+import { UyariKutusu } from '@/components/UyariKutusu'
 import { cevir, cevirF } from './dil'
 import { panoyaKopyala } from './yardimci'
 import type { AlanTuru } from './tipler'
@@ -19,6 +20,29 @@ export const DOKUN_IKON = 'size-10 @2xl/sayfa:size-8'
 export const Dugme = forwardRef<HTMLButtonElement, ButtonProps>(function Dugme({ boyut, className = '', ...rest }, ref) {
   return <Button ref={ref} boyut={boyut} className={boyut === 'sm' ? `${DOKUN} ${className}` : className} {...rest} />
 })
+
+// Başarısız bir uç çekimi için "Yeniden dene" — sayfanın her yerinde aynı ton
+// (neutral outlined + yenile ikonu, yenilerken döner) ve dar sayfada 40 px hedef.
+export function YenidenDene({ uc, className = '' }: { uc: { yukleniyor: boolean; yenile: () => Promise<void> }; className?: string }) {
+  return (
+    <Dugme variant="outlined" boyut="sm" ikon={I.yenile} yukleniyor={uc.yukleniyor} className={className} onClick={() => void uc.yenile()}>
+      {cevir('Yeniden dene')}
+    </Dugme>
+  )
+}
+
+// Askıdaki hesap (uçlar 403 + askı mesajı, bkz. useUc askiYaniti): hata değil hesap
+// durumu — dostça açıklama; "Yeniden dene" YOK (askı sağlayıcı kaldırana kadar sürer).
+export function AskiKutusu({ className = '' }: { className?: string }) {
+  return (
+    <UyariKutusu ton="uyari" baslik={cevir('Hesabınız askıya alındı')} className={className}>
+      <p>{cevir('Siteniz ziyaretçilere bakım sayfası gösteriyor. Ayrıntı için hizmet sağlayıcınızla iletişime geçin.')}</p>
+      <p className="mt-1">
+        {cevir('Hesabınız şu anda askıda olduğu için panel araçları kullanılamıyor. Askının nedeni ve hesabınızın yeniden açılması için hizmet sağlayıcınızla görüşün.')}
+      </p>
+    </UyariKutusu>
+  )
+}
 
 // Buton görünümlü iç bağlantı (gezinme bir eylem değil, bağlantıdır: yeni sekmede
 // açılabilir). İkon ölçüsü/boşluğu Button ile birebir aynı.

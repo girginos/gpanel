@@ -14,22 +14,22 @@
 //   PHP desteği        GET /php/versions                (eol)
 //   Uyarı (bildirim)   GET /bildirimler                 (müşteri yalnız kendi domaini)
 //   Eklenti kapıları   GET /eklentiler                  (müşteriye yalnız açık olanlar)
-// Yönetici uçları ÇAĞRILMAZ (403 alan istek bırakılmaz).
+// Yönetici uçları ÇAĞRILMAZ (403 alan istek bırakılmaz). İstisna: askıdaki hesapta
+// MusteriScope TÜM uçlara 403 + askı mesajı döner → sayfa AskiKutusu çizer (hata değil).
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Button } from '@/components/ui'
-import { I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
-import { useUc } from '@/components/alanpano/useUc'
+import { askiYaniti, useUc } from '@/components/alanpano/useUc'
 import { kaydet, oku } from '@/lib/kalici'
-import { MUSTERI_ARACLAR } from '@/components/musteri-ana/araclar'
+import { MUSTERI_ARACLAR, eklentiKapisi } from '@/components/musteri-ana/araclar'
 import AracIzgarasi from '@/components/musteri-ana/AracIzgarasi'
 import BilgiPaneli from '@/components/musteri-ana/BilgiPaneli'
 import UyariBandi from '@/components/musteri-ana/UyariBandi'
-import { cevir } from '@/components/musteri-ana/dil'
+import { AskiKutusu, YenidenDene } from '@/components/musteri-ana/ortak'
+import { cevir, cevirF } from '@/components/musteri-ana/dil'
 import { alanSatirlari, eolSurumleri, sslDurumu, uyarilariTuret } from '@/components/musteri-ana/hesap'
 import type { AltAlan, BildirimYaniti, EklentiKaydi, PhpSurum, Yedek } from '@/components/musteri-ana/tipler'
 
@@ -82,13 +82,18 @@ export default function MusteriAnaSayfa() {
   if (!domain.veri) {
     if (domain.yukleniyor || !id) return <Iskelet />
     return (
-      <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-        <UyariKutusu ton="tehlike" baslik={cevir('Hesap bilgileri alınamadı')}>
-          <p>{domain.hata}</p>
-          <Button variant="outlined" boyut="sm" ikon={I.yenile} yukleniyor={domain.yukleniyor} className="mt-3" onClick={() => void domain.yenile()}>
-            {cevir('Yeniden dene')}
-          </Button>
-        </UyariKutusu>
+      <div className="@container/sayfa">
+        <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+          <h1 className="sr-only">{cevir('Ana sayfa')}</h1>
+          {askiYaniti(domain) ? (
+            <AskiKutusu />
+          ) : (
+            <UyariKutusu ton="tehlike" baslik={cevir('Hesap bilgileri alınamadı')}>
+              <p>{domain.hata}</p>
+              <YenidenDene uc={domain} className="mt-3" />
+            </UyariKutusu>
+          )}
+        </div>
       </div>
     )
   }
@@ -109,32 +114,26 @@ export default function MusteriAnaSayfa() {
     simdi,
   }).filter((u) => !gizli.has(u.id))
 
-  // Eklenti kapısı (SubscriptionDetailPage ile aynı desen): liste gelmeden eklenti aracı
-  // çizilmez. Mail: aktifse araçlar; kurulu ama askıdaysa kategori açıklamayla durur.
-  // Çalıştırıcı: kuruluysa görünür, askı durumunu kendi sayfası (EklentiEkrani) söyler.
+  // Eklenti kapısı (SubscriptionDetailPage ile aynı desen; üst çubuk araması da aynı
+  // süzgeç — araclar.ts eklentiKapisi): liste gelmeden eklenti aracı çizilmez. Mail:
+  // aktifse araçlar; kurulu ama askıdaysa kategori açıklamayla durur. Çalıştırıcı:
+  // kuruluysa görünür, askı durumunu kendi sayfası (EklentiEkrani) söyler.
   const ekl = eklentiler.veri ?? []
   const mailKurulu = ekl.some((e) => e.ad === 'mail')
   const mailAktif = ekl.some((e) => e.ad === 'mail' && e.aktif)
-  const calistiriciKurulu = ekl.some((e) => e.ad === 'calistirici')
-  const araclar = MUSTERI_ARACLAR.filter((a) => !a.eklenti || (a.eklenti === 'mail' ? mailAktif : calistiriciKurulu))
+  const araclar = MUSTERI_ARACLAR.filter(eklentiKapisi(eklentiler.veri))
   const secili = satirlar.find((s) => s.anahtar === seciliAnahtar) ? seciliAnahtar : 'ana'
 
   return (
     <div className="@container/sayfa">
+      {/* Sayfanın tek h1'i en başta (görünmez): uyarı bandının ve panelin h2'leri ondan sonra gelir. */}
+      <h1 className="sr-only">{cevirF('{0} — ana sayfa', d.alan_adi)}</h1>
       <UyariBandi liste={uyarilar} acik={bantAcik} setAcik={setBantAcik} onGizle={gizle} />
+      {/* DOM sırası = dar sayfadaki görsel sıra (odak sırası, WCAG 2.4.3): önce bilgi paneli
+          ("Hesap özeti"), sonra araçlar. Geniş sayfada ızgara hücreleriyle yer değiştirir:
+          araçlar solda, panel sağda. */}
       <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-4 py-4 @2xl/sayfa:px-6 @2xl/sayfa:py-6 @4xl/sayfa:grid @4xl/sayfa:grid-cols-[minmax(0,1fr)_300px] @4xl/sayfa:items-start @4xl/sayfa:gap-6 @6xl/sayfa:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="@container/ana min-w-0">
-          <AracIzgarasi
-            domainId={domainId}
-            araclar={araclar}
-            mailAskida={mailKurulu && !mailAktif}
-            satirlar={satirlar}
-            seciliAnahtar={secili}
-            onSec={setSeciliAnahtar}
-            sistemKullanici={d.sistem_kullanici}
-          />
-        </div>
-        <aside aria-label={cevir('Hesap bilgileri')} className="order-first min-w-0 @4xl/sayfa:order-none">
+        <aside aria-label={cevir('Hesap bilgileri')} className="min-w-0 @4xl/sayfa:col-start-2 @4xl/sayfa:row-start-1">
           <BilgiPaneli
             domainId={domainId}
             domain={d}
@@ -149,6 +148,17 @@ export default function MusteriAnaSayfa() {
             setAcik={setBilgiAcik}
           />
         </aside>
+        <div className="@container/ana min-w-0 @4xl/sayfa:col-start-1 @4xl/sayfa:row-start-1">
+          <AracIzgarasi
+            domainId={domainId}
+            araclar={araclar}
+            mailAskida={mailKurulu && !mailAktif}
+            satirlar={satirlar}
+            seciliAnahtar={secili}
+            onSec={setSeciliAnahtar}
+            sistemKullanici={d.sistem_kullanici}
+          />
+        </div>
       </div>
     </div>
   )

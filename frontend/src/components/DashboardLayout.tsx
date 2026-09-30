@@ -269,6 +269,7 @@ export default function DashboardLayout() {
     if (isMusteri) {
       const arac = yolunAraci(konum.pathname)
       if (arac) etiket = aracCevir(arac.ad)
+      else if (/^\/abonelikler\/[0-9]+\/?$/.test(konum.pathname)) etiket = aracCevir('Ana sayfa')
     } else {
       const aktif = aktifNav
         .flatMap(g => g.items)

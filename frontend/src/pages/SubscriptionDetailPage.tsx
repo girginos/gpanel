@@ -113,9 +113,7 @@ export default function SubscriptionDetailPage() {
   const diskMB = kaynak.veri ? kaynak.veri.disk_mb.kullanim : null
   const [menuAcik, setMenuAcik] = useState(false)
   const [isleniyor, setIsleniyor] = useState(false)
-  const [bildirim, setBildirim] = useState<string | null>(null)
   const [mailAktif, setMailAktif] = useState(false)
-  const [calistiriciAktif, setCalistiriciAktif] = useState(false)
   // 🔴 KURULU (aktif'ten AYRI): askıya alınmış (kurulu ama aktif=0) eklentinin
   // sekmesi kaybolmasın — açık kalıp landing göstersin (Marka/top-level ile tutarlı).
   const [mailKurulu, setMailKurulu] = useState(false)
@@ -152,11 +150,10 @@ export default function SubscriptionDetailPage() {
       .then(r => {
         if (iptal) return
         setMailAktif(r.data.some(e => e.ad === 'mail' && e.aktif))
-        setCalistiriciAktif(r.data.some(e => e.ad === 'calistirici' && e.aktif))
         setMailKurulu(r.data.some(e => e.ad === 'mail'))
         setCalistiriciKurulu(r.data.some(e => e.ad === 'calistirici'))
       })
-      .catch(() => { if (iptal) return; setMailAktif(false); setCalistiriciAktif(false); setMailKurulu(false); setCalistiriciKurulu(false) })
+      .catch(() => { if (iptal) return; setMailAktif(false); setMailKurulu(false); setCalistiriciKurulu(false) })
     return () => { iptal = true; domainYukleNesli.current++ }
   }, [id])
 
@@ -164,13 +161,12 @@ export default function SubscriptionDetailPage() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
     if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
-    setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
+    setMenuAcik(false); setIsleniyor(true); setHata(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
+      // Başarı mesajı toast ile gösterilir (ayrı bir sayfa içi bildirim alanı yok).
       const iyi = askiyaAl ? cevir("Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("Askı kaldırıldı — site tekrar erişilebilir.")
-      setBildirim(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
-      setTimeout(() => setBildirim(null), 6000)
       void domainYukle()
     } catch (e) {
       const m = apiHata(e, cevir("İşlem başarısız"))
@@ -303,7 +299,7 @@ export default function SubscriptionDetailPage() {
           {tab === 'hosting'   && <HostingTab domain={domain} />}
           {tab === 'apps'      && <UygulamaKatalogu domain={domain} />}
           {tab === 'mail'      && (mailAktif ? <MailTab domain={domain} /> : <LisansAskida baslik={cevir("Mail Sunucu")} />)}
-          {/* 🔴 `calistiriciAktif &&` şart: seçili sekme localStorage'da
+          {/* 🔴 `calistiriciKurulu &&` şart: seçili sekme localStorage'da
               saklanıyor. Eklenti kaldırıldıktan sonra kullanıcı bu sayfaya
               dönerse sekme DÜĞMESİ çizilmez ama içerik yine de render edilir
               ve boş/hatalı bir ekran görünürdü. */}
