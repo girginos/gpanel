@@ -771,11 +771,13 @@ func buildSecurityHeaders(o VhostOpts) string {
 
 // suspendedVhostTmpl — "Hesabı Askıya Al" için: acme-challenge hariç TÜM istekler 503.
 // SSL sertifikası varsa 443'te de servis edilir (böylece askıdayken bile cert yenilenebilir).
+// Veri askiVhostVeri'dir; ana vhost ve alt alan adı vhost'ları bu TEK şablonu
+// kullanır (AskiVhostGovde).
 var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} — GirginOSPanel tarafından ASKIYA ALINDI
 server {
     listen 80;
     listen [::]:80;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -817,7 +819,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     ssl_certificate     {{.CertPath}};
     ssl_certificate_key {{.KeyPath}};
@@ -971,6 +973,10 @@ func phpPoolPath(sk, phpSurum string) (string, string, string) {
 // (nginx/DNS'teki backup-rollback deseni). Basariliysa ilgili php-fpm servisini reload eder.
 // Doner: aktif socket yolu + servis adi.
 func writePoolValidated(sk, phpSurum string) (socket, service string, err error) {
+	// 🔴 Askıdaki hesabın havuzu yazılıp master'a YÜKLENMEZ (bkz. PHPHavuzAski).
+	if err := HesapAskiKapisi(sk); err != nil {
+		return "", "", err
+	}
 	// 🔴 Silinmis tenant korumasi: kullanici yoksa havuz YAZILMAZ. Aksi halde
 	// (silme ile es zamanli calisan heal/downgrade yollari) sahipsiz bir havuz
 	// birakir, `php-fpm -t` o PHP surumunde kalici hata verir ve YENI DOMAIN
@@ -1052,6 +1058,23 @@ func gecerliSKAdi(sk string) bool {
 	return true
 }
 
+// vhostAskiDurumu — opts açıkça askıda demese bile HESAP askıdaysa (tek kaynak:
+// hesaplar.HesapAskida) render'ı 503 vhost'u olarak zorlar. Bu sayede SetPHP/SSL/
+// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
+// 🔴 Durum okunamazsa hata: vhost'a DOKUNULMAZ. Eskiden hata yutulup "askıda
+// değil" sayılıyordu → DB anlık hatasında askıdaki site sessizce yayına dönüyordu.
+func vhostAskiDurumu(opts *VhostOpts, sk string) error {
+	if opts.Askida {
+		return nil
+	}
+	askida, err := HesapAskida(sk)
+	if err != nil {
+		return fmt.Errorf("vhost DEGISTIRILMEDI (%s): %w", sk, err)
+	}
+	opts.Askida = askida
+	return nil
+}
+
 func renderAndReload(opts VhostOpts, sk string) error {
 	// 🔴 TEK NOKTA: tüm vhost üretim yolları (HTTP, SSL, yeniden üretim) buradan
 	// geçer. Snippet satırını burada doldurmak, çağıran her yerde tekrar etmeye
@@ -1091,15 +1114,9 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		opts.PHPSocket = tenantSocket(sk)
 	}
 
-	// Askıya-alma tutarlılığı: opts açıkça askıda demese bile DB'de bu kullanıcının
-	// domaini askıdaysa, HER render'ı 503 vhost'u olarak zorla. Bu sayede SetPHP/SSL/
-	// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
-	if !opts.Askida && pkgDB != nil {
-		var ak int
-		_ = pkgDB.QueryRow(`SELECT COALESCE(askida,0) FROM domains WHERE sistem_kullanici=?`, sk).Scan(&ak)
-		if ak == 1 {
-			opts.Askida = true
-		}
+	// Askıya-alma tutarlılığı: HER render hesabın askı durumunu tek kaynaktan okur.
+	if err := vhostAskiDurumu(&opts, sk); err != nil {
+		return err
 	}
 
 	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
@@ -1129,11 +1146,18 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	}
 
 	var buf bytes.Buffer
-	tmpl := vhostTmpl
 	if opts.Askida {
-		tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
-	}
-	if err := tmpl.Execute(&buf, opts); err != nil {
+		// askıdayken 503 vhost'u (alt alan adlarıyla AYNI şablon)
+		cert, key := "", ""
+		if opts.SSL() {
+			cert, key = opts.CertPath, opts.KeyPath
+		}
+		govde, err := AskiVhostGovde(opts.AlanAdi, opts.AlanAdi+" www."+opts.AlanAdi, cert, key)
+		if err != nil {
+			return err
+		}
+		buf.WriteString(govde)
+	} else if err := vhostTmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("template render: %w", err)
 	}
 	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi).
