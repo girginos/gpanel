@@ -96,7 +96,7 @@ export default function IzlemePage() {
   useTranslation() // dil re-render aboneligi
   const [tab, setTab] = useState<'sunucu' | 'domain' | 'loglar'>('sunucu')
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("İzleme") }]} />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Uçtan Uca İzleme")}</h1>

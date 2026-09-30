@@ -297,7 +297,7 @@ export default function DomainSSLPage() {
     : []
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]"
+    <div
       style={panelYuksek > 0 ? { paddingBottom: panelYuksek + 32 } : undefined}>
       <IlerlemePaneli
         isler={panelIsler}
