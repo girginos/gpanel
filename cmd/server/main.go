@@ -36,6 +36,7 @@ import (
 	githubpkg "girginospanel/internal/github"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/guvenlikduvari"
+	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/hostuyg"
 	"girginospanel/internal/httpx"
@@ -378,6 +379,21 @@ func main() {
 	// birakilsaydi "panelde gorunmeyen kesinti" sinifi ozelligin alt alan
 	// yarisinda oldugu gibi kalirdi.
 	subdomain.HealAltAlanSapmasi(d)
+	// Hesap askısı uzlaştırması: askıdaki HER hesaba askı adımlarını (ana + alt
+	// alan vhost'ları, PHP havuzları, Laravel işleyicileri, FTP/SSH/DB girişleri,
+	// cron) yeniden uygular. Hesap askısı genişletilmeden önce askıya alınmış
+	// hesaplar (alt alanları/PHP/SSH/DB açık kalmıştı) ve yarım kalmış işlemler
+	// böylece kapanır; idempotent, askıyı KALDIRMAZ. Boot'u bloklamaz.
+	go func() {
+		n, hatali, err := hesapaski.AskidakileriUygula(context.Background(), d)
+		if err != nil {
+			log.Printf("hesap askısı uzlaştırması: liste okunamadı: %v", err)
+			return
+		}
+		if n+hatali > 0 {
+			log.Printf("hesap askısı uzlaştırması: %d hesap uygulandı, %d hatalı", n, hatali)
+		}
+	}()
 	// Acilistaki tek seferlik kontrol, iki acilis ARASINDA olusan sapmalari
 	// goremez (yeni domainin 0644 logu, sessizce basarisiz olan bir gunluk
 	// dondurme). Periyodik olcum bu bosluğu kapatir.

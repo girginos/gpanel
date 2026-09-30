@@ -43,6 +43,7 @@ func ha_adimlar(t *testing.T, phpHata error) *[]string {
 			},
 			SSHGiris:      func(string, bool) error { not("ssh"); return nil },
 			DBKullanici:   func(*sql.DB, int64, bool) error { not("db"); return nil },
+			Birimler:      func(context.Context, *sql.DB, int64, bool) error { not("birim"); return nil },
 			CalismaZamani: func(string, bool) { not("cron") },
 		}
 	}
@@ -51,7 +52,7 @@ func ha_adimlar(t *testing.T, phpHata error) *[]string {
 
 func ha_askiSatiri(sd *sahtedb.DB) {
 	sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum",
-		[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(0), ""})
+		[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(0), "", int64(0)})
 }
 
 var ha_askiyaAl = sh_durum{
@@ -66,7 +67,7 @@ func TestAskiyaAl_HesapDuzeyindeTekYol(t *testing.T) {
 	if kod != http.StatusOK {
 		t.Fatalf("200 beklenirdi: %d %s", kod, govde)
 	}
-	if got := strings.Join(*cagri, " "); got != "ana alt db php(true) ssh cron" {
+	if got := strings.Join(*cagri, " "); got != "ana alt birim db php(true) ssh cron" {
 		t.Fatalf("hesabın tüm adımları uygulanmalı: %s", got)
 	}
 }

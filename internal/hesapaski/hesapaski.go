@@ -13,11 +13,25 @@
 //     açık kalır (sertifika askıda da yenilenir).
 //   - PHP: hesabın FPM havuzları durur (provisioner.PHPHavuzAski); havuzu
 //     yeniden başlatabilecek yollar askıda kapalıdır (provisioner.HesapAskiKapisi).
-//   - cron: crontab spool'dan çıkarılır + hesabın süreçleri öldürülür (mevcut).
+//     Hesabın PHP kodunu FPM dışında çalıştıran Laravel kuyruk işleyicisi
+//     (systemd, Restart=always) ve zamanlanmış görevi (cron.d) de kapanır
+//     (laravel.HesapAski); askıda açılamazlar.
+//   - cron: crontab spool'dan çıkarılır + hesabın süreçleri öldürülür (mevcut);
+//     askıda panelden cron yazılamaz.
 //   - girişler: FTP ve müşteri paneli (ftp_accounts.status), SSH/SFTP (hesap
 //     süresi; ssh_erisim ayarı korunur).
-//   - veritabanı: hesabın MariaDB kullanıcıları ACCOUNT LOCK.
-//   - posta: kutular mail eklentisinin veritabanındadır; bu yol dokunmaz.
+//   - veritabanı: hesabın MariaDB kullanıcıları (TÜM host'ları) ACCOUNT LOCK.
+//   - posta: AÇIK KALIR. Kutular mail eklentisinin veritabanında ve kaynağı bu
+//     depoda değil; panel posta girişini kapatamaz. Gelen posta kabul edilir
+//     (veri kaybı yok); IMAP/POP3 ve SMTP AUTH da şu an açıktır. Kapatmak için
+//     eklentide alan adı askı bayrağı + dovecot password_query koşulu gerekir;
+//     o zaman buraya tek adım eklenir.
+//
+// Eşzamanlılık: Uygula hesap başına kilitlidir (kilit.Hesap); tekil/toplu yol
+// bayi durum denetimini ve uygulamayı bayi kilidi (kilit.Bayi — bayi zinciri,
+// hosting oluşturma ve silme ile aynı) altında yapar. Açılış süpürmesi
+// (AskidakileriUygula) askıdaki her hesaba adımları yeniden uygular: bu dal
+// yayına girmeden askıya alınmış hesaplar ve yarım kalmış işlemler uzlaşır.
 //
 // Ek (addon) alan adı arka ucu henüz yok. Tasarım hesap (sistem kullanıcısı)
 // anahtarlıdır: ek alan adının vhost'u hesaplar.HesapAskida(sk) çağırınca askıya
@@ -33,6 +47,8 @@ import (
 	"strings"
 
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kilit"
+	"girginospanel/internal/laravel"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/sshaccess"
 	"girginospanel/internal/subdomain"
@@ -91,6 +107,7 @@ type Adimlar struct {
 	PHPHavuz      func(db *sql.DB, domainID int64, sk, surum string, ekHavuzlar []string, askida bool) error
 	SSHGiris      func(sk string, kilit bool) error
 	DBKullanici   func(db *sql.DB, domainID int64, kilit bool) error
+	Birimler      func(ctx context.Context, db *sql.DB, domainID int64, askida bool) error
 	CalismaZamani func(sk string, askida bool)
 }
 
@@ -103,6 +120,7 @@ func Varsayilan() Adimlar {
 		PHPHavuz:      provisioner.PHPHavuzAski,
 		SSHGiris:      sshaccess.HesapGirisKilidi,
 		DBKullanici:   hesaplar.DBKullanicilariKilit,
+		Birimler:      laravel.HesapAski,
 		CalismaZamani: provisioner.SuspendUserRuntime,
 	}
 }
@@ -115,6 +133,27 @@ func Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak strin
 // BayiUygula — Varsayilan().BayiUygula.
 func BayiUygula(ctx context.Context, db *sql.DB, resellerID int64, askida bool) (int, int, error) {
 	return Varsayilan().BayiUygula(ctx, db, resellerID, askida)
+}
+
+// AskidakileriUygula — Varsayilan().AskidakileriUygula.
+func AskidakileriUygula(ctx context.Context, db *sql.DB) (int, int, error) {
+	return Varsayilan().AskidakileriUygula(ctx, db)
+}
+
+// hesapSatiri — domains satırının askı işlemine giren alanları.
+type hesapSatiri struct {
+	alanAdi, sk, surum, kaynak string
+	isDemo, askida             int
+	bayi                       int64
+}
+
+func satirOku(ctx context.Context, db *sql.DB, id int64) (hesapSatiri, error) {
+	var h hesapSatiri
+	err := db.QueryRowContext(ctx,
+		`SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum,'8.3'), COALESCE(askida,0), COALESCE(askida_kaynak,''), COALESCE(reseller_id,0)
+		   FROM domains WHERE id=?`, id).
+		Scan(&h.alanAdi, &h.sk, &h.isDemo, &h.surum, &h.askida, &h.kaynak, &h.bayi)
+	return h, err
 }
 
 // durumYaz — domains askı kolonları (askida, durum, askida_kaynak).
@@ -150,16 +189,37 @@ func ftpDurum(ctx context.Context, db *sql.DB, id int64, askida bool) error {
 // şey değişmemiştir — bayi zincirinin askıya alması hariç, bkz. aşağısı) →
 // kalan adımlar. Kalan adımlardan biri düşerse ötekiler yine uygulanır ve
 // KismiHata döner (güvenli taraf: hesap askıda sayılır).
+//
+// Kilitler (sıra: bayi → hesap): tekil/toplu yol (KaynakManuel) bayi durumunu
+// ve uygulamayı kilit.Bayi altında yapar — bayi zinciri (reseller, kilit.Bayi'yi
+// tutarak BayiUygula'yı çağırır) araya girip "bayi aktif" okumasını bayatlatamaz.
+// Hesap kilidi (kilit.Hesap) aynı hesaba eşzamanlı askı işlemlerini serileştirir:
+// askıya almanın adımları askıdan almanın durumYaz'ından SONRA koşup DB "açık"
+// derken havuzları/girişleri kapalı bırakamaz.
 func (a Adimlar) Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak string) (string, error) {
-	var alanAdi, sk, surum, eskiKaynak string
-	var isDemo, eskiAskida int
-	if err := db.QueryRowContext(ctx,
-		`SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum,'8.3'), COALESCE(askida,0), COALESCE(askida_kaynak,'')
-		   FROM domains WHERE id=?`, id).
-		Scan(&alanAdi, &sk, &isDemo, &surum, &eskiAskida, &eskiKaynak); err != nil {
+	on, err := satirOku(ctx, db, id)
+	if err != nil {
 		return "", err
 	}
-	if isDemo == 1 {
+	if kaynak == KaynakManuel {
+		bk := kilit.Bayi(on.bayi)
+		bk.Lock()
+		defer bk.Unlock()
+	}
+	hk := kilit.Hesap(on.sk)
+	hk.Lock()
+	defer hk.Unlock()
+	return a.uygulaKilitli(ctx, db, id, askida, kaynak)
+}
+
+func (a Adimlar) uygulaKilitli(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak string) (string, error) {
+	// Kilit altında YENİDEN oku: bekleme sırasında başka bir işlem durumu değiştirmiş olabilir.
+	h, err := satirOku(ctx, db, id)
+	if err != nil {
+		return "", err
+	}
+	alanAdi, sk, surum, eskiKaynak, eskiAskida := h.alanAdi, h.sk, h.surum, h.kaynak, h.askida
+	if h.isDemo == 1 {
 		return alanAdi, ErrDemo
 	}
 	if kaynak == KaynakManuel {
@@ -229,6 +289,9 @@ func (a Adimlar) kapat(ctx context.Context, db *sql.DB, id int64, sk, surum stri
 	}
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, true))
+	// İşleyiciler DB kilidinden ÖNCE durur: kilitli DB'ye bağlanamayıp çökme
+	// döngüsüne girmesinler.
+	ekle("kuyruk işleyicisi / zamanlanmış görev", a.Birimler(ctx, db, id, true))
 	ekle("veritabanı kullanıcıları", a.DBKullanici(db, id, true))
 	if hesapKullanicisi(sk) {
 		havuzlar, err := a.AltHavuzlar(ctx, db, id, sk)
@@ -258,6 +321,8 @@ func (a Adimlar) ac(ctx context.Context, db *sql.DB, id int64, sk, surum string)
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, false))
 	ekle("veritabanı kullanıcıları", a.DBKullanici(db, id, false))
+	// İşleyiciler DB kilidi açıldıktan SONRA başlar.
+	ekle("kuyruk işleyicisi / zamanlanmış görev", a.Birimler(ctx, db, id, false))
 	if hesapKullanicisi(sk) {
 		ekle("SSH/SFTP girişi", a.SSHGiris(sk, false))
 		a.CalismaZamani(sk, false)
@@ -319,4 +384,80 @@ func (a Adimlar) BayiUygula(ctx context.Context, db *sql.DB, resellerID int64, a
 		basarili++
 	}
 	return basarili, basarisiz, nil
+}
+
+// AskidakileriUygula — askıdaki (askida=1) HER hesaba askı adımlarını yeniden
+// uygular; DB'ye (askida/durum/kaynak) dokunmaz, bayi kuralına bakmaz (askıyı
+// kaldırmaz, yalnız uygular). İdempotenttir; panel her açılışta arka planda
+// çağırır:
+//   - bu dal yayına girmeden askıya alınmış hesaplar (eski kod yalnız ana
+//     vhost'u kapatıyordu: alt alan adları, PHP havuzu, SSH, DB kullanıcıları
+//     açık) yeni kapsama geçer — kendiliğinden düzelmezdi (alt alan sapma
+//     nöbetçisi askıdakileri bilerek atlar);
+//   - yarım kalmış bir askı işlemi (KismiHata, çökme) uzlaşır.
+//
+// Döner: (uygulanan, hatalı, liste hatası).
+func (a Adimlar) AskidakileriUygula(ctx context.Context, db *sql.DB) (int, int, error) {
+	if db == nil {
+		return 0, 0, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id FROM domains WHERE COALESCE(askida,0)=1 ORDER BY id`)
+	if err != nil {
+		return 0, 0, err
+	}
+	var liste []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, 0, err
+		}
+		liste = append(liste, id)
+	}
+	okumaHatasi := rows.Err()
+	_ = rows.Close()
+	if okumaHatasi != nil {
+		return 0, 0, okumaHatasi
+	}
+	uygulanan, hatali := 0, 0
+	for _, id := range liste {
+		switch err := a.yenidenAski(ctx, db, id); {
+		case err == nil:
+			uygulanan++
+		case errors.Is(err, sql.ErrNoRows):
+			// bu arada silinmiş — sayma
+		default:
+			log.Printf("hesap askısı (açılış): domain %d: %v", id, err)
+			hatali++
+		}
+	}
+	return uygulanan, hatali, nil
+}
+
+// yenidenAski — askıdaki tek hesaba adımları (ana vhost + kapat) hesap kilidi
+// altında yeniden uygular. Bu arada askıdan alınmışsa dokunmaz.
+func (a Adimlar) yenidenAski(ctx context.Context, db *sql.DB, id int64) error {
+	on, err := satirOku(ctx, db, id)
+	if err != nil {
+		return err
+	}
+	hk := kilit.Hesap(on.sk)
+	hk.Lock()
+	defer hk.Unlock()
+	h, err := satirOku(ctx, db, id)
+	if err != nil {
+		return err
+	}
+	if h.askida != 1 {
+		return nil
+	}
+	var hatalar []error
+	if err := a.AnaVhost(db, id); err != nil {
+		hatalar = append(hatalar, fmt.Errorf("ana vhost: %w", err))
+	}
+	hatalar = append(hatalar, a.kapat(ctx, db, id, h.sk, h.surum)...)
+	if len(hatalar) > 0 {
+		return &KismiHata{Askida: true, Hatalar: hatalar}
+	}
+	return nil
 }

@@ -16,12 +16,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kilit"
 )
 
 func ha_db(t *testing.T) *sql.DB {
@@ -113,6 +115,9 @@ func (k *ha_kayit) adimlar(t *testing.T) Adimlar {
 		DBKullanici: func(_ *sql.DB, id int64, kilit bool) error {
 			return k.not(t, fmt.Sprintf("db(%v)", kilit), k.sk(t, id))
 		},
+		Birimler: func(_ context.Context, _ *sql.DB, id int64, askida bool) error {
+			return k.not(t, fmt.Sprintf("birim(%v)", askida), k.sk(t, id))
+		},
 		CalismaZamani: func(sk string, askida bool) { _ = k.not(t, fmt.Sprintf("cron(%v)", askida), sk) },
 	}
 }
@@ -165,7 +170,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	if err != nil || alan != "ha1.test" {
 		t.Fatalf("askıya alma: %q %v", alan, err)
 	}
-	want := "ana[askida=true] alt[askida=true] db(true)[askida=true] althavuz[askida=true] php(true)[askida=true] ssh(true)[askida=true] cron(true)[askida=true]"
+	want := "ana[askida=true] alt[askida=true] birim(true)[askida=true] db(true)[askida=true] althavuz[askida=true] php(true)[askida=true] ssh(true)[askida=true] cron(true)[askida=true]"
 	if got := strings.Join(k.cagri, " "); got != want {
 		t.Fatalf("askıya alma adımları:\n got: %s\nwant: %s", got, want)
 	}
@@ -177,7 +182,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	}
 	// İdempotent: ikinci askıya alma aynı adımları zararsızca yineler.
 	k.cagri = nil
-	if _, err := a.Uygula(ctx, db, 1, true, KaynakManuel); err != nil || len(k.cagri) != 7 {
+	if _, err := a.Uygula(ctx, db, 1, true, KaynakManuel); err != nil || len(k.cagri) != 8 {
 		t.Fatalf("ikinci askıya alma: %v %v", err, k.cagri)
 	}
 
@@ -185,7 +190,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	if _, err := a.Uygula(ctx, db, 1, false, KaynakManuel); err != nil {
 		t.Fatalf("askıdan alma: %v", err)
 	}
-	want = "ana[askida=false] althavuz[askida=false] php(false)[askida=false] alt[askida=false] db(false)[askida=false] ssh(false)[askida=false] cron(false)[askida=false]"
+	want = "ana[askida=false] althavuz[askida=false] php(false)[askida=false] alt[askida=false] db(false)[askida=false] birim(false)[askida=false] ssh(false)[askida=false] cron(false)[askida=false]"
 	if got := strings.Join(k.cagri, " "); got != want {
 		t.Fatalf("askıdan alma adımları:\n got: %s\nwant: %s", got, want)
 	}
@@ -258,7 +263,7 @@ func TestUygula_AskidanAlmaYarim_YenidenAskiya(t *testing.T) {
 		t.Fatalf("hesap askı kaynağıyla askıda kalmalı: %+v", d)
 	}
 	cagri := strings.Join(k.cagri, " ")
-	for _, adim := range []string{"php(false)", "php(true)[askida=true]", "ssh(true)", "db(true)", "cron(true)"} {
+	for _, adim := range []string{"php(false)", "php(true)[askida=true]", "ssh(true)", "db(true)", "birim(true)", "cron(true)"} {
 		if !strings.Contains(cagri, adim) {
 			t.Fatalf("%s bekleniyordu (açılanlar geri kapanmalı): %s", adim, cagri)
 		}
@@ -373,5 +378,205 @@ func TestBayiUygula_AnaVhostHatasi_AskidaKalir(t *testing.T) {
 	delete(k.hata, "ana")
 	if ok, hatali, err = a.BayiUygula(ctx, db, 7, false); err != nil || ok != 1 || hatali != 0 {
 		t.Fatalf("geri açma: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+}
+
+// 🔴 Zaten AÇIK bir hesapta askıdan alma (yeniden deneme, toplu "aktif") bir
+// adımda düşerse hesap askıya ALINMAZ: DB açık kalır, KismiHata{Askida:false}.
+// (Bozulursa toplu "aktif" işleminde adımı düşen açık hesaplar sessizce kapanırdı.)
+func TestUygula_AcikHesaptaKismiHata_AskiyaAlmaz(t *testing.T) {
+	db := ha_db(t)
+	k := &ha_kayit{db: db, hata: map[string]error{"ssh(false)": errors.New("chage başarısız")}}
+	_, err := k.adimlar(t).Uygula(context.Background(), db, 1, false, KaynakManuel)
+	var kh *KismiHata
+	if !errors.As(err, &kh) || kh.Askida {
+		t.Fatalf("açık kalan KismiHata beklenirdi: %v", err)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{0, "aktif", "", "active"}) {
+		t.Fatalf("açık hesap askıya alınmamalı: %+v", d)
+	}
+	for _, c := range k.cagri {
+		if strings.Contains(c, "(true)") {
+			t.Fatalf("açık hesapta kapatma adımı çalışmamalı: %v", k.cagri)
+		}
+	}
+}
+
+// Sistem kullanıcısı adımları (PHP havuzu, SSH, cron/süreçler) yalnız c_
+// hesaplarına uygulanır; web/FTP/DB/işleyici adımları yine uygulanır.
+func TestUygula_CKullanicisiDegilse_SistemAdimlariYok(t *testing.T) {
+	db := ha_db(t)
+	if _, err := db.Exec(`UPDATE domains SET sistem_kullanici='root' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	k := &ha_kayit{db: db}
+	if _, err := k.adimlar(t).Uygula(context.Background(), db, 1, true, KaynakManuel); err != nil {
+		t.Fatal(err)
+	}
+	cagri := strings.Join(k.cagri, " ")
+	for _, yasak := range []string{"php(", "althavuz", "ssh(", "cron("} {
+		if strings.Contains(cagri, yasak) {
+			t.Fatalf("c_ olmayan kullanıcıya %s uygulanmamalı: %s", yasak, cagri)
+		}
+	}
+	for _, gerek := range []string{"ana", "alt", "birim(true)", "db(true)"} {
+		if !strings.Contains(cagri, gerek) {
+			t.Fatalf("%s uygulanmalı: %s", gerek, cagri)
+		}
+	}
+}
+
+// Bayi zinciri listesi anlık görüntüdür: işlem sırasında silinen hesap
+// başarısız SAYILMAZ (bayi askısı "başarısız" diye raporlanmaz).
+func TestBayiUygula_SilinenHesapSayilmaz(t *testing.T) {
+	db := ha_db(t)
+	if _, err := db.Exec(`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (2,'ha2.test','c_ha2',7)`); err != nil {
+		t.Fatal(err)
+	}
+	k := &ha_kayit{db: db}
+	a := k.adimlar(t)
+	ana := a.AnaVhost
+	a.AnaVhost = func(d *sql.DB, id int64) error {
+		if id == 1 {
+			if _, err := db.Exec(`DELETE FROM domains WHERE id=2`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return ana(d, id)
+	}
+	ok, hatali, err := a.BayiUygula(context.Background(), db, 7, true)
+	if err != nil || ok != 1 || hatali != 0 {
+		t.Fatalf("silinen hesap sayılmamalı: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+}
+
+// Hesap kilidi: aynı hesaba eşzamanlı askıya alma / askıdan alma iç içe
+// GEÇMEZ. İkinci işlem ilki bitene kadar hiçbir adım (DB yazımı dahil) yapmaz;
+// son durum son işlemindir ve adımlar tutarlıdır.
+func TestUygula_HesapKilidi_IcIceGecmez(t *testing.T) {
+	db := ha_db(t)
+	k := &ha_kayit{db: db}
+	a := k.adimlar(t)
+	var mu sync.Mutex
+	bekle, girdi := make(chan struct{}), make(chan struct{})
+	ilk := true
+	ana := a.AnaVhost
+	a.AnaVhost = func(d *sql.DB, id int64) error {
+		mu.Lock()
+		birinci := ilk
+		ilk = false
+		mu.Unlock()
+		if birinci {
+			close(girdi)
+			<-bekle // askıya alma ana vhost adımında bekletilir
+		}
+		return ana(d, id)
+	}
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		// Bayi kaynağı: bayi kilidi alınmaz — yalnız HESAP kilidi sınanır.
+		if _, err := a.Uygula(ctx, db, 1, true, KaynakBayi); err != nil {
+			t.Errorf("askıya alma: %v", err)
+		}
+	}()
+	<-girdi
+	go func() {
+		defer wg.Done()
+		if _, err := a.Uygula(ctx, db, 1, false, KaynakBayi); err != nil {
+			t.Errorf("askıdan alma: %v", err)
+		}
+	}()
+	time.Sleep(300 * time.Millisecond)
+	// Askıya alma ana vhost'ta beklerken askıdan alma DB'ye yazmamış olmalı.
+	if d := ha_oku(t, db, 1); d.askida != 1 {
+		t.Fatalf("ikinci işlem kilidi beklemeden DB'ye yazdı: %+v", d)
+	}
+	close(bekle)
+	wg.Wait()
+	cagri := strings.Join(k.cagri, " ")
+	i := strings.Index(cagri, "cron(true)")
+	j := strings.Index(cagri, "ana[askida=false]")
+	if i < 0 || j < 0 || i > j {
+		t.Fatalf("askıdan alma, askıya alma bitmeden başladı: %s", cagri)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{0, "aktif", "", "active"}) {
+		t.Fatalf("son durum askıdan alma olmalı: %+v", d)
+	}
+}
+
+// Tekil/toplu yol bayi durumunu ve uygulamayı BAYİ kilidi altında yapar: bayi
+// zinciri kilidi tutarken tekil askı bekler, zincir bitince güncel bayi
+// durumunu okur (bayi askıya alındıysa reddedilir).
+func TestUygula_Manuel_BayiKilidiniBekler(t *testing.T) {
+	db := ha_db(t)
+	k := &ha_kayit{db: db}
+	a := k.adimlar(t)
+	bk := kilit.Bayi(7)
+	bk.Lock()
+	sonuc := make(chan error, 1)
+	go func() {
+		_, err := a.Uygula(context.Background(), db, 1, true, KaynakManuel)
+		sonuc <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if len(k.cagri) != 0 || ha_oku(t, db, 1).askida != 0 {
+		bk.Unlock()
+		t.Fatalf("bayi kilidi tutulurken tekil askı uygulanmamalı: %v", k.cagri)
+	}
+	// Zincir bu sırada bayiyi askıya aldı.
+	if _, err := db.Exec(`UPDATE users SET status='suspended' WHERE id=7`); err != nil {
+		bk.Unlock()
+		t.Fatal(err)
+	}
+	bk.Unlock()
+	if err := <-sonuc; !errors.Is(err, ErrBayiAskida) {
+		t.Fatalf("kilit bırakılınca güncel bayi durumu okunmalı (ErrBayiAskida): %v", err)
+	}
+}
+
+// Açılış süpürmesi: askıdaki HER hesaba (bayi kaynaklı ve bayisi askıdaki dahil)
+// askı adımları yeniden uygulanır; DB askı kolonlarına dokunulmaz, açık hesaba
+// hiçbir adım uygulanmaz.
+func TestAskidakileriUygula_AcilisSupurmesi(t *testing.T) {
+	db := ha_db(t)
+	for _, q := range []string{
+		`UPDATE users SET status='suspended' WHERE id=7`,
+		`UPDATE domains SET askida=1, durum='pasif', askida_kaynak='bayi' WHERE id=1`,
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id, askida, askida_kaynak, durum) VALUES (2,'ha2.test','c_ha2',NULL,1,'manuel','pasif')`,
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (3,'ha3.test','c_ha3')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k := &ha_kayit{db: db}
+	ok, hatali, err := k.adimlar(t).AskidakileriUygula(context.Background(), db)
+	if err != nil || ok != 2 || hatali != 0 {
+		t.Fatalf("süpürme: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+	cagri := strings.Join(k.cagri, " ")
+	if strings.Count(cagri, "php(true)[askida=true]") != 2 || strings.Count(cagri, "ana[askida=true]") != 2 ||
+		strings.Contains(cagri, "(false)") || strings.Contains(cagri, "askida=false") {
+		t.Fatalf("yalnız askıdaki iki hesaba askı adımları uygulanmalı: %s", cagri)
+	}
+	if d := ha_oku(t, db, 1); d.askida != 1 || d.kaynak != "bayi" || d.ftp != "suspended" {
+		t.Fatalf("bayi kaynaklı askı korunmalı, adımlar uygulanmalı: %+v", d)
+	}
+	if d := ha_oku(t, db, 2); d.askida != 1 || d.kaynak != "manuel" {
+		t.Fatalf("manuel askı korunmalı: %+v", d)
+	}
+	if d := ha_oku(t, db, 3); d.askida != 0 || d.durum != "aktif" {
+		t.Fatalf("açık hesaba dokunulmamalı: %+v", d)
+	}
+	// Bir adım düşerse hesap hatalı sayılır, ötekiler yine uygulanır.
+	k2 := &ha_kayit{db: db, hata: map[string]error{"php(true)": errors.New("reload başarısız")}}
+	if ok, hatali, err := k2.adimlar(t).AskidakileriUygula(context.Background(), db); err != nil || ok != 0 || hatali != 2 {
+		t.Fatalf("düşen adım hatalı sayılmalı: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+	if !strings.Contains(strings.Join(k2.cagri, " "), "cron(true)") {
+		t.Fatalf("düşen adımdan sonrakiler de uygulanmalı: %v", k2.cagri)
 	}
 }
