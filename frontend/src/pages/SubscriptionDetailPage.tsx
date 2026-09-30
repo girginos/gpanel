@@ -66,7 +66,7 @@ const SUBD2_EN: Record<string, string> = {
   "Askı kaldırıldı — hesap askı öncesi hâline döndü.": "Suspension lifted — the account is back to its previous state.",
   "Hesap askıya alındı — tüm alan adları 503 askı sayfası döndürüyor.": "Account suspended — all domains now return the 503 suspension page.",
   "Onay gerekiyor": "Confirmation required",
-  "\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, FTP, SSH ve veritabanı girişleri kapanır. Devam edilsin mi?": "The \"{0}\" account will be suspended — all of its domains (subdomains included) will return 503; PHP, cron, FTP, SSH and database logins will be disabled. Continue?",
+  "\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, kuyruk işleyicileri, FTP, SSH ve veritabanı girişleri kapanır. Posta kutuları açık kalır (gelen posta ve giriş). Devam edilsin mi?": "The \"{0}\" account will be suspended — all of its domains (subdomains included) will return 503; PHP, cron, queue workers, FTP, SSH and database logins will be disabled. Mailboxes stay open (incoming mail and logins). Continue?",
   "Anasayfa": "Home",
   "Hata": "Error",
   "Askıdan Al (Geri Getir)": "Unsuspend (Restore)",
@@ -179,7 +179,7 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, FTP, SSH ve veritabanı girişleri kapanır. Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
+    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, kuyruk işleyicileri, FTP, SSH ve veritabanı girişleri kapanır. Posta kutuları açık kalır (gelen posta ve giriş). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null); setBildirim(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
