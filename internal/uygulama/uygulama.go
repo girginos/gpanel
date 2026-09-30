@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kiraci"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -269,19 +270,21 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 	}
 
 	// Çıkarma — runuser -u <sk> (root DEĞİL — security)
-	var cikarCmd *exec.Cmd
+	// kiraciKomut (kiraci.Komut): panel ortamı (sırlar) çıkarıcıya geçmez.
+	var cikarArgv []string
 	switch a.Tarif.IcerikTuru {
 	case "tarball_gz":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"tar", "-xzf", tmpYol, "-C", hedef, "--strip-components=1")
+		cikarArgv = []string{"tar", "-xzf", tmpYol, "-C", hedef, "--strip-components=1"}
 	case "tarball_bz2":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"tar", "-xjf", tmpYol, "-C", hedef, "--strip-components=1")
+		cikarArgv = []string{"tar", "-xjf", tmpYol, "-C", hedef, "--strip-components=1"}
 	case "zip":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"unzip", "-q", tmpYol, "-d", hedef)
+		cikarArgv = []string{"unzip", "-q", tmpYol, "-d", hedef}
 	default:
 		return nil, fmt.Errorf("icerik_turu: %s", a.Tarif.IcerikTuru)
+	}
+	cikarCmd, err := kiraciKomut(ctx, a.Domain.SK, cikarArgv...)
+	if err != nil {
+		return nil, fmt.Errorf("çıkarma: %w", err)
 	}
 	if out, err := cikarCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("çıkarma: %s (%w)", strings.TrimSpace(string(out)), err)
@@ -606,10 +609,19 @@ func guvenliHedef(docRoot, hedef string) error {
 // bir yolda ayricalikli is yapmasi symlink yarisina acik oldugu icin
 // mkdir/mv/rm gibi islemler bu sarmalayicidan gecer.
 func tenantKomut(ctx context.Context, sk string, args ...string) error {
-	tam := append([]string{"-u", sk, "--"}, args...)
-	out, err := exec.CommandContext(ctx, "runuser", tam...).CombinedOutput()
+	cmd, err := kiraciKomut(ctx, sk, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", args[0], err)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %s", args[0], strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// kiraciKomut: argv'yi kiracı (sk) kimliğinde, kabuksuz ve panel ortamı OLMADAN
+// (kiraci.Komut: yalnız PATH/HOME/LANG) çalıştıracak komutu hazırlar.
+func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
 }

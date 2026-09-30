@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +28,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"girginospanel/internal/kiraci"
 )
 
 // Güvenlik hataları.
@@ -341,15 +344,10 @@ func tarTara(archivePath string, tur Tur) error {
 }
 
 // runuserKomut: argv'yi tenant kullanıcısı (sk) olarak, panel sırları OLMADAN,
-// temiz env ile çalıştıracak komutu hazırlar (panelin composer/git/redis deseni).
-func runuserKomut(sk string, argv ...string) *exec.Cmd {
-	full := append([]string{"-u", sk, "--"}, argv...)
-	cmd := exec.Command("runuser", full...)
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/home/" + sk,
-	}
-	return cmd
+// temiz env ile çalıştıracak komutu hazırlar — panelin tek sarmalayıcısı kiraci.Komut
+// (kabuk yok, yalnız PATH/HOME/LANG; boş argv / kök ya da çözülmeyen kullanıcı reddedilir).
+func runuserKomut(sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), argv...)
 }
 
 // UyeSay: arşivdeki üye sayısını döner (ilerleme çubuğu TOPLAM'ı için).
@@ -489,14 +487,15 @@ func GuvenliCikarIlerleme(archivePath, destDir, sk string, ilerle func(delta int
 	// Katman 1: tenant-user (DAC) altında çıkar.
 	verbose := ilerle != nil
 	var cmd *exec.Cmd
+	var kErr error
 	switch tur {
 	case TurZip:
 		// unzip stdin okuyamaz; arşiv sk-okunur olmalı (tenant home'undaki dosya).
 		// verbose: -q düşer → üye başına " extracting: ..." satırı (ilerleme).
 		if verbose {
-			cmd = runuserKomut(sk, "unzip", "-o", archivePath, "-d", destDir)
+			cmd, kErr = runuserKomut(sk, "unzip", "-o", archivePath, "-d", destDir)
 		} else {
-			cmd = runuserKomut(sk, "unzip", "-o", "-q", archivePath, "-d", destDir)
+			cmd, kErr = runuserKomut(sk, "unzip", "-o", "-q", archivePath, "-d", destDir)
 		}
 	case TurRar:
 		// RAR: seçilen açıcıyı tenant kimliğinde çalıştır (tam-yol koru, üzerine yaz).
@@ -511,13 +510,13 @@ func GuvenliCikarIlerleme(archivePath, destDir, sk string, ilerle func(delta int
 			if verbose {
 				bsdFlag = "-xv" // üye başına satır (stderr) → ilerleme
 			}
-			cmd = runuserKomut(sk, "bsdtar", bsdFlag, "-f", archivePath, "-C", destDir)
+			cmd, kErr = runuserKomut(sk, "bsdtar", bsdFlag, "-f", archivePath, "-C", destDir)
 		case "unar":
 			// -f: üzerine yaz, -D: kapsayıcı dizin oluşturma, -o: hedef.
-			cmd = runuserKomut(sk, "unar", "-f", "-D", "-o", destDir, archivePath)
+			cmd, kErr = runuserKomut(sk, "unar", "-f", "-D", "-o", destDir, archivePath)
 		default: // unrar
 			// x: tam-yol çıkar, -o+: üzerine yaz, hedef sonuna / şart.
-			cmd = runuserKomut(sk, "unrar", "x", "-o+", archivePath, destDir+"/")
+			cmd, kErr = runuserKomut(sk, "unrar", "x", "-o+", archivePath, destDir+"/")
 		}
 	default:
 		// tar ailesi: root arşivi açar, baytlar tenant tar'a stdin'den akar.
@@ -538,8 +537,13 @@ func GuvenliCikarIlerleme(archivePath, destDir, sk string, ilerle func(delta int
 		if verbose {
 			flag += "v" // GNU tar: üye başına satır (stderr) → ilerleme
 		}
-		cmd = runuserKomut(sk, "tar", flag, "-f", "-", "-C", destDir)
-		cmd.Stdin = f
+		cmd, kErr = runuserKomut(sk, "tar", flag, "-f", "-", "-C", destDir)
+		if kErr == nil {
+			cmd.Stdin = f
+		}
+	}
+	if kErr != nil {
+		return "", fmt.Errorf("çıkarma (tenant=%s): %w", sk, kErr)
 	}
 
 	if verbose {

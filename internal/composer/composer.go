@@ -2,6 +2,7 @@
 package composer
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -111,7 +113,7 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 	}
 	dizin := h.composerDir(r, sk)
 	// argv EXPLICIT (shell yok → enjeksiyon yok)
-	args := []string{"-u", sk, "--", composerBin, req.Komut, "--no-interaction", "--no-ansi", "-d", dizin}
+	args := []string{composerBin, req.Komut, "--no-interaction", "--no-ansi", "-d", dizin}
 	// Guvenlik: script/plugin calistirmayi engelle (rasgele kod + env-sizinti vektoru)
 	switch req.Komut {
 	case "install", "update", "require", "remove", "dump-autoload":
@@ -125,14 +127,17 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, pkg)
 	}
-	cmd := exec.Command("runuser", args...)
-	// Guvenlik: panel sirlarini (PANEL_JWT_SECRET, PANEL_DB_DSN, ...) alt-surece VERME
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/home/" + sk,
-		"COMPOSER_HOME=/home/" + sk + "/.composer",
-		"COMPOSER_ALLOW_SUPERUSER=0",
+	// Guvenlik: kiraci.Komut — kiracı kimliği, kabuk yok, panel sirlari (PANEL_JWT_SECRET,
+	// PANEL_DB_DSN, ...) alt-surece VERILMEZ (yalniz PATH/HOME/LANG + composer ayarlari).
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), args...)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kiracı kullanıcısı")
+		return
 	}
+	cmd.Env = append(cmd.Env,
+		"COMPOSER_HOME=/home/"+sk+"/.composer",
+		"COMPOSER_ALLOW_SUPERUSER=0",
+	)
 	out, err := cmd.CombinedOutput()
 	cikti := string(out)
 	if len(cikti) > 20000 {

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -508,10 +509,12 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "runuser", "-u", sk, "--", "/bin/sh", "-c", komut)
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/home/" + sk,
+	// kiraci.Komut: kiracı kimliği + panel ortamı (sırlar) YOK (yalnız PATH/HOME/LANG).
+	// Kabuk burada bilinçli: komut kiracının KENDİ crontab satırıdır.
+	cmd, kErr := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, "/bin/sh", "-c", komut)
+	if kErr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kiracı kullanıcısı")
+		return
 	}
 	out, runErr := cmd.CombinedOutput()
 	cikti := string(out)

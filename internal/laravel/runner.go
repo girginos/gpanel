@@ -2,7 +2,7 @@
 //
 // GÜVENLİK ÇEKİRDEĞİ: tüm artisan/composer/npm/git komutları tenant kullanıcısı
 // (c_xxx) OLARAK, tenant ev dizini altında, panel sırları sızdırılmadan çalışır.
-// runuser (sudo DEĞİL — git.go env-sızıntı tuzağı) + sıfırdan env + mutlak binary
+// kiraci.Komut (runuser; sudo DEĞİL) + sıfırdan env (panel ortamı yok) + mutlak binary
 // yolları (PATH hijack yok) + context timeout + çıktı cap. Root'a geri dönüş yok.
 package laravel
 
@@ -23,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"girginospanel/internal/kiraci"
 
 	"golang.org/x/sys/unix"
 )
@@ -169,10 +171,14 @@ func tenantExecEnv(ctx context.Context, sk, cwd string, env []string, bin string
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, kisaTimeout)
 	defer cancel()
-	argv := append([]string{"-u", sk, "--", bin}, args...)
-	cmd := exec.CommandContext(ctx, "runuser", argv...)
+	// kiraci.Komut: runuser -u sk -- bin args (kabuk yok), temel ortam PATH/HOME/LANG —
+	// panel ortamı (sırlar) ASLA geçmez; env yalnız bunun üzerine eklenir.
+	cmd, kErr := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, append([]string{bin}, args...)...)
+	if kErr != nil {
+		return "geçersiz kullanıcı", false
+	}
 	cmd.Dir = real
-	cmd.Env = env
+	cmd.Env = append(cmd.Env, env...)
 	cmd.Cancel = func() error { return cmd.Process.Kill() }
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
@@ -671,14 +677,18 @@ var envYazici = envYaz
 
 // envYaz: .env'i TENANT OLARAK yaz (runuser tee) → doğru sahiplik + uid-confined
 // (tenant kendi izinleri dışına yazamaz; root symlink-follow felaketi YOK).
-// Kaynak koruma testi: yalnız exec.Command("runuser", "-u", sk, ...) — root yazımı yasak.
+// Kaynak koruma testi: yalnız kiraci.Kiraci{...}.Komut (runuser -u sk, panel ortamı yok) —
+// doğrudan exec ve root yazımı yasak.
 func envYaz(sk, appDir, icerik string) error {
 	if len(icerik) > 5<<20 {
 		return fmt.Errorf(".env çok büyük")
 	}
 	dst := filepath.Join(appDir, ".env")
-	cmd := exec.Command("runuser", "-u", sk, "--", "/usr/bin/tee", dst)
-	cmd.Env = tenantEnv(sk)
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), "/usr/bin/tee", dst)
+	if err != nil {
+		return fmt.Errorf(".env yazılamadı: %v", err)
+	}
+	cmd.Env = append(cmd.Env, tenantEnv(sk)...)
 	cmd.Stdin = strings.NewReader(icerik)
 	var errBuf bytes.Buffer
 	cmd.Stdout = nil

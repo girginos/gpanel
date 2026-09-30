@@ -1,5 +1,5 @@
 // Package wordpress: 1-tıkla WordPress kurulum + yönetim (wp-cli, domain kullanıcısı olarak).
-// Güvenlik: runuser -u c_<slug> (domain kullanıcısı), yol public_html'e kilitli, kök-site silme yasak.
+// Güvenlik: kiraci.Komut (runuser -u c_<slug>, panel ortamı yok), yol public_html'e kilitli, kök-site silme yasak.
 package wordpress
 
 import (
@@ -26,6 +26,7 @@ import (
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
 
 	"github.com/go-chi/chi/v5"
@@ -66,11 +67,27 @@ func (h *Handlers) domain(r *http.Request) (id int64, sk, alanAdi string, ssl, d
 // wp <args> komutunu domain kullanıcısı olarak çalıştırır (HOME set, shell yok).
 // php'yi doğrudan -d memory_limit=512M ile çağır (ham .phar shebang'i WP_CLI_PHP_ARGS'ı
 // okumaz; arşiv çıkarımı 128M default'a takılır).
+//
+// 🔴 GÜVENLİK: wp-cli kiracının wp-config.php'sini ve eklentilerini YÜKLER (kiracı
+// PHP'si) → panel ortamı ASLA verilmez: kiracıKomut (kiraci.Komut) yalnız
+// PATH/HOME/LANG verir. Önceden `env HOME=...` ortamı AYNEN aktarıyordu; kiracı PHP'si
+// getenv('PANEL_JWT_SECRET') ile yönetici JWT'si üretebiliyordu.
 func wpKomut(sk string, args ...string) ([]byte, error) {
-	full := append([]string{"-u", sk, "--", "env", "HOME=/home/" + sk,
-		"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)
-	cmd := exec.Command("runuser", full...)
+	cmd, err := kiraciKomut(context.Background(), sk, wpArgv(args)...)
+	if err != nil {
+		return nil, err
+	}
 	return cmd.CombinedOutput()
+}
+
+// wpArgv: wp-cli'nin tam argv'si (php doğrudan, 512M bellek).
+func wpArgv(args []string) []string {
+	return append([]string{"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)
+}
+
+// kiraciKomut: argv'yi kiracı (sk) kimliğinde, panel ortamı OLMADAN hazırlar.
+func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
 }
 
 // guvenliSilTenant: hedefi TENANT kimliğinde (runuser -u sk) siler.
@@ -87,7 +104,10 @@ func guvenliSilTenant(sk, hedef string) error {
 	if hedef == "" || !strings.HasPrefix(hedef, "/home/"+sk+"/") {
 		return fmt.Errorf("güvenlik: hedef tenant dizini dışında")
 	}
-	cmd := exec.Command("runuser", "-u", sk, "--", "rm", "-rf", "--", hedef)
+	cmd, err := kiraciKomut(context.Background(), sk, "rm", "-rf", "--", hedef)
+	if err != nil {
+		return fmt.Errorf("silme: %w", err)
+	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("silme: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -271,12 +291,13 @@ func (h *Handlers) incele(ctx context.Context, a wpAday) TumKurulum {
 // wpStdout: wp-cli'yi domain kullanıcısı olarak, context-timeout ile çalıştırır; SADECE stdout döner
 // (stderr yutulur → JSON çıktısı deprecation-warning ile bozulmaz).
 func wpStdout(ctx context.Context, sk string, args ...string) ([]byte, error) {
-	full := append([]string{"-u", sk, "--", "env", "HOME=/home/" + sk,
-		"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)
-	cmd := exec.CommandContext(ctx, "runuser", full...)
+	cmd, err := kiraciKomut(ctx, sk, wpArgv(args)...)
+	if err != nil {
+		return nil, err
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	err := cmd.Run()
+	err = cmd.Run()
 	return out.Bytes(), err
 }
 

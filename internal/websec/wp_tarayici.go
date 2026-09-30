@@ -9,8 +9,10 @@ package websec
 // tarafında doğrudan çağrılamaz. Onun yerine domainleri DB'den okuyup
 // aynı wp-cli komutlarını burada tekrar çalıştırıyoruz (izole, testable).
 //
-// 🔴 wp-cli process başına belirli tenant kullanıcısı altında koşar. Bu iş
-// panel process'inin sudo yetkisini kullanır (systemd unit'te tanımlı).
+// 🔴 wp-cli process başına belirli tenant kullanıcısı altında koşar: kiraci.Komut
+// (runuser -u <sk>, panel ortamı YOK). wp-cli kiracının wp-config.php'sini yükler;
+// sudo'nun ortam politikası (env_reset/env_keep) sudoers'a bağlı olduğundan
+// kullanılmaz — ortam açıkça PATH/HOME/LANG'dır, panel sırları geçmez.
 
 import (
 	"context"
@@ -21,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"girginospanel/internal/kiraci"
 )
 
 type WPKurulum struct {
@@ -56,18 +60,21 @@ func wpKurulumBul(ctx context.Context, sk, alanAdi string) []string {
 	return nil
 }
 
-// wpBinYol — wp-cli tam yolu. sudo PATH'i stripler, yalın `wp` çağırınca
-// "command not found" alırız (canlıda gözlendi). Kaynak: `which wp` (canlı).
+// wpBinYol — wp-cli tam yolu (yalın `wp` PATH'e bağımlı olurdu; canlıda
+// "command not found" gözlendi). Kaynak: `which wp` (canlı).
 const wpBinYol = "/usr/local/bin/wp"
 
 // wpCliJSON — belirli path'te wp-cli komutu çalıştır, JSON çıktısı alır.
 // Tenant kullanıcısı altında (--allow-root YASAK).
 func wpCliJSON(ctx context.Context, sk, path string, altKomut ...string) ([]byte, error) {
-	args := []string{"-u", sk, wpBinYol, "--path=" + path, "--skip-plugins", "--skip-themes"}
+	args := []string{wpBinYol, "--path=" + path, "--skip-plugins", "--skip-themes"}
 	// --format=json sadece list-tarzı komutlarda çalışır; "core version"
 	// düz metin döner. Komut tipine göre bayrağı ekleme kararı çağrı yerinde.
 	args = append(args, altKomut...)
-	c := exec.CommandContext(ctx, "sudo", args...)
+	c, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("wp-cli %s: %w", strings.Join(altKomut, " "), err)
+	}
 	out, err := c.Output()
 	if err != nil {
 		return nil, fmt.Errorf("wp-cli %s: %w", strings.Join(altKomut, " "), err)

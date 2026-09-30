@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 	"girginospanel/internal/provisioner"
 )
 
@@ -21,9 +22,14 @@ func setupScript(id int64) string { return fmt.Sprintf("/run/girginos-lt-setup-%
 
 // mkdirTenant: dizini TENANT OLARAK oluştur (runuser mkdir). Root MkdirAll+chown
 // symlink'li ebeveyni takip edip keyfi konumda dizin yaratıp tenant'a chown ederdi
-// (denetim #4); tenant olarak yaratınca kendi izinleri dışına çıkamaz.
+// (denetim #4); tenant olarak yaratınca kendi izinleri dışına çıkamaz. kiraci.Komut:
+// panel ortamı (sırlar) çocuğa geçmez (/proc/<pid>/environ kiracı uid'sine açıktır).
 func mkdirTenant(sk, dir string) error {
-	out, err := exec.Command("runuser", "-u", sk, "--", "/bin/mkdir", "-p", dir).CombinedOutput()
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), "/bin/mkdir", "-p", dir)
+	if err != nil {
+		return fmt.Errorf("dizin oluşturulamadı: %v", err)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("dizin oluşturulamadı: %v: %s", err, string(out))
 	}
