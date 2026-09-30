@@ -8,10 +8,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/php"
@@ -60,15 +60,82 @@ func rebuildVhostIc(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd
 	birak := provisioner.RenderKilidiAl()
 	defer birak()
 
+	// 🔴 HESAP askıdaysa (tek kaynak: hesaplar.HesapAskida) alt alan adı da ana
+	// vhost'la AYNI 503 askı şablonuyla yazılır. Bu fonksiyon alt alan vhost'unun
+	// tek üreticisi olduğundan SSL verme/yenileme, PHP sürüm/ayar değişimi, web
+	// sunucu değişimi, koruma/erişim yeniden çizimi ve sapma iyileştirici askıyı
+	// DELEMEZ. Askıdayken alt alanın PHP havuzu KURULMAZ. Durum okunamazsa vhost'a
+	// DOKUNMA (ne açar ne kapatır).
+	askida, aerr := hesaplar.HesapAskida(ctx, db, sk)
+	if aerr != nil {
+		return fmt.Errorf("alt alan vhost'u DEGISTIRILMEDI (%s): %w", tamAd, aerr)
+	}
+	var body string
+	if askida {
+		crt, key := certYolu(sk, tamAd)
+		if !dosyaVar(crt) || !dosyaVar(key) {
+			crt, key = "", ""
+		}
+		b, err := provisioner.AskiVhostGovde(tamAd, tamAd, crt, key)
+		if err != nil {
+			return err
+		}
+		body = b
+	} else {
+		b, err := altVhostGovde(ctx, db, sid, sk, altAd, tamAd, phpSurum)
+		if err != nil {
+			return err
+		}
+		body = b
+	}
+	conf := confPath(sk, altAd)
+
+	eskiB, _ := os.ReadFile(conf)
+	if err := os.WriteFile(conf, []byte(body), 0o644); err != nil {
+		return err
+	}
+	_, _ = komut("restorecon", conf)
+	if out, e := komut("nginx", "-t"); e != nil {
+		if len(eskiB) > 0 {
+			_ = os.WriteFile(conf, eskiB, 0o644) // rollback
+		} else {
+			_ = os.Remove(conf)
+		}
+		_, _ = komut("systemctl", "reload", "nginx")
+		return &nginxHata{strings.TrimSpace(string(out))}
+	}
+	if out, e := komut("systemctl", "reload", "nginx"); e != nil {
+		// Ana domainde olculen ders: reload dalinda geri alma YOKSA dosya
+		// diskte kalir ve BASKA bir domainin sonraki basarili reload'i, hic
+		// sinanmamis bu degisikligi sessizce yururluge sokar.
+		if len(eskiB) > 0 {
+			_ = os.WriteFile(conf, eskiB, 0o644)
+		} else {
+			_ = os.Remove(conf)
+		}
+		return fmt.Errorf("nginx reload BASARISIZ, %s GERI ALINDI: %s", conf, strings.TrimSpace(string(out)))
+	}
+	if askida {
+		// nginx artık 503 döndürüyor: alt alanın apache arka ucu (varsa) kaldırılır;
+		// askıdan alınca altVhostGovde ayardan yeniden yazar.
+		subApacheSil(sk, altAd)
+	}
+	return nil
+}
+
+// altVhostGovde — askıda OLMAYAN hesabın alt alan vhost gövdesi: PHP havuzu
+// (alt alanın kendi havuzu ya da parent soketi), apache arka ucu, koruma ve erişim
+// kısıtlama blokları, SSL, nginx ayarları.
+func altVhostGovde(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd, phpSurum string) (string, error) {
 	docroot := docrootOf(sk, tamAd)
 	socket, hasPool, err := php.ApplyForSub(ctx, db, sk, sid, phpSurum)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !hasPool {
 		socket, err = provisioner.PHPSocketFor(sk, phpSurum)
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 	koruma := provisioner.ProtectedBlocksForSub(db, sid, socket, webBackendGet(ctx, db, sid))
@@ -82,7 +149,7 @@ func rebuildVhostIc(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd
 	// apache backend: nginx'i yeniden yazmadan ÖNCE upstream'i hazırla (502'yi önle)
 	if backend == "apache" {
 		if e := subApacheYaz(sk, altAd, tamAd, docroot, socket); e != nil {
-			return e
+			return "", e
 		}
 	} else {
 		subApacheSil(sk, altAd)
@@ -93,40 +160,12 @@ func rebuildVhostIc(ctx context.Context, db *sql.DB, sid int64, sk, altAd, tamAd
 	// SESSIZCE kaldirmak olurdu.
 	kisit, kerr := provisioner.AltAlanErisimBloku(db, sid)
 	if kerr != nil {
-		return fmt.Errorf("erisim kisitlama okunamadi, alt alan vhost'u DEGISTIRILMEDI (%s): %w", tamAd, kerr)
+		return "", fmt.Errorf("erisim kisitlama okunamadi, alt alan vhost'u DEGISTIRILMEDI (%s): %w", tamAd, kerr)
 	}
 
 	o := subVhostOpts{TamAd: tamAd, DocRoot: docroot, Socket: socket, Backend: backend,
 		SSL: ssl, Crt: crt, Key: key, Koruma: koruma, N: ng, Kisit: kisit}
-	body := renderSubVhost(o)
-	conf := confPath(sk, altAd)
-
-	eskiB, _ := os.ReadFile(conf)
-	if err := os.WriteFile(conf, []byte(body), 0o644); err != nil {
-		return err
-	}
-	_ = exec.Command("restorecon", conf).Run()
-	if out, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
-		if len(eskiB) > 0 {
-			_ = os.WriteFile(conf, eskiB, 0o644) // rollback
-		} else {
-			_ = os.Remove(conf)
-		}
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
-		return &nginxHata{strings.TrimSpace(string(out))}
-	}
-	if out, e := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); e != nil {
-		// Ana domainde olculen ders: reload dalinda geri alma YOKSA dosya
-		// diskte kalir ve BASKA bir domainin sonraki basarili reload'i, hic
-		// sinanmamis bu degisikligi sessizce yururluge sokar.
-		if len(eskiB) > 0 {
-			_ = os.WriteFile(conf, eskiB, 0o644)
-		} else {
-			_ = os.Remove(conf)
-		}
-		return fmt.Errorf("nginx reload BASARISIZ, %s GERI ALINDI: %s", conf, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return renderSubVhost(o), nil
 }
 
 type nginxHata struct{ msg string }

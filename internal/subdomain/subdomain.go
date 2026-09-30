@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/dns"
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/php"
@@ -51,13 +52,14 @@ func (h *Handlers) parent(r *http.Request) (id int64, sk, alanAdi, phpSurum stri
 	return id, sk, alanAdi, phpSurum, isDemo == 1, true
 }
 
-// Dış etkili adımlar (ev dizini, nginx conf.d, dış komutlar: `nginx -t`,
-// systemctl, chown/chcon/restorecon, acme.sh, openssl). Testler sahteyle
-// değiştirir: hata yolları ana makinenin /home, /etc/nginx dizinlerine ve
-// servislerine dokunmadan sınanır. Üretimde değerler SABİTTİR.
+// Dış etkili adımlar (ev dizini, nginx/httpd conf.d, dış komutlar: `nginx -t`,
+// `httpd -t`, systemctl, chown/chcon/restorecon, acme.sh, openssl). Testler
+// sahteyle değiştirir: hata yolları ana makinenin /home, /etc/nginx, /etc/httpd
+// dizinlerine ve servislerine dokunmadan sınanır. Üretimde değerler SABİTTİR.
 var (
 	evKoku     = "/home"
 	nginxConfD = "/etc/nginx/conf.d"
+	httpdConfD = "/etc/httpd/conf.d"
 	komut      = func(ad string, arg ...string) ([]byte, error) { return exec.Command(ad, arg...).CombinedOutput() }
 )
 
@@ -150,7 +152,25 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü sunucuda kurulu değil: "+phpSurum)
 		return
 	}
+	// 🔴 Hesap askıdaysa (tek kaynak) yeni alt alan adı da 503 askı vhost'uyla
+	// doğar — askıdaki hesaba yayında bir alan adı eklenemez. Askıdan alınca
+	// hesap askısı tüm alt alan adlarını tek üreticiden yeniden kurar.
+	askida, aerr := hesaplar.HesapAskida(r.Context(), h.DB, sk)
+	if aerr != nil {
+		log.Printf("subdomain %s: %v", tamAd, aerr)
+		httpx.WriteError(w, http.StatusInternalServerError, "hesap askı durumu okunamadı")
+		return
+	}
 	docroot := docrootOf(sk, tamAd)
+	govde := vhost(tamAd, docroot, socket, "")
+	if askida {
+		g, gerr := provisioner.AskiVhostGovde(tamAd, tamAd, "", "")
+		if gerr != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
+			return
+		}
+		govde = g
+	}
 	if err := os.MkdirAll(docroot, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "docroot oluşturulamadı")
 		return
@@ -165,7 +185,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 
 	// nginx server bloğu
 	conf := confPath(sk, altAd)
-	if err := os.WriteFile(conf, []byte(vhost(tamAd, docroot, socket, "")), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte(govde), 0o644); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "vhost yazılamadı")
 		return
 	}
