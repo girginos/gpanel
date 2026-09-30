@@ -43,10 +43,6 @@ const iptalBekleme = 15 * time.Second
 // "c_" + [a-z0-9_], en çok 32). Yol bileşenine ve runuser argv'sine girer.
 var reSK = regexp.MustCompile(`^c_[a-z0-9_]{1,30}$`)
 
-// reKul — Komut'un kabul ettiği işletim sistemi kullanıcı adı (useradd alfabesi):
-// boş değil, '-' ile başlamaz (runuser seçeneği sayılmaz), yol/boşluk içermez.
-var reKul = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-
 var (
 	// ErrEvDisi — yol kiracının ev dizininin İÇİNDE değil (ev'in kendisi ya da dışı).
 	ErrEvDisi = errors.New("yol kiracı ev dizininin içinde değil")
@@ -74,14 +70,11 @@ type Kiraci struct {
 // sonunda Go süreci öldürür. Stdin/Stdout/Stderr'i çağıran bağlar.
 //
 // Reddedilir (ErrKomut): boş argv ya da boş komut adı — runuser argv'siz
-// kiracının KABUĞUNU açar; Kul'un kullanıcı adı olmaması, sistemde bulunmaması
-// ya da uid 0'a çözülmesi — kök kimliğinde "kiracı" komutu DAC korumasını
-// tümden kaldırırdı.
+// kiracının KABUĞUNU açar; Kul'un sistemde bir kullanıcıya çözülmemesi (boş,
+// '-' ile başlayan runuser seçeneği, yol dahil) ya da uid 0'a çözülmesi — kök
+// kimliğinde "kiracı" komutu DAC korumasını tümden kaldırırdı.
 func (k Kiraci) Komut(ctx context.Context, argv ...string) (*exec.Cmd, error) {
 	if len(argv) == 0 || argv[0] == "" {
-		return nil, ErrKomut
-	}
-	if !reKul.MatchString(k.Kul) {
 		return nil, ErrKomut
 	}
 	if u, err := user.Lookup(k.Kul); err != nil || u.Uid == "0" {
