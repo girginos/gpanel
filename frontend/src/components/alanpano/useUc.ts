@@ -38,6 +38,7 @@ export function useUc<T>(url: string | null, hataBaglam?: string): Uc<T> {
       .catch((e: unknown) => {
         if (o.iptal) return
         setDurum((d) => ({ veri: d.veri, yukleniyor: false, hata: apiHata(e) }))
+        // Askı 403'ünü hataBildir kendisi yutar (uygulama zaten askı sayfasına geçti).
         if (baglam.current) hataBildir(baglam.current, e)
       })
       .finally(() => { if (o.istek === p) o.istek = null })

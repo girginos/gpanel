@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"girginospanel/internal/httpx"
 )
 
 type domainAskiDurum struct {
@@ -93,14 +95,14 @@ func domainAskidaKod(ctx context.Context, domainID int64) (int, string) {
 		}
 		domainAskiCacheYaz(domainID, askida, now)
 		if askida {
-			return http.StatusForbidden, "hesap askıya alınmış"
+			return http.StatusForbidden, httpx.HesapAskidaMesaj
 		}
 		return 0, ""
 	}
 	// Geçici DB hatası → son bilinen durum taze mi?
 	if v, ok := domainAskiCacheOku(domainID, now); ok {
 		if v.askida {
-			return http.StatusForbidden, "hesap askıya alınmış"
+			return http.StatusForbidden, httpx.HesapAskidaMesaj
 		}
 		return 0, ""
 	}

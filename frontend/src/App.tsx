@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth, depoBaskaOturumda } from '@/store/auth'
+import { useHesapAski } from '@/store/hesapAski'
+import HesapAskidaPage from '@/pages/HesapAskidaPage'
 import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
@@ -21,6 +23,9 @@ const DomainSecurityPage = lazy(() => import('@/pages/DomainSecurityPage'))
 const BayiPlaniDuzenlePage = lazy(() => import('@/pages/BayiPlaniDuzenlePage'))
 const BayiPlanlariPage = lazy(() => import('@/pages/BayiPlanlariPage'))
 const SubscriptionDetailPage = lazy(() => import('@/pages/SubscriptionDetailPage'))
+const MusteriAnaSayfa = lazy(() => import('@/pages/MusteriAnaSayfa'))
+const DomainUygulamalarPage = lazy(() => import('@/pages/DomainUygulamalarPage'))
+const DomainGelistiriciPage = lazy(() => import('@/pages/DomainGelistiriciPage'))
 const ServicePlansPage = lazy(() => import('@/pages/ServicePlansPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const ToolPage = lazy(() => import('@/pages/ToolPage'))
@@ -110,6 +115,15 @@ function RolKapisi() {
   return <Outlet />
 }
 
+// /abonelikler/:id — hosting müşterisinin (rol 'user') ana sayfası "Modern klasik"
+// (MusteriAnaSayfa); kök ve bayi aynı rotada abonelik sayfasını görür (değişmedi).
+// rolAnaSayfa('user') zaten bu rotayı verdiği için mevcut bağlantılar (Breadcrumb
+// 'Anasayfa', logo, rol kapısı yönlendirmesi) müşteride kendiliğinden yeni sayfaya çıkar.
+function AbonelikSayfasi() {
+  const musteri = useAuth((s) => s.kullanici?.rol === 'user')
+  return musteri ? <MusteriAnaSayfa /> : <SubscriptionDetailPage />
+}
+
 function BozukMusteriOturumu() {
   const cikis = useAuth((s) => s.cikis)
   const hidrate = useAuth((s) => s.hidrate)
@@ -136,6 +150,10 @@ function SayfaYukleniyor() {
 }
 
 export default function App() {
+  // Askıdaki hesap (giriş formu ya da açık oturumdaki ilk askı yanıtı, bkz. lib/api):
+  // panelin hiçbir rotası/kabuğu çizilmez — yalnız tam ekran askı sayfası.
+  const askida = useHesapAski((s) => s.askida)
+  if (askida) return <HesapAskidaPage />
   return (
     <Suspense fallback={<SayfaYukleniyor />}>
     <Routes>
@@ -160,7 +178,7 @@ export default function App() {
         <Route path="bildirimler"         element={<BildirimlerPage />} />
         <Route path="saldiri-zincirleri"  element={<SaldiriZincirleriPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
-        <Route path="abonelikler/:id"      element={<SubscriptionDetailPage />} />
+        <Route path="abonelikler/:id"      element={<AbonelikSayfasi />} />
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
         <Route path="abonelikler/:id/dosyalar"      element={<DomainFilesPage />} />
         <Route path="abonelikler/:id/veritabanlari" element={<DomainDatabasesPage />} />
@@ -201,6 +219,8 @@ export default function App() {
         <Route path="abonelikler/:id/laravel" element={<DomainLaravelPage />} />
         <Route path="abonelikler/:id/waf"           element={<DomainWafPage />} />
         <Route path="abonelikler/:id/erisim"        element={<DomainErisimPage />} />
+        <Route path="abonelikler/:id/uygulamalar"   element={<DomainUygulamalarPage />} />
+        <Route path="abonelikler/:id/gelistirici"   element={<DomainGelistiriciPage />} />
         <Route path="php-sunucu-sihirbazi"           element={<PHPSunucuSihirbaziPage />} />
         {/* Eski dağınık sayfalar tek sihirbaza yönlendirir (kullanıcı isteği). */}
         <Route path="sistem/php-modulleri"           element={<Navigate to="/php-sunucu-sihirbazi" replace />} />

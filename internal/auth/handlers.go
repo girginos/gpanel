@@ -243,7 +243,7 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 	}
 	if status != "active" {
 		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
-		httpx.WriteError(w, http.StatusForbidden, "hesabınız askıya alınmış")
+		httpx.WriteHesapAskida(w)
 		return
 	}
 	// 2FA — bayi icin de zorunlu (admin ile AYNI desen). FAIL-CLOSED: durum

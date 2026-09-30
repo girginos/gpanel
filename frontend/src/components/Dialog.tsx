@@ -24,6 +24,7 @@ import { Button } from './ui'
 import { I } from './Ikon'
 import { TONLAR, type Ton } from './tonlar'
 import { TonRozeti } from './UyariKutusu'
+import { useHesapAski } from '@/store/hesapAski'
 
 const DIALOG_EN: Record<string, string> = {
   "Vazgeç": "Cancel",
@@ -105,6 +106,17 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
     if (istek.tur === 'sor') { kapat(deger) } else { kapat(true) }
   }
 
+  // Hesap askıya alınınca (tam ekran askı sayfası, bkz. store/hesapAski) açık diyalog
+  // sayfanın üstünde kalmasın: iptal edilmiş sayılıp kapanır (bekleyen söz çözülür).
+  // Askıdayken açılmaya çalışan diyalog da aynı yoldan hemen iptal olur.
+  const askida = useHesapAski((s) => s.askida)
+  useEffect(() => {
+    if (askida && istek) {
+      istek.cevapla(istek.tur === 'sor' ? null : false)
+      setIstek(null)
+    }
+  }, [askida, istek])
+
   // Esc = iptal, Enter = onayla (metin alanında da geçerli).
   useEffect(() => {
     if (!istek) return
@@ -128,7 +140,7 @@ export function DialogSaglayici({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {children}
-      {istek && s && (
+      {istek && s && !askida && (
         <div className="gosp-fade fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm dark:bg-black/50"
           role="dialog" aria-modal="true" aria-label={s.baslik} onClick={iptal}>
           <div className="gosp-modal-in w-full max-w-md rounded-lg bg-white p-6 shadow-soft dark:bg-dark-700 dark:shadow-none"

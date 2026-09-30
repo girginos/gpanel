@@ -17,8 +17,9 @@ export type Domain = {
   db_host: string
   db_user: string
   db_adi: string
-  web_root: string
   notlar?: string
   ssh_erisim?: boolean
   askida?: boolean
+  // Hizmet planının adı (plan atanmamışsa yok) — internal/domains Domain.PlanAd.
+  plan_ad?: string
 }

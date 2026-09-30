@@ -32,7 +32,8 @@ export function musteriDomainID(): number | null {
   return Number(v)
 }
 
-// Rolün ana sayfası: müşteri → kendi aboneliği, diğerleri → '/'.
+// Rolün ana sayfası: müşteri → kendi aboneliği (/abonelikler/{id}; bu rotada müşteriye
+// MusteriAnaSayfa çizilir, bkz. App.tsx AbonelikSayfasi), diğerleri → '/'.
 // Hook DEĞİL: HataSiniri React ağacının dışında (sınıf bileşeni, hook yok) da
 // çağırır; rol verilmezse store'dan okunur (store ilk değerini localStorage'dan alır).
 // Müşterinin domain kimliği bozuksa '/' döner — oradaki rol kapısı oturumu kapatır.
