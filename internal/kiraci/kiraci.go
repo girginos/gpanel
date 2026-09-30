@@ -8,8 +8,11 @@
 //   - kopyalama/oluşturma KİRACI kimliğinde koşar (Komut: runuser -u <kul> --,
 //     kabuk yok, panel ortamı yok); çekirdek her erişimde DAC'ı uygular →
 //     kiracı yalnız zaten erişebildiğine erişir, TOCTOU penceresi yoktur;
-//   - kökte kalması gereken okuma/yazma ev dizinine KİLİTLİ os.Root üzerinden
-//     yapılır (EvAc): ev dışına çıkan bağ reddedilir.
+//   - kökte kalması gereken okuma/yazma internal/evalti ile yapılır: ev dizinine
+//     çapalı openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS), yol boyunca HİÇBİR bağ
+//     izlenmez. os.OpenRoot YETMEZ: ev dışına çıkan bağı reddeder ama ev İÇİNDE
+//     kalan bağı izler — kiracının evinde kök sahipli bir alanı gösteren bağ kökün
+//     işlemini oraya yönlendirir.
 //
 // <EvKoku> kök sahiplidir; kiracı buradaki kendi girdisini (ev dizinini) takas
 // edemez → <EvKoku>/<sk> güvenilir bir çapadır.
@@ -23,7 +26,6 @@ package kiraci
 import (
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -59,7 +61,7 @@ func GecerliSK(sk string) bool { return reSK.MatchString(sk) }
 type Kiraci struct {
 	// Kul — runuser -u değeri: kiracının işletim sistemi kullanıcısı (üretimde sk).
 	Kul string
-	// Ev — ev dizini (mutlak): Komut'un HOME'u, EvAc'ın ve Goreli'nin çapası.
+	// Ev — ev dizini (mutlak): Komut'un HOME'u, Goreli'nin ve evalti.Ac'ın çapası.
 	Ev string
 }
 
@@ -92,10 +94,10 @@ func (k Kiraci) Komut(ctx context.Context, argv ...string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// Goreli — mutlak yolun ev dizinine göreli karşılığı (EvAc köküne verilecek
+// Goreli — mutlak yolun ev dizinine göreli karşılığı (evalti.Ac'a verilecek
 // biçim). Yol temizlenir; ev'in kendisi, ev dışı ya da göreli yol → ErrEvDisi.
-// Yalnız DİZGE denetimidir: yolun bileşenleri bağ olabilir, onları çözmek
-// EvAc'ın (os.Root) ya da kiracı kimliğinin işidir.
+// Yalnız DİZGE denetimidir: yolun bileşenleri bağ olabilir, onları reddetmek
+// evalti.Ac'ın ya da kiracı kimliğinin işidir.
 func (k Kiraci) Goreli(yol string) (string, error) {
 	rel, err := filepath.Rel(k.Ev, filepath.Clean(yol))
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
@@ -103,8 +105,3 @@ func (k Kiraci) Goreli(yol string) (string, error) {
 	}
 	return rel, nil
 }
-
-// EvAc — ev dizinine KİLİTLİ os.Root: altındaki her yol openat ile bileşen
-// bileşen çözülür, ev dışına çıkan bağ (mutlak ya da ..) reddedilir. Çağıran
-// kapatır.
-func (k Kiraci) EvAc() (*os.Root, error) { return os.OpenRoot(k.Ev) }

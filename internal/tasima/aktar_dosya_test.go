@@ -10,8 +10,9 @@ package tasima
 //
 // Her şey t.TempDir içinde; kiracı yerine ayrıcalıksız "nobody" (runuser ile
 // GERÇEK kimlik düşürme), uzak sunucu yerine sahte uzakKabuk (ağa çıkılmaz).
-// Komşu kiracı da testte "nobody"dir: böylece ev kilidi (os.Root) ve ev dışı
-// denetimi uid farkına yaslanmadan TEK BAŞINA sınanır. root değilse atlanır.
+// Komşu kiracı da testte "nobody"dir: böylece bağ izlemeyen açma (evalti.Ac) ve
+// ev dışı denetimi uid farkına yaslanmadan TEK BAŞINA sınanır. root değilse
+// atlanır.
 
 import (
 	"context"

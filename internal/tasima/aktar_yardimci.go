@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"girginospanel/internal/evalti"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/phpsurum"
 )
@@ -193,8 +194,8 @@ func kiraciAl(sk string) (kiraci.Kiraci, error) {
 
 // kiraciYolu — <evKoku>/<sk>/<göreli> biçimindeki mutlak yolu kiracıya ve ev'e
 // göreli yola ayırır (ev kökü dışı ".." bileşeni geçersiz sk sayılır; ev'in
-// kendisi → hata). Kiracı yalnız DİZGEDEN çıkarılır; bileşenleri çözmek ev
-// köküne kilitli os.Root'un işi.
+// kendisi → hata). Kiracı yalnız DİZGEDEN çıkarılır; bileşenleri çözmek
+// evalti.Ac'ın (bağ izlemeden) işi.
 func kiraciYolu(yol string) (kiraci.Kiraci, string, error) {
 	rel, err := filepath.Rel(evKoku, filepath.Clean(yol))
 	if err != nil {
@@ -211,7 +212,7 @@ func kiraciYolu(yol string) (kiraci.Kiraci, string, error) {
 
 var errKiraciDosyasiDegil = errors.New("kiracinin duzenli dosyasi degil")
 
-// kiraciDosyasi — ev köküne kilitli açılmış bir dizindeki, kiracının KENDİ
+// kiraciDosyasi — ev köküne çapalı, bağ izlenmeden açılmış bir dizindeki, kiracının KENDİ
 // düzenli dosyası. Sonraki işlemler (okuma, fchmod, yerine yazma) açılmış
 // tanıtıcılar ve dizine göreli *at çağrılarıyla yapılır: denetimden sonra yolun
 // takası işlemi başka dosyaya yönlendiremez.
@@ -222,23 +223,26 @@ type kiraciDosyasi struct {
 	st    unix.Stat_t
 }
 
-// kiraciDosyasiAc — ev altındaki rel'i yalnız kiracının KENDİ düzenli dosyasıysa
-// açar; aksi halde hata. Çağıran Kapat'ı çağırır.
-func kiraciDosyasiAc(ev *os.Root, rel string, uid int) (*kiraciDosyasi, error) {
+// kiraciDosyasiAc — ev (kiracının ev dizini, mutlak) altındaki rel'i yalnız
+// kiracının KENDİ düzenli dosyasıysa açar; aksi halde hata. Çağıran Kapat'ı
+// çağırır.
+func kiraciDosyasiAc(ev, rel string, uid int) (*kiraciDosyasi, error) {
 	rel = path.Clean(rel)
-	// Dizin ev köküne KİLİTLİ çözülür: yol boyunca ev dışına çıkan bağ reddedilir.
-	// 🔴 O_DIRECTORY: os.Root son bileşeni yalnız O_NOFOLLOW ile açar; dizin
-	// yerine FIFO (doğrudan ya da ev içi bağla) olursa openat bir yazıcı bekleyip
-	// SÜRESİZ takılırdı (bağlam iptali kesemez; tek taşıma yuvası kilitli kalır).
-	// O_DIRECTORY ile çekirdek açmadan önce ENOTDIR döner; ev içi bağ çözümü
-	// (ENOTDIR/ELOOP → os.Root bağı kök içinde izler) korunur.
-	dizin, err := ev.OpenFile(path.Dir(rel), os.O_RDONLY|unix.O_DIRECTORY, 0)
+	// 🔴 Dizin evalti.Ac ile açılır (openat2 RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS):
+	// yol boyunca HİÇBİR bağ izlenmez — ev DIŞINA çıkan da, ev İÇİNDE kalan da
+	// (os.Root ev içi bağı izlerdi: kiracı kendi evindeki kök sahipli bir alanı
+	// gösteren bağla kökün okuma/yazmasını oraya yönlendirebilirdi).
+	// O_DIRECTORY: dizin yerine FIFO olursa openat bir yazıcı bekleyip SÜRESİZ
+	// takılırdı (bağlam iptali kesemez; tek taşıma yuvası kilitli kalır); çekirdek
+	// açmadan önce ENOTDIR döner.
+	dfd, err := evalti.Ac(ev, path.Dir(rel), unix.O_RDONLY|unix.O_DIRECTORY)
 	if err != nil {
 		return nil, err
 	}
+	dizin := os.NewFile(uintptr(dfd), path.Dir(rel))
 	ad := path.Base(rel)
-	// Son bileşen bağ İZLENMEDEN açılır: *at çözümü ev kilidinin DIŞINDADIR,
-	// izlenen mutlak bağ komşu kiracıya/sisteme uzanırdı. O_NONBLOCK: FIFO'da
+	// Son bileşen de bağ İZLENMEDEN açılır: izlenen mutlak bağ komşu
+	// kiracıya/sisteme uzanırdı. O_NONBLOCK: FIFO'da
 	// (kiracı .env yerine koyabilir) takılma yok.
 	fd, err := unix.Openat(int(dizin.Fd()), ad, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -326,9 +330,9 @@ func (d *kiraciDosyasi) Degistir(veri []byte, izin os.FileMode) error {
 
 // docrootDisiBagimlilik — belge kokundeki PHP giris dosyalarinda "../<dizin>/"
 // referanslarini bulur (Laravel/Symfony deseni). Donen adlar TEK SEVIYE dizin
-// adidir; ".."/slash iceren veya supheli degerler elenir. Dosyalar ev köküne
-// kilitli, yalnız kiracının kendi düzenli dosyasıysa okunur.
-func docrootDisiBagimlilik(ev *os.Root, dizin string, uid int) []string {
+// adidir; ".."/slash iceren veya supheli degerler elenir. Dosyalar bağ
+// izlenmeden, yalnız kiracının kendi düzenli dosyasıysa okunur (kiraciDosyasiAc).
+func docrootDisiBagimlilik(ev, dizin string, uid int) []string {
 	re := regexp.MustCompile(`\.\./([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/`)
 	gorulen := map[string]bool{}
 	var out []string
@@ -359,13 +363,21 @@ func docrootDisiBagimlilik(ev *os.Root, dizin string, uid int) []string {
 // onbelleklenmis config/route (eski YOLLARI icerir) silinir, .env 0600 yapilir
 // (kaynaktan 0644 gelir — APP_KEY/DB parolasi dunyaya okunur kalirdi).
 //
-// 🔴 dizin ev'e (ev köküne kilitli os.Root) göredir; kök kiracı ağacında yol
-// dizgesiyle işlem YAPMAZ: .env yalnız kiracının kendi düzenli dosyasıysa
-// (kiraciDosyasiAc) okunur/yazılır, önbellek dosyaları kilitli kökten silinir.
-// Dosyalar kiracı kimliğinde yerleştirildiği için sahiplik zaten kiracınındır.
-func laravelSonrasiDuzelt(ev *os.Root, dizin, alanAdi string, uid int, log func(string, ...any)) {
-	if _, err := ev.Lstat(path.Join(dizin, "artisan")); err != nil {
-		return // Laravel degil (ya da dizin ev disina cikiyor)
+// 🔴 dizin ev'e (kiracının ev dizini) göredir; kök kiracı ağacında yol
+// dizgesiyle işlem YAPMAZ ve hiçbir bağı izlemez (evalti.Ac): .env yalnız
+// kiracının kendi düzenli dosyasıysa (kiraciDosyasiAc) okunur/yazılır, önbellek
+// dosyaları bağ izlenmeden açılmış önbellek dizininden silinir. Dosyalar kiracı
+// kimliğinde yerleştirildiği için sahiplik zaten kiracınındır.
+func laravelSonrasiDuzelt(ev, dizin, alanAdi string, uid int, log func(string, ...any)) {
+	dfd, err := evalti.Ac(ev, dizin, unix.O_RDONLY|unix.O_DIRECTORY)
+	if err != nil {
+		return // dizin yok, bağ ya da ev dışı
+	}
+	var st unix.Stat_t
+	err = unix.Fstatat(dfd, "artisan", &st, unix.AT_SYMLINK_NOFOLLOW)
+	unix.Close(dfd)
+	if err != nil {
+		return // Laravel degil
 	}
 	if env, err := kiraciDosyasiAc(ev, path.Join(dizin, ".env"), uid); err == nil {
 		if b, err := env.Oku(yapilandirmaMaxBayt); err == nil {
@@ -378,8 +390,11 @@ func laravelSonrasiDuzelt(ev *os.Root, dizin, alanAdi string, uid int, log func(
 		}
 		env.Kapat()
 	}
-	for _, c := range []string{"config.php", "services.php", "packages.php", "routes-v7.php"} {
-		_ = ev.Remove(path.Join(dizin, "bootstrap", "cache", c))
+	if cfd, err := evalti.Ac(ev, path.Join(dizin, "bootstrap", "cache"), unix.O_RDONLY|unix.O_DIRECTORY); err == nil {
+		for _, c := range []string{"config.php", "services.php", "packages.php", "routes-v7.php"} {
+			_ = unix.Unlinkat(cfd, c, 0)
+		}
+		unix.Close(cfd)
 	}
 	log("laravel: onbellek temizlendi, .env 0600")
 }

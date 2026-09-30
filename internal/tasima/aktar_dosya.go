@@ -22,7 +22,7 @@ import (
 //
 // 🔴 Hedef (webRoot, ev dizini) kiracının ağacıdır ve içe aktarılan her şey
 // güvenilmezdir: kök bu ağaca yol dizgesiyle YAZMAZ — yerleşim kiracı
-// kimliğinde, sonrası ev köküne kilitli os.Root altında (bkz. internal/kiraci).
+// kimliğinde (internal/kiraci), sonrası bağ izlemeyen açmalarla (internal/evalti).
 func (h *Handlers) dosyalariAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, sk, webRoot, alanAdi string,
 	sonuc *AktarSonuc, log func(string, ...any)) error {
 	if ay.Dosyalar && strings.TrimSpace(hs.WebRoot) == "" {
@@ -49,11 +49,6 @@ func (h *Handlers) dosyalariAktar(ctx context.Context, k *Kaynak, hs Hesap, ay A
 		if err != nil {
 			return fmt.Errorf("hedef sistem kullanicisi bulunamadi")
 		}
-		ev, err := ki.EvAc()
-		if err != nil {
-			return fmt.Errorf("hedef ev dizini acilamadi")
-		}
-		defer ev.Close()
 
 		log("dosyalar aktariliyor: %s → %s", uzak, webRoot)
 		bayt, atlanan, err := dizinAktar(ctx, k, ki, uid, gid, uzak, kok,
@@ -68,7 +63,7 @@ func (h *Handlers) dosyalariAktar(ctx context.Context, k *Kaynak, hs Hesap, ay A
 		// DISINDA durur (public_html/index.php -> ../laravel_11/vendor/autoload.php).
 		// Yalniz docroot tasinirsa site 500 verir. index.php'deki "../<dizin>/"
 		// referanslarini tara, kaynaktan o dizinleri de getir (ev'in <dizin>'ine).
-		for _, ust := range docrootDisiBagimlilik(ev, kok, uid) {
+		for _, ust := range docrootDisiBagimlilik(ki.Ev, kok, uid) {
 			uzakUst := filepath.Join(filepath.Dir(uzak), ust)
 			if !gecerliUzakYol(uzakUst) {
 				continue
@@ -82,10 +77,10 @@ func (h *Handlers) dosyalariAktar(ctx context.Context, k *Kaynak, hs Hesap, ay A
 				continue
 			}
 			// Laravel ise: APP_URL'i hedef domaine cek, cache temizle, .env'i 0600 yap.
-			laravelSonrasiDuzelt(ev, ust, alanAdi, uid, log)
+			laravelSonrasiDuzelt(ki.Ev, ust, alanAdi, uid, log)
 		}
 		// Docroot'un KENDISI Laravel ise (public_html/artisan) ayni duzeltmeler.
-		laravelSonrasiDuzelt(ev, kok, alanAdi, uid, log)
+		laravelSonrasiDuzelt(ki.Ev, kok, alanAdi, uid, log)
 	}
 	return nil
 }

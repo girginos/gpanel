@@ -2,8 +2,8 @@ package kiraci
 
 // Birim: argv/ortam/çalışma dizini sözleşmesi ve yol denetimi (çalıştırmadan).
 // Tümleşik: root + ayrıcalıksız "nobody" varsa GERÇEK runuser ile kimlik
-// düşürme ve ev köküne kilit t.TempDir içinde sınanır; canlı ev dizinlerine
-// dokunulmaz, root değilse atlanır.
+// düşürme t.TempDir içinde sınanır; canlı ev dizinlerine dokunulmaz, root
+// değilse atlanır. Bağ izlemeyen kök açmaları: internal/evalti.
 
 import (
 	"context"
@@ -189,43 +189,5 @@ func TestKomut_KimlikDusurulur(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(kok, "x")); err == nil {
 		t.Fatal("kök sahipli dizinde dosya oluştu")
-	}
-}
-
-// EvAc: ev içindeki bağ izlenir, ev dışına çıkan bağ (mutlak ya da ..) reddedilir.
-func TestEvAc_DisariCikanBagReddedilir(t *testing.T) {
-	base := t.TempDir()
-	ev := filepath.Join(base, "c_test")
-	dis := filepath.Join(base, "dis")
-	for _, d := range []string{filepath.Join(ev, "ic"), dis} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, f := range []string{filepath.Join(ev, "ic", "a.txt"), filepath.Join(dis, "gizli.txt")} {
-		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for bag, hedef := range map[string]string{"mutlak": dis, "goreli": "../dis", "icerde": "ic"} {
-		if err := os.Symlink(hedef, filepath.Join(ev, bag)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	kok, err := Kiraci{Kul: "nobody", Ev: ev}.EvAc()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer kok.Close()
-	for _, p := range []string{"mutlak/gizli.txt", "goreli/gizli.txt", "../dis/gizli.txt"} {
-		if f, err := kok.Open(p); err == nil {
-			f.Close()
-			t.Errorf("%s: ev dışına çıkan yol açıldı", p)
-		}
-	}
-	if f, err := kok.Open("icerde/a.txt"); err != nil {
-		t.Errorf("ev içindeki bağ izlenmeliydi: %v", err)
-	} else {
-		f.Close()
 	}
 }

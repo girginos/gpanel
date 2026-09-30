@@ -55,8 +55,8 @@ func xenforoDBYaz(icerik, key, val string) string {
 // dönene kadar açıktır (f onu yerine yazabilir).
 //
 // 🔴 webRoot kiracının ağacıdır (kiracı her bileşeni bağa/FIFO'ya çevirebilir):
-// dosyalar ev köküne KİLİTLİ os.Root altında, yalnız kiracının kendi düzenli ve
-// tek bağlantılı dosyasıysa açılır (kiraciDosyasiAc). Uygun olmayan aday
+// dosyalar yol boyunca hiçbir bağ izlenmeden (evalti.Ac), yalnız kiracının kendi
+// düzenli ve tek bağlantılı dosyasıysa açılır (kiraciDosyasiAc). Uygun olmayan aday
 // sessizce atlanır. webRoot bir kiracı evinde değilse hiçbir dosya açılmadan
 // hata döner (okuyucular için "yapılandırma yok" demektir).
 func kiraciYapilandirmalari(webRoot string, f func(rel string, d *kiraciDosyasi, ham []byte)) error {
@@ -68,13 +68,8 @@ func kiraciYapilandirmalari(webRoot string, f func(rel string, d *kiraciDosyasi,
 	if err != nil {
 		return errors.New("sistem kullanicisi bulunamadi")
 	}
-	ev, err := ki.EvAc()
-	if err != nil {
-		return errors.New("ev dizini acilamadi")
-	}
-	defer ev.Close()
 	for _, rel := range yapilandirmaAdaylari {
-		d, err := kiraciDosyasiAc(ev, path.Join(kok, rel), uid)
+		d, err := kiraciDosyasiAc(ki.Ev, path.Join(kok, rel), uid)
 		if err != nil {
 			continue
 		}
@@ -194,8 +189,8 @@ func configtenDBKimlik(webRoot string) map[string]dbKimlik {
 // icinde apostrof olan PHP dosyalarini sozdizimsel olarak BOZUYORDU.
 //
 // 🔴 webRoot kiracının ağacıdır (kiracı her bileşeni bağa çevirebilir): dosyalar
-// ev köküne KİLİTLİ os.Root altında, yalnız kiracının kendi düzenli dosyasıysa
-// okunup atomik yenilenir (kiraciYapilandirmalari). Eskiden kök yol üzerinden
+// bağ izlenmeden (evalti.Ac), yalnız kiracının kendi düzenli dosyasıysa okunup
+// atomik yenilenir (kiraciYapilandirmalari). Eskiden kök yol üzerinden
 // okuyup yazıyordu → public_html komşu evine bağlıysa KOMŞUNUN yapılandırması
 // ezilirdi.
 func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, kaynakHesap, yeniPw string, log func(string, ...any)) int {

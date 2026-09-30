@@ -9,6 +9,9 @@
 // Farklar: göreli yoldaki ".." bileşeni kökte sessizce kırpılmaz, REDDEDİLİR; kiracı
 // adı her giriş noktasında dar doğrulanır (kiraci.GecerliSK).
 //
+// Kök kiracı ağacında yol çözmesi gereken HER açmayı Ac ile yapar (taşıma
+// yerleşimi, arşiv çıkarma): os.OpenRoot ev İÇİNDE kalan bağı izler; kiracının ev
+// içinde kök sahipli bir alanı gösteren bağı kökün işlemini oraya yönlendirirdi.
 // Kiracı kimliğinde komut bu paketin işi DEĞİLDİR: tek runuser sarmalayıcısı
 // kiraci.Komut'tur.
 package evalti

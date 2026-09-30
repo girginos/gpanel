@@ -1,9 +1,10 @@
 package tasima
 
 // aktar_config_test.go — H3 regresyonu: yapılandırma yeniden yazımı ve Laravel
-// düzeltmesi ev köküne KİLİTLİ (os.Root) ve yalnız kiracının kendi düzenli
-// dosyasında çalışır. Her senaryo tek bir korumayı sınar (komşu kiracı testte
-// aynı uid'dir: ev kilidi ve bağ korumaları uid denetimine yaslanmaz).
+// düzeltmesi kiracının ev dizinine çapalı, yol boyunca HİÇBİR bağı izlemeden
+// (evalti.Ac: ev dışına çıkan da, ev içinde kalan da) ve yalnız kiracının kendi
+// düzenli dosyasında çalışır. Her senaryo tek bir korumayı sınar (komşu kiracı
+// testte aynı uid'dir: bağ korumaları uid denetimine yaslanmaz).
 // Ortam ve yardımcılar: aktar_dosya_test.go.
 
 import (
@@ -61,7 +62,7 @@ func TestYapilandirma_BaglarKurbaniDegistirmez(t *testing.T) {
 			yrYaz(t, env, "APP_URL=http://eski.example\nAPP_KEY=kok-sirri\n", 0o640)
 			return env
 		}, yrLaravel},
-		// Önbellek silme de ev kilidinde: bootstrap komşuya bağ.
+		// Önbellek silme de bağ izlemez: bootstrap komşuya bağ.
 		{"bootstrap komşuya bağ (Laravel)", func(t *testing.T, o yrOrtam, ph, komsu string) string {
 			o.dizin(t, ph)
 			o.dosya(t, filepath.Join(ph, "artisan"), "#!/usr/bin/env php\n", 0o644)
@@ -91,12 +92,71 @@ func yrConfigYaz(t *testing.T, o yrOrtam, ph string) {
 
 func yrLaravel(t *testing.T, o yrOrtam, ph string) {
 	t.Helper()
-	ev, err := os.OpenRoot(o.ev)
-	if err != nil {
-		t.Fatal(err)
+	yrLaravelDizin(t, o, "public_html")
+}
+
+func yrLaravelDizin(t *testing.T, o yrOrtam, dizin string) {
+	t.Helper()
+	laravelSonrasiDuzelt(o.ev, dizin, yrAlan, o.uid, yrLog(t))
+}
+
+// Ev İÇİNDE kalan bağ da izlenmez: kiracı evinde kök sahipli bir alan (burada
+// <ev>/.kok; panelin kiracı evine koyduğu kök dizinleri temsil eder) varken
+// kiracının oraya kurduğu göreli bağ kökün yapılandırma okuma/yazma ve Laravel
+// önbellek silme işlemini o alana YÖNLENDİREMEZ. (Önceki os.Root yalnız ev DIŞINA
+// çıkan bağı reddediyor, ev içi bağı izliyordu.) Meşru karşılıkları (bağsız) diğer
+// testlerde yeşildir.
+func TestYapilandirma_EvIciKokAlaninaBagIzlenmez(t *testing.T) {
+	senaryolar := []struct {
+		ad    string
+		kur   func(t *testing.T, o yrOrtam, ph, kok string)
+		calis func(t *testing.T, o yrOrtam, ph string)
+	}{
+		{"yapılandırma dizini kök alanına bağ", func(t *testing.T, o yrOrtam, ph, kok string) {
+			env := filepath.Join(kok, "app", "etc", "env.php")
+			yrYaz(t, env, "<?php\ndefine( 'DB_NAME', 'eski_db' );\ndefine( 'DB_USER', 'eski_kul' );\ndefine( 'DB_PASSWORD', 'eski_pw' );\n", 0o640)
+			if err := os.Lchown(env, o.uid, o.gid); err != nil {
+				t.Fatal(err)
+			}
+			o.dizin(t, ph)
+			o.bag(t, "../.kok/app", filepath.Join(ph, "app"))
+		}, func(t *testing.T, o yrOrtam, ph string) {
+			if b, k := configtenDBBul(ph), configtenDBKimlik(ph); len(b) != 0 || len(k) != 0 {
+				t.Errorf("kök alanındaki yapılandırma okundu: bulunan=%v kimlik=%d", b, len(k))
+			}
+			yrConfigYaz(t, o, ph)
+		}},
+		{"Laravel önbelleği kök alanına bağ", func(t *testing.T, o yrOrtam, ph, kok string) {
+			yrYaz(t, filepath.Join(kok, "bootstrap", "cache", "config.php"), "<?php return [];\n", 0o644)
+			o.dizin(t, ph)
+			o.dosya(t, filepath.Join(ph, "artisan"), "#!/usr/bin/env php\n", 0o644)
+			o.bag(t, "../.kok/bootstrap", filepath.Join(ph, "bootstrap"))
+		}, yrLaravel},
+		{"Laravel uygulama dizini kök alanına bağ", func(t *testing.T, o yrOrtam, ph, kok string) {
+			for ad, icerik := range map[string]string{"artisan": "#!/usr/bin/env php\n", ".env": "APP_URL=http://eski.example\n"} {
+				yol := filepath.Join(kok, "uyg", ad)
+				yrYaz(t, yol, icerik, 0o644)
+				if err := os.Lchown(yol, o.uid, o.gid); err != nil {
+					t.Fatal(err)
+				}
+			}
+			o.bag(t, ".kok/uyg", filepath.Join(o.ev, "uyg"))
+		}, func(t *testing.T, o yrOrtam, ph string) { yrLaravelDizin(t, o, "uyg") }},
 	}
-	defer ev.Close()
-	laravelSonrasiDuzelt(ev, "public_html", yrAlan, o.uid, yrLog(t))
+	for _, sn := range senaryolar {
+		t.Run(sn.ad, func(t *testing.T) {
+			o := yrYeniOrtam(t)
+			kok := filepath.Join(o.ev, ".kok")
+			if err := os.Mkdir(kok, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ph := filepath.Join(o.ev, "public_html")
+			sn.kur(t, o, ph, kok)
+			once := yrOzet(t, kok)
+			sn.calis(t, o, ph)
+			yrOzetKarsilastir(t, sn.ad, once, yrOzet(t, kok))
+		})
+	}
 }
 
 // FIFO .env: okunmaz, izni değişmez, takılmaz (eskiden os.ReadFile yazıcı
@@ -192,7 +252,7 @@ func TestYapilandirma_FifoDizinTakilmaz(t *testing.T) {
 	}
 }
 
-// Okuyucular (configtenDBBul/configtenDBKimlik) da ev kilidinde: bağla ya da
+// Okuyucular (configtenDBBul/configtenDBKimlik) da bağ izlemez: bağla ya da
 // sabit bağla komşunun yapılandırmasındaki DB adı/kullanıcı/parola bu hesaba
 // OKUNMAZ; ev dışı web kökünde hiçbir şey okunmaz. Meşru durumda kiracının
 // kendi yapılandırması okunur (test boşuna geçmiyor).
