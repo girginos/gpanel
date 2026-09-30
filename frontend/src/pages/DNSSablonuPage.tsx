@@ -119,7 +119,7 @@ export default function DNSSablonuPage() {
   const inp = 'w-full px-2.5 py-1.5 bg-white dark:bg-dark-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-800 dark:text-slate-100 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none'
 
   return (
-    <div className="px-6 md:px-8 py-6">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' }, { etiket: cevir("DNS Şablonu") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir(yonetici ? "Merkezi DNS Şablonu" : "DNS Şablonları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">

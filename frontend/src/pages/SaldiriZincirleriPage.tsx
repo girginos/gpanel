@@ -70,8 +70,7 @@ export default function SaldiriZincirleriPage() {
   const aktifKritik = zincirler.filter(z => z.seviye === 'kritik').length
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-5xl mx-auto">
+    <div>
         <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Saldırı Zincirleri") }]} />
         <div className="flex items-start gap-3 mb-1">
           <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${aktifKritik > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
@@ -150,7 +149,6 @@ export default function SaldiriZincirleriPage() {
             })}
           </div>
         )}
-      </div>
     </div>
   )
 }

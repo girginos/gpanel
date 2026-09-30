@@ -141,7 +141,7 @@ export default function DomainLaravelPage() {
   function hataBildir(msg: string) { setHata(msg); if (msg) toast.hata(cevir("İşlem başarısız"), msg) }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-[1100px]">
+    <div>
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' },
         { etiket: d?.kullanici ? d.kullanici.replace(/^c_/, '') : '...', href: `/abonelikler/${id}` },
