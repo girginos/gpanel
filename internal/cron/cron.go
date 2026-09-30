@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -70,6 +72,34 @@ func (h *Handlers) lookup(r *http.Request) (string, error) {
 	}
 	if !strings.HasPrefix(sk, "c_") {
 		return "", errBad
+	}
+	return sk, nil
+}
+
+// errAskida: hesap askıda — crontab'ı askı adımı spool dışında saklıyor
+// (provisioner.SuspendUserRuntime). Askıdayken spool'a yazmak saklananı ya
+// askıdan alınınca ezer ya da yeniden askıya almada onun yerine geçer (hesabın
+// gerçek görevleri kaybolur); elle çalıştırma da askıdaki hesabın kodunu
+// çalıştırır. Değiştiren/çalıştıran uçlar bu yüzden askıda 409 döner.
+var (
+	errAskida        = errors.New("hesap askıda — zamanlanmış görevler askıdan alınınca yönetilebilir")
+	errAskiOkunamadi = errors.New("hesap askı durumu okunamadı")
+)
+
+// yazmaLookup: lookup + hesap askı kapısı (değiştiren/çalıştıran uçlar için).
+// Durum okunamazsa da reddedilir.
+func (h *Handlers) yazmaLookup(r *http.Request) (string, error) {
+	sk, err := h.lookup(r)
+	if err != nil {
+		return "", err
+	}
+	askida, err := hesaplar.HesapAskida(r.Context(), h.DB, sk)
+	if err != nil {
+		log.Printf("cron: %s: %v", sk, err)
+		return "", errAskiOkunamadi // ayrıntı (DB hatası) yalnız günlükte
+	}
+	if askida {
+		return "", errAskida
 	}
 	return sk, nil
 }
@@ -273,6 +303,8 @@ func statusFromErr(err error) int {
 		return http.StatusForbidden
 	case errBad:
 		return http.StatusBadRequest
+	case errAskida:
+		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }
@@ -377,7 +409,7 @@ func hazirla(in gorevInput) (Gorev, error) {
 }
 
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
-	sk, err := h.lookup(r)
+	sk, err := h.yazmaLookup(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -411,7 +443,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 
 // Update: PUT /domains/{id}/cron/{idx} — mevcut görevi düzenler (aynı index).
 func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
-	sk, err := h.lookup(r)
+	sk, err := h.yazmaLookup(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -449,7 +481,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
-	sk, err := h.lookup(r)
+	sk, err := h.yazmaLookup(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -485,7 +517,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 // zaten kendi kimliğinde koşacaktı — bu yalnız zamanı öne alır. runuser tenant'a
 // düşürür; ek ayrıcalık yoktur. lookup demo/sk kontrolünü yapar.
 func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
-	sk, err := h.lookup(r)
+	sk, err := h.yazmaLookup(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
