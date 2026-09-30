@@ -208,7 +208,8 @@ func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, k
 		if yeni == string(ham) {
 			return
 		}
-		if yedekYaz(webRoot, rel, ham) != nil {
+		if err := yedekYaz(webRoot, rel, ham); err != nil {
+			// Ayrıntı (panel yolu) yalnız sunucu logunda: iş günlüğü bayiye açılır.
 			log("uyari: %s yedegi alinamadi, dosya degistirilmedi", rel)
 			return
 		}

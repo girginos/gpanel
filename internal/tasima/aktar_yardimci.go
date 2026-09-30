@@ -111,16 +111,14 @@ func phpParcala(s string) (int, int) {
 // alanı). Testler geçici dizinle değiştirir.
 var tasimaYedekKok = "/var/lib/girginospanel/tasima-yedek"
 
-var errYedek = errors.New("yapilandirma yedegi alinamadi")
-
 // yedekYaz — webRoot altındaki rel yapılandırmasının özgün içeriğini
 // <tasimaYedekKok>/<sk>/<web kökü>/<rel> olarak saklar. Ad kiracı (sk) ve web
 // kökünün ev'e göre yoluyla BENZERSİZDİR (her bileşen PathEscape'li tek dizin
 // adı: "/" içermez, farklı yollar aynı ada düşmez): eskiden yalnız
 // filepath.Base(filepath.Dir(webRoot)) kullanılıyordu → public_html/public
 // (Laravel) belge köklü her kiracı "public_html"a düşüp birbirinin yedeğini
-// eziyordu. Ayrıntılı hata yalnız sunucu loguna yazılır; dönen hata genel
-// metindir (iş günlüğü bayiye açılır, panel yolları sızmaz).
+// eziyordu. Hata ayrıntısı (panel yolları) burada sunucu loguna yazılır;
+// çağıran iş günlüğüne (bayiye açılır) yalnız genel metin yazar.
 func yedekYaz(webRoot, rel string, ham []byte) error {
 	ki, kok, err := kiraciYolu(webRoot)
 	if err == nil {
@@ -131,9 +129,8 @@ func yedekYaz(webRoot, rel string, ham []byte) error {
 	}
 	if err != nil {
 		log.Printf("tasima: %s yapilandirma yedegi yazilamadi: %v", rel, err)
-		return errYedek
 	}
-	return nil
+	return err
 }
 
 func uidGid(sk string) (int, int, error) {
