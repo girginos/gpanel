@@ -109,11 +109,22 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 			return nil, fmt.Errorf("hedefte '%s' zaten var (uzerine yazma kapali)", alanAdi)
 		}
 		sonuc.DomainID, sk = mevcutID, mevcutSK
+		// 🔴 KİRACI EVİNE KİLİT: sonraki adımlar (yapılandırma yeniden yazımı ve
+		// okuyucular) kiracıyı web kökü DİZGESİNDEN türetir. web_root/sistem_kullanici
+		// (DB bozulması) başka kiracının evini, evin kendisini ya da ev dışını
+		// gösteriyorsa o evde çalışırlardı → hiçbir adımdan önce reddet (kök dahil).
+		ki, err := kiraciAl(sk)
+		if err != nil {
+			return nil, fmt.Errorf("hedef sistem kullanicisi gecersiz")
+		}
 		// 🔴 Belge koku alt klasor olabilir (or. Laravel .../public_html/public).
 		// public_html'e yazarsak icerik HIC YAYINLANMAZ.
 		webRoot = mevcutKok
 		if webRoot == "" {
-			webRoot = filepath.Join("/home", sk, "public_html")
+			webRoot = filepath.Join(ki.Ev, "public_html")
+		}
+		if _, err := ki.Goreli(webRoot); err != nil {
+			return nil, fmt.Errorf("hedef web kok dizini kiracinin ev dizininde degil")
 		}
 		log("hedefte mevcut domain bulundu, uzerine yaziliyor (id=%d, kok=%s)", mevcutID, webRoot)
 	} else {

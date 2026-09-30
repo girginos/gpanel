@@ -88,7 +88,7 @@ func h5_bayiOrtam(t *testing.T) *Handlers {
 		`INSERT INTO users (id, role) VALUES (9,'reseller')`,
 		// bayi 9'un ad-alanı: alt adı (x.bayi9.test) başka kiracıya kapalı;
 		// ez.bayi9.test = üzerine-yazma sahip-eşitliği testinin mevcut hedefi.
-		`INSERT INTO domains (id, alan_adi, reseller_id) VALUES (30,'bayi9.test',9), (40,'ez.bayi9.test',9)`,
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (30,'bayi9.test','c_bayi9',9), (40,'ez.bayi9.test','c_ezbayi9',9)`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("h5 şema: %v\n%s", err, q)
@@ -175,6 +175,51 @@ func TestHesapAktarBayiUstuneYaz_SahipEsitligi(t *testing.T) {
 		Hesap{AlanAdi: "ez.bayi9.test"},
 		Ayarlar{Ustune: true}, Kapsam{}, func(string, ...any) {}); err != nil {
 		t.Errorf("kök üzerine yazması engellenmemeli: %v", err)
+	}
+}
+
+// Üzerine yazma: domains.web_root ya da sistem_kullanici (DB bozulması) hedef
+// kiracının ev dizini İÇİNİ göstermiyorsa (başka kiracının evi, '..' ile çıkış,
+// sistem yolu, evin kendisi, geçersiz kullanıcı) üzerine yazma HİÇBİR adımdan
+// önce reddedilir — kök için de. Aksi halde dosya/yapılandırma/DB adımları
+// (configYenidenYaz, okuyucular) kiracıyı web kökü dizgesinden türettiği için
+// o yabancı evde çalışırdı. Kiracının kendi alt dizini (Laravel public) ve boş
+// web_root (public_html'e düşer) kabul edilir.
+func TestHesapAktarUstuneYaz_WebKokuKiracininEvindeOlmali(t *testing.T) {
+	h := h5_bayiOrtam(t)
+	saglanan, _, gercek := ta_kalkan(t, nil)
+	for _, q := range []string{
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici, web_root, reseller_id) VALUES
+			(50,'komsu.bayi7.test','c_ez7a','/home/c_komsu/public_html',7),
+			(51,'kacis.bayi7.test','c_ez7b','/home/c_ez7b/../c_komsu/public_html',7),
+			(52,'sistem.bayi7.test','c_ez7c','/etc',7),
+			(53,'evin.bayi7.test','c_ez7d','/home/c_ez7d',7),
+			(54,'onek.bayi7.test','c_ez7e','/home/c_ez7e2/public_html',7),
+			(55,'sksiz.bayi7.test','','/home/c_ez7f/public_html',7),
+			(60,'laravel.bayi7.test','c_ez7g','/home/c_ez7g/public_html/public',7),
+			(61,'bos.bayi7.test','c_ez7h','',7)`,
+	} {
+		if _, err := h.DB.Exec(q); err != nil {
+			t.Fatalf("şema: %v\n%s", err, q)
+		}
+	}
+	for _, kapsam := range []Kapsam{{RID: 7}, {}} {
+		for _, alan := range []string{"komsu.bayi7.test", "kacis.bayi7.test", "sistem.bayi7.test",
+			"evin.bayi7.test", "onek.bayi7.test", "sksiz.bayi7.test"} {
+			if _, err := h.HesapAktar(context.Background(), &Kaynak{}, Hesap{AlanAdi: alan},
+				Ayarlar{Ustune: true}, kapsam, func(string, ...any) {}); err == nil {
+				t.Errorf("%s (kapsam %+v): kiracı evi dışını gösteren web_root ile üzerine yazma reddedilmeliydi", alan, kapsam)
+			}
+		}
+		for _, alan := range []string{"laravel.bayi7.test", "bos.bayi7.test"} {
+			if _, err := h.HesapAktar(context.Background(), &Kaynak{}, Hesap{AlanAdi: alan},
+				Ayarlar{Ustune: true}, kapsam, func(string, ...any) {}); err != nil {
+				t.Errorf("%s (kapsam %+v): kiracının kendi web kökü üzerine yazılabilmeli: %v", alan, kapsam, err)
+			}
+		}
+	}
+	if len(*saglanan) != 0 || *gercek != 0 {
+		t.Errorf("üzerine yazma hiçbir sağlama tetiklememeli: sahte=%v gerçek=%d", *saglanan, *gercek)
 	}
 }
 
