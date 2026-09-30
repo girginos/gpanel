@@ -159,8 +159,11 @@ var errYerlesimSuresi = errors.New("yerlesim adimi zaman asimina ugradi")
 func kiraciAdim(ctx context.Context, sure time.Duration, ki kiraci.Kiraci, argv ...string) error {
 	ctx, iptal := context.WithTimeout(ctx, sure)
 	defer iptal()
-	err := ki.Komut(ctx, argv...).Run()
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	cmd, err := ki.Komut(ctx, argv...)
+	if err != nil {
+		return err
+	}
+	if err = cmd.Run(); err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return errYerlesimSuresi
 	}
 	return err

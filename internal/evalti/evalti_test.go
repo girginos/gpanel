@@ -1,17 +1,14 @@
 package evalti
 
-// Regresyon: ev köküne çapalı root dosya işlemleri ve kiracı komutu. Tümü t.TempDir
-// içinde; kiracı yerine ayrıcalıksız "nobody" kullanılır, canlı /home'a dokunulmaz.
+// Regresyon: ev köküne çapalı root dosya işlemleri. Tümü t.TempDir içinde; kiracı
+// yerine ayrıcalıksız "nobody" kullanılır, canlı /home'a dokunulmaz. Kiracı adının
+// doğrulaması ve runuser sarmalayıcısı: internal/kiraci (kiraci_test.go).
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
-	"reflect"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 
@@ -45,29 +42,6 @@ func dosyaYaz(t *testing.T, yol, icerik string) {
 	t.Helper()
 	if err := os.WriteFile(yol, []byte(icerik), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestGecerliSK(t *testing.T) {
-	for sk, want := range map[string]bool{
-		"c_site":                       true,
-		"c_a1_b2":                      true,
-		"c_" + strings.Repeat("a", 30): true,
-		"c_" + strings.Repeat("a", 31): false,
-		"c_":                           false,
-		"root":                         false,
-		"nobody":                       false,
-		"c_A":                          false,
-		"c_x/y":                        false,
-		"c_..":                         false,
-		"c_x\n":                        false,
-		"-c_x":                         false,
-		"c_x-y":                        false,
-		"c_x y":                        false,
-	} {
-		if got := GecerliSK(sk); got != want {
-			t.Errorf("GecerliSK(%q) = %v, beklenen %v", sk, got, want)
-		}
 	}
 }
 
@@ -231,67 +205,5 @@ func TestMkdirHepsi_AdTakasi(t *testing.T) {
 	}
 	if sys := st.Sys().(*syscall.Stat_t); sys.Uid != 0 || st.Mode().Perm() != 0o700 {
 		t.Fatalf("dolu dizin kiracıya geçti: mod=%v uid=%d", st.Mode(), sys.Uid)
-	}
-}
-
-func TestKiraciKomut(t *testing.T) {
-	nobodyKullan(t)
-	eski := EvKoku
-	EvKoku = "/tmp/evkoku"
-	t.Cleanup(func() { EvKoku = eski })
-
-	cmd, err := KiraciKomut(context.Background(), "c_site", "env")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"runuser", "-u", "nobody", "--", "env"}; !reflect.DeepEqual(cmd.Args, want) {
-		t.Fatalf("argv = %q, beklenen %q", cmd.Args, want)
-	}
-	if want := []string{kiraciPATH, "HOME=/tmp/evkoku/c_site", "LANG=C"}; !reflect.DeepEqual(cmd.Env, want) {
-		t.Fatalf("env = %q, beklenen %q", cmd.Env, want)
-	}
-	if cmd.Dir != "/" || cmd.Cancel == nil || cmd.WaitDelay == 0 {
-		t.Fatalf("dizin/iptal ayarı eksik: dir=%q", cmd.Dir)
-	}
-
-	for _, c := range []struct {
-		sk   string
-		argv []string
-	}{
-		{"../x", []string{"id"}},
-		{"root", []string{"id"}},
-		{"c_site", nil},          // argv'siz runuser kabuk açardı
-		{"c_site", []string{""}}, // boş komut adı
-	} {
-		if _, err := KiraciKomut(context.Background(), c.sk, c.argv...); err == nil {
-			t.Errorf("KiraciKomut(%q, %q) reddedilmeliydi", c.sk, c.argv)
-		}
-	}
-}
-
-// TestKiraciKomut_GercekKimlik: runuser gerçekten kiracı kimliğinde ve panel ortamı
-// olmadan koşar.
-func TestKiraciKomut_GercekKimlik(t *testing.T) {
-	nobodyKimlik(t)
-	if _, err := exec.LookPath("runuser"); err != nil {
-		t.Skip("runuser yok")
-	}
-	nobodyKullan(t)
-	t.Setenv("GOSP_PANEL_SIRRI_TEST", "SIZMAMALI")
-
-	cmd, err := KiraciKomut(context.Background(), "c_site", "sh", "-c", "id -un; env")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("runuser: %v", err)
-	}
-	s := string(out)
-	if !strings.HasPrefix(s, "nobody\n") {
-		t.Fatalf("kiracı kimliği değil: %q", s)
-	}
-	if strings.Contains(s, "SIZMAMALI") {
-		t.Fatal("panel ortamı kiracı komutuna sızdı")
 	}
 }

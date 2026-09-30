@@ -7,12 +7,12 @@ package kiraci
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -30,6 +30,11 @@ func TestGecerliSK(t *testing.T) {
 		"-c_x":                         false,
 		"c_x\n":                        false,
 		"":                             false,
+		"nobody":                       false,
+		"c_x/y":                        false,
+		"c_..":                         false,
+		"c_x-y":                        false,
+		"c_x y":                        false,
 	} {
 		if GecerliSK(sk) != bek {
 			t.Errorf("GecerliSK(%q) = %v, beklenen %v", sk, !bek, bek)
@@ -67,29 +72,68 @@ func TestGoreli(t *testing.T) {
 
 // Komut: kabuk yok, kiracı kimliği, panel ortamı (sırlar) çocuğa geçmez.
 func TestKomut_ArgvOrtamDizin(t *testing.T) {
+	if _, err := user.Lookup("nobody"); err != nil {
+		t.Skipf("nobody kullanıcısı yok: %v", err)
+	}
 	t.Setenv("GOSP_TEST_PANEL_SIRRI", "gizli-deger-9c1e")
-	k := Kiraci{Kul: "c_ornek", Ev: "/home/c_ornek"}
-	cmd := k.Komut(context.Background(), "rsync", "-a", "kaynak/", "hedef/")
+	k := Kiraci{Kul: "nobody", Ev: "/home/c_ornek"}
+	cmd, err := k.Komut(context.Background(), "rsync", "-a", "kaynak/", "hedef/")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if want := []string{"runuser", "-u", "c_ornek", "--", "rsync", "-a", "kaynak/", "hedef/"}; !reflect.DeepEqual(cmd.Args, want) {
+	if want := []string{"runuser", "-u", "nobody", "--", "rsync", "-a", "kaynak/", "hedef/"}; !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("argv:\n got %q\nwant %q", cmd.Args, want)
 	}
 	if cmd.Dir != "/" {
 		t.Errorf("çalışma dizini %q, beklenen /", cmd.Dir)
 	}
-	for _, e := range cmd.Env {
-		if strings.Contains(e, "GOSP_TEST_PANEL_SIRRI") || strings.Contains(e, "gizli-deger-9c1e") {
-			t.Fatalf("panel ortamı kiracı sürecine sızdı: %q", e)
-		}
-	}
-	for _, gerekli := range []string{"HOME=/home/c_ornek", "LANG=C"} {
-		if !slices.Contains(cmd.Env, gerekli) {
-			t.Errorf("ortamda %q yok: %q", gerekli, cmd.Env)
-		}
+	// Ortam TAM OLARAK bu üçü: panelin ortamından hiçbir şey (sırlar) geçmez.
+	if want := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/home/c_ornek", "LANG=C"}; !reflect.DeepEqual(cmd.Env, want) {
+		t.Fatalf("ortam:\n got %q\nwant %q", cmd.Env, want)
 	}
 	if cmd.Cancel == nil || cmd.WaitDelay <= 0 {
 		t.Errorf("iptal sözleşmesi eksik (Cancel=%v, WaitDelay=%v)", cmd.Cancel != nil, cmd.WaitDelay)
 	}
+}
+
+// Komut reddeder: argv'siz runuser kiracının KABUĞUNU açar; kiracı olamayacak
+// kullanıcı (boş, seçenek gibi, yol, sistemde yok, uid 0) kök kimliği ya da
+// runuser seçeneği demektir.
+func TestKomut_Reddeder(t *testing.T) {
+	if _, err := user.Lookup("nobody"); err != nil {
+		t.Skipf("nobody kullanıcısı yok: %v", err)
+	}
+	for _, c := range []struct {
+		kul  string
+		argv []string
+	}{
+		{"nobody", nil},
+		{"nobody", []string{""}},
+		{"", []string{"id"}},
+		{"-x", []string{"id"}},
+		{"--", []string{"id"}},
+		{"../x", []string{"id"}},
+		{"c_yok_boyle_kiraci_7f3e", []string{"id"}},
+		{"root", []string{"id"}},
+	} {
+		cmd, err := Kiraci{Kul: c.kul, Ev: "/home/c_ornek"}.Komut(context.Background(), c.argv...)
+		if err == nil || cmd != nil {
+			t.Errorf("Komut(Kul=%q, %q) reddedilmeliydi", c.kul, c.argv)
+		} else if !errors.Is(err, ErrKomut) {
+			t.Errorf("Komut(Kul=%q, %q) hata = %v, beklenen ErrKomut", c.kul, c.argv, err)
+		}
+	}
+}
+
+// komut — Komut'u hatasız bekleyen test kısayolu.
+func komut(t *testing.T, k Kiraci, argv ...string) *exec.Cmd {
+	t.Helper()
+	cmd, err := k.Komut(context.Background(), argv...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmd
 }
 
 // nobodyOrtam: gerçek runuser için root + nobody gerekir; geçici ev nobody'nin
@@ -120,22 +164,27 @@ func nobodyOrtam(t *testing.T) (base string, k Kiraci) {
 	return base, Kiraci{Kul: "nobody", Ev: ev}
 }
 
+// Gerçek runuser: kiracı kimliğinde ve panel ortamı olmadan koşar.
 func TestKomut_KimlikDusurulur(t *testing.T) {
 	base, k := nobodyOrtam(t)
-	out, err := k.Komut(context.Background(), "id", "-u").Output()
+	t.Setenv("GOSP_PANEL_SIRRI_TEST", "SIZMAMALI")
+	out, err := komut(t, k, "sh", "-c", "id -u; env").Output()
 	if err != nil {
 		t.Fatalf("id: %v", err)
 	}
 	u, _ := user.Lookup("nobody")
-	if got := strings.TrimSpace(string(out)); got != u.Uid {
+	if got, _, _ := strings.Cut(string(out), "\n"); got != u.Uid {
 		t.Fatalf("komut kiracı kimliğinde koşmadı: uid=%s, beklenen %s", got, u.Uid)
+	}
+	if strings.Contains(string(out), "SIZMAMALI") {
+		t.Fatal("panel ortamı kiracı komutuna sızdı")
 	}
 	// Kök sahipli dizine kiracı YAZAMAZ (kök yetkisi çocuğa geçmez).
 	kok := filepath.Join(base, "kok")
 	if err := os.Mkdir(kok, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.Komut(context.Background(), "touch", filepath.Join(kok, "x")).Run(); err == nil {
+	if err := komut(t, k, "touch", filepath.Join(kok, "x")).Run(); err == nil {
 		t.Fatal("kiracı kimliği kök sahipli dizine yazabildi")
 	}
 	if _, err := os.Lstat(filepath.Join(kok, "x")); err == nil {

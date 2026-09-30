@@ -14,8 +14,10 @@
 // <EvKoku> kök sahiplidir; kiracı buradaki kendi girdisini (ev dizinini) takas
 // edemez → <EvKoku>/<sk> güvenilir bir çapadır.
 //
-// Öncüller: sitekopya.kiraciKomut ve archivex.runuserKomut (ayrı işte bu pakete
-// geçirilir). Paket yapraktır: panelin başka paketini içe aktarmaz.
+// Panelin TEK runuser sarmalayıcısı Komut'tur (evalti ve taşıma bunu kullanır).
+// Öncüller: sitekopya.kiraciKomut, archivex.runuserKomut ve git.kiraciCalistir
+// (ayrı işte bu pakete geçirilir). Paket yapraktır: panelin başka paketini içe
+// aktarmaz.
 package kiraci
 
 import (
@@ -23,6 +25,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"syscall"
@@ -40,8 +43,18 @@ const iptalBekleme = 15 * time.Second
 // "c_" + [a-z0-9_], en çok 32). Yol bileşenine ve runuser argv'sine girer.
 var reSK = regexp.MustCompile(`^c_[a-z0-9_]{1,30}$`)
 
-// ErrEvDisi — yol kiracının ev dizininin İÇİNDE değil (ev'in kendisi ya da dışı).
-var ErrEvDisi = errors.New("yol kiracı ev dizininin içinde değil")
+// reKul — Komut'un kabul ettiği işletim sistemi kullanıcı adı (useradd alfabesi):
+// boş değil, '-' ile başlamaz (runuser seçeneği sayılmaz), yol/boşluk içermez.
+var reKul = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+var (
+	// ErrEvDisi — yol kiracının ev dizininin İÇİNDE değil (ev'in kendisi ya da dışı).
+	ErrEvDisi = errors.New("yol kiracı ev dizininin içinde değil")
+	// ErrSK — sk panelin ürettiği biçimde bir kiracı sistem kullanıcısı değil.
+	ErrSK = errors.New("geçersiz kiracı kullanıcısı")
+	// ErrKomut — Komut'a boş argv ya da kiracı olamayacak bir kullanıcı verildi.
+	ErrKomut = errors.New("geçersiz kiracı komutu")
+)
 
 // GecerliSK — sk panelin ürettiği bir sistem kullanıcısı adı mı?
 func GecerliSK(sk string) bool { return reSK.MatchString(sk) }
@@ -58,8 +71,22 @@ type Kiraci struct {
 // <Kul> -- argv (kabuk yok; argv[0] PATH'te aranır), panel ortamı AKTARILMAZ
 // (yalnız PATH/HOME/LANG — panel sırları çocuğa sızmaz), çalışma dizini "/".
 // Bağlam iptalinde önce SIGTERM (runuser çocuğa iletir), takılırsa iptalBekleme
-// sonunda Go süreci öldürür.
-func (k Kiraci) Komut(ctx context.Context, argv ...string) *exec.Cmd {
+// sonunda Go süreci öldürür. Stdin/Stdout/Stderr'i çağıran bağlar.
+//
+// Reddedilir (ErrKomut): boş argv ya da boş komut adı — runuser argv'siz
+// kiracının KABUĞUNU açar; Kul'un kullanıcı adı olmaması, sistemde bulunmaması
+// ya da uid 0'a çözülmesi — kök kimliğinde "kiracı" komutu DAC korumasını
+// tümden kaldırırdı.
+func (k Kiraci) Komut(ctx context.Context, argv ...string) (*exec.Cmd, error) {
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, ErrKomut
+	}
+	if !reKul.MatchString(k.Kul) {
+		return nil, ErrKomut
+	}
+	if u, err := user.Lookup(k.Kul); err != nil || u.Uid == "0" {
+		return nil, ErrKomut
+	}
 	cmd := exec.CommandContext(ctx, "runuser", append([]string{"-u", k.Kul, "--"}, argv...)...)
 	cmd.Env = []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -69,7 +96,7 @@ func (k Kiraci) Komut(ctx context.Context, argv ...string) *exec.Cmd {
 	cmd.Dir = "/"
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = iptalBekleme
-	return cmd
+	return cmd, nil
 }
 
 // Goreli — mutlak yolun ev dizinine göreli karşılığı (EvAc köküne verilecek

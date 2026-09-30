@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"girginospanel/internal/evalti"
+	"girginospanel/internal/kiraci"
 )
 
 // Hedef: çıkarmanın yapılacağı kiracı dizini.
@@ -90,8 +91,9 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 	if kok != "" {
 		hedefYol += "/" + kok
 	}
-	cmd, err := evalti.KiraciKomut(ctx, h.SK, "tar", "-x", "--no-same-owner", "--no-same-permissions",
-		"-f", "-", "-C", hedefYol)
+	// SK EvDizini'de doğrulandı; Kul testte ayrıcalıksız kimliğe çevrilebilir.
+	cmd, err := kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}.Komut(ctx, "tar", "-x",
+		"--no-same-owner", "--no-same-permissions", "-f", "-", "-C", hedefYol)
 	if err != nil {
 		return nil, err
 	}

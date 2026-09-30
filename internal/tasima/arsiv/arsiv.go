@@ -24,7 +24,8 @@
 //   - gzip/bzip2 süreç içinde (Go); xz/zstd alt süreçte, panel root ise nobody
 //     kimliğinde, bellek sınırlı, yalnız stdin → stdout.
 //   - Yazma: `runuser -u <sk> -- tar -x --no-same-owner --no-same-permissions -f - -C
-//     <kök>`; kök ev dizinine çapalı, symlink izlenmeden hazırlanır (evalti).
+//     <kök>` (kiraci.Komut); kök ev dizinine çapalı, symlink izlenmeden hazırlanır
+//     (evalti).
 //
 // Paket tasima'yı import etmez (tasima → arsiv tek yönlü).
 package arsiv

@@ -1,60 +1,49 @@
 // Package evalti: kiracı ev dizinine (<EvKoku>/<sk>) çapalı, yol boyunca symlink
-// İZLEMEYEN root dosya işlemleri ve kiracı kimliğinde komut hazırlama.
+// İZLEMEYEN root dosya işlemleri.
 //
-// Kaynak desenler paket içine kapalı olduğundan dışa açık ortak yaprak olarak buraya
-// alındı (o paketlere bu işte dokunulmadı):
-//   - laravel/runner.go evAltiAc + evAltiMkdirHepsi: openat2(RESOLVE_BENEATH|
-//     RESOLVE_NO_SYMLINKS), Mkdirat + fd üzerinden Fchown/Fchmod, ad takası savunması;
-//   - sitekopya.kiraciKomut (archivex.runuserKomut, git.kiraciCalistir ailesi): runuser,
-//     shell yok, panel ortamı yok, iptalde SIGTERM.
+// Kaynak desen paket içine kapalı olduğundan dışa açık ortak yaprak olarak buraya
+// alındı (o pakete bu işte dokunulmadı): laravel/runner.go evAltiAc +
+// evAltiMkdirHepsi: openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS), Mkdirat + fd
+// üzerinden Fchown/Fchmod, ad takası savunması.
 //
 // Farklar: göreli yoldaki ".." bileşeni kökte sessizce kırpılmaz, REDDEDİLİR; kiracı
-// adı her giriş noktasında dar doğrulanır; boş argv reddedilir (runuser argv'siz kabuk açar).
+// adı her giriş noktasında dar doğrulanır (kiraci.GecerliSK).
+//
+// Kiracı kimliğinde komut bu paketin işi DEĞİLDİR: tek runuser sarmalayıcısı
+// kiraci.Komut'tur.
 package evalti
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"os/user"
-	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
+
+	"girginospanel/internal/kiraci"
 )
 
 // EvKoku: kiracı ev dizinlerinin kökü. Yalnız testler t.TempDir ile değiştirir.
-var EvKoku = "/home"
+var EvKoku = kiraci.EvKoku
 
 // OSKullanici: sk → komutun koşacağı ve kimliği çözülen işletim sistemi kullanıcısı.
 // Üretimde birebir; testler ayrıcalıksız "nobody" ile değiştirir (sitekopya deseni).
 var OSKullanici = func(sk string) string { return sk }
 
-// reSK: panelin açtığı sistem kullanıcıları (c_<slug>[n]; provisioner gecerliSKAdi
-// alfabesi, en çok 32 karakter). Yol bileşenine ve runuser argv'sine girer → dar doğrula.
-var reSK = regexp.MustCompile(`^c_[a-z0-9_]{1,30}$`)
-
-var errSK = errors.New("geçersiz kiracı kullanıcısı")
-
-// GecerliSK: sk panelin açtığı biçimde bir kiracı sistem kullanıcısı mı?
-func GecerliSK(sk string) bool { return reSK.MatchString(sk) }
-
 // EvDizini: <EvKoku>/<sk>; sk geçersizse hata.
 func EvDizini(sk string) (string, error) {
-	if !GecerliSK(sk) {
-		return "", errSK
+	if !kiraci.GecerliSK(sk) {
+		return "", kiraci.ErrSK
 	}
 	return EvKoku + "/" + sk, nil
 }
 
 // Kimlik: kiracının uid/gid'i.
 func Kimlik(sk string) (uid, gid int, err error) {
-	if !GecerliSK(sk) {
-		return 0, 0, errSK
+	if !kiraci.GecerliSK(sk) {
+		return 0, 0, kiraci.ErrSK
 	}
 	u, err := user.Lookup(OSKullanici(sk))
 	if err != nil {
@@ -190,29 +179,4 @@ func MkdirHepsi(home, rel string, uid, gid int, mode uint32) error {
 	}
 	unix.Close(fd)
 	return nil
-}
-
-// kiraciPATH: kiracı komutlarının arama yolu (panelin PATH'i ve ortamı taşınmaz).
-const kiraciPATH = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-// KiraciKomut: argv'yi KİRACI kimliğinde (runuser -u sk; shell yok, panel ortamı ve
-// sırları yok) çalıştıracak komutu hazırlar; Stdin/Stdout/Stderr'i çağıran bağlar.
-// Kiracı olarak koşmak symlink hilelerini yapısal olarak kapatır: çözülen bağ komşu
-// evi ya da /etc'yi gösterse bile yazım EACCES alır; dosyalar doğrudan kiracıya ait
-// oluşur ve disk kotası kiracıya işler. runuser SIGTERM'i çocuğa iletir (SIGKILL'i
-// iletemez) → iptalde önce TERM; çocuk takılırsa WaitDelay sonunda Go süreci öldürür.
-func KiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
-	ev, err := EvDizini(sk)
-	if err != nil {
-		return nil, err
-	}
-	if len(argv) == 0 || argv[0] == "" {
-		return nil, errors.New("boş komut")
-	}
-	cmd := exec.CommandContext(ctx, "runuser", append([]string{"-u", OSKullanici(sk), "--"}, argv...)...)
-	cmd.Env = []string{kiraciPATH, "HOME=" + ev, "LANG=C"}
-	cmd.Dir = "/"
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = 15 * time.Second
-	return cmd, nil
 }
