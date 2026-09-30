@@ -147,8 +147,9 @@ func ftpDurum(ctx context.Context, db *sql.DB, id int64, askida bool) error {
 // her adımı yeniden uygular, zarar vermez.
 //
 // Sıra: DB durumu → ana vhost (ilk adım; düşerse DB eski hâline döner, hiçbir
-// şey değişmemiştir) → kalan adımlar. Kalan adımlardan biri düşerse ötekiler
-// yine uygulanır ve KismiHata döner (güvenli taraf: hesap askıda sayılır).
+// şey değişmemiştir — bayi zincirinin askıya alması hariç, bkz. aşağısı) →
+// kalan adımlar. Kalan adımlardan biri düşerse ötekiler yine uygulanır ve
+// KismiHata döner (güvenli taraf: hesap askıda sayılır).
 func (a Adimlar) Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak string) (string, error) {
 	var alanAdi, sk, surum, eskiKaynak string
 	var isDemo, eskiAskida int
@@ -178,6 +179,15 @@ func (a Adimlar) Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, 
 	}
 	// 1) Ana vhost — askı durumunu DB'den okur (tek kaynak).
 	if err := a.AnaVhost(db, id); err != nil {
+		if askida && kaynak == KaynakBayi {
+			// 🔴 Bayi zinciri GERİ ALMAZ (zincirin önceki davranışı): bayi
+			// askıdayken hosting tek tek askıya alınamaz (ErrBayiAskida), geri
+			// alınsaydı askıdaki bayinin altında yayında site kalırdı. Güvenli
+			// taraf: hesap askıda sayılır, kalan adımlar uygulanır; ana vhost bir
+			// sonraki başarılı render'da 503 olur.
+			hatalar := append([]error{fmt.Errorf("ana vhost: %w", err)}, a.kapat(ctx, db, id, sk, surum)...)
+			return alanAdi, &KismiHata{Askida: true, Hatalar: hatalar}
+		}
 		// DB ile nginx ayrışmasın: render eski dosyayı geri koydu, DB de dönsün.
 		_ = durumYaz(ctx, db, id, eskiAskida == 1, eskiKaynak)
 		return alanAdi, &VhostHatasi{Err: err}

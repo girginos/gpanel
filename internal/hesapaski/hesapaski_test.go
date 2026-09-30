@@ -351,3 +351,27 @@ func TestBayiUygula_TekYoldan(t *testing.T) {
 		t.Fatalf("elle askıya alınan açılmamalı: %+v", d)
 	}
 }
+
+// Bayi zincirinde ana vhost düşerse hesap GERİ ALINMAZ: askıdaki bayinin altında
+// yayında site kalmaz (tek tek askıya alma bayi askıdayken kapalıdır); kalan
+// adımlar uygulanır, başarısız sayılır; bayi geri açılınca zincir onu da açar.
+func TestBayiUygula_AnaVhostHatasi_AskidaKalir(t *testing.T) {
+	db := ha_db(t)
+	k := &ha_kayit{db: db, hata: map[string]error{"ana": errors.New("nginx -t başarısız")}}
+	a := k.adimlar(t)
+	ctx := context.Background()
+	ok, hatali, err := a.BayiUygula(ctx, db, 7, true)
+	if err != nil || ok != 0 || hatali != 1 {
+		t.Fatalf("zincir: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{1, "pasif", "bayi", "suspended"}) {
+		t.Fatalf("bayi zincirinde hesap askıda kalmalı: %+v", d)
+	}
+	if !strings.Contains(strings.Join(k.cagri, " "), "php(true)") {
+		t.Fatalf("kalan askı adımları uygulanmalı: %v", k.cagri)
+	}
+	delete(k.hata, "ana")
+	if ok, hatali, err = a.BayiUygula(ctx, db, 7, false); err != nil || ok != 1 || hatali != 0 {
+		t.Fatalf("geri açma: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+}
