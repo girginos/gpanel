@@ -66,103 +66,101 @@ export default function DomainStatsPage() {
   }
   useEffect(yukle, [id])
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
-  if (!o) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!o) return <div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div>
 
   const maxGun = Math.max(1, ...o.gunluk.map(g => g.istek))
   const durumBar: Record<string, string> = { '2xx': 'bg-emerald-500', '3xx': 'bg-sky-500', '4xx': 'bg-amber-500', '5xx': 'bg-rose-500' }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-5xl mx-auto">
-        <Breadcrumb items={[
-          { etiket: cevir('Anasayfa'), href: '/' },
-          { etiket: cevir('Domainler'), href: '/domainler' },
-          { etiket: o.alan_adi, href: `/abonelikler/${id}` },
-          { etiket: cevir('İstatistikler') },
-        ]} />
+    <div>
+      <Breadcrumb items={[
+        { etiket: cevir('Anasayfa'), href: '/' },
+        { etiket: cevir('Domainler'), href: '/domainler' },
+        { etiket: o.alan_adi, href: `/abonelikler/${id}` },
+        { etiket: cevir('İstatistikler') },
+      ]} />
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
-          </div>
-          <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile} className="self-start sm:self-auto shrink-0">{cevir("Yenile")}</Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Trafik İstatistikleri")}</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1"><span className="font-mono">{o.alan_adi}</span> {cevir("— nginx erişim günlüğü analizi.")}</p>
         </div>
-
-        {!o.log_var || o.toplam_istek === 0 ? (
-          <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-10 text-center text-sm text-slate-400">
-            {cevir("Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.")}
-          </div>
-        ) : (
-          <>
-            {/* KPI kartları */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <KPI etiket={cevir("Toplam İstek")} deger={o.toplam_istek.toLocaleString('tr-TR')} renk="indigo" />
-              <KPI etiket={cevir("Bant Kullanımı")} deger={`${o.toplam_bant_mb.toFixed(1)} MB`} renk="sky" />
-              <KPI etiket={cevir("Tekil IP")} deger={o.tekil_ip.toLocaleString('tr-TR')} renk="emerald" />
-              <KPI etiket={cevir("Bot Oranı")} deger={`%${o.bot_orani}`} renk={o.bot_orani >= 50 ? 'rose' : 'violet'} />
-            </div>
-
-            {/* Durum dağılımı */}
-            <Kart baslik={cevir("HTTP Durum Dağılımı")}>
-              <div className="space-y-2">
-                {(['2xx', '3xx', '4xx', '5xx'] as const).map(g => {
-                  const v = o.durum_grup[g] || 0
-                  const oran = o.toplam_istek ? Math.round(v / o.toplam_istek * 100) : 0
-                  return (
-                    <div key={g} className="flex items-center gap-3">
-                      <span className="w-10 text-xs font-mono text-slate-500">{g}</span>
-                      <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-dark-600/50 overflow-hidden">
-                        <div className={`h-full rounded-full ${durumBar[g]}`} style={{ width: Math.max(oran, v > 0 ? 2 : 0) + '%' }} />
-                      </div>
-                      <span className="w-24 text-right text-xs font-mono text-slate-600 dark:text-slate-300">{v.toLocaleString('tr-TR')} <span className="text-slate-400">%{oran}</span></span>
-                    </div>
-                  )
-                })}
-              </div>
-            </Kart>
-
-            {/* Günlük istek (7 gün) */}
-            {o.gunluk.length > 0 && (
-              <Kart baslik={cevir("Günlük İstek (son 7 gün)")}>
-                <div className="flex items-end gap-2 h-32">
-                  {o.gunluk.map(g => (
-                    <div key={g.tarih} className="flex-1 flex flex-col items-center gap-1">
-                      <div className="w-full flex items-end justify-center" style={{ height: '100px' }}>
-                        <div className="w-full max-w-[36px] rounded-t bg-gradient-to-t from-brand-600 to-brand-400" style={{ height: Math.max(4, g.istek / maxGun * 100) + '%' }} title={`${g.istek} ${cevir("istek")}`} />
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono">{g.tarih.split('/')[0]}</span>
-                      <span className="text-[10px] text-slate-600 dark:text-slate-300 font-mono">{g.istek}</span>
-                    </div>
-                  ))}
-                </div>
-              </Kart>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Kart baslik={cevir("En Çok İstenen Yollar")}>
-                <Tablo rows={o.top_yollar} birim={cevir("istek")} mono />
-              </Kart>
-              <Kart baslik={cevir("En Aktif IP'ler")}>
-                <Tablo rows={o.top_ip} birim={cevir("istek")} mono />
-              </Kart>
-            </div>
-
-            <Kart baslik={cevir("Son İstekler")}>
-              <div className="font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
-                {o.son_istekler.map((s, i) => {
-                  const kod = s.slice(0, 3)
-                  const renk = kod[0] === '5' ? 'text-rose-500' : kod[0] === '4' ? 'text-amber-500' : kod[0] === '3' ? 'text-sky-500' : 'text-emerald-500'
-                  return <div key={i} className="truncate"><span className={renk}>{kod}</span><span className="text-slate-500 dark:text-slate-400">{s.slice(3)}</span></div>
-                })}
-              </div>
-            </Kart>
-          </>
-        )}
-
-        <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
+        <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile} className="self-start sm:self-auto shrink-0">{cevir("Yenile")}</Button>
       </div>
+
+      {!o.log_var || o.toplam_istek === 0 ? (
+        <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-10 text-center text-sm text-slate-400">
+          {cevir("Henüz erişim günlüğü verisi yok. Site trafik almaya başladığında burada görünür.")}
+        </div>
+      ) : (
+        <>
+          {/* KPI kartları */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <KPI etiket={cevir("Toplam İstek")} deger={o.toplam_istek.toLocaleString('tr-TR')} renk="indigo" />
+            <KPI etiket={cevir("Bant Kullanımı")} deger={`${o.toplam_bant_mb.toFixed(1)} MB`} renk="sky" />
+            <KPI etiket={cevir("Tekil IP")} deger={o.tekil_ip.toLocaleString('tr-TR')} renk="emerald" />
+            <KPI etiket={cevir("Bot Oranı")} deger={`%${o.bot_orani}`} renk={o.bot_orani >= 50 ? 'rose' : 'violet'} />
+          </div>
+
+          {/* Durum dağılımı */}
+          <Kart baslik={cevir("HTTP Durum Dağılımı")}>
+            <div className="space-y-2">
+              {(['2xx', '3xx', '4xx', '5xx'] as const).map(g => {
+                const v = o.durum_grup[g] || 0
+                const oran = o.toplam_istek ? Math.round(v / o.toplam_istek * 100) : 0
+                return (
+                  <div key={g} className="flex items-center gap-3">
+                    <span className="w-10 text-xs font-mono text-slate-500">{g}</span>
+                    <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-dark-600/50 overflow-hidden">
+                      <div className={`h-full rounded-full ${durumBar[g]}`} style={{ width: Math.max(oran, v > 0 ? 2 : 0) + '%' }} />
+                    </div>
+                    <span className="w-24 text-right text-xs font-mono text-slate-600 dark:text-slate-300">{v.toLocaleString('tr-TR')} <span className="text-slate-400">%{oran}</span></span>
+                  </div>
+                )
+              })}
+            </div>
+          </Kart>
+
+          {/* Günlük istek (7 gün) */}
+          {o.gunluk.length > 0 && (
+            <Kart baslik={cevir("Günlük İstek (son 7 gün)")}>
+              <div className="flex items-end gap-2 h-32">
+                {o.gunluk.map(g => (
+                  <div key={g.tarih} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex items-end justify-center" style={{ height: '100px' }}>
+                      <div className="w-full max-w-[36px] rounded-t bg-gradient-to-t from-brand-600 to-brand-400" style={{ height: Math.max(4, g.istek / maxGun * 100) + '%' }} title={`${g.istek} ${cevir("istek")}`} />
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">{g.tarih.split('/')[0]}</span>
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-mono">{g.istek}</span>
+                  </div>
+                ))}
+              </div>
+            </Kart>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Kart baslik={cevir("En Çok İstenen Yollar")}>
+              <Tablo rows={o.top_yollar} birim={cevir("istek")} mono />
+            </Kart>
+            <Kart baslik={cevir("En Aktif IP'ler")}>
+              <Tablo rows={o.top_ip} birim={cevir("istek")} mono />
+            </Kart>
+          </div>
+
+          <Kart baslik={cevir("Son İstekler")}>
+            <div className="font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
+              {o.son_istekler.map((s, i) => {
+                const kod = s.slice(0, 3)
+                const renk = kod[0] === '5' ? 'text-rose-500' : kod[0] === '4' ? 'text-amber-500' : kod[0] === '3' ? 'text-sky-500' : 'text-emerald-500'
+                return <div key={i} className="truncate"><span className={renk}>{kod}</span><span className="text-slate-500 dark:text-slate-400">{s.slice(3)}</span></div>
+              })}
+            </div>
+          </Kart>
+        </>
+      )}
+
+      <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
     </div>
   )
 }
