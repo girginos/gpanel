@@ -201,11 +201,56 @@ func TestHesapAskida_AltAlanYenidenKur_503(t *testing.T) {
 	db := ha_db(t)
 	ha_dikisler(t)
 	sid := ha_altEkle(t, db, "magaza")
+	// apache arka uçlu alt alan: askıda httpd vhost'u da kaldırılır.
+	apache := subApachePath(ha_sk, "magaza")
+	if err := os.WriteFile(apache, []byte("<VirtualHost 127.0.0.1:10080>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ha_askiya(t, db, 1)
 	if err := rebuildVhostDB(context.Background(), db, sid, ha_sk, "magaza", "magaza."+ha_alan, "8.3"); err != nil {
 		t.Fatalf("yeniden kurma: %v", err)
 	}
 	ha_askiVhostu(t, ha_conf(t, "magaza"), "magaza."+ha_alan)
+	if _, err := os.Stat(apache); err == nil {
+		t.Fatal("askıda alt alanın apache arka ucu kaldırılmalı")
+	}
+}
+
+// Askı durumu okunamazsa alt alan vhost'una DOKUNULMAZ (ne açar ne kapatır).
+func TestHesapAskida_DurumOkunamazsa_AltVhostaDokunmaz(t *testing.T) {
+	db := ha_db(t)
+	ha_dikisler(t)
+	sid := ha_altEkle(t, db, "arsiv")
+	ha_askiya(t, db, 1)
+	if err := rebuildVhostDB(context.Background(), db, sid, ha_sk, "arsiv", "arsiv."+ha_alan, "8.3"); err != nil {
+		t.Fatal(err)
+	}
+	once := ha_conf(t, "arsiv")
+	_ = db.Close()
+	if err := rebuildVhostDB(context.Background(), db, sid, ha_sk, "arsiv", "arsiv."+ha_alan, "8.3"); err == nil {
+		t.Fatal("askı durumu okunamazken hata beklenirdi")
+	}
+	if ha_conf(t, "arsiv") != once {
+		t.Fatal("askı durumu okunamazken vhost değişmemeli")
+	}
+}
+
+// Hesap askısı adımı: hesabın TÜM alt alan adları tek üreticiden kurulur; alt
+// alan PHP havuz adları hesaba aittir.
+func TestHesapAskida_TumAltAlanlar(t *testing.T) {
+	db := ha_db(t)
+	ha_dikisler(t)
+	s1, s2 := ha_altEkle(t, db, "bir"), ha_altEkle(t, db, "iki")
+	ha_askiya(t, db, 1)
+	if err := AltAlanVhostlariniYenidenKur(context.Background(), db, ha_domID); err != nil {
+		t.Fatal(err)
+	}
+	ha_askiVhostu(t, ha_conf(t, "bir"), "bir."+ha_alan)
+	ha_askiVhostu(t, ha_conf(t, "iki"), "iki."+ha_alan)
+	adlar, err := AltAlanHavuzAdlari(context.Background(), db, ha_domID, ha_sk)
+	if err != nil || strings.Join(adlar, ",") != fmt.Sprintf("%s_s%d,%s_s%d", ha_sk, s1, ha_sk, s2) {
+		t.Fatalf("alt alan havuz adları: %v %v", adlar, err)
+	}
 }
 
 // PHP sürümü değişimi askıyı delmez (vhost 503 kalır, alt alan havuzu kurulmaz).
