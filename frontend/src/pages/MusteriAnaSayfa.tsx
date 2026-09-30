@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { SayfaCercevesi } from '@/components/SayfaKabugu'
 import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
 import { useUc } from '@/components/alanpano/useUc'
@@ -40,18 +41,20 @@ const GIZLI_SURE = 24 * 3600 * 1000
 function Iskelet() {
   const blok = 'animate-pulse rounded-lg bg-gray-150 dark:bg-dark-600'
   return (
-    <div className="mx-auto max-w-sayfa px-4 py-6 sm:px-6" aria-busy="true">
-      <span className="sr-only">{cevir('Yükleniyor…')}</span>
-      <div className={`h-11 ${blok}`} />
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className={`h-24 ${blok}`} />
-          ))}
+    <SayfaCercevesi>
+      <div aria-busy="true">
+        <span className="sr-only">{cevir('Yükleniyor…')}</span>
+        <div className={`h-11 ${blok}`} />
+        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className={`h-24 ${blok}`} />
+            ))}
+          </div>
+          <div className={`hidden h-80 lg:block ${blok}`} />
         </div>
-        <div className={`hidden h-80 lg:block ${blok}`} />
       </div>
-    </div>
+    </SayfaCercevesi>
   )
 }
 
@@ -83,13 +86,13 @@ export default function MusteriAnaSayfa() {
     if (domain.yukleniyor || !id) return <Iskelet />
     return (
       <div className="@container/sayfa">
-        <div className="mx-auto max-w-sayfa px-4 py-6 sm:px-6">
+        <SayfaCercevesi>
           <h1 className="sr-only">{cevir('Ana sayfa')}</h1>
           <UyariKutusu ton="tehlike" baslik={cevir('Hesap bilgileri alınamadı')}>
             <p>{domain.hata}</p>
             <YenidenDene uc={domain} className="mt-3" />
           </UyariKutusu>
-        </div>
+        </SayfaCercevesi>
       </div>
     )
   }
@@ -128,34 +131,38 @@ export default function MusteriAnaSayfa() {
       {/* DOM sırası = dar sayfadaki görsel sıra (odak sırası, WCAG 2.4.3): önce bilgi paneli
           ("Hesap özeti"), sonra araçlar. Geniş sayfada ızgara hücreleriyle yer değiştirir:
           araçlar solda, panel sağda. */}
-      <div className="mx-auto flex max-w-sayfa flex-col gap-4 px-4 py-4 @2xl/sayfa:px-6 @2xl/sayfa:py-6 @4xl/sayfa:grid @4xl/sayfa:grid-cols-[minmax(0,1fr)_300px] @4xl/sayfa:items-start @4xl/sayfa:gap-6 @6xl/sayfa:grid-cols-[minmax(0,1fr)_340px]">
-        <aside aria-label={cevir('Hesap bilgileri')} className="min-w-0 @4xl/sayfa:col-start-2 @4xl/sayfa:row-start-1">
-          <BilgiPaneli
-            domainId={domainId}
-            domain={d}
-            kaynak={kaynak}
-            yedekler={yedekler}
-            altlar={altlar}
-            satirlar={satirlar}
-            ssl={ssl}
-            seciliAnahtar={secili}
-            onSec={setSeciliAnahtar}
-            acik={bilgiAcik}
-            setAcik={setBilgiAcik}
-          />
-        </aside>
-        <div className="@container/ana min-w-0 @4xl/sayfa:col-start-1 @4xl/sayfa:row-start-1">
-          <AracIzgarasi
-            domainId={domainId}
-            araclar={araclar}
-            mailAskida={mailKurulu && !mailAktif}
-            satirlar={satirlar}
-            seciliAnahtar={secili}
-            onSec={setSeciliAnahtar}
-            sistemKullanici={d.sistem_kullanici}
-          />
+      {/* Gövde ortak kabukta (SayfaCercevesi: genişlik + dolgu, viewport kırılımı); ızgara
+          kırılımları sayfa kapsayıcısına (@container/sayfa) göre kalır. */}
+      <SayfaCercevesi>
+        <div className="flex flex-col gap-4 @4xl/sayfa:grid @4xl/sayfa:grid-cols-[minmax(0,1fr)_300px] @4xl/sayfa:items-start @4xl/sayfa:gap-6 @6xl/sayfa:grid-cols-[minmax(0,1fr)_340px]">
+          <aside aria-label={cevir('Hesap bilgileri')} className="min-w-0 @4xl/sayfa:col-start-2 @4xl/sayfa:row-start-1">
+            <BilgiPaneli
+              domainId={domainId}
+              domain={d}
+              kaynak={kaynak}
+              yedekler={yedekler}
+              altlar={altlar}
+              satirlar={satirlar}
+              ssl={ssl}
+              seciliAnahtar={secili}
+              onSec={setSeciliAnahtar}
+              acik={bilgiAcik}
+              setAcik={setBilgiAcik}
+            />
+          </aside>
+          <div className="@container/ana min-w-0 @4xl/sayfa:col-start-1 @4xl/sayfa:row-start-1">
+            <AracIzgarasi
+              domainId={domainId}
+              araclar={araclar}
+              mailAskida={mailKurulu && !mailAktif}
+              satirlar={satirlar}
+              seciliAnahtar={secili}
+              onSec={setSeciliAnahtar}
+              sistemKullanici={d.sistem_kullanici}
+            />
+          </div>
         </div>
-      </div>
+      </SayfaCercevesi>
     </div>
   )
 }

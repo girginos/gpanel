@@ -181,7 +181,8 @@ export default function App() {
               Bayi dalı (BayiOzet) koyu pano değildir: HomePage onu SayfaCercevesi
               ile her panel sayfası gibi kabukta çizer.
             • abonelikler/:id müşteri dalı (MusteriAnaSayfa): üst çubuğa yapışık tam
-              genişlik uyarı bandı; bant içeriği ve sayfa max-w-sayfa ile ortalanır.
+              genişlik uyarı bandı (bant içeriği max-w-sayfa + kabukla aynı dolgu);
+              sayfa gövdesi, iskelet ve hata durumu SayfaCercevesi ile kabukta çizilir.
               Yönetici/bayi dalı AbonelikSayfasi içinde SayfaCercevesi ile sarılır.
             Panel dışı tam ekranlar (giriş, cPanel giriş, askı) zaten DashboardLayout'a
             hiç girmez. */}
