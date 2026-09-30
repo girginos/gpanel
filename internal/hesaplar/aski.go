@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 )
 
 // ErrHesapAskida: hesap askıdayken hesabı yeniden çalışır hâle getirebilecek bir
@@ -50,26 +51,35 @@ func HesapAskida(ctx context.Context, db *sql.DB, sk string) (bool, error) {
 // kilitler (ALTER USER … ACCOUNT LOCK; MariaDB ≥ 10.4.2) ve açık oturumlarını
 // düşürür; kilit=false iken kilidi açar. İdempotenttir.
 //
-// Kapsam yalnız db_accounts'ta BU domaine kayıtlı kullanıcılardır. Sistem/servis
-// hesabı (SistemDBHesabiMi) ya da başka bir domaine de kayıtlı kullanıcı
-// (kullaniciYalnizBuDomainde) ASLA kilitlenmez/açılmaz: komşu kiracının ya da
-// sunucu servisinin veritabanı erişimi askıdan etkilenmemeli. Böyle bir satır
-// hata olarak raporlanır (sessiz atlama yok).
+// Kapsam db_accounts'ta BU domaine kayıtlı kullanıcılardır; her kullanıcının
+// MariaDB'deki TÜM hesapları (host'ları) işlenir. db_accounts.db_host'a
+// GÜVENİLMEZ: yedekten dönüş arşivdeki host'u aynen kullanır ('%', '127.0.0.1'
+// …; bkz. kaynaklimit mysqlUserHosts) — yalnız kayıtlı host'u kilitlemek öteki
+// host'tan bağlantıyı açık bırakırdı. Sistem/servis hesabı (SistemDBHesabiMi)
+// ya da başka bir domaine de kayıtlı kullanıcı (kullaniciYalnizBuDomainde)
+// ASLA kilitlenmez/açılmaz: komşu kiracının ya da sunucu servisinin veritabanı
+// erişimi askıdan etkilenmemeli. Kilitlerken böyle bir satır hata olarak
+// raporlanır (sessiz atlama yok: o kullanıcı açık kaldı). Açarken yalnız
+// günlüğe yazılır: onu hiç kilitlemedik, hata askıdan almayı yarım bırakıp hesabı
+// yeniden askıya alırdı (hesap hiç açılamazdı).
+//
+// Kullanıcısı boş satırlar (geri yüklemenin "kullanıcı/parola tanımlayın" diye
+// yeniden kaydettiği DB) atlanır: kilitlenecek hesap yoktur. MariaDB'de hiçbir
+// host'ta bulunmayan kullanıcı da bağlanamaz → kilitlenecek bir şey yoktur.
 func DBKullanicilariKilit(db *sql.DB, domainID int64, kilit bool) error {
 	rows, err := db.Query(
-		`SELECT DISTINCT db_user, COALESCE(NULLIF(db_host,''),'localhost') FROM db_accounts WHERE domain_id=?`, domainID)
+		`SELECT DISTINCT db_user FROM db_accounts WHERE domain_id=? AND db_user<>''`, domainID)
 	if err != nil {
 		return fmt.Errorf("veritabanı kullanıcıları okunamadı: %w", err)
 	}
-	type hesap struct{ kul, host string }
-	var liste []hesap
+	var liste []string
 	for rows.Next() {
-		var h hesap
-		if err := rows.Scan(&h.kul, &h.host); err != nil {
+		var kul string
+		if err := rows.Scan(&kul); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("veritabanı kullanıcıları okunamadı: %w", err)
 		}
-		liste = append(liste, h)
+		liste = append(liste, kul)
 	}
 	okumaHatasi := rows.Err()
 	_ = rows.Close()
@@ -83,28 +93,66 @@ func DBKullanicilariKilit(db *sql.DB, domainID int64, kilit bool) error {
 		eylem = "LOCK"
 	}
 	var hatalar []error
-	for _, h := range liste {
-		if !GecerliDBKimlik(h.kul) || !reDBHost.MatchString(h.host) || SistemDBHesabiMi(h.kul) {
-			hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: güvenlik: işlenemez ad", h.kul))
-			continue
-		}
-		if err := kullaniciYalnizBuDomainde(db, domainID, h.kul); err != nil {
-			hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: %w", h.kul, err))
-			continue
-		}
-		// Ad GecerliDBKimlik'ten, host reDBHost'tan geçti: tırnak/ters bölü yok → SQLi yok.
-		hesapAdi := fmt.Sprintf("'%s'@'%s'", h.kul, h.host)
-		if err := mysqlCalistir(fmt.Sprintf("ALTER USER IF EXISTS %s ACCOUNT %s;", hesapAdi, eylem)); err != nil {
-			hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: %w", h.kul, err))
-			continue
-		}
+	reddet := func(kul string, err error) {
 		if kilit {
-			// Kilit yalnız YENİ bağlantıyı keser; açık oturumu düşür. Oturum
-			// yoksa hata; bu durumda kilit zaten uygulanmıştır → yalnız günlük.
-			if err := mysqlCalistir(fmt.Sprintf("KILL USER %s;", hesapAdi)); err != nil {
-				log.Printf("askı: veritabanı kullanıcısı %q oturumları düşürülemedi: %v", h.kul, err)
+			hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: %w", kul, err))
+			return
+		}
+		log.Printf("askıdan alma: veritabanı kullanıcısı %q atlandı (askıda kilitlenmemişti): %v", kul, err)
+	}
+	for _, kul := range liste {
+		if !GecerliDBKimlik(kul) || SistemDBHesabiMi(kul) {
+			reddet(kul, errors.New("güvenlik: işlenemez ad"))
+			continue
+		}
+		if err := kullaniciYalnizBuDomainde(db, domainID, kul); err != nil {
+			reddet(kul, err)
+			continue
+		}
+		hostlar, err := dbHesapHostlari(kul)
+		if err != nil {
+			hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: %w", kul, err))
+			continue
+		}
+		for _, host := range hostlar {
+			if !reDBHost.MatchString(host) {
+				hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: güvenlik: işlenemez host", kul))
+				continue
+			}
+			// Ad GecerliDBKimlik'ten geçti; host reDBHost'tan geçti ve sqlKac ile
+			// kaçışlı (kacisModu) → SQLi yok. IF EXISTS YOK: hesap az önce
+			// mysql.user'dan okundu; ALTER başarısızsa hata döner (kilitlenmeyen
+			// hesap "kilitlendi" sayılmaz).
+			hesapAdi := fmt.Sprintf("'%s'@'%s'", kul, sqlKac(host))
+			if err := mysqlCalistir(kacisModu, fmt.Sprintf("ALTER USER %s ACCOUNT %s;", hesapAdi, eylem)); err != nil {
+				hatalar = append(hatalar, fmt.Errorf("veritabanı kullanıcısı %q: %w", kul, err))
+				continue
+			}
+			if kilit {
+				// Kilit yalnız YENİ bağlantıyı keser; açık oturumu düşür. Oturum
+				// yoksa hata; bu durumda kilit zaten uygulanmıştır → yalnız günlük.
+				if err := mysqlCalistir(kacisModu, fmt.Sprintf("KILL USER %s;", hesapAdi)); err != nil {
+					log.Printf("askı: veritabanı kullanıcısı %q oturumları düşürülemedi: %v", kul, err)
+				}
 			}
 		}
 	}
 	return errors.Join(hatalar...)
+}
+
+// dbHesapHostlari — kul adının MariaDB'deki TÜM hesaplarının host'ları.
+// Ad GecerliDBKimlik'ten geçmiş olmalı; sqlKac + kacisModu ile kaçışlı.
+func dbHesapHostlari(kul string) ([]string, error) {
+	out, err := mysqlKomut("-N", "-B", "-r", "-e", kacisModu+
+		" SELECT Host FROM mysql.user WHERE User='"+sqlKac(kul)+"'").Output()
+	if err != nil {
+		return nil, fmt.Errorf("MariaDB hesapları okunamadı: %w", err)
+	}
+	var hostlar []string
+	for _, s := range strings.Split(string(out), "\n") {
+		if s = strings.TrimSpace(s); s != "" {
+			hostlar = append(hostlar, s)
+		}
+	}
+	return hostlar, nil
 }

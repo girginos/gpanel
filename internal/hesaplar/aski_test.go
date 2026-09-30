@@ -52,8 +52,13 @@ func ha_baglan(soket, kul, parola string) (*sql.DB, error) {
 
 func ha_kilitli(t *testing.T, kok *sql.DB, kul string) bool {
 	t.Helper()
+	return ha_kilitliHost(t, kok, kul, "localhost")
+}
+
+func ha_kilitliHost(t *testing.T, kok *sql.DB, kul, host string) bool {
+	t.Helper()
 	var v string
-	if err := kok.QueryRow("SHOW CREATE USER '" + kul + "'@'localhost'").Scan(&v); err != nil {
+	if err := kok.QueryRow("SHOW CREATE USER '" + kul + "'@'" + host + "'").Scan(&v); err != nil {
 		t.Fatalf("%s kilit durumu okunamadı: %v", kul, err)
 	}
 	return strings.HasSuffix(v, " ACCOUNT LOCK")
@@ -137,5 +142,48 @@ func TestDBKullanicilariKilit_PaylasilanVeSistemHesabiDokunulmaz(t *testing.T) {
 	}
 	if ha_kilitli(t, kok, ortak) {
 		t.Fatal("başka domaine de kayıtlı kullanıcı kilitlenmemeli")
+	}
+	// Askıdan alırken aynı satırlar HATA DEĞİL: onları hiç kilitlemedik; hata
+	// askıdan almayı yarım bırakıp hesabı yeniden askıya alırdı (hiç açılamazdı).
+	if err := DBKullanicilariKilit(panel, 7, false); err != nil {
+		t.Fatalf("askıdan almada kilitlenmemiş paylaşılan/sistem hesabı hata olmamalı: %v", err)
+	}
+	if ha_kilitli(t, kok, ortak) {
+		t.Fatal("paylaşılan kullanıcıya askıdan almada da dokunulmamalı")
+	}
+}
+
+// 🔴 db_accounts.db_host'a güvenilmez: yedekten dönüş kullanıcıyı arşivdeki
+// host'ta ('%', '127.0.0.1') oluşturabilir. Kullanıcının MariaDB'deki TÜM
+// hesapları kilitlenir/açılır; kullanıcısı boş satır (geri yüklemenin yeniden
+// kaydı) hata üretmez; MariaDB'de hiç olmayan kullanıcı bağlanamaz → hata yok.
+func TestDBKullanicilariKilit_TumHostlar(t *testing.T) {
+	kok, panel, _ := dk_geciciMariaDB(t)
+	on := fmt.Sprintf("hah%d", time.Now().UnixNano()%1e9)
+	kul, yok := on+"_db", on+"_yok"
+	hostlar := []string{"localhost", "%", "127.0.0.1"}
+	for _, h := range hostlar {
+		dk_exec(t, kok, "CREATE USER '"+kul+"'@'"+h+"' IDENTIFIED BY 'Ha-Parola-12345'")
+		h := h
+		t.Cleanup(func() { _, _ = kok.Exec("DROP USER IF EXISTS '" + kul + "'@'" + h + "'") })
+	}
+	// db_host 'localhost' kayıtlı (varsayılan) — öteki iki host yalnız MariaDB'de.
+	dk_exec(t, panel, `INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (7,?,?,'x'),(7,?,'','') ,(7,?,?,'x')`,
+		on+"_a", kul, on+"_b", on+"_c", yok)
+	if err := DBKullanicilariKilit(panel, 7, true); err != nil {
+		t.Fatalf("kilitleme: %v", err)
+	}
+	for _, h := range hostlar {
+		if !ha_kilitliHost(t, kok, kul, h) {
+			t.Errorf("'%s'@'%s' kilitlenmeli (kullanıcının TÜM hesapları)", kul, h)
+		}
+	}
+	if err := DBKullanicilariKilit(panel, 7, false); err != nil {
+		t.Fatalf("kilit açma: %v", err)
+	}
+	for _, h := range hostlar {
+		if ha_kilitliHost(t, kok, kul, h) {
+			t.Errorf("'%s'@'%s' askıdan alınca açılmalı", kul, h)
+		}
 	}
 }
