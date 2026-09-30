@@ -7,8 +7,11 @@ package tasima
 // Ortam ve yardımcılar: aktar_dosya_test.go.
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -274,14 +277,95 @@ func TestYapilandirma_KiracininDosyasiYenilenir(t *testing.T) {
 	if !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o640 || st.Uid != uint32(o.uid) || st.Nlink != 1 {
 		t.Errorf("yazılan dosya: mod=%v uid=%d nlink=%d", fi.Mode(), st.Uid, st.Nlink)
 	}
-	if y, err := os.ReadFile(filepath.Join(tasimaYedekKok, yrSK, "wp-config.php")); err != nil || string(y) != ozgun {
-		t.Errorf("özgün yapılandırma yedeklenmedi: %q (%v)", y, err)
+	if y := yrYedekler(t); len(y) != 1 || !y[ozgun] {
+		t.Errorf("özgün yapılandırma yedeklenmedi: %v", y)
 	}
 	g, _ := os.ReadDir(ph)
 	for _, e := range g {
 		if strings.HasPrefix(e.Name(), ".gosp_cfg_") {
 			t.Errorf("geçici dosya kaldı: %s", e.Name())
 		}
+	}
+}
+
+// yrYedekler — yapılandırma yedek kökündeki her yedeğin içeriği (adlandırma
+// biçiminden bağımsız).
+func yrYedekler(t *testing.T) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	err := filepath.WalkDir(tasimaYedekKok, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		out[string(b)] = true
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// Yedek adı kiracı + web kökü ile benzersiz: Laravel (public_html/public) belge
+// köklü iki kiracı ve aynı kiracının iki sitesi birbirinin özgün yapılandırma
+// yedeğini EZMEZ (eskiden hepsi "public_html" dizinine düşüyordu).
+func TestYapilandirma_YedekBenzersiz(t *testing.T) {
+	o := yrYeniOrtam(t)
+	webRootlar := []string{
+		filepath.Join(o.ev, "public_html", "public"),
+		filepath.Join(o.ev, "domains", "b.example", "public_html", "public"),
+		filepath.Join(o.base, "c_ikinci", "public_html", "public"),
+	}
+	ozgunler := map[string]bool{}
+	for i, w := range webRootlar {
+		rel, err := filepath.Rel(o.base, w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := o.base
+		for _, b := range strings.Split(rel, string(filepath.Separator)) {
+			if d = filepath.Join(d, b); d != o.ev {
+				o.dizin(t, d)
+			}
+		}
+		ozgun := fmt.Sprintf("<?php\ndefine( 'DB_NAME', 'eski_db' );\n// site %d\n", i)
+		o.dosya(t, filepath.Join(w, "wp-config.php"), ozgun, 0o640)
+		ozgunler[ozgun] = true
+	}
+	for _, w := range webRootlar {
+		if n := (&Handlers{}).configYenidenYaz(w, yrEsleme, "", yrYeniPw, yrLog(t)); n != 1 {
+			t.Fatalf("%s: %d dosya yazıldı, beklenen 1", w, n)
+		}
+	}
+	if y := yrYedekler(t); !reflect.DeepEqual(y, ozgunler) {
+		t.Errorf("yedekler birbirini ezdi: %d yedek, beklenen %d", len(y), len(ozgunler))
+	}
+}
+
+// Yedek yazılamazsa dosya değiştirilmez ve iş günlüğüne (bayiye açılır) panelin
+// yedek yolu sızmaz — ayrıntı yalnız sunucu logunda.
+func TestYapilandirma_YedekHatasiYolSizdirmaz(t *testing.T) {
+	o := yrYeniOrtam(t)
+	yrYaz(t, tasimaYedekKok, "dizin degil", 0o600)
+	ph := filepath.Join(o.ev, "public_html")
+	o.dizin(t, ph)
+	wp := filepath.Join(ph, "wp-config.php")
+	o.dosya(t, wp, "<?php\ndefine( 'DB_NAME', 'eski_db' );\n", 0o640)
+	once := yrOzet(t, ph)
+
+	var gunluk []string
+	kaydet := func(f string, a ...any) { gunluk = append(gunluk, fmt.Sprintf(f, a...)) }
+	if n := (&Handlers{}).configYenidenYaz(ph, yrEsleme, "", yrYeniPw, kaydet); n != 0 {
+		t.Errorf("yedeksiz %d dosya yazıldı", n)
+	}
+	yrOzetKarsilastir(t, "yedeksiz", once, yrOzet(t, ph))
+	metin := strings.Join(gunluk, "\n")
+	if !strings.Contains(metin, "yedegi alinamadi") {
+		t.Errorf("yedek hatası günlüğe yazılmadı: %q", metin)
+	}
+	if strings.Contains(metin, tasimaYedekKok) || strings.Contains(metin, o.base) {
+		t.Errorf("iş günlüğüne panel yolu sızdı: %q", metin)
 	}
 }
 

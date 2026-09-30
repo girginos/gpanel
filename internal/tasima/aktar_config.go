@@ -208,8 +208,8 @@ func (h *Handlers) configYenidenYaz(webRoot string, esleme map[string]dbHedef, k
 		if yeni == string(ham) {
 			return
 		}
-		if err := yedekYaz(webRoot, rel, ham); err != nil {
-			log("uyari: %s yedegi alinamadi, dosya degistirilmedi: %v", rel, err)
+		if yedekYaz(webRoot, rel, ham) != nil {
+			log("uyari: %s yedegi alinamadi, dosya degistirilmedi", rel)
 			return
 		}
 		if err := d.Degistir([]byte(yeni), d.izin()); err == nil {

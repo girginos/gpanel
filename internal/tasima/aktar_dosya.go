@@ -2,6 +2,7 @@ package tasima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -129,6 +130,39 @@ const hazirlikOmru = hesapTimeout + time.Hour
 // lchown — hazırlık alanının sahiplik devri. Testler çağrı SIRASINI kaydeder.
 var lchown = os.Lchown
 
+// Yerleşim adımlarının süre sınırı.
+//
+// 🔴 Yerleşim KİRACI kimliğinde koşar: kiracı kendi sürecini SIGSTOP ile
+// dondurabilir. Tek sınır hesap bağlamı (hesapTimeout) olsaydı tek taşıma yuvası
+// saatlerce dolu kalırdı. Her adım kendi süresiyle kesilir (kiraci.Komut önce
+// SIGTERM, sonra öldürür; donmuş süreci de runuser SIGKILL'le kapatır):
+// sabit taban + boyuta orantılı pay (yerel diskten diske kopyaya göre çok
+// kötümser hız), hesap bağlamının yarısıyla sınırlı.
+const (
+	yerlesimTaban = 10 * time.Minute
+	yerlesimHizi  = 10 << 20 // bayt/sn
+	yerlesimTavan = hesapTimeout / 2
+)
+
+// yerlesimSuresi — bayt büyüklüğündeki içeriğin kiracı adımı için süre. Testler
+// kısaltır.
+var yerlesimSuresi = func(bayt int64) time.Duration {
+	return min(yerlesimTaban+time.Duration(bayt/yerlesimHizi)*time.Second, yerlesimTavan)
+}
+
+var errYerlesimSuresi = errors.New("yerlesim adimi zaman asimina ugradi")
+
+// kiraciAdim — argv'yi kiracı kimliğinde en çok sure boyunca çalıştırır.
+func kiraciAdim(ctx context.Context, sure time.Duration, ki kiraci.Kiraci, argv ...string) error {
+	ctx, iptal := context.WithTimeout(ctx, sure)
+	defer iptal()
+	err := ki.Komut(ctx, argv...).Run()
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errYerlesimSuresi
+	}
+	return err
+}
+
 // dizinAktar — uzak dizini kiracının ev'e göre hedefRel dizinine iki adımda taşır:
 //  1. kök, uzak rsync'i YALNIZ kendisinin erişebildiği yeni iş dizininin
 //     (sarmalayıcı, 0700) içine (hazirlikIcerik) çeker — bu sırada kiracı ya da
@@ -138,6 +172,20 @@ var lchown = os.Lchown
 //     rsync ile hedefe yerleştirilir: kiracının kurduğu bağlar/takaslar
 //     çekirdeğin DAC'ı ile kiracının kendi yetkisine iner; dosyalar doğrudan
 //     kiracıya ait oluşur (chown yok, disk kotası kiracıya işler).
+//
+// 🔴 KOTA TEK KAT: devirle birlikte hazırlık içeriği (S bayt, N inode) kiracının
+// kotasına yazılır; kiracı rsync'i aynı içeriği bir kez daha yazsaydı tepe
+// kullanım mevcut+2S olurdu → ~Q/2 üstü siteler EDQUOT ile düşer, yeni hesap geri
+// alınırdı. Bu yüzden yerleşim --remove-source-files ile TAŞIR: her dosya hedefe
+// yazılıp doğrulandıktan sonra hazırlıktan silinir → tepe ≈ mevcut + S + rsync
+// boru hattında uçuştaki içerik (181'de 32 MB'lık 64 dosyada ~7 MB; S'ye değil
+// tamponlara bağlı); boşalan dizinleri iş sonunda hazırlık silinirken kök süpürür.
+// Aynı fs içinde yeniden adlandırma (rename) seçilmedi: yalnız hedef yokken/boşken
+// uygulanır (sağlanan public_html ve üzerine yazma kipinde hedef dolu → yine bu
+// yol gerekir), --no-perms'in yeni dosyalardaki izin süzmesini (umask, özel
+// bitler) atlayıp kaynağın izinlerini aynen kiracı ağacına taşır ve farklı
+// bağlama noktasında EXDEV geri dönüşü ister; tek kod yolu tüm kipleri kapsar,
+// tepe farkı yalnız boru hattındaki birkaç MB'tır.
 //
 // Hedefte SİLME yapılmaz (üzerine yazma modunda hedef canlı sitedir); var olan
 // dosyaların izni korunur (--no-perms). Döner: kaynaktan aktarılan bayt,
@@ -160,15 +208,16 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 		return bayt, atlanan, fmt.Errorf("hazirlik alani kiraciya devredilemedi")
 	}
 	// Kiracı olarak: bağlı/erişilemez bir ara bileşen EACCES verir, kök izlemez.
-	if err := ki.Komut(ctx, "mkdir", "-p", "-m", "0750", "--", hedef).Run(); err != nil {
+	if err := kiraciAdim(ctx, yerlesimTaban, ki, "mkdir", "-p", "-m", "0750", "--", hedef); err != nil {
 		return bayt, atlanan, fmt.Errorf("hedef dizin olusturulamadi")
 	}
 	// Hata metnine yalnız çıkış kodu girer (stderr panel yollarını içerir).
-	if err := ki.Komut(ctx, "rsync", "-a", "--no-perms", "--no-owner", "--no-group",
-		icerik+"/", hedef+"/").Run(); err != nil {
+	sure := yerlesimSuresi(bayt)
+	if err := kiraciAdim(ctx, sure, ki, "rsync", "-a", "--no-perms", "--no-owner", "--no-group",
+		"--remove-source-files", icerik+"/", hedef+"/"); err != nil {
 		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (rsync: %v)", err)
 	}
-	_ = ki.Komut(ctx, "restorecon", "-R", hedef).Run()
+	_ = kiraciAdim(ctx, sure, ki, "restorecon", "-R", hedef)
 	return bayt, atlanan, nil
 }
 
@@ -218,7 +267,9 @@ func hazirlikSupur(simdi time.Time) {
 // disk/bellek erişimi demektir (kaynak rsync -a ile yaratabilir). Kalan
 // girdilerin (dizin/dosya/bağ, içerik dizininin kendisi dahil) sahipliği bağ
 // İZLENMEDEN kiracıya geçer; kaynaktan gelen uid'ler böylece silinir.
-// Döner: silinen özel dosya sayısı.
+// Sahibin okuyamadığı modlar (0000 dosya, u+x'siz dizin) devirden önce sahibe
+// açılır (hazirlikSahibeAc): aksi halde kiracı rsync'i okuyamayıp 23 ile çıkar,
+// kalem düşer. Döner: silinen özel dosya sayısı.
 func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 	fi, err := os.Lstat(sarmalayici)
 	if err != nil {
@@ -233,12 +284,21 @@ func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 		if err != nil {
 			return err
 		}
-		if t := d.Type(); t.IsDir() || t.IsRegular() || t&fs.ModeSymlink != 0 {
-			yollar = append(yollar, p)
-			return nil
+		switch t := d.Type(); {
+		case t.IsDir():
+			// rwx: okuma/geçme + yerleşimin (--remove-source-files) dosya silmesi.
+			err = hazirlikSahibeAc(p, d, 0o700)
+		case t.IsRegular():
+			err = hazirlikSahibeAc(p, d, 0o400)
+		case t&fs.ModeSymlink != 0:
+		default:
+			atlanan++
+			return os.Remove(p)
 		}
-		atlanan++
-		return os.Remove(p)
+		if err == nil {
+			yollar = append(yollar, p)
+		}
+		return err
 	})
 	if err != nil {
 		return atlanan, err
@@ -250,4 +310,20 @@ func hazirlikDevret(sarmalayici string, uid, gid int) (int, error) {
 	}
 	// EN SON: kiracıya kapıyı açan adım (bundan önce içeri giremez).
 	return atlanan, lchown(sarmalayici, uid, gid)
+}
+
+// hazirlikSahibeAc — hazırlıktaki dizin ya da düzenli dosyaya (bağ DEĞİL: tür
+// Lstat'tan) sahibin gerek bitlerini ekler; diğer bitler korunur. Yol tabanlı
+// chmod yalnız sarmalayıcı hâlâ kökün 0700 dizini iken (hazirlikDevret önkoşulu)
+// güvenlidir: başka hiçbir hesap girdiyi bağa çeviremez.
+func hazirlikSahibeAc(p string, d fs.DirEntry, gerek fs.FileMode) error {
+	fi, err := d.Info()
+	if err != nil {
+		return err
+	}
+	m := fi.Mode()
+	if m.Perm()&gerek == gerek {
+		return nil
+	}
+	return os.Chmod(p, m.Perm()|gerek|m&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky))
 }

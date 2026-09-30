@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -109,12 +111,29 @@ func phpParcala(s string) (int, int) {
 // alanı). Testler geçici dizinle değiştirir.
 var tasimaYedekKok = "/var/lib/girginospanel/tasima-yedek"
 
+var errYedek = errors.New("yapilandirma yedegi alinamadi")
+
+// yedekYaz — webRoot altındaki rel yapılandırmasının özgün içeriğini
+// <tasimaYedekKok>/<sk>/<web kökü>/<rel> olarak saklar. Ad kiracı (sk) ve web
+// kökünün ev'e göre yoluyla BENZERSİZDİR (her bileşen PathEscape'li tek dizin
+// adı: "/" içermez, farklı yollar aynı ada düşmez): eskiden yalnız
+// filepath.Base(filepath.Dir(webRoot)) kullanılıyordu → public_html/public
+// (Laravel) belge köklü her kiracı "public_html"a düşüp birbirinin yedeğini
+// eziyordu. Ayrıntılı hata yalnız sunucu loguna yazılır; dönen hata genel
+// metindir (iş günlüğü bayiye açılır, panel yolları sızmaz).
 func yedekYaz(webRoot, rel string, ham []byte) error {
-	dizin := filepath.Join(tasimaYedekKok, filepath.Base(filepath.Dir(webRoot)))
-	if err := os.MkdirAll(dizin, 0o700); err != nil {
-		return err
+	ki, kok, err := kiraciYolu(webRoot)
+	if err == nil {
+		dizin := filepath.Join(tasimaYedekKok, filepath.Base(ki.Ev), url.PathEscape(kok))
+		if err = os.MkdirAll(dizin, 0o700); err == nil {
+			err = os.WriteFile(filepath.Join(dizin, url.PathEscape(rel)), ham, 0o600)
+		}
 	}
-	return os.WriteFile(filepath.Join(dizin, strings.ReplaceAll(rel, "/", "_")), ham, 0o600)
+	if err != nil {
+		log.Printf("tasima: %s yapilandirma yedegi yazilamadi: %v", rel, err)
+		return errYedek
+	}
+	return nil
 }
 
 func uidGid(sk string) (int, int, error) {
