@@ -7,6 +7,7 @@ import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 import DashboardLayout from '@/components/DashboardLayout'
 import KapiGiris from '@/components/KapiGiris'
+import SayfaKabugu, { KabukDisi, SayfaCercevesi } from '@/components/SayfaKabugu'
 const HomePage = lazy(() => import('@/pages/HomePage'))
 const DomainsPage = lazy(() => import('@/pages/DomainsPage'))
 const ResellerlarPage = lazy(() => import('@/pages/ResellerlarPage'))
@@ -121,7 +122,9 @@ function RolKapisi() {
 // 'Anasayfa', logo, rol kapısı yönlendirmesi) müşteride kendiliğinden yeni sayfaya çıkar.
 function AbonelikSayfasi() {
   const musteri = useAuth((s) => s.kullanici?.rol === 'user')
-  return musteri ? <MusteriAnaSayfa /> : <SubscriptionDetailPage />
+  // Rota KabukDisi bloğunda (müşteri ana sayfasının tam genişlik uyarı bandı);
+  // yönetici/bayi görünümü ise her panel sayfası gibi tek kabukta çizilir.
+  return musteri ? <MusteriAnaSayfa /> : <SayfaCercevesi><SubscriptionDetailPage /></SayfaCercevesi>
 }
 
 function BozukMusteriOturumu() {
@@ -171,14 +174,28 @@ export default function App() {
       >
         {/* Rol kapısı: altındaki TÜM rotalar müşteride izin listesinden geçer (yeni rota = varsayılan yasak). */}
         <Route element={<RolKapisi />}>
+        {/* 🔴 KABUK DIŞI (açık istisnalar — sessiz kaçış yok). Tam genişlik ZEMİN
+            kullanan sayfalar; içerik genişliği yine --container-sayfa'dır:
+            • index (HomePage): koyu pano adası (.gp-dash) içerik alanını baştan
+              sona kaplar; içerik dashboard.css'te aynı genişlikte ortalanır.
+            • abonelikler/:id müşteri dalı (MusteriAnaSayfa): üst çubuğa yapışık tam
+              genişlik uyarı bandı; bant içeriği ve sayfa max-w-sayfa ile ortalanır.
+              Yönetici/bayi dalı AbonelikSayfasi içinde SayfaCercevesi ile sarılır.
+            Panel dışı tam ekranlar (giriş, cPanel giriş, askı) zaten DashboardLayout'a
+            hiç girmez. */}
+        <Route element={<KabukDisi />}>
         <Route index                      element={<HomePage />} />
+        <Route path="abonelikler/:id"      element={<AbonelikSayfasi />} />
+        </Route>
+        {/* TEK SAYFA KABUĞU (components/SayfaKabugu): yeni rota BURAYA eklenir ve
+            ortalanmış sabit genişliği kendiliğinden alır. */}
+        <Route element={<SayfaKabugu />}>
         <Route path="domainler"            element={<DomainsPage />} />
         <Route path="bayiler"              element={<ResellerlarPage />} />
         <Route path="denetim"              element={<DenetimPage />} />
         <Route path="bildirimler"         element={<BildirimlerPage />} />
         <Route path="saldiri-zincirleri"  element={<SaldiriZincirleriPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
-        <Route path="abonelikler/:id"      element={<AbonelikSayfasi />} />
         <Route path="abonelikler/:id/baglanti"      element={<DomainConnectionPage />} />
         <Route path="abonelikler/:id/dosyalar"      element={<DomainFilesPage />} />
         <Route path="abonelikler/:id/veritabanlari" element={<DomainDatabasesPage />} />
@@ -265,6 +282,7 @@ export default function App() {
         <Route path="profil"          element={<SettingsPage />} />
         <Route path="parola-degistir" element={<Navigate to="/profil" replace />} />
         <Route path="ayarlar"         element={<Navigate to="/profil" replace />} />
+        </Route>
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

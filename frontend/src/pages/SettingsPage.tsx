@@ -195,7 +195,7 @@ export default function SettingsPage() {
   const secretGruplu = f2Kur ? (f2Kur.secret.match(/.{1,4}/g) || []).join(' ') : ''
 
   return (
-    <div className="px-6 md:px-8 py-6">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Profil ve Tercihler") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Profil ve Tercihler")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">{musteri ? cevir("Hesap bilgileriniz ve panel giriş parolanız.") : cevir("Hesap bilgileriniz, parola, iki adımlı doğrulama ve panel tercihleri.")}</p>

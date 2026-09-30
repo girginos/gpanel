@@ -27,6 +27,10 @@
 
   --ease-elastic: cubic-bezier(0.53, 0.21, 0.29, 0.67);
 
+  /* TEK SAYFA GENİŞLİĞİ (dolgu dahil) → `max-w-sayfa`. Yalnız components/SayfaKabugu
+     ve tam-zemin istisnaları kullanır; sayfa kendi kök max-w'sini yazmaz. */
+  --container-sayfa: 80rem;
+
   /* "this" (buton/aktif renk köprüsü) + yüzeyler */
   --color-this-lighter: var(--this-lighter);
   --color-this-light: var(--this-light);
