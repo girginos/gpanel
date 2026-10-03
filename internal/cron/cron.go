@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -105,13 +104,17 @@ func (h *Handlers) yazmaLookup(r *http.Request) (string, error) {
 	return sk, nil
 }
 
-// crontab path
-func cronPath(sk string) string {
-	return "/var/spool/cron/" + sk
+// read — kiracının panel görev deposu (kök sahipli; bkz. zamanlayici.go).
+func read(sk string) ([]Gorev, error) {
+	if !kiraci.GecerliSK(sk) {
+		return nil, errBad
+	}
+	return okuDosya(depoYolu(sk))
 }
 
-func read(sk string) ([]Gorev, error) {
-	p := cronPath(sk)
+// okuDosya — crontab biçimli dosyayı (panel deposu, askı deposu ya da eski
+// spool) görevlere çevirir; dosya yoksa boş liste.
+func okuDosya(p string) ([]Gorev, error) {
 	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -214,7 +217,8 @@ func looksCron(s string) bool {
 	return true
 }
 
-func write(sk string, list []Gorev) error {
+// metin — görev listesinin depo metni (crontab biçimi: panel geri okur).
+func metin(sk string, list []Gorev) []byte {
 	var buf bytes.Buffer
 	buf.WriteString(bannerLine + "\n")
 	buf.WriteString("# son güncelleme: " + sk + "\n\n")
@@ -237,11 +241,10 @@ func write(sk string, list []Gorev) error {
 			fmt.Fprintf(&buf, "# gosp-meta: %s\n", strings.Join(mp, " "))
 		}
 		if g.Yorum != "" {
-			// 🔴 \r de temizlenir: yorumdan satır kaçışı olmasın (crontab satır enjeksiyonu).
+			// 🔴 \r de temizlenir: yorumdan satır kaçışı olmasın (satır enjeksiyonu).
 			fmt.Fprintf(&buf, "# %s\n", strings.NewReplacer("\n", " ", "\r", " ").Replace(g.Yorum))
 		}
-		// Pasif görev cron satırı '#' ile comment'lenir (crond çalıştırmaz) ama
-		// panel geri okuyabilir (looksCron).
+		// Pasif görev satırı '#' ile comment'lenir; panel geri okuyabilir (looksCron).
 		pre := ""
 		if !g.Etkin {
 			pre = "#"
@@ -249,22 +252,22 @@ func write(sk string, list []Gorev) error {
 		fmt.Fprintf(&buf, "%s%s %s %s %s %s %s\n",
 			pre, g.Dakika, g.Saat, g.Gun, g.Ay, g.Hafta, g.Komut)
 	}
-	p := cronPath(sk)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0600); err != nil {
+	return buf.Bytes()
+}
+
+// write — depoyu yazar ve zamanlayıcı satırlarını (/etc/cron.d) yeniden üretir.
+// Çağıran yazKilit'i tutar.
+func write(sk string, list []Gorev) error {
+	if !kiraci.GecerliSK(sk) {
+		return errBad
+	}
+	if askida(sk) {
+		return errAskida // askı deposu varken etkin depo yaratılmaz
+	}
+	if err := dosyaYaz(depoYolu(sk), metin(sk, list)); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, p); err != nil {
-		return err
-	}
-	_ = os.Chmod(p, 0600)
-	// chown user:user
-	if out, err := exec.Command("chown", sk+":"+sk, p).CombinedOutput(); err != nil {
-		return fmt.Errorf("chown: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	// SELinux context — system_cron_spool_t
-	_, _ = exec.Command("restorecon", p).CombinedOutput()
-	return nil
+	return cronDYaz(sk, list)
 }
 
 func validate(g Gorev) error {
@@ -277,9 +280,12 @@ func validate(g Gorev) error {
 	if len(g.Komut) > maxKomut {
 		return fmt.Errorf("komut çok uzun (max %d)", maxKomut)
 	}
+	// 🔴 Zaman alanları KÖK zamanlayıcı satırına (/etc/cron.d) girer: boşluk ya da
+	// beklenmeyen karakter alan sayısını kaydırıp "root <komut>" enjekte ederdi.
+	// Yalnız cron dilbilgisi (sayı/*/ad, aralık, adım, liste) kabul edilir.
 	for _, f := range []string{g.Dakika, g.Saat, g.Gun, g.Ay, g.Hafta} {
-		if strings.ContainsAny(f, ";|&`\n\r") {
-			return fmt.Errorf("zaman alanlarında geçersiz karakter")
+		if !zamanGecerli(f) {
+			return fmt.Errorf("zaman alanlarında geçersiz değer: %q", f)
 		}
 	}
 	if strings.ContainsAny(g.Komut, "\n\r") {
@@ -425,6 +431,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	yazKilit.Lock()
+	defer yazKilit.Unlock()
 	list, err := read(sk)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -436,7 +444,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	list = append(list, g)
 	if err := write(sk, list); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
+		yazmaHatasi(w, sk, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "idx": len(list) - 1})
@@ -464,6 +472,8 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	yazKilit.Lock()
+	defer yazKilit.Unlock()
 	list, err := read(sk)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -475,7 +485,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	list[idx] = g
 	if err := write(sk, list); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
+		yazmaHatasi(w, sk, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "idx": idx})
@@ -492,6 +502,8 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz index")
 		return
 	}
+	yazKilit.Lock()
+	defer yazKilit.Unlock()
 	list, err := read(sk)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -504,7 +516,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	silinen := list[idx]
 	list = append(list[:idx], list[idx+1:]...)
 	if err := write(sk, list); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "yazma: "+err.Error())
+		yazmaHatasi(w, sk, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": silinen})
@@ -537,13 +549,13 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "index aralık dışında")
 		return
 	}
-	komut := list[idx].Komut
+	g := list[idx]
 
 	// Kiracının görevi istemci 30 sn'de kopunca ÖLDÜRÜLMEZ; söz verilen üst süre
 	// (120 sn) geçerli kalır (kopuk bağlam).
 	ctx, cancel := httpx.KopukBaglam(r, 120*time.Second)
 	defer cancel()
-	out, runErr := kiraciCronCalistir(ctx, sk, komut)
+	out, runErr := kiraciCronCalistir(ctx, sk, g)
 	if errors.Is(runErr, kiraci.ErrKomut) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kiracı kullanıcısı")
 		return
@@ -552,7 +564,7 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 	if len(cikti) > 8192 {
 		cikti = "…(kısaltıldı)\n" + cikti[len(cikti)-8192:]
 	}
-	resp := map[string]any{"ok": runErr == nil, "cikti": cikti, "komut": komut}
+	resp := map[string]any{"ok": runErr == nil, "cikti": cikti, "komut": g.Komut}
 	if runErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			resp["hata"] = "zaman aşımı (120sn) — görev arka planda sürebilir"
@@ -563,15 +575,27 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-// kiraciCronCalistir: kiracının crontab komutunu onun kimliğinde çalıştırır;
-// birleşik çıktı döner. kiraci.Komut: kiracı kimliği + panel ortamı (sırlar) YOK
-// (yalnız PATH/HOME/LANG) — komut kiracının KENDİ kodudur, ortamı okuyabilir.
-// Kabuk burada bilinçli: komut kiracının KENDİ crontab satırıdır.
-// Kiracı olamayacak kullanıcı → kiraci.ErrKomut. Kilit: sir_cocuk_test.go.
-func kiraciCronCalistir(ctx context.Context, sk, komut string) ([]byte, error) {
-	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, "/bin/sh", "-c", komut)
+// kiraciCronCalistir: görevi zamanlayıcının çalıştırdığı biçimde (gorevKomutu:
+// kiracı kimliği, kaynak dilimi, ev dizini, asgari ortam, cron '%' kuralı) ŞİMDİ
+// çalıştırır; birleşik çıktı döner. Panel servisinin cgroup'unda KOŞMAZ: arka
+// plana atılan süreçler de kiracı diliminde kalır. Kilit: sir_cocuk_test.go.
+func kiraciCronCalistir(ctx context.Context, sk string, g Gorev) ([]byte, error) {
+	cmd, err := gorevKomutu(ctx, sk, g)
 	if err != nil {
 		return nil, err
 	}
 	return cmd.CombinedOutput()
+}
+
+// yazmaHatasi — depo/zamanlayıcı yazma hatasının HTTP karşılığı.
+func yazmaHatasi(w http.ResponseWriter, sk string, err error) {
+	switch {
+	case errors.Is(err, errAskida):
+		httpx.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, errBad):
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+	default:
+		log.Printf("cron: %s: yazma: %v", sk, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "zamanlanmış görevler kaydedilemedi")
+	}
 }

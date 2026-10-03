@@ -1,12 +1,12 @@
 package cron
 
-// aski_test.go — hesap askısı: askıdaki hesabın crontab'ı spool dışında
-// saklanır (provisioner.SuspendUserRuntime); panel askıda spool'a yazmaz ve
-// görev çalıştırmaz (409). DB: sahtedb (bellek içi).
+// aski_test.go — hesap askısı: askıdaki hesabın görev deposu askı deposuna
+// taşınır (AskiUygula); panel askıda depoya yazmaz ve görev çalıştırmaz (409).
+// DB: sahtedb (bellek içi).
 //
-// 🔴 Güvenlik: istekler spool'a YAZMA yoluna inemeyecek biçimde kurulur (var
-// olmayan hesap adı → boş liste → dizin dışı/400), kapı bozulsa bile test canlı
-// /var/spool/cron'a dokunmaz.
+// 🔴 Güvenlik: istekler YAZMA yoluna inemeyecek biçimde kurulur (var olmayan
+// hesap adı → boş liste → dizin dışı/400); ayrıca TestMain tüm yolları geçici
+// dizinlere çevirir — test canlı /etc/cron.d ya da depoya dokunamaz.
 
 import (
 	"context"
