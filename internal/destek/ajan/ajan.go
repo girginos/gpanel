@@ -343,7 +343,7 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 
 	kay := &p.Kayit{
 		CihazAnahtari:   p.AcikAnahtarKodla(a.cihaz.Acik),
-		LisansParmakIzi: lisansParmakIzi(),
+		LisansParmakIzi: a.Yap.parmakIzi(),
 		LisansIspati:    base64.RawURLEncoding.EncodeToString(a.Yap.lisansIspati()),
 		PanelSurumu:     PanelSurumu,
 		KatalogOzeti:    p.KatalogOzeti(),

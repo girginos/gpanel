@@ -44,6 +44,8 @@ type Yapilandirma struct {
 	YoklamaZorla bool
 	// LisansIspati: kayit.lisans_ispati baytları (nil → lisans bileti dosyası).
 	LisansIspati func() []byte
+	// LisansParmakIzi: kayit.lisans_parmak_izi (nil → lisans.Parmakizi; uçtan uca testte sabit).
+	LisansParmakIzi func() string
 	// Hata: dosya okunurken görülen yapılandırma sorunu (arayüzde gösterilir).
 	Hata string
 }
@@ -138,6 +140,14 @@ func (y Yapilandirma) adresler() (ws *url.URL, taban *url.URL, err error) {
 		ws.Scheme = "ws"
 	}
 	return ws, taban, nil
+}
+
+// parmakIzi: kayit.lisans_parmak_izi.
+func (y Yapilandirma) parmakIzi() string {
+	if y.LisansParmakIzi != nil {
+		return y.LisansParmakIzi()
+	}
+	return lisansParmakIzi()
 }
 
 // lisansIspati: kayit.lisans_ispati. Varsayılan: lisans sunucusunun imzalı çalışma

@@ -25,6 +25,7 @@ import (
 
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/maske"
+	"girginospanel/internal/monitor"
 )
 
 // Yurutucu — ajanın (internal/destek/ajan) çağırdığı arayüz.
@@ -75,6 +76,34 @@ type yurutucu struct {
 // maskelenecek panel sırları (JWT sırrı, DB DSN/parolası, Redis yönetici parolası).
 func Yeni(db *sql.DB, router http.Handler, panelSirlari []string) Yurutucu {
 	return yeni(db, router, panelSirlari, varsayilanOrtam())
+}
+
+// Dikisler — dış dünya dikişleri: uçtan uca testler (internal/destek/e2e) gerçek
+// yürütücüyü kök komutu / runuser / ağ yoklaması çalıştırmadan sürsün diye. nil
+// alan gerçek uygulamayı kullanır. Üretim kodu Yeni'yi çağırır; bunu ÇAĞIRMAZ.
+type Dikisler struct {
+	Komut       func(ctx context.Context, argv ...string) ([]byte, error)
+	KiraciKomut func(ctx context.Context, sk string, argv ...string) ([]byte, error)
+	Yokla       func(hedefURL string) monitor.DomainHealth
+	Dig         func(ctx context.Context, sunucu, ad, tur string) ([]string, error)
+}
+
+// YeniDikisli — Yeni ile aynı yürütücü; yalnız dış dünya dikişleri değiştirilmiş.
+func YeniDikisli(db *sql.DB, router http.Handler, panelSirlari []string, d Dikisler) Yurutucu {
+	o := varsayilanOrtam()
+	if d.Komut != nil {
+		o.komut = d.Komut
+	}
+	if d.KiraciKomut != nil {
+		o.kiraciKomut = d.KiraciKomut
+	}
+	if d.Yokla != nil {
+		o.yokla = d.Yokla
+	}
+	if d.Dig != nil {
+		o.dig = d.Dig
+	}
+	return yeni(db, router, panelSirlari, o)
 }
 
 func yeni(db *sql.DB, router http.Handler, panelSirlari []string, o ortam) *yurutucu {
