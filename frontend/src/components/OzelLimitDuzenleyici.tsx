@@ -141,15 +141,17 @@ export default function OzelLimitDuzenleyici({ domainId, veri, mailAktif, onDegi
   const [hata, setHata] = useState<string | null>(null)
   useEffect(() => { setTaslak(taslakKur(veri.alanlar)) }, [veri])
 
-  const gorunen = useMemo(() => veri.alanlar.filter(a => !GIZLI_ALAN.has(a.ad) && (a.grup !== 'posta' || mailAktif)), [veri, mailAktif])
+  // Kökün iç ayarları (sunucu `ic` işaretler; tek kaynak internal/efektiflimit IcAlan)
+  // bayiye hiç gösterilmez ve gönderilen gövdeye girmez — sunucu gelirse 403 döner.
+  const gorunen = useMemo(() => veri.alanlar.filter(a => !a.ic && !GIZLI_ALAN.has(a.ad) && (a.grup !== 'posta' || mailAktif)), [veri, mailAktif])
   const degisti = useMemo(() => veri.alanlar.some(a => {
     const t = taslak[a.ad]
-    if (!t || a.kilitli) return false
+    if (!t || a.kilitli || a.ic) return false
     const yeniOzel = t.ozel
     if (yeniOzel !== (a.ust !== null)) return true
     return yeniOzel && String(a.ust) !== t.deger.trim()
   }), [veri, taslak])
-  const ozelVar = veri.alanlar.some(a => a.ust !== null && !a.kilitli)
+  const ozelVar = veri.alanlar.some(a => a.ust !== null && !a.kilitli && !a.ic)
 
   function ozelDegis(a: LimitAlan, ozel: boolean) {
     const onceki = taslak[a.ad]
@@ -162,7 +164,7 @@ export default function OzelLimitDuzenleyici({ domainId, veri, mailAktif, onDegi
     const ust: Record<string, number | null> = {}
     for (const a of veri.alanlar) {
       const t = taslak[a.ad]
-      if (!t || a.kilitli || !t.ozel) continue
+      if (!t || a.kilitli || a.ic || !t.ozel) continue
       const s = t.deger.trim()
       const n = Number(s)
       const etiket = cevir(ETIKET[a.ad] || a.ad)

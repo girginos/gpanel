@@ -11,7 +11,8 @@ import { T } from '@/lib/tablo'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
-import { useBayiSinir, alanAcik, havuzDurumu, mbOkunur } from '@/lib/bayiPlan'
+import { useBayiSinir, alanAcik, havuzDurumu, mbOkunur, bayiPlanGovdesi } from '@/lib/bayiPlan'
+import { useRol } from '@/lib/rol'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -37,6 +38,7 @@ type Surum = { surum: string; aciklama?: string }
 
 
 const PKTDET_EN: Record<string, string> = {
+  "Paket sınırları yüklenemedi — sayfayı yenileyip tekrar deneyin.": "Package limits could not be loaded — refresh the page and try again.",
   "Türkçe": "English",
   "Anasayfa": "Home",
   "Genel": "General",
@@ -174,6 +176,7 @@ export default function PaketDetayPage() {
   const sinir = useBayiSinir(sinirNesli)
   const bayi = !!sinir?.bayi
   const acik = (alan: string) => alanAcik(sinir, alan)
+  const bayiRol = useRol() === 'reseller'
 
   const yukleNesli = useRef(0)
   function yukle() {
@@ -204,9 +207,16 @@ export default function PaketDetayPage() {
 
   async function kaydet() {
     if (!plan) return
+    // Bayi: kökün iç alanları gövdeye GİRMEZ (sunucu 403 döner).
+    const govde = bayiPlanGovdesi(sinir, bayiRol, plan)
+    if (!govde) {
+      const m = cevir("Paket sınırları yüklenemedi — sayfayı yenileyip tekrar deneyin.")
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      return
+    }
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
-      await api.put(`/plans/${id}`, plan)
+      await api.put(`/plans/${id}`, govde)
       const iyi = `"${plan.ad}" ${cevir("kaydedildi; değişen limitler atanmış domainlere arka planda uygulanıyor.")}`
       setBasari(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)

@@ -23,6 +23,7 @@ export type LimitAlan = {
   kaynak: LimitKaynak
   gizli?: boolean // değer bu rol için gösterilmez (kökün planı/kilidi)
   kilitli?: boolean // yönetici belirledi — bayi değiştiremez
+  ic?: boolean // kökün iç ayarı (IO/process/governor…) — bayi hiç yazamaz; gövdeye girmez
 }
 
 export type LimitYanit = {
