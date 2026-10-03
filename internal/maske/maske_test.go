@@ -263,6 +263,8 @@ func TestKanarya(t *testing.T) {
 		keyK,
 		"abc " + keyK + " def",
 		sahte("-----END ", "RSA PRIVATE ", "KEY-----") + " sonrası normal",
+		sahte("-----BEGIN ", "EC PRIVATE ", "KEY-----"),
+		"Ymxvaw" + keyK + sahte("-----END ", "EC PRIVATE ", "KEY-----"),
 		"normal satır",
 	}
 	out := KesSatirlar(MaskeleSatirlar(satirlar, Secenek{BilinenSirlar: []string{kanarya}, IPKirp: true, EpostaMaskele: true, EvOnekSoy: true}), 100, 80)
@@ -272,8 +274,8 @@ func TestKanarya(t *testing.T) {
 			t.Errorf("kanarya sızdı (%s):\n%s", yasak, tum)
 		}
 	}
-	if out[len(out)-1] != "normal satır" || !strings.HasSuffix(out[len(out)-2], " sonrası normal") {
-		t.Errorf("blok sonrası satırlar bozuldu: %q", out[len(out)-2:])
+	if out[len(out)-1] != "normal satır" || !strings.HasSuffix(out[10], " sonrası normal") || out[12] != Isaret {
+		t.Errorf("blok sonrası satırlar bozuldu: %q", out[10:])
 	}
 	if len(out) != len(satirlar) {
 		t.Errorf("satır sayısı değişti: %d", len(out))
