@@ -6,6 +6,7 @@ package tasima
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"net/http"
@@ -398,5 +399,35 @@ func TestSSHHataYorumla_BayiYolGostermez(t *testing.T) {
 	kok := &Kaynak{}
 	if got := kok.sshHataYorumla("Host key verification failed"); !strings.Contains(got, kokKnownHosts) {
 		t.Errorf("kök eski yönlendirmeyi görmeli: %q", got)
+	}
+}
+
+// Orijinal DB kimliği yolu (kaynağın wp-config'indeki DÜŞMAN ad/kullanıcı/parola)
+// bayide HİÇ denenmez; kökte denenir. Canlı MariaDB'ye dokunulmaz: yapılandırma
+// okuyucusu ve karar sahte, DB erişilemez bir adrese açıktır (geri dönüş yolu hata
+// verip döner).
+func TestVeritabanlari_BayideOrijinalKimlikYoluKapali(t *testing.T) {
+	eskiS, eskiK, eskiO := sandboxKontrol, configtenDBKimlikOku, orijinalKimlikDene
+	t.Cleanup(func() { sandboxKontrol, configtenDBKimlikOku, orijinalKimlikDene = eskiS, eskiK, eskiO })
+	sandboxKontrol = func() bool { return true }
+	configtenDBKimlikOku = func(string) map[string]dbKimlik {
+		return map[string]dbKimlik{"ahmet_wp": {Kul: "ahmet_u", Pw: "kaynak-pw"}}
+	}
+	cagri := 0
+	orijinalKimlikDene = func(*Handlers, context.Context, int64, string, dbKimlik) bool { cagri++; return false }
+	db, err := sql.Open("mysql", "yok:yok@tcp(127.0.0.1:1)/yok?timeout=1s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	h := &Handlers{DB: db}
+	hs := Hesap{KaynakHesap: "ahmet", DBler: []string{"ahmet_wp"}}
+	_, _, _ = h.veritabanlariniAktar(context.Background(), &Kaynak{}, hs, "c_x", "/nonexistent", Kapsam{RID: 7}, &AktarSonuc{}, func(string, ...any) {})
+	if cagri != 0 {
+		t.Errorf("bayide orijinal kimlik yolu denenmemeli (%d çağrı)", cagri)
+	}
+	_, _, _ = h.veritabanlariniAktar(context.Background(), &Kaynak{}, hs, "c_x", "/nonexistent", Kapsam{}, &AktarSonuc{}, func(string, ...any) {})
+	if cagri != 1 {
+		t.Errorf("kökte orijinal kimlik yolu denenmeli (%d çağrı)", cagri)
 	}
 }

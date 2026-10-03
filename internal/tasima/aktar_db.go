@@ -21,6 +21,16 @@ import (
 
 type dbHedef struct{ Ad, Kul string }
 
+// configtenDBKimlikOku / orijinalKimlikDene — orijinal DB kimliği yolunun girişleri
+// (testler değiştirir: bayide bu yolun HİÇ denenmediği canlı MariaDB'ye dokunmadan
+// sınanır).
+var (
+	configtenDBKimlikOku = configtenDBKimlik
+	orijinalKimlikDene   func(h *Handlers, ctx context.Context, domainID int64, kaynakDB string, orij dbKimlik) bool
+)
+
+func init() { orijinalKimlikDene = (*Handlers).orijinalKimlikKullanilir }
+
 // veritabanlariniAktar — tum kaynak DB'lerini tasir.
 //
 // 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Orijinal
@@ -51,7 +61,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 	// HIC degismez (kullanici config guncellemek zorunda kalmaz) ve ad uzamaz.
 	// Yapilandirmadan okunur; yalniz hedefte ad+kullanici MUSAITSE (cakisma yok)
 	// kullanilir, aksi halde <sk> onekli benzersiz ada + config rewrite'a düsülür.
-	kimlikler := configtenDBKimlik(webRoot)
+	kimlikler := configtenDBKimlikOku(webRoot)
 
 	// 🔴 ORİJİNAL DB KİMLİĞİ YOLU BAYİDE KAPALI: bu yol, kaynağın wp-config'inden
 	// okunan (DÜŞMAN) ad/kullanıcı/parolayı hedefte doğrudan kullanır. Kök için
@@ -69,7 +79,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			continue
 		}
 		// --- ORIJINAL kimlikle taşıma (config degismez) ---
-		if orij, ok := kimlikler[kaynakDB]; orijIzin && ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
+		if orij, ok := kimlikler[kaynakDB]; orijIzin && ok && orijinalKimlikDene(h, ctx, sonuc.DomainID, kaynakDB, orij) {
 			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
 				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
 			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
