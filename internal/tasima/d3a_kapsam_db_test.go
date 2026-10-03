@@ -746,3 +746,31 @@ func TestD3_CalistirBayiGunlukSuzgeci(t *testing.T) {
 		}
 	}
 }
+
+// isYukle: satır bozulsa/ele geçirilse de bayi işi bayinin kendi hesabına yürür
+// (sahip eşlemesi yalnız kök işinde); kök işinin sunucu eşlemesi kuyrukta korunur.
+func TestD3_IsYukle_KapsamSatirdan(t *testing.T) {
+	o := d3Kur(t)
+	bozuk := `{"reseller_id":9,"customer_id":5,"sahipleri_tasi":true,"ustune":true,"plan_id":3,"sahip_esle":{"src":{"r":9,"c":5}}}`
+	for _, c := range []struct {
+		rid int64
+	}{{7}, {0}} {
+		res := o.exec(t, `INSERT INTO tasima_isleri (kaynak_tip, kaynak_host, durum, sahip_rid, ayarlar, kaynak_parola)
+			VALUES ('plesk','93.184.216.34','kuyrukta',?,?,?)`, c.rid, bozuk, kimlikSifrele("pw-x", kimlikBaglam(Kapsam{RID: c.rid}, "93.184.216.34")))
+		id, _ := res.LastInsertId()
+		k, ay, kp, err := o.h.isYukle(id)
+		if err != nil {
+			t.Fatalf("rid %d: %v", c.rid, err)
+		}
+		if k.Parola != "pw-x" || kp.RID != c.rid {
+			t.Errorf("rid %d: kimlik kapsam bağlamıyla çözülmeli: %q %+v", c.rid, k.Parola, kp)
+		}
+		if c.rid > 0 {
+			if ay.ResellerID != 7 || ay.CustomerID != 0 || ay.SahipleriTasi || ay.Ustune || ay.SahipEsle != nil {
+				t.Errorf("bayi işi satırdaki sahip alanlarını yok saymalı: %+v", ay)
+			}
+		} else if ay.SahipEsle["src"].ResellerID != 9 || ay.ResellerID != 9 {
+			t.Errorf("kök işinin sunucu eşlemesi korunmalı: %+v", ay)
+		}
+	}
+}
