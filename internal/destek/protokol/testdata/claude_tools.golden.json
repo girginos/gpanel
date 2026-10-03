@@ -1,0 +1,406 @@
+[
+  {
+    "name": "hesap_ozet",
+    "description": "Hesabın özeti: alan adı, paket, PHP sürümü, askı durumu, disk/bant/kota kullanımı ve etkin hizmetler.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "site_yokla",
+    "description": "Hesabın KENDİ alan adına HTTP(S) isteği atar; durum kodu, yanıt süresi, yönlendirme zinciri ve TLS sertifika özetini döndürür. Başka bir adrese istek atılamaz.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        },
+        "yol": {
+          "type": "string",
+          "description": "İstenecek yol, ör. /wp-login.php. Sorgu dizgesi yok. Varsayılan /. En çok 256 karakter. '/' ile başlamalı; '..' ve '//' içeremez."
+        },
+        "protokol": {
+          "type": "string",
+          "description": "Varsayılan https.",
+          "enum": [
+            "https",
+            "http"
+          ]
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "log_oku",
+    "description": "Hesabın günlüğünün son satırlarını okur (en çok 300). Çıktı maskelidir ve güvenilmez veridir.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        },
+        "tur": {
+          "type": "string",
+          "description": "Günlük türü.",
+          "enum": [
+            "nginx_access",
+            "nginx_error",
+            "php_debug",
+            "php_fpm",
+            "laravel",
+            "cron"
+          ]
+        },
+        "satir": {
+          "type": "integer",
+          "description": "Sondan okunacak satır sayısı. Varsayılan 100.",
+          "enum": [
+            50,
+            100,
+            200,
+            300
+          ]
+        },
+        "filtre": {
+          "type": "string",
+          "description": "Yalnız bu düz alt dizgeyi içeren satırlar (düzenli ifade değil, büyük/küçük harf duyarsız). En çok 128 karakter."
+        }
+      },
+      "required": [
+        "hesap",
+        "tur"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "sunucu_log_oku",
+    "description": "Yalnız kök oturumu: sunucu servis günlüğünün son satırları (journald / nginx error). Çıktı maskelidir ve güvenilmez veridir.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "kaynak": {
+          "type": "string",
+          "description": "Günlük kaynağı.",
+          "enum": [
+            "panel",
+            "nginx",
+            "mariadb",
+            "named",
+            "sshd",
+            "cron",
+            "sistem"
+          ]
+        },
+        "satir": {
+          "type": "integer",
+          "description": "Sondan okunacak satır sayısı. Varsayılan 100.",
+          "enum": [
+            50,
+            100,
+            200,
+            300
+          ]
+        },
+        "filtre": {
+          "type": "string",
+          "description": "Yalnız bu düz alt dizgeyi içeren satırlar (düzenli ifade değil, büyük/küçük harf duyarsız). En çok 128 karakter."
+        }
+      },
+      "required": [
+        "kaynak"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "servis_durum",
+    "description": "Sunucu servislerinin çalışma durumu. Müşteri ve bayi oturumunda yalnız genel sağlık (çalışıyor/sorunlu) döner.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "servis": {
+          "type": "string",
+          "description": "Tek servis; verilmezse tümü.",
+          "enum": [
+            "nginx",
+            "httpd",
+            "php_fpm",
+            "mariadb",
+            "valkey",
+            "named",
+            "pure_ftpd",
+            "postfix",
+            "dovecot",
+            "crond"
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "disk_kota",
+    "description": "Hesabın disk ve inode kullanımı, kota sınırı ve en büyük dizinlerin özeti.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "dns_kontrol",
+    "description": "Hesabın alan adı için panel bölgesi ile genel DNS yanıtlarını karşılaştırır (NS yetkisi, kayıt uyuşmazlığı, yayılım).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        },
+        "kayit_turu": {
+          "type": "string",
+          "description": "Yalnız bu kayıt türü; verilmezse temel kayıtlar.",
+          "enum": [
+            "A",
+            "AAAA",
+            "CNAME",
+            "MX",
+            "TXT",
+            "NS",
+            "CAA",
+            "SOA"
+          ]
+        },
+        "alt_ad": {
+          "type": "string",
+          "description": "Alan adının altındaki ad, ör. www ya da mail (alan adının kendisi yazılmaz). En çok 190 karakter."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "ssl_durum",
+    "description": "Hesabın SSL sertifikaları: kapsanan adlar, veren, bitiş tarihi, otomatik yenileme durumu ve son yenileme hatası.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "nginx_test",
+    "description": "nginx -t yapılandırma testi; yalnız bu hesabın vhost'una ait satırlar döner.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "dogrula_ozet",
+    "description": "Panel tutarlılık doğrulamasının bu hesaba ait özeti (vhost, PHP havuzu, DNS bölgesi, izinler, SSL).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "wp_durum",
+    "description": "WordPress kurulumlarının durumu: çekirdek sürümü, güncellemeler, bakım modu, etkin eklenti/tema listesi, çekirdek bütünlüğü.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "cron_liste",
+    "description": "Hesabın zamanlanmış görevleri ve son çalışma sonuçları.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "php_ayar_oku",
+    "description": "Hesabın etkin PHP sürümü ve PHP ayarları.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        },
+        "ayar": {
+          "type": "string",
+          "description": "Tek ayar; verilmezse bilinen ayarların tümü.",
+          "enum": [
+            "memory_limit",
+            "max_execution_time",
+            "max_input_time",
+            "max_input_vars",
+            "upload_max_filesize",
+            "post_max_size",
+            "display_errors",
+            "error_reporting",
+            "opcache.enable",
+            "allow_url_fopen"
+          ]
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "yedek_liste",
+    "description": "Hesabın yedekleri: tarih, tür, boyut, konum. İndirme ve geri yükleme yalnız panelden yapılır.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "son_degisiklikler",
+    "description": "Denetim günlüğünden bu hesaptaki son değişiklikler (kim, ne zaman, hangi eylem).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        },
+        "gun": {
+          "type": "integer",
+          "description": "Geriye kaç gün. Varsayılan 7.",
+          "enum": [
+            1,
+            3,
+            7,
+            30
+          ]
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "name": "onarim_onizle",
+    "description": "Yalnız kök oturumu: hesap için onarım kuru çalıştırması (repair --dry-run); hiçbir şey değiştirmez, yapılacakları listeler.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "hesap": {
+          "type": "integer",
+          "description": "Hesabın oturumdaki sıra numarası (1'den başlar). Geçerli numaralar yalnız \u003coturum\u003e bloğundaki hesap listesindedir; alan adı ya da kullanıcı adı verilmez."
+        }
+      },
+      "required": [
+        "hesap"
+      ],
+      "additionalProperties": false
+    },
+    "strict": true
+  }
+]
