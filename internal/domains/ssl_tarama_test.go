@@ -44,13 +44,28 @@ func TestSertifikaYoluGuvenli(t *testing.T) {
 	if sertifikaYoluGuvenli(d) {
 		t.Error("dizin reddedilmeli")
 	}
-	// /home altına çıkan sembolik bağlantı reddedilir (hedef var olmasa da: EvalSymlinks düşer).
-	b := filepath.Join(d, "bag.crt")
-	if err := os.Symlink("/home/c_kiraci/sahte.crt", b); err != nil {
+	// Kiracı köküne (gerçekte /home) çıkan sembolik bağlantı reddedilir — hedef VAR olsa da.
+	eski := sertifikaYasakKok
+	t.Cleanup(func() { sertifikaYasakKok = eski })
+	ev := filepath.Join(d, "home")
+	if err := os.MkdirAll(filepath.Join(ev, "c_kiraci"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if sertifikaYoluGuvenli(b) {
-		t.Error("/home'a çıkan bağlantı reddedilmeli")
+	sertifikaYasakKok = ev
+	kiraci := filepath.Join(ev, "c_kiraci", "sahte.crt")
+	sslt_sertifika(t, kiraci, time.Now().Add(time.Hour))
+	b := filepath.Join(d, "bag.crt")
+	if err := os.Symlink(kiraci, b); err != nil {
+		t.Fatal(err)
+	}
+	if sertifikaYoluGuvenli(b) || sertifikaYoluGuvenli(kiraci) {
+		t.Error("kiracı köküne çıkan yol/bağlantı reddedilmeli")
+	}
+	// Var olan dosyaya göreli yol da reddedilir (yalnız mutlak).
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, c); err == nil && sertifikaYoluGuvenli(rel) {
+			t.Error("göreli yol reddedilmeli")
+		}
 	}
 	_, bitis, _ := sertifikaGercek(c, "", time.Time{})
 	if kalan := time.Until(bitis); kalan < 4*24*time.Hour || kalan > 6*24*time.Hour {

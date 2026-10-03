@@ -25,6 +25,10 @@ import (
 // sertifikaMaxBayt — okunacak en büyük sertifika dosyası (zincir dahil bol bol yeter).
 const sertifikaMaxBayt = 256 << 10
 
+// sertifikaYasakKok — kiracının yazabildiği kök: çözülmüş yol buranın altındaysa
+// okunmaz (test geçici dizinle değiştirir).
+var sertifikaYasakKok = "/home"
+
 // sertifikaYoluGuvenli — okunabilir sertifika yolu mu (mutlak, çözülmüş hali
 // /home altında değil, normal dosya, boyut sınırı içinde).
 func sertifikaYoluGuvenli(yol string) bool {
@@ -35,7 +39,7 @@ func sertifikaYoluGuvenli(yol string) bool {
 	if err != nil || !filepath.IsAbs(gercek) {
 		return false
 	}
-	if gercek == "/home" || strings.HasPrefix(gercek, "/home/") {
+	if gercek == sertifikaYasakKok || strings.HasPrefix(gercek, sertifikaYasakKok+"/") {
 		return false
 	}
 	fi, err := os.Stat(gercek)
