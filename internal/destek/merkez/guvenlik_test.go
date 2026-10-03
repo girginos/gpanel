@@ -590,3 +590,19 @@ func TestDosyaDepoKalicilikVeBudama(t *testing.T) {
 		t.Fatalf("durum.json izni %o", fi.Mode().Perm())
 	}
 }
+
+// Başka sunucunun ajanı mevcut bir bağlantıyı (kapsam/rol) değiştiremez ya da iptal edemez.
+func TestBaskaSunucuBaglantiyiDegistiremez(t *testing.T) {
+	o := yeniOrtam(t, nil)
+	a1 := sahteAjanBagla(t, o, nil)
+	a2 := sahteAjanBagla(t, o, nil)
+	b := o.baglantiEkle(t, tTg, a1.Sunucu, protokol.RolMusteri, "ornek.com.tr")
+	a2.gonder(&protokol.BaglantiDurum{BaglantiID: b.BaglantiID, TgUserID: tTg, Durum: protokol.BaglantiEtkin,
+		Rol: protokol.RolKok, Duzey: protokol.DuzeyTam, Hesaplar: []protokol.HesapEtiketi{{Sira: 1, Etiket: "kurban.com"}}})
+	a2.gonder(&protokol.BaglantiIptal{BaglantiID: b.BaglantiID, Neden: protokol.IptalMerkez})
+	bekle(t, func() bool { a2.mu.Lock(); defer a2.mu.Unlock(); return len(a2.hatalar) >= 2 })
+	g, ok := o.depo.BaglantiAl(b.BaglantiID)
+	if !ok || g.SunucuKimligi != a1.Sunucu || g.Rol != protokol.RolMusteri || g.Hesaplar[0].Etiket != "ornek.com.tr" {
+		t.Fatalf("bağlantı başka sunucuca değiştirildi: %+v", g)
+	}
+}
