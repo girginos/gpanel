@@ -345,6 +345,10 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	}
 
 	// ── İptal: bayi yabancı anahtarı iptal edemez (404); kök bayi anahtarını edebilir ──
+	// Depo katmanı ikinci kilit: sahip koşullu iptal yabancı satıra DOKUNMAZ.
+	if degisti, err := apianahtar.Iptal(t.Context(), db, b.Kayit.ID, 7, 7, "deneme", time.Now().Unix()); err != nil || degisti {
+		t.Fatalf("depo: sahip koşullu iptal yabancı anahtarı etkiledi: %v %v", degisti, err)
+	}
 	if s := ucIstek(t, h, "DELETE", fmt.Sprintf("/api/v1/api-anahtarlari/%d", b.Kayit.ID), jA, nil); s.kod != 404 {
 		t.Fatalf("IDOR: bayi A, B'nin anahtarını iptal: %d %s", s.kod, s.govde)
 	}
