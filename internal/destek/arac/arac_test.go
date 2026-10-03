@@ -76,3 +76,37 @@ func TestAnsiSoy(t *testing.T) {
 		t.Fatalf("%q", g)
 	}
 }
+
+// TestSonucKurSinirlar — protokol sınırları ve maske araçtan BAĞIMSIZ olarak
+// sonucKur'da zorlanır (bir araç süzgeçsiz binlerce satır dönse de).
+func TestSonucKurSinirlar(t *testing.T) {
+	const sir = "PanelSirri-Birim-Testi-987654"
+	y := yeni(nil, nil, []string{sir}, ortam{})
+	var sat []string
+	for i := 0; i < 1000; i++ {
+		sat = append(sat, strings.Repeat("x", 5000)+" "+sir)
+	}
+	r := y.sonucKur("ABCDEFGH", &cikti{ozet: strings.Repeat("ö", 3000) + sir + "\n\x1b[31m", satirlar: sat})
+	if !r.Ok || r.Dogrula() != nil {
+		t.Fatalf("sonuç: %+v %v", r.HataKodu, r.Dogrula())
+	}
+	if len(r.Satirlar) != protokol.SatirSayisiSiniri || !r.Kesildi {
+		t.Fatalf("satır sınırı: %d %v", len(r.Satirlar), r.Kesildi)
+	}
+	for _, s := range r.Satirlar {
+		if len(s) > protokol.SatirSiniri {
+			t.Fatalf("satır bayt sınırı: %d", len(s))
+		}
+	}
+	if len(r.Ozet) > protokol.OzetSiniri {
+		t.Fatalf("özet sınırı: %d", len(r.Ozet))
+	}
+	r = y.sonucKur("ABCDEFGH", &cikti{ozet: "özet " + sir + " DB_PASSWORD=abcdefgh123", satirlar: []string{"satır " + sir}})
+	if strings.Contains(r.Ozet+strings.Join(r.Satirlar, ""), sir) || strings.Contains(r.Ozet, "abcdefgh123") {
+		t.Fatalf("özet/satır maskelenmedi: %q %q", r.Ozet, r.Satirlar)
+	}
+	h := y.hataSonucu("ABCDEFGH", hataf(protokol.HataYetki, "ret "+sir))
+	if h.Ok || h.HataKodu != protokol.HataYetki || strings.Contains(h.Ozet, sir) || h.Dogrula() != nil {
+		t.Fatalf("hata sonucu: %+v", h)
+	}
+}

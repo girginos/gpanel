@@ -375,6 +375,9 @@ func TestKapsamBayi(t *testing.T) {
 	beklenenHata(t, "askıdaki bayi", s.calistir(&askida, oturum(protokol.RolBayi, "a.com"), "hesap_ozet", `{"hesap":1}`), protokol.HataYetki)
 	sahteKok := Kimlik{Rol: protokol.RolKok, KullaniciID: 10, HesapIDleri: []int64{102}}
 	beklenenHata(t, "bayi kök taklidi", s.calistir(&sahteKok, oturum(protokol.RolKok, "b.com"), "hesap_ozet", `{"hesap":1}`), protokol.HataYetki)
+	// Rotaya gitmeyen (yalnız DB/komut) araçta da ret: middleware'in ikinci katmanına güvenilmez.
+	beklenenHata(t, "bayi kök taklidi (DB aracı)", s.calistir(&sahteKok, oturum(protokol.RolKok, "b.com"), "son_degisiklikler", `{"hesap":1}`), protokol.HataYetki)
+	beklenenHata(t, "bayi kök taklidi (komut aracı)", s.calistir(&sahteKok, oturum(protokol.RolKok, "b.com"), "nginx_test", `{"hesap":1}`), protokol.HataYetki)
 }
 
 func TestKokYalnizAraclar(t *testing.T) {
@@ -660,7 +663,11 @@ func TestZamanAsimi(t *testing.T) {
 	araclar["nginx_test"] = aracTanim{sure: 50 * time.Millisecond, fn: eski.fn}
 	t.Cleanup(func() { araclar["nginx_test"] = eski })
 	s.komutBekle = true
+	t0 := time.Now()
 	beklenenHata(t, "zaman aşımı", s.calistir(&musteriA, oturum(protokol.RolMusteri, "a.com"), "nginx_test", `{"hesap":1}`), protokol.HataZamanAsimi)
+	if d := time.Since(t0); d > 5*time.Second {
+		t.Fatalf("araç başına zaman aşımı uygulanmadı: %v", d)
+	}
 }
 
 func TestHesapListesi(t *testing.T) {
