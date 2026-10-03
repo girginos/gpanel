@@ -1,9 +1,13 @@
 // Package marka — panelin KENDİ görünen markası (whitelabel).
 //
-// MİMARİ KARARI: core burada hiçbir eklentiyi TANIMAZ. Yalnız sabit bir
-// dosyayı okur; dosya yoksa varsayılan GirginOSPanel markasını döner. Dosyayı
-// yazan taraf `whitelabel` eklentisidir, ama core onun kurulu olup olmadığını
-// bilmez ve umursamaz — kanca jeneriktir.
+// MİMARİ KARARI (D2, 2026-10-03): marka ÇEKİRDEKTEDİR. Eskiden marka.json'u
+// `whitelabel` eklentisi yazıyordu; eklenti emekliye ayrıldı (emekli.go) ve
+// yazma yolu buraya taşındı (yaz.go, yonet.go). Dosya biçimi ve yeri AYNIDIR:
+// eklentinin yazdığı marka.json ve görseller çekirdek tarafından aynen okunur,
+// göç gerektirmez.
+//
+// Katmanlar (cozum.go): kök markası (bu dosya, DB'den bağımsız) → bayi markası
+// (cp_marka, depo.go) → müşteri bayisinin markasını görür.
 //
 // 🔴 NEDEN CORE'DA BİR PUBLIC UÇ VAR (eklenti proxy'si yerine):
 // Marka bilgisini ilk gösteren yer GİRİŞ SAYFASIDIR ve o sayfa kimlik
@@ -32,7 +36,9 @@ import (
 //
 // 🔴 frontend-dist ALTINDA DEĞİL: panel güncellemesi frontend-dist'i yeniden
 // serer; marka orada olsaydı her güncellemede sessizce SIFIRLANIRDI.
-const Kok = "/opt/girginospanel/marka"
+//
+// var (const değil): testler geçici dizine çevirir.
+var Kok = "/opt/girginospanel/marka"
 
 const (
 	AyarDosya = "marka.json"
@@ -84,6 +90,11 @@ type Marka struct {
 	GirisDipnot string `json:"giris_dipnot"`
 	SurumGoster bool   `json:"surum_goster"`
 	DestekURL   string `json:"destek_url"`
+	// Destek iletişimi (D2): bayinin müşterisi sağlayıcısına buradan ulaşır.
+	// Biçimleri katıdır (EpostaGecerli / TelefonGecerli): panelde mailto:/tel:
+	// bağlantısı olur, serbest metin başlık/şema enjeksiyonu taşırdı.
+	DestekEposta  string `json:"destek_eposta"`
+	DestekTelefon string `json:"destek_telefon"`
 
 	// Giriş sayfası bandı: görsel ve/veya metin. İkisi de isteğe bağlı ve
 	// birlikte kullanılabilir (görselin altında duyuru metni).
@@ -278,7 +289,72 @@ func Normalize(m Marka) Marka {
 	if !URLGecerli(m.BannerURL) {
 		m.BannerURL = ""
 	}
+	m.DestekEposta = strings.TrimSpace(m.DestekEposta)
+	if !EpostaGecerli(m.DestekEposta) {
+		m.DestekEposta = ""
+	}
+	m.DestekTelefon = strings.TrimSpace(m.DestekTelefon)
+	if !TelefonGecerli(m.DestekTelefon) {
+		m.DestekTelefon = ""
+	}
 	return m
+}
+
+// EpostaGecerli — destek e-postası. Boş geçerlidir (alan isteğe bağlı).
+//
+// 🔴 mailto: enjeksiyonu: `a@b.c?cc=x&body=...` ya da boşluk/satır sonu
+// taşıyan bir değer panelde tıklanabilir bağlantıya dönüşür; yalnız tek bir
+// yerel@alan biçimi, ASCII ve güvenli karakter kümesi kabul edilir.
+func EpostaGecerli(s string) bool {
+	if s == "" {
+		return true
+	}
+	if len(s) > 254 {
+		return false
+	}
+	at := strings.IndexByte(s, '@')
+	if at <= 0 || at != strings.LastIndexByte(s, '@') || at == len(s)-1 {
+		return false
+	}
+	yerel, alan := s[:at], s[at+1:]
+	if len(yerel) > 64 || !strings.Contains(alan, ".") || strings.HasPrefix(alan, ".") ||
+		strings.HasSuffix(alan, ".") || strings.Contains(alan, "..") {
+		return false
+	}
+	for i := 0; i < len(yerel); i++ {
+		c := yerel[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '.' || c == '_' || c == '-' || c == '+') {
+			return false
+		}
+	}
+	for i := 0; i < len(alan); i++ {
+		c := alan[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// TelefonGecerli — destek telefonu: ^\+?[0-9 ()-]{5,20}$. Boş geçerlidir.
+func TelefonGecerli(s string) bool {
+	if s == "" {
+		return true
+	}
+	if len(s) < 5 || len(s) > 20 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '+' && i == 0 {
+			continue
+		}
+		if !(c >= '0' && c <= '9' || c == ' ' || c == '(' || c == ')' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // metinKirp — kontrol karakterlerini atar, rune sınırına kırpar.
@@ -391,14 +467,17 @@ type genelGorunum struct {
 	BannerSurum  int64  `json:"banner_surum"`
 	BannerMetin  string `json:"banner_metin"`
 	BannerURL    string `json:"banner_url"`
+	// D2 — destek iletişimi + markanın tahmin edilemez anahtarı ("kok" ya da
+	// [a-z2-7]{20}). Anahtar görsel adresini kurar; bayi kimliği (users.id),
+	// izin/durum ve webmail bilgisi bu yapıda YOKTUR (izin listesi testli).
+	DestekEposta  string `json:"destek_eposta"`
+	DestekTelefon string `json:"destek_telefon"`
+	Anahtar       string `json:"anahtar"`
 }
 
-// Handler — GET /api/v1/marka
-func Handler(w http.ResponseWriter, _ *http.Request) {
-	m := Oku()
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_ = json.NewEncoder(w).Encode(genelGorunum{
+// genelYap — Marka → kimliksiz uca dönebilecek alanlar (izin listesi).
+func genelYap(m Marka, anahtar string) genelGorunum {
+	return genelGorunum{
 		PanelAdi: m.PanelAdi, Baslik: m.Baslik, KisaAd: m.KisaAd,
 		VurguRenk: m.VurguRenk, Logo: m.Logo, LogoSurum: m.LogoSurum,
 		Favicon: m.Favicon, FaviconSurum: m.FaviconSurum, Footer: m.Footer,
@@ -406,13 +485,21 @@ func Handler(w http.ResponseWriter, _ *http.Request) {
 		SurumGoster: m.SurumGoster, DestekURL: m.DestekURL,
 		Banner: m.Banner, BannerSurum: m.BannerSurum,
 		BannerMetin: m.BannerMetin, BannerURL: m.BannerURL,
-	})
+		DestekEposta: m.DestekEposta, DestekTelefon: m.DestekTelefon,
+		Anahtar: anahtar,
+	}
+}
+
+// genelYaz — genel görünümü JSON olarak yazar (önbellek başlıkları çağıranın).
+func genelYaz(w http.ResponseWriter, m Marka, anahtar string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(genelYap(m, anahtar))
 }
 
 // LogoHandler — GET /api/v1/marka/logo
 func LogoHandler(w http.ResponseWriter, r *http.Request) {
 	m := Oku()
-	gorselServisEt(w, r, m.Logo, LogoDosya, TipDosya)
+	gorselServisEt(w, r, m.Logo, Kok, LogoDosya, TipDosya)
 }
 
 // FaviconHandler — GET /api/v1/marka/favicon (tarayıcı sekmesi simgesi)
@@ -421,27 +508,30 @@ func LogoHandler(w http.ResponseWriter, r *http.Request) {
 // (boyut, MIME beyaz listesi, önbellek başlıkları) üç görsel için de geçerli.
 func FaviconHandler(w http.ResponseWriter, r *http.Request) {
 	m := Oku()
-	gorselServisEt(w, r, m.Favicon, FaviconDosya, FaviconTip)
+	gorselServisEt(w, r, m.Favicon, Kok, FaviconDosya, FaviconTip)
 }
 
 // BannerHandler — GET /api/v1/marka/banner (giriş sayfası bandı)
 func BannerHandler(w http.ResponseWriter, r *http.Request) {
 	m := Oku()
-	gorselServisEt(w, r, m.Banner, BannerDosya, BannerTip)
+	gorselServisEt(w, r, m.Banner, Kok, BannerDosya, BannerTip)
 }
 
 // gorselServisEt — logo ve bant için ORTAK servis yolu.
 //
 // İki ayrı kopya yazmak, birinde düzeltilen bir güvenlik kontrolünün
 // diğerinde eksik kalmasına açık kapı bırakırdı.
-func gorselServisEt(w http.ResponseWriter, r *http.Request, varMi bool, veriAd, tipAd string) {
-	yol := filepath.Join(Kok, veriAd)
+//
+// dizin: kök için Kok, bayi için Kok/bayi/<anahtar> (anahtar regex'le
+// doğrulanmış olarak gelir; bkz. cozum.go GorselHandler).
+func gorselServisEt(w http.ResponseWriter, r *http.Request, varMi bool, dizin, veriAd, tipAd string) {
+	yol := filepath.Join(dizin, veriAd)
 	fi, err := os.Stat(yol)
 	if !varMi || err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	tip := tipOku(tipAd)
+	tip := tipOkuDiz(dizin, tipAd)
 	// 🔴 SERVİSTE DE DOĞRULA: dosyaya elle dokunulup MIME'ı svg yapılmış
 	// olabilir. Yazma tarafındaki kontrole güvenip burada atlamak, tek bir
 	// dosya düzenlemesini panelde XSS'e çevirirdi.
@@ -488,8 +578,8 @@ func DizinHazirla() error {
 	return os.MkdirAll(Kok, 0o755)
 }
 
-func tipOku(ad string) string {
-	ham, err := os.ReadFile(filepath.Join(Kok, ad))
+func tipOkuDiz(dizin, ad string) string {
+	ham, err := os.ReadFile(filepath.Join(dizin, ad))
 	if err != nil {
 		return ""
 	}

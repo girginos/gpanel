@@ -359,11 +359,13 @@ func main() {
 	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
 	// sunucusuna ulasilamasa bile goruilmelidir.
 	go lisans.ButunlukIzleyici(d)
-	// 🔴 Çekirdek/ücretsiz eklenti (whitelabel) "panelle BİRLİKTE gelir":
-	// payload src/eklentiler'de olduğu halde cp_eklentiler'e kayıtlı DEĞİLSE
-	// otomatik kurulur. Hem taze kurulumu (installer adımı atlanmış olsa bile)
-	// hem güncellemeyi (girginospanel-update installer'ı çalıştırmaz) kapsar.
-	go cekirdekEklentiGuvence(d)
+	// Marka çekirdekte (D2): whitelabel eklentisi emekli — birim durdurulur, kayıt
+	// aktif=0 (dosyalar korunur, geri alınabilir; bkz. marka/emekli.go). Eski
+	// cekirdekEklentiGuvence (eklentiyi oto-kuran) kaldırıldı.
+	go func() {
+		marka.EklentiEmekliyeAyir(context.Background(), d)
+		marka.YetimGorselTemizle(context.Background(), d)
+	}()
 	nginxsetH := &nginxset.Handlers{DB: d}
 	sshH := &sshaccess.Handlers{DB: d, IPv4: ipv4}
 	statH := &istatistik.Handlers{DB: d}
@@ -467,7 +469,7 @@ func main() {
 	})
 
 	// eklenti frontend bundle: nginx yalnizca /api/ proxyler + <script src> JWT tasiyamaz => auth disi
-	r.Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
+	r.With(marka.EmekliKapisi).Get("/api/v1/eklenti-bundle/{ad}/app.js", eklentiH.Bundle)
 
 	// Marka (whitelabel) — AUTH YOK.
 	//
@@ -535,12 +537,31 @@ func main() {
 			tur()
 		}
 	}()
-	r.Get("/api/v1/marka", marka.Handler)
-	r.Get("/api/v1/marka/logo", marka.LogoHandler)
-	r.Get("/api/v1/marka/banner", marka.BannerHandler)
-	r.Get("/api/v1/marka/favicon", marka.FaviconHandler)
+	// Marka rotaları tek yerde (marka/rota.go): kimliksizler /api/v1 içinde
+	// RequireAuth grubunun dışında, yönetim uçları grubun içinde.
+	markaH := &marka.Handlers{DB: d, SunucuIPleri: []string{ipv4}}
+	marka.AdAlaniKanca = func(ctx context.Context, ad string, rid int64) error {
+		if err := domains.AdAlaniDenetle(ctx, d, ad, rid); err != nil {
+			var ae *domains.AdAlaniHatasi
+			if errors.As(err, &ae) {
+				return errors.New(ae.Mesaj(false))
+			}
+			return errors.New("ad alanı denetlenemedi")
+		}
+		return nil
+	}
+	auth.TOTPIssuerKanca = func(r *http.Request) string {
+		if c := middleware.ClaimsFrom(r); c != nil && c.Role == "reseller" {
+			return marka.RIDIcin(r.Context(), d, c.ResellerID).PanelAdi
+		}
+		return marka.Oku().PanelAdi
+	}
+	marka.MusteriAdresKanca = musteriKapiAdresi
+	auth.HostKiraciKanca = markaH.HostKiraciRID
+	musteri.HostKiraciKanca = markaH.HostKiraciRID
 
 	r.Route("/api/v1", func(r chi.Router) {
+		markaH.GenelRotalar(r)
 		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
 		r.With(middleware.GirisLimiti).Post("/auth/login", authH.Login)
 		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
@@ -710,8 +731,13 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/system/cve/log", system.CveLog)
 			r.With(middleware.AdminOnly).Get("/system/kernelcare", system.KernelcareDurumHandler)
 			r.With(middleware.AdminOnly).Post("/system/kernelcare/yamala", system.KernelcareYamala)
-			lisansH.Routes(r)
-			eklentiH.Routes(r)
+			// Emekli eklentinin (whitelabel) proxy/lisans/kurulum yolları 404.
+			r.Group(func(r chi.Router) {
+				r.Use(marka.EmekliKapisi)
+				lisansH.Routes(r)
+				eklentiH.Routes(r)
+			})
+			markaH.KimlikliRotalar(r)
 			r.With(middleware.AdminOnly).Get("/system/processes", monitor.Processes)
 			r.With(middleware.AdminOnly).Get("/system/load-history", monitorH.YukGecmisi)
 			r.With(middleware.AdminOnly).Get("/admin/system/loglar", monitorH.SunucuLog)
@@ -1328,6 +1354,10 @@ func semaDogrula(d *sql.DB) {
 		{"pano_gunluk", "kapsam_id"},
 		{"cp_esik_durum", "seviye"},
 		{"cp_bildirim_tercih", "panel"},
+		// 0122/0123: bayi markası + özel panel alan adı — yoksa /marka/yonet,
+		// bayi markası çözümü ve alan adı uçları 500 verir (kök markası dosyada, etkilenmez).
+		{"cp_marka", "alanadi_izni"},
+		{"cp_marka_alanadi", "dogrulama"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
@@ -1367,36 +1397,4 @@ func detectIPv4() string {
 		}
 	}
 	return ""
-}
-
-// cekirdekEklentiGuvence — çekirdek/ücretsiz eklentileri (whitelabel) panelle
-// birlikte gelmiş sayar: kurulum yordamı tanımlı VE payload mevcut olduğu halde
-// cp_eklentiler'e kaydedilmemişse otomatik kurar. Best-effort — açılışı BLOKLAMAZ,
-// hata panelin çalışmasını engellemez (yalnız loglanır). Idempotent: zaten kayıtlı
-// eklenti tekrar kurulmaz.
-func cekirdekEklentiGuvence(d *sql.DB) {
-	for _, ad := range []string{"whitelabel"} {
-		if !lisans.KurucuVarMi(ad) {
-			continue
-		}
-		// cp_eklentiler migration ile gelir; taze kurulumda tablo henüz
-		// oluşmamış olabilir → hazır olana kadar (en çok ~2 dk) bekle.
-		hazir, kurulu := false, false
-		for i := 0; i < 60; i++ {
-			var n int
-			if err := d.QueryRow(`SELECT COUNT(*) FROM cp_eklentiler WHERE ad = ?`, ad).Scan(&n); err == nil {
-				hazir, kurulu = true, n > 0
-				break
-			}
-			time.Sleep(2 * time.Second)
-		}
-		if !hazir || kurulu {
-			continue
-		}
-		if _, err := lisans.KurulumBaslat(d, ad); err != nil {
-			log.Printf("çekirdek eklenti güvence: %s otomatik kurulamadı: %v", ad, err)
-			continue
-		}
-		log.Printf("çekirdek eklenti güvence: %s otomatik kuruldu (panelle birlikte)", ad)
-	}
 }

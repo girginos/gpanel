@@ -190,9 +190,12 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (EKL_EN[tr] || O
 // bir sayfaya götüren düğme, çalışmayan bir düğmedir.
 const AYAR_YOLU: Record<string, string> = {
   mail: '/mail-sunucu',
-  whitelabel: '/marka',
   tehdit: '/tehdit',
 }
+
+// Emekli eklentiler (D2): marka çekirdekte (/marka). Katalog kaydı lisans
+// paketinde durduğu için burada süzülür; sunucu /eklenti/whitelabel/* yollarını 404'ler.
+const EMEKLI = new Set(['whitelabel'])
 
 function tarih(s: string): string {
   if (!s) return ''
@@ -506,7 +509,7 @@ export default function EklentilerPage() {
     if (!sessiz) setYuk(true)
     return api.get<KatalogYanit>('/eklenti-katalog')
       .then(r => {
-        setKatalog(r.data)
+        setKatalog(r.data ? { ...r.data, urunler: (r.data.urunler || []).filter(u => !EMEKLI.has(u.eklenti_ad) && !EMEKLI.has(u.slug)) } : r.data)
         setHata(null)
         sonHataRef.current = null
       })

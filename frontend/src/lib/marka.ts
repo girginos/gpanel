@@ -1,7 +1,11 @@
 /* Marka (whitelabel) — panelin görünen kimliği.
  *
- * Değerler AUTH DIŞI `/api/v1/marka` ucundan gelir; çünkü ilk gösteren yer
- * GİRİŞ SAYFASIDIR ve o sayfa kimlik doğrulamadan ÖNCE render edilir.
+ * Giriş ÖNCESİ değerler AUTH DIŞI `/api/v1/marka` ucundan gelir (giriş sayfası
+ * kimlik doğrulamadan ÖNCE çizilir). Sunucu Host (bayinin doğrulanmış özel
+ * adresi) > ?m=<anahtar> > kök sırasıyla çözer. `?m=` yalnız müşteri formunda
+ * (/cp) gönderilir ve son değer bu tarayıcıda ipucu olarak saklanır.
+ * Giriş SONRASI marka jetondan gelir (`/marka/oturum`): müşteri bayisinin,
+ * bayi kendi markasını görür (D2).
  *
  * 🔴 MARKA PANELİ BLOKLAMAZ. Uç yavaş/ölü olsa bile panel varsayılan markayla
  * açılır (kısa zaman aşımı + varsayılana düşme). Bir görünüm ayarının,
@@ -14,6 +18,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
+import { useAuth } from '@/store/auth'
 
 export type Marka = {
   panel_adi: string
@@ -36,6 +41,11 @@ export type Marka = {
   banner_surum: number
   banner_metin: string
   banner_url: string
+  /** Destek iletişimi (bayinin müşterisi sağlayıcısına buradan ulaşır). */
+  destek_eposta: string
+  destek_telefon: string
+  /** Görsel adresinin anahtarı: 'kok' ya da 20 karakter tahmin edilemez kısa ad. */
+  anahtar: string
 }
 
 export const VARSAYILAN: Marka = {
@@ -57,6 +67,22 @@ export const VARSAYILAN: Marka = {
   banner_surum: 0,
   banner_metin: '',
   banner_url: '',
+  destek_eposta: '',
+  destek_telefon: '',
+  anahtar: 'kok',
+}
+
+// Anahtar biçimi sunucuyla aynı; başka bir değer URL'ye hiç girmez.
+const ANAHTAR_RE = /^[a-z2-7]{20}$/
+const IPUCU_ANAHTAR = 'gosp_marka_m'
+
+function gorselAnahtar(m: Marka): string {
+  return ANAHTAR_RE.test(m.anahtar || '') ? m.anahtar : 'kok'
+}
+
+/** gorselAdres — markanın bir görsel yuvasının adresi (sürümle önbellek kırılır). */
+export function gorselAdres(m: Marka, yuva: 'logo' | 'banner' | 'favicon', surum: number): string {
+  return `/api/v1/marka/gorsel/${gorselAnahtar(m)}/${yuva}?v=${surum}`
 }
 
 let mevcut: Marka = VARSAYILAN
@@ -91,7 +117,7 @@ export function useMarka(): Marka {
 
 /** logoURL — yüklenmiş logo yoksa null. Sürüm parametresi tarayıcı önbelleğini kırar. */
 export function logoURL(m: Marka = mevcut): string | null {
-  return m.logo ? `/api/v1/marka/logo?v=${m.logo_surum}` : null
+  return m.logo ? gorselAdres(m, 'logo', m.logo_surum) : null
 }
 
 /**
@@ -101,12 +127,12 @@ export function logoURL(m: Marka = mevcut): string | null {
  * düşer (eski davranış korunur).
  */
 export function faviconURL(m: Marka = mevcut): string | null {
-  return m.favicon ? `/api/v1/marka/favicon?v=${m.favicon_surum}` : null
+  return m.favicon ? gorselAdres(m, 'favicon', m.favicon_surum) : null
 }
 
 /** bannerURL — giriş sayfası bandının GÖRSELİ. Yüklenmemişse null. */
 export function bannerURL(m: Marka = mevcut): string | null {
-  return m.banner ? `/api/v1/marka/banner?v=${m.banner_surum}` : null
+  return m.banner ? gorselAdres(m, 'banner', m.banner_surum) : null
 }
 
 /* ── uygulama ─────────────────────────────────────────────────────────── */
@@ -179,24 +205,97 @@ function uygula(m: Marka) {
   })
 }
 
-/** markaYukle — açılışta bir kez. Zaman aşımında sessizce varsayılanda kalır. */
+function ipucuOku(): string {
+  try {
+    const v = localStorage.getItem(IPUCU_ANAHTAR) || ''
+    return ANAHTAR_RE.test(v) ? v : ''
+  } catch {
+    return ''
+  }
+}
+
+function ipucuYaz(v: string) {
+  try {
+    if (ANAHTAR_RE.test(v)) localStorage.setItem(IPUCU_ANAHTAR, v)
+    else if (v === 'kok') localStorage.removeItem(IPUCU_ANAHTAR)
+  } catch {
+    /* depolama kapalı → ipucu yok; marka yine sunucudan çözülür */
+  }
+}
+
+/** genelAdres — giriş öncesi marka ucunun adresi. `?m=` YALNIZ müşteri formunda. */
+function genelAdres(): string {
+  if (typeof window === 'undefined') return '/api/v1/marka'
+  const yol = window.location.pathname
+  const musteriFormu = yol === '/cp' || yol.startsWith('/cp/')
+  const urlM = new URLSearchParams(window.location.search).get('m') || ''
+  if (ANAHTAR_RE.test(urlM) && yol !== '/giris') {
+    ipucuYaz(urlM)
+    return `/api/v1/marka?m=${urlM}`
+  }
+  const ipucu = musteriFormu ? ipucuOku() : ''
+  return ipucu ? `/api/v1/marka?m=${ipucu}` : '/api/v1/marka'
+}
+
+async function getir(adres: string, token?: string): Promise<Partial<Marka> | null> {
+  const kes = new AbortController()
+  const zaman = window.setTimeout(() => kes.abort(), 2000)
+  try {
+    const y = await fetch(adres, {
+      signal: kes.signal,
+      cache: 'no-store',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    if (!y.ok) return null
+    return (await y.json()) as Partial<Marka>
+  } finally {
+    window.clearTimeout(zaman)
+  }
+}
+
+/** markaOturumYukle — oturumun markası (jetondan). Oturum yoksa ya da uç
+ *  yanıt vermezse mevcut marka KALIR. Müşteride bayinin anahtarı, çıkıştan
+ *  sonraki giriş formu için ipucu olarak saklanır. */
+export async function markaOturumYukle(): Promise<void> {
+  const st = useAuth.getState()
+  if (!st.token) return
+  try {
+    const g = await getir('/api/v1/marka/oturum', st.token)
+    if (!g) return
+    uygula({ ...VARSAYILAN, ...g })
+    if (st.kullanici?.rol === 'user' && g.anahtar) ipucuYaz(g.anahtar)
+  } catch {
+    /* sessiz: görünüm ayarı */
+  }
+}
+
+/** markaYukle — açılışta bir kez. Oturum varsa jetonun markası, yoksa giriş
+ *  öncesi marka. Zaman aşımında sessizce varsayılanda kalır. */
 export async function markaYukle(): Promise<void> {
   try {
-    const kes = new AbortController()
-    const zaman = window.setTimeout(() => kes.abort(), 2000)
-    const y = await fetch('/api/v1/marka', { signal: kes.signal, cache: 'no-store' })
-    window.clearTimeout(zaman)
-    if (!y.ok) return
-    const g = (await y.json()) as Partial<Marka>
-    uygula({ ...VARSAYILAN, ...g })
+    if (useAuth.getState().token) {
+      const g = await getir('/api/v1/marka/oturum', useAuth.getState().token as string)
+      if (g) {
+        uygula({ ...VARSAYILAN, ...g })
+        return
+      }
+    }
+    const g = await getir(genelAdres())
+    if (g) uygula({ ...VARSAYILAN, ...g })
   } catch {
     /* ağ/zaman aşımı → varsayılan marka. Panel yine açılır. */
   }
 }
 
-/** markaTazele — eklenti kaydettikten sonra sayfayı yenilemeden güncellemek için. */
+/** markaTazele — marka kaydedildikten sonra sayfayı yenilemeden güncellemek için. */
 export async function markaTazele(): Promise<void> {
   await markaYukle()
+}
+
+/** markaUygula — yönetim ekranının önizlemesi için DEĞİL; kaydedilen markanın
+ *  (sunucu yanıtı) panele hemen yansıması için. */
+export function markaUygula(m: Partial<Marka>) {
+  uygula({ ...VARSAYILAN, ...m })
 }
 
 // Eklenti bundle'i AYRI bir dosyadir; core'un modullerini import edemez. Kaydet

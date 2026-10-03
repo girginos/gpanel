@@ -1,7 +1,7 @@
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useState } from 'react'
-import { useMarka, logoURL } from '@/lib/marka'
+import { useMarka, logoURL, VARSAYILAN as MARKA_VARSAYILAN } from '@/lib/marka'
 import { useTranslation } from 'react-i18next'
 import DilSecici from '@/components/DilSecici'
 import { Ikon, I } from '@/components/Ikon'
@@ -79,13 +79,16 @@ export default function CPanelGirisPage() {
           ) : (
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-lg bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-2xl mb-3"><Ikon d={I.kure} className="h-7 w-7" /></div>
           )}
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t('giris.baslik')}</h1>
+          {/* Giriş metinleri markadan (D2, B2): varsayılan değerde i18n metni kalır. */}
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+            {marka.giris_baslik && marka.giris_baslik !== MARKA_VARSAYILAN.giris_baslik ? marka.giris_baslik : t('giris.baslik')}
+          </h1>
           {/* Panel adi yalniz OZELLESTIRILMISSE yazilir: varsayilan kurulumda
               "GirginOSPanel" satiri sayfaya bilgi katmaz, gurultu olurdu. */}
           {marka.panel_adi !== 'GirginOSPanel' ? (
             <p className="text-sm font-medium text-brand-700 dark:text-brand-300 mt-0.5">{marka.panel_adi}</p>
           ) : null}
-          <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">{t('giris.altbaslik')}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">{marka.giris_alt || t('giris.altbaslik')}</p>
         </div>
 
         <form onSubmit={gir} className="space-y-3">
@@ -106,6 +109,18 @@ export default function CPanelGirisPage() {
             {yuk ? t('ortak.yukleniyor') : t('giris.girisYap')}
           </Button>
         </form>
+        {(marka.giris_dipnot || marka.destek_eposta || marka.destek_telefon || marka.destek_url) && (
+          <div className="mt-5 space-y-1 text-center text-xs text-slate-500 dark:text-slate-400">
+            {marka.giris_dipnot && <p className="break-words">{marka.giris_dipnot}</p>}
+            {(marka.destek_eposta || marka.destek_telefon || marka.destek_url) && (
+              <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                {marka.destek_eposta && <a className="break-all hover:underline" href={'mailto:' + marka.destek_eposta}>{marka.destek_eposta}</a>}
+                {marka.destek_telefon && <a className="hover:underline" href={'tel:' + marka.destek_telefon.replace(/[^+0-9]/g, '')}>{marka.destek_telefon}</a>}
+                {/^https?:\/\//i.test(marka.destek_url) && <a className="break-all hover:underline" href={marka.destek_url} target="_blank" rel="noopener noreferrer">{marka.destek_url.replace(/^https?:\/\//i, '')}</a>}
+              </p>
+            )}
+          </div>
+        )}
         {kapi === 'karma' && (
           <p className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">
             {cevir('Yönetici ya da bayi misiniz?')}{' '}

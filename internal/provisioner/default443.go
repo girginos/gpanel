@@ -6,6 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"unicode"
+
+	"girginospanel/internal/marka"
 )
 
 // ── 443 catch-all ───────────────────────────────────────────────────────────
@@ -44,7 +48,7 @@ func EnsureDefault443() {
 		}
 		out, e := exec.Command("openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048",
 			"-days", "3650", "-keyout", key, "-out", crt,
-			"-subj", "/C=TR/O=GirginOSPanel/CN="+host).CombinedOutput()
+			"-subj", "/C=TR/O="+sertifikaOrg()+"/CN="+host).CombinedOutput()
 		if e != nil {
 			log.Printf("default443: sertifika uretilemedi: %v (%s)", e, out)
 			return
@@ -151,4 +155,20 @@ func sslYokHTML() string {
 </div>
 </body>
 </html>`, markaStil, markaCizim, markaAlt)
+}
+
+// sertifikaOrg — öz imzalı sertifikanın O= alanı KÖK MARKASINDAN (karar 7; bu
+// sertifika sunucu IP'siyle gelen ziyaretçiye görünür). -subj ayrıştırıcısını
+// bozabilecek karakterler ('/', '=', '+', ',' …) atılır; boş kalırsa nötr ad.
+func sertifikaOrg() string {
+	var b strings.Builder
+	for _, c := range marka.Oku().PanelAdi {
+		if c == ' ' || c == '.' || c == '-' || c == '_' || unicode.IsLetter(c) || unicode.IsDigit(c) {
+			b.WriteRune(c)
+		}
+	}
+	if s := strings.TrimSpace(b.String()); s != "" {
+		return s
+	}
+	return "Panel"
 }

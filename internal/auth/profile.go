@@ -175,7 +175,14 @@ func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 	if c := h.claims(r); c != nil && c.Username != "" {
 		kul = c.Username // authenticator uygulamasinda dogru hesap adi gorunsun
 	}
-	uri := TOTPURI(secret, kul, "GirginOSPanel")
+	// Issuer markadan (karar 7): yönetici → kök markası, bayi → kendi markası.
+	issuer := "GirginOSPanel"
+	if TOTPIssuerKanca != nil {
+		if v := strings.TrimSpace(TOTPIssuerKanca(r)); v != "" {
+			issuer = v
+		}
+	}
+	uri := TOTPURI(secret, kul, issuer)
 	resp := map[string]any{
 		"secret":      secret,
 		"otpauth":     uri, // geriye dönük uyum (elle giriş fallback)
