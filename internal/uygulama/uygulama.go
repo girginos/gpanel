@@ -270,24 +270,8 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 	}
 
 	// Çıkarma — runuser -u <sk> (root DEĞİL — security)
-	// kiraciKomut (kiraci.Komut): panel ortamı (sırlar) çıkarıcıya geçmez.
-	var cikarArgv []string
-	switch a.Tarif.IcerikTuru {
-	case "tarball_gz":
-		cikarArgv = []string{"tar", "-xzf", tmpYol, "-C", hedef, "--strip-components=1"}
-	case "tarball_bz2":
-		cikarArgv = []string{"tar", "-xjf", tmpYol, "-C", hedef, "--strip-components=1"}
-	case "zip":
-		cikarArgv = []string{"unzip", "-q", tmpYol, "-d", hedef}
-	default:
-		return nil, fmt.Errorf("icerik_turu: %s", a.Tarif.IcerikTuru)
-	}
-	cikarCmd, err := kiraciKomut(ctx, a.Domain.SK, cikarArgv...)
-	if err != nil {
-		return nil, fmt.Errorf("çıkarma: %w", err)
-	}
-	if out, err := cikarCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("çıkarma: %s (%w)", strings.TrimSpace(string(out)), err)
+	if err := kiraciCikar(ctx, a.Domain.SK, a.Tarif.IcerikTuru, tmpYol, hedef); err != nil {
+		return nil, err
 	}
 
 	// 🔴 ZIP KOK DIZINI: tar icin `--strip-components=1` var ama `unzip`'in
@@ -616,6 +600,31 @@ func tenantKomut(ctx context.Context, sk string, args ...string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %s", args[0], strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// kiraciCikar: indirilen dağıtım arşivini (arsiv) hedef'e KİRACI kimliğinde
+// çıkarır. kiraciKomut (kiraci.Komut): panel ortamı (sırlar) çıkarıcıya geçmez;
+// cmd.Env burada genişletilmez. Kilit: sir_cocuk_test.go.
+func kiraciCikar(ctx context.Context, sk, icerikTuru, arsiv, hedef string) error {
+	var cikarArgv []string
+	switch icerikTuru {
+	case "tarball_gz":
+		cikarArgv = []string{"tar", "-xzf", arsiv, "-C", hedef, "--strip-components=1"}
+	case "tarball_bz2":
+		cikarArgv = []string{"tar", "-xjf", arsiv, "-C", hedef, "--strip-components=1"}
+	case "zip":
+		cikarArgv = []string{"unzip", "-q", arsiv, "-d", hedef}
+	default:
+		return fmt.Errorf("icerik_turu: %s", icerikTuru)
+	}
+	cikarCmd, err := kiraciKomut(ctx, sk, cikarArgv...)
+	if err != nil {
+		return fmt.Errorf("çıkarma: %w", err)
+	}
+	if out, err := cikarCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("çıkarma: %s (%w)", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }

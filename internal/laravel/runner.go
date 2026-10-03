@@ -171,19 +171,11 @@ func tenantExecEnv(ctx context.Context, sk, cwd string, env []string, bin string
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, kisaTimeout)
 	defer cancel()
-	// kiraci.Komut: runuser -u sk -- bin args (kabuk yok), temel ortam PATH/HOME/LANG —
-	// panel ortamı (sırlar) ASLA geçmez; env yalnız bunun üzerine eklenir.
-	cmd, kErr := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, append([]string{bin}, args...)...)
-	if kErr != nil {
+	ham, runErr := tenantCalistir(ctx, sk, real, env, append([]string{bin}, args...)...)
+	if errors.Is(runErr, kiraci.ErrKomut) {
 		return "geçersiz kullanıcı", false
 	}
-	cmd.Dir = real
-	cmd.Env = append(cmd.Env, env...)
-	cmd.Cancel = func() error { return cmd.Process.Kill() }
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, &buf
-	runErr := cmd.Run()
-	out := ansiTemizle(buf.String()) // ANSI renk kodlarını temizle (Laravel --ansi zorlar)
+	out := ansiTemizle(ham) // ANSI renk kodlarını temizle (Laravel --ansi zorlar)
 	if len(out) > ciktiCap {
 		out = out[len(out)-ciktiCap:]
 	}
@@ -191,6 +183,26 @@ func tenantExecEnv(ctx context.Context, sk, cwd string, env []string, bin string
 		return out + "\n\n[zaman aşımı: komut 120sn'de tamamlanmadı, sonlandırıldı]", false
 	}
 	return out, runErr == nil
+}
+
+// tenantCalistir: tenantExecEnv'in süreç çekirdeği — argv'yi kiracı (sk) kimliğinde
+// dir'de çalıştırır, birleşik çıktı döner. kiraci.Komut: runuser -u sk -- argv
+// (kabuk yok), temel ortam PATH/HOME/LANG — panel ortamı (sırlar) ASLA geçmez; env
+// yalnız bunun üzerine eklenir. artisan/composer/npm kiracının KODUNU yükler →
+// ortam burada genişletilmez. Kiracı olamayacak kullanıcı → kiraci.ErrKomut.
+// Doğrulama (gecerliSK, dir kiracı evinde) çağıranın işidir. Kilit: sir_cocuk_test.go.
+func tenantCalistir(ctx context.Context, sk, dir string, env []string, argv ...string) (string, error) {
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+	if err != nil {
+		return "", err
+	}
+	cmd.Dir = dir
+	cmd.Env = append(cmd.Env, env...)
+	cmd.Cancel = func() error { return cmd.Process.Kill() }
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	err = cmd.Run()
+	return buf.String(), err
 }
 
 // systemdRunDetached: uzun tek-seferlik iş (create-project, deploy). Transient unit

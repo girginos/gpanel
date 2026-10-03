@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -127,18 +128,11 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, pkg)
 	}
-	// Guvenlik: kiraci.Komut — kiracı kimliği, kabuk yok, panel sirlari (PANEL_JWT_SECRET,
-	// PANEL_DB_DSN, ...) alt-surece VERILMEZ (yalniz PATH/HOME/LANG + composer ayarlari).
-	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), args...)
-	if err != nil {
+	out, err := kiraciComposer(context.Background(), sk, args...)
+	if errors.Is(err, kiraci.ErrKomut) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kiracı kullanıcısı")
 		return
 	}
-	cmd.Env = append(cmd.Env,
-		"COMPOSER_HOME=/home/"+sk+"/.composer",
-		"COMPOSER_ALLOW_SUPERUSER=0",
-	)
-	out, err := cmd.CombinedOutput()
 	cikti := string(out)
 	if len(cikti) > 20000 {
 		cikti = cikti[len(cikti)-20000:]
@@ -148,4 +142,22 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		"komut": req.Komut,
 		"cikti": cikti,
 	})
+}
+
+// kiraciComposer: composer argv'sini kiracı (sk) kimliğinde çalıştırır; birleşik
+// çıktı döner. Guvenlik: kiraci.Komut — kabuk yok, panel sirlari (PANEL_JWT_SECRET,
+// PANEL_DB_DSN, ...) alt-surece VERILMEZ (yalniz PATH/HOME/LANG + composer ayarlari).
+// Composer kiracının composer.json'unu ve (izin verilen komutlarda) autoload'unu
+// işler → ortam burada genişletilmez. Kiracı olamayacak kullanıcı → kiraci.ErrKomut.
+// Kilit: sir_cocuk_test.go.
+func kiraciComposer(ctx context.Context, sk string, args ...string) ([]byte, error) {
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = append(cmd.Env,
+		"COMPOSER_HOME=/home/"+sk+"/.composer",
+		"COMPOSER_ALLOW_SUPERUSER=0",
+	)
+	return cmd.CombinedOutput()
 }

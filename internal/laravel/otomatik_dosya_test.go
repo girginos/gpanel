@@ -777,13 +777,16 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 		"os.ReadFile": true, "ioutil.WriteFile": true, "ioutil.ReadFile": true,
 	}
 	// (1) kiraci.Komut ile kiracı olarak çalışanlar.
-	for _, ad := range []string{"envYaz", "TenantExec", "tenantExecEnv", "mkdirTenant"} {
+	// Devredenler: süreci kendisi başlatmaz, çekirdeğini ÇAĞIRMALI (zincir
+	// TenantExec → tenantExecEnv → tenantCalistir → kiraci.Komut).
+	devreder := map[string]string{"TenantExec": "tenantExecEnv", "tenantExecEnv": "tenantCalistir"}
+	for _, ad := range []string{"envYaz", "TenantExec", "tenantExecEnv", "tenantCalistir", "mkdirTenant"} {
 		g, ok := p.fonk[ad]
 		if !ok {
 			t.Errorf("%s bulunamadı", ad)
 			continue
 		}
-		var komutCagri int
+		var komutCagri, devirCagri int
 		ast.Inspect(g.fd.Body, func(n ast.Node) bool {
 			ce, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -791,6 +794,9 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 			}
 			if kiraciKomutCagrisi(ce, g.paket) {
 				komutCagri++
+			}
+			if id, ok := ce.Fun.(*ast.Ident); ok && devreder[ad] != "" && id.Name == devreder[ad] {
+				devirCagri++
 			}
 			se, ok := ce.Fun.(*ast.SelectorExpr)
 			if !ok {
@@ -809,8 +815,11 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 			}
 			return true
 		})
-		// TenantExec, tenantExecEnv'e devreder; diğerleri süreci kendisi başlatır.
-		if ad != "TenantExec" && komutCagri == 0 {
+		if hedef := devreder[ad]; hedef != "" {
+			if devirCagri == 0 {
+				t.Errorf("%s: %s çağrısı yok (kiracı çekirdeği atlanmış olabilir)", ad, hedef)
+			}
+		} else if komutCagri == 0 {
 			t.Errorf("%s: kiraci.Kiraci{...}.Komut çağrısı yok (kiracıya düşürme atlanmış olabilir)", ad)
 		}
 	}

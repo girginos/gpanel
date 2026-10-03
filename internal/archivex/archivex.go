@@ -485,6 +485,14 @@ func GuvenliCikarIlerleme(archivePath, destDir, sk string, ilerle func(delta int
 	}
 
 	// Katman 1: tenant-user (DAC) altında çıkar.
+	return kiraciCikar(archivePath, destDir, sk, tur, ilerle)
+}
+
+// kiraciCikar: GuvenliCikarIlerleme'nin süreç çekirdeği — doğrulanmış (sk,
+// Tara) arşivi aracı KİRACI kimliğinde (runuserKomut → kiraci.Komut) çalıştırarak
+// çıkarır. Panel ortamı (sırlar) çıkarıcıya geçmez; cmd.Env burada genişletilmez.
+// Kilit: sir_cocuk_test.go.
+func kiraciCikar(archivePath, destDir, sk string, tur Tur, ilerle func(delta int)) (string, error) {
 	verbose := ilerle != nil
 	var cmd *exec.Cmd
 	var kErr error
