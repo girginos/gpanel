@@ -7,7 +7,9 @@
 //     hemen adres çubuğundan siler ve POST /musteri/adina-giris ile kısa ömürlü
 //     (30 dk) bir token'a çevirir.
 //  3. Oturum SEKMEYE ÖZELDİR (store/auth oturumDeposu → sessionStorage): bayinin kendi
-//     oturumu ve öteki sekmeleri etkilenmez. "Çık" → sekme `don` adresine (bayi paneli) döner.
+//     oturumu ve öteki sekmeleri etkilenmez. Müşteri paneli YENİ SEKMEDE açılır (bayi paneli
+//     yerinde kalır); "dön" o sekmeyi kapatır. Açılır pencere engellenirse aynı sekmede gidilir,
+//     "dön" sekmeyi `don` adresine (bayi paneli) götürür.
 import { api } from '@/lib/api'
 import { adinaBilgi, useAuth } from '@/store/auth'
 
@@ -26,14 +28,27 @@ export function guvenliDonus(don: string | null | undefined): string {
   return '/'
 }
 
-// adinaBaslat: kodu alır ve sekmeyi müşteri paneline götürür. Hata çağırana fırlatılır.
+// adinaBaslat: kodu alır ve müşteri panelini YENİ SEKMEDE açar. Hata çağırana fırlatılır.
+// Sekme, tıklama anında (await'ten ÖNCE) açılır: tarayıcılar kullanıcı hareketi dışındaki
+// window.open'ı engeller. Engellenirse aynı sekmede gidilir.
 export async function adinaBaslat(domainID: number): Promise<void> {
-  const r = await api.post<BaslatYanit>(`/domains/${domainID}/adina-oturum`)
-  const { kod, adres } = r.data
-  if (!kod) throw new Error('giriş kodu alınamadı')
-  const kok = adres || window.location.origin
-  const don = window.location.origin + window.location.pathname
-  window.location.assign(`${kok}/adina#kod=${encodeURIComponent(kod)}&don=${encodeURIComponent(don)}`)
+  const w = window.open('', '_blank')
+  if (w) {
+    try { w.opener = null } catch { /* yoksay */ }
+  }
+  try {
+    const r = await api.post<BaslatYanit>(`/domains/${domainID}/adina-oturum`)
+    const { kod, adres } = r.data
+    if (!kod) throw new Error('giriş kodu alınamadı')
+    const kok = adres || window.location.origin
+    const don = window.location.origin + window.location.pathname
+    const hedef = `${kok}/adina#kod=${encodeURIComponent(kod)}&don=${encodeURIComponent(don)}`
+    if (w && !w.closed) w.location.replace(hedef + '&sekme=1')
+    else window.location.assign(hedef)
+  } catch (e) {
+    if (w && !w.closed) w.close()
+    throw e
+  }
 }
 
 // adinaCik: adına-oturumu kapatır (denetime yazılır), sekme bayi paneline döner.
@@ -49,5 +64,11 @@ export function adinaCik(): void {
     } catch { /* yoksay */ }
   }
   useAuth.getState().cikis()
+  if (b?.sekme) {
+    // Script'in açtığı sekme kapatılabilir; tarayıcı izin vermezse bayi paneline gidilir.
+    window.close()
+    setTimeout(() => { if (!window.closed) window.location.assign(guvenliDonus(b?.don)) }, 300)
+    return
+  }
   window.location.assign(guvenliDonus(b?.don))
 }

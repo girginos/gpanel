@@ -28,6 +28,7 @@ export default function AdinaGirisPage() {
     const p = new URLSearchParams(window.location.hash.replace(/^#/, ''))
     const kod = p.get('kod') || ''
     const donus = guvenliDonus(p.get('don'))
+    const sekme = p.get('sekme') === '1'
     setDon(donus)
     // Kod adres çubuğunda/geçmişte KALMAZ.
     window.history.replaceState(null, '', window.location.pathname)
@@ -44,7 +45,7 @@ export default function AdinaGirisPage() {
         }
         const bilgi: AdinaBilgi = {
           aktor: y.adina?.aktor || '', rol: y.adina?.rol === 'admin' ? 'admin' : 'reseller',
-          alan: y.alan_adi, domainID: y.domain_id, don: donus,
+          alan: y.alan_adi, domainID: y.domain_id, don: donus, sekme,
         }
         girisAdina(y.token, y.bitis || 0, y.domain_id, y.alan_adi, y.kullanici || '', bilgi)
         navigate(`/abonelikler/${y.domain_id}`, { replace: true })

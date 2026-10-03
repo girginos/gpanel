@@ -86,7 +86,8 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
     setGiriliyor(h.id)
     try { await adinaBaslat(h.id) } catch (e) {
       toast.hata(t('Müşteri paneline girilemedi'), apiHata(e))
-      setGiriliyor(null)
+    } finally {
+      setGiriliyor(null) // yeni sekmede açıldı: bu sayfa yerinde kalır
     }
   }
 

@@ -45,6 +45,8 @@ export type AdinaBilgi = {
   alan: string
   domainID: number
   don: string
+  // Yeni sekmede açıldıysa "dön" sekmeyi kapatır (bayi paneli opener sekmede açık kalır).
+  sekme?: boolean
 }
 
 function adinaModu(): boolean {

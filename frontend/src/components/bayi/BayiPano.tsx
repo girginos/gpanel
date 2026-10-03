@@ -52,7 +52,7 @@ export default function BayiPano() {
   async function gir(id: number) {
     if (giriliyor) return
     setGiriliyor(id)
-    try { await adinaBaslat(id) } catch (e) { toast.hata(t('Müşteri paneline girilemedi'), apiHata(e)); setGiriliyor(null) }
+    try { await adinaBaslat(id) } catch (e) { toast.hata(t('Müşteri paneline girilemedi'), apiHata(e)) } finally { setGiriliyor(null) }
   }
 
   const diskMB = o ? o.disk_kullanim_kb / 1024 : 0
