@@ -520,3 +520,51 @@ func TestSahipsizTenantFPMTemizle_SurenKurulumaDokunmaz(t *testing.T) {
 	}
 	izlerDuruyor(t, "c_inflight")
 }
+
+// Kanıt kilit ALTINDA tazelenir: aday seçildikten sonra hesap yeniden sağlanırsa
+// (domains satırı geldi) söküm yapılmaz.
+func TestSahipsizTenantFPMTemizle_KilitAltindaYenidenKanitlar(t *testing.T) {
+	o := sokumDikis(t)
+	db := sokum_panel(t)
+	const sk = "c_yaris"
+	tenantKur(t, o, sk, time.Hour)
+	yk := fpmYasamKilidi(sk)
+	yk.Lock() // ör. EnableTenantFPM / Teardown sürüyor
+	type sonuc struct {
+		t   []SahipsizTenantFPM
+		err error
+	}
+	ch := make(chan sonuc, 1)
+	go func() { x, e := SahipsizTenantFPMTemizle(db); ch <- sonuc{x, e} }()
+	time.Sleep(300 * time.Millisecond) // aday seçildi, kilitte bekliyor
+	if _, err := db.Exec(`INSERT INTO domains (id, sistem_kullanici) VALUES (7, ?)`, sk); err != nil {
+		yk.Unlock()
+		t.Fatal(err)
+	}
+	yk.Unlock()
+	var s sonuc
+	select {
+	case s = <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatal("uzlaştırma bitmedi")
+	}
+	if s.err != nil || len(s.t) != 0 {
+		t.Fatalf("yeniden sağlanan hesap sökülmemeli: %v %v", s.t, s.err)
+	}
+	izlerDuruyor(t, sk)
+}
+
+// Panelin olmayan bir cfg dizini (php-fpm.conf başka içerik) olan sk'ye dokunulmaz.
+func TestSahipsizTenantFPMTemizle_YabanciCfgDizini(t *testing.T) {
+	sokumDikis(t)
+	db := sokum_panel(t)
+	sk_yaz(t, filepath.Join(tenantCfgDir("c_yabcfg"), "php-fpm.conf"), "[global]\ninclude=/baska/yer.conf\n")
+	old := time.Now().Add(-time.Hour)
+	_ = os.Chtimes(tenantCfgDir("c_yabcfg"), old, old)
+	if temiz, err := SahipsizTenantFPMTemizle(db); err != nil || len(temiz) != 0 {
+		t.Fatalf("yabancı cfg dizinine dokunulmamalı: %v %v", temiz, err)
+	}
+	if !izVar(tenantCfgDir("c_yabcfg")) {
+		t.Fatal("yabancı cfg dizini silindi")
+	}
+}
