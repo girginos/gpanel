@@ -1,9 +1,12 @@
 package domainip
 
-// HTTP uçları:
-//   GET /domains/ip-secenekleri  (AdminVeyaReseller) — rolün seçebileceği hedef IP'ler
-//   PUT /domains/{id}/ip         (SahipYonetim)      — domain IP değiştir
-//   PUT /admin/domains/{id}/ipv4 (AdminOnly)         — eski yönetici ucu, aynı çekirdek
+// HTTP uçları — HEPSİ YALNIZ YÖNETİCİ (kullanıcı kararı 2026-10-03: alan adı IP
+// değiştirme / IP seçimi bayide YOK; yalnız kök):
+//   GET /domains/ip-secenekleri  (AdminOnly) — hedef IP'ler (sunucunun tüm global IPv4'leri)
+//   PUT /domains/{id}/ip         (AdminOnly) — domain IP değiştir
+//   PUT /admin/domains/{id}/ipv4 (AdminOnly) — eski yönetici ucu, aynı çekirdek
+// Toplu "ip" işlemi POST /domains/toplu/is (AdminOnly, internal/toplu) üzerindedir.
+// Kayıt TEK yerde (Rotalar): main.go ve testler aynı zinciri kullanır.
 
 import (
 	"context"
@@ -24,12 +27,19 @@ import (
 
 type Handler struct{ DB *sql.DB }
 
+// Rotalar — /api/v1 kimlik doğrulamalı grubuna IP uçlarını AdminOnly ile kaydeder.
+// Bayi (ve müşteri) 403 "sadece yöneticiler için" alır; handler'a hiç ulaşmaz.
+func (h *Handler) Rotalar(r chi.Router) {
+	r.With(middleware.AdminOnly).Put("/domains/{id}/ip", h.DomainIP)
+	r.With(middleware.AdminOnly).Get("/domains/ip-secenekleri", h.IPSecenekleri)
+}
+
 type ipGovde struct {
 	IPv4 string `json:"ipv4"`
 }
 
 // DomainIP — gövde {"ipv4":"…"}. Hata sözleşmesi: geçersiz/sunucuda olmayan IP 400;
-// sunucuda var ama bayiye açık değil 403; başka bayinin domaini SahipYonetim'de 403.
+// domain yok 404. Yetki rota katmanında (AdminOnly).
 func (h *Handler) DomainIP(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -51,25 +61,6 @@ func (h *Handler) DomainIP(w http.ResponseWriter, r *http.Request) {
 	if !SunucudaMi(yeni) {
 		httpx.WriteError(w, http.StatusBadRequest, ErrSunucudaYok.Error())
 		return
-	}
-	if middleware.RolFrom(r) != "admin" {
-		// Bayi: sunucudaki bir IP olsa bile yalnız kendisine açık olanlar.
-		izinli, err := IzinliIPler(r.Context(), h.DB, false, middleware.ResellerIDFrom(r))
-		if err != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "IP listesi okunamadı")
-			return
-		}
-		ok := false
-		for _, s := range izinli {
-			if s.IP == yeni {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			httpx.WriteError(w, http.StatusForbidden, "bu IP hesabınızın kullanımına açık değil")
-			return
-		}
 	}
 	ctx, iptal := context.WithTimeout(r.Context(), 60*time.Second)
 	defer iptal()
@@ -94,11 +85,10 @@ func (h *Handler) DomainIP(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, sonuc)
 }
 
-// IPSecenekleri — hedef IP açılır listesi. Yönetici tüm sunucu IP'lerini, bayi
-// yalnız kendisine açık olanları görür; kullanım sayısı rolün kapsamıdır.
+// IPSecenekleri — hedef IP açılır listesi: sunucunun tüm global IPv4'leri ve her
+// birindeki domain sayısı.
 func (h *Handler) IPSecenekleri(w http.ResponseWriter, r *http.Request) {
-	admin := middleware.RolFrom(r) == "admin"
-	liste, err := IzinliIPler(r.Context(), h.DB, admin, middleware.ResellerIDFrom(r))
+	liste, err := IPSecenekListesi(r.Context(), h.DB)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "IP listesi okunamadı")
 		return

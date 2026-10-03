@@ -1,8 +1,7 @@
-// IP değiştir diyaloğu — yönetici (DomainsPage, toplu iş "ip") ve bayi (BayiDomainler,
-// öğe başına PUT /domains/{id}/ip) toplu işlem çubuklarının ORTAK diyaloğu.
-// Seçenekler GET /domains/ip-secenekleri'den gelir: sunucu rolün seçebileceği IP'leri
-// döndürür (yönetici: tüm sunucu IP'leri; bayi: birincil + kendi kullandığı). Liste
-// yalnız kolaylıktır — hedef IP her istekte sunucuda yeniden doğrulanır.
+// IP değiştir diyaloğu — YALNIZ yönetici (DomainsPage toplu iş "ip"). Bayide IP
+// değiştirme/seçimi yok (kullanıcı kararı 2026-10-03; uçlar AdminOnly, bayi 403).
+// Seçenekler GET /domains/ip-secenekleri'den gelir (sunucunun tüm global IPv4'leri).
+// Liste yalnız kolaylıktır — hedef IP her istekte sunucuda yeniden doğrulanır.
 import { useCallback, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, apiHata } from '@/lib/api'

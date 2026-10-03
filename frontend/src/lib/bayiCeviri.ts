@@ -57,7 +57,6 @@ export const BAYI_EN: Record<string, string> = {
   'Trafik (düşük)': 'Traffic (low)',
   'Plan (A-Z)': 'Plan (A-Z)',
   'Plan (Z-A)': 'Plan (Z-A)',
-  'IP değiştir': 'Change IP',
   'Oluşturulma (yeni önce)': 'Created (newest first)',
   'Oluşturulma (eski önce)': 'Created (oldest first)',
   'Görünen tüm alan adlarını seç': 'Select all visible domains',
