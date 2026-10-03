@@ -12,10 +12,8 @@ die(){ echo -e "  ${c_r}✗${c_0} $*"; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "root gerekli"
 
-ENVF=/etc/girginospanel/env
-PANEL_DB_PASS=$(grep -oP '^PANEL_DB_PASS=\K.*' "$ENVF" 2>/dev/null || true)
-# DSN'den de dene
-[ -z "${PANEL_DB_PASS:-}" ] && PANEL_DB_PASS=$(grep -oP 'panel:\K[^@]*' "$ENVF" 2>/dev/null | head -1 || true)
+# (Panel DB parolası burada OKUNMAZ: pure-ftpd kendi salt-okur 'pureftpd' kullanıcısıyla
+# bağlanır. Eskiden okunup hiç kullanılmayan PANEL_DB_PASS satırları kaldırıldı.)
 
 echo "══ Pure-FTPd (MySQL backend) kurulumu ══"
 

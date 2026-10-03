@@ -6,7 +6,14 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/girginospanel/env
+# 🔴 SIRLAR ORTAMA GİRMEZ: /etc/girginospanel/env (JWT/DB/Redis sırları + ayarlar,
+# root:root 0600) EnvironmentFile ile DEĞİL, kimlik (credential) olarak verilir.
+# systemd onu /run/credentials/girginospanel.service/panel-env altına (yalnız bu
+# servise açık, 0400) kopyalar; config.Load ayrıştırır: sırlar yalnız belleğe,
+# sır olmayan ayarlar ortama. EnvironmentFile sırları süreç ortamına koyuyordu →
+# kiracı kimliğinde başlatılan çocuklar (wp-cli) ve /proc/<pid>/environ okuyabiliyordu.
+# EnvironmentFile=/etc/girginospanel/env  ← GERİ EKLEMEYİN (kaynak koruma testi düşer).
+LoadCredential=panel-env:/etc/girginospanel/env
 ExecStart=/opt/girginospanel/bin/girginospanel-server
 Restart=always
 RestartSec=3

@@ -37,7 +37,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
+DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,sir_izin,phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -554,6 +554,8 @@ sec_env_izin() {
   # jetonu uretip panelin TUM yetki denetimini baypas edebilir. /proc
   # hidepid'siz bagli oldugu icin surec ortamindan da okunabiliyordu.
   local f=/etc/girginospanel/env
+  # 🔴 symlink TAKIP EDILMEZ: chown/chmod symlink'in hedefini degistirirdi.
+  if [ -L "$f" ]; then err "env dosyasi symlink — takip edilmedi, elle inceleyin: $f"; return 0; fi
   [ -f "$f" ] || { ok "env dosyasi yok (kurulum eksik?)"; return 0; }
   local mod sahip
   mod="$(stat -c %a "$f" 2>/dev/null)"
@@ -571,11 +573,32 @@ sec_env_izin() {
   chmod 600 "$f" 2>/dev/null
   # Yedek kopyalar da ayni siri tasir.
   for y in "$f".* ; do
+    [ -L "$y" ] && continue
     [ -f "$y" ] || continue
     chown root:root "$y" 2>/dev/null; chmod 600 "$y" 2>/dev/null
   done
   FIXN=$((FIXN+1))
   ok "duzeltildi: $(stat -c '%a %U:%G' "$f")"
+}
+
+# sec_sir_izin: gizli dosya envanteri (girginospanel-sir izin --onar) — panel sirlari,
+# anahtarlar, TLS ozel anahtarlari, eklenti/posta/FTP/Valkey parolalari. Fazla izni
+# SOYAR, yanlis sahibi duzeltir; symlink'e DOKUNMAZ (KRITIK raporlar). Envanter TEK
+# yerde (girginospanel-sir); dogrula ayni tabloyla olcer.
+sec_sir_izin() {
+  want sir_izin || return 0
+  head_ "gizli dosya izinleri (girginospanel-sir)"
+  local arac
+  arac=$(command -v girginospanel-sir 2>/dev/null || true)
+  [ -n "$arac" ] || { _rd="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/girginospanel-sir"; [ -f "$_rd" ] && arac="$_rd"; }
+  [ -n "$arac" ] || { warn "girginospanel-sir yok — gizli dosya izinleri onarilmadi"; return 0; }
+  local cikti rc=0
+  if [ $DRY -eq 1 ]; then cikti=$(bash "$arac" izin --onar --kuru 2>&1) || rc=$?
+  else cikti=$(bash "$arac" izin --onar 2>&1) || rc=$?; fi
+  say "$cikti"
+  local n; n=$(printf '%s\n' "$cikti" | grep -c '✔ onarıldı' || true)
+  FIXN=$((FIXN + ${n:-0})); CHK=$((CHK+1))
+  [ $rc -eq 0 ] || [ $DRY -eq 1 ] || err "gizli dosya izinlerinde KRİTİK kaldı (yukarıda)"
 }
 
 sec_backup_cron() {
@@ -680,6 +703,7 @@ if [ "${GOSP_REPAIR_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; f
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_env_izin
+sec_sir_izin
 sec_eklenti_runtime
 sec_phpmyadmin
 sec_docroot_selinux
