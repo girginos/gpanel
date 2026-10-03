@@ -24,11 +24,13 @@
 //   - girişler: FTP ve müşteri paneli (ftp_accounts.status), SSH/SFTP (hesap
 //     süresi; ssh_erisim ayarı korunur).
 //   - veritabanı: hesabın MariaDB kullanıcıları (TÜM host'ları) ACCOUNT LOCK.
-//   - posta: AÇIK KALIR. Kutular mail eklentisinin veritabanında ve kaynağı bu
-//     depoda değil; panel posta girişini kapatamaz. Gelen posta kabul edilir
-//     (veri kaybı yok); IMAP/POP3 ve SMTP AUTH da şu an açıktır. Kapatmak için
-//     eklentide alan adı askı bayrağı + dovecot password_query koşulu gerekir;
-//     o zaman buraya tek adım eklenir.
+//   - posta: GİRİŞ kapanır, GELEN POSTA AÇIK KALIR (kullanıcı kararı
+//     2026-10-03). Hesabın ana + alt alan adlarında IMAP/POP3, SMTP AUTH
+//     gönderim ve webmail tek tık reddedilir, açık oturumlar düşürülür; teslim
+//     sürer (ret yok, veri kaybı yok). Bayrak mail eklentisinin veritabanında
+//     (virtual_domains.askida, eklenti soketi üzerinden — PostaAski), dovecot
+//     password_query'si ona bakar (provisioner.PostaAskiAltyapisi). Kutu bazlı
+//     askı (virtual_users.aktif) ayrıdır, dokunulmaz.
 //
 // Eşzamanlılık: Uygula hesap başına kilitlidir (kilit.Hesap); tekil/toplu yol
 // bayi durum denetimini ve uygulamayı bayi kilidi (kilit.Bayi — bayi zinciri,
@@ -149,6 +151,7 @@ type Adimlar struct {
 	Birimler      func(ctx context.Context, db *sql.DB, domainID int64, askida bool) error
 	Uygulamalar   func(sk string, askida bool) error
 	CalismaZamani func(sk string, askida bool)
+	Posta         func(ctx context.Context, db *sql.DB, domainID int64, askida bool) error
 }
 
 // Varsayilan — üretim adımları.
@@ -163,6 +166,7 @@ func Varsayilan() Adimlar {
 		Birimler:      laravel.HesapAski,
 		Uygulamalar:   provisioner.HesapBirimleriAski,
 		CalismaZamani: provisioner.SuspendUserRuntime,
+		Posta:         PostaAski,
 	}
 }
 
@@ -370,6 +374,7 @@ func (a Adimlar) kapat(ctx context.Context, db *sql.DB, id int64, sk, surum stri
 	}
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, true))
+	ekle("posta girişi", a.Posta(ctx, db, id, true))
 	// İşleyiciler ve uygulamalar DB kilidinden ÖNCE durur: kilitli DB'ye
 	// bağlanamayıp çökme döngüsüne girmesinler.
 	ekle("kuyruk işleyicisi / zamanlanmış görev", a.Birimler(ctx, db, id, true))
@@ -404,6 +409,7 @@ func (a Adimlar) ac(ctx context.Context, db *sql.DB, id int64, sk, surum string)
 	}
 	ekle("alt alan adları", a.AltVhostlar(ctx, db, id))
 	ekle("FTP/panel girişi", ftpDurum(ctx, db, id, false))
+	ekle("posta girişi", a.Posta(ctx, db, id, false))
 	ekle("veritabanı kullanıcıları", a.DBKullanici(db, id, false))
 	// Uygulamalar ve işleyiciler DB kilidi açıldıktan SONRA başlar. Uygulama
 	// adımı kuyruk işleyicisinden ÖNCE: işleyici birimi de User=<sk>'dir; askı
