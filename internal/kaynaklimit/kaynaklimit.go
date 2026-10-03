@@ -270,6 +270,10 @@ func SystemdSliceRuntimeSifirla(sk string) {
 	ioClearKernelLimits(sk, Limitler{})
 }
 
+// Söküm kancası: provisioner.TeardownTenantFPM (TÜM silme yolları) slice'ı da
+// kaldırsın — taşıma geri alma / platform SiteSil SystemdSliceSil'i çağırmıyordu.
+func init() { provisioner.TenantSliceSilKancasi = SystemdSliceSil }
+
 // SystemdSliceSil: kayıt varsa siler.
 func SystemdSliceSil(sk string) error {
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
@@ -742,6 +746,11 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if sk == "" {
 		return fmt.Errorf("sistem_kullanici boş")
 	}
+	// Hesap bu arada silindiyse (arka plan goroutine'i silmeden sonra koşuyor)
+	// slice/FPM YAZMA — yetim birim doğardı (bkz provisioner.TeardownTenantFPM).
+	if provisioner.TenantSokumde(sk) {
+		return fmt.Errorf("%w: %s", provisioner.ErrTenantSokuldu, sk)
+	}
 	l, err := PlanLimitleriGetir(ctx, db, domainID)
 	if err != nil {
 		return err
@@ -832,6 +841,11 @@ func LimitleriReAssert(ctx context.Context, db *sql.DB, domainID int64) error {
 	}
 	if sk == "" {
 		return fmt.Errorf("sistem_kullanici boş")
+	}
+	// Hesap bu arada silindiyse (arka plan goroutine'i silmeden sonra koşuyor)
+	// slice/FPM YAZMA — yetim birim doğardı (bkz provisioner.TeardownTenantFPM).
+	if provisioner.TenantSokumde(sk) {
+		return fmt.Errorf("%w: %s", provisioner.ErrTenantSokuldu, sk)
 	}
 	l, err := PlanLimitleriGetir(ctx, db, domainID)
 	if err != nil {
