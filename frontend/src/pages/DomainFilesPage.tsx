@@ -16,6 +16,7 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import Modal from '@/components/Modal'
+import { useAuth } from '@/store/auth'
 
 type Entry = {
   adi: string
@@ -651,7 +652,7 @@ export default function DomainFilesPage() {
   }
 
   function indir(e: Entry) {
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = useAuth.getState().token || ''
     const url = `/api/v1${base}/files/indir?yol=${encodeURIComponent(e.yol)}`
     // Header'lı GET tarayıcıdan; en basit: ayrı fetch + blob
     fetch(url, { headers: { Authorization: `Bearer ${tok}` } })

@@ -9,7 +9,8 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from '@/store/auth'
+import { useAuth, adinaBilgi } from '@/store/auth'
+import { adinaCik } from '@/lib/adina'
 import { musteriDomainID } from '@/lib/rol'
 import { MUSTERI_ARACLAR, aracCevir, aracEslesir, aramaSozcukleri, eklentiKapisi } from '@/components/musteri-ana/araclar'
 import { eklentileriGetir, type EklentiKayit } from '@/lib/eklenti'
@@ -295,6 +296,8 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   }
 
   function onCikis() {
+    // Müşteri ADINA oturum: çıkış bayi paneline döner (bayinin kendi oturumu açık kalır).
+    if (adinaBilgi()) { adinaCik(); return }
     // Hedef cikis()'ten ÖNCE belirlenir: cikis() müşteri bayraklarını siliyor.
     // Müşteri kendi giriş formuna döner (karma kapıda /giris yönetici formudur).
     const hedef = musteri ? '/cp/giris' : '/giris'
