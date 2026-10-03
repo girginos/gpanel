@@ -248,17 +248,29 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ridC := middleware.ResellerIDFrom(r)
-	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut hesabina
-	// 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile kota=0 plan acip
-	// sinirsiz disk dagitabiliyordu. Kok icin 0 serbest (kendi sunucusu).
+	if ridC > 0 {
+		// Kök alanları (bayi_plan.go KokAlanlari) bayi isteğinden ALINMAZ: yeni bayi
+		// planında panel varsayılanı (sütun DDL'iyle aynı).
+		kokAlanlariniAl(&p, panelVarsayilanPlan())
+	}
 	if err := h.bayiTavanKontrol(r.Context(), ridC, &p); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if ridC > 0 && (p.DiskKotaMB <= 0 || p.TrafikKotaMB <= 0) {
-		httpx.WriteError(w, http.StatusBadRequest,
-			"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
+	// 🔴 Bayi plani SINIRSIZ olamaz (kota=0 taahhude 0 girer → havuz dolu olsa bile
+	// sinirsiz disk dagitilirdi) ve paket havuzuna sigmali — bayiPaketKontrol.
+	if err := h.bayiPaketKontrol(r.Context(), ridC, 0, &p); err != nil {
+		hataYaz(w, ridC, err)
 		return
+	}
+	if ridC > 0 && !p.Varsayilan {
+		// Varsayılanı olmayan bayinin (uzlaştırma öncesi / elle silinmiş) yeni planı
+		// varsayılan olur: bayinin her zaman tek bir varsayılanı vardır.
+		var n int
+		if err := h.DB.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM service_plans WHERE reseller_id=? AND varsayilan=1 AND domain_id IS NULL`, ridC).Scan(&n); err == nil && n == 0 {
+			p.Varsayilan = true
+		}
 	}
 	v := 0
 	if p.Varsayilan {
@@ -301,6 +313,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
 	saved, _ := scan(row)
+	uidC, kulC := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uidC, kulC, "plan.olustur", p.Ad, "", ridC, true)
 	httpx.WriteJSON(w, http.StatusCreated, saved.gorunum(ridC))
 }
 
@@ -327,21 +341,29 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	mevcut, err := scan(h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		httpx.WriteError(w, http.StatusNotFound, "plan bulunamadı")
+		return
+	}
+	if err != nil {
+		bayiHata(w, ridU, err)
+		return
+	}
+	if ridU > 0 {
+		// Kök alanları bayi isteğiyle DEĞİŞMEZ: mevcut değer korunur (yönetici değiştirir).
+		kokAlanlariniAl(&p, mevcut)
+	}
 	// Bayi posta TAVANI kontrolu — govde parse edildikten SONRA calismali.
 	if err := h.bayiTavanKontrol(r.Context(), ridU, &p); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// 🔴 Bayi plani SINIRSIZ olamaz: kota=0 "sinirsiz" demek ve taahhut
-	// hesabina 0 olarak girdigi icin bayi, disk havuzu dolu olsa bile
-	// kota=0 plan acip sinirsiz disk dagitabiliyordu. Kok icin 0 serbest
-	// (kendi sunucusu), bayi icin pozitif deger zorunlu.
-	if rid := middleware.ResellerIDFrom(r); rid > 0 {
-		if p.DiskKotaMB <= 0 || p.TrafikKotaMB <= 0 {
-			httpx.WriteError(w, http.StatusBadRequest,
-				"bayi planlarında disk ve trafik kotası sıfır (sınırsız) olamaz")
-			return
-		}
+	// 🔴 Bayi plani SINIRSIZ olamaz + paket havuzu + bagli hostinglerin taahhudu
+	// (bayi_plan.go bayiPaketKontrol). Kok icin kisitsiz (kendi sunucusu).
+	if err := h.bayiPaketKontrol(r.Context(), ridU, id, &p); err != nil {
+		hataYaz(w, ridU, err)
+		return
 	}
 	if ad := provisioner.TehlikeliNginxDirektifi(p.NginxEkDirektifler); ad != "" {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
@@ -351,10 +373,17 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+nginxset.DirektifHatasi(r, "plans.guncelle", 0, err, p.NginxEkDirektifler))
 		return
 	}
+	// Bayi planının varsayılan işareti düzenlemeyle KALDIRILAMAZ (bayinin her zaman
+	// bir varsayılanı olur): başka planı varsayılan yaparak değişir (VarsayilanYap).
+	if mevcut.resellerID > 0 && mevcut.Varsayilan && mevcut.DomainID == nil {
+		p.Varsayilan = true
+	}
 	v := 0
 	if p.Varsayilan {
 		v = 1
-		if _, err := h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>? AND reseller_id=?`, id, ridU); err != nil {
+		// Kapsam planın SAHİBİ: yönetici bir bayi planını varsayılan yaptığında kökün
+		// varsayılanı sıfırlanmamalı (eskiden çağıranın kapsamı kullanılıyordu).
+		if _, err := h.DB.ExecContext(r.Context(), `UPDATE service_plans SET varsayilan=0 WHERE id<>? AND reseller_id=?`, id, mevcut.resellerID); err != nil {
 			if ridU > 0 {
 				bayiHata(w, ridU, err)
 			} else {
@@ -391,10 +420,12 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		bayiHata(w, ridU, err)
 		return
 	}
-	// Plan WAF varsayilani degismis olabilir → bu plandaki (domain override'i olmayan)
-	// domainlerin vhost'unu arka planda yeniden render et ki WAF direktifi guncellensin.
+	// Limit ya da WAF varsayilani degistiyse bagli hostinglere arka planda yeniden
+	// uygula ("Yeniden Uygula" ile ayni yol: kaynaklimit + WAF + posta — HostingUygula).
 	// (nginx -t gate + rollback her render'da korur; hata log'lanir, panel bloklanmaz.)
-	go h.wafPlanReapply(id)
+	if limitDegisti(mevcut, p) || mevcut.WafEnabled != p.WafEnabled || mevcut.WafMode != p.WafMode || mevcut.WafParanoia != p.WafParanoia {
+		go h.planReapply(id)
+	}
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
 	saved, _ := scan(row)
 	// Kapsam: planin SAHIBI (kok global bir plani degistirdiginde de o plani
@@ -407,31 +438,41 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, saved.gorunum(ridU))
 }
 
-// wafPlanReapply: bu plana bagli tum domainlerin WAF ayarini (plan varsayilanini devralanlar
-// dahil) yeniden uygular. Arka plan goroutine — kendi baglaminda calisir.
-func (h *Handlers) wafPlanReapply(planID int64) {
+// planReapply: bu plana bagli tum hostinglere limitleri (HostingUygula: kaynaklimit +
+// WAF + posta; bagli degilse yalniz WAF) yeniden uygular. Arka plan goroutine — kendi
+// baglaminda, hostingleri SIRAYLA isler.
+func (h *Handlers) planReapply(planID int64) {
 	// Plan sahibi disindaki kiracilara ait domainler HARIC: devir sonrasi
 	// domain eski bayinin planina bagli kalabiliyor; o bayinin plan
 	// guncellemesi yabanci bir kiracinin vhost'una uygulanmamali.
 	rows, err := h.DB.Query(`
-		SELECT d.id FROM domains d
+		SELECT d.id, d.alan_adi FROM domains d
 		  JOIN service_plans p ON p.id = d.plan_id
 		 WHERE d.plan_id = ?
 		   AND (p.reseller_id = 0 OR p.reseller_id = d.reseller_id)`, planID)
 	if err != nil {
 		return
 	}
-	var ids []int64
+	type hedef struct {
+		id int64
+		ad string
+	}
+	var hl []hedef
 	for rows.Next() {
-		var did int64
-		if rows.Scan(&did) == nil {
-			ids = append(ids, did)
+		var x hedef
+		if rows.Scan(&x.id, &x.ad) == nil {
+			hl = append(hl, x)
 		}
 	}
 	rows.Close()
-	for _, did := range ids {
-		if err := provisioner.WAFUygula(h.DB, did); err != nil {
-			log.Printf("waf plan reapply domain=%d: %v", did, err)
+	uygula := HostingUygula
+	for _, x := range hl {
+		if uygula != nil {
+			uygula(h.DB, x.id, x.ad)
+			continue
+		}
+		if err := provisioner.WAFUygula(h.DB, x.id); err != nil {
+			log.Printf("waf plan reapply domain=%d: %v", x.id, err)
 		}
 	}
 }
@@ -469,11 +510,72 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 			"bu plan "+strconv.Itoa(n)+" abonelikte kullanıldığı için silinemez")
 		return
 	}
-	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM service_plans WHERE id=?`, id); err != nil {
-		bayiHata(w, rid, err)
+	ad, sahip, err := h.planSil(r.Context(), rid, id)
+	if err != nil {
+		hataYaz(w, rid, err)
 		return
 	}
+	uid, kul := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uid, kul, "plan.sil", ad, "", sahip, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// planSil — planı siler. Bayi planı (reseller_id>0, katalog) için: bayinin SON
+// katalog planı silinemez (bayinin her zaman bir varsayılanı olur); silinen plan
+// varsayılansa en eski kalan planı varsayılan olur. Sahibin planları kilitlenir
+// (eşzamanlı iki silme son planı birlikte götürmesin).
+func (h *Handlers) planSil(ctx context.Context, rid, id int64) (string, int64, error) {
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var ad string
+	var sahip int64
+	var dom sql.NullInt64
+	var vars int
+	err = tx.QueryRowContext(ctx, `SELECT ad, reseller_id, domain_id, varsayilan FROM service_plans WHERE id=? FOR UPDATE`, id).
+		Scan(&ad, &sahip, &dom, &vars)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, &planHata{http.StatusNotFound, "plan bulunamadı"}
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	if rid > 0 && sahip != rid {
+		return "", 0, &planHata{http.StatusForbidden, "bu planı silemezsiniz"}
+	}
+	var digerleri []int64
+	if sahip > 0 && !dom.Valid {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT id FROM service_plans WHERE reseller_id=? AND domain_id IS NULL ORDER BY id FOR UPDATE`, sahip)
+		if err != nil {
+			return "", 0, err
+		}
+		for rows.Next() {
+			var x int64
+			if rows.Scan(&x) == nil && x != id {
+				digerleri = append(digerleri, x)
+			}
+		}
+		rows.Close()
+		if len(digerleri) == 0 {
+			m := "bayinin son planı silinemez — önce başka bir plan oluşturun"
+			if rid > 0 {
+				m = "son planınız silinemez — önce yeni bir plan oluşturun"
+			}
+			return "", 0, &planHata{http.StatusConflict, m}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM service_plans WHERE id=?`, id); err != nil {
+		return "", 0, err
+	}
+	if vars == 1 && len(digerleri) > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE service_plans SET varsayilan=1 WHERE id=?`, digerleri[0]); err != nil {
+			return "", 0, err
+		}
+	}
+	return ad, sahip, tx.Commit()
 }
 
 // GET /plans/{id}/domains — bu plana bağlı domain listesi

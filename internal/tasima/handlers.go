@@ -579,6 +579,12 @@ func (h *Handlers) bayiPlanCoz(ctx context.Context, rid, planID int64) (int64, i
 		}
 		return planID, 0, ""
 	}
+	// Bayinin KENDİ varsayılan planı (plans.BayiVarsayilanSagla: yoksa oluşturur /
+	// işaretler — açılış uzlaştırmasından sonra eklenen bayi için de). Yalnız sağlama
+	// düşerse eski davranış: genel (kök) varsayılan katalog planı.
+	if defID, _, err := plans.BayiVarsayilanSagla(ctx, h.DB, rid, 0, "sistem"); err == nil && defID > 0 {
+		return defID, 0, ""
+	}
 	var defID int64
 	if err := h.DB.QueryRowContext(ctx,
 		`SELECT id FROM service_plans WHERE varsayilan=1 AND domain_id IS NULL AND reseller_id IN (?,0)

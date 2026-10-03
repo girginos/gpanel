@@ -98,8 +98,11 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"bayi.parola":     {TR: "Bayi parolası değiştirildi", EN: "Reseller password changed"},
 
 	// Plan
-	"plan.olustur":  {TR: "Plan oluşturuldu", EN: "Plan created"},
-	"plan.guncelle": {TR: "Plan güncellendi", EN: "Plan updated"},
+	"plan.olustur":            {TR: "Plan oluşturuldu", EN: "Plan created"},
+	"plan.guncelle":           {TR: "Plan güncellendi", EN: "Plan updated"},
+	"plan.sil":                {TR: "Plan silindi", EN: "Plan deleted"},
+	"plan.varsayilan":         {TR: "Varsayılan plan değiştirildi", EN: "Default plan changed"},
+	"plan.varsayilan_olustur": {TR: "Varsayılan bayi planı oluşturuldu", EN: "Default reseller plan created"},
 
 	// Yedek
 	"yedek.geriyukle":           {TR: "Yedek geri yüklendi", EN: "Backup restored"},

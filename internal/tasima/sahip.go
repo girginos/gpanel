@@ -7,10 +7,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/plans"
 )
 
 // sahipHedef — bir kaynak sahip login'inin GVM'deki karşılığı.
@@ -76,6 +78,11 @@ func sahipleriHazirla(ctx context.Context, db *sql.DB, sahipler []KaynakSahip, k
 			return esle, kimlikler, fmt.Errorf("reseller (%s): %w", s.Login, err)
 		}
 		rid, _ := res.LastInsertId()
+		// Yeni bayinin kendi varsayılan hosting planı (reseller.Olustur ile aynı kural);
+		// hata taşımayı durdurmaz — açılış uzlaştırması yeniden dener.
+		if _, _, perr := plans.BayiVarsayilanSagla(ctx, db, rid, 0, "sistem"); perr != nil {
+			log.Printf("tasima: bayi %d varsayılan planı oluşturulamadı: %v", rid, perr)
+		}
 		esle[s.Login] = sahipHedef{ResellerID: rid}
 		kimlikler = append(kimlikler, UretilenKimlik{Tip: "reseller", Ad: ad, Login: s.Login, Eposta: s.Eposta, Parola: parola})
 	}

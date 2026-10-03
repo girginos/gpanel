@@ -11,6 +11,7 @@ import { T } from '@/lib/tablo'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
+import { useBayiSinir, alanAcik, havuzDurumu, mbOkunur } from '@/lib/bayiPlan'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -136,6 +137,16 @@ const PKTDET_EN: Record<string, string> = {
   "Kutu Depolama": "Mailbox Storage",
   "Bu plan yönetici tarafından tanımlanır: hostinglerinize atayabilir, düzenleyemezsiniz.": "This plan is defined by the administrator: you can assign it to your hostings but cannot edit it.",
   "Başarısız": "Failed",
+  "kaydedildi; değişen limitler atanmış domainlere arka planda uygulanıyor.": "saved; changed limits are being applied to assigned domains in the background.",
+  "systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydedince atanmış domainlere otomatik uygulanır.": "Applied at the system level with systemd cgroup + xfs_quota + MariaDB GRANT. Saving applies them to assigned domains automatically.",
+  "Plan kaydedilince limitler bu domainlere otomatik uygulanır; tek bir domain için elle tekrarlamak isterseniz “Yeniden Uygula”.": "When the plan is saved, limits are applied to these domains automatically; use “Reapply” to repeat it for a single domain.",
+  "Varsayılan planınız — değiştirmek için başka bir planı varsayılan yapın": "Your default plan — make another plan default to change it",
+  "Bayi planında 0 (sınırsız) olamaz": "Cannot be 0 (unlimited) in a reseller plan",
+  "Paketinizde kalan: {0} / {1}": "Left in your package: {0} / {1}",
+  "plan değeri {0} altında olmalı": "plan value must be below {0}",
+  "fazla satış açık": "overselling on",
+  "Paket tavanı: {0}": "Package cap: {0}",
+  "IO, veritabanı governor, process, inode ve PHP-FPM sınırları yöneticiniz tarafından belirlenir.": "IO, database governor, process, inode and PHP-FPM limits are set by your administrator.",
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
 }
@@ -158,6 +169,11 @@ export default function PaketDetayPage() {
   const [uygulananID, setUygulananID] = useState<number | null>(null)
   const [sonucID, setSonucID] = useState<{ id: number; ok: boolean } | null>(null)
   const toast = useToast()
+  // Paket sınırı ipuçları + bayinin yazamadığı kök alanları (sunucu yine doğrular).
+  const [sinirNesli, setSinirNesli] = useState(0)
+  const sinir = useBayiSinir(sinirNesli)
+  const bayi = !!sinir?.bayi
+  const acik = (alan: string) => alanAcik(sinir, alan)
 
   const yukleNesli = useRef(0)
   function yukle() {
@@ -191,11 +207,12 @@ export default function PaketDetayPage() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
       await api.put(`/plans/${id}`, plan)
-      const iyi = `"${plan.ad}" ${cevir("kaydedildi. Atanmış domainlere uygulamak için aşağıdan “Yeniden Uygula”.")}`
+      const iyi = `"${plan.ad}" ${cevir("kaydedildi; değişen limitler atanmış domainlere arka planda uygulanıyor.")}`
       setBasari(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
       setTimeout(() => setBasari(null), 6000)
       yukle()
+      setSinirNesli(n => n + 1)
     } catch (e) {
       const m = apiHata(e, cevir("Kaydetme başarısız"))
       setHata(m)
@@ -302,8 +319,8 @@ export default function PaketDetayPage() {
           </Alan>
           <Alan etiket={cevir("Varsayılan Plan")}>
             <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
-              <input type="checkbox" checked={plan.varsayilan} onChange={e => P('varsayilan', e.target.checked)} className="rounded" />
-              <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlere otomatik atansın")}</span>
+              <input type="checkbox" checked={plan.varsayilan} disabled={bayi && plan.varsayilan} onChange={e => P('varsayilan', e.target.checked)} className="rounded" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{bayi && plan.varsayilan ? cevir("Varsayılan planınız — değiştirmek için başka bir planı varsayılan yapın") : cevir("Yeni domainlere otomatik atansın")}</span>
             </label>
           </Alan>
           <Alan etiket={cevir("Açıklama")} span={2}>
@@ -324,7 +341,7 @@ export default function PaketDetayPage() {
       </Kart>
 
       {/* Kaynak Limitleri */}
-      <Kart baslik={cevir("Kaynak Limitleri")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M5 21V10M12 21V4M19 21v-7M3 21h18"/></svg>} alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
+      <Kart baslik={cevir("Kaynak Limitleri")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M5 21V10M12 21V4M19 21v-7M3 21h18"/></svg>} alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydedince atanmış domainlere otomatik uygulanır.")}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Alan etiket="CPU %" ipucu={cevir("100 = 1 çekirdek (systemd CPUQuota)")}>
             <input type="number" min={10} max={2000} value={plan.cpu_yuzde} onChange={e => P('cpu_yuzde', Number(e.target.value) || 0)} className={inpNum} />
@@ -332,28 +349,37 @@ export default function PaketDetayPage() {
           <Alan etiket="RAM (MB)" ipucu={cevir("Hard MemoryMax; MemoryHigh otomatik %90")}>
             <input type="number" min={64} value={plan.ram_mb} onChange={e => P('ram_mb', Number(e.target.value) || 0)} className={inpNum} />
           </Alan>
-          <Alan etiket="Max Process" ipucu={cevir("systemd TasksMax — PHP-FPM worker dahil")}>
+          {acik('max_process') && <Alan etiket="Max Process" ipucu={cevir("systemd TasksMax — PHP-FPM worker dahil")}>
             <input type="number" min={5} value={plan.max_process} onChange={e => P('max_process', Number(e.target.value) || 0)} className={inpNum} />
-          </Alan>
-          <Alan etiket={cevir("MySQL Bağlantı")} ipucu="MAX_USER_CONNECTIONS">
+          </Alan>}
+          {acik('mysql_max_baglanti') && <Alan etiket={cevir("MySQL Bağlantı")} ipucu="MAX_USER_CONNECTIONS">
             <input type="number" min={1} value={plan.mysql_max_baglanti} onChange={e => P('mysql_max_baglanti', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>}
+          <Alan etiket="Disk (MB)" ipucu={bayi ? cevir("Bayi planında 0 (sınırsız) olamaz") : cevir("0 = sınırsız")}>
+            <input type="number" min={bayi ? 1 : 0} value={plan.disk_kota_mb} onChange={e => P('disk_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+            <HavuzIpucu d={havuzDurumu(sinir, 'disk')} />
           </Alan>
-          <Alan etiket="Disk (MB)" ipucu={cevir("0 = sınırsız")}>
-            <input type="number" min={0} value={plan.disk_kota_mb} onChange={e => P('disk_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+          <Alan etiket={cevir("Trafik (MB/ay)")} ipucu={bayi ? cevir("Bayi planında 0 (sınırsız) olamaz") : cevir("0 = sınırsız")}>
+            <input type="number" min={bayi ? 1 : 0} value={plan.trafik_kota_mb} onChange={e => P('trafik_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+            <HavuzIpucu d={havuzDurumu(sinir, 'trafik')} />
           </Alan>
-          <Alan etiket={cevir("Trafik (MB/ay)")} ipucu={cevir("0 = sınırsız")}>
-            <input type="number" min={0} value={plan.trafik_kota_mb} onChange={e => P('trafik_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
-          </Alan>
-          <Alan etiket={cevir("Inode Kotası")} ipucu={cevir("Toplam dosya + dizin sayısı")}>
+          {acik('inode_kota') && <Alan etiket={cevir("Inode Kotası")} ipucu={cevir("Toplam dosya + dizin sayısı")}>
             <input type="number" min={1000} value={plan.inode_kota} onChange={e => P('inode_kota', Number(e.target.value) || 0)} className={inpNum} />
-          </Alan>
-          <Alan etiket={cevir("I/O Ağırlık")} ipucu="systemd IOWeight (1-1000)">
+          </Alan>}
+          {acik('io_agirlik') && <Alan etiket={cevir("I/O Ağırlık")} ipucu="systemd IOWeight (1-1000)">
             <input type="number" min={1} max={1000} value={plan.io_agirlik} onChange={e => P('io_agirlik', Number(e.target.value) || 0)} className={inpNum} />
-          </Alan>
-          <Alan etiket="PHP-FPM max_children" ipucu={cevir("0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.")}>
+          </Alan>}
+          {acik('pm_max_children') && <Alan etiket="PHP-FPM max_children" ipucu={cevir("0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.")}>
             <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = Otomatik")} />
-          </Alan>
+          </Alan>}
         </div>
+        {bayi && (
+          <p className="mt-3 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
+            <span>{cevir("IO, veritabanı governor, process, inode ve PHP-FPM sınırları yöneticiniz tarafından belirlenir.")}</span>
+          </p>
+        )}
+        {acik('io_read_mbps') && (<>
         <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Disk G/Ç (mutlak throttle — IOWeight'ten farklı; cgroup v2)")}</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
           <Alan etiket={cevir("Disk Okuma (MB/s)")} ipucu={cevir("Mutlak okuma bant genişliği. 0 = sınırsız")}>
@@ -369,6 +395,8 @@ export default function PaketDetayPage() {
             <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
           </Alan>
         </div>
+        </>)}
+        {acik('db_max_queries_per_hour') && (<>
         <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)")}</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
           <Alan etiket={cevir("Maks. Sorgu/Saat")} ipucu={cevir("MAX_QUERIES_PER_HOUR. 0 = sınırsız")}>
@@ -381,6 +409,7 @@ export default function PaketDetayPage() {
             <input type="number" min={0} value={plan.db_max_query_seconds} onChange={e => P('db_max_query_seconds', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
           </Alan>
         </div>
+        </>)}
       </Kart>
 
       {/* Sayısal Sınırlar — posta alanlari mail eklentisi aktifken eklenir */}
@@ -401,12 +430,15 @@ export default function PaketDetayPage() {
             <>
               <Alan etiket={cevir("E-posta Kutusu")} ipucu={cevir("Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz")}>
                 <input type="number" min={0} value={plan.max_email} onChange={e => P('max_email', Number(e.target.value) || 0)} className={inpNum} />
+                <TavanIpucu tavan={bayi ? sinir?.mail_max_email : 0} />
               </Alan>
               <Alan etiket={cevir("Saatlik Gönderim")} ipucu={cevir("Kutu basina giden mail/saat. 0 = sinirsiz")}>
                 <input type="number" min={0} value={plan.saatlik_mail_limiti} onChange={e => P('saatlik_mail_limiti', Number(e.target.value) || 0)} className={inpNum} />
+                <TavanIpucu tavan={bayi ? sinir?.mail_saatlik_limit : 0} />
               </Alan>
               <Alan etiket={cevir("Kutu Depolama (MB)")} ipucu={cevir("Posta kutusu basina disk kotasi. 0 = sinirsiz")}>
                 <input type="number" min={0} value={plan.mail_kutu_kota_mb} onChange={e => P('mail_kutu_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+                <TavanIpucu tavan={bayi ? sinir?.mail_kutu_kota_mb : 0} mb />
               </Alan>
             </>
           )}
@@ -474,7 +506,7 @@ export default function PaketDetayPage() {
       </>)}
 
       {/* Atanmış domainler */}
-      <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
+      <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan kaydedilince limitler bu domainlere otomatik uygulanır; tek bir domain için elle tekrarlamak isterseniz “Yeniden Uygula”.")}>
         {domainler.length === 0 ? (
           <div className="text-sm text-slate-400 py-6 text-center">{cevir("Henüz bu plana atanmış domain yok.")}</div>
         ) : (
@@ -538,6 +570,23 @@ function ozetAdet(v?: number) {
   if (v === undefined || v === null) return '—'
   return v <= 0 ? cevir('sınırsız') : v.toLocaleString('tr-TR')
 }
+// Bayi paket havuzu ipucu (sunucu kuralı: fazla satış kapalıyken plan < havuz).
+function HavuzIpucu({ d }: { d: ReturnType<typeof havuzDurumu> }) {
+  if (!d) return null
+  return (
+    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+      {cevirT(cevir("Paketinizde kalan: {0} / {1}"), mbOkunur(d.kalan), mbOkunur(d.havuz))}
+      {' · '}{d.fazla ? cevir("fazla satış açık") : cevirT(cevir("plan değeri {0} altında olmalı"), mbOkunur(d.havuz))}
+    </p>
+  )
+}
+
+// Bayi paketinin posta tavanı ipucu (0 = tavan yok → gösterilmez).
+function TavanIpucu({ tavan, mb }: { tavan?: number; mb?: boolean }) {
+  if (!tavan || tavan <= 0) return null
+  return <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{cevirT(cevir("Paket tavanı: {0}"), mb ? mbOkunur(tavan) : tavan.toLocaleString())}</p>
+}
+
 function OzetSat({ e, d }: { e: string; d: string }) {
   return (
     <div>
