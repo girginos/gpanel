@@ -251,6 +251,10 @@ func BayiTaahhut(ctx context.Context, db *sql.DB, rid int64) (disk, trafik int64
 	return disk, trafik, err
 }
 
+// PlanSonrasiUygula — dışa açık "Yeniden Uygula" yolu: plan DÜZENLENİNCE
+// (plans.Update) bağlı her hostinge aynı işlev uygulanır (main, plans.HostingUygula'ya bağlar).
+func PlanSonrasiUygula(db *sql.DB, did int64, ad string) { planSonrasiUygula(db, did, ad) }
+
 // planSonrasiUygula — plan değişiminden sonra (arka planda, kendi context'i) limitleri,
 // WAF'ı ve posta limitlerini yeniden uygular. Değişken: testler sistem yan etkisi
 // (systemd/nginx) olmadan sahteyle değiştirir.

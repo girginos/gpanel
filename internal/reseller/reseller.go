@@ -17,6 +17,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/plans"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -170,7 +171,14 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "bayi.olustur", req.Kullanici,
 		fmt.Sprintf("paket=%d domain=%d disk=%dMB", req.PaketID, req.MaxDomain, req.MaxDiskMB), id, true)
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "kullanici": req.Kullanici})
+	// Her bayinin kendi varsayılan hosting planı olur (plans.BayiVarsayilanSagla).
+	// Başarısızlık bayiyi geri almaz: açılış uzlaştırması (BayiVarsayilanUzlastir)
+	// ve plansız taşıma yolu aynı işlevi yeniden dener.
+	varsayilanPlan, _, perr := plans.BayiVarsayilanSagla(r.Context(), h.DB, id, uid, kul)
+	if perr != nil {
+		log.Printf("bayi %d varsayılan planı oluşturulamadı: %v", id, perr)
+	}
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "kullanici": req.Kullanici, "varsayilan_plan_id": varsayilanPlan})
 }
 
 type guncelleReq struct {

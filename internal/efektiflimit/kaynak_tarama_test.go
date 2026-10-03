@@ -22,6 +22,7 @@ var beyazListe = map[string]string{
 	"internal/plans/plans.go":           "plan CRUD + tohum (planın kendisi)",
 	"internal/plans/kapsam.go":          "plan kapsamı / devir (planın kendisi)",
 	"internal/plans/donustur.go":        "eski kopya → üst yazım dönüşümü (plan satırlarını karşılaştırır)",
+	"internal/plans/bayi_plan.go":       "bayi varsayılan planı: kökün şablon planı (planın kendisi, hosting değil)",
 	"internal/domains/handlers.go":      "Create: YENİ hostingin (üst yazımı yok) plan değeri + nginx/php tohumu",
 	"internal/domains/handlers_plan.go": "yeniPlanEfektifKota: hosting yoksa yalnız plan değeri",
 	"internal/reseller/plan.go":         "bayi paketi: kökün en küçük global planı (hosting değil)",

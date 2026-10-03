@@ -56,6 +56,12 @@ func dh_cagir(t *testing.T, kim, yontem, yol string) (int, string) {
 	// Update kapısı (bayi): plan 3 bayinin, yabancı hostinge bağlı değil.
 	sd.Satirlar("SELECT reseller_id, domain_id FROM service_plans", []any{int64(7), nil})
 	sd.Satirlar("SELECT COUNT(*) FROM domains WHERE plan_id=? AND reseller_id<>?", []any{int64(0)})
+	// Update mevcut satırı okur (kök alanları korunur — bayi_plan.go); bayi havuzu sınırsız.
+	sd.Satirlar("reseller_id, domain_id FROM service_plans WHERE id=?", []any{int64(3), "bayi-plan", "", int64(1024), int64(1024),
+		int64(1), int64(1), int64(0), int64(0), int64(0), int64(1), int64(100), int64(512), int64(50), int64(50000), int64(100), int64(25),
+		int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), "8.3", int64(0), int64(64), "",
+		int64(0), "on", int64(1), int64(0), "2026-10-03", int64(7), nil})
+	sd.Satirlar("SELECT max_disk_mb, max_trafik_mb, fazla_satis FROM users", []any{int64(0), int64(0), int64(0)})
 	h := &Handlers{DB: db}
 	r := chi.NewRouter()
 	r.With(middleware.RequireAuth(dh_sir), middleware.AdminVeyaReseller).Post("/plans", h.Create)

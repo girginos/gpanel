@@ -184,6 +184,7 @@ func main() {
 		log.Printf("plans seed-sync warn: %v", err)
 	}
 	ozelPlanAcilis(d) // D1: eski özel kopya planlar → hostinge özel üst yazım (Heal'lerden ÖNCE)
+	bayiPlanAcilis(d) // her bayinin kendi varsayılan planı (idempotent) + plan düzenle → yeniden uygula
 	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
 		log.Printf("dns template seed warn: %v", err)
 	}
@@ -922,6 +923,7 @@ func main() {
 				r.With(middleware.AdminVeyaReseller).Put("/plans/{id}", plansH.Update)
 				r.With(middleware.AdminVeyaReseller).Delete("/plans/{id}", plansH.Delete)
 				r.With(middleware.AdminVeyaReseller).Get("/plans/{id}/domains", plansH.DomainlerAra)
+				bayiPlanRotalari(r, plansH) // GET /plans/bayi-sinir, POST /plans/{id}/varsayilan
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/plan", domainsH.SetPlan)
 				// Domain IP değiştir (tek + bayi toplu): yönetici her domain, bayi yalnız kendi
 				// hostingi ve yalnız kendisine açık sunucu IP'leri (internal/ipyonetim/domain_ip.go).
