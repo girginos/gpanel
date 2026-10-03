@@ -551,6 +551,7 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
+			apiAnahtarRotalari(r, d)        // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
 			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
@@ -1311,6 +1312,9 @@ func semaDogrula(d *sql.DB) {
 		// 0115: otomatik yedek planının kaynağı — yoksa zamanlayıcı kaynak süzgecini
 		// atlar (eski davranış) ve yönetici planı 'kok' olarak işaretlenemez.
 		{"domains", "backup_plan_kaynak"},
+		// 0128: API anahtarları — yoksa anahtarla kimlik doğrulama 503, yönetim uçları 500.
+		{"api_anahtarlari", "ozet"},
+		{"api_anahtarlari", "iptal_neden"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
