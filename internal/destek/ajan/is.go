@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unicode/utf8"
 
+	"girginospanel/internal/destek/arac"
 	"girginospanel/internal/destek/baglam"
 	p "girginospanel/internal/destek/protokol"
 )
@@ -143,7 +145,8 @@ func (a *Ajan) isYurut(ctx context.Context, m *p.IsEmri) *p.IsSonucu {
 	_, _ = a.DB.ExecContext(ctx, `UPDATE destek_baglantilari SET son_kullanim=CURRENT_TIMESTAMP WHERE id=?`, b.ID)
 
 	var sonuc p.IsSonucu
-	if a.Yurutucu == nil {
+	yur := a.yurutucu()
+	if yur == nil {
 		sonuc = p.IsSonucu{IsKodu: m.IsKodu, HataKodu: p.HataIc, Ozet: "arac_yok: araç yürütücüsü bu panelde bağlı değil"}
 	} else {
 		kap := baglam.Kapsam{BaglantiID: b.Kimlik, Rol: b.Rol, Duzey: etkin, ResellerID: b.ResellerID, PanelUserID: b.PanelUserID,
@@ -151,8 +154,18 @@ func (a *Ajan) isYurut(ctx context.Context, m *p.IsEmri) *p.IsSonucu {
 		if b.Rol != p.RolMusteri {
 			kap.DomainID = 0
 		}
-		yctx, iptal := context.WithTimeout(baglam.Ile(ctx, kap), a.IsZamanAsimi)
-		sonuc = a.yurutKorumali(yctx, ob, *m)
+		// arac paketinin yerel kimlik sözleşmesi (HesapIDleri = Hesaplar ile aynı sıra).
+		idler := make([]int64, len(hs))
+		for i, h := range hs {
+			idler[i] = h.DomainID
+		}
+		akim := arac.Kimlik{Rol: b.Rol, HesapIDleri: idler, TgKisa: aracTgKisa(b.TgKullaniciAdi, b.TgUserID)}
+		if b.Rol != p.RolMusteri {
+			akim.KullaniciID = b.PanelUserID
+			akim.Kullanici = a.kullaniciAdi(ctx, b.PanelUserID, b.Rol)
+		}
+		yctx, iptal := context.WithTimeout(arac.KimlikBagla(baglam.Ile(ctx, kap), akim), a.IsZamanAsimi)
+		sonuc = a.yurutKorumali(yctx, yur, ob, *m)
 		iptal()
 	}
 	s := a.sonucTemizle(m.IsKodu, sonuc)
@@ -164,14 +177,36 @@ func (a *Ajan) isYurut(ctx context.Context, m *p.IsEmri) *p.IsSonucu {
 	return s
 }
 
-func (a *Ajan) yurutKorumali(ctx context.Context, ob p.OturumBaglami, m p.IsEmri) (s p.IsSonucu) {
+func (a *Ajan) yurutKorumali(ctx context.Context, yur Yurutucu, ob p.OturumBaglami, m p.IsEmri) (s p.IsSonucu) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("🔴 destek: araç %s yürütülürken panik: %v", m.Arac, r)
 			s = p.IsSonucu{IsKodu: m.IsKodu, HataKodu: p.HataIc}
 		}
 	}()
-	return a.Yurutucu.Yurut(ctx, ob, m)
+	return yur.Yurut(ctx, ob, m)
+}
+
+// aracTgKisa: arac.Kimlik.TgKisa (^[A-Za-z0-9_-]{1,24}$): kullanıcı adı ya da id'nin son 6 hanesi.
+func aracTgKisa(ad string, id int64) string {
+	if ad != "" {
+		return kesRune(ad, 24)
+	}
+	s := strconv.FormatInt(id, 10)
+	if len(s) > 6 {
+		s = s[len(s)-6:]
+	}
+	return s
+}
+
+// kullaniciAdi: bayi/kök users.username (kökte boşsa "root").
+func (a *Ajan) kullaniciAdi(ctx context.Context, uid int64, rol p.Rol) string {
+	var ad string
+	_ = a.DB.QueryRowContext(ctx, `SELECT username FROM users WHERE id=?`, uid).Scan(&ad)
+	if ad == "" && rol == p.RolKok {
+		ad = "root"
+	}
+	return ad
 }
 
 var ozetSatirSonu = strings.NewReplacer("\r\n", " / ", "\n", " / ", "\r", " / ")

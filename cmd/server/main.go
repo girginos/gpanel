@@ -1082,6 +1082,9 @@ func main() {
 		})
 	})
 
+	// Telegram destek: araç yürütücüsü (Parça B) TÜM rotalar kaydedildikten SONRA
+	// bağlanır — süreç içi yönlendirici tam olmalı (cmd/server/destek_arac.go).
+	destekA.YurutucuAyarla(destekYurutucuKur(d, r, cfg))
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           r,

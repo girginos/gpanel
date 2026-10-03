@@ -10,9 +10,9 @@ import (
 	"errors"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
+	"girginospanel/internal/destek/arac"
 	"girginospanel/internal/destek/baglam"
 	p "girginospanel/internal/destek/protokol"
 
@@ -240,41 +240,26 @@ func izDenetle(b *baglanti, k kimlikDurumu) p.IptalNedeni {
 
 // ---- hesap listesi (oturum kapsamı) ----
 
-var hesapEtiketDeseniYerel = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
-
-// hesaplarOku: bağlantının kapsamındaki hesaplar, kararlı sırayla (domains.id artan).
-// Etiket protokol desenine uymayan hesap (bozuk ad) LİSTEYE ALINMAZ.
+// hesaplarOku: bağlantının kapsamındaki hesaplar. Liste arac.HesapListesi'nden
+// gelir (yürütücünün beklediği sıra ve süzgeçle BİREBİR aynı: domains.id artan,
+// etiket desenine uymayan ad yok; müşteride askıdaki hosting listeye girmez).
 func hesaplarOku(ctx context.Context, db *sql.DB, b *baglanti) ([]baglam.Hesap, error) {
-	var rows *sql.Rows
-	var err error
-	switch b.Rol {
-	case p.RolMusteri:
-		rows, err = db.QueryContext(ctx, `SELECT id, alan_adi FROM domains WHERE id=?`, b.DomainID)
-	case p.RolBayi:
-		rows, err = db.QueryContext(ctx, `SELECT id, alan_adi FROM domains WHERE reseller_id=? ORDER BY id LIMIT ?`, b.PanelUserID, p.EnCokHesap)
-	case p.RolKok:
-		rows, err = db.QueryContext(ctx, `SELECT id, alan_adi FROM domains ORDER BY id LIMIT ?`, p.EnCokHesap)
-	default:
-		return nil, errors.New("rol bilinmiyor")
+	kid, did := b.PanelUserID, int64(0)
+	if b.Rol == p.RolMusteri {
+		kid, did = 0, b.DomainID
 	}
+	et, idler, err := arac.HesapListesi(ctx, db, b.Rol, kid, did)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []baglam.Hesap
-	for rows.Next() {
-		var id int64
-		var ad string
-		if err := rows.Scan(&id, &ad); err != nil {
-			return nil, err
-		}
-		ad = strings.ToLower(strings.TrimSpace(ad))
-		if !hesapEtiketDeseniYerel.MatchString(ad) {
-			continue
-		}
-		out = append(out, baglam.Hesap{Sira: len(out) + 1, Etiket: ad, DomainID: id})
+	if len(et) != len(idler) {
+		return nil, errors.New("hesap listesi tutarsız")
 	}
-	return out, rows.Err()
+	out := make([]baglam.Hesap, len(et))
+	for i := range et {
+		out[i] = baglam.Hesap{Sira: et[i].Sira, Etiket: et[i].Etiket, DomainID: idler[i]}
+	}
+	return out, nil
 }
 
 func hesapListesiOzeti(hs []baglam.Hesap) string {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/destek/arac"
 	"girginospanel/internal/destek/iptal"
 	p "girginospanel/internal/destek/protokol"
 )
@@ -512,5 +513,30 @@ func TestKayitReddi(t *testing.T) {
 	}
 	if a.Bagli() || !strings.Contains(a.DurumAl().SonHata, string(p.HataLisans)) {
 		t.Fatalf("durum: %+v", a.DurumAl())
+	}
+}
+
+// Gerçek araç yürütücüsü (internal/destek/arac) ile sözleşme: ajanın kurduğu yerel
+// kimlik (arac.KimlikBagla) ve hesap listesi (arac.HesapListesi) yürütücünün kimlik
+// ve kapsam kapılarından geçer — müşteri ve bayi bağlantısı için yetki_yok/kapsam_disi YOK.
+func TestGercekYurutucuSozlesmesi(t *testing.T) {
+	o := kurOrtam(t, false, true)
+	o.a.YurutucuAyarla(arac.Yeni(o.db, o.h, []string{dtKanarya}))
+	for _, c := range []struct {
+		tok, tg string
+		tgID    int64
+		param   string
+	}{{o.mA, "musteri_a", 401, `{"hesap":1}`}, {o.bA, "bayi_a_tg", 402, `{"hesap":2}`}, {o.kok, "", 403, `{"hesap":3}`}} {
+		kim := o.eslestir(c.tok, c.tgID, c.tg, "okuma")
+		o.onayla(c.tok, kim)
+		e := o.m.isEmri(kim, "hesap_ozet", c.param)
+		o.m.gonder(e)
+		s := o.m.isSonucu(e.IsKodu)
+		if s.HataKodu == p.HataYetki || s.HataKodu == p.HataKapsam || strings.Contains(s.Ozet, "arac_yok") {
+			t.Fatalf("%s: gerçek yürütücü yerel kimliği reddetti: %+v", c.tg, s)
+		}
+		if strings.Contains(s.Ozet+strings.Join(s.Satirlar, ""), dtKanarya) {
+			t.Fatal("kanarya sızdı")
+		}
 	}
 }

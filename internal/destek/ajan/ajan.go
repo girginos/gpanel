@@ -127,6 +127,19 @@ func (a *Ajan) Baslat(ctx context.Context) {
 	go a.korunmus(ctx, "süpürge", a.supurgeDongusu)
 }
 
+// YurutucuAyarla: araç yürütücüsünü (sonradan, döngü çalışırken) bağlar.
+func (a *Ajan) YurutucuAyarla(y Yurutucu) {
+	a.mu.Lock()
+	a.Yurutucu = y
+	a.mu.Unlock()
+}
+
+func (a *Ajan) yurutucu() Yurutucu {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Yurutucu
+}
+
 // Durt: ayar değişti — döngüyü hemen uyandır.
 func (a *Ajan) Durt() {
 	select {
