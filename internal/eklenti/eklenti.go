@@ -273,6 +273,11 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 			req.Header.Del("X-Gosp-Uid")
 			req.Header.Del("X-Gosp-Rol")
 			req.Header.Del("X-Gosp-Sahip") // spoof koruması
+			// API anahtarı eklenti sürecine SIZMASIN (v1'de vekil anahtara zaten
+			// kapalı — izin tablosu; derinlemesine savunma).
+			if middleware.AnahtarFrom(req) != nil {
+				req.Header.Del("Authorization")
+			}
 			if mc := middleware.MusteriClaimsFrom(req); mc != nil {
 				// Müşteri: kapsam TEK alan adıdır. Eklenti bunu X-Gosp-Sahip'ten
 				// okuyup her uçta hedef domain'in eşleşmesini şart koşar.
