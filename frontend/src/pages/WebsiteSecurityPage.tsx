@@ -12,6 +12,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { TaramaButonu } from '@/components/TaramaButonu'
 
 /*
  * Website Security Monitor — yönetici + bayi.
@@ -122,6 +123,7 @@ const WSEC_EN: Record<string, string> = {
   "Tarama başlatıldı": "Scan started",
   "Sonuçlar tarama bitince burada görünür.": "Results appear here when the scan finishes.",
   "Tarama sınırı": "Scan limit",
+  "Sunucu geneli tarama sürüyor": "A server-wide scan is in progress",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -302,7 +304,8 @@ export default function WebsiteSecurityPage() {
         </div>
         <Button
           color="primary"
-          ikon={I.oynat}
+          ikon={I.kalkanTara}
+          className="max-sm:min-h-10"
           onClick={tumunuTara}
           yukleniyor={taranıyor || !!status?.running}
         >
@@ -407,18 +410,17 @@ export default function WebsiteSecurityPage() {
                       <td className="px-3 py-2.5"><DurumRozet u={u} /></td>
                       <td className="px-3 py-2.5 text-xs text-slate-500">{u.son_tarama || '—'}</td>
                       <td className="px-3 py-2.5 text-right">
-                        <Button
-                          variant="outlined"
-                          boyut="sm"
-                          ikon={I.oynat}
+                        <TaramaButonu
+                          durum={u.durum === 'taraniyor' ? 'taraniyor' : u.durum === 'sirada' ? 'sirada' : tarananDomain === u.domain_id ? 'baslatiliyor' : 'hazir'}
+                          etiket={cevir("Tara")}
+                          baglam={u.alan_adi || `#${u.domain_id}`}
+                          acikSayisi={u.durum === 'acik' ? u.bulgu_sayisi : 0}
                           onClick={(e) => { e.stopPropagation(); void domainTara(u.domain_id) }}
-                          yukleniyor={tarananDomain === u.domain_id}
                           // Yönetici ucu tek kilitli (tarama sürerken 409) → tarama boyunca kapalı;
                           // bayi isteği kuyruğa girer, yalnız zaten sırada/taranan satır kapalı.
-                          disabled={(yonetici && status?.running) || u.durum === 'taraniyor' || u.durum === 'sirada'}
-                        >
-                          {cevir("Tara")}
-                        </Button>
+                          kilitli={yonetici && !!status?.running}
+                          kilitNedeni={cevir("Sunucu geneli tarama sürüyor")}
+                        />
                       </td>
                     </tr>
                   )

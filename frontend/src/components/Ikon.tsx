@@ -44,6 +44,8 @@ export const I: Record<string, string> = {
   db: 'M4 6c0-1.66 3.58-3 8-3s8 1.34 8 3-3.58 3-8 3-8-1.34-8-3M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3',
   mail: 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 7l-10 6L2 7',
   kalkan: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10',
+  // kalkanTara — güvenlik taraması (kalkan + büyüteç): Website Security "Tara" eylemleri.
+  kalkanTara: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10|M11.5 13.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z|M13.3 12.8l2 2',
   disket: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8',
   oynat: 'M5 3l14 9-14 9z',
   durdur: 'M6 6h12v12H6z',

@@ -12,6 +12,7 @@ import { Button, Badge } from '@/components/ui'
 import type { Color } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { TaramaButonu } from '@/components/TaramaButonu'
 
 /*
  * Domaine ÖZEL güvenlik sayfası — bir domainin bilinen açıklarını listeler.
@@ -174,6 +175,8 @@ export default function DomainSecurityPage() {
   const alanAdi = uyg[0]?.alan_adi || sayfa.items[0]?.alan_adi || `#${domainID}`
   const taraniyorMu = uyg.some((u) => u.durum === 'taraniyor')
   const siradaMu = !taraniyorMu && uyg.some((u) => u.durum === 'sirada')
+  // Son taramada açık: envanterin 'acik' satırlarının bulgu sayısı (sunucu verisi; filtreden bağımsız)
+  const acikSayisi = uyg.reduce((t, u) => t + (u.durum === 'acik' ? u.bulgu_sayisi : 0), 0)
   const sev = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 }
     for (const b of sayfa.items) if (b.severity in c) (c as Record<string, number>)[b.severity]++
@@ -225,9 +228,13 @@ export default function DomainSecurityPage() {
             )}
           </div>
         </div>
-        <Button color="primary" ikon={I.oynat} onClick={domainTara} yukleniyor={taranıyor || taraniyorMu || siradaMu}>
-          {taraniyorMu ? cevir("Taranıyor…") : siradaMu ? cevir("Sırada") : (taranıyor ? cevir("Başlatılıyor…") : cevir("Bu Domaini Tara"))}
-        </Button>
+        <TaramaButonu
+          boyut="md"
+          durum={taraniyorMu ? 'taraniyor' : siradaMu ? 'sirada' : taranıyor ? 'baslatiliyor' : 'hazir'}
+          etiket={cevir("Bu Domaini Tara")}
+          acikSayisi={acikSayisi}
+          onClick={() => { void domainTara() }}
+        />
       </div>
 
       {/* Şiddet filtresi */}
