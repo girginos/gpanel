@@ -118,7 +118,8 @@ func bdo_ortam(t *testing.T) *bdoOrtam {
 	t.Cleanup(func() { _ = panel.Close() })
 	for _, q := range []string{
 		`CREATE TABLE domains (id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', customer_id BIGINT UNSIGNED NULL) ENGINE=InnoDB`,
+			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', customer_id BIGINT UNSIGNED NULL,
+			askida TINYINT NOT NULL DEFAULT 0) ENGINE=InnoDB`,
 		`CREATE TABLE customers (id BIGINT UNSIGNED NOT NULL PRIMARY KEY, plan_id BIGINT UNSIGNED NULL) ENGINE=InnoDB`,
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED NOT NULL PRIMARY KEY, max_db INT NOT NULL DEFAULT 0) ENGINE=InnoDB`,
 		// canlı şema: DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci (harf duyarsız)

@@ -776,6 +776,11 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	socket, err := phpSurumUygula(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
+	if errors.Is(err, hesaplar.ErrHesapAskida) {
+		// Hiçbir şeye dokunulmadı (havuz askıda başlatılmaz).
+		httpx.WriteError(w, http.StatusConflict, "hesap askıda — PHP sürümü askıdan alındıktan sonra değiştirilebilir")
+		return
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+nginxset.SunucuHatasi(r, "domains.php", id, err))
 		return
@@ -1379,19 +1384,23 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 	askida := req.Durum == "pasif"
 	rid := middleware.ResellerIDFrom(r)
 	uid, kul := middleware.Aktor(r)
+	kaynak := elleAskiKaynagi(r) // bayi kökün askısını açamaz → atlanan
+	// Başlatılan toplu işlem istemci kopsa / HTTP zaman aşımı dolsa da sonuna
+	// kadar yürür (yarıda kesilen döngü hangi hesabın işlendiğini belirsiz bırakırdı).
+	ctx := context.WithoutCancel(r.Context())
 
 	basarili, atlanan := 0, 0
 	for _, id := range req.IDs {
 		// Kapsam: bayi yalniz KENDI hosting hesabina dokunabilir.
 		if rid > 0 {
 			var sahip int64
-			if err := h.DB.QueryRowContext(r.Context(),
+			if err := h.DB.QueryRowContext(ctx,
 				`SELECT COALESCE(reseller_id,0) FROM domains WHERE id=?`, id).Scan(&sahip); err != nil || sahip != rid {
 				atlanan++
 				continue
 			}
 		}
-		alanAdi, err := h.AskiUygula(r.Context(), id, askida, "manuel")
+		alanAdi, err := h.AskiUygula(ctx, id, askida, kaynak)
 		if err != nil {
 			log.Printf("toplu durum: domain %d: %v", id, err)
 			atlanan++

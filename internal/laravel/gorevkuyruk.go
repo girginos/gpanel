@@ -114,7 +114,13 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 	// yol tabanlı os/exec (MkdirAll, chown, os.Chown ...) kaynak koruma testiyle yasak;
 	// davranış TestScheduleHandler_LogDiziniVeCron'da (bellek içi sahte DB + sahte ev +
 	// cronDizini dikişi) kilitli.
+	// Hesap askısı (HesapAski) ile aynı alan adı kilidi: askı yazıldıktan sonra gelen
+	// açma isteği askiKapisi'na takılır, önce gelen açma askı adımından önce biter.
+	defer kilitle(id)()
 	if req.Aktif {
+		if !askiKapisi(w, r, h.DB, id, sk) {
+			return
+		}
 		home, err := evDizini(sk)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, err.Error())
@@ -150,8 +156,11 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 
 var reConn = regexp.MustCompile(`^[a-z0-9_]+$`)
 
+// queueUnitDizini — kuyruk işleyicisi birimlerinin dizini (hesap askısı da buna bakar).
+const queueUnitDizini = "/etc/systemd/system"
+
 func queueUnitName(id int64) string { return "girginos-laravel-queue-" + fmt.Sprint(id) }
-func queueUnitPath(id int64) string { return "/etc/systemd/system/" + queueUnitName(id) + ".service" }
+func queueUnitPath(id int64) string { return queueUnitDizini + "/" + queueUnitName(id) + ".service" }
 
 // queueUnit: sertleştirilmiş worker unit'i (tenantfpm reçetesi; YASAK direktifler yok).
 func queueUnit(id int64, sk, appDir, php, conn string, timeout, maxJobs int) string {
@@ -208,6 +217,11 @@ func (h *Handlers) Queue(w http.ResponseWriter, r *http.Request) {
 		_ = exec.Command("systemctl", "reset-failed", unit).Run()
 		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET queue_enabled=0 WHERE domain_id=?`, id)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "queue_enabled": false})
+		return
+	}
+	// Askıdaki hesaba işleyici açılmaz (kapatmak serbest). Kilit altında: askı
+	// adımı (HesapAski) da aynı kilidi alır.
+	if !askiKapisi(w, r, h.DB, id, sk) {
 		return
 	}
 	appDir, err := h.appDizin(r, id, sk)

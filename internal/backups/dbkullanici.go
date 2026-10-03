@@ -313,6 +313,10 @@ func dbKullanicilariUygula(db *sql.DB, domainID int64, dbDir string, izin map[st
 		}
 		switch {
 		case strings.HasPrefix(s, "CREATE USER IF NOT EXISTS "):
+			// Askıdaki hesabın yedeğinde SHOW CREATE USER "ACCOUNT LOCK" taşır. Kilit
+			// arşivden gelmez: kullanıcı kilitsiz doğar, kilit durumu geri yükleme
+			// sonunda hesabın BUGÜNKÜ askısından uygulanır (dbKilidiniHesabaUydur).
+			s = reHesapKilidi.ReplaceAllString(s, "")
 		case grantSuzgeci(s, izin):
 		default:
 			log.Printf("backup: kullanicilar.sql reddedilen ifade: %.80s", s)
@@ -343,6 +347,26 @@ func dbKullanicilariUygula(db *sql.DB, domainID int64, dbDir string, izin map[st
 		_ = mysqlCalistir("FLUSH PRIVILEGES;")
 	}
 	return n, nil
+}
+
+// reHesapKilidi — CREATE USER satırındaki hesap kilidi (MariaDB SHOW CREATE USER
+// çıktısı). Yalnız SİLER: arşivden gelen satıra bir şey eklemez.
+var reHesapKilidi = regexp.MustCompile(`(?i)\s+ACCOUNT\s+LOCK\b`)
+
+// dbKilidiniHesabaUydur — geri yüklemeden sonra hesabın DB kullanıcılarının kilidi
+// hesabın askı durumuna (tek kaynak: hesaplar.HesapAskida) göre uygulanır. Askıda
+// alınmış yedek açık hesaba KİLİTLİ kullanıcı ("account is locked", panelde iz
+// yok) getirmez; askı SÜRERKEN yapılan geri yükleme (kimlikTamamla dahil) kilitsiz
+// kullanıcı bırakmaz.
+func dbKilidiniHesabaUydur(db *sql.DB, domainID int64, sk string) {
+	askida, err := hesaplar.HesapAskida(context.Background(), db, sk)
+	if err != nil {
+		log.Printf("restore %s: DB kullanıcı kilidi uygulanamadı: %v", sk, err)
+		return
+	}
+	if err := hesaplar.DBKullanicilariKilit(db, domainID, askida); err != nil {
+		log.Printf("restore %s: DB kullanıcı kilidi (askida=%v): %v", sk, askida, err)
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

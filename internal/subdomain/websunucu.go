@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -106,7 +105,7 @@ func webBackendGet(ctx context.Context, db *sql.DB, sid int64) string {
 // ── nginx vhost render (parite: backend switch + cache + client_max_body + başlıklar) ──
 
 func subApachePath(sk, altAd string) string {
-	return "/etc/httpd/conf.d/sub_apache_" + sk + "_" + altAd + ".conf"
+	return httpdConfD + "/sub_apache_" + sk + "_" + altAd + ".conf"
 }
 
 func subSecHeaders(n subNginx, ssl bool) string {
@@ -276,11 +275,11 @@ func subApacheYaz(sk, altAd, tamAd, docroot, socket string) error {
 	if err := os.WriteFile(subApachePath(sk, altAd), []byte(body), 0o644); err != nil {
 		return err
 	}
-	if out, err := exec.Command("httpd", "-t").CombinedOutput(); err != nil {
+	if out, err := komut("httpd", "-t"); err != nil {
 		_ = os.Remove(subApachePath(sk, altAd))
 		return fmt.Errorf("httpd doğrulanamadı: %s", strings.TrimSpace(string(out)))
 	}
-	_ = exec.Command("systemctl", "reload", "httpd").Run()
+	_, _ = komut("systemctl", "reload", "httpd")
 	return nil
 }
 
@@ -288,7 +287,7 @@ func subApacheSil(sk, altAd string) {
 	p := subApachePath(sk, altAd)
 	if _, err := os.Stat(p); err == nil {
 		_ = os.Remove(p)
-		_ = exec.Command("systemctl", "reload", "httpd").Run()
+		_, _ = komut("systemctl", "reload", "httpd")
 	}
 }
 
@@ -386,4 +385,4 @@ func (h *Handlers) WebPut(w http.ResponseWriter, r *http.Request) {
 // icin oraya konan her dosya erisim kisitlamasini atlatirdi. Kok, root-sahipli
 // /var/www/acme olmali -- ana domainle ayni. Sertifika verme tarafi
 // (ssl.go --webroot) da AYNI koku kullanmali, yoksa dogrulama kirilir.
-func acmeKok() string { return provisioner.AcmeWebroot() }
+func acmeKok() string { return acmeKoku() }

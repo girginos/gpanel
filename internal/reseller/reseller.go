@@ -3,6 +3,7 @@
 package reseller
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,10 +13,10 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
-	"girginospanel/internal/provisioner"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -327,7 +328,9 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		// ve bayi geri acilinca zincir ona hic dokunmadigi icin kalicilasiyordu.
 		k := kilit.Bayi(id)
 		k.Lock()
-		n, hatali, err := provisioner.BayiAskiUygula(h.DB, id, askida)
+		// Her hosting hesabı TEK yoldan (hesapaski.Uygula, kaynak 'bayi') geçer.
+		// İstemci bağlantısı kopsa da zincir yarıda kesilmesin: arka plan bağlamı.
+		n, hatali, err := hesapaski.BayiUygula(context.Background(), h.DB, id, askida)
 		k.Unlock()
 		etkilenen, basarisiz = n, hatali
 		if err != nil {

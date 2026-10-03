@@ -270,8 +270,8 @@ func TestTopluDurum_AskiHatasi_YanitaVeDenetimeHamGirmez(t *testing.T) {
 	for _, rol := range []string{"bayi", "admin"} {
 		sd, db := sahtedb.Yeni()
 		sd.Satirlar("SELECT COALESCE(reseller_id,0) FROM domains", []any{int64(7)})
-		sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo FROM domains",
-			[]any{"bayialan.test", "c_bayialan", int64(0)})
+		sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum",
+			[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(0), "", int64(0)})
 		r := chi.NewRouter()
 		r.With(middleware.RequireAuth(sh_sir)).Post("/domains/toplu/durum", (&Handlers{DB: db}).TopluDurum)
 		req := httptest.NewRequest(http.MethodPost, "/domains/toplu/durum", strings.NewReader(`{"ids":[42],"durum":"pasif"}`))
