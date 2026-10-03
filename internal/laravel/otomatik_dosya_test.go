@@ -764,7 +764,8 @@ func TestKaynakKoruma_RootDosyaIslemleriCapali(t *testing.T) {
 // TestKaynakKoruma_KiraciCapali: guvenli listesindeki "içine inilmeyen" yazıcıların KENDİSİ
 // güvenli mi? İki sınıf: (1) kiracı uid'siyle çalışanlar (envYaz/envYazici) — yol tabanlı
 // root os yazımı (os.WriteFile/os.Create/os.OpenFile/os.Chmod/os.Chown/os.Remove/os.Mkdir*)
-// YASAK, tek exec hedefi "runuser" olmalı; (2) yalnız kök yoluna yazanlar (cronYaz/cronSil) —
+// YASAK, doğrudan exec YASAK — süreç yalnız kiraci.Kiraci{...}.Komut ile (runuser, panel
+// ortamı/sırları çocuğa geçmez) başlatılır; (2) yalnız kök yoluna yazanlar (cronYaz/cronSil) —
 // her os yol argümanı cronDPath(...) çağrısı olmalı. Denetim boşluğu (b): envYaz gizlice
 // root os.WriteFile(dst,...) yaparsa bir üst test onu (guvenli, taranmıyor) yakalamıyordu.
 func TestKaynakKoruma_KiraciCapali(t *testing.T) {
@@ -775,18 +776,27 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 		"os.Mkdir": true, "os.MkdirAll": true, "os.Rename": true, "os.Symlink": true, "os.Link": true,
 		"os.ReadFile": true, "ioutil.WriteFile": true, "ioutil.ReadFile": true,
 	}
-	// (1) runuser ile kiracı olarak çalışanlar.
-	for _, ad := range []string{"envYaz", "TenantExec", "tenantExecEnv"} {
+	// (1) kiraci.Komut ile kiracı olarak çalışanlar.
+	// Devredenler: süreci kendisi başlatmaz, çekirdeğini ÇAĞIRMALI (zincir
+	// TenantExec → tenantExecEnv → tenantCalistir → kiraci.Komut).
+	devreder := map[string]string{"TenantExec": "tenantExecEnv", "tenantExecEnv": "tenantCalistir"}
+	for _, ad := range []string{"envYaz", "TenantExec", "tenantExecEnv", "tenantCalistir", "mkdirTenant"} {
 		g, ok := p.fonk[ad]
 		if !ok {
 			t.Errorf("%s bulunamadı", ad)
 			continue
 		}
-		var execCagri int
+		var komutCagri, devirCagri int
 		ast.Inspect(g.fd.Body, func(n ast.Node) bool {
 			ce, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
+			}
+			if kiraciKomutCagrisi(ce, g.paket) {
+				komutCagri++
+			}
+			if id, ok := ce.Fun.(*ast.Ident); ok && devreder[ad] != "" && id.Name == devreder[ad] {
+				devirCagri++
 			}
 			se, ok := ce.Fun.(*ast.SelectorExpr)
 			if !ok {
@@ -800,12 +810,18 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 			if yasakYazSel[sel] {
 				t.Errorf("%s: kiracı-çapalı yazıcı yol tabanlı root %s yapıyor", ad, sel)
 			}
-			if (sel == "exec.Command" || sel == "exec.CommandContext") && !execHedefRunuser(ce) {
-				t.Errorf("%s: exec hedefi \"runuser\" değil (kiracıya düşürme atlanmış olabilir)", ad)
+			if sel == "exec.Command" || sel == "exec.CommandContext" {
+				t.Errorf("%s: doğrudan %s — kiracı süreci yalnız kiraci.Kiraci{...}.Komut ile başlatılır (kimlik düşürme + panel ortamı yok)", ad, sel)
 			}
 			return true
 		})
-		_ = execCagri
+		if hedef := devreder[ad]; hedef != "" {
+			if devirCagri == 0 {
+				t.Errorf("%s: %s çağrısı yok (kiracı çekirdeği atlanmış olabilir)", ad, hedef)
+			}
+		} else if komutCagri == 0 {
+			t.Errorf("%s: kiraci.Kiraci{...}.Komut çağrısı yok (kiracıya düşürme atlanmış olabilir)", ad)
+		}
 	}
 	// (2) yalnız kök (id türevli) yola yazanlar: her os çağrısının yol argümanı cronDPath(...).
 	for _, ad := range []string{"cronYaz", "cronSil"} {
@@ -852,7 +868,7 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 // yazıcıya bağlanırdı; davranış testleri dikişi sahteyle değiştirdiği için bunu göremez.
 func TestKaynakKoruma_DikisDegerleri(t *testing.T) {
 	beklenen := map[string]string{
-		"envYazici":    "envYaz",       // kiracı uid'siyle runuser tee (KiraciCapali kilitler)
+		"envYazici":    "envYaz",       // kiracı uid'siyle kiraci.Komut tee (KiraciCapali kilitler)
 		"kimlikBul":    "tenantKimlik", // user.Lookup
 		"evKoku":       `"/home"`,
 		"cronDizini":   "cronDDizin",
@@ -965,18 +981,23 @@ func TestKaynakKoruma_DikisDegerleri(t *testing.T) {
 	}
 }
 
-// execHedefRunuser: exec.Command/CommandContext ilk (ya da CommandContext için ikinci) arg
-// sabit "runuser" mı?
-func execHedefRunuser(ce *ast.CallExpr) bool {
-	idx := 0
-	if se, ok := ce.Fun.(*ast.SelectorExpr); ok && se.Sel.Name == "CommandContext" {
-		idx = 1
-	}
-	if len(ce.Args) <= idx {
+// kiraciKomutCagrisi: çağrı `kiraci.Kiraci{...}.Komut(...)` mı (internal/kiraci içe
+// aktarılmış, alıcı bileşik değişmez)?
+func kiraciKomutCagrisi(ce *ast.CallExpr, paket map[string]string) bool {
+	se, ok := ce.Fun.(*ast.SelectorExpr)
+	if !ok || se.Sel.Name != "Komut" {
 		return false
 	}
-	bl, ok := ce.Args[idx].(*ast.BasicLit)
-	return ok && bl.Kind == token.STRING && strings.Trim(bl.Value, "\"`") == "runuser"
+	cl, ok := se.X.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	tip, ok := cl.Type.(*ast.SelectorExpr)
+	if !ok || tip.Sel.Name != "Kiraci" {
+		return false
+	}
+	id, ok := tip.X.(*ast.Ident)
+	return ok && paket[id.Name] == "girginospanel/internal/kiraci"
 }
 
 // cagriAdi: ifade `ad(...)` biçiminde bir çağrı mı?
