@@ -241,6 +241,15 @@ func (h *Handlers) resellerLogin(w http.ResponseWriter, r *http.Request, req log
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
 		return
 	}
+	// Katı giriş (D2 whitelabel): doğrulanmış bir BAŞKA bayinin özel panel adresinden
+	// giriş, parola hatasıyla aynı 401'i alır. Host yalnız REDDEDER, izin vermez.
+	if HostKiraciKanca != nil {
+		if hrid, ok := HostKiraciKanca(r); ok && hrid != id {
+			writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login.marka_host", req.Kullanici, false, id)
+			httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı adı veya parola hatalı")
+			return
+		}
+	}
 	if status != "active" {
 		writeAudit(h.DB, id, req.Kullanici, httpx.DenetimIP(r), "auth.login", req.Kullanici, false, id)
 		httpx.WriteHesapAskida(w)

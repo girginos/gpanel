@@ -89,6 +89,19 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}
+	// Katı giriş (D2 whitelabel): bir bayinin doğrulanmış özel panel adresinden YALNIZ
+	// o bayinin müşterisi girer; başkası parola hatasıyla AYNI 401'i alır (askı/hesap
+	// durumu da sızmaz). Host yalnız REDDEDER; izin her zaman parola+jetondan gelir.
+	if HostKiraciKanca != nil {
+		if hrid, ok := HostKiraciKanca(r); ok {
+			var drid int64
+			if err := h.DB.QueryRowContext(r.Context(),
+				`SELECT COALESCE(reseller_id,0) FROM domains WHERE id=?`, domainID).Scan(&drid); err != nil || drid != hrid {
+				httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
+				return
+			}
+		}
+	}
 	// Askı iki yerden okunur (RequireAuth + MusteriScope kapılarıyla aynı): askıya alma
 	// ftp_accounts.status='suspended' yazar, abonelik askısı domains.askida=1'dir.
 	if status != "active" || domainAskida == 1 {

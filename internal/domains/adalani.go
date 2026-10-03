@@ -232,6 +232,16 @@ func AdAlaniDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci in
 		}
 	}
 
+	// Kural 1b (D2 whitelabel): bayilerin özel panel adresleri (cp_marka_alanadi,
+	// BEKLEYEN kayıtlar dahil — tek doğruluk kaynağı DB). Ad bir panel adresinin
+	// kendisi ya da altıysa herkese red (panel vhost'u/ACME ele geçirilmesin);
+	// üstüyse yalnız sahibi açabilir (bayi kendi bayi.com hostingini açar).
+	if h, err := markaAdlariDenetle(ctx, db, ad, kiraci); err != nil {
+		return err
+	} else if h != nil {
+		return h
+	}
+
 	// Kural 2: alt alan adı (subdomanlar) — kimin olursa olsun aynı ad iki kez olmaz.
 	var n int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subdomanlar WHERE tam_ad=?`, ad).Scan(&n); err != nil {
@@ -276,4 +286,36 @@ func AdAlaniEkle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64
 		return err
 	}
 	return ekle()
+}
+
+// markaAdlariDenetle: Kural 1b. Tablo yoksa (0123 koşmamış) kural atlanır —
+// alan adı açmayı bütünüyle kilitlemek orantısız olurdu; öteki sorgu hataları
+// fail-closed.
+func markaAdlariDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64) (*AdAlaniHatasi, error) {
+	adaylar := append([]string{ad}, ustAdlar(ad)...)
+	yer := strings.TrimSuffix(strings.Repeat("?,", len(adaylar)), ",")
+	args := make([]any, 0, len(adaylar)+3)
+	for _, a := range adaylar {
+		args = append(args, a)
+	}
+	args = append(args, len(ad)+1, len(ad)+1, "."+ad)
+	kayitlar, err := adAlaniOku(ctx, db,
+		`SELECT alan_adi, reseller_id FROM cp_marka_alanadi
+		  WHERE alan_adi IN (`+yer+`) OR (CHAR_LENGTH(alan_adi) > ? AND RIGHT(alan_adi, ?) = ?)`, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, k := range kayitlar {
+		pa := adAlaniNormal(k.ad)
+		if ad == pa || altAdMi(ad, pa) {
+			return &AdAlaniHatasi{Genel: adAlaniMsjPanel, Ayrinti: "bayi panel adresi; sahibi: " + sahipMetni(k.rid)}, nil
+		}
+		if altAdMi(pa, ad) && k.rid != kiraci {
+			return &AdAlaniHatasi{Genel: adAlaniMsjCapraz, Ayrinti: "bayi panel adresinin üst adı; sahibi: " + sahipMetni(k.rid)}, nil
+		}
+	}
+	return nil, nil
 }
