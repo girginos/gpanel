@@ -137,6 +137,8 @@ func TestOzelPlanDonusum(t *testing.T) {
 	dn_denetim(t, db, "hosting.ozel_plan", "a-kokkopya.test — Özel", "plan=430")
 	// Paylaşılan kopya (iki hosting) → dokunulmaz.
 	dn_kopya(t, db, 440, "a-paylasim.test — Özel", 2, 44, 200, "ram_mb=999")
+	dn_denetim(t, db, "hosting.plan", "a-paylasim.test", "yeni plan=200") // taban bilinse de paylaşılan → dokunulmaz
+	dn_denetim(t, db, "hosting.ozel_plan", "a-paylasim.test — Özel", "plan=440")
 	// İpucu bayinin GÖREMEDİĞİ plana (B'nin 300'ü) işaret ediyor → kabul edilmez → belirsiz.
 	dn_kopya(t, db, 460, "a-yabanci.test — Özel", 2, 46, 300, "ram_mb=777")
 	dn_denetim(t, db, "hosting.plan", "a-yabanci.test", "yeni plan=300")
