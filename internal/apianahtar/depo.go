@@ -109,7 +109,7 @@ func satirOku(s tarayici) (*Kayit, error) {
 		&k.IptalEdenID, &k.IptalNeden, &k.SahipAd, &k.SahipDurum, &k.SahipUyeRol); err != nil {
 		return nil, err
 	}
-	k.Izinler = IzinleriCoz(iz)
+	k.Izinler = IzinleriGoc(IzinleriCoz(iz))
 	k.IPler = IzinleriCoz(ip)
 	return &k, nil
 }

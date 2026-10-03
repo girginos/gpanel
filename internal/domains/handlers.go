@@ -1028,6 +1028,13 @@ type setFTPPwReq struct {
 }
 
 func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
+	// API anahtarı (ftp.parola izni): otomasyon sözleşmesi — "password" alanı, boşsa
+	// üretim, panel parola kuralı, denetim kaydı (api_parola.go). Arayüz yolu aşağıda
+	// DEĞİŞMEDEN kalır.
+	if middleware.AnahtarFrom(r) != nil {
+		h.apiFTPParola(w, r, "")
+		return
+	}
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var req setFTPPwReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -1,7 +1,9 @@
 package middleware
 
-// anahtar.go — API anahtarıyla kimlik doğrulama (D4). RequireAuth, Bearer değeri
-// "gosp_" önekiyle başlıyorsa JWT yerine buraya dallanır.
+// anahtar.go — API anahtarıyla kimlik doğrulama (D4). RequireAuth, Authorization
+// şeması "gosp" ise ("gosp <kullanıcı adı>:<anahtar>") JWT yerine buraya dallanır.
+// Anahtar YALNIZ sahibinin kullanıcı adıyla birlikte geçerlidir (sabit zamanlı
+// karşılaştırma; eşleşmezse geçersiz anahtarla aynı 401). "Bearer gosp_…" reddedilir.
 //
 // 🔴 Üretilen kimlik JWT ile BİREBİR aynı auth.Claims'tir (uid, usr, rol, rid, kpi):
 // AdminOnly / SahipYonetim / MusteriScope / DBSahipligi / denetim kapsamı hiçbir
@@ -109,6 +111,39 @@ var errVTYok error = vtYokHata{}
 // sahteOzet: önek bulunamadığında da özet hesaplanır (zamanlama eşitliği).
 var sahteOzet = apianahtar.Ozet("gosp_zamanlama_esitligi_icin_sahte_deger")
 
+// sahteKullanici: önek bulunamadığında da kullanıcı adı karşılaştırılır.
+const sahteKullanici = "\x00zamanlama-esitligi"
+
+// anahtarKullaniciUyar: verilen kullanıcı adı anahtarın SAHİBİNİNKİ mi? Bayi:
+// users.username. Kök: "root" (JWT usr) ya da users.username. İki karşılaştırma da
+// HER ZAMAN yapılır (kısa devre yok).
+func anahtarKullaniciUyar(k *apianahtar.Kayit, verilen string) bool {
+	beklenen, kok := sahteKullanici, false
+	if k != nil {
+		beklenen, kok = k.SahipAd, k.SahipRol == apianahtar.RolKok
+	}
+	ad := apianahtar.KullaniciEsit(beklenen, verilen)
+	kokAd := apianahtar.KullaniciEsit(apianahtar.KokKullaniciAdi, verilen)
+	return ad || (kok && kokAd)
+}
+
+// anahtarEskiBicim: "Bearer gosp_…" — kullanıcı adısız eski biçim. DB'ye gidilmez;
+// hatalı deneme sayılır (IP kilidi), yanıt doğru biçimi söyler.
+func anahtarEskiBicim(w http.ResponseWriter, r *http.Request) {
+	ip := anahtarIstemciIP(r)
+	if ip == "" {
+		ip = "kanitsiz"
+	}
+	simdi := anahtarSimdi()
+	if kalan := anahtarHata.kilitli(ip, simdi); kalan > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(kalan.Seconds())+1))
+		httpx.WriteError(w, http.StatusTooManyRequests, "çok fazla hatalı API anahtarı denemesi, daha sonra tekrar deneyin")
+		return
+	}
+	anahtarHata.say(ip, simdi)
+	httpx.WriteError(w, http.StatusUnauthorized, apianahtar.EskiBicimMesaji)
+}
+
 func anahtarSahipAdi(k *apianahtar.Kayit) string {
 	if k.SahipRol == apianahtar.RolKok {
 		return "root" // JWT'deki usr ile aynı (users.username "admin" olabilir)
@@ -118,7 +153,9 @@ func anahtarSahipAdi(k *apianahtar.Kayit) string {
 
 // anahtarIstek: API anahtarını doğrular; geçerse kimliği bağlayıp next'i çağırır,
 // geçmezse yanıtı yazar.
-func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, tokenRaw, istekKapi string) {
+//
+// kimlikDeger: şemasız başlık değeri "<kullanıcı adı>:<anahtar>".
+func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, kimlikDeger, istekKapi string) {
 	ip := anahtarIstemciIP(r)
 	kilitAnahtari := ip
 	if kilitAnahtari == "" {
@@ -134,6 +171,11 @@ func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, tok
 		anahtarHata.say(kilitAnahtari, simdi)
 		httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
 	}
+	kullanici, tokenRaw, ok := apianahtar.KimlikAyristir(kimlikDeger)
+	if !ok {
+		gecersiz()
+		return
+	}
 	onek, ok := apianahtar.Ayristir(tokenRaw)
 	if !ok {
 		gecersiz()
@@ -148,7 +190,19 @@ func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, tok
 	if k != nil {
 		beklenen = k.Ozet
 	}
-	if !apianahtar.OzetEsit(beklenen, apianahtar.Ozet(tokenRaw)) || k == nil {
+	// Özet ve kullanıcı adı İKİSİ DE her durumda hesaplanır; sonuç birleşik.
+	ozetTutar := apianahtar.OzetEsit(beklenen, apianahtar.Ozet(tokenRaw))
+	kullaniciTutar := anahtarKullaniciUyar(k, kullanici)
+	if !ozetTutar || k == nil {
+		gecersiz()
+		return
+	}
+	if !kullaniciTutar {
+		// Geçerli anahtar + yanlış kullanıcı adı: istemciye geçersiz anahtarla AYNI
+		// yanıt (hangisinin yanlış olduğu sızmaz); denetime seyrek ret kaydı.
+		if anahtarRedSeyrek(k.ID, simdi) {
+			anahtarRedDenetim(r, k, "kullanıcı adı uyuşmuyor")
+		}
 		gecersiz()
 		return
 	}

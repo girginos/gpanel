@@ -171,6 +171,10 @@ func (h *Handlers) Katalog(w http.ResponseWriter, r *http.Request) {
 		"varsayilan_gun": VarsayilanGun, "maks_gun": MaksGun,
 		"varsayilan_hiz": VarsayilanHiz, "min_hiz": MinHiz, "maks_hiz": MaksHiz,
 		"maks_ip": apianahtar.MaksIP,
+		// Authorization: gosp <kullanici_adi>:<anahtar> — anahtar yalnız bu adla geçer.
+		// Kökte JWT usr ("root"); bayide users.username (JWT usr ile aynı).
+		"kullanici_adi": c.Username,
+		"kimlik_sema":   apianahtar.Sema,
 	})
 }
 
