@@ -281,3 +281,25 @@ func TestGuncelleme_SirAdimSirasi(t *testing.T) {
 		t.Error("tek seferlik işaret yok")
 	}
 }
+
+// İzni ve grubu doğru ama SAHİBİ yanlış gizli dosya (kiracı uid'si 0600 ile okur/yazar)
+// KRİTİK'tir ve onarımda root'a alınır.
+func TestSirIzin_YalnizSahipYanlis(t *testing.T) {
+	rootGerek(t)
+	kok := izinKok(t)
+	p := filepath.Join(kok, "etc/girginospanel/db.key")
+	yazMod(t, p, 0o600)
+	if err := os.Chown(p, kiraciUID, 0); err != nil {
+		t.Fatal(err)
+	}
+	out, kod := sirKos(t, kok, nil, `sir_izin; exit $?`)
+	if kod != 1 || !strings.Contains(out, "sahip") {
+		t.Fatalf("yanlış sahip yakalanmadı: %d %s", kod, out)
+	}
+	if _, kod := sirKos(t, kok, nil, `sir_izin --onar; exit $?`); kod != 0 {
+		t.Fatal("onarım temiz dönmedi")
+	}
+	if d := oku(t, p); d.uid != 0 || d.mod.Perm() != 0o600 {
+		t.Errorf("uid=%d mod=%o", d.uid, d.mod.Perm())
+	}
+}
