@@ -262,7 +262,10 @@ func (a Adimlar) Uygula(ctx context.Context, db *sql.DB, id int64, askida bool, 
 	hk := kilit.Hesap(on.sk)
 	hk.Lock()
 	defer hk.Unlock()
-	return a.uygulaKilitli(ctx, db, id, askida, kaynak)
+	onceki := askidaOku(ctx, db, id)
+	alanAdi, err := a.uygulaKilitli(ctx, db, id, askida, kaynak)
+	askiBildirimi(ctx, db, id, alanAdi, onceki, kaynak) // durum GERÇEKTEN değiştiyse (bildirim.go)
+	return alanAdi, err
 }
 
 func (a Adimlar) uygulaKilitli(ctx context.Context, db *sql.DB, id int64, askida bool, kaynak string) (string, error) {
