@@ -1054,6 +1054,8 @@ else
     #  1) In `CREATE TABLE( IF NOT EXISTS)? <name>`, when the optional group didn't match,
     #     `[a-z0-9_]+` mistook the word "IF" for the TABLE NAME -> a bogus "MISSING if"
     #     finding on every server. Fix: strip IF NOT EXISTS FIRST.
+    #  3) SQL `--` comments were parsed too: 0112's comment "CREATE TABLE IF NOT EXISTS
+    #     yeniden koşulabilir" produced a bogus "MISSING yeniden". Fix: strip comments FIRST.
     #  2) DROP TABLE was not counted at all. cp_banned_tlds is created in 0060 and DROPped
     #     in 0061; the table is LEGITIMATELY gone but the check flashed red "MISSING".
     # A check that yields a false positive is WORSE than a missing check: it trains people
@@ -1062,8 +1064,8 @@ else
     _beklenen_tablolar() {
       local f
       for f in $(ls "$_MIGR"/*.sql 2>/dev/null | sort); do
-        sed -E 's/CREATE[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+/@CT@ /Ig;
-                s/DROP[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+/@DT@ /Ig' "$f" \
+        sed -E 's/--.*$//' "$f" | sed -E 's/CREATE[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS)?[[:space:]]+/@CT@ /Ig;
+                s/DROP[[:space:]]+TABLE([[:space:]]+IF[[:space:]]+EXISTS)?[[:space:]]+/@DT@ /Ig' \
         | grep -oE '@[CD]T@ `?[a-zA-Z0-9_]+' \
         | sed -E 's/`//g' \
         | awk '{print $1" "tolower($2)}'
