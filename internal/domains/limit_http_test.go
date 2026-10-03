@@ -455,3 +455,92 @@ func TestOzelLimit_BayiSinirsizaDonemez(t *testing.T) {
 		t.Errorf("yönetici plana dönüş → %d %s", kod, g)
 	}
 }
+
+// ── Kökün iç alanları: bayi hiçbir hostingde yazamaz (kullanıcı kararı 2026-10-03) ──
+
+func TestOzelLimit_BayiIcAlanYazamaz(t *testing.T) {
+	db := ol_db(t)
+	h := ol_router(db)
+	put := func(kim string, did int64, m map[string]any) (int, string) {
+		return ol_istek(t, h, kim, "PUT", fmt.Sprintf("/domains/%d/limitler", did), ol_ust(m))
+	}
+	// Bayinin KENDİ planındaki hostingte (21, plan 200) bile: iç alan → 403, hiçbir şey yazılmaz.
+	for _, m := range []map[string]any{
+		{"io_read_mbps": 10},
+		{"inode_kota": nil},
+		{"max_process": 50, "cpu_yuzde": 150},
+		{"db_max_query_seconds": 0},
+	} {
+		if kod, g := put("A", 21, m); kod != http.StatusForbidden || !strings.Contains(g, "yöneticinize ait") {
+			t.Errorf("bayi iç alan %v → %d %s (beklenen 403)", m, kod, g)
+		}
+	}
+	if s := ol_oku(t, db, 21); s.UstVar {
+		t.Errorf("reddedilen bayi isteği üst yazım bıraktı: %+v", s.UstHarita())
+	}
+	// Yanıt iç alanları işaretler (ön yüz düzenleyicide göstermez).
+	_, g := ol_istek(t, h, "A", "GET", "/domains/21/limitler", nil)
+	al := ol_alanlar(t, g)
+	var y struct {
+		Alanlar []struct {
+			Ad string `json:"ad"`
+			Ic bool   `json:"ic"`
+		} `json:"alanlar"`
+	}
+	_ = json.Unmarshal([]byte(g), &y)
+	for _, a := range y.Alanlar {
+		if a.Ic != efektiflimit.IcAlan(a.Ad) {
+			t.Errorf("bayi GET %s ic=%v (beklenen %v)", a.Ad, a.Ic, efektiflimit.IcAlan(a.Ad))
+		}
+	}
+	if len(al) == 0 {
+		t.Fatal("alan yok")
+	}
+	_, g = ol_istek(t, h, "admin", "GET", "/domains/21/limitler", nil)
+	if strings.Contains(g, `"ic":true`) {
+		t.Errorf("yöneticiye iç alan işareti dönmemeli: %s", g)
+	}
+
+	// Kök yazabilir.
+	if kod, g := put("admin", 21, map[string]any{"io_read_mbps": 77, "max_process": 70}); kod != 200 {
+		t.Fatalf("yönetici iç alan PUT → %d %s", kod, g)
+	}
+	// Bayinin kendi alanı düzenlemesi + plana dönüşü kökün iç değerlerini KORUR.
+	if kod, g := put("A", 21, map[string]any{"cpu_yuzde": 150}); kod != 200 {
+		t.Fatalf("bayi kendi alanı → %d %s", kod, g)
+	}
+	s := ol_oku(t, db, 21)
+	if s.Efektif("io_read_mbps", -1) != 77 || s.Efektif("max_process", -1) != 70 || s.Efektif("cpu_yuzde", -1) != 150 {
+		t.Errorf("bayi PUT sonrası: io=%d proc=%d cpu=%d", s.Efektif("io_read_mbps", -1), s.Efektif("max_process", -1), s.Efektif("cpu_yuzde", -1))
+	}
+	if kod, g := ol_istek(t, h, "A", "DELETE", "/domains/21/limitler", nil); kod != 200 {
+		t.Fatalf("bayi DELETE → %d %s", kod, g)
+	}
+	s = ol_oku(t, db, 21)
+	if s.Efektif("io_read_mbps", -1) != 77 || s.Efektif("max_process", -1) != 70 || s.Degerler["cpu_yuzde"].Ust != nil ||
+		!s.Degerler["io_read_mbps"].Kok || !s.Degerler["max_process"].Kok {
+		t.Errorf("bayi DELETE sonrası (kök kilidi de korunmalı): io=%d proc=%d cpu.ust=%v kok=%v", s.Efektif("io_read_mbps", -1),
+			s.Efektif("max_process", -1), s.Degerler["cpu_yuzde"].Ust, s.KokAlanlar)
+	}
+	// Kilitsiz (eski, karar öncesi yazılmış) iç üst yazım da bayinin PUT/DELETE'iyle silinmez.
+	if _, err := db.Exec(`INSERT INTO hosting_limit_ust (domain_id, io_write_mbps) VALUES (20, 33)`); err != nil {
+		t.Fatal(err)
+	}
+	if kod, g := put("A", 20, map[string]any{"cpu_yuzde": 120}); kod != 200 {
+		t.Fatalf("bayi PUT 20 → %d %s", kod, g)
+	}
+	if kod, g := ol_istek(t, h, "A", "DELETE", "/domains/20/limitler", nil); kod != 200 {
+		t.Fatalf("bayi DELETE 20 → %d %s", kod, g)
+	}
+	s = ol_oku(t, db, 20)
+	if v := s.Degerler["io_write_mbps"].Ust; v == nil || *v != 33 || s.Degerler["cpu_yuzde"].Ust != nil {
+		t.Errorf("kilitsiz iç üst yazım bayi DELETE'iyle değişti: io_write=%v cpu=%v", v, s.Degerler["cpu_yuzde"].Ust)
+	}
+	// Kök değiştirir ve siler.
+	if kod, g := put("admin", 21, map[string]any{"io_read_mbps": 5}); kod != 200 {
+		t.Fatalf("yönetici PUT → %d %s", kod, g)
+	}
+	if s := ol_oku(t, db, 21); s.Efektif("io_read_mbps", -1) != 5 || s.Degerler["max_process"].Ust != nil {
+		t.Errorf("yönetici tam değiştirme: io=%d proc.ust=%v", s.Efektif("io_read_mbps", -1), s.Degerler["max_process"].Ust)
+	}
+}

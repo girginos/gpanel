@@ -207,7 +207,7 @@ func TestDevirPlan_EskiBayiYeniSahibinLimitleriniDegistiremez(t *testing.T) {
 	dp_ayniEfektif(t, once, sonra)
 	// Eski bayi kendi planını düzenler (yan etkisiz: plan artık hiçbir hostingde değil).
 	kod := dp_bayiPut(t, db, 7, 202, map[string]any{"ad": "A Devir Artigi", "disk_kota_mb": 1000, "trafik_kota_mb": 1000,
-		"cpu_yuzde": 5, "ram_mb": 64, "max_process": 2, "db_max_query_seconds": 1, "nginx_ek_direktifler": ""})
+		"cpu_yuzde": 5, "ram_mb": 64, "nginx_ek_direktifler": ""}) // iç alan yok: bayi gövdesinde 403 (efektiflimit.IcAlan)
 	son := dp_etkinOku(t, db, dt_did)
 	if son.cpu != once.cpu || son.ram != once.ram || son.dbq != once.dbq {
 		t.Errorf("GL-03: eski bayi (PUT → %d) YENİ sahibin hostinginin limitlerini değiştirdi: önce cpu=%d ram=%d dbq=%d, sonra cpu=%d ram=%d dbq=%d",

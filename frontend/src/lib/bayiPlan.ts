@@ -41,6 +41,20 @@ export function alanAcik(s: BayiSinir | null, alan: string): boolean {
   return !s.kok_alanlar.includes(alan)
 }
 
+/**
+ * Bayinin gönderdiği plan gövdesinden kökün iç alanlarını çıkarır (sunucu bayi
+ * gövdesinde bu alanlardan birini görürse 403 döner — sessizce yok saymaz).
+ * Yönetici için gövde aynen döner. Bayi oturumunda sınır bilgisi yüklenmemişse
+ * null döner: çağıran kaydetmemeli (hangi alanların çıkarılacağı bilinmiyor).
+ */
+export function bayiPlanGovdesi<T extends object>(s: BayiSinir | null, bayiRol: boolean, govde: T): Partial<T> | null {
+  if (!bayiRol && !s?.bayi) return govde
+  if (!s) return null
+  const out = { ...govde } as Record<string, unknown>
+  for (const k of s.kok_alanlar) delete out[k]
+  return out as Partial<T>
+}
+
 /** Havuz ipucu: havuz, taahhüt, kalan (MB). Havuz sınırsızsa null. */
 export function havuzDurumu(s: BayiSinir | null, tur: 'disk' | 'trafik'): { havuz: number; taahhut: number; kalan: number; fazla: boolean } | null {
   if (!s || !s.bayi) return null

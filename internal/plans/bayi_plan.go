@@ -10,15 +10,19 @@ package plans
 //     satış kurallarına uyar (bayiPaketKontrol).
 //   - Kök alanları: efektiflimit.Alanlar'da Ozette=false olan iç ayarlar (inode,
 //     process, IO ağırlığı/bant genişliği/IOPS, FPM, MySQL bağlantı + governor)
-//     bayi tarafından YAZILAMAZ; yeni bayi planında panel varsayılanı, düzenlemede
-//     mevcut değer korunur. Yönetici bu alanları her planda düzenler.
+//     bayi tarafından YAZILAMAZ: bayi gövdesinde bu alanlardan biri varsa istek
+//     403 ile reddedilir (sessizce yok sayılmaz); yeni bayi planında panel
+//     varsayılanı, düzenlemede mevcut değer korunur. Yönetici bu alanları her
+//     planda düzenler.
 //   - Varsayılan yapma ucu (VarsayilanYap) ve paket sınırı ipuçları (BayiSinir).
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -50,13 +54,7 @@ func planAlanlari(p *Plan) map[string]*int {
 // KokAlanlari — bayinin plan formunda OLMAYAN, yalnız kökün belirlediği alanlar
 // (efektiflimit.Alanlar'da Ozette=false: GL-06 sınıfı iç ayarlar). Tek kaynak.
 func KokAlanlari() []string {
-	var out []string
-	for _, a := range efektiflimit.Alanlar {
-		if !a.Ozette {
-			out = append(out, a.Sutun)
-		}
-	}
-	return out
+	return efektiflimit.IcAlanlar()
 }
 
 // kokAlanlariniAl — hedefin kök alanlarını kaynaktan kopyalar (bayi isteği bu
@@ -66,6 +64,41 @@ func kokAlanlariniAl(hedef *Plan, kaynak Plan) {
 	for _, s := range KokAlanlari() {
 		*h[s] = *k[s]
 	}
+}
+
+// planGovdesiOku — plan oluştur/düzenle gövdesini çözer. Bayide (rid>0) gövdede
+// kökün iç alanlarından (efektiflimit.IcAlan) biri VARSA — değeri ne olursa olsun —
+// istek 403 ile reddedilir (sessizce yok sayılmaz; kullanıcı kararı 2026-10-03).
+// Yanıt yazıldıysa ok=false.
+func planGovdesiOku(w http.ResponseWriter, r *http.Request, rid int64) (Plan, bool) {
+	var p Plan
+	ham, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil || json.Unmarshal(ham, &p) != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return p, false
+	}
+	if rid > 0 {
+		var anahtar map[string]json.RawMessage
+		if json.Unmarshal(ham, &anahtar) != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+			return p, false
+		}
+		// encoding/json struct alanlarını harf duyarsız (Unicode katlamalı: "IO_READ_MBPS",
+		// "max_proceſs") eşler — denetim de strings.EqualFold ile aynı katlamayı kullanır.
+		gelen := map[string]bool{}
+		for k := range anahtar {
+			for _, a := range efektiflimit.Alanlar {
+				if strings.EqualFold(k, a.Sutun) {
+					gelen[a.Sutun] = true
+				}
+			}
+		}
+		if ic := efektiflimit.IcAlanlarIcinde(gelen); len(ic) > 0 {
+			httpx.WriteError(w, http.StatusForbidden, efektiflimit.IcAlanRedMesaji(ic))
+			return p, false
+		}
+	}
+	return p, true
 }
 
 // panelVarsayilanPlan — sütun varsayılanlarıyla (göç DDL'i) aynı boş plan.

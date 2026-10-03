@@ -93,6 +93,44 @@ func Bul(sutun string) (Alan, bool) {
 	return a, ok
 }
 
+// IcAlan — sütun kökün İÇ AYARI mı (Ozette=false: inode, process, IO, FPM, MySQL
+// bağlantı + governor)? Bayi bu alanların kökten gelen değerini GÖREMEZ ve hiçbir
+// yoldan (hosting limitleri, kendi planları) YAZAMAZ. Okuma maskesi (domains.limitGorunum,
+// plans.PlanOzet) ile yazma reddi (domains.limitYaz, plans.Create/Update) bu TEK
+// listeyi kullanır — kayma olmasın.
+func IcAlan(sutun string) bool {
+	a, ok := alanHarita[sutun]
+	return ok && !a.Ozette
+}
+
+// IcAlanlar — iç alanların sütun adları (Alanlar sırasıyla).
+func IcAlanlar() []string {
+	var out []string
+	for _, a := range Alanlar {
+		if !a.Ozette {
+			out = append(out, a.Sutun)
+		}
+	}
+	return out
+}
+
+// IcAlanlarIcinde — anahtar kümesinde (istek gövdesi) bulunan iç alanlar, Alanlar
+// sırasıyla. Boş = bayi isteği iç alan taşımıyor.
+func IcAlanlarIcinde[V any](m map[string]V) []string {
+	var out []string
+	for _, a := range Alanlar {
+		if _, var_ := m[a.Sutun]; var_ && !a.Ozette {
+			out = append(out, a.Sutun)
+		}
+	}
+	return out
+}
+
+// IcAlanRedMesaji — bayi isteğinde iç alan geldiğinde dönen (403) hata metni.
+func IcAlanRedMesaji(alanlar []string) string {
+	return "bu ayarlar yöneticinize aittir, değiştirilemez: " + strings.Join(alanlar, ", ")
+}
+
 // Join — efektif limit SQL'i için domains d'ye eklenecek birleşimler.
 // Kullanım: "SELECT "+Ifade("ram_mb")+" FROM domains d"+Join+"WHERE d.id=?"
 const Join = " LEFT JOIN service_plans p ON p.id=d.plan_id LEFT JOIN hosting_limit_ust u ON u.domain_id=d.id "
