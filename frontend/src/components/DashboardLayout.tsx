@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 // Hosting müşterisinde (rol 'user') kenar çubuğu YOK: tüm araçlar ana sayfada
 // (MusteriAnaSayfa); dönüş Breadcrumb + üst çubuktaki marka bağlantısı + mobil alt çubuk.
 import { useEffect, useState } from 'react'
+import type { KeyboardEvent as RKE } from 'react'
 import { api } from '@/lib/api'
 import { useEklentiler } from '@/lib/eklenti'
 import { useMarka, logoURL, faviconURL } from '@/lib/marka'
@@ -16,9 +17,11 @@ import TopBar from './TopBar'
 import AltNavBar from './AltNavBar'
 import HataYuzeyi from './HataYuzeyi'
 import KapiAdresSeridi from './KapiAdresSeridi'
+import AdinaSeridi from './AdinaSeridi'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { musteriMi, rolAnaSayfa, useRol } from '@/lib/rol'
+import { adinaBilgi } from '@/store/auth'
 import { aracCevir, yolunAraci } from '@/components/musteri-ana/araclar'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
@@ -77,7 +80,8 @@ const MENU_EN: Record<string, string> = {
   // Grup başlıkları
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
   'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings', 'Güvenlik': 'Security',
-  'Profilim': 'My Profile', 'Genel': 'General',
+  'Profilim': 'My Profile', 'Genel': 'General', 'Hosting': 'Hosting',
+  'Menüyü daralt': 'Collapse menu', 'Menüyü genişlet': 'Expand menu',
   'Bildirimler': 'Notifications', 'Yedek Yönetimi': 'Backup Management',
   'Menüyü kapat': 'Close menu', 'adet': 'items', 'Ana menü': 'Main menu',
 }
@@ -128,7 +132,8 @@ const RESELLER_NAV: NavGroup[] = [
   // Bayi tarafinda da ayni yetim-panel sorunu vardi; icerik eklenmiyor,
   // yalnizca baslik veriliyor ki panel Anasayfa'yi takip etsin.
   { baslik: GENEL, items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
-  { baslik: 'Barındırma Hizmetleri', items: [
+  // Seçenek 1 (kullanıcı kararı 2026-10-03): gruplar Genel / Hosting / Güvenlik / Ayarlar.
+  { baslik: 'Hosting', items: [
     { to: '/domainler',       etiket: 'Domainler', ikon: ICONS.domain, sayac: 'domainler' },
     { to: '/hizmet-planlari', etiket: 'Planlar',   ikon: ICONS.plan, sayac: 'hizmet_planlari' },
   ]},
@@ -172,6 +177,8 @@ export default function DashboardLayout() {
   const rol = useRol()
   const isMusteri = musteriMi(rol)
   const isReseller = rol === 'reseller'
+  // Müşteri ADINA oturum (bayi/yönetici "panele gir"; sekmeye özel, bkz. store/auth).
+  const adinaOturum = isMusteri && adinaBilgi() !== null
   // Müşteride kenar çubuğu (ve mobil çekmecesi) çizilmez: araçlar ana sayfada.
   const kenarCubugu = !isMusteri
   // Logo hedefi rolün ana sayfası (müşteri → kendi ana sayfası).
@@ -291,6 +298,27 @@ export default function DashboardLayout() {
     </svg>
   )
 
+  // ── Bayi menüsü: daraltılabilir ikon kipi (yalnız lg ve üstü; mobil çekmece hep tam) ──
+  const [dar, setDar] = useState<boolean>(() => {
+    try { return localStorage.getItem('gosp.bayi.menuDar') === '1' } catch { return false }
+  })
+  const darDegistir = () => setDar((v) => {
+    const y = !v
+    try { localStorage.setItem('gosp.bayi.menuDar', y ? '1' : '0') } catch { /* yoksay */ }
+    return y
+  })
+  // ↑/↓/Home/End: menüdeki görünür bağlantılar arasında odak gezinmesi.
+  const okGezinme = (e: RKE<HTMLElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+    const l = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('a[data-nav]')).filter((x) => x.offsetParent !== null)
+    if (!l.length) return
+    const i = l.indexOf(document.activeElement as HTMLElement)
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? l.length - 1
+      : e.key === 'ArrowDown' ? (i < 0 ? 0 : (i + 1) % l.length) : (i <= 0 ? l.length - 1 : i - 1)
+    e.preventDefault()
+    l[n].focus()
+  }
+
   // ── Tek katmanli sidebar (bayi) ─────────────────────────────────────────
   // Yönetici menüsü geniş (5 bölüm, ~20 öğe): ray gezinmeyi toplar. Bayi
   // menüsü kısa — ray yalnız fazladan bir tık ekliyordu. Onda tüm kategoriler
@@ -342,6 +370,45 @@ export default function DashboardLayout() {
             ) : null}
             {it.rozet ? (
               <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{cevir(it.rozet)}</span>
+            ) : null}
+          </>
+        )}
+      </NavLink>
+    </li>
+  )
+
+  // Bayi öğesi (Seçenek 1): aktif öğe sol şerit + vurgu; dar (ikon) kipte etiket
+  // yalnız lg'de gizlenir (ipucu = title, erişilebilir ad = aria-label).
+  const bayiOgeCiz = (it: NavItem, kume: NavItem[]) => (
+    <li key={it.to}>
+      <NavLink
+        to={it.to}
+        end={tamEslesme(it, kume)}
+        data-nav
+        onClick={() => setMobilAcik(false)}
+        title={dar ? cevir(it.etiket) : undefined}
+        aria-label={dar ? cevir(it.etiket) : undefined}
+        className={({ isActive }) =>
+          `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-500/70 ${dar ? 'lg:justify-center lg:px-0' : ''} ${
+            isActive
+              ? 'bg-brand-50 font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-slate-100'
+          }`
+        }
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-brand-600 dark:bg-brand-400" aria-hidden />}
+            <svg className={`h-[18px] w-[18px] shrink-0 ${isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300'}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={isActive ? 2 : 1.7} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d={it.ikon} />
+            </svg>
+            <span className={`min-w-0 flex-1 truncate ${dar ? 'lg:sr-only' : ''}`}>{cevir(it.etiket)}</span>
+            {it.sayac && sayac[it.sayac] ? (
+              <span className={`shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-600 dark:bg-dark-500 dark:text-slate-200 ${dar ? 'lg:hidden' : ''}`}
+                aria-label={`${sayac[it.sayac]} ${cevir('adet')}`}>
+                {sayac[it.sayac]}
+              </span>
             ) : null}
           </>
         )}
@@ -478,11 +545,24 @@ export default function DashboardLayout() {
         )}
 
         {/* ── ETIKETLI PANEL ── */}
-        <div className={`${tekKatman ? 'w-64' : 'w-[248px]'} shrink-0 h-screen flex flex-col bg-white dark:bg-dark-800 border-r border-slate-200 dark:border-dark-600`}>
+        <div className={`${tekKatman ? (dar ? 'w-64 lg:w-16' : 'w-64') : 'w-[248px]'} shrink-0 h-screen flex flex-col bg-white dark:bg-dark-800 border-r border-slate-200 dark:border-dark-600 transition-[width] duration-200`}>
           {/* Baslik: panel adi + kapat (mobil) */}
-          <div className="h-[60px] flex items-center px-5 border-b border-slate-200 dark:border-dark-600">
-            {/* MARKA LOGOSU BURADA — genis basligin yeri (bkz. markaBaglantisi). */}
-            {markaBaglantisi}
+          <div className={`h-[60px] flex items-center px-5 border-b border-slate-200 dark:border-dark-600 ${tekKatman && dar ? 'lg:justify-center lg:px-2' : ''}`}>
+            {/* MARKA LOGOSU BURADA — genis basligin yeri (bkz. markaBaglantisi).
+                Bayi dar (ikon) kipte: kare işaret (favicon ya da panel işareti). */}
+            {tekKatman && dar ? (
+              <>
+                <span className="lg:hidden">{markaBaglantisi}</span>
+                <NavLink to={anaSayfa} end aria-label={marka.panel_adi} title={marka.panel_adi}
+                  className="hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 lg:block">
+                  {faviconURL(marka)
+                    ? <img src={faviconURL(marka) as string} alt="" aria-hidden className="h-8 w-8 rounded-lg object-contain" />
+                    : <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white" aria-hidden>
+                        <svg viewBox="0 0 32 32" className="h-4 w-4" fill="currentColor"><path d="M9 10h14v3H9zM9 15h14v3H9zM9 20h9v3H9z" /></svg>
+                      </span>}
+                </NavLink>
+              </>
+            ) : markaBaglantisi}
             <Button
               isIcon
               variant="flat"
@@ -496,23 +576,37 @@ export default function DashboardLayout() {
 
           {tekKatman ? (
             /* Tek katman: tüm kategoriler alt alta, her biri başlığıyla */
-            <nav aria-label={cevir('Ana menü')} className="flex-1 px-2.5 py-3 overflow-y-auto">
+            <>
+            <nav aria-label={cevir('Ana menü')} onKeyDown={okGezinme} className={`flex-1 px-2.5 py-3 overflow-y-auto ${dar ? 'lg:px-2' : ''}`}>
               {aktifNav.filter(g => g.items.length > 0).map((g, i) => {
                 const baslikId = `gosp-menu-grup-${i}`
                 return (
-                  <div key={g.baslik || i} className="mb-4 last:mb-0">
+                  <div key={g.baslik || i} role="group" aria-labelledby={g.baslik ? baslikId : undefined} className="mb-4 last:mb-0">
                     {g.baslik && (
-                      <p id={baslikId} className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      <p id={baslikId} className={`px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 ${dar ? 'lg:sr-only' : ''}`}>
                         {cevir(g.baslik)}
                       </p>
                     )}
-                    <ul className="space-y-0.5" aria-labelledby={g.baslik ? baslikId : undefined}>
-                      {g.items.map(it => ogeCiz(it, tumOgeler))}
+                    {dar && i > 0 && <div className="mx-2 mb-2 hidden h-px bg-slate-200 dark:bg-dark-600 lg:block" aria-hidden />}
+                    <ul className="space-y-0.5">
+                      {g.items.map(it => bayiOgeCiz(it, tumOgeler))}
                     </ul>
                   </div>
                 )
               })}
             </nav>
+            {/* Daralt / genişlet — yalnız masaüstü (mobilde menü çekmecedir). */}
+            <div className="hidden shrink-0 border-t border-slate-200 p-2.5 dark:border-dark-600 lg:block">
+              <button type="button" onClick={darDegistir} aria-pressed={dar}
+                aria-label={cevir(dar ? 'Menüyü genişlet' : 'Menüyü daralt')} title={dar ? cevir('Menüyü genişlet') : undefined}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-600 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-brand-500/70 dark:text-slate-300 dark:hover:bg-white/5 ${dar ? 'justify-center px-0' : ''}`}>
+                <svg className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d={dar ? 'M9 5l7 7-7 7' : 'M15 19l-7-7 7-7'} />
+                </svg>
+                {!dar && <span>{cevir('Menüyü daralt')}</span>}
+              </button>
+            </div>
+            </>
           ) : (
             /* İki katman: rayda seçili bölümün etiketli öğeleri */
             <nav className="flex-1 px-2.5 py-3 overflow-y-auto">
@@ -530,11 +624,16 @@ export default function DashboardLayout() {
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Müşteride kenar çubuğu yok: hamburger çizilmez, marka bağlantısı üst çubukta. */}
+        {/* Müşteri ADINA oturum (bayi/yönetici "panele gir"): sabit şerit + dönüş. */}
+        {/* Şerit ve üst çubuk BİRLİKTE yapışır (ikisi ayrı sticky olsa üst üste binerdi). */}
+        <div className={adinaOturum ? 'sticky top-0 z-40' : 'contents'}>
+        {adinaOturum && <AdinaSeridi />}
         <TopBar
           onMenuAc={kenarCubugu ? () => setMobilAcik(true) : undefined}
           menuAcik={mobilAcik}
           marka={kenarCubugu ? undefined : markaBaglantisi}
         />
+        </div>
         <KapiAdresSeridi />
         {/* Alt gezinme çubuğu (AltNavBar) mobilde ekranın dibine sabitlenir;
             altında kalan boşluğu akışın SON ögesi ayırır. Alt bilgi

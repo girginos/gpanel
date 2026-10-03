@@ -8,7 +8,7 @@
 //
 // Müşteri kapıları yalnız 'user' rolünü etkiler. Yönetici-yalnız (AdminOnly) uca giden
 // arayüz öğeleri yoneticiMi ile çizilir: bayi ve müşteri onları görmez (bayi kapsam kuralı).
-import { useAuth, KEY_MUSTERI_DOM, sonOturumMusteri, type Kullanici } from '@/store/auth'
+import { useAuth, KEY_MUSTERI_DOM, oturumDeposu, sonOturumMusteri, type Kullanici } from '@/store/auth'
 
 export type Rol = Kullanici['rol']
 
@@ -27,7 +27,8 @@ export function useRol(): Rol | undefined {
 // yerine oturumu kapatır (aksi halde /abonelikler/ → kapı → /abonelikler/ döngüsü).
 export function musteriDomainID(): number | null {
   let v: string | null = null
-  try { v = localStorage.getItem(KEY_MUSTERI_DOM) } catch { return null }
+  // Adına-oturumda (bayi "panele gir") sekmeye özel depo — bkz. store/auth oturumDeposu.
+  try { v = oturumDeposu().getItem(KEY_MUSTERI_DOM) } catch { return null }
   if (!v || !/^[1-9][0-9]{0,14}$/.test(v)) return null
   return Number(v)
 }

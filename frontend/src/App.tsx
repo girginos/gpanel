@@ -1,10 +1,12 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { useAuth, depoBaskaOturumda } from '@/store/auth'
+import { useAuth, depoBaskaOturumda, adinaDonusAl } from '@/store/auth'
+import { guvenliDonus } from '@/lib/adina'
 import { useHesapAski } from '@/store/hesapAski'
 import HesapAskidaPage from '@/pages/HesapAskidaPage'
 import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
+const AdinaGirisPage = lazy(() => import('@/pages/AdinaGirisPage'))
 import DashboardLayout from '@/components/DashboardLayout'
 import KapiGiris from '@/components/KapiGiris'
 import SayfaKabugu, { KabukDisi, SayfaCercevesi } from '@/components/SayfaKabugu'
@@ -89,6 +91,13 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuth((s) => s.token)
   const loc = useLocation()
   if (!token) {
+    // Müşteri ADINA oturumun (bayi "panele gir") süresi doldu / kapandı: bu sekme giriş
+    // formuna değil geldiği bayi paneline döner (bkz. store/auth KEY_ADINA_DON).
+    const don = adinaDonusAl()
+    if (don) {
+      window.location.replace(guvenliDonus(don))
+      return null
+    }
     // Gelmek istenen yolu koru; giriş sonrası oraya DÖN (login'de bırakma).
     const hedef = loc.pathname + loc.search
     const next = hedef && hedef !== '/' ? `?next=${encodeURIComponent(hedef)}` : ''
@@ -162,6 +171,8 @@ export default function App() {
     <Routes>
       {/* Rol kapıları (ADR-GP-001): her kapı yalnız kendi giriş formunu gösterir. */}
       <Route path="/giris" element={<KapiGiris form="yonetim"><LoginPage /></KapiGiris>} />
+      {/* Müşteri adına giriş kodu değişimi (kimliksiz; kod URL parçasında). */}
+      <Route path="/adina" element={<AdinaGirisPage />} />
         <Route path="/cp/giris" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
         <Route path="/cp" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
       <Route
@@ -178,7 +189,7 @@ export default function App() {
             kullanan sayfalar; içerik genişliği yine --container-sayfa'dır:
             • index (HomePage): koyu pano adası (.gp-dash) içerik alanını baştan
               sona kaplar; içerik dashboard.css'te aynı genişlikte ortalanır.
-              Bayi dalı (BayiOzet) koyu pano değildir: HomePage onu SayfaCercevesi
+              Bayi dalı (bayi/BayiPano) koyu pano değildir: HomePage onu SayfaCercevesi
               ile her panel sayfası gibi kabukta çizer.
             • abonelikler/:id müşteri dalı (MusteriAnaSayfa): üst çubuğa yapışık tam
               genişlik uyarı bandı (bant içeriği max-w-sayfa + kabukla aynı dolgu);

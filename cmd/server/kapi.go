@@ -395,3 +395,22 @@ func kapiAdresURL(host string, port int) string {
 	}
 	return "https://" + net.JoinHostPort(host, strconv.Itoa(port))
 }
+
+// musteriKapiAdresi: müşteri adına giriş (internal/adina) için müşteri kapısının kök
+// adresi. Kapı zorlaması kapalıysa ("" kapı) ayrı kapı yoktur → ("", false): arayüz
+// aynı kökende kalır. Zorlama açıksa adres GEREKLİDİR (bayi/yönetici kapısında müşteri
+// girişi 404'tür); okunamazsa ("", true) → uç 503 döner.
+func musteriKapiAdresi(r *http.Request) (string, bool) {
+	if kapi.Istek(r) == "" {
+		return "", false
+	}
+	a, err := kapi.Oku(kapi.AyarYolu)
+	if err != nil {
+		return "", true
+	}
+	port := a.RolPortu(kapi.Musteri)
+	if port == 0 {
+		return "", true
+	}
+	return kapiAdresURL(r.Host, port), true
+}

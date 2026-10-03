@@ -19,6 +19,7 @@ import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
 import { useRol, yoneticiMi } from '@/lib/rol'
+import BayiDomainler from '@/components/bayi/BayiDomainler'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -26,7 +27,7 @@ type Domain = {
   php_surum?: string; is_demo?: boolean
   olusturulma?: string; plan_id?: number; plan_ad?: string
   sahip_ad?: string; sahip_tur?: string; reseller_id?: number
-  ssl?: boolean
+  ssl?: boolean; ssl_bitis?: string; askida?: boolean; disk_kota_mb?: number
 }
 type SubGenel = {
   id: number; alt_ad: string; tam_ad: string
@@ -426,7 +427,8 @@ export default function DomainsPage() {
     const domById = new Map(items.map(d => [d.id, d.alan_adi]))
     type SilGorev = { url: string; etiket: string }
     const gorevler: SilGorev[] = [
-      ...ids.map(id => ({ url: `/domains/${id}`, etiket: domById.get(id) ?? String(id) })),
+      // Onay metni (?onay=<alan adı>): sunucu bayide zorunlu tutar, yöneticide doğrular.
+      ...ids.map(id => ({ url: `/domains/${id}?onay=${encodeURIComponent(domById.get(id) ?? '')}`, etiket: domById.get(id) ?? String(id) })),
       ...subIds
         .map(sid => {
           const sd = subById.get(sid)
@@ -504,6 +506,11 @@ export default function DomainsPage() {
 
   return (
     <div>
+      {/* Bayi: Seçenek 1 Domainler görünümü (alan adı odaklı liste, satıra tık = müşteri
+          paneline tek tık giriş, toplu işlemler). Oluşturma modalı aşağıda ORTAK. */}
+      {!yonetici ? (
+        <BayiDomainler items={items} yuk={yuk} yenile={yukle} onYeni={olusturAc} />
+      ) : (<>
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Domainler") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Domainler")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
@@ -707,6 +714,7 @@ export default function DomainsPage() {
           </div>
         </div>
       )}
+      </>)}
 
       {/* Domain Oluştur Modal */}
       <Modal acik={olusturAcik} baslik={cevir("Yeni Domain Oluştur")} onKapat={() => setOlusturAcik(false)} kapatilamaz={olusturuluyor} genislik="lg"

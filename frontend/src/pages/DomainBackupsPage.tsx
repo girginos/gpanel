@@ -17,6 +17,7 @@ import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
+import { useAuth } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type Yedek = { id: number; domain_id: number; tip: string; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
@@ -352,7 +353,7 @@ export default function DomainBackupsPage() {
   }
 
   function indir(y: Yedek) {
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = useAuth.getState().token || ''
     fetch(`/api/v1/domains/${id}/backups/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
       // Askı 403'ü: askı sayfasına geçilir; hata gövdesi dosya diye indirilmez.
       .then(async r => ((await fetchAskiKontrol(r, tok)) ? null : r.blob()))

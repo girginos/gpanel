@@ -97,7 +97,14 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				// İmza tek başına yetmez: hesap askıya alınmış, parolası
 				// değişmiş veya domain DEVREDİLMİŞ olabilir (bkz.
 				// musteri_oturum.go). Sunucu-taraflı iptal kontrolü.
-				if kod, mesaj := musteriOturumGecerli(r.Context(), mc); kod != 0 {
+				// Müşteri ADINA oturum (bayi/yönetici): geçerlilik aktörün hesabına
+				// ve domain sahipliğine bağlıdır (bkz. adina.go).
+				if mc.Adina() {
+					if kod, mesaj := adinaOturumGecerli(r.Context(), mc); kod != 0 {
+						httpx.WriteError(w, kod, mesaj)
+						return
+					}
+				} else if kod, mesaj := musteriOturumGecerli(r.Context(), mc); kod != 0 {
 					redYaz(w, kod, mesaj)
 					return
 				}
@@ -264,9 +271,13 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 			// desenini kullanır (retry + kısa-ömürlü önbellek). Eski hali geçici
 			// DB hatasında fail-OPEN idi → askıdaki müşteri kesinti penceresinde
 			// kendi domainine erişebiliyordu.
-			if kod, mesaj := domainAskidaKod(r.Context(), mc.DomainID); kod != 0 {
-				redYaz(w, kod, mesaj)
-				return
+			// Adına-oturum (bayi/yönetici) askıdaki hesaba da girer: askı kararı
+			// (kök askısı dahil) RequireAuth'taki adinaOturumGecerli'de verildi.
+			if !mc.Adina() {
+				if kod, mesaj := domainAskidaKod(r.Context(), mc.DomainID); kod != 0 {
+					redYaz(w, kod, mesaj)
+					return
+				}
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -378,9 +389,27 @@ func Aktor(r *http.Request) (int64, string) {
 		return c.UserID, c.Username
 	}
 	if mc := MusteriClaimsFrom(r); mc != nil {
+		if mc.Adina() {
+			// Müşteri ADINA oturum: işlemi yapan GERÇEK aktördür (bayi/yönetici);
+			// kayıt "aktör (adına musteri:<id>)" olarak düşer.
+			return mc.AktorUID, AdinaAktorAdi(mc.AktorAd, mc.DomainID)
+		}
 		return 0, "musteri:" + strconv.FormatInt(mc.DomainID, 10)
 	}
 	return 0, "anonim"
+}
+
+// AdinaAktorAdi: audit_log.actor_username (VARCHAR(64)) sığacak biçimde
+// "aktör (adına musteri:<id>)". Aktör adı gerekirse rune sınırında kısaltılır;
+// "adına musteri:<id>" eki HİÇ kesilmez (kaydın anlamı odur).
+func AdinaAktorAdi(aktor string, domainID int64) string {
+	ek := " (adına musteri:" + strconv.FormatInt(domainID, 10) + ")"
+	kalan := 64 - len([]rune(ek))
+	r := []rune(aktor)
+	if len(r) > kalan {
+		r = r[:kalan]
+	}
+	return string(r) + ek
 }
 
 // RolFrom: admin/reseller token rol (yoksa "").
