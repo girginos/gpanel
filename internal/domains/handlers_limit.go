@@ -9,6 +9,10 @@
 // kalır; katalogda kopya plan ÜRETİLMEZ.
 //
 // Bayi kuralları:
+//   - Kökün İÇ AYARLARI (efektiflimit.IcAlan: inode, process, IO, FPM, MySQL
+//     bağlantı + governor) bayi tarafından YAZILAMAZ: istekte bu alanlardan biri
+//     (değeri ne olursa olsun, null dahil) varsa 403; mevcut değerleri (kökün ya da
+//     eski bir üst yazımın) bayinin PUT/DELETE'inde aynen korunur.
 //   - Kökün kilitlediği alanlar (hosting_limit_ust.kok_alanlar) değiştirilemez;
 //     GL-06 sınıfı (plans.PlanOzet'te olmayan) kilitli alanın değeri bayiye dönmez.
 //   - Plan bayinin değilse (kökün global planı / başka sahibin planı) GL-06 sınıfı
@@ -54,6 +58,7 @@ type limitAlanYanit struct {
 	Kaynak  string `json:"kaynak"`
 	Gizli   bool   `json:"gizli,omitempty"`   // değer bu rol için gösterilmez (GL-06)
 	Kilitli bool   `json:"kilitli,omitempty"` // yönetici kilitledi — bayi değiştiremez
+	Ic      bool   `json:"ic,omitempty"`      // kökün iç ayarı — bayi hiç yazamaz (efektiflimit.IcAlan)
 }
 
 type limitYanit struct {
@@ -86,7 +91,8 @@ func limitGorunum(s efektiflimit.Sonuc, rid int64) limitYanit {
 			Plan: d.Plan, Ust: d.Ust, Efektif: d.Efektif, Kaynak: d.Kaynak}
 		if rid > 0 {
 			ay.Kilitli = d.Kok
-			if !a.Ozette {
+			if efektiflimit.IcAlan(a.Sutun) {
+				ay.Ic = true
 				if planGizli {
 					ay.Plan = nil
 					ay.Gizli = true
@@ -191,6 +197,15 @@ func (h *Handlers) limitYaz(w http.ResponseWriter, r *http.Request, istek map[st
 		return
 	}
 	if rid > 0 {
+		// Kökün iç ayarları bayi isteğinde YOK SAYILMAZ, reddedilir (kullanıcı kararı
+		// 2026-10-03). Varlığı yeter: aynı değer/null da reddedilir — gizli kök
+		// değerini deneme-yanılmayla ölçen bir kâhin (oracle) oluşmasın.
+		if ic := efektiflimit.IcAlanlarIcinde(istek); len(ic) > 0 {
+			httpx.WriteError(w, http.StatusForbidden, efektiflimit.IcAlanRedMesaji(ic))
+			return
+		}
+	}
+	if rid > 0 {
 		// Havuz kapısı: iki paralel istek aynı eski toplamı okuyup havuzu aşmasın
 		// (SetPlan/Create ile aynı kilit).
 		k := kilit.Bayi(rid)
@@ -249,7 +264,7 @@ func (h *Handlers) limitYaz(w http.ResponseWriter, r *http.Request, istek map[st
 		if esitInt(e, n) {
 			continue
 		}
-		if rid <= 0 && once.ResellerID > 0 && !a.Ozette {
+		if rid <= 0 && once.ResellerID > 0 && efektiflimit.IcAlan(a.Sutun) {
 			degisen = append(degisen, a.Sutun+": değişti")
 			continue
 		}
@@ -277,8 +292,9 @@ func (h *Handlers) limitYaz(w http.ResponseWriter, r *http.Request, istek map[st
 //
 // Yönetici: istek TAM değiştirmedir. Bayi hostinginde yöneticinin yeni yazdığı ya da
 // değiştirdiği alan kilitlenir; değeri aynı kalan bayi alanı bayinin kalır.
-// Bayi: kilitli alanlar mevcut değerinde kalır (istekte farklı değer → 403);
-// kilitsiz alanlar istekle TAM değiştirilir.
+// Bayi: iç alanlar (efektiflimit.IcAlan) ve kilitli alanlar mevcut değerinde kalır
+// (iç alan istekte hiç olmaz — limitYaz reddeder; kilitli alanda farklı değer → 403);
+// diğer alanlar istekle TAM değiştirilir.
 func limitBirlestir(once efektiflimit.Sonuc, istek map[string]*int, rid int64) (map[string]*int, map[string]bool, *limitHata) {
 	yeni := map[string]*int{}
 	kok := map[string]bool{}
@@ -286,6 +302,12 @@ func limitBirlestir(once efektiflimit.Sonuc, istek map[string]*int, rid int64) (
 		mevcut := once.Degerler[a.Sutun]
 		v, var_ := istek[a.Sutun]
 		if rid > 0 {
+			if efektiflimit.IcAlan(a.Sutun) {
+				// Bayinin "plana dön"ü / tam değiştirmesi kökün iç ayarını silmez.
+				yeni[a.Sutun] = mevcut.Ust
+				kok[a.Sutun] = mevcut.Kok
+				continue
+			}
 			if mevcut.Kok {
 				if var_ && !esitInt(v, mevcut.Ust) {
 					return nil, nil, &limitHata{http.StatusForbidden, a.Sutun + " yöneticiniz tarafından belirlendi — değiştirilemez"}

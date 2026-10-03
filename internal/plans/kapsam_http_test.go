@@ -398,8 +398,10 @@ func TestPlanKapsam_BayiYabanciPlaniBaglayamaz(t *testing.T) {
 func TestPlanKapsam_YabanciHostingeBagliPlanDuzenlenemez(t *testing.T) {
 	db := pk_geciciDB(t)
 	h := pk_router(db)
+	// Bayi gövdesi kökün iç alanlarını (max_process, db_max_query_seconds…) taşımaz:
+	// taşırsa ayrıca 403 (efektiflimit.IcAlan) — burada yalnız GL-03 kapısı sınanır.
 	govde := map[string]any{"ad": "A Devir Artigi", "disk_kota_mb": 1000, "trafik_kota_mb": 1000,
-		"cpu_yuzde": 5, "ram_mb": 64, "max_process": 2, "db_max_query_seconds": 1, "nginx_ek_direktifler": ""}
+		"cpu_yuzde": 5, "ram_mb": 64, "nginx_ek_direktifler": ""}
 
 	// Plan 202 A'nın ama YALNIZ B'nin hostingi 33'te: A düzenlerse B'nin sitesi boğulur.
 	y := pk_istek(t, h, "A", "PUT", "/plans/202", govde)
@@ -428,6 +430,8 @@ func TestPlanKapsam_YabanciHostingeBagliPlanDuzenlenemez(t *testing.T) {
 	// Yönetici DEĞİŞMEZ: aynı planı düzenleyebilir.
 	govde["ad"] = "A Devir Artigi"
 	govde["cpu_yuzde"] = 150
+	govde["max_process"] = 2
+	govde["db_max_query_seconds"] = 1
 	if y := pk_istek(t, h, "admin", "PUT", "/plans/202", govde); y.kod != http.StatusOK {
 		t.Errorf("yönetici PUT /plans/202 → %d %s", y.kod, y.govde)
 	}

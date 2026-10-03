@@ -1,6 +1,7 @@
 package plans
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -132,5 +133,25 @@ func TestVarsayilanPlanAdi(t *testing.T) {
 		if utf8.RuneCountInString(g) > 64 || !strings.Contains(g, "Varsayılan") {
 			t.Errorf("uzun ad (%d): %q", d, g)
 		}
+	}
+}
+
+// Okuma maskesi (PlanOzet) ile yazma reddi (efektiflimit.IcAlan) AYNI listeyi kullanır:
+// özette olan her limit alanı bayiye açık, olmayan her alan iç alandır.
+func TestPlanOzet_IcAlanlaAyni(t *testing.T) {
+	b, err := json.Marshal(PlanOzet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	for _, a := range efektiflimit.Alanlar {
+		_, ozette := m[a.Sutun]
+		if ozette == efektiflimit.IcAlan(a.Sutun) {
+			t.Errorf("%s: PlanOzet'te=%v ama IcAlan=%v (okuma maskesi ile yazma reddi kaydı)", a.Sutun, ozette, efektiflimit.IcAlan(a.Sutun))
+		}
+	}
+	if strings.Join(KokAlanlari(), ",") != strings.Join(efektiflimit.IcAlanlar(), ",") {
+		t.Errorf("KokAlanlari ≠ efektiflimit.IcAlanlar")
 	}
 }

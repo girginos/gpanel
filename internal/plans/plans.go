@@ -4,7 +4,6 @@ package plans
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -228,9 +227,8 @@ func varsayilanDoldur(p *Plan) {
 }
 
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
-	var p Plan
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+	p, ok := planGovdesiOku(w, r, middleware.ResellerIDFrom(r))
+	if !ok {
 		return
 	}
 	p.Ad = strings.TrimSpace(p.Ad)
@@ -330,9 +328,8 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var p Plan
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+	p, ok := planGovdesiOku(w, r, ridU)
+	if !ok {
 		return
 	}
 	p.Ad = strings.TrimSpace(p.Ad)

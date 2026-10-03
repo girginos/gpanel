@@ -300,9 +300,26 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	if y := bp_istek(t, h, "C", "POST", "/plans", govde("C Posta", 3000, 5000, map[string]any{"max_email": 50})); y.kod != http.StatusBadRequest {
 		t.Errorf("posta tavanı → %d %s", y.kod, y.govde)
 	}
-	// Geçerli plan: kök alanları gövdeden ALINMAZ (panel varsayılanı).
-	y := bp_istek(t, h, "C", "POST", "/plans", govde("C Ikinci", 3000, 5000, map[string]any{
-		"io_read_mbps": 999, "db_max_query_seconds": 5, "max_process": 9999, "cpu_yuzde": 200, "max_email": 10}))
+	// Kökün iç alanı bayi gövdesinde: sessizce yok sayılmaz, 403 ve plan OLUŞMAZ.
+	// Varlık yeter (aynı/sıfır değer de); harf katlamalı anahtar da yakalanır.
+	planSayisi := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`)
+	for _, ek := range []map[string]any{
+		{"io_read_mbps": 999, "db_max_query_seconds": 5, "max_process": 9999, "cpu_yuzde": 200},
+		{"io_read_mbps": 0},
+		{"max_process": nil},
+		{"IO_READ_MBPS": 999},
+		{"max_proce\u017fs": 9999},
+	} {
+		y := bp_istek(t, h, "C", "POST", "/plans", govde("C Ic", 3000, 5000, ek))
+		if y.kod != http.StatusForbidden || !strings.Contains(y.govde, "yöneticinize ait") {
+			t.Errorf("bayi iç alanlı plan oluşturma %v → %d %s (beklenen 403)", ek, y.kod, y.govde)
+		}
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`); n != planSayisi {
+		t.Errorf("reddedilen istekler plan oluşturdu: %d → %d", planSayisi, n)
+	}
+	// Geçerli plan (iç alansız): kök alanları panel varsayılanı.
+	y := bp_istek(t, h, "C", "POST", "/plans", govde("C Ikinci", 3000, 5000, map[string]any{"cpu_yuzde": 200, "max_email": 10}))
 	if y.kod != http.StatusCreated || !strings.Contains(y.govde, `"duzenlenebilir":true`) {
 		t.Fatalf("C yeni plan → %d %s", y.kod, y.govde)
 	}
@@ -343,8 +360,12 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	}
 
 	// Kök alanları: bayi değiştiremez; yönetici değiştirir; bayi kaydı yöneticininkini korur.
-	if y := bp_istek(t, h, "C", "PUT", yol, govde("C Ikinci", 4000, 5000, map[string]any{"io_read_mbps": 777})); y.kod != http.StatusOK || bp_oku(t, db, yeni.ID).ioRead != 0 {
-		t.Errorf("bayi kök alanını (io_read_mbps) değiştirdi → %d %s", y.kod, y.govde)
+	if y := bp_istek(t, h, "C", "PUT", yol, govde("C Ikinci Degisti", 3900, 5000, map[string]any{"io_read_mbps": 777})); y.kod != http.StatusForbidden ||
+		!strings.Contains(y.govde, "io_read_mbps") {
+		t.Errorf("bayi kök alanını (io_read_mbps) yazmaya çalıştı → %d %s (beklenen 403)", y.kod, y.govde)
+	}
+	if x := bp_oku(t, db, yeni.ID); x.ioRead != 0 || x.disk != 4000 || x.ad != "C Ikinci Ad" {
+		t.Errorf("reddedilen bayi düzenlemesi planı değiştirdi: %+v", x)
 	}
 	if y := pk_istek(t, h, "admin", "PUT", yol, govde("C Ikinci", 4000, 5000, map[string]any{"io_read_mbps": 50, "max_process": 80})); y.kod != http.StatusOK {
 		t.Fatalf("yönetici bayi planını düzenleyemedi → %d %s", y.kod, y.govde)
@@ -356,6 +377,13 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	uygulanan(time.Second, 2)
 	if x := bp_oku(t, db, yeni.ID); x.ioRead != 50 || x.proc != 80 || x.disk != 3500 {
 		t.Errorf("bayi kaydı yöneticinin kök alanlarını ezdi: %+v", x)
+	}
+	// Yöneticinin değeri varken bayi aynı değeri gönderse de 403; değer korunur.
+	if y := bp_istek(t, h, "C", "PUT", yol, govde("C Ikinci", 3500, 5000, map[string]any{"io_read_mbps": 50, "max_process": 80})); y.kod != http.StatusForbidden {
+		t.Errorf("bayi iç alanı (aynı değer) → %d %s (beklenen 403)", y.kod, y.govde)
+	}
+	if x := bp_oku(t, db, yeni.ID); x.ioRead != 50 || x.proc != 80 {
+		t.Errorf("reddedilen bayi isteği kök alanlarını değiştirdi: %+v", x)
 	}
 
 	// Varsayılan: kaldırılamaz; VarsayilanYap ile değişir (kapsam yalnız C).
