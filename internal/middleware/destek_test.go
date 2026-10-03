@@ -59,6 +59,9 @@ func dsKur(t *testing.T, hesap func(context.Context, int64) (string, string, err
 			r.With(MusteriScope).Post("/domains/{id}/cron", yakala)
 			r.With(MusteriScope).Get("/domains/{id}/files/oku", yakala)
 			r.With(AdminOnly).Get("/admin/system/loglar", yakala)
+			// Rol ara yazılımı OLMAYAN izinli uç: hesap doğrulamasını tek başına ölçer
+			// (AdminOnly/MusteriScope'un 403'ü askı kararını örtmesin).
+			r.Get("/domains/{id}/dns", yakala)
 		})
 	})
 	return s, r
@@ -187,10 +190,14 @@ func TestDestekHesapDogrulama(t *testing.T) {
 		{"müşteri domain yok", &DestekKimlik{Rol: DestekMusteri, TgKisa: "k"}, dsHesap("admin", "active"), 401},
 		{"bilinmeyen rol", &DestekKimlik{Rol: "admin", KullaniciID: 1}, dsHesap("admin", "active"), 401},
 	}
+	destekHesapSorgu = dsHesap("reseller", "active")
+	if w := dsIstek(h, "GET", "/api/v1/domains/42/dns", bayi); w.Code != 200 || !s.cagrildi || s.claims.ResellerID != 7 {
+		t.Fatalf("etkin bayi (taban): %d %+v", w.Code, s.claims)
+	}
 	for _, c := range cases {
 		destekHesapSorgu = c.hesap
 		s.cagrildi = false
-		w := dsIstek(h, "GET", "/api/v1/admin/system/loglar", c.dk)
+		w := dsIstek(h, "GET", "/api/v1/domains/42/dns", c.dk)
 		if w.Code != c.kod || s.cagrildi {
 			t.Fatalf("%s: %d (beklenen %d) çağrıldı=%v", c.ad, w.Code, c.kod, s.cagrildi)
 		}
