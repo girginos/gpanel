@@ -419,12 +419,22 @@ func TestGorsel_YuklemeVeServis(t *testing.T) {
 // Özel alan adı: izin şart; başka bayinin adı genel metinle reddedilir.
 func TestAlanAdi_IzinVeCakisma(t *testing.T) {
 	o := ktKur(t)
+	// Uzlaştırma kancası (provisioner.PanelMarkaDurt): yalnız durum değiştiren adımlarda.
+	var kanca []string
+	eskiK := AlanDegistiKanca
+	t.Cleanup(func() { AlanDegistiKanca = eskiK })
+	AlanDegistiKanca = func(ad string) { kanca = append(kanca, "["+ad+"]") }
 	if k, _ := o.istek("POST", "/api/v1/marka/alan-adi", o.bayiA, map[string]any{"alan_adi": "panel.alfa.test"}); k != 403 {
 		t.Errorf("izin kapalıyken (varsayılan) ekleme 403 olmalı, gelen %d", k)
 	}
 	for _, rid := range []string{"7", "8"} {
 		o.istek("PUT", "/api/v1/marka/bayiler/"+rid, o.admin, map[string]any{"alanadi_izni": true})
 	}
+	o.istek("PUT", "/api/v1/marka/bayiler/7", o.admin, map[string]any{"izin": true}) // izin değişmedi → kanca yok
+	if strings.Join(kanca, "") != "[][]" {
+		t.Errorf("izin açılışı kancayı bir kez dürtmeli: %v", kanca)
+	}
+	kanca = nil
 	if k, g := o.istek("POST", "/api/v1/marka/alan-adi", o.bayiB, map[string]any{"alan_adi": "panel.ortak.test"}); k != 200 {
 		t.Fatalf("B ekleme: %d %s", k, g)
 	}
@@ -459,8 +469,23 @@ func TestAlanAdi_IzinVeCakisma(t *testing.T) {
 	if k, g := o.istek("POST", "/api/v1/marka/alan-adi/dogrula", o.bayiA, nil); k != 200 || !strings.Contains(g, "ssl_bekliyor") {
 		t.Errorf("doğru TXT ssl_bekliyor olmalı: %d %s", k, g)
 	}
+	if strings.Join(kanca, "") != "[panel.alfa.test]" {
+		t.Errorf("yalnız başarılı doğrulama kancayı adla dürtmeli: %v", kanca)
+	}
+	// Teknik ayrıntı (acme çıktısı) bayiye ASLA gitmez; genel gerekçe gider.
+	o.db.Exec(`UPDATE cp_marka_alanadi SET durum='hata', son_hata_genel='Sertifika alınamadı.', son_hata_ayrinti='acme GIZLI-AYRINTI', ssl_bitis='2027-01-02 03:04:05' WHERE reseller_id=7`)
+	if _, g := o.istek("GET", "/api/v1/marka/alan-adi", o.bayiA, nil); strings.Contains(g, "GIZLI-AYRINTI") || !strings.Contains(g, "Sertifika alınamadı.") || !strings.Contains(g, `"ssl_bitis":"2027-01-02"`) {
+		t.Errorf("bayi görünümü: %s", g)
+	}
+	if _, g := o.istek("GET", "/api/v1/marka/bayiler", o.admin, nil); !strings.Contains(g, "GIZLI-AYRINTI") {
+		t.Errorf("kök ayrıntıyı görmeli: %s", g)
+	}
+	kanca = nil
 	// A silme yalnız kendi satırını siler.
 	o.istek("DELETE", "/api/v1/marka/alan-adi", o.bayiA, nil)
+	if strings.Join(kanca, "") != "[]" {
+		t.Errorf("silme temizlik için kancayı dürtmeli: %v", kanca)
+	}
 	var n int
 	o.db.QueryRow(`SELECT COUNT(*) FROM cp_marka_alanadi WHERE reseller_id=8`).Scan(&n)
 	if n != 1 {

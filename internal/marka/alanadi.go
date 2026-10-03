@@ -7,9 +7,10 @@ package marka
 //
 // Akış: ekle (dns_bekliyor + TXT jetonu) → dogrula (A kaydı bu sunucuya +
 // TXT _gpanel-dogrulama.<ad> = jeton, KAMU çözücüsünden) → ssl_bekliyor →
-// [SSL + nginx: alanadi_nginx.go saf üreticileri HAZIR; G/Ç (acme + nginx -t +
-// reload) bu dalda BAĞLANMADI] → aktif. Host çözümü yalnız 'aktif' satırları
-// ve alanadi_izni=1 bayileri kullanır (cozum.go hostRID).
+// provisioner/panelmarka.go döngüsü (acme.sh HTTP-01 + SNI/include + nginx -t +
+// TLS ölçümü) → aktif (ya da hata + gerekçe, geri çekilmeyle yeniden dener).
+// Host çözümü yalnız 'aktif' satırları ve alanadi_izni=1 bayileri kullanır
+// (cozum.go hostRID).
 //
 // 🔴 TXT ŞART: A kaydı yalnız "bu sunucuya işaret ediyor" der; aynı sunucudaki
 // başka bir bayi DNS'i buraya bakan ama sahiplenilmemiş bir adı kapabilirdi.
@@ -35,6 +36,16 @@ import (
 // AdAlaniKanca — hosting ad-alanı denetimi (domains.AdAlaniDenetle; main.go
 // bağlar — import döngüsü olmasın). Dönen hata metni GENEL olmalı.
 var AdAlaniKanca func(ctx context.Context, ad string, rid int64) error
+
+// AlanDegistiKanca — özel adın sertifika/nginx uzlaştırmasını hemen tetikler
+// (provisioner.PanelMarkaDurt; main bağlar). ad: yeniden doğrulanan ad ya da "".
+var AlanDegistiKanca func(ad string)
+
+func alanDegisti(ad string) {
+	if AlanDegistiKanca != nil {
+		AlanDegistiKanca(ad)
+	}
+}
 
 // DogrulamaOnek — TXT kaydının adı: _gpanel-dogrulama.<alan>
 const DogrulamaOnek = "_gpanel-dogrulama."
@@ -74,12 +85,14 @@ type alanKaydi struct {
 	TXTDeger  string `json:"txt_deger"`
 	SonHata   string `json:"son_hata"`
 	Olusturma string `json:"olusturma"`
+	SSLBitis  string `json:"ssl_bitis"`
 }
 
 func alanOku(ctx context.Context, db *sql.DB, rid int64) (*alanKaydi, error) {
 	var k alanKaydi
-	err := db.QueryRowContext(ctx, `SELECT alan_adi, durum, dogrulama, son_hata_genel, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i')
-		FROM cp_marka_alanadi WHERE reseller_id=?`, rid).Scan(&k.AlanAdi, &k.Durum, &k.TXTDeger, &k.SonHata, &k.Olusturma)
+	err := db.QueryRowContext(ctx, `SELECT alan_adi, durum, dogrulama, son_hata_genel, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i'),
+		COALESCE(DATE_FORMAT(ssl_bitis,'%Y-%m-%d'),'')
+		FROM cp_marka_alanadi WHERE reseller_id=?`, rid).Scan(&k.AlanAdi, &k.Durum, &k.TXTDeger, &k.SonHata, &k.Olusturma, &k.SSLBitis)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -201,6 +214,9 @@ func (h *Handlers) AlanDogrula(w http.ResponseWriter, r *http.Request) {
 		log.Printf("marka: alan adı durumu yazılamadı (rid=%d): %v", k.RID, err)
 	}
 	hostTemizle()
+	if durum == "ssl_bekliyor" {
+		alanDegisti(a.AlanAdi)
+	}
 	h.denetim(r, "marka.alanadi.dogrula", a.AlanAdi, durum, k.RID, hata == "")
 	a2, _ := alanOku(r.Context(), h.DB, k.RID)
 	kod := http.StatusOK
@@ -255,6 +271,7 @@ func (h *Handlers) alanSilRID(w http.ResponseWriter, r *http.Request, rid, kapsa
 		return
 	}
 	hostTemizle()
+	alanDegisti("") // nginx + sertifika + acme yenileme kaydı temizliği
 	h.denetim(r, "marka.alanadi.sil", a.AlanAdi, "", kapsam, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
