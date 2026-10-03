@@ -32,6 +32,9 @@ type sahteMerkez struct {
 	gelen    chan gelenMesaj
 	baglanti atomic.Int32
 	kayitRed atomic.Value // p.HataKodu
+	// sahteci: ayarlanırsa meydan okuma BU (ajanın tanımadığı) anahtarla imzalanır.
+	sahteci  *p.Imzalayici
+	yanitSay atomic.Int32
 
 	mu       sync.Mutex
 	birikim  []gelenMesaj // bekle'nin henüz istenmemiş mesajları
@@ -92,7 +95,11 @@ func (m *sahteMerkez) wsIsle(w http.ResponseWriter, r *http.Request) {
 		_ = s.yaz(0x1, b, true)
 		return
 	}
-	mo, err := m.imz.MeydanOlustur(kay)
+	imz := m.imz
+	if m.sahteci != nil {
+		imz = m.sahteci
+	}
+	mo, err := imz.MeydanOlustur(kay)
 	if err != nil {
 		m.t.Errorf("meydan: %v", err)
 		return
@@ -103,6 +110,7 @@ func (m *sahteMerkez) wsIsle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	m.yanitSay.Add(1)
 	_, g, err = p.Coz(veri, p.YonMerkeze)
 	y, ok := g.(*p.MeydanYanit)
 	if err != nil || !ok {

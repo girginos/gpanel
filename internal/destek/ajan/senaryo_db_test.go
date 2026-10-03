@@ -544,3 +544,32 @@ func TestGercekYurutucuSozlesmesi(t *testing.T) {
 		}
 	}
 }
+
+// Merkez taklitçisi (Cloudflare arkasında TLS merkezi kanıtlamaz): meydan okumayı
+// sabitlenmiş anahtar dışında bir anahtarla imzalayan "merkeze" cihaz imzası VERİLMEZ.
+func TestSahteMerkezeCihazImzasiYok(t *testing.T) {
+	db := dtGeciciDB(t)
+	m := yeniSahteMerkez(t)
+	sahte, _ := p.AnahtarCiftiUret(nil)
+	m.sahteci = p.YeniImzalayici(sahte)
+	eskiPI := lisansParmakIzi
+	lisansParmakIzi = func() string { return strings.Repeat("ef", 32) }
+	defer func() { lisansParmakIzi = eskiPI }()
+	a := Yeni(db, Yapilandirma{MerkezURL: m.srv.URL, MerkezAnahtarlari: []ed25519.PublicKey{m.cift.Acik},
+		CihazAnahtarYolu: t.TempDir() + "/c.key", GuvensizIzin: true})
+	_, _ = db.Exec(`INSERT INTO destek_ayar (reseller_id, modul_duzey) VALUES (0,'okuma')`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.Baslat(ctx)
+	son := time.Now().Add(5 * time.Second)
+	for m.baglanti.Load() == 0 || a.DurumAl().Durum != BagHata {
+		if time.Now().After(son) {
+			t.Fatalf("durum: %+v", a.DurumAl())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if m.yanitSay.Load() != 0 || a.Bagli() {
+		t.Fatal("taklitçi merkeze meydan yanıtı (cihaz imzası) verildi")
+	}
+}
