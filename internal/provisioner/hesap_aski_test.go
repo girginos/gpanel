@@ -477,7 +477,7 @@ func TestGecerliHavuzAdi_TamEslesme(t *testing.T) {
 func TestHesabinAltVhostlari_KomsuyaDokunmaz(t *testing.T) {
 	d := t.TempDir()
 	for _, ad := range []string{"sub_c_shop_blog.conf", "sub_c_shop_www-2.conf", "sub_c_shop_store_blog.conf",
-		"sub_c_shopx_a.conf", "dom_c_shop.conf"} {
+		"sub_c_shopx_a.conf", "dom_c_shop.conf", "sub_c_shop_.conf"} {
 		ha_yaz(t, filepath.Join(d, ad), "x")
 	}
 	var got []string
