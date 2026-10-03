@@ -51,6 +51,16 @@ func TestEsik_MusteriyeGitmez_SahipGorur(t *testing.T) {
 	if y := bt_liste(t, h, bt_musteri(t, 10), "?kategori=kota"); len(y.Bildirimler) != 0 {
 		t.Errorf("?kategori=kota müşteriye eşik göstermemeli: %+v", y.Bildirimler)
 	}
+	// Yazıcı: görenler YALNIZ sahip → sahip hâlâ okunmamış tutarken aynı eşik
+	// yeniden yazılmaz. Müşteri görenlerde kalsaydı (okuma süzgeci onu hep "okunmamış
+	// yok" sayar) her turda yinelenen satır yazılır, sahibin kopyası okunmuş
+	// işaretlenirdi.
+	if YazOlay(h.DB, esik, 10, AktorYok, 0) != 0 {
+		t.Error("sahip okunmamış tutarken aynı eşik yeniden yazılmamalı")
+	}
+	if n := bt_sayi(t, h.DB, `SELECT COUNT(*) FROM cp_bildirim WHERE domain_id=10 AND kategori='kota'`); n != 1 {
+		t.Errorf("domain 10 için tek eşik satırı olmalı: %d", n)
+	}
 	// Yazıcı: müşteri için okundu/tekilleştirme kaydı yok.
 	if n := bt_sayi(t, h.DB, `SELECT COUNT(*) FROM cp_bildirim_okundu WHERE okuyan_tur='musteri'`); n != 0 {
 		t.Errorf("müşteri okundu kaydı olmamalı: %d", n)
