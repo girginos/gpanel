@@ -112,9 +112,12 @@ func (m *Merkez) IcHandler() http.Handler {
 			sayac[k] = v
 		}
 		m.sayacMu.Unlock()
+		bk, be := m.ajan.bekleyenSayilari()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"cevrimici_ajan":   m.ajan.cevrimiciSayi(),
+			"bekleyen_kod":     bk,
+			"bekleyen_eslesme": be,
 			"etkin_oturum":     m.oturumlar.Sayi(),
 			"cache_isabet":     m.defter.cache.Durum(),
 			"genel_gunluk_usd": gg,
@@ -187,6 +190,14 @@ func (m *Merkez) baglantiKapandi(b Baglanti, neden protokol.IptalNedeni) {
 			m.log.Warn("telegram gönderilemedi", "hata", err)
 		}
 	}()
+}
+
+// eslesmeReddedildi: ajan /start sonrası eşleştirmeyi reddetti.
+func (m *Merkez) eslesmeReddedildi(tg int64, kod protokol.HataKodu) {
+	k, _ := m.depo.KullaniciAl(tg)
+	if _, err := m.tg.MesajGonder(context.Background(), GidenMesaj{ChatID: tg, Metin: metin(kullaniciDili(k, ""), "eslesme_red", string(kod))}); err != nil {
+		m.log.Warn("telegram gönderilemedi", "hata", err)
+	}
 }
 
 // insanDevri: destek grubuna kısa, maskeli bilet; grup yoksa yalnız log.

@@ -158,6 +158,14 @@ func (m *Merkez) destekYanitla(ctx context.Context, o *Oturum, metin, dil string
 	yukseldi, zorla := false, false
 	tur := 0
 	for {
+		// Bağlantı (kapsam/hesap listesi) değişti ya da iptal edildi: eski Baglam'la devam
+		// edilirse modelin "hesap N"i ajanın YENİ listesinde başka hesaba işaret eder ve
+		// ajan (artık güncel listeyi bildirmiş olduğundan) bunu yürütür. Oturum biter;
+		// kullanıcının yeni mesajı güncel kapsamla yeni oturum açar.
+		if m.oturumlar.Kapali(o) {
+			m.say("oturum_kapsam_degisti")
+			return Sonuc{Metin: metin_(dil, "kapsam_degisti"), Sabit: true, OturumBitir: true}
+		}
 		if err := m.defter.Uygun(o.Sunucu, o.tokenToplam); err != nil {
 			m.log.Warn("bütçe engeli (döngü içi)", "sunucu", o.Sunucu, "neden", err)
 			return Sonuc{Metin: metin_(dil, "butce"), Sabit: true, Devir: true, Neden: err.Error(), OturumBitir: true}
@@ -263,6 +271,10 @@ func (m *Merkez) araclariCalistir(ctx context.Context, o *Oturum, bloklar []json
 		}
 		if g.Risk != protokol.R0 { // Faz 1: yalnız okuma
 			out = append(out, aracSonucBlok(h.ID, "hata: "+string(protokol.HataDuzey), true))
+			continue
+		}
+		if m.oturumlar.Kapali(o) { // aynı turda sonraki araçlar da bayat kapsamla GİTMEZ
+			out = append(out, aracSonucBlok(h.ID, "hata: "+string(protokol.HataKapsam)+" (oturum kapsamı değişti)", true))
 			continue
 		}
 		ilerleme(metin_(dil, "arac_calisiyor", g.Arac))

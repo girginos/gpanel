@@ -68,7 +68,12 @@ type ajanOturumu struct {
 }
 
 func (o *ajanOturumu) gonder(g protokol.Govde) error {
-	b, err := protokol.Kodla(yeniKimlik(), g)
+	return o.gonderKimlikle(yeniKimlik(), g)
+}
+
+// gonderKimlikle: zarf kimliği çağırandan (ajanın hata.ilgili ile yanıtı eşlenecekse).
+func (o *ajanOturumu) gonderKimlikle(kimlik string, g protokol.Govde) error {
+	b, err := protokol.Kodla(kimlik, g)
 	if err != nil {
 		return err
 	}
@@ -101,6 +106,7 @@ type eslesmeKaydi struct {
 	sunucu string
 	tg     int64
 	bitis  time.Time
+	zarf   string // eslesme_onayla zarf kimliği: ajanın reddi hata.ilgili ile buna döner
 }
 
 type bekleyenMeydan struct {
@@ -113,6 +119,9 @@ type yoklamaOturumu struct {
 	ao     *ajanOturumu
 	kuyruk chan []byte
 	son    time.Time
+
+	emu       sync.Mutex
+	ertelenen []byte // /al sınırına sığmayan zarf: sıradaki /al'ın İLK zarfı
 }
 
 // AjanSunucu: ajan uçları + bağlı ajanlar + eşleştirme durumu.
@@ -143,6 +152,24 @@ func (a *AjanSunucu) cevrimiciSayi() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return len(a.aktif)
+}
+
+// bekleyenSayilari: süresi dolmamış eşleştirme kodu ve panel onayı bekleyen eşleştirme sayısı (metrik).
+func (a *AjanSunucu) bekleyenSayilari() (kod, eslesme int) {
+	simdi := a.m.saat()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, k := range a.kodlar {
+		if k.bitis.After(simdi) {
+			kod++
+		}
+	}
+	for _, e := range a.eslesmeler {
+		if e.bitis.After(simdi) {
+			eslesme++
+		}
+	}
+	return kod, eslesme
 }
 
 // sunucuKimligi: cihaz açık anahtarından türetilir (TOFU kimlik).
@@ -248,6 +275,9 @@ func (a *AjanSunucu) isle(ao *ajanOturumu, veri []byte) {
 	case *protokol.IsSonucu:
 		a.yanitIlet(ao, m.IsKodu, isYaniti{sonuc: m})
 	case *protokol.HataMesaji:
+		if m.Ilgili != "" && a.eslesmeReddi(ao, m) {
+			return
+		}
 		if m.Ilgili != "" && a.yanitIlet(ao, m.Ilgili, isYaniti{hata: m}) {
 			return
 		}
@@ -325,7 +355,8 @@ func (a *AjanSunucu) EslesmeBaslat(kodOzet string, tg int64, tgAd string) (strin
 		return "", ErrAjanCevrimdisi
 	}
 	delete(a.kodlar, kodOzet)
-	a.eslesmeler[kodOzet] = eslesmeKaydi{sunucu: k.sunucu, tg: tg, bitis: simdi.Add(eslesmeBeklemesi)}
+	zarf := yeniKimlik()
+	a.eslesmeler[kodOzet] = eslesmeKaydi{sunucu: k.sunucu, tg: tg, bitis: simdi.Add(eslesmeBeklemesi), zarf: zarf}
 	a.mu.Unlock()
 
 	if !tgAdDeseni(tgAd) {
@@ -335,11 +366,36 @@ func (a *AjanSunucu) EslesmeBaslat(kodOzet string, tg int64, tgAd string) (strin
 	if err := a.m.imza.Imzala(e, protokol.EnUzunGecerlilik); err != nil {
 		return "", err
 	}
-	if err := ao.gonder(e); err != nil {
+	if err := ao.gonderKimlikle(zarf, e); err != nil {
 		return "", ErrAjanCevrimdisi
 	}
 	a.m.log.Info("eşleştirme onayı gönderildi", "sunucu", k.sunucu, "tg", tgKisa(tg))
 	return k.sunucu, nil
+}
+
+// eslesmeReddi: ajan eslesme_onayla'yı reddetti (kod tüketilmiş, destek kapalı, kota…).
+// Kullanıcıya "panelde onay verin" denmişti — sessiz kalmasın; kayıt silinir.
+func (a *AjanSunucu) eslesmeReddi(ao *ajanOturumu, h *protokol.HataMesaji) bool {
+	a.mu.Lock()
+	var (
+		bulundu bool
+		kayit   eslesmeKaydi
+	)
+	for oz, e := range a.eslesmeler {
+		if e.zarf != "" && e.zarf == h.Ilgili && e.sunucu == ao.sunucu {
+			kayit, bulundu = e, true
+			delete(a.eslesmeler, oz)
+			break
+		}
+	}
+	a.mu.Unlock()
+	if !bulundu {
+		return false
+	}
+	a.m.say("eslesme_red")
+	a.m.log.Info("ajan eşleştirmeyi reddetti", "sunucu", ao.sunucu, "kod", h.Kod)
+	go a.m.eslesmeReddedildi(kayit.tg, h.Kod)
+	return true
 }
 
 func tgAdDeseni(s string) bool {
@@ -373,6 +429,12 @@ func (a *AjanSunucu) baglantiDurumIsle(ao *ajanOturumu, d *protokol.BaglantiDuru
 		}
 		a.mu.Unlock()
 		if d.KodOzet == "" || !ok || e.sunucu != ao.sunucu || e.tg != d.TgUserID {
+			// Merkezde karşılığı olmayan bağlantı (ör. ajan çevrimdışıyken /unutbeni ya da
+			// merkez kaydı silindi): merkez onu ASLA kullanamaz — ajana da kapattırılır ki
+			// panelde "aktif" görünüp süresi dolana dek asılı kalmasın.
+			if d.Durum != protokol.BaglantiIptalEdildi {
+				_ = ao.gonder(&protokol.BaglantiIptal{BaglantiID: d.BaglantiID, Neden: protokol.IptalMerkez})
+			}
 			return &protokol.Hata{Kod: protokol.HataEslesmeKodu, Ayrinti: "merkezde eşleştirme kaydı yok"}
 		}
 	}
@@ -414,7 +476,14 @@ func (a *AjanSunucu) eslesmeSil(kodOzet string) {
 func (a *AjanSunucu) baglantiIptalIsle(ao *ajanOturumu, i *protokol.BaglantiIptal) {
 	b, ok := a.m.depo.BaglantiAl(i.BaglantiID)
 	if !ok || b.SunucuKimligi != ao.sunucu {
-		a.hataGonder(ao, protokol.HataBaglantiYok, "")
+		// İptal idempotenttir: ajan her yeniden bağlanışta son 7 günün iptallerini
+		// (senkron) yeniden bildirir; merkezde olmayan kayıt için hata YANITLANMAZ —
+		// yanıtlansaydı yüzlerce iptal yoklama kuyruğunu doldurup oturumu düşürürdü.
+		// Başka sunucunun bağlantısına dokunulmaz (yetki_yok).
+		if ok {
+			a.m.log.Warn("başka sunucunun bağlantısı için iptal reddedildi", "sunucu", ao.sunucu)
+			a.hataGonder(ao, protokol.HataYetki, "")
+		}
 		return
 	}
 	_ = a.m.depo.BaglantiSil(i.BaglantiID)
@@ -740,29 +809,49 @@ func (a *AjanSunucu) YoklamaAl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "belirteç", http.StatusUnauthorized)
 		return
 	}
+	// Sözleşme: tek yanıtta en çok YoklamaAlEnCokZarf zarf ve YoklamaAlEnCokBayt bayt
+	// (ajan fazlasını reddedip oturumu düşürür). Sığmayan zarf kaybolmaz: ertelenir.
 	var cikti [][]byte
-	t := time.NewTimer(protokol.YoklamaBekleme)
-	defer t.Stop()
-	select {
-	case b := <-yo.kuyruk:
-		cikti = append(cikti, b)
-	case <-t.C:
-	case <-r.Context().Done():
-		return
-	}
 	boyut := 2
-	for _, b := range cikti {
+	ekle := func(b []byte) bool {
+		if len(cikti) > 0 && (len(cikti) >= protokol.YoklamaAlEnCokZarf || boyut+len(b)+1 > protokol.YoklamaAlEnCokBayt) {
+			return false
+		}
+		cikti = append(cikti, b)
 		boyut += len(b) + 1
+		return true
 	}
-	for boyut < protokol.CerceveSiniri*2 {
+	yo.emu.Lock()
+	if yo.ertelenen != nil {
+		ekle(yo.ertelenen)
+		yo.ertelenen = nil
+	}
+	yo.emu.Unlock()
+	if len(cikti) == 0 {
+		t := time.NewTimer(protokol.YoklamaBekleme)
 		select {
 		case b := <-yo.kuyruk:
-			cikti = append(cikti, b)
-			boyut += len(b) + 1
-			continue
-		default:
+			ekle(b)
+		case <-t.C:
+		case <-r.Context().Done():
+			t.Stop()
+			return
 		}
-		break
+		t.Stop()
+	}
+doldur:
+	for {
+		select {
+		case b := <-yo.kuyruk:
+			if !ekle(b) {
+				yo.emu.Lock()
+				yo.ertelenen = b
+				yo.emu.Unlock()
+				break doldur
+			}
+		default:
+			break doldur
+		}
 	}
 	var out bytes.Buffer
 	out.WriteByte('[')
