@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 
@@ -151,7 +152,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	nid, _ := res.LastInsertId()
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", nid)
 	saved, _ := scan(row)
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusCreated, saved)
@@ -199,7 +203,10 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	// ki baska domain'in kaydi (0-satir guncellemede) yanitla sizmasin.
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=? AND domain_id=?", rid, id)
 	saved, _ := scan(row)
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, saved)
@@ -225,7 +232,10 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	// Silme de zone YENIDEN URETMELI. Create/Update/TopluSil/TopluDurum/ApplyTemplate
 	// WriteZone cagiriyor; tek-kayit Delete atlanmisti -> silinen kayit baska bir
 	// mutasyon zone uretene dek DNS uzerinde YAYINDA kaliyordu.
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone(delete) domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -269,7 +279,10 @@ func (h *Handlers) TopluSil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, _ := res.RowsAffected()
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": n})
@@ -319,7 +332,10 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, _ := res.RowsAffected()
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "guncellenen": n})
@@ -339,12 +355,15 @@ func (h *Handlers) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	var ipv4 string
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT ipv4 FROM domains WHERE id=?`, id).Scan(&ipv4)
-	n, err := SeedDefaults(r.Context(), h.DB, id, alanAdi, ipv4)
+	// Tohum + zone istemciden KOPUK (yarım tohum/zone kalmaz).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	n, err := SeedDefaults(zctx, h.DB, id, alanAdi, ipv4)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "eklenen": n})

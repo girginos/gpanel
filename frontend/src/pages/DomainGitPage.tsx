@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -184,8 +184,8 @@ export default function DomainGitPage() {
     try {
       const r = await api.post<{ ok: boolean; webhook_ok?: boolean; webhook_hata?: string }>(
         `/domains/${id}/github/use`,
-        { repo: ghSelectedRepo, branch: ghSelectedBranch, target_dir: targetDir, auto_deploy: ghAutoDeploy }
-      )
+        { repo: ghSelectedRepo, branch: ghSelectedBranch, target_dir: targetDir, auto_deploy: ghAutoDeploy },
+        UZUN_ISTEK)
       let msg = cevirT(cevir("Repo bağlandı: {0}@{1}"), ghSelectedRepo, ghSelectedBranch)
       if (ghAutoDeploy) {
         if (r.data.webhook_ok) msg += ' · ' + cevir("Otomatik dağıtım aktif (webhook kuruldu)")
@@ -217,7 +217,7 @@ export default function DomainGitPage() {
   async function bagla() {
     setIsleniyor(true)
     try {
-      await api.post(`/domains/${id}/git`, { repo_url: repoUrl, branch, target_dir: targetDir })
+      await api.post(`/domains/${id}/git`, { repo_url: repoUrl, branch, target_dir: targetDir }, UZUN_ISTEK)
       toast.basari(cevir("Kaydedildi"), cevir("Repo bağlandı. Deploy key'i kopyalayıp GitHub repo'nuza ekleyin, sonra \"Klonla\" tıklayın."))
       yukle()
     } catch (e) {
@@ -230,7 +230,7 @@ export default function DomainGitPage() {
   async function klonla() {
     setIsleniyor(true); setLogSon(null); setKlonOnay(false)
     try {
-      const { data } = await api.post(`/domains/${id}/git/klonla`)
+      const { data } = await api.post(`/domains/${id}/git/klonla`, undefined, UZUN_ISTEK)
       const m = cevirT(cevir("Klonlandı! Commit: {0}"), data.commit.slice(0, 7))
       toast.basari(m)
       setLogSon(data.log)
@@ -245,7 +245,7 @@ export default function DomainGitPage() {
   async function pull() {
     setIsleniyor(true); setLogSon(null)
     try {
-      const { data } = await api.post(`/domains/${id}/git/pull`)
+      const { data } = await api.post(`/domains/${id}/git/pull`, undefined, UZUN_ISTEK)
       const m = cevir("Pull tamam. Commit:") + ' ' + data.commit.slice(0, 7)
       toast.basari(m)
       setLogSon(data.log)
@@ -259,7 +259,7 @@ export default function DomainGitPage() {
 
   async function sil() {
     try {
-      await api.delete(`/domains/${id}/git`)
+      await api.delete(`/domains/${id}/git`, UZUN_ISTEK)
       setRepo(null); setSilinecek(false); toast.basari(cevir("Repo bağlantısı kaldırıldı"))
     } catch (e) {
       (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e), ton: 'tehlike' }))

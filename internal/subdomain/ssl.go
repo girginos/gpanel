@@ -145,7 +145,11 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 
 	// vhost'u yeniden yaz — cert artık var, rebuildVhost HTTPS bloğunu üretir;
 	// alt alanın özel PHP havuzu + nginx/backend ayarları KORUNUR.
-	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
+	// 🔴 Let's Encrypt 10-60 sn sürer; tarayıcı 30 sn'de kopunca sertifika diskte
+	// ama vhost HTTP'de kalıyordu. Kopuk bağlam: vhost her durumda yazılır.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	if err := h.rebuildVhost(kctx, sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl", id, err))
 		return
 	}
@@ -172,7 +176,10 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(crt)
 	_ = os.Remove(key)
 	// cert gitti → rebuildVhost HTTP bloğunu üretir; özel ayarlar KORUNUR.
-	if err := h.rebuildVhost(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
+	// Kopuk bağlam: cert silindikten sonra vhost var olmayan cert'e işaret etmesin.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	if err := h.rebuildVhost(kctx, sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl-kaldir", id, err))
 		return
 	}

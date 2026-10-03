@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -142,7 +142,7 @@ export default function DomainWordPressPage() {
     try {
       const { data } = await api.post<Sonuc>(`${base}`, {
         alt_dizin: altDizin.trim(), site_basligi: baslik.trim(), admin_kullanici: adminK.trim(), admin_email: adminE.trim(),
-      })
+      }, UZUN_ISTEK)
       setSonuc(data); setBaslik(''); setAltDizin(''); setFormAcik(false)
       listele()
     } catch (err) {
@@ -267,16 +267,16 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
     finally { setMesgul(null) }
   }
 
-  const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin })).data, cevir("WordPress çekirdeği güncellendi."), () => { durumYukle(); onDegisti() })
-  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Çekirdek, eklenti ve temalar güncellendi."), () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
-  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' })).data, durum?.bakim ? cevir("Bakım modu kapatıldı.") : cevir("Bakım modu açıldı."), durumYukle)
-  const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' })).data, cevir("Önbellek temizlendi."))
-  const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin })).data, cevir("Çekirdek onarımı tamamlandı."), durumYukle)
+  const surumGuncelle = () => calistir('surum', async () => (await api.post(`${base}/guncelle`, { dizin }, UZUN_ISTEK)).data, cevir("WordPress çekirdeği güncellendi."), () => { durumYukle(); onDegisti() })
+  const tumunuGuncelle = () => calistir('tumu', async () => (await api.post(`${base}/arac`, { dizin, islem: 'tumunu-guncelle' }, UZUN_ISTEK)).data, cevir("Çekirdek, eklenti ve temalar güncellendi."), () => { durumYukle(); setEklentiler(null); setTemalar(null); onDegisti() })
+  const bakimTogle = () => calistir('bakim', async () => (await api.post(`${base}/arac`, { dizin, islem: durum?.bakim ? 'bakim-kapat' : 'bakim-ac' }, UZUN_ISTEK)).data, durum?.bakim ? cevir("Bakım modu kapatıldı.") : cevir("Bakım modu açıldı."), durumYukle)
+  const cacheTemizle = () => calistir('cache', async () => (await api.post(`${base}/arac`, { dizin, islem: 'cache-temizle' }, UZUN_ISTEK)).data, cevir("Önbellek temizlendi."))
+  const onar = () => calistir('onar', async () => (await api.post(`${base}/onar`, { dizin }, UZUN_ISTEK)).data, cevir("Çekirdek onarımı tamamlandı."), durumYukle)
 
-  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad })).data, cevirT(cevir("{0} güncellendi."), ad), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
-  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' })).data, cevir("Tümü güncellendi."), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
-  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name })).data, `${p.name} ${p.status === 'active' ? cevir("devre dışı bırakıldı") : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
-  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name })).data, cevirT(cevir("{0} etkinleştirildi."), p.name), () => setTemalar(null))
+  const paketGuncelle = (tur: 'eklenti' | 'tema', ad: string) => calistir(`${tur}:${ad}`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'guncelle', ad }, UZUN_ISTEK)).data, cevirT(cevir("{0} güncellendi."), ad), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
+  const paketTumu = (tur: 'eklenti' | 'tema') => calistir(`${tur}:tum`, async () => (await api.post(`${base}/${tur}`, { dizin, islem: 'tumunu-guncelle' }, UZUN_ISTEK)).data, cevir("Tümü güncellendi."), () => { if (tur === 'eklenti') setEklentiler(null); else setTemalar(null) })
+  const eklentiTogle = (p: Paket) => calistir(`ekl:${p.name}`, async () => (await api.post(`${base}/eklenti`, { dizin, islem: p.status === 'active' ? 'pasif' : 'aktif', ad: p.name }, UZUN_ISTEK)).data, `${p.name} ${p.status === 'active' ? cevir("devre dışı bırakıldı") : cevir("etkinleştirildi")}.`, () => setEklentiler(null))
+  const temaAktif = (p: Paket) => calistir(`tema:${p.name}`, async () => (await api.post(`${base}/tema`, { dizin, islem: 'aktif', ad: p.name }, UZUN_ISTEK)).data, cevirT(cevir("{0} etkinleştirildi."), p.name), () => setTemalar(null))
 
   async function parolaSifirla(u: Kullanici) {
     // WRITE-ONLY: kullanıcı yeni parolayı KENDİ yazar; sunucu yanıtta parola DÖNMEZ.
@@ -317,7 +317,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
       // `catch` de tetiklenmiyor ve kullanıcı düz BAŞARI görüyordu —
       // üstelik onay diyaloğu ona cevir("veritabanı silinir") demişti.
       const r = await api.delete<{ ok: boolean; db_uyari?: string }>(
-        `${base}`, { data: { dizin, db_sil: true } })
+        `${base}`, { ...UZUN_ISTEK, data: { dizin, db_sil: true } })
       if (r?.data?.db_uyari) {
         await bilgi({
           baslik: cevir("Dosyalar silindi, veritabanı KALDI"),

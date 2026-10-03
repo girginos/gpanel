@@ -190,7 +190,10 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	zoneUyari := ""
-	if zerr := zoneYaz(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := zoneYaz(zctx, h.DB, id); zerr != nil {
 		zoneUyari = "kayıtlar kaydedildi ancak zone doğrulaması uyarı verdi: " + zoneHatasi(r, id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

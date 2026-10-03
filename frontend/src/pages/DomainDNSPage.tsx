@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
@@ -212,7 +212,7 @@ export default function DomainDNSPage() {
     try {
       const fd = new FormData(); fd.append('dosya', iceDosya)
       const mod = iceDegistir ? 'degistir' : 'birlestir'
-      const { data } = await api.post<{ eklenen: number; atlanan: number; mod: string; uyari?: string }>(`/domains/${id}/dns/ice-aktar?mod=${mod}`, fd)
+      const { data } = await api.post<{ eklenen: number; atlanan: number; mod: string; uyari?: string }>(`/domains/${id}/dns/ice-aktar?mod=${mod}`, fd, UZUN_ISTEK)
       const m = cevirT(cevir("İçe aktarma tamam — {0} eklendi, {1} atlandı ({2}){3}"), data.eklenen, data.atlanan, data.mod, data.uyari ? ' · ' + data.uyari : '')
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
@@ -296,7 +296,7 @@ export default function DomainDNSPage() {
     if (!id) return
     setHata(null); setBasari(null); setDnssecKapatOnay(false); setDnssecIsliyor(true)
     try {
-      const { data } = await api.post<DNSSEC>(`/domains/${id}/dns/dnssec`, { aktif })
+      const { data } = await api.post<DNSSEC>(`/domains/${id}/dns/dnssec`, { aktif }, UZUN_ISTEK)
       setDnssec(data)
       const m = aktif
         ? cevir("DNSSEC etkinleştirildi. Aşağıdaki DS kaydını alan adı operatörünüze (registrar) girin.")
@@ -336,7 +336,7 @@ export default function DomainDNSPage() {
     if (!id) return
     setHata(null); setBasari(null)
     try {
-      const { data } = await api.post(`/domains/${id}/dns/sablon`)
+      const { data } = await api.post(`/domains/${id}/dns/sablon`, undefined, UZUN_ISTEK)
       setBasari(`${data.eklenen} ${cevir("varsayılan kayıt eklendi")}`)
       toast.basari(`${data.eklenen} ${cevir("varsayılan kayıt eklendi")}`)
       yukle()

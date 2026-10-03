@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -257,7 +257,7 @@ function YeniDBModal({ domainId, sk, mevcutKullanicilar, onKapat, onTamam }: Yen
               ? { kullanici_sonek: kullaniciSonek, parola }
               : { mevcut_kullanici: mevcutKullanici }),
           }
-      const { data } = await api.post(`/domains/${domainId}/databases`, body)
+      const { data } = await api.post(`/domains/${domainId}/databases`, body, UZUN_ISTEK)
       setSonuc({ db_adi: data.db_adi, db_kullanici: data.db_kullanici, db_parola: data.db_parola })
     } catch (e) {
       const m = apiHata(e, cevir("Oluşturma başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)

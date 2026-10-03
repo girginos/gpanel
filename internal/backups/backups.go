@@ -392,12 +392,16 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	// ve denetim kaydina yazilir — kimse yanlislikla sizinti biriktirmez.
 	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
 	uid, kullanici := middleware.Aktor(r)
+	// Yan etki (uzak → yerel → DB) istemciden KOPUK: uzak silme onlarca saniye
+	// sürebilir; tarayıcı koparsa dosyalar gitmiş, kayıt (sarkan yedek) kalmasın.
+	kctx, iptal := httpx.KopukBaglam(r, 10*time.Minute)
+	defer iptal()
 	if uzagiYoksay {
 		yh := ""
 		if e := os.Remove(filepath.Join(BackupRoot, sk, dosya)); e != nil && !os.IsNotExist(e) {
 			yh = e.Error()
 		}
-		if _, e := h.DB.ExecContext(r.Context(), `DELETE FROM backups WHERE id=?`, bid); e != nil {
+		if _, e := h.DB.ExecContext(kctx, `DELETE FROM backups WHERE id=?`, bid); e != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı silinemedi: "+e.Error())
 			return
 		}
@@ -412,7 +416,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Uzak → yerel → DB, tek noktadan (bkz. yedekKaydiniYokEt).
-	yerelHata, e := yedekKaydiniYokEt(r.Context(), h.DB, id, sk, dosya, bid)
+	yerelHata, e := yedekKaydiniYokEt(kctx, h.DB, id, sk, dosya, bid)
 	if errors.Is(e, ErrLftpYok) {
 		// 🔴 SUNUCU EKSIGI, DEPO ARIZASI DEGIL. Silmeyi bloke etmek,
 		// duzeltmeden ONCE calisan bir islevi bozardi (lftp paket listesine
@@ -422,7 +426,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		if er := os.Remove(filepath.Join(BackupRoot, sk, dosya)); er != nil && !os.IsNotExist(er) {
 			yh = er.Error()
 		}
-		if _, er := h.DB.ExecContext(r.Context(), `DELETE FROM backups WHERE id=?`, bid); er != nil {
+		if _, er := h.DB.ExecContext(kctx, `DELETE FROM backups WHERE id=?`, bid); er != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı silinemedi: "+er.Error())
 			return
 		}

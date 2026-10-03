@@ -52,6 +52,9 @@ type Kurulum struct {
 	ParolaVar      bool   `json:"parola_var"` // kurulumda uretilen parola saklandi mi (iste-goster)
 }
 
+// kopukSure — istemciden kopuk (httpx.KopukBaglam) yan etki zincirlerinin üst süresi.
+const kopukSure = 15 * time.Minute
+
 func (h *Handlers) domain(r *http.Request) (id int64, sk, alanAdi string, ssl, demo, ok bool) {
 	id, _ = strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var cert string
@@ -404,6 +407,11 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 			"WordPress kurulumu yeni bir veritabanı gerektiriyor; "+kerr.Error())
 		return
 	}
+	// Yan etki burada başlar (dizin, DB, wp-cli 20-90 sn). İstemci 30 sn'de kopsa da
+	// kurulum kaydı (şifreli admin parolası) yazılmalı — yoksa kurulu sitenin
+	// parolasına hiçbir yoldan ulaşılamaz. Kopuk bağlam.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	if err := os.MkdirAll(hedef, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin oluşturulamadı")
 		return
@@ -495,7 +503,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	}
 	// 🔴 CWE-200: uretilen admin parolasi YANITTA DONMEZ; sifreli saklanir,
 	// sahip /domains/{id}/wordpress/admin-parola ucundan iste-goster ile alir.
-	if _, e := h.DB.ExecContext(r.Context(),
+	if _, e := h.DB.ExecContext(kctx,
 		`INSERT INTO cp_wp_kurulum (domain_id, hedef, admin_kullanici, admin_parola) VALUES (?,?,?,?)
 		 ON DUPLICATE KEY UPDATE admin_kullanici=VALUES(admin_kullanici), admin_parola=VALUES(admin_parola), olusturulma=CURRENT_TIMESTAMP`,
 		id, hedef, req.AdminKullanici, gizli.SaklaBagli(adminParola, sk)); e != nil {
@@ -660,6 +668,10 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	// `_, _ = h.DB.Exec(...)` ile yok sayiliyordu: veritabani yerinde
 	// kaliyor ama panel "ok" diyordu. Kullanici sildigini saniyordu.
 	dbSonuc := ""
+	// DB düşürme dosya silmeden ÖNCE ve istemciden KOPUK: iptal edilmiş bağlamla
+	// sahiplik sorgusu düşer, DB yetim kalır, dosyalar yine silinirdi.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	if sreq.DBSil {
 		dbSonuc = "wp-config.php okunamadı — veritabanı adı bulunamadı"
 		if b, err := os.ReadFile(filepath.Join(dir, "wp-config.php")); err == nil {
@@ -673,7 +685,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 				//  2) SAHİPLİK: db_accounts'ta (db_name=? AND domain_id=?) satırı olmalı →
 				//     müşteri wp-config'e "wp_baskatenant" yazsa bile o DB bu domaine kayıtlı
 				//     değilse DROP YAPILMAZ (başka tenant'ın DB'sini düşürme engellenir).
-				sahip := func(n string, d int64) (bool, error) { return h.dbSahipMi(r.Context(), n, d) }
+				sahip := func(n string, d int64) (bool, error) { return h.dbSahipMi(kctx, n, d) }
 				if !dropIzinli(dbName, domID, sahip) {
 					dbSonuc = "veritabanı '" + dbName + "' bu domaine kayıtlı değil — güvenlik gereği düşürülmedi"
 					// 🔴 `h.DB.Exec("DROP DATABASE ...")` CALISMIYOR: panelin MySQL
@@ -682,7 +694,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 					// calisan yol `hesaplar.MySQLDropDBKeepUser`: root soketi
 					// uzerinden `mysql -e` calistirir VE `db_accounts` metadata
 					// satirini da siler (aksi halde yetim kayit kalirdi).
-				} else if derr := h.wpDBDusur(r.Context(), dbName, domID); derr != nil {
+				} else if derr := h.wpDBDusur(kctx, dbName, domID); derr != nil {
 					dbSonuc = "veritabanı '" + dbName + "' düşürülemedi: " + derr.Error()
 					log.Printf("wordpress sil: DROP DATABASE %s basarisiz: %v", dbName, derr)
 				} else {

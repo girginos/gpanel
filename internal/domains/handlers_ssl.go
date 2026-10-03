@@ -238,11 +238,14 @@ func (h *Handlers) SSLDisable(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo abonelik dokunulamaz")
 		return
 	}
+	// vhost HTTP'ye döndükten sonra DB de yazılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	if err := sslKapat(alanAdi, sk, phpSurum, backend); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "SSL kapat: "+nginxset.SunucuHatasi(r, "domains.ssl-kapat", id, err))
 		return
 	}
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`UPDATE domains SET ssl_aktif=0, ssl_kaynak='', cert_path='', key_path='', ssl_bitis=NULL
 		 WHERE id=?`, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())

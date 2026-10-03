@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -253,7 +253,7 @@ export default function DomainSSLPage() {
   async function dnsYenile() {
     setHata(null); setBasari(null); setUyari(null)
     try {
-      const r = await api.post<{ ok: boolean; mesaj?: string }>(`/domains/${id}/ssl/dns-yenile`, {})
+      const r = await api.post<{ ok: boolean; mesaj?: string }>(`/domains/${id}/ssl/dns-yenile`, {}, UZUN_ISTEK)
       const m = r.data?.mesaj || cevir("DNS önbelleği temizlendi.")
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)

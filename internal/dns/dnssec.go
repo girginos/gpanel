@@ -71,7 +71,10 @@ func (h *Handlers) PostDNSSEC(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if zerr := zoneYaz(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := zoneYaz(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone(dnssec) domain=%d: %v", id, zerr)
 		httpx.WriteError(w, http.StatusInternalServerError, "zone güncellenemedi: "+zoneHatasi(r, id, zerr))
 		return
@@ -80,9 +83,9 @@ func (h *Handlers) PostDNSSEC(w http.ResponseWriter, r *http.Request) {
 	if req.Aktif {
 		// İmzalama birkaç saniye sürebilir; DS/DNSKEY hemen görünmeyebilir → frontend "durum"
 		// ile poll eder. Yine de anlık bir okuma dönelim.
-		out.DS = dsForZone(r.Context(), alanAdi)
-		out.Imzali = len(digShort(r.Context(), alanAdi, "DNSKEY")) > 0
-		out.Durum = rndcDNSSECStatus(r.Context(), alanAdi)
+		out.DS = dsForZone(zctx, alanAdi)
+		out.Imzali = len(digShort(zctx, alanAdi, "DNSKEY")) > 0
+		out.Durum = rndcDNSSECStatus(zctx, alanAdi)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

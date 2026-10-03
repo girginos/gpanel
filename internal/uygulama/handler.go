@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
+
+	"girginospanel/internal/httpx"
 )
 
 type Handler struct {
@@ -60,7 +63,11 @@ func (h *Handler) Kur(w http.ResponseWriter, r *http.Request) {
 		yazHata(w, 404, "recipe bulunamadı: "+g.Kod)
 		return
 	}
-	kayit, err := Kur(r.Context(), h.DB, KurArgs{
+	// İndirme + açma + DB çoğu zaman 30 sn'yi aşar: istemci koparsa r.Context() işi
+	// iptal edip geri alıyordu (büyük uygulama hiç kurulamıyordu). Kopuk bağlam.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	kayit, err := Kur(kctx, h.DB, KurArgs{
 		Domain: d, Tarif: tarif, AltDizin: g.AltDizin,
 		DBAdi: g.DBAdi, DBSifre: g.DBSifre,
 	}, h.MySQLOlustur, h.MySQLDrop)
@@ -88,12 +95,18 @@ func (h *Handler) Sil(w http.ResponseWriter, r *http.Request) {
 		yazHata(w, 400, "geçersiz kayit_id")
 		return
 	}
-	if err := Sil(r.Context(), h.DB, kid, d, h.MySQLDrop); err != nil {
+	// Dosya + DB silindikten sonra kayıt da silinmeli (kopuk bağlam; yetim kayıt kalmaz).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	if err := Sil(kctx, h.DB, kid, d, h.MySQLDrop); err != nil {
 		yazHata(w, 500, err.Error())
 		return
 	}
 	yaz(w, 200, map[string]any{"ok": true})
 }
+
+// kopukSure — istemciden kopuk kurulum/silme zincirinin üst süresi.
+const kopukSure = 15 * time.Minute
 
 func yaz(w http.ResponseWriter, k int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

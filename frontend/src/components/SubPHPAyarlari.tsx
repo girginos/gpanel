@@ -2,7 +2,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
@@ -61,7 +61,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
     if (!a) return
     setKaydediliyor(true); setMesaj(null)
     try {
-      const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: phpAyarGovdesi(a, yonetici) })
+      const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: phpAyarGovdesi(a, yonetici) }, UZUN_ISTEK)
       setOzel(r.data.ozel_havuz)
       setMesaj({ t: 'ok', m: cevir("Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.") })
     } catch (e) {

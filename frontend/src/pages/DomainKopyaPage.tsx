@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, COK_UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -48,7 +48,7 @@ export default function DomainKopyaPage() {
   async function olustur() {
     setHata(null); setOk(null); setOlusturuyor(true)
     try {
-      const { data } = await api.post(`/domains/${id}/kopya`, {})
+      const { data } = await api.post(`/domains/${id}/kopya`, {}, COK_UZUN_ISTEK)
       const m = cevirT(cevir("Kopya oluşturuldu: {0} ({1} MB)"), data.ad, data.boyut_mb)
       setOk(m)
       toast.basari(cevir("Kaydedildi"), m)

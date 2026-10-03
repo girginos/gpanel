@@ -99,7 +99,10 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// vhost'u yeniden yaz — alt alanın ayrı FPM havuzu varsa yeni sürüme taşınır.
-	if err := h.rebuildVhost(r.Context(), sid, sk, altAd, tamAd, php); err != nil {
+	// Kopuk bağlam: DB yeni sürümdeyken vhost/havuz eskide kalmasın.
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	if err := h.rebuildVhost(kctx, sid, sk, altAd, tamAd, php); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.php", id, err))
 		return
 	}

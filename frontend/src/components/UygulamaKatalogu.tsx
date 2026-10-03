@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import i18n from '@/lib/i18n'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { cevirT } from '@/lib/cevirT'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import ToolCard from '@/components/ToolCard'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -93,7 +93,7 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
     try {
       await api.post(`/domains/${domain.id}/uygulamalar`, {
         kod: kurTaslak.kod, alt_dizin: kurTaslak.alt_dizin,
-      })
+      }, UZUN_ISTEK)
       setKurTaslak(null)
       await yukle()
     } catch (e) {
@@ -103,7 +103,7 @@ export default function UygulamaKatalogu({ domain }: { domain: AlanAdi }) {
   const sil = async (kayitID: number, ad: string) => {
     if (!(await dialog.onay({ baslik: cevirT(cevir('{0} silinsin mi? Dosyalar + DB kaybolur.'), ad), onayEtiketi: cevir('Sil'), ton: 'tehlike', onayIkonu: I.cop }))) return
     try {
-      await api.delete(`/domains/${domain.id}/uygulamalar/${kayitID}`)
+      await api.delete(`/domains/${domain.id}/uygulamalar/${kayitID}`, UZUN_ISTEK)
       await yukle()
     } catch (e) { await dialog.bilgi({ baslik: apiHata(e, cevir('Silinemedi')), ton: 'tehlike' }) }
   }

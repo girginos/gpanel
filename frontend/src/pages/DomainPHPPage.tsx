@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
@@ -167,7 +167,7 @@ export default function DomainPHPPage() {
     if (!a) return
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
-      const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: phpAyarGovdesi(a, yonetici) })
+      const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: phpAyarGovdesi(a, yonetici) }, UZUN_ISTEK)
       const m = `${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)

@@ -122,12 +122,17 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğinde kullanılamaz")
 		return
 	}
-	ad, err := kopyaOlustur(r.Context(), sk, time.Now())
+	// rsync (3 GB'a kadar) dakikalar sürer: tarayıcı 30 sn'de koparsa r.Context()
+	// rsync'i öldürüyor, büyük site HİÇ kopyalanamıyordu. Kopuk bağlam; üst süre
+	// kopyaOlustur'un kendi zaman aşımı.
+	kctx, iptal := httpx.KopukBaglam(r, kopyaZamanAsimi+time.Minute)
+	defer iptal()
+	ad, err := kopyaOlustur(kctx, sk, time.Now())
 	if err != nil {
 		hataYaz(w, err)
 		return
 	}
-	boyut := kiraciBoyutBayt(r.Context(), sk, evDizini(sk)+"/kopyalar/"+ad) / (1024 * 1024)
+	boyut := kiraciBoyutBayt(kctx, sk, evDizini(sk)+"/kopyalar/"+ad) / (1024 * 1024)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "ad": ad, "boyut_mb": boyut})
 }
 

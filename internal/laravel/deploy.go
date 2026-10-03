@@ -89,7 +89,10 @@ func (h *Handlers) Deploy(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET son_deploy_durum='calisiyor', son_deploy_at=NOW() WHERE domain_id=?`, id)
+	// unit başladı: durum yazımı istemci kopsa da yapılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	_, _ = h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET son_deploy_durum='calisiyor', son_deploy_at=NOW() WHERE domain_id=?`, id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "unit": deployUnit(id)})
 }
 

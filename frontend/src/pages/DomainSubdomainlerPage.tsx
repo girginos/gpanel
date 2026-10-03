@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -73,7 +73,7 @@ export default function DomainSubdomainlerPage() {
     e.preventDefault()
     setHata(null); setOk(null); setKaydediyor(true)
     try {
-      const { data } = await api.post(`/domains/${id}/subdomain`, { alt_ad: altAd.trim() })
+      const { data } = await api.post(`/domains/${id}/subdomain`, { alt_ad: altAd.trim() }, UZUN_ISTEK)
       const m = cevirT(cevir("{0} oluşturuldu. DNS A kaydı eklendi."), data.tam_ad)
       setOk(m)
       toast.basari(cevir("Kaydedildi"), m)
@@ -90,7 +90,7 @@ export default function DomainSubdomainlerPage() {
   async function sil(s: Sub) {
     if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyaları (docroot) + DNS kaydı kaldırılır. Geri alınamaz."), s.tam_ad), ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setOk(null); setSilinen(s.id)
-    try { await api.delete(`/domains/${id}/subdomain/${s.id}`); yukle() }
+    try { await api.delete(`/domains/${id}/subdomain/${s.id}`, UZUN_ISTEK); yukle() }
     catch (err) {
       const m = apiHata(err, cevir("Silinemedi"))
       setHata(m)
@@ -103,7 +103,7 @@ export default function DomainSubdomainlerPage() {
   async function sslKur(s: Sub, tip: 'letsencrypt' | 'self-signed') {
     setHata(null); setOk(null); setSslMesgul(s.id)
     try {
-      await api.post(`/domains/${id}/subdomain/${s.id}/ssl`, { tip })
+      await api.post(`/domains/${id}/subdomain/${s.id}/ssl`, { tip }, UZUN_ISTEK)
       const m = cevirT(cevir("{0} için SSL kuruldu ({1}). Artık https:// ile erişilebilir."), s.tam_ad, tip === 'letsencrypt' ? "Let's Encrypt" : cevir("öz-imzalı"))
       setOk(m)
       toast.basari(cevir("Kaydedildi"), m)

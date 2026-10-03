@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, sonucBelirsiz } from '@/lib/api'
 import { cevirT } from '@/lib/cevirT'
 import { useAuth } from '@/store/auth'
 import { useDialog } from '@/components/Dialog'
@@ -60,15 +60,7 @@ type KapiUygulaSonuc = { ok?: boolean; uyari?: string; uygulandi?: boolean }
 // "başarısız" gösterirdi → kapı istekleri sunucu üst sınırını aşan süre bekler.
 const KAPI_ISTEK = { timeout: 150_000 }
 
-// Sunucudan uygulama yanıtı alınamadı mı (zaman aşımı, ağ kesintisi, vekilin 502/504'ü)?
-// Bu durumda işlem sunucuda tamamlanmış da olabilir, hiç ulaşmamış da: "başarısız" denmez.
-function sonucBelirsiz(e: unknown): boolean {
-  const x = e as { response?: { status?: number }; code?: string; message?: string } | null
-  if (!x || typeof x !== 'object') return false
-  if (x.response) return x.response.status === 502 || x.response.status === 504
-  return x.code === 'ECONNABORTED' || x.code === 'ETIMEDOUT' || x.code === 'ERR_NETWORK' ||
-    /timeout|network error/i.test(x.message || '')
-}
+// sonucBelirsiz: ortak yardımcı (lib/api.ts) — zaman aşımı/ağ/502/504 → "başarısız" denmez.
 
 // Adres çubuğu loopback mı (SSH tüneli / yerel yönlendirme)? location.hostname IPv6'yı
 // köşeli ayraçla verir ("[::1]").

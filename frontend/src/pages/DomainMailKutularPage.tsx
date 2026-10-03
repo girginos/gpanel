@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/domainTipi'
@@ -212,7 +212,7 @@ export default function DomainMailKutularPage() {
     const email = `${yeniKullanici.trim().toLowerCase()}@${domain.alan_adi}`
     setIsleniyor(true); setHata(null); setBildirim(null)
     try {
-      await api.post('/eklenti/mail/hesaplar', { domain_id: mailDomain.id, email, parola: yeniParola, quota_mb: yeniQuota })
+      await api.post('/eklenti/mail/hesaplar', { domain_id: mailDomain.id, email, parola: yeniParola, quota_mb: yeniQuota }, UZUN_ISTEK)
       const m = cevirT(cevir("{0} oluşturuldu."), email)
       setBildirim(m)
       toast.basari(m)

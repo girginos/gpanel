@@ -9,6 +9,27 @@ export const api = axios.create({
   timeout: 30_000,
 })
 
+// Uzun süren işlemler (hosting/alt alan oluşturma, SSL, PHP/web sunucu değişimi,
+// WordPress/Laravel/composer/npm, uygulama kurulumu, git, yedek silme, cron
+// çalıştırma …) sunucuda İSTEMCİDEN KOPUK tamamlanır (arka uç httpx.KopukBaglam).
+// Genel 30 sn sınırı yanıtı beklemeden keser, sürmekte/bitmiş bir işi "başarısız"
+// gösterir ve aceleyle yeniden denemeye iterdi (2026-10-03: "Yeni Domain" 30 sn'de
+// kesildi). Bu çağrılar sunucu üst sınırı kadar bekler. Panel vekili 3600 sn.
+export const UZUN_ISTEK = { timeout: 15 * 60_000 }
+// Dakikalar sürebilen tek parça işlemler: geri yükleme (uzak indirme), site kopyası.
+export const COK_UZUN_ISTEK = { timeout: 60 * 60_000 }
+
+// Sunucudan uygulama yanıtı alınamadı mı (zaman aşımı, ağ kesintisi, vekilin 502/504'ü)?
+// Bu durumda işlem sunucuda tamamlanmış da olabilir, sürüyor da olabilir, hiç ulaşmamış
+// da: "başarısız" denmez — çağıran durumu kontrol eder.
+export function sonucBelirsiz(e: unknown): boolean {
+  const x = e as { response?: { status?: number }; code?: string; message?: string } | null
+  if (!x || typeof x !== 'object') return false
+  if (x.response) return x.response.status === 502 || x.response.status === 504
+  return x.code === 'ECONNABORTED' || x.code === 'ETIMEDOUT' || x.code === 'ERR_NETWORK' ||
+    /timeout|network error/i.test(x.message || '')
+}
+
 api.interceptors.request.use((cfg) => {
   const tok = useAuth.getState().token
   if (tok) {
@@ -86,7 +107,8 @@ export function apiHata(err: unknown, varsayilan = 'Beklenmeyen bir hata oluştu
   // 0ms exceeded") Türkçe panelde kullanıcıya hiçbir şey anlatmıyordu.
   const kod = (e as { code?: string })?.code
   if (kod === 'ECONNABORTED' || /timeout/i.test(e?.message || '')) {
-    return 'İşlem zaman aşımına uğradı — sunucu yanıt vermedi'
+    // Sunucu işi istemciden kopuk sürdürür: "başarısız" demek yanıltıcıydı.
+    return 'Sunucu yanıtı zamanında gelmedi — işlem sunucuda sürüyor ya da tamamlanmış olabilir; birazdan sayfayı yenileyip durumu kontrol edin'
   }
   if (kod === 'ERR_NETWORK' || e?.message === 'Network Error') {
     return 'Sunucuya ulaşılamadı — bağlantınızı kontrol edin'

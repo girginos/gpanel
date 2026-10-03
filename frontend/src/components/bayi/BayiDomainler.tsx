@@ -11,7 +11,7 @@
 //     doğrulamasından geçer (SahipYonetim); sonuç öğe başına gösterilir.
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { adinaBaslat } from '@/lib/adina'
 import { cevirT } from '@/lib/cevirT'
 import { useBayiCevir } from '@/lib/bayiCeviri'
@@ -317,7 +317,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
         </Modal>
       )}
       {islem === 'sil' && <SilDiyalog secili={secili} kapat={() => setIslem(null)}
-        onayla={() => yurut('sil', secili, (h) => api.delete(`/domains/${h.id}`, { params: { onay: h.alan_adi } }))} />}
+        onayla={() => yurut('sil', secili, (h) => api.delete(`/domains/${h.id}`, { ...UZUN_ISTEK, params: { onay: h.alan_adi } }))} />}
       {calisan && <IlerlemeDiyalog c={calisan} bul={bul} bitir={bitir} />}
     </div>
   )

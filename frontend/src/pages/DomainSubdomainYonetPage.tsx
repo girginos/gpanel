@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import SubPHPAyarlari from '@/components/SubPHPAyarlari'
 import SubWebAyarlari from '@/components/SubWebAyarlari'
@@ -121,7 +121,7 @@ export default function DomainSubdomainYonetPage() {
     if (!d || yeniPHP === d.php_surum) return
     setHata(null); setOk(null); setPhpKaydet(true)
     try {
-      await api.put(`/domains/${id}/subdomain/${sid}/php`, { php_surum: yeniPHP })
+      await api.put(`/domains/${id}/subdomain/${sid}/php`, { php_surum: yeniPHP }, UZUN_ISTEK)
       const m = cevirT(cevir("PHP surumu {0} olarak guncellendi."), yeniPHP)
       setOk(m); toast.basari(m)
       setD({ ...d, php_surum: yeniPHP })
@@ -135,7 +135,7 @@ export default function DomainSubdomainYonetPage() {
   async function sslKur(tip: 'letsencrypt' | 'self-signed') {
     setHata(null); setOk(null); setSslMesgul(true)
     try {
-      await api.post(`/domains/${id}/subdomain/${sid}/ssl`, { tip })
+      await api.post(`/domains/${id}/subdomain/${sid}/ssl`, { tip }, UZUN_ISTEK)
       const m = cevirT(cevir("SSL kuruldu ({0}). Artik https:// ile erisilebilir."), tip === 'letsencrypt' ? "Let's Encrypt" : cevir("oz-imzali"))
       setOk(m); toast.basari(cevir("Kaydedildi"), m)
       setSslAktif(true)
@@ -149,7 +149,7 @@ export default function DomainSubdomainYonetPage() {
     if (!(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevir("SSL sertifikasi kaldirilsin mi? Site sadece http:// ile erisilebilir olur."), ton: 'uyari', onayIkonu: I.cop }))) return
     setHata(null); setOk(null); setSslMesgul(true)
     try {
-      await api.delete(`/domains/${id}/subdomain/${sid}/ssl`)
+      await api.delete(`/domains/${id}/subdomain/${sid}/ssl`, UZUN_ISTEK)
       setOk(cevir("SSL kaldirildi.")); toast.basari(cevir("SSL kaldirildi.")); setSslAktif(false)
     } catch (e) {
       const m = apiHata(e, cevir("SSL kaldirilamadi"))
@@ -162,7 +162,7 @@ export default function DomainSubdomainYonetPage() {
     if (!d) return
     if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevirT(cevir("{0} subdomaini silinsin mi?\nvhost + dosyalari (docroot) + DNS kaydi kaldirilir. Geri alinamaz."), d.tam_ad), ton: 'tehlike', onayIkonu: I.cop }))) return
     try {
-      await api.delete(`/domains/${id}/subdomain/${sid}`)
+      await api.delete(`/domains/${id}/subdomain/${sid}`, UZUN_ISTEK)
       navigate(`/abonelikler/${id}/subdomainler`)
     } catch (e) {
       const m = apiHata(e, cevir("Silinemedi"))

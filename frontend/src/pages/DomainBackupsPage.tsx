@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
+import { api, apiHata, fetchAskiKontrol, COK_UZUN_ISTEK, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -372,7 +372,7 @@ export default function DomainBackupsPage() {
   async function sil() {
     if (!silinecek) return
     try {
-      const { data } = await api.delete<{ ok?: boolean; uyari?: string }>(`/domains/${id}/backups/${silinecek.id}`)
+      const { data } = await api.delete<{ ok?: boolean; uyari?: string }>(`/domains/${id}/backups/${silinecek.id}`, UZUN_ISTEK)
       setSilinecek(null); yukle()
       // 🔴 KISMİ BAŞARI SESSİZ GEÇMEZ. Sunucu "silindi" derken yerel dosya
       // silinememiş olabilir; eskiden yanıt hiç okunmuyordu ve kullanıcı
@@ -823,7 +823,7 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
     }
     setBusy(true)
     try {
-      const { data } = await api.post(`/domains/${domainId}/backups/${yedek.id}/geriyukle`, body)
+      const { data } = await api.post(`/domains/${domainId}/backups/${yedek.id}/geriyukle`, body, COK_UZUN_ISTEK)
       let msg = cevir("Geri yükleme tamam")
       if (data.uyari) msg = data.uyari
       else if (typeof data.db === 'string') msg = data.db

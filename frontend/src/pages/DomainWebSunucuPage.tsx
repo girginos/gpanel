@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useId, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Badge, Button, Select } from '@/components/ui'
@@ -195,7 +195,7 @@ export default function DomainWebSunucuPage() {
     if (yeni === backend || backendDegistiriliyor) return
     setBackendDegistiriliyor(true); setHata(null); setBasari(null)
     try {
-      await api.put(`/domains/${id}/web-backend`, { backend: yeni })
+      await api.put(`/domains/${id}/web-backend`, { backend: yeni }, UZUN_ISTEK)
       setBackend(yeni)
       const m = cevirT(cevir("Web sunucusu \"{0}\" olarak değiştirildi"), BACKEND_BILGI[yeni]?.ad || yeni)
       setBasari(m)

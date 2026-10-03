@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
@@ -116,7 +117,12 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Yedek uzak hedefteyse burada indirilir; yuzde KESIN (beklenen boyut bilinir).
-	abs, err := yedekHazirla(r.Context(), h.DB, sk, dosya)
+	// 🔴 Uzak indirme 30 sn'yi aşınca tarayıcı kopuyor, r.Context() indirmeyi
+	// kesiyordu → büyük uzak yedek HİÇ geri yüklenemiyordu. Geri yüklemenin geri
+	// kalanı zaten bağlamsız; indirme de kopuk bağlamla (ilerleme /backups/ilerleme).
+	kctx, iptal := httpx.KopukBaglam(r, 2*time.Hour)
+	defer iptal()
+	abs, err := yedekHazirla(kctx, h.DB, sk, dosya)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, hazirlikHatasi(r, id, err))
 		return
