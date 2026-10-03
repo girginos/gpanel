@@ -79,8 +79,10 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// gecerliKayitAlanlari: zone satir-enjeksiyonu (newline) + $ yonerge enjeksiyonu engelle
-func gecerliKayitAlanlari(ad, deger string) error {
+// KayitAlanlariGecerli: zone satir-enjeksiyonu (newline) + $ yonerge enjeksiyonu engelle.
+// Disa acik: site tasima (internal/tasima) kaynaktan okudugu kayitlari DB'ye
+// yazmadan once ayni kuraldan gecirir.
+func KayitAlanlariGecerli(ad, deger string) error {
 	if strings.ContainsAny(ad, " \t\r\n") {
 		return errors.New("kayıt adı boşluk veya satır sonu içeremez")
 	}
@@ -134,7 +136,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		ak = 0
 	}
 	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
-	if err := gecerliKayitAlanlari(k.Ad, k.Deger); err != nil {
+	if err := KayitAlanlariGecerli(k.Ad, k.Deger); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -182,7 +184,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		ak = 1
 	}
 	k.Oncelik = oncelikNormalize(k.Tip, k.Oncelik)
-	if err := gecerliKayitAlanlari(k.Ad, k.Deger); err != nil {
+	if err := KayitAlanlariGecerli(k.Ad, k.Deger); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}

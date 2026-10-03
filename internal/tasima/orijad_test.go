@@ -4,9 +4,14 @@ package tasima
 // birim kanıtı. configtenDBKimlik gerçek wp-config.php / XenForo config.php
 // içerikleriyle çağrılır; orijinal ad+kullanıcı+parola okunabiliyorsa taşıma
 // kolu orijinali kullanır (aktar.go: "ORIJINAL kimlik tercihi" bloğu).
+//
+// Yapılandırma yalnız bir kiracı evinin altında, kiracının KENDİ dosyasıysa
+// okunur (kiraciYapilandirmalari): fikstürler geçici ev köküne, kiracı yerine
+// testi koşan kullanıcıyla kurulur (root gerekmez).
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 )
@@ -21,8 +26,22 @@ func yazDosya(t *testing.T, yol, icerik string) {
 	}
 }
 
+// orijadEv — geçici ev kökünde c_test kiracısının evi; kiracı = testi koşan kullanıcı.
+func orijadEv(t *testing.T) string {
+	t.Helper()
+	u, err := user.Current()
+	if err != nil {
+		t.Skipf("geçerli kullanıcı yok: %v", err)
+	}
+	eskiEv, eskiKul := evKoku, kiraciKul
+	evKoku = t.TempDir()
+	kiraciKul = func(string) string { return u.Username }
+	t.Cleanup(func() { evKoku, kiraciKul = eskiEv, eskiKul })
+	return filepath.Join(evKoku, "c_test")
+}
+
 func TestOrijinalDBKimligiOkunuyor(t *testing.T) {
-	kok := t.TempDir()
+	kok := orijadEv(t)
 
 	// 1) WordPress
 	wp := filepath.Join(kok, "wp")
@@ -83,7 +102,10 @@ $config['db']['password'] = 'YeniParola456';
 // TestOrijinalOkunamazsaBos: config yoksa kimlik haritası boş dönmeli
 // (bu durumda taşıma benzersiz ada düşer — sessiz yanlış ad üretmez).
 func TestConfigYoksaBos(t *testing.T) {
-	bos := t.TempDir()
+	bos := filepath.Join(orijadEv(t), "bos")
+	if err := os.MkdirAll(bos, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if k := configtenDBKimlik(bos); len(k) != 0 {
 		t.Fatalf("boş dizinden kimlik üretildi: %v", k)
 	}

@@ -100,6 +100,10 @@ export const I: Record<string, string> = {
   ilet: 'M15 17l5-5-5-5|M4 18v-2a4 4 0 0 1 4-4h12',
   yukselt: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z|M16 12l-4-4-4 4|M12 16V8',
   git: 'M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-1-2.6c3-.3 6.2-1.5 6.2-6.8a5.3 5.3 0 0 0-1.5-3.7 5 5 0 0 0-.1-3.7s-1.2-.3-3.9 1.4a13.4 13.4 0 0 0-7 0C5.4 1.7 4.2 2 4.2 2a5 5 0 0 0-.1 3.7 5.3 5.3 0 0 0-1.5 3.7c0 5.3 3.2 6.5 6.2 6.8a3.4 3.4 0 0 0-1 2.6V22',
+  // Alan hizmetleri (veritabanı ikonu yukarıda `db`). Yollar Site Taşıma'nın yerel
+  // setiyle aynı: sayfa bu çekirdeğe geçince görünüm değişmez.
+  dns: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20M2 12h20M12 2c2.5 2.7 3.9 6.3 4 10-.1 3.7-1.5 7.3-4 10-2.5-2.7-3.9-6.3-4-10 .1-3.7 1.5-7.3 4-10',
+  ssl: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10M9 12l2 2 4-4',
 }
 
 export default Ikon

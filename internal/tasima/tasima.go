@@ -21,6 +21,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -40,6 +41,10 @@ type Kaynak struct {
 	Kullanici string
 	Parola    string // duz metin YALNIZ bellekte; DB'ye sifreli yazilir
 	Anahtar   string // SSH ozel anahtari (opsiyonel, paroleye alternatif)
+
+	// kabuk — uzak çalıştırma dikişi (bkz. kabuk.go). nil → gerçek ssh/rsync;
+	// testler kaydedici sahte takar (ağa çıkılmaz).
+	kabuk uzakKabuk
 }
 
 // Ayarlar — tasima davranisi (JSON olarak tasima_isleri.ayarlar icinde).
@@ -205,6 +210,27 @@ func (k *Kaynak) sshOrtakArgs(anahtarDosya string) []string {
 	return a
 }
 
+// sshOrtam — kök ssh/rsync/sshpass çocuğunun ortamı AÇIKÇA kurulur: yalnız
+// PATH/HOME/LANG (+ ek, ör. SSHPASS). Panel ortamının tamamı (os.Environ)
+// verilmez: config.Load sırları silse de (1. katman) bir gerileme kaynak sunucuya
+// giden sürece sır taşımasın (ssh SendEnv). PATH/HOME/LANG panelden alınır
+// (sır değildir; testler sahte ssh/rsync'i PATH ile verir).
+func sshOrtam(ek ...string) []string {
+	yol := os.Getenv("PATH")
+	if yol == "" {
+		yol = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	}
+	ev := os.Getenv("HOME")
+	if ev == "" {
+		ev = "/root"
+	}
+	dil := os.Getenv("LANG")
+	if dil == "" {
+		dil = "C"
+	}
+	return append([]string{"PATH=" + yol, "HOME=" + ev, "LANG=" + dil}, ek...)
+}
+
 // anahtarYaz — SSH ozel anahtarini 0600 gecici dosyaya yazar. temizle() cagrilmali.
 func (k *Kaynak) anahtarYaz() (yol string, temizle func(), err error) {
 	if strings.TrimSpace(k.Anahtar) == "" {
@@ -237,6 +263,9 @@ func (k *Kaynak) anahtarYaz() (yol string, temizle func(), err error) {
 // uzakKomut bu paket tarafindan uretilen SABIT sablondur; degisken deger
 // iceriyorsa shQuote()'tan gecmis olmalidir.
 func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.Calistir(ctx, uzakKomut)
+	}
 	anahtar, temizle, err := k.anahtarYaz()
 	if err != nil {
 		return "", fmt.Errorf("anahtar yazilamadi: %w", err)
@@ -251,10 +280,10 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 	if anahtar == "" {
 		// Parola argv'de GORUNMEZ: sshpass -e ortam degiskeninden okur.
 		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
 	} else {
 		cmd = exec.CommandContext(ctx, "ssh", args...)
-		cmd.Env = os.Environ()
+		cmd.Env = sshOrtam()
 	}
 	var sb, eb strings.Builder
 	cmd.Stdout = &sb
@@ -268,6 +297,9 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 // RsyncCek — uzak dizini yerele kopyalar. uzakYol/yerelYol cagiran tarafindan
 // dogrulanmis olmalidir.
 func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra ...string) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.RsyncCek(ctx, uzakYol, yerelYol, ekstra...)
+	}
 	anahtar, temizle, err := k.anahtarYaz()
 	if err != nil {
 		return "", err
@@ -284,7 +316,11 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 		// kaynakta olmayan her sey silinir. 'ustune' modunda hedef MUSTERININ
 		// CANLI dizinidir — uploads/, public/ gibi klasorler geri donusu
 		// olmadan yok oluyordu (kanary testiyle dogrulandi).
-		"-a", "--numeric-ids",
+		// 🔴 Aygıt/özel dosya ve sahiplik TAŞINMAZ (-a'dan SONRA gelmeli): root
+		// rsync kaynaktaki aygıt düğümünü (ör. ham disk) mknod eder, çağıranın
+		// chown -R'si onu kiracıya verir; fifo/soket de gelir. -o/-g yabancı
+		// uid/gid'i hedefe yazar. Sahiplik taşınmadığından --numeric-ids yok.
+		"-a", "--no-D", "--no-o", "--no-g",
 		"--timeout=120", "--partial",
 		// Tenant izolasyonu: uzaktaki setuid/setgid bitleri TASINMAZ.
 		"--no-perms", "--chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r",
@@ -299,10 +335,10 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 	var cmd *exec.Cmd
 	if anahtar == "" {
 		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "rsync"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
 	} else {
 		cmd = exec.CommandContext(ctx, "rsync", args...)
-		cmd.Env = os.Environ()
+		cmd.Env = sshOrtam()
 	}
 	var sb, eb strings.Builder
 	cmd.Stdout = &sb
@@ -311,6 +347,39 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 		return sb.String(), fmt.Errorf("dosya kopyalama (rsync) hatasi: %s", k.sshHataYorumla(eb.String()))
 	}
 	return sb.String(), nil
+}
+
+// AkisCalistir — uzak sunucuda komut calistirir; stdout BELLEGE ALINMADAN w'ye
+// akar (buyuk dump'lar). Dondurur: ham (maskesiz) stderr + cmd.Run hatasi;
+// yorumlama/maskeleme cagirana aittir. Anahtar dosyasi yazilamazsa komut
+// baslamaz ve hata *akisHazirlikHatasi olur. uzakKomut bu paketin SABIT
+// sablonudur; degisken deger iceriyorsa shQuote()'tan gecmis olmalidir.
+func (k *Kaynak) AkisCalistir(ctx context.Context, uzakKomut string, w io.Writer) (string, error) {
+	if k.kabuk != nil {
+		return k.kabuk.AkisCalistir(ctx, uzakKomut, w)
+	}
+	anahtar, temizle, err := k.anahtarYaz()
+	if err != nil {
+		return "", &akisHazirlikHatasi{err: err}
+	}
+	defer temizle()
+
+	args := k.sshOrtakArgs(anahtar)
+	args = append(args, "-l", k.Kullanici, "--", k.Host, uzakKomut)
+
+	var cmd *exec.Cmd
+	if anahtar == "" {
+		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
+	} else {
+		cmd = exec.CommandContext(ctx, "ssh", args...)
+		cmd.Env = sshOrtam()
+	}
+	var eb strings.Builder
+	cmd.Stdout = w
+	cmd.Stderr = &eb
+	runErr := cmd.Run()
+	return eb.String(), runErr
 }
 
 // BaglantiTesti — kimlik dogru mu, uzak panel tipi beklenen mi?
