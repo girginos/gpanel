@@ -692,3 +692,57 @@ func TestD3_PanelAnahtariKiraciyaOzel(t *testing.T) {
 		t.Errorf("bayi panel anahtarı kiracının çifti olmalı: %q", k.Anahtar)
 	}
 }
+
+// Bayi işinin günlüğü ve kalem notları süzülür (panel yolu, komşu işareti, sır);
+// kökünkü ham kalır. Kota hatası kalemi 'atlandi' yapar.
+func TestD3_CalistirBayiGunlukSuzgeci(t *testing.T) {
+	o := d3Kur(t)
+	eski := hesapAktarici
+	t.Cleanup(func() { hesapAktarici = eski })
+	hesapAktarici = func(_ *Handlers, _ context.Context, k *Kaynak, hs Hesap, _ Ayarlar, kp Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
+		log("dosyalar aktariliyor: /var/www/vhosts/%s/httpdocs → /home/c_komsu/public_html", hs.AlanAdi)
+		log("ad alanı: sahibi: bayi #9 parola=%s", k.Parola)
+		if hs.AlanAdi == "kota.test" {
+			return nil, &kotaHatasi{mesaj: "hosting hesabı limitiniz dolu (2/2)"}
+		}
+		return &AktarSonuc{DomainID: 1, Uyarilar: []string{"SSL: nginx -t /etc/nginx/conf.d/komsu.conf", "Veritabanı yok — taşınmadı"}}, nil
+	}
+	for _, c := range []struct {
+		rid  int64
+		ham  bool
+		etik string
+	}{{7, false, "bayi"}, {0, true, "kök"}} {
+		id := o.isEkle(t, c.rid, "calisiyor", "")
+		o.exec(t, `DELETE FROM tasima_kalemleri WHERE is_id=?`, id)
+		for _, a := range []string{"ok.test", "kota.test"} {
+			o.exec(t, `INSERT INTO tasima_kalemleri (is_id, kaynak_hesap, alan_adi, durum) VALUES (?, 'u', ?, 'bekliyor')`, id, a)
+		}
+		o.h.calistir(context.Background(), id, &Kaynak{Host: "93.184.216.34", Tip: "plesk", Parola: "gizli-kaynak-pw"},
+			[]Hesap{{AlanAdi: "ok.test"}, {AlanAdi: "kota.test"}}, Ayarlar{}, Kapsam{RID: c.rid})
+		gunluk := dosyaSonu(logYolu(id), 1<<20)
+		var notlar, kotaDurum string
+		_ = o.db.QueryRow(`SELECT COALESCE(hata,'') FROM tasima_kalemleri WHERE is_id=? AND alan_adi='ok.test'`, id).Scan(&notlar)
+		_ = o.db.QueryRow(`SELECT durum FROM tasima_kalemleri WHERE is_id=? AND alan_adi='kota.test'`, id).Scan(&kotaDurum)
+		hepsi := gunluk + "\n" + notlar
+		for _, iz := range []string{"/home/c_komsu", "bayi #9", "/etc/nginx", "komsu.conf", "gizli-kaynak-pw", "/var/www"} {
+			if c.ham {
+				continue
+			}
+			if strings.Contains(hepsi, iz) {
+				t.Errorf("%s: %q bayiye sızdı:\n%s", c.etik, iz, hepsi)
+			}
+		}
+		if c.ham && (!strings.Contains(gunluk, "/home/c_komsu") || !strings.Contains(notlar, "/etc/nginx")) {
+			t.Errorf("kök ham ayrıntıyı görmeli:\n%s\n%s", gunluk, notlar)
+		}
+		if strings.Contains(hepsi, "gizli-kaynak-pw") {
+			t.Errorf("%s: kaynak parolası günlüğe yazılmamalı", c.etik)
+		}
+		if !strings.Contains(notlar, "Veritabanı yok") || kotaDurum != "atlandi" {
+			t.Errorf("%s: zararsız not korunmalı, kota kalemi atlandi: %q %q", c.etik, notlar, kotaDurum)
+		}
+		if !strings.Contains(gunluk, "limitiniz dolu (2/2)") {
+			t.Errorf("%s: bayinin kendi kota metni günlükte görünmeli:\n%s", c.etik, gunluk)
+		}
+	}
+}

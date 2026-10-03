@@ -31,6 +31,10 @@ import (
 // kuyrukOmru — bu süreden uzun sırada bekleyen iş iptal edilir (kimliği silinir).
 const kuyrukOmru = 24 * time.Hour
 
+// hesapAktarici — calistir'in kalem başına çağırdığı taşıma (testler değiştirir:
+// günlük/kalem süzgeci gerçek taşıma olmadan sınanır).
+var hesapAktarici = (*Handlers).HesapAktar
+
 // isYurutucu — dağıtıcının çalıştırdığı fonksiyon (testler değiştirir: gerçek
 // taşıma yerine yuva/kapsam davranışı sınanır).
 var isYurutucu func(h *Handlers, ctx context.Context, isID int64)
@@ -214,7 +218,7 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, k *Kaynak, hesaplar
 	}
 	yaz := func(f string, a ...any) {
 		ham := fmt.Sprintf(f, a...)
-		satir := ham
+		satir := temizHata(ham, k.Parola) // kök de olsa kaynak parolası günlüğe düşmez
 		if kp.Bayi() {
 			satir = bayiSatirSuz(ham, k.Parola)
 			if satir != ham {
@@ -245,7 +249,7 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, k *Kaynak, hesaplar
 			`UPDATE tasima_kalemleri SET durum='calisiyor', basladi=NOW() WHERE is_id=? AND alan_adi=?`,
 			isID, hs.AlanAdi)
 
-		sonuc, err := h.HesapAktar(ctx, k, hs, ay, kp, yaz)
+		sonuc, err := hesapAktarici(h, ctx, k, hs, ay, kp, yaz)
 		if err != nil && ctx.Err() != nil {
 			// Iptal son hesap sirasinda gelirse dongunun basindaki ctx kontrolune
 			// hic donulmez; is 'hata' olarak ve BOS mesajla kapaniyordu.
