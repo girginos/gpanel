@@ -298,6 +298,10 @@ func TestModulKapali(t *testing.T) {
 	if s := o.a.isYurut(context.Background(), emir); s.HataKodu != p.HataDevreDisi {
 		t.Fatalf("kapalı modülde iş: %+v", s)
 	}
+	// Şalter, bağlantı kaydına bakılmadan ÖNCE denetlenir (kapalı modülde DB'de iz/sorgu yok).
+	if s := o.a.isYurut(context.Background(), o.m.isEmri("YOKyokYOKyokYOKyokYOKy", "hesap_ozet", `{"hesap":1}`)); s.HataKodu != p.HataDevreDisi {
+		t.Fatalf("kapalı modülde olmayan bağlantı: %+v", s)
+	}
 	if o.y.sayi() != 0 {
 		t.Fatal("kapalı modülde yürütücü çağrıldı")
 	}
