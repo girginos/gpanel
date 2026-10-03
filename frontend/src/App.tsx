@@ -14,6 +14,7 @@ const HomePage = lazy(() => import('@/pages/HomePage'))
 const DomainsPage = lazy(() => import('@/pages/DomainsPage'))
 const ResellerlarPage = lazy(() => import('@/pages/ResellerlarPage'))
 const DenetimPage = lazy(() => import('@/pages/DenetimPage'))
+const ApiAnahtarlariPage = lazy(() => import('@/pages/ApiAnahtarlariPage'))
 const BildirimlerPage = lazy(() => import('@/pages/BildirimlerPage'))
 const SaldiriZincirleriPage = lazy(() => import('@/pages/SaldiriZincirleriPage'))
 const YasakliDomainPage = lazy(() => import('@/pages/YasakliDomainPage'))
@@ -207,6 +208,7 @@ export default function App() {
         <Route path="domainler"            element={<DomainsPage />} />
         <Route path="bayiler"              element={<ResellerlarPage />} />
         <Route path="denetim"              element={<DenetimPage />} />
+        <Route path="api-anahtarlari"      element={<ApiAnahtarlariPage />} />
         <Route path="bildirimler"         element={<BildirimlerPage />} />
         <Route path="saldiri-zincirleri"  element={<SaldiriZincirleriPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />
