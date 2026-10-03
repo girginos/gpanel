@@ -3,7 +3,6 @@ package subdomain
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -205,7 +204,7 @@ func (h *Handlers) PHPAyarGet(w http.ResponseWriter, r *http.Request) {
 		"tam_ad":     tamAd,
 		"php_surum":  phpSurum,
 		"ozel_havuz": php.HasSub(r.Context(), h.DB, sid),
-		"ayarlar":    ayarlar,
+		"ayarlar":    php.IstemciAyarlari(r, ayarlar), // yönetici dışı: kökün iç alanları çıkarılır
 	})
 }
 
@@ -233,14 +232,30 @@ func (h *Handlers) PHPAyarPut(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "subdomain bulunamadı")
 		return
 	}
-	var req struct {
-		PHPSurum string       `json:"php_surum"`
-		Ayarlar  php.Settings `json:"ayarlar"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+	// 🔴 KÖK SINIRI (php.IstegiCoz — domain ucuyla AYNI kapı): yönetici dışı oturum
+	// kökün iç alanlarını (pm_max_children + türevleri) yazamaz, disable_functions /
+	// open_basedir / session_save_path / mail_force_extra_parameters'ı değiştiremez
+	// → 403, hiçbir şey yazılmaz; değerler alt alanın kaydından korunur. Eskiden alt
+	// alan havuzu bunları AYNEN yazıyordu: müşteri disable_functions="" ile alt
+	// alanda exec/system'i açabiliyor, pm_max_children ile planın işçi sayısını
+	// slice dışında aşabiliyordu.
+	mevcut, err := php.GetSub(r.Context(), h.DB, sid)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "ayarlar okunamadı")
 		return
 	}
+	surumIstek, ayarlar, kod, mesaj := php.IstegiCoz(r, mevcut)
+	if kod != 0 {
+		if kod == http.StatusBadRequest {
+			mesaj = "geçersiz gövde"
+		}
+		httpx.WriteError(w, kod, mesaj)
+		return
+	}
+	req := struct {
+		PHPSurum string
+		Ayarlar  php.Settings
+	}{surumIstek, ayarlar}
 	// güvenlik: skalar enjeksiyon + ek_direktifler allowlist (domain ile aynı sertleştirme)
 	if err := php.ValidateSettings(req.Ayarlar); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())

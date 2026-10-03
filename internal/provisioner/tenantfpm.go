@@ -588,11 +588,10 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 // sınırlıdır. pm.max_children plandan türetilir.
 func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	ps := tenantReadPoolSettings(db, domainID)
-	maxCh := tenantPMMaxChildren(db, domainID)
 	// 🔴 PLAN TAVANI: php_settings degerleri plan cgroup RAM'ini / disk kotasini
 	// ASAMAZ (aksi halde temiz PHP fatal'i yerine cgroup OOM-kill = 502 + bos log).
-	// Tavan uygulanan her alan log'a yazilir.
-	_, diskMB := tenantPlanTavanlari(db, domainID)
+	// Tavan uygulanan her alan log'a yazilir. Tek uygulayici PlanHavuzTavani —
+	// paylasilan ve alt alan havuzlari da AYNI tavani alir (havuz_tavan.go).
 	// 🔴 memory_limit BILEREK TAVANLANMIYOR (2026-09-11, operator karari):
 	// cgroup RAM'in bir kesri modern yazilima YETMIYOR (WP+WooCommerce, Laravel,
 	// composer tek basina 256M+ ister; 256MB'lik planda %50 tavani 128M yapiyordu
@@ -601,22 +600,17 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	// bir script temiz "Allowed memory size exhausted" yerine cgroup OOM-kill
 	// yiyebilir (502 + logda PHP hatasi yok). Dogru cozum PHP'yi kismak degil,
 	// planin ram_mb'sini yazilimin ihtiyacina gore ayarlamaktir.
-	ps.UploadMaxFilesize = tenantBoyutTavani(sk, "upload_max_filesize", ps.UploadMaxFilesize,
-		tenantOranTavani(diskMB, tenantUploadYuzde, tenantUploadTabanMB))
-	ps.PostMaxSize = tenantBoyutTavani(sk, "post_max_size", ps.PostMaxSize,
-		tenantOranTavani(diskMB, tenantPostYuzde, tenantPostTabanMB))
-	ps.PostMaxSize = tenantPostEnAzUpload(sk, ps.PostMaxSize, ps.UploadMaxFilesize)
-	ps.MaxExecutionTime = tenantSureTavani(sk, "max_execution_time", ps.MaxExecutionTime, tenantMaxExecTavanSn)
-	ps.MaxInputTime = tenantSureTavani(sk, "max_input_time", ps.MaxInputTime, tenantMaxInputTavanSn)
-	startServers := maxCh / 4
-	if startServers < 1 {
-		startServers = 1
-	}
-	minSpare := 1
-	maxSpare := maxCh / 2
-	if maxSpare < minSpare {
-		maxSpare = minSpare
-	}
+	hv := PlanHavuzTavani(db, domainID, sk, HavuzDegerleri{
+		PMStrategy:        ps.PMStrategy,
+		UploadMaxFilesize: ps.UploadMaxFilesize,
+		PostMaxSize:       ps.PostMaxSize,
+		MaxExecutionTime:  ps.MaxExecutionTime,
+		MaxInputTime:      ps.MaxInputTime,
+	})
+	ps.PMStrategy = hv.PMStrategy
+	ps.UploadMaxFilesize, ps.PostMaxSize = hv.UploadMaxFilesize, hv.PostMaxSize
+	ps.MaxExecutionTime, ps.MaxInputTime = hv.MaxExecutionTime, hv.MaxInputTime
+	maxCh, startServers, minSpare, maxSpare := hv.MaxChildren, hv.StartServers, hv.MinSpareServers, hv.MaxSpareServers
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n", sk)
 	fmt.Fprintf(&b, "user = %s\n", sk)

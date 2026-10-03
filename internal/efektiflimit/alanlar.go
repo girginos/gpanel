@@ -126,6 +126,32 @@ func IcAlanlarIcinde[V any](m map[string]V) []string {
 	return out
 }
 
+// phpTuretilen — php_settings / subdomain_php_settings'te bir iç alandan TÜRETİLEN
+// havuz anahtarları: per-tenant havuz (ve PlanHavuzTavani ile paylaşılan / alt alan
+// havuzları) start/min_spare/max_spare'ı pm_max_children'dan hesaplar.
+var phpTuretilen = map[string]string{
+	"pm_start_servers":     "pm_max_children",
+	"pm_min_spare_servers": "pm_max_children",
+	"pm_max_spare_servers": "pm_max_children",
+}
+
+// PHPAyarIcAnahtarlari — PHP ayar gövdesinde (PUT /domains/{id}/php-settings ve alt
+// alan eşi) kökün İÇ ALANINA ait anahtarlar: iç alan pm_max_children + ondan türetilen
+// havuz sayıları. Yönetici dışı oturum (müşteri, bayi, müşteri adına) bunları
+// GÖREMEZ ve YAZAMAZ (değer korunur) — bayi kararıyla aynı kural, aynı tek liste.
+func PHPAyarIcAnahtarlari() []string {
+	var out []string
+	if IcAlan("pm_max_children") {
+		out = append(out, "pm_max_children")
+	}
+	for _, k := range []string{"pm_start_servers", "pm_min_spare_servers", "pm_max_spare_servers"} {
+		if IcAlan(phpTuretilen[k]) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // IcAlanRedMesaji — bayi isteğinde iç alan geldiğinde dönen (403) hata metni.
 func IcAlanRedMesaji(alanlar []string) string {
 	return "bu ayarlar yöneticinize aittir, değiştirilemez: " + strings.Join(alanlar, ", ")
