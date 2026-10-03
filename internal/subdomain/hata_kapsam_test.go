@@ -104,6 +104,7 @@ func hk_db() (*sahtedb.DB, *sql.DB) {
 	sd.Satirlar("SELECT alt_ad, tam_ad, php_surum FROM subdomanlar",
 		[]any{"blog", "blog.bayialan.test", "8.3"})
 	sd.Satirlar("SELECT alt_ad, tam_ad FROM subdomanlar", []any{"blog", "blog.bayialan.test"})
+	sd.Satirlar("SELECT tam_ad, COALESCE(php_surum,'8.3') FROM subdomanlar", []any{"blog.bayialan.test", "8.3"})
 	sd.Satirlar("SELECT tip, cidr, aciklama, sira FROM subdomain_erisim_kurallari",
 		[]any{"izin", "203.0.113.45/32", "", int64(10)})
 	return sd, db
