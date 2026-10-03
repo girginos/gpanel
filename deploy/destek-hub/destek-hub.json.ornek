@@ -1,0 +1,41 @@
+{
+  "dinle": "127.0.0.1:8470",
+  "ic_dinle": "127.0.0.1:8471",
+  "veri_dizini": "/var/lib/girginos-destek",
+  "bot_kullanici_adi": "GirginOSDestekBot",
+  "modeller": {
+    "triyaj": "claude-haiku-4-5-20251001",
+    "ana": "claude-sonnet-5-5",
+    "yukseltme": "claude-opus-5-5"
+  },
+  "fiyatlar": {
+    "claude-haiku-4-5-20251001": {"giris_mtok": 1, "cikis_mtok": 5, "cache_yazma_5dk_mtok": 1.25, "cache_yazma_1sa_mtok": 2, "cache_okuma_mtok": 0.1},
+    "claude-sonnet-5-5": {"giris_mtok": 0, "cikis_mtok": 0, "cache_yazma_5dk_mtok": 0, "cache_yazma_1sa_mtok": 0, "cache_okuma_mtok": 0},
+    "claude-opus-5-5": {"giris_mtok": 0, "cikis_mtok": 0, "cache_yazma_5dk_mtok": 0, "cache_yazma_1sa_mtok": 0, "cache_okuma_mtok": 0}
+  },
+  "butce": {
+    "oturum_token_tavani": 200000,
+    "sunucu_gunluk_usd": 2,
+    "sunucu_aylik_usd": 20,
+    "genel_gunluk_usd": 50,
+    "genel_aylik_usd": 500
+  },
+  "acil_kesici_dosyasi": "/etc/girginos-destek/acil-kesici",
+  "destek_grubu_id": 0,
+  "cache_ttl": "5m",
+  "cache_uyari_esigi": 0.5,
+  "cache_uyari_pencere": 20,
+  "ana_max_token": 4096,
+  "triyaj_max_token": 256,
+  "efor": "",
+  "dusunme": false,
+  "sikistirma_esigi": 40000,
+  "konusma_saklama_gun": 30,
+  "arac_tur_siniri": 8,
+  "oturum_arac_siniri": 25,
+  "yukseltme_tur_siniri": 4,
+  "mesaj_dakika_siniri": 10,
+  "sunucu_oturum_siniri": 2,
+  "oturum_bosta_sn": 900,
+  "is_zaman_asimi_sn": 45
+}
