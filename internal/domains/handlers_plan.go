@@ -302,7 +302,10 @@ func (h *Handlers) planKullanimSigar(ctx context.Context, domainID, planID int64
 		return nil
 	}
 	if err := h.DB.QueryRowContext(ctx, `SELECT COALESCE(boyut_kb,0) FROM domains WHERE id=?`, domainID).Scan(&boyutKB); err != nil {
-		return fmt.Errorf("domain bulunamadı")
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // hosting yok: SetPlan aşağıda 404 "domain bulunamadı" döner
+		}
+		return fmt.Errorf("disk kullanımı okunamadı: %w", err)
 	}
 	if boyutKB > kotaMB*1024 {
 		return fmt.Errorf("mevcut disk kullanımı (%d MB) yeni planın disk sınırını (%d MB) aşıyor", boyutKB/1024, kotaMB)

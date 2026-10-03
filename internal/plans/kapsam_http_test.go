@@ -165,6 +165,7 @@ func pk_geciciDB(t *testing.T) *sql.DB {
 			durum VARCHAR(16) NOT NULL DEFAULT 'aktif',
 			olusturulma DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			plan_id BIGINT UNSIGNED NULL,
+			boyut_kb BIGINT NOT NULL DEFAULT 0,
 			customer_id BIGINT UNSIGNED NULL,
 			reseller_id BIGINT NOT NULL DEFAULT 0,
 			KEY ix_domains_plan (plan_id), KEY ix_dom_reseller (reseller_id)
