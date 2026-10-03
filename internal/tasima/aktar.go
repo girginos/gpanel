@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/efektiflimit"
 	stdlog "log"
 	"path/filepath"
 	"strings"
@@ -497,7 +498,7 @@ func (h *Handlers) bayiDiskHavuzu(ctx context.Context, rid, domainID, bayt int64
 func (h *Handlers) bayiDBKotasi(ctx context.Context, domainID int64, adet int) error {
 	var maks int
 	if err := h.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(p.max_db,0) FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.id=?`,
+		`SELECT `+efektiflimit.IfadeVarsayilan("max_db", 0)+` FROM domains d`+efektiflimit.Join+`WHERE d.id=?`,
 		domainID).Scan(&maks); err != nil {
 		return &kotaHatasi{mesaj: "plan limitleri okunamadı"}
 	}

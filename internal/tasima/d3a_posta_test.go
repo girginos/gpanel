@@ -6,6 +6,7 @@ package tasima
 
 import (
 	"context"
+	"girginospanel/internal/efektiflimit"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,7 @@ func TestMailAktar_SurucuUzakYoluDogrulanir(t *testing.T) {
 		`ALTER TABLE domains ADD COLUMN plan_id BIGINT UNSIGNED NULL`,
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, max_email INT NOT NULL DEFAULT 0,
 			saatlik_mail_limiti INT NOT NULL DEFAULT 0, mail_kutu_kota_mb INT NOT NULL DEFAULT 0)`,
+		efektiflimit.TabloDDL, // 0120
 		`CREATE TABLE cp_eklentiler (ad VARCHAR(64) PRIMARY KEY, aktif TINYINT NOT NULL DEFAULT 0,
 			soket VARCHAR(255) NOT NULL DEFAULT '')`,
 		`INSERT INTO domains (id, alan_adi, reseller_id) VALUES (31,'surucu.test',0)`,

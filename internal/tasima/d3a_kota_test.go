@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"girginospanel/internal/efektiflimit"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ func d3KotaOrtam(t *testing.T) (*Handlers, *[]string) {
 		`ALTER TABLE service_plans ADD COLUMN disk_kota_mb BIGINT NOT NULL DEFAULT 0,
 			ADD COLUMN trafik_kota_mb BIGINT NOT NULL DEFAULT 0, ADD COLUMN max_db INT NOT NULL DEFAULT 0`,
 		`CREATE TABLE db_accounts (id BIGINT AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT NOT NULL, db_name VARCHAR(64) NOT NULL)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit (plan ⊕ üst yazım)
 	} {
 		if _, err := h.DB.Exec(q); err != nil {
 			t.Fatalf("kota şeması: %v\n%s", err, q)

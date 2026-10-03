@@ -186,6 +186,11 @@ var KimlikUclari = map[string]bool{
 	"GET " + p + "/system/tasima/oturumlar":      true,
 	"GET " + p + "/system/tasima/oturum/{id}":    true,
 	"DELETE " + p + "/system/tasima/oturum/{id}": true,
+	// D3a: taşıma uçları /tasima/* altına taşındı (/system/tasima/* bir sürüm takma ad).
+	"GET " + p + "/tasima/anahtar":        true,
+	"GET " + p + "/tasima/oturumlar":      true,
+	"GET " + p + "/tasima/oturum/{id}":    true,
+	"DELETE " + p + "/tasima/oturum/{id}": true,
 	// Eklenti vekili: eklentiye X-Gosp-Rol ile kimlik geçirir (eleştiri #21).
 	"* " + p + "/eklenti/{ad}/*": true,
 }
