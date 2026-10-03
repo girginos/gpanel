@@ -375,6 +375,9 @@ func TestTur_KenarTetikliBildirimler(t *testing.T) {
 	if len(havuz) != 1 || havuz[0].rid.Int64 != 7 || havuz[0].baslik != "Kaynak havuzu: Disk kotası %85'i aştı" {
 		t.Errorf("havuz bildirimi yalnız bayi 7'ye: %+v", havuz)
 	}
+	if y := pt_bildirimler(t, db, "domain_id IS NULL AND reseller_id IS NULL"); len(y) != 0 {
+		t.Errorf("%%85 havuz eşiği yöneticiye gitmemeli (yalnız %%100 + asim_bildirim): %+v", y)
+	}
 	if n := pt_say(t, db, `SELECT COUNT(*) FROM cp_bildirim WHERE kategori='websec'`); n != 0 {
 		t.Errorf("ilk tur websec taban çizgisi: bildirim olmamalı (%d)", n)
 	}
