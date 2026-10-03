@@ -218,6 +218,10 @@ func (h *Handlers) Tara(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "public_html bulunamadı")
 		return
 	}
+	if !taramaKokuEvIcinde("/home/"+sk, root) {
+		httpx.WriteError(w, http.StatusBadRequest, "public_html kiracının ev dizini dışını gösteriyor — taranmadı")
+		return
+	}
 	if !atomic.CompareAndSwapInt32(&scanning, 0, 1) {
 		httpx.WriteError(w, http.StatusConflict, "sunucuda başka bir tarama sürüyor, lütfen bekleyin")
 		return
@@ -521,4 +525,22 @@ func phpish(ext string) bool {
 		return true
 	}
 	return false
+}
+
+// taramaKokuEvIcinde — tarama kökü (kiracının public_html'i) çözüldüğünde hâlâ
+// kiracının (çözülmüş) evi altında mı? 🔴 Son bileşen kiracının denetiminde:
+// public_html -> /home/<başka>/public_html symlink'i ile tarama (avajan clamav
+// modu kökü EvalSymlinks ile çözer; eski clamscan -r komut satırındaki symlink'i
+// izler) başka kiracının ağacına gider, bulgu yolları/imzalar bu kiracının
+// kaydına yazılırdı. Ev içi symlink (public_html -> ~/www) meşru.
+func taramaKokuEvIcinde(home, root string) bool {
+	gHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return false
+	}
+	gRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(gRoot, gHome+"/")
 }

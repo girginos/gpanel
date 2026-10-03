@@ -750,6 +750,17 @@ func (a *ajan) clamKok(kok string, haric []string) clamKokSonuc {
 		log.Printf("clamav: kök çözümlenemedi %s: %v", gosterim(kok), err)
 		return s
 	}
+	// 🔴 Kiracı kökü kiracının evinden ÇIKMAMALI. Panelin "Tara" ucu kökü
+	// /home/<sk>/public_html olarak verir; son bileşen kiracının denetiminde. Kiracı
+	// public_html'i başka bir kiracının ya da sistemin dizinine symlink yaparsa
+	// EvalSymlinks oraya çözülür, bulgu yolları/imzalar/taranan sayısı kiracının
+	// kendi kaydına yazılırdı (kiracılar arası bilgi sızıntısı). Ev içinde kalan
+	// symlink (ör. public_html -> ~/www) meşru, kabul.
+	if abs, aerr := filepath.Abs(kok); aerr == nil && kokEvDisinaCikiyor(kokEvKoku, abs, gercek) {
+		log.Printf("clamav: kök kiracının evi dışına çözülüyor, taranmadı: %s -> %s", gosterim(kok), gosterim(gercek))
+		s.tutarli = false
+		return s
+	}
 	if err := os.MkdirAll(clamListeDizini, 0o700); err != nil {
 		log.Printf("clamav: liste dizini hazırlanamadı: %v — kök taranmadı: %s", err, gosterim(kok))
 		s.tutarli = false
@@ -1093,6 +1104,25 @@ func karantinaAl(yol string) (string, error) {
 
 // evKoku — kiracı ev dizinlerinin kökü (root-yönetimli; /home/<sk> güven çapası).
 const evKoku = "/home"
+
+// kokEvKoku — clamKok'un kiracı kökü denetiminde kullandığı ev kökü (test dikişi).
+var kokEvKoku = evKoku
+
+// kokEvDisinaCikiyor — sözcüksel kök <evKok>/<sk>/... altındaysa, çözülmüş (gerçek)
+// yolu o kiracının (çözülmüş) evinin dışına düşüyor mu? Kiracı altında olmayan
+// kökler (yönetici yapılandırması, ör. /var/www) denetlenmez. Ev çözülemezse
+// güvenli tarafta kalınır (true).
+func kokEvDisinaCikiyor(evKok, sozcuksel, gercek string) bool {
+	sk, home := kiraciBul(evKok, sozcuksel)
+	if sk == "" {
+		return false
+	}
+	gHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return true
+	}
+	return gercek != gHome && !strings.HasPrefix(gercek, gHome+"/")
+}
 
 // karantinaAlEv — karantinaAl'ın dikişli gövdesi: ev kökü ve sk→uid çözücü
 // testlerde t.TempDir ve sahte uid ile verilir (gerçek kullanıcı araması yok).
