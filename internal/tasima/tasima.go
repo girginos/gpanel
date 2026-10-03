@@ -210,6 +210,27 @@ func (k *Kaynak) sshOrtakArgs(anahtarDosya string) []string {
 	return a
 }
 
+// sshOrtam — kök ssh/rsync/sshpass çocuğunun ortamı AÇIKÇA kurulur: yalnız
+// PATH/HOME/LANG (+ ek, ör. SSHPASS). Panel ortamının tamamı (os.Environ)
+// verilmez: config.Load sırları silse de (1. katman) bir gerileme kaynak sunucuya
+// giden sürece sır taşımasın (ssh SendEnv). PATH/HOME/LANG panelden alınır
+// (sır değildir; testler sahte ssh/rsync'i PATH ile verir).
+func sshOrtam(ek ...string) []string {
+	yol := os.Getenv("PATH")
+	if yol == "" {
+		yol = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	}
+	ev := os.Getenv("HOME")
+	if ev == "" {
+		ev = "/root"
+	}
+	dil := os.Getenv("LANG")
+	if dil == "" {
+		dil = "C"
+	}
+	return append([]string{"PATH=" + yol, "HOME=" + ev, "LANG=" + dil}, ek...)
+}
+
 // anahtarYaz — SSH ozel anahtarini 0600 gecici dosyaya yazar. temizle() cagrilmali.
 func (k *Kaynak) anahtarYaz() (yol string, temizle func(), err error) {
 	if strings.TrimSpace(k.Anahtar) == "" {
@@ -259,10 +280,10 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 	if anahtar == "" {
 		// Parola argv'de GORUNMEZ: sshpass -e ortam degiskeninden okur.
 		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
 	} else {
 		cmd = exec.CommandContext(ctx, "ssh", args...)
-		cmd.Env = os.Environ()
+		cmd.Env = sshOrtam()
 	}
 	var sb, eb strings.Builder
 	cmd.Stdout = &sb
@@ -314,10 +335,10 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 	var cmd *exec.Cmd
 	if anahtar == "" {
 		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "rsync"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
 	} else {
 		cmd = exec.CommandContext(ctx, "rsync", args...)
-		cmd.Env = os.Environ()
+		cmd.Env = sshOrtam()
 	}
 	var sb, eb strings.Builder
 	cmd.Stdout = &sb
@@ -349,10 +370,10 @@ func (k *Kaynak) AkisCalistir(ctx context.Context, uzakKomut string, w io.Writer
 	var cmd *exec.Cmd
 	if anahtar == "" {
 		cmd = exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+k.Parola)
+		cmd.Env = sshOrtam("SSHPASS=" + k.Parola)
 	} else {
 		cmd = exec.CommandContext(ctx, "ssh", args...)
-		cmd.Env = os.Environ()
+		cmd.Env = sshOrtam()
 	}
 	var eb strings.Builder
 	cmd.Stdout = w

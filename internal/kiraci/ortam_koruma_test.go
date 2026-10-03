@@ -36,8 +36,6 @@ var ortamIstisnalari = map[string]int{
 	"internal/config/config.go": 1,
 	// sshpass (kök): SSHPASS eklenir; 1. katmandan sonra ortamda sır yok.
 	"internal/backups/destination.go": 1,
-	"internal/tasima/aktar.go":        2,
-	"internal/tasima/tasima.go":       4,
 	// valkey-cli (kök): REDISCLI_AUTH eklenir.
 	"internal/redis/redis.go": 1,
 	// Windows geliştirme platformu (mysql istemcisi), Linux'ta derlenmez.

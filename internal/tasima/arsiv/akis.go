@@ -12,11 +12,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
-	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"girginospanel/internal/kiraci"
 )
 
 // Sıkıştırma imzaları (uzantıya değil içeriğe bakılır; ad saldırganın elinde).
@@ -29,6 +29,9 @@ var (
 
 // Go standart kitaplığında xz/zstd açıcı yok → alt süreç: yalnız stdin → stdout, bellek
 // sınırlı, sessiz. Root ise nobody kimliğinde koşar (acici).
+// aciciKul — root panelde xz/zstd açıcısının ayrıcalıksız kimliği.
+const aciciKul = "nobody"
+
 var (
 	xzArgv   = []string{"xz", "-d", "-c", "-q", "--memlimit-decompress=512MiB"}
 	zstdArgv = []string{"zstd", "-d", "-c", "-q", "--memory=512MB"}
@@ -131,26 +134,27 @@ func (a *Arsiv) gecisAc(ctx context.Context, beklenen []Uye) (*gecis, error) {
 
 // acici: xz/zstd alt süreci. Arşivi panel açar ve stdin'den verir; açıcı dosya
 // sistemine erişmez. Panel root ise açıcı nobody kimliğinde koşar (güvenilmez girdiyi
-// ayrıştıran C kodu root yetkisi taşımasın); panel ölürse açıcı da ölür.
+// ayrıştıran C kodu root yetkisi taşımasın) — kimlik düşürme panelin tek
+// sarmalayıcısı kiraci.Komut ile (runuser, ortam yalnız PATH/HOME/LANG). Komut adı
+// panelde çözülür (eksikse ErrAcici; runuser'ın 127'si biçim hatası sanılmasın) ve
+// mutlak yolla verilir. Panel ölürse runuser SIGKILL alır; açıcının stdin'i kapanır,
+// o da biter.
 func (g *gecis) acici(argv []string, girdi io.Reader) (io.Reader, error) {
-	cmd := exec.CommandContext(g.ctx, argv[0], argv[1:]...)
-	cmd.Stdin = girdi
-	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
-	cmd.Dir = "/"
-	cmd.WaitDelay = 5 * time.Second
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	yol, err := exec.LookPath(argv[0])
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrAcici, argv[0])
+	}
+	var cmd *exec.Cmd
 	if os.Geteuid() == 0 {
-		u, err := user.Lookup("nobody")
-		if err != nil {
+		if cmd, err = (kiraci.Kiraci{Kul: aciciKul, Ev: "/"}).Komut(g.ctx, append([]string{yol}, argv[1:]...)...); err != nil {
 			return nil, fmt.Errorf("açıcı için ayrıcalıksız kullanıcı yok: %w", err)
 		}
-		uid, uerr := strconv.ParseUint(u.Uid, 10, 32)
-		gid, gerr := strconv.ParseUint(u.Gid, 10, 32)
-		if uerr != nil || gerr != nil {
-			return nil, fmt.Errorf("açıcı için ayrıcalıksız kullanıcı çözülemedi")
-		}
-		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{}}
+	} else {
+		cmd = yetkisizAcici(g.ctx, yol, argv[1:])
 	}
+	cmd.Stdin = girdi
+	cmd.WaitDelay = 5 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	cikis, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -163,6 +167,15 @@ func (g *gecis) acici(argv []string, girdi io.Reader) (io.Reader, error) {
 	}
 	g.alt, g.altCikis = cmd, cikis
 	return cikis, nil
+}
+
+// yetkisizAcici — panel root DEĞİLKEN açıcı: kimlik zaten ayrıcalıksız, ortam
+// açıkça asgari.
+func yetkisizAcici(ctx context.Context, yol string, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, yol, args...)
+	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+	cmd.Dir = "/"
+	return cmd
 }
 
 // hata: okuma hatasını sınıflar. İptal ve bomba olduğu gibi; gerisi (tar/gzip/bzip2

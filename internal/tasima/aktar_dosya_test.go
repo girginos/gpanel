@@ -959,6 +959,13 @@ func yrKiraciYerlesimDondur(t *testing.T, uid int, adlar map[string]bool) (dur f
 	return dur
 }
 
+// Donma testinin süreleri: adım süresi yük altında donmayan adımlara yeter;
+// bekçi adım süresi + iptalBekleme (15 sn) + yük payının üstünde.
+const (
+	yrDonmaAdimSuresi = 12 * time.Second
+	yrDonmaBekci      = 120 * time.Second
+)
+
 // Kiracı kendi uid'indeki yerleşim adımını (cp, find) SIGSTOP ile dondurur:
 // adım kendi süresiyle kesilir (hesap bağlamının 3 saatini beklemez), kalem o
 // adımın süre hatasıyla biter, sonraki kiracı adımı koşmaz, hazırlık alanı
@@ -976,8 +983,14 @@ func TestDosyalariAktar_KiraciDondurursaAdimKesilir(t *testing.T) {
 					yrYaz(t, filepath.Join(d, fmt.Sprintf("p%02d", i%40), fmt.Sprintf("f%04d.txt", i)), "x", 0o644)
 				}
 			}}
+			// Süre tüm kiracı adımlarına ortaktır: donmayan önceki adımlar (mkdir,
+			// "find" alt testinde 4000 girdilik cp) da bu süreye sığmalı. 2 sn yük
+			// altında (181=2 CPU, paralel go test) cp'yi keserdi → kalem yanlış adımın
+			// hatasıyla biter. Anlam süreden bağımsızdır: donmuş adım hesap
+			// bağlamının (3 sa) ve 120 sn bekçinin çok altında, KENDİ süresi +
+			// kiraci.iptalBekleme (15 sn) içinde kesilmeli.
 			eski := yerlesimSuresi
-			yerlesimSuresi = func(int64) time.Duration { return 2 * time.Second }
+			yerlesimSuresi = func(int64) time.Duration { return yrDonmaAdimSuresi }
 			t.Cleanup(func() { yerlesimSuresi = eski })
 
 			// Dondurulan adım ve ondan SONRAKİLER: süre aşımına rağmen yerleşim
@@ -994,14 +1007,14 @@ func TestDosyalariAktar_KiraciDondurursaAdimKesilir(t *testing.T) {
 			takildi := false
 			select {
 			case err = <-bitti:
-			case <-time.After(60 * time.Second):
+			case <-time.After(yrDonmaBekci):
 				takildi = true
 			}
 			donmus := dur()
 			if takildi {
 				// dur dondurulanları öldürdü: kalem şimdi biter (test asılı kalmaz).
 				<-bitti
-				t.Fatal("donmuş kiracı süreci yerleşimi süresiz bekletti (60 sn)")
+				t.Fatalf("donmuş kiracı süreci yerleşimi süresiz bekletti (%v)", yrDonmaBekci)
 			}
 			if donmus == 0 {
 				t.Fatalf("fikstür: kiracının yerleşim süreci dondurulamadı (hata=%v)", err)
