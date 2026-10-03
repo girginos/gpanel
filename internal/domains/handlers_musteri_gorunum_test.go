@@ -186,3 +186,32 @@ func TestDomainGet_MusteriSahiplikAlanlariniGormez(t *testing.T) {
 		t.Errorf("bayi yanıtı değişmemeli: %v / %v / %v", b["sahip_ad"], b["sahip_tur"], b["reseller_id"])
 	}
 }
+
+// D1: "özel limit" işareti yönetici/bayi listesi içindir; müşteri yalnız efektif
+// değerleri görür (rozet/işaret yok).
+func TestDomainGet_OzelLimitIsaretiMusteriyeGitmez(t *testing.T) {
+	d := Domain{ID: 42, AlanAdi: "musteri.test", OzelLimit: true}
+	if b, _ := json.Marshal(d); !strings.Contains(string(b), `"ozel_limit":true`) {
+		t.Fatalf("yönetici görünümünde ozel_limit yok: %s", b)
+	}
+	if b, _ := json.Marshal(musteriGorunumu(d)); strings.Contains(string(b), "ozel_limit") {
+		t.Errorf("müşteri görünümünde ozel_limit var: %s", b)
+	}
+	db := mg_geciciDB(t)
+	h := &Handlers{DB: db, IPv4: "203.0.113.10"}
+	if _, err := db.Exec(`INSERT INTO hosting_limit_ust (domain_id, disk_kota_mb) VALUES (42, 777)`); err != nil {
+		t.Fatal(err)
+	}
+	adminTok, err := auth.IssueAt(ds_secret, 3600, 1, "root", "admin", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := mg_get(t, ds_router(h), adminTok, 42)
+	if a["ozel_limit"] != true || a["disk_kota_mb"] != float64(777) {
+		t.Errorf("yönetici: ozel_limit=%v disk_kota_mb=%v (beklenen true / efektif 777)", a["ozel_limit"], a["disk_kota_mb"])
+	}
+	m := mg_get(t, ds_router(h), ds_musteriToken(t, 5, 42), 42)
+	if _, ok := m["ozel_limit"]; ok || m["disk_kota_mb"] != float64(777) {
+		t.Errorf("müşteri: ozel_limit görünür ya da efektif disk yanlış: %v", m)
+	}
+}
