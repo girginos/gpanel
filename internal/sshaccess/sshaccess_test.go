@@ -111,6 +111,15 @@ func kurbanDegismedi(t *testing.T, yol string) {
 	}
 }
 
+// kiraciSshKur: kiracıya ait ~/.ssh kurar (gerçek dünyadaki gibi; root'a ait dolu
+// ~/.ssh sahiplik denetiminde zaten reddedilir ve asıl denetlenen dalı gizlerdi).
+func kiraciSshKur(o *ortam, ssh string) error {
+	if err := os.Mkdir(ssh, 0o700); err != nil {
+		return err
+	}
+	return os.Chown(ssh, o.uid, o.gid)
+}
+
 func geciciKalmadi(t *testing.T, dizin string) {
 	t.Helper()
 	girdiler, _ := os.ReadDir(dizin)
@@ -309,7 +318,7 @@ func TestAnahtarKaydet_SabitBagKurbaniDegistirmez(t *testing.T) {
 	kurban := filepath.Join(o.dis, "authorized_keys")
 	kurbanYaz(t, kurban)
 	ssh := filepath.Join(o.ev, ".ssh")
-	if err := os.Mkdir(ssh, 0o700); err != nil {
+	if err := kiraciSshKur(o, ssh); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Link(kurban, filepath.Join(ssh, "authorized_keys")); err != nil {
@@ -351,7 +360,7 @@ func TestAuthorizedKeysYaz_GeciciAdSymlinkIzlenmez(t *testing.T) {
 	kurban := filepath.Join(o.dis, "authorized_keys")
 	kurbanYaz(t, kurban)
 	ssh := filepath.Join(o.ev, ".ssh")
-	if err := os.Mkdir(ssh, 0o700); err != nil {
+	if err := kiraciSshKur(o, ssh); err != nil {
 		t.Fatal(err)
 	}
 	const sabit = ".authorized_keys.gosp-sabit"
@@ -374,7 +383,7 @@ func TestAuthorizedKeysYaz_DizinVeFIFOReddedilir(t *testing.T) {
 		t.Run(tur, func(t *testing.T) {
 			o := ortamKur(t)
 			ssh := filepath.Join(o.ev, ".ssh")
-			if err := os.Mkdir(ssh, 0o700); err != nil {
+			if err := kiraciSshKur(o, ssh); err != nil {
 				t.Fatal(err)
 			}
 			ak := filepath.Join(ssh, "authorized_keys")
@@ -406,7 +415,7 @@ func TestAuthorizedKeysYaz_DenetimSonrasiYarisKurbaniDegistirmez(t *testing.T) {
 			kurban := filepath.Join(o.dis, "authorized_keys")
 			kurbanYaz(t, kurban)
 			ssh := filepath.Join(o.ev, ".ssh")
-			if err := os.Mkdir(ssh, 0o700); err != nil {
+			if err := kiraciSshKur(o, ssh); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(ssh, "authorized_keys"), []byte("ssh-ed25519 ESKI\n"), 0o600); err != nil {
@@ -570,5 +579,157 @@ func TestRestoreconFd_EvDisinaTasinanEtiketlenmez(t *testing.T) {
 	restoreconFd(evFd, sshFd)
 	if len(o.etiketlenen) != 1 {
 		t.Fatalf("ev dışına taşınan dizin etiketlendi: %v", o.etiketlenen)
+	}
+}
+
+// ---------------------------------------------------------------- ~/.ssh sahiplik denetimi
+
+// Kiracı root'a ait ~/.karantina'yı (root:root 0700, içinde 0000 dosyalar) '.ssh'
+// adına taşır; yönetici anahtar kaydettiğinde ya da SSH'i açtığında panel dizini
+// kiracıya DEVRETMEMELİ (karantina atlatma).
+func TestSshDizini_RootaAitDoluDizinDevredilmez(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("root'a ait dizin kurmak için root gerekir")
+	}
+	o := ortamKur(t)
+	kar := filepath.Join(o.ev, ".karantina")
+	if err := os.Mkdir(kar, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	zararli := filepath.Join(kar, "20260101-000000_shell.php")
+	if err := os.WriteFile(zararli, []byte("<?php zararli();"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(kar, filepath.Join(o.ev, ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	ssh := filepath.Join(o.ev, ".ssh")
+	sahibiRootMu := func() {
+		t.Helper()
+		st, err := os.Lstat(ssh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := st.Sys().(*syscall.Stat_t); s.Uid != 0 || st.Mode().Perm() != 0o700 {
+			t.Fatalf("root'a ait dolu dizin kiracıya devredildi: uid=%d mod=%v", s.Uid, st.Mode())
+		}
+		if _, err := os.Lstat(filepath.Join(ssh, "authorized_keys")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("reddedilen dizine authorized_keys yazıldı: %v", err)
+		}
+	}
+
+	if w := anahtarKaydet(t, kiraciAnahtari); w.Code != http.StatusConflict {
+		t.Fatalf("AnahtarKaydet: %d %s, beklenen 409", w.Code, w.Body)
+	}
+	sahibiRootMu()
+	if err := sshDiziniHazirla(testSK); !errors.Is(err, errGuvensizYol) {
+		t.Fatalf("sshDiziniHazirla: %v, beklenen errGuvensizYol", err)
+	}
+	sahibiRootMu()
+	if len(o.etiketlenen) != 0 {
+		t.Fatalf("reddedilen istekte restorecon: %v", o.etiketlenen)
+	}
+}
+
+// Başka bir kullanıcıya ait ~/.ssh (boş olsa bile) devredilmez.
+func TestSshDizini_YabanciSahipDevredilmez(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("yabancı sahip kurmak için root gerekir")
+	}
+	o := ortamKur(t)
+	ssh := filepath.Join(o.ev, ".ssh")
+	if err := os.Mkdir(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(ssh, 54322, 54322); err != nil {
+		t.Fatal(err)
+	}
+	if err := sshDiziniHazirla(testSK); !errors.Is(err, errGuvensizYol) {
+		t.Fatalf("yabancı sahipli .ssh: %v, beklenen errGuvensizYol", err)
+	}
+	if st, _ := os.Lstat(ssh); st.Sys().(*syscall.Stat_t).Uid != 54322 {
+		t.Fatal("yabancı sahipli .ssh devredildi")
+	}
+}
+
+// Meşru: kiracıya ait dolu ~/.ssh (known_hosts vb.) ve root'a ait BOŞ ~/.ssh
+// (eski sürümün yarım bıraktığı) kabul edilir.
+func TestSshDizini_KiraciyaAitVeRootBosKabul(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("sahiplik ayrımı için root gerekir")
+	}
+	o := ortamKur(t)
+	ssh := filepath.Join(o.ev, ".ssh")
+	if err := os.Mkdir(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// root'a ait boş → kabul, kiracıya geçer.
+	if err := sshDiziniHazirla(testSK); err != nil {
+		t.Fatalf("root'a ait boş .ssh reddedildi: %v", err)
+	}
+	sahipKontrol(t, o, ssh)
+	// kiracıya ait dolu → kabul.
+	if err := os.WriteFile(filepath.Join(ssh, "known_hosts"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := anahtarKaydet(t, kiraciAnahtari); w.Code != http.StatusOK {
+		t.Fatalf("kiracıya ait dolu .ssh: %d %s", w.Code, w.Body)
+	}
+	sahipKontrol(t, o, filepath.Join(ssh, "authorized_keys"))
+}
+
+// restorecon kemeri kardeş önekli evi (c_x ile c_x2) ev altı saymamalı.
+func TestRestoreconFd_KardesOnekliEvEtiketlenmez(t *testing.T) {
+	o := ortamKur(t)
+	kardes := filepath.Join(o.kok, testSK+"2")
+	if err := os.Mkdir(kardes, 0o710); err != nil {
+		t.Fatal(err)
+	}
+	ssh := filepath.Join(o.ev, ".ssh")
+	if err := os.Mkdir(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	evFd, err := unix.Open(o.ev, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(evFd)
+	sshFd, err := unix.Open(ssh, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(sshFd)
+	if err := os.Rename(ssh, filepath.Join(kardes, ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	restoreconFd(evFd, sshFd)
+	if len(o.etiketlenen) != 0 {
+		t.Fatalf("kardeş önekli eve taşınan dizin etiketlendi: %v", o.etiketlenen)
+	}
+}
+
+// anahtarVar (GET MusteriScope) FIFO authorized_keys'te asılı kalmamalı (O_PATH).
+func TestAnahtarVar_FIFOAsiliKalmaz(t *testing.T) {
+	o := ortamKur(t)
+	ssh := filepath.Join(o.ev, ".ssh")
+	if err := os.Mkdir(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(ssh, "authorized_keys"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sonuc := make(chan bool, 1)
+	go func() { sonuc <- anahtarVar(testSK) }()
+	select {
+	case v := <-sonuc:
+		if v {
+			t.Fatal("FIFO anahtar sayıldı")
+		}
+	case <-time.After(3 * time.Second):
+		// Asılı goroutine'i çöz: FIFO'nun yazma ucunu açıp kapat.
+		if f, err := os.OpenFile(filepath.Join(ssh, "authorized_keys"), os.O_WRONLY, 0); err == nil {
+			f.Close()
+		}
+		t.Fatal("anahtarVar FIFO'da asılı kaldı")
 	}
 }

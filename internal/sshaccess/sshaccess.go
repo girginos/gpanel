@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -148,6 +149,16 @@ func evAc(sk string) (int, error) {
 
 // sshDiziniAc: ~/.ssh'yi yoksa 0700 oluşturur, ev fd'sine göre symlink izlemeden
 // açar ve sahipliğini fd üzerinden kiracıya verir (fd'yi çağıran kapatır).
+//
+// 🔴 Sahiplik denetimi: var olan ~/.ssh körü körüne kiracıya devredilmez. Ev
+// dizini kiracıya ait ve sticky biti yok; kiracı evindeki root'a ait bir dizini
+// (tasarım gereği root:root 0700 duran ~/.karantina) aynı üst dizin içinde
+// '.ssh' adına taşıyabilir (aynı üst dizinde rename, dizinin kendisinde yazma
+// izni istemez). Eski kod Fchown ile bunu kiracıya verir, karantinadaki 0000
+// dosyalar kiracının erişimine açılırdı (karantina atlatma). Kabul edilen:
+// zaten kiracıya ait dizin ya da root'a ait BOŞ dizin (az önce Mkdirat ile
+// açtığımız, ya da içinde devredilecek bir şey olmayan). Boşluk denetimi ile
+// Fchown arasında kiracı root'a ait 0700 dizine girdi ekleyemez.
 func sshDiziniAc(evFd, uid, gid int) (int, error) {
 	if err := unix.Mkdirat(evFd, ".ssh", 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
 		return -1, err
@@ -156,11 +167,57 @@ func sshDiziniAc(evFd, uid, gid int) (int, error) {
 	if err != nil {
 		return -1, guvensizMi(err)
 	}
+	if err := sshDiziniDevredilebilir(fd, uid); err != nil {
+		unix.Close(fd)
+		return -1, err
+	}
 	if err := unix.Fchown(fd, uid, gid); err != nil {
 		unix.Close(fd)
 		return -1, err
 	}
 	return fd, nil
+}
+
+// sshDiziniDevredilebilir: pinli ~/.ssh fd'si kiracıya devredilebilir mi? Kiracıya
+// aitse evet; root'a aitse yalnız boşsa; başka her sahip errGuvensizYol.
+func sshDiziniDevredilebilir(fd, uid int) error {
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return err
+	}
+	if int(st.Uid) == uid {
+		return nil
+	}
+	if st.Uid != 0 {
+		return fmt.Errorf("%w (~/.ssh sahibi uid %d)", errGuvensizYol, st.Uid)
+	}
+	bos, err := dizinBosMu(fd)
+	if err != nil {
+		return err
+	}
+	if !bos {
+		return fmt.Errorf("%w (~/.ssh root'a ait ve boş değil — kiracıya devredilmez)", errGuvensizYol)
+	}
+	return nil
+}
+
+// dizinBosMu: fd'nin gösterdiği dizinde ("." ve ".." dışında) girdi var mı?
+// Ayrı bir fd ile okunur; çağıranın fd'sinin konumu değişmez.
+func dizinBosMu(fd int) (bool, error) {
+	dfd, err := unix.Openat(fd, ".", unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false, err
+	}
+	f := os.NewFile(uintptr(dfd), ".ssh")
+	defer f.Close()
+	adlar, err := f.Readdirnames(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return len(adlar) == 0, nil
 }
 
 func fdYolu(fd int) (string, error) {
