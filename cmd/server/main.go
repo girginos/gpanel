@@ -105,11 +105,21 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "kapi" {
 		os.Exit(kapiCLI(os.Args[2:]))
 	}
+	// Sır CLI'ı da config.Load()'dan ÖNCE: env dosyasını (root 0600) doğrudan okur/yazar;
+	// sırlar argv'ye/stdout'a ÇIKMAZ. Bkz. sir.go (sir yenile / sir kurtar / sir durum).
+	if len(os.Args) > 1 && os.Args[1] == "sir" {
+		os.Exit(sirCLI(os.Args[2:]))
+	}
 	// config.Load panel sırlarını okuduktan sonra süreç ortamından SİLER: hiçbir çocuk
 	// süreç (kök ya da kiracı kimliğinde) onları miras alamaz. Sırlar yalnız cfg'den geçer.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+	if cfg.SirKaynagi == "kimlik" {
+		log.Printf("config: sırlar systemd kimliğinden (LoadCredential) okundu — süreç ortamına girmedi")
+	} else {
+		log.Printf("config: UYARI sırlar süreç ortamından (eski birim: EnvironmentFile) okundu ve silindi — kalıcı düzeltme: girginospanel-update (birim LoadCredential'a geçer)")
 	}
 	redis.AdminParolaAyarla(cfg.RedisAdminPass)
 	d, err := db.Open(cfg.DBDsn)

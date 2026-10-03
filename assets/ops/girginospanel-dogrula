@@ -565,8 +565,11 @@ _dbp=$(printf '%s' "$_dsn" | sed -E 's#^[^:]+:([^@]*)@.*#\1#')
 _dbh=$(printf '%s' "$_dsn" | sed -E 's#.*tcp\(([^:]+):([0-9]+)\).*#\1#')
 _dbport=$(printf '%s' "$_dsn" | sed -E 's#.*tcp\(([^:]+):([0-9]+)\).*#\2#')
 _dbn=$(printf '%s' "$_dsn" | sed -E 's#.*/([a-zA-Z0-9_]+)(\?.*)?$#\1#')
+# 🔴 Parola argv'ye (-p...) KONMAZ: /proc/<pid>/cmdline her kullanıcıya açıktır, kiracı
+# `ps` ile panel DB parolasını okurdu. MYSQL_PWD yalnız bu mysql sürecinin ortamına verilir.
+_panel_mysql() { MYSQL_PWD="$_dbp" mysql -N -u "$_dbu" -h "${_dbh:-127.0.0.1}" -P "${_dbport:-3306}" "$_dbn" "$@"; }
 if [ -n "$_dbu" ] && [ -n "$_dbn" ]; then
-  _PANEL_MYSQL="mysql -N -u $_dbu -p$_dbp -h ${_dbh:-127.0.0.1} -P ${_dbport:-3306} $_dbn"
+  _PANEL_MYSQL="_panel_mysql"
 else
   _PANEL_MYSQL=""
 fi
@@ -593,6 +596,31 @@ elif $_PANEL_MYSQL -e 'SELECT 1' >/dev/null 2>&1; then
   else gec "panel tables" "$TAB tables ($DB)"; fi
 else
   dus "MariaDB connection" "COULD NOT CONNECT via panel DSN — panel won't open ($_dbu@$_dbh/$_dbn)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+bas "Secrets"
+# Panel birimi env'i LoadCredential ile mi veriyor (sırlar süreç ortamına girmez)?
+# EnvironmentFile ile veren eski birimde sırlar kiracı çocuklarına geçebiliyordu
+# (2026-10); panel açılışta onları ortamdan siler (1. katman) ama kalıcı düzen kimliktir.
+_sir_arac=$(command -v girginospanel-sir 2>/dev/null || true)
+if [ -z "$_sir_arac" ]; then
+  uyar "secret layout" "girginospanel-sir not installed — COULD NOT MEASURE (run girginospanel-update)"
+else
+  if bash "$_sir_arac" birim --denetle >/dev/null 2>&1; then
+    gec "panel unit secrets" "LoadCredential (secrets never enter the process environment)"
+  else
+    uyar "panel unit secrets" "EnvironmentFile (legacy) — secrets enter the process environment; fix: girginospanel-sir birim && systemctl restart girginospanel"
+  fi
+  _sir_izin=$(bash "$_sir_arac" izin 2>&1); _sir_rc=$?
+  if [ $_sir_rc -eq 0 ]; then
+    gec "secret file permissions" "$(printf '%s\n' "$_sir_izin" | tail -1 | sed 's/^ *✓ *//')"
+  else
+    dus "secret file permissions" "$(printf '%s\n' "$_sir_izin" | grep 'KRİTİK' | sed 's/^ *//' | head -12 | tr '\n' ';') fix: girginospanel-repair --only sir_izin"
+  fi
+  if [ -e /etc/girginospanel/.sir-yenile-bekleyen ]; then
+    dus "secret rotation" "half-finished rotation marker present — run: girginospanel-server sir kurtar"
+  fi
 fi
 
 # ══════════════════════════════════════════════════════════════════════

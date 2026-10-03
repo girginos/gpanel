@@ -47,6 +47,15 @@ sed -i '/^requirepass /d' "$CONF"   # aclfile ile çakışır
 echo "════ SELinux (php-fpm → redis TCP) ════"
 setsebool -P httpd_can_network_connect 1 2>/dev/null && log "httpd_can_network_connect=1"
 
+echo "════ valkey UMask (users.acl 0640) ════"
+# ACL SAVE users.acl'i valkey sürecinin umask'ıyla yeniden yazar (varsayılan 0022 → 0644:
+# admin + kiracı parola özetleri herkese okunur). UMask=0027 → 0640 valkey:valkey.
+mkdir -p /etc/systemd/system/valkey.service.d
+printf '[Service]\n# girginospanel-sir: ACL SAVE users.acl dosyasını 0640 yazsın (parola özetleri)\nUMask=0027\n' \
+  > /etc/systemd/system/valkey.service.d/50-gosp-umask.conf
+systemctl daemon-reload >/dev/null 2>&1
+log "valkey UMask=0027 drop-in"
+
 echo "════ valkey enable + (re)start ════"
 systemctl enable valkey >/dev/null 2>&1
 systemctl restart valkey; sleep 2

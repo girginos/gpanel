@@ -309,7 +309,7 @@ FLUSH PRIVILEGES;
 SQL
 # Verify: "ALTER USER didn't error" is NOT enough — prove the password actually works by
 # connecting as the panel user. Otherwise the breakage would only show at step 12.
-mysql -u panel -p"$DBPASS" -h 127.0.0.1 -e 'SELECT 1' panel >/dev/null 2>&1 \
+MYSQL_PWD="$DBPASS" mysql -u panel -h 127.0.0.1 -e 'SELECT 1' panel >/dev/null 2>&1 \
   || die "panel DB user could not be verified (password not aligned with env) — install stopped"
 ok "panel DB + user (panel@127.0.0.1) — password $DBPASS_KAYNAK, connection VERIFIED"
 
