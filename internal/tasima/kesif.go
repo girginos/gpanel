@@ -42,21 +42,16 @@ func (k *Kaynak) PanelTespit(ctx context.Context) (string, error) {
 	return strings.TrimSpace(cikti), nil
 }
 
-// Kesfet — kaynak paneldeki tum hesaplari/siteleri listeler.
+// Kesfet — kaynak paneldeki tum hesaplari/siteleri listeler (surucu kayit
+// defterinden; bkz. kaynak_kayit.go).
 func (k *Kaynak) Kesfet(ctx context.Context) ([]Hesap, error) {
 	ctx, iptal := context.WithTimeout(ctx, kesifTimeout*3)
 	defer iptal()
-	switch k.Tip {
-	case "cpanel":
-		return k.ayristir(k.Calistir(ctx, komutCpanel))
-	case "plesk":
-		return k.ayristir(k.Calistir(ctx, komutPlesk))
-	case "directadmin":
-		return k.ayristir(k.Calistir(ctx, komutDirectAdmin))
-	case "gpanel":
-		return k.ayristir(k.Calistir(ctx, komutGpanel))
+	s, ok := surucuBul(k.Tip)
+	if !ok {
+		return nil, errDesteklenmeyenTip
 	}
-	return nil, fmt.Errorf("desteklenmeyen panel tipi")
+	return s.kesif(ctx, k)
 }
 
 // KaynakSahip — kaynaktaki bir reseller veya müşteri (client). Reseller/sahip
@@ -75,18 +70,13 @@ type KaynakSahip struct {
 // KesfetSahipler — kaynaktaki reseller + müşteri hesaplarını (iletişim + limit)
 // keşfeder. Şimdilik yalnız Plesk (cPanel/DA reseller yapısı ayrı ele alınır).
 func (k *Kaynak) KesfetSahipler(ctx context.Context) ([]KaynakSahip, error) {
-	komut := ""
-	switch k.Tip {
-	case "plesk":
-		komut = komutPleskSahipler
-	case "gpanel":
-		komut = komutGpanelSahipler
-	default:
+	s, ok := surucuBul(k.Tip)
+	if !ok || s.sahipKomutu == "" {
 		return nil, nil // cPanel/DA reseller yapisi ayri ele alinir
 	}
 	ctx, iptal := context.WithTimeout(ctx, kesifTimeout)
 	defer iptal()
-	cikti, err := k.Calistir(ctx, komut)
+	cikti, err := k.Calistir(ctx, s.sahipKomutu)
 	if err != nil {
 		return nil, err
 	}
@@ -188,25 +178,7 @@ func (k *Kaynak) ayristir(cikti string, err error) ([]Hesap, error) {
 //   ###DB:<db1,db2,...>          (hesap geneli — YALNIZ ana domaine atanir)
 //   ###DOM:<alan adi>|<docroot>|<php surumu>|<boyut MB>|<ana|ek>
 
-const komutCpanel = `for f in /var/cpanel/users/*; do
-  [ -f "$f" ] || continue
-  u=$(basename "$f")
-  case "$u" in system|root|*.cache|*.lock) continue ;; esac
-  echo "###USER:$u"
-  echo "###DB:$(mysql -N -B -e "SHOW DATABASES" 2>/dev/null | grep -E "^${u}_" | tr '\n' ',')"
-  ana=1
-  for d in $(grep -E '^DNS[0-9]*=' "$f" 2>/dev/null | sed 's/^DNS[0-9]*=//'); do
-    [ -n "$d" ] || continue
-    ud="/var/cpanel/userdata/$u/$d"
-    dr=$(grep -E '^documentroot:' "$ud" 2>/dev/null | head -1 | sed 's/^documentroot: *//')
-    pv=$(grep -E '^phpversion:' "$ud" 2>/dev/null | head -1 | sed 's/^phpversion: *//')
-    [ -n "$dr" ] || dr="/home/$u/public_html"
-    [ -n "$pv" ] || pv=$(grep -E '^phpversion=' "$f" 2>/dev/null | head -1 | sed 's/^phpversion=//')
-    sz=$(du -sm "$dr" 2>/dev/null | cut -f1)
-    if [ "$ana" = "1" ]; then tur=ana; ana=0; else tur=ek; fi
-    echo "###DOM:$d|$dr|$pv|$sz|$tur"
-  done
-done`
+// cPanel kesfi: kaynak_cpanel.go (userdata/<u>/main eslemesi).
 
 const komutPlesk = `for d in $(plesk bin subscription --list 2>/dev/null); do
   su=$(plesk db -Ne "SELECT s.login FROM domains dom JOIN hosting h ON h.dom_id=dom.id JOIN sys_users s ON s.id=h.sys_user_id WHERE dom.name='$d' LIMIT 1" 2>/dev/null)
@@ -227,13 +199,23 @@ done`
 
 // DirectAdmin: php1_select bir INDEKS'tir (1/2/3), surum degil — custombuild
 // options.conf'taki phpN_release ile eslenir.
+//
+// 🔴 MySQL kimligi: DA'da MySQL root/admin PAROLALIDIR; kimliksiz `mysql` "Access
+// denied" verir ve DB listesi SESSIZCE bos donerdi. Dump ile ayni kaynak
+// (/usr/local/directadmin/conf/mysql.conf) kullanilir; parola $(sed ...) ile
+// alinir → ps'te gorunmez.
+//
+// Alt alan adlari (domains/<d>.subdomains, satir basina etiket) `ek` olarak
+// listelenir; belge koku DA duzeninde public_html/<etiket>. Isaretci (pointer)
+// alan adlari taşınmaz.
 const komutDirectAdmin = `oc=/usr/local/directadmin/custombuild/options.conf
+mc=/usr/local/directadmin/conf/mysql.conf
 for ud in /usr/local/directadmin/data/users/*; do
   [ -d "$ud" ] || continue
   u=$(basename "$ud")
   case "$u" in admin) continue ;; esac
   echo "###USER:$u"
-  echo "###DB:$(mysql -N -B -e "SHOW DATABASES" 2>/dev/null | grep -E "^${u}_" | tr '\n' ',')"
+  echo "###DB:$(MYSQL_PWD="$(sed -n 's/^passwd=//p' "$mc" 2>/dev/null)" mysql -u"$(sed -n 's/^user=//p' "$mc" 2>/dev/null)" -N -B -e "SHOW DATABASES" 2>/dev/null | grep -E "^${u}_" | tr '\n' ',')"
   ana=1
   while read -r d; do
     [ -n "$d" ] || continue
@@ -244,6 +226,12 @@ for ud in /usr/local/directadmin/data/users/*; do
     sz=$(du -sm "$dr" 2>/dev/null | cut -f1)
     if [ "$ana" = "1" ]; then tur=ana; ana=0; else tur=ek; fi
     echo "###DOM:$d|$dr|$pv|$sz|$tur"
+    [ -f "$ud/domains/$d.subdomains" ] || continue
+    while read -r s; do
+      [ -n "$s" ] || continue
+      ssz=$(du -sm "$dr/$s" 2>/dev/null | cut -f1)
+      echo "###DOM:$s.$d|$dr/$s|$pv|$ssz|ek"
+    done < "$ud/domains/$d.subdomains"
   done < "$ud/domains.list"
 done`
 

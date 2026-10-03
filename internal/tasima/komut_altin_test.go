@@ -73,6 +73,7 @@ const (
 	altinDB      = "ornekhesap_wp"
 	altinHedefDB = "c_ornek_wp"
 	altinParola  = "altin-parola-1234"
+	altinHesap   = "ornekhesap"
 )
 
 var altinTipler = []string{"plesk", "cpanel", "directadmin", "gpanel"}
@@ -138,46 +139,78 @@ func altinSenaryolari() []altinSenaryo {
 				_, _, err := kaynakCertOku(ctx, k, altinAlan)
 				return err
 			}},
-			altinSenaryo{ad: tip + "/posta", tip: tip, calis: func(ctx context.Context, k *Kaynak) error {
-				_, err := pleskMailKesfet(ctx, k, altinAlan)
-				return err
-			}},
+			// Posta keşfi kayıt defterindeki sürücüden; posta yeteneği olmayan kaynağa
+			// (gPanel) HİÇ komut gitmez. cPanel/DA sahte yanıtta ev dizini yok → hata.
+			altinSenaryo{ad: tip + "/posta", tip: tip, bos: tip == "gpanel",
+				hata: map[string]string{"cpanel": "kaynak hesabin ev dizini okunamadi",
+					"directadmin": "kaynak hesabin ev dizini okunamadi"}[tip],
+				calis: func(ctx context.Context, k *Kaynak) error {
+					s, _ := surucuBul(k.Tip)
+					if s.postaKesfet == nil {
+						return nil
+					}
+					_, err := s.postaKesfet(ctx, k, Hesap{KaynakHesap: altinHesap, AlanAdi: altinAlan})
+					return err
+				}},
+			// Kaynağa özel sertifika deposu (cPanel apache_tls, DA kullanıcı dizini).
+			altinSenaryo{ad: tip + "/sertifika-ozel", tip: tip, bos: tip == "plesk" || tip == "gpanel",
+				calis: func(ctx context.Context, k *Kaynak) error {
+					s, _ := surucuBul(k.Tip)
+					if s.sertifikaOku == nil {
+						return nil
+					}
+					_, _, err := s.sertifikaOku(ctx, k, Hesap{KaynakHesap: altinHesap, AlanAdi: altinAlan})
+					return err
+				}},
 		)
 	}
 	return s
 }
 
 // komutAltin — senaryo → kaydedilen çağrı dizisinin sha256'sı (taban aef5088).
-// Aynı değerler bilinçlidir: sertifika/posta/dns komutları bugün tipten bağımsız
-// (posta her tipte Plesk komutunu gönderir), cPanel ile gPanel dump'ı kimliksiz;
-// e3b0c442… boş dizgenin sha'sıdır (uzak komut YOK).
+// Aynı değerler bilinçlidir: ortak sertifika taraması tipten bağımsız, cPanel ile
+// gPanel dump'ı kimliksiz; e3b0c442… boş dizgenin sha'sıdır (uzak komut YOK).
+//
+// D3a (kayıt defteri) bilinçli değişiklikleri — Plesk/gPanel komutları BAYT BAYT
+// aynı kaldı; değişenler:
+//   - cpanel/kesif: userdata/<u>/main eşlemesi (ek alan belge kökü hatası) + DB öneki
+//     8 karakter varyantı;
+//   - directadmin/kesif: DB listesi mysql.conf kimliğiyle + alt alan adları;
+//   - directadmin/dns: Debian DA zone yolu (/etc/bind/<alan>.db) eklendi;
+//   - */posta: kutu keşfi sürücüden (eskiden HER tipte Plesk komutu gidiyordu;
+//     gPanel'e artık hiç gitmez, cPanel/DA kendi düzenini okur);
+//   - */sertifika-ozel: yeni (cPanel apache_tls, DA kullanıcı dizini).
 var komutAltin = map[string]string{
-	"ortak/tespit":          "660f481e7c2e37f51be0379fa040df3529011a5e3ef509c98834aeff2ddcb4d5",
-	"ortak/baglanti":        "992d9d1ac6630a7e11070d3f6e86bd92e08e2116d0dfa7357089b49fb54b1ddc",
-	"plesk/kesif":           "b6bee2bc4f1037cbc5ad65b1bfeba288fc8ea2aab2ced721e10e72698c2a817c",
-	"plesk/sahipler":        "1494de69ea74aac5b65c333c2ae3423aaa07e1bce476e57c0baba2e081896c03",
-	"plesk/dump":            "4594b08ba38f4f4b76d9e97a900cd21dc9cb6e258e595acc5f0921a8f82f19cb",
-	"plesk/dns":             "d0161e91c90434253c70bf8c60a1a592220d4dd47b67358dbbcfe512a95ecd47",
-	"plesk/sertifika":       "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
-	"plesk/posta":           "bf1ebe8bf9f570cb7a7df018d080664eb87abb8cd2f7541f7d4b35e21d10b6b0",
-	"cpanel/kesif":          "b5597bc3464a1ecb389941fdcc16936db841da2b1856496ba8d7b3d2ee1cd893",
-	"cpanel/sahipler":       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-	"cpanel/dump":           "6f1199f11a0adf808c36b05fe5228ac9139d237981d553e8c92e644e7f322d48",
-	"cpanel/dns":            "58d9451a3f19848a5bb0325b2ee2e5fcb67f7d3e77594a09a9140d559f2abd71",
-	"cpanel/sertifika":      "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
-	"cpanel/posta":          "bf1ebe8bf9f570cb7a7df018d080664eb87abb8cd2f7541f7d4b35e21d10b6b0",
-	"directadmin/kesif":     "cccdee8fde2b14767cbe3d5e31a492f5c5712fe098349f0dba1b6563483dc839",
-	"directadmin/sahipler":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-	"directadmin/dump":      "8eafcd0d3ed63a9bdbaf9c5b9bd60f43b66a0a9b178fdbe2e55fd39d690c3a7e",
-	"directadmin/dns":       "58d9451a3f19848a5bb0325b2ee2e5fcb67f7d3e77594a09a9140d559f2abd71",
-	"directadmin/sertifika": "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
-	"directadmin/posta":     "bf1ebe8bf9f570cb7a7df018d080664eb87abb8cd2f7541f7d4b35e21d10b6b0",
-	"gpanel/kesif":          "df5366a18e71aff91f64eb3de58d6748659b8a27e01a966d0c97b2c011546645",
-	"gpanel/sahipler":       "3ef8cbb4d4fe5358067a5779783ff3924cd7ff48f789fa3533500bad7f61291f",
-	"gpanel/dump":           "6f1199f11a0adf808c36b05fe5228ac9139d237981d553e8c92e644e7f322d48",
-	"gpanel/dns":            "58d9451a3f19848a5bb0325b2ee2e5fcb67f7d3e77594a09a9140d559f2abd71",
-	"gpanel/sertifika":      "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
-	"gpanel/posta":          "bf1ebe8bf9f570cb7a7df018d080664eb87abb8cd2f7541f7d4b35e21d10b6b0",
+	"ortak/tespit":               "660f481e7c2e37f51be0379fa040df3529011a5e3ef509c98834aeff2ddcb4d5",
+	"ortak/baglanti":             "992d9d1ac6630a7e11070d3f6e86bd92e08e2116d0dfa7357089b49fb54b1ddc",
+	"plesk/kesif":                "b6bee2bc4f1037cbc5ad65b1bfeba288fc8ea2aab2ced721e10e72698c2a817c",
+	"plesk/sahipler":             "1494de69ea74aac5b65c333c2ae3423aaa07e1bce476e57c0baba2e081896c03",
+	"plesk/dump":                 "4594b08ba38f4f4b76d9e97a900cd21dc9cb6e258e595acc5f0921a8f82f19cb",
+	"plesk/dns":                  "d0161e91c90434253c70bf8c60a1a592220d4dd47b67358dbbcfe512a95ecd47",
+	"plesk/sertifika":            "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
+	"plesk/posta":                "bf1ebe8bf9f570cb7a7df018d080664eb87abb8cd2f7541f7d4b35e21d10b6b0",
+	"cpanel/kesif":               "503892f70b5865ffea17bb4b99c28cf754db42471ccceef5d435c02920e6204d",
+	"cpanel/sahipler":            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	"cpanel/dump":                "6f1199f11a0adf808c36b05fe5228ac9139d237981d553e8c92e644e7f322d48",
+	"cpanel/dns":                 "58d9451a3f19848a5bb0325b2ee2e5fcb67f7d3e77594a09a9140d559f2abd71",
+	"cpanel/sertifika":           "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
+	"cpanel/posta":               "8802b884d93825f3b7018f3273bfeb6a49e53a75ac7cb2edef65addc09de7c9b",
+	"directadmin/kesif":          "cdbaa73b8a8e748ce74ea92d3efc8b396402d7db1d204be1af046f78418a3547",
+	"directadmin/sahipler":       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	"directadmin/dump":           "8eafcd0d3ed63a9bdbaf9c5b9bd60f43b66a0a9b178fdbe2e55fd39d690c3a7e",
+	"directadmin/dns":            "36d0500708173b8446f6d3b6ba447f6e18a5485c488dad5e4f085f71281a45d4",
+	"directadmin/sertifika":      "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
+	"directadmin/posta":          "a092eb6553ef845ccd20e9f13b6fec24b2b0baad89ae60c55f18c6616e3d8924",
+	"gpanel/kesif":               "df5366a18e71aff91f64eb3de58d6748659b8a27e01a966d0c97b2c011546645",
+	"gpanel/sahipler":            "3ef8cbb4d4fe5358067a5779783ff3924cd7ff48f789fa3533500bad7f61291f",
+	"gpanel/dump":                "6f1199f11a0adf808c36b05fe5228ac9139d237981d553e8c92e644e7f322d48",
+	"gpanel/dns":                 "58d9451a3f19848a5bb0325b2ee2e5fcb67f7d3e77594a09a9140d559f2abd71",
+	"gpanel/sertifika":           "d40ca371e3134654cc2fc4be0bd8bc588ae6521606d920736d8f0adaaf410779",
+	"gpanel/posta":               "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	"plesk/sertifika-ozel":       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	"cpanel/sertifika-ozel":      "089c6bb900b7a0182130c8ff6b1a64da058160818a5768c0bbf087590747bd77",
+	"directadmin/sertifika-ozel": "581b2a44c741da6636d2d9015b15fdc3a6bcb5f4e48b16a6887fab754369dadf",
+	"gpanel/sertifika-ozel":      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 }
 
 func TestKomutAltin(t *testing.T) {

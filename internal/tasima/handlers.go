@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,19 +19,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"girginospanel/internal/gizli"
+	"girginospanel/internal/domains"
 	"girginospanel/internal/httpx"
-	"girginospanel/internal/middleware"
+	"girginospanel/internal/plans"
 )
 
-const logDizin = "/opt/girginospanel/logs"
+// logDizin — iş günlükleri (testler geçici dizine çevirir).
+var logDizin = "/opt/girginospanel/logs"
 
 // Ayni anda yalnizca TEK tasima isi calisir: rsync/mysqldump agir islerdir,
 // paralel calisirsa sunucuyu bogar ve ayni sistem kullanicisi uzerinde yaris
-// olusur.
-// rezerveNobetci — is kaydi henuz acilmadan slotun tutuldugunu belirtir.
-const rezerveNobetci int64 = -1
-
+// olusur. Yeni isler KUYRUGA yazilir (kuyruk.go); tek dagitici sirayla calistirir.
 var (
 	kilit      sync.Mutex
 	aktifIsID  int64
@@ -39,6 +38,21 @@ var (
 
 func logYolu(isID int64) string {
 	return filepath.Join(logDizin, fmt.Sprintf("tasima-%d.log", isID))
+}
+
+// isBulunamadi — kapsam dışı ve var olmayan iş için BAYT BAYT aynı yanıt (IDOR:
+// başka kiracının iş kimliği varlığını sızdırmaz).
+func isBulunamadi(w http.ResponseWriter) {
+	httpx.WriteError(w, http.StatusNotFound, "iş bulunamadı")
+}
+
+// kapsamYaz — kapsam/hız/anahtar reddini yazar; true = devam edilebilir.
+func kapsamHatasi(w http.ResponseWriter, kod int, msj string) bool {
+	if kod != 0 {
+		httpx.WriteError(w, kod, msj)
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -52,21 +66,22 @@ type kaynakGirdi struct {
 	Kullanici string `json:"kullanici"`
 	Parola    string `json:"parola"`
 	Anahtar   string `json:"anahtar"`
-	// PanelAnahtari: true ise panelin KENDI taşıma anahtarı kullanılır (parola/kullanıcı
-	// anahtarı yerine). Kaynak sunucuya panelin public anahtarı eklenmiş olmalı. Kaynak
-	// root parola-girişini kapatmış (prohibit-password) olsa bile çalışır.
+	// PanelAnahtari: true ise panelin taşıma anahtarı kullanılır (parola/kullanıcı
+	// anahtarı yerine). Anahtar KİRACIYA ÖZELDİR: kök kendi çiftini, her bayi kendi
+	// çiftini kullanır (bkz. panelTasimaAnahtar) — bayi, kökün anahtarını eklediği
+	// sunuculara bu yolla bağlanamaz.
 	PanelAnahtari bool `json:"panel_anahtari"`
 }
 
-func (g kaynakGirdi) kaynak() *Kaynak {
+func (g kaynakGirdi) kaynak(kp Kapsam) *Kaynak {
 	p := g.Port
 	if p == 0 {
 		p = 22
 	}
 	parola, anahtar := g.Parola, g.Anahtar
 	if g.PanelAnahtari {
-		if priv, _, err := panelTasimaAnahtar(); err == nil {
-			anahtar = priv // panel özel anahtarı → key-auth (parola devre dışı)
+		if priv, _, err := panelTasimaAnahtar(kp); err == nil {
+			anahtar = priv // kiracının özel anahtarı → key-auth (parola devre dışı)
 			parola = ""
 		}
 	}
@@ -77,43 +92,84 @@ func (g kaynakGirdi) kaynak() *Kaynak {
 }
 
 // ── Panel taşıma SSH anahtarı (parola çalışmadığında otomatik yol) ──────────
-const tasimaKeyDir = "/var/lib/girginospanel/tasima"
-const tasimaKeyPath = tasimaKeyDir + "/id_ed25519"
+// Kök: <tasimaKeyDir>/id_ed25519 (eski yol — kökün kaynaklarındaki yetki bozulmaz).
+// Bayi: <tasimaKeyDir>/<rid>/id_ed25519.
+var tasimaKeyDir = "/var/lib/girginospanel/tasima"
 
 var tasimaKeyMu sync.Mutex
 
-// panelTasimaAnahtar — panelin taşıma ed25519 anahtar çiftini garanti eder (yoksa
-// üretir) ve (özel-anahtar-içeriği, public-anahtar-satırı) döner. Kullanıcı public
-// anahtarı kaynağa ekler; taşıma panelin özel anahtarıyla parolasız bağlanır.
-func panelTasimaAnahtar() (priv string, pub string, err error) {
+// sshKeygen — anahtar üretici (testler değiştirir).
+var sshKeygen = func(yol, yorum string) ([]byte, error) {
+	return exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", yorum, "-f", yol).CombinedOutput()
+}
+
+// panelTasimaAnahtar — kapsamın taşıma ed25519 anahtar çiftini garanti eder (yoksa
+// üretir) ve (özel-anahtar-içeriği, public-anahtar-satırı) döner.
+func panelTasimaAnahtar(kp Kapsam) (priv string, pub string, err error) {
 	tasimaKeyMu.Lock()
 	defer tasimaKeyMu.Unlock()
-	if err = os.MkdirAll(tasimaKeyDir, 0o700); err != nil {
+	dizin := kiraciDizin(kp)
+	if err = os.MkdirAll(dizin, 0o700); err != nil {
 		return "", "", err
 	}
-	if _, e := os.Stat(tasimaKeyPath); e != nil {
-		out, ge := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "girginospanel-tasima", "-f", tasimaKeyPath).CombinedOutput()
+	yol := filepath.Join(dizin, "id_ed25519")
+	yorum := "girginospanel-tasima"
+	if kp.Bayi() {
+		yorum = fmt.Sprintf("girginospanel-tasima-r%d", kp.RID)
+	}
+	if _, e := os.Lstat(yol); e != nil {
+		out, ge := sshKeygen(yol, yorum)
 		if ge != nil {
 			return "", "", fmt.Errorf("anahtar üretilemedi: %s", strings.TrimSpace(string(out)))
 		}
 	}
-	pb, err := os.ReadFile(tasimaKeyPath)
+	pb, err := dosyaOkuBagsiz(yol)
 	if err != nil {
 		return "", "", err
 	}
-	pubB, err := os.ReadFile(tasimaKeyPath + ".pub")
+	pubB, err := dosyaOkuBagsiz(yol + ".pub")
 	if err != nil {
 		return "", "", err
 	}
 	return string(pb), strings.TrimSpace(string(pubB)), nil
 }
 
-// PanelAnahtar: GET /system/tasima/anahtar → {pubkey, komut}. Parola çalışmazsa
-// (yanlış parola veya kaynak root parola-girişini kapatmış) kullanılır: kullanıcı
-// tek-satır komutu kaynak sunucuda çalıştırır, sonra "Panel anahtarıyla" bağlanır.
-func (h *Handlers) PanelAnahtar(w http.ResponseWriter, r *http.Request) {
-	_, pub, err := panelTasimaAnahtar()
+// dosyaOkuBagsiz — sembolik bağ izlemeden düzenli dosya okur (anahtar dizini).
+func dosyaOkuBagsiz(yol string) ([]byte, error) {
+	f, err := os.OpenFile(yol, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() || st.Size() > 64<<10 {
+		return nil, fmt.Errorf("anahtar dosyası geçersiz")
+	}
+	b := make([]byte, st.Size())
+	n, err := f.Read(b)
+	if err != nil && n == 0 {
+		return nil, err
+	}
+	return b[:n], nil
+}
+
+// PanelAnahtar: GET /tasima/anahtar → {pubkey, komut}. Kiracıya özel çift.
+func (h *Handlers) PanelAnahtar(w http.ResponseWriter, r *http.Request) {
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	if kp.Bayi() && !h.bayiAcikMi(r.Context()) {
+		httpx.WriteError(w, http.StatusForbidden, errTasimaKapali.Error())
+		return
+	}
+	_, pub, err := panelTasimaAnahtar(kp.Kapsam)
+	if err != nil {
+		if kp.Bayi() {
+			log.Printf("tasima: bayi %d anahtari hazirlanamadi: %v", kp.RID, err)
+			httpx.WriteError(w, http.StatusInternalServerError, "taşıma anahtarı hazırlanamadı")
+			return
+		}
 		httpx.WriteError(w, http.StatusInternalServerError, "panel taşıma anahtarı hazırlanamadı: "+err.Error())
 		return
 	}
@@ -122,16 +178,46 @@ func (h *Handlers) PanelAnahtar(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"pubkey": pub, "komut": komut})
 }
 
-// Test — POST /system/tasima/test
+// kaynakHazirla — test/keşif/başlat ortak girişi: kapsam, hız sınırı, kaynak
+// anahtarı, girdi doğrulaması ve hedef denetimi. Döner: kaynak, HTTP kodu, mesaj.
+func (h *Handlers) kaynakHazirla(ctx context.Context, kp Kapsam, k *Kaynak) (int, string) {
+	if err := h.kaynakKullanilabilir(ctx, kp, k.Tip); err != nil {
+		if errors.Is(err, errTasimaKapali) {
+			return http.StatusForbidden, err.Error()
+		}
+		return http.StatusBadRequest, err.Error()
+	}
+	if err := k.Dogrula(); err != nil {
+		return http.StatusBadRequest, err.Error()
+	}
+	if err := k.hedefHazirla(ctx, kp); err != nil {
+		if kp.Bayi() && !errors.Is(err, errHedefIzinsiz) {
+			log.Printf("tasima: bayi %d hedef hazirlanamadi: %v", kp.RID, err)
+			return http.StatusInternalServerError, tasimaHataGenel
+		}
+		return http.StatusBadRequest, err.Error()
+	}
+	return 0, ""
+}
+
+// Test — POST /tasima/test
 func (h *Handlers) Test(w http.ResponseWriter, r *http.Request) {
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	if !bayiHizIzni(kp.Kapsam) {
+		httpx.WriteError(w, http.StatusTooManyRequests, "çok sık deneme — bir dakika sonra yeniden deneyin")
+		return
+	}
 	var g kaynakGirdi
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&g); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "gecersiz istek")
 		return
 	}
-	k := g.kaynak()
-	if err := k.Dogrula(); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+	k := g.kaynak(kp.Kapsam)
+	if kod, msj := h.kaynakHazirla(r.Context(), kp.Kapsam, k); kod != 0 {
+		httpx.WriteError(w, kod, msj)
 		return
 	}
 	ad, err := k.BaglantiTesti(r.Context())
@@ -141,21 +227,29 @@ func (h *Handlers) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	tespit, _ := k.PanelTespit(r.Context())
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "sunucu_adi": ad, "tespit_edilen": tespit,
+		"ok": true, "sunucu_adi": kisalt(ad, 128), "tespit_edilen": kisalt(tespit, 32),
 		"uyusuyor": tespit == k.Tip,
 	})
 }
 
-// Kesif — POST /system/tasima/kesif
+// Kesif — POST /tasima/kesif
 func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	if !bayiHizIzni(kp.Kapsam) {
+		httpx.WriteError(w, http.StatusTooManyRequests, "çok sık deneme — bir dakika sonra yeniden deneyin")
+		return
+	}
 	var g kaynakGirdi
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&g); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "gecersiz istek")
 		return
 	}
-	k := g.kaynak()
-	if err := k.Dogrula(); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+	k := g.kaynak(kp.Kapsam)
+	if kod, msj := h.kaynakHazirla(r.Context(), kp.Kapsam, k); kod != 0 {
+		httpx.WriteError(w, kod, msj)
 		return
 	}
 	hesaplar, err := k.Kesfet(r.Context())
@@ -163,15 +257,31 @@ func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadGateway, "kesif basarisiz: "+err.Error())
 		return
 	}
-	// Hedefte zaten var mi bilgisini isaretle.
-	type cikti struct {
-		Hesap
-		Mevcut bool `json:"mevcut"`
-	}
-	out := make([]cikti, 0, len(hesaplar))
-	// N+1 yerine tek sorgu: hedefte var olan alan adlarini topla. 'mevcut' bayragi
-	// advisory oldugundan DB hatasinda kesfi dusurmeyiz — log + eksik bayrak.
-	mevcutSet := map[string]bool{}
+	out := h.kesifIsaretle(r.Context(), kp.Kapsam, hesaplar)
+	// 🔴 Oturumu kalıcılaştır: kaynak bilgileri + keşif sonucu şifreli saklanır ki
+	// sayfa yenilenince kullanıcı her şeyi yeniden girmesin (bkz. oturum.go). Bayide
+	// başlatma YALNIZ bu sunucu kopyasıyla yapılır (Secilen kesişimi).
+	oturumID := h.oturumKaydet(kp, g, hesaplar)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hesaplar": out, "toplam": len(out), "oturum_id": oturumID})
+}
+
+// kesifCikti — keşif satırı + hedefteki durum.
+//   - Kök: mevcut = alan adı hedefte (herhangi bir sahipte) var.
+//   - Bayi: durum = yeni | hesabinizda | kullanilamaz (+ neden). Başka kiracıdaki
+//     alan adıyla ad-alanı reddi AYNI "kullanilamaz" olur — varlık sızmaz;
+//     mevcut yalnız KENDİ hesabındaysa true.
+type kesifCikti struct {
+	Hesap
+	Mevcut bool   `json:"mevcut"`
+	Durum  string `json:"durum,omitempty"`
+	Neden  string `json:"neden,omitempty"`
+}
+
+func (h *Handlers) kesifIsaretle(ctx context.Context, kp Kapsam, hesaplar []Hesap) []kesifCikti {
+	out := make([]kesifCikti, 0, len(hesaplar))
+	// N+1 yerine tek sorgu: hedefte var olan alan adlarini topla. Bayrak advisory
+	// oldugundan DB hatasinda kesfi dusurmeyiz — log + eksik bayrak.
+	sahipler := map[string]int64{}
 	if len(hesaplar) > 0 {
 		ph := make([]string, len(hesaplar))
 		args := make([]any, len(hesaplar))
@@ -179,25 +289,45 @@ func (h *Handlers) Kesif(w http.ResponseWriter, r *http.Request) {
 			ph[i] = "?"
 			args[i] = hs.AlanAdi
 		}
-		if rows, err := h.DB.Query(`SELECT alan_adi FROM domains WHERE alan_adi IN (`+strings.Join(ph, ",")+`)`, args...); err != nil { //nolint:gosec // G202: ph = []string{"?",...} (yalnız placeholder); alan adları (hs.AlanAdi) args ile ? bağlanır.
+		if rows, err := h.DB.QueryContext(ctx, `SELECT alan_adi, reseller_id FROM domains WHERE alan_adi IN (`+strings.Join(ph, ",")+`)`, args...); err != nil { //nolint:gosec // G202: ph = []string{"?",...} (yalnız placeholder); alan adları args ile ? bağlanır.
 			log.Printf("tasima.Kesif: mevcut-domain sorgusu basarisiz: %v — 'mevcut' bayragi eksik olabilir", err)
 		} else {
 			defer rows.Close()
 			for rows.Next() {
 				var a string
-				if err := rows.Scan(&a); err == nil {
-					mevcutSet[a] = true
+				var rid int64
+				if err := rows.Scan(&a, &rid); err == nil {
+					sahipler[a] = rid
 				}
 			}
 		}
 	}
 	for _, hs := range hesaplar {
-		out = append(out, cikti{Hesap: hs, Mevcut: mevcutSet[hs.AlanAdi]})
+		rid, var_ := sahipler[hs.AlanAdi]
+		if !kp.Bayi() {
+			out = append(out, kesifCikti{Hesap: hs, Mevcut: var_})
+			continue
+		}
+		c := kesifCikti{Hesap: hs, Durum: "yeni"}
+		switch {
+		case var_ && rid == kp.RID:
+			c.Durum, c.Mevcut = "hesabinizda", true
+		case var_:
+			c.Durum, c.Neden = "kullanilamaz", "bu alan adı bu panelde kullanılamaz"
+		default:
+			if err := domains.AdAlaniDenetle(ctx, h.DB, hs.AlanAdi, kp.RID); err != nil {
+				var ah *domains.AdAlaniHatasi
+				c.Durum = "kullanilamaz"
+				if errors.As(err, &ah) {
+					c.Neden = ah.Mesaj(false)
+				} else {
+					c.Neden = "bu alan adı bu panelde kullanılamaz"
+				}
+			}
+		}
+		out = append(out, c)
 	}
-	// 🔴 Oturumu kalıcılaştır: kaynak bilgileri + keşif sonucu şifreli saklanır ki
-	// sayfa yenilenince kullanıcı her şeyi yeniden girmesin (bkz. oturum.go).
-	oturumID := h.oturumKaydet(g, hesaplar)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hesaplar": out, "toplam": len(out), "oturum_id": oturumID})
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -212,61 +342,68 @@ type baslatGirdi struct {
 	OturumID int64   `json:"oturum_id"` // kaydedilmis oturum — parola yeniden girilmezse buradan cozulur
 }
 
-// Baslat — POST /system/tasima/baslat
+// isAyarKayit — tasima_isleri.ayarlar sütununa yazılan biçim: Ayarlar + SUNUCUNUN
+// hazırladığı sahip eşlemesi (kuyruktaki kök işi panel yeniden başlasa da doğru
+// sahibe açılsın). Ayarlar.SahipEsle json:"-" olduğundan istemci bunu gövdeden
+// VEREMEZ; yalnız Baslat yazar, dağıtıcı okur.
+type isAyarKayit struct {
+	Ayarlar
+	SahipEsleK map[string]sahipHedefJSON `json:"sahip_esle,omitempty"`
+}
+
+type sahipHedefJSON struct {
+	ResellerID int64 `json:"r"`
+	CustomerID int64 `json:"c"`
+}
+
+var baslatMu sync.Mutex // aynı kiracının eşzamanlı iki başlatması tek iş açsın
+
+// Baslat — POST /tasima/baslat
 func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
-	// Slotu ATOMIK rezerve et: kontrol ile atama arasinda kilit birakilirsa
-	// (JSON cozme + sifreleme + DB insert suresi) iki istek birden gecip AYNI
-	// hedefe iki rsync/DB-import calistirabilir — yikici.
-	kilit.Lock()
-	if aktifIsID != 0 {
-		kilit.Unlock()
-		httpx.WriteError(w, http.StatusConflict, "zaten calisan bir tasima isi var")
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
 		return
 	}
-	aktifIsID = rezerveNobetci // rezerve edildi; is kaydi acilinca gercek id yazilir
-	kilit.Unlock()
-
-	// Hata ile donulen HER yolda rezervasyon birakilmali.
-	rezerveAktif := true
-	birak := func() {
-		if !rezerveAktif {
-			return
-		}
-		rezerveAktif = false
-		kilit.Lock()
-		if aktifIsID == rezerveNobetci {
-			aktifIsID = 0
-		}
-		kilit.Unlock()
+	if !bayiHizIzni(kp.Kapsam) {
+		httpx.WriteError(w, http.StatusTooManyRequests, "çok sık deneme — bir dakika sonra yeniden deneyin")
+		return
 	}
-	defer birak()
-
 	var g baslatGirdi
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&g); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "gecersiz istek")
 		return
 	}
-	k := g.kaynak()
-	// 🔴 KİMLİK YENİDEN KULLAN: kullanıcı parolayı yeniden girmediyse (sayfa
-	// yenilendi → oturumdan geldi) saklı şifreli kimliği SUNUCU TARAFINDA çöz.
-	// Parola tarayıcıya asla geri dönmedi; burada düz-metin yalnızca bu iş için.
-	if k.Parola == "" && k.Anahtar == "" && g.OturumID > 0 {
-		var host string
+	ctx := r.Context()
+	k := g.kaynak(kp.Kapsam)
+
+	// 🔴 KİMLİK + KEŞİF OTURUMDAN: yalnız AYNI kapsamın oturumu okunur (sahip_rid)
+	// ve kimlik o kapsamın bağlamıyla çözülür. Başka kiracının oturum_id'si "yok"
+	// sayılır (parola istenir) — şifreli kimlik başka kapsamda çözülmez.
+	var oturumHesaplari []Hesap
+	oturumVar := false
+	if g.OturumID > 0 {
+		var host, kesifJSON string
 		var pSif, aSif sql.NullString
-		if h.DB.QueryRow(
-			`SELECT kaynak_host, kaynak_parola, kaynak_anahtar FROM tasima_isleri
-			 WHERE id=? AND durum='oturum' AND (gecerlilik IS NULL OR gecerlilik > NOW())`,
-			g.OturumID).Scan(&host, &pSif, &aSif) == nil {
-			if pSif.Valid && pSif.String != "" {
-				k.Parola = gizli.CozBagli(pSif.String, host)
+		if h.DB.QueryRowContext(ctx,
+			`SELECT kaynak_host, COALESCE(kesif_json,''), kaynak_parola, kaynak_anahtar FROM tasima_isleri
+			 WHERE id=? AND durum='oturum' AND sahip_rid=? AND (gecerlilik IS NULL OR gecerlilik > NOW())`,
+			g.OturumID, kp.RID).Scan(&host, &kesifJSON, &pSif, &aSif) == nil && host == strings.TrimSpace(k.Host) {
+			oturumVar = true
+			if kesifJSON != "" {
+				_ = json.Unmarshal([]byte(kesifJSON), &oturumHesaplari)
 			}
-			if aSif.Valid && aSif.String != "" {
-				k.Anahtar = gizli.CozBagli(aSif.String, host)
+			if k.Parola == "" && k.Anahtar == "" {
+				if pSif.Valid && pSif.String != "" {
+					k.Parola = kimlikCoz(pSif.String, kimlikBaglam(kp.Kapsam, host))
+				}
+				if aSif.Valid && aSif.String != "" {
+					k.Anahtar = kimlikCoz(aSif.String, kimlikBaglam(kp.Kapsam, host))
+				}
 			}
 		}
 	}
-	if err := k.Dogrula(); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+	if kod, msj := h.kaynakHazirla(ctx, kp.Kapsam, k); kod != 0 {
+		httpx.WriteError(w, kod, msj)
 		return
 	}
 	if len(g.Secilen) == 0 {
@@ -281,9 +418,33 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 	if g.Mod == "tekil" || len(g.Secilen) == 1 {
 		mod = "tekil"
 	}
+
+	// 🔴 BAYİ: seçilen hesaplar istemciden DEĞİL, oturumdaki SUNUCU keşfinden alınır
+	// (alan adı kesişimi). Gövdedeki WebRoot/DBler/Sahip alanları yok sayılır →
+	// bayi keşifte olmayan bir docroot/DB adı enjekte edemez.
+	secilen := g.Secilen
+	if kp.Bayi() {
+		if !oturumVar {
+			httpx.WriteError(w, http.StatusBadRequest, "önce kaynak sunucuyu keşfedin (oturum bulunamadı ya da süresi doldu)")
+			return
+		}
+		sunucu := map[string]Hesap{}
+		for _, hs := range oturumHesaplari {
+			sunucu[strings.ToLower(hs.AlanAdi)] = hs
+		}
+		secilen = nil
+		gorulen := map[string]bool{}
+		for _, hs := range g.Secilen {
+			a := strings.ToLower(strings.TrimSpace(hs.AlanAdi))
+			if s, ok := sunucu[a]; ok && !gorulen[a] {
+				gorulen[a] = true
+				secilen = append(secilen, s)
+			}
+		}
+	}
 	// Gecerli hesaplari suz (uzaktan gelen veri — yeniden dogrula).
 	var gecerli []Hesap
-	for _, hs := range g.Secilen {
+	for _, hs := range secilen {
 		hs.AlanAdi = strings.ToLower(strings.TrimSpace(hs.AlanAdi))
 		if !reAlanAdi.MatchString(hs.AlanAdi) || !strings.Contains(hs.AlanAdi, ".") {
 			continue
@@ -298,175 +459,210 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔴 SAHİPLİK TAŞIMA (senkron, domainlerden ÖNCE): kaynaktaki reseller/müşteri
-	// hesaplarını GVM'de oluştur; login→hedef eşlemesini Ayarlar'a koy. Üretilen
-	// reseller parolaları admin'e yanıtta bir kez raporlanır (Plesk parolaları
-	// düz-metin alınamaz). İş kaydı açılmadan yapılır ki hata olursa temiz dönülür.
+	ay := g.Ayarlar
+	ay.SahipEsle = nil
 	var uretilenKimlikler []UretilenKimlik
-	if g.Ayarlar.SahipleriTasi {
-		sahipler, serr := k.KesfetSahipler(r.Context())
+	if kp.Bayi() {
+		// 🔴 BAYİ İÇİN ZORLANAN ALANLAR (istemci değeri yok sayılır): site YALNIZ
+		// bayinin kendi hesabına açılır, sahip/müşteri taşınmaz, var olan site ezilmez
+		// (v1 kararı), plan kapsamlı ve zorunlu.
+		ay.ResellerID, ay.CustomerID = kp.RID, 0
+		ay.SahipleriTasi = false
+		ay.Ustune = false
+		ay.Hesaplar = nil
+		planID, kod, msj := h.bayiPlanCoz(ctx, kp.RID, ay.PlanID)
+		if kod != 0 {
+			httpx.WriteError(w, kod, msj)
+			return
+		}
+		ay.PlanID = planID
+		if kod, msj := h.bayiKalanDenetle(ctx, kp.RID, len(gecerli)); kod != 0 {
+			httpx.WriteError(w, kod, msj)
+			return
+		}
+	} else if ay.SahipleriTasi {
+		// 🔴 SAHİPLİK TAŞIMA (yalnız kök, senkron, domainlerden ÖNCE): kaynaktaki
+		// reseller/müşteri hesaplarını oluştur; login→hedef eşlemesini işe yaz.
+		// Üretilen reseller parolaları yanıtta bir kez raporlanır.
+		sahipler, serr := k.KesfetSahipler(ctx)
 		if serr != nil {
 			httpx.WriteError(w, http.StatusBadGateway, "sahip keşfi başarısız: "+serr.Error())
 			return
 		}
-		esle, kimlikler, herr := sahipleriHazirla(r.Context(), h.DB, sahipler, Kapsam{})
+		esle, kimlikler, herr := sahipleriHazirla(ctx, h.DB, sahipler, kp.Kapsam)
 		if herr != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "sahip hesapları oluşturulamadı: "+herr.Error())
 			return
 		}
-		g.Ayarlar.SahipEsle = esle
+		ay.SahipEsle = esle
 		uretilenKimlikler = kimlikler
 	}
 
-	ayarJSON, _ := json.Marshal(g.Ayarlar)
-	aktorUID, aktor := middleware.Aktor(r)
+	kayit := isAyarKayit{Ayarlar: ay}
+	if len(ay.SahipEsle) > 0 {
+		kayit.SahipEsleK = map[string]sahipHedefJSON{}
+		for lg, s := range ay.SahipEsle {
+			kayit.SahipEsleK[lg] = sahipHedefJSON{ResellerID: s.ResellerID, CustomerID: s.CustomerID}
+		}
+	}
+	ayarJSON, _ := json.Marshal(kayit)
 
-	// Kimlik bilgileri at-rest sifreli (baglam = host, capraz kullanim engeli).
+	// Kimlik bilgileri at-rest sifreli (baglam = kapsam + host, capraz kullanim engeli).
+	baglam := kimlikBaglam(kp.Kapsam, k.Host)
 	parolaSifreli := ""
 	if k.Parola != "" {
-		parolaSifreli = gizli.SaklaBagli(k.Parola, k.Host)
+		parolaSifreli = kimlikSifrele(k.Parola, baglam)
 	}
 	anahtarSifreli := ""
 	if k.Anahtar != "" {
-		anahtarSifreli = gizli.SaklaBagli(k.Anahtar, k.Host)
+		anahtarSifreli = kimlikSifrele(k.Anahtar, baglam)
 	}
 
-	res, err := h.DB.Exec(
+	baslatMu.Lock()
+	var acik int
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasima_isleri WHERE sahip_rid=? AND durum IN ('kuyrukta','calisiyor')`, kp.RID).Scan(&acik); err != nil {
+		baslatMu.Unlock()
+		httpx.WriteError(w, http.StatusInternalServerError, "is kaydi olusturulamadi")
+		return
+	}
+	if acik > 0 {
+		// Yalnız KENDİ verisi: başka kiracının (kökün) işi bu sayıma girmez.
+		baslatMu.Unlock()
+		httpx.WriteError(w, http.StatusConflict, "devam eden ya da sırada bekleyen bir taşımanız var")
+		return
+	}
+	res, err := h.DB.ExecContext(ctx,
 		`INSERT INTO tasima_isleri (kaynak_tip, kaynak_host, kaynak_port, kaynak_kullanici,
-		   kaynak_parola, kaynak_anahtar, tasima_modu, durum, toplam, ayarlar, baslatan, baslangic)
-		 VALUES (?,?,?,?,?,?,?, 'calisiyor', ?, ?, ?, NOW())`,
+		   kaynak_parola, kaynak_anahtar, tasima_modu, durum, toplam, ayarlar, baslatan,
+		   sahip_rid, baslatan_uid)
+		 VALUES (?,?,?,?,?,?,?, 'kuyrukta', ?, ?, ?, ?, NULLIF(?,0))`,
 		k.Tip, k.Host, k.Port, k.Kullanici, parolaSifreli, anahtarSifreli,
-		mod, len(gecerli), string(ayarJSON), aktor)
+		mod, len(gecerli), string(ayarJSON), kp.Kul, kp.RID, kp.UID)
 	if err != nil {
+		baslatMu.Unlock()
+		log.Printf("tasima: is kaydi olusturulamadi: %v", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "is kaydi olusturulamadi")
 		return
 	}
 	isID, _ := res.LastInsertId()
-
 	for _, hs := range gecerli {
-		_, _ = h.DB.Exec(
-			`INSERT INTO tasima_kalemleri (is_id, kaynak_hesap, alan_adi, durum)
-			 VALUES (?,?,?, 'bekliyor')`, isID, hs.KaynakHesap, hs.AlanAdi)
+		hj, _ := json.Marshal(hs)
+		if _, err := h.DB.ExecContext(ctx,
+			`INSERT INTO tasima_kalemleri (is_id, kaynak_hesap, alan_adi, durum, hesap_json)
+			 VALUES (?,?,?, 'bekliyor', ?)`, isID, hs.KaynakHesap, hs.AlanAdi, string(hj)); err != nil {
+			log.Printf("tasima: kalem yazilamadi (is=%d): %v", isID, err)
+		}
 	}
+	baslatMu.Unlock()
 
-	httpx.Denetim(h.DB, r, aktorUID, aktor, "tasima_baslat",
+	httpx.Denetim(h.DB, r, kp.UID, kp.Kul, "tasima_baslat",
 		fmt.Sprintf("%s@%s", k.Tip, k.Host),
-		fmt.Sprintf("%d site", len(gecerli)), 0, true)
+		fmt.Sprintf("%d site", len(gecerli)), kp.RID, true)
 
-	ctx, iptal := context.WithCancel(context.Background())
-	kilit.Lock()
-	aktifIsID, aktifIptal = isID, iptal
-	kilit.Unlock()
-	rezerveAktif = false // artik gercek is id tutuyor; defer birak() bosa dusmesin
-
-	go h.calistir(ctx, isID, k, gecerli, g.Ayarlar)
-
-	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(gecerli), "uretilen_kimlikler": uretilenKimlikler})
+	h.dagit()
+	durum := "kuyrukta"
+	_ = h.DB.QueryRowContext(ctx, `SELECT durum FROM tasima_isleri WHERE id=?`, isID).Scan(&durum)
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"is_id": isID, "toplam": len(gecerli), "durum": durum, "uretilen_kimlikler": uretilenKimlikler,
+	})
 }
 
-// calistir — is yurutucusu (goroutine).
-func (h *Handlers) calistir(ctx context.Context, isID int64, k *Kaynak, hesaplar []Hesap, ay Ayarlar) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("tasima: panik (is=%d): %v", isID, rec)
-			_, _ = h.DB.Exec(`UPDATE tasima_isleri SET durum='hata', hata=?, bitis=NOW() WHERE id=?`,
-				fmt.Sprintf("beklenmeyen hata: %v", rec), isID)
+// bayiPlanCoz — bayi işinin planı: istenen plan BaglanabilirMi'den geçmeli;
+// istenmediyse bayinin (yoksa genel) VARSAYILAN katalog planı. Plan bulunamazsa
+// ret: plansız hosting kaynak limitsiz açılır (kaynaklimit: plansız = sınırsız),
+// taşınan hesap bayinin plan/havuz sınırının dışına çıkmasın.
+func (h *Handlers) bayiPlanCoz(ctx context.Context, rid, planID int64) (int64, int, string) {
+	if planID > 0 {
+		if err := plans.BaglanabilirMi(ctx, h.DB, rid, planID, 0); err != nil {
+			return 0, http.StatusForbidden, err.Error()
 		}
-		kilit.Lock()
-		aktifIsID, aktifIptal = 0, nil
-		kilit.Unlock()
-		// Kimlik bilgilerini DB'den temizle — is bitti, artik gerekmiyor.
-		_, _ = h.DB.Exec(
-			`UPDATE tasima_isleri SET kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1 WHERE id=?`, isID)
-		k.Parola, k.Anahtar = "", ""
-	}()
-
-	_ = os.MkdirAll(logDizin, 0o750)
-	lf, err := os.OpenFile(logYolu(isID), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
-	if err != nil {
-		log.Printf("tasima: log acilamadi: %v", err)
+		return planID, 0, ""
 	}
-	yaz := func(f string, a ...any) {
-		satir := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(f, a...))
-		if lf != nil {
-			_, _ = lf.WriteString(satir)
-			_ = lf.Sync()
+	var defID int64
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT id FROM service_plans WHERE varsayilan=1 AND domain_id IS NULL AND reseller_id IN (?,0)
+		 ORDER BY reseller_id DESC, id LIMIT 1`, rid).Scan(&defID); err != nil || defID <= 0 {
+		return 0, http.StatusBadRequest, errBayiPlanGerekli.Error()
+	}
+	return defID, 0, ""
+}
+
+// bayiKalanDenetle — başlatmada ön denetim: bayi etkin mi, seçilen site sayısı
+// kalan hosting hakkını aşıyor mu? Kesin denetim her kalemde (kilit altında).
+func (h *Handlers) bayiKalanDenetle(ctx context.Context, rid int64, adet int) (int, string) {
+	var maxDomain int
+	var durum string
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT max_domain, status FROM users WHERE id=? AND role='reseller'`, rid).Scan(&maxDomain, &durum); err != nil {
+		return http.StatusForbidden, "yetkiniz yok"
+	}
+	if durum != "active" {
+		return http.StatusForbidden, "bayi hesabı askıda — taşıma başlatılamaz"
+	}
+	if maxDomain <= 0 {
+		return 0, ""
+	}
+	var mevcut int
+	if err := h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM domains WHERE reseller_id=?`, rid).Scan(&mevcut); err != nil {
+		return http.StatusInternalServerError, "kota okunamadı"
+	}
+	if kalan := maxDomain - mevcut; adet > kalan {
+		if kalan < 0 {
+			kalan = 0
 		}
+		return http.StatusForbidden, fmt.Sprintf("hosting hesabı limitiniz yetersiz: %d site seçildi, kalan hak %d (%d/%d)", adet, kalan, mevcut, maxDomain)
 	}
-	if lf != nil {
-		defer lf.Close()
-	}
-
-	yaz("Tasima basladi — kaynak %s (%s), %d site", k.Host, k.Tip, len(hesaplar))
-
-	var tamam, hata int
-	for i, hs := range hesaplar {
-		select {
-		case <-ctx.Done():
-			yaz("IPTAL EDILDI — kalan %d site atlandi", len(hesaplar)-i)
-			_, _ = h.DB.Exec(`UPDATE tasima_isleri SET durum='iptal', bitis=NOW() WHERE id=?`, isID)
-			return
-		default:
-		}
-
-		yaz("──────── [%d/%d] %s ────────", i+1, len(hesaplar), hs.AlanAdi)
-		_, _ = h.DB.Exec(
-			`UPDATE tasima_kalemleri SET durum='calisiyor', basladi=NOW() WHERE is_id=? AND alan_adi=?`,
-			isID, hs.AlanAdi)
-
-		sonuc, err := h.HesapAktar(ctx, k, hs, ay, Kapsam{}, yaz)
-		if err != nil && ctx.Err() != nil {
-			// Iptal son hesap sirasinda gelirse dongunun basindaki ctx kontrolune
-			// hic donulmez; is 'hata' olarak ve BOS mesajla kapaniyordu.
-			yaz("IPTAL EDILDI — %s yarida kesildi", hs.AlanAdi)
-			_, _ = h.DB.Exec(
-				`UPDATE tasima_kalemleri SET durum='atlandi', hata='kullanici iptal etti', bitti=NOW() WHERE is_id=? AND alan_adi=?`,
-				isID, hs.AlanAdi)
-			_, _ = h.DB.Exec(`UPDATE tasima_isleri SET durum='iptal', bitis=NOW() WHERE id=?`, isID)
-			return
-		}
-		if err != nil {
-			hata++
-			yaz("HATA: %s → %v", hs.AlanAdi, err)
-			_, _ = h.DB.Exec(
-				`UPDATE tasima_kalemleri SET durum='hata', hata=?, bitti=NOW() WHERE is_id=? AND alan_adi=?`,
-				kisalt(err.Error(), 500), isID, hs.AlanAdi)
-		} else {
-			tamam++
-			uy := ""
-			if len(sonuc.Uyarilar) > 0 {
-				uy = " | uyari: " + strings.Join(sonuc.Uyarilar, "; ")
-			}
-			yaz("TAMAM: %s (%.1f MB, %d DB, %d DNS)%s", hs.AlanAdi,
-				float64(sonuc.DosyaBayt)/(1024*1024), sonuc.DBSayisi, sonuc.DNSSayisi, uy)
-			_, _ = h.DB.Exec(
-				`UPDATE tasima_kalemleri SET durum='tamam', domain_id=?, dosya_bayt=?, db_sayisi=?,
-				   dns_sayisi=?, hata=NULLIF(?,''), bitti=NOW() WHERE is_id=? AND alan_adi=?`,
-				sonuc.DomainID, sonuc.DosyaBayt, sonuc.DBSayisi, sonuc.DNSSayisi,
-				strings.Join(sonuc.Uyarilar, "; "), isID, hs.AlanAdi)
-		}
-		_, _ = h.DB.Exec(`UPDATE tasima_isleri SET tamamlanan=?, basarisiz=? WHERE id=?`, tamam, hata, isID)
-	}
-
-	sonDurum := "tamam"
-	if hata > 0 && tamam == 0 {
-		sonDurum = "hata"
-	}
-	yaz("Tasima bitti — %d basarili, %d basarisiz", tamam, hata)
-	_, _ = h.DB.Exec(`UPDATE tasima_isleri SET durum=?, tamamlanan=?, basarisiz=?, bitis=NOW() WHERE id=?`,
-		sonDurum, tamam, hata, isID)
+	return 0, ""
 }
 
 // ---------------------------------------------------------------------------
 // Durum / liste / log / iptal
 // ---------------------------------------------------------------------------
 
-// Durum — GET /system/tasima  (son isler + aktif is)
+// isKapsami — işin sahibi (oturum satırları iş değildir). ok=false: yok.
+func (h *Handlers) isKapsami(ctx context.Context, isID int64) (int64, bool) {
+	var rid int64
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT sahip_rid FROM tasima_isleri WHERE id=? AND durum<>'oturum'`, isID).Scan(&rid); err != nil {
+		return 0, false
+	}
+	return rid, true
+}
+
+// isErisimi — URL'deki iş bu kapsamda mı? Değilse (yok ya da başkasının) false
+// ve AYNI 404 yazılmış olur.
+func (h *Handlers) isErisimi(w http.ResponseWriter, r *http.Request, kp Kapsam) (int64, bool) {
+	isID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || isID <= 0 {
+		isBulunamadi(w)
+		return 0, false
+	}
+	rid, ok := h.isKapsami(r.Context(), isID)
+	if !ok || (kp.Bayi() && rid != kp.RID) {
+		isBulunamadi(w)
+		return 0, false
+	}
+	return isID, true
+}
+
+// Durum — GET /tasima  (son isler + aktif is; bayide YALNIZ kendi isleri)
 func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.DB.Query(
-		`SELECT id, kaynak_tip, kaynak_host, tasima_modu, durum, toplam, tamamlanan, basarisiz,
-		        COALESCE(hata,''), COALESCE(baslatan,''), baslangic, bitis, olusturma
-		 FROM tasima_isleri WHERE durum <> 'oturum' ORDER BY id DESC LIMIT 25`)
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	q := `SELECT t.id, t.kaynak_tip, t.kaynak_host, t.tasima_modu, t.durum, t.toplam, t.tamamlanan, t.basarisiz,
+	        COALESCE(t.hata,''), COALESCE(t.baslatan,''), t.baslangic, t.bitis, t.olusturma, t.sahip_rid,
+	        COALESCE((SELECT u.username FROM users u WHERE u.id=t.sahip_rid AND t.sahip_rid>0),'')
+	      FROM tasima_isleri t WHERE t.durum <> 'oturum'`
+	var args []any
+	if kp.Bayi() {
+		q += ` AND t.sahip_rid=?`
+		args = append(args, kp.RID)
+	}
+	q += ` ORDER BY t.id DESC LIMIT 25`
+	rows, err := h.DB.QueryContext(r.Context(), q, args...)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "isler okunamadi")
 		return
@@ -486,30 +682,45 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		Baslangic  *time.Time `json:"baslangic"`
 		Bitis      *time.Time `json:"bitis"`
 		Olusturma  time.Time  `json:"olusturma"`
+		SahipRID   int64      `json:"sahip_rid,omitempty"`
+		Sahip      string     `json:"sahip,omitempty"`
 	}
 	out := []is{}
 	for rows.Next() {
 		var v is
 		if err := rows.Scan(&v.ID, &v.Tip, &v.Host, &v.Mod, &v.Durum, &v.Toplam,
-			&v.Tamamlanan, &v.Basarisiz, &v.Hata, &v.Baslatan, &v.Baslangic, &v.Bitis, &v.Olusturma); err != nil {
+			&v.Tamamlanan, &v.Basarisiz, &v.Hata, &v.Baslatan, &v.Baslangic, &v.Bitis, &v.Olusturma,
+			&v.SahipRID, &v.Sahip); err != nil {
 			continue
+		}
+		if kp.Bayi() {
+			v.SahipRID, v.Sahip = 0, ""
 		}
 		out = append(out, v)
 	}
 	kilit.Lock()
 	aktif := aktifIsID
 	kilit.Unlock()
+	// aktif_is yalnız KAPSAM İÇİNDEYSE: bayi başkasının (kökün) çalışan işini öğrenmez.
+	if aktif != 0 && kp.Bayi() {
+		if rid, ok := h.isKapsami(r.Context(), aktif); !ok || rid != kp.RID {
+			aktif = 0
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"isler": out, "aktif_is": aktif})
 }
 
-// Detay — GET /system/tasima/{id}
+// Detay — GET /tasima/{id}
 func (h *Handlers) Detay(w http.ResponseWriter, r *http.Request) {
-	isID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || isID <= 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "gecersiz is")
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
 		return
 	}
-	rows, err := h.DB.Query(
+	isID, ok := h.isErisimi(w, r, kp.Kapsam)
+	if !ok {
+		return
+	}
+	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT id, kaynak_hesap, alan_adi, durum, COALESCE(domain_id,0),
 		        dosya_bayt, db_sayisi, dns_sayisi, COALESCE(hata,''), basladi, bitti
 		 FROM tasima_kalemleri WHERE is_id=? ORDER BY id`, isID)
@@ -540,24 +751,27 @@ func (h *Handlers) Detay(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, v)
 	}
-	var durum string
+	var durum, hata string
 	var toplam, tamamlanan, basarisiz int
-	_ = h.DB.QueryRow(`SELECT durum, toplam, tamamlanan, basarisiz FROM tasima_isleri WHERE id=?`, isID).
-		Scan(&durum, &toplam, &tamamlanan, &basarisiz)
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT durum, toplam, tamamlanan, basarisiz, COALESCE(hata,'') FROM tasima_isleri WHERE id=?`, isID).
+		Scan(&durum, &toplam, &tamamlanan, &basarisiz, &hata)
 	kilit.Lock()
 	calisiyor := aktifIsID == isID
 	kilit.Unlock()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"kalemler": out, "durum": durum, "toplam": toplam,
+		"kalemler": out, "durum": durum, "toplam": toplam, "hata": hata,
 		"tamamlanan": tamamlanan, "basarisiz": basarisiz, "calisiyor": calisiyor,
 	})
 }
 
-// Log — GET /system/tasima/{id}/log
+// Log — GET /tasima/{id}/log
 func (h *Handlers) Log(w http.ResponseWriter, r *http.Request) {
-	isID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || isID <= 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "gecersiz is")
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	isID, ok := h.isErisimi(w, r, kp.Kapsam)
+	if !ok {
 		return
 	}
 	metin := dosyaSonu(logYolu(isID), 120<<10)
@@ -565,17 +779,20 @@ func (h *Handlers) Log(w http.ResponseWriter, r *http.Request) {
 	calisiyor := aktifIsID == isID
 	kilit.Unlock()
 	var durum string
-	_ = h.DB.QueryRow(`SELECT durum FROM tasima_isleri WHERE id=?`, isID).Scan(&durum)
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT durum FROM tasima_isleri WHERE id=?`, isID).Scan(&durum)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"log": metin, "calisiyor": calisiyor, "durum": durum,
 	})
 }
 
-// Iptal — POST /system/tasima/{id}/iptal
+// Iptal — POST /tasima/{id}/iptal  (çalışan iş durdurulur; sıradaki iş düşer)
 func (h *Handlers) Iptal(w http.ResponseWriter, r *http.Request) {
-	isID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || isID <= 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "gecersiz is")
+	kp, kod, msj := kapsamAl(r)
+	if !kapsamHatasi(w, kod, msj) {
+		return
+	}
+	isID, ok := h.isErisimi(w, r, kp.Kapsam)
+	if !ok {
 		return
 	}
 	kilit.Lock()
@@ -585,11 +802,24 @@ func (h *Handlers) Iptal(w http.ResponseWriter, r *http.Request) {
 	}
 	kilit.Unlock()
 	if !eslesti {
-		httpx.WriteError(w, http.StatusNotFound, "bu is calismiyor")
-		return
+		res, err := h.DB.ExecContext(r.Context(),
+			`UPDATE tasima_isleri SET durum='iptal', hata='kullanici iptal etti', bitis=NOW(),
+			   kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1
+			 WHERE id=? AND durum='kuyrukta'`, isID)
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "iptal edilemedi")
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			httpx.WriteError(w, http.StatusConflict, "bu iş çalışmıyor")
+			return
+		}
+		_, _ = h.DB.ExecContext(r.Context(),
+			`UPDATE tasima_kalemleri SET durum='atlandi', hata='kullanici iptal etti', bitti=NOW()
+			 WHERE is_id=? AND durum='bekliyor'`, isID)
 	}
-	httpx.Denetim(h.DB, r, 0, aktorAd(r), "tasima_iptal",
-		fmt.Sprintf("is=%d", isID), "", 0, true)
+	httpx.Denetim(h.DB, r, kp.UID, kp.Kul, "tasima_iptal",
+		fmt.Sprintf("is=%d", isID), "", kp.RID, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -598,23 +828,30 @@ func (h *Handlers) AcilistaTemizle() {
 	res, err := h.DB.Exec(
 		`UPDATE tasima_isleri SET durum='kesildi', hata='panel yeniden baslatildi', bitis=NOW()
 		 WHERE durum IN ('calisiyor','kesif')`)
-	if err != nil {
-		return
+	if err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("tasima: %d yarim kalan is 'kesildi' olarak isaretlendi", n)
+			_, _ = h.DB.Exec(
+				`UPDATE tasima_kalemleri SET durum='hata', hata='panel yeniden baslatildi', bitti=NOW()
+				 WHERE durum='calisiyor'`)
+		}
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("tasima: %d yarim kalan is 'kesildi' olarak isaretlendi", n)
-		_, _ = h.DB.Exec(
-			`UPDATE tasima_kalemleri SET durum='hata', hata='panel yeniden baslatildi', bitti=NOW()
-			 WHERE durum='calisiyor'`)
-	}
-	// Guvenlik: yarim kalan islerin kimlik bilgilerini de temizle.
+	h.kuyrukTemizle()
+	// Guvenlik: biten islerin kimlik bilgilerini de temizle.
 	_, _ = h.DB.Exec(
 		`UPDATE tasima_isleri SET kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1
 		 WHERE durum IN ('tamam','hata','iptal','kesildi') AND kimlik_temiz=0`)
 	// 🔴 Suresi dolan kaydedilmis oturumlari SIL (kimlik dahil). 'oturum' durumu
 	// yeniden baslatmayi ATLATIR (yukaridaki UPDATE onu OLDURMEZ); yalniz TTL siler.
 	_, _ = h.DB.Exec(`DELETE FROM tasima_isleri WHERE durum='oturum' AND gecerlilik IS NOT NULL AND gecerlilik < NOW()`)
+	// Sıradaki işler panel yeniden başlasa da sürer — açılış tamamlansın diye gecikmeli.
+	if acilisDagitGecikme > 0 {
+		time.AfterFunc(acilisDagitGecikme, h.dagit)
+	}
 }
+
+// acilisDagitGecikme — açılışta kuyruğun devralınmasından önceki bekleme (0 = yok).
+var acilisDagitGecikme = 20 * time.Second
 
 // dosyaSonu — dosyanin son n baytini guvenli okur (symlink/ozel dosya reddi).
 func dosyaSonu(yol string, n int64) string {
@@ -639,10 +876,4 @@ func dosyaSonu(yol string, n int64) string {
 		return ""
 	}
 	return string(buf[:okunan])
-}
-
-// aktorAd — denetim kaydi icin kullanici adi.
-func aktorAd(r *http.Request) string {
-	_, ad := middleware.Aktor(r)
-	return ad
 }

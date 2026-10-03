@@ -13,9 +13,16 @@ import { Button, Badge } from '@/components/ui'
 // süsleri, ayar kartları ve adım göstergesi içindir.
 import { I as IK } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import EmptyState from '@/components/EmptyState'
+import { TASIMA_TABAN, useTasimaKaynaklari, type TasimaKaynak } from '@/lib/tasima'
+import { useRol, yoneticiMi } from '@/lib/rol'
 
 /*
- * Site Taşıma — cPanel / Plesk / DirectAdmin'den bu panele uçtan uca aktarım.
+ * Site Taşıma — Plesk / GirginOSPanel / cPanel / DirectAdmin'den bu panele uçtan uca aktarım.
+ * Kök ve bayi aynı sayfayı kullanır; kaynak listesi sunucudaki kayıt defterinden gelir
+ * (lib/tasima.ts). Bayide: yalnız kökün açtığı kaynaklar, site yalnız bayinin kendi
+ * hesabına açılır (sahip/müşteri seçicileri, "sahipleri taşı" ve "mevcut siteyi ez" yok;
+ * /resellers ve /customers ÇAĞRILMAZ — sunucuda AdminOnly).
  * 3 adımlı sihirbaz:
  *   1) Sunucu bilgileri + kontrol paneli + bağlantı testi
  *   2) Site listesi (tekil/toplu) + sahiplik + aktarım ayarları
@@ -26,6 +33,8 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 type Hesap = {
   kaynak_hesap: string; alan_adi: string; web_root: string; php_surum: string
   dbler: string[] | null; boyut_mb: number; not: string; mevcut: boolean
+  // Yalnız bayi yanıtında: yeni | hesabinizda | kullanilamaz (+ neden)
+  durum?: string; neden?: string
 }
 type Kalem = {
   id: number; kaynak_hesap: string; alan_adi: string
@@ -35,22 +44,14 @@ type Kalem = {
 type Is = {
   id: number; tip: string; host: string; mod: string; durum: string
   toplam: number; tamamlanan: number; basarisiz: number; baslatan: string; olusturma: string
+  sahip_rid?: number; sahip?: string
 }
 type Plan = { id: number; ad: string }
 type Bayi = { id: number; kullanici: string; ad_soyad?: string }
 type Musteri = { id: number; ad: string }
 
-// UI'da yalniz UCTAN UCA DOGRULANMIS kaynaklar listelenir. cPanel/DA backend'de
-// hazir ama gercek sunucuda dogrulanmadigi icin gecici olarak kaldirildi —
-// "destekleniyor" demek, denenmis demek olmali.
-//
-// gpanel: kaynak da bir GirginOSPanel kurulumu. Kesif panelin KENDI
-// veritabanindan okunur (dosya/dizin tahmini yok); ozel docroot'lar
-// (`public_html/public`) korunur, alt alanlar ayri site olarak listelenir.
-const PANELLER = [
-  { deger: 'plesk', etiket: 'Plesk' },
-  { deger: 'gpanel', etiket: 'GirginOSPanel' },
-]
+// Kaynak türleri SABİT DEĞİL: GET /tasima/kaynaklar (kayıt defteri). Doğrulanmamış
+// kaynaklar (cPanel, DirectAdmin) "deneysel" rozetiyle ve yalnız kök açtıysa görünür.
 const PHP_SURUMLERI = ['', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
 
 
@@ -58,6 +59,28 @@ const STASIMA_EN: Record<string, string> = {
   "(seçtiğiniz panel ile uyuşmuyor!)": "(does not match the panel you selected!)",
   "Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir.": "Source reseller/customer accounts are created with their limits; each site is assigned to its own owner (Plesk and GirginOSPanel). Reseller passwords are shown when you start.",
   "Yeni taşıma": "New migration",
+  "Sırada": "Queued",
+  "Sırada — sunucu uygun olunca başlayacak. Bu sayfayı kapatabilirsiniz.": "Queued — it will start when the server is free. You can close this page.",
+  "Taşıma bu panelde etkin değil": "Migration is not enabled on this panel",
+  "Yöneticiniz site taşımayı açtığında buradan kullanabilirsiniz. Sorunuz varsa yöneticinize başvurun.": "You can use it here once your administrator enables site migration. Contact your administrator if you have questions.",
+  "Etkin taşıma kaynağı yok": "No migration source is enabled",
+  "Aşağıdaki “Taşıma kaynakları” kartından en az bir kaynağı açın.": "Enable at least one source in the “Migration sources” card below.",
+  "Taşıma kaynakları": "Migration sources",
+  "Hangi panellerden taşıma yapılabileceğini seçin. Açtığınız kaynak bayilerde de görünür (bayi taşıması açıksa).": "Choose which panels sites can be migrated from. A source you enable also appears for resellers (if reseller migration is on).",
+  "Bayiler kullanabilir": "Resellers can use it",
+  "Açıkken bayiler kendi hesaplarına taşıma yapabilir: yalnız genel IP'li kaynaklardan, kendi plan ve kotaları içinde.": "When on, resellers can migrate into their own accounts: only from public-IP sources, within their own plans and quotas.",
+  "Doğrulandı": "Verified",
+  "Deneysel": "Experimental",
+  "deneysel": "experimental",
+  "Gerçek sunucuda uçtan uca doğrulanmadı — önce küçük bir siteyle deneyin.": "Not verified end-to-end on a real server — try with a small site first.",
+  "Ayar kaydedilemedi": "Setting could not be saved",
+  "Kaynak sunucunuzdaki siteleri dosyaları, veritabanları, DNS ve SSL ile": "Move the sites on your source server — with files, databases, DNS and SSL —",
+  "Varsayılan plan": "Default plan",
+  "Hesabınızda var": "Already in your account",
+  "Kullanılamaz": "Unavailable",
+  "Siteler yalnız kendi hesabınıza açılır; plan ve kota sınırlarınız uygulanır. Kaynak sunucu internete açık (genel) bir IP adresinde olmalıdır.": "Sites are created in your own account only; your plan and quota limits apply. The source server must be on a public (internet-facing) IP address.",
+  "Sahip": "Owner",
+  "Ana hesap": "Main account",
   "Anahtar hazırlanıyor…": "Preparing key…",
   "Bayiler yüklenemedi": "Failed to load resellers",
   "Bağlantı testi başarısız": "Connection test failed",
@@ -171,7 +194,7 @@ function sure(sn: number) {
 }
 
 const DURUM_ETIKET: Record<string, string> = {
-  bekliyor: 'Bekliyor', calisiyor: 'Aktarılıyor', tamam: 'Tamamlandı',
+  bekliyor: 'Bekliyor', kuyrukta: 'Sırada', calisiyor: 'Aktarılıyor', tamam: 'Tamamlandı',
   hata: 'Hata', atlandi: 'Atlandı', iptal: 'İptal edildi', kesildi: 'Kesildi',
 }
 
@@ -211,7 +234,7 @@ function DurumRozet({ durum }: { durum: string }) {
   const stil =
     durum === 'tamam' ? 'border-emerald-200 text-emerald-700 bg-emerald-50 dark:border-emerald-800/60 dark:text-emerald-300 dark:bg-emerald-900/20'
     : durum === 'hata' ? 'border-red-200 text-red-700 bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:bg-red-900/20'
-    : durum === 'calisiyor' ? 'border-brand-200 text-brand-700 bg-brand-50 dark:border-brand-800/60 dark:text-brand-300 dark:bg-brand-900/20'
+    : durum === 'calisiyor' || durum === 'kuyrukta' ? 'border-brand-200 text-brand-700 bg-brand-50 dark:border-brand-800/60 dark:text-brand-300 dark:bg-brand-900/20'
     : 'border-slate-200 text-slate-600 bg-slate-50 dark:border-dark-600 dark:text-slate-300 dark:bg-dark-700'
   return (
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${stil}`}>
@@ -281,8 +304,13 @@ function kayitliKaynakOku(): KayitliKaynak {
 export default function SiteTasimaPage() {
   useTranslation() // dil re-render aboneligi
   const kk = kayitliKaynakOku()
+  // Rol: yönetici-yalnız öğeler (bayi/müşteri seçicileri, sahip taşıma, üzerine yazma,
+  // kaynak anahtarları) YALNIZ yöneticide çizilir/çağrılır. Asıl kapı sunucudadır.
+  const yonetici = yoneticiMi(useRol())
+  const { veri: kaynakVeri, yenile: kaynakYenile } = useTasimaKaynaklari(true)
+  const kullanilabilir: TasimaKaynak[] = (kaynakVeri?.kaynaklar || []).filter(k => k.etkin)
   // --- kaynak sunucu ---
-  const [tip, setTip] = useState('plesk')
+  const [tip, setTip] = useState(kk.tip || 'plesk')
   const [host, setHost] = useState(kk.host || '')
   const [port, setPort] = useState(kk.port || 22)
   const [kullanici, setKullanici] = useState(kk.kullanici || 'root')
@@ -302,7 +330,7 @@ export default function SiteTasimaPage() {
   const [kesifYuk, setKesifYuk] = useState(false)
   const [hesaplar, setHesaplar] = useState<Hesap[] | null>(null)
   const [secili, setSecili] = useState<Record<string, boolean>>({})
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const toast = useToast()
 
   // --- ayarlar ---
@@ -332,10 +360,27 @@ export default function SiteTasimaPage() {
   const [gecmis, setGecmis] = useState<Is[]>([])
   const [oturumID, setOturumID] = useState<number | null>(null)
   const [oturumlar, setOturumlar] = useState<Oturum[]>([])
-  const [kimlikSakli, setKimlikSakli] = useState(false)
+  const [, setKimlikSakli] = useState(false)
   const [retryAcik, setRetryAcik] = useState(false) // oturumdan geldiyse parola sunucuda saklı
+  const [sirada, setSirada] = useState(false) // iş kuyrukta (tek genel yuva doluyken)
+  const [ayarYuk, setAyarYuk] = useState('')
   const logRef = useRef<HTMLPreElement>(null)
   const basladiRef = useRef<number | null>(null) // ETA için başlangıç ms
+
+  // Seçili kaynak listede yoksa (kök kapattı / bayiye açık değil) ilk kullanılabilire geç.
+  const kullanilabilirKodlar = kullanilabilir.map(k => k.kod).join(',')
+  useEffect(() => {
+    const kodlar = kullanilabilirKodlar ? kullanilabilirKodlar.split(',') : []
+    if (kodlar.length && !kodlar.includes(tip)) setTip(kodlar[0])
+  }, [kullanilabilirKodlar, tip])
+  const seciliKaynak = kullanilabilir.find(k => k.kod === tip)
+  const postaVar = !!seciliKaynak?.yetenekler.posta
+  const sahiplerVar = yonetici && !!seciliKaynak?.yetenekler.sahipler
+  // Bayide yönetici-yalnız ayarlar her zaman kapalı gönderilir (sunucu da zorlar).
+  useEffect(() => {
+    if (!yonetici) { setUstune(false); setSahipleriTasi(false); setResellerID(0); setCustomerID(0) }
+  }, [yonetici])
+  useEffect(() => { if (!sahiplerVar) setSahipleriTasi(false) }, [sahiplerVar])
 
   const kaynakGovde = () => ({
     tip, host: host.trim(), port: Number(port) || 22, kullanici: kullanici.trim(),
@@ -347,7 +392,7 @@ export default function SiteTasimaPage() {
   useEffect(() => {
     let iptal = false
     if (kimlikTipi !== 'panel' || panelPub) return
-    api.get<{ pubkey: string; komut: string }>('/system/tasima/anahtar')
+    api.get<{ pubkey: string; komut: string }>(`${TASIMA_TABAN}/anahtar`)
       .then(r => { if (iptal) return; setPanelPub(r.data.pubkey || ''); setPanelKomut(r.data.komut || '') })
       .catch(() => { /* sessiz */ })
     return () => { iptal = true }
@@ -355,10 +400,12 @@ export default function SiteTasimaPage() {
 
   const durumYukle = useCallback(async () => {
     try {
-      const { data } = await api.get<{ isler: Is[]; aktif_is: number }>('/system/tasima')
+      const { data } = await api.get<{ isler: Is[]; aktif_is: number }>(TASIMA_TABAN)
       setGecmis(data.isler || [])
-      if (data.aktif_is) {
-        setIsID(data.aktif_is); setCalisiyor(true); setAdim(3)
+      // Çalışan iş (kapsam içi) ya da sırada bekleyen KENDİ işimiz → canlı izleme.
+      const acikIs = data.aktif_is || (data.isler || []).find(i => i.durum === 'kuyrukta' || i.durum === 'calisiyor')?.id
+      if (acikIs) {
+        setIsID(acikIs); setCalisiyor(true); setAdim(3)
         if (basladiRef.current === null) basladiRef.current = Date.now()
       }
     } catch { /* panel yeniden başlıyor olabilir */ }
@@ -370,7 +417,7 @@ export default function SiteTasimaPage() {
   // girmeden kaldığı yerden devam.
   const oturumlarYukle = useCallback(async () => {
     try {
-      const { data } = await api.get<{ oturumlar: Oturum[] }>('/system/tasima/oturumlar')
+      const { data } = await api.get<{ oturumlar: Oturum[] }>(`${TASIMA_TABAN}/oturumlar`)
       setOturumlar(data.oturumlar || [])
     } catch { /* yok say */ }
   }, [])
@@ -379,13 +426,13 @@ export default function SiteTasimaPage() {
   async function oturumaGeri(id: number) {
     setHata(null)
     try {
-      const { data } = await api.get<{ id: number; tip: string; host: string; port: number; kullanici: string; hesaplar: Hesap[]; secim: string[]; kimlik_sakli: boolean }>(`/system/tasima/oturum/${id}`)
+      const { data } = await api.get<{ id: number; tip: string; host: string; port: number; kullanici: string; hesaplar: Hesap[]; secim: string[]; kimlik_sakli: boolean }>(`${TASIMA_TABAN}/oturum/${id}`)
       setTip(data.tip); setHost(data.host); setPort(data.port); setKullanici(data.kullanici)
       const list = data.hesaplar || []
       setHesaplar(list)
       const s: Record<string, boolean> = {}
       if (data.secim && data.secim.length) data.secim.forEach(a => { s[a] = true })
-      else list.forEach(h => { s[h.alan_adi] = !h.mevcut })
+      else list.forEach(h => { s[h.alan_adi] = varsayilanSecim(h) })
       setSecili(s)
       setOturumID(data.id); setKimlikSakli(data.kimlik_sakli)
       try { localStorage.setItem(OTURUM_KEY, String(data.id)) } catch { /* */ }
@@ -397,7 +444,7 @@ export default function SiteTasimaPage() {
   }
 
   async function oturumSil(id: number) {
-    try { await api.delete(`/system/tasima/oturum/${id}`) } catch { /* */ }
+    try { await api.delete(`${TASIMA_TABAN}/oturum/${id}`) } catch { /* */ }
     if (oturumID === id) { setOturumID(null); setKimlikSakli(false); localStorage.removeItem(OTURUM_KEY) }
     oturumlarYukle()
   }
@@ -407,14 +454,18 @@ export default function SiteTasimaPage() {
     try { localStorage.setItem(KAYNAK_KEY, JSON.stringify({ tip, host, port, kullanici, kimlikTipi })) } catch { /* */ }
   }, [tip, host, port, kullanici, kimlikTipi])
 
-  // Plan + sahiplik hedefleri.
+  // Plan + sahiplik hedefleri. /resellers ve /customers YALNIZ yöneticide (AdminOnly
+  // uçlar; bayide çağrılmaz). Bayide plan varsayılanı 0 = "varsayılan plan" (sunucu
+  // bayinin varsayılan katalog planını çözer); kökte ilk plan seçili gelir.
   useEffect(() => {
     let iptal = false
-    api.get<Plan[]>('/plans').then(r => { if (iptal) return; const l = r.data || []; setPlanlar(l); if (l.length && !planID) setPlanID(l[0].id) }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
-    api.get<Bayi[]>('/resellers').then(r => { if (iptal) return; setBayiler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Bayiler yüklenemedi"))(e) })
-    api.get<Musteri[]>('/customers').then(r => { if (iptal) return; setMusteriler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Müşteriler yüklenemedi"))(e) })
+    api.get<Plan[]>('/plans').then(r => { if (iptal) return; const l = r.data || []; setPlanlar(l); if (yonetici && l.length) setPlanID(p => p || l[0].id) }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
+    if (yonetici) {
+      api.get<Bayi[]>('/resellers').then(r => { if (iptal) return; setBayiler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Bayiler yüklenemedi"))(e) })
+      api.get<Musteri[]>('/customers').then(r => { if (iptal) return; setMusteriler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Müşteriler yüklenemedi"))(e) })
+    }
     return () => { iptal = true }
-  }, [])
+  }, [yonetici])
 
   // Çalışan işi izle (2sn polling).
   useEffect(() => {
@@ -423,14 +474,17 @@ export default function SiteTasimaPage() {
     const tik = async () => {
       try {
         const [l, d] = await Promise.all([
-          api.get<{ log: string; calisiyor: boolean; durum: string }>(`/system/tasima/${isID}/log`),
-          api.get<{ kalemler: Kalem[]; durum: string; toplam: number; tamamlanan: number; basarisiz: number }>(`/system/tasima/${isID}`),
+          api.get<{ log: string; calisiyor: boolean; durum: string }>(`${TASIMA_TABAN}/${isID}/log`),
+          api.get<{ kalemler: Kalem[]; durum: string; toplam: number; tamamlanan: number; basarisiz: number }>(`${TASIMA_TABAN}/${isID}`),
         ])
         if (dur) return
         setLogMetin(l.data.log || '')
         setKalemler(d.data.kalemler || [])
         setOzet({ toplam: d.data.toplam, tamamlanan: d.data.tamamlanan, basarisiz: d.data.basarisiz, durum: d.data.durum })
-        if (!l.data.calisiyor) { setCalisiyor(false); durumYukle() }
+        // Sıradaki iş henüz yuvada değil (calisiyor=false) ama bitmedi: izlemeyi sürdür.
+        const kuyrukta = d.data.durum === 'kuyrukta'
+        setSirada(kuyrukta)
+        if (!l.data.calisiyor && !kuyrukta && d.data.durum !== 'calisiyor') { setCalisiyor(false); durumYukle() }
       } catch { /* geçici hata — yut */ }
     }
     tik()
@@ -444,7 +498,7 @@ export default function SiteTasimaPage() {
   async function baglantiTest() {
     setTestYuk(true); setHata(null); setTestSonuc(null)
     try {
-      const { data } = await api.post<{ sunucu_adi: string; tespit_edilen: string; uyusuyor: boolean }>('/system/tasima/test', kaynakGovde())
+      const { data } = await api.post<{ sunucu_adi: string; tespit_edilen: string; uyusuyor: boolean }>(`${TASIMA_TABAN}/test`, kaynakGovde())
       setTestSonuc(cevirT(cevir("Bağlantı başarılı — {0} · tespit edilen panel: {1}"), data.sunucu_adi || cevir('sunucu'), data.tespit_edilen || cevir('bilinmiyor')) + (data.uyusuyor ? '' : ' ' + cevir('(seçtiğiniz panel ile uyuşmuyor!)')))
     } catch (e) {
       const m = apiHata(e, cevir("Bağlantı testi başarısız"))
@@ -455,10 +509,10 @@ export default function SiteTasimaPage() {
   async function kesfet() {
     setKesifYuk(true); setHata(null); setHesaplar(null)
     try {
-      const { data } = await api.post<{ hesaplar: Hesap[]; oturum_id: number }>('/system/tasima/kesif', kaynakGovde())
+      const { data } = await api.post<{ hesaplar: Hesap[]; oturum_id: number }>(`${TASIMA_TABAN}/kesif`, kaynakGovde())
       const list = data.hesaplar || []
       setHesaplar(list)
-      const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = !h.mevcut }); setSecili(s)
+      const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = varsayilanSecim(h) }); setSecili(s)
       if (data.oturum_id) { setOturumID(data.oturum_id); setKimlikSakli(kimlikTipi === 'parola' ? !!parola : kimlikTipi === 'anahtar' ? !!anahtar : false); try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
       oturumlarYukle()
       if (!list.length) { setHata(cevir("Kaynak sunucuda taşınabilir site bulunamadı.")); toast.hata(cevir("Kaynak sunucuda taşınabilir site bulunamadı.")) }
@@ -470,18 +524,25 @@ export default function SiteTasimaPage() {
   }
 
   async function baslat() {
-    const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi])
+    const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi] && secilebilir(h))
     if (!secilenler.length) { setHata(cevir("En az bir site seçin.")); toast.hata(cevir("En az bir site seçin.")); return }
     setHata(null)
     try {
-      const { data } = await api.post<{ is_id: number; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>('/system/tasima/baslat', {
+      const { data } = await api.post<{ is_id: number; durum?: string; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>(`${TASIMA_TABAN}/baslat`, {
         ...kaynakGovde(),
         oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
         mod: secilenler.length === 1 ? 'tekil' : 'toplu',
-        ayarlar: { dosyalar, veritabani, dns, ssl, posta, ustune, hedef_php: hedefPHP, plan_id: planID, reseller_id: resellerID, customer_id: customerID, sahipleri_tasi: sahipleriTasi, hesaplar: [] },
+        // Bayide sahip/müşteri/üzerine yazma gönderilmez (sunucu da yok sayar).
+        ayarlar: {
+          dosyalar, veritabani, dns, ssl, posta: posta && postaVar, hedef_php: hedefPHP, plan_id: planID,
+          ustune: yonetici && ustune,
+          reseller_id: yonetici ? resellerID : 0, customer_id: yonetici ? customerID : 0,
+          sahipleri_tasi: sahiplerVar && sahipleriTasi, hesaplar: [],
+        },
         secilen: secilenler,
       })
       basladiRef.current = Date.now()
+      setSirada(data.durum === 'kuyrukta')
       setUretilenKimlikler(data.uretilen_kimlikler || [])
       setIsID(data.is_id); setCalisiyor(true); setLogMetin(''); setKalemler([]); setAdim(3)
     } catch (e) {
@@ -492,7 +553,7 @@ export default function SiteTasimaPage() {
 
   async function iptalEt() {
     if (!isID) return
-    try { await api.post(`/system/tasima/${isID}/iptal`, {}) } catch (e) {
+    try { await api.post(`${TASIMA_TABAN}/${isID}/iptal`, {}) } catch (e) {
       const m = apiHata(e, cevir("İptal edilemedi"))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     }
@@ -513,8 +574,26 @@ export default function SiteTasimaPage() {
     await baslat()
   }
 
-  const secilenSayi = (hesaplar || []).filter(h => secili[h.alan_adi]).length
-  const kilitli = calisiyor
+  // Bayide yalnız "yeni" (hesabında olmayan, ad-alanı uygun) siteler seçilebilir: üzerine
+  // yazma bayide kapalı (v1). Kökte eski davranış: panelde olmayanlar seçili gelir.
+  function secilebilir(h: Hesap) { return yonetici || !h.durum || h.durum === 'yeni' }
+  function varsayilanSecim(h: Hesap) { return yonetici ? !h.mevcut : (!h.durum || h.durum === 'yeni') }
+
+  // Kökün taşıma anahtarları (genel "bayiler kullanabilir" + kaynak başına).
+  async function bayiAnahtar(acik: boolean) {
+    setAyarYuk('bayi')
+    try { await api.put(`${TASIMA_TABAN}/ayar`, { bayi_acik: acik }); kaynakYenile() } catch (e) {
+      const m = apiHata(e, cevir("Ayar kaydedilemedi")); toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setAyarYuk('') }
+  }
+  async function kaynakAnahtar(kod: string, etkin: boolean) {
+    setAyarYuk(kod)
+    try { await api.put(`${TASIMA_TABAN}/kaynaklar/${encodeURIComponent(kod)}`, { etkin }); kaynakYenile() } catch (e) {
+      const m = apiHata(e, cevir("Ayar kaydedilemedi")); toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setAyarYuk('') }
+  }
+
+  const secilenSayi = (hesaplar || []).filter(h => secili[h.alan_adi] && secilebilir(h)).length
   const done = ozet.tamamlanan + ozet.basarisiz
   const yuzde = ozet.toplam > 0 ? Math.round((done / ozet.toplam) * 100) : 0
   const gecenSn = basladiRef.current ? (Date.now() - basladiRef.current) / 1000 : 0
@@ -522,15 +601,18 @@ export default function SiteTasimaPage() {
   const aktifKalem = kalemler.find(k => k.durum === 'calisiyor')
   const erisim = (n: number) => n === 1 || (n === 2 && !!(hesaplar && hesaplar.length)) || (n === 3 && !!isID)
 
+  // Ayar kartları kaynağın yeteneklerine ve role göre çizilir.
   const ayarlar: [string, boolean, (v: boolean) => void, string, string][] = [
     [cevir("Dosyalar"), dosyalar, setDosyalar, cevir("Web kök dizini rsync ile aktarılır"), I.files],
     [cevir("Veritabanları"), veritabani, setVeritabani, cevir("Dump alınır, aktarılır, ayarlar güncellenir"), I.db],
     [cevir("DNS kayıtları"), dns, setDns, cevir("Kaynak zone okunur, A kayıtları çevrilir"), I.dns],
     [cevir("SSL sertifikası"), ssl, setSsl, cevir("Let's Encrypt denenir"), I.ssl],
-    [cevir("Posta (kutular + mesajlar)"), posta, setPosta, cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail],
-    [cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir."), I.anahtarIkon],
-    [cevir("Mevcut siteyi ez"), ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez],
+    ...(postaVar ? [[cevir("Posta (kutular + mesajlar)"), posta, setPosta, cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail] as [string, boolean, (v: boolean) => void, string, string]] : []),
+    ...(sahiplerVar ? [[cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir."), I.anahtarIkon] as [string, boolean, (v: boolean) => void, string, string]] : []),
+    ...(yonetici ? [[cevir("Mevcut siteyi ez"), ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez] as [string, boolean, (v: boolean) => void, string, string]] : []),
   ]
+  // Kaynak listesi geldi ve kullanılabilir kaynak yok → bayide boş durum; kökte uyarı + anahtar kartı.
+  const kapali = kaynakVeri !== null && (!kaynakVeri.acik || kullanilabilir.length === 0)
 
   return (
     <div>
@@ -543,11 +625,29 @@ export default function SiteTasimaPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Site Taşıma")}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-          {cevir(cevir("Plesk sunucunuzdaki siteleri dosyaları, veritabanları, DNS ve SSL ile"))}
+          {cevir(cevir("Kaynak sunucunuzdaki siteleri dosyaları, veritabanları, DNS ve SSL ile"))}
           {cevir(cevir("birlikte 3 adımda bu panele aktarın. İşlem arka planda çalışır — bu sayfayı kapatabilirsiniz."))}
         </p>
       </div>
 
+      {kapali && !yonetici && (
+        <Kart>
+          <EmptyState baslik={cevir("Taşıma bu panelde etkin değil")}
+            aciklama={cevir("Yöneticiniz site taşımayı açtığında buradan kullanabilirsiniz. Sorunuz varsa yöneticinize başvurun.")} />
+        </Kart>
+      )}
+      {kapali && yonetici && (
+        <UyariKutusu ton="uyari" className="mb-5" baslik={cevir("Etkin taşıma kaynağı yok")}>
+          {cevir("Aşağıdaki “Taşıma kaynakları” kartından en az bir kaynağı açın.")}
+        </UyariKutusu>
+      )}
+      {!yonetici && !kapali && adim === 1 && (
+        <UyariKutusu ton="bilgi" className="mb-5" kucuk>
+          {cevir("Siteler yalnız kendi hesabınıza açılır; plan ve kota sınırlarınız uygulanır. Kaynak sunucu internete açık (genel) bir IP adresinde olmalıdır.")}
+        </UyariKutusu>
+      )}
+
+      {!(kapali && !yonetici) && <>
       <Stepper adim={adim} git={setAdim} erisim={erisim} />
 
       {/* Kaydedilmiş oturumlar — sunucu bilgilerini yeniden girmeden devam et */}
@@ -583,10 +683,13 @@ export default function SiteTasimaPage() {
                 <span className={labelCls}>{cevir("Kontrol paneli")}</span>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Ikon d={I.panel} /></span>
-                  <select value={tip} onChange={e => setTip(e.target.value)} className={inputCls + ' pl-9'}>
-                    {PANELLER.map(p => <option key={p.deger} value={p.deger}>{p.etiket}</option>)}
+                  <select value={tip} onChange={e => setTip(e.target.value)} className={inputCls + ' pl-9'} disabled={!kullanilabilir.length}>
+                    {kullanilabilir.map(p => <option key={p.kod} value={p.kod}>{p.etiket}{p.olgunluk === 'deneysel' ? ` (${cevir('deneysel')})` : ''}</option>)}
                   </select>
                 </div>
+                {seciliKaynak?.olgunluk === 'deneysel' && (
+                  <span className="mt-1 block text-[11px] text-amber-600 dark:text-amber-400">{cevir("Gerçek sunucuda uçtan uca doğrulanmadı — önce küçük bir siteyle deneyin.")}</span>
+                )}
               </label>
               <label className="block sm:col-span-2 lg:col-span-3">
                 <span className={labelCls}>{cevir("Sunucu adresi (IP veya host)")}</span>
@@ -673,16 +776,21 @@ export default function SiteTasimaPage() {
             )}
 
             <div className="mt-5 flex flex-wrap gap-2.5">
-              <Button type="button" variant="outlined" ikon={IK.yenile} onClick={baglantiTest} yukleniyor={testYuk} disabled={!host}>
+              <Button type="button" variant="outlined" ikon={IK.yenile} onClick={baglantiTest} yukleniyor={testYuk} disabled={!host || !seciliKaynak}>
                 {testYuk ? cevir('Test ediliyor…') : cevir("Bağlantıyı test et")}
               </Button>
-              <Button type="button" color="primary" ikon={IK.sunucu} ikonSonda={IK.ileri} onClick={kesfet} yukleniyor={kesifYuk} disabled={!host}>
+              <Button type="button" color="primary" ikon={IK.sunucu} ikonSonda={IK.ileri} onClick={kesfet} yukleniyor={kesifYuk} disabled={!host || !seciliKaynak}>
                 {kesifYuk ? cevir('Siteler taranıyor…') : cevir("Siteleri keşfet")}
               </Button>
             </div>
           </Kart>
 
-          {gecmis.length > 0 && <GecmisKart gecmis={gecmis} sec={(g) => { setIsID(g.id); setCalisiyor(g.durum === 'calisiyor'); if (basladiRef.current === null) basladiRef.current = Date.now(); setAdim(3) }} />}
+          {yonetici && kaynakVeri && (
+            <KaynakAnahtarKart veri={kaynakVeri.kaynaklar} bayiAcik={kaynakVeri.bayi_acik} yuk={ayarYuk}
+              bayiDegis={bayiAnahtar} kaynakDegis={kaynakAnahtar} />
+          )}
+
+          {gecmis.length > 0 && <GecmisKart gecmis={gecmis} sahipSutunu={yonetici} sec={(g) => { setIsID(g.id); setCalisiyor(g.durum === 'calisiyor' || g.durum === 'kuyrukta'); if (basladiRef.current === null) basladiRef.current = Date.now(); setAdim(3) }} />}
         </div>
       )}
 
@@ -710,12 +818,13 @@ export default function SiteTasimaPage() {
                 </thead>
                 <tbody className={T.govde}>
                   {hesaplar.map(h => {
-                    const sec = !!secili[h.alan_adi]
+                    const acik = secilebilir(h)
+                    const sec = acik && !!secili[h.alan_adi]
                     return (
-                      <tr key={`${h.kaynak_hesap}|${h.alan_adi}`} onClick={() => setSecili(s => ({ ...s, [h.alan_adi]: !sec }))}
-                        className={`${T.satir} cursor-pointer transition ${sec ? 'bg-brand-50/30 dark:bg-brand-900/10' : ''}`}>
+                      <tr key={`${h.kaynak_hesap}|${h.alan_adi}`} onClick={() => acik && setSecili(s => ({ ...s, [h.alan_adi]: !sec }))}
+                        className={`${T.satir} transition ${acik ? 'cursor-pointer' : 'opacity-60'} ${sec ? 'bg-brand-50/30 dark:bg-brand-900/10' : ''}`}>
                         <td className={T.hucre} data-etiket={cevir("Seç")}>
-                          <input type="checkbox" checked={sec} onClick={e => e.stopPropagation()} onChange={e => setSecili(s => ({ ...s, [h.alan_adi]: e.target.checked }))}
+                          <input type="checkbox" checked={sec} disabled={!acik} onClick={e => e.stopPropagation()} onChange={e => setSecili(s => ({ ...s, [h.alan_adi]: e.target.checked }))}
                             className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-brand-500/30 dark:border-slate-600 dark:bg-dark-700" />
                         </td>
                         <td className={T.hucreBaslik} data-etiket={cevir("Alan adı")}>
@@ -727,9 +836,14 @@ export default function SiteTasimaPage() {
                         <td className={T.hucre} data-etiket={cevir("Boyut")}>{mb(h.boyut_mb)}</td>
                         <td className={T.hucre} data-etiket={cevir("Veritabanı")}>{h.dbler?.length || 0}</td>
                         <td className={T.hucre} data-etiket={cevir("Durum")}>
-                          {h.mevcut
-                            ? <Badge color="warning" variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Panelde var")}</Badge>
-                            : <Badge variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Yeni")}</Badge>}
+                          {!yonetici && h.durum === 'kullanilamaz'
+                            ? <Badge color="error" variant="soft" className="px-2 py-0.5 text-[11px] font-medium" title={h.neden}>{cevir("Kullanılamaz")}</Badge>
+                            : !yonetici && h.durum === 'hesabinizda'
+                              ? <Badge color="warning" variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Hesabınızda var")}</Badge>
+                              : h.mevcut
+                                ? <Badge color="warning" variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Panelde var")}</Badge>
+                                : <Badge variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Yeni")}</Badge>}
+                          {!yonetici && h.durum === 'kullanilamaz' && h.neden && <span className="mt-0.5 block text-[11px] text-slate-400">{h.neden}</span>}
                         </td>
                       </tr>
                     )
@@ -760,9 +874,9 @@ export default function SiteTasimaPage() {
                 </button>
               ))}
               <SelKart etiket={cevir("Hedef PHP")}><select value={hedefPHP} onChange={e => setHedefPHP(e.target.value)} className={selCls}>{PHP_SURUMLERI.map(v => <option key={v} value={v}>{v || cevir("Kaynaktakiyle aynı")}</option>)}</select></SelKart>
-              <SelKart etiket={cevir("Hosting planı")}><select value={planID} onChange={e => setPlanID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Plansız (limit yok)")}</option>{planlar.map(p => <option key={p.id} value={p.id}>{p.ad}</option>)}</select></SelKart>
-              <SelKart etiket={cevir("Bayi (sahip)")}><select value={resellerID} onChange={e => setResellerID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Ana hesap (admin)")}</option>{bayiler.map(b => <option key={b.id} value={b.id}>{b.ad_soyad ? `${b.ad_soyad} (${b.kullanici})` : b.kullanici}</option>)}</select></SelKart>
-              <SelKart etiket={cevir("Müşteri")}><select value={customerID} onChange={e => setCustomerID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Yok")}</option>{musteriler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}</select></SelKart>
+              <SelKart etiket={cevir("Hosting planı")}><select value={planID} onChange={e => setPlanID(Number(e.target.value))} className={selCls}><option value={0}>{yonetici ? cevir("Plansız (limit yok)") : cevir("Varsayılan plan")}</option>{planlar.map(p => <option key={p.id} value={p.id}>{p.ad}</option>)}</select></SelKart>
+              {yonetici && <SelKart etiket={cevir("Bayi (sahip)")}><select value={resellerID} onChange={e => setResellerID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Ana hesap (admin)")}</option>{bayiler.map(b => <option key={b.id} value={b.id}>{b.ad_soyad ? `${b.ad_soyad} (${b.kullanici})` : b.kullanici}</option>)}</select></SelKart>}
+              {yonetici && <SelKart etiket={cevir("Müşteri")}><select value={customerID} onChange={e => setCustomerID(Number(e.target.value))} className={selCls}><option value={0}>{cevir("Yok")}</option>{musteriler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}</select></SelKart>}
             </div>
 
             {ustune && (
@@ -815,7 +929,7 @@ export default function SiteTasimaPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Taşıma")} #{isID}</h2>
-                <DurumRozet durum={calisiyor ? 'calisiyor' : (ozet.durum || 'bekliyor')} />
+                <DurumRozet durum={sirada ? 'kuyrukta' : calisiyor ? 'calisiyor' : (ozet.durum || 'bekliyor')} />
               </div>
               {calisiyor
                 ? <Button type="button" color="error" variant="soft" boyut="sm" ikon={IK.durdur} onClick={iptalEt}>{cevir("Durdur")}</Button>
@@ -833,12 +947,14 @@ export default function SiteTasimaPage() {
                                 <RetrySecim etiket={cevir("SQL (Veritabanı)")} ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
                                 <RetrySecim etiket="DNS" ikon={I.dns} secili={dns} degis={() => setDns(v => !v)} />
                                 <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
-                                <RetrySecim etiket="Mail" ikon={I.mail} secili={posta} degis={() => setPosta(v => !v)} />
+                                <RetrySecim etiket="Mail" ikon={I.mail} secili={posta && postaVar} degis={() => setPosta(v => !v)} pasif={!postaVar} />
                               </div>
-                              <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-dark-600 dark:text-slate-400">
-                                <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />
-                                {cevir(cevir("Mevcut siteyi ez (üzerine yaz)"))}
-                              </label>
+                              {yonetici && (
+                                <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-600 dark:border-dark-600 dark:text-slate-400">
+                                  <input type="checkbox" checked={ustune} onChange={() => setUstune(v => !v)} className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600" />
+                                  {cevir(cevir("Mevcut siteyi ez (üzerine yaz)"))}
+                                </label>
+                              )}
                               <Button type="button" color="primary" boyut="sm" ikon={IK.tasi} onClick={() => { setRetryAcik(false); tekrarDene() }} className="mt-2 w-full">{cevir("Seçileni Taşı")}</Button>
                             </div>
                           </>
@@ -849,8 +965,14 @@ export default function SiteTasimaPage() {
                   </div>}
             </div>
 
+            {sirada && (
+              <UyariKutusu ton="bilgi" className="mt-4" kucuk>
+                {cevir("Sırada — sunucu uygun olunca başlayacak. Bu sayfayı kapatabilirsiniz.")}
+              </UyariKutusu>
+            )}
+
             {/* Canlı: hangi domain taşınıyor + ETA */}
-            {calisiyor && (
+            {calisiyor && !sirada && (
               <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-brand-200/60 bg-brand-50/50 px-4 py-3 dark:border-brand-800/40 dark:bg-brand-900/10">
                 <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                 <div className="min-w-0 flex-1">
@@ -915,9 +1037,49 @@ export default function SiteTasimaPage() {
             </pre>
           </Kart>
 
-          {gecmis.length > 0 && <GecmisKart gecmis={gecmis} sec={(g) => { setIsID(g.id); setCalisiyor(g.durum === 'calisiyor') }} />}
+          {gecmis.length > 0 && <GecmisKart gecmis={gecmis} sahipSutunu={yonetici} sec={(g) => { setIsID(g.id); setCalisiyor(g.durum === 'calisiyor' || g.durum === 'kuyrukta') }} />}
         </div>
       )}
+      </>}
+    </div>
+  )
+}
+
+// KaynakAnahtarKart — yalnız yönetici: "Bayiler kullanabilir" genel anahtarı ve kaynak
+// başına etkin anahtarı (olgunluk rozetiyle). Açılan kaynak bayilerde de görünür.
+function KaynakAnahtarKart({ veri, bayiAcik, yuk, bayiDegis, kaynakDegis }: {
+  veri: TasimaKaynak[]; bayiAcik: boolean; yuk: string
+  bayiDegis: (acik: boolean) => void; kaynakDegis: (kod: string, etkin: boolean) => void
+}) {
+  return (
+    <Kart>
+      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Taşıma kaynakları")}</h2>
+      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{cevir("Hangi panellerden taşıma yapılabileceğini seçin. Açtığınız kaynak bayilerde de görünür (bayi taşıması açıksa).")}</p>
+      <div className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200/70 dark:divide-dark-600 dark:border-dark-600/60">
+        <AnahtarSatir etiket={cevir("Bayiler kullanabilir")} aciklama={cevir("Açıkken bayiler kendi hesaplarına taşıma yapabilir: yalnız genel IP'li kaynaklardan, kendi plan ve kotaları içinde.")}
+          acik={bayiAcik} yukleniyor={yuk === 'bayi'} degis={() => bayiDegis(!bayiAcik)} />
+        {veri.map(k => (
+          <AnahtarSatir key={k.kod} etiket={k.etiket} acik={k.etkin} yukleniyor={yuk === k.kod} degis={() => kaynakDegis(k.kod, !k.etkin)}
+            rozet={<Badge color={k.olgunluk === 'dogrulandi' ? 'success' : 'warning'} variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{k.olgunluk === 'dogrulandi' ? cevir("Doğrulandı") : cevir("Deneysel")}</Badge>} />
+        ))}
+      </div>
+    </Kart>
+  )
+}
+
+function AnahtarSatir({ etiket, aciklama, rozet, acik, yukleniyor, degis }: {
+  etiket: string; aciklama?: string; rozet?: ReactNode; acik: boolean; yukleniyor: boolean; degis: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-800 dark:text-slate-100">{etiket}{rozet}</div>
+        {aciklama && <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{aciklama}</p>}
+      </div>
+      <button type="button" role="switch" aria-checked={acik} aria-label={etiket} disabled={yukleniyor} onClick={degis}
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:opacity-60 ${acik ? 'bg-brand-600 dark:bg-brand-500' : 'bg-slate-300 dark:bg-dark-500'}`}>
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-5' : 'translate-x-0.5'}`} />
+      </button>
     </div>
   )
 }
@@ -931,14 +1093,14 @@ function SelKart({ etiket, children }: { etiket: string; children: ReactNode }) 
   )
 }
 
-function GecmisKart({ gecmis, sec }: { gecmis: Is[]; sec: (g: Is) => void }) {
+function GecmisKart({ gecmis, sec, sahipSutunu }: { gecmis: Is[]; sec: (g: Is) => void; sahipSutunu?: boolean }) {
   return (
     <Kart>
       <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Geçmiş taşımalar")}</h2>
       <div className="mt-4 overflow-x-auto">
         <table className={T.tablo}>
           <thead className={T.baslikGrubu}>
-            <tr><th className={T.baslik}>#</th><th className={T.baslik}>{cevir("Kaynak")}</th><th className={T.baslik}>Panel</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Sonuç")}</th><th className={T.baslik}>{cevir("Başlatan")}</th></tr>
+            <tr><th className={T.baslik}>#</th><th className={T.baslik}>{cevir("Kaynak")}</th><th className={T.baslik}>Panel</th><th className={T.baslik}>{cevir("Durum")}</th><th className={T.baslik}>{cevir("Sonuç")}</th>{sahipSutunu && <th className={T.baslik}>{cevir("Sahip")}</th>}<th className={T.baslik}>{cevir("Başlatan")}</th></tr>
           </thead>
           <tbody className={T.govde}>
             {gecmis.map(g => (
@@ -948,6 +1110,7 @@ function GecmisKart({ gecmis, sec }: { gecmis: Is[]; sec: (g: Is) => void }) {
                 <td className={T.hucre} data-etiket="Panel">{g.tip}</td>
                 <td className={T.hucre} data-etiket={cevir("Durum")}><DurumRozet durum={g.durum} /></td>
                 <td className={T.hucre} data-etiket={cevir("Sonuç")}>{g.tamamlanan}/{g.toplam}{g.basarisiz ? ` (${g.basarisiz} ${cevir("hata")})` : ''}</td>
+                {sahipSutunu && <td className={T.hucre} data-etiket={cevir("Sahip")}>{g.sahip || cevir("Ana hesap")}</td>}
                 <td className={T.hucre} data-etiket={cevir("Başlatan")}>{g.baslatan || '—'}</td>
               </tr>
             ))}

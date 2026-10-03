@@ -108,10 +108,10 @@ func TestGpanelSahipCozumleme(t *testing.T) {
 
 // Panel tipi allowlist'i gpanel'i kabul etmeli.
 func TestGpanelGecerliTip(t *testing.T) {
-	if !gecerliTipler["gpanel"] {
+	if _, ok := surucuBul("gpanel"); !ok {
 		t.Error("gpanel gecerli panel tipi olmali")
 	}
-	if gecerliTipler["bilinmiyor"] {
+	if _, ok := surucuBul("bilinmiyor"); ok {
 		t.Error("bilinmeyen tip kabul EDILMEMELI")
 	}
 }

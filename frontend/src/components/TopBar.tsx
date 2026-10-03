@@ -41,7 +41,7 @@ const SAYFALAR: SayfaTanim[] = [
   { etiket: 'Güvenlik Duvarı', yol: '/firewall', anahtar: ['firewall', 'güvenlik', 'guvenlik', 'security', 'iptables', 'ban', 'duvar', 'kara liste', 'ip engel'] },
   { etiket: 'WordPress', yol: '/wordpress', anahtar: ['wordpress', 'wp', 'toolkit', 'wp toolkit'] },
   { etiket: 'İzleme', yol: '/izleme', anahtar: ['izleme', 'monitoring', 'monitor', 'metrik', 'cpu', 'ram', 'yük', 'load', 'kaynak'] },
-  { etiket: 'Site Taşıma', yol: '/araclar/tasima', anahtar: ['taşıma', 'tasima', 'migration', 'transfer', 'göç', 'goc', 'cpanel', 'plesk', 'directadmin', 'aktar', 'import'] },
+  { etiket: 'Site Taşıma', yol: '/araclar/tasima', roller: ['admin', 'reseller'], anahtar: ['taşıma', 'tasima', 'migration', 'transfer', 'göç', 'goc', 'cpanel', 'plesk', 'directadmin', 'aktar', 'import'] },
   { etiket: 'Sunucu Optimize', yol: '/araclar/optimize', anahtar: ['optimize', 'optimizasyon', 'hızlandır', 'hizlandir', 'performans', 'performance', 'temizlik'] },
   { etiket: 'Eklentiler', yol: '/eklentiler', anahtar: ['eklenti', 'plugin', 'addon', 'marketplace', 'eklentiler'] },
   { etiket: 'Araçlar ve Ayarlar', yol: '/araclar-ayarlar', anahtar: ['araç', 'arac', 'ayar', 'tool', 'araçlar', 'ayarlar'] },

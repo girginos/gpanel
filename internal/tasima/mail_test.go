@@ -338,7 +338,7 @@ func TestMailAktarGuvenilmezKaynak(t *testing.T) {
 		adlar := "info\nOK.User+etiket\nmevcut\ndolu\nbag\n" + strings.Join(kotuAdlar, "\n") + "\n"
 		k, pk := postaKaynak(adlar, "info@"+alan+" gizliparola1\nok.user+etiket@"+alan+" gizliparola2\n")
 
-		n, uyar, err := h.mailAktar(ctx, k, alan, gunluk)
+		n, uyar, err := h.mailAktar(ctx, k, Hesap{AlanAdi: alan}, gunluk)
 		if err != nil {
 			t.Fatalf("mailAktar: %v", err)
 		}
@@ -446,7 +446,7 @@ func TestMailAktarGuvenilmezKaynak(t *testing.T) {
 	t.Run("kok-domain-admin", func(t *testing.T) {
 		const alan = "kokdomain.test" // ta_db: reseller_id=0, plan yok
 		k, pk := postaKaynak("info\n", "")
-		n, _, err := h.mailAktar(ctx, k, alan, gunluk)
+		n, _, err := h.mailAktar(ctx, k, Hesap{AlanAdi: alan}, gunluk)
 		if err != nil || n != 1 || len(pk.rsyncler) != 1 {
 			t.Fatalf("n=%d rsync=%d err=%v", n, len(pk.rsyncler), err)
 		}

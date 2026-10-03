@@ -12,9 +12,18 @@ import (
 	"girginospanel/internal/domains"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kaynaklimit"
+	bayikilit "girginospanel/internal/kilit"
 	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 )
+
+// kotaDenetle — bayi hosting kotası (domains.resellerKotaKontrol; testler değiştirir).
+var kotaDenetle = domains.TasimaKotaKontrol
+
+// diskHavuzuDenetle — bayi fiili disk havuzu (testler değiştirir).
+var diskHavuzuDenetle func(h *Handlers, ctx context.Context, rid, domainID, bayt int64) error
+
+func init() { diskHavuzuDenetle = (*Handlers).bayiDiskHavuzu }
 
 // saglama / saglamaGeriAl / limitUygula: sistem hesabı + vhost kurulumu ve plan
 // limitleri (systemd slice, kiracı FPM) — testler değiştirir; ret ve geri alma
@@ -160,6 +169,34 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 		if err := domains.AdAlaniDenetle(ctx, h.DB, alanAdi, resellerID); err != nil {
 			return nil, fmt.Errorf("ad alanı: %w", err)
 		}
+		// 🔴 PLANSIZ BAYİ SİTESİ YOK: plansız hosting kaynak limitsiz açılır
+		// (kaynaklimit: plansız = sınırsız slice). Baslat planı çözer (istenen ya da
+		// varsayılan katalog); burası savunma derinliği. Sağlamadan ÖNCE.
+		if kapsam.Bayi() && ay.PlanID <= 0 {
+			return nil, errBayiPlanGerekli
+		}
+		// 🔴 BAYİ KOTASI + TOCTOU: kota okuması ile domains INSERT'i arasında bayi
+		// kilidi TUTULUR (domains.Create ile aynı kilit/kural: max_domain, fiili disk,
+		// taahhüt, askı). Kilit INSERT'ten hemen sonra bırakılır — rsync/dump boyunca
+		// TUTULMAZ (askı/plan/silme işlemleri aynı kilidi bekler). Kota dolu ya da
+		// bayi askıdaysa kalem 'atlandi' olur (kotaHatasi).
+		kotaBirak := func() {}
+		if kapsam.Bayi() {
+			bk := bayikilit.Bayi(kapsam.RID)
+			bk.Lock()
+			birakildi := false
+			kotaBirak = func() {
+				if !birakildi {
+					birakildi = true
+					bk.Unlock()
+				}
+			}
+			defer kotaBirak()
+			pid := ay.PlanID
+			if err := kotaDenetle(ctx, h.DB, kapsam.RID, &pid); err != nil {
+				return nil, &kotaHatasi{mesaj: err.Error()}
+			}
+		}
 		istenen := php
 		php = kuruluPHPSec(php)
 		if php != istenen {
@@ -198,6 +235,7 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 			return nil, fmt.Errorf("domain kaydi: %w", err)
 		}
 		sonuc.DomainID, _ = res.LastInsertId()
+		kotaBirak() // satır yazıldı: sonraki kota okumaları bu siteyi sayar
 
 		limCtx, limIptal := context.WithTimeout(context.Background(), 5*time.Minute)
 		if err := limitUygula(limCtx, h.DB, sonuc.DomainID); err != nil {
@@ -231,6 +269,13 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 	if err := h.dosyalariAktar(ctx, k, hs, ay, sk, webRoot, alanAdi, sonuc, log); err != nil {
 		return nil, err
 	}
+	// 🔴 BAYİ DİSK HAVUZU (fiili): taşınan dosyalar bayinin toplam disk hakkını
+	// aşıyorsa yeni açılan site geri alınır (kalem 'atlandi').
+	if kapsam.Bayi() && yeniOlusturuldu {
+		if err := diskHavuzuDenetle(h, ctx, kapsam.RID, sonuc.DomainID, sonuc.DosyaBayt); err != nil {
+			return nil, err
+		}
+	}
 
 	// --- 3. Veritabanlari --------------------------------------------------
 	// 🔴 YEDEK KEŞIF: Kesif DB listesini boş bıraktıysa (ek/alt alan adı — DB'ler
@@ -241,6 +286,13 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 		if bulunan := configtenDBBul(webRoot); len(bulunan) > 0 {
 			log("kesif DB bulmadi; yapilandirmadan %d DB adi cikarildi: %v", len(bulunan), bulunan)
 			hs.DBler = bulunan
+		}
+	}
+	// 🔴 BAYİ PLAN DB LİMİTİ: kaynaktaki DB sayısı planın max_db'sini aşıyorsa site
+	// açılmaz (geri alınır) — yarım DB'li site yayına alınmaz, limit aşılmaz.
+	if kapsam.Bayi() && ay.Veritabani && len(hs.DBler) > 0 {
+		if err := h.bayiDBKotasi(ctx, sonuc.DomainID, len(hs.DBler)); err != nil {
+			return nil, err
 		}
 	}
 	if ay.Veritabani && len(hs.DBler) > 0 {
@@ -276,7 +328,7 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 		// varsa aynen taşınır → DNS geçişini beklemeden HTTPS hazır. Kaynak cert
 		// yok/geçersizse Let's Encrypt'e düşülür (regresyon yok — eski davranış).
 		log("SSL: kaynak sertifikasi okunuyor…")
-		if cp, kp, gercek, err := h.sslAktar(ctx, k, alanAdi, sk, php); err == nil && cp != "" {
+		if cp, kp, gercek, err := h.sslAktar(ctx, k, hs, alanAdi, sk, php); err == nil && cp != "" {
 			_, _ = h.DB.ExecContext(ctx,
 				`UPDATE domains SET ssl_aktif=1, ssl_kaynak='imported', cert_path=?, key_path=? WHERE id=?`,
 				cp, kp, sonuc.DomainID)
@@ -315,7 +367,9 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 	// --- 6. Posta (kutular + mail verisi) ----------------------------------
 	if ay.Posta {
 		log("Posta: kaynak kutulari kesfediliyor…")
-		n, uyar, err := h.mailAktar(ctx, k, alanAdi, log)
+		hsPosta := hs
+		hsPosta.AlanAdi = alanAdi
+		n, uyar, err := h.mailAktar(ctx, k, hsPosta, log)
 		sonuc.Uyarilar = append(sonuc.Uyarilar, uyar...)
 		if err != nil {
 			log("Posta: taşınamadı (%s)", kisalt(temizHata(err.Error(), k.Parola), 120))
@@ -340,10 +394,23 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 // sslAktar — KAYNAK'tan domainin çalışan cert+key'ini okuyup DOĞRULAYIP kurar.
 // Başarılı: (certPath, keyPath, gercekCA, nil). Kaynakta cert yoksa: ("","",false,nil)
 // → çağıran Let's Encrypt'e düşer. Doğrulama/kurulum hatası: err döner → yine LE.
-func (h *Handlers) sslAktar(ctx context.Context, k *Kaynak, alanAdi, sk, php string) (string, string, bool, error) {
-	certPEM, keyPEM, err := kaynakCertOku(ctx, k, alanAdi)
-	if err != nil {
-		return "", "", false, err
+func (h *Handlers) sslAktar(ctx context.Context, k *Kaynak, hs Hesap, alanAdi, sk, php string) (string, string, bool, error) {
+	// Kaynağa özel depo önce (cPanel apache_tls, DA kullanıcı dizini — Apache
+	// tabanlı kaynaklarda nginx vhost'u yoktur); boşsa ortak nginx taraması.
+	var certPEM, keyPEM string
+	if s, ok := surucuBul(k.Tip); ok && s.sertifikaOku != nil {
+		hsC := hs
+		hsC.AlanAdi = alanAdi
+		if c, kk, err := s.sertifikaOku(ctx, k, hsC); err == nil {
+			certPEM, keyPEM = c, kk
+		}
+	}
+	if certPEM == "" || keyPEM == "" {
+		var err error
+		certPEM, keyPEM, err = kaynakCertOku(ctx, k, alanAdi)
+		if err != nil {
+			return "", "", false, err
+		}
 	}
 	if certPEM == "" || keyPEM == "" {
 		return "", "", false, nil
@@ -400,6 +467,49 @@ func kesitAl(s, bas, son string) string {
 		return ""
 	}
 	return s[i : i+j]
+}
+
+// bayiDiskHavuzu — bayinin öteki sitelerinin fiili kullanımı + taşınan bayt
+// max_disk_mb'yi aşıyor mu? 0 = sınırsız. Metin yalnız bayinin kendi sayıları.
+func (h *Handlers) bayiDiskHavuzu(ctx context.Context, rid, domainID, bayt int64) error {
+	var maxMB int64
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT max_disk_mb FROM users WHERE id=? AND role='reseller'`, rid).Scan(&maxMB); err != nil {
+		return &kotaHatasi{mesaj: "bayi kaydı bulunamadı"}
+	}
+	if maxMB <= 0 {
+		return nil
+	}
+	var digerKB int64
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(boyut_kb),0) FROM domains WHERE reseller_id=? AND id<>?`, rid, domainID).Scan(&digerKB); err != nil {
+		return &kotaHatasi{mesaj: "disk kullanımı okunamadı"}
+	}
+	tasinanMB := (bayt + (1<<20 - 1)) >> 20
+	if digerKB/1024+tasinanMB > maxMB {
+		return &kotaHatasi{mesaj: fmt.Sprintf("disk kotanız yetersiz: taşınan site %d MB, mevcut kullanım %d MB, limit %d MB — site geri alındı",
+			tasinanMB, digerKB/1024, maxMB)}
+	}
+	return nil
+}
+
+// bayiDBKotasi — domainin planı (max_db, 0 = sınırsız) adet yeni DB'yi kaldırır mı?
+func (h *Handlers) bayiDBKotasi(ctx context.Context, domainID int64, adet int) error {
+	var maks int
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(p.max_db,0) FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.id=?`,
+		domainID).Scan(&maks); err != nil {
+		return &kotaHatasi{mesaj: "plan limitleri okunamadı"}
+	}
+	if maks <= 0 {
+		return nil
+	}
+	var mevcut int
+	_ = h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_accounts WHERE domain_id=?`, domainID).Scan(&mevcut)
+	if mevcut+adet > maks {
+		return &kotaHatasi{mesaj: fmt.Sprintf("planın veritabanı limiti yetersiz: kaynakta %d veritabanı, plan en çok %d — site geri alındı", adet, maks)}
+	}
+	return nil
 }
 
 // sahiplikDogrula — taşınan sitenin atanacağı bayi/müşteri gerçekten var mı?
