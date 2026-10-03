@@ -11,7 +11,7 @@ import (
 
 // apiAnahtarRotalari: API anahtarı yönetim uçları (D4). RequireAuth grubunun
 // İÇİNDE çağrılır. Yönetim uçları yalnız etkileşimli oturuma açıktır
-// (YalnizOturum: bir anahtar anahtar üretemez/döndüremez/iptal edemez); izin
+// (YalnizOturum: bir anahtar anahtar üretemez/döndüremez/iptal edemez/silemez); izin
 // tablosu da bunları KimlikUclari'nda tutar (çift kilit).
 func apiAnahtarRotalari(r chi.Router, d *sql.DB) {
 	h := &uc.Handlers{DB: d}
@@ -20,7 +20,8 @@ func apiAnahtarRotalari(r chi.Router, d *sql.DB) {
 	yonetim.Get("/api-anahtarlari/izin-gruplari", h.Katalog)
 	yonetim.Post("/api-anahtarlari", h.Olustur)
 	yonetim.Post("/api-anahtarlari/{id}/yenile", h.Yenile)
-	yonetim.Delete("/api-anahtarlari/{id}", h.Iptal)
+	yonetim.Post("/api-anahtarlari/{id}/iptal", h.Iptal)
+	yonetim.Delete("/api-anahtarlari/{id}", h.Sil) // kalıcı silme (etkinse onay_ad)
 	// Yalnız anahtarla (JWT → 404).
 	r.With(middleware.AdminVeyaReseller).Get("/api-anahtari/ben", h.Ben)
 }

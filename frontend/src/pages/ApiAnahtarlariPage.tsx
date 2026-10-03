@@ -1,5 +1,5 @@
 // API Anahtarları (D4) — kök ve bayi. Kök: kendi anahtarları + bayi anahtarları
-// (yalnız listeleme/iptal). Bayi: yalnız kendi anahtarları (kapsam sunucuda).
+// (listeleme/iptal/silme). Bayi: yalnız kendi anahtarları (kapsam sunucuda).
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -11,7 +11,7 @@ import { useDialog } from '@/components/Dialog'
 import { apiHata } from '@/lib/api'
 import { useRol, yoneticiMi } from '@/lib/rol'
 import {
-  anahtarIptal, anahtarKatalog, anahtarListe,
+  anahtarIptal, anahtarKatalog, anahtarListe, anahtarSil,
   type ApiAnahtari, type Katalog, type TekKezYanit,
 } from '@/lib/apiAnahtar'
 import AnahtarOlusturModal from '@/components/apianahtar/AnahtarOlusturModal'
@@ -25,6 +25,7 @@ function DurumRozeti({ k }: { k: ApiAnahtari }) {
   switch (k.durum) {
     case 'etkin': return <Badge color="success" variant="soft">{cevir('Etkin')}</Badge>
     case 'gecis': return <Badge color="warning" variant="soft">{cevir('Geçiş süresinde')}</Badge>
+    case 'askida': return <Badge color="warning" variant="soft" title={cevir('Bayi askıdan alınınca anahtar kendiliğinden yeniden çalışır.')}>{cevir('Askıda (bayi askıya alındı)')}</Badge>
     case 'suresi_doldu': return <Badge variant="soft">{cevir('Süresi doldu')}</Badge>
     default: return <Badge color="error" variant="soft">{k.iptal_yonetim ? cevir('İptal edildi (yönetim)') : cevir('İptal edildi')}</Badge>
   }
@@ -61,6 +62,7 @@ export default function ApiAnahtarlariPage() {
   const [yenileHedef, setYenileHedef] = useState<ApiAnahtari | null>(null)
   const [tekKez, setTekKez] = useState<TekKezYanit | null>(null)
   const [iptalEdilen, setIptalEdilen] = useState<number | null>(null)
+  const [silinen, setSilinen] = useState<number | null>(null)
 
   const yukle = useCallback(async () => {
     setYukleniyor(true); setHata(null)
@@ -80,7 +82,7 @@ export default function ApiAnahtarlariPage() {
     const ok = await dialog.onay({
       baslik: cevir('Anahtar iptal edilsin mi?'),
       mesaj: cevirT('"{0}" anahtarı hemen geçersiz olur; onu kullanan entegrasyonlar çalışmayı bırakır. Bu işlem geri alınamaz.', k.ad),
-      ton: 'tehlike', onayEtiketi: cevir('İptal et'), iptalEtiketi: cevir('Vazgeç'), onayIkonu: I.cop,
+      ton: 'tehlike', onayEtiketi: cevir('İptal et'), iptalEtiketi: cevir('Vazgeç'), onayIkonu: I.kapat,
     })
     if (!ok) return
     setIptalEdilen(k.id)
@@ -95,6 +97,39 @@ export default function ApiAnahtarlariPage() {
     }
   }
 
+  // Kalıcı silme. Etkin (geçiş/askıda dahil) anahtar: adını yazarak tek adımda
+  // "iptal et ve sil"; iptal edilmiş/süresi dolmuş: düz onay.
+  const sil = async (k: ApiAnahtari) => {
+    let onayAd: string | undefined
+    if (etkin(k)) {
+      const girilen = await dialog.sor({
+        baslik: cevir('Anahtar iptal edilip silinsin mi?'),
+        mesaj: cevirT('"{0}" anahtarı hâlâ etkin. Silinince hemen geçersiz olur ve listeden kalkar; denetim geçmişi korunur. Onaylamak için anahtarın adını yazın.', k.ad),
+        yerTutucu: k.ad, ton: 'tehlike', onayEtiketi: cevir('İptal et ve sil'), iptalEtiketi: cevir('Vazgeç'), onayIkonu: I.cop,
+      })
+      if (girilen === null) return
+      if (girilen.trim() !== k.ad) { toast.hata(cevir('İşlem başarısız'), cevir('Yazılan ad anahtarın adıyla eşleşmiyor.')); return }
+      onayAd = girilen.trim()
+    } else {
+      const ok = await dialog.onay({
+        baslik: cevir('Anahtar kalıcı olarak silinsin mi?'),
+        mesaj: cevirT('"{0}" anahtarının kaydı listeden kalıcı olarak silinir; denetim geçmişi korunur. Bu işlem geri alınamaz.', k.ad),
+        ton: 'tehlike', onayEtiketi: cevir('Sil'), iptalEtiketi: cevir('Vazgeç'), onayIkonu: I.cop,
+      })
+      if (!ok) return
+    }
+    setSilinen(k.id)
+    try {
+      await anahtarSil(k.id, onayAd)
+      toast.basari(cevir('Anahtar silindi'), k.ad)
+      await yukle()
+    } catch (e) {
+      toast.hata(cevir('İşlem başarısız'), apiHata(e))
+    } finally {
+      setSilinen(null)
+    }
+  }
+
   const tekKezGoster = (y: TekKezYanit) => {
     setOlusturAcik(false); setYenileHedef(null)
     setTekKez(y)
@@ -102,7 +137,10 @@ export default function ApiAnahtarlariPage() {
   }
 
   const kendi = sekme === 'benim'
-  const etkin = (k: ApiAnahtari) => k.durum === 'etkin' || k.durum === 'gecis'
+  // etkin: anahtar kaydı geçerli (askıdaki bayinin anahtarı da — iptal edilebilir,
+  // silmek için ad onayı ister).
+  const etkin = (k: ApiAnahtari) => k.durum === 'etkin' || k.durum === 'gecis' || k.durum === 'askida'
+  const soluk = (k: ApiAnahtari) => k.durum === 'suresi_doldu' || k.durum === 'iptal'
   const taban = typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : '/api/v1'
 
   const eylemler = (k: ApiAnahtari) => (
@@ -111,8 +149,9 @@ export default function ApiAnahtarlariPage() {
         <Button boyut="sm" variant="outlined" ikon={I.yenile} onClick={() => setYenileHedef(k)}>{cevir('Döndür')}</Button>
       )}
       {etkin(k) && (
-        <Button boyut="sm" variant="outlined" color="error" ikon={I.cop} yukleniyor={iptalEdilen === k.id} onClick={() => void iptalEt(k)}>{cevir('İptal et')}</Button>
+        <Button boyut="sm" variant="outlined" color="error" ikon={I.kapat} yukleniyor={iptalEdilen === k.id} onClick={() => void iptalEt(k)}>{cevir('İptal et')}</Button>
       )}
+      <Button boyut="sm" variant="outlined" color="error" ikon={I.cop} yukleniyor={silinen === k.id} onClick={() => void sil(k)} title={cevir('Kalıcı olarak sil')} aria-label={cevirT('{0} anahtarını sil', k.ad)}>{cevir('Sil')}</Button>
     </div>
   )
 
@@ -173,7 +212,7 @@ export default function ApiAnahtarlariPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                 {liste.map((k) => (
-                  <tr key={k.id} className={etkin(k) ? '' : 'opacity-60'}>
+                  <tr key={k.id} className={soluk(k) ? 'opacity-60' : ''}>
                     <td className="px-4 py-3 align-top">
                       <div className="font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
                       <div className="font-mono text-xs text-slate-500 dark:text-dark-300">{k.gosterim}</div>
@@ -197,7 +236,7 @@ export default function ApiAnahtarlariPage() {
           {/* Mobil/tablet: kartlar */}
           <div className="space-y-3 lg:hidden">
             {liste.map((k) => (
-              <div key={k.id} className={'rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800 ' + (etkin(k) ? '' : 'opacity-60')}>
+              <div key={k.id} className={'rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800 ' + (soluk(k) ? 'opacity-60' : '')}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
@@ -239,7 +278,7 @@ export default function ApiAnahtarlariPage() {
         </div>
         <UyariKutusu ton="bilgi" kucuk className="mt-4">
           {cevir('Anahtar giriş, parola/2FA değişikliği, müşteri adına oturum, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez.')}
-          {' '}{cevir('Bayi parolası sıfırlandığında, bayi askıya alındığında ya da silindiğinde o bayinin tüm anahtarları iptal edilir.')}
+          {' '}{cevir('Bayi parolası sıfırlandığında ya da bayi silindiğinde o bayinin tüm anahtarları iptal edilir. Bayi askıya alındığında anahtarları iptal edilmez, askıda kalır; bayi askıdan alınınca yeniden çalışır.')}
         </UyariKutusu>
       </section>
 

@@ -10,7 +10,8 @@ import (
 )
 
 // bayiAnahtarlariniIptal: bayinin TÜM geçerli API anahtarlarını iptal eder
-// (parola sıfırlama / askı / silme — kullanıcı kararı 2026-10-03). Asıl işlemi
+// (parola sıfırlama / silme — kullanıcı kararı 2026-10-03; askı İPTAL ETMEZ,
+// anahtar askıda kalır — bkz. middleware/anahtar.go). Asıl işlemi
 // bozmaz; sonuç denetime yazılır (iptal edilemediyse ok=0 — operatör görsün).
 func bayiAnahtarlariniIptal(r *http.Request, db *sql.DB, bayiID, eden int64, kul, bayiAd, neden string) {
 	n, err := apianahtar.SahibinTumunuIptal(r.Context(), db, bayiID, eden, neden)

@@ -67,6 +67,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"api_anahtar.olustur":              {TR: "API anahtarı oluşturuldu", EN: "API key created"},
 	"api_anahtar.yenile":               {TR: "API anahtarı yenilendi", EN: "API key rotated"},
 	"api_anahtar.iptal":                {TR: "API anahtarı iptal edildi", EN: "API key revoked"},
+	"api_anahtar.sil":                  {TR: "API anahtarı silindi", EN: "API key deleted"},
 	"api_anahtar.toplu_iptal":          {TR: "Bayinin API anahtarları iptal edildi", EN: "Reseller API keys revoked"},
 	"api_anahtar.red":                  {TR: "API anahtarı reddedildi", EN: "API key rejected"},
 	"api_anahtar.yeniden_dogrulama":    {TR: "API anahtarı için kimlik doğrulandı", EN: "Re-authenticated for API key"},

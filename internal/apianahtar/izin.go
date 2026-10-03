@@ -172,6 +172,7 @@ var KimlikUclari = map[string]bool{
 	"GET " + p + "/api-anahtarlari/izin-gruplari":                            true,
 	"POST " + p + "/api-anahtarlari":                                         true,
 	"POST " + p + "/api-anahtarlari/{id}/yenile":                             true,
+	"POST " + p + "/api-anahtarlari/{id}/iptal":                              true,
 	"DELETE " + p + "/api-anahtarlari/{id}":                                  true,
 	"PUT " + p + "/domains/{id}/ssh/anahtar":                                 true,
 	"POST " + p + "/domains/{id}/wordpress/kullanici-parola":                 true,

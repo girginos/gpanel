@@ -306,7 +306,7 @@ func TestAnahtarHesapVeRolTutarliligi(t *testing.T) {
 	silinmis := s.akEkle(t, apianahtar.RolBayi, 9, []string{"hesap:oku"}, nil, func(k *apianahtar.Kayit) { k.SahipUyeRol = ""; k.SahipDurum = "" })
 	ridsiz := s.akEkle(t, apianahtar.RolBayi, 0, []string{"hesap:oku"}, nil, nil)
 	w := akIstek(h, "GET", "/api/v1/domains", askida)
-	if w.Code != 403 || !strings.Contains(w.Body.String(), "hesap_askida") {
+	if w.Code != 403 || !strings.Contains(w.Body.String(), `"kod":"bayi_askida"`) {
 		t.Errorf("askıdaki bayi: %d %s", w.Code, w.Body)
 	}
 	for ad, tok := range map[string]string{"rol değişti": rolDegisti, "uid≠1 kök": sahteKok, "silinmiş sahip": silinmis, "rid=0 bayi": ridsiz} {
