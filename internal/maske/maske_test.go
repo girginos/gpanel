@@ -164,6 +164,7 @@ func TestKisiselVeri_TumSecenekler(t *testing.T) {
 		{"[2001:db8:abcd:12::5]:443", "[2001:db8:abcd::]:443"},
 		{"tam 2001:0db8:85a3:0042:1000:8a2e:0370:7334 son", "tam 2001:db8:85a3:: son"},
 		{"lo ::1 ve ::", "lo ::1 ve ::"},
+		{"tam loopback 0:0:0:0:0:0:0:1 son", "tam loopback 0:0:0:0:0:0:0:1 son"},
 		{"eşlemeli ::ffff:203.0.113.7", "eşlemeli ::ffff:203.0.113.0"},
 		{"saat 12:34:56 MAC 52:54:00:12:34:56 A::B WP_Foo::$bar Db::fetch", "saat 12:34:56 MAC 52:54:00:12:34:56 A::B WP_Foo::$bar Db::fetch"},
 		{"gönderen ali.veli@ornek.com.tr alıcı x@y.io", "gönderen a***@ornek.com.tr alıcı x***@y.io"},
@@ -201,12 +202,13 @@ func TestKart_LuhnVeYanlisPozitif(t *testing.T) {
 		}
 	}
 	dokunma := []string{
-		"4111111111111112",     // Luhn geçersiz
-		"1234567812345670",     // Luhn geçerli ama kart öneki değil (1)
-		"1696000000000",        // ms zaman damgası
-		"41111111111111111111", // 20 hane
-		"411111111111",         // 12 hane
-		"x4111111111111111",    // sözcük içinde
+		"4111111111111112",      // Luhn geçersiz
+		"1234567812345670",      // Luhn geçerli ama kart öneki değil (1)
+		"1696000000000",         // ms zaman damgası
+		"41111111111111111111",  // 20 hane
+		"411111111111",          // 12 hane
+		"x4111111111111111",     // sözcük içinde
+		"3 1234 5678 1234 5670", // içteki Luhn geçerli aralık kart önekiyle başlamıyor (1…)
 	}
 	for _, k := range dokunma {
 		if got := MaskeleSatir("k " + k + " s"); got != "k "+k+" s" {
