@@ -130,15 +130,17 @@ func TestHesapAktarBayiKapsam_SahipKapsamdan(t *testing.T) {
 		t.Errorf("bayi 9'un domaini değişti: n=%d err=%v", n, err)
 	}
 
-	// (B) Bayinin KENDİ (7) alt adı → serbest; sağlamaya ulaşır (INSERT şemada düşer).
+	// (B) Bayinin KENDİ (7) alt adı → ad-alanı SERBEST; sonraki kapı (D3a: bayide plan
+	// zorunlu, PlanID=0) sağlamadan önce durdurur. Ad-alanı kapsamdan değil gövdeden
+	// (9) hesaplansaydı burada ad-alanı reddi dönerdi → mutasyon yakalanır.
 	_, errB := h.HesapAktar(context.Background(), &Kaynak{},
 		Hesap{AlanAdi: "x.bayi7.test", PHPSurum: "8.3", SahipLogin: "srcuser"},
 		ay, Kapsam{RID: 7}, func(string, ...any) {})
-	if errB == nil {
-		t.Errorf("INSERT şemada düşmeli (web_backend yok) — hata beklenirdi")
+	if errB == nil || errB.Error() != errBayiPlanGerekli.Error() {
+		t.Errorf("kendi alt adı ad-alanından geçip plan kapısına varmalı, alınan: %v", errB)
 	}
-	if len(*saglanan) != 1 || *gercek != 0 {
-		t.Errorf("kendi alt adı sağlamaya bir kez ulaşmalı: sahte=%v gerçek=%d", *saglanan, *gercek)
+	if len(*saglanan) != 0 || *gercek != 0 {
+		t.Errorf("plansız bayi sitesi sağlamaya ulaşmamalı: sahte=%v gerçek=%d", *saglanan, *gercek)
 	}
 }
 
@@ -269,7 +271,7 @@ func TestHesapAktarBayiKapsam_SatirKendiBayisinde(t *testing.T) {
 	h, limit := h5_insertOrtam(t)
 	saglanan, _, gercek := ta_kalkan(t, nil)
 
-	ay := Ayarlar{ResellerID: 9, CustomerID: 5,
+	ay := Ayarlar{ResellerID: 9, CustomerID: 5, PlanID: 3,
 		SahipEsle: map[string]sahipHedef{"srcuser": {ResellerID: 9, CustomerID: 5}}}
 	sonuc, err := h.HesapAktar(context.Background(), &Kaynak{},
 		Hesap{AlanAdi: "yenisite.test", PHPSurum: "8.3", SahipLogin: "srcuser"},
@@ -372,7 +374,7 @@ func TestHesapAktarGeriAlma_SaglamaSonrasiHata(t *testing.T) {
 			}()
 			_, err = h.HesapAktar(context.Background(), &Kaynak{},
 				Hesap{AlanAdi: c.alan, PHPSurum: "8.3", WebRoot: "goreli/yol"},
-				Ayarlar{Dosyalar: true}, c.kapsam, func(string, ...any) {})
+				Ayarlar{Dosyalar: true, PlanID: 3}, c.kapsam, func(string, ...any) {})
 		}()
 		if err == nil || err.Error() != c.beklenen {
 			t.Errorf("%s: %q beklenirdi, alınan %v", c.alan, c.beklenen, err)

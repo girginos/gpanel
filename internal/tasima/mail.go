@@ -65,6 +65,9 @@ var mailRsyncHaric = []string{
 type mailHesap struct {
 	Yerel  string // e-postanın @ öncesi (mail_name)
 	Parola string // düz metin (mail_auth_view) — boşsa çağıran yeni üretir
+	// uzakYol — kutunun kaynaktaki maildir yolu (sonda "/"). Kaynak sürücüsü
+	// verir; YALNIZ ad kuralından (mailYerelGecerli) geçmiş yerel adla çağrılır.
+	uzakYol func(yerel string) string
 }
 
 // mailKimlik — eklentiye iletilen güvenilir kimlik başlıkları (eklenti.go Proxy
@@ -260,10 +263,17 @@ func dizinVeyaYok(yol string) error {
 
 // mailAktar — domainin kutularını + mail verisini kaynaktan taşır. Döndürür:
 // taşınan kutu sayısı, uyarılar, hata (yalnız kesif/eklenti erişim hatasında).
-func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log func(string, ...any)) (int, []string, error) {
+func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log func(string, ...any)) (int, []string, error) {
 	var uyarilar []string
+	alanAdi := hs0.AlanAdi
 
-	hesaplar, err := pleskMailKesfet(ctx, k, alanAdi)
+	// Kutu keşfi kaynak sürücüsünden (Plesk, cPanel, DirectAdmin). Posta yeteneği
+	// olmayan kaynak (ör. gPanel) adımı atlatır — kaynağa komut GİTMEZ.
+	s, ok := surucuBul(k.Tip)
+	if !ok || s.postaKesfet == nil {
+		return 0, []string{"Posta: bu kaynak türünden posta taşıma desteklenmiyor"}, nil
+	}
+	hesaplar, err := s.postaKesfet(ctx, k, hs0)
 	if err != nil {
 		return 0, nil, fmt.Errorf("kaynak posta kesfi: %w", err)
 	}
@@ -346,8 +356,16 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log
 			}
 		}
 
-		// Maildir verisini taşı: Plesk (qmail düzeni) → gPanel (dovecot maildir).
+		// Maildir verisini taşı: kaynak düzeni (Plesk qmail, cPanel ~/mail, DA
+		// ~/imap) → gPanel (dovecot maildir). Yol sürücüden, ad kuralından SONRA.
 		uzak := "/var/qmail/mailnames/" + alanAdi + "/" + hs.Yerel + "/Maildir/"
+		if hs.uzakYol != nil {
+			uzak = hs.uzakYol(hs.Yerel)
+		}
+		if !gecerliUzakYol(uzak) {
+			uyarilar = append(uyarilar, "Posta: "+email+" kaynak yolu geçersiz — atlandı")
+			continue
+		}
 		if err := os.MkdirAll(hedef, 0o700); err != nil {
 			uyarilar = append(uyarilar, "Posta: "+email+" hedef maildir hazırlanamadı")
 		} else if _, err := k.RsyncCek(ctx, uzak, hedef+"/", mailRsyncHaric...); err != nil {
@@ -398,7 +416,9 @@ func pleskMailKesfet(ctx context.Context, k *Kaynak, alanAdi string) ([]mailHesa
 
 	var out []mailHesap
 	for yerel := range yereller {
-		out = append(out, mailHesap{Yerel: yerel, Parola: parolalar[yerel]})
+		out = append(out, mailHesap{Yerel: yerel, Parola: parolalar[yerel], uzakYol: func(y string) string {
+			return "/var/qmail/mailnames/" + alanAdi + "/" + y + "/Maildir/"
+		}})
 	}
 	return out, nil
 }

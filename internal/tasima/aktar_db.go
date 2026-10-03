@@ -327,15 +327,11 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	// (kullanıcının gerçek Plesk'inde CANLI yakalandı). Panelin admin MySQL kimliğini
 	// kullan. 🔴 Parola $(cat/sed ...) ile ALINIR: `ps`'te parolanın KENDİSİ görünmez,
 	// yalnız onu okuyan komut görünür.
+	// Kimlik kaynak sürücüsünden (kaynak_kayit.go: Plesk .psa.shadow, DA mysql.conf).
 	kimlikOnek := ""
 	dumpKul := ""
-	switch k.Tip {
-	case "plesk":
-		kimlikOnek = `MYSQL_PWD="$(cat /etc/psa/.psa.shadow 2>/dev/null)" `
-		dumpKul = "-uadmin "
-	case "directadmin":
-		kimlikOnek = `MYSQL_PWD="$(sed -n 's/^passwd=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
-		dumpKul = `-u"$(sed -n 's/^user=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
+	if s, ok := surucuBul(k.Tip); ok {
+		kimlikOnek, dumpKul = s.dumpKimlikOnek, s.dumpKul
 	}
 	ic := kimlikOnek + "mysqldump " + dumpKul + "--single-transaction --quick --routines --triggers " +
 		"--no-tablespaces --default-character-set=utf8mb4 " + shQuote(kaynakDB) + " | gzip -c"

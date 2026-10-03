@@ -44,9 +44,24 @@ const tasimaHataGenel = "taşıma sırasında bir hata oluştu; ayrıntı sunucu
 // (fmt.Errorf %w) yalnız SABİT hata döner — sarmalayıcının bağlamı sızmaz.
 var bayiyeAcikHatalar = []error{
 	errBayiSandboxYok,
+	errBayiPlanGerekli,
+	errHedefIzinsiz,
+	errTasimaKapali,
+	errKaynakKapali,
 	plans.ErrPlanKapsamDisi,
 	plans.ErrOzelPlanBaskaHosting,
 }
+
+// errBayiPlanGerekli — bayi işinde plan çözülemedi (istenmedi, varsayılan katalog
+// planı da yok). Plansız hosting kaynak limitsiz açılırdı (kaynaklimit).
+var errBayiPlanGerekli = errors.New("taşınacak siteler için bir hosting planı seçin (varsayılan plan tanımlı değil)")
+
+// kotaHatasi — bayinin KENDİ kota/askı durumu (hosting adedi, disk havuzu, askı).
+// Metin yalnız bayinin kendi sayılarını içerir → bayiye aynen gösterilir; kalem
+// 'atlandi' işaretlenir (site açılmadı / geri alındı).
+type kotaHatasi struct{ mesaj string }
+
+func (e *kotaHatasi) Error() string { return e.mesaj }
 
 // hataMetni — bir taşıma hatasını KAPSAMA göre metne çevirir.
 //
@@ -65,6 +80,10 @@ func hataMetni(yonetici bool, err error) error {
 	var ah *domains.AdAlaniHatasi
 	if errors.As(err, &ah) {
 		return errors.New(ah.Mesaj(false))
+	}
+	var kh *kotaHatasi
+	if errors.As(err, &kh) {
+		return kh
 	}
 	for _, acik := range bayiyeAcikHatalar {
 		if errors.Is(err, acik) {

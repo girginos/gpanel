@@ -106,6 +106,11 @@ func ta_kalkan(t *testing.T, oncesi func()) (saglanan, geriAlinan *[]string, ger
 		}
 		return false, ""
 	})
+	// Bayi kota denetimi (domains.resellerKotaKontrol) bu şemada yok: kota testleri
+	// (kota_test.go) kendi sahtesini/şemasını kurar.
+	eskiK, eskiH := kotaDenetle, diskHavuzuDenetle
+	kotaDenetle = func(context.Context, *sql.DB, int64, *int64) error { return nil }
+	diskHavuzuDenetle = func(*Handlers, context.Context, int64, int64, int64) error { return nil }
 	eskiS, eskiG := saglama, saglamaGeriAl
 	saglama = func(alan, php string) (*provisioner.Result, error) {
 		s = append(s, alan)
@@ -120,6 +125,7 @@ func ta_kalkan(t *testing.T, oncesi func()) (saglanan, geriAlinan *[]string, ger
 	}
 	t.Cleanup(func() {
 		saglama, saglamaGeriAl = eskiS, eskiG
+		kotaDenetle, diskHavuzuDenetle = eskiK, eskiH
 		provisioner.SetYasakliKontrolu(nil)
 	})
 	return &s, &g, &n

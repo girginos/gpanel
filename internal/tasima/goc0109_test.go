@@ -129,16 +129,19 @@ func TestGoc0109_GpanelOturumuYazilir(t *testing.T) {
 	hesaplar := []Hesap{{AlanAdi: "ornek.test"}}
 	gunluk := g109Gunluk(t)
 
-	if id := h.oturumKaydet(g109Girdi, hesaplar); id != 0 {
+	if id := h.oturumKaydet(istekKapsami{}, g109Girdi, hesaplar); id != 0 {
 		t.Fatalf("0109 öncesi şemada gpanel oturumu yazıldı (id=%d) — taban canlıyı yansıtmıyor", id)
 	}
-	if g := gunluk.String(); !strings.Contains(g, "oturum kaydedilemedi") || !strings.Contains(g, "kaynak_tip") {
+	// D3a: oturum satırı kapsamla (sahip_rid, 0109) yazılır → 0109 öncesi şemada INSERT
+	// sahip_rid ya da kaynak_tip sütununa takılır; ikisi de günlükte görünmeli.
+	if g := gunluk.String(); !strings.Contains(g, "oturum kaydedilemedi") ||
+		!(strings.Contains(g, "kaynak_tip") || strings.Contains(g, "sahip_rid")) {
 		t.Errorf("oturumKaydet INSERT hatasını yuttu, günlükte iz yok: %q", g)
 	}
 
 	g109GocUygula(t, db, g109Goc)
 	gunluk.Reset()
-	id := h.oturumKaydet(g109Girdi, hesaplar)
+	id := h.oturumKaydet(istekKapsami{}, g109Girdi, hesaplar)
 	if id <= 0 {
 		t.Fatalf("0109 sonrası gpanel oturumu yazılamadı; günlük: %q", gunluk.String())
 	}
@@ -161,7 +164,7 @@ func TestGoc0109_GpanelOturumuYazilir(t *testing.T) {
 func TestOturumKaydet_HataGunlugeYazilir(t *testing.T) {
 	h := &Handlers{DB: g109DB(t)}
 	gunluk := g109Gunluk(t)
-	if id := h.oturumKaydet(g109Girdi, nil); id != 0 {
+	if id := h.oturumKaydet(istekKapsami{}, g109Girdi, nil); id != 0 {
 		t.Fatalf("tablo yokken id=%d döndü", id)
 	}
 	g := gunluk.String()

@@ -45,6 +45,11 @@ type Kaynak struct {
 	// kabuk — uzak çalıştırma dikişi (bkz. kabuk.go). nil → gerçek ssh/rsync;
 	// testler kaydedici sahte takar (ağa çıkılmaz).
 	kabuk uzakKabuk
+
+	// Kapsam (hedef.go hedefHazirla doldurur):
+	bayi       bool   // bayi işi: hata metinlerinde panel yolu gösterilmez
+	baglanIP   string // bayide doğrulanmış bağlantı IP'si (boş → Host)
+	knownHosts string // kiracıya özel known_hosts (boş → kökün eski dosyası)
 }
 
 // Ayarlar — tasima davranisi (JSON olarak tasima_isleri.ayarlar icinde).
@@ -94,8 +99,7 @@ var (
 	reDBAd = regexp.MustCompile(`^[A-Za-z0-9_$-]{1,64}$`)
 )
 
-// gpanel: kaynak da bir GirginOSPanel kurulumu (panelden panele tasima).
-var gecerliTipler = map[string]bool{"cpanel": true, "plesk": true, "directadmin": true, "gpanel": true}
+// Gecerli kaynak tipleri kayit defterinden gelir (kaynak_kayit.go).
 
 // Dogrula — Kaynak girdisini kabul etmeden once tam dogrular.
 // Bastaki '-' kontrolu ozellikle onemli: "-oProxyCommand=..." bir ssh BAYRAGIDIR.
@@ -122,7 +126,7 @@ func kendineMiCozuluyor(host string) bool {
 }
 
 func (k *Kaynak) Dogrula() error {
-	if !gecerliTipler[k.Tip] {
+	if _, ok := surucuBul(k.Tip); !ok {
 		return fmt.Errorf("gecersiz kaynak panel tipi")
 	}
 	h := strings.TrimSpace(k.Host)
@@ -189,12 +193,17 @@ func (k *Kaynak) sshOrtakArgs(anahtarDosya string) []string {
 		// Ilk baglantida host anahtarini kabul et ama SONRADAN degisirse reddet
 		// (MITM koruma). Tasima tek seferlik oldugu icin dogru denge.
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "UserKnownHostsFile=/root/.ssh/known_hosts_tasima",
+		"-o", "UserKnownHostsFile=" + k.knownHostsDosyasi(),
 		// Kaynak sunucunun bize komut/agent sizdirmasini engelle.
 		"-o", "ForwardAgent=no",
 		"-o", "ForwardX11=no",
 		"-o", "ClearAllForwardings=yes",
 		"-o", "PermitLocalCommand=no",
+	}
+	// Bayide bağlantı doğrulanmış IP'ye gider; host anahtarı yine girilen ADLA
+	// eşlenir (aynı adın farklı IP'leri tek kayıt; ad reHost'tan geçti, boşluk yok).
+	if k.baglanIP != "" {
+		a = append(a, "-o", "HostKeyAlias="+k.Host)
 	}
 	if anahtarDosya != "" {
 		// Anahtar yolu: interaktif prompt olmasin (hang engelle).
@@ -274,7 +283,7 @@ func (k *Kaynak) Calistir(ctx context.Context, uzakKomut string) (string, error)
 
 	args := k.sshOrtakArgs(anahtar)
 	// -l <kullanici> -- <host>: user@host ayristirmasi yok, host bayrak sanilamaz.
-	args = append(args, "-l", k.Kullanici, "--", k.Host, uzakKomut)
+	args = append(args, "-l", k.Kullanici, "--", k.sshHedefi(), uzakKomut)
 
 	var cmd *exec.Cmd
 	if anahtar == "" {
@@ -330,7 +339,7 @@ func (k *Kaynak) RsyncCek(ctx context.Context, uzakYol, yerelYol string, ekstra 
 	}
 	args = append(args, ekstra...)
 	// Kaynak: kullanici@host:yol — kullanici/host allowlist'ten gecti.
-	args = append(args, k.Kullanici+"@"+k.Host+":"+uzakYol, yerelYol)
+	args = append(args, k.Kullanici+"@"+k.rsyncHedefi()+":"+uzakYol, yerelYol)
 
 	var cmd *exec.Cmd
 	if anahtar == "" {
@@ -365,7 +374,7 @@ func (k *Kaynak) AkisCalistir(ctx context.Context, uzakKomut string, w io.Writer
 	defer temizle()
 
 	args := k.sshOrtakArgs(anahtar)
-	args = append(args, "-l", k.Kullanici, "--", k.Host, uzakKomut)
+	args = append(args, "-l", k.Kullanici, "--", k.sshHedefi(), uzakKomut)
 
 	var cmd *exec.Cmd
 	if anahtar == "" {
@@ -430,9 +439,16 @@ func (k *Kaynak) sshHataYorumla(stderr string) string {
 	case strings.Contains(low, "could not resolve") || strings.Contains(low, "name or service not known") || strings.Contains(low, "nodename nor servname"):
 		return fmt.Sprintf("Kaynak host adi cozulemedi ('%s'). Yazimi kontrol edin ya da dogrudan IP adresi girin.", k.Host)
 	case strings.Contains(low, "host key") && (strings.Contains(low, "changed") || strings.Contains(low, "verification failed")):
-		return "Kaynagin SSH host anahtari degismis gorunuyor (yeniden kurulum ya da guvenlik uyarisi). Kaynaga guveniyorsaniz /root/.ssh/known_hosts_tasima icindeki ilgili satiri silip tekrar deneyin."
+		if k.bayi {
+			// Panel dosya yolu bayiye verilmez; anahtar kaydını yönetici temizler.
+			return "Kaynagin SSH host anahtari degismis gorunuyor (yeniden kurulum ya da guvenlik uyarisi). Kaynaga guveniyorsaniz yoneticinize basvurun."
+		}
+		return "Kaynagin SSH host anahtari degismis gorunuyor (yeniden kurulum ya da guvenlik uyarisi). Kaynaga guveniyorsaniz " + k.knownHostsDosyasi() + " icindeki ilgili satiri silip tekrar deneyin."
 	}
-	// Taninmayan hata: ham (ama sir-maskeli + kisa).
+	// Taninmayan hata: ham (ama sir-maskeli + kisa). Bayide panel yollari maskelenir.
+	if k.bayi {
+		return kisalt(bayiSatirSuz(stderr, k.Parola), 300)
+	}
 	return kisalt(temizHata(stderr, k.Parola), 300)
 }
 

@@ -176,26 +176,34 @@ func zoneKaydiGecerli(alanAdi, tip, ad, deger string) bool {
 func kaynakZoneOku(ctx context.Context, k *Kaynak, alanAdi string) []zoneKayit {
 	q := shQuote(alanAdi)
 	var kayitlar []zoneKayit
+	s, _ := surucuBul(k.Tip)
 
 	// Plesk DNS'i zone DOSYASINDA degil kendi deposunda tutar → `plesk bin dns
-	// --info` ile cekilir (FQDN TYPE [pri] deger bicimi). cPanel/DA icin ham
-	// BIND zone dosyasi okunur.
-	if k.Tip == "plesk" {
-		if ham, err := k.Calistir(ctx, "plesk bin dns --info "+q+" 2>/dev/null"); err == nil {
-			kayitlar = pleskDNSAyristir(ham, alanAdi)
-		}
+	// --info` ile cekilir (FQDN TYPE [pri] deger bicimi; surucu dnsOnce). Diger
+	// kaynaklar icin ham BIND zone dosyasi okunur (surucuye ozel yol listesi ya da
+	// ortak liste).
+	if s != nil && s.dnsOnce != nil {
+		kayitlar = s.dnsOnce(ctx, k, alanAdi)
 	}
 	if len(kayitlar) == 0 {
-		komut := "cat /var/named/" + q + ".db 2>/dev/null || " +
-			"cat /var/named/run-root/var/named/" + q + ".db 2>/dev/null || " +
-			"cat /var/lib/named/var/named/" + q + ".db 2>/dev/null || " +
-			"cat /etc/bind/db." + q + " 2>/dev/null || " +
-			"cat /var/named/data/" + q + ".db 2>/dev/null"
+		komut := ortakZoneKomutu(q)
+		if s != nil && s.dnsKomutu != nil {
+			komut = s.dnsKomutu(q)
+		}
 		if ham, err := k.Calistir(ctx, komut); err == nil && strings.TrimSpace(ham) != "" {
 			kayitlar = zoneAyristir(ham, alanAdi)
 		}
 	}
 	return kayitlar
+}
+
+// ortakZoneKomutu — bilinen BIND zone dosyası yolları (q = shQuote(alan)).
+func ortakZoneKomutu(q string) string {
+	return "cat /var/named/" + q + ".db 2>/dev/null || " +
+		"cat /var/named/run-root/var/named/" + q + ".db 2>/dev/null || " +
+		"cat /var/lib/named/var/named/" + q + ".db 2>/dev/null || " +
+		"cat /etc/bind/db." + q + " 2>/dev/null || " +
+		"cat /var/named/data/" + q + ".db 2>/dev/null"
 }
 
 type zoneKayit struct {
