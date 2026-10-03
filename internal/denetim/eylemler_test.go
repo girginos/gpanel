@@ -77,6 +77,9 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 		// müşterinin kendi işlemi
 		[]any{int64(1), "2026-10-03 09:58:00", "musteri:999999038", int64(0), "", "5.6.7.8",
 			"yeni.bir_eylem", "musteri-alan.test", "", int64(1), int64(7), "girgin"},
+		// hostingi silinmiş müşterinin işlemi: alan adı çözülemez
+		[]any{int64(0), "2026-10-03 09:57:00", "musteri:888888017", int64(0), "", "5.6.7.8",
+			"auth.login", "", "", int64(1), int64(7), "girgin"},
 	)
 	sd.Satirlar("SELECT id, alan_adi FROM domains", []any{int64(999999038), "musteri-alan.test"})
 	sd.Satirlar("SELECT DISTINCT a.action", []any{"musteri.adina_kod"}, []any{"musteri.adina_cikis"})
@@ -87,14 +90,14 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatalf("200 beklenirdi: %d %s", rr.Code, rr.Body)
 	}
-	if strings.Contains(rr.Body.String(), "999999038") || strings.Contains(rr.Body.String(), "adına musteri") {
+	if b := rr.Body.String(); strings.Contains(b, "999999038") || strings.Contains(b, "888888017") || strings.Contains(b, "adına musteri") {
 		t.Fatalf("yanıtta ham müşteri kimliği / eski ek olmamalı: %s", rr.Body)
 	}
 	var y struct {
 		Kayitlar  []Kayit                `json:"kayitlar"`
 		Etiketler map[string]EylemEtiket `json:"etiketler"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &y); err != nil || len(y.Kayitlar) != 3 {
+	if err := json.Unmarshal(rr.Body.Bytes(), &y); err != nil || len(y.Kayitlar) != 4 {
 		t.Fatalf("yanıt çözülemedi: %v %s", err, rr.Body)
 	}
 	for i, k := range y.Kayitlar[:2] {
@@ -110,6 +113,9 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 	}
 	if m := y.Kayitlar[2]; m.Aktor != "musteri-alan.test" || m.AktorRol != "müşteri" || m.Adina {
 		t.Errorf("müşteri kaydı alan adıyla gösterilmeli: %+v", m)
+	}
+	if m := y.Kayitlar[3]; m.Aktor != "" || m.AktorRol != "müşteri" {
+		t.Errorf("hostingi silinmiş müşteri kaydında ham kimlik yerine boş aktör (ön yüz \"Müşteri\") beklenir: %+v", m)
 	}
 	for kod, bek := range map[string]string{
 		"musteri.adina_cikis": "Müşteri panelinden çıkıldı",
