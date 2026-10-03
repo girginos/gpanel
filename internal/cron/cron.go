@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -508,12 +509,11 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "runuser", "-u", sk, "--", "/bin/sh", "-c", komut)
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/home/" + sk,
+	out, runErr := kiraciCronCalistir(ctx, sk, komut)
+	if errors.Is(runErr, kiraci.ErrKomut) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kiracı kullanıcısı")
+		return
 	}
-	out, runErr := cmd.CombinedOutput()
 	cikti := string(out)
 	if len(cikti) > 8192 {
 		cikti = "…(kısaltıldı)\n" + cikti[len(cikti)-8192:]
@@ -527,4 +527,17 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// kiraciCronCalistir: kiracının crontab komutunu onun kimliğinde çalıştırır;
+// birleşik çıktı döner. kiraci.Komut: kiracı kimliği + panel ortamı (sırlar) YOK
+// (yalnız PATH/HOME/LANG) — komut kiracının KENDİ kodudur, ortamı okuyabilir.
+// Kabuk burada bilinçli: komut kiracının KENDİ crontab satırıdır.
+// Kiracı olamayacak kullanıcı → kiraci.ErrKomut. Kilit: sir_cocuk_test.go.
+func kiraciCronCalistir(ctx context.Context, sk, komut string) ([]byte, error) {
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, "/bin/sh", "-c", komut)
+	if err != nil {
+		return nil, err
+	}
+	return cmd.CombinedOutput()
 }
