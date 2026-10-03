@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -354,8 +354,10 @@ export default function DomainBackupsPage() {
   function indir(y: Yedek) {
     const tok = localStorage.getItem('gosp.token') || ''
     fetch(`/api/v1/domains/${id}/backups/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
-      .then(r => r.blob())
+      // Askı 403'ü: askı sayfasına geçilir; hata gövdesi dosya diye indirilmez.
+      .then(async r => ((await fetchAskiKontrol(r, tok)) ? null : r.blob()))
       .then(blob => {
+        if (!blob) return
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
         a.download = y.dosya

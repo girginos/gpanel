@@ -9,7 +9,19 @@ import (
 
 type ErrorBody struct {
 	Hata string `json:"hata"`
+	// Kod: makine okunur hata kodu (isteğe bağlı). Ön yüz bir durumu metin
+	// eşleştirerek değil bu alanla tanır; boşsa gövdeye yazılmaz (eski biçim aynen).
+	Kod string `json:"kod,omitempty"`
 }
+
+// Hesap askısı — TÜM askı 403'lerinin (giriş uçları + oturum/abonelik kapıları) ortak
+// yanıtı. Ön yüz bu kodu görünce paneli kapatıp tam ekran "Hesabınız askıya alındı"
+// sayfasını gösterir. 🔴 Giriş uçlarında YALNIZ parola doğrulandıktan sonra dönülür:
+// yanlış parolada askı bilgisi sızarsa hesap varlığı/askı durumu numaralandırılabilir.
+const (
+	KodHesapAskida   = "hesap_askida"
+	HesapAskidaMesaj = "hesabınız askıya alınmış"
+)
 
 func WriteJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -19,6 +31,16 @@ func WriteJSON(w http.ResponseWriter, status int, body any) {
 
 func WriteError(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, ErrorBody{Hata: msg})
+}
+
+// WriteErrorKod: WriteError + makine okunur kod ({"hata":…,"kod":…}).
+func WriteErrorKod(w http.ResponseWriter, status int, msg, kod string) {
+	WriteJSON(w, status, ErrorBody{Hata: msg, Kod: kod})
+}
+
+// WriteHesapAskida: askıdaki hesabın tek biçimli 403 yanıtı.
+func WriteHesapAskida(w http.ResponseWriter) {
+	WriteErrorKod(w, http.StatusForbidden, HesapAskidaMesaj, KodHesapAskida)
 }
 
 // ClientIP — gerçek istemci IP'si.

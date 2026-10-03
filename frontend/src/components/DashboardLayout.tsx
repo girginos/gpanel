@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 // gosp-mobil-v1
 // gosp-tailux-rail-v1  (iki katmanli sidebar: ikon rayi + etiketli panel — yonetici)
-// gosp-tek-katman-v1   (bayi + musteri: tek katman, kategoriler alt alta)
+// gosp-tek-katman-v1   (bayi: tek katman, kategoriler alt alta)
+// Hosting müşterisinde (rol 'user') kenar çubuğu YOK: tüm araçlar ana sayfada
+// (MusteriAnaSayfa); dönüş Breadcrumb + üst çubuktaki marka bağlantısı + mobil alt çubuk.
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { useEklentiler } from '@/lib/eklenti'
@@ -16,7 +18,8 @@ import HataYuzeyi from './HataYuzeyi'
 import KapiAdresSeridi from './KapiAdresSeridi'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
-import { rolAnaSayfa, useRol } from '@/lib/rol'
+import { musteriMi, rolAnaSayfa, useRol } from '@/lib/rol'
+import { aracCevir, yolunAraci } from '@/components/musteri-ana/araclar'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
 type NavGroup = { baslik?: string; items: NavItem[] }
@@ -55,13 +58,6 @@ const ICONS = {
   sunucu:      'M4 5h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zM4 13h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4a1 1 0 011-1zM7 8h.01M7 16h.01',
   bildirim:    'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
   yedek:       'M4 7v10c0 1.105 3.582 2 8 2s8-.895 8-2V7M4 7c0 1.105 3.582 2 8 2s8-.895 8-2M4 7c0-1.105 3.582-2 8-2s8 .895 8 2m0 5c0 1.105-3.582 2-8 2s-8-.895-8-2',
-  // Müşteri menüsü (tek katman) — her öğe kendi işini anlatan ikonla
-  klasor:      'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
-  aktarim:     'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4',
-  katman:      'M12 3l9 5-9 5-9-5 9-5zm-9 10l9 5 9-5M3 18l9 5 9-5',
-  dal:         'M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9',
-  saat:        'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
-  arsiv:       'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4',
 }
 
 
@@ -76,21 +72,13 @@ const MENU_EN: Record<string, string> = {
   'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus', 'Yakında': 'Soon', 'Tehdit İstihbaratı': 'Threat Intelligence', 'Uygulama Çalıştırıcı': 'Application Runner',
   'Saldırı Zincirleri': 'Attack Chains', 'Denetim Kaydı': 'Audit Log',
   'Mail Sunucu': 'Mail Server',
-  'Dosya Yöneticisi': 'File Manager', 'Veritabanları': 'Databases',
-  'FTP Hesapları': 'FTP Accounts', 'DNS Ayarları': 'DNS Settings',
-  'DNS Şablonları': 'DNS Templates', 'SSL/TLS': 'SSL/TLS',
-  'PHP Ayarları': 'PHP Settings', 'Yedekler': 'Backups', 'Günlükler': 'Logs',
-  'Zamanlanmış Görevler': 'Cron Jobs', 'Git Deploy': 'Git Deploy', 'Laravel': 'Laravel',
-  'Apache & nginx': 'Apache & nginx',
-  'Genel Bakış': 'Overview',
+  'DNS Şablonları': 'DNS Templates',
   'Profil ve Tercihler': 'Profile & Preferences',
   // Grup başlıkları
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
   'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings', 'Güvenlik': 'Security',
   'Profilim': 'My Profile', 'Genel': 'General',
   'Bildirimler': 'Notifications', 'Yedek Yönetimi': 'Backup Management',
-  'Dosyalar ve Veriler': 'Files & Data', 'Web ve Uygulamalar': 'Web & Apps',
-  'Alan Adı ve Güvenlik': 'Domain & Security', 'Otomasyon ve Kayıtlar': 'Automation & Logs',
   'Menüyü kapat': 'Close menu', 'adet': 'items', 'Ana menü': 'Main menu',
 }
 
@@ -180,13 +168,14 @@ export default function DashboardLayout() {
   const { i18n } = useTranslation()
   const cevir = (tr: string) => (i18n.language === 'en' ? (MENU_EN[tr] || tr) : tr)
 
-  const isMusteri = typeof window !== 'undefined' && localStorage.getItem('girginospanel.musteri') === '1'
-  let _rol = ''
-  try { _rol = JSON.parse(localStorage.getItem('gosp.user') || '{}').rol || '' } catch { /* okunamadi */ }
-  const isReseller = _rol === 'reseller'
-  const musteriDomainID = typeof window !== 'undefined' ? localStorage.getItem('girginospanel.musteri.domain_id') || '' : ''
-  // Logo hedefi rolün ana sayfası (müşteri → kendi aboneliği); rol tek kaynaktan.
-  const anaSayfa = rolAnaSayfa(useRol())
+  // Rol tek kaynaktan (useAuth kullanici.rol; bkz. lib/rol.ts).
+  const rol = useRol()
+  const isMusteri = musteriMi(rol)
+  const isReseller = rol === 'reseller'
+  // Müşteride kenar çubuğu (ve mobil çekmecesi) çizilmez: araçlar ana sayfada.
+  const kenarCubugu = !isMusteri
+  // Logo hedefi rolün ana sayfası (müşteri → kendi ana sayfası).
+  const anaSayfa = rolAnaSayfa(rol)
 
   const [sayac, setSayac] = useState<Sayaclar>({})
   useEffect(() => {
@@ -223,35 +212,6 @@ export default function DashboardLayout() {
     }
   }, [mobilAcik])
 
-  // Musteri navigasyonu — sadece kendi domain'i. Tek düz liste (13 öğe) yerine
-  // işe göre kategoriler: kullanıcı aradığını başlıktan bulur.
-  const md = `/abonelikler/${musteriDomainID}`
-  const MUSTERI_NAV: NavGroup[] = [
-    { baslik: GENEL, items: [
-      { to: md, etiket: 'Genel Bakış', ikon: ICONS.home },
-    ]},
-    { baslik: 'Dosyalar ve Veriler', items: [
-      { to: `${md}/dosyalar`, etiket: 'Dosya Yöneticisi', ikon: ICONS.klasor },
-      { to: `${md}/veritabanlari`, etiket: 'Veritabanları', ikon: ICONS.yedek },
-      { to: `${md}/ftp`, etiket: 'FTP Hesapları', ikon: ICONS.aktarim },
-      { to: `${md}/yedekler`, etiket: 'Yedekler', ikon: ICONS.arsiv },
-    ]},
-    { baslik: 'Web ve Uygulamalar', items: [
-      { to: `${md}/php`, etiket: 'PHP Ayarları', ikon: ICONS.eklenti },
-      { to: `${md}/web-sunucu`, etiket: 'Apache & nginx', ikon: ICONS.sunucu },
-      { to: `${md}/laravel`, etiket: 'Laravel', ikon: ICONS.katman },
-      { to: `${md}/git`, etiket: 'Git Deploy', ikon: ICONS.dal },
-    ]},
-    { baslik: 'Alan Adı ve Güvenlik', items: [
-      { to: `${md}/dns`, etiket: 'DNS Ayarları', ikon: ICONS.domain },
-      { to: `${md}/ssl`, etiket: 'SSL/TLS', ikon: ICONS.kilit },
-    ]},
-    { baslik: 'Otomasyon ve Kayıtlar', items: [
-      { to: `${md}/cron`, etiket: 'Zamanlanmış Görevler', ikon: ICONS.saat },
-      { to: `${md}/gunlukler`, etiket: 'Günlükler', ikon: ICONS.denetim },
-    ]},
-  ]
-
   // 'Mail Sunucu' menusu YALNIZ mail eklentisi lisansli+etkinken cizilir.
   // 🔴 GÖRÜNÜRLÜK: 'aktif' DEĞİL 'kurulu'. Askıya alınmış (kurulu ama
   // aktif=0) bir eklentinin sekmesi GİZLENMEZ — açık kalır ki sayfası 'lisans
@@ -274,7 +234,8 @@ export default function DashboardLayout() {
   // menüye giriyor ama efektin tek bağımlılığı pathname olduğu için BİR DAHA
   // KOŞMUYORDU. Bu anahtar, kapılar çözülünce efektleri yeniden tetikler.
   const gizliAnahtar = [...gizli].sort().join(',')
-  const temelNav = isMusteri ? MUSTERI_NAV : isReseller ? RESELLER_NAV : NAV
+  // Müşteri menüsü yok (kenar çubuğu çizilmez); sekme başlığı araç kataloğundan gelir.
+  const temelNav: NavGroup[] = isMusteri ? [] : isReseller ? RESELLER_NAV : NAV
   const aktifNav = gizli.size === 0
     ? temelNav
     : temelNav.map(g => ({ ...g, items: g.items.filter(it => !gizli.has(it.to)) }))
@@ -301,15 +262,24 @@ export default function DashboardLayout() {
   // etiketini markanın önüne ekleriz ("Eklentiler · GirginOSPanel"). Marka/dil
   // değişince de çalışır — aksi halde marka geç yüklenince başlığı geri ezerdi.
   // En uzun eşleşen 'to' seçilir ki alt sayfalar en özgül üst öğeyi göstersin.
+  // Müşteride menü yok: etiket, ana sayfanın araç kataloğundan (musteri-ana/araclar).
   useEffect(() => {
     const markaAd = marka.baslik || marka.panel_adi
-    const aktif = aktifNav
-      .flatMap(g => g.items)
-      .filter(it => konum.pathname === it.to || konum.pathname.startsWith(it.to + '/'))
-      .sort((a, b) => b.to.length - a.to.length)[0]
-    document.title = aktif ? `${cevir(aktif.etiket)} · ${markaAd}` : markaAd
+    let etiket: string | null = null
+    if (isMusteri) {
+      const arac = yolunAraci(konum.pathname)
+      if (arac) etiket = aracCevir(arac.ad)
+      else if (/^\/abonelikler\/[0-9]+\/?$/.test(konum.pathname)) etiket = aracCevir('Ana sayfa')
+    } else {
+      const aktif = aktifNav
+        .flatMap(g => g.items)
+        .filter(it => konum.pathname === it.to || konum.pathname.startsWith(it.to + '/'))
+        .sort((a, b) => b.to.length - a.to.length)[0]
+      if (aktif) etiket = cevir(aktif.etiket)
+    }
+    document.title = etiket ? `${etiket} · ${markaAd}` : markaAd
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [konum.pathname, marka, i18n.language, gizliAnahtar])
+  }, [konum.pathname, marka, i18n.language, gizliAnahtar, isMusteri])
 
   const gosterilenBaslik = aktifBolum || bolumler[0]?.baslik || ''
   const gosterilenBolum = bolumler.find(g => g.baslik === gosterilenBaslik)
@@ -321,16 +291,15 @@ export default function DashboardLayout() {
     </svg>
   )
 
-  // ── Tek katmanli sidebar (bayi + müşteri) ───────────────────────────────
-  // Yönetici menüsü geniş (5 bölüm, ~20 öğe): ray gezinmeyi toplar. Bayi ve
-  // müşteri menüsü kısa — ray yalnız fazladan bir tık ekliyordu. Onlarda tüm
-  // kategoriler başlıklarıyla ALT ALTA, tek panelde görünür.
-  const tekKatman = isMusteri || isReseller
+  // ── Tek katmanli sidebar (bayi) ─────────────────────────────────────────
+  // Yönetici menüsü geniş (5 bölüm, ~20 öğe): ray gezinmeyi toplar. Bayi
+  // menüsü kısa — ray yalnız fazladan bir tık ekliyordu. Onda tüm kategoriler
+  // başlıklarıyla ALT ALTA, tek panelde görünür. (Müşteride kenar çubuğu yok.)
+  const tekKatman = isReseller
   const tumOgeler = aktifNav.flatMap(g => g.items)
 
-  // Bir öğenin yolu başka bir öğenin ÖNEKİyse tam eşleşme ister (müşteri "Genel
-  // Bakış" = /abonelikler/ID, diğerleri /abonelikler/ID/...); yoksa her alt
-  // sayfada o da seçili görünürdü.
+  // Bir öğenin yolu başka bir öğenin ÖNEKİyse tam eşleşme ister ('/' ya da
+  // /x iken /x/y de menüdeyse); yoksa her alt sayfada o da seçili görünürdü.
   const tamEslesme = (it: NavItem, kume: NavItem[]) =>
     it.to === '/' || kume.some(o => o.to !== it.to && o.to.startsWith(it.to + '/'))
 
@@ -380,10 +349,39 @@ export default function DashboardLayout() {
     </li>
   )
 
+  // Marka alani ANASAYFA BAGLANTISIDIR (kenar cubugu basligi; musteride ust cubuk).
+  // Onceki hali olu bir gorseldi; "logoya tikla -> anasayfa" neredeyse evrensel bir
+  // beklenti ve karsilanmayinca kullanici tiklayip hicbir sey olmamasiyla karsilasiyordu.
+  // Erisilebilir adi LINK tasir (aria-label); logo gorseli dekoratif sayilir (alt="")
+  // -- aksi halde ekran okuyucu ayni adi iki kez okurdu. Odak halkasi gorunur.
+  // Logo kendi en-boy oraniyla yatay durur; logo yoksa panel adi yazilir.
+  const markaBaglantisi = (
+    <NavLink
+      to={anaSayfa}
+      end
+      onClick={() => setMobilAcik(false)}
+      aria-label={marka.panel_adi}
+      className="flex min-w-0 items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-transparent focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-800"
+    >
+      {logoURL(marka) ? (
+        <img
+          src={logoURL(marka) as string}
+          alt=""
+          aria-hidden
+          className="max-h-9 w-auto max-w-[168px] object-contain"
+        />
+      ) : (
+        <span className="truncate text-[17px] font-semibold text-slate-900 dark:text-slate-100">
+          {marka.panel_adi}
+        </span>
+      )}
+    </NavLink>
+  )
+
   return (
     <div className="min-h-screen flex items-start bg-gray-50 dark:bg-dark-900">
       {/* Mobil perde — yalnız çekmece açıkken ve < lg genişlikte */}
-      {mobilAcik && (
+      {kenarCubugu && mobilAcik && (
         <div
           className="fixed inset-0 z-40 bg-dark-800/50 lg:hidden"
           onClick={() => setMobilAcik(false)}
@@ -393,10 +391,12 @@ export default function DashboardLayout() {
 
       {/*
         Yönetici: iki katman — [ikon rayi 68px] + [etiketli panel 248px].
-        Bayi / müşteri: tek katman — tüm kategoriler alt alta [panel 256px].
+        Bayi: tek katman — tüm kategoriler alt alta [panel 256px].
+        Müşteri: kenar çubuğu YOK (araçlar ana sayfada).
         < lg : ekran disina kaydirilmis cekmece (hamburger ile acilir)
         >= lg: yapiskan
       */}
+      {kenarCubugu && (
       <div
         id="gosp-kenar-cubugu"
         className={`fixed inset-y-0 left-0 z-50 flex h-screen transform transition-transform duration-200 ease-out ${
@@ -481,37 +481,8 @@ export default function DashboardLayout() {
         <div className={`${tekKatman ? 'w-64' : 'w-[248px]'} shrink-0 h-screen flex flex-col bg-white dark:bg-dark-800 border-r border-slate-200 dark:border-dark-600`}>
           {/* Baslik: panel adi + kapat (mobil) */}
           <div className="h-[60px] flex items-center px-5 border-b border-slate-200 dark:border-dark-600">
-            {/* MARKA LOGOSU BURADA — genis basligin yeri.
-                Logo kendi en-boy oraniyla yatay durur; yuksekligi baslik
-                seridine sigacak sekilde sinirlanir. Logo yoksa panel adi
-                yazilir ki markasiz kurulumda serit bos kalmasin. */}
-            {/* Marka alani ANASAYFA BAGLANTISIDIR.
-                Onceki hali olu bir gorseldi; "logoya tikla -> anasayfa" neredeyse
-                evrensel bir beklenti ve karsilanmayinca kullanici tiklayip hicbir
-                sey olmamasiyla karsilasiyordu.
-                Erisilebilir adi LINK tasir (aria-label); logo gorseli dekoratif
-                sayilir (alt="") -- aksi halde ekran okuyucu ayni adi iki kez
-                okurdu. Odak halkasi gorunur. */}
-            <NavLink
-              to={anaSayfa}
-              end
-              onClick={() => setMobilAcik(false)}
-              aria-label={marka.panel_adi}
-              className="flex min-w-0 items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-transparent focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-800"
-            >
-              {logoURL(marka) ? (
-                <img
-                  src={logoURL(marka) as string}
-                  alt=""
-                  aria-hidden
-                  className="max-h-9 w-auto max-w-[168px] object-contain"
-                />
-              ) : (
-                <span className="truncate text-[17px] font-semibold text-slate-900 dark:text-slate-100">
-                  {marka.panel_adi}
-                </span>
-              )}
-            </NavLink>
+            {/* MARKA LOGOSU BURADA — genis basligin yeri (bkz. markaBaglantisi). */}
+            {markaBaglantisi}
             <Button
               isIcon
               variant="flat"
@@ -555,9 +526,15 @@ export default function DashboardLayout() {
           )}
         </div>
       </div>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar onMenuAc={() => setMobilAcik(true)} menuAcik={mobilAcik} />
+        {/* Müşteride kenar çubuğu yok: hamburger çizilmez, marka bağlantısı üst çubukta. */}
+        <TopBar
+          onMenuAc={kenarCubugu ? () => setMobilAcik(true) : undefined}
+          menuAcik={mobilAcik}
+          marka={kenarCubugu ? undefined : markaBaglantisi}
+        />
         <KapiAdresSeridi />
         {/* Alt gezinme çubuğu (AltNavBar) mobilde ekranın dibine sabitlenir;
             altında kalan boşluğu akışın SON ögesi ayırır. Alt bilgi

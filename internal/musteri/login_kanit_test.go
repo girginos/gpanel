@@ -29,7 +29,7 @@ func TestMusteriLoginTokenKapisiVeKanit(t *testing.T) {
 			s, db := sahtedb.Yeni()
 			t.Cleanup(func() { db.Close() })
 			// Düz-metin satır: geçişi tamamlanmamış FTP hesabı (sabit zamanlı karşılaştırma).
-			s.Satirlar("FROM ftp_accounts", []any{int64(7), int64(42), "parola1", "active", "ornek.com"})
+			s.Satirlar("FROM ftp_accounts", []any{int64(7), int64(42), "parola1", "active", "ornek.com", int64(0)})
 			h := &Handlers{DB: db, Secret: sir}
 			rec := httptest.NewRecorder()
 			h.Login(rec, httptest.NewRequest(http.MethodPost, "/api/v1/musteri/login",
@@ -63,7 +63,7 @@ func TestMusteriLoginYanlisParolaKanitYazmaz(t *testing.T) {
 	}
 	s, db := sahtedb.Yeni()
 	t.Cleanup(func() { db.Close() })
-	s.Satirlar("FROM ftp_accounts", []any{int64(7), int64(42), "parola1", "active", "ornek.com"})
+	s.Satirlar("FROM ftp_accounts", []any{int64(7), int64(42), "parola1", "active", "ornek.com", int64(0)})
 	rec := httptest.NewRecorder()
 	(&Handlers{DB: db, Secret: []byte("musteri-test-anahtari-0123456789-abcdef")}).Login(rec,
 		httptest.NewRequest(http.MethodPost, "/api/v1/musteri/login", strings.NewReader(`{"kullanici":"c_ornek","parola":"yanlis"}`)))

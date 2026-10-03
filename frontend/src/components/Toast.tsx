@@ -16,6 +16,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { useTranslation } from 'react-i18next'
 import { Ikon } from './Ikon'
 import { TONLAR, tonSinifi, type Ton } from './tonlar'
+import { useHesapAski } from '@/store/hesapAski'
 
 const TOAST_EN: Record<string, string> = {
   'Kapat': 'Close',
@@ -76,6 +77,16 @@ export function ToastSaglayici({ children }: { children: ReactNode }) {
 
   useEffect(() => () => { zamanlayicilar.current.forEach((t) => window.clearTimeout(t)) }, [])
 
+  // Askıya geçişte ekrandaki bildirimler de temizlenir: panelden kalan toast'lar tam ekran
+  // askı sayfasının üstünde asılı kalmasın (yenileri aşağıda ekle() içinde engellenir).
+  const askida = useHesapAski((s) => s.askida)
+  useEffect(() => {
+    if (!askida) return
+    zamanlayicilar.current.forEach((t) => window.clearTimeout(t))
+    zamanlayicilar.current = []
+    setKayitlar([])
+  }, [askida])
+
   const kapat = useCallback((id: number) => {
     setKayitlar((l) => l.map((k) => (k.id === id ? { ...k, cikiyor: true } : k)))
     const t = window.setTimeout(() => setKayitlar((l) => l.filter((k) => k.id !== id)), 220)
@@ -83,6 +94,9 @@ export function ToastSaglayici({ children }: { children: ReactNode }) {
   }, [])
 
   const ekle = useCallback((tip: ToastTip, baslik: string, mesaj?: string) => {
+    // Askı sayfası açıkken panelden geriye kalan (uçuştaki) isteklerin bildirimleri
+    // tam ekran sayfanın üstüne düşmesin.
+    if (useHesapAski.getState().askida) return
     const id = ++sayacRef.current
     // En fazla 4 bildirim: toplu işlemde ekran dolmasın (en eskisi düşer).
     setKayitlar((l) => [...l.slice(-3), { id, tip, baslik, mesaj }])

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/httpx"
 )
 
 // ── Oturum durum önbelleği (fail-CLOSED + kullanılabilirlik önbelleği) ────────
@@ -74,7 +75,7 @@ var nowFn = time.Now
 // dalları AYNI kararı kullanır ki davranış tutarlı olsun.
 func oturumKarar(c *auth.Claims, durum string, gecersizTS int64) (int, string) {
 	if c.Role == "reseller" && durum != "active" {
-		return http.StatusForbidden, "hesabınız askıya alınmış"
+		return http.StatusForbidden, httpx.HesapAskidaMesaj // askı → redYaz kodlu yazar
 	}
 	if gecersizTS > 0 && c.IssuedAt != nil && c.IssuedAt.Unix() < gecersizTS {
 		return http.StatusUnauthorized, "oturum sonlandırıldı, tekrar giriş yapın"

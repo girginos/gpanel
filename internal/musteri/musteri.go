@@ -27,11 +27,16 @@ type loginReq struct {
 	Parola    string `json:"parola"`
 }
 
-// Dikişler (testler): isteğin panel kapısı, kapı giriş kanıtı.
+// Dikişler (testler): isteğin panel kapısı, kapı giriş kanıtı, parola doğrulama.
 var (
 	kapiCoz         = kapi.Istek
 	kapiGirisKaydet = kapi.GirisiKaydet
+	parolaDogrulaFn = hesaplar.FTPParolaDogrula
 )
+
+// sahteFTPHash: olmayan kullanıcıda doğrulamanın koşacağı biçimce geçerli $6$ değer
+// (tuz + 86 karakter). Hiçbir parola bununla eşleşmez; amaç yalnız aynı iş yükü.
+var sahteFTPHash = "$6$gospzamankoruma$" + strings.Repeat("x", 86)
 
 // Login: FTP user/password ile, FTP hesabının bağlı olduğu domain için JWT döner
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
@@ -57,13 +62,17 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	// ftp_accounts'tan kontrol
 	var ftpID, domainID int64
 	var passDB, alanAdi, status string
+	var domainAskida int
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT fa.id, fa.domain_id, fa.password_md5, fa.status, d.alan_adi
+		`SELECT fa.id, fa.domain_id, fa.password_md5, fa.status, d.alan_adi, COALESCE(d.askida,0)
 		 FROM ftp_accounts fa
 		 JOIN domains d ON d.id = fa.domain_id
 		 WHERE fa.username = ?`, req.Kullanici).
-		Scan(&ftpID, &domainID, &passDB, &status, &alanAdi)
+		Scan(&ftpID, &domainID, &passDB, &status, &alanAdi, &domainAskida)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Olmayan kullanıcıda da crypt doğrulaması KOŞAR: var olan ve olmayan hesap
+		// yanıt süresinden ayırt edilemesin (bayi girişindeki dummyBcryptHash deseni).
+		_ = parolaDogrulaFn(req.Parola, sahteFTPHash)
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
 		return
 	}
@@ -71,14 +80,19 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "sunucu hatası")
 		return
 	}
-	if status != "active" {
-		httpx.WriteError(w, http.StatusForbidden, "FTP hesabı askıya alınmış")
-		return
-	}
 	// FTP parolasi at-rest $6$ crypt hash'i; sabit-zamanli crypt dogrulama
 	// (eski duz-metin satir icin geriye-uyumlu). Bkz hesaplar.FTPParolaDogrula.
-	if !hesaplar.FTPParolaDogrula(req.Parola, passDB) {
+	// 🔴 SIRA: parola ASKIDAN ÖNCE. Askı yanıtı ("hesap_askida") yalnız doğru parolayla
+	// döner; yanlış parolada askıdaki hesap da aynı 401'i alır — hesap varlığı ve askı
+	// durumu parola bilmeden numaralandırılamaz.
+	if !parolaDogrulaFn(req.Parola, passDB) {
 		httpx.WriteError(w, http.StatusUnauthorized, "kullanıcı veya parola hatalı")
+		return
+	}
+	// Askı iki yerden okunur (RequireAuth + MusteriScope kapılarıyla aynı): askıya alma
+	// ftp_accounts.status='suspended' yazar, abonelik askısı domains.askida=1'dir.
+	if status != "active" || domainAskida == 1 {
+		httpx.WriteHesapAskida(w)
 		return
 	}
 

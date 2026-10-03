@@ -67,7 +67,7 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				// degisen hesabin ACIK oturumu da dusmeli. Aksi halde askiya alinan
 				// bayi, token omru (8 saat) boyunca hosting acmaya devam ediyordu.
 				if kod, mesaj := oturumGecerli(r.Context(), c); kod != 0 {
-					httpx.WriteError(w, kod, mesaj)
+					redYaz(w, kod, mesaj)
 					return
 				}
 				// 🔴 Oturum boşta süresi (kayıt-tabanlı). Ayar=0 iken kontrol
@@ -98,7 +98,7 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				// değişmiş veya domain DEVREDİLMİŞ olabilir (bkz.
 				// musteri_oturum.go). Sunucu-taraflı iptal kontrolü.
 				if kod, mesaj := musteriOturumGecerli(r.Context(), mc); kod != 0 {
-					httpx.WriteError(w, kod, mesaj)
+					redYaz(w, kod, mesaj)
 					return
 				}
 				ctx := context.WithValue(r.Context(), musteriClaimsKey, mc)
@@ -123,6 +123,18 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 // kabul edilebiliyordu.
 func oturumGecerli(ctx context.Context, c *auth.Claims) (int, string) {
 	return oturumGecerliImpl(ctx, c)
+}
+
+// redYaz: oturum/askı kapılarının (kod, mesaj) kararını yazar. Üç kapı da askıda
+// (403, httpx.HesapAskidaMesaj) döndürür (oturumKarar, musteriKarar, domainAskidaKod);
+// bu karar makine okunur askı koduyla gider ({"kod":"hesap_askida"}) — ön yüz metne
+// değil koda bakar. Diğer kararlar (401 oturum, 503 doğrulanamadı…) eski biçimde.
+func redYaz(w http.ResponseWriter, kod int, mesaj string) {
+	if kod == http.StatusForbidden && mesaj == httpx.HesapAskidaMesaj {
+		httpx.WriteHesapAskida(w)
+		return
+	}
+	httpx.WriteError(w, kod, mesaj)
 }
 
 // OturumlariDusur: hesabin tum ACIK oturumlarini gecersiz kilar (askiya alma,
@@ -253,7 +265,7 @@ func MusteriScopeParam(param string) func(http.Handler) http.Handler {
 			// DB hatasında fail-OPEN idi → askıdaki müşteri kesinti penceresinde
 			// kendi domainine erişebiliyordu.
 			if kod, mesaj := domainAskidaKod(r.Context(), mc.DomainID); kod != 0 {
-				httpx.WriteError(w, kod, mesaj)
+				redYaz(w, kod, mesaj)
 				return
 			}
 			next.ServeHTTP(w, r)

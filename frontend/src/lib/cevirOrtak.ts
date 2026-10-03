@@ -1865,6 +1865,7 @@ export const ORTAK_EN: Record<string, string> = {
   "Alt alan PHP ayarları yüklenemedi": "Failed to load subdomain PHP settings",
   "Alt alan web sunucu ayarları yüklenemedi": "Failed to load subdomain web server settings",
   "Anasayfaya dön": "Back to home",
+  "Anasayfa": "Home",
   "Ara: domain, alt alan, sayfa (ör. yedek, firewall)…": "Search: domain, subdomain, page (e.g. backup, firewall)…",
   "Backend, önbellek, yükleme limiti ve güvenlik başlıkları — domain gibi tam parite.": "Backend, cache, upload limit and security headers — full parity like a domain.",
   "Bakım": "Maintenance",
