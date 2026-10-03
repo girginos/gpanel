@@ -5,6 +5,7 @@ package pano
 // taşıma/toplu işler. Alıcı kapsamı bildirim paketinin hedefleriyle:
 //
 //	domain olayı → YazOlay(domainID): domain sahibi (bayi/yönetici) + müşterisi
+//	               (kota eşiği İSTİSNA: yalnız sahip — bildirim.musteriyeKapali)
 //	bayi havuzu  → YazBayi(rid): yalnız o bayi (+ %100'de asim_bildirim=1 ise yönetici)
 //	taşıma       → işin sahibi (sahip_rid>0 → bayi, 0 → yönetici)
 //	toplu işlem  → yönetici (cp_toplu_isler sahipsiz; bayi toplu işlem başlatamaz)

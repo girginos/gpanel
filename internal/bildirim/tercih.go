@@ -30,7 +30,8 @@ type Kategori struct {
 // Kategoriler — olay türü sözlüğü (üreticiler bu kodları yazar). Roller: o türü
 // görebilecek görüntüleyenler; tercih ekranı yalnız bunları listeler.
 var Kategoriler = []Kategori{
-	{"kota", []string{okuyanAdmin, okuyanBayi, okuyanMusteri}},
+	// kota: eşik bildirimleri müşteriye gitmez (musteriyeKapali) → müşteri tercih ekranında yok.
+	{"kota", []string{okuyanAdmin, okuyanBayi}},
 	{"ssl", []string{okuyanAdmin, okuyanBayi, okuyanMusteri}},
 	{"aski", []string{okuyanAdmin, okuyanBayi, okuyanMusteri}},
 	{"yedek", []string{okuyanAdmin, okuyanBayi, okuyanMusteri}},
