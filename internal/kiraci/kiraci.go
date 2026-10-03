@@ -63,7 +63,29 @@ type Kiraci struct {
 	Kul string
 	// Ev — ev dizini (mutlak): Komut'un HOME'u, Goreli'nin ve evalti.Ac'ın çapası.
 	Ev string
+	// Dilim — true: Komut süreç ağacını kiracının KAYNAK DİLİMİNE
+	// (girginos-<Kul>.slice; plan RAM/CPU/süreç tavanı) koyar. false iken çocuk
+	// ÇAĞIRANIN cgroup'unda kalır: panelden açılan kiracı kodu panel servisinin
+	// (sınırsız) cgroup'unda, arka plana attığı süreçler de orada yaşar. Kiracının
+	// KENDİ kodunu (cron, "şimdi çalıştır") koşan yollar Dilim kullanır.
+	Dilim bool
 }
+
+// DilimOnek — kiracı kaynak dilimi adının öneki (kaynaklimit.sliceName ve
+// cgroup.KiraciDizin ile aynı biçim: girginos-<sk>.slice).
+const DilimOnek = "girginos-"
+
+// DilimAdi — sk'nin kaynak dilimi birimi; sk panel biçiminde değilse ErrSK.
+// Ad systemd-run argv'sine girer: biçim denetimi seçenek/yol enjeksiyonunu keser.
+func DilimAdi(sk string) (string, error) {
+	if !GecerliSK(sk) {
+		return "", ErrSK
+	}
+	return DilimOnek + sk + ".slice", nil
+}
+
+// kullaniciBul — Kul çözümü (testler sahte kiracı kullanıcısıyla değiştirir).
+var kullaniciBul = user.Lookup
 
 // Komut — argv'yi kiracı kimliğinde çalıştıracak komutu hazırlar: runuser -u
 // <Kul> -- argv (kabuk yok; argv[0] PATH'te aranır), panel ortamı AKTARILMAZ
@@ -79,10 +101,30 @@ func (k Kiraci) Komut(ctx context.Context, argv ...string) (*exec.Cmd, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return nil, ErrKomut
 	}
-	if u, err := user.Lookup(k.Kul); err != nil || u.Uid == "0" {
+	if u, err := kullaniciBul(k.Kul); err != nil || u.Uid == "0" {
 		return nil, ErrKomut
 	}
-	cmd := exec.CommandContext(ctx, "runuser", append([]string{"-u", k.Kul, "--"}, argv...)...)
+	args := append([]string{"-u", k.Kul, "--"}, argv...)
+	ad := "runuser"
+	if k.Dilim {
+		// systemd-run --scope: kendini yeni bir kapsam birimine (kiracı dilimi
+		// altında) taşır ve runuser'ı AYNI süreçte exec eder → kimlik düşürme,
+		// ortam ve sinyal sözleşmesi runuser yolunun aynısıdır; tek fark cgroup.
+		// --uid KULLANILMAZ: systemd-run kapsam kipinde ek grupları düşürmez
+		// (setgroups yok → kökün ek grupları çocuğa geçer); runuser initgroups yapar.
+		// Dilim adı biçim denetimli (ErrKomut); açıklama sabit: komut satırı birim
+		// açıklamasına (D-Bus'tan herkesçe okunur) girmez. systemd-run yoksa ya da
+		// kapsam açılamazsa komut ÇALIŞMAZ (dilimsiz yedek yol yok: o sınırı aşmak olur).
+		dilim, err := DilimAdi(k.Kul)
+		if err != nil {
+			return nil, ErrKomut
+		}
+		args = append([]string{"--scope", "--quiet", "--collect",
+			"--slice=" + dilim, "--description=girginospanel kiraci " + k.Kul,
+			"--", "runuser"}, args...)
+		ad = "systemd-run"
+	}
+	cmd := exec.CommandContext(ctx, ad, args...)
 	cmd.Env = []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=" + k.Ev,

@@ -112,8 +112,16 @@ IOWeight=%d
 	if err := os.WriteFile(slicePath(sk), []byte(content), 0644); err != nil {
 		return fmt.Errorf("slice yaz: %w", err)
 	}
+	// PAM oturum dilimi (user-<UID>.slice: SSH/su/linger) aynı tavanla — bkz. oturum_dilimi.go.
+	oturumUID, oturumErr := oturumDilimiYaz(sk, l)
+	if oturumErr != nil {
+		log.Printf("oturum dilimi %s: %v", sk, oturumErr)
+	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
 		return fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if oturumErr == nil {
+		oturumDilimiCanli(oturumUID, l)
 	}
 	// 🔴 CANLI GÜNCELLEME (süreç-öldürmez): slice zaten üye içeriyorsa (aktif),
 	// yeni limitleri set-property --runtime ile ANINDA uygula. restart KULLANMA —
@@ -248,6 +256,7 @@ func ioSetPropertyArgs(l Limitler) []string {
 // ioClearKernelLimits cagrilir cunku bos atama kernel'deki mevcut cihaz limitini
 // guvenilir sekilde temizlemiyor (bkz. SystemdSliceYaz'daki ayni not).
 func SystemdSliceRuntimeSifirla(sk string) {
+	oturumDilimiSil(sk) // plan kalktı → oturum dilimi tavanı da kalkar
 	out, _ := exec.Command("systemctl", "is-active", sliceName(sk)).CombinedOutput()
 	if strings.TrimSpace(string(out)) != "active" {
 		return // slice ayakta degil -> temizlenecek runtime override yok
@@ -266,6 +275,7 @@ func SystemdSliceSil(sk string) error {
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
 		return nil // guvenlik: yalnizca tenant slice'lari
 	}
+	oturumDilimiSil(sk)
 	birim := "girginos-" + sk + ".slice"
 	// 🔴 ONCE slice'i DURDUR: yalnizca unit dosyasini silmek yetmiyordu — slice
 	// "loaded active" kalip cgroup'u (ve runtime drop-in'lerini) sunucuda tutuyordu.

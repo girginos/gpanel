@@ -113,6 +113,12 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "sir" {
 		os.Exit(sirCLI(os.Args[2:]))
 	}
+	// Cron çalıştırıcısı da config.Load()'dan ÖNCE: crond (kök) /etc/cron.d satırından
+	// çağırır; panel sırlarına gerek yok. Kiracı görevini kiracı kimliğinde ve kaynak
+	// diliminde (girginos-<sk>.slice) koşturur. Bkz. internal/cron/zamanlayici.go.
+	if len(os.Args) > 1 && os.Args[1] == cron.CLIKomutu {
+		os.Exit(cron.CalistirCLI(os.Args[2:]))
+	}
 	// config.Load panel sırlarını okuduktan sonra süreç ortamından SİLER: hiçbir çocuk
 	// süreç (kök ya da kiracı kimliğinde) onları miras alamaz. Sırlar yalnız cfg'den geçer.
 	cfg, err := config.Load()
@@ -331,6 +337,18 @@ func main() {
 	}
 	filesH := &files.Handlers{DB: d}
 	cronH := &cron.Handlers{DB: d}
+	// Cron modeli uzlaştırması: eski /var/spool/cron/c_* görevleri panel deposuna
+	// alınır (crond onları sınırsız user-<UID>.slice'ta koşturuyordu), zamanlayıcı
+	// dosyaları (/etc/cron.d) depodan yeniden üretilir. Periyodik tekrar: kiracının
+	// crontab(1) ile yarattığı spool dosyası da dilime alınır. İdempotent.
+	go func() {
+		cron.Uzlastir()
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			cron.Uzlastir()
+		}
+	}()
 	logsH := &logs.Handlers{DB: d}
 	tasimaH := &tasima.Handlers{DB: d}
 	tasimaH.AcilistaTemizle()

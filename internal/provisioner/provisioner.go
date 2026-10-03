@@ -17,6 +17,7 @@ import (
 	"sync"
 	"text/template"
 
+	"girginospanel/internal/cron"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/sshaccess"
@@ -1416,7 +1417,8 @@ func Deprovision(alanAdi, sk string) error {
 	// miras kalmasın — aynı sk'yi alan hesap askıdan alınınca eski kiracının
 	// crontab'ı onun adına çalışırdı; birim koruması aynı adlı birimini durdururdu.
 	if gecerliSKAdi(sk) {
-		_ = os.Remove(filepath.Join(cronAskiDeposu, sk))
+		// cron: zamanlayıcı dosyası + panel deposu + askı deposu + eski spool.
+		cron.Sil(sk)
 		sshaccess.AskiArtiginiSil(sk)
 		askiBirimArtiklariniSil(sk)
 	}
@@ -1976,44 +1978,21 @@ func HealHomePerms() {
 	}
 }
 
-// cronAskiDeposu — askıdaki hesabın crontab'ının saklandığı dizin (spool dışında).
-const cronAskiDeposu = "/var/lib/girginospanel/cron-suspended"
-
-// SuspendUserRuntime: askıya alınan tenant'ın çalışan süreçlerini ve crontab'ını yönetir.
+// SuspendUserRuntime: askıya alınan tenant'ın çalışan süreçlerini öldürür.
 //
-//	suspend=true  → crontab'ı cron spool'undan çıkar (crond çalıştırmaz) + tüm tenant
-//	                süreçlerini öldür (php-fpm worker, cron-spawn script).
-//	suspend=false → crontab'ı geri getir.
+// Cron artık burada DEĞİL: askının cron adımı (zamanlayıcı dosyası + depo)
+// internal/cron.AskiUygula'dadır ve hesapaski bunu bu adımdan ÖNCE çağırır
+// (yeni görev başlamasın, sonra süreçler ölsün). Eski spool taşıma kodu
+// kaldırıldı: spool artık kiracı görevi taşımaz (cron.Uzlastir geçişi).
 //
 // c_ prefix ZORUNLU (sistem/root user'a asla dokunma). Best-effort.
 func SuspendUserRuntime(sk string, suspend bool) {
-	if !strings.HasPrefix(sk, "c_") {
-		return // güvenlik: yalnız tenant user
+	if !strings.HasPrefix(sk, "c_") || !suspend {
+		return // güvenlik: yalnız tenant user; açarken süreç adımı yok
 	}
-	cronSpool := "/var/spool/cron/" + sk
-	stored := filepath.Join(cronAskiDeposu, sk)
-
-	if suspend {
-		if _, err := os.Stat(cronSpool); err == nil {
-			_ = os.MkdirAll(cronAskiDeposu, 0o700)
-			if err := os.Rename(cronSpool, stored); err != nil {
-				log.Printf("suspend runtime: crontab taşıma (%s): %v", sk, err)
-			}
-		}
-		// Tenant'ın çalışan tüm süreçlerini öldür (yalnız bu uid). Eşleşme yoksa
-		// pkill exit!=0 döner → yok say.
-		_, _ = exec.Command("pkill", "-KILL", "-u", sk).CombinedOutput()
-		return
-	}
-	if _, err := os.Stat(stored); err == nil {
-		_ = os.MkdirAll("/var/spool/cron", 0o700)
-		if err := os.Rename(stored, cronSpool); err != nil {
-			log.Printf("suspend runtime: crontab geri getirme (%s): %v", sk, err)
-			return
-		}
-		_ = os.Chmod(cronSpool, 0o600)
-		_, _ = exec.Command("restorecon", cronSpool).CombinedOutput()
-	}
+	// Tenant'ın çalışan tüm süreçlerini öldür (yalnız bu uid). Eşleşme yoksa
+	// pkill exit!=0 döner → yok say.
+	_, _ = exec.Command("pkill", "-KILL", "-u", sk).CombinedOutput()
 }
 
 // ApplyVhostForDomain: domainID'ye gore nginx vhost'unu yeniden render eder.

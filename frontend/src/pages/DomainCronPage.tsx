@@ -181,7 +181,7 @@ export default function DomainCronPage() {
         <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
           {' · '}
-          <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">/var/spool/cron/{domain.sistem_kullanici}</span>
+          <span className="font-mono text-slate-600 dark:text-slate-400 dark:text-slate-500">{domain.sistem_kullanici}</span>
         </p>
       )}
 

@@ -54,6 +54,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/cron"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/laravel"
@@ -165,9 +166,19 @@ func Varsayilan() Adimlar {
 		DBKullanici:   hesaplar.DBKullanicilariKilit,
 		Birimler:      laravel.HesapAski,
 		Uygulamalar:   provisioner.HesapBirimleriAski,
-		CalismaZamani: provisioner.SuspendUserRuntime,
+		CalismaZamani: calismaZamani,
 		Posta:         PostaAski,
 	}
+}
+
+// calismaZamani — askının çalışma zamanı adımı: önce cron (zamanlayıcı dosyası
+// silinir, depo askı deposuna taşınır — yeni görev başlamasın), sonra süreçler
+// (pkill). Açarken cron deposu geri gelir, zamanlayıcı yeniden üretilir.
+func calismaZamani(sk string, askida bool) {
+	if err := cron.AskiUygula(sk, askida); err != nil {
+		log.Printf("hesap askısı: %s: cron: %v", sk, err)
+	}
+	provisioner.SuspendUserRuntime(sk, askida)
 }
 
 // Uygula — Varsayilan().Uygula.
