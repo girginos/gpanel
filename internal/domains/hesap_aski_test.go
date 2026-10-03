@@ -46,6 +46,7 @@ func ha_adimlar(t *testing.T, phpHata error) *[]string {
 			Birimler:      func(context.Context, *sql.DB, int64, bool) error { not("birim"); return nil },
 			Uygulamalar:   func(string, bool) error { not("uyg"); return nil },
 			CalismaZamani: func(string, bool) { not("cron") },
+			Posta:         func(context.Context, *sql.DB, int64, bool) error { not("posta"); return nil },
 		}
 	}
 	return cagri
@@ -68,7 +69,7 @@ func TestAskiyaAl_HesapDuzeyindeTekYol(t *testing.T) {
 	if kod != http.StatusOK {
 		t.Fatalf("200 beklenirdi: %d %s", kod, govde)
 	}
-	if got := strings.Join(*cagri, " "); got != "ana alt birim uyg db php(true) ssh cron" {
+	if got := strings.Join(*cagri, " "); got != "ana alt posta birim uyg db php(true) ssh cron" {
 		t.Fatalf("hesabın tüm adımları uygulanmalı: %s", got)
 	}
 }

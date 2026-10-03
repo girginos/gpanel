@@ -120,6 +120,9 @@ func (k *ha_kayit) adimlar(t *testing.T) Adimlar {
 		},
 		Uygulamalar:   func(sk string, askida bool) error { return k.not(t, fmt.Sprintf("uyg(%v)", askida), sk) },
 		CalismaZamani: func(sk string, askida bool) { _ = k.not(t, fmt.Sprintf("cron(%v)", askida), sk) },
+		Posta: func(_ context.Context, _ *sql.DB, id int64, askida bool) error {
+			return k.not(t, fmt.Sprintf("posta(%v)", askida), k.sk(t, id))
+		},
 	}
 }
 
@@ -171,7 +174,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	if err != nil || alan != "ha1.test" {
 		t.Fatalf("askıya alma: %q %v", alan, err)
 	}
-	want := "ana[askida=true] alt[askida=true] birim(true)[askida=true] uyg(true)[askida=true] db(true)[askida=true] althavuz[askida=true] php(true)[askida=true] ssh(true)[askida=true] cron(true)[askida=true]"
+	want := "ana[askida=true] alt[askida=true] posta(true)[askida=true] birim(true)[askida=true] uyg(true)[askida=true] db(true)[askida=true] althavuz[askida=true] php(true)[askida=true] ssh(true)[askida=true] cron(true)[askida=true]"
 	if got := strings.Join(k.cagri, " "); got != want {
 		t.Fatalf("askıya alma adımları:\n got: %s\nwant: %s", got, want)
 	}
@@ -183,7 +186,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	}
 	// İdempotent: ikinci askıya alma aynı adımları zararsızca yineler.
 	k.cagri = nil
-	if _, err := a.Uygula(ctx, db, 1, true, KaynakKok); err != nil || len(k.cagri) != 9 {
+	if _, err := a.Uygula(ctx, db, 1, true, KaynakKok); err != nil || len(k.cagri) != 10 {
 		t.Fatalf("ikinci askıya alma: %v %v", err, k.cagri)
 	}
 
@@ -191,7 +194,7 @@ func TestUygula_HesapDuzeyinde_GidisDonus(t *testing.T) {
 	if _, err := a.Uygula(ctx, db, 1, false, KaynakKok); err != nil {
 		t.Fatalf("askıdan alma: %v", err)
 	}
-	want = "ana[askida=false] althavuz[askida=false] php(false)[askida=false] alt[askida=false] db(false)[askida=false] uyg(false)[askida=false] birim(false)[askida=false] ssh(false)[askida=false] cron(false)[askida=false]"
+	want = "ana[askida=false] althavuz[askida=false] php(false)[askida=false] alt[askida=false] posta(false)[askida=false] db(false)[askida=false] uyg(false)[askida=false] birim(false)[askida=false] ssh(false)[askida=false] cron(false)[askida=false]"
 	if got := strings.Join(k.cagri, " "); got != want {
 		t.Fatalf("askıdan alma adımları:\n got: %s\nwant: %s", got, want)
 	}
@@ -609,7 +612,7 @@ func TestUygula_IstekBaglamiIptal_IslemTamamlanir(t *testing.T) {
 			t.Fatalf("askida=%v: durum %+v, beklenen %+v", askida, d, w)
 		}
 		cagri := strings.Join(k.cagri, " ")
-		if len(k.cagri) != 9 || strings.Contains(cagri, fmt.Sprintf("(%v)", !askida)) {
+		if len(k.cagri) != 10 || strings.Contains(cagri, fmt.Sprintf("(%v)", !askida)) {
 			t.Fatalf("askida=%v: tüm adımlar tek yönde uygulanmalı: %s", askida, cagri)
 		}
 	}
