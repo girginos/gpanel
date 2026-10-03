@@ -165,7 +165,7 @@ func ymDB(t *testing.T, gocKos bool) *sql.DB {
 
 func ymGocKos(t *testing.T, db *sql.DB) {
 	t.Helper()
-	body, err := os.ReadFile("../../migrations/0114_yedek_plan_kaynak.sql")
+	body, err := os.ReadFile("../../migrations/0115_yedek_plan_kaynak.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func TestYedekKaynagi(t *testing.T) {
 }
 
 func TestGoc0114_KosucuUyumu(t *testing.T) {
-	body, err := os.ReadFile("../../migrations/0114_yedek_plan_kaynak.sql")
+	body, err := os.ReadFile("../../migrations/0115_yedek_plan_kaynak.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

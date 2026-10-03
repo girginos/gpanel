@@ -1,4 +1,4 @@
--- 0114_yedek_plan_kaynak.sql
+-- 0115_yedek_plan_kaynak.sql
 -- Müşteri yedeği YALNIZ MANUEL (kullanıcı kararı 2026-10-03). Otomatik yedek planı
 -- (domains.backup_freq/hour/retention) bundan sonra YALNIZ gerçek yönetici
 -- tarafından değiştirilir, zamanlayıcı yalnız kök kaynaklı planları koşar.
