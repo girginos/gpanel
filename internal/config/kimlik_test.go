@@ -207,7 +207,9 @@ func TestKaynakKoruma_GizliDosyaSirdosyaIleYazilir(t *testing.T) {
 				return err
 			}
 			if d.IsDir() {
-				if d.Name() == "node_modules" || d.Name() == "testdata" || d.Name() == "sirdosya" {
+				// lisans: git'te olmayan ayrı depo (worktree'de symlink ya da kopya) — kendi
+				// denetimi orada; sirdosya: yardımcının kendisi.
+				if d.Name() == "node_modules" || d.Name() == "testdata" || d.Name() == "sirdosya" || d.Name() == "lisans" {
 					return filepath.SkipDir
 				}
 				return nil
