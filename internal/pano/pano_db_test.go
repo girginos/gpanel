@@ -195,6 +195,8 @@ func TestWidget_GenelSizintiTarayici(t *testing.T) {
 	db := pt_db(t)
 	ornekleyiciSahte(t, nil)
 	Tur(context.Background(), db) // egilim için bugünün satırları
+	// Bayi 8'in yedek hatası bildirimi: bayi 7'nin "son 7 günde yedek hatası" sayacına girmemeli.
+	pt_exec(t, db, `INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id) VALUES ('kritik','yedek','Yedek başarısız','m',20,8)`)
 	h := &Handlers{DB: db}
 	yabanci := map[int64][]string{
 		7: {"bayi8x", "kokx", "paksekiz", "pakkok", "cpanel-sekiz", "cpanel-kok", "ssl-kok"},
@@ -235,6 +237,12 @@ func TestWidget_GenelSizintiTarayici(t *testing.T) {
 	_, g := pt_get(t, h, "/pano/w/egilim", pt_tok(t, "bayi", 7))
 	if !strings.Contains(g, `"hesap":2,`) || strings.Contains(g, `"hesap":4,`) {
 		t.Errorf("bayi 7 eğilimi kendi kapsamı olmalı: %s", g)
+	}
+	if _, g := pt_get(t, h, "/pano/w/isler", pt_tok(t, "bayi", 7)); !strings.Contains(g, `"hata_7gun":0`) {
+		t.Errorf("bayi 7 yedek hatası sayacı yalnız kendi bildirimlerini saymalı: %s", g)
+	}
+	if _, g := pt_get(t, h, "/pano/w/isler", pt_tok(t, "bayi", 8)); !strings.Contains(g, `"hata_7gun":1`) {
+		t.Errorf("bayi 8 kendi yedek hatasını görmeli: %s", g)
 	}
 	_, g = pt_get(t, h, "/pano/w/egilim", pt_tok(t, "admin", 0))
 	if !strings.Contains(g, `"hesap":4,`) {
