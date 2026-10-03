@@ -38,7 +38,8 @@ func cagrilar(src, uc string) []string {
 			return out
 		}
 		j += i
-		a := strings.LastIndex(src[:j], "api.")
+		// uç metni "api." ile başlayabilir: kendisi de aranan önekte kalsın.
+		a := strings.LastIndex(src[:j+len(uc)], "api.")
 		if a < 0 {
 			i = j + len(uc)
 			continue
