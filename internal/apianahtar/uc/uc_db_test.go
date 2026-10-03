@@ -86,7 +86,7 @@ func ucGeciciDB(t *testing.T) *sql.DB {
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			actor_user_id BIGINT UNSIGNED NULL, actor_username VARCHAR(64) NOT NULL DEFAULT '', ip VARCHAR(64) NULL,
 			action VARCHAR(64) NOT NULL, target VARCHAR(255) NULL, detail JSON NULL CHECK (json_valid(detail)),
-			ok TINYINT NOT NULL DEFAULT 1, reseller_id BIGINT NOT NULL DEFAULT 0)`,
+			ok TINYINT NOT NULL DEFAULT 1, reseller_id BIGINT NOT NULL DEFAULT 0, adina_domain_id BIGINT UNSIGNED NULL)`,
 		`INSERT INTO users (id, username, role, password_hash) VALUES (1,'admin','admin','')`,
 		`INSERT INTO users (id, username, role, password_hash) VALUES (7,'bayi_a','reseller','` + string(hashA) + `'),
 			(8,'bayi_b','reseller','` + string(hashB) + `'), (9,'bayi_c','reseller','` + string(hashB) + `'),
