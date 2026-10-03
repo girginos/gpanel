@@ -160,8 +160,10 @@ func TestDomainEviOnar_SymlinkHedefiDegismez(t *testing.T) {
 				t.Fatalf("deep=%v: KURBAN DEĞİŞTİ %s: önce %+v sonra %+v\n%s", deep, p, o, s, cikti)
 			}
 		}
-		if !strings.Contains(cikti, "symlink") {
-			t.Fatalf("deep=%v: symlink uyarısı yok:\n%s", deep, cikti)
+		// Symlink sessizce atlanmalı (uyarı), "onarılamadı" hatası değil: ikinci
+		// savunma katmanına (pwd -P) düşmek ERRN'i artırıp repair'i exit 1 yapar.
+		if strings.Count(cikti, "symlink — kiracı ağacında izlenmez") != 3 || strings.Contains(cikti, "onarılamadı") {
+			t.Fatalf("deep=%v: symlink uyarısı beklenen gibi değil:\n%s", deep, cikti)
 		}
 	}
 }
@@ -222,5 +224,39 @@ func TestDomainEviOnar_DeepSabitBagDegismez(t *testing.T) {
 	cikti := onar(t, ev, true)
 	if s := oku(t, kurban); s != once {
 		t.Fatalf("sabit bağlı kurbanın sahibi değişti: %+v → %+v\n%s", once, s, cikti)
+	}
+}
+
+// TOCTOU: [ -L ] denetiminden SONRA kiracı ~/.ssh'i ev dışına symlink'le değiştirir.
+// Yarış, kiraci_dizin_onar'ın denetimle cd arasında çağırdığı basename'e kabuk
+// fonksiyonu olarak deterministik biçimde enjekte edilir. pwd -P doğrulaması
+// kurbana dokunmadan reddetmeli.
+func TestKiraciDizinOnar_DenetimSonrasiYaris(t *testing.T) {
+	rootGerek(t)
+	_, ev := evKur(t)
+	dis := t.TempDir()
+	kurban := filepath.Join(dis, "sistem")
+	mkdir(t, kurban, 0o755, 0)
+	ssh := filepath.Join(ev, ".ssh")
+	mkdir(t, ssh, 0o755, kiraciUID)
+	once := oku(t, kurban)
+
+	betik := `f=$1 ev=$2 kurban=$3; set --; source "$f" || exit 90; SEL=0
+basename() { if [ ! -L "$ev/.ssh" ]; then mv "$ev/.ssh" "$ev/.ssh-gercek"; ln -s "$kurban" "$ev/.ssh"; fi; command basename "$@"; }
+kiraci_dizin_onar "$ev/.ssh" 700 "root:root"; exit 0`
+	cmd := exec.Command("bash", "-c", betik, "bash", betikYolu(t), ev, kurban)
+	cmd.Env = append(os.Environ(), "GOSP_REPAIR_KUTUPHANE=1", "LC_ALL=C")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("betik hatası (%v): %s", err, out)
+	}
+	if fi, err := os.Lstat(ssh); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("yarış kurulmadı: %v %v\n%s", fi, err, out)
+	}
+	if s := oku(t, kurban); s != once {
+		t.Fatalf("YARIŞTA KURBAN DEĞİŞTİ: %+v → %+v\n%s", once, s, out)
+	}
+	if !strings.Contains(string(out), "onarılamadı") {
+		t.Fatalf("yarış reddedilmedi:\n%s", out)
 	}
 }
