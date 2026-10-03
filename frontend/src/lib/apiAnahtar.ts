@@ -4,7 +4,9 @@
 // onu yalnız bileşen durumunda tutar — store'a, localStorage'a, URL'ye YAZILMAZ.
 import { api } from '@/lib/api'
 
-export type AnahtarDurum = 'etkin' | 'gecis' | 'suresi_doldu' | 'iptal'
+// askida: anahtar geçerli ama sahibi bayi askıda (kayıt değişmez; askıdan alınınca
+// kendiliğinden yeniden çalışır).
+export type AnahtarDurum = 'etkin' | 'gecis' | 'askida' | 'suresi_doldu' | 'iptal'
 
 export interface ApiAnahtari {
   id: number
@@ -22,6 +24,7 @@ export interface ApiAnahtari {
   durum: AnahtarDurum
   iptal_neden: string
   iptal_yonetim: boolean
+  sahip_askida: boolean
   sahip_id: number
   sahip_rol: 'admin' | 'reseller'
   sahip_ad?: string
@@ -78,8 +81,15 @@ export async function anahtarYenile(id: number, parola: string, kod: string, gec
   return (await api.post<TekKezYanit>(`/api-anahtarlari/${id}/yenile`, { parola, kod, gecis_saat })).data
 }
 
+// İptal: yumuşak (satır ve iz kalır).
 export async function anahtarIptal(id: number): Promise<void> {
-  await api.delete(`/api-anahtarlari/${id}`)
+  await api.post(`/api-anahtarlari/${id}/iptal`)
+}
+
+// Kalıcı silme: satır gider, denetim geçmişi kalır. Etkin anahtarda onayAd =
+// anahtarın adı zorunlu ("iptal et ve sil"); iptal edilmiş/süresi dolmuşta gerekmez.
+export async function anahtarSil(id: number, onayAd?: string): Promise<void> {
+  await api.delete(`/api-anahtarlari/${id}`, onayAd ? { data: { onay_ad: onayAd } } : undefined)
 }
 
 // Sunucunun makine okunur hata kodu (ör. iki_fa_gerekli, parola_hatali).

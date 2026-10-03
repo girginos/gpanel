@@ -1,10 +1,14 @@
 // Package uc — API anahtarı yönetim uçları (oluştur / listele / döndür / iptal /
-// ben). middleware → apianahtar bağımlılığı tek yönlü kalsın diye ayrı alt paket.
+// kalıcı sil / ben). middleware → apianahtar bağımlılığı tek yönlü kalsın diye ayrı alt paket.
 //
-// 🔴 Kapsam: bayi YALNIZ kendi anahtarlarını görür/iptal eder (WHERE sahip_id=uid;
-// istemci parametresi yok sayılır; yabancı kimlik 404 — varlık sızmaz). Kök kendi
-// anahtarlarını yönetir, bayi anahtarlarını listeler ve iptal eder ama ÜRETEMEZ ve
-// DÖNDÜREMEZ (gizli, sahibinden başkasının elinde doğmasın).
+// 🔴 Kapsam: bayi YALNIZ kendi anahtarlarını görür/iptal eder/siler (WHERE
+// sahip_id=uid; istemci parametresi yok sayılır; yabancı kimlik 404 — varlık
+// sızmaz). Kök kendi anahtarlarını yönetir, bayi anahtarlarını listeler, iptal eder
+// ve siler ama ÜRETEMEZ ve DÖNDÜREMEZ (gizli, sahibinden başkasının elinde doğmasın).
+//
+// Uç anlamları: POST /{id}/iptal = yumuşak iptal (satır + iz kalır); DELETE /{id} =
+// kalıcı silme (satır gider, denetim geçmişi kalır). Etkin anahtar DELETE ile
+// ancak onay_ad = anahtarın adı verilirse silinir ("iptal et ve sil"); onaysız 409.
 //
 // 🔴 Tam anahtar YALNIZ oluştur/döndür yanıtında bir kez döner (no-store); hiçbir
 // liste yanıtında ozet ya da anahtar alanı yoktur. Denetime yalnız önek yazılır.
@@ -15,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -70,6 +75,7 @@ type Gorunum struct {
 	Durum         string   `json:"durum"`
 	IptalNeden    string   `json:"iptal_neden"`
 	IptalYonetim  bool     `json:"iptal_yonetim"`
+	SahipAskida   bool     `json:"sahip_askida"` // sahibi askıdaki bayi (kayıt değişmez)
 	SahipID       int64    `json:"sahip_id"`
 	SahipRol      string   `json:"sahip_rol"`
 	SahipAd       string   `json:"sahip_ad,omitempty"`
@@ -80,7 +86,8 @@ func gorunum(k *apianahtar.Kayit, simdi int64, sahipAdGoster bool) Gorunum {
 		ID: k.ID, Ad: k.Ad, Gosterim: apianahtar.Gosterim(k.Onek, k.Son4), Onek: k.Onek,
 		Izinler: k.Izinler, IPler: k.IPler, HizDk: k.HizDk, SonKullanma: k.SonKullanma,
 		Olusturma: k.Olusturma, SonKullanim: k.SonKullanim, SonKullanimIP: k.SonKullanimIP,
-		IptalAt: k.IptalAt, Durum: k.Durum(simdi), IptalNeden: k.IptalNeden,
+		IptalAt: k.IptalAt, Durum: k.GorunenDurum(simdi), IptalNeden: k.IptalNeden,
+		SahipAskida:  k.SahipAskida(),
 		IptalYonetim: k.IptalEdenID > 0 && k.IptalEdenID != k.SahipID,
 		SahipID:      k.SahipID, SahipRol: k.SahipRol,
 	}
@@ -471,7 +478,7 @@ func (h *Handlers) Yenile(w http.ResponseWriter, r *http.Request) {
 	h.tekKezYanit(w, yeni, tam, simdi.Unix())
 }
 
-// Iptal: DELETE /api-anahtarlari/{id} — yumuşak iptal (satır ve iz kalır).
+// Iptal: POST /api-anahtarlari/{id}/iptal — yumuşak iptal (satır ve iz kalır).
 // Bayi yalnız kendisininkini (yabancı → 404); kök kendisininkini ve bayi anahtarlarını.
 func (h *Handlers) Iptal(w http.ResponseWriter, r *http.Request) {
 	c, ok := kimlik(r)
@@ -514,6 +521,79 @@ func (h *Handlers) Iptal(w http.ResponseWriter, r *http.Request) {
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "api_anahtar.iptal", apianahtar.Gosterim(k.Onek, k.Son4),
 		fmt.Sprintf("ad=%s neden=%s", k.Ad, neden), kapsamOf(c), true)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type silIstek struct {
+	OnayAd string `json:"onay_ad"`
+}
+
+// Sil: DELETE /api-anahtarlari/{id} — anahtar satırını KALICI siler; denetim
+// geçmişi (audit_log) silinmez. İptal edilmiş / süresi dolmuş anahtar doğrudan
+// silinir. Etkin (geçiş süresindeki ve sahibi askıdaki dahil) anahtar yalnız gövdede
+// onay_ad = anahtarın adı ile silinir: tek adımda "iptal et ve sil" (satır gider →
+// sonraki istek 401). Onaysız 409 anahtar_etkin. Bayi yalnız kendisininkini
+// (yabancı → 404); kök kendisininkini ve bayi anahtarlarını.
+func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
+	c, ok := kimlik(r)
+	if !ok {
+		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
+		return
+	}
+	id := idParam(r)
+	var req silIstek
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+			return
+		}
+	}
+	k, err := apianahtar.IDGetir(r.Context(), h.DB, id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "API anahtarı okunamadı")
+		return
+	}
+	sahipKosul := int64(0)
+	if c.Role == apianahtar.RolBayi {
+		sahipKosul = c.UserID
+	}
+	if k == nil || id == 0 || (sahipKosul > 0 && k.SahipID != sahipKosul) {
+		httpx.WriteError(w, http.StatusNotFound, "API anahtarı bulunamadı")
+		return
+	}
+	simdi := simdiFn().Unix()
+	etkin := k.Gecerli(simdi)
+	if etkin {
+		onay := strings.TrimSpace(req.OnayAd)
+		if onay == "" {
+			httpx.WriteErrorKod(w, http.StatusConflict, "anahtar hâlâ etkin; önce iptal edin ya da adını yazarak \"iptal et ve sil\" onayı verin", "anahtar_etkin")
+			return
+		}
+		if onay != k.Ad {
+			httpx.WriteErrorKod(w, http.StatusBadRequest, "onay için yazılan ad anahtarın adıyla eşleşmiyor", "onay_ad_uyusmuyor")
+			return
+		}
+	}
+	durum := k.GorunenDurum(simdi)
+	silindi, err := apianahtar.Sil(r.Context(), h.DB, id, sahipKosul, !etkin, simdi)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "API anahtarı silinemedi")
+		return
+	}
+	if !silindi {
+		httpx.WriteError(w, http.StatusNotFound, "API anahtarı bulunamadı")
+		return
+	}
+	detay := fmt.Sprintf("ad=%s durum=%s", k.Ad, durum)
+	if etkin {
+		detay += " (etkinken iptal edilip silindi)"
+	}
+	if k.SahipID != c.UserID {
+		detay += fmt.Sprintf(" sahip=%s", k.SahipAd)
+	}
+	uid, kul := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uid, kul, "api_anahtar.sil", apianahtar.Gosterim(k.Onek, k.Son4), detay, kapsamOf(c), true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

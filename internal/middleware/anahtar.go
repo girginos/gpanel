@@ -171,8 +171,16 @@ func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, tok
 		red(http.StatusUnauthorized, "geçersiz oturum", "rol tutarsız")
 		return
 	}
+	// Bayi askısı: anahtar İPTAL EDİLMEZ, askıda kalır (kullanıcı kararı 2026-10-03).
+	// Sahibin durumu her istekte users.status'tan okunur (OnekleGetir JOIN; önbellek
+	// yok) → askıdan alınınca anahtar kendiliğinden yeniden çalışır. "active" dışı her
+	// durum reddedilir (fail-closed); kod hesap_askida DEĞİL bayi_askida — ön yüzün
+	// oturum askı ekranıyla karışmasın, istemci geçici olduğunu bilsin.
 	if k.SahipRol == apianahtar.RolBayi && k.SahipDurum != "active" {
-		red(http.StatusForbidden, httpx.HesapAskidaMesaj, "hesap askıda")
+		if anahtarRedSeyrek(k.ID, simdi) {
+			anahtarRedDenetim(r, k, "bayi askıda")
+		}
+		httpx.WriteErrorKod(w, http.StatusForbidden, apianahtar.BayiAskidaMesaj, apianahtar.KodBayiAskida)
 		return
 	}
 	// Kapı: kök anahtarı yalnız yönetici kapısında, bayi anahtarı yalnız bayi

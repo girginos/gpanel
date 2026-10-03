@@ -330,8 +330,10 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		if askida {
 			// Askiya alinan bayi ACIK oturumla is yapmaya devam edemez.
 			middleware.OturumlariDusur(h.DB, id)
-			// API anahtarları da iptal (askıdan alınınca KENDİLİĞİNDEN geri gelmez).
-			bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_askiya_alindi")
+			// 🔴 API anahtarları İPTAL EDİLMEZ, ASKIDA kalır (kullanıcı kararı
+			// 2026-10-03): doğrulama users.status'u her istekte okur ve askıdaki
+			// bayinin anahtarını 403 bayi_askida ile reddeder; askıdan alınınca
+			// anahtar kendiliğinden yeniden çalışır (middleware/anahtar.go).
 		}
 		// 🔴 Kilit: askiya alma sirasinda UCUSTA olan "hosting olustur" istegi
 		// bitene kadar bekle; aksi halde yeni hosting askidan MUAF canli doguyor

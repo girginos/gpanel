@@ -41,7 +41,37 @@ const (
 	DurumGecis  = "gecis" // yenilendi; iptal_at gelecekte
 	DurumSuresi = "suresi_doldu"
 	DurumIptal  = "iptal"
+	// DurumAskida: YALNIZ görünüm durumu — anahtar kendi başına geçerli ama sahibi
+	// bayi askıda (users.status='suspended'). Kayıtta hiçbir şey değişmez; bayi
+	// askıdan alınınca anahtar kendiliğinden yeniden çalışır (kullanıcı kararı
+	// 2026-10-03). Doğrulama bu durumu middleware'de 403 bayi_askida ile reddeder.
+	DurumAskida = "askida"
 )
+
+// KodBayiAskida: askıdaki bayinin anahtarıyla gelen isteğe dönen makine okunur kod.
+// Oturum askısının "hesap_askida" kodundan AYRI: ön yüz o kodla paneli kapatır;
+// anahtar istemcisi (WHMCS/betik) ise bunun geçici olduğunu bilmeli.
+const (
+	KodBayiAskida   = "bayi_askida"
+	BayiAskidaMesaj = "bayi hesabı askıya alınmış; API anahtarı bayi askıdan alınınca yeniden çalışır"
+)
+
+// SahipAskida: anahtarın sahibi askıdaki bir bayi mi? Askının TEK kaynağı
+// users.status (reseller.Guncelle yazar; hesapaski bayi zinciri de oradan okur).
+func (k *Kayit) SahipAskida() bool {
+	return k.SahipRol == RolBayi && k.SahipUyeRol == "reseller" && k.SahipDurum == "suspended"
+}
+
+// GorunenDurum: listede gösterilecek durum — geçerli bir anahtarın sahibi askıdaki
+// bayiyse DurumAskida, değilse Durum. İptal/süresi dolmuş anahtar askıda görünmez
+// (askıdan alınınca da geri gelmeyecek).
+func (k *Kayit) GorunenDurum(simdi int64) string {
+	d := k.Durum(simdi)
+	if (d == DurumEtkin || d == DurumGecis) && k.SahipAskida() {
+		return DurumAskida
+	}
+	return d
+}
 
 // Durum: anahtarın şu anki durumu.
 func (k *Kayit) Durum(simdi int64) string {
@@ -177,8 +207,34 @@ func Iptal(ctx context.Context, db *sql.DB, id, sahipKosul, eden int64, neden st
 	return n > 0, nil
 }
 
+// Sil: anahtar satırını KALICI siler (denetim geçmişi audit_log'da kalır; FK yok).
+// sahipKosul > 0 ise YALNIZ o sahibin satırı silinir (bayi IDOR kilidi: yabancı
+// satır 0 satır = bulunamadı). yalnizGecersiz → yalnız iptal edilmiş ya da süresi
+// dolmuş satır silinir (karar ile silme arasında durum değişse bile etkin anahtar
+// onaysız silinmesin). Silindi mi döner.
+func Sil(ctx context.Context, db *sql.DB, id, sahipKosul int64, yalnizGecersiz bool, simdi int64) (bool, error) {
+	q := `DELETE FROM api_anahtarlari WHERE id=?`
+	args := []any{id}
+	if sahipKosul > 0 {
+		q += ` AND sahip_id=?`
+		args = append(args, sahipKosul)
+	}
+	if yalnizGecersiz {
+		q += ` AND ((iptal_at IS NOT NULL AND iptal_at <= FROM_UNIXTIME(?))
+			OR (son_kullanma_at IS NOT NULL AND son_kullanma_at <= FROM_UNIXTIME(?)))`
+		args = append(args, simdi, simdi)
+	}
+	res, err := db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // SahibinTumunuIptal: bir sahibin TÜM geçerli anahtarlarını şimdi iptal eder
-// (bayi parolası sıfırlandı / bayi askıya alındı / silindi). Etkilenen sayı döner.
+// (bayi parolası sıfırlandı / bayi silindi). Bayi askısı İPTAL ETMEZ — askı
+// doğrulama anında denetlenir (SahipAskida). Etkilenen sayı döner.
 // Hata günlüğe yazılır ve döner; çağıran asıl işlemi BOZMAZ ama hatayı denetime
 // yansıtabilir.
 func SahibinTumunuIptal(ctx context.Context, db *sql.DB, sahipID, eden int64, neden string) (int64, error) {

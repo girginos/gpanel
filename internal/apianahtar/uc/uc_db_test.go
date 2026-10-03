@@ -153,7 +153,8 @@ func ucRouter(db *sql.DB) http.Handler {
 			yonetim.Get("/api-anahtarlari/izin-gruplari", h.Katalog)
 			yonetim.Post("/api-anahtarlari", h.Olustur)
 			yonetim.Post("/api-anahtarlari/{id}/yenile", h.Yenile)
-			yonetim.Delete("/api-anahtarlari/{id}", h.Iptal)
+			yonetim.Post("/api-anahtarlari/{id}/iptal", h.Iptal)
+			yonetim.Delete("/api-anahtarlari/{id}", h.Sil)
 			r.With(middleware.AdminVeyaReseller).Get("/api-anahtari/ben", h.Ben)
 			r.With(middleware.AdminVeyaReseller).Get("/domains", func(w http.ResponseWriter, r *http.Request) {
 				httpx.WriteJSON(w, 200, map[string]any{"rid": middleware.ResellerIDFrom(r)})
@@ -349,7 +350,7 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	if degisti, err := apianahtar.Iptal(t.Context(), db, b.Kayit.ID, 7, 7, "deneme", time.Now().Unix()); err != nil || degisti {
 		t.Fatalf("depo: sahip koşullu iptal yabancı anahtarı etkiledi: %v %v", degisti, err)
 	}
-	if s := ucIstek(t, h, "DELETE", fmt.Sprintf("/api/v1/api-anahtarlari/%d", b.Kayit.ID), jA, nil); s.kod != 404 {
+	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/iptal", b.Kayit.ID), jA, nil); s.kod != 404 {
 		t.Fatalf("IDOR: bayi A, B'nin anahtarını iptal: %d %s", s.kod, s.govde)
 	}
 	if s := ucIstek(t, h, "GET", "/api/v1/domains/43", b.Anahtar, nil); s.kod != 200 {
@@ -365,7 +366,7 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/yenile", b.Kayit.ID), jK, map[string]any{"parola": "kok-parola"}); s.kod != 404 {
 		t.Fatalf("kök bayi anahtarını DÖNDÜREMEZ (gizli sahibinde doğar): %d", s.kod)
 	}
-	if s := ucIstek(t, h, "DELETE", fmt.Sprintf("/api/v1/api-anahtarlari/%d", b.Kayit.ID), jK, nil); s.kod != 200 {
+	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/iptal", b.Kayit.ID), jK, nil); s.kod != 200 {
 		t.Fatalf("kök bayi anahtarını iptal: %d %s", s.kod, s.govde)
 	}
 	if s := ucIstek(t, h, "GET", "/api/v1/domains/43", b.Anahtar, nil); s.kod != 401 {
