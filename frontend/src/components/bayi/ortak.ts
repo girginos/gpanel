@@ -13,6 +13,9 @@ export type BayiDomain = {
   plan_ad?: string
   boyut_kb: number
   disk_kota_mb?: number
+  trafik_kb?: number
+  trafik_kota_mb?: number
+  ipv4?: string
   askida?: boolean
   olusturulma?: string
   ssl?: boolean
