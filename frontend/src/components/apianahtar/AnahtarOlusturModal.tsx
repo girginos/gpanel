@@ -119,8 +119,14 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
                 </div>
                 <div className="flex shrink-0 gap-1 rounded-lg bg-slate-50 p-0.5 dark:bg-dark-700" role="group" aria-label={cevir(g.etiket)}>
                   {erisimDugmesi(g.ad, '', cevir('Yok'))}
-                  {erisimDugmesi(g.ad, 'oku', cevir('Okuma'))}
-                  {!g.yalniz_oku && erisimDugmesi(g.ad, 'yaz', cevir('Okuma + yazma'))}
+                  {g.yalniz_yaz ? (
+                    erisimDugmesi(g.ad, 'yaz', cevir('İzin ver'))
+                  ) : (
+                    <>
+                      {erisimDugmesi(g.ad, 'oku', cevir('Okuma'))}
+                      {!g.yalniz_oku && erisimDugmesi(g.ad, 'yaz', cevir('Okuma + yazma'))}
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -171,6 +177,10 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
             )}
           </div>
         </div>
+
+        <p className="text-xs text-slate-500 dark:text-dark-300">
+          {cevirT('Anahtar her istekte kullanıcı adınızla birlikte gönderilir: Authorization: gosp {0}:<anahtar>', katalog?.kullanici_adi || cevir('<kullanıcı adı>'))}
+        </p>
 
         {hata && <UyariKutusu ton="tehlike" kucuk>{hata}</UyariKutusu>}
       </form>

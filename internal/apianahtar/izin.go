@@ -39,6 +39,9 @@ type Grup struct {
 	Roller   []string `json:"roller"`
 	// YalnizOku: grupta yazma ucu yok (denetim, bildirim).
 	YalnizOku bool `json:"yalniz_oku"`
+	// YalnizYaz: grupta okuma ucu yok — tek düzey "yaz" (parola değiştirme).
+	// "grup:oku" reddedilir; arayüz yalnız Yok / İzin ver gösterir.
+	YalnizYaz bool `json:"yalniz_yaz"`
 }
 
 // Kural: bir rotanın gerektirdiği izin.
@@ -50,7 +53,10 @@ type Kural struct {
 // Gruplar: v1 grupları. Sıra arayüzdeki sıradır.
 var Gruplar = []Grup{
 	{Ad: "hesap", Etiket: "Hosting hesapları", Aciklama: "Hosting hesabı listeleme, oluşturma, silme, askı, plan ve PHP değişikliği", Roller: []string{RolKok, RolBayi}},
-	{Ad: "parola", Etiket: "Hosting parolaları", Aciklama: "Hosting hesabının FTP ve veritabanı parolasını değiştirme (faturalama otomasyonu ChangePassword)", Roller: []string{RolKok, RolBayi}},
+	// FTP ve DB parolası AYRI izinlerdir (kullanıcı kararı 2026-10-03: "DB parolası
+	// ile FTP parolasının alakası olmasın"). Varsayılan kapalı (her izin gibi).
+	{Ad: GrupFTPParola, Etiket: "FTP parolası değiştir", Aciklama: "Hosting hesabının FTP parolasını (ana ve ek FTP hesapları) değiştirme; veritabanı parolasına dokunmaz", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
+	{Ad: GrupDBParola, Etiket: "DB parolası değiştir", Aciklama: "Hosting veritabanı kullanıcısının parolasını değiştirme; FTP parolasına dokunmaz", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
 	{Ad: "plan", Etiket: "Hosting planları", Aciklama: "Hosting planlarını listeleme ve yönetme", Roller: []string{RolKok, RolBayi}},
 	{Ad: "dns", Etiket: "DNS", Aciklama: "Alan adı DNS kayıtları", Roller: []string{RolKok, RolBayi}},
 	{Ad: "veritabani", Etiket: "Veritabanları", Aciklama: "Veritabanı listeleme, oluşturma, silme", Roller: []string{RolKok, RolBayi}},
@@ -62,6 +68,16 @@ var Gruplar = []Grup{
 }
 
 const p = "/api/v1"
+
+// Parola izin grupları.
+const (
+	GrupFTPParola = "ftp.parola"
+	GrupDBParola  = "db.parola"
+	// grupEskiParola: D4 ilk sürümündeki birleşik "parola" izni (FTP + DB). Yeni
+	// anahtarda SEÇİLEMEZ; DB'de kalmış satır okunurken IzinleriGoc ile iki yeni
+	// izne açılır (eski anahtarın yetkisi daralmaz/genişlemez: ikisi de parola).
+	grupEskiParola = "parola"
+)
 
 // Rotalar: anahtara AÇIK uçların TEK kaynağı. Değişiklik testdata altın dosyasında
 // diff olarak görünür (TestAnahtarUcListesiAltin).
@@ -80,9 +96,11 @@ var Rotalar = map[string]Kural{
 	"POST " + p + "/domains/{id}/askiya-al":  {"hesap", Yaz},
 	"POST " + p + "/domains/{id}/askidan-al": {"hesap", Yaz},
 	"PUT " + p + "/domains/{id}/php":         {"hesap", Yaz},
-	// parola (hosting hesabının kaynak parolaları — anahtar SAHİBİNİN kimliği DEĞİL)
-	"PUT " + p + "/domains/{id}/ftp/password": {"parola", Yaz},
-	"PUT " + p + "/databases/{dbid}/password": {"parola", Yaz},
+	// parola (hosting hesabının kaynak parolaları — anahtar SAHİBİNİN kimliği DEĞİL).
+	// FTP ve DB ayrı izin; bir uç ötekinin parolasına DOKUNMAZ.
+	"PUT " + p + "/domains/{id}/ftp/password":                         {GrupFTPParola, Yaz},
+	"PUT " + p + "/domains/{id}/ftp-accounts/{kullanici}/password":    {GrupFTPParola, Yaz},
+	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": {GrupDBParola, Yaz},
 	// plan
 	"GET " + p + "/plans":              {"plan", Oku},
 	"GET " + p + "/plans/{id}":         {"plan", Oku},
@@ -198,10 +216,11 @@ var KimlikUclari = map[string]bool{
 // KimlikBenzeriIzinli: adı kimlik/parola çağrıştıran ama BİLİNÇLİ olarak anahtara
 // açılan uçlar (gerekçeli). Rota envanteri testi bu ikisini ayırt eder.
 var KimlikBenzeriIzinli = map[string]string{
-	"PUT " + p + "/domains/{id}/ftp/password": "hosting hesabının FTP parolası (WHMCS ChangePassword) — anahtar sahibinin kimliği değil; ayrı 'parola' izni ister",
-	"PUT " + p + "/databases/{dbid}/password": "hosting veritabanı parolası — ayrı 'parola' izni ister",
-	"GET " + p + "/kapi/adres":                "yalnız yeni panel adresi döner, jeton basmaz",
-	"GET " + p + "/api-anahtari/ben":          "anahtarın kendi meta verisi (gizli/özet DÖNMEZ)",
+	"PUT " + p + "/domains/{id}/ftp/password":                         "hosting hesabının ana FTP parolası (WHMCS ChangePassword) — anahtar sahibinin kimliği değil; ayrı 'ftp.parola' izni ister",
+	"PUT " + p + "/domains/{id}/ftp-accounts/{kullanici}/password":    "hosting hesabının FTP hesabı parolası — ayrı 'ftp.parola' izni ister",
+	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": "hosting veritabanı kullanıcısı parolası — ayrı 'db.parola' izni ister; FTP'ye dokunmaz",
+	"GET " + p + "/kapi/adres":                                        "yalnız yeni panel adresi döner, jeton basmaz",
+	"GET " + p + "/api-anahtari/ben":                                  "anahtarın kendi meta verisi (gizli/özet DÖNMEZ)",
 }
 
 // GrupBul: ada göre grup.
@@ -248,6 +267,9 @@ func IzinleriKanonik(ham []string, rol string) ([]string, error) {
 		if g.YalnizOku && erisim == Yaz {
 			return nil, ErrIzin
 		}
+		if g.YalnizYaz && erisim == Oku {
+			return nil, ErrIzin
+		}
 		if enIyi[grup] != Yaz {
 			enIyi[grup] = erisim
 		}
@@ -271,6 +293,40 @@ func IzinleriCoz(s string) []string {
 			out = append(out, x)
 		}
 	}
+	return out
+}
+
+// IzinleriGoc: DB'den okunan izin listesinde eski birleşik "parola:yaz" iznini
+// "ftp.parola:yaz" + "db.parola:yaz" olarak açar (D4 ilk sürüm anahtarları).
+// Diğer girdilere dokunmaz; sonuç tekilleştirilmiş ve sıralıdır.
+func IzinleriGoc(izinler []string) []string {
+	eski := false
+	for _, iz := range izinler {
+		if g, _, _ := strings.Cut(iz, ":"); g == grupEskiParola {
+			eski = true
+			break
+		}
+	}
+	if !eski {
+		return izinler
+	}
+	set := map[string]bool{}
+	for _, iz := range izinler {
+		g, e, _ := strings.Cut(iz, ":")
+		if g != grupEskiParola {
+			set[iz] = true
+			continue
+		}
+		if e == Yaz { // eski "parola:oku" hiçbir uca yetmiyordu → karşılığı yok
+			set[GrupFTPParola+":"+Yaz] = true
+			set[GrupDBParola+":"+Yaz] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for iz := range set {
+		out = append(out, iz)
+	}
+	sort.Strings(out)
 	return out
 }
 

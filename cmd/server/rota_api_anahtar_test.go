@@ -136,6 +136,10 @@ func TestKimlikUclariSiniflandirildi(t *testing.T) {
 var KimlikDisiGerekce = map[string]string{
 	"GET /api/v1/marka/gorsel/{anahtar}/{yuva}": "kimliksiz marka görseli; 'anahtar' görsel kimliği, kimlik bilgisi değil",
 	"GET /api/v1/marka/oturum":                  "oturumdaki kullanıcının marka görünümü (salt okuma); jeton basmaz",
+	// Panel arayüzünün DB parolası ucu: kullanıcısız DB'de KULLANICI OLUŞTURMA dalı
+	// da taşır ve arayüzün (>=6) kuralını kullanır. API'deki karşılığı
+	// PUT /domains/{id}/databases/users/{kullanici}/password (db.parola).
+	"PUT /api/v1/databases/{dbid}/password": "arayüz DB parolası + kullanıcı oluşturma; API karşılığı databases/users/{kullanici}/password",
 }
 
 func TestAnahtarUcListesiAltin(t *testing.T) {

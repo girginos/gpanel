@@ -83,6 +83,11 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"db.parola":            {TR: "Veritabanı parolası değiştirildi", EN: "Database password changed"},
 	"db.kullanici-olustur": {TR: "Veritabanı kullanıcısı oluşturuldu", EN: "Database user created"},
 	"db.optimize":          {TR: "Veritabanı iyileştirildi", EN: "Database optimized"},
+	"db.parola_api":        {TR: "Veritabanı parolası API ile değiştirildi", EN: "Database password changed via API"},
+
+	// FTP
+	"ftp.parola":     {TR: "FTP parolası değiştirildi", EN: "FTP password changed"},
+	"ftp.parola_api": {TR: "FTP parolası API ile değiştirildi", EN: "FTP password changed via API"},
 
 	// Bayi
 	"bayi.olustur":    {TR: "Bayi oluşturuldu", EN: "Reseller created"},

@@ -31,12 +31,36 @@ function DurumRozeti({ k }: { k: ApiAnahtari }) {
   }
 }
 
+// kimlikBasligi: örneklerdeki Authorization değeri — anahtar YALNIZ sahibinin
+// kullanıcı adıyla geçer ("gosp <kullanıcı adı>:<anahtar>").
+function kimlikBasligi(katalog: Katalog | null): string {
+  return `gosp ${katalog?.kullanici_adi || '<kullanici>'}:gosp_xxxxxxxxxxxx_…`
+}
+
+// kullanimOrnekleri: curl örnekleri (bağlantı testi, listeleme, üç parola ucu).
+function kullanimOrnekleri(taban: string, kimlik: string): { baslik: string; kod: string }[] {
+  const h = `-H "Authorization: ${kimlik}"`
+  const put = (yol: string) => `curl -s -X PUT ${taban}${yol} \\\n  ${h} \\\n  -H "Content-Type: application/json" \\\n  -d '{"password":"<yeni-parola>"}'`
+  return [
+    { baslik: 'Bağlantıyı test et', kod: `curl -s ${taban}/api-anahtari/ben \\\n  ${h}` },
+    { baslik: 'Hosting hesaplarını listele', kod: `curl -s ${taban}/domains \\\n  ${h}` },
+    { baslik: 'Hostingin ana FTP parolasını değiştir (FTP parolası izni)', kod: put('/domains/{id}/ftp/password') },
+    { baslik: 'FTP hesabının parolasını değiştir (FTP parolası izni)', kod: put('/domains/{id}/ftp-accounts/{kullanici}/password') },
+    { baslik: 'Veritabanı kullanıcısının parolasını değiştir (DB parolası izni)', kod: put('/domains/{id}/databases/users/{kullanici}/password') },
+  ]
+}
+
 function IzinRozetleri({ k, katalog }: { k: ApiAnahtari; katalog: Katalog | null }) {
   return (
     <div className="flex flex-wrap gap-1">
       {k.izinler.map((iz) => {
         const [g, e] = iz.split(':')
-        const etiket = katalog?.gruplar.find((x) => x.ad === g)?.etiket || g
+        const grup = katalog?.gruplar.find((x) => x.ad === g)
+        const etiket = grup?.etiket || g
+        // Tek düzeyli (yalnız yazma) izin — parola değiştirme: düzey eki gösterilmez.
+        if (grup?.yalniz_yaz) {
+          return <Badge key={iz} color="primary" variant="outlined" className="text-[11px]">{cevir(etiket)}</Badge>
+        }
         return (
           <Badge key={iz} color={e === 'yaz' ? 'primary' : 'info'} variant="outlined" className="text-[11px]" title={e === 'yaz' ? cevir('okuma + yazma') : cevir('okuma')}>
             {cevir(etiket)}{e === 'yaz' ? ' · RW' : ' · R'}
@@ -264,18 +288,20 @@ export default function ApiAnahtarlariPage() {
       <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
         <h2 className="text-base font-semibold text-slate-900 dark:text-dark-50">{cevir('Kullanım')}</h2>
         <p className="mt-1.5 text-sm text-slate-600 dark:text-dark-200">
-          {cevir('Anahtarı her istekte Authorization başlığında gönderin. Anahtar yalnız kendi kapınızdan (kök anahtarı yönetici portundan, bayi anahtarı bayi portundan) ve yalnız sunucudan sunucuya çağrılarda çalışır; tarayıcıdan (Origin başlığıyla) gelen istekler reddedilir.')}
+          {cevirT('Anahtarı her istekte, kullanıcı adınızla birlikte Authorization başlığında gönderin: {0}. Anahtar başka bir kullanıcı adıyla geçmez.', `gosp ${katalog?.kullanici_adi || cevir('<kullanıcı adı>')}:<${cevir('anahtar')}>`)}{' '}
+          {cevir('Anahtar yalnız kendi kapınızdan (kök anahtarı yönetici portundan, bayi anahtarı bayi portundan) ve yalnız sunucudan sunucuya çağrılarda çalışır; tarayıcıdan (Origin başlığıyla) gelen istekler reddedilir.')}
         </p>
         <div className="mt-3 space-y-3">
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-dark-300">{cevir('Bağlantıyı test et')}</div>
-            <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 dark:bg-dark-900"><code>{`curl -s ${taban}/api-anahtari/ben \\\n  -H "Authorization: Bearer gosp_xxxxxxxxxxxx_…"`}</code></pre>
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-dark-300">{cevir('Hosting hesaplarını listele')}</div>
-            <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 dark:bg-dark-900"><code>{`curl -s ${taban}/domains \\\n  -H "Authorization: Bearer gosp_xxxxxxxxxxxx_…"`}</code></pre>
-          </div>
+          {kullanimOrnekleri(taban, kimlikBasligi(katalog)).map((o) => (
+            <div key={o.baslik}>
+              <div className="mb-1 text-xs font-medium text-slate-500 dark:text-dark-300">{cevir(o.baslik)}</div>
+              <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 dark:bg-dark-900"><code>{o.kod}</code></pre>
+            </div>
+          ))}
         </div>
+        <p className="mt-3 text-xs text-slate-500 dark:text-dark-300">
+          {cevir('Parola uçlarında gövde boş bırakılırsa ("password" gönderilmezse) sunucu güçlü bir parola üretir ve yanıtta yalnız bir kez döndürür. FTP ve veritabanı parolaları birbirinden bağımsızdır; biri değişince öteki değişmez.')}
+        </p>
         <UyariKutusu ton="bilgi" kucuk className="mt-4">
           {cevir('Anahtar giriş, parola/2FA değişikliği, müşteri adına oturum, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez.')}
           {' '}{cevir('Bayi parolası sıfırlandığında ya da bayi silindiğinde o bayinin tüm anahtarları iptal edilir. Bayi askıya alındığında anahtarları iptal edilmez, askıda kalır; bayi askıdan alınınca yeniden çalışır.')}
@@ -284,7 +310,7 @@ export default function ApiAnahtarlariPage() {
 
       <AnahtarOlusturModal acik={olusturAcik} katalog={katalog} onKapat={() => setOlusturAcik(false)} onOlusturuldu={tekKezGoster} />
       <AnahtarYenileModal hedef={yenileHedef} onKapat={() => setYenileHedef(null)} onYenilendi={tekKezGoster} />
-      <AnahtarGosterModal anahtar={tekKez?.anahtar || null} ad={tekKez?.anahtar_kaydi.ad || ''} onKapat={() => setTekKez(null)} />
+      <AnahtarGosterModal anahtar={tekKez?.anahtar || null} ad={tekKez?.anahtar_kaydi.ad || ''} kullaniciAdi={katalog?.kullanici_adi || ''} onKapat={() => setTekKez(null)} />
     </div>
   )
 }

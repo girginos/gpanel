@@ -41,6 +41,16 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := strings.TrimSpace(r.Header.Get("Authorization"))
+			// API anahtarı: "gosp <kullanıcı adı>:<anahtar>" — JWT yolundan AYRI dal
+			// (bkz. anahtar.go, apianahtar/kimlik.go).
+			if deger, ok := apianahtar.SemaMi(raw); ok {
+				if len(deger) > 8192 {
+					httpx.WriteError(w, http.StatusUnauthorized, "geçersiz oturum")
+					return
+				}
+				anahtarIstek(w, r, next, deger, kapiCoz(r))
+				return
+			}
 			const p = "Bearer "
 			if !strings.HasPrefix(raw, p) {
 				httpx.WriteError(w, http.StatusUnauthorized, "yetkilendirme gerekli")
@@ -54,9 +64,10 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 			}
 			istekKapi := kapiCoz(r)
 
-			// API anahtarı (gosp_…): JWT yolundan AYRI dal — bkz. anahtar.go.
+			// 🔴 "Bearer gosp_…" (kullanıcı adısız eski biçim) REDDEDİLİR: anahtar
+			// yalnız sahibinin kullanıcı adıyla geçerlidir. Hatalı deneme sayılır.
 			if apianahtar.AnahtarMi(tokenRaw) {
-				anahtarIstek(w, r, next, tokenRaw, istekKapi)
+				anahtarEskiBicim(w, r)
 				return
 			}
 

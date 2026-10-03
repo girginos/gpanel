@@ -112,13 +112,38 @@ func (s *akSahne) akEkle(t *testing.T, rol string, sahip int64, izinler, ipler [
 		degistir(k)
 	}
 	s.kayitlar[u.Onek] = k
+	if rol == apianahtar.RolKok {
+		akKullanici[u.Tam] = apianahtar.KokKullaniciAdi
+	} else {
+		akKullanici[u.Tam] = k.SahipAd
+	}
 	return u.Tam
+}
+
+// akKullanici: anahtar → sahibinin API kullanıcı adı (akIstek doğru biçimi kurar).
+var akKullanici = map[string]string{}
+
+// akIstekHam: Authorization başlığını olduğu gibi gönderir.
+func akIstekHam(h http.Handler, metod, yol, baslik string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(metod, yol, nil)
+	req.Header.Set("Authorization", baslik)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w
 }
 
 func akIstek(h http.Handler, metod, yol, tok string, basliklar ...string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(metod, yol, nil)
 	if tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+		if apianahtar.AnahtarMi(tok) {
+			kul, ok := akKullanici[tok]
+			if !ok {
+				kul = "bayi7" // sahnede olmayan (sahte/bozuk) anahtar
+			}
+			req.Header.Set("Authorization", "gosp "+kul+":"+tok)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 	}
 	for i := 0; i+1 < len(basliklar); i += 2 {
 		req.Header.Set(basliklar[i], basliklar[i+1])
@@ -394,5 +419,67 @@ func TestYalnizOturumDogrudan(t *testing.T) {
 	h.ServeHTTP(w, req.WithContext(ctx))
 	if w.Code != 200 {
 		t.Fatalf("JWT kimliği YalnizOturum'da: %d", w.Code)
+	}
+}
+
+// TestAnahtarKullaniciAdiBagi: anahtar YALNIZ sahibinin kullanıcı adıyla geçer
+// ("gosp <kullanıcı>:<anahtar>"); yanlış ad geçersiz anahtarla AYNI 401'i alır ve
+// hatalı deneme sayılır; kullanıcı adısız eski "Bearer gosp_…" reddedilir.
+func TestAnahtarKullaniciAdiBagi(t *testing.T) {
+	s, h := akKur(t)
+	bayi := s.akEkle(t, apianahtar.RolBayi, 7, []string{"hesap:oku"}, nil, nil)
+	kok := s.akEkle(t, apianahtar.RolKok, 1, []string{"hesap:oku"}, kokIP, func(k *apianahtar.Kayit) { k.SahipAd = "yonetici" })
+	gecersiz, _ := apianahtar.Uret()
+	cases := []struct {
+		ad, baslik string
+		kod        int
+	}{
+		{"bayi doğru ad", "gosp bayi7:" + bayi, 200},
+		{"bayi ad harf duyarsız", "GOSP BAYI7:" + bayi, 200},
+		{"bayi yanlış ad", "gosp bayi8:" + bayi, 401},
+		{"bayi kökün adıyla", "gosp root:" + bayi, 401},
+		{"bayi boş ad", "gosp :" + bayi, 401},
+		{"bayi adsız", "gosp " + bayi, 401},
+		{"kök 'root'", "gosp root:" + kok, 200},
+		{"kök users.username", "gosp yonetici:" + kok, 200},
+		{"kök bayinin adıyla", "gosp bayi7:" + kok, 401},
+		{"geçersiz anahtar doğru ad", "gosp bayi7:" + gecersiz.Tam, 401},
+	}
+	for _, c := range cases {
+		if w := akIstekHam(h, "GET", "/api/v1/domains", c.baslik); w.Code != c.kod {
+			t.Errorf("%s: %d (beklenen %d) %s", c.ad, w.Code, c.kod, w.Body)
+		}
+	}
+	// Yanlış ad ile geçersiz anahtar istemciye AYIRT EDİLEMEZ (aynı gövde).
+	a := akIstekHam(h, "GET", "/api/v1/domains", "gosp bayi8:"+bayi).Body.String()
+	b := akIstekHam(h, "GET", "/api/v1/domains", "gosp bayi7:"+gecersiz.Tam).Body.String()
+	if a != b {
+		t.Errorf("yanlış ad yanıtı geçersiz anahtardan ayırt edilebiliyor: %q / %q", a, b)
+	}
+	if !strings.Contains(strings.Join(s.redler, ","), "kullanıcı adı uyuşmuyor") {
+		t.Errorf("yanlış ad denetime ret olarak düşmeli: %v", s.redler)
+	}
+	// Eski biçim: reddedilir, doğru biçimi söyler.
+	w := akIstekHam(h, "GET", "/api/v1/domains", "Bearer "+bayi)
+	if w.Code != 401 || !strings.Contains(w.Body.String(), "Authorization: gosp ") {
+		t.Fatalf("Bearer gosp_ reddedilmeli ve biçimi söylemeli: %d %s", w.Code, w.Body)
+	}
+}
+
+// Yanlış kullanıcı adı ve eski biçim hatalı deneme sayılır (IP kilidi).
+func TestAnahtarKullaniciAdiKilit(t *testing.T) {
+	for _, eski := range []bool{false, true} {
+		s, h := akKur(t)
+		bayi := s.akEkle(t, apianahtar.RolBayi, 7, []string{"hesap:oku"}, nil, nil)
+		baslik := "gosp bayi8:" + bayi
+		if eski {
+			baslik = "Bearer " + bayi
+		}
+		for i := 0; i < 20; i++ {
+			_ = akIstekHam(h, "GET", "/api/v1/domains", baslik)
+		}
+		if w := akIstekHam(h, "GET", "/api/v1/domains", "gosp bayi7:"+bayi); w.Code != 429 {
+			t.Errorf("eski=%v: 20 hatalı denemeden sonra IP kilitlenmeli: %d", eski, w.Code)
+		}
 	}
 }

@@ -856,6 +856,10 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-root", domainsH.SetWebRoot)
 				// FTP parolası = müşterinin panel giriş parolası → adına-oturumda kimlik işlemi (403).
 				r.With(middleware.MusteriScope, middleware.AdinaYasak).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
+				// Otomasyon (WHMCS ChangePassword) parola uçları: kök hepsinde, bayi YALNIZ
+				// kendi hosting hesaplarında, müşteri ASLA (SahipYonetim). FTP ve DB bağımsız.
+				r.With(middleware.SahipYonetim).Put("/domains/{id}/ftp-accounts/{kullanici}/password", domainsH.FTPHesapParola)
+				r.With(middleware.SahipYonetim).Put("/domains/{id}/databases/users/{kullanici}/password", domainsH.DBKullaniciParola)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)
 				r.With(middleware.DBSahipligi("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)

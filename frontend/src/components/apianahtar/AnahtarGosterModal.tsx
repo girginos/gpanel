@@ -8,9 +8,11 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
 import { cevir } from './ceviri'
 
-export default function AnahtarGosterModal({ anahtar, ad, onKapat }: {
+export default function AnahtarGosterModal({ anahtar, ad, kullaniciAdi, onKapat }: {
   anahtar: string | null
   ad: string
+  // Anahtar YALNIZ bu kullanıcı adıyla geçer (Authorization: gosp <ad>:<anahtar>).
+  kullaniciAdi: string
   onKapat: () => void
 }) {
   const [onay, setOnay] = useState(false)
@@ -57,6 +59,17 @@ export default function AnahtarGosterModal({ anahtar, ad, onKapat }: {
             </Button>
           </div>
         </div>
+        {kullaniciAdi && (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-slate-500 dark:text-dark-300">{cevir('Kullanıcı adı')}</dt>
+            <dd className="break-all font-mono text-slate-900 dark:text-dark-50">{kullaniciAdi}</dd>
+            <dt className="text-slate-500 dark:text-dark-300">{cevir('Başlık')}</dt>
+            <dd className="break-all font-mono text-xs text-slate-700 dark:text-dark-100">{`Authorization: gosp ${kullaniciAdi}:<${cevir('anahtar')}>`}</dd>
+          </dl>
+        )}
+        <p className="text-xs text-slate-500 dark:text-dark-300">
+          {cevir('Faturalama sisteminde (WHMCS) sunucu ayarındaki "Kullanıcı adı" alanına kullanıcı adınızı, "API Token / Parola" alanına bu anahtarı girin. Anahtar başka bir kullanıcı adıyla çalışmaz.')}
+        </p>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-dark-100">
           <input type="checkbox" checked={onay} onChange={(e) => setOnay(e.target.checked)} className="size-4 rounded border-slate-300" />
           {cevir('Anahtarı güvenli bir yere kopyaladım')}

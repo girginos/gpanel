@@ -120,7 +120,8 @@ func ucGeciciDB(t *testing.T) *sql.DB {
 		}
 	}
 	middleware.Init(db)
-	t.Cleanup(func() { middleware.Init(nil) })
+	ucDB = db
+	t.Cleanup(func() { middleware.Init(nil); ucDB = nil })
 	eskiYD := yenidenDogrula
 	yenidenDogrula = func(db *sql.DB, uid int64, rol, parola, kod string) auth.YDSonuc {
 		if rol == "admin" { // kök /etc/shadow kullanır — testte sabit parola
@@ -184,11 +185,37 @@ func ucIstek(t *testing.T, h http.Handler, metod, yol, tok string, govde any) uc
 	req := httptest.NewRequest(metod, yol, bytes.NewReader(b))
 	req.RemoteAddr = "192.0.2.10:40000" // doğrudan (loopback olmayan) istemci
 	if tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+		if apianahtar.AnahtarMi(tok) {
+			// Anahtar YALNIZ sahibinin kullanıcı adıyla geçer: "gosp <kullanıcı>:<anahtar>".
+			req.Header.Set("Authorization", "gosp "+ucSahipAdi(tok)+":"+tok)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	return ucSonuc{w.Code, w.Body.String()}
+}
+
+// ucDB: ucSahipAdi'nın baktığı geçici veritabanı (ucGeciciDB kurar).
+var ucDB *sql.DB
+
+// ucSahipAdi: anahtarın sahibinin API kullanıcı adı (kök → "root", bayi →
+// users.username). Satır yoksa (silinmiş anahtar) yer tutucu.
+func ucSahipAdi(tok string) string {
+	onek, ok := apianahtar.Ayristir(tok)
+	if !ok || ucDB == nil {
+		return "yok"
+	}
+	var ad, rol string
+	if err := ucDB.QueryRow(`SELECT COALESCE(u.username,''), k.sahip_rol FROM api_anahtarlari k
+		LEFT JOIN users u ON u.id=k.sahip_id WHERE k.onek=?`, onek).Scan(&ad, &rol); err != nil {
+		return "yok"
+	}
+	if rol == apianahtar.RolKok {
+		return apianahtar.KokKullaniciAdi
+	}
+	return ad
 }
 
 func jwtBayi(t *testing.T, id int64, ad string) string {

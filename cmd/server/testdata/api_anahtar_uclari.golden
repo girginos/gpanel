@@ -52,11 +52,12 @@ POST /api/v1/domains/{id}/ssl/issue  ssl:yaz
 POST /api/v1/plans  plan:yaz
 POST /api/v1/reseller-plans  bayi:yaz
 POST /api/v1/resellers  bayi:yaz
-PUT /api/v1/databases/{dbid}/password  parola:yaz
 PUT /api/v1/domains/{id}/backup-schedule  yedek:yaz
+PUT /api/v1/domains/{id}/databases/users/{kullanici}/password  db.parola:yaz
 PUT /api/v1/domains/{id}/dns/soa  dns:yaz
 PUT /api/v1/domains/{id}/dns/{rid}  dns:yaz
-PUT /api/v1/domains/{id}/ftp/password  parola:yaz
+PUT /api/v1/domains/{id}/ftp-accounts/{kullanici}/password  ftp.parola:yaz
+PUT /api/v1/domains/{id}/ftp/password  ftp.parola:yaz
 PUT /api/v1/domains/{id}/php  hesap:yaz
 PUT /api/v1/domains/{id}/plan  hesap:yaz
 PUT /api/v1/plans/{id}  plan:yaz

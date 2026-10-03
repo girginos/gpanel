@@ -36,10 +36,15 @@ export interface IzinGrubu {
   aciklama: string
   roller: string[]
   yalniz_oku: boolean
+  // Tek düzeyli izin (yalnız yazma; parola değiştirme): arayüz Yok / İzin ver gösterir.
+  yalniz_yaz?: boolean
 }
 
 export interface Katalog {
   gruplar: IzinGrubu[]
+  // Authorization: gosp <kullanici_adi>:<anahtar> — anahtar yalnız bu adla geçer.
+  kullanici_adi?: string
+  kimlik_sema?: string
   ip_zorunlu: boolean
   varsayilan_gun: number
   maks_gun: number
