@@ -4,8 +4,9 @@
 //     Mobilde (md altı) kart düzeni: etiket–değer satırları. SSL sütunu YOK (acme.sh
 //     otomatik yeniler) — yalnız "SSL alınamadı" uyarısı.
 //   · Satıra tık / "Panele gir" = o alan adının müşteri panelinde tek tık oturum (lib/adina).
-//   · Toplu işlemler: paket değiştir (havuz/kullanım kontrolü), IP değiştir (yalnız
-//     bayiye açık sunucu IP'leri), sahiplik (bayide KAPALI — kökte bayiler arasıdır),
+//   · Toplu işlemler: paket değiştir (havuz/kullanım kontrolü), sahiplik (bayide
+//     KAPALI — kökte bayiler arasıdır), IP değiştirme YOK (yalnız kök yönetici —
+//     kullanıcı kararı 2026-10-03; sunucu da bayiye 403 döner),
 //     askıya al / aç, sil (onay metniyle). Her öğe sunucuda ayrı ayrı kapsam
 //     doğrulamasından geçer (SahipYonetim); sonuç öğe başına gösterilir.
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -19,13 +20,12 @@ import { Badge, Button } from '@/components/ui'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import EmptyState from '@/components/EmptyState'
-import IPDegistirDiyalog from '@/components/IPDegistirDiyalog'
 import { I, Ikon } from '@/components/Ikon'
 import { ODAK, cx, mbYaz, sslHatali, tarihYaz, yuzde, type BayiDomain } from './ortak'
 import { Cubuk } from './Grafik'
 import { KullanimHucre } from './Hucreler'
 
-type Islem = 'paket' | 'ip' | 'askida' | 'sil'
+type Islem = 'paket' | 'askida' | 'sil'
 type Sonuc = { id: number; ok: boolean; neden?: string }
 type Calisan = { tur: Islem; ids: number[]; adim: number; sonuc: Sonuc[] | null }
 type Kolon = 'alan' | 'plan' | 'olusturulma' | 'disk' | 'trafik' | 'durum'
@@ -216,7 +216,6 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
           <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
             <span className="me-2 ps-1 text-sm font-semibold tabular-nums" aria-live="polite">{secili.length} {t('seçildi')}</span>
             <TopluDugme ikon={I.kutu} onClick={() => setIslem('paket')}>{t('Paket değiştir')}</TopluDugme>
-            <TopluDugme ikon={I.kure} onClick={() => setIslem('ip')}>{t('IP değiştir')}</TopluDugme>
             <TopluDugme ikon={I.degistir} disabled aria-describedby={sahipNotId} title={t('Yalnız kök yönetici kullanabilir')}>{t('Sahiplik değiştir')}</TopluDugme>
             <span id={sahipNotId} className="sr-only">{t('Bu işlem kökte bayiler arasıdır; bayi kendi kapsamı dışına aktaramaz')}</span>
             <TopluDugme ikon={hepsiAskida ? I.oynat : I.durakla} onClick={() => setIslem('askida')}>{t(askiAd)}</TopluDugme>
@@ -302,8 +301,6 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
 
       {islem === 'paket' && <PaketDiyalog secili={secili} kapat={() => setIslem(null)}
         onayla={(p) => yurut('paket', secili, (h) => api.put(`/domains/${h.id}/plan`, { plan_id: p }))} />}
-      {islem === 'ip' && <IPDegistirDiyalog liste={secili} kapat={() => setIslem(null)}
-        onayla={(ip) => yurut('ip', secili.filter((h) => h.ipv4 !== ip), (h) => api.put(`/domains/${h.id}/ip`, { ipv4: ip }))} />}
       {islem === 'askida' && (
         <Modal acik baslik={t(askiAd)} ton={hepsiAskida ? 'bilgi' : 'uyari'} onKapat={() => setIslem(null)}
           alt={<>
@@ -443,7 +440,7 @@ function IlerlemeDiyalog({ c, bul, bitir }: { c: Calisan; bul: (id: number) => B
   const bitti = !!c.sonuc
   const ok = c.sonuc?.filter((x) => x.ok).length ?? 0
   const hata = c.sonuc?.filter((x) => !x.ok) ?? []
-  const AD: Record<Islem, string> = { paket: 'Paket değiştir', ip: 'IP değiştir', askida: 'Askıya al / Aç', sil: 'Sil' }
+  const AD: Record<Islem, string> = { paket: 'Paket değiştir', askida: 'Askıya al / Aç', sil: 'Sil' }
   return (
     <Modal acik baslik={bitti ? `${t(AD[c.tur])}: ${t('sonuç')}` : `${t(AD[c.tur])}…`} ton={bitti ? (hata.length ? 'uyari' : 'basari') : undefined}
       onKapat={() => { if (bitti) bitir() }} kapatilamaz={!bitti}

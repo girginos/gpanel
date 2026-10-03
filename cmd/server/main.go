@@ -929,10 +929,9 @@ func main() {
 				r.With(middleware.AdminVeyaReseller).Get("/plans/{id}/domains", plansH.DomainlerAra)
 				bayiPlanRotalari(r, plansH) // GET /plans/bayi-sinir, POST /plans/{id}/varsayilan
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/plan", domainsH.SetPlan)
-				// Domain IP değiştir (tek + bayi toplu): yönetici her domain, bayi yalnız kendi
-				// hostingi ve yalnız kendisine açık sunucu IP'leri (internal/ipyonetim/domain_ip.go).
-				r.With(middleware.SahipYonetim).Put("/domains/{id}/ip", domainIPH.DomainIP)
-				r.With(middleware.AdminVeyaReseller).Get("/domains/ip-secenekleri", domainIPH.IPSecenekleri)
+				// Domain IP değiştir + IP seçenekleri: YALNIZ yönetici (kullanıcı kararı
+				// 2026-10-03 — bayide IP değiştirme/seçimi yok). Kayıt internal/domainip.Rotalar.
+				domainIPH.Rotalar(r)
 				r.With(middleware.SahipYonetim).Post("/domains/{id}/ozel-plan", domainsH.OzelPlan)
 				ozelPlanRotalari(r, domainsH) // D1: GET/PUT/DELETE /domains/{id}/limitler
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns", dnsH.List)

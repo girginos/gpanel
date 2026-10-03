@@ -3,7 +3,7 @@ package domainip
 // Package domainip — TEK domainin IPv4'ünü değiştiren TEK KAYNAK çekirdek.
 //
 // (ipyonetim içinde olamaz: ipyonetim ← portyonetim ← provisioner ← nginxset ← dns
-// döngüsü.) Kullananlar: PUT /domains/{id}/ip (yönetici + bayi kendi hostingi),
+// döngüsü.) Kullananlar (HEPSİ yalnız yönetici): PUT /domains/{id}/ip,
 // PUT /admin/domains/{id}/ipv4 (eski yönetici ucu) ve toplu işlem "ip"
 // (internal/toplu). Sunucu çapında IP değişimi ayrı araçtır (gpanel ip change).
 //
@@ -256,25 +256,16 @@ type IPSecenek struct {
 	Iface    string `json:"iface"`
 	Primary  bool   `json:"primary"`
 	PanelIP  bool   `json:"panel_ip"`
-	Kullanim int    `json:"kullanim"` // bu IP'deki (kapsam içi) domain sayısı
+	Kullanim int    `json:"kullanim"` // bu IP'deki domain sayısı
 }
 
-// IzinliIPler — rolün hedef olarak seçebileceği IP'ler.
-//   - yönetici: sunucunun TÜM global IPv4'leri.
-//   - bayi (resellerID>0): panelde bayiye IP atama kavramı YOK (recon). Muhafazakâr
-//     kural: arayüzlerin PAYLAŞIMLI birincil IP'leri + bayinin KENDİ domainlerinin
-//     şu an kullandığı (ve sunucuda hâlâ var olan) IP'ler. Yöneticinin ayrıca eklediği
-//     ikincil IP'ler (çoğu zaman bir müşteriye özel) bayiye açılmaz.
-func IzinliIPler(ctx context.Context, db *sql.DB, admin bool, resellerID int64) ([]IPSecenek, error) {
+// IPSecenekListesi — yöneticinin hedef olarak seçebileceği IP'ler: sunucunun TÜM
+// global IPv4'leri; Kullanim = o IP'deki domain sayısı. (Bayiye IP seçimi yok —
+// kullanıcı kararı 2026-10-03; eski bayi kapsamı kaldırıldı.)
+func IPSecenekListesi(ctx context.Context, db *sql.DB) ([]IPSecenek, error) {
 	sunucu := sunucuIPOku()
 	kullanim := map[string]int{}
-	q := `SELECT ipv4, COUNT(*) FROM domains WHERE ipv4<>'' GROUP BY ipv4`
-	args := []any{}
-	if !admin {
-		q = `SELECT ipv4, COUNT(*) FROM domains WHERE ipv4<>'' AND reseller_id=? GROUP BY ipv4`
-		args = append(args, resellerID)
-	}
-	rows, err := db.QueryContext(ctx, q, args...)
+	rows, err := db.QueryContext(ctx, `SELECT ipv4, COUNT(*) FROM domains WHERE ipv4<>'' GROUP BY ipv4`)
 	if err != nil {
 		return nil, err
 	}
@@ -290,12 +281,6 @@ func IzinliIPler(ctx context.Context, db *sql.DB, admin bool, resellerID int64) 
 	gor := map[string]bool{}
 	for _, s := range sunucu {
 		if gor[s.IP] {
-			continue
-		}
-		if !admin && resellerID <= 0 {
-			continue
-		}
-		if !admin && !s.PrimaryMi && kullanim[s.IP] == 0 {
 			continue
 		}
 		gor[s.IP] = true

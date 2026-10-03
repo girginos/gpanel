@@ -196,15 +196,14 @@ func TestSPFIP4Ekle(t *testing.T) {
 	}
 }
 
-// ── HTTP: main.go ile aynı zincir ────────────────────────────────────────────
+// ── HTTP: main.go ile aynı zincir (Rotalar) ────────────────────────────────────────────
 
 func di_router(db *sql.DB) http.Handler {
 	h := &Handler{DB: db}
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(di_sir))
-		r.With(middleware.SahipYonetim).Put("/domains/{id}/ip", h.DomainIP)
-		r.With(middleware.AdminVeyaReseller).Get("/domains/ip-secenekleri", h.IPSecenekleri)
+		h.Rotalar(r) // main.go ile AYNI kayıt
 	})
 	return r
 }
@@ -237,8 +236,10 @@ func di_istek(t *testing.T, db *sql.DB, kim int64, yontem, yol string, govde any
 	return rec.Code, rec.Body.String()
 }
 
-func TestHTTP_DomainIP_YetkiKapilari(t *testing.T) {
-	db, _ := di_kur(t)
+// Kullanıcı kararı 2026-10-03: alan adı IP değiştirme / IP seçimi YALNIZ kök
+// yönetici. Bayi kendi hostinginde ve birincil (paylaşımlı) IP'de bile 403 alır.
+func TestHTTP_DomainIP_YalnizYonetici(t *testing.T) {
+	db, z := di_kur(t)
 	for _, c := range []struct {
 		ad  string
 		kim int64
@@ -246,57 +247,55 @@ func TestHTTP_DomainIP_YetkiKapilari(t *testing.T) {
 		ip  string
 		kod int
 	}{
+		{"bayi kendi hostingi, birincil IP", 7, 11, ipBir, http.StatusForbidden},
+		{"bayi kendi hostingi, başka IP", 7, 11, ipIki, http.StatusForbidden},
+		{"bayi kendi hostingi, kendi kullandığı IP", 8, 12, ipUc, http.StatusForbidden},
 		{"bayi başka bayinin domaini", 7, 12, ipBir, http.StatusForbidden},
-		{"bayi kökün domaini", 7, 10, ipBir, http.StatusForbidden},
-		{"bayi izinsiz sunucu IP'si (başka bayinin)", 7, 11, ipUc, http.StatusForbidden},
-		{"bayi izinsiz panel-ikincil IP", 7, 11, ipIki, http.StatusForbidden},
-		{"bayi sunucuda olmayan IP", 7, 11, ipDisar, http.StatusBadRequest},
-		{"bayi geçersiz IP", 7, 11, "1.2.3", http.StatusBadRequest},
+		{"bayi kökün domaini", 7, 10, ipIki, http.StatusForbidden},
+		{"bayi sunucuda olmayan IP (doğrulamadan önce 403)", 7, 11, ipDisar, http.StatusForbidden},
 		{"yönetici sunucuda olmayan IP", 1, 11, ipDisar, http.StatusBadRequest},
+		{"yönetici geçersiz IP", 1, 11, "1.2.3", http.StatusBadRequest},
+		{"yönetici olmayan domain", 1, 99, ipIki, http.StatusNotFound},
 	} {
 		if kod, body := di_istek(t, db, c.kim, http.MethodPut, fmt.Sprintf("/domains/%d/ip", c.id), map[string]string{"ipv4": c.ip}); kod != c.kod {
 			t.Errorf("%s: %d beklenir, alınan %d %s", c.ad, c.kod, kod, body)
 		}
 	}
-	if got := di_str(t, db, `SELECT GROUP_CONCAT(ipv4 ORDER BY id) FROM domains`); got != ipBir+","+ipBir+","+ipUc {
-		t.Fatalf("reddedilen istekler hiçbir şey değiştirmemeli: %s", got)
+	if got := di_str(t, db, `SELECT GROUP_CONCAT(ipv4 ORDER BY id) FROM domains`); got != ipBir+","+ipBir+","+ipUc || z.cagri != 0 {
+		t.Fatalf("reddedilen istekler hiçbir şey değiştirmemeli: %s zone=%d", got, z.cagri)
 	}
-	// Yönetici her sunucu IP'sine taşır; bayi birincil IP'ye geri alır.
+	// Yönetici her sunucu IP'sine (bayi domaini dahil) taşır.
 	if kod, body := di_istek(t, db, 1, http.MethodPut, "/domains/11/ip", map[string]string{"ipv4": ipUc}); kod != 200 {
 		t.Fatalf("yönetici .3: %d %s", kod, body)
 	}
-	if kod, body := di_istek(t, db, 7, http.MethodPut, "/domains/11/ip", map[string]string{"ipv4": ipBir}); kod != 200 {
-		t.Fatalf("bayi birincil IP: %d %s", kod, body)
+	if kod, body := di_istek(t, db, 1, http.MethodPut, "/domains/12/ip", map[string]string{"ipv4": ipIki}); kod != 200 {
+		t.Fatalf("yönetici .2 (panel-ikincil): %d %s", kod, body)
 	}
-	if got := di_str(t, db, `SELECT ipv4 FROM domains WHERE id=11`); got != ipBir {
+	if got := di_str(t, db, `SELECT GROUP_CONCAT(ipv4 ORDER BY id) FROM domains`); got != ipBir+","+ipUc+","+ipIki {
 		t.Fatalf("son durum: %s", got)
 	}
 }
 
-func TestHTTP_IPSecenekleri_Kapsam(t *testing.T) {
+func TestHTTP_IPSecenekleri_YalnizYonetici(t *testing.T) {
 	db, _ := di_kur(t)
-	liste := func(kim int64) string {
-		kod, body := di_istek(t, db, kim, http.MethodGet, "/domains/ip-secenekleri", nil)
-		if kod != 200 {
-			t.Fatalf("liste %d: %d %s", kim, kod, body)
+	for _, kim := range []int64{7, 8} {
+		if kod, body := di_istek(t, db, kim, http.MethodGet, "/domains/ip-secenekleri", nil); kod != http.StatusForbidden || strings.Contains(body, ipBir) {
+			t.Errorf("bayi %d: 403 ve IP'siz gövde beklenir, alınan %d %s", kim, kod, body)
 		}
-		var y struct {
-			IPler []IPSecenek `json:"ipler"`
-		}
-		_ = json.Unmarshal([]byte(body), &y)
-		var p []string
-		for _, s := range y.IPler {
-			p = append(p, fmt.Sprintf("%s:%d", s.IP, s.Kullanim))
-		}
-		return strings.Join(p, ",")
 	}
-	if got := liste(1); got != ipBir+":2,"+ipIki+":0,"+ipUc+":1" {
+	kod, body := di_istek(t, db, 1, http.MethodGet, "/domains/ip-secenekleri", nil)
+	if kod != 200 {
+		t.Fatalf("yönetici: %d %s", kod, body)
+	}
+	var y struct {
+		IPler []IPSecenek `json:"ipler"`
+	}
+	_ = json.Unmarshal([]byte(body), &y)
+	var p []string
+	for _, s := range y.IPler {
+		p = append(p, fmt.Sprintf("%s:%d", s.IP, s.Kullanim))
+	}
+	if got := strings.Join(p, ","); got != ipBir+":2,"+ipIki+":0,"+ipUc+":1" {
 		t.Fatalf("yönetici: %s", got)
-	}
-	if got := liste(7); got != ipBir+":1" {
-		t.Fatalf("bayi 7 yalnız birincil + kendi kullandığı: %s", got)
-	}
-	if got := liste(8); got != ipBir+":0,"+ipUc+":1" {
-		t.Fatalf("bayi 8: %s", got)
 	}
 }
