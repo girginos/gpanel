@@ -554,17 +554,20 @@ func TestSahipsizTenantFPMTemizle_KilitAltindaYenidenKanitlar(t *testing.T) {
 	izlerDuruyor(t, sk)
 }
 
-// Panelin olmayan bir cfg dizini (php-fpm.conf başka içerik) olan sk'ye dokunulmaz.
+// Panelin olmayan bir cfg dizini / slice olan sk'ye dokunulmaz.
 func TestSahipsizTenantFPMTemizle_YabanciCfgDizini(t *testing.T) {
 	sokumDikis(t)
 	db := sokum_panel(t)
 	sk_yaz(t, filepath.Join(tenantCfgDir("c_yabcfg"), "php-fpm.conf"), "[global]\ninclude=/baska/yer.conf\n")
 	old := time.Now().Add(-time.Hour)
 	_ = os.Chtimes(tenantCfgDir("c_yabcfg"), old, old)
+	// Panelin olmayan slice (başlık imzası yok) da korunur.
+	sk_yaz(t, tenantSlicePath("c_yabslice"), "[Unit]\nDescription=baska\n")
+	_ = os.Chtimes(tenantSlicePath("c_yabslice"), old, old)
 	if temiz, err := SahipsizTenantFPMTemizle(db); err != nil || len(temiz) != 0 {
-		t.Fatalf("yabancı cfg dizinine dokunulmamalı: %v %v", temiz, err)
+		t.Fatalf("yabancı cfg dizinine / slice'a dokunulmamalı: %v %v", temiz, err)
 	}
-	if !izVar(tenantCfgDir("c_yabcfg")) {
-		t.Fatal("yabancı cfg dizini silindi")
+	if !izVar(tenantCfgDir("c_yabcfg")) || !izVar(tenantSlicePath("c_yabslice")) {
+		t.Fatal("yabancı cfg dizini / slice silindi")
 	}
 }
