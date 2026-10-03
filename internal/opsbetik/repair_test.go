@@ -220,10 +220,16 @@ func TestDomainEviOnar_DeepSabitBagDegismez(t *testing.T) {
 	if err := os.Link(kurban, filepath.Join(pub, "bag.php")); err != nil {
 		t.Fatal(err)
 	}
+	// Meşru yanlış sahipli dosya: DEEP bloğu gerçekten koşsun (n>0).
+	mesru := filepath.Join(pub, "mesru.php")
+	yaz(t, mesru, 0o644, 0)
 	once := oku(t, kurban)
 	cikti := onar(t, ev, true)
 	if s := oku(t, kurban); s != once {
 		t.Fatalf("sabit bağlı kurbanın sahibi değişti: %+v → %+v\n%s", once, s, cikti)
+	}
+	if s := oku(t, mesru); s.uid != kiraciUID {
+		t.Fatalf("DEEP meşru dosyayı devretmedi: %+v\n%s", s, cikti)
 	}
 }
 
@@ -242,7 +248,8 @@ func TestKiraciDizinOnar_DenetimSonrasiYaris(t *testing.T) {
 	once := oku(t, kurban)
 
 	betik := `f=$1 ev=$2 kurban=$3; set --; source "$f" || exit 90; SEL=0
-basename() { if [ ! -L "$ev/.ssh" ]; then mv "$ev/.ssh" "$ev/.ssh-gercek"; ln -s "$kurban" "$ev/.ssh"; fi; command basename "$@"; }
+takas() { if [ ! -L "$ev/.ssh" ]; then mv "$ev/.ssh" "$ev/.ssh-gercek"; ln -s "$kurban" "$ev/.ssh"; fi; }
+basename() { takas; command basename "$@"; }
 kiraci_dizin_onar "$ev/.ssh" 700 "root:root"; exit 0`
 	cmd := exec.Command("bash", "-c", betik, "bash", betikYolu(t), ev, kurban)
 	cmd.Env = append(os.Environ(), "GOSP_REPAIR_KUTUPHANE=1", "LC_ALL=C")
@@ -258,5 +265,38 @@ kiraci_dizin_onar "$ev/.ssh" 700 "root:root"; exit 0`
 	}
 	if !strings.Contains(string(out), "onarılamadı") {
 		t.Fatalf("yarış reddedilmedi:\n%s", out)
+	}
+}
+
+// TOCTOU 2: pwd -P doğrulamasından SONRA takas. İşlem '.' (sabitlenmiş cwd inode)
+// üzerinde yapıldığı için kurban değişmemeli, gerçek dizin onarılmalı. Takas,
+// doğrulamanın çağırdığı pwd'ye kabuk fonksiyonu olarak enjekte edilir.
+func TestKiraciDizinOnar_DogrulamaSonrasiYaris(t *testing.T) {
+	rootGerek(t)
+	_, ev := evKur(t)
+	dis := t.TempDir()
+	kurban := filepath.Join(dis, "sistem")
+	mkdir(t, kurban, 0o755, 0)
+	ssh := filepath.Join(ev, ".ssh")
+	mkdir(t, ssh, 0o755, kiraciUID)
+	once := oku(t, kurban)
+
+	betik := `f=$1 ev=$2 kurban=$3; set --; source "$f" || exit 90; SEL=0
+pwd() { local r; r=$(builtin pwd "$@"); if [ "${r##*/}" = .ssh ] && [ ! -L "$ev/.ssh" ]; then mv "$ev/.ssh" "$ev/.ssh-gercek"; ln -s "$kurban" "$ev/.ssh"; fi; printf '%s\n' "$r"; }
+kiraci_dizin_onar "$ev/.ssh" 700 "root:root"; exit 0`
+	cmd := exec.Command("bash", "-c", betik, "bash", betikYolu(t), ev, kurban)
+	cmd.Env = append(os.Environ(), "GOSP_REPAIR_KUTUPHANE=1", "LC_ALL=C")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("betik hatası (%v): %s", err, out)
+	}
+	if fi, err := os.Lstat(ssh); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("yarış kurulmadı: %v %v\n%s", fi, err, out)
+	}
+	if s := oku(t, kurban); s != once {
+		t.Fatalf("DOĞRULAMA SONRASI YARIŞTA KURBAN DEĞİŞTİ: %+v → %+v\n%s", once, s, out)
+	}
+	if s := oku(t, filepath.Join(ev, ".ssh-gercek")); s.uid != 0 || s.mod.Perm() != 0o700 {
+		t.Fatalf("sabitlenen gerçek dizin onarılmadı: %+v\n%s", s, out)
 	}
 }
