@@ -72,17 +72,24 @@ type Handlers struct {
 }
 
 type Kayit struct {
-	ID       int64  `json:"id"`
-	Zaman    string `json:"zaman"`
+	ID    int64  `json:"id"`
+	Zaman string `json:"zaman"`
+	// Aktor: işlemi YAPANIN adı — tek başına ("girgin"); müşteri adına yapılan
+	// işlemde "kimin adına" Adina/AdinaAlan'dadır. Müşteri kaydında hostingin alan
+	// adı (yoksa ""); ham "musteri:<id>" kimliği gösterilmez.
 	Aktor    string `json:"aktor"`
 	AktorRol string `json:"aktor_rol"`
-	IP       string `json:"ip"`
-	Eylem    string `json:"eylem"`
-	Hedef    string `json:"hedef"`
-	Detay    string `json:"detay,omitempty"`
-	Basarili bool   `json:"basarili"`
-	KapsamID int64  `json:"kapsam_id"`
-	KapsamAd string `json:"kapsam_ad"` // "" = kök (panel sahibi)
+	// Adina: işlem müşteri ADINA oturumda yapıldı (bayi/yönetici müşteri panelinde).
+	Adina bool `json:"adina,omitempty"`
+	// AdinaAlan: adına olunan hostingin alan adı (silinmişse "").
+	AdinaAlan string `json:"adina_alan,omitempty"`
+	IP        string `json:"ip"`
+	Eylem     string `json:"eylem"`
+	Hedef     string `json:"hedef"`
+	Detay     string `json:"detay,omitempty"`
+	Basarili  bool   `json:"basarili"`
+	KapsamID  int64  `json:"kapsam_id"`
+	KapsamAd  string `json:"kapsam_ad"` // "" = kök (panel sahibi)
 }
 
 // Liste: GET /denetim?ara=&eylem=&kapsam=&limit=&offset=
@@ -116,6 +123,14 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	if e := strings.TrimSpace(q.Get("eylem")); e != "" {
 		kosul = append(kosul, "a.action=?")
 		args = append(args, e)
+	} else if tk := teknikEylemler(); len(tk) > 0 {
+		// Teknik ara adımlar (ör. müşteri paneline giriş KODU üretimi) varsayılan
+		// listede gizlenir: aynı girişi "Müşteri paneline girildi" kaydı anlatır.
+		// Başarısız olanları görünür kalır; süzgeçte açıkça seçilince hepsi görünür.
+		kosul = append(kosul, "NOT (a.action IN (?"+strings.Repeat(",?", len(tk)-1)+") AND a.ok=1)")
+		for _, k := range tk {
+			args = append(args, k)
+		}
 	}
 	if ara := strings.TrimSpace(q.Get("ara")); ara != "" {
 		kosul = append(kosul, "(a.actor_username LIKE ? OR a.target LIKE ? OR a.ip LIKE ? OR a.action LIKE ?)")
@@ -134,7 +149,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 
 	//nolint:gosec // G202: where = SABİT koşul parçalarının (kapsam + "a.action=?" + LIKE ? bloğu) " AND " birleşimidir; kapsam parametresi ParseInt ile int'e çevrilir, tüm kullanıcı değerleri args ile ? bağlanır.
 	sorgu := `SELECT a.id, DATE_FORMAT(a.ts,'%Y-%m-%d %H:%i:%s'), a.actor_username,
-	                 COALESCE(au.role,''), a.ip, a.action, COALESCE(a.target,''),
+	                 COALESCE(a.adina_domain_id,0), COALESCE(au.role,''), a.ip, a.action, COALESCE(a.target,''),
 	                 COALESCE(a.detail,''), a.ok, a.reseller_id, COALESCE(ru.username,'')
 	            FROM audit_log a
 	            LEFT JOIN users au ON au.id = a.actor_user_id
@@ -149,23 +164,44 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	out := make([]Kayit, 0, limit)
+	// alanIcin: kaydın gösterimi için alan adı gereken hosting id'leri (adına olunan
+	// hosting ya da müşteri aktörü) → kayıt sıraları. Tek sorguda çözülür.
+	type alanIhtiyac struct {
+		i     int
+		adina bool
+	}
+	alanIcin := map[int64][]alanIhtiyac{}
 	for rows.Next() {
 		var k Kayit
 		var ok int
 		var detay string
-		if err := rows.Scan(&k.ID, &k.Zaman, &k.Aktor, &k.AktorRol, &k.IP, &k.Eylem,
+		var adinaID int64
+		if err := rows.Scan(&k.ID, &k.Zaman, &k.Aktor, &adinaID, &k.AktorRol, &k.IP, &k.Eylem,
 			&k.Hedef, &detay, &ok, &k.KapsamID, &k.KapsamAd); err != nil {
 			log.Printf("denetim: satir okunamadi: %v", err)
 			continue
 		}
 		k.Basarili = ok == 1
-		k.Detay = notCikar(detay)
+		k.Detay = notSade(k.Eylem, notCikar(detay))
+		if adinaID == 0 {
+			// 0114 öncesi kayıt: "aktör (adına musteri:<id>)" tek dizgede.
+			k.Aktor, adinaID = httpx.AktorAyir(k.Aktor)
+		}
+		if adinaID > 0 {
+			k.Adina = true
+			alanIcin[adinaID] = append(alanIcin[adinaID], alanIhtiyac{len(out), true})
+		}
 		// users satiri yok: ya musteri token'i (aktor "musteri:<id>"), ya panelin
 		// kendi arka-plan isi ("sistem"), ya da silinmis bir hesap.
 		if k.AktorRol == "" {
 			switch {
 			case strings.HasPrefix(k.Aktor, "musteri:"):
 				k.AktorRol = "müşteri"
+				id, _ := strconv.ParseInt(strings.TrimPrefix(k.Aktor, "musteri:"), 10, 64)
+				k.Aktor = "" // ham müşteri kimliği gösterilmez; alan adıyla doldurulur
+				if id > 0 {
+					alanIcin[id] = append(alanIcin[id], alanIhtiyac{len(out), false})
+				}
 			case k.Aktor == "sistem":
 				k.AktorRol = "sistem"
 			case k.Aktor != "":
@@ -173,6 +209,31 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out = append(out, k)
+	}
+	if len(alanIcin) > 0 {
+		ids := make([]any, 0, len(alanIcin))
+		for id := range alanIcin {
+			ids = append(ids, id)
+		}
+		//nolint:gosec // G202: yalnız "?" yer tutucuları birleştirilir; değerler args ile bağlanır.
+		if ar, err := h.DB.QueryContext(r.Context(),
+			`SELECT id, alan_adi FROM domains WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, ids...); err == nil {
+			for ar.Next() {
+				var id int64
+				var alan string
+				if ar.Scan(&id, &alan) != nil {
+					continue
+				}
+				for _, ih := range alanIcin[id] {
+					if ih.adina {
+						out[ih.i].AdinaAlan = alan
+					} else {
+						out[ih.i].Aktor = alan
+					}
+				}
+			}
+			_ = ar.Close()
+		}
 	}
 
 	// Suzgec kutusu icin bu KAPSAMDAKI eylem turleri (secili eylem listeyi daraltmaz)
@@ -191,7 +252,9 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"toplam": toplam, "limit": limit, "offset": offset,
 		"kayitlar": out, "eylemler": eylemler,
-		"kapsam": map[string]any{"bayi_mi": bayiMi(c), "bayi_id": rid},
+		// Ön yüzün TEK etiket kaynağı: listedeki ve süzgeçteki kodların TR/EN adları.
+		"etiketler": etiketHaritasi(out, eylemler),
+		"kapsam":    map[string]any{"bayi_mi": bayiMi(c), "bayi_id": rid},
 	})
 }
 
@@ -226,4 +289,19 @@ func notCikar(detay string) string {
 		parcalar = append(parcalar, k+"="+v)
 	}
 	return strings.Join(parcalar, " · ")
+}
+
+// etiketHaritasi: yanıttaki kayıtların ve süzgeç seçeneklerinin eylem etiketleri
+// (bilinmeyen kodlar okunur geri dönüşle).
+func etiketHaritasi(kayitlar []Kayit, eylemler []string) map[string]EylemEtiket {
+	m := make(map[string]EylemEtiket, len(eylemler)+len(kayitlar))
+	for _, e := range eylemler {
+		m[e] = eylemEtiketi(e)
+	}
+	for _, k := range kayitlar {
+		if _, ok := m[k.Eylem]; !ok {
+			m[k.Eylem] = eylemEtiketi(k.Eylem)
+		}
+	}
+	return m
 }

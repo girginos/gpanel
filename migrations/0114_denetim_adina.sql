@@ -1,0 +1,11 @@
+-- 0114_denetim_adina.sql
+-- audit_log.adina_domain_id: müşteri ADINA oturumda (bayi/yönetici müşteri paneline
+-- girdiğinde) yapılan işlemin hangi hosting adına yapıldığı. Aktör adı artık
+-- actor_username'de TEK BAŞINA durur; eskiden "aktör (adına musteri:<id>)" biçiminde
+-- tek dizgeye gömülüyordu.
+--
+-- Eski kayıtlar YENİDEN YAZILMAZ (denetim kaydı değiştirilmez): okuma ucu eski
+-- biçimi httpx.AktorAyir ile ayrıştırıp aynı yapıyla sunar.
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS. Satır içi yorum YOK.
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS adina_domain_id BIGINT UNSIGNED NULL DEFAULT NULL AFTER actor_username;

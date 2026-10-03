@@ -37,19 +37,11 @@ type Handlers struct {
 // etkileyen guvenilir vekil listesini) iz birakmadan degistirebiliyordu.
 // Guvenlik ozelliginin kendisi denetlenebilir olmali.
 func (h *Handlers) denetle(r *http.Request, domainID int64, eylem, hedef, detay string, ok bool) {
-	var uid int64
-	var kullanici string
-	if c := middleware.ClaimsFrom(r); c != nil {
-		uid, kullanici = c.UserID, c.Username
-	} else if mc := middleware.MusteriClaimsFrom(r); mc != nil {
-		// 🔴 Musteri token'i da AKTORDUR. Onceki surum yalniz panel
-		// (admin/bayi) claim'ine bakiyordu; hosting sahibinin kendi
-		// panelinden yaptigi degisiklik denetime "actor_user_id=NULL,
-		// actor_username=''" olarak, yani ANONIM dusuyordu. Denetim
-		// bosluguna karsi yazilan kayit, en sik kullanilan yolda kimseyi
-		// yazmiyordu.
-		kullanici = "musteri:" + strconv.FormatInt(mc.DomainID, 10)
-	}
+	// Aktör TEK yerden (middleware.Aktor): panel kullanıcısı, müşteri ("musteri:<id>")
+	// ya da müşteri ADINA oturumda gerçek aktör + adına olunan hosting. Önceki yerel
+	// kopya adına-oturumu "musteri:<id>" (uid 0) olarak yazıyor, işlemi yapan bayiyi
+	// kayıttan siliyordu.
+	uid, kullanici := middleware.Aktor(r)
 	if domainID > 0 {
 		httpx.DenetimDomain(h.DB, r, uid, kullanici, eylem, hedef, detay, domainID, ok)
 		return
