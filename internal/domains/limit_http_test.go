@@ -430,3 +430,28 @@ func TestOzelLimit_PlanDegisimindeKorunurVeEskiUc410(t *testing.T) {
 		t.Errorf("eski uç plan üretti: %d → %d", once, sonra)
 	}
 }
+
+// Sınırlı havuzlu bayi, kökün SINIRSIZ (disk 0) planındaki hostingini üst yazımı
+// silerek sınırsıza geri döndüremez (havuz dışına çıkmak = artış).
+func TestOzelLimit_BayiSinirsizaDonemez(t *testing.T) {
+	db := ol_db(t)
+	h := ol_router(db)
+	if _, err := db.Exec(`UPDATE service_plans SET disk_kota_mb=0 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	// Sınırsızdan 3000'e: azaltma, geçer.
+	if kod, g := ol_istek(t, h, "A", "PUT", "/domains/20/limitler", ol_ust(map[string]any{"disk_kota_mb": 3000})); kod != 200 {
+		t.Fatalf("sınırsızdan limitliye → %d %s", kod, g)
+	}
+	// Plana dön = sınırsız: red.
+	if kod, g := ol_istek(t, h, "A", "DELETE", "/domains/20/limitler", nil); kod != http.StatusForbidden || !strings.Contains(g, "sınırsız") {
+		t.Errorf("bayi sınırsıza döndü → %d %s", kod, g)
+	}
+	if e := ol_oku(t, db, 20).Efektif("disk_kota_mb", -1); e != 3000 {
+		t.Errorf("reddedilen istek üst yazımı değiştirdi: %d", e)
+	}
+	// Yönetici serbest.
+	if kod, g := ol_istek(t, h, "admin", "DELETE", "/domains/20/limitler", nil); kod != 200 {
+		t.Errorf("yönetici plana dönüş → %d %s", kod, g)
+	}
+}
