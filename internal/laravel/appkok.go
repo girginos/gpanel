@@ -275,7 +275,10 @@ func (h *Handlers) OtomatikHazirla(w http.ResponseWriter, r *http.Request) {
 	var alanAdi string
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT alan_adi FROM domains WHERE id=?`, id).Scan(&alanAdi)
 
-	ctx := r.Context()
+	// Adımlar (composer install, key:generate, optimize) istemciden KOPUK: 30 sn'de
+	// kopan tarayıcı .env yazılmış ama vendor/ yarım bir uygulama bırakmasın.
+	ctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	php := phpBin(phpSurum)
 	var adimlar []map[string]any
 	kaydet := func(ad string, ok bool, not string) {

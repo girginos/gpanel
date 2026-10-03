@@ -329,6 +329,9 @@ var (
 // yalnız takılmayı keser.
 const olusturSuresi = 10 * time.Minute
 
+// kopukSure — öteki istekten kopuk yan etki zincirlerinin (PHP/backend/SSL) üst süresi.
+const kopukSure = 5 * time.Minute
+
 // Vhost render + SUNUCU GENELİ `nginx -t` + reload yapan dış etkili adımlar
 // (testler sahteyle değiştirir: hata metninin kime ne döndüğü ana makinenin
 // nginx'ine dokunmadan sınanır). Hataları istemciye nginxset.SunucuHatasi ile
@@ -825,6 +828,9 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin PHP sürümü değiştirilemez")
 		return
 	}
+	// Havuz/vhost değişince DB de yazılmalı — istemci kopsa da (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	socket, err := phpSurumUygula(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
 	if errors.Is(err, hesaplar.ErrHesapAskida) {
 		// Hiçbir şeye dokunulmadı (havuz askıda başlatılmaz).
@@ -835,7 +841,7 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+nginxset.SunucuHatasi(r, "domains.php", id, err))
 		return
 	}
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`UPDATE domains SET php_surum=? WHERE id=?`, req.PHPSurum, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
@@ -941,13 +947,17 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = alanAdi
+	// Yan etki burada başlar (DB → vhost → gerekirse DB geri alma): istemci kopsa
+	// da zincir tamamlanır, DB ile disk ayrışmaz (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	// Eski değeri SAKLA: render düşerse DB'yi geri almak için gerekir.
 	var eskiBackend string
-	_ = h.DB.QueryRowContext(r.Context(),
+	_ = h.DB.QueryRowContext(kctx,
 		`SELECT COALESCE(web_backend,'php-fpm') FROM domains WHERE id=?`, id).Scan(&eskiBackend)
 
 	// 1) DB güncelle
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`UPDATE domains SET web_backend=? WHERE id=?`, req.Backend, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
@@ -961,7 +971,7 @@ func (h *Handlers) SetWebBackend(w http.ResponseWriter, r *http.Request) {
 		// yenilemesi dahil) DB'den yeni değeri okuyup aynı hataya düşer ve o
 		// kiracının yenilemesi KALICI olarak bozulur — kimse fark etmeden.
 		if eskiBackend != "" {
-			if _, gerr := h.DB.ExecContext(r.Context(),
+			if _, gerr := h.DB.ExecContext(kctx,
 				`UPDATE domains SET web_backend=? WHERE id=?`, eskiBackend, id); gerr != nil {
 				httpx.WriteError(w, http.StatusInternalServerError,
 					"vhost render: "+hata+" — DB geri alınamadı: "+gerr.Error())

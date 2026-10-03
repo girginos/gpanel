@@ -577,7 +577,12 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		surum = req.PHPSurum
 	}
 
-	if err := Save(r.Context(), h.DB, id, req.Ayarlar); err != nil {
+	// Yan etki burada başlar (DB → havuz restart → vhost → php_surum): havuz/FPM
+	// yeniden başlatma saniyeler sürer; istemci kopsa da zincir tamamlanır ve DB
+	// ile havuz ayrışmaz (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, 5*time.Minute)
+	defer iptal()
+	if err := Save(kctx, h.DB, id, req.Ayarlar); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB kaydet: "+err.Error())
 		return
 	}
@@ -613,7 +618,7 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.PHPSurum != "" {
-		_, _ = h.DB.ExecContext(r.Context(),
+		_, _ = h.DB.ExecContext(kctx,
 			`UPDATE domains SET php_surum=? WHERE id=?`, surum, id)
 	}
 

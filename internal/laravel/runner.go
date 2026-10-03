@@ -33,6 +33,9 @@ const (
 	composerBin = "/usr/local/bin/composer"
 	ciktiCap    = 64 << 10 // 64KB çıktı tavanı
 	kisaTimeout = 120 * time.Second
+	// kopukSure — istemciden kopuk (httpx.KopukBaglam) komut zincirinin üst süresi;
+	// tek komut yine kisaTimeout ile sınırlı.
+	kopukSure   = 15 * time.Minute
 	sistemPATH  = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	cronDDizin  = "/etc/cron.d"
 	logAltDizin = "logs" // /home/c_x/logs

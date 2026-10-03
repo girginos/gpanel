@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
@@ -536,12 +537,15 @@ func (h *Handlers) Klonla(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "önce repo bağlayın")
 		return
 	}
+	// git uzun sürebilir; durum yazımı istemci kopsa da yapılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
+	defer iptal()
 	sha, log, err := gitClone(sk, h.patliURL(id, repoURL), branch, targetDir)
 	durum := "basarili"
 	if err != nil {
 		durum = "hata"
 	}
-	_, _ = h.DB.ExecContext(r.Context(),
+	_, _ = h.DB.ExecContext(kctx,
 		`UPDATE git_repos SET son_sync=NOW(), son_commit=?, son_durum=? WHERE id=?`,
 		sha, durum, gid)
 	if err != nil {
@@ -569,12 +573,15 @@ func (h *Handlers) Pull(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "repo yok")
 		return
 	}
+	// git uzun sürebilir; durum yazımı istemci kopsa da yapılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
+	defer iptal()
 	sha, log, err := gitPull(sk, targetDir, branch)
 	durum := "basarili"
 	if err != nil {
 		durum = "hata"
 	}
-	_, _ = h.DB.ExecContext(r.Context(),
+	_, _ = h.DB.ExecContext(kctx,
 		`UPDATE git_repos SET son_sync=NOW(), son_commit=?, son_durum=? WHERE id=?`,
 		sha, durum, gid)
 	if err != nil {
@@ -634,12 +641,15 @@ func (h *Handlers) Webhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "secret eşleşmedi", http.StatusNotFound)
 		return
 	}
+	// git uzun sürebilir; durum yazımı istemci kopsa da yapılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
+	defer iptal()
 	sha, log, perr := gitPull(sk, targetDir, branch)
 	durum := "basarili"
 	if perr != nil {
 		durum = "hata-webhook"
 	}
-	_, _ = h.DB.ExecContext(r.Context(),
+	_, _ = h.DB.ExecContext(kctx,
 		`UPDATE git_repos SET son_sync=NOW(), son_commit=?, son_durum=? WHERE id=?`,
 		sha, durum, gid)
 	if perr != nil {

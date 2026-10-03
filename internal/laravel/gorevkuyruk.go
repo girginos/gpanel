@@ -117,6 +117,8 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 	// Hesap askısı (HesapAski) ile aynı alan adı kilidi: askı yazıldıktan sonra gelen
 	// açma isteği askiKapisi'na takılır, önce gelen açma askı adımından önce biter.
 	defer kilitle(id)()
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure) // cron yazıldıktan sonra DB durumu kopmasın
+	defer iptal()
 	if req.Aktif {
 		if !askiKapisi(w, r, h.DB, id, sk) {
 			return
@@ -140,12 +142,12 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "cron yazılamadı: "+err.Error())
 			return
 		}
-		if _, err := h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=1 WHERE domain_id=?`, id); err != nil {
+		if _, err := h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET schedule_enabled=1 WHERE domain_id=?`, id); err != nil {
 			log.Printf("laravel schedule: schedule_enabled=1 yazılamadı (domain=%d): %v — cron kuruldu ama panel durumu güncellenmedi", id, err)
 		}
 	} else {
 		_ = cronSil(id)
-		if _, err := h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET schedule_enabled=0 WHERE domain_id=?`, id); err != nil {
+		if _, err := h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET schedule_enabled=0 WHERE domain_id=?`, id); err != nil {
 			log.Printf("laravel schedule: schedule_enabled=0 yazılamadı (domain=%d): %v — cron kaldırıldı ama panel durumu güncellenmedi", id, err)
 		}
 	}
@@ -209,13 +211,16 @@ func (h *Handlers) Queue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer kilitle(id)() // per-domain serileştir (global daemon-reload amplifikasyonu — denetim #7)
+	// unit/systemd değiştikten sonra DB durumu istemci kopsa da yazılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	unit := queueUnitName(id) + ".service"
 	if !req.Aktif {
 		_ = exec.Command("systemctl", "disable", "--now", unit).Run()
 		_ = os.Remove(queueUnitPath(id))
 		_ = exec.Command("systemctl", "daemon-reload").Run()
 		_ = exec.Command("systemctl", "reset-failed", unit).Run()
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET queue_enabled=0 WHERE domain_id=?`, id)
+		_, _ = h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET queue_enabled=0 WHERE domain_id=?`, id)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "queue_enabled": false})
 		return
 	}
@@ -254,7 +259,7 @@ func (h *Handlers) Queue(w http.ResponseWriter, r *http.Request) {
 	}
 	// crash-loop tespiti (5sn pencere)
 	crashLog, saglikli := monitorQueue(unit)
-	_, _ = h.DB.ExecContext(r.Context(),
+	_, _ = h.DB.ExecContext(kctx,
 		`UPDATE cp_laravel_apps SET queue_enabled=1, queue_timeout=?, queue_max_jobs=?, queue_connection=? WHERE domain_id=?`,
 		req.Timeout, req.MaxJobs, conn, id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

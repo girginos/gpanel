@@ -96,9 +96,11 @@ func (h *Handlers) Bakim(w http.ResponseWriter, r *http.Request) {
 	if req.Aktif {
 		komut = "down"
 	}
-	out, cok := TenantExec(r.Context(), sk, appDir, phpBin(phpSurum), "artisan", komut)
+	ctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	out, cok := TenantExec(ctx, sk, appDir, phpBin(phpSurum), "artisan", komut)
 	if cok {
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET maintenance=? WHERE domain_id=?`,
+		_, _ = h.DB.ExecContext(ctx, `UPDATE cp_laravel_apps SET maintenance=? WHERE domain_id=?`,
 			map[bool]int{true: 1, false: 0}[req.Aktif], id)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": cok, "bakim": req.Aktif, "cikti": out})

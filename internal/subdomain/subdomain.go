@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/dns"
 	"girginospanel/internal/hesaplar"
@@ -56,6 +57,9 @@ func (h *Handlers) parent(r *http.Request) (id int64, sk, alanAdi, phpSurum stri
 // `httpd -t`, systemctl, chown/chcon/restorecon, acme.sh, openssl). Testler
 // sahteyle değiştirir: hata yolları ana makinenin /home, /etc/nginx, /etc/httpd
 // dizinlerine ve servislerine dokunmadan sınanır. Üretimde değerler SABİTTİR.
+// kopukSure — istemciden kopuk (httpx.KopukBaglam) yan etki zincirlerinin üst süresi.
+const kopukSure = 5 * time.Minute
+
 var (
 	evKoku     = "/home"
 	nginxConfD = "/etc/nginx/conf.d"
@@ -153,6 +157,10 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	docroot := docrootOf(sk, tamAd)
+	// Yan etki burada başlar: istemci kopsa da vhost + kayıt + DNS A + zone
+	// tamamlanır (kopuk bağlam; yarım alt alan adı kalmaz).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
 	if err := os.MkdirAll(docroot, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "docroot oluşturulamadı")
 		return
@@ -176,7 +184,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		defer birak()
 		// Hesap askıdaysa (tek kaynak) yeni alt alan adı 503 askı vhost'uyla doğar;
 		// askıdan alınca hesap askısı tüm alt alan adlarını tek üreticiden yeniden kurar.
-		askida, aerr := hesaplar.HesapAskida(r.Context(), h.DB, sk)
+		askida, aerr := hesaplar.HesapAskida(kctx, h.DB, sk)
 		if aerr != nil {
 			log.Printf("subdomain %s: %v", tamAd, aerr)
 			httpx.WriteError(w, http.StatusInternalServerError, "hesap askı durumu okunamadı")
@@ -231,7 +239,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.DB.Exec(`INSERT INTO dns_records (domain_id, ad, tip, deger, ttl, oncelik, aktif) VALUES (?,?,?,?,?,?,1)`,
 			id, altAd, "A", altIP, 3600, 0); err != nil {
 			log.Printf("subdomain %s: DNS A kaydı eklenemedi: %v — subdomain çözümlenmeyebilir", tamAd, err)
-		} else if err := dns.WriteZone(r.Context(), h.DB, id); err != nil {
+		} else if err := dns.WriteZone(kctx, h.DB, id); err != nil {
 			log.Printf("subdomain %s: zone dosyası yazılamadı: %v", tamAd, err)
 		}
 	}
@@ -279,7 +287,10 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(`DELETE FROM dns_records WHERE domain_id=? AND ad=? AND tip='A'`, id, altAd); err != nil {
 		log.Printf("subdomain sil: DNS A kaydı silinemedi (domain=%d ad=%s): %v — zone'da orphan kalabilir", id, altAd, err)
 	}
-	_ = dns.WriteZone(r.Context(), h.DB, id)
+	// DB satırları gitti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	_ = dns.WriteZone(kctx, h.DB, id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

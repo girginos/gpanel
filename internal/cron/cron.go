@@ -539,7 +539,9 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 	}
 	komut := list[idx].Komut
 
-	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	// Kiracının görevi istemci 30 sn'de kopunca ÖLDÜRÜLMEZ; söz verilen üst süre
+	// (120 sn) geçerli kalır (kopuk bağlam).
+	ctx, cancel := httpx.KopukBaglam(r, 120*time.Second)
 	defer cancel()
 	out, runErr := kiraciCronCalistir(ctx, sk, komut)
 	if errors.Is(runErr, kiraci.ErrKomut) {

@@ -111,19 +111,22 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	logPath := setupLog(id)
 	tmp := "/home/" + sk + "/.lt-skel-" + fmt.Sprint(id)
 
-	// kaydı hemen oluştur (kuruluyor)
-	_ = h.upsertTemel(r.Context(), id, appRoot, req.Mode, phpSurum, "")
-	_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET son_deploy_durum='kuruluyor' WHERE domain_id=?`, id)
+	// kaydı hemen oluştur (kuruluyor). Yan etki burada başlar: istemci kopsa da
+	// kayıt "kuruluyor"da asılı kalmasın (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	_ = h.upsertTemel(kctx, id, appRoot, req.Mode, phpSurum, "")
+	_, _ = h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET son_deploy_durum='kuruluyor' WHERE domain_id=?`, id)
 
 	switch req.Mode {
 	case "yerel":
 		// git init senkron (hızlı)
-		out, gok := TenantExec(r.Context(), sk, appDir, "/usr/bin/git", "init")
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET son_deploy_durum=? WHERE domain_id=?`,
+		out, gok := TenantExec(kctx, sk, appDir, "/usr/bin/git", "init")
+		_, _ = h.DB.ExecContext(kctx, `UPDATE cp_laravel_apps SET son_deploy_durum=? WHERE domain_id=?`,
 			map[bool]string{true: "hazir", false: "hata"}[gok], id)
 		// public zaten varsa docroot ayarla (yoksa ilk deploy'da)
 		if _, e := os.Stat(filepath.Join(appDir, "public")); e == nil {
-			_ = h.setDocroot(r.Context(), id, sk, altDizinPublic(appRoot))
+			_ = h.setDocroot(kctx, id, sk, altDizinPublic(appRoot))
 		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": gok, "async": false, "cikti": out,
 			"mesaj": "Boş git deposu oluşturuldu. Kodunuzu push edip Dağıtım sekmesinden yayınlayın."})

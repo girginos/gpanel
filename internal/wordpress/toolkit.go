@@ -400,6 +400,10 @@ func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 // bakimKaydet: bakım modu durumunu wp_bakim tablosuna yazar (kalıcı takip).
 // Böylece durum DB'de tutulur; ileride reconcile/render bunu referans alabilir.
 func (h *Handlers) bakimKaydet(r *http.Request, dir string, aktif bool) {
+	// wp-cli bitti (uzun sürebilir): durum istemci kopsa da yazılmalı (kopuk bağlam).
+	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	r = r.WithContext(kctx)
 	id, _, _, _, _, ok := h.domain(r)
 	if !ok {
 		return
@@ -408,7 +412,7 @@ func (h *Handlers) bakimKaydet(r *http.Request, dir string, aktif bool) {
 	if aktif {
 		ak = 1
 	}
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`INSERT INTO wp_bakim(domain_id, dizin, aktif) VALUES(?,?,?)
 		 ON DUPLICATE KEY UPDATE aktif=VALUES(aktif)`, id, dir, ak); err != nil {
 		log.Printf("wordpress.bakimKaydet: durum yazılamadı (domain=%d): %v — panel görünümü gerçek bakım durumundan sapabilir", id, err)

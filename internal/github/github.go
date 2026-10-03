@@ -365,16 +365,20 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 	// TOKEN'SIZ saklanır, clone anında git.patliURL ile RUNTIME enjekte edilir.
 	cloneURL := fmt.Sprintf("https://github.com/%s.git", req.Repo)
 
+	// Yan etki (DB + GitHub'da webhook) istemciden KOPUK: webhook GitHub'da
+	// oluşup kimliği kaydedilmezse sonraki seçimler mükerrer kanca bırakır.
+	kctx, iptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer iptal()
 	// git_repos kaydını yaz/güncelle
 	var existingSecret string
-	_ = h.DB.QueryRowContext(r.Context(),
+	_ = h.DB.QueryRowContext(kctx,
 		`SELECT COALESCE(webhook_secret,'') FROM git_repos WHERE domain_id=?`, id).Scan(&existingSecret)
 	existingSecret = gizli.CozBagli(existingSecret, "webhook")
 	secret := existingSecret
 	if secret == "" {
 		secret = randomHex(20)
 	}
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`INSERT INTO git_repos(domain_id, repo_url, branch, target_dir, deploy_key_pub, webhook_secret, webhook_secret_hash, son_durum)
 		 VALUES(?,?,?,?, '', ?,?, 'beklemede')
 		 ON DUPLICATE KEY UPDATE repo_url=VALUES(repo_url), branch=VALUES(branch),
@@ -385,7 +389,7 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// connection state
-	if _, err := h.DB.ExecContext(r.Context(),
+	if _, err := h.DB.ExecContext(kctx,
 		`UPDATE github_connections SET secili_repo=?, secili_branch=? WHERE domain_id=?`,
 		req.Repo, req.Branch, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB: "+err.Error())
@@ -398,10 +402,10 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 		hookURL := taban + "/api/v1/git-webhook/" + secret
 		// Önce eski webhook'u temizle
 		var oldID int64
-		_ = h.DB.QueryRowContext(r.Context(),
+		_ = h.DB.QueryRowContext(kctx,
 			`SELECT webhook_id FROM github_connections WHERE domain_id=?`, id).Scan(&oldID)
 		if oldID > 0 {
-			_, _, _ = ghCall(r.Context(), "DELETE",
+			_, _, _ = ghCall(kctx, "DELETE",
 				fmt.Sprintf("/repos/%s/hooks/%d", req.Repo, oldID), pat, nil)
 		}
 		hook := ghHook{Name: "web", Active: true, Events: []string{"push"}}
@@ -409,14 +413,14 @@ func (h *Handlers) Use(w http.ResponseWriter, r *http.Request) {
 		hook.Config.ContentType = "json"
 		hook.Config.Secret = secret
 		hook.Config.InsecureSSL = "1" // self-signed cert için
-		body, st, err := ghCall(r.Context(), "POST", "/repos/"+req.Repo+"/hooks", pat, hook)
+		body, st, err := ghCall(kctx, "POST", "/repos/"+req.Repo+"/hooks", pat, hook)
 		if err != nil || (st != 201 && st != 200) {
 			resp["webhook_ok"] = false
 			resp["webhook_hata"] = patHataMesaji(st, body)
 		} else {
 			var created ghHook
 			_ = json.Unmarshal(body, &created)
-			_, _ = h.DB.ExecContext(r.Context(),
+			_, _ = h.DB.ExecContext(kctx,
 				`UPDATE github_connections SET webhook_id=?, webhook_url=? WHERE domain_id=?`,
 				created.ID, hookURL, id)
 			resp["webhook_ok"] = true

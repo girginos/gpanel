@@ -73,9 +73,12 @@ func (h *Handlers) Artisan(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	out, cok := TenantExec(r.Context(), sk, appDir, phpBin(phpSurum), argv...)
+	// İstemci 30 sn'de kopsa da komut (migrate vb.) YARIDA ÖLDÜRÜLMEZ: kopuk bağlam.
+	ctx, iptal := httpx.KopukBaglam(r, kopukSure)
+	defer iptal()
+	out, cok := TenantExec(ctx, sk, appDir, phpBin(phpSurum), argv...)
 	if bakimAktif(appDir) != (alt == "down") && (alt == "down" || alt == "up") {
-		_, _ = h.DB.ExecContext(r.Context(), `UPDATE cp_laravel_apps SET maintenance=? WHERE domain_id=?`,
+		_, _ = h.DB.ExecContext(ctx, `UPDATE cp_laravel_apps SET maintenance=? WHERE domain_id=?`,
 			map[bool]int{true: 1, false: 0}[alt == "down"], id)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": cok, "komut": "artisan " + strings.Join(parts, " "), "cikti": out})
@@ -133,7 +136,9 @@ func (h *Handlers) Composer(w http.ResponseWriter, r *http.Request) {
 		}
 		argv = append(argv, pkg)
 	}
-	out, cok := TenantExec(r.Context(), sk, appDir, phpBin(phpSurum), argv...)
+	ctx, iptal := httpx.KopukBaglam(r, kopukSure) // composer yarıda öldürülmesin (vendor/ yarım kalır)
+	defer iptal()
+	out, cok := TenantExec(ctx, sk, appDir, phpBin(phpSurum), argv...)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": cok, "komut": "composer " + req.Komut, "cikti": out})
 }
 
@@ -255,7 +260,9 @@ func (h *Handlers) Npm(w http.ResponseWriter, r *http.Request) {
 			env[i] = "PATH=" + binDir + ":" + sistemPATH
 		}
 	}
-	out, cok := tenantExecEnv(r.Context(), sk, appDir, env, npmBin, argv...)
+	ctx, iptal := httpx.KopukBaglam(r, kopukSure) // npm yarıda öldürülmesin (node_modules yarım kalır)
+	defer iptal()
+	out, cok := tenantExecEnv(ctx, sk, appDir, env, npmBin, argv...)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": cok, "komut": "npm " + req.Komut, "cikti": out, "node_dir": binDir})
 }
 

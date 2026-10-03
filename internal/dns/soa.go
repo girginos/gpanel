@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"girginospanel/internal/httpx"
 
@@ -132,7 +133,10 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if zerr := WriteZone(r.Context(), h.DB, id); zerr != nil {
+	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
+	defer ziptal()
+	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
 		log.Printf("dns WriteZone(soa) domain=%d: %v", id, zerr)
 	}
 	httpx.WriteJSON(w, http.StatusOK, s)
