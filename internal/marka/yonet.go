@@ -105,7 +105,13 @@ type yonetGorunum struct {
 	KokKapatti  bool   `json:"kok_kapatti"`
 	AlanadiIzni bool   `json:"alanadi_izni"`
 	Marka       Marka  `json:"marka"`
+	// MusteriAdresi — müşteri kapısının kökü (kapı modu kapalıyken boş → aynı
+	// köken). Bayi markalı müşteri giriş bağlantısını (/cp/giris?m=…) bununla kurar.
+	MusteriAdresi string `json:"musteri_adresi,omitempty"`
 }
+
+// MusteriAdresKanca — müşteri kapısı adresi (main.go: musteriKapiAdresi).
+var MusteriAdresKanca func(r *http.Request) (string, bool)
 
 func kokGorunum() (yonetGorunum, error) {
 	m, err := KokOkuYonetim()
@@ -180,7 +186,11 @@ func (h *Handlers) YonetGetir(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, bayiGorunum(k))
+	g := bayiGorunum(k)
+	if MusteriAdresKanca != nil {
+		g.MusteriAdresi, _ = MusteriAdresKanca(r)
+	}
+	httpx.WriteJSON(w, http.StatusOK, g)
 }
 
 type yonetGovde struct {

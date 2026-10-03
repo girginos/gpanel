@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent as RKE } from 'react'
 import { api } from '@/lib/api'
 import { useEklentiler } from '@/lib/eklenti'
-import { useMarka, logoURL, faviconURL } from '@/lib/marka'
+import { useMarka, logoURL, faviconURL, markaOturumYukle } from '@/lib/marka'
 import { Suspense } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import TopBar from './TopBar'
@@ -70,7 +70,7 @@ const MENU_EN: Record<string, string> = {
   'Hosting Planları': 'Hosting Plans', 'Bayi Planları': 'Reseller Plans',
   'Araçlar ve Ayarlar': 'Tools & Settings', 'PHP & Sunucu Sihirbazı': 'PHP & Server Wizard',
   'Sunucu Optimize': 'Server Optimization', 'Site Taşıma': 'Site Migration',
-  'İstatistikler': 'Statistics', 'Eklentiler': 'Plugins', 'Marka': 'Branding', 'WordPress': 'WordPress',
+  'İstatistikler': 'Statistics', 'Eklentiler': 'Plugins', 'Marka': 'Branding', 'Markam': 'My branding', 'WordPress': 'WordPress',
   'Güvenlik Duvarı': 'Firewall', 'İzleme': 'Monitoring',
   'Website Security Monitor': 'Website Security Monitor', 'Antivirüs': 'Antivirus', 'Yakında': 'Soon', 'Tehdit İstihbaratı': 'Threat Intelligence', 'Uygulama Çalıştırıcı': 'Application Runner',
   'Saldırı Zincirleri': 'Attack Chains', 'Denetim Kaydı': 'Audit Log',
@@ -144,6 +144,7 @@ const RESELLER_NAV: NavGroup[] = [
   ]},
   { baslik: 'Ayarlar', items: [
     { to: '/araclar/dns-sablonu', etiket: 'DNS Şablonları',      ikon: ICONS.domain },
+    { to: '/marka',               etiket: 'Markam',              ikon: ICONS.marka },
     { to: '/denetim',             etiket: 'Denetim Kaydı',       ikon: ICONS.denetim },
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
   ]},
@@ -183,6 +184,10 @@ export default function DashboardLayout() {
   const kenarCubugu = !isMusteri
   // Logo hedefi rolün ana sayfası (müşteri → kendi ana sayfası).
   const anaSayfa = rolAnaSayfa(rol)
+
+  // Oturum markası jetondan (D2): müşteri bayisinin markasını, bayi kendi markasını
+  // görür. Giriş sayfası tam yenileme yapmadan buraya geçtiğinde de doğru marka gelir.
+  useEffect(() => { void markaOturumYukle() }, [rol])
 
   const [sayac, setSayac] = useState<Sayaclar>({})
   useEffect(() => {
@@ -230,7 +235,7 @@ export default function DashboardLayout() {
     eklentiler === null ? null : eklentiler.some((e) => e.ad === ad)
   const eklentiKapilari: Array<{ yol: string; goster: boolean | null }> = [
     { yol: '/mail-sunucu', goster: kuruluMu('mail') },
-    { yol: '/marka', goster: isReseller ? false : kuruluMu('whitelabel') },
+    // /marka artık çekirdek (D2): eklentiye bağlı değil; bayi menüsünde "Markam".
   ]
   const gizli = new Set(eklentiKapilari.filter((k) => k.goster !== true).map((k) => k.yol))
   // 🔴 EKLENTİ KAPILARI GEÇ ÇÖZÜLÜR — aşağıdaki efektler buna BAĞLIDIR.

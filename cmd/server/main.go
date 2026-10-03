@@ -552,6 +552,7 @@ func main() {
 		}
 		return marka.Oku().PanelAdi
 	}
+	marka.MusteriAdresKanca = musteriKapiAdresi
 	auth.HostKiraciKanca = markaH.HostKiraciRID
 	musteri.HostKiraciKanca = markaH.HostKiraciRID
 
