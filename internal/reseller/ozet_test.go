@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 func ozGeciciDB(t *testing.T) *sql.DB {
@@ -43,11 +45,14 @@ func ozGeciciDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	q := []string{
-		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL)`,
+		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL,
+			trafik_kota_mb BIGINT NULL)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit (plan ⊕ üst yazım)
 		`CREATE TABLE domains (id BIGINT PRIMARY KEY, alan_adi VARCHAR(255) NOT NULL, reseller_id BIGINT NOT NULL DEFAULT 0,
+			disk_kota_mb INT NOT NULL DEFAULT 0,
 			plan_id BIGINT NULL, boyut_kb BIGINT NOT NULL DEFAULT 0, askida TINYINT NULL, is_demo TINYINT NOT NULL DEFAULT 0,
 			ssl_aktif TINYINT NOT NULL DEFAULT 0, ssl_bitis DATETIME NULL, olusturulma DATETIME NOT NULL)`,
-		`INSERT INTO service_plans VALUES (1,'Mini',100)`,
+		`INSERT INTO service_plans (id, ad, disk_kota_mb) VALUES (1,'Mini',100)`,
 	}
 	for i := 1; i <= 12; i++ { // bayi 7: 12 hosting, oluşturulma gün gün artar
 		q = append(q, fmt.Sprintf(`INSERT INTO domains (id, alan_adi, reseller_id, plan_id, olusturulma) VALUES (%d,'b7-%02d.test',7,1,'2026-01-%02d')`, i, i, i))

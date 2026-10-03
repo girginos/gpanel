@@ -25,6 +25,8 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 func TestMailYerelGecerli(t *testing.T) {
@@ -291,6 +293,7 @@ func TestMailAktarGuvenilmezKaynak(t *testing.T) {
 		`ALTER TABLE domains ADD COLUMN plan_id BIGINT UNSIGNED NULL`,
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, max_email INT NOT NULL DEFAULT 0,
 			saatlik_mail_limiti INT NOT NULL DEFAULT 0, mail_kutu_kota_mb INT NOT NULL DEFAULT 0)`,
+		efektiflimit.TabloDDL, // 0120: efektif posta limiti (plan ⊕ üst yazım)
 		`CREATE TABLE cp_eklentiler (ad VARCHAR(64) PRIMARY KEY, aktif TINYINT NOT NULL DEFAULT 0,
 			soket VARCHAR(255) NOT NULL DEFAULT '')`,
 		`INSERT INTO service_plans VALUES (3, 9, 50, 250)`,

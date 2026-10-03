@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 // 🔴 Governor sorgu sahibinin planını harf DUYARLI ve tek-domain koşuluyla okur: eski
@@ -45,6 +47,7 @@ func TestGovernorLimiti_HarfVaryantiVeCokDomain(t *testing.T) {
 	defer db.Close()
 	for _, q := range []string{
 		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, db_max_query_seconds INT NULL)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit = plan ⊕ hostinge özel üst yazım
 		`CREATE TABLE domains (id BIGINT PRIMARY KEY, plan_id BIGINT NULL)`,
 		`CREATE TABLE db_accounts (id BIGINT AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT NOT NULL,
 			db_name VARCHAR(64) NOT NULL UNIQUE, db_user VARCHAR(64) NOT NULL)`,

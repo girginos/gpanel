@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"girginospanel/internal/domains"
+	"girginospanel/internal/efektiflimit"
 )
 
 // mailEklentiSoket — core→eklenti güvenilir yerel kanal (aynı kutu, out-of-process).
@@ -276,8 +277,8 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, alanAdi string, log
 	var domainID, resellerID int64
 	var kotaMB int
 	if err := h.DB.QueryRowContext(ctx,
-		`SELECT d.id, d.reseller_id, COALESCE(p.mail_kutu_kota_mb,0)
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.alan_adi=?`,
+		`SELECT d.id, d.reseller_id, `+efektiflimit.IfadeVarsayilan("mail_kutu_kota_mb", 0)+`
+		   FROM domains d`+efektiflimit.Join+`WHERE d.alan_adi=?`,
 		alanAdi).Scan(&domainID, &resellerID, &kotaMB); err != nil {
 		return 0, nil, fmt.Errorf("hedef domain okunamadı: %w", err)
 	}

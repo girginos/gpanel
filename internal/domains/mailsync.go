@@ -12,22 +12,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"girginospanel/internal/efektiflimit"
 )
 
-// mailKutuLimitSenkron — domaine uygulanan planın posta limitlerini (max_email +
+// mailKutuLimitSenkron — domainin EFEKTİF (plan ⊕ üst yazım) posta limitlerini (max_email +
 // saatlik_mail_limiti) mail eklentisine iletir; enforcement PLUGIN tarafındadır
 // (virtual_domains.kutu_limiti / saatlik_limiti). Best-effort: mail eklentisi
 // yok/kapalı/soketsiz ise ya da bu domain için mail servisi kurulmamışsa sessizce
 // döner — planı asla bloklamaz. Yalnız admin-header ile çağırır (soket zaten iç).
 func mailKutuLimitSenkron(ctx context.Context, db *sql.DB, domainID int64, alanAdi string) {
-	var kutu, saatlik, kotaMB int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(p.max_email,0), COALESCE(p.saatlik_mail_limiti,0),
-		        COALESCE(p.mail_kutu_kota_mb,0)
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.id=?`,
-		domainID).Scan(&kutu, &saatlik, &kotaMB); err != nil {
+	// Efektif değer: plan ⊕ hostinge özel üst yazım (tek kaynak efektiflimit).
+	el, err := efektiflimit.Oku(ctx, db, domainID)
+	if err != nil {
 		return
 	}
+	kutu, saatlik, kotaMB := el.Efektif("max_email", 0), el.Efektif("saatlik_mail_limiti", 0), el.Efektif("mail_kutu_kota_mb", 0)
 	var aktif int
 	var soket string
 	if err := db.QueryRowContext(ctx,

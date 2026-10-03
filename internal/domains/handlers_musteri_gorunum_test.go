@@ -23,6 +23,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/middleware"
 )
 
@@ -57,7 +58,9 @@ func mg_geciciDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	for _, q := range []string{
-		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL)`,
+		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL,
+			trafik_kota_mb BIGINT NULL)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit (plan ⊕ üst yazım) birleşimi
 		`CREATE TABLE users (id BIGINT UNSIGNED PRIMARY KEY, username VARCHAR(64) NOT NULL DEFAULT '',
 			full_name VARCHAR(128) NULL, role VARCHAR(16) NOT NULL DEFAULT 'user')`,
 		`CREATE TABLE domains (
@@ -71,7 +74,7 @@ func mg_geciciDB(t *testing.T) *sql.DB {
 			trafik_kb BIGINT NOT NULL DEFAULT 0, is_demo TINYINT NOT NULL DEFAULT 0, notlar TEXT NULL,
 			olusturulma DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, plan_id BIGINT UNSIGNED NULL,
 			ssh_erisim TINYINT NOT NULL DEFAULT 0, askida TINYINT NULL,
-			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0)`,
+			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0, disk_kota_mb INT NOT NULL DEFAULT 0)`,
 		`INSERT INTO users (id, username, full_name, role) VALUES
 			(1, 'root', 'Kok Yonetici Adi', 'admin'), (7, 'bayi_ahmet', 'Bayi Ahmet Yilmaz', 'reseller')`,
 		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES
