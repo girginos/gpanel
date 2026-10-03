@@ -183,20 +183,12 @@ export default function EklentiEkrani(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ad, token, ekBaglam?.domainID, eklentiAktif])
 
-  // 🔴 SAYFA DOLGUSU BURADA. Panelin <main>'i yatay dolgu vermez; her sayfa
-  // kendi dolgusunu koyar (bkz. EklentilerPage: "px-4 py-4 sm:px-6 sm:py-5
-  // max-w-6xl mx-auto"). Bu kabuk onu koymuyordu, dolayısıyla HER eklenti
-  // ekranı — başlığıyla birlikte — pencerenin sağ ve sol kenarına yapışık
-  // çiziliyordu. Ölçüt panelin kendi sayfaları; aynı değerler kullanılır ki
-  // eklenti ekranı diğer sayfalardan farklı hizalanmasın. Genişlik sınırı
-  // ayrıca geniş ekranda tek satırlık metin kutularının 1200 piksele
-  // yayılmasını da engeller.
-  // `sade` gömülü kullanımdır (örn. abonelik sayfası içinde); orada dolguyu
-  // saran sayfa verir, burada vermek çift dolgu olurdu.
-  const kapsayici = sade ? '' : 'px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto'
-
+  // Dolgu ve genişlik burada DEĞİL: eklenti ekranı da her panel sayfası gibi tek
+  // sayfa kabuğunun (components/SayfaKabugu) içinde çizilir — aynı hiza, aynı
+  // genişlik. `sade` gömülü kullanımdır (örn. abonelik sayfası sekmesi); orada
+  // başlık/breadcrumb'ı saran sayfa verir.
   return (
-    <div className={kapsayici}>
+    <div>
       {!sade && (
         <>
           <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: baslik }]} />

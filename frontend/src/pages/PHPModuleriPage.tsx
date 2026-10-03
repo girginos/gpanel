@@ -315,7 +315,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
   })
 
   return (
-    <div className={gomulu ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}>
+    <div>
       {!gomulu && (
         <Breadcrumb items={[
           { etiket: cevir("Anasayfa"), href: '/' },

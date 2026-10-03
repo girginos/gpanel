@@ -175,7 +175,7 @@ export default function DomainSubdomainYonetPage() {
   const etiket = 'text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500'
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-5xl">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

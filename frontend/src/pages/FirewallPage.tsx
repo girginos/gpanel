@@ -260,7 +260,7 @@ export default function FirewallPage() {
   const kisitUyari = tip === 'whitelist' && port.trim() !== ''
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-3xl mx-auto">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Güvenlik Duvarı") }]} />
       {/* Başlık — kalkan (gerçek SVG) + ad + tek satır açıklama */}
       <div className="mb-4 flex items-start gap-2.5">

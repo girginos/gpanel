@@ -11,6 +11,10 @@
   color: #e8eef8;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   padding: 24px;
+  /* TEK SAYFA GENİŞLİĞİ: koyu zemin içerik alanını baştan sona kaplar (App.tsx
+     KabukDisi), içerik ise diğer sayfalarla aynı genişlikte ortalanır — kabuk
+     (components/SayfaKabugu) gibi --container-sayfa dolgu DAHİL. */
+  padding-inline: max(24px, calc((100% - var(--container-sayfa)) / 2 + 24px));
   min-height: 100%;
 }
 .gp-dash *, .gp-dash *::before, .gp-dash *::after { box-sizing: border-box; }
@@ -152,12 +156,17 @@
   .gp-dash .grid-main > *:last-child, .gp-dash .grid-second > *:last-child { grid-column: 1/-1; }
 }
 @media (max-width: 800px) {
-  .gp-dash { padding: 14px; }
+  /* Yatay dolgu sayfa kabuğuyla aynı (SayfaKabugu px-4 / sm:px-6): dar ekranda pano
+     içeriği diğer sayfalarla aynı sol kenarda başlar (eskiden 14 px → 768'de 10 px kayık). */
+  .gp-dash { padding: 14px 24px; }
   .gp-dash .page-title { align-items: flex-start; gap: 10px; flex-direction: column; }
   .gp-dash .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .gp-dash .grid-main, .gp-dash .grid-second { grid-template-columns: 1fr; }
   .gp-dash .grid-main > *:last-child, .gp-dash .grid-second > *:last-child { grid-column: auto; }
   .gp-dash .dash-footer { flex-wrap: wrap; }
+}
+@media (max-width: 639.98px) {
+  .gp-dash { padding-inline: 16px; }
 }
 @media (max-width: 500px) {
   .gp-dash .stats-grid { grid-template-columns: 1fr; }

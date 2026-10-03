@@ -186,7 +186,7 @@ export default function PortYonetimPage() {
   const aktifCalisiyor = durum?.aktif_is && durum.aktif_is.bitis_ts === '0001-01-01T00:00:00Z'
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
+    <div>
       <Breadcrumb items={[
         { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
         { etiket: cevir("Port Değiştirme") },
@@ -236,7 +236,7 @@ export default function PortYonetimPage() {
             </UyariKutusu>
           )}
 
-          <div className="mx-auto max-w-2xl">
+          <div className="max-w-2xl">
             {durum.kapi ? (
               <PanelKapilari kapi={durum.kapi} onDegisti={yukle} />
             ) : (

@@ -76,7 +76,7 @@ export default function DomainMailTeslimatPage() {
   useEffect(() => { if (domain) yukle(domain); return () => { yukleNesli.current++ } }, [domain, yukle])
 
   if (!domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
@@ -85,7 +85,7 @@ export default function DomainMailTeslimatPage() {
   const sayac = (d: string) => (kayitlar || []).filter(k => k.durum === d).length
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

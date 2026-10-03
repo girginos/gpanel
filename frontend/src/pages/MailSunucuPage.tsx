@@ -62,7 +62,7 @@ export default function MailSunucuPage() {
   if (mailAktif === false) return <LisansAskida baslik={cevir('Mail Sunucu')} />
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-6xl mx-auto">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Sunucu Yönetimi") }, { etiket: cevir("Mail Sunucu") }]} />
       <h1 className="text-2xl font-semibold text-brand-700 dark:text-brand-300 mb-1">{cevir("Mail Sunucu")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{cevir("Sunucu geneli mail ayarları ve giden IP havuzu — tek yerden yönetin.")}</p>

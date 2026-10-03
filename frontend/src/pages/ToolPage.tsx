@@ -92,7 +92,7 @@ export default function ToolPage() {
   const meta = TOOL_META[slug || ''] || { etiket: slug || cevir("Araç"), aciklama: cevir("Henüz uygulanmadı.") }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir('Anasayfa'), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

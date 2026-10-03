@@ -188,7 +188,7 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
   const yukluSayi = surumler.filter(s => s.yuklu).length
 
   return (
-    <div className={gomulu ? '' : 'px-4 py-4 sm:px-6 sm:py-5'}>
+    <div>
       {!gomulu && (
         <>
           <Breadcrumb items={[

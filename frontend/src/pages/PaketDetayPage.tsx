@@ -227,8 +227,8 @@ export default function PaketDetayPage() {
     setPlan({ ...plan, [k]: v })
   }
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
-  if (!plan) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Plan bulunamadı")}</div></div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!plan) return <div className="text-sm text-red-600">{hata || cevir("Plan bulunamadı")}</div>
   // Düzenleme yalnız planın sahibine (sunucu işareti; eski yanıtta işaret yoksa düzenlenebilir).
   const salt = plan.duzenlenebilir === false
 
@@ -240,292 +240,290 @@ export default function PaketDetayPage() {
   ].filter(Boolean)))
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-5xl mx-auto">
-        <Breadcrumb items={[
-          { etiket: cevir('Anasayfa'), href: '/' },
-          { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
-          { etiket: cevir("Hizmet Planları"), href: '/hizmet-planlari' },
-          { etiket: plan.ad },
-        ]} />
+    <div>
+      <Breadcrumb items={[
+        { etiket: cevir('Anasayfa'), href: '/' },
+        { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
+        { etiket: cevir("Hizmet Planları"), href: '/hizmet-planlari' },
+        { etiket: plan.ad },
+      ]} />
 
-        {/* Başlık + kaydet (yapışkan) */}
-        <div className="sticky top-0 z-10 -mx-2 px-2 py-3 mb-4 bg-slate-50/85 dark:bg-dark-800/85 backdrop-blur border-b border-slate-200/70 dark:border-dark-600 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 truncate">
-              {plan.ad}
-              {plan.varsayilan && <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Varsayılan")}</span>}
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-              {salt ? cevir("Paylaşılan plan") : (plan.aciklama || cevir("Açıklama yok"))} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
-            </p>
-          </div>
-          {salt ? (
-            <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-slate-100 dark:bg-dark-600/60 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{cevir("Salt okunur")}</span>
-          ) : (
-            <Button onClick={kaydet} yukleniyor={isleniyor} color="primary" ikon={I.disket}
-              className="shrink-0">
-              {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
-            </Button>
-          )}
+      {/* Başlık + kaydet (yapışkan) */}
+      <div className="sticky top-0 z-10 -mx-2 px-2 py-3 mb-4 bg-slate-50/85 dark:bg-dark-800/85 backdrop-blur border-b border-slate-200/70 dark:border-dark-600 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 truncate">
+            {plan.ad}
+            {plan.varsayilan && <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded">{cevir("Varsayılan")}</span>}
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+            {salt ? cevir("Paylaşılan plan") : (plan.aciklama || cevir("Açıklama yok"))} · <span className="font-mono">{domainSayisi}</span> {cevir("domainde kullanılıyor")}
+          </p>
         </div>
-
-        {/* Paylaşılan plan (bayi): yalnız seçim özeti — iç ayarlar sunucudan gelmez */}
-        {salt && (
-          <Kart baslik={cevir("Kotalar")} ikon={<Ikon d={I.bilgi} className="h-5 w-5" />} alt={cevir("Bu plan yönetici tarafından tanımlanır: hostinglerinize atayabilir, düzenleyemezsiniz.")}>
-            <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
-              <OzetSat e="Disk" d={ozetMb(plan.disk_kota_mb)} />
-              <OzetSat e={cevir("Trafik")} d={ozetMb(plan.trafik_kota_mb)} />
-              <OzetSat e="CPU %" d={ozetAdet(plan.cpu_yuzde)} />
-              <OzetSat e="RAM" d={ozetMb(plan.ram_mb)} />
-              <OzetSat e="Domain" d={ozetAdet(plan.max_domain)} />
-              <OzetSat e={cevir("Veritabanı")} d={ozetAdet(plan.max_db)} />
-              <OzetSat e={cevir("FTP Hesabı")} d={ozetAdet(plan.max_ftp)} />
-              <OzetSat e={cevir("PHP Sürümü")} d={plan.php_surum || '—'} />
-              {mailAktif && (
-                <>
-                  <OzetSat e={cevir("E-posta Kutusu")} d={ozetAdet(plan.max_email)} />
-                  <OzetSat e={cevir("Saatlik Gönderim")} d={ozetAdet(plan.saatlik_mail_limiti)} />
-                  <OzetSat e={cevir("Kutu Depolama")} d={ozetMb(plan.mail_kutu_kota_mb)} />
-                </>
-              )}
-            </dl>
-          </Kart>
+        {salt ? (
+          <span className="shrink-0 text-[10px] uppercase font-semibold tracking-wider bg-slate-100 dark:bg-dark-600/60 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{cevir("Salt okunur")}</span>
+        ) : (
+          <Button onClick={kaydet} yukleniyor={isleniyor} color="primary" ikon={I.disket}
+            className="shrink-0">
+            {isleniyor ? cevir('Kaydediliyor…') : cevir("Değişiklikleri Kaydet")}
+          </Button>
         )}
+      </div>
 
-        {!salt && (<>
-
-        {/* Genel */}
-        <Kart baslik={cevir("Genel")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Alan etiket={cevir("Plan Adı")}>
-              <input value={plan.ad} onChange={e => P('ad', e.target.value)} className={inp} />
-            </Alan>
-            <Alan etiket={cevir("Varsayılan Plan")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
-                <input type="checkbox" checked={plan.varsayilan} onChange={e => P('varsayilan', e.target.checked)} className="rounded" />
-                <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlere otomatik atansın")}</span>
-              </label>
-            </Alan>
-            <Alan etiket={cevir("Açıklama")} span={2}>
-              <textarea value={plan.aciklama} onChange={e => P('aciklama', e.target.value)} rows={2} className={inp} />
-            </Alan>
-          </div>
-        </Kart>
-
-        {/* Varsayılanlar — yeni domainler bu değerleri miras alır */}
-        <Kart baslik={cevir("Varsayılanlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10 4a2 2 0 114 0v2h2a2 2 0 012 2v2h-2a2 2 0 100 4h2v2a2 2 0 01-2 2h-2v-2a2 2 0 10-4 0v2H8a2 2 0 01-2-2v-2H4a2 2 0 110-4h2V8a2 2 0 012-2h2V4z"/></svg>} alt={cevir("Bu plana bağlı yeni bir domain oluşturulduğunda uygulanacak başlangıç değerleri.")}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Alan etiket={cevir("PHP Sürümü")} ipucu={cevir("Bu plandaki yeni domainler bu PHP sürümüyle kurulur.")}>
-              <select value={plan.php_surum} onChange={e => P('php_surum', e.target.value)} className={inp}>
-                {phpOpts.map(v => <option key={v} value={v}>PHP {v}</option>)}
-              </select>
-            </Alan>
-          </div>
-        </Kart>
-
-        {/* Kaynak Limitleri */}
-        <Kart baslik={cevir("Kaynak Limitleri")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M5 21V10M12 21V4M19 21v-7M3 21h18"/></svg>} alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Alan etiket="CPU %" ipucu={cevir("100 = 1 çekirdek (systemd CPUQuota)")}>
-              <input type="number" min={10} max={2000} value={plan.cpu_yuzde} onChange={e => P('cpu_yuzde', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket="RAM (MB)" ipucu={cevir("Hard MemoryMax; MemoryHigh otomatik %90")}>
-              <input type="number" min={64} value={plan.ram_mb} onChange={e => P('ram_mb', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket="Max Process" ipucu={cevir("systemd TasksMax — PHP-FPM worker dahil")}>
-              <input type="number" min={5} value={plan.max_process} onChange={e => P('max_process', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("MySQL Bağlantı")} ipucu="MAX_USER_CONNECTIONS">
-              <input type="number" min={1} value={plan.mysql_max_baglanti} onChange={e => P('mysql_max_baglanti', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket="Disk (MB)" ipucu={cevir("0 = sınırsız")}>
-              <input type="number" min={0} value={plan.disk_kota_mb} onChange={e => P('disk_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("Trafik (MB/ay)")} ipucu={cevir("0 = sınırsız")}>
-              <input type="number" min={0} value={plan.trafik_kota_mb} onChange={e => P('trafik_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("Inode Kotası")} ipucu={cevir("Toplam dosya + dizin sayısı")}>
-              <input type="number" min={1000} value={plan.inode_kota} onChange={e => P('inode_kota', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("I/O Ağırlık")} ipucu="systemd IOWeight (1-1000)">
-              <input type="number" min={1} max={1000} value={plan.io_agirlik} onChange={e => P('io_agirlik', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket="PHP-FPM max_children" ipucu={cevir("0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.")}>
-              <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = Otomatik")} />
-            </Alan>
-          </div>
-          <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Disk G/Ç (mutlak throttle — IOWeight'ten farklı; cgroup v2)")}</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            <Alan etiket={cevir("Disk Okuma (MB/s)")} ipucu={cevir("Mutlak okuma bant genişliği. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.io_read_mbps} onChange={e => P('io_read_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-            <Alan etiket={cevir("Disk Yazma (MB/s)")} ipucu={cevir("Mutlak yazma bant genişliği. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.io_write_mbps} onChange={e => P('io_write_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-            <Alan etiket={cevir("Okuma IOPS")} ipucu={cevir("Saniyedeki maksimum okuma işlemi. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.io_read_iops} onChange={e => P('io_read_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-            <Alan etiket={cevir("Yazma IOPS")} ipucu={cevir("Saniyedeki maksimum yazma işlemi. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-          </div>
-          <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)")}</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-            <Alan etiket={cevir("Maks. Sorgu/Saat")} ipucu={cevir("MAX_QUERIES_PER_HOUR. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.db_max_queries_per_hour} onChange={e => P('db_max_queries_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-            <Alan etiket={cevir("Maks. Güncelleme/Saat")} ipucu={cevir("MAX_UPDATES_PER_HOUR. 0 = sınırsız")}>
-              <input type="number" min={0} value={plan.db_max_updates_per_hour} onChange={e => P('db_max_updates_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-            <Alan etiket={cevir("Maks. Sorgu Süresi (sn)")} ipucu={cevir("Bu süreyi aşan sorgu KILL edilir (watchdog). 0 = öldürme yok")}>
-              <input type="number" min={0} value={plan.db_max_query_seconds} onChange={e => P('db_max_query_seconds', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
-            </Alan>
-          </div>
-        </Kart>
-
-        {/* Sayısal Sınırlar — posta alanlari mail eklentisi aktifken eklenir */}
-        <Kart baslik={cevir("Sayısal Sınırlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M4 7h4m-4 5h4m-4 5h4M14 5l-1 14M19 5l-1 14"/></svg>} alt={cevir("Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.")}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <Alan etiket="Domain">
-              <input type="number" min={0} value={plan.max_domain} onChange={e => P('max_domain', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("Veritabanı")}>
-              <input type="number" min={0} value={plan.max_db} onChange={e => P('max_db', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            <Alan etiket={cevir("FTP Hesabı")}>
-              <input type="number" min={0} value={plan.max_ftp} onChange={e => P('max_ftp', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-            {/* Posta limitleri: YALNIZ mail eklentisi aktifken. Eklenti yokken
-                bu alanlari gostermek, olmayan bir ozelligi vaat etmek olurdu. */}
+      {/* Paylaşılan plan (bayi): yalnız seçim özeti — iç ayarlar sunucudan gelmez */}
+      {salt && (
+        <Kart baslik={cevir("Kotalar")} ikon={<Ikon d={I.bilgi} className="h-5 w-5" />} alt={cevir("Bu plan yönetici tarafından tanımlanır: hostinglerinize atayabilir, düzenleyemezsiniz.")}>
+          <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
+            <OzetSat e="Disk" d={ozetMb(plan.disk_kota_mb)} />
+            <OzetSat e={cevir("Trafik")} d={ozetMb(plan.trafik_kota_mb)} />
+            <OzetSat e="CPU %" d={ozetAdet(plan.cpu_yuzde)} />
+            <OzetSat e="RAM" d={ozetMb(plan.ram_mb)} />
+            <OzetSat e="Domain" d={ozetAdet(plan.max_domain)} />
+            <OzetSat e={cevir("Veritabanı")} d={ozetAdet(plan.max_db)} />
+            <OzetSat e={cevir("FTP Hesabı")} d={ozetAdet(plan.max_ftp)} />
+            <OzetSat e={cevir("PHP Sürümü")} d={plan.php_surum || '—'} />
             {mailAktif && (
               <>
-                <Alan etiket={cevir("E-posta Kutusu")} ipucu={cevir("Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz")}>
-                  <input type="number" min={0} value={plan.max_email} onChange={e => P('max_email', Number(e.target.value) || 0)} className={inpNum} />
-                </Alan>
-                <Alan etiket={cevir("Saatlik Gönderim")} ipucu={cevir("Kutu basina giden mail/saat. 0 = sinirsiz")}>
-                  <input type="number" min={0} value={plan.saatlik_mail_limiti} onChange={e => P('saatlik_mail_limiti', Number(e.target.value) || 0)} className={inpNum} />
-                </Alan>
-                <Alan etiket={cevir("Kutu Depolama (MB)")} ipucu={cevir("Posta kutusu basina disk kotasi. 0 = sinirsiz")}>
-                  <input type="number" min={0} value={plan.mail_kutu_kota_mb} onChange={e => P('mail_kutu_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
-                </Alan>
+                <OzetSat e={cevir("E-posta Kutusu")} d={ozetAdet(plan.max_email)} />
+                <OzetSat e={cevir("Saatlik Gönderim")} d={ozetAdet(plan.saatlik_mail_limiti)} />
+                <OzetSat e={cevir("Kutu Depolama")} d={ozetMb(plan.mail_kutu_kota_mb)} />
               </>
             )}
-          </div>
+          </dl>
         </Kart>
+      )}
 
-        {/* Web Sunucusu (nginx) */}
-        <Kart baslik={cevir("Web Sunucusu (nginx)")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>} alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <Alan etiket="FastCGI Cache" ipucu={cevir("Dinamik PHP çıktısını nginx tarafında önbelleğe alır (yüksek trafik için)")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
-                <input type="checkbox" checked={plan.fastcgi_cache} onChange={e => P('fastcgi_cache', e.target.checked)} className="rounded" />
-                <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlerde açık olsun")}</span>
-              </label>
-            </Alan>
-            <Alan etiket={cevir("Yükleme Boyutu Limiti (MB)")} ipucu={cevir("nginx client_max_body_size — dosya yükleme üst sınırı")}>
-              <input type="number" min={1} max={4096} value={plan.client_max_body_mb} onChange={e => P('client_max_body_mb', Number(e.target.value) || 0)} className={inpNum} />
-            </Alan>
-          </div>
-          <Alan etiket={cevir("Ek nginx Direktifleri")} ipucu={cevir("server{} bloğuna eklenir; kaydederken doğrulanır.")}>
-            <textarea
-              value={plan.nginx_ek_direktifler || ''}
-              onChange={e => P('nginx_ek_direktifler', e.target.value)}
-              rows={6}
-              spellCheck={false}
-              placeholder={cevir('# Örnek:\nadd_header X-Robots-Tag "noindex" always;\nlocation = /saglik { return 200 "ok"; }')}
-              className={inp + ' font-mono text-xs leading-relaxed'}
-            />
+      {!salt && (<>
+
+      {/* Genel */}
+      <Kart baslik={cevir("Genel")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Alan etiket={cevir("Plan Adı")}>
+            <input value={plan.ad} onChange={e => P('ad', e.target.value)} className={inp} />
           </Alan>
-          <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-            <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
-            <span>{cevir("Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ")}<code className="font-mono">nginx -t</code>{cevir(" ile test edilir. Geçersizse plan ")}<strong>{cevir("kaydedilmez")}</strong>{cevir(" ve nginx'in hata çıktısı yukarıda gösterilir.")}</span>
-          </p>
-        </Kart>
+          <Alan etiket={cevir("Varsayılan Plan")}>
+            <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
+              <input type="checkbox" checked={plan.varsayilan} onChange={e => P('varsayilan', e.target.checked)} className="rounded" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlere otomatik atansın")}</span>
+            </label>
+          </Alan>
+          <Alan etiket={cevir("Açıklama")} span={2}>
+            <textarea value={plan.aciklama} onChange={e => P('aciklama', e.target.value)} rows={2} className={inp} />
+          </Alan>
+        </div>
+      </Kart>
 
-        {/* WAF (ModSecurity + OWASP CRS) plan varsayılanı */}
-        <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3l7 2.6v5.2c0 4.3-3 7-7 8.2-4-1.2-7-3.9-7-8.2V5.6L12 3z"/></svg>} alt={cevir("ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.")}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Alan etiket={cevir("WAF Varsayılanı")} ipucu={cevir("Bu plandaki yeni domainlerde WAF açık mı gelsin (per-domain override edilebilir).")}>
-              <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
-                <input type="checkbox" checked={plan.waf_enabled} onChange={e => P('waf_enabled', e.target.checked)} className="rounded" />
-                <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Bu planda açık olsun")}</span>
-              </label>
-            </Alan>
-            <Alan etiket={cevir("Mod")} ipucu={cevir("Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).")}>
-              <select value={plan.waf_mode} onChange={e => P('waf_mode', e.target.value)} className={inp} disabled={!plan.waf_enabled}>
-                <option value="on">{cevir("Engelle (On)")}</option>
-                <option value="detect">{cevir("Denetle (yalnızca kaydet)")}</option>
-              </select>
-            </Alan>
-            <Alan etiket={cevir("Paranoya Seviyesi")} ipucu={cevir("CRS paranoia 1–4. Yüksek = daha sıkı koruma + daha çok yanlış-pozitif.")}>
-              <select value={plan.waf_paranoia} onChange={e => P('waf_paranoia', Number(e.target.value) || 1)} className={inp} disabled={!plan.waf_enabled}>
-                <option value={1}>{cevir("Seviye 1 (Düşük — önerilen)")}</option>
-                <option value={2}>{cevir("Seviye 2 (Orta)")}</option>
-                <option value={3}>{cevir("Seviye 3 (Yüksek)")}</option>
-                <option value={4}>{cevir("Seviye 4 (Sıkı)")}</option>
-              </select>
-            </Alan>
-          </div>
-          <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-            <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
-            <span>{cevir("Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}</span>
-          </p>
-        </Kart>
-        </>)}
+      {/* Varsayılanlar — yeni domainler bu değerleri miras alır */}
+      <Kart baslik={cevir("Varsayılanlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10 4a2 2 0 114 0v2h2a2 2 0 012 2v2h-2a2 2 0 100 4h2v2a2 2 0 01-2 2h-2v-2a2 2 0 10-4 0v2H8a2 2 0 01-2-2v-2H4a2 2 0 110-4h2V8a2 2 0 012-2h2V4z"/></svg>} alt={cevir("Bu plana bağlı yeni bir domain oluşturulduğunda uygulanacak başlangıç değerleri.")}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Alan etiket={cevir("PHP Sürümü")} ipucu={cevir("Bu plandaki yeni domainler bu PHP sürümüyle kurulur.")}>
+            <select value={plan.php_surum} onChange={e => P('php_surum', e.target.value)} className={inp}>
+              {phpOpts.map(v => <option key={v} value={v}>PHP {v}</option>)}
+            </select>
+          </Alan>
+        </div>
+      </Kart>
 
-        {/* Atanmış domainler */}
-        <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
-          {domainler.length === 0 ? (
-            <div className="text-sm text-slate-400 py-6 text-center">{cevir("Henüz bu plana atanmış domain yok.")}</div>
-          ) : (
-            // Mobilde yatay kaydırma yok — her satır kart olur (bkz. @/lib/tablo)
-            <div className="lg:overflow-x-auto">
-              <table className={`${T.tablo} text-sm`}>
-                <thead className={`${T.baslikGrubu} text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-dark-600`}>
-                  <tr>
-                    <th className={T.baslik}>Domain</th>
-                    <th className={T.baslik}>{cevir("Sistem Kullanıcısı")}</th>
-                    <th className={T.baslik}>{cevir("Durum")}</th>
-                    <th className={T.baslik}>{cevir("Oluşturma")}</th>
-                    <th className={`${T.baslik} text-right`}>{cevir("İşlem")}</th>
-                  </tr>
-                </thead>
-                <tbody className={T.govde}>
-                  {domainler.map(d => (
-                    <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700/60`}>
-                      {/* Birincil tanımlayıcı: mobilde kart başlığı olur, etiket istemez */}
-                      <td className={T.hucreBaslik}>
-                        <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 font-medium">{d.alan_adi}</Link>
-                      </td>
-                      <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
-                        <span className="font-mono text-xs break-all">{d.sistem_kullanici}</span>
-                      </td>
-                      <td className={T.hucre} data-etiket={cevir("Durum")}>
-                        <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
-                          d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500'
-                        }`}>{d.durum}</span>
-                      </td>
-                      <td className={T.hucre} data-etiket={cevir("Oluşturma")}>
-                        <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{d.olusturulma}</span>
-                      </td>
-                      <td className={`${T.hucreAksiyon} lg:text-right`}>
-                        <Button type="button" onClick={() => domainicinYenidenUygula(d.id)} disabled={uygulananID !== null}
-                          yukleniyor={uygulananID === d.id} boyut="sm"
-                          color={sonucID?.id === d.id ? (sonucID.ok ? 'success' : 'error') : 'neutral'}
-                          variant={sonucID?.id === d.id ? 'soft' : 'outlined'}
-                          ikon={sonucID?.id === d.id ? (sonucID.ok ? I.onay : I.kapat) : I.yenile}>
-                          {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('Uygulandı') : cevir("Başarısız")) : cevir('Yeniden Uygula')}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {/* Kaynak Limitleri */}
+      <Kart baslik={cevir("Kaynak Limitleri")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M5 21V10M12 21V4M19 21v-7M3 21h18"/></svg>} alt={cevir("systemd cgroup + xfs_quota + MariaDB GRANT ile sistem seviyesinde uygulanır. Kaydettikten sonra atanmış domainler için “Yeniden Uygula” tetikleyin.")}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Alan etiket="CPU %" ipucu={cevir("100 = 1 çekirdek (systemd CPUQuota)")}>
+            <input type="number" min={10} max={2000} value={plan.cpu_yuzde} onChange={e => P('cpu_yuzde', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket="RAM (MB)" ipucu={cevir("Hard MemoryMax; MemoryHigh otomatik %90")}>
+            <input type="number" min={64} value={plan.ram_mb} onChange={e => P('ram_mb', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket="Max Process" ipucu={cevir("systemd TasksMax — PHP-FPM worker dahil")}>
+            <input type="number" min={5} value={plan.max_process} onChange={e => P('max_process', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("MySQL Bağlantı")} ipucu="MAX_USER_CONNECTIONS">
+            <input type="number" min={1} value={plan.mysql_max_baglanti} onChange={e => P('mysql_max_baglanti', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket="Disk (MB)" ipucu={cevir("0 = sınırsız")}>
+            <input type="number" min={0} value={plan.disk_kota_mb} onChange={e => P('disk_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("Trafik (MB/ay)")} ipucu={cevir("0 = sınırsız")}>
+            <input type="number" min={0} value={plan.trafik_kota_mb} onChange={e => P('trafik_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("Inode Kotası")} ipucu={cevir("Toplam dosya + dizin sayısı")}>
+            <input type="number" min={1000} value={plan.inode_kota} onChange={e => P('inode_kota', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("I/O Ağırlık")} ipucu="systemd IOWeight (1-1000)">
+            <input type="number" min={1} max={1000} value={plan.io_agirlik} onChange={e => P('io_agirlik', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket="PHP-FPM max_children" ipucu={cevir("0 = Otomatik (max(4, RAM/64)). Per-tenant FPM'de RAM tavanıyla tutarlı.")}>
+            <input type="number" min={0} value={plan.pm_max_children} onChange={e => P('pm_max_children', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = Otomatik")} />
+          </Alan>
+        </div>
+        <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Disk G/Ç (mutlak throttle — IOWeight'ten farklı; cgroup v2)")}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+          <Alan etiket={cevir("Disk Okuma (MB/s)")} ipucu={cevir("Mutlak okuma bant genişliği. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.io_read_mbps} onChange={e => P('io_read_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+          <Alan etiket={cevir("Disk Yazma (MB/s)")} ipucu={cevir("Mutlak yazma bant genişliği. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.io_write_mbps} onChange={e => P('io_write_mbps', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+          <Alan etiket={cevir("Okuma IOPS")} ipucu={cevir("Saniyedeki maksimum okuma işlemi. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.io_read_iops} onChange={e => P('io_read_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+          <Alan etiket={cevir("Yazma IOPS")} ipucu={cevir("Saniyedeki maksimum yazma işlemi. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.io_write_iops} onChange={e => P('io_write_iops', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+        </div>
+        <div className="mt-4 text-xs font-medium text-slate-500">{cevir("Veritabanı (MySQL Governor — native MariaDB; Bağlantı limiti yukarıdaki “MySQL Bağlantı”)")}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+          <Alan etiket={cevir("Maks. Sorgu/Saat")} ipucu={cevir("MAX_QUERIES_PER_HOUR. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.db_max_queries_per_hour} onChange={e => P('db_max_queries_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+          <Alan etiket={cevir("Maks. Güncelleme/Saat")} ipucu={cevir("MAX_UPDATES_PER_HOUR. 0 = sınırsız")}>
+            <input type="number" min={0} value={plan.db_max_updates_per_hour} onChange={e => P('db_max_updates_per_hour', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+          <Alan etiket={cevir("Maks. Sorgu Süresi (sn)")} ipucu={cevir("Bu süreyi aşan sorgu KILL edilir (watchdog). 0 = öldürme yok")}>
+            <input type="number" min={0} value={plan.db_max_query_seconds} onChange={e => P('db_max_query_seconds', Number(e.target.value) || 0)} className={inpNum} placeholder={cevir("0 = sınırsız")} />
+          </Alan>
+        </div>
+      </Kart>
+
+      {/* Sayısal Sınırlar — posta alanlari mail eklentisi aktifken eklenir */}
+      <Kart baslik={cevir("Sayısal Sınırlar")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M4 7h4m-4 5h4m-4 5h4M14 5l-1 14M19 5l-1 14"/></svg>} alt={cevir("Bu plana bağlı hesapta oluşturulabilecek nesne sayıları. 0 = sınırsız.")}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <Alan etiket="Domain">
+            <input type="number" min={0} value={plan.max_domain} onChange={e => P('max_domain', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("Veritabanı")}>
+            <input type="number" min={0} value={plan.max_db} onChange={e => P('max_db', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          <Alan etiket={cevir("FTP Hesabı")}>
+            <input type="number" min={0} value={plan.max_ftp} onChange={e => P('max_ftp', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+          {/* Posta limitleri: YALNIZ mail eklentisi aktifken. Eklenti yokken
+              bu alanlari gostermek, olmayan bir ozelligi vaat etmek olurdu. */}
+          {mailAktif && (
+            <>
+              <Alan etiket={cevir("E-posta Kutusu")} ipucu={cevir("Bu plandaki hesapta acilabilecek posta kutusu sayisi. 0 = sinirsiz")}>
+                <input type="number" min={0} value={plan.max_email} onChange={e => P('max_email', Number(e.target.value) || 0)} className={inpNum} />
+              </Alan>
+              <Alan etiket={cevir("Saatlik Gönderim")} ipucu={cevir("Kutu basina giden mail/saat. 0 = sinirsiz")}>
+                <input type="number" min={0} value={plan.saatlik_mail_limiti} onChange={e => P('saatlik_mail_limiti', Number(e.target.value) || 0)} className={inpNum} />
+              </Alan>
+              <Alan etiket={cevir("Kutu Depolama (MB)")} ipucu={cevir("Posta kutusu basina disk kotasi. 0 = sinirsiz")}>
+                <input type="number" min={0} value={plan.mail_kutu_kota_mb} onChange={e => P('mail_kutu_kota_mb', Number(e.target.value) || 0)} className={inpNum} />
+              </Alan>
+            </>
           )}
-        </Kart>
-      </div>
+        </div>
+      </Kart>
+
+      {/* Web Sunucusu (nginx) */}
+      <Kart baslik={cevir("Web Sunucusu (nginx)")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.3 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.3a1.7 1.7 0 00-1 2.6c.9 1.5-.8 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.3 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.8-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.3a1.7 1.7 0 001-2.5c-.9-1.6.8-3.3 2.4-2.4 1 .6 2.3.2 2.6-1zM15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>} alt={cevir("Bu plandaki yeni domainler bu nginx ayarlarıyla kurulur. Ek direktifler kaydederken “nginx -t” ile doğrulanır.")}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <Alan etiket="FastCGI Cache" ipucu={cevir("Dinamik PHP çıktısını nginx tarafında önbelleğe alır (yüksek trafik için)")}>
+            <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
+              <input type="checkbox" checked={plan.fastcgi_cache} onChange={e => P('fastcgi_cache', e.target.checked)} className="rounded" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Yeni domainlerde açık olsun")}</span>
+            </label>
+          </Alan>
+          <Alan etiket={cevir("Yükleme Boyutu Limiti (MB)")} ipucu={cevir("nginx client_max_body_size — dosya yükleme üst sınırı")}>
+            <input type="number" min={1} max={4096} value={plan.client_max_body_mb} onChange={e => P('client_max_body_mb', Number(e.target.value) || 0)} className={inpNum} />
+          </Alan>
+        </div>
+        <Alan etiket={cevir("Ek nginx Direktifleri")} ipucu={cevir("server{} bloğuna eklenir; kaydederken doğrulanır.")}>
+          <textarea
+            value={plan.nginx_ek_direktifler || ''}
+            onChange={e => P('nginx_ek_direktifler', e.target.value)}
+            rows={6}
+            spellCheck={false}
+            placeholder={cevir('# Örnek:\nadd_header X-Robots-Tag "noindex" always;\nlocation = /saglik { return 200 "ok"; }')}
+            className={inp + ' font-mono text-xs leading-relaxed'}
+          />
+        </Alan>
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
+          <span>{cevir("Kaydet'e bastığınızda direktifler geçici bir sunucu bloğunda ")}<code className="font-mono">nginx -t</code>{cevir(" ile test edilir. Geçersizse plan ")}<strong>{cevir("kaydedilmez")}</strong>{cevir(" ve nginx'in hata çıktısı yukarıda gösterilir.")}</span>
+        </p>
+      </Kart>
+
+      {/* WAF (ModSecurity + OWASP CRS) plan varsayılanı */}
+      <Kart baslik={cevir("Güvenlik Duvarı (WAF) Varsayılanı")} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3l7 2.6v5.2c0 4.3-3 7-7 8.2-4-1.2-7-3.9-7-8.2V5.6L12 3z"/></svg>} alt={cevir("ModSecurity v3 + OWASP Core Rule Set. Bu plandaki domainler (kendi WAF override'ı yoksa) bu değerleri devralır. Domain düzeyinde ‘Plandan Devral’ seçiliyse buradaki ayar geçerlidir.")}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Alan etiket={cevir("WAF Varsayılanı")} ipucu={cevir("Bu plandaki yeni domainlerde WAF açık mı gelsin (per-domain override edilebilir).")}>
+            <label className="flex items-center gap-2 h-[38px] px-3 border border-slate-200 dark:border-dark-600 rounded-lg bg-slate-50/60 dark:bg-dark-800/40 cursor-pointer">
+              <input type="checkbox" checked={plan.waf_enabled} onChange={e => P('waf_enabled', e.target.checked)} className="rounded" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{cevir("Bu planda açık olsun")}</span>
+            </label>
+          </Alan>
+          <Alan etiket={cevir("Mod")} ipucu={cevir("Engelle = kötü istekleri 403’ler (SecRuleEngine On). Denetle = yalnızca audit log’a yazar (DetectionOnly).")}>
+            <select value={plan.waf_mode} onChange={e => P('waf_mode', e.target.value)} className={inp} disabled={!plan.waf_enabled}>
+              <option value="on">{cevir("Engelle (On)")}</option>
+              <option value="detect">{cevir("Denetle (yalnızca kaydet)")}</option>
+            </select>
+          </Alan>
+          <Alan etiket={cevir("Paranoya Seviyesi")} ipucu={cevir("CRS paranoia 1–4. Yüksek = daha sıkı koruma + daha çok yanlış-pozitif.")}>
+            <select value={plan.waf_paranoia} onChange={e => P('waf_paranoia', Number(e.target.value) || 1)} className={inp} disabled={!plan.waf_enabled}>
+              <option value={1}>{cevir("Seviye 1 (Düşük — önerilen)")}</option>
+              <option value={2}>{cevir("Seviye 2 (Orta)")}</option>
+              <option value={3}>{cevir("Seviye 3 (Yüksek)")}</option>
+              <option value={4}>{cevir("Seviye 4 (Sıkı)")}</option>
+            </select>
+          </Alan>
+        </div>
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <Ikon d={I.bilgi} className="mt-px size-3.5 shrink-0" />
+          <span>{cevir("Değişiklikten sonra bu plana bağlı domainlerin vhost’ları arka planda otomatik yeniden render edilir (nginx -t korumalı, sıfır kesinti). Sunucuda modül kurulu değilse ayar saklanır ve ")}<code className="font-mono">girginospanel-waf-setup</code>{cevir(" ile etkinleşir.")}</span>
+        </p>
+      </Kart>
+      </>)}
+
+      {/* Atanmış domainler */}
+      <Kart baslik={cevirT(cevir("Atanmış Domainler ({0})"), domainler.length)} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} alt={cevir("Plan güncellendikten sonra “Yeniden Uygula” ile ilgili domain'in cgroup + quota + MySQL limitleri güncellenir.")}>
+        {domainler.length === 0 ? (
+          <div className="text-sm text-slate-400 py-6 text-center">{cevir("Henüz bu plana atanmış domain yok.")}</div>
+        ) : (
+          // Mobilde yatay kaydırma yok — her satır kart olur (bkz. @/lib/tablo)
+          <div className="lg:overflow-x-auto">
+            <table className={`${T.tablo} text-sm`}>
+              <thead className={`${T.baslikGrubu} text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-dark-600`}>
+                <tr>
+                  <th className={T.baslik}>Domain</th>
+                  <th className={T.baslik}>{cevir("Sistem Kullanıcısı")}</th>
+                  <th className={T.baslik}>{cevir("Durum")}</th>
+                  <th className={T.baslik}>{cevir("Oluşturma")}</th>
+                  <th className={`${T.baslik} text-right`}>{cevir("İşlem")}</th>
+                </tr>
+              </thead>
+              <tbody className={T.govde}>
+                {domainler.map(d => (
+                  <tr key={d.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700/60`}>
+                    {/* Birincil tanımlayıcı: mobilde kart başlığı olur, etiket istemez */}
+                    <td className={T.hucreBaslik}>
+                      <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 font-medium">{d.alan_adi}</Link>
+                    </td>
+                    <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
+                      <span className="font-mono text-xs break-all">{d.sistem_kullanici}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket={cevir("Durum")}>
+                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold ${
+                        d.durum === 'aktif' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-dark-600 text-slate-500'
+                      }`}>{d.durum}</span>
+                    </td>
+                    <td className={T.hucre} data-etiket={cevir("Oluşturma")}>
+                      <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{d.olusturulma}</span>
+                    </td>
+                    <td className={`${T.hucreAksiyon} lg:text-right`}>
+                      <Button type="button" onClick={() => domainicinYenidenUygula(d.id)} disabled={uygulananID !== null}
+                        yukleniyor={uygulananID === d.id} boyut="sm"
+                        color={sonucID?.id === d.id ? (sonucID.ok ? 'success' : 'error') : 'neutral'}
+                        variant={sonucID?.id === d.id ? 'soft' : 'outlined'}
+                        ikon={sonucID?.id === d.id ? (sonucID.ok ? I.onay : I.kapat) : I.yenile}>
+                        {uygulananID === d.id ? cevir('Uygulanıyor…') : sonucID?.id === d.id ? (sonucID.ok ? cevir('Uygulandı') : cevir("Başarısız")) : cevir('Yeniden Uygula')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Kart>
     </div>
   )
 }

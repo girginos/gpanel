@@ -281,7 +281,7 @@ export default function YasakliDomainPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
+    <div>
       <Breadcrumb items={[
         { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
         { etiket: cevir("Yasaklı Alan Adları") },
