@@ -2666,28 +2666,60 @@ func acmeCronHizala() {
 //
 // 🔴 `restorecon -R` YETMEZ: kural yeni eklendiğinde mevcut etiketi
 // değiştirmeyebiliyor; `-F` (force) şart.
+//
+// 🔴 HIZ (2026-10-03, 181): her `semanage fcontext -a` TÜM politikayı yeniden
+// derleyip yükler (~12-13 sn; journal "SELinux: Converting 749 SID table
+// entries"). Oluşturmada public_html + tmp için İKİ kez → ~26 sn; tarayıcının
+// 30 sn sınırını tek başına dolduruyordu. Kurulum/güncelleme zaten GENEL kuralı
+// yazar (ops/girginospanel-wp-onkosul: /home/c_[^/]+/(public_html|tmp)(/.*)?
+// → httpd_user_rw_content_t). Politika bu yolu ZATEN yazılabilir tipe
+// çözüyorsa (matchpathcon) kiracıya özel kural GEREKSİZ: yalnız restorecon -RF.
+// Sonuç etiketi birebir aynı; genel kural yoksa eski yol (kural ekle) aynen.
+const kiraciRWTip = "httpd_user_rw_content_t"
+
+// selinuxKomut — bu adımın dış komutları (testler sahteyle değiştirir).
+var selinuxKomut = func(ad string, arg ...string) ([]byte, error) {
+	return exec.Command(ad, arg...).CombinedOutput()
+}
+
+// selinuxAracVar — PATH'te araç var mı (testler sahteyle değiştirir).
+var selinuxAracVar = func(ad string) bool {
+	_, err := exec.LookPath(ad)
+	return err == nil
+}
+
+// selinuxPolitikaRWMi — politika (yerel kurallar dahil) yolu kiracı-yazılabilir
+// tipe mi çözüyor? matchpathcon yoksa/hata verirse false (eski yol).
+func selinuxPolitikaRWMi(yol string) bool {
+	out, err := selinuxKomut("matchpathcon", "-n", yol)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), ":"+kiraciRWTip+":")
+}
+
 func selinuxDocrootEtiketle(docRoot string) {
 	if docRoot == "" {
 		return
 	}
 	// SELinux kapalıysa sessizce geç (getenforce yoksa da).
-	out, err := exec.Command("getenforce").Output()
+	out, err := selinuxKomut("getenforce")
 	if err != nil || strings.TrimSpace(string(out)) == "Disabled" {
 		return
 	}
-	if _, err := exec.LookPath("semanage"); err == nil {
+	if selinuxAracVar("semanage") && !selinuxPolitikaRWMi(docRoot) {
 		spec := docRoot + "(/.*)?"
 		// -a çakışırsa -m ile güncelle; ikisi de idempotent.
-		if o, e := exec.Command("semanage", "fcontext", "-a", "-t",
-			"httpd_user_rw_content_t", spec).CombinedOutput(); e != nil {
-			if o2, e2 := exec.Command("semanage", "fcontext", "-m", "-t",
-				"httpd_user_rw_content_t", spec).CombinedOutput(); e2 != nil {
+		if o, e := selinuxKomut("semanage", "fcontext", "-a", "-t",
+			kiraciRWTip, spec); e != nil {
+			if o2, e2 := selinuxKomut("semanage", "fcontext", "-m", "-t",
+				kiraciRWTip, spec); e2 != nil {
 				log.Printf("selinux docroot kurali yazilamadi (%s): %s / %s",
 					docRoot, strings.TrimSpace(string(o)), strings.TrimSpace(string(o2)))
 			}
 		}
 	}
-	if o, e := exec.Command("restorecon", "-RF", docRoot).CombinedOutput(); e != nil {
+	if o, e := selinuxKomut("restorecon", "-RF", docRoot); e != nil {
 		log.Printf("selinux restorecon basarisiz (%s): %s", docRoot, strings.TrimSpace(string(o)))
 	}
 }

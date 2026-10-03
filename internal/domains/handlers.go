@@ -314,7 +314,20 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 var (
 	saglama       = provisioner.Provision
 	saglamaGeriAl = provisioner.Deprovision
+
+	// Sağlama SONRASI dış etkili adımlar (testler sahteyle değiştirir: gerçek
+	// systemd/BIND/pure-ftpd'ye ulaşılmadan bağlamın iptal edilmediği kanıtlanır).
+	olusturKaynakUygula  = kaynaklimit.UygulaHepsi
+	olusturFTP           = hesaplar.FTPCreate
+	olusturSertifikaSart = provisioner.SertifikaSartMi
+	olusturDNSTohumla    = dns.SeedDefaults
+	olusturZoneYaz       = dns.WriteZone
 )
+
+// olusturSuresi — hosting oluşturmanın istekten KOPUK üst süresi. Ölçülen olağan
+// süre ~10-35 sn (SELinux fcontext + php-fpm/nginx doğrulama + reload); üst sınır
+// yalnız takılmayı keser.
+const olusturSuresi = 10 * time.Minute
 
 // Vhost render + SUNUCU GENELİ `nginx -t` + reload yapan dış etkili adımlar
 // (testler sahteyle değiştirir: hata metninin kime ne döndüğü ana makinenin
@@ -418,6 +431,17 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
 	}
+
+	// 🔴🔴 YAN ETKİ BURADA BAŞLAR — bundan sonra istek bağlamı KULLANILMAZ.
+	//
+	// 181 (2026-10-03): sağlama ~30 sn sürdü, tarayıcının 30 sn axios sınırı
+	// bağlantıyı kapattı (nginx 499), r.Context() iptal oldu; kullanıcı/vhost/FPM
+	// kurulmuşken DNS tohumu + SOA + zone "context canceled" ile düştü → zone'suz,
+	// YARIM alan adı. İş artık istemciden bağımsız ya TAMAMLANIR ya da (INSERT
+	// düşerse) saglamaGeriAl ile geri alınır. (Silme/askı/PHP ile aynı desen.)
+	ctx, iptal := httpx.KopukBaglam(r, olusturSuresi)
+	defer iptal()
+
 	pr, err := saglama(req.AlanAdi, req.PHPSurum)
 	if err != nil {
 		log.Printf("provision %q başarısız: %v", req.AlanAdi, err)
@@ -443,9 +467,9 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// 2) domains satırı — ad-alanı denetimiyle AYNI kilit altında (sağlama sürerken
 	// başka kiracı üst/alt adı açmış olabilir).
 	var res sql.Result
-	if err := AdAlaniEkle(r.Context(), h.DB, req.AlanAdi, rid, func() error {
+	if err := AdAlaniEkle(ctx, h.DB, req.AlanAdi, rid, func() error {
 		var e error
-		res, e = h.DB.ExecContext(r.Context(),
+		res, e = h.DB.ExecContext(ctx,
 			`INSERT INTO domains(alan_adi, sistem_kullanici, php_surum, ssl_aktif, durum, ipv4,
 			   ftp_host, ftp_user, db_host, db_user, db_adi, web_root, is_demo, reseller_id)
 			 VALUES(?,?,?,0,'aktif',?,?,?, 'localhost',?,?,?, 0, ?)`,
@@ -465,13 +489,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 
 	if req.CustomerID != nil || req.PlanID != nil {
-		_, _ = h.DB.ExecContext(r.Context(),
+		if _, err := h.DB.ExecContext(ctx,
 			`UPDATE domains SET customer_id=?, plan_id=? WHERE id=?`,
-			req.CustomerID, req.PlanID, id)
+			req.CustomerID, req.PlanID, id); err != nil {
+			log.Printf("domains.Create: plan/müşteri bağlanamadı (domain=%d): %v", id, err)
+		}
 	}
 	// Plan seçildiyse nginx web-sunucusu varsayılanlarını domain'e tohumla + vhost yenile
 	if req.PlanID != nil {
-		h.applyPlanNginxDefaults(r.Context(), id, *req.PlanID, pr.SistemKullanici, req.PHPSurum)
+		h.applyPlanNginxDefaults(ctx, id, *req.PlanID, pr.SistemKullanici, req.PHPSurum)
 	}
 	// 🔴🔴 A: IZOLASYON HERKESE — plan SECILMESE DE calisir.
 	//
@@ -490,7 +516,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	go func(did int64) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
+		if err := olusturKaynakUygula(ctx, h.DB, did); err != nil {
 			log.Printf("kaynaklimit apply (create) domain=%d: %v", did, err)
 		}
 	}(id)
@@ -498,7 +524,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// 3) FTP hesap (random parola)
 	ftpPass := hesaplar.RandomParola(20)
 	uidN, gidN := uidGidOf(pr.SistemKullanici)
-	if err := hesaplar.FTPCreate(h.DB, id, pr.SistemKullanici, ftpPass, uidN, gidN); err != nil {
+	if err := olusturFTP(h.DB, id, pr.SistemKullanici, ftpPass, uidN, gidN); err != nil {
 		log.Printf("FTP create %q hata: %v", pr.SistemKullanici, err)
 	}
 
@@ -506,7 +532,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// dosya yükler, DB'yi sonra Databases sekmesinden açar → varsayılan KAPALI.
 	dbPass := ""
 	if req.SqlOlustur {
-		dbPass = h.saglamaDBKur(r.Context(), id, dbName, dbUser)
+		dbPass = h.saglamaDBKur(ctx, id, dbName, dbUser)
 	}
 
 	// 4.5) HTTPS-ZORUNLU uzanti (.app/.dev/.page...) → sertifikayi HEMEN dene.
@@ -515,7 +541,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// sessiz basarisiz olur (fail-safe self-signed 443'u ayakta tutar).
 	// Sertifikasiz kalirsa site TAMAMEN erisilemez olacaksa (HTTPS-zorunlu uzanti
 	// ya da CDN/proxy arkasi) sertifikayi kurulum aninda dene.
-	if gerek, _ := provisioner.SertifikaSartMi(req.AlanAdi); gerek {
+	if gerek, _ := olusturSertifikaSart(req.AlanAdi); gerek {
 		go func(alan, sk, php, backend string, did int64) {
 			crt, key, gercek := provisioner.OtoSSLDene(alan, sk, php, backend)
 			if !gercek {
@@ -531,14 +557,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5) DNS şablonu otomatik tohumla + BIND zone yaz + reload
-	if _, err := dns.SeedDefaults(r.Context(), h.DB, id, req.AlanAdi, h.IPv4); err != nil {
+	// (Yine de düşerse açılış onarımı dns.EksikZoneOnar tohumlar.)
+	if _, err := olusturDNSTohumla(ctx, h.DB, id, req.AlanAdi, h.IPv4); err != nil {
 		log.Printf("DNS SeedDefaults %q hata: %v", req.AlanAdi, err)
 	}
-	if err := dns.WriteZone(r.Context(), h.DB, id); err != nil {
+	if err := olusturZoneYaz(ctx, h.DB, id); err != nil {
 		log.Printf("DNS WriteZone %q hata: %v", req.AlanAdi, err)
 	}
 
-	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE d.id=?", id)
+	row := h.DB.QueryRowContext(ctx, selectAll+" WHERE d.id=?", id)
 	d, _ := scan(row)
 
 	uid, kul := middleware.Aktor(r)

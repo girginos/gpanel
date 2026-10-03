@@ -194,6 +194,18 @@ func main() {
 	if err := dns.HealZoneIncludes(context.Background(), d); err != nil {
 		log.Printf("dns zone-include heal warn: %v", err)
 	}
+	// Yarım alan adı onarımı: DNS'i hiç tohumlanmamış (kayıt + SOA yok) aktif alan
+	// adlarına şablonu tohumla + zone yaz (oluşturma istemci kopunca yarıda
+	// kalmıştı — 2026-10-03 girginos.cloud). İdempotent; boot'u bloklamaz.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if n, err := dns.EksikZoneOnar(ctx, d, ipv4); err != nil {
+			log.Printf("dns eksik-zone onarım warn: %v", err)
+		} else if n > 0 {
+			log.Printf("dns eksik-zone onarım: %d alan adı tamamlandı", n)
+		}
+	}()
 	// Batch5A: mevcut planlı domain'leri per-tenant FPM'e (Seçenek A) ARKA PLANDA + GÜVENLE
 	// (baseline/post self-check + auto-rollback) migrate et. Panel her restart'ında
 	// (girginospanel-update) otomatik döner → mevcut-müşteri cutover'ı plan-driven tamamlanır.
