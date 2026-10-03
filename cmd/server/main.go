@@ -36,6 +36,7 @@ import (
 	githubpkg "girginospanel/internal/github"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/guvenlikduvari"
+	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/hostuyg"
 	"girginospanel/internal/httpx"
@@ -381,6 +382,21 @@ func main() {
 	// birakilsaydi "panelde gorunmeyen kesinti" sinifi ozelligin alt alan
 	// yarisinda oldugu gibi kalirdi.
 	subdomain.HealAltAlanSapmasi(d)
+	// Hesap askısı uzlaştırması: askıdaki HER hesaba askı adımlarını (ana + alt
+	// alan vhost'ları, PHP havuzları, Laravel işleyicileri, FTP/SSH/DB girişleri,
+	// cron) yeniden uygular. Hesap askısı genişletilmeden önce askıya alınmış
+	// hesaplar (alt alanları/PHP/SSH/DB açık kalmıştı) ve yarım kalmış işlemler
+	// böylece kapanır; idempotent, askıyı KALDIRMAZ. Boot'u bloklamaz.
+	go func() {
+		n, hatali, err := hesapaski.AskidakileriUygula(context.Background(), d)
+		if err != nil {
+			log.Printf("hesap askısı uzlaştırması: liste okunamadı: %v", err)
+			return
+		}
+		if n+hatali > 0 {
+			log.Printf("hesap askısı uzlaştırması: %d hesap uygulandı, %d hatalı", n, hatali)
+		}
+	}()
 	// Acilistaki tek seferlik kontrol, iki acilis ARASINDA olusan sapmalari
 	// goremez (yeni domainin 0644 logu, sessizce basarisiz olan bir gunluk
 	// dondurme). Periyodik olcum bu bosluğu kapatir.
@@ -1244,6 +1260,17 @@ func semaDogrula(d *sql.DB) {
 		{"cp_eklentiler", "ad"},
 		// 0105: bildirim okundu kaydı görüntüleyene göre — yoksa zil/bildirim listesi 500 verir.
 		{"cp_bildirim_okundu", "okuyan_tur"},
+		// 0109: taşıma kapsamı (sahip_rid süzgeci, başlatan) + kuyruk kalemi + kaynak anahtarı.
+		{"tasima_isleri", "sahip_rid"},
+		{"tasima_isleri", "baslatan_uid"},
+		{"tasima_kalemleri", "hesap_json"},
+		{"tasima_kaynak_ayar", "kod"},
+		// 0113: yedek uzak hedefleri, uzak kopya kuyruğu ve age anahtarları —
+		// yoksa uzak hedef/kopya/şifreleme yolları çalışmaz. Üretilmiş kolonlar
+		// (hedef_anahtar, etkin_tekil) tekillik kısıtlarının da kanıtıdır.
+		{"backup_hedefler", "ic_ag_izni"},
+		{"backup_uzak_kopyalar", "hedef_anahtar"},
+		{"backup_sifre_anahtarlari", "etkin_tekil"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

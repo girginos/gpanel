@@ -49,6 +49,13 @@ func (sahteBag) Close() error              { return nil }
 func (sahteBag) Begin() (driver.Tx, error) { return nil, errors.New("sahte sürücü: işlem yok") }
 
 func (b sahteBag) QueryContext(_ context.Context, q string, _ []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(q, "COALESCE(askida,0)=1") {
+		// Hesap askı durumu (hesaplar.HesapAskida): "c_askili" hesabı askıda, öteki açık.
+		if string(b) == "c_askili" {
+			return &sahteSatirlar{kolon: []string{"bir"}, veri: [][]driver.Value{{int64(1)}}}, nil
+		}
+		return &sahteSatirlar{kolon: []string{"bir"}}, nil
+	}
 	if strings.Contains(q, "FROM domains") {
 		return &sahteSatirlar{kolon: []string{"sistem_kullanici", "php_surum", "is_demo"},
 			veri: [][]driver.Value{{string(b), "8.3", int64(0)}}}, nil

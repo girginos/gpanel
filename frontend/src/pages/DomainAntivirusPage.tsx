@@ -187,8 +187,8 @@ export default function DomainAntivirusPage() {
     try { const { data } = await api.get<{ icerik: string; ikili: boolean; kesik?: boolean }>(`/domains/${id}/antivirus/karantina/${k.id}/incele`); setInceleModal({ ad: k.orijinal_yol, icerik: data.ikili ? cevir("[ikili dosya]") : data.icerik, kesik: data.kesik }) }
     catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
-  if (!d) return <div className="px-4 py-4 sm:px-6 sm:py-5"><div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div></div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (!d) return <div className="text-sm text-red-600">{hata || cevir("Bulunamadı")}</div>
 
   const aktif = d.bulgular.filter(b => !b.karantina)
   const karAktif = kliste.filter(k => k.durum === 'karantina' && k.mevcut).length
@@ -211,7 +211,7 @@ export default function DomainAntivirusPage() {
   )
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <div className="w-full">
         <Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline mb-2"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link>
         <Breadcrumb items={[

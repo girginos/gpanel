@@ -55,7 +55,9 @@ export default function UyariBandi({ liste, acik, setAcik, onGizle }: { liste: U
           : `${tonSinifi(ilk.ton)} border-b border-this/20 bg-this/[.06] dark:border-this-lighter/20 dark:bg-this-lighter/[.06]`
       }`}
     >
-      <div className="mx-auto max-w-[1440px] px-4 @2xl/sayfa:px-6">
+      {/* Bant zemini tam genişlik; içerik kabukla aynı genişlik ve aynı viewport kırılımlı
+          dolguda (SayfaCercevesi: px-4 sm:px-6) — metin sayfa gövdesiyle aynı hizada başlar. */}
+      <div className="mx-auto max-w-sayfa px-4 sm:px-6">
         {!acik || tekli ? (
           // Dar sayfada metin tam satırı alır, düğmeler altına iner; geniş sayfada tek satır.
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2 @2xl/sayfa:flex-nowrap">

@@ -101,8 +101,7 @@ export default function DomainSifreKorumaPage() {
   const grup = liste.reduce<Record<string, Kayit[]>>((a, k) => { (a[k.yol] ||= []).push(k); return a }, {})
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-3xl mx-auto">
+    <div>
         <Breadcrumb items={[
           { etiket: cevir("Anasayfa"), href: '/' },
           { etiket: cevir("Domainler"), href: '/domainler' },
@@ -173,7 +172,6 @@ export default function DomainSifreKorumaPage() {
         </div>
 
         <div className="mt-4"><Link to={`/abonelikler/${id}`} className="inline-flex items-center gap-1.5 text-sm text-brand-600 dark:text-brand-400"><Ikon d={I.geri} className="size-4 shrink-0" />{cevir("Aboneliğe dön")}</Link></div>
-      </div>
     </div>
   )
 }

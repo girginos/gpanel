@@ -27,6 +27,10 @@
 
   --ease-elastic: cubic-bezier(0.53, 0.21, 0.29, 0.67);
 
+  /* TEK SAYFA GENİŞLİĞİ (dolgu dahil) → `max-w-sayfa`. Yalnız components/SayfaKabugu
+     ve tam-zemin istisnaları kullanır; sayfa kendi kök max-w'sini yazmaz. */
+  --container-sayfa: 80rem;
+
   /* "this" (buton/aktif renk köprüsü) + yüzeyler */
   --color-this-lighter: var(--this-lighter);
   --color-this-light: var(--this-light);
@@ -119,6 +123,12 @@ html {
   text-rendering: optimizeLegibility;
 }
 html.dark { color-scheme: dark; }
+/* Panel (DashboardLayout <main>) içinde kısa ve uzun sayfa arasında geçerken klasik
+   kaydırma çubuğu (Windows/Linux, 15 px) gelip gitmesin: gelirse ortalı sayfa kabuğu
+   7,5 px sola kayar, kabuk genişliği 15 px daralır — sayfadan sayfaya içerik "zıplar".
+   Yalnız panelde: giriş/askı gibi tam ekran sayfalarda boş şerit bırakılmaz.
+   Kaplamalı çubuklu sistemlerde (macOS, mobil) etkisizdir. */
+html:has(main) { scrollbar-gutter: stable; }
 html, body, #root { min-height: 100%; }
 
 body {

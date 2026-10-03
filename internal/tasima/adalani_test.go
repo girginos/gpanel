@@ -69,7 +69,7 @@ func ta_db(t *testing.T) *sql.DB {
 			alt_ad VARCHAR(63) NOT NULL, tam_ad VARCHAR(253) NOT NULL, UNIQUE KEY uq_sub_tam (tam_ad))
 			ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`INSERT INTO users (id, role) VALUES (1,'admin'), (7,'reseller')`,
-		`INSERT INTO domains (id, alan_adi, reseller_id) VALUES (10,'kokdomain.test',0), (20,'bayi7.test',7)`,
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (10,'kokdomain.test','c_kokdomain',0), (20,'bayi7.test','c_bayi7',7)`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("şema: %v\n%s", err, q)
@@ -126,8 +126,11 @@ func ta_kalkan(t *testing.T, oncesi func()) (saglanan, geriAlinan *[]string, ger
 }
 
 func ta_aktar(h *Handlers, alan string, rid int64) error {
+	// Kök (admin) kapsamı: rid, Ayarlar.ResellerID üzerinden atanan sahiptir
+	// (kökün bir bayiye/kendine site açması). Kapsam{} = Yonetici → hata metni ve
+	// davranış mevcut haliyle korunur.
 	_, err := h.HesapAktar(context.Background(), &Kaynak{}, Hesap{AlanAdi: alan, PHPSurum: "8.3"},
-		Ayarlar{ResellerID: rid}, func(string, ...any) {})
+		Ayarlar{ResellerID: rid}, Kapsam{}, func(string, ...any) {})
 	return err
 }
 

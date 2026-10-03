@@ -140,10 +140,10 @@ export default function BayiPlaniDuzenlePage() {
     }
   }
 
-  if (yuk) return <div className="px-4 py-6 sm:px-6"><div className="h-64 rounded-lg bg-slate-100 dark:bg-dark-700 animate-pulse" /></div>
+  if (yuk) return <div className="h-64 rounded-lg bg-slate-100 dark:bg-dark-700 animate-pulse" />
 
   return (
-    <form onSubmit={kaydet} className="px-4 py-4 sm:px-6 sm:py-5 max-w-4xl">
+    <form onSubmit={kaydet}>
       <Breadcrumb items={[{ etiket: cevir("Bayi Planları"), href: '/bayi-planlari' }, { etiket: yeni ? cevir('Yeni plan') : p.ad || '…' }]} />
 
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -288,7 +288,8 @@ function Bolum({ baslik, alt, children }: { baslik: string; alt?: string; childr
     <section className="rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800 p-4">
       <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{baslik}</h2>
       {alt && <p className="mt-0.5 mb-3 text-xs text-slate-500 dark:text-slate-400 max-w-2xl">{alt}</p>}
-      <div className={alt ? '' : 'mt-3'}>{children}</div>
+      {/* Form alanları kartın İÇİNDE daralır (sayfa kabuğu genişliği değişmez) */}
+      <div className={alt ? 'max-w-3xl' : 'mt-3 max-w-3xl'}>{children}</div>
     </section>
   )
 }

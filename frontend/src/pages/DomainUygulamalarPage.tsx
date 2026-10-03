@@ -26,26 +26,24 @@ export default function DomainUygulamalarPage() {
   const domain = useUc<Domain>(id ? `/domains/${id}` : null, cevir('Alan adı bilgisi alınamadı'))
   const d = domain.veri
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="mx-auto max-w-6xl">
-        <Breadcrumb
-          items={[
-            { etiket: cevir('Anasayfa'), href: '/' },
-            { etiket: cevir('Domainler'), href: '/domainler' },
-            ...(d ? [{ etiket: d.alan_adi, href: `/abonelikler/${id}` }] : []),
-            { etiket: cevir('Uygulama Kurulumu') },
-          ]}
-        />
-        <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir('Uygulama Kurulumu')}</h1>
-        <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">{cevir('Hazır uygulamaları tek tıkla kurun ve kurulu uygulamaları yönetin.')}</p>
-        {d ? (
-          <UygulamaKatalogu domain={d} />
-        ) : domain.hata ? (
-          <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
-        ) : (
-          <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir('Yükleniyor…')}</div>
-        )}
-      </div>
+    <div>
+      <Breadcrumb
+        items={[
+          { etiket: cevir('Anasayfa'), href: '/' },
+          { etiket: cevir('Domainler'), href: '/domainler' },
+          ...(d ? [{ etiket: d.alan_adi, href: `/abonelikler/${id}` }] : []),
+          { etiket: cevir('Uygulama Kurulumu') },
+        ]}
+      />
+      <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir('Uygulama Kurulumu')}</h1>
+      <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">{cevir('Hazır uygulamaları tek tıkla kurun ve kurulu uygulamaları yönetin.')}</p>
+      {d ? (
+        <UygulamaKatalogu domain={d} />
+      ) : domain.hata ? (
+        <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
+      ) : (
+        <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir('Yükleniyor…')}</div>
+      )}
     </div>
   )
 }

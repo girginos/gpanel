@@ -344,11 +344,14 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
         </Button>
       )}
 
+      {/* lg'de arama en çok xl genişlikte ortalanır ama DARALABİLİR (flex-initial): kenar
+          çubuğu açıkken ~1280 px altında flex-none + w-full 576 px'te kalıp sağ kümeyi
+          taşırıyor, HER sayfada yatay kaydırma çıkarıyordu (+251 px kök, +183 px bayi). */}
       {!aramaGizli && (
       <div
         id="gosp-ust-arama"
         ref={kutuRef}
-        className={`flex-1 lg:flex-none w-full lg:max-w-xl min-w-0 ${darMod
+        className={`flex-1 lg:flex-initial w-full lg:max-w-xl min-w-0 ${darMod
           ? (darAcik
             ? 'max-sm:absolute max-sm:inset-0 max-sm:z-40 max-sm:flex max-sm:items-center max-sm:gap-2 max-sm:bg-white max-sm:px-3 max-sm:dark:bg-dark-800'
             : 'max-sm:hidden')

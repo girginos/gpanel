@@ -61,10 +61,10 @@ const SUBD2_EN: Record<string, string> = {
   "Yönlendirme, catch-all": "Forwarding, catch-all",
   "Yükselt, düşür veya özel plan": "Upgrade, downgrade or custom plan",
   "Önizleme yalnızca HTTPS sitelerde gösterilir": "Preview is shown only on HTTPS sites",
-  "Askı kaldırıldı — site tekrar erişilebilir.": "Suspension lifted — the site is accessible again.",
-  "Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.": "Account suspended — the site now returns a 503 maintenance page.",
+  "Askı kaldırıldı — hesap askı öncesi hâline döndü.": "Suspension lifted — the account is back to its previous state.",
+  "Hesap askıya alındı — tüm alan adları 503 askı sayfası döndürüyor.": "Account suspended — all domains now return the 503 suspension page.",
   "Onay gerekiyor": "Confirmation required",
-  "\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?": "\"{0}\" will be suspended — the site will become inaccessible (503). Continue?",
+  "\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, uygulamalar ve kuyruk işleyicileri, FTP, SSH ve veritabanı girişleri kapanır. Posta kutuları açık kalır (gelen posta ve giriş). Devam edilsin mi?": "The \"{0}\" account will be suspended — all of its domains (subdomains included) will return 503; PHP, cron, applications and queue workers, FTP, SSH and database logins will be disabled. Mailboxes stay open (incoming mail and logins). Continue?",
   "Anasayfa": "Home",
   "Hata": "Error",
   "Askıdan Al (Geri Getir)": "Unsuspend (Restore)",
@@ -160,12 +160,12 @@ export default function SubscriptionDetailPage() {
   async function askiToggle() {
     if (!id || !domain) return
     const askiyaAl = !domain.askida
-    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" askıya alınacak — site erişilemez olacak (503). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
+    if (askiyaAl && !(await onay({ baslik: cevir("Onay gerekiyor"), mesaj: cevirT(cevir("\"{0}\" hesabı askıya alınacak — hesabın tüm alan adları (alt alan adları dahil) 503 olur; PHP, cron, uygulamalar ve kuyruk işleyicileri, FTP, SSH ve veritabanı girişleri kapanır. Posta kutuları açık kalır (gelen posta ve giriş). Devam edilsin mi?"), domain.alan_adi), ton: 'uyari', onayIkonu: I.kilit }))) return
     setMenuAcik(false); setIsleniyor(true); setHata(null)
     try {
       await api.post(`/domains/${id}/${askiyaAl ? 'askiya-al' : 'askidan-al'}`)
       // Başarı mesajı toast ile gösterilir (ayrı bir sayfa içi bildirim alanı yok).
-      const iyi = askiyaAl ? cevir("Hesap askıya alındı — site artık 503 bakım sayfası döndürüyor.") : cevir("Askı kaldırıldı — site tekrar erişilebilir.")
+      const iyi = askiyaAl ? cevir("Hesap askıya alındı — tüm alan adları 503 askı sayfası döndürüyor.") : cevir("Askı kaldırıldı — hesap askı öncesi hâline döndü.")
       toast.basari(cevir("Kaydedildi"), iyi)
       void domainYukle()
     } catch (e) {
@@ -177,21 +177,21 @@ export default function SubscriptionDetailPage() {
   }
 
   if (hata && !domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: cevir("Hata") }]} />
       <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
     </div>
   )
 
   if (!domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
     </div>
   )
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },
