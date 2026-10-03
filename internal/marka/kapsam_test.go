@@ -519,3 +519,22 @@ func TestKok_YazmaYolu(t *testing.T) {
 		t.Errorf("kök genel görünüm: %s", g)
 	}
 }
+
+// DB'ye elle yazılmış (doğrulanmamış) değer OKURKEN de süzülür: CSS enjeksiyonu,
+// BIDI, javascript: bağlantısı kimliksiz yanıta geçmez.
+func TestGenel_OkurkenNormalize(t *testing.T) {
+	o := ktKur(t)
+	ham := `{"panel_adi":"Nova‮Kotu","vurgu_renk":"red;background:url(//x)","destek_url":"javascript:alert(1)","destek_eposta":"a@b.com?cc=x@y.z"}`
+	if _, err := o.db.Exec(`INSERT INTO cp_marka (reseller_id, anahtar, ayar_json, etkin) VALUES (7, 'cccccccccccccccccccc', ?, 1)`, ham); err != nil {
+		t.Fatal(err)
+	}
+	_, g := o.istek("GET", "/api/v1/marka?m=cccccccccccccccccccc", "", nil)
+	for _, yasak := range []string{"‮", `‮`, "red;", "javascript:", "cc=x"} {
+		if strings.Contains(g, yasak) {
+			t.Errorf("okurken süzülmeyen değer (%q): %s", yasak, g)
+		}
+	}
+	if !strings.Contains(g, `"NovaKotu"`) || !strings.Contains(g, `"vurgu_renk":"#2563eb"`) {
+		t.Errorf("normalize edilmiş değerler beklenir: %s", g)
+	}
+}
