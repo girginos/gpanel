@@ -192,3 +192,16 @@ func TestHataKodlariBenzersiz(t *testing.T) {
 		t.Fatal("tanımsız kod geçerli sayıldı")
 	}
 }
+
+// katiCoz doğrudan: Coz'un ön denetimlerinden bağımsız katmanlar.
+func TestKatiCozDogrudan(t *testing.T) {
+	var k KalpAtisi
+	kodBekle(t, katiCoz([]byte(`{"sira":1,"zaman":2} {"sira":3}`), &k), HataBicim)
+	kodBekle(t, katiCoz([]byte(`{"sira":1,"zaman":2}x`), &k), HataBicim)
+	kodBekle(t, katiCoz([]byte(`{"sira":1,"zaman":2,"ZAMAN":3}`), &k), HataBilinmeyenAlan)
+	kodBekle(t, katiCoz(bytes.Repeat([]byte(" "), CerceveSiniri+1), &k), HataCerceveBuyuk)
+	kodBekle(t, katiCoz([]byte("{\"sira\":1,\"zaman\":2,\"x\":\"\xff\"}"), &k), HataBicim)
+	if err := katiCoz([]byte(`{"sira":1,"zaman":2}`), &k); err != nil || k.Zaman != 2 {
+		t.Fatal(err)
+	}
+}
