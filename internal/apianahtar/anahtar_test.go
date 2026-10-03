@@ -215,3 +215,20 @@ func TestDurum(t *testing.T) {
 		t.Fatal("iptal")
 	}
 }
+
+// TestKararKimlikOnceligi: bir kimlik ucu YANLIŞLIKLA izin tablosuna eklense bile
+// Karar onu reddeder (KimlikUclari, Rotalar'dan önce gelir).
+func TestKararKimlikOnceligi(t *testing.T) {
+	const d = "POST /api/v1/me/parola"
+	Rotalar[d] = Kural{"hesap", Yaz}
+	defer delete(Rotalar, d)
+	if Karar(d, RolKok, []string{"hesap:yaz"}) != KararUcKapali {
+		t.Fatal("izin tablosuna sızan kimlik ucu açıldı")
+	}
+	const j = "GET /api/v1/eklenti/{ad}/*"
+	Rotalar[j] = Kural{"hesap", Oku}
+	defer delete(Rotalar, j)
+	if Karar(j, RolKok, []string{"hesap:yaz"}) != KararUcKapali {
+		t.Fatal("eklenti vekili jokeri açıldı")
+	}
+}
