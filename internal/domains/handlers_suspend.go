@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 
+	destekiptal "girginospanel/internal/destek/iptal"
+	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
@@ -43,7 +45,13 @@ var askiAdimlari = func() hesapaski.Adimlar {
 // zinciri de (hesapaski.BayiUygula) aynı Uygula'dan geçer. Uygula istek
 // bağlamından bağımsız koşar: istemci kopsa da işlem yarıda kalmaz.
 func (h *Handlers) AskiUygula(ctx context.Context, id int64, askida bool, kaynak string) (string, error) {
-	return askiAdimlari().Uygula(ctx, h.DB, id, askida, kaynak)
+	alan, err := askiAdimlari().Uygula(ctx, h.DB, id, askida, kaynak)
+	if askida && err == nil {
+		// Telegram destek: askıdaki hostingin müşteri bot bağlantıları iptal
+		// (kaçan yollar ajanın kimlik izi denetiminde yakalanır).
+		destekiptal.Domain(ctx, h.DB, id, protokol.IptalAlanSilme, 0, "sistem")
+	}
+	return alan, err
 }
 
 // elleAskiKaynagi — elle askının kaynağı isteği yapana göre: kök (yönetici)

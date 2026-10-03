@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"girginospanel/internal/backups"
+	destekiptal "girginospanel/internal/destek/iptal"
+	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/gizli"
@@ -771,6 +773,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.Denetim(h.DB, r, uidSil, kulSil, "hosting.sil", alanAdi, "sistem_kullanici="+sk, kapsamSil, true)
+	destekiptal.Domain(r.Context(), h.DB, id, protokol.IptalAlanSilme, uidSil, kulSil)
 
 	// BIND zone temizliği DELETE'ten SONRA: updateZoneIncludes zones.conf'u domains
 	// tablosundan yeniden üretir; domain hâlâ tabloda olsaydı (eski sıra) son silinen
