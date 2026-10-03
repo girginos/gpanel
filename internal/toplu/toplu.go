@@ -1,5 +1,5 @@
 // Package toplu — domainlerde TOPLU islemler (DNS varsayilan reset, SSL kurulumu,
-// sahiplik ve plan degisimi). Islemler ASENKRON calisir: istek aninda is kaydi
+// sahiplik, plan ve IP degisimi). Islemler ASENKRON calisir: istek aninda is kaydi
 // acilir ve is_id doner; UI ilerlemeyi poll ederek process bar gosterir.
 //
 // 🔴 NEDEN ASENKRON: 20 domain icin Let's Encrypt kurulumu dakikalar surer. Senkron
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"girginospanel/internal/dns"
+	"girginospanel/internal/domainip"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/middleware"
@@ -43,9 +44,10 @@ type baslatReq struct {
 	ResellerID *int64  `json:"reseller_id"`
 	CustomerID *int64  `json:"customer_id"`
 	PlanID     *int64  `json:"plan_id"`
+	IPv4       string  `json:"ipv4"` // tip "ip": hedef IP (sunucuda olmalı)
 }
 
-var gecerliTip = map[string]bool{"dns_reset": true, "ssl_kur": true, "sahip": true, "plan": true}
+var gecerliTip = map[string]bool{"dns_reset": true, "ssl_kur": true, "sahip": true, "plan": true, "ip": true}
 
 // Baslat: POST /domains/toplu/is
 func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +82,20 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 	if req.Tip == "plan" {
 		if req.PlanID == nil || *req.PlanID <= 0 || !varMi(h.DB, "SELECT COUNT(*) FROM service_plans WHERE id=?", *req.PlanID) {
 			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
+			return
+		}
+	}
+
+	// IP: hedef sunucunun gerçekten sahip olduğu bir IPv4 olmalı (istemciye güvenme).
+	// Çekirdek (domainip.DomainIPDegistir) her domainde yeniden doğrular.
+	if req.Tip == "ip" {
+		req.IPv4 = domainip.NormIP(req.IPv4)
+		if req.IPv4 == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz IPv4 adresi")
+			return
+		}
+		if !domainip.SunucudaMi(req.IPv4) {
+			httpx.WriteError(w, http.StatusBadRequest, "bu IP sunucuda tanımlı değil")
 			return
 		}
 	}
@@ -183,6 +199,22 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, req baslatReq, akto
 			}
 		case "plan":
 			err = h.planDegistir(ctx, did, *req.PlanID)
+		case "ip":
+			var ds domainip.DegisimSonuc
+			ds, err = domainip.DomainIPDegistir(ctx, h.DB, did, req.IPv4)
+			if err == nil {
+				if !ds.Degisti {
+					detay = append(detay, alanAdi+": zaten "+req.IPv4)
+				}
+				for _, u := range ds.Uyarilar {
+					detay = append(detay, alanAdi+": "+u)
+				}
+				if ds.Degisti {
+					httpx.DenetimSistem(h.DB, aktorUID, aktorAd, "domain.ip_degistir", alanAdi,
+						fmt.Sprintf("toplu #%d: %s → %s (A:%d SPF:%d)", isID, ds.EskiIP, ds.YeniIP, ds.DNSKayit, ds.SPFKayit),
+						httpx.DomainKapsam(h.DB, did), true)
+				}
+			}
 		}
 		if err != nil {
 			hata++

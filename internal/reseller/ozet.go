@@ -64,13 +64,15 @@ func (h *Handlers) Ozet(w http.ResponseWriter, r *http.Request) {
 
 // SonDomain: bayi panosundaki "son oluşturulan alan adları" satırı.
 type SonDomain struct {
-	ID          int64  `json:"id"`
-	AlanAdi     string `json:"alan_adi"`
-	PlanAd      string `json:"plan_ad"`
-	BoyutKB     int64  `json:"boyut_kb"`
-	DiskKotaMB  int64  `json:"disk_kota_mb"`
-	Askida      bool   `json:"askida"`
-	Olusturulma string `json:"olusturulma"`
+	ID           int64  `json:"id"`
+	AlanAdi      string `json:"alan_adi"`
+	PlanAd       string `json:"plan_ad"`
+	BoyutKB      int64  `json:"boyut_kb"`
+	DiskKotaMB   int64  `json:"disk_kota_mb"`
+	TrafikKB     int64  `json:"trafik_kb"`
+	TrafikKotaMB int64  `json:"trafik_kota_mb"`
+	Askida       bool   `json:"askida"`
+	Olusturulma  string `json:"olusturulma"`
 }
 
 // Dikkat: panodaki "dikkat gerektirenler" kalemi. Metni arayüz kurar (TR/EN).
@@ -95,6 +97,7 @@ func (h *Handlers) panoListeleri(ctx context.Context, rid int64) ([]SonDomain, [
 	son := make([]SonDomain, 0, 10)
 	if rows, err := h.DB.QueryContext(ctx,
 		`SELECT d.id, d.alan_adi, COALESCE(p.ad,''), COALESCE(d.boyut_kb,0), COALESCE(p.disk_kota_mb,0),
+		        COALESCE(d.trafik_kb,0), COALESCE(p.trafik_kota_mb,0),
 		        COALESCE(d.askida,0), DATE_FORMAT(d.olusturulma,'%Y-%m-%d')
 		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
 		  WHERE d.reseller_id=?
@@ -102,7 +105,7 @@ func (h *Handlers) panoListeleri(ctx context.Context, rid int64) ([]SonDomain, [
 		for rows.Next() {
 			var s SonDomain
 			var askida int
-			if rows.Scan(&s.ID, &s.AlanAdi, &s.PlanAd, &s.BoyutKB, &s.DiskKotaMB, &askida, &s.Olusturulma) == nil {
+			if rows.Scan(&s.ID, &s.AlanAdi, &s.PlanAd, &s.BoyutKB, &s.DiskKotaMB, &s.TrafikKB, &s.TrafikKotaMB, &askida, &s.Olusturulma) == nil {
 				s.Askida = askida == 1
 				son = append(son, s)
 			}

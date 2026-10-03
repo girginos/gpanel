@@ -4,7 +4,7 @@ package ipyonetim
 //   GET  /admin/ipler                    — sunucudaki tüm IP'ler + panel kayıtları
 //   POST /admin/ipler                    — yeni IP ekle
 //   DELETE /admin/ipler/{ip}             — panel-etiketli IP kaldır
-//   PUT  /admin/domains/{id}/ipv4        — bir domain'in ipv4 kaydını güncelle
+//   (PUT /admin/domains/{id}/ipv4 → internal/domainip)
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -104,63 +103,10 @@ func (h *Handler) Sil(w http.ResponseWriter, r *http.Request) {
 	jsonYaz(w, 200, map[string]any{"ok": true})
 }
 
-/* -------- Domain IP değiştirme -------- */
-
-type domainIPGovde struct {
-	IPv4 string `json:"ipv4"`
-}
-
-// DomainIPGuncelle — PUT /admin/domains/{id}/ipv4
-// Sadece DB kaydını günceller — nginx vhost render IP-agnostik olduğu için
-// yeniden render'a gerek yok. Ancak DNS zone güncellenmeli (SPF, A kayıtları).
-// Bugünkü kapsamda yalnız DB update + audit. DNS zone yenileme sonraki iş.
-func (h *Handler) DomainIPGuncelle(w http.ResponseWriter, r *http.Request) {
-	// URL: /admin/domains/{id}/ipv4
-	yolu := strings.TrimSuffix(r.URL.Path, "/ipv4")
-	idStr := pathSonParca(yolu)
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
-		hataYaz(w, 400, "geçersiz domain id")
-		return
-	}
-	var g domainIPGovde
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&g); err != nil {
-		hataYaz(w, 400, "geçersiz gövde: "+err.Error())
-		return
-	}
-	newIP := normIP(g.IPv4)
-	if newIP == "" {
-		hataYaz(w, 400, "geçersiz IPv4")
-		return
-	}
-	// Bu IP sunucuda mevcut mu? (Panel yönetiliyor olmasa da olur, ama
-	// sunucuda yoksa DNS trafiği bu sunucuya gelmez → uyarı ver.)
-	sunucuVar := false
-	for _, s := range SunucuIPler() {
-		if s.IP == newIP {
-			sunucuVar = true
-			break
-		}
-	}
-	res, err := h.DB.ExecContext(r.Context(),
-		`UPDATE domains SET ipv4=? WHERE id=?`, newIP, id)
-	if err != nil {
-		hataYaz(w, 500, err.Error())
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		hataYaz(w, 404, "domain bulunamadı")
-		return
-	}
-	jsonYaz(w, 200, map[string]any{
-		"ok":        true,
-		"ipv4":      newIP,
-		"sunucu_ip": sunucuVar, // false ise UI uyarı gösterir
-	})
-}
+/* -------- Domain IP değiştirme --------
+ * PUT /admin/domains/{id}/ipv4 artık internal/domainip (DNS A/SPF + zone +
+ * ftp_host/db_host; sunucuda olmayan IP 400). Eski DB-only gövde kaldırıldı.
+ */
 
 func pathSonParca(p string) string {
 	if i := strings.LastIndex(p, "/"); i >= 0 {
