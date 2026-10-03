@@ -20,7 +20,12 @@ import (
 // homeAltiAc — /home/<sk> köküne göre `rel`'i, yol boyunca HİÇBİR symlink
 // izlemeden açar. flags/mode os.OpenFile ile aynı anlamda.
 func homeAltiAc(sk, rel string, flags int, mode uint32) (*os.File, error) {
-	home := filepath.Join("/home", sk)
+	return homeAltiAcKok("/home", sk, rel, flags, mode)
+}
+
+// homeAltiAcKok — homeAltiAc'ın ev kökü parametreli hali (testler t.TempDir verir).
+func homeAltiAcKok(evKok, sk, rel string, flags int, mode uint32) (*os.File, error) {
+	home := filepath.Join(evKok, sk)
 	// Home kökünü aç: bu dizinin KENDİSİ symlink olmamalı (tenant onu değiştiremez;
 	// üst dizin /home root'undur). O_NOFOLLOW ile yine de güvenceye alıyoruz.
 	hf, err := unix.Open(home, unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_RDONLY|unix.O_CLOEXEC, 0)
