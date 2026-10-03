@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kilit"
@@ -329,6 +330,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		middleware.OturumlariDusur(h.DB, id)
 		// Parola sıfırlandı → ele geçirme varsayımı: bayinin API anahtarları da iptal.
 		bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "parola_sifirlama")
+		// Telegram destek: bayinin KENDİ bot bağlantıları da düşer (müşterilerininki kalır).
+		destekiptal.Bayi(r.Context(), h.DB, id, false, uid, kul)
 		httpx.Denetim(h.DB, r, uid, kul, "bayi.parola", bayiAd, "", id, true)
 	}
 
@@ -338,6 +341,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		if askida {
 			// Askiya alinan bayi ACIK oturumla is yapmaya devam edemez.
 			middleware.OturumlariDusur(h.DB, id)
+			// Telegram destek: bayinin ve müşterilerinin bot bağlantıları iptal.
+			destekiptal.Bayi(r.Context(), h.DB, id, true, uid, kul)
 			// 🔴 API anahtarları İPTAL EDİLMEZ, ASKIDA kalır (kullanıcı kararı
 			// 2026-10-03): doğrulama users.status'u her istekte okur ve askıdaki
 			// bayinin anahtarını 403 bayi_askida ile reddeder; askıdan alınınca
@@ -435,6 +440,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, kul := middleware.Aktor(r)
 	bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
+	destekiptal.Bayi(r.Context(), h.DB, id, true, uid, kul)
 	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi
 	// bu kaydi kendi gecmisi sanmasin (kok zaten tum kayitlari gorur).
 	httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", bayiAd, fmt.Sprintf("silinen bayi id=%d", id), 0, true)

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 
+	destekiptal "girginospanel/internal/destek/iptal"
+	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/httpx"
 )
 
@@ -251,5 +253,7 @@ func (h *Handlers) TwoFADisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAudit(h.DB, c.UserID, c.Username, httpx.ClientIP(r), "auth.2fa.disable", c.Username, true, kapsamRol(c))
+	// Telegram destek: 2FA kapanınca kullanıcının bot bağlantıları düşer.
+	destekiptal.Kullanici(r.Context(), h.DB, c.UserID, protokol.IptalIkiFA, c.UserID, c.Username)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

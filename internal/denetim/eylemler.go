@@ -129,11 +129,43 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"kapi.eski_uzat":  {TR: "Eski panel portunun süresi uzatıldı", EN: "Old panel port extended"},
 	"kapi.eski_kapat": {TR: "Eski panel portu kapatıldı", EN: "Old panel port closed"},
 
+	// Telegram destek botu (internal/destek/ajan). Aktör "destek-bot (tg:<kısa>)" ya da paneldeki kullanıcı.
+	"destek.eslesme_kod":      {TR: "Telegram destek eşleştirme kodu üretildi", EN: "Telegram support pairing code created"},
+	"destek.eslesme_bekliyor": {TR: "Telegram hesabı eşleşti, onay bekliyor", EN: "Telegram account paired, awaiting approval"},
+	"destek.eslesme_onay":     {TR: "Telegram destek bağlantısı onaylandı", EN: "Telegram support connection approved"},
+	"destek.baglanti_iptal":   {TR: "Telegram destek bağlantısı kaldırıldı", EN: "Telegram support connection removed"},
+	"destek.ayar":             {TR: "Telegram destek ayarı değişti", EN: "Telegram support settings changed"},
+	"destek.r0_ozet":          {TR: "Destek botu okuma işlemleri (özet)", EN: "Support bot read operations (summary)"},
+	"destek.is_red":           {TR: "Destek botu işlemi reddedildi", EN: "Support bot operation rejected"},
+	// Araç kodları (protokol.AracTanimi.DenetimKodu): R1/R2 işlemleri tek tek bu kodlarla yazılır.
+	"destek.hesap_ozet":        {TR: "Destek botu: hesap özeti", EN: "Support bot: account summary"},
+	"destek.site_yokla":        {TR: "Destek botu: site yoklandı", EN: "Support bot: site probed"},
+	"destek.log_oku":           {TR: "Destek botu: günlük okundu", EN: "Support bot: log read"},
+	"destek.sunucu_log_oku":    {TR: "Destek botu: sunucu günlüğü okundu", EN: "Support bot: server log read"},
+	"destek.servis_durum":      {TR: "Destek botu: servis durumu", EN: "Support bot: service status"},
+	"destek.disk_kota":         {TR: "Destek botu: disk kotası", EN: "Support bot: disk quota"},
+	"destek.dns_kontrol":       {TR: "Destek botu: DNS denetimi", EN: "Support bot: DNS check"},
+	"destek.ssl_durum":         {TR: "Destek botu: SSL durumu", EN: "Support bot: SSL status"},
+	"destek.nginx_test":        {TR: "Destek botu: nginx sınaması", EN: "Support bot: nginx test"},
+	"destek.dogrula_ozet":      {TR: "Destek botu: doğrulama özeti", EN: "Support bot: verification summary"},
+	"destek.wp_durum":          {TR: "Destek botu: WordPress durumu", EN: "Support bot: WordPress status"},
+	"destek.cron_liste":        {TR: "Destek botu: cron listesi", EN: "Support bot: cron list"},
+	"destek.php_ayar_oku":      {TR: "Destek botu: PHP ayarları okundu", EN: "Support bot: PHP settings read"},
+	"destek.yedek_liste":       {TR: "Destek botu: yedek listesi", EN: "Support bot: backup list"},
+	"destek.son_degisiklikler": {TR: "Destek botu: son değişiklikler", EN: "Support bot: recent changes"},
+	"destek.onarim_onizle":     {TR: "Destek botu: onarım önizlemesi", EN: "Support bot: repair preview"},
+
 	// Güvenlik / diğer
 	"websec.tara":              {TR: "Güvenlik taraması başlatıldı", EN: "Security scan started"},
 	"guvenlik.izolasyon_kaybi": {TR: "İzolasyon uyarısı", EN: "Isolation warning"},
 	"winajan.ekle":             {TR: "Windows ajanı eklendi", EN: "Windows agent added"},
 	"winajan.sil":              {TR: "Windows ajanı silindi", EN: "Windows agent removed", gereksizNot: []string{"windows ajanı silindi"}},
+}
+
+// EylemEtiketiVar: kodun katalogda etiketi var mı (başka paketlerin katalog testleri için).
+func EylemEtiketiVar(kod string) bool {
+	_, ok := eylemKatalogu[kod]
+	return ok
 }
 
 // eylemEtiketi: katalogdaki etiket; bilinmeyen kod için okunur bir geri dönüş

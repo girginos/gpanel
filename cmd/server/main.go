@@ -387,6 +387,8 @@ func main() {
 	// Nabiz AG HATASINDA FAIL-OPEN'dir (bkz. internal/lisans/nabiz.go).
 	lisansH := &lisans.Handlers{DB: d, Surum: version}
 	go lisansH.NabizDongusu(context.Background())
+	// Telegram destek ajanı (Faz 1; varsayılan KAPALI — cmd/server/destek.go).
+	destekA := destekKur(context.Background(), d, cfg)
 	// Kurulu eklenti ikilisinin imzali paket basligiyla tutarliligi.
 	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
 	// sunucusuna ulasilamasa bile goruilmelidir.
@@ -610,6 +612,7 @@ func main() {
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
 			apiAnahtarRotalari(r, d)        // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
+			destekA.Rotalar(r)              // Telegram destek: eşleştirme/ayar (internal/destek/ajan)
 			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
@@ -1079,6 +1082,9 @@ func main() {
 		})
 	})
 
+	// Telegram destek: araç yürütücüsü (Parça B) TÜM rotalar kaydedildikten SONRA
+	// bağlanır — süreç içi yönlendirici tam olmalı (cmd/server/destek_arac.go).
+	destekA.YurutucuAyarla(destekYurutucuKur(d, r, cfg))
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           r,
@@ -1397,6 +1403,10 @@ func semaDogrula(d *sql.DB) {
 		{"hosting_limit_ust", "domain_id"},
 		{"hosting_limit_ust", "kok_alanlar"},
 		{"service_plans_ozel_arsiv", "satir_json"},
+		// 0129: Telegram destek — yoksa destek uçları 503 (destek_goc_yok), ajan kapalı kalır.
+		{"destek_baglantilari", "durum_izi"},
+		{"destek_islemleri", "denetim_ozet"},
+		{"destek_ayar", "musteri_duzey"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
