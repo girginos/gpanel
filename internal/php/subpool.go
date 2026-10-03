@@ -208,7 +208,9 @@ func ApplyForSub(ctx context.Context, db *sql.DB, sk string, subID int64, surum 
 	if !HasSub(ctx, db, subID) {
 		return "", false, nil
 	}
-	s, e := GetSub(ctx, db, subID)
+	// 🔴 Alt alan havuzu paylaşılan master'da, hesabın slice'ı DIŞINDA koşar: üst
+	// alan adının plan tavanı + disable_functions tabanı burada uygulanır.
+	s, e := altHavuzAyarlari(ctx, db, sk, subID)
 	if e != nil {
 		return "", false, e
 	}

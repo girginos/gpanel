@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -476,7 +475,7 @@ func (h *Handlers) GetAyarlar(w http.ResponseWriter, r *http.Request) {
 		"alan_adi":  alanAdi,
 		"sk":        sk,
 		"php_surum": surum,
-		"ayarlar":   s,
+		"ayarlar":   IstemciAyarlari(r, s), // yönetici dışı: kökün iç alanları çıkarılır
 		"moduller":  moduller,
 		// Aynı iç yollar burada da müşteriye açık (MusteriScope) — aynı süzgeç.
 		"surumler": istemciSurumleri(r, func() []Surum {
@@ -502,14 +501,25 @@ func (h *Handlers) GetAyarlar(w http.ResponseWriter, r *http.Request) {
 // PutAyarlar: ayarlari (+ opsiyonel versiyon) tek seferde kaydet ve pool conf'u yeniden yaz.
 func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var req struct {
-		PHPSurum string   `json:"php_surum,omitempty"` // opsiyonel; verilirse versiyon değişir
-		Ayarlar  Settings `json:"ayarlar"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde: "+err.Error())
+	// 🔴 KÖK SINIRI (kok_sinir.go): yönetici dışı oturum kökün iç alanlarını
+	// (pm_max_children + türevleri) yazamaz → 403; disable_functions / open_basedir /
+	// session_save_path / mail_force_extra_parameters'ı DEĞİŞTİREMEZ → 403. İkisinde
+	// de değer kayıttan korunur. (Eski davranış: disable_functions sessizce yok
+	// sayılıyordu — artık açık ret; kanıtlı regresyon kapısı aynen duruyor.)
+	mevcut, err := Get(r.Context(), h.DB, id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "ayarlar okunamadı")
 		return
 	}
+	surumIstek, ayarlar, kod, mesaj := IstegiCoz(r, mevcut)
+	if kod != 0 {
+		httpx.WriteError(w, kod, mesaj)
+		return
+	}
+	req := struct {
+		PHPSurum string
+		Ayarlar  Settings
+	}{surumIstek, ayarlar}
 
 	// Güvenlik: pool enjeksiyonunu engelle. Skaler alanlarda satır sonu reddedilir,
 	// ek_direktifler allowlist'ten geçirilir (php_admin_*/user/group/open_basedir → 400).
@@ -525,21 +535,11 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	req.Ayarlar.EkDirektifler = temizEk
 
 	// 🔴 İZOLASYON KONTROLÜ: disable_functions'ı YALNIZ ADMIN değiştirebilir.
-	// Müşteri (RolFrom "") veya reseller token'ı bu alanı düzenleyemez — aksi
-	// halde bir müşteri (veya ele geçirilmiş bir müşteri oturumu) kendi PHP'sinde
-	// disable_functions="" göndererek system/exec/shell_exec'i açabilirdi
-	// (kanıtlı regresyon). Gelen değer yok sayılır, mevcut DB değeri korunur;
-	// satır yoksa render zamanı hardened default + zorunlu taban zaten uygulanır.
-	if middleware.RolFrom(r) != "admin" {
-		var mevcutDF sql.NullString
-		_ = h.DB.QueryRowContext(r.Context(),
-			`SELECT disable_functions FROM php_settings WHERE domain_id=?`, id).Scan(&mevcutDF)
-		if mevcutDF.Valid {
-			req.Ayarlar.DisableFunctions = mevcutDF.String
-		} else {
-			req.Ayarlar.DisableFunctions = Defaults().DisableFunctions
-		}
-	}
+	// Müşteri / bayi / müşteri-adına oturumu bu alanı düzenleyemez — aksi halde bir
+	// müşteri (veya ele geçirilmiş bir müşteri oturumu) kendi PHP'sinde
+	// disable_functions="" göndererek system/exec/shell_exec'i açabilirdi (kanıtlı
+	// regresyon). Kapı artık IstegiCoz'da (kok_sinir.go): farklı değer 403, değer
+	// her durumda kayıttan (satır yoksa hardened Defaults) korunur.
 
 	var sk, surum string
 	var demo int
@@ -599,7 +599,9 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		}
 		socket = s
 	} else {
-		s, err := havuzUygula(sk, surum, req.Ayarlar)
+		// Paylaşılan havuz slice DIŞINDA koşar: plan tavanı burada uygulanır
+		// (per-tenant havuzla aynı uygulayıcı); DB kaydı istenen değerle kalır.
+		s, err := havuzUygula(sk, surum, havuzTavanla(h.DB, id, sk, req.Ayarlar))
 		if err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "pool yaz: "+nginxset.SunucuHatasi(r, "php", id, err))
 			return
