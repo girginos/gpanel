@@ -12,6 +12,7 @@ import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
+import { useAuth } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type LogDosya = { anahtar: string; etiket: string; yol: string; boyut_b: number; degisme: string; mevcut: boolean }
@@ -122,7 +123,7 @@ export default function DomainLogsPage() {
     setSatirlar([]) // canlı başlangıçta tail kendi 200 satırı zaten gönderiyor
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    const tok = localStorage.getItem('gosp.token') || ''
+    const tok = useAuth.getState().token || ''
 
     ;(async () => {
       try {

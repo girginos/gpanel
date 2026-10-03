@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"girginospanel/internal/accounts"
+	"girginospanel/internal/adina"
 	"girginospanel/internal/antivirus"
 	"girginospanel/internal/auth"
 	"girginospanel/internal/avayar"
@@ -205,6 +206,8 @@ func main() {
 	go healSirleriSifrele(d)
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
+	// Müşteri ADINA panele giriş (bayi/yönetici "panele gir"): bkz. internal/adina.
+	adinaH := &adina.Handlers{DB: d, Secret: cfg.JWTSecret, MusteriAdresi: musteriKapiAdresi}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
 	usersH := &users.Handlers{DB: d}
 	domainsH := &domains.Handlers{DB: d, IPv4: ipv4}
@@ -527,6 +530,8 @@ func main() {
 		// Kaba-kuvvet koruması: giriş uçları IP başına hız-sınırlı (bkz. middleware.GirisLimiti)
 		r.With(middleware.GirisLimiti).Post("/auth/login", authH.Login)
 		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
+		// Müşteri adına giriş kodu → kısa ömürlü token (kimliksiz; tek kullanımlık kod).
+		r.With(middleware.GirisLimiti).Post("/musteri/adina-giris", adinaH.Giris)
 		// Panel kapısı tipi (kimliksiz): arayüzün giriş formu seçimi + açılış ölçümü.
 		r.Get("/kapi", kapi.TipHandler)
 
@@ -534,6 +539,7 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
+			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
 			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
@@ -694,6 +700,8 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.With(middleware.AdminVeyaReseller).Post("/domains", domainsH.Create)
 				r.With(middleware.SahipYonetim).Delete("/domains/{id}", domainsH.Delete)
+				// Müşteri paneline tek tık giriş (impersonation): bayi YALNIZ kendi domaini.
+				r.With(middleware.SahipYonetim).Post("/domains/{id}/adina-oturum", adinaH.Baslat)
 				// Toplu islemler (async + process bar): DNS reset / SSL / sahip / plan
 				r.With(middleware.AdminOnly).Post("/domains/toplu/is", topluH.Baslat)
 				r.With(middleware.AdminOnly).Get("/domains/toplu/is", topluH.Durum)
@@ -808,7 +816,8 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-backend", domainsH.SetWebBackend)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/web-root", domainsH.GetWebRoot)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-root", domainsH.SetWebRoot)
-				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
+				// FTP parolası = müşterinin panel giriş parolası → adına-oturumda kimlik işlemi (403).
+				r.With(middleware.MusteriScope, middleware.AdinaYasak).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)
 				r.With(middleware.DBSahipligi("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)

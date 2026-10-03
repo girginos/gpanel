@@ -55,6 +55,12 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 		// Reseller: yeni planin disk kotasi bayi havuzunu asmasin (mevcut domainin
 		// kotasi dusulerek hesaplanir → yukseltme/dusurme dogru degerlendirilir).
 		if rid > 0 {
+			// Bayi: hostingin FİİLİ disk kullanımı yeni planın kotasını aşıyorsa
+			// geçiş reddedilir (aksi hâlde hesap anında kota aşımına düşerdi).
+			if err := h.planKullanimSigar(r.Context(), id, *req.PlanID); err != nil {
+				httpx.WriteError(w, http.StatusConflict, err.Error())
+				return
+			}
 			// Kilit: iki paralel yukseltme ayni eski toplami okuyup kotayi asamasin.
 			k := kilit.Bayi(rid)
 			k.Lock()
@@ -285,4 +291,21 @@ func OzelPlanTemizle(db *sql.DB, planID, did int64) {
 	if _, err := db.Exec(`DELETE FROM service_plans WHERE id=? AND domain_id=?`, planID, did); err == nil {
 		log.Printf("ozel plan temizlendi: plan=%d (domain=%d artik kullanmiyor)", planID, did)
 	}
+}
+
+// planKullanimSigar: hostingin fiili disk kullanımı (domains.boyut_kb) yeni planın
+// disk kotasına sığıyor mu? Kota 0 = sınırsız → her zaman sığar.
+func (h *Handlers) planKullanimSigar(ctx context.Context, domainID, planID int64) error {
+	var kotaMB, boyutKB int64
+	_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0) FROM service_plans WHERE id=?`, planID).Scan(&kotaMB)
+	if kotaMB <= 0 {
+		return nil
+	}
+	if err := h.DB.QueryRowContext(ctx, `SELECT COALESCE(boyut_kb,0) FROM domains WHERE id=?`, domainID).Scan(&boyutKB); err != nil {
+		return fmt.Errorf("domain bulunamadı")
+	}
+	if boyutKB > kotaMB*1024 {
+		return fmt.Errorf("mevcut disk kullanımı (%d MB) yeni planın disk sınırını (%d MB) aşıyor", boyutKB/1024, kotaMB)
+	}
+	return nil
 }

@@ -61,6 +61,9 @@ type Domain struct {
 	SahipAd    string `json:"sahip_ad,omitempty"`
 	SahipTur   string `json:"sahip_tur,omitempty"` // "admin" | "bayi"
 	ResellerID int64  `json:"reseller_id"`
+	// DiskKotaMB: bağlı planın disk kotası (0 = sınırsız / plansız). Bayi listesi
+	// "disk %" gösterir.
+	DiskKotaMB int64 `json:"disk_kota_mb"`
 }
 
 type Handlers struct {
@@ -73,7 +76,8 @@ const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.s
   d.db_host, d.db_user, d.db_adi, d.web_root, d.boyut_kb, d.trafik_kb, d.is_demo,
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
   d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0),
-  CASE WHEN CHAR_LENGTH(TRIM(COALESCE(u.full_name,'')))>=2 THEN TRIM(u.full_name) ELSE COALESCE(NULLIF(u.username,''),'') END, COALESCE(d.reseller_id,0)
+  CASE WHEN CHAR_LENGTH(TRIM(COALESCE(u.full_name,'')))>=2 THEN TRIM(u.full_name) ELSE COALESCE(NULLIF(u.username,''),'') END, COALESCE(d.reseller_id,0),
+  COALESCE(p.disk_kota_mb,0)
   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
   LEFT JOIN users u ON u.id = d.reseller_id`
 
@@ -106,7 +110,7 @@ func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 		&d.DBHost, &d.DBUser, &d.DBAdi, &d.WebRoot, &d.BoyutKB, &d.TrafikKB, &demo,
 		&d.Notlar, &d.Olusturulma,
 		&planID, &d.PlanAd, &sshE, &askida,
-		&d.SahipAd, &d.ResellerID)
+		&d.SahipAd, &d.ResellerID, &d.DiskKotaMB)
 	// Kok (reseller_id=0): users tablosunda admin satiri OLMAYABILIR (kurulum
 	// varyanti) — sahip adini sorguya baglamak yerine burada cozuyoruz.
 	d.SahipTur = "admin"
@@ -602,6 +606,13 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma hatası: "+err.Error())
+		return
+	}
+	// Onay metni (geri alınamaz işlem): ?onay=<alan adı>. Bayi için ZORUNLU — toplu
+	// silmede yanlış kimlikli/kör bir istek başka bir hostingi silemesin; yönetici
+	// verirse doğrulanır, vermezse eski davranış (yönetici araçları/E2E).
+	if kod, mesaj := silmeOnayi(r, alanAdi); kod != 0 {
+		httpx.WriteError(w, kod, mesaj)
 		return
 	}
 
@@ -1464,4 +1475,19 @@ func planNoLog(p *int64) int64 {
 		return 0
 	}
 	return *p
+}
+
+// silmeOnayi: DELETE /domains/{id} onay metni kararı. (0,"") = geçer.
+func silmeOnayi(r *http.Request, alanAdi string) (int, string) {
+	onay := strings.TrimSpace(r.URL.Query().Get("onay"))
+	if onay == "" {
+		if middleware.RolFrom(r) == "admin" {
+			return 0, ""
+		}
+		return http.StatusBadRequest, "silme onayı gerekli: alan adını yazın"
+	}
+	if !strings.EqualFold(onay, alanAdi) {
+		return http.StatusBadRequest, "onay metni alan adıyla eşleşmiyor"
+	}
+	return 0, ""
 }

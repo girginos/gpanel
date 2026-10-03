@@ -111,8 +111,24 @@ type MusteriClaims struct {
 	AlanAdi    string `json:"alan"`
 	Tip        string `json:"tip"`           // "musteri"
 	Kapi       string `json:"kpi,omitempty"` // alindigi panel kapisi (bkz. Claims.Kapi)
+	// Müşteri ADINA oturum (bayi/yönetici "panele gir"). Boşsa olağan müşteri
+	// oturumu. Doluysa token'ı GERÇEK aktör (bayi/yönetici) almıştır: oturum
+	// geçerliliği FTP hesabına değil aktörün hesabına ve domain sahipliğine
+	// bağlıdır (middleware.adinaOturumGecerli); kimlik işlemleri (parola vb.)
+	// yasaktır; denetim kaydı aktörle yazılır. Kısa ömürlü, yenilenmez.
+	AktorUID int64  `json:"auid,omitempty"`
+	AktorAd  string `json:"aad,omitempty"`
+	AktorRol string `json:"arol,omitempty"` // "admin" | "reseller"
+	AktorRID int64  `json:"arid,omitempty"` // bayi ise kendi kapsam anahtarı
 	jwt.RegisteredClaims
 }
+
+// Adina: token bir bayinin/yöneticinin müşteri adına açtığı oturum mu?
+func (c *MusteriClaims) Adina() bool { return c != nil && c.AktorUID > 0 }
+
+// AdinaOmurSn: müşteri adına oturumun ömrü (yenileme YOK; süre dolunca aktör
+// bayi panelinden yeniden girer).
+const AdinaOmurSn = 30 * 60
 
 func GenerateMusteri(secret []byte, c MusteriClaims, lifetimeSec int64) (string, int64, error) {
 	now := time.Now()
