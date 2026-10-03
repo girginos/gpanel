@@ -309,7 +309,7 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadGateway, "sahip keşfi başarısız: "+serr.Error())
 			return
 		}
-		esle, kimlikler, herr := sahipleriHazirla(r.Context(), h.DB, sahipler)
+		esle, kimlikler, herr := sahipleriHazirla(r.Context(), h.DB, sahipler, Kapsam{})
 		if herr != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "sahip hesapları oluşturulamadı: "+herr.Error())
 			return
@@ -414,7 +414,7 @@ func (h *Handlers) calistir(ctx context.Context, isID int64, k *Kaynak, hesaplar
 			`UPDATE tasima_kalemleri SET durum='calisiyor', basladi=NOW() WHERE is_id=? AND alan_adi=?`,
 			isID, hs.AlanAdi)
 
-		sonuc, err := h.HesapAktar(ctx, k, hs, ay, yaz)
+		sonuc, err := h.HesapAktar(ctx, k, hs, ay, Kapsam{}, yaz)
 		if err != nil && ctx.Err() != nil {
 			// Iptal son hesap sirasinda gelirse dongunun basindaki ctx kontrolune
 			// hic donulmez; is 'hata' olarak ve BOS mesajla kapaniyordu.

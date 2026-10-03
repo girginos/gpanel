@@ -33,7 +33,13 @@ type UretilenKimlik struct {
 // sahipleriHazirla — kaynak sahipleri (reseller önce, sonra client) GVM'de
 // idempotent oluşturur. Döner: login→hedef eşlemesi + üretilen kimlik listesi.
 // Hata halinde o ana kadar oluşturulanlar kalır (idempotent → tekrar çalıştırılabilir).
-func sahipleriHazirla(ctx context.Context, db *sql.DB, sahipler []KaynakSahip) (map[string]sahipHedef, []UretilenKimlik, error) {
+func sahipleriHazirla(ctx context.Context, db *sql.DB, sahipler []KaynakSahip, kapsam Kapsam) (map[string]sahipHedef, []UretilenKimlik, error) {
+	// 🔴 SAHİP OLUŞTURMA YALNIZ KÖK: reseller/müşteri hesabı açmak panel-sahibine
+	// özgüdür. Bir bayi işinde (RID>0) bu yola girilmemeli — bayi, gövdeye
+	// SahipleriTasi koyarak yeni bayiler/müşteriler oluşturamaz (yetki yükseltme).
+	if kapsam.Bayi() {
+		return nil, nil, fmt.Errorf("bayi taşımasında sahip (reseller/müşteri) hesabı oluşturulamaz")
+	}
 	esle := map[string]sahipHedef{}
 	var kimlikler []UretilenKimlik
 
