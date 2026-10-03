@@ -6,6 +6,8 @@ package bildirim
 // Hedefler (görünürlük gorunurluk() ile AYNI sözlükte kalır, yeni kural yok):
 //
 //	YazOlay(domainID>0) → domain sahibi (bayi ya da yönetici) + o domainin müşterisi
+//	                      (müşteri YALNIZ musteriyeKapali dışındaki kategorilerde;
+//	                      kota eşikleri yalnız sahibe — bildirim.go)
 //	YazOlay(domainID=0) → panel geneli (yalnız yönetici)
 //	YazBayi(rid)        → domain_id NULL, reseller_id=rid: YALNIZ o bayi görür
 //	                      (yönetici NULL/0 kapsamını, müşteri domain_id'yi görür → sızmaz)
@@ -93,7 +95,10 @@ func YazOlay(db *sql.DB, o Olay, domainID int64, aktor string, bastir time.Durat
 		if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
 			rid = r // reseller-sahipli; 0 ise admin-sahipli → NULL (admin görür)
 		}
-		gorenler = []okuyan{sahipOkuyan(r), {okuyanMusteri, domainID}}
+		gorenler = []okuyan{sahipOkuyan(r)}
+		if musteriyeGider(o.Kategori) {
+			gorenler = append(gorenler, okuyan{okuyanMusteri, domainID})
+		}
 		// Kiracıya görünür → mesaj temizliği zorunlu (tek nokta, eleştiri 14).
 		o.Mesaj = Guvenli(o.Mesaj)
 	}

@@ -12,7 +12,8 @@
 //
 //	admin    → yalnız panel-geneli / ana hesap bildirimleri (reseller_id NULL ya da 0)
 //	reseller → yalnız KENDİ domainleri (reseller_id = kendi uid)
-//	müşteri  → yalnız KENDİ domaini (domain_id = token domaini)
+//	müşteri  → yalnız KENDİ domaini (domain_id = token domaini); musteriyeKapali
+//	           kategorileri (kota eşikleri) hariç
 //
 // Bu süzgeç OLMADAN cp_bildirim küresel okunuyordu → tam sunucu yolu dahil her
 // kiracının tespiti admin bell'ine düşüyordu (gizlilik sızıntısı).
@@ -77,6 +78,29 @@ const (
 	yoneticiID int64 = 1
 )
 
+// musteriyeKapali — MÜŞTERİYE HİÇ GÖSTERİLMEYEN kategoriler (kullanıcı kararı
+// 2026-10-03). "kota" = kota/kaynak EŞİK bildirimleri (internal/pano/uretici.go:
+// %85 uyarı / %100 aşım, histerezis 5): domain olsa da yalnız domainin SAHİBİNE
+// (bayi ya da yönetici) gider; müşterinin işi değil.
+//
+// İki katmanda uygulanır:
+//  1. Yazıcı (YazOlay): görenler listesine müşteri eklenmez (tekilleştirme/okundu).
+//  2. Okuyucu (gorunurluk): müşterinin kapsam koşulu bu kategorileri dışlar —
+//     liste, sayaç, okundu ve tekilleştirme AYNI ifadeyi kullandığından eski
+//     (karar öncesi müşteriye görünür yazılmış) eşik satırları da göç/silme
+//     GEREKMEDEN müşteri listesinden ve rozetinden düşer; sahip görmeye devam eder.
+var musteriyeKapali = []string{"kota"}
+
+// musteriyeGider — bu kategorideki domain bildirimini müşteri görür mü?
+func musteriyeGider(kategori string) bool {
+	for _, k := range musteriyeKapali {
+		if k == kategori {
+			return false
+		}
+	}
+	return true
+}
+
 // okuyan — bildirimi GÖRÜNTÜLEYEN kimlik; okundu durumu bu anahtarla tutulur.
 //
 //	admin   → id = users.id (jetondaki UserID)
@@ -108,7 +132,13 @@ func (o okuyan) gorunurluk() (string, []any) {
 	case okuyanBayi:
 		return "b.reseller_id = ?", []any{o.id}
 	default:
-		return "b.domain_id = ?", []any{o.id}
+		// Müşteriye kapalı kategoriler (musteriyeKapali) dışlanır; parantez:
+		// çağıranlar ifadeyi AND ile genişletir, tek ifade kalmalı.
+		arg := []any{o.id}
+		for _, k := range musteriyeKapali {
+			arg = append(arg, k)
+		}
+		return "(b.domain_id = ? AND b.kategori NOT IN (" + yerTutucu(len(musteriyeKapali)) + "))", arg
 	}
 }
 
