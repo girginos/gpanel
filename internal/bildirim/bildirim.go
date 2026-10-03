@@ -170,6 +170,18 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 			arg = append(arg, did)
 		}
 	}
+	// Tercih: görüntüleyenin kapattığı kategoriler gizlenir (tercih.go). Sayaç da
+	// aynı süzgeci kullanır; rozet ile liste tutarlı kalır.
+	tk, ta := tercihSuzgec(r.Context(), h.DB, o)
+	if tk != "" {
+		kosuller = append(kosuller, tk)
+		arg = append(arg, ta...)
+	}
+	// limit: 1..100 (zil yalnız son birkaç kaydı ister); verilmez/geçersizse eski 200.
+	limit := 200
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v >= 1 && v <= 100 {
+		limit = v
+	}
 	//nolint:gosec // G202: joinAnd yalnız SABİT koşul parçalarını (gorunurluk() rol ifadesi + "k.bildirim_id IS NULL" + "b.kategori=?" + "b.domain_id=?" / "1=0") birleştirir; kullanıcı değerleri (kategori, domain_id, kimlik) ? ile arg üzerinden bağlanır. Sorguya kullanıcı girdisi enterpole edilmez.
 	q := `SELECT b.id, b.seviye, b.kategori, b.baslik, b.mesaj, b.domain_id, b.ref_tur, b.ref_id,
 	             k.bildirim_id IS NOT NULL,
@@ -177,7 +189,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	        FROM cp_bildirim b
 	        LEFT JOIN cp_bildirim_okundu k
 	          ON k.bildirim_id = b.id AND k.okuyan_tur = ? AND k.okuyan_id = ?
-	       WHERE ` + joinAnd(kosuller) + ` ORDER BY b.created_at DESC, b.id DESC LIMIT 200`
+	       WHERE ` + joinAnd(kosuller) + ` ORDER BY b.created_at DESC, b.id DESC LIMIT ` + strconv.Itoa(limit)
 
 	rows, err := h.DB.QueryContext(r.Context(), q, arg...) //nolint:gosec // G701: q yalnız SABİT parçalardan kurulur (bkz. yukarı); istek değerleri ? ile bağlanır.
 	if err != nil {
@@ -206,6 +218,10 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	okK, okArg := o.okumadi()
 	sayArg := append(append([]any{}, scopeArg...), okArg...)
 	sayQ := `SELECT COUNT(*) FROM cp_bildirim b WHERE ` + kos + ` AND ` + okK //nolint:gosec // G202: kos/okK SABİT ifadeler (gorunurluk/okumadi); değerler ? ile bağlanır.
+	if tk != "" {
+		sayQ += ` AND ` + tk
+		sayArg = append(sayArg, ta...)
+	}
 	var okunmamis int
 	_ = h.DB.QueryRowContext(r.Context(), sayQ, sayArg...).Scan(&okunmamis) //nolint:gosec // G701: sayQ SABİT parçalardan; değerler ? ile bağlanır.
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"bildirimler": out, "okunmamis": okunmamis})
@@ -370,67 +386,12 @@ func idAny(l []int64) []any {
 // Yaz — modül-içi kullanım (AV, SSL, ...): bildirim oluştur. domainID>0 ise
 // sahip reseller_id domains'ten çözülür ve kayda yazılır → görünürlük sahibine
 // kilitlenir. domainID=0 → panel-geneli (admin).
+//
+// Gövde yazGenel'dedir (hedef.go): aynı tekilleştirme (görüntüleyene göre) +
+// kiracıya görünen mesajda sunucu yolu maskesi (Guvenli). Zaman pencereli
+// bastırma ve aktörün kendi eylemini okunmuş yazma yalnız YazOlay/YazBayi ile.
 func Yaz(db *sql.DB, seviye, kategori, baslik, mesaj string, domainID int64, refTur string, refID int64) {
-	if db == nil {
-		return
-	}
-	var dom, rid any
-	gorenler := []okuyan{sahipOkuyan(0)}
-	if domainID > 0 {
-		dom = domainID
-		var r int64
-		if db.QueryRow(`SELECT reseller_id FROM domains WHERE id=?`, domainID).Scan(&r) == nil && r > 0 {
-			rid = r // reseller-sahipli; 0 ise admin-sahipli → NULL (admin görür)
-		}
-		gorenler = []okuyan{sahipOkuyan(r), {okuyanMusteri, domainID}}
-	}
-	// 🔴 DEDUP (görüntüleyene göre): aynı (kategori, başlık, ref, domain) bildirimi
-	// yeni satırı görecek HERKES hâlâ okunmamış tutuyorsa YENİDEN YAZMA. Kalıcı
-	// bir durum (swap yok, SSL hatası, ...) her panel açılışında / monitoring
-	// turunda yeni kayıt üretip bildirim merkezini spam'liyordu (kullanıcı 11
-	// özdeş "Swap alanı yok" gördü). Farklı olaylar (farklı başlık/ref/domain)
-	// BİRLEŞTİRİLMEZ — yalnız birebir tekrar.
-	//
-	// Okuyan ve durum sürüyorsa YALNIZ o yeniden uyarılır: yeni satır yazılır ve
-	// elinde hâlâ okunmamış kopyası olan görüntüleyen için baştan okundu işaretlenir
-	// (rozetine ikinci kopya binmez). "Hâlâ okunmamış" GÜNCEL sahibin gördüğü
-	// satırlara bakar: devirden kalmış, sahibin göremediği bir satır yöneticiyi/bayiyi
-	// artık susturmaz (B4).
-	var bekleyen []okuyan
-	for _, o := range gorenler {
-		var n int
-		if err := ayniOkunmamis(db, o, kategori, baslik, refTur, refID, dom).Scan(&n); err != nil {
-			// cp_bildirim_okundu okunamıyor (0105 göçü uygulanmamış?) → eski ortak
-			// sütunla tekilleştir: bildirim merkezi her turda spam'lenmesin.
-			if db.QueryRow(`SELECT COUNT(*) FROM cp_bildirim
-			  WHERE okundu=0 AND kategori=? AND baslik=? AND ref_tur=? AND ref_id=? AND domain_id <=> ?`,
-				kategori, baslik, refTur, refID, dom).Scan(&n) == nil && n > 0 {
-				return
-			}
-			bekleyen = nil
-			break
-		}
-		if n > 0 {
-			bekleyen = append(bekleyen, o)
-		}
-	}
-	if len(bekleyen) == len(gorenler) {
-		return
-	}
-	res, err := db.Exec(
-		`INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id, ref_tur, ref_id)
-		 VALUES (?,?,?,?,?,?,?,?)`, seviye, kategori, baslik, mesaj, dom, rid, refTur, refID)
-	if err != nil {
-		return
-	}
-	yeni, err := res.LastInsertId()
-	if err != nil || yeni <= 0 {
-		return
-	}
-	for _, o := range bekleyen {
-		_, _ = db.Exec(`INSERT IGNORE INTO cp_bildirim_okundu (bildirim_id, okuyan_tur, okuyan_id) VALUES (?,?,?)`,
-			yeni, o.tur, o.id)
-	}
+	YazOlay(db, Olay{Seviye: seviye, Kategori: kategori, Baslik: baslik, Mesaj: mesaj, RefTur: refTur, RefID: refID}, domainID, "", 0)
 }
 
 // ayniOkunmamis — o görüntüleyenin gördüğü ve henüz okumadığı birebir aynı

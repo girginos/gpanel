@@ -17,10 +17,10 @@ import { eklentileriGetir, type EklentiKayit } from '@/lib/eklenti'
 import { api } from '@/lib/api'
 import DilSecici from '@/components/DilSecici'
 import TemaDugmesi from '@/components/TemaDugmesi'
+import BildirimZili from '@/components/BildirimZili'
 import { Button } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 
-type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
 type AramaDomain = { id: number; alan_adi: string; sistem_kullanici: string }
 type AramaSub = { id: number; tam_ad: string; parent_id: number; sistem_kullanici: string }
 type Sonuc = { tip: 'sayfa' | 'domain' | 'alt'; ad: string; alt: string; yol: string; key: string }
@@ -61,30 +61,6 @@ const SAYFALAR: SayfaTanim[] = [
 // sayfanın kendi araması olduğundan orada bu kutu çizilmez.
 const MUSTERI_ANA_ANAHTAR = ['ana sayfa', 'anasayfa', 'araçlar', 'genel', 'pano', 'özet', 'home', 'tools', 'dashboard']
 
-// ── Bildirim yardımcıları ──
-const goreliZaman = (t: string) => {
-  // Backend zaman damgalari UTC ama timezone-suz ("2026-08-22 14:14:45").
-  // 'Z' eklemeden new Date() bunu LOCAL sanip UTC+3 kullanicida 3 saat kaydirirdi.
-  const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
-  const s = Math.floor((Date.now() - d.getTime()) / 1000)
-  if (!isFinite(s) || s < 0) return t.slice(0, 16)
-  if (s < 60) return cevir('az önce')
-  if (s < 3600) return cevirT("{0} dk önce", Math.floor(s / 60))
-  if (s < 86400) return cevirT("{0} sa önce", Math.floor(s / 3600))
-  if (s < 604800) return cevirT("{0} gün önce", Math.floor(s / 86400))
-  return t.slice(0, 10)
-}
-// Eski kayıtlardaki tam sunucu yolunu (/home/<kullanıcı>/) gizle — göreli kalır.
-const yolGizle = (m: string) => m.replace(/\/home\/[^/\s]+\//g, '')
-const sevBg = (s: string) =>
-  s === 'kritik' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-    : s === 'uyari' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-      : 'bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
-const KatIkon = ({ kategori }: { kategori: string }) => (
-  <Ikon d={kategori === 'antivirus' ? I.kalkan : I.zil} kalinlik={1.9} className="w-4 h-4" />
-)
-
-
 const CMP_EN: Record<string, string> = {
   "Domainler": "Domains",
   "Hosting Planları": "Hosting Plans",
@@ -106,7 +82,6 @@ const CMP_EN: Record<string, string> = {
   "PHP Modülleri": "PHP Modules",
   "Servisler": "Services",
   "Panel Güncelleme": "Panel Update",
-  "az önce": "just now",
   "sayfa": "page",
   "domain": "domain",
   "alt alan": "subdomain",
@@ -114,11 +89,6 @@ const CMP_EN: Record<string, string> = {
   "Ara: domain, alt alan, sayfa (ör. yedek, firewall)…": "Search: domain, subdomain, page (e.g. backup, firewall)…",
   "Ara": "Search",
   "Yükleniyor…": "Loading…",
-  "Bildirimler": "Notifications",
-  "yeni": "new",
-  "Tümünü okundu": "Mark all read",
-  "Bildirim yok": "No notifications",
-  "Tümünü göster": "Show all",
   "Hesap menüsü": "Account menu",
   "Çıkış Yap": "Log out",
   "Ara: sayfa (ör. yedek, dns, ssl)…": "Search: page (e.g. backup, dns, ssl)…",
@@ -142,40 +112,6 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   const musteriKok = musteriID !== null ? `/abonelikler/${musteriID}` : null
   // Müşterinin ana sayfasında sayfanın kendi araç araması var: burada ikinci kutu çizilmez.
   const aramaGizli = musteriKok !== null && konum.pathname.replace(/\/+$/, '') === musteriKok
-  async function bildirimYukle() {
-    try {
-      const { data } = await api.get<{ bildirimler: Bildirim[]; okunmamis: number }>('/bildirimler')
-      setBildirimler(data.bildirimler || []); setOkunmamis(data.okunmamis || 0)
-    } catch { /* sessiz — badge kritik degil */ }
-  }
-  useEffect(() => {
-    bildirimYukle()
-    const t = setInterval(bildirimYukle, 60000)
-    return () => clearInterval(t)
-  }, [])
-  // Açılınca artık otomatik OKUNDU YAPMAZ — okunmamışlar dropdown'da görünsün.
-  function bildirimAc() { setBAcik(v => !v) }
-  async function bildirimTumOkundu() {
-    setOkunduYapiliyor(true)
-    try {
-      await api.post('/bildirimler/0/okundu', {})
-      setBildirimler(list => list.map(b => ({ ...b, okundu: true })))
-      setOkunmamis(0)
-    } catch { /* sessiz */ } finally { setOkunduYapiliyor(false) }
-  }
-  function bildirimGit(b: Bildirim) {
-    setBAcik(false)
-    if (!b.okundu) {
-      api.post(`/bildirimler/${b.id}/okundu`, {}).catch(() => { })
-      setBildirimler(list => list.map(x => x.id === b.id ? { ...x, okundu: true } : x))
-      setOkunmamis(n => Math.max(0, n - 1))
-    }
-    // Domainli bildirim → O DOMAİNİN kendi AV sayfasına; yoksa panel-geneli merkezî.
-    if (b.domain_id) { navigate(`/abonelikler/${b.domain_id}/imunify`); return }
-    // Domain'siz bildirim yönetici merkezine gider; müşteride o sayfa yok (rol kapısı
-    // yine kendi aboneliğine çevirirdi) — müşteride yalnız okundu işaretlenir.
-    if (b.kategori === 'antivirus' && !musteri) { navigate('/antivirus'); return }
-  }
   const [menuAcikProfil, setMenuAcik] = useState(false)
 
   // ── Global arama ──
@@ -197,17 +133,11 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
   const darIkon = !aramaGizli && darMod && !darAcik
   const girdiRef = useRef<HTMLInputElement>(null)
   const darDugmeRef = useRef<HTMLButtonElement>(null)
-  const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
-  const [okunmamis, setOkunmamis] = useState(0)
-  const [bAcik, setBAcik] = useState(false)
-  const [okunduYapiliyor, setOkunduYapiliyor] = useState(false)
-  const bRef = useRef<HTMLDivElement>(null)
 
   // dışarı tıklama → kapat
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (kutuRef.current && !kutuRef.current.contains(e.target as Node)) { setAcik(false); setDarAcik(false) }
-      if (bRef.current && !bRef.current.contains(e.target as Node)) setBAcik(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
@@ -429,54 +359,7 @@ export default function TopBar({ onMenuAc, menuAcik, marka }: { onMenuAc?: () =>
       <div className={`${darIkon ? 'max-sm:ms-0' : ''} ms-auto flex-none lg:flex-1 flex items-center justify-end gap-0.5 sm:gap-1`}>
         <DilSecici />
         <TemaDugmesi />
-        <div className="relative" ref={bRef}>
-        <Button isIcon variant="flat" onClick={bildirimAc} className="relative size-9 rounded-full" aria-label={cevir("Bildirimler")} title={cevir("Bildirimler")}>
-          {okunmamis > 0 && (
-            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">{okunmamis > 99 ? '99+' : okunmamis}</span>
-          )}
-          <Ikon d={I.zil} kalinlik={1.8} className="w-5 h-5" />
-        </Button>
-          {bAcik && (
-            <div className="absolute right-0 mt-2 w-[27rem] max-w-[calc(100vw-1.5rem)] max-h-[70vh] overflow-y-auto bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-lg z-50">
-              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-dark-600 flex items-center justify-between sticky top-0 bg-white dark:bg-dark-700 z-10">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  {cevir("Bildirimler")}{okunmamis > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">{okunmamis} {cevir("yeni")}</span>}
-                </span>
-                {okunmamis > 0 && (
-                  <Button boyut="sm" variant="flat" color="primary" ikon={I.onay} onClick={bildirimTumOkundu} yukleniyor={okunduYapiliyor} className="-mr-2">{cevir("Tümünü okundu")}</Button>
-                )}
-              </div>
-              {bildirimler.length === 0 ? (
-                <div className="px-4 py-10 text-center">
-                  <Ikon d={I.zil} kalinlik={1.5} className="w-9 h-9 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                  <p className="text-sm text-slate-400 dark:text-slate-500">{cevir("Bildirim yok")}</p>
-                </div>
-              ) : bildirimler.map(b => (
-                <button key={b.id} onClick={() => bildirimGit(b)}
-                  className={`w-full text-left px-3.5 py-3 border-b border-slate-50 dark:border-dark-600/50 hover:bg-slate-50 dark:hover:bg-dark-600/50 transition flex gap-3 ${!b.okundu ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
-                  <span className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${sevBg(b.seviye)}`}>
-                    <KatIkon kategori={b.kategori} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-start gap-1.5">
-                      <span className={`block text-sm ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
-                      {!b.okundu && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0" />}
-                    </span>
-                    <span className="block text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">{yolGizle(b.mesaj)}</span>
-                    <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-1">{goreliZaman(b.tarih)}</span>
-                  </span>
-                </button>
-              ))}
-              {bildirimler.length > 0 && (
-                <button onClick={() => { setBAcik(false); navigate('/bildirimler') }}
-                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-dark-600/50 sticky bottom-0 bg-white dark:bg-dark-700 border-t border-slate-100 dark:border-dark-600">
-                  {cevir(cevir("Tümünü göster"))}
-                  <Ikon d={I.ileri} className="size-3.5 shrink-0" />
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <BildirimZili />
 
         <div className="relative">
           <button

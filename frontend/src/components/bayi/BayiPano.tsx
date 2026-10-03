@@ -14,6 +14,9 @@ import { I, Ikon } from '@/components/Ikon'
 import { KART, ODAK, cx, mbYaz, tarihYaz, yuzde } from './ortak'
 import { KullanimHucre } from './Hucreler'
 import { Donut } from './Grafik'
+import PanoWidgetlari from '@/components/pano/PanoWidgetlari'
+import { KpiEgilim } from '@/components/pano/Egilim'
+import type { EgilimMetrik } from '@/components/pano/egilimHesap'
 
 type SonDomain = { id: number; alan_adi: string; plan_ad: string; boyut_kb: number; disk_kota_mb: number; trafik_kb?: number; trafik_kota_mb?: number; askida: boolean; olusturulma: string }
 type Dikkat = { tur: 'ssl_alinamadi' | 'disk_yuksek' | 'askida'; onem: 'kritik' | 'uyari' | 'bilgi'; domain_id?: number; alan_adi?: string; yuzde?: number; adet?: number; ornekler?: string[] }
@@ -58,11 +61,12 @@ export default function BayiPano() {
 
   const diskMB = o ? o.disk_kullanim_kb / 1024 : 0
   const trafikMB = o ? o.trafik_kullanim_kb / 1024 : 0
-  const kpiler = o ? [
-    { ad: 'Hosting hesabı', deger: String(o.hosting_adet), alt: o.hosting_limit > 0 ? `/ ${o.hosting_limit}` : '' },
-    { ad: 'Disk kullanımı', deger: mbYaz(diskMB), alt: o.disk_limit_mb > 0 ? `/ ${mbYaz(o.disk_limit_mb)}` : '' },
-    { ad: 'Aylık trafik', deger: mbYaz(trafikMB), alt: o.trafik_limit_mb > 0 ? `/ ${mbYaz(o.trafik_limit_mb)}` : '' },
-    { ad: 'Askıda', deger: String(o.askida_adet), alt: '' },
+  // egilim: KPI altındaki sparkline + değişim (D3b, GET /pano/w/egilim; geçmiş yoksa "Veri toplanıyor").
+  const kpiler: { ad: string; deger: string; alt: string; egilim: EgilimMetrik }[] = o ? [
+    { ad: 'Hosting hesabı', deger: String(o.hosting_adet), alt: o.hosting_limit > 0 ? `/ ${o.hosting_limit}` : '', egilim: 'hesap' },
+    { ad: 'Disk kullanımı', deger: mbYaz(diskMB), alt: o.disk_limit_mb > 0 ? `/ ${mbYaz(o.disk_limit_mb)}` : '', egilim: 'disk_kb' },
+    { ad: 'Aylık trafik', deger: mbYaz(trafikMB), alt: o.trafik_limit_mb > 0 ? `/ ${mbYaz(o.trafik_limit_mb)}` : '', egilim: 'trafik' },
+    { ad: 'Askıda', deger: String(o.askida_adet), alt: '', egilim: 'askida' },
   ] : []
   const havuzlar = o ? [
     { ad: 'Disk', kull: diskMB, limit: o.disk_limit_mb, yaz: mbYaz, taahhut: o.disk_taahhut_mb },
@@ -102,6 +106,7 @@ export default function BayiPano() {
             <div className="mt-1 text-[1.7rem] font-semibold leading-none tabular-nums text-gray-900 dark:text-dark-50">
               {x.deger}{x.alt && <span className="ms-1.5 text-sm font-medium text-gray-500 dark:text-dark-300">{x.alt}</span>}
             </div>
+            <KpiEgilim metrik={x.egilim} etiket={t(x.ad)} />
           </div>
         ))}
       </section>
@@ -160,6 +165,9 @@ export default function BayiPano() {
           )}
         </section>
       </div>
+
+      {/* İstatistik widget'ları (D3b): eğilim, yakında dolacaklar, SSL, askı, işler, Website Security */}
+      <PanoWidgetlari />
 
       {/* Son oluşturulan 10 alan adı */}
       <section className={cx(KART, 'overflow-hidden')} aria-label={t('Son oluşturulan alan adları')}>

@@ -59,6 +59,7 @@ import (
 	"girginospanel/internal/oturumbosta"
 	"girginospanel/internal/paketler"
 	"girginospanel/internal/panelhost"
+	"girginospanel/internal/pano"
 	"girginospanel/internal/performans"
 	"girginospanel/internal/php"
 	"girginospanel/internal/phpext"
@@ -372,6 +373,7 @@ func main() {
 	korumaH := &sifrekoruma.Handlers{DB: d}
 	avH := &antivirus.Handlers{DB: d}
 	bildirimH := &bildirim.Handlers{DB: d}
+	panoH := &pano.Handlers{DB: d}
 	zincirH := &zincir.Handlers{DB: d}
 	kopyaH := &sitekopya.Handlers{DB: d}
 	wpH := &wordpress.Handlers{DB: d}
@@ -596,6 +598,12 @@ func main() {
 			// tespitini gorurdu (izolasyon ihlali).
 			r.Get("/bildirimler", bildirimH.Liste)
 			r.Post("/bildirimler/{id}/okundu", bildirimH.Okundu)
+			// D3b: zil sayacı + görüntüleyene ait tercihler (aynı rol-kapsamı) + pano widget'ları
+			// (kapsam jetondan, internal/pano.kapsamCoz).
+			r.Get("/bildirimler/sayac", bildirimH.Sayac)
+			r.Get("/bildirim-tercihleri", bildirimH.TercihGetir)
+			r.Put("/bildirim-tercihleri", bildirimH.TercihKaydet)
+			r.With(middleware.AdminVeyaReseller).Get("/pano/w/{id}", panoH.Widget)
 			r.Get("/antivirus/zincirler", zincirH.Liste) // FAZ3 saldiri zincirleri (rol-kapsamli)
 			// Sunucu-geneli antivirüs paneli (sol menü)
 			r.With(middleware.AdminOnly).Get("/antivirus/durum", avH.AdminDurum)
@@ -1027,6 +1035,7 @@ func main() {
 	monitor.StartYukSampler(d, 60*time.Second)         // dashboard yük geçmişi örnekleyici
 	go zincir.Baslat(d)                                // FAZ2 attack-chain korelasyon
 	istatistik.StartTrafikAggregator(d, 5*time.Minute) // per-domain aylık trafik toplayıcı
+	pano.Baslat(d)                                     // D3b: disk ölçümü, günlük pano görüntüsü, eşik/olay bildirimleri, saklama
 	// 🔴 Antivirüs kaynak dilimini açılışta kapasiteye göre YENİDEN YAZ.
 	// Installer taban slice'ı sabit 50% CPUQuota içerir; kapasite-hesaplı
 	// değer (çekirdek×100/4) ancak LimitleriUygula ile gelir. Bu çağrı olmadan
@@ -1315,6 +1324,10 @@ func semaDogrula(d *sql.DB) {
 		// 0128: API anahtarları — yoksa anahtarla kimlik doğrulama 503, yönetim uçları 500.
 		{"api_anahtarlari", "ozet"},
 		{"api_anahtarlari", "iptal_neden"},
+		// 0126/0127: pano günlük görüntüsü, kenar-tetikli eşik durumu, bildirim tercihleri.
+		{"pano_gunluk", "kapsam_id"},
+		{"cp_esik_durum", "seviye"},
+		{"cp_bildirim_tercih", "panel"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

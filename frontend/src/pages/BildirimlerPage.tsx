@@ -8,25 +8,12 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
+import BildirimTercihleri from '@/components/BildirimTercihleri'
+import { useAuth } from '@/store/auth'
+import { type Bildirim, baslikAd, goreliZaman, hedef, kategoriAd, yolGizle } from '@/lib/bildirim'
 
-type Bildirim = { id: number; seviye: string; kategori: string; baslik: string; mesaj: string; domain_id: number | null; okundu: boolean; tarih: string }
-
-const KAT_ETIKET: Record<string, string> = { antivirus: 'Antivirüs', ssl: 'SSL', yedek: 'Yedek', kota: 'Kota', sistem: 'Sistem' }
-const katAd = (k: string) => KAT_ETIKET[k] || (k ? k[0].toUpperCase() + k.slice(1) : 'Genel')
-
-const goreliZaman = (t: string) => {
-  // UTC timezone-suz zaman damgasi (bkz. TopBar). Z eklemeden 3 saat kayar.
-  const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
-  const s = Math.floor((Date.now() - d.getTime()) / 1000)
-  if (!isFinite(s) || s < 0) return t.slice(0, 16)
-  if (s < 60) return cevir("az önce")
-  if (s < 3600) return `${Math.floor(s / 60)} ${cevir("dk önce")}`
-  if (s < 86400) return `${Math.floor(s / 3600)} ${cevir("sa önce")}`
-  if (s < 604800) return `${Math.floor(s / 86400)} ${cevir("gün önce")}`
-  return t.slice(0, 10)
-}
-// Eski kayıtlardaki tam sunucu yolunu (/home/<kullanıcı>/) gizle — göreli kalır.
-const yolGizle = (m: string) => m.replace(/\/home\/[^/\s]+\//g, '')
+// Tip, kategori etiketi, başlık çevirisi, göreli zaman ve tıklama hedefi tek
+// kaynaktan (lib/bildirim — zil ile aynı).
 const sevBg = (s: string) =>
   s === 'kritik' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
     : s === 'uyari' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
@@ -44,18 +31,9 @@ const KatIkon = ({ kategori }: { kategori: string }) => (
 
 const BILDIRIM_EN: Record<string, string> = {
   "Okunmamış bildirim yok.": "No unread notifications.",
-  "az önce": "just now",
   "Yalnız okunmamış": "Unread only",
-  "dk önce": "min ago",
-  "sa önce": "h ago",
-  "gün önce": "d ago",
   "Anasayfa": "Homepage",
   "Bildirimler": "Notifications",
-  "Antivirüs": "Antivirus",
-  "Yedek": "Backup",
-  "Kota": "Quota",
-  "Sistem": "System",
-  "Genel": "General",
   "Tümünü okundu işaretle": "Mark all as read",
   "Bildirim yok.": "No notifications.",
   "Kritik": "Critical",
@@ -66,6 +44,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (BILDIRIM_EN[tr]
 export default function BildirimlerPage() {
   useTranslation() // dil re-render aboneligi
   const navigate = useNavigate()
+  const rol = useAuth((st) => st.kullanici?.rol)
   const toast = useToast()
   const [liste, setListe] = useState<Bildirim[]>([])
   const [yuk, setYuk] = useState(true)
@@ -95,8 +74,8 @@ export default function BildirimlerPage() {
       api.post(`/bildirimler/${b.id}/okundu`, {}).catch(() => { })
       setListe(l => l.map(x => x.id === b.id ? { ...x, okundu: true } : x))
     }
-    if (b.domain_id) { navigate(`/abonelikler/${b.domain_id}/imunify`); return }
-    if (b.kategori === 'antivirus') { navigate('/antivirus'); return }
+    const h = hedef(b, rol)
+    if (h) navigate(h)
   }
 
   // Kategori çipleri — YÜKLENEN kümeden türetilir (yalnız var olanlar görünür).
@@ -138,7 +117,7 @@ export default function BildirimlerPage() {
         </button>
         <span className="w-px h-5 bg-slate-200 dark:bg-dark-600 mx-1" />
         {cip('', cevir("Tümü"))}
-        {katlar.map(k => cip(k, cevir(katAd(k))))}
+        {katlar.map(k => cip(k, kategoriAd(k)))}
       </div>
 
       <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg shadow-xs overflow-hidden">
@@ -158,7 +137,7 @@ export default function BildirimlerPage() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-start justify-between gap-2">
-                  <span className={`text-sm ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{b.baslik}</span>
+                  <span className={`text-sm ${!b.okundu ? 'font-semibold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200'}`}>{baslikAd(b)}</span>
                   <span className="flex items-center gap-2 shrink-0">
                     <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">{goreliZaman(b.tarih)}</span>
                     {!b.okundu && <span className="w-2 h-2 rounded-full bg-brand-500" />}
@@ -166,13 +145,17 @@ export default function BildirimlerPage() {
                 </span>
                 <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1 break-words">{yolGizle(b.mesaj)}</span>
                 <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600/60">{cevir(katAd(b.kategori))}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-600/60">{kategoriAd(b.kategori)}</span>
                   {b.seviye === 'kritik' && <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">{cevir("Kritik")}</span>}
                 </span>
               </span>
             </button>
           ))
         )}
+      </div>
+
+      <div className="mt-6">
+        <BildirimTercihleri />
       </div>
     </div>
   )

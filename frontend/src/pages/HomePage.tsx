@@ -14,6 +14,7 @@ import BayiPano from '@/components/bayi/BayiPano'
 import { SayfaCercevesi } from '@/components/SayfaKabugu'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
+import PanoWidgetlari from '@/components/pano/PanoWidgetlari'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, Box, CheckCircle2, Cloud, Cpu,
@@ -239,7 +240,7 @@ export default function HomePage() {
   const yenile = () => {
     cek()
     api.get<Domain[]>('/domains').then((r) => setDomainler(r.data || [])).catch(() => { })
-    api.get<{ bildirimler: Bildirim[] }>('/bildirimler').then((r) => setBildirimler(r.data.bildirimler || [])).catch(() => { })
+    api.get<{ bildirimler: Bildirim[] }>('/bildirimler?limit=3').then((r) => setBildirimler(r.data.bildirimler || [])).catch(() => { })
     api.get<{ toplam_boyut_b: number }>('/admin/backups/ozet').then((r) => setYedekB(r.data?.toplam_boyut_b ?? 0)).catch(() => { })
     // Dizin bazlı disk dağılımı — backend 5 dk cache'ler, biz de yalnız yenile()'de çağırırız
     // (5 sn'lik cek() döngüsüne KOYMA: du pahalı, cache'e rağmen boşuna istek olur).
@@ -536,6 +537,11 @@ export default function HomePage() {
             })}
           </div>
         </Card>
+      </div>
+
+      {/* SATIR 3 — pano istatistik widget'ları (D3b, tüm sunucu kapsamı) */}
+      <div className="mt-5">
+        <PanoWidgetlari />
       </div>
 
       <footer className="dash-footer">
