@@ -83,13 +83,19 @@ type Kayit struct {
 	Adina bool `json:"adina,omitempty"`
 	// AdinaAlan: adına olunan hostingin alan adı (silinmişse "").
 	AdinaAlan string `json:"adina_alan,omitempty"`
-	IP        string `json:"ip"`
-	Eylem     string `json:"eylem"`
-	Hedef     string `json:"hedef"`
-	Detay     string `json:"detay,omitempty"`
-	Basarili  bool   `json:"basarili"`
-	KapsamID  int64  `json:"kapsam_id"`
-	KapsamAd  string `json:"kapsam_ad"` // "" = kök (panel sahibi)
+	// APIAnahtar: işlem bu adlı API anahtarıyla yapıldı (Aktor = anahtarın sahibi).
+	APIAnahtar string `json:"api_anahtar,omitempty"`
+	IP         string `json:"ip"`
+	Eylem      string `json:"eylem"`
+	Hedef      string `json:"hedef"`
+	// Detay: açıklamanın HAM metni (etiketi tekrarlayan sabit notlar düşürülmüş).
+	// Ön yüz bunu yalnız ipucunda (title) ve satır genişletmede gösterir.
+	Detay string `json:"detay,omitempty"`
+	// Aciklama: Detay'ın sade TR/EN cümlesi + gizli teknik ayrıntılar (aciklama.go).
+	Aciklama *Aciklama `json:"aciklama,omitempty"`
+	Basarili bool      `json:"basarili"`
+	KapsamID int64     `json:"kapsam_id"`
+	KapsamAd string    `json:"kapsam_ad"` // "" = kök (panel sahibi)
 }
 
 // Liste: GET /denetim?ara=&eylem=&kapsam=&limit=&offset=
@@ -183,9 +189,16 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 		k.Basarili = ok == 1
 		k.Detay = notSade(k.Eylem, notCikar(detay))
+		if k.Detay != "" {
+			k.Aciklama = aciklamaKur(k.Eylem, detay)
+		}
 		if adinaID == 0 {
 			// 0114 öncesi kayıt: "aktör (adına musteri:<id>)" tek dizgede.
 			k.Aktor, adinaID = httpx.AktorAyir(k.Aktor)
+		}
+		// API anahtarıyla yapılan işlem: "<sahip> (API anahtarı <ad>)" → sahip + rozet.
+		if sahip, ad, ok := anahtarAktorAyir(k.Aktor); ok {
+			k.Aktor, k.APIAnahtar = sahip, ad
 		}
 		if adinaID > 0 {
 			k.Adina = true
@@ -256,6 +269,24 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		"etiketler": etiketHaritasi(out, eylemler),
 		"kapsam":    map[string]any{"bayi_mi": bayiMi(c), "bayi_id": rid},
 	})
+}
+
+// anahtarEkOnek: middleware.AnahtarAktorAdi'nin aktör adına eklediği ek.
+const anahtarEkOnek = " (API anahtarı "
+
+// anahtarAktorAyir: "<sahip> (API anahtarı <ad>)" → (sahip, ad, true). Biçim
+// tutmuyorsa (s, "", false). Sahip kullanıcı adıdır (boşluk/parantez içermez),
+// bu yüzden İLK ek eşleşmesi alınır; anahtar adı parantez içerebilir.
+func anahtarAktorAyir(s string) (string, string, bool) {
+	i := strings.Index(s, anahtarEkOnek)
+	if i <= 0 || !strings.HasSuffix(s, ")") {
+		return s, "", false
+	}
+	ad := s[i+len(anahtarEkOnek) : len(s)-1]
+	if strings.TrimSpace(ad) == "" {
+		return s, "", false
+	}
+	return s[:i], ad, true
 }
 
 // notCikar: detail JSON'unu okunur metne cevirir.
