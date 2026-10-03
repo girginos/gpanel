@@ -388,6 +388,15 @@ func main() {
 	// hesaplar (alt alanları/PHP/SSH/DB açık kalmıştı) ve yarım kalmış işlemler
 	// böylece kapanır; idempotent, askıyı KALDIRMAZ. Boot'u bloklamaz.
 	go func() {
+		// Posta askısı altyapısı (mail eklentisi kuruluysa): virtual_domains.askida
+		// kolonu + dovecot password_query askı koşulu + webmail master pass=yes.
+		// Süpürmeden ÖNCE: posta adımı askıyı yazdığında dovecot onu uygulasın.
+		// Düşse de süpürme koşar (öteki adımlar; posta adımı hatayı raporlar).
+		if degisti, err := provisioner.PostaAskiAltyapisi(context.Background()); err != nil {
+			log.Printf("posta askısı altyapısı: %v", err)
+		} else if degisti {
+			log.Printf("posta askısı altyapısı kuruldu (dovecot password_query askı koşulu + webmail pass=yes)")
+		}
 		n, hatali, err := hesapaski.AskidakileriUygula(context.Background(), d)
 		if err != nil {
 			log.Printf("hesap askısı uzlaştırması: liste okunamadı: %v", err)
