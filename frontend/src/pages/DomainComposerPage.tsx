@@ -3,7 +3,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
@@ -51,7 +51,7 @@ export default function DomainComposerPage() {
   async function calistir(komut: string, pkt?: string) {
     setCalisan(komut); setHata(null); setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${cevir("Çalışıyor…")}`)
     try {
-      const { data } = await api.post(`${base}/composer`, { komut, paket: pkt || '' })
+      const { data } = await api.post(`${base}/composer`, { komut, paket: pkt || '' }, UZUN_ISTEK)
       setCikti(`$ composer ${komut}${pkt ? ' ' + pkt : ''}\n\n${data.cikti || cevir("(çıktı yok)")}\n\n${data.ok ? cevir('✓ Tamamlandı') : cevir('✗ Hata ile bitti')}`)
       yukle()
     } catch (e) {

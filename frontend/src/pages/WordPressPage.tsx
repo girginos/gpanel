@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { T } from '@/lib/tablo'
 import { useDialog } from '@/components/Dialog'
@@ -101,7 +101,7 @@ export default function WordPressPage() {
     try {
       const { data } = await api.post<Sonuc>(`/domains/${domainId}/wordpress`, {
         alt_dizin: altDizin.trim(), site_basligi: baslik.trim(), admin_kullanici: adminK.trim(), admin_email: adminE.trim(),
-      })
+      }, UZUN_ISTEK)
       setSonuc(data); setSonucParola(data.admin_parola ?? null); setBaslik(''); setAltDizin('')
       tumListele()
     } catch (err) {
@@ -114,7 +114,7 @@ export default function WordPressPage() {
   async function guncelle(t: TumKurulum) {
     const key = t.domain_id + t.dizin
     setMesgul(key); setHata(null)
-    try { await api.post(`/domains/${t.domain_id}/wordpress/guncelle`, { dizin: t.dizin }); tumListele() }
+    try { await api.post(`/domains/${t.domain_id}/wordpress/guncelle`, { dizin: t.dizin }, UZUN_ISTEK); tumListele() }
     catch (err) {
       const m = apiHata(err, cevir("Güncellenemedi"))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)
@@ -134,7 +134,7 @@ export default function WordPressPage() {
     setMesgul(key); setHata(null)
     try {
       const r = await api.delete<{ ok: boolean; db_uyari?: string }>(
-        `/domains/${t.domain_id}/wordpress`, { data: { dizin: t.dizin, db_sil: true } })
+        `/domains/${t.domain_id}/wordpress`, { ...UZUN_ISTEK, data: { dizin: t.dizin, db_sil: true } })
       // Dosyalar gitse de veritabanı kalmış olabilir — sessizce geçme.
       if (r?.data?.db_uyari) {
         await bilgi({ baslik: cevir("Dosyalar silindi, veritabanı KALDI"), mesaj: r.data.db_uyari, ton: 'uyari' })

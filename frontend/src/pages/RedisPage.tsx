@@ -4,7 +4,7 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -99,7 +99,7 @@ export default function RedisPage() {
     setHata(null); setBasari(null); setMesgul(true)
     try {
       // Ac/enable (ve yeniden-uret) yaniti parola + wp_snippet'i TEK SEFER doner.
-      const { data } = await api.post<Durum & Sir>(`/domains/${id}/redis`, {})
+      const { data } = await api.post<Durum & Sir>(`/domains/${id}/redis`, {}, UZUN_ISTEK)
       setD(data)
       // Tek-seferlik siri state'e koy: panelde hemen bir kez gosterilir; reveal cagrisi YOK.
       setSir({ parola: data.parola, wp_snippet: data.wp_snippet })
@@ -118,7 +118,7 @@ export default function RedisPage() {
     if (!(await onay({ baslik: cevir("Emin misiniz?"), mesaj: cevir("Redis cache kapatılsın mı? Bu domaine ait ACL kullanıcısı silinir."), ton: 'tehlike', onayIkonu: I.durdur }))) return
     setHata(null); setBasari(null); setMesgul(true)
     try {
-      await api.delete(`/domains/${id}/redis`)
+      await api.delete(`/domains/${id}/redis`, UZUN_ISTEK)
       yukle()
       setBasari(cevir("Redis cache kapatıldı."))
       toast.basari(cevir("Redis cache kapatıldı."))

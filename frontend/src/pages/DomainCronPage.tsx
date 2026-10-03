@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { Button, Badge } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -145,7 +145,7 @@ export default function DomainCronPage() {
   async function calistir(g: Gorev) {
     setCalisan(g.idx)
     try {
-      const { data } = await api.post(`/domains/${id}/cron/${g.idx}/calistir`)
+      const { data } = await api.post(`/domains/${id}/cron/${g.idx}/calistir`, undefined, UZUN_ISTEK)
       const baslik = data.ok ? cevir("Görev çalıştı") : cevir("Görev hata verdi")
       const cikti = (data.cikti || '').trim() || cevir("(çıktı yok)")
       const hataStr = data.hata ? '\n\n' + cevir("Hata:") + ' ' + data.hata : ''

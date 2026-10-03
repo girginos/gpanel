@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
@@ -211,7 +211,7 @@ function KurulumSihirbazi({ id, onKuruldu, onHata }:
     try {
       const r = await api.post<{ async: boolean }>(`/domains/${id}/laravel/kur`, {
         mode, repo_url: repoURL, branch, app_root: appRoot,
-      })
+      }, UZUN_ISTEK)
       if (r.data.async) setAsyncUnit(true)
       else onKuruldu()
     } catch (e) {
@@ -484,7 +484,7 @@ function useRunner(url: string, onHata: (m: string) => void) {
     setCalisan(true); setSonOk(null); onHata('')
     setCik(prev => `${prev}${prev ? '\n\n' : ''}$ ${etiket}\n(çalışıyor…)\n`)
     try {
-      const r = await api.post<{ ok: boolean; cikti: string }>(url, body)
+      const r = await api.post<{ ok: boolean; cikti: string }>(url, body, UZUN_ISTEK)
       setSonOk(r.data.ok)
       setCik(prev => prev.replace(/\(çalışıyor…\)\n$/, '') + (r.data.cikti || cevir("(çıktı yok)")) + `\n[${r.data.ok ? 'başarılı' : 'hata'}]\n`)
     } catch (e) {
@@ -635,7 +635,7 @@ function DeploySekmesi({ id, d, onHata }: { id: string; d: Durum; onHata: (m: st
   async function deploy() {
     onHata(''); setLog(''); setCalisiyor(true); setDurum('calisiyor')
     try {
-      await api.post(`/domains/${id}/laravel/deploy`, { migrate, npm_build: npmBuild, node_surum: nodeSurum })
+      await api.post(`/domains/${id}/laravel/deploy`, { migrate, npm_build: npmBuild, node_surum: nodeSurum }, UZUN_ISTEK)
       poll.current = setInterval(async () => {
         const r = await api.get<{ calisiyor: boolean; durum: string; log: string }>(`/domains/${id}/laravel/deploy/durum`)
         setLog(r.data.log || ''); setDurum(r.data.durum)
@@ -723,7 +723,7 @@ function KuyrukSekmesi({ id, d, onDegisti, onHata }:
     setIsleniyor(true); onHata('')
     try {
       const r = await api.post<{ saglikli?: boolean; uyari?: string }>(`/domains/${id}/laravel/queue`,
-        { aktif, timeout, max_jobs: maxJobs, connection: conn })
+        { aktif, timeout, max_jobs: maxJobs, connection: conn }, UZUN_ISTEK)
       if (aktif && r.data.saglikli === false && r.data.uyari) onHata(r.data.uyari)
       onDegisti(); setTimeout(durumYukle, 500)
     } catch (e) { onHata(apiHata(e)) }
@@ -936,7 +936,7 @@ function OtomatikAlgilaSerit({ id, onKuruldu, onHata }: { id: string | number; o
   async function hazirla() {
     setCalisiyor(true); onHata('')
     try {
-      const r = await api.post<{ adimlar: Array<{ adim: string; ok: boolean; not?: string }>; kurulu: boolean }>(`/domains/${id}/laravel/otomatik-hazirla`, {})
+      const r = await api.post<{ adimlar: Array<{ adim: string; ok: boolean; not?: string }>; kurulu: boolean }>(`/domains/${id}/laravel/otomatik-hazirla`, {}, UZUN_ISTEK)
       setAdimlar(r.data.adimlar || [])
       if (r.data.kurulu) setTimeout(onKuruldu, 800)
     } catch (e) { onHata(apiHata(e, cevir("Otomatik hazırlama başarısız"))) } finally { setCalisiyor(false) }

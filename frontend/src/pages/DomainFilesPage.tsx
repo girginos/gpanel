@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
+import { api, apiHata, fetchAskiKontrol, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import DizinAgac from '@/components/DizinAgac'
@@ -541,7 +541,7 @@ export default function DomainFilesPage() {
     try {
       const { data } = await api.post(`${base}/files/${url}`, {
         kaynaklar: kopyalaModal.yollar, hedef,
-      })
+      }, UZUN_ISTEK)
       const adet = kopyalaModal.yollar.length
       const fiil = kopyalaModal.tip === 'kopyala' ? cevir('kopyalandı') : cevir("taşındı")
       setKopyalaModal(null); setSeciliSet(new Set())

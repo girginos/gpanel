@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AramaliSecim from '@/components/AramaliSecim'
 import { Ikon, I } from '@/components/Ikon'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, sonucBelirsiz, UZUN_ISTEK } from '@/lib/api'
 import { varsayilanPlanSec } from '@/lib/bayiPlan'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
@@ -193,6 +193,13 @@ const DOMAINS_EN: Record<string, string> = {
   "İşlem başarısız": "Operation failed",
   "IP değiştir": "Change IP",
   "IP değiştirme": "IP change",
+  "Durum kontrol ediliyor…": "Checking status…",
+  "Sonuç belirsiz": "Result unknown",
+  "Kuruluyor… ({0} sn)": "Provisioning… ({0} s)",
+  "Linux kullanıcısı, web sunucusu, PHP havuzu, FTP ve DNS hazırlanıyor; genellikle 10–40 sn sürer. Sayfadan ayrılsanız da işlem sunucuda tamamlanır.": "Setting up the Linux user, web server, PHP pool, FTP and DNS; this usually takes 10–40 s. The server finishes the job even if you leave this page.",
+  "Sunucu yanıtı gecikti — alan adının oluşup oluşmadığı kontrol ediliyor…": "The server response is late — checking whether the domain was created…",
+  '"{0}" oluşturuldu (sunucu yanıtı gecikti). Bu yüzden oluşturma parolaları gösterilemedi — FTP parolasını hosting sayfasından yenileyebilirsiniz.': '"{0}" was created (the server response was late), so the generated passwords could not be shown — you can reset the FTP password on the hosting page.',
+  "Sunucudan yanıt alınamadı ve alan adı henüz listede görünmüyor. İşlem sunucuda sürüyor olabilir — tekrar oluşturmadan önce birkaç dakika sonra listeyi yenileyin.": "No response from the server and the domain is not in the list yet. It may still be in progress on the server — refresh the list in a few minutes before trying again.",
 }
 
 function useCevir() {
@@ -242,6 +249,9 @@ export default function DomainsPage() {
   const [modalVeriGeldi, setModalVeriGeldi] = useState(false)
   const [olusturAcik, setOlusturAcik] = useState(false)
   const [olusturuluyor, setOlusturuluyor] = useState(false)
+  // Oluşturma sürerken geçen süre (sn) ve yanıt gecikince "listede var mı" yoklaması.
+  const [olusturGecen, setOlusturGecen] = useState(0)
+  const [olusturDurumKontrol, setOlusturDurumKontrol] = useState(false)
   const [olusturmaSonuc, setOlusturmaSonuc] = useState<OlusturmaSonuc | null>(null)
   const [fAlanAdi, setFAlanAdi] = useState('')
   const [fPHPSurum, setFPHPSurum] = useState('8.3')
@@ -342,6 +352,32 @@ export default function DomainsPage() {
     modalVeriYukle() // lazy: plan/php sürümleri henüz gelmediyse şimdi çek (listeyi bloklamaz)
   }
 
+  useEffect(() => {
+    if (!olusturuluyor) return
+    setOlusturGecen(0)
+    const t = setInterval(() => setOlusturGecen(g => g + 1), 1000)
+    return () => clearInterval(t)
+  }, [olusturuluyor])
+
+  // Yanıt alınamadıysa (zaman aşımı / ağ / 502-504) sunucu işi istemciden KOPUK
+  // sürdürür: "başarısız" demek yerine alan adının listede belirip belirmediğini
+  // yokla (en çok ~2 dk). true → oluşturuldu.
+  async function olusturmaDurumuBekle(alanAdi: string): Promise<boolean> {
+    setOlusturDurumKontrol(true)
+    try {
+      for (let i = 0; i < 24; i++) {
+        try {
+          const r = await api.get<Domain[]>('/domains')
+          if (r.data.some(d => d.alan_adi === alanAdi)) return true
+        } catch { /* geçici hata: yoklamayı sürdür */ }
+        await new Promise(res => setTimeout(res, 5000))
+      }
+      return false
+    } finally {
+      setOlusturDurumKontrol(false)
+    }
+  }
+
   async function olusturGonder(e: React.FormEvent) {
     e.preventDefault()
     setHata(null)
@@ -356,7 +392,9 @@ export default function DomainsPage() {
       const body: any = { alan_adi: alanAdi, php_surum: fPHPSurum }
       if (fPlanID !== '') body.plan_id = fPlanID
       if (fSqlOlustur) body.sql_olustur = true
-      const r = await api.post<OlusturmaSonuc>('/domains', body)
+      // Sağlama 10-40 sn sürer (SELinux, php-fpm/nginx doğrulama); sunucu istemciden
+      // kopuk tamamlar → genel 30 sn sınırına takılmasın.
+      const r = await api.post<OlusturmaSonuc>('/domains', body, UZUN_ISTEK)
       setOlusturAcik(false)
       setOlusturmaSonuc(r.data)
       // Metin davranisla ortusmeli: DB yalniz kutu isaretliyse olusturulur.
@@ -368,6 +406,21 @@ export default function DomainsPage() {
       setTimeout(() => setBasari(null), 8000)
       yukle()
     } catch (e: any) {
+      if (sonucBelirsiz(e)) {
+        if (await olusturmaDurumuBekle(alanAdi)) {
+          setOlusturAcik(false)
+          const m = cevirT(cevir('"{0}" oluşturuldu (sunucu yanıtı gecikti). Bu yüzden oluşturma parolaları gösterilemedi — FTP parolasını hosting sayfasından yenileyebilirsiniz.'), alanAdi)
+          setBasari(m)
+          toast.basari(cevir("Oluşturuldu"), m)
+          yukle()
+        } else {
+          const m = cevir("Sunucudan yanıt alınamadı ve alan adı henüz listede görünmüyor. İşlem sunucuda sürüyor olabilir — tekrar oluşturmadan önce birkaç dakika sonra listeyi yenileyin.")
+          setHata(m)
+          toast.uyari(cevir("Sonuç belirsiz"), m)
+          yukle()
+        }
+        return
+      }
       const m = apiHata(e, cevir("Domain oluşturulamadı"))
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
@@ -449,7 +502,7 @@ export default function DomainsPage() {
     const isci = async () => {
       while (idx < gorevler.length) {
         const g = gorevler[idx++]
-        try { await api.delete(g.url); basarili++ } catch { basarisizlar.push(g.etiket) }
+        try { await api.delete(g.url, UZUN_ISTEK); basarili++ } catch { basarisizlar.push(g.etiket) }
       }
     }
     await Promise.all(Array.from({ length: Math.min(ESZAMAN, gorevler.length) }, isci))
@@ -729,10 +782,17 @@ export default function DomainsPage() {
         alt={<>
           <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setOlusturAcik(false)} disabled={olusturuluyor}>{cevir("İptal")}</Button>
           <Button type="submit" form="gosp-domain-olustur" color="primary" ikon={I.arti} yukleniyor={olusturuluyor} disabled={!fAlanAdi.trim()}>
-            {olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
+            {olusturDurumKontrol ? cevir('Durum kontrol ediliyor…') : olusturuluyor ? cevir('Oluşturuluyor…') : cevir("Oluştur")}
           </Button>
         </>}>
           <form id="gosp-domain-olustur" onSubmit={olusturGonder}>
+            {olusturuluyor && (
+              <UyariKutusu ton="bilgi" className="mb-4" kucuk>
+                {olusturDurumKontrol
+                  ? cevir("Sunucu yanıtı gecikti — alan adının oluşup oluşmadığı kontrol ediliyor…")
+                  : <>{cevirT(cevir("Kuruluyor… ({0} sn)"), String(olusturGecen))} {cevir("Linux kullanıcısı, web sunucusu, PHP havuzu, FTP ve DNS hazırlanıyor; genellikle 10–40 sn sürer. Sayfadan ayrılsanız da işlem sunucuda tamamlanır.")}</>}
+              </UyariKutusu>
+            )}
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
               {cevir(cevir("Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik kurulur."))}
             </p>

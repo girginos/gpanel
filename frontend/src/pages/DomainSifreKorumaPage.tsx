@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
-import { api, apiHata } from '@/lib/api'
+import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
@@ -71,7 +71,7 @@ export default function DomainSifreKorumaPage() {
     e.preventDefault()
     setHata(null); setOk(null); setKaydediyor(true)
     try {
-      await api.post(`${base}/koruma`, { yol, kullanici, parola })
+      await api.post(`${base}/koruma`, { yol, kullanici, parola }, UZUN_ISTEK)
       const iyi = `${yol} ${cevir("dizini")} "${kullanici}" ${cevir("ile korumaya alındı.")}`
       setOk(iyi)
       toast.basari(cevir("Kaydedildi"), iyi)
