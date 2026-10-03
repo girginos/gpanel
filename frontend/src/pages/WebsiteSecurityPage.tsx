@@ -268,7 +268,7 @@ export default function WebsiteSecurityPage() {
   }
 
   return (
-    <div className="w-full px-4 py-6 md:px-6 md:py-8">
+    <div>
       <Breadcrumb items={[{ etiket: 'Website Security Monitor' }]} />
 
       <div className="mt-4 mb-6 flex flex-wrap items-start justify-between gap-3">

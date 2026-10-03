@@ -125,7 +125,7 @@ export default function ServicePlansPage() {
   }
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Hizmet Planları") }]} />
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">{cevir("Hizmet Planları")}</h1>
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">

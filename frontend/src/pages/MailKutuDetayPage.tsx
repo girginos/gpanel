@@ -528,7 +528,7 @@ export default function MailKutuDetayPage() {
 
   const bcDom = domain?.alan_adi || '…'
   if (kutu === undefined) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
+    <div>
       <Breadcrumb items={[{ etiket: 'Anasayfa', href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
     </div>
@@ -601,7 +601,7 @@ export default function MailKutuDetayPage() {
   ]
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 max-w-7xl mx-auto">
+    <div>
       <Breadcrumb items={[
         { etiket: 'Anasayfa', href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

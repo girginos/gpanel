@@ -3,6 +3,7 @@ package provisioner
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -17,6 +18,7 @@ import (
 	"text/template"
 
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kiraci"
 	"girginospanel/internal/sshaccess"
 )
 
@@ -1893,7 +1895,13 @@ func nginxOkuyabilir(ph string) bool {
 	if _, err := os.Stat(hedef); err != nil {
 		hedef = ph
 	}
-	return exec.Command("runuser", "-u", "nginx", "--", "/usr/bin/test", "-r", hedef).Run() == nil
+	// kiraci.Komut: panel ortamı (sırlar) nginx kimliğindeki çocuğa geçmez; nginx
+	// kullanıcısı yoksa / uid 0'a çözülürse hata → false (grup modeli).
+	cmd, err := kiraci.Kiraci{Kul: "nginx", Ev: "/"}.Komut(context.Background(), "/usr/bin/test", "-r", hedef)
+	if err != nil {
+		return false
+	}
+	return cmd.Run() == nil
 }
 
 // hardenHomePermsRecursive: MEVCUT public_html içeriğini per-user ACL modeline dönüştürür

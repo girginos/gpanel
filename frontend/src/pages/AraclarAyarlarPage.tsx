@@ -236,7 +236,7 @@ export default function AraclarAyarlarPage() {
   const toplam = GRUPLAR.reduce((n, g) => n + g.araclar.length, 0)
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Araçlar ve Ayarlar") }]} />
 
       {/* Başlık + arama */}

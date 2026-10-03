@@ -177,21 +177,21 @@ export default function SubscriptionDetailPage() {
   }
 
   if (hata && !domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: cevir("Hata") }]} />
       <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
     </div>
   )
 
   if (!domain) return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }]} />
       <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
     </div>
   )
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Domainler"), href: '/domainler' },

@@ -109,7 +109,7 @@ export default function OturumAyarPage() {
   const degistiMi = mevcut !== null && String(mevcut) !== taslak.trim()
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-6 md:px-6 md:py-8">
+    <div>
       <Breadcrumb items={[
         { href: '/araclar-ayarlar', etiket: cevir("Araçlar ve Ayarlar") },
         { etiket: cevir("Oturum Güvenliği") },
@@ -132,7 +132,7 @@ export default function OturumAyarPage() {
           <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             {cevir("Boşta süresi (dakika)")}
           </label>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <input
               type="number"
               min={0}

@@ -143,9 +143,9 @@ func kiraciCalistirGercek(sk, cwd string, stdin []byte, argv ...string) (string,
 		if cwd != "" {
 			cmd.Dir = cwd
 		}
-		if env != nil {
-			cmd.Env = env
-		}
+		// Ortam DAİMA açık (boşsa bile boş dilim): Env nil olsaydı exec.Cmd panelin süreç
+		// ortamını miras alırdı.
+		cmd.Env = append([]string{}, env...)
 		if stdin != nil {
 			cmd.Stdin = bytes.NewReader(stdin)
 		}
@@ -154,12 +154,18 @@ func kiraciCalistirGercek(sk, cwd string, stdin []byte, argv ...string) (string,
 		err := cmd.Run()
 		return so.String(), se.String(), err
 	}
-	o, e, err := calistir("sudo", append([]string{"-u", sk, "-H", "--"}, argv...), nil)
+	// 🔴 Panel ortamı (PANEL_JWT_SECRET, PANEL_DB_DSN, ...) sudo'ya da VERİLMEZ: sudo'nun
+	// env_reset'i sudoers'a bağlıdır (env_keep / !env_reset sırrı kiracı komutuna
+	// geçirirdi). İki yol da yalnız bu asgari ortamla koşar.
+	// TODO(kiraci): sudo→runuser ikilisi kiraci.Komut'a taşınacak (testler sudo'yu kilitliyor).
+	temizOrtam := []string{
+		"HOME=" + evDizini(sk),
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"LANG=C",
+	}
+	o, e, err := calistir("sudo", append([]string{"-u", sk, "-H", "--"}, argv...), temizOrtam)
 	if err != nil {
-		o, e, err = calistir("runuser", append([]string{"-u", sk, "--"}, argv...), []string{
-			"HOME=" + evDizini(sk),
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		})
+		o, e, err = calistir("runuser", append([]string{"-u", sk, "--"}, argv...), temizOrtam)
 	}
 	return o, e, err
 }

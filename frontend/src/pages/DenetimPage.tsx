@@ -181,7 +181,7 @@ export default function DenetimPage() {
   const sonSayfa = Math.max(0, Math.ceil(toplam / limit) - 1)
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5 space-y-5">
+    <div className="space-y-5">
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir("Denetim Kaydı") }]} />
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Denetim Kaydı")}</h1>

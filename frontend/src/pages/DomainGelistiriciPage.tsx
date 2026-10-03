@@ -25,7 +25,7 @@ export default function DomainGelistiriciPage() {
   const d = domain.veri
   if (!d) {
     return (
-      <div className="px-4 py-4 sm:px-6 sm:py-5">
+      <div>
         {domain.hata ? (
           <UyariKutusu ton="tehlike">{domain.hata}</UyariKutusu>
         ) : (

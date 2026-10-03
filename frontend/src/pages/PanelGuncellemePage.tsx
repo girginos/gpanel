@@ -25,25 +25,24 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (PGUNC_EN[tr] ||
 export default function PanelGuncellemePage() {
   useTranslation() // dil re-render aboneligi
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },
         { etiket: cevir("Panel Güncellemesi") },
       ]} />
 
-      <div className="mb-5 max-w-3xl">
+      <div className="mb-5">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Panel Güncellemesi")}</h1>
-        <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+        {/* Yalnız açıklama metni okunur satır boyunda daralır; başlık ve kart kabuk genişliğindedir. */}
+        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
           {cevir("Paneli GitHub'daki son sürüme günceller. Ortam değişkenleri, veritabanı ve siteler korunur;")}
           {' '}{cevir("yeni sürüm sağlıklı başlamazsa otomatik geri alınır. İşlem arka planda çalışır —")}
           {cevir(cevir("bu sayfayı kapatabilirsiniz, güncelleme kesintisiz devam eder."))}
         </p>
       </div>
 
-      <div className="max-w-3xl">
-        <PanelGuncelleme />
-      </div>
+      <PanelGuncelleme />
     </div>
   )
 }

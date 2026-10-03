@@ -29,10 +29,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
@@ -145,25 +145,25 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// kiraciKomut: argv'yi KİRACI kimliğinde (runuser -u sk; shell yok, panel env'i
-// yok) çalıştıracak komutu hazırlar — cron.go/archivex runuserKomut deseni.
+// kiraciKomut: argv'yi KİRACI kimliğinde (kiraci.Komut: runuser -u sk; shell yok,
+// panel env'i/sırları yok, cwd "/") çalıştıracak komutu hazırlar.
 // Kopyalanan ağaç kiracınındır; kök yerine kiracı olarak koşmak tüm symlink
 // hilelerini yapısal olarak kapatır (çözülen bağ /etc/shadow'u ya da komşu evi
 // gösterse bile EACCES) ve dosyalar doğrudan kiracıya ait oluşur (chown yok,
 // disk kotası kiracıya işler).
-func kiraciKomut(ctx context.Context, sk string, argv ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "runuser", append([]string{"-u", osKullanici(sk), "--"}, argv...)...)
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=" + evDizini(sk),
-		"LANG=C",
+// Zaman aşımında önce SIGTERM (runuser çocuğa iletir), takılırsa WaitDelay
+// sonunda Go süreci öldürür (kiraci.Komut sözleşmesi).
+func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: osKullanici(sk), Ev: evDizini(sk)}.Komut(ctx, argv...)
+}
+
+// kiraciCalistir: kiraciKomut + Run.
+func kiraciCalistir(ctx context.Context, sk string, argv ...string) error {
+	cmd, err := kiraciKomut(ctx, sk, argv...)
+	if err != nil {
+		return err
 	}
-	cmd.Dir = "/"
-	// runuser SIGTERM'i çocuğa iletir (SIGKILL'i iletemez) → zaman aşımında önce
-	// TERM; çocuk takılırsa WaitDelay sonunda Go süreci öldürür.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = 15 * time.Second
-	return cmd
+	return cmd.Run()
 }
 
 // kiraciBoyutBayt: `du -sb` KİRACI kimliğinde (kök olarak bağ izleyip başka
@@ -171,7 +171,11 @@ func kiraciKomut(ctx context.Context, sk string, argv ...string) *exec.Cmd {
 // de toplamı yazar → stdout'taki sayı kullanılır (0'a düşüp 3 GB kapağını
 // atlatmasın).
 func kiraciBoyutBayt(ctx context.Context, sk, p string) int64 {
-	out, _ := kiraciKomut(ctx, sk, "du", "-sb", "--", p).Output()
+	cmd, err := kiraciKomut(ctx, sk, "du", "-sb", "--", p)
+	if err != nil {
+		return 0
+	}
+	out, _ := cmd.Output()
 	f := strings.Fields(string(out))
 	if len(f) == 0 {
 		return 0
@@ -240,29 +244,34 @@ func kopyaOlustur(ctx context.Context, sk string, simdi time.Time) (string, erro
 	// Varlık ve boyut kiracı gözünden: public_html kiracının erişebildiği bir
 	// yere bağlıysa o içerik (rsync'in göreceği) ölçülür; erişemediği hedef
 	// "bulunamadı"/rsync EACCES olur.
-	if err := kiraciKomut(ctx, sk, "test", "-d", kaynak+"/").Run(); err != nil {
+	if err := kiraciCalistir(ctx, sk, "test", "-d", kaynak+"/"); err != nil {
 		return "", &islemHatasi{http.StatusBadRequest, "public_html bulunamadı"}
 	}
 	if b := kiraciBoyutBayt(ctx, sk, kaynak+"/"); b > maxKopyaBayt {
 		return "", &islemHatasi{http.StatusRequestEntityTooLarge, "site 3 GB'den büyük — lütfen Yedekler aracını kullanın"}
 	}
 	kopyaDir := home + "/kopyalar"
-	if err := kiraciKomut(ctx, sk, "mkdir", "-p", "-m", "0711", "--", kopyaDir).Run(); err != nil {
+	if err := kiraciCalistir(ctx, sk, "mkdir", "-p", "-m", "0711", "--", kopyaDir); err != nil {
 		return "", &islemHatasi{http.StatusInternalServerError, "kopya dizini oluşturulamadı"}
 	}
 	ad := "kopya_" + simdi.Format("20060102_150405")
 	hedef := kopyaDir + "/" + ad + "/public_html"
-	if err := kiraciKomut(ctx, sk, "mkdir", "-p", "--", hedef).Run(); err != nil {
+	if err := kiraciCalistir(ctx, sk, "mkdir", "-p", "--", hedef); err != nil {
 		return "", &islemHatasi{http.StatusInternalServerError, "hedef oluşturulamadı"}
 	}
 	// rsync (trailing slash: içeriği kopyala). --delete YOK (yıkıcı değil).
 	// Kiracı olarak koştuğu için ağaç içi bağlar olduğu gibi (bağ olarak) taşınır;
 	// kök bağı çözülse bile yalnız kiracının okuyabildiği içerik gelir.
-	if out, err := kiraciKomut(ctx, sk, "rsync", "-a", "--no-owner", "--no-group", kaynak+"/", hedef+"/").CombinedOutput(); err != nil {
+	rsync, err := kiraciKomut(ctx, sk, "rsync", "-a", "--no-owner", "--no-group", kaynak+"/", hedef+"/")
+	var out []byte
+	if err == nil {
+		out, err = rsync.CombinedOutput()
+	}
+	if err != nil {
 		_ = kopyaKaldir(sk, ad)
 		return "", &islemHatasi{http.StatusInternalServerError, "kopyalama başarısız: " + strings.TrimSpace(string(out))}
 	}
-	_ = kiraciKomut(ctx, sk, "restorecon", "-R", kopyaDir+"/"+ad).Run()
+	_ = kiraciCalistir(ctx, sk, "restorecon", "-R", kopyaDir+"/"+ad)
 	return ad, nil
 }
 

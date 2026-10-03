@@ -144,7 +144,7 @@ export default function RedisPage() {
     : (snippetGoster || !sir.parola ? sir.wp_snippet : sir.wp_snippet.split(sir.parola).join('••••••••'))
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Domainler"), href: '/domainler' }, { etiket: 'Redis Cache' }]} />
       <div className="flex items-center gap-3 mb-1">
         <Ikon d={I.simsek} className="size-6 shrink-0 text-amber-500" />

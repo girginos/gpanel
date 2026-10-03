@@ -139,7 +139,7 @@ export default function SunucuOptimizePage() {
   const toplamOneri = rapor?.servisler.reduce((n, s) => n + (s.oneriler?.length || 0), 0) || 0
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir("Anasayfa"), href: '/' },
         { etiket: cevir("Araçlar ve Ayarlar"), href: '/araclar-ayarlar' },

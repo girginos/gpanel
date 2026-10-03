@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kiraci"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -269,22 +270,8 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 	}
 
 	// Çıkarma — runuser -u <sk> (root DEĞİL — security)
-	var cikarCmd *exec.Cmd
-	switch a.Tarif.IcerikTuru {
-	case "tarball_gz":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"tar", "-xzf", tmpYol, "-C", hedef, "--strip-components=1")
-	case "tarball_bz2":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"tar", "-xjf", tmpYol, "-C", hedef, "--strip-components=1")
-	case "zip":
-		cikarCmd = exec.CommandContext(ctx, "runuser", "-u", a.Domain.SK, "--",
-			"unzip", "-q", tmpYol, "-d", hedef)
-	default:
-		return nil, fmt.Errorf("icerik_turu: %s", a.Tarif.IcerikTuru)
-	}
-	if out, err := cikarCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("çıkarma: %s (%w)", strings.TrimSpace(string(out)), err)
+	if err := kiraciCikar(ctx, a.Domain.SK, a.Tarif.IcerikTuru, tmpYol, hedef); err != nil {
+		return nil, err
 	}
 
 	// 🔴 ZIP KOK DIZINI: tar icin `--strip-components=1` var ama `unzip`'in
@@ -606,10 +593,44 @@ func guvenliHedef(docRoot, hedef string) error {
 // bir yolda ayricalikli is yapmasi symlink yarisina acik oldugu icin
 // mkdir/mv/rm gibi islemler bu sarmalayicidan gecer.
 func tenantKomut(ctx context.Context, sk string, args ...string) error {
-	tam := append([]string{"-u", sk, "--"}, args...)
-	out, err := exec.CommandContext(ctx, "runuser", tam...).CombinedOutput()
+	cmd, err := kiraciKomut(ctx, sk, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", args[0], err)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %s", args[0], strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// kiraciCikar: indirilen dağıtım arşivini (arsiv) hedef'e KİRACI kimliğinde
+// çıkarır. kiraciKomut (kiraci.Komut): panel ortamı (sırlar) çıkarıcıya geçmez;
+// cmd.Env burada genişletilmez. Kilit: sir_cocuk_test.go.
+func kiraciCikar(ctx context.Context, sk, icerikTuru, arsiv, hedef string) error {
+	var cikarArgv []string
+	switch icerikTuru {
+	case "tarball_gz":
+		cikarArgv = []string{"tar", "-xzf", arsiv, "-C", hedef, "--strip-components=1"}
+	case "tarball_bz2":
+		cikarArgv = []string{"tar", "-xjf", arsiv, "-C", hedef, "--strip-components=1"}
+	case "zip":
+		cikarArgv = []string{"unzip", "-q", arsiv, "-d", hedef}
+	default:
+		return fmt.Errorf("icerik_turu: %s", icerikTuru)
+	}
+	cikarCmd, err := kiraciKomut(ctx, sk, cikarArgv...)
+	if err != nil {
+		return fmt.Errorf("çıkarma: %w", err)
+	}
+	if out, err := cikarCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("çıkarma: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// kiraciKomut: argv'yi kiracı (sk) kimliğinde, kabuksuz ve panel ortamı OLMADAN
+// (kiraci.Komut: yalnız PATH/HOME/LANG) çalıştıracak komutu hazırlar.
+func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
 }

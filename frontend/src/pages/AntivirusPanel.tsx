@@ -427,7 +427,7 @@ export default function AntivirusPanel() {
     catch (e) { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
   }
 
-  if (yuk) return <div className="px-4 py-4 sm:px-6 sm:py-5 text-slate-400">{cevir("Yükleniyor…")}</div>
+  if (yuk) return <div className="text-slate-400">{cevir("Yükleniyor…")}</div>
 
   // Koruma duruşu skoru (0-100): açık katman/koruma oranı.
   const korumaAktif = !!(d?.izleyici_aktif && ayar?.gercek_zamanli)
@@ -456,8 +456,7 @@ export default function AntivirusPanel() {
   ]
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
-      <div className="max-w-7xl mx-auto">
+    <div>
         <style>{ANIM_CSS}</style>
         <Breadcrumb items={[{ etiket: cevir("Anasayfa"), href: '/' }, { etiket: cevir("Antivirüs") }]} />
         <UyariKutusu ton="uyari" className="mb-4">
@@ -830,7 +829,6 @@ export default function AntivirusPanel() {
             </div>
           )}
         </Modal>
-      </div>
     </div>
   )
 }

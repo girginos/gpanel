@@ -177,7 +177,7 @@ export default function ResellerlarPage() {
   const lbl = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1'
 
   return (
-    <div className="px-4 py-4 sm:px-6 sm:py-5">
+    <div>
       <Breadcrumb items={[{ etiket: cevir('Anasayfa'), href: '/' }, { etiket: cevir('Bayiler') }]} />
       <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{cevir("Bayiler (Reseller)")}</h1>

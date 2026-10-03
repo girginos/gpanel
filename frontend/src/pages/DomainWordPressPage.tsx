@@ -156,7 +156,7 @@ export default function DomainWordPressPage() {
   const bosDurum = !yuk && liste.length === 0
 
   return (
-    <div className="px-6 py-6 max-w-5xl">
+    <div>
       <Breadcrumb items={[
         { etiket: cevir('Anasayfa'), href: '/' },
         { etiket: alanAdi || cevir('Abonelik'), href: `/abonelikler/${id}` },
