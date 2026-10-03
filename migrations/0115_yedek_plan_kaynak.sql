@@ -1,0 +1,15 @@
+-- 0115_yedek_plan_kaynak.sql
+-- Müşteri yedeği YALNIZ MANUEL (kullanıcı kararı 2026-10-03). Otomatik yedek planı
+-- (domains.backup_freq/hour/retention) bundan sonra YALNIZ gerçek yönetici
+-- tarafından değiştirilir, zamanlayıcı yalnız kök kaynaklı planları koşar.
+--
+-- backup_plan_kaynak
+--   eski   bu göçten ÖNCE yazılmış plan: kimin yazdığı bilinmez (müşteri, bayi ya da
+--          yönetici aynı uçtan yazıyordu). Zamanlayıcı şimdilik KOŞAR
+--          (zamanlayiciPlanKaynaklari) — kapatmak kullanıcı kararıdır.
+--   kok    yönetici yazdı (PUT backup-schedule, gerçek yönetici token'ı)
+--   pasif  plan değerleri KORUNUR ama zamanlayıcı koşmaz (veri silmeden pasifleştirme)
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS. Satır içi yorum YOK (koşucu yalnız baştaki
+-- iki tireyi atar ve metni noktalı virgülden böler).
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS backup_plan_kaynak VARCHAR(8) NOT NULL DEFAULT 'eski';

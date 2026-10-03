@@ -1308,6 +1308,9 @@ func semaDogrula(d *sql.DB) {
 		// 0114: müşteri adına yapılan işlemin hostingi — yoksa denetim listesi 500
 		// verir (yazım tarafı eski biçime düşerek kaydı korur).
 		{"audit_log", "adina_domain_id"},
+		// 0115: otomatik yedek planının kaynağı — yoksa zamanlayıcı kaynak süzgecini
+		// atlar (eski davranış) ve yönetici planı 'kok' olarak işaretlenemez.
+		{"domains", "backup_plan_kaynak"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

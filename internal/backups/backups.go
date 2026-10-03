@@ -44,10 +44,12 @@ func RemoveDomainBackups(sk string) error {
 type Yedek struct {
 	// Mevcut — "yerel" | "uzak" | "yok". Dosyasi hicbir yerde bulunmayan
 	// kayitlar arayuzde gecerli yedek gibi gorunmemeli.
-	Mevcut    string `json:"mevcut"`
-	ID        int64  `json:"id"`
-	DomainID  int64  `json:"domain_id"`
-	Tip       string `json:"tip"`
+	Mevcut   string `json:"mevcut"`
+	ID       int64  `json:"id"`
+	DomainID int64  `json:"domain_id"`
+	Tip      string `json:"tip"`
+	// Kaynak — "sistem" (kök: zamanlayıcı / toplu iş) | "manuel" (Şimdi Yedekle).
+	Kaynak    string `json:"kaynak"`
 	Dosya     string `json:"dosya"`
 	BoyutB    int64  `json:"boyut_b"`
 	Notlar    string `json:"notlar"`
@@ -71,7 +73,7 @@ func (h *Handlers) lookupDomain(r *http.Request) (id int64, alanAdi, sk string, 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT id, domain_id, tip, dosya, boyut_b, notlar, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i')
+		`SELECT id, domain_id, tip, dosya, boyut_b, notlar, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i'), job_id
 		 FROM backups WHERE domain_id=? ORDER BY id DESC`, id)
 	if err != nil {
 		// 🔴 ham err.Error() musteri yanitina degil loga — DB ic detaylari sizmasin.
@@ -96,9 +98,11 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	out := make([]Yedek, 0)
 	for rows.Next() {
 		var y Yedek
-		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma); err != nil {
+		var jobID sql.NullInt64
+		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma, &jobID); err != nil {
 			continue
 		}
+		y.Kaynak = yedekKaynagi(y.Tip, jobID)
 		switch {
 		case sk != "" && dosyaVar(filepath.Join(BackupRoot, sk, y.Dosya)):
 			y.Mevcut = "yerel"
@@ -211,9 +215,26 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 HESAP BAŞINA BEKLEME: manuel yedek ağır IO (çok inode'lu hesapta tar
+	// saatlerce diski meşgul eder). Son başarılı manuel yedekten sonra
+	// ManuelBeklemeSuresi dolmadan yenisi alınmaz. Gerçek yönetici muaf.
+	if !beklemedenMuaf(rolCoz(r)) {
+		if kalan := manuelBeklemeKalan(r.Context(), h.DB, id); kalan > 0 {
+			httpx.WriteError(w, http.StatusTooManyRequests, fmt.Sprintf(
+				"Bu hesap için son manuel yedeğin üzerinden henüz %s geçmedi. Yeni manuel yedeği %s sonra alabilirsiniz; sistem yedekleri aşağıda listelenir.",
+				sureMetni(ManuelBeklemeSuresi), sureMetni(kalan)))
+			return
+		}
+	}
+
 	// DoS: kiraci sinirsiz-paralel backup tetikleyebiliyordu (mysqldump+gzip, CPU/IO agir).
-	// Domain basina TEK backup ayni anda; ikincisi 429. Uzun tar/dump timeout ile OLDURULUR.
-	if !yedekBasla(id) {
+	// Domain basina TEK backup ayni anda; ikincisi 429. Kökün otomatik/toplu yedeği bu
+	// hesapta çalışıyorsa 409 (çakışma yok: aynı hesabı iki yedek aynı anda okumaz).
+	if sahip, ok := yedekBaslaTur(id, "manuel"); !ok {
+		if sahip == "sistem" {
+			httpx.WriteError(w, http.StatusConflict, "Bu hesabın sistem yedeği şu anda alınıyor. Bittiğinde yeni yedek listede görünecek; ek yedek gerekiyorsa sonra tekrar deneyin.")
+			return
+		}
 		httpx.WriteError(w, http.StatusTooManyRequests, "bu domain için zaten bir yedekleme sürüyor, lütfen bekleyin")
 		return
 	}
@@ -221,32 +242,59 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// hemen dondugu icin burada birakmak kilidi is bitmeden acar ve ikinci bir
 	// yedek ayni anda baslayabilirdi.
 
-	stamp := time.Now().UTC().Format("20060102-150405")
-	dir := filepath.Join(BackupRoot, sk)
-	_ = os.MkdirAll(dir, 0700)
-	dosya := fmt.Sprintf("%s-%s.tar.gz", sk, stamp)
-	abs := filepath.Join(dir, dosya)
+	// 🔴 SUNUCU GENELİ KUYRUK: aynı anda en çok ManuelEszamanliSinir manuel yedek
+	// koşar; fazlası FIFO sırada bekler. Liste doluysa 503 (bellek/bekleme sınırı).
+	if !manuelKuyrugu.Ekle(id) {
+		yedekBitir(id)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "Yedek kuyruğu şu anda dolu. Lütfen birkaç dakika sonra tekrar deneyin.")
+		return
+	}
+	sira := manuelKuyrugu.Sira(id)
 
 	// 🔴 ASENKRON: 5 GB'lik bir tenant'ta yedek dakikalarca surer. Istek boyunca
 	// beklemek istemciyi kopariyor ve kullaniciya "sunucu yanit vermiyor" gibi
 	// alakasiz hatalar donduruyordu. Artik istek hemen doner; ilerleme
 	// GET /domains/{id}/backups/ilerleme ucundan izlenir.
-	IlerlemeBaslat(id, "yedek", "hazırlanıyor", oncekiYedekBoyutu(h.DB, id))
-	go h.yedekGorevi(id, alanAdi, sk, dir, dosya, abs)
+	IlerlemeBaslat(id, "yedek", "sırada", oncekiYedekBoyutu(h.DB, id))
+	go h.yedekGorevi(id, alanAdi, sk)
+	mesaj := "Yedekleme başladı — ilerlemeyi bu sayfadan izleyebilirsiniz."
+	if sira > ManuelEszamanliSinir || manuelKuyrugu.Calisan() >= ManuelEszamanliSinir {
+		mesaj = "Yedekleme sıraya alındı — sırası gelince düşük öncelikle başlayacak."
+	}
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"ok":      true,
 		"basladi": true,
-		"dosya":   dosya,
-		"mesaj":   "Yedekleme başladı — ilerlemeyi bu sayfadan izleyebilirsiniz.",
+		"sira":    sira,
+		"mesaj":   mesaj,
 	})
 }
 
 // yedekGorevi: Create'in arka plan govdesi. Kendi context'i vardir (istek
 // context'i cevapla birlikte iptal olur).
-func (h *Handlers) yedekGorevi(id int64, alanAdi, sk, dir, dosya, abs string) {
+//
+// Sıra: önce sunucu geneli kuyrukta slot beklenir (en çok 6 saat), sonra yedek
+// DÜŞÜK ÖNCELİKLE (ionice idle + nice 19) alınır; domain uzak hedefine gönderim
+// de aynı slot ve öncelikle yapılır (arka plana atılıp sınırı delmez).
+func (h *Handlers) yedekGorevi(id int64, alanAdi, sk string) {
 	defer yedekBitir(id)
+	bekleCtx, bekleIptal := context.WithTimeout(context.Background(), 6*time.Hour)
+	err := manuelKuyrugu.Bekle(bekleCtx, id)
+	bekleIptal()
+	if err != nil {
+		IlerlemeBitir(id, "", fmt.Errorf("yedek sırası zaman aşımına uğradı, lütfen tekrar deneyin"))
+		return
+	}
+	defer manuelKuyrugu.Birak()
+	IlerlemeAsama(id, "hazırlanıyor", 0)
+
 	ctx, iptal := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer iptal()
+	ctx = dusukOncelikli(ctx)
+
+	dir := filepath.Join(BackupRoot, sk)
+	_ = os.MkdirAll(dir, 0700)
+	dosya := yedekDosyaAdi(dir, sk, time.Now().UTC())
+	abs := filepath.Join(dir, dosya)
 
 	// TÜM domain DB'lerini (ana + wp_* vb.) + home'u tek arşive paketle.
 	boyut, sha, eksikDB, aerr := arsivOlustur(ctx, h.DB, id, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
@@ -275,15 +323,20 @@ func (h *Handlers) yedekGorevi(id int64, alanAdi, sk, dir, dosya, abs string) {
 			id, "backup", 0)
 	}
 	pruneManuelYedek(h.DB, id, sk) // manuel yedeklerde de adet siniri (kok disk birikimi DoS)
-	// Uzak hedef varsa arkaplanda yükle (API cevabını bloke etme)
-	pushToDestinationAsync(h.DB, id, abs, dosya)
-	// Tek-domain manuel yedek de sistem geneli uzak hedefe gitsin (toplu is +
-	// zamanlayici ile ayni davranis).
-	if genel := genelAyarOku(context.Background(), h.DB); genel.UzakAktif {
+	// Domain uzak hedefi ("Manuel yedeklerim bu hedefe de gönderilsin"): kuyruk
+	// slotu ve düşük öncelik içinde, EŞZAMANLI (arka plana atılsaydı slot
+	// bırakıldıktan sonra yüklemeler üst üste binip sınırı delerdi).
+	if d, derr := readDestination(ctx, h.DB, id); derr == nil && d != nil && d.Aktif {
 		IlerlemeAsama(id, "uzak hedefe yükleniyor", 0)
-		pushGenelAsync(h.DB, genel, abs, dosya, yid)
+		pushToDestination(ctx, h.DB, id, abs, dosya)
 	}
-	IlerlemeBitir(id, fmt.Sprintf("Yedek alındı: %s (%s)", dosya, insanBoyut(boyut)), nil)
+	// Tek-domain manuel yedek de sistem geneli uzak hedefe gitsin (toplu is +
+	// zamanlayici ile ayni davranis) — o da slot içinde ve düşük öncelikle.
+	if genel := genelAyarOku(ctx, h.DB); genel.UzakAktif {
+		IlerlemeAsama(id, "uzak hedefe yükleniyor", 0)
+		pushGenel(ctx, h.DB, genel, abs, dosya, yid)
+	}
+	IlerlemeBitir(id, fmt.Sprintf("Yedek alındı (%s)", insanBoyut(boyut)), nil)
 }
 
 // insanBoyut: bayt -> okunur metin.
@@ -441,19 +494,56 @@ func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 }
 
 // yedekBasla/yedekBitir: domain basina backup tek-ucus guard'i (eszamanli kaynak-tukenme DoS).
+//
+// Kilit sahibinin TÜRÜ tutulur ("manuel" | "sistem"): kökün otomatik/toplu yedeği
+// bir hesapta çalışırken müşterinin manuel yedeği aynı hesaba binmez (409 + açık
+// mesaj); manuel yedek sıradayken/çalışırken de kök yolu bekler (sistemKilidiAl).
 var (
 	yedekMu    sync.Mutex
-	yedekAktif = map[int64]bool{}
+	yedekAktif = map[int64]string{}
 )
 
 func yedekBasla(id int64) bool {
+	_, ok := yedekBaslaTur(id, "manuel")
+	return ok
+}
+
+// yedekBaslaTur: kilidi tur adına almayı dener; doluysa mevcut sahibin türünü döner.
+func yedekBaslaTur(id int64, tur string) (mevcut string, ok bool) {
 	yedekMu.Lock()
 	defer yedekMu.Unlock()
-	if yedekAktif[id] {
-		return false
+	if m, var_ := yedekAktif[id]; var_ {
+		return m, false
 	}
-	yedekAktif[id] = true
-	return true
+	yedekAktif[id] = tur
+	return tur, true
+}
+
+// sistemKilitBekleme / sistemKilitAralik: kök yolu (zamanlayıcı, toplu iş) bir
+// hesabın kilidi doluysa (müşterinin manuel yedeği sırada/çalışıyor) en çok bu
+// kadar bekler; süre dolarsa o hesap bu turda ATLANIR (log'a yazılır, bir sonraki
+// turda alınır). Değişken: testler kısaltır.
+var (
+	sistemKilitBekleme = 20 * time.Minute
+	sistemKilitAralik  = 5 * time.Second
+)
+
+// sistemKilidiAl: hesap kilidini "sistem" adına alır; doluysa boşalmasını bekler.
+func sistemKilidiAl(ctx context.Context, id int64) bool {
+	son := time.Now().Add(sistemKilitBekleme)
+	for {
+		if _, ok := yedekBaslaTur(id, "sistem"); ok {
+			return true
+		}
+		if time.Now().After(son) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(sistemKilitAralik):
+		}
+	}
 }
 
 func yedekBitir(id int64) {

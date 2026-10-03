@@ -20,8 +20,14 @@ import { Button, Badge } from '@/components/ui'
 import { useAuth } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
-type Yedek = { id: number; domain_id: number; tip: string; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
-type Schedule = { freq: 'none' | 'daily' | 'weekly'; hour: number; retention: number; last_backup_at?: string }
+type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
+// duzenlenebilir: YALNIZ gerçek yönetici (sunucu söyler). Müşteri / bayi / müşteri-adına
+// görünümünde plan seçici çizilmez — müşteri yedeği yalnız manuel (2026-10-03).
+type ManuelDurum = { bekleme_sn: number; bekleme_saat: number; eszamanli: number; calisan: number; sira: number }
+type Schedule = {
+  freq: 'none' | 'daily' | 'weekly'; hour: number; retention: number; last_backup_at?: string
+  duzenlenebilir?: boolean; son_sistem_yedek?: string; manuel?: ManuelDurum
+}
 type Destination = {
   yok?: boolean
   id?: number; tip?: 'ftp' | 'sftp'; host?: string; port?: number
@@ -76,6 +82,30 @@ const BACKUP_EN: Record<string, string> = {
   "Çalışma saati (yerel)": "Run time (local)",
   "Üzerine yaz": "Overwrite",
   "Şimdi Yedekle": "Back Up Now",
+  "Hesabınız sistem tarafından otomatik yedeklenir; bu yedekler aşağıda listelenir. İhtiyaç duyduğunuzda 'Şimdi Yedekle' ile ek yedek alabilirsiniz.": "Your account is backed up automatically by the system; these backups are listed below. When you need one, you can take an extra backup with 'Back Up Now'.",
+  "Otomatik yedek": "Automatic backup",
+  "Sistem tarafından": "By the system",
+  "Son sistem yedeği:": "Last system backup:",
+  "Henüz sistem yedeği yok": "No system backup yet",
+  "Manuel yedek": "Manual backup",
+  "Manuel yedekler sunucuyu yormamak için düşük öncelikle ve sırayla alınır; aynı hesap için {0} saatte bir alınabilir.": "Manual backups run one at a time at low priority so the server is not overloaded; one can be taken every {0} hours per account.",
+  "Yeni manuel yedek {0} sonra alınabilir.": "A new manual backup can be taken in {0}.",
+  "Plan (yalnız yönetici)": "Schedule (admin only)",
+  "Kapalı": "Off",
+  "Saat": "Time",
+  "Saklanacak": "Keep",
+  "Manuel yedeklerim bu hedefe de gönderilsin": "Also send my manual backups to this target",
+  "Sistem yedekleri de bu hedefe kopyalanır. Gönderim, yedekle aynı sırada ve düşük öncelikle yapılır.": "System backups are also copied to this target. Uploads run in the same queue as the backup, at low priority.",
+  "Yedekler alındıktan sonra uzak sunucunuza da gönderilir — disk arızasına karşı ek koruma.": "Backups are also sent to your remote server after they are taken — extra protection against disk failure.",
+  "Yedek sırada": "Backup queued",
+  "{0}. sırada — sırası gelince başlayacak": "position {0} — starts when its turn comes",
+  "sırada": "queued",
+  "Sistem": "System",
+  "Manuel": "Manual",
+  "Kaynak": "Source",
+  "Yedek": "Backup",
+  "{0} sa {1} dk": "{0} h {1} min",
+  "{0} dk": "{0} min",
   "Son: başarılı": "Last: successful",
   "Bağlantı OK": "Connection OK",
   "Son: hata": "Last: error",
@@ -146,6 +176,26 @@ type Ilerleme = {
   aktif: boolean; bitti: boolean; islem: string; asama: string
   yapilan: number; toplam: number; yuzde: number; gecen_sn: number
   sonuc?: string; hata?: string
+  sirada?: boolean; sira_no?: number
+}
+
+const AYLAR: Record<'tr' | 'en', string[]> = {
+  tr: ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'],
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+}
+
+// "2026-08-31 03:01" → "31 Ağu 2026 · 03:01" (saat dilimi dönüşümü YOK: sunucunun
+// verdiği yerel saat aynen gösterilir).
+function tarihEtiket(s?: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(s || '')
+  if (!m) return s || ''
+  const ay = AYLAR[i18n.language === 'en' ? 'en' : 'tr'][Number(m[2]) - 1] || m[2]
+  return `${Number(m[3])} ${ay} ${m[1]} · ${m[4]}:${m[5]}`
+}
+
+function sureEtiket(sn: number): string {
+  const dk = Math.max(1, Math.ceil(sn / 60))
+  return dk >= 60 ? cevirT(cevir("{0} sa {1} dk"), Math.floor(dk / 60), dk % 60) : cevirT(cevir("{0} dk"), dk)
 }
 
 export default function DomainBackupsPage() {
@@ -177,6 +227,9 @@ export default function DomainBackupsPage() {
   const [destTest, setDestTest] = useState<{ ok: boolean; hata?: string } | null>(null)
   // Yalnız görünüm: destKayit üç işte ortak — spinner tetikleyen butonda dönsün.
   const [destIslem, setDestIslem] = useState<'test' | 'kaydet' | 'sil' | null>(null)
+
+  // Yeni manuel yedek için kalan bekleme (sunucu ölçer; yönetici muaf → 0).
+  const beklemeSn = sched.manuel?.bekleme_sn ?? 0
 
   const yukleNesli = useRef(0)
   function yukle() {
@@ -256,8 +309,13 @@ export default function DomainBackupsPage() {
     let iptal = false
     if (id) api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
     yukle()
+    // Sayfa yenilendiğinde süren/sıradaki yedek görünür kalsın (sıra no + aşama).
+    if (id) api.get<Ilerleme>(`/domains/${id}/backups/ilerleme`).then(r => {
+      if (iptal || !r.data.aktif || r.data.bitti) return
+      setIlerleme(r.data); setIsleniyor(true); ilerlemeIzle()
+    }).catch(() => { /* yoklama isteğe bağlı */ })
     return () => { iptal = true; yukleNesli.current++ }
-  }, [id])
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function scheduleKaydet(yeni: Schedule) {
     setSchedKayit(true); setHata(null); setBasari(null)
@@ -375,167 +433,169 @@ export default function DomainBackupsPage() {
       ]} />
 
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Yedekler")}</h1>
-      {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
+      {domain && <p className="text-sm text-slate-500 dark:text-slate-500 mb-1">
         <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
-        {' · '}home + MySQL dump = tar.gz · {sched.freq === 'none'
-          ? cevir("Otomatik yedek kapalı")
-          : cevirT(cevir("{0} {1}:00 · son {2} oto-yedek korunur"), sched.freq === 'daily' ? cevir("Günlük") : cevir("Haftalık"), String(sched.hour).padStart(2,'0'), sched.retention)}
       </p>}
+      <p className="text-sm text-slate-600 dark:text-slate-400 mb-5 max-w-3xl">
+        {cevir("Hesabınız sistem tarafından otomatik yedeklenir; bu yedekler aşağıda listelenir. İhtiyaç duyduğunuzda 'Şimdi Yedekle' ile ek yedek alabilirsiniz.")}
+      </p>
 
-      {/* Otomatik Yedek Planı */}
-      <div className="mb-5 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
-        <div className="flex items-center justify-between mb-3">
+      {/* Tek kart, masaüstünde 2 sütun: SOL yedekleme durumu/plan + Şimdi Yedekle, SAĞ uzak FTP/SFTP hedefi. */}
+      <div className="mb-5 grid grid-cols-1 lg:grid-cols-2 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-dark-600">
+        {/* SOL: otomatik yedek durumu (yönetici: kompakt plan seçici) + manuel yedek */}
+        <section className="p-4 sm:p-5 min-w-0 flex flex-col gap-4" aria-labelledby="yedek-durum-baslik">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Otomatik Yedekleme Planı")}</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-              {cevir("Plan aktifken panel her saat tarama yapar; gelen saat slot'unda yedek üretilip retention dışına çıkanlar silinir.")}
-            </p>
-          </div>
-          {sched.last_backup_at && (
-            <div className="text-xs text-slate-500 dark:text-slate-500">{cevir("Son oto-yedek:")} <span className="font-mono">{sched.last_backup_at.replace('T',' ').replace('Z','')}</span></div>
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {(['none','daily','weekly'] as const).map(f => {
-            const aktif = sched.freq === f
-            const svgIkon = (d: string) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d={d} /></svg>
-            const meta: Record<string,{ad:string;ikon:React.ReactNode;aciklama:string;renk:string}> = {
-              none: { ad:cevir("Kapalı"), ikon:svgIkon('M9 5v14M15 5v14'), aciklama:cevir("Otomatik yedek yok. Yalnız manuel “Şimdi Yedekle”."), renk:'slate' },
-              daily: { ad:cevir("Günlük"), ikon:svgIkon('M20.4 15.4A9 9 0 018.6 3.6 9 9 0 1020.4 15.4z'), aciklama:cevir("Her gün seçilen saatte yedek üretilir, son N tutulur."), renk:'emerald' },
-              weekly: { ad:cevir("Haftalık"), ikon:svgIkon('M8 3v3M16 3v3M4 8h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z'), aciklama:cevir("Her 7 günde bir yedek, daha ekonomik disk kullanımı."), renk:'indigo' },
-            }
-            const m = meta[f]
-            const renk: Record<string,string> = {
-              slate:   aktif ? 'border-slate-500 bg-slate-100 dark:border-dark-300 dark:bg-dark-600 ring-2 ring-slate-400/20'      : 'border-slate-200 dark:border-dark-600 hover:border-slate-400 hover:bg-slate-50 dark:hover:border-dark-450 dark:hover:bg-dark-600',
-              emerald: aktif ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-2 ring-emerald-500/20': 'border-slate-200 dark:border-dark-600 hover:border-emerald-300 hover:bg-emerald-50 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/20',
-              indigo:  aktif ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-500/20'   : 'border-slate-200 dark:border-dark-600 hover:border-indigo-300 hover:bg-indigo-50 dark:hover:border-indigo-700 dark:hover:bg-indigo-900/20',
-            }
-            return (
-              <button key={f} type="button" disabled={schedKayit || aktif}
-                onClick={() => scheduleKaydet({ ...sched, freq: f })}
-                className={`text-left p-3 border rounded-lg transition disabled:cursor-default ${renk[m.renk]}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-base leading-none">{m.ikon}</span>
-                  {aktif && <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300"><span className="inline-block size-2 rounded-full bg-emerald-500" aria-hidden />{cevir("Aktif")}</span>}
+            <h3 id="yedek-durum-baslik" className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Otomatik yedek")}</h3>
+            {sched.duzenlenebilir ? (
+              <div className="mt-2 space-y-3">
+                <div role="radiogroup" aria-label={cevir("Plan (yalnız yönetici)")} className="inline-grid grid-cols-3 gap-0.5 rounded-lg bg-slate-100 dark:bg-dark-800 p-0.5 w-full sm:w-auto">
+                  {(['none','daily','weekly'] as const).map(f => {
+                    const aktif = sched.freq === f
+                    return (
+                      <button key={f} type="button" role="radio" aria-checked={aktif} disabled={schedKayit}
+                        onClick={() => { if (!aktif) scheduleKaydet({ ...sched, freq: f }) }}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition disabled:opacity-60 ${aktif
+                          ? 'bg-white dark:bg-dark-600 text-slate-900 dark:text-slate-100 shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
+                        {f === 'none' ? cevir("Kapalı") : f === 'daily' ? cevir("Günlük") : cevir("Haftalık")}
+                      </button>
+                    )
+                  })}
                 </div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ad}</div>
-                <div className="text-[11px] text-slate-600 dark:text-slate-400 dark:text-slate-500 mt-1 leading-snug">{m.aciklama}</div>
-              </button>
-            )
-          })}
-        </div>
-
-        {sched.freq !== 'none' && (
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500">{cevir("Çalışma saati (yerel)")}</span>
-              <select
-                value={sched.hour}
-                onChange={e => scheduleKaydet({ ...sched, hour: Number(e.target.value) })}
-                disabled={schedKayit}
-                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm bg-white dark:bg-dark-700">
-                {Array.from({length:24},(_,i)=>i).map(h =>
-                  <option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>
+                {sched.freq !== 'none' && (
+                  <div className="grid grid-cols-2 gap-3 max-w-sm">
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Saat")}</span>
+                      <select value={sched.hour} disabled={schedKayit}
+                        onChange={e => scheduleKaydet({ ...sched, hour: Number(e.target.value) })}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100">
+                        {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{cevir("Saklanacak")}</span>
+                      <input type="number" min={1} max={90} value={sched.retention} disabled={schedKayit}
+                        onChange={e => setSched(s => ({...s, retention: Math.max(1, Math.min(90, Number(e.target.value)||1))}))}
+                        onBlur={() => scheduleKaydet(sched)}
+                        title={cevir("Bu sayıyı aşan eski oto-yedekler silinir. Manuel yedekler korunur.")}
+                        className="mt-1 w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+                    </label>
+                  </div>
                 )}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500">{cevir("Tutulacak yedek sayısı (retention)")}</span>
-              <input type="number" min={1} max={90} value={sched.retention}
-                onChange={e => setSched(s => ({...s, retention: Math.max(1, Math.min(90, Number(e.target.value)||1))}))}
-                onBlur={() => scheduleKaydet(sched)}
-                disabled={schedKayit}
-                className="mt-1 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-              <span className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5 block">{cevir("Bu sayıyı aşan eski oto-yedekler silinir. Manuel yedekler korunur.")}</span>
-            </label>
-          </div>
-        )}
-      </div>
-
-      {/* Uzak Yedek Hedefi (FTP/SFTP) */}
-      <div className="mb-5 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Uzak Yedek Hedefi (FTP / SFTP)")}</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-              {cevir("Yedek üretildikten sonra arkaplanda uzak sunucuya yüklenir — disk arızasına karşı off-site koruma.")}
-            </p>
-          </div>
-          {!dest.yok && dest.son_durum && (
-            <Badge variant="soft" color={dest.son_durum === 'basarili' ? 'success' : dest.son_durum === 'hata' ? 'error' : 'neutral'}
-              className="shrink-0 gap-1 text-[10px] uppercase tracking-wider font-semibold">
-              {dest.son_durum === 'basarili' ? <><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir('Son: başarılı')}</>
-                : dest.son_durum === 'hata' ? <><Ikon d={I.kapat} className="size-3 shrink-0" />{cevir('Son: hata')}</> : dest.son_durum}
-            </Badge>
-          )}
-        </div>
-
-        {!dest.yok && dest.son_yukleme && (
-          <div className="mb-3 text-xs text-slate-500 dark:text-slate-500">
-            {cevir("Son yükleme:")} <span className="font-mono">{dest.son_yukleme}</span>
-            {dest.son_durum === 'hata' && dest.son_hata && (
-              <UyariKutusu ton="tehlike" className="mt-1">
-                <span className="font-mono text-[11px] whitespace-pre-wrap">{dest.son_hata}</span>
-              </UyariKutusu>
+              </div>
+            ) : (
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                <dt className="text-slate-500 dark:text-slate-400">{cevir("Otomatik yedek")}:</dt>
+                <dd className="text-slate-800 dark:text-slate-200 font-medium">{cevir("Sistem tarafından")}</dd>
+                <dt className="text-slate-500 dark:text-slate-400">{cevir("Son sistem yedeği:")}</dt>
+                <dd className="text-slate-800 dark:text-slate-200 tabular-nums">{sched.son_sistem_yedek ? tarihEtiket(sched.son_sistem_yedek) : cevir("Henüz sistem yedeği yok")}</dd>
+              </dl>
             )}
           </div>
-        )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 mb-3">
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Protokol")}</label>
-            <div className="flex gap-2">
+          <div className="border-t border-slate-100 dark:border-dark-600 pt-4">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Manuel yedek")}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {cevirT(cevir("Manuel yedekler sunucuyu yormamak için düşük öncelikle ve sırayla alınır; aynı hesap için {0} saatte bir alınabilir."), sched.manuel?.bekleme_saat ?? 6)}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button onClick={olustur} yukleniyor={isleniyor} disabled={isleniyor || beklemeSn > 0} color="primary" ikon={I.arti}
+                title={beklemeSn > 0 ? cevirT(cevir("Yeni manuel yedek {0} sonra alınabilir."), sureEtiket(beklemeSn)) : undefined}>
+                {isleniyor ? (ilerleme?.sirada ? cevir("Yedek sırada") : cevir("Yedekleniyor…")) : cevir("Şimdi Yedekle")}
+              </Button>
+              <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile}>{cevir("Yenile")}</Button>
+            </div>
+            {beklemeSn > 0 && !isleniyor && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+                {cevirT(cevir("Yeni manuel yedek {0} sonra alınabilir."), sureEtiket(beklemeSn))}
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* SAĞ: Uzak Yedek Hedefi (FTP/SFTP) — sıkı düzen */}
+        <section className="p-4 sm:p-5 min-w-0" aria-labelledby="uzak-hedef-baslik">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <h3 id="uzak-hedef-baslik" className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Uzak Yedek Hedefi (FTP / SFTP)")}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {cevir("Yedekler alındıktan sonra uzak sunucunuza da gönderilir — disk arızasına karşı ek koruma.")}
+              </p>
+            </div>
+            {!dest.yok && dest.son_durum && (
+              <Badge variant="soft" color={dest.son_durum === 'basarili' ? 'success' : dest.son_durum === 'hata' ? 'error' : 'neutral'}
+                className="shrink-0 gap-1 text-[10px] uppercase tracking-wider font-semibold">
+                {dest.son_durum === 'basarili' ? <><span className="inline-block size-2 rounded-full bg-current" aria-hidden />{cevir('Son: başarılı')}</>
+                  : dest.son_durum === 'hata' ? <><Ikon d={I.kapat} className="size-3 shrink-0" />{cevir('Son: hata')}</> : dest.son_durum}
+              </Badge>
+            )}
+          </div>
+
+          {!dest.yok && dest.son_yukleme && (
+            <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+              {cevir("Son yükleme:")} <span className="font-mono">{dest.son_yukleme}</span>
+              {dest.son_durum === 'hata' && dest.son_hata && (
+                <UyariKutusu ton="tehlike" className="mt-1">
+                  <span className="font-mono text-[11px] whitespace-pre-wrap">{dest.son_hata}</span>
+                </UyariKutusu>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2.5 mb-3">
+            <div role="radiogroup" aria-label={cevir("Protokol")} className="inline-grid grid-cols-2 gap-0.5 rounded-lg bg-slate-100 dark:bg-dark-800 p-0.5">
               {(['sftp','ftp'] as const).map(t => {
                 const aktif = destForm.tip === t
                 return (
-                  <button key={t} type="button"
+                  <button key={t} type="button" role="radio" aria-checked={aktif}
                     onClick={() => setDestForm(f => ({...f, tip: t, port: t === 'sftp' ? 22 : 21}))}
-                    className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${aktif ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-semibold' : 'border-slate-200 dark:border-dark-600 text-slate-700 dark:text-dark-100 hover:bg-slate-50 dark:hover:bg-dark-600'}`}>
-                    {t === 'sftp' ? <span className="inline-flex items-center gap-1.5"><Ikon d={I.kilit} /> SFTP (port 22)</span> : <span className="inline-flex items-center gap-1.5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M4.9 16.1a10 10 0 010-14.2m2.83 2.83a6 6 0 000 8.48M12 12h.01m4.24 4.24a10 10 0 000-14.2m-2.83 2.83a6 6 0 010 8.48M12 12l-3 9m6 0l-3-9"/></svg> FTP (port 21)</span>}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition inline-flex items-center gap-1.5 ${aktif
+                      ? 'bg-white dark:bg-dark-600 text-slate-900 dark:text-slate-100 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
+                    {t === 'sftp' && <Ikon d={I.kilit} className="size-3.5" />}{t.toUpperCase()}
                   </button>
                 )
               })}
             </div>
+            <div className="grid grid-cols-[1fr_5.5rem] gap-2">
+              <label className="block min-w-0">
+                <span className="sr-only">Host</span>
+                <input type="text" value={destForm.host} placeholder={'Host · ' + cevir("backup.firma.com")} aria-label="Host"
+                  onChange={e => setDestForm(f => ({...f, host: e.target.value}))}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+              </label>
+              <label className="block">
+                <span className="sr-only">Port</span>
+                <input type="number" value={destForm.port} aria-label="Port" placeholder="Port"
+                  onChange={e => setDestForm(f => ({...f, port: Number(e.target.value)||0}))}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+              </label>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input type="text" value={destForm.kullanici} autoComplete="off" aria-label={cevir("Kullanıcı")} placeholder={cevir("Kullanıcı")}
+                onChange={e => setDestForm(f => ({...f, kullanici: e.target.value}))}
+                className="w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+              <input type="password" value={destForm.parola} autoComplete="new-password" aria-label={cevir("Parola")}
+                placeholder={!dest.yok ? cevir("(boş bırakırsanız mevcut korunur)") : cevir("Parola")}
+                onChange={e => setDestForm(f => ({...f, parola: e.target.value}))}
+                className="w-full px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+            </div>
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400 shrink-0">{cevir("Uzak dizin")}</span>
+              <input type="text" value={destForm.uzak_dizin}
+                onChange={e => setDestForm(f => ({...f, uzak_dizin: e.target.value}))}
+                className="min-w-0 flex-1 px-2.5 py-1.5 border border-slate-300 dark:border-dark-500 rounded text-sm font-mono bg-white dark:bg-dark-700 text-slate-900 dark:text-slate-100"/>
+            </label>
           </div>
-          <div className="sm:col-span-3">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Host</label>
-            <input type="text" value={destForm.host} placeholder={cevir("backup.firma.com")}
-              onChange={e => setDestForm(f => ({...f, host: e.target.value}))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-          </div>
-          <div className="sm:col-span-1">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">Port</label>
-            <input type="number" value={destForm.port}
-              onChange={e => setDestForm(f => ({...f, port: Number(e.target.value)||0}))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Kullanıcı")}</label>
-            <input type="text" value={destForm.kullanici} autoComplete="off"
-              onChange={e => setDestForm(f => ({...f, kullanici: e.target.value}))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Parola")} {!dest.yok && <span className="text-[10px] text-slate-400 dark:text-slate-500">{cevir("(boş bırakırsanız mevcut korunur)")}</span>}</label>
-            <input type="password" value={destForm.parola} autoComplete="new-password"
-              onChange={e => setDestForm(f => ({...f, parola: e.target.value}))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Uzak dizin")}</label>
-            <input type="text" value={destForm.uzak_dizin}
-              onChange={e => setDestForm(f => ({...f, uzak_dizin: e.target.value}))}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono"/>
-          </div>
-        </div>
 
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+          <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer mb-1">
             <input type="checkbox" checked={destForm.aktif}
               onChange={e => setDestForm(f => ({...f, aktif: e.target.checked}))}
-              className="cursor-pointer"/>
-            {cevir("Aktif (her yedek bu hedefe gönderilsin)")}
+              className="mt-0.5 cursor-pointer"/>
+            <span>{cevir("Manuel yedeklerim bu hedefe de gönderilsin")}</span>
           </label>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 ps-6">{cevir("Sistem yedekleri de bu hedefe kopyalanır. Gönderim, yedekle aynı sırada ve düşük öncelikle yapılır.")}</p>
+
           <div className="flex flex-wrap items-center gap-2">
             {destTest && (
               <Badge variant="soft" color={destTest.ok ? 'success' : 'error'} className="gap-1 text-xs leading-snug">
@@ -561,14 +621,10 @@ export default function DomainBackupsPage() {
               </Button>
             )}
           </div>
-        </div>
+        </section>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Button onClick={olustur} yukleniyor={isleniyor} color="primary" ikon={I.arti}>
-          {isleniyor ? cevir("Yedekleniyor…") : cevir("Şimdi Yedekle")}
-        </Button>
-        <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile}>{cevir("Yenile")}</Button>
+      <div className="flex items-center mb-2">
         <span className="ml-auto text-sm text-slate-500 dark:text-slate-500">{yedekler.length} {cevir("yedek")}</span>
       </div>
 
@@ -578,11 +634,13 @@ export default function DomainBackupsPage() {
       {ilerleme && (
         <div className="mb-4 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
           <div className="flex items-center gap-2 flex-wrap mb-2">
-            <span className={`w-2 h-2 rounded-full ${ilerleme.bitti ? (ilerleme.hata ? 'bg-red-500' : 'bg-emerald-500') : 'bg-amber-500 animate-pulse'}`} />
-            <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-              {ilerleme.islem === 'geri' ? cevir("Geri yükleniyor…") : cevir("Yedekleniyor…")}
+            <span className={`w-2 h-2 rounded-full ${ilerleme.bitti ? (ilerleme.hata ? 'bg-red-500' : 'bg-emerald-500') : ilerleme.sirada ? 'bg-slate-400' : 'bg-amber-500 animate-pulse'}`} />
+            <span className="text-sm font-medium text-slate-800 dark:text-slate-100" role="status">
+              {ilerleme.islem === 'geri' ? cevir("Geri yükleniyor…") : ilerleme.sirada ? cevir("Yedek sırada") : cevir("Yedekleniyor…")}
             </span>
-            <span className="text-sm text-slate-500 dark:text-slate-400">· {cevir(ilerleme.asama)}</span>
+            <span className="text-sm text-slate-500 dark:text-slate-400">· {ilerleme.sirada && ilerleme.sira_no
+              ? cevirT(cevir("{0}. sırada — sırası gelince başlayacak"), ilerleme.sira_no)
+              : cevir(ilerleme.asama)}</span>
             <span className="ml-auto text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
               {ilerleme.yuzde > 0 ? `${ilerleme.yuzde}%` : ''}
               {ilerleme.yapilan > 0 ? ` · ${formatBoyut(ilerleme.yapilan)}${ilerleme.toplam > 0 ? ' / ' + formatBoyut(ilerleme.toplam) : ''}` : ''}
@@ -609,19 +667,20 @@ export default function DomainBackupsPage() {
           <table className={T.tablo}>
           <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
             <tr>
-              <th className={T.baslik}>{cevir("Dosya")}</th>
-              <th className={T.baslik}>{cevir("Tip")}</th>
+              <th className={T.baslik}>{cevir("Yedek")}</th>
+              <th className={T.baslik}>{cevir("Kaynak")}</th>
               <th className={T.baslik}>{cevir("Boyut")}</th>
-              <th className={T.baslik}>{cevir("Oluşturulma")}</th>
               <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
             </tr>
           </thead>
           <tbody className={T.govde}>
             {yedekler.map(y => (
               <tr key={y.id} className={`${T.satir} lg:hover:bg-slate-50 dark:lg:hover:bg-dark-700`}>
-                {/* Birincil tanımlayıcı: dosya adı — mobilde kart başlığı */}
-                <td className={`${T.hucreBaslik} font-mono break-all`}>
-                  {y.dosya}
+                {/* Birincil tanımlayıcı: hesap + okunur tarih — mobilde kart başlığı.
+                    Tam dosya adı yalnız title'da (İndir aynı adla kaydeder). */}
+                <td className={`${T.hucreBaslik}`} title={y.dosya}>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{domain?.alan_adi || hesapAdi(y.dosya)}</span>
+                  <span className="ml-2 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap tabular-nums">{tarihEtiket(y.olusturma)}</span>
                   {/* 🔴 HAYALET KAYIT GÖRÜNÜR OLMALI. Dosyası ne yerelde ne
                       uzakta olan kayıtlar geçerli yedek gibi listeleniyordu;
                       kullanıcı "yedeğim var" sanıp İndir'e basınca 500
@@ -641,15 +700,12 @@ export default function DomainBackupsPage() {
                     </Badge>
                   )}
                 </td>
-                <td className={T.hucre} data-etiket={cevir("Tip")}>
-                  <Badge variant="soft" color={y.tip === 'planli' ? 'info' : 'neutral'}
-                    className="px-1.5 py-0.5 uppercase tracking-wider font-semibold">{y.tip === 'planli' ? cevir('Planlı') : y.tip}</Badge>
+                <td className={T.hucre} data-etiket={cevir("Kaynak")}>
+                  <Badge variant="soft" color={kaynakOf(y) === 'sistem' ? 'info' : 'neutral'}
+                    className="px-1.5 py-0.5 text-[11px] font-semibold">{kaynakOf(y) === 'sistem' ? cevir('Sistem') : cevir('Manuel')}</Badge>
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Boyut")}>
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span>
-                </td>
-                <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
-                  <span className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 whitespace-nowrap">{y.olusturma}</span>
                 </td>
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   {/* İndirme YEREL dosyayı okur; uzağa taşınmış kayıt
@@ -675,7 +731,7 @@ export default function DomainBackupsPage() {
       <ConfirmDialog
         acik={!!silinecek}
         baslik={cevir("Yedek dosyasını sil")}
-        mesaj={cevirT(cevir("\"{0}\" silinsin mi?"), silinecek?.dosya)}
+        mesaj={cevirT(cevir("\"{0}\" silinsin mi?"), silinecek ? `${domain?.alan_adi || hesapAdi(silinecek.dosya)} · ${tarihEtiket(silinecek.olusturma)}` : '')}
         ton="tehlike" onayIkonu={I.cop} onayMetni={cevir("Evet, sil")}
         onOnay={sil}
         onIptal={() => setSilinecek(null)}
@@ -885,6 +941,17 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
         </div>
     </Modal>
   )
+}
+
+// kaynakOf: sunucu "kaynak" döndürmeyen eski sürümde tipten türetilir.
+function kaynakOf(y: Yedek): 'sistem' | 'manuel' {
+  if (y.kaynak) return y.kaynak
+  return y.tip === 'oto' || y.tip === 'planli' ? 'sistem' : 'manuel'
+}
+
+// hesapAdi: "c_kaan_com-20260831-030125-planli.tar.gz" → "c_kaan_com" (alan adı yüklenmeden önce).
+function hesapAdi(dosya: string): string {
+  return dosya.replace(/\.tar\.gz$/, '').replace(/(-auto)?-\d{8}-\d{6}.*$/, '')
 }
 
 function formatBoyut(b: number): string {

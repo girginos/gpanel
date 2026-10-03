@@ -85,40 +85,10 @@ func tickOnce(db *sql.DB) {
 		return
 	}
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, alan_adi, sistem_kullanici,
-		       COALESCE(backup_freq,'none'), COALESCE(backup_hour,3),
-		       COALESCE(backup_retention,7), is_demo,
-		       UNIX_TIMESTAMP(last_backup_at)
-		FROM domains
-		WHERE COALESCE(backup_freq,'none') != 'none'
-		  AND COALESCE(backup_hour,3) = ?
-		  AND is_demo = 0`,
-		currentHour)
+	due, err := zamanlanmisDomainler(ctx, db, currentHour, now)
 	if err != nil {
 		log.Printf("backup scheduler tick query: %v", err)
 		return
-	}
-	defer rows.Close()
-
-	var due []dueDomain
-	for rows.Next() {
-		var d dueDomain
-		var lastTs sql.NullInt64
-		if err := rows.Scan(&d.ID, &d.AlanAdi, &d.SK, &d.Freq, &d.Hour, &d.Retention, &d.IsDemo, &lastTs); err != nil {
-			log.Printf("backup scheduler scan: %v", err)
-			continue
-		}
-		// Filtre: freq=daily ise 23 saat geçmiş olmalı; weekly ise 6.5 gün
-		// (slack: gün/hafta sınırına denk gelirse kaçırmamak için)
-		minSec := int64(23 * 3600)
-		if d.Freq == "weekly" {
-			minSec = int64(6*24*3600 + 12*3600)
-		}
-		if lastTs.Valid && (now.Unix()-lastTs.Int64) < minSec {
-			continue
-		}
-		due = append(due, d)
 	}
 
 	if len(due) == 0 {
@@ -157,6 +127,72 @@ func tickOnce(db *sql.DB) {
 	if _, err := db.Exec(`UPDATE backup_jobs SET durum=?, aktif_domain='', bitis=NOW() WHERE id=?`, jobDurum(basari, hata), jid); err != nil {
 		log.Printf("backups.tickOnce: is durum yazilamadi: %v", err)
 	}
+}
+
+// zamanlayiciPlanKaynaklari: zamanlayıcının KOŞTUĞU plan kaynakları (0114).
+// "kok" = yönetici yazdı; "eski" = 0114 öncesi, yazanı bilinmeyen plan. "pasif"
+// listede YOK (plan değerleri korunur, koşmaz). Müşteri/bayi bundan sonra plan
+// YAZAMAZ (SetSchedule 403). Eski planları da durdurmak kullanıcı kararıdır:
+// "eski"yi bu listeden çıkarmak yeterli (veri silinmez).
+var zamanlayiciPlanKaynaklari = []string{"kok", "eski"}
+
+// planKaynakKolonuVar: 0114 göçü koşmuş mu. Koşmamışsa süzgeç UYGULANMAZ (eski
+// davranış) — göç gecikti diye otomatik yedekler sessizce durmasın.
+func planKaynakKolonuVar(ctx context.Context, db *sql.DB) bool {
+	var n int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'domains' AND COLUMN_NAME = 'backup_plan_kaynak'`).Scan(&n)
+	return err == nil && n > 0
+}
+
+// zamanlanmisDomainler: bu saat slotunda yedeği gelmiş domainler (yalnız kök
+// kaynaklı planlar; bkz. zamanlayiciPlanKaynaklari).
+func zamanlanmisDomainler(ctx context.Context, db *sql.DB, saat int, now time.Time) ([]dueDomain, error) {
+	q := `
+		SELECT id, alan_adi, sistem_kullanici,
+		       COALESCE(backup_freq,'none'), COALESCE(backup_hour,3),
+		       COALESCE(backup_retention,7), is_demo,
+		       UNIX_TIMESTAMP(last_backup_at)
+		FROM domains
+		WHERE COALESCE(backup_freq,'none') != 'none'
+		  AND COALESCE(backup_hour,3) = ?
+		  AND is_demo = 0`
+	args := []any{saat}
+	if planKaynakKolonuVar(ctx, db) {
+		if len(zamanlayiciPlanKaynaklari) == 0 {
+			return nil, nil
+		}
+		q += " AND backup_plan_kaynak IN (" + strings.TrimRight(strings.Repeat("?,", len(zamanlayiciPlanKaynaklari)), ",") + ")" //nolint:gosec // G202: yalnız "?" yer tutucuları; değerler args ile bağlanır.
+		for _, k := range zamanlayiciPlanKaynaklari {
+			args = append(args, k)
+		}
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var due []dueDomain
+	for rows.Next() {
+		var d dueDomain
+		var lastTs sql.NullInt64
+		if err := rows.Scan(&d.ID, &d.AlanAdi, &d.SK, &d.Freq, &d.Hour, &d.Retention, &d.IsDemo, &lastTs); err != nil {
+			log.Printf("backup scheduler scan: %v", err)
+			continue
+		}
+		// Filtre: freq=daily ise 23 saat geçmiş olmalı; weekly ise 6.5 gün
+		// (slack: gün/hafta sınırına denk gelirse kaçırmamak için)
+		minSec := int64(23 * 3600)
+		if d.Freq == "weekly" {
+			minSec = int64(6*24*3600 + 12*3600)
+		}
+		if lastTs.Valid && (now.Unix()-lastTs.Int64) < minSec {
+			continue
+		}
+		due = append(due, d)
+	}
+	return due, rows.Err()
 }
 
 // runOneBackup: bir domain için backup üret (job_id ile) + last_backup_at. Boyut döner.
