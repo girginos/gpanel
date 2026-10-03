@@ -68,7 +68,7 @@ type cpanelMain struct {
 
 const (
 	cpanelYAMLSatirSiniri  = 400
-	cpanelYAMLElemanSiniri = 500
+	cpanelYAMLElemanSiniri = 300 // satır sınırından küçük: liste başına anlamlı
 )
 
 // cpanelMainAyristir — main'in DAR alt kümesini okur. Desteklenmeyen YAML yapısı
