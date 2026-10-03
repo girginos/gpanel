@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"girginospanel/internal/sirdosya"
 )
 
 const (
@@ -50,7 +52,9 @@ func anahtariYukle() {
 		if err := os.MkdirAll(filepath.Dir(anahtarYol), 0o700); err != nil {
 			return
 		}
-		if err := os.WriteFile(anahtarYol, yeni, 0o600); err != nil {
+		// sirdosya: atomik + izin TAM 0600 (önceden kalmış geniş izinli dosya üzerine
+		// yazılsa bile) + symlink takip edilmez.
+		if err := sirdosya.YazKok(anahtarYol, yeni, 0o600); err != nil {
 			return
 		}
 		anahtar = yeni

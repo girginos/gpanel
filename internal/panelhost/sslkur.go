@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"girginospanel/internal/provisioner"
+
+	"girginospanel/internal/sirdosya"
 )
 
 func SslKurAsync(hostname string) *Is {
@@ -180,7 +182,7 @@ func sslKurKos(is *Is, hostname string) {
 		_ = os.WriteFile(certYedek, raw, 0644)
 	}
 	if raw, e := os.ReadFile(KeyPath); e == nil {
-		_ = os.WriteFile(keyYedek, raw, 0600)
+		_ = sirdosya.YazKok(keyYedek, raw, 0o600)
 	}
 	is.AdimEkle("mevcut cert/key yedeklendi (.yedek-oncesi-le)", true)
 
@@ -286,7 +288,7 @@ func certGeriYukle(certYedek, cert, keyYedek, key string) error {
 		_ = os.WriteFile(cert, raw, 0644)
 	}
 	if raw, e := os.ReadFile(keyYedek); e == nil {
-		_ = os.WriteFile(key, raw, 0600)
+		_ = sirdosya.YazKok(key, raw, 0o600)
 	}
 	return nil
 }

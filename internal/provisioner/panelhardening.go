@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+
+	"girginospanel/internal/sirdosya"
 )
 
 // okuProxyGizli: kalici gizliyi okur (>=32 hex), yoksa "".
@@ -119,7 +121,7 @@ func HealPanelProxyTrustOnStartup() {
 		return
 	}
 	// nginx OK (veya degismedi) → gizliyi kalici yaz (app artik guvenir).
-	if e := os.WriteFile(httpx.ProxySecretPath, []byte(cand+"\n"), 0600); e != nil {
+	if e := sirdosya.YazKok(httpx.ProxySecretPath, []byte(cand+"\n"), 0o600); e != nil {
 		log.Printf("panel proxy-trust heal: gizli yazilamadi: %v", e)
 		if nginxDegisti {
 			_ = os.WriteFile(panelVhostPath, orig, 0644)
