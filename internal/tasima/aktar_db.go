@@ -21,6 +21,16 @@ import (
 
 type dbHedef struct{ Ad, Kul string }
 
+// configtenDBKimlikOku / orijinalKimlikDene — orijinal DB kimliği yolunun girişleri
+// (testler değiştirir: bayide bu yolun HİÇ denenmediği canlı MariaDB'ye dokunmadan
+// sınanır).
+var (
+	configtenDBKimlikOku = configtenDBKimlik
+	orijinalKimlikDene   func(h *Handlers, ctx context.Context, domainID int64, kaynakDB string, orij dbKimlik) bool
+)
+
+func init() { orijinalKimlikDene = (*Handlers).orijinalKimlikKullanilir }
+
 // veritabanlariniAktar — tum kaynak DB'lerini tasir.
 //
 // 🔴 Parola domain basina BIR KEZ uretilir ve kullanici YOKSA atanir. Orijinal
@@ -51,7 +61,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 	// HIC degismez (kullanici config guncellemek zorunda kalmaz) ve ad uzamaz.
 	// Yapilandirmadan okunur; yalniz hedefte ad+kullanici MUSAITSE (cakisma yok)
 	// kullanilir, aksi halde <sk> onekli benzersiz ada + config rewrite'a düsülür.
-	kimlikler := configtenDBKimlik(webRoot)
+	kimlikler := configtenDBKimlikOku(webRoot)
 
 	// 🔴 ORİJİNAL DB KİMLİĞİ YOLU BAYİDE KAPALI: bu yol, kaynağın wp-config'inden
 	// okunan (DÜŞMAN) ad/kullanıcı/parolayı hedefte doğrudan kullanır. Kök için
@@ -69,7 +79,7 @@ func (h *Handlers) veritabanlariniAktar(ctx context.Context, k *Kaynak, hs Hesap
 			continue
 		}
 		// --- ORIJINAL kimlikle taşıma (config degismez) ---
-		if orij, ok := kimlikler[kaynakDB]; orijIzin && ok && h.orijinalKimlikKullanilir(ctx, sonuc.DomainID, kaynakDB, orij) {
+		if orij, ok := kimlikler[kaynakDB]; orijIzin && ok && orijinalKimlikDene(h, ctx, sonuc.DomainID, kaynakDB, orij) {
 			if err := hesaplar.MySQLCreateDB(h.DB, sonuc.DomainID, kaynakDB, orij.Kul, orij.Pw); err != nil {
 				log("uyari: orijinal DB %s olusturulamadi, benzersize düşülüyor: %v", kaynakDB, err)
 			} else if err := h.dbAktar(ctx, k, kaynakDB, kaynakDB, log); err != nil {
@@ -327,15 +337,11 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	// (kullanıcının gerçek Plesk'inde CANLI yakalandı). Panelin admin MySQL kimliğini
 	// kullan. 🔴 Parola $(cat/sed ...) ile ALINIR: `ps`'te parolanın KENDİSİ görünmez,
 	// yalnız onu okuyan komut görünür.
+	// Kimlik kaynak sürücüsünden (kaynak_kayit.go: Plesk .psa.shadow, DA mysql.conf).
 	kimlikOnek := ""
 	dumpKul := ""
-	switch k.Tip {
-	case "plesk":
-		kimlikOnek = `MYSQL_PWD="$(cat /etc/psa/.psa.shadow 2>/dev/null)" `
-		dumpKul = "-uadmin "
-	case "directadmin":
-		kimlikOnek = `MYSQL_PWD="$(sed -n 's/^passwd=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
-		dumpKul = `-u"$(sed -n 's/^user=//p' /usr/local/directadmin/conf/mysql.conf 2>/dev/null)" `
+	if s, ok := surucuBul(k.Tip); ok {
+		kimlikOnek, dumpKul = s.dumpKimlikOnek, s.dumpKul
 	}
 	ic := kimlikOnek + "mysqldump " + dumpKul + "--single-transaction --quick --routines --triggers " +
 		"--no-tablespaces --default-character-set=utf8mb4 " + shQuote(kaynakDB) + " | gzip -c"

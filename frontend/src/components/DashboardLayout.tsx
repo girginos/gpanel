@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent as RKE } from 'react'
 import { api } from '@/lib/api'
 import { useEklentiler } from '@/lib/eklenti'
+import { useTasimaKaynaklari } from '@/lib/tasima'
 import { useMarka, logoURL, faviconURL, markaOturumYukle } from '@/lib/marka'
 import { Suspense } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -136,9 +137,12 @@ const RESELLER_NAV: NavGroup[] = [
   // yalnizca baslik veriliyor ki panel Anasayfa'yi takip etsin.
   { baslik: GENEL, items: [{ to: '/', etiket: 'Anasayfa', ikon: ICONS.home }] },
   // Seçenek 1 (kullanıcı kararı 2026-10-03): gruplar Genel / Hosting / Güvenlik / Ayarlar.
+  // Site Taşıma YALNIZ kök bayi taşımasını açtıysa görünür (kapı: eklentiKapilari
+  // deseni, aşağıda; liste yüklenene kadar gizli). Kapsamı sunucu zorlar.
   { baslik: 'Hosting', items: [
     { to: '/domainler',       etiket: 'Domainler', ikon: ICONS.domain, sayac: 'domainler' },
     { to: '/hizmet-planlari', etiket: 'Planlar',   ikon: ICONS.plan, sayac: 'hizmet_planlari' },
+    { to: '/araclar/tasima',  etiket: 'Site Taşıma', ikon: ICONS.tasima },
   ]},
   // Website Security Monitor bayide YALNIZ kendi domainlerini gösterir; kapsamı
   // sunucu (websec handler'ları) zorlar, menü yalnız kapıyı açar.
@@ -237,9 +241,12 @@ export default function DashboardLayout() {
   const eklentiler = useEklentiler(!isMusteri)
   const kuruluMu = (ad: string): boolean | null =>
     eklentiler === null ? null : eklentiler.some((e) => e.ad === ad)
+  // Bayide Site Taşıma kapısı: GET /tasima/kaynaklar → acik (kök anahtarı). Kökte her zaman.
+  const tasimaKaynak = useTasimaKaynaklari(isReseller)
   const eklentiKapilari: Array<{ yol: string; goster: boolean | null }> = [
     { yol: '/mail-sunucu', goster: kuruluMu('mail') },
     // /marka artık çekirdek (D2): eklentiye bağlı değil; bayi menüsünde "Markam".
+    { yol: '/araclar/tasima', goster: isReseller ? (tasimaKaynak.veri === null ? null : tasimaKaynak.veri.acik) : true },
   ]
   const gizli = new Set(eklentiKapilari.filter((k) => k.goster !== true).map((k) => k.yol))
   // 🔴 EKLENTİ KAPILARI GEÇ ÇÖZÜLÜR — aşağıdaki efektler buna BAĞLIDIR.
