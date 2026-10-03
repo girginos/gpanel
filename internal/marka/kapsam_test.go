@@ -307,20 +307,23 @@ func TestGenel_HostYalnizAktif(t *testing.T) {
 	if _, err := o.db.Exec(`INSERT INTO cp_marka_alanadi (alan_adi, reseller_id, dogrulama, durum) VALUES ('panel.alfa.test', 7, 'x', 'ssl_bekliyor')`); err != nil {
 		t.Fatal(err)
 	}
+	o.istek("PUT", "/api/v1/marka/bayiler/7", o.admin, map[string]any{"alanadi_izni": true})
 	OnbellekTemizle()
 	if _, g := o.istek("GET", "/api/v1/marka", "", nil, "Host", "panel.alfa.test:2083"); g != kok {
-		t.Errorf("aktif olmayan Host kök vermeli: %s", g)
+		t.Errorf("aktif olmayan (izinli) Host kök vermeli: %s", g)
 	}
 	o.db.Exec(`UPDATE cp_marka_alanadi SET durum='aktif'`)
-	OnbellekTemizle()
-	if _, g := o.istek("GET", "/api/v1/marka", "", nil, "Host", "panel.alfa.test:2083"); g != kok {
-		t.Errorf("alanadi_izni kapalıyken Host kök vermeli: %s", g)
-	}
-	o.istek("PUT", "/api/v1/marka/bayiler/7", o.admin, map[string]any{"alanadi_izni": true})
 	OnbellekTemizle()
 	if _, g := o.istek("GET", "/api/v1/marka", "", nil, "Host", "Panel.Alfa.Test:2083"); !strings.Contains(g, `"Alfa"`) {
 		t.Errorf("aktif + izinli Host A markası vermeli: %s", g)
 	}
+	o.istek("PUT", "/api/v1/marka/bayiler/7", o.admin, map[string]any{"alanadi_izni": false})
+	OnbellekTemizle()
+	if _, g := o.istek("GET", "/api/v1/marka", "", nil, "Host", "panel.alfa.test:2083"); g != kok {
+		t.Errorf("alanadi_izni kapalıyken aktif Host kök vermeli: %s", g)
+	}
+	o.istek("PUT", "/api/v1/marka/bayiler/7", o.admin, map[string]any{"alanadi_izni": true})
+	OnbellekTemizle()
 	h := &Handlers{DB: o.db}
 	req := httptest.NewRequest("POST", "/x", nil)
 	req.Host = "panel.alfa.test:2083"
