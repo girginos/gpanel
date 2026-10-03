@@ -78,7 +78,9 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Tip == "plan" {
-		if req.PlanID == nil || *req.PlanID <= 0 || !varMi(h.DB, "SELECT COUNT(*) FROM service_plans WHERE id=?", *req.PlanID) {
+		if req.PlanID == nil || *req.PlanID <= 0 || !varMi(h.DB, "SELECT COUNT(*) FROM service_plans WHERE id=? AND domain_id IS NULL", *req.PlanID) {
+			// Yalnız katalog planı: eski hostinge özel kopya toplu olarak başka hostinglere
+			// bağlanamaz (D1). Hostinge özel limitler (üst yazım) plan değişiminde korunur.
 			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
 			return
 		}
