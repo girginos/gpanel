@@ -316,9 +316,9 @@ func TestAjanKayitRedleri(t *testing.T) {
 	t.Run("maskesiz_cerceve", func(t *testing.T) {
 		ws, _ := wsBaglan(t, o.srv.URL, nil)
 		ws.cerceve(wsOpMetin, []byte(`{}`), true, false)
-		op, _, err := ws.oku(2 * time.Second)
-		if err == nil && op != wsOpKapat {
-			t.Fatalf("maskesiz çerçeve kabul: op=%d", op)
+		op, v, err := ws.oku(2 * time.Second)
+		if err != nil || op != wsOpKapat || !bytes.Equal(v, []byte{0x03, 0xEA}) {
+			t.Fatalf("maskesiz çerçeve 1002 ile kapatılmadı: op=%d v=%x err=%v", op, v, err)
 		}
 	})
 	if o.m.ajan.cevrimiciSayi() != 0 {
@@ -345,9 +345,9 @@ func TestWSParcaliVeSinir(t *testing.T) {
 	}
 	ws2, _ := wsBaglan(t, o.srv.URL, nil)
 	ws2.cerceve(wsOpMetin, make([]byte, protokol.CerceveSiniri+1), true, true)
-	op, _, err = ws2.oku(2 * time.Second)
-	if err == nil && op != wsOpKapat {
-		t.Fatal("sınır aşan mesaj kabul edildi")
+	op, v, err = ws2.oku(2 * time.Second)
+	if err != nil || op != wsOpKapat || !bytes.Equal(v, []byte{0x03, 0xF1}) {
+		t.Fatalf("sınır aşan mesaj 1009 ile kapatılmadı: op=%d v=%x err=%v", op, v, err)
 	}
 }
 
