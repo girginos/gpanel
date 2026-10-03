@@ -123,6 +123,77 @@ ensure_context() { # path  type  [recursive]
 }
 want() { echo ",$ONLY," | grep -q ",$1,"; }
 
+# ---- kiracı ağacı yardımcıları ----
+# 🔴 KİRACI AĞACINDA YOL ÜZERİNDEN chmod/chown YAPMA. Kiracı kendi evinde
+# ~/.ssh, ~/public_html ya da ~/.karantina'yı symlink yapabilir (ör. ~/.ssh -> /,
+# ~/public_html -> /root). `[ -d ]`, `stat` ve `chmod` symlink'i izler; chown -h'siz
+# de izler. Root bu yüzden kiracının gösterdiği sistem yolunu chmod/chown ederdi
+# (chmod 700 / → sistem çapında DoS; chmod 755 /root → ifşa; .karantina -> başka
+# kiracının evi → root:root 700). Linux'ta chmod'un -h karşılığı yok; bu yüzden:
+#   1) symlink ise hiç dokunma,
+#   2) dizine `cd -P` ile gir ve kernel'in verdiği gerçek yolu (pwd -P) beklenen
+#      yolla (gerçek üst dizin + ad) karşılaştır,
+#   3) işlemi '.' üzerinde yap: cwd inode'a sabitlenmiştir; kiracı adı denetimden
+#      sonra symlink'le değiştirse bile chmod/chown sabitlenen inode'a gider.
+kiraci_dizin_onar() { # path  mode  [user:group]
+  local p=$1 m=$2 o=${3:-}
+  if [ -L "$p" ]; then warn "symlink — kiracı ağacında izlenmez, atlandı: $p"; return 0; fi
+  [ -d "$p" ] || return 0
+  local ust ad beklenen cur curo degis=0
+  ust=$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P) || { err "üst dizin çözülemedi: $p"; return 0; }
+  ad=$(basename -- "$p"); beklenen="$ust/$ad"
+  cur=$(stat -c '%a' -- "$p" 2>/dev/null) || return 0      # stat -L'siz = lstat
+  curo=$(stat -c '%U:%G' -- "$p" 2>/dev/null) || return 0
+  [ "$((8#$cur & 07777))" != "$((8#$m))" ] && degis=1
+  [ -n "$o" ] && [ "$curo" != "$o" ] && degis=1
+  if [ $degis -eq 0 ]; then ok "izin $m${o:+ sahip $o}  $p"; return 0; fi
+  act "kiracı dizini ${o:+chown $o + }chmod $m  $p  (şu an: $curo $cur)"
+  [ $DRY -eq 1 ] && return 0
+  if ! ( cd -P -- "$p" 2>/dev/null || exit 3
+         [ "$(pwd -P)" = "$beklenen" ] || exit 4
+         if [ -n "$o" ]; then chown -h -- "$o" . || exit 5; fi
+         chmod -- "$m" . || exit 6 ); then
+    err "kiracı dizini onarılamadı (yer değişti/symlink ya da izin hatası): $p"
+  fi
+}
+
+# Bir domain ev dizinini onar (sec_domains gövdesi; test için ayrı fonksiyon).
+domain_evi_onar() { # home  sk
+  local home=$1 sk=$2 child bn
+  ensure_owner "$home" "$sk:$sk"
+  ensure_mode  "$home" 711
+  # ÖNEMLİ: .karantina root'a ait KALMALI (müşteri zararlıya erişmesin) → hariç tut.
+  # Sabit bağlı (links>1) düzenli dosya atlanır: protected_hardlinks=0 olan bir
+  # sunucuda kiracı root'a ait bir dosyayı (ör. /etc/shadow) evine bağlayıp
+  # repair'e kendine chown ettirebilirdi. chown -h: symlink'in kendisi değişir.
+  while IFS= read -r child; do
+    [ -z "$child" ] && continue
+    bn=$(basename "$child")
+    [ "$bn" = ".karantina" ] && continue
+    # root:root 0700 dizin: kiracı .karantina'yı başka ada taşımış olabilir (aynı üst
+    # dizinde rename serbest). Devredersek karantinadaki 0000 dosyalar kiracıya açılır.
+    if [ -d "$child" ] && [ ! -L "$child" ] && [ "$(stat -c '%u %a' -- "$child" 2>/dev/null)" = "0 700" ]; then
+      warn "root:root 0700 dizin (taşınmış karantina olabilir) devredilmedi — elle inceleyin: $child"
+      continue
+    fi
+    ensure_owner "$child" "$sk:$sk" -hR
+  done < <(find -P "$home" -maxdepth 1 -mindepth 1 ! -user "$sk" \( -type d -o -type l -o -links 1 \) 2>/dev/null)
+  kiraci_dizin_onar "$home/public_html" 755
+  kiraci_dizin_onar "$home/.ssh" 700
+  # karantina: root-owned + kilitli
+  kiraci_dizin_onar "$home/.karantina" 700 "root:root"
+  if [ $DEEP -eq 1 ]; then
+    local n; n=$(find -P "$home" \( -path "$home/.karantina" -o -type d -user 0 -perm 700 \) -prune -o ! -user "$sk" \( -type d -o -type l -o -links 1 \) -print 2>/dev/null | wc -l)
+    if [ "${n:-0}" -gt 0 ]; then
+      act "DEEP chown -R $sk:$sk $home ($n yanlış-sahipli girdi; .karantina, root:root 0700 dizinler ve sabit bağlı dosyalar hariç)"
+      # -execdir: find dizinlere fts ile (symlink izlemeden) iner ve komutu o dizinde
+      # ./ad ile koşar → ara dizin symlink'e çevrilse bile yol yeniden çözülmez.
+      [ $DRY -eq 0 ] && find -P "$home" \( -path "$home/.karantina" -o -type d -user 0 -perm 700 \) -prune -o ! -user "$sk" \( -type d -o -type l -o -links 1 \) -execdir chown -h "$sk:$sk" {} + 2>/dev/null
+    fi
+  fi
+  [ $SEL -eq 1 ] && [ $DRY -eq 0 ] && restorecon -R "$home" >/dev/null 2>&1
+}
+
 # ================= BÖLÜMLER =================
 sec_phpmyadmin() {
   want phpmyadmin || return 0
@@ -309,28 +380,7 @@ sec_domains() {
     [ -d "$home" ] || continue
     sk=$(basename "$home")
     if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
-    ensure_owner "$home" "$sk:$sk"
-    ensure_mode  "$home" 711
-    # ÖNEMLİ: .karantina root'a ait KALMALI (müşteri zararlıya erişmesin) → hariç tut
-    local child bn
-    while IFS= read -r child; do
-      [ -z "$child" ] && continue
-      bn=$(basename "$child")
-      [ "$bn" = ".karantina" ] && continue
-      ensure_owner "$child" "$sk:$sk" -R
-    done < <(find "$home" -maxdepth 1 -mindepth 1 ! -user "$sk" 2>/dev/null)
-    [ -d "$home/public_html" ] && ensure_mode "$home/public_html" 755
-    [ -d "$home/.ssh" ]        && ensure_mode "$home/.ssh" 700
-    # karantina: root-owned + kilitli
-    if [ -d "$home/.karantina" ]; then ensure_owner "$home/.karantina" "root:root"; ensure_mode "$home/.karantina" 700; fi
-    if [ $DEEP -eq 1 ]; then
-      local n; n=$(find "$home" -path "$home/.karantina" -prune -o ! -user "$sk" -print 2>/dev/null | wc -l)
-      if [ "${n:-0}" -gt 0 ]; then
-        act "DEEP chown -R $sk:$sk $home ($n yanlış-sahipli dosya, .karantina hariç)"
-        [ $DRY -eq 0 ] && find "$home" -path "$home/.karantina" -prune -o ! -user "$sk" -exec chown "$sk:$sk" {} + 2>/dev/null
-      fi
-    fi
-    [ $SEL -eq 1 ] && [ $DRY -eq 0 ] && restorecon -R "$home" >/dev/null 2>&1
+    domain_evi_onar "$home" "$sk"
   done
 }
 
@@ -350,6 +400,9 @@ sec_docroot_selinux() {
   # tmp varsayilan olarak user_tmp_t etiketlidir ve httpd domaini
   # oraya yazamaz -> WordPress eklenti indiremez ("Permission denied").
   for d in /home/c_*/public_html /home/c_*/tmp; do
+    # Kiracı bu adı symlink yapabilir: fcontext kuralı/restorecon hedefi olarak
+    # kiracının gösterdiği yolu kullanma.
+    [ -L "$d" ] && { warn "symlink — atlandı: $d"; continue; }
     [ -d "$d" ] || continue
     n=$((n+1))
     local mevcut; mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
@@ -619,6 +672,10 @@ SIEVEEOF
     rm -f "$SF"; err "sieve config doveconf testini gecmedi - geri alindi"
   fi
 }
+
+# Test kancası: GOSP_REPAIR_KUTUPHANE=1 ile `source` edilince yalnız fonksiyonlar
+# tanımlanır, hiçbir bölüm koşmaz (bkz. internal/opsbetik/repair_test.go).
+if [ "${GOSP_REPAIR_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"

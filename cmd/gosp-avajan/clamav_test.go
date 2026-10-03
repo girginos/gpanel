@@ -438,3 +438,81 @@ func TestArgPartileri(t *testing.T) {
 		t.Fatal("boş girdi boş parti")
 	}
 }
+
+// Panelin "Tara" ucu kökü /home/<sk>/public_html olarak verir. Kiracı public_html'i
+// başka kiracının belge köküne symlink yaparsa tarama ORAYA çözülmemeli: kurbanın
+// dosya yolları/imzaları saldırganın kaydına sızmamalı, hiçbir yol listeye girmemeli.
+func TestClamKok_KiraciKokuEvDisinaCozulmez(t *testing.T) {
+	a, o := yeniClamOrtam(t)
+	eski := kokEvKoku
+	kokEvKoku = o.kok
+	t.Cleanup(func() { kokEvKoku = eski })
+	kurbanPub := filepath.Dir(o.kurbanDosya)
+	dosyaOlustur(t, filepath.Join(kurbanPub, "kurban-shell.php"), zararliIcerik, 0o644)
+	if err := os.Remove(o.saldirgan); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(kurbanPub, o.saldirgan); err != nil {
+		t.Fatal(err)
+	}
+	s := a.clamKok(o.saldirgan, nil)
+	if len(s.bulgular) != 0 || len(o.sc.liste) != 0 || len(o.sc.konumsal) != 0 {
+		t.Fatalf("ev dışına çözülen kök tarandı: bulgular=%v liste=%v konumsal=%v", s.bulgular, o.sc.liste, o.sc.konumsal)
+	}
+	if s.tutarli {
+		t.Fatal("reddedilen kök tutarlı sayıldı (alarm/oto-karantina kapanmalı)")
+	}
+}
+
+// Meşru: ev İÇİNDE kalan symlink kök (public_html -> ~/www) taranır.
+func TestClamKok_EvIciSymlinkKokTaranir(t *testing.T) {
+	a, o := yeniClamOrtam(t)
+	eski := kokEvKoku
+	kokEvKoku = o.kok
+	t.Cleanup(func() { kokEvKoku = eski })
+	www := filepath.Join(filepath.Dir(o.saldirgan), "www")
+	if err := os.Mkdir(www, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dosyaOlustur(t, filepath.Join(www, "shell.php"), zararliIcerik, 0o644)
+	if err := os.Remove(o.saldirgan); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(www, o.saldirgan); err != nil {
+		t.Fatal(err)
+	}
+	s := a.clamKok(o.saldirgan, nil)
+	if !s.tutarli || len(s.bulgular) != 1 {
+		t.Fatalf("ev içi symlink kök taranmadı: tutarli=%v bulgular=%v", s.tutarli, s.bulgular)
+	}
+}
+
+func TestKokEvDisinaCikiyor(t *testing.T) {
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kok := filepath.Join(d, "home")
+	for _, p := range []string{filepath.Join(kok, "c_a"), filepath.Join(kok, "c_ab")} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	durumlar := []struct {
+		soz, gercek string
+		beklenen    bool
+	}{
+		{kok + "/c_a/public_html", kok + "/c_a/public_html", false},
+		{kok + "/c_a/public_html", kok + "/c_a/www", false},
+		{kok + "/c_a/public_html", kok + "/c_ab/public_html", true}, // kardeş önek
+		{kok + "/c_a/public_html", kok + "/c_a", false},
+		{kok + "/c_a/public_html", "/etc", true},
+		{kok + "/c_yok/public_html", kok + "/c_yok/public_html", true}, // ev çözülemiyor
+		{"/var/www/html", "/srv/www", false},                           // kiracı altında değil
+	}
+	for _, c := range durumlar {
+		if g := kokEvDisinaCikiyor(kok, c.soz, c.gercek); g != c.beklenen {
+			t.Errorf("kokEvDisinaCikiyor(%q,%q)=%v, beklenen %v", c.soz, c.gercek, g, c.beklenen)
+		}
+	}
+}

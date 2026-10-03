@@ -328,36 +328,93 @@ func (h *Handlers) sshAnahtarlariArsivle(sk string) error {
 	if !strings.HasPrefix(sk, "c_") {
 		return fmt.Errorf("güvenlik: c_ prefiksli olmayan kullanıcı")
 	}
-	// SYMLINK-GUVENLI: /home/<sk> tenant'in sahipligindedir; tenant .ssh'i
-	// /root/.ssh veya /etc'e symlink'e cevirip panelin (root) o link uzerinden
-	// dosya truncate etmesini saglayabilirdi. homeAltiAc openat2
-	// (RESOLVE_NO_SYMLINKS) ile yol boyunca hicbir bagi izlemez; biri symlink
-	// ise ELOOP doner. Acik fd uzerinden okuyup Truncate ederiz (TOCTOU yok).
-	f, err := homeAltiAc(sk, ".ssh/authorized_keys", unix.O_RDWR, 0)
+	err := authorizedKeysArsivle("/home", sk, devirArsivKok, time.Now())
+	// Shell'i her halukarda kapat (dosya yoksa da, saldiri denenmis olsa da eski
+	// sahip parolayla girememeli). Yeni sahip bilincli olarak acsin.
+	_ = hesaplar.LockSSHPassword(sk)
+	return err
+}
+
+// authorizedKeysMaks — arşive alınan authorized_keys için üst sınır (bellek DoS'u
+// önler; meşru dosya birkaç KB'dir).
+const authorizedKeysMaks = 1 << 20
+
+// authorizedKeysArsivle — <evKok>/<sk>/.ssh/authorized_keys'i arşive kopyalar ve
+// eski sahibin anahtarlarını etkisiz kılar.
+//
+// SYMLINK-GUVENLI: /home/<sk> tenant'in sahipligindedir; tenant .ssh'i /root/.ssh
+// veya /etc'e symlink'e cevirip panelin (root) o link uzerinden dosya truncate
+// etmesini saglayabilirdi. .ssh homeAltiAcKok (openat2 RESOLVE_NO_SYMLINKS) ile
+// acilir; authorized_keys o dizin fd'sine gore O_NOFOLLOW ile.
+//
+// 🔴 TUR VE BAG DENETIMI: eskiden dosya turune bakilmadan O_RDWR acilip io.ReadAll
+// yapiliyordu. FIFO'da (panel iki ucu da tuttugu icin EOF hic gelmez) devir isi
+// sonsuza dek asili kaliyordu (DoS); sabit bagda (protected_hardlinks=0) bagin
+// hedefi — ör. root'un authorized_keys'i — arsive okunup truncate edilirdi. Artik
+// yalniz tek bagli duzenli dosya okunup fd uzerinden bosaltilir; baska her tur
+// (FIFO, sabit bag, aygit, dizin disi) icin yalniz DIZIN GIRDISI kaldirilir
+// (unlinkat): baska inode'a dokunulmaz ve eski sahip anahtarini bir bagla
+// koruyamaz. Okuma authorizedKeysMaks ile sinirli.
+func authorizedKeysArsivle(evKok, sk, arsivKok string, an time.Time) error {
+	if !strings.HasPrefix(sk, "c_") {
+		return fmt.Errorf("güvenlik: c_ prefiksli olmayan kullanıcı")
+	}
+	d, err := homeAltiAcKok(evKok, sk, ".ssh", unix.O_DIRECTORY|unix.O_RDONLY, 0)
 	if err != nil {
-		// Shell'i her halukarda kapat (dosya yoksa da, symlink saldirisi denenmis
-		// olsa da eski sahip parolayla girememeli).
-		_ = hesaplar.LockSSHPassword(sk)
 		if os.IsNotExist(err) {
+			return nil // .ssh yok — normal
+		}
+		return err // ELOOP (symlink) veya izin: dokunmadan cik
+	}
+	defer d.Close()
+	dfd := int(d.Fd())
+	const ad = "authorized_keys"
+	var st unix.Stat_t
+	if err := unix.Fstatat(dfd, ad, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if errors.Is(err, unix.ENOENT) {
 			return nil // authorized_keys yok — normal
 		}
-		return err // ELOOP (symlink) veya izin: OKUMADAN/TRUNCATE ETMEDEN cik
+		return err
 	}
-	defer f.Close()
-	veri, err := io.ReadAll(f)
+	switch {
+	case st.Mode&unix.S_IFMT == unix.S_IFDIR:
+		return fmt.Errorf("authorized_keys bir dizin — elle inceleyin")
+	case st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1:
+		// Symlink, FIFO, aygıt, soket ya da sabit bağ: içeriği OKUMA, yalnız girdiyi kaldır.
+		if err := unix.Unlinkat(dfd, ad, 0); err != nil {
+			return fmt.Errorf("düzenli olmayan/sabit bağlı authorized_keys kaldırılamadı: %w", err)
+		}
+		return fmt.Errorf("authorized_keys düzenli tek bağlı dosya değildi (mod %o, bağ %d) — okunmadan kaldırıldı", st.Mode, st.Nlink)
+	}
+	// O_NONBLOCK: denetim ile açış arasında FIFO'ya çevrilse bile açış/okuma asılı kalmaz.
+	fd, err := unix.Openat(dfd, ad, unix.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		_ = hesaplar.LockSSHPassword(sk)
+		return err
+	}
+	f := os.NewFile(uintptr(fd), ad)
+	defer f.Close()
+	var st2 unix.Stat_t
+	if err := unix.Fstat(fd, &st2); err != nil {
+		return err
+	}
+	if st2.Mode&unix.S_IFMT != unix.S_IFREG || st2.Nlink != 1 || st2.Ino != st.Ino || st2.Dev != st.Dev {
+		return fmt.Errorf("authorized_keys denetim sırasında değişti — dokunulmadı")
+	}
+	veri, err := io.ReadAll(io.LimitReader(f, authorizedKeysMaks))
+	if err != nil {
 		return err
 	}
 	if len(veri) > 0 {
-		if err := os.MkdirAll(devirArsivKok, 0700); err == nil {
-			hedef := filepath.Join(devirArsivKok, sk+".authorized_keys."+time.Now().UTC().Format("20060102-150405"))
+		if err := os.MkdirAll(arsivKok, 0700); err == nil {
+			hedef := filepath.Join(arsivKok, sk+".authorized_keys."+an.UTC().Format("20060102-150405"))
 			_ = os.WriteFile(hedef, veri, 0600)
 		}
-		_ = f.Truncate(0) // acik fd uzerinden — yol yeniden cozulmez
 	}
-	// Shell'i kapat: yeni sahip bilincli olarak acsin.
-	_ = hesaplar.LockSSHPassword(sk)
+	if st2.Size > 0 {
+		if err := f.Truncate(0); err != nil { // acik fd uzerinden — yol yeniden cozulmez
+			return err
+		}
+	}
 	return nil
 }
 
