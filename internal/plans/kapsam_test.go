@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/plans"
 )
 
@@ -69,55 +69,67 @@ func TestPlanKapsam_KendiHostinginYabanciSahipliOzelPlani(t *testing.T) {
 	}
 }
 
-// Kopya planın adı VARCHAR(64)'e sığar; uzun alan adında da devir düşmez.
-func TestDevirPlanTasi_UzunAlanAdiVeYinelenenAd(t *testing.T) {
+// D1: devir KOPYA PLAN ÜRETMEZ. Eski sahibin katalog planındaki hosting, yeni
+// sahibin görebildiği en yakın katalog planına geçer; farklı her alan hostinge özel
+// üst yazım olur (kökün kilidi altında) ve efektif limitler birebir aynı kalır.
+func TestDevirPlanTasi_KopyaYokUstYazim(t *testing.T) {
 	db := pk_geciciDB(t)
-	uzun := strings.Repeat("çok-uzun-alt-alan-", 5) + "a-iki.test" // 100 rune
-	pk_exec(t, db, `UPDATE domains SET alan_adi=?, reseller_id=3 WHERE id=21`, uzun)
 	ctx := context.Background()
-	kopya := func() (string, int64) {
+	pk_exec(t, db, `UPDATE domains SET reseller_id=3 WHERE id=21`) // devir: A'nın plan 200'ü → B
+	planSay := func() int {
+		var n int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM service_plans`).Scan(&n)
+		return n
+	}
+	devret := func(did, yeni int64) string {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		not, err := plans.DevirPlanTasi(ctx, tx, 21, 3)
+		not, err := plans.DevirPlanTasi(ctx, tx, did, yeni)
 		if err != nil {
 			t.Fatalf("DevirPlanTasi: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		var ad string
-		var pid int64
-		if err := db.QueryRow(`SELECT p.ad, p.id FROM domains d JOIN service_plans p ON p.id=d.plan_id WHERE d.id=21`).Scan(&ad, &pid); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("not: %s", not)
-		return ad, pid
+		return not
 	}
-	ad1, p1 := kopya()
-	if utf8.RuneCountInString(ad1) > 64 || !strings.HasSuffix(ad1, " — Özel") || p1 == 200 {
-		t.Errorf("kopya adı %q (%d rune), plan %d", ad1, utf8.RuneCountInString(ad1), p1)
-	}
-	// Aynı hosting ikinci kez (A'ya geri, sonra B'ye) devredilirse: özel plan artık
-	// B'nin → A'ya devirde sahipliği taşınır (kopya yok).
-	pk_exec(t, db, `UPDATE domains SET reseller_id=2 WHERE id=21`)
-	tx, _ := db.BeginTx(ctx, nil)
-	if _, err := plans.DevirPlanTasi(ctx, tx, 21, 2); err != nil {
+	n0 := planSay()
+	once, err := efektiflimit.Oku(ctx, db, 21)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_ = tx.Commit()
-	var sahip int64
-	_ = db.QueryRow(`SELECT reseller_id FROM service_plans WHERE id=?`, p1).Scan(&sahip)
-	if sahip != 2 {
-		t.Errorf("özel plan geri devirde taşınmadı: sahip %d", sahip)
+	not := devret(21, 3)
+	sonra, _ := efektiflimit.Oku(ctx, db, 21)
+	if f := efektiflimit.Esit(once, sonra, nil); len(f) > 0 {
+		t.Errorf("devir efektif limitleri değiştirdi: %v", f)
 	}
-	// Ad çakışması: aynı kalıpta ikinci kopya "… — Özel 2" olur.
-	pk_exec(t, db, `UPDATE domains SET plan_id=200, reseller_id=3 WHERE id=21`)
-	ad2, p2 := kopya()
-	if p2 == p1 || !strings.HasSuffix(ad2, " — Özel 2") || utf8.RuneCountInString(ad2) > 64 {
-		t.Errorf("ikinci kopya adı %q plan %d (ilk %d)", ad2, p2, p1)
+	if planSay() != n0 {
+		t.Errorf("devir kopya plan üretti: %d → %d plan", n0, planSay())
+	}
+	// B'nin görebildiği katalog: 1 (kök global) ve 300 (B). 200'e en yakın: 300 (4 alan).
+	if sonra.PlanID == nil || *sonra.PlanID != 300 {
+		t.Fatalf("taban plan %v, beklenen 300 (not: %s)", sonra.PlanID, not)
+	}
+	for _, k := range []string{"disk_kota_mb", "trafik_kota_mb", "cpu_yuzde", "ram_mb"} {
+		if d := sonra.Degerler[k]; d.Kaynak != efektiflimit.KaynakUst || !d.Kok {
+			t.Errorf("%s: kaynak=%s kök kilidi=%v (beklenen üst yazım + kilit)", k, d.Kaynak, d.Kok)
+		}
+	}
+	if !strings.Contains(not, "#300") || !strings.Contains(not, "4 alan") {
+		t.Errorf("devir notu: %q", not)
+	}
+	// Geri devir (B → A): yine kopya yok, efektif aynı.
+	pk_exec(t, db, `UPDATE domains SET reseller_id=2 WHERE id=21`)
+	devret(21, 2)
+	geri, _ := efektiflimit.Oku(ctx, db, 21)
+	if f := efektiflimit.Esit(once, geri, nil); len(f) > 0 || planSay() != n0 {
+		t.Errorf("geri devir: fark %v, plan sayısı %d (beklenen %d)", f, planSay(), n0)
+	}
+	if geri.PlanID == nil || *geri.PlanID == 300 {
+		t.Errorf("geri devirde hosting B'nin planında kaldı: %v", geri.PlanID)
 	}
 }
 

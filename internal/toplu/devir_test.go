@@ -40,6 +40,7 @@ import (
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/bildirim"
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/middleware"
 )
@@ -121,9 +122,12 @@ func dt_geciciDB(t *testing.T) *sql.DB {
 			customer_id BIGINT UNSIGNED NULL,
 			boyut_kb BIGINT NULL,
 			plan_id BIGINT UNSIGNED NULL,
+			disk_kota_mb INT NOT NULL DEFAULT 0, inode_kota INT NOT NULL DEFAULT 0,
+			waf_enabled TINYINT NULL, waf_mode VARCHAR(10) NULL, waf_paranoia TINYINT NULL,
 			KEY ix_domains_plan (plan_id)
 		) ENGINE=InnoDB`,
 		dt_servicePlansDDL,
+		efektiflimit.TabloDDL, // 0120: devir farkları hostinge özel üst yazım olur
 		// 0003 + 0089 (token_gecersiz_ts) + 0104 (password_md5 VARCHAR(255))
 		`CREATE TABLE ftp_accounts (
 			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

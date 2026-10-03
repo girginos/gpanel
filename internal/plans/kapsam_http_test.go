@@ -46,6 +46,7 @@ import (
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/domains"
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/plans"
 )
@@ -168,8 +169,11 @@ func pk_geciciDB(t *testing.T) *sql.DB {
 			boyut_kb BIGINT NOT NULL DEFAULT 0,
 			customer_id BIGINT UNSIGNED NULL,
 			reseller_id BIGINT NOT NULL DEFAULT 0,
+			disk_kota_mb INT NOT NULL DEFAULT 0, inode_kota INT NOT NULL DEFAULT 0,
+			waf_enabled TINYINT NULL, waf_mode VARCHAR(10) NULL, waf_paranoia TINYINT NULL,
 			KEY ix_domains_plan (plan_id), KEY ix_dom_reseller (reseller_id)
 		) ENGINE=InnoDB`,
+		efektiflimit.TabloDDL, // 0120
 		`CREATE TABLE audit_log (
 			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 			actor_user_id BIGINT NULL, actor_username VARCHAR(64) NULL, ip VARCHAR(64) NULL,
@@ -329,19 +333,20 @@ func TestPlanKapsam_KokOzelPlanBayiyeKapali(t *testing.T) {
 			t.Errorf("BAYI-UI-02: tarama — bayi A GET /plans/%d → 200 %s", id, y.govde)
 		}
 	}
-	// Kontrol: kendi hostinginin özel planı görünür (?domain=20 ve doğrudan).
-	if p := pk_planlar(t, pk_istek(t, h, "A", "GET", "/plans?domain=20", nil)); p[210] == nil {
-		t.Errorf("kontrol: bayi A kendi hostingi 20'nin özel planını (210) göremedi")
+	// D1: liste YALNIZ katalogdur — ?domain= yok sayılır; bayinin kendi hostingine ait
+	// eski kopya da listeye girmez (doğrudan kimlikle okunabilir).
+	if p := pk_planlar(t, pk_istek(t, h, "A", "GET", "/plans?domain=20", nil)); p[210] != nil || p[1] == nil || p[200] == nil {
+		t.Errorf("D1: bayi A GET /plans?domain=20 → katalog dışı kopya listede ya da katalog eksik: %v", p)
 	}
 	if y := pk_istek(t, h, "A", "GET", "/plans/210", nil); y.kod != http.StatusOK {
 		t.Errorf("kontrol: bayi A GET /plans/210 → %d %s", y.kod, y.govde)
 	}
-	// Yönetici DEĞİŞMEZ: kök özel planı tüm ayrıntısıyla görür.
+	// Yönetici: kök özel planı tüm ayrıntısıyla görür; listede yine yalnız katalog.
 	if y := pk_istek(t, h, "admin", "GET", "/plans/100", nil); y.kod != http.StatusOK || !strings.Contains(y.govde, "# KOK-OZEL-DIREKTIF") {
 		t.Errorf("yönetici GET /plans/100 → %d %s", y.kod, y.govde)
 	}
-	if p := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?domain=10", nil)); p[100] == nil {
-		t.Errorf("yönetici GET /plans?domain=10 kök özel planını listelemedi")
+	if p := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?domain=10", nil)); p[100] != nil || p[210] != nil || p[300] == nil {
+		t.Errorf("D1: yönetici GET /plans?domain=10 kopya listeledi ya da katalog eksik: %v", p)
 	}
 }
 
@@ -370,10 +375,16 @@ func TestPlanKapsam_BayiYabanciPlaniBaglayamaz(t *testing.T) {
 			t.Errorf("kontrol: bayi A plan %d → %d %s (beklenen kapıdan geçip 404)", pid, y.kod, y.govde)
 		}
 	}
-	// Yönetici DEĞİŞMEZ: her planı bağlayabilir (hosting yok → 404).
-	for _, pid := range []int64{100, 210, 300} {
+	// Yönetici: her KATALOG planını bağlayabilir (hosting yok → 404); başka hostingin
+	// eski özel kopyası (D1) yönetici için de bağlanamaz.
+	for _, pid := range []int64{1, 300} {
 		if y := bagla("admin", pid); y.kod != http.StatusNotFound {
 			t.Errorf("yönetici plan %d → %d %s (beklenen 404)", pid, y.kod, y.govde)
+		}
+	}
+	for _, pid := range []int64{100, 210} {
+		if y := bagla("admin", pid); y.kod != http.StatusForbidden || !strings.Contains(y.govde, "yalnız ait olduğu hostinge") {
+			t.Errorf("D1: yönetici başka hostingin kopyasını (%d) bağlayabildi → %d %s", pid, y.kod, y.govde)
 		}
 	}
 	// Olmayan plan (değişmeyen davranış).
