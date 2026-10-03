@@ -330,3 +330,24 @@ func TestCalistirCLI(t *testing.T) {
 		t.Fatalf("askıda/pasif/bilinmeyen görev çalıştırıldı: %d çağrı", n)
 	}
 }
+
+// Tutarsız durum (yarım kalmış işlem: hem depo hem askı deposu var): hesabın
+// zamanlayıcısı ÜRETİLMEZ — askı her zaman kazanır (derinlemesine savunma;
+// Uzlastir'in artık temizliğinden bağımsız).
+func TestCronDUzlastir_AskiKazanir(t *testing.T) {
+	temizle(t)
+	_ = os.WriteFile(depoYolu("c_var_a"), metin("c_var_a", []Gorev{gorev("*", "x")}), 0o600)
+	_ = os.WriteFile(askiYolu("c_var_a"), nil, 0o600)
+	_ = os.WriteFile(cronDYolu("c_var_a"), []byte("eski"), 0o600)
+	if err := cronDUzlastir("c_var_a"); err != nil {
+		t.Fatal(err)
+	}
+	if varMi(cronDYolu("c_var_a")) {
+		t.Fatal("askıdaki hesabın zamanlayıcısı kaldı/üretildi")
+	}
+	// Kullanıcısı olmayan hesap da zamanlanmaz.
+	_ = os.WriteFile(depoYolu("c_yok"), metin("c_yok", []Gorev{gorev("*", "x")}), 0o600)
+	if err := cronDUzlastir("c_yok"); err != nil || varMi(cronDYolu("c_yok")) {
+		t.Fatalf("kullanıcısız hesap zamanlandı: %v", err)
+	}
+}
