@@ -8,6 +8,7 @@ import AramaliSecim from '@/components/AramaliSecim'
 import { Ikon, I } from '@/components/Ikon'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
+import { varsayilanPlanSec } from '@/lib/bayiPlan'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
@@ -35,7 +36,7 @@ type SubGenel = {
   parent_id: number; parent_ad: string
   sistem_kullanici: string; php_surum: string; docroot: string; olusturulma: string
 }
-type Plan = { id: number; ad: string; disk_kota_mb?: number }
+type Plan = { id: number; ad: string; disk_kota_mb?: number; varsayilan?: boolean; duzenlenebilir?: boolean }
 type PHPVer = { surum: string; aciklama?: string; eol?: boolean }
 type OlusturmaSonuc = {
   alan_adi: string; sistem_kullanici: string; ftp_user: string; ftp_host: string
@@ -324,7 +325,7 @@ export default function DomainsPage() {
       // Plan henüz seçilmediyse (modal veri gelmeden açıldıysa) varsayılanı ata.
       setFPlanID(prev => {
         if (prev !== '') return prev
-        const v = pl.find(p => p.ad === cevir("Başlangıç")) || pl[0]
+        const v = varsayilanPlanSec(pl)
         return v ? v.id : ''
       })
     }).finally(() => setModalVeriYuk(false))
@@ -332,9 +333,10 @@ export default function DomainsPage() {
 
   function olusturAc() {
     setHata(null); setBasari(null); setOlusturmaSonuc(null)
-    // varsayılan plan = cevir("Başlangıç") (yoksa ilk plan, o da yoksa boş) — veri geldiyse hemen ata,
+    // ön seçili plan = çağıranın varsayılan planı (bayide bayinin kendi varsayılanı;
+    // yoksa "Başlangıç", o da yoksa ilk plan — lib/bayiPlan.ts) — veri geldiyse hemen ata,
     // gelmediyse modalVeriYukle tamamlanınca atanır.
-    const varsayilan = planlar.find(p => p.ad === cevir("Başlangıç")) || planlar[0]
+    const varsayilan = varsayilanPlanSec(planlar)
     setFAlanAdi(''); setFPHPSurum('8.3'); setFPlanID(varsayilan ? varsayilan.id : '')
     setOlusturAcik(true)
     modalVeriYukle() // lazy: plan/php sürümleri henüz gelmediyse şimdi çek (listeyi bloklamaz)
