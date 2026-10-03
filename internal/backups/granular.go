@@ -143,6 +143,8 @@ func dumpTamamlandiMi(yol string) bool {
 
 // arsivOlustur: /home/<sk> + TUM domain DB'leri (__db__/<ad>.sql) + manifest'i tek
 // .tar.gz'ye paketler. Hem manuel (Create) hem otomatik (scheduler) tarafindan kullanilir.
+// Harici surecler komut() ile kurulur: manuel yedekte ctx dusukOncelikli oldugu icin
+// mysqldump/tar/gzip ionice idle + nice 19 kosar; kok yollarinda davranis AYNI.
 // Eski surum yalniz <sk>_main aliyordu; artik wp_* gibi ek DB'ler de yedeklenir.
 //
 // 🔴 BUTUNLUK: tar'in cikis kodu YALNIZ kaba hatalari yakalar; sessiz sikistirma
@@ -171,7 +173,7 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		// $ ` \ genislemeye devam eder ve tek-tirnak kacisi etkisiz kalirdi.
 		// SQL'in tamami tek shq ile sarilir (dbName GecerliDBKimlik'ten gecmis
 		// [A-Za-z0-9_] oldugu icin SQL literali olarak da guvenlidir).
-		chk := exec.CommandContext(ctx, "bash", "-c",
+		chk := komut(ctx, "bash", "-c",
 			fmt.Sprintf("mysql -N -e %s", shq("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='"+dbName+"'")))
 		chkOut, chkErr := chk.Output()
 		if chkErr != nil {
@@ -193,7 +195,7 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 		//: sunucuya MySQL-8 istemcisi kurulursa varsayilan
 		// MariaDB mysqldump 'unknown option' ile exit 2 verir ve TUM dumplar patlar.
 		hataDosya := hedef + ".hata"
-		cmd := exec.CommandContext(ctx, "bash", "-c",
+		cmd := komut(ctx, "bash", "-c",
 			fmt.Sprintf("mysqldump --single-transaction --skip-lock-tables --routines --events --triggers --default-character-set=utf8mb4 --hex-blob %s > %s 2> %s",
 				shq(dbName), shq(hedef), shq(hataDosya)))
 		dumpHata := func() string {
@@ -256,7 +258,7 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 	IlerlemeAsama(domainID, "dosyalar arşivleniyor", oncekiYedekBoyutu(db, domainID))
 	IlerlemeDosyaIzle(domainID, abs)
 	tarUyarisi := ""
-	if out, err := exec.CommandContext(ctx, "tar", args...).CombinedOutput(); err != nil {
+	if out, err := komut(ctx, "tar", args...).CombinedOutput(); err != nil {
 		kod := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -277,7 +279,7 @@ func arsivOlustur(ctx context.Context, db *sql.DB, domainID int64, sk, dir, dosy
 	IlerlemeDosyaDur(domainID)
 	IlerlemeAsama(domainID, "bütünlük doğrulanıyor", 0)
 	// 🔴 BUTUNLUK DOGRULAMASI: gzip stream'i saglam mi (bozulma/truncation tespiti).
-	if out, err := exec.CommandContext(ctx, "gzip", "-t", abs).CombinedOutput(); err != nil {
+	if out, err := komut(ctx, "gzip", "-t", abs).CombinedOutput(); err != nil {
 		_ = os.Remove(abs) // bozuk arsivi tut-ma: yaniltici "gecerli yedek" olusmasin
 		return 0, "", basarisizDB, fmt.Errorf("yedek butunluk dogrulamasi basarisiz — BOZUK arsiv: %s: %w", strings.TrimSpace(string(out)), err)
 	}

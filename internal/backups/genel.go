@@ -184,8 +184,17 @@ func pushGenelAsync(db *sql.DB, g *GenelAyar, yerelYol, dosyaAdi string, yedekID
 	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	go pushGenel(context.Background(), db, g, yerelYol, dosyaAdi, yedekID)
+}
+
+// pushGenel: pushGenelAsync'in EŞZAMANLI gövdesi. Manuel yedek bunu kuyruk slotu
+// içinde düşük öncelikli context ile çağırır (lftp ionice/nice ile koşar).
+func pushGenel(ctx context.Context, db *sql.DB, g *GenelAyar, yerelYol, dosyaAdi string, yedekID int64) {
+	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
+		return
+	}
+	{
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		defer cancel()
 		// Tarih alt dizini: /gpanel/2026-08-25/<dosya>. uploadToRemote hedef
 		// dizini `mkdir -p -f` ile kendi yaratir, ek adim gerekmez.
@@ -239,7 +248,7 @@ func pushGenelAsync(db *sql.DB, g *GenelAyar, yerelYol, dosyaAdi string, yedekID
 				log.Printf("backup genel: %s uzaga tasindi, yerel kopya silindi", dosyaAdi)
 			}
 		}
-	}()
+	}
 }
 
 // uzakTarihDizini: yedek dosya adindan UTC tarih klasoru turetir.

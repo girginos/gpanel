@@ -68,6 +68,9 @@ func isDurdur(jobID int64) bool {
 	return true
 }
 
+// ErrManuelYedekSuruyor: kök yolu hesabın kilidini beklerken süre doldu.
+var ErrManuelYedekSuruyor = errors.New("hesabın manuel yedeği sürüyor; bu turda atlandı")
+
 func jobDurum(basari, hata int) string {
 	if hata == 0 {
 		return "tamam"
@@ -84,14 +87,16 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 	if !strings.HasPrefix(sk, "c_") {
 		return 0, "", fmt.Errorf("güvensiz sk: %s", sk)
 	}
+	// 🔴 HESAP KİLİDİ: müşterinin manuel yedeği bu hesapta sıradaysa/çalışıyorsa
+	// kök yolu bekler (en çok sistemKilitBekleme), aynı hesabı iki arşiv aynı anda
+	// okumaz. Süre dolarsa hesap bu turda atlanır (bir sonraki turda alınır).
+	if !sistemKilidiAl(ctx, domainID) {
+		return 0, "", ErrManuelYedekSuruyor
+	}
+	defer yedekBitir(domainID)
 	dir := filepath.Join(BackupRoot, sk)
 	_ = os.MkdirAll(dir, 0700)
-	stamp := time.Now().UTC().Format("20060102-150405")
-	ek := ""
-	if tip == "oto" {
-		ek = "-auto"
-	}
-	dosya := fmt.Sprintf("%s%s-%s.tar.gz", sk, ek, stamp)
+	dosya := yedekDosyaAdi(dir, sk, time.Now().UTC())
 	boyut, sha, eksikDB, err := arsivOlustur(ctx, db, domainID, sk, dir, dosya, time.Now().UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		// 🔴 Yedek basarisiz/bozuk → MUTLAKA bildirim (scheduler'da sessizce log'lanip

@@ -394,7 +394,8 @@ func lftpKomutu(ctx context.Context, betik string) (*exec.Cmd, func(), error) {
 		return nil, func() {}, fmt.Errorf("lftp betigi yazma: %w", err)
 	}
 	_ = f.Close()
-	return exec.CommandContext(ctx, "lftp", "-f", yol), temizle, nil
+	// komut: context düşük öncelikliyse (manuel yedek) lftp ionice idle + nice 19 koşar.
+	return komut(ctx, "lftp", "-f", yol), temizle, nil
 }
 
 // lftpEscape: lftp komut satırı içinde çift tırnak içine konacak değerleri escape eder.
@@ -563,28 +564,38 @@ func sshGurultuTemizle(cikti string, err error) string {
 
 // pushToDestinationAsync: yedek başarıyla oluştuktan sonra arkaplanda upload tetikler.
 // Hata olsa bile API cevabını bloke etmez; son_durum/son_hata DB'ye yazılır.
+// (Kök yolları: zamanlayıcı + toplu iş. Manuel yedek pushToDestination'ı kuyruk
+// slotu içinde EŞZAMANLI çağırır.)
 func pushToDestinationAsync(db *sql.DB, domainID int64, localPath, dosyaAdi string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		d, err := readDestination(ctx, db, domainID)
-		if err != nil || d == nil || !d.Aktif {
-			return
-		}
-		if err := uploadToRemote(ctx, d, localPath, dosyaAdi); err != nil {
-			short := err.Error()
-			if len(short) > 500 {
-				short = short[:500]
-			}
-			_, _ = db.Exec(`UPDATE backup_destinations
-				SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE domain_id=?`,
-				short, domainID)
-			log.Printf("backup destination upload domain=%d: %v", domainID, err)
-			return
+		pushToDestination(ctx, db, domainID, localPath, dosyaAdi)
+	}()
+}
+
+// pushToDestination: domain uzak hedefine EŞZAMANLI yükleme. Context'in önceliği
+// (dusukOncelikli) lftp'ye geçer.
+func pushToDestination(ctx context.Context, db *sql.DB, domainID int64, localPath, dosyaAdi string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	d, err := readDestination(ctx, db, domainID)
+	if err != nil || d == nil || !d.Aktif {
+		return
+	}
+	if err := uploadToRemote(ctx, d, localPath, dosyaAdi); err != nil {
+		short := err.Error()
+		if len(short) > 500 {
+			short = short[:500]
 		}
 		_, _ = db.Exec(`UPDATE backup_destinations
-			SET son_durum='basarili', son_hata='', son_yukleme=NOW() WHERE domain_id=?`,
-			domainID)
-		log.Printf("backup destination upload domain=%d başarılı: %s", domainID, dosyaAdi)
-	}()
+			SET son_durum='hata', son_hata=?, son_yukleme=NOW() WHERE domain_id=?`,
+			short, domainID)
+		log.Printf("backup destination upload domain=%d: %v", domainID, err)
+		return
+	}
+	_, _ = db.Exec(`UPDATE backup_destinations
+		SET son_durum='basarili', son_hata='', son_yukleme=NOW() WHERE domain_id=?`,
+		domainID)
+	log.Printf("backup destination upload domain=%d başarılı: %s", domainID, dosyaAdi)
 }

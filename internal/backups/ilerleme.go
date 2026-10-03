@@ -38,6 +38,9 @@ type Ilerleme struct {
 	GecenSn int    `json:"gecen_sn"`
 	Sonuc   string `json:"sonuc,omitempty"` // basarili bitis mesaji
 	Hata    string `json:"hata,omitempty"`  // basarisiz bitis mesaji
+	// Sirada: manuel yedek sunucu geneli kuyrukta slot bekliyor; SiraNo 1'den başlar.
+	Sirada bool `json:"sirada,omitempty"`
+	SiraNo int  `json:"sira_no,omitempty"`
 }
 
 type ilerlemeKayit struct {
@@ -204,6 +207,12 @@ func IlerlemeOku(domainID int64) Ilerleme {
 	if k.bitti {
 		i.Yuzde = 100
 		return i
+	}
+	if k.islem == "yedek" {
+		if n := manuelKuyrugu.Sira(domainID); n > 0 {
+			i.Sirada = true
+			i.SiraNo = n
+		}
 	}
 	// 🔴 Yuzde %99'da tutulur: arsivleme bitse bile dogrulama/checksum/yukleme
 	// asamalari kalir. Erken "%100" yanlis biterlik hissi verir ve kullanici
