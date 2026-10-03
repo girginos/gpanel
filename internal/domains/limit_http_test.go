@@ -517,8 +517,10 @@ func TestOzelLimit_BayiIcAlanYazamaz(t *testing.T) {
 		t.Fatalf("bayi DELETE → %d %s", kod, g)
 	}
 	s = ol_oku(t, db, 21)
-	if s.Efektif("io_read_mbps", -1) != 77 || s.Efektif("max_process", -1) != 70 || s.Degerler["cpu_yuzde"].Ust != nil {
-		t.Errorf("bayi DELETE sonrası: io=%d proc=%d cpu.ust=%v", s.Efektif("io_read_mbps", -1), s.Efektif("max_process", -1), s.Degerler["cpu_yuzde"].Ust)
+	if s.Efektif("io_read_mbps", -1) != 77 || s.Efektif("max_process", -1) != 70 || s.Degerler["cpu_yuzde"].Ust != nil ||
+		!s.Degerler["io_read_mbps"].Kok || !s.Degerler["max_process"].Kok {
+		t.Errorf("bayi DELETE sonrası (kök kilidi de korunmalı): io=%d proc=%d cpu.ust=%v kok=%v", s.Efektif("io_read_mbps", -1),
+			s.Efektif("max_process", -1), s.Degerler["cpu_yuzde"].Ust, s.KokAlanlar)
 	}
 	// Kilitsiz (eski, karar öncesi yazılmış) iç üst yazım da bayinin PUT/DELETE'iyle silinmez.
 	if _, err := db.Exec(`INSERT INTO hosting_limit_ust (domain_id, io_write_mbps) VALUES (20, 33)`); err != nil {
