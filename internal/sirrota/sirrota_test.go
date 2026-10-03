@@ -424,3 +424,21 @@ func TestSqlGuvenli(t *testing.T) {
 		t.Error("geçerli değer reddedildi")
 	}
 }
+
+// Başkasına (ör. kiracıya) ait env dosyasına sır YAZILMAZ: sahibi dosyayı okuyup
+// yeni sırları öğrenebilir ya da içeriği önceden hazırlayabilirdi.
+func TestYenile_YabanciSahipliEnvReddedilir(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("chown için root gerekir")
+	}
+	d := kur(t)
+	if err := os.Chown(d.r.EnvYolu, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.r.Yenile(context.Background(), Hepsi); err == nil || !strings.Contains(err.Error(), "sahibi") {
+		t.Fatalf("yabancı sahipli env reddedilmedi: %v", err)
+	}
+	if oku(t, d.r.EnvYolu) != eskiEnv() || d.db.parola["localhost"] != eskiPw || d.redis.parola != eskiRedis {
+		t.Error("reddedilen yenilemede bir şey değişti")
+	}
+}
