@@ -167,3 +167,15 @@ func TestSunucuHatasiGenelEsit(t *testing.T) {
 		t.Fatalf("sunucuHatasiGenel kopyası nginxset.SunucuHatasiGenel ile aynı değil")
 	}
 }
+
+// bosIseNil: cümlesi de ayrıntısı da olmayan açıklama yanıta "boş kutu" olarak
+// girmesin (ön yüz boş satır/düğme çizerdi). Bugünkü biçimlerde aciklamaKur
+// üzerinden ulaşılamayan savunma yolu; doğrudan sınanır.
+func TestBosIseNil(t *testing.T) {
+	if bosIseNil(&Aciklama{}) != nil || bosIseNil(nil) != nil {
+		t.Fatal("boş açıklama nil olmalı")
+	}
+	if bosIseNil(&Aciklama{Ayrinti: []Ayrinti{{TR: "İş", EN: "Job", Deger: "1"}}}) == nil {
+		t.Fatal("yalnız ayrıntısı olan açıklama korunmalı")
+	}
+}
