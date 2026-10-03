@@ -81,7 +81,7 @@ func ksdb(t *testing.T) *sql.DB {
 		"INSERT INTO service_plans (id, ad, pm_max_children, ram_mb, disk_kota_mb) VALUES (1, 'P', 6, 1024, 400)",
 		`INSERT INTO domains (id, alan_adi, sistem_kullanici, plan_id) VALUES (42, 'kok.test', 'c_kok', 1)`,
 		`INSERT INTO php_settings VALUES (42, '256M', 30, 60, '64M', '32M', 1, 'exec,system', 0, 1, 1, 1, 0,
-			'E_ALL', '.:/usr/share/php', '', '', '', 'dynamic', 6, 500, 2, 1, 3, '', 0)`,
+			'E_ALL', '.:/usr/share/php', '/home/c_kok/:/tmp/', '', '', 'dynamic', 6, 500, 2, 1, 3, '', 0)`,
 		`INSERT INTO subdomanlar VALUES (5, 42)`,
 		`INSERT INTO subdomain_php_settings VALUES (5, '256M', 9000, 9000, '9000M', '5000M', 1, '', 0, 1, 1, 1, 0,
 			'E_ALL', '.:/usr/share/php', '', '', '', 'static', 500, 500, 100, 50, 200, '', 0)`,
@@ -123,14 +123,16 @@ func TestPHPAyarDB_MusteriKokSiniri_VePlanTavani(t *testing.T) {
 		t.Fatalf("ret sonrası kayıt değişmemeli: %+v", s)
 	}
 
-	// Kabul: izinli alanlar yazılır; iç/korumalı alanlar kayıttan korunur.
+	// Kabul: izinli alanlar yazılır; iç/korumalı alanlar (gövdede YOK — ön yüz
+	// göndermez) kayıttan korunur, boş değere düşmez.
 	kod, g, havuz := ksdb_put(t, db, tok["müşteri"],
-		`{"ayarlar":{"memory_limit":"1G","upload_max_filesize":"2000M","post_max_size":"8000M","max_execution_time":3000,"max_input_time":0,"pm_strategy":"dynamic","disable_functions":"exec,system"}}`)
+		`{"ayarlar":{"memory_limit":"1G","upload_max_filesize":"2000M","post_max_size":"8000M","max_execution_time":3000,"max_input_time":0,"pm_strategy":"dynamic"}}`)
 	if kod != http.StatusOK || havuz == nil {
 		t.Fatalf("200 beklenirdi: %d %s", kod, g)
 	}
 	s, _ := Get(ctx, db, 42)
-	if s.MemoryLimit != "1G" || s.PMMaxChildren != 6 || s.PMStartServers != 2 || s.PMMaxSpareServers != 3 || s.DisableFunctions != "exec,system" {
+	if s.MemoryLimit != "1G" || s.PMMaxChildren != 6 || s.PMStartServers != 2 || s.PMMaxSpareServers != 3 || s.DisableFunctions != "exec,system" ||
+		s.OpenBasedir != "/home/c_kok/:/tmp/" {
 		t.Errorf("kayıt: izinli alan yazılmalı, iç/korumalı korunmalı: %+v", s)
 	}
 	if havuz.PMMaxChildren != 6 || havuz.UploadMaxFilesize != "100M" || havuz.PostMaxSize != "200M" ||
