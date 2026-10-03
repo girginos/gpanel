@@ -164,7 +164,7 @@ const ARAC_EN: Record<string, string> = {
   "Tüm domain listesi, arama ve hızlı erişim.": "Full domain list, search and quick access.",
   "Tüm domainlerin yedekleri + boyut, tek tıkla yedekle. S3/SFTP hedefler.": "Backups of all domains + size, back up with one click. S3/SFTP targets.",
   "Yeni domainlere uygulanan merkezi DNS kayıtları (A/MX/SPF/DMARC/DKIM) + SOA.": "Central DNS records applied to new domains (A/MX/SPF/DMARC/DKIM) + SOA.",
-  "cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.": "Migrate sites from your cPanel, Plesk or DirectAdmin server to this panel along with files, database, DNS and SSL.",
+  "Plesk, GirginOSPanel, cPanel veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.": "Migrate sites from your Plesk, GirginOSPanel, cPanel or DirectAdmin server to this panel along with files, database, DNS and SSL.",
   "sahibinden.com gibi marka domainlerini engelleyerek phishing için panele eklenmesini önleyin. Alt-domain kapsamı seçilebilir; mevcut siteler etkilenmez.": "Prevent brand domains like sahibinden.com from being added to the panel for phishing. Subdomain scope is selectable; existing sites are unaffected.",
   "İzleme ve Loglar": "Monitoring and Logs",
 }
@@ -273,7 +273,7 @@ export default function AraclarAyarlarPage() {
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <AracKart a={{ baslik: cevir("Panel Güncellemesi"), href: '/araclar/guncelleme', ikon: I.refresh, rozet: cevir("Sunucu"), aciklama: cevir("Paneli en son sürüme güncelle — veriler korunur, arka planda çalışır.") }} />
-          <AracKart a={{ baslik: cevir("Site Taşıma"), href: '/araclar/tasima', ikon: I.server, rozet: cevir("Sunucu"), anahtar: 'tasima migration cpanel plesk directadmin aktar transfer goc', aciklama: cevir("cPanel, Plesk veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.") }} />
+          <AracKart a={{ baslik: cevir("Site Taşıma"), href: '/araclar/tasima', ikon: I.server, rozet: cevir("Sunucu"), anahtar: 'tasima migration cpanel plesk directadmin aktar transfer goc', aciklama: cevir("Plesk, GirginOSPanel, cPanel veya DirectAdmin sunucunuzdaki siteleri dosya, veritabanı, DNS ve SSL ile birlikte bu panele aktarın.") }} />
         </div>
       </section>
 
