@@ -7,18 +7,12 @@ import { I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { useMarkaCeviri } from './ceviri'
+import { ALAN_DURUM, useMarkaCeviri } from './ceviri'
 
-type Kayit = { alan_adi: string; durum: string; txt_ad: string; txt_deger: string; son_hata: string }
+type Kayit = { alan_adi: string; durum: string; txt_ad: string; txt_deger: string; son_hata: string; ssl_bitis: string }
 type Yanit = { kayit: Kayit | null; sunucu_ip: string[]; hata?: string }
 
-const DURUM: Record<string, { etiket: string; renk: 'warning' | 'info' | 'success' | 'error' | 'neutral' }> = {
-  dns_bekliyor: { etiket: 'DNS bekleniyor', renk: 'warning' },
-  ssl_bekliyor: { etiket: 'SSL bekleniyor', renk: 'info' },
-  aktif: { etiket: 'Etkin', renk: 'success' },
-  hata: { etiket: 'Hata', renk: 'error' },
-  kapali: { etiket: 'Kapalı', renk: 'neutral' },
-}
+const DURUM = ALAN_DURUM
 
 export function OzelAdres() {
   const cevir = useMarkaCeviri()
@@ -35,6 +29,15 @@ export function OzelAdres() {
       .catch((e) => { if (axios.isAxiosError(e) && e.response?.status === 403) setIzinYok(true); else toast.hata(cevir('Kaydedilemedi'), apiHata(e)) })
   }, [toast, cevir])
   useEffect(() => { yukle() }, [yukle])
+  // Sertifika sunucuda arka planda alınır: beklerken durumu kendiliğinden yenile.
+  const bekliyor = veri?.kayit?.durum === 'ssl_bekliyor'
+  useEffect(() => {
+    if (!bekliyor) return
+    const id = window.setInterval(() => {
+      api.get<Yanit>('/marka/alan-adi').then((r) => setVeri(r.data)).catch(() => {})
+    }, 15000)
+    return () => window.clearInterval(id)
+  }, [bekliyor])
 
   async function ekle() {
     setMesgul(true)
@@ -98,8 +101,14 @@ export function OzelAdres() {
             {d && <Badge color={d.renk} variant="soft">{cevir(d.etiket)}</Badge>}
           </div>
           {k.son_hata && <UyariKutusu ton="uyari" kucuk>{k.son_hata}</UyariKutusu>}
-          {k.durum === 'ssl_bekliyor' && <UyariKutusu ton="bilgi" kucuk>{cevir('DNS doğrulandı. Sertifika kurulumu ve etkinleştirme sunucu yöneticisinin altyapı adımını bekliyor.')}</UyariKutusu>}
-          {k.durum === 'aktif' && <UyariKutusu ton="basari" kucuk>{cevir('Adres etkin.')}</UyariKutusu>}
+          {k.durum === 'ssl_bekliyor' && <UyariKutusu ton="bilgi" kucuk>{cevir('DNS doğrulandı. Sertifika birkaç dakika içinde otomatik alınır ve adres etkinleşir; bu sayfa kendiliğinden yenilenir.')}</UyariKutusu>}
+          {k.durum === 'aktif' && (
+            <UyariKutusu ton="basari" kucuk>
+              {cevir('Adres etkin.')}
+              {k.ssl_bitis && <> {cevir('Sertifika geçerlilik sonu')}: <span className="font-mono">{k.ssl_bitis}</span> ({cevir('otomatik yenilenir')})</>}
+            </UyariKutusu>
+          )}
+          {k.durum === 'hata' && <p className="text-xs text-gray-500 dark:text-dark-300">{cevir('DNS kayıtlarınızı düzelttiyseniz Doğrula’ya basın; sunucu yeniden dener.')}</p>}
           {k.durum === 'dns_bekliyor' && (
             <div>
               <h4 className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir('DNS kayıtları')}</h4>

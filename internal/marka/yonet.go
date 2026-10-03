@@ -515,12 +515,15 @@ type bayiSatiri struct {
 	AlanAdi     string `json:"alan_adi"`
 	AlanDurum   string `json:"alan_durum"`
 	AlanHata    string `json:"alan_hata"`
+	AlanAyrinti string `json:"alan_ayrinti"` // yalnız kök (AdminOnly uç): teknik gerekçe
+	AlanBitis   string `json:"alan_ssl_bitis"`
 }
 
 // Bayiler — GET /marka/bayiler (AdminOnly).
 func (h *Handlers) Bayiler(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.DB.QueryContext(r.Context(), `SELECT u.id, u.username, u.status,
-		COALESCE(a.alan_adi,''), COALESCE(a.durum,''), COALESCE(a.son_hata_genel,'')
+		COALESCE(a.alan_adi,''), COALESCE(a.durum,''), COALESCE(a.son_hata_genel,''),
+		COALESCE(a.son_hata_ayrinti,''), COALESCE(DATE_FORMAT(a.ssl_bitis,'%Y-%m-%d'),'')
 		FROM users u LEFT JOIN cp_marka_alanadi a ON a.reseller_id=u.id
 		WHERE u.role='reseller' ORDER BY u.username`)
 	if err != nil {
@@ -531,7 +534,7 @@ func (h *Handlers) Bayiler(w http.ResponseWriter, r *http.Request) {
 	var liste []bayiSatiri
 	for rows.Next() {
 		var s bayiSatiri
-		if rows.Scan(&s.ID, &s.Kullanici, &s.Durum, &s.AlanAdi, &s.AlanDurum, &s.AlanHata) == nil {
+		if rows.Scan(&s.ID, &s.Kullanici, &s.Durum, &s.AlanAdi, &s.AlanDurum, &s.AlanHata, &s.AlanAyrinti, &s.AlanBitis) == nil {
 			liste = append(liste, s)
 		}
 	}
@@ -629,6 +632,9 @@ func (h *Handlers) BayiIzin(w http.ResponseWriter, r *http.Request) {
 	}
 	bayiDusur(k)
 	hostTemizle()
+	if ai != k.AlanadiIzni {
+		alanDegisti("") // izin açıldı → sertifika; kapandı → nginx'ten çıkar + temizlik
+	}
 	h.denetim(r, "marka.izin", "bayi:"+strconv.FormatInt(k.RID, 10), detay, 0, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -76,7 +76,7 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	t.Helper()
 	s := &kapiSahte{dir: t.TempDir(), dinliyor: true, gizli: kapiTestGizli}
 	eskiVhost, eskiCatch, eskiMap, eskiAyar := kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu
-	eskiAcme, eskiYay := kapiAcmeYolu, KapiGenelPortUzlastir
+	eskiAcme, eskiYay, eskiMarkaAcme := kapiAcmeYolu, KapiGenelPortUzlastir, kapiMarkaAcmeYolu
 	eskiKomut, eskiAc, eskiKapat := kapiNginxKomut, kapiFwAc, kapiFwKapat
 	eskiDinl, eskiGizli, eskiIzin, eskiAktif := kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif
 	eskiMasa, eskiOzel := kapiMasaustu, kapiOzelIzin
@@ -96,7 +96,7 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 		kapiKararAyarla(eskiKarar)
 		kapiSELinuxOnbellek, kapiOnbellekOkundu = eskiOnb, eskiOkundu
 		kapiVhostYolu, kapiCatchallYolu, kapiMapYolu, kapiAyarYolu = eskiVhost, eskiCatch, eskiMap, eskiAyar
-		kapiAcmeYolu, KapiGenelPortUzlastir = eskiAcme, eskiYay
+		kapiAcmeYolu, KapiGenelPortUzlastir, kapiMarkaAcmeYolu = eskiAcme, eskiYay, eskiMarkaAcme
 		kapiNginxKomut, kapiFwAc, kapiFwKapat = eskiKomut, eskiAc, eskiKapat
 		kapiPortDinliyor, kapiProxyGizli, kapiVhostIzin, kapiNginxAktif = eskiDinl, eskiGizli, eskiIzin, eskiAktif
 		kapiMasaustu, kapiOzelIzin = eskiMasa, eskiOzel
@@ -117,6 +117,7 @@ func kapiTestKur(t *testing.T, conf string, ayar *kapi.Ayar) *kapiSahte {
 	kapiVhostYolu = filepath.Join(s.dir, "_panel.conf")
 	kapiCatchallYolu = filepath.Join(s.dir, "_panel_catchall.conf")
 	kapiAcmeYolu = filepath.Join(s.dir, "_panel_acme.conf")
+	kapiMarkaAcmeYolu = filepath.Join(s.dir, "_panel_marka_acme.conf")
 	KapiGenelPortUzlastir = nil
 	kapiMapYolu = filepath.Join(s.dir, "00-gosp-kapi.conf")
 	kapiAyarYolu = filepath.Join(s.dir, "kapi.json")

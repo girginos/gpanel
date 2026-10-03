@@ -279,6 +279,9 @@ func sslKurKos(is *Is, hostname string) {
 
 	// Başarı — rate-limit sayacını sıfırla
 	RateLimitBasari(hostname)
+	// Bayi özel panel adları açıksa (değişkenli sertifika kipi) map'in varsayılanı panel
+	// sertifikasının KOPYASIDIR: yeni sertifika hemen kopyaya eşitlensin.
+	provisioner.PanelMarkaDurt("")
 	is.Bitir("")
 }
 

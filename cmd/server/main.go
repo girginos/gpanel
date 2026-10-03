@@ -559,6 +559,9 @@ func main() {
 		return marka.Oku().PanelAdi
 	}
 	marka.MusteriAdresKanca = musteriKapiAdresi
+	// Bayi özel panel adı: sertifika + nginx uzlaştırması (provisioner/panelmarka.go).
+	provisioner.PanelMarkaSunucuIPleri = []string{ipv4}
+	marka.AlanDegistiKanca = provisioner.PanelMarkaDurt
 	auth.HostKiraciKanca = markaH.HostKiraciRID
 	musteri.HostKiraciKanca = markaH.HostKiraciRID
 
@@ -1093,6 +1096,10 @@ func main() {
 	// kalkınca uçtan uca ölçer; yalnız doğrulanırsa zorlama açık kalır. 15 dk'da bir
 	// uzlaştırma + ölçüm tekrarlanır (eski kapının süresi dolunca kapanır).
 	provisioner.KapiDogrulaBaslat(context.Background(), 15*time.Minute)
+
+	// Bayi özel panel adları: DB → acme.sh sertifika + SNI/include + nginx -t + TLS ölçümü.
+	// Açılıştan 30 sn sonra, sonra 10 dk'da bir ve marka uçları dürttükçe.
+	provisioner.PanelMarkaBaslat(context.Background(), 10*time.Minute)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

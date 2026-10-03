@@ -167,9 +167,9 @@ func TestNginx_SNIveInclude(t *testing.T) {
 		t.Fatal(err)
 	}
 	beklenen := "# GirginOSPanel — bayi özel panel adları (OTOMATİK ÜRETİLDİ, elle düzenlemeyin)\n" +
-		"map $ssl_server_name $gp_panel_crt {\n    default /etc/ssl/girginospanel/panel.crt;\n" +
+		"map $ssl_server_name $gp_panel_crt {\n    default /etc/ssl/girginospanel/bayi/_varsayilan.crt;\n" +
 		"    panel.a.com /etc/ssl/girginospanel/bayi/panel.a.com.crt;\n    panel.b.com /etc/ssl/girginospanel/bayi/panel.b.com.crt;\n}\n" +
-		"map $ssl_server_name $gp_panel_key {\n    default /etc/ssl/girginospanel/panel.key;\n" +
+		"map $ssl_server_name $gp_panel_key {\n    default /etc/ssl/girginospanel/bayi/_varsayilan.key;\n" +
 		"    panel.a.com /etc/ssl/girginospanel/bayi/panel.a.com.key;\n    panel.b.com /etc/ssl/girginospanel/bayi/panel.b.com.key;\n}\n"
 	if s != beklenen {
 		t.Errorf("SNI haritası altın çıktıdan farklı:\n%s", s)

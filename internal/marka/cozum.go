@@ -51,6 +51,10 @@ func hostTemizle() {
 	hostOb.Unlock()
 }
 
+// HostOnbellekTemizle — provisioner/panelmarka.go bir adı etkinleştirdiğinde/
+// düşürdüğünde Host çözümü 60 sn beklemesin.
+func HostOnbellekTemizle() { hostTemizle() }
+
 // HostNormalize — "Panel.Bayi.com:2083" → "panel.bayi.com". Geçersizse "".
 func HostNormalize(h string) string {
 	h = strings.ToLower(strings.TrimSpace(h))

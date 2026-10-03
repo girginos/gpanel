@@ -97,6 +97,13 @@ const EN: Record<string, string> = {
   'Hata': 'Error',
   'DNS doğrulandı. Sertifika kurulumu ve etkinleştirme sunucu yöneticisinin altyapı adımını bekliyor.': 'DNS verified. Certificate setup and activation are waiting for the administrator’s infrastructure step.',
   'Adres etkin.': 'Address active.',
+  'Doğrulandı · sertifika bekleniyor': 'Verified · waiting for certificate',
+  'Etkin · sertifika alındı': 'Active · certificate issued',
+  'DNS doğrulandı. Sertifika birkaç dakika içinde otomatik alınır ve adres etkinleşir; bu sayfa kendiliğinden yenilenir.': 'DNS verified. The certificate is issued automatically within a few minutes and the address becomes active; this page refreshes by itself.',
+  'Sertifika geçerlilik sonu': 'Certificate valid until',
+  'otomatik yenilenir': 'renews automatically',
+  'DNS kayıtlarınızı düzelttiyseniz Doğrula’ya basın; sunucu yeniden dener.': 'If you have fixed your DNS records, press Verify; the server will retry.',
+  'Teknik ayrıntı': 'Technical detail',
   'Doğrulandı': 'Verified',
   'Doğrulanamadı': 'Could not verify',
   'Kaldırıldı': 'Removed',
@@ -104,6 +111,17 @@ const EN: Record<string, string> = {
   'Müşterileriniz bu adresten artık giriş yapamaz.': 'Your customers can no longer sign in at this address.',
   'Bu ekran yalnız yönetici ve bayiler içindir.': 'This screen is for administrators and resellers only.',
   'Kontrast düşük: bu renk beyaz yazıyla okunaksız olabilir.': 'Low contrast: this colour may be hard to read with white text.',
+}
+
+// Durum makinesi (arka uç: marka/alanadi.go + provisioner/panelmarka.go):
+// dns_bekliyor → (Doğrula: A + TXT) → ssl_bekliyor → (sunucu: Let's Encrypt + nginx) → aktif
+// Sertifika/yapılandırma hatası → hata (gerekçeli; sunucu geri çekilmeyle kendisi yeniden dener).
+export const ALAN_DURUM: Record<string, { etiket: string; renk: 'warning' | 'info' | 'success' | 'error' | 'neutral' }> = {
+  dns_bekliyor: { etiket: 'DNS bekleniyor', renk: 'warning' },
+  ssl_bekliyor: { etiket: 'Doğrulandı · sertifika bekleniyor', renk: 'info' },
+  aktif: { etiket: 'Etkin · sertifika alındı', renk: 'success' },
+  hata: { etiket: 'Hata', renk: 'error' },
+  kapali: { etiket: 'Kapalı', renk: 'neutral' },
 }
 
 export function useMarkaCeviri() {

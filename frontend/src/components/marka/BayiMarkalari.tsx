@@ -6,7 +6,7 @@ import { Badge, Button, Card, Select } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { useMarkaCeviri } from './ceviri'
+import { ALAN_DURUM, useMarkaCeviri } from './ceviri'
 
 type Satir = {
   id: number
@@ -24,6 +24,8 @@ type Satir = {
   alan_adi: string
   alan_durum: string
   alan_hata: string
+  alan_ayrinti: string
+  alan_ssl_bitis: string
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/
@@ -126,7 +128,11 @@ export function BayiMarkalari() {
                         {s.kayitli && <Badge color="success" variant="soft">{cevir('Kayıtlı')}</Badge>}
                         {s.kok_kapatti && <Badge color="warning" variant="soft">{cevir('Kök kapattı')}</Badge>}
                         {!s.izin && <Badge color="error" variant="soft">{cevir('Marka yönetimi')}: {cevir('Kapalı')}</Badge>}
-                        {s.alan_adi && <Badge color="info" variant="soft" className="max-w-full truncate">{s.alan_adi} · {s.alan_durum}</Badge>}
+                        {s.alan_adi && (
+                          <Badge color={ALAN_DURUM[s.alan_durum]?.renk || 'neutral'} variant="soft" className="max-w-full truncate" title={s.alan_ssl_bitis ? `${cevir('Sertifika geçerlilik sonu')}: ${s.alan_ssl_bitis}` : undefined}>
+                            {s.alan_adi} · {cevir(ALAN_DURUM[s.alan_durum]?.etiket || s.alan_durum)}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -149,6 +155,12 @@ export function BayiMarkalari() {
                     )}
                   </div>
                   {s.alan_hata && <p className="mt-2 break-words text-xs text-error dark:text-error-light">{s.alan_hata}</p>}
+                  {s.alan_ayrinti && (
+                    <details className="mt-1 text-xs text-gray-500 dark:text-dark-300">
+                      <summary className="cursor-pointer">{cevir('Teknik ayrıntı')}</summary>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono">{s.alan_ayrinti}</pre>
+                    </details>
+                  )}
                 </Card>
               </li>
             )

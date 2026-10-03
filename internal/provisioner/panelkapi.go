@@ -42,6 +42,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kapi"
+	"girginospanel/internal/marka"
 	"girginospanel/internal/portyonetim"
 )
 
@@ -58,9 +59,12 @@ var (
 	kapiVhostYolu    = panelVhostPath
 	kapiCatchallYolu = "/etc/nginx/conf.d/_panel_catchall.conf"
 	kapiAcmeYolu     = "/etc/nginx/conf.d/_panel_acme.conf" // panelhost.AcmeVhostPath
-	kapiMapYolu      = kapi.MapYolu
-	kapiAyarYolu     = kapi.AyarYolu
-	kapiNginxKomut   = func(ad string, arg ...string) ([]byte, error) {
+	// kapiMarkaAcmeYolu: bayi özel panel adlarının :80 mini vhost'u (panelmarka.go) —
+	// HTTPS yönlendirmesi _panel_acme.conf gibi genel panel portuna eşitlenir.
+	kapiMarkaAcmeYolu = marka.MarkaAcmeConf
+	kapiMapYolu       = kapi.MapYolu
+	kapiAyarYolu      = kapi.AyarYolu
+	kapiNginxKomut    = func(ad string, arg ...string) ([]byte, error) {
 		return exec.Command(ad, arg...).CombinedOutput()
 	}
 	kapiFwAc    = portyonetim.FwPortAc
@@ -397,10 +401,19 @@ func kapiKapaliTemizle(conf string) {
 // onarim: bu değişiklik ÖNCEDEN bozuk bir `nginx -t`'yi düzeltmesi beklenen onarımdır
 // (silinmiş kapı haritası) — taban kontrolü onu engellemez; yazımdan sonraki `nginx -t`
 // yine geçmezse her şey geri alınır.
+// sil: dosya SİLİNİR (yeni yok sayılır); geri almada eski içerik yeniden yazılır.
 type nginxDosya struct {
-	yol          string
-	eski, yeni   []byte
-	ozel, onarim bool
+	yol               string
+	eski, yeni        []byte
+	ozel, onarim, sil bool
+}
+
+// degisir: dosya bu uygulamada değişecek mi?
+func (d nginxDosya) degisir() bool {
+	if d.sil {
+		return d.eski != nil
+	}
+	return !bytes.Equal(d.eski, d.yeni)
 }
 
 func kapiMapDosyasi(icerik string, onarim bool) nginxDosya {
@@ -425,6 +438,10 @@ func kapiYanDosyalar(conf string, a *kapi.Ayar) []nginxDosya {
 	if eski, err := os.ReadFile(kapiAcmeYolu); err == nil {
 		yeni := kapi.AcmeYonlendirmeUzlastir(string(eski), kapi.GenelPanelPortu(conf, a))
 		out = append(out, nginxDosya{yol: kapiAcmeYolu, eski: eski, yeni: []byte(yeni)})
+	}
+	if eski, err := os.ReadFile(kapiMarkaAcmeYolu); err == nil {
+		yeni := kapi.AcmeYonlendirmeUzlastir(string(eski), kapi.GenelPanelPortu(conf, a))
+		out = append(out, nginxDosya{yol: kapiMarkaAcmeYolu, eski: eski, yeni: []byte(yeni), ozel: true})
 	}
 	return out
 }
@@ -468,7 +485,7 @@ func kapiGenelPortuYay(conf string, a *kapi.Ayar) {
 func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) (tamam, ertelendi bool) {
 	var degisen []nginxDosya
 	for _, d := range dosyalar {
-		if !bytes.Equal(d.eski, d.yeni) {
+		if d.degisir() {
 			degisen = append(degisen, d)
 			continue
 		}
@@ -496,10 +513,21 @@ func kapiNginxUygula(dosyalar []nginxDosya, dinlenecek []int, zorlaReload bool) 
 				_ = os.Remove(d.yol)
 			} else {
 				_ = os.WriteFile(d.yol, d.eski, 0o644)
+				if d.ozel {
+					kapiOzelIzin(d.yol) // silinip geri yazılan özel dosya geniş izinle kalmasın
+				}
 			}
 		}
 	}
 	for _, d := range degisen {
+		if d.sil {
+			if e := os.Remove(d.yol); e != nil && !errors.Is(e, os.ErrNotExist) {
+				geriAl()
+				log.Printf("🔴 kapi: %s silinemedi: %v — geri alındı", d.yol, e)
+				return false, false
+			}
+			continue
+		}
 		izin := os.FileMode(0o644)
 		if d.ozel {
 			izin = 0o640 // yeni dosya baştan kısıtlı doğsun
