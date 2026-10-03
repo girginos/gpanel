@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/efektiflimit"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,6 +95,7 @@ func pt_db(t *testing.T) *sql.DB {
 			max_domain INT NOT NULL DEFAULT 0, max_disk_mb BIGINT NOT NULL DEFAULT 0, max_trafik_mb BIGINT NOT NULL DEFAULT 0,
 			asim_bildirim TINYINT(1) NOT NULL DEFAULT 1)`,
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, disk_kota_mb INT NOT NULL DEFAULT 0, trafik_kota_mb BIGINT NOT NULL DEFAULT 0)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit (plan ⊕ üst yazım)
 		`CREATE TABLE domains (id BIGINT UNSIGNED PRIMARY KEY, alan_adi VARCHAR(253) NOT NULL, sistem_kullanici VARCHAR(64) NOT NULL,
 			reseller_id BIGINT NOT NULL DEFAULT 0, boyut_kb BIGINT NOT NULL DEFAULT 0, trafik_kb BIGINT NOT NULL DEFAULT 0,
 			disk_kota_mb INT NOT NULL DEFAULT 0, plan_id BIGINT UNSIGNED NULL, ssl_aktif TINYINT(1) NOT NULL DEFAULT 0,

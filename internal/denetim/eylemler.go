@@ -52,6 +52,8 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"hosting.askidan_al":               {TR: "Hosting askıdan alındı", EN: "Hosting unsuspended"},
 	"hosting.plan":                     {TR: "Plan değiştirildi", EN: "Plan changed"},
 	"domain.ip_degistir":               {TR: "IP adresi değiştirildi", EN: "IP address changed"},
+	"hosting.limit":                    {TR: "Hostinge özel limitler değiştirildi", EN: "Hosting custom limits changed"},
+	"sistem.ozel_plan_donusum":         {TR: "Özel plan kopyası dönüştürüldü", EN: "Custom plan copy converted"},
 	"marka.guncelle":                   {TR: "Marka güncellendi", EN: "Branding updated"},
 	"marka.sifirla":                    {TR: "Marka sıfırlandı", EN: "Branding reset"},
 	"marka.gorsel.yukle":               {TR: "Marka görseli yüklendi", EN: "Branding image uploaded"},

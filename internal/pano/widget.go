@@ -10,6 +10,7 @@ package pano
 import (
 	"context"
 	"database/sql"
+	"girginospanel/internal/efektiflimit"
 	"log"
 	"net/http"
 	"sort"
@@ -119,8 +120,8 @@ func kotaSatirlari(ctx context.Context, db *sql.DB, k Kapsam, esik float64) ([]k
 	kos, arg := k.kosul("d")
 	rows, err := db.QueryContext(ctx,
 		`SELECT d.id, d.alan_adi, COALESCE(d.boyut_kb,0), COALESCE(d.disk_kota_mb,0), d.plan_id IS NOT NULL,
-		        COALESCE(p.disk_kota_mb,0), COALESCE(d.trafik_kb,0), COALESCE(p.trafik_kota_mb,0)
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
+		        `+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`, COALESCE(d.trafik_kb,0), `+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`
+		   FROM domains d`+efektiflimit.Join+`
 		  WHERE `+kos+` AND COALESCE(d.is_demo,0)=0`, arg...) //nolint:gosec // G202: kos SABİT kapsam ifadesi; değer ? ile bağlanır.
 	if err != nil {
 		return nil, err
