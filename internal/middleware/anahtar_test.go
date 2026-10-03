@@ -378,3 +378,21 @@ func TestAnahtarAktorAdiSigar(t *testing.T) {
 		t.Fatalf("biçim bozuldu: %q", a)
 	}
 }
+
+// TestYalnizOturumDogrudan: izin tablosundan BAĞIMSIZ ikinci kilit — anahtar
+// kimliğiyle gelen istek YalnizOturum uçlarında 403, JWT kimliğiyle geçer.
+func TestYalnizOturumDogrudan(t *testing.T) {
+	h := YalnizOturum(http.HandlerFunc(mwOK))
+	req := httptest.NewRequest("POST", "/api/v1/api-anahtarlari", nil)
+	ctx := context.WithValue(req.Context(), claimsKey, &auth.Claims{UserID: 1, Role: "admin"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req.WithContext(context.WithValue(ctx, anahtarKey, &AnahtarBilgi{ID: 1})))
+	if w.Code != 403 {
+		t.Fatalf("anahtar kimliği YalnizOturum'u geçti: %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req.WithContext(ctx))
+	if w.Code != 200 {
+		t.Fatalf("JWT kimliği YalnizOturum'da: %d", w.Code)
+	}
+}
