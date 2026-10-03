@@ -35,6 +35,8 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+
+	"girginospanel/internal/sirdosya"
 )
 
 const (
@@ -96,7 +98,7 @@ func KurulumKimligi() string {
 	kimlik := hex.EncodeToString(ham)
 	_ = os.MkdirAll(filepath.Dir(surumKimlikYol), 0o755)
 	// 0600 + root: kimlik müşteri sitelerinden okunabilir olmamalı
-	_ = os.WriteFile(surumKimlikYol, []byte(kimlik+"\n"), 0o600)
+	_ = sirdosya.YazKok(surumKimlikYol, []byte(kimlik+"\n"), 0o600)
 	return kimlik
 }
 

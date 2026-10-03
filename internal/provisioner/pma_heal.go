@@ -27,6 +27,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"girginospanel/internal/sirdosya"
 )
 
 const (
@@ -197,27 +199,27 @@ func ensurePMAToken() {
 		return
 	}
 	tok := hex.EncodeToString(raw) // 64 hex — openssl rand -hex 32 ile aynı
-	if err := os.WriteFile(pmaTokenPath, []byte(tok+"\n"), 0640); err != nil {
-		log.Printf("pma heal: token yazılamadı: %v", err)
-		return
-	}
 	// root:apache 0640 → pma-signon FPM pool'u (apache) okur; başkası okuyamaz.
+	// sirdosya: sahiplik + izin dosya YERİNE KONMADAN önce (geçici dosyada) ayarlanır
+	// → token hiçbir an geniş izinle görünmez; symlink takip edilmez.
 	gid := 0
 	if g, err := user.LookupGroup("apache"); err == nil {
 		if n, e := strconv.Atoi(g.Gid); e == nil {
 			gid = n
 		}
 	}
-	if gid != 0 {
-		_ = os.Chown(pmaTokenPath, 0, gid)
-		_ = os.Chmod(pmaTokenPath, 0640)
-	} else {
+	mod := os.FileMode(0o640)
+	if gid == 0 {
 		// 🔴 FAIL-CLOSED (karsit denetim bulgusu): apache grubu yokken 0644'e
 		// GENISLETME — herkes-okur token, kiraci kabuk/FTP kullanicisina pma-redeem
 		// kanalini acardi. apache grubu yoksa phpMyAdmin havuzu da yok = signon
 		// zaten calismaz; token root'a kilitlenir, heal dongusu grup gelince 0640 yapar.
-		_ = os.Chmod(pmaTokenPath, 0600)
+		mod = 0o600
 		log.Printf("pma heal: UYARI — apache grubu yok; token 0600 kilitlendi (signon calismaz)")
+	}
+	if err := sirdosya.Yaz(pmaTokenPath, []byte(tok+"\n"), mod, 0, gid); err != nil {
+		log.Printf("pma heal: token yazılamadı: %v", err)
+		return
 	}
 	log.Printf("pma heal: /etc/girginospanel/pma-internal.token üretildi")
 }

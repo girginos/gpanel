@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"girginospanel/internal/sirdosya"
 )
 
 // ---------------------------------------------------------------------------
@@ -389,7 +391,9 @@ func SertifikaKur(alanAdi, sk, phpSurum, backend, certPEM, keyPEM string) (strin
 	if err := os.WriteFile(certPath, []byte(certPEM), 0o644); err != nil {
 		return "", "", false, err
 	}
-	if err := os.WriteFile(keyPath, []byte(keyPEM), 0o600); err != nil {
+	// Özel anahtar: atomik + izin TAM 0600 (önceden kalmış geniş izinli dosya üzerine
+	// yazılsa bile) + symlink takip edilmez.
+	if err := sirdosya.YazKok(keyPath, []byte(keyPEM), 0o600); err != nil {
 		return "", "", false, err
 	}
 	yazCertKurulumu(sslDir, certPath, keyPath)
