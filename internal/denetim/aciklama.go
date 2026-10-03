@@ -61,21 +61,25 @@ func aciklamaKur(eylem, detail string) *Aciklama {
 // Düz metin ({"not": "..."}) açıklamalar
 
 var (
-	reYeniPlan      = regexp.MustCompile(`^yeni plan=(\d+)$`)
-	reBayiEtki      = regexp.MustCompile(`^etkilenen hosting=(\d+) basarisiz=(\d+)$`)
-	reBayiRed       = regexp.MustCompile(`^reddedildi: (\d+) hosting hesabı var$`)
-	reBayiSilinen   = regexp.MustCompile(`^silinen bayi id=(\d+)$`)
-	reIPDegis       = regexp.MustCompile(`^(?:toplu #(\d+): )?(\S*) → (\S+) \(A:(\d+) SPF:(\d+)\)(?:: (.+))?$`)
-	reSahipDevir    = regexp.MustCompile(`^bayi (.+?)→(.+?), müşteri (.+?)→(.+?), ftp parolası döndürüldü=(true|false)$`)
-	reSiteSayisi    = regexp.MustCompile(`^(\d+) site$`)
-	reErisimKural   = regexp.MustCompile(`^(izin|red) (\S+)$`)
-	rePortDegis     = regexp.MustCompile(`^(\d+) → (\d+)$`)
-	reGunSayisi     = regexp.MustCompile(`^(\d+) gün$`)
-	reWinAjan       = regexp.MustCompile(`^windows ajanı eklendi \((.*), sürüm=(.*), parmak izi=(.*)\)$`)
-	reDegisimOk     = regexp.MustCompile(`^(\S+) (\S+)→(\S+)$`)
-	reAnahtar       = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	geriAlindiOnek  = "render basarisiz, GERI ALINDI: "
-	paketleGelenOnk = "paketle gelen: "
+	reYeniPlan       = regexp.MustCompile(`^yeni plan=(\d+)$`)
+	reBayiEtki       = regexp.MustCompile(`^etkilenen hosting=(\d+) basarisiz=(\d+)$`)
+	reBayiRed        = regexp.MustCompile(`^reddedildi: (\d+) hosting hesabı var$`)
+	reBayiSilinen    = regexp.MustCompile(`^silinen bayi id=(\d+)$`)
+	reIPDegis        = regexp.MustCompile(`^(?:toplu #(\d+): )?(\S*) → (\S+) \(A:(\d+) SPF:(\d+)\)(?:: (.+))?$`)
+	reSahipDevir     = regexp.MustCompile(`^bayi (.+?)→(.+?), müşteri (.+?)→(.+?), ftp parolası döndürüldü=(true|false)$`)
+	reSiteSayisi     = regexp.MustCompile(`^(\d+) site$`)
+	reErisimKural    = regexp.MustCompile(`^(izin|red) (\S+)$`)
+	rePortDegis      = regexp.MustCompile(`^(\d+) → (\d+)$`)
+	reGunSayisi      = regexp.MustCompile(`^(\d+) gün$`)
+	reWinAjan        = regexp.MustCompile(`^windows ajanı eklendi \((.*), sürüm=(.*), parmak izi=(.*)\)$`)
+	reDegisimOk      = regexp.MustCompile(`^(\S+) (\S+)→(\S+)$`)
+	reAnahtarOlustur = regexp.MustCompile(`^ad=(.*) izinler=(\S*) ip=(\d+) gün=(\d+)$`)
+	reAnahtarYenile  = regexp.MustCompile(`^eski=(\S+) geçiş=(\d+) saat$`)
+	reAnahtarIptal   = regexp.MustCompile(`^ad=(.*) neden=(\S+)$`)
+	reAnahtarToplu   = regexp.MustCompile(`^neden=(\S+) (?:iptal edilen=(\d+)|HATA: anahtarlar iptal edilemedi)$`)
+	reAnahtar        = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	geriAlindiOnek   = "render basarisiz, GERI ALINDI: "
+	paketleGelenOnk  = "paketle gelen: "
 )
 
 // sunucuHatasiGenel: nginxset.SunucuHatasiGenel'in kopyası (import döngüsü/yük
@@ -90,6 +94,8 @@ var sabitMetin = map[string]iki{
 	"kullanıcı adı zaten var":                {"Kullanıcı adı zaten kullanılıyor", "Username is already taken"},
 	"uzak yedekler BIRAKILDI (admin onayı)":  {"Yönetici onayıyla", "With admin approval"},
 	"uzak kopya BIRAKILDI (kullanıcı onayı)": {"Kullanıcı onayıyla", "With user approval"},
+	"hatalı kod":                             {"Hatalı iki aşamalı doğrulama kodu", "Wrong two-factor code"},
+	"hatalı parola":                          {"Hatalı parola", "Wrong password"},
 	"zorla (admin yeni kapıyı doğrulamadan)": {"Zorla kapatıldı (yeni port doğrulanmadan)", "Forced (new port not verified)"},
 	sunucuHatasiGenel:                        {"Sunucu yapılandırması uygulanamadı; ayrıntı sunucu günlüğünde", "Server configuration could not be applied; details are in the server log"},
 }
@@ -196,6 +202,93 @@ func ozelMetin(eylem, s string) *Aciklama {
 				Ayrinti: []Ayrinti{{TR: "Parmak izi", EN: "Fingerprint", Deger: m[3]}},
 			}
 		}
+	case "api_anahtar.olustur":
+		if m := reAnahtarOlustur.FindStringSubmatch(s); m != nil {
+			ip, gun := atoi(m[3]), atoi(m[4])
+			izT, izE := "izin yok", "no permissions"
+			if m[2] != "" {
+				izT = strings.ReplaceAll(m[2], ",", ", ")
+				izE = izT
+			}
+			return &Aciklama{
+				TR: fmt.Sprintf("Ad: %s · İzinler: %s · %d IP adresi · %d gün geçerli", m[1], izT, ip, gun),
+				EN: fmt.Sprintf("Name: %s · Permissions: %s · %d IP %s · valid for %d %s", m[1], izE, ip, cogul(ip, "address", "addresses"), gun, cogul(gun, "day", "days")),
+			}
+		}
+	case "api_anahtar.yenile":
+		if m := reAnahtarYenile.FindStringSubmatch(s); m != nil {
+			a := &Aciklama{Ayrinti: []Ayrinti{{TR: "Eski anahtar", EN: "Old key", Deger: m[1]}}}
+			if h := atoi(m[2]); h > 0 {
+				a.TR = fmt.Sprintf("Eski anahtar %d saat daha geçerli", h)
+				a.EN = fmt.Sprintf("Old key stays valid for %d more %s", h, cogul(h, "hour", "hours"))
+			} else {
+				a.TR, a.EN = "Eski anahtar hemen iptal edildi", "Old key revoked immediately"
+			}
+			return a
+		}
+	case "api_anahtar.iptal":
+		if m := reAnahtarIptal.FindStringSubmatch(s); m != nil {
+			k := iki{"Sahibi iptal etti", "Revoked by owner"}
+			if m[2] == "yonetim" {
+				k = iki{"Yönetici iptal etti", "Revoked by administrator"}
+			} else if m[2] != "sahip" {
+				k = iki{"Neden: " + m[2], "Reason: " + m[2]}
+			}
+			return &Aciklama{TR: "Ad: " + m[1] + " · " + k.tr, EN: "Name: " + m[1] + " · " + k.en}
+		}
+	case "api_anahtar.toplu_iptal":
+		if m := reAnahtarToplu.FindStringSubmatch(s); m != nil {
+			n := iptalNedeni(m[1])
+			if m[2] == "" {
+				return &Aciklama{TR: n.tr + "; anahtarlar iptal edilemedi", EN: n.en + "; keys could not be revoked"}
+			}
+			c := atoi(m[2])
+			return &Aciklama{
+				TR: fmt.Sprintf("%s; %d API anahtarı iptal edildi", n.tr, c),
+				EN: fmt.Sprintf("%s; %d API %s revoked", n.en, c, cogul(c, "key", "keys")),
+			}
+		}
+	case "api_anahtar.red":
+		return anahtarRed(s)
+	}
+	return nil
+}
+
+// iptalNedeni: toplu anahtar iptalinin nedeni (reseller.bayiAnahtarlariniIptal).
+func iptalNedeni(n string) iki {
+	switch n {
+	case "parola_sifirlama":
+		return iki{"Bayi parolası sıfırlandı", "Reseller password was reset"}
+	case "bayi_silindi":
+		return iki{"Bayi silindi", "Reseller was deleted"}
+	}
+	o := okunurKod(n)
+	return iki{o, o}
+}
+
+// anahtarRed: API anahtarıyla gelen isteğin reddedilme nedeni (middleware/anahtar.go).
+func anahtarRed(s string) *Aciklama {
+	sabit := map[string]iki{
+		"iptal/süre":         {"Anahtar iptal edilmiş ya da süresi dolmuş", "Key is revoked or expired"},
+		"rol tutarsız":       {"Anahtar sahibinin rolü değişmiş", "Key owner's role has changed"},
+		"hesap askıda":       {"Hesap askıda", "Account is suspended"},
+		"kapı uyumsuz":       {"Yanlış panel portu", "Wrong panel port"},
+		"origin":             {"Tarayıcıdan kullanım engellendi", "Use from a browser was blocked"},
+		"kök IP listesi boş": {"IP izin listesi boş", "IP allow list is empty"},
+	}
+	if c, ok := sabit[s]; ok {
+		return &Aciklama{TR: c.tr, EN: c.en}
+	}
+	if ip, ok := strings.CutPrefix(s, "ip "); ok {
+		return &Aciklama{TR: "İzin listesinde olmayan IP: " + ip, EN: "IP not on the allow list: " + ip}
+	}
+	if d, ok := strings.CutPrefix(s, "izin "); ok {
+		return &Aciklama{TR: "Anahtarın bu işleme izni yok", EN: "Key has no permission for this action",
+			Ayrinti: []Ayrinti{{TR: "İstenen izin", EN: "Required permission", Deger: d}}}
+	}
+	if d, ok := strings.CutPrefix(s, "uç kapalı "); ok {
+		return &Aciklama{TR: "Bu işlem API anahtarına kapalı", EN: "This action is not available to API keys",
+			Ayrinti: []Ayrinti{{TR: "Uç", EN: "Endpoint", Deger: d}}}
 	}
 	return nil
 }

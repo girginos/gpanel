@@ -108,6 +108,29 @@ func TestAciklamaKur(t *testing.T) {
 			tr: "Ftp parola suresi: 30", en: "Ftp parola suresi: 30", ayr: []string{"İş=7"}},
 		{ad: "bilinmeyen json", eylem: "yeni.eylem", detail: `{"yeni_alan":true}`, tr: "Yeni alan: evet", en: "Yeni alan: yes"},
 		{ad: "serbest metin", eylem: "kapi.rol_port", detail: n("port 80 kullanımda"), tr: "Port 80 kullanımda", en: "Port 80 kullanımda"},
+		{ad: "api oluştur", eylem: "api_anahtar.olustur", detail: n("ad=WHMCS ana izinler=hosting.oku,hosting.yaz ip=2 gün=365"),
+			tr: "Ad: WHMCS ana · İzinler: hosting.oku, hosting.yaz · 2 IP adresi · 365 gün geçerli",
+			en: "Name: WHMCS ana · Permissions: hosting.oku, hosting.yaz · 2 IP addresses · valid for 365 days"},
+		{ad: "api oluştur izinsiz", eylem: "api_anahtar.olustur", detail: n("ad=x izinler= ip=1 gün=1"),
+			tr: "Ad: x · İzinler: izin yok · 1 IP adresi · 1 gün geçerli", en: "Name: x · Permissions: no permissions · 1 IP address · valid for 1 day"},
+		{ad: "api yenile", eylem: "api_anahtar.yenile", detail: n("eski=gosp_ab12_…9f3c geçiş=24 saat"),
+			tr: "Eski anahtar 24 saat daha geçerli", en: "Old key stays valid for 24 more hours", ayr: []string{"Eski anahtar=gosp_ab12_…9f3c"}},
+		{ad: "api yenile hemen", eylem: "api_anahtar.yenile", detail: n("eski=gosp_ab12_…9f3c geçiş=0 saat"),
+			tr: "Eski anahtar hemen iptal edildi", en: "Old key revoked immediately", ayr: []string{"Eski anahtar=gosp_ab12_…9f3c"}},
+		{ad: "api iptal yönetim", eylem: "api_anahtar.iptal", detail: n("ad=WHMCS (eski) neden=yonetim"),
+			tr: "Ad: WHMCS (eski) · Yönetici iptal etti", en: "Name: WHMCS (eski) · Revoked by administrator"},
+		{ad: "api toplu iptal", eylem: "api_anahtar.toplu_iptal", detail: n("neden=parola_sifirlama iptal edilen=3"),
+			tr: "Bayi parolası sıfırlandı; 3 API anahtarı iptal edildi", en: "Reseller password was reset; 3 API keys revoked"},
+		{ad: "api toplu iptal hata", eylem: "api_anahtar.toplu_iptal", detail: n("neden=bayi_silindi HATA: anahtarlar iptal edilemedi"),
+			tr: "Bayi silindi; anahtarlar iptal edilemedi", en: "Reseller was deleted; keys could not be revoked"},
+		{ad: "api yeniden doğrulama", eylem: "api_anahtar.yeniden_dogrulama", detail: n("hatalı kod"),
+			tr: "Hatalı iki aşamalı doğrulama kodu", en: "Wrong two-factor code"},
+		{ad: "api red ip", eylem: "api_anahtar.red", detail: n("ip 203.0.113.9"),
+			tr: "İzin listesinde olmayan IP: 203.0.113.9", en: "IP not on the allow list: 203.0.113.9"},
+		{ad: "api red izin", eylem: "api_anahtar.red", detail: n("izin hosting.sil"),
+			tr: "Anahtarın bu işleme izni yok", en: "Key has no permission for this action", ayr: []string{"İstenen izin=hosting.sil"}},
+		{ad: "api red sabit", eylem: "api_anahtar.red", detail: n("iptal/süre"),
+			tr: "Anahtar iptal edilmiş ya da süresi dolmuş", en: "Key is revoked or expired"},
 		{ad: "boş", eylem: "hosting.sil", detail: "", yok: true},
 		{ad: "boş not", eylem: "hosting.sil", detail: n("   "), yok: true},
 		{ad: "etiketi tekrarlayan", eylem: "winajan.sil", detail: n("windows ajanı silindi"), yok: true},
@@ -177,5 +200,26 @@ func TestBosIseNil(t *testing.T) {
 	}
 	if bosIseNil(&Aciklama{Ayrinti: []Ayrinti{{TR: "İş", EN: "Job", Deger: "1"}}}) == nil {
 		t.Fatal("yalnız ayrıntısı olan açıklama korunmalı")
+	}
+}
+
+func TestAnahtarAktorAyir(t *testing.T) {
+	for _, c := range []struct {
+		g, sahip, ad string
+		ok           bool
+	}{
+		{"root (API anahtarı WHMCS)", "root", "WHMCS", true},
+		{"bayi_a (API anahtarı WHMCS (yedek))", "bayi_a", "WHMCS (yedek)", true},
+		{"girgin", "girgin", "", false},
+		{"girgin (adına musteri:5)", "girgin (adına musteri:5)", "", false},
+		{" (API anahtarı X)", " (API anahtarı X)", "", false}, // sahipsiz
+		{"root (API anahtarı )", "root (API anahtarı )", "", false},
+		{"root (API anahtarı WHMCS", "root (API anahtarı WHMCS", "", false}, // kesik
+		{"", "", "", false},
+	} {
+		s, a, ok := anahtarAktorAyir(c.g)
+		if s != c.sahip || a != c.ad || ok != c.ok {
+			t.Errorf("anahtarAktorAyir(%q) = (%q,%q,%v), beklenen (%q,%q,%v)", c.g, s, a, ok, c.sahip, c.ad, c.ok)
+		}
 	}
 }

@@ -21,6 +21,8 @@ type Kayit = {
   kapsam_id: number; kapsam_ad: string
   // adina: işlem müşteri ADINA oturumda yapıldı; adina_alan: o hostingin alan adı
   adina?: boolean; adina_alan?: string
+  // api_anahtar: işlem bu adlı API anahtarıyla yapıldı (aktor = anahtarın sahibi)
+  api_anahtar?: string
 }
 type Etiket = { tr: string; en: string }
 type Ayrinti = { tr: string; en: string; deger: string }
@@ -72,6 +74,7 @@ const DEN_EN: Record<string, string> = {
   "Müşteri paneline girerek yaptı": "Done from the customer panel",
   "Ayrıntıyı gizle": "Hide details",
   "Ham kayıt": "Raw record",
+  "API anahtarıyla yapıldı: {0}": "Done with API key: {0}",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DEN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -304,6 +307,12 @@ export default function DenetimPage() {
                         {k.aktor_rol && !bayiMi && (
                           <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400">
                             {cevir(ROL_AD[k.aktor_rol] || k.aktor_rol)}
+                          </span>
+                        )}
+                        {k.api_anahtar && (
+                          <span title={cevirT(cevir("API anahtarıyla yapıldı: {0}"), k.api_anahtar)}
+                                className="max-w-[18ch] truncate text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 whitespace-nowrap">
+                            API: {k.api_anahtar}
                           </span>
                         )}
                         {k.adina && (

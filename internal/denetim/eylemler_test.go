@@ -80,6 +80,9 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 		// hostingi silinmiş müşterinin işlemi: alan adı çözülemez
 		[]any{int64(0), "2026-10-03 09:57:00", "musteri:888888017", int64(0), "", "5.6.7.8",
 			"auth.login", "", "", int64(1), int64(7), "girgin"},
+		// API anahtarıyla yapılan işlem: aktör = sahip, anahtar adı ayrı alanda
+		[]any{int64(-1), "2026-10-03 09:56:00", "girgin (API anahtarı WHMCS)", int64(0), "reseller", "9.9.9.9",
+			"hosting.olustur", "yeni.test", `{"not":"plan=3"}`, int64(1), int64(7), "girgin"},
 	)
 	sd.Satirlar("SELECT id, alan_adi FROM domains", []any{int64(999999038), "musteri-alan.test"})
 	sd.Satirlar("SELECT DISTINCT a.action", []any{"musteri.adina_kod"}, []any{"musteri.adina_cikis"})
@@ -97,7 +100,7 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 		Kayitlar  []Kayit                `json:"kayitlar"`
 		Etiketler map[string]EylemEtiket `json:"etiketler"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &y); err != nil || len(y.Kayitlar) != 4 {
+	if err := json.Unmarshal(rr.Body.Bytes(), &y); err != nil || len(y.Kayitlar) != 5 {
 		t.Fatalf("yanıt çözülemedi: %v %s", err, rr.Body)
 	}
 	for i, k := range y.Kayitlar[:2] {
@@ -119,6 +122,12 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 	}
 	if m := y.Kayitlar[2]; m.Aktor != "musteri-alan.test" || m.AktorRol != "müşteri" || m.Adina {
 		t.Errorf("müşteri kaydı alan adıyla gösterilmeli: %+v", m)
+	}
+	if m := y.Kayitlar[4]; m.Aktor != "girgin" || m.APIAnahtar != "WHMCS" || m.AktorRol != "reseller" || m.Adina {
+		t.Errorf("API anahtarı kaydı: aktör sahip, anahtar adı ayrı olmalı: %+v", m)
+	}
+	if m := y.Kayitlar[4]; m.Aciklama == nil || m.Aciklama.TR != "Plan: #3" {
+		t.Errorf("API anahtarı kaydının açıklaması sadeleşmeli: %+v", m.Aciklama)
 	}
 	if m := y.Kayitlar[3]; m.Aktor != "" || m.AktorRol != "müşteri" {
 		t.Errorf("hostingi silinmiş müşteri kaydında ham kimlik yerine boş aktör (ön yüz \"Müşteri\") beklenir: %+v", m)
