@@ -253,7 +253,9 @@ if [ "$DRY" = 1 ]; then
   echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
   echo "  • $DBBK + /etc/systemd/system/girginospanel-db-backup.{service,timer} (timer enable --now)"
   echo "  • migration'lardan ÖNCE panel DB dump'ı → $DBDIR  (DRY-RUN'da dump ALINMAZ)"
+  echo "  • panel birimi LoadCredential'a geçer (girginospanel-sir birim; sırlar süreç ortamına girmez)"
   echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR)"
+  [ -f /var/lib/girginospanel/sir-yenile-2026-10 ] || echo "  • TEK SEFERLİK sır yenileme (JWT/DB/Valkey; oturumlar düşer): girginospanel-server sir yenile --hepsi"
   exit 0
 fi
 
@@ -555,6 +557,26 @@ elif [ "$QROOTFS" = "xfs" ]; then
   [ -f "$QSENTINEL" ] && rm -f "$QSENTINEL" 2>/dev/null && ok "disk kotası aktif — reboot sentinel temizlendi" || ok "disk kotası aktif (kök XFS user quota)"
 fi
 
+# 10e) Panel sırları — KALICI DÜZEN (2026-10 sır sızıntısı). Birim env dosyasını
+# EnvironmentFile ile DEĞİL LoadCredential ile verir: sırlar panel sürecinin ortamına
+# HİÇ girmez (kiracı çocukları + /proc/<pid>/environ). env dosyasının BİÇİMİ ve YERİ
+# DEĞİŞMEZ (yan araçlar aynen okur). Yeni ikili (adım 6) iki birimi de anlar; ESKİ ikili
+# kimlikli birimle açılamaz → geri alma dalı birimi de geri koyar (SIR_BIRIM_YENI).
+# Önkoşul düşerse (systemd<247, env yok/bozuk) birime dokunulmaz, eski birimle sürer.
+SIR_BIRIM_YENI=0; SIR_ARAC=""
+if [ -f "$A/ops/girginospanel-sir" ]; then SIR_ARAC="$A/ops/girginospanel-sir"
+else SIR_ARAC=$(command -v girginospanel-sir 2>/dev/null || true); fi
+if [ -n "$SIR_ARAC" ]; then
+  _sir_rc=0; bash "$SIR_ARAC" birim || _sir_rc=$?
+  case "$_sir_rc" in
+    0) SIR_BIRIM_YENI=1 ;;
+    3) : ;;
+    *) warn "panel birimi LoadCredential'a geçirilemedi — eski birimle devam (sırlar açılışta ortamdan silinir)" ;;
+  esac
+else
+  warn "girginospanel-sir yok — panel birimi geçirilmedi"
+fi
+
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
 step "Yeniden başlatılıyor"
 systemctl restart girginospanel
@@ -570,6 +592,24 @@ if [ "$HEALTHY" = 1 ]; then
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK"
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
+
+  # 11b) TEK SEFERLİK SIR YENİLEME — 2026-10 sızıntısı (JWT/DB/Redis sırları kiracı
+  # süreçlerine geçebiliyordu): sızmış olabilecek değerler geçersiz kılınır. İşaret
+  # dosyası yalnız BAŞARIDA yazılır (başarısızlık sonraki güncellemede yeniden denenir).
+  # `sir yenile` kendi içinde işlemseldir: DB/Valkey/env adım adım doğrulanır, panel yeni
+  # sırlarla sağlıklı açılmazsa HEPSİ eski sırlara döner → güncelleme KİLİTLENMEZ,
+  # panel eski sırlarla çalışmaya devam eder. Atlamak: GOSP_SIR_YENILE=0.
+  SIR_ISARET=/var/lib/girginospanel/sir-yenile-2026-10
+  if [ ! -f "$SIR_ISARET" ] && [ "${GOSP_SIR_YENILE:-1}" != 0 ]; then
+    step "Panel sırları yenileniyor (tek seferlik; tüm oturumlar düşer)"
+    _sy_rc=0
+    "$BIN" sir yenile --hepsi --saglik-sn 120 || _sy_rc=$?
+    case "$_sy_rc" in
+      0) { mkdir -p /var/lib/girginospanel && date -Is > "$SIR_ISARET"; } 2>/dev/null || warn "işaret yazılamadı: $SIR_ISARET"; ok "panel sırları yenilendi (işaret: $SIR_ISARET)" ;;
+      3) warn "🔴 KRİTİK: sır yenileme geri dönüşü EKSİK — journalctl -u girginospanel -n 60; ardından: girginospanel-server sir kurtar" ;;
+      *) warn "sır yenileme UYGULANMADI (eski sırlarla devam; sonraki güncellemede yeniden denenir) — elle: girginospanel-server sir yenile --hepsi" ;;
+    esac
+  fi
 
   # 11a) FTP kimlik-modu uyumu (pure-ftpd MYSQLCrypt) — 🔴 updater eskiden FTP
   # config'ine HİÇ dokunmuyordu. Panel restart'ta sifreheal (cmd/server/sifreheal.go)
@@ -648,6 +688,12 @@ else
   # migration'ın EKLEDİĞİ tablolar dump'ta olmadığı için kalır (eski binary onları
   # görmez, zararsız). Kolon/veri değişiklikleri geri alınır.
   systemctl stop girginospanel >/dev/null 2>&1 || true
+
+  # 10e'nin geçirdiği birimi geri koy: ESKİ ikili kimlikli birimle açılamaz (sırları
+  # yalnız ortamdan okur). env dosyası hiç değişmedi → eski birim + eski ikili tam eski hal.
+  if [ "$SIR_BIRIM_YENI" = 1 ] && [ -n "$SIR_ARAC" ]; then
+    bash "$SIR_ARAC" birim-geri || warn "panel birimi geri konamadı — elle: girginospanel-sir birim-geri"
+  fi
   if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
     if zcat "$PREDUMP" | mysql; then
       ok "DB güncelleme öncesi yedeğe geri yüklendi ($PREDUMP)"
