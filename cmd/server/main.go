@@ -116,12 +116,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	redis.AdminParolaAyarla(cfg.RedisAdminPass)
 	if cfg.SirKaynagi == "kimlik" {
 		log.Printf("config: sırlar systemd kimliğinden (LoadCredential) okundu — süreç ortamına girmedi")
 	} else {
 		log.Printf("config: UYARI sırlar süreç ortamından (eski birim: EnvironmentFile) okundu ve silindi — kalıcı düzeltme: girginospanel-update (birim LoadCredential'a geçer)")
 	}
-	redis.AdminParolaAyarla(cfg.RedisAdminPass)
 	d, err := db.Open(cfg.DBDsn)
 	if err != nil {
 		// Reboot/MariaDB gecikmesinde ANINDA log.Fatalf ile olmek yerine bekle+tekrar dene.
