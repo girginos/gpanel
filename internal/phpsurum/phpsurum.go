@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/provisioner"
 )
 
 // DesteklenenSurumler: panelin sunduğu PHP sürümleri. 🔴 5.6/7.0-7.3 EOL ve AlmaLinux 10
@@ -768,6 +769,13 @@ type Handlers struct {
 	DB *sql.DB
 }
 
+// Per-tenant FPM birim kapısı (testler sahteyle değiştirir: ana makinenin
+// systemd birim dizinine dokunulmaz).
+var (
+	tenantSahipsizTemizle  = provisioner.SahipsizTenantFPMTemizle
+	tenantBirimleriSurumle = provisioner.SurumuKullananTenantBirimleri
+)
+
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"surumler": TumSurumler(),
@@ -888,13 +896,37 @@ func (h *Handlers) Kaldir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bu sürümü kullanan domain var mı?
-	var count int
-	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM domains WHERE php_surum=?`, req.Surum).Scan(&count)
-	if count > 0 {
+	// Bu sürümü kullanan domain / alt alan adı var mı?
+	// 🔴 Sorgu hatası YUTULMAZ: eskiden `_ = …Scan` → hata = count 0 → kullanan
+	// varken sürüm kaldırılıyordu; o sürüme bağlı per-tenant FPM birimleri ikilisiz
+	// kalıp Restart döngüsüne girerdi. Alt alan adları da kendi sürümünü taşır.
+	var count, altCount int
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM domains WHERE php_surum=?`, req.Surum).Scan(&count); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "kullanım denetlenemedi")
+		return
+	}
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM subdomanlar WHERE php_surum=?`, req.Surum).Scan(&altCount); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "kullanım denetlenemedi")
+		return
+	}
+	if count > 0 || altCount > 0 {
 		httpx.WriteError(w, http.StatusConflict,
-			fmt.Sprintf("Bu surumu kullanan %d domain var, once baska bir surume gec.", count))
+			fmt.Sprintf("Bu surumu kullanan %d domain ve %d alt alan adi var, once baska bir surume gec.", count, altCount))
+		return
+	}
+	// Domains'te kaydı olmayan (silinmiş hesaptan kalmış) per-tenant FPM birimleri:
+	// önce sahipsiz uzlaştırması (yalnız kullanıcısı + kaydı olmayanları söker,
+	// denetime yazar), sonra kalan birim bu sürümü gösteriyorsa kaldırma reddedilir.
+	if _, err := tenantSahipsizTemizle(h.DB); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "per-tenant FPM birimleri denetlenemedi")
+		return
+	}
+	if birimler := tenantBirimleriSurumle(req.Surum); len(birimler) > 0 {
+		httpx.WriteError(w, http.StatusConflict,
+			fmt.Sprintf("Bu surumu kullanan %d per-tenant PHP-FPM birimi var (%s), once onlari tasiyin.",
+				len(birimler), strings.Join(birimler, ", ")))
 		return
 	}
 

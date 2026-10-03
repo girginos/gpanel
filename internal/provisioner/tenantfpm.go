@@ -40,8 +40,15 @@ import (
 )
 
 const (
+	tenantLogDir = "/var/log/php-fpm"
+)
+
+// Per-tenant yol kökleri. Üretimde SABİT; testler geçici dizine çevirir (söküm ve
+// sahipsiz uzlaştırması ana makinenin /etc, /run, /var/log'una dokunmadan sınanır).
+var (
 	tenantCfgRoot = "/etc/php-fpm-tenant"
-	tenantLogDir  = "/var/log/php-fpm"
+	tenantRunKok  = "/run"
+	tenantLogKok  = "/var/log"
 )
 
 // tenantUnitDir: per-tenant systemd unit dizini. Üretimde SABİT; testler geçici
@@ -50,10 +57,10 @@ var tenantUnitDir = "/etc/systemd/system"
 
 func tenantUnitName(sk string) string     { return "php-fpm-" + sk + ".service" }
 func tenantUnitPath(sk string) string     { return filepath.Join(tenantUnitDir, tenantUnitName(sk)) }
-func tenantRunDir(sk string) string       { return "/run/php-fpm-" + sk }
+func tenantRunDir(sk string) string       { return filepath.Join(tenantRunKok, "php-fpm-"+sk) }
 func tenantSocket(sk string) string       { return filepath.Join(tenantRunDir(sk), sk+".sock") }
 func tenantCfgDir(sk string) string       { return filepath.Join(tenantCfgRoot, sk) }
-func tenantPerSkLogDir(sk string) string  { return "/var/log/php-fpm-" + sk }
+func tenantPerSkLogDir(sk string) string  { return filepath.Join(tenantLogKok, "php-fpm-"+sk) }
 func tenantPerSkLogFile(sk string) string { return filepath.Join(tenantPerSkLogDir(sk), "tenant.log") }
 
 // mtaBindSatirlari: PHP mail() cage İÇİNDEN çalışsın diye MTA yollarını per-tenant systemd
@@ -1111,7 +1118,9 @@ func fpmWatchdogLoop() {
 	hist := map[string][]fpmSample{}
 	tk := time.NewTicker(fpmWatchdogTick)
 	defer tk.Stop()
+	tikSayisi := 0
 	for range tk.C {
+		tikSayisi++
 		// 🔴 recover TICK BASINA: dis dongude olsaydi tek bir panic goroutine'i
 		// KALICI olarak oldururdu (watchdog sessizce olur). Ayrica recover'siz
 		// panic TUM girginospanel surecini goturur.
@@ -1122,6 +1131,11 @@ func fpmWatchdogLoop() {
 				}
 			}()
 			fpmWatchdogScan(hist)
+			// Bakım döngüsü: sahipsiz kiracı FPM birimi uzlaştırması (watchdog yalnız
+			// domains'teki hesapları gördüğü için yetimleri ASLA yakalamıyordu).
+			if tikSayisi%sahipsizTaramaTik == 0 {
+				sahipsizTaramasiniKos(pkgDB, "bakim")
+			}
 		}()
 	}
 }
@@ -1376,6 +1390,24 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	if err := HesapAskiKapisi(sk); err != nil {
 		return "", err
 	}
+	// 🔴 YAŞAM KİLİDİ — SÖKÜM YARIŞI (181, php-fpm-c_e2ebayi1_test 1,8M restart):
+	// oluşturma/plan değişikliği bu fonksiyonu ARKA PLANDA (go UygulaHepsi) çağırır.
+	// Hesap o sırada silinirse Deprovision→TeardownTenantFPM birim HENÜZ yazılmamışken
+	// koşuyor, ardından buradaki adım 4 birimi yazıp enable ediyordu → kullanıcısı ve
+	// domains kaydı olmayan, kimsenin izlemediği (watchdog yalnız domains'i tarar)
+	// sonsuz Restart döngüsü. Söküm ile kurulum artık AYNI sk kilidinde sıralanır:
+	//   • söküm önce geldiyse işaret (TenantSokumde) kurulumu reddeder,
+	//   • kurulum önce geldiyse söküm onun bitmesini bekler ve yazdığını kaldırır.
+	// Ev dizini / kullanıcı denetimi de kilit ALTINDA (userdel arada koşamaz).
+	yk := fpmYasamKilidi(sk)
+	yk.Lock()
+	defer yk.Unlock()
+	if TenantSokumde(sk) {
+		return "", fmt.Errorf("%w: %s", ErrTenantSokuldu, sk)
+	}
+	if !tenantKullaniciVar(sk) {
+		return "", fmt.Errorf("%w: sistem kullanıcısı yok (%s)", ErrTenantSokuldu, sk)
+	}
 	surum = normalizePHP(surum)
 	ay := phpMap[surum]
 	fpmBin := ay.FpmBin
@@ -1450,6 +1482,11 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	if err := os.WriteFile(tenantUnitPath(sk), []byte(renderTenantUnit(sk, fpmBin)), 0644); err != nil {
 		return "", fmt.Errorf("tenant unit yaz: %w", err)
 	}
+	// Yeniden başlatma tavanı (drop-in; ana birimin damgasını DEĞİŞTİRMEZ → mevcut
+	// tenant'larda drift-restart tetiklemez). Bkz tenantStartLimitDropin.
+	if _, err := tenantStartLimitYaz(sk); err != nil {
+		log.Printf("EnableTenantFPM: %s StartLimit drop-in yazilamadi: %v", sk, err)
+	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
 		return "", fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -1468,6 +1505,9 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 		_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: systemctl enable basarisiz")
 		return "", fmt.Errorf("tenant fpm enable: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+	// Yönetici kaynaklı (yeniden) başlatma StartLimit sayacına takılmasın: reset-failed
+	// sayacı sıfırlar. Tavan yalnız systemd'nin KENDİ Restart= döngüsünü keser.
+	_, _ = exec.Command("systemctl", "reset-failed", tenantUnitName(sk)).CombinedOutput()
 	if out, err := exec.Command("systemctl", "restart", tenantUnitName(sk)).CombinedOutput(); err != nil {
 		_ = RollbackToSharedFPM(db, domainID, sk, surum, "EnableTenantFPM: systemctl restart basarisiz")
 		return "", fmt.Errorf("tenant fpm restart: %s: %w", strings.TrimSpace(string(out)), err)
@@ -1544,8 +1584,19 @@ func RollbackToSharedFPM(db *sql.DB, domainID int64, sk, surum string, sebep ...
 	}
 	// 🔴 Askıdaki hesapta paylaşılan havuzu geri getirmek (.bak → .conf) askıyı
 	// delerdi: servis bilerek durdurulmuş (PHPHavuzAski), "ölü" değil. Dokunma.
+	// Silinen hesap: "paylaşılana indirme" anlamsız (kullanıcı yok → writePoolValidated
+	// düşer, adım 3'e hiç varılmaz → cfg dizini YETİM kalırdı; 181'de c_dgrplan_test)
+	// ve silinmiş hesap için sahte "izolasyon kaybı" denetim satırı yazılırdı.
+	if TenantSokumde(sk) {
+		return fmt.Errorf("%w: %s (paylaşılana indirme yapılmadı)", ErrTenantSokuldu, sk)
+	}
 	if err := HesapAskiKapisi(sk); err != nil {
 		return err
+	}
+	if !tenantKullaniciVar(sk) {
+		k := tenantFPMArtiklariniSok(sk)
+		log.Printf("RollbackToSharedFPM: %s sistem kullanicisi yok — paylasilana indirme yerine per-tenant izler sokuldu %v", sk, k)
+		return fmt.Errorf("%w: sistem kullanıcısı yok (%s)", ErrTenantSokuldu, sk)
 	}
 	// 🔴 GUVENLIK OLAYI (C): bu cagri tenant'in CageFS izolasyonunu KALDIRIR.
 	// Log + audit_log + sentinel UCU BIRDEN, mutasyondan ONCE yazilir: adim 1
@@ -1599,30 +1650,28 @@ func RollbackToSharedFPM(db *sql.DB, domainID int64, sk, surum string, sebep ...
 }
 
 // TeardownTenantFPM: domain silinirken per-tenant FPM izlerini kaldırır (DB/nginx render
-// YOK — Deprovision zaten vhost'u siler). Slice ayrı olarak kaynaklimit.SystemdSliceSil
-// ile domain handler'ında silinir.
+// YOK — Deprovision zaten vhost'u siler). TÜM silme yolları (tekil/bayi toplu silme,
+// taşıma geri alma, oluşturma hatası geri alma, platform SiteSil) Deprovision üzerinden
+// buraya gelir. İdempotent: iz yoksa no-op.
+//
+// 🔴 Yaşam kilidi altında koşar ve sk'yi "sökülüyor" işaretler: arka planda süren ya da
+// SONRADAN gelen bir EnableTenantFPM (go UygulaHepsi) birimi yeniden yazamaz (bkz.
+// EnableTenantFPM yaşam kilidi notu). İşaret, aynı sk yeniden sağlanınca (Provision)
+// kalkar. Slice da burada (TenantSliceSilKancasi) gider: taşıma geri alma ve platform
+// SiteSil yolları kaynaklimit.SystemdSliceSil'i HİÇ çağırmıyordu.
 func TeardownTenantFPM(sk string) {
-	if sk == "" || !strings.HasPrefix(sk, "c_") {
+	if sk == "" || !strings.HasPrefix(sk, "c_") || !gecerliSKAdi(sk) {
 		return
 	}
-	_, _ = exec.Command("systemctl", "disable", "--now", tenantUnitName(sk)).CombinedOutput()
-	_ = os.Remove(tenantUnitPath(sk))
-	_, _ = exec.Command("systemctl", "daemon-reload").CombinedOutput()
-	_ = os.RemoveAll(tenantCfgDir(sk))
-	_ = os.RemoveAll(tenantRunDir(sk))
+	yk := fpmYasamKilidi(sk)
+	yk.Lock()
+	defer yk.Unlock()
+	tenantSokulen.Store(sk, time.Now())
+	tenantFPMArtiklariniSok(sk)
 	// Paylasilan havuz dosyasini VE .bak artigini temizle. 🔴 Canli havuz
 	// (<PoolDir>/<sk>.conf) birakilirsa kullanici userdel ile gittigi icin
 	// `php-fpm -t` o surumde KALICI hata verir ve YENI DOMAIN ACILAMAZ.
-	for _, ay := range phpMap {
-		aktif := filepath.Join(ay.PoolDir, sk+".conf")
-		_, varMi := os.Stat(aktif)
-		_ = os.Remove(aktif)
-		_ = os.Remove(filepath.Join(ay.PoolDir, sk+".conf.bak"))
-		if varMi == nil && ay.Service != "" {
-			// yalniz gercekten havuzu olan surumu yeniden yukle
-			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
-		}
-	}
+	paylasilanHavuzArtiklariniSil(sk)
 	// Askıda silinen hesabın saklanan (.askida) havuzları da gider.
 	askiHavuzArtiklariniSil(sk)
 	// C: domain silindi -> "izolasyon kaybi" uyarisi bayat kalmasin.
@@ -1692,6 +1741,9 @@ func ensureTenantFPMSweep() {
 		}
 	}
 	rows.Close()
+	// Yeniden başlatma tavanını MEVCUT birimlere indir (drop-in + tek daemon-reload;
+	// restart YOK → sağlıklı süreçler kesintisiz).
+	tenantStartLimitGeriDoldur()
 	for _, d := range list {
 		// Askidaki hesabin servisi acilista BASLATILMAZ (drift onarimi dahil);
 		// askidan alma PHPHavuzAski ile acar.
@@ -1711,6 +1763,7 @@ func ensureTenantFPMSweep() {
 		if out, _ := exec.Command("systemctl", "is-active", tenantUnitName(d.sk)).CombinedOutput(); strings.TrimSpace(string(out)) == "active" {
 			continue
 		}
+		_, _ = exec.Command("systemctl", "reset-failed", tenantUnitName(d.sk)).CombinedOutput()
 		if out, err := exec.Command("systemctl", "start", tenantUnitName(d.sk)).CombinedOutput(); err != nil {
 			// başlatılamadı → paylaşılan düzene güvenli indir
 			_ = RollbackToSharedFPM(pkgDB, d.id, d.sk, d.php, "acilis sweep: systemctl start basarisiz")
@@ -1726,6 +1779,7 @@ func ensureTenantFPMSweep() {
 	}
 	log.Printf("ensureTenantFPMSweep: bitti (%d domain, %s) — arka planda kosuldu, panel acilisi bloklanmadi",
 		len(list), time.Since(basla).Round(time.Millisecond))
+	sahipsizTaramasiniKos(pkgDB, "acilis")
 }
 
 // RepairTenantUnitDrift: mevcut per-tenant systemd unit dosyasi guncel sablondan
@@ -1781,10 +1835,25 @@ func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 
 	// Kilitli bolum AYRI closure: guardPostStart kendi icinde fpmSkLock alir,
 	// sync.Mutex reentrant DEGIL → kilidi tutarken cagirmak deadlock olurdu.
+	atlandi := false
 	devam := func() bool {
 		mu := fpmSkLock(sk)
 		mu.Lock()
 		defer mu.Unlock()
+		// Söküm yarışı: hesap bu arada silindiyse birimi YENİDEN YAZMA (yetim birim
+		// doğardı). Kilit sırası fpmSkLock → yaşam; yaşam kilidini tutan hiçbir yol
+		// fpmSkLock almaz (EnableTenantFPM guard'ı ayrı goroutine'de başlatır).
+		yk := fpmYasamKilidi(sk)
+		yk.Lock()
+		defer yk.Unlock()
+		if TenantSokumde(sk) {
+			atlandi = true
+			return false
+		}
+		if _, serr := os.Stat(unitPath); serr != nil {
+			atlandi = true
+			return false
+		}
 		if werr := os.WriteFile(unitPath, []byte(want), 0644); werr != nil {
 			log.Printf("repairTenantUnitDrift: %s unit yazilamadi: %v", sk, werr)
 			return false
@@ -1796,6 +1865,7 @@ func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 				sk, strings.TrimSpace(string(out)))
 			return false
 		}
+		_, _ = exec.Command("systemctl", "reset-failed", tenantUnitName(sk)).CombinedOutput()
 		if out, rerr := exec.Command("systemctl", "restart", tenantUnitName(sk)).CombinedOutput(); rerr != nil {
 			log.Printf("repairTenantUnitDrift: %s restart basarisiz (%s) → paylasilan FPM'e geri aliniyor",
 				sk, strings.TrimSpace(string(out)))
@@ -1814,6 +1884,9 @@ func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 		log.Printf("repairTenantUnitDrift: %s unit guncellendi + restart edildi (damga=%s)", sk, unitStampOf(want))
 		return true
 	}()
+	if atlandi {
+		return false
+	}
 	if !devam {
 		return true
 	}

@@ -1248,6 +1248,9 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 			return nil, fmt.Errorf("useradd: %s: %w", strings.TrimSpace(string(out)), err)
 		}
 	}
+	// sk yeniden kullanılabilir: önceki kiracının söküm işareti bu YENİ hesabın
+	// per-tenant FPM kurulumunu engellemesin (bkz TeardownTenantFPM).
+	tenantSokumIsaretiKaldir(u)
 	provizyonKilit.Unlock()
 
 	dirs := []string{"public_html", "logs", "tmp", "ssl", ".cron"}
