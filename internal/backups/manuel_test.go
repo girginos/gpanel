@@ -253,8 +253,9 @@ func TestZamanlayici_YalnizKokKaynakliPlanlar(t *testing.T) {
 	for _, d := range due {
 		got[d.ID] = true
 	}
-	if !got[1] || !got[2] || got[3] || got[4] || len(got) != 2 {
-		t.Fatalf("koşacak domainler %v; {1 kok, 2 eski} beklendi (pasif/kapalı koşmamalı)", got)
+	// Kullanıcı kararı (2026-10-03): yazanı bilinmeyen "eski" planlar DURDURULUR.
+	if !got[1] || got[2] || got[3] || got[4] || len(got) != 1 {
+		t.Fatalf("koşacak domainler %v; yalnız {1 kok} beklendi (eski/pasif/kapalı koşmamalı)", got)
 	}
 }
 

@@ -129,12 +129,12 @@ func tickOnce(db *sql.DB) {
 	}
 }
 
-// zamanlayiciPlanKaynaklari: zamanlayıcının KOŞTUĞU plan kaynakları (0114).
-// "kok" = yönetici yazdı; "eski" = 0114 öncesi, yazanı bilinmeyen plan. "pasif"
-// listede YOK (plan değerleri korunur, koşmaz). Müşteri/bayi bundan sonra plan
-// YAZAMAZ (SetSchedule 403). Eski planları da durdurmak kullanıcı kararıdır:
-// "eski"yi bu listeden çıkarmak yeterli (veri silinmez).
-var zamanlayiciPlanKaynaklari = []string{"kok", "eski"}
+// zamanlayiciPlanKaynaklari: zamanlayıcının KOŞTUĞU plan kaynakları (0115).
+// Yalnız "kok" (yönetici yazdı). "eski" = 0115 öncesi, yazanı bilinmeyen plan ve
+// "pasif" listede YOK: değerleri korunur, KOŞMAZ. Kullanıcı kararı (2026-10-03):
+// eski planlar durdurulur; yönetici bir hostingin planını yeniden kaydedince
+// "kok" olur ve tekrar koşar. Müşteri/bayi plan YAZAMAZ (SetSchedule 403).
+var zamanlayiciPlanKaynaklari = []string{"kok"}
 
 // planKaynakKolonuVar: 0114 göçü koşmuş mu. Koşmamışsa süzgeç UYGULANMAZ (eski
 // davranış) — göç gecikti diye otomatik yedekler sessizce durmasın.
