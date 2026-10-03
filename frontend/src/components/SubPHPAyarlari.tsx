@@ -7,6 +7,8 @@ import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { useRol, yoneticiMi } from '@/lib/rol'
+import { phpAyarGovdesi } from '@/lib/phpAyar'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
 // AYRI bir PHP-FPM havuzu render edilir (bağımsız memory_limit/upload/pm.* vb.).
@@ -17,8 +19,9 @@ type Ayar = {
   allow_url_fopen: boolean; file_uploads: boolean; short_open_tag: boolean
   error_reporting: string; include_path: string; open_basedir: string
   session_save_path: string; mail_force_extra_parameters: string
-  pm_strategy: string; pm_max_children: number; pm_max_requests: number
-  pm_start_servers: number; pm_min_spare_servers: number; pm_max_spare_servers: number
+  // pm_max_children + türevleri: kökün iç alanı — yalnız yöneticiye döner (lib/phpAyar.ts)
+  pm_strategy: string; pm_max_children?: number; pm_max_requests: number
+  pm_start_servers?: number; pm_min_spare_servers?: number; pm_max_spare_servers?: number
   ek_direktifler: string; debug_mode: boolean
 }
 
@@ -36,6 +39,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || O
 
 export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; sid: string }) {
   useTranslation() // dil re-render aboneligi
+  const yonetici = yoneticiMi(useRol())
   const [a, setA] = useState<Ayar | null>(null)
   const [ozel, setOzel] = useState(false)
   const [acik, setAcik] = useState(false)
@@ -57,7 +61,7 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
     if (!a) return
     setKaydediliyor(true); setMesaj(null)
     try {
-      const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: a })
+      const r = await api.put<{ ozel_havuz: boolean }>(`/domains/${domainId}/subdomain/${sid}/php-settings`, { ayarlar: phpAyarGovdesi(a, yonetici) })
       setOzel(r.data.ozel_havuz)
       setMesaj({ t: 'ok', m: cevir("Ayarlar kaydedildi — bu alt alan için ayrı FPM havuzu etkin.") })
     } catch (e) {
@@ -68,10 +72,13 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
   if (!a) return null
 
   const num = (k: keyof Ayar) => (
-    <input type="number" value={a[k] as number} onChange={e => P(k, Number(e.target.value) as never)} className={inp} />
+    <input type="number" value={(a[k] as number | undefined) ?? 0} onChange={e => P(k, Number(e.target.value) as never)} className={inp} />
   )
-  const txt = (k: keyof Ayar) => (
-    <input type="text" value={a[k] as string} onChange={e => P(k, e.target.value as never)} className={inp} />
+  // kilitli: kök korumalı alan — yönetici dışı salt okunur (sunucu değişikliği 403 ile reddeder)
+  const txt = (k: keyof Ayar, kilitli = false) => (
+    <input type="text" value={a[k] as string} onChange={e => P(k, e.target.value as never)} readOnly={kilitli}
+      title={kilitli ? 'Bu ayar yöneticinize aittir' : undefined}
+      className={`${inp} ${kilitli ? 'text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-dark-700' : ''}`} />
   )
   const Toggle = ({ k, l }: { k: keyof Ayar; l: string }) => (
     <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
@@ -131,16 +138,23 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
                   <option value="static">static</option>
                 </select>
               </div>
-              <div><label className={etk}>pm.max_children</label>{num('pm_max_children')}</div>
+              {yonetici && <div><label className={etk}>pm.max_children</label>{num('pm_max_children')}</div>}
               <div><label className={etk}>pm.max_requests</label>{num('pm_max_requests')}</div>
-              <div><label className={etk}>pm.start_servers</label>{num('pm_start_servers')}</div>
-              <div><label className={etk}>pm.min_spare</label>{num('pm_min_spare_servers')}</div>
-              <div><label className={etk}>pm.max_spare</label>{num('pm_max_spare_servers')}</div>
+              {yonetici && <>
+                <div><label className={etk}>pm.start_servers</label>{num('pm_start_servers')}</div>
+                <div><label className={etk}>pm.min_spare</label>{num('pm_min_spare_servers')}</div>
+                <div><label className={etk}>pm.max_spare</label>{num('pm_max_spare_servers')}</div>
+              </>}
             </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              {yonetici
+                ? cevir("İşçi sayısı havuzda üst alan adının paket / hostinge özel limitiyle uygulanır; buradaki değer onu aşamaz.")
+                : cevir("Aynı anda çalışan PHP işçi sayısı paketinizle belirlenir.")}
+            </p>
           </div>
 
           <div>
-            <label className={etk}>disable_functions</label>{txt('disable_functions')}
+            <label className={etk}>disable_functions</label>{txt('disable_functions', !yonetici)}
           </div>
           <div>
             <label className={etk}>Ek direktifler (php_value[...] / php_flag[...])</label>

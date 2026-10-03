@@ -12,6 +12,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useRol, yoneticiMi } from '@/lib/rol'
+import { phpAyarGovdesi } from '@/lib/phpAyar'
 
 type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
 
@@ -23,8 +24,9 @@ type Ayarlar = {
   file_uploads: boolean; short_open_tag: boolean
   error_reporting: string; include_path: string; open_basedir: string
   session_save_path: string; mail_force_extra_parameters: string
-  pm_strategy: string; pm_max_children: number; pm_max_requests: number
-  pm_start_servers: number; pm_min_spare_servers: number; pm_max_spare_servers: number
+  // pm_max_children + türevleri: kökün iç alanı — yalnız yöneticiye döner (lib/phpAyar.ts)
+  pm_strategy: string; pm_max_children?: number; pm_max_requests: number
+  pm_start_servers?: number; pm_min_spare_servers?: number; pm_max_spare_servers?: number
   ek_direktifler: string
   debug_mode: boolean
 }
@@ -165,7 +167,7 @@ export default function DomainPHPPage() {
     if (!a) return
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
-      const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: a })
+      const { data } = await api.put(`/domains/${id}/php-settings`, { php_surum: secili, ayarlar: phpAyarGovdesi(a, yonetici) })
       const m = `${cevir("Kaydedildi.")} PHP ${data.php_surum}, socket: ${data.socket}`
       setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
@@ -289,7 +291,7 @@ export default function DomainPHPPage() {
             </Grid>
             <div className="mt-4">
               <Etiket>disable_functions <Ipucu t={cevir("Devre dışı bırakılacak PHP fonksiyonları (virgülle ayrılmış)")} /></Etiket>
-              <Txt value={a.disable_functions} onChange={v => P('disable_functions', v)} mono />
+              <Txt value={a.disable_functions} onChange={v => P('disable_functions', v)} mono kilitli={!yonetici} />
             </div>
           </Kart>
 
@@ -309,13 +311,13 @@ export default function DomainPHPPage() {
               <Txt value={a.include_path} onChange={v => P('include_path', v)} mono />
             </Tek>
             <Tek e="open_basedir" h={cevir("PHP'nin erişebileceği dizinler (boş = sınır yok). : ile ayır")}>
-              <Txt value={a.open_basedir} onChange={v => P('open_basedir', v)} mono placeholder={cevir("örn: /home/kullanici/:/tmp/")} />
+              <Txt value={a.open_basedir} onChange={v => P('open_basedir', v)} mono placeholder={cevir("örn: /home/kullanici/:/tmp/")} kilitli={!yonetici} />
             </Tek>
             <Tek e="session.save_path" h={cevir("Session dosyaları dizini (boş = /home/{sk}/tmp)")}>
-              <Txt value={a.session_save_path} onChange={v => P('session_save_path', v)} mono />
+              <Txt value={a.session_save_path} onChange={v => P('session_save_path', v)} mono kilitli={!yonetici} />
             </Tek>
             <Tek e="mail.force_extra_parameters" h={cevir("mail() fonksiyonu için ek parametreler")}>
-              <Txt value={a.mail_force_extra_parameters} onChange={v => P('mail_force_extra_parameters', v)} mono />
+              <Txt value={a.mail_force_extra_parameters} onChange={v => P('mail_force_extra_parameters', v)} mono kilitli={!yonetici} />
             </Tek>
           </Kart>
 
@@ -392,12 +394,19 @@ export default function DomainPHPPage() {
                   {PMS.map(p => <option key={p.v} value={p.v}>{cevir(p.t)}</option>)}
                 </select>
               </Sec>
-              <Saytec etiket="pm.max_children" yardim={cevir("Aynı anda en çok kaç PHP worker")} value={a.pm_max_children} onChange={v => P('pm_max_children', v)} />
+              {yonetici && <Saytec etiket="pm.max_children" yardim={cevir("Aynı anda en çok kaç PHP worker")} value={a.pm_max_children ?? 0} onChange={v => P('pm_max_children', v)} />}
               <Saytec etiket="pm.max_requests" yardim={cevir("Worker'ı kaç istek sonra yeniden başlat (memory leak önler)")} value={a.pm_max_requests} onChange={v => P('pm_max_requests', v)} />
-              <Saytec etiket="pm.start_servers" yardim={cevir("Başlangıçta açılacak worker sayısı (dynamic için)")} value={a.pm_start_servers} onChange={v => P('pm_start_servers', v)} />
-              <Saytec etiket="pm.min_spare_servers" yardim={cevir("Bekleyen minimum worker sayısı")} value={a.pm_min_spare_servers} onChange={v => P('pm_min_spare_servers', v)} />
-              <Saytec etiket="pm.max_spare_servers" yardim={cevir("Bekleyen maksimum worker sayısı")} value={a.pm_max_spare_servers} onChange={v => P('pm_max_spare_servers', v)} />
+              {yonetici && <>
+                <Saytec etiket="pm.start_servers" yardim={cevir("Başlangıçta açılacak worker sayısı (dynamic için)")} value={a.pm_start_servers ?? 0} onChange={v => P('pm_start_servers', v)} />
+                <Saytec etiket="pm.min_spare_servers" yardim={cevir("Bekleyen minimum worker sayısı")} value={a.pm_min_spare_servers ?? 0} onChange={v => P('pm_min_spare_servers', v)} />
+                <Saytec etiket="pm.max_spare_servers" yardim={cevir("Bekleyen maksimum worker sayısı")} value={a.pm_max_spare_servers ?? 0} onChange={v => P('pm_max_spare_servers', v)} />
+              </>}
             </Grid>
+            <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-3">
+              {yonetici
+                ? cevir("İşçi sayısı (pm.max_children ve yedek sayıları) havuzda paketin / hostinge özel limitin değeriyle uygulanır; buradaki değer onu aşamaz.")
+                : cevir("Aynı anda çalışan PHP işçi sayısı paketinizle belirlenir.")}
+            </p>
           </Kart>
 
           {/* PHP Modülleri (read-only, sunucu seviyesi) */}
@@ -479,8 +488,8 @@ export default function DomainPHPPage() {
                     return (
                       <div key={g.renk} className={`border rounded-lg p-3 ${renkMap[g.renk]}`}>
                         <div className="flex items-start gap-3">
-                          <button onClick={() => grupTogga(g)} aria-label={cevir(g.ad)}
-                            className={`shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
+                          <button onClick={() => grupTogga(g)} aria-label={cevir(g.ad)} disabled={!yonetici}
+                            className={`shrink-0 mt-0.5 relative inline-flex h-5 w-9 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-60 disabled:cursor-not-allowed ${
                               blokeli ? 'bg-red-500' : (karisik ? 'bg-amber-400' : 'bg-emerald-500')
                             }`}
                             title={blokeli ? cevir("Tümünü aç (etkin yap)") : (karisik ? cevir("Tümünü kapat") : cevir("Tümünü kapat (engelle)"))}>
@@ -507,12 +516,15 @@ export default function DomainPHPPage() {
               )
             })()}
 
-            <details className="mt-4">
+            {!yonetici && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-3">{cevir("Bu ayarlar yöneticinize aittir; değiştirmek için yöneticinizle iletişime geçin.")}</p>
+            )}
+            {yonetici && <details className="mt-4">
               <summary className="text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100 dark:text-slate-100">{cevir("Manuel düzenle (ham disable_functions)")}</summary>
               <input value={a.disable_functions} onChange={e => P('disable_functions', e.target.value)}
                 className="w-full mt-2 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-xs font-mono" />
               <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">{cevir("Virgülle ayrılmış fonksiyon adları.")}</p>
-            </details>
+            </details>}
           </Kart>
 
           {/* Additional */}
@@ -586,10 +598,13 @@ function Saytec({ etiket, yardim, suffix, value, onChange }: { etiket: string; y
     </Sec>
   )
 }
-function Txt({ value, onChange, mono, placeholder }: { value: string; onChange: (v: string) => void; mono?: boolean; placeholder?: string }) {
+// kilitli: kök korumalı alan (yönetici dışı salt okunur; sunucu değişikliği 403 ile reddeder).
+function Txt({ value, onChange, mono, placeholder, kilitli }: { value: string; onChange: (v: string) => void; mono?: boolean; placeholder?: string; kilitli?: boolean }) {
   return (
     <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm ${mono ? 'font-mono' : ''}`} />
+      readOnly={kilitli} aria-readonly={kilitli || undefined}
+      title={kilitli ? 'Bu ayar yöneticinize aittir' : undefined}
+      className={`w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm ${mono ? 'font-mono' : ''} ${kilitli ? 'bg-slate-50 dark:bg-dark-800 text-slate-500 cursor-not-allowed' : ''}`} />
   )
 }
 function Bayrak({ etiket, yardim, value, onChange }: { etiket: string; yardim: string; value: boolean; onChange: (v: boolean) => void }) {
