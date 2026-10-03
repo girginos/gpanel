@@ -61,6 +61,8 @@ type DonusumRaporu struct {
 	Donusen    []DonusumKalemi
 	Atlanan    []DonusumKalemi
 	Temizlenen []int64 // hiçbir hostingin kullanmadığı eski kopyalar (arşivlendi)
+	// Geri yükleme kalıntısı (bkz. bayatKalintiTemizle): silinen bayat satır sayıları.
+	BayatUst, BayatArsiv int64
 }
 
 // planSatiri — bir planın karşılaştırılan alanları.
@@ -337,10 +339,14 @@ func ustYazimaTasi(ctx context.Context, tx *sql.Tx, did int64, kaynak planSatiri
 // dönüşemeyen kopya yerinde kalır ve raporlanır.
 func OzelPlanlariDonustur(ctx context.Context, db *sql.DB) (DonusumRaporu, error) {
 	var rapor DonusumRaporu
+	var err error
 	// FK'si kurulamamış eski şemada silinmiş hostingin üst yazımı kalmasın.
-	if _, err := db.ExecContext(ctx,
+	if _, err = db.ExecContext(ctx,
 		`DELETE u FROM hosting_limit_ust u LEFT JOIN domains d ON d.id=u.domain_id WHERE d.id IS NULL`); err != nil {
 		return rapor, fmt.Errorf("hosting_limit_ust okunamadı (göç 0120 uygulandı mı?): %w", err)
+	}
+	if rapor.BayatUst, rapor.BayatArsiv, err = bayatKalintiTemizle(ctx, db); err != nil {
+		return rapor, fmt.Errorf("geri yükleme kalıntısı temizlenemedi: %w", err)
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id, domain_id FROM service_plans WHERE domain_id IS NOT NULL ORDER BY id`)
 	if err != nil {
@@ -373,6 +379,67 @@ func OzelPlanlariDonustur(ctx context.Context, db *sql.DB) (DonusumRaporu, error
 		}
 	}
 	return rapor, nil
+}
+
+// bayatKalintiTemizle — GERİ DÖNÜŞ KALINTISI. DB dönüşümden ÖNCE alınmış bir yedeğe
+// geri yüklenirse (girginospanel-update/-restore sağlıksız açılışta güncelleme öncesi
+// dump'ı geri yükler; operatör elle `zcat dump | mysql` yapabilir) dump yalnız KENDİ
+// tablolarını (service_plans, domains, audit_log…) geri koyar: 0120'nin tabloları
+// (hosting_limit_ust, service_plans_ozel_arsiv) geri alınmış zaman çizgisinin
+// satırlarıyla KALIR. Yeni ikiliye tekrar geçişte bunlar canlı sanılırsa:
+//   - üst yazım satırı, kopya hâlâ planken alanı "zaten plandan bağımsız" saydırır →
+//     eski ikilinin kopyada yaptığı değişiklik sessizce ezilir;
+//   - arşivdeki UNIQUE(kaynak_plan_id) kopyanın yeniden arşivlenmesini reddeder →
+//     o hosting HER açılışta "dönüştürülmedi" kalır (çift dönüşüm / takılı dönüşüm).
+//
+// Yalnız KANITLANABİLİR bayat satır silinir: kaynak kopyası service_plans'ta AYNI
+// hostinge ait (domain_id) olarak yeniden VAR olan arşiv ve üst yazım satırı. Dönüşüm
+// kopyayı, üst yazımı yazdığı/arşivlediği AYNI işlemde siler; kopyanın geri gelmesi o
+// işlemin geri alındığının kanıtıdır (kimlik yeniden kullanılsa bile yeni plan domain_id
+// taşımaz — kopya artık üretilmiyor). Veri kaybı yok: silinen satırın bilgisi geri gelen
+// kopyanın kendisidir; dönüşüm hemen ardından onu yeniden, aynı sonuçla dönüştürür.
+// Kanıtlanamayan kalıntıyı (ör. elle üst yazım, devir) güncelleme/onarım betiği geri
+// yüklemede zaten kaldırır (assets/ops yeni_tablolari_kenara_al: yedekle + DROP).
+func bayatKalintiTemizle(ctx context.Context, db *sql.DB) (ust, arsiv int64, err error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var kayit []string
+	rows, err := tx.QueryContext(ctx,
+		`SELECT u.domain_id, u.kaynak_ozel_plan_id FROM hosting_limit_ust u
+		   JOIN service_plans p ON p.id=u.kaynak_ozel_plan_id AND p.domain_id=u.domain_id FOR UPDATE`)
+	if err != nil {
+		return 0, 0, err
+	}
+	for rows.Next() {
+		var d, k int64
+		if rows.Scan(&d, &k) == nil {
+			kayit = append(kayit, fmt.Sprintf("hosting %d (kopya #%d)", d, k))
+		}
+	}
+	rows.Close()
+	r, err := tx.ExecContext(ctx,
+		`DELETE u FROM hosting_limit_ust u JOIN service_plans p ON p.id=u.kaynak_ozel_plan_id AND p.domain_id=u.domain_id`)
+	if err != nil {
+		return 0, 0, err
+	}
+	ust, _ = r.RowsAffected()
+	r, err = tx.ExecContext(ctx,
+		`DELETE a FROM service_plans_ozel_arsiv a JOIN service_plans p ON p.id=a.kaynak_plan_id AND p.domain_id=a.domain_id`)
+	if err != nil {
+		return 0, 0, err
+	}
+	arsiv, _ = r.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	if ust+arsiv > 0 {
+		log.Printf("🔴 ozel plan: DB donusum oncesi yedege geri yuklenmis — bayat %d ust yazim %v + %d arsiv satiri silindi (kopyalar geri geldi, yeniden donusturulecek)",
+			ust, kayit, arsiv)
+	}
+	return ust, arsiv, nil
 }
 
 var errBelirsiz = errors.New("taban plan belirlenemedi (denetim kaydı yok ve birebir eşleşen tek katalog planı yok)")

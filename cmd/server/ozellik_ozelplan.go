@@ -36,8 +36,8 @@ func ozelPlanAcilis(d *sql.DB) {
 		log.Printf("🔴 ozel plan donusumu calismadi: %v", err)
 		return
 	}
-	if n := len(rapor.Donusen) + len(rapor.Atlanan) + len(rapor.Temizlenen); n > 0 {
-		log.Printf("ozel plan donusumu: %d donustu, %d atlandi (taban belirsiz/paylasilan), %d kullanilmayan kopya arsivlendi",
-			len(rapor.Donusen), len(rapor.Atlanan), len(rapor.Temizlenen))
+	if n := int64(len(rapor.Donusen)+len(rapor.Atlanan)+len(rapor.Temizlenen)) + rapor.BayatUst + rapor.BayatArsiv; n > 0 {
+		log.Printf("ozel plan donusumu: %d donustu, %d atlandi (taban belirsiz/paylasilan), %d kullanilmayan kopya arsivlendi, %d/%d bayat ust yazim/arsiv (geri yukleme kalintisi) silindi",
+			len(rapor.Donusen), len(rapor.Atlanan), len(rapor.Temizlenen), rapor.BayatUst, rapor.BayatArsiv)
 	}
 }

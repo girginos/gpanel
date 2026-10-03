@@ -83,6 +83,104 @@ warn() { echo -e "  ${c_y}!${c_0} $*"; }
 die()  { echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
 step() { echo -e "${c_b}══ $* ══${c_0}"; }
 
+# >>> geri-donus-kapisi — girginospanel-update ve girginospanel-restore'da BİREBİR aynı
+# (internal/opsbetik/geridonus_test.go iki kopyayı karşılaştırır ve davranışı sınar).
+#
+# GERİ DÖNÜŞSÜZ GÖÇLER: uygulandıktan sonra DB'yi o göçü bilmeyen (daha ESKİ) ikili
+# YANLIŞ okur. 0120 (D1 "özel plan = üst yazım"): hostinge özel limitler artık
+# hosting_limit_ust'ta, eski "<alan> — Özel" kopya planlar arşivde ve hosting katalog
+# planına bağlı. Eski ikili hosting_limit_ust'u bilmez → hostingi katalog planının
+# limitleriyle görür ve açılıştaki UygulaHepsi/LimitleriReAssert cgroup/FPM/disk
+# kotası/governor sınırlarını SESSİZCE DEĞİŞTİRİR. Böyle bir DB'ye bu göçü içermeyen
+# paket kurulmaz. Bilerek (sonucu kabul ederek): GOSP_GERI_DONUS_ZORLA=1.
+# Not: başarısız güncellemenin KENDİ geri dönüşü bu kapıya takılmaz — orada DB de
+# güncelleme öncesi dump'a döner (eski ikili + eski DB tutarlı).
+GERI_DONUSSUZ_GOCLER="0120_hosting_limit_ust.sql"
+GOSP_DB_ADI="${GOSP_DB_ADI:-panel}"
+
+# paket_gocleri <assets dizini> — paketteki göç dosya adları (satır başına bir).
+# Paket göç listesi taşımıyorsa 1 döner (bilinmiyor ≠ "göç yok").
+paket_gocleri() {
+  if [ -f "$1/migrations.tar.gz" ]; then
+    tar tzf "$1/migrations.tar.gz" 2>/dev/null | sed 's#.*/##' || return 1
+  elif [ -d "$1/migrations" ]; then
+    ls -1 "$1/migrations" 2>/dev/null || return 1
+  else
+    return 1
+  fi
+}
+
+# geri_donus_kapisi <paketin assets dizini> — DB'de uygulanmış geri dönüşsüz bir göç
+# pakette YOKSA kurulumu reddeder (die). Göç defteri okunamıyorsa (mysql yok/kapalı,
+# defter tablosu yok = çok eski kurulum) denetim atlanır: o durumda DB yedeği adımı
+# zaten fail-closed'dur ve defteri olmayan DB 0120'yi hiç görmemiştir.
+geri_donus_kapisi() {
+  local uygulanan paket g eksik=""
+  command -v mysql >/dev/null 2>&1 || { warn "geri dönüş kapısı: mysql yok — sürüm tabanı denetlenemedi"; return 0; }
+  uygulanan=$(mysql -N -e "SELECT dosya FROM \`$GOSP_DB_ADI\`.schema_migrations" 2>/dev/null) \
+    || { warn "geri dönüş kapısı: göç defteri okunamadı — sürüm tabanı denetlenemedi"; return 0; }
+  paket=$(paket_gocleri "$1") || paket=""
+  for g in $GERI_DONUSSUZ_GOCLER; do
+    grep -qxF -- "$g" <<<"$uygulanan" || continue
+    grep -qxF -- "$g" <<<"$paket" && continue
+    eksik="$eksik $g"
+  done
+  [ -z "$eksik" ] && return 0
+  if [ "${GOSP_GERI_DONUS_ZORLA:-0}" = 1 ]; then
+    warn "🔴 GERİ DÖNÜŞ ZORLANDI (GOSP_GERI_DONUS_ZORLA=1): paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — eski ikili hostinge özel limitleri GÖRMEZ; bu hostingler katalog planının limitlerine düşer"
+    return 0
+  fi
+  die "GERİ DÖNÜŞ REDDEDİLDİ: bu paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — paket bu DB'den ESKİ. Eski ikili hostinge özel limitleri (hosting_limit_ust) görmez ve açılışta cgroup/FPM/kota/governor limitlerini katalog planına düşürür. Hiçbir şeye dokunulmadı. Güncel/yeni bir paket kurun; sonucu bilerek kabul ediyorsanız: GOSP_GERI_DONUS_ZORLA=1"
+}
+
+# yeni_tablolari_kenara_al <güncelleme öncesi dump.sql.gz> — geri dönüşte, dump GERİ
+# YÜKLENDİKTEN SONRA (panel DURMUŞKEN) çağrılır. Dump yalnız KENDİ tablolarını
+# DROP+CREATE eder; başarısız sürümün göçlerinin YARATTIĞI tablolar (ör. 0120
+# hosting_limit_ust / service_plans_ozel_arsiv) geri alınmış zaman çizgisinin
+# verisiyle kalırdı. Eski ikili onları görmez ama yeniden güncellemede göç defteri
+# (dump'tan geri geldi) o göçü yeniden koşar, CREATE IF NOT EXISTS no-op olur ve BAYAT
+# satırlar canlı sayılırdı (hostinge yanlış limit, takılı/çift dönüşüm). Bu tablolar
+# önce ayrı bir dump'a yedeklenir (veri kaybı yok), sonra kaldırılır → DB güncelleme
+# öncesiyle BİREBİR aynı. Yedek alınamazsa ya da liste şüpheliyse HİÇBİR ŞEY silinmez.
+yeni_tablolari_kenara_al() {
+  local onceki simdi ek t sayi=0 ts yedek dizin
+  onceki=$(zcat "$1" 2>/dev/null | sed -n 's/^CREATE TABLE \(IF NOT EXISTS \)\{0,1\}`\([^`]*\)`.*/\2/p' | LC_ALL=C sort -u) || onceki=""
+  if [ -z "$onceki" ]; then
+    warn "geri yükleme artığı denetlenemedi (dump'ta tablo listesi okunamadı) — yeni göç tabloları yerinde bırakıldı"
+    return 1
+  fi
+  simdi=$(mysql -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$GOSP_DB_ADI' AND table_type='BASE TABLE'" 2>/dev/null | LC_ALL=C sort -u) \
+    || { warn "geri yükleme artığı denetlenemedi (tablo listesi okunamadı)"; return 1; }
+  ek=$(LC_ALL=C comm -13 <(printf '%s\n' "$onceki") <(printf '%s\n' "$simdi")) || ek=""
+  [ -z "$ek" ] && return 0
+  for t in $ek; do
+    case "$t" in *[!A-Za-z0-9_]*) warn "beklenmeyen tablo adı ($t) — geri yükleme artığı yerinde bırakıldı"; return 1 ;; esac
+    sayi=$((sayi + 1))
+  done
+  if [ "$sayi" -gt 20 ]; then
+    warn "dump'ta olmayan $sayi tablo var (şüpheli çok) — hiçbiri kaldırılmadı; elle inceleyin"
+    return 1
+  fi
+  ts=$(date +%Y%m%d%H%M%S)
+  dizin="${DBDIR:-/var/backups/girginospanel/db}"
+  yedek="$dizin/geri-donus-artik-$ts.sql.gz"
+  mkdir -p "$dizin" 2>/dev/null || true
+  # shellcheck disable=SC2086 # $ek tablo adları (yukarıda doğrulandı), ayrı argüman olmalı
+  if ! mysqldump --single-transaction "$GOSP_DB_ADI" $ek 2>/dev/null | gzip > "$yedek"; then
+    rm -f "$yedek" 2>/dev/null || true
+    warn "geri yükleme artığı yedeklenemedi — tablolar yerinde bırakıldı:" $ek
+    return 1
+  fi
+  for t in $ek; do
+    if mysql -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE \`$GOSP_DB_ADI\`.\`$t\`" 2>/dev/null; then
+      ok "geri alınan sürümün tablosu kaldırıldı: $t (yedek: $yedek)"
+    else
+      warn "geri alınan sürümün tablosu kaldırılamadı: $t — elle: DROP TABLE $GOSP_DB_ADI.$t (yedek: $yedek)"
+    fi
+  done
+}
+# <<< geri-donus-kapisi
+
 # çalışan panelin /healthz'inden sürüm (binary'nin --version flag'i YOK, asla çalıştırmıyoruz)
 # 🔴 SAGLIK URL'INI VARSAYMA — env'den OKU. Sabit :8080, portu degistirilmis
 # (girginospanel-port-swap.sh) saglikli bir sunucuda saglik kontrolunu HIC
@@ -360,6 +458,10 @@ NEWBIN=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-server -path '*/ass
 [ -n "$NEWBIN" ] || die "pakette assets/girginospanel-server yok (yapı beklenenden farklı)"
 A=$(dirname "$NEWBIN")
 SRC=$(dirname "$A")
+
+# 🔴 GERİ DÖNÜŞ KAPISI — kendini güncellemeden ÖNCE: daha eski bir paketin (eski)
+# updater'ı bu denetimi bilmez; şu an koşan (kurulu) updater paketi burada süzer.
+geri_donus_kapisi "$A"
 
 # ── Kendini ONCE guncelle ──────────────────────────────────────────
 # 🔴 Eskiden updater kendini adim 9'da, yani TUM isi bitirdikten SONRA
@@ -914,6 +1016,8 @@ else
   if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
     if zcat "$PREDUMP" | mysql; then
       ok "DB güncelleme öncesi yedeğe geri yüklendi ($PREDUMP)"
+      # Dump'ta olmayan (bu güncellemenin göçlerinin yarattığı) tablolar → yedekle + kaldır.
+      yeni_tablolari_kenara_al "$PREDUMP" || true
     else
       warn "DB geri yükleme BAŞARISIZ — dump duruyor, elle: zcat '$PREDUMP' | mysql"
     fi
