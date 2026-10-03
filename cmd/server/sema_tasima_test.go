@@ -108,3 +108,30 @@ func TestSemaDogrula_Tasima0109(t *testing.T) {
 		}
 	}
 }
+
+// 0114: audit_log.adina_domain_id — boş şemada eksik raporlanır, göç sonrası raporlanmaz.
+// Göç dosyasının gerçek MariaDB'de hatasız koştuğunu da kanıtlar.
+func TestSemaDogrula_DenetimAdina0114(t *testing.T) {
+	db := semaTestDB(t)
+	var gunluk bytes.Buffer
+	eski := log.Writer()
+	log.SetOutput(&gunluk)
+	t.Cleanup(func() { log.SetOutput(eski) })
+
+	const k = "audit_log.adina_domain_id"
+	semaDogrula(db)
+	if !strings.Contains(gunluk.String(), k) {
+		t.Fatalf("boş şemada %s eksik diye raporlanmadı: %q", k, gunluk.String())
+	}
+	if _, err := db.Exec(`CREATE TABLE audit_log (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+		actor_user_id BIGINT UNSIGNED NULL, actor_username VARCHAR(64) NOT NULL DEFAULT '')`); err != nil {
+		t.Fatal(err)
+	}
+	semaTestGoc(t, db, "0114_denetim_adina.sql")
+	semaTestGoc(t, db, "0114_denetim_adina.sql") // idempotent
+	gunluk.Reset()
+	semaDogrula(db)
+	if strings.Contains(gunluk.String(), k) {
+		t.Fatalf("0114 sonrası %s hâlâ eksik görünüyor: %q", k, gunluk.String())
+	}
+}

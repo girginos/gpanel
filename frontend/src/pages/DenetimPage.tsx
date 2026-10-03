@@ -15,73 +15,33 @@ type Kayit = {
   id: number; zaman: string; aktor: string; aktor_rol: string; ip: string
   eylem: string; hedef: string; detay?: string; basarili: boolean
   kapsam_id: number; kapsam_ad: string
+  // adina: işlem müşteri ADINA oturumda yapıldı; adina_alan: o hostingin alan adı
+  adina?: boolean; adina_alan?: string
 }
+type Etiket = { tr: string; en: string }
 type Yanit = {
   toplam: number; limit: number; offset: number
   kayitlar: Kayit[]; eylemler: string[]
+  // Eylem kodu → insan dilinde ad. TEK kaynak arka uçtaki katalog (internal/denetim/eylemler.go);
+  // ham kod kullanıcıya gösterilmez, yalnız ipucunda (title) durur.
+  etiketler?: Record<string, Etiket>
   kapsam: { bayi_mi: boolean; bayi_id: number }
 }
 type Bayi = { id: number; kullanici: string }
 
-// Eylem kodlarını okunur etikete çevirir. Bilinmeyen kod olduğu gibi gösterilir —
-// yeni bir eylem eklendiğinde sayfa bozulmaz, sadece ham kodu görünür.
-const ETIKET: Record<string, string> = {
-  'auth.login': 'Giriş', 'auth.parola': 'Parola değişimi', 'auth.2fa': '2FA doğrulama',
-  'auth.2fa.enable': '2FA açıldı', 'auth.2fa.disable': '2FA kapatıldı',
-  'hosting.olustur': 'Hosting oluşturuldu', 'hosting.sil': 'Hosting silindi',
-  'hosting.askiya_al': 'Hosting askıya alındı', 'hosting.askidan_al': 'Hosting askıdan alındı',
-  'hosting.plan': 'Plan değiştirildi', 'hosting.ozel_plan': 'Özel plan uygulandı',
-  'hosting.toplu_durum': 'Toplu durum değişimi',
-  'db.olustur': 'Veritabanı oluşturuldu', 'db.sil': 'Veritabanı silindi', 'db.parola': 'DB parolası değişti',
-  'bayi.olustur': 'Bayi oluşturuldu', 'bayi.guncelle': 'Bayi güncellendi', 'bayi.sil': 'Bayi silindi',
-  'bayi.askiya_al': 'Bayi askıya alındı', 'bayi.askidan_al': 'Bayi askıdan alındı',
-  'bayi.parola': 'Bayi parolası değişti',
-  'plan.olustur': 'Plan oluşturuldu', 'plan.guncelle': 'Plan güncellendi',
-  'yedek.geriyukle': 'Yedek geri yüklendi',
-  'tasima_baslat': 'Taşıma başlatıldı', 'tasima_iptal': 'Taşıma iptal edildi',
-  'guvenlik.izolasyon_kaybi': 'İzolasyon uyarısı',
-}
-
 const DEN_EN: Record<string, string> = {
   "İşlem başarısız": "Operation failed",
-  "2FA açıldı": "2FA enabled",
-  "2FA doğrulama": "2FA verification",
-  "2FA kapatıldı": "2FA disabled",
-  "Bayi askıdan alındı": "Reseller unsuspended",
-  "Bayi askıya alındı": "Reseller suspended",
-  "Bayi güncellendi": "Reseller updated",
-  "Bayi oluşturuldu": "Reseller created",
-  "Bayi parolası değişti": "Reseller password changed",
   "Bu süzgeçlerle eşleşen denetim kaydı bulunamadı. Süzgeçleri temizleyip tekrar deneyin.": "No audit records match these filters. Clear the filters and try again.",
-  "DB parolası değişti": "DB password changed",
   "Denetim Kaydı": "Audit Log",
-  "Hosting askıdan alındı": "Hosting unsuspended",
-  "Hosting askıya alındı": "Hosting suspended",
-  "Hosting oluşturuldu": "Hosting created",
   "Kayıtlarda ara": "Search records",
   "Yalnızca sizin yaptığınız işlemler.": "Only the operations you performed.",
   "Kullanıcı, hedef, IP veya eylem ara…": "Search user, target, IP or action…",
-  "Parola değişimi": "Password change",
-  "Plan değiştirildi": "Plan changed",
-  "Plan güncellendi": "Plan updated",
-  "Plan oluşturuldu": "Plan created",
   "Sunucudaki tüm panel işlemleri — kök ve bayiler dâhil. Kapsam süzgeciyle tek bir bayiye daraltabilirsiniz.": "All panel operations on the server — including root and resellers. You can narrow to a single reseller with the scope filter.",
-  "Taşıma başlatıldı": "Migration started",
-  "Taşıma iptal edildi": "Migration cancelled",
-  "Toplu durum değişimi": "Bulk status change",
   "Tüm eylemler": "All actions",
   "Tüm kapsamlar": "All scopes",
-  "Veritabanı oluşturuldu": "Database created",
-  "Veritabanı silindi": "Database deleted",
   "Yalnız kök (panel sahibi)": "Root only (panel owner)",
-  "Yedek geri yüklendi": "Backup restored",
   "Yıkıcı işlem —": "Destructive operation —",
   "yıkıcı": "destructive",
-  "Özel plan uygulandı": "Custom plan applied",
-  "İzolasyon uyarısı": "Isolation warning",
-  "Giriş": "Login",
-  "Hosting silindi": "Hosting deleted",
-  "Bayi silindi": "Reseller deleted",
   "Kapsam": "Scope",
   "Bayi": "Reseller",
   "kayıt": "records",
@@ -97,12 +57,30 @@ const DEN_EN: Record<string, string> = {
   "kök": "root",
   "Silinmiş bayi #{0}": "Deleted reseller #{0}",
   "Anasayfa": "Homepage",
+  "müşteri": "customer",
+  "sistem": "system",
+  "silinmiş": "deleted",
+  "Müşteri": "Customer",
+  "müşteri adına": "on behalf of customer",
+  "Müşteri paneline girerek yaptı: {0}": "Done from the customer panel: {0}",
+  "Müşteri paneline girerek yaptı": "Done from the customer panel",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DEN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-function etiketle(e: string) {
-  return ETIKET[e] || e
+// okunurKod: katalogda olmayan (yeni) bir kod için okunur geri dönüş —
+// "musteri.adina_cikis" → "Musteri adina cikis". Arka uçtaki okunurKod ile aynı kural.
+function okunurKod(kod: string): string {
+  const s = kod.split(/[._-]+/).filter(Boolean).join(' ')
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : kod
 }
+
+function etiketle(e: string, etiketler?: Record<string, Etiket>): string {
+  const et = etiketler?.[e]
+  if (et) return i18n.language === 'en' ? (et.en || et.tr) : et.tr
+  return okunurKod(e)
+}
+
+const ROL_AD: Record<string, string> = { admin: 'yönetici', reseller: 'bayi' }
 
 // Yıkıcı işlemler listede göz ile ayrılsın (renk TEK başına anlam taşımasın diye
 // ayrıca cevir("yıkıcı") ibaresi title'da verilir).
@@ -113,6 +91,8 @@ const YIKICI = new Set(['hosting.sil', 'db.sil', 'bayi.sil', 'hosting.askiya_al'
 // eylem kodları (ör. yeni bir *.sil / *.olustur) otomatik doğru kategoriye düşer. Renk TEK
 // sinyal değildir — ikon + etiket + title da anlam taşır (erişilebilirlik).
 function eylemStil(e: string): { ikon: string; renk: string } {
+  if (e === 'musteri.adina_cikis')      return { ikon: I.cikis, renk: 'text-indigo-600 dark:text-indigo-300' }
+  if (e.startsWith('musteri.adina_'))   return { ikon: I.giris, renk: 'text-indigo-600 dark:text-indigo-300' }
   if (e === 'guvenlik.izolasyon_kaybi') return { ikon: I.kalkan, renk: 'text-rose-700 dark:text-rose-300' }
   if (/\.sil$/.test(e))                 return { ikon: I.cop, renk: 'text-rose-700 dark:text-rose-300' }
   if (/iptal$/.test(e))                 return { ikon: I.kapat, renk: 'text-amber-700 dark:text-amber-300' }
@@ -128,13 +108,13 @@ function eylemStil(e: string): { ikon: string; renk: string } {
 
 // EylemRozet: ikon + kategori-renkli etiket. Tüm eylem türlerini "Hosting silindi" gibi
 // makyajlar (düz metin yerine).
-function EylemRozet({ eylem }: { eylem: string }) {
+function EylemRozet({ eylem, etiket }: { eylem: string; etiket: string }) {
   const s = eylemStil(eylem)
   return (
     <span className={`inline-flex items-center gap-1.5 font-medium ${s.renk}`}
       title={(YIKICI.has(eylem) ? cevir('Yıkıcı işlem —') + ' ' : '') + eylem}>
       <Ikon d={s.ikon} className="h-3.5 w-3.5 shrink-0" />
-      {cevir(etiketle(eylem))}
+      {etiket}
     </span>
   )
 }
@@ -206,7 +186,7 @@ export default function DenetimPage() {
         <select id="denetim-eylem" value={eylem} onChange={e => { setSayfa(0); setEylem(e.target.value) }}
           className="shrink-0 rounded-lg border border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-800/60 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15">
           <option value="">{cevir("Tüm eylemler")}</option>
-          {(veri?.eylemler || []).map(e => <option key={e} value={e}>{cevir(etiketle(e))}</option>)}
+          {(veri?.eylemler || []).map(e => <option key={e} value={e}>{etiketle(e, veri?.etiketler)}</option>)}
         </select>
         {!bayiMi && (
           <>
@@ -249,15 +229,28 @@ export default function DenetimPage() {
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap tabular-nums">{k.zaman}</span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
-                      <span className="text-slate-700 dark:text-slate-300">{k.aktor || '—'}</span>
-                      {k.aktor_rol && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400">
-                          {k.aktor_rol === 'admin' ? cevir('yönetici') : k.aktor_rol === 'reseller' ? cevir('bayi') : k.aktor_rol}
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <span className="text-slate-700 dark:text-slate-300 break-all">
+                          {k.aktor || (k.aktor_rol === 'müşteri' ? cevir('Müşteri') : '—')}
                         </span>
-                      )}
+                        {/* Bayi görünümünde her satırın aktörü bayinin kendisidir — rol rozeti tekrar olur. */}
+                        {k.aktor_rol && !bayiMi && (
+                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold bg-slate-100 dark:bg-dark-700 text-slate-600 dark:text-slate-400">
+                            {cevir(ROL_AD[k.aktor_rol] || k.aktor_rol)}
+                          </span>
+                        )}
+                        {k.adina && (
+                          // Müşteri paneline girerek (adına-oturum) yapılan işlem. Hangi
+                          // hosting olduğu Hedef kolonunda; alan adı ipucunda da durur.
+                          <span title={k.adina_alan ? cevirT(cevir("Müşteri paneline girerek yaptı: {0}"), k.adina_alan) : cevir("Müşteri paneline girerek yaptı")}
+                                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+                            {cevir("müşteri adına")}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Eylem")}>
-                      <EylemRozet eylem={k.eylem} />
+                      <EylemRozet eylem={k.eylem} etiket={etiketle(k.eylem, veri?.etiketler)} />
                       {k.detay && (
                         // Uzun sistem kayitlari satiri sismesin: iki satirda kirpilir,
                         // tamami title ile erisilebilir kalir.

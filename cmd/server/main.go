@@ -1299,6 +1299,9 @@ func semaDogrula(d *sql.DB) {
 		{"backup_hedefler", "ic_ag_izni"},
 		{"backup_uzak_kopyalar", "hedef_anahtar"},
 		{"backup_sifre_anahtarlari", "etkin_tekil"},
+		// 0114: müşteri adına yapılan işlemin hostingi — yoksa denetim listesi 500
+		// verir (yazım tarafı eski biçime düşerek kaydı korur).
+		{"audit_log", "adina_domain_id"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

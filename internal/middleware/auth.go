@@ -399,17 +399,11 @@ func Aktor(r *http.Request) (int64, string) {
 	return 0, "anonim"
 }
 
-// AdinaAktorAdi: audit_log.actor_username (VARCHAR(64)) sığacak biçimde
-// "aktör (adına musteri:<id>)". Aktör adı gerekirse rune sınırında kısaltılır;
-// "adına musteri:<id>" eki HİÇ kesilmez (kaydın anlamı odur).
+// AdinaAktorAdi: "aktör (adına musteri:<id>)" kimlik dizgesi. Biçimin TEK sahibi
+// httpx'tir (yazarken ayrı kolona bölen ve eski kayıtları okuyan ayrıştırıcı
+// httpx.AktorAyir aynı yerde durur).
 func AdinaAktorAdi(aktor string, domainID int64) string {
-	ek := " (adına musteri:" + strconv.FormatInt(domainID, 10) + ")"
-	kalan := 64 - len([]rune(ek))
-	r := []rune(aktor)
-	if len(r) > kalan {
-		r = r[:kalan]
-	}
-	return string(r) + ek
+	return httpx.AdinaAktorAdi(aktor, domainID)
 }
 
 // RolFrom: admin/reseller token rol (yoksa "").

@@ -78,7 +78,8 @@ func adGeciciDB(t *testing.T) *sql.DB {
 		`CREATE TABLE ftp_accounts (id BIGINT UNSIGNED PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL,
 			username VARCHAR(64) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active', token_gecersiz_ts BIGINT NULL)`,
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, actor_user_id BIGINT UNSIGNED NULL,
-			actor_username VARCHAR(64) NOT NULL DEFAULT '', ip VARCHAR(64) NULL, action VARCHAR(64) NOT NULL,
+			actor_username VARCHAR(64) NOT NULL DEFAULT '', adina_domain_id BIGINT UNSIGNED NULL,
+			ip VARCHAR(64) NULL, action VARCHAR(64) NOT NULL,
 			target VARCHAR(255) NULL, detail JSON NULL, ok TINYINT NOT NULL DEFAULT 1, reseller_id BIGINT NOT NULL DEFAULT 0)`,
 		`INSERT INTO users (id, username, role) VALUES (1,'root','admin'), (7,'bayi_a','reseller'), (8,'bayi_b','reseller')`,
 		`INSERT INTO domains (id, alan_adi, ftp_user, reseller_id) VALUES (42,'a-musteri.test','amus',7), (43,'b-musteri.test','bmus',8)`,
@@ -196,7 +197,9 @@ func TestAdina_BayiKendiDomaini_TamAkis_VeDenetim(t *testing.T) {
 	}
 	adIstek(t, h, http.MethodPost, "/musteri/adina-cikis", tok, nil)
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE actor_user_id=? AND actor_username LIKE '%adına musteri:42%'
+	// 0114: aktör adı ve "kimin adına" AYRI kolonlarda (eski tek-dizge biçim yok).
+	_ = db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE actor_user_id=? AND actor_username='bayi_7'
+		AND adina_domain_id=42
 		AND action IN ('musteri.adina_oturum','musteri.adina_cikis') AND reseller_id=?`, bayiA, bayiA).Scan(&n)
 	if n != 2 {
 		t.Fatalf("denetim kaydı aktörle yazılmalı (oturum+çıkış), bulunan=%d", n)

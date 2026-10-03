@@ -71,13 +71,8 @@ func (h *Handlers) altAlanCoz(w http.ResponseWriter, r *http.Request) (domainID,
 
 // denetle — politika değişikliklerini audit_log'a yazar (başarı VE başarısızlık).
 func (h *Handlers) erisimDenetle(r *http.Request, domainID int64, eylem, hedef, detay string, basarili bool) {
-	var uid int64
-	var kullanici string
-	if c := middleware.ClaimsFrom(r); c != nil {
-		uid, kullanici = c.UserID, c.Username
-	} else if mc := middleware.MusteriClaimsFrom(r); mc != nil {
-		kullanici = "musteri:" + strconv.FormatInt(mc.DomainID, 10)
-	}
+	// Aktör TEK yerden (middleware.Aktor) — adına-oturumda gerçek aktör yazılır.
+	uid, kullanici := middleware.Aktor(r)
 	httpx.DenetimDomain(h.DB, r, uid, kullanici, eylem, hedef, detay, domainID, basarili)
 }
 
