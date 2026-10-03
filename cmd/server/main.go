@@ -1249,6 +1249,12 @@ func semaDogrula(d *sql.DB) {
 		{"tasima_isleri", "baslatan_uid"},
 		{"tasima_kalemleri", "hesap_json"},
 		{"tasima_kaynak_ayar", "kod"},
+		// 0113: yedek uzak hedefleri, uzak kopya kuyruğu ve age anahtarları —
+		// yoksa uzak hedef/kopya/şifreleme yolları çalışmaz. Üretilmiş kolonlar
+		// (hedef_anahtar, etkin_tekil) tekillik kısıtlarının da kanıtıdır.
+		{"backup_hedefler", "ic_ag_izni"},
+		{"backup_uzak_kopyalar", "hedef_anahtar"},
+		{"backup_sifre_anahtarlari", "etkin_tekil"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
