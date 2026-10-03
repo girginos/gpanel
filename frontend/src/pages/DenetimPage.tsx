@@ -13,12 +13,18 @@ import { useToast } from '@/components/Toast'
 
 type Kayit = {
   id: number; zaman: string; aktor: string; aktor_rol: string; ip: string
-  eylem: string; hedef: string; detay?: string; basarili: boolean
+  eylem: string; hedef: string; basarili: boolean
+  // detay: HAM açıklama — yalnız ipucunda (title) ve genişletmede gösterilir.
+  // aciklama: arka uçta (internal/denetim/aciklama.go) sadeleştirilmiş TR/EN cümle +
+  // varsayılan gizli teknik ayrıntılar (iş kimliği, dosya yolu, parmak izi, ham hata).
+  detay?: string; aciklama?: Aciklama
   kapsam_id: number; kapsam_ad: string
   // adina: işlem müşteri ADINA oturumda yapıldı; adina_alan: o hostingin alan adı
   adina?: boolean; adina_alan?: string
 }
 type Etiket = { tr: string; en: string }
+type Ayrinti = { tr: string; en: string; deger: string }
+type Aciklama = { tr: string; en: string; ayrinti?: Ayrinti[] }
 type Yanit = {
   toplam: number; limit: number; offset: number
   kayitlar: Kayit[]; eylemler: string[]
@@ -64,6 +70,8 @@ const DEN_EN: Record<string, string> = {
   "müşteri adına": "on behalf of customer",
   "Müşteri paneline girerek yaptı: {0}": "Done from the customer panel: {0}",
   "Müşteri paneline girerek yaptı": "Done from the customer panel",
+  "Ayrıntıyı gizle": "Hide details",
+  "Ham kayıt": "Raw record",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DEN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -78,6 +86,58 @@ function etiketle(e: string, etiketler?: Record<string, Etiket>): string {
   const et = etiketler?.[e]
   if (et) return i18n.language === 'en' ? (et.en || et.tr) : et.tr
   return okunurKod(e)
+}
+
+const dilde = (e: { tr: string; en: string }): string => (i18n.language === 'en' ? (e.en || e.tr) : e.tr)
+
+// Satırda gösterilecek sade açıklama: arka uçtaki sade cümle; o yoksa (eski arka uç)
+// ham metin. Sade hâli bilerek boşsa (yalnız teknik ayrıntı var) satırda bir şey yazmaz.
+function sadeAciklama(k: Kayit): string {
+  if (k.aciklama) return dilde(k.aciklama)
+  return k.detay || ''
+}
+
+// AciklamaHucre: sade açıklama + (varsa) "Ayrıntılar" ile açılan teknik ayrıntılar ve
+// ham kayıt. Ham metin varsayılan gösterimde yalnız ipucundadır.
+function AciklamaHucre({ k, acik, degistir }: { k: Kayit; acik: boolean; degistir: () => void }) {
+  const metin = sadeAciklama(k)
+  const ayr = k.aciklama?.ayrinti || []
+  const hamFarkli = !!k.detay && k.detay !== metin
+  if (!metin && ayr.length === 0 && !hamFarkli) return null
+  const panelId = `denetim-ayr-${k.id}`
+  return (
+    <div className="mt-0.5 max-w-[42ch]">
+      {metin && (
+        // Uzun açıklama satırı şişirmesin: iki satırda kırpılır; tamamı genişletmede.
+        <div title={k.detay || metin} className="text-[11px] text-slate-500 dark:text-slate-400 break-words line-clamp-2">
+          {metin}
+        </div>
+      )}
+      {(ayr.length > 0 || hamFarkli) && (
+        <button type="button" onClick={degistir} aria-expanded={acik} aria-controls={panelId}
+          className="mt-0.5 inline-flex items-center gap-0.5 rounded text-[11px] font-medium text-brand-600 dark:text-brand-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40">
+          {cevir(acik ? 'Ayrıntıyı gizle' : 'Ayrıntılar')}
+          <Ikon d={acik ? I.chevronYukari : I.chevronAsagi} className="h-3 w-3" />
+        </button>
+      )}
+      {acik && (
+        <dl id={panelId} className="mt-1 space-y-0.5 rounded-md border border-slate-200 dark:border-dark-600 bg-slate-50 dark:bg-dark-800/60 px-2 py-1.5 text-[11px]">
+          {ayr.map((a, i) => (
+            <div key={i} className="flex flex-wrap gap-x-1.5">
+              <dt className="text-slate-500 dark:text-slate-400">{dilde(a)}:</dt>
+              <dd className="font-mono text-slate-700 dark:text-slate-300 break-all">{a.deger}</dd>
+            </div>
+          ))}
+          {hamFarkli && (
+            <div className="flex flex-wrap gap-x-1.5">
+              <dt className="text-slate-500 dark:text-slate-400">{cevir('Ham kayıt')}:</dt>
+              <dd className="font-mono text-slate-600 dark:text-slate-400 break-all">{k.detay}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </div>
+  )
 }
 
 const ROL_AD: Record<string, string> = { admin: 'yönetici', reseller: 'bayi' }
@@ -132,6 +192,13 @@ export default function DenetimPage() {
   const [kapsam, setKapsam] = useState('')
   const [sayfa, setSayfa] = useState(0)
   const [yuk, setYuk] = useState(true)
+  // Ayrıntısı açık satırlar (kayıt id'si).
+  const [acikSatir, setAcikSatir] = useState<Set<number>>(() => new Set())
+  const satirDegistir = (id: number) => setAcikSatir(s => {
+    const y = new Set(s)
+    if (y.has(id)) y.delete(id); else y.add(id)
+    return y
+  })
   const [, setHata] = useState<string | null>(null)
   const limit = 50
 
@@ -251,14 +318,7 @@ export default function DenetimPage() {
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Eylem")}>
                       <EylemRozet eylem={k.eylem} etiket={etiketle(k.eylem, veri?.etiketler)} />
-                      {k.detay && (
-                        // Uzun sistem kayitlari satiri sismesin: iki satirda kirpilir,
-                        // tamami title ile erisilebilir kalir.
-                        <div title={k.detay}
-                             className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 break-words line-clamp-2 max-w-[42ch]">
-                          {k.detay}
-                        </div>
-                      )}
+                      <AciklamaHucre k={k} acik={acikSatir.has(k.id)} degistir={() => satirDegistir(k.id)} />
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Hedef")}>
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 break-all">{k.hedef || '—'}</span>

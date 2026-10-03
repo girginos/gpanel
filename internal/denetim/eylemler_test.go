@@ -46,7 +46,7 @@ func TestNotSade_TekrarEdenAciklamaGizlenir(t *testing.T) {
 		{"musteri.adina_cikis", "müşteri adına oturum kapatıldı", ""},
 		{"musteri.adina_oturum", "müşteri adına oturum açıldı", ""},
 		{"musteri.adina_kod", "müşteri paneline giriş kodu üretildi", ""},
-		{"websec.tara", "sirada=3", ""},
+		{"websec.tara", "sirada=3", "sirada=3"}, // bilgi taşır: aciklama.go "3 alan adı tarama sırasına alındı"
 		{"winajan.sil", "windows ajanı silindi", ""},
 		{"hosting.plan", "Plan değiştirildi", ""}, // etiketin aynısı
 		{"hosting.askiya_al", "toplu işlem", "toplu işlem"},
@@ -110,6 +110,12 @@ func TestListe_AktorAdinaAyriVeEtiketli(t *testing.T) {
 	}
 	if y.Kayitlar[1].Detay != "aktif=true" {
 		t.Errorf("bilgi taşıyan açıklama kalmalı: %q", y.Kayitlar[1].Detay)
+	}
+	if a := y.Kayitlar[1].Aciklama; a == nil || a.TR != "Erişim kısıtlaması açık" || a.EN != "Access restriction on" {
+		t.Errorf("sade TR/EN açıklama yanıtta olmalı: %+v", a)
+	}
+	if y.Kayitlar[0].Aciklama != nil {
+		t.Errorf("gizlenen açıklamanın sade hâli de olmamalı: %+v", y.Kayitlar[0].Aciklama)
 	}
 	if m := y.Kayitlar[2]; m.Aktor != "musteri-alan.test" || m.AktorRol != "müşteri" || m.Adina {
 		t.Errorf("müşteri kaydı alan adıyla gösterilmeli: %+v", m)

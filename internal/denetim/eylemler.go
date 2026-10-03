@@ -101,7 +101,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"kapi.eski_kapat": {TR: "Eski panel portu kapatıldı", EN: "Old panel port closed"},
 
 	// Güvenlik / diğer
-	"websec.tara":              {TR: "Güvenlik taraması başlatıldı", EN: "Security scan started", gereksizNot: []string{"sirada=*"}},
+	"websec.tara":              {TR: "Güvenlik taraması başlatıldı", EN: "Security scan started"},
 	"guvenlik.izolasyon_kaybi": {TR: "İzolasyon uyarısı", EN: "Isolation warning"},
 	"winajan.ekle":             {TR: "Windows ajanı eklendi", EN: "Windows agent added"},
 	"winajan.sil":              {TR: "Windows ajanı silindi", EN: "Windows agent removed", gereksizNot: []string{"windows ajanı silindi"}},

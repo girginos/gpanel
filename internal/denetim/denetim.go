@@ -86,10 +86,14 @@ type Kayit struct {
 	IP        string `json:"ip"`
 	Eylem     string `json:"eylem"`
 	Hedef     string `json:"hedef"`
-	Detay     string `json:"detay,omitempty"`
-	Basarili  bool   `json:"basarili"`
-	KapsamID  int64  `json:"kapsam_id"`
-	KapsamAd  string `json:"kapsam_ad"` // "" = kök (panel sahibi)
+	// Detay: açıklamanın HAM metni (etiketi tekrarlayan sabit notlar düşürülmüş).
+	// Ön yüz bunu yalnız ipucunda (title) ve satır genişletmede gösterir.
+	Detay string `json:"detay,omitempty"`
+	// Aciklama: Detay'ın sade TR/EN cümlesi + gizli teknik ayrıntılar (aciklama.go).
+	Aciklama *Aciklama `json:"aciklama,omitempty"`
+	Basarili bool      `json:"basarili"`
+	KapsamID int64     `json:"kapsam_id"`
+	KapsamAd string    `json:"kapsam_ad"` // "" = kök (panel sahibi)
 }
 
 // Liste: GET /denetim?ara=&eylem=&kapsam=&limit=&offset=
@@ -183,6 +187,9 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 		k.Basarili = ok == 1
 		k.Detay = notSade(k.Eylem, notCikar(detay))
+		if k.Detay != "" {
+			k.Aciklama = aciklamaKur(k.Eylem, detay)
+		}
 		if adinaID == 0 {
 			// 0114 öncesi kayıt: "aktör (adına musteri:<id>)" tek dizgede.
 			k.Aktor, adinaID = httpx.AktorAyir(k.Aktor)
