@@ -62,6 +62,9 @@ func TestGrupSohbetiSessiz(t *testing.T) {
 				"from": map[string]any{"id": tTg, "is_bot": false}, "chat": map[string]any{"id": -1001, "type": tur}}}, tWebhookGizli)
 		}
 	}
+	// tür denetimi tek başına da yeterli olmalı: sohbet kimliği kullanıcıyla aynı olsa bile grup sessiz
+	o.webhook(t, map[string]any{"message": map[string]any{"message_id": 1, "text": "sitem çöktü",
+		"from": map[string]any{"id": tTg, "is_bot": false}, "chat": map[string]any{"id": tTg, "type": "group"}}}, tWebhookGizli)
 	// bot kullanıcıdan gelen özel mesaj da sessiz
 	o.webhook(t, map[string]any{"message": map[string]any{"message_id": 1, "text": "x",
 		"from": map[string]any{"id": tTg, "is_bot": true}, "chat": map[string]any{"id": tTg, "type": "private"}}}, tWebhookGizli)
