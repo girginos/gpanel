@@ -13,6 +13,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"girginospanel/internal/apianahtar"
 )
 
 func listeDurumu(t *testing.T, govde string, id int64) (string, bool) {
@@ -138,8 +141,20 @@ func TestAPIAnahtarKaliciSil(t *testing.T) {
 	if s := ucIstek(t, h, "DELETE", yol(a.Kayit.ID), jB, map[string]any{"onay_ad": "WHMCS-A"}); s.kod != 404 || !satirVar(a.Kayit.ID) {
 		t.Fatalf("IDOR: bayi B, A'nın anahtarını sildi: %d %s", s.kod, s.govde)
 	}
+	// Onaysız yabancı istek de 404 (409 anahtar_etkin DEĞİL — varlık/durum sızmaz).
+	if s := ucIstek(t, h, "DELETE", yol(a.Kayit.ID), jB, nil); s.kod != 404 || strings.Contains(s.govde, "anahtar_etkin") {
+		t.Fatalf("IDOR: yabancı anahtarın varlığı/durumu sızdı: %d %s", s.kod, s.govde)
+	}
 	if s := ucIstek(t, h, "POST", yol(a.Kayit.ID)+"/iptal", jB, nil); s.kod != 404 {
 		t.Fatalf("IDOR: bayi B, A'nın anahtarını iptal: %d %s", s.kod, s.govde)
+	}
+	// Depo katmanı ikinci kilit: sahip koşullu silme yabancı satıra DOKUNMAZ;
+	// yalnizGecersiz etkin satırı silmez (karar ile silme arası yarış kilidi).
+	if silindi, err := apianahtar.Sil(t.Context(), db, a.Kayit.ID, 8, false, time.Now().Unix()); err != nil || silindi || !satirVar(a.Kayit.ID) {
+		t.Fatalf("depo: sahip koşullu silme yabancı anahtarı sildi: %v %v", silindi, err)
+	}
+	if silindi, err := apianahtar.Sil(t.Context(), db, a.Kayit.ID, 7, true, time.Now().Unix()); err != nil || silindi || !satirVar(a.Kayit.ID) {
+		t.Fatalf("depo: yalnizGecersiz etkin anahtarı sildi: %v %v", silindi, err)
 	}
 	// Bayi kök anahtarını da silemez.
 	if s := ucIstek(t, h, "DELETE", yol(k.Kayit.ID), jA, map[string]any{"onay_ad": "Kok"}); s.kod != 404 || !satirVar(k.Kayit.ID) {
