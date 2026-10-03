@@ -118,22 +118,14 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	// Admin: hepsi. Bayi: kapsam.go kuralı — kendi planlari (tam) + kokun GLOBAL
-	// katalogu (yalniz secim ozeti) + kendi hostinglerinin ozel planlari.
-	// 🔴 Domaine-OZEL planlar (domain_id dolu) katalogda LISTELENMEZ — yoksa her
-	// ozellestirilen hosting katalogu bir satir daha sisirirdi (100 domain = 100 plan).
-	// `?domain=<id>` ile yalniz O domainin ozel plani listeye dahil edilir — bayide
-	// YALNIZ domain kendisininse (kokun/baska bayinin hostinginin ozel plani, alan
-	// adini ve limitlerini sizdiriyordu: GL-04/B-02).
-	ozelDomain := strings.TrimSpace(r.URL.Query().Get("domain"))
-	kosul := " WHERE (domain_id IS NULL"
+	// katalogu (yalniz secim ozeti).
+	// 🔴 YALNIZ KATALOG (domain_id IS NULL): hostinge özel limitler artık plan
+	// kopyası değil, hosting üzerinde üst yazım (GET /domains/{id}/limitler).
+	// Eski `?domain=<id>` parametresi YOK SAYILIR — dönüştürülmemiş eski kopya plan
+	// ızgarasına "<alan> — Özel" kartı olarak düşmesin (kalabalık + düzenlenince
+	// başka hostingi etkileyen katalog planı sanılması).
+	kosul := " WHERE domain_id IS NULL"
 	args := []any{}
-	if ozelDomain != "" {
-		if did, e := strconv.ParseInt(ozelDomain, 10, 64); e == nil && did > 0 {
-			kosul += " OR domain_id=?"
-			args = append(args, did)
-		}
-	}
-	kosul += ")"
 	rid := middleware.ResellerIDFrom(r)
 	if rid > 0 {
 		k, a := bayiGorurKosul(rid)
@@ -652,4 +644,12 @@ func (h *Handlers) bayiTavanKontrol(ctx context.Context, rid int64, p *Plan) err
 		return e
 	}
 	return nil
+}
+
+// BayiPostaTavanKontrol — bayinin bir hostinge yazdığı EFEKTİF posta limitleri (plan
+// ⊕ hostinge özel üst yazım) bayi paketinin tavanlarını aşamaz (bayiTavanKontrol ile
+// aynı kural; özel limit uçları da buradan geçer). Admin (rid<=0) kısıtsız.
+func BayiPostaTavanKontrol(ctx context.Context, db *sql.DB, rid int64, maxEmail, saatlik, kutuKotaMB int) error {
+	h := &Handlers{DB: db}
+	return h.bayiTavanKontrol(ctx, rid, &Plan{MaxEmail: maxEmail, SaatlikMailLimiti: saatlik, MailKutuKotaMB: kutuKotaMB})
 }

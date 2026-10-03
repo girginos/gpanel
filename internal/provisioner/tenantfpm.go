@@ -17,6 +17,7 @@
 package provisioner
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
@@ -34,6 +35,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 const (
@@ -241,9 +244,10 @@ func tenantSanitizeScalar(v, def string) string {
 func tenantPMMaxChildren(db *sql.DB, domainID int64) int {
 	var pmc, ram int
 	if db != nil && domainID > 0 {
-		_ = db.QueryRow(`SELECT COALESCE(p.pm_max_children,0), COALESCE(p.ram_mb,0)
-		                 FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
-		                 WHERE d.id=?`, domainID).Scan(&pmc, &ram)
+		// Efektif değer: plan ⊕ hostinge özel üst yazım (tek kaynak efektiflimit).
+		if s, err := efektiflimit.Oku(context.Background(), db, domainID); err == nil {
+			pmc, ram = s.Efektif("pm_max_children", 0), s.Efektif("ram_mb", 0)
+		}
 	}
 	if pmc > 0 {
 		return pmc
@@ -300,7 +304,7 @@ const (
 	tenantVarsayilanDiskMB = 5120
 )
 
-// tenantPlanTavanlari: domain'in planindan efektif RAM (cgroup MemoryMax) ve disk
+// tenantPlanTavanlari: domain'in EFEKTİF limitlerinden (plan ⊕ üst yazım) RAM (cgroup MemoryMax) ve disk
 // kotasini MB cinsinden cozer. 0 donen deger = "sinirsiz/bilinmiyor" → tavan yok.
 //
 // Disk kotasi cozumu kaynaklimit.efektifKota ile AYNI sirayi izler:
@@ -309,25 +313,23 @@ func tenantPlanTavanlari(db *sql.DB, domainID int64) (ramMB, diskMB int) {
 	if db == nil || domainID <= 0 {
 		return 0, 0
 	}
-	var pRAM, dDisk, pDisk, planVar int
-	if err := db.QueryRow(`SELECT COALESCE(p.ram_mb,0), COALESCE(d.disk_kota_mb,0),
-	                              COALESCE(p.disk_kota_mb,0), (d.plan_id IS NOT NULL)
-	                       FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
-	                       WHERE d.id=?`, domainID).Scan(&pRAM, &dDisk, &pDisk, &planVar); err != nil {
+	s, err := efektiflimit.Oku(context.Background(), db, domainID)
+	if err != nil {
 		// Plan okunamadi → TAVAN UYGULAMA (mevcut davranis korunur, site bozulmaz).
 		log.Printf("tenant-fpm plan tavani: domain %d plan limitleri okunamadi (%v) — tavan uygulanmadi", domainID, err)
 		return 0, 0
 	}
-	ramMB = pRAM
+	// Efektif değer (plan ⊕ hostinge özel üst yazım ⊕ domains.disk_kota_mb mirası).
+	ramMB = s.Efektif("ram_mb", 0)
 	if ramMB <= 0 {
 		ramMB = tenantVarsayilanRAMMB // cgroup MemoryMax de bu degere duser
 	}
 	diskMB = tenantVarsayilanDiskMB
-	if planVar == 1 {
-		diskMB = pDisk // plan disk_kota_mb=0 → "sinirsiz" → tavan uygulanmaz
+	if s.PlanID != nil {
+		diskMB = 0 // plan atanmış (sarkık plan_id dahil — eski davranış): plan değeri, yoksa sınırsız
 	}
-	if dDisk > 0 {
-		diskMB = dDisk // domain-seviye override
+	if d := s.Degerler["disk_kota_mb"]; d.Efektif != nil {
+		diskMB = *d.Efektif // plan disk_kota_mb=0 → "sinirsiz" → tavan uygulanmaz
 	}
 	return ramMB, diskMB
 }

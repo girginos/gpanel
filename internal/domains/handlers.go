@@ -18,6 +18,7 @@ import (
 
 	"girginospanel/internal/backups"
 	"girginospanel/internal/dns"
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
@@ -61,12 +62,15 @@ type Domain struct {
 	SahipAd    string `json:"sahip_ad,omitempty"`
 	SahipTur   string `json:"sahip_tur,omitempty"` // "admin" | "bayi"
 	ResellerID int64  `json:"reseller_id"`
-	// DiskKotaMB: bağlı planın disk kotası (0 = sınırsız / plansız). Bayi listesi
-	// "disk %" gösterir.
+	// DiskKotaMB: EFEKTİF disk kotası (plan ⊕ hostinge özel üst yazım; 0 = sınırsız /
+	// plansız). Bayi listesi "disk %" gösterir.
 	DiskKotaMB int64 `json:"disk_kota_mb"`
 	// TrafikKotaMB: bağlı planın aylık trafik kotası (0 = sınırsız / plansız).
 	// Bayi listesi trafik kolonunda "kullanılan / kota" gösterir.
 	TrafikKotaMB int64 `json:"trafik_kota_mb"`
+	// OzelLimit: hostinge özel limit (üst yazım) var — listede "<plan> + özel" rozeti.
+	// Müşteriye gönderilmez (musteriGorunumu siler).
+	OzelLimit bool `json:"ozel_limit,omitempty"`
 }
 
 type Handlers struct {
@@ -74,15 +78,15 @@ type Handlers struct {
 	IPv4 string
 }
 
-const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.ssl_aktif,
+var selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.ssl_aktif,
   COALESCE(DATE_FORMAT(d.ssl_bitis,'%Y-%m-%d'),''), d.durum, d.ipv4, d.ftp_host, d.ftp_user,
   d.db_host, d.db_user, d.db_adi, d.web_root, d.boyut_kb, d.trafik_kb, d.is_demo,
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
   d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0),
-  CASE WHEN CHAR_LENGTH(TRIM(COALESCE(u.full_name,'')))>=2 THEN TRIM(u.full_name) ELSE COALESCE(NULLIF(u.username,''),'') END, COALESCE(d.reseller_id,0),
-  COALESCE(p.disk_kota_mb,0), COALESCE(p.trafik_kota_mb,0)
-  FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
-  LEFT JOIN users u ON u.id = d.reseller_id`
+  CASE WHEN CHAR_LENGTH(TRIM(COALESCE(us.full_name,'')))>=2 THEN TRIM(us.full_name) ELSE COALESCE(NULLIF(us.username,''),'') END, COALESCE(d.reseller_id,0),
+  ` + efektiflimit.IfadeVarsayilan("disk_kota_mb", 0) + `, ` + efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0) + `, ` + efektiflimit.OzelVarIfade + `
+  FROM domains d` + efektiflimit.Join + `
+  LEFT JOIN users us ON us.id = d.reseller_id`
 
 // kokAdi: panel sahibinin gorunen adi (users'taki ilk admin). Onbellege alinir —
 // domain listesinde satir basina sorgu atmanin anlami yok.
@@ -106,14 +110,15 @@ func kokAdi() string {
 
 func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 	var d Domain
-	var ssl, demo, sshE, askida int
+	var ssl, demo, sshE, askida, ozel int
 	var planID sql.NullInt64
 	err := rs.Scan(&d.ID, &d.AlanAdi, &d.SistemKullanici, &d.PHPSurum, &ssl,
 		&d.SSLBitis, &d.Durum, &d.IPv4, &d.FTPHost, &d.FTPUser,
 		&d.DBHost, &d.DBUser, &d.DBAdi, &d.WebRoot, &d.BoyutKB, &d.TrafikKB, &demo,
 		&d.Notlar, &d.Olusturulma,
 		&planID, &d.PlanAd, &sshE, &askida,
-		&d.SahipAd, &d.ResellerID, &d.DiskKotaMB, &d.TrafikKotaMB)
+		&d.SahipAd, &d.ResellerID, &d.DiskKotaMB, &d.TrafikKotaMB, &ozel)
+	d.OzelLimit = ozel == 1
 	// Kok (reseller_id=0): users tablosunda admin satiri OLMAYABILIR (kurulum
 	// varyanti) — sahip adini sorguya baglamak yerine burada cozuyoruz.
 	d.SahipTur = "admin"
@@ -200,6 +205,7 @@ type musteriDomain struct {
 func musteriGorunumu(d Domain) musteriDomain {
 	// Gölgelemeye ek olarak değerler de silinir: etiketler ileride değişse bile sızmaz.
 	d.SahipAd, d.SahipTur, d.ResellerID = "", "", 0
+	d.OzelLimit = false // müşteri yalnız efektif değerleri görür (rozet yok)
 	return musteriDomain{Domain: d}
 }
 
@@ -273,8 +279,8 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 			var yeniTr, mevcutTr int64
 			_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(trafik_kota_mb,0) FROM service_plans WHERE id=?`, *planID).Scan(&yeniTr)
 			_ = h.DB.QueryRowContext(ctx,
-				`SELECT COALESCE(SUM(COALESCE(p.trafik_kota_mb,0)),0) FROM domains d
-				   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcutTr)
+				`SELECT COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`),0) FROM domains d`+
+					efektiflimit.Join+`WHERE d.reseller_id=?`, rid).Scan(&mevcutTr)
 			if mevcutTr+yeniTr >= maxTrafikMB && yeniTr > 0 {
 				return fmt.Errorf("trafik kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcutTr, yeniTr, maxTrafikMB)
 			}
@@ -294,8 +300,8 @@ func (h *Handlers) resellerKotaKontrol(ctx context.Context, rid int64, planID *i
 		_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0) FROM service_plans WHERE id=?`, *planID).Scan(&yeniKota)
 		var mevcut int64
 		_ = h.DB.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(COALESCE(p.disk_kota_mb,0)),0) FROM domains d
-			   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).Scan(&mevcut)
+			`SELECT COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`),0) FROM domains d`+
+				efektiflimit.Join+`WHERE d.reseller_id=?`, rid).Scan(&mevcut)
 		if mevcut+yeniKota >= maxDiskMB && yeniKota > 0 {
 			return fmt.Errorf("disk kotanız yetersiz (taahhüt %d MB + yeni %d MB > limit %d MB)", mevcut, yeniKota, maxDiskMB)
 		}
@@ -719,6 +725,9 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	// domain silinince satırlar orphan kalmasın diye açıkça sil.
 	// 🔴 Domaine-ÖZEL plan da gider: katalog planları (domain_id NULL) korunur.
 	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM service_plans WHERE domain_id=?`, id)
+	// Hostinge özel limitler (0120; FK ON DELETE CASCADE da siler — FK'si kurulamamış
+	// eski şemada da artık kalmasın).
+	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM hosting_limit_ust WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
 	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM wp_bakim WHERE domain_id=?`, id)

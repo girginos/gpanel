@@ -183,6 +183,7 @@ func main() {
 	if err := plans.SeedSync(context.Background(), d); err != nil {
 		log.Printf("plans seed-sync warn: %v", err)
 	}
+	ozelPlanAcilis(d) // D1: eski özel kopya planlar → hostinge özel üst yazım (Heal'lerden ÖNCE)
 	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
 		log.Printf("dns template seed warn: %v", err)
 	}
@@ -937,6 +938,7 @@ func main() {
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/ip", domainIPH.DomainIP)
 				r.With(middleware.AdminVeyaReseller).Get("/domains/ip-secenekleri", domainIPH.IPSecenekleri)
 				r.With(middleware.SahipYonetim).Post("/domains/{id}/ozel-plan", domainsH.OzelPlan)
+				ozelPlanRotalari(r, domainsH) // D1: GET/PUT/DELETE /domains/{id}/limitler
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns", dnsH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns", dnsH.Create)
 				r.With(middleware.MusteriScope).Put("/domains/{id}/dns/{rid}", dnsH.Update)
@@ -1358,6 +1360,11 @@ func semaDogrula(d *sql.DB) {
 		// bayi markası çözümü ve alan adı uçları 500 verir (kök markası dosyada, etkilenmez).
 		{"cp_marka", "alanadi_izni"},
 		{"cp_marka_alanadi", "dogrulama"},
+		// 0120: hostinge özel limit üst yazımı — yoksa efektif limit okuyucuları
+		// (kaynaklimit, FPM, governor, posta, havuz) hata verir.
+		{"hosting_limit_ust", "domain_id"},
+		{"hosting_limit_ust", "kok_alanlar"},
+		{"service_plans_ozel_arsiv", "satir_json"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

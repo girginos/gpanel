@@ -67,4 +67,18 @@ func TestPlanKullanimSigar(t *testing.T) {
 	if err := h.planKullanimSigar(ctx, 42, 3); err != nil {
 		t.Fatalf("sınırsız plana sığmalı: %v", err)
 	}
+	// D1: hostinge özel disk üst yazımı plan değişiminde KORUNUR → 100 MB'lık plana
+	// geçişte de efektif disk 2000 MB'tır; 500 MB kullanım sığar.
+	if _, err := db.Exec(`INSERT INTO hosting_limit_ust (domain_id, disk_kota_mb) VALUES (42, 2000)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.planKullanimSigar(ctx, 42, 1); err != nil {
+		t.Errorf("korunan 2000 MB üst yazımla 500 MB kullanım sığmalı: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE hosting_limit_ust SET disk_kota_mb=200 WHERE domain_id=42`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.planKullanimSigar(ctx, 42, 2); err == nil {
+		t.Error("200 MB üst yazım 1000 MB'lık plana geçişte de geçerli: 500 MB sığmamalı")
+	}
 }

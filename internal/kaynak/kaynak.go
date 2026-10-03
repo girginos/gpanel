@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 
@@ -148,19 +149,19 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 		o.SSLBitis = sslBitis.String
 	}
 
-	// Plan limitleri
-	var pAdi sql.NullString
+	// EFEKTİF limitler (plan ⊕ hostinge özel üst yazım — tek kaynak efektiflimit).
 	var diskKota, trafikKota, maxDom, maxDB, maxEmail, maxFTP int64
-	if planID.Valid {
-		_ = h.DB.QueryRowContext(ctx,
-			`SELECT ad, disk_kota_mb, trafik_kota_mb, max_domain, max_db, max_email, max_ftp
-			 FROM service_plans WHERE id=?`, planID.Int64).
-			Scan(&pAdi, &diskKota, &trafikKota, &maxDom, &maxDB, &maxEmail, &maxFTP)
-	}
-	if pAdi.Valid {
-		o.PlanAdi = pAdi.String
-	} else {
-		o.PlanAdi = "Sınırsız (paket atanmadı)"
+	o.PlanAdi = "Sınırsız (paket atanmadı)"
+	if el, e := efektiflimit.Oku(ctx, h.DB, id); e == nil {
+		if planID.Valid && el.PlanVar {
+			o.PlanAdi = el.PlanAd
+		}
+		diskKota = int64(el.Efektif("disk_kota_mb", 0))
+		trafikKota = int64(el.Efektif("trafik_kota_mb", 0))
+		maxDom = int64(el.Efektif("max_domain", 0))
+		maxDB = int64(el.Efektif("max_db", 0))
+		maxEmail = int64(el.Efektif("max_email", 0))
+		maxFTP = int64(el.Efektif("max_ftp", 0))
 	}
 
 	// Disk kullanım

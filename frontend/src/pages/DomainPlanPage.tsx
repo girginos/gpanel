@@ -11,6 +11,9 @@ import { useToast } from '@/components/Toast'
 import { Button, Badge, Card, butonSinifi } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { useRol } from '@/lib/rol'
+import { useDialog } from '@/components/Dialog'
+import { limitGetir, type LimitYanit } from '@/lib/limit'
+import OzelLimitDuzenleyici from '@/components/OzelLimitDuzenleyici'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -24,7 +27,6 @@ type Plan = {
   [k: string]: unknown // PUT'ta bilinmeyen alanlar KAYBOLMASIN (waf, io, nginx…)
 }
 type Domain = { id: number; alan_adi: string; plan_id?: number; plan_ad?: string }
-type Surum = { surum: string; aciklama?: string }
 
 // Plan "ağırlığı": yükseltme mi düşürme mi olduğunu göstermek için kaba bir puan.
 // Sınırsız (0) alanlar en yükseğe sayılır — aksi halde "sınırsız" düşürme görünür.
@@ -33,68 +35,49 @@ const DPLAN_EN: Record<string, string> = {
   "Kaydedildi": "Saved",
   "İşlem başarısız": "Operation failed",
   "Türkçe": "English",
-  "Limitler kaydedildi ve bu hostinge uygulandı.": "Limits saved and applied to this hosting.",
   "Domainler": "Domains",
+  "Bu hostingin paketini yükseltin ya da düşürün; gerekirse yalnız bu hostinge özel limitler belirleyin (katalogda yeni plan oluşmaz).": "Upgrade or downgrade this hosting's package; if needed, set limits specific to this hosting only (no new plan is added to the catalog).",
+  "Özel limitler": "Custom limits",
+  "Plan atanmamış · özel limitler": "No plan assigned · custom limits",
+  "Bu hostingte plandan farklı limitler var; yalnız bu hostingi etkiler ve plan değişince korunur.": "This hosting has limits that differ from its plan; they affect only this hosting and are kept when the plan changes.",
+  "Limitler plandan gelir. Yalnız bu hosting için farklı değer gerekiyorsa “Limitleri özelleştir”i kullanın — başka hostingler etkilenmez.": "Limits come from the plan. If this hosting alone needs different values, use “Customize limits” — other hostings are not affected.",
+  "Bu hosting eski bir özel plan kopyasında. Bir katalog planı seçtiğinizde kopya kaldırılır; özel limitleri aşağıdan yeniden girebilirsiniz.": "This hosting is on an old custom plan copy. When you pick a catalog plan the copy is removed; you can re-enter custom limits below.",
+  "Özel limitler korunur": "Custom limits are kept",
+  "Bu hostinge özel {0} limit yeni planda da geçerli kalır: {1}. Plana geçilsin mi?": "{0} limit(s) specific to this hosting stay in effect on the new plan: {1}. Switch plan?",
+  "Plana geç": "Switch plan",
+  "Vazgeç": "Cancel",
   "Hosting Planı": "Hosting Plan",
-  "Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin.": "Upgrade or downgrade this hosting's package, or create a plan specific to this hosting and set its limits yourself.",
   "Limitleri özelleştir": "Customize limits",
   "Tüm ayarlar": "All settings",
-  "Veritabanı": "Database",
-  "PHP sürümü": "PHP version",
-  "Vazgeç": "Cancel",
-  "Gelişmiş ayarlar (WAF, nginx, IO)": "Advanced settings (WAF, nginx, IO)",
   "Aktif": "Active",
-  "Düzenle": "Edit",
   "Mevcut plan": "Current plan",
   "Disk": "Disk",
   "Trafik": "Traffic",
-  "Oluşturuluyor…": "Creating…",
-  "Kaynak limitleri": "Resource limits",
-  "Disk (MB)": "Disk (MB)",
-  "Trafik (MB/ay)": "Traffic (MB/month)",
-  "RAM (MB)": "RAM (MB)",
-  "E-posta kutusu": "Mailbox",
-  "Kutu depolama (MB)": "Mailbox storage (MB)",
-  "Kaydediliyor…": "Saving…",
-  "Kaydet ve uygula": "Save and apply",
-  "Kaydedilemedi": "Could not save",
   "Planlara git": "Go to plans",
   "Uygulanıyor…": "Applying…",
   "planı uygulandı. Kaynak limitleri arka planda güncelleniyor.": "plan applied. Resource limits are being updated in the background.",
-  "zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.": "is already specific to this hosting — you can edit its limits below.",
-  "oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.": "created and assigned to this hosting. Edit its limits below.",
-  "0 = sınırsız": "0 = unlimited",
-  "100 = 1 çekirdek": "100 = 1 core",
   "Açıklama yok": "No description",
-  "Bu hostinge özel": "Specific to this hosting",
-  "Bu plan başka hostingler tarafından da kullanılıyor olabilir. Limitleri yalnız bu hosting için değiştirmek üzere önce “Tek tıkla özel plan” oluşturun.": "This plan may also be used by other hostings. To change limits for this hosting only, first create a “One-click custom plan”.",
-  "Bu plan yalnız bu hostinge ait — limitlerini değiştirmek başka hiçbir hostingi etkilemez.": "This plan belongs only to this hosting — changing its limits affects no other hosting.",
   "Bu plana geç": "Switch to this plan",
-  "FTP hesabı": "FTP account",
-  "Inode (dosya sayısı)": "Inode (file count)",
   "Kullanımda": "In use",
-  "Kutu başına giden mail/saat": "Outgoing mail per mailbox/hour",
-  "Mail eklentisi — posta kutusu sayısı": "Mail add-on — mailbox count",
   "Plan atanmamış": "No plan assigned",
   "Plan değiştirilemedi": "Failed to change plan",
-  "Plan okunamadı": "Failed to read plan",
   "Planlar yükleniyor": "Loading plans",
-  "Posta kutusu başına disk kotası; 0 = sınırsız": "Disk quota per mailbox; 0 = unlimited",
-  "Saatlik gönderim": "Hourly sending",
   "Tanımlı plan yok": "No plans defined",
-  "Tek tıkla özel plan": "One-click custom plan",
   "ağırlığı": "weight",
   "düşür": "decrease",
   "geç": "switch",
   "sınırsız": "unlimited",
   "yükselt": "increase",
   "Önce bir hosting planı oluşturun.": "Create a hosting plan first.",
-  "Özel plan oluşturulamadı": "Failed to create custom plan",
   "Yükselt": "Upgrade",
   "Paylaşılan plan": "Shared plan",
   "Düşür": "Downgrade",
 }
-const cevir = (tr: string): string => (i18n.language === "en" ? (DPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+const cevir = (tr: string, ...a: (string | number)[]): string => {
+  let s = i18n.language === "en" ? (DPLAN_EN[tr] || ORTAK_EN[tr] || tr) : tr
+  a.forEach((v, i) => { s = s.split('{' + i + '}').join(String(v)) })
+  return s
+}
 
 function puan(p: Plan) {
   const s = (v: number) => (v <= 0 ? 1_000_000 : v)
@@ -103,21 +86,19 @@ function puan(p: Plan) {
 const mb = (v: number) => (v <= 0 ? cevir('sınırsız') : v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`)
 const adet = (v: number) => (v <= 0 ? cevir('sınırsız') : String(v))
 
-const inp = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 tabular-nums'
-
 export default function DomainPlanPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams()
   const toast = useToast()
+  const { onay } = useDialog()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [planlar, setPlanlar] = useState<Plan[]>([])
-  const [surumler, setSurumler] = useState<Surum[]>([])
+  const [limit, setLimit] = useState<LimitYanit | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
-  const [isleniyor, setIsleniyor] = useState<number | 'ozel' | 'kaydet' | null>(null)
-  // Satır-içi özelleştirme: yalnız bu hostinge ÖZEL plan düzenlenebilir.
-  const [taslak, setTaslak] = useState<Plan | null>(null)
+  const [isleniyor, setIsleniyor] = useState<number | null>(null)
+  // "Bu hostinge özel limitler" düzenleyicisi açık mı?
+  const [duzenle, setDuzenle] = useState(false)
   // Mail eklentisi aktif+ödemeli ise posta limiti alanları görünür.
   const [mailAktif, setMailAktif] = useState(false)
   // Müşteri plan tanımlayamaz (/plans AdminVeyaReseller); boş durumdaki
@@ -129,11 +110,11 @@ export default function DomainPlanPage() {
     setYuk(true); setHata(null)
     Promise.all([
       api.get<Domain>(`/domains/${id}`),
-      // ?domain= → katalog planlari + YALNIZ bu hostingin ozel plani
-      api.get<Plan[]>(`/plans?domain=${id}`),
-      api.get<Surum[]>('/php/versions').catch(() => ({ data: [] as Surum[] })),
+      // Yalnız KATALOG planları (hostinge özel limitler plan kopyası değil, üst yazım).
+      api.get<Plan[]>('/plans'),
+      limitGetir(id).catch(() => null),
     ])
-      .then(([d, p, s]) => { setDomain(d.data); setPlanlar(p.data || []); setSurumler(s.data || []) })
+      .then(([d, p, l]) => { setDomain(d.data); setPlanlar(p.data || []); setLimit(l) })
       .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
     // Mail eklentisi aktif mi? (posta limiti alanlarının gate'i)
@@ -145,78 +126,33 @@ export default function DomainPlanPage() {
 
   const mevcut = planlar.find(p => p.id === domain?.plan_id) || null
   const mevcutPuan = mevcut ? puan(mevcut) : -1
-  // Bu plan yalnız bu hostinge mi ait? (adı "<alan_adı> — Özel" ile başlıyorsa)
-  // 🔴 LOGIC: backend plan adını her zaman Türkçe "<domain> — Özel" olarak üretir;
-  // ceviri UYGULANMAZ, aksi halde EN modda eşleşme bozulur.
-  const ozelMi = !!(mevcut && domain && (mevcut.domain_id === domain.id || mevcut.ad.startsWith(`${domain.alan_adi} — Özel`)))
   // Düzenleme/“Tüm ayarlar” yalnız planın sahibine (eski yanıtta işaret yoksa düzenlenebilir).
   const mevcutDuzenlenebilir = mevcut?.duzenlenebilir !== false
+  const ozelAlanlar = (limit?.alanlar || []).filter(a => a.ust !== null || a.kilitli)
+  const ef = (ad: string): number | null => {
+    const a = limit?.alanlar.find(x => x.ad === ad)
+    return a ? a.efektif : null
+  }
 
   async function planUygula(p: Plan) {
     if (!id) return
-    setIsleniyor(p.id); setHata(null); setBasari(null); setTaslak(null)
+    // Özel limitler plan değişiminde KORUNUR — kullanıcı bunu bilerek geçsin.
+    if (ozelAlanlar.length > 0 && !(await onay({
+      baslik: cevir("Özel limitler korunur"),
+      mesaj: cevir("Bu hostinge özel {0} limit yeni planda da geçerli kalır: {1}. Plana geçilsin mi?",
+        ozelAlanlar.length, ozelAlanlar.map(a => a.ad).join(', ')),
+      ton: 'bilgi', onayEtiketi: cevir("Plana geç"), iptalEtiketi: cevir("Vazgeç"), onayIkonu: I.onay,
+    }))) return
+    setIsleniyor(p.id); setHata(null)
     try {
       await api.put(`/domains/${id}/plan`, { plan_id: p.id })
       const m = `"${p.ad}" ${cevir("planı uygulandı. Kaynak limitleri arka planda güncelleniyor.")}`
-      setBasari(m)
       toast.basari(cevir("Kaydedildi"), m)
       yukle()
     } catch (e) {
       const m = apiHata(e, cevir("Plan değiştirilemedi")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setIsleniyor(null) }
   }
-
-  // Tek tıkla özel plan: mevcut planın kopyasını bu hostinge özel oluşturur ve
-  // hemen düzenleme panelini açar (kullanıcı sayfadan çıkmadan limit değiştirsin).
-  async function ozelPlan() {
-    if (!id) return
-    setIsleniyor('ozel'); setHata(null); setBasari(null)
-    try {
-      const { data } = await api.post<{ plan_id: number; ad: string; zaten_ozel?: boolean }>(`/domains/${id}/ozel-plan`, {})
-      const m = data.zaten_ozel
-        ? `"${data.ad}" ${cevir("zaten bu hostinge özel — limitleri aşağıdan düzenleyebilirsiniz.")}`
-        : `"${data.ad}" ${cevir("oluşturuldu ve bu hostinge atandı. Limitleri aşağıdan düzenleyin.")}`
-      setBasari(m)
-      toast.basari(cevir("Kaydedildi"), m)
-      const { data: pl } = await api.get<{ plan: Plan }>(`/plans/${data.plan_id}`)
-      setTaslak(pl.plan)
-      yukle()
-    } catch (e) {
-      const m = apiHata(e, cevir("Özel plan oluşturulamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
-    } finally { setIsleniyor(null) }
-  }
-
-  async function duzenlemeyiAc() {
-    if (!mevcut) return
-    setHata(null); setBasari(null)
-    try {
-      const { data } = await api.get<{ plan: Plan }>(`/plans/${mevcut.id}`)
-      setTaslak(data.plan)
-    } catch (e) { const m = apiHata(e, cevir("Plan okunamadı")); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }
-  }
-
-  function T<K extends keyof Plan>(k: K, v: Plan[K]) {
-    if (!taslak) return
-    setTaslak({ ...taslak, [k]: v })
-  }
-
-  async function kaydet() {
-    if (!taslak || !id) return
-    setIsleniyor('kaydet'); setHata(null); setBasari(null)
-    try {
-      await api.put(`/plans/${taslak.id}`, taslak)
-      // Plan kaydı limitleri hostinge KENDİLİĞİNDEN uygulamaz — yeniden atayarak uygula.
-      await api.put(`/domains/${id}/plan`, { plan_id: taslak.id })
-      setBasari(cevir("Limitler kaydedildi ve bu hostinge uygulandı."))
-      toast.basari(cevir("Kaydedildi"), cevir("Limitler kaydedildi ve bu hostinge uygulandı."))
-      setTaslak(null)
-      yukle()
-    } catch (e) {
-      const m = apiHata(e, cevir('Kaydedilemedi')); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
-    } finally { setIsleniyor(null) }
-  }
-
-  const phpSecenek = Array.from(new Set([...(surumler.map(s => s.surum)), taslak?.php_surum].filter(Boolean) as string[]))
 
   return (
     <div>
@@ -229,9 +165,13 @@ export default function DomainPlanPage() {
       <div className="mb-4">
         <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{cevir("Hosting Planı")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          {cevir("Bu hostingin paketini yükseltin, düşürün veya bu hostinge özel bir plan oluşturup limitlerini kendiniz belirleyin.")}
+          {cevir("Bu hostingin paketini yükseltin ya da düşürün; gerekirse yalnız bu hostinge özel limitler belirleyin (katalogda yeni plan oluşmaz).")}
         </p>
       </div>
+
+      {hata && !yuk && (
+        <p role="alert" className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-sm text-red-700 dark:text-red-300">{hata}</p>
+      )}
 
       {yuk ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label={cevir("Planlar yükleniyor")}>
@@ -242,31 +182,29 @@ export default function DomainPlanPage() {
           {/* Mevcut plan + aksiyonlar */}
           <Card className="mb-5 bg-white dark:bg-dark-800 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 dark:text-slate-500">{cevir("Mevcut plan")}</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-semibold text-slate-900 dark:text-slate-100">{mevcut?.ad || domain?.plan_ad || cevir("Plan atanmamış")}</span>
-                  {ozelMi && <Badge color="primary" variant="soft" className="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5">{cevir("Bu hostinge özel")}</Badge>}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-base font-semibold text-slate-900 dark:text-slate-100 break-words">
+                    {limit?.plan?.ad || mevcut?.ad || domain?.plan_ad || (ozelAlanlar.length > 0 ? cevir("Plan atanmamış · özel limitler") : cevir("Plan atanmamış"))}
+                  </span>
+                  {ozelAlanlar.length > 0 && (
+                    <Badge color="primary" variant="soft" className="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5">{cevir("Özel limitler")}</Badge>
+                  )}
                 </div>
-                {mevcut && (
+                {limit && (
                   <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Disk")} </dt><dd className="inline font-medium">{mb(mevcut.disk_kota_mb)}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Trafik")} </dt><dd className="inline font-medium">{mb(mevcut.trafik_kota_mb)}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">RAM </dt><dd className="inline font-medium">{mb(mevcut.ram_mb)}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">CPU </dt><dd className="inline font-medium">{mevcut.cpu_yuzde <= 0 ? cevir('sınırsız') : `%${mevcut.cpu_yuzde}`}</dd></div>
-                    <div><dt className="inline text-slate-400 dark:text-slate-500">PHP </dt><dd className="inline font-medium">{mevcut.php_surum}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Disk")} </dt><dd className="inline font-medium">{ef('disk_kota_mb') === null ? '—' : mb(ef('disk_kota_mb') as number)}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">{cevir("Trafik")} </dt><dd className="inline font-medium">{ef('trafik_kota_mb') === null ? '—' : mb(ef('trafik_kota_mb') as number)}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">RAM </dt><dd className="inline font-medium">{ef('ram_mb') === null ? '—' : mb(ef('ram_mb') as number)}</dd></div>
+                    <div><dt className="inline text-slate-400 dark:text-slate-500">CPU </dt><dd className="inline font-medium">{ef('cpu_yuzde') === null ? '—' : `%${ef('cpu_yuzde')}`}</dd></div>
                   </dl>
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {ozelMi ? (mevcutDuzenlenebilir && (
-                  <Button type="button" color="primary" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}>
+                {limit && !musteri && (
+                  <Button type="button" color="primary" ikon={I.kalem} onClick={() => setDuzenle(true)} disabled={isleniyor !== null || duzenle}>
                     {cevir("Limitleri özelleştir")}
-                  </Button>
-                )) : (
-                  <Button type="button" color="primary" onClick={ozelPlan} disabled={isleniyor !== null}
-                          yukleniyor={isleniyor === 'ozel'} ikon={I.arti}>
-                    {isleniyor === 'ozel' ? cevir('Oluşturuluyor…') : cevir("Tek tıkla özel plan")}
                   </Button>
                 )}
                 {mevcut && mevcutDuzenlenebilir && (
@@ -279,54 +217,22 @@ export default function DomainPlanPage() {
               </div>
             </div>
             <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-              {ozelMi
-                ? cevir("Bu plan yalnız bu hostinge ait — limitlerini değiştirmek başka hiçbir hostingi etkilemez.")
-                : cevir("Bu plan başka hostingler tarafından da kullanılıyor olabilir. Limitleri yalnız bu hosting için değiştirmek üzere önce “Tek tıkla özel plan” oluşturun.")}
+              {ozelAlanlar.length > 0
+                ? cevir("Bu hostingte plandan farklı limitler var; yalnız bu hostingi etkiler ve plan değişince korunur.")
+                : cevir("Limitler plandan gelir. Yalnız bu hosting için farklı değer gerekiyorsa “Limitleri özelleştir”i kullanın — başka hostingler etkilenmez.")}
             </p>
+            {limit?.eski_ozel_kopya && (
+              <p role="status" className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-800 dark:text-amber-200">
+                <Ikon d={I.uyari} className="mt-0.5 size-3.5 shrink-0" />
+                {cevir("Bu hosting eski bir özel plan kopyasında. Bir katalog planı seçtiğinizde kopya kaldırılır; özel limitleri aşağıdan yeniden girebilirsiniz.")}
+              </p>
+            )}
           </Card>
 
-          {/* Satır-içi özelleştirme paneli */}
-          {taslak && (
-            <div className="mb-5 rounded-lg border border-brand-300 dark:border-brand-800 bg-brand-50/40 dark:bg-brand-950/20 p-4">
-              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Kaynak limitleri")} — {taslak.ad}</h2>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("0 = sınırsız")}</span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Alan etiket={cevir("Disk (MB)")}><input type="number" min={0} className={inp} value={taslak.disk_kota_mb} onChange={e => T('disk_kota_mb', Number(e.target.value))} /></Alan>
-                <Alan etiket={cevir("Trafik (MB/ay)")}><input type="number" min={0} className={inp} value={taslak.trafik_kota_mb} onChange={e => T('trafik_kota_mb', Number(e.target.value))} /></Alan>
-                <Alan etiket={cevir("RAM (MB)")}><input type="number" min={0} className={inp} value={taslak.ram_mb} onChange={e => T('ram_mb', Number(e.target.value))} /></Alan>
-                <Alan etiket="CPU (%)" ipucu={cevir("100 = 1 çekirdek")}><input type="number" min={0} className={inp} value={taslak.cpu_yuzde} onChange={e => T('cpu_yuzde', Number(e.target.value))} /></Alan>
-                <Alan etiket={cevir("Veritabanı")}><input type="number" min={0} className={inp} value={taslak.max_db} onChange={e => T('max_db', Number(e.target.value))} /></Alan>
-                <Alan etiket={cevir("FTP hesabı")}><input type="number" min={0} className={inp} value={taslak.max_ftp} onChange={e => T('max_ftp', Number(e.target.value))} /></Alan>
-                {mailAktif && (
-                  <>
-                    <Alan etiket={cevir("E-posta kutusu")} ipucu={cevir("Mail eklentisi — posta kutusu sayısı")}><input type="number" min={0} className={inp} value={taslak.max_email} onChange={e => T('max_email', Number(e.target.value))} /></Alan>
-                    <Alan etiket={cevir("Saatlik gönderim")} ipucu={cevir("Kutu başına giden mail/saat")}><input type="number" min={0} className={inp} value={taslak.saatlik_mail_limiti} onChange={e => T('saatlik_mail_limiti', Number(e.target.value))} /></Alan>
-                    <Alan etiket={cevir("Kutu depolama (MB)")} ipucu={cevir("Posta kutusu başına disk kotası; 0 = sınırsız")}><input type="number" min={0} className={inp} value={taslak.mail_kutu_kota_mb} onChange={e => T('mail_kutu_kota_mb', Number(e.target.value))} /></Alan>
-                  </>
-                )}
-                <Alan etiket={cevir("Inode (dosya sayısı)")}><input type="number" min={0} className={inp} value={taslak.inode_kota} onChange={e => T('inode_kota', Number(e.target.value))} /></Alan>
-                <Alan etiket={cevir("PHP sürümü")}>
-                  <select className={inp} value={taslak.php_surum} onChange={e => T('php_surum', e.target.value)}>
-                    {phpSecenek.map(v => <option key={v} value={v}>PHP {v}</option>)}
-                  </select>
-                </Alan>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button type="button" color="primary" onClick={kaydet} disabled={isleniyor !== null}
-                        yukleniyor={isleniyor === 'kaydet'} ikon={I.disket}>
-                  {isleniyor === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet ve uygula')}
-                </Button>
-                <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setTaslak(null)} disabled={isleniyor !== null}>
-                  {cevir("Vazgeç")}
-                </Button>
-                <Link to={`/araclar/paketler/${taslak.id}`} className="inline-flex items-center px-1 py-2 text-sm text-brand-700 dark:text-brand-300 hover:underline">
-                  {cevir("Gelişmiş ayarlar (WAF, nginx, IO)")}
-                  <Ikon d={I.ileri} className="size-4 shrink-0 ms-1.5" />
-                </Link>
-              </div>
-            </div>
+          {/* Bu hostinge özel limitler (üst yazım) */}
+          {duzenle && limit && id && (
+            <OzelLimitDuzenleyici domainId={id} veri={limit} mailAktif={mailAktif}
+                                  onDegisti={v => { setLimit(v); yukle() }} onKapat={() => setDuzenle(false)} />
           )}
 
           {planlar.length === 0 ? (
@@ -363,15 +269,7 @@ export default function DomainPlanPage() {
                     </dl>
                     <div className="mt-auto flex gap-2">
                       {bu ? (
-                        <>
-                          <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
-                          {ozelMi && mevcutDuzenlenebilir && (
-                            <Button type="button" variant="outlined" boyut="sm" ikon={I.kalem} onClick={duzenlemeyiAc} disabled={isleniyor !== null || !!taslak}
-                                    className="shrink-0">
-                              {cevir("Düzenle")}
-                            </Button>
-                          )}
-                        </>
+                        <span className="flex-1 rounded-md border border-slate-200 dark:border-dark-600 px-3 py-1.5 text-sm text-center text-slate-400 dark:text-slate-500">{cevir("Kullanımda")}</span>
                       ) : (
                         <Button type="button" color={yon === 'düşür' ? 'neutral' : 'primary'}
                                 onClick={() => planUygula(p)} disabled={isleniyor !== null}
@@ -390,15 +288,5 @@ export default function DomainPlanPage() {
         </>
       )}
     </div>
-  )
-}
-
-function Alan({ etiket, ipucu, children }: { etiket: string; ipucu?: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">{etiket}</span>
-      {children}
-      {ipucu && <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">{ipucu}</span>}
-    </label>
   )
 }

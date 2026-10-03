@@ -23,6 +23,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/middleware"
 )
 
@@ -57,7 +58,9 @@ func mg_geciciDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	for _, q := range []string{
-		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL, trafik_kota_mb BIGINT NULL)`,
+		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL,
+			trafik_kota_mb BIGINT NULL)`,
+		efektiflimit.TabloDDL, // 0120: efektif limit (plan ⊕ üst yazım) birleşimi
 		`CREATE TABLE users (id BIGINT UNSIGNED PRIMARY KEY, username VARCHAR(64) NOT NULL DEFAULT '',
 			full_name VARCHAR(128) NULL, role VARCHAR(16) NOT NULL DEFAULT 'user')`,
 		`CREATE TABLE domains (
@@ -71,7 +74,7 @@ func mg_geciciDB(t *testing.T) *sql.DB {
 			trafik_kb BIGINT NOT NULL DEFAULT 0, is_demo TINYINT NOT NULL DEFAULT 0, notlar TEXT NULL,
 			olusturulma DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, plan_id BIGINT UNSIGNED NULL,
 			ssh_erisim TINYINT NOT NULL DEFAULT 0, askida TINYINT NULL,
-			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0)`,
+			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0, disk_kota_mb INT NOT NULL DEFAULT 0)`,
 		`INSERT INTO users (id, username, full_name, role) VALUES
 			(1, 'root', 'Kok Yonetici Adi', 'admin'), (7, 'bayi_ahmet', 'Bayi Ahmet Yilmaz', 'reseller')`,
 		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES
@@ -181,5 +184,34 @@ func TestDomainGet_MusteriSahiplikAlanlariniGormez(t *testing.T) {
 	b := mg_get(t, br, bayiTok, 42)
 	if b["sahip_ad"] != "Bayi Ahmet Yilmaz" || b["sahip_tur"] != "bayi" || b["reseller_id"] != float64(7) {
 		t.Errorf("bayi yanıtı değişmemeli: %v / %v / %v", b["sahip_ad"], b["sahip_tur"], b["reseller_id"])
+	}
+}
+
+// D1: "özel limit" işareti yönetici/bayi listesi içindir; müşteri yalnız efektif
+// değerleri görür (rozet/işaret yok).
+func TestDomainGet_OzelLimitIsaretiMusteriyeGitmez(t *testing.T) {
+	d := Domain{ID: 42, AlanAdi: "musteri.test", OzelLimit: true}
+	if b, _ := json.Marshal(d); !strings.Contains(string(b), `"ozel_limit":true`) {
+		t.Fatalf("yönetici görünümünde ozel_limit yok: %s", b)
+	}
+	if b, _ := json.Marshal(musteriGorunumu(d)); strings.Contains(string(b), "ozel_limit") {
+		t.Errorf("müşteri görünümünde ozel_limit var: %s", b)
+	}
+	db := mg_geciciDB(t)
+	h := &Handlers{DB: db, IPv4: "203.0.113.10"}
+	if _, err := db.Exec(`INSERT INTO hosting_limit_ust (domain_id, disk_kota_mb) VALUES (42, 777)`); err != nil {
+		t.Fatal(err)
+	}
+	adminTok, err := auth.IssueAt(ds_secret, 3600, 1, "root", "admin", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := mg_get(t, ds_router(h), adminTok, 42)
+	if a["ozel_limit"] != true || a["disk_kota_mb"] != float64(777) {
+		t.Errorf("yönetici: ozel_limit=%v disk_kota_mb=%v (beklenen true / efektif 777)", a["ozel_limit"], a["disk_kota_mb"])
+	}
+	m := mg_get(t, ds_router(h), ds_musteriToken(t, 5, 42), 42)
+	if _, ok := m["ozel_limit"]; ok || m["disk_kota_mb"] != float64(777) {
+		t.Errorf("müşteri: ozel_limit görünür ya da efektif disk yanlış: %v", m)
 	}
 }

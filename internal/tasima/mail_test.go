@@ -25,6 +25,8 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 func TestMailYerelGecerli(t *testing.T) {
@@ -287,13 +289,21 @@ func TestMailAktarGuvenilmezKaynak(t *testing.T) {
 	db := ta_db(t)
 	kok := mailTestKok(t)
 	ek := sahteMailEklenti(t)
+	// Efektif limit (plan ⊕ üst yazım, efektiflimit.Oku) canlı şemadaki gibi 22 limit
+	// sütununu ve domains.disk_kota_mb/inode_kota'yı okur.
+	var spSutun []string
+	for _, a := range efektiflimit.Alanlar {
+		spSutun = append(spSutun, "`"+a.Sutun+"` INT NOT NULL DEFAULT 0")
+	}
 	for _, q := range []string{
-		`ALTER TABLE domains ADD COLUMN plan_id BIGINT UNSIGNED NULL`,
-		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, max_email INT NOT NULL DEFAULT 0,
-			saatlik_mail_limiti INT NOT NULL DEFAULT 0, mail_kutu_kota_mb INT NOT NULL DEFAULT 0)`,
+		`ALTER TABLE domains ADD COLUMN plan_id BIGINT UNSIGNED NULL, ADD COLUMN disk_kota_mb INT NOT NULL DEFAULT 0,
+			ADD COLUMN inode_kota INT NOT NULL DEFAULT 0`,
+		"CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(64) NOT NULL DEFAULT '', " +
+			"reseller_id BIGINT NOT NULL DEFAULT 0, domain_id BIGINT UNSIGNED NULL, " + strings.Join(spSutun, ", ") + ")",
+		efektiflimit.TabloDDL, // 0120: efektif posta limiti (plan ⊕ üst yazım)
 		`CREATE TABLE cp_eklentiler (ad VARCHAR(64) PRIMARY KEY, aktif TINYINT NOT NULL DEFAULT 0,
 			soket VARCHAR(255) NOT NULL DEFAULT '')`,
-		`INSERT INTO service_plans VALUES (3, 9, 50, 250)`,
+		`INSERT INTO service_plans (id, max_email, saatlik_mail_limiti, mail_kutu_kota_mb) VALUES (3, 9, 50, 250)`,
 		`INSERT INTO domains (id, alan_adi, reseller_id, plan_id) VALUES (30,'posta-bayi.test',7,3)`,
 	} {
 		if _, err := db.Exec(q); err != nil {

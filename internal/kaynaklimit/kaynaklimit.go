@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/provisioner"
 )
 
@@ -42,26 +43,31 @@ type Limitler struct {
 // olarak tenant home'unu barındıran blok cihazına (major:minor) çözer (181/177: /home → /dev/vdaN).
 const ioDevicePath = "/home"
 
-// planLimitleriGetir: domain'in bağlı olduğu plan'ın limitlerini döner.
-// Plan atanmamışsa boş Limitler{0,...} — uygulama kaldırılır.
+// PlanLimitleriGetir: domain'in EFEKTİF limitlerini döner (plan ⊕ hostinge özel
+// üst yazım — tek kaynak efektiflimit.Oku). Plan ve üst yazım yoksa boş
+// Limitler{0,...} (io_agirlik 100) — uygulama kaldırılır.
 func PlanLimitleriGetir(ctx context.Context, db *sql.DB, domainID int64) (Limitler, error) {
-	var l Limitler
-	err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(p.cpu_yuzde,0), COALESCE(p.ram_mb,0),
-		       COALESCE(p.max_process,0), COALESCE(p.inode_kota,0),
-		       COALESCE(p.io_agirlik,100), COALESCE(p.mysql_max_baglanti,0),
-		       COALESCE(p.disk_kota_mb,0), COALESCE(p.pm_max_children,0),
-		       COALESCE(p.io_read_mbps,0), COALESCE(p.io_write_mbps,0),
-		       COALESCE(p.io_read_iops,0), COALESCE(p.io_write_iops,0),
-		       COALESCE(p.db_max_queries_per_hour,0), COALESCE(p.db_max_updates_per_hour,0),
-		       COALESCE(p.db_max_query_seconds,0)
-		FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
-		WHERE d.id=?`, domainID).
-		Scan(&l.CPUYuzde, &l.RAMMB, &l.MaxProcess, &l.InodeKota,
-			&l.IOAgirlik, &l.MySQLMaxBaglanti, &l.DiskKotaMB, &l.PMMaxChildren,
-			&l.IOReadMBps, &l.IOWriteMBps, &l.IOReadIOPS, &l.IOWriteIOPS,
-			&l.DBMaxQueriesPerHr, &l.DBMaxUpdatesPerHr, &l.DBMaxQuerySeconds)
-	return l, err
+	s, err := efektiflimit.Oku(ctx, db, domainID)
+	if err != nil {
+		return Limitler{}, err
+	}
+	return Limitler{
+		CPUYuzde:          s.Efektif("cpu_yuzde", 0),
+		RAMMB:             s.Efektif("ram_mb", 0),
+		MaxProcess:        s.Efektif("max_process", 0),
+		InodeKota:         s.Efektif("inode_kota", 0),
+		IOAgirlik:         s.Efektif("io_agirlik", 100),
+		MySQLMaxBaglanti:  s.Efektif("mysql_max_baglanti", 0),
+		DiskKotaMB:        s.Efektif("disk_kota_mb", 0),
+		PMMaxChildren:     s.Efektif("pm_max_children", 0),
+		IOReadMBps:        s.Efektif("io_read_mbps", 0),
+		IOWriteMBps:       s.Efektif("io_write_mbps", 0),
+		IOReadIOPS:        s.Efektif("io_read_iops", 0),
+		IOWriteIOPS:       s.Efektif("io_write_iops", 0),
+		DBMaxQueriesPerHr: s.Efektif("db_max_queries_per_hour", 0),
+		DBMaxUpdatesPerHr: s.Efektif("db_max_updates_per_hour", 0),
+		DBMaxQuerySeconds: s.Efektif("db_max_query_seconds", 0),
+	}, nil
 }
 
 const sliceDir = "/etc/systemd/system"
@@ -455,30 +461,39 @@ func efektifKota(diskOverride, inodeOverride int, planVar bool, planDisk, planIn
 	return disk, inode
 }
 
-// DomainKotaUygula: domain için efektif kotayı (override>plan>varsayılan) çözer ve KotaUygula
-// çağırır. Create + plan-değişim hook'ları (UygulaHepsi/LimitleriReAssert) ve HealKotaOnStartup
-// buradan geçer → tek çözümleme kaynağı.
+// DomainKotaUygula: domain için efektif kotayı (üst yazım > domain override > plan >
+// varsayılan) çözer ve KotaUygula çağırır. Create + plan-değişim hook'ları
+// (UygulaHepsi/LimitleriReAssert) ve HealKotaOnStartup buradan geçer → tek çözümleme
+// kaynağı (efektiflimit.Oku).
 func DomainKotaUygula(ctx context.Context, db *sql.DB, domainID int64) error {
 	var sk string
-	var dDisk, dInode int
-	var planID sql.NullInt64
-	var pDisk, pInode int
-	err := db.QueryRowContext(ctx, `
-		SELECT d.sistem_kullanici,
-		       COALESCE(d.disk_kota_mb,0), COALESCE(d.inode_kota,0),
-		       d.plan_id,
-		       COALESCE(p.disk_kota_mb,0), COALESCE(p.inode_kota,0)
-		FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
-		WHERE d.id=?`, domainID).
-		Scan(&sk, &dDisk, &dInode, &planID, &pDisk, &pInode)
-	if err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(sk, "c_") {
 		return nil // admin/geçersiz sistem kullanıcı → dokunma
 	}
-	disk, inode := efektifKota(dDisk, dInode, planID.Valid, pDisk, pInode)
+	s, err := efektiflimit.Oku(ctx, db, domainID)
+	if err != nil {
+		return err
+	}
+	disk, inode := efektifKotaSonuc(s)
 	return KotaUygula(ctx, sk, disk, inode)
+}
+
+// efektifKotaSonuc: efektiflimit çözümünden disk/inode. Üst yazım ve domains.* (0037)
+// değeri efektiflimit'te zaten öndedir; geriye plan yoksa varsayılan kalır.
+func efektifKotaSonuc(s efektiflimit.Sonuc) (int, int) {
+	// planVar: d.plan_id dolu (sarkık plan_id dahil — eski davranış korunur: plan değeri 0).
+	disk, inode := efektifKota(0, 0, s.PlanID != nil, s.Efektif("disk_kota_mb", 0), s.Efektif("inode_kota", 0))
+	// Plan yok ama üst yazım/0037 var → onlar geçerli (varsayılan değil).
+	if d := s.Degerler["disk_kota_mb"]; d.Kaynak == efektiflimit.KaynakUst || d.Kaynak == efektiflimit.KaynakAlan {
+		disk = *d.Efektif
+	}
+	if d := s.Degerler["inode_kota"]; d.Kaynak == efektiflimit.KaynakUst || d.Kaynak == efektiflimit.KaynakAlan {
+		inode = *d.Efektif
+	}
+	return disk, inode
 }
 
 // kotaReportSatir: `xfs_quota report -u -N <metric> /` çıktısında sk satırının Used + Hard
@@ -648,7 +663,8 @@ func SlowQueryWatchdog(ctx context.Context, db *sql.DB) {
 	}
 }
 
-// governorLimiti: MariaDB kullanicisi → db_accounts → domain → plan.db_max_query_seconds.
+// governorLimiti: MariaDB kullanicisi → db_accounts → domain → EFEKTİF db_max_query_seconds
+// (plan ⊕ hostinge özel üst yazım).
 // ok=false: kullanici panelde kayitli degil YA DA birden cok domaine kayitli (sahibi
 // belirsiz → KILL yok).
 //
@@ -661,9 +677,8 @@ func SlowQueryWatchdog(ctx context.Context, db *sql.DB) {
 func governorLimiti(db *sql.DB, user string) (int, bool) {
 	var n, limit int
 	if err := db.QueryRow(
-		`SELECT COUNT(DISTINCT a.domain_id), COALESCE(MAX(COALESCE(p.db_max_query_seconds,0)),0)
-		 FROM db_accounts a JOIN domains d ON d.id=a.domain_id
-		 LEFT JOIN service_plans p ON p.id=d.plan_id
+		`SELECT COUNT(DISTINCT a.domain_id), COALESCE(MAX(`+efektiflimit.IfadeVarsayilan("db_max_query_seconds", 0)+`),0)
+		 FROM db_accounts a JOIN domains d ON d.id=a.domain_id`+efektiflimit.Join+`
 		 WHERE BINARY a.db_user=?`, user).Scan(&n, &limit); err != nil || n != 1 {
 		return 0, false
 	}

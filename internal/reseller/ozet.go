@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 )
@@ -34,12 +35,12 @@ func (h *Handlers) Ozet(w http.ResponseWriter, r *http.Request) {
 		   FROM domains WHERE reseller_id=?`, rid).
 		Scan(&adet, &diskKB, &trafikKB, &askida)
 	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT COALESCE(SUM(COALESCE(p.disk_kota_mb,0)),0), COALESCE(SUM(COALESCE(p.trafik_kota_mb,0)),0)
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).
+		`SELECT COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`),0), COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`),0)
+		   FROM domains d`+efektiflimit.Join+`WHERE d.reseller_id=?`, rid).
 		Scan(&taahhutDisk, &taahhutTrafik)
 
 	var planAdet, sablonSatir int
-	_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM service_plans WHERE reseller_id=?`, rid).Scan(&planAdet)
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM service_plans WHERE reseller_id=? AND domain_id IS NULL`, rid).Scan(&planAdet)
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM dns_template WHERE reseller_id=?`, rid).Scan(&sablonSatir)
 
 	son, dikkat := h.panoListeleri(r.Context(), rid)
@@ -96,10 +97,10 @@ type Dikkat struct {
 func (h *Handlers) panoListeleri(ctx context.Context, rid int64) ([]SonDomain, []Dikkat) {
 	son := make([]SonDomain, 0, 10)
 	if rows, err := h.DB.QueryContext(ctx,
-		`SELECT d.id, d.alan_adi, COALESCE(p.ad,''), COALESCE(d.boyut_kb,0), COALESCE(p.disk_kota_mb,0),
-		        COALESCE(d.trafik_kb,0), COALESCE(p.trafik_kota_mb,0),
+		`SELECT d.id, d.alan_adi, COALESCE(p.ad,''), COALESCE(d.boyut_kb,0), `+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`,
+		        COALESCE(d.trafik_kb,0), `+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`,
 		        COALESCE(d.askida,0), DATE_FORMAT(d.olusturulma,'%Y-%m-%d')
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
+		   FROM domains d`+efektiflimit.Join+`
 		  WHERE d.reseller_id=?
 		  ORDER BY d.olusturulma DESC, d.id DESC LIMIT 10`, rid); err == nil {
 		for rows.Next() {
@@ -129,10 +130,12 @@ func (h *Handlers) panoListeleri(ctx context.Context, rid int64) ([]SonDomain, [
 		rows.Close()
 	}
 	if rows, err := h.DB.QueryContext(ctx,
-		`SELECT d.id, d.alan_adi, COALESCE(d.boyut_kb,0), p.disk_kota_mb
-		   FROM domains d JOIN service_plans p ON p.id=d.plan_id
-		  WHERE d.reseller_id=? AND p.disk_kota_mb > 0 AND d.boyut_kb >= p.disk_kota_mb*1024*0.9
-		  ORDER BY d.boyut_kb/(p.disk_kota_mb*1024) DESC LIMIT 20`, rid); err == nil {
+		`SELECT d.id, d.alan_adi, COALESCE(d.boyut_kb,0), k.kota FROM (
+		   SELECT d.id, `+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+` AS kota
+		     FROM domains d`+efektiflimit.Join+`WHERE d.reseller_id=?) k
+		   JOIN domains d ON d.id=k.id
+		  WHERE k.kota > 0 AND d.boyut_kb >= k.kota*1024*0.9
+		  ORDER BY d.boyut_kb/(k.kota*1024) DESC LIMIT 20`, rid); err == nil {
 		for rows.Next() {
 			var d Dikkat
 			var kb, kota int64

@@ -10,9 +10,9 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
 	"girginospanel/internal/kilit"
@@ -38,9 +38,9 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	// Plan var mı doğrula (+ reseller ise plan sahipligi: kendi plani veya global)
 	rid := middleware.ResellerIDFrom(r)
 	if req.PlanID != nil {
-		var planVar int
+		var planDomain sql.NullInt64
 		if err := h.DB.QueryRowContext(r.Context(),
-			`SELECT 1 FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planVar); err != nil {
+			`SELECT domain_id FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planDomain); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
 			return
 		}
@@ -50,6 +50,13 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 		// bağlanabiliyordu (GL-04); özel plan yalnız ait olduğu hostinge bağlanır.
 		if err := plans.BaglanabilirMi(r.Context(), h.DB, rid, *req.PlanID, id); err != nil {
 			httpx.WriteError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		// Eski "<alan> — Özel" kopyası (dönüştürülmemiş) YALNIZ kendi hostingine
+		// bağlanır — yönetici dahil herkes için (başka hostingten geri bağlama yok).
+		// Bayi kapsam kapısından SONRA: görünmeyen plan için ayrı ileti sızmasın.
+		if planDomain.Valid && planDomain.Int64 != id {
+			httpx.WriteError(w, http.StatusForbidden, plans.ErrOzelPlanBaskaHosting.Error())
 			return
 		}
 		// Reseller: yeni planin disk kotasi bayi havuzunu asmasin (mevcut domainin
@@ -97,22 +104,11 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	if eskiPlan.Valid && (req.PlanID == nil || *req.PlanID != eskiPlan.Int64) {
 		OzelPlanTemizle(h.DB, eskiPlan.Int64, id)
 	}
+	// Hostinge özel limitler (hosting_limit_ust) plan değişiminde KORUNUR (kullanıcı
+	// kararı 2026-09-29) — burada dokunulmaz; efektif değer yeni plan ⊕ üst yazımdır.
 	// Kaynak limitlerini yeniden uygula — arkaplanda + kendi context'i
 	// (r.Context() HTTP request bitince iptal olur, cgroup yazımı yarıda kalır)
-	go func(did int64, ad string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
-			log.Printf("kaynaklimit apply domain=%d: %v", did, err)
-		}
-		// Plan degisti → WAF plan varsayilani da degismis olabilir; vhost'u WAF ile yeniden
-		// render et (domain override yoksa yeni planin WAF varsayilanini devralir).
-		if err := provisioner.WAFUygula(h.DB, did); err != nil {
-			log.Printf("waf apply (plan degisimi) domain=%d: %v", did, err)
-		}
-		// Plan posta limitlerini (max_email + saatlik) mail eklentisine senkronla (best-effort).
-		mailKutuLimitSenkron(ctx, h.DB, did, ad)
-	}(id, alanAdi)
+	go planSonrasiUygula(h.DB, id, alanAdi)
 	uid, kul := middleware.Aktor(r)
 	httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.plan", alanAdi,
 		fmt.Sprintf("yeni plan=%d", planNoLog(req.PlanID)), id, true)
@@ -139,22 +135,20 @@ func (h *Handlers) resellerPlanDegisimKota(ctx context.Context, rid, domainID, y
 	if maxTrafikMB < 0 {
 		maxTrafikMB = 0
 	}
-	// Yeni planin ve mevcut domainin kotalari
-	var yeniDisk, yeniTrafik int64
-	_ = h.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(disk_kota_mb,0), COALESCE(trafik_kota_mb,0) FROM service_plans WHERE id=?`, yeniPlan).
-		Scan(&yeniDisk, &yeniTrafik)
+	// Yeni EFEKTİF kota (yeni plan ⊕ korunan üst yazım) ve mevcut efektif kota.
+	yeniDisk, yeniTrafik, err := yeniPlanEfektifKota(ctx, h.DB, domainID, yeniPlan)
+	if err != nil {
+		return fmt.Errorf("kota hesaplanamadı")
+	}
 	var eskiDisk, eskiTrafik int64
 	_ = h.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(p.disk_kota_mb,0), COALESCE(p.trafik_kota_mb,0) FROM domains d
-		   LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.id=?`, domainID).
+		`SELECT `+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`, `+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`
+		   FROM domains d`+efektiflimit.Join+`WHERE d.id=?`, domainID).
 		Scan(&eskiDisk, &eskiTrafik)
-	// Bayinin TUM taahhudu (bu domain dahil) — degisen domainin eski kotasi dusulur.
-	var toplamDisk, toplamTrafik int64
-	_ = h.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(COALESCE(p.disk_kota_mb,0)),0), COALESCE(SUM(COALESCE(p.trafik_kota_mb,0)),0)
-		   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.reseller_id=?`, rid).
-		Scan(&toplamDisk, &toplamTrafik)
+	toplamDisk, toplamTrafik, err := BayiTaahhut(ctx, h.DB, rid)
+	if err != nil {
+		return fmt.Errorf("kota hesaplanamadı")
+	}
 
 	// 🔴 Sinir konvansiyonu CREATE yoluyla AYNI: ">=" (sinira ulasmak doludur).
 	// Eskiden burada ">" vardi ve tam-esitlik create'te RED, plan degisiminde
@@ -177,101 +171,18 @@ func (h *Handlers) resellerPlanDegisimKota(ctx context.Context, rid, domainID, y
 	return nil
 }
 
+// OzelPlan — ESKİ uç (POST /domains/{id}/ozel-plan): artık katalog planı
+// kopyalanmaz; hostinge özel limitler hosting üzerinde (GET/PUT/DELETE
+// /domains/{id}/limitler). 410: önbellekteki eski arayüz katalog planını "özel"
+// sanıp düzenlemesin (o plan başka hostingleri de etkilerdi).
 func (h *Handlers) OzelPlan(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	rid := middleware.ResellerIDFrom(r)
-
-	var alanAdi string
-	var mevcutPlan sql.NullInt64
-	var domRid int64
-	if err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alan_adi, plan_id, reseller_id FROM domains WHERE id=?`, id).
-		Scan(&alanAdi, &mevcutPlan, &domRid); err != nil {
-		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
-		return
-	}
-	kaynak := mevcutPlan
-	if !kaynak.Valid || kaynak.Int64 == 0 {
-		var def int64
-		if e := h.DB.QueryRowContext(r.Context(),
-			`SELECT id FROM service_plans WHERE varsayilan=1 AND reseller_id IN (?,0) ORDER BY reseller_id DESC, id LIMIT 1`,
-			domRid).Scan(&def); e == nil {
-			kaynak = sql.NullInt64{Int64: def, Valid: true}
-		}
-	}
-	if !kaynak.Valid || kaynak.Int64 == 0 {
-		httpx.WriteError(w, http.StatusBadRequest, "kopyalanacak plan bulunamadı; önce bir hosting planı oluşturun")
-		return
-	}
-	// Ozel plan sahibi: reseller ise kendisi, admin ise domainin bayisi (yoksa global)
-	sahip := domRid
-	if rid > 0 {
-		sahip = rid
-	}
-	// 🔴 Idempotent: aktif plan ZATEN bu hostinge ozel bir plansa (ve baska hosting
-	// kullanmiyorsa) yenisini URETME — kullanici butona ikinci kez bastiginda
-	// "<alan> — Özel 1234" cogaltmasi olusuyordu. Mevcut ozel plani dondur.
-	if kaynak.Valid && mevcutPlan.Valid && kaynak.Int64 == mevcutPlan.Int64 {
-		var mevcutAd string
-		var kullananAdet int
-		_ = h.DB.QueryRowContext(r.Context(), `SELECT ad FROM service_plans WHERE id=?`, kaynak.Int64).Scan(&mevcutAd)
-		_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM domains WHERE plan_id=?`, kaynak.Int64).Scan(&kullananAdet)
-		var planDomain sql.NullInt64
-		_ = h.DB.QueryRowContext(r.Context(), `SELECT domain_id FROM service_plans WHERE id=?`, kaynak.Int64).Scan(&planDomain)
-		if (planDomain.Valid && planDomain.Int64 == id) ||
-			(strings.HasPrefix(mevcutAd, alanAdi+" — Özel") && kullananAdet <= 1) {
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": true, "plan_id": kaynak.Int64, "ad": mevcutAd, "zaten_ozel": true,
-			})
-			return
-		}
-	}
-	ad := alanAdi + " — Özel"
-	// Ayni isim varsa sirala (idempotent olmayan cakisma engeli)
-	var varMi int
-	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM service_plans WHERE ad=?`, ad).Scan(&varMi)
-	if varMi > 0 {
-		ad = fmt.Sprintf("%s — Özel %d", alanAdi, time.Now().Unix()%10000)
-	}
-	res, err := h.DB.ExecContext(r.Context(), `
-		INSERT INTO service_plans (ad, aciklama, disk_kota_mb, trafik_kota_mb, max_domain, max_db, max_email, max_ftp,
-		  cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti, pm_max_children,
-		  io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
-		  db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
-		  php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
-		  waf_enabled, waf_mode, waf_paranoia, varsayilan, reseller_id, domain_id)
-		SELECT ?, CONCAT('Yalnız ', ?, ' için özel plan'), disk_kota_mb, trafik_kota_mb, max_domain, max_db, max_email, max_ftp,
-		  cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti, pm_max_children,
-		  io_read_mbps, io_write_mbps, io_read_iops, io_write_iops,
-		  db_max_queries_per_hour, db_max_updates_per_hour, db_max_query_seconds,
-		  php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
-		  waf_enabled, waf_mode, waf_paranoia, 0, ?, ?
-		FROM service_plans WHERE id=?`, ad, alanAdi, sahip, id, kaynak.Int64)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "özel plan oluşturulamadı: "+err.Error())
-		return
-	}
-	yeniID, _ := res.LastInsertId()
-	if _, err := h.DB.ExecContext(r.Context(), `UPDATE domains SET plan_id=? WHERE id=?`, yeniID, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "plan atanamadı: "+err.Error())
-		return
-	}
-	// Kaynak limitlerini uygula (arka plan, kendi context'i — SetPlan ile ayni desen)
-	go func(did int64) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if err := kaynaklimit.UygulaHepsi(ctx, h.DB, did); err != nil {
-			log.Printf("kaynaklimit apply (ozel-plan) domain=%d: %v", did, err)
-		}
-	}(id)
-	uid, kul := middleware.Aktor(r)
-	httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.ozel_plan", ad,
-		fmt.Sprintf("plan=%d", yeniID), id, true)
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "plan_id": yeniID, "ad": ad})
+	httpx.WriteError(w, http.StatusGone, "özel limitler artık hosting üzerinde düzenleniyor — sayfayı yenileyin")
 }
 
-// OzelPlanTemizle: verilen plan YALNIZ bu domaine ait ozel plansa (domain_id=did)
-// ve artik hicbir domain kullanmiyorsa siler. Katalog planlarina DOKUNMAZ.
+// OzelPlanTemizle: verilen plan YALNIZ bu domaine ait (dönüştürülmemiş, ESKİ) ozel
+// plansa (domain_id=did) ve artik hicbir domain kullanmiyorsa siler. Katalog
+// planlarina DOKUNMAZ. Yeni kopya üretilmediği için yalnız açılış dönüşümünün
+// (plans.OzelPlanlariDonustur) tabanı belirleyemediği eski kopyalarda iş görür.
 func OzelPlanTemizle(db *sql.DB, planID, did int64) {
 	if planID <= 0 {
 		return
@@ -296,8 +207,9 @@ func OzelPlanTemizle(db *sql.DB, planID, did int64) {
 // planKullanimSigar: hostingin fiili disk kullanımı (domains.boyut_kb) yeni planın
 // disk kotasına sığıyor mu? Kota 0 = sınırsız → her zaman sığar.
 func (h *Handlers) planKullanimSigar(ctx context.Context, domainID, planID int64) error {
-	var kotaMB, boyutKB int64
-	_ = h.DB.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0) FROM service_plans WHERE id=?`, planID).Scan(&kotaMB)
+	var boyutKB int64
+	// Yeni planın EFEKTİF kotası (korunan üst yazım dahil).
+	kotaMB, _, _ := yeniPlanEfektifKota(ctx, h.DB, domainID, planID)
 	if kotaMB <= 0 {
 		return nil
 	}
@@ -311,4 +223,48 @@ func (h *Handlers) planKullanimSigar(ctx context.Context, domainID, planID int64
 		return fmt.Errorf("mevcut disk kullanımı (%d MB) yeni planın disk sınırını (%d MB) aşıyor", boyutKB/1024, kotaMB)
 	}
 	return nil
+}
+
+// yeniPlanEfektifKota — hosting planID'ye geçerse efektif disk/trafik (MB) ne olur:
+// yeni plan ⊕ korunan üst yazım ⊕ domains.disk_kota_mb mirası (efektiflimit sırası).
+func yeniPlanEfektifKota(ctx context.Context, db *sql.DB, domainID, planID int64) (disk, trafik int64, err error) {
+	err = db.QueryRowContext(ctx,
+		`SELECT COALESCE(`+efektiflimit.IfadePlanla("disk_kota_mb", "np")+`,0), COALESCE(`+efektiflimit.IfadePlanla("trafik_kota_mb", "np")+`,0)
+		   FROM domains d LEFT JOIN hosting_limit_ust u ON u.domain_id=d.id LEFT JOIN service_plans np ON np.id=?
+		  WHERE d.id=?`, planID, domainID).Scan(&disk, &trafik)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Hosting yok (SetPlan aşağıda 404 döner): yalnız planın değeri.
+		err = db.QueryRowContext(ctx, `SELECT COALESCE(disk_kota_mb,0), COALESCE(trafik_kota_mb,0) FROM service_plans WHERE id=?`, planID).
+			Scan(&disk, &trafik)
+	}
+	return disk, trafik, err
+}
+
+// BayiTaahhut — bayinin tüm hostinglerinin EFEKTİF disk/trafik kotası toplamı (MB).
+// Havuz kapıları (oluşturma, plan değişimi, özel limit) bunu kullanır: üst yazım
+// sayılmazsa bayi hostinge özel limitle havuzu aşabilirdi.
+func BayiTaahhut(ctx context.Context, db *sql.DB, rid int64) (disk, trafik int64, err error) {
+	err = db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("disk_kota_mb", 0)+`),0),
+		        COALESCE(SUM(`+efektiflimit.IfadeVarsayilan("trafik_kota_mb", 0)+`),0)
+		   FROM domains d`+efektiflimit.Join+`WHERE d.reseller_id=?`, rid).Scan(&disk, &trafik)
+	return disk, trafik, err
+}
+
+// planSonrasiUygula — plan değişiminden sonra (arka planda, kendi context'i) limitleri,
+// WAF'ı ve posta limitlerini yeniden uygular. Değişken: testler sistem yan etkisi
+// (systemd/nginx) olmadan sahteyle değiştirir.
+var planSonrasiUygula = func(db *sql.DB, did int64, ad string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := kaynaklimit.UygulaHepsi(ctx, db, did); err != nil {
+		log.Printf("kaynaklimit apply domain=%d: %v", did, err)
+	}
+	// Plan degisti → WAF plan varsayilani da degismis olabilir; vhost'u WAF ile yeniden
+	// render et (domain override yoksa yeni planin WAF varsayilanini devralir).
+	if err := provisioner.WAFUygula(db, did); err != nil {
+		log.Printf("waf apply (plan degisimi) domain=%d: %v", did, err)
+	}
+	// Plan posta limitlerini (max_email + saatlik) mail eklentisine senkronla (best-effort).
+	mailKutuLimitSenkron(ctx, db, did, ad)
 }

@@ -6,10 +6,13 @@ package plans
 //
 //	service_plans.reseller_id  planın SAHİBİ (0 = kök / panel sahibi)
 //	service_plans.domain_id    NULL  → katalog planı ("Hizmet Planları"nda listelenir)
-//	                           dolu  → yalnız o hostinge ÖZEL plan (OzelPlan "tek tıkla
-//	                                   özel plan", sahiplik devri)
+//	                           dolu  → ESKİ hostinge özel kopya (D1 öncesi "tek tıkla özel
+//	                                   plan"); açılışta OzelPlanlariDonustur ile hostinge özel
+//	                                   üst yazıma dönüştürülür, yenisi ÜRETİLMEZ
 //	domains.plan_id            hostingin bağlı olduğu plan — limitler buradan CANLI okunur
 //	                           (kaynaklimit, MySQL governor, WAF)
+//	hosting_limit_ust          hostinge özel limit üst yazımı (0120); efektif değer =
+//	                           plan ⊕ üst yazım, TEK kaynak internal/efektiflimit
 //	domains.reseller_id        hostingin sahibi bayi (0 = kök)
 //	reseller_plans             bayi PAKETLERİ (ayrı tablo; burada yalnız posta tavanı okunur)
 //
@@ -33,10 +36,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -197,19 +197,22 @@ func tekrarAnahtar(err error) bool {
 // eski bayi planını düzenleyerek yeni sahibin sitesinin CPU/RAM/process/yavaş-
 // sorgu KILL eşiğini değiştirebiliyordu (governor bu değeri canlı okur).
 //
-// Hostingin efektif limitleri DEĞİŞMEZ; eski sahibin planı ve diğer hostingleri
-// ETKİLENMEZ (veri/hizmet kaybı yok):
+// Hostingin efektif limitleri DEĞİŞMEZ (değişmez denetimi; ihlalde devir düşer);
+// eski sahibin planı ve diğer hostingleri ETKİLENMEZ:
 //
 //	plan yok / kökün global katalog planı / zaten yeni sahibin → dokunulmaz
-//	yalnız BU hostinge özel ve başka hosting kullanmıyor        → sahipliği taşınır
-//	diğer her durum (eski sahibin katalog planı, paylaşılan
-//	özel plan, başka hostingin özel planı, kökün özel planı)    → birebir kopyası bu hostinge
-//	                                                               ÖZEL olarak yeni sahip adına
-//	                                                               açılır, hosting ona bağlanır
+//	yalnız BU hostinge özel (eski, dönüştürülmemiş kopya)       → sahipliği taşınır
+//	diğer her durum (eski sahibin katalog planı, paylaşılan /
+//	başka hostingin kopyası)                                    → yeni sahibin GÖREBİLDİĞİ en
+//	                                                              yakın katalog planına (en az
+//	                                                              farklı alan) bağlanır; farklı
+//	                                                              her alan hostinge özel ÜST
+//	                                                              YAZIM olur (kopya plan YOK)
 //
-// Kopyanın adı "<alan> — Özel" (OzelPlan ile aynı kalıp): eski bayinin plan adı ve
-// açıklaması yeni sahibe geçmez. Dönen metin yöneticinin devir özetine yazılır
-// ("" = değişiklik yok). Hata → devir DÜŞER (erişim kesilemeyen devir yapılmaz).
+// Devir yöneticinin işidir: yazılan üst yazım alanları yeni sahip bayiyse kökün
+// kilidi altına girer — bayi eski sahibin plan iç ayarlarını (GL-06 sınıfı) görmez.
+// Görünür katalog hiç yoksa hosting plansız kalır ve tüm alanlar üst yazım olur.
+// Dönen metin yöneticinin devir özetine yazılır ("" = değişiklik yok).
 func DevirPlanTasi(ctx context.Context, tx *sql.Tx, did, yeniSahip int64) (string, error) {
 	var planID sql.NullInt64
 	var alanAdi string
@@ -219,16 +222,14 @@ func DevirPlanTasi(ctx context.Context, tx *sql.Tx, did, yeniSahip int64) (strin
 	if !planID.Valid || planID.Int64 <= 0 {
 		return "", nil
 	}
-	var sahip int64
-	var dom sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT reseller_id, domain_id FROM service_plans WHERE id=? FOR UPDATE`, planID.Int64).
-		Scan(&sahip, &dom)
+	kaynak, err := planSatirOku(ctx, tx, planID.Int64, true)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil // sarkık plan_id: devredilecek plan yok
 	}
 	if err != nil {
 		return "", fmt.Errorf("plan okunamadı: %w", err)
 	}
+	sahip, dom := kaynak.sahip, kaynak.domainID
 	if sahip == yeniSahip || (sahip == 0 && !dom.Valid) {
 		return "", nil
 	}
@@ -244,92 +245,33 @@ func DevirPlanTasi(ctx context.Context, tx *sql.Tx, did, yeniSahip int64) (strin
 			return fmt.Sprintf("plan: hostinge özel plan #%d yeni sahibe taşındı (limitler aynı)", planID.Int64), nil
 		}
 	}
-	yeniID, ad, err := ozelKopya(ctx, tx, planID.Int64, did, alanAdi, yeniSahip)
+	katalog, err := gorunurKatalog(ctx, tx, yeniSahip)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("katalog okunamadı: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE domains SET plan_id=? WHERE id=?`, yeniID, did); err != nil {
-		return "", fmt.Errorf("hosting kopya plana bağlanamadı: %w", err)
+	var taban *planSatiri
+	enAz := -1
+	for i := range katalog {
+		f := len(limitFark(kaynak, katalog[i]))
+		if !wafAyni(kaynak, katalog[i]) {
+			f++
+		}
+		if enAz < 0 || f < enAz {
+			taban, enAz = &katalog[i], f
+		}
 	}
-	return fmt.Sprintf("plan: #%d eski sahipte kaldı; hosting birebir kopyası olan özel plana (#%d %q) geçti (limitler aynı)",
-		planID.Int64, yeniID, ad), nil
-}
-
-var sutunAdi = regexp.MustCompile(`^[a-z0-9_]+$`)
-
-// ozelKopya — kaynak planın TÜM sütunlarını (kimlik/ad/sahiplik hariç) kopyalar.
-// Sütun listesi şemadan okunur: ileride eklenecek limit sütunu da kopyaya girer
-// (sabit liste "birebir kopya"yı sessizce bozardı — OzelPlan posta limitlerini
-// böyle kaybediyor).
-func ozelKopya(ctx context.Context, tx *sql.Tx, kaynakID, did int64, alanAdi string, yeniSahip int64) (int64, string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'service_plans' ORDER BY ORDINAL_POSITION`)
+	alanlar, _, waf, err := ustYazimaTasi(ctx, tx, did, kaynak, taban, false, yeniSahip > 0, nil)
 	if err != nil {
-		return 0, "", fmt.Errorf("plan şeması okunamadı: %w", err)
+		return "", fmt.Errorf("plan yeni sahibe taşınamadı: %w", err)
 	}
-	haric := map[string]bool{"id": true, "ad": true, "aciklama": true, "varsayilan": true,
-		"reseller_id": true, "domain_id": true, "created_at": true, "updated_at": true}
-	var sut []string
-	for rows.Next() {
-		var c string
-		if err := rows.Scan(&c); err != nil {
-			rows.Close()
-			return 0, "", fmt.Errorf("plan şeması okunamadı: %w", err)
-		}
-		if haric[c] {
-			continue
-		}
-		if !sutunAdi.MatchString(c) {
-			rows.Close()
-			return 0, "", fmt.Errorf("beklenmeyen plan sütunu %q", c)
-		}
-		sut = append(sut, "`"+c+"`")
+	hedef := "plansız"
+	if taban != nil {
+		hedef = fmt.Sprintf("#%d", taban.id)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, "", fmt.Errorf("plan şeması okunamadı: %w", err)
+	not := fmt.Sprintf("plan: #%d eski sahipte kaldı; hosting %s planına geçti, %d alan hostinge özel limit olarak korundu (limitler aynı)",
+		planID.Int64, hedef, len(alanlar))
+	if len(waf) > 0 {
+		not += fmt.Sprintf(", WAF ayarı hostinge yazıldı (%s)", strings.Join(waf, ","))
 	}
-	if len(sut) == 0 {
-		return 0, "", fmt.Errorf("plan şeması boş")
-	}
-	liste := strings.Join(sut, ", ")
-	aciklama := kisaltRune("Yalnız "+alanAdi+" için özel plan", 255)
-	for n := 1; n <= 50; n++ {
-		ad := ozelPlanAdi(alanAdi, n)
-		res, err := tx.ExecContext(ctx,
-			"INSERT INTO service_plans (ad, aciklama, varsayilan, reseller_id, domain_id, "+liste+") "+
-				"SELECT ?, ?, 0, ?, ?, "+liste+" FROM service_plans WHERE id=?",
-			ad, aciklama, yeniSahip, did, kaynakID)
-		if tekrarAnahtar(err) {
-			continue // ad dolu (UNIQUE) — ifade geri alındı, işlem sürüyor; sıradaki ad
-		}
-		if err != nil {
-			return 0, "", fmt.Errorf("plan kopyalanamadı: %w", err)
-		}
-		id, err := res.LastInsertId()
-		if err != nil || id <= 0 {
-			return 0, "", fmt.Errorf("kopya plan kimliği alınamadı: %v", err)
-		}
-		return id, ad, nil
-	}
-	return 0, "", fmt.Errorf("kopya plan için boş ad bulunamadı")
-}
-
-const ozelEk = " — Özel"
-
-// ozelPlanAdi — "<alan> — Özel" / "<alan> — Özel N"; service_plans.ad VARCHAR(64).
-func ozelPlanAdi(alan string, n int) string {
-	ek := ozelEk
-	if n > 1 {
-		ek += " " + strconv.Itoa(n)
-	}
-	return kisaltRune(alan, 64-utf8.RuneCountInString(ek)) + ek
-}
-
-func kisaltRune(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n])
-	}
-	return s
+	return not, nil
 }
