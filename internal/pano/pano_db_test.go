@@ -197,6 +197,9 @@ func TestWidget_GenelSizintiTarayici(t *testing.T) {
 	Tur(context.Background(), db) // egilim için bugünün satırları
 	// Bayi 8'in yedek hatası bildirimi: bayi 7'nin "son 7 günde yedek hatası" sayacına girmemeli.
 	pt_exec(t, db, `INSERT INTO cp_bildirim (seviye, kategori, baslik, mesaj, domain_id, reseller_id) VALUES ('kritik','yedek','Yedek başarısız','m',20,8)`)
+	// Önceki sahibin (bayi 8) denetim kaydı bayi 7'nin "son askı zamanı"na karışmamalı.
+	pt_exec(t, db, `UPDATE audit_log SET ts='2026-01-01 10:00:00' WHERE target='bayi7b.test'`)
+	pt_exec(t, db, `INSERT INTO audit_log (ts, action, target, ok, reseller_id) VALUES ('2026-02-02 10:00:00','hosting.askiya_al','bayi7b.test',1,8)`)
 	h := &Handlers{DB: db}
 	yabanci := map[int64][]string{
 		7: {"bayi8x", "kokx", "paksekiz", "pakkok", "cpanel-sekiz", "cpanel-kok", "ssl-kok"},
@@ -237,6 +240,9 @@ func TestWidget_GenelSizintiTarayici(t *testing.T) {
 	_, g := pt_get(t, h, "/pano/w/egilim", pt_tok(t, "bayi", 7))
 	if !strings.Contains(g, `"hesap":2,`) || strings.Contains(g, `"hesap":4,`) {
 		t.Errorf("bayi 7 eğilimi kendi kapsamı olmalı: %s", g)
+	}
+	if _, g := pt_get(t, h, "/pano/w/askida", pt_tok(t, "bayi", 7)); !strings.Contains(g, "2026-01-01 10:00:00") || strings.Contains(g, "2026-02-02") {
+		t.Errorf("askı zamanı yalnız güncel sahibin denetim kaydından: %s", g)
 	}
 	if _, g := pt_get(t, h, "/pano/w/isler", pt_tok(t, "bayi", 7)); !strings.Contains(g, `"hata_7gun":0`) {
 		t.Errorf("bayi 7 yedek hatası sayacı yalnız kendi bildirimlerini saymalı: %s", g)
