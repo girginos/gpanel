@@ -133,6 +133,14 @@ func (y *OturumYoneticisi) KapatBaglanti(baglanti string) {
 	}
 }
 
+// Kapali: oturum işlenirken bağlantısı değişti/iptal edildi mi (KapatBaglanti/KapatKullanici).
+// Kapalı oturumun Baglam'ı BAYATTIR: modelin "hesap N"i artık başka hesabı gösterebilir.
+func (y *OturumYoneticisi) Kapali(o *Oturum) bool {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	return o.kapali
+}
+
 // KapatKullanici: /unutbeni.
 func (y *OturumYoneticisi) KapatKullanici(tg int64) {
 	y.mu.Lock()

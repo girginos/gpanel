@@ -405,6 +405,7 @@ type sahteAjan struct {
 	mu         sync.Mutex
 	emirler    []*protokol.IsEmri
 	eslesmeler []*protokol.EslesmeOnayla
+	eslesmeZrf []string // eslesme_onayla zarf kimlikleri (hata.ilgili ile yanıt için)
 	hatalar    []*protokol.HataMesaji
 	iptaller   []*protokol.BaglantiIptal
 	imzaHatasi int
@@ -509,7 +510,7 @@ func (a *sahteAjan) dongu() {
 		if op != wsOpMetin {
 			continue
 		}
-		_, g, err := protokol.Coz(v, protokol.YonAjana)
+		z, g, err := protokol.Coz(v, protokol.YonAjana)
 		if err != nil {
 			continue
 		}
@@ -548,6 +549,7 @@ func (a *sahteAjan) dongu() {
 			}
 			a.mu.Lock()
 			a.eslesmeler = append(a.eslesmeler, m)
+			a.eslesmeZrf = append(a.eslesmeZrf, z.Kimlik)
 			a.mu.Unlock()
 		case *protokol.HataMesaji:
 			a.mu.Lock()

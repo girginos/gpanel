@@ -99,9 +99,32 @@ func (t *yoklamaTasima) post(ctx context.Context, yol string, govde []byte, beli
 		return nil, nil
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("yoklama %s: HTTP %d", yol, resp.StatusCode)
+		return veri, &yoklamaHTTPHatasi{yol: yol, kod: resp.StatusCode}
 	}
 	return veri, nil
+}
+
+// yoklamaHTTPHatasi: 2xx dışı yanıt. Merkez kayit/yanit reddinde gövdeye
+// kayit_sonuc{kabul:false, hata_kodu} koyar (400/403/503) — ajan kodu okuyabilsin.
+type yoklamaHTTPHatasi struct {
+	yol string
+	kod int
+}
+
+func (e *yoklamaHTTPHatasi) Error() string { return fmt.Sprintf("yoklama %s: HTTP %d", e.yol, e.kod) }
+
+// redGovdesi: el sıkışma uçlarının 2xx dışı yanıtındaki kayit_sonuc reddi (yoksa nil).
+func redGovdesi(veri []byte, err error) []byte {
+	var he *yoklamaHTTPHatasi
+	if !errors.As(err, &he) {
+		return nil
+	}
+	if _, g, cerr := p.Coz(veri, p.YonAjana); cerr == nil {
+		if ks, ok := g.(*p.KayitSonuc); ok && !ks.Kabul {
+			return veri
+		}
+	}
+	return nil
 }
 
 func zarfTipi(veri []byte) p.Tip {
@@ -116,6 +139,10 @@ func (t *yoklamaTasima) Gonder(ctx context.Context, veri []byte) error {
 	switch zarfTipi(veri) {
 	case p.TipKayit:
 		y, err := t.post(ctx, p.YoklamaKayitYolu, veri, false)
+		if red := redGovdesi(y, err); red != nil {
+			t.kuyruga(red) // bekleyenAl → kayitRed (lisans/sürüm → uzun bekleme)
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -123,6 +150,10 @@ func (t *yoklamaTasima) Gonder(ctx context.Context, veri []byte) error {
 		return nil
 	case p.TipMeydanYanit:
 		y, err := t.post(ctx, p.YoklamaYanitYolu, veri, false)
+		if red := redGovdesi(y, err); red != nil {
+			t.kuyruga(red)
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -173,7 +204,7 @@ func (t *yoklamaTasima) Al(ctx context.Context) ([]byte, error) {
 	if err := json.Unmarshal(y, &dizi); err != nil {
 		return nil, fmt.Errorf("yoklama al: zarf dizisi bekleniyordu: %w", err)
 	}
-	if len(dizi) > 64 {
+	if len(dizi) > p.YoklamaAlEnCokZarf {
 		return nil, errors.New("yoklama al: çok fazla zarf")
 	}
 	if len(dizi) == 0 {

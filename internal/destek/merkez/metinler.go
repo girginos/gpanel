@@ -52,6 +52,8 @@ var metinler = map[string][2]string{
 	"unut_tamam":        {"Silindi. Yeniden bağlanmak için panelden yeni kod oluşturun.", "Deleted. Create a new code in your panel to reconnect."},
 	"secildi":           {"Etkin bağlantı: %s", "Active link: %s"},
 	"metin_yok":         {"Lütfen sorununuzu metin olarak yazın.", "Please describe your issue as text."},
+	"kapsam_degisti":    {"Bağlantınızın hesap listesi ya da yetkisi değişti; güncel bilgilerle incelemek için mesajınızı yeniden gönderin.", "The account list or permission of your link changed; please send your message again to continue with the current details."},
+	"eslesme_red":       {"Sunucunuz eşleştirmeyi reddetti (%s). Panelden yeni kod oluşturup yeniden deneyin.", "Your server rejected the pairing (%s). Create a new code in your panel and try again."},
 	"baglanti_iptal":    {"Destek bağlantınız kapatıldı (%s).", "Your support link was closed (%s)."},
 	"hesaplarim_baslik": {"<b>Bağlantılarınız</b>", "<b>Your links</b>"},
 	"durum_baslik":      {"<b>Durum</b>", "<b>Status</b>"},

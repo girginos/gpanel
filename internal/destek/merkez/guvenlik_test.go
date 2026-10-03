@@ -3,9 +3,8 @@ package merkez
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -216,13 +215,18 @@ func TestFiyatUSDVeCacheOlcer(t *testing.T) {
 func TestEslesmeAkisi(t *testing.T) {
 	o := yeniOrtam(t, nil)
 	ajan := sahteAjanBagla(t, o, nil)
-	kod := "Kod_123abcXYZ"
-	h := sha256.Sum256([]byte(kod))
-	ozet := hex.EncodeToString(h[:])
+	// Ajanın kuralı (protokol.EslesmeKoduOzet): özet NORMALLEŞTİRİLMİŞ koddan. Kullanıcı
+	// panelde gösterilen "ABCD-EFGH-…" biçimini küçük harfle yazsa da eşleşmeli.
+	kod := "ABCDEFGHJKMNPQRS"
+	ozet, _ := protokol.EslesmeKoduOzet(kod)
 	ajan.gonder(&protokol.KodOzet{KodOzet: ozet, SonGecerlilik: time.Now().Add(10 * time.Minute).Unix()})
 	bekle(t, func() bool { o.m.ajan.mu.Lock(); defer o.m.ajan.mu.Unlock(); _, ok := o.m.ajan.kodlar[ozet]; return ok })
 
-	o.mesaj(t, tTg, "/start "+kod)
+	o.mesaj(t, tTg, "/start Kod_123abcXYZ") // alfabe/uzunluk dışı → biçim hatası, kod tüketilmez
+	if !strings.Contains(o.tg.son(tTg), "biçimi") {
+		t.Fatalf("biçimsiz kod: %q", o.tg.son(tTg))
+	}
+	o.mesaj(t, tTg, "/start "+strings.ToLower(protokol.EslesmeKoduGorunen(kod)))
 	bekle(t, func() bool { ajan.mu.Lock(); defer ajan.mu.Unlock(); return len(ajan.eslesmeler) == 1 })
 	ajan.mu.Lock()
 	e := ajan.eslesmeler[0]
@@ -246,6 +250,15 @@ func TestEslesmeAkisi(t *testing.T) {
 	if len(o.tg.metinler(666))+len(o.tg.metinler(667)) != 0 {
 		t.Fatal("eşleştirmesiz bağlantı kullanıcıya mesaj attırdı")
 	}
+	// merkezde karşılığı olmayan bağlantıyı ajan da kapatsın (merkez onu asla kullanamaz)
+	bekle(t, func() bool { ajan.mu.Lock(); defer ajan.mu.Unlock(); return len(ajan.iptaller) == 2 })
+	ajan.mu.Lock()
+	for i, ip := range ajan.iptaller {
+		if ip.Neden != protokol.IptalMerkez || ip.BaglantiID != fmt.Sprintf("bag_sahte_000%d", i+1) {
+			t.Errorf("kayıtsız bağlantı iptali: %+v", ip)
+		}
+	}
+	ajan.mu.Unlock()
 	// gerçek bağlantı
 	ajan.gonder(&protokol.BaglantiDurum{BaglantiID: "bag_gercek_0001", KodOzet: ozet, TgUserID: tTg, Durum: protokol.BaglantiEtkin,
 		Rol: protokol.RolMusteri, Duzey: protokol.DuzeyOkuma, Hesaplar: []protokol.HesapEtiketi{{Sira: 1, Etiket: "ornek.com.tr"}}})
@@ -272,7 +285,11 @@ func TestEslesmeAkisi(t *testing.T) {
 	// /unutbeni → ajana iptal + kayıtlar silinir
 	o.mesaj(t, tTg, "/unutbeni")
 	o.callback(t, tTg, "unut:evet")
-	bekle(t, func() bool { ajan.mu.Lock(); defer ajan.mu.Unlock(); return len(ajan.iptaller) == 1 })
+	bekle(t, func() bool {
+		ajan.mu.Lock()
+		defer ajan.mu.Unlock()
+		return len(ajan.iptaller) == 3 && ajan.iptaller[2].Neden == protokol.IptalUnutBeni
+	})
 	if len(o.depo.KullaniciBaglantilari(tTg)) != 0 || len(o.depo.konusmaBellek()) != 0 {
 		t.Fatal("unutbeni sonrası kayıt kaldı")
 	}

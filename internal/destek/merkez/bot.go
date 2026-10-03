@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +21,6 @@ const (
 	esZamanliGuncelleme = 64
 	tgMetinSiniri       = 4000
 )
-
-var startKodDeseni = regexp.MustCompile(`^[A-Za-z0-9_-]{6,64}$`)
 
 // Bot: Telegram tarafı.
 type Bot struct {
@@ -196,7 +193,11 @@ func (b *Bot) startIsle(ctx context.Context, kul *TgKullanici, dil, kod string) 
 		b.gonder(ctx, kul.ID, metin(dil, "hosgeldin"), true)
 		return
 	}
-	if !startKodDeseni.MatchString(kod) {
+	// Kod kuralı protokolde (eslesme.go): ajan kod_ozet'i NORMALLEŞTİRİLMİŞ kodun
+	// özetiyle bildirir; panel kodu "ABCD-EFGH-…" gösterir, kullanıcı küçük harf ya da
+	// boşlukla yazabilir. Ham metnin özeti ajanınkiyle hiç eşleşmezdi.
+	ozet, gecerli := protokol.EslesmeKoduOzet(kod)
+	if !gecerli {
 		b.gonder(ctx, kul.ID, metin(dil, "kod_bicim"), false)
 		return
 	}
@@ -204,8 +205,7 @@ func (b *Bot) startIsle(ctx context.Context, kul *TgKullanici, dil, kod string) 
 		b.gonder(ctx, kul.ID, metin(dil, "kod_cok_deneme"), false)
 		return
 	}
-	h := sha256.Sum256([]byte(kod))
-	_, err := b.m.ajan.EslesmeBaslat(hex.EncodeToString(h[:]), kul.ID, kul.Username)
+	_, err := b.m.ajan.EslesmeBaslat(ozet, kul.ID, kul.Username)
 	switch {
 	case errors.Is(err, ErrKodGecersiz):
 		b.gonder(ctx, kul.ID, metin(dil, "kod_gecersiz"), false)

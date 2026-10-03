@@ -9,7 +9,10 @@
 // WSS [WSSYolu] (alt protokol [WSAltProtokol]). WSS kurulamazsa aynı mesajlar
 // uzun yoklama uçlarından ([YoklamaKayitYolu], [YoklamaYanitYolu],
 // [YoklamaAlYolu], [YoklamaGonderYolu]) taşınır. Her çerçeve tek bir [Zarf]
-// JSON nesnesidir; en çok [CerceveSiniri] bayt.
+// JSON nesnesidir; en çok [CerceveSiniri] bayt. /al yanıtı zarf DİZİSİDİR: en
+// çok [YoklamaAlEnCokZarf] zarf ve [YoklamaAlEnCokBayt] bayt (fazlası sonraki
+// /al'a kalır). Kayıt/yanıt reddinde merkez 2xx dışı durumla birlikte gövdeye
+// kayit_sonuc{kabul:false, hata_kodu} koyar; ajan kodu gövdeden okur.
 //
 // # Akış
 //
@@ -28,6 +31,19 @@
 // kodu tüketir, panelde ikinci onayı bekler → baglanti_durum (hesap sıra
 // numaraları + etiketleri, rol, etkin düzey). baglanti_iptal iki yönde
 // gönderilebilir; iptal yalnız yetkiyi düşürür.
+//
+// Eşleştirme kuralları (iki taraf AYNI): kod_ozet = [EslesmeKoduOzet] (kod
+// NORMALLEŞTİRİLİR: tire/boşluk atılır, büyük harf); merkez /start argümanını da
+// aynı işlevle özetler. Ajan eslesme_onayla'yı reddederse hata.ilgili = o zarfın
+// kimliği; merkez bunu kullanıcıya bildirir ve bekleyen eşleştirmeyi siler.
+//
+// Uzlaşma: baglanti_iptal İDEMPOTENTTİR — alıcıda olmayan bağlantı için hata
+// yanıtlanmaz (ajan her yeniden bağlanışta son iptalleri yeniden bildirir).
+// Merkezde karşılığı olmayan (eşleştirme kaydı da olmayan) bir baglanti_durum için
+// merkez hata + baglanti_iptal(merkez) gönderir; ajan bağlantıyı kapatır.
+// Hesap listesi değişince ajan yeni baglanti_durum'u iş sonucundan ÖNCE gönderir
+// ve işi kapsam_disi ile reddeder; merkez o bağlantının açık oturumunu kapatır ve
+// bayat oturumla başka iş emri göndermez.
 //
 // İş: merkez → is_emri (İMZALI) → ajan [Dogrulayici.Dogrula] +
 // [AracGirdisiCoz] (YEREL oturum bağlamıyla; merkezin iddiası kapsamı

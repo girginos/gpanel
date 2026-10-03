@@ -40,7 +40,12 @@ const (
 	AyrintiSiniri     = 500       // hata.ayrinti (bayt)
 	LisansIspatSiniri = 3072      // kayit.lisans_ispati çözülmüş bayt
 	EnCokHesap        = 500       // bir oturumdaki hesap sayısı
-	varsayilanDizge   = 256       // EnUzun verilmemiş serbest dizge parametresi
+	// YoklamaAlEnCokZarf: tek /al yanıtındaki en çok zarf. Merkez fazlasını kuyrukta
+	// bırakır (sonraki /al); ajan bu sınırı aşan diziyi reddeder.
+	YoklamaAlEnCokZarf = 64
+	// YoklamaAlEnCokBayt: tek /al yanıtının (JSON dizisi) en büyük boyutu.
+	YoklamaAlEnCokBayt = 2 * CerceveSiniri
+	varsayilanDizge    = 256 // EnUzun verilmemiş serbest dizge parametresi
 
 	EnUzunGecerlilik = 60 * time.Second // imzalı mesajın son_gecerlilik − verilme üst sınırı
 	SaatSapmasi      = 5 * time.Second  // doğrulayıcının saat sapması toleransı
