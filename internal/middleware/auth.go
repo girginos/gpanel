@@ -40,6 +40,12 @@ const (
 func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Destek botunun SÜREÇ İÇİ isteği: kimlik context işaretinden (dışarıdan
+			// taklit edilemez); başlık/jeton bakılmaz (bkz. destek.go).
+			if dk := destekCtx(r.Context()); dk != nil {
+				destekIstek(w, r, next, dk)
+				return
+			}
 			raw := strings.TrimSpace(r.Header.Get("Authorization"))
 			// API anahtarı: "gosp <kullanıcı adı>:<anahtar>" — JWT yolundan AYRI dal
 			// (bkz. anahtar.go, apianahtar/kimlik.go).
@@ -403,6 +409,10 @@ func resellerDomainSahibi(ctx context.Context, domainID, resellerID int64) bool 
 // Aktor: denetim kaydi icin cagiran kimligi (uid, kullanici-adi). Musteri token'inda
 // uid 0, kullanici "musteri:<domain_id>" doner.
 func Aktor(r *http.Request) (int64, string) {
+	if dk := DestekFrom(r); dk != nil {
+		// Destek botu: işlemi yapan bot; bayi/kök bağlantısında uid sahibinindir.
+		return dk.KullaniciID, DestekAktorAdi(dk.TgKisa)
+	}
 	if c := ClaimsFrom(r); c != nil {
 		if k := AnahtarFrom(r); k != nil {
 			// API anahtarıyla yapılan işlem: "<sahip> (API anahtarı <ad>)".

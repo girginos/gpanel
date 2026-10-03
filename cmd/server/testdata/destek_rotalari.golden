@@ -1,0 +1,14 @@
+GET /api/v1/admin/system/loglar  sunucu_log_oku (AdminOnly)
+GET /api/v1/domains/{id}  hesap_ozet
+GET /api/v1/domains/{id}/backup-schedule  yedek_liste
+GET /api/v1/domains/{id}/backups  yedek_liste
+GET /api/v1/domains/{id}/cron  cron_liste
+GET /api/v1/domains/{id}/dns  dns_kontrol
+GET /api/v1/domains/{id}/kaynak  hesap_ozet, disk_kota
+GET /api/v1/domains/{id}/logs/oku  log_oku(nginx_access, nginx_error)
+GET /api/v1/domains/{id}/php-settings  php_ayar_oku
+GET /api/v1/domains/{id}/php/debug-log  log_oku(php_debug)
+GET /api/v1/domains/{id}/ssl  ssl_durum
+GET /api/v1/domains/{id}/wordpress  wp_durum
+GET /api/v1/domains/{id}/wordpress/durum  wp_durum
+GET /api/v1/domains/{id}/wordpress/eklentiler  wp_durum
