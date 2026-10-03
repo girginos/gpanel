@@ -57,7 +57,7 @@ func mg_geciciDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	for _, q := range []string{
-		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL)`,
+		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(100) NOT NULL DEFAULT '', disk_kota_mb BIGINT NULL, trafik_kota_mb BIGINT NULL)`,
 		`CREATE TABLE users (id BIGINT UNSIGNED PRIMARY KEY, username VARCHAR(64) NOT NULL DEFAULT '',
 			full_name VARCHAR(128) NULL, role VARCHAR(16) NOT NULL DEFAULT 'user')`,
 		`CREATE TABLE domains (

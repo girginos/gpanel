@@ -11,10 +11,11 @@ import { useToast } from '@/components/Toast'
 import { Badge, Button, butonSinifi } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { I, Ikon } from '@/components/Ikon'
-import { KART, ODAK, cx, diskYuzde, mbYaz, tarihYaz, yuzde } from './ortak'
-import { Cubuk, Donut } from './Grafik'
+import { KART, ODAK, cx, mbYaz, tarihYaz, yuzde } from './ortak'
+import { KullanimHucre } from './Hucreler'
+import { Donut } from './Grafik'
 
-type SonDomain = { id: number; alan_adi: string; plan_ad: string; boyut_kb: number; disk_kota_mb: number; askida: boolean; olusturulma: string }
+type SonDomain = { id: number; alan_adi: string; plan_ad: string; boyut_kb: number; disk_kota_mb: number; trafik_kb?: number; trafik_kota_mb?: number; askida: boolean; olusturulma: string }
 type Dikkat = { tur: 'ssl_alinamadi' | 'disk_yuksek' | 'askida'; onem: 'kritik' | 'uyari' | 'bilgi'; domain_id?: number; alan_adi?: string; yuzde?: number; adet?: number; ornekler?: string[] }
 type Ozet = {
   paket_ad: string
@@ -174,47 +175,65 @@ export default function BayiPano() {
             <p className="mt-1 text-sm text-gray-500 dark:text-dark-300">{t('İlk hesabı oluşturun; müşterinize otomatik giriş bilgisi gönderilir.')}</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <caption className="sr-only">{t('Son oluşturulan alan adları')}</caption>
-              <thead className="bg-gray-50 dark:bg-dark-800">
-                <tr className="text-start text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-300">
-                  <th scope="col" className="px-3 py-2 text-start">{t('Alan adı')}</th>
-                  <th scope="col" className="hidden px-3 py-2 text-start lg:table-cell">{t('Plan')}</th>
-                  <th scope="col" className="px-3 py-2 text-start">{t('Disk')}</th>
-                  <th scope="col" className="hidden px-3 py-2 text-start md:table-cell">{t('Oluşturulma')}</th>
-                  <th scope="col" className="px-3 py-2 text-start">{t('Durum')}</th>
-                  <th scope="col" className="w-10 px-2"><span className="sr-only">{t('Eylemler')}</span></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-dark-600">
-                {son.map((h) => {
-                  const y = diskYuzde(h)
-                  return (
+          <>
+            {/* Masaüstü: Domainler sayfasıyla AYNI kolon düzeni */}
+            <div className="hidden md:block">
+              <table className="w-full table-fixed border-collapse text-sm">
+                <caption className="sr-only">{t('Son oluşturulan alan adları')}</caption>
+                <thead className="bg-gray-50 dark:bg-dark-800">
+                  <tr className="text-start text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-300">
+                    <th scope="col" className="px-3 py-2 text-start">{t('Alan adı')}</th>
+                    <th scope="col" className="w-[14%] px-3 py-2 text-start">{t('Plan')}</th>
+                    <th scope="col" className="w-[14%] px-3 py-2 text-start">{t('Oluşturulma')}</th>
+                    <th scope="col" className="w-[17%] px-3 py-2 text-start">{t('Disk')}</th>
+                    <th scope="col" className="w-[17%] px-3 py-2 text-start">{t('Trafik')}</th>
+                    <th scope="col" className="w-12 px-2"><span className="sr-only">{t('Eylemler')}</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-dark-600">
+                  {son.map((h) => (
                     <tr key={h.id} onClick={() => gir(h.id)} className="cursor-pointer hover:bg-gray-50/70 dark:hover:bg-dark-600/40">
-                      <td className="max-w-0 px-3 py-2.5 sm:max-w-none">
+                      <td className="px-3 py-2.5">
                         <button type="button" onClick={(e) => { e.stopPropagation(); gir(h.id) }} aria-label={`${h.alan_adi}: ${t('Panele gir')}`}
                           className={cx('block max-w-full truncate rounded text-start font-medium text-gray-900 dark:text-dark-50', ODAK)}>{h.alan_adi}</button>
+                        <div className="mt-1"><Badge color={h.askida ? 'warning' : 'success'} variant="soft">{t(h.askida ? 'Askıda' : 'Aktif')}</Badge></div>
                       </td>
-                      <td className="hidden px-3 py-2.5 text-gray-700 lg:table-cell dark:text-dark-200">{h.plan_ad || '—'}</td>
-                      <td className="px-3 py-2.5">
-                        <div className="w-20 sm:w-32">
-                          <div className="mb-1 text-xs tabular-nums text-gray-600 dark:text-dark-200">{mbYaz(h.boyut_kb / 1024)}{y !== null && <span className="text-gray-400"> · %{y}</span>}</div>
-                          {y !== null && <Cubuk deger={y} etiket={`${h.alan_adi} ${t('Disk')}`} />}
-                        </div>
-                      </td>
-                      <td className="hidden px-3 py-2.5 tabular-nums text-gray-700 md:table-cell dark:text-dark-200">{tarihYaz(h.olusturulma)}</td>
-                      <td className="px-3 py-2.5"><Badge color={h.askida ? 'warning' : 'success'} variant="soft">{t(h.askida ? 'Askıda' : 'Aktif')}</Badge></td>
+                      <td className="truncate px-3 py-2.5 text-gray-700 dark:text-dark-200">{h.plan_ad || '—'}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-gray-700 dark:text-dark-200">{tarihYaz(h.olusturulma)}</td>
+                      <td className="px-3 py-2.5"><KullanimHucre kullanilanMB={h.boyut_kb / 1024} kotaMB={h.disk_kota_mb} etiket={`${h.alan_adi} ${t('Disk')}`} /></td>
+                      <td className="px-3 py-2.5"><KullanimHucre kullanilanMB={(h.trafik_kb || 0) / 1024} kotaMB={h.trafik_kota_mb} etiket={`${h.alan_adi} ${t('Trafik')}`} /></td>
                       <td className="px-2 py-2.5 text-end">
                         <Button isIcon variant="flat" ikon={I.giris} className="size-8" yukleniyor={giriliyor === h.id} disabled={giriliyor !== null}
                           aria-label={`${h.alan_adi}: ${t('Panele gir')}`} title={t('Panele gir')} onClick={(e) => { e.stopPropagation(); gir(h.id) }} />
                       </td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobil: kart (etiket: değer) */}
+            <ul className="divide-y divide-gray-200 md:hidden dark:divide-dark-600" aria-label={t('Son oluşturulan alan adları')}>
+              {son.map((h) => (
+                <li key={h.id} onClick={() => gir(h.id)} className="cursor-pointer px-4 py-3 hover:bg-gray-50/70 dark:hover:bg-dark-600/40">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); gir(h.id) }} aria-label={`${h.alan_adi}: ${t('Panele gir')}`}
+                        className={cx('block max-w-full truncate rounded text-start font-medium text-gray-900 dark:text-dark-50', ODAK)}>{h.alan_adi}</button>
+                      <div className="mt-1"><Badge color={h.askida ? 'warning' : 'success'} variant="soft">{t(h.askida ? 'Askıda' : 'Aktif')}</Badge></div>
+                    </div>
+                    <Button isIcon variant="flat" ikon={I.giris} className="size-8 shrink-0" yukleniyor={giriliyor === h.id} disabled={giriliyor !== null}
+                      aria-label={`${h.alan_adi}: ${t('Panele gir')}`} onClick={(e) => { e.stopPropagation(); gir(h.id) }} />
+                  </div>
+                  <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div><dt className="text-gray-500 dark:text-dark-300">{t('Plan')}</dt><dd className="truncate text-gray-800 dark:text-dark-100">{h.plan_ad || '—'}</dd></div>
+                    <div><dt className="text-gray-500 dark:text-dark-300">{t('Oluşturulma')}</dt><dd className="tabular-nums text-gray-800 dark:text-dark-100">{tarihYaz(h.olusturulma)}</dd></div>
+                    <div><dt className="mb-0.5 text-gray-500 dark:text-dark-300">{t('Disk')}</dt><dd><KullanimHucre kullanilanMB={h.boyut_kb / 1024} kotaMB={h.disk_kota_mb} etiket={`${h.alan_adi} ${t('Disk')}`} /></dd></div>
+                    <div><dt className="mb-0.5 text-gray-500 dark:text-dark-300">{t('Trafik')}</dt><dd><KullanimHucre kullanilanMB={(h.trafik_kb || 0) / 1024} kotaMB={h.trafik_kota_mb} etiket={`${h.alan_adi} ${t('Trafik')}`} /></dd></div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
         {!yuk && son.length > 0 && (
           <div className="border-t border-gray-200 p-2 text-center dark:border-dark-600">

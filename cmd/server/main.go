@@ -28,6 +28,7 @@ import (
 	"girginospanel/internal/db"
 	"girginospanel/internal/denetim"
 	"girginospanel/internal/dns"
+	"girginospanel/internal/domainip"
 	"girginospanel/internal/domains"
 	"girginospanel/internal/domainyasak"
 	"girginospanel/internal/eklenti"
@@ -234,6 +235,7 @@ func main() {
 	panelhost.DB = d
 	panelhost.IsRestartTemizle() // yarım kalan işleri temizle
 	panelhostH := &panelhost.Handler{}
+	domainIPH := &domainip.Handler{DB: d}
 	ipYonetimH := &ipyonetim.Handler{
 		DB: d,
 		Aktor: func(r *http.Request) (int64, bool) {
@@ -622,7 +624,7 @@ func main() {
 			r.With(middleware.AdminOnly).Get("/ipler", ipYonetimH.Liste)
 			r.With(middleware.AdminOnly).Post("/ipler", ipYonetimH.Ekle)
 			r.With(middleware.AdminOnly).Delete("/ipler/{ip}", ipYonetimH.Sil)
-			r.With(middleware.AdminOnly).Put("/domains/{id}/ipv4", ipYonetimH.DomainIPGuncelle)
+			r.With(middleware.AdminOnly).Put("/domains/{id}/ipv4", domainIPH.DomainIP) // eski uç → domainip çekirdeği
 			// Port Değiştirme (Feature 6)
 			r.With(middleware.AdminOnly).Get("/portlar", portYonetimH.Durum)
 			r.With(middleware.AdminOnly).Get("/portlar/is", portYonetimH.IsDurum)
@@ -895,6 +897,10 @@ func main() {
 				r.With(middleware.AdminVeyaReseller).Delete("/plans/{id}", plansH.Delete)
 				r.With(middleware.AdminVeyaReseller).Get("/plans/{id}/domains", plansH.DomainlerAra)
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/plan", domainsH.SetPlan)
+				// Domain IP değiştir (tek + bayi toplu): yönetici her domain, bayi yalnız kendi
+				// hostingi ve yalnız kendisine açık sunucu IP'leri (internal/ipyonetim/domain_ip.go).
+				r.With(middleware.SahipYonetim).Put("/domains/{id}/ip", domainIPH.DomainIP)
+				r.With(middleware.AdminVeyaReseller).Get("/domains/ip-secenekleri", domainIPH.IPSecenekleri)
 				r.With(middleware.SahipYonetim).Post("/domains/{id}/ozel-plan", domainsH.OzelPlan)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/dns", dnsH.List)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/dns", dnsH.Create)

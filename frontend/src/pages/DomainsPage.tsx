@@ -15,6 +15,7 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, butonSinifi } from '@/components/ui'
 import type { Color } from '@/components/ui'
+import IPDegistirDiyalog from '@/components/IPDegistirDiyalog'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
@@ -27,7 +28,7 @@ type Domain = {
   php_surum?: string; is_demo?: boolean
   olusturulma?: string; plan_id?: number; plan_ad?: string
   sahip_ad?: string; sahip_tur?: string; reseller_id?: number
-  ssl?: boolean; ssl_bitis?: string; askida?: boolean; disk_kota_mb?: number
+  ssl?: boolean; ssl_bitis?: string; askida?: boolean; disk_kota_mb?: number; ipv4?: string
 }
 type SubGenel = {
   id: number; alt_ad: string; tam_ad: string
@@ -189,6 +190,8 @@ const DOMAINS_EN: Record<string, string> = {
   "— kaydedin.": "— save it.",
   "Oluşturuldu": "Created",
   "İşlem başarısız": "Operation failed",
+  "IP değiştir": "Change IP",
+  "IP değiştirme": "IP change",
 }
 
 function useCevir() {
@@ -220,7 +223,7 @@ export default function DomainsPage() {
   const [secili, setSecili] = useState<Set<number>>(new Set())
   // Toplu async islem (DNS reset / SSL / sahip / plan) — process bar ile
   const [topluIsID, setTopluIsID] = useState<number>(0)
-  const [topluModal, setTopluModal] = useState<'' | 'sahip' | 'plan'>('')
+  const [topluModal, setTopluModal] = useState<'' | 'sahip' | 'plan' | 'ip'>('')
   const [topluBayiler, setTopluBayiler] = useState<Array<{ id: number; kullanici: string; ad_soyad?: string }>>([])
   const [topluMusteriler, setTopluMusteriler] = useState<Array<{ id: number; ad: string }>>([])
   const [topluHedefBayi, setTopluHedefBayi] = useState(0)
@@ -466,7 +469,7 @@ export default function DomainsPage() {
   // topluBaslat — asenkron toplu is baslatir; sayfa BLOKLANMAZ, ilerleme
   // TopluIsPaneli'nde process bar olarak akar (SSL'de nginx reload sayfayi
   // etkilerse bile is DB'de surer ve panel kaldigi yerden takip eder).
-  async function topluBaslat(tip: 'dns_reset' | 'ssl_kur' | 'sahip' | 'plan', ek?: Record<string, unknown>) {
+  async function topluBaslat(tip: 'dns_reset' | 'ssl_kur' | 'sahip' | 'plan' | 'ip', ek?: Record<string, unknown>) {
     const ids = Array.from(secili)
     if (!ids.length || !yonetici) return
     if (tip === 'dns_reset' && !(await onay({
@@ -549,7 +552,7 @@ export default function DomainsPage() {
               {cevir("Pasif Et")}
             </Button>
           </>}
-          {/* DNS/SSL/sahip/plan → POST /domains/toplu/is (AdminOnly): yalnız yönetici. */}
+          {/* DNS/SSL/sahip/plan/IP → POST /domains/toplu/is (AdminOnly): yalnız yönetici. */}
           {yonetici && secili.size > 0 && <>
             <Button color="error" variant="soft" boyut="sm" ikon={I.sifirla} onClick={() => topluBaslat('dns_reset')} disabled={isleniyor || topluIsID > 0} yukleniyor={topluBasliyor === 'dns_reset'}>
               {cevir(cevir("DNS varsayılana sıfırla"))}
@@ -562,6 +565,9 @@ export default function DomainsPage() {
             </Button>
             <Button variant="outlined" boyut="sm" ikon={I.kalem} onClick={() => setTopluModal('plan')} disabled={isleniyor || topluIsID > 0}>
               {cevir(cevir("Plan değiştir"))}
+            </Button>
+            <Button variant="outlined" boyut="sm" ikon={I.kure} onClick={() => setTopluModal('ip')} disabled={isleniyor || topluIsID > 0}>
+              {cevir("IP değiştir")}
             </Button>
           </>}
           <Button color="error" boyut="sm" ikon={I.cop} onClick={() => setSilOnay(true)} disabled={isleniyor}>
@@ -833,7 +839,13 @@ export default function DomainsPage() {
 
       {/* Toplu Sil Onay */}
       {/* topluHedefModal — sahip/plan hedefi secimi (async is bundan sonra baslar) */}
-      <Modal acik={yonetici && topluModal !== ''} baslik={topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
+      {yonetici && topluModal === 'ip' && (
+        <IPDegistirDiyalog
+          liste={Array.from(secili).map(id => items.find(x => x.id === id)).filter((d): d is Domain => !!d)}
+          kapat={() => setTopluModal('')} yukleniyor={topluBasliyor === 'ip'}
+          onayla={ip => topluBaslat('ip', { ipv4: ip })} />
+      )}
+      <Modal acik={yonetici && (topluModal === 'sahip' || topluModal === 'plan')} baslik={topluModal === 'sahip' ? cevir('Toplu sahip değiştir') : cevir('Toplu plan değiştir')}
         onKapat={() => setTopluModal('')} kapatilamaz={topluBasliyor === 'sahip' || topluBasliyor === 'plan'}
         alt={<>
           <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setTopluModal('')}>{cevir("Vazgeç")}</Button>
@@ -996,7 +1008,7 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   if (!d || kapandi) return null
   const ADLAR: Record<string, string> = {
     dns_reset: cevir('DNS varsayılana sıfırlama'), ssl_kur: cevir("Let's Encrypt SSL kurulumu"),
-    sahip: cevir('Sahip değiştirme'), plan: cevir('Plan değiştirme'),
+    sahip: cevir('Sahip değiştirme'), plan: cevir('Plan değiştirme'), ip: cevir('IP değiştirme'),
   }
   const yuzde = d.toplam > 0 ? Math.round((d.tamamlanan / d.toplam) * 100) : 0
   const bitti = d.durum !== 'calisiyor'

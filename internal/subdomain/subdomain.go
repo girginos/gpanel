@@ -219,10 +219,17 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	if !kaydedildi {
 		return
 	}
-	// DNS A kaydı (parent zone'a) + zone yaz
-	if h.IPv4 != "" {
+	// DNS A kaydı (parent zone'a) + zone yaz. IP = ANA DOMAININ IP'si (domains.ipv4):
+	// domain başka bir sunucu IP'sine taşındıysa (ipyonetim.DomainIPDegistir) yeni alt
+	// alan adı da oraya çözülmeli; boşsa sunucu varsayılanı (h.IPv4).
+	altIP := h.IPv4
+	var domIP string
+	if err := h.DB.QueryRow(`SELECT COALESCE(ipv4,'') FROM domains WHERE id=?`, id).Scan(&domIP); err == nil && domIP != "" {
+		altIP = domIP
+	}
+	if altIP != "" {
 		if _, err := h.DB.Exec(`INSERT INTO dns_records (domain_id, ad, tip, deger, ttl, oncelik, aktif) VALUES (?,?,?,?,?,?,1)`,
-			id, altAd, "A", h.IPv4, 3600, 0); err != nil {
+			id, altAd, "A", altIP, 3600, 0); err != nil {
 			log.Printf("subdomain %s: DNS A kaydı eklenemedi: %v — subdomain çözümlenmeyebilir", tamAd, err)
 		} else if err := dns.WriteZone(r.Context(), h.DB, id); err != nil {
 			log.Printf("subdomain %s: zone dosyası yazılamadı: %v", tamAd, err)

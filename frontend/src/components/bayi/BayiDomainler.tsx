@@ -1,12 +1,15 @@
 // Bayi Domainler (Seçenek 1, kullanıcı kararı 2026-10-03):
-//   · Liste YALNIZ alan adı odaklı: büyük alan adı + küçük işaretler (durum, plan, disk %,
-//     oluşturulma). SSL sütunu YOK (acme.sh otomatik yeniler) — yalnız "SSL alınamadı" uyarısı.
+//   · Masaüstünde başlıklı kolonlar: Alan adı (altında yalnız durum) · Plan · Oluşturulma ·
+//     Disk · Trafik · Panele gir. Kolon başlıkları sıralar (Sırala menüsüyle aynı durum).
+//     Mobilde (md altı) kart düzeni: etiket–değer satırları. SSL sütunu YOK (acme.sh
+//     otomatik yeniler) — yalnız "SSL alınamadı" uyarısı.
 //   · Satıra tık / "Panele gir" = o alan adının müşteri panelinde tek tık oturum (lib/adina).
-//   · Toplu işlemler: paket değiştir (havuz/kullanım kontrolü), sahiplik (bayide KAPALI —
-//     kökte bayiler arasıdır), askıya al / aç, sil (onay metniyle). Her öğe sunucuda ayrı
-//     ayrı kapsam doğrulamasından geçer (SahipYonetim); sonuç öğe başına gösterilir.
+//   · Toplu işlemler: paket değiştir (havuz/kullanım kontrolü), IP değiştir (yalnız
+//     bayiye açık sunucu IP'leri), sahiplik (bayide KAPALI — kökte bayiler arasıdır),
+//     askıya al / aç, sil (onay metniyle). Her öğe sunucuda ayrı ayrı kapsam
+//     doğrulamasından geçer (SahipYonetim); sonuç öğe başına gösterilir.
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { api, apiHata } from '@/lib/api'
 import { adinaBaslat } from '@/lib/adina'
 import { cevirT } from '@/lib/cevirT'
@@ -16,22 +19,33 @@ import { Badge, Button } from '@/components/ui'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import EmptyState from '@/components/EmptyState'
+import IPDegistirDiyalog from '@/components/IPDegistirDiyalog'
 import { I, Ikon } from '@/components/Ikon'
-import { ODAK, cx, diskYuzde, mbYaz, sslHatali, tarihYaz, yuzde, type BayiDomain } from './ortak'
+import { ODAK, cx, mbYaz, sslHatali, tarihYaz, yuzde, type BayiDomain } from './ortak'
 import { Cubuk } from './Grafik'
+import { KullanimHucre } from './Hucreler'
 
-type Islem = 'paket' | 'askida' | 'sil'
+type Islem = 'paket' | 'ip' | 'askida' | 'sil'
 type Sonuc = { id: number; ok: boolean; neden?: string }
 type Calisan = { tur: Islem; ids: number[]; adim: number; sonuc: Sonuc[] | null }
-type Sirala = 'alan-a' | 'alan-z' | 'disk' | 'plan' | 'durum' | 'yeni' | 'eski'
+type Kolon = 'alan' | 'plan' | 'olusturulma' | 'disk' | 'trafik' | 'durum'
+type Yon = 1 | -1
+type Sira = { k: Kolon; yon: Yon }
 type DFiltre = 'tum' | 'aktif' | 'askida'
 type Plan = { id: number; ad: string; disk_kota_mb?: number }
 type Havuz = { disk_limit_mb: number; disk_taahhut_mb: number }
 
-const SIRALAR: { id: Sirala; ad: string }[] = [
-  { id: 'alan-a', ad: 'Alan adı (A-Z)' }, { id: 'alan-z', ad: 'Alan adı (Z-A)' }, { id: 'disk', ad: 'Disk kullanımı (yüksek)' },
-  { id: 'plan', ad: 'Plan' }, { id: 'durum', ad: 'Durum' }, { id: 'yeni', ad: 'Oluşturulma (yeni önce)' }, { id: 'eski', ad: 'Oluşturulma (eski önce)' },
+// Sırala menüsü: kolon başlığı tıklamasının üretebileceği HER birleşim burada olmalı.
+const SIRALAR: { k: Kolon; yon: Yon; ad: string }[] = [
+  { k: 'alan', yon: 1, ad: 'Alan adı (A-Z)' }, { k: 'alan', yon: -1, ad: 'Alan adı (Z-A)' },
+  { k: 'disk', yon: -1, ad: 'Disk kullanımı (yüksek)' }, { k: 'disk', yon: 1, ad: 'Disk kullanımı (düşük)' },
+  { k: 'trafik', yon: -1, ad: 'Trafik (yüksek)' }, { k: 'trafik', yon: 1, ad: 'Trafik (düşük)' },
+  { k: 'plan', yon: 1, ad: 'Plan (A-Z)' }, { k: 'plan', yon: -1, ad: 'Plan (Z-A)' },
+  { k: 'durum', yon: 1, ad: 'Durum' },
+  { k: 'olusturulma', yon: -1, ad: 'Oluşturulma (yeni önce)' }, { k: 'olusturulma', yon: 1, ad: 'Oluşturulma (eski önce)' },
 ]
+// Başlığa ilk tıklamada yön: metinde A→Z, sayı/tarihte büyükten küçüğe.
+const ILK_YON: Record<Kolon, Yon> = { alan: 1, plan: 1, olusturulma: -1, disk: -1, trafik: -1, durum: 1 }
 const INPUT = cx('h-9 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 placeholder:text-gray-400 dark:border-dark-450 dark:bg-dark-800 dark:text-dark-50', ODAK)
 
 export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
@@ -41,7 +55,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
   const toast = useToast()
   const [q, setQ] = useState('')
   const [filtre, setFiltre] = useState<DFiltre>('tum')
-  const [sirala, setSirala] = useState<Sirala>('alan-a')
+  const [sira, setSira] = useState<Sira>({ k: 'alan', yon: 1 })
   const [sec, setSec] = useState<Set<number>>(new Set())
   const [islem, setIslem] = useState<Islem | null>(null)
   const [calisan, setCalisan] = useState<Calisan | null>(null)
@@ -53,20 +67,20 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
   const gorunen = useMemo(() => {
     const s = q.trim().toLocaleLowerCase('tr')
     const f = items.filter((h) => (filtre === 'tum' || (filtre === 'askida') === !!h.askida) && (!s || h.alan_adi.toLocaleLowerCase('tr').includes(s)))
-    const d = (h: BayiDomain) => diskYuzde(h) ?? -1
-    const o = (h: BayiDomain) => h.olusturulma || ''
-    return [...f].sort((a, b) => {
-      switch (sirala) {
-        case 'alan-z': return b.alan_adi.localeCompare(a.alan_adi, 'tr')
-        case 'disk': return d(b) - d(a)
-        case 'plan': return (a.plan_ad || '').localeCompare(b.plan_ad || '', 'tr') || a.alan_adi.localeCompare(b.alan_adi, 'tr')
-        case 'durum': return Number(!!a.askida) - Number(!!b.askida) || a.alan_adi.localeCompare(b.alan_adi, 'tr')
-        case 'yeni': return o(b).localeCompare(o(a)) || b.id - a.id
-        case 'eski': return o(a).localeCompare(o(b)) || a.id - b.id
-        default: return a.alan_adi.localeCompare(b.alan_adi, 'tr')
+    const ad = (a: BayiDomain, b: BayiDomain) => a.alan_adi.localeCompare(b.alan_adi, 'tr')
+    const kiyas = (a: BayiDomain, b: BayiDomain): number => {
+      switch (sira.k) {
+        case 'plan': return (a.plan_ad || '').localeCompare(b.plan_ad || '', 'tr')
+        case 'olusturulma': return (a.olusturulma || '').localeCompare(b.olusturulma || '') || a.id - b.id
+        case 'disk': return a.boyut_kb - b.boyut_kb
+        case 'trafik': return (a.trafik_kb || 0) - (b.trafik_kb || 0)
+        case 'durum': return Number(!!a.askida) - Number(!!b.askida)
+        default: return ad(a, b)
       }
-    })
-  }, [items, q, filtre, sirala])
+    }
+    // Eşitlikte alan adı A→Z (yönden bağımsız) — liste kararlı kalsın.
+    return [...f].sort((a, b) => sira.yon * kiyas(a, b) || ad(a, b))
+  }, [items, q, filtre, sira])
   // Liste yenilenince artık olmayan seçimler düşer.
   useEffect(() => { setSec((o) => new Set([...o].filter((id) => items.some((h) => h.id === id)))) }, [items])
   const secili = items.filter((h) => sec.has(h.id))
@@ -80,6 +94,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
 
   const degistir = (id: number) => setSec((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const tumToggle = () => setSec((o) => { const n = new Set(o); if (tumunuSec) gorunen.forEach((h) => n.delete(h.id)); else gorunen.forEach((h) => n.add(h.id)); return n })
+  const basliktanSirala = (k: Kolon) => setSira((o) => (o.k === k ? { k, yon: (o.yon === 1 ? -1 : 1) as Yon } : { k, yon: ILK_YON[k] }))
 
   async function gir(h: BayiDomain) {
     if (giriliyor) return
@@ -118,6 +133,44 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
     return <div className="py-12 text-center text-sm text-gray-500 dark:text-dark-300">{t('Yükleniyor…')}</div>
   }
 
+  // Satır parçaları: masaüstü tablo ile mobil kart AYNI parçaları kullanır.
+  const secKutusu = (h: BayiDomain) => (
+    <label className="grid shrink-0 cursor-pointer place-items-center p-1" onClick={(e) => e.stopPropagation()}>
+      <input type="checkbox" checked={sec.has(h.id)} onChange={() => degistir(h.id)} aria-label={`${h.alan_adi} ${t('seç')}`} className="size-4 rounded accent-primary-600" />
+    </label>
+  )
+  const alanHucre = (h: BayiDomain) => (
+    <div className="min-w-0">
+      <button type="button" onClick={(e) => { e.stopPropagation(); gir(h) }} aria-label={`${h.alan_adi}: ${t('Panele gir')}`}
+        className={cx('block max-w-full truncate rounded text-start text-base font-semibold text-gray-900 dark:text-dark-50', ODAK, h.askida && 'opacity-80')}>
+        {h.alan_adi}
+      </button>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <Badge color={h.askida ? 'warning' : 'success'} variant="soft">{t(h.askida ? 'Askıda' : 'Aktif')}</Badge>
+        {sslHatali(h) && <Badge color="error" variant="soft" title={t('Sertifikanın süresi doldu; otomatik yenileme başarısız oldu.')}>{t('SSL alınamadı')}</Badge>}
+      </div>
+    </div>
+  )
+  const diskHucre = (h: BayiDomain) => <KullanimHucre kullanilanMB={h.boyut_kb / 1024} kotaMB={h.disk_kota_mb} etiket={`${h.alan_adi} ${t('Disk')}`} />
+  const trafikHucre = (h: BayiDomain) => <KullanimHucre kullanilanMB={(h.trafik_kb || 0) / 1024} kotaMB={h.trafik_kota_mb} etiket={`${h.alan_adi} ${t('Trafik')}`} />
+  const girDugmesi = (h: BayiDomain, metinli: boolean) => (
+    <Button boyut="sm" variant="soft" color="primary" ikon={I.giris} className="shrink-0" yukleniyor={giriliyor === h.id} disabled={giriliyor !== null}
+      aria-label={`${h.alan_adi}: ${t('Panele gir')}`} onClick={(e) => { e.stopPropagation(); gir(h) }}>
+      {metinli && <span className="sr-only lg:not-sr-only">{t('Panele gir')}</span>}
+    </Button>
+  )
+  const baslik = (k: Kolon, children: ReactNode, className?: string) => {
+    const aktif = sira.k === k
+    return (
+      <th key={k} scope="col" aria-sort={aktif ? (sira.yon === 1 ? 'ascending' : 'descending') : 'none'} className={cx('px-3 py-2 text-start', className)}>
+        <button type="button" onClick={() => basliktanSirala(k)} className={cx('inline-flex items-center gap-1 rounded uppercase tracking-wider', ODAK, aktif ? 'text-gray-900 dark:text-dark-50' : 'hover:text-gray-700 dark:hover:text-dark-100')}>
+          {children}
+          <Ikon d={aktif && sira.yon === -1 ? I.chevronAsagi : I.chevronYukari} className={cx('size-3.5', !aktif && 'opacity-30')} />
+        </button>
+      </th>
+    )
+  }
+
   return (
     <div className={cx('space-y-4', secili.length > 0 && 'pb-28 md:pb-0')}>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -149,8 +202,9 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
         </div>
         <div className="flex items-center gap-2 sm:ms-auto">
           <label htmlFor={sirId} className="text-xs text-gray-500 dark:text-dark-300">{t('Sırala')}</label>
-          <select id={sirId} value={sirala} onChange={(e) => setSirala(e.target.value as Sirala)} className={cx(INPUT, 'px-2')}>
-            {SIRALAR.map((s) => <option key={s.id} value={s.id}>{t(s.ad)}</option>)}
+          <select id={sirId} value={`${sira.k}:${sira.yon}`} className={cx(INPUT, 'px-2')}
+            onChange={(e) => { const [k, y] = e.target.value.split(':'); setSira({ k: k as Kolon, yon: (Number(y) === -1 ? -1 : 1) as Yon }) }}>
+            {SIRALAR.map((s) => <option key={`${s.k}:${s.yon}`} value={`${s.k}:${s.yon}`}>{t(s.ad)}</option>)}
           </select>
         </div>
       </div>
@@ -162,6 +216,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
           <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
             <span className="me-2 ps-1 text-sm font-semibold tabular-nums" aria-live="polite">{secili.length} {t('seçildi')}</span>
             <TopluDugme ikon={I.kutu} onClick={() => setIslem('paket')}>{t('Paket değiştir')}</TopluDugme>
+            <TopluDugme ikon={I.kure} onClick={() => setIslem('ip')}>{t('IP değiştir')}</TopluDugme>
             <TopluDugme ikon={I.degistir} disabled aria-describedby={sahipNotId} title={t('Yalnız kök yönetici kullanabilir')}>{t('Sahiplik değiştir')}</TopluDugme>
             <span id={sahipNotId} className="sr-only">{t('Bu işlem kökte bayiler arasıdır; bayi kendi kapsamı dışına aktaramaz')}</span>
             <TopluDugme ikon={hepsiAskida ? I.oynat : I.durakla} onClick={() => setIslem('askida')}>{t(askiAd)}</TopluDugme>
@@ -176,7 +231,8 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
           buton={{ etiket: t('Yeni hosting hesabı'), onClick: onYeni }} />
       ) : (
         <section aria-label={t('Domainler')} className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-700">
-          <div className="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs text-gray-500 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-300">
+          {/* Mobil başlık şeridi: tümünü seç + sayaç (masaüstünde tablo başlığında) */}
+          <div className="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs text-gray-500 md:hidden dark:border-dark-600 dark:bg-dark-800 dark:text-dark-300">
             <label className="flex items-center gap-3">
               <input ref={tumRef} type="checkbox" checked={tumunuSec} onChange={tumToggle} aria-label={t('Görünen tüm alan adlarını seç')} className="size-4 rounded accent-primary-600" />
               <span>{gorSecili > 0 ? `${gorSecili} ${t('seçildi')}` : t('Tümünü seç')}</span>
@@ -185,45 +241,69 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
           </div>
           {gorunen.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-gray-500 dark:text-dark-300">{t('Sonuç yok')}</p>
-          ) : (
-            <ul className="divide-y divide-gray-200 dark:divide-dark-600">
-              {gorunen.map((h) => {
-                const y = diskYuzde(h)
-                const s = sec.has(h.id)
-                const girilen = giriliyor === h.id
-                return (
-                  <li key={h.id} onClick={() => gir(h)}
-                    className={cx('flex cursor-pointer items-center gap-3 px-3 py-3 sm:px-4', s ? 'bg-primary-50 dark:bg-primary-500/10' : 'hover:bg-gray-50 dark:hover:bg-dark-600/40')}>
-                    <label className="grid shrink-0 cursor-pointer place-items-center p-1" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={s} onChange={() => degistir(h.id)} aria-label={`${h.alan_adi} ${t('seç')}`} className="size-4 rounded accent-primary-600" />
-                    </label>
-                    <div className="min-w-0 flex-1">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); gir(h) }} aria-label={`${h.alan_adi}: ${t('Panele gir')}`}
-                        className={cx('block max-w-full truncate rounded text-start text-base font-semibold text-gray-900 sm:text-[17px] dark:text-dark-50', ODAK, h.askida && 'opacity-80')}>
-                        {h.alan_adi}
-                      </button>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Badge color={h.askida ? 'warning' : 'success'} variant="soft">{t(h.askida ? 'Askıda' : 'Aktif')}</Badge>
-                        {h.plan_ad && <Badge color="neutral" variant="soft">{h.plan_ad}</Badge>}
-                        {y !== null && <span className="text-xs tabular-nums text-gray-500 dark:text-dark-300">{t('Disk')} %{y}</span>}
-                        <span className="text-xs tabular-nums text-gray-500 dark:text-dark-300">{t('Oluşturulma')} {tarihYaz(h.olusturulma)}</span>
-                        {sslHatali(h) && <Badge color="error" variant="soft" title={t('Sertifikanın süresi doldu; otomatik yenileme başarısız oldu.')}>{t('SSL alınamadı')}</Badge>}
-                      </div>
-                    </div>
-                    <Button boyut="sm" variant="soft" color="primary" ikon={I.giris} className="shrink-0" yukleniyor={girilen} disabled={giriliyor !== null}
-                      aria-label={`${h.alan_adi}: ${t('Panele gir')}`} onClick={(e) => { e.stopPropagation(); gir(h) }}>
-                      <span className="sr-only sm:not-sr-only">{t('Panele gir')}</span>
-                    </Button>
-                  </li>
-                )
-              })}
+          ) : (<>
+            {/* Masaüstü: başlıklı kolonlar */}
+            <div className="hidden md:block">
+              <table className="w-full table-fixed border-collapse text-sm">
+                <caption className="sr-only">{t('Domainler')}</caption>
+                <thead className="bg-gray-50 dark:bg-dark-800">
+                  <tr className="text-[11px] font-semibold text-gray-500 dark:text-dark-300">
+                    <th scope="col" className="w-11 px-3 py-2">
+                      <input type="checkbox" checked={tumunuSec} onChange={tumToggle} aria-label={t('Görünen tüm alan adlarını seç')} className="size-4 rounded accent-primary-600"
+                        ref={(el) => { if (el) el.indeterminate = gorSecili > 0 && !tumunuSec }} />
+                    </th>
+                    {baslik('alan', t('Alan adı'))}
+                    {baslik('plan', t('Plan'), 'w-[14%]')}
+                    {baslik('olusturulma', t('Oluşturulma'), 'w-[14%]')}
+                    {baslik('disk', t('Disk'), 'w-[16%]')}
+                    {baslik('trafik', t('Trafik'), 'w-[16%]')}
+                    <th scope="col" className="w-14 px-3 py-2 lg:w-36"><span className="sr-only">{t('Eylemler')}</span>
+                      <span className="hidden text-end font-normal tabular-nums lg:block" aria-hidden>{gorunen.length} / {items.length}</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-dark-600">
+                  {gorunen.map((h) => (
+                    <tr key={h.id} onClick={() => gir(h)}
+                      className={cx('cursor-pointer align-middle', sec.has(h.id) ? 'bg-primary-50 dark:bg-primary-500/10' : 'hover:bg-gray-50 dark:hover:bg-dark-600/40')}>
+                      <td className="px-3 py-3">{secKutusu(h)}</td>
+                      <td className="px-3 py-3">{alanHucre(h)}</td>
+                      <td className="truncate px-3 py-3 text-gray-700 dark:text-dark-200">{h.plan_ad || '—'}</td>
+                      <td className="px-3 py-3 tabular-nums text-gray-700 dark:text-dark-200">{tarihYaz(h.olusturulma)}</td>
+                      <td className="px-3 py-3">{diskHucre(h)}</td>
+                      <td className="px-3 py-3">{trafikHucre(h)}</td>
+                      <td className="px-3 py-3 text-end">{girDugmesi(h, true)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobil: kart (etiket: değer) */}
+            <ul className="divide-y divide-gray-200 md:hidden dark:divide-dark-600">
+              {gorunen.map((h) => (
+                <li key={h.id} onClick={() => gir(h)}
+                  className={cx('cursor-pointer px-3 py-3', sec.has(h.id) ? 'bg-primary-50 dark:bg-primary-500/10' : 'hover:bg-gray-50 dark:hover:bg-dark-600/40')}>
+                  <div className="flex items-start gap-2">
+                    {secKutusu(h)}
+                    <div className="min-w-0 flex-1">{alanHucre(h)}</div>
+                    {girDugmesi(h, false)}
+                  </div>
+                  <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 ps-9 text-xs">
+                    <div><dt className="text-gray-500 dark:text-dark-300">{t('Plan')}</dt><dd className="truncate text-gray-800 dark:text-dark-100">{h.plan_ad || '—'}</dd></div>
+                    <div><dt className="text-gray-500 dark:text-dark-300">{t('Oluşturulma')}</dt><dd className="tabular-nums text-gray-800 dark:text-dark-100">{tarihYaz(h.olusturulma)}</dd></div>
+                    <div><dt className="mb-0.5 text-gray-500 dark:text-dark-300">{t('Disk')}</dt><dd>{diskHucre(h)}</dd></div>
+                    <div><dt className="mb-0.5 text-gray-500 dark:text-dark-300">{t('Trafik')}</dt><dd>{trafikHucre(h)}</dd></div>
+                  </dl>
+                </li>
+              ))}
             </ul>
-          )}
+          </>)}
         </section>
       )}
 
       {islem === 'paket' && <PaketDiyalog secili={secili} kapat={() => setIslem(null)}
         onayla={(p) => yurut('paket', secili, (h) => api.put(`/domains/${h.id}/plan`, { plan_id: p }))} />}
+      {islem === 'ip' && <IPDegistirDiyalog liste={secili} kapat={() => setIslem(null)}
+        onayla={(ip) => yurut('ip', secili.filter((h) => h.ipv4 !== ip), (h) => api.put(`/domains/${h.id}/ip`, { ipv4: ip }))} />}
       {islem === 'askida' && (
         <Modal acik baslik={t(askiAd)} ton={hepsiAskida ? 'bilgi' : 'uyari'} onKapat={() => setIslem(null)}
           alt={<>
@@ -363,7 +443,7 @@ function IlerlemeDiyalog({ c, bul, bitir }: { c: Calisan; bul: (id: number) => B
   const bitti = !!c.sonuc
   const ok = c.sonuc?.filter((x) => x.ok).length ?? 0
   const hata = c.sonuc?.filter((x) => !x.ok) ?? []
-  const AD: Record<Islem, string> = { paket: 'Paket değiştir', askida: 'Askıya al / Aç', sil: 'Sil' }
+  const AD: Record<Islem, string> = { paket: 'Paket değiştir', ip: 'IP değiştir', askida: 'Askıya al / Aç', sil: 'Sil' }
   return (
     <Modal acik baslik={bitti ? `${t(AD[c.tur])}: ${t('sonuç')}` : `${t(AD[c.tur])}…`} ton={bitti ? (hata.length ? 'uyari' : 'basari') : undefined}
       onKapat={() => { if (bitti) bitir() }} kapatilamaz={!bitti}

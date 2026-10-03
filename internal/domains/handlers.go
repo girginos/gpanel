@@ -64,6 +64,9 @@ type Domain struct {
 	// DiskKotaMB: bağlı planın disk kotası (0 = sınırsız / plansız). Bayi listesi
 	// "disk %" gösterir.
 	DiskKotaMB int64 `json:"disk_kota_mb"`
+	// TrafikKotaMB: bağlı planın aylık trafik kotası (0 = sınırsız / plansız).
+	// Bayi listesi trafik kolonunda "kullanılan / kota" gösterir.
+	TrafikKotaMB int64 `json:"trafik_kota_mb"`
 }
 
 type Handlers struct {
@@ -77,7 +80,7 @@ const selectAll = `SELECT d.id, d.alan_adi, d.sistem_kullanici, d.php_surum, d.s
   COALESCE(d.notlar,''), DATE_FORMAT(d.olusturulma,'%Y-%m-%d'),
   d.plan_id, COALESCE(p.ad,''), d.ssh_erisim, COALESCE(d.askida,0),
   CASE WHEN CHAR_LENGTH(TRIM(COALESCE(u.full_name,'')))>=2 THEN TRIM(u.full_name) ELSE COALESCE(NULLIF(u.username,''),'') END, COALESCE(d.reseller_id,0),
-  COALESCE(p.disk_kota_mb,0)
+  COALESCE(p.disk_kota_mb,0), COALESCE(p.trafik_kota_mb,0)
   FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id
   LEFT JOIN users u ON u.id = d.reseller_id`
 
@@ -110,7 +113,7 @@ func scan(rs interface{ Scan(...any) error }) (Domain, error) {
 		&d.DBHost, &d.DBUser, &d.DBAdi, &d.WebRoot, &d.BoyutKB, &d.TrafikKB, &demo,
 		&d.Notlar, &d.Olusturulma,
 		&planID, &d.PlanAd, &sshE, &askida,
-		&d.SahipAd, &d.ResellerID, &d.DiskKotaMB)
+		&d.SahipAd, &d.ResellerID, &d.DiskKotaMB, &d.TrafikKotaMB)
 	// Kok (reseller_id=0): users tablosunda admin satiri OLMAYABILIR (kurulum
 	// varyanti) — sahip adini sorguya baglamak yerine burada cozuyoruz.
 	d.SahipTur = "admin"
