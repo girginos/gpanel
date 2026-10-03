@@ -609,6 +609,7 @@ func tumDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, filter string) []map[st
 				res[i]["durum"] = res[i]["durum"] + " — " + ek
 			}
 		}
+		dbKilidiniHesabaUydur(db, domainID, sk)
 	}
 	return res
 }

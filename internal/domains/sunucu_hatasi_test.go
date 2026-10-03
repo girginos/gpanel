@@ -121,8 +121,8 @@ var sh_durumlar = []sh_durum{
 		ad: "AskiyaAl", yontem: http.MethodPost, yol: "/domains/42/askiya-al", desen: "/domains/{id}/askiya-al",
 		isle: func(h *Handlers) http.HandlerFunc { return h.AskiyaAl },
 		satirlar: func(sd *sahtedb.DB) {
-			sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo FROM domains",
-				[]any{"bayialan.test", "c_bayialan", int64(0)})
+			sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum",
+				[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(0), "", int64(0)})
 		},
 		onek: "vhost render: ",
 	},
@@ -130,8 +130,8 @@ var sh_durumlar = []sh_durum{
 		ad: "AskidanAl", yontem: http.MethodPost, yol: "/domains/42/askidan-al", desen: "/domains/{id}/askidan-al",
 		isle: func(h *Handlers) http.HandlerFunc { return h.AskidanAl },
 		satirlar: func(sd *sahtedb.DB) {
-			sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo FROM domains",
-				[]any{"bayialan.test", "c_bayialan", int64(0)})
+			sd.Satirlar("SELECT alan_adi, sistem_kullanici, is_demo, COALESCE(php_surum",
+				[]any{"bayialan.test", "c_bayialan", int64(0), "8.3", int64(0), "", int64(0)})
 		},
 		onek: "vhost render: ",
 	},

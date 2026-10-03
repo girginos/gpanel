@@ -19,6 +19,7 @@ import (
 
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kiraci"
+	"girginospanel/internal/sshaccess"
 )
 
 var (
@@ -773,11 +774,13 @@ func buildSecurityHeaders(o VhostOpts) string {
 
 // suspendedVhostTmpl — "Hesabı Askıya Al" için: acme-challenge hariç TÜM istekler 503.
 // SSL sertifikası varsa 443'te de servis edilir (böylece askıdayken bile cert yenilenebilir).
+// Veri askiVhostVeri'dir; ana vhost ve alt alan adı vhost'ları bu TEK şablonu
+// kullanır (AskiVhostGovde).
 var suspendedVhostTmpl = template.Must(template.New("s").Parse(`# {{.AlanAdi}} — GirginOSPanel tarafından ASKIYA ALINDI
 server {
     listen 80;
     listen [::]:80;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -819,7 +822,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name {{.AlanAdi}} www.{{.AlanAdi}};
+    server_name {{.SunucuAdlari}};
 
     ssl_certificate     {{.CertPath}};
     ssl_certificate_key {{.KeyPath}};
@@ -973,6 +976,10 @@ func phpPoolPath(sk, phpSurum string) (string, string, string) {
 // (nginx/DNS'teki backup-rollback deseni). Basariliysa ilgili php-fpm servisini reload eder.
 // Doner: aktif socket yolu + servis adi.
 func writePoolValidated(sk, phpSurum string) (socket, service string, err error) {
+	// 🔴 Askıdaki hesabın havuzu yazılıp master'a YÜKLENMEZ (bkz. PHPHavuzAski).
+	if err := HesapAskiKapisi(sk); err != nil {
+		return "", "", err
+	}
 	// 🔴 Silinmis tenant korumasi: kullanici yoksa havuz YAZILMAZ. Aksi halde
 	// (silme ile es zamanli calisan heal/downgrade yollari) sahipsiz bir havuz
 	// birakir, `php-fpm -t` o PHP surumunde kalici hata verir ve YENI DOMAIN
@@ -1054,6 +1061,23 @@ func gecerliSKAdi(sk string) bool {
 	return true
 }
 
+// vhostAskiDurumu — opts açıkça askıda demese bile HESAP askıdaysa (tek kaynak:
+// hesaplar.HesapAskida) render'ı 503 vhost'u olarak zorlar. Bu sayede SetPHP/SSL/
+// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
+// 🔴 Durum okunamazsa hata: vhost'a DOKUNULMAZ. Eskiden hata yutulup "askıda
+// değil" sayılıyordu → DB anlık hatasında askıdaki site sessizce yayına dönüyordu.
+func vhostAskiDurumu(opts *VhostOpts, sk string) error {
+	if opts.Askida {
+		return nil
+	}
+	askida, err := HesapAskida(sk)
+	if err != nil {
+		return fmt.Errorf("vhost DEGISTIRILMEDI (%s): %w", sk, err)
+	}
+	opts.Askida = askida
+	return nil
+}
+
 func renderAndReload(opts VhostOpts, sk string) error {
 	// 🔴 TEK NOKTA: tüm vhost üretim yolları (HTTP, SSL, yeniden üretim) buradan
 	// geçer. Snippet satırını burada doldurmak, çağıran her yerde tekrar etmeye
@@ -1093,15 +1117,18 @@ func renderAndReload(opts VhostOpts, sk string) error {
 		opts.PHPSocket = tenantSocket(sk)
 	}
 
-	// Askıya-alma tutarlılığı: opts açıkça askıda demese bile DB'de bu kullanıcının
-	// domaini askıdaysa, HER render'ı 503 vhost'u olarak zorla. Bu sayede SetPHP/SSL/
-	// backend değişikliği gibi işlemler askıyı EZMEZ (Bug 3 kalıcılık garantisi).
-	if !opts.Askida && pkgDB != nil {
-		var ak int
-		_ = pkgDB.QueryRow(`SELECT COALESCE(askida,0) FROM domains WHERE sistem_kullanici=?`, sk).Scan(&ak)
-		if ak == 1 {
-			opts.Askida = true
-		}
+	// 🔴 Kilit, askı durumu OKUNMADAN alınır (eskiden yalnız yazma+reload'u
+	// sarıyordu): kilitten önce "askıda değil" okuyan eşzamanlı bir render (SSL
+	// yenileme, erişim nöbetçisi, SetPHP) hesap askısının 503'ünün ÜSTÜNE yayında
+	// vhost yazıp DB askıdayken siteyi açabiliyordu. Kilit altında okunan durum,
+	// yazılan dosyanın son hâlidir: askıyı yazan işlem ya önce biter (burada
+	// "askıda" okunur) ya da sonra kendi render'ını yapar.
+	renderKilidi.Lock()
+	defer renderKilidi.Unlock()
+
+	// Askıya-alma tutarlılığı: HER render hesabın askı durumunu tek kaynaktan okur.
+	if err := vhostAskiDurumu(&opts, sk); err != nil {
+		return err
 	}
 
 	// Guvenlik header + deny bloklarini her render'da hesapla (opts toggle'larina gore).
@@ -1131,17 +1158,21 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	}
 
 	var buf bytes.Buffer
-	tmpl := vhostTmpl
 	if opts.Askida {
-		tmpl = suspendedVhostTmpl // askıdayken 503 vhost'u
-	}
-	if err := tmpl.Execute(&buf, opts); err != nil {
+		// askıdayken 503 vhost'u (alt alan adlarıyla AYNI şablon)
+		cert, key := "", ""
+		if opts.SSL() {
+			cert, key = opts.CertPath, opts.KeyPath
+		}
+		govde, err := AskiVhostGovde(opts.AlanAdi, opts.AlanAdi+" www."+opts.AlanAdi, cert, key)
+		if err != nil {
+			return err
+		}
+		buf.WriteString(govde)
+	} else if err := vhostTmpl.Execute(&buf, opts); err != nil {
 		return fmt.Errorf("template render: %w", err)
 	}
-	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi).
-	renderKilidi.Lock()
-	defer renderKilidi.Unlock()
-
+	// Yazma+dogrulama+reload tek kilit altinda (bkz. renderKilidi; yukarida alindi).
 	cfgPath := "/etc/nginx/conf.d/dom_" + sk + ".conf"
 	// Fail-safe: bozuk config diske kalirsa sonraki nginx -t/reload TUM nginx'i dusurur.
 	// Eski icerigi yedekle; nginx -t patlarsa geri yukle.
@@ -1294,6 +1325,36 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 	}, nil
 }
 
+// hesabinAltVhostlari — dizindeki sub_<sk>_<alt>.conf dosyaları. 🔴 "sub_<sk>_*"
+// deseni komşu kiracıyı da yakalar (c_shop için sub_c_shop_store_blog.conf,
+// c_shop_store'undur); <alt> bir DNS etiketidir ('_' içermez) → '_' içeren kalan
+// başka hesabındır, elenir. (Aynı süzgeç joker içeren bir sk'nin desenle
+// yakaladığı yabancı dosyaları da eler: literal önek tutmazsa kalan "sub_…" olur.)
+func hesabinAltVhostlari(dizin, sk string) []string {
+	adaylar, _ := filepath.Glob(filepath.Join(dizin, "sub_"+sk+"_*.conf"))
+	var out []string
+	for _, y := range adaylar {
+		alt := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(y), "sub_"+sk+"_"), ".conf")
+		if alt == "" || strings.Contains(alt, "_") {
+			continue
+		}
+		out = append(out, y)
+	}
+	return out
+}
+
+// alanAdiGunlukleri — alan adının nginx erişim/hata günlükleri (logrotate
+// arşivleri dahil). 🔴 "<alan>.*" deseni komşu alan adını da yakalardı (shop.com
+// silinirken shop.com.tr'nin günlükleri); yalnız vhost şablonundaki adlar.
+func alanAdiGunlukleri(dizin, alanAdi string) []string {
+	var out []string
+	for _, tur := range []string{".access.log", ".error.log"} {
+		m, _ := filepath.Glob(filepath.Join(dizin, alanAdi+tur+"*"))
+		out = append(out, m...)
+	}
+	return out
+}
+
 func Deprovision(alanAdi, sk string) error {
 	// 🔴 SNIPPET DİZİNİ DE SİLİNİR. Sistem kullanıcı adı (sk) alan adından
 	// türetiliyor ve domain silinince YENİDEN KULLANILABİLİR hale geliyor
@@ -1315,10 +1376,8 @@ func Deprovision(alanAdi, sk string) error {
 	// Subdomain vhost'ları (sub_<sk>_*.conf) da temizle — domain silinince bunlar
 	// orphan kalıyordu; SSL'li bir subdomain vhost'u silinmiş cert'e referansla
 	// nginx -t'yi GLOBAL kırıp yeni domain oluşturmayı bile engelliyordu.
-	if subs, _ := filepath.Glob("/etc/nginx/conf.d/sub_" + sk + "_*.conf"); len(subs) > 0 {
-		for _, s := range subs {
-			_ = os.Remove(s)
-		}
+	for _, s := range hesabinAltVhostlari("/etc/nginx/conf.d", sk) {
+		_ = os.Remove(s)
 	}
 	// WAF per-domain modsec conf'larini temizle (orphan kalmasin).
 	if reWafSK.MatchString(sk) {
@@ -1343,16 +1402,23 @@ func Deprovision(alanAdi, sk string) error {
 		}
 		// nginx erisim/hata loglari (logrotate arsivleri dahil) — silinen domainin
 		// loglari sonsuza dek birikmesin.
-		if eskiler, _ := filepath.Glob(filepath.Join("/var/log/nginx", alanAdi+".*")); len(eskiler) > 0 {
-			for _, f := range eskiler {
-				_ = os.Remove(f)
-			}
+		for _, f := range alanAdiGunlukleri("/var/log/nginx", alanAdi) {
+			_ = os.Remove(f)
 		}
 	}
 	_, _ = exec.Command("systemctl", "reload", "nginx").CombinedOutput()
 
 	if !strings.HasPrefix(sk, "c_") {
 		return fmt.Errorf("güvenlik: c_ prefix'li olmayan kullanıcı silinmez")
+	}
+	// Hesap askısı artıkları (sk YENİDEN KULLANILABİLİR): askıda silinen hesabın
+	// saklanan crontab'ı, SSH süresi ve systemd birim korumaları yeni kiracıya
+	// miras kalmasın — aynı sk'yi alan hesap askıdan alınınca eski kiracının
+	// crontab'ı onun adına çalışırdı; birim koruması aynı adlı birimini durdururdu.
+	if gecerliSKAdi(sk) {
+		_ = os.Remove(filepath.Join(cronAskiDeposu, sk))
+		sshaccess.AskiArtiginiSil(sk)
+		askiBirimArtiklariniSil(sk)
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
@@ -1910,6 +1976,9 @@ func HealHomePerms() {
 	}
 }
 
+// cronAskiDeposu — askıdaki hesabın crontab'ının saklandığı dizin (spool dışında).
+const cronAskiDeposu = "/var/lib/girginospanel/cron-suspended"
+
 // SuspendUserRuntime: askıya alınan tenant'ın çalışan süreçlerini ve crontab'ını yönetir.
 //
 //	suspend=true  → crontab'ı cron spool'undan çıkar (crond çalıştırmaz) + tüm tenant
@@ -1921,13 +1990,12 @@ func SuspendUserRuntime(sk string, suspend bool) {
 	if !strings.HasPrefix(sk, "c_") {
 		return // güvenlik: yalnız tenant user
 	}
-	const suspendStore = "/var/lib/girginospanel/cron-suspended"
 	cronSpool := "/var/spool/cron/" + sk
-	stored := filepath.Join(suspendStore, sk)
+	stored := filepath.Join(cronAskiDeposu, sk)
 
 	if suspend {
 		if _, err := os.Stat(cronSpool); err == nil {
-			_ = os.MkdirAll(suspendStore, 0o700)
+			_ = os.MkdirAll(cronAskiDeposu, 0o700)
 			if err := os.Rename(cronSpool, stored); err != nil {
 				log.Printf("suspend runtime: crontab taşıma (%s): %v", sk, err)
 			}

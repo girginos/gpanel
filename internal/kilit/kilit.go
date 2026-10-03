@@ -15,7 +15,24 @@ import "sync"
 var (
 	mu       sync.Mutex
 	kilitler = map[int64]*sync.Mutex{}
+	hesaplar = map[string]*sync.Mutex{}
 )
+
+// Hesap: verilen hosting hesabi (sistem kullanicisi) icin paylasilan kilit.
+// Hesap askisi (hesapaski) adimlarini hesap basina serilestirir: ayni hesaba
+// eszamanli askiya alma / askidan alma / acilis supurmesi ic ice gecip DB ile
+// gercek durumu ayristirmasin. Bayi kilidiyle birlikte alinacaksa SIRA: once
+// Bayi, sonra Hesap.
+func Hesap(sk string) *sync.Mutex {
+	mu.Lock()
+	defer mu.Unlock()
+	k, ok := hesaplar[sk]
+	if !ok {
+		k = &sync.Mutex{}
+		hesaplar[sk] = k
+	}
+	return k
+}
 
 // Bayi: verilen bayi icin paylasilan kilit. rid<=0 (kok) icin de tek bir kilit
 // doner — kok islemleri de kendi arasinda sirali olur.

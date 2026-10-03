@@ -21,7 +21,9 @@ import (
 	"text/template"
 	"time"
 
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/phpsurum"
@@ -549,6 +551,22 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	}
 	if demo == 1 {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin PHP ayarları sabittir")
+		return
+	}
+	// Askıdaki hesapta ayar KAYDEDİLMEZ ve havuz BAŞLATILMAZ: kaydedilip
+	// uygulanmasaydı DB ile havuz ayrışırdı (havuz askıdan alınınca askı öncesi
+	// hâliyle geri gelir). Tek kaynak: hesaplar.HesapAskida.
+	// 🔴 Denetim ile havuz yazımı AYNI hesap kilidinde (hesapaski.Uygula'nınkiyle
+	// aynı): arada askı <sk>.conf'u .askida'ya taşıyıp bu yol yeni <sk>.conf yazarak
+	// askıdaki hesabın havuzunu yeniden başlatamaz (TOCTOU).
+	hk := kilit.Hesap(sk)
+	hk.Lock()
+	defer hk.Unlock()
+	if askida, err := hesaplar.HesapAskida(r.Context(), h.DB, sk); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "hesap askı durumu okunamadı")
+		return
+	} else if askida {
+		httpx.WriteError(w, http.StatusConflict, "hesap askıda — PHP ayarları askıdan alındıktan sonra değiştirilebilir")
 		return
 	}
 	if req.PHPSurum != "" && req.PHPSurum != surum {

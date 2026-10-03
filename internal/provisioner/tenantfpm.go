@@ -37,10 +37,13 @@ import (
 )
 
 const (
-	tenantUnitDir = "/etc/systemd/system"
 	tenantCfgRoot = "/etc/php-fpm-tenant"
 	tenantLogDir  = "/var/log/php-fpm"
 )
+
+// tenantUnitDir: per-tenant systemd unit dizini. Üretimde SABİT; testler geçici
+// dizine çevirir (TenantFPMActive ana makinenin unit'lerine bakmadan sınanır).
+var tenantUnitDir = "/etc/systemd/system"
 
 func tenantUnitName(sk string) string     { return "php-fpm-" + sk + ".service" }
 func tenantUnitPath(sk string) string     { return filepath.Join(tenantUnitDir, tenantUnitName(sk)) }
@@ -208,6 +211,15 @@ func TenantFPMActive(sk string) bool {
 	}
 	_, err := os.Stat(tenantUnitPath(sk))
 	return err == nil
+}
+
+// tenantFPMBakimi: açılış taraması ve watchdog bu hesabın per-tenant FPM
+// servisine dokunabilir mi (başlatma, drift onarımı, ölü sanıp paylaşılana
+// indirme)? Per-tenant kurulu DEĞİLSE ya da hesap ASKIDAYSA hayır: askıdaki
+// hesabın servisi bilerek durdurulmuştur (PHPHavuzAski). Durum okunamazsa da
+// dokunulmaz.
+func tenantFPMBakimi(sk string) bool {
+	return TenantFPMActive(sk) && HesapAskiKapisi(sk) == nil
 }
 
 // tenantSanitizeScalar: pool'a gömülecek tek-satır değere kaçış/enjeksiyon girmesini
@@ -1147,6 +1159,12 @@ func fpmWatchdogScan(hist map[string][]fpmSample) {
 			continue
 		}
 		canli[d.sk] = true
+		// Askidaki hesabin servisi BILEREK durduruldu (PHPHavuzAski): "olu" sayip
+		// paylasilana indirmek askiyi delerdi.
+		if !tenantFPMBakimi(d.sk) {
+			delete(hist, d.sk)
+			continue
+		}
 		if _, busy := fpmInflight.Load(d.sk); busy {
 			continue // K1 senkron monitor calisiyor → karisma
 		}
@@ -1249,7 +1267,9 @@ func waitForSocket(path string, timeout time.Duration) bool {
 // veya domain silindiginde (TeardownTenantFPM) otomatik temizlenir -> bayat uyari yok.
 // audit_log satiri KALICIDIR (gecmis kanit), sentinel ANLIK DURUMDUR.
 
-const izolasyonSentinelDir = "/etc/girginospanel/izolasyon-kaybi"
+// izolasyonSentinelDir — üretimde SABİT; testler geçici dizine çevirir (askı
+// kapısı testi kapı delinirse ana makinenin /etc'sine yazmasın).
+var izolasyonSentinelDir = "/etc/girginospanel/izolasyon-kaybi"
 
 func izolasyonSentinelPath(sk string) string {
 	return filepath.Join(izolasyonSentinelDir, sk)
@@ -1354,6 +1374,11 @@ func auditIzolasyonKaybi(db *sql.DB, domainID int64, sk, sebep string) {
 func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, error) {
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
 		return "", fmt.Errorf("geçersiz sistem kullanıcısı: %q", sk)
+	}
+	// 🔴 Askıdaki hesabın servisi başlatılmaz (plan/PHP ayarı yolları dahil);
+	// askıdan alınınca PHPHavuzAski geri açar.
+	if err := HesapAskiKapisi(sk); err != nil {
+		return "", err
 	}
 	surum = normalizePHP(surum)
 	ay := phpMap[surum]
@@ -1521,6 +1546,11 @@ func RollbackToSharedFPM(db *sql.DB, domainID int64, sk, surum string, sebep ...
 	if sk == "" || !strings.HasPrefix(sk, "c_") {
 		return fmt.Errorf("geçersiz sistem kullanıcısı: %q", sk)
 	}
+	// 🔴 Askıdaki hesapta paylaşılan havuzu geri getirmek (.bak → .conf) askıyı
+	// delerdi: servis bilerek durdurulmuş (PHPHavuzAski), "ölü" değil. Dokunma.
+	if err := HesapAskiKapisi(sk); err != nil {
+		return err
+	}
 	// 🔴 GUVENLIK OLAYI (C): bu cagri tenant'in CageFS izolasyonunu KALDIRIR.
 	// Log + audit_log + sentinel UCU BIRDEN, mutasyondan ONCE yazilir: adim 1
 	// (disable --now + unit sil) KOSULSUZ calisir, yani buraya girildiginde izolasyon
@@ -1597,6 +1627,8 @@ func TeardownTenantFPM(sk string) {
 			_, _ = exec.Command("systemctl", "reload-or-restart", ay.Service).CombinedOutput()
 		}
 	}
+	// Askıda silinen hesabın saklanan (.askida) havuzları da gider.
+	askiHavuzArtiklariniSil(sk)
 	// C: domain silindi -> "izolasyon kaybi" uyarisi bayat kalmasin.
 	izolasyonKaybiTemizle(sk)
 }
@@ -1665,7 +1697,9 @@ func ensureTenantFPMSweep() {
 	}
 	rows.Close()
 	for _, d := range list {
-		if !TenantFPMActive(d.sk) {
+		// Askidaki hesabin servisi acilista BASLATILMAZ (drift onarimi dahil);
+		// askidan alma PHPHavuzAski ile acar.
+		if !tenantFPMBakimi(d.sk) {
 			continue
 		}
 		// aktif mi?
@@ -1722,6 +1756,10 @@ func ensureTenantFPMSweep() {
 // guardPostStart (crash-loop dedektoru) calisir. Drift yoksa TAM no-op — restart YOK.
 func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 	if pkgDB == nil || sk == "" || !strings.HasPrefix(sk, "c_") {
+		return false
+	}
+	// Askidaki hesapta restart servisi yeniden baslatirdi → askidan alinca.
+	if HesapAskiKapisi(sk) != nil {
 		return false
 	}
 	unitPath := tenantUnitPath(sk)
@@ -1798,6 +1836,11 @@ func RepairTenantUnitDrift(domainID int64, sk, surum string) bool {
 // dogrular; bozuksa eski config'i geri alir. Graceful reload (USR2) → site kesintiye ugramaz.
 func repairTenantPoolDrift(domainID int64, sk, surum string) {
 	if pkgDB == nil || sk == "" || !strings.HasPrefix(sk, "c_") {
+		return
+	}
+	// Askidaki hesapta reload + guardPostStart durdurulmus servisi "olu" sayip
+	// paylasilana indirmeye kalkardi → askidan alinca.
+	if HesapAskiKapisi(sk) != nil {
 		return
 	}
 	cfgDir := tenantCfgDir(sk)

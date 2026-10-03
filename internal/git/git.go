@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/gizli"
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -614,7 +616,22 @@ func (h *Handlers) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Kimlik doğrulamasız uç: ham DB hatası yanıta girmez.
+		log.Printf("git webhook: repo okunamadı: %v", err)
+		http.Error(w, "sunucu hatası", http.StatusInternalServerError)
+		return
+	}
+	// 🔴 Askıdaki hesapta HİÇBİR komut çalışmaz: pull kiracı kimliğiyle git
+	// çalıştırır ve kiracının .git/config / hooks'u kod yürütebilir (askıda
+	// PHP/SSH/cron kapalıyken uzaktan tetiklenen tek yol olurdu). Yanıt eşleşmeyen
+	// sırla AYNIDIR: kimlik doğrulamasız uçta hesabın askı durumu sızmaz. Durum
+	// okunamazsa da çalışmaz.
+	if askida, aerr := hesaplar.HesapAskida(r.Context(), h.DB, sk); aerr != nil {
+		log.Printf("git webhook: domain %d: %v", domainID, aerr)
+		http.Error(w, "sunucu hatası", http.StatusInternalServerError)
+		return
+	} else if askida {
+		http.Error(w, "secret eşleşmedi", http.StatusNotFound)
 		return
 	}
 	sha, log, perr := gitPull(sk, targetDir, branch)
