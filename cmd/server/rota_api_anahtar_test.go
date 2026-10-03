@@ -133,7 +133,10 @@ func TestKimlikUclariSiniflandirildi(t *testing.T) {
 // KimlikDisiGerekce: adı desene takılan ama kimlik/jeton işlemi OLMAYAN rotalar.
 // Hepsi anahtara KAPALI kalır (varsayılan reddet); açılmak istenirse
 // KimlikBenzeriIzinli'ye gerekçeyle taşınmalı.
-var KimlikDisiGerekce = map[string]string{}
+var KimlikDisiGerekce = map[string]string{
+	"GET /api/v1/marka/gorsel/{anahtar}/{yuva}": "kimliksiz marka görseli; 'anahtar' görsel kimliği, kimlik bilgisi değil",
+	"GET /api/v1/marka/oturum":                  "oturumdaki kullanıcının marka görünümü (salt okuma); jeton basmaz",
+}
 
 func TestAnahtarUcListesiAltin(t *testing.T) {
 	var satirlar []string
