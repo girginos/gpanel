@@ -56,6 +56,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"tasima_kaynak_ayar":               {TR: "Taşıma kaynağı ayarı değiştirildi", EN: "Migration source setting changed"},
 	"hosting.limit":                    {TR: "Hostinge özel limitler değiştirildi", EN: "Hosting custom limits changed"},
 	"sistem.ozel_plan_donusum":         {TR: "Özel plan kopyası dönüştürüldü", EN: "Custom plan copy converted"},
+	"sistem.fpm_sahipsiz_temizlendi":   {TR: "Sahipsiz PHP-FPM kalıntısı temizlendi", EN: "Orphaned PHP-FPM leftovers removed"},
 	"marka.guncelle":                   {TR: "Marka güncellendi", EN: "Branding updated"},
 	"marka.sifirla":                    {TR: "Marka sıfırlandı", EN: "Branding reset"},
 	"marka.gorsel.yukle":               {TR: "Marka görseli yüklendi", EN: "Branding image uploaded"},
