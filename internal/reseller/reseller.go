@@ -284,6 +284,12 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		args = append(args, *req.MaxTrafikMB)
 	}
 	if req.Parola != nil && *req.Parola != "" {
+		// 🔴 API anahtarı bayi parolasını DEĞİŞTİREMEZ: anahtar → parola → etkileşimli
+		// bayi oturumu (kimlik devralma) yolu olmasın (kullanıcı kararı 2026-10-03).
+		if middleware.AnahtarFrom(r) != nil {
+			httpx.WriteError(w, http.StatusForbidden, "bayi parolası API anahtarıyla değiştirilemez")
+			return
+		}
 		if len(*req.Parola) < 8 || len(*req.Parola) > 128 {
 			httpx.WriteError(w, http.StatusBadRequest, "parola 8-128 karakter olmalı")
 			return
@@ -313,6 +319,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	// Parola degisti → acik oturumlar dussun.
 	if req.Parola != nil && *req.Parola != "" {
 		middleware.OturumlariDusur(h.DB, id)
+		// Parola sıfırlandı → ele geçirme varsayımı: bayinin API anahtarları da iptal.
+		bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "parola_sifirlama")
 		httpx.Denetim(h.DB, r, uid, kul, "bayi.parola", bayiAd, "", id, true)
 	}
 
@@ -322,6 +330,8 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		if askida {
 			// Askiya alinan bayi ACIK oturumla is yapmaya devam edemez.
 			middleware.OturumlariDusur(h.DB, id)
+			// API anahtarları da iptal (askıdan alınınca KENDİLİĞİNDEN geri gelmez).
+			bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_askiya_alindi")
 		}
 		// 🔴 Kilit: askiya alma sirasinda UCUSTA olan "hosting olustur" istegi
 		// bitene kadar bekle; aksi halde yeni hosting askidan MUAF canli doguyor
@@ -414,6 +424,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid, kul := middleware.Aktor(r)
+	bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
 	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi
 	// bu kaydi kendi gecmisi sanmasin (kok zaten tum kayitlari gorur).
 	httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", bayiAd, fmt.Sprintf("silinen bayi id=%d", id), 0, true)

@@ -23,6 +23,16 @@ useDefault = true
 #   * En az 10 karakter -> kisa/dusuk-degerli sabitler haric.
 #   * keywords: kural yalniz ilgili satirlarda degerlendirilir (performans + gurultu).
 # ===========================================================================
+# ===========================================================================
+# EK KURAL — GirginOSPanel API anahtarı (D4): gosp_<önek:12 base32>_<gizli:43 base64url>
+# Tam anahtar yalnız üretim yanıtında bir kez gösterilir; depoya düşmemeli.
+# ===========================================================================
+[[rules]]
+id = "gosp-api-anahtari"
+description = "GirginOSPanel API anahtarı (gosp_…)"
+regex = '''\bgosp_[a-z2-7]{12}_[A-Za-z0-9_-]{43}'''
+keywords = ["gosp_"]
+
 [[rules]]
 id = "gosp-hardcoded-credential"
 description = "Hardcoded parola/kimlik atamasi (yuksek-entropi sabit deger)"

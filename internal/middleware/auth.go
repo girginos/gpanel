@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/apianahtar"
 	"girginospanel/internal/auth"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kapi"
@@ -52,6 +53,12 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 			istekKapi := kapiCoz(r)
+
+			// API anahtarı (gosp_…): JWT yolundan AYRI dal — bkz. anahtar.go.
+			if apianahtar.AnahtarMi(tokenRaw) {
+				anahtarIstek(w, r, next, tokenRaw, istekKapi)
+				return
+			}
 
 			// Önce admin claims dene
 			if c, err := auth.Parse(secret, tokenRaw); err == nil {
@@ -386,6 +393,10 @@ func resellerDomainSahibi(ctx context.Context, domainID, resellerID int64) bool 
 // uid 0, kullanici "musteri:<domain_id>" doner.
 func Aktor(r *http.Request) (int64, string) {
 	if c := ClaimsFrom(r); c != nil {
+		if k := AnahtarFrom(r); k != nil {
+			// API anahtarıyla yapılan işlem: "<sahip> (API anahtarı <ad>)".
+			return c.UserID, AnahtarAktorAdi(c.Username, k.Ad)
+		}
 		return c.UserID, c.Username
 	}
 	if mc := MusteriClaimsFrom(r); mc != nil {

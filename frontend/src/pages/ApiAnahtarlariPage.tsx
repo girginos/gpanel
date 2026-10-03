@@ -1,0 +1,251 @@
+// API Anahtarları (D4) — kök ve bayi. Kök: kendi anahtarları + bayi anahtarları
+// (yalnız listeleme/iptal). Bayi: yalnız kendi anahtarları (kapsam sunucuda).
+import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import Breadcrumb from '@/components/Breadcrumb'
+import { Badge, Button } from '@/components/ui'
+import { I } from '@/components/Ikon'
+import { UyariKutusu } from '@/components/UyariKutusu'
+import { useToast } from '@/components/Toast'
+import { useDialog } from '@/components/Dialog'
+import { apiHata } from '@/lib/api'
+import { useRol, yoneticiMi } from '@/lib/rol'
+import {
+  anahtarIptal, anahtarKatalog, anahtarListe,
+  type ApiAnahtari, type Katalog, type TekKezYanit,
+} from '@/lib/apiAnahtar'
+import AnahtarOlusturModal from '@/components/apianahtar/AnahtarOlusturModal'
+import AnahtarGosterModal from '@/components/apianahtar/AnahtarGosterModal'
+import AnahtarYenileModal from '@/components/apianahtar/AnahtarYenileModal'
+import { cevir, cevirT, tarih } from '@/components/apianahtar/ceviri'
+
+type Sekme = 'benim' | 'bayiler'
+
+function DurumRozeti({ k }: { k: ApiAnahtari }) {
+  switch (k.durum) {
+    case 'etkin': return <Badge color="success" variant="soft">{cevir('Etkin')}</Badge>
+    case 'gecis': return <Badge color="warning" variant="soft">{cevir('Geçiş süresinde')}</Badge>
+    case 'suresi_doldu': return <Badge variant="soft">{cevir('Süresi doldu')}</Badge>
+    default: return <Badge color="error" variant="soft">{k.iptal_yonetim ? cevir('İptal edildi (yönetim)') : cevir('İptal edildi')}</Badge>
+  }
+}
+
+function IzinRozetleri({ k, katalog }: { k: ApiAnahtari; katalog: Katalog | null }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {k.izinler.map((iz) => {
+        const [g, e] = iz.split(':')
+        const etiket = katalog?.gruplar.find((x) => x.ad === g)?.etiket || g
+        return (
+          <Badge key={iz} color={e === 'yaz' ? 'primary' : 'info'} variant="outlined" className="text-[11px]" title={e === 'yaz' ? cevir('okuma + yazma') : cevir('okuma')}>
+            {cevir(etiket)}{e === 'yaz' ? ' · RW' : ' · R'}
+          </Badge>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function ApiAnahtarlariPage() {
+  useTranslation()
+  const rol = useRol()
+  const kok = yoneticiMi(rol)
+  const toast = useToast()
+  const dialog = useDialog()
+  const [sekme, setSekme] = useState<Sekme>('benim')
+  const [liste, setListe] = useState<ApiAnahtari[]>([])
+  const [katalog, setKatalog] = useState<Katalog | null>(null)
+  const [yukleniyor, setYukleniyor] = useState(true)
+  const [hata, setHata] = useState<string | null>(null)
+  const [olusturAcik, setOlusturAcik] = useState(false)
+  const [yenileHedef, setYenileHedef] = useState<ApiAnahtari | null>(null)
+  const [tekKez, setTekKez] = useState<TekKezYanit | null>(null)
+  const [iptalEdilen, setIptalEdilen] = useState<number | null>(null)
+
+  const yukle = useCallback(async () => {
+    setYukleniyor(true); setHata(null)
+    try {
+      setListe(await anahtarListe(sekme === 'bayiler'))
+    } catch (e) {
+      setHata(apiHata(e, cevir('Liste okunamadı')))
+    } finally {
+      setYukleniyor(false)
+    }
+  }, [sekme])
+
+  useEffect(() => { void yukle() }, [yukle])
+  useEffect(() => { anahtarKatalog().then(setKatalog).catch(() => setKatalog(null)) }, [])
+
+  const iptalEt = async (k: ApiAnahtari) => {
+    const ok = await dialog.onay({
+      baslik: cevir('Anahtar iptal edilsin mi?'),
+      mesaj: cevirT('"{0}" anahtarı hemen geçersiz olur; onu kullanan entegrasyonlar çalışmayı bırakır. Bu işlem geri alınamaz.', k.ad),
+      ton: 'tehlike', onayEtiketi: cevir('İptal et'), iptalEtiketi: cevir('Vazgeç'), onayIkonu: I.cop,
+    })
+    if (!ok) return
+    setIptalEdilen(k.id)
+    try {
+      await anahtarIptal(k.id)
+      toast.basari(cevir('Anahtar iptal edildi'), k.ad)
+      await yukle()
+    } catch (e) {
+      toast.hata(cevir('İşlem başarısız'), apiHata(e))
+    } finally {
+      setIptalEdilen(null)
+    }
+  }
+
+  const tekKezGoster = (y: TekKezYanit) => {
+    setOlusturAcik(false); setYenileHedef(null)
+    setTekKez(y)
+    void yukle()
+  }
+
+  const kendi = sekme === 'benim'
+  const etkin = (k: ApiAnahtari) => k.durum === 'etkin' || k.durum === 'gecis'
+  const taban = typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : '/api/v1'
+
+  const eylemler = (k: ApiAnahtari) => (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {kendi && k.durum === 'etkin' && (
+        <Button boyut="sm" variant="outlined" ikon={I.yenile} onClick={() => setYenileHedef(k)}>{cevir('Döndür')}</Button>
+      )}
+      {etkin(k) && (
+        <Button boyut="sm" variant="outlined" color="error" ikon={I.cop} yukleniyor={iptalEdilen === k.id} onClick={() => void iptalEt(k)}>{cevir('İptal et')}</Button>
+      )}
+    </div>
+  )
+
+  return (
+    <div>
+      <Breadcrumb items={[{ etiket: cevir('API Anahtarları') }]} />
+      <div className="mb-6 mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir('API Anahtarları')}</h1>
+          <p className="mt-1.5 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
+            {cevir('Faturalama otomasyonu (WHMCS, Blesta) ve betikler için kalıcı erişim anahtarları. Anahtar yalnız seçtiğiniz izinlerle ve kendi kapsamınızda çalışır.')}
+          </p>
+        </div>
+        <Button color="primary" ikon={I.arti} onClick={() => setOlusturAcik(true)} disabled={!katalog} className="shrink-0">{cevir('Yeni anahtar')}</Button>
+      </div>
+
+      {kok && (
+        <div className="mb-4 inline-flex rounded-lg bg-slate-100 p-1 dark:bg-dark-700" role="tablist">
+          {(['benim', 'bayiler'] as Sekme[]).map((s) => (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={sekme === s}
+              onClick={() => setSekme(s)}
+              className={
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
+                (sekme === s ? 'bg-white text-slate-900 shadow-sm dark:bg-dark-500 dark:text-dark-50' : 'text-slate-600 hover:text-slate-900 dark:text-dark-200 dark:hover:text-dark-50')
+              }
+            >
+              {s === 'benim' ? cevir('Anahtarlarım') : cevir('Bayi anahtarları')}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {hata && <UyariKutusu ton="tehlike" className="mb-4">{hata}</UyariKutusu>}
+
+      {yukleniyor ? (
+        <div className="rounded-lg border border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-dark-600">{cevir('Yükleniyor…')}</div>
+      ) : liste.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500 dark:border-dark-500 dark:text-dark-300">{cevir('Henüz API anahtarı yok.')}</div>
+      ) : (
+        <>
+          {/* Masaüstü: tablo */}
+          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-800 lg:block">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">{cevir('Ad')}</th>
+                  {!kendi && <th className="px-4 py-3 font-semibold">{cevir('Bayi')}</th>}
+                  <th className="px-4 py-3 font-semibold">{cevir('İzinler')}</th>
+                  <th className="px-4 py-3 font-semibold">{cevir('İzinli IP')}</th>
+                  <th className="px-4 py-3 font-semibold">{cevir('Son kullanım')}</th>
+                  <th className="px-4 py-3 font-semibold">{cevir('Bitiş')}</th>
+                  <th className="px-4 py-3 font-semibold">{cevir('Durum')}</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
+                {liste.map((k) => (
+                  <tr key={k.id} className={etkin(k) ? '' : 'opacity-60'}>
+                    <td className="px-4 py-3 align-top">
+                      <div className="font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
+                      <div className="font-mono text-xs text-slate-500 dark:text-dark-300">{k.gosterim}</div>
+                    </td>
+                    {!kendi && <td className="px-4 py-3 align-top text-slate-700 dark:text-dark-100">{k.sahip_ad || `#${k.sahip_id}`}</td>}
+                    <td className="max-w-xs px-4 py-3 align-top"><IzinRozetleri k={k} katalog={katalog} /></td>
+                    <td className="px-4 py-3 align-top font-mono text-xs text-slate-600 dark:text-dark-200">
+                      {k.izinli_ipler.length ? k.izinli_ipler.map((ip) => <div key={ip}>{ip}</div>) : <span className="font-sans text-slate-400">{cevir('her IP')}</span>}
+                    </td>
+                    <td className="px-4 py-3 align-top text-xs text-slate-600 dark:text-dark-200">
+                      {k.son_kullanim_at ? <>{tarih(k.son_kullanim_at)}<div className="font-mono text-slate-400">{k.son_kullanim_ip}</div></> : cevir('hiç')}
+                    </td>
+                    <td className="px-4 py-3 align-top text-xs text-slate-600 dark:text-dark-200">{tarih(k.son_kullanma_at)}</td>
+                    <td className="px-4 py-3 align-top"><DurumRozeti k={k} /></td>
+                    <td className="px-4 py-3 align-top">{eylemler(k)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Mobil/tablet: kartlar */}
+          <div className="space-y-3 lg:hidden">
+            {liste.map((k) => (
+              <div key={k.id} className={'rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800 ' + (etkin(k) ? '' : 'opacity-60')}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
+                    <div className="break-all font-mono text-xs text-slate-500 dark:text-dark-300">{k.gosterim}</div>
+                    {!kendi && <div className="text-xs text-slate-500">{cevir('Bayi')}: {k.sahip_ad || `#${k.sahip_id}`}</div>}
+                  </div>
+                  <DurumRozeti k={k} />
+                </div>
+                <div className="mt-3"><IzinRozetleri k={k} katalog={katalog} /></div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-slate-500">{cevir('İzinli IP')}</dt>
+                  <dd className="break-all font-mono text-slate-700 dark:text-dark-100">{k.izinli_ipler.join(', ') || cevir('her IP')}</dd>
+                  <dt className="text-slate-500">{cevir('Son kullanım')}</dt>
+                  <dd className="text-slate-700 dark:text-dark-100">{k.son_kullanim_at ? `${tarih(k.son_kullanim_at)} · ${k.son_kullanim_ip}` : cevir('hiç')}</dd>
+                  <dt className="text-slate-500">{cevir('Bitiş')}</dt>
+                  <dd className="text-slate-700 dark:text-dark-100">{tarih(k.son_kullanma_at)}</dd>
+                </dl>
+                <div className="mt-3">{eylemler(k)}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-dark-50">{cevir('Kullanım')}</h2>
+        <p className="mt-1.5 text-sm text-slate-600 dark:text-dark-200">
+          {cevir('Anahtarı her istekte Authorization başlığında gönderin. Anahtar yalnız kendi kapınızdan (kök anahtarı yönetici portundan, bayi anahtarı bayi portundan) ve yalnız sunucudan sunucuya çağrılarda çalışır; tarayıcıdan (Origin başlığıyla) gelen istekler reddedilir.')}
+        </p>
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-dark-300">{cevir('Bağlantıyı test et')}</div>
+            <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 dark:bg-dark-900"><code>{`curl -s ${taban}/api-anahtari/ben \\\n  -H "Authorization: Bearer gosp_xxxxxxxxxxxx_…"`}</code></pre>
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-dark-300">{cevir('Hosting hesaplarını listele')}</div>
+            <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 dark:bg-dark-900"><code>{`curl -s ${taban}/domains \\\n  -H "Authorization: Bearer gosp_xxxxxxxxxxxx_…"`}</code></pre>
+          </div>
+        </div>
+        <UyariKutusu ton="bilgi" kucuk className="mt-4">
+          {cevir('Anahtar giriş, parola/2FA değişikliği, müşteri adına oturum, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez.')}
+          {' '}{cevir('Bayi parolası sıfırlandığında, bayi askıya alındığında ya da silindiğinde o bayinin tüm anahtarları iptal edilir.')}
+        </UyariKutusu>
+      </section>
+
+      <AnahtarOlusturModal acik={olusturAcik} katalog={katalog} onKapat={() => setOlusturAcik(false)} onOlusturuldu={tekKezGoster} />
+      <AnahtarYenileModal hedef={yenileHedef} onKapat={() => setYenileHedef(null)} onYenilendi={tekKezGoster} />
+      <AnahtarGosterModal anahtar={tekKez?.anahtar || null} ad={tekKez?.anahtar_kaydi.ad || ''} onKapat={() => setTekKez(null)} />
+    </div>
+  )
+}
