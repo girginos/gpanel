@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -218,5 +219,12 @@ func TestUygula_PostaHatasi_GuvenliTaraf(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(k2.cagri, " "), "posta(true)") {
 		t.Fatalf("posta yeniden kapatılmalı: %v", k2.cagri)
+	}
+}
+
+// Üretim adımları posta adımını gerçekten bağlar (sahte değil).
+func TestVarsayilan_PostaAdimiBagli(t *testing.T) {
+	if reflect.ValueOf(Varsayilan().Posta).Pointer() != reflect.ValueOf(PostaAski).Pointer() {
+		t.Fatal("Varsayilan().Posta üretimde PostaAski olmalı")
 	}
 }
