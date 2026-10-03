@@ -487,8 +487,8 @@ func TestHesabinAltVhostlari_KomsuyaDokunmaz(t *testing.T) {
 	if strings.Join(got, ",") != "sub_c_shop_blog.conf,sub_c_shop_www-2.conf" {
 		t.Fatalf("yalnız hesabın alt alan vhost'ları: %v", got)
 	}
-	if hesabinAltVhostlari(d, "c_*") != nil {
-		t.Fatal("geçersiz sk ile desen kurulmamalı")
+	if got := hesabinAltVhostlari(d, "c_*"); got != nil {
+		t.Fatalf("joker içeren sk başka hesabın dosyasını seçmemeli: %v", got)
 	}
 }
 

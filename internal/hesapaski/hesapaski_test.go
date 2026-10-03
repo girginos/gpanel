@@ -653,6 +653,24 @@ func TestUygula_UstSureDolarsa_GuvenliTaraf(t *testing.T) {
 	if !strings.Contains(strings.Join(k.cagri, " "), "php(true)[askida=true]") {
 		t.Fatalf("açılan adımlar geri kapanmalı: %v", k.cagri)
 	}
+
+	// Süre FTP açıldıktan SONRA dolar ve sonraki bir adım düşer: yeniden askıya
+	// alma (kurtarma bağlamı) açılmış FTP'yi de kapatır.
+	k = &ha_kayit{db: db, hata: map[string]error{"ssh(false)": errors.New("chage başarısız")}}
+	a := k.adimlar(t)
+	dbAdim := a.DBKullanici
+	a.DBKullanici = func(d *sql.DB, id int64, kilit bool) error {
+		if !kilit {
+			time.Sleep(400 * time.Millisecond)
+		}
+		return dbAdim(d, id, kilit)
+	}
+	if _, err := a.Uygula(context.Background(), db, 1, false, KaynakKok); !errors.As(err, &kh) || !kh.Askida {
+		t.Fatalf("yeniden askıya alınmış KismiHata beklenirdi: %v", err)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{1, "pasif", "manuel", "suspended"}) {
+		t.Fatalf("açılmış FTP de geri kapanmalı: %+v", d)
+	}
 }
 
 // 🔴 Bayi kökün askısını AÇAMAZ (kullanıcı kararı 2026-09-29): 'manuel' ve
@@ -722,5 +740,36 @@ func TestUygula_BayiKokAskisiniAcamaz(t *testing.T) {
 	}
 	if _, err := a.Uygula(ctx, db, 1, true, "manuel2"); !errors.Is(err, ErrKaynak) {
 		t.Fatalf("tanınmayan kaynak reddedilmeli: %v", err)
+	}
+}
+
+// Ana vhost süre dolduktan SONRA düşerse de güvenli taraf kurtarma bağlamıyla
+// kurulur: elle askıda DB eski hâline döner (VhostHatasi, hiçbir şey değişmedi);
+// bayi zincirinde hesap askıda kalır ve kalan kapatma adımları uygulanır.
+func TestUygula_AnaVhostHatasi_SureDolmus_GuvenliTaraf(t *testing.T) {
+	db := ha_db(t)
+	eski := islemSuresi
+	t.Cleanup(func() { islemSuresi = eski })
+	islemSuresi = 200 * time.Millisecond
+	k := &ha_kayit{db: db, hata: map[string]error{"ana": errors.New("nginx -t başarısız")}}
+	a := k.adimlar(t)
+	ana := a.AnaVhost
+	a.AnaVhost = func(d *sql.DB, id int64) error {
+		time.Sleep(400 * time.Millisecond)
+		return ana(d, id)
+	}
+	var vh *VhostHatasi
+	if _, err := a.Uygula(context.Background(), db, 1, true, KaynakKok); !errors.As(err, &vh) {
+		t.Fatalf("VhostHatasi beklenirdi (DB geri alındı): %v", err)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{0, "aktif", "", "active"}) {
+		t.Fatalf("DB eski hâline dönmeli: %+v", d)
+	}
+	ok, hatali, err := a.BayiUygula(context.Background(), db, 7, true)
+	if err != nil || ok != 0 || hatali != 1 {
+		t.Fatalf("zincir: ok=%d hatali=%d err=%v", ok, hatali, err)
+	}
+	if d := ha_oku(t, db, 1); d != (ha_durum{1, "pasif", "bayi", "suspended"}) {
+		t.Fatalf("zincirde hesap askıda kalmalı, kapatma adımları uygulanmalı: %+v", d)
 	}
 }

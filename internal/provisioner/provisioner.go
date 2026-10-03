@@ -1326,11 +1326,9 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 // hesabinAltVhostlari — dizindeki sub_<sk>_<alt>.conf dosyaları. 🔴 "sub_<sk>_*"
 // deseni komşu kiracıyı da yakalar (c_shop için sub_c_shop_store_blog.conf,
 // c_shop_store'undur); <alt> bir DNS etiketidir ('_' içermez) → '_' içeren kalan
-// başka hesabındır, elenir.
+// başka hesabındır, elenir. (Aynı süzgeç joker içeren bir sk'nin desenle
+// yakaladığı yabancı dosyaları da eler: literal önek tutmazsa kalan "sub_…" olur.)
 func hesabinAltVhostlari(dizin, sk string) []string {
-	if !gecerliSKAdi(sk) {
-		return nil
-	}
 	adaylar, _ := filepath.Glob(filepath.Join(dizin, "sub_"+sk+"_*.conf"))
 	var out []string
 	for _, y := range adaylar {
