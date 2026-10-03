@@ -139,3 +139,24 @@ func TestEsik_MusteriTercihindeKotaYok(t *testing.T) {
 		}
 	}
 }
+
+// Eşik dışı tür: müşteri yazıcının görenlerinde KALIR — müşteri okuyup durum
+// sürünce yalnız müşteri yeniden uyarılır (sahibin rozetine ikinci kopya binmez).
+func TestEsik_OtekiTurdeMusteriGorenlerde(t *testing.T) {
+	h := bh_kur(t)
+	o := Olay{Seviye: "uyari", Kategori: "ssl", Baslik: "SSL sertifikası yenilenemedi", Mesaj: "m", RefTur: "esik_ssl", RefID: 1}
+	if YazOlay(h.DB, o, 10, AktorYok, 0) <= 0 {
+		t.Fatal("ssl yazılmalı")
+	}
+	mus, bayi := bt_musteri(t, 10), bt_bayi(t, 7)
+	bt_okundu(t, h, mus, 0)
+	if YazOlay(h.DB, o, 10, AktorYok, 0) <= 0 {
+		t.Fatal("müşteri okudu, durum sürüyor → müşteri için yeniden yazılmalı")
+	}
+	if n, _ := bh_sayac(t, h, mus); n != 1 {
+		t.Errorf("müşteri yeniden uyarılmalı: %d", n)
+	}
+	if n, _ := bh_sayac(t, h, bayi); n != 1 {
+		t.Errorf("bayinin rozetine ikinci kopya binmemeli: %d", n)
+	}
+}
