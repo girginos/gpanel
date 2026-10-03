@@ -4,13 +4,13 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { useParams, Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Badge, Button, Select } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Ayarlar = {
@@ -90,7 +90,6 @@ const WEBSRV_EN: Record<string, string> = {
   " yalnızca HTTPS aktif siteler için anlamlıdır. Site HTTP-only ise tarayıcıya gönderilmez.": " is only meaningful for sites with HTTPS active. If the site is HTTP-only, it is not sent to the browser.",
   "1 hafta": "1 week",
   "6 ay": "6 months",
-  "WordPress/PHP sayfalarini diskte onbellege alir. POST/cookie/login/preview otomatik atlanir. WP Site Health (Page cache detected) uyarisini giderir.": "Caches WordPress/PHP pages on disk. POST/cookie/login/preview are skipped automatically. Resolves the WP Site Health (Page cache detected) warning.",
   "5 dakika": "5 minutes",
   "15 dakika": "15 minutes",
   "6 saat": "6 hours",
@@ -115,9 +114,6 @@ const WEBSRV_EN: Record<string, string> = {
   "Belge Kök Dizini": "Document Root",
   "Belge Kökünü Kaydet": "Save Document Root",
   "Belge kökü değiştirilemedi": "Failed to change document root",
-  "CSS/JS/PNG/JPG/WOFF gibi statik dosyalar tarayıcıda önbellekte tutulur. Tekrar ziyaretlerde sayfa çok daha hızlı yüklenir.": "Static files like CSS/JS/PNG/JPG/WOFF are cached in the browser. Pages load much faster on repeat visits.",
-  "Cache süresi (dakika)": "Cache duration (minutes)",
-  "Cache süresi (gün)": "Cache duration (days)",
   "Cross-site Referer bilgisi kısıtlanır": "Cross-site Referer info is restricted",
   "Eski tarayıcı XSS koruması": "Legacy browser XSS protection",
   "Etkin kök:": "Active root:",
@@ -132,6 +128,25 @@ const WEBSRV_EN: Record<string, string> = {
   "Web Sunucu Yığını": "Web Server Stack",
   "Yalnız dosya servisi — React/Vue/Angular SPA, statik site jeneratörleri (Hugo/Jekyll), CDN içeriği için. PHP çağrıları 404 döner.": "File-serving only — for React/Vue/Angular SPAs, static site generators (Hugo/Jekyll), CDN content. PHP calls return 404.",
   "public_html içindeki alt klasör": "Subfolder inside public_html",
+  "Sitenizin hızını artıran önbellek ayarları.": "Cache settings that speed up your site.",
+  "Sayfa önbelleği": "Page cache",
+  "Tarayıcı önbelleği": "Browser cache",
+  "Statik dosyalar": "Static files",
+  "WordPress/PHP sayfalarını önbelleğe alarak siteyi hızlandırır. Giriş yapmış kullanıcılar ve formlar etkilenmez.": "Speeds up the site by caching WordPress/PHP pages. Logged-in users and forms are not affected.",
+  "Resim, CSS ve JS dosyalarını ziyaretçinin tarayıcısında saklar; tekrar gelenlerde sayfa daha hızlı açılır.": "Stores images, CSS and JS files in the visitor's browser; pages open faster for returning visitors.",
+  "Saklama süresi": "Retention period",
+  "Teknik ayrıntılar": "Technical details",
+  "Yöntem": "Method",
+  "Yanıt başlığı": "Response header",
+  "Önbellek süresi": "Cache duration",
+  "Geçerlilik": "Expires",
+  "Dosya türleri": "File types",
+  "Atlananlar": "Bypassed",
+  "Not": "Note",
+  "{0} dakika": "{0} minutes",
+  "{0} gün": "{0} days",
+  "POST istekleri, oturum çerezleri, giriş ve önizleme sayfaları": "POST requests, session cookies, login and preview pages",
+  "WP Site Health \"Page cache detected\" uyarısını giderir.": "Resolves the WP Site Health \"Page cache detected\" warning.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WEBSRV_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -411,50 +426,69 @@ export default function DomainWebSunucuPage() {
             )}
           </Kart>
 
-          {/* Performans Önbelleği */}
+          {/* Performans Önbelleği — sade, insan dilinde sunum; teknik ayrıntılar katlanır bölümde */}
           <Kart baslik={cevir("Performans Önbelleği")}>
-            <SatirToggle
-              etiket="Nginx FastCGI Cache"
-              deger={cevirT(cevir("x-cache-status header · {0} dk önbellek süresi"), a.fastcgi_cache_dakika)}
-              aciklama={cevir("WordPress/PHP sayfalarini diskte onbellege alir. POST/cookie/login/preview otomatik atlanir. WP Site Health (Page cache detected) uyarisini giderir.")}
-              acik={a.fastcgi_cache}
-              onToggle={() => P('fastcgi_cache', !a.fastcgi_cache)}
-            />
-            {a.fastcgi_cache && (
-              <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-600">
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Cache süresi (dakika)")}</label>
-                <select value={a.fastcgi_cache_dakika} onChange={e => P('fastcgi_cache_dakika', parseInt(e.target.value))}
-                  className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
-                  <option value={5}>{cevir("5 dakika")}</option>
-                  <option value={15}>{cevir("15 dakika")}</option>
-                  <option value={60}>{cevir("1 saat (önerilen)")}</option>
-                  <option value={360}>{cevir("6 saat")}</option>
-                  <option value={1440}>{cevir("1 gün")}</option>
-                </select>
-              </div>
-            )}
+            <p className="-mt-1 mb-3 text-sm text-slate-500 dark:text-slate-400">
+              {cevir("Sitenizin hızını artıran önbellek ayarları.")}
+            </p>
+            <div className="space-y-3">
+              <OnbellekSecenegi
+                ikon={I.simsek}
+                baslik={cevir("Sayfa önbelleği")}
+                altEtiket="Nginx FastCGI"
+                aciklama={cevir("WordPress/PHP sayfalarını önbelleğe alarak siteyi hızlandırır. Giriş yapmış kullanıcılar ve formlar etkilenmez.")}
+                acik={a.fastcgi_cache}
+                onToggle={() => P('fastcgi_cache', !a.fastcgi_cache)}
+                teknik={[
+                  [cevir("Yöntem"), 'Nginx FastCGI Cache'],
+                  [cevir("Yanıt başlığı"), 'X-Cache-Status: HIT / MISS / BYPASS'],
+                  [cevir("Önbellek süresi"), cevirT(cevir("{0} dakika"), a.fastcgi_cache_dakika)],
+                  [cevir("Atlananlar"), cevir("POST istekleri, oturum çerezleri, giriş ve önizleme sayfaları")],
+                  [cevir("Not"), cevir("WP Site Health \"Page cache detected\" uyarısını giderir.")],
+                ]}
+              >
+                <Select
+                  label={cevir("Saklama süresi")}
+                  value={a.fastcgi_cache_dakika}
+                  onChange={e => P('fastcgi_cache_dakika', parseInt(e.target.value))}
+                  classNames={{ root: 'w-full sm:max-w-xs' }}
+                  data={[
+                    { value: 5, label: cevir("5 dakika") },
+                    { value: 15, label: cevir("15 dakika") },
+                    { value: 60, label: cevir("1 saat (önerilen)") },
+                    { value: 360, label: cevir("6 saat") },
+                    { value: 1440, label: cevir("1 gün") },
+                  ]}
+                />
+              </OnbellekSecenegi>
 
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-dark-600">
-              <SatirToggle
-                etiket="Browser Cache (statik dosyalar)"
-                deger={`Cache-Control: public, immutable · expires ${a.browser_cache_gun}d`}
-                aciklama={cevir("CSS/JS/PNG/JPG/WOFF gibi statik dosyalar tarayıcıda önbellekte tutulur. Tekrar ziyaretlerde sayfa çok daha hızlı yüklenir.")}
+              <OnbellekSecenegi
+                ikon={I.monitor}
+                baslik={cevir("Tarayıcı önbelleği")}
+                altEtiket={cevir("Statik dosyalar")}
+                aciklama={cevir("Resim, CSS ve JS dosyalarını ziyaretçinin tarayıcısında saklar; tekrar gelenlerde sayfa daha hızlı açılır.")}
                 acik={a.browser_cache}
                 onToggle={() => P('browser_cache', !a.browser_cache)}
-              />
-              {a.browser_cache && (
-                <div className="mt-3 pl-4 border-l-2 border-slate-200 dark:border-dark-600">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Cache süresi (gün)")}</label>
-                  <select value={a.browser_cache_gun} onChange={e => P('browser_cache_gun', parseInt(e.target.value))}
-                    className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
-                    <option value={1}>{cevir("1 gün")}</option>
-                    <option value={7}>{cevir("1 hafta")}</option>
-                    <option value={30}>{cevir("30 gün (önerilen)")}</option>
-                    <option value={90}>{cevir("3 ay")}</option>
-                    <option value={365}>{cevir("1 yıl")}</option>
-                  </select>
-                </div>
-              )}
+                teknik={[
+                  [cevir("Yanıt başlığı"), 'Cache-Control: public, immutable'],
+                  [cevir("Geçerlilik"), cevirT(cevir("{0} gün"), a.browser_cache_gun)],
+                  [cevir("Dosya türleri"), 'CSS, JS, PNG, JPG, WOFF…'],
+                ]}
+              >
+                <Select
+                  label={cevir("Saklama süresi")}
+                  value={a.browser_cache_gun}
+                  onChange={e => P('browser_cache_gun', parseInt(e.target.value))}
+                  classNames={{ root: 'w-full sm:max-w-xs' }}
+                  data={[
+                    { value: 1, label: cevir("1 gün") },
+                    { value: 7, label: cevir("1 hafta") },
+                    { value: 30, label: cevir("30 gün (önerilen)") },
+                    { value: 90, label: cevir("3 ay") },
+                    { value: 365, label: cevir("1 yıl") },
+                  ]}
+                />
+              </OnbellekSecenegi>
             </div>
           </Kart>
 
@@ -526,5 +560,72 @@ function CheckboxRow({ etiket, aciklama, checked, onChange }:
         <div className="text-xs text-slate-500 dark:text-slate-500">{aciklama}</div>
       </div>
     </label>
+  )
+}
+
+// Performans Önbelleği seçeneği: ikon + insan dilinde başlık + gri teknik alt etiket,
+// sağda durum rozeti ve anahtar. Teknik ayrıntılar <details> içinde katlanır (klavye ve
+// ekran okuyucu yerel olarak destekler). Ayar alanı (children) yalnız açıkken görünür.
+function OnbellekSecenegi({ ikon, baslik, altEtiket, aciklama, acik, onToggle, teknik, children }: {
+  ikon: string; baslik: string; altEtiket: string; aciklama: string; acik: boolean
+  onToggle: () => void; teknik: Array<[string, string]>; children?: React.ReactNode
+}) {
+  const kimlik = useId()
+  const baslikId = `${kimlik}-baslik`
+  const aciklamaId = `${kimlik}-aciklama`
+  return (
+    <div className={`rounded-lg border p-4 transition-colors ${
+      acik
+        ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]'
+        : 'border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-700'
+    }`}>
+      <div className="flex items-start gap-3">
+        <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${
+          acik
+            ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'
+            : 'bg-slate-100 text-slate-500 dark:bg-dark-600 dark:text-slate-400'
+        }`}>
+          <Ikon d={ikon} className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h4 id={baslikId} className="text-sm font-semibold text-slate-900 dark:text-slate-100">{baslik}</h4>
+            <Badge color={acik ? 'success' : 'neutral'} variant="soft" className="text-[11px]">
+              {acik ? cevir("Açık") : cevir("Kapalı")}
+            </Badge>
+          </div>
+          <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{altEtiket}</div>
+          <p id={aciklamaId} className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">{aciklama}</p>
+        </div>
+        <button type="button" onClick={onToggle} role="switch" aria-checked={acik}
+          aria-labelledby={baslikId} aria-describedby={aciklamaId}
+          className={`relative mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
+            acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+          }`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+
+      {acik && children && (
+        <div className="mt-4 border-t border-slate-200/70 pt-4 dark:border-dark-600 sm:ml-12">
+          {children}
+        </div>
+      )}
+
+      <details className="group mt-3 sm:ml-12">
+        <summary className="inline-flex cursor-pointer select-none list-none items-center gap-1 rounded text-xs font-medium text-slate-500 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:text-slate-400 dark:hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+          <Ikon d={I.chevronSag} className="size-3.5 transition-transform group-open:rotate-90" />
+          {cevir("Teknik ayrıntılar")}
+        </summary>
+        <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-md bg-slate-50 px-3 py-2.5 text-xs dark:bg-dark-800/50 sm:grid-cols-[max-content_1fr]">
+          {teknik.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-slate-400 dark:text-slate-500">{k}</dt>
+              <dd className="min-w-0 break-words font-mono text-slate-700 dark:text-slate-300">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </div>
   )
 }
