@@ -220,7 +220,17 @@ sir_valkey_umask() {
   fi
   [ "$kuru" = 1 ] && { echo "  → (kuru) $f yazılacak (UMask=0027)"; return 0; }
   mkdir -p "$d" && printf '[Service]\n# girginospanel-sir: ACL SAVE users.acl dosyasını 0640 yazsın (parola özetleri)\nUMask=0027\n' > "$f" \
-    && { [ -n "$SIR_KOK" ] || systemctl daemon-reload >/dev/null 2>&1; echo "  ✔ valkey UMask=0027 drop-in (sonraki valkey restart'ında etkin)"; }
+    || return 0
+  if [ -n "$SIR_KOK" ]; then echo "  ✔ valkey UMask=0027 drop-in"; return 0; fi
+  # Drop-in ancak restart'ta etkin olur; restart'sız bırakılırsa panelin bir sonraki
+  # ACL SAVE'i (kiracı Redis kullanıcısı açma/kapama) dosyayı yine 0644 yazar
+  # (181'de ölçüldü). Tek seferlik: drop-in zaten varsa bu dala hiç gelinmez.
+  systemctl daemon-reload >/dev/null 2>&1
+  if systemctl try-restart valkey >/dev/null 2>&1; then
+    echo "  ✔ valkey UMask=0027 drop-in + valkey yeniden başlatıldı (bir kerelik)"
+  else
+    echo "  ! valkey UMask=0027 drop-in yazıldı ama valkey yeniden başlatılamadı — elle: systemctl restart valkey"
+  fi
 }
 
 sir_izin() {
