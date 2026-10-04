@@ -25,9 +25,6 @@ export interface ApiAnahtari {
   iptal_neden: string
   iptal_yonetim: boolean
   sahip_askida: boolean
-  sahip_id: number
-  sahip_rol: 'admin' | 'reseller'
-  sahip_ad?: string
 }
 
 export interface IzinGrubu {
@@ -69,8 +66,9 @@ export interface TekKezYanit {
   anahtar_kaydi: ApiAnahtari
 }
 
-export async function anahtarListe(bayiler = false): Promise<ApiAnahtari[]> {
-  const r = await api.get<{ anahtarlar: ApiAnahtari[] }>('/api-anahtarlari', { params: bayiler ? { sahip: 'bayiler' } : undefined })
+// Yalnız çağıranın kendi anahtarları (sunucu oturumdan süzer; sahip parametresi yok).
+export async function anahtarListe(): Promise<ApiAnahtari[]> {
+  const r = await api.get<{ anahtarlar: ApiAnahtari[] }>('/api-anahtarlari')
   return r.data.anahtarlar || []
 }
 
