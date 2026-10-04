@@ -35,7 +35,24 @@ func bozTckn(gecerli string) string {
 	return gecerli[:10] + string(yeni)
 }
 
+// bozTckn10 — 10. hanesi bozuk ama 11. hanesi buna göre TUTARLI hesaplanmış sayı:
+// yalnız 10. hane sağlaması yakalar.
+func bozTckn10(d9 string) string {
+	g := tcknUret(d9)
+	d10 := (int(g[9]-'0') + 1) % 10
+	top := 0
+	for i := 0; i < 9; i++ {
+		top += int(g[i] - '0')
+	}
+	return g[:9] + string(rune('0'+d10)) + string(rune('0'+(top+d10)%10))
+}
+
 func TestTCKN_SaglamaVeYanlisPozitif(t *testing.T) {
+	for _, d9 := range []string{"123456789", "987654321", "246813579"} {
+		if b := bozTckn10(d9); tcknGecerli(b) {
+			t.Errorf("10. hanesi bozuk sayı geçerli sayıldı: %s", b)
+		}
+	}
 	if !tcknGecerli("10000000146") {
 		t.Fatal("bilinen geçerli T.C. kimlik no reddedildi")
 	}
@@ -169,6 +186,7 @@ func TestKullaniciMetni_YanlisPozitifKorumasi(t *testing.T) {
 		"pid 12345 öldü, port 8080 ve 3306 açık",
 		"nginx 1.18.0 ve php 8.2.12 sürümü",
 		"v10.20.30 ve 1.2.3.4.5",
+		"+1 2 3 4 5 6 7 az hane", "+1234567890123456789 çok hane",
 		"2147483647 değeri taştı",
 		"5000000000 bayt dosya",
 		"boyut 4294967296 ve 1696000000000 zaman damgası",
