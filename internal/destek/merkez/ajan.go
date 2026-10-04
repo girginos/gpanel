@@ -395,6 +395,7 @@ func (a *AjanSunucu) EslesmeBaslat(kodOzet string, tg int64, tgAd string) (strin
 		return "", ErrDogrulanmadi
 	}
 	delete(a.kodlar, kodOzet)
+	a.m.unutulduKaldir(tg) // yeniden eşleştirme: /unutbeni mezar taşı kalkar
 	zarf := yeniKimlik()
 	a.eslesmeler[kodOzet] = eslesmeKaydi{sunucu: k.sunucu, tg: tg, bitis: simdi.Add(eslesmeBeklemesi), zarf: zarf, aydinlatma: k.aydinlatma}
 	a.mu.Unlock()
@@ -514,6 +515,17 @@ func (a *AjanSunucu) baglantiDurumIsle(ao *ajanOturumu, d *protokol.BaglantiDuru
 		}
 	}
 	return nil
+}
+
+// eslesmeTemizle: /unutbeni — kullanıcının bekleyen (henüz etkinleşmemiş) eşleştirme kayıtlarını siler.
+func (a *AjanSunucu) eslesmeTemizle(tg int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for oz, e := range a.eslesmeler {
+		if e.tg == tg {
+			delete(a.eslesmeler, oz)
+		}
+	}
 }
 
 func (a *AjanSunucu) eslesmeSil(kodOzet string) {

@@ -90,6 +90,8 @@ var desenler = []desen{
 	{ad: "dropbox", on: []string{"sl."}, re: regexp.MustCompile(`\bsl\.[0-9A-Za-z\-_.]{20,}`), yerine: "sl." + Isaret},
 	{ad: "base64-anahtar", on: []string{"base64:"}, re: regexp.MustCompile(`\bbase64:[A-Za-z0-9+/]{32,}={0,2}`), yerine: "base64:" + Isaret},
 	{ad: "pem-govde", re: regexp.MustCompile(`^\s*[A-Za-z0-9+/]{60,}={0,2}\s*$`), yerine: Isaret},
+	{ad: "iban", re: ibanAdayRe, fn: ibanMaskele},
+	{ad: "tckn", re: tcknAdayRe, fn: tcknMaskele},
 	{ad: "kart", re: regexp.MustCompile(`\b[2-69](?:[ -]?[0-9]){12,18}\b`), fn: kartMaskele},
 }
 

@@ -217,7 +217,7 @@ func TestIptalIkiYonde(t *testing.T) {
 	o.kosulBekle("merkez ajanı çevrimdışı gördü", 10*time.Second, func() bool { return o.metrikSayi("cevrimici_ajan") == 0 })
 	o.mesaj(tgB, "musteri_b", "/unutbeni")
 	o.callback(tgB, "unut:evet")
-	o.tg.bekle(t, tgB, "Silindi")
+	o.tg.bekle(t, tgB, "çevrimdışı olduğundan") // bot yanıtı: merkez silindi, sunucu tarafı bekliyor
 	if d, _ := o.dbDurum(kimB); d != "aktif" {
 		t.Fatalf("çevrimdışı ajanın bağlantısı: %s", d)
 	}
@@ -227,6 +227,18 @@ func TestIptalIkiYonde(t *testing.T) {
 		d, n := o.dbDurum(kimB)
 		return d == "iptal" && n == string(protokol.IptalMerkez)
 	})
+	// KVKK: çevrimdışıyken verilen /unutbeni yeniden bağlanınca TAMAMLANIR — sunucuda Telegram
+	// kimliği (id + @ad) ve denetim dizgeleri anonimleşir.
+	o.kosulBekle("çevrimdışı unutbeni sonrası Telegram kimliği anonimleşti", 10*time.Second, func() bool {
+		var tg int64
+		var ad string
+		return o.db.QueryRow(`SELECT tg_user_id, tg_kullanici_adi FROM destek_baglantilari WHERE kimlik=?`, kimB).Scan(&tg, &ad) == nil && tg == 0 && ad == ""
+	})
+	var kal int
+	_ = o.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE INSTR(actor_username, 'musteri_b')>0 OR INSTR(target, 'musteri_b')>0`).Scan(&kal)
+	if kal != 0 {
+		t.Fatalf("denetim günlüğünde Telegram kullanıcı adı kaldı: %d satır", kal)
+	}
 	// senkron, önceki iptalleri yeniden bildirdi: merkez sessiz kalır, oturum düşmez
 	time.Sleep(300 * time.Millisecond)
 	if !o.ajan().Bagli() {

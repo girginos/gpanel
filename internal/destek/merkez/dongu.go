@@ -46,9 +46,27 @@ var etiketSoz = strings.NewReplacer(
 	"<mesaj", "‹mesaj", "</mesaj", "‹/mesaj", "<yanit", "‹yanit", "</yanit", "‹/yanit",
 )
 
-// kullaniciMetni: kullanıcı metni oturum/veri etiketlerini taklit edemez; 4000 rune sınırı.
-func kullaniciMetni(s string) string {
-	return etiketSoz.Replace(maske.KesRune(strings.ToValidUTF8(s, "?"), 4000))
+// maskeliKullaniciMetni — KVKK: Telegram kullanıcısının serbest metni, Anthropic'e
+// (triyaj + ana model), diske (konuşma kaydı) ve insan devrine gitmeden ÖNCE tek
+// noktadan maskelenir (maske.KullaniciMetni: sırlar, T.C. kimlik no, IBAN, kart,
+// telefon, e-posta, IP, "şifrem …"). Önce maske, SONRA kesme: sınır bir sırrı
+// ikiye bölüp maskeyi kaçırtamaz. Belirlenimci ve idempotenttir (birden çok
+// çağrıda aynı sonuç). Komutlar (/start KOD …) bu yola girmez: bot.go komutları
+// maskeden ÖNCE ayırır, eşleştirme kodu akışı etkilenmez.
+func (m *Merkez) maskeliKullaniciMetni(s string) string {
+	s = strings.ToValidUTF8(s, "?")
+	var bilinen []string
+	if m.sir != nil {
+		bilinen = m.sir.Bilinenler()
+	}
+	return maske.KesRune(maske.KullaniciMetni(s, bilinen), 4000)
+}
+
+// kullaniciMetni: maskeli kullanıcı metni oturum/veri etiketlerini taklit edemez.
+// Modele giden HER kullanıcı metni buradan geçer (savunma derinliği: çağıran
+// zaten maskelemiş olsa da idempotent maske yeniden uygulanır).
+func (m *Merkez) kullaniciMetni(s string) string {
+	return etiketSoz.Replace(m.maskeliKullaniciMetni(s))
 }
 
 // tekAracCagir: zorunlu tek araçlı küçük model çağrısı; araç girdisi döner.
@@ -77,7 +95,7 @@ type triyajSonucu struct {
 }
 
 func (m *Merkez) triyaj(ctx context.Context, sunucu, metin string) (triyajSonucu, error) {
-	ham, err := m.tekAracCagir(ctx, sunucu, triyajSistem, triyajArac, "siniflandir", "<mesaj>\n"+kullaniciMetni(metin)+"\n</mesaj>")
+	ham, err := m.tekAracCagir(ctx, sunucu, triyajSistem, triyajArac, "siniflandir", "<mesaj>\n"+m.kullaniciMetni(metin)+"\n</mesaj>")
 	if err != nil {
 		return triyajSonucu{}, err
 	}
@@ -150,7 +168,7 @@ func (m *Merkez) destekYanitla(ctx context.Context, o *Oturum, metin, dil string
 	if len(o.mesajlar) == 0 {
 		bloklar = append(bloklar, metinBlok(protokol.OturumBlogu(o.Baglam, m.saat())))
 	}
-	bloklar = append(bloklar, metinBlok(kullaniciMetni(metin)))
+	bloklar = append(bloklar, metinBlok(m.kullaniciMetni(metin)))
 	o.mesajlar = append(o.mesajlar, apiMesaj{Rol: "user", Icerik: bloklar})
 
 	model := m.yap.Modeller.Ana
@@ -244,6 +262,28 @@ func (m *Merkez) destekYanitla(ctx context.Context, o *Oturum, metin, dil string
 	}
 }
 
+// aracSonucuMaskele — KVKK/R9: ajan sonucu (eski, hatalı ya da ele geçirilmiş bir ajan
+// maskesiz çıktı gönderebilir) modele girmeden HUB'da ikinci kez süzülür. Yalnız sır
+// desenleri + bilinen sırlar + sağlamalı tanımlayıcılar (kart/IBAN/T.C. kimlik no):
+// telefon/IP/e-posta KURALLARI UYGULANMAZ (port, PID, IP teşhisi bozulmasın). Girdi
+// değiştirilmez; özet ve satırlar kopyada maskelenir.
+func (m *Merkez) aracSonucuMaskele(s *protokol.IsSonucu) *protokol.IsSonucu {
+	if s == nil {
+		return s
+	}
+	var bilinen []string
+	if m.sir != nil {
+		bilinen = m.sir.Bilinenler()
+	}
+	mk := maske.Yeni(maske.Secenek{BilinenSirlar: bilinen})
+	c := *s
+	c.Ozet = mk.Satir(s.Ozet)
+	if s.Satirlar != nil {
+		c.Satirlar = mk.Satirlar(s.Satirlar)
+	}
+	return &c
+}
+
 // metin_: metin() kısaltması (yerel değişken adı "metin" ile çakışmasın diye).
 func metin_(dil, anahtar string, a ...any) string { return metin(dil, anahtar, a...) }
 
@@ -291,7 +331,7 @@ func (m *Merkez) araclariCalistir(ctx context.Context, o *Oturum, bloklar []json
 			continue
 		}
 		m.konusmaKaydet(o.TgUserID, o.Sunucu, "arac", fmt.Sprintf("%s → %s ok=%t", g.Arac, s.IsKodu, s.Ok))
-		out = append(out, aracSonucBlok(h.ID, protokol.GuvenilmezSar(s), !s.Ok))
+		out = append(out, aracSonucBlok(h.ID, protokol.GuvenilmezSar(m.aracSonucuMaskele(s)), !s.Ok))
 	}
 	return out
 }

@@ -329,7 +329,12 @@ func (b *Bot) callbackIsle(ctx context.Context, c *TgCallback) {
 			return
 		}
 		if bg.KVKKKabul.IsZero() {
+			// 🔴 KVKK: bu yol yalnız portal onayı OLMAYAN eski kayıtlar için kalır (yeni bağlantılar
+			// portalda imzalı v2 onayından doğar ve KVKKKabul'u zaten taşır). Portal yolu gibi
+			// kaynak + metin sürümü + zaman kaydedilir; sürüm bot metninin etiketidir (KvkkMetinSurumu).
 			bg.KVKKKabul = b.m.saat().UTC()
+			bg.KVKKSurum = KvkkMetinSurumu
+			bg.KVKKKaynak = KvkkKaynakTelegram
 			_ = b.m.depo.BaglantiKaydet(*bg)
 		}
 		_ = b.m.tg.CallbackYanitla(ctx, c.ID, "")
@@ -348,20 +353,43 @@ func (b *Bot) callbackIsle(ctx context.Context, c *TgCallback) {
 		if deger != "evet" {
 			return
 		}
-		for _, bg := range b.m.depo.KullaniciBaglantilari(kul.ID) {
-			if !b.m.ajan.BaglantiIptalGonder(bg.SunucuKimligi, bg.BaglantiID, protokol.IptalUnutBeni) {
-				b.m.log.Warn("unutbeni: ajan çevrimdışı, iptal iletilemedi (merkez kaydı yine silinir)", "sunucu", bg.SunucuKimligi)
-			}
-		}
-		b.m.oturumlar.KapatKullanici(kul.ID)
-		if err := b.m.depo.KullaniciUnut(kul.ID); err != nil {
-			b.m.log.Error("unutbeni başarısız", "hata", err)
-		}
-		_ = b.m.tg.CallbackYanitla(ctx, c.ID, "")
-		b.gonder(ctx, kul.ID, metin(dil, "unut_tamam"), false)
+		b.unutBeni(ctx, kul.ID, c.ID, dil)
 	default:
 		_ = b.m.tg.CallbackYanitla(ctx, c.ID, "")
 	}
+}
+
+// unutBeni: /unutbeni onayı — gerçek silme. Hub'da: kullanıcı tercihi, TÜM bağlantılar, o kullanıcıya
+// ait konuşma satırları (tüm gün dosyalarında, atomik yeniden yazım), bellek oturumları, bekleyen
+// eşleştirmeler ve hız sayaçları silinir. Ajana (sunucu) her bağlantı için BaglantiIptal{unutbeni}
+// gider; ajan Telegram kimliğini anonimleştirir. Ajan çevrimdışıysa hub kaydı yine silinir; ajan
+// bir sonraki bağlanışta bağlantıyı bildirir, merkezde karşılığı olmadığından iptal+anonimleştirme
+// TAMAMLANIR (merkez/ajan.go baglantiDurumIsle). Yanıt metni ikisini ayrı söyler.
+func (b *Bot) unutBeni(ctx context.Context, tg int64, callbackID, dil string) {
+	cevrimdisi := false
+	for _, bg := range b.m.depo.KullaniciBaglantilari(tg) {
+		if !b.m.ajan.BaglantiIptalGonder(bg.SunucuKimligi, bg.BaglantiID, protokol.IptalUnutBeni) {
+			cevrimdisi = true
+			b.m.log.Warn("unutbeni: ajan çevrimdışı; sunucu tarafı bir sonraki bağlanışta tamamlanacak (merkez kaydı yine silinir)", "sunucu", bg.SunucuKimligi)
+		}
+	}
+	b.m.unutuldu(tg) // uçuştaki işlem silmeden sonra kayıt eklemesin
+	b.m.oturumlar.KapatKullanici(tg)
+	b.m.ajan.eslesmeTemizle(tg)
+	if err := b.m.depo.KullaniciUnut(tg); err != nil {
+		b.m.log.Error("unutbeni başarısız", "hata", err)
+		_ = b.m.tg.CallbackYanitla(ctx, callbackID, "")
+		b.gonder(ctx, tg, metin(dil, "unut_hata"), false)
+		return
+	}
+	b.hiz.Sil(tgKisa(tg))
+	b.startHiz.Sil(tgKisa(tg))
+	_ = b.m.tg.CallbackYanitla(ctx, callbackID, "")
+	if cevrimdisi {
+		b.gonder(ctx, tg, metin(dil, "unut_tamam_bekliyor"), false)
+		return
+	}
+	b.gonder(ctx, tg, metin(dil, "unut_tamam"), false)
 }
 
 // ilerlemeYazici: ilerleme mesajını en çok saniyede bir düzenler.
@@ -418,6 +446,9 @@ func (b *Bot) destekIsle(ctx context.Context, kul *TgKullanici, k Kullanici, dil
 	bitir := false
 	defer func() { b.m.oturumlar.Birak(o, bitir) }()
 
+	// 🔴 KVKK: ham kullanıcı metni bu noktadan sonra HİÇBİR yere gitmez (konuşma kaydı,
+	// triyaj/ana model, insan devri mesajı) — önce maskelenir (dongu.go maskeliKullaniciMetni).
+	txt = b.m.maskeliKullaniciMetni(txt)
 	b.m.konusmaKaydet(kul.ID, bg.SunucuKimligi, "kullanici", txt)
 	_ = b.m.tg.EylemGonder(ctx, kul.ID, "typing")
 	il := &ilerlemeYazici{b: b, ctx: ctx, chat: kul.ID, metin: metin(dil, "inceleniyor")}

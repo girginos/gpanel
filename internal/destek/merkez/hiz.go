@@ -53,3 +53,11 @@ func (k *kayanPencere) uyarildi(anahtar string, simdi time.Time) bool {
 	k.olaylar[ua] = []time.Time{simdi}
 	return false
 }
+
+// Sil: anahtarın olaylarını ve ret-uyarı işaretini siler (/unutbeni).
+func (k *kayanPencere) Sil(anahtar string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	delete(k.olaylar, anahtar)
+	delete(k.olaylar, "~"+anahtar)
+}

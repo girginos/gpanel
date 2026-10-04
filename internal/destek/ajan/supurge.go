@@ -71,6 +71,7 @@ func (a *Ajan) SupurgeTur(ctx context.Context) {
 			a.otomatikIptal(ctx, b, n)
 		}
 	}
+	a.anonimEskiIptaller(ctx)
 	_, _ = a.DB.ExecContext(ctx, `DELETE FROM destek_islemleri WHERE zaman < NOW() - INTERVAL ? DAY LIMIT 5000`, isSaklama)
 }
 

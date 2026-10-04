@@ -65,7 +65,7 @@ type Baglanti struct {
 	Hesaplar      []protokol.HesapEtiketi `json:"hesaplar"`
 	KVKKKabul     time.Time               `json:"kvkk_kabul"`
 	KVKKSurum     string                  `json:"kvkk_surum,omitempty"`  // kabul edilen aydınlatma sürümü (portal)
-	KVKKKaynak    string                  `json:"kvkk_kaynak,omitempty"` // "portal" | "" (Telegram düğmesi)
+	KVKKKaynak    string                  `json:"kvkk_kaynak,omitempty"` // "portal" | "telegram" (bot içi düğme) | "" (eski kayıt)
 	Guncelleme    time.Time               `json:"guncelleme"`
 }
 
