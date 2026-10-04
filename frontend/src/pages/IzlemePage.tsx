@@ -216,14 +216,14 @@ function DomainIzleme() {
       {/* Loglar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <Kart baslik={cevir("Erişim Logu (Access)")} sag={`${cevir("son")} ${accessLog.length} ${cevir("satır")}`}>
-          <div ref={accessRef} className="bg-dark-900 text-emerald-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
+          <div ref={accessRef} className="bg-slate-50 dark:bg-dark-900 border border-slate-200 dark:border-transparent text-emerald-800 dark:text-emerald-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
             {accessLog.length === 0
               ? <div className="text-slate-500 dark:text-slate-500 italic">{cevir("Henüz log yok…")}</div>
               : accessLog.join('\n')}
           </div>
         </Kart>
         <Kart baslik={cevir("Hata Logu (Error)")} sag={`${cevir("son")} ${errorLog.length} ${cevir("satır")}`}>
-          <div ref={errorRef} className="bg-dark-900 text-rose-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
+          <div ref={errorRef} className="bg-slate-50 dark:bg-dark-900 border border-slate-200 dark:border-transparent text-rose-800 dark:text-rose-300 font-mono text-[11px] p-3 rounded h-80 overflow-auto whitespace-pre">
             {errorLog.length === 0
               ? <div className="text-slate-500 dark:text-slate-500 italic">{logHata || cevir("Henüz hata kaydı yok")}</div>
               : errorLog.join('\n')}
@@ -296,21 +296,21 @@ function SunucuLoglari() {
           <Button onClick={() => yukle()} yukleniyor={yuk} variant="outlined" boyut="sm" ikon={I.yenile}>{cevir("Yenile")}</Button>
         </div>
       </div>
-      <div ref={scrollRef} className="bg-dark-800 border border-dark-600 rounded-lg overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all h-[min(60vh,320px)] sm:h-[420px] lg:h-[560px]">
+      <div ref={scrollRef} className="bg-slate-50 dark:bg-dark-800 border border-slate-200 dark:border-dark-600 rounded-lg overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all h-[min(60vh,320px)] sm:h-[420px] lg:h-[560px]">
         {yuk ? <div className="text-slate-500 py-4">{cevir("Yükleniyor…")}</div>
           : gorunen.length === 0 ? <div className="text-slate-500 py-4">{arama ? cevirT(cevir("\"{0}\" bulunamadı."), arama) : cevir("(kayıt yok)")}</div>
             : gorunen.map((s, i) => <div key={i} className={logRenk(s)}>{s}</div>)}
       </div>
-      <p className="text-xs text-slate-400 mt-2">{arama ? `${gorunen.length} / ${satirlar.length}` : satirlar.length} {cevir("satır")} · journald · {cevir(LOG_KAYNAK_ET[kaynak] || kaynak)}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{arama ? `${gorunen.length} / ${satirlar.length}` : satirlar.length} {cevir("satır")} · journald · {cevir(LOG_KAYNAK_ET[kaynak] || kaynak)}</p>
     </div>
   )
 }
 
 function logRenk(s: string): string {
-  if (/error|fail|fatal|denied|refused|panic|segfault/i.test(s)) return 'text-red-400'
-  if (/warn/i.test(s)) return 'text-amber-400'
-  if (/notice|started|listening|active/i.test(s)) return 'text-sky-400'
-  return 'text-slate-300'
+  if (/error|fail|fatal|denied|refused|panic|segfault/i.test(s)) return 'text-red-700 dark:text-red-400'
+  if (/warn/i.test(s)) return 'text-amber-700 dark:text-amber-400'
+  if (/notice|started|listening|active/i.test(s)) return 'text-sky-700 dark:text-sky-400'
+  return 'text-slate-700 dark:text-slate-300'
 }
 
 // tabloMod: içinde duyarlı tablo varsa kullanılır. Mobilde çerçeve/zemin/padding

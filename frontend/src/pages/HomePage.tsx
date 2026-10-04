@@ -15,6 +15,7 @@ import { SayfaCercevesi } from '@/components/SayfaKabugu'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import PanoWidgetlari from '@/components/pano/PanoWidgetlari'
+import { useKoyuTema } from '@/lib/useKoyuTema'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, Box, CheckCircle2, Cloud, Cpu,
@@ -108,9 +109,28 @@ const saatEtiket = (d = new Date()) => d.toLocaleTimeString('tr-TR', { hour: '2-
 // örneklere kadar grafik yerine boş durum çizilir.
 const GRAFIK_EN_AZ = 2 // alan grafiği ve sparkline için gereken en az örnek
 
-const TAB_RENK: Record<string, string> = { cpu: '#3b82f6', bellek: '#8b5cf6', disk: '#f59e0b' }
-const IMLEC: any = { stroke: 'rgba(255,255,255,.16)', strokeDasharray: '3 3' }
-const TIP_STIL: any = { background: '#111722', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, color: '#fff', fontSize: 13, boxShadow: '0 10px 30px rgba(0,0,0,.35)' }
+// Grafik renkleri tema başına (recharts JS değeri ister; CSS değişkeni yetmez). Koyu palet
+// önceki sabit değerlerdir; açık palet beyaz kart üstünde yeterli kontrast için 600-700 tonlu.
+const PALET_KOYU = {
+  tab: { cpu: '#3b82f6', bellek: '#8b5cf6', disk: '#f59e0b' } as Record<string, string>,
+  imlec: { stroke: 'rgba(255,255,255,.16)', strokeDasharray: '3 3' },
+  tip: { background: '#111722', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, color: '#fff', fontSize: 13, boxShadow: '0 10px 30px rgba(0,0,0,.35)' } as React.CSSProperties,
+  izgara: 'rgba(255,255,255,.055)', eksen: '#64748b',
+  gelen: '#10b981', giden: '#3b82f6',
+  depo: { host: '#3b82f6', sql: '#8b5cf6', yedek: '#f59e0b', log: '#10b981' } as Record<string, string>,
+  notr: '#64748b', iyi: '#10b981', orta: '#f59e0b', kotu: '#f43f5e',
+  spark: { cpu: '#10b981', ram: '#8b5cf6', disk: '#f59e0b', net: '#3b82f6' } as Record<string, string>,
+}
+const PALET_ACIK: typeof PALET_KOYU = {
+  tab: { cpu: '#2563eb', bellek: '#7c3aed', disk: '#b45309' },
+  imlec: { stroke: 'rgba(15,23,42,.25)', strokeDasharray: '3 3' },
+  tip: { background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12, color: '#0f172a', fontSize: 13, boxShadow: '0 10px 30px rgba(15,23,42,.15)' },
+  izgara: 'rgba(15,23,42,.09)', eksen: '#64748b',
+  gelen: '#059669', giden: '#2563eb',
+  depo: { host: '#2563eb', sql: '#7c3aed', yedek: '#d97706', log: '#059669' },
+  notr: '#64748b', iyi: '#047857', orta: '#b45309', kotu: '#be123c',
+  spark: { cpu: '#059669', ram: '#7c3aed', disk: '#d97706', net: '#2563eb' },
+}
 
 // Kart içi mini sparkline (alan + çizgi), kartın altına tam genişlik.
 function Spark({ pts, renk, id }: { pts: number[]; renk: string; id: string }) {
@@ -182,7 +202,7 @@ function Donut({ segments }: { segments: { ad: string; deger: number; renk: stri
   return (
     <svg viewBox="0 0 140 140" aria-hidden="true">
       <g transform="rotate(-90 70 70)">
-        <circle cx="70" cy="70" r={R} fill="none" stroke="#18232e" strokeWidth="16" />
+        <circle cx="70" cy="70" r={R} fill="none" style={{ stroke: 'var(--gpd-ring)' }} strokeWidth="16" />
         {segments.map((x) => {
           const dash = C * (x.deger / toplam)
           const el = (
@@ -200,6 +220,9 @@ function Donut({ segments }: { segments: { ad: string; deger: number; renk: stri
 
 export default function HomePage() {
   useTranslation()
+  const koyu = useKoyuTema() // tema değişince yeniden çizilir (grafik renkleri JS değeri)
+  const P = koyu ? PALET_KOYU : PALET_ACIK
+  const TAB_RENK = P.tab, IMLEC = P.imlec, TIP_STIL = P.tip
   const marka = useMarka()
   const navigate = useNavigate()
   const kullanici = useAuth((st) => st.kullanici)
@@ -284,16 +307,14 @@ export default function HomePage() {
   const yB = Math.min(Math.max(0, yedekB ?? 0), diskKul)
   // Dizin kırılımı: host / sql / yedek / log. Backend henüz yanıtlamadıysa eski
   // (yedek + diğer) görünümüne düşeriz — halka ASLA boş kalmasın.
-  const DEPO_RENK: Record<string, string> = {
-    host: '#3b82f6', sql: '#8b5cf6', yedek: '#f59e0b', log: '#10b981',
-  }
+  const DEPO_RENK = P.depo
   // Dört dizin 0 olsa BİLE listede kalır (kullanıcı kırılımı görmek istiyor);
   // halkada 0 zaten çizilmez.
   const dizinSeg = (dagilim || []).map((k) => ({
     ad: cevir(k.ad),
     // Yedek dizini boş görünüyorsa (yedekler başka birimde) yedek özetine düş.
     deger: k.anahtar === 'yedek' && k.byte === 0 ? yB : k.byte,
-    renk: DEPO_RENK[k.anahtar] || '#64748b',
+    renk: DEPO_RENK[k.anahtar] || P.notr,
   }))
   const dizinTop = dizinSeg.reduce((a, x) => a + x.deger, 0)
   // 🔴 Halka KULLANILAN alanı ayrıştırır, toplam diski değil. Boş alan segment
@@ -302,11 +323,11 @@ export default function HomePage() {
   const depoSeg = dizinSeg.length
     ? [
         ...dizinSeg,
-        ...[{ ad: cevir('Diğer'), deger: Math.max(0, diskKul - dizinTop), renk: '#64748b' }].filter((x) => x.deger > 0),
+        ...[{ ad: cevir('Diğer'), deger: Math.max(0, diskKul - dizinTop), renk: P.notr }].filter((x) => x.deger > 0),
       ]
     : [
-        { ad: cevir('Yedekler'), deger: yB, renk: '#3b82f6' },
-        { ad: cevir('Diğer kullanım'), deger: Math.max(0, diskKul - yB), renk: '#10b981' },
+        { ad: cevir('Yedekler'), deger: yB, renk: P.giden },
+        { ad: cevir('Diğer kullanım'), deger: Math.max(0, diskKul - yB), renk: P.gelen },
       ]
   const depoPay = depoSeg.reduce((a, x) => a + x.deger, 0) || 1
   // Sağlık skoru servis listesi YOKKEN hesaplanmaz: servisDown 0−0=0 ile halka 100/"Mükemmel"
@@ -314,7 +335,7 @@ export default function HomePage() {
   // pratikte systemd'ye ulaşılamadığı, yani sistemin tam sağlıksız olduğu an → halka nötr.
   const skorBilinir = !!s && servisBilinir
   const skor = s && skorBilinir ? Math.max(0, Math.min(100, 100 - servisDown * 12 - (diskY > 90 ? 15 : diskY > 80 ? 6 : 0) - izo * 20 - (s.cpu.yuzde > 92 ? 8 : 0))) : 0
-  const skorRenk = !skorBilinir ? '#64748b' : skor >= 85 ? '#10b981' : skor >= 60 ? '#f59e0b' : '#f43f5e'
+  const skorRenk = !skorBilinir ? P.notr : skor >= 85 ? P.iyi : skor >= 60 ? P.orta : P.kotu
   const skorAd = !skorBilinir ? cevir('Veri yok') : skor >= 85 ? cevir('Mükemmel') : skor >= 60 ? cevir('İyi') : skor >= 40 ? cevir('Dikkat') : cevir('Kritik')
 
   // Trend YALNIZ gerçek örneklerden (seed sahte yüzde üretmesin)
@@ -341,9 +362,9 @@ export default function HomePage() {
   const ad = (kullanici?.ad_soyad || kullanici?.adi || '').trim()
 
   return (
-    // Pano her temada koyu bir ada: kökteki `dark` sınıfı Tailux butonlarının koyu
-    // varyantını açık temada da seçtirir (başlık, kart başlığı — koyu zeminde okunur).
-    <div className="gp-dash dark">
+    // Pano temayı izler: yüzey/metin renkleri dashboard.css'te --gpd-* tokenları (açık
+    // varsayılan, `html.dark` koyu); grafik renkleri yukarıdaki P paletinden (useKoyuTema).
+    <div className="gp-dash">
       <div className="page-title">
         <div>
           <h1>{selamla()}{ad ? `, ${ad}` : ''}</h1>
@@ -360,13 +381,13 @@ export default function HomePage() {
         <StatCard title={cevir('Toplam Domain')} value={domainler.length} subtitle={`${aktif} ${cevir('aktif')} · ${sslli} SSL`} icon={Server} />
         <StatCard title={cevir('Servisler')} value={s ? `${servisAktif}/${servisToplam}` : '—'} subtitle={servisOzet} icon={Box} />
         <StatCard title={cevir('CPU Kullanımı')} value={s ? `%${Math.round(s.cpu.yuzde)}` : '—'} subtitle={s ? `${s.cpu.cekirdek} ${cevir('toplam çekirdek')}` : '…'} icon={Cpu} trend={tCpu?.t} down={tCpu?.down}
-          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.cpu) : undefined} sparkRenk="#10b981" sparkId="cpu" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.cpu) : undefined} sparkRenk={P.spark.cpu} sparkId="cpu" />
         <StatCard title={cevir('RAM Kullanımı')} value={s ? `%${Math.round(s.bellek.yuzde)}` : '—'} subtitle={s ? `${fmtGB(s.bellek.kullanilan_kb)} / ${fmtGB(s.bellek.toplam_kb)}` : '…'} icon={MemoryStick} trend={tMem?.t} down={tMem?.down}
-          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.bellek) : undefined} sparkRenk="#8b5cf6" sparkId="ram" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.bellek) : undefined} sparkRenk={P.spark.ram} sparkId="ram" />
         <StatCard title={cevir('Depolama')} value={s ? `%${diskY}` : '—'} subtitle={s ? `${fmtByte(s.disk.kullanilan_byte)} / ${fmtByte(s.disk.toplam_byte)}` : '…'} icon={HardDrive} trend={tDsk?.t} down={tDsk?.down}
-          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.disk) : undefined} sparkRenk="#f59e0b" sparkId="disk" />
+          spark={kaynakBuf.length >= GRAFIK_EN_AZ ? kaynakBuf.map((d) => d.disk) : undefined} sparkRenk={P.spark.disk} sparkId="disk" />
         <StatCard title={cevir('Toplam Trafik')} value={s ? fmtRate(s.ag.rx_bytes_sn + s.ag.tx_bytes_sn) : '—'} subtitle={cevir('Gelen + giden')} icon={Network}
-          spark={trafikBuf.length >= GRAFIK_EN_AZ ? trafikBuf.map((d) => d.gelen + d.giden) : undefined} sparkRenk="#3b82f6" sparkId="net" />
+          spark={trafikBuf.length >= GRAFIK_EN_AZ ? trafikBuf.map((d) => d.gelen + d.giden) : undefined} sparkRenk={P.spark.net} sparkId="net" />
       </div>
 
       {/* SATIR 1 */}
@@ -391,9 +412,9 @@ export default function HomePage() {
                     <stop offset="100%" stopColor={TAB_RENK[tab]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.055)" vertical={false} />
-                <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} ticks={[0, 25, 50, 75, 100]} domain={[0, 100]} width={34} />
+                <CartesianGrid strokeDasharray="3 3" stroke={P.izgara} vertical={false} />
+                <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} ticks={[0, 25, 50, 75, 100]} domain={[0, 100]} width={34} />
                 <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v: any) => [`%${v}`, tab === 'cpu' ? 'CPU' : tab === 'bellek' ? cevir('Bellek') : cevir('Disk')]} />
                 <Area type="monotone" dataKey={tab} stroke={TAB_RENK[tab]} strokeWidth={2} fill={`url(#gpk-${tab})`} dot={false} activeDot={{ r: 3, fill: TAB_RENK[tab] }} isAnimationActive={false} />
               </AreaChart>
@@ -433,7 +454,7 @@ export default function HomePage() {
 
         <Card title={cevir('Sistem Sağlığı')} icon={ShieldCheck}>
           <div className="health">
-            <div className="health-ring" style={{ background: `conic-gradient(${skorRenk} 0 ${skor}%, #18232e ${skor}%)` }}>
+            <div className="health-ring" style={{ background: `conic-gradient(${skorRenk} 0 ${skor}%, var(--gpd-ring) ${skor}%)` }}>
               <div><strong>{skorBilinir ? skor : '—'}</strong><small style={{ color: skorRenk }}>{s ? skorAd : ''}</small></div>
             </div>
             <div className="health-list">
@@ -472,15 +493,15 @@ export default function HomePage() {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trafikBuf}>
                 <defs>
-                  <linearGradient id="gpt-in" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.28} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
-                  <linearGradient id="gpt-out" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3b82f6" stopOpacity={0.28} /><stop offset="100%" stopColor="#3b82f6" stopOpacity={0} /></linearGradient>
+                  <linearGradient id="gpt-in" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={P.gelen} stopOpacity={0.28} /><stop offset="100%" stopColor={P.gelen} stopOpacity={0} /></linearGradient>
+                  <linearGradient id="gpt-out" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={P.giden} stopOpacity={0.28} /><stop offset="100%" stopColor={P.giden} stopOpacity={0} /></linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.055)" vertical={false} />
-                <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} width={58} tickFormatter={(v: any) => fmtRate(v).replace('/s', '')} />
+                <CartesianGrid strokeDasharray="3 3" stroke={P.izgara} vertical={false} />
+                <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} width={58} tickFormatter={(v: any) => fmtRate(v).replace('/s', '')} />
                 <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v: any, n: any) => [fmtRate(v), n === 'gelen' ? cevir('Gelen Trafik') : cevir('Giden Trafik')]} />
-                <Area type="monotone" dataKey="gelen" stroke="#10b981" strokeWidth={2} fill="url(#gpt-in)" dot={false} isAnimationActive={false} />
-                <Area type="monotone" dataKey="giden" stroke="#3b82f6" strokeWidth={2} fill="url(#gpt-out)" dot={false} isAnimationActive={false} />
+                <Area type="monotone" dataKey="gelen" stroke={P.gelen} strokeWidth={2} fill="url(#gpt-in)" dot={false} isAnimationActive={false} />
+                <Area type="monotone" dataKey="giden" stroke={P.giden} strokeWidth={2} fill="url(#gpt-out)" dot={false} isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
             )}
