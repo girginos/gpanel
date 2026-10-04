@@ -1,4 +1,3 @@
-import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
@@ -35,19 +34,20 @@ const ICONS = {
 }
 
 
+// Araç başlıkları: tek satıra sığacak kısa adlar (~16 karakter). Alt açıklama YOK —
+// kart yalnız simge + başlık; yalnız aksiyon gerektiren uyarı (SSL yok) rozet olarak kalır.
 const CMP_EN: Record<string, string> = {
   "Türkçe": "English",
-  "Erişim Kısıtlama": "Access Restrictions",
-  "IP bazlı erişim izni": "IP-based access control",
   "Dosyalar": "Files",
-  "Web Sitesini Kopyala": "Copy Website",
-  "Klonlama": "Cloning",
-  "Depo entegrasyonu": "Repository integration",
-  "Kurulum · Artisan · Deploy · Kuyruk": "Install · Artisan · Deploy · Queue",
   "Performans": "Performance",
+  "Yedekler": "Backups",
+  "Website Clone": "Website Clone",
+  "Cronlar": "Cron Jobs",
+  "SSL Sertifikaları": "SSL Certificates",
+  "Erişim Kısıtlama": "Access Control",
+  "Dizin Koruma": "Dir Protection",
+  "SSH Erişimi": "SSH Access",
   "Alan adı korunmadı": "Domain not secured",
-  "Trafik analizi": "Traffic analysis",
-  "Açık": "On",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -69,46 +69,40 @@ export default function DomainPano({ domain }: { domain: Domain }) {
       {/* WordPress → "Uygulamalar" sekmesine, DNS → cevir("Barınma ve DNS") sekmesine
           taşındı; Subdomainler zaten kendi listesinde görünüyor (kullanıcı isteği). */}
       <Grup baslik={cevir("Dosyalar ve Veritabanları")}>
-        <ToolCard etiket={cevir("Bağlantı Bilgisi")}      aciklama={cevir("FTP, veri tabanı")}  ikon={ICONS.baglanti} renk="emerald" onClick={git('baglanti')} />
-        <ToolCard etiket={cevir("Dosyalar")}              aciklama={cevir("Dosya yöneticisi")}  ikon={ICONS.dosyalar} renk="amber"   onClick={git('dosyalar')} />
-        <ToolCard etiket={cevir("Veritabanları")}         aciklama={domain.db_adi}     ikon={ICONS.db}       renk="violet"  onClick={git('veritabanlari')} />
-        <ToolCard etiket="FTP"                   aciklama={cevir("FTP hesapları")}     ikon={ICONS.ftp}      renk="sky"     onClick={git('ftp')} />
-        <ToolCard etiket={cevir("Yedekle ve Geri Yükle")} aciklama={cevir("Yedek yönetimi")}    ikon={ICONS.yedek}    renk="rose"    onClick={git('yedekler')} />
-        <ToolCard etiket={cevir("Web Sitesini Kopyala")}  aciklama={cevir("Klonlama")}          ikon={ICONS.kopya}    renk="sky"     onClick={git('kopyala')} />
+        <ToolCard etiket={cevir("Bağlantı Bilgisi")} ikon={ICONS.baglanti} renk="emerald" onClick={git('baglanti')} />
+        <ToolCard etiket={cevir("Dosyalar")}         ikon={ICONS.dosyalar} renk="amber"   onClick={git('dosyalar')} />
+        <ToolCard etiket={cevir("Veritabanları")}    ikon={ICONS.db}       renk="violet"  onClick={git('veritabanlari')} />
+        <ToolCard etiket="FTP"                       ikon={ICONS.ftp}      renk="sky"     onClick={git('ftp')} />
+        <ToolCard etiket={cevir("Yedekler")}         ikon={ICONS.yedek}    renk="rose"    onClick={git('yedekler')} />
+        <ToolCard etiket={cevir("Website Clone")}    ikon={ICONS.kopya}    renk="sky"     onClick={git('kopyala')} />
       </Grup>
 
       <Grup baslik={cevir("Geliştirme Araçları")}>
-        <ToolCard etiket="PHP"                   aciklama={cevirT("Sürüm {0}", domain.php_surum)} ikon={ICONS.php}      renk="indigo" onClick={git('php')} />
-        <ToolCard etiket={cevir("Günlükler")}             aciklama="access, error"  ikon={ICONS.log}      renk="slate"  onClick={git('gunlukler')} />
-        <ToolCard etiket={cevir("Zamanlanmış Görevler")}  aciklama="Cron"            ikon={ICONS.cron}     renk="teal"   onClick={git('cron')} />
-        <ToolCard etiket="Git"                   aciklama={cevir("Depo entegrasyonu")} ikon={ICONS.git}    renk="orange" onClick={git('git')} />
-        <ToolCard etiket="PHP Composer"          aciklama={cevir("Paket yöneticisi")}  ikon={ICONS.composer} renk="amber" onClick={git('composer')} />
-        <ToolCard etiket="Laravel Toolkit" aciklama={cevir("Kurulum · Artisan · Deploy · Kuyruk")} ikon={ICONS.composer} renk="rose" onClick={git('laravel')} />
-        <ToolCard etiket={cevir("Performans")}            aciklama={cevir("Hızlandırıcılar")}   ikon={ICONS.hizmet} renk="emerald" onClick={git('performans')} />
-        <ToolCard etiket="Redis Cache"           aciklama={cevir("İzole nesne cache · hızlandırıcı")} ikon={ICONS.redis} renk="rose" onClick={git('redis')} />
+        <ToolCard etiket="PHP"                       ikon={ICONS.php}      renk="indigo"  onClick={git('php')} />
+        <ToolCard etiket={cevir("Günlükler")}        ikon={ICONS.log}      renk="slate"   onClick={git('gunlukler')} />
+        <ToolCard etiket={cevir("Cronlar")}          ikon={ICONS.cron}     renk="teal"    onClick={git('cron')} />
+        <ToolCard etiket="Git"                       ikon={ICONS.git}      renk="orange"  onClick={git('git')} />
+        <ToolCard etiket="PHP Composer"              ikon={ICONS.composer} renk="amber"   onClick={git('composer')} />
+        <ToolCard etiket="Laravel Toolkit"           ikon={ICONS.composer} renk="rose"    onClick={git('laravel')} />
+        <ToolCard etiket={cevir("Performans")}       ikon={ICONS.hizmet}   renk="emerald" onClick={git('performans')} />
+        <ToolCard etiket="Redis Cache"               ikon={ICONS.redis}    renk="rose"    onClick={git('redis')} />
       </Grup>
 
       <Grup baslik={cevir("Güvenlik")}>
+        {/* SSL yok = aksiyon gerektiren tek durum: kırmızı rozet + tooltip (düzeni bozmaz) */}
         <ToolCard
-          etiket={cevir("SSL/TLS Sertifikaları")}
-          aciklama={domain.ssl ? cevirT(cevir("Bitiş: {0}"), domain.ssl_bitis || '—') : 'Let’s Encrypt'}
+          etiket={cevir("SSL Sertifikaları")}
           ikon={ICONS.ssl}
           renk={domain.ssl ? 'emerald' : 'rose'}
           uyari={!domain.ssl ? cevir('Alan adı korunmadı') : undefined}
           onClick={git('ssl')}
         />
-        <ToolCard etiket={cevir(cevir("WAF (Güvenlik Duvarı)"))}   aciklama="ModSecurity + OWASP CRS" ikon={ICONS.waf} renk="emerald" onClick={git('waf')} />
-        <ToolCard etiket={cevir("Erişim Kısıtlama")} aciklama={cevir("IP bazlı erişim izni")} ikon={ICONS.erisim} renk="indigo" onClick={git('erisim')} />
-        <ToolCard etiket={cevir("Şifre Korumalı Dizinler")} aciklama=".htpasswd"       ikon={ICONS.kilit}      renk="amber" onClick={git('sifre-koruma')} />
-        <ToolCard etiket={cevir("İstatistikler")}            aciklama={cevir("Trafik analizi")}  ikon={ICONS.istatistik} renk="indigo" onClick={git('istatistik')} />
-        <ToolCard etiket="G-AV"                  aciklama={cevir("Antivirüs")}        ikon={ICONS.imunify}    renk="emerald" onClick={git('imunify')} />
-        <ToolCard
-          etiket={cevir("SSH Erişimi")}
-          aciklama={domain.ssh_erisim ? cevir('Açık') : cevir("Kapalı")}
-          ikon={ICONS.ssh}
-          renk={domain.ssh_erisim ? 'emerald' : 'slate'}
-          onClick={git('ssh-erisim')}
-        />
+        <ToolCard etiket="WAF"                       ikon={ICONS.waf}      renk="emerald" onClick={git('waf')} />
+        <ToolCard etiket={cevir("Erişim Kısıtlama")} ikon={ICONS.erisim}   renk="indigo"  onClick={git('erisim')} />
+        <ToolCard etiket={cevir("Dizin Koruma")}     ikon={ICONS.kilit}    renk="amber"   onClick={git('sifre-koruma')} />
+        <ToolCard etiket={cevir("İstatistikler")}    ikon={ICONS.istatistik} renk="indigo" onClick={git('istatistik')} />
+        <ToolCard etiket="G-AV"                      ikon={ICONS.imunify}  renk="emerald" onClick={git('imunify')} />
+        <ToolCard etiket={cevir("SSH Erişimi")}      ikon={ICONS.ssh}      renk="slate"   onClick={git('ssh-erisim')} />
       </Grup>
     </div>
   )

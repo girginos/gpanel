@@ -33,6 +33,8 @@ export default function ToolCard({
     if (to) navigate(to)
     else if (onClick) onClick()
   }
+  // Alt açıklama yoksa kart tek satır: simge + başlık dikey ortalı; uyarı küçük rozet olarak sağda.
+  const tekSatir = !aciklama
   const govde = (
     <>
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${BG[renk]}`}>
@@ -47,11 +49,15 @@ export default function ToolCard({
           <span className="truncate">{etiket}</span>
         </div>
         {aciklama && <div className="text-xs text-slate-500 dark:text-slate-500 truncate mt-0.5">{aciklama}</div>}
-        {uyari && <div className="text-[11px] text-red-600 dark:text-red-400 truncate mt-0.5">{uyari}</div>}
+        {uyari && !tekSatir && <div className="text-[11px] text-red-600 dark:text-red-400 truncate mt-0.5">{uyari}</div>}
       </div>
+      {uyari && tekSatir && (
+        <span title={uyari} aria-label={uyari} role="img"
+          className="shrink-0 w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-[11px] font-bold leading-none flex items-center justify-center">!</span>
+      )}
     </>
   )
-  const klass = 'group flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-dark-600 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700/50 hover:shadow-xs transition text-left w-full cursor-pointer'
+  const klass = `group flex ${tekSatir ? 'items-center' : 'items-start'} gap-3 p-3 rounded-lg border border-slate-200 dark:border-dark-600 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-dark-700/50 hover:shadow-xs transition text-left w-full cursor-pointer`
 
   return <button type="button" onClick={tikla} className={klass}>{govde}</button>
 }
