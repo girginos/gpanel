@@ -547,6 +547,23 @@ func TestYapilandirmaVeSirlar(t *testing.T) {
 	if strings.Contains(s.String()+strings.Join([]string{}, ""), tAnthropic) {
 		t.Fatal("String() sır yazıyor")
 	}
+	// systemd ≥ 256 LoadCredential: root:root 0440 (+ACL) → kabul; grup root değilse ya da
+	// grup yazabiliyorsa → ret.
+	os.Chmod(filepath.Join(d, SirAnthropic), 0o440)
+	if os.Getuid() == 0 {
+		if _, err := SirlariYukle(d); err != nil {
+			t.Fatalf("root grubuna okunur (systemd kimlik) sır reddedildi: %v", err)
+		}
+		os.Chown(filepath.Join(d, SirAnthropic), -1, 65534)
+		if _, err := SirlariYukle(d); err == nil {
+			t.Fatal("root olmayan gruba okunur sır kabul edildi")
+		}
+		os.Chown(filepath.Join(d, SirAnthropic), -1, 0)
+	}
+	os.Chmod(filepath.Join(d, SirAnthropic), 0o460)
+	if _, err := SirlariYukle(d); err == nil {
+		t.Fatal("grup yazılabilir sır kabul edildi")
+	}
 	os.Chmod(filepath.Join(d, SirAnthropic), 0o644)
 	if _, err := SirlariYukle(d); err == nil || strings.Contains(err.Error(), tAnthropic) {
 		t.Fatalf("herkese açık sır dosyası kabul edildi / hata sır içeriyor: %v", err)

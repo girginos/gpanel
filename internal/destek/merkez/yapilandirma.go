@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"girginospanel/internal/destek/protokol"
@@ -278,7 +279,7 @@ func sirOku(dizin, ad string) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("sır %s düzenli dosya değil", ad)
 	}
-	if fi.Mode().Perm()&0o077 != 0 {
+	if !sirIzniGuvenli(fi) {
 		return nil, fmt.Errorf("sır %s grup/diğer erişimine açık (%o)", ad, fi.Mode().Perm())
 	}
 	f, err := os.Open(yol)
@@ -291,6 +292,21 @@ func sirOku(dizin, ad string) ([]byte, error) {
 		return nil, fmt.Errorf("sır %s okunamadı ya da çok büyük", ad)
 	}
 	return b, nil
+}
+
+// sirIzniGuvenli: "diğer" hiçbir zaman erişemez; grup en çok OKUYABİLİR ve yalnız grup
+// root (gid 0) ise. systemd ≥ 256 LoadCredential dosyalarını root:root 0440 açar ve servis
+// kullanıcısına okumayı ACL ile verir — root grubu zaten root'a denk olduğundan güvenli.
+func sirIzniGuvenli(fi os.FileInfo) bool {
+	izin := fi.Mode().Perm()
+	if izin&0o007 != 0 || izin&0o030 != 0 {
+		return false
+	}
+	if izin&0o040 == 0 {
+		return true
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && st.Gid == 0
 }
 
 // tohumCoz: 32 bayt ham, 64 hex ya da base64(url) metin.
