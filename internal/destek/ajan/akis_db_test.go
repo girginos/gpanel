@@ -5,17 +5,14 @@ package ajan
 // yönlendiricisi + RequireAuth, sahte merkez (WSS ve uzun yoklama) ve sahte araç yürütücüsü.
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,10 +172,14 @@ type ortam struct {
 	mA2 string // müşteri A2 (domain 45, ftp 8, bayi 7)
 	mK  string // kök müşterisi (domain 44, ftp 7)
 
+	kapatma string // yerel acil kapatma dosyasının (test) yolu
+
 	etkin map[string]*p.BaglantiDurum // kök (v2) eşleştirmesinin etkin durumu: kimlik → merkeze giden durum
 }
 
-func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
+// kurOrtam: bagli=false → yerel acil kapatma dosyası ajan başlamadan ÖNCE oluşturulur (ajan
+// merkeze bağlanmaz). destek_ayar satırı HİÇ yazılmaz: ajan şalter/tavan gerektirmez.
+func kurOrtam(t *testing.T, yoklama bool, bagli bool) *ortam {
 	t.Helper()
 	db := dtGeciciDB(t)
 	m := yeniSahteMerkez(t)
@@ -189,21 +190,17 @@ func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
 		CihazAnahtarYolu: filepath.Join(t.TempDir(), "cihaz.key"), GuvensizIzin: true, YoklamaZorla: yoklama,
 		BotKullaniciAdi: "GirginTestBot", LisansIspati: func() []byte { return []byte("test-ispat") }})
 	a.BilinenSirlar = []string{dtKanarya}
-	a.ModulKontrolAraligi = 200 * time.Millisecond
+	a.KapatmaKontrolAraligi = 200 * time.Millisecond
+	kapatma := filepath.Join(t.TempDir(), "destek-kapali") // gerçek /etc yoluna ASLA dokunulmaz
+	a.KapatmaDosyasi = kapatma
 	a.DBYoklamaAraligi = 100 * time.Millisecond // panel ↔ ajan bağı DB yoklaması
 	a.NabizAraligi = 200 * time.Millisecond
 	a.PanelKancasiKur() // main.go'daki panel tarafı kanca (denetim); bildirim ajan yoklamasıyla
 	y := &sahteYurutucu{}
 	a.Yurutucu = y
-	o := &ortam{t: t, db: db, m: m, a: a, y: y, etkin: map[string]*p.BaglantiDurum{}}
-	r := chi.NewRouter()
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(dtSecret))
-			a.Rotalar(r)
-		})
-	})
-	o.h = r
+	o := &ortam{t: t, db: db, m: m, a: a, y: y, etkin: map[string]*p.BaglantiDurum{}, kapatma: kapatma}
+	// Panelde destek HTTP ucu YOK: yönlendirici boş (araç testleri kendi sahte panel rotalarını ekler).
+	o.h = chi.NewRouter()
 	o.kok = jwtAt(t, 1, "root", "admin", 0)
 	o.bA = jwtAt(t, 7, "bayi_a", "reseller", 7)
 	o.bB = jwtAt(t, 8, "bayi_b", "reseller", 8)
@@ -211,14 +208,15 @@ func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
 	o.mB = musteriJWT(t, 6, 43, "bmus", "b.test", nil)
 	o.mA2 = musteriJWT(t, 8, 45, "a2mus", "a2.test", nil)
 	o.mK = musteriJWT(t, 7, 44, "kmus", "kok.test", nil)
-	if modulAcik {
-		o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam", "bayi_duzey": "tam", "musteri_duzey": "tam"})
-		o.bayiAyar(7, p.DuzeyTam)
+	if !bagli {
+		if err := os.WriteFile(kapatma, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); time.Sleep(50 * time.Millisecond) })
 	a.Baslat(ctx)
-	if modulAcik {
+	if bagli {
 		o.bagliBekle()
 	}
 	return o
@@ -256,37 +254,6 @@ func musteriJWT(t *testing.T, ftp, dom int64, kul, alan string, adina *auth.Must
 	return tok
 }
 
-type yanit struct {
-	kod   int
-	govde map[string]any
-	ham   string
-}
-
-func (o *ortam) istek(metod, yol, tok string, govde any) yanit {
-	o.t.Helper()
-	var b []byte
-	if govde != nil {
-		b, _ = json.Marshal(govde)
-	}
-	req := httptest.NewRequest(metod, "/api/v1"+yol, bytes.NewReader(b))
-	req.RemoteAddr = "192.0.2.10:40000"
-	req.Header.Set("Authorization", "Bearer "+tok)
-	w := httptest.NewRecorder()
-	o.h.ServeHTTP(w, req)
-	y := yanit{kod: w.Code, ham: w.Body.String()}
-	_ = json.Unmarshal(w.Body.Bytes(), &y.govde)
-	return y
-}
-
-func (o *ortam) istekOK(metod, yol, tok string, govde any) yanit {
-	o.t.Helper()
-	y := o.istek(metod, yol, tok, govde)
-	if y.kod != 200 {
-		o.t.Fatalf("%s %s: %d %s", metod, yol, y.kod, y.ham)
-	}
-	return y
-}
-
 func (o *ortam) bagliBekle() {
 	o.t.Helper()
 	son := time.Now().Add(10 * time.Second)
@@ -295,15 +262,6 @@ func (o *ortam) bagliBekle() {
 			o.t.Fatalf("ajan merkeze bağlanmadı: %+v", o.a.DurumAl())
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// bayiAyar: bayinin "müşterilerim kullanabilir" üst sınırı. Bayi artık panelden ayar değiştiremez
-// (kök-only); eski (bayi/müşteri) kayıtların düzey kuralı testi için satır doğrudan yazılır.
-func (o *ortam) bayiAyar(rid int64, d p.Duzey) {
-	o.t.Helper()
-	if err := ayarYaz(context.Background(), o.db, rid, Ayar{ModulDuzey: p.DuzeyKapali, BayiDuzey: p.DuzeyKapali, MusteriDuzey: d}, "test"); err != nil {
-		o.t.Fatal(err)
 	}
 }
 

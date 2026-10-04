@@ -388,7 +388,7 @@ func main() {
 	lisansH := &lisans.Handlers{DB: d, Surum: version}
 	go lisansH.NabizDongusu(context.Background())
 	// Telegram destek (panel tarafı; ajan AYRI hizmet — cmd/server/destek.go).
-	destekA := destekKur(d)
+	destekKur(d)
 	// Kurulu eklenti ikilisinin imzali paket basligiyla tutarliligi.
 	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
 	// sunucusuna ulasilamasa bile goruilmelidir.
@@ -612,7 +612,6 @@ func main() {
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
 			apiAnahtarRotalari(r, d)        // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
-			destekA.Rotalar(r)              // Telegram destek: durum/ayar/iptal (yalnız DB; internal/destek/ajan)
 			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
@@ -1404,15 +1403,13 @@ func semaDogrula(d *sql.DB) {
 		{"hosting_limit_ust", "domain_id"},
 		{"hosting_limit_ust", "kok_alanlar"},
 		{"service_plans_ozel_arsiv", "satir_json"},
-		// 0129: Telegram destek — yoksa destek uçları 503 (destek_goc_yok), ajan kapalı kalır.
+		// 0129: Telegram destek ajanı (ayrı hizmet) — yoksa iptal kancası/ajan tabloları bulamaz.
 		{"destek_baglantilari", "durum_izi"},
 		{"destek_islemleri", "denetim_ozet"},
-		{"destek_ayar", "musteri_duzey"},
 		// 0130: destek ajanı ayrı süreç — yoksa panel tarafı iptaller merkeze yalnız yeniden
-		// bağlanınca bildirilir ve durum sayfası ajan canlılığını gösteremez.
+		// bağlanınca bildirilir ve ajan canlılığı (nabız) yazılamaz. (destek_ayar artık okunmaz.)
 		{"destek_baglantilari", "hub_bildirildi_at"},
 		{"destek_ajan_nabiz", "kopru_durum"},
-		{"destek_ayar", "surum"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

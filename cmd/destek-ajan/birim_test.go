@@ -56,10 +56,10 @@ func TestBirimBagimsizVeSertlestirilmis(t *testing.T) {
 			t.Errorf("birimde %q yok", gerek)
 		}
 	}
-	// ReadWritePaths yalnız bilinen dört yol (genişlerse bilinçli karar olsun).
+	// ReadWritePaths yalnız bilinen beş yol (genişlerse bilinçli karar olsun).
 	for _, l := range strings.Split(u, "\n") {
 		if strings.HasPrefix(l, "ReadWritePaths=") {
-			if got, want := strings.TrimPrefix(l, "ReadWritePaths="), "/run/girginospanel /etc/girginospanel /var/log/nginx /var/lib/nginx"; got != want {
+			if got, want := strings.TrimPrefix(l, "ReadWritePaths="), "/run/girginospanel /etc/girginospanel /var/log/nginx /var/lib/nginx /var/cache/nginx"; got != want {
 				t.Errorf("ReadWritePaths değişti: %q (beklenen %q)", got, want)
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,14 +42,16 @@ type Yurutucu interface {
 const (
 	dEslesmePortal = "destek.eslesme_portal"
 	dBaglantiIptal = "destek.baglanti_iptal"
-	dAyar          = "destek.ayar"
 	dR0Ozet        = "destek.r0_ozet"
 	dIsRed         = "destek.is_red"
 )
 
 // Bağlantı durumları (arayüz).
 const (
-	BagKapali       = "kapali"
+	BagKapali = "kapali" // başlangıç (henüz döngü çalışmadı)
+	// BagYerelKapali: root'un acil kapatma dosyası (VarsayilanKapatmaDosyasi) var — ajan merkeze
+	// bağlanmaz / bağlıysa koparır. Nabızda (destek_ajan_nabiz.durum) bu değerle raporlanır.
+	BagYerelKapali  = "yerel_kapali"
 	BagYapilandirma = "yapilandirma_eksik"
 	BagBaglaniyor   = "baglaniyor"
 	BagBagli        = "bagli"
@@ -77,17 +80,20 @@ type Ajan struct {
 	TLS           *tls.Config // nil → sistem kökleri (test: kendi kökü)
 	// IsZamanAsimi: tek iş emrinin yürütme sınırı.
 	IsZamanAsimi time.Duration
-	// ModulKontrolAraligi: oturum sırasında şalterin yeniden okunma aralığı.
-	ModulKontrolAraligi time.Duration
+	// KapatmaKontrolAraligi: yerel acil kapatma dosyasının yoklanma aralığı (dosya belirdikten
+	// sonra bağlantının kopma süresinin üst sınırı; varsayılan 3 sn).
+	KapatmaKontrolAraligi time.Duration
+	// KapatmaDosyasi: varlığı ajanı kapatan dosya (varsayılan VarsayilanKapatmaDosyasi). Testte değişir.
+	KapatmaDosyasi string
 	// BiletYenilemeAraligi: açık oturum bu sürede bir kapatılıp yeniden kurulur — kayıtta gönderilen
 	// lisans bileti (merkez doğrulamasının süresini belirler) diskteki taze biletle tazelensin diye.
 	// Lisans nabzı her ~6 saatte bileti yeniler; uzun ömürlü bağlantı eski biletle doğrulamasını
 	// yitirmesin.
 	BiletYenilemeAraligi time.Duration
-	// DBYoklamaAraligi: panelin DB'ye yazdığı değişikliklerin (ayar, panel tarafı iptal)
+	// DBYoklamaAraligi: panelin DB'ye yazdığı değişikliklerin (panel tarafı iptal)
 	// ajana ulaşma aralığı. Panel ve ajan AYRI süreçtir; aralarındaki tek bağ DB'dir.
 	DBYoklamaAraligi time.Duration
-	// NabizAraligi: destek_ajan_nabiz satırının yazılma aralığı (panel durum sayfası canlılığı).
+	// NabizAraligi: destek_ajan_nabiz satırının yazılma aralığı (ops canlılık okuması).
 	NabizAraligi time.Duration
 	// KopruPing: panel köprüsünün canlılık yoklaması (nil → nabızda köprü durumu boş).
 	KopruPing func(ctx context.Context) error
@@ -105,17 +111,15 @@ type Ajan struct {
 	baslatildi bool
 
 	// DB yoklama durumu (yalnız izleme döngüsü yazar).
-	ayarIzi       string
-	ayarHazir     bool
 	iptalSutunYok atomic.Bool
 	basladiAt     time.Time
 }
 
 // Yeni: ajanı kurar (çalıştırmaz). Panel süreci de Yeni ile kurar ama Baslat ÇAĞIRMAZ:
-// panel yalnız UI uçlarını (Rotalar) ve DB'ye yazan iptal kancasını (PanelKancasiKur) kullanır;
+// panel yalnız DB'ye yazan iptal kancasını (PanelKancasiKur) kullanır (HTTP ucu YOKTUR);
 // ajanı ayrı süreç (cmd/destek-ajan, girginospanel-destek-ajan.service) çalıştırır.
 func Yeni(db *sql.DB, yap Yapilandirma) *Ajan {
-	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, ModulKontrolAraligi: 15 * time.Second, BiletYenilemeAraligi: 12 * time.Hour,
+	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, KapatmaKontrolAraligi: 3 * time.Second, KapatmaDosyasi: VarsayilanKapatmaDosyasi, BiletYenilemeAraligi: 12 * time.Hour,
 		DBYoklamaAraligi: 3 * time.Second, NabizAraligi: 10 * time.Second}
 	a.durt = make(chan struct{}, 1)
 	a.isSem = make(chan struct{}, 4)
@@ -163,7 +167,30 @@ func (a *Ajan) yurutucu() Yurutucu {
 	return a.Yurutucu
 }
 
-// Durt: ayar değişti — döngüyü hemen uyandır.
+// VarsayilanKapatmaDosyasi: root'un YEREL ACİL KAPATMA anahtarı. Dosya VAR olduğu sürece ajan
+// merkeze bağlanmaz, açık bağlantıyı ≤ KapatmaKontrolAraligi (3 sn) içinde koparır ve iş emri
+// kabul etmez; dosya silinince yeniden bağlanır. Bilinçli olarak panelde karşılığı yoktur.
+const VarsayilanKapatmaDosyasi = "/etc/girginospanel/destek-kapali"
+
+// yerelKapali: acil kapatma dosyası var mı. Tür önemsiz (dosya/dizin/kırık bağ — Lstat). Varlığı
+// belirlenemezse (izin vb. NotExist dışı hata) KAPALI sayılır (kapalı başarısız).
+func (a *Ajan) yerelKapali() bool {
+	yol := a.KapatmaDosyasi
+	if yol == "" {
+		return false
+	}
+	_, err := os.Lstat(yol)
+	return err == nil || !errors.Is(err, os.ErrNotExist)
+}
+
+func (a *Ajan) kapatmaAraligi() time.Duration {
+	if a.KapatmaKontrolAraligi > 0 {
+		return a.KapatmaKontrolAraligi
+	}
+	return 3 * time.Second
+}
+
+// Durt: döngüyü hemen uyandır.
 func (a *Ajan) Durt() {
 	select {
 	case a.durt <- struct{}{}:
@@ -249,10 +276,12 @@ func (a *Ajan) dongu(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !modulAcik(ctx, a.DB) {
+		// Yerel acil kapatma (root dosyası): bağlanma; dosya kalkınca ≤ KapatmaKontrolAraligi'nda
+		// hemen yeniden dene. destek_ayar/şalter YOKTUR: anahtar varsa her zaman bağlanılır.
+		if a.yerelKapali() {
 			deneme = 0
-			a.durumYaz(func(d *Durum) { d.Durum, d.Tasima, d.SonHata = BagKapali, "", "" })
-			if !a.bekle(ctx, 30*time.Second) {
+			a.durumYaz(func(d *Durum) { d.Durum, d.Tasima, d.SonHata = BagYerelKapali, "", "" })
+			if !a.bekle(ctx, a.kapatmaAraligi()) {
 				return
 			}
 			continue
@@ -283,6 +312,10 @@ func (a *Ajan) dongu(ctx context.Context) {
 		err := a.oturumCalistir(ctx)
 		if ctx.Err() != nil {
 			return
+		}
+		if a.yerelKapali() { // acil kapatma bağlantıyı kopardı: hata/geri çekilme değil
+			deneme = 0
+			continue
 		}
 		if time.Since(basla) > 2*time.Minute {
 			deneme = 0
@@ -363,6 +396,23 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 		return err
 	}
 	go func() { <-sctx.Done(); _ = t.Kapat() }()
+	// Acil kapatma izleyicisi: el sıkışma sırasında da dahil, dosya belirirse oturum KOPARILIR.
+	go func() {
+		tk := time.NewTicker(a.kapatmaAraligi())
+		defer tk.Stop()
+		for {
+			select {
+			case <-sctx.Done():
+				return
+			case <-tk.C:
+				if a.yerelKapali() {
+					log.Printf("destek: yerel acil kapatma dosyası var (%s) — merkez bağlantısı kesiliyor", a.KapatmaDosyasi)
+					iptal()
+					return
+				}
+			}
+		}
+	}()
 
 	kay := &p.Kayit{
 		CihazAnahtari:   p.AcikAnahtarKodla(a.cihaz.Acik),
@@ -453,8 +503,6 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 	go func() {
 		tk := time.NewTicker(kalp)
 		defer tk.Stop()
-		modTk := time.NewTicker(a.ModulKontrolAraligi)
-		defer modTk.Stop()
 		yenileTk := time.NewTicker(a.BiletYenilemeAraligi)
 		defer yenileTk.Stop()
 		var sira uint64
@@ -469,12 +517,6 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 				log.Printf("destek: lisans bileti tazelemesi için merkez oturumu yeniden kuruluyor")
 				iptal()
 				return
-			case <-modTk.C:
-				if !modulAcik(sctx, a.DB) {
-					log.Printf("destek: modül kapatıldı — merkez bağlantısı kesiliyor")
-					iptal()
-					return
-				}
 			}
 		}
 	}()
@@ -606,7 +648,7 @@ func (a *Ajan) durumBildir(ctx context.Context, b *baglanti) {
 	bd := &p.BaglantiDurum{BaglantiID: b.Kimlik, KodOzet: b.KodOzet, TgUserID: b.TgUserID, Durum: durumProtokol(b.Durum),
 		Rol: b.Rol, Duzey: p.DuzeyKapali, Hesaplar: []p.HesapEtiketi{}}
 	if b.Durum == durumAktif {
-		bd.Duzey = EtkinDuzey(ctx, a.DB, b.Rol, b.ResellerID, b.Duzey)
+		bd.Duzey = EtkinDuzey(b.Duzey)
 		hs, err := hesaplarOku(ctx, a.DB, b)
 		if err != nil {
 			log.Printf("destek: hesap listesi okunamadı (%s): %v", b.Kimlik, err)
@@ -654,7 +696,7 @@ func (a *Ajan) eslesmeOnayla(ctx context.Context, o *oturum, zk string, m *p.Esl
 		o.hata(zk, &p.Hata{Kod: p.HataYetki, Ayrinti: "onay başka sunucu için"})
 		return
 	}
-	if Tavan(ctx, a.DB, p.RolKok, 0) == p.DuzeyKapali {
+	if a.yerelKapali() {
 		o.hata(zk, &p.Hata{Kod: p.HataDevreDisi})
 		return
 	}

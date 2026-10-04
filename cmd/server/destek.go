@@ -16,18 +16,19 @@ import (
 // süreç) artık panelin içinde ÇALIŞMAZ: ayrı hizmet girginospanel-destek-ajan.service
 // (cmd/destek-ajan). Panel çökse de destek sürer; ajan çökse de panel etkilenmez.
 //
+// 🔴 2026-10-04 ürün kararı: panelde Telegram Destek özelliği YOKTUR (menü, sayfa, HTTP ucu,
+// panel anahtarı yok). Eşleştirme/açma/kapama/iptal yalnız müşteri portalında (app.girginos.io).
+// Ajan, ilk anahtar varsa her zaman bağlanır; tek yerel kapatma: root'un
+// /etc/girginospanel/destek-kapali dosyası (ya da systemd stop/disable).
+//
 // Panelde kalanlar:
-//   - UI uçları (durum/ayar/bağlantılar/iptal): yalnız DB okur/yazar, ajana süreç içi
-//     çağrı YAPMAZ; ajan değişikliği DB yoklamasıyla (≤3 sn) görür.
 //   - iptal kancası: kimlik olaylarında (parola/2FA/hosting silme…) bağlantı DB'de iptal
 //     edilir, denetim yazılır; merkeze bildirimi ajan yapar.
 //   - özel köprü (destekKopruBaslat): panel-bağımlı araçların GET çağrıları için.
-func destekKur(d *sql.DB) *ajan.Ajan {
-	a := ajan.Yeni(d, ajan.YapilandirmaYukle(""))
-	a.PanelKancasiKur()
+func destekKur(d *sql.DB) {
+	ajan.PanelKancasiKur(d)
 	// Güncelleme sonrası eski (0644) lisans bileti dosyaları bir sonraki yazımı beklemeden sıkılaşsın.
 	go lisans.BiletIzinleriniDuzelt()
-	return a
 }
 
 // destekKopruBaslat: /run/girginospanel/destek-kopru.sock köprüsünü açar (yönlendirici TÜM

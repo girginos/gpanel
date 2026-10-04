@@ -6,7 +6,6 @@ package ajan
 import (
 	"context"
 	"encoding/base64"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,10 +16,7 @@ import (
 	"girginospanel/internal/destek/iptal"
 	p "girginospanel/internal/destek/protokol"
 	"girginospanel/internal/gizli"
-	"girginospanel/internal/middleware"
 	"girginospanel/internal/sirdosya"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func TestVarsayilanYoklamaAraliklari(t *testing.T) {
@@ -33,45 +29,12 @@ func TestVarsayilanYoklamaAraliklari(t *testing.T) {
 	}
 }
 
-// (c1) Panelde ayar değişir → AJAN (ayrı süreç gibi: panel uçları ona hiç dokunmaz) DB yoklamasıyla
-// görür ve hesap durumunu merkeze yeniden bildirir (etkin düzey düşer).
-func TestAyarDegisiminiAjanYoklamasiGorur(t *testing.T) {
-	o := kurOrtam(t, false, true)
-	mA := o.eslestir(o.mA, 101, "musteri_a", "tam")
-	o.onayla(o.mA, mA)
-	o.m.bosalt()
-
-	// Panel yalnız DB'ye yazar: çalışmayan (Baslat edilmemiş) bir "panel" örneğinden PUT.
-	panel := paneliKur(t, o)
-	basla := time.Now()
-	if y := panel.istek("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "okuma"}); y.kod != 200 {
-		t.Fatalf("panel PUT: %d %s", y.kod, y.ham)
-	}
-	d := o.m.bekle(p.TipBaglantiDurum, func(g p.Govde) bool {
-		b := g.(*p.BaglantiDurum)
-		return b.BaglantiID == mA && b.Duzey == p.DuzeyOkuma
-	}).(*p.BaglantiDurum)
-	if gec := time.Since(basla); gec > 3*time.Second {
-		t.Fatalf("ayar değişimi %v sonra bildirildi (yoklama aralığı 100 ms)", gec)
-	}
-	_ = d
-	// Şalter KAPALI → ajan merkez bağlantısını keser (oturumlar merkezde kapanır).
-	panel.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "kapali"})
-	son := time.Now().Add(5 * time.Second)
-	for o.a.Bagli() {
-		if time.Now().After(son) {
-			t.Fatal("şalter kapanınca ajan merkez bağlantısını kesmedi")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// (c2) Panel UI iptali (yalnız DB) → ajan baglanti_iptal gönderir, damgalar, ikinci kez göndermez.
-func TestPanelIptaliHubaUlasir(t *testing.T) {
+// (c2) İptal yalnız DB'ye yazılır (panelde HTTP ucu YOK; iptal.Tek = eski panel ucunun DB işi)
+// → ajan baglanti_iptal gönderir, damgalar, ikinci kez göndermez.
+func TestDBIptaliHubaUlasir(t *testing.T) {
 	o := kurOrtam(t, false, true)
 	mA := o.eslestir(o.mA, 101, "musteri_a", "okuma")
 	o.onayla(o.mA, mA)
-	panel := paneliKur(t, o)
 	o.m.bosalt()
 	o.a.mu.Lock()
 	_, izVar := o.a.hesapIzi[mA]
@@ -80,7 +43,9 @@ func TestPanelIptaliHubaUlasir(t *testing.T) {
 		t.Fatal("ön koşul: etkin bağlantının hesap izi yok")
 	}
 
-	panel.istekOK("POST", "/destek/baglantilar/"+mA+"/iptal", o.kok, nil)
+	if !iptal.Tek(context.Background(), o.db, mustID(t, o, mA), p.IptalKullanici, "root") {
+		t.Fatal("iptal yazılamadı")
+	}
 	g := o.m.bekle(p.TipBaglantiIptal, func(g p.Govde) bool { return g.(*p.BaglantiIptal).BaglantiID == mA }).(*p.BaglantiIptal)
 	if g.Neden != p.IptalKullanici {
 		t.Fatalf("neden %q", g.Neden)
@@ -149,7 +114,7 @@ func TestKimlikOlayiIptaliAjanYoluyla(t *testing.T) {
 
 // Merkeze bağlı değilken iptal damgalanmaz (bağlanınca bildirilir) ve ajan panik etmez.
 func TestBagliDegilkenIptalDamgalanmaz(t *testing.T) {
-	o := kurOrtam(t, false, false) // modül kapalı → ajan merkeze bağlı değil
+	o := kurOrtam(t, false, false) // yerel acil kapatma → ajan merkeze bağlı değil
 	if _, err := o.db.Exec(`INSERT INTO destek_baglantilari (kimlik, tg_user_id, rol, durum, iptal_nedeni, iptal_at)
 		VALUES ('AAAAAAAAAAAAAAAAAAAAAA', 5, 'kok', 'iptal', 'kullanici', CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
@@ -174,65 +139,36 @@ func mustID(t *testing.T, o *ortam, kimlik string) int64 {
 	return id
 }
 
-// panelRota: cmd/server'daki gibi RequireAuth altında yalnız UI uçları.
-func panelRota(a *Ajan) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(dtSecret))
-			a.Rotalar(r)
-		})
-	})
-	return r
-}
-
-// panelOrtam: aynı DB'ye bakan, ajanı ÇALIŞTIRMAYAN panel örneği (cmd/server'ın yaptığı gibi).
-type panelOrtam struct{ *ortam }
-
-func paneliKur(t *testing.T, o *ortam) panelOrtam {
-	t.Helper()
-	panelAjan := Yeni(o.db, Yapilandirma{}) // Baslat YOK
-	po := &ortam{t: t, db: o.db}
-	po.h = panelRota(panelAjan)
-	return panelOrtam{po}
-}
-
-// (nabız) Durum ucu ajan canlılığını DB nabzından okur.
-func TestNabizVeDurumUcu(t *testing.T) {
+// (nabız) Ajan canlılığı DB nabzından okunur (ops: girginospanel-dogrula; panelde arayüz YOK).
+func TestNabizOku(t *testing.T) {
 	o := kurOrtam(t, false, true)
-	panel := paneliKur(t, o)
-	bekleCanli := func(istenen bool) map[string]any {
-		var son yanit
+	bekleCanli := func(istenen bool) Nabiz {
+		var son Nabiz
 		for i := 0; i < 100; i++ {
-			son = panel.istek("GET", "/destek/durum", o.kok, nil)
-			aj, _ := son.govde["ajan"].(map[string]any)
-			if son.kod == 200 && aj != nil && aj["canli"] == istenen {
-				return son.govde
+			son = NabizOku(context.Background(), o.db)
+			if son.Canli == istenen {
+				return son
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatalf("ajan.canli=%v olmadı: %s", istenen, son.ham)
-		return nil
+		t.Fatalf("canli=%v olmadı: %+v", istenen, son)
+		return son
 	}
-	var g map[string]any
+	var n Nabiz
 	for i := 0; i < 100; i++ { // ilk nabız bağlanmadan önce yazılmış olabilir
-		g = bekleCanli(true)
-		if b, _ := g["baglanti"].(map[string]any); b != nil && b["durum"] == BagBagli {
+		n = bekleCanli(true)
+		if n.Durum.Durum == BagBagli {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if b, _ := g["baglanti"].(map[string]any); b == nil || b["durum"] != BagBagli {
-		t.Fatalf("bağlı ajan durumu: %v", g["baglanti"])
-	}
-	if g["merkez_bagli"] != true {
-		t.Fatal("merkez_bagli false")
+	if n.Durum.Durum != BagBagli || !n.MerkezBagl {
+		t.Fatalf("bağlı ajan nabzı: %+v", n)
 	}
 	// Temiz kapanış → hemen "ajan yok".
 	o.a.Durdur(context.Background())
-	g = bekleCanli(false)
-	if b, _ := g["baglanti"].(map[string]any); b == nil || b["durum"] != BagAjanYok || g["merkez_bagli"] != false {
-		t.Fatalf("durdurulmuş ajan: %v", g)
+	if n = bekleCanli(false); n.MerkezBagl {
+		t.Fatalf("durdurulmuş ajan merkez bağlı: %+v", n)
 	}
 	// Bayat nabız (ajan çöktü, Durdur çalışmadı).
 	o.a.nabizYaz(context.Background())

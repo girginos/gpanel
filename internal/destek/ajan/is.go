@@ -58,7 +58,7 @@ func (a *Ajan) isYurut(ctx context.Context, m *p.IsEmri) *p.IsSonucu {
 		}
 		return red(m.IsKodu, p.HataKoduAl(err), "")
 	}
-	if !modulAcik(ctx, a.DB) {
+	if a.yerelKapali() { // acil kapatma: bağlantı kopmadan önceki aralıkta gelen emirler de reddedilir
 		return red(m.IsKodu, p.HataDevreDisi, "")
 	}
 	b, err := baglantiKimlikle(ctx, a.DB, m.BaglantiID)
@@ -86,7 +86,7 @@ func (a *Ajan) isYurut(ctx context.Context, m *p.IsEmri) *p.IsSonucu {
 		a.otomatikIptal(ctx, b, n)
 		return red(m.IsKodu, p.HataBaglantiIptal, "")
 	}
-	etkin := EtkinDuzey(ctx, a.DB, b.Rol, b.ResellerID, b.Duzey)
+	etkin := EtkinDuzey(b.Duzey) // = portalda seçilen, merkezin imzaladığı düzey
 	if etkin == p.DuzeyKapali {
 		return red(m.IsKodu, p.HataDevreDisi, "")
 	}

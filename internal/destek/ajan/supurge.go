@@ -17,6 +17,8 @@ const (
 	supurgeAraligi = time.Minute
 	ozetAraligi    = time.Hour
 	isSaklama      = 180 // gün
+	// bekleyenOmru: eski ('bekliyor') kayıtların onay süresi — süpürge bunları kapatır.
+	bekleyenOmru = 30 * time.Minute
 )
 
 func (a *Ajan) supurgeDongusu(ctx context.Context) {
@@ -38,7 +40,7 @@ func (a *Ajan) supurgeDongusu(ctx context.Context) {
 }
 
 // SupurgeTur: süresi dolan bekleyen/aktif bağlantıları ve kimlik izi bozulanları
-// iptal eder (modül kapalıyken de: iptal tetikleri her zaman çalışmalı).
+// iptal eder (yerel acil kapatma dosyası varken de: iptal tetikleri her zaman çalışmalı).
 func (a *Ajan) SupurgeTur(ctx context.Context) {
 	simdi := a.Saat().Unix()
 	bs, err := baglantilarSorgu(ctx, a.DB, `durum IN ('bekliyor','aktif') ORDER BY id LIMIT 5000`)

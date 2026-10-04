@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -197,12 +198,10 @@ func TestIptalIkiYonde(t *testing.T) {
 		t.Fatal("unutbeni sonrası merkezde bağlantı kaldı")
 	}
 
-	// panel → Telegram: kök panelden iptal eder (bayi/müşteri panelden bağlantı yönetemez)
+	// DB iptali → Telegram: panelde HTTP ucu YOK; iptal DB'ye yazılır (kimlik olayı kancalarının
+	// yolu), ajan yoklamayla görür ve merkeze bildirir.
 	kimBayi := o.eslestir(o.bA, tgBayi, "bayi_a_tg", "okuma", false)
-	if y := o.istek("POST", "/destek/baglantilar/"+kimBayi+"/iptal", o.bA, nil); y.kod != 403 {
-		t.Fatalf("bayi panelden iptal edebildi: %d", y.kod)
-	}
-	o.istekOK("POST", "/destek/baglantilar/"+kimBayi+"/iptal", o.kok, nil)
+	o.dbIptal(kimBayi)
 	o.tg.bekle(t, tgBayi, "Destek bağlantınız kapatıldı (kullanici)")
 	o.kosulBekle("merkez bağlantıyı sildi", 10*time.Second, func() bool { _, ok := o.merkezBaglantisi(tgBayi); return !ok })
 	n := o.c.anaSayisi()
@@ -279,10 +278,10 @@ func TestMusteriBaskaHesabaErisemez(t *testing.T) {
 
 	// ajan hattı: merkez kaydı bozulmuş/ele geçirilmiş — A'nın bağlantısı B'nin hesabını
 	// listeliyor. Merkez 1. hattı geçer, İMZALI iş emri gider; ajan YEREL kapsamla reddeder.
-	// Önce açık oturum kapansın (yeni oturum kapsamı kayıttan okur): panel ayarı
-	// değişince ajan bağlantı durumlarını yeniden bildirir → merkez oturumu kapatır.
+	// Önce açık oturum kapansın (yeni oturum kapsamı kayıttan okur): ajan yeniden
+	// bağlanınca bağlantı durumlarını yeniden bildirir → merkez oturumu kapatır.
 	once, _ := o.merkezBaglantisi(tgA)
-	o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam"})
+	o.ajanYenidenBildir()
 	o.kosulBekle("ajan durumu yeniden bildirdi", 10*time.Second, func() bool {
 		b, _ := o.merkezBaglantisi(tgA)
 		return b.Guncelleme.After(once.Guncelleme)
@@ -394,4 +393,27 @@ func TestHesapListesiDegisimi(t *testing.T) {
 	if y := o.yoklananlar(); !slices.Equal(y, []string{"https://a2.test/"}) {
 		t.Fatalf("güncel listeyle hedef: %q", y)
 	}
+}
+
+// Yerel acil kapatma (root dosyası) GERÇEK merkezle: dosya belirince ajan koparılır ve merkez
+// çevrimdışı görür; kalkınca yeniden bağlanır. destek_ayar satırı hiç yoktur (şalter yok).
+func TestAcilKapatmaMerkezdeGorunur(t *testing.T) {
+	o := kur(t, false, nil)
+	o.bagliBekle()
+	o.kosulBekle("merkez ajanı çevrimiçi gördü", 10*time.Second, func() bool { return o.metrikSayi("cevrimici_ajan") == 1 })
+	var n int
+	if err := o.db.QueryRow(`SELECT COUNT(*) FROM destek_ayar`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("destek_ayar boş olmalı: n=%d err=%v", n, err)
+	}
+	if err := os.WriteFile(o.kapatma, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o.kosulBekle("merkez ajanı çevrimdışı gördü", 10*time.Second, func() bool { return o.metrikSayi("cevrimici_ajan") == 0 })
+	if o.ajan().Bagli() {
+		t.Fatal("kapatma dosyası varken ajan bağlı")
+	}
+	if err := os.Remove(o.kapatma); err != nil {
+		t.Fatal(err)
+	}
+	o.kosulBekle("merkez ajanı yeniden çevrimiçi gördü", 15*time.Second, func() bool { return o.metrikSayi("cevrimici_ajan") == 1 })
 }
