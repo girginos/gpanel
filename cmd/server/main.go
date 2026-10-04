@@ -892,9 +892,11 @@ func main() {
 				r.With(middleware.MusteriScope).Put("/domains/{id}/web-root", domainsH.SetWebRoot)
 				// FTP parolası = müşterinin panel giriş parolası → adına-oturumda kimlik işlemi (403).
 				r.With(middleware.MusteriScope, middleware.AdinaYasak).Put("/domains/{id}/ftp/password", domainsH.SetFTPPassword)
-				// Kök/bayi "Şifre değiştir": müşteri giriş parolası (sahiplik işleyicide, başkasının → 404;
-				// oturumları düşürür, denetim + hesap başına hız sınırı). Müşteri/adına-oturum/anahtar GİREMEZ.
-				r.With(middleware.AdminVeyaReseller).Put("/domains/{id}/giris-parola", domainsH.GirisParola)
+				// Bayi "Şifre değiştir": müşteri giriş parolası (sahiplik işleyicide, başkasının → 404;
+				// oturumları düşürür, denetim + hesap başına hız sınırı). YALNIZ BAYİ (kullanıcı kararı
+				// 2026-10-04): kök bu uca 403 alır — kök parolayı domain ayrıntısındaki FTP/bağlantı
+				// bilgisinden değiştirir. Müşteri/adına-oturum/anahtar GİREMEZ.
+				r.With(middleware.RequireRole("reseller")).Put("/domains/{id}/giris-parola", domainsH.GirisParola)
 				// Otomasyon (WHMCS ChangePassword) parola uçları: kök hepsinde, bayi YALNIZ
 				// kendi hosting hesaplarında, müşteri ASLA (SahipYonetim). FTP ve DB bağımsız.
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/ftp-accounts/{kullanici}/password", domainsH.FTPHesapParola)

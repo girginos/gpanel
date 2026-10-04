@@ -1,7 +1,7 @@
 package domains
 
 // giris_parola_test.go — "Şifre değiştir" ucu (PUT /domains/{id}/giris-parola)
-// UÇTAN UCA: gerçek RequireAuth + AdminVeyaReseller zinciri (main.go ile AYNI),
+// UÇTAN UCA: gerçek RequireAuth + RequireRole("reseller") zinciri (main.go ile AYNI),
 // gerçek işleyici, geçici MariaDB (GOSP_TEST_GECICI_DSN yoksa ATLANIR). Şema/sahte
 // SSH-eşitleme api_parola_test.go ile ortak.
 
@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,10 @@ func gp_kur(t *testing.T) (*sql.DB, http.Handler, *ap_sahte) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(ap_sir))
-			r.With(middleware.AdminVeyaReseller).Put("/domains/{id}/giris-parola", h.GirisParola)
+			// Üretimle AYNI kapı: yalnız bayi (cmd/server/main.go; rota_giris_parola_test.go kaynağı kilitler).
+			r.With(middleware.RequireRole("reseller")).Put("/domains/{id}/giris-parola", h.GirisParola)
+			// Rol kapısı OLMADAN: işleyicinin KENDİ ikinci kilidini (kök → 403) tek başına sınar.
+			r.Put("/domains/{id}/giris-parola-ham", h.GirisParola)
 			r.With(middleware.MusteriScope, middleware.AdinaYasak).Put("/domains/{id}/ftp/password", h.SetFTPPassword)
 			r.With(middleware.MusteriScope).Get("/domains/{id}/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
 		})
@@ -143,15 +147,35 @@ func TestGirisParola_KokVeSahipBayi(t *testing.T) {
 	if len(s.ssh) != 1 || s.ssh[0] != "c_bayi2" {
 		t.Fatalf("SSH eşitlenmeli: %v", s.ssh)
 	}
-	// kök: sahibi bayi olan domainde de, sahibi kök olan domainde de (SSH kapalı → eşitleme yok)
-	if y := gp_istek(t, h, "PUT", gp_tok(t, "admin", 1), "/domains/30/giris-parola", map[string]string{"parola": apGuclu}); y.kod != 200 {
-		t.Fatalf("kök bayi domainine: %d %s", y.kod, y.ham)
-	}
-	if y := gp_istek(t, h, "PUT", gp_tok(t, "admin", 1), "/domains/40/giris-parola", map[string]string{"parola": apGuclu}); y.kod != 200 {
-		t.Fatalf("kök kendi domainine: %d %s", y.kod, y.ham)
-	}
 	if len(s.ssh) != 1 {
-		t.Fatalf("SSH kapalı hostingte eşitleme olmamalı: %v", s.ssh)
+		t.Fatalf("SSH eşitlemesi tek olmalı: %v", s.ssh)
+	}
+}
+
+// Kullanıcı kararı (2026-10-04): şifre sıfırlama YALNIZ bayi içindir; kök bu uca giremez
+// (bayi domaininde de, kendi domaininde de) ve hiçbir şey değişmez. Hem rota kapısı hem
+// işleyicinin ikinci kilidi ayrı ayrı 403 vermeli.
+func TestGirisParola_KokReddedilir(t *testing.T) {
+	db, h, s := gp_kur(t)
+	for _, yol := range []string{"/domains/%d/giris-parola", "/domains/%d/giris-parola-ham"} {
+		for _, id := range []int{20, 30, 40} { // bayi2 sahipli, başka bayi sahipli, kök sahipli
+			y := gp_istek(t, h, "PUT", gp_tok(t, "admin", 1), fmt.Sprintf(yol, id), map[string]string{"parola": apGuclu})
+			if y.kod != 403 {
+				t.Errorf("kök %s (id=%d): 403 beklenirdi, %d %s", yol, id, y.kod, y.ham)
+			}
+		}
+	}
+	for _, k := range []string{"c_bayi2", "c_kurban"} {
+		if h0, _ := ap_ftpHash(t, db, k); hesaplar.FTPParolaDogrula(apGuclu, h0) {
+			t.Fatalf("reddedilen kök isteği %s parolasını değiştirmemeli", k)
+		}
+	}
+	if len(s.ssh) != 0 || len(gp_denetim(t, db)) != 0 {
+		t.Fatalf("reddedilen kök isteği yan etki bırakmamalı: ssh=%v", s.ssh)
+	}
+	// bayi aynı ucu hâlâ kullanabilir (regresyon)
+	if y := gp_istek(t, h, "PUT", gp_tok(t, "reseller", 2), "/domains/20/giris-parola", map[string]string{"parola": apGuclu}); y.kod != 200 {
+		t.Fatalf("bayi sahibi: %d %s", y.kod, y.ham)
 	}
 }
 
@@ -262,7 +286,7 @@ func TestGirisParola_HizSiniri(t *testing.T) {
 		t.Fatalf("hesap başına hız sınırı (429): %d", son.kod)
 	}
 	// başka hesap etkilenmez
-	if y := gp_istek(t, h, "PUT", gp_tok(t, "admin", 1), "/domains/40/giris-parola", map[string]string{"parola": apGuclu}); y.kod != 200 {
+	if y := gp_istek(t, h, "PUT", gp_tok(t, "reseller", 2), "/domains/21/giris-parola", map[string]string{"parola": apGuclu}); y.kod != 200 {
 		t.Fatalf("başka hesap: %d", y.kod)
 	}
 }

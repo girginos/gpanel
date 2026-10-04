@@ -1,13 +1,15 @@
 package domains
 
-// giris_parola.go — kök/bayi arayüzünden hosting hesabının MÜŞTERİ GİRİŞ (ana FTP)
-// parolasını değiştirme: "Domainler" listesindeki "Şifre değiştir" penceresi.
+// giris_parola.go — BAYİ arayüzünden hosting hesabının MÜŞTERİ GİRİŞ (ana FTP)
+// parolasını değiştirme: bayi "Domainler" listesindeki "Şifre değiştir" penceresi.
 //
 //	PUT /domains/{id}/giris-parola        gövde {"parola":"..."} (boş → sunucu üretir)
 //
-// Kapsam (rota: AdminVeyaReseller; sahiplik burada, DB'den):
-//   - kök herkese; bayi YALNIZ kendi sahipliğindeki domaine — başkasının domaini ve
-//     olmayan domain AYNI 404 ("domain bulunamadı": varlık sızmaz);
+// Kapsam (rota: RequireRole("reseller"); sahiplik burada, DB'den):
+//   - YALNIZ bayi, YALNIZ kendi sahipliğindeki domaine — başkasının domaini, kök sahipli
+//     domain ve olmayan domain AYNI 404 ("domain bulunamadı": varlık sızmaz);
+//   - kök (admin): 403 — kullanıcı kararı 2026-10-04; kök FTP/bağlantı parolasını domain
+//     ayrıntısındaki uçlardan değiştirir (bu uç kök için kullanılmaz);
 //   - müşteri / adına-oturum (müşteri jetonu) / API anahtarı / destek botu: ERİŞEMEZ
 //     (rota katmanı + burada ikinci kilit; anahtar tablosunda da KimlikUclari).
 //
@@ -73,10 +75,10 @@ func girisParolaSifirla() {
 
 // GirisParola: PUT /domains/{id}/giris-parola
 func (h *Handlers) GirisParola(w http.ResponseWriter, r *http.Request) {
-	// İkinci kilit: yalnız kök/bayi OTURUMU. API anahtarı, destek botu, müşteri ve
+	// İkinci kilit: yalnız BAYİ OTURUMU (kök de giremez). API anahtarı, destek botu, müşteri ve
 	// adına-oturum (müşteri jetonu → ClaimsFrom nil) buraya giremez.
 	c := middleware.ClaimsFrom(r)
-	if c == nil || (c.Role != "admin" && c.Role != "reseller") ||
+	if c == nil || c.Role != "reseller" ||
 		middleware.AnahtarFrom(r) != nil || middleware.DestekFrom(r) != nil {
 		httpx.WriteError(w, http.StatusForbidden, "bu işlem için yetkiniz yok")
 		return
@@ -90,7 +92,7 @@ func (h *Handlers) GirisParola(w http.ResponseWriter, r *http.Request) {
 		Scan(&alan, &sk, &isDemo, &sshOn, &rid)
 	// 🔴 Sahiplik DB'den: istemci alanına güvenilmez. Başkasının domaini = yok.
 	if errors.Is(err, sql.ErrNoRows) ||
-		(err == nil && c.Role == "reseller" && (!rid.Valid || c.ResellerID == 0 || rid.Int64 != c.ResellerID)) {
+		(err == nil && (!rid.Valid || c.ResellerID == 0 || rid.Int64 != c.ResellerID)) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}

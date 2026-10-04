@@ -22,7 +22,6 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
 import { useRol, yoneticiMi } from '@/lib/rol'
 import BayiDomainler from '@/components/bayi/BayiDomainler'
-import SifreDegistirModal from '@/components/SifreDegistirModal'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -51,7 +50,7 @@ function SahipHucre({ ad, tur }: { ad?: string; tur?: string }) {
   if (!ad) return <span className="text-slate-400 dark:text-slate-500 italic">—</span>
   const bayi = tur === 'bayi'
   return (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
+    <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full lg:max-w-[8rem]" title={ad}>
       <span className="text-slate-700 dark:text-slate-300 truncate">{ad}</span>
       <Badge color={bayi ? 'primary' : 'neutral'} variant="soft"
         className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 font-semibold shrink-0">
@@ -78,6 +77,24 @@ function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
     </a>
   )
 }
+
+// Kök Domainler tablosu: sütunlar KAPSAYICI genişliğine göre kademeli gizlenir (container query).
+// Ekran genişliği değil, tablonun gerçekten sahip olduğu alan ölçülür: sol rayın + alt menünün
+// (Domainler/Bayiler) yediği ~316px düşüldükten sonra kalan genişlik. Gizleme yalnız masaüstü
+// tablo kipinde (lg+) geçerlidir; mobil kartta tüm alanlar zaten alt alta gösterilir.
+// Önem sırası (önce gizlenen): Oluşturulma > PHP > Sistem kullanıcısı > Disk > Kullanıcı (sahip) > Plan.
+// Eşikler en kötü durumda (uzun adlar kırpılma sınırında) tablonun sığdığı en dar kapsayıcı genişliğidir.
+// Sayfa en çok 1280px (içerik 1230px) olduğundan Oluşturulma yalnız sayfa genişletilirse görünür;
+// kayıt tarihi domain ayrıntı sayfasında zaten var.
+// `!` zorunlu: T.hucre'nin `lg:table-cell` kuralını sıra bağımsız ezmeli.
+const KOL = {
+  plan: '@max-[739px]:lg:hidden!',
+  sahip: '@max-[869px]:lg:hidden!',
+  disk: '@max-[959px]:lg:hidden!',
+  sk: '@max-[1089px]:lg:hidden!',
+  php: '@max-[1169px]:lg:hidden!',
+  olusturulma: '@max-[1289px]:lg:hidden!',
+} as const
 
 function fmtKB(kb: number) {
   if (kb < 1024) return kb + ' KB'
@@ -221,7 +238,6 @@ export default function DomainsPage() {
   //    reseller_id'siyle süzer), DELETE /domains/{id} (SahipYonetim),
   //    DELETE /domains/{id}/subdomain/{sid} (MusteriScope → bayi sahipliği).
   const yonetici = yoneticiMi(useRol())
-  const [sifreDom, setSifreDom] = useState<{ id: number; alan_adi: string; sistem_kullanici: string } | null>(null)
   const sahipKolonu = yonetici
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
@@ -643,7 +659,7 @@ export default function DomainsPage() {
           aciklama={cevir("İlk domain'inizi ekleyerek başlayın. Linux kullanıcı, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone otomatik oluşturulur.")}
           buton={{ etiket: cevir("Domain Oluştur"), onClick: olusturAc }} />
       ) : (
-        <div className="lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
+        <div className="@container lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
             <table className={T.tablo}>
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
@@ -657,13 +673,13 @@ export default function DomainsPage() {
                     className="cursor-pointer" />
                 </th>
                 <th className={T.baslik}>{cevir("Domain Adı")}</th>
-                <th className={T.baslik}>{cevir("Sistem Kullanıcısı")}</th>
-                {sahipKolonu && <th className={T.baslik}>{cevir("Kullanıcı")}</th>}
-                <th className={T.baslik}>Plan</th>
-                <th className={T.baslik}>PHP</th>
-                <th className={T.baslik}>Disk</th>
+                <th className={`${T.baslik} ${KOL.sk}`}>{cevir("Sistem Kullanıcısı")}</th>
+                {sahipKolonu && <th className={`${T.baslik} ${KOL.sahip}`}>{cevir("Kullanıcı")}</th>}
+                <th className={`${T.baslik} ${KOL.plan}`}>Plan</th>
+                <th className={`${T.baslik} ${KOL.php}`}>PHP</th>
+                <th className={`${T.baslik} ${KOL.disk}`}>Disk</th>
                 <th className={T.baslik}>{cevir("Durum")}</th>
-                <th className={T.baslik}>{cevir("Oluşturulma")}</th>
+                <th className={`${T.baslik} ${KOL.olusturulma}`}>{cevir("Oluşturulma")}</th>
                 <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
               </tr>
             </thead>
@@ -679,45 +695,42 @@ export default function DomainsPage() {
                         className="cursor-pointer" />
                     </td>
                     <td className={T.hucreBaslikSecimli}>
-                      <span className="inline-flex items-center gap-1.5 min-w-0 align-middle">
-                      <Link to={`/abonelikler/${d.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">
+                      <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full lg:max-w-[14rem] align-middle">
+                      <Link to={`/abonelikler/${d.id}`} title={d.alan_adi} className="min-w-0 lg:truncate text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">
                         {d.alan_adi}
                       </Link>
                       <SiteAc ad={d.alan_adi} ssl={d.ssl} />
-                      {d.is_demo && <Badge color="warning" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5">DEMO</Badge>}
+                      {d.is_demo && <Badge color="warning" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 shrink-0">DEMO</Badge>}
                       </span>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
-                      <span title={d.sistem_kullanici} className="font-mono text-xs text-slate-600 dark:text-slate-400 inline-block max-w-[8rem] truncate align-bottom lg:text-left">{d.sistem_kullanici}</span>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sk}`} data-etiket={cevir("Sistem Kullanıcısı")}>
+                      <span title={d.sistem_kullanici} className="font-mono text-xs text-slate-600 dark:text-slate-400 inline-block max-w-[7rem] truncate align-bottom lg:text-left">{d.sistem_kullanici}</span>
                     </td>
                     {sahipKolonu && (
-                      <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
+                      <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sahip}`} data-etiket={cevir("Kullanıcı")}>
                         <SahipHucre ad={d.sahip_ad} tur={d.sahip_tur} />
                       </td>
                     )}
-                    <td className={T.hucre} data-etiket="Plan">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.plan}`} data-etiket="Plan">
                       {!d.plan_ad
                         ? <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                         : (/—\s*Özel\s*$/.test(d.plan_ad) || d.plan_ad.trim() === cevir("Özel"))
                           ? <Badge title={d.plan_ad} variant="outlined" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Özel")}</Badge>
-                          : <span className="text-slate-700 dark:text-slate-300">{d.plan_ad}</span>}
+                          : <span title={d.plan_ad} className="text-slate-700 dark:text-slate-300 inline-block max-w-full lg:max-w-[7rem] truncate align-bottom">{d.plan_ad}</span>}
                     </td>
-                    <td className={T.hucre} data-etiket="PHP">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.php}`} data-etiket="PHP">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.php_surum || '-'}</span>
                     </td>
-                    <td className={T.hucre} data-etiket="Disk">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(d.boyut_kb)}</span>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Durum")}>
+                    <td className={`${T.hucre} lg:whitespace-nowrap`} data-etiket={cevir("Durum")}>
                       <Badge color={durumRenk(d.durum)} variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{d.durum}</Badge>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.olusturulma}`} data-etiket={cevir("Oluşturulma")}>
+                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma?.slice(0, 10) || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Button variant="outlined" boyut="sm" ikon={I.anahtar} className="lg:mr-2" disabled={d.is_demo || !d.sistem_kullanici}
-                        aria-label={`${d.alan_adi}: ${cevir('Şifre değiştir')}`} title={cevir('Şifre değiştir')}
-                        onClick={() => setSifreDom({ id: d.id, alan_adi: d.alan_adi, sistem_kullanici: d.sistem_kullanici })} />
                       <Link to={`/abonelikler/${d.id}/subdomainler`} className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'lg:mr-2' })}>
                         <Ikon d={I.arti} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />Subdomain
                       </Link>
@@ -736,35 +749,35 @@ export default function DomainsPage() {
                         className="cursor-pointer" />
                     </td>
                     <td className={T.hucreBaslikSecimli}>
-                      <span className="inline-flex items-center gap-1.5 lg:pl-5">
-                        <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline">└─</span>
-                        <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{sd.tam_ad}</Link>
+                      <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full lg:max-w-[14rem] @min-[950px]:lg:max-w-[17rem]! lg:pl-5 align-middle">
+                        <span className="text-slate-300 dark:text-slate-600 select-none hidden lg:inline shrink-0">└─</span>
+                        <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} title={sd.tam_ad} className="min-w-0 lg:truncate text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300">{sd.tam_ad}</Link>
                         <SiteAc ad={sd.tam_ad} ssl={d.ssl} />
-                        <Badge color="info" variant="soft" className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 align-middle">{cevir("alt alan")}</Badge>
+                        <Badge color="info" variant="soft" className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 align-middle shrink-0 whitespace-nowrap @max-[739px]:lg:hidden!">{cevir("alt alan")}</Badge>
                       </span>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Sistem Kullanıcısı")}>
-                      <span title={sd.sistem_kullanici} className="font-mono text-xs text-slate-500 dark:text-slate-400 inline-block max-w-[8rem] truncate align-bottom">{sd.sistem_kullanici}</span>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sk}`} data-etiket={cevir("Sistem Kullanıcısı")}>
+                      <span title={sd.sistem_kullanici} className="font-mono text-xs text-slate-500 dark:text-slate-400 inline-block max-w-[7rem] truncate align-bottom">{sd.sistem_kullanici}</span>
                     </td>
                     {sahipKolonu && (
-                      <td className={T.hucre} data-etiket={cevir("Kullanıcı")}>
-                        <span className="text-xs text-slate-400 dark:text-slate-500 truncate">{d.sahip_ad || '—'}</span>
+                      <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sahip}`} data-etiket={cevir("Kullanıcı")}>
+                        <span title={d.sahip_ad} className="text-xs text-slate-400 dark:text-slate-500 truncate inline-block max-w-full lg:max-w-[8rem] align-bottom">{d.sahip_ad || '—'}</span>
                       </td>
                     )}
-                    <td className={T.hucre} data-etiket="Plan">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.plan}`} data-etiket="Plan">
                       <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                     </td>
-                    <td className={T.hucre} data-etiket="PHP">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.php}`} data-etiket="PHP">
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{sd.php_surum || '-'}</span>
                     </td>
-                    <td className={T.hucre} data-etiket="Disk">
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
                       <span className="text-slate-300 dark:text-slate-600">—</span>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Durum")}>
+                    <td className={`${T.hucre} lg:whitespace-nowrap`} data-etiket={cevir("Durum")}>
                       <Badge color="success" variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{cevir("aktif")}</Badge>
                     </td>
-                    <td className={T.hucre} data-etiket={cevir("Oluşturulma")}>
-                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma || '-'}</span>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.olusturulma}`} data-etiket={cevir("Oluşturulma")}>
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sd.olusturulma?.slice(0, 10) || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
                       <Link to={`/abonelikler/${sd.parent_id}/subdomainler/${sd.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm' })}>
@@ -781,8 +794,6 @@ export default function DomainsPage() {
         </div>
       )}
       </>)}
-
-      {sifreDom && <SifreDegistirModal key={sifreDom.id} domain={sifreDom} onKapat={() => setSifreDom(null)} />}
 
       {/* Domain Oluştur Modal */}
       <Modal acik={olusturAcik} baslik={cevir("Yeni Domain Oluştur")} onKapat={() => setOlusturAcik(false)} kapatilamaz={olusturuluyor} genislik="lg"
