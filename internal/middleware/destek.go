@@ -26,6 +26,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"girginospanel/internal/auth"
 	"girginospanel/internal/httpx"
@@ -105,6 +106,60 @@ var DestekRotalari = map[string]string{
 	"GET " + dp + "/domains/{id}/dns":                  "dns_kontrol",
 	"GET " + dp + "/admin/system/loglar":               "sunucu_log_oku (AdminOnly)",
 }
+
+// DestekYolIzinli — somut istek yolunun DestekRotalari'ndaki bir kalıba TAM uyup
+// uymadığı. Özel köprü (internal/destek/kopru) isteği süreç içi yönlendiriciye
+// vermeden ÖNCE bunu çağırır: kimlik zaten RoutePattern ile ikinci kez denetlenir
+// (destekIstek), bu ise köprünün kendi, bağımsız varsayılan-red kapısıdır.
+//
+// Kurallar: yalnız GET; yol mutlak ve "/api/v1/" altında; "{id}" bölümü 1-18 rakam;
+// diğer bölümler birebir; boş bölüm, ".", "..", "?", "#", "%", kontrol karakteri YOK.
+// Dönen desen DestekRotalari anahtarıdır ("GET /api/v1/...").
+func DestekYolIzinli(metod, yol string) (string, bool) {
+	if metod != http.MethodGet || len(yol) < len(dp)+2 || len(yol) > 512 || !strings.HasPrefix(yol, dp+"/") {
+		return "", false
+	}
+	for i := 0; i < len(yol); i++ {
+		c := yol[i]
+		if c <= ' ' || c >= 0x7f || c == '?' || c == '#' || c == '%' || c == '\\' {
+			return "", false
+		}
+	}
+	parcalar := strings.Split(yol[1:], "/")
+	for _, pc := range parcalar {
+		if pc == "" || pc == "." || pc == ".." {
+			return "", false
+		}
+	}
+	for desen := range DestekRotalari {
+		_, kalip, ok := strings.Cut(desen, " ")
+		if !ok || !strings.HasPrefix(desen, http.MethodGet+" ") {
+			continue
+		}
+		kp := strings.Split(kalip[1:], "/")
+		if len(kp) != len(parcalar) {
+			continue
+		}
+		uydu := true
+		for i := range kp {
+			if kp[i] == "{id}" {
+				if !destekIDRe.MatchString(parcalar[i]) {
+					uydu = false
+					break
+				}
+			} else if kp[i] != parcalar[i] {
+				uydu = false
+				break
+			}
+		}
+		if uydu {
+			return desen, true
+		}
+	}
+	return "", false
+}
+
+var destekIDRe = regexp.MustCompile(`^[0-9]{1,18}$`)
 
 // destekHesapSorgu — bayi/kök hesabının (rol, durum) satırı. Dikiş (testler).
 var destekHesapSorgu = func(ctx context.Context, uid int64) (rol, durum string, err error) {

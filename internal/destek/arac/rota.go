@@ -4,57 +4,35 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 
+	"girginospanel/internal/destek/kopru"
 	"girginospanel/internal/destek/protokol"
-	"girginospanel/internal/middleware"
 )
 
-// yanitSiniri — süreç içi rota yanıtının üst sınırı (bayt).
-const yanitSiniri = 8 << 20
+// yanitSiniri — panel rota yanıtının üst sınırı (bayt); köprüyle aynı değer.
+const yanitSiniri = kopru.YanitSiniri
 
-// kayitci — sınırlı, eşzamanlı-güvenli ResponseWriter (httptest.ResponseRecorder
-// yerine: gövde sınırsız büyümesin; zaman aşımında bırakılan işleyici yazmaya
-// devam etse de okuyanla yarışmasın).
-type kayitci struct {
-	mu     sync.Mutex
-	h      http.Header
-	kod    int
-	govde  bytes.Buffer
-	asildi bool
+// PanelYanitVermiyor — panel-bağımlı bir araç panele ulaşamadığında sonuç özetinin
+// başındaki SABİT işaret (modelin ve operatörün aradığı ad). Telde hata kodu olarak
+// protokol.HataMesgul gider (eski merkez sürümleri yeni bir kodu REDDEDERDİ — bkz.
+// KURULUM.md "uyumluluk"); ayırt edici ad özet metnindedir.
+const PanelYanitVermiyor = "panel_yanit_vermiyor"
+
+// panelYok — köprü/panel yanıt vermiyor. Özet modele panel-bağımsız araçları önerir.
+func panelYok() error {
+	return hataf(protokol.HataMesgul, PanelYanitVermiyor+": panel hizmeti yanıt vermiyor; bu araç panele bağlı. "+
+		"servis_durum, dogrula_ozet, nginx_test ve log_oku (php_fpm/laravel/cron) panelden bağımsız çalışır")
 }
 
-func (k *kayitci) Header() http.Header { return k.h }
-func (k *kayitci) WriteHeader(kod int) {
-	k.mu.Lock()
-	if k.kod == 0 {
-		k.kod = kod
-	}
-	k.mu.Unlock()
-}
-func (k *kayitci) Write(p []byte) (int, error) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	if k.kod == 0 {
-		k.kod = http.StatusOK
-	}
-	if kalan := yanitSiniri - k.govde.Len(); kalan < len(p) {
-		if kalan > 0 {
-			k.govde.Write(p[:kalan])
-		}
-		k.asildi = true
-		return len(p), nil
-	}
-	return k.govde.Write(p)
-}
-func (k *kayitci) Flush() {}
-
-// rota — panelin kendi yönlendiricisine destek kimliğiyle GET isteği atar ve JSON
-// gövdeyi çözer. hesap verilirse {id} yerine o hesabın kimliği konur (yol
-// kalıbı çağırandan, kimlik DB'den gelir; modelden gelen metin yola girmez).
+// rota — panelin salt-okunur GET ucuna destek kimliğiyle istek atar ve JSON
+// gövdeyi çözer. Panel sürecinde kopru.Yerel (süreç içi), ayrı destek-ajan
+// sürecinde köprü istemcisi arkadadır. hesap verilirse {id} yerine o hesabın
+// kimliği konur (yol kalıbı çağırandan, kimlik DB'den gelir; modelden gelen
+// metin yola girmez).
 func (c *cagri) rota(ctx context.Context, h *hesap, yol string, sorgu url.Values) (any, error) {
 	dk, err := c.destekKimligi(h)
 	if err != nil {
@@ -63,41 +41,24 @@ func (c *cagri) rota(ctx context.Context, h *hesap, yol string, sorgu url.Values
 	if h != nil {
 		yol = "/api/v1/domains/" + strconv.FormatInt(h.ID, 10) + yol
 	}
-	if len(sorgu) > 0 {
-		yol += "?" + sorgu.Encode()
-	}
-	req, err := http.NewRequestWithContext(middleware.DestekBagla(ctx, dk), http.MethodGet, yol, nil)
+	y, err := c.y.gecit.Cagir(ctx, kopru.Istek{Kimlik: dk, Yol: yol, Sorgu: sorgu.Encode()})
 	if err != nil {
-		return nil, hataf(protokol.HataIc, "istek kurulamadı")
+		switch {
+		case errors.Is(err, kopru.ErrYok):
+			return nil, panelYok()
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			return nil, hataf(protokol.HataZamanAsimi, "panel yanıtı gecikti")
+		}
+		return nil, hataf(protokol.HataYetki, "köprü isteği reddetti")
 	}
-	req.RemoteAddr = "127.0.0.1:0"
-	req.RequestURI = yol
-	k := &kayitci{h: http.Header{}}
-	bitti := make(chan struct{})
-	go func() {
-		defer close(bitti)
-		defer func() {
-			if r := recover(); r != nil {
-				k.WriteHeader(http.StatusInternalServerError)
-			}
-		}()
-		c.y.router.ServeHTTP(k, req)
-	}()
-	select {
-	case <-bitti:
-	case <-ctx.Done():
-		return nil, hataf(protokol.HataZamanAsimi, "panel yanıtı gecikti")
-	}
-	k.mu.Lock()
-	kod, govde, asildi := k.kod, bytes.Clone(k.govde.Bytes()), k.asildi
-	k.mu.Unlock()
+	kod, govde, asildi := y.Kod, y.Govde, y.Asildi
 	if kod == 0 {
 		kod = http.StatusOK
 	}
 	if kod != http.StatusOK {
 		return nil, rotaHatasi(kod, govde)
 	}
-	if asildi {
+	if asildi || len(govde) > yanitSiniri {
 		return nil, hataf(protokol.HataIc, "panel yanıtı çok büyük")
 	}
 	d := json.NewDecoder(bytes.NewReader(govde))
