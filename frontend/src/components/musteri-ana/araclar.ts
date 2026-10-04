@@ -95,8 +95,6 @@ export const MUSTERI_ARACLAR: MusteriArac[] = [
 
 // Araç adları, açıklamaları ve kategori adları (TR → EN).
 export const ARAC_EN: Record<string, string> = {
-  'Telegram Destek': 'Telegram Support',
-  'Destek botunu hesabınıza bağlayın': 'Connect the support bot to your account',
   'Dosyalar': 'Files',
   'Veritabanları': 'Databases',
   'Alan Adları': 'Domains',

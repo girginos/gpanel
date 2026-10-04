@@ -60,3 +60,27 @@ func TestDestekRotalariAltin(t *testing.T) {
 		t.Fatalf("destek botuna AÇIK uç listesi değişti. Bilinçliyse GOSP_ALTIN_GUNCELLE=1 ile altın dosyayı güncelleyin ve diff'i inceletin.\n--- altın\n%s\n--- şimdi\n%s", want, got)
 	}
 }
+
+// 2026-10-04 ürün kararı: sunucu panellerinde Telegram Destek özelliği YOKTUR (yalnız müşteri
+// portalında). Panelin HTTP yüzeyinde /destek/* ucu bulunmamalı (durum/ayar/bağlantılar/iptal
+// kaldırıldı → 404). Ajanın ihtiyaç duyduğu tek yüzey köprü soketidir (HTTP değil) ve
+// DestekRotalari'ndaki mevcut GET uçları (okuma).
+func TestPanelDestekUclariYok(t *testing.T) {
+	for d := range rotaEnvanteri(t) {
+		if strings.Contains(d, "/destek") {
+			t.Errorf("panelde destek HTTP ucu kalmış: %s", d)
+		}
+	}
+	for d := range apianahtar.Rotalar {
+		if strings.Contains(d, "/destek") {
+			t.Errorf("API anahtarı izin tablosunda destek ucu kalmış: %s", d)
+		}
+	}
+	b, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "destekA.Rotalar") || strings.Contains(string(b), "destekA :=") {
+		t.Error("main.go destek rotalarını bağlıyor")
+	}
+}

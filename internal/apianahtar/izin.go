@@ -211,13 +211,6 @@ var KimlikUclari = map[string]bool{
 	"DELETE " + p + "/tasima/oturum/{id}": true,
 	// Eklenti vekili: eklentiye X-Gosp-Rol ile kimlik geçirir (eleştiri #21).
 	"* " + p + "/eklenti/{ad}/*": true,
-	// Telegram destek: bot bağlantısı bir erişim kimliğidir (iptal, modül şalteri, liste). Eşleştirme
-	// ve ikinci onay uçları KALDIRILDI (eşleştirme portalda). Uçlar ayrıca middleware.YalnizOturum
-	// ile korunur (çift kilit) ve yalnız kök içindir.
-	"GET " + p + "/destek/durum":                       true,
-	"PUT " + p + "/destek/ayar":                        true,
-	"GET " + p + "/destek/baglantilar":                 true,
-	"POST " + p + "/destek/baglantilar/{kimlik}/iptal": true,
 }
 
 // KimlikBenzeriIzinli: adı kimlik/parola çağrıştıran ama BİLİNÇLİ olarak anahtara

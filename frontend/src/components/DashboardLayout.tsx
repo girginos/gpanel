@@ -62,7 +62,6 @@ const ICONS = {
   sunucu:      'M4 5h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zM4 13h16a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4a1 1 0 011-1zM7 8h.01M7 16h.01',
   bildirim:    'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
   yedek:       'M4 7v10c0 1.105 3.582 2 8 2s8-.895 8-2V7M4 7c0 1.105 3.582 2 8 2s8-.895 8-2M4 7c0-1.105 3.582-2 8-2s8 .895 8 2m0 5c0 1.105-3.582 2-8 2s-8-.895-8-2',
-  telegram:    'M22 2 11 13M22 2l-7 20-4-9-9-4z',
   anahtar:     'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
 }
 
@@ -81,7 +80,6 @@ const MENU_EN: Record<string, string> = {
   'DNS Şablonları': 'DNS Templates',
   'Profil ve Tercihler': 'Profile & Preferences',
   'API Anahtarları': 'API Keys',
-  'Telegram Destek': 'Telegram Support',
   // Grup başlıkları
   'Barındırma Hizmetleri': 'Hosting Services', 'Planlar': 'Plans',
   'Sunucu Yönetimi': 'Server Management', 'Ayarlar': 'Settings', 'Güvenlik': 'Security',
@@ -131,7 +129,6 @@ const NAV: NavGroup[] = [
   { baslik: 'Profilim', items: [
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
     { to: '/api-anahtarlari',     etiket: 'API Anahtarları',     ikon: ICONS.anahtar },
-    { to: '/telegram-destek',     etiket: 'Telegram Destek',     ikon: ICONS.telegram },
   ]},
 ]
 

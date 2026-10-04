@@ -12,7 +12,7 @@
 | 4 | 182 | systemd + nginx + Cloudflare (§4, §8) |
 | 5 | 182 | `destek-hub webhook-kur` (§5) |
 | 6 | 181 | `/etc/girginospanel/destek.json`: `merkez_url` + `merkez_anahtarlari` (adım 2'deki açık anahtar) + `bot_kullanici_adi` → panel yeniden başlat (§7) |
-| 7 | 181 | panel → Telegram Destek: kök şalteri aç → "bağlı" görünmeli; eşleştirme **portaldan** (app.girginos.io → sunucu seç → KVKK → kod) → `/start` → bağlantı doğrudan etkin (§9, §10) |
+| 7 | 181 | ajan bağlı görünmeli (panelde şalter YOK; ajan anahtar varsa kendiliğinden bağlanır, acil kapatma: `/etc/girginospanel/destek-kapali`); eşleştirme **portaldan** (app.girginos.io → sunucu seç → KVKK → kod) → `/start` → bağlantı doğrudan etkin (§9, §10) |
 
 Açık anahtar daha sonra yeniden görülebilir: `destek-hub acik-anahtar` (sırlar LoadCredential ile verilerek,
 §5'teki `systemd-run` kalıbıyla; `portal-ic-anahtar` da LoadCredential listesine eklenmeli) → `<açık anahtar> <anahtar kimliği>`.
@@ -86,7 +86,7 @@ systemd-run --pipe --wait -p User=destekhub \
 
 ## 7. Panel (ajan) tarafı — 181 ve müşteri sunucuları
 Ajan panelden AYRI hizmettir (`girginospanel-destek-ajan.service`, kaynak `cmd/destek-ajan` + `internal/destek/ajan`; ayrıntı: `deploy/destek-ajan/KURULUM.md`). Panel çökse de destek sürer. Modül varsayılan
-KAPALI: kök "Telegram Destek" sayfasından şalter açılmadıkça merkeze hiç bağlanmaz.
+Panelde şalter YOK (2026-10-04): ajan merkez anahtarı varsa her zaman bağlanır; yerel acil kapatma = root dosyası `/etc/girginospanel/destek-kapali`.
 
 `/etc/girginospanel/destek.json` — **root sahipli, grup/diğer YAZAMAZ** (ör. `root:root 0600`);
 aksi halde dosya YOK SAYILIR (panelde "yapılandırma dosyasının sahibi/izni güvensiz"). Bilinmeyen
@@ -146,7 +146,7 @@ Kod bellekte tutulur (≤10 dk, tek kullanımlık, sunucu başına 3, toplam 200
 - Repo içi: `go test ./internal/destek/e2e/` (geçici MariaDB ile; `GOSP_TEST_GECICI_DSN`) gerçek
   merkez ↔ gerçek ajan ↔ gerçek araç yürütücüsünü WSS ve uzun yoklama üzerinden koşar
   (sahte Claude + sahte Telegram API; gerçek dış çağrı yok).
-- Canlı: 181'de kök şalteri açık → `curl -s 127.0.0.1:8471/metrik` (182) `cevrimici_ajan ≥ 1`;
+- Canlı: 181de ajan çalışıyor → `curl -s 127.0.0.1:8471/metrik` (182) `cevrimici_ajan ≥ 1`;
   portal (ya da `curl` + Bearer) ile `POST /ic/v1/eslesme-kodu` → `bekleyen_kod` artar → Telegram'da
   `/start <kod>` (`ABCD-EFGH-…` biçimi, küçük harf ve boşluk serbest) → bağlantı doğrudan etkin
   (KVKK portalda alındı; düğme yok) → "sitem açılıyor mu?" → panel "İşlemler" listesinde `site_yokla=ok`.

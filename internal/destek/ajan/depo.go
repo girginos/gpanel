@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"regexp"
 	"strconv"
 	"time"
 
@@ -108,8 +107,6 @@ func yeniKimlik() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
-
-var kimlikDeseniYerel = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
 
 // durumProtokol: DB durumu → protokol durumu.
 func durumProtokol(d string) p.BaglantiDurumu {

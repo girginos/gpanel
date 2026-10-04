@@ -4,25 +4,22 @@ package ajan
 //
 // Panel süreci ajanı süreç içinde ÇAĞIRAMAZ (ajan ayrı hizmettir; panel çökse de
 // destek sürer). Bu yüzden panel yalnız DB'ye yazar; ajan şunları ≤ DBYoklamaAraligi
-// (3 sn) içinde fark eder:
+// (3 sn) içinde fark eder (destek_ayar artık OKUNMAZ — şalter/tavan kaldırıldı):
 //
-//	(a) destek_ayar değişti (şalter/tavan/düzey)  → hesap durumları merkeze yeniden bildirilir
-//	    (etkin düzeyi KAPALI'ya inen bağlantıların oturumu merkezde kapanır) + döngü uyanır.
-//	(b) bağlantı 'iptal' oldu ama merkeze bildirilmedi (hub_bildirildi_at IS NULL: panel UI
+//	(a) bağlantı 'iptal' oldu ama merkeze bildirilmedi (hub_bildirildi_at IS NULL: panel UI
 //	    iptali, parola/2FA/hosting silme tetikleri) → baglanti_iptal gider, iz temizlenir.
-//	(c) süre dolumu süpürgesi (supurge.go) bu süreçte çalışır.
+//	(b) süre dolumu süpürgesi (supurge.go) bu süreçte çalışır.
 //
-// Ajan ayrıca destek_ajan_nabiz satırına ≤ NabizAraligi'nda canlılık yazar; panel durum
-// sayfası "ajan çalışıyor mu" bilgisini buradan okur.
+// Ajan ayrıca destek_ajan_nabiz satırına ≤ NabizAraligi'nda canlılık yazar; ops araçları
+// (girginospanel-dogrula, NabizOku) "ajan çalışıyor mu" bilgisini buradan okur; panelde
+// bunu gösteren arayüz YOKTUR.
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"girginospanel/internal/destek/iptal"
@@ -40,7 +37,6 @@ func kolonYok(err error) bool {
 func (a *Ajan) dbYoklamaDongusu(ctx context.Context) {
 	tk := time.NewTicker(a.dbAralik())
 	defer tk.Stop()
-	a.dbYoklaTur(ctx) // taban çizgisi (ayar parmak izi) hemen alınır
 	for {
 		select {
 		case <-ctx.Done():
@@ -60,64 +56,7 @@ func (a *Ajan) dbAralik() time.Duration {
 
 // dbYoklaTur: tek yoklama turu (test doğrudan çağırabilir).
 func (a *Ajan) dbYoklaTur(ctx context.Context) {
-	a.ayarYokla(ctx)
 	a.iptalYokla(ctx)
-}
-
-// ayarParmakIzi: destek_ayar'ın tüm satırlarının sıralı dökümü (değerler + yazım sayacı surum).
-func (a *Ajan) ayarParmakIzi(ctx context.Context) (string, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT reseller_id, modul_duzey, bayi_duzey, musteri_duzey, surum FROM destek_ayar ORDER BY reseller_id LIMIT 5000`)
-	if kolonYok(err) { // göç 0130 yok: yalnız değerler
-		rows, err = a.DB.QueryContext(ctx, `SELECT reseller_id, modul_duzey, bayi_duzey, musteri_duzey, 0 FROM destek_ayar ORDER BY reseller_id LIMIT 5000`)
-	}
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	var b strings.Builder
-	for rows.Next() {
-		var rid, sv int64
-		var m, by, mu string
-		if err := rows.Scan(&rid, &m, &by, &mu, &sv); err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&b, "%d|%s|%s|%s|%d;", rid, m, by, mu, sv)
-	}
-	return b.String(), rows.Err()
-}
-
-func (a *Ajan) ayarYokla(ctx context.Context) {
-	iz, err := a.ayarParmakIzi(ctx)
-	if err != nil {
-		if !iptal.TabloYok(err) {
-			log.Printf("destek: ayar yoklanamadı: %v", err)
-		}
-		return
-	}
-	if !a.ayarHazir {
-		a.ayarIzi, a.ayarHazir = iz, true
-		return
-	}
-	if iz == a.ayarIzi {
-		return
-	}
-	a.ayarIzi = iz
-	log.Printf("destek: ayar değişti — bağlantı durumları merkeze yeniden bildiriliyor")
-	a.Durt() // modül kapandı/açıldıysa döngü hemen karar versin
-	if a.Bagli() {
-		a.tumDurumlariBildir(ctx)
-	}
-}
-
-// tumDurumlariBildir: etkin düzey değişmiş olabilir — aktif bağlantıların durumunu tazele.
-func (a *Ajan) tumDurumlariBildir(ctx context.Context) {
-	bs, err := baglantilarSorgu(ctx, a.DB, `durum='aktif' ORDER BY id LIMIT 1000`)
-	if err != nil {
-		return
-	}
-	for _, b := range bs {
-		a.durumBildir(ctx, b)
-	}
 }
 
 // iptalYokla: panelin (ya da kimlik olaylarının) iptal ettiği ama merkeze bildirilmemiş bağlantılar.
@@ -209,14 +148,14 @@ func (a *Ajan) nabizYaz(ctx context.Context) {
 	}
 }
 
-// Durdur: temiz kapanışta nabzı "durdu" işaretler (panel hemen "ajan yok" göstersin).
+// Durdur: temiz kapanışta nabzı "durdu" işaretler (ops araçları hemen "ajan yok" görsün).
 func (a *Ajan) Durdur(ctx context.Context) {
 	_, _ = a.DB.ExecContext(ctx, `UPDATE destek_ajan_nabiz SET nabiz_at = CURRENT_TIMESTAMP - INTERVAL 1 DAY, merkez_bagli=0, durum='durdu' WHERE id=1`)
 }
 
-// ---- panel tarafı ----
+// ---- nabız okuma (ops/test) ----
 
-// Nabiz — destek_ajan_nabiz satırının panel görünümü.
+// Nabiz — destek_ajan_nabiz satırının görünümü.
 type Nabiz struct {
 	Canli      bool   `json:"canli"`
 	YasSn      int64  `json:"yas_sn"`
@@ -230,7 +169,7 @@ type Nabiz struct {
 // NabizCanliSn: nabız bu süreden eskiyse ajan çalışmıyor sayılır.
 const NabizCanliSn = 30
 
-// NabizOku — panelin kullanımı için. Satır/tablo yoksa Canli=false.
+// NabizOku — ops/test kullanımı için. Satır/tablo yoksa Canli=false.
 func NabizOku(ctx context.Context, db *sql.DB) Nabiz {
 	var n Nabiz
 	var son sql.NullInt64

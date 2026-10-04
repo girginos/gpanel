@@ -439,7 +439,7 @@ type ortam struct {
 
 	amu       sync.Mutex
 	a         *ajan.Ajan
-	panel     http.Handler
+	kapatma   string // yerel acil kapatma dosyası (test dizininde)
 	ajanIptal context.CancelFunc
 	cihazYolu string
 
@@ -526,16 +526,9 @@ func kur(t *testing.T, yoklama bool, anahtarlar []ed25519.PublicKey) *ortam {
 	o.mB = musteriJWT(t, 6, 43, "bmus", "b.test")
 	o.cihazYolu = filepath.Join(t.TempDir(), "cihaz.key")
 
-	o.ajanBaslat(anahtarlar, func() {
-		o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam", "bayi_duzey": "tam", "musteri_duzey": "tam"})
-		// Bayi artık panelden ayar değiştiremez (kök-only); eski (bayi/müşteri) kayıt senaryoları için
-		// bayilerin "müşterilerim kullanabilir" satırı doğrudan yazılır.
-		for _, rid := range []int{7, 8} {
-			if _, err := o.db.Exec(`INSERT INTO destek_ayar (reseller_id, musteri_duzey) VALUES (?, 'tam') ON DUPLICATE KEY UPDATE musteri_duzey='tam'`, rid); err != nil {
-				t.Fatal(err)
-			}
-		}
-	})
+	// destek_ayar satırı YAZILMAZ: ajan şalter/tavan olmadan, anahtar varsa bağlanır.
+	o.kapatma = filepath.Join(t.TempDir(), "destek-kapali")
+	o.ajanBaslat(anahtarlar, nil)
 	return o
 }
 
@@ -580,21 +573,15 @@ func (o *ortam) ajanBaslat(anahtarlar []ed25519.PublicKey, once func()) {
 		LisansIspati:    func() []byte { return o.bilet(e2eParmakIzi) },
 		LisansParmakIzi: func() string { return e2eParmakIzi }})
 	a.BilinenSirlar = []string{panelSirri}
-	a.ModulKontrolAraligi = 200 * time.Millisecond
+	a.KapatmaKontrolAraligi = 200 * time.Millisecond
+	a.KapatmaDosyasi = o.kapatma // gerçek /etc yoluna dokunulmaz
 	a.DBYoklamaAraligi = 100 * time.Millisecond
 	a.NabizAraligi = 200 * time.Millisecond
 	a.PanelKancasiKur()
 	a.YurutucuAyarla(o.yur)
-	r := chi.NewRouter()
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(jwtSirri))
-			a.Rotalar(r)
-		})
-	})
 	ctx, iptalF := context.WithCancel(context.Background())
 	o.amu.Lock()
-	o.a, o.panel, o.ajanIptal = a, r, iptalF
+	o.a, o.ajanIptal = a, iptalF
 	o.amu.Unlock()
 	if once != nil {
 		once()
@@ -698,39 +685,31 @@ func musteriJWT(t *testing.T, ftp, dom int64, kul, alan string) string {
 	return tok
 }
 
-type yanitP struct {
-	kod   int
-	govde map[string]any
-	ham   string
+// dbIptal: bağlantıyı DB'de iptal eder (panelde HTTP ucu YOK; kimlik olayı kancalarının yaptığı iş).
+func (o *ortam) dbIptal(kimlik string) {
+	o.t.Helper()
+	var id int64
+	if err := o.db.QueryRow(`SELECT id FROM destek_baglantilari WHERE kimlik=?`, kimlik).Scan(&id); err != nil {
+		o.t.Fatal(err)
+	}
+	if !iptal.Tek(context.Background(), o.db, id, protokol.IptalKullanici, "root") {
+		o.t.Fatal("iptal yazılamadı")
+	}
 }
 
-// istek: panel uçları (gerçek RequireAuth + ajan.Rotalar).
-func (o *ortam) istek(metod, yol, tok string, govde any) yanitP {
+// ajanYenidenBildir: ajanın TÜM aktif bağlantı durumlarını merkeze yeniden göndermesini sağlar —
+// gerçek yol: acil kapatma dosyasıyla bağlantı koparılır, dosya kalkınca yeniden bağlanılır ve
+// bağlanma senkronu durumları (taze kapsam/düzey) bildirir.
+func (o *ortam) ajanYenidenBildir() {
 	o.t.Helper()
-	var b []byte
-	if govde != nil {
-		b, _ = json.Marshal(govde)
+	if err := os.WriteFile(o.kapatma, nil, 0o600); err != nil {
+		o.t.Fatal(err)
 	}
-	req := httptest.NewRequest(metod, "/api/v1"+yol, bytes.NewReader(b))
-	req.RemoteAddr = "192.0.2.10:40000"
-	req.Header.Set("Authorization", "Bearer "+tok)
-	w := httptest.NewRecorder()
-	o.amu.Lock()
-	h := o.panel
-	o.amu.Unlock()
-	h.ServeHTTP(w, req)
-	y := yanitP{kod: w.Code, ham: w.Body.String()}
-	_ = json.Unmarshal(w.Body.Bytes(), &y.govde)
-	return y
-}
-
-func (o *ortam) istekOK(metod, yol, tok string, govde any) yanitP {
-	o.t.Helper()
-	y := o.istek(metod, yol, tok, govde)
-	if y.kod != http.StatusOK {
-		o.t.Fatalf("%s %s: %d %s", metod, yol, y.kod, y.ham)
+	o.kosulBekle("ajan kapatma dosyasıyla koptu", 10*time.Second, func() bool { return !o.ajan().Bagli() })
+	if err := os.Remove(o.kapatma); err != nil {
+		o.t.Fatal(err)
 	}
-	return y
+	o.bagliBekle()
 }
 
 // metrik: merkezin iç /metrik ucu (yalnız sayılar).
@@ -795,24 +774,7 @@ func (o *ortam) callback(tg int64, veri string) {
 	}})
 }
 
-// ---- panel tarafı ----
-
-type panelBaglanti struct {
-	Kimlik         string `json:"kimlik"`
-	Durum          string `json:"durum"`
-	TgKullaniciAdi string `json:"tg_kullanici_adi"`
-	IptalNedeni    string `json:"iptal_nedeni"`
-}
-
-func (o *ortam) panelBaglantilari(tok string) []panelBaglanti {
-	o.t.Helper()
-	y := o.istekOK("GET", "/destek/baglantilar", tok, nil)
-	var g struct {
-		Baglantilar []panelBaglanti `json:"baglantilar"`
-	}
-	_ = json.Unmarshal([]byte(y.ham), &g)
-	return g.Baglantilar
-}
+// ---- yardımcılar ----
 
 // dbDurum: ajan DB'sindeki bağlantı durumu + iptal nedeni.
 func (o *ortam) dbDurum(kimlik string) (string, string) {
@@ -894,7 +856,7 @@ func (o *ortam) eslestir(tok string, tg int64, ad, duzey string, _ bool) string 
 		o.t.Fatal(err)
 	}
 	once, _ := o.merkezBaglantisi(tg)
-	o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam"}) // ajan aktif bağlantıları yeniden bildirir
+	o.ajanYenidenBildir() // ajan aktif bağlantıları yeniden bildirir
 	o.kosulBekle("merkez eski kayıt kapsamını aldı", 10*time.Second, func() bool {
 		b, _ := o.merkezBaglantisi(tg)
 		return b.Guncelleme.After(once.Guncelleme) && string(b.Rol) == rol

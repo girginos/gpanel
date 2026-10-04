@@ -83,7 +83,7 @@ func TestSonucTemizleMaskeVeSinirlar(t *testing.T) {
 
 // Denetim kataloğu: ajanın yazdığı her destek.* kodu ve her aracın denetim kodu etiketli.
 func TestDenetimKataloguDestekKodlari(t *testing.T) {
-	for _, k := range []string{dEslesmePortal, dBaglantiIptal, dAyar, dR0Ozet, dIsRed} {
+	for _, k := range []string{dEslesmePortal, dBaglantiIptal, dR0Ozet, dIsRed} {
 		if !denetim.EylemEtiketiVar(k) {
 			t.Errorf("denetim kataloğunda etiket yok: %s", k)
 		}
