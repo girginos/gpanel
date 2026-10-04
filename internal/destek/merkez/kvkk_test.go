@@ -90,6 +90,55 @@ func TestKVKKKullaniciMetniModeleMaskeliGider(t *testing.T) {
 	}
 }
 
+// Savunma derinliği: bot.go zaten maskelese de modele giden HER yol kendi başına maskeler
+// (triyaj ve ana model ayrı ayrı; çağıran bu fonksiyonlara ham metin verirse bile).
+func TestKVKKTriyajVeAnaModelHamMetniKendisiMaskeler(t *testing.T) {
+	tc, iban, kart, parola, tel, eposta := kvGizliler()
+	ham := "site açılmıyor tc " + tc + " iban " + iban + " kart " + kart + " şifrem: " + parola + " tel " + tel + " mail " + eposta
+	yasak := map[string]string{"tckn": tc, "iban": "6457 8413", "kart": "1111 1111", "parola": parola, "telefon": "123 45 67", "eposta": "ali.veli"}
+
+	t.Run("triyaj", func(t *testing.T) {
+		o := yeniOrtam(t, nil)
+		if _, err := o.m.triyaj(t.Context(), "s_0000000000000001", ham); err != nil {
+			t.Fatal(err)
+		}
+		g := istekGovdeleri(o)
+		if !strings.Contains(g, "site açılmıyor") {
+			t.Fatal("triyaj isteği yok (test geçersiz)")
+		}
+		for ad, d := range yasak {
+			if strings.Contains(g, d) {
+				t.Errorf("triyaj isteğine %s sızdı", ad)
+			}
+		}
+	})
+	t.Run("ana", func(t *testing.T) {
+		o := yeniOrtam(t, nil)
+		sahteAjanBagla(t, o, nil)
+		bg := o.baglantiEkle(t, tTg, "s_0000000000000001", protokol.RolKok, "ornek.com.tr")
+		oturum, err := o.m.oturumlar.Al(bg, "tr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := o.m.destekYanitla(t.Context(), oturum, ham, "tr", func(string) {})
+		if s.Metin == "" {
+			t.Fatal("cevap yolu çalışmadı")
+		}
+		var ana string
+		for _, i := range o.c.anaIstekler() {
+			ana += string(i.Govde)
+		}
+		if !strings.Contains(ana, "site açılmıyor") {
+			t.Fatal("ana model isteği yok (test geçersiz)")
+		}
+		for ad, d := range yasak {
+			if strings.Contains(ana, d) {
+				t.Errorf("ana model isteğine %s sızdı", ad)
+			}
+		}
+	})
+}
+
 func TestKVKKInsanDevriMesajiMaskeli(t *testing.T) {
 	o := yeniOrtam(t, nil)
 	sahteAjanBagla(t, o, nil)
@@ -185,8 +234,12 @@ func unutOrtam(t *testing.T, ajanBagli bool) (*ortam, *sahteAjan) {
 
 func TestUnutBeniHubdaGercekSilme_AjanBagli(t *testing.T) {
 	o, ajan := unutOrtam(t, true)
-	if len(o.depo.konusmaBellek()) == 0 || o.m.oturumlar.Sayi() == 0 {
-		t.Fatal("ön koşul: konuşma/oturum yok")
+	if len(o.depo.konusmaBellek()) == 0 || o.m.oturumlar.Sayi() != 2 {
+		t.Fatalf("ön koşul: konuşma/oturum yok (oturum %d)", o.m.oturumlar.Sayi())
+	}
+	o.m.bot.startHiz.Izin(tgKisa(tTg), time.Now()) // /start denemesi sayacı tohumla
+	if !o.m.bot.hiz.olaylarVar(tgKisa(tTg)) || !o.m.bot.startHiz.olaylarVar(tgKisa(tTg)) {
+		t.Fatal("ön koşul: hız sayaçları yok")
 	}
 	o.mesaj(t, tTg, "/unutbeni")
 	o.callback(t, tTg, "unut:evet")
@@ -218,6 +271,9 @@ func TestUnutBeniHubdaGercekSilme_AjanBagli(t *testing.T) {
 	}
 	if o.m.bot.hiz.olaylarVar(tgKisa(tTg)) || o.m.bot.startHiz.olaylarVar(tgKisa(tTg)) {
 		t.Fatal("hız sayacı kaldı")
+	}
+	if n := o.m.oturumlar.Sayi(); n != 1 {
+		t.Fatalf("bellek oturumu kapanmadı: %d (beklenen: yalnız başka kullanıcının 1 oturumu)", n)
 	}
 	son := o.tg.son(tTg)
 	for _, s := range []string{"Deleted", "Telegram ID", "tg:silindi", "Not deletable"} {
