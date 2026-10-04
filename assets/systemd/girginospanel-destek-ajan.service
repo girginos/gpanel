@@ -29,17 +29,21 @@ SyslogIdentifier=girginospanel-destek-ajan
 # kiraci kimliginde `runuser -u <sk>` (log/disk okuma). Bunlari ayrıcalıksiz kullanici yapamaz;
 # ayrıcalık CapabilityBoundingSet ile asgariye indirilir (tam kok DEGIL).
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_KILL CAP_AUDIT_WRITE CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_KILL CAP_AUDIT_WRITE CAP_SYS_RESOURCE CAP_NET_BIND_SERVICE
 # SETUID/SETGID: runuser kiraci kimligine duser. DAC_READ_SEARCH/DAC_OVERRIDE: /home/<sk>, /var/log, journal
 # okuma; nginx -t gecici dizin. CHOWN/FOWNER: nginx -t gecici dizinleri. KILL: zaman asiminda
 # kiraci komut cocuguna sinyal. AUDIT_WRITE/SYS_RESOURCE: runuser PAM oturumu.
+# NET_BIND_SERVICE: `nginx -t` 80/443 dinleyicilerini deneme amaciyla baglar; yoksa bind() EACCES verir ve
+# `girginospanel-dogrula` bunu YANLIS "nginx -t INVALID" KRITIK sayar (181 sandbox denemesiyle bulundu).
+# BILINCLI YOK: CAP_SYS_PTRACE — dogrula "running binary"/"panel port owner" olcumlerini yapamaz (UYARI: COULD NOT MEASURE).
 ProtectSystem=strict
 # Yazilabilir yollar (HEPSI kasitli; gerekcesi KURULUM.md):
 #   /run/girginospanel   tek-ornek kilidi + (panelin actigi) kopru soketi dizini
 #   /etc/girginospanel   YALNIZ cihaz anahtari destek-cihaz.key'in ilk uretimi (db.key okunur; ajan
 #                        db.key'i ASLA uretmez/yazmaz — gizli.AnahtarHazir onkosulu)
 #   /var/log/nginx, /var/lib/nginx   `nginx -t` log dosyalarini acar / gecici dizinleri olusturur
-ReadWritePaths=/run/girginospanel /etc/girginospanel /var/log/nginx /var/lib/nginx
+#   /var/cache/nginx     dogrula "cache dir access" yazma yoklamasi (yoksa YANLIS uyari)
+ReadWritePaths=/run/girginospanel /etc/girginospanel /var/log/nginx /var/lib/nginx /var/cache/nginx
 ProtectHome=read-only
 PrivateTmp=yes
 PrivateDevices=yes
