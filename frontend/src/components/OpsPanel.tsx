@@ -18,6 +18,7 @@ import {
 import { Activity, Cpu, Gauge, HardDrive, MemoryStick, Network } from 'lucide-react'
 import { I, Ikon as SvgIkon } from '@/components/Ikon'
 import { Button } from '@/components/ui'
+import { useKoyuTema } from '@/lib/useKoyuTema'
 
 const OPS_EN: Record<string, string> = {
   'Zaman aralığı': 'Time range', 'Yenileme': 'Refresh', 'Kapalı': 'Off', 'Canlı': 'Live', 'Duruk': 'Paused',
@@ -51,13 +52,25 @@ const YENILEMELER = [
   { sn: 0, et: 'Kapalı' }, { sn: 10, et: '10sn' }, { sn: 30, et: '30sn' }, { sn: 60, et: '1dk' },
 ]
 
-const RENK = {
+// Seri renkleri tema başına: açık zeminde 500'lük tonlar (özellikle amber/yeşil) soluk
+// kalır → 600-700 tonları (çizgi >= 3:1). Koyu palet önceki değerlerle aynı.
+const RENK_KOYU = {
   cpu: '#3b82f6', cpuMax: '#1d4ed8',
   bellek: '#8b5cf6', swap: '#f59e0b',
   y1: '#10b981', y5: '#38bdf8', y15: '#a78bfa',
   rx: '#3b82f6', tx: '#10b981',
   disk: '#f97316',
 }
+const RENK_ACIK = {
+  cpu: '#2563eb', cpuMax: '#1e40af',
+  bellek: '#7c3aed', swap: '#d97706',
+  y1: '#059669', y5: '#0284c7', y15: '#7c3aed',
+  rx: '#2563eb', tx: '#059669',
+  disk: '#ea580c',
+}
+// Eksen / ızgara / eşik çizgisi (grafik içi SVG öznitelikleri tema başına).
+const GRAFIK_KOYU = { eksen: '#6b7c92', izgara: 'rgba(255,255,255,.05)', sifir: 'rgba(255,255,255,.16)', refKrit: 'rgba(244,63,94,.35)', refYuk: 'rgba(244,63,94,.45)' }
+const GRAFIK_ACIK = { eksen: '#64748b', izgara: 'rgba(15,23,42,.09)', sifir: 'rgba(15,23,42,.3)', refKrit: 'rgba(190,18,60,.5)', refYuk: 'rgba(190,18,60,.6)' }
 
 // ── biçimlendiriciler ──
 const yuzde = (v: number) => `%${(v ?? 0).toFixed(1)}`
@@ -157,6 +170,9 @@ function Panel({ baslik, ikon: Ikon, sag, genis, children }: {
 
 export default function OpsPanel() {
   useTranslation()
+  const koyu = useKoyuTema() // tema değişince yeniden çizilir (grafik renkleri JS değeri)
+  const RENK = koyu ? RENK_KOYU : RENK_ACIK
+  const GR = koyu ? GRAFIK_KOYU : GRAFIK_ACIK
   const [saat, setSaat] = useState(6)
   const [yenileSn, setYenileSn] = useState(30)
   const [veri, setVeri] = useState<Yanit | null>(null)
@@ -222,14 +238,14 @@ export default function OpsPanel() {
     { ad: cevir('Ağ'), ikon: Network, deger: hiz(son.rx_bps + son.tx_bps), alt: <><SvgIkon d={I.asagi} className="inline size-2.5 align-[-1px]" />{hiz(son.rx_bps)} <SvgIkon d={I.yukari} className="inline size-2.5 align-[-1px]" />{hiz(son.tx_bps)}</>, renk: 'var(--ops-ok)' },
   ] : []
 
-  const eksenStil = { fill: '#6b7c92', fontSize: 11 }
-  const izgara = <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.05)" vertical={false} />
+  const eksenStil = { fill: GR.eksen, fontSize: 11 }
+  const izgara = <CartesianGrid strokeDasharray="3 3" stroke={GR.izgara} vertical={false} />
   const xEksen = <XAxis dataKey="t" axisLine={false} tickLine={false} tick={eksenStil} interval="preserveStartEnd" minTickGap={44} />
 
   return (
-    // `dark`: OPS yüzeyi her temada koyu (kendi --ops-* tokenları) — içindeki Tailux
-    // bileşenleri (Button) açık temada da koyu varyantlarıyla çizilsin.
-    <div className="gp-ops dark">
+    // Yüzey --ops-* tokenlarıyla temayı izler (ops.css: açık varsayılan, `html.dark` koyu);
+    // içteki Tailux bileşenleri (Button) kökteki `dark` sınıfından doğal olarak etkilenir.
+    <div className="gp-ops">
       {/* araç çubuğu */}
       <div className="ops-bar">
         <span className="ops-label">{cevir('Zaman aralığı')}</span>
@@ -291,7 +307,7 @@ export default function OpsPanel() {
                   </defs>
                   {izgara}{xEksen}
                   <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: any) => `%${v}`} />
-                  <ReferenceLine y={90} stroke="rgba(244,63,94,.35)" strokeDasharray="4 4" />
+                  <ReferenceLine y={90} stroke={GR.refKrit} strokeDasharray="4 4" />
                   <Tooltip content={<Ipucu bicim={yuzde} />} />
                   <Area type="monotone" dataKey="cpuMax" name={cevir('tepe')} stroke={RENK.cpuMax} strokeWidth={1} strokeDasharray="3 3" fill="none" dot={false} isAnimationActive={false} />
                   <Area type="monotone" dataKey="cpu" name={cevir('ortalama')} stroke={RENK.cpu} strokeWidth={2} fill="url(#opsCpu)" dot={false} isAnimationActive={false} />
@@ -338,7 +354,7 @@ export default function OpsPanel() {
                   <YAxis axisLine={false} tickLine={false} tick={eksenStil} width={38} />
                   {/* 🔴 Cekirdek sayisi = doygunluk esigi. Yuk bu cizgiyi asiyorsa
                       calisabilir surecler CPU bekliyor demektir. */}
-                  {cekirdek > 0 && <ReferenceLine y={cekirdek} stroke="rgba(244,63,94,.45)" strokeDasharray="4 4" />}
+                  {cekirdek > 0 && <ReferenceLine y={cekirdek} stroke={GR.refYuk} strokeDasharray="4 4" />}
                   <Tooltip content={<Ipucu bicim={(v: number) => (v ?? 0).toFixed(2)} />} />
                   <Area type="monotone" dataKey="y1" name="1dk" stroke={RENK.y1} strokeWidth={2} fill="none" dot={false} isAnimationActive={false} />
                   <Area type="monotone" dataKey="y5" name="5dk" stroke={RENK.y5} strokeWidth={1.5} fill="none" dot={false} isAnimationActive={false} />
@@ -366,7 +382,7 @@ export default function OpsPanel() {
                   </defs>
                   {izgara}{xEksen}
                   <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: any) => `%${v}`} />
-                  <ReferenceLine y={90} stroke="rgba(244,63,94,.35)" strokeDasharray="4 4" />
+                  <ReferenceLine y={90} stroke={GR.refKrit} strokeDasharray="4 4" />
                   <Tooltip content={<Ipucu bicim={yuzde} />} />
                   <Area type="monotone" dataKey="disk" name={cevir('Disk')} stroke={RENK.disk} strokeWidth={2} fill="url(#opsDisk)" dot={false} isAnimationActive={false} />
                 </AreaChart>
@@ -392,7 +408,7 @@ export default function OpsPanel() {
                   </defs>
                   {izgara}{xEksen}
                   <YAxis axisLine={false} tickLine={false} tick={eksenStil} width={68} tickFormatter={(v: any) => hiz(v)} />
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,.16)" />
+                  <ReferenceLine y={0} stroke={GR.sifir} />
                   <Tooltip content={<Ipucu bicim={hiz} />} />
                   <Area type="monotone" dataKey="rx" name={cevir('Gelen')} stroke={RENK.rx} strokeWidth={2} fill="url(#opsRx)" dot={false} isAnimationActive={false} />
                   <Area type="monotone" dataKey="txNeg" name={cevir('Giden')} stroke={RENK.tx} strokeWidth={2} fill="url(#opsTx)" dot={false} isAnimationActive={false} />
