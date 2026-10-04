@@ -293,12 +293,12 @@ export default function DomainLogsPage() {
       {/* Log gövdesi */}
       <div
         ref={scrollRef}
-        className="bg-dark-800 border border-dark-600 rounded-lg overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
+        className="bg-slate-50 dark:bg-dark-800 border border-slate-200 dark:border-dark-600 rounded-lg overflow-auto h-[min(60vh,320px)] sm:h-[420px] lg:h-[540px]"
       >
         {satirlar.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500 font-mono">{canli ? cevir('Bekleniyor… yeni satırlar geldikçe akacak.') : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
+          <div className="p-6 text-sm text-slate-600 dark:text-slate-500 font-mono">{canli ? cevir('Bekleniyor… yeni satırlar geldikçe akacak.') : cevir("(log dosyası boş veya henüz oluşmadı)")}</div>
         ) : gorunen.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500 font-mono">"{arama}" {cevir("aramasına uygun satır yok.")}</div>
+          <div className="p-6 text-sm text-slate-600 dark:text-slate-500 font-mono">"{arama}" {cevir("aramasına uygun satır yok.")}</div>
         ) : gorunum === 'ham' ? (
           <div className="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
             {gorunen.map((s, i) => (
@@ -312,7 +312,7 @@ export default function DomainLogsPage() {
         )}
       </div>
 
-      <div className="mt-2 text-xs text-slate-500 dark:text-slate-500 flex items-center justify-between">
+      <div className="mt-2 text-xs text-slate-600 dark:text-slate-500 flex items-center justify-between">
         <span>{arama ? `${gorunen.length} / ${satirlar.length} ${cevir("satır (filtreli)")}` : `${satirlar.length} ${cevir("satır")}`} · {cevir("pencere")} {MAX_PENCERE}</span>
         {canli && <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>{cevir("canlı yayın")}</span>}
       </div>
@@ -352,7 +352,7 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse min-w-[640px]">
-      <thead className="sticky top-0 z-10 bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-dark-600">
+      <thead className="sticky top-0 z-10 bg-slate-100/95 dark:bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-500 border-b border-slate-200 dark:border-dark-600">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">IP</th>
@@ -363,31 +363,31 @@ function AccessTablosu({ satirlar }: { satirlar: string[] }) {
           <th className="text-left font-medium px-3 py-2">{cevir("Tarayıcı")}</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-dark-600/70">
+      <tbody className="divide-y divide-slate-200 dark:divide-dark-600/70">
         {satirlar.map((ham, i) => {
           const r = satirNesne[i]
           if (!r) {
             return (
               <tr key={i}>
-                <td colSpan={7} className="px-3 py-1.5 font-mono text-slate-500 break-all">{ham}</td>
+                <td colSpan={7} className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-500 break-all">{ham}</td>
               </tr>
             )
           }
           return (
-            <tr key={i} className="hover:bg-dark-700/40">
-              <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap">{kisaZaman(r.zaman)}</td>
-              <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.ip}</td>
+            <tr key={i} className="hover:bg-slate-100 dark:hover:bg-dark-700/40">
+              <td className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">{kisaZaman(r.zaman)}</td>
+              <td className="px-3 py-1.5 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.ip}</td>
               <td className="px-3 py-1.5">
                 <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold text-[10px] ${methodRenk(r.method)}`}>{r.method || '—'}</span>
               </td>
-              <td className="px-3 py-1.5 font-mono text-slate-200 max-w-0">
+              <td className="px-3 py-1.5 font-mono text-slate-800 dark:text-slate-200 max-w-0">
                 <div className="truncate" title={r.referer && r.referer !== '-' ? `${r.yol}\n← ${r.referer}` : r.yol}>{r.yol}</div>
               </td>
               <td className="px-3 py-1.5">
                 <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold text-[10px] ${durumRenk(r.durum)}`}>{r.durum}</span>
               </td>
-              <td className="px-3 py-1.5 font-mono text-slate-400 text-right whitespace-nowrap">{boyutFmt(r.boyut)}</td>
-              <td className="px-3 py-1.5 text-slate-400 max-w-[220px]">
+              <td className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-400 text-right whitespace-nowrap">{boyutFmt(r.boyut)}</td>
+              <td className="px-3 py-1.5 text-slate-600 dark:text-slate-400 max-w-[220px]">
                 <div className="truncate" title={r.ua}>{uaKisa(r.ua)}</div>
               </td>
             </tr>
@@ -457,7 +457,7 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse min-w-[640px]">
-      <thead className="sticky top-0 z-10 bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500 border-b border-dark-600">
+      <thead className="sticky top-0 z-10 bg-slate-100/95 dark:bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-500 border-b border-slate-200 dark:border-dark-600">
         <tr>
           <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
           <th className="text-left font-medium px-3 py-2">{cevir("Seviye")}</th>
@@ -465,14 +465,14 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
           <th className="text-left font-medium px-3 py-2 w-full">{cevir("Mesaj")}</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-dark-600/70">
+      <tbody className="divide-y divide-slate-200 dark:divide-dark-600/70">
         {grupla(satirlar).map((g, i) => {
           const m = ERROR_RE.exec(g.bas)
           if (!m) {
             // Hiç timestamp'li satır yok (nadir) — ham göster.
             return (
               <tr key={i}>
-                <td colSpan={4} className="px-3 py-1.5 font-mono text-slate-500 break-all whitespace-pre-wrap">{[g.bas, ...g.devam].join('\n')}</td>
+                <td colSpan={4} className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-500 break-all whitespace-pre-wrap">{[g.bas, ...g.devam].join('\n')}</td>
               </tr>
             )
           }
@@ -483,17 +483,17 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
           const ozet = ozetMesaj(m[3])
           const konum = konumBul([m[3], ...g.devam])
           return (
-            <tr key={i} className="hover:bg-dark-700/40">
-              <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap">{m[1].slice(5)}</td>
+            <tr key={i} className="hover:bg-slate-100 dark:hover:bg-dark-700/40">
+              <td className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">{m[1].slice(5)}</td>
               <td className="px-3 py-1.5">
                 <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold text-[10px] ${seviyeRenk(m[2])}`}>{m[2]}</span>
               </td>
-              <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{client || '—'}</td>
-              <td className="px-3 py-1.5 font-mono text-slate-200 max-w-0">
+              <td className="px-3 py-1.5 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{client || '—'}</td>
+              <td className="px-3 py-1.5 font-mono text-slate-800 dark:text-slate-200 max-w-0">
                 <div className="flex items-center gap-2 min-w-0" title={tamMesaj}>
                   <span className="truncate">{ozet}</span>
                   {konum && (
-                    <span className="shrink-0 font-mono text-[11px] text-amber-400/90 bg-amber-500/10 rounded px-1.5 py-0.5">{konum}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-amber-800 dark:text-amber-400/90 bg-amber-100 dark:bg-amber-500/10 rounded px-1.5 py-0.5">{konum}</span>
                   )}
                 </div>
               </td>
@@ -510,31 +510,31 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
 
 function methodRenk(m: string): string {
   switch (m) {
-    case 'GET': return 'bg-dark-600 text-slate-200'
-    case 'POST': return 'bg-sky-900/70 text-sky-200'
+    case 'GET': return 'bg-slate-200 text-slate-800 dark:bg-dark-600 dark:text-slate-200'
+    case 'POST': return 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200'
     case 'PUT':
-    case 'PATCH': return 'bg-amber-900/70 text-amber-200'
-    case 'DELETE': return 'bg-red-900/70 text-red-200'
+    case 'PATCH': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
+    case 'DELETE': return 'bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200'
     case 'HEAD':
-    case 'OPTIONS': return 'bg-dark-600/60 text-slate-300'
-    default: return 'bg-dark-700 text-slate-400'
+    case 'OPTIONS': return 'bg-slate-100 text-slate-700 dark:bg-dark-600/60 dark:text-slate-300'
+    default: return 'bg-slate-100 text-slate-600 dark:bg-dark-700 dark:text-slate-400'
   }
 }
 
 function durumRenk(s: number): string {
-  if (s >= 500) return 'bg-red-900/70 text-red-200'
-  if (s >= 400) return 'bg-amber-900/70 text-amber-200'
-  if (s >= 300) return 'bg-sky-900/70 text-sky-200'
-  if (s >= 200) return 'bg-emerald-900/70 text-emerald-200'
-  return 'bg-dark-600 text-slate-300'
+  if (s >= 500) return 'bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200'
+  if (s >= 400) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
+  if (s >= 300) return 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200'
+  if (s >= 200) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200'
+  return 'bg-slate-200 text-slate-700 dark:bg-dark-600 dark:text-slate-300'
 }
 
 function seviyeRenk(s: string): string {
   const l = s.toLowerCase()
-  if (l === 'emerg' || l === 'alert' || l === 'crit' || l === 'error') return 'bg-red-900/70 text-red-200'
-  if (l === 'warn') return 'bg-amber-900/70 text-amber-200'
-  if (l === 'notice') return 'bg-sky-900/70 text-sky-200'
-  return 'bg-dark-600 text-slate-300'
+  if (l === 'emerg' || l === 'alert' || l === 'crit' || l === 'error') return 'bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200'
+  if (l === 'warn') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
+  if (l === 'notice') return 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200'
+  return 'bg-slate-200 text-slate-700 dark:bg-dark-600 dark:text-slate-300'
 }
 
 // 03/Jul/2026:22:40:31 +0000  ->  03/Jul 22:40:31
@@ -573,12 +573,12 @@ function uaKisa(ua: string): string {
 
 function renkSec(s: string): string {
   // Ham görünüm renklendirmesi
-  if (/\s5\d\d\s/.test(s)) return 'text-red-400'
-  if (/\s4\d\d\s/.test(s)) return 'text-amber-400'
-  if (/\[error\]|\[crit\]|\[emerg\]|\[alert\]/i.test(s)) return 'text-red-400'
-  if (/\[warn\]/i.test(s)) return 'text-amber-400'
-  if (/\[notice\]/i.test(s)) return 'text-sky-400'
-  return 'text-slate-300'
+  if (/\s5\d\d\s/.test(s)) return 'text-red-700 dark:text-red-400'
+  if (/\s4\d\d\s/.test(s)) return 'text-amber-700 dark:text-amber-400'
+  if (/\[error\]|\[crit\]|\[emerg\]|\[alert\]/i.test(s)) return 'text-red-700 dark:text-red-400'
+  if (/\[warn\]/i.test(s)) return 'text-amber-700 dark:text-amber-400'
+  if (/\[notice\]/i.test(s)) return 'text-sky-700 dark:text-sky-400'
+  return 'text-slate-700 dark:text-slate-300'
 }
 
 function formatBoyut(b: number): string {
