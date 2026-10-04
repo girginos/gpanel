@@ -83,17 +83,18 @@ function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
 // (Domainler/Bayiler) yediği ~316px düşüldükten sonra kalan genişlik. Gizleme yalnız masaüstü
 // tablo kipinde (lg+) geçerlidir; mobil kartta tüm alanlar zaten alt alta gösterilir.
 // Önem sırası (önce gizlenen): Oluşturulma > PHP > Sistem kullanıcısı > Disk > Kullanıcı (sahip) > Plan.
-// Eşikler en kötü durumda (uzun adlar kırpılma sınırında) tablonun sığdığı en dar kapsayıcı genişliğidir.
-// Sayfa en çok 1280px (içerik 1230px) olduğundan Oluşturulma yalnız sayfa genişletilirse görünür;
-// kayıt tarihi domain ayrıntı sayfasında zaten var.
+// Eşik = o sütun kümesinin EN KÖTÜ durumda (TR/EN etiketleri, uzun adlar kırpılma sınırında)
+// ihtiyaç duyduğu en dar kapsayıcı genişliği (ölçüm: sütun taban genişlikleri toplamı) + ~14px pay.
+// Satır içi "Subdomain" düğmesi kalkıp İşlemler yalnız "Yönet" kaldığından eşikler gevşetildi;
+// taban (onay kutusu+Domain+Durum+İşlemler) ≈525px olduğundan 1024px'de bile taşma payı ≥24px.
 // `!` zorunlu: T.hucre'nin `lg:table-cell` kuralını sıra bağımsız ezmeli.
 const KOL = {
-  plan: '@max-[739px]:lg:hidden!',
-  sahip: '@max-[869px]:lg:hidden!',
-  disk: '@max-[959px]:lg:hidden!',
-  sk: '@max-[1089px]:lg:hidden!',
-  php: '@max-[1169px]:lg:hidden!',
-  olusturulma: '@max-[1289px]:lg:hidden!',
+  plan: '@max-[632px]:lg:hidden!',
+  sahip: '@max-[786px]:lg:hidden!',
+  disk: '@max-[863px]:lg:hidden!',
+  sk: '@max-[1003px]:lg:hidden!',
+  php: '@max-[1050px]:lg:hidden!',
+  olusturulma: '@max-[1150px]:lg:hidden!',
 } as const
 
 function fmtKB(kb: number) {
@@ -146,6 +147,16 @@ const DOMAINS_EN: Record<string, string> = {
   "Yeni parola işlem sonucunda gösterilir": "New password is shown after the operation",
   "Yeni plan limitleri (disk, inode, FPM) her domaine uygulanır.": "New plan limits (disk, inode, FPM) apply to every domain.",
   "Yönet": "Manage",
+  "Üst domain": "Parent domain",
+  "Domain seçin…": "Select a domain…",
+  "Domain ara…": "Search domains…",
+  "Yeni Subdomain": "New Subdomain",
+  "Alt Alan": "Subdomain",
+  "Subdomain Ekle": "Add Subdomain",
+  "Küçük harf, rakam ve tire. Örn:": "Lowercase, digits and hyphen. E.g:",
+  "{0} oluşturuldu. DNS A kaydı eklendi.": "{0} created. DNS A record added.",
+  "Oluşturulamadı": "Could not be created",
+  "Kaydedildi": "Saved",
   "Yükleniyor…": "Loading…",
   "geri dönüşsüz": "irreversible",
   "kısmen tamamlandı": "partially completed",
@@ -357,6 +368,41 @@ export default function DomainsPage() {
         return v ? v.id : ''
       })
     }).finally(() => setModalVeriYuk(false))
+  }
+
+  // --- Üst bardaki "Subdomain": üst domain seçicili alt alan oluşturma diyaloğu ---
+  // Çağrı DomainSubdomainlerPage.olustur ile AYNI uç: POST /domains/{id}/subdomain {alt_ad}.
+  const [subAcik, setSubAcik] = useState(false)
+  const [subUst, setSubUst] = useState<number>(0)
+  const [subAd, setSubAd] = useState('')
+  const [subKaydediyor, setSubKaydediyor] = useState(false)
+  // Yalnız ana alan adları (items alt alan içermez), alan adına göre sıralı.
+  const subUstSecenekleri = useMemo(
+    () => [...items].sort((x, y) => x.alan_adi.localeCompare(y.alan_adi, 'tr'))
+      .map(d => ({ id: d.id, etiket: d.alan_adi, altEtiket: d.sahip_ad || undefined })),
+    [items])
+  function subdomainAc() {
+    // Tablodan TEK domain seçiliyse ön-seçili; aksi halde boş.
+    setSubUst(secili.size === 1 ? Array.from(secili)[0] : 0)
+    setSubAd('')
+    setSubAcik(true)
+  }
+  async function subdomainOlustur(e: React.FormEvent) {
+    e.preventDefault()
+    if (!subUst || !subAd.trim() || subKaydediyor) return
+    setHata(null); setSubKaydediyor(true)
+    try {
+      const { data } = await api.post(`/domains/${subUst}/subdomain`, { alt_ad: subAd.trim() }, UZUN_ISTEK)
+      const m = cevirT(cevir("{0} oluşturuldu. DNS A kaydı eklendi."), data.tam_ad)
+      toast.basari(cevir("Kaydedildi"), m)
+      setSubAcik(false); setSubAd('')
+      yukle()
+    } catch (err) {
+      const m = apiHata(err, cevir("Oluşturulamadı"))
+      setHata(m)
+      toast.hata(cevir("İşlem başarısız"), m)
+    }
+    finally { setSubKaydediyor(false) }
   }
 
   function olusturAc() {
@@ -596,15 +642,20 @@ export default function DomainsPage() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <div className="flex-1 max-w-md">
+        <div className="flex-1 min-w-[10rem] max-w-md">
           <input type="text" value={q} onChange={e => setQ(e.target.value)}
             placeholder={cevir("Domain ara...")}
             className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm focus:border-brand-500 outline-none" />
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-500">{filtreli.length} / {items.length}</span>
-        <Button color="primary" ikon={I.arti} onClick={olusturAc} className="ml-auto">
-          {cevir("Yeni Domain")}
-        </Button>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2 max-sm:w-full">
+          <Button variant="outlined" ikon={I.arti} onClick={subdomainAc} disabled={items.length === 0}>
+            Subdomain
+          </Button>
+          <Button color="primary" ikon={I.arti} onClick={olusturAc}>
+            {cevir("Yeni Domain")}
+          </Button>
+        </div>
       </div>
 
       {yonetici && topluIsID > 0 && (
@@ -661,7 +712,7 @@ export default function DomainsPage() {
       ) : (
         <div className="@container lg:bg-white dark:lg:bg-dark-700 lg:border lg:border-slate-200 dark:lg:border-dark-600 lg:rounded-lg lg:overflow-hidden">
           <div className="lg:overflow-x-auto">
-            <table className={T.tablo}>
+            <table className={`${T.tablo} lg:min-w-0!`}>
             <thead className={`${T.baslikGrubu} bg-slate-50 dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600`}>
               <tr>
                 <th className={`${T.baslik} w-10 text-center`}>
@@ -731,9 +782,6 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma?.slice(0, 10) || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
-                      <Link to={`/abonelikler/${d.id}/subdomainler`} className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'lg:mr-2' })}>
-                        <Ikon d={I.arti} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />Subdomain
-                      </Link>
                       <Link to={`/abonelikler/${d.id}`} className={butonSinifi({ color: 'primary', variant: 'soft', boyut: 'sm', className: 'ml-auto lg:ml-0' })}>
                         {cevir("Yönet")}<Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
                       </Link>
@@ -794,6 +842,41 @@ export default function DomainsPage() {
         </div>
       )}
       </>)}
+
+      {/* Subdomain Oluştur Modal (kök liste, yönetici) */}
+      <Modal acik={subAcik} baslik={cevir("Yeni Subdomain")} onKapat={() => setSubAcik(false)} kapatilamaz={subKaydediyor} genislik="md"
+        alt={<>
+          <Button type="button" variant="outlined" ikon={I.kapat} onClick={() => setSubAcik(false)} disabled={subKaydediyor}>{cevir("İptal")}</Button>
+          <Button type="submit" form="gosp-subdomain-olustur" color="primary" ikon={I.arti} yukleniyor={subKaydediyor} disabled={!subUst || !subAd.trim()}>
+            {subKaydediyor ? cevir("Oluşturuluyor…") : cevir("Subdomain Ekle")}
+          </Button>
+        </>}>
+        <form id="gosp-subdomain-olustur" onSubmit={subdomainOlustur} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Üst domain")} <span className="text-red-500">*</span></label>
+            <AramaliSecim
+              deger={subUst || null}
+              onDegis={v => setSubUst(Number(v))}
+              yerTutucu={cevir("Domain seçin…")}
+              aramaYerTutucu={cevir("Domain ara…")}
+              bosMetin={cevir("Henüz domain yok")}
+              secenekler={subUstSecenekleri}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("Alt Alan")} <span className="text-red-500">*</span></label>
+            <div className="flex items-center gap-2 min-w-0">
+              <input value={subAd} onChange={e => setSubAd(e.target.value.toLowerCase())} required placeholder="blog" disabled={subKaydediyor}
+                className="w-40 shrink-0 px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-dark-800 rounded-lg text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none" />
+              <span className="font-mono text-sm text-slate-500 dark:text-slate-400 truncate min-w-0"
+                title={subUst ? `.${items.find(d => d.id === subUst)?.alan_adi || ''}` : undefined}>
+                {subUst ? `.${items.find(d => d.id === subUst)?.alan_adi || ''}` : ''}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2">{cevir("Küçük harf, rakam ve tire. Örn:")} <span className="font-mono">blog</span>, <span className="font-mono">shop</span>, <span className="font-mono">api</span>.</p>
+          </div>
+        </form>
+      </Modal>
 
       {/* Domain Oluştur Modal */}
       <Modal acik={olusturAcik} baslik={cevir("Yeni Domain Oluştur")} onKapat={() => setOlusturAcik(false)} kapatilamaz={olusturuluyor} genislik="lg"
