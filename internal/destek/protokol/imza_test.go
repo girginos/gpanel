@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -236,15 +237,21 @@ func TestKanonikAlanAyiriciVeUzunlukOneki(t *testing.T) {
 	// Tip ayırıcı: eşleşme onayının imzası iş emrinde geçmemeli.
 	es := &EslesmeOnayla{}
 	k3, _ := KanonikBaytlar(es)
-	if !bytes.HasPrefix(k3[4:], []byte(alanOneki+"eslesme_onayla")) || !bytes.HasPrefix(k1[4:], []byte(alanOneki+"is_emri")) {
+	if !bytes.HasPrefix(k3[4:], []byte(alanOneki+"eslesme_onayla_v2")) || !bytes.HasPrefix(k1[4:], []byte(alanOneki+"is_emri")) {
 		t.Fatal("alan ayırıcı eksik")
 	}
+}
+
+// ornekEslesme: v2 eşleştirme onayı örneği (tüm alanlar dolu).
+func ornekEslesme() *EslesmeOnayla {
+	return &EslesmeOnayla{KodOzet: h64("a"), TgUserID: 123456789, TgKullaniciAdi: "musteri_1", SunucuKimligi: "s_0123456789abcdef",
+		Duzey: DuzeyOnarim, SureGun: 7, Onayli: true, PortalKullanici: "u_42", AydinlatmaSurum: "2026-10-04.1"}
 }
 
 func TestEslesmeOnaylaImza(t *testing.T) {
 	c := testCifti(t, 1)
 	s := testImzalayici(t, c, t0)
-	m := &EslesmeOnayla{KodOzet: string(bytes.Repeat([]byte("a"), 64)), TgUserID: 123456789, TgKullaniciAdi: "musteri_1"}
+	m := ornekEslesme()
 	if err := s.Imzala(m, 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -259,14 +266,50 @@ func TestEslesmeOnaylaImza(t *testing.T) {
 	if err := testDogrulayici(t, t0, c.Acik).Dogrula(g.(*EslesmeOnayla)); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []func(m *EslesmeOnayla){
-		func(m *EslesmeOnayla) { m.TgUserID++ },
-		func(m *EslesmeOnayla) { m.TgKullaniciAdi = "saldirgan" },
-		func(m *EslesmeOnayla) { m.KodOzet = string(bytes.Repeat([]byte("b"), 64)) },
+	// 🔴 v2'nin yeni alanlarının HER BİRİ imzayla kapsanır: değiştirilen mesaj imza hatası vermeli.
+	for ad, f := range map[string]func(m *EslesmeOnayla){
+		"tg_user_id":       func(m *EslesmeOnayla) { m.TgUserID++ },
+		"tg_kullanici_adi": func(m *EslesmeOnayla) { m.TgKullaniciAdi = "saldirgan" },
+		"kod_ozet":         func(m *EslesmeOnayla) { m.KodOzet = h64("b") },
+		"sunucu_kimligi":   func(m *EslesmeOnayla) { m.SunucuKimligi = "s_fedcba9876543210" },
+		"duzey":            func(m *EslesmeOnayla) { m.Duzey = DuzeyTam },
+		"sure_gun":         func(m *EslesmeOnayla) { m.SureGun = 30 },
+		"portal_kullanici": func(m *EslesmeOnayla) { m.PortalKullanici = "u_43" },
+		"aydinlatma_surum": func(m *EslesmeOnayla) { m.AydinlatmaSurum = "eski" },
 	} {
 		k := *g.(*EslesmeOnayla)
 		f(&k)
-		kodBekle(t, testDogrulayici(t, t0, c.Acik).Dogrula(&k), HataImza)
+		if err := testDogrulayici(t, t0, c.Acik).Dogrula(&k); HataKoduAl(err) != HataImza {
+			t.Fatalf("%s değişikliği imzayla yakalanmadı: %v", ad, err)
+		}
+	}
+}
+
+// Biçim: onayli=false, kapali düzey, süre sınırı ve desen dışı değerler Dogrula'da reddedilir
+// (imzalamadan ÖNCE de, sonra da) — onaysız bağlantı protokolde temsil edilemez.
+func TestEslesmeOnaylaBicim(t *testing.T) {
+	for _, f := range map[string]func(m *EslesmeOnayla){
+		"onayli=false":   func(m *EslesmeOnayla) { m.Onayli = false },
+		"duzey kapali":   func(m *EslesmeOnayla) { m.Duzey = DuzeyKapali },
+		"duzey bos":      func(m *EslesmeOnayla) { m.Duzey = "" },
+		"sure 0":         func(m *EslesmeOnayla) { m.SureGun = 0 },
+		"sure 31":        func(m *EslesmeOnayla) { m.SureGun = 31 },
+		"portal bos":     func(m *EslesmeOnayla) { m.PortalKullanici = "" },
+		"portal bosluk":  func(m *EslesmeOnayla) { m.PortalKullanici = "a b" },
+		"portal 65":      func(m *EslesmeOnayla) { m.PortalKullanici = strings.Repeat("a", 65) },
+		"aydinlatma bos": func(m *EslesmeOnayla) { m.AydinlatmaSurum = "" },
+		"sunucu bos":     func(m *EslesmeOnayla) { m.SunucuKimligi = "" },
+	} {
+		m := ornekEslesme()
+		f(m)
+		m.AnahtarKimligi, m.Nonce, m.Verilme, m.SonGecerlilik, m.Imza = "0123456789abcdef", "AAAAAAAAAAAAAAAAAAAAAA", 1, 2, strings.Repeat("A", 86)
+		kodBekle(t, m.Dogrula(), HataBicim)
+
+	}
+	// eski tipler artık tanınmaz: v1 çerçevesi "tip_bilinmiyor"
+	for _, tp := range []string{"eslesme_onayla", "kod_ozet"} {
+		_, _, err := Coz([]byte(`{"surum":1,"tip":"`+tp+`","kimlik":"zarf_0001","govde":{}}`), YonAjana|YonMerkeze)
+		kodBekle(t, err, HataTipBilinmiyor)
 	}
 }
 

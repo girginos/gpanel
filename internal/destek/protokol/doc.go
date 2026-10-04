@@ -26,16 +26,26 @@
 //  5. kalp_atisi iki yönde [KalpAraligi] ile; [KalpZamanAsimi] sessizlikte
 //     bağlantı kapatılır.
 //
-// Eşleştirme: ajan kod_ozet (tek kullanımlık kodun SHA-256 özeti) bildirir →
-// müşteri Telegram'da /start <kod> → merkez eslesme_onayla (İMZALI) → ajan
-// kodu tüketir, panelde ikinci onayı bekler → baglanti_durum (hesap sıra
-// numaraları + etiketleri, rol, etkin düzey). baglanti_iptal iki yönde
-// gönderilebilir; iptal yalnız yetkiyi düşürür.
+// Eşleştirme (v2, 2026-10-04): eşleştirme sunucu panelinde DEĞİL müşteri portalında
+// (app.girginos.io) başlar — panel kapalıyken de çalışsın diye. Yalnız sunucu SAHİBİ
+// (lisansın portal hesabı) eşleştirebilir. Portal merkezin iç API'sinden kod ister;
+// merkez kodu üretir (yalnız özetini bellekte tutur), müşteri Telegram'da /start <kod>
+// → merkez eslesme_onayla_v2 (İMZALI; düzey, süre, portal onayı ve portal kullanıcısı
+// imzayla kapsanır) → ajan bağlantıyı DOĞRUDAN etkin ve kök rolüyle açar (panelde ikinci
+// onay yok) → baglanti_durum (hesap sıra numaraları + etiketleri, rol, etkin düzey).
+// baglanti_iptal iki yönde gönderilebilir; iptal yalnız yetkiyi düşürür.
 //
-// Eşleştirme kuralları (iki taraf AYNI): kod_ozet = [EslesmeKoduOzet] (kod
-// NORMALLEŞTİRİLİR: tire/boşluk atılır, büyük harf); merkez /start argümanını da
-// aynı işlevle özetler. Ajan eslesme_onayla'yı reddederse hata.ilgili = o zarfın
-// kimliği; merkez bunu kullanıcıya bildirir ve bekleyen eşleştirmeyi siler.
+// SÜRÜM KARARI: zarf sürümü (Surum=1) DEĞİŞMEZ — sürüm yükseltmek her mesajı kırardı.
+// Bunun yerine mesaj tipi adı değişti: eslesme_onayla → eslesme_onayla_v2 (kanonik alan
+// ayırıcısı "girginos-destek/v1/<tip>" tipi içerdiğinden v1 imzası v2'de, v2 imzası v1'de
+// GEÇMEZ). Eski tipler (eslesme_onayla, ajan→merkez kod_ozet) protokolden KALDIRILDI:
+// yeni taraf eskisini "tip_bilinmiyor" ile reddeder, eski ajan v2'yi tanımaz ve yok sayar —
+// alanları eksik bir imzalı onay hiçbir ajan sürümünde kabul edilemez.
+//
+// Eşleştirme kodu kuralları: kod_ozet = [EslesmeKoduOzet] (kod NORMALLEŞTİRİLİR: tire/
+// boşluk atılır, büyük harf); merkez /start argümanını da aynı işlevle özetler. Ajan
+// eslesme_onayla_v2'yi reddederse hata.ilgili = o zarfın kimliği; merkez bunu kullanıcıya
+// bildirir ve bekleyen eşleştirmeyi siler.
 //
 // Uzlaşma: baglanti_iptal İDEMPOTENTTİR — alıcıda olmayan bağlantı için hata
 // yanıtlanmaz (ajan her yeniden bağlanışta son iptalleri yeniden bildirir).

@@ -51,12 +51,13 @@ func TestKanonikVektorIsEmri(t *testing.T) {
 
 func TestKanonikVektorEslesme(t *testing.T) {
 	c := testCifti(t, 1)
-	m := &EslesmeOnayla{KodOzet: h64("a"), TgUserID: 987654321, TgKullaniciAdi: "musteri_1"}
+	m := &EslesmeOnayla{KodOzet: h64("a"), TgUserID: 987654321, TgKullaniciAdi: "musteri_1", SunucuKimligi: "s_0123456789abcdef",
+		Duzey: DuzeyOnarim, SureGun: 7, Onayli: true, PortalKullanici: "u_42", AydinlatmaSurum: "2026-10-04.1"}
 	if err := testImzalayici(t, c, t0).imzalaZaman(m, "AAAAAAAAAAAAAAAAAAAAAA", t0.Unix(), t0.Unix()+30); err != nil {
 		t.Fatal(err)
 	}
 	var b bytes.Buffer
-	kvDizge(&b, "girginos-destek/v1/eslesme_onayla")
+	kvDizge(&b, "girginos-destek/v1/eslesme_onayla_v2")
 	kvSayi(&b, 1)
 	kvDizge(&b, c.Kimlik)
 	kvDizge(&b, "AAAAAAAAAAAAAAAAAAAAAA")
@@ -65,6 +66,19 @@ func TestKanonikVektorEslesme(t *testing.T) {
 	kvDizge(&b, h64("a"))
 	kvSayi(&b, 987654321)
 	kvDizge(&b, "musteri_1")
+	kvDizge(&b, "s_0123456789abcdef")
+	kvDizge(&b, "onarim")
+	kvSayi(&b, 7)
+	kvSayi(&b, 1)
+	kvDizge(&b, "u_42")
+	kvDizge(&b, "2026-10-04.1")
+	k, err := KanonikBaytlar(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(k, b.Bytes()) {
+		t.Fatalf("kanonik baytlar:\n%x\nbeklenen\n%x", k, b.Bytes())
+	}
 	imza, _ := b64.DecodeString(m.Imza)
 	if !ed25519.Verify(c.Acik, b.Bytes(), imza) {
 		t.Fatal("eslesme_onayla kanonik vektörü")

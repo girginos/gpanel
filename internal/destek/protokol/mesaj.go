@@ -13,13 +13,16 @@ import (
 type Tip string
 
 const (
-	TipKayit         Tip = "kayit"          // ajan → merkez
-	TipMeydanOkuma   Tip = "meydan_okuma"   // merkez → ajan (merkez imzalı)
-	TipMeydanYanit   Tip = "meydan_yanit"   // ajan → merkez (cihaz imzalı)
-	TipKayitSonuc    Tip = "kayit_sonuc"    // merkez → ajan
-	TipKalpAtisi     Tip = "kalp_atisi"     // iki yön
-	TipKodOzet       Tip = "kod_ozet"       // ajan → merkez
-	TipEslesmeOnayla Tip = "eslesme_onayla" // merkez → ajan (imzalı)
+	TipKayit       Tip = "kayit"        // ajan → merkez
+	TipMeydanOkuma Tip = "meydan_okuma" // merkez → ajan (merkez imzalı)
+	TipMeydanYanit Tip = "meydan_yanit" // ajan → merkez (cihaz imzalı)
+	TipKayitSonuc  Tip = "kayit_sonuc"  // merkez → ajan
+	TipKalpAtisi   Tip = "kalp_atisi"   // iki yön
+	// TipEslesmeOnayla: merkez → ajan (imzalı). v2 (2026-10-04): eşleştirme artık müşteri
+	// portalından (app.girginos.io) başlar; mesaj düzey/süre/portal onayını taşır ve imzayla
+	// KAPSANIR. Tip adı değiştiği için kanonik alan ayırıcısı da değişir (v1 imzası v2 olarak
+	// geçmez, tersi de); eski tipler (eslesme_onayla, kod_ozet) artık TANINMAZ.
+	TipEslesmeOnayla Tip = "eslesme_onayla_v2"
 	TipBaglantiDurum Tip = "baglanti_durum" // ajan → merkez
 	TipBaglantiIptal Tip = "baglanti_iptal" // iki yön
 	TipIsEmri        Tip = "is_emri"        // merkez → ajan (imzalı)
@@ -41,7 +44,6 @@ var tipYonleri = map[Tip]Yon{
 	TipMeydanYanit:   YonMerkeze,
 	TipKayitSonuc:    YonAjana,
 	TipKalpAtisi:     YonMerkeze | YonAjana,
-	TipKodOzet:       YonMerkeze,
 	TipEslesmeOnayla: YonAjana,
 	TipBaglantiDurum: YonMerkeze,
 	TipBaglantiIptal: YonMerkeze | YonAjana,
@@ -79,8 +81,6 @@ func yeniGovde(t Tip) Govde {
 		return &KayitSonuc{}
 	case TipKalpAtisi:
 		return &KalpAtisi{}
-	case TipKodOzet:
-		return &KodOzet{}
 	case TipEslesmeOnayla:
 		return &EslesmeOnayla{}
 	case TipBaglantiDurum:
@@ -369,21 +369,6 @@ func (m *KalpAtisi) Dogrula() error {
 	return nil
 }
 
-// KodOzet: ajan → merkez; panelde üretilen tek kullanımlık eşleştirme kodunun SHA-256 özeti.
-// Kodun kendisi sunucudan çıkmaz.
-type KodOzet struct {
-	KodOzet       string `json:"kod_ozet"`
-	SonGecerlilik int64  `json:"son_gecerlilik"`
-}
-
-func (*KodOzet) Tip() Tip { return TipKodOzet }
-func (m *KodOzet) Dogrula() error {
-	if m.SonGecerlilik <= 0 {
-		return hataf(HataBicim, "son_gecerlilik")
-	}
-	return desenDenetle("kod_ozet", hex64Deseni, m.KodOzet)
-}
-
 // ImzaAlanlari: imzalı mesajlarda ortak alanlar (JSON'da düz, gömülü).
 type ImzaAlanlari struct {
 	AnahtarKimligi string `json:"anahtar_kimligi"` // AnahtarKimligi(merkez açık anahtarı)
@@ -409,13 +394,30 @@ func (a *ImzaAlanlari) bicimDogrula() error {
 	return err
 }
 
-// EslesmeOnayla: merkez → ajan (İMZALI). Telegram kullanıcısı /start <kod> ile kodu sundu.
+// EslesmeOnayla (v2): merkez → ajan (İMZALI). Sunucu sahibi portalda sunucuyu seçip aydınlatmayı
+// kabul etti, merkez ürettiği kodu verdi; Telegram kullanıcısı /start <kod> ile sundu.
+// Ajan bağlantıyı DOĞRUDAN etkin ve kök rolüyle açar (panelde ikinci onay yok); bu yüzden
+// düzey, süre, portal onayı ve portal kullanıcısı imzayla kapsanır — ağdaki biri değiştiremez.
 type EslesmeOnayla struct {
-	KodOzet        string `json:"kod_ozet"`
-	TgUserID       int64  `json:"tg_user_id"`
-	TgKullaniciAdi string `json:"tg_kullanici_adi"` // boş olabilir (kullanıcı adı olmayan hesap)
+	KodOzet         string `json:"kod_ozet"` // merkezin ürettiği kodun özeti (baglanti_durum ile ilişkilendirme)
+	TgUserID        int64  `json:"tg_user_id"`
+	TgKullaniciAdi  string `json:"tg_kullanici_adi"` // boş olabilir (kullanıcı adı olmayan hesap)
+	SunucuKimligi   string `json:"sunucu_kimligi"`   // hedef ajan: başka sunucuya yönlendirilmiş onay reddedilir
+	Duzey           Duzey  `json:"duzey"`            // okuma | onarim | tam (kapali eşleştirilemez)
+	SureGun         int    `json:"sure_gun"`         // 1..EslesmeEnCokSureGun
+	Onayli          bool   `json:"onayli"`           // portalda KVKK aydınlatması kabul edildi (true olmalı)
+	PortalKullanici string `json:"portal_kullanici"` // portal hesabı (denetim: olusturan = "portal:<id>")
+	AydinlatmaSurum string `json:"aydinlatma_surum"` // portalda kabul edilen metin sürümü
 	ImzaAlanlari
 }
+
+// EslesmeEnCokSureGun: bağlantı süresi üst sınırı (süresiz bağlantı yok).
+const EslesmeEnCokSureGun = 30
+
+var (
+	portalKullaniciDeseni = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)
+	aydinlatmaSurumDeseni = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+)
 
 func (*EslesmeOnayla) Tip() Tip { return TipEslesmeOnayla }
 func (m *EslesmeOnayla) Dogrula() error {
@@ -429,6 +431,26 @@ func (m *EslesmeOnayla) Dogrula() error {
 		if err := desenDenetle("tg_kullanici_adi", tgAdDeseni, m.TgKullaniciAdi); err != nil {
 			return err
 		}
+	}
+	if err := desenDenetle("sunucu_kimligi", kimlikDeseni, m.SunucuKimligi); err != nil {
+		return err
+	}
+	switch m.Duzey {
+	case DuzeyOkuma, DuzeyOnarim, DuzeyTam:
+	default:
+		return hataf(HataBicim, "duzey")
+	}
+	if m.SureGun < 1 || m.SureGun > EslesmeEnCokSureGun {
+		return hataf(HataBicim, "sure_gun")
+	}
+	if !m.Onayli {
+		return hataf(HataBicim, "onayli")
+	}
+	if err := desenDenetle("portal_kullanici", portalKullaniciDeseni, m.PortalKullanici); err != nil {
+		return err
+	}
+	if err := desenDenetle("aydinlatma_surum", aydinlatmaSurumDeseni, m.AydinlatmaSurum); err != nil {
+		return err
 	}
 	return m.bicimDogrula()
 }

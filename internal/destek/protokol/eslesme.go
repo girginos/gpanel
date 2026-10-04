@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// Eşleştirme kodu (panel → Telegram /start <kod>) — ajan ve merkez AYNI kuralı
-// kullanmalı: kod_ozet = sha256(EslesmeKoduNormal(kod)) küçük hex.
+// Eşleştirme kodu (portal → merkez üretir → Telegram /start <kod>): kod_ozet =
+// sha256(EslesmeKoduNormal(kod)) küçük hex.
 //
 //   - EslesmeKoduUzunlugu karakter, IsKoduAlfabesi'nden (31^16 ≈ 2^79).
 //   - Telegram start parametresine (A-Za-z0-9_-, ≤64) olduğu gibi sığar.
 //   - Elle yazımda tire/boşluk ve küçük harf serbesttir; Normal bunları düzeltir.
-//   - Kodun kendisi sunucudan çıkmaz; merkeze yalnız özeti (KodOzet) gider.
+//   - Kodu MERKEZ üretir ve yalnız özetini bellekte tutar; kod portala bir kez döner.
 const (
 	EslesmeKoduUzunlugu = 16
 	EslesmeKoduOmru     = 10 * time.Minute

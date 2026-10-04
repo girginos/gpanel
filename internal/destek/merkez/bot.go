@@ -193,9 +193,8 @@ func (b *Bot) startIsle(ctx context.Context, kul *TgKullanici, dil, kod string) 
 		b.gonder(ctx, kul.ID, metin(dil, "hosgeldin"), true)
 		return
 	}
-	// Kod kuralı protokolde (eslesme.go): ajan kod_ozet'i NORMALLEŞTİRİLMİŞ kodun
-	// özetiyle bildirir; panel kodu "ABCD-EFGH-…" gösterir, kullanıcı küçük harf ya da
-	// boşlukla yazabilir. Ham metnin özeti ajanınkiyle hiç eşleşmezdi.
+	// Kod kuralı protokolde (eslesme.go): merkez kodu NORMALLEŞTİRİLMİŞ haliyle özetler;
+	// portal kodu "ABCD-EFGH-…" gösterir, kullanıcı küçük harf ya da boşlukla yazabilir.
 	ozet, gecerli := protokol.EslesmeKoduOzet(kod)
 	if !gecerli {
 		b.gonder(ctx, kul.ID, metin(dil, "kod_bicim"), false)
@@ -211,6 +210,8 @@ func (b *Bot) startIsle(ctx context.Context, kul *TgKullanici, dil, kod string) 
 		b.gonder(ctx, kul.ID, metin(dil, "kod_gecersiz"), false)
 	case errors.Is(err, ErrAjanCevrimdisi):
 		b.gonder(ctx, kul.ID, metin(dil, "ajan_cevrimdisi"), false)
+	case errors.Is(err, ErrDogrulanmadi):
+		b.gonder(ctx, kul.ID, metin(dil, "sunucu_dogrulanmadi"), false)
 	case err != nil:
 		b.m.log.Error("eşleştirme başlatılamadı", "hata", err)
 		b.gonder(ctx, kul.ID, metin(dil, "gecici_hata"), false)

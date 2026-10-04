@@ -211,16 +211,13 @@ func TestFiyatUSDVeCacheOlcer(t *testing.T) {
 	}
 }
 
-// Eşleştirme: kod_ozet → /start → İMZALI eslesme_onayla → baglanti_durum(etkin) → KVKK → kabul.
+// Eşleştirme (portal akışı): portal iç API'sinden kod → /start → İMZALI eslesme_onayla_v2 →
+// baglanti_durum(etkin) → KVKK portalda alındığından Telegram düğmesi YOK → doğrudan soru.
 func TestEslesmeAkisi(t *testing.T) {
 	o := yeniOrtam(t, nil)
 	ajan := sahteAjanBagla(t, o, nil)
-	// Ajanın kuralı (protokol.EslesmeKoduOzet): özet NORMALLEŞTİRİLMİŞ koddan. Kullanıcı
-	// panelde gösterilen "ABCD-EFGH-…" biçimini küçük harfle yazsa da eşleşmeli.
-	kod := "ABCDEFGHJKMNPQRS"
-	ozet, _ := protokol.EslesmeKoduOzet(kod)
-	ajan.gonder(&protokol.KodOzet{KodOzet: ozet, SonGecerlilik: time.Now().Add(10 * time.Minute).Unix()})
-	bekle(t, func() bool { o.m.ajan.mu.Lock(); defer o.m.ajan.mu.Unlock(); _, ok := o.m.ajan.kodlar[ozet]; return ok })
+	// Kuralı protokol belirler (EslesmeKoduOzet): kullanıcı "ABCD-EFGH-…" biçimini küçük harfle yazsa da eşleşmeli.
+	kod, ozet := o.kodAl(t, ajan.kayit.LisansParmakIzi, "onarim", 7)
 
 	o.mesaj(t, tTg, "/start Kod_123abcXYZ") // alfabe/uzunluk dışı → biçim hatası, kod tüketilmez
 	if !strings.Contains(o.tg.son(tTg), "biçimi") {
@@ -235,7 +232,11 @@ func TestEslesmeAkisi(t *testing.T) {
 	if ih != 0 || e.TgUserID != tTg || e.KodOzet != ozet || e.TgKullaniciAdi != "kullanici_1" {
 		t.Fatalf("eslesme_onayla: %+v imza hatası %d", e, ih)
 	}
-	if !strings.Contains(o.tg.son(tTg), "panelde onay") {
+	// v2 alanları: düzey/süre/portal onayı imzalı mesajda ve hedef sunucu bu ajan
+	if e.Duzey != protokol.DuzeyOnarim || e.SureGun != 7 || !e.Onayli || e.PortalKullanici != "u_42" || e.AydinlatmaSurum != "2026-10-04.1" || e.SunucuKimligi != ajan.Sunucu {
+		t.Fatalf("v2 alanları: %+v", e)
+	}
+	if !strings.Contains(o.tg.son(tTg), "bağlantı kuruluyor") {
 		t.Fatalf("kullanıcı mesajı: %q", o.tg.son(tTg))
 	}
 	// kod tek kullanımlık
@@ -259,28 +260,26 @@ func TestEslesmeAkisi(t *testing.T) {
 		}
 	}
 	ajan.mu.Unlock()
-	// gerçek bağlantı
+	// gerçek bağlantı (ajan doğrudan etkin bildirir)
 	ajan.gonder(&protokol.BaglantiDurum{BaglantiID: "bag_gercek_0001", KodOzet: ozet, TgUserID: tTg, Durum: protokol.BaglantiEtkin,
-		Rol: protokol.RolMusteri, Duzey: protokol.DuzeyOkuma, Hesaplar: []protokol.HesapEtiketi{{Sira: 1, Etiket: "ornek.com.tr"}}})
-	bekle(t, func() bool { return strings.Contains(o.tg.son(tTg), "Aydınlatma metni") })
-	var veri string
+		Rol: protokol.RolKok, Duzey: protokol.DuzeyOnarim, Hesaplar: []protokol.HesapEtiketi{{Sira: 1, Etiket: "ornek.com.tr"}}})
+	bekle(t, func() bool { return strings.Contains(o.tg.son(tTg), "Bağlantı hazır") })
 	for _, k := range o.tg.hepsi() {
-		if len(k.Dugmeler) > 0 && strings.HasPrefix(k.Dugmeler[0][0].Veri, "kvkk:") {
-			veri = k.Dugmeler[0][0].Veri
+		for _, sira := range k.Dugmeler {
+			for _, d := range sira {
+				if strings.HasPrefix(d.Veri, "kvkk:") {
+					t.Fatal("portalda kabul edilen aydınlatma için Telegram KVKK düğmesi gönderildi")
+				}
+			}
 		}
 	}
-	o.mesaj(t, tTg, "site çalışmıyor") // kabul öncesi Claude'a gitmez
-	if o.c.toplam() != 0 {
-		t.Fatal("KVKK kabulü olmadan Claude çağrıldı")
-	}
-	o.callback(t, tTg, veri)
 	b, _ := o.depo.BaglantiAl("bag_gercek_0001")
-	if b.KVKKKabul.IsZero() || b.SunucuKimligi != ajan.Sunucu {
+	if b.KVKKKabul.IsZero() || b.KVKKKaynak != "portal" || b.KVKKSurum != "2026-10-04.1" || b.SunucuKimligi != ajan.Sunucu {
 		t.Fatalf("bağlantı: %+v", b)
 	}
-	o.mesaj(t, tTg, "site çalışmıyor")
+	o.mesaj(t, tTg, "site çalışmıyor") // KVKK portalda alındı → doğrudan Claude
 	if len(o.c.anaIstekler()) != 1 {
-		t.Fatal("kabul sonrası Claude çağrılmadı")
+		t.Fatal("portal KVKK'sı sonrası Claude çağrılmadı")
 	}
 	// /unutbeni → ajana iptal + kayıtlar silinir
 	o.mesaj(t, tTg, "/unutbeni")
@@ -292,6 +291,33 @@ func TestEslesmeAkisi(t *testing.T) {
 	})
 	if len(o.depo.KullaniciBaglantilari(tTg)) != 0 || len(o.depo.konusmaBellek()) != 0 {
 		t.Fatal("unutbeni sonrası kayıt kaldı")
+	}
+}
+
+// Portal onayı OLMAYAN bağlantıda (eski kayıt) Telegram KVKK düğmesi korunur: kabul olmadan Claude çağrılmaz.
+func TestKVKKTelegramDugmesiPortalOnaysizdaKalir(t *testing.T) {
+	o := yeniOrtam(t, nil)
+	sahteAjanBagla(t, o, nil)
+	b := o.baglantiEkle(t, tTg, "s_0000000000000001", protokol.RolKok, "ornek.com.tr")
+	b.KVKKKabul = time.Time{}
+	_ = o.depo.BaglantiKaydet(b)
+	o.mesaj(t, tTg, "site çalışmıyor")
+	if o.c.toplam() != 0 {
+		t.Fatal("KVKK kabulü olmadan Claude çağrıldı")
+	}
+	var veri string
+	for _, k := range o.tg.hepsi() {
+		if len(k.Dugmeler) > 0 && strings.HasPrefix(k.Dugmeler[0][0].Veri, "kvkk:") {
+			veri = k.Dugmeler[0][0].Veri
+		}
+	}
+	if veri == "" {
+		t.Fatal("KVKK düğmesi gönderilmedi")
+	}
+	o.callback(t, tTg, veri)
+	got, _ := o.depo.BaglantiAl(b.BaglantiID)
+	if got.KVKKKabul.IsZero() || got.KVKKKaynak != "" {
+		t.Fatalf("Telegram kabulü kaydı: %+v", got)
 	}
 }
 
@@ -537,11 +563,15 @@ func TestYapilandirmaVeSirlar(t *testing.T) {
 	yaz(SirAnthropic, tAnthropic, 0o400)
 	yaz(SirWebhook, tWebhookGizli, 0o400)
 	yaz(SirMerkezAnahtar, strings.Repeat("ab", 32), 0o400)
+	if _, err := SirlariYukle(d); err == nil {
+		t.Fatal("portal-ic-anahtar olmadan sırlar yüklendi")
+	}
+	yaz(SirPortalIc, tPortalIc+"\n", 0o400)
 	s, err := SirlariYukle(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.TelegramToken != tTelegramToken || s.MerkezAnahtar == nil {
+	if s.TelegramToken != tTelegramToken || s.MerkezAnahtar == nil || s.PortalIcAnahtar != tPortalIc {
 		t.Fatal("sırlar okunamadı")
 	}
 	if strings.Contains(s.String()+strings.Join([]string{}, ""), tAnthropic) {
@@ -576,6 +606,21 @@ func TestYapilandirmaVeSirlar(t *testing.T) {
 	os.WriteFile(yd, []byte(`{"modeller":{"triyaj":"a","ana":"b"},"fiyatlar":{"a":{"giris_mtok":1,"cikis_mtok":1,"cache_yazma_5dk_mtok":1,"cache_yazma_1sa_mtok":1,"cache_okuma_mtok":0.1}},"butce":{"oturum_token_tavani":1,"sunucu_gunluk_usd":1,"sunucu_aylik_usd":1,"genel_gunluk_usd":1,"genel_aylik_usd":1}}`), 0o600)
 	if _, err := YapilandirmaYukle(yd); err == nil || !strings.Contains(err.Error(), `"b"`) {
 		t.Fatalf("fiyatsız model kabul edildi: %v", err)
+	}
+	// ic_dinle YALNIZ loopback; portal bilet anahtarı geçerli base64url Ed25519 olmalı
+	temel := `{"modeller":{"triyaj":"a","ana":"a"},"fiyatlar":{"a":{"giris_mtok":1,"cikis_mtok":1,"cache_yazma_5dk_mtok":1,"cache_yazma_1sa_mtok":1,"cache_okuma_mtok":0.1}},"butce":{"oturum_token_tavani":1,"sunucu_gunluk_usd":1,"sunucu_aylik_usd":1,"genel_gunluk_usd":1,"genel_aylik_usd":1}`
+	for ic, ok := range map[string]bool{"127.0.0.1:8471": true, "[::1]:8471": true, "localhost:8471": true, "0.0.0.0:8471": false, ":8471": false,
+		"10.0.0.5:8471": false, "182.1.2.3:8471": false, "ornek.com:8471": false, "127.0.0.1": false} {
+		os.WriteFile(yd, []byte(temel+`,"ic_dinle":"`+ic+`"}`), 0o600)
+		if _, err := YapilandirmaYukle(yd); (err == nil) != ok {
+			t.Fatalf("ic_dinle %q: kabul=%v beklenen %v (%v)", ic, err == nil, ok, err)
+		}
+	}
+	for anahtar, ok := range map[string]bool{protokol.AcikAnahtarKodla(make([]byte, 32)): true, "kisa": false, "!!!": false} {
+		os.WriteFile(yd, []byte(temel+`,"portal_bilet_anahtarlari":["`+anahtar+`"]}`), 0o600)
+		if _, err := YapilandirmaYukle(yd); (err == nil) != ok {
+			t.Fatalf("portal_bilet_anahtarlari %q: kabul=%v beklenen %v (%v)", anahtar, err == nil, ok, err)
+		}
 	}
 	os.WriteFile(yd, []byte(`{"bilinmeyen":1}`), 0o600)
 	if _, err := YapilandirmaYukle(yd); err == nil {

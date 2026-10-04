@@ -98,7 +98,11 @@ func calistir(args []string) error {
 	go func() { hatalar <- srv.ListenAndServe() }()
 	var ic *http.Server
 	if yap.IcDinle != "" {
-		ic = &http.Server{Addr: yap.IcDinle, Handler: m.IcHandler(), ReadHeaderTimeout: 5 * time.Second}
+		ic = &http.Server{
+			Addr: yap.IcDinle, Handler: m.IcHandler(),
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second,
+			IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10,
+		}
 		go func() { hatalar <- ic.ListenAndServe() }()
 	}
 	log.Info("destek-hub başladı", "dinle", yap.Dinle, "ic", yap.IcDinle, "merkez_anahtar_kimligi", sir.MerkezAnahtar.Kimlik)

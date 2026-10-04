@@ -23,7 +23,8 @@ func ornekGovdeler(t *testing.T) []Govde {
 	if err != nil {
 		t.Fatal(err)
 	}
-	es := &EslesmeOnayla{KodOzet: h64("a"), TgUserID: 42, TgKullaniciAdi: ""}
+	es := ornekEslesme()
+	es.TgKullaniciAdi = ""
 	if err := s.Imzala(es, 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,6 @@ func ornekGovdeler(t *testing.T) []Govde {
 		&KayitSonuc{Kabul: true, SunucuKimligi: "sunucu_0001", KalpAraligiSn: 20},
 		&KayitSonuc{Kabul: false, HataKodu: HataLisans},
 		&KalpAtisi{Sira: 7, Zaman: t0.Unix()},
-		&KodOzet{KodOzet: h64("b"), SonGecerlilik: t0.Unix() + 600},
 		es,
 		&BaglantiDurum{BaglantiID: "baglanti_0001", KodOzet: h64("b"), TgUserID: 42, Durum: BaglantiEtkin, Rol: RolMusteri, Duzey: DuzeyOkuma,
 			Hesaplar: []HesapEtiketi{{1, "ornek.com"}, {2, "xn--rnek-zoa.com.tr"}}},

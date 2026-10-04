@@ -2,12 +2,14 @@ package merkez
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,34 +49,38 @@ type Butce struct {
 // Yapilandirma: /etc/girginos-destek/destek-hub.json (katı çözülür; bilinmeyen alan → ret).
 // Sır İÇERMEZ.
 type Yapilandirma struct {
-	Dinle               string           `json:"dinle"`    // nginx arkası, ör. 127.0.0.1:8470
-	IcDinle             string           `json:"ic_dinle"` // /saglik + /metrik, ör. 127.0.0.1:8471; boş = kapalı
-	VeriDizini          string           `json:"veri_dizini"`
-	BotKullaniciAdi     string           `json:"bot_kullanici_adi"`
-	Modeller            Modeller         `json:"modeller"`
-	Fiyatlar            map[string]Fiyat `json:"fiyatlar"`
-	Butce               Butce            `json:"butce"`
-	AcilKesiciDosyasi   string           `json:"acil_kesici_dosyasi"` // dosya VARSA tüm Claude çağrıları durur
-	DestekGrubuID       int64            `json:"destek_grubu_id"`     // insan devri grubu; 0 = yalnız log
-	CacheTTL            string           `json:"cache_ttl"`           // "5m" (varsayılan) | "1h"
-	CacheUyariEsigi     float64          `json:"cache_uyari_esigi"`   // isabet oranı bunun altına düşerse uyarı (varsayılan 0.5)
-	CacheUyariPencere   int              `json:"cache_uyari_pencere"` // son N ana model çağrısı (varsayılan 20)
-	AnaMaxToken         int64            `json:"ana_max_token"`
-	TriyajMaxToken      int64            `json:"triyaj_max_token"`
-	CikisKontroluKapali bool             `json:"cikis_kontrolu_kapali"`
-	Efor                string           `json:"efor"`    // output_config.effort: "" | low | medium | high | max
-	Dusunme             bool             `json:"dusunme"` // thinking: adaptive
-	SikistirmaEsigi     int64            `json:"sikistirma_esigi"`
-	KonusmaSaklamaGun   int              `json:"konusma_saklama_gun"`
-	AracTurSiniri       int              `json:"arac_tur_siniri"`
-	OturumAracSiniri    int              `json:"oturum_arac_siniri"`
-	YukseltmeTurSiniri  int              `json:"yukseltme_tur_siniri"`
-	MesajDakikaSiniri   int              `json:"mesaj_dakika_siniri"`
-	SunucuOturumSiniri  int              `json:"sunucu_oturum_siniri"`
-	OturumBostaSn       int              `json:"oturum_bosta_sn"`
-	IsZamanAsimiSn      int              `json:"is_zaman_asimi_sn"`
-	AnthropicTabanURL   string           `json:"anthropic_taban_url"` // boş = SDK varsayılanı
-	TelegramTabanURL    string           `json:"telegram_taban_url"`  // boş = https://api.telegram.org
+	Dinle   string `json:"dinle"`    // nginx arkası, ör. 127.0.0.1:8470
+	IcDinle string `json:"ic_dinle"` // /saglik + /metrik + /ic/v1/* (portal), ör. 127.0.0.1:8471; boş = kapalı; YALNIZ loopback
+	// PortalBiletAnahtarlari: portalın (lisans sunucusu) bilet imza açık anahtarları, base64url
+	// (32 bayt Ed25519). Boşsa hiçbir sunucu "doğrulanmış" olamaz → eşleştirme kodu verilmez (kapalı başarısız).
+	// Birden çok anahtar = anahtar döndürme.
+	PortalBiletAnahtarlari []string         `json:"portal_bilet_anahtarlari"`
+	VeriDizini             string           `json:"veri_dizini"`
+	BotKullaniciAdi        string           `json:"bot_kullanici_adi"`
+	Modeller               Modeller         `json:"modeller"`
+	Fiyatlar               map[string]Fiyat `json:"fiyatlar"`
+	Butce                  Butce            `json:"butce"`
+	AcilKesiciDosyasi      string           `json:"acil_kesici_dosyasi"` // dosya VARSA tüm Claude çağrıları durur
+	DestekGrubuID          int64            `json:"destek_grubu_id"`     // insan devri grubu; 0 = yalnız log
+	CacheTTL               string           `json:"cache_ttl"`           // "5m" (varsayılan) | "1h"
+	CacheUyariEsigi        float64          `json:"cache_uyari_esigi"`   // isabet oranı bunun altına düşerse uyarı (varsayılan 0.5)
+	CacheUyariPencere      int              `json:"cache_uyari_pencere"` // son N ana model çağrısı (varsayılan 20)
+	AnaMaxToken            int64            `json:"ana_max_token"`
+	TriyajMaxToken         int64            `json:"triyaj_max_token"`
+	CikisKontroluKapali    bool             `json:"cikis_kontrolu_kapali"`
+	Efor                   string           `json:"efor"`    // output_config.effort: "" | low | medium | high | max
+	Dusunme                bool             `json:"dusunme"` // thinking: adaptive
+	SikistirmaEsigi        int64            `json:"sikistirma_esigi"`
+	KonusmaSaklamaGun      int              `json:"konusma_saklama_gun"`
+	AracTurSiniri          int              `json:"arac_tur_siniri"`
+	OturumAracSiniri       int              `json:"oturum_arac_siniri"`
+	YukseltmeTurSiniri     int              `json:"yukseltme_tur_siniri"`
+	MesajDakikaSiniri      int              `json:"mesaj_dakika_siniri"`
+	SunucuOturumSiniri     int              `json:"sunucu_oturum_siniri"`
+	OturumBostaSn          int              `json:"oturum_bosta_sn"`
+	IsZamanAsimiSn         int              `json:"is_zaman_asimi_sn"`
+	AnthropicTabanURL      string           `json:"anthropic_taban_url"` // boş = SDK varsayılanı
+	TelegramTabanURL       string           `json:"telegram_taban_url"`  // boş = https://api.telegram.org
 }
 
 // Varsayilanlar: sıfır alanları doldurur (fiyat ve bütçe HARİÇ — onlar zorunludur).
@@ -186,10 +192,51 @@ func (y *Yapilandirma) Dogrula() error {
 	if y.KonusmaSaklamaGun < 1 || y.KonusmaSaklamaGun > 30 {
 		return errors.New("konusma_saklama_gun 1..30")
 	}
+	if y.IcDinle != "" {
+		if err := loopbackDinle(y.IcDinle); err != nil {
+			return err
+		}
+	}
+	if len(y.PortalBiletAnahtarlari) > 8 {
+		return errors.New("portal_bilet_anahtarlari en çok 8")
+	}
+	if _, err := y.PortalAnahtarlari(); err != nil {
+		return err
+	}
 	if y.BotKullaniciAdi != "" && !regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`).MatchString(y.BotKullaniciAdi) {
 		return errors.New("bot_kullanici_adi geçersiz")
 	}
 	return nil
+}
+
+// loopbackDinle: iç API'nin dinleme adresi YALNIZ loopback olabilir (0.0.0.0, boş host, dış IP ve
+// ad çözümü gerektiren adlar reddedilir — nginx/tünel arkasından erişim ayrı katmandır).
+func loopbackDinle(adres string) error {
+	host, port, err := net.SplitHostPort(adres)
+	if err != nil || port == "" {
+		return errors.New("ic_dinle host:port olmalı")
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("ic_dinle yalnız loopback olabilir (127.0.0.1 / [::1])")
+	}
+	return nil
+}
+
+// PortalAnahtarlari: yapılandırmadaki portal bilet açık anahtarları (çözülmüş).
+func (y *Yapilandirma) PortalAnahtarlari() ([]ed25519.PublicKey, error) {
+	var out []ed25519.PublicKey
+	for _, s := range y.PortalBiletAnahtarlari {
+		a, err := protokol.AcikAnahtarCoz(strings.TrimSpace(s))
+		if err != nil {
+			return nil, errors.New("portal_bilet_anahtarlari: geçersiz açık anahtar")
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // YapilandirmaYukle: dosyayı katı çözer, varsayılanları uygular, doğrular.
@@ -230,6 +277,8 @@ const (
 	SirAnthropic     = "anthropic-key"
 	SirWebhook       = "telegram-webhook-gizli"
 	SirMerkezAnahtar = "merkez-imza-anahtari"
+	// SirPortalIc: portalın iç API'yi (/ic/v1/*) çağırırken sunduğu Bearer sırrı.
+	SirPortalIc = "portal-ic-anahtar"
 )
 
 // Sirlar: bellekteki sırlar. String() / %v sırrı YAZMAZ.
@@ -238,6 +287,7 @@ type Sirlar struct {
 	AnthropicAnahtar string
 	WebhookGizli     string
 	MerkezAnahtar    *protokol.AnahtarCifti
+	PortalIcAnahtar  string // iç API Bearer sırrı; boşsa /ic/v1/* tümüyle kapalı (503)
 }
 
 func (*Sirlar) String() string   { return "Sirlar{***}" }
@@ -248,12 +298,13 @@ func (s *Sirlar) Bilinenler() []string {
 	if s == nil {
 		return nil
 	}
-	return []string{s.TelegramToken, s.AnthropicAnahtar, s.WebhookGizli}
+	return []string{s.TelegramToken, s.AnthropicAnahtar, s.WebhookGizli, s.PortalIcAnahtar}
 }
 
 var (
 	telegramTokenDeseni = regexp.MustCompile(`^[0-9]{5,15}:[A-Za-z0-9_-]{30,64}$`)
 	webhookGizliDeseni  = regexp.MustCompile(`^[A-Za-z0-9_-]{16,256}$`)
+	portalIcDeseni      = regexp.MustCompile(`^[A-Za-z0-9_-]{32,256}$`)
 )
 
 // KimlikDizini: --kimlik-dizini bayrağı, yoksa systemd'nin verdiği CREDENTIALS_DIRECTORY
@@ -328,7 +379,7 @@ func tohumCoz(ham []byte) ([]byte, error) {
 	return nil, errors.New("merkez imza anahtarı 32 baytlık Ed25519 tohumu değil")
 }
 
-// SirlariYukle: dört sırrı dizinden okur ve biçimlerini doğrular.
+// SirlariYukle: beş sırrı dizinden okur ve biçimlerini doğrular.
 func SirlariYukle(dizin string) (*Sirlar, error) {
 	s := &Sirlar{}
 	tg, err := sirOku(dizin, SirTelegram)
@@ -354,6 +405,14 @@ func SirlariYukle(dizin string) (*Sirlar, error) {
 	s.WebhookGizli = strings.TrimSpace(string(wh))
 	if !webhookGizliDeseni.MatchString(s.WebhookGizli) {
 		return nil, errors.New("telegram-webhook-gizli biçimi geçersiz ([A-Za-z0-9_-]{16,256})")
+	}
+	pi, err := sirOku(dizin, SirPortalIc)
+	if err != nil {
+		return nil, err
+	}
+	s.PortalIcAnahtar = strings.TrimSpace(string(pi))
+	if !portalIcDeseni.MatchString(s.PortalIcAnahtar) {
+		return nil, errors.New("portal-ic-anahtar biçimi geçersiz ([A-Za-z0-9_-]{32,256})")
 	}
 	th, err := sirOku(dizin, SirMerkezAnahtar)
 	if err != nil {

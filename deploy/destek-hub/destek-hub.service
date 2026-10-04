@@ -16,6 +16,8 @@ LoadCredential=telegram-token:/etc/girginos-destek/telegram-token
 LoadCredential=anthropic-key:/etc/girginos-destek/anthropic-key
 LoadCredential=telegram-webhook-gizli:/etc/girginos-destek/telegram-webhook-gizli
 LoadCredential=merkez-imza-anahtari:/etc/girginos-destek/merkez-imza-anahtari
+# Portalın iç API'yi (/ic/v1/*) çağırırken sunduğu Bearer sırrı (≥32 karakter, [A-Za-z0-9_-]).
+LoadCredential=portal-ic-anahtar:/etc/girginos-destek/portal-ic-anahtar
 
 StateDirectory=girginos-destek
 StateDirectoryMode=0700

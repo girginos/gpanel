@@ -43,6 +43,15 @@ type Cihaz struct {
 	PanelSurumu     string    `json:"panel_surumu"`
 	IlkGorulme      time.Time `json:"ilk_gorulme"`
 	SonGorulme      time.Time `json:"son_gorulme"`
+	// DogrulamaBitis: lisans biletinin parmak izini doğruladığı an → bu ana kadar "doğrulandı".
+	// Sıfır = doğrulanmadı. Her kayıtta yeniden hesaplanır; süre dolunca kendiliğinden düşer.
+	DogrulamaBitis time.Time `json:"dogrulama_bitis"`
+	DogrulamaNeden string    `json:"dogrulama_neden,omitempty"` // doğrulanamadıysa kısa kod (tanı)
+}
+
+// Dogrulandi: lisans parmak izi portal biletiyle doğrulanmış VE doğrulama süresi dolmamış.
+func (c Cihaz) Dogrulandi(simdi time.Time) bool {
+	return !c.DogrulamaBitis.IsZero() && simdi.Before(c.DogrulamaBitis)
 }
 
 // Baglanti: Telegram kullanıcısı ↔ sunucu eşleştirmesi (kapsamın yerel otoritesi ajandır).
@@ -55,6 +64,8 @@ type Baglanti struct {
 	Duzey         protokol.Duzey          `json:"duzey"`
 	Hesaplar      []protokol.HesapEtiketi `json:"hesaplar"`
 	KVKKKabul     time.Time               `json:"kvkk_kabul"`
+	KVKKSurum     string                  `json:"kvkk_surum,omitempty"`  // kabul edilen aydınlatma sürümü (portal)
+	KVKKKaynak    string                  `json:"kvkk_kaynak,omitempty"` // "portal" | "" (Telegram düğmesi)
 	Guncelleme    time.Time               `json:"guncelleme"`
 }
 
@@ -84,10 +95,14 @@ func tgKisa(id int64) string {
 type Depo interface {
 	CihazAl(sunucu string) (Cihaz, bool)
 	CihazKaydet(c Cihaz) error
+	// CihazlarParmakIzi: lisans parmak izi iddia eden TÜM cihazlar (doğrulanmış olsun olmasın).
+	CihazlarParmakIzi(parmakIzi string) []Cihaz
 	BaglantiAl(id string) (Baglanti, bool)
 	BaglantiKaydet(b Baglanti) error
 	BaglantiSil(id string) error
 	KullaniciBaglantilari(tg int64) []Baglanti
+	// SunucuBaglantilari: bir sunucu kimliğine ait bağlantılar (portal iç API'si).
+	SunucuBaglantilari(sunucu string) []Baglanti
 	KullaniciAl(tg int64) (Kullanici, bool)
 	KullaniciKaydet(k Kullanici) error
 	// KullaniciUnut: /unutbeni — tercih, bağlantılar ve konuşma kaydı silinir.
@@ -219,6 +234,19 @@ func (dd *DosyaDepo) CihazKaydet(c Cihaz) error {
 	return dd.kaydet()
 }
 
+func (dd *DosyaDepo) CihazlarParmakIzi(parmakIzi string) []Cihaz {
+	dd.mu.Lock()
+	defer dd.mu.Unlock()
+	var out []Cihaz
+	for _, c := range dd.d.Cihazlar {
+		if c.LisansParmakIzi == parmakIzi {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SunucuKimligi < out[j].SunucuKimligi })
+	return out
+}
+
 func baglantiKopya(b Baglanti) Baglanti {
 	b.Hesaplar = slices.Clone(b.Hesaplar)
 	return b
@@ -254,6 +282,19 @@ func (dd *DosyaDepo) KullaniciBaglantilari(tg int64) []Baglanti {
 	var out []Baglanti
 	for _, b := range dd.d.Baglantilar {
 		if b.TgUserID == tg {
+			out = append(out, baglantiKopya(b))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BaglantiID < out[j].BaglantiID })
+	return out
+}
+
+func (dd *DosyaDepo) SunucuBaglantilari(sunucu string) []Baglanti {
+	dd.mu.Lock()
+	defer dd.mu.Unlock()
+	var out []Baglanti
+	for _, b := range dd.d.Baglantilar {
+		if b.SunucuKimligi == sunucu {
 			out = append(out, baglantiKopya(b))
 		}
 	}

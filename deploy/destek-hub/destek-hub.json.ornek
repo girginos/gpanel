@@ -1,6 +1,7 @@
 {
   "dinle": "127.0.0.1:8470",
   "ic_dinle": "127.0.0.1:8471",
+  "portal_bilet_anahtarlari": ["<PORTAL_LISANS_IMZA_ACIK_ANAHTARI_base64url>"],
   "veri_dizini": "/var/lib/girginos-destek",
   "bot_kullanici_adi": "GirginOSDestekBot",
   "modeller": {
