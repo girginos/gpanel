@@ -237,6 +237,16 @@ func TestPortalDogrulanmamisCihazSahiplenemez(t *testing.T) {
 	if m["sunucu_kimligi"] != gercek.Sunucu {
 		t.Fatalf("kod sahte cihaza bağlandı: %v (gerçek %s)", m["sunucu_kimligi"], gercek.Sunucu)
 	}
+	// Gerçek cihaz çevrimdışıyken sahte (daha yeni görülen, biletsiz) onun yerine GEÇMEZ:
+	// sunucu hâlâ gerçek cihazdır (doğrulanmış, çevrimdışı) ve kod verilmez.
+	gercek.ws.c.Close()
+	bekle(t, func() bool { return !o.m.ajan.Cevrimici(gercek.Sunucu) })
+	if _, m = o.portal(t, "GET", "/ic/v1/sunucu?parmak_izi="+tFP, nil, tPortalIc); m["sunucu_kimligi"] != gercek.Sunucu || m["dogrulandi"] != true || m["cevrimici"] != false {
+		t.Fatalf("sahte cihaz doğrulanmışın yerine geçti: %v", m)
+	}
+	if d, m := o.portal(t, "POST", "/ic/v1/eslesme-kodu", kodGovde(tFP), tPortalIc); d != http.StatusConflict || m["hata"] != "cevrimdisi" {
+		t.Fatalf("sahte cihaza kod: %d %v", d, m)
+	}
 }
 
 // Kod ömrü: süresi dolmuş kod geçersiz; bilet doğrulaması düşen sunucunun kodu /start'ta yanar.
