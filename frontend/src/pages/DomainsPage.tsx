@@ -82,19 +82,19 @@ function SiteAc({ ad, ssl }: { ad: string; ssl?: boolean }) {
 // Ekran genişliği değil, tablonun gerçekten sahip olduğu alan ölçülür: sol rayın + alt menünün
 // (Domainler/Bayiler) yediği ~316px düşüldükten sonra kalan genişlik. Gizleme yalnız masaüstü
 // tablo kipinde (lg+) geçerlidir; mobil kartta tüm alanlar zaten alt alta gösterilir.
-// Önem sırası (önce gizlenen): Oluşturulma > PHP > Sistem kullanıcısı > Disk > Kullanıcı (sahip) > Plan.
+// Önem sırası (önce gizlenen): Oluşturulma > Sistem kullanıcısı > Disk > Kullanıcı (sahip) > Plan.
 // Eşik = o sütun kümesinin EN KÖTÜ durumda (TR/EN etiketleri, uzun adlar kırpılma sınırında)
 // ihtiyaç duyduğu en dar kapsayıcı genişliği (ölçüm: sütun taban genişlikleri toplamı) + ~14px pay.
 // Satır içi "Subdomain" düğmesi kalkıp İşlemler yalnız "Yönet" kaldığından eşikler gevşetildi;
 // taban (onay kutusu+Domain+Durum+İşlemler) ≈525px olduğundan 1024px'de bile taşma payı ≥24px.
+// PHP sütunu kalktı (sürüm domain detayında/araçlarda): Oluşturulma eşiği 1150 -> 1103 (PHP ≈47px). Ölçüm: tüm sütunlar 1074px.
 // `!` zorunlu: T.hucre'nin `lg:table-cell` kuralını sıra bağımsız ezmeli.
 const KOL = {
   plan: '@max-[632px]:lg:hidden!',
   sahip: '@max-[786px]:lg:hidden!',
   disk: '@max-[863px]:lg:hidden!',
   sk: '@max-[1003px]:lg:hidden!',
-  php: '@max-[1050px]:lg:hidden!',
-  olusturulma: '@max-[1150px]:lg:hidden!',
+  olusturulma: '@max-[1103px]:lg:hidden!',
 } as const
 
 function fmtKB(kb: number) {
@@ -727,7 +727,6 @@ export default function DomainsPage() {
                 <th className={`${T.baslik} ${KOL.sk}`}>{cevir("Sistem Kullanıcısı")}</th>
                 {sahipKolonu && <th className={`${T.baslik} ${KOL.sahip}`}>{cevir("Kullanıcı")}</th>}
                 <th className={`${T.baslik} ${KOL.plan}`}>Plan</th>
-                <th className={`${T.baslik} ${KOL.php}`}>PHP</th>
                 <th className={`${T.baslik} ${KOL.disk}`}>Disk</th>
                 <th className={T.baslik}>{cevir("Durum")}</th>
                 <th className={`${T.baslik} ${KOL.olusturulma}`}>{cevir("Oluşturulma")}</th>
@@ -768,9 +767,6 @@ export default function DomainsPage() {
                         : (/—\s*Özel\s*$/.test(d.plan_ad) || d.plan_ad.trim() === cevir("Özel"))
                           ? <Badge title={d.plan_ad} variant="outlined" className="px-2 py-0.5 text-[11px] font-medium">{cevir("Özel")}</Badge>
                           : <span title={d.plan_ad} className="text-slate-700 dark:text-slate-300 inline-block max-w-full lg:max-w-[7rem] truncate align-bottom">{d.plan_ad}</span>}
-                    </td>
-                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.php}`} data-etiket="PHP">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{d.php_surum || '-'}</span>
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(d.boyut_kb)}</span>
@@ -814,9 +810,6 @@ export default function DomainsPage() {
                     )}
                     <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.plan}`} data-etiket="Plan">
                       <span className="text-slate-400 dark:text-slate-500 italic">—</span>
-                    </td>
-                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.php}`} data-etiket="PHP">
-                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{sd.php_surum || '-'}</span>
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
                       <span className="text-slate-300 dark:text-slate-600">—</span>
