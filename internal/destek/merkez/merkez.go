@@ -47,6 +47,9 @@ type Merkez struct {
 
 	sayacMu sync.Mutex
 	sayac   map[string]int64
+
+	unutMu      sync.Mutex
+	unutulanlar map[int64]time.Time // /unutbeni mezar taşı (yalnız bellek, unutmaBekleme)
 }
 
 // Yeni: bağımlılıkları doğrular ve bileşenleri kurar.
@@ -164,8 +167,44 @@ func (m *Merkez) Calistir(ctx context.Context) {
 // Bekle: süren webhook işlemlerinin bitmesini bekler (kapanış/test).
 func (m *Merkez) Bekle() { m.bot.isler.Wait() }
 
+// unutuldu / unutulduMu — /unutbeni mezar taşı: yalnız BELLEKTE, unutmaBekleme süresince. Silme anında
+// uçuşta olan bir işlem (webhook 5 dk'ya kadar sürebilir) silmeden sonra konuşma satırı yazmasın.
+// Diske YAZILMAZ (kimlik kalıcılaşmasın); yeniden eşleştirmede (unutulduKaldir) kalkar.
+const unutmaBekleme = 10 * time.Minute
+
+func (m *Merkez) unutuldu(tg int64) {
+	m.unutMu.Lock()
+	defer m.unutMu.Unlock()
+	if m.unutulanlar == nil {
+		m.unutulanlar = map[int64]time.Time{}
+	}
+	now := m.saat()
+	for k, t := range m.unutulanlar {
+		if now.Sub(t) > unutmaBekleme {
+			delete(m.unutulanlar, k)
+		}
+	}
+	m.unutulanlar[tg] = now
+}
+
+func (m *Merkez) unutulduKaldir(tg int64) {
+	m.unutMu.Lock()
+	delete(m.unutulanlar, tg)
+	m.unutMu.Unlock()
+}
+
+func (m *Merkez) unutulduMu(tg int64) bool {
+	m.unutMu.Lock()
+	defer m.unutMu.Unlock()
+	t, ok := m.unutulanlar[tg]
+	return ok && m.saat().Sub(t) <= unutmaBekleme
+}
+
 // konusmaKaydet: maskeli, kesik (≤4000 rune) konuşma satırı.
 func (m *Merkez) konusmaKaydet(tg int64, sunucu, yon, metin string) {
+	if m.unutulduMu(tg) {
+		return // /unutbeni sonrası uçuştaki işlemin satırı kalıcılaşmaz
+	}
 	satirlar := strings.Split(metin, "\n")
 	satirlar = maske.MaskeleSatirlar(satirlar, maske.Secenek{BilinenSirlar: m.sir.Bilinenler(), IPKirp: true, EpostaMaskele: true})
 	k := KonusmaKaydi{Zaman: m.saat().UTC(), Tg: tgKisa(tg), Sunucu: sunucu, Yon: yon, Metin: maske.KesRune(strings.Join(satirlar, "\n"), 4000)}

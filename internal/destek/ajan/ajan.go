@@ -752,13 +752,21 @@ func (a *Ajan) eslesmeOnayla(ctx context.Context, o *oturum, zk string, m *p.Esl
 
 func (a *Ajan) merkezIptal(ctx context.Context, m *p.BaglantiIptal) {
 	b, err := baglantiKimlikle(ctx, a.DB, m.BaglantiID)
-	if err != nil || b.Durum == durumIptal {
+	if err != nil {
 		return
 	}
-	if iptal.Tek(ctx, a.DB, b.ID, m.Neden, "merkez") {
+	if b.Durum != durumIptal && iptal.Tek(ctx, a.DB, b.ID, m.Neden, "merkez") {
 		a.denetimBot(ctx, b, dBaglantiIptal, "neden="+string(m.Neden)+" kaynak=telegram", true)
 		a.temizleIz(b.Kimlik)
 		a.hubBildirildiIsaretle(ctx, b.ID) // merkez zaten biliyor
+	}
+	// 🔴 KVKK: /unutbeni, kullanıcı ve merkez iptallerinde Telegram kimliği (id, @ad, denetim
+	// dizgeleri) anonimleştirilir — bağlantı zaten 'iptal' olsa da (örn. panelden iptal edilmiş,
+	// merkez ise sonradan unutbeni göndermiş). Denetim satırı yazıldıktan SONRA: yeni satır da silinir.
+	if anonimlestirNeden(m.Neden) {
+		if err := a.anonimlestir(ctx, b); err != nil {
+			log.Printf("destek: Telegram kimliği anonimleştirilemedi (%s): %v", b.Kimlik, err)
+		}
 	}
 }
 

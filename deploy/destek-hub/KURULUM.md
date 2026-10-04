@@ -150,3 +150,44 @@ Kod bellekte tutulur (≤10 dk, tek kullanımlık, sunucu başına 3, toplam 200
   portal (ya da `curl` + Bearer) ile `POST /ic/v1/eslesme-kodu` → `bekleyen_kod` artar → Telegram'da
   `/start <kod>` (`ABCD-EFGH-…` biçimi, küçük harf ve boşluk serbest) → bağlantı doğrudan etkin
   (KVKK portalda alındı; düğme yok) → "sitem açılıyor mu?" → panel "İşlemler" listesinde `site_yokla=ok`.
+
+## 11. KVKK davranışları (maskeleme katmanları, silme, saklama)
+
+> Kod: `internal/maske/` (kurallar), `internal/destek/merkez/{dongu,bot,depo}.go`, `internal/destek/ajan/unutma.go`.
+> Hukuki metinler TASLAKTIR; bu bölüm yalnız **kodun bugünkü davranışını** anlatır.
+
+### 11.1 Maskeleme katmanları
+
+| Katman | Nerede | Ne maskelenir |
+|---|---|---|
+| Kullanıcı metni | Hub, **ilk işlem** (`Bot.destekIsle` → `Merkez.maskeliKullaniciMetni`); komutlar (`/start KOD` …) bundan önce ayrılır, maskelenmez | bilinen sırlar, sır desenleri (parola/anahtar/jeton/özel anahtar/DSN/Bearer/JWT…), **T.C. kimlik no** (11 hane + resmi sağlama), **IBAN** (ISO 13616 mod-97; TR için 26 hane), **kart** (13–19 hane, Luhn, boşluk/tire), **telefon** (TR: `+90`/`0090`/`0`+10 hane/`5xx xxx xx xx`; `+` ile başlayan uluslararası 8–15 hane), **"şifrem …/parolam …/password …"** ifadeleri, e-posta (yerel kısım `a***`, **alan adı kalır**), IPv4 /24 ve IPv6 /48 |
+| Araç sonucu — ajan | Müşteri sunucusu (`arac`, `ajan`) | sırlar + IP/e-posta/ev dizini (mevcut) + sağlamalı tanımlayıcılar |
+| Araç sonucu — hub (2. geçiş) | `Merkez.aracSonucuMaskele`, `GuvenilmezSar`'dan **önce** | bilinen sırlar, sır desenleri, T.C. no/IBAN/kart. **Telefon, IP, e-posta, "şifrem" kuralları UYGULANMAZ** (port/PID/IP teşhisi bozulmasın) |
+| Konuşma kaydı, insan devri | Hub | Kullanıcı metni zaten maskeli gelir; ayrıca mevcut satır maskesi |
+| Model çıkış süzgeci | Hub | (mevcut, değişmedi) |
+
+Maskeleme belirlenimci ve idempotenttir. Önce maske, **sonra** 4000 rune kesmesi (kesme sırrı bölüp maskeyi kaçıramaz).
+**Maskelenmeyenler (bilinen sınır):** ad-soyad, adres, alan adları, 11 haneli ama sağlaması geçmeyen sayılar, boşlukla bölünmüş T.C. no, noktalı telefon (IP/sürümle çakışır).
+
+### 11.2 `/unutbeni` — silme ve anonimleştirme
+
+**Hub'da SİLİNİR** (tek işlemde, `DosyaDepo.KullaniciUnut`): `durum.json` içindeki kullanıcı tercihi ve **tüm** bağlantılar; `konusma/*.jsonl` içinde kullanıcıya ait **tüm satırlar** (her gün dosyası atomik yeniden yazılır); bellek oturumları; bekleyen eşleştirme kayıtları; hız sayaçları. Silme anında uçuşta olan işlem sonradan satır ekleyemesin diye 10 dk'lık **yalnız bellek** mezar taşı tutulur (diske yazılmaz; yeniden eşleştirmede kalkar).
+
+**Ajanda (sunucu DB) ANONİMLEŞTİRİLİR** — silinmez: `destek_baglantilari.tg_user_id → 0`, `tg_kullanici_adi → ''` (şema `tg_user_id NOT NULL`, tekillik yok → **yeni göç gerekmedi**); `audit_log.actor_username` ve `target` içindeki `tg:<kısa>` → `tg:silindi`. Aynı kullanıcının önceden iptal olmuş satırları da temizlenir. Ödünleşim: **güvenlik denetim izi "ne yapıldı"yı korur, "kim (hangi Telegram hesabı)"ı yitirir.** Tetik: `BaglantiIptal` nedeni `unutbeni`, `kullanici` veya `merkez`.
+
+**Çevrimdışı ajan:** hub kaydı hemen silinir; ajan yeniden bağlanınca bağlantıyı bildirir, hub'da karşılığı olmadığı için `BaglantiIptal{merkez}` döner ve anonimleştirme **o anda tamamlanır**. Bot yanıtı iki durumu ayrı söyler (`unut_tamam`, `unut_tamam_bekliyor`) ve silinemeyenleri sayar.
+
+**Silinmeyenler:** Telegram sohbet geçmişi (bot silemez), insan devrinde destek grubuna giden mesaj, Anthropic/Telegram tarafı, nginx/journald günlükleri (tg **özeti** içerebilir), portal onay kayıtları (`destek_kvkk_kabul`, değiştirilemez — ayrı karar), `audit_log` satırlarının kendisi (yalnız Telegram kimliği alanları anonimleşir).
+
+### 11.3 Saklama süreleri (kodun bugünkü değeri)
+
+| Veri | Süre |
+|---|---|
+| Hub konuşma kaydı (maskeli) | `konusma_saklama_gun` (≤30 gün), gün dosyası bütünüyle budanır |
+| Ajan iş kayıtları (`destek_islemleri`) | 180 gün |
+| İptal edilmiş bağlantı satırındaki Telegram kimliği | **30 gün** sonra süpürge anonimleştirir (yalnız bağlantı satırı; `audit_log`'a dokunmaz) |
+| `audit_log` | Bu modül süre koymaz (panel politikası) |
+
+### 11.4 Bot KVKK metni sürümü
+
+Bot içi metin (`metinler["kvkk"]`) kendi sürüm etiketini taşır (`KvkkMetinSurumu`, şimdi `taslak-1`); `TestKvkkMetinSurumuMetinleEsit` metin ile sabit ayrışırsa düşer. Telegram düğmesiyle alınan kabul (yalnız portal onayı olmayan **eski** kayıtlarda mümkün) artık `kvkk_kaynak=telegram`, `kvkk_surum`, zaman damgası yazar. TODO: portal `taslak-2` kesinleşince bot metni portalla eşitlenir.

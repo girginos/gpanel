@@ -316,7 +316,8 @@ func TestKVKKTelegramDugmesiPortalOnaysizdaKalir(t *testing.T) {
 	}
 	o.callback(t, tTg, veri)
 	got, _ := o.depo.BaglantiAl(b.BaglantiID)
-	if got.KVKKKabul.IsZero() || got.KVKKKaynak != "" {
+	// KVKK: Telegram düğmesiyle kabul de portal yolu gibi kaynak + metin sürümü + zaman kaydeder.
+	if got.KVKKKabul.IsZero() || got.KVKKKaynak != KvkkKaynakTelegram || got.KVKKSurum != KvkkMetinSurumu {
 		t.Fatalf("Telegram kabulü kaydı: %+v", got)
 	}
 }
