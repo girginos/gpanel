@@ -11,7 +11,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/store/auth'
 import { goreliZaman } from '@/lib/bildirim'
 import { Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
@@ -25,8 +24,6 @@ import { pt } from './ceviri'
 type KotaVeri = { esik: number; toplam: number; disk_olcum: string; hesaplar: { id: number; alan_adi: string; metrik: 'disk' | 'trafik'; yuzde: number; kullanim_mb: number; limit_mb: number }[] }
 type SSLVeri = { doldu: number; yakin: number; sslsiz: number; son_tarama: string; hesaplar: { id: number; alan_adi: string; kalan_gun: number }[] }
 type AskiVeri = { toplam: number; hesaplar: { id: number; alan_adi: string; kaynak: string; zaman: string }[] }
-type IsSatir = { id: number; tur: string; durum: string; toplam: number; basarili: number; basarisiz: number; zaman: string }
-type IslerVeri = { tasima: IsSatir[]; toplu?: IsSatir[]; yedek: { planli: number; geciken: number; hata_7gun?: number; isler?: IsSatir[] } }
 type WebsecVeri = { sayim: Record<'critical' | 'high' | 'medium' | 'low', number>; son_tarama: string; son: { domain_id: number; alan_adi: string; paket: string; surum: string; cve: string; onem: string; duzeltme: string; ilk: string }[] }
 
 // Kart başına gösterilen en çok satır (sabit; fazlası "Tümünü gör" ile).
@@ -34,7 +31,6 @@ const N_KOTA = 3
 const N_SSL = 4
 const N_ASKI = 4
 const N_WEBSEC = 4
-const N_IS = 3
 
 const LINK = cx('block min-w-0 truncate rounded font-medium text-gray-900 hover:underline dark:text-dark-50', ODAK)
 const SATIR_AYRAC = 'divide-y divide-gray-100 dark:divide-dark-600'
@@ -97,38 +93,6 @@ function Sayac({ ad, deger, ton }: { ad: string; deger: number; ton?: 'error' | 
     <div className="flex h-16 min-w-0 flex-col justify-between rounded-md bg-gray-50 px-2.5 py-2 dark:bg-dark-800">
       <div className="line-clamp-2 text-[11px] leading-tight text-gray-500 dark:text-dark-300" title={ad}>{ad}</div>
       <div className={cx('text-lg font-semibold leading-none tabular-nums', renk)}>{deger}</div>
-    </div>
-  )
-}
-
-const DURUM_TON: Record<string, string> = {
-  tamam: 'bg-success/10 text-success', hata: 'bg-error/10 text-error', kismi: 'bg-warning/10 text-warning',
-  kesildi: 'bg-warning/10 text-warning', iptal: 'bg-gray-200/60 text-gray-600 dark:bg-dark-500/50 dark:text-dark-200',
-}
-function DurumRozeti({ durum }: { durum: string }) {
-  return <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium', DURUM_TON[durum] || 'bg-info/10 text-info')}>{pt(durum)}</span>
-}
-
-function IsListesi({ baslik, satirlar, bos, yol }: { baslik: string; satirlar: IsSatir[]; bos: string; yol?: string }) {
-  const gorunen = satirlar.slice(0, N_IS)
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 flex h-5 items-center justify-between text-xs font-medium text-gray-600 dark:text-dark-200">
-        <span className="truncate">{baslik}</span>
-        {yol && satirlar.length > 0 && <Link to={yol} className={cx('rounded text-primary-600 hover:underline dark:text-primary-400', ODAK)} aria-label={baslik} title={satirlar.length > N_IS ? pt('{0} kayıt daha', satirlar.length - N_IS) : baslik}><Ikon d={I.ileri} className="size-3.5" /></Link>}
-      </div>
-      {gorunen.length === 0 ? <p className="text-xs text-gray-400 dark:text-dark-300">{bos}</p> : (
-        <ul className={SATIR_AYRAC}>
-          {gorunen.map((s) => (
-            <li key={s.id} className="flex h-8 items-center gap-2 text-xs">
-              <span className="tabular-nums text-gray-400 dark:text-dark-300">#{s.id}</span>
-              <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-dark-100" title={s.tur}>{s.tur}</span>
-              <span className="shrink-0 tabular-nums text-gray-500 dark:text-dark-300">{pt('{0}/{1} hesap', s.basarili, s.toplam)}</span>
-              <DurumRozeti durum={s.durum} />
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   )
 }
@@ -227,39 +191,6 @@ function AskidaKarti() {
   )
 }
 
-function IslerKarti({ yonetici }: { yonetici: boolean }) {
-  const d = useWidget<IslerVeri>('isler')
-  return (
-    <WidgetKabugu baslik={pt('Taşıma ve yedek işleri')} ikon={I.tasi} d={d} yol={yonetici ? '/backup-yonetimi' : '/araclar/tasima'}>
-      {(v) => {
-        const yedekKpi = (
-          <div>
-            <div className="mb-1 flex h-5 items-center text-xs font-medium text-gray-600 dark:text-dark-200">{pt('Yedek')}</div>
-            <div className="grid grid-cols-3 gap-2">
-              <Sayac ad={pt('Planlı yedekli hesap')} deger={v.yedek.planli} />
-              <Sayac ad={pt('Geciken yedek')} deger={v.yedek.geciken} ton="warning" />
-              {v.yedek.hata_7gun !== undefined && <Sayac ad={pt('Son 7 günde yedek hatası')} deger={v.yedek.hata_7gun} ton="error" />}
-            </div>
-          </div>
-        )
-        const tasima = <IsListesi baslik={pt('Son taşımalar')} satirlar={v.tasima} bos={pt('Taşıma işi yok')} yol="/araclar/tasima" />
-        // Kart tam genişlikte çizilir (ızgarada geniş hücre); iç yerleşim KAP genişliğine göre:
-        // yönetici → KPI şeridi üstte + 3 eşit liste sütunu; bayi → taşıma | yedek.
-        return yonetici ? (
-          <div className="grid grid-cols-1 gap-x-6 gap-y-4 @3xl:grid-cols-3">
-            <div className="@3xl:col-span-3 @3xl:max-w-xl">{yedekKpi}</div>
-            {tasima}
-            {v.yedek.isler && <IsListesi baslik={pt('Son yedek işleri')} satirlar={v.yedek.isler} bos={pt('Yedek işi yok')} yol="/backup-yonetimi" />}
-            {v.toplu && <IsListesi baslik={pt('Son toplu işlemler')} satirlar={v.toplu} bos={pt('Toplu işlem yok')} />}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-x-6 gap-y-4 @3xl:grid-cols-2">{tasima}{yedekKpi}</div>
-        )
-      }}
-    </WidgetKabugu>
-  )
-}
-
 const ONEM: [keyof WebsecVeri['sayim'], string, 'error' | 'warning' | 'info' | undefined][] = [
   ['critical', 'Kritik', 'error'], ['high', 'Yüksek', 'warning'], ['medium', 'Orta', 'info'], ['low', 'Düşük', undefined],
 ]
@@ -296,17 +227,14 @@ function WebsecKarti() {
   )
 }
 
-// PanoWidgetlari — ızgara: mobil 1 sütun, md 2, xl 3. Varsayılan (6 widget) düzen
-// dikdörtgen dolar: eğilim 2 sütun geniş, işler kartı tam satır; böylece md'de
-// (2+1+1 / 1+1 / 2) ve xl'de (2+1 / 1+1+1 / 3) boş hücre kalmaz. Satırdaki kartlar
-// eşit yükseklik (stretch). Yönetici ek olarak sunucu geneli yedek işlerini ve
-// toplu işlemleri görür (bayide kaynak yok). `gizli`: kapalı widget kimlikleri —
-// geniş hücreler bırakılır, ızgara 1'lik hücrelerle yeniden akar ve son satırdaki
-// artan kart(lar) satırı doldurur (boşluk kalmaz).
-export type PanoWidgetId = 'egilim' | 'kota' | 'ssl' | 'askida' | 'isler' | 'websec'
+// PanoWidgetlari — ızgara: mobil 1 sütun, md 2, xl 3. Varsayılan (5 widget) düzen
+// dikdörtgen dolar: eğilim 2 sütun geniş; md'de (2 / 1+1 / 1+1) ve xl'de
+// (2+1 / 1+1+1) boş hücre kalmaz. Satırdaki kartlar eşit yükseklik (stretch).
+// `gizli`: kapalı widget kimlikleri — geniş hücre bırakılır, ızgara 1'lik
+// hücrelerle yeniden akar ve son satırdaki artan kart(lar) satırı doldurur.
+export type PanoWidgetId = 'egilim' | 'kota' | 'ssl' | 'askida' | 'websec'
 export default function PanoWidgetlari({ gizli = [] }: { gizli?: PanoWidgetId[] }) {
   useTranslation()
-  const yonetici = useAuth((s) => s.kullanici?.rol === 'admin')
   const genis = gizli.length === 0
   const kartlar: [PanoWidgetId, ReactNode, string][] = [
     ['egilim', <EgilimKarti key="egilim" />, 'md:col-span-2 xl:col-span-2'],
@@ -314,7 +242,6 @@ export default function PanoWidgetlari({ gizli = [] }: { gizli?: PanoWidgetId[] 
     ['kota', <KotaKarti key="kota" />, ''],
     ['askida', <AskidaKarti key="askida" />, ''],
     ['websec', <WebsecKarti key="websec" />, ''],
-    ['isler', <IslerKarti key="isler" yonetici={yonetici} />, 'md:col-span-2 xl:col-span-3'],
   ]
   return (
     <section aria-label={pt('Pano istatistikleri')} data-pano-izgara
