@@ -424,3 +424,22 @@ func (k *kayanPencere) olaylarVar(anahtar string) bool {
 	_, b := k.olaylar["~"+anahtar]
 	return a || b
 }
+
+// Önce maske, sonra kesme: sınır bir tanımlayıcıyı ikiye bölüp maskeyi kaçıramaz;
+// hub'ın bilinen sırları kullanıcı metninde de birebir maskelenir.
+func TestKVKKMaskeSonraKesme_VeBilinenSirlar(t *testing.T) {
+	o := yeniOrtam(t, nil)
+	tc, _, _, _, _, _ := kvGizliler()
+	got := o.m.maskeliKullaniciMetni(strings.Repeat("a", 3995) + " " + tc + " son")
+	if strings.Contains(got, tc[:4]) {
+		t.Fatalf("kesme sınırı T.C. no'yu böldü, ön ek sızdı: ...%q", got[len(got)-12:])
+	}
+	if n := len([]rune(got)); n > 4001 { // KesRune kesilince "…" ekler
+		t.Fatalf("4000 rune (+ellipsis) sınırı aşıldı: %d", n)
+	}
+	// bilinen sır (portal iç anahtarı) kullanıcı mesajına yapıştırılırsa
+	got = o.m.maskeliKullaniciMetni("şunu kullan: " + tPortalIc + " tamam")
+	if strings.Contains(got, tPortalIc) {
+		t.Fatalf("bilinen sır kullanıcı metninde maskelenmedi: %q", got)
+	}
+}
