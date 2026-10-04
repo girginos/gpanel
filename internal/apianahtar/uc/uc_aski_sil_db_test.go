@@ -9,7 +9,6 @@ package uc
 // hiçbir domaine dokunmaz (sistem adımı çalışmaz).
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,18 +17,15 @@ import (
 	"girginospanel/internal/apianahtar"
 )
 
-func listeDurumu(t *testing.T, govde string, id int64) (string, bool) {
+// kayitDurumu: anahtarın görünen durumu + sahibi askıda mı (depodan; askıdaki bayinin
+// JWT'si düşer, kök de bayi anahtarlarını arayüzden listeleyemez).
+func kayitDurumu(t *testing.T, id int64) (string, bool) {
 	t.Helper()
-	var l struct{ Anahtarlar []Gorunum }
-	if err := json.Unmarshal([]byte(govde), &l); err != nil {
-		t.Fatalf("liste: %v %s", err, govde)
+	k, err := apianahtar.IDGetir(t.Context(), ucDB, id)
+	if err != nil || k == nil {
+		t.Fatalf("kayıt okunamadı: %v", err)
 	}
-	for _, g := range l.Anahtarlar {
-		if g.ID == id {
-			return g.Durum, g.SahipAskida
-		}
-	}
-	return "", false
+	return k.GorunenDurum(time.Now().Unix()), k.SahipAskida()
 }
 
 func TestAPIAnahtarBayiAskiAskidaKalir(t *testing.T) {
@@ -70,8 +66,7 @@ func TestAPIAnahtarBayiAskiAskidaKalir(t *testing.T) {
 		t.Fatalf("ret denetimi seyreltilmeli: %d", redKaydi)
 	}
 	// Kök listesi: "askida" (iptal değil).
-	s = ucIstek(t, h, "GET", "/api/v1/api-anahtarlari?sahip=bayiler", jK, nil)
-	if durum, askida := listeDurumu(t, s.govde, d.Kayit.ID); durum != "askida" || !askida {
+	if durum, askida := kayitDurumu(t, d.Kayit.ID); durum != "askida" || !askida {
 		t.Fatalf("kök bayi anahtarları listesinde askıda görünmeli: durum=%q sahip_askida=%v", durum, askida)
 	}
 	// Kök anahtarı etkilenmez.
@@ -87,8 +82,7 @@ func TestAPIAnahtarBayiAskiAskidaKalir(t *testing.T) {
 		t.Fatalf("askıdan alınan bayinin anahtarı yeniden çalışmalı: %d %s", s.kod, s.govde)
 	}
 	// (bayinin JWT'si askıda düşürüldü — listeyi kök okur)
-	s = ucIstek(t, h, "GET", "/api/v1/api-anahtarlari?sahip=bayiler", jK, nil)
-	if durum, askida := listeDurumu(t, s.govde, d.Kayit.ID); durum != "etkin" || askida {
+	if durum, askida := kayitDurumu(t, d.Kayit.ID); durum != "etkin" || askida {
 		t.Fatalf("askıdan sonra etkin görünmeli: %q %v", durum, askida)
 	}
 
@@ -108,8 +102,7 @@ func TestAPIAnahtarBayiAskiAskidaKalir(t *testing.T) {
 	if s := ucIstek(t, h, "GET", "/api/v1/domains", d.Anahtar, nil); s.kod != 401 {
 		t.Fatalf("iptal edilmiş anahtar askı döngüsüyle geri gelmemeli: %d", s.kod)
 	}
-	s = ucIstek(t, h, "GET", "/api/v1/api-anahtarlari?sahip=bayiler", jK, nil)
-	if durum, _ := listeDurumu(t, s.govde, d.Kayit.ID); durum != "iptal" {
+	if durum, _ := kayitDurumu(t, d.Kayit.ID); durum != "iptal" {
 		t.Fatalf("iptal edilmiş anahtar listede iptal görünmeli: %q", durum)
 	}
 }
@@ -190,9 +183,15 @@ func TestAPIAnahtarKaliciSil(t *testing.T) {
 		t.Fatalf("silinen anahtar 401 olmalı: %d", s.kod)
 	}
 
-	// ── Kök bayi anahtarını siler (etkinse onayla) ──
-	if s := ucIstek(t, h, "DELETE", yol(b.Kayit.ID), jK, map[string]any{"onay_ad": "WHMCS-B"}); s.kod != 200 || satirVar(b.Kayit.ID) {
-		t.Fatalf("kök bayi anahtarını silmeli: %d %s", s.kod, s.govde)
+	// ── Kök bayi anahtarını SİLEMEZ (404, satır kalır); sahibi kendisi siler ──
+	if s := ucIstek(t, h, "DELETE", yol(b.Kayit.ID), jK, map[string]any{"onay_ad": "WHMCS-B"}); s.kod != 404 || !satirVar(b.Kayit.ID) {
+		t.Fatalf("kök bayi anahtarını silememeli: %d %s", s.kod, s.govde)
+	}
+	if s := ucIstek(t, h, "DELETE", yol(b.Kayit.ID), jK, nil); s.kod != 404 || strings.Contains(s.govde, "anahtar_etkin") {
+		t.Fatalf("kök için yabancı anahtar durumu sızmamalı: %d %s", s.kod, s.govde)
+	}
+	if s := ucIstek(t, h, "DELETE", yol(b.Kayit.ID), jB, map[string]any{"onay_ad": "WHMCS-B"}); s.kod != 200 || satirVar(b.Kayit.ID) {
+		t.Fatalf("bayi kendi anahtarını silmeli: %d %s", s.kod, s.govde)
 	}
 
 	// ── Denetim: her silme api_anahtar.sil; oluşturma geçmişi SİLİNMEZ ──

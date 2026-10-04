@@ -1,5 +1,5 @@
-// API Anahtarları (D4) — kök ve bayi. Kök: kendi anahtarları + bayi anahtarları
-// (listeleme/iptal/silme). Bayi: yalnız kendi anahtarları (kapsam sunucuda).
+// API Anahtarları (D4) — kök ve bayi. Herkes YALNIZ kendi anahtarlarını görür
+// (kapsam sunucuda, oturumdan; kökte de bayi anahtarları listelenmez).
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -9,7 +9,6 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
 import { apiHata } from '@/lib/api'
-import { useRol, yoneticiMi } from '@/lib/rol'
 import {
   anahtarIptal, anahtarKatalog, anahtarListe, anahtarSil,
   type ApiAnahtari, type Katalog, type TekKezYanit,
@@ -18,8 +17,6 @@ import AnahtarOlusturModal from '@/components/apianahtar/AnahtarOlusturModal'
 import AnahtarGosterModal from '@/components/apianahtar/AnahtarGosterModal'
 import AnahtarYenileModal from '@/components/apianahtar/AnahtarYenileModal'
 import { cevir, cevirT, tarih } from '@/components/apianahtar/ceviri'
-
-type Sekme = 'benim' | 'bayiler'
 
 function DurumRozeti({ k }: { k: ApiAnahtari }) {
   switch (k.durum) {
@@ -73,11 +70,8 @@ function IzinRozetleri({ k, katalog }: { k: ApiAnahtari; katalog: Katalog | null
 
 export default function ApiAnahtarlariPage() {
   useTranslation()
-  const rol = useRol()
-  const kok = yoneticiMi(rol)
   const toast = useToast()
   const dialog = useDialog()
-  const [sekme, setSekme] = useState<Sekme>('benim')
   const [liste, setListe] = useState<ApiAnahtari[]>([])
   const [katalog, setKatalog] = useState<Katalog | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
@@ -91,13 +85,13 @@ export default function ApiAnahtarlariPage() {
   const yukle = useCallback(async () => {
     setYukleniyor(true); setHata(null)
     try {
-      setListe(await anahtarListe(sekme === 'bayiler'))
+      setListe(await anahtarListe())
     } catch (e) {
       setHata(apiHata(e, cevir('Liste okunamadı')))
     } finally {
       setYukleniyor(false)
     }
-  }, [sekme])
+  }, [])
 
   useEffect(() => { void yukle() }, [yukle])
   useEffect(() => { anahtarKatalog().then(setKatalog).catch(() => setKatalog(null)) }, [])
@@ -160,7 +154,6 @@ export default function ApiAnahtarlariPage() {
     void yukle()
   }
 
-  const kendi = sekme === 'benim'
   // etkin: anahtar kaydı geçerli (askıdaki bayinin anahtarı da — iptal edilebilir,
   // silmek için ad onayı ister).
   const etkin = (k: ApiAnahtari) => k.durum === 'etkin' || k.durum === 'gecis' || k.durum === 'askida'
@@ -169,7 +162,7 @@ export default function ApiAnahtarlariPage() {
 
   const eylemler = (k: ApiAnahtari) => (
     <div className="flex flex-wrap justify-end gap-1.5">
-      {kendi && k.durum === 'etkin' && (
+      {k.durum === 'etkin' && (
         <Button boyut="sm" variant="outlined" ikon={I.yenile} onClick={() => setYenileHedef(k)}>{cevir('Döndür')}</Button>
       )}
       {etkin(k) && (
@@ -192,25 +185,6 @@ export default function ApiAnahtarlariPage() {
         <Button color="primary" ikon={I.arti} onClick={() => setOlusturAcik(true)} disabled={!katalog} className="shrink-0">{cevir('Yeni anahtar')}</Button>
       </div>
 
-      {kok && (
-        <div className="mb-4 inline-flex rounded-lg bg-slate-100 p-1 dark:bg-dark-700" role="tablist">
-          {(['benim', 'bayiler'] as Sekme[]).map((s) => (
-            <button
-              key={s}
-              role="tab"
-              aria-selected={sekme === s}
-              onClick={() => setSekme(s)}
-              className={
-                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
-                (sekme === s ? 'bg-white text-slate-900 shadow-sm dark:bg-dark-500 dark:text-dark-50' : 'text-slate-600 hover:text-slate-900 dark:text-dark-200 dark:hover:text-dark-50')
-              }
-            >
-              {s === 'benim' ? cevir('Anahtarlarım') : cevir('Bayi anahtarları')}
-            </button>
-          ))}
-        </div>
-      )}
-
       {hata && <UyariKutusu ton="tehlike" className="mb-4">{hata}</UyariKutusu>}
 
       {yukleniyor ? (
@@ -225,7 +199,6 @@ export default function ApiAnahtarlariPage() {
               <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-dark-800 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-3 font-semibold">{cevir('Ad')}</th>
-                  {!kendi && <th className="px-4 py-3 font-semibold">{cevir('Bayi')}</th>}
                   <th className="px-4 py-3 font-semibold">{cevir('İzinler')}</th>
                   <th className="px-4 py-3 font-semibold">{cevir('İzinli IP')}</th>
                   <th className="px-4 py-3 font-semibold">{cevir('Son kullanım')}</th>
@@ -241,7 +214,6 @@ export default function ApiAnahtarlariPage() {
                       <div className="font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
                       <div className="font-mono text-xs text-slate-500 dark:text-dark-300">{k.gosterim}</div>
                     </td>
-                    {!kendi && <td className="px-4 py-3 align-top text-slate-700 dark:text-dark-100">{k.sahip_ad || `#${k.sahip_id}`}</td>}
                     <td className="max-w-xs px-4 py-3 align-top"><IzinRozetleri k={k} katalog={katalog} /></td>
                     <td className="px-4 py-3 align-top font-mono text-xs text-slate-600 dark:text-dark-200">
                       {k.izinli_ipler.length ? k.izinli_ipler.map((ip) => <div key={ip}>{ip}</div>) : <span className="font-sans text-slate-400">{cevir('her IP')}</span>}
@@ -265,7 +237,6 @@ export default function ApiAnahtarlariPage() {
                   <div className="min-w-0">
                     <div className="truncate font-medium text-slate-900 dark:text-dark-50">{k.ad}</div>
                     <div className="break-all font-mono text-xs text-slate-500 dark:text-dark-300">{k.gosterim}</div>
-                    {!kendi && <div className="text-xs text-slate-500">{cevir('Bayi')}: {k.sahip_ad || `#${k.sahip_id}`}</div>}
                   </div>
                   <DurumRozeti k={k} />
                 </div>

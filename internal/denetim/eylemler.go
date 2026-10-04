@@ -72,6 +72,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"api_anahtar.iptal":                {TR: "API anahtarı iptal edildi", EN: "API key revoked"},
 	"api_anahtar.sil":                  {TR: "API anahtarı silindi", EN: "API key deleted"},
 	"api_anahtar.toplu_iptal":          {TR: "Bayinin API anahtarları iptal edildi", EN: "Reseller API keys revoked"},
+	"api_anahtar.capraz_erisim":        {TR: "Başkasının API anahtarına erişim reddedildi", EN: "Access to another user's API key denied"},
 	"api_anahtar.red":                  {TR: "API anahtarı reddedildi", EN: "API key rejected"},
 	"api_anahtar.yeniden_dogrulama":    {TR: "API anahtarı için kimlik doğrulandı", EN: "Re-authenticated for API key"},
 	"hosting.ozel_plan":                {TR: "Özel plan uygulandı", EN: "Custom plan applied"},

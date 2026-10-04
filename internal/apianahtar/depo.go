@@ -153,25 +153,15 @@ func Ekle(ctx context.Context, db *sql.DB, k *Kayit) (int64, error) {
 	return res.LastInsertId()
 }
 
-// Listele: sahipID > 0 → yalnız o sahibin anahtarları; sahipID == TumBayiler →
-// tüm bayi anahtarları (yalnız kök çağırır). İptal edilmişler de döner (iz kalır),
-// en yeniler önce, en çok 500.
-const TumBayiler = int64(-1)
-
-func Listele(ctx context.Context, db *sql.DB, sahipID int64) ([]*Kayit, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	q := `SELECT ` + secimKolonlari + ` FROM api_anahtarlari k LEFT JOIN users u ON u.id = k.sahip_id `
-	switch {
-	case sahipID == TumBayiler:
-		rows, err = db.QueryContext(ctx, q+`WHERE k.sahip_rol='reseller' ORDER BY k.id DESC LIMIT 500`)
-	case sahipID > 0:
-		rows, err = db.QueryContext(ctx, q+`WHERE k.sahip_id=? ORDER BY k.id DESC LIMIT 500`, sahipID)
-	default:
+// Listele: YALNIZ (sahipID, rol) çiftinin anahtarları — başka sahibi listeleyen
+// bir yol YOKTUR. İptal edilmişler de döner (iz kalır), en yeniler önce, en çok 500.
+func Listele(ctx context.Context, db *sql.DB, sahipID int64, rol string) ([]*Kayit, error) {
+	if sahipID <= 0 || rol == "" {
 		return nil, errors.New("geçersiz sahip")
 	}
+	rows, err := db.QueryContext(ctx, `SELECT `+secimKolonlari+` FROM api_anahtarlari k
+		LEFT JOIN users u ON u.id = k.sahip_id
+		WHERE k.sahip_id=? AND k.sahip_rol=? ORDER BY k.id DESC LIMIT 500`, sahipID, rol)
 	if err != nil {
 		return nil, err
 	}

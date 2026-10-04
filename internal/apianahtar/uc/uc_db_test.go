@@ -301,11 +301,12 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	s := ucIstek(t, h, "GET", "/api/v1/api-anahtarlari?sahip=bayiler", jA, nil)
 	var liste struct{ Anahtarlar []map[string]any }
 	_ = json.Unmarshal([]byte(s.govde), &liste)
-	if s.kod != 200 || len(liste.Anahtarlar) != 1 || liste.Anahtarlar[0]["sahip_id"].(float64) != 7 {
+	if s.kod != 200 || len(liste.Anahtarlar) != 1 || liste.Anahtarlar[0]["ad"] != "WHMCS-A" {
 		t.Fatalf("bayi listesi kapsam dışı: %d %s", s.kod, s.govde)
 	}
 	for alan := range liste.Anahtarlar[0] {
-		if alan == "ozet" || alan == "anahtar" {
+		// sahip_* alanları artık hiç dönmez (başkasının anahtarı listede olmadığından anlamsız).
+		if alan == "ozet" || alan == "anahtar" || strings.HasPrefix(alan, "sahip_ad") || alan == "sahip_id" || alan == "sahip_rol" {
 			t.Fatalf("liste yanıtında %q alanı var", alan)
 		}
 	}
@@ -386,15 +387,39 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/yenile", b.Kayit.ID), jA, map[string]any{"parola": "dogru-parola-a"}); s.kod != 404 {
 		t.Fatalf("IDOR: bayi A, B'nin anahtarını döndürme: %d", s.kod)
 	}
-	s = ucIstek(t, h, "GET", "/api/v1/api-anahtarlari?sahip=bayiler", jK, nil)
-	if !strings.Contains(s.govde, "WHMCS-A") || !strings.Contains(s.govde, "WHMCS-B") || !strings.Contains(s.govde, `"sahip_ad":"bayi_b"`) || strings.Contains(s.govde, `"Kok"`) {
-		t.Fatalf("kök bayi anahtarları listesi: %s", s.govde)
+	// 🔴 Kök de bayi anahtarını göremez / döndüremez / iptal edemez (kullanıcı kararı 2026-10-04).
+	for _, yol := range []string{"/api/v1/api-anahtarlari", "/api/v1/api-anahtarlari?sahip=bayiler", "/api/v1/api-anahtarlari?owner=8&user_id=8&sahip_id=8"} {
+		s = ucIstek(t, h, "GET", yol, jK, nil)
+		if s.kod != 200 || strings.Contains(s.govde, "WHMCS-A") || strings.Contains(s.govde, "WHMCS-B") || !strings.Contains(s.govde, `"Kok"`) {
+			t.Fatalf("kök yalnız KENDİ anahtarını görmeli (%s): %s", yol, s.govde)
+		}
 	}
 	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/yenile", b.Kayit.ID), jK, map[string]any{"parola": "kok-parola"}); s.kod != 404 {
-		t.Fatalf("kök bayi anahtarını DÖNDÜREMEZ (gizli sahibinde doğar): %d", s.kod)
+		t.Fatalf("kök bayi anahtarını DÖNDÜREMEZ: %d", s.kod)
 	}
-	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/iptal", b.Kayit.ID), jK, nil); s.kod != 200 {
-		t.Fatalf("kök bayi anahtarını iptal: %d %s", s.kod, s.govde)
+	if s := ucIstek(t, h, "POST", fmt.Sprintf("/api/v1/api-anahtarlari/%d/iptal", b.Kayit.ID), jK, nil); s.kod != 404 {
+		t.Fatalf("kök bayi anahtarını İPTAL EDEMEZ: %d %s", s.kod, s.govde)
+	}
+	if s := ucIstek(t, h, "GET", "/api/v1/domains/43", b.Anahtar, nil); s.kod != 200 {
+		t.Fatalf("reddedilen kök iptali anahtarı etkilememeli: %d", s.kod)
+	}
+	var capraz int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='api_anahtar.capraz_erisim' AND ok=0`).Scan(&capraz)
+	if capraz < 3 {
+		t.Fatalf("reddedilen çapraz erişim denetime yazılmalı: %d", capraz)
+	}
+	// Başka kullanıcıya anahtar OLUŞTURMA yolu yok: gövdedeki sahip alanları yok sayılır.
+	if s := ucIstek(t, h, "POST", "/api/v1/api-anahtarlari", jK, map[string]any{"ad": "sahte", "izinler": []string{"hesap:oku"}, "izinli_ipler": []string{"192.0.2.0/24"}, "parola": "kok-parola", "sahip_id": 8, "owner": "bayi_b", "user_id": 8}); s.kod != 201 {
+		t.Fatalf("oluşturma: %d %s", s.kod, s.govde)
+	}
+	var sahibi int64
+	_ = db.QueryRow(`SELECT sahip_id FROM api_anahtarlari WHERE ad='sahte'`).Scan(&sahibi)
+	if sahibi != 1 {
+		t.Fatalf("anahtar oturumun sahibine yazılmalı (kök=1): %d", sahibi)
+	}
+	// Yönetim akışı (sistem içi): depo iptali hâlâ çalışır; bayi listesinde "yönetim iptali" görünür.
+	if degisti, err := apianahtar.Iptal(t.Context(), db, b.Kayit.ID, 0, 1, "yonetim", time.Now().Unix()); err != nil || !degisti {
+		t.Fatalf("sistem içi iptal: %v %v", degisti, err)
 	}
 	if s := ucIstek(t, h, "GET", "/api/v1/domains/43", b.Anahtar, nil); s.kod != 401 {
 		t.Fatalf("iptal edilen anahtar ilk istekte 401: %d", s.kod)
