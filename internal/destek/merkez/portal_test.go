@@ -381,3 +381,30 @@ func TestPortalBaglantilarVeIptal(t *testing.T) {
 		t.Fatalf("ikinci iptal: %d %v", d, m)
 	}
 }
+
+// Kod verildikten SONRA bilet doğrulaması düşerse (kod hâlâ taze): /start'ta onay ajana GİTMEZ,
+// kullanıcıya lisans doğrulanamadı denir ve kod yanar.
+func TestPortalBiletKodVerildiktenSonraDuserse(t *testing.T) {
+	o := yeniOrtam(t, nil)
+	fp := strings.Repeat("7a", 32)
+	ajan := sahteAjanBaglaOzel(t, o, nil, fp, o.bilet(fp, func(g *bilet.Govde) { g.Bitis = time.Now().Add(5 * time.Minute).Unix() }))
+	kod, ozet := o.kodAl(t, fp, "okuma", 1)
+	simdi := time.Now()
+	o.m.saat = func() time.Time { return simdi.Add(6 * time.Minute) } // kod (10 dk) taze, bilet (5 dk) bitti
+	o.mesaj(t, tTg, "/start "+kod)
+	if !strings.Contains(o.tg.son(tTg), "doğrulanamadığı") {
+		t.Fatalf("kullanıcı mesajı: %q", o.tg.son(tTg))
+	}
+	ajan.mu.Lock()
+	n := len(ajan.eslesmeler)
+	ajan.mu.Unlock()
+	if n != 0 {
+		t.Fatal("doğrulaması düşen sunucuya onay gitti")
+	}
+	o.m.ajan.mu.Lock()
+	_, kaldi := o.m.ajan.kodlar[ozet]
+	o.m.ajan.mu.Unlock()
+	if kaldi {
+		t.Fatal("doğrulaması düşen sunucunun kodu yanmadı")
+	}
+}
