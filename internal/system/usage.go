@@ -477,22 +477,16 @@ func ReadInfo() SystemInfo {
 		c.IP = birinciIP()
 		return c
 	}
-	info := SystemInfo{PanelSurum: PanelSurum, CPUCekirdek: runtime.NumCPU(), Mimari: runtime.GOARCH}
+	info := SystemInfo{PanelSurum: PanelSurum, CPUCekirdek: runtime.NumCPU(), Mimari: mimariAdi(runtime.GOARCH)}
 	info.Hostname, _ = os.Hostname()
 	info.IP = birinciIP()
 	var u syscall.Utsname
 	if err := syscall.Uname(&u); err == nil {
 		info.Kernel = utsToString(u.Release[:])
+		info.Mimari = mimariAdi(utsToString(u.Machine[:]))
 	}
 	if data, err := os.ReadFile("/etc/os-release"); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "PRETTY_NAME=") {
-				v := strings.TrimPrefix(line, "PRETTY_NAME=")
-				v = strings.Trim(v, "\"'")
-				info.OSAdi = v
-				break
-			}
-		}
+		info.OSAdi = osAdiAyikla(string(data))
 	}
 	if f, err := os.Open("/proc/cpuinfo"); err == nil {
 		s := bufio.NewScanner(f)
