@@ -436,6 +436,13 @@ else
   # feature is switched on. Say it out loud instead.
   warn "girginospanel-avajan not in package — antivirus units will not start (203/EXEC)"
 fi
+# Telegram support agent — a SEPARATE service from the panel (so support survives a panel crash).
+# Binary only here; the unit is installed in step 10 and STARTED in step 12 after the panel is up.
+if [ -f "$A/girginospanel-destek-ajan" ]; then
+  install -m 0755 "$A/girginospanel-destek-ajan" /usr/local/bin/girginospanel-destek-ajan || die "girginospanel-destek-ajan could not be installed"
+else
+  warn "girginospanel-destek-ajan not in package — Telegram support agent will not start"
+fi
 # ops tool + signon
 # 🔴 Two separate targets, two separate meanings:
 #   /usr/local/bin        -> COMMANDS the operator runs manually
@@ -661,6 +668,12 @@ for u in girginospanel-db-backup.service girginospanel-db-backup.timer; do
     warn "$u not in package — the panel DB will NOT be backed up daily"
   fi
 done
+if [ -f "$A/systemd/girginospanel-destek-ajan.service" ]; then
+  # 🔴 NOT enabled/started here: it starts in step 12 only AFTER the panel is up and swapped
+  # (an old panel with the embedded agent and this service must never both connect to the hub).
+  install -m 0644 "$A/systemd/girginospanel-destek-ajan.service" /etc/systemd/system/girginospanel-destek-ajan.service \
+    || die "girginospanel-destek-ajan.service could not be installed"
+fi
 systemctl daemon-reload
 
 # ── Antivirus units: resource slice + monitor + scheduled scan ──
@@ -978,6 +991,18 @@ fi
 systemctl restart nginx >/dev/null 2>&1
 if ! systemctl is-active --quiet girginospanel; then
   journalctl -u girginospanel --no-pager -n 20; die "panel did not start"
+fi
+# Telegram support agent: separate service, started AFTER the panel is up (see step 10).
+# Its failure never fails the install (the panel does not depend on it).
+if [ -f /etc/systemd/system/girginospanel-destek-ajan.service ] && [ -x /usr/local/bin/girginospanel-destek-ajan ]; then
+  systemctl enable girginospanel-destek-ajan >/dev/null 2>&1
+  systemctl restart girginospanel-destek-ajan >/dev/null 2>&1
+  sleep 2
+  if systemctl is-active --quiet girginospanel-destek-ajan; then
+    ok "girginospanel-destek-ajan ACTIVE (separate from the panel)"
+  else
+    warn "girginospanel-destek-ajan did not start — journalctl -u girginospanel-destek-ajan -n 40 (panel is unaffected)"
+  fi
 fi
 # "up" is NOT enough — prove the RUNNING PROCESS is the binary we installed.
 # When the binary is replaced without restart /proc/PID/exe shows the OLD inode

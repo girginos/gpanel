@@ -36,6 +36,23 @@ else
   go build -o assets/girginospanel-server ./cmd/server
 fi
 
+# 🔴 Telegram destek ajanı: panelden AYRI hizmet (girginospanel-destek-ajan.service; ExecStart
+# /usr/local/bin/girginospanel-destek-ajan). Panelle AYNI GOAMD64=v1 + AYNI sürüm damgası
+# (kayit.panel_surumu merkeze bundan gider); eski CPU'lu müşteride "v3 gerekli" ile hiç açılmazsa
+# destek sessizce ölürdü.
+echo "== girginospanel-destek-ajan derleniyor (GOAMD64=$GOAMD64) =="
+# Üretim merkez açık anahtarı (isteğe bağlı): GOSP_DESTEK_MERKEZ_ANAHTAR=<base64url[,..]> verilirse
+# ajana GÖMÜLÜR (ajan artık bağlantıyı bu ikili kurar; yoksa yalnız /etc/girginospanel/destek.json
+# anahtarları geçerlidir ve ajan bağlanmaz — kapalı başarısız).
+DAJ_LDF=""
+[ -n "${GOSP_SURUM:-}" ] && DAJ_LDF="-X girginospanel/internal/surum.Panel=$GOSP_SURUM"
+[ -n "${GOSP_DESTEK_MERKEZ_ANAHTAR:-}" ] && DAJ_LDF="$DAJ_LDF -X girginospanel/internal/destek/ajan.GomuluMerkezAnahtari=$GOSP_DESTEK_MERKEZ_ANAHTAR"
+if [ -n "$DAJ_LDF" ]; then
+  go build -trimpath -ldflags "$DAJ_LDF" -o assets/girginospanel-destek-ajan ./cmd/destek-ajan
+else
+  go build -o assets/girginospanel-destek-ajan ./cmd/destek-ajan
+fi
+
 # 🔴 Eklenti başlatıcısı: systemd birimlerinin ExecStart'ı BUDUR.
 # Panelle AYNI GOAMD64=v1 bayrağıyla derlenmek ZORUNDA — v3 ile derlenseydi
 # eski CPU'lu müşteride eklenti "Exec format" ile hiç açılmazdı ve hata

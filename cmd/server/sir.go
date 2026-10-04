@@ -259,6 +259,12 @@ func sirYenileCLI(ctx context.Context, r *sirrota.Rotator, sv sirServis, args []
 			ekBirim = append(ekBirim, "girginospanel-avizle.service", "girginospanel-avsurec.service")
 		}
 	}
+	if len(s.Yenilenen) > 0 {
+		// Telegram destek ajanı AYRI hizmettir: sırları (DB DSN'i, maske listesi) kendi LoadCredential
+		// kopyasında tutar; yenilenen sırlarla yeniden açılmazsa DB bağlantısı kopar (try-restart:
+		// çalışmıyorsa dokunulmaz).
+		ekBirim = append(ekBirim, "girginospanel-destek-ajan.service")
+	}
 	if len(ekBirim) > 0 {
 		sv.DeneYenidenBaslat(ctx, ekBirim...)
 	}

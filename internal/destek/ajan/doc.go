@@ -1,6 +1,12 @@
-// Package ajan — GirginOSPanel Telegram destek botunun PANEL İÇİ ajanı (Faz 1).
+// Package ajan — GirginOSPanel Telegram destek botunun ajanı (Faz 1; Faz 3'te panelden AYRI süreç).
 //
-// Görevler:
+// 🔴 Panel ve ajan AYRI süreçlerdir: ajan cmd/destek-ajan (girginospanel-destek-ajan.service)
+// içinde çalışır (Baslat), panel yalnız arayüz uçlarını (Rotalar, DB), denetim-yalnız iptal
+// kancasını (PanelKancasiKur) kullanır ve ajanı ÇALIŞTIRMAZ. Aralarındaki tek bağ veritabanıdır
+// (izleme.go: ayar/iptal yoklaması ≤3 sn, nabız ≤10 sn) + panel-bağımlı araçlar için özel köprü
+// (internal/destek/kopru).
+//
+// Görevler (ajan süreci):
 //   - Cihaz kimliği: Ed25519 anahtar (ilk açılışta üretilir, 0600 + gizli.SaklaBagli).
 //   - Bağlantı döngüsü: modül açıksa merkeze (bot.girginos.io) DIŞA bağlanır — WSS
 //     (protokol.WSSYolu + alt protokol), kurulamazsa uzun yoklama; üstel geri çekilme
@@ -18,5 +24,5 @@
 //     Merkezin iddiası kapsamı DEĞİŞTİRMEZ (yerel otorite).
 //
 // Araç yürütücüsü ayrı pakettedir (internal/destek/arac); burada yalnız arayüzü
-// (Yurutucu) tanımlıdır ve main.go bağlar. Bağlı değilse iş emri "arac_yok" ile reddedilir.
+// (Yurutucu) tanımlıdır ve cmd/destek-ajan bağlar. Bağlı değilse iş emri "arac_yok" ile reddedilir.
 package ajan

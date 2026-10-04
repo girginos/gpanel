@@ -1,0 +1,67 @@
+[Unit]
+Description=GirginOSPanel Telegram destek ajani (panelden BAGIMSIZ)
+After=network-online.target mariadb.service
+Wants=network-online.target mariadb.service
+# 🔴 BILINCLI: girginospanel.service'e Requires=/BindsTo=/PartOf= YOK. Destegin varlik sebebi panel
+# cokse/durdurulsa/guncellenirken bile botun sunucuyu teshis edebilmesidir; bagimlilik bu
+# amaci yok ederdi. Panel-bagimli araclar ozel kopruden (/run/girginospanel/destek-kopru.sock)
+# gider; kopru yoksa araclar panel_yanit_vermiyor doner, bagimsiz araclar calismaya devam eder.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# 🔴 SIRLAR ORTAMA GIRMEZ (panel ile AYNI yontem): DB DSN'i + maske listesi icin panelin env dosyasi
+# LoadCredential ile verilir (/run/credentials/girginospanel-destek-ajan.service/panel-env, 0400).
+# EnvironmentFile KULLANMAYIN.
+LoadCredential=panel-env:/etc/girginospanel/env
+ExecStartPre=+/usr/bin/install -d -m 0700 -o root -g root /run/girginospanel
+ExecStart=/usr/local/bin/girginospanel-destek-ajan
+Restart=always
+RestartSec=5
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=girginospanel-destek-ajan
+
+# ── KISITLAR ─────────────────────────────────────────────────────────────
+# Neden kok (root)? Panelden bagimsiz araclar kok kimligiyle komut calistirir: `nginx -t`,
+# `systemctl is-active`, `journalctl`, `girginospanel-dogrula --json`, `girginospanel-repair --dry-run`,
+# kiraci kimliginde `runuser -u <sk>` (log/disk okuma). Bunlari ayrıcalıksiz kullanici yapamaz;
+# ayrıcalık CapabilityBoundingSet ile asgariye indirilir (tam kok DEGIL).
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_KILL CAP_AUDIT_WRITE CAP_SYS_RESOURCE
+# SETUID/SETGID: runuser kiraci kimligine duser. DAC_READ_SEARCH/DAC_OVERRIDE: /home/<sk>, /var/log, journal
+# okuma; nginx -t gecici dizin. CHOWN/FOWNER: nginx -t gecici dizinleri. KILL: zaman asiminda
+# kiraci komut cocuguna sinyal. AUDIT_WRITE/SYS_RESOURCE: runuser PAM oturumu.
+ProtectSystem=strict
+# Yazilabilir yollar (HEPSI kasitli; gerekcesi KURULUM.md):
+#   /run/girginospanel   tek-ornek kilidi + (panelin actigi) kopru soketi dizini
+#   /etc/girginospanel   YALNIZ cihaz anahtari destek-cihaz.key'in ilk uretimi (db.key okunur; ajan
+#                        db.key'i ASLA uretmez/yazmaz — gizli.AnahtarHazir onkosulu)
+#   /var/log/nginx, /var/lib/nginx   `nginx -t` log dosyalarini acar / gecici dizinleri olusturur
+ReadWritePaths=/run/girginospanel /etc/girginospanel /var/log/nginx /var/lib/nginx
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @setuid
+SystemCallErrorNumber=EPERM
+UMask=0077
+# Sinirlar: ajan asiri kaynak yiyerek paneli/musterileri bogamasin.
+MemoryMax=512M
+TasksMax=256
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

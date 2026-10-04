@@ -85,7 +85,7 @@ systemd-run --pipe --wait -p User=destekhub \
   bozulmasını gösterir (ToolsJSON/SistemSabit/model değişimi).
 
 ## 7. Panel (ajan) tarafı — 181 ve müşteri sunucuları
-Ajan panel sürecinin içindedir (`internal/destek/ajan`); ayrı servis yoktur. Modül varsayılan
+Ajan panelden AYRI hizmettir (`girginospanel-destek-ajan.service`, kaynak `cmd/destek-ajan` + `internal/destek/ajan`; ayrıntı: `deploy/destek-ajan/KURULUM.md`). Panel çökse de destek sürer. Modül varsayılan
 KAPALI: kök "Telegram Destek" sayfasından şalter açılmadıkça merkeze hiç bağlanmaz.
 
 `/etc/girginospanel/destek.json` — **root sahipli, grup/diğer YAZAMAZ** (ör. `root:root 0600`);
@@ -101,7 +101,7 @@ alan → dosya çözülemez sayılır.
 - `merkez_url`: yalnız `https://` (yol/sorgu yok). Boşsa `https://bot.girginos.io`.
 - `merkez_anahtarlari`: meydan okuma ve TÜM imzalı mesajlar (eşleştirme onayı, iş emri) bu
   SABİT anahtarlarla doğrulanır — merkez Cloudflare arkasında olduğundan TLS merkezi kanıtlamaz.
-  Yanlış/eksik anahtar → ajan bağlanmaz (panelde "meydan okuma doğrulanamadı"); cihaz imzası
+  Yanlış/eksik anahtar → ajan bağlanmaz (panel durum sayfasında "meydan okuma doğrulanamadı"); cihaz imzası
   verilmez. Anahtar döndürmede eski+yeni birlikte yazılır, tüm paneller güncellenince eski çıkarılır.
   Yayın derlemesinde üretim anahtarı `-ldflags "-X girginospanel/internal/destek/ajan.GomuluMerkezAnahtari=<açık anahtar>"`
   ile de gömülebilir (dosyadakilerle BİRLEŞİR).
@@ -113,7 +113,7 @@ alan → dosya çözülemez sayılır.
   yol adı mail kalıntısıdır, bilet her ücretli/lisanslı eklenti aktivasyonu ve nabzında YAZILIR; yoksa
   `bilet-yok`) gönderir. Merkez bileti `portal_bilet_anahtarlari` ile DOĞRULAR (imza, süre, parmak izi,
   durum, askı); geçemeyen sunucu yine bağlanır ama "doğrulanmadı" sayılır ve **eşleştirme kodu alamaz**.
-- Değişiklikten sonra `systemctl restart girginospanel`.
+- Değişiklikten sonra `systemctl restart girginospanel-destek-ajan` (ajan ayrı hizmettir).
 
 ## 8. Cloudflare notları (bot.girginos.io)
 - Turuncu bulut, SSL/TLS **Full (strict)** + Origin CA sertifikası; **WebSockets açık**.
