@@ -18,12 +18,12 @@ import PanoWidgetlari from '@/components/pano/PanoWidgetlari'
 import { useKoyuTema } from '@/lib/useKoyuTema'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
-  Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, Box, CheckCircle2, Cloud, Cpu,
+  Activity, ArrowDown, ArrowUp, Box, Check, CheckCircle2, Copy, Cpu,
   HardDrive, MemoryStick, Network, Server, ShieldCheck,
 } from 'lucide-react'
 
 // ── Tipler ──
-type SistemInfo = { hostname: string; ip: string; os_adi: string; cpu_cekirdek: number; panel_surum: string }
+type SistemInfo = { hostname: string; ip: string; os_adi: string; kernel?: string; mimari?: string; cpu_cekirdek: number; panel_surum: string }
 type Sistem = {
   sistem: SistemInfo
   cpu: { yuzde: number; cekirdek: number; yuk_1dk: number }
@@ -35,7 +35,6 @@ type Sistem = {
   izolasyon_kaybi?: string[]
 }
 type Domain = { id: number; alan_adi: string; ssl: boolean; durum: string; sistem_kullanici?: string }
-type Bildirim = { id: number; seviye: string; baslik: string; mesaj: string; tarih: string }
 type DagilimKalem = { anahtar: string; ad: string; yol: string; byte: number }
 type KaynakOrnek = { t: string; cpu: number; bellek: number; disk: number }
 type TrafikOrnek = { t: string; gelen: number; giden: number }
@@ -52,7 +51,10 @@ const H_EN: Record<string, string> = {
   'Mükemmel': 'Excellent', 'İyi': 'Good', 'Dikkat': 'Attention', 'Kritik': 'Critical',
   'Disk Durumu': 'Disk Status', 'Sağlıklı': 'Healthy', 'Ağ Bağlantısı': 'Network', 'İzolasyon': 'Isolation',
   'Sağlam': 'Intact', 'Çalışma Süresi': 'Uptime', 'Gerçek Zamanlı Trafik': 'Real-Time Traffic',
-  'Gelen Trafik': 'Incoming', 'Giden Trafik': 'Outgoing', 'Bildirimler': 'Notifications', 'Tümü': 'All', 'Bildirim yok': 'No notifications',
+  'Gelen Trafik': 'Incoming', 'Giden Trafik': 'Outgoing', 'Tümü': 'All',
+  'Sunucu bilgileri': 'Server information', 'Hostname': 'Hostname', 'İşletim sistemi': 'Operating system', 'Main IP': 'Main IP',
+  'gPanel sürümü': 'gPanel version', 'Kernel sürümü': 'Kernel version', 'Architecture': 'Architecture',
+  'Kopyala': 'Copy', 'Kopyalandı': 'Copied',
   'Depolama Kullanımı': 'Storage Usage', 'Kullanılan': 'Used', 'Yedekler': 'Backups',
   'Diğer kullanım': 'Other usage', 'Boş alan': 'Free space', 'Depolama yönetimine git': 'Go to storage management',
   'Host dizini': 'Host directory', 'SQL dizini': 'SQL directory', 'Yedek dizini': 'Backup directory',
@@ -90,15 +92,6 @@ function fmtUptime(sn: number): string {
 function selamla(): string {
   const h = new Date().getHours()
   return h < 6 ? cevir('İyi geceler') : h < 12 ? cevir('Günaydın') : h < 18 ? cevir('İyi günler') : cevir('İyi akşamlar')
-}
-function goreli(t: string): string {
-  const d = new Date(t.replace(' ', 'T') + (t.includes(' ') ? 'Z' : ''))
-  const s = Math.floor((Date.now() - d.getTime()) / 1000)
-  if (!isFinite(s) || s < 0) return t.slice(0, 16)
-  if (s < 60) return cevir('az önce')
-  if (s < 3600) return `${Math.floor(s / 60)} ${cevir('dk önce')}`
-  if (s < 86400) return `${Math.floor(s / 3600)} ${cevir('sa önce')}`
-  return t.slice(0, 10)
 }
 const saatEtiket = (d = new Date()) => d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
 
@@ -190,6 +183,50 @@ function Card({ title, icon: Icon, action, onAction, children }:
   )
 }
 
+// Sunucu bilgileri — YALNIZ kök panosu (bayi BayiPano'ya gider; hostname/IP/kernel kiracıya
+// gösterilmez). Veri yeni bir uçtan DEĞİL, panonun zaten 5 sn'de bir okuduğu AdminOnly
+// GET /system/usage → sistem bloğundandır. Değer yoksa "—".
+function SunucuBilgiKarti({ sistem, hata }: { sistem?: SistemInfo; hata: boolean }) {
+  const [kopya, setKopya] = useState<string | null>(null)
+  const zaman = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (zaman.current) clearTimeout(zaman.current) }, [])
+  const kopyala = (k: string, v: string) => {
+    const bitti = () => { setKopya(k); if (zaman.current) clearTimeout(zaman.current); zaman.current = setTimeout(() => setKopya(null), 1500) }
+    try { navigator.clipboard.writeText(v).then(bitti, () => { }) } catch { /* pano erişimi yok */ }
+  }
+  const satirlar: { k: string; e: string; v?: string; kop?: boolean }[] = [
+    { k: 'host', e: 'Hostname', v: sistem?.hostname, kop: true },
+    { k: 'os', e: 'İşletim sistemi', v: sistem?.os_adi },
+    { k: 'ip', e: 'Main IP', v: sistem?.ip, kop: true },
+    { k: 'surum', e: 'gPanel sürümü', v: sistem?.panel_surum },
+    { k: 'kernel', e: 'Kernel sürümü', v: sistem?.kernel },
+    { k: 'mimari', e: 'Architecture', v: sistem?.mimari },
+  ]
+  const yukleniyor = !sistem && !hata
+  return (
+    <Card title={cevir('Sunucu bilgileri')} icon={Server}>
+      <div className="sb-list" aria-busy={yukleniyor}>
+        {satirlar.map((x) => (
+          <div className="sb-row" key={x.k}>
+            <span className="sb-et">{cevir(x.e)}</span>
+            {yukleniyor ? <i className="sb-iskelet" aria-hidden="true" /> : (
+              <div className="sb-deger">
+                <code title={x.v || undefined}>{x.v || '—'}</code>
+                {x.kop && x.v && (
+                  <button type="button" className="sb-kopya" onClick={() => kopyala(x.k, x.v as string)}
+                    aria-label={`${cevir('Kopyala')}: ${cevir(x.e)}`} title={kopya === x.k ? cevir('Kopyalandı') : cevir('Kopyala')}>
+                    {kopya === x.k ? <Check size={13} /> : <Copy size={13} />}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 const Progress = ({ value, variant = '' }: { value: number; variant?: string }) => (
   <div className="progress"><div className={`progress-fill ${variant}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>
 )
@@ -233,7 +270,6 @@ export default function HomePage() {
 
   const [s, setS] = useState<Sistem | null>(null)
   const [domainler, setDomainler] = useState<Domain[]>([])
-  const [bildirimler, setBildirimler] = useState<Bildirim[]>([])
   const [yedekB, setYedekB] = useState<number | null>(null)
   const [dagilim, setDagilim] = useState<DagilimKalem[] | null>(null)
   const [kaynakBuf, setKaynakBuf] = useState<KaynakOrnek[]>([])
@@ -263,7 +299,6 @@ export default function HomePage() {
   const yenile = () => {
     cek()
     api.get<Domain[]>('/domains').then((r) => setDomainler(r.data || [])).catch(() => { })
-    api.get<{ bildirimler: Bildirim[] }>('/bildirimler?limit=3').then((r) => setBildirimler(r.data.bildirimler || [])).catch(() => { })
     api.get<{ toplam_boyut_b: number }>('/admin/backups/ozet').then((r) => setYedekB(r.data?.toplam_boyut_b ?? 0)).catch(() => { })
     // Dizin bazlı disk dağılımı — backend 5 dk cache'ler, biz de yalnız yenile()'de çağırırız
     // (5 sn'lik cek() döngüsüne KOYMA: du pahalı, cache'e rağmen boşuna istek olur).
@@ -358,7 +393,6 @@ export default function HomePage() {
     )
   }
 
-  const bIkon = (sev: string) => sev === 'kritik' ? { I: AlertTriangle, c: 'sev-kritik' } : sev === 'uyari' ? { I: AlertTriangle, c: 'sev-uyari' } : { I: Cloud, c: '' }
   const ad = (kullanici?.ad_soyad || kullanici?.adi || '').trim()
 
   return (
@@ -545,19 +579,7 @@ export default function HomePage() {
           </div>
         </Card>
 
-        <Card title={cevir('Bildirimler')} icon={Bell} action={cevir('Tümü')} onAction={() => navigate('/bildirimler')}>
-          <div className="alerts">
-            {bildirimler.length === 0 ? <div className="bos">{cevir('Bildirim yok')}</div> : bildirimler.slice(0, 3).map((b) => {
-              const { I, c } = bIkon(b.seviye)
-              return (
-                <div key={b.id} className={c}>
-                  <I size={17} />
-                  <section><strong>{b.baslik}</strong><small>{goreli(b.tarih)}</small></section>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
+        <SunucuBilgiKarti sistem={s?.sistem} hata={usageHata} />
       </div>
 
       {/* SATIR 3 — pano istatistik widget'ları (D3b, tüm sunucu kapsamı) */}
