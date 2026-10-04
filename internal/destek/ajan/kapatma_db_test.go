@@ -138,3 +138,26 @@ func TestYerelKapaliTurleri(t *testing.T) {
 		t.Fatal("varsayılan kapatma yolu değişti (belge: KURULUM.md)")
 	}
 }
+
+// Kapatma dosyası varken (bağlantı henüz kopmadan) gelen imzalı eşleştirme onayı da KABUL
+// EDİLMEZ: bağlantı satırı yazılmaz.
+func TestKapaliykenEslesmeOnayiKabulEdilmez(t *testing.T) {
+	o := kurOrtam(t, false, true)
+	e := o.v2(901, "kok_tg", "okuma", 7)
+	o.m.imzala(e)
+	if err := os.WriteFile(o.kapatma, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o.a.mu.Lock()
+	oturum := o.a.aktif
+	o.a.mu.Unlock()
+	if oturum == nil {
+		t.Fatal("ön koşul: açık oturum yok")
+	}
+	o.a.eslesmeOnayla(context.Background(), oturum, "zk-test", e)
+	var n int
+	_ = o.db.QueryRow(`SELECT COUNT(*) FROM destek_baglantilari WHERE kod_ozet=?`, e.KodOzet).Scan(&n)
+	if n != 0 {
+		t.Fatalf("kapalıyken eşleştirme kaydı yazıldı (%d)", n)
+	}
+}
