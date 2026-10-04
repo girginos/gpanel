@@ -73,6 +73,12 @@ func TestPanelIptaliHubaUlasir(t *testing.T) {
 	o.onayla(o.mA, mA)
 	panel := paneliKur(t, o)
 	o.m.bosalt()
+	o.a.mu.Lock()
+	_, izVar := o.a.hesapIzi[mA]
+	o.a.mu.Unlock()
+	if !izVar {
+		t.Fatal("ön koşul: etkin bağlantının hesap izi yok")
+	}
 
 	panel.istekOK("POST", "/destek/baglantilar/"+mA+"/iptal", o.kok, nil)
 	g := o.m.bekle(p.TipBaglantiIptal, func(g p.Govde) bool { return g.(*p.BaglantiIptal).BaglantiID == mA }).(*p.BaglantiIptal)
@@ -92,16 +98,34 @@ func TestPanelIptaliHubaUlasir(t *testing.T) {
 	if bildirildi == nil {
 		t.Fatal("hub_bildirildi_at damgalanmadı")
 	}
-	// Tekrar gönderilmez (yoklama döngüsü çalışıyor ama damga var).
+	// Tekrar gönderilmez (yoklama döngüsü çalışıyor ama damga var): hem biriken hem henüz okunmamış mesajlar.
 	time.Sleep(500 * time.Millisecond)
-	o.m.mu.Lock()
-	for _, gm := range o.m.birikim {
-		if b, ok := gm.g.(*p.BaglantiIptal); ok && b.BaglantiID == mA {
-			o.m.mu.Unlock()
+	ikinci := func(g p.Govde) {
+		if b, ok := g.(*p.BaglantiIptal); ok && b.BaglantiID == mA {
 			t.Fatal("aynı iptal merkeze ikinci kez gönderildi")
 		}
 	}
+	o.m.mu.Lock()
+	for _, gm := range o.m.birikim {
+		ikinci(gm.g)
+	}
 	o.m.mu.Unlock()
+	for {
+		select {
+		case gm := <-o.m.gelen:
+			ikinci(gm.g)
+			continue
+		default:
+		}
+		break
+	}
+	// İz temizliği: iptal edilen bağlantının hesap listesi özeti bellekten düşer.
+	o.a.mu.Lock()
+	_, kaldi := o.a.hesapIzi[mA]
+	o.a.mu.Unlock()
+	if kaldi {
+		t.Fatal("iptal edilen bağlantının hesap izi temizlenmedi")
+	}
 }
 
 // (c3) Kimlik olayı (parola/2FA/hosting silme → iptal.* tetikleri) panelde DB'ye yazılır, denetim
