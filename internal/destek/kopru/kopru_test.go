@@ -206,7 +206,9 @@ func TestKopruYolVeBicimRedleri(t *testing.T) {
 
 func TestKopruYanitSiniri(t *testing.T) {
 	_, yol := sunucuBaslat(t, &kokRouter{buyuk: YanitSiniri + 1000}, nil)
-	y, err := istemci(yol).Cagir(context.Background(), Istek{Kimlik: kokKimlik, Yol: "/api/v1/domains/42"})
+	c := istemci(yol)
+	c.CagriSiniri = 60 * time.Second // -race altında 8 MB base64 yavaş
+	y, err := c.Cagir(context.Background(), Istek{Kimlik: kokKimlik, Yol: "/api/v1/domains/42"})
 	if err != nil {
 		t.Fatal(err)
 	}
