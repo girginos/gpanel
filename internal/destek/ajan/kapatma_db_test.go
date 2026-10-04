@@ -127,6 +127,13 @@ func TestYerelKapaliTurleri(t *testing.T) {
 	if !a.yerelKapali() {
 		t.Fatal("dizin KAPALI sayılmalı")
 	}
+	// Varlığı belirlenemeyen yol (üst bileşen dosya → ENOTDIR; izin hatası da aynı sınıf) KAPALI sayılır.
+	dosya := d + "/dosya"
+	_ = os.WriteFile(dosya, nil, 0o600)
+	a.KapatmaDosyasi = dosya + "/destek-kapali"
+	if !a.yerelKapali() {
+		t.Fatal("belirsiz durum (NotExist dışı hata) KAPALI sayılmalı (kapalı başarısız)")
+	}
 	if Yeni(nil, Yapilandirma{}).KapatmaDosyasi != "/etc/girginospanel/destek-kapali" {
 		t.Fatal("varsayılan kapatma yolu değişti (belge: KURULUM.md)")
 	}
