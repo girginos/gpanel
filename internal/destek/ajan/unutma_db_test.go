@@ -224,3 +224,21 @@ func TestSupurge_EskiIptalAnonimlesir(t *testing.T) {
 		t.Error("süpürge denetim izine dokundu (ürün sahibi kararı olmadan değişmemeli)")
 	}
 }
+
+// Portaldan "bağlantıyı kes" (hub → ajan neden=kullanici) de Telegram kimliğini siler;
+// OTOMATİK nedenler (hosting askısı vb.) merkez isteği olmadığından anonimleştirmez.
+func TestKullaniciIptali_Anonimlestirir_OtomatikIptalDegil(t *testing.T) {
+	o := kurOrtam(t, false, true)
+	id := o.kokEslestir(kvTg, kvAd, "okuma")
+	o.m.gonder(&p.BaglantiIptal{BaglantiID: id, Neden: p.IptalKullanici})
+	kvBekleIptalAnon(t, o, id)
+
+	id2 := o.kokEslestir(kvTg+5, kvAd+"c", "okuma")
+	o.m.gonder(&p.BaglantiIptal{BaglantiID: id2, Neden: p.IptalBayi}) // merkezden gelse bile otomatik neden
+	time.Sleep(300 * time.Millisecond)
+	var tg int64
+	_ = o.db.QueryRow(`SELECT tg_user_id FROM destek_baglantilari WHERE kimlik=?`, id2).Scan(&tg)
+	if tg != kvTg+5 {
+		t.Fatal("otomatik neden Telegram kimliğini hemen silmemeli")
+	}
+}
