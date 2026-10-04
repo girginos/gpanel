@@ -194,6 +194,7 @@ var KimlikUclari = map[string]bool{
 	"DELETE " + p + "/api-anahtarlari/{id}":                                  true,
 	"PUT " + p + "/domains/{id}/ssh/anahtar":                                 true,
 	"POST " + p + "/domains/{id}/wordpress/kullanici-parola":                 true,
+	"PUT " + p + "/domains/{id}/giris-parola":                                true,
 	"POST " + p + "/domains/{id}/subdomain/{sid}/wordpress/kullanici-parola": true,
 	"GET " + p + "/system/tasima/anahtar":                                    true,
 	"GET " + p + "/settings/session-idle":                                    true,
