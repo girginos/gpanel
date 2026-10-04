@@ -290,3 +290,71 @@ func TestKopruSonradanGelinceToparlanir(t *testing.T) {
 	}
 	t.Fatalf("köprü gelince toparlanmadı: %v", son)
 }
+
+// Boşlukla şişirilmiş AMA geçerli JSON istek de boyut sınırında reddedilir (sınır JSON değil bayt).
+func TestKopruIstekBoyutSiniriBayt(t *testing.T) {
+	r := &kokRouter{}
+	_, yol := sunucuBaslat(t, r, nil)
+	govde := `{"kimlik":{"Rol":"kok","KullaniciID":1,"Kullanici":"root","TgKisa":"t"},"yol":"/api/v1/domains/42"}` + strings.Repeat(" ", IstekSiniri)
+	if y := hamIstek(t, yol, []byte(govde)); y.Kod != 0 || y.Hata == "" {
+		t.Fatalf("boyut sınırı aşan istek geçti: %+v", y)
+	}
+	if r.cagri.Load() != 0 {
+		t.Fatal("yönlendirici çağrıldı")
+	}
+}
+
+// Sorgu katı çözülür: bozuk kaçış, çok değer, kontrol baytı reddedilir; geçerli sorgu yeniden kodlanır.
+func TestKopruSorguTemizleme(t *testing.T) {
+	r := &kokRouter{}
+	_, yol := sunucuBaslat(t, r, nil)
+	kim := `"kimlik":{"Rol":"kok","KullaniciID":1,"Kullanici":"root","TgKisa":"t"}`
+	for ad, sorgu := range map[string]string{
+		"bozuk kaçış":  `x=%zz`,
+		"çok değer":    `a=1&a=2&a=3&a=4&a=5&a=6&a=7&a=8&a=9`,
+		"boş anahtar":  `=1`,
+		"nokta virgül": `a=1;b=2`,
+	} {
+		if y := hamIstek(t, yol, []byte(`{`+kim+`,"yol":"/api/v1/domains/42","sorgu":"`+sorgu+`"}`)); y.Kod != 0 {
+			t.Errorf("%s: sorgu geçti: %+v", ad, y)
+		}
+	}
+	if r.cagri.Load() != 0 {
+		t.Fatal("reddedilen sorgularda yönlendirici çağrıldı")
+	}
+	y := hamIstek(t, yol, []byte(`{`+kim+`,"yol":"/api/v1/domains/42","sorgu":"son=5&dosya=a%20b"}`))
+	var g struct{ Sorgu string }
+	_ = json.Unmarshal(y.Govde, &g)
+	if y.Kod != 200 || g.Sorgu != "dosya=a+b&son=5" {
+		t.Fatalf("geçerli sorgu yeniden kodlanmadı: %d %q", y.Kod, g.Sorgu)
+	}
+}
+
+// Var olan gevşek izinli dizin 0700'e sıkılaştırılır.
+func TestKopruDizinSikilastirilir(t *testing.T) {
+	d := filepath.Join(kisaDizin(t), "s")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chmod(d, 0o755)
+	sunucuBaslatYol(t, filepath.Join(d, "k.sock"))
+	if st, _ := os.Stat(d); st.Mode().Perm() != 0o700 {
+		t.Fatalf("dizin sıkılaştırılmadı: %v", st.Mode().Perm())
+	}
+}
+
+func sunucuBaslatYol(t *testing.T, yol string) {
+	t.Helper()
+	s := &Sunucu{Router: &kokRouter{}, Yol: yol, IzinliUID: uint32(os.Geteuid())}
+	ctx, iptal := context.WithCancel(context.Background())
+	bitti := make(chan error, 1)
+	go func() { bitti <- s.Dinle(ctx) }()
+	t.Cleanup(func() { iptal(); <-bitti })
+	for i := 0; i < 200; i++ {
+		if _, err := os.Lstat(yol); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("soket kurulmadı")
+}
