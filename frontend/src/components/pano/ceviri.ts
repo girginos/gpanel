@@ -4,6 +4,8 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 
 const EN: Record<string, string> = {
   'İstatistikler': 'Statistics',
+  'Tümünü gör': 'View all',
+  '{0} kayıt daha': '{0} more',
   'Pano istatistikleri': 'Dashboard statistics',
   'Yenile': 'Refresh',
   'Yeniden dene': 'Retry',

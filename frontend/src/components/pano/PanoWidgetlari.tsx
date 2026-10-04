@@ -2,6 +2,12 @@
 // kurumsal dili (KART, ince kenarlık, sade tipografi). Her kart kendi ucunu
 // (GET /pano/w/{id}) çağırır ve yükleniyor / boş / hata hâllerini ayrı çizer.
 // Kapsam sunucuda jetondan: bayi yalnız kendi hesaplarını görür.
+//
+// DENGE KURALLARI (pano-denge): ızgara satır başına EŞİT yükseklik (stretch);
+// her kart flex-col — gövde esner, altbilgi (son ölçüm/tarama + "Tümünü gör")
+// kartın en altına yapışır; listeler SABİT en çok N satır gösterir (taşan kısım
+// "Tümünü gör" ile açılır); uzun alan adları kırpılır (title ile tam ad); KPI
+// kutuları her kartta aynı yükseklik/tipografi; boş durum kalan alanda ortalanır.
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -23,31 +29,50 @@ type IsSatir = { id: number; tur: string; durum: string; toplam: number; basaril
 type IslerVeri = { tasima: IsSatir[]; toplu?: IsSatir[]; yedek: { planli: number; geciken: number; hata_7gun?: number; isler?: IsSatir[] } }
 type WebsecVeri = { sayim: Record<'critical' | 'high' | 'medium' | 'low', number>; son_tarama: string; son: { domain_id: number; alan_adi: string; paket: string; surum: string; cve: string; onem: string; duzeltme: string; ilk: string }[] }
 
-const LINK = cx('break-all rounded font-medium text-gray-900 hover:underline dark:text-dark-50', ODAK)
+// Kart başına gösterilen en çok satır (sabit; fazlası "Tümünü gör" ile).
+const N_KOTA = 3
+const N_SSL = 4
+const N_ASKI = 4
+const N_WEBSEC = 4
+const N_IS = 3
+
+const LINK = cx('block min-w-0 truncate rounded font-medium text-gray-900 hover:underline dark:text-dark-50', ODAK)
+const SATIR_AYRAC = 'divide-y divide-gray-100 dark:divide-dark-600'
 
 function Iskelet({ sinif }: { sinif: string }) {
   return <div className={cx('animate-pulse rounded-md bg-gray-200 dark:bg-dark-500', sinif)} aria-hidden="true" />
 }
 
+// Bos — kalan alanda ortalanan boş durum (kart eşit yükseklikte kalır).
 function Bos({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-gray-500 dark:text-dark-300">{children}</p>
+  return <div className="flex min-h-24 flex-1 items-center justify-center px-2 py-4 text-center text-sm text-gray-500 dark:text-dark-300">{children}</div>
+}
+
+function TumunuGor({ yol, baslik }: { yol: string; baslik: string }) {
+  return (
+    <Link to={yol} title={baslik} className={cx('inline-flex shrink-0 items-center gap-0.5 rounded text-xs font-medium text-primary-600 hover:underline dark:text-primary-400', ODAK)}>
+      {pt('Tümünü gör')}<Ikon d={I.ileri} className="size-3.5" />
+    </Link>
+  )
 }
 
 // WidgetKabugu — başlık + ikon + yenile; yükleniyor/hata hâlleri burada.
-function WidgetKabugu<T>({ baslik, ikon, d, alt, children }: { baslik: string; ikon: string; d: WidgetDurum<T>; alt?: ReactNode; children: (v: T) => ReactNode }) {
+// alt: sol altbilgi metni (ölçüm/tarama zamanı); yol: sağ altbilgi "Tümünü gör".
+function WidgetKabugu<T>({ baslik, ikon, d, alt, yol, children }: { baslik: string; ikon: string; d: WidgetDurum<T>; alt?: ReactNode; yol?: string; children: (v: T) => ReactNode }) {
+  const hazir = d.veri !== null && !d.hata
   return (
-    <section className={cx(KART, 'flex flex-col p-5')} aria-label={baslik} aria-busy={d.yuk}>
-      <div className="flex items-center justify-between gap-2">
+    <section className={cx(KART, 'flex h-full min-h-[17rem] min-w-0 flex-col p-5')} aria-label={baslik} aria-busy={d.yuk}>
+      <div className="flex h-7 items-center justify-between gap-2">
         <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-dark-50">
           <Ikon d={ikon} className="size-4 shrink-0 text-gray-400 dark:text-dark-300" />
-          <span className="truncate">{baslik}</span>
+          <span className="truncate" title={baslik}>{baslik}</span>
         </h3>
         <Button isIcon variant="flat" boyut="sm" onClick={d.yenile} yukleniyor={d.yuk && d.veri !== null}
-          className="size-7 rounded-full" aria-label={`${pt('Yenile')}: ${baslik}`} title={pt('Yenile')} ikon={I.yenile} />
+          className="size-7 shrink-0 rounded-full" aria-label={`${pt('Yenile')}: ${baslik}`} title={pt('Yenile')} ikon={I.yenile} />
       </div>
-      <div className="mt-3 flex-1">
+      <div className="@container mt-3 flex min-h-0 flex-1 flex-col">
         {d.hata ? (
-          <div className="py-4 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center py-4 text-center">
             <p className="text-sm text-error">{pt('Veri alınamadı')}</p>
             <Button boyut="sm" variant="outlined" ikon={I.yenile} onClick={d.yenile} className="mt-2">{pt('Yeniden dene')}</Button>
           </div>
@@ -55,17 +80,23 @@ function WidgetKabugu<T>({ baslik, ikon, d, alt, children }: { baslik: string; i
           <div className="space-y-2.5">{[0, 1, 2].map((n) => <Iskelet key={n} sinif="h-7 w-full" />)}</div>
         ) : children(d.veri)}
       </div>
-      {alt && d.veri !== null && !d.hata && <div className="mt-3 border-t border-gray-100 pt-2 text-[11px] text-gray-400 dark:border-dark-600 dark:text-dark-300">{alt}</div>}
+      {hazir && (alt || yol) && (
+        <div className="mt-3 flex min-h-8 items-center justify-between gap-3 border-t border-gray-100 pt-2 text-[11px] text-gray-400 dark:border-dark-600 dark:text-dark-300">
+          <span className="min-w-0 truncate">{alt}</span>
+          {yol && <TumunuGor yol={yol} baslik={baslik} />}
+        </div>
+      )}
     </section>
   )
 }
 
+// Sayac — KPI kutusu: her kartta aynı yükseklik (h-16), etiket en çok 2 satır.
 function Sayac({ ad, deger, ton }: { ad: string; deger: number; ton?: 'error' | 'warning' | 'info' }) {
   const renk = deger > 0 && ton ? { error: 'text-error', warning: 'text-warning', info: 'text-info' }[ton] : 'text-gray-900 dark:text-dark-50'
   return (
-    <div className="min-w-0 rounded-md bg-gray-50 px-2.5 py-2 dark:bg-dark-800">
-      <div className="truncate text-[11px] text-gray-500 dark:text-dark-300">{ad}</div>
-      <div className={cx('text-lg font-semibold leading-tight tabular-nums', renk)}>{deger}</div>
+    <div className="flex h-16 min-w-0 flex-col justify-between rounded-md bg-gray-50 px-2.5 py-2 dark:bg-dark-800">
+      <div className="line-clamp-2 text-[11px] leading-tight text-gray-500 dark:text-dark-300" title={ad}>{ad}</div>
+      <div className={cx('text-lg font-semibold leading-none tabular-nums', renk)}>{deger}</div>
     </div>
   )
 }
@@ -79,19 +110,20 @@ function DurumRozeti({ durum }: { durum: string }) {
 }
 
 function IsListesi({ baslik, satirlar, bos, yol }: { baslik: string; satirlar: IsSatir[]; bos: string; yol?: string }) {
+  const gorunen = satirlar.slice(0, N_IS)
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-gray-600 dark:text-dark-200">
-        <span>{baslik}</span>
-        {yol && satirlar.length > 0 && <Link to={yol} className={cx('rounded text-primary-600 hover:underline dark:text-primary-400', ODAK)} aria-label={baslik}><Ikon d={I.ileri} className="size-3.5" /></Link>}
+    <div className="min-w-0">
+      <div className="mb-1 flex h-5 items-center justify-between text-xs font-medium text-gray-600 dark:text-dark-200">
+        <span className="truncate">{baslik}</span>
+        {yol && satirlar.length > 0 && <Link to={yol} className={cx('rounded text-primary-600 hover:underline dark:text-primary-400', ODAK)} aria-label={baslik} title={satirlar.length > N_IS ? pt('{0} kayıt daha', satirlar.length - N_IS) : baslik}><Ikon d={I.ileri} className="size-3.5" /></Link>}
       </div>
-      {satirlar.length === 0 ? <p className="text-xs text-gray-400 dark:text-dark-300">{bos}</p> : (
-        <ul className="divide-y divide-gray-100 dark:divide-dark-600">
-          {satirlar.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 py-1.5 text-xs">
+      {gorunen.length === 0 ? <p className="text-xs text-gray-400 dark:text-dark-300">{bos}</p> : (
+        <ul className={SATIR_AYRAC}>
+          {gorunen.map((s) => (
+            <li key={s.id} className="flex h-8 items-center gap-2 text-xs">
               <span className="tabular-nums text-gray-400 dark:text-dark-300">#{s.id}</span>
-              <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-dark-100">{s.tur}</span>
-              <span className="tabular-nums text-gray-500 dark:text-dark-300">{pt('{0}/{1} hesap', s.basarili, s.toplam)}</span>
+              <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-dark-100" title={s.tur}>{s.tur}</span>
+              <span className="shrink-0 tabular-nums text-gray-500 dark:text-dark-300">{pt('{0}/{1} hesap', s.basarili, s.toplam)}</span>
               <DurumRozeti durum={s.durum} />
             </li>
           ))}
@@ -101,32 +133,36 @@ function IsListesi({ baslik, satirlar, bos, yol }: { baslik: string; satirlar: I
   )
 }
 
+function OlcumMetni(olcum?: string) {
+  return olcum ? `${pt('Son disk ölçümü')}: ${goreliZaman(olcum)}` : pt('Disk kotası ölçümü kapalı; değerler son elle ölçümden.')
+}
+
 function EgilimKarti() {
   const d = useWidget<EgilimVeri>('egilim')
-  return <WidgetKabugu baslik={`${pt('Disk ve trafik eğilimi')} · ${pt('Son 30 gün')}`} ikon={I.grafik} d={d}>{(v) => <EgilimIcerik veri={v} />}</WidgetKabugu>
+  return <WidgetKabugu baslik={`${pt('Disk ve trafik eğilimi')} · ${pt('Son 30 gün')}`} ikon={I.grafik} d={d} alt={d.veri && OlcumMetni(d.veri.disk_olcum)}>{(v) => <EgilimIcerik veri={v} />}</WidgetKabugu>
 }
 
 function KotaKarti() {
   const d = useWidget<KotaVeri>('kota')
   return (
-    <WidgetKabugu baslik={pt('Yakında dolacak hesaplar')} ikon={I.db} d={d}
-      alt={d.veri && (d.veri.disk_olcum ? `${pt('Son disk ölçümü')}: ${goreliZaman(d.veri.disk_olcum)}` : pt('Disk kotası ölçümü kapalı; değerler son elle ölçümden.'))}>
+    <WidgetKabugu baslik={pt('Yakında dolacak hesaplar')} ikon={I.db} d={d} yol="/domainler"
+      alt={d.veri && OlcumMetni(d.veri.disk_olcum)}>
       {(v) => v.hesaplar.length === 0 ? <Bos>{pt("Kotasının %85'ini aşan hesap yok")}</Bos> : (
         <>
-          <p className="mb-2 text-xs text-gray-500 dark:text-dark-300">{pt('Kotasının %{0} kadarını aşan', v.esik)}</p>
+          <p className="mb-2 truncate text-xs text-gray-500 dark:text-dark-300">{pt('Kotasının %{0} kadarını aşan', v.esik)}</p>
           <ul className="space-y-2.5">
-            {v.hesaplar.map((h) => (
+            {v.hesaplar.slice(0, N_KOTA).map((h) => (
               <li key={`${h.id}-${h.metrik}`}>
                 <div className="flex items-baseline justify-between gap-2 text-xs">
-                  <Link to={`/abonelikler/${h.id}`} className={cx(LINK, 'text-sm')}>{h.alan_adi}</Link>
+                  <Link to={`/abonelikler/${h.id}`} title={h.alan_adi} className={cx(LINK, 'text-sm')}>{h.alan_adi}</Link>
                   <span className="shrink-0 tabular-nums text-gray-500 dark:text-dark-300">{pt(h.metrik === 'disk' ? 'Disk' : 'Trafik')} · %{Math.round(h.yuzde)}</span>
                 </div>
                 <div className="mt-1"><Cubuk deger={Math.min(100, Math.round(h.yuzde))} etiket={`${h.alan_adi}: %${Math.round(h.yuzde)}`} /></div>
-                <div className="mt-0.5 text-[11px] tabular-nums text-gray-400 dark:text-dark-300">{mbYaz(h.kullanim_mb)} / {mbYaz(h.limit_mb)}</div>
+                <div className="mt-0.5 truncate text-[11px] tabular-nums text-gray-400 dark:text-dark-300">{mbYaz(h.kullanim_mb)} / {mbYaz(h.limit_mb)}</div>
               </li>
             ))}
           </ul>
-          {v.toplam > v.hesaplar.length && <p className="mt-2 text-xs text-gray-500 dark:text-dark-300">{pt('ve {0} hesap daha', v.toplam - v.hesaplar.length)}</p>}
+          {Math.max(v.toplam, v.hesaplar.length) > N_KOTA && <p className="mt-2 text-xs text-gray-500 dark:text-dark-300">{pt('ve {0} hesap daha', Math.max(v.toplam, v.hesaplar.length) - N_KOTA)}</p>}
         </>
       )}
     </WidgetKabugu>
@@ -142,7 +178,7 @@ function kalanMetni(g: number) {
 function SSLKarti() {
   const d = useWidget<SSLVeri>('ssl')
   return (
-    <WidgetKabugu baslik={pt('SSL sertifikaları')} ikon={I.ssl} d={d}
+    <WidgetKabugu baslik={pt('SSL sertifikaları')} ikon={I.ssl} d={d} yol="/domainler"
       alt={d.veri?.son_tarama ? `${pt('Son tarama')}: ${goreliZaman(d.veri.son_tarama)}` : undefined}>
       {(v) => (
         <>
@@ -152,10 +188,10 @@ function SSLKarti() {
             <Sayac ad={pt("SSL'siz aktif")} deger={v.sslsiz} ton="info" />
           </div>
           {v.hesaplar.length === 0 ? <Bos>{pt('30 gün içinde dolacak sertifika yok')}</Bos> : (
-            <ul className="mt-3 divide-y divide-gray-100 dark:divide-dark-600">
-              {v.hesaplar.map((h) => (
-                <li key={h.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                  <Link to={`/abonelikler/${h.id}/ssl`} className={LINK}>{h.alan_adi}</Link>
+            <ul className={cx('mt-3', SATIR_AYRAC)}>
+              {v.hesaplar.slice(0, N_SSL).map((h) => (
+                <li key={h.id} className="flex h-9 items-center justify-between gap-2 text-sm">
+                  <Link to={`/abonelikler/${h.id}/ssl`} title={h.alan_adi} className={LINK}>{h.alan_adi}</Link>
                   <span className={cx('shrink-0 text-xs tabular-nums', h.kalan_gun < 0 ? 'text-error' : h.kalan_gun <= 14 ? 'text-warning' : 'text-gray-500 dark:text-dark-300')}>{kalanMetni(h.kalan_gun)}</span>
                 </li>
               ))}
@@ -172,14 +208,15 @@ const KAYNAK: Record<string, string> = { manuel: 'Yönetici', bayi_el: 'Bayi', b
 function AskidaKarti() {
   const d = useWidget<AskiVeri>('askida')
   return (
-    <WidgetKabugu baslik={pt('Son askıya alınanlar')} ikon={I.durakla} d={d} alt={d.veri && d.veri.toplam > 0 ? pt('Toplam {0}', d.veri.toplam) : undefined}>
+    <WidgetKabugu baslik={pt('Son askıya alınanlar')} ikon={I.durakla} d={d} yol="/domainler"
+      alt={d.veri && d.veri.toplam > 0 ? pt('Toplam {0}', d.veri.toplam) : undefined}>
       {(v) => v.hesaplar.length === 0 ? <Bos>{pt('Askıda hesap yok')}</Bos> : (
-        <ul className="divide-y divide-gray-100 dark:divide-dark-600">
-          {v.hesaplar.map((h) => (
-            <li key={h.id} className="flex items-center justify-between gap-2 py-2">
+        <ul className={SATIR_AYRAC}>
+          {v.hesaplar.slice(0, N_ASKI).map((h) => (
+            <li key={h.id} className="flex h-12 items-center justify-between gap-2">
               <div className="min-w-0">
-                <Link to={`/abonelikler/${h.id}`} className={cx(LINK, 'text-sm')}>{h.alan_adi}</Link>
-                {h.kaynak && <div className="text-[11px] text-gray-500 dark:text-dark-300">{pt(KAYNAK[h.kaynak] || h.kaynak)}</div>}
+                <Link to={`/abonelikler/${h.id}`} title={h.alan_adi} className={cx(LINK, 'text-sm')}>{h.alan_adi}</Link>
+                {h.kaynak && <div className="truncate text-[11px] text-gray-500 dark:text-dark-300">{pt(KAYNAK[h.kaynak] || h.kaynak)}</div>}
               </div>
               {h.zaman && <span className="shrink-0 text-xs text-gray-400 dark:text-dark-300">{goreliZaman(h.zaman)}</span>}
             </li>
@@ -193,22 +230,32 @@ function AskidaKarti() {
 function IslerKarti({ yonetici }: { yonetici: boolean }) {
   const d = useWidget<IslerVeri>('isler')
   return (
-    <WidgetKabugu baslik={pt('Taşıma ve yedek işleri')} ikon={I.tasi} d={d}>
-      {(v) => (
-        <div className="space-y-4">
-          <IsListesi baslik={pt('Son taşımalar')} satirlar={v.tasima} bos={pt('Taşıma işi yok')} yol="/araclar/tasima" />
+    <WidgetKabugu baslik={pt('Taşıma ve yedek işleri')} ikon={I.tasi} d={d} yol={yonetici ? '/backup-yonetimi' : '/araclar/tasima'}>
+      {(v) => {
+        const yedekKpi = (
           <div>
-            <div className="mb-1.5 text-xs font-medium text-gray-600 dark:text-dark-200">{pt('Yedek')}</div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="mb-1 flex h-5 items-center text-xs font-medium text-gray-600 dark:text-dark-200">{pt('Yedek')}</div>
+            <div className="grid grid-cols-3 gap-2">
               <Sayac ad={pt('Planlı yedekli hesap')} deger={v.yedek.planli} />
               <Sayac ad={pt('Geciken yedek')} deger={v.yedek.geciken} ton="warning" />
               {v.yedek.hata_7gun !== undefined && <Sayac ad={pt('Son 7 günde yedek hatası')} deger={v.yedek.hata_7gun} ton="error" />}
             </div>
           </div>
-          {yonetici && v.yedek.isler && <IsListesi baslik={pt('Son yedek işleri')} satirlar={v.yedek.isler} bos={pt('Yedek işi yok')} yol="/backup-yonetimi" />}
-          {yonetici && v.toplu && <IsListesi baslik={pt('Son toplu işlemler')} satirlar={v.toplu} bos={pt('Toplu işlem yok')} />}
-        </div>
-      )}
+        )
+        const tasima = <IsListesi baslik={pt('Son taşımalar')} satirlar={v.tasima} bos={pt('Taşıma işi yok')} yol="/araclar/tasima" />
+        // Kart tam genişlikte çizilir (ızgarada geniş hücre); iç yerleşim KAP genişliğine göre:
+        // yönetici → KPI şeridi üstte + 3 eşit liste sütunu; bayi → taşıma | yedek.
+        return yonetici ? (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 @3xl:grid-cols-3">
+            <div className="@3xl:col-span-3 @3xl:max-w-xl">{yedekKpi}</div>
+            {tasima}
+            {v.yedek.isler && <IsListesi baslik={pt('Son yedek işleri')} satirlar={v.yedek.isler} bos={pt('Yedek işi yok')} yol="/backup-yonetimi" />}
+            {v.toplu && <IsListesi baslik={pt('Son toplu işlemler')} satirlar={v.toplu} bos={pt('Toplu işlem yok')} />}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 @3xl:grid-cols-2">{tasima}{yedekKpi}</div>
+        )
+      }}
     </WidgetKabugu>
   )
 }
@@ -220,7 +267,7 @@ const ONEM: [keyof WebsecVeri['sayim'], string, 'error' | 'warning' | 'info' | u
 function WebsecKarti() {
   const d = useWidget<WebsecVeri>('websec')
   return (
-    <WidgetKabugu baslik={pt('Website Security bulguları')} ikon={I.kalkanTara} d={d}
+    <WidgetKabugu baslik={pt('Website Security bulguları')} ikon={I.kalkanTara} d={d} yol="/website-security"
       alt={d.veri && (d.veri.son_tarama ? `${pt('Son tarama')}: ${goreliZaman(d.veri.son_tarama)}` : pt('Henüz tarama yapılmadı'))}>
       {(v) => (
         <>
@@ -228,18 +275,19 @@ function WebsecKarti() {
             {ONEM.map(([k, ad, ton]) => <Sayac key={k} ad={pt(ad)} deger={v.sayim[k] ?? 0} ton={ton} />)}
           </div>
           {v.son.length === 0 ? <Bos>{pt('Kritik/yüksek önemli bulgu yok')}</Bos> : (
-            <ul className="mt-3 divide-y divide-gray-100 dark:divide-dark-600">
-              {v.son.map((b, i) => (
-                <li key={`${b.domain_id}-${b.cve}-${i}`} className="py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <Link to={`/website-security/domain/${b.domain_id}`} className={cx(LINK, 'text-sm')}>{b.alan_adi}</Link>
-                    <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium', b.onem === 'critical' ? 'bg-error/10 text-error' : 'bg-warning/10 text-warning')}>{pt(b.onem === 'critical' ? 'Kritik' : 'Yüksek')}</span>
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-dark-300">
-                    {b.paket}{b.surum && ` ${b.surum}`} · {b.cve}{b.duzeltme && ` · ${pt('Düzeltilmiş sürüm {0}', b.duzeltme)}`}
-                  </div>
-                </li>
-              ))}
+            <ul className={cx('mt-3', SATIR_AYRAC)}>
+              {v.son.slice(0, N_WEBSEC).map((b, i) => {
+                const ozet = `${b.paket}${b.surum ? ` ${b.surum}` : ''} · ${b.cve}${b.duzeltme ? ` · ${pt('Düzeltilmiş sürüm {0}', b.duzeltme)}` : ''}`
+                return (
+                  <li key={`${b.domain_id}-${b.cve}-${i}`} className="flex h-12 flex-col justify-center">
+                    <div className="flex items-center justify-between gap-2">
+                      <Link to={`/website-security/domain/${b.domain_id}`} title={b.alan_adi} className={cx(LINK, 'text-sm')}>{b.alan_adi}</Link>
+                      <span className={cx('shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium', b.onem === 'critical' ? 'bg-error/10 text-error' : 'bg-warning/10 text-warning')}>{pt(b.onem === 'critical' ? 'Kritik' : 'Yüksek')}</span>
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-dark-300" title={ozet}>{ozet}</div>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </>
@@ -248,19 +296,33 @@ function WebsecKarti() {
   )
 }
 
-// PanoWidgetlari — ızgara (mobilde tek sütun, md 2, xl 3). Yönetici ek olarak
-// sunucu geneli yedek işlerini ve toplu işlemleri görür (bayide kaynak yok).
-export default function PanoWidgetlari() {
+// PanoWidgetlari — ızgara: mobil 1 sütun, md 2, xl 3. Varsayılan (6 widget) düzen
+// dikdörtgen dolar: eğilim 2 sütun geniş, işler kartı tam satır; böylece md'de
+// (2+1+1 / 1+1 / 2) ve xl'de (2+1 / 1+1+1 / 3) boş hücre kalmaz. Satırdaki kartlar
+// eşit yükseklik (stretch). Yönetici ek olarak sunucu geneli yedek işlerini ve
+// toplu işlemleri görür (bayide kaynak yok). `gizli`: kapalı widget kimlikleri —
+// geniş hücreler bırakılır, ızgara 1'lik hücrelerle yeniden akar ve son satırdaki
+// artan kart(lar) satırı doldurur (boşluk kalmaz).
+export type PanoWidgetId = 'egilim' | 'kota' | 'ssl' | 'askida' | 'isler' | 'websec'
+export default function PanoWidgetlari({ gizli = [] }: { gizli?: PanoWidgetId[] }) {
   useTranslation()
   const yonetici = useAuth((s) => s.kullanici?.rol === 'admin')
+  const genis = gizli.length === 0
+  const kartlar: [PanoWidgetId, ReactNode, string][] = [
+    ['egilim', <EgilimKarti key="egilim" />, 'md:col-span-2 xl:col-span-2'],
+    ['ssl', <SSLKarti key="ssl" />, ''],
+    ['kota', <KotaKarti key="kota" />, ''],
+    ['askida', <AskidaKarti key="askida" />, ''],
+    ['websec', <WebsecKarti key="websec" />, ''],
+    ['isler', <IslerKarti key="isler" yonetici={yonetici} />, 'md:col-span-2 xl:col-span-3'],
+  ]
   return (
-    <section aria-label={pt('Pano istatistikleri')} className="grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3">
-      <EgilimKarti />
-      <KotaKarti />
-      <SSLKarti />
-      <AskidaKarti />
-      <IslerKarti yonetici={yonetici} />
-      <WebsecKarti />
+    <section aria-label={pt('Pano istatistikleri')} data-pano-izgara
+      className={cx('grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3',
+        !genis && 'md:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:[&>*:last-child:nth-child(3n+1)]:col-span-3 xl:[&>*:last-child:nth-child(3n+2)]:col-span-2')}>
+      {kartlar.filter(([id]) => !gizli.includes(id)).map(([id, k, sinif]) => (
+        <div key={id} data-pano-kart={id} className={cx('flex min-w-0 *:w-full', genis && sinif)}>{k}</div>
+      ))}
     </section>
   )
 }
