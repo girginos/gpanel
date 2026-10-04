@@ -6,8 +6,11 @@
 //   - Telegram webhook'u (gizli başlık doğrulamalı, yalnız özel sohbet) ve
 //     komutlar (/start <kod>, /hesaplarim, /durum, /insan, /dil, /unutbeni).
 //   - Ajan uçları: WSS ve uzun yoklama; kayıt → merkez imzalı meydan okuma →
-//     cihaz imzalı yanıt; eşleştirme (kod_ozet ↔ /start), bağlantı durumu,
-//     İMZALI iş emri → is_sonucu.
+//     cihaz imzalı yanıt (lisans bileti portal anahtarıyla doğrulanır); eşleştirme
+//     (portal iç API'sinden merkez-üretimli kod ↔ /start → İMZALI eslesme_onayla_v2),
+//     bağlantı durumu, İMZALI iş emri → is_sonucu.
+//   - Portal iç API'si (/ic/v1/*, yalnız loopback ic_dinle, Bearer sırrı): sunucu durumu,
+//     eşleştirme kodu, bağlantı listesi, bağlantı iptali (portal.go).
 //   - Claude orkestrasyonu: Haiku triyaj → Sonnet araç döngüsü → gerekirse
 //     Opus yükseltmesi → Haiku çıkış denetimi. Araç girdisi merkezde de
 //     protokol.AracGirdisiCoz ile doğrulanır (1. hat; bağlayıcı olan ajandır).

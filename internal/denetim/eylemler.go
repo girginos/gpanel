@@ -134,6 +134,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"destek.eslesme_kod":      {TR: "Telegram destek eşleştirme kodu üretildi", EN: "Telegram support pairing code created"},
 	"destek.eslesme_bekliyor": {TR: "Telegram hesabı eşleşti, onay bekliyor", EN: "Telegram account paired, awaiting approval"},
 	"destek.eslesme_onay":     {TR: "Telegram destek bağlantısı onaylandı", EN: "Telegram support connection approved"},
+	"destek.eslesme_portal":   {TR: "Telegram destek portaldan eşleştirildi", EN: "Telegram support paired from portal"},
 	"destek.baglanti_iptal":   {TR: "Telegram destek bağlantısı kaldırıldı", EN: "Telegram support connection removed"},
 	"destek.ayar":             {TR: "Telegram destek ayarı değişti", EN: "Telegram support settings changed"},
 	"destek.r0_ozet":          {TR: "Destek botu okuma işlemleri (özet)", EN: "Support bot read operations (summary)"},

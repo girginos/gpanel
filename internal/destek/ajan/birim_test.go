@@ -46,39 +46,6 @@ func TestGeriCekilmeSinirlar(t *testing.T) {
 	}
 }
 
-func TestKodDeposuTekKullanimVeSure(t *testing.T) {
-	simdi := time.Now()
-	d := yeniKodDeposu(func() time.Time { return simdi })
-	s := sahip{Rol: p.RolMusteri, DomainID: 42, FTPHesapID: 5}
-	k := kodKaydi{sahip: s, duzey: p.DuzeyOkuma, sureGun: 7, bitis: simdi.Add(10 * time.Minute)}
-	for i := 0; i < sahipKodSiniri; i++ {
-		if !d.sakla("oz"+string(rune('a'+i)), k) {
-			t.Fatalf("%d. kod saklanamadı", i)
-		}
-	}
-	if d.sakla("ozfazla", k) {
-		t.Fatal("sahip başına kod sınırı uygulanmadı")
-	}
-	diger := k
-	diger.sahip = sahip{Rol: p.RolMusteri, DomainID: 43, FTPHesapID: 6}
-	if !d.sakla("ozdiger", diger) {
-		t.Fatal("başka sahibin kodu sınırdan etkilendi")
-	}
-	if _, ok := d.tuket("oza"); !ok {
-		t.Fatal("geçerli kod tüketilemedi")
-	}
-	if _, ok := d.tuket("oza"); ok {
-		t.Fatal("kod İKİ KEZ tüketildi")
-	}
-	simdi = simdi.Add(10 * time.Minute)
-	if _, ok := d.tuket("ozb"); ok {
-		t.Fatal("süresi dolmuş kod tüketildi")
-	}
-	if len(d.gecerliler()) != 0 {
-		t.Fatal("süresi dolan kodlar temizlenmedi")
-	}
-}
-
 func TestSonucTemizleMaskeVeSinirlar(t *testing.T) {
 	kanarya := "KANARYA-SIR-0123456789abcdef"
 	a := Yeni(nil, Yapilandirma{})
@@ -116,7 +83,7 @@ func TestSonucTemizleMaskeVeSinirlar(t *testing.T) {
 
 // Denetim kataloğu: ajanın yazdığı her destek.* kodu ve her aracın denetim kodu etiketli.
 func TestDenetimKataloguDestekKodlari(t *testing.T) {
-	for _, k := range []string{dEslesmeKod, dEslesmeBekliyor, dEslesmeOnay, dBaglantiIptal, dAyar, dR0Ozet, dIsRed} {
+	for _, k := range []string{dEslesmePortal, dBaglantiIptal, dAyar, dR0Ozet, dIsRed} {
 		if !denetim.EylemEtiketiVar(k) {
 			t.Errorf("denetim kataloğunda etiket yok: %s", k)
 		}

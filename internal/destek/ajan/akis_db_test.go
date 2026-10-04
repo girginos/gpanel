@@ -8,7 +8,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -168,6 +171,8 @@ type ortam struct {
 	mB  string // müşteri B (domain 43, ftp 6, bayi 8)
 	mA2 string // müşteri A2 (domain 45, ftp 8, bayi 7)
 	mK  string // kök müşterisi (domain 44, ftp 7)
+
+	etkin map[string]*p.BaglantiDurum // kök (v2) eşleştirmesinin etkin durumu: kimlik → merkeze giden durum
 }
 
 func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
@@ -184,7 +189,7 @@ func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
 	a.ModulKontrolAraligi = 200 * time.Millisecond
 	y := &sahteYurutucu{}
 	a.Yurutucu = y
-	o := &ortam{t: t, db: db, m: m, a: a, y: y}
+	o := &ortam{t: t, db: db, m: m, a: a, y: y, etkin: map[string]*p.BaglantiDurum{}}
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
@@ -202,7 +207,7 @@ func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
 	o.mK = musteriJWT(t, 7, 44, "kmus", "kok.test", nil)
 	if modulAcik {
 		o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam", "bayi_duzey": "tam", "musteri_duzey": "tam"})
-		o.istekOK("PUT", "/destek/ayar", o.bA, map[string]any{"musteri_duzey": "tam"})
+		o.bayiAyar(7, p.DuzeyTam)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); time.Sleep(50 * time.Millisecond) })
@@ -287,19 +292,93 @@ func (o *ortam) bagliBekle() {
 	}
 }
 
-// eslestir: tok ile kod üretir, merkez imzalı eslesme_onayla gönderir; bekleyen bağlantı kimliği döner.
-func (o *ortam) eslestir(tok string, tgID int64, tgAd, duzey string) string {
+// bayiAyar: bayinin "müşterilerim kullanabilir" üst sınırı. Bayi artık panelden ayar değiştiremez
+// (kök-only); eski (bayi/müşteri) kayıtların düzey kuralı testi için satır doğrudan yazılır.
+func (o *ortam) bayiAyar(rid int64, d p.Duzey) {
 	o.t.Helper()
-	y := o.istekOK("POST", "/destek/eslestir", tok, map[string]any{"duzey": duzey, "sure_gun": 7})
-	kod := y.govde["kod"].(string)
-	oz, _ := p.EslesmeKoduOzet(kod)
-	o.m.bekle(p.TipKodOzet, func(g p.Govde) bool { return g.(*p.KodOzet).KodOzet == oz })
-	e := &p.EslesmeOnayla{KodOzet: oz, TgUserID: tgID, TgKullaniciAdi: tgAd}
+	if err := ayarYaz(context.Background(), o.db, rid, Ayar{ModulDuzey: p.DuzeyKapali, BayiDuzey: p.DuzeyKapali, MusteriDuzey: d}, "test"); err != nil {
+		o.t.Fatal(err)
+	}
+}
+
+// kokEslestir: GERÇEK portal yolu — merkez imzalı eslesme_onayla_v2 gönderir; ajan bağlantıyı
+// doğrudan etkin açar (kök). Etkin baglanti_durum'u beklenir; bağlantı kimliği döner.
+func (o *ortam) kokEslestir(tgID int64, tgAd, duzey string) string {
+	o.t.Helper()
+	e := o.v2(tgID, tgAd, duzey, 7)
 	o.m.imzala(e)
 	o.m.gonder(e)
 	bd := o.m.bekle(p.TipBaglantiDurum, func(g p.Govde) bool {
 		d := g.(*p.BaglantiDurum)
-		return d.KodOzet == oz && d.Durum == p.BaglantiOnayBekliyor
+		return d.KodOzet == e.KodOzet && d.Durum == p.BaglantiEtkin
+	}).(*p.BaglantiDurum)
+	o.etkin[bd.BaglantiID] = bd
+	return bd.BaglantiID
+}
+
+// v2: imzalanMAMIŞ eslesme_onayla_v2 (hedef = bu ajanın oturumundaki sunucu kimliği; taze kod özeti).
+func (o *ortam) v2(tgID int64, tgAd, duzey string, gun int) *p.EslesmeOnayla {
+	o.t.Helper()
+	ham := make([]byte, 16)
+	_, _ = rand.Read(ham)
+	oz := sha256.Sum256(ham)
+	return &p.EslesmeOnayla{KodOzet: hex.EncodeToString(oz[:]), TgUserID: tgID, TgKullaniciAdi: tgAd, SunucuKimligi: o.a.DurumAl().SunucuKimligi,
+		Duzey: p.Duzey(duzey), SureGun: gun, Onayli: true, PortalKullanici: "u_42", AydinlatmaSurum: "2026-10-04.1"}
+}
+
+// eskiKimlik: eski (bayi/müşteri) kayıt kimlikleri. Eşleştirme artık YALNIZ kök içindir; bu kayıtlar
+// ajan/arac kapsam, iz ve süpürge davranışının (kapsam sızıntısı, otomatik iptal) hâlâ doğru
+// çalıştığını doğrulamak için DOĞRUDAN veritabanına yazılır.
+type eskiKimlik struct {
+	rol                     p.Rol
+	dom, ftp, rid, panelUID int64
+}
+
+func (o *ortam) eskiKimligi(tok string) (eskiKimlik, bool) {
+	k := map[string]eskiKimlik{
+		o.mA:  {p.RolMusteri, 42, 5, 7, 0},
+		o.mB:  {p.RolMusteri, 43, 6, 8, 0},
+		o.mA2: {p.RolMusteri, 45, 8, 7, 0},
+		o.mK:  {p.RolMusteri, 44, 7, 0, 0},
+		o.bA:  {p.RolBayi, 0, 0, 7, 7},
+		o.bB:  {p.RolBayi, 0, 0, 8, 8},
+	}
+	v, ok := k[tok]
+	return v, ok
+}
+
+// eslestir: kök → gerçek v2 yolu (etkin döner); bayi/müşteri → eski 'bekliyor' kaydı (onayla ile aktifleşir).
+func (o *ortam) eslestir(tok string, tgID int64, tgAd, duzey string) string {
+	o.t.Helper()
+	if tok == o.kok {
+		return o.kokEslestir(tgID, tgAd, duzey)
+	}
+	k, ok := o.eskiKimligi(tok)
+	if !ok {
+		o.t.Fatal("bilinmeyen kimlik")
+	}
+	kimlik, _ := yeniKimlik()
+	ham := make([]byte, 16)
+	_, _ = rand.Read(ham)
+	oz := sha256.Sum256(ham)
+	ozet := hex.EncodeToString(oz[:])
+	var dom, ftp any
+	if k.rol == p.RolMusteri {
+		dom, ftp = k.dom, k.ftp
+	}
+	if _, err := o.db.Exec(`INSERT INTO destek_baglantilari (kimlik, kod_ozet, tg_user_id, tg_kullanici_adi, rol, domain_id, ftp_hesap_id,
+		reseller_id, panel_user_id, duzey, sure_gun, durum, olusturan) VALUES (?,?,?,?,?,?,?,?,?,?,7,'bekliyor','test-eski')`,
+		kimlik, ozet, tgID, tgAd, string(k.rol), dom, ftp, k.rid, k.panelUID, duzey); err != nil {
+		o.t.Fatal(err)
+	}
+	b, err := baglantiKimlikle(context.Background(), o.db, kimlik)
+	if err != nil {
+		o.t.Fatal(err)
+	}
+	o.a.durumBildir(context.Background(), b)
+	bd := o.m.bekle(p.TipBaglantiDurum, func(g p.Govde) bool {
+		d := g.(*p.BaglantiDurum)
+		return d.KodOzet == ozet && d.Durum == p.BaglantiOnayBekliyor
 	}).(*p.BaglantiDurum)
 	if bd.Duzey != p.DuzeyKapali || len(bd.Hesaplar) != 0 || bd.TgUserID != tgID {
 		o.t.Fatalf("onay bekleyen bağlantı kapsam taşıyor: %+v", bd)
@@ -307,9 +386,32 @@ func (o *ortam) eslestir(tok string, tgID int64, tgAd, duzey string) string {
 	return bd.BaglantiID
 }
 
+// onayla: kök → zaten etkin (saklanan durum); eski kayıt → ikinci onayın eski etkisi doğrudan uygulanır.
 func (o *ortam) onayla(tok, kimlik string) *p.BaglantiDurum {
 	o.t.Helper()
-	o.istekOK("POST", "/destek/baglantilar/"+kimlik+"/onayla", tok, map[string]any{"aydinlatma_surum": aydinlatmaSurum, "kabul": true})
+	if tok == o.kok {
+		bd := o.etkin[kimlik]
+		if bd == nil {
+			o.t.Fatal("kök bağlantısı etkin değil")
+		}
+		return bd
+	}
+	ctx := context.Background()
+	b, err := baglantiKimlikle(ctx, o.db, kimlik)
+	if err != nil {
+		o.t.Fatal(err)
+	}
+	kd, err := kimlikIzi(ctx, o.db, b.Rol, b.DomainID, b.FTPHesapID, b.PanelUserID)
+	if err != nil {
+		o.t.Fatal(err)
+	}
+	if _, err := o.db.Exec(`UPDATE destek_baglantilari SET durum='aktif', onaylayan='test-eski', onay_at=CURRENT_TIMESTAMP,
+		bitis=CURRENT_TIMESTAMP + INTERVAL sure_gun DAY, aydinlatma_surum='eski', aydinlatma_zamani=CURRENT_TIMESTAMP, durum_izi=?, iki_fa=?
+		WHERE id=? AND durum='bekliyor'`, kd.iz, kd.ikiFA, b.ID); err != nil {
+		o.t.Fatal(err)
+	}
+	yeni, _ := baglantiKimlikle(ctx, o.db, kimlik)
+	o.a.durumBildir(ctx, yeni)
 	return o.m.bekle(p.TipBaglantiDurum, func(g p.Govde) bool {
 		d := g.(*p.BaglantiDurum)
 		return d.BaglantiID == kimlik && d.Durum == p.BaglantiEtkin

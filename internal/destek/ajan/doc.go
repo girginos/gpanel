@@ -6,10 +6,13 @@
 //     (protokol.WSSYolu + alt protokol), kurulamazsa uzun yoklama; üstel geri çekilme
 //   - titreşim; panik panel sürecini düşürmez. Merkez meydan okuması panelde
 //     SABİTLENMİŞ merkez açık anahtarıyla doğrulanır (TLS Cloudflare'de sonlanır).
-//   - Eşleştirme: panel uçları kod üretir (10 dk, tek kullanımlık, bellekte yalnız
-//     SHA-256 özeti); merkez imzalı eslesme_onayla → bekleyen kayıt; panelde İKİNCİ
-//     ONAY (her rol) → aktif. İptal: panelden, Telegram'dan (/unutbeni) ve otomatik
-//     (internal/destek/iptal + kimlik izi denetimi).
+//   - Eşleştirme (v2, 2026-10-04): panelde YAPILMAZ — sunucu sahibi müşteri portalında
+//     (app.girginos.io) kod alır; merkez imzalı eslesme_onayla_v2 (düzey, süre, portal onayı,
+//     portal kullanıcısı imzayla kapsanır) gelince ajan bağlantıyı DOĞRUDAN etkin ve rol=kök
+//     açar (yerel kod ve panelde ikinci onay yok). Panel uçları yalnız KÖK içindir: durum,
+//     modül şalteri, liste, iptal. İptal: panelden, portaldan, Telegram'dan (/unutbeni) ve
+//     otomatik (internal/destek/iptal + kimlik izi denetimi). Kayıttaki lisans bileti merkezde
+//     doğrulanır; uzun oturum bileti tazelemek için BiletYenilemeAraligi'nda yeniden kurulur.
 //   - İş emri: imza/zaman/tekrar → yerel bağlantı kaydı → etkin düzey (min kuralı)
 //     → protokol.AracGirdisiCoz (YEREL kapsamla) → Yurutucu → maskeli IsSonucu.
 //     Merkezin iddiası kapsamı DEĞİŞTİRMEZ (yerel otorite).

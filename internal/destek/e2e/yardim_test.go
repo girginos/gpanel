@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"girginospanel/internal/auth"
 	"girginospanel/internal/destek/ajan"
 	"girginospanel/internal/destek/arac"
+	"girginospanel/internal/destek/bilet"
 	"girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/merkez"
 	"girginospanel/internal/destek/protokol"
@@ -42,6 +44,7 @@ var (
 	tgToken    = "123456789" + ":" + strings.Repeat("B", 35)
 	anthropic  = "sk-" + "ant-api03-E2ETESTANAHTARI-0123456789abcdef"
 	webhookGiz = "e2e-webhook-gizli-0123456789"
+	portalIc   = "e2e-portal-ic-anahtari-0123456789abcdef"
 
 	// kanaryaLog: TEST HESABININ günlüğündeki gizli değer (DB_PASSWORD=<kanarya>).
 	kanaryaLog = "Kanarya" + "E2E" + "log" + "7f3a9c1d5b"
@@ -428,6 +431,8 @@ type ortam struct {
 	cift    *protokol.AnahtarCifti
 	yur     arac.Yurutucu
 	yoklama bool
+	// portalSk: sahte portalın (lisans sunucusu) bilet imza anahtarı; açık yarısı hub yapılandırmasında.
+	portalSk ed25519.PrivateKey
 
 	amu       sync.Mutex
 	a         *ajan.Ajan
@@ -473,8 +478,15 @@ func kur(t *testing.T, yoklama bool, anahtarlar []ed25519.PublicKey) *ortam {
 	if os.Getenv("DESTEK_E2E_LOG") != "" {
 		logSeviye = slog.LevelDebug
 	}
-	o.m, err = merkez.Yeni(merkez.Secenekler{Yap: testYap(),
-		Sirlar: &merkez.Sirlar{TelegramToken: tgToken, AnthropicAnahtar: anthropic, WebhookGizli: webhookGiz, MerkezAnahtar: o.cift},
+	portalPub, portalSk, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.portalSk = portalSk
+	yap := testYap()
+	yap.PortalBiletAnahtarlari = []string{protokol.AcikAnahtarKodla(portalPub)}
+	o.m, err = merkez.Yeni(merkez.Secenekler{Yap: yap,
+		Sirlar: &merkez.Sirlar{TelegramToken: tgToken, AnthropicAnahtar: anthropic, WebhookGizli: webhookGiz, MerkezAnahtar: o.cift, PortalIcAnahtar: portalIc},
 		Depo:   o.depo, Claude: o.c, Telegram: merkez.YeniTelegramHTTP(tgToken, o.tg.srv.URL),
 		Log: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logSeviye}))})
 	if err != nil {
@@ -513,8 +525,13 @@ func kur(t *testing.T, yoklama bool, anahtarlar []ed25519.PublicKey) *ortam {
 
 	o.ajanBaslat(anahtarlar, func() {
 		o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam", "bayi_duzey": "tam", "musteri_duzey": "tam"})
-		o.istekOK("PUT", "/destek/ayar", o.bA, map[string]any{"musteri_duzey": "tam"})
-		o.istekOK("PUT", "/destek/ayar", jwtAt(t, 8, "bayi_b", "reseller"), map[string]any{"musteri_duzey": "tam"})
+		// Bayi artık panelden ayar değiştiremez (kök-only); eski (bayi/müşteri) kayıt senaryoları için
+		// bayilerin "müşterilerim kullanabilir" satırı doğrudan yazılır.
+		for _, rid := range []int{7, 8} {
+			if _, err := o.db.Exec(`INSERT INTO destek_ayar (reseller_id, musteri_duzey) VALUES (?, 'tam') ON DUPLICATE KEY UPDATE musteri_duzey='tam'`, rid); err != nil {
+				t.Fatal(err)
+			}
+		}
 	})
 	return o
 }
@@ -556,9 +573,9 @@ func (o *ortam) ajanBaslat(anahtarlar []ed25519.PublicKey, once func()) {
 	}
 	a := ajan.Yeni(o.db, ajan.Yapilandirma{MerkezURL: o.hub.URL, MerkezAnahtarlari: anahtarlar,
 		BotKullaniciAdi: "GirginTestBot", CihazAnahtarYolu: o.cihazYolu, GuvensizIzin: true, YoklamaZorla: o.yoklama,
-		// Faz 1: lisans bileti yoksa ajan açık işaret gönderir; merkez Faz 1'de kabul eder.
-		LisansIspati:    func() []byte { return []byte("bilet-yok") },
-		LisansParmakIzi: func() string { return strings.Repeat("cd", 32) }})
+		// Lisans sunucusunun (sahte portal) imzaladığı bilet: merkez parmak izini doğrular.
+		LisansIspati:    func() []byte { return o.bilet(e2eParmakIzi) },
+		LisansParmakIzi: func() string { return e2eParmakIzi }})
 	a.BilinenSirlar = []string{panelSirri}
 	a.ModulKontrolAraligi = 200 * time.Millisecond
 	a.YurutucuAyarla(o.yur)
@@ -577,6 +594,40 @@ func (o *ortam) ajanBaslat(anahtarlar []ed25519.PublicKey, once func()) {
 		once()
 	}
 	a.Baslat(ctx)
+}
+
+// e2eParmakIzi: test sunucusunun lisans parmak izi.
+var e2eParmakIzi = strings.Repeat("cd", 32)
+
+// bilet: sahte portalın imzaladığı geçerli lisans bileti (lisans sunucusundaki biletUret ile aynı biçim).
+func (o *ortam) bilet(fp string) []byte {
+	g := bilet.Govde{FP: fp, Urun: "gpanel-suite", Durum: bilet.DurumAktif,
+		Bitis: time.Now().Add(24 * time.Hour).Unix(), Iat: time.Now().Add(-time.Minute).Unix(), Pkt: "0"}
+	b, _ := json.Marshal(g)
+	e := base64.RawURLEncoding
+	return []byte(e.EncodeToString(b) + "." + e.EncodeToString(ed25519.Sign(o.portalSk, b)))
+}
+
+// portal: merkezin iç API'sine sahte portal çağrısı (secret boş → başlık yok).
+func (o *ortam) portal(yontem, yol string, govde any, secret string) (int, map[string]any) {
+	o.t.Helper()
+	var r io.Reader
+	if govde != nil {
+		b, _ := json.Marshal(govde)
+		r = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequest(yontem, o.ic.URL+yol, r)
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		o.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&m)
+	return resp.StatusCode, m
 }
 
 func (o *ortam) ajanDurdur() {
@@ -772,69 +823,76 @@ func (o *ortam) merkezBaglantisi(tg int64) (merkez.Baglanti, bool) {
 	return bs[0], true
 }
 
-// eslestir — senaryo (a): panelde kod → Telegram /start → panelde ikinci onay → KVKK → etkin.
-// ayrintili: onay ve KVKK öncesi mesajların Claude'a GİTMEDİĞİ de sınanır.
-func (o *ortam) eslestir(tok string, tg int64, ad, duzey string, ayrintili bool) string {
+// portalEslestir — GERÇEK portal akışı: sahte portal iç API'den kod ister → Telegram /start →
+// merkez imzalı eslesme_onayla_v2 → ajan bağlantıyı doğrudan etkin (kök) açar → KVKK portalda
+// alındığı için Telegram düğmesi YOK → kullanıcı doğrudan soru sorabilir.
+func (o *ortam) portalEslestir(tg int64, ad, duzey string) string {
 	o.t.Helper()
-	onceki := o.metrikSayi("bekleyen_kod")
-	y := o.istekOK("POST", "/destek/eslestir", tok, map[string]any{"duzey": duzey, "sure_gun": 7})
-	kod, _ := y.govde["kod"].(string)
-	gorunen, _ := y.govde["gorunen"].(string)
-	if y.govde["merkez_bagli"] != true || kod == "" || !strings.Contains(fmt.Sprint(y.govde["baglanti_url"]), "start="+kod) {
-		o.t.Fatalf("eşleştirme yanıtı: %s", y.ham)
+	d, m := o.portal("POST", "/ic/v1/eslesme-kodu", map[string]any{"parmak_izi": e2eParmakIzi, "duzey": duzey, "sure_gun": 7,
+		"portal_kullanici_id": "u_42", "aydinlatma_surum": "2026-10-04.1"}, portalIc)
+	kod, _ := m["kod"].(string)
+	if d != http.StatusOK || kod == "" {
+		o.t.Fatalf("eslesme-kodu: %d %v", d, m)
 	}
-	o.kosulBekle("merkez kod özetini aldı", 10*time.Second, func() bool { return o.metrikSayi("bekleyen_kod") > onceki })
-	// WSS'de kullanıcı paneldeki "ABCD-EFGH-…" biçimini küçük harfle yazar; yoklamada
-	// derin bağlantının ham kodu gelir. İkisi de protokol.EslesmeKoduOzet ile aynı özet.
+	// WSS'de kullanıcı "ABCD-EFGH-…" biçimini küçük harfle yazar; yoklamada derin bağlantının ham kodu gelir.
 	start := kod
 	if !o.yoklama {
-		start = strings.ToLower(gorunen)
+		start = strings.ToLower(protokol.EslesmeKoduGorunen(kod))
 	}
 	o.mesaj(tg, ad, "/start "+start)
-	o.tg.bekle(o.t, tg, "panelde onay")
-
 	var kimlik string
-	o.kosulBekle("panelde onay bekleyen bağlantı", 10*time.Second, func() bool {
-		for _, b := range o.panelBaglantilari(tok) {
-			if b.Durum == "bekliyor" && b.TgKullaniciAdi == ad {
-				kimlik = b.Kimlik
-				return true
-			}
+	o.kosulBekle("merkez etkin bağlantıyı aldı", 10*time.Second, func() bool {
+		b, ok := o.merkezBaglantisi(tg)
+		if ok && b.Durum == protokol.BaglantiEtkin {
+			kimlik = b.BaglantiID
+			return true
 		}
 		return false
 	})
-	o.kosulBekle("merkez onay bekleyen bağlantıyı bildi", 10*time.Second, func() bool {
-		b, ok := o.merkezBaglantisi(tg)
-		return ok && b.BaglantiID == kimlik && b.Durum == protokol.BaglantiOnayBekliyor
+	o.tg.bekle(o.t, tg, "Bağlantı hazır")
+	if o.tg.dugmeVerisi(tg, "kvkk:") != "" {
+		o.t.Fatal("portalda kabul edilen aydınlatma için Telegram KVKK düğmesi gönderildi")
+	}
+	b, _ := o.merkezBaglantisi(tg)
+	if b.KVKKKabul.IsZero() || b.KVKKKaynak != "portal" {
+		o.t.Fatalf("merkez KVKK kaydı: %+v", b)
+	}
+	return kimlik
+}
+
+// eslestir — kök (tok = o.kok): doğrudan portalEslestir. Bayi/müşteri eşleştirmesi KALDIRILDI; kapsam
+// senaryoları (müşteri A↛B, bayi hesap listesi) için bağlantı önce gerçek portal yoluyla açılır, sonra
+// DB satırı ESKİ bayi/müşteri kaydına çevrilir ve ajan durumu yeniden bildirir (eski kayıtlar için
+// ajan/arac/merkez kapsam davranışının bozulmadığının kanıtı).
+func (o *ortam) eslestir(tok string, tg int64, ad, duzey string, _ bool) string {
+	o.t.Helper()
+	kimlik := o.portalEslestir(tg, ad, duzey)
+	if tok == o.kok {
+		return kimlik
+	}
+	var rol string
+	var dom, ftp any
+	var rid, uid int64
+	switch tok {
+	case o.mA:
+		rol, dom, ftp, rid = "musteri", 42, 5, 7
+	case o.mB:
+		rol, dom, ftp, rid = "musteri", 43, 6, 8
+	case o.bA:
+		rol, rid, uid = "bayi", 7, 7
+	default:
+		o.t.Fatal("bilinmeyen eski kayıt kimliği")
+	}
+	if _, err := o.db.Exec(`UPDATE destek_baglantilari SET rol=?, domain_id=?, ftp_hesap_id=?, reseller_id=?, panel_user_id=?, durum_izi='', iki_fa=0,
+		olusturan='test-eski' WHERE kimlik=?`, rol, dom, ftp, rid, uid, kimlik); err != nil {
+		o.t.Fatal(err)
+	}
+	once, _ := o.merkezBaglantisi(tg)
+	o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam"}) // ajan aktif bağlantıları yeniden bildirir
+	o.kosulBekle("merkez eski kayıt kapsamını aldı", 10*time.Second, func() bool {
+		b, _ := o.merkezBaglantisi(tg)
+		return b.Guncelleme.After(once.Guncelleme) && string(b.Rol) == rol
 	})
-	if b, _ := o.merkezBaglantisi(tg); b.Duzey != protokol.DuzeyKapali || len(b.Hesaplar) != 0 {
-		o.t.Fatalf("onay bekleyen bağlantı kapsam taşıyor: %+v", b)
-	}
-	cagri := o.c.anaSayisi()
-	if ayrintili {
-		o.mesaj(tg, ad, "sitem açılmıyor")
-		o.tg.bekle(o.t, tg, "panel onayı bekliyor")
-	}
-	o.istekOK("POST", "/destek/baglantilar/"+kimlik+"/onayla", tok,
-		map[string]any{"aydinlatma_surum": ajan.AydinlatmaMetni().Surum, "kabul": true})
-	o.tg.bekle(o.t, tg, "Bağlantı etkin")
-	veri := o.tg.dugmeVerisi(tg, "kvkk:")
-	if veri == "" {
-		o.t.Fatal("KVKK düğmesi yok")
-	}
-	if ayrintili {
-		o.mesaj(tg, ad, "sitem açılmıyor")
-		o.tg.bekle(o.t, tg, "aydınlatma metnini kabul")
-	}
-	if o.c.anaSayisi() != cagri {
-		o.t.Fatal("onay/KVKK öncesi mesaj Claude'a gitti")
-	}
-	o.callback(tg, veri)
-	o.tg.bekle(o.t, tg, "Sorununuzu yazabilirsiniz")
-	b, ok := o.merkezBaglantisi(tg)
-	if !ok || b.Durum != protokol.BaglantiEtkin || b.KVKKKabul.IsZero() || b.BaglantiID != kimlik {
-		o.t.Fatalf("merkez bağlantısı etkin değil: %+v", b)
-	}
 	return kimlik
 }
 

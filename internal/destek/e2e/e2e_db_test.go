@@ -3,6 +3,7 @@ package e2e
 import (
 	"crypto/ed25519"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -115,6 +116,68 @@ func TestUcuncaUcEslesmeVeTeshis(t *testing.T) {
 	}
 }
 
+// Portal akışı uçtan uca (WSS ve uzun yoklama): sahte portal → /ic/v1/eslesme-kodu → Telegram /start →
+// ajan doğrudan etkin kök bağlantısı → soru yanıtlanır → portal listeler ve iptal eder. Ayrıca iç API
+// kimlik doğrulaması ve doğrulanmamış sunucunun kod alamaması.
+func TestPortalUctanUca(t *testing.T) {
+	for _, tasima := range []string{"wss", "yoklama"} {
+		t.Run(tasima, func(t *testing.T) {
+			o := kur(t, tasima == "yoklama", nil)
+			o.bagliBekle()
+			// Bearer: yok / yanlış → 401; yanlış sırla kod alınamaz
+			for _, sir := range []string{"", "yanlis-sir"} {
+				if d, _ := o.portal("POST", "/ic/v1/eslesme-kodu", map[string]any{"parmak_izi": e2eParmakIzi}, sir); d != http.StatusUnauthorized {
+					t.Fatalf("sır %q: %d", sir, d)
+				}
+			}
+			if d, m := o.portal("GET", "/ic/v1/sunucu?parmak_izi="+e2eParmakIzi, nil, portalIc); d != 200 || m["dogrulandi"] != true || m["cevrimici"] != true || m["bulundu"] != true {
+				t.Fatalf("sunucu durumu: %d %v", d, m)
+			}
+			kim := o.portalEslestir(tgA, "musteri_a", "okuma")
+
+			var rol, durum, olusturan string
+			if err := o.db.QueryRow(`SELECT rol, durum, olusturan FROM destek_baglantilari WHERE kimlik=?`, kim).Scan(&rol, &durum, &olusturan); err != nil {
+				t.Fatal(err)
+			}
+			if rol != "kok" || durum != "aktif" || olusturan != "portal:u_42" {
+				t.Fatalf("ajan DB satırı: %s %s %s", rol, durum, olusturan)
+			}
+			// soru yanıtlanır (KVKK düğmesi / panel onayı beklenmeden)
+			o.c.senaryo(func(n int, govde []byte) *merkez.ClaudeYanit {
+				if n == 0 {
+					return yanit("tool_use", aracBlok("toolu_p_1", "site_yokla", `{"hesap":1}`))
+				}
+				return yanit("end_turn", metinBlok("Teşhis: portal eşleştirmesiyle yanıt."))
+			})
+			o.mesaj(tgA, "musteri_a", "sitem açılmıyor")
+			o.tg.bekle(t, tgA, "Teşhis: portal eşleştirmesiyle")
+			if is := o.islemSonuclari(kim); !slices.Equal(is, []string{"site_yokla=ok"}) {
+				t.Fatalf("iş kayıtları: %q", is)
+			}
+			// portal listesi + iptal
+			d, m := o.portal("GET", "/ic/v1/baglantilar?parmak_izi="+e2eParmakIzi, nil, portalIc)
+			l, _ := m["baglantilar"].([]any)
+			if d != 200 || len(l) != 1 || l[0].(map[string]any)["baglanti_id"] != kim || l[0].(map[string]any)["kvkk_kaynak"] != "portal" {
+				t.Fatalf("portal listesi: %d %v", d, m)
+			}
+			if d, m := o.portal("POST", "/ic/v1/baglanti/iptal", map[string]any{"parmak_izi": e2eParmakIzi, "baglanti_id": kim}, portalIc); d != 200 || m["ajana_iletildi"] != true {
+				t.Fatalf("portal iptali: %d %v", d, m)
+			}
+			o.kosulBekle("ajan portal iptalini uyguladı", 10*time.Second, func() bool {
+				d, n := o.dbDurum(kim)
+				return d == "iptal" && n == string(protokol.IptalKullanici)
+			})
+			o.tg.bekle(t, tgA, "Destek bağlantınız kapatıldı (kullanici)")
+			n := o.c.anaSayisi()
+			o.mesaj(tgA, "musteri_a", "tekrar yazıyorum")
+			o.tg.bekle(t, tgA, "bağlı bir sunucunuz yok")
+			if o.c.anaSayisi() != n {
+				t.Fatal("iptal edilmiş bağlantı Claude'a gitti")
+			}
+		})
+	}
+}
+
 // (d) /unutbeni ve panelden iptal iki yönde yansır; ajan çevrimdışıyken /unutbeni
 // yeniden bağlanınca ajana da kapattırılır.
 func TestIptalIkiYonde(t *testing.T) {
@@ -134,9 +197,12 @@ func TestIptalIkiYonde(t *testing.T) {
 		t.Fatal("unutbeni sonrası merkezde bağlantı kaldı")
 	}
 
-	// panel → Telegram: bayi panelden iptal eder
+	// panel → Telegram: kök panelden iptal eder (bayi/müşteri panelden bağlantı yönetemez)
 	kimBayi := o.eslestir(o.bA, tgBayi, "bayi_a_tg", "okuma", false)
-	o.istekOK("POST", "/destek/baglantilar/"+kimBayi+"/iptal", o.bA, nil)
+	if y := o.istek("POST", "/destek/baglantilar/"+kimBayi+"/iptal", o.bA, nil); y.kod != 403 {
+		t.Fatalf("bayi panelden iptal edebildi: %d", y.kod)
+	}
+	o.istekOK("POST", "/destek/baglantilar/"+kimBayi+"/iptal", o.kok, nil)
 	o.tg.bekle(t, tgBayi, "Destek bağlantınız kapatıldı (kullanici)")
 	o.kosulBekle("merkez bağlantıyı sildi", 10*time.Second, func() bool { _, ok := o.merkezBaglantisi(tgBayi); return !ok })
 	n := o.c.anaSayisi()

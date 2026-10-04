@@ -38,13 +38,11 @@ type Yurutucu interface {
 
 // Denetim eylem kodları (literal sabitler: denetim kataloğu tarayıcısı çözebilsin).
 const (
-	dEslesmeKod      = "destek.eslesme_kod"
-	dEslesmeBekliyor = "destek.eslesme_bekliyor"
-	dEslesmeOnay     = "destek.eslesme_onay"
-	dBaglantiIptal   = "destek.baglanti_iptal"
-	dAyar            = "destek.ayar"
-	dR0Ozet          = "destek.r0_ozet"
-	dIsRed           = "destek.is_red"
+	dEslesmePortal = "destek.eslesme_portal"
+	dBaglantiIptal = "destek.baglanti_iptal"
+	dAyar          = "destek.ayar"
+	dR0Ozet        = "destek.r0_ozet"
+	dIsRed         = "destek.is_red"
 )
 
 // Bağlantı durumları (arayüz).
@@ -78,8 +76,12 @@ type Ajan struct {
 	IsZamanAsimi time.Duration
 	// ModulKontrolAraligi: oturum sırasında şalterin yeniden okunma aralığı.
 	ModulKontrolAraligi time.Duration
+	// BiletYenilemeAraligi: açık oturum bu sürede bir kapatılıp yeniden kurulur — kayıtta gönderilen
+	// lisans bileti (merkez doğrulamasının süresini belirler) diskteki taze biletle tazelensin diye.
+	// Lisans nabzı her ~6 saatte bileti yeniler; uzun ömürlü bağlantı eski biletle doğrulamasını
+	// yitirmesin.
+	BiletYenilemeAraligi time.Duration
 
-	kodlar      *kodDeposu
 	dogrulayici *p.Dogrulayici
 	cihaz       *p.AnahtarCifti
 	maske       *maske.Maskeleyici
@@ -95,8 +97,7 @@ type Ajan struct {
 
 // Yeni: ajanı kurar (çalıştırmaz).
 func Yeni(db *sql.DB, yap Yapilandirma) *Ajan {
-	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, ModulKontrolAraligi: 15 * time.Second}
-	a.kodlar = yeniKodDeposu(func() time.Time { return a.Saat() })
+	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, ModulKontrolAraligi: 15 * time.Second, BiletYenilemeAraligi: 12 * time.Hour}
 	a.durt = make(chan struct{}, 1)
 	a.isSem = make(chan struct{}, 4)
 	a.hesapIzi = map[string]string{}
@@ -432,6 +433,8 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 		defer tk.Stop()
 		modTk := time.NewTicker(a.ModulKontrolAraligi)
 		defer modTk.Stop()
+		yenileTk := time.NewTicker(a.BiletYenilemeAraligi)
+		defer yenileTk.Stop()
 		var sira uint64
 		for {
 			select {
@@ -440,6 +443,10 @@ func (a *Ajan) oturumCalistir(ctx context.Context) error {
 			case <-tk.C:
 				sira++
 				o.gonder(&p.KalpAtisi{Sira: sira, Zaman: a.Saat().Unix()})
+			case <-yenileTk.C:
+				log.Printf("destek: lisans bileti tazelemesi için merkez oturumu yeniden kuruluyor")
+				iptal()
+				return
 			case <-modTk.C:
 				if !modulAcik(sctx, a.DB) {
 					log.Printf("destek: modül kapatıldı — merkez bağlantısı kesiliyor")
@@ -544,9 +551,6 @@ func (a *Ajan) mesajIsle(ctx context.Context, o *oturum, veri []byte) {
 
 // senkron: bağlantı (yeniden) kurulunca merkezin bilmesi gereken durum.
 func (a *Ajan) senkron(ctx context.Context, o *oturum) {
-	for oz, bitis := range a.kodlar.gecerliler() {
-		o.gonder(&p.KodOzet{KodOzet: oz, SonGecerlilik: bitis.Unix()})
-	}
 	bs, err := baglantilarSorgu(ctx, a.DB, `durum IN ('bekliyor','aktif') ORDER BY id LIMIT 1000`)
 	if err != nil {
 		if !iptal.TabloYok(err) {
@@ -599,26 +603,60 @@ func (a *Ajan) durumBildir(ctx context.Context, b *baglanti) {
 
 // ---- merkezden gelen eşleştirme / iptal ----
 
+// Portal eşleştirmesi sınırları (sunucu sahibi = kök; bayi/müşteri eşleştirmesi YOK).
+const (
+	aktifBaglantiSiniri = 20 // sunucudaki toplam aktif destek bağlantısı
+	portalSahipOneki    = "portal:"
+)
+
+// kokYonetici: kök bağlantıların sahibi — panelin etkin ilk yöneticisi (users.role='admin').
+// Bağlantının kimlik izi (parola özeti, 2FA) bu kullanıcıdan alınır; parolası değişirse ya da
+// hesabı askıya alınırsa bağlantı mevcut süpürge/iz denetimiyle kendiliğinden kapanır.
+func (a *Ajan) kokYonetici(ctx context.Context) (int64, error) {
+	var id int64
+	err := a.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE role='admin' AND COALESCE(status,'active')='active' ORDER BY id LIMIT 1`).Scan(&id)
+	return id, err
+}
+
+// eslesmeOnayla: merkezin İMZALI v2 onayı (portal eşleştirmesi). Yerel kod YOKTUR: yetki,
+// imzayla kapsanan düzey/süre/portal onayından gelir. Bağlantı DOĞRUDAN etkin ve rol=kök açılır;
+// panelde ikinci onay adımı yoktur (sunucu sahibi portalda seçip aydınlatmayı kabul etti).
 func (a *Ajan) eslesmeOnayla(ctx context.Context, o *oturum, zk string, m *p.EslesmeOnayla) {
 	if err := a.dogrulayici.Dogrula(m); err != nil {
 		o.hata(zk, err)
 		return
 	}
-	k, ok := a.kodlar.tuket(m.KodOzet)
-	if !ok {
-		o.hata(zk, &p.Hata{Kod: p.HataEslesmeKodu, Ayrinti: "kod geçersiz, kullanılmış ya da süresi dolmuş"})
+	// Başka sunucuya yönlendirilmiş (ya da bu oturumun kimliğiyle uyuşmayan) onay reddedilir.
+	if kim := a.DurumAl().SunucuKimligi; kim == "" || kim != m.SunucuKimligi {
+		o.hata(zk, &p.Hata{Kod: p.HataYetki, Ayrinti: "onay başka sunucu için"})
 		return
 	}
-	if Tavan(ctx, a.DB, k.sahip.Rol, k.sahip.ResellerID) == p.DuzeyKapali {
+	if Tavan(ctx, a.DB, p.RolKok, 0) == p.DuzeyKapali {
 		o.hata(zk, &p.Hata{Kod: p.HataDevreDisi})
 		return
 	}
-	var bekleyen int
-	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM destek_baglantilari WHERE durum='bekliyor' AND rol=? AND
-		panel_user_id=? AND COALESCE(domain_id,0)=? AND COALESCE(ftp_hesap_id,0)=?`,
-		string(k.sahip.Rol), k.sahip.PanelUserID, k.sahip.DomainID, k.sahip.FTPHesapID).Scan(&bekleyen)
-	if bekleyen >= bekleyenSiniri {
-		o.hata(zk, &p.Hata{Kod: p.HataKota, Ayrinti: "onay bekleyen bağlantı çok"})
+	var aktif int
+	_ = a.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM destek_baglantilari WHERE durum IN ('aktif','bekliyor')`).Scan(&aktif)
+	if aktif >= aktifBaglantiSiniri {
+		o.hata(zk, &p.Hata{Kod: p.HataKota, Ayrinti: "aktif bağlantı sınırı"})
+		return
+	}
+	// Kod TEK KULLANIMLIKTIR: aynı kod özetiyle ikinci kayıt (yeniden iletim, başka Telegram
+	// kullanıcısı) açılmaz.
+	var var_ int
+	if a.DB.QueryRowContext(ctx, `SELECT 1 FROM destek_baglantilari WHERE kod_ozet=? LIMIT 1`, m.KodOzet).Scan(&var_) == nil {
+		o.hata(zk, &p.Hata{Kod: p.HataEslesmeKodu, Ayrinti: "kod daha önce kullanılmış"})
+		return
+	}
+	yonetici, err := a.kokYonetici(ctx)
+	if err != nil {
+		log.Printf("destek: kök yönetici bulunamadı: %v", err)
+		o.hata(zk, &p.Hata{Kod: p.HataDevreDisi})
+		return
+	}
+	kd, err := kimlikIzi(ctx, a.DB, p.RolKok, 0, 0, yonetici)
+	if err != nil || kd.neden != "" {
+		o.hata(zk, &p.Hata{Kod: p.HataDevreDisi})
 		return
 	}
 	kimlik, err := yeniKimlik()
@@ -626,16 +664,15 @@ func (a *Ajan) eslesmeOnayla(ctx context.Context, o *oturum, zk string, m *p.Esl
 		o.hata(zk, &p.Hata{Kod: p.HataIc})
 		return
 	}
-	var domainID, ftpID any
-	if k.sahip.Rol == p.RolMusteri {
-		domainID, ftpID = k.sahip.DomainID, k.sahip.FTPHesapID
-	}
+	sahip := kesRune(portalSahipOneki+m.PortalKullanici, 64)
 	_, err = a.DB.ExecContext(ctx, `INSERT INTO destek_baglantilari (kimlik, kod_ozet, tg_user_id, tg_kullanici_adi, rol, domain_id,
-		ftp_hesap_id, reseller_id, panel_user_id, duzey, sure_gun, durum, olusturan) VALUES (?,?,?,?,?,?,?,?,?,?,?,'bekliyor',?)`,
-		kimlik, m.KodOzet, m.TgUserID, m.TgKullaniciAdi, string(k.sahip.Rol), domainID, ftpID, k.sahip.ResellerID,
-		k.sahip.PanelUserID, string(k.duzey), k.sureGun, kesRune(k.olusturan, 64))
+		ftp_hesap_id, reseller_id, panel_user_id, duzey, sure_gun, bitis, durum, olusturan, onaylayan, onay_at, aydinlatma_surum,
+		aydinlatma_zamani, durum_izi, iki_fa) VALUES (?,?,?,?,'kok',NULL,NULL,0,?,?,?,CURRENT_TIMESTAMP + INTERVAL ? DAY,'aktif',?,?,
+		CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP,?,?)`,
+		kimlik, m.KodOzet, m.TgUserID, m.TgKullaniciAdi, yonetici, string(m.Duzey), m.SureGun, m.SureGun, sahip, sahip,
+		kesRune(m.AydinlatmaSurum, 32), kd.iz, kd.ikiFA)
 	if err != nil {
-		log.Printf("destek: bekleyen bağlantı yazılamadı: %v", err)
+		log.Printf("destek: portal bağlantısı yazılamadı: %v", err)
 		o.hata(zk, &p.Hata{Kod: p.HataIc})
 		return
 	}
@@ -644,7 +681,7 @@ func (a *Ajan) eslesmeOnayla(ctx context.Context, o *oturum, zk string, m *p.Esl
 		o.hata(zk, &p.Hata{Kod: p.HataIc})
 		return
 	}
-	a.denetimBot(ctx, b, dEslesmeBekliyor, "Telegram hesabı eşleşti, panel onayı bekleniyor", true)
+	a.denetimBot(ctx, b, dEslesmePortal, fmt.Sprintf("düzey=%s gün=%d aydınlatma=%s kaynak=portal", m.Duzey, m.SureGun, kesRune(m.AydinlatmaSurum, 32)), true)
 	a.durumBildir(ctx, b)
 }
 
