@@ -358,3 +358,21 @@ func sunucuBaslatYol(t *testing.T, yol string) {
 	}
 	t.Fatal("soket kurulmadı")
 }
+
+// Soket dizini başka bir kullanıcıya aitse köprü KURULMAZ (dizin sahibi soketi değiştirebilirdi).
+func TestKopruYabanciSahipliDizinReddedilir(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("chown için kök gerekir")
+	}
+	d := filepath.Join(kisaDizin(t), "s")
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(d, 4242, 4242); err != nil {
+		t.Skip("chown yapılamadı")
+	}
+	s := &Sunucu{Router: &kokRouter{}, Yol: filepath.Join(d, "k.sock")}
+	if err := s.Dinle(context.Background()); err == nil {
+		t.Fatal("yabancı sahipli dizinde köprü kuruldu")
+	}
+}
