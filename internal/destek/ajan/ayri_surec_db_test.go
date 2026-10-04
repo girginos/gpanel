@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -238,6 +239,15 @@ func TestTekOrnekKilidi(t *testing.T) {
 	st, _ := os.Stat(filepath.Dir(yol))
 	if st.Mode().Perm() != 0o700 {
 		t.Errorf("kilit dizini modu %v", st.Mode().Perm())
+	}
+	if fs, _ := os.Stat(yol); fs.Mode().Perm() != 0o600 {
+		t.Errorf("kilit dosyası modu %v", fs.Mode().Perm())
+	}
+	// SÜREÇLER ARASI: başka bir süreç (util-linux flock) tutulan kilidi alamamalı.
+	if _, err := exec.LookPath("flock"); err == nil {
+		if err := exec.Command("flock", "-n", yol, "true").Run(); err == nil {
+			t.Error("kilit tutulurken başka SÜREÇ kilidi aldı")
+		}
 	}
 	birinci()
 	üçüncü, err := TekOrnekKilidi(yol)
