@@ -38,6 +38,7 @@ function MerkezRozeti({ d }: { d: MerkezDurumu }) {
     case 'bagli': return <Badge color="success" variant="soft">{cevir('Bağlı')} · {d.tasima}</Badge>
     case 'baglaniyor': return <Badge color="info" variant="soft">{cevir('Bağlanıyor')}</Badge>
     case 'hata': return <Badge color="error" variant="soft">{cevir('Hata')}</Badge>
+    case 'ajan_yok': return <Badge color="error" variant="soft">{cevir('Destek servisi çalışmıyor')}</Badge>
     case 'yapilandirma_eksik': return <Badge color="warning" variant="soft">{cevir('Yapılandırma eksik')}</Badge>
     default: return <Badge variant="soft">{cevir('Kapalı')}</Badge>
   }
@@ -141,6 +142,16 @@ export default function TelegramDestekPage() {
             <Select label={cevir('Telegram destek modülü')} value={ayar.modul_duzey || 'kapali'} data={DUZEYLER.map(duzeySecenek)}
               onChange={(e) => setAyar({ ...ayar, modul_duzey: e.target.value as Duzey })} />
           </div>
+          {durum.ajan && !durum.ajan.canli && durum.baglanti?.durum === 'ajan_yok' && (
+            <p className="mt-4 text-xs text-error dark:text-error-light">
+              {cevir('Destek servisi (girginospanel-destek-ajan) çalışmıyor; Telegram desteği yanıt vermez. Sunucuda: systemctl restart girginospanel-destek-ajan')}
+            </p>
+          )}
+          {durum.ajan?.canli && durum.ajan.kopru === 'yok' && (
+            <p className="mt-4 text-xs text-slate-500">
+              {cevir('Panel köprüsü kapalı: panele bağlı tanılama araçları geçici olarak kullanılamaz (servis ve günlük araçları çalışır).')}
+            </p>
+          )}
           {durum.baglanti && (durum.baglanti.son_hata || durum.baglanti.cihaz_kimligi) && (
             <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               {durum.baglanti.cihaz_kimligi && (<><dt className="text-slate-500">{cevir('Cihaz kimliği')}</dt><dd className="font-mono text-slate-700 dark:text-dark-100">{durum.baglanti.cihaz_kimligi}</dd></>)}

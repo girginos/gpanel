@@ -10,7 +10,7 @@ export type DestekRol = 'musteri' | 'bayi' | 'kok'
 export type BaglantiDurumu = 'bekliyor' | 'aktif' | 'iptal'
 
 export interface MerkezDurumu {
-  durum: 'kapali' | 'yapilandirma_eksik' | 'baglaniyor' | 'bagli' | 'hata'
+  durum: 'kapali' | 'yapilandirma_eksik' | 'baglaniyor' | 'bagli' | 'hata' | 'ajan_yok'
   tasima: string
   son_hata: string
   son_baglanti: number
@@ -24,6 +24,15 @@ export interface DestekAyar {
   musteri_duzey?: Duzey
 }
 
+// Destek ajanı panelden AYRI hizmettir (girginospanel-destek-ajan); canlılığı DB nabzından gelir.
+export interface AjanDurumu {
+  canli: boolean
+  yas_sn: number
+  pid: number
+  surum: string
+  kopru: '' | 'tamam' | 'yok'
+}
+
 export interface DestekDurum {
   rol: DestekRol
   modul_acik: boolean
@@ -31,6 +40,7 @@ export interface DestekDurum {
   merkez_bagli: boolean
   ayar?: DestekAyar
   baglanti?: MerkezDurumu
+  ajan?: AjanDurumu
   eslestirme_url: string
 }
 

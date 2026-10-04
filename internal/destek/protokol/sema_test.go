@@ -21,7 +21,7 @@ var guncelle = flag.Bool("guncelle", false, "altın dosyaları ve önek özetler
 // Bilinçli değişiklikte: go test ./internal/destek/protokol/ -run Altin -guncelle → yeni değerleri buraya yaz.
 const (
 	altinToolsSHA  = "ef6ca5e6c8d25029a57a8a182e4faab25e62b737d67cca68a9f3c100a8e30189"
-	altinSistemSHA = "2511e0d51f9807f867c5fc06aae63827f8cb0dbb8ee8edfa9f10b34a97a50cf0"
+	altinSistemSHA = "c2a88d2e82eee8d73cf0d201d0dc639bc3aa49ac1552a4f09d2db22c41ba0b44"
 )
 
 func sha(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
