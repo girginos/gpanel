@@ -4,7 +4,13 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 
 const DESTEK_EN: Record<string, string> = {
   'Telegram Destek': 'Telegram Support',
-  'Hesabınızı Telegram destek botuna bağlayın: bot sorunu teşhis etmek için yalnız sizin seçtiğiniz kapsamda ve düzeyde günlükleri ve ayarları okur. Parolalar ve gizli değerler sunucudan çıkmadan maskelenir.': 'Connect your account to the Telegram support bot: to diagnose problems it reads logs and settings only within the scope and level you choose. Passwords and secret values are masked before they leave the server.',
+  'Telegram destek botu sorunu teşhis etmek için yalnız sizin seçtiğiniz kapsamda ve düzeyde günlükleri ve ayarları okur. Parolalar ve gizli değerler sunucudan çıkmadan maskelenir.': 'To diagnose problems the Telegram support bot reads logs and settings only within the scope and level you choose. Passwords and secret values are masked before they leave the server.',
+  'Modül varsayılan olarak kapalıdır. Açıldığında panel destek merkezine dışa doğru bağlanır; hiçbir bağlantı bu sınırın üzerinde yetki alamaz.': 'The module is off by default. When it is on, the panel connects outward to the support hub; no connection can get permissions above this limit.',
+  'Eşleştirme': 'Pairing',
+  "Eşleştirme app.girginos.io'dan yapılır.": 'Pairing is done at app.girginos.io.',
+  'Yalnız sunucunun sahibi (lisansın portal hesabı) sunucuyu seçip aydınlatma metnini kabul ederek eşleştirme kodu alabilir. Bu sayfada eşleştirme yapılamaz; panel kapalıyken de portaldan eşleştirilebilir. Aşağıdaki bağlantılar her zaman süreli (en çok 30 gün) olup parolanız değişirse, hesabınız askıya alınırsa ya da 2FA kapatılırsa kendiliğinden kaldırılır.': 'Only the server owner (the license\'s portal account) can get a pairing code, by selecting the server and accepting the privacy notice. Pairing cannot be done on this page; it works from the portal even while the panel is down. The connections below are always time-limited (at most 30 days) and are removed automatically if your password changes, your account is suspended or 2FA is turned off.',
+  'Portalı aç': 'Open the portal',
+  'Eski kayıt (onaysız)': 'Legacy record (unapproved)',
   'Yükleniyor…': 'Loading…',
   'Durum okunamadı': 'Could not load status',
   'Liste okunamadı': 'Could not load the list',

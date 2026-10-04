@@ -211,7 +211,6 @@ export default function App() {
         <Route path="denetim"              element={<DenetimPage />} />
         <Route path="api-anahtarlari"      element={<ApiAnahtarlariPage />} />
         <Route path="telegram-destek"      element={<TelegramDestekPage />} />
-        <Route path="abonelikler/:id/telegram-destek" element={<TelegramDestekPage />} />
         <Route path="bildirimler"         element={<BildirimlerPage />} />
         <Route path="saldiri-zincirleri"  element={<SaldiriZincirleriPage />} />
         <Route path="abonelikler"          element={<Navigate to="/domainler" replace />} />

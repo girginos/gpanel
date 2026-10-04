@@ -1,20 +1,13 @@
 // Telegram destek botu — panel uçları (internal/destek/ajan/handlers.go).
 //
-// 🔴 Eşleştirme kodu YALNIZ üretim yanıtında gelir; bileşen durumunda tutulur —
-// store'a, localStorage'a, URL'ye YAZILMAZ (Telegram bağlantısı t.me/<bot>?start=<kod>
-// yalnız kullanıcının tıklaması için çizilir).
+// 🔴 EŞLEŞTİRME BU PANELDE YAPILMAZ: sunucu sahibi müşteri portalında (app.girginos.io)
+// sunucuyu seçer, aydınlatmayı kabul eder ve kodu oradan alır (panel kapalıyken de çalışsın
+// diye). Panelde yalnız durum, kök şalteri, bağlantı listesi ve kaldırma vardır; hepsi YALNIZ kök.
 import { api } from '@/lib/api'
 
 export type Duzey = 'kapali' | 'okuma' | 'onarim' | 'tam'
 export type DestekRol = 'musteri' | 'bayi' | 'kok'
 export type BaglantiDurumu = 'bekliyor' | 'aktif' | 'iptal'
-
-export interface Aydinlatma {
-  surum: string
-  taslak: boolean
-  tr: string
-  en: string
-}
 
 export interface MerkezDurumu {
   durum: 'kapali' | 'yapilandirma_eksik' | 'baglaniyor' | 'bagli' | 'hata'
@@ -33,29 +26,12 @@ export interface DestekAyar {
 
 export interface DestekDurum {
   rol: DestekRol
-  adina: boolean
   modul_acik: boolean
   tavan: Duzey
-  bot_kullanici_adi: string
-  aydinlatma: Aydinlatma
-  sure_secenekleri: number[]
-  en_uzun_gun: number
-  varsayilan_gun: number
   merkez_bagli: boolean
-  kod_omru_sn: number
   ayar?: DestekAyar
   baglanti?: MerkezDurumu
-  musteri_ust_sinir?: Duzey
-}
-
-export interface EslesmeKodu {
-  kod: string
-  gorunen: string
-  bitis: number
-  gecerlilik: number
-  merkez_bagli: boolean
-  baglanti_url: string
-  qr: string
+  eslestirme_url: string
 }
 
 export interface DestekBaglantisi {
@@ -78,7 +54,6 @@ export interface DestekBaglantisi {
   iptal_eden: string
   iptal_at: number
   olusturma_at: number
-  benim: boolean
 }
 
 export async function destekDurum(): Promise<DestekDurum> {
@@ -89,16 +64,8 @@ export async function destekAyarKaydet(ayar: DestekAyar): Promise<void> {
   await api.put('/destek/ayar', ayar)
 }
 
-export async function destekEslestir(duzey: Duzey, sureGun: number): Promise<EslesmeKodu> {
-  return (await api.post<EslesmeKodu>('/destek/eslestir', { duzey, sure_gun: sureGun })).data
-}
-
 export async function destekBaglantilar(): Promise<DestekBaglantisi[]> {
   return (await api.get<{ baglantilar: DestekBaglantisi[] }>('/destek/baglantilar')).data.baglantilar || []
-}
-
-export async function destekOnayla(kimlik: string, aydinlatmaSurum: string): Promise<void> {
-  await api.post(`/destek/baglantilar/${encodeURIComponent(kimlik)}/onayla`, { aydinlatma_surum: aydinlatmaSurum, kabul: true })
 }
 
 export async function destekIptal(kimlik: string): Promise<void> {

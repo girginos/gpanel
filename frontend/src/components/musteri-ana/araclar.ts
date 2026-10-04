@@ -90,7 +90,6 @@ export const MUSTERI_ARACLAR: MusteriArac[] = [
   // Gelişmiş
   { kod: 'cron', ad: 'Zamanlanmış Görevler', aciklama: 'Cron işleri', ikon: 'saat', kapsam: 'hesap', kategori: 'gelismis', yol: 'cron', anahtar: ['cron', 'zamanla', 'görev', 'schedule', 'crontab'] },
   { kod: 'gunlukler', ad: 'Günlükler', aciklama: 'Erişim ve hata günlükleri', ikon: 'dosya', kapsam: 'alan', kategori: 'gelismis', yol: 'gunlukler', altYol: 'gunlukler', anahtar: ['log', 'günlük', 'hata', 'error', 'access', 'erişim'] },
-  { kod: 'telegram-destek', ad: 'Telegram Destek', aciklama: 'Destek botunu hesabınıza bağlayın', ikon: 'gonder', kapsam: 'hesap', kategori: 'gelismis', yol: 'telegram-destek', anahtar: ['telegram', 'destek', 'bot', 'support', 'yardım'] },
   { kod: 'istatistik', ad: 'İstatistikler', aciklama: 'Ziyaret ve trafik', ikon: 'grafik', kapsam: 'alan', kategori: 'gelismis', yol: 'istatistik', altYol: 'istatistik', anahtar: ['istatistik', 'ziyaret', 'trafik', 'stats', 'analytics'] },
 ]
 

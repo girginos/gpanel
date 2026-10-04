@@ -158,7 +158,6 @@ const RESELLER_NAV: NavGroup[] = [
     { to: '/denetim',             etiket: 'Denetim Kaydı',       ikon: ICONS.denetim },
     { to: '/profil',              etiket: 'Profil ve Tercihler', ikon: ICONS.profil },
     { to: '/api-anahtarlari',     etiket: 'API Anahtarları',     ikon: ICONS.anahtar },
-    { to: '/telegram-destek',     etiket: 'Telegram Destek',     ikon: ICONS.telegram },
   ]},
 ]
 
