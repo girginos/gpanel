@@ -7,7 +7,7 @@ import "fmt"
 // değişemez, tersi de).
 // TODO(KVKK): portal aydınlatma metni sürümü "taslak-2"ye geçtiğinde bot metni portalla eşitlenecek
 // (tek kaynak); o adımda hem metin hem bu sabit birlikte güncellenir. Metin içeriği bu işte DEĞİŞMEDİ.
-const KvkkMetinSurumu = "taslak-1"
+const KvkkMetinSurumu = "taslak-2"
 
 // KvkkKaynakTelegram — Baglanti.KVKKKaynak: kabul bot içi düğmeyle alındı (portal: "portal").
 const KvkkKaynakTelegram = "telegram"
@@ -32,8 +32,8 @@ var metinler = map[string][2]string{
 	"onay_bekliyor":    {"Bağlantınız henüz etkinleşmedi; eşleştirmeyi app.girginos.io üzerinden yeniden başlatın.", "Your link is not active yet; please restart pairing from app.girginos.io."},
 	"destek_kapali":    {"Bu sunucuda destek botu yerel olarak kapatılmış (yönetici tarafından).", "The support bot has been switched off locally on this server (by the administrator)."},
 	"kvkk": {
-		"<b>Bağlantı etkin: %s</b>\n\n<b>Aydınlatma metni (taslak — hukuki onay bekliyor)</b> — sürüm: taslak-1\nSorununuzu teşhis etmek için sunucunuzdan alınan maskelenmiş günlük ve durum bilgileri, yanıt üretimi amacıyla yurt dışındaki yapay zekâ sağlayıcısına (Anthropic) aktarılır. Konuşma kayıtları maskelenerek 30 gün saklanır. /unutbeni ile bağlantılarınızı ve kayıtlarınızı silebilirsiniz.\n\nDevam etmek için kabul edin.",
-		"<b>Link active: %s</b>\n\n<b>Privacy notice (draft — pending legal approval)</b> — version: taslak-1\nTo diagnose your issue, masked log and status data from your server is sent to an AI provider abroad (Anthropic) to generate answers. Conversation records are masked and kept for 30 days. Use /unutbeni to delete your links and records.\n\nPlease accept to continue.",
+		"<b>Bağlantı etkin: %s</b>\n\n<b>Aydınlatma metni (taslak — hukuki onay bekliyor)</b> — sürüm: taslak-2\nSorununuzu teşhis etmek için sunucunuzdan alınan günlük ve durum bilgileri ile yazdığınız mesajlar, otomatik maskelenerek Telegram üzerinden iletilir ve yanıt üretimi amacıyla yurt dışındaki yapay zekâ sağlayıcısına (Anthropic, ABD) aktarılır. Maskeleme otomatiktir ve kusursuz değildir; parola, kart, IBAN gibi bilgileri yazmayın. Konuşma kayıtları maskelenerek 30 gün saklanır. /unutbeni ile Telegram kullanıcı numaranız, kullanıcı adınız, bağlantılarınız ve konuşma kayıtlarınız silinir (Telegram'ın kendi sohbet geçmişi ve sağlayıcıların kayıtları bizim silebildiğimiz veriler değildir). Tam metin ve haklarınız: app.girginos.io → Telegram Destek.\n\nDevam etmek için kabul edin.",
+		"<b>Link active: %s</b>\n\n<b>Privacy notice (draft — pending legal approval)</b> — version: taslak-2\nTo diagnose your issue, log and status data from your server and the messages you write are automatically masked, sent via Telegram, and transferred to an AI provider abroad (Anthropic, USA) to generate answers. Masking is automatic and not perfect; do not type passwords, card numbers, IBANs or similar. Conversation records are masked and kept for 30 days. /unutbeni deletes your Telegram user ID, username, links and conversation records (Telegram's own chat history and the providers' records are not data we can delete). Full text and your rights: app.girginos.io → Telegram Support.\n\nPlease accept to continue.",
 	},
 	"baglanti_hazir":      {"<b>Bağlantı hazır: %s</b>\n\nAydınlatma metnini sunucu sahibi olarak müşteri portalında kabul ettiniz. Sorununuzu yazabilirsiniz.", "<b>Link ready: %s</b>\n\nYou accepted the privacy notice as the server owner in the customer portal. You can describe your issue now."},
 	"sunucu_dogrulanmadi": {"Sunucunuzun lisansı doğrulanamadığı için eşleştirme yapılamadı. Portaldan sunucunuzun lisansını kontrol edip yeni kod oluşturun.", "The pairing could not be completed because your server's license could not be verified. Check the license in the portal and create a new code."},
