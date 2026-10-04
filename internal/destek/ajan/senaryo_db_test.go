@@ -8,16 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"girginospanel/internal/auth"
 	"girginospanel/internal/destek/arac"
 	"girginospanel/internal/destek/iptal"
 	p "girginospanel/internal/destek/protokol"
 )
 
-// Eşleştirme uçtan uca (WSS ve uzun yoklama): kod → merkez imzalı onay → bekleyen →
-// panelde ikinci onay → etkin + hesap listesi → iş emri → yürütücü YEREL kapsamla →
-// maskeli sonuç → iş kaydı + denetim.
-func TestAkisMusteriEslesmeUctanUca(t *testing.T) {
+// Portal eşleştirmesi uçtan uca (WSS ve uzun yoklama): merkez imzalı eslesme_onayla_v2 →
+// bağlantı DOĞRUDAN etkin + rol=kök (yerel kod / panel onayı YOK) → iş emri → yürütücü YEREL
+// kapsamla → maskeli sonuç → iş kaydı + denetim → panelden iptal.
+func TestAkisPortalEslesmeUctanUca(t *testing.T) {
 	for _, tur := range []struct {
 		ad      string
 		yoklama bool
@@ -27,60 +26,47 @@ func TestAkisMusteriEslesmeUctanUca(t *testing.T) {
 			if d := o.a.DurumAl(); d.Tasima != map[bool]string{false: "wss", true: "yoklama"}[tur.yoklama] {
 				t.Fatalf("taşıma: %+v", d)
 			}
-			y := o.istekOK("POST", "/destek/eslestir", o.mA, map[string]any{"duzey": "okuma", "sure_gun": 7})
-			kod := y.govde["kod"].(string)
-			if u := y.govde["baglanti_url"].(string); u != "https://t.me/GirginTestBot?start="+kod {
-				t.Fatalf("bağlantı: %s", u)
+			// Kaldırılan uçlar: kod üretme ve panelde onay artık YOK.
+			for _, u := range []struct{ yontem, yol string }{{"POST", "/destek/eslestir"}, {"POST", "/destek/baglantilar/AAAAAAAAAAAAAAAAAAAAAA/onayla"}} {
+				if y := o.istek(u.yontem, u.yol, o.kok, map[string]any{"duzey": "okuma", "sure_gun": 7}); y.kod != 404 && y.kod != 405 {
+					t.Fatalf("%s %s hâlâ var: %d", u.yontem, u.yol, y.kod)
+				}
 			}
-			if !strings.HasPrefix(y.govde["qr"].(string), "data:image/png;base64,") || y.govde["merkez_bagli"] != true {
-				t.Fatalf("qr/merkez: %v", y.ham)
-			}
-			oz, _ := p.EslesmeKoduOzet(kod)
-			ko := o.m.bekle(p.TipKodOzet, nil).(*p.KodOzet)
-			if ko.KodOzet != oz || strings.Contains(o.m.srv.URL, kod) {
-				t.Fatalf("merkeze özet yerine başka şey gitti: %+v", ko)
-			}
-			e := &p.EslesmeOnayla{KodOzet: oz, TgUserID: 111222333, TgKullaniciAdi: "musteri_a"}
+			e := o.v2(111222333, "musteri_a", "okuma", 7)
 			o.m.imzala(e)
 			o.m.gonder(e)
 			bd := o.m.bekle(p.TipBaglantiDurum, nil).(*p.BaglantiDurum)
-			if bd.Durum != p.BaglantiOnayBekliyor || bd.Duzey != p.DuzeyKapali || len(bd.Hesaplar) != 0 || bd.Rol != p.RolMusteri {
-				t.Fatalf("bekleyen: %+v", bd)
+			// Doğrudan etkin: 'bekliyor' ara durumu YOK; kök rolü; düzey imzalı mesajdan; tüm hesaplar.
+			if bd.Durum != p.BaglantiEtkin || bd.Rol != p.RolKok || bd.Duzey != p.DuzeyOkuma || bd.KodOzet != e.KodOzet || len(bd.Hesaplar) != 4 {
+				t.Fatalf("etkin bağlantı: %+v", bd)
 			}
 			kim := bd.BaglantiID
-
-			// Onaysız bağlantıya iş emri: panel_onayi_bekliyor, yürütücü çağrılmaz.
-			e1 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)
-			o.m.gonder(e1)
-			if s := o.m.isSonucu(e1.IsKodu); s.Ok || s.HataKodu != p.HataOnayBekliyor {
-				t.Fatalf("onaysız iş: %+v", s)
+			var rol, durum, olusturan, onaylayan, ayd string
+			var panelUID, sureGun int64
+			var bitisVar, onayVar bool
+			if err := o.db.QueryRow(`SELECT rol, durum, olusturan, onaylayan, aydinlatma_surum, panel_user_id, sure_gun, bitis IS NOT NULL, onay_at IS NOT NULL
+				FROM destek_baglantilari WHERE kimlik=?`, kim).Scan(&rol, &durum, &olusturan, &onaylayan, &ayd, &panelUID, &sureGun, &bitisVar, &onayVar); err != nil {
+				t.Fatal(err)
+			}
+			if rol != "kok" || durum != durumAktif || olusturan != "portal:u_42" || onaylayan != "portal:u_42" || ayd != "2026-10-04.1" || panelUID != 1 || sureGun != 7 || !bitisVar || !onayVar {
+				t.Fatalf("DB satırı: %s %s %s %s %s uid=%d gün=%d bitis=%v onay=%v", rol, durum, olusturan, onaylayan, ayd, panelUID, sureGun, bitisVar, onayVar)
 			}
 
-			// Kapsam: müşteri B ve bayi B görmez/onaylayamaz; bayi A görür ama sahibi değil → onaylayamaz.
-			if y := o.istekOK("GET", "/destek/baglantilar", o.mB, nil); len(y.govde["baglantilar"].([]any)) != 0 {
-				t.Fatalf("müşteri B A'nın bağlantısını gördü: %s", y.ham)
-			}
-			govde := map[string]any{"aydinlatma_surum": aydinlatmaSurum, "kabul": true}
-			for _, tok := range []string{o.mB, o.bB, o.bA, o.mA2} {
-				if y := o.istek("POST", "/destek/baglantilar/"+kim+"/onayla", tok, govde); y.kod != 404 {
-					t.Fatalf("sahibi olmayan onayladı: %d %s", y.kod, y.ham)
+			// Panel uçları kök-only: bayi ve müşteri 403.
+			for _, tok := range []string{o.bA, o.mA} {
+				for _, u := range []struct{ yontem, yol string }{{"GET", "/destek/durum"}, {"GET", "/destek/baglantilar"}, {"POST", "/destek/baglantilar/" + kim + "/iptal"}, {"PUT", "/destek/ayar"}} {
+					if y := o.istek(u.yontem, u.yol, tok, map[string]any{"musteri_duzey": "tam"}); y.kod != 403 {
+						t.Fatalf("bayi/müşteri %s %s: %d (beklenen 403)", u.yontem, u.yol, y.kod)
+					}
 				}
 			}
-			if y := o.istekOK("GET", "/destek/baglantilar", o.bA, nil); len(y.govde["baglantilar"].([]any)) != 1 {
-				t.Fatalf("bayi A müşterisinin bağlantısını görmeli: %s", y.ham)
+			y := o.istekOK("GET", "/destek/baglantilar", o.kok, nil)
+			l := y.govde["baglantilar"].([]any)
+			if len(l) != 1 || l[0].(map[string]any)["olusturan"] != "portal:u_42" || l[0].(map[string]any)["durum"] != "aktif" {
+				t.Fatalf("kök listesi: %s", y.ham)
 			}
-			if y := o.istek("POST", "/destek/baglantilar/"+kim+"/onayla", o.mA, map[string]any{"aydinlatma_surum": "eski", "kabul": true}); y.kod != 400 {
-				t.Fatalf("eski aydınlatma sürümü kabul edildi: %d", y.kod)
-			}
-			// Müşteri ADINA oturum (bayi "panele gir") onaylayamaz.
-			adina := musteriJWT(t, 5, 42, "amus", "a.test", &auth.MusteriClaims{AktorUID: 7, AktorAd: "bayi_a", AktorRol: "reseller", AktorRID: 7})
-			if y := o.istek("POST", "/destek/baglantilar/"+kim+"/onayla", adina, govde); y.kod != 403 {
-				t.Fatalf("adına oturum onayladı: %d %s", y.kod, y.ham)
-			}
-
-			et := o.onayla(o.mA, kim)
-			if et.Duzey != p.DuzeyOkuma || len(et.Hesaplar) != 1 || et.Hesaplar[0] != (p.HesapEtiketi{Sira: 1, Etiket: "a.test"}) {
-				t.Fatalf("etkin bağlantı: %+v", et)
+			if d := o.istekOK("GET", "/destek/durum", o.kok, nil); d.govde["eslestirme_url"] != "https://app.girginos.io" || d.govde["rol"] != "kok" {
+				t.Fatalf("durum: %s", d.ham)
 			}
 
 			e2 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)
@@ -94,53 +80,29 @@ func TestAkisMusteriEslesmeUctanUca(t *testing.T) {
 				t.Fatalf("sonuç maskelenmedi: %q", tum)
 			}
 			c := o.y.son()
-			if !c.ok || c.kap.DomainID != 42 || c.kap.FTPHesapID != 5 || c.kap.ResellerID != 7 || c.kap.Aktor != "destek-bot (tg:@musteri_a)" ||
-				len(c.ob.Hesaplar) != 1 || c.ob.Hesaplar[0].Etiket != "a.test" || c.ob.Rol != p.RolMusteri || c.ob.Duzey != p.DuzeyOkuma {
+			if !c.ok || c.kap.Aktor != "destek-bot (tg:@musteri_a)" || c.ob.Rol != p.RolKok || c.ob.Duzey != p.DuzeyOkuma || len(c.ob.Hesaplar) != 4 {
 				t.Fatalf("yürütücü bağlamı: %+v", c)
 			}
-			if h, ok := c.kap.HesapDomain(1); !ok || h != 42 {
-				t.Fatal("hesap → domain eşlemesi")
-			}
-
-			// Kapsam dışı hesap (2) → kapsam_disi, yürütücü çağrılmaz, red denetime geçer.
+			// Düzey okuma: R1/R2 araç reddedilir; hesap sırası dışı → kapsam_disi. Yürütücü çağrılmaz.
 			n := o.y.sayi()
-			e3 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":2}`)
+			e3 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":9}`)
 			o.m.gonder(e3)
 			if s := o.m.isSonucu(e3.IsKodu); s.Ok || s.HataKodu != p.HataKapsam {
 				t.Fatalf("kapsam dışı: %+v", s)
 			}
-			// Müşteri kök aracı çağıramaz.
-			e4 := o.m.isEmri(kim, "sunucu_log_oku", `{"kaynak":"nginx_error"}`)
-			o.m.gonder(e4)
-			if s := o.m.isSonucu(e4.IsKodu); s.Ok || (s.HataKodu != p.HataYetki && s.HataKodu != p.HataParam) {
-				t.Fatalf("müşteri kök aracı: %+v", s)
-			}
 			if o.y.sayi() != n {
 				t.Fatal("reddedilen iş yürütücüye ulaştı")
 			}
-
-			var ok, red int
-			_ = o.db.QueryRow(`SELECT SUM(sonuc='ok'), SUM(sonuc<>'ok') FROM destek_islemleri`).Scan(&ok, &red)
-			if ok != 1 || red != 2 {
-				t.Fatalf("iş kayıtları ok=%d red=%d", ok, red)
-			}
-			if o.denetimSay(dEslesmeKod, "musteri:42") != 1 || o.denetimSay(dEslesmeBekliyor, "destek-bot (tg:@musteri_a)") != 1 ||
-				o.denetimSay(dEslesmeOnay, "musteri:42") != 1 || o.denetimSay(dIsRed, "destek-bot") != 2 {
+			if o.denetimSay(dEslesmePortal, "destek-bot (tg:@musteri_a)") != 1 || o.denetimSay(dIsRed, "destek-bot") != 1 {
 				t.Fatal("denetim kayıtları eksik")
 			}
-			// R0 özet: işler tek denetim satırına toplanır.
 			o.a.R0Ozet(context.Background())
 			if o.denetimSay(dR0Ozet, "destek-bot (tg:@musteri_a)") != 1 {
 				t.Fatal("R0 özeti yazılmadı")
 			}
-			var kalan int
-			_ = o.db.QueryRow(`SELECT COUNT(*) FROM destek_islemleri WHERE denetim_ozet=0`).Scan(&kalan)
-			if kalan != 0 {
-				t.Fatalf("özetlenmemiş R0 kaydı kaldı: %d", kalan)
-			}
 
 			// Panelden iptal → merkeze bildirim; iptal sonrası iş emri reddedilir.
-			o.istekOK("POST", "/destek/baglantilar/"+kim+"/iptal", o.mA, nil)
+			o.istekOK("POST", "/destek/baglantilar/"+kim+"/iptal", o.kok, nil)
 			o.m.bekle(p.TipBaglantiIptal, func(g p.Govde) bool {
 				i := g.(*p.BaglantiIptal)
 				return i.BaglantiID == kim && i.Neden == p.IptalKullanici
@@ -154,51 +116,134 @@ func TestAkisMusteriEslesmeUctanUca(t *testing.T) {
 	}
 }
 
-// Kod: süresi dolmuş, yeniden kullanılmış ve aynı imzalı mesajın tekrarı reddedilir.
-func TestKodSuresiVeTekrar(t *testing.T) {
+// Eski (bayi/müşteri) kayıtlar: eşleştirme KALDIRILDI ama ajan/arac kapsam davranışı bu kayıtlar
+// için de bozulmamalı (müşteri A↛B, kök aracı yasak, kapsam dışı hesap). Satırlar DB'ye doğrudan yazılır.
+func TestEskiKayitKapsami(t *testing.T) {
 	o := kurOrtam(t, false, true)
-	y := o.istekOK("POST", "/destek/eslestir", o.mA, map[string]any{"duzey": "okuma", "sure_gun": 1})
-	oz, _ := p.EslesmeKoduOzet(y.govde["kod"].(string))
-	eski := o.a.kodlar.saat
-	o.a.kodlar.saat = func() time.Time { return time.Now().Add(p.EslesmeKoduOmru + time.Second) }
-	e := &p.EslesmeOnayla{KodOzet: oz, TgUserID: 5, TgKullaniciAdi: "musteri_a"}
-	o.m.imzala(e)
-	zk, _ := o.m.gonder(e)
-	if h := o.m.hata(zk); h.Kod != p.HataEslesmeKodu {
-		t.Fatalf("süresi dolmuş kod: %+v", h)
+	kim := o.eslestir(o.mA, 111222333, "musteri_a", "okuma")
+	o.m.gonder(o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)) // onaysız: panel_onayi_bekliyor
+	e1 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)
+	o.m.gonder(e1)
+	if s := o.m.isSonucu(e1.IsKodu); s.Ok || s.HataKodu != p.HataOnayBekliyor {
+		t.Fatalf("onaysız iş: %+v", s)
 	}
-	o.a.kodlar.saat = eski
+	et := o.onayla(o.mA, kim)
+	if et.Duzey != p.DuzeyOkuma || len(et.Hesaplar) != 1 || et.Hesaplar[0] != (p.HesapEtiketi{Sira: 1, Etiket: "a.test"}) {
+		t.Fatalf("etkin bağlantı: %+v", et)
+	}
+	e2 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)
+	o.m.gonder(e2)
+	if s := o.m.isSonucu(e2.IsKodu); !s.Ok {
+		t.Fatalf("iş başarısız: %+v", s)
+	}
+	c := o.y.son()
+	if !c.ok || c.kap.DomainID != 42 || c.kap.FTPHesapID != 5 || c.kap.ResellerID != 7 || c.ob.Rol != p.RolMusteri {
+		t.Fatalf("yürütücü bağlamı: %+v", c)
+	}
+	n := o.y.sayi()
+	e3 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":2}`)
+	o.m.gonder(e3)
+	if s := o.m.isSonucu(e3.IsKodu); s.Ok || s.HataKodu != p.HataKapsam {
+		t.Fatalf("kapsam dışı: %+v", s)
+	}
+	e4 := o.m.isEmri(kim, "sunucu_log_oku", `{"kaynak":"nginx_error"}`)
+	o.m.gonder(e4)
+	if s := o.m.isSonucu(e4.IsKodu); s.Ok || (s.HataKodu != p.HataYetki && s.HataKodu != p.HataParam) {
+		t.Fatalf("müşteri kök aracı: %+v", s)
+	}
+	if o.y.sayi() != n {
+		t.Fatal("reddedilen iş yürütücüye ulaştı")
+	}
+}
 
-	kim := o.eslestir(o.mA, 6, "musteri_a", "okuma")
-	_ = kim
-	// Aynı kod (yeni nonce ile yeniden imzalı) ikinci kez: tek kullanımlık.
-	var oz2 string
-	_ = o.db.QueryRow(`SELECT kod_ozet FROM destek_baglantilari WHERE kimlik=?`, kim).Scan(&oz2)
-	e2 := &p.EslesmeOnayla{KodOzet: oz2, TgUserID: 999, TgKullaniciAdi: "saldirgan_x"}
-	o.m.imzala(e2)
-	zk2, ham := o.m.gonder(e2)
-	if h := o.m.hata(zk2); h.Kod != p.HataEslesmeKodu {
-		t.Fatalf("kullanılmış kod: %+v", h)
+// Eşleştirme v2 reddi: imzası bozulan HER alan (düzey, süre, portal kullanıcı, aydınlatma, Telegram kimliği),
+// yanlış hedef sunucu, tekrar, kullanılmış kod, yabancı anahtar, eski mesaj, süresi dolmuş, aktif sınır.
+func TestEslesmeV2Redleri(t *testing.T) {
+	o := kurOrtam(t, false, true)
+	say := func() int {
+		var n int
+		_ = o.db.QueryRow(`SELECT COUNT(*) FROM destek_baglantilari`).Scan(&n)
+		return n
 	}
-	// Aynı çerçevenin birebir tekrarı: imza önbelleği (tekrar).
+	// 1) imzadan sonra değiştirilen her alan → imza hatası, kayıt açılmaz
+	for ad, f := range map[string]func(e *p.EslesmeOnayla){
+		"tg_user_id":       func(e *p.EslesmeOnayla) { e.TgUserID = 666 },
+		"duzey":            func(e *p.EslesmeOnayla) { e.Duzey = p.DuzeyTam },
+		"sure_gun":         func(e *p.EslesmeOnayla) { e.SureGun = 30 },
+		"portal_kullanici": func(e *p.EslesmeOnayla) { e.PortalKullanici = "u_99" },
+		"aydinlatma_surum": func(e *p.EslesmeOnayla) { e.AydinlatmaSurum = "baska" },
+		"sunucu_kimligi":   func(e *p.EslesmeOnayla) { e.SunucuKimligi = "sunucu-baska-01" },
+		"kod_ozet":         func(e *p.EslesmeOnayla) { e.KodOzet = strings.Repeat("0", 64) },
+	} {
+		e := o.v2(7, "musteri_a", "okuma", 1)
+		o.m.imzala(e)
+		f(e)
+		zk, _ := o.m.gonder(e)
+		if h := o.m.hata(zk); h.Kod != p.HataImza {
+			t.Fatalf("%s değişikliği imzayla yakalanmadı: %+v", ad, h)
+		}
+	}
+	// 2) doğru imzalı ama başka sunucuya yönlendirilmiş onay
+	yanlis := o.v2(7, "musteri_a", "okuma", 1)
+	yanlis.SunucuKimligi = "sunucu-baska-01"
+	o.m.imzala(yanlis)
+	zk, _ := o.m.gonder(yanlis)
+	if h := o.m.hata(zk); h.Kod != p.HataYetki {
+		t.Fatalf("başka sunucu için onay: %+v", h)
+	}
+	if say() != 0 {
+		t.Fatalf("reddedilen onaylar %d kayıt açtı", say())
+	}
+	// 3) yabancı anahtar, eski, birebir tekrar, kullanılmış kod
+	yabanci, _ := p.AnahtarCiftiUret(nil)
+	ye := o.v2(7, "musteri_a", "okuma", 1)
+	_ = p.YeniImzalayici(yabanci).Imzala(ye, 30*time.Second)
+	zk, _ = o.m.gonder(ye)
+	if h := o.m.hata(zk); h.Kod != p.HataAnahtarBilinmiyor {
+		t.Fatalf("yabancı anahtar: %+v", h)
+	}
+	o.m.imz.Saat = func() time.Time { return time.Now().Add(-2 * time.Minute) }
+	eski := o.v2(7, "musteri_a", "okuma", 1)
+	o.m.imzala(eski)
+	o.m.imz.Saat = time.Now
+	zk, _ = o.m.gonder(eski)
+	if h := o.m.hata(zk); h.Kod != p.HataSuresiDoldu {
+		t.Fatalf("eski onay: %+v", h)
+	}
+	iyi := o.v2(7, "musteri_a", "okuma", 1)
+	o.m.imzala(iyi)
+	zk, ham := o.m.gonder(iyi)
+	_ = zk
+	o.m.bekle(p.TipBaglantiDurum, func(g p.Govde) bool { return g.(*p.BaglantiDurum).KodOzet == iyi.KodOzet })
 	o.m.gonderHam(ham)
-	if h := o.m.hata(zk2); h.Kod != p.HataTekrar {
+	if h := o.m.hata(zk); h.Kod != p.HataTekrar {
 		t.Fatalf("birebir tekrar: %+v", h)
 	}
-	// İmzası bozuk eşleştirme (tg kimliği imzadan sonra değişti).
-	y3 := o.istekOK("POST", "/destek/eslestir", o.mA, map[string]any{"duzey": "okuma", "sure_gun": 1})
-	oz3, _ := p.EslesmeKoduOzet(y3.govde["kod"].(string))
-	e3 := &p.EslesmeOnayla{KodOzet: oz3, TgUserID: 7, TgKullaniciAdi: "musteri_a"}
-	o.m.imzala(e3)
-	e3.TgUserID = 666
-	zk3, _ := o.m.gonder(e3)
-	if h := o.m.hata(zk3); h.Kod != p.HataImza {
-		t.Fatalf("imzası bozuk eşleştirme: %+v", h)
+	kullanilmis := o.v2(8, "musteri_b", "okuma", 1)
+	kullanilmis.KodOzet = iyi.KodOzet // aynı kod, yeni imza, başka Telegram kullanıcısı
+	o.m.imzala(kullanilmis)
+	zk, _ = o.m.gonder(kullanilmis)
+	if h := o.m.hata(zk); h.Kod != p.HataEslesmeKodu {
+		t.Fatalf("kullanılmış kod: %+v", h)
 	}
-	var n int
-	_ = o.db.QueryRow(`SELECT COUNT(*) FROM destek_baglantilari`).Scan(&n)
-	if n != 1 {
-		t.Fatalf("bağlantı sayısı %d (beklenen 1)", n)
+	if say() != 1 {
+		t.Fatalf("bağlantı sayısı %d (beklenen 1)", say())
+	}
+	// 4) eski mesaj tipi artık tanınmaz
+	o.m.gonderHam([]byte(`{"surum":1,"tip":"eslesme_onayla","kimlik":"zarf_eski_0001","govde":{"kod_ozet":"` + strings.Repeat("a", 64) + `","tg_user_id":5}}`))
+	o.m.bekle(p.TipHata, func(g p.Govde) bool { return g.(*p.HataMesaji).Kod == p.HataTipBilinmiyor })
+	// 5) sunucu başına aktif bağlantı sınırı
+	for i := say(); i < aktifBaglantiSiniri; i++ {
+		o.kokEslestir(int64(1000+i), "", "okuma")
+	}
+	fazla := o.v2(9999, "", "okuma", 1)
+	o.m.imzala(fazla)
+	zk, _ = o.m.gonder(fazla)
+	if h := o.m.hata(zk); h.Kod != p.HataKota {
+		t.Fatalf("aktif sınır: %+v", h)
+	}
+	if say() != aktifBaglantiSiniri {
+		t.Fatalf("bağlantı sayısı %d", say())
 	}
 }
 
@@ -267,9 +312,6 @@ func TestModulKapali(t *testing.T) {
 	if o.m.baglanti.Load() != 0 || o.a.Bagli() {
 		t.Fatal("modül kapalıyken merkeze bağlanıldı")
 	}
-	if y := o.istek("POST", "/destek/eslestir", o.kok, map[string]any{"duzey": "okuma", "sure_gun": 1}); y.kod != 403 {
-		t.Fatalf("kapalı modülde kod üretildi: %d %s", y.kod, y.ham)
-	}
 	if y := o.istekOK("GET", "/destek/durum", o.kok, nil); y.govde["modul_acik"] != false {
 		t.Fatalf("durum: %s", y.ham)
 	}
@@ -316,7 +358,7 @@ func TestModulKapali(t *testing.T) {
 // bayi + müşterileri), bayi durumu (süpürge), 2FA kapatma (tetik + süpürge).
 func TestOtomatikIptal(t *testing.T) {
 	o := kurOrtam(t, false, true)
-	o.istekOK("PUT", "/destek/ayar", o.bB, map[string]any{"musteri_duzey": "okuma"})
+	o.bayiAyar(8, p.DuzeyOkuma)
 	mA := o.eslestir(o.mA, 101, "musteri_a", "okuma")
 	o.onayla(o.mA, mA)
 	mA2 := o.eslestir(o.mA2, 102, "musteri_a2", "okuma")
@@ -404,7 +446,7 @@ func TestDuzeyMinVeSure(t *testing.T) {
 	ctx := context.Background()
 	// kök: modül tam, müşteri üst sınırı onarim; bayi A müşterileri için okuma.
 	o.istekOK("PUT", "/destek/ayar", o.kok, map[string]any{"modul_duzey": "tam", "bayi_duzey": "onarim", "musteri_duzey": "onarim"})
-	o.istekOK("PUT", "/destek/ayar", o.bA, map[string]any{"musteri_duzey": "okuma"})
+	o.bayiAyar(7, p.DuzeyOkuma)
 	cases := []struct {
 		rol  p.Rol
 		rid  int64
@@ -423,9 +465,9 @@ func TestDuzeyMinVeSure(t *testing.T) {
 			t.Errorf("EtkinDuzey(%s, rid=%d, %s) = %s, beklenen %s", c.rol, c.rid, c.bag, g, c.bekl)
 		}
 	}
-	// Bayi B müşterisi: kod üretilemez (tavan kapalı).
-	if y := o.istek("POST", "/destek/eslestir", o.mB, map[string]any{"duzey": "okuma", "sure_gun": 7}); y.kod != 403 {
-		t.Fatalf("izin verilmeyen müşteri kod üretti: %d", y.kod)
+	// Bayi B müşterisi: tavan kapalı.
+	if Tavan(ctx, o.db, p.RolMusteri, 8) != p.DuzeyKapali {
+		t.Fatal("izin verilmeyen müşteri için tavan açık")
 	}
 	// Bağlantı "tam" ama bayi izni "okuma": merkeze ve yürütücüye okuma gider.
 	kim := o.eslestir(o.mA, 201, "musteri_a", "tam")
@@ -439,19 +481,19 @@ func TestDuzeyMinVeSure(t *testing.T) {
 		t.Fatalf("yürütücüye giden düzey: %+v", c.ob)
 	}
 	// Bayi izni kapatılınca etkin düzey kapalı → iş reddedilir.
-	o.istekOK("PUT", "/destek/ayar", o.bA, map[string]any{"musteri_duzey": "kapali"})
+	o.bayiAyar(7, p.DuzeyKapali)
 	e2 := o.m.isEmri(kim, "hesap_ozet", `{"hesap":1}`)
 	o.m.gonder(e2)
 	if s := o.m.isSonucu(e2.IsKodu); s.HataKodu != p.HataDevreDisi {
 		t.Fatalf("bayi izni kapalıyken iş: %+v", s)
 	}
-	// Süre: süresiz (0) ve > 30 gün kök dahil reddedilir; 30 kabul.
+	// Süre: protokol 0 ve > 30 gün bağlantıyı temsil ETMEZ (imzalama/biçim aşamasında reddedilir).
 	for _, gun := range []int{0, -1, 31, 3650} {
-		if y := o.istek("POST", "/destek/eslestir", o.kok, map[string]any{"duzey": "okuma", "sure_gun": gun}); y.kod != 400 {
-			t.Fatalf("kök %d gün seçebildi: %d", gun, y.kod)
+		e := o.v2(1, "", "okuma", gun)
+		if err := o.m.imz.Imzala(e, 30*time.Second); err == nil {
+			t.Fatalf("%d gün imzalanabildi", gun)
 		}
 	}
-	o.istekOK("POST", "/destek/eslestir", o.kok, map[string]any{"duzey": "okuma", "sure_gun": 30})
 	// Bağlantının süresi dolunca iş reddedilir ve bağlantı iptal olur.
 	kim2 := o.eslestir(o.kok, 202, "kok_tg", "okuma")
 	o.onayla(o.kok, kim2)
@@ -571,5 +613,26 @@ func TestSahteMerkezeCihazImzasiYok(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if m.yanitSay.Load() != 0 || a.Bagli() {
 		t.Fatal("taklitçi merkeze meydan yanıtı (cihaz imzası) verildi")
+	}
+}
+
+// Uzun ömürlü oturum lisans biletini tazeler: belirli aralıkla oturum kapatılıp yeniden kurulur
+// (kayıtta diskteki güncel bilet gider); bağlantı kendiliğinden geri gelir.
+func TestBiletTazelemesiIcinYenidenBaglanir(t *testing.T) {
+	db := dtGeciciDB(t)
+	m := yeniSahteMerkez(t)
+	a := Yeni(db, Yapilandirma{MerkezURL: m.srv.URL, MerkezAnahtarlari: []ed25519.PublicKey{m.cift.Acik},
+		CihazAnahtarYolu: t.TempDir() + "/c.key", GuvensizIzin: true})
+	a.BiletYenilemeAraligi = 300 * time.Millisecond
+	_, _ = db.Exec(`INSERT INTO destek_ayar (reseller_id, modul_duzey) VALUES (0,'okuma')`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.Baslat(ctx)
+	son := time.Now().Add(15 * time.Second)
+	for m.baglanti.Load() < 2 {
+		if time.Now().After(son) {
+			t.Fatalf("oturum yeniden kurulmadı (bağlantı %d): %+v", m.baglanti.Load(), a.DurumAl())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

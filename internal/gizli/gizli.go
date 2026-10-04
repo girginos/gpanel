@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -152,4 +153,21 @@ func SifreliMi(deger string) bool { return strings.HasPrefix(deger, onEk) }
 func Sha256Hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+// AnahtarHazir: db.key okunabilir ve geçerli mi — ASLA ÜRETMEZ/YAZMAZ.
+//
+// 🔴 Anahtarı üretmemesi gereken ikincil süreçler (girginospanel-destek-ajan: cihaz kimliği
+// db.key'e bağlı mühürlüdür) açılışta bunu çağırır. aead() anahtar OKUNAMAZSA yenisini
+// üretip db.key'in üstüne YAZAR; ikincil süreçte bu, ortam sorunu (izin, bağlama) yüzünden
+// tüm panelin sırlarını çözülemez kılar ve cihaz kimliğini sessizce değiştirirdi.
+func AnahtarHazir() error {
+	b, err := os.ReadFile(anahtarYol)
+	if err != nil {
+		return err
+	}
+	if len(b) < 32 {
+		return errors.New("db.key kısa/bozuk")
+	}
+	return nil
 }

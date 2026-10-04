@@ -29,7 +29,9 @@ import (
 //	+ tipe özgü gövde:
 //	  is_emri:        dizge(is_kodu) dizge(oturum) dizge(baglanti_id) dizge(arac)
 //	                  dizge(risk) dizge(json.Compact(param))
-//	  eslesme_onayla: dizge(kod_ozet) sayi(tg_user_id) dizge(tg_kullanici_adi)
+//	  eslesme_onayla_v2: dizge(kod_ozet) sayi(tg_user_id) dizge(tg_kullanici_adi)
+//	                  dizge(sunucu_kimligi) dizge(duzey) sayi(sure_gun) sayi(onayli: 1|0)
+//	                  dizge(portal_kullanici) dizge(aydinlatma_surum)
 //
 // meydan_okuma (merkez imzalar) ve meydan_yanit (cihaz imzalar):
 //
@@ -77,6 +79,16 @@ func (m *EslesmeOnayla) kanonikGovde(k *kanonik) error {
 	k.dizge(m.KodOzet)
 	k.sayi(m.TgUserID)
 	k.dizge(m.TgKullaniciAdi)
+	k.dizge(m.SunucuKimligi)
+	k.dizge(string(m.Duzey))
+	k.sayi(int64(m.SureGun))
+	if m.Onayli {
+		k.sayi(1)
+	} else {
+		k.sayi(0)
+	}
+	k.dizge(m.PortalKullanici)
+	k.dizge(m.AydinlatmaSurum)
 	return nil
 }
 

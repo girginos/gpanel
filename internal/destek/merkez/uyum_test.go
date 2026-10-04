@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"girginospanel/internal/destek/protokol"
 )
@@ -157,14 +156,11 @@ func TestOturumKapsamDegisinceDurur(t *testing.T) {
 }
 
 // Ajan eslesme_onayla'yı reddederse (kod tüketilmiş / destek kapalı / kota) kullanıcıya
-// "panelde onay verin" denip sessiz kalınmaz; merkezdeki bekleyen eşleştirme silinir.
+// "bağlantı kuruluyor" denip sessiz kalınmaz; merkezdeki bekleyen eşleştirme silinir.
 func TestEslesmeReddiKullaniciyaBildirilir(t *testing.T) {
 	o := yeniOrtam(t, nil)
 	ajan := sahteAjanBagla(t, o, nil)
-	kod := "ZYXWVUTSRQPNMKJH"
-	ozet, _ := protokol.EslesmeKoduOzet(kod)
-	ajan.gonder(&protokol.KodOzet{KodOzet: ozet, SonGecerlilik: time.Now().Add(5 * time.Minute).Unix()})
-	bekle(t, func() bool { o.m.ajan.mu.Lock(); defer o.m.ajan.mu.Unlock(); _, ok := o.m.ajan.kodlar[ozet]; return ok })
+	kod, ozet := o.kodAl(t, ajan.kayit.LisansParmakIzi, "okuma", 1)
 	o.mesaj(t, tTg, "/start "+kod)
 	bekle(t, func() bool { ajan.mu.Lock(); defer ajan.mu.Unlock(); return len(ajan.eslesmeZrf) == 1 })
 	ajan.mu.Lock()
@@ -185,7 +181,7 @@ func TestEslesmeReddiKullaniciyaBildirilir(t *testing.T) {
 	}
 	// reddedilen eşleştirmeden bağlantı doğamaz
 	ajan.gonder(&protokol.BaglantiDurum{BaglantiID: "bag_red_00001", KodOzet: ozet, TgUserID: tTg, Durum: protokol.BaglantiOnayBekliyor,
-		Rol: protokol.RolMusteri, Duzey: protokol.DuzeyKapali})
+		Rol: protokol.RolKok, Duzey: protokol.DuzeyKapali})
 	bekle(t, func() bool { ajan.mu.Lock(); defer ajan.mu.Unlock(); return len(ajan.hatalar) >= 1 })
 	if _, var_ := o.depo.BaglantiAl("bag_red_00001"); var_ {
 		t.Fatal("reddedilmiş eşleştirmeden bağlantı kaydedildi")
@@ -197,10 +193,7 @@ func TestEslesmeReddiKullaniciyaBildirilir(t *testing.T) {
 func TestStartKoduNormallestirilir(t *testing.T) {
 	o := yeniOrtam(t, nil)
 	ajan := sahteAjanBagla(t, o, nil)
-	kod, _ := protokol.EslesmeKoduUret(nil)
-	ozet, _ := protokol.EslesmeKoduOzet(kod)
-	ajan.gonder(&protokol.KodOzet{KodOzet: ozet, SonGecerlilik: time.Now().Add(5 * time.Minute).Unix()})
-	bekle(t, func() bool { o.m.ajan.mu.Lock(); defer o.m.ajan.mu.Unlock(); _, ok := o.m.ajan.kodlar[ozet]; return ok })
+	kod, ozet := o.kodAl(t, ajan.kayit.LisansParmakIzi, "okuma", 1)
 	for _, bozuk := range []string{"ABC", strings.Repeat("A", 17), "ABCD-EFGH-IJKL-MNOP"} { // I/L/O alfabede yok
 		o.mesaj(t, tTg, "/start "+bozuk)
 	}

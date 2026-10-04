@@ -141,6 +141,11 @@ fi
 # gosp-paketle ile .gosp uretir, DUZ ikiliyi SILER; whitelabel duz kalir.
 GOSP_SURUM="$SURUM_TAM" bash "$S/scripts/build-assets.sh" || dur "build-assets.sh (eklenti yukleri + .gosp)"
 
+# 🔴 KAPI: Telegram destek ajani (panelden AYRI hizmet) build-assets.sh ile GOAMD64=v1 derlenir;
+# installer/updater $A/girginospanel-destek-ajan'a atif yapar — yoksa paket reddedilir.
+[ -f "$A/girginospanel-destek-ajan" ] || dur "assets/girginospanel-destek-ajan yok (build-assets.sh derlemedi)"
+[ -f "$A/systemd/girginospanel-destek-ajan.service" ] || dur "assets/systemd/girginospanel-destek-ajan.service yok"
+
 # 🔴 KAPI: ucretli eklentinin DUZ ikilisi assets'te KALMAMALI. build-assets.sh
 # silmis olmali; kalmissa yayin paketi sifreli teslimi bosa cikarirdi.
 for _u in mail calistirici; do

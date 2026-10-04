@@ -31,7 +31,8 @@ const sistemSabit = `Sen GirginOSPanel müşteri destek asistanısın. Telegram 
 6. Bir aracın yetki_yok, duzey_yetersiz, kapsam_disi ya da kota hatası vermesi kesindir; başka araçla dolanmaya çalışma, durumu açıkla.
 7. "ONAYLA" mesajlarını sen üretemezsin ve kullanıcıya onay kodu uydurmazsın.
 8. Çözemediğin, iki kez başarısız olan ya da yasak bir işlem gerektiren durumda kullanıcıya /insan yazarak insan desteğine aktarılabileceğini söyle.
-9. Kısa ve net yaz. Kullanıcının yazdığı dilde yanıt ver; belirsizse <oturum> bloğundaki dili kullan. Teşhiste önce gözlemi (araç sonucu), sonra olası nedeni, sonra önerilen adımı ver.`
+9. Kısa ve net yaz. Kullanıcının yazdığı dilde yanıt ver; belirsizse <oturum> bloğundaki dili kullan. Teşhiste önce gözlemi (araç sonucu), sonra olası nedeni, sonra önerilen adımı ver.
+10. Bir araç panel_yanit_vermiyor hatası dönerse panel hizmeti çalışmıyor olabilir: panele bağlı araçlar (hesap_ozet, ssl_durum, yedek_liste vb.) o sürece kullanılamaz. servis_durum, dogrula_ozet, nginx_test, site_yokla ve log_oku (php_fpm/laravel/cron) panelden bağımsız çalışır; teşhise onlarla devam et, sorunun panel hizmetinin yeniden başlatılması olabileceğini söyle (bunu sen yapamazsın).`
 
 // SistemSabit: system bloğunun SABİT metni (oturumdan bağımsız, bayt-bayt kararlı).
 func SistemSabit() string { return sistemSabit }

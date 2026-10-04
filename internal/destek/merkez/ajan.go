@@ -16,33 +16,51 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/destek/bilet"
 	"girginospanel/internal/destek/protokol"
 )
 
-// LisansDogrulayici: kayit.lisans_ispati doğrulaması.
-// TODO(destek faz 2): lic-eu ile ispat doğrulaması (parmak izi ↔ etkin lisans).
+// LisansDogrulayici: kayit.lisans_ispati (portalın imzaladığı lisans bileti) doğrulaması.
+// Başarıda doğrulamanın düşeceği an döner (bilet bitişi / askı anı); hata → cihaz
+// "doğrulanmadı" sayılır. Kayıt YİNE kabul edilir (destek hizmeti sürer) — ama doğrulanmamış
+// cihaza eşleştirme kodu VERİLMEZ (sahte parmak izi iddiası portalda başka sunucuya
+// eşleşemez). Test için arayüz.
 type LisansDogrulayici interface {
-	Dogrula(ctx context.Context, parmakIzi string, ispat []byte) error
+	Dogrula(parmakIzi string, ispat []byte, simdi time.Time) (time.Time, error)
 }
 
-// lisansDogrulamaYok: Faz 1 — ispat biçim olarak doğrulanır (protokol), içerik DOĞRULANMAZ.
-type lisansDogrulamaYok struct {
-	once sync.Once
-	m    *Merkez
+// biletLisans: varsayılan doğrulayıcı — portal bilet anahtarlarıyla (yapılandırma).
+type biletLisans struct{ d *bilet.Dogrulayici }
+
+func (b biletLisans) Dogrula(parmakIzi string, ispat []byte, simdi time.Time) (time.Time, error) {
+	s, err := b.d.Dogrula(ispat, parmakIzi, simdi)
+	return s.Bitis, err
 }
 
-func (l *lisansDogrulamaYok) Dogrula(context.Context, string, []byte) error {
-	l.once.Do(func() {
-		l.m.log.Warn("lisans ispatı doğrulanmıyor (Faz 1 TODO): kayıt yalnız cihaz anahtarına dayanıyor")
-	})
-	return nil
+// dogrulamaNedeni: doğrulama hatasının kısa, sızıntısız kodu (depoda ve tanıda görünür).
+func dogrulamaNedeni(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, bilet.ErrAnahtarYok):
+		return "anahtar_yok"
+	case errors.Is(err, bilet.ErrImza):
+		return "imza"
+	case errors.Is(err, bilet.ErrSuresiDoldu):
+		return "suresi_doldu"
+	case errors.Is(err, bilet.ErrParmakIzi):
+		return "parmak_izi"
+	case errors.Is(err, bilet.ErrDurum), errors.Is(err, bilet.ErrAskida):
+		return "askida"
+	}
+	return "bicim"
 }
 
 const (
-	kodSinirSunucu   = 20
-	kodSinirToplam   = 10000
+	kodSinirSunucu   = 3    // bir sunucunun aynı anda bekleyen portal kodu
+	kodSinirToplam   = 2000 // bellekteki toplam bekleyen kod
 	meydanSiniri     = 10000
-	enUzunKodOmru    = 10*time.Minute + protokol.SaatSapmasi
+	kodOmru          = protokol.EslesmeKoduOmru // ≤ 15 dk (sözleşme); yalnız bellekte
 	eslesmeBeklemesi = 24 * time.Hour
 	kayitBeklemesi   = 10 * time.Second
 	yoklamaKuyrugu   = 256
@@ -97,16 +115,23 @@ func (o *ajanOturumu) kapat() {
 	}
 }
 
+// bekleyenKod: merkezin portal isteğiyle ürettiği, henüz /start ile tüketilmemiş kod.
+// Yalnız bellekte; süreç yeniden başlarsa düşer (portal yeniden ister).
 type bekleyenKod struct {
-	sunucu string
-	bitis  time.Time
+	sunucu          string
+	duzey           protokol.Duzey
+	sureGun         int
+	portalKullanici string
+	aydinlatma      string
+	bitis           time.Time
 }
 
 type eslesmeKaydi struct {
-	sunucu string
-	tg     int64
-	bitis  time.Time
-	zarf   string // eslesme_onayla zarf kimliği: ajanın reddi hata.ilgili ile buna döner
+	sunucu     string
+	tg         int64
+	bitis      time.Time
+	zarf       string // eslesme_onayla_v2 zarf kimliği: ajanın reddi hata.ilgili ile buna döner
+	aydinlatma string // portalda kabul edilen aydınlatma sürümü (KVKK kaydı: kaynak=portal)
 }
 
 type bekleyenMeydan struct {
@@ -181,16 +206,13 @@ func sunucuKimligi(cihazAnahtari string) (string, error) {
 	return "s_" + protokol.AnahtarKimligi(acik), nil
 }
 
-// kayitDenetle: katalog ve lisans.
-func (a *AjanSunucu) kayitDenetle(ctx context.Context, kay *protokol.Kayit) error {
+// kayitDenetle: katalog uyumu ve ispat biçimi. Lisans bileti burada DOĞRULANMAZ: cihaz
+// kimliğini (meydan yanıtı) kanıtladıktan sonra kimlikTamamla'da doğrulanır.
+func (a *AjanSunucu) kayitDenetle(_ context.Context, kay *protokol.Kayit) error {
 	if kay.KatalogOzeti != protokol.KatalogOzeti() {
 		return &protokol.Hata{Kod: protokol.HataSurum, Ayrinti: "katalog özeti uyuşmuyor"}
 	}
-	ispat, err := base64.RawURLEncoding.DecodeString(kay.LisansIspati)
-	if err != nil {
-		return &protokol.Hata{Kod: protokol.HataLisans}
-	}
-	if err := a.m.lisans.Dogrula(ctx, kay.LisansParmakIzi, ispat); err != nil {
+	if _, err := base64.RawURLEncoding.DecodeString(kay.LisansIspati); err != nil {
 		return &protokol.Hata{Kod: protokol.HataLisans}
 	}
 	return nil
@@ -216,6 +238,18 @@ func (a *AjanSunucu) kimlikTamamla(kay *protokol.Kayit, md *protokol.MeydanOkuma
 	c.LisansParmakIzi = kay.LisansParmakIzi
 	c.PanelSurumu = kay.PanelSurumu
 	c.SonGorulme = simdi
+	// 🔴 Anti-spoof: parmak izi iddiası portalın imzalı biletiyle doğrulanır; HER kayıtta
+	// yeniden. Başarısızlıkta eski doğrulama silinir (parmak izi değişmiş olabilir).
+	onceki := c.Dogrulandi(simdi)
+	ispat, _ := base64.RawURLEncoding.DecodeString(kay.LisansIspati)
+	if bitis, err := a.m.lisans.Dogrula(kay.LisansParmakIzi, ispat, simdi); err == nil {
+		c.DogrulamaBitis, c.DogrulamaNeden = bitis, ""
+	} else {
+		c.DogrulamaBitis, c.DogrulamaNeden = time.Time{}, dogrulamaNedeni(err)
+	}
+	if c.Dogrulandi(simdi) != onceki || !c.Dogrulandi(simdi) {
+		a.m.log.Info("ajan lisans doğrulaması", "sunucu", sunucu, "dogrulandi", c.Dogrulandi(simdi), "neden", c.DogrulamaNeden)
+	}
 	if err := a.m.depo.CihazKaydet(c); err != nil {
 		return "", &protokol.Hata{Kod: protokol.HataIc}
 	}
@@ -263,8 +297,6 @@ func (a *AjanSunucu) isle(ao *ajanOturumu, veri []byte) {
 	}
 	switch m := g.(type) {
 	case *protokol.KalpAtisi:
-	case *protokol.KodOzet:
-		a.kodOzetIsle(ao, m)
 	case *protokol.BaglantiDurum:
 		if err := a.baglantiDurumIsle(ao, m); err != nil {
 			a.m.log.Warn("baglanti_durum reddedildi", "sunucu", ao.sunucu, "hata", err)
@@ -303,13 +335,24 @@ func (a *AjanSunucu) yanitIlet(ao *ajanOturumu, isKodu string, y isYaniti) bool 
 	return true
 }
 
-func (a *AjanSunucu) kodOzetIsle(ao *ajanOturumu, k *protokol.KodOzet) {
-	simdi := a.m.saat()
-	bitis := time.Unix(k.SonGecerlilik, 0)
-	if !bitis.After(simdi) || bitis.Sub(simdi) > enUzunKodOmru {
-		a.hataGonder(ao, protokol.HataZaman, "")
-		return
+// Eşleştirme hataları (kullanıcıya / portala gösterilecek).
+var (
+	ErrKodGecersiz    = errors.New("eşleştirme kodu geçersiz ya da süresi dolmuş")
+	ErrAjanCevrimdisi = errors.New("sunucu şu an merkeze bağlı değil")
+	ErrDogrulanmadi   = errors.New("sunucunun lisans parmak izi doğrulanmamış")
+	ErrKodKota        = errors.New("bekleyen eşleştirme kodu sınırı aşıldı")
+)
+
+// kodUret: portal isteğiyle YENİ kod. Kodu MERKEZ üretir; bellekte yalnız özeti durur
+// (kodun kendisi çağırana bir kez döner). Sunucu başına ve toplam sınır aşılırsa ErrKodKota.
+func (a *AjanSunucu) kodUret(sunucu string, duzey protokol.Duzey, sureGun int, portalKullanici, aydinlatma string) (kod string, bitis time.Time, err error) {
+	kod, err = protokol.EslesmeKoduUret(nil)
+	if err != nil {
+		return "", time.Time{}, err
 	}
+	ozet, _ := protokol.EslesmeKoduOzet(kod)
+	simdi := a.m.saat()
+	bitis = simdi.Add(kodOmru)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	n := 0
@@ -318,28 +361,20 @@ func (a *AjanSunucu) kodOzetIsle(ao *ajanOturumu, k *protokol.KodOzet) {
 			delete(a.kodlar, o)
 			continue
 		}
-		if b.sunucu == ao.sunucu {
+		if b.sunucu == sunucu {
 			n++
 		}
 	}
-	if mevcut, var_ := a.kodlar[k.KodOzet]; var_ && mevcut.sunucu != ao.sunucu {
-		a.m.log.Warn("kod özeti çakışması (başka sunucu)", "sunucu", ao.sunucu)
-		return
-	}
 	if n >= kodSinirSunucu || len(a.kodlar) >= kodSinirToplam {
-		go a.hataGonder(ao, protokol.HataKota, "")
-		return
+		return "", time.Time{}, ErrKodKota
 	}
-	a.kodlar[k.KodOzet] = bekleyenKod{sunucu: ao.sunucu, bitis: bitis}
+	a.kodlar[ozet] = bekleyenKod{sunucu: sunucu, duzey: duzey, sureGun: sureGun, portalKullanici: portalKullanici, aydinlatma: aydinlatma, bitis: bitis}
+	return kod, bitis, nil
 }
 
-// Eşleştirme hataları (kullanıcıya gösterilecek).
-var (
-	ErrKodGecersiz    = errors.New("eşleştirme kodu geçersiz ya da süresi dolmuş")
-	ErrAjanCevrimdisi = errors.New("sunucu şu an merkeze bağlı değil")
-)
-
-// EslesmeBaslat: /start <kod>. Kod merkezde TEK KULLANIMLIKTIR (ajan da kendi tarafında tüketir).
+// EslesmeBaslat: /start <kod>. Kod merkezde TEK KULLANIMLIKTIR. Hedef sunucu çevrimiçi ve
+// HÂLÂ doğrulanmış olmalı (kod verildikten sonra bilet düşmüş/askıya alınmış olabilir).
+// İmzalı onay düzey/süre/portal onayını taşır; ajan bağlantıyı doğrudan etkin açar.
 func (a *AjanSunucu) EslesmeBaslat(kodOzet string, tg int64, tgAd string) (string, error) {
 	simdi := a.m.saat()
 	a.mu.Lock()
@@ -354,19 +389,27 @@ func (a *AjanSunucu) EslesmeBaslat(kodOzet string, tg int64, tgAd string) (strin
 		a.mu.Unlock()
 		return "", ErrAjanCevrimdisi
 	}
+	if c, var_ := a.m.depo.CihazAl(k.sunucu); !var_ || !c.Dogrulandi(simdi) {
+		delete(a.kodlar, kodOzet) // doğrulaması düşen sunucunun kodu yanar; portal yeniden ister
+		a.mu.Unlock()
+		return "", ErrDogrulanmadi
+	}
 	delete(a.kodlar, kodOzet)
 	zarf := yeniKimlik()
-	a.eslesmeler[kodOzet] = eslesmeKaydi{sunucu: k.sunucu, tg: tg, bitis: simdi.Add(eslesmeBeklemesi), zarf: zarf}
+	a.eslesmeler[kodOzet] = eslesmeKaydi{sunucu: k.sunucu, tg: tg, bitis: simdi.Add(eslesmeBeklemesi), zarf: zarf, aydinlatma: k.aydinlatma}
 	a.mu.Unlock()
 
 	if !tgAdDeseni(tgAd) {
 		tgAd = ""
 	}
-	e := &protokol.EslesmeOnayla{KodOzet: kodOzet, TgUserID: tg, TgKullaniciAdi: tgAd}
+	e := &protokol.EslesmeOnayla{KodOzet: kodOzet, TgUserID: tg, TgKullaniciAdi: tgAd, SunucuKimligi: k.sunucu,
+		Duzey: k.duzey, SureGun: k.sureGun, Onayli: true, PortalKullanici: k.portalKullanici, AydinlatmaSurum: k.aydinlatma}
 	if err := a.m.imza.Imzala(e, protokol.EnUzunGecerlilik); err != nil {
+		a.eslesmeSil(kodOzet)
 		return "", err
 	}
 	if err := ao.gonderKimlikle(zarf, e); err != nil {
+		a.eslesmeSil(kodOzet)
 		return "", ErrAjanCevrimdisi
 	}
 	a.m.log.Info("eşleştirme onayı gönderildi", "sunucu", k.sunucu, "tg", tgKisa(tg))
@@ -416,6 +459,7 @@ func tgAdDeseni(s string) bool {
 func (a *AjanSunucu) baglantiDurumIsle(ao *ajanOturumu, d *protokol.BaglantiDurum) error {
 	simdi := a.m.saat()
 	mevcut, var_ := a.m.depo.BaglantiAl(d.BaglantiID)
+	var kayit eslesmeKaydi
 	if var_ {
 		if mevcut.SunucuKimligi != ao.sunucu || mevcut.TgUserID != d.TgUserID {
 			return &protokol.Hata{Kod: protokol.HataYetki, Ayrinti: "bağlantı başka sunucu/kullanıcıya ait"}
@@ -428,6 +472,7 @@ func (a *AjanSunucu) baglantiDurumIsle(ao *ajanOturumu, d *protokol.BaglantiDuru
 			ok = false
 		}
 		a.mu.Unlock()
+		kayit = e
 		if d.KodOzet == "" || !ok || e.sunucu != ao.sunucu || e.tg != d.TgUserID {
 			// Merkezde karşılığı olmayan bağlantı (ör. ajan çevrimdışıyken /unutbeni ya da
 			// merkez kaydı silindi): merkez onu ASLA kullanamaz — ajana da kapattırılır ki
@@ -449,7 +494,14 @@ func (a *AjanSunucu) baglantiDurumIsle(ao *ajanOturumu, d *protokol.BaglantiDuru
 	}
 	b := Baglanti{
 		BaglantiID: d.BaglantiID, SunucuKimligi: ao.sunucu, TgUserID: d.TgUserID, Durum: d.Durum,
-		Rol: d.Rol, Duzey: d.Duzey, Hesaplar: d.Hesaplar, KVKKKabul: mevcut.KVKKKabul, Guncelleme: simdi,
+		Rol: d.Rol, Duzey: d.Duzey, Hesaplar: d.Hesaplar, KVKKKabul: mevcut.KVKKKabul, KVKKSurum: mevcut.KVKKSurum,
+		KVKKKaynak: mevcut.KVKKKaynak, Guncelleme: simdi,
+	}
+	// 🔴 KVKK: portalda aydınlatma kabul edilmiş eşleştirmeden doğan YENİ bağlantı Telegram'daki
+	// kabul düğmesini atlar; kabul portalda (sahip hesabıyla) alınmıştır. Portal onayı olmayan
+	// her bağlantı (eski kayıtlar dahil) Telegram düğmesine tabi kalır.
+	if !var_ && kayit.aydinlatma != "" && b.KVKKKabul.IsZero() {
+		b.KVKKKabul, b.KVKKSurum, b.KVKKKaynak = simdi.UTC(), kayit.aydinlatma, "portal"
 	}
 	if err := a.m.depo.BaglantiKaydet(b); err != nil {
 		return &protokol.Hata{Kod: protokol.HataIc}
@@ -489,6 +541,17 @@ func (a *AjanSunucu) baglantiIptalIsle(ao *ajanOturumu, i *protokol.BaglantiIpta
 	_ = a.m.depo.BaglantiSil(i.BaglantiID)
 	a.m.oturumlar.KapatBaglanti(i.BaglantiID)
 	a.m.baglantiKapandi(b, i.Neden)
+}
+
+// portalIptal: portalın iptal isteği — ajana BaglantiIptal gönderilir (çevrimdışıysa ajan bir
+// sonraki bağlanışta "merkezde kayıt yok" yanıtıyla kendiliğinden kapatır), merkez kaydı
+// silinir, açık oturumlar kapanır ve Telegram kullanıcısına bildirilir.
+func (a *AjanSunucu) portalIptal(b Baglanti) (ajanaIletildi bool) {
+	ajanaIletildi = a.BaglantiIptalGonder(b.SunucuKimligi, b.BaglantiID, protokol.IptalKullanici)
+	_ = a.m.depo.BaglantiSil(b.BaglantiID)
+	a.m.oturumlar.KapatBaglanti(b.BaglantiID)
+	a.m.baglantiKapandi(b, protokol.IptalKullanici)
+	return ajanaIletildi
 }
 
 // BaglantiIptalGonder: merkez → ajan (ör. /unutbeni). Ajan çevrimdışıysa false.
@@ -896,6 +959,11 @@ func (a *AjanSunucu) yoklamaBuda() {
 	for k, v := range a.eslesmeler {
 		if !v.bitis.After(simdi) {
 			delete(a.eslesmeler, k)
+		}
+	}
+	for k, v := range a.kodlar {
+		if !v.bitis.After(simdi) {
+			delete(a.kodlar, k)
 		}
 	}
 	a.mu.Unlock()

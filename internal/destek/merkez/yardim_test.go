@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"girginospanel/internal/destek/bilet"
 	"girginospanel/internal/destek/protokol"
 )
 
@@ -171,6 +173,7 @@ var (
 	tTelegramToken = "123456789" + ":" + strings.Repeat("A", 35)
 	tAnthropic     = "sk-" + "ant-api03-TESTANAHTARI-0123456789abcdef"
 	tWebhookGizli  = "webhook-gizli-0123456789"
+	tPortalIc      = "portal-ic-test-anahtari-0123456789abcdef"
 )
 
 type ortam struct {
@@ -178,9 +181,12 @@ type ortam struct {
 	c    *sahteClaude
 	tg   *sahteTG
 	srv  *httptest.Server
+	ic   *httptest.Server // iç dinleyici (portal API'si)
 	depo *DosyaDepo
 	sir  *Sirlar
 	upd  atomic.Int64
+	// portalSk: sahte portalın (lisans sunucusu) bilet imza anahtarı; açık yarısı yapılandırmadadır.
+	portalSk ed25519.PrivateKey
 }
 
 func testYap() *Yapilandirma {
@@ -205,19 +211,76 @@ func yeniOrtam(t *testing.T, degis func(*Yapilandirma)) *ortam {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := &ortam{c: &sahteClaude{}, tg: &sahteTG{}, depo: YeniBellekDepo(),
-		sir: &Sirlar{TelegramToken: tTelegramToken, AnthropicAnahtar: tAnthropic, WebhookGizli: tWebhookGizli, MerkezAnahtar: cift}}
+	pub, sk, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y.PortalBiletAnahtarlari = []string{protokol.AcikAnahtarKodla(pub)}
+	o := &ortam{c: &sahteClaude{}, tg: &sahteTG{}, depo: YeniBellekDepo(), portalSk: sk,
+		sir: &Sirlar{TelegramToken: tTelegramToken, AnthropicAnahtar: tAnthropic, WebhookGizli: tWebhookGizli, MerkezAnahtar: cift, PortalIcAnahtar: tPortalIc}}
 	o.m, err = Yeni(Secenekler{Yap: y, Sirlar: o.sir, Depo: o.depo, Claude: o.c, Telegram: o.tg,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	o.srv = httptest.NewServer(o.m.Handler())
+	o.ic = httptest.NewServer(o.m.IcHandler())
 	t.Cleanup(func() {
 		o.srv.CloseClientConnections()
 		o.srv.Close()
+		o.ic.Close()
 	})
 	return o
+}
+
+// bilet: sahte portalın imzaladığı lisans bileti (fp için geçerli; mut ile bozulabilir).
+func (o *ortam) bilet(fp string, mut func(*bilet.Govde)) []byte {
+	g := bilet.Govde{FP: fp, Urun: "gpanel-suite", Durum: bilet.DurumAktif,
+		Bitis: time.Now().Add(24 * time.Hour).Unix(), Iat: time.Now().Add(-time.Minute).Unix(), Pkt: "0"}
+	if mut != nil {
+		mut(&g)
+	}
+	b, _ := json.Marshal(g)
+	e := base64.RawURLEncoding
+	return []byte(e.EncodeToString(b) + "." + e.EncodeToString(ed25519.Sign(o.portalSk, b)))
+}
+
+// portal: iç API çağrısı (secret boşsa Authorization başlığı yok). Dönüş: durum kodu + JSON gövdesi.
+func (o *ortam) portal(t *testing.T, yontem, yol string, govde any, secret string) (int, map[string]any) {
+	t.Helper()
+	var r io.Reader
+	if govde != nil {
+		b, _ := json.Marshal(govde)
+		r = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequest(yontem, o.ic.URL+yol, r)
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&m)
+	return resp.StatusCode, m
+}
+
+// kodAl: portal iç API'sinden eşleştirme kodu ister; kodu ve özetini döndürür.
+func (o *ortam) kodAl(t *testing.T, fp, duzey string, gun int) (string, string) {
+	t.Helper()
+	d, m := o.portal(t, http.MethodPost, "/ic/v1/eslesme-kodu", map[string]any{"parmak_izi": fp, "duzey": duzey, "sure_gun": gun,
+		"portal_kullanici_id": "u_42", "aydinlatma_surum": "2026-10-04.1"}, tPortalIc)
+	if d != http.StatusOK {
+		t.Fatalf("eslesme-kodu: %d %v", d, m)
+	}
+	kod, _ := m["kod"].(string)
+	ozet, ok := protokol.EslesmeKoduOzet(kod)
+	if !ok {
+		t.Fatalf("kod biçimi: %q", kod)
+	}
+	return kod, ozet
 }
 
 func (o *ortam) webhook(t *testing.T, u map[string]any, gizli string) int {
@@ -456,6 +519,22 @@ func (a *sahteAjan) okuGovde(sure time.Duration) protokol.Govde {
 // sahteAjanBagla: WSS üzerinden tam kayıt el sıkışması (merkez imzası sabitlenmiş anahtarla doğrulanır).
 func sahteAjanBagla(t *testing.T, o *ortam, isle func(e *protokol.IsEmri) *protokol.IsSonucu) *sahteAjan {
 	t.Helper()
+	return sahteAjanBaglaFP(t, o, isle, strings.Repeat("ab", 32), true)
+}
+
+// sahteAjanBaglaFP: parmak izi seçilebilir; gecerliBilet=false → ispat geçersiz ("bilet-yok").
+func sahteAjanBaglaFP(t *testing.T, o *ortam, isle func(e *protokol.IsEmri) *protokol.IsSonucu, fp string, gecerliBilet bool) *sahteAjan {
+	t.Helper()
+	ispat := []byte("bilet-yok")
+	if gecerliBilet {
+		ispat = o.bilet(fp, nil)
+	}
+	return sahteAjanBaglaOzel(t, o, isle, fp, ispat)
+}
+
+// sahteAjanBaglaOzel: ham ispat baytlarıyla kayıt.
+func sahteAjanBaglaOzel(t *testing.T, o *ortam, isle func(e *protokol.IsEmri) *protokol.IsSonucu, fp string, ispat []byte) *sahteAjan {
+	t.Helper()
 	cift, _ := protokol.AnahtarCiftiUret(nil)
 	dog, err := protokol.YeniDogrulayici(nil, protokol.YeniBellekOnbellek(0), o.sir.MerkezAnahtar.Acik)
 	if err != nil {
@@ -466,6 +545,8 @@ func sahteAjanBagla(t *testing.T, o *ortam, isle func(e *protokol.IsEmri) *proto
 		t.Fatalf("ws: %d", resp.StatusCode)
 	}
 	a := &sahteAjan{t: t, ws: ws, cift: cift, kayit: yeniKayit(t, cift), dog: dog, isle: isle}
+	a.kayit.LisansParmakIzi = fp
+	a.kayit.LisansIspati = base64.RawURLEncoding.EncodeToString(ispat)
 	if err := ws.yaz(zarfla(t, a.kayit)); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/destek/bilet"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/maske"
 )
@@ -39,6 +40,7 @@ type Merkez struct {
 	imza      *protokol.Imzalayici
 	ajan      *AjanSunucu
 	bot       *Bot
+	portal    *portalAPI
 	defter    *Defter
 	oturumlar *OturumYoneticisi
 	suzgec    *CikisSuzgeci
@@ -66,13 +68,21 @@ func Yeni(s Secenekler) (*Merkez, error) {
 	m.imza.Saat = s.Saat
 	m.lisans = s.Lisans
 	if m.lisans == nil {
-		m.lisans = &lisansDogrulamaYok{m: m}
+		anahtarlar, err := s.Yap.PortalAnahtarlari()
+		if err != nil {
+			return nil, err
+		}
+		if len(anahtarlar) == 0 {
+			s.Log.Warn("portal_bilet_anahtarlari boş: hiçbir sunucu doğrulanamaz, eşleştirme kodu verilmeyecek")
+		}
+		m.lisans = biletLisans{d: bilet.Yeni(anahtarlar)}
 	}
 	m.ajan = yeniAjanSunucu(m)
 	m.defter = yeniDefter(s.Yap, s.Depo, s.Log, s.Saat)
 	m.oturumlar = yeniOturumYoneticisi(s.Yap.SunucuOturumSiniri, s.Yap.oturumBosta(), s.Saat)
 	m.suzgec = yeniCikisSuzgeci(s.Sirlar.Bilinenler())
 	m.bot = yeniBot(m)
+	m.portal = yeniPortalAPI(m)
 	return m, nil
 }
 
@@ -100,9 +110,11 @@ func (m *Merkez) Handler() http.Handler {
 	return mux
 }
 
-// IcHandler: yalnız yerel dinleyicide (sağlık + metrik; sır/kişisel veri yok).
+// IcHandler: yalnız yerel dinleyicide: sağlık + metrik (sır/kişisel veri yok) ve portal iç API'si
+// (/ic/v1/*; Bearer sırrı şart — bkz. portal.go).
 func (m *Merkez) IcHandler() http.Handler {
 	mux := http.NewServeMux()
+	m.portal.rotalar(mux)
 	mux.HandleFunc("GET /saglik", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /metrik", func(w http.ResponseWriter, _ *http.Request) {
 		gg, ga := m.depo.Maliyet("*", m.saat())
@@ -162,15 +174,22 @@ func (m *Merkez) konusmaKaydet(tg int64, sunucu, yon, metin string) {
 	}
 }
 
-// baglantiEtkin: panelde ikinci onay verildi → kullanıcıya karşılama + KVKK aydınlatma.
+// baglantiEtkin: bağlantı etkinleşti → kullanıcıya karşılama. KVKK aydınlatması portalda
+// kabul edilmişse (KVKKKabul dolu) Telegram düğmesi atlanır ve doğrudan "hazır" denir;
+// aksi halde aydınlatma + kabul düğmesi gönderilir.
 func (m *Merkez) baglantiEtkin(b Baglanti) {
 	k, _ := m.depo.KullaniciAl(b.TgUserID)
 	if k.SeciliBaglanti == "" {
 		k.SeciliBaglanti = b.BaglantiID
 		_ = m.depo.KullaniciKaydet(k)
 	}
+	dil := kullaniciDili(k, "")
 	// ajan okuma döngüsünü Telegram çağrısıyla bekletme
-	go m.bot.kvkkGonder(context.Background(), b, kullaniciDili(k, ""))
+	if !b.KVKKKabul.IsZero() {
+		go m.bot.gonder(context.Background(), b.TgUserID, metin(dil, "baglanti_hazir", htmlKacis(m.bot.baglantiEtiketi(b))), true)
+		return
+	}
+	go m.bot.kvkkGonder(context.Background(), b, dil)
 }
 
 // baglantiKapandi: ajan ya da panel bağlantıyı iptal etti.

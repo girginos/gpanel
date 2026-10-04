@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,19 @@ func TestSirYenileCLI_Basari(t *testing.T) {
 	// Sır değeri çıktıya sızmamalı
 	if strings.Contains(out.String()+hata.String(), rd.p) {
 		t.Error("yeni sır stdout/stderr'e yazıldı")
+	}
+}
+
+// Destek ajanı ayrı hizmet: sırlar yenilenince (kendi LoadCredential kopyası bayatlar) yeniden başlatılır.
+func TestSirYenileCLI_DestekAjaniYenidenBaslar(t *testing.T) {
+	r, _, _ := cliKur(t)
+	sv := &cliSahteServis{onceSaglikli: true, sonraSaglikli: []bool{true}}
+	var out, hata bytes.Buffer
+	if kod := sirYenileCLI(context.Background(), r, sv, []string{"--hepsi"}, &out, &hata); kod != 0 {
+		t.Fatalf("kod=%d hata=%s", kod, hata.String())
+	}
+	if !slices.Contains(sv.denenen, "girginospanel-destek-ajan.service") {
+		t.Fatalf("sır yenilenince destek ajanı try-restart listesinde yok: %v", sv.denenen)
 	}
 }
 

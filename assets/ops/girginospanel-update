@@ -55,6 +55,7 @@ DBDIR=/var/backups/girginospanel/db           # dump'ların yeri (kardeş dizinl
 PREDUMP=""                                    # güncelleme öncesi dump yolu (rollback'te geri yüklenir)
 KAPI_JSON=/etc/girginospanel/kapi.json        # rol kapıları (ADR-GP-001) doğruluk kaynağı
 KAPI_YENI=0                                   # 1 = kapi.json'u BU koşu (10c) yarattı → rollback kaldırır
+DESTEK_AJAN_YENI=0                            # 1 = pakette destek ajanı ikilisi vardı ve /usr/local/bin'e yazıldı (adım 6)
 SIR_BIRIM_YENI=0                              # 1 = panel birimini BU koşu (10e) LoadCredential'a geçirdi → rollback geri koyar
 SIR_ARAC=""                                   # girginospanel-sir (paketteki tercih edilir)
 # Restart sonrası sağlık penceresi (sn) ve çöküş sonrası kararlılık (ardışık başarılı yoklama).
@@ -627,6 +628,14 @@ if [ -n "$NEWAV" ]; then
   ok "antivirus ajani guncellendi"
 fi
 
+# Telegram destek ajani — panelden AYRI hizmet. Burada yalniz ikili atomik yazilir (calisan surec
+# eski inode'u tutar); hizmet panel yeni ikiliyle SAGLIKLI acildiktan sonra (adim 11a) baslatilir.
+NEWDA=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-destek-ajan -path '*/assets/*' 2>/dev/null | head -1)
+if [ -n "$NEWDA" ]; then
+  install -m 0755 "$NEWDA" /usr/local/bin/girginospanel-destek-ajan || warn "destek ajani guncellenemedi"
+  DESTEK_AJAN_YENI=1
+fi
+
 # Eklenti YUKLERI (src/eklentiler) — installer bunu yapar, updater ESKIDEN
 # YAPMIYORDU. Sonuc: guncellenen eski sunucularda whitelabel (panelle birlikte
 # gelen ucretsiz eklenti) payload'i hic gelmiyor, panel 'Marka eklentisi dosyasi
@@ -889,6 +898,24 @@ if [ "$HEALTHY" = 1 ]; then
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} sn)"
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
+
+  # 11a) TELEGRAM DESTEK AJANI — panelden AYRI hizmet. SIRA BİLİNÇLİ: yalnız panel yeni ikiliyle
+  # SAĞLIKLI açıldıktan SONRA başlatılır/yeniden başlatılır. Eski panelin (gömülü ajanlı) süreci
+  # restart'ta öldü; bu noktada aynı cihaz anahtarıyla merkeze bağlanan TEK ajan bu hizmettir
+  # (ayrıca hizmet tek-örnek flock kilidiyle iki kopyaya karşı korunur). Ajanın hatası güncellemeyi
+  # BAŞARISIZ saymaz: panel ajana bağımlı değil.
+  if [ "$DESTEK_AJAN_YENI" = 1 ] && [ -f "$A/systemd/girginospanel-destek-ajan.service" ]; then
+    install -m 0644 "$A/systemd/girginospanel-destek-ajan.service" /etc/systemd/system/girginospanel-destek-ajan.service \
+      && systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable girginospanel-destek-ajan >/dev/null 2>&1 || true
+    systemctl restart girginospanel-destek-ajan >/dev/null 2>&1 || true
+    sleep 2
+    if systemctl is-active --quiet girginospanel-destek-ajan; then
+      ok "Telegram destek ajanı ACTIVE (panelden ayrı hizmet)"
+    else
+      warn "Telegram destek ajanı BAŞLAMADI (panel etkilenmez) — journalctl -u girginospanel-destek-ajan -n 40"
+    fi
+  fi
 
   # 11b) TEK SEFERLİK SIR YENİLEME — 2026-10 sızıntısı (JWT/DB/Redis sırları kiracı
   # süreçlerine geçebiliyordu): sızmış olabilecek değerler geçersiz kılınır. İşaret

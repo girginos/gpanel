@@ -29,6 +29,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"girginospanel/internal/auth"
+	"girginospanel/internal/destek/kopru"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
@@ -50,10 +51,11 @@ var kanaryaJWT = "ey" + "JhbGciOiJIUzI1NiJ9" + "." + "ey" + "JzdWIiOiJrYW5hcnlhI
 var testSecret = []byte("destek-arac-test-jwt-sirri-0123456789")
 
 type sahne struct {
-	db  *sql.DB
-	y   *yurutucu
-	mu  sync.Mutex
-	son struct {
+	db     *sql.DB
+	y      *yurutucu
+	router http.Handler
+	mu     sync.Mutex
+	son    struct {
 		c  *auth.Claims
 		mc *auth.MusteriClaims
 	}
@@ -247,7 +249,8 @@ func sahneKur(t *testing.T) *sahne {
 			return nil, nil
 		},
 	}
-	s.y = yeni(db, r, []string{panelSirri}, o)
+	s.y = yeni(db, kopru.Yerel{Router: r}, []string{panelSirri}, o)
+	s.router = r
 	return s
 }
 
@@ -410,7 +413,7 @@ func TestIkinciKatmanMiddleware(t *testing.T) {
 	iste := func(dk middleware.DestekKimlik, metod, yol string) int {
 		req := httptest.NewRequest(metod, yol, nil).WithContext(middleware.DestekBagla(context.Background(), dk))
 		w := httptest.NewRecorder()
-		s.y.router.ServeHTTP(w, req)
+		s.router.ServeHTTP(w, req)
 		return w.Code
 	}
 	b10 := middleware.DestekKimlik{Rol: middleware.DestekBayi, KullaniciID: 10, Kullanici: "bayi10", TgKisa: "t"}
@@ -438,7 +441,7 @@ func TestIkinciKatmanMiddleware(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/domains/101", nil)
 	req.Header.Set("X-Destek-Kimlik", "kok")
 	w := httptest.NewRecorder()
-	s.y.router.ServeHTTP(w, req)
+	s.router.ServeHTTP(w, req)
 	if w.Code != 401 {
 		t.Fatalf("başlık taklidi: %d", w.Code)
 	}
@@ -689,4 +692,25 @@ func TestHesapListesi(t *testing.T) {
 	et, id, _ = HesapListesi(ctx, s.db, protokol.RolBayi, 10, 0)
 	b := protokol.OturumBaglami{Rol: protokol.RolBayi, Duzey: protokol.DuzeyOkuma, Hesaplar: et}
 	basarili(t, "liste ile", s.calistir(&Kimlik{Rol: protokol.RolBayi, KullaniciID: 10, HesapIDleri: id}, b, "hesap_ozet", `{"hesap":1}`))
+}
+
+// Köprü yoksa (panel çöktü): panel-bağımlı araçlar panel_yanit_vermiyor döner;
+// panelden bağımsız araçlar çalışmaya devam eder.
+func TestPanelYokKopruAraclari(t *testing.T) {
+	s := sahneKur(t)
+	s.y.gecit = &kopru.Istemci{Yol: "/tmp/gosp-olmayan-kopru.sock", SahipUID: 0}
+	b := oturum(protokol.RolKok, "a.com", "b.com", "c.com")
+	for _, c := range []struct{ arac, param string }{
+		{"hesap_ozet", `{"hesap":1}`},
+		{"ssl_durum", `{"hesap":1}`},
+		{"sunucu_log_oku", `{"kaynak":"panel"}`},
+	} {
+		r := s.calistir(&kok, b, c.arac, c.param)
+		beklenenHata(t, c.arac, r, protokol.HataMesgul)
+		if !strings.Contains(r.Ozet, PanelYanitVermiyor) || !strings.Contains(r.Ozet, "servis_durum") {
+			t.Errorf("%s: özet panel_yanit_vermiyor + öneri içermiyor: %q", c.arac, r.Ozet)
+		}
+	}
+	basarili(t, "servis_durum", s.calistir(&kok, b, "servis_durum", `{"servis":"nginx"}`))
+	basarili(t, "nginx_test", s.calistir(&kok, b, "nginx_test", `{"hesap":1}`))
 }

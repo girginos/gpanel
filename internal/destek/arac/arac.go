@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"girginospanel/internal/destek/kopru"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/maske"
 	"girginospanel/internal/monitor"
@@ -65,17 +66,27 @@ func kimlikAl(ctx context.Context) (*Kimlik, bool) {
 
 // yurutucu — Yurutucu gerçeklemesi.
 type yurutucu struct {
-	db     *sql.DB
-	router http.Handler
-	mask   *maske.Maskeleyici
-	o      ortam
+	db *sql.DB
+	// gecit — panelin salt-okunur GET uçlarına erişim: panel sürecinde süreç içi
+	// (kopru.Yerel), ayrı destek-ajan sürecinde özel köprü istemcisi (kopru.Istemci).
+	gecit kopru.Gecit
+	mask  *maske.Maskeleyici
+	o     ortam
 }
 
 // Yeni — db: panel veritabanı; router: panelin kök http.Handler'ı (/api/v1
 // rotaları dahil, RequireAuth grubu ile); panelSirlari: çıktıda birebir
 // maskelenecek panel sırları (JWT sırrı, DB DSN/parolası, Redis yönetici parolası).
 func Yeni(db *sql.DB, router http.Handler, panelSirlari []string) Yurutucu {
-	return yeni(db, router, panelSirlari, varsayilanOrtam())
+	return yeni(db, kopru.Yerel{Router: router}, panelSirlari, varsayilanOrtam())
+}
+
+// YeniKopruli — AYRI süreçteki destek ajanı için: panel uçlarına router yerine
+// özel Unix soket köprüsü (internal/destek/kopru) üzerinden erişir. Köprü yoksa
+// panel-bağımlı araçlar "panel_yanit_vermiyor" döner; panelden bağımsız araçlar
+// (servis_durum, nginx_test, dogrula_ozet, log_oku(php_fpm/laravel/cron) …) etkilenmez.
+func YeniKopruli(db *sql.DB, g kopru.Gecit, panelSirlari []string) Yurutucu {
+	return yeni(db, g, panelSirlari, varsayilanOrtam())
 }
 
 // Dikisler — dış dünya dikişleri: uçtan uca testler (internal/destek/e2e) gerçek
@@ -103,13 +114,31 @@ func YeniDikisli(db *sql.DB, router http.Handler, panelSirlari []string, d Dikis
 	if d.Dig != nil {
 		o.dig = d.Dig
 	}
-	return yeni(db, router, panelSirlari, o)
+	return yeni(db, kopru.Yerel{Router: router}, panelSirlari, o)
 }
 
-func yeni(db *sql.DB, router http.Handler, panelSirlari []string, o ortam) *yurutucu {
+// YeniDikisliKopruli — YeniDikisli'nin köprülü karşılığı (ayrı süreç e2e testleri).
+func YeniDikisliKopruli(db *sql.DB, g kopru.Gecit, panelSirlari []string, d Dikisler) Yurutucu {
+	o := varsayilanOrtam()
+	if d.Komut != nil {
+		o.komut = d.Komut
+	}
+	if d.KiraciKomut != nil {
+		o.kiraciKomut = d.KiraciKomut
+	}
+	if d.Yokla != nil {
+		o.yokla = d.Yokla
+	}
+	if d.Dig != nil {
+		o.dig = d.Dig
+	}
+	return yeni(db, g, panelSirlari, o)
+}
+
+func yeni(db *sql.DB, g kopru.Gecit, panelSirlari []string, o ortam) *yurutucu {
 	return &yurutucu{
-		db:     db,
-		router: router,
+		db:    db,
+		gecit: g,
 		mask: maske.Yeni(maske.Secenek{
 			BilinenSirlar: slices.Clone(panelSirlari),
 			IPKirp:        true,
