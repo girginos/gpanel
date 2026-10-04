@@ -14,6 +14,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,13 +126,17 @@ func (h *Handlers) scheme(ssl bool) string {
 }
 
 // GET /domains/{id}/wordpress — kurulu WP'leri keşfet (public_html + 1 alt dizin)
+//
+// Hız: sürüm dosyadan (wp-cli yok); siteurl wp-cli ister → önbellekte yoksa alan adından
+// türetilen adres hemen döner ve gerçek değer arka planda önbelleğe alınır (sonraki
+// istekte gerçek). Eskiden kurulum başına 2 SIRALI wp-cli çağrısı (~1-5 sn) vardı.
 func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
-	id, sk, _, _, _, ok := h.domain(r)
+	id, sk, alanAdi, ssl, _, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	root, _, _ := h.wpKapsam(r, sk)
+	root, wpHost, _ := h.wpKapsam(r, sk)
 	out := []Kurulum{}
 	adaylar := []string{root}
 	if entries, err := os.ReadDir(root); err == nil {
@@ -141,6 +146,22 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Panel-DB'deki admin kullanıcı kaydı: tek sorgu (kurulum başına sorgu yok).
+	akullar := map[string]string{}
+	if rows, err := h.DB.QueryContext(r.Context(),
+		`SELECT hedef, admin_kullanici FROM cp_wp_kurulum WHERE domain_id=?`, id); err == nil {
+		for rows.Next() {
+			var hd, ak string
+			if rows.Scan(&hd, &ak) == nil {
+				akullar[hd] = ak
+			}
+		}
+		rows.Close()
+	}
+	host := alanAdi
+	if wpHost != "" {
+		host = wpHost
+	}
 	for _, dir := range adaylar {
 		if _, err := os.Stat(filepath.Join(dir, "wp-config.php")); err != nil {
 			continue
@@ -149,23 +170,42 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		if k.Dizin == "/" {
 			k.Dizin = "/ (kök)"
 		}
-		if b, err := wpKomut(sk, "core", "version", "--path="+dir); err == nil {
-			k.Surum = strings.TrimSpace(string(b))
-		}
-		if b, err := wpKomut(sk, "option", "get", "siteurl", "--path="+dir); err == nil {
-			k.SiteURL = strings.TrimSpace(string(b))
-			k.AdminURL = k.SiteURL + "/wp-admin"
-		}
-		var akul string
-		if h.DB.QueryRowContext(r.Context(),
-			`SELECT admin_kullanici FROM cp_wp_kurulum WHERE domain_id=? AND hedef=?`,
-			id, dir).Scan(&akul) == nil {
+		k.Surum = surumOku(sk, dir)
+		k.SiteURL = siteURLAl(sk, dir, h.scheme(ssl)+host, strings.TrimPrefix(strings.TrimPrefix(dir, root), "/"))
+		k.AdminURL = k.SiteURL + "/wp-admin"
+		if akul, varMi := akullar[dir]; varMi {
 			k.ParolaVar = true
 			k.AdminKullanici = akul
 		}
 		out = append(out, k)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// siteURLAl: önbellekteki gerçek siteurl; yoksa taban+alt-dizin (türetilmiş) ve arka
+// planda gerçek değeri doldurur. wp-cli çıktısı güvenilmez → yalnız http(s) URL kabul.
+func siteURLAl(sk, dir, taban, altDizin string) string {
+	key := onbAnahtar(sk, dir, "siteurl")
+	if d, ok := siteOnb.Bak(key); ok {
+		if s, _ := d.(string); s != "" {
+			return s
+		}
+	}
+	siteOnb.Arka(key, 30*time.Second, func(c context.Context) (any, error) {
+		b, e := wpOku(c, sk, "option", "get", "siteurl", "--path="+dir)
+		if e != nil {
+			return nil, e
+		}
+		s := strings.TrimSpace(string(b))
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || len(s) > 300 {
+			return "", nil
+		}
+		return s, nil
+	})
+	if altDizin != "" {
+		return taban + "/" + altDizin
+	}
+	return taban
 }
 
 // TumKurulum: tüm domainlerdeki tek WP kurulumunun özeti (aggregate tablo satırı).
@@ -189,7 +229,7 @@ type wpAday struct {
 }
 
 // GET /wordpress/tumu — TÜM domainlerdeki kurulu WordPress'leri tarar (sürüm + güncelleme + kurulum tarihi).
-// AdminOnly. wp-cli çağrıları worker-pool (4) ile paralel, her çağrı context-timeout'lu.
+// AdminOnly. wp-cli ÇAĞRILMAZ: sürüm dosyadan, güncelleme sürüm başına önbellekli HTTP kontrolünden.
 func (h *Handlers) TumListe(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT id, sistem_kullanici, alan_adi, COALESCE(cert_path,'') FROM domains ORDER BY alan_adi`)
@@ -226,24 +266,40 @@ func (h *Handlers) TumListe(w http.ResponseWriter, r *http.Request) {
 	_ = rows.Err()
 	rows.Close()
 
-	out := make([]TumKurulum, len(adaylar))
-	sem := make(chan struct{}, 4)
+	// 1) Dosya sisteminden sürümler (wp-cli YOK, mikrosaniye).
+	surumler := make([]string, len(adaylar))
+	uniq := map[string]struct{}{}
+	for i, a := range adaylar {
+		surumler[i] = surumOku(a.sk, a.dir)
+		if surumler[i] != "" {
+			uniq[surumler[i]] = struct{}{}
+		}
+	}
+	// 2) Güncelleme kontrolü: SÜRÜM başına en çok bir HTTP isteği (önbellekli, paralel).
+	gunc := make(map[string]cekGunc, len(uniq))
+	var gmu sync.Mutex
 	var wg sync.WaitGroup
-	for i := range adaylar {
+	for s := range uniq {
 		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, a wpAday) {
+		go func(s string) {
 			defer wg.Done()
-			defer func() { <-sem }()
-			out[i] = h.incele(r.Context(), a)
-		}(i, adaylar[i])
+			g := cekKontrol.sorgu(r.Context(), s)
+			gmu.Lock()
+			gunc[s] = g
+			gmu.Unlock()
+		}(s)
 	}
 	wg.Wait()
+	out := make([]TumKurulum, len(adaylar))
+	for i, a := range adaylar {
+		out[i] = h.incele(a, surumler[i], gunc[surumler[i]])
+	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// incele: tek WP kurulumu için sürüm + güncelleme durumu + kurulum tarihini toplar.
-func (h *Handlers) incele(ctx context.Context, a wpAday) TumKurulum {
+// incele: tek WP kurulumunun satırı (sürüm + güncelleme durumu + kurulum tarihi).
+// wp-cli çağırmaz; girdiler önceden doğrulanmış sürüm ve önbellekli kontrol sonucudur.
+func (h *Handlers) incele(a wpAday, surum string, g cekGunc) TumKurulum {
 	dizinYol := strings.TrimPrefix(strings.TrimPrefix(a.dir, a.root), "/")
 	base := h.scheme(a.ssl) + a.alanAdi
 	if dizinYol != "" {
@@ -255,35 +311,15 @@ func (h *Handlers) incele(ctx context.Context, a wpAday) TumKurulum {
 	}
 	k := TumKurulum{
 		DomainID: a.domainID, AlanAdi: a.alanAdi, Dizin: dizinEt,
-		SiteURL: base, AdminURL: base + "/wp-admin", Durum: "bilinmiyor",
+		SiteURL: base, AdminURL: base + "/wp-admin", Durum: "bilinmiyor", Surum: surum,
 	}
-	// mevcut sürüm
-	c1, cancel1 := context.WithTimeout(ctx, 15*time.Second)
-	if b, err := wpStdout(c1, a.sk, "core", "version", "--path="+a.dir); err == nil {
-		k.Surum = strings.TrimSpace(string(b))
+	switch {
+	case surum == "" || !g.Bilinen:
+	case g.Var:
+		k.Durum, k.SonSurum = "eski", g.Hedef
+	default:
+		k.Durum = "guncel"
 	}
-	cancel1()
-	// güncelleme kontrolü (wordpress.org API'sine gider → timeout şart)
-	c2, cancel2 := context.WithTimeout(ctx, 25*time.Second)
-	if b, err := wpStdout(c2, a.sk, "core", "check-update", "--path="+a.dir, "--format=json"); err == nil {
-		bt := bytes.TrimSpace(b)
-		if len(bt) == 0 || string(bt) == "[]" {
-			k.Durum = "guncel"
-		} else {
-			var ups []struct {
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(bt, &ups) == nil {
-				if len(ups) > 0 {
-					k.Durum = "eski"
-					k.SonSurum = ups[0].Version
-				} else {
-					k.Durum = "guncel"
-				}
-			}
-		}
-	}
-	cancel2()
 	// kurulum tarihi: wp-config.php değişme zamanı (kuruluşta yazılır, nadir değişir)
 	if fi, err := os.Stat(filepath.Join(a.dir, "wp-config.php")); err == nil {
 		k.KurulumTarihi = fi.ModTime().Format("2006-01-02")
@@ -387,6 +423,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	// 2. kez (çift-tık / hızlı tekrar) yapıp MEVCUT kurulumu EZMESİNİ engeller.
 	// (a) eşzamanlı kurulum kilidi: ilk istek bitmeden gelen 2. istek 409 alır —
 	//     wp-config.php henüz yazılmamışken bile yarış kapatılır.
+	defer wpOnbellekSil(sk, hedef)
 	if _, sur := wpKurulumKilit.LoadOrStore(hedef, struct{}{}); sur {
 		httpx.WriteError(w, http.StatusConflict, "bu dizine kurulum zaten sürüyor — lütfen bekleyin")
 		return
@@ -540,6 +577,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	defer wpOnbellekSil(sk, dir)
 	out1, e1 := wpKomut(sk, "core", "update", "--path="+dir)
 	out2, _ := wpKomut(sk, "core", "update-db", "--path="+dir)
 	if e1 != nil {
@@ -658,6 +696,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	defer wpOnbellekSil(sk, dir)
 	root := wpRoot
 	// KÖK-SİTE KORUMASI: public_html'in KENDİSİ asla silinmez (tüm site gider).
 	// Ama kökteki WordPress'i kaldırmak meşru ve yaygın bir istek — bu yüzden

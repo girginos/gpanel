@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -32,22 +31,13 @@ func (h *Handlers) dizinQP(r *http.Request, sk string) (string, error) {
 	return cozDizin(root, d)
 }
 
-// gonderJSON: wp-cli'nin JSON çıktısını (bir dizi) olduğu gibi ilet; hata/boşsa [] döndür.
-func gonderJSON(w http.ResponseWriter, raw []byte, err error) {
-	bt := strings.TrimSpace(string(raw))
-	if err != nil || bt == "" {
-		httpx.WriteJSON(w, http.StatusOK, []any{})
-		return
-	}
-	var arr []json.RawMessage
-	if json.Unmarshal([]byte(bt), &arr) != nil {
-		httpx.WriteJSON(w, http.StatusOK, []any{})
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, arr)
-}
-
 // GET /domains/{id}/wordpress/durum?dizin= — çekirdek sürüm/güncelleme + PHP + DB boyutu + bakım
+//
+// Hız (ölçüm: eski hâl 4 wp-cli çağrısı, her istekte): sürüm dosyadan, güncelleme
+// kontrolü sürüm başına önbellekli tek HTTP isteği, PHP sürümü saatlik global önbellek,
+// bakım bayrak dosyası. YALNIZ DB boyutu wp-cli ister → arka planda hesaplanır, 10 dk
+// önbellekte tutulur; hazır değilse yanıt hemen döner (yukleniyor=true) ve istemci
+// kısa aralıkla yeniden sorar.
 func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	_, sk, _, _, _, ok := h.domain(r)
 	if !ok {
@@ -59,63 +49,58 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
+	httpx.WriteJSON(w, http.StatusOK, durumOlustur(r.Context(), sk, dir))
+}
 
-	// 5 wp-cli çağrısını PARALEL çalıştır → gecikme = en yavaş tek çağrı (~check-update),
-	// toplam ~3s yerine ~1.5s. 🔴 Her goroutine KENDİ yerel değişkenine yazar; map
-	// yalnız wg.Wait() sonrası kurulur. (Eski hâl aynı map'e eşzamanlı yazıp Go'nun
-	// "concurrent map writes" fatal'ıyla TÜM paneli düşürüyordu — farklı anahtar dahi olsa.)
-	var (
-		surum, hedefSurum, php, dbMB string
-		guncellemeVar, bakim         bool
-	)
-	var wg sync.WaitGroup
-	wg.Add(5)
-	go func() {
-		defer wg.Done()
-		if b, e := wpStdout(ctx, sk, "core", "version", "--path="+dir); e == nil {
-			surum = strings.TrimSpace(string(b))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if b, e := wpStdout(ctx, sk, "core", "check-update", "--path="+dir, "--format=json"); e == nil {
-			bt := strings.TrimSpace(string(b))
-			if bt != "" && bt != "[]" {
-				var ups []struct {
-					Version string `json:"version"`
-				}
-				if json.Unmarshal([]byte(bt), &ups) == nil && len(ups) > 0 {
-					guncellemeVar = true
-					hedefSurum = ups[0].Version
-				}
+// durumOlustur: Durum yanıtının gövdesi (HTTP/DB'den bağımsız → test edilebilir).
+func durumOlustur(ctx context.Context, sk, dir string) map[string]any {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	surum := surumOku(sk, dir)
+	if surum == "" {
+		// Beklenmedik yerleşim: wp-cli ile oku (önbellekli, hafif bootstrap).
+		d, e := agirOnb.Yap(ctx, onbAnahtar(sk, dir, "surum"), 30*time.Second, func(c context.Context) (any, error) {
+			b, e := wpOku(c, sk, "core", "version", "--path="+dir)
+			return strings.TrimSpace(string(b)), e
+		})
+		if e == nil {
+			if s, _ := d.(string); reSurum.MatchString(s) {
+				surum = s
 			}
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		if b, e := wpStdout(ctx, sk, "eval", "echo PHP_VERSION;", "--path="+dir); e == nil {
-			php = strings.TrimSpace(string(b))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if b, e := wpStdout(ctx, sk, "db", "size", "--size_format=mb", "--path="+dir); e == nil {
-			dbMB = strings.TrimSpace(string(b))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		// KALICI bakım modu: WP-native 10dk auto-expiry yerine mu-plugin bayrağını oku.
-		bakim = bakimAktif(dir)
-	}()
-	wg.Wait()
-	out := map[string]any{
-		"surum": surum, "guncelleme_var": guncellemeVar, "hedef_surum": hedefSurum,
-		"php": php, "db_mb": dbMB, "bakim": bakim,
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	g := cekKontrol.sorgu(ctx, surum)
+	dbMB, yukleniyor := "", false
+	key := onbAnahtar(sk, dir, "dbmb")
+	if d, ok := agirOnb.Bak(key); ok {
+		dbMB, _ = d.(string)
+	} else {
+		yukleniyor = true
+		agirOnb.Arka(key, 40*time.Second, func(c context.Context) (any, error) {
+			b, e := wpOku(c, sk, "db", "size", "--size_format=mb", "--path="+dir)
+			if e != nil {
+				return nil, e
+			}
+			return dbBoyutuTemiz(string(b)), nil
+		})
+	}
+	return map[string]any{
+		"surum": surum, "guncelleme_var": g.Var, "hedef_surum": g.Hedef,
+		"php": phpSurumu(ctx), "db_mb": dbMB, "bakim": bakimAktif(dir),
+		"yukleniyor": yukleniyor,
+	}
+}
+
+// reDBBoyut: `wp db size --size_format=mb` çıktısı bir sayıdır. wp-cli çıktısı (kiracı
+// kontrollü wp-config/DB üzerinden) güvenilmez → yalnız rakam/nokta kabul edilir.
+var reDBBoyut = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,3})?$`)
+
+func dbBoyutuTemiz(s string) string {
+	s = strings.TrimSpace(s)
+	if reDBBoyut.MatchString(s) {
+		return s
+	}
+	return ""
 }
 
 // GET /domains/{id}/wordpress/eklentiler?dizin=
@@ -130,11 +115,9 @@ func (h *Handlers) Eklentiler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
-	defer cancel()
-	b, e := wpStdout(ctx, sk, "plugin", "list", "--path="+dir, "--format=json",
-		"--fields=name,status,version,update,update_version")
-	gonderJSON(w, b, e)
+	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "plugin", 40*time.Second,
+		"plugin", "list", "--path="+dir, "--format=json",
+		"--fields=name,status,version,update,update_version"))
 }
 
 // GET /domains/{id}/wordpress/temalar?dizin=
@@ -149,11 +132,9 @@ func (h *Handlers) Temalar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
-	defer cancel()
-	b, e := wpStdout(ctx, sk, "theme", "list", "--path="+dir, "--format=json",
-		"--fields=name,status,version,update,update_version")
-	gonderJSON(w, b, e)
+	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "theme", 40*time.Second,
+		"theme", "list", "--path="+dir, "--format=json",
+		"--fields=name,status,version,update,update_version"))
 }
 
 // GET /domains/{id}/wordpress/kullanicilar?dizin=
@@ -168,11 +149,9 @@ func (h *Handlers) Kullanicilar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	b, e := wpStdout(ctx, sk, "user", "list", "--path="+dir, "--format=json",
-		"--fields=ID,user_login,user_email,display_name,roles")
-	gonderJSON(w, b, e)
+	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "user", 30*time.Second,
+		"user", "list", "--path="+dir, "--format=json",
+		"--fields=ID,user_login,user_email,display_name,roles"))
 }
 
 // mutasyonHazir: mutasyon işlemlerinde ortak domain+demo+dizin çözümü. ok=false ise yanıt yazılmıştır.
@@ -225,6 +204,7 @@ func (h *Handlers) TemaIslem(w http.ResponseWriter, r *http.Request) {
 
 // paketIslem: plugin/theme için ortak güncelle/etkinleştir/devre-dışı yürütücü.
 func (h *Handlers) paketIslem(w http.ResponseWriter, sk, dir, tur, islem, ad string) {
+	defer wpOnbellekSil(sk, dir) // mutasyon sonrası liste/durum önbelleği bayat kalmasın
 	var args []string
 	switch islem {
 	case "tumunu-guncelle":
@@ -275,6 +255,7 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer wpOnbellekSil(sk, dir)
 	if req.UserID <= 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı")
 		return
@@ -315,6 +296,7 @@ func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer wpOnbellekSil(sk, dir)
 	onceOut, onceErr := wpKomut(sk, "core", "verify-checksums", "--path="+dir)
 	once := "temiz"
 	if onceErr != nil {
@@ -358,6 +340,7 @@ func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer wpOnbellekSil(sk, dir)
 	var out []byte
 	var err error
 	switch req.Islem {

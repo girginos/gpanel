@@ -214,8 +214,16 @@ export default function WordPressPage() {
               </tr>
             </thead>
             <tbody className={T.govde}>
-              {tumYuk ? (
-                <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>{cevir("Kurulumlar taranıyor… (sürüm + güncelleme kontrolü)")}</td></tr>
+              {tumYuk && tum.length === 0 ? (
+                // İlk yükleme: satır iskeleti. Yenilemede eski satırlar görünür kalır (boş tablo yanıp sönmez).
+                [0, 1, 2].map(i => (
+                  <tr key={i} className={T.satir} aria-busy="true">
+                    <td colSpan={6} className={T.hucreDurum}>
+                      {i === 0 && <span className="sr-only">{cevir("Kurulumlar taranıyor… (sürüm + güncelleme kontrolü)")}</span>}
+                      <div aria-hidden="true" className="h-6 w-full rounded-md bg-slate-100 dark:bg-dark-600/50 animate-pulse motion-reduce:animate-none" />
+                    </td>
+                  </tr>
+                ))
               ) : tum.length === 0 ? (
                 <tr className={T.satir}><td colSpan={6} className={T.hucreDurum}>
                   <Ikon d={I.kalem} className="h-6 w-6 mb-1" />
