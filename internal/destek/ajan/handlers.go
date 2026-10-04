@@ -84,7 +84,13 @@ func (a *Ajan) DurumUcu(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "ayar okunamadı")
 		return
 	}
-	d := a.DurumAl()
+	// Ajan AYRI süreçtir: bağlantı durumu onun DB'ye yazdığı nabızdan okunur. Nabız
+	// bayatsa ya da yoksa ajan çalışmıyor demektir — panel bunu açıkça söyler.
+	nb := NabizOku(ctx, a.DB)
+	d := nb.Durum
+	if !nb.Canli {
+		d = Durum{Durum: BagAjanYok}
+	}
 	if a.Yap.Hata != "" && d.SonHata == "" {
 		d.SonHata = a.Yap.Hata
 	}
@@ -93,10 +99,13 @@ func (a *Ajan) DurumUcu(w http.ResponseWriter, r *http.Request) {
 		"rol":            p.RolKok,
 		"modul_acik":     minDuzey(kok.ModulDuzey) != p.DuzeyKapali,
 		"tavan":          Tavan(ctx, a.DB, p.RolKok, 0),
-		"merkez_bagli":   a.Bagli(),
+		"merkez_bagli":   nb.MerkezBagl,
 		"ayar":           kok,
 		"baglanti":       d,
 		"eslestirme_url": eslestirmeURL,
+		"ajan": map[string]any{
+			"canli": nb.Canli, "yas_sn": nb.YasSn, "pid": nb.PID, "surum": nb.Surum, "kopru": nb.Kopru,
+		},
 	})
 }
 
@@ -150,22 +159,9 @@ func (a *Ajan) AyarUcu(w http.ResponseWriter, r *http.Request) {
 	detay := fmt.Sprintf("modul=%s→%s bayi=%s→%s musteri=%s→%s", mevcut.ModulDuzey, yeni.ModulDuzey,
 		mevcut.BayiDuzey, yeni.BayiDuzey, mevcut.MusteriDuzey, yeni.MusteriDuzey)
 	httpx.Denetim(a.DB, r, ik.uid, ik.aktor, dAyar, "telegram-destek", detay, 0, true)
-	a.Durt()
-	// Etkin düzey değişmiş olabilir: bağlı ise aktif bağlantıların durumunu tazele.
-	if a.Bagli() {
-		go a.tumDurumlariBildir(context.WithoutCancel(ctx))
-	}
+	// Ajan ayrı süreç: değişikliği DB yoklamasıyla (≤3 sn) görür ve hesap durumlarını
+	// merkeze yeniden bildirir (izleme.go ayarYokla).
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "ayar": yeni})
-}
-
-func (a *Ajan) tumDurumlariBildir(ctx context.Context) {
-	bs, err := baglantilarSorgu(ctx, a.DB, `durum='aktif' ORDER BY id LIMIT 1000`)
-	if err != nil {
-		return
-	}
-	for _, b := range bs {
-		a.durumBildir(ctx, b)
-	}
 }
 
 // ---- GET /destek/baglantilar ----
@@ -287,7 +283,7 @@ func (a *Ajan) IptalUcu(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.Denetim(a.DB, r, ik.uid, ik.aktor, dBaglantiIptal, a.hedefAdi(ctx, b), "neden=kullanici kaynak=panel", 0, true)
-	a.temizleIz(b.Kimlik)
-	a.bildir(&p.BaglantiIptal{BaglantiID: b.Kimlik, Neden: p.IptalKullanici})
+	// Merkeze bildirim + iz temizliği: ajan süreci DB'de hub_bildirildi_at IS NULL olan
+	// iptali yoklamayla görür (izleme.go iptalYokla).
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

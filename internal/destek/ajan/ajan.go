@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"girginospanel/internal/destek/iptal"
@@ -52,6 +53,8 @@ const (
 	BagBaglaniyor   = "baglaniyor"
 	BagBagli        = "bagli"
 	BagHata         = "hata"
+	// BagAjanYok: ajan ayrı hizmettir; nabzı yoksa/bayatsa panel bunu gösterir.
+	BagAjanYok = "ajan_yok"
 )
 
 // Durum: merkez bağlantısının anlık hali (arayüz için; sır taşımaz).
@@ -81,6 +84,13 @@ type Ajan struct {
 	// Lisans nabzı her ~6 saatte bileti yeniler; uzun ömürlü bağlantı eski biletle doğrulamasını
 	// yitirmesin.
 	BiletYenilemeAraligi time.Duration
+	// DBYoklamaAraligi: panelin DB'ye yazdığı değişikliklerin (ayar, panel tarafı iptal)
+	// ajana ulaşma aralığı. Panel ve ajan AYRI süreçtir; aralarındaki tek bağ DB'dir.
+	DBYoklamaAraligi time.Duration
+	// NabizAraligi: destek_ajan_nabiz satırının yazılma aralığı (panel durum sayfası canlılığı).
+	NabizAraligi time.Duration
+	// KopruPing: panel köprüsünün canlılık yoklaması (nil → nabızda köprü durumu boş).
+	KopruPing func(ctx context.Context) error
 
 	dogrulayici *p.Dogrulayici
 	cihaz       *p.AnahtarCifti
@@ -93,11 +103,20 @@ type Ajan struct {
 	aktif      *oturum
 	hesapIzi   map[string]string
 	baslatildi bool
+
+	// DB yoklama durumu (yalnız izleme döngüsü yazar).
+	ayarIzi       string
+	ayarHazir     bool
+	iptalSutunYok atomic.Bool
+	basladiAt     time.Time
 }
 
-// Yeni: ajanı kurar (çalıştırmaz).
+// Yeni: ajanı kurar (çalıştırmaz). Panel süreci de Yeni ile kurar ama Baslat ÇAĞIRMAZ:
+// panel yalnız UI uçlarını (Rotalar) ve DB'ye yazan iptal kancasını (PanelKancasiKur) kullanır;
+// ajanı ayrı süreç (cmd/destek-ajan, girginospanel-destek-ajan.service) çalıştırır.
 func Yeni(db *sql.DB, yap Yapilandirma) *Ajan {
-	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, ModulKontrolAraligi: 15 * time.Second, BiletYenilemeAraligi: 12 * time.Hour}
+	a := &Ajan{DB: db, Yap: yap, Saat: time.Now, IsZamanAsimi: 90 * time.Second, ModulKontrolAraligi: 15 * time.Second, BiletYenilemeAraligi: 12 * time.Hour,
+		DBYoklamaAraligi: 3 * time.Second, NabizAraligi: 10 * time.Second}
 	a.durt = make(chan struct{}, 1)
 	a.isSem = make(chan struct{}, 4)
 	a.hesapIzi = map[string]string{}
@@ -105,7 +124,8 @@ func Yeni(db *sql.DB, yap Yapilandirma) *Ajan {
 	return a
 }
 
-// Baslat: cihaz kimliği + doğrulayıcı + döngüler. Hata olsa da panel çalışmaya devam eder.
+// Baslat: cihaz kimliği + doğrulayıcı + döngüler (merkez bağlantısı, süpürge, DB yoklama,
+// nabız). YALNIZ ayrı destek-ajan sürecinde çağrılır. Hata olsa da süreç çalışmaya devam eder.
 func (a *Ajan) Baslat(ctx context.Context) {
 	a.mu.Lock()
 	if a.baslatildi {
@@ -115,7 +135,7 @@ func (a *Ajan) Baslat(ctx context.Context) {
 	a.baslatildi = true
 	a.mu.Unlock()
 	a.maske = maske.Yeni(maske.Secenek{BilinenSirlar: a.BilinenSirlar, IPKirp: true, EpostaMaskele: true, EvOnekSoy: true})
-	iptal.Kanca = a.iptalKancasi
+	a.basladiAt = a.Saat()
 	if len(a.Yap.MerkezAnahtarlari) > 0 {
 		d, err := p.YeniDogrulayici(func() time.Time { return a.Saat() }, p.YeniBellekOnbellek(0), a.Yap.MerkezAnahtarlari...)
 		if err != nil {
@@ -126,6 +146,8 @@ func (a *Ajan) Baslat(ctx context.Context) {
 	}
 	go a.korunmus(ctx, "bağlantı", a.dongu)
 	go a.korunmus(ctx, "süpürge", a.supurgeDongusu)
+	go a.korunmus(ctx, "db-yoklama", a.dbYoklamaDongusu)
+	go a.korunmus(ctx, "nabız", a.nabizDongusu)
 }
 
 // YurutucuAyarla: araç yürütücüsünü (sonradan, döngü çalışırken) bağlar.
@@ -565,6 +587,7 @@ func (a *Ajan) senkron(ctx context.Context, o *oturum) {
 	if err == nil {
 		for _, b := range sonIptal {
 			o.gonder(&p.BaglantiIptal{BaglantiID: b.Kimlik, Neden: iptalNedeniProtokol(b.IptalNedeni)})
+			a.hubBildirildiIsaretle(ctx, b.ID) // yoklama döngüsü aynı iptali ikinci kez yollamasın
 		}
 	}
 }
@@ -693,6 +716,7 @@ func (a *Ajan) merkezIptal(ctx context.Context, m *p.BaglantiIptal) {
 	if iptal.Tek(ctx, a.DB, b.ID, m.Neden, "merkez") {
 		a.denetimBot(ctx, b, dBaglantiIptal, "neden="+string(m.Neden)+" kaynak=telegram", true)
 		a.temizleIz(b.Kimlik)
+		a.hubBildirildiIsaretle(ctx, b.ID) // merkez zaten biliyor
 	}
 }
 
@@ -707,26 +731,9 @@ func (a *Ajan) otomatikIptal(ctx context.Context, b *baglanti, neden p.IptalNede
 	if iptal.Tek(ctx, a.DB, b.ID, neden, "sistem") {
 		a.denetimSistem(ctx, b, dBaglantiIptal, "neden="+string(neden)+" kaynak=otomatik", true)
 		a.temizleIz(b.Kimlik)
-		a.bildir(&p.BaglantiIptal{BaglantiID: b.Kimlik, Neden: neden})
-	}
-}
-
-// iptalKancasi: internal/destek/iptal tetiklerinden (bayi/hosting/2FA) gelen iptaller.
-func (a *Ajan) iptalKancasi(ctx context.Context, aktorUID int64, aktorAd string, kayitlar []iptal.Kayit) {
-	for _, k := range kayitlar {
-		// Silinen bayinin kimliği yeniden kullanılırsa yeni bayi bu kaydı görmesin
-		// (reseller.Sil denetim kapsamını köke çeker; aynı kural).
-		kapsam := k.ResellerID
-		if kapsam > 0 {
-			var var_ int
-			if a.DB.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id=?`, kapsam).Scan(&var_) != nil {
-				kapsam = 0
-			}
+		if a.bildir(&p.BaglantiIptal{BaglantiID: b.Kimlik, Neden: neden}) {
+			a.hubBildirildiIsaretle(ctx, b.ID)
 		}
-		httpx.DenetimSistem(a.DB, aktorUID, aktorAd, dBaglantiIptal, hedefTg(k.TgKullaniciAdi, k.TgUserID),
-			"neden="+string(k.Neden)+" kaynak=otomatik", kapsam, true)
-		a.temizleIz(k.Kimlik)
-		a.bildir(&p.BaglantiIptal{BaglantiID: k.Kimlik, Neden: k.Neden})
 	}
 }
 

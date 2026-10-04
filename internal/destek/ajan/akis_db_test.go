@@ -94,16 +94,19 @@ func dtGeciciDB(t *testing.T) *sql.DB {
 			t.Fatalf("şema: %v\n%s", err, q)
 		}
 	}
-	b, err := os.ReadFile("../../../migrations/0129_destek.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
 	var temiz []string
-	for _, s := range strings.Split(string(b), "\n") {
-		if ts := strings.TrimSpace(s); ts == "" || strings.HasPrefix(ts, "--") {
-			continue
+	for _, dosya := range []string{"0129_destek.sql", "0130_destek_ajan_ayri.sql"} {
+		b, err := os.ReadFile("../../../migrations/" + dosya)
+		if err != nil {
+			t.Fatal(err)
 		}
-		temiz = append(temiz, s)
+		for _, s := range strings.Split(string(b), "\n") {
+			if ts := strings.TrimSpace(s); ts == "" || strings.HasPrefix(ts, "--") {
+				continue
+			}
+			temiz = append(temiz, s)
+		}
+		temiz = append(temiz, ";")
 	}
 	for kez := 0; kez < 2; kez++ {
 		for _, st := range strings.Split(strings.Join(temiz, "\n"), ";") {
@@ -111,7 +114,7 @@ func dtGeciciDB(t *testing.T) *sql.DB {
 				continue
 			}
 			if _, err := db.Exec(st); err != nil {
-				t.Fatalf("göç 0129 (tur %d): %v", kez+1, err)
+				t.Fatalf("göç 0129/0130 (tur %d): %v", kez+1, err)
 			}
 		}
 	}
@@ -187,6 +190,9 @@ func kurOrtam(t *testing.T, yoklama bool, modulAcik bool) *ortam {
 		BotKullaniciAdi: "GirginTestBot", LisansIspati: func() []byte { return []byte("test-ispat") }})
 	a.BilinenSirlar = []string{dtKanarya}
 	a.ModulKontrolAraligi = 200 * time.Millisecond
+	a.DBYoklamaAraligi = 100 * time.Millisecond // panel ↔ ajan bağı DB yoklaması
+	a.NabizAraligi = 200 * time.Millisecond
+	a.PanelKancasiKur() // main.go'daki panel tarafı kanca (denetim); bildirim ajan yoklamasıyla
 	y := &sahteYurutucu{}
 	a.Yurutucu = y
 	o := &ortam{t: t, db: db, m: m, a: a, y: y, etkin: map[string]*p.BaglantiDurum{}}

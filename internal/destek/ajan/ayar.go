@@ -94,10 +94,19 @@ func modulAcik(ctx context.Context, db *sql.DB) bool {
 	return err == nil && minDuzey(a.ModulDuzey) != p.DuzeyKapali
 }
 
+// ayarYaz: ayar satırını yazar. surum her yazımda artar (aynı değerler yazılsa bile): ajan
+// süreci DB yoklamasıyla değişikliği buradan fark eder (izleme.go ayarYokla). Göç 0130
+// uygulanmamışsa (sütun yok) eski ifadeye düşer.
 func ayarYaz(ctx context.Context, db *sql.DB, rid int64, a Ayar, guncelleyen string) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO destek_ayar (reseller_id, modul_duzey, bayi_duzey, musteri_duzey, guncelleyen)
+	_, err := db.ExecContext(ctx, `INSERT INTO destek_ayar (reseller_id, modul_duzey, bayi_duzey, musteri_duzey, guncelleyen, surum)
+		VALUES (?,?,?,?,?,1) ON DUPLICATE KEY UPDATE modul_duzey=VALUES(modul_duzey), bayi_duzey=VALUES(bayi_duzey),
+		musteri_duzey=VALUES(musteri_duzey), guncelleyen=VALUES(guncelleyen), surum=surum+1`,
+		rid, string(a.ModulDuzey), string(a.BayiDuzey), string(a.MusteriDuzey), kesRune(guncelleyen, 64))
+	if kolonYok(err) {
+		_, err = db.ExecContext(ctx, `INSERT INTO destek_ayar (reseller_id, modul_duzey, bayi_duzey, musteri_duzey, guncelleyen)
 		VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE modul_duzey=VALUES(modul_duzey), bayi_duzey=VALUES(bayi_duzey),
 		musteri_duzey=VALUES(musteri_duzey), guncelleyen=VALUES(guncelleyen)`,
-		rid, string(a.ModulDuzey), string(a.BayiDuzey), string(a.MusteriDuzey), kesRune(guncelleyen, 64))
+			rid, string(a.ModulDuzey), string(a.BayiDuzey), string(a.MusteriDuzey), kesRune(guncelleyen, 64))
+	}
 	return err
 }

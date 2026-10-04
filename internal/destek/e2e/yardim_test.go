@@ -122,21 +122,24 @@ func geciciDB(t *testing.T) *sql.DB {
 			t.Fatalf("şema: %v\n%s", err, q)
 		}
 	}
-	b, err := os.ReadFile("../../../migrations/0129_destek.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
 	var temiz []string
-	for _, s := range strings.Split(string(b), "\n") {
-		if ts := strings.TrimSpace(s); ts == "" || strings.HasPrefix(ts, "--") {
-			continue
+	for _, dosya := range []string{"0129_destek.sql", "0130_destek_ajan_ayri.sql"} {
+		b, err := os.ReadFile("../../../migrations/" + dosya)
+		if err != nil {
+			t.Fatal(err)
 		}
-		temiz = append(temiz, s)
+		for _, s := range strings.Split(string(b), "\n") {
+			if ts := strings.TrimSpace(s); ts == "" || strings.HasPrefix(ts, "--") {
+				continue
+			}
+			temiz = append(temiz, s)
+		}
+		temiz = append(temiz, ";")
 	}
 	for _, st := range strings.Split(strings.Join(temiz, "\n"), ";") {
 		if st = strings.TrimSpace(st); st != "" {
 			if _, err := db.Exec(st); err != nil {
-				t.Fatalf("göç 0129: %v", err)
+				t.Fatalf("göç 0129/0130: %v", err)
 			}
 		}
 	}
@@ -578,6 +581,9 @@ func (o *ortam) ajanBaslat(anahtarlar []ed25519.PublicKey, once func()) {
 		LisansParmakIzi: func() string { return e2eParmakIzi }})
 	a.BilinenSirlar = []string{panelSirri}
 	a.ModulKontrolAraligi = 200 * time.Millisecond
+	a.DBYoklamaAraligi = 100 * time.Millisecond
+	a.NabizAraligi = 200 * time.Millisecond
+	a.PanelKancasiKur()
 	a.YurutucuAyarla(o.yur)
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

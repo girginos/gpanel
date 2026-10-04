@@ -387,8 +387,8 @@ func main() {
 	// Nabiz AG HATASINDA FAIL-OPEN'dir (bkz. internal/lisans/nabiz.go).
 	lisansH := &lisans.Handlers{DB: d, Surum: version}
 	go lisansH.NabizDongusu(context.Background())
-	// Telegram destek ajanı (Faz 1; varsayılan KAPALI — cmd/server/destek.go).
-	destekA := destekKur(context.Background(), d, cfg)
+	// Telegram destek (panel tarafı; ajan AYRI hizmet — cmd/server/destek.go).
+	destekA := destekKur(d)
 	// Kurulu eklenti ikilisinin imzali paket basligiyla tutarliligi.
 	// 🔴 Nabizdan AYRI: kurcalama agdan bagimsiz bir olaydir, lisans
 	// sunucusuna ulasilamasa bile goruilmelidir.
@@ -612,7 +612,7 @@ func main() {
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
 			apiAnahtarRotalari(r, d)        // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
-			destekA.Rotalar(r)              // Telegram destek: eşleştirme/ayar (internal/destek/ajan)
+			destekA.Rotalar(r)              // Telegram destek: durum/ayar/iptal (yalnız DB; internal/destek/ajan)
 			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
@@ -1082,9 +1082,10 @@ func main() {
 		})
 	})
 
-	// Telegram destek: araç yürütücüsü (Parça B) TÜM rotalar kaydedildikten SONRA
-	// bağlanır — süreç içi yönlendirici tam olmalı (cmd/server/destek_arac.go).
-	destekA.YurutucuAyarla(destekYurutucuKur(d, r, cfg))
+	// Telegram destek köprüsü: ayrı süreçteki ajanın panel-bağımlı araçları panelin süreç içi
+	// yönlendiricisine yalnız bu özel (root-only Unix soket) köprüden ulaşır; yönlendirici TÜM
+	// rotalarıyla kurulduktan SONRA açılır (cmd/server/destek.go).
+	destekKopruBaslat(context.Background(), r)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           r,
@@ -1407,6 +1408,11 @@ func semaDogrula(d *sql.DB) {
 		{"destek_baglantilari", "durum_izi"},
 		{"destek_islemleri", "denetim_ozet"},
 		{"destek_ayar", "musteri_duzey"},
+		// 0130: destek ajanı ayrı süreç — yoksa panel tarafı iptaller merkeze yalnız yeniden
+		// bağlanınca bildirilir ve durum sayfası ajan canlılığını gösteremez.
+		{"destek_baglantilari", "hub_bildirildi_at"},
+		{"destek_ajan_nabiz", "kopru_durum"},
+		{"destek_ayar", "surum"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
