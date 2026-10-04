@@ -11,11 +11,12 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, butonSinifi } from '@/components/ui'
+import { SatirIskeleti } from '@/components/SatirIskeleti'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string }
-type Durum = { surum: string; guncelleme_var: boolean; hedef_surum: string; php: string; db_mb: string; bakim: boolean }
+type Durum = { surum: string; guncelleme_var: boolean; hedef_surum: string; php: string; db_mb: string; bakim: boolean; yukleniyor?: boolean }
 type Paket = { name: string; status: string; version: string; update: string; update_version: string }
 type Kullanici = { ID: number; user_login: string; user_email: string; display_name: string; roles: string }
 
@@ -178,7 +179,7 @@ export default function DomainWordPressPage() {
       {sonuc && <KurulumSonuc s={sonuc} kapat={() => setSonuc(null)} />}
 
       {yuk ? (
-        <div className="rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-10 text-center text-sm text-slate-400">{cevir("Yükleniyor…")}</div>
+        <div className="rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-5"><SatirIskeleti satir={4} yukseklik="h-14" etiket={cevir("Yükleniyor…")} /></div>
       ) : bosDurum ? (
         <div className="rounded-lg border border-dashed border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700/40 p-12 text-center mb-5">
           <div className="w-12 h-12 mx-auto rounded-lg bg-slate-100 dark:bg-dark-600/50 flex items-center justify-center mb-3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-slate-400 dark:text-slate-500"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></div>
@@ -235,12 +236,24 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
   const qp = { params: { dizin } }
 
   const durumYukleNesli = useRef(0)
-  const durumYukle = useCallback(() => {
+  // Sunucu ağır alanı (DB boyutu) arka planda hesaplıyorsa yanıt hemen döner
+  // (yukleniyor=true); kısa aralıkla ve SINIRLI sayıda yeniden sorulur.
+  const durumDeneme = useRef(0)
+  const durumZaman = useRef<number | undefined>(undefined)
+  const durumYukle = useCallback((yeniden = false) => {
+    if (yeniden !== true) { durumDeneme.current = 0; window.clearTimeout(durumZaman.current) }
     const _n = ++durumYukleNesli.current
-    api.get<Durum>(`${base}/durum`, qp).then(r => { if (_n !== durumYukleNesli.current) return; setDurum(r.data) }).catch(() => { if (_n !== durumYukleNesli.current) return; setDurum(null) })
+    api.get<Durum>(`${base}/durum`, qp).then(r => {
+      if (_n !== durumYukleNesli.current) return
+      setDurum(r.data)
+      if (r.data?.yukleniyor && durumDeneme.current < 8) {
+        durumDeneme.current++
+        durumZaman.current = window.setTimeout(() => durumYukle(true), 2500)
+      }
+    }).catch(() => { if (_n !== durumYukleNesli.current) return; setDurum(null) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, dizin])
-  useEffect(() => { durumYukle(); return () => { durumYukleNesli.current++ } }, [durumYukle])
+  useEffect(() => { durumYukle(); return () => { durumYukleNesli.current++; window.clearTimeout(durumZaman.current) } }, [durumYukle])
 
   useEffect(() => {
     let iptal = false
@@ -367,7 +380,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         <Metrik label={cevir("Sürüm")} v={durum?.surum ? durum.surum : '…'}
           pill={durum ? (durum.guncelleme_var ? { t: durum.hedef_surum, c: 'amber', ikon: I.yukari } : { t: cevir("güncel"), c: 'green' }) : undefined} />
         <Metrik label="PHP" v={durum?.php || '…'} />
-        <Metrik label={cevir("Veritabanı")} v={durum ? `${durum.db_mb} MB` : '…'} />
+        <Metrik label={cevir("Veritabanı")} v={durum ? (durum.db_mb ? `${durum.db_mb} MB` : durum.yukleniyor ? '…' : '—') : '…'} />
         <Metrik label={cevir("Bakım modu")} v={durum?.bakim ? cevir('Açık') : cevir("Kapalı")}
           pill={durum?.bakim ? { t: cevir('aktif'), c: 'amber' } : undefined} />
       </div>
@@ -461,7 +474,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
   tur: 'eklenti' | 'tema'; liste: Paket[] | null; mesgul: string | null
   onTumu: () => void; onGuncelle: (p: Paket) => void; onTogle?: (p: Paket) => void; onAktif?: (p: Paket) => void
 }) {
-  if (liste === null) return <div className="text-sm text-slate-400 py-4">{cevir("Yükleniyor…")}</div>
+  if (liste === null) return <SatirIskeleti satir={4} className="py-4" etiket={cevir("Yükleniyor…")} />
   if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{tur === 'eklenti' ? cevir('Eklenti') : cevir('Tema')} {cevir("bulunamadı.")}</div>
   const guncellenebilir = liste.filter(p => p.update === 'available').length
   return (
@@ -504,7 +517,7 @@ function PaketTablo({ tur, liste, mesgul, onTumu, onGuncelle, onTogle, onAktif }
 }
 
 function KullaniciListe({ liste, mesgul, onReset }: { liste: Kullanici[] | null; mesgul: string | null; onReset: (u: Kullanici) => void }) {
-  if (liste === null) return <div className="text-sm text-slate-400 py-4">{cevir("Yükleniyor…")}</div>
+  if (liste === null) return <SatirIskeleti satir={4} className="py-4" etiket={cevir("Yükleniyor…")} />
   if (liste.length === 0) return <div className="text-sm text-slate-400 py-4">{cevir("Kullanıcı bulunamadı.")}</div>
   return (
     <div className="divide-y divide-slate-100 dark:divide-dark-600/50">
