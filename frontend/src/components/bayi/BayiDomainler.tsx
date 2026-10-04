@@ -18,6 +18,7 @@ import { useBayiCevir } from '@/lib/bayiCeviri'
 import { useToast } from '@/components/Toast'
 import { Badge, Button } from '@/components/ui'
 import Modal from '@/components/Modal'
+import SifreDegistirModal from '@/components/SifreDegistirModal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import EmptyState from '@/components/EmptyState'
 import { I, Ikon } from '@/components/Ikon'
@@ -60,6 +61,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
   const [islem, setIslem] = useState<Islem | null>(null)
   const [calisan, setCalisan] = useState<Calisan | null>(null)
   const [giriliyor, setGiriliyor] = useState<number | null>(null)
+  const [sifreDom, setSifreDom] = useState<BayiDomain | null>(null)
   const tumRef = useRef<HTMLInputElement>(null)
   const sirId = useId()
   const sahipNotId = useId()
@@ -153,6 +155,10 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
   )
   const diskHucre = (h: BayiDomain) => <KullanimHucre kullanilanMB={h.boyut_kb / 1024} kotaMB={h.disk_kota_mb} etiket={`${h.alan_adi} ${t('Disk')}`} />
   const trafikHucre = (h: BayiDomain) => <KullanimHucre kullanilanMB={(h.trafik_kb || 0) / 1024} kotaMB={h.trafik_kota_mb} etiket={`${h.alan_adi} ${t('Trafik')}`} />
+  const sifreDugmesi = (h: BayiDomain) => (
+    <Button boyut="sm" variant="outlined" ikon={I.anahtar} className="shrink-0" disabled={!h.sistem_kullanici}
+      aria-label={`${h.alan_adi}: ${t('Şifre değiştir')}`} title={t('Şifre değiştir')} onClick={(e) => { e.stopPropagation(); setSifreDom(h) }} />
+  )
   const girDugmesi = (h: BayiDomain, metinli: boolean) => (
     <Button boyut="sm" variant="soft" color="primary" ikon={I.giris} className="shrink-0" yukleniyor={giriliyor === h.id} disabled={giriliyor !== null}
       aria-label={`${h.alan_adi}: ${t('Panele gir')}`} onClick={(e) => { e.stopPropagation(); gir(h) }}>
@@ -256,7 +262,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
                     {baslik('olusturulma', t('Oluşturulma'), 'w-[14%]')}
                     {baslik('disk', t('Disk'), 'w-[16%]')}
                     {baslik('trafik', t('Trafik'), 'w-[16%]')}
-                    <th scope="col" className="w-14 px-3 py-2 lg:w-36"><span className="sr-only">{t('Eylemler')}</span>
+                    <th scope="col" className="w-24 px-3 py-2 lg:w-44"><span className="sr-only">{t('Eylemler')}</span>
                       <span className="hidden text-end font-normal tabular-nums lg:block" aria-hidden>{gorunen.length} / {items.length}</span></th>
                   </tr>
                 </thead>
@@ -270,7 +276,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
                       <td className="px-3 py-3 tabular-nums text-gray-700 dark:text-dark-200">{tarihYaz(h.olusturulma)}</td>
                       <td className="px-3 py-3">{diskHucre(h)}</td>
                       <td className="px-3 py-3">{trafikHucre(h)}</td>
-                      <td className="px-3 py-3 text-end">{girDugmesi(h, true)}</td>
+                      <td className="px-3 py-3"><div className="flex items-center justify-end gap-2">{sifreDugmesi(h)}{girDugmesi(h, true)}</div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -284,7 +290,7 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
                   <div className="flex items-start gap-2">
                     {secKutusu(h)}
                     <div className="min-w-0 flex-1">{alanHucre(h)}</div>
-                    {girDugmesi(h, false)}
+                    <div className="flex shrink-0 items-center gap-1.5">{sifreDugmesi(h)}{girDugmesi(h, false)}</div>
                   </div>
                   <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 ps-9 text-xs">
                     <div><dt className="text-gray-500 dark:text-dark-300">{t('Plan')}</dt><dd className="truncate text-gray-800 dark:text-dark-100">{h.plan_ad || '—'}</dd></div>
@@ -318,6 +324,8 @@ export default function BayiDomainler({ items, yuk, yenile, onYeni }: {
       )}
       {islem === 'sil' && <SilDiyalog secili={secili} kapat={() => setIslem(null)}
         onayla={() => yurut('sil', secili, (h) => api.delete(`/domains/${h.id}`, { ...UZUN_ISTEK, params: { onay: h.alan_adi } }))} />}
+      {sifreDom && <SifreDegistirModal key={sifreDom.id} domain={{ id: sifreDom.id, alan_adi: sifreDom.alan_adi, sistem_kullanici: sifreDom.sistem_kullanici || '' }}
+        onKapat={() => setSifreDom(null)} />}
       {calisan && <IlerlemeDiyalog c={calisan} bul={bul} bitir={bitir} />}
     </div>
   )

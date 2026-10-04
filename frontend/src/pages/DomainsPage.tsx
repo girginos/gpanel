@@ -22,6 +22,7 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
 import { useRol, yoneticiMi } from '@/lib/rol'
 import BayiDomainler from '@/components/bayi/BayiDomainler'
+import SifreDegistirModal from '@/components/SifreDegistirModal'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -220,6 +221,7 @@ export default function DomainsPage() {
   //    reseller_id'siyle süzer), DELETE /domains/{id} (SahipYonetim),
   //    DELETE /domains/{id}/subdomain/{sid} (MusteriScope → bayi sahipliği).
   const yonetici = yoneticiMi(useRol())
+  const [sifreDom, setSifreDom] = useState<{ id: number; alan_adi: string; sistem_kullanici: string } | null>(null)
   const sahipKolonu = yonetici
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
@@ -713,6 +715,9 @@ export default function DomainsPage() {
                       <span className="font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{d.olusturulma || '-'}</span>
                     </td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
+                      <Button variant="outlined" boyut="sm" ikon={I.anahtar} className="lg:mr-2" disabled={d.is_demo || !d.sistem_kullanici}
+                        aria-label={`${d.alan_adi}: ${cevir('Şifre değiştir')}`} title={cevir('Şifre değiştir')}
+                        onClick={() => setSifreDom({ id: d.id, alan_adi: d.alan_adi, sistem_kullanici: d.sistem_kullanici })} />
                       <Link to={`/abonelikler/${d.id}/subdomainler`} className={butonSinifi({ variant: 'outlined', boyut: 'sm', className: 'lg:mr-2' })}>
                         <Ikon d={I.arti} className="size-3.5 shrink-0 -ms-0.5 me-1.5" />Subdomain
                       </Link>
@@ -776,6 +781,8 @@ export default function DomainsPage() {
         </div>
       )}
       </>)}
+
+      {sifreDom && <SifreDegistirModal key={sifreDom.id} domain={sifreDom} onKapat={() => setSifreDom(null)} />}
 
       {/* Domain Oluştur Modal */}
       <Modal acik={olusturAcik} baslik={cevir("Yeni Domain Oluştur")} onKapat={() => setOlusturAcik(false)} kapatilamaz={olusturuluyor} genislik="lg"

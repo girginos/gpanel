@@ -21,6 +21,7 @@ export type BayiDomain = {
   ssl?: boolean
   ssl_bitis?: string
   sahip_ad?: string
+  sistem_kullanici?: string
 }
 
 export const yuzde = (k: number, l: number) => (l > 0 ? Math.min(100, Math.round((k / l) * 100)) : 0)
