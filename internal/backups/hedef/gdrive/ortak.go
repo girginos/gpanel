@@ -50,7 +50,21 @@ var (
 	ErrOrtakBozuk    = errors.New("Ortak Google istemci yapılandırması geçersiz (client_id/client_secret biçimi)")
 )
 
+// ortakDosya — iki biçim kabul edilir:
+//  1. düz:   {"client_id":"…","client_secret":"…"}
+//  2. Google Cloud Console'dan "JSON'u indir" ile gelen dosya (cihaz akışı
+//     istemcisi = "TV'ler ve Sınırlı Girişli Cihazlar" türü):
+//     {"installed":{"client_id":"…","client_secret":"…","project_id":"…","auth_uri":"…","token_uri":"…",…}}
+//
+// 🔴 Google biçimindeki auth_uri/token_uri/project_id/… alanları YOK SAYILIR:
+// uç adresleri koda sabittir (agkapi izin listesi); dosyadan uç adresi alınmaz.
 type ortakDosya struct {
+	ClientID     string          `json:"client_id"`
+	ClientSecret string          `json:"client_secret"`
+	Installed    json.RawMessage `json:"installed"`
+}
+
+type ortakIstemi struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 }
@@ -78,6 +92,9 @@ func OrtakIstemci() (Kimlik, error) {
 	if uid, _, ok := sirdosya.Sahip(st); !ok || int(uid) != os.Getuid() || st.Mode().Perm()&0o077 != 0 {
 		return Kimlik{}, ErrOrtakGuvensiz
 	}
+	// Üst düzey katı: yalnız client_id/client_secret/installed (yazım hatası ve
+	// sahte uç adresi alanları reddedilir). "installed" İÇİ Google'ın kendi
+	// alanlarını taşır (project_id, auth_uri, token_uri…): yok sayılır.
 	var d ortakDosya
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -85,6 +102,18 @@ func OrtakIstemci() (Kimlik, error) {
 		return Kimlik{}, ErrOrtakBozuk
 	}
 	k := Kimlik{ClientID: strings.TrimSpace(d.ClientID), ClientSecret: strings.TrimSpace(d.ClientSecret)}
+	if len(d.Installed) > 0 {
+		// İki biçim birlikte verilmişse belirsizlik: reddet (hangisinin geçerli
+		// olduğu tahmin edilmez).
+		if k.ClientID != "" || k.ClientSecret != "" {
+			return Kimlik{}, ErrOrtakBozuk
+		}
+		var ic ortakIstemi
+		if json.Unmarshal(d.Installed, &ic) != nil {
+			return Kimlik{}, ErrOrtakBozuk
+		}
+		k = Kimlik{ClientID: strings.TrimSpace(ic.ClientID), ClientSecret: strings.TrimSpace(ic.ClientSecret)}
+	}
 	if !ClientIDGecerli(k.ClientID) || !ClientSecretGecerli(k.ClientSecret) {
 		return Kimlik{}, ErrOrtakBozuk
 	}

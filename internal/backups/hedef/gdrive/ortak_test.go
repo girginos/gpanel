@@ -128,6 +128,43 @@ func TestOrtakGomuluOncelikliVeBozukGomuluDosyayaDuser(t *testing.T) {
 	}
 }
 
+// googleIndirmeIcerik — Cloud Console "JSON'u indir" biçimi (cihaz akışı istemcisi).
+func googleIndirmeIcerik(id, secret string) string {
+	return `{"installed":{"client_id":"` + id + `","project_id":"gpanel-sahte","auth_uri":"https://accounts.google.com/o/oauth2/auth",` +
+		`"token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs",` +
+		`"client_secret":"` + secret + `"}}`
+}
+
+// Google'dan indirilen dosya OLDUĞU GİBİ kabul edilir; uç adresleri dosyadan ALINMAZ.
+func TestOrtakGoogleIndirmeBicimiKabulEdilir(t *testing.T) {
+	ortakKur(t, googleIndirmeIcerik(oIDDosya, oSirDosya), 0o600)
+	k, err := OrtakIstemci()
+	if err != nil || k.ClientID != oIDDosya || k.ClientSecret != oSirDosya {
+		t.Fatalf("Google indirme biçimi okunamadı: %v", err)
+	}
+}
+
+// Belirsiz/bozuk biçimler reddedilir: iki biçim birlikte, installed içi eksik,
+// "web" türü (cihaz akışında çalışmaz), üst düzeyde bilinmeyen alan.
+func TestOrtakGoogleBicimiBozuklariReddedilir(t *testing.T) {
+	for ad, icerik := range map[string]string{
+		"iki-bicim-birlikte":   `{"client_id":"` + oIDDosya + `","client_secret":"` + oSirDosya + `","installed":{"client_id":"` + oIDDosya + `","client_secret":"` + oSirDosya + `"}}`,
+		"installed-bos":        `{"installed":{}}`,
+		"installed-dize":       `{"installed":"x"}`,
+		"web-turu":             `{"web":{"client_id":"` + oIDDosya + `","client_secret":"` + oSirDosya + `"}}`,
+		"ust-duzey-bilinmeyen": `{"installed":{"client_id":"` + oIDDosya + `","client_secret":"` + oSirDosya + `"},"token_url":"https://evil.example"}`,
+	} {
+		ortakKur(t, icerik, 0o600)
+		_, err := OrtakIstemci()
+		if !errors.Is(err, ErrOrtakBozuk) {
+			t.Errorf("%s: ErrOrtakBozuk bekleniyordu: %v", ad, err)
+		}
+		if err != nil && strings.Contains(err.Error(), oSirDosya) {
+			t.Errorf("%s: hata metnine secret sızdı", ad)
+		}
+	}
+}
+
 func TestMaskeID(t *testing.T) {
 	m := MaskeID(oIDDosya)
 	if m != "ortak-do…" || strings.Contains(m, "111") {
