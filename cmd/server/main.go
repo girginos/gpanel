@@ -606,6 +606,14 @@ func main() {
 	// Bayi özel panel adı: sertifika + nginx uzlaştırması (provisioner/panelmarka.go).
 	provisioner.PanelMarkaSunucuIPleri = []string{ipv4}
 	marka.AlanDegistiKanca = provisioner.PanelMarkaDurt
+	// Uygula: yerel bölgeye tek A kaydı + bölge yazımı; DNS yoklama döngüsü (30 sn).
+	marka.ZoneYazKanca = func(ctx context.Context, ek bool, id int64) error {
+		if ek {
+			return dns.WriteEkZone(ctx, d, id)
+		}
+		return dns.WriteZone(ctx, d, id)
+	}
+	markaH.UygulaDongusu(context.Background(), 30*time.Second)
 	auth.HostKiraciKanca = markaH.HostKiraciRID
 	musteri.HostKiraciKanca = markaH.HostKiraciRID
 
@@ -1471,6 +1479,9 @@ func semaDogrula(d *sql.DB) {
 		// bayi markası çözümü ve alan adı uçları 500 verir (kök markası dosyada, etkilenmez).
 		{"cp_marka", "alanadi_izni"},
 		{"cp_marka_alanadi", "dogrulama"},
+		// 0170: Uygula adım izleme — yoksa /marka/alan-adi uçları 500 verir.
+		{"cp_marka_alanadi", "adim"},
+		{"cp_marka_alanadi", "yoklama_bitis"},
 		// 0120: hostinge özel limit üst yazımı — yoksa efektif limit okuyucuları
 		// (kaynaklimit, FPM, governor, posta, havuz) hata verir.
 		{"hosting_limit_ust", "domain_id"},

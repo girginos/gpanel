@@ -33,6 +33,7 @@ func (h *Handlers) KimlikliRotalar(r chi.Router) {
 	r.With(middleware.AdminVeyaReseller).Get("/marka/alan-adi", h.AlanGetir)
 	r.With(middleware.AdminVeyaReseller).Post("/marka/alan-adi", h.AlanEkle)
 	r.With(middleware.AdminVeyaReseller).Post("/marka/alan-adi/dogrula", h.AlanDogrula)
+	r.With(middleware.AdminVeyaReseller).Post("/marka/alan-adi/uygula", h.AlanUygula)
 	r.With(middleware.AdminVeyaReseller).Delete("/marka/alan-adi", h.AlanSil)
 
 	r.With(middleware.AdminOnly).Get("/marka/bayiler", h.Bayiler)
