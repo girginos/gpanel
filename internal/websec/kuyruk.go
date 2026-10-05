@@ -56,7 +56,10 @@ type kuyruk struct {
 	bekleyen map[int64]int64     // domain → kuyruğa alan bayi (0 = kök)
 	sonIstek map[int64]bayiIstek // bayi soğuması: domain → son kuyruğa alış
 	sonTumu  map[int64]time.Time // bayi → son "Domainlerimi Tara"
-	tetik    chan struct{}       // işçiyi uyandırır (kapasite 1, bloklamaz)
+	// musteriGun: hosting müşterisi (hesap) → son 24 saatte kuyruğa alınan tarama
+	// zamanları (günlük üst sınır; musteri.go).
+	musteriGun map[int64][]time.Time
+	tetik      chan struct{} // işçiyi uyandırır (kapasite 1, bloklamaz)
 }
 
 // bayiIstek — domain soğuması KİMİN isteğine ait: soğuma yalnız aynı bayiye
@@ -69,10 +72,11 @@ type bayiIstek struct {
 
 func yeniKuyruk() *kuyruk {
 	return &kuyruk{
-		bekleyen: map[int64]int64{},
-		sonIstek: map[int64]bayiIstek{},
-		sonTumu:  map[int64]time.Time{},
-		tetik:    make(chan struct{}, 1),
+		bekleyen:   map[int64]int64{},
+		sonIstek:   map[int64]bayiIstek{},
+		sonTumu:    map[int64]time.Time{},
+		musteriGun: map[int64][]time.Time{},
+		tetik:      make(chan struct{}, 1),
 	}
 }
 
@@ -206,6 +210,19 @@ func (k *kuyruk) budaKilitli(simdi time.Time) {
 	for rid, t := range k.sonTumu {
 		if simdi.Sub(t) >= bayiTumuAralik {
 			delete(k.sonTumu, rid)
+		}
+	}
+	for hesap, zamanlar := range k.musteriGun {
+		kalan := zamanlar[:0:0]
+		for _, z := range zamanlar {
+			if simdi.Sub(z) < musteriGunlukPencere {
+				kalan = append(kalan, z)
+			}
+		}
+		if len(kalan) == 0 {
+			delete(k.musteriGun, hesap)
+		} else {
+			k.musteriGun[hesap] = kalan
 		}
 	}
 }

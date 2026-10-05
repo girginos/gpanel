@@ -834,6 +834,12 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus", avH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/tara", avH.Tara)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/tara/{sid}", avH.TaraDurum)
+				// Website Security — hosting müşterisi: YALNIZ kendi hesabının ana + ek alan adları
+				// (kimlik jetondan; yabancı {id} 404; kök/bayi doğrudan jeton 403; API anahtarı kapalı).
+				r.With(websec.MusteriKapi, middleware.MusteriScope).Get("/domains/{id}/guvenlik", websecH.MusteriListe)
+				r.With(websec.MusteriKapi, middleware.MusteriScope).Get("/domains/{id}/guvenlik/ozet", websecH.MusteriOzet)
+				r.With(websec.MusteriKapi, middleware.MusteriScope).Get("/domains/{id}/guvenlik/bulgular", websecH.MusteriBulgular)
+				r.With(websec.MusteriKapi, middleware.MusteriScope).Post("/domains/{id}/guvenlik/tara", websecH.MusteriTara)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina", avH.Karantina)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/karantina/liste", avH.KarantinaListe)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/geri-yukle", avH.KarantinaGeriYukle)
