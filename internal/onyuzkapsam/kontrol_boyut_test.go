@@ -12,7 +12,7 @@ import (
 
 func TestToggleKompaktBoyut(t *testing.T) {
 	s := oku(t, "components/ui/Toggle.tsx")
-	for _, w := range []string{"'h-5 w-9'", "'h-4 w-7'", "'size-4'", "'size-3'", `role="switch"`, "aria-checked={acik}", "focus-visible:ring-2", "text-xs font-medium"} {
+	for _, w := range []string{"'h-5 w-9'", "'h-4 w-7'", "'size-4'", "'size-3'", `type="button" role="switch"`, "aria-checked={acik}", "focus-visible:ring-2", "text-xs font-medium"} {
 		if !strings.Contains(s, w) {
 			t.Errorf("Toggle.tsx: %q yok", w)
 		}
