@@ -228,17 +228,13 @@ func sslKurKos(is *Is, hostname string) {
 	}
 	is.AdimEkle("yeni cert PEM olarak geçerli", true)
 
-	// 6c) 🔴 CRITICAL fix: cron kaydı — panel-özel config-home standart cron'a
-	// kayıtlı değil. `acme.sh --cron` default `/root/.acme.sh`'a bakar, panel
-	// domain'ini GÖRMEZ → 90 gün sonra cert expire → panel cert-mismatch.
-	// `--install-cronjob` ile cron kaydını KENDİ config-home'umuza bağla.
-	cronCmd := exec.CommandContext(ctx, AcmeBin, "--install-cronjob", "--config-home", AcmeConfigHome)
-	if out, e := cronCmd.CombinedOutput(); e != nil {
-		// Cron zaten kurulu olabilir — hata fatal değil, sadece uyar
-		is.AdimEkle("cron kayıt uyarısı (yenileme yine de default cron'dan gelmeyebilir): "+
-			strings.TrimSpace(string(out)), false)
+	// 6c) 🔴 CRITICAL fix: yenileme cron'u. `acme.sh --install-cronjob` KULLANILMAZ: tek
+	// --config-home'a bağlı crontab satırı yazar (panelin öbür config-home'u sessizce yenilenmez).
+	// provisioner.AcmeCronKur: /etc/cron.d + sarmalayıcı, TÜM panel config-home'ları (idempotent).
+	if e := provisioner.AcmeCronKur(); e != nil {
+		is.AdimEkle("cron kayıt uyarısı (yenileme otomatik olmayabilir): "+e.Error(), false)
 	} else {
-		is.AdimEkle("acme.sh cron kaydı yenilendi (90 gün öncesi auto-renew)", true)
+		is.AdimEkle("acme.sh yenileme cron'u doğrulandı (tüm config-home'lar, 90 gün öncesi auto-renew)", true)
 	}
 
 	// 7) Doğrulama: panel.crt gerçekten yeni hostname'e mi ait?

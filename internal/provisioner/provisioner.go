@@ -75,16 +75,19 @@ func Init(d *sql.DB) {
 	HealPanelKapiOnStartup()         // ADR-GP-001 rol kapıları (proxy gizlisine dayanır → ondan SONRA)
 	ensurePMAStartup()               // Cloud-fix: phpMyAdmin GCP/socket (pma-signon.php + token + pool socket + config host=localhost)
 	HealVhostsOnStartup()
-	HealHomePerms()             // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
-	ensureFPMSELinuxFcontext()  // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
-	Ensure404Page()             // marka 404 sayfasi (root-sahipli, tenant degistiremez)
-	Ensure5xxPage()             // marka 5xx sayfasi (uygulama hatasi)
-	EnsureAskidaPage()          // marka "askiya alindi" sayfasi (ayni dizin)
-	EnsureMarkaAssets()         // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
-	EnsureDefault80()           // 80 catch-all: belge kokunu de garanti eder (yoksa try_files donguye girip 500 verir)
-	EnsureDefault443()          // 443 catch-all: SSL'siz host, baglanti hatasi yerine uyari sayfasi gorur
-	TrafikArtikSupur(pkgDB)     // eski silmelerden kalan sahipsiz trafik satirlari
-	acmeCronHizala()            // acme.sh cron'u yeni config-home'u yenilesin
+	HealHomePerms()                       // Batch3: mevcut tenant ev dizinlerine izolasyon izinleri (retroaktif)
+	ensureFPMSELinuxFcontext()            // Batch5A: /run/php-fpm-<sk>/ için SELinux fcontext (taze Enforcing kurulumda ilk domain 500 vermesin)
+	Ensure404Page()                       // marka 404 sayfasi (root-sahipli, tenant degistiremez)
+	Ensure5xxPage()                       // marka 5xx sayfasi (uygulama hatasi)
+	EnsureAskidaPage()                    // marka "askiya alindi" sayfasi (ayni dizin)
+	EnsureMarkaAssets()                   // Lottie animasyonlari + oynatici (paylasimli, /_gosp/)
+	EnsureDefault80()                     // 80 catch-all: belge kokunu de garanti eder (yoksa try_files donguye girip 500 verir)
+	EnsureDefault443()                    // 443 catch-all: SSL'siz host, baglanti hatasi yerine uyari sayfasi gorur
+	TrafikArtikSupur(pkgDB)               // eski silmelerden kalan sahipsiz trafik satirlari
+	acmeCronHizala()                      // acme.sh cron'u yeni config-home'u yenilesin
+	if err := AcmeCronKur(); err != nil { // acme.sh yenileme: tüm config-home'lar, tek cron.d + sarmalayıcı
+		log.Printf("acme cron kurulamadı: %v", err)
+	}
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin

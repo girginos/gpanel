@@ -1214,6 +1214,32 @@ else
   uyar "clock sync" "no timedatectl — COULD NOT MEASURE"
 fi
 
+bas "Certificate renewal (acme.sh)"
+# 🔴 Panelin sertifika kayıtları birden çok acme.sh config-home'unda durur; cron yalnız birine
+# bağlıyken diğerindekiler SESSİZCE yenilenmedi (alt/ek alan sertifikaları süresi geçmeden hata
+# vermez, sonra bir gün tarayıcı uyarısı olarak patlar). Salt-okuma: kayıt başına yenileme zamanı
+# geçmiş mi / bitişe ≤14 gün mü (sarmalayıcının `durum` alt komutu; özel anahtar OKUNMAZ).
+if [ -x /root/.acme.sh/acme.sh ]; then
+  _ay=${GOSP_ACME_YENILE:-/usr/local/bin/girginospanel-acme-yenile}
+  if [ ! -x "$_ay" ]; then
+    uyar "cert renewal wrapper" "girginospanel-acme-yenile NOT INSTALLED — panel restart installs it"
+  else
+    [ -f "${GOSP_ACME_CRON_DOSYA:-/etc/cron.d/girginospanel-acme}" ] \
+      && gec "cert renewal cron" "/etc/cron.d/girginospanel-acme" \
+      || uyar "cert renewal cron" "cron.d entry MISSING — panel restart recreates it"
+    _cs=$("$_ay" durum 2>/dev/null); _ct=0; _cp=0
+    while IFS='|' read -r _st _ad _hm _kg _bt; do
+      [ -n "$_st" ] || continue
+      _ct=$((_ct+1))
+      case "$_st" in
+        GECMIS)   _cp=$((_cp+1)); uyar "cert renewal OVERDUE" "$_ad — renewal time passed (expires in ${_kg}d, $_bt) [$_hm]" ;;
+        YAKLASAN) _cp=$((_cp+1)); uyar "cert expiring soon" "$_ad — ${_kg}d left ($_bt) [$_hm]" ;;
+      esac
+    done <<<"$_cs"
+    [ "$_cp" -eq 0 ] && gec "cert renewal" "$_ct certs, none overdue/expiring"
+  fi
+fi
+
 # ══════════════════════════════════════════════════════════════════════
 if [ $JSON -eq 1 ]; then
   printf '{"gecen":%d,"kritik":%d,"uyari":%d,"dusenler":[' "$GECEN" "$KRITIK" "$UYARI"
