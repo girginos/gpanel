@@ -49,7 +49,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
           aria-invalid={error ? true : undefined}
           aria-describedby={[tarif, hataMetni ? hataId : ''].filter(Boolean).join(' ') || undefined}
           className={cn(
-            'form-input-base form-input pr-9',
+            'form-input-base form-input h-9 py-1 pr-9 text-sm',
             !!prefix && 'pl-9',
             error ? 'border-error dark:border-error-lighter'
               : disabled ? 'bg-gray-150 dark:border-dark-500 dark:bg-dark-600 cursor-not-allowed border-gray-300 opacity-60'

@@ -10,7 +10,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, Toggle } from '@/components/ui'
 
 type Kural = { id: number; tip: 'izin' | 'red'; cidr: string; aciklama: string; sira: number }
 type Yanit = {
@@ -380,8 +380,9 @@ export default function DomainErisimPage() {
         { etiket: cevir("Erişim Kısıtlama") },
       ]} />
 
-      <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Erişim Kısıtlama")}</h1>
-      <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
+      <div className="max-w-4xl">
+      <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Erişim Kısıtlama")}</h1>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
         <Link to={altAlanMi ? `/abonelikler/${id}/subdomainler/${sid}` : `/abonelikler/${id}`}
           className="text-brand-700 dark:text-brand-400 hover:text-brand-800 font-medium">
           {altAlanMi ? (y?.tam_ad || cevir("Alt alan adı")) : cevir("Alan adı bazlı erişim kısıtlama")}
@@ -394,28 +395,17 @@ export default function DomainErisimPage() {
       ) : (
         <>
           {/* ── Ana toggle ─────────────────────────────────────────────── */}
-          <div className="mb-4 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5">
-            <div className="flex flex-wrap items-center gap-4">
-              <span className={`inline-flex items-center justify-center h-10 w-10 rounded-lg ${aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-slate-100 dark:bg-dark-600 text-slate-400'}`}>
-                <Ikon d={aktif ? I.kilit : I.kilitAcik} className="h-5 w-5" />
+          <div className="mb-3 bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex items-center justify-center size-8 shrink-0 rounded-lg ${aktif ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-slate-100 dark:bg-dark-600 text-slate-400'}`}>
+                <Ikon d={aktif ? I.kilit : I.kilitAcik} className="size-4" />
               </span>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Kısıtlama")}</div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">{sonuc}</div>
               </div>
-
-              {/* Anahtar: gercek buton + aria-pressed (ekran okuyucu icin durum) */}
-              <button
-                type="button" role="switch" aria-checked={aktif}
-                aria-label={cevir("Kısıtlama")}
-                onClick={() => setAktif(!aktif)}
-                className={`ml-auto relative inline-flex h-11 w-[76px] shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 ${
-                  aktif ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                <span className={`inline-block h-9 w-9 transform rounded-full bg-white shadow transition-transform ${aktif ? 'translate-x-[35px]' : 'translate-x-1'}`} />
-              </button>
-              <span className={`text-sm font-semibold w-[52px] ${aktif ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
-                {aktif ? cevir("Açık") : cevir("Kapalı")}
-              </span>
+              <Toggle acik={aktif} onDegis={setAktif} aria-label={cevir("Kısıtlama")}
+                durumEtiketi={aktif ? cevir("Açık") : cevir("Kapalı")} />
             </div>
           </div>
 
@@ -474,7 +464,7 @@ export default function DomainErisimPage() {
                     const sec = varsayilan === m.key
                     return (
                       <button key={m.key} type="button" onClick={() => setVarsayilan(m.key)}
-                        className={`text-left p-4 border rounded-lg transition min-h-[44px] ${sec
+                        className={`text-left p-3 border rounded-lg transition ${sec
                           ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-500/20'
                           : 'border-slate-200 dark:border-dark-600 hover:border-brand-300'}`}>
                         <div className="flex items-center gap-2 mb-1">
@@ -482,7 +472,7 @@ export default function DomainErisimPage() {
                           <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{m.ad}</span>
                           {sec && <span className="ml-auto text-slate-500 dark:text-slate-400"><Ikon d={I.onay} className="h-4 w-4" /></span>}
                         </div>
-                        <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">{m.aciklama}</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 leading-snug">{m.aciklama}</div>
                       </button>
                     )
                   })}
@@ -491,9 +481,9 @@ export default function DomainErisimPage() {
 
               {/* ── Kural listesi ──────────────────────────────────────── */}
               <Kart baslik={cevir("Kural ekle")}>
-                <div className="flex flex-wrap gap-2 items-start">
+                <div className="flex flex-wrap gap-2 items-center">
                   <select value={yeniTip} onChange={e => setYeniTip(e.target.value as 'izin' | 'red')}
-                    className="min-h-[44px] px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100">
+                    className="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100">
                     <option value="izin">{cevir("İzin ver")}</option>
                     <option value="red">{cevir("Reddet")}</option>
                   </select>
@@ -501,18 +491,18 @@ export default function DomainErisimPage() {
                     placeholder="203.0.113.45 / 198.51.100.0/24"
                     aria-invalid={yeniCidr.trim() !== '' && !kuralBicimiGecerli(yeniCidr)}
                     aria-label={cevir("IP veya CIDR")}
-                    className={`min-h-[44px] px-3 rounded-lg border bg-white dark:bg-dark-800 text-sm font-mono text-slate-900 dark:text-slate-100 flex-1 min-w-[190px] ${
+                    className={`h-9 px-3 rounded-lg border bg-white dark:bg-dark-800 text-sm font-mono text-slate-900 dark:text-slate-100 flex-1 min-w-[190px] ${
                       yeniCidr.trim() !== '' && !kuralBicimiGecerli(yeniCidr)
                         ? 'border-red-500 dark:border-red-500'
                         : 'border-slate-300 dark:border-slate-600'}`} />
                   <input value={yeniAciklama} onChange={e => setYeniAciklama(e.target.value)}
                     placeholder={cevir("Açıklama (isteğe bağlı)")}
-                    className="min-h-[44px] px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100 flex-1 min-w-[160px]" />
-                  <Button color="primary" ikon={I.arti}
+                    className="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-sm text-slate-900 dark:text-slate-100 flex-1 min-w-[160px]" />
+                  <Button color="primary" boyut="sm" ikon={I.arti}
                     disabled={!kuralBicimiGecerli(yeniCidr)}
                     yukleniyor={isleniyor}
                     onClick={() => kuralEkle()}
-                    className="self-stretch">
+                    className="h-9">
                     {isleniyor ? cevir("Ekleniyor…") : cevir("Ekle")}
                   </Button>
                 </div>
@@ -570,23 +560,24 @@ export default function DomainErisimPage() {
           )}
 
           <div className="flex gap-2">
-            <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={isleniyor}>
+            <Button color="primary" boyut="sm" ikon={I.disket} onClick={kaydet} yukleniyor={isleniyor}>
               {isleniyor ? cevir("Kaydediliyor…") : cevir("Kaydet")}
             </Button>
-            <Button variant="outlined" ikon={I.yenile} onClick={() => yukle()} disabled={isleniyor}>
+            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={() => yukle()} disabled={isleniyor}>
               {cevir("Yeniden Yükle")}
             </Button>
           </div>
         </>
       )}
+      </div>
     </div>
   )
 }
 
 function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 mb-3">
+      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )
