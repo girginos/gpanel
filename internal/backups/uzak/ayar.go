@@ -88,15 +88,13 @@ func AyarDenetle(a *Ayar) error {
 	return nil
 }
 
-// AyarYaz — ayarı doğrular ve yazar. Açarken hedef (kök, aktif) ve etkin anahtar şart.
-func AyarYaz(ctx context.Context, db *sql.DB, a Ayar) error {
-	if err := AyarDenetle(&a); err != nil {
+// ayarKontrol — alan sınırları + hedef denetimi (yazmaz, anahtar üretmez).
+func ayarKontrol(ctx context.Context, db *sql.DB, a *Ayar) error {
+	if err := AyarDenetle(a); err != nil {
 		return err
 	}
-	if a.Aktif {
-		if a.HedefID <= 0 {
-			return ErrHedefYok
-		}
+	if a.Aktif && a.HedefID <= 0 {
+		return ErrHedefYok
 	}
 	if a.HedefID > 0 {
 		var n int
@@ -108,15 +106,10 @@ func AyarYaz(ctx context.Context, db *sql.DB, a Ayar) error {
 			return ErrHedefYok
 		}
 	}
-	if a.Aktif {
-		k, err := EtkinAnahtar(ctx, db)
-		if err != nil {
-			return err
-		}
-		if k == nil {
-			return ErrAnahtarYok
-		}
-	}
+	return nil
+}
+
+func ayarKaydet(ctx context.Context, db *sql.DB, a Ayar) error {
 	var hid any
 	if a.HedefID > 0 {
 		hid = a.HedefID
@@ -131,6 +124,13 @@ func AyarYaz(ctx context.Context, db *sql.DB, a Ayar) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE backup_uzak_kopya_ayar SET aktif=?, hedef_id=?, klasor=?, saklama_n=?, saklama_gun=?, bant_kbps=? WHERE id=1`,
 		ak, hid, a.Klasor, a.SaklamaN, a.SaklamaGun, a.BantKBps)
+	return err
+}
+
+// AyarYaz — ayarı doğrular ve yazar. Açarken hedef (kök, aktif) şart; etkin şifreleme
+// anahtarı yoksa SUNUCU otomatik üretir (kullanıcı anahtar üretmez/onaylamaz).
+func AyarYaz(ctx context.Context, db *sql.DB, a Ayar) error {
+	_, err := AyarYazAnahtarli(ctx, db, a)
 	return err
 }
 

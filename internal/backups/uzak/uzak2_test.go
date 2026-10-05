@@ -47,14 +47,18 @@ func TestKuyrugaAlIdempotent(t *testing.T) {
 	}
 }
 
-func TestAnahtarYoksaAcilamazVeKuyrukOlusmaz(t *testing.T) {
+// Eski davranış (anahtarsız açılış ErrAnahtarYok) KALDIRILDI: sunucu otomatik üretir.
+func TestAnahtarYokkenAcilisArtikHataVermez(t *testing.T) {
 	o := yeniOrtam(t)
 	if _, err := o.db.Exec(`UPDATE backup_sifre_anahtarlari SET durum='emekli'`); err != nil {
 		t.Fatal(err)
 	}
 	a := Ayar{Aktif: true, HedefID: o.hedefID, Klasor: "gpanel", SaklamaN: 7}
-	if err := AyarYaz(context.Background(), o.db, a); !errors.Is(err, ErrAnahtarYok) {
-		t.Fatalf("anahtarsız açılamaz: %v", err)
+	if err := AyarYaz(context.Background(), o.db, a); err != nil {
+		t.Fatalf("anahtarsız açılış otomatik anahtar üretmeli: %v", err)
+	}
+	if k, _ := EtkinAnahtar(context.Background(), o.db); k == nil {
+		t.Fatal("etkin anahtar oluşmalı")
 	}
 }
 

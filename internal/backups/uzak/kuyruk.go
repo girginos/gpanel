@@ -106,6 +106,29 @@ func YenidenDene(ctx context.Context, db *sql.DB, isID int64) error {
 	return ErrDurumUygunDegil
 }
 
+// SimdiGonder — tek yedeği uzağa gönderilmek üzere sıraya alır (uç ve toplu gönderim
+// ortak çekirdeği). Var olan iş: hata/iptalse yeniden denenir, tamamsa ErrZatenGonderildi,
+// sürüyorsa aynen bırakılır.
+func SimdiGonder(ctx context.Context, db *sql.DB, yedekID int64) (int64, error) {
+	isID, yeni, err := KuyrugaAl(ctx, db, yedekID)
+	if err != nil {
+		return 0, err
+	}
+	if !yeni {
+		var durum string
+		_ = db.QueryRowContext(ctx, `SELECT durum FROM backup_uzak_kopyalar WHERE id=?`, isID).Scan(&durum)
+		switch durum {
+		case DurumTamam:
+			return isID, ErrZatenGonderildi
+		case DurumHata, DurumIptal:
+			if err := YenidenDene(ctx, db, isID); err != nil {
+				return isID, err
+			}
+		}
+	}
+	return isID, nil
+}
+
 // Is — işler listesi satırı (SIRSIZ).
 type Is struct {
 	ID            int64  `json:"id"`

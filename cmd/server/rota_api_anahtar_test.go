@@ -177,8 +177,8 @@ func TestUzakKopyaUclariAdminOnlyVeAnahtaraKapali(t *testing.T) {
 			uclar = append(uclar, d)
 		}
 	}
-	if len(uclar) != 10 {
-		t.Fatalf("uzak kopya uçları envanterde 10 olmalı (%d): %v", len(uclar), uclar)
+	if len(uclar) != 15 {
+		t.Fatalf("uzak kopya uçları envanterde 15 olmalı (%d): %v", len(uclar), uclar)
 	}
 	var hepsi []string
 	for _, g := range apianahtar.Gruplar {
@@ -207,8 +207,8 @@ func TestUzakKopyaUclariAdminOnlyVeAnahtaraKapali(t *testing.T) {
 			}
 		}
 	}
-	if n != 10 {
-		t.Errorf("main.go'da 10 uzak kopya ucu beklenirdi: %d", n)
+	if n != 15 {
+		t.Errorf("main.go'da 15 uzak kopya ucu beklenirdi: %d", n)
 	}
 }
 

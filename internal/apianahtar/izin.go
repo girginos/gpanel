@@ -216,6 +216,8 @@ var KimlikUclari = map[string]bool{
 	"POST " + p + "/admin/backups/uzak-kopya/anahtar-uret":      true,
 	"POST " + p + "/admin/backups/uzak-kopya/anahtar-onayla":    true,
 	"POST " + p + "/admin/backups/uzak-kopya/anahtar-ice-aktar": true,
+	"POST " + p + "/admin/backups/uzak-kopya/anahtar-yenile":    true,
+	"POST " + p + "/admin/backups/uzak-kopya/kurtarma-anahtari": true,
 }
 
 // KimlikBenzeriIzinli: adı kimlik/parola çağrıştıran ama BİLİNÇLİ olarak anahtara
