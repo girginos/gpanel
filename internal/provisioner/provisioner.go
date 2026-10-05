@@ -88,12 +88,13 @@ func Init(d *sql.DB) {
 	if err := AcmeCronKur(); err != nil { // acme.sh yenileme: tüm config-home'lar, tek cron.d + sarmalayıcı
 		log.Printf("acme cron kurulamadı: %v", err)
 	}
-	AcmeKayitOnar()             // eski acme kayıtlarında Le_Webroot=/home/... → /var/www/acme (challenge yalnız oradan sunulur)
-	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
-	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
-	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
-	EnsureTenantFPMOnStartup()  // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
-	HealWAFOnStartup()          // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
+	HealACMEHTTPYonlendirmeOnStartup() // eski vhost'larda ACME challenge http→https 301'ine takılıyordu (yenileme sessizce kırık)
+	AcmeKayitOnar()                    // eski acme kayıtlarında Le_Webroot=/home/... → /var/www/acme (challenge yalnız oradan sunulur)
+	ensureHTTPDHomeBooleans()          // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
+	HealSSLCertPathsOnStartup()        // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
+	HealSSLVhost443OnStartup()         // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
+	EnsureTenantFPMOnStartup()         // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
+	HealWAFOnStartup()                 // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -366,7 +367,15 @@ server {
     # CDN/proxy (Cloudflare "Flexible") edge'de TLS'i sonlandirip origin'e DUZ HTTP
     # gonderir; kosulsuz "301 https" SONSUZ DONGU uretir (ERR_TOO_MANY_REDIRECTS).
     # $gosp_force_https yalniz GERCEK duz-HTTP istemcide 1'dir (00-gosp-edge.conf).
-    if ($gosp_force_https) {
+    # 🔴 Server seviyesindeki "if" rewrite aşamasında, location seçiminden ÖNCE çalışır:
+    # ACME location'ı olsa bile challenge 301 ile 443'e atılır, orada uygulama/docroot
+    # challenge yerine kendi sayfasını döner ("reader size limit exceeded") ve yenileme
+    # sessizce kırılır. Bu yüzden challenge yolu yönlendirmeden muaftır.
+    set $gosp_https_yonlendir $gosp_force_https;
+    if ($uri ~ ^/\.well-known/acme-challenge/) {
+        set $gosp_https_yonlendir 0;
+    }
+    if ($gosp_https_yonlendir) {
         return 301 https://$host$request_uri;
     }
 
