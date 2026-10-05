@@ -319,7 +319,7 @@ export default function AracIzgarasi({
         )}
         {secili.tur === 'ek' && (
           <p className="border-t border-gray-200 px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-300">
-            {cevirF('Ek alan adının kendi araç sayfası yok; araçlar ana alan adında ({0}) açılır. Ek alan adını yönetmek için alan adları kartındaki oku kullanın.', ana.ad)}
+            {cevirF('Ek alan adının kendi araç sayfası yok; araçlar ana alan adında ({0}) açılır. Ek alan adını silmek için alan adları kartındaki çöp kutusunu kullanın.', ana.ad)}
           </p>
         )}
       </div>
