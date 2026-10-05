@@ -389,3 +389,38 @@ func TestManifestYazilamazsaTamamSayilmaz(t *testing.T) {
 		t.Fatalf("yeniden denemede tamamlanmalı: %+v", d)
 	}
 }
+
+// Kayıt bozulsa (elle düzenleme, hata) bile bizim biçimimizde olmayan adlar silinmez:
+// başkasının dosyası kayda yanlışlıkla yazılmış olsa da dokunulmaz.
+func TestSaklama_BozukKayitYabanciDosyayiSilmez(t *testing.T) {
+	o := yeniOrtam(t)
+	o.ayar(func(a *Ayar) { a.SaklamaN = 1 })
+	y1 := o.yedek(1, "c_a", "20260821-020000", sahteIcerik(1500, 1), "oto", nil)
+	i1 := o.kuyrukla(y1)
+	o.calis()
+	o.bel.Koy("gpanel/baskasi.txt", []byte("onemli"))
+	o.bel.Koy("gpanel/baskasi.txt.manifest.json", []byte("{}"))
+	// kayıt bozuldu: uzak_ad yabancı dosyaya işaret ediyor (".age" değil)
+	if _, err := o.db.Exec(`UPDATE backup_uzak_kopyalar SET uzak_ad='gpanel/baskasi.txt', manifest_ad='gpanel/baskasi.txt.manifest.json' WHERE id=?`, i1); err != nil {
+		t.Fatal(err)
+	}
+	y2 := o.yedek(1, "c_a", "20260822-020000", sahteIcerik(1501, 2), "oto", nil)
+	o.kuyrukla(y2)
+	o.calis()
+	for _, ad := range []string{"gpanel/baskasi.txt", "gpanel/baskasi.txt.manifest.json"} {
+		if _, ok := o.bel.Icerik(ad); !ok {
+			t.Errorf("yabancı dosya silindi: %s", ad)
+		}
+	}
+	// manifest adı uzak_ad'dan türemiyorsa da silinmez
+	if _, err := o.db.Exec(`UPDATE backup_uzak_kopyalar SET uzak_ad='gpanel/2026-08-21/c_a-20260821-020000.tar.gz.age', manifest_ad='gpanel/baskasi.txt' WHERE id=?`, i1); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := AyarOku(context.Background(), o.db)
+	if _, err := SaklamaUygula(context.Background(), o.db, o.sar, a, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := o.bel.Icerik("gpanel/baskasi.txt"); !ok {
+		t.Error("manifest adı uyuşmayan kayıt yabancı dosyayı sildi")
+	}
+}
