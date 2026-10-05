@@ -689,8 +689,8 @@ func TestEkVhostGovde_SablonKurallari(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acmeKok := acmeKoku()
-	dogruKalip := `location ~ "^/\.well-known/acme-challenge/[A-Za-z0-9_-]{16,128}$" { auth_basic off; allow all; root ` + acmeKok + `; try_files $uri =404; }`
+	// subdomain-acme birleşiminden sonra TEK üretici acmeLocation(): alan sırası onun.
+	dogruKalip := acmeLocation()
 	if !strings.Contains(govde, dogruKalip) {
 		t.Fatalf("ACME challenge doğru kalıpta değil (root-sahipli kök + token biçimi):\n%s", govde)
 	}
