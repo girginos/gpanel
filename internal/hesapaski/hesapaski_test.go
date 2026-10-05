@@ -67,7 +67,8 @@ func ha_db(t *testing.T) *sql.DB {
 			askida TINYINT NOT NULL DEFAULT 0, askida_kaynak VARCHAR(16) NOT NULL DEFAULT '',
 			durum VARCHAR(16) NOT NULL DEFAULT 'aktif')`,
 		`CREATE TABLE ftp_accounts (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-			domain_id BIGINT UNSIGNED NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active')`,
+			domain_id BIGINT UNSIGNED NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active',
+			tur ENUM('ana','ek') NOT NULL DEFAULT 'ana', ek_etkin TINYINT(1) NOT NULL DEFAULT 1)`,
 		`INSERT INTO users (id, status) VALUES (7,'active')`,
 		`INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (1,'ha1.test','c_ha1',7)`,
 		`INSERT INTO ftp_accounts (domain_id) VALUES (1),(1)`,
@@ -774,5 +775,47 @@ func TestUygula_AnaVhostHatasi_SureDolmus_GuvenliTaraf(t *testing.T) {
 	}
 	if d := ha_oku(t, db, 1); d != (ha_durum{1, "pasif", "bayi", "suspended"}) {
 		t.Fatalf("zincirde hesap askıda kalmalı, kapatma adımları uygulanmalı: %+v", d)
+	}
+}
+
+// Ek FTP hesabı: müşterinin hesap bazında KAPATTIĞI (ek_etkin=0) ek hesap, hosting
+// askıdan çıkınca açılmaz; açık olanlar ve ana hesap açılır. Askıya alınca hepsi kapanır.
+func TestUygula_EkFTPHesaplari_AskiGidisDonus(t *testing.T) {
+	db := ha_db(t)
+	if _, err := db.Exec(`DELETE FROM ftp_accounts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO ftp_accounts (domain_id, tur, ek_etkin, status) VALUES
+		(1,'ana',1,'active'), (1,'ek',1,'active'), (1,'ek',0,'suspended')`); err != nil {
+		t.Fatal(err)
+	}
+	k := &ha_kayit{db: db}
+	a := k.adimlar(t)
+	ctx := context.Background()
+	durumlar := func() string {
+		rows, err := db.Query(`SELECT CONCAT(tur,ek_etkin,':',status) FROM ftp_accounts ORDER BY id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			_ = rows.Scan(&s)
+			out = append(out, s)
+		}
+		return strings.Join(out, " ")
+	}
+	if _, err := a.Uygula(ctx, db, 1, true, KaynakKok); err != nil {
+		t.Fatal(err)
+	}
+	if got := durumlar(); got != "ana1:suspended ek1:suspended ek0:suspended" {
+		t.Fatalf("askıya alma: %s", got)
+	}
+	if _, err := a.Uygula(ctx, db, 1, false, KaynakKok); err != nil {
+		t.Fatal(err)
+	}
+	if got := durumlar(); got != "ana1:active ek1:active ek0:suspended" {
+		t.Fatalf("askıdan alma müşterinin kapattığı ek hesabı AÇTI: %s", got)
 	}
 }

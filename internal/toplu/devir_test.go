@@ -138,6 +138,7 @@ func dt_geciciDB(t *testing.T) *sql.DB {
 			uid_n INT NOT NULL, gid_n INT NOT NULL,
 			status ENUM('active','suspended') DEFAULT 'active',
 			token_gecersiz_ts BIGINT NOT NULL DEFAULT 0,
+			tur ENUM('ana','ek') NOT NULL DEFAULT 'ana', ek_etkin TINYINT(1) NOT NULL DEFAULT 1,
 			KEY ix_ftp_domain (domain_id),
 			CONSTRAINT fk_ftp_domain FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
 		) ENGINE=InnoDB`,
@@ -623,5 +624,32 @@ func TestDevir_EszamanliOkunduIleSessizKayipYok(t *testing.T) {
 	}
 	if okunduHata > 0 {
 		t.Errorf("BLD-2: %d okundu isteği 200 dönmedi", okunduHata)
+	}
+}
+
+// Ek (kısıtlı) FTP hesapları eski sahibin üçüncü kişilere verdiği erişimdir: devirde
+// SİLİNİR; parola rotasyonu yalnız ana hesapta uygulanır (ek hesap yeni sahibin
+// parolasını ALMAZ).
+func TestDevir_EkFTPHesaplariSilinir(t *testing.T) {
+	db := dt_geciciDB(t)
+	dt_sahteAraclar(t)
+	dt_hazirla(t, db)
+	dt_exec(t, db, `INSERT INTO ftp_accounts (domain_id, username, password_md5, home_dir, uid_n, gid_n, tur) VALUES (?,?,?,?,1000,1000,'ek')`,
+		dt_did, dt_sk+"-ucuncu", hesaplar.FTPParolaHash("Ucuncu-Kisi-Parola-1"), "/home/"+dt_sk+"/web")
+	h := &Handlers{DB: db}
+	hedef := int64(8)
+	ds, err := h.devret(context.Background(), dt_did, "ornek.test", dt_sk, &hedef, nil, 1, "root")
+	if err != nil {
+		t.Fatalf("devret: %v", err)
+	}
+	if n := dt_sayi(t, db, `SELECT COUNT(*) FROM ftp_accounts WHERE domain_id=? AND tur='ek'`, dt_did); n != 0 {
+		t.Fatalf("devirde ek FTP hesapları silinmeli, kalan=%d", n)
+	}
+	var saklanan string
+	if err := db.QueryRow(`SELECT password_md5 FROM ftp_accounts WHERE domain_id=? AND tur='ana'`, dt_did).Scan(&saklanan); err != nil {
+		t.Fatal(err)
+	}
+	if !hesaplar.FTPParolaDogrula(ds.YeniFTPParola, saklanan) {
+		t.Fatal("ana hesap parolası döndürülmedi")
 	}
 }

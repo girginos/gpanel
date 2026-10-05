@@ -195,6 +195,7 @@ var KimlikUclari = map[string]bool{
 	"PUT " + p + "/domains/{id}/ssh/anahtar":                                 true,
 	"POST " + p + "/domains/{id}/wordpress/kullanici-parola":                 true,
 	"PUT " + p + "/domains/{id}/giris-parola":                                true,
+	"PUT " + p + "/domains/{id}/ftp-ek/{kullanici}/password":                 true,
 	"POST " + p + "/domains/{id}/subdomain/{sid}/wordpress/kullanici-parola": true,
 	"GET " + p + "/system/tasima/anahtar":                                    true,
 	"GET " + p + "/settings/session-idle":                                    true,

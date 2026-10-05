@@ -922,6 +922,13 @@ func main() {
 				// Otomasyon (WHMCS ChangePassword) parola uçları: kök hepsinde, bayi YALNIZ
 				// kendi hosting hesaplarında, müşteri ASLA (SahipYonetim). FTP ve DB bağımsız.
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/ftp-accounts/{kullanici}/password", domainsH.FTPHesapParola)
+				// Müşterinin belirli dizinlere özel ek FTP hesapları (ana hesaptan AYRI; panele giriş yapamaz).
+				// API anahtarı GİREMEZ (izin tablosunda yok → varsayılan-reddet); parola ucu KimlikUclari'nda.
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ftp-ek", domainsH.FTPEkListe)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ftp-ek", domainsH.FTPEkOlustur)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp-ek/{kullanici}", domainsH.FTPEkGuncelle)
+				r.With(middleware.MusteriScope).Put("/domains/{id}/ftp-ek/{kullanici}/password", domainsH.FTPEkParola)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ftp-ek/{kullanici}", domainsH.FTPEkSil)
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/databases/users/{kullanici}/password", domainsH.DBKullaniciParola)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)

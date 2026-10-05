@@ -100,3 +100,20 @@ func TestMusteriLoginAskiKodu(t *testing.T) {
 		t.Fatalf("aktif hesap giriş yapmalı: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// 🔴 Müşteri paneli girişi YALNIZ ana FTP hesabıdır (tur='ana'): müşterinin açtığı dizin
+// kısıtlı ek FTP hesapları (tur='ek') aynı tabloda durur ama panele GİRİŞ YAPAMAZ.
+func TestMusteriLoginSorgusuYalnizAnaHesap(t *testing.T) {
+	kapidanGelsin(t, kapi.Musteri)
+	eskiK := kapiGirisKaydet
+	t.Cleanup(func() { kapiGirisKaydet = eskiK })
+	s, db := sahtedb.Yeni()
+	t.Cleanup(func() { db.Close() })
+	rec := httptest.NewRecorder()
+	(&Handlers{DB: db, Secret: []byte("musteri-test-anahtari-0123456789-abcdef")}).Login(rec,
+		httptest.NewRequest(http.MethodPost, "/api/v1/musteri/login",
+			strings.NewReader(`{"kullanici":"c_ornek-ek","parola":"x"}`)))
+	if !s.Sorgulandi("fa.tur = 'ana'") {
+		t.Fatal("müşteri girişi sorgusu tur='ana' ile sınırlı değil: ek FTP hesabı panele girebilir")
+	}
+}

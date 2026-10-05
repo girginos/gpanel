@@ -223,8 +223,13 @@ func (h *Handlers) devirTx(ctx context.Context, did, eskiRID int64, resellerID, 
 		"UPDATE ftp_accounts SET token_gecersiz_ts=UNIX_TIMESTAMP()+1 WHERE domain_id=?", did); err != nil {
 		return nil, fmt.Errorf("oturum düşürme: %w", err)
 	}
+	// Ek (kisitli) FTP hesaplari eski sahibin ucuncu kisilere verdigi erisim olabilir:
+	// devirde SILINIR (yeni sahip kendi acar), parola rotasyonu yalniz ana hesaba uygulanir.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM ftp_accounts WHERE domain_id=? AND tur='ek'", did); err != nil {
+		return nil, fmt.Errorf("ek FTP hesaplari temizligi: %w", err)
+	}
 	res, err := tx.ExecContext(ctx,
-		"UPDATE ftp_accounts SET password_md5=? WHERE domain_id=?", parolaHash, did)
+		"UPDATE ftp_accounts SET password_md5=? WHERE domain_id=? AND tur='ana'", parolaHash, did)
 	if err != nil {
 		return nil, fmt.Errorf("FTP parola rotasyonu: %w", err)
 	}
