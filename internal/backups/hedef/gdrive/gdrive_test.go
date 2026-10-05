@@ -240,11 +240,52 @@ func TestKopanYuklemeSurdurulur(t *testing.T) {
 	if len(o.uykuSayisi()) == 0 {
 		t.Errorf("kopmadan sonra geri çekilme beklemesi yapılmadı")
 	}
-	// Durum sorgusu (bytes */N) yapıldı.
-	var durum bool
-	o.f.ayarla(func(f *sahteDrive) { durum = len(f.istekler) > 0 })
-	if !durum {
-		t.Fatal("istek yok")
+	// Durum sorgusu (bytes */N) yapıldı ve yükleme BAŞA SARMADI: hiçbir parça ofset 0'dan
+	// ikinci kez gönderilmedi (sunucunun 308 ipucuna değil, durum sorgusuna dayanır).
+	var durum, basaSaran int
+	o.f.ayarla(func(f *sahteDrive) {
+		for _, cr := range f.araliklar {
+			if strings.HasPrefix(cr, "bytes */") {
+				durum++
+			}
+			if strings.HasPrefix(cr, "bytes 0-") {
+				basaSaran++
+			}
+		}
+	})
+	if durum == 0 {
+		t.Errorf("kopmadan sonra oturum durumu sorgulanmadı (bytes */N)")
+	}
+	if basaSaran != 1 {
+		t.Errorf("0. ofsetten %d parça gönderildi: kopan yükleme sürdürülmeli, baştan gönderilmemeli", basaSaran)
+	}
+}
+
+func TestKesikIndirmeKabulEdilmez(t *testing.T) {
+	o := yeniOrtam(t)
+	ctx := context.Background()
+	yerel, veri := yerelDosya(t, 300000, 15)
+	if err := o.h.Yukle(ctx, yerel, "d/x.age", hedef.YukleSecenek{}); err != nil {
+		t.Fatal(err)
+	}
+	inen := filepath.Join(t.TempDir(), "i")
+	// Sunucu gövdeyi yarıda ama TEMİZ bitirir (EOF): boyut denetimi olmasa kesik dosya
+	// "başarı" sayılırdı. Kalıcı arızada hata ve yerel dosya YOK.
+	o.f.ayarla(func(f *sahteDrive) { f.indirKesik = 100 })
+	err := o.h.Indir(ctx, "d/x.age", inen)
+	if err == nil {
+		t.Fatal("kesik gövde başarı sayıldı")
+	}
+	if _, serr := os.Stat(inen); serr == nil {
+		t.Errorf("kesik indirme yerel dosya bıraktı")
+	}
+	// Geçici arıza: bir kez kesilir, yeniden denenir, tam içerik gelir.
+	o.f.ayarla(func(f *sahteDrive) { f.indirKesik = 1 })
+	if err := o.h.Indir(ctx, "d/x.age", inen); err != nil {
+		t.Fatalf("geçici kesilmeden sonra yeniden denemeliydi: %v", err)
+	}
+	if got, _ := os.ReadFile(inen); shaHex(got) != shaHex(veri) {
+		t.Errorf("içerik bozuk")
 	}
 }
 

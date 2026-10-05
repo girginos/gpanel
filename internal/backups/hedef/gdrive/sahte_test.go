@@ -71,8 +71,10 @@ type sahteDrive struct {
 	kotaKullanim      string
 	sayfaBoyutu       int
 	md5Boz            bool
-	kopOfset          int64 // >0: bir sonraki parça gövdesi bu kadar bayt okununca bağlantı kopar (bir kez)
-	indirKop          int   // >0: indirme gövdesi yarıda kopar (kalan kez)
+	kopOfset          int64    // >0: bir sonraki parça gövdesi bu kadar bayt okununca bağlantı kopar (bir kez)
+	indirKop          int      // >0: indirme gövdesi yarıda kopar (kalan kez)
+	indirKesik        int      // >0: indirme gövdesi Content-Length'siz, yarıda ama TEMİZ biter (kalan kez)
+	araliklar         []string // oturum PUT'larının Content-Range başlıkları
 	oturumAcmaSayisi  int
 	hook              func(f *sahteDrive, r *http.Request, n int) *hookYanit
 	istekler          []sahteIstek
@@ -416,13 +418,21 @@ func (f *sahteDrive) dosyaIslem(w http.ResponseWriter, r *http.Request, id strin
 		f.mu.Unlock()
 		w.WriteHeader(204)
 	case r.Method == "GET" && r.URL.Query().Get("alt") == "media":
-		w.Header().Set("Content-Length", strconv.Itoa(len(veri)))
 		f.mu.Lock()
 		kop := f.indirKop > 0
 		if kop {
 			f.indirKop--
 		}
+		kesik := f.indirKesik > 0
+		if kesik {
+			f.indirKesik--
+		}
 		f.mu.Unlock()
+		if kesik && len(veri) > 10 {
+			_, _ = w.Write(veri[:len(veri)/2]) // Content-Length yok: chunked, temiz bitiş
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(veri)))
 		if kop && len(veri) > 10 {
 			_, _ = w.Write(veri[:len(veri)/2])
 			if hj, ok := w.(http.Hijacker); ok {
@@ -505,6 +515,9 @@ func (f *sahteDrive) oturumPut(w http.ResponseWriter, r *http.Request, sid strin
 		return
 	}
 	cr := r.Header.Get("Content-Range")
+	f.mu.Lock()
+	f.araliklar = append(f.araliklar, cr)
+	f.mu.Unlock()
 	if strings.HasPrefix(cr, "bytes */") {
 		f.mu.Lock()
 		defer f.mu.Unlock()
