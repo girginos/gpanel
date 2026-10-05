@@ -77,6 +77,7 @@ catch_workers_output = yes
 `))
 
 func renderSubPool(sk, poolName, sockDir string, s Settings) (string, error) {
+	s.EkDirektifler = ekRenderSuz(s.EkDirektifler)
 	var buf bytes.Buffer
 	err := subPoolTmpl.Execute(&buf, map[string]any{"SK": sk, "Pool": poolName, "SockDir": sockDir, "S": s})
 	return buf.String(), err

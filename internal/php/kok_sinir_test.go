@@ -119,6 +119,21 @@ func TestPHPAyar_KokKorumali_MusteriBayiDegistiremez(t *testing.T) {
 				t.Errorf("%s %s: 403 + yazımsız beklenirdi: %d %s", rol, g, kod, govde)
 			}
 		}
+		if rol == "müşteri" {
+			// Müşteri için disable_functions görünmez: aynı değer bile 403 (kâhin yok);
+			// gövdede YOKSA kayıt yazılır ve değer kayıttan korunur.
+			if kod, govde, sd, _ := ks_cagir(t, http.MethodPut, tok[rol], `{"ayarlar":{"disable_functions":"exec,system"}}`); kod != http.StatusForbidden || sd.Yurutuldu("INSERT INTO php_settings") {
+				t.Errorf("müşteri: aynı disable_functions değeri de 403 olmalı: %d %s", kod, govde)
+			}
+			kod, govde, sd, havuz := ks_cagir(t, http.MethodPut, tok[rol], `{"ayarlar":{"open_basedir":"","memory_limit":"512M","max_execution_time":3000,"pm_strategy":"static"}}`)
+			if kod != http.StatusOK || havuz == nil || !sd.Yurutuldu("INSERT INTO php_settings") {
+				t.Fatalf("müşteri: disable_functions'sız kayıt 200 beklenirdi: %d %s", kod, govde)
+			}
+			if !strings.HasPrefix(havuz.DisableFunctions, "exec,system") || !strings.Contains(havuz.DisableFunctions, "pcntl_exec") {
+				t.Errorf("müşteri: df kayıttan korunmalı + zorunlu taban: %q", havuz.DisableFunctions)
+			}
+			continue
+		}
 		// Görünen değeri geri göndermek serbest; değerler kayıttan korunur.
 		kod, govde, sd, havuz := ks_cagir(t, http.MethodPut, tok[rol],
 			`{"ayarlar":{"disable_functions":"exec,system","open_basedir":"","memory_limit":"512M","max_execution_time":3000,"pm_strategy":"static"}}`)
@@ -181,7 +196,10 @@ func TestPHPAyar_GET_IcAlanMusteriBayiyeDonmez(t *testing.T) {
 				t.Errorf("%s kökün iç alanı %s görmemeli: %v", rol, k, y.Ayarlar[k])
 			}
 		}
-		if y.Ayarlar["disable_functions"] != "exec,system" || y.Ayarlar["memory_limit"] != "256M" {
+		if _, var_ := y.Ayarlar["disable_functions"]; var_ == (rol == "müşteri") {
+			t.Errorf("%s: disable_functions görünürlüğü yanlış (müşteri görmemeli, diğerleri görmeli): %v", rol, y.Ayarlar)
+		}
+		if rol != "müşteri" && y.Ayarlar["disable_functions"] != "exec,system" || y.Ayarlar["memory_limit"] != "256M" {
 			t.Errorf("%s: görünür alanlar dönmeli: %v", rol, y.Ayarlar)
 		}
 	}

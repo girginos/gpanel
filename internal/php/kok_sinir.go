@@ -111,7 +111,7 @@ func kokAlaniDeger(s *Settings, ad string) *string {
 // kokSiniriUygula — yönetici dışı istekte kök/plan alanlarını denetler. Red listesi
 // boş değilse çağıran 403 döner (efektiflimit.IcAlanRedMesaji) ve HİÇBİR ŞEY
 // yazmaz. Boşsa a.Ayarlar'daki iç ve korumalı alanlar mevcut değerle doldurulmuştur.
-func kokSiniriUygula(a *ayarIstegi, mevcut Settings) []string {
+func kokSiniriUygula(a *ayarIstegi, mevcut Settings, musteri bool) []string {
 	var red []string
 	for _, k := range efektiflimit.PHPAyarIcAnahtarlari() {
 		if a.gelenVar(k) {
@@ -119,6 +119,12 @@ func kokSiniriUygula(a *ayarIstegi, mevcut Settings) []string {
 		}
 	}
 	for _, k := range kokKorumaliAnahtarlar {
+		// Müşteri: disable_functions GÖRÜNMEZ → gövdede anahtar VARSA (aynı değer dahil)
+		// ret; diğer korumalı alanlar görünür olduğundan yalnız farklı değer reddedilir.
+		if musteri && strings.EqualFold(k, "disable_functions") && a.gelenVar(k) {
+			red = append(red, k)
+			continue
+		}
 		if a.gelenVar(k) && *kokAlaniDeger(&a.Ayarlar, k) != *kokAlaniDeger(&mevcut, k) {
 			red = append(red, k)
 		}
@@ -139,6 +145,11 @@ func kokSiniriUygula(a *ayarIstegi, mevcut Settings) []string {
 // kokYetkili — kök/plan alanlarını yazıp görebilen oturum (yalnız yönetici).
 func kokYetkili(r *http.Request) bool { return middleware.RolFrom(r) == "admin" }
 
+// MusteriOturumu — hosting müşterisi oturumu (kendi token'ı ya da bayi/yönetici
+// "adına" oturumu: ikisi de MusteriClaims taşır, ön yüzde rol 'user'). Bayi ve
+// yönetici kendi token'larıyla bu kapıya takılmaz.
+func MusteriOturumu(r *http.Request) bool { return middleware.MusteriClaimsFrom(r) != nil }
+
 // IstegiCoz — PUT gövdesini okur ve yönetici dışı oturumda kök sınırını uygular.
 // kod=0 → başarılı; aksi halde çağıran kod/mesajı döner, hiçbir şey yazmaz.
 // mevcut: alanın (ya da alt alanın) KAYITLI ayarı (satır yoksa Defaults()).
@@ -148,7 +159,7 @@ func IstegiCoz(r *http.Request, mevcut Settings) (surum string, s Settings, kod 
 		return "", Settings{}, http.StatusBadRequest, "geçersiz gövde: " + err.Error()
 	}
 	if !kokYetkili(r) {
-		if red := kokSiniriUygula(&a, mevcut); len(red) > 0 {
+		if red := kokSiniriUygula(&a, mevcut, MusteriOturumu(r)); len(red) > 0 {
 			return "", Settings{}, http.StatusForbidden, efektiflimit.IcAlanRedMesaji(red)
 		}
 	}
@@ -162,6 +173,7 @@ func IstemciAyarlari(r *http.Request, s Settings) any {
 	if kokYetkili(r) {
 		return s
 	}
+	musteri := MusteriOturumu(r)
 	b, err := json.Marshal(s)
 	if err != nil {
 		return map[string]any{}
@@ -172,6 +184,11 @@ func IstemciAyarlari(r *http.Request, s Settings) any {
 	}
 	for _, k := range efektiflimit.PHPAyarIcAnahtarlari() {
 		delete(m, k)
+	}
+	// Müşteri: disable_functions ve kategorileri HİÇ görünmez (salt okunur bile değil).
+	// Kayıtlı değer korunur ve havuza yazılmaya devam eder; yalnız yanıttan çıkar.
+	if musteri {
+		delete(m, "disable_functions")
 	}
 	return m
 }
