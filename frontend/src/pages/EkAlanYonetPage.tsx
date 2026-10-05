@@ -309,6 +309,9 @@ export default function EkAlanYonetPage() {
         <Link to={kok} className="inline-flex min-h-10 items-center text-sm font-medium text-primary-600 hover:underline dark:text-primary-400">
           {cevir('Hesaba dön')}
         </Link>
+        <Link to={`/abonelikler/${id}/gunlukler?hedef=ek:${eid}`} className="ml-4 inline-flex min-h-10 items-center text-sm font-medium text-primary-600 hover:underline dark:text-primary-400">
+          {cevir('Bu alan adının günlükleri')}
+        </Link>
       </p>
 
       <Modal

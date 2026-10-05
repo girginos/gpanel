@@ -181,6 +181,7 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'DNS yayıldıktan sonra yönetim sayfasından SSL’i yeniden deneyebilirsiniz.': 'Once DNS has propagated, retry SSL from the management page.',
   'Yönet': 'Manage',
   'Hesaba dön': 'Back to account',
+  'Bu alan adının günlükleri': 'Logs of this domain',
   'DNS’i bu sunucuya yönlendirin': 'Point DNS to this server',
   'A kaydı': 'A record',
   'Alan adının A kaydı bu hesabın IP adresini göstermeli.': 'The domain’s A record must point to this account’s IP address.',

@@ -6,19 +6,30 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept-v2
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui'
+import { Button, Select } from '@/components/ui'
 import { useAuth } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
-type LogDosya = { anahtar: string; etiket: string; yol: string; boyut_b: number; degisme: string; mevcut: boolean }
-type ReadResp = { dosya: string; yol: string; satirlar: string[]; mevcut: boolean }
+type LogDosya = { anahtar: string; etiket: string; boyut_b: number; degisme: string; mevcut: boolean }
+type ReadResp = { dosya: string; alan_adi?: string; satirlar: string[]; mevcut: boolean }
+// log-hedefleri: hesabın log alınabilir alan adları (dosya yolu sunucudan DÖNMEZ).
+export type LogHedefi = {
+  hedef: string // "ana" | "ek:<id>" | "alt:<id>"
+  tur: 'ana' | 'ek' | 'alt'
+  alan_adi: string
+  access_var: boolean
+  error_var: boolean
+  access_boyut: number
+  son_degisiklik: string
+}
 
 const MAX_PENCERE = 1000
+const TUR_ETIKET: Record<LogHedefi['tur'], string> = { ana: 'ana', ek: 'ek alan adı', alt: 'alt alan adı' }
 
 
 const DLOGS_EN: Record<string, string> = {
@@ -54,6 +65,13 @@ const DLOGS_EN: Record<string, string> = {
   "Mesaj": "Message",
   "stream başlamadı (HTTP {0})": "stream did not start (HTTP {0})",
   "Alan adı bilgisi alınamadı": "Failed to retrieve domain info",
+  "Alan adı": "Domain",
+  "ana": "main",
+  "ek alan adı": "addon domain",
+  "alt alan adı": "subdomain",
+  "Henüz log yok": "No logs yet",
+  "İndir": "Download",
+  "Log alan adları alınamadı": "Failed to load log domains",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DLOGS_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -61,7 +79,12 @@ export default function DomainLogsPage() {
   useTranslation() // dil re-render aboneligi
   const { id, sid } = useParams()
   const toast = useToast()
-  const base = sid ? `/domains/${id}/subdomain/${sid}` : `/domains/${id}`
+  const [arama_, setAramaPrm] = useSearchParams()
+  // Hedef: alt alan rotasında alt:<sid>; aksi halde ?hedef= (derin bağlantı), yoksa ana.
+  const hedef = sid ? `alt:${sid}` : (arama_.get('hedef') || 'ana')
+  const base = `/domains/${id}`
+  const hedefPrm = hedef === 'ana' ? {} : { hedef }
+  const [hedefler, setHedefler] = useState<LogHedefi[]>([])
   const [domain, setDomain] = useState<Domain | null>(null)
   const [dosyalar, setDosyalar] = useState<LogDosya[]>([])
   const [aktif, setAktif] = useState<string>('access')
@@ -74,6 +97,28 @@ export default function DomainLogsPage() {
   const [okunuyor, setOkunuyor] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  const seciliHedef = hedefler.find(h => h.hedef === hedef)
+  function hedefSec(h: string) {
+    if (h === hedef) return
+    setCanli(false)
+    setSatirlar([])
+    setAramaPrm(h === 'ana' ? {} : { hedef: h }, { replace: true })
+  }
+  // Liste geldi ama hedef hesapta yok (eski/yabancı bağlantı): ana alan adına dön.
+  useEffect(() => {
+    if (hedefler.length > 0 && !sid && hedef !== 'ana' && !hedefler.some(h => h.hedef === hedef)) setAramaPrm({}, { replace: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hedefler, hedef])
+  function indir() {
+    const ad = (seciliHedef?.alan_adi || domain?.alan_adi || 'log') + '.' + aktif + '.log'
+    const url = URL.createObjectURL(new Blob([gorunen.join('\n') + '\n'], { type: 'text/plain' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = ad
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const hataTab = aktif === 'error' || aktif.includes('error') || aktif.includes('hata')
 
@@ -88,9 +133,19 @@ export default function DomainLogsPage() {
     let iptal = false
     if (!id) return
     api.get<Domain>(`/domains/${id}`).then(r => { if (iptal) return; setDomain(r.data) }).catch(e => { if (!iptal) hataYakala(cevir("Alan adı bilgisi alınamadı"))(e) })
-    api.get<LogDosya[]>(`${base}/logs`).then(r => { if (iptal) return; setDosyalar(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    api.get<LogHedefi[]>(`${base}/log-hedefleri`).then(r => { if (iptal) return; setHedefler(r.data) }).catch(() => { if (!iptal) toast.hata(cevir("Log alan adları alınamadı")) })
     return () => { iptal = true }
   }, [id])
+
+  // Hedef değişince: liste temizlenir, dosya listesi yeniden alınır.
+  useEffect(() => {
+    let iptal = false
+    if (!id) return
+    setDosyalar([])
+    api.get<LogDosya[]>(`${base}/logs`, { params: hedefPrm }).then(r => { if (iptal) return; setDosyalar(r.data) }).catch(e => { if (iptal) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+    return () => { iptal = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, hedef])
 
   // Aktif dosya değişince son N satırı yükle
   const ilkYukleNesli = useRef(0)
@@ -99,7 +154,7 @@ export default function DomainLogsPage() {
     const _n = ++ilkYukleNesli.current
     setOkunuyor(true)
     try {
-      const { data } = await api.get<ReadResp>(`${base}/logs/oku`, { params: { dosya: aktif, son: 200 } })
+      const { data } = await api.get<ReadResp>(`${base}/logs/oku`, { params: { dosya: aktif, son: 200, ...hedefPrm } })
       if (_n !== ilkYukleNesli.current) return
       setSatirlar(data.satirlar || [])
       setHata(null)
@@ -112,10 +167,11 @@ export default function DomainLogsPage() {
   }
   useEffect(() => {
     setCanli(false)
+    setSatirlar([])
     ilkYukle()
     return () => { ilkYukleNesli.current++ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aktif, id])
+  }, [aktif, id, hedef])
 
   // Canlı tail başlat/durdur
   useEffect(() => {
@@ -127,7 +183,7 @@ export default function DomainLogsPage() {
 
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1${base}/logs/canli?dosya=${aktif}`, {
+        const res = await fetch(`/api/v1${base}/logs/canli?dosya=${aktif}${hedef === 'ana' ? '' : `&hedef=${encodeURIComponent(hedef)}`}`, {
           headers: { Authorization: `Bearer ${tok}` },
           signal: ctrl.signal,
         })
@@ -167,7 +223,7 @@ export default function DomainLogsPage() {
     })()
     return () => ctrl.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canli, aktif, id])
+  }, [canli, aktif, id, hedef])
 
   // Oto scroll
   useEffect(() => {
@@ -186,11 +242,28 @@ export default function DomainLogsPage() {
 
       <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-1">{cevir("Günlükler")}</h1>
       {domain && (
-        <p className="text-sm text-slate-500 dark:text-slate-500 mb-5">
+        <p className="text-sm text-slate-500 dark:text-slate-500 mb-3">
           <Link to={`/abonelikler/${id}`} className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium">{domain.alan_adi}</Link>
-          {' · '}
-          <span className="font-mono">/var/log/nginx/{domain.alan_adi}.*.log</span>
+          {seciliHedef && seciliHedef.tur !== 'ana' && (
+            <>{' · '}<span className="font-mono" data-testid="log-baslik-alan">{seciliHedef.alan_adi}</span></>
+          )}
         </p>
+      )}
+
+      {/* Dinamik alan adı seçici: ana + ek alan adları + alt alanlar */}
+      {hedefler.length > 0 && !sid && (
+        <div className="mb-3 max-w-md">
+          <Select
+            label={cevir("Alan adı")}
+            value={hedef}
+            onChange={e => hedefSec(e.target.value)}
+            data={hedefler.map(h => ({
+              value: h.hedef,
+              label: `${h.alan_adi} (${cevir(TUR_ETIKET[h.tur])})${h.access_var || h.error_var ? '' : ` — ${cevir("Henüz log yok")}`}`,
+              disabled: !h.access_var && !h.error_var && h.hedef !== hedef,
+            }))}
+          />
+        </div>
       )}
 
       {/* Sekmeler */}
@@ -257,6 +330,15 @@ export default function DomainLogsPage() {
             ikon={I.silgi}
           >
             {cevir("Temizle")}
+          </Button>
+          <Button
+            onClick={indir}
+            disabled={gorunen.length === 0}
+            variant="outlined"
+            boyut="sm"
+            ikon={I.indir}
+          >
+            {cevir("İndir")}
           </Button>
         </div>
       </div>

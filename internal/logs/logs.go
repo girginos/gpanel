@@ -1,4 +1,11 @@
-// Package logs: per-domain nginx log dosyalari + SSE canli tail
+// Package logs: per-domain nginx log dosyalari + SSE canli tail.
+//
+// Log hedefi: bir hosting hesabinin ana alan adi, ek (addon) alan adlari ve alt
+// alanlari ayni hesap kimligi altinda secilebilir. Hedef sunucuda COZULUR: istemci
+// yalniz {tur, id} gonderir (?hedef=ana|ek:<id>|alt:<id>), alan adi DB'den hesap
+// sahipligi dogrulanarak gelir, dosya adi karakter kumesi dogrulanir ve okuma
+// yalniz LogDizin icinde, sembolik baga izin vermeden yapilir. Dosya yolu
+// istemciye DONMEZ.
 package logs
 
 import (
@@ -10,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +27,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// LogDizin: nginx vhost'larinin access/error log dizini (testte degistirilir).
+var LogDizin = "/var/log/nginx"
+
+const (
+	azamiOkumaB   = 8 << 20 // tek istekte dosya sonundan en cok bu kadar bayt okunur
+	azamiSatirSay = 2000
+	azamiAdUzun   = 253
+)
+
 type Handlers struct {
 	DB *sql.DB
 }
@@ -26,58 +43,220 @@ type Handlers struct {
 type LogDosya struct {
 	Anahtar string `json:"anahtar"` // "access" | "error"
 	Etiket  string `json:"etiket"`
-	Yol     string `json:"yol"`
 	BoyutB  int64  `json:"boyut_b"`
 	Degisme string `json:"degisme"`
 	Mevcut  bool   `json:"mevcut"`
 }
 
-func (h *Handlers) lookup(r *http.Request) (string, string, error) {
-	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var alanAdi, sk string
-	var isDemo int
-	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alan_adi, sistem_kullanici, is_demo FROM domains WHERE id=?`, id).
-		Scan(&alanAdi, &sk, &isDemo)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", os.ErrNotExist
-	}
-	if err != nil {
-		return "", "", err
-	}
-	if isDemo == 1 {
-		return "", "", errors.New("demo aboneliğin logları yönetilemez")
-	}
-	if sidStr := chi.URLParam(r, "sid"); sidStr != "" {
-		sid, _ := strconv.ParseInt(sidStr, 10, 64)
-		var tamAd string
-		if e := h.DB.QueryRowContext(r.Context(), `SELECT tam_ad FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&tamAd); e == nil && tamAd != "" {
-			return tamAd, sk, nil
-		}
-	}
-	return alanAdi, sk, nil
+// LogHedefi: log-hedefleri satiri. Dosya yolu YOK.
+type LogHedefi struct {
+	Hedef         string `json:"hedef"` // "ana" | "ek:<id>" | "alt:<id>"
+	Tur           string `json:"tur"`   // "ana" | "ek" | "alt"
+	AlanAdi       string `json:"alan_adi"`
+	EkAlanID      int64  `json:"ek_alan_id,omitempty"`
+	AltAlanID     int64  `json:"alt_alan_id,omitempty"`
+	AccessVar     bool   `json:"access_var"`
+	ErrorVar      bool   `json:"error_var"`
+	AccessBoyut   int64  `json:"access_boyut"`
+	SonDegisiklik string `json:"son_degisiklik"`
 }
 
-func dosyaYolu(alanAdi, anahtar string) string {
+var errYol = errors.New("geçersiz log hedefi")
+
+// alanAdiRe: DNS etiketleri (harf/rakam/tire) noktayla ayrilir; "..", bas/son nokta ve tire yok.
+var alanAdiRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
+
+// DosyaYolu: alan adi + anahtar -> LogDizin altindaki log dosyasi. Alan adi DB'den gelse
+// de dogrulanir (savunma derinligi): karakter kumesi, uzunluk, filepath.Base ve dizin icinde kalma.
+func DosyaYolu(alanAdi, anahtar string) (string, error) {
+	var son string
 	switch anahtar {
 	case "access":
-		return "/var/log/nginx/" + alanAdi + ".access.log"
+		son = ".access.log"
 	case "error":
-		return "/var/log/nginx/" + alanAdi + ".error.log"
+		son = ".error.log"
+	default:
+		return "", errYol
 	}
-	return ""
+	if alanAdi == "" || len(alanAdi) > azamiAdUzun || !alanAdiRe.MatchString(alanAdi) {
+		return "", errYol
+	}
+	ad := alanAdi + son
+	if filepath.Base(ad) != ad {
+		return "", errYol
+	}
+	kok := filepath.Clean(LogDizin)
+	p := filepath.Join(kok, ad)
+	if filepath.Dir(p) != kok {
+		return "", errYol
+	}
+	return p, nil
+}
+
+// dosyaBilgi: sembolik bagi TAKIP ETMEDEN (Lstat) salt-okuma bilgi. Sembolik bag ya da
+// duz dosya olmayan = yok sayilir.
+func dosyaBilgi(p string) (os.FileInfo, bool) {
+	st, err := os.Lstat(p)
+	if err != nil || !st.Mode().IsRegular() {
+		return nil, false
+	}
+	return st, true
+}
+
+// guvenliAc: Lstat duz dosya + acilan tanimlayici ayni dosya (TOCTOU'da sembolik bag takasi reddedilir).
+func guvenliAc(p string) (*os.File, error) {
+	ls, ok := dosyaBilgi(p)
+	if !ok {
+		if _, err := os.Lstat(p); err != nil {
+			return nil, err // yok: os.IsNotExist
+		}
+		return nil, errors.New("log dosyası okunamaz")
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	fs, err := f.Stat()
+	if err != nil || !os.SameFile(ls, fs) {
+		_ = f.Close()
+		return nil, errors.New("log dosyası okunamaz")
+	}
+	return f, nil
+}
+
+type hataKodlu struct {
+	kod int
+	msg string
+}
+
+func (e *hataKodlu) Error() string { return e.msg }
+
+// cozum: hedefin alan adi (ve hesap SK'si) ya da hata.
+func (h *Handlers) cozum(r *http.Request) (alanAdi string, err error) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var ana, sk string
+	var isDemo int
+	e := h.DB.QueryRowContext(r.Context(),
+		`SELECT alan_adi, sistem_kullanici, is_demo FROM domains WHERE id=?`, id).Scan(&ana, &sk, &isDemo)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", &hataKodlu{http.StatusNotFound, "abonelik bulunamadı"}
+	}
+	if e != nil {
+		return "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
+	}
+	if isDemo == 1 {
+		return "", &hataKodlu{http.StatusForbidden, "demo aboneliğin logları yönetilemez"}
+	}
+	hedef := strings.TrimSpace(r.URL.Query().Get("hedef"))
+	if sidStr := chi.URLParam(r, "sid"); sidStr != "" {
+		if hedef != "" {
+			return "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
+		}
+		hedef = "alt:" + sidStr
+	}
+	if hedef == "" || hedef == "ana" {
+		return ana, nil
+	}
+	tur, num, ok := strings.Cut(hedef, ":")
+	n, perr := strconv.ParseInt(num, 10, 64)
+	if !ok || perr != nil || n <= 0 || (tur != "ek" && tur != "alt") {
+		return "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
+	}
+	q := `SELECT alan_adi FROM ek_alan_adlari WHERE id=? AND domain_id=?`
+	if tur == "alt" {
+		q = `SELECT tam_ad FROM subdomanlar WHERE id=? AND domain_id=?`
+	}
+	var ad string
+	e = h.DB.QueryRowContext(r.Context(), q, n, id).Scan(&ad)
+	if errors.Is(e, sql.ErrNoRows) || (e == nil && ad == "") {
+		// başka hesabın kimliği = olmayanla aynı yanıt (IDOR)
+		return "", &hataKodlu{http.StatusNotFound, "log hedefi bulunamadı"}
+	}
+	if e != nil {
+		return "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
+	}
+	return ad, nil
+}
+
+func hataYaz(w http.ResponseWriter, err error) {
+	var hk *hataKodlu
+	if errors.As(err, &hk) {
+		httpx.WriteError(w, hk.kod, hk.msg)
+		return
+	}
+	httpx.WriteError(w, http.StatusInternalServerError, "log okunamadı")
+}
+
+// Hedefler: GET /domains/{id}/log-hedefleri
+func (h *Handlers) Hedefler(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var ana string
+	var isDemo int
+	e := h.DB.QueryRowContext(r.Context(), `SELECT alan_adi, is_demo FROM domains WHERE id=?`, id).Scan(&ana, &isDemo)
+	if errors.Is(e, sql.ErrNoRows) {
+		hataYaz(w, &hataKodlu{http.StatusNotFound, "abonelik bulunamadı"})
+		return
+	}
+	if e != nil {
+		hataYaz(w, &hataKodlu{http.StatusInternalServerError, "log hedefleri okunamadı"})
+		return
+	}
+	if isDemo == 1 {
+		hataYaz(w, &hataKodlu{http.StatusForbidden, "demo aboneliğin logları yönetilemez"})
+		return
+	}
+	out := []LogHedefi{h.hedefSatiri(LogHedefi{Hedef: "ana", Tur: "ana", AlanAdi: ana})}
+	for _, k := range []struct{ tur, tablo, sut string }{
+		{"ek", "ek_alan_adlari", "alan_adi"},
+		{"alt", "subdomanlar", "tam_ad"},
+	} {
+		rows, err := h.DB.QueryContext(r.Context(), "SELECT id, "+k.sut+" FROM "+k.tablo+" WHERE domain_id=? ORDER BY id", id) //nolint:gosec // G202: tablo/sutun SABIT dilimden, kullanici girdisi yok
+		if err != nil {
+			hataYaz(w, &hataKodlu{http.StatusInternalServerError, "log hedefleri okunamadı"})
+			return
+		}
+		for rows.Next() {
+			var n int64
+			var ad string
+			if rows.Scan(&n, &ad) != nil {
+				continue
+			}
+			t := LogHedefi{Hedef: k.tur + ":" + strconv.FormatInt(n, 10), Tur: k.tur, AlanAdi: ad}
+			if k.tur == "ek" {
+				t.EkAlanID = n
+			} else {
+				t.AltAlanID = n
+			}
+			out = append(out, h.hedefSatiri(t))
+		}
+		_ = rows.Close()
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) hedefSatiri(t LogHedefi) LogHedefi {
+	if p, err := DosyaYolu(t.AlanAdi, "access"); err == nil {
+		if st, ok := dosyaBilgi(p); ok {
+			t.AccessVar = true
+			t.AccessBoyut = st.Size()
+			t.SonDegisiklik = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+		}
+	}
+	if p, err := DosyaYolu(t.AlanAdi, "error"); err == nil {
+		if st, ok := dosyaBilgi(p); ok {
+			t.ErrorVar = true
+			if t.SonDegisiklik == "" || st.ModTime().UTC().Format("2006-01-02T15:04:05Z") > t.SonDegisiklik {
+				t.SonDegisiklik = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+			}
+		}
+	}
+	return t
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
-	alanAdi, _, err := h.lookup(r)
+	alanAdi, err := h.cozum(r)
 	if err != nil {
-		st := http.StatusInternalServerError
-		if errors.Is(err, os.ErrNotExist) {
-			st = http.StatusNotFound
-		} else if strings.Contains(err.Error(), "demo") {
-			st = http.StatusForbidden
-		}
-		httpx.WriteError(w, st, err.Error())
+		hataYaz(w, err)
 		return
 	}
 	out := []LogDosya{}
@@ -85,12 +264,13 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		{"access", "Erişim (access)"},
 		{"error", "Hata (error)"},
 	} {
-		p := dosyaYolu(alanAdi, k.Anahtar)
-		entry := LogDosya{Anahtar: k.Anahtar, Etiket: k.Etiket, Yol: p}
-		if st, err := os.Stat(p); err == nil {
-			entry.Mevcut = true
-			entry.BoyutB = st.Size()
-			entry.Degisme = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+		entry := LogDosya{Anahtar: k.Anahtar, Etiket: k.Etiket}
+		if p, perr := DosyaYolu(alanAdi, k.Anahtar); perr == nil {
+			if st, ok := dosyaBilgi(p); ok {
+				entry.Mevcut = true
+				entry.BoyutB = st.Size()
+				entry.Degisme = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+			}
 		}
 		out = append(out, entry)
 	}
@@ -99,17 +279,17 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 // Son N satiri okur (default 200, max 2000)
 func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
-	alanAdi, _, err := h.lookup(r)
+	alanAdi, err := h.cozum(r)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		hataYaz(w, err)
 		return
 	}
 	anahtar := r.URL.Query().Get("dosya")
 	if anahtar == "" {
 		anahtar = "access"
 	}
-	p := dosyaYolu(alanAdi, anahtar)
-	if p == "" {
+	p, perr := DosyaYolu(alanAdi, anahtar)
+	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz dosya anahtarı")
 		return
 	}
@@ -117,39 +297,39 @@ func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
 	if son <= 0 {
 		son = 200
 	}
-	if son > 2000 {
-		son = 2000
+	if son > azamiSatirSay {
+		son = azamiSatirSay
 	}
 
 	satirlar, err := sonNSatir(p, son)
 	if err != nil {
 		if os.IsNotExist(err) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"dosya": anahtar, "yol": p, "satirlar": []string{}, "mevcut": false,
+				"dosya": anahtar, "alan_adi": alanAdi, "satirlar": []string{}, "mevcut": false,
 			})
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "okuma: "+err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "log okunamadı") // yol/hata ayrıntısı sızdırılmaz
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"dosya": anahtar, "yol": p, "satirlar": satirlar, "mevcut": true,
+		"dosya": anahtar, "alan_adi": alanAdi, "satirlar": satirlar, "mevcut": true,
 	})
 }
 
 // SSE canli tail: log dosyasinin sonuna seek, yeni satirlari "data: ..." ile pushlar
 func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
-	alanAdi, _, err := h.lookup(r)
+	alanAdi, err := h.cozum(r)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		hataYaz(w, err)
 		return
 	}
 	anahtar := r.URL.Query().Get("dosya")
 	if anahtar == "" {
 		anahtar = "access"
 	}
-	p := dosyaYolu(alanAdi, anahtar)
-	if p == "" {
+	p, perr := DosyaYolu(alanAdi, anahtar)
+	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz dosya anahtarı")
 		return
 	}
@@ -167,9 +347,9 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, ": tail %s baslatildi\n\n", anahtar) //nolint:gosec // G705 FP: Content-Type text/event-stream (HTML DEGIL); anahtar yalniz {access,error} allowlist (aksi halde ustte 400) - tarayici govdeyi HTML yorumlamaz.
 	flusher.Flush()
 
-	f, err := os.Open(p)
+	f, err := guvenliAc(p)
 	if err != nil {
-		_, _ = fmt.Fprintf(w, "event: hata\ndata: dosya açılamadı: %s\n\n", err.Error()) //nolint:gosec // G705 FP: SSE akisi (text/event-stream), HTML degil; err yol-tabanli FS hatasi, tarayiciya HTML olarak render edilmez.
+		_, _ = fmt.Fprint(w, "event: hata\ndata: log dosyası açılamadı\n\n") // yol/hata ayrıntısı sızdırılmaz
 		flusher.Flush()
 		return
 	}
@@ -223,9 +403,11 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sonNSatir: dosyanın sonundan N satır oku
+// sonNSatir: dosyanin sonundan N satir oku. Okuma penceresi azamiOkumaB ile sinirlidir
+// (tek satirlik devasa log dosyasi bellegi sisiremez); pencere dosya basindan basliyorsa
+// ilk satir tamdir, aksi halde kesik ilk satir atilir. Sembolik bag reddedilir.
 func sonNSatir(yol string, n int) ([]string, error) {
-	f, err := os.Open(yol)
+	f, err := guvenliAc(yol)
 	if err != nil {
 		return nil, err
 	}
@@ -235,22 +417,28 @@ func sonNSatir(yol string, n int) ([]string, error) {
 		return nil, err
 	}
 	size := st.Size()
+	if size == 0 {
+		return []string{}, nil
+	}
 	const blok = 8192
 	var buf []byte
 	var read int64
-	// Dosyanın sonundan 8K parçalar halinde ileri-geri oku
-	for read < size && countLines(buf) < n+1 {
+	for read < size && read < azamiOkumaB && countLines(buf) < n+1 {
 		read += blok
 		if read > size {
 			read = size
 		}
-		_, _ = f.Seek(-read, io.SeekEnd)
 		tmp := make([]byte, read)
-		_, _ = f.ReadAt(tmp, size-read)
-		buf = tmp
+		m, rerr := f.ReadAt(tmp, size-read)
+		if rerr != nil && rerr != io.EOF {
+			return nil, rerr
+		}
+		buf = tmp[:m]
 	}
-	// Satırlara böl
 	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
+	if read < size && len(lines) > 1 {
+		lines = lines[1:] // pencere satir ortasinda basladi
+	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
@@ -266,6 +454,3 @@ func countLines(b []byte) int {
 	}
 	return n
 }
-
-// helper for filepath import order
-var _ = filepath.Base
