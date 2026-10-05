@@ -56,7 +56,7 @@ console.log(JSON.stringify({
 	bek := map[string][]string{
 		"anahtar": {"ana", "ek:7", "alt:9", "ana"},
 		"base":    {"/domains/5/wordpress", "/domains/5/ek-alan-adlari/7/wordpress", "/domains/5/subdomain/9/wordpress", "/domains/5/wordpress"},
-		"ssl":     {"/abonelikler/5/ssl", "/abonelikler/5/ek-alanlar/7", "/abonelikler/5/subdomainler/9"},
+		"ssl":     {"/abonelikler/5/ssl", "/abonelikler/5/ssl?hedef=ek:7", "/abonelikler/5/subdomainler/9"},
 		"derin":   {"ek:12", "alt:3", "ana", "alt:4", "", "", "", "", "", ""},
 		"url":     {"https://test5.com/blog", "https://test5.com", "http://a.b/yeni", "https://a.b/x"},
 	}
@@ -116,15 +116,5 @@ func TestWPEkAlan_SayfaKaynakKilitleri(t *testing.T) {
 		if !strings.Contains(s, k) {
 			t.Errorf("EN sözlüğünde %s yok", k)
 		}
-	}
-}
-
-func TestWPEkAlan_EkAlanSayfasindanKisayol(t *testing.T) {
-	s := oku(t, "pages/EkAlanYonetPage.tsx")
-	if !strings.Contains(s, "`${kok}/wordpress?hedef=ek:${eid}`") || !strings.Contains(s, "cevir('WordPress kur')") {
-		t.Error("ek alan yönetim sayfasında hedef önseçili 'WordPress kur' kısayolu yok")
-	}
-	if !strings.Contains(oku(t, "components/musteri-ana/dil.ts"), "'WordPress kur': 'Install WordPress'") {
-		t.Error("kısayol EN çevirisi yok")
 	}
 }

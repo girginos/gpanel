@@ -173,20 +173,22 @@ func TestBilgiPaneli_EkleDugmeleriYalnizEklemeEylemleriyle(t *testing.T) {
 
 func TestEkAlan_RotalarVeKirinti(t *testing.T) {
 	app := oku(t, "App.tsx")
-	for _, gerek := range []string{`path="abonelikler/:id/ek-alanlar/yeni" element={<EkAlanEklePage />}`, `path="abonelikler/:id/ek-alanlar/:eid" element={<EkAlanYonetPage />}`} {
-		if !strings.Contains(app, gerek) {
-			t.Errorf("App.tsx rota eksik: %s", gerek)
-		}
+	if !strings.Contains(app, `path="abonelikler/:id/ek-alanlar/yeni" element={<EkAlanEklePage />}`) {
+		t.Error("App.tsx rota eksik: ek-alanlar/yeni")
 	}
-	// "yeni" rotası ":eid"den ÖNCE olmalı (aksi halde "yeni" bir kimlik sanılır).
-	if strings.Index(app, "ek-alanlar/yeni") > strings.Index(app, "ek-alanlar/:eid") {
-		t.Error("ek-alanlar/yeni, :eid rotasından önce tanımlanmalı")
+	// Ek alan detay sayfası KALDIRILDI: alan seçici ortak sayfalarda (SSL/WordPress/Günlükler); silme hesap
+	// sayfasındaki alan listesinden. Rota, sayfa ve ona giden bağlantılar geri gelmemeli.
+	if strings.Contains(app, "EkAlanYonetPage") || strings.Contains(app, "ek-alanlar/:eid") {
+		t.Error("ek alan detay rotası/sayfası geri gelmiş")
 	}
-	yon := oku(t, "pages/EkAlanYonetPage.tsx")
-	if !strings.Contains(yon, "?onay=${encodeURIComponent(d.alan_adi)}") {
+	if _, err := os.Stat(filepath.Join(kok, "pages/EkAlanYonetPage.tsx")); err == nil {
+		t.Error("pages/EkAlanYonetPage.tsx geri gelmiş")
+	}
+	sil := oku(t, "components/musteri-ana/EkAlanSilModal.tsx")
+	if !strings.Contains(sil, "?onay=${encodeURIComponent(alanAdi)}") {
 		t.Error("silme çağrısı ?onay=<alan adı> göndermeli (sunucu zorunlu tutuyor)")
 	}
-	if strings.Contains(yon, "/php`") && strings.Contains(yon, "api.put(") {
-		t.Error("ek alan adı için PHP PUT ucu yok; sürüm salt okunur olmalı")
+	if !strings.Contains(oku(t, "components/musteri-ana/BilgiPaneli.tsx"), "<EkAlanSilModal") {
+		t.Error("alan listesinde ek alan silme yok")
 	}
 }

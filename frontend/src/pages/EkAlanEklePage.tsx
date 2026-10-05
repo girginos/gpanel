@@ -122,12 +122,12 @@ export default function EkAlanEklePage() {
           {sonuc.ssl && !sonuc.ssl.ok && (
             <UyariKutusu ton="uyari" kucuk className="mt-3">
               <p>{sonuc.ssl.hata || cevir('SSL kurulamadı')}</p>
-              <p className="mt-1">{cevir('DNS yayıldıktan sonra yönetim sayfasından SSL’i yeniden deneyebilirsiniz.')}</p>
+              <p className="mt-1">{cevir('DNS yayıldıktan sonra SSL sayfasından SSL’i yeniden deneyebilirsiniz.')}</p>
             </UyariKutusu>
           )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <BaglantiDugme to={`${kok}/ek-alanlar/${sonuc.id}`} variant="filled" color="primary" ikonSonda={I.chevronSag}>
-              {cevir('Yönet')}
+            <BaglantiDugme to={`${kok}/ssl?hedef=ek:${sonuc.id}`} variant="filled" color="primary" ikonSonda={I.chevronSag}>
+              {cevir('SSL yönet — tüm alan adları')}
             </BaglantiDugme>
             <BaglantiDugme to={kok} variant="flat">
               {cevir('Hesaba dön')}

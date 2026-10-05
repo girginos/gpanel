@@ -25,9 +25,9 @@ export const hedefBase = (id: string, h: WpHedefKimlik): string =>
     : h.tur === 'alt' ? `/domains/${id}/subdomain/${h.alt_alan_id}/wordpress`
       : `/domains/${id}/wordpress`
 
-// SSL ekleme sayfası: ana alan adı SSL sayfası; ek ve alt alan adı kendi yönetim sayfası.
+// SSL ekleme sayfası: ana ve ek alan adı ortak SSL sayfası (ek için hedef önseçili); alt alan adı kendi yönetim sayfası.
 export const hedefSslYol = (id: string, h: WpHedefKimlik): string =>
-  h.tur === 'ek' ? `/abonelikler/${id}/ek-alanlar/${h.ek_alan_id}`
+  h.tur === 'ek' ? `/abonelikler/${id}/ssl?hedef=ek:${h.ek_alan_id}`
     : h.tur === 'alt' ? `/abonelikler/${id}/subdomainler/${h.alt_alan_id}`
       : `/abonelikler/${id}/ssl`
 

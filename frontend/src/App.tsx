@@ -85,7 +85,6 @@ const DomainWordPressPage = lazy(() => import('@/pages/DomainWordPressPage'))
 const DomainSubdomainlerPage = lazy(() => import('@/pages/DomainSubdomainlerPage'))
 const DomainSubdomainYonetPage = lazy(() => import('@/pages/DomainSubdomainYonetPage'))
 const EkAlanEklePage = lazy(() => import('@/pages/EkAlanEklePage'))
-const EkAlanYonetPage = lazy(() => import('@/pages/EkAlanYonetPage'))
 const CPanelGirisPage = lazy(() => import('@/pages/CPanelGirisPage'))
 const IzlemePage = lazy(() => import('@/pages/IzlemePage'))
 const TehditPage = lazy(() => import('@/pages/TehditPage'))
@@ -237,7 +236,6 @@ export default function App() {
         <Route path="abonelikler/:id/subdomainler"  element={<DomainSubdomainlerPage />} />
         <Route path="abonelikler/:id/subdomainler/:sid" element={<DomainSubdomainYonetPage />} />
         <Route path="abonelikler/:id/ek-alanlar/yeni" element={<EkAlanEklePage />} />
-        <Route path="abonelikler/:id/ek-alanlar/:eid" element={<EkAlanYonetPage />} />
         <Route path="abonelikler/:id/subdomainler/:sid/wordpress" element={<DomainWordPressPage />} />
         <Route path="abonelikler/:id/subdomainler/:sid/composer" element={<DomainComposerPage />} />
         <Route path="abonelikler/:id/subdomainler/:sid/gunlukler" element={<DomainLogsPage />} />

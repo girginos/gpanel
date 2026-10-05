@@ -16,6 +16,7 @@ import { BaglantiDugme, Dugme, KartBasligi, KopyaDugmesi, TurRozeti, YenidenDene
 import { cevir, cevirF, cevirSayili, oran, tarihBicim } from './dil'
 import { KULLANIM_ESIK, gecerliYedekler, kullanimSatirlari, sslDurumu, yuzde } from './hesap'
 import { eklemeEylemleri } from './ekleme'
+import EkAlanSilModal from './EkAlanSilModal'
 import GuvenlikKarti from './GuvenlikKarti'
 import { useDisariKapat } from './yardimci'
 import type { SslDurumu } from './hesap'
@@ -371,6 +372,7 @@ function AlanListesi({
   className?: string
 }) {
   const kok = `/abonelikler/${domainId}`
+  const [silinecek, setSilinecek] = useState<{ ekId: number; ad: string; anahtar: string } | null>(null)
   const ekSayisi = satirlar.filter((s) => s.tur === 'ek').length
   const altSayisi = satirlar.filter((s) => s.tur === 'alt').length
   const https = ssl.tur === 'gecerli' || ssl.tur === 'bitiyor'
@@ -437,14 +439,15 @@ function AlanListesi({
                   <Ikon d={I.chevronSag} className="size-4" />
                 </Link>
               ) : s.tur === 'ek' && s.ekId != null ? (
-                <Link
-                  to={`${kok}/ek-alanlar/${s.ekId}`}
-                  className="grid size-10 shrink-0 place-items-center rounded-md text-gray-400 hover:bg-gray-50 hover:text-gray-700 dark:text-dark-300 dark:hover:bg-dark-600/60 dark:hover:text-dark-100"
-                  aria-label={cevirF('{0} ek alan adını yönet', s.ad)}
-                  title={cevirF('{0} ek alan adını yönet', s.ad)}
+                <button
+                  type="button"
+                  onClick={() => setSilinecek({ ekId: s.ekId as number, ad: s.ad, anahtar: s.anahtar })}
+                  className="grid size-10 shrink-0 place-items-center rounded-md text-gray-400 hover:bg-gray-50 hover:text-error dark:text-dark-300 dark:hover:bg-dark-600/60 dark:hover:text-error-light"
+                  aria-label={cevirF('{0} ek alan adını sil', s.ad)}
+                  title={cevirF('{0} ek alan adını sil', s.ad)}
                 >
-                  <Ikon d={I.chevronSag} className="size-4" />
-                </Link>
+                  <Ikon d={I.cop} className="size-4" />
+                </button>
               ) : (
                 <a
                   href={siteAdresi(s.ad, https)}
@@ -461,6 +464,19 @@ function AlanListesi({
           )
         })}
       </ul>
+      {silinecek && (
+        <EkAlanSilModal
+          domainId={domainId}
+          ekId={silinecek.ekId}
+          alanAdi={silinecek.ad}
+          onKapat={() => setSilinecek(null)}
+          onSilindi={() => {
+            if (seciliAnahtar === silinecek.anahtar) onSec('ana')
+            setSilinecek(null)
+            void ekler.yenile()
+          }}
+        />
+      )}
       {ekler.hata && !ekler.veri ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600 dark:border-dark-600 dark:text-dark-200">
           <span>{cevir('Ek alan adları alınamadı.')}</span>
