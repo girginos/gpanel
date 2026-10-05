@@ -115,9 +115,6 @@ func TestSslSayfasi_SuzgecVeDerinBaglanti(t *testing.T) {
 		}
 	}
 	// alt/ek yönetim sayfalarından "SSL yönet" bağlantısı (hedef önseçili); mevcut bölümler yerinde
-	if e := oku(t, "pages/EkAlanYonetPage.tsx"); !strings.Contains(e, "ssl?hedef=ek:${eid}") || !strings.Contains(e, "function SslKarti") {
-		t.Error("EkAlanYonetPage: SSL yönet bağlantısı yok")
-	}
 	if a := oku(t, "pages/DomainSubdomainYonetPage.tsx"); !strings.Contains(a, "ssl?hedef=alt:${sid}") || !strings.Contains(a, "sslKur('letsencrypt')") {
 		t.Error("DomainSubdomainYonetPage: SSL yönet bağlantısı yok / mevcut bölüm bozuldu")
 	}

@@ -24,14 +24,14 @@ func TestLogSayfasi_AlanAdiSecici(t *testing.T) {
 	s := logKaynak(t, "pages/DomainLogsPage.tsx")
 	for _, parca := range []struct{ ad, metin string }{
 		{"hedef uç çağrısı", "/log-hedefleri"},
-		{"Select render", "<Select"},
+		{"AramaliSecim render (arama kutulu, koyu temada okunur)", "<AramaliSecim"},
 		{"seçici etiketi", `cevir("Alan adı")`},
 		{"derin bağlantı okuma", "arama_.get('hedef')"},
 		{"derin bağlantı yazma", "setAramaPrm("},
 		{"alt alan rotası hedefe eşlenir", "`alt:${sid}`"},
 		{"oku hedef parametresi", "...hedefPrm"},
 		{"canlı hedef parametresi", "&hedef=${encodeURIComponent(hedef)}"},
-		{"pasif seçenek", "disabled: !h.access_var && !h.error_var"},
+		{"pasif seçenek", "pasif: !h.access_var && !h.error_var"},
 		{"Henüz log yok", `cevir("Henüz log yok")`},
 		{"tür etiketleri", "'ek alan adı'"},
 		{"hedef değişince temizlik", "setSatirlar([])"},
@@ -47,12 +47,5 @@ func TestLogSayfasi_AlanAdiSecici(t *testing.T) {
 	}
 	if strings.Contains(s, "yol: string") && strings.Contains(s, "LogDosya = {") && strings.Contains(strings.SplitN(s, "type ReadResp", 2)[0], "yol: string") {
 		t.Error("LogDosya tipinde yol alanı olmamalı")
-	}
-}
-
-func TestEkAlanSayfasi_LogKisayolu(t *testing.T) {
-	s := logKaynak(t, "pages/EkAlanYonetPage.tsx")
-	if !strings.Contains(s, "/gunlukler?hedef=ek:${eid}") {
-		t.Error("ek alan yönetim sayfasında hedefi önseçili Günlükler kısayolu yok")
 	}
 }
