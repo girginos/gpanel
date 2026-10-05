@@ -18,6 +18,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,7 +123,8 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 	}
 }
 
-// TaraDomains — filtre listesi verilirse yalnız o domain'ler taranır.
+// TaraDomains — filtre listesi verilirse yalnız o hedefler taranır. Liste elemanı bir
+// HEDEF ANAHTARIdır (ekalan.go): >0 ana domain id, <0 ek alan (-ek_alan_adlari.id).
 // nil/boş liste → tüm filo (klasik full-scan). Kilit TEK çağrı boyunca
 // tutulur — bu yüzden N domain için N çağrı YERINE bir liste geçirilmeli.
 // Yalnız kuyruk işçisi çağırır (isCalistir): kısmi iş boş listeyle koşmaz.
@@ -135,7 +137,7 @@ func TaraDomains(ctx context.Context, db *sql.DB, domainIDs []int64) error {
 	kosuyor = true
 	taranEden = map[int64]bool{}
 	for _, id := range domainIDs {
-		if id > 0 {
+		if id != 0 { // hedef anahtarı: >0 ana domain, <0 ek alan (ekalan.go)
 			taranEden[id] = true
 		}
 	}
@@ -235,7 +237,7 @@ WPloop:
 		}
 		// Bulgu 0 olsa BILE yaz — envanterin asil degeri zaten budur:
 		// "tarandi, temiz cikti" ile "hic bakilmadi" ayrimi.
-		envanterYaz(ctx, db, k.DomainID, "wordpress", k.Yol, k.CoreSurum,
+		envanterYaz(ctx, db, k.DomainID, k.EkAlanID, "wordpress", k.Yol, k.CoreSurum,
 			len(k.Eklentiler)+len(k.Temalar), wpKurulumBulgu)
 	}
 
@@ -255,7 +257,7 @@ WPloop:
 			if ok {
 				nodeFeedOK = true
 			}
-			envanterYaz(ctx, db, k.DomainID, "nodejs", k.Yol, "", len(k.Paketler), n)
+			envanterYaz(ctx, db, k.DomainID, k.EkAlanID, "nodejs", k.Yol, "", len(k.Paketler), n)
 		}
 	}
 
@@ -275,7 +277,7 @@ WPloop:
 			if ok {
 				phpFeedOK = true
 			}
-			envanterYaz(ctx, db, k.DomainID, "php-composer", k.Yol, "", len(k.Paketler), n)
+			envanterYaz(ctx, db, k.DomainID, k.EkAlanID, "php-composer", k.Yol, "", len(k.Paketler), n)
 		}
 	}
 
@@ -324,14 +326,11 @@ WPloop:
 			sArgs = append(sArgs, a)
 		}
 		sorgu := `DELETE FROM cp_websec_findings WHERE last_seen < ? AND app_type IN (` + strings.Join(appYer, ",") + `)` //nolint:gosec // G202: appYer = []string{"?",...} (yalnız placeholder); basariliApps SABİT ("wordpress"/"nodejs"/"php-composer") ve tüm değerler sArgs ile ? bağlanır.
-		if len(domainIDs) > 0 {
-			domYer := make([]string, len(domainIDs))
-			for i, id := range domainIDs {
-				domYer[i] = "?"
-				sArgs = append(sArgs, id)
-			}
-			sorgu += ` AND domain_id IN (` + strings.Join(domYer, ",") + `)`
-		}
+		// Kısmi taramada silme YALNIZ taranan hedeflerle sınırlı (ana domain anahtarı
+		// ek alanların bulgularına dokunmaz; ek alan anahtarı yalnız o ek alana).
+		kosul, kArgs := kapsamSQL(domainIDs)
+		sorgu += kosul //nolint:gosec // G202: kapsamSQL yalnız sabit parça + "?" üretir; değerler sArgs ile bağlanır.
+		sArgs = append(sArgs, kArgs...)
 		_, _ = db.ExecContext(yazCtx, sorgu, sArgs...)
 		// Envanter de ayni solma mantigina tabi: silinen site / kaldirilan
 		// WordPress envanterde kalirsa panel var olmayan bir kurulumu
@@ -602,6 +601,37 @@ func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
 		k.hata(w, err)
 		return
 	}
+	// Bayinin ek alan adları: son tarama zamanı + çalışıyor/sırada (anahtar = -ek id).
+	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+	ekRows, err := h.DB.QueryContext(r.Context(), `
+		SELECT e.id, COALESCE(DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s'),'')
+		  FROM ek_alan_adlari e
+		  JOIN domains d ON d.id = e.domain_id
+		  LEFT JOIN cp_websec_ek_tarama t ON t.ek_alan_id = e.id
+		 WHERE 1=1`+kosul, args...)
+	if err != nil {
+		k.hata(w, err)
+		return
+	}
+	defer ekRows.Close()
+	for ekRows.Next() {
+		var id int64
+		var son string
+		if err := ekRows.Scan(&id, &son); err != nil {
+			k.hata(w, err)
+			return
+		}
+		if son > enYeni {
+			enYeni = son
+		}
+		if (kosuyor && (len(taranSet) == 0 || taranSet[-id])) || bekleyen[-id] {
+			y.Running = true
+		}
+	}
+	if err := ekRows.Err(); err != nil {
+		k.hata(w, err)
+		return
+	}
 	if enYeni != "" {
 		y.LastRun, y.LastSuccess = &enYeni, &enYeni
 	}
@@ -621,8 +651,10 @@ func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
 }
 
 type bulguSatir struct {
-	ID          int64   `json:"id"`
-	DomainID    int64   `json:"domain_id"`
+	ID       int64 `json:"id"`
+	DomainID int64 `json:"domain_id"`
+	// EkAlanID >0: bulgu bir ek alan adınındır; AlanAdi ek alanın kendi adıdır.
+	EkAlanID    int64   `json:"ek_alan_id,omitempty"`
 	AlanAdi     string  `json:"alan_adi"`
 	AppType     string  `json:"app_type"`
 	PackageName string  `json:"package_name"`
@@ -681,17 +713,30 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 			args = append(args, n)
 		}
 	}
+	// ek_alan_id — ek alana ÖZEL açık sayfası: >0 yalnız o ek alan, 0 yalnız ana alan
+	// adı satırları. Parametre yoksa (eski istemci) süzgeç yok. Kapsam yukarıda (bayi
+	// yabancı ek alan id'siyle de boş liste alır).
+	if ek := q.Get("ek_alan_id"); ek != "" {
+		if n, e := strconv.ParseInt(ek, 10, 64); e == nil && n > 0 {
+			where += " AND f.ek_alan_id=?"
+			args = append(args, n)
+		} else if e == nil && n == 0 {
+			where += " AND f.ek_alan_id IS NULL"
+		} else {
+			where += " AND 1=0"
+		}
+	}
 	if arama != "" {
-		// Domain adı / paket / CVE / başlık üzerinde arama. LIKE '%…%' full
-		// scan; küçük veri seti için sorun değil. Filo büyürse FTS düşünülür.
-		where += " AND (f.package_name LIKE ? OR f.cve_id LIKE ? OR f.title LIKE ? OR d.alan_adi LIKE ?)"
+		// Domain adı (ana ya da ek alan) / paket / CVE / başlık üzerinde arama. LIKE '%…%'
+		// full scan; küçük veri seti için sorun değil. Filo büyürse FTS düşünülür.
+		where += " AND (f.package_name LIKE ? OR f.cve_id LIKE ? OR f.title LIKE ? OR d.alan_adi LIKE ? OR e.alan_adi LIKE ?)"
 		p := "%" + arama + "%"
-		args = append(args, p, p, p, p)
+		args = append(args, p, p, p, p, p)
 	}
 
 	// 1) Toplam sayı
 	var toplam int
-	sayiSorgu := `SELECT COUNT(*) FROM cp_websec_findings f LEFT JOIN domains d ON d.id=f.domain_id WHERE 1=1 AND d.id IS NOT NULL` + where
+	sayiSorgu := `SELECT COUNT(*) FROM cp_websec_findings f LEFT JOIN domains d ON d.id=f.domain_id LEFT JOIN ek_alan_adlari e ON e.id=f.ek_alan_id WHERE 1=1 AND d.id IS NOT NULL` + where
 	if err := h.DB.QueryRow(sayiSorgu, args...).Scan(&toplam); err != nil { //nolint:gosec // G701: where = kapsam.kosul + SABİT süzgeç parçaları; tüm değerler args ile ? bağlanır.
 		k.hata(w, err)
 		return
@@ -700,12 +745,13 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	// 2) Sayfa verisi
 	offset := (sayfa - 1) * boyut
 	//nolint:gosec // G202: where = kapsam.kosul + SABİT süzgeç parçaları; tüm değerler args ile ? bağlanır.
-	listeSorgu := `SELECT f.id, f.domain_id, COALESCE(d.alan_adi,''), f.app_type,
+	listeSorgu := `SELECT f.id, f.domain_id, COALESCE(f.ek_alan_id,0), COALESCE(e.alan_adi, d.alan_adi, ''), f.app_type,
 	                 f.package_name, f.installed_version, f.cve_id,
 	                 f.severity, IFNULL(f.cvss,0), COALESCE(f.title,''),
 	                 COALESCE(f.fixed_in,''), f.source, f.last_seen
 	          FROM cp_websec_findings f
 	          LEFT JOIN domains d ON d.id=f.domain_id
+	          LEFT JOIN ek_alan_adlari e ON e.id=f.ek_alan_id
 	          WHERE 1=1 AND d.id IS NOT NULL` + where +
 		` ORDER BY FIELD(f.severity,'critical','high','medium','low','') , f.last_seen DESC
 	     LIMIT ? OFFSET ?`
@@ -722,7 +768,7 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b bulguSatir
 		var lastSeen sql.NullString
-		if err := rows.Scan(&b.ID, &b.DomainID, &b.AlanAdi, &b.AppType,
+		if err := rows.Scan(&b.ID, &b.DomainID, &b.EkAlanID, &b.AlanAdi, &b.AppType,
 			&b.PackageName, &b.Version, &b.CVE, &b.Severity, &b.CVSS,
 			&b.Title, &b.FixedIn, &b.Source, &lastSeen); err != nil {
 			continue
@@ -735,21 +781,38 @@ func (h *Handler) Findings(w http.ResponseWriter, r *http.Request) {
 	jsonYaz(w, 200, bulguYanit{Toplam: toplam, Sayfa: sayfa, SayfaBoyut: boyut, Items: items})
 }
 
-// Rescan — POST /websec/rescan[?domain_id=]. Tarama başlatılmaz, kuyruğa yazılır
-// (kuyruk.go) ve 202 döner; meşgulken 409 yok, istek sıraya girer.
-// Kök: domain_id verilirse yalnız o domain, yoksa tam tarama (yanıt biçimi aynı).
-// Bayi: bkz. bayiRescan.
+// Rescan — POST /websec/rescan[?domain_id=|?ek_alan_id=]. Tarama başlatılmaz, kuyruğa
+// yazılır (kuyruk.go) ve 202 döner; meşgulken 409 yok, istek sıraya girer.
+// Kök: domain_id verilirse yalnız o domainin ANA docroot'u, ek_alan_id verilirse yalnız
+// o ek alan adı (ek alan satırındaki Tara), ikisi de yoksa tam tarama (ana + tüm ek
+// alanlar; yanıt biçimi aynı). Bayi: bkz. bayiRescan.
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("domain_id")
+	ekq := r.URL.Query().Get("ek_alan_id")
 	if k := kapsamAl(r); k.bayi {
-		h.bayiRescan(w, r, k, q)
+		h.bayiRescan(w, r, k, q, ekq)
 		return
 	}
-	var domainID int64
+	var domainID, ekID int64
 	if q != "" {
 		if v, e := strconv.ParseInt(q, 10, 64); e == nil && v > 0 {
 			domainID = v
 		}
+	}
+	if ekq != "" {
+		if v, e := strconv.ParseInt(ekq, 10, 64); e == nil && v > 0 {
+			ekID = v
+		}
+	}
+	if ekID > 0 {
+		anahtar := -ekID
+		if zatenSiradaMi(anahtar) {
+			jsonYaz(w, 202, map[string]any{"started": false, "zaten": true, "ek_alan_id": ekID, "at": time.Now().Format(time.RFC3339)})
+			return
+		}
+		kuy.kokEkle([]int64{anahtar})
+		jsonYaz(w, 202, map[string]any{"started": true, "ek_alan_id": ekID, "at": time.Now().Format(time.RFC3339)})
+		return
 	}
 	if domainID > 0 {
 		// Zaten sırada/taranıyor: tekrar tıklama kuyruğu şişirmez.
@@ -766,10 +829,13 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 
 type rescanManyGovde struct {
 	DomainIDs []int64 `json:"domain_ids"`
+	// EkAlanIDs — ek alan adları (ek_alan_adlari.id); domain_ids ile birlikte tek listede
+	// sınırlanır (en çok 200 hedef).
+	EkAlanIDs []int64 `json:"ek_alan_ids"`
 }
 
-// RescanMany — birden çok domain'i tek çağrıda kuyruğa yaz. Frontend'de "seçili
-// satırları tara" akışını karşılar. Boş liste → 400.
+// RescanMany — birden çok hedefi (domain ve/veya ek alan) tek çağrıda kuyruğa yaz.
+// Frontend'de "seçili satırları tara" akışını karşılar. Boş liste → 400.
 // Bayi: listede TEK yabancı/olmayan id varsa TAMAMI 404, hiçbiri kuyruğa girmez.
 func (h *Handler) RescanMany(w http.ResponseWriter, r *http.Request) {
 	var g rescanManyGovde
@@ -792,45 +858,104 @@ func (h *Handler) RescanMany(w http.ResponseWriter, r *http.Request) {
 		set[id] = struct{}{}
 		temiz = append(temiz, id)
 	}
-	if len(temiz) == 0 {
+	var ekTemiz []int64
+	for _, id := range g.EkAlanIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, dup := set[-id]; dup {
+			continue
+		}
+		set[-id] = struct{}{}
+		ekTemiz = append(ekTemiz, id)
+	}
+	if len(temiz)+len(ekTemiz) == 0 {
 		hataMesaji(w, 400, "domain_ids boş")
 		return
 	}
 	// Üst sınır — istismar önlemi
-	if len(temiz) > 200 {
+	if len(temiz)+len(ekTemiz) > 200 {
 		hataMesaji(w, 413, "tek seferde en fazla 200 domain taranabilir")
 		return
 	}
+	anahtarlar := append([]int64(nil), temiz...)
+	for _, id := range ekTemiz {
+		anahtarlar = append(anahtarlar, -id)
+	}
 	if k := kapsamAl(r); k.bayi {
 		kosul, args := k.kosul()
-		sArgs := make([]any, 0, len(temiz)+len(args))
-		for _, id := range temiz {
-			sArgs = append(sArgs, id)
+		if len(temiz) > 0 {
+			sArgs := make([]any, 0, len(temiz)+len(args))
+			for _, id := range temiz {
+				sArgs = append(sArgs, id)
+			}
+			sArgs = append(sArgs, args...)
+			var n int
+			//nolint:gosec // G202/G701: yalnız "?" yer tutucular + kapsam.kosul; değerler args ile bağlanır.
+			if err := h.DB.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM domains d WHERE d.id IN (`+yerTutucu(len(temiz))+`)`+kosul, sArgs...).Scan(&n); err != nil {
+				k.hata(w, err)
+				return
+			}
+			if n != len(temiz) {
+				hataMesaji(w, 404, "domain bulunamadı")
+				return
+			}
 		}
-		sArgs = append(sArgs, args...)
-		var n int
-		//nolint:gosec // G202/G701: yalnız "?" yer tutucular + kapsam.kosul; değerler args ile bağlanır.
-		if err := h.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM domains d WHERE d.id IN (`+yerTutucu(len(temiz))+`)`+kosul, sArgs...).Scan(&n); err != nil {
-			k.hata(w, err)
-			return
+		if len(ekTemiz) > 0 {
+			sArgs := make([]any, 0, len(ekTemiz)+len(args))
+			for _, id := range ekTemiz {
+				sArgs = append(sArgs, id)
+			}
+			sArgs = append(sArgs, args...)
+			var n int
+			//nolint:gosec // G202/G701: yalnız "?" yer tutucular + kapsam.kosul; değerler args ile bağlanır.
+			if err := h.DB.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM ek_alan_adlari e JOIN domains d ON d.id = e.domain_id WHERE e.id IN (`+yerTutucu(len(ekTemiz))+`)`+kosul, sArgs...).Scan(&n); err != nil {
+				k.hata(w, err)
+				return
+			}
+			if n != len(ekTemiz) {
+				hataMesaji(w, 404, "domain bulunamadı")
+				return
+			}
 		}
-		if n != len(temiz) {
+		h.bayiKuyruga(w, r, k, anahtarlar, false, 0, fmt.Sprintf("%d domain", len(anahtarlar)))
+		return
+	}
+	kuy.kokEkle(anahtarlar)
+	jsonYaz(w, 202, map[string]any{"started": true, "count": len(anahtarlar), "at": time.Now().Format(time.RFC3339)})
+}
+
+// bayiRescan — bayinin tarama isteği. domain_id verilirse YALNIZ kendi domaininin ana
+// docroot'u; ek_alan_id verilirse YALNIZ kendi hesabının o ek alan adı: yabancı, olmayan
+// ve geçersiz id aynı 404'ü alır. Hiçbiri verilmezse ("Domainlerimi Tara") hedef listesi
+// SUNUCUDA kapsamdan çıkarılır (domainler + ek alanlar); hedefi yoksa 202 {"sirada":0}
+// ve hiçbir şey kuyruğa girmez — liste boş gidip tam taramaya (nil = tüm sunucu) dönmez.
+func (h *Handler) bayiRescan(w http.ResponseWriter, r *http.Request, k kapsam, q, ekq string) {
+	if ekq != "" {
+		id, err := strconv.ParseInt(ekq, 10, 64)
+		if err != nil || id <= 0 {
 			hataMesaji(w, 404, "domain bulunamadı")
 			return
 		}
-		h.bayiKuyruga(w, r, k, temiz, false, 0, fmt.Sprintf("%d domain", len(temiz)))
+		kosul, args := k.kosul()
+		var ad string
+		var domainID int64
+		//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+		err = h.DB.QueryRowContext(r.Context(),
+			`SELECT e.alan_adi, d.id FROM ek_alan_adlari e JOIN domains d ON d.id = e.domain_id WHERE e.id=?`+kosul,
+			append([]any{id}, args...)...).Scan(&ad, &domainID)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			hataMesaji(w, 404, "domain bulunamadı")
+		case err != nil:
+			k.hata(w, err)
+		default:
+			h.bayiKuyruga(w, r, k, []int64{-id}, false, domainID, ad)
+		}
 		return
 	}
-	kuy.kokEkle(temiz)
-	jsonYaz(w, 202, map[string]any{"started": true, "count": len(temiz), "at": time.Now().Format(time.RFC3339)})
-}
-
-// bayiRescan — bayinin tarama isteği. domain_id verilirse YALNIZ kendi domaini:
-// yabancı, olmayan ve geçersiz id aynı 404'ü alır. Verilmezse ("Domainlerimi Tara")
-// domain listesi SUNUCUDA kapsamdan çıkarılır; domaini yoksa 202 {"sirada":0} ve
-// hiçbir şey kuyruğa girmez — liste boş gidip tam taramaya (nil = tüm sunucu) dönmez.
-func (h *Handler) bayiRescan(w http.ResponseWriter, r *http.Request, k kapsam, q string) {
 	if q != "" {
 		id, err := strconv.ParseInt(q, 10, 64)
 		if err != nil || id <= 0 {
@@ -864,13 +989,19 @@ func (h *Handler) bayiRescan(w http.ResponseWriter, r *http.Request, k kapsam, q
 	h.bayiKuyruga(w, r, k, ids, true, 0, fmt.Sprintf("%d domain", len(ids)))
 }
 
-// bayiDomainleri — "Domainlerimi Tara" adayları: bayinin domainleri, en uzun süredir
-// taranmayan önce (kuyruk payı listeyi keserse sonraki basışta kalanlar gelir).
+// bayiDomainleri — "Domainlerimi Tara" adayları (hedef anahtarları): bayinin domainleri
+// ve ek alan adları, en uzun süredir taranmayan önce (kuyruk payı listeyi keserse sonraki
+// basışta kalanlar gelir).
 func (h *Handler) bayiDomainleri(ctx context.Context, k kapsam) ([]int64, error) {
 	kosul, args := k.kosul()
+	type aday struct {
+		anahtar int64
+		son     sql.NullString
+	}
+	var adaylar []aday
 	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
 	rows, err := h.DB.QueryContext(ctx, `
-		SELECT d.id FROM domains d
+		SELECT d.id, DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s') FROM domains d
 		  LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id
 		 WHERE 1=1`+kosul+`
 		 ORDER BY t.son_tarama IS NOT NULL, t.son_tarama, d.id`, args...)
@@ -878,15 +1009,59 @@ func (h *Handler) bayiDomainleri(ctx context.Context, k kapsam) ([]int64, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []int64
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var a aday
+		if err := rows.Scan(&a.anahtar, &a.son); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		adaylar = append(adaylar, a)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	//nolint:gosec // G202/G701: kosul kapsam.kosul'dan (sabit parça + "?"); değerler args ile bağlanır.
+	ekRows, err := h.DB.QueryContext(ctx, `
+		SELECT -e.id, DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s')
+		  FROM ek_alan_adlari e
+		  JOIN domains d ON d.id = e.domain_id
+		  LEFT JOIN cp_websec_ek_tarama t ON t.ek_alan_id = e.id
+		 WHERE 1=1`+kosul+`
+		 ORDER BY t.son_tarama IS NOT NULL, t.son_tarama, e.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer ekRows.Close()
+	ekVar := false
+	for ekRows.Next() {
+		var a aday
+		if err := ekRows.Scan(&a.anahtar, &a.son); err != nil {
+			return nil, err
+		}
+		adaylar = append(adaylar, a)
+		ekVar = true
+	}
+	if err := ekRows.Err(); err != nil {
+		return nil, err
+	}
+	if ekVar {
+		// Sabit biçim (YYYY-AA-GG SS:DD:ss): metin karşılaştırması zaman sırasıdır; hiç
+		// taranmamış (NULL) önce.
+		sort.SliceStable(adaylar, func(i, j int) bool {
+			a, b := adaylar[i], adaylar[j]
+			if a.son.Valid != b.son.Valid {
+				return !a.son.Valid
+			}
+			return a.son.Valid && a.son.String < b.son.String
+		})
+	}
+	ids := make([]int64, 0, len(adaylar))
+	for _, a := range adaylar {
+		ids = append(ids, a.anahtar)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return ids, nil
 }
 
 // bayiKuyruga — sahipliği DOĞRULANMIŞ domainleri bayi sınırlarıyla kuyruğa yazar ve

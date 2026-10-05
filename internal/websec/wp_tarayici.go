@@ -19,8 +19,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,6 +27,7 @@ import (
 
 type WPKurulum struct {
 	DomainID        int64
+	EkAlanID        int64 // 0 = ana alan adı, >0 = ek alan adı (ek_alan_adlari.id)
 	SistemKullanici string
 	AlanAdi         string
 	Yol             string
@@ -43,19 +42,16 @@ type WPPaket struct {
 	Aktif bool
 }
 
-// wpKurulumBul — panel'deki bir tenant için wp-core kurulumlarını bul.
-// wp-cli `wp find` kullanmıyor (root olabilir); onun yerine tenant'ın
-// public_html'inde .wp-config.php arıyoruz.
+// wpKurulumBul — bir hedefin (ana ya da ek alan docroot'u) wp-core kurulumunu bul.
+// wp-cli `wp find` kullanmıyor (root olabilir); onun yerine docroot'ta wp-config.php
+// arıyoruz. Dosya varlığı os.Root ile denetlenir: sembolik bağ takip edilmez.
 //
 // Alternatif: `wp cli find --path=/home/<user>` — daha kesin ama daha yavaş.
-// Şimdilik "sadece public_html kökündeki WP" ele alıyoruz (subdirectory install
+// Şimdilik "sadece docroot kökündeki WP" ele alıyoruz (subdirectory install
 // kapsam dışı — sonraki iterasyonda genişletiriz).
-func wpKurulumBul(ctx context.Context, sk, alanAdi string) []string {
-	// Panel kanonik yol: /home/<sk>/public_html
-	kok := filepath.Join("/home", sk, "public_html")
-	// wp-config.php varlığı = WP kurulumu (kaba ama pratik).
-	if _, err := exec.CommandContext(ctx, "test", "-f", filepath.Join(kok, "wp-config.php")).Output(); err == nil {
-		return []string{kok}
+func wpKurulumBul(_ context.Context, h hedef) []string {
+	if kokDosyaVarMi(h.okumaKok(), "wp-config.php") {
+		return []string{h.Docroot}
 	}
 	return nil
 }
@@ -114,51 +110,29 @@ func wpKurulumIncele(ctx context.Context, sk, path string) (*WPKurulum, error) {
 // WPKurulumlariBul — domainleri gezip WP kurulumlarını topla (ids boş = tüm
 // domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
 func WPKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]WPKurulum, error) {
-	sorgu, args := kesifSorgusu(ids)
-	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
+	hedefler, err := tarananHedefler(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var domainler []struct {
-		id int64
-		sk string
-		ad string
-	}
-	for rows.Next() {
-		var r struct {
-			id int64
-			sk string
-			ad string
-		}
-		if err := rows.Scan(&r.id, &r.sk, &r.ad); err != nil {
-			continue
-		}
-		domainler = append(domainler, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
 	var out []WPKurulum
-	for _, d := range domainler {
+	for _, d := range hedefler {
 		select {
 		case <-ctx.Done():
 			return out, ctx.Err()
 		default:
 		}
-		yollar := wpKurulumBul(ctx, d.sk, d.ad)
+		yollar := wpKurulumBul(ctx, d)
 		for _, yol := range yollar {
 			// wp-cli çağrıları için tenant başına 30 sn üst limit
 			ktx, iptal := context.WithTimeout(ctx, 30*time.Second)
-			k, err := wpKurulumIncele(ktx, d.sk, yol)
+			k, err := wpKurulumIncele(ktx, d.SK, yol)
 			iptal()
 			if err != nil {
 				continue
 			}
-			k.DomainID = d.id
-			k.AlanAdi = d.ad
+			k.DomainID = d.DomainID
+			k.EkAlanID = d.EkAlanID
+			k.AlanAdi = d.AlanAdi
 			out = append(out, *k)
 		}
 	}
@@ -179,15 +153,16 @@ func paketKarsilastirveKaydet(ctx context.Context, db *sql.DB, k *WPKurulum, tur
 		_, err := db.ExecContext(ctx,
 			`INSERT INTO cp_websec_findings
 			   (domain_id, app_type, install_path, package_name, installed_version,
-			    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen)
-			 VALUES (?, 'wordpress', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+			    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen, ek_alan_id)
+			 VALUES (?, 'wordpress', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULLIF(?, 0))
 			 ON DUPLICATE KEY UPDATE
+			   ek_alan_id=VALUES(ek_alan_id),
 			   installed_version=VALUES(installed_version),
 			   severity=VALUES(severity), cvss=VALUES(cvss),
 			   title=VALUES(title), fixed_in=VALUES(fixed_in),
 			   last_seen=NOW()`,
 			k.DomainID, k.Yol+"#"+tur+":"+paket.Slug, paket.Slug, paket.Surum,
-			z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source,
+			z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source, k.EkAlanID,
 		)
 		if err == nil {
 			n++

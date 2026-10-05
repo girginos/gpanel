@@ -16,6 +16,11 @@ package websec
 // "Domainlerimi Tara" (domain_id'siz) bayi başına bayiTumuAralik'ta bir. Aşımda
 // 429 + "N dk sonra tekrar deneyin"; süre yalnız bayinin kendi isteklerinden hesaplanır.
 //
+// Kuyruk/taranan-küme anahtarı bir HEDEF ANAHTARIdır (ekalan.go): >0 ana domain id,
+// <0 ek alan adı (-ek_alan_adlari.id). Ek alan satırının Tara'sı yalnız o ek alanı,
+// ana domain Tara'sı yalnız ana docroot'u kuyruğa alır; tekrar tıklama kapısı, domain
+// soğuması (15 dk), bayi payı (50) ve parti boyutu hedef başına aynen uygulanır.
+//
 // 🔴 TaraDomains'te boş/nil liste TÜM SUNUCU demektir. Bayi isteği tam tarama
 // bayrağını ASLA koyamaz (bayiEkle yalnız domain ekler) ve kısmi iş ASLA boş listeyle
 // koşmaz (isCalistir).
@@ -109,7 +114,7 @@ func (k *kuyruk) ekleKilitli(id, rid int64) {
 func (k *kuyruk) kokEkle(ids []int64) {
 	k.mu.Lock()
 	for _, id := range ids {
-		if id > 0 {
+		if id != 0 { // hedef anahtarı: >0 ana domain, <0 ek alan (ekalan.go)
 			k.ekleKilitli(id, 0)
 		}
 	}

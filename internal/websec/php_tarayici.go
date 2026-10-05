@@ -15,13 +15,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"time"
 )
 
 type phpKurulum struct {
 	DomainID int64
+	EkAlanID int64
 	AlanAdi  string
 	Yol      string
 	Paketler []phpPaket
@@ -46,34 +46,46 @@ func guvenliKullanici(sk string) bool {
 	return true
 }
 
-// phpBul — composer.lock arar. Sırayla:
+// phpBul — composer.lock arar. Ana alan adı için sırayla:
 //  1. /home/<sk>/public_html/composer.lock
 //  2. /home/<sk>/composer.lock             (Laravel gibi framework kalıbı)
-func phpBul(_ context.Context, sk, _ string) *phpKurulum {
+//
+// Ek alan adı için: docroot/composer.lock, sonra alan dizini (docroot'un bir üstü,
+// /home/<sk>/ek-alanlar/<alan>/composer.lock). Ek alan ASLA /home/<sk>/composer.lock'a
+// bakmaz: o ana alan adınındır (çift sayım).
+func phpBul(_ context.Context, h hedef) *phpKurulum {
 	// Güvenlik (defense-in-depth): sk = sistem_kullanici (DB) yol içine gömülüyor
 	// ("/home/<sk>/..."). gPanel sistem kullanıcıları harf/rakam/altçizgi/tire —
 	// '/', '.', '..' yasak → CWE-22 FP savunma katmanı.
-	if !guvenliKullanici(sk) {
+	if !guvenliKullanici(h.SK) {
 		return nil
 	}
-	adaylar := []string{
-		filepath.Join("/home", sk, "public_html", "composer.lock"),
-		filepath.Join("/home", sk, "composer.lock"),
+	type aday struct{ kok, yol string }
+	var adaylar []aday
+	if h.EkAlanID > 0 {
+		adaylar = append(adaylar, aday{h.okumaKok(), h.Docroot})
+		// Alan dizini: gerçek docroot'un üstü, ama yalnız hâlâ ek-alanlar/<alan> ise
+		// (docroot başka yere bağlıysa ekDocrootDogrula zaten reddetmiştir).
+		adaylar = append(adaylar, aday{filepath.Dir(h.okumaKok()), filepath.Dir(h.Docroot)})
+	} else {
+		adaylar = append(adaylar,
+			aday{h.Docroot, h.Docroot},
+			aday{filepath.Join(evKoku, h.SK), filepath.Join(evKoku, h.SK)})
 	}
-	for _, p := range adaylar {
-		if _, err := os.Stat(p); err != nil {
+	for _, a := range adaylar {
+		if !kokDosyaVarMi(a.kok, "composer.lock") {
 			continue
 		}
-		pk := composerLockOku(p)
+		pk := composerLockOku(a.kok, "composer.lock")
 		if len(pk) > 0 {
-			return &phpKurulum{Yol: filepath.Dir(p), Paketler: pk}
+			return &phpKurulum{Yol: a.yol, Paketler: pk}
 		}
 	}
 	return nil
 }
 
-func composerLockOku(p string) []phpPaket {
-	raw, err := os.ReadFile(p)
+func composerLockOku(kok, ad string) []phpPaket {
+	raw, err := kokDosyaOku(kok, ad)
 	if err != nil {
 		return nil
 	}
@@ -108,26 +120,20 @@ func composerLockOku(p string) []phpPaket {
 // PhpKurulumlariBul — domainlerdeki PHP Composer uygulamalarını topla (ids boş =
 // tüm domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
 func PhpKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]phpKurulum, error) {
-	sorgu, args := kesifSorgusu(ids)
-	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
+	hedefler, err := tarananHedefler(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []phpKurulum
-	for rows.Next() {
-		var id int64
-		var sk, ad string
-		if err := rows.Scan(&id, &sk, &ad); err != nil {
-			continue
-		}
-		if k := phpBul(ctx, sk, ad); k != nil {
-			k.DomainID = id
-			k.AlanAdi = ad
+	for _, h := range hedefler {
+		if k := phpBul(ctx, h); k != nil {
+			k.DomainID = h.DomainID
+			k.EkAlanID = h.EkAlanID
+			k.AlanAdi = h.AlanAdi
 			out = append(out, *k)
 		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // phpTara — Composer kurulumları için OSV sorgusu + kayıt.
@@ -151,15 +157,16 @@ func phpTara(ctx context.Context, db *sql.DB, k *phpKurulum) (int, bool) {
 			if _, e := db.ExecContext(ctx,
 				`INSERT INTO cp_websec_findings
 				   (domain_id, app_type, install_path, package_name, installed_version,
-				    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen)
-				 VALUES (?, 'php-composer', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+				    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen, ek_alan_id)
+				 VALUES (?, 'php-composer', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULLIF(?, 0))
 				 ON DUPLICATE KEY UPDATE
+				   ek_alan_id=VALUES(ek_alan_id),
 				   installed_version=VALUES(installed_version),
 				   severity=VALUES(severity), cvss=VALUES(cvss),
 				   title=VALUES(title), fixed_in=VALUES(fixed_in),
 				   last_seen=NOW()`,
 				k.DomainID, k.Yol+"#composer:"+p.Ad, p.Ad, p.Surum,
-				z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source,
+				z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source, k.EkAlanID,
 			); e == nil {
 				n++
 			}

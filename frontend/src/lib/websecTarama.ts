@@ -14,6 +14,7 @@ export function zamanYaz(s: string | null | undefined): string {
 
 export type DomainSatir = {
   domain_id: number
+  ek_alan_id?: number
   durum: string
   domain_son_tarama?: string
   son_sonuc?: { uygulama_sayisi: number; bulgu_sayisi: number }
@@ -22,6 +23,12 @@ export type DomainSatir = {
 // Bekleyen: istek sonrası sonucu beklenen domain. onceki = istek anındaki domain
 // son tarama damgası; aktifGoruldu = satır bir kez sırada/taranıyor göründü.
 export type Bekleyen = { onceki: string; aktifGoruldu: boolean; t0: number }
+
+// Hedef anahtarı — sunucudaki kuyruk anahtarıyla AYNI sözleşme (ekalan.go): >0 ana alan
+// adı (domain_id), <0 ek alan adı (-ek_alan_id). Yoklama/bekleyen haritaları bununla
+// anahtarlanır: aynı hesabın ana alan adı ile ek alanları birbirine karışmaz.
+export const satirAnahtari = (s: { domain_id: number; ek_alan_id?: number }): number =>
+  s.ek_alan_id ? -s.ek_alan_id : s.domain_id
 
 export const aktifDurum = (d: string) => d === 'taraniyor' || d === 'sirada'
 
@@ -48,8 +55,9 @@ export function degerlendir(bekleyen: Map<number, Bekleyen>, satirlar: DomainSat
   const sonuc = new Map<number, DomainSatir>()
   const aktif = new Map<number, boolean>()
   for (const s of satirlar) {
-    if (!sonuc.has(s.domain_id)) sonuc.set(s.domain_id, s)
-    if (aktifDurum(s.durum)) aktif.set(s.domain_id, true)
+    const a = satirAnahtari(s)
+    if (!sonuc.has(a)) sonuc.set(a, s)
+    if (aktifDurum(s.durum)) aktif.set(a, true)
   }
   for (const [id, b] of bekleyen) {
     const s = sonuc.get(id)

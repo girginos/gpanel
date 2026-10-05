@@ -15,8 +15,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -24,6 +22,7 @@ import (
 
 type nodejsKurulum struct {
 	DomainID int64
+	EkAlanID int64
 	AlanAdi  string
 	Yol      string
 	Paketler []nodejsPaket
@@ -42,44 +41,39 @@ type nodejsPaket struct {
 //  2. yarn.lock                     — Yarn 1.x + Berry (klasik format)
 //  3. pnpm-lock.yaml                — pnpm workspace/monorepo yaygın
 //  4. package.json dependencies     — hiçbir lock yoksa fallback (range içerir)
-func nodejsBul(ctx context.Context, sk, alanAdi string) *nodejsKurulum {
-	kok := filepath.Join("/home", sk, "public_html")
-	pj := filepath.Join(kok, "package.json")
-	if _, err := os.Stat(pj); err != nil {
+func nodejsBul(_ context.Context, h hedef) *nodejsKurulum {
+	kok := h.okumaKok()
+	if !kokDosyaVarMi(kok, "package.json") {
 		return nil
 	}
 
 	var paketler []nodejsPaket
 
 	// 1) npm
-	if _, e := os.Stat(filepath.Join(kok, "package-lock.json")); e == nil {
-		paketler = npmLockOku(filepath.Join(kok, "package-lock.json"))
+	if kokDosyaVarMi(kok, "package-lock.json") {
+		paketler = npmLockOku(kok, "package-lock.json")
 	}
 	// 2) yarn
-	if len(paketler) == 0 {
-		if _, e := os.Stat(filepath.Join(kok, "yarn.lock")); e == nil {
-			paketler = yarnLockOku(filepath.Join(kok, "yarn.lock"))
-		}
+	if len(paketler) == 0 && kokDosyaVarMi(kok, "yarn.lock") {
+		paketler = yarnLockOku(kok, "yarn.lock")
 	}
 	// 3) pnpm
-	if len(paketler) == 0 {
-		if _, e := os.Stat(filepath.Join(kok, "pnpm-lock.yaml")); e == nil {
-			paketler = pnpmLockOku(filepath.Join(kok, "pnpm-lock.yaml"))
-		}
+	if len(paketler) == 0 && kokDosyaVarMi(kok, "pnpm-lock.yaml") {
+		paketler = pnpmLockOku(kok, "pnpm-lock.yaml")
 	}
 	// 4) Fallback — package.json (range içerir; ilk semver'a düşer)
 	if len(paketler) == 0 {
-		paketler = packageJSONDependenciesOku(pj)
+		paketler = packageJSONDependenciesOku(kok, "package.json")
 	}
 	if len(paketler) == 0 {
 		return nil
 	}
-	return &nodejsKurulum{Yol: kok, Paketler: paketler}
+	return &nodejsKurulum{Yol: h.Docroot, Paketler: paketler}
 }
 
 // npmLockOku — npm package-lock.json parse eder.
-func npmLockOku(pl string) []nodejsPaket {
-	raw, err := os.ReadFile(pl)
+func npmLockOku(kok, ad string) []nodejsPaket {
+	raw, err := kokDosyaOku(kok, ad)
 	if err != nil {
 		return nil
 	}
@@ -150,8 +144,8 @@ func npmLockOku(pl string) []nodejsPaket {
 // 🔴 Berry (Yarn 2+) __metadata bloğu var, atlanmalı. dev vs prod ayrımı bu
 // dosyadan çıkarılamaz — hepsi dahil (feed'in yanlış-pozitif oranı OSV'de
 // düşük olduğu için pratik sorun değil).
-func yarnLockOku(p string) []nodejsPaket {
-	raw, err := os.ReadFile(p)
+func yarnLockOku(kok, ad string) []nodejsPaket {
+	raw, err := kokDosyaOku(kok, ad)
 	if err != nil {
 		return nil
 	}
@@ -264,8 +258,8 @@ func yarnSpecAd(spec string) string {
 //
 // 🔴 devDependencies ile prodDeps arasında ayırım yapmaz — birden çok
 // versiyondaki aynı paket set halinde alınır (dedup).
-func pnpmLockOku(p string) []nodejsPaket {
-	raw, err := os.ReadFile(p)
+func pnpmLockOku(kok, ad string) []nodejsPaket {
+	raw, err := kokDosyaOku(kok, ad)
 	if err != nil {
 		return nil
 	}
@@ -350,8 +344,8 @@ func pnpmAnahtarAyir(k string) (string, string) {
 // önce sayı, sonra iki opsiyonel `.NUMBER` bloğu, opsiyonel `-pre` eki.
 // Bu, "^1.2.3", "~1.2.3", ">=1.2 <2.0" gibi girdilerin YALNIZ ilk sürümünü
 // alır ve "npm:@scope/foo@1.0.0" gibi bozuk speclerde boş döner.
-func packageJSONDependenciesOku(pj string) []nodejsPaket {
-	raw, err := os.ReadFile(pj)
+func packageJSONDependenciesOku(kok, ad string) []nodejsPaket {
+	raw, err := kokDosyaOku(kok, ad)
 	if err != nil {
 		return nil
 	}
@@ -388,26 +382,20 @@ func semverIlk(s string) string {
 // NodejsKurulumlariBul — domainlerdeki Node.js uygulamalarını topla (ids boş =
 // tüm domainler; dolu = yalnız o domainler, bkz. kesifSorgusu).
 func NodejsKurulumlariBul(ctx context.Context, db *sql.DB, ids []int64) ([]nodejsKurulum, error) {
-	sorgu, args := kesifSorgusu(ids)
-	rows, err := db.QueryContext(ctx, sorgu, args...) //nolint:gosec // G701: sorgu SABİT parçalar + yalnız "?" (kesifSorgusu); id'ler args ile bağlanır.
+	hedefler, err := tarananHedefler(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []nodejsKurulum
-	for rows.Next() {
-		var id int64
-		var sk, ad string
-		if err := rows.Scan(&id, &sk, &ad); err != nil {
-			continue
-		}
-		if k := nodejsBul(ctx, sk, ad); k != nil {
-			k.DomainID = id
-			k.AlanAdi = ad
+	for _, h := range hedefler {
+		if k := nodejsBul(ctx, h); k != nil {
+			k.DomainID = h.DomainID
+			k.EkAlanID = h.EkAlanID
+			k.AlanAdi = h.AlanAdi
 			out = append(out, *k)
 		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // nodejsTara — Node kurulumları için OSV sorgusu + kayıt.
@@ -436,15 +424,16 @@ func nodejsTara(ctx context.Context, db *sql.DB, k *nodejsKurulum) (int, bool) {
 			if _, e := db.ExecContext(ctx,
 				`INSERT INTO cp_websec_findings
 				   (domain_id, app_type, install_path, package_name, installed_version,
-				    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen)
-				 VALUES (?, 'nodejs', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+				    cve_id, severity, cvss, title, fixed_in, source, first_seen, last_seen, ek_alan_id)
+				 VALUES (?, 'nodejs', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NULLIF(?, 0))
 				 ON DUPLICATE KEY UPDATE
+				   ek_alan_id=VALUES(ek_alan_id),
 				   installed_version=VALUES(installed_version),
 				   severity=VALUES(severity), cvss=VALUES(cvss),
 				   title=VALUES(title), fixed_in=VALUES(fixed_in),
 				   last_seen=NOW()`,
 				k.DomainID, k.Yol+"#npm:"+p.Ad, p.Ad, p.Surum,
-				z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source,
+				z.CVE, z.Severity, sqlNullFloat(z.CVSS), z.Title, z.FixedIn, z.Source, k.EkAlanID,
 			); e == nil {
 				n++
 			}

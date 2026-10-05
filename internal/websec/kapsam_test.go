@@ -103,8 +103,8 @@ func TestFindingsBayiIkiSorguKapsamli(t *testing.T) {
 		t.Fatalf("200 beklenirdi: %d %s", rr.Code, rr.Body)
 	}
 	for _, parca := range []string{
-		"SELECT COUNT(*) FROM cp_websec_findings f LEFT JOIN domains d ON d.id=f.domain_id WHERE 1=1 AND d.id IS NOT NULL AND d.reseller_id=? AND f.severity=?",
-		"AND d.id IS NOT NULL AND d.reseller_id=? AND f.severity=? AND f.domain_id=? AND (f.package_name LIKE ? OR f.cve_id LIKE ? OR f.title LIKE ? OR d.alan_adi LIKE ?) ORDER BY FIELD",
+		"SELECT COUNT(*) FROM cp_websec_findings f LEFT JOIN domains d ON d.id=f.domain_id LEFT JOIN ek_alan_adlari e ON e.id=f.ek_alan_id WHERE 1=1 AND d.id IS NOT NULL AND d.reseller_id=? AND f.severity=?",
+		"AND d.id IS NOT NULL AND d.reseller_id=? AND f.severity=? AND f.domain_id=? AND (f.package_name LIKE ? OR f.cve_id LIKE ? OR f.title LIKE ? OR d.alan_adi LIKE ? OR e.alan_adi LIKE ?) ORDER BY FIELD",
 	} {
 		if !sd.Sorgulandi(parca) {
 			t.Fatalf("sorgu kapsam süzgeci taşımalı: %q", parca)
@@ -236,7 +236,7 @@ func TestTaraniyorDurumuYalnizKendiDomaini(t *testing.T) {
 		taramaKur(t, c.kosu, c.taranan...)
 		kimlikKur(t, bayiJeton)
 		sd, db := sahtedb.Yeni()
-		sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
+		sd.Satirlar("(t.domain_id IS NOT NULL)", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
 		sd.Satirlar("LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id", []any{int64(10), ""})
 		h := &Handler{DB: db}
 

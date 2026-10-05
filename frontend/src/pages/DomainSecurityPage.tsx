@@ -3,7 +3,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -25,6 +25,7 @@ import { TaramaButonu } from '@/components/TaramaButonu'
 type Bulgu = {
   id: number
   domain_id: number
+  ek_alan_id?: number
   alan_adi: string
   app_type: string
   package_name: string
@@ -41,7 +42,7 @@ type Bulgu = {
 type Sayfa = { toplam: number; sayfa: number; sayfa_boyut: number; items: Bulgu[] }
 
 type Uygulama = {
-  domain_id: number; alan_adi: string; app_type: string; install_path: string
+  domain_id: number; ek_alan_id?: number; alan_adi: string; app_type: string; install_path: string
   app_version: string; paket_sayisi: number; bulgu_sayisi: number; son_tarama: string
   durum: string // taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede
 }
@@ -74,6 +75,9 @@ const SEC_EN: Record<string, string> = {
   "Türkçe": "English",
   "paket": "packages",
   "Bu Domaini Tara": "Scan This Domain",
+  "Ek": "Add-on",
+  "Ek alan adı (addon domain)": "Add-on domain",
+  "Bu Ek Alanı Tara": "Scan This Add-on Domain",
   "Filtre:": "Filter:",
   "Hepsi": "All",
   "Kritik {0}": "Critical {0}",
@@ -102,7 +106,12 @@ export default function DomainSecurityPage() {
   useTranslation() // dil re-render aboneligi
   const { id } = useParams<{ id: string }>()
   const domainID = Number(id)
-  const gecerliID = Number.isSafeInteger(domainID) && domainID > 0
+  // ?ek=<ek_alan_id>: ek alan adının sayfası (yoksa ana alan adı). Geçersiz değer
+  // "Domain bulunamadı" görünümüdür; ana sayfa ek alanların bulgularını KARIŞTIRMAZ.
+  const [sp] = useSearchParams()
+  const ekHam = sp.get('ek')
+  const ekID = ekHam === null ? 0 : Number(ekHam)
+  const gecerliID = Number.isSafeInteger(domainID) && domainID > 0 && Number.isSafeInteger(ekID) && ekID >= 0 && (ekHam === null || ekID > 0)
   const [sayfa, setSayfa] = useState<Sayfa>({ toplam: 0, sayfa: 1, sayfa_boyut: 50, items: [] })
   const [uyg, setUyg] = useState<Uygulama[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
@@ -120,7 +129,7 @@ export default function DomainSecurityPage() {
     if (!ilk.current) setYukleniyor(true)
     setHata(null)
     try {
-      const params = new URLSearchParams({ domain_id: String(domainID), page: String(aktifSayfa), page_size: '100' })
+      const params = new URLSearchParams({ domain_id: String(domainID), ek_alan_id: String(ekID), page: String(aktifSayfa), page_size: '100' })
       if (filtre) params.set('severity', filtre)
       const [p, env] = await Promise.all([
         api.get<Sayfa>('/websec/findings?' + params.toString()),
@@ -132,7 +141,7 @@ export default function DomainSecurityPage() {
         sayfa_boyut: p.data.sayfa_boyut ?? 100, items: Array.isArray(p.data.items) ? p.data.items : [],
       })
       // Sunucu ?domain_id= ile süzer; istemci süzgeci süzgeçsiz (eski) yanıtta da doğru kalır.
-      const bunun = (env.data.items ?? []).filter((u) => u.domain_id === domainID)
+      const bunun = (env.data.items ?? []).filter((u) => u.domain_id === domainID && (u.ek_alan_id ?? 0) === ekID)
       setUyg(bunun)
       // Görünen her domain envanterde (uygulaması olmasa da) en az bir satır alır. Satır da
       // bulgu da yoksa domain ya yok ya başkasının — ikisi aynı görünüm.
@@ -144,7 +153,7 @@ export default function DomainSecurityPage() {
       toast.hata(cevir("İşlem başarısız"), m)
     } finally { setYukleniyor(false) }
   }
-  useEffect(() => { if (gecerliID) void yukle() }, [domainID, gecerliID, filtre, aktifSayfa])
+  useEffect(() => { if (gecerliID) void yukle() }, [domainID, ekID, gecerliID, filtre, aktifSayfa])
 
   // Taranıyor ya da sıradaysa canlı tazele
   useEffect(() => {
@@ -158,7 +167,7 @@ export default function DomainSecurityPage() {
   const domainTara = async () => {
     setTaranıyor(true)
     try {
-      const r = await api.post<TaramaYanit>('/websec/rescan?domain_id=' + domainID, {})
+      const r = await api.post<TaramaYanit>(ekID > 0 ? '/websec/rescan?ek_alan_id=' + ekID : '/websec/rescan?domain_id=' + domainID, {})
       const n = r.data?.sirada
       // Bayi: {sirada: n} (yalnız kendi domainleri); kök: {started: true} — sirada yok.
       if (typeof n === 'number') { if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevir("Bu domain tarama sırasında.")) }
@@ -209,7 +218,14 @@ export default function DomainSecurityPage() {
 
       <div className="mt-4 mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{alanAdi}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+            <span className="break-all">{alanAdi}</span>
+            {ekID > 0 && (
+              <Badge color="neutral" variant="soft" className="text-[10px] font-semibold uppercase" title={cevir("Ek alan adı (addon domain)")}>
+                {cevir("Ek")}
+              </Badge>
+            )}
+          </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {uyg.map((u) => (
               <Badge key={u.app_type} color={appRenk(u.app_type)} variant="soft" className="font-normal">
@@ -231,7 +247,7 @@ export default function DomainSecurityPage() {
         <TaramaButonu
           boyut="md"
           durum={taraniyorMu ? 'taraniyor' : siradaMu ? 'sirada' : taranıyor ? 'baslatiliyor' : 'hazir'}
-          etiket={cevir("Bu Domaini Tara")}
+          etiket={cevir(ekID > 0 ? "Bu Ek Alanı Tara" : "Bu Domaini Tara")}
           acikSayisi={acikSayisi}
           onClick={() => { void domainTara() }}
         />
