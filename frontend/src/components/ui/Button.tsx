@@ -61,6 +61,9 @@ export type ButtonGorunum = {
 
 // sm: yoğun yerler (tablo satırı, araç çubuğu). isIcon'da boyutu className verir (size-8 vb.).
 const BOYUT_SM = 'rounded-md px-3 py-1.5 text-xs-plus'
+// md (varsayılan): 14px. Boyut verilmeyen butonlar sayfanın 16px'lik taban yazısını miras alıp
+// fazla iri duruyordu; sm (13px) ile arasındaki ölçekte kalır. isIcon'da metin yok.
+const BOYUT_MD = 'text-sm'
 
 // butonSinifi — Button görünümünün TEK kaynağı. Buton gibi görünmesi gereken
 // <a>/<Link> öğeleri de bunu kullanır: <a className={butonSinifi({ color: 'primary' })}>.
@@ -71,6 +74,7 @@ export function butonSinifi({ color = 'neutral', variant = 'filled', isIcon = fa
     !unstyled && 'btn',
     !unstyled && isIcon && 'shrink-0 p-0',
     !unstyled && !isIcon && boyut === 'sm' && BOYUT_SM,
+    !unstyled && !isIcon && boyut === 'md' && BOYUT_MD,
     !unstyled && (color === 'neutral'
       ? cx(neutralVariants[variant], isGlow && 'dark:shadow-dark-450/5 shadow-lg shadow-gray-200/50')
       : cx(THIS[color], variants[variant], odakHalkasi, isGlow && 'shadow-soft shadow-this/50 dark:shadow-this/50 dark:shadow-lg')),
