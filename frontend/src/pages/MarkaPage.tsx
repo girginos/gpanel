@@ -12,12 +12,19 @@ import { Button, Card } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useToast } from '@/components/Toast'
+import { kaydet, oku } from '@/lib/kalici'
 import { MarkaFormu, type YonetGorunum } from '@/components/marka/MarkaFormu'
 import { BayiMarkalari } from '@/components/marka/BayiMarkalari'
 import { OzelAdres } from '@/components/marka/OzelAdres'
 import { useMarkaCeviri } from '@/components/marka/ceviri'
 
 type Sekme = 'marka' | 'adres' | 'bayiler'
+
+// Açık sekme bu tarayıcıda hatırlanır (sayfa yenilenince / başka sayfadan dönünce kaldığın yerden).
+// Kişisel kolaylık; kritik değil. Kayıtlı sekme bu rolde yoksa (ör. bayiye 'bayiler') 'marka'ya düşer.
+const SEKME_ANAHTAR = 'marka.sekme'
+const SEKME_SURE = 30 * 24 * 3600 * 1000
+const SEKMELER: readonly Sekme[] = ['marka', 'adres', 'bayiler']
 
 // Müşteri giriş bağlantısı: özel adres AKTİFse https://<özel-adres>/cp/giris (özel host markayı
 // ?m= olmadan çözer), değilse kısa kodlu bağlantı + özel adres ipucu.
@@ -53,7 +60,10 @@ export default function MarkaPage() {
   const rol = useRol()
   const kok = yoneticiMi(rol)
   const bayi = rol === 'reseller'
-  const [sekme, setSekme] = useState<Sekme>('marka')
+  const [kayitliSekme, setKayitliSekme] = useState<Sekme>(() => {
+    const k = oku<string>(SEKME_ANAHTAR)
+    return SEKMELER.find((x) => x === k) ?? 'marka'
+  })
   const [veri, setVeri] = useState<YonetGorunum | null>(null)
   const [hata, setHata] = useState<string | null>(null)
   const [kapali, setKapali] = useState(false)
@@ -76,6 +86,11 @@ export default function MarkaPage() {
   // Sekme HER ZAMAN görünür: izin yoksa içinde bilgi mesajı çıkar (backend 403 davranışı aynen).
   if (bayi) sekmeler.push({ k: 'adres', ad: 'Özel adres' })
   if (kok) sekmeler.push({ k: 'bayiler', ad: 'Bayi markaları' })
+  const sekme: Sekme = sekmeler.some((x) => x.k === kayitliSekme) ? kayitliSekme : 'marka'
+  const sekmeSec = (k: Sekme) => {
+    setKayitliSekme(k)
+    kaydet(SEKME_ANAHTAR, k, SEKME_SURE)
+  }
 
   return (
     <div>
@@ -94,7 +109,7 @@ export default function MarkaPage() {
           {sekmeler.map((s) => {
             const aktif = sekme === s.k
             return (
-              <button key={s.k} type="button" role="tab" aria-selected={aktif} onClick={() => setSekme(s.k)}
+              <button key={s.k} type="button" role="tab" aria-selected={aktif} onClick={() => sekmeSec(s.k)}
                 className={`-mb-px shrink-0 rounded-t border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 ${aktif
                   ? 'border-brand-500 text-brand-700 dark:text-brand-300'
                   : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
