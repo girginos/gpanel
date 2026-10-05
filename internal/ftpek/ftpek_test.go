@@ -646,3 +646,47 @@ func TestGuncelle_DizinDegistirVeKacis(t *testing.T) {
 		t.Fatal("boş güncelleme kabul edildi")
 	}
 }
+
+// Limit/askı kararı domains satırı kilidi altında verilir: başka bir işlem kilidi
+// tutarken Olustur BEKLER (kilitsiz sayım yarışı mümkün olurdu), bırakınca tamamlanır.
+func TestOlustur_DomainSatiriKilidiniBekler(t *testing.T) {
+	db := fdb(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`SELECT id FROM domains WHERE id=1 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	bitti := make(chan error, 1)
+	go func() { _, e := olustur(t, db, 1, "bekler", "web/bekler"); bitti <- e }()
+	select {
+	case e := <-bitti:
+		_ = tx.Rollback()
+		t.Fatalf("kilit tutulurken Olustur tamamlandı (kilit yok): %v", e)
+	case <-time.After(700 * time.Millisecond):
+	}
+	_ = tx.Rollback()
+	select {
+	case e := <-bitti:
+		if e != nil {
+			t.Fatalf("kilit bırakılınca tamamlanmalı: %v", e)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("kilit bırakıldığı halde Olustur takıldı")
+	}
+}
+
+// Ana hesabın uid/gid'i 0 (root) ya da geçersizse ek hesap ASLA açılmaz.
+func TestOlustur_RootUIDReddedilir(t *testing.T) {
+	db := fdb(t)
+	for _, set := range []string{"uid_n=0", "gid_n=0"} {
+		_, _ = db.Exec(`UPDATE ftp_accounts SET uid_n=1002, gid_n=1002 WHERE username='c_baska_com'`)
+		if _, err := db.Exec(`UPDATE ftp_accounts SET ` + set + ` WHERE username='c_baska_com'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := olustur(t, db, 2, "x", "public_html"); err == nil || err.(*Hata).HTTP != 409 {
+			t.Fatalf("%s ile ek hesap açıldı: %v", set, err)
+		}
+	}
+}
