@@ -34,6 +34,22 @@ func TestAltAlanPHPAyar_KokSiniri(t *testing.T) {
 			}
 		}
 		// Kayıtsız alt alan: Defaults; aynı df + izinli alanlar serbest.
+		if rol == "müşteri" {
+			// disable_functions müşteriye görünmez: aynı değer bile 403; gövdede yoksa serbest.
+			if k, govde, yazdi := put(rol, `{"ayarlar":{"disable_functions":"exec,passthru,shell_exec,system,proc_open,popen"}}`); k != http.StatusForbidden || yazdi {
+				t.Errorf("müşteri: aynı disable_functions de 403 olmalı: %d %s", k, govde)
+			}
+			if k, govde, yazdi := put(rol, `{"ayarlar":{"memory_limit":"512M"}}`); k != http.StatusOK || !yazdi {
+				t.Errorf("müşteri: izinli kayıt 200 beklenirdi: %d %s", k, govde)
+			}
+			for _, ek := range []string{"php_value[open_basedir]=/", "php_value[opcache.preload]=/x.php", "php_value[auto_prepend_file]=/x", "php_admin_value[x]=1", "extension=a.so"} {
+				b, _ := json.Marshal(map[string]any{"ayarlar": map[string]any{"ek_direktifler": ek}})
+				if k, govde, yazdi := put(rol, string(b)); k != http.StatusBadRequest || yazdi || !strings.Contains(govde, "ek direktif") {
+					t.Errorf("müşteri ek %q: 400 + yazımsız + açık mesaj beklenirdi: %d %s", ek, k, govde)
+				}
+			}
+			continue
+		}
 		if k, govde, yazdi := put(rol, `{"ayarlar":{"disable_functions":"exec,passthru,shell_exec,system,proc_open,popen","memory_limit":"512M"}}`); k != http.StatusOK || !yazdi {
 			t.Errorf("%s: izinli kayıt 200 beklenirdi: %d %s", rol, k, govde)
 		}
@@ -58,6 +74,9 @@ func TestAltAlanPHPAyarGET_IcAlanGizli(t *testing.T) {
 		}
 		if err := json.Unmarshal([]byte(govde), &y); err != nil {
 			t.Fatal(err)
+		}
+		if _, df := y.Ayarlar["disable_functions"]; df == (rol == "müşteri") {
+			t.Errorf("%s: disable_functions görünürlüğü yanlış (%v)", rol, df)
 		}
 		_, var_ := y.Ayarlar["pm_max_children"]
 		if (rol == "admin") != var_ {

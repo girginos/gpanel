@@ -7,7 +7,7 @@ import { hataYakala } from '@/lib/hata'
 import { Button, Badge, Card } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { useRol, yoneticiMi } from '@/lib/rol'
+import { useRol, yoneticiMi, musteriMi } from '@/lib/rol'
 import { phpAyarGovdesi } from '@/lib/phpAyar'
 
 // Alt alan PHP ayarları — domain PHP ayarlarının aynısı; kaydedilince alt alana
@@ -15,7 +15,7 @@ import { phpAyarGovdesi } from '@/lib/phpAyar'
 type Ayar = {
   memory_limit: string; max_execution_time: number; max_input_time: number
   post_max_size: string; upload_max_filesize: string; opcache_enable: boolean
-  disable_functions: string; display_errors: boolean; log_errors: boolean
+  disable_functions?: string; display_errors: boolean; log_errors: boolean
   allow_url_fopen: boolean; file_uploads: boolean; short_open_tag: boolean
   error_reporting: string; include_path: string; open_basedir: string
   session_save_path: string; mail_force_extra_parameters: string
@@ -39,7 +39,9 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || O
 
 export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; sid: string }) {
   useTranslation() // dil re-render aboneligi
-  const yonetici = yoneticiMi(useRol())
+  const rol = useRol()
+  const yonetici = yoneticiMi(rol)
+  const musteri = musteriMi(rol) // müşteriye disable_functions çizilmez (sunucu da döndürmez)
   const [a, setA] = useState<Ayar | null>(null)
   const [ozel, setOzel] = useState(false)
   const [acik, setAcik] = useState(false)
@@ -153,9 +155,9 @@ export default function SubPHPAyarlari({ domainId, sid }: { domainId: string; si
             </p>
           </div>
 
-          <div>
+          {!musteri && <div>
             <label className={etk}>disable_functions</label>{txt('disable_functions', !yonetici)}
-          </div>
+          </div>}
           <div>
             <label className={etk}>Ek direktifler (php_value[...] / php_flag[...])</label>
             <textarea value={a.ek_direktifler} onChange={e => P('ek_direktifler', e.target.value)} rows={3}

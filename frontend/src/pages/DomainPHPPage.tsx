@@ -11,7 +11,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Toggle } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { useRol, yoneticiMi } from '@/lib/rol'
+import { useRol, yoneticiMi, musteriMi } from '@/lib/rol'
 import { phpAyarGovdesi } from '@/lib/phpAyar'
 
 type Surum = { surum: string; pool_dir: string; sock_dir: string; service: string; aciklama: string; eol?: boolean }
@@ -142,7 +142,11 @@ export default function DomainPHPPage() {
   const toast = useToast()
   // 'Sunucu Modüllerini Yönet' → /sistem/php-modulleri → PHP sunucu sihirbazı; uçları
   // (/php-surumler, /runtimeler, /php-extensions …) AdminOnly → yalnız yönetici görür.
-  const yonetici = yoneticiMi(useRol())
+  const rol = useRol()
+  const yonetici = yoneticiMi(rol)
+  // Hosting müşterisi: disable_functions (kategoriler + ham kutu) HİÇ çizilmez; sunucu da
+  // müşteriye bu alanı döndürmez / yazdırmaz (internal/php/kok_sinir.go).
+  const musteri = musteriMi(rol)
   const [yanit, setYanit] = useState<Yanit | null>(null)
   const [secili, setSurum] = useState<string>('')
   const [a, setA] = useState<Ayarlar | null>(null)
@@ -289,10 +293,10 @@ export default function DomainPHPPage() {
               </Sec>
               <Bayrak etiket="opcache.enable" yardim={cevir("OPcache opcode cache (önerilen: AÇIK)")} value={a.opcache_enable} onChange={v => P('opcache_enable', v)} />
             </Grid>
-            <div className="mt-4">
+            {!musteri && <div className="mt-4">
               <Etiket>disable_functions <Ipucu t={cevir("Devre dışı bırakılacak PHP fonksiyonları (virgülle ayrılmış)")} /></Etiket>
               <Txt value={a.disable_functions} onChange={v => P('disable_functions', v)} mono kilitli={!yonetici} />
-            </div>
+            </div>}
           </Kart>
 
           {/* Common */}
@@ -427,8 +431,8 @@ export default function DomainPHPPage() {
             </div>
           </Kart>
 
-          {/* Tehlikeli Fonksiyonlar — per-domain disable_functions toggle */}
-          <Kart baslik={cevir("Tehlikeli Fonksiyonları Devre Dışı Bırak")}>
+          {/* Tehlikeli Fonksiyonlar — per-domain disable_functions toggle (müşteriye çizilmez) */}
+          {!musteri && <Kart baslik={cevir("Tehlikeli Fonksiyonları Devre Dışı Bırak")}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-3">
               {cevir(cevir("Bu fonksiyonlar shell injection, RCE, malware riski oluşturur. Kategori bazlı toggle ile"))} <code className="font-mono">disable_functions</code>{cevir("'a yazılır.")} <strong>{cevir("Açık = aktif")}</strong> {cevir("(engellenmemiş),")} <strong>{cevir("kapalı = bloke")}</strong>.
             </p>
@@ -522,12 +526,14 @@ export default function DomainPHPPage() {
                 className="w-full mt-2 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded text-xs font-mono" />
               <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-1">{cevir("Virgülle ayrılmış fonksiyon adları.")}</p>
             </details>}
-          </Kart>
+          </Kart>}
 
           {/* Additional */}
           <Kart baslik={cevir("Ek Yapılandırma Direktifleri")}>
             <p className="text-xs text-slate-500 dark:text-slate-500 mb-2">
-              {cevir("php.ini sözdizimini kullanarak ek parametreler tanımlayın. Örn: ")}<code className="font-mono">extension=imagick.so</code>
+              {musteri
+                ? <>{cevir("Her satıra bir ayar yazın. Örn: ")}<code className="font-mono">php_value[date.timezone] = Europe/Istanbul</code></>
+                : <>{cevir("php.ini sözdizimini kullanarak ek parametreler tanımlayın. Örn: ")}<code className="font-mono">extension=imagick.so</code></>}
             </p>
             <textarea value={a.ek_direktifler} onChange={e => P('ek_direktifler', e.target.value)}
               rows={5}

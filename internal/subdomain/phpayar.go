@@ -262,6 +262,9 @@ func (h *Handlers) PHPAyarPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	temiz, err := php.SanitizeEk(req.Ayarlar.EkDirektifler)
+	if err == nil {
+		err = php.EkDirektifKapisi(r, req.Ayarlar.EkDirektifler) // müşteriye özgü ek yasaklar
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return

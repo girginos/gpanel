@@ -273,6 +273,7 @@ catch_workers_output = yes
 
 // RenderPool: pool conf icerigini settings + sk + sockdir ile uretir.
 func RenderPool(sk string, sockDir string, s Settings) (string, error) {
+	s.EkDirektifler = ekRenderSuz(s.EkDirektifler)
 	var buf bytes.Buffer
 	err := poolTmpl.Execute(&buf, map[string]any{"SK": sk, "SockDir": sockDir, "S": s})
 	return buf.String(), err
@@ -358,6 +359,89 @@ func sanitizeEkDirektifler(raw string) (string, error) {
 		temiz = append(temiz, t)
 	}
 	return strings.Join(temiz, "\n"), nil
+}
+
+// ekDirektifMusteriYasakAnahtar: YALNIZ müşteri girdisinde (müşteri / müşteri-adına
+// oturumu) reddedilen EK anahtarlar — ekDirektifYasakAnahtar'ın üstüne. Yönetici için
+// mevcut serbestlik korunur. Kapsam: izolasyonu/komşu kiracıyı etkileyebilen, yol
+// ya da yürütme taşıyan ya da havuz dışı dosya yazdıran anahtarlar.
+var ekDirektifMusteriYasakAnahtar = map[string]bool{
+	"user_dir": true, "doc_root": true, "extension_dir": true, "enable_dl": true,
+	"allow_url_include": true,
+	"sendmail_path":     true, "mail.log": true, "unserialize_callback_func": true,
+	"assert.callback": true, "mysqli.default_socket": true, "pdo_mysql.default_socket": true,
+	"soap.wsdl_cache_dir": true, "session.save_handler": true, "browscap": true,
+	"openssl.cafile": true, "sqlite3.extension_dir": true,
+}
+
+// ekDirektifMusteriYasakOnek: önek eşleşmesiyle yasak ailelerin (user_ini.*,
+// opcache.*, xdebug.*, phar.*, syslog.*, cgi.*/fastcgi.*, ffi.*).
+var ekDirektifMusteriYasakOnek = []string{
+	"user_ini.", "opcache.", "xdebug.", "phar.", "syslog.", "cgi.", "fastcgi.", "ffi.",
+}
+
+// EkDirektifKapisi — müşteri oturumunda ek_direktifler'i, temel allowlist'e (satır
+// biçimi + ekDirektifYasakAnahtar) EK olarak müşteriye özgü yasak listeyle denetler.
+// Açık hata döner (sessiz yutma yok); müşteri dışı oturumda hep nil (kök serbestliği
+// korunur — temel denetim sanitizeEkDirektifler'de herkese uygulanır).
+func EkDirektifKapisi(r *http.Request, raw string) error {
+	if !MusteriOturumu(r) {
+		return nil
+	}
+	return ekDirektifMusteriDenetle(raw)
+}
+
+func ekDirektifMusteriDenetle(raw string) error {
+	if _, err := sanitizeEkDirektifler(raw); err != nil {
+		return err
+	}
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	for i, ln := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(ln)
+		m := ekDirektifSatirRe.FindStringSubmatch(t)
+		if m == nil {
+			continue
+		}
+		k := strings.ToLower(m[1])
+		yasak := ekDirektifMusteriYasakAnahtar[k]
+		for _, on := range ekDirektifMusteriYasakOnek {
+			if strings.HasPrefix(k, on) {
+				yasak = true
+			}
+		}
+		if yasak {
+			return fmt.Errorf("ek direktif satır %d: '%s' anahtarı hosting hesabında kullanılamaz (yöneticinize aittir)", i+1, m[1])
+		}
+	}
+	return nil
+}
+
+// ekRenderSuz — havuza YAZILIRKEN (RenderPool / alt alan havuzu) kayıtlı ek_direktifler'i
+// temel kurallardan geçirir: geçersiz/yasak satır SESSİZCE kullanılmaya devam etmez,
+// yerine açıklayıcı yorum satırı yazılır. Geriye dönük: eski kayıtlarda (allowlist
+// öncesi) yasak satır kalmış olsa da havuza ulaşmaz. DB kaydı değişmez.
+func ekRenderSuz(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	raw = strings.ReplaceAll(raw, "\x00", "")
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	var out []string
+	for i, ln := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, ";") {
+			out = append(out, t)
+			continue
+		}
+		if _, err := sanitizeEkDirektifler(t); err != nil {
+			out = append(out, fmt.Sprintf("; [gpanel] satir %d guvenlik nedeniyle yok sayildi", i+1))
+			continue
+		}
+		out = append(out, t)
+	}
+	return strings.Join(out, "\n")
 }
 
 // validatePoolScalars: tek-satırlık string ayarlarına gömülü \n/\r ile pool'a yeni
@@ -528,6 +612,9 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	temizEk, ekErr := sanitizeEkDirektifler(req.Ayarlar.EkDirektifler)
+	if ekErr == nil {
+		ekErr = EkDirektifKapisi(r, req.Ayarlar.EkDirektifler) // müşteriye özgü ek yasaklar
+	}
 	if ekErr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, ekErr.Error())
 		return
