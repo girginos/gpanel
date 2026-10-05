@@ -29,12 +29,14 @@ import (
 )
 
 // Şema göçlerin KENDİSİNDEN kurulur (elle kopya değil): 0063 bulgu+durum, 0074 FK,
-// 0076 envanter, 0112 domain başına tarama.
+// 0076 envanter, 0112 domain başına tarama, 0160 ek alan adları, 0180 websec ek alan.
 var wsGoclar = []string{
 	"../../migrations/0063_websec.sql",
 	"../../migrations/0074_websec_domain_cascade.sql",
 	"../../migrations/0076_websec_apps.sql",
 	"../../migrations/0112_websec_domain_tarama.sql",
+	"../../migrations/0160_ek_alan_adlari.sql",
+	"../../migrations/0180_websec_ek_alan.sql",
 }
 
 func wsGeciciDB(t *testing.T) *sql.DB {

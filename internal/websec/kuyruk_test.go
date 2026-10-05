@@ -134,7 +134,7 @@ func TestRescanDomainsizBayiNilListeUretmez(t *testing.T) {
 		if _, ok := k.sonrakiIs(); ok {
 			t.Fatalf("%s: işçiye iş gitmemeli", c.ad)
 		}
-		if !sd.Sorgulandi("SELECT d.id FROM domains d") || !sd.Sorgulandi(c.kosul) {
+		if !sd.Sorgulandi("SELECT d.id, DATE_FORMAT(t.son_tarama") || !sd.Sorgulandi(c.kosul) {
 			t.Fatalf("%s: domain listesi sunucuda kapsamla çıkarılmalı (%s)", c.ad, c.kosul)
 		}
 		if sd.Yurutuldu("audit_log") {
@@ -149,7 +149,7 @@ func TestRescanBayiKendiDomainleri(t *testing.T) {
 	saatKur(t)
 	kimlikKur(t, bayiJeton)
 	sd, db := sahtedb.Yeni()
-	sd.Satirlar("SELECT d.id FROM domains d", []any{int64(10)}, []any{int64(11)})
+	sd.Satirlar("SELECT d.id, DATE_FORMAT(t.son_tarama", []any{int64(10), nil}, []any{int64(11), nil})
 	rr := istek(t, (&Handler{DB: db}).Rescan, "POST", "/websec/rescan", "")
 	if rr.Code != 202 || strings.TrimSpace(rr.Body.String()) != `{"sirada":2}` {
 		t.Fatalf("202 {\"sirada\":2} beklenirdi: %d %s", rr.Code, rr.Body)
@@ -287,7 +287,7 @@ func TestBayiTumunuTara30Dk(t *testing.T) {
 	simdi := saatKur(t)
 	kimlikKur(t, bayiJeton)
 	sd, db := sahtedb.Yeni()
-	sd.Satirlar("SELECT d.id FROM domains d", []any{int64(10)}, []any{int64(11)})
+	sd.Satirlar("SELECT d.id, DATE_FORMAT(t.son_tarama", []any{int64(10), nil}, []any{int64(11), nil})
 	h := &Handler{DB: db}
 	tara := func() (int, string) {
 		rr := istek(t, h.Rescan, "POST", "/websec/rescan", "")
@@ -449,7 +449,7 @@ func TestSiradaDurumu(t *testing.T) {
 	kimlikKur(t, bayiJeton)
 	k.bayiEkle(7, []int64{10}, false)
 	sd, db := sahtedb.Yeni()
-	sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
+	sd.Satirlar("(t.domain_id IS NOT NULL)", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
 	sd.Satirlar("LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id", []any{int64(10), ""})
 	h := &Handler{DB: db}
 	rr := istek(t, h.Apps, "GET", "/websec/apps", "")
