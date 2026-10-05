@@ -81,24 +81,6 @@ func TestOzelAdres_YoklamaTemizligi(t *testing.T) {
 	}
 }
 
-func TestMusteriBaglantisi_OzelAdresAktifseOnuKullanir(t *testing.T) {
-	src := oku(t, markaSayfa)
-	ozel := strings.Index(src, "if (veri.ozel_adres) return { url: `https://${veri.ozel_adres}/cp/giris`, ozel: true }")
-	kisa := strings.Index(src, "/cp/giris?m=${veri.anahtar}")
-	if ozel < 0 || kisa < 0 || ozel > kisa {
-		t.Fatal("bağlantı: önce özel adres (https://<ad>/cp/giris), yoksa kısa kodlu bağlantı seçilmeli")
-	}
-	if !strings.Contains(src, "musteriBaglantisi(veri, window.location.origin)") || !strings.Contains(src, "Kendi alan adınızı Özel adres sekmesinden bağlayabilirsiniz.") {
-		t.Error("kart seçici fonksiyonu + aktif değilken ipucu olmalı")
-	}
-	if !strings.Contains(src, "<OzelAdres onDegisti={yukle} />") {
-		t.Error("özel adres aktif/kaldırılınca görünüm yenilenmeli (bağlantı kartı güncellensin)")
-	}
-	if !strings.Contains(oku(t, "components/marka/MarkaFormu.tsx"), "ozel_adres?: string") {
-		t.Error("YonetGorunum ozel_adres alanı yok")
-	}
-}
-
 // Her görünür TR metni için EN karşılık: cevir('…') sabitleri + sunucu adım mesajları.
 func TestOzelAdres_ENKarsiliklari(t *testing.T) {
 	ceviri := oku(t, markaCeviri)

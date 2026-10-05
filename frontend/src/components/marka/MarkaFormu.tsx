@@ -19,9 +19,6 @@ export type YonetGorunum = {
   kok_kapatti: boolean
   alanadi_izni: boolean
   marka: Marka & { webmail_marka?: boolean }
-  musteri_adresi?: string
-  // Bayinin AKTİF özel panel adresi (yoksa alan yok): müşteri giriş bağlantısı bunu kullanır.
-  ozel_adres?: string
 }
 
 type Metin = keyof Pick<Marka, 'panel_adi' | 'baslik' | 'kisa_ad' | 'vurgu_renk' | 'giris_baslik' | 'giris_alt' |
