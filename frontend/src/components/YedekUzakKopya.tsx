@@ -85,16 +85,54 @@ const EN: Record<string, string> = {
   'Yenile': 'Renew',
   'Anahtar yenilendi. Kurtarma anahtarını yeniden indirin.': 'Key renewed. Download the recovery key again.',
   'Anahtar yenilenemedi': 'Could not renew the key',
+  'Sunucudaki kopya': 'Copy on this server',
+  'Drive’a gönderilince bu sunucudaki kopyayı sil': 'Delete the copy on this server once it is sent to Drive',
+  'yedek sunucuda kalsın': 'backups stay on the server',
+  'Yedek Drive’a gönderilip doğrulandıktan sonra sunucudaki dosya silinir; disk dolmaz. Müşterilerin elle aldığı yedeklere ve Drive’a hiç gönderilmemiş yedeklere dokunulmaz.':
+    'Once a backup is sent to Drive and checked, the file on this server is deleted so the disk does not fill up. Backups customers took by hand and backups never sent to Drive are not touched.',
+  'Yedek yalnızca Google Drive’da kalır; geri yüklemek için indirilip çözülür.': 'The backup stays only in Google Drive; to restore it, it has to be downloaded and decrypted.',
+  'Sunucudaki kopya silinsin mi?': 'Delete the copy on this server?',
+  'Drive’a gönderilip doğrulanan yedeklerin sunucudaki dosyası silinecek (her alan adı için en yeni {0} yedek hariç).': 'Backups that were sent to Drive and checked will be deleted from this server (except the newest {0} for each domain).',
+  'Evet, aç': 'Yes, turn on',
+  'Yalnızca Drive’da': 'Only in Drive',
+  'Mevcut yedekleri temizle': 'Clean up existing backups',
+  'Sunucudaki kopyalar silinsin mi?': 'Delete the copies on this server?',
+  '{0} yedeğin sunucudaki kopyası silinecek ({1}, {2} alan adı).': 'The server copy of {0} backups will be deleted ({1}, {2} domains).',
+  'Her alan adı için en yeni {0} yedek sunucuda kalacak ({1} yedek).': 'The newest {0} backups of each domain stay on the server ({1} backups).',
+  'Drive’da olmadığı için korunacak: {0} yedek, {1}.': 'Kept because they are not in Drive: {0} backups, {1}.',
+  'Müşterilerin elle aldığı yedekler korunacak: {0} yedek, {1}.': 'Backups customers took by hand are kept: {0} backups, {1}.',
+  'Doğrulanamadığı için korunacak: {0} yedek, {1}.': 'Kept because they could not be matched with their Drive copy: {0} backups, {1}.',
+  'Silinen yedekler yalnızca Google Drive’da kalır.': 'Deleted backups stay only in Google Drive.',
+  'Evet, sil': 'Yes, delete',
+  'Sunucuda silinecek yedek yok.': 'There are no backups to delete from this server.',
+  '{0} yedeğin sunucudaki kopyası silindi ({1}).': 'The server copy of {0} backups was deleted ({1}).',
+  '{0} yedek atlandı': '{0} backups skipped',
+  'Sunucudaki kopya temizlenemedi': 'Could not clean up the server copies',
+  'Sunucudaki kopya ayarı kaydedilemedi': 'Could not save the server copy setting',
+  'alan adında yedek ya da geri yükleme işlemi sürüyor': 'a backup or restore is running for this domain',
+  'geri yükleme işi sürüyor': 'a restore job is running',
+  'yedeğin başka bir gönderimi sürüyor': 'another upload of this backup is running',
+  'Drive hedefine ulaşılamadı': 'Could not reach Drive',
+  'kopya Drive\'da görünmüyor ya da boyutu uyuşmuyor': 'the copy is not visible in Drive or its size differs',
+  'Drive kopyasının durumu değişti': 'the Drive copy changed state',
+  'dosya başka bir işlemce kaldırıldı': 'the file was removed by another process',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-type Ayar = { aktif: boolean; hedef_id: number; klasor: string; saklama_n: number; saklama_gun: number; bant_kbps: number }
+type Ayar = { aktif: boolean; hedef_id: number; klasor: string; saklama_n: number; saklama_gun: number; bant_kbps: number; yerel_sil: boolean; yerel_tut: number }
 type Gonderim = { gonderilen: number; bekleyen: number; hata: number; son_gonderim: string }
 type Durum = {
   ayar: Ayar
   gonderim: Gonderim
   kurtarma: { var: boolean; indirildi: string }
+  yerel?: { yalniz_drive_adet: number; yalniz_drive_b: number }
 }
+type YerelOnizleme = {
+  yerel_tut: number; silinecek_adet: number; silinecek_b: number; domain: number
+  tutulan_adet: number; tutulan_b: number; drive_yok_adet: number; drive_yok_b: number
+  manuel_adet: number; manuel_b: number; sorunlu_adet: number; sorunlu_b: number
+}
+type YerelSonuc = { silinen: number; silinen_b: number; isaretlenen: number; atlanan: number; hata: number; nedenler: { neden: string; adet: number }[] }
 type Is = {
   id: number; yedek_id?: number; domain?: string; yedek_dosya: string; durum: string; deneme: number; son_hata?: string
   boyut_sifreli: number; yuklenen_b: number; olusturma: string; bitis?: string; sonraki_deneme?: string
@@ -224,14 +262,14 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
     } catch (e) { setHata(apiHata(e, cevir('Mevcut yedekler gönderilemedi'))) } finally { setMesgul(null) }
   }
 
-  async function kaydet() {
+  async function kaydet(hataMetni?: string) {
     if (!form) return
     temizle(); setMesgul('kaydet')
     try {
       const { data } = await api.put<Durum>('/admin/backups/uzak-kopya/ayar', form)
       setD(data); setForm(data.ayar); setDirty(false)
       setBasari(cevir('Ayarlar kaydedildi.'))
-    } catch (e) { setHata(apiHata(e, cevir('Ayarlar kaydedilemedi'))) } finally { setMesgul(null) }
+    } catch (e) { setHata(apiHata(e, hataMetni || cevir('Ayarlar kaydedilemedi'))) } finally { setMesgul(null) }
   }
   async function onizle() {
     temizle(); setMesgul('onizle')
@@ -240,6 +278,53 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
       setOnizleme(data.silinecek)
     } catch (e) { setHata(apiHata(e, cevir('İşlem başarısız'))) } finally { setMesgul(null) }
   }
+  // Sunucudaki kopya: ayar kaydı. Açarken (kapalıyken) açık uyarı ile onay istenir.
+  async function yerelKaydet() {
+    if (!form || !d) return
+    if (form.yerel_sil && !d.ayar.yerel_sil) {
+      const evet = await onay({
+        baslik: cevir('Sunucudaki kopya silinsin mi?'),
+        mesaj: <>
+          <p>{cevirT(cevir('Drive’a gönderilip doğrulanan yedeklerin sunucudaki dosyası silinecek (her alan adı için en yeni {0} yedek hariç).'), form.yerel_tut)}</p>
+          <p className="mt-1.5 font-medium">{cevir('Yedek yalnızca Google Drive’da kalır; geri yüklemek için indirilip çözülür.')}</p>
+        </>,
+        ton: 'uyari', onayEtiketi: cevir('Evet, aç'), onayIkonu: I.onay,
+      })
+      if (!evet) return
+    }
+    await kaydet(cevir('Sunucudaki kopya ayarı kaydedilemedi'))
+  }
+
+  async function yerelTemizle() {
+    temizle(); setMesgul('yerel')
+    try {
+      const { data: on } = await api.get<YerelOnizleme>('/admin/backups/uzak-kopya/yerel-temizle')
+      if (on.silinecek_adet === 0) {
+        setBasari(cevir('Sunucuda silinecek yedek yok.') + (on.drive_yok_adet > 0 ? ' ' + cevirT(cevir('Drive’da olmadığı için korunacak: {0} yedek, {1}.'), on.drive_yok_adet, fmtB(on.drive_yok_b)) : ''))
+        return
+      }
+      const evet = await onay({
+        baslik: cevir('Sunucudaki kopyalar silinsin mi?'),
+        mesaj: <div className="space-y-1.5">
+          <p className="font-medium">{cevirT(cevir('{0} yedeğin sunucudaki kopyası silinecek ({1}, {2} alan adı).'), on.silinecek_adet, fmtB(on.silinecek_b), on.domain)}</p>
+          <p>{cevirT(cevir('Her alan adı için en yeni {0} yedek sunucuda kalacak ({1} yedek).'), on.yerel_tut, on.tutulan_adet)}</p>
+          <p>{cevirT(cevir('Drive’da olmadığı için korunacak: {0} yedek, {1}.'), on.drive_yok_adet, fmtB(on.drive_yok_b))}</p>
+          {on.manuel_adet > 0 && <p>{cevirT(cevir('Müşterilerin elle aldığı yedekler korunacak: {0} yedek, {1}.'), on.manuel_adet, fmtB(on.manuel_b))}</p>}
+          {on.sorunlu_adet > 0 && <p>{cevirT(cevir('Doğrulanamadığı için korunacak: {0} yedek, {1}.'), on.sorunlu_adet, fmtB(on.sorunlu_b))}</p>}
+          <p className="font-medium">{cevir('Silinen yedekler yalnızca Google Drive’da kalır.')}</p>
+        </div>,
+        ton: 'tehlike', onayEtiketi: cevir('Evet, sil'), onayIkonu: I.cop,
+      })
+      if (!evet) return
+      const { data } = await api.post<YerelSonuc>('/admin/backups/uzak-kopya/yerel-temizle')
+      const atlandi = data.atlanan + data.hata > 0
+        ? ' ' + cevirT(cevir('{0} yedek atlandı'), data.atlanan + data.hata) + ': ' + data.nedenler.map(n => `${cevir(n.neden)} (${n.adet})`).join('; ') + '.'
+        : ''
+      setBasari(cevirT(cevir('{0} yedeğin sunucudaki kopyası silindi ({1}).'), data.silinen, fmtB(data.silinen_b)) + atlandi)
+      await yukle()
+    } catch (e) { setHata(apiHata(e, cevir('Sunucudaki kopya temizlenemedi'))) } finally { setMesgul(null) }
+  }
+
   async function anahtarYenile() {
     const evet = await onay({
       baslik: cevir('Anahtar yenilensin mi?'),
@@ -306,6 +391,35 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
             </Button>
           </div>
         )}
+
+        {/* Sunucudaki kopya: Drive'a gönderilince yerel dosyayı sil (varsayılan KAPALI) */}
+        <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 p-3 space-y-2.5">
+          <div className="flex items-center gap-2">
+            <Ikon d={I.disket} className="h-4 w-4 shrink-0" />
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir('Sunucudaki kopya')}</h4>
+            {d.yerel && d.yerel.yalniz_drive_adet > 0 && (
+              <Badge color="info" variant="soft">{cevir('Yalnızca Drive’da')}: {d.yerel.yalniz_drive_adet} {cevir('yedek')} ({fmtB(d.yerel.yalniz_drive_b)})</Badge>
+            )}
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+            <input type="checkbox" checked={form.yerel_sil} onChange={e => ayarDegis({ yerel_sil: e.target.checked })} />
+            {cevir('Drive’a gönderilince bu sunucudaki kopyayı sil')}
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+            <label htmlFor="uk-yerel-tut">{cevir('Her alan adı için en yeni')}</label>
+            <input id="uk-yerel-tut" type="number" min={0} max={10} className={kutu + ' !w-20'} value={form.yerel_tut}
+              onChange={e => ayarDegis({ yerel_tut: Math.min(10, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
+            <span>{cevir('yedek sunucuda kalsın')}</span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{cevir('Yedek Drive’a gönderilip doğrulandıktan sonra sunucudaki dosya silinir; disk dolmaz. Müşterilerin elle aldığı yedeklere ve Drive’a hiç gönderilmemiş yedeklere dokunulmaz.')}</p>
+          {form.yerel_sil && <UyariKutusu ton="uyari">{cevir('Yedek yalnızca Google Drive’da kalır; geri yüklemek için indirilip çözülür.')}</UyariKutusu>}
+          <div className="flex flex-wrap gap-2">
+            <Button color="primary" boyut="sm" ikon={I.disket} onClick={yerelKaydet} disabled={!dirty} yukleniyor={mesgul === 'kaydet'}>{mesgul === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet')}</Button>
+            <Button variant="outlined" boyut="sm" ikon={I.cop} onClick={yerelTemizle} yukleniyor={mesgul === 'yerel'}>
+              {mesgul === 'yerel' ? cevir('Hesaplanıyor…') : cevir('Mevcut yedekleri temizle')}
+            </Button>
+          </div>
+        </div>
 
         {/* Mevcut yedekleri de gönder */}
         <div className="flex flex-wrap items-end gap-3">
@@ -399,7 +513,7 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">{cevir('Sınırdan fazla ya da eski kopyalar yalnızca bu uygulamanın gönderdikleri arasından silinir; klasördeki başkasının dosyalarına dokunulmaz. Her alan adının en yeni kopyası korunur.')}</p>
             <div className="flex flex-wrap gap-2">
-              <Button color="primary" ikon={I.disket} onClick={kaydet} yukleniyor={mesgul === 'kaydet'}>{mesgul === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet')}</Button>
+              <Button color="primary" ikon={I.disket} onClick={() => void kaydet()} yukleniyor={mesgul === 'kaydet'}>{mesgul === 'kaydet' ? cevir('Kaydediliyor…') : cevir('Kaydet')}</Button>
               <Button variant="outlined" ikon={I.goz} onClick={onizle} yukleniyor={mesgul === 'onizle'}>{cevir('Saklama önizlemesi')}</Button>
             </div>
             {onizleme && (

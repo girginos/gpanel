@@ -22,7 +22,7 @@ import { UzakSatirCubugu } from '@/components/UzakIlerleme'
 import { useUzakIlerleme } from '@/lib/uzakIlerleme'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
-type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
+type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'drive' | 'yok'; yerel_var?: boolean; drive_var?: boolean }
 // duzenlenebilir: YALNIZ gerçek yönetici (sunucu söyler). Müşteri / bayi / müşteri-adına
 // görünümünde plan seçici çizilmez — müşteri yedeği yalnız manuel (2026-10-03).
 type ManuelDurum = { bekleme_sn: number; bekleme_saat: number; eszamanli: number; calisan: number; sira: number }
@@ -147,6 +147,10 @@ const BACKUP_EN: Record<string, string> = {
   "DOSYA YOK": "FILE MISSING",
   "uzakta (doğrulanmadı)": "remote (unverified)",
   "Yedek uzak depoya taşınmış — önce geri getirilmeli": "Backup moved to remote storage — must be fetched first",
+  "Yalnız Drive’da": "Only in Drive",
+  "Yedek yalnızca Google Drive’da; geri yüklemek için indirilip çözülür": "The backup is only in Google Drive; to restore it, it has to be downloaded and decrypted",
+  "Yalnız Drive’da — sunucuda kopyası yok": "Only in Drive — no copy on this server",
+  "Yalnız Drive’da — önce indirilip çözülmeli": "Only in Drive — download and decrypt it first",
   "Yedek dosyası bulunamadı": "Backup file not found",
   "Yedek silinemedi": "Backup could not be deleted",
   "{0} {1}:00 · son {2} oto-yedek korunur": "{0} {1}:00 · last {2} auto-backups kept",
@@ -738,6 +742,12 @@ export default function DomainBackupsPage() {
                       Sunucu bu değeri kaydın `notlar` etiketinden okuyor; ağa
                       çıkmıyor. Kesin bilgi gibi göstermek, hiçbir yerde
                       olmayan bir yedeği geçerli sandırırdı. */}
+                  {/* Drive'a gönderilince sunucudaki kopya silindi: yedek kayıp DEĞİL, yalnız Drive'da. */}
+                  {y.mevcut === 'drive' && (
+                    <Badge variant="soft" color="info" className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold" title={cevir("Yedek yalnızca Google Drive’da; geri yüklemek için indirilip çözülür")}>
+                      {cevir("Yalnız Drive’da")}
+                    </Badge>
+                  )}
                   {y.mevcut === 'uzak_iddia' && (
                     <Badge variant="soft" color="warning" className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold">
                       {cevir("uzakta (doğrulanmadı)")}
@@ -763,11 +773,15 @@ export default function DomainBackupsPage() {
                     onClick={() => indir(y)}
                     disabled={y.mevcut !== 'yerel'}
                     title={y.mevcut === 'yok' ? cevir("Yedek dosyası bulunamadı")
+                      : y.mevcut === 'drive' ? cevir("Yalnız Drive’da — sunucuda kopyası yok")
                       : y.mevcut === 'uzak_iddia' ? cevir("Yedek uzak depoya taşınmış — önce geri getirilmeli") : undefined}
                     variant="outlined" boyut="sm" ikon={I.indir}
                     className="disabled:opacity-40"
                   >{cevir("İndir")}</Button>
-                  <Button onClick={() => setGeriYukle(y)} color="warning" variant="soft" boyut="sm" ikon={I.geriAl}>{cevir("Geri Yükle")}</Button>
+                  <Button onClick={() => setGeriYukle(y)} color="warning" variant="soft" boyut="sm" ikon={I.geriAl}
+                    disabled={y.mevcut === 'drive'}
+                    title={y.mevcut === 'drive' ? cevir("Yalnız Drive’da — önce indirilip çözülmeli") : undefined}
+                    className="disabled:opacity-40">{cevir("Geri Yükle")}</Button>
                   <Button onClick={() => setSilinecek(y)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
                 </td>
               </tr>

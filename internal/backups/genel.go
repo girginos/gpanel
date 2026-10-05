@@ -380,6 +380,11 @@ func YerelDosyaHazirla(ctx context.Context, db *sql.DB, sk, dosya string) (strin
 			dosya, fi.Size(), bekBoyut)
 		_ = os.Remove(yol)
 	}
+	// Yerel dosya yok ama doğrulanmış Drive kopyası var (ve eski FTP/SFTP yolunda da "uzağa taşındı"
+	// kaydı yok): FTP'ye boşuna gitmeyip AÇIK yönlendirme ver.
+	if is, ok := driveYalnizIs(db, dosya); ok && !uzakKopyaVar(db, dosya) {
+		return "", &driveYalnizHata{is: is}
+	}
 	g := genelAyarOku(ctx, db)
 	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {
 		return "", errYedekDiskteYok
@@ -456,6 +461,9 @@ func UzakIndirmeBaslat(db *sql.DB, sk, dosya string) (hazir bool, suruyor bool, 
 	bek, _ := yedekBeklenenBoyut(db, dosya)
 	if fi, e := os.Stat(yol); e == nil && (bek <= 0 || fi.Size() == bek) {
 		return true, false, nil
+	}
+	if is, ok := driveYalnizIs(db, dosya); ok && !uzakKopyaVar(db, dosya) {
+		return false, false, &driveYalnizHata{is: is}
 	}
 	g := genelAyarOku(context.Background(), db)
 	if !g.UzakAktif || strings.TrimSpace(g.UzakHost) == "" {

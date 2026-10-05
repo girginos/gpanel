@@ -72,12 +72,24 @@ func UzakIsciKur(db *sql.DB) *uzak.Isci {
 		GeciciDizin: UzakGeciciDizin,
 		HedefAc:     UzakHedefAcici(db),
 		PanelSurum:  surum.Panel,
+		Mesgul:      domainIslemde,
 		Uyari: func(baslik, mesaj string, domainID, yedekID int64) {
 			bildirim.Yaz(db, "kritik", "yedek", baslik, mesaj, domainID, "backup", yedekID)
 		},
 	}
 	i.Hazirla()
 	return i
+}
+
+// domainIslemde — alan adında yedek ya da geri yükleme sürüyor mu (yerel silme bu sırada ertelenir).
+func domainIslemde(domainID int64) bool {
+	if IlerlemeAktifMi(domainID) {
+		return true
+	}
+	yedekMu.Lock()
+	defer yedekMu.Unlock()
+	_, var_ := yedekAktif[domainID]
+	return var_
 }
 
 // StartUzakKopya — panel açılışında çağrılır; işçi goroutine'ini başlatır. Ayar

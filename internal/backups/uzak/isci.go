@@ -58,6 +58,14 @@ type Isci struct {
 	IsZamanAsimi time.Duration                  // tek işin üst sınırı; varsayılan 24 sa
 	Aralik       time.Duration                  // kuyruk yoklaması; varsayılan 30 sn
 
+	// Mesgul — alan adında yedek/geri yükleme işlemi sürüyor mu (yerel silme bu durumda ertelenir).
+	Mesgul func(domainID int64) bool
+	// SupurmeAralik — yerel silme süpürmesi (varsayılan 10 dk; yalnız yerel_sil açıkken iş yapar).
+	SupurmeAralik time.Duration
+
+	ysSilinen, ysHata int64     // cm altında
+	ysSon             time.Time // son süpürme
+
 	mu    sync.Mutex // eşzamanlılık 1
 	tetik chan struct{}
 
@@ -138,6 +146,7 @@ func (i *Isci) Calistir(ctx context.Context) {
 	iz := i.Izle()
 	iz.Calisiyor(true)
 	defer iz.Calisiyor(false)
+	var sonSupurme time.Time
 	if n, err := i.YarimlariSifirla(ctx); err != nil {
 		log.Printf("uzak kopya: yarım işler sıfırlanamadı: %v", err)
 	} else if n > 0 {
@@ -155,6 +164,15 @@ func (i *Isci) Calistir(ctx context.Context) {
 		}
 		if isDone {
 			continue
+		}
+		// İşçi boşta: yerel silme süpürmesi (kapalıysa hiçbir şey yapmaz; açılışta da koşar).
+		sa := i.SupurmeAralik
+		if sa <= 0 {
+			sa = yerelSilSupurmeVar
+		}
+		if sonSupurme.IsZero() || time.Since(sonSupurme) >= sa {
+			sonSupurme = time.Now()
+			i.YerelSupur(ctx)
 		}
 		select {
 		case <-ctx.Done():
@@ -265,6 +283,9 @@ func (i *Isci) Bir(ctx context.Context) (bool, error) {
 	i.calisanID, i.iptalFn, i.iptalIst = 0, nil, false
 	i.cm.Unlock()
 	if hata == nil {
+		// Gönderim doğrulandı ve 'tamam' yazıldı: yerel silme (kapalıysa hiçbir şey yapmaz).
+		// Başarısızlığı iş durumunu BOZMAZ.
+		i.yerelOtomatik(ctx, is.domainID)
 		return true, nil
 	}
 	if kullaniciIptali {

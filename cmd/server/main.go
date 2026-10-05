@@ -1073,6 +1073,8 @@ func main() {
 				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/mevcutlari-gonder", backupsH.UzakKopyaMevcutlariGonder)
 				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/yedek-durumlari", backupsH.UzakKopyaYedekDurumlari)
 				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/ilerleme", backupsH.UzakKopyaIlerleme)
+				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/yerel-temizle", backupsH.UzakKopyaYerelOnizle)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/yerel-temizle", backupsH.UzakKopyaYerelTemizle)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
@@ -1446,6 +1448,10 @@ func semaDogrula(d *sql.DB) {
 		// orkestratör ayarı okuyamaz (kapalı sayılır) ve uzak kopya uçları 500 verir.
 		{"backup_uzak_kopya_ayar", "saklama_n"},
 		{"backup_uzak_kopyalar", "sha256_duz"},
+		// 0141: Drive'a gönderilince yerel kopyayı sil (ayar + işaret) — yoksa uzak kopya ayarı
+		// okunamaz (kapalı sayılır) ve yedek listesi 500 verir.
+		{"backup_uzak_kopya_ayar", "yerel_sil"},
+		{"backups", "yerel_yok"},
 		// 0114: müşteri adına yapılan işlemin hostingi — yoksa denetim listesi 500
 		// verir (yazım tarafı eski biçime düşerek kaydı korur).
 		{"audit_log", "adina_domain_id"},
