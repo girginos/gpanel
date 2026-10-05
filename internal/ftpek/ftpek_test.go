@@ -534,8 +534,7 @@ func TestAski_EtkinVeHostAskisi(t *testing.T) {
 		t.Fatalf("kapalı hesap pure-ftpd'ye açık: %s %d", s, e)
 	}
 	// Hosting askıdayken hesap AÇILAMAZ: ek_etkin=1 yazılır ama status suspended kalır.
-	_, _ = db.Exec(`UPDATE domains SET askida=1 WHERE id=1`)
-	_, _ = db.Exec(`UPDATE ftp_accounts SET status='suspended' WHERE domain_id=1`)
+	_, _ = db.Exec(`UPDATE domains SET askida=1 WHERE id=1`) // yalnız domains.askida (ana hesap hâlâ active)
 	tr := true
 	h, err := Guncelle(ctx, db, GuncelleGirdi{DomainID: 1, Kullanici: k, Etkin: &tr})
 	if err != nil || h.Durum != "askida" {
@@ -544,6 +543,13 @@ func TestAski_EtkinVeHostAskisi(t *testing.T) {
 	if s, e := dur(); s != "suspended" || e != 1 {
 		t.Fatalf("askıdaki hosting: status=%s ek_etkin=%d", s, e)
 	}
+	// Yalnız ana hesap askıdaysa (domains.askida=0) da ek hesap açılamaz.
+	_, _ = db.Exec(`UPDATE domains SET askida=0 WHERE id=1`)
+	_, _ = db.Exec(`UPDATE ftp_accounts SET status='suspended' WHERE username=?`, testSK)
+	if h, err = Guncelle(ctx, db, GuncelleGirdi{DomainID: 1, Kullanici: k, Etkin: &tr}); err != nil || h.Durum != "askida" {
+		t.Fatalf("ana hesap askıdayken ek hesap açıldı: %+v %v", h, err)
+	}
+	_, _ = db.Exec(`UPDATE ftp_accounts SET status='active' WHERE username=?`, testSK)
 	// Askı kalkınca (hesapaski ftpDurum mantığı) hesap müşterinin tercihine döner: burada
 	// ek_etkin=1 → active. Listede host_askida bayrağı.
 	_, _ = db.Exec(`UPDATE domains SET askida=0 WHERE id=1`)
