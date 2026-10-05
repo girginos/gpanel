@@ -1,0 +1,15 @@
+-- 0150_ftp_ek_hesap.sql
+-- Ek FTP hesaplari (musteri, kendi alan adi altinda belirli dizinlere ozel FTP hesabi).
+-- Ek hesaplar AYNI ftp_accounts tablosunda satirdir: Pure-FTPd sorgulari (GetPW, GetUID,
+-- GetGID, GetDir) DEGISMEZ, home_dir = kisitli dizin (ChrootEveryone). Pure-FTPd yapilandirmasi
+-- ve MySQL yetkisi bu goc icin degistirilmez.
+--
+--   tur       ana = hostingin ana FTP hesabi (musteri paneli girisi, sistem kullanicisi)
+--             ek  = musterinin actigi kisitli hesap. Musteri paneline GIRIS YAPAMAZ
+--   ek_etkin  musterinin hesap bazinda actigi/kapattigi anahtar (1 acik)
+--             status = active yalniz ek_etkin=1 VE hosting askida degilse yazilir
+--
+-- Mevcut satirlar DEFAULT ile tur=ana alir. Idempotent: ADD COLUMN IF NOT EXISTS.
+-- Satir ici yorum YOK ve metinde noktalı virgül YOK: goc kosucusu yalniz basinda iki tire
+-- olan satirlari atar ve metni noktalı virgulden boler.
+ALTER TABLE ftp_accounts ADD COLUMN IF NOT EXISTS tur ENUM('ana','ek') NOT NULL DEFAULT 'ana', ADD COLUMN IF NOT EXISTS ek_etkin TINYINT(1) NOT NULL DEFAULT 1;

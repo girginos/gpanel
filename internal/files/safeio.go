@@ -499,3 +499,11 @@ func copyRegAt(sdir int, sname string, ddir int, dname string, perm uint32, uid,
 	}
 	return nil
 }
+
+// MkdirAllBeneath: mkdirAllBeneath'in dış paketler için sarmalayıcısı (ek FTP hesabı
+// dizini). Aynı symlink-güvenli yürüyüş; yeni dizinler sk sahibine chown edilir.
+func MkdirAllBeneath(home, rel, sk string) error { return mkdirAllBeneath(home, rel, sk) }
+
+// DirBeneath: rel, home altında symlink'siz bir DİZİN mi? Ara bileşen symlink ise
+// hata döner; yoksa os.IsNotExist(err) true.
+func DirBeneath(home, rel string) (bool, error) { return isDirBeneath(home, rel) }

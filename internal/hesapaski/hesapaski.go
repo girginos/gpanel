@@ -232,7 +232,10 @@ func ftpDurum(ctx context.Context, db *sql.DB, id int64, askida bool) error {
 	if askida {
 		durum = "suspended"
 	}
-	_, err := db.ExecContext(ctx, `UPDATE ftp_accounts SET status=? WHERE domain_id=?`, durum, id)
+	// Askidan alirken musterinin hesap bazinda KAPATTIGI ek hesap (ek_etkin=0) kapali kalir.
+	_, err := db.ExecContext(ctx,
+		`UPDATE ftp_accounts SET status=IF(?='active' AND tur='ek' AND ek_etkin=0, 'suspended', ?) WHERE domain_id=?`,
+		durum, durum, id)
 	return err
 }
 

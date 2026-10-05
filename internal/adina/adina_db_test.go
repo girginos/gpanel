@@ -76,7 +76,8 @@ func adGeciciDB(t *testing.T) *sql.DB {
 			ftp_user VARCHAR(64) NOT NULL DEFAULT '', askida TINYINT NULL, askida_kaynak VARCHAR(8) NULL,
 			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0)`,
 		`CREATE TABLE ftp_accounts (id BIGINT UNSIGNED PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL,
-			username VARCHAR(64) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active', token_gecersiz_ts BIGINT NULL)`,
+			username VARCHAR(64) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active', token_gecersiz_ts BIGINT NULL,
+			tur ENUM('ana','ek') NOT NULL DEFAULT 'ana', ek_etkin TINYINT(1) NOT NULL DEFAULT 1)`,
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, actor_user_id BIGINT UNSIGNED NULL,
 			actor_username VARCHAR(64) NOT NULL DEFAULT '', adina_domain_id BIGINT UNSIGNED NULL,
 			ip VARCHAR(64) NULL, action VARCHAR(64) NOT NULL,
@@ -339,5 +340,20 @@ func TestAdina_UzunOmurluAdinaToken_Reddedilir(t *testing.T) {
 	}
 	if rec := adIstek(t, h, http.MethodGet, "/domains/42", tok, nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("24 saatlik adına-token 401 beklenir: %d", rec.Code)
+	}
+}
+
+// Ek (kısıtlı) FTP hesabı panel kimliği olamaz: adına-oturum HER ZAMAN ana hesabı seçer —
+// ek hesabın id'si daha küçük olsa bile (id sırası seçimi etkilemez).
+func TestAdina_EkFTPHesabiPanelKimligiOlamaz(t *testing.T) {
+	db := adGeciciDB(t)
+	if _, err := db.Exec(`INSERT INTO ftp_accounts (id, domain_id, username, tur) VALUES (1, 42, 'a-musteri-ek', 'ek')`); err != nil {
+		t.Fatal(err)
+	}
+	h := adRouter(db)
+	tok := adinaTokenAl(t, h, bayiTok(t, bayiA), domA)
+	mc, err := auth.ParseMusteri(adSecret, tok)
+	if err != nil || mc.FTPHesapID != 5 {
+		t.Fatalf("adına-oturum ana hesabı (id 5) seçmeli, ek hesap (id 1) değil: %+v err=%v", mc, err)
 	}
 }

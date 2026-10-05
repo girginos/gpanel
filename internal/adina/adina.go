@@ -145,7 +145,7 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 	err := h.DB.QueryRowContext(r.Context(),
 		`SELECT d.alan_adi, fa.id, fa.username FROM domains d
 		   JOIN ftp_accounts fa ON fa.domain_id = d.id
-		  WHERE d.id = ?
+		  WHERE d.id = ? AND fa.tur = 'ana'
 		  ORDER BY (fa.username = d.ftp_user) DESC, fa.id
 		  LIMIT 1`, id).Scan(&alanAdi, &ftpID, &kullanici)
 	if errors.Is(err, sql.ErrNoRows) {

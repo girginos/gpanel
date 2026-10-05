@@ -91,6 +91,10 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"ftp.parola":       {TR: "FTP parolası değiştirildi", EN: "FTP password changed"},
 	"ftp.parola_api":   {TR: "FTP parolası API ile değiştirildi", EN: "FTP password changed via API"},
 	"ftp.giris_parola": {TR: "Müşteri giriş parolası değiştirildi", EN: "Customer login password changed"},
+	"ftp.ek_olustur":   {TR: "Ek FTP hesabı oluşturuldu", EN: "Extra FTP account created"},
+	"ftp.ek_guncelle":  {TR: "Ek FTP hesabı güncellendi", EN: "Extra FTP account updated"},
+	"ftp.ek_parola":    {TR: "Ek FTP hesabının parolası değiştirildi", EN: "Extra FTP account password changed"},
+	"ftp.ek_sil":       {TR: "Ek FTP hesabı silindi", EN: "Extra FTP account deleted"},
 
 	// Bayi
 	"bayi.olustur":    {TR: "Bayi oluşturuldu", EN: "Reseller created"},

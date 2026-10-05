@@ -59,7 +59,8 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ftp_accounts'tan kontrol
+	// ftp_accounts'tan kontrol. YALNIZ ana hesap (tur='ana'): musterinin actigi kisitli ek FTP
+	// hesaplari (tur='ek') panele GIRIS YAPAMAZ — dizin-kisitli hesap tam panel yetkisi kazanmasin.
 	var ftpID, domainID int64
 	var passDB, alanAdi, status string
 	var domainAskida int
@@ -67,7 +68,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		`SELECT fa.id, fa.domain_id, fa.password_md5, fa.status, d.alan_adi, COALESCE(d.askida,0)
 		 FROM ftp_accounts fa
 		 JOIN domains d ON d.id = fa.domain_id
-		 WHERE fa.username = ?`, req.Kullanici).
+		 WHERE fa.username = ? AND fa.tur = 'ana'`, req.Kullanici).
 		Scan(&ftpID, &domainID, &passDB, &status, &alanAdi, &domainAskida)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Olmayan kullanıcıda da crypt doğrulaması KOŞAR: var olan ve olmayan hesap
