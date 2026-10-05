@@ -72,6 +72,10 @@ func TestOnyuz_MusteriGuvenlikSatirVeBulgu(t *testing.T) {
 		"oneriMetni(b)", "b.duzeltme_surumu", "b.baglanti", `rel="noreferrer noopener"`, "Ikon d={I.harici}",
 		"cevir('Hepsi')", "cevir('Bu filtreyle açık yok.')", "cevir('Bu alan adında bilinen açık bulunmadı.')",
 		"ek_alan_id: String(ekID)")
+	// Ek rozeti hem tabloda hem mobil kartta çizilir (iki yerde).
+	if n := strings.Count(sayfa, "{u.ek && <EkRozeti />}"); n != 2 {
+		t.Errorf("Ek rozeti tablo + kart olmak üzere 2 yerde çizilmeli: %d", n)
+	}
 	// Hesabın "Tara" hakkı bilgisi.
 	wsIcerir(t, "sayfa", sayfa, "liste.tara.soguma_dk", "liste.tara.gunluk_kalan")
 }
@@ -82,9 +86,9 @@ func TestOnyuz_MusteriGuvenlikBosHataVeFeedSeridi(t *testing.T) {
 	wsIcerir(t, "sayfa", sayfa,
 		"<EmptyState", "cevir('İlk taramayı başlat')", "hicTaranmamis", "const ilkTarama = async",
 		"cevir('Yükleniyor…')", "cevir('Güvenlik bilgileri alınamadı')", "cevir('Tekrar dene')",
-		"liste.feed_uyari", "Güvenlik veri kaynaklarına şu an erişilemiyor, sonuçlar güncel olmayabilir.",
+		"{liste.feed_uyari && (", "Güvenlik veri kaynaklarına şu an erişilemiyor, sonuçlar güncel olmayabilir.",
 		"<TaramaButonu", "zamanYaz(liste.ozet.son_tarama)", "zamanYaz(u.domain_son_tarama)")
-	wsIcermez(t, "sayfa", sayfa, "toLocaleString", "Hepsini Tara", "Tümünü Tara")
+	wsIcermez(t, "sayfa", sayfa, "toLocaleString", "Hepsini Tara", "Tümünü Tara", "false && ")
 }
 
 // Mobil (375 px): kart listesi, yatay kaydırma yok; koyu tema; küçük buton kuralı.
