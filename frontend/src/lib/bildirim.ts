@@ -85,7 +85,7 @@ export function hedef(b: Bildirim, rol: Rol | null | undefined): string | null {
       case 'yedek': return `${kok}/yedekler`
       case 'ssl': return `${kok}/ssl`
       case 'antivirus': case 'zincir': return `${kok}/imunify`
-      case 'websec': return musteri ? kok : `/website-security/domain/${d}`
+      case 'websec': return musteri ? `${kok}/guvenlik` : `/website-security/domain/${d}`
       default: return kok // kota, askı, diğerleri: aboneliğin ana sayfası
     }
   }
