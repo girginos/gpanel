@@ -69,6 +69,8 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"marka.ayar":                       {TR: "Marka ayarları değiştirildi", EN: "Branding settings changed"},
 	"marka.alanadi.ekle":               {TR: "Özel panel adresi eklendi", EN: "Custom panel address added"},
 	"marka.alanadi.dogrula":            {TR: "Özel panel adresi doğrulandı", EN: "Custom panel address verified"},
+	"marka.alanadi_uygula":             {TR: "Özel panel adresi uygulandı", EN: "Custom panel address applied"},
+	"marka.alanadi_dns_eklendi":        {TR: "Özel panel adresi için DNS A kaydı eklendi", EN: "DNS A record added for custom panel address"},
 	"marka.alanadi.sil":                {TR: "Özel panel adresi kaldırıldı", EN: "Custom panel address removed"},
 	"auth.login.marka_host":            {TR: "Yanlış panel adresinden giriş reddi", EN: "Login rejected: wrong panel address"},
 	"api_anahtar.olustur":              {TR: "API anahtarı oluşturuldu", EN: "API key created"},

@@ -74,7 +74,7 @@ func ktDB(t *testing.T) *sql.DB {
 			t.Fatalf("hazırlık: %v\n%s", err, q)
 		}
 	}
-	for _, dosya := range []string{"0122_bayi_marka.sql", "0123_bayi_marka_alanadi.sql"} {
+	for _, dosya := range []string{"0122_bayi_marka.sql", "0123_bayi_marka_alanadi.sql", "0170_marka_alanadi_uygula.sql"} {
 		ktGoc(t, db, dosya)
 	}
 	return db

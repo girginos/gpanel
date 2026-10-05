@@ -86,13 +86,25 @@ type alanKaydi struct {
 	SonHata   string `json:"son_hata"`
 	Olusturma string `json:"olusturma"`
 	SSLBitis  string `json:"ssl_bitis"`
+
+	// Uygula akışı (göç 0170).
+	Adim         *adimBilgi   `json:"adim,omitempty"`
+	Adimlar      []adimSatir  `json:"adimlar,omitempty"`
+	DNSKaynak    string       `json:"dns_kaynak"`
+	DNSKayitlari []dnsTalimat `json:"dns_kayitlari,omitempty"`
+	Isleniyor    bool         `json:"isleniyor"`
+
+	adim, adimMesaj, adimZaman string
+	bitis                      time.Time
 }
 
 func alanOku(ctx context.Context, db *sql.DB, rid int64) (*alanKaydi, error) {
 	var k alanKaydi
+	var bitis sql.NullString
 	err := db.QueryRowContext(ctx, `SELECT alan_adi, durum, dogrulama, son_hata_genel, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i'),
-		COALESCE(DATE_FORMAT(ssl_bitis,'%Y-%m-%d'),'')
-		FROM cp_marka_alanadi WHERE reseller_id=?`, rid).Scan(&k.AlanAdi, &k.Durum, &k.TXTDeger, &k.SonHata, &k.Olusturma, &k.SSLBitis)
+		COALESCE(DATE_FORMAT(ssl_bitis,'%Y-%m-%d'),''), adim, adim_mesaj, dns_kaynak, COALESCE(DATE_FORMAT(adim_zaman,'%Y-%m-%d %H:%i:%s'),''), DATE_FORMAT(yoklama_bitis,'%Y-%m-%d %H:%i:%s')
+		FROM cp_marka_alanadi WHERE reseller_id=?`, rid).Scan(&k.AlanAdi, &k.Durum, &k.TXTDeger, &k.SonHata, &k.Olusturma, &k.SSLBitis,
+		&k.adim, &k.adimMesaj, &k.DNSKaynak, &k.adimZaman, &bitis)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -100,6 +112,7 @@ func alanOku(ctx context.Context, db *sql.DB, rid int64) (*alanKaydi, error) {
 		return nil, err
 	}
 	k.TXTAd = DogrulamaOnek + k.AlanAdi
+	k.bitis = zamanOku(bitis)
 	return &k, nil
 }
 
@@ -127,7 +140,7 @@ func (h *Handlers) AlanGetir(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := alanOku(r.Context(), h.DB, k.RID)
+	a, err := h.alanGorunum(r.Context(), k.RID)
 	if err != nil {
 		yazHata(w, http.StatusInternalServerError, "Özel adres okunamadı.")
 		return
@@ -181,7 +194,7 @@ func (h *Handlers) AlanEkle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.denetim(r, "marka.alanadi.ekle", ad, "", k.RID, true)
-	a, _ := alanOku(r.Context(), h.DB, k.RID)
+	a, _ := h.alanGorunum(r.Context(), k.RID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kayit": a, "sunucu_ip": h.SunucuIPleri})
 }
 
@@ -195,6 +208,14 @@ func (h *Handlers) AlanDogrula(w http.ResponseWriter, r *http.Request) {
 	if err != nil || a == nil {
 		yazHata(w, http.StatusNotFound, "Özel adres bulunamadı.")
 		return
+	}
+	if a.adim != "" {
+		// Uygula akışının satırı: "Şimdi kontrol et" (TXT'siz yerel sahiplik satırını
+		// eski doğrulama BOZMASIN diye eski yol bu satırlara hiç dokunmaz).
+		if sat, err := h.satirOku(r.Context(), k.RID); err == nil && sat != nil {
+			h.alanSimdiKontrol(w, r, k.RID, sat)
+			return
+		}
 	}
 	hata := ""
 	if !aBuSunucuya(a.AlanAdi, h.SunucuIPleri) {
@@ -218,7 +239,7 @@ func (h *Handlers) AlanDogrula(w http.ResponseWriter, r *http.Request) {
 		alanDegisti(a.AlanAdi)
 	}
 	h.denetim(r, "marka.alanadi.dogrula", a.AlanAdi, durum, k.RID, hata == "")
-	a2, _ := alanOku(r.Context(), h.DB, k.RID)
+	a2, _ := h.alanGorunum(r.Context(), k.RID)
 	kod := http.StatusOK
 	if hata != "" {
 		kod = http.StatusUnprocessableEntity
