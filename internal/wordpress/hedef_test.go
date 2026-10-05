@@ -888,3 +888,43 @@ func TestHedefAdGuvenli(t *testing.T) {
 		}
 	}
 }
+
+// docrootDurum yalnız ek alan için kapı; alt alan ve ana alan için kök adımların güvenliği
+// docrootGuvenli'ye dayanır — sembolik bağ ile başka hesaba yönlendirme reddedilmeli.
+func TestKur_AltAlan_SembolikBag_BaskaHesabaYonlendirme(t *testing.T) {
+	o := wh_ortam(t)
+	kurban := o.ev + "/" + wh_sk2 + "/public_html"
+	dal := o.ev + "/" + wh_sk1 + "/subdomains/" + wh_alt1
+	if err := os.RemoveAll(dal); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(kurban, dal); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(kurban + "/index.html") // kurban boş: kurulumZatenVar geçerdi
+	kod, _ := wh_kur(o, fmt.Sprintf("/domains/1/subdomain/%d/wordpress", wh_sid1), "")
+	if kod != 400 || len(o.komutlar()) != 0 {
+		t.Fatalf("alt alan docroot sembolik bağı reddedilmeli: %d %v", kod, o.komutlar())
+	}
+	if _, err := os.Stat(kurban + "/wp-config.php"); err == nil {
+		t.Fatal("kurban hesabın docroot'una yazıldı")
+	}
+}
+
+func TestKur_AltDizinSembolikBag_BaskaHesabaYonlendirme(t *testing.T) {
+	o := wh_ortam(t)
+	kurban := o.ev + "/" + wh_sk2 + "/public_html/bos"
+	if err := os.MkdirAll(kurban, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(kurban, o.ekRoot(wh_sk1, wh_ek1)+"/blog"); err != nil {
+		t.Fatal(err)
+	}
+	kod, _ := wh_kur(o, fmt.Sprintf("/domains/1/ek-alan-adlari/%d/wordpress", wh_eid1), "blog")
+	if kod != 400 || len(o.komutlar()) != 0 {
+		t.Fatalf("alt dizin sembolik bağı reddedilmeli: %d %v", kod, o.komutlar())
+	}
+	if _, err := os.Stat(kurban + "/wp-config.php"); err == nil {
+		t.Fatal("kurban dizine yazıldı")
+	}
+}
