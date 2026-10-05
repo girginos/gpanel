@@ -22,6 +22,7 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import type { Ton } from '@/components/tonlar'
 import { useRol, yoneticiMi } from '@/lib/rol'
 import BayiDomainler from '@/components/bayi/BayiDomainler'
+import { KullanimHucre } from '@/components/bayi/Hucreler'
 
 type Domain = {
   id: number; alan_adi: string; sistem_kullanici: string
@@ -29,7 +30,7 @@ type Domain = {
   php_surum?: string; is_demo?: boolean
   olusturulma?: string; plan_id?: number; plan_ad?: string
   sahip_ad?: string; sahip_tur?: string; reseller_id?: number
-  ssl?: boolean; ssl_bitis?: string; askida?: boolean; disk_kota_mb?: number; ipv4?: string
+  ssl?: boolean; ssl_bitis?: string; askida?: boolean; disk_kota_mb?: number; trafik_kota_mb?: number; ipv4?: string
 }
 type SubGenel = {
   id: number; alt_ad: string; tam_ad: string
@@ -93,18 +94,14 @@ const KOL = {
   plan: '@max-[632px]:lg:hidden!',
   sahip: '@max-[786px]:lg:hidden!',
   disk: '@max-[863px]:lg:hidden!',
-  sk: '@max-[1003px]:lg:hidden!',
+  trafik: '@max-[1003px]:lg:hidden!',
   olusturulma: '@max-[1103px]:lg:hidden!',
 } as const
 
-function fmtKB(kb: number) {
-  if (kb < 1024) return kb + ' KB'
-  if (kb < 1024 * 1024) return (kb / 1024).toFixed(1) + ' MB'
-  return (kb / 1024 / 1024).toFixed(2) + ' GB'
-}
 
 
 const DOMAINS_EN: Record<string, string> = {
+  "Trafik": "Traffic",
   "ornek.com": "example.com",
   "(varsayılan)": "(default)",
   "Alan adı": "Domain name",
@@ -724,10 +721,10 @@ export default function DomainsPage() {
                     className="cursor-pointer" />
                 </th>
                 <th className={T.baslik}>{cevir("Domain Adı")}</th>
-                <th className={`${T.baslik} ${KOL.sk}`}>{cevir("Sistem Kullanıcısı")}</th>
                 {sahipKolonu && <th className={`${T.baslik} ${KOL.sahip}`}>{cevir("Kullanıcı")}</th>}
                 <th className={`${T.baslik} ${KOL.plan}`}>Plan</th>
                 <th className={`${T.baslik} ${KOL.disk}`}>Disk</th>
+                <th className={`${T.baslik} ${KOL.trafik}`}>{cevir("Trafik")}</th>
                 <th className={T.baslik}>{cevir("Durum")}</th>
                 <th className={`${T.baslik} ${KOL.olusturulma}`}>{cevir("Oluşturulma")}</th>
                 <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
@@ -753,9 +750,6 @@ export default function DomainsPage() {
                       {d.is_demo && <Badge color="warning" variant="soft" className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 shrink-0">DEMO</Badge>}
                       </span>
                     </td>
-                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sk}`} data-etiket={cevir("Sistem Kullanıcısı")}>
-                      <span title={d.sistem_kullanici} className="font-mono text-xs text-slate-600 dark:text-slate-400 inline-block max-w-[7rem] truncate align-bottom lg:text-left">{d.sistem_kullanici}</span>
-                    </td>
                     {sahipKolonu && (
                       <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sahip}`} data-etiket={cevir("Kullanıcı")}>
                         <SahipHucre ad={d.sahip_ad} tur={d.sahip_tur} />
@@ -769,7 +763,10 @@ export default function DomainsPage() {
                           : <span title={d.plan_ad} className="text-slate-700 dark:text-slate-300 inline-block max-w-full lg:max-w-[7rem] truncate align-bottom">{d.plan_ad}</span>}
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
-                      <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(d.boyut_kb)}</span>
+                      <KullanimHucre kullanilanMB={d.boyut_kb / 1024} kotaMB={d.disk_kota_mb} etiket={`${d.alan_adi} ${cevir("Disk")}`} />
+                    </td>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.trafik}`} data-etiket={cevir("Trafik")}>
+                      <KullanimHucre kullanilanMB={(d.trafik_kb || 0) / 1024} kotaMB={d.trafik_kota_mb} etiket={`${d.alan_adi} ${cevir("Trafik")}`} />
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap`} data-etiket={cevir("Durum")}>
                       <Badge color={durumRenk(d.durum)} variant="soft" className="text-[10px] uppercase tracking-wider px-2 py-0.5 font-semibold">{d.durum}</Badge>
@@ -800,9 +797,6 @@ export default function DomainsPage() {
                         <Badge color="info" variant="soft" className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 align-middle shrink-0 whitespace-nowrap @max-[739px]:lg:hidden!">{cevir("alt alan")}</Badge>
                       </span>
                     </td>
-                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sk}`} data-etiket={cevir("Sistem Kullanıcısı")}>
-                      <span title={sd.sistem_kullanici} className="font-mono text-xs text-slate-500 dark:text-slate-400 inline-block max-w-[7rem] truncate align-bottom">{sd.sistem_kullanici}</span>
-                    </td>
                     {sahipKolonu && (
                       <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.sahip}`} data-etiket={cevir("Kullanıcı")}>
                         <span title={d.sahip_ad} className="text-xs text-slate-400 dark:text-slate-500 truncate inline-block max-w-full lg:max-w-[8rem] align-bottom">{d.sahip_ad || '—'}</span>
@@ -812,6 +806,9 @@ export default function DomainsPage() {
                       <span className="text-slate-400 dark:text-slate-500 italic">—</span>
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.disk}`} data-etiket="Disk">
+                      <span className="text-slate-300 dark:text-slate-600">—</span>
+                    </td>
+                    <td className={`${T.hucre} lg:whitespace-nowrap ${KOL.trafik}`} data-etiket={cevir("Trafik")}>
                       <span className="text-slate-300 dark:text-slate-600">—</span>
                     </td>
                     <td className={`${T.hucre} lg:whitespace-nowrap`} data-etiket={cevir("Durum")}>
