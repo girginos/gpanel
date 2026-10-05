@@ -152,6 +152,19 @@ func TestEkKlasorTasi_SymlinkTasinmaz(t *testing.T) {
 	if !yokMu(dis + "/s.example.org") {
 		t.Fatal("dış dizine yazıldı (kaçış)")
 	}
+	// hedef taban hesap İÇİNDE başka bir dizine sembolik bağlantı (EvalSymlinks tek başına yakalamaz).
+	_ = os.Remove(yeni)
+	ic := evKoku + "/" + sk + "/baska"
+	_ = os.MkdirAll(ic, 0o755)
+	if err := os.Symlink(ic, yeni); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := ekKlasorTasi(context.Background(), sk, l, tasimaTamam); err == nil || n != 0 {
+		t.Fatalf("hesap içi sembolik hedef taban reddedilmeli: %d %v", n, err)
+	}
+	if !yokMu(ic + "/s.example.org") {
+		t.Fatal("sembolik hedefin içine taşındı")
+	}
 }
 
 func TestEkKlasorTasi_BosKaynakKaldirilir(t *testing.T) {
