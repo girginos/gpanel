@@ -218,7 +218,8 @@ func TestAltAlanVhostHatasi_BayiMusteriyeHamCiktiDonmez_YoneticiAyni(t *testing.
 	}
 }
 
-// SSL kurulumunun kendi komutları: acme.sh --issue / --install-cert ve openssl
+// SSL kurulumunun kendi komutları: acme.sh --install-cert ve openssl
+// (acme.sh --issue artık sınıflanır: acme_test.go)
 // çıktısı (sunucunun ACME hesap dizini, hesap parmak izi, reload çıktısı).
 func TestAltAlanSSLKomutHatasi_BayiMusteriyeHamCiktiDonmez_YoneticiAyni(t *testing.T) {
 	durumlar := []struct {
@@ -228,8 +229,6 @@ func TestAltAlanSSLKomutHatasi_BayiMusteriyeHamCiktiDonmez_YoneticiAyni(t *testi
 		kod       int
 		onek      string
 	}{
-		{"acme-issue", hk_sslKurLE, map[string]string{"/root/.acme.sh/acme.sh": hk_acme}, http.StatusBadRequest,
-			"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "},
 		{"openssl", hk_sslKurSelf, map[string]string{"openssl": hk_acme}, http.StatusInternalServerError, "openssl: "},
 	}
 	for _, d := range durumlar {

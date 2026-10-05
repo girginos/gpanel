@@ -294,62 +294,11 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// vhost — yeni alt alanın İLK vhost'u. TEK üretici renderSubVhost'tur (acme.go ADR):
+// eskiden burada ayrı bir şablon vardı ve challenge'ı kiracı docroot'undan sunduğu
+// için Let's Encrypt 404 alıyordu. Ayarlar sonradan DB'den okununca (rebuildVhostDB)
+// aynı şablon varsayılan ayarlarla zaten üretilmişti.
 func vhost(tamAd, docroot, socket, koruma string) string {
-	return `server {
-    listen 80;
-    listen [::]:80;
-    server_name ` + tamAd + `;
-
-    root ` + docroot + `;
-    index index.php index.html index.htm;
-
-    access_log /var/log/nginx/` + tamAd + `.access.log;
-    error_log  /var/log/nginx/` + tamAd + `.error.log warn;
-
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    location /.well-known/acme-challenge/ {
-        auth_basic off;
-        root ` + docroot + `;
-        try_files $uri =404;
-    }
-
-` + koruma + `
-    error_page 404 /_gosp_404.html;
-    location = /_gosp_404.html {
-        root /usr/share/girginospanel/errors;
-        internal;
-        access_log off;
-    }
-    location ^~ /_gosp/ {
-        alias /usr/share/girginospanel/errors/;
-        access_log off;
-        expires 7d;
-        gzip on;
-        gzip_types application/json application/javascript;
-    }
-
-    location / { try_files $uri $uri/ /index.php?$query_string; }
-
-    location ~ \.php$ {
-        try_files $uri =404;
-        fastcgi_split_path_info ^(.+\.php)(/.+)$;
-        fastcgi_pass unix:` + socket + `;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_read_timeout 60s;
-    }
-
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff2?|svg|webp|avif|pdf|zip|gz)$ {
-        expires 30d;
-        access_log off;
-    }
-
-    location ~ /\.(?!well-known) { deny all; }
-
-    # GirginOSPanel subdomain — ` + tamAd + `
-}
-`
+	return renderSubVhost(subVhostOpts{TamAd: tamAd, DocRoot: docroot, Socket: socket,
+		Backend: "php-fpm", Koruma: koruma, N: subNginxDefaults()})
 }

@@ -441,6 +441,9 @@ func main() {
 	// birakilsaydi "panelde gorunmeyen kesinti" sinifi ozelligin alt alan
 	// yarisinda oldugu gibi kalirdi.
 	subdomain.HealAltAlanSapmasi(d)
+	// Eski şablonla yazılmış alt alan vhost'larının ACME challenge kökünü düzelt
+	// (Let's Encrypt 404; yalnız panelin ürettiği biçim, nginx -t geri alma).
+	subdomain.HealAltAlanAcmeKalibi(d)
 	// Hesap askısı uzlaştırması: askıdaki HER hesaba askı adımlarını (ana + alt
 	// alan vhost'ları, PHP havuzları, Laravel işleyicileri, FTP/SSH/DB girişleri,
 	// cron) yeniden uygular. Hesap askısı genişletilmeden önce askıya alınmış

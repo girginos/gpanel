@@ -112,6 +112,13 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 		// kisitlamasini atlatma kapisi acar (olculdu). Vhost tarafi da AYNI
 		// koku gosteriyor; ikisi birlikte degismeli.
 		_ = acmeKoku()
+		// Ön doğrulama (acme.go ADR-3): vhost'un challenge kökü doğru değilse
+		// acme.sh'tan ÖNCE onarılır; aksi halde doğrulama 404 ile düşer.
+		if err := h.acmeVhostHazir(r.Context(), sslSid(r), sk, altAd, tamAd, phpSurum); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError,
+				"Doğrulama dosyasına erişilemedi (sunucu yapılandırması): "+nginxset.SunucuHatasi(r, "subdomain.ssl-acme-vhost", id, err))
+			return
+		}
 		_, _ = komut("restorecon", "-R", filepath.Join(docroot, ".well-known"))
 		if out, err := komut("/root/.acme.sh/acme.sh", "--issue", "--server", "letsencrypt",
 			"--config-home", provisioner.AcmeConfigHome(), "--webroot", acmeKoku(),
@@ -121,8 +128,7 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 			// (eski hata) ikinci kurulumda "Let's Encrypt alınamadı" yanılgısı verip panel SSL'i
 			// hiç kurmuyordu. Yalnız DİĞER çıkış kodları (DNS/challenge hatası) gerçek başarısızlık.
 			if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 {
-				httpx.WriteError(w, http.StatusBadRequest,
-					"Let's Encrypt alınamadı (subdomain DNS'i bu sunucuya A kaydıyla yönlendirilmeli): "+komutHatasi(r, "subdomain.ssl-le", id, out))
+				httpx.WriteError(w, http.StatusBadRequest, acmeHataMesaji("subdomain.ssl-le", id, tamAd, out))
 				return
 			}
 		}
