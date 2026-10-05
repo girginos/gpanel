@@ -248,7 +248,7 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
       setDurum(r.data)
       if (r.data?.yukleniyor && durumDeneme.current < 8) {
         durumDeneme.current++
-        durumZaman.current = window.setTimeout(() => durumYukle(true), 2500)
+        durumZaman.current = window.setTimeout(() => durumYukle(true), 1500)
       }
     }).catch(() => { if (_n !== durumYukleNesli.current) return; setDurum(null) })
     // eslint-disable-next-line react-hooks/exhaustive-deps

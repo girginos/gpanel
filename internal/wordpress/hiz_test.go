@@ -426,6 +426,9 @@ func TestListeJSON_HataVeBozukCiktiOnbelleklenmez(t *testing.T) {
 func TestDurum_DBBoyutuArkaPlanVeTemizleme(t *testing.T) {
 	agirOnb = yeniOnbellek(time.Minute, 64)
 	phpOnb = yeniOnbellek(time.Minute, 4)
+	eskiBekle := dbIlkBekle
+	dbIlkBekle = 20 * time.Millisecond // yavaş db → ilk yanıt yukleniyor=true yolu
+	defer func() { dbIlkBekle = eskiBekle }()
 	phpCalistir = func(context.Context) ([]byte, error) { return []byte("8.3.1\n"), nil }
 	srv, _ := apiSunucu(t, func(string) (int, string) {
 		return 200, `{"offers":[{"response":"upgrade","current":"7.1.2"}]}`

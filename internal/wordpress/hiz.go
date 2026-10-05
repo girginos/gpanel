@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -314,7 +315,12 @@ func (o *onbellek) Yap(ctx context.Context, key string, sure time.Duration, fn f
 				return nil, ctx.Err()
 			}
 		}
+		eski := e
 		e = &onbOge{bekleyen: make(chan struct{})}
+		if eski != nil && eski.deger != nil {
+			// yenileme sürerken bayat değer okunabilir kalır (BayatBak); Sil bunu temizler.
+			e.deger, e.gecerli = eski.deger, eski.gecerli
+		}
 		o.sigdir(key)
 		o.m[key] = e
 		nesil := o.nesil
@@ -379,15 +385,45 @@ func (o *onbellek) Sil(onek string) {
 	defer o.mu.Unlock()
 	o.nesil++
 	for k, e := range o.m {
-		if strings.HasPrefix(k, onek) && e.bekleyen == nil {
+		if !strings.HasPrefix(k, onek) {
+			continue
+		}
+		if e.bekleyen == nil {
 			delete(o.m, k)
+		} else {
+			// uçuştaki yenilemenin eski (mutasyon öncesi) değeri artık sunulmaz.
+			e.deger, e.gecerli = nil, time.Time{}
 		}
 	}
 }
 
+// BayatBak: değer taze değilse bile, süresi dolalı en çok bayat kadar olmuşsa döner
+// (yenileme sürüyor olsa da). Sil'den sonra hiçbir bayat değer kalmaz.
+func (o *onbellek) BayatBak(key string, bayat time.Duration) (any, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if e := o.m[key]; e != nil && e.deger != nil && o.simdi().Before(e.gecerli.Add(bayat)) {
+		return e.deger, true
+	}
+	return nil, false
+}
+
+// YapBayat (stale-while-revalidate): taze → onu; bayat penceresinde → bayat değeri HEMEN
+// döner ve yenileme arka planda başlar; hiç yoksa Yap gibi bekler. Hata önbelleğe alınmaz.
+func (o *onbellek) YapBayat(ctx context.Context, key string, sure, bayat time.Duration, fn func(context.Context) (any, error)) (any, error) {
+	if d, ok := o.Bak(key); ok {
+		return d, nil
+	}
+	if d, ok := o.BayatBak(key, bayat); ok {
+		o.Arka(key, sure, fn)
+		return d, nil
+	}
+	return o.Yap(ctx, key, sure, fn)
+}
+
 var (
 	// listeOnb: eklenti/tema/kullanıcı listesi (gonderJSON'dan geçmiş, doğrulanmış dizi).
-	listeOnb = yeniOnbellek(45*time.Second, 1024)
+	listeOnb = yeniOnbellek(60*time.Second, 1024)
 	// agirOnb: DB boyutu gibi ağır, nadir değişen alanlar (arka planda hesaplanır).
 	agirOnb = yeniOnbellek(10*time.Minute, 2048)
 	// siteOnb: wp-cli siteurl (nadiren değişir).
@@ -403,10 +439,40 @@ func wpOnbellekSil(sk, dir string) {
 	siteOnb.Sil(p)
 }
 
-// listeJSON: wp-cli JSON dizisi çıktısını doğrulayıp önbellekle döner. Hata → [] (eski
-// davranış), hata önbelleğe alınmaz.
+// Bayat pencereleri: değer TTL'den sonra da bu süre boyunca HEMEN sunulur, yenileme arka
+// planda yürür (stale-while-revalidate). Mutasyon (wpOnbellekSil) bayat değeri de atar.
+// WordPress güncelleme bilgisini zaten saatlerce önbellekler → liste bayatlığı zararsız.
+const (
+	listeBayat = 30 * time.Minute
+	dbBayat    = 24 * time.Hour
+)
+
+// listeTanim: sekme listesinin wp-cli argv'si + süre sınırı (tek yer: uç ve ön-ısıtma aynı).
+func listeTanim(tur, dir string) ([]string, time.Duration) {
+	switch tur {
+	case "plugin", "theme":
+		return []string{tur, "list", "--path=" + dir, "--format=json",
+			"--fields=name,status,version,update,update_version"}, 40 * time.Second
+	case "user":
+		return []string{"user", "list", "--path=" + dir, "--format=json",
+			"--fields=ID,user_login,user_email,display_name,roles"}, 30 * time.Second
+	}
+	return nil, 0
+}
+
+// listeTur: tanımlı liste türünü (plugin/theme/user) önbellekli getirir.
+func listeTur(ctx context.Context, sk, dir, tur string) []json.RawMessage {
+	args, sure := listeTanim(tur, dir)
+	if args == nil {
+		return []json.RawMessage{}
+	}
+	return listeJSON(ctx, sk, dir, tur, sure, args...)
+}
+
+// listeJSON: wp-cli JSON dizisi çıktısını doğrulayıp önbellekle döner (SWR). Hata → []
+// (eski davranış), hata önbelleğe alınmaz.
 func listeJSON(ctx context.Context, sk, dir, tur string, sure time.Duration, args ...string) []json.RawMessage {
-	d, err := listeOnb.Yap(ctx, onbAnahtar(sk, dir, tur), sure, func(c context.Context) (any, error) {
+	d, err := listeOnb.YapBayat(ctx, onbAnahtar(sk, dir, tur), sure, listeBayat, func(c context.Context) (any, error) {
 		raw, e := wpOku(c, sk, args...)
 		if e != nil {
 			return nil, e
@@ -426,6 +492,103 @@ func listeJSON(ctx context.Context, sk, dir, tur string, sure time.Duration, arg
 		return []json.RawMessage{}
 	}
 	return d.([]json.RawMessage)
+}
+
+// dbIlkBekle: Durum yanıtı DB boyutunu en çok bu kadar bekler (sonra yukleniyor=true). Test kancası.
+var dbIlkBekle = time.Second
+
+func dbBoyutuCek(sk, dir string) func(context.Context) (any, error) {
+	return func(c context.Context) (any, error) {
+		b, e := wpOku(c, sk, "db", "size", "--size_format=mb", "--path="+dir)
+		if e != nil {
+			return nil, e
+		}
+		return dbBoyutuTemiz(string(b)), nil
+	}
+}
+
+// dbBoyutuAl: DB boyutu (MB). Önbellekte (bayat olsa da) varsa HEMEN; yoksa en çok bekle
+// kadar bekler, yetişmezse yukleniyor=true (iş arkada sürer, istemci yeniden sorar).
+func dbBoyutuAl(ctx context.Context, sk, dir string, bekle time.Duration) (mb string, yukleniyor bool) {
+	key := onbAnahtar(sk, dir, "dbmb")
+	if d, ok := agirOnb.BayatBak(key, dbBayat); ok {
+		if _, taze := agirOnb.Bak(key); !taze {
+			agirOnb.Arka(key, 40*time.Second, dbBoyutuCek(sk, dir))
+		}
+		mb, _ = d.(string)
+		return mb, false
+	}
+	type sonuc struct {
+		v  string
+		ok bool
+	}
+	ch := make(chan sonuc, 1)
+	go func() {
+		d, err := agirOnb.Yap(context.Background(), key, 40*time.Second, dbBoyutuCek(sk, dir))
+		v, _ := d.(string)
+		ch <- sonuc{v, err == nil}
+	}()
+	t := time.NewTimer(bekle)
+	defer t.Stop()
+	select {
+	case r := <-ch:
+		return r.v, false // hata → "" ve yukleniyor=false: istemci "—" gösterir, döngü yok
+	case <-t.C:
+		return "", true
+	case <-ctx.Done():
+		return "", true
+	}
+}
+
+// ---------------------------------------------------------------- arka plan ön-ısıtma
+
+var (
+	isitDevam sync.Map     // "sk\x00dir" → iş sürüyor (tekilleştirme)
+	isitSayac atomic.Int32 // sırada/çalışan toplam iş (üst sınır)
+	isitSem   = make(chan struct{}, 1)
+)
+
+const isitAzami = 64
+
+// wpIsit: bir WordPress'in DB boyutu + eklenti/tema/kullanıcı listelerini ARKA PLANDA,
+// TEK TEK (genel tek slot: CPU'yu kiracılardan çalmaz) önbelleğe koyar; sekmeye geçildiğinde
+// liste hazırdır. Zaten (bayat da olsa) önbellekte olan türler atlanır. Aynı site için
+// tekilleştirilir, toplam iş sayısı sınırlıdır; hata sessizce yutulur (istek yolu yeniden dener).
+func wpIsit(sk, dir string) {
+	k := sk + "\x00" + dir
+	if _, var_ := isitDevam.LoadOrStore(k, struct{}{}); var_ {
+		return
+	}
+	if isitSayac.Add(1) > isitAzami {
+		isitSayac.Add(-1)
+		isitDevam.Delete(k)
+		return
+	}
+	go func() {
+		defer func() { isitSayac.Add(-1); isitDevam.Delete(k) }()
+		isitSem <- struct{}{}
+		defer func() { <-isitSem }()
+		ctx, iptal := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer iptal()
+		if _, ok := agirOnb.BayatBak(onbAnahtar(sk, dir, "dbmb"), dbBayat); !ok {
+			dbBoyutuAl(ctx, sk, dir, 40*time.Second)
+		}
+		for _, tur := range []string{"plugin", "theme", "user"} {
+			if ctx.Err() != nil {
+				return
+			}
+			if _, ok := listeOnb.BayatBak(onbAnahtar(sk, dir, tur), listeBayat); ok {
+				continue
+			}
+			listeTur(ctx, sk, dir, tur)
+		}
+	}()
+}
+
+// wpMutasyonSonu: mutasyon SONRASI — önbelleği at (bayat dahil) ve arkada yeniden ısıt.
+func wpMutasyonSonu(sk, dir string) {
+	wpOnbellekSil(sk, dir)
+	wpIsit(sk, dir)
 }
 
 // phpSurumu: panelin wp-cli'de kullandığı php'nin sürümü (tüm siteler için aynı) — site
