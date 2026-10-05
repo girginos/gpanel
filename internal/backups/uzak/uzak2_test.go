@@ -370,3 +370,22 @@ func TestSifreleHataDagitimiVeAkis(t *testing.T) {
 		t.Errorf("anahtarsız dosya: %v", err)
 	}
 }
+
+func TestManifestYazilamazsaTamamSayilmaz(t *testing.T) {
+	o := yeniOrtam(t)
+	o.ayar(nil)
+	o.sar.manifestHata = hedef.YeniHata(hedef.KategoriAg, "yukle", errors.New("kesildi"))
+	id := o.kuyrukla(o.yedek(1, "c_a", "20260825-020000", sahteIcerik(4000, 1), "oto", nil))
+	o.calis()
+	d := o.is(id)
+	if d.durum != DurumBekliyor || d.manifestAd != "" || !strings.Contains(d.sonHata, "manifest") {
+		t.Fatalf("manifestsiz kopya TAMAM sayılmamalı: %+v", d)
+	}
+	// manifest düzelince yeniden deneme aynı adı üzerine yazar ve tamamlar
+	o.sar.manifestHata = nil
+	_, _ = o.db.Exec(`UPDATE backup_uzak_kopyalar SET sonraki_deneme=NULL WHERE id=?`, id)
+	o.calis()
+	if d := o.is(id); d.durum != DurumTamam || d.manifestAd == "" {
+		t.Fatalf("yeniden denemede tamamlanmalı: %+v", d)
+	}
+}

@@ -127,6 +127,8 @@ type sarmal struct {
 	bekle    time.Duration
 	// yuklemeSonrasi — nihai ada yükleme BAŞARIYLA bitince çağrılır (bozma benzetimi).
 	yuklemeSonrasi func(ad string)
+	// manifestHata — yalnız manifest yüklemesi bu hatayla başarısız olur.
+	manifestHata error
 }
 
 func (s *sarmal) Yetenekler() hedef.Yetenek {
@@ -152,6 +154,9 @@ func (s *sarmal) Yukle(ctx context.Context, yerel, ad string, sec hedef.YukleSec
 	s.mu.Unlock()
 	if bk > 0 {
 		time.Sleep(bk)
+	}
+	if s.manifestHata != nil && strings.HasSuffix(ad, ".manifest.json") {
+		return s.manifestHata
 	}
 	err := s.Hedef.Yukle(ctx, yerel, ad, sec)
 	if err == nil && s.yuklemeSonrasi != nil {
