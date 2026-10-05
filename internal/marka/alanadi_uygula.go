@@ -232,13 +232,15 @@ func (y yerelBolge) Uygun(rid int64) bool {
 	return y.Var && y.Red(rid) == "" && !y.Musteri
 }
 
+// 🔴 domains.alan_adi utf8mb4_unicode_ci, ek_alan_adlari.alan_adi utf8mb4_general_ci: UNION'da kolasyon açıkça
+// eşitlenmezse MariaDB 1271 "Illegal mix of collations" verir ve "Özel adres doğrulanamadı" hatası çıkar.
 func yerelBolgeBul(ctx context.Context, db *sql.DB, host string, rid int64) (yerelBolge, error) {
 	sorgu := func(ek bool) string {
 		s := `SELECT t, id, kok, sahip, askida, durum, cust FROM (
 			SELECT 0 AS t, d.id AS id, d.alan_adi AS kok, COALESCE(d.reseller_id,0) AS sahip, d.askida AS askida, d.durum AS durum, COALESCE(d.customer_id,0) AS cust FROM domains d`
 		if ek {
 			s += ` UNION ALL
-			SELECT 1, e.id, e.alan_adi, COALESCE(d.reseller_id,0), d.askida, d.durum, COALESCE(d.customer_id,0)
+			SELECT 1, e.id, e.alan_adi COLLATE utf8mb4_unicode_ci, COALESCE(d.reseller_id,0), d.askida, d.durum, COALESCE(d.customer_id,0)
 			FROM ek_alan_adlari e JOIN domains d ON d.id=e.domain_id`
 		}
 		return s + `) z WHERE z.kok = ? OR (CHAR_LENGTH(z.kok) < CHAR_LENGTH(?) AND RIGHT(?, CHAR_LENGTH(z.kok)+1) = CONCAT('.', z.kok))

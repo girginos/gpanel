@@ -81,10 +81,11 @@ func PostaAski(ctx context.Context, db *sql.DB, domainID int64, askida bool) err
 }
 
 // postaAlanAdlari — hesabın ana alan adı + alt alan adları.
+// 🔴 subdomanlar.tam_ad utf8mb4_general_ci, domains.alan_adi utf8mb4_unicode_ci: UNION'da kolasyon eşitlenmezse 1271.
 func postaAlanAdlari(ctx context.Context, db *sql.DB, domainID int64) ([]string, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT alan_adi FROM domains WHERE id=?
-		 UNION SELECT tam_ad FROM subdomanlar WHERE domain_id=?`, domainID, domainID)
+		 UNION SELECT tam_ad COLLATE utf8mb4_unicode_ci FROM subdomanlar WHERE domain_id=?`, domainID, domainID)
 	if err != nil {
 		return nil, fmt.Errorf("posta alan adları okunamadı: %w", err)
 	}
