@@ -90,6 +90,7 @@ func yeniUzakOrtam(t *testing.T) *uzakOrtam {
 	r.Get("/uzak-kopya/mevcutlari-gonder", h.UzakKopyaMevcutlariOnizle)
 	r.Post("/uzak-kopya/mevcutlari-gonder", h.UzakKopyaMevcutlariGonder)
 	r.Get("/uzak-kopya/yedek-durumlari", h.UzakKopyaYedekDurumlari)
+	r.Get("/uzak-kopya/ilerleme", h.UzakKopyaIlerleme)
 	o.r = r
 	// bağlı (yetkili) bir Drive hedefi
 	g113_exec(t, db, `INSERT INTO backup_hedefler (ad, tur, ayar, sirlar) VALUES ('Drive 1', 'drive', '{"klasor":"Y"}', '')`)

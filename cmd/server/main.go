@@ -1049,6 +1049,7 @@ func main() {
 				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/mevcutlari-gonder", backupsH.UzakKopyaMevcutlariOnizle)
 				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/mevcutlari-gonder", backupsH.UzakKopyaMevcutlariGonder)
 				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/yedek-durumlari", backupsH.UzakKopyaYedekDurumlari)
+				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/ilerleme", backupsH.UzakKopyaIlerleme)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
