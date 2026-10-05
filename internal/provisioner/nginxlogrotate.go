@@ -61,7 +61,48 @@ import (
 	"time"
 )
 
-const nginxLogrotateYolu = "/etc/logrotate.d/nginx"
+// Değişken: testler geçici dizine yönlendirir.
+var (
+	nginxLogrotateYolu = "/etc/logrotate.d/nginx"
+
+	// 🔴 Dağıtım yedeği /etc/logrotate.d/ İÇİNDE TUTULAMAZ: logrotate o dizindeki
+	// her dosyayı okur (yalnız .rpmsave/.disabled/~ gibi bilinen uzantıları yok
+	// sayar), ".yedek"i yok saymaz. Yedek aynı log yollarını tanımladığı için her
+	// gün "duplicate log entry" hatası verir, logrotate.service "failed" kalır ve
+	// gerçek bir logrotate arızasını maskeler. Yedek dizin dışında durur.
+	nginxLogrotateYedekDizin = "/var/lib/girginospanel/logrotate-yedek"
+	nginxLogrotateEskiYedek  = "/etc/logrotate.d/nginx.dagitim.yedek" // eski sürümlerin bıraktığı yer
+)
+
+func nginxLogrotateYedekYolu() string {
+	return filepath.Join(nginxLogrotateYedekDizin, "nginx.dagitim.yedek")
+}
+
+// nginxLogrotateEskiYedekTasi — eski sürümün /etc/logrotate.d içine bıraktığı
+// dağıtım yedeğini dizin dışına taşır (idempotent). Yeni konumda yedek zaten
+// varsa (ilk yedek = gerçek dağıtım dosyası) eskisi yalnız silinir.
+func nginxLogrotateEskiYedekTasi() {
+	b, err := os.ReadFile(nginxLogrotateEskiYedek)
+	if err != nil {
+		return
+	}
+	yeni := nginxLogrotateYedekYolu()
+	if _, e := os.Stat(yeni); e != nil {
+		if e := os.MkdirAll(nginxLogrotateYedekDizin, 0o700); e != nil {
+			log.Printf("🔴 logrotate yedek dizini olusturulamadi: %v", e)
+			return // yedeği kaybetme: eskiyi SİLME
+		}
+		if e := os.WriteFile(yeni, b, 0o600); e != nil {
+			log.Printf("🔴 logrotate dagitim yedegi tasinamadi: %v", e)
+			return
+		}
+	}
+	if e := os.Remove(nginxLogrotateEskiYedek); e != nil {
+		log.Printf("logrotate eski yedek silinemedi: %v", e)
+		return
+	}
+	log.Printf("logrotate dagitim yedegi /etc/logrotate.d disina tasindi (duplicate log entry hatasi giderildi)")
+}
 
 // nginxLogrotateIcerik — panel-sahipli döndürme kuralı.
 //
@@ -129,13 +170,16 @@ const nginxLogrotateIcerik = `# GirginOSPanel tarafından yönetilir — elle d�
 // NginxLogrotateEnsure — döndürme kuralını panel sahipliğine alır (idempotent).
 // İçerik zaten aynıysa dosyaya DOKUNMAZ.
 func NginxLogrotateEnsure() {
+	nginxLogrotateEskiYedekTasi() // içerik aynı olsa da çalışır: eski kurulumlar buradan düzelir
 	if b, err := os.ReadFile(nginxLogrotateYolu); err == nil && string(b) == nginxLogrotateIcerik {
 		return
 	}
-	// Dağıtımın dosyasını ilk kez devralırken bir kopyasını sakla.
+	// Dağıtımın dosyasını ilk kez devralırken bir kopyasını sakla (dizin dışında).
 	if b, err := os.ReadFile(nginxLogrotateYolu); err == nil &&
 		!strings.Contains(string(b), "GirginOSPanel tarafından yönetilir") {
-		_ = os.WriteFile(nginxLogrotateYolu+".dagitim.yedek", b, 0o644)
+		if e := os.MkdirAll(nginxLogrotateYedekDizin, 0o700); e == nil {
+			_ = os.WriteFile(nginxLogrotateYedekYolu(), b, 0o600)
+		}
 	}
 	if err := os.WriteFile(nginxLogrotateYolu, []byte(nginxLogrotateIcerik), 0o644); err != nil {
 		log.Printf("🔴 nginx logrotate kurali yazilamadi: %v", err)
@@ -146,7 +190,7 @@ func NginxLogrotateEnsure() {
 	if out, err := exec.Command("logrotate", "-d", nginxLogrotateYolu).CombinedOutput(); err != nil {
 		log.Printf("🔴 nginx logrotate kurali GECERSIZ, dagitim yedegine donuluyor: %s",
 			strings.TrimSpace(string(out)))
-		if b, e := os.ReadFile(nginxLogrotateYolu + ".dagitim.yedek"); e == nil {
+		if b, e := os.ReadFile(nginxLogrotateYedekYolu()); e == nil {
 			_ = os.WriteFile(nginxLogrotateYolu, b, 0o644)
 		}
 		return
