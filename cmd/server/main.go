@@ -585,7 +585,7 @@ func main() {
 	// RequireAuth grubunun dışında, yönetim uçları grubun içinde.
 	markaH := &marka.Handlers{DB: d, SunucuIPleri: []string{ipv4}}
 	marka.AdAlaniKanca = func(ctx context.Context, ad string, rid int64) error {
-		if err := domains.AdAlaniDenetle(ctx, d, ad, rid); err != nil {
+		if err := domains.AdAlaniDenetleMarka(ctx, d, ad, rid); err != nil {
 			var ae *domains.AdAlaniHatasi
 			if errors.As(err, &ae) {
 				return errors.New(ae.Mesaj(false))
