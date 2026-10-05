@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"girginospanel/internal/httpx"
@@ -30,7 +31,37 @@ const (
 	varsayilanPeriyot = 6 * time.Hour
 	acilisGecikmesi   = 5 * time.Minute
 	feedIsteğiBekleme = 200 * time.Millisecond // eklenti başına küçük jitter
+
+	// feedHataOnek — cp_websec_status.last_error bu önekle başlıyorsa son YEM SORGULU
+	// taramada güvenlik veri kaynaklarına erişilemedi (feed_uyari). Göç gerektirmez:
+	// kalıcı işaret mevcut last_error sütunudur; kısmi/0-uygulamalı tarama bunu silmez.
+	feedHataOnek  = "Güvenlik veri kaynaklarına erişilemedi"
+	feedHataMetni = feedHataOnek + " — sonuçlar güncel olmayabilir"
 )
+
+// feedDegerlendir — tarama sonunda feed sağlığı. denendi: en az bir ekosistemde yem
+// sorgusu YAPILDI (uygulama/paket vardı); hatali: denenen ekosistemlerden biri hiç
+// başarılı yanıt alamadı. 0 uygulamalı taramada denendi=false → ne uyarı ne "feed
+// sağlıklı" iddiası (yem sorgulanmadı: "solma atlandı" alarmı yanlış alarmdır).
+func feedDegerlendir(wpDenendi, wpOK, nodeDenendi, nodeOK, phpDenendi, phpOK bool) (denendi, hatali bool) {
+	denendi = wpDenendi || nodeDenendi || phpDenendi
+	hatali = (wpDenendi && !wpOK) || (nodeDenendi && !nodeOK) || (phpDenendi && !phpOK)
+	return
+}
+
+// feedHataIfadesi — status UPDATE'inin last_error parçası + bağımsız değişkeni.
+// Hatalı → uyarı metni; yem sağlıklı → NULL; yem hiç sorgulanmadı → önceki feed
+// uyarısı KORUNUR (başka hata ise temizlenir, eski davranış).
+func feedHataIfadesi(denendi, hatali bool) (string, any) {
+	switch {
+	case hatali:
+		return "last_error=?", feedHataMetni
+	case denendi:
+		return "last_error=NULL", nil
+	default:
+		return "last_error=IF(last_error LIKE ?, last_error, NULL)", feedHataOnek + "%"
+	}
+}
 
 var (
 	kosmaMu sync.Mutex
@@ -60,6 +91,11 @@ func Dongusu(ctx context.Context, db *sql.DB) {
 	// Açılışta bir kez sıfırla — bellek bayrağı (kosuyor) zaten reset,
 	// DB damgasını da hizala.
 	_, _ = db.Exec(`UPDATE cp_websec_status SET running=0 WHERE running=1`)
+	// Feed uyarısı yeniden başlatmada kaybolmasın (kalıcı işaret: last_error öneki).
+	var feedVar sql.NullBool
+	if db.QueryRow(`SELECT COALESCE(last_error LIKE ?, 0) FROM cp_websec_status WHERE id=1`, feedHataOnek+"%").Scan(&feedVar) == nil {
+		feedUyariBayrak.Store(feedVar.Valid && feedVar.Bool)
+	}
 
 	// Tek işçi açılıştan itibaren çalışır: elle istekler açılış gecikmesini beklemez.
 	go kuy.isci(ctx, db)
@@ -128,6 +164,8 @@ func TaraDomains(ctx context.Context, db *sql.DB, domainIDs []int64) error {
 	wpFeedOK := false
 	nodeFeedOK := false
 	phpFeedOK := false
+	nodeDenendi := false
+	phpDenendi := false
 
 	// 1) WP kurulumlarını bul (domainIDs doluysa keşif YALNIZ o domainlerde koşar)
 	kurulumlar, err := WPKurulumlariBul(ctx, db, domainIDs)
@@ -209,6 +247,9 @@ WPloop:
 			if ctx.Err() != nil {
 				break
 			}
+			if len(k.Paketler) > 0 {
+				nodeDenendi = true
+			}
 			n, ok := nodejsTara(ctx, db, &k)
 			toplamBulgu += n
 			if ok {
@@ -226,6 +267,9 @@ WPloop:
 			if ctx.Err() != nil {
 				break
 			}
+			if len(k.Paketler) > 0 {
+				phpDenendi = true
+			}
 			n, ok := phpTara(ctx, db, &k)
 			toplamBulgu += n
 			if ok {
@@ -236,6 +280,12 @@ WPloop:
 	}
 
 	sure := time.Since(basla).Milliseconds()
+	// Feed sağlığı: yalnız yem sorgusu yapılan ekosistemler değerlendirilir.
+	feedDenendi, feedHatali := feedDegerlendir(len(feedCache) > 0, wpFeedOK, nodeDenendi, nodeFeedOK, phpDenendi, phpFeedOK)
+	if feedHatali && ctx.Err() != nil {
+		// İptal edilmiş tarama: yarım kalan sorgular outage sayılmaz.
+		feedHatali = false
+	}
 
 	// 🔴 SOLMA + STATUS için AYRI CONTEXT — scan ctx feed HTTP çağrılarında
 	// tükenmiş olabilir; DB yazmayı ona bağlarsak temizlik ve durum kaydı
@@ -287,8 +337,10 @@ WPloop:
 		// WordPress envanterde kalirsa panel var olmayan bir kurulumu
 		// "tarandi" diye gosterir.
 		envanterSolmaTemizle(yazCtx, db, stale, basariliApps, domainIDs)
-	} else {
+	} else if feedDenendi {
 		log.Printf("websec: solma temizliği atlandı — hiçbir feed başarılı yanıt vermedi (network outage şüphesi)")
+	} else {
+		log.Printf("websec: solma temizliği atlandı — yem sorgulanmadı (taranacak uygulama/paket yok)")
 	}
 	// Domain başına tarama damgası — yalnız tarama YARIDA kesilmediyse: ctx iptali
 	// keşfi/feed'i yarım bırakır, o domainlere "tarandı" demek yanlış olur.
@@ -301,20 +353,26 @@ WPloop:
 	// FULL taramayı temsil eder. Aksi halde "1 uygulama tarandı" yazması
 	// filoyu yanlış anlatır. Bulgu sayaçları (total/severity) her durumda
 	// güncellenir çünkü ozetiHesapla tüm tablodan sayar.
+	feedBayrakGuncelle(feedDenendi, feedHatali)
+	errIfade, errArg := feedHataIfadesi(feedDenendi, feedHatali)
+	var errArgs []any
+	if errArg != nil {
+		errArgs = []any{errArg}
+	}
 	if len(domainIDs) > 0 {
 		_, _ = db.ExecContext(yazCtx,
 			`UPDATE cp_websec_status SET
 			   running=0, last_success=NOW(),
 			   total_findings=?, critical=?, high=?, medium=?, low=?,
-			   last_error=NULL WHERE id=1`,
-			ozet.Toplam, ozet.Critical, ozet.High, ozet.Medium, ozet.Low)
+			   `+errIfade+` WHERE id=1`, //nolint:gosec // G202: errIfade SABİT parçalardan (feedHataIfadesi); değer ? ile bağlanır.
+			append([]any{ozet.Toplam, ozet.Critical, ozet.High, ozet.Medium, ozet.Low}, errArgs...)...)
 	} else {
 		_, _ = db.ExecContext(yazCtx,
 			`UPDATE cp_websec_status SET
 			   running=0, last_success=NOW(), duration_ms=?, scanned_apps=?,
 			   total_findings=?, critical=?, high=?, medium=?, low=?,
-			   last_error=NULL WHERE id=1`,
-			sure, toplamApp, ozet.Toplam, ozet.Critical, ozet.High, ozet.Medium, ozet.Low)
+			   `+errIfade+` WHERE id=1`, //nolint:gosec // G202: errIfade SABİT parçalardan (feedHataIfadesi); değer ? ile bağlanır.
+			append([]any{sure, toplamApp, ozet.Toplam, ozet.Critical, ozet.High, ozet.Medium, ozet.Low}, errArgs...)...)
 	}
 
 	kapsam := ""
@@ -414,6 +472,9 @@ type durumYanit struct {
 	// Her ekosistem için ayrıca kaç bulgu var: {"wordpress": 3, "nodejs": 12}
 	Ekosistemler []string       `json:"ekosistemler"`
 	AppSayaclari map[string]int `json:"app_sayaclari"`
+	// FeedUyari — son yem sorgulu taramada güvenlik veri kaynaklarına (wpvulnerability.net,
+	// osv.dev) erişilemedi: "Temiz" güvencesi güncel olmayabilir.
+	FeedUyari bool `json:"feed_uyari"`
 }
 
 // bayiDurumYanit — bayinin durum kartı. Sunucu geneli alanlar (scanned_apps,
@@ -430,6 +491,19 @@ type bayiDurumYanit struct {
 	Medium        int      `json:"medium"`
 	Low           int      `json:"low"`
 	Ekosistemler  []string `json:"ekosistemler"`
+	FeedUyari     bool     `json:"feed_uyari"`
+}
+
+// feedUyariBayrak — bayinin görebildiği feed uyarısı (yalnız bool; sunucu geneli
+// last_error metni bayiye gitmez, bayi durumu cp_websec_status'u HİÇ okumaz). Tarama
+// sonu günceller; açılışta last_error önekinden yüklenir (Dongusu).
+var feedUyariBayrak atomic.Bool
+
+// feedBayrakGuncelle — yem sorgulanmadıysa (0 uygulama) bayrak DEĞİŞMEZ.
+func feedBayrakGuncelle(denendi, hatali bool) {
+	if denendi {
+		feedUyariBayrak.Store(hatali)
+	}
 }
 
 // ekosistemler — aktif tarayıcı ekosistemleri (sabit; sayfa chip'leri).
@@ -474,6 +548,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ekosistem listesi + sayaçlar
 	y.Ekosistemler = ekosistemler()
+	y.FeedUyari = lastErr.Valid && strings.HasPrefix(lastErr.String, feedHataOnek)
 	y.AppSayaclari = map[string]int{}
 	if rows, e := h.DB.Query(`SELECT app_type, COUNT(*) FROM cp_websec_findings GROUP BY app_type`); e == nil {
 		defer rows.Close()
@@ -492,7 +567,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 // cp_websec_status (tek satır, sunucu geneli) HİÇ okunmaz.
 func (h *Handler) bayiDurum(w http.ResponseWriter, r *http.Request, k kapsam) {
 	kosul, args := k.kosul()
-	y := bayiDurumYanit{Ekosistemler: ekosistemler()}
+	y := bayiDurumYanit{Ekosistemler: ekosistemler(), FeedUyari: feedUyariBayrak.Load()}
 
 	kosuyor, taranSet := TaramaDurumu()
 	bekleyen := kuy.bekleyenKume()
@@ -677,6 +752,11 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if domainID > 0 {
+		// Zaten sırada/taranıyor: tekrar tıklama kuyruğu şişirmez.
+		if zatenSiradaMi(domainID) {
+			jsonYaz(w, 202, map[string]any{"started": false, "zaten": true, "domain_id": domainID, "at": time.Now().Format(time.RFC3339)})
+			return
+		}
 		kuy.kokEkle([]int64{domainID})
 	} else {
 		kuy.tamIste()
@@ -813,9 +893,29 @@ func (h *Handler) bayiDomainleri(ctx context.Context, k kapsam) ([]int64, error)
 // denetime işler (websec.tara). Yanıt: 202 {"sirada": n} ya da
 // 429 {"error": "N dk sonra tekrar deneyin"} (süre yalnız bayinin kendi isteklerinden).
 func (h *Handler) bayiKuyruga(w http.ResponseWriter, r *http.Request, k kapsam, ids []int64, tumu bool, domainID int64, hedef string) {
-	sirada, bekle := kuy.bayiEkle(k.rid, ids, tumu)
+	// Şu an taranan domainler yeniden kuyruğa girmez ("zaten taranıyor").
+	var aday []int64
+	calisan := 0
+	for _, id := range ids {
+		if calisiyorMu(id) {
+			calisan++
+		} else {
+			aday = append(aday, id)
+		}
+	}
+	if len(aday) == 0 {
+		jsonYaz(w, http.StatusAccepted, map[string]any{"sirada": calisan, "zaten": true})
+		return
+	}
+	sirada, yeni, bekle := kuy.bayiEkleSay(k.rid, aday, tumu)
 	if bekle > 0 {
 		hataMesaji(w, http.StatusTooManyRequests, fmt.Sprintf("%d dk sonra tekrar deneyin", dakikaYukari(bekle)))
+		return
+	}
+	sirada += calisan
+	if yeni == 0 {
+		// Hepsi zaten sırada: denetime ikinci satır YAZILMAZ.
+		jsonYaz(w, http.StatusAccepted, map[string]any{"sirada": sirada, "zaten": true})
 		return
 	}
 	var uid int64
@@ -830,6 +930,17 @@ func (h *Handler) bayiKuyruga(w http.ResponseWriter, r *http.Request, k kapsam, 
 		httpx.Denetim(h.DB, r, uid, kul, "websec.tara", hedef, detay, k.rid, true)
 	}
 	jsonYaz(w, http.StatusAccepted, map[string]int{"sirada": sirada})
+}
+
+// calisiyorMu — domain şu an taranıyor mu (tam taramada hepsi).
+func calisiyorMu(id int64) bool {
+	kos, set := TaramaDurumu()
+	return kos && (len(set) == 0 || set[id])
+}
+
+// zatenSiradaMi — domain taranıyor ya da kuyrukta bekliyor mu.
+func zatenSiradaMi(id int64) bool {
+	return calisiyorMu(id) || kuy.bekleyenKume()[id]
 }
 
 // dakikaYukari — süreyi yukarı yuvarlanmış tam dakikaya çevirir (en az 1).

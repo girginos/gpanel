@@ -13,6 +13,7 @@ import { Button, Badge } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { TaramaButonu } from '@/components/TaramaButonu'
+import { YOKLAMA_MS, degerlendir, zamanYaz, type Bekleyen } from '@/lib/websecTarama'
 
 /*
  * Website Security Monitor — yönetici + bayi.
@@ -40,6 +41,8 @@ type Status = {
   next_estimate?: string
   ekosistemler?: string[] | null
   app_sayaclari?: Record<string, number> | null
+  // Son yem sorgulu taramada güvenlik veri kaynaklarına erişilemedi (Temiz güvencesi eskimiş olabilir)
+  feed_uyari?: boolean
 }
 
 // Görünen her domain'in (yönetici: tümü, bayi: kendi) güvenlik durumu.
@@ -52,11 +55,13 @@ type Uygulama = {
   paket_sayisi: number
   bulgu_sayisi: number
   son_tarama: string
+  domain_son_tarama?: string // domainin kendi son tarama zamanı (uygulaması olmasa da dolu)
+  son_sonuc?: { uygulama_sayisi: number; bulgu_sayisi: number }
   durum: string // taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede
 }
 
 // Tarama isteğinin yanıtı: kuyruğa alınınca 202 {sirada: n}.
-type TaramaYanit = { sirada?: number }
+type TaramaYanit = { sirada?: number; zaten?: boolean }
 
 const durumKodu = (e: unknown): number | undefined =>
   (e as { response?: { status?: number } })?.response?.status
@@ -124,11 +129,21 @@ const WSEC_EN: Record<string, string> = {
   "Sonuçlar tarama bitince burada görünür.": "Results appear here when the scan finishes.",
   "Tarama sınırı": "Scan limit",
   "Sunucu geneli tarama sürüyor": "A server-wide scan is in progress",
+  "Tarama tamamlandı": "Scan completed",
+  "{0} uygulama tarandı, {1} bulgu.": "{0} applications scanned, {1} findings.",
+  "Taranacak uygulama bulunamadı (WordPress, Node.js veya PHP Composer yok).": "No application to scan was found (no WordPress, Node.js or PHP Composer).",
+  "Bu domainde taranabilir bir uygulama bulunamadı (WordPress, Node.js, PHP Composer). Yeni bir uygulama kurduysanız yeniden tarayın.": "No scannable application was found on this domain (WordPress, Node.js, PHP Composer). Scan again if you installed one.",
+  "Uygulama bulunamadı": "No app found",
+  "Zaten sırada ya da taranıyor": "Already queued or scanning",
+  "Bu domain için tarama zaten sırada ya da sürüyor.": "A scan for this domain is already queued or in progress.",
+  "Tarama beklenenden uzun sürüyor": "Scan is taking longer than expected",
+  "Sonuç gelince bu sayfada görünür; sayfayı yenileyebilirsiniz.": "The result will appear on this page; you can refresh it.",
+  "Güvenlik veri kaynaklarına şu an erişilemiyor, sonuçlar güncel olmayabilir.": "Security data sources are currently unreachable; results may be out of date.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WSEC_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-function DurumRozet({ u }: { u: Uygulama }) {
-  switch (u.durum) {
+function DurumRozet({ u, bekliyor }: { u: Uygulama; bekliyor?: boolean }) {
+  switch (bekliyor && u.durum !== 'sirada' ? 'taraniyor' : u.durum) {
     case 'taraniyor':
       return (
         <Badge color="info" variant="soft" className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium">
@@ -155,9 +170,11 @@ function DurumRozet({ u }: { u: Uygulama }) {
       )
     case 'desteklenmiyor':
       return (
-        <Badge variant="soft" className="px-2 py-0.5 text-[11px]">
-          {cevir("Uygulama yok")}
-        </Badge>
+        <span title={cevir("Bu domainde taranabilir bir uygulama bulunamadı (WordPress, Node.js, PHP Composer). Yeni bir uygulama kurduysanız yeniden tarayın.")}>
+          <Badge variant="soft" className="px-2 py-0.5 text-[11px]">
+            {cevir("Uygulama yok")}
+          </Badge>
+        </span>
       )
     default: // beklemede
       return (
@@ -178,6 +195,12 @@ export default function WebsiteSecurityPage() {
   const [appFiltre, setAppFiltre] = useState<string>('') // domain tablosunu ekosisteme göre süz
   const [arama, setArama] = useState<string>('')
   const [tarananDomain, setTarananDomain] = useState<number | null>(null)
+  // Sonucu beklenen domainler (istek sonrası): satır "Taranıyor…" gösterir, bitince toast.
+  const [bekleyenIds, setBekleyenIds] = useState<Set<number>>(new Set())
+  const bekleyen = useRef<Map<number, Bekleyen>>(new Map())
+  const envanterRef = useRef<EnvanterYanit | null>(null)
+  const yukluyor = useRef(false) // istekler üst üste binmesin
+  const canli = useRef(true)     // bileşen mount'lu mu
 
   const dialog = useDialog()
   const toast = useToast()
@@ -186,7 +209,35 @@ export default function WebsiteSecurityPage() {
   // Bayi (ve bilinmeyen rol) yönetici-yalnız öğeleri görmez; veri kapsamını sunucu zorlar.
   const yonetici = yoneticiMi(useRol())
 
-  const yukle = async () => {
+  const bekleyenYaz = () => setBekleyenIds(new Set(bekleyen.current.keys()))
+
+  // Bekleyen domainlerin sonucunu değerlendir: biten varsa tek toast ("Tarama tamamlandı"
+  // + sonuç özeti); zaman aşımı → sessizce bırakma, bilgi ver.
+  const sonucuDegerlendir = (env: EnvanterYanit) => {
+    if (bekleyen.current.size === 0) return
+    const d = degerlendir(bekleyen.current, env.items, Date.now())
+    if (d.biten.length === 0 && d.zamanAsimi.length === 0) {
+      bekleyen.current = d.kalan
+      return
+    }
+    bekleyen.current = d.kalan
+    bekleyenYaz()
+    if (d.biten.length > 0) {
+      if (d.uygulama === 0) toast.bilgi(cevir("Tarama tamamlandı"), cevir("Taranacak uygulama bulunamadı (WordPress, Node.js veya PHP Composer yok)."))
+      else toast.basari(cevir("Tarama tamamlandı"), cevirT(cevir("{0} uygulama tarandı, {1} bulgu."), d.uygulama, d.bulgu))
+    }
+    if (d.zamanAsimi.length > 0) {
+      toast.uyari(cevir("Tarama beklenenden uzun sürüyor"), cevir("Sonuç gelince bu sayfada görünür; sayfayı yenileyebilirsiniz."))
+    }
+  }
+
+  // taze: sürmekte olan yüklemenin BİTMESİNİ bekleyip yeniden yükler (üst üste binmez).
+  const yukle = async (taze = false) => {
+    if (yukluyor.current) {
+      if (!taze) return
+      while (yukluyor.current) await new Promise((r) => setTimeout(r, 50))
+    }
+    yukluyor.current = true
     if (!ilkYuklendi.current) setYukleniyor(true)
     setHata(null)
     try {
@@ -194,41 +245,87 @@ export default function WebsiteSecurityPage() {
         api.get<Status>('/websec/status'),
         api.get<EnvanterYanit>('/websec/apps'),
       ])
+      if (!canli.current) return
       setStatus(s.data)
       setEnvanter(env.data)
+      envanterRef.current = env.data
       ilkYuklendi.current = true
+      sonucuDegerlendir(env.data)
     } catch (e) {
       const m = apiHata(e, cevir("Yüklenemedi"))
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
-    } finally { setYukleniyor(false) }
+    } finally { yukluyor.current = false; setYukleniyor(false) }
   }
-  useEffect(() => { void yukle() }, [])
-
-  // Tarama aktifse (ya da sırada domain varsa) 5sn'de bir tazele — domain durumları canlı güncellensin.
   useEffect(() => {
-    const canli = status?.running || (envanter?.items.some((u) => u.durum === 'taraniyor' || u.durum === 'sirada') ?? false)
-    if (!canli) return
-    const t = setInterval(yukle, 5000)
-    return () => clearInterval(t)
-  }, [status?.running, envanter])
+    canli.current = true
+    void yukle()
+    return () => { canli.current = false }
+  }, [])
+
+  // Yoklama: tarama aktifken (sunucu running / satır taranıyor-sırada / sonucu beklenen
+  // domain var) YOKLAMA_MS aralıkla tazele; bitince dur. Sekme gizliyken yoklama yok
+  // (görününce hemen tazelenir); önceki istek bitmeden yenisi başlamaz (zincirleme
+  // setTimeout); bileşen kalkınca zamanlayıcı ve dinleyici temizlenir.
+  const aktifTarama = !!status?.running
+    || (envanter?.items.some((u) => u.durum === 'taraniyor' || u.durum === 'sirada') ?? false)
+    || bekleyenIds.size > 0
+  useEffect(() => {
+    if (!aktifTarama) return
+    let zamanlayici: ReturnType<typeof setTimeout> | undefined
+    let durdu = false
+    const planla = () => {
+      if (durdu) return
+      zamanlayici = setTimeout(async () => {
+        if (!document.hidden) await yukle()
+        planla()
+      }, YOKLAMA_MS)
+    }
+    const gorunur = () => { if (!document.hidden) void yukle() }
+    document.addEventListener('visibilitychange', gorunur)
+    planla()
+    return () => {
+      durdu = true
+      if (zamanlayici) clearTimeout(zamanlayici)
+      document.removeEventListener('visibilitychange', gorunur)
+    }
+  }, [aktifTarama])
 
   // Tarama isteği (yönetici ve bayi aynı uç). Kuyruğa alınınca 202 {sirada: n} → bildirim;
   // 429 = bayi tarama sınırı (sunucu mesajı "N dk sonra tekrar deneyin"); 404 = domain
   // yok ya da başkasının (ikisi aynı yanıt) → liste bayat, tazelenir.
-  const taramaIste = async (yol: string, varsayilanHata: string) => {
+  const taramaIste = async (yol: string, varsayilanHata: string, domainId?: number) => {
+    // İstek öncesi damgalar: bitiş "domain son tarama damgası değişti" ile anlaşılır.
+    const onceki = new Map<number, string>()
+    for (const u of envanterRef.current?.items ?? []) onceki.set(u.domain_id, u.domain_son_tarama ?? '')
     try {
       const r = await api.post<TaramaYanit>(yol, {})
+      if (r.data?.zaten) {
+        toast.bilgi(cevir("Zaten sırada ya da taranıyor"), cevir("Bu domain için tarama zaten sırada ya da sürüyor."))
+      }
       const n = r.data?.sirada
       // Bayi yanıtı {sirada: n} — n YALNIZ bu isteğin kendi domainlerinden sırada bekleyenler
       // (ortak kuyruğun uzunluğu değil). Kök yanıtında sirada yok ({started: true}).
-      if (typeof n === 'number') {
+      if (r.data?.zaten) {
+        // bildirim yukarıda verildi
+      } else if (typeof n === 'number') {
         if (n > 0) toast.bilgi(cevir("Tarama sıraya alındı"), cevirT(cevir("{0} domaininiz tarama sırasında."), n))
         else toast.bilgi(cevir("Taranacak domaininiz yok."))
       } else {
         toast.bilgi(cevir("Tarama başlatıldı"), cevir("Sonuçlar tarama bitince burada görünür."))
       }
-      await yukle()
+      await yukle(true)
+      // Sonucu beklenecek domainler: tek domain → o; toplu → şimdi aktif olanlar ya da
+      // istek öncesine göre damgası değişenler (tarama çok kısa sürmüş olabilir).
+      const simdiki = envanterRef.current?.items ?? []
+      const t0 = Date.now()
+      const ekle = (id: number) => bekleyen.current.set(id, { onceki: onceki.get(id) ?? '', aktifGoruldu: false, t0 })
+      if (domainId) ekle(domainId)
+      else for (const u of simdiki) {
+        if (u.durum === 'taraniyor' || u.durum === 'sirada' || (u.domain_son_tarama ?? '') !== (onceki.get(u.domain_id) ?? '')) ekle(u.domain_id)
+      }
+      if (envanterRef.current) sonucuDegerlendir(envanterRef.current)
+      bekleyenYaz()
     } catch (e) {
       const kod = durumKodu(e)
       if (kod === 429) {
@@ -236,7 +333,7 @@ export default function WebsiteSecurityPage() {
         return
       }
       await dialog.bilgi({ baslik: cevir("Başlatılamadı"), mesaj: apiHata(e, varsayilanHata), ton: 'tehlike' })
-      if (kod === 404) await yukle()
+      if (kod === 404) await yukle(true)
     }
   }
 
@@ -247,13 +344,7 @@ export default function WebsiteSecurityPage() {
 
   const domainTara = async (id: number) => {
     setTarananDomain(id)
-    try { await taramaIste('/websec/rescan?domain_id=' + id, cevir("Tarama hatası")) } finally { setTarananDomain(null) }
-  }
-
-  const zamanFmt = (s: string | null) => {
-    if (!s) return '—'
-    try { return new Date(s.replace(' ', 'T') + (s.includes(' ') ? 'Z' : '')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) }
-    catch { return s }
+    try { await taramaIste('/websec/rescan?domain_id=' + id, cevir("Tarama hatası"), id) } finally { setTarananDomain(null) }
   }
 
   const listelenen = useMemo(() => {
@@ -327,15 +418,20 @@ export default function WebsiteSecurityPage() {
       {status && (
         <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
           <div className={`grid grid-cols-2 gap-3 text-sm ${yonetici ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
-            <div><div className="text-xs text-slate-500">{cevir("Son tarama")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_run)}</div></div>
-            <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanFmt(status.last_success)}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Son tarama")}</div><div className="mt-0.5 font-medium">{zamanYaz(status.last_run)}</div></div>
+            <div><div className="text-xs text-slate-500">{cevir("Son başarılı")}</div><div className="mt-0.5 font-medium">{zamanYaz(status.last_success)}</div></div>
             {/* Taranan uygulama + son hata sunucu geneli bilgidir: yalnız yöneticide */}
             {yonetici && (
               <div><div className="text-xs text-slate-500">{cevir("Taranan uygulama")}</div><div className="mt-0.5 font-medium">{status.scanned_apps ?? '—'}</div></div>
             )}
             <div><div className="text-xs text-slate-500">{cevir("Toplam bulgu")}</div><div className="mt-0.5 font-medium">{status.total_findings}</div></div>
           </div>
-          {yonetici && status.last_error && (
+          {status.feed_uyari && (
+            <UyariKutusu ton="uyari" className="mt-3" kucuk>
+              {cevir("Güvenlik veri kaynaklarına şu an erişilemiyor, sonuçlar güncel olmayabilir.")}
+            </UyariKutusu>
+          )}
+          {yonetici && status.last_error && !status.feed_uyari && (
             <UyariKutusu ton="tehlike" className="mt-3" kucuk>
               {cevir("Son hata:")} {status.last_error}
             </UyariKutusu>
@@ -370,7 +466,7 @@ export default function WebsiteSecurityPage() {
         <UyariKutusu ton="tehlike">
           {hata}
           <div className="mt-2">
-            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={yukle} yukleniyor={yukleniyor}>{cevir("Tekrar dene")}</Button>
+            <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={() => void yukle(true)} yukleniyor={yukleniyor}>{cevir("Tekrar dene")}</Button>
           </div>
         </UyariKutusu>
       ) : listelenen.length === 0 ? (
@@ -407,11 +503,18 @@ export default function WebsiteSecurityPage() {
                       </td>
                       <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400">{u.app_version || '—'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{u.paket_sayisi || '—'}</td>
-                      <td className="px-3 py-2.5"><DurumRozet u={u} /></td>
-                      <td className="px-3 py-2.5 text-xs text-slate-500">{u.son_tarama || '—'}</td>
+                      <td className="px-3 py-2.5">
+                        <DurumRozet u={u} bekliyor={bekleyenIds.has(u.domain_id)} />
+                        {u.durum === 'desteklenmiyor' && !bekleyenIds.has(u.domain_id) && (
+                          <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-500">
+                            {cevir("Bu domainde taranabilir bir uygulama bulunamadı (WordPress, Node.js, PHP Composer). Yeni bir uygulama kurduysanız yeniden tarayın.")}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-slate-500">{zamanYaz(u.son_tarama)}</td>
                       <td className="px-3 py-2.5 text-right">
                         <TaramaButonu
-                          durum={u.durum === 'taraniyor' ? 'taraniyor' : u.durum === 'sirada' ? 'sirada' : tarananDomain === u.domain_id ? 'baslatiliyor' : 'hazir'}
+                          durum={u.durum === 'taraniyor' || (bekleyenIds.has(u.domain_id) && u.durum !== 'sirada') ? 'taraniyor' : u.durum === 'sirada' ? 'sirada' : tarananDomain === u.domain_id ? 'baslatiliyor' : 'hazir'}
                           etiket={cevir("Tara")}
                           baglam={u.alan_adi || `#${u.domain_id}`}
                           acikSayisi={u.durum === 'acik' ? u.bulgu_sayisi : 0}

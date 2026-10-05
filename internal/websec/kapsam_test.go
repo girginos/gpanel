@@ -236,7 +236,7 @@ func TestTaraniyorDurumuYalnizKendiDomaini(t *testing.T) {
 		taramaKur(t, c.kosu, c.taranan...)
 		kimlikKur(t, bayiJeton)
 		sd, db := sahtedb.Yeni()
-		sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", int64(0)})
+		sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
 		sd.Satirlar("LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id", []any{int64(10), ""})
 		h := &Handler{DB: db}
 
