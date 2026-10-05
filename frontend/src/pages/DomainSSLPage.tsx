@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useEffect, useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -14,6 +14,7 @@ import IlerlemePaneli, { type IlerlemeIsi } from '@/components/IlerlemePaneli'
 import { Button, Badge } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import SslAlanAdlari from '@/components/SslAlanAdlari'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ipv4: string; ssl: boolean; ssl_bitis?: string }
 type SSLDurum = {
@@ -127,6 +128,13 @@ export default function DomainSSLPage() {
   const { onay } = useDialog()
   const toast = useToast()
   const { id } = useParams()
+  // ?hedef=ana|ek:<id>|alt:<id> — alan adı süzgeci/derin bağlantı (boş = hesabın tüm alan adları).
+  const [sp, setSp] = useSearchParams()
+  const hamHedef = sp.get('hedef') || ''
+  const hedef = /^(ana|ek:\d+|alt:\d+)$/.test(hamHedef) ? hamHedef : ''
+  const hedefDegistir = (h: string) => setSp(h ? { hedef: h } : {}, { replace: true })
+  const [tabloYenile, setTabloYenile] = useState(0)  // alan adı tablosunu yeniden okutur
+  const anaGorunur = hedef === '' || hedef === 'ana'
   const [domain, setDomain] = useState<Domain | null>(null)
   const [durum, setDurum] = useState<SSLDurum | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
@@ -184,6 +192,7 @@ export default function DomainSSLPage() {
       if (d.durum !== 'calisiyor') {
         // Bitti: cert durumunu yenile + sonucu özetle.
         yukle()
+        setTabloYenile(n => n + 1)
         const uyarili = (d.adimlar || []).filter(a => a.durum === 'uyari')
         if (d.durum === 'hata') {
           const m = cevir("SSL kurulumu başarısız:") + ' ' + (d.hata || (d.adimlar || []).find(a => a.durum === 'hata')?.mesaj || '')
@@ -274,6 +283,7 @@ export default function DomainSSLPage() {
       setBasari(cevir("SSL kaldırıldı. Site HTTP olarak çalışıyor."))
       toast.basari(cevir("Kaydedildi"), cevir("SSL kaldırıldı. Site HTTP olarak çalışıyor."))
       yukle()
+      setTabloYenile(n => n + 1)
     } catch (e) {
       const m = apiHata(e, cevir("SSL kaldırma başarısız"))
       setHata(m)
@@ -327,6 +337,20 @@ export default function DomainSSLPage() {
       {/* Adım listesi SAĞ ALT PANELE taşındı — sayfanın içinde büyüyüp
           altındaki kartları itmesin. Panel return'ün sonunda. */}
 
+      {/* Hesabın TÜM alan adları (ana + ek + alt): durum tablosu + işlemler */}
+      {id && (
+        <SslAlanAdlari
+          id={id}
+          hedef={hedef}
+          onHedef={hedefDegistir}
+          anaKur={(tip) => { void issue(tip) }}
+          anaKaldir={() => { void disable() }}
+          anaMesgul={isleniyor || isDurum === 'calisiyor'}
+          yenileSay={tabloYenile}
+        />
+      )}
+
+      {anaGorunur && (<>
       {/* Durum kartı */}
       <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-6 mb-5">
         <div className="flex items-center justify-between mb-4">
@@ -447,6 +471,7 @@ export default function DomainSSLPage() {
           </div>
         </div>
       )}
+      </>)}
     </div>
   )
 }

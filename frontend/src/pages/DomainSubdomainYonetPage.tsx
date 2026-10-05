@@ -22,6 +22,7 @@ type PHPVer = { surum: string; aciklama?: string }
 
 
 const SUBYONET_EN: Record<string, string> = {
+  "SSL yönet — tüm alan adları": "Manage SSL — all domains",
   "Erişim Kısıtlama": "Access Restrictions",
   "IP bazlı erişim izni": "IP-based access control",
   "PHP surumu {0} olarak guncellendi.": "PHP version updated to {0}.",
@@ -318,6 +319,7 @@ export default function DomainSubdomainYonetPage() {
                 )}
               </div>
               <p className="text-[11px] text-slate-400 mt-2">{cevirT(cevir("Let's Encrypt icin {0} A kaydinin bu sunucuya ({1}) cozumlenmesi gerekir."), d.tam_ad, d.ipv4)}</p>
+              <Link to={`/abonelikler/${id}/ssl?hedef=alt:${sid}`} className="text-[11px] text-brand-600 dark:text-brand-400 hover:underline mt-1 inline-block">{cevir("SSL yönet — tüm alan adları")}</Link>
             </Card>
 
             <SubWebAyarlari domainId={String(id)} sid={String(sid)} />
