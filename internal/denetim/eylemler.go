@@ -116,6 +116,15 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"yedek.hedef.yetkilendi":       {TR: "Google Drive yetkilendirildi", EN: "Google Drive authorized"},
 	"yedek.hedef.baglanti_kesildi": {TR: "Google Drive bağlantısı kesildi", EN: "Google Drive disconnected"},
 	"yedek.hedef.test":             {TR: "Yedek hedefi bağlantısı sınandı", EN: "Backup target connection tested"},
+	"yedek.uzak.ac":                {TR: "Uzak yedek kopyası açıldı", EN: "Remote backup copy enabled"},
+	"yedek.uzak.kapat":             {TR: "Uzak yedek kopyası kapatıldı", EN: "Remote backup copy disabled"},
+	"yedek.uzak.ayar":              {TR: "Uzak yedek kopyası ayarı değişti", EN: "Remote backup copy settings changed"},
+	"yedek.uzak.anahtar_uret":      {TR: "Yedek şifreleme anahtarı üretildi", EN: "Backup encryption key generated"},
+	"yedek.uzak.anahtar_onay":      {TR: "Yedek şifreleme anahtarı etkinleştirildi", EN: "Backup encryption key activated"},
+	"yedek.uzak.anahtar_ice":       {TR: "Yedek şifreleme açık anahtarı eklendi", EN: "Backup encryption public key imported"},
+	"yedek.uzak.simdi":             {TR: "Yedek uzağa gönderilmek üzere sıraya alındı", EN: "Backup queued for remote copy"},
+	"yedek.uzak.yeniden":           {TR: "Uzak kopya işi yeniden denendi", EN: "Remote copy job retried"},
+	"yedek.uzak.iptal":             {TR: "Uzak kopya işi iptal edildi", EN: "Remote copy job cancelled"},
 
 	// Taşıma
 	"tasima_baslat":     {TR: "Taşıma başlatıldı", EN: "Migration started"},
