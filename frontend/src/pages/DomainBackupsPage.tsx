@@ -101,6 +101,14 @@ const BACKUP_EN: Record<string, string> = {
   "{0}. sırada — sırası gelince başlayacak": "position {0} — starts when its turn comes",
   "sırada": "queued",
   "Sistem": "System",
+  "Drive'a gönder": "Send to Drive",
+  "Drive'a gönderildi": "Sent to Drive",
+  "Drive'a gönderilemedi": "Could not send to Drive",
+  "Drive: sırada": "Drive: queued",
+  "Drive: gönderiliyor": "Drive: sending",
+  "Drive'dan silindi (saklama)": "Removed from Drive (retention)",
+  "Drive: iptal edildi": "Drive: cancelled",
+  "Yedek Drive'a gönderilmek üzere sıraya alındı.": "Backup queued for Google Drive.",
   "Manuel": "Manual",
   "Kaynak": "Source",
   "Yedek": "Backup",
@@ -202,6 +210,10 @@ export default function DomainBackupsPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, bilgi } = useDialog()
   const toast = useToast()
+  const admin = useAuth((st) => st.kullanici?.rol) === 'admin'
+  // Google Drive uzak kopya durumu (yalnız yönetici): yedek id → iş durumu.
+  const [driveDurum, setDriveDurum] = useState<{ aktif: boolean; durumlar: Record<string, string> } | null>(null)
+  const [driveMesgul, setDriveMesgul] = useState<number | null>(null)
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [yedekler, setYedekler] = useState<Yedek[]>([])
@@ -231,6 +243,21 @@ export default function DomainBackupsPage() {
   // Yeni manuel yedek için kalan bekleme (sunucu ölçer; yönetici muaf → 0).
   const beklemeSn = sched.manuel?.bekleme_sn ?? 0
 
+  function driveDurumYukle(liste: Yedek[]) {
+    const ids = liste.filter(y => kaynakOf(y) === 'sistem').map(y => y.id).slice(0, 500)
+    if (ids.length === 0) { setDriveDurum(null); return }
+    api.get<{ aktif: boolean; durumlar: Record<string, string> }>(`/admin/backups/uzak-kopya/yedek-durumlari?ids=${ids.join(',')}`)
+      .then(r => setDriveDurum(r.data)).catch(() => setDriveDurum(null)) // rozet yardımcıdır: hata sayfayı bozmaz
+  }
+  async function driveGonder(y: Yedek) {
+    setDriveMesgul(y.id)
+    try {
+      await api.post(`/admin/backups/uzak-kopya/simdi-gonder/${y.id}`)
+      toast.basari(cevir("Yedek Drive'a gönderilmek üzere sıraya alındı."))
+      driveDurumYukle(yedekler)
+    } catch (e) { toast.hata(cevir("Drive'a gönderilemedi"), apiHata(e)) } finally { setDriveMesgul(null) }
+  }
+
   const yukleNesli = useRef(0)
   function yukle() {
     if (!id) return
@@ -243,6 +270,7 @@ export default function DomainBackupsPage() {
     ]).then(([y, s, d]) => {
       if (_n !== yukleNesli.current) return
       setYedekler(y.data)
+      if (admin) driveDurumYukle(y.data)
       setSched(s.data)
       setDest(d.data)
       if (!d.data.yok) {
@@ -703,6 +731,7 @@ export default function DomainBackupsPage() {
                 <td className={T.hucre} data-etiket={cevir("Kaynak")}>
                   <Badge variant="soft" color={kaynakOf(y) === 'sistem' ? 'info' : 'neutral'}
                     className="px-1.5 py-0.5 text-[11px] font-semibold">{kaynakOf(y) === 'sistem' ? cevir('Sistem') : cevir('Manuel')}</Badge>
+                  {admin && driveDurum?.aktif && kaynakOf(y) === 'sistem' && <DriveRozeti d={driveDurum.durumlar[String(y.id)]} />}
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Boyut")}>
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span>
@@ -710,6 +739,9 @@ export default function DomainBackupsPage() {
                 <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
                   {/* İndirme YEREL dosyayı okur; uzağa taşınmış kayıt
                       indirilemez, açık bırakmak 500 üretirdi. */}
+                  {admin && driveDurum?.aktif && kaynakOf(y) === 'sistem' && y.mevcut === 'yerel' && ['', 'hata', 'iptal'].includes(driveDurum.durumlar[String(y.id)] ?? '') && (
+                    <Button onClick={() => driveGonder(y)} variant="outlined" boyut="sm" ikon={I.gonder} yukleniyor={driveMesgul === y.id}>{cevir("Drive'a gönder")}</Button>
+                  )}
                   <Button
                     onClick={() => indir(y)}
                     disabled={y.mevcut !== 'yerel'}
@@ -941,6 +973,20 @@ function RestoreModal({ yedek, domainId, onClose, onDone, onErr }: {
         </div>
     </Modal>
   )
+}
+
+// DriveRozeti: yedeğin Google Drive uzak kopya durumu (kuyruğa alınmamışsa rozet yok).
+function DriveRozeti({ d }: { d?: string }) {
+  if (!d) return null
+  const cls = 'ml-1.5 px-1.5 py-0.5 text-[11px] font-semibold'
+  switch (d) {
+    case 'tamam': return <Badge variant="soft" color="success" className={cls}>{cevir("Drive'a gönderildi")}</Badge>
+    case 'hata': return <Badge variant="soft" color="error" className={cls}>{cevir("Drive'a gönderilemedi")}</Badge>
+    case 'bekliyor': return <Badge variant="soft" color="warning" className={cls}>{cevir('Drive: sırada')}</Badge>
+    case 'silindi': case 'siliniyor': return <Badge variant="soft" className={cls}>{cevir("Drive'dan silindi (saklama)")}</Badge>
+    case 'iptal': return <Badge variant="soft" className={cls}>{cevir('Drive: iptal edildi')}</Badge>
+    default: return <Badge variant="soft" color="info" className={cls}>{cevir('Drive: gönderiliyor')}</Badge>
+  }
 }
 
 // kaynakOf: sunucu "kaynak" döndürmeyen eski sürümde tipten türetilir.

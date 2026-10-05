@@ -85,6 +85,11 @@ func yeniUzakOrtam(t *testing.T) *uzakOrtam {
 	r.Post("/uzak-kopya/simdi-gonder/{yedek_id}", h.UzakKopyaSimdiGonder)
 	r.Post("/uzak-kopya/yeniden-dene/{is_id}", h.UzakKopyaYenidenDene)
 	r.Post("/uzak-kopya/iptal/{is_id}", h.UzakKopyaIptal)
+	r.Post("/uzak-kopya/anahtar-yenile", h.UzakKopyaAnahtarYenile)
+	r.Post("/uzak-kopya/kurtarma-anahtari", h.UzakKopyaKurtarmaAnahtari)
+	r.Get("/uzak-kopya/mevcutlari-gonder", h.UzakKopyaMevcutlariOnizle)
+	r.Post("/uzak-kopya/mevcutlari-gonder", h.UzakKopyaMevcutlariGonder)
+	r.Get("/uzak-kopya/yedek-durumlari", h.UzakKopyaYedekDurumlari)
 	o.r = r
 	// bağlı (yetkili) bir Drive hedefi
 	g113_exec(t, db, `INSERT INTO backup_hedefler (ad, tur, ayar, sirlar) VALUES ('Drive 1', 'drive', '{"klasor":"Y"}', '')`)
@@ -127,10 +132,7 @@ func TestUzakKopyaUclari_TamAkisVeSizintiYok(t *testing.T) {
 	if kod != 200 || json.Unmarshal([]byte(g), &d) != nil || d.Ayar.Aktif || d.EtkinAnahtar != nil || len(d.Hedefler) != 1 {
 		t.Fatalf("başlangıç durumu: %d %s", kod, g)
 	}
-	// anahtarsız açılamaz
-	if kod, _ := o.cagri("PUT", "/uzak-kopya/ayar", `{"aktif":true,"hedef_id":`+itoa(o.hedefID)+`,"klasor":"gp","saklama_n":7}`); kod != http.StatusConflict {
-		t.Errorf("anahtarsız açılış 409 olmalı: %d", kod)
-	}
+	// geriye uyumlu eski akış (elle anahtar-uret + onayla) hâlâ çalışır: önce kapalı ayar yaz
 	// anahtar üret: kurtarma dosyası TEK KEZ döner
 	kod, g = o.cagri("POST", "/uzak-kopya/anahtar-uret", `{}`)
 	uretIdx := len(o.yanitlar) - 1
