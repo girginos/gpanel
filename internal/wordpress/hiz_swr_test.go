@@ -54,6 +54,7 @@ func TestYapBayat_BayatHemenDonerArkadaYenilenir(t *testing.T) {
 		t.Fatalf("bayat değer HEMEN dönmeliydi: %v %v %v", d, err, time.Since(bas))
 	}
 	// yenileme sürerken ikinci istek de bayatı alır, ikinci yenileme BAŞLAMAZ
+	bekleKosul(t, "yenileme uçuşta", func() bool { return atomic.LoadInt64(&n) == 2 })
 	if d, _ := o.YapBayat(context.Background(), "k", time.Second, time.Hour, fn); d != "v1" {
 		t.Fatalf("yenileme sürerken: %v", d)
 	}
@@ -363,4 +364,57 @@ func TestDbBoyutuAl_BayatHemenDonerKiracıKapsamli(t *testing.T) {
 		t.Fatal("c_b değeri c_a'dan sızdı")
 	}
 	bekleKosul(t, "arka yenileme biter", func() bool { v, ok := agirOnb.Bak(onbAnahtar("c_a", "/d", "dbmb")); return ok && v == "20" })
+}
+
+// Aynı site için ısıtma tekilleştirilir: iş sürerken kaç kez çağrılırsa çağrılsın tek iş.
+func TestWpIsit_AyniSiteTekIs(t *testing.T) {
+	isitSifirla()
+	kapi := make(chan struct{})
+	sahteWPCli(t, func(ctx context.Context, sk string, args ...string) ([]byte, error) {
+		<-kapi
+		if args[0] == "db" {
+			return []byte("1"), nil
+		}
+		return []byte(`[]`), nil
+	})
+	dir := "/home/c_a/public_html"
+	for i := 0; i < 5; i++ {
+		wpIsit("c_a", dir)
+	}
+	if g := isitSayac.Load(); g != 1 {
+		t.Fatalf("aynı site için %d iş açıldı (1 beklenir)", g)
+	}
+	wpIsit("c_b", dir)
+	if g := isitSayac.Load(); g != 2 {
+		t.Fatalf("farklı site ayrı iş olmalı: %d", g)
+	}
+	close(kapi)
+	bekleKosul(t, "işler biter", func() bool { return isitSayac.Load() == 0 })
+}
+
+// Bayat (ama pencere içinde) olan site ısıtmayla YENİDEN yenilenmez: yenileme istek yolunda.
+func TestWpIsit_BayatOlaniYenilemez(t *testing.T) {
+	l, now := saatliOnb(time.Minute)
+	a, _ := saatliOnb(time.Minute)
+	a.simdi = l.simdi
+	onbDegistir(l, a)
+	var n int64
+	sahteWPCli(t, func(ctx context.Context, sk string, args ...string) ([]byte, error) {
+		atomic.AddInt64(&n, 1)
+		if args[0] == "db" {
+			return []byte("1"), nil
+		}
+		return []byte(`[]`), nil
+	})
+	dir := "/home/c_a/public_html"
+	wpIsit("c_a", dir)
+	bekleKosul(t, "ilk ısınma", func() bool { return atomic.LoadInt64(&n) == 4 })
+	bekleKosul(t, "iş bitti", func() bool { return isitSayac.Load() == 0 })
+	*now = now.Add(5 * time.Minute) // hepsi bayat
+	wpIsit("c_a", dir)
+	bekleKosul(t, "iş bitti", func() bool { return isitSayac.Load() == 0 })
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadInt64(&n) != 4 {
+		t.Fatalf("bayat siteyi ısıtma yeniden çalıştırdı: %d", n)
+	}
 }
