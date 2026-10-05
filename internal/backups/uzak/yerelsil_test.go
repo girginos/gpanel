@@ -589,3 +589,86 @@ func TestYerelSil_CiktilardaSirVeYolYok(t *testing.T) {
 		}
 	}
 }
+
+// ─── katman testleri (savunma derinliği: her katman TEK BAŞINA sınanır) ──────
+
+func TestYerelDosyaYolu_GuvenliYol(t *testing.T) {
+	kok := t.TempDir()
+	dir := filepath.Join(kok, "c_a")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "x.tar.gz"), []byte("veri"), 0o600)
+	dis := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dis, "gercek.tar.gz"), []byte("veri"), 0o600)
+	if err := os.Symlink(filepath.Join(dis, "gercek.tar.gz"), filepath.Join(dir, "link.tar.gz")); err != nil {
+		t.Skip("symlink yok")
+	}
+	_ = os.MkdirAll(filepath.Join(kok, "gercek-dizin"), 0o700)
+	_ = os.WriteFile(filepath.Join(kok, "gercek-dizin", "y.tar.gz"), []byte("veri"), 0o600)
+	_ = os.Symlink(filepath.Join(kok, "gercek-dizin"), filepath.Join(kok, "c_link"))
+	_ = os.WriteFile(filepath.Join(dir, "x.zip"), []byte("veri"), 0o600)
+
+	if yol, fi, neden, yok := YerelDosyaYolu(kok, "c_a", "x.tar.gz"); neden != "" || yok || fi == nil || !strings.HasSuffix(yol, "/c_a/x.tar.gz") {
+		t.Errorf("normal dosya kabul edilmeli: %q %q %v", yol, neden, yok)
+	}
+	if _, _, _, yok := YerelDosyaYolu(kok, "c_a", "yok.tar.gz"); !yok {
+		t.Error("olmayan dosya yok=true")
+	}
+	for ad, c := range map[string][2]string{
+		"dosya symlink":    {"c_a", "link.tar.gz"},
+		"dizin symlink":    {"c_link", "y.tar.gz"},
+		"../ kaçışı":       {"c_a", "../c_a/x.tar.gz"},
+		"alt dizin":        {"c_a", "a/x.tar.gz"},
+		"c_ değil":         {"root", "x.tar.gz"},
+		"sk içinde ..":     {"c_..", "x.tar.gz"},
+		"sk içinde /":      {"c_a/../c_a", "x.tar.gz"},
+		"tar.gz değil":     {"c_a", "x.zip"},
+		"boş ad":           {"c_a", ""},
+		"geçici silinecek": {"c_a", "x.tar.gz.silinecek-ab"},
+	} {
+		if _, _, neden, yok := YerelDosyaYolu(kok, c[0], c[1]); neden == "" {
+			t.Errorf("%s: REDDEDİLMELİYDİ (yok=%v)", ad, yok)
+		}
+	}
+}
+
+func TestYerelSil_SiniflandirmaKatmani(t *testing.T) {
+	o := yerelOrtam(t, nil)
+	yid, isid := o.gonder(1, "c_ornek", "20260825-233538")
+	sinif := func() string {
+		liste, err := yerelKayitlari(context.Background(), o.db, o.kok, 0, 0)
+		if err != nil || len(liste) != 1 {
+			t.Fatalf("liste: %v %d", err, len(liste))
+		}
+		return liste[0].sinif
+	}
+	if s := sinif(); s != sinifSil {
+		t.Fatalf("tamam+dogrulanmis: sil bekleniyordu, %s", s)
+	}
+	for _, d := range []string{"hata", "bekliyor", "iptal", "yukleniyor", "dogrulaniyor", "siliniyor", "silindi"} {
+		_, _ = o.db.Exec(`UPDATE backup_uzak_kopyalar SET durum=? WHERE id=?`, d, isid)
+		if s := sinif(); s != sinifDriveYok {
+			t.Errorf("uzak durum %q iken sınıf %s (drive_yok bekleniyordu)", d, s)
+		}
+	}
+	_, _ = o.db.Exec(`UPDATE backup_uzak_kopyalar SET durum='tamam' WHERE id=?`, isid)
+	if s := sinif(); s != sinifSil {
+		t.Fatalf("geri alındı: %s", s)
+	}
+	_ = yid
+}
+
+// Savunma derinliği 2: liste ile silme arasında Drive kopyasının durumu değişirse silme anında yakalanır.
+func TestYerelSil_ListeSonrasiDurumDegisirseSilmeDurur(t *testing.T) {
+	o := yerelOrtam(t, nil)
+	yid, isid := o.gonder(1, "c_ornek", "20260825-233538")
+	yol := o.yedekYol("c_ornek", o.dosyaAdi(yid))
+	liste, err := yerelKayitlari(context.Background(), o.db, o.kok, 0, 0)
+	if err != nil || len(liste) != 1 || liste[0].sinif != sinifSil {
+		t.Fatalf("hazırlık: %v", err)
+	}
+	_, _ = o.db.Exec(`UPDATE backup_uzak_kopyalar SET durum='siliniyor' WHERE id=?`, isid) // saklama Drive'dan siliyor
+	donus, _ := o.isci.yerelSilBir(context.Background(), liste[0], 0)
+	if donus != "atlandi" || !varMi(yol) || o.yerelYokMu(yid) {
+		t.Fatalf("silme durmalıydı: %s", donus)
+	}
+}
