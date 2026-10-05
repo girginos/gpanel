@@ -105,17 +105,7 @@ type yonetGorunum struct {
 	KokKapatti  bool   `json:"kok_kapatti"`
 	AlanadiIzni bool   `json:"alanadi_izni"`
 	Marka       Marka  `json:"marka"`
-	// MusteriAdresi — müşteri kapısının kökü (kapı modu kapalıyken boş → aynı
-	// köken). Bayi markalı müşteri giriş bağlantısını (/cp/giris?m=…) bununla kurar.
-	MusteriAdresi string `json:"musteri_adresi,omitempty"`
-	// OzelAdres — bayinin AKTİF özel panel adresi (yoksa boş). Müşteri giriş
-	// bağlantısı doluysa https://<OzelAdres>/cp/giris olur (özel host markayı
-	// ?m= olmadan çözer: cozum.go genelCoz Host > ?m).
-	OzelAdres string `json:"ozel_adres,omitempty"`
 }
-
-// MusteriAdresKanca — müşteri kapısı adresi (main.go: musteriKapiAdresi).
-var MusteriAdresKanca func(r *http.Request) (string, bool)
 
 func kokGorunum() (yonetGorunum, error) {
 	m, err := KokOkuYonetim()
@@ -190,11 +180,7 @@ func (h *Handlers) YonetGetir(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	g := h.gorunumBayi(r.Context(), k)
-	if MusteriAdresKanca != nil {
-		g.MusteriAdresi, _ = MusteriAdresKanca(r)
-	}
-	httpx.WriteJSON(w, http.StatusOK, g)
+	httpx.WriteJSON(w, http.StatusOK, bayiGorunum(k))
 }
 
 type yonetGovde struct {
@@ -338,7 +324,7 @@ func (h *Handlers) YonetKaydet(w http.ResponseWriter, r *http.Request) {
 	}
 	h.denetim(r, "marka.guncelle", "bayi", "", rid, true)
 	k2, _ := bayiOkuDB(r.Context(), h.DB, rid)
-	httpx.WriteJSON(w, http.StatusOK, h.gorunumBayi(r.Context(), k2))
+	httpx.WriteJSON(w, http.StatusOK, bayiGorunum(k2))
 }
 
 // GorselYukle — POST /marka/yonet/gorsel/{yuva} (multipart "dosya", ≤512 KB).
@@ -436,7 +422,7 @@ func (h *Handlers) gorselIslem(w http.ResponseWriter, r *http.Request, yukle boo
 	bayiDusur(k)
 	h.denetim(r, eylem, "bayi/"+y.Ad, "", rid, true)
 	k2, _ := bayiOkuDB(r.Context(), h.DB, rid)
-	httpx.WriteJSON(w, http.StatusOK, h.gorunumBayi(r.Context(), k2))
+	httpx.WriteJSON(w, http.StatusOK, bayiGorunum(k2))
 }
 
 func gorselYazVeyaSil(dizin string, y Yuva, yukle bool, veri []byte, tip string) error {
@@ -498,7 +484,7 @@ func (h *Handlers) Sifirla(w http.ResponseWriter, r *http.Request) {
 	}
 	h.denetim(r, "marka.sifirla", "bayi", "", rid, true)
 	k2, _ := bayiOkuDB(r.Context(), h.DB, rid)
-	httpx.WriteJSON(w, http.StatusOK, h.gorunumBayi(r.Context(), k2))
+	httpx.WriteJSON(w, http.StatusOK, bayiGorunum(k2))
 }
 
 // ── kök moderasyonu (AdminOnly) ─────────────────────────────────────────────

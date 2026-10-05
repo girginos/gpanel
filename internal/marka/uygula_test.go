@@ -448,29 +448,30 @@ func TestUygula_CakismaGenelMetin(t *testing.T) {
 	}
 }
 
-// Müşteri giriş bağlantısı için: yalnız AKTİF özel adres yönetim görünümünde ozel_adres olur.
-func TestYonet_OzelAdresYalnizAktif(t *testing.T) {
+// Müşteri giriş bağlantısı kartı kaldırıldı: yönetim görünümü artık özel adres / müşteri kapısı adresi
+// ALANI taşımaz (ölü alan geri gelmesin; bayiler arası adres sızıntısı da olmasın).
+func TestYonet_OzelAdresAlaniYok(t *testing.T) {
 	o := uyKur(t)
 	o.uygula(o.bayiA, "panel.bayi-disi.example.org")
-	_, g := o.istek("GET", "/api/v1/marka/yonet", o.bayiA, nil)
-	var v map[string]any
-	_ = json.Unmarshal([]byte(g), &v)
-	if _, var_ := v["ozel_adres"]; var_ {
-		t.Errorf("aktif değilken ozel_adres olmamalı: %s", g)
-	}
 	o.db.Exec(`UPDATE cp_marka_alanadi SET durum='aktif'`)
-	_, g = o.istek("GET", "/api/v1/marka/yonet", o.bayiA, nil)
-	_ = json.Unmarshal([]byte(g), &v)
-	if v["ozel_adres"] != "panel.bayi-disi.example.org" {
-		t.Errorf("aktifken ozel_adres beklenir: %s", g)
+	for ad, g := range map[string]string{
+		"GET": func() string { _, g := o.istek("GET", "/api/v1/marka/yonet", o.bayiA, nil); return g }(),
+		"PUT": func() string {
+			_, g := o.istek("PUT", "/api/v1/marka/yonet", o.bayiA, map[string]any{"panel_adi": "Alfa"})
+			return g
+		}(),
+	} {
+		var v map[string]any
+		if err := json.Unmarshal([]byte(g), &v); err != nil {
+			t.Fatalf("%s yanıtı JSON değil: %s", ad, g)
+		}
+		for _, alan := range []string{"ozel_adres", "musteri_adresi"} {
+			if _, var_ := v[alan]; var_ {
+				t.Errorf("%s: %s alanı kaldırıldı, yanıtta olmamalı: %s", ad, alan, g)
+			}
+		}
 	}
-	// Kaydetme yanıtı da taşır (arayüz yanıtı görünüme yazar).
-	_, g = o.istek("PUT", "/api/v1/marka/yonet", o.bayiA, map[string]any{"panel_adi": "Alfa"})
-	if !strings.Contains(g, `"ozel_adres":"panel.bayi-disi.example.org"`) {
-		t.Errorf("PUT yanıtı ozel_adres taşımalı: %s", g)
-	}
-	// B bayisi A'nın adresini görmez.
-	_, g = o.istek("GET", "/api/v1/marka/yonet", o.bayiB, nil)
+	_, g := o.istek("GET", "/api/v1/marka/yonet", o.bayiB, nil)
 	if strings.Contains(g, "bayi-disi") {
 		t.Errorf("B görünümünde A'nın adresi: %s", g)
 	}

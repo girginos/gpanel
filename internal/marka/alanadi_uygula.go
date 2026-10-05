@@ -822,15 +822,3 @@ func (h *Handlers) alanSimdiKontrol(w http.ResponseWriter, r *http.Request, rid 
 	}
 	h.yazDurum(w, r, rid, http.StatusOK, false, false)
 }
-
-// gorunumBayi — bayinin yönetim görünümü + AKTİF özel adresi (müşteri giriş bağlantısı için).
-func (h *Handlers) gorunumBayi(ctx context.Context, k BayiKayit) yonetGorunum {
-	g := bayiGorunum(k)
-	if k.AlanadiIzni {
-		var ad string
-		if err := h.DB.QueryRowContext(ctx, `SELECT alan_adi FROM cp_marka_alanadi WHERE reseller_id=? AND durum='aktif'`, k.RID).Scan(&ad); err == nil {
-			g.OzelAdres = ad
-		}
-	}
-	return g
-}

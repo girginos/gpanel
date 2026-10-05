@@ -600,7 +600,6 @@ func main() {
 		}
 		return marka.Oku().PanelAdi
 	}
-	marka.MusteriAdresKanca = musteriKapiAdresi
 	// Bayi özel panel adı: sertifika + nginx uzlaştırması (provisioner/panelmarka.go).
 	provisioner.PanelMarkaSunucuIPleri = []string{ipv4}
 	marka.AlanDegistiKanca = provisioner.PanelMarkaDurt
