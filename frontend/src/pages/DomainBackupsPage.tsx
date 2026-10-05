@@ -18,6 +18,8 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { useAuth } from '@/store/auth'
+import { UzakSatirCubugu } from '@/components/UzakIlerleme'
+import { useUzakIlerleme } from '@/lib/uzakIlerleme'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
 type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'yok' }
@@ -214,6 +216,7 @@ export default function DomainBackupsPage() {
   // Google Drive uzak kopya durumu (yalnız yönetici): yedek id → iş durumu.
   const [driveDurum, setDriveDurum] = useState<{ aktif: boolean; durumlar: Record<string, string> } | null>(null)
   const [driveMesgul, setDriveMesgul] = useState<number | null>(null)
+  const [driveHizlan, setDriveHizlan] = useState(0)
   const { id } = useParams()
   const [domain, setDomain] = useState<Domain | null>(null)
   const [yedekler, setYedekler] = useState<Yedek[]>([])
@@ -249,12 +252,25 @@ export default function DomainBackupsPage() {
     api.get<{ aktif: boolean; durumlar: Record<string, string> }>(`/admin/backups/uzak-kopya/yedek-durumlari?ids=${ids.join(',')}`)
       .then(r => setDriveDurum(r.data)).catch(() => setDriveDurum(null)) // rozet yardımcıdır: hata sayfayı bozmaz
   }
+  // Canlı gönderim ilerlemesi: yalnız listede kuyrukta/gönderilen satır varken TEK çağrı (N+1 yok).
+  const driveEtkin = admin && !!driveDurum?.aktif && Object.values(driveDurum.durumlar).some(d => ['bekliyor', 'sifreleniyor', 'yukleniyor', 'dogrulaniyor'].includes(d))
+  const driveIlerleme = useUzakIlerleme(driveEtkin, driveHizlan, 3000)
+  // Aktif iş değişince ya da kuyruk boşalınca rozetler (durum) yeniden okunur.
+  const aktifYedekID = driveIlerleme?.aktif?.yedek_id ?? 0
+  const driveAktifMi = !!driveIlerleme?.aktif_mi
+  const yedeklerRef = useRef<Yedek[]>([])
+  yedeklerRef.current = yedekler
+  useEffect(() => {
+    if (driveEtkin) driveDurumYukle(yedeklerRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aktifYedekID, driveAktifMi])
   async function driveGonder(y: Yedek) {
     setDriveMesgul(y.id)
     try {
       await api.post(`/admin/backups/uzak-kopya/simdi-gonder/${y.id}`)
       toast.basari(cevir("Yedek Drive'a gönderilmek üzere sıraya alındı."))
       driveDurumYukle(yedekler)
+      setDriveHizlan(n => n + 1)
     } catch (e) { toast.hata(cevir("Drive'a gönderilemedi"), apiHata(e)) } finally { setDriveMesgul(null) }
   }
 
@@ -732,6 +748,7 @@ export default function DomainBackupsPage() {
                   <Badge variant="soft" color={kaynakOf(y) === 'sistem' ? 'info' : 'neutral'}
                     className="px-1.5 py-0.5 text-[11px] font-semibold">{kaynakOf(y) === 'sistem' ? cevir('Sistem') : cevir('Manuel')}</Badge>
                   {admin && driveDurum?.aktif && kaynakOf(y) === 'sistem' && <DriveRozeti d={driveDurum.durumlar[String(y.id)]} />}
+                  {admin && driveIlerleme?.aktif && driveIlerleme.aktif.yedek_id === y.id && <UzakSatirCubugu a={driveIlerleme.aktif} />}
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Boyut")}>
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-400 dark:text-slate-500">{formatBoyut(y.boyut_b)}</span>

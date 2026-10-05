@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
@@ -8,6 +8,8 @@ import { Badge, Button } from '@/components/ui'
 import { I, Ikon } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useDialog } from '@/components/Dialog'
+import { UzakIlerlemePaneli } from '@/components/UzakIlerleme'
+import { useIlerlemeBitisi, useUzakIlerleme } from '@/lib/uzakIlerleme'
 
 // Google Drive'a gönderim durumu (YALNIZ kök; Drive hedefi Genel Yedek Ayarları'nda seçilince görünür).
 // Sade akış: hedef seçilip kaydedilince gönderim kendiliğinden açılır, şifreleme otomatiktir ve
@@ -148,6 +150,8 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
   const [hibrit, setHibrit] = useState(false)
   const [onizleme, setOnizleme] = useState<{ yedek_dosya: string; neden: string }[] | null>(null)
   const [topluN, setTopluN] = useState(7)
+  const [hizlandir, setHizlandir] = useState(0) // gönderim başlatılınca ilerleme yoklaması hemen hızlanır
+  const sonIslerRef = useRef<HTMLDetailsElement>(null)
 
   const temizle = () => { setHata(null); setBasari(null) }
 
@@ -168,8 +172,19 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
   }, [])
   useEffect(() => { void yukle() }, [yukle, yenile])
   useEffect(() => { void islerYukle(sayfa) }, [islerYukle, sayfa, yenile])
-  // Aktif iş varken özet + tabloyu 8 sn'de bir tazele
-  const etkinIs = isler.some(i => aktifDurum.has(i.durum))
+  // Canlı ilerleme: kuyrukta iş varken 2 sn, boştayken 15 sn; sekme gizliyken durur.
+  const ilerleme = useUzakIlerleme(!!d?.ayar.aktif, hizlandir)
+  // Gönderim bitince özet + tablo yenilensin (sayfa yenilemeye gerek kalmasın).
+  useIlerlemeBitisi(ilerleme, () => { void yukle(); void islerYukle(sayfa) })
+  function sonIslerAc() {
+    const el = sonIslerRef.current
+    if (!el) return
+    el.open = true
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+  // Aktif iş varken özet + tabloyu 8 sn'de bir tazele. En yeni 10 işin içinde aktif iş
+  // olmayabilir (63 işlik kuyrukta aktif olan en ESKİ iştir) → canlı ilerleme de tetikler.
+  const etkinIs = isler.some(i => aktifDurum.has(i.durum)) || !!ilerleme?.aktif_mi
   useEffect(() => {
     if (!etkinIs) return
     const t = setInterval(() => { void islerYukle(sayfa); void yukle() }, 8000)
@@ -205,6 +220,7 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
       const { data } = await api.post<{ kuyruga: number }>('/admin/backups/uzak-kopya/mevcutlari-gonder', { n: topluN })
       setBasari(cevirT(cevir('{0} yedek sıraya alındı.'), data.kuyruga))
       await yukle(); await islerYukle(1); setSayfa(1)
+      setHizlandir(n => n + 1)
     } catch (e) { setHata(apiHata(e, cevir('Mevcut yedekler gönderilemedi'))) } finally { setMesgul(null) }
   }
 
@@ -242,6 +258,7 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
     try {
       await api.post(`/admin/backups/uzak-kopya/${yol}/${id}`)
       await islerYukle(sayfa); await yukle()
+      setHizlandir(n => n + 1)
     } catch (e) { setHata(apiHata(e, cevir('İşlem başarısız'))) } finally { setMesgul(null) }
   }
   function ayarDegis(p: Partial<Ayar>) { setDirty(true); setForm(f => (f ? { ...f, ...p } : f)) }
@@ -259,6 +276,7 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
         <Badge color="success" variant="soft">{cevir('Açık')}</Badge>
       </div>
       <div className="p-4 space-y-4">
+        <UzakIlerlemePaneli v={ilerleme} sonIslerAc={sonIslerAc} />
         {hata && <UyariKutusu ton="tehlike">{hata}</UyariKutusu>}
         {basari && <UyariKutusu ton="basari">{basari}</UyariKutusu>}
 
@@ -302,7 +320,7 @@ export default function YedekUzakKopya({ yenile = 0 }: { yenile?: number }) {
         </div>
 
         {/* Son işler (daraltılabilir) */}
-        <details className="rounded-lg border border-slate-200 dark:border-dark-600/60 overflow-hidden">
+        <details ref={sonIslerRef} className="rounded-lg border border-slate-200 dark:border-dark-600/60 overflow-hidden">
           <summary className="px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-100 cursor-pointer select-none">{cevir('Son işler')}</summary>
           {isler.length === 0 ? (
             <p className="p-3 text-sm text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-dark-600/60">{cevir('Henüz gönderim işi yok.')}</p>
