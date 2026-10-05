@@ -35,7 +35,7 @@ func TestOnyuz_YoklamaTemizligi(t *testing.T) {
 	lib := oku(t, "lib/websecTarama.ts")
 	wsIcerir(t, "lib", lib, "export const YOKLAMA_MS = 2000")
 	wsIcerir(t, "sayfa", sayfa,
-		"setTimeout(async () => {", "clearTimeout(zamanlayici)", "document.hidden",
+		"setTimeout(async () => {", "clearTimeout(zamanlayici)", "if (!document.hidden) await yukle()",
 		"addEventListener('visibilitychange'", "removeEventListener('visibilitychange'",
 		"yukluyor.current", "canli.current = false", "aktifTarama")
 	wsIcermez(t, "sayfa", sayfa, "setInterval")
