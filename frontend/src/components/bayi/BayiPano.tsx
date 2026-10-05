@@ -62,11 +62,11 @@ export default function BayiPano() {
   const diskMB = o ? o.disk_kullanim_kb / 1024 : 0
   const trafikMB = o ? o.trafik_kullanim_kb / 1024 : 0
   // egilim: KPI altındaki sparkline + değişim (D3b, GET /pano/w/egilim; geçmiş yoksa "Veri toplanıyor").
-  const kpiler: { ad: string; deger: string; alt: string; egilim: EgilimMetrik }[] = o ? [
-    { ad: 'Hosting hesabı', deger: String(o.hosting_adet), alt: o.hosting_limit > 0 ? `/ ${o.hosting_limit}` : '', egilim: 'hesap' },
-    { ad: 'Disk kullanımı', deger: mbYaz(diskMB), alt: o.disk_limit_mb > 0 ? `/ ${mbYaz(o.disk_limit_mb)}` : '', egilim: 'disk_kb' },
-    { ad: 'Aylık trafik', deger: mbYaz(trafikMB), alt: o.trafik_limit_mb > 0 ? `/ ${mbYaz(o.trafik_limit_mb)}` : '', egilim: 'trafik' },
-    { ad: 'Askıda', deger: String(o.askida_adet), alt: '', egilim: 'askida' },
+  const kpiler: { ad: string; deger: string; alt: string; egilim: EgilimMetrik; ikon: string; uyari?: boolean }[] = o ? [
+    { ad: 'Hosting hesabı', deger: String(o.hosting_adet), alt: o.hosting_limit > 0 ? `/ ${o.hosting_limit}` : '', egilim: 'hesap', ikon: I.sunucu },
+    { ad: 'Disk kullanımı', deger: mbYaz(diskMB), alt: o.disk_limit_mb > 0 ? `/ ${mbYaz(o.disk_limit_mb)}` : '', egilim: 'disk_kb', ikon: I.disk },
+    { ad: 'Aylık trafik', deger: mbYaz(trafikMB), alt: o.trafik_limit_mb > 0 ? `/ ${mbYaz(o.trafik_limit_mb)}` : '', egilim: 'trafik', ikon: I.trafik },
+    { ad: 'Askıda', deger: String(o.askida_adet), alt: '', egilim: 'askida', ikon: I.askida, uyari: o.askida_adet > 0 },
   ] : []
   const havuzlar = o ? [
     { ad: 'Disk', kull: diskMB, limit: o.disk_limit_mb, yaz: mbYaz, taahhut: o.disk_taahhut_mb },
@@ -102,7 +102,12 @@ export default function BayiPano() {
           <div key={n} className="space-y-2 bg-white p-4 dark:bg-dark-700"><Iskelet sinif="h-3 w-24" /><Iskelet sinif="h-7 w-20" /></div>
         )) : kpiler.map((x) => (
           <div key={x.ad} className="bg-white p-4 dark:bg-dark-700">
-            <div className="text-xs font-medium text-gray-500 dark:text-dark-300">{t(x.ad)}</div>
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-xs font-medium text-gray-500 dark:text-dark-300">{t(x.ad)}</div>
+              <span className={cx('grid size-8 shrink-0 place-items-center rounded-lg', x.uyari ? 'bg-warning/10 text-warning' : 'bg-primary-600/10 text-primary-600 dark:bg-primary-400/10 dark:text-primary-400')} aria-hidden="true">
+                <Ikon d={x.ikon} className="size-[18px]" />
+              </span>
+            </div>
             <div className="mt-1 text-[1.7rem] font-semibold leading-none tabular-nums text-gray-900 dark:text-dark-50">
               {x.deger}{x.alt && <span className="ms-1.5 text-sm font-medium text-gray-500 dark:text-dark-300">{x.alt}</span>}
             </div>
@@ -111,7 +116,7 @@ export default function BayiPano() {
         ))}
       </section>
 
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         {/* Kaynak havuzu */}
         <section className={cx(KART, 'p-5')} aria-label={t('Kaynak havuzu')}>
           <div className="flex items-center justify-between gap-2">

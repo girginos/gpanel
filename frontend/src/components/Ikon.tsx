@@ -78,6 +78,10 @@ export const I: Record<string, string> = {
   kullaniciArti: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2|M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z|M19 8v6|M22 11h-6',
   terminal: 'M4 17l6-6-6-6|M12 19h8',
   sunucu: 'M20 2H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z|M20 14H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2z|M6 6h.01|M6 18h.01',
+  // Disk (sabit sürücü), trafik (yukarı/aşağı oklar), askıda (duraklatma dairesi) — özet kartları için.
+  disk: 'M22 12H2|M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z|M6 16h.01|M10 16h.01',
+  trafik: 'M7 3v18|M3 7l4-4 4 4|M17 21V3|M13 17l4 4 4-4',
+  askida: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z|M10 15V9|M14 15V9',
   filtre: 'M22 3H2l8 9.46V19l4 2v-8.54z',
   cikis: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9',
   kucult: 'M8 3v3a2 2 0 0 1-2 2H3|M21 8h-3a2 2 0 0 1-2-2V3|M3 16h3a2 2 0 0 1 2 2v3|M16 21v-3a2 2 0 0 1 2-2h3',
