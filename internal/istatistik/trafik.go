@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/logs"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -65,19 +66,122 @@ func AggregateAll(db *sql.DB) int {
 	return n
 }
 
-// aggregateDomain: tek domain'in access.log'unu artımlı okuyup aylık trafiği günceller.
+// imlec: bir log dosyasının okuma imleci (ofset+boyut) saklama arayüzü.
+type imlec interface {
+	oku() (ofset, boyut int64)
+	yaz(ofset, boyut int64)
+}
+
+// anaImlec: ana alan adı — eski tablo (domain_trafik_imlec, anahtar domain_id).
+type anaImlec struct {
+	db *sql.DB
+	id int64
+}
+
+func (a anaImlec) oku() (o, b int64) {
+	_ = a.db.QueryRow(`SELECT ofset, boyut FROM domain_trafik_imlec WHERE domain_id=?`, a.id).Scan(&o, &b)
+	return
+}
+func (a anaImlec) yaz(o, b int64) {
+	_, _ = a.db.Exec(
+		`INSERT INTO domain_trafik_imlec(domain_id, ofset, boyut) VALUES(?,?,?)
+		 ON DUPLICATE KEY UPDATE ofset=VALUES(ofset), boyut=VALUES(boyut)`, a.id, o, b)
+}
+
+// dosyaImlec: ek/alt alan adı — anahtar (domain_id, log_ad).
+type dosyaImlec struct {
+	db *sql.DB
+	id int64
+	ad string
+}
+
+func (a dosyaImlec) oku() (o, b int64) {
+	_ = a.db.QueryRow(`SELECT ofset, boyut FROM domain_trafik_imlec_dosya WHERE domain_id=? AND log_ad=?`, a.id, a.ad).Scan(&o, &b)
+	return
+}
+func (a dosyaImlec) yaz(o, b int64) {
+	_, _ = a.db.Exec(
+		`INSERT INTO domain_trafik_imlec_dosya(domain_id, log_ad, ofset, boyut) VALUES(?,?,?,?)
+		 ON DUPLICATE KEY UPDATE ofset=VALUES(ofset), boyut=VALUES(boyut)`, a.id, a.ad, o, b)
+}
+
+// hesapLogAdlari: hesabın ana dışındaki alan adları (ek alan adları + alt alanlar).
+// Hepsinin access log'u ayrı dosyadır (vhost: <ad>.access.log) ve hesabın trafik
+// kotasına sayılır.
+func hesapLogAdlari(db *sql.DB, domainID int64) []string {
+	var out []string
+	for _, q := range []string{
+		`SELECT alan_adi FROM ek_alan_adlari WHERE domain_id=? ORDER BY id`,
+		`SELECT tam_ad FROM subdomanlar WHERE domain_id=? ORDER BY id`,
+	} {
+		rows, err := db.Query(q, domainID)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var ad string
+			if rows.Scan(&ad) == nil && ad != "" {
+				out = append(out, ad)
+			}
+		}
+		rows.Close()
+	}
+	return out
+}
+
+// aggregateDomain: hesabın ana + ek alan adı + alt alan access.log'larını artımlı okuyup
+// aylık trafiği günceller. Dönen değer: ANA log işlendi mi (eski anlam).
 func aggregateDomain(db *sql.DB, domainID int64, alanAdi string) bool {
-	logPath := "/var/log/nginx/" + alanAdi + ".access.log"
-	fi, err := os.Stat(logPath)
+	ok := false
+	if p, err := logs.DosyaYolu(alanAdi, "access"); err == nil {
+		ok = aggregateDosya(db, domainID, p, anaImlec{db, domainID})
+	}
+	adlar := hesapLogAdlari(db, domainID)
+	imlecTemizle(db, domainID, adlar)
+	for _, ad := range adlar {
+		if p, err := logs.DosyaYolu(ad, "access"); err == nil {
+			aggregateDosya(db, domainID, p, dosyaImlec{db, domainID, ad})
+		}
+	}
+	refreshTrafikKB(db, domainID)
+	return ok
+}
+
+// imlecTemizle: silinmiş ek alan/alt alanın imleci kalmasın (aynı ad sonradan yeniden
+// eklenirse eski ofsetle yanlış başlamasın).
+func imlecTemizle(db *sql.DB, domainID int64, adlar []string) {
+	rows, err := db.Query(`SELECT log_ad FROM domain_trafik_imlec_dosya WHERE domain_id=?`, domainID)
 	if err != nil {
-		// log yok → yine de içinde bulunulan ay kovasından trafik_kb tazele
-		refreshTrafikKB(db, domainID)
+		return
+	}
+	var eski []string
+	for rows.Next() {
+		var ad string
+		if rows.Scan(&ad) == nil {
+			eski = append(eski, ad)
+		}
+	}
+	rows.Close()
+	mevcut := map[string]bool{}
+	for _, a := range adlar {
+		mevcut[a] = true
+	}
+	for _, ad := range eski {
+		if !mevcut[ad] {
+			_, _ = db.Exec(`DELETE FROM domain_trafik_imlec_dosya WHERE domain_id=? AND log_ad=?`, domainID, ad)
+		}
+	}
+}
+
+// aggregateDosya: tek access.log'u imleçten itibaren okur, aylık kovalara ekler.
+func aggregateDosya(db *sql.DB, domainID int64, logPath string, im imlec) bool {
+	fi, err := os.Lstat(logPath) // sembolik bağ takip edilmez
+	if err != nil || !fi.Mode().IsRegular() {
 		return false
 	}
 	size := fi.Size()
 
-	var ofset, boyut int64
-	_ = db.QueryRow(`SELECT ofset, boyut FROM domain_trafik_imlec WHERE domain_id=?`, domainID).Scan(&ofset, &boyut)
+	ofset, _ := im.oku()
 
 	start := ofset
 	// rotasyon/truncate tespiti: dosya küçüldüyse baştan oku
@@ -85,7 +189,6 @@ func aggregateDomain(db *sql.DB, domainID int64, alanAdi string) bool {
 		start = 0
 	}
 	if start == size {
-		refreshTrafikKB(db, domainID)
 		return true
 	}
 
@@ -131,12 +234,7 @@ func aggregateDomain(db *sql.DB, domainID int64, alanAdi string) bool {
 	}
 
 	// imleci güncelle
-	_, _ = db.Exec(
-		`INSERT INTO domain_trafik_imlec(domain_id, ofset, boyut) VALUES(?,?,?)
-		 ON DUPLICATE KEY UPDATE ofset=VALUES(ofset), boyut=VALUES(boyut)`,
-		domainID, consumed, size)
-
-	refreshTrafikKB(db, domainID)
+	im.yaz(consumed, size)
 	return true
 }
 
