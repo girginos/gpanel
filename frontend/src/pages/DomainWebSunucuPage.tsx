@@ -10,7 +10,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Badge, Button, Select } from '@/components/ui'
+import { Badge, Button, Select, Toggle } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
 type Ayarlar = {
@@ -400,7 +400,7 @@ export default function DomainWebSunucuPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("max-age (saniye)")}</label>
                   <select value={a.hsts_max_age} onChange={e => P('hsts_max_age', parseInt(e.target.value))}
-                    className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm font-mono">
+                    className="h-9 px-3 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-mono">
                     <option value={300}>{cevir("5 dk (test için)")}</option>
                     <option value={86400}>{cevir("1 gün")}</option>
                     <option value={604800}>{cevir("1 hafta")}</option>
@@ -451,7 +451,7 @@ export default function DomainWebSunucuPage() {
                   label={cevir("Saklama süresi")}
                   value={a.fastcgi_cache_dakika}
                   onChange={e => P('fastcgi_cache_dakika', parseInt(e.target.value))}
-                  classNames={{ root: 'w-full sm:max-w-xs' }}
+                  classNames={{ root: SAKLAMA_KOK }}
                   data={[
                     { value: 5, label: cevir("5 dakika") },
                     { value: 15, label: cevir("15 dakika") },
@@ -479,7 +479,7 @@ export default function DomainWebSunucuPage() {
                   label={cevir("Saklama süresi")}
                   value={a.browser_cache_gun}
                   onChange={e => P('browser_cache_gun', parseInt(e.target.value))}
-                  classNames={{ root: 'w-full sm:max-w-xs' }}
+                  classNames={{ root: SAKLAMA_KOK }}
                   data={[
                     { value: 1, label: cevir("1 gün") },
                     { value: 7, label: cevir("1 hafta") },
@@ -519,10 +519,13 @@ export default function DomainWebSunucuPage() {
   )
 }
 
+// "Saklama süresi": geniş ekranda etiket + küçük select aynı satırda, mobilde alt alta.
+const SAKLAMA_KOK = 'w-full gap-1.5 sm:w-auto sm:flex-row sm:items-center sm:gap-3 sm:[&>.input-wrapper]:mt-0 sm:[&>.input-wrapper]:w-44'
+
 function Kart({ baslik, children }: { baslik: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-5 mb-4">
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
+    <div className="bg-white dark:bg-dark-700 border border-slate-200 dark:border-dark-600 rounded-lg p-4 mb-3">
+      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3 pb-2 border-b border-slate-100 dark:border-dark-600">{baslik}</h3>
       {children}
     </div>
   )
@@ -532,12 +535,7 @@ function SatirToggle({ etiket, deger, aciklama, acik, onToggle }:
   { etiket: string; deger: string; aciklama: string; acik: boolean; onToggle: () => void }) {
   return (
     <div className="flex items-start gap-3 py-2 border-b border-slate-50 dark:border-dark-600/50 last:border-0">
-      <button onClick={onToggle} role="switch" aria-checked={acik} aria-label={etiket}
-        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
-          acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-        }`}>
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-dark-700 shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
-      </button>
+      <Toggle acik={acik} onDegis={() => onToggle()} aria-label={etiket} className="mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline justify-between gap-2">
           <div className="font-mono text-sm font-semibold text-slate-900 dark:text-slate-100">{etiket}</div>
@@ -574,18 +572,18 @@ function OnbellekSecenegi({ ikon, baslik, altEtiket, aciklama, acik, onToggle, t
   const baslikId = `${kimlik}-baslik`
   const aciklamaId = `${kimlik}-aciklama`
   return (
-    <div className={`rounded-lg border p-4 transition-colors ${
+    <div className={`rounded-lg border p-3.5 transition-colors ${
       acik
         ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]'
         : 'border-slate-200 bg-white dark:border-dark-600 dark:bg-dark-700'
     }`}>
       <div className="flex items-start gap-3">
-        <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${
+        <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${
           acik
             ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'
             : 'bg-slate-100 text-slate-500 dark:bg-dark-600 dark:text-slate-400'
         }`}>
-          <Ikon d={ikon} className="size-5" />
+          <Ikon d={ikon} className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -594,25 +592,20 @@ function OnbellekSecenegi({ ikon, baslik, altEtiket, aciklama, acik, onToggle, t
               {acik ? cevir("Açık") : cevir("Kapalı")}
             </Badge>
           </div>
-          <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{altEtiket}</div>
-          <p id={aciklamaId} className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">{aciklama}</p>
+          <div className="text-xs text-slate-400 dark:text-slate-500">{altEtiket}</div>
+          <p id={aciklamaId} className="mt-1 text-[13px] leading-snug text-slate-600 dark:text-slate-300">{aciklama}</p>
         </div>
-        <button type="button" onClick={onToggle} role="switch" aria-checked={acik}
-          aria-labelledby={baslikId} aria-describedby={aciklamaId}
-          className={`relative mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
-            acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-          }`}>
-          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
+        <Toggle acik={acik} onDegis={() => onToggle()} aria-labelledby={baslikId} aria-describedby={aciklamaId}
+          className="mt-0.5" />
       </div>
 
       {acik && children && (
-        <div className="mt-4 border-t border-slate-200/70 pt-4 dark:border-dark-600 sm:ml-12">
+        <div className="mt-3 border-t border-slate-200/70 pt-3 dark:border-dark-600 sm:ml-11">
           {children}
         </div>
       )}
 
-      <details className="group mt-3 sm:ml-12">
+      <details className="group mt-2 sm:ml-11">
         <summary className="inline-flex cursor-pointer select-none list-none items-center gap-1 rounded text-xs font-medium text-slate-500 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:text-slate-400 dark:hover:text-slate-200 [&::-webkit-details-marker]:hidden">
           <Ikon d={I.chevronSag} className="size-3.5 transition-transform group-open:rotate-90" />
           {cevir("Teknik ayrıntılar")}

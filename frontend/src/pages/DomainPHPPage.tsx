@@ -9,7 +9,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, Toggle } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { useRol, yoneticiMi } from '@/lib/rol'
 import { phpAyarGovdesi } from '@/lib/phpAyar'
@@ -324,11 +324,8 @@ export default function DomainPHPPage() {
           {/* PHP Debug Modu — master switch */}
           <Kart baslik={cevir("PHP Debug Modu")}>
             <div className="flex items-start gap-4">
-              <button onClick={() => P('debug_mode', !a.debug_mode)} role="switch" aria-checked={a.debug_mode} aria-label={cevir("Debug modu")}
-                className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${a.debug_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
-                title={a.debug_mode ? cevir("Debug modunu kapat") : cevir("Debug modunu ac")}>
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${a.debug_mode ? 'translate-x-6' : 'translate-x-1'}`} />
-              </button>
+              <Toggle acik={!!a.debug_mode} onDegis={(v) => P('debug_mode', v)} renk="warning" aria-label={cevir("Debug modu")}
+                title={a.debug_mode ? cevir("Debug modunu kapat") : cevir("Debug modunu ac")} className="mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Debug modu")}</span>

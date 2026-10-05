@@ -10,7 +10,7 @@ import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, Toggle } from '@/components/ui'
 import Modal from '@/components/Modal'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
@@ -796,10 +796,7 @@ function SatirToggle({ etiket, aciklama, acik, onToggle }:
   { etiket: string; aciklama: string; acik: boolean; onToggle: () => void }) {
   return (
     <div className="flex items-start gap-3 py-1">
-      <button onClick={onToggle} role="switch" aria-checked={acik} aria-label={etiket}
-        className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${acik ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-6' : 'translate-x-1'}`} />
-      </button>
+      <Toggle acik={acik} onDegis={() => onToggle()} aria-label={etiket} className="mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{etiket}</div>
         <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">{aciklama}</div>

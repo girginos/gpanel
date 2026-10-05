@@ -8,7 +8,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import { T } from '@/lib/tablo'
 import { useToast } from '@/components/Toast'
-import { Button, Badge } from '@/components/ui'
+import { Button, Badge, Toggle } from '@/components/ui'
 // Buton ikonları paylaşılan setten (IK). Aşağıdaki yerel Ikon/I yalnız alan
 // süsleri, ayar kartları ve adım göstergesi içindir.
 import { I as IK } from '@/components/Ikon'
@@ -1076,10 +1076,7 @@ function AnahtarSatir({ etiket, aciklama, rozet, acik, yukleniyor, degis }: {
         <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-800 dark:text-slate-100">{etiket}{rozet}</div>
         {aciklama && <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{aciklama}</p>}
       </div>
-      <button type="button" role="switch" aria-checked={acik} aria-label={etiket} disabled={yukleniyor} onClick={degis}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:opacity-60 ${acik ? 'bg-brand-600 dark:bg-brand-500' : 'bg-slate-300 dark:bg-dark-500'}`}>
-        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${acik ? 'translate-x-5' : 'translate-x-0.5'}`} />
-      </button>
+      <Toggle acik={acik} onDegis={() => degis()} aria-label={etiket} disabled={yukleniyor} renk="brand" />
     </div>
   )
 }
