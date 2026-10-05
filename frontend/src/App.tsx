@@ -24,6 +24,7 @@ const IPYonetimPage = lazy(() => import('@/pages/IPYonetimPage'))
 const PortYonetimPage = lazy(() => import('@/pages/PortYonetimPage'))
 const WebsiteSecurityPage = lazy(() => import('@/pages/WebsiteSecurityPage'))
 const DomainSecurityPage = lazy(() => import('@/pages/DomainSecurityPage'))
+const MusteriGuvenlikPage = lazy(() => import('@/pages/MusteriGuvenlikPage'))
 const BayiPlaniDuzenlePage = lazy(() => import('@/pages/BayiPlaniDuzenlePage'))
 const BayiPlanlariPage = lazy(() => import('@/pages/BayiPlanlariPage'))
 const SubscriptionDetailPage = lazy(() => import('@/pages/SubscriptionDetailPage'))
@@ -278,6 +279,7 @@ export default function App() {
         <Route path="website-security" element={<WebsiteSecurityPage />} />
         <Route path="website-security/domain/:id" element={<DomainSecurityPage />} />
         <Route path="antivirus" element={<AntivirusPanel />} />
+        <Route path="abonelikler/:id/guvenlik" element={<MusteriGuvenlikPage />} />
         <Route path="abonelikler/:id/:slug" element={<ToolPage />} />
         <Route path="hizmet-planlari"      element={<ServicePlansPage />} />
         <Route path="bayi-planlari"        element={<BayiPlanlariPage />} />

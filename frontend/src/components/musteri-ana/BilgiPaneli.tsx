@@ -16,6 +16,7 @@ import { BaglantiDugme, Dugme, KartBasligi, KopyaDugmesi, TurRozeti, YenidenDene
 import { cevir, cevirF, cevirSayili, oran, tarihBicim } from './dil'
 import { KULLANIM_ESIK, gecerliYedekler, kullanimSatirlari, sslDurumu, yuzde } from './hesap'
 import { eklemeEylemleri } from './ekleme'
+import GuvenlikKarti from './GuvenlikKarti'
 import { useDisariKapat } from './yardimci'
 import type { SslDurumu } from './hesap'
 import type { AlanSatiri, EkAlanListesi, Yedek } from './tipler'
@@ -537,6 +538,7 @@ export default function BilgiPaneli({
       </button>
       <div id={bolumId} className={`${acik ? 'grid' : 'hidden'} mt-3 gap-4 @2xl/sayfa:grid-cols-2 @4xl/sayfa:mt-0 @4xl/sayfa:grid @4xl/sayfa:grid-cols-1`}>
         <GenelBilgi domainId={domainId} domain={domain} kaynak={k} ssl={ssl} yedekler={yedekler} phpEol={satirlar[0]?.phpEol ?? false} />
+        <GuvenlikKarti domainId={domainId} />
         <Kullanim kaynak={kaynak} />
         <AlanListesi
           domainId={domainId}

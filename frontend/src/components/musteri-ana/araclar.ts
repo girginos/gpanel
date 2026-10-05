@@ -75,6 +75,7 @@ export const MUSTERI_ARACLAR: MusteriArac[] = [
   { kod: 'waf', ad: 'Güvenlik Duvarı (WAF)', aciklama: 'ModSecurity + OWASP CRS', ikon: 'kalkan', kapsam: 'alan', kategori: 'guvenlik', yol: 'waf', anahtar: ['waf', 'modsecurity', 'owasp', 'güvenlik duvarı', 'firewall'] },
   { kod: 'erisim', ad: 'Erişim Kısıtlama', aciklama: 'IP izin ve engel kuralları', ikon: 'ban', kapsam: 'alan', kategori: 'guvenlik', yol: 'erisim', altYol: 'erisim', anahtar: ['ip', 'engel', 'izin', 'block', 'allow', 'erişim'] },
   { kod: 'sifre-koruma', ad: 'Şifre Korumalı Dizinler', aciklama: '.htpasswd ile dizin koruma', ikon: 'anahtar', kapsam: 'alan', kategori: 'guvenlik', yol: 'sifre-koruma', altYol: 'sifre-koruma', anahtar: ['htpasswd', 'parola koruma', 'şifre', 'dizin koruma', 'password protect'] },
+  { kod: 'guvenlik-tarama', ad: 'Website Security', aciklama: 'Sitenizdeki bilinen güvenlik açıkları', ikon: 'kalkanTara', kapsam: 'hesap', kategori: 'guvenlik', yol: 'guvenlik', anahtar: ['website security', 'güvenlik açığı', 'açık', 'zafiyet', 'cve', 'vulnerability', 'eklenti güncelle', 'tema güncelle', 'tarama', 'wordpress güvenlik'] },
   { kod: 'antivirus', ad: 'Antivirüs', aciklama: 'Zararlı yazılım taraması, karantina', ikon: 'onayDaire', kapsam: 'hesap', kategori: 'guvenlik', yol: 'imunify', anahtar: ['antivirüs', 'antivirus', 'virüs', 'malware', 'zararlı', 'karantina', 'g-av', 'tarama'] },
   { kod: 'ssh', ad: 'SSH Erişimi', aciklama: 'Terminal erişimi ve anahtarlar', ikon: 'terminal', kapsam: 'hesap', kategori: 'guvenlik', yol: 'ssh-erisim', anahtar: ['ssh', 'terminal', 'anahtar', 'key', 'shell'] },
   // Yazılım
@@ -137,6 +138,8 @@ export const ARAC_EN: Record<string, string> = {
   'Şifre Korumalı Dizinler': 'Password-Protected Directories',
   '.htpasswd ile dizin koruma': 'Protect directories with .htpasswd',
   'Antivirüs': 'Antivirus',
+  'Website Security': 'Website Security',
+  'Sitenizdeki bilinen güvenlik açıkları': 'Known security vulnerabilities on your site',
   'Zararlı yazılım taraması, karantina': 'Malware scanning and quarantine',
   'SSH Erişimi': 'SSH Access',
   'Terminal erişimi ve anahtarlar': 'Terminal access and keys',
