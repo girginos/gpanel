@@ -1,6 +1,6 @@
 // Müşteri ana sayfası — bileşen dışı yardımcılar (hook + DOM).
 import { useEffect, useRef } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
+import type { RefObject } from 'react'
 
 // Açılır panel: dışarı tıklama ya da Esc ile kapanır.
 export function useDisariKapat(acik: boolean, ref: RefObject<HTMLElement>, kapat: () => void) {
@@ -23,17 +23,6 @@ export function useDisariKapat(acik: boolean, ref: RefObject<HTMLElement>, kapat
       document.removeEventListener('keydown', tus)
     }
   }, [acik, ref])
-}
-
-// Ok tuşlarıyla bir listedeki düğmeler arasında gezinme.
-export function okTusuylaGez(e: ReactKeyboardEvent<HTMLElement>) {
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-  e.preventDefault()
-  const l = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
-  if (!l.length) return
-  const i = l.indexOf(document.activeElement as HTMLButtonElement)
-  const s = e.key === 'ArrowDown' ? (i + 1) % l.length : (i - 1 + l.length) % l.length
-  l[s].focus()
 }
 
 // Panoya kopyala: Clipboard API, olmazsa (HTTP, eski tarayıcı) gizli textarea yedeği.

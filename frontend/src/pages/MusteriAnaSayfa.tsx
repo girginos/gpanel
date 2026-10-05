@@ -160,7 +160,6 @@ export default function MusteriAnaSayfa() {
               satirlar={satirlar}
               seciliAnahtar={secili}
               onSec={setSeciliAnahtar}
-              sistemKullanici={d.sistem_kullanici}
             />
           </div>
         </div>

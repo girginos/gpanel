@@ -1,7 +1,6 @@
 // Araç ızgarası: anında süzen arama ("/" odaklar, Enter ilk sonucu açar), kapsam süzgeci,
-// kapsam şeridi (hesap geneli · alan adı başına + seçili alan adı) ve katlanabilir
-// kategoriler. Kutucuklar yalnız mevcut, müşteriye açık sayfalara bağlantıdır (araclar.ts).
-import { useEffect, useId, useRef, useState } from 'react'
+// ve katlanabilir kategoriler. Kutucuklar yalnız mevcut, müşteriye açık sayfalara bağlantıdır (araclar.ts).
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button, Card, Input } from '@/components/ui'
@@ -12,7 +11,6 @@ import { KATEGORILER, aracCevir, aracEslesir, aracHedefi, aramaSozcukleri, sade 
 import type { KategoriKodu, MusteriArac } from './araclar'
 import { DOKUN, Dugme, KapsamKaresi, TurRozeti } from './ortak'
 import { cevir, cevirF, cevirSayili } from './dil'
-import { okTusuylaGez, useDisariKapat } from './yardimci'
 import type { AlanSatiri } from './tipler'
 
 type KapsamFiltre = 'tumu' | 'hesap' | 'alan'
@@ -40,76 +38,6 @@ function AracKutusu({ arac, domainId, secili, ana }: { arac: MusteriArac; domain
   )
 }
 
-// Alan adı seçici — seçili alan adı her zaman görünür; ok tuşlarıyla gezilir.
-function AlanSecici({ satirlar, secili, onSec }: { satirlar: AlanSatiri[]; secili: AlanSatiri; onSec: (anahtar: string) => void }) {
-  const [acik, setAcik] = useState(false)
-  const kokRef = useRef<HTMLDivElement>(null)
-  const dugmeRef = useRef<HTMLButtonElement>(null)
-  const listeRef = useRef<HTMLUListElement>(null)
-  const listeId = useId()
-  useDisariKapat(acik, kokRef, () => {
-    const icerde = kokRef.current?.contains(document.activeElement)
-    setAcik(false)
-    if (icerde) dugmeRef.current?.focus()
-  })
-  useEffect(() => {
-    if (acik) listeRef.current?.querySelector<HTMLButtonElement>('[aria-current="true"]')?.focus()
-  }, [acik])
-  return (
-    <div ref={kokRef} className="relative min-w-0">
-      <button
-        ref={dugmeRef}
-        type="button"
-        aria-expanded={acik}
-        aria-controls={listeId}
-        onClick={() => setAcik((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' && !acik) {
-            e.preventDefault()
-            setAcik(true)
-          }
-        }}
-        className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-start text-sm transition-colors hover:border-gray-400 dark:border-dark-450 dark:bg-dark-800 dark:hover:border-dark-400"
-      >
-        <Ikon d={I.kure} className="size-4 shrink-0 text-primary-600 dark:text-primary-400" />
-        <span className="sr-only">{cevir('Seçili alan adı')}:</span>
-        <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-dark-50">{secili.ad}</span>
-        <TurRozeti tur={secili.tur} />
-        <Ikon d={I.chevronAsagi} className={`size-4 shrink-0 text-gray-400 transition-transform dark:text-dark-300 ${acik ? 'rotate-180' : ''}`} />
-      </button>
-      {acik && (
-        <div className="absolute inset-x-0 z-20 mt-1 rounded-lg border border-gray-200 bg-white p-1 shadow-soft dark:border-dark-500 dark:bg-dark-700 dark:shadow-none">
-          <ul ref={listeRef} id={listeId} aria-label={cevir('Seçili alan adı')} onKeyDown={okTusuylaGez} className="max-h-72 overflow-y-auto">
-            {satirlar.map((s) => {
-              const aktif = s.anahtar === secili.anahtar
-              return (
-                <li key={s.anahtar}>
-                  <button
-                    type="button"
-                    aria-current={aktif}
-                    onClick={() => {
-                      setAcik(false)
-                      dugmeRef.current?.focus()
-                      onSec(s.anahtar)
-                    }}
-                    className={`flex min-h-10 w-full min-w-0 items-center gap-2 rounded-md py-2 pe-2.5 text-start text-sm transition-colors ${s.tur === 'alt' ? 'ps-6' : 'ps-2.5'} ${
-                      aktif ? 'bg-primary-50 text-primary-700 dark:bg-primary-400/10 dark:text-primary-300' : 'text-gray-700 hover:bg-gray-100 dark:text-dark-100 dark:hover:bg-dark-600'
-                    }`}
-                  >
-                    <Ikon d={I.onay} className={`size-4 shrink-0 ${aktif ? '' : 'invisible'}`} />
-                    <span className="min-w-0 flex-1 truncate">{s.ad}</span>
-                    <TurRozeti tur={s.tur} />
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function AracIzgarasi({
   domainId,
   araclar,
@@ -117,7 +45,6 @@ export default function AracIzgarasi({
   satirlar,
   seciliAnahtar,
   onSec,
-  sistemKullanici,
 }: {
   domainId: number
   araclar: MusteriArac[]
@@ -125,7 +52,6 @@ export default function AracIzgarasi({
   satirlar: AlanSatiri[]
   seciliAnahtar: string
   onSec: (anahtar: string) => void
-  sistemKullanici: string
 }) {
   const navigate = useNavigate()
   const aramaRef = useRef<HTMLInputElement>(null)
@@ -280,49 +206,17 @@ export default function AracIzgarasi({
         </div>
       </div>
 
-      {/* Kapsam şeridi — modelin özü + lejant: gri kare hesabın, mavi kare seçili alan adının.
-          overflow-hidden YOK: alan adı seçicinin açılır listesi şeridin dışına taşar. */}
-      <div className="mb-4 rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-700">
-        <div className="grid @2xl/ana:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
-          <div className="flex items-start gap-3 p-3.5">
-            <KapsamKaresi alan={false} ikon={I.kullanici} />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir('Hesap geneli')}</p>
-              <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-dark-300">{cevirF('{0} sistem kullanıcısına ait; tüm alan adlarında ortak.', sistemKullanici)}</p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2.5 border-t border-gray-200 p-3.5 @md/ana:flex-row @md/ana:items-center @2xl/ana:border-s @2xl/ana:border-t-0 dark:border-dark-600">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <KapsamKaresi alan ikon={I.kure} />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir('Alan adı başına')}</p>
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-dark-300">{cevir('Şu alan adında açılır:')}</p>
-              </div>
-            </div>
-            <div className="min-w-0 @md/ana:w-64 @2xl/ana:w-60 @4xl/ana:w-72">
-              {satirlar.length > 1 ? (
-                <AlanSecici satirlar={satirlar} secili={secili} onSec={alanSec} />
-              ) : (
-                <p className="flex min-h-10 min-w-0 items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-dark-800">
-                  <Ikon d={I.kure} className="size-4 shrink-0 text-primary-600 dark:text-primary-400" />
-                  <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-dark-50">{ana.ad}</span>
-                  <TurRozeti tur="ana" />
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-        {secili.tur === 'alt' && (
-          <p className="border-t border-gray-200 px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-300">
-            {cevirF('Alt alan adı sayfası olmayan araçlar (ör. DNS, WAF) ana alan adında ({0}) açılır.', ana.ad)}
-          </p>
-        )}
-        {secili.tur === 'ek' && (
-          <p className="border-t border-gray-200 px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-300">
-            {cevirF('Ek alan adının kendi araç sayfası yok; araçlar ana alan adında ({0}) açılır. Ek alan adını silmek için alan adları kartındaki çöp kutusunu kullanın.', ana.ad)}
-          </p>
-        )}
-      </div>
+      {/* Seçili alan adı alt/ek ise araçların neden ana alan adında açıldığını söyler (seçim "Alan adları" listesinden). */}
+      {secili.tur === 'alt' && (
+        <p className="mb-4 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:bg-dark-700 dark:text-dark-300">
+          {cevirF('Alt alan adı sayfası olmayan araçlar (ör. DNS, WAF) ana alan adında ({0}) açılır.', ana.ad)}
+        </p>
+      )}
+      {secili.tur === 'ek' && (
+        <p className="mb-4 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:bg-dark-700 dark:text-dark-300">
+          {cevirF('Ek alan adının kendi araç sayfası yok; araçlar ana alan adında ({0}) açılır. Ek alan adını silmek için alan adları kartındaki çöp kutusunu kullanın.', ana.ad)}
+        </p>
+      )}
 
       <p className="sr-only" aria-live="polite">
         {aramaVar ? cevirSayili('“{0}” için {1} sonuç', aracSonucu + alanSonucu.length, arama.trim(), aracSonucu + alanSonucu.length) : duyuru}
