@@ -47,6 +47,7 @@ var (
 var (
 	sunucuIPOku = ipyonetim.SunucuIPler
 	zoneYazFn   = dns.WriteZone
+	ekZoneYazFn = dns.WriteEkZone
 )
 
 // domainIPKilit: aynı süreçte iki IP değişimi zone/DB üzerinde yarışmasın.
@@ -54,16 +55,17 @@ var domainIPKilit sync.Mutex
 
 // DegisimSonuc — tek domain IP değişiminin özeti (arayüz + toplu iş detayı).
 type DegisimSonuc struct {
-	DomainID int64    `json:"domain_id"`
-	AlanAdi  string   `json:"alan_adi"`
-	EskiIP   string   `json:"eski_ip"`
-	YeniIP   string   `json:"yeni_ip"`
-	Degisti  bool     `json:"degisti"`
-	DNSKayit int      `json:"dns_kayit"` // güncellenen A kaydı
-	SPFKayit int      `json:"spf_kayit"` // yeni IP eklenen SPF kaydı
-	FTPHost  bool     `json:"ftp_host"`
-	DBHost   bool     `json:"db_host"`
-	Uyarilar []string `json:"uyarilar,omitempty"`
+	DomainID   int64    `json:"domain_id"`
+	AlanAdi    string   `json:"alan_adi"`
+	EskiIP     string   `json:"eski_ip"`
+	YeniIP     string   `json:"yeni_ip"`
+	Degisti    bool     `json:"degisti"`
+	DNSKayit   int      `json:"dns_kayit"`    // güncellenen A kaydı
+	EkDNSKayit int      `json:"ek_dns_kayit"` // ek alan adı bölgelerinde güncellenen A kaydı
+	SPFKayit   int      `json:"spf_kayit"`    // yeni IP eklenen SPF kaydı
+	FTPHost    bool     `json:"ftp_host"`
+	DBHost     bool     `json:"db_host"`
+	Uyarilar   []string `json:"uyarilar,omitempty"`
 }
 
 // SunucudaMi — ip sunucunun global IPv4'lerinden biri mi?
@@ -204,6 +206,13 @@ func DomainIPDegistir(ctx context.Context, db *sql.DB, domainID int64, yeniIP st
 			return s, err
 		}
 	}
+	// Ek (addon) alan adı bölgeleri: değeri TAM OLARAK eski IP olan A kayıtları (elle başka
+	// IP'ye yöneltilmişe dokunulmaz). Aynı işlemde; zone dosyaları commit sonrası.
+	ekKayitlar, ekAlanlar, err := ekAKayitlariniGuncelle(ctx, tx, domainID, eski, yeni)
+	if err != nil {
+		return s, err
+	}
+	s.EkDNSKayit = len(ekKayitlar)
 	s.FTPHost = eski != "" && ftpHost == eski
 	s.DBHost = eski != "" && dbHost == eski
 	if _, err := tx.ExecContext(ctx,
@@ -216,6 +225,13 @@ func DomainIPDegistir(ctx context.Context, db *sql.DB, domainID int64, yeniIP st
 	}
 	s.Degisti = true
 
+	// Ek alan adı bölgeleri (ana bölgenin başarısından bağımsız; hata uyarı olarak döner).
+	for _, ekID := range ekAlanlar {
+		if zerr := ekZoneYazFn(ctx, db, ekID); zerr != nil {
+			s.Uyarilar = append(s.Uyarilar, fmt.Sprintf("ek alan adı #%d DNS bölgesi yazılamadı: %v", ekID, zerr))
+		}
+	}
+
 	if len(yeniler) == 0 {
 		return s, nil
 	}
@@ -223,7 +239,7 @@ func DomainIPDegistir(ctx context.Context, db *sql.DB, domainID int64, yeniIP st
 	// eski haline döndür ve zone'u eski kayıtlarla yeniden üret → DB ile yayındaki
 	// DNS hiçbir an ayrışık kalmaz.
 	if zerr := zoneYazFn(ctx, db, domainID); zerr != nil {
-		if gerr := geriAl(context.WithoutCancel(ctx), db, domainID, eski, ftpHost, dbHost, eskiler); gerr != nil {
+		if gerr := geriAl(context.WithoutCancel(ctx), db, domainID, eski, ftpHost, dbHost, eskiler, ekKayitlar, yeni, eski); gerr != nil {
 			return s, fmt.Errorf("DNS zone yazılamadı (%v) ve GERİ ALMA BAŞARISIZ: %w", zerr, gerr)
 		}
 		_ = zoneYazFn(context.WithoutCancel(ctx), db, domainID)
@@ -233,7 +249,7 @@ func DomainIPDegistir(ctx context.Context, db *sql.DB, domainID int64, yeniIP st
 	return s, nil
 }
 
-func geriAl(ctx context.Context, db *sql.DB, domainID int64, ipv4, ftpHost, dbHost string, eskiler []dnsEski) error {
+func geriAl(ctx context.Context, db *sql.DB, domainID int64, ipv4, ftpHost, dbHost string, eskiler []dnsEski, ekKayitlar []int64, ekYeni, ekEski string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -244,10 +260,64 @@ func geriAl(ctx context.Context, db *sql.DB, domainID int64, ipv4, ftpHost, dbHo
 			return err
 		}
 	}
+	for _, id := range ekKayitlar {
+		if _, err := tx.ExecContext(ctx, `UPDATE ek_dns_kayitlari SET deger=? WHERE id=? AND deger=?`, ekEski, id, ekYeni); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE domains SET ipv4=?, ftp_host=?, db_host=? WHERE id=?`, ipv4, ftpHost, dbHost, domainID); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// sorguYazici — *sql.Tx.
+type sorguYazici interface {
+	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+}
+
+// ekAKayitlariniGuncelle — hesabın ek alan adı bölgelerinde değeri `eski` olan A
+// kayıtlarını `yeni` yapar. Dönen: değişen kayıt kimlikleri (geri alma için) ve
+// değişen bölgelerin ek alan kimlikleri (zone yazımı için). Tablo yoksa (0160 koşmamış)
+// ya da eski IP boşsa hiçbir şey yapmaz.
+func ekAKayitlariniGuncelle(ctx context.Context, tx sorguYazici, domainID int64, eski, yeni string) ([]int64, []int64, error) {
+	if eski == "" {
+		return nil, nil, nil
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT k.id, k.ek_alan_id FROM ek_dns_kayitlari k JOIN ek_alan_adlari e ON e.id=k.ek_alan_id
+		  WHERE e.domain_id=? AND k.tip='A' AND k.deger=?`, domainID, eski)
+	if err != nil {
+		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	var idler, alanlar []int64
+	goruldu := map[int64]bool{}
+	for rows.Next() {
+		var id, ek int64
+		if err := rows.Scan(&id, &ek); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		idler = append(idler, id)
+		if !goruldu[ek] {
+			goruldu[ek] = true
+			alanlar = append(alanlar, ek)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	for _, id := range idler {
+		if _, err := tx.ExecContext(ctx, `UPDATE ek_dns_kayitlari SET deger=? WHERE id=?`, yeni, id); err != nil {
+			return nil, nil, err
+		}
+	}
+	return idler, alanlar, nil
 }
 
 // IPSecenek — hedef IP seçim listesinin bir satırı.

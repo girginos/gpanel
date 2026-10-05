@@ -441,6 +441,7 @@ func main() {
 	// birakilsaydi "panelde gorunmeyen kesinti" sinifi ozelligin alt alan
 	// yarisinda oldugu gibi kalirdi.
 	subdomain.HealAltAlanSapmasi(d)
+	subdomain.HealEkAlanlar(d, ipv4)
 	// Hesap askısı uzlaştırması: askıdaki HER hesaba askı adımlarını (ana + alt
 	// alan vhost'ları, PHP havuzları, Laravel işleyicileri, FTP/SSH/DB girişleri,
 	// cron) yeniden uygular. Hesap askısı genişletilmeden önce askıya alınmış
@@ -878,6 +879,18 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/ssl", subH.SSLDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/subdomain/{sid}/ssl", subH.SSLKaldir)
+				// Ek (addon) alan adı: hesap altında birden fazla alan adı (cPanel modeli).
+				// MusteriScope {id}'yi (hesap sahipliği) doğrular; {eid}'nin O hesaba ait
+				// olduğu handler içinde ayrıca doğrulanır (IDOR kapısı). Paket limiti
+				// (max_domain = ana + ek) sunucuda zorunlu (EkOlustur).
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari", subH.EkListe)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ek-alan-adlari", subH.EkOlustur)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari/{eid}", subH.EkDetay)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ek-alan-adlari/{eid}", subH.EkSil)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari/{eid}/ssl", subH.EkSSLDurum)
+				r.With(middleware.MusteriScope).Post("/domains/{id}/ek-alan-adlari/{eid}/ssl", subH.EkSSLKur)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/ek-alan-adlari/{eid}/ssl", subH.EkSSLKaldir)
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari/{eid}/dns", subH.EkDNS)
 				// Subdomain WordPress (docroot-kapsamli, wpKapsam ile alt-alana hapis)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/wordpress", wpH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/wordpress", wpH.Kur)

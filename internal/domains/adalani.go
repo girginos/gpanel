@@ -250,6 +250,72 @@ func AdAlaniDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci in
 	if n > 0 {
 		return &AdAlaniHatasi{Genel: adAlaniMsjAltAlan}
 	}
+
+	// Kural 4: ek (addon) alan adları (ek_alan_adlari, 0160). Ek alan adı kendi bölgesinin
+	// ve vhost'unun sahibidir: domains/subdomanlar ile AYNI ad-alanı kuralları geçerlidir.
+	return ekAlanAdlariDenetle(ctx, db, ad, kiraci)
+}
+
+const adAlaniMsjEk = "bu alan adı sunucuda ek alan adı olarak kullanımda"
+
+// ekAlanAdlariDenetle: Kural 4. Tablo yoksa (0160 koşmamış) atlanır; öteki sorgu
+// hataları fail-closed.
+//   - ad birebir bir ek alan adı → herkese red (kimin olursa olsun).
+//   - ad, SAHİBİ kiraci OLMAYAN bir ek alan adının alt adı ya da üst adı → red
+//     (başka kiracının bölgesi/vhost'u/sertifikası ele geçirilemez).
+//   - ad = <hizmet öneki>.<mevcut ek alan adı> → red.
+func ekAlanAdlariDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64) error {
+	adaylar := append([]string{ad}, ustAdlar(ad)...)
+	yer := strings.TrimSuffix(strings.Repeat("?,", len(adaylar)), ",")
+	args := make([]any, 0, len(adaylar)+3)
+	for _, a := range adaylar {
+		args = append(args, a)
+	}
+	ustler, err := adAlaniOku(ctx, db,
+		`SELECT e.alan_adi, COALESCE(d.reseller_id,0) FROM ek_alan_adlari e JOIN domains d ON d.id=e.domain_id
+		  WHERE e.alan_adi IN (`+yer+`)`, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
+			return nil
+		}
+		return err
+	}
+	altlar, err := adAlaniOku(ctx, db,
+		`SELECT e.alan_adi, COALESCE(d.reseller_id,0) FROM ek_alan_adlari e JOIN domains d ON d.id=e.domain_id
+		  WHERE CHAR_LENGTH(e.alan_adi) > ? AND RIGHT(e.alan_adi, ?) = ?`,
+		len(ad)+1, len(ad)+1, "."+ad)
+	if err != nil {
+		return err
+	}
+	for _, k := range ustler {
+		if k.ad == ad {
+			return &AdAlaniHatasi{Genel: adAlaniMsjEk, Ayrinti: "sahibi: " + sahipMetni(k.rid)}
+		}
+	}
+	for _, k := range ustler {
+		if k.rid != kiraci {
+			return &AdAlaniHatasi{Genel: adAlaniMsjCapraz,
+				Ayrinti: fmt.Sprintf("%s ek alan adının alt adı; sahibi: %s", k.ad, sahipMetni(k.rid))}
+		}
+	}
+	for _, k := range altlar {
+		if k.rid != kiraci {
+			return &AdAlaniHatasi{Genel: adAlaniMsjCapraz,
+				Ayrinti: fmt.Sprintf("%s ek alan adının üst adı; sahibi: %s", k.ad, sahipMetni(k.rid))}
+		}
+	}
+	for _, k := range ustler {
+		if hizmetAdiMi(ad, k.ad) {
+			return &AdAlaniHatasi{Genel: fmt.Sprintf(
+				"bu ad, %s alan adının hizmet adı (www/mail/webmail/smtp/imap/pop/autoconfig/autodiscover); ayrı hosting olarak açılamaz", k.ad)}
+		}
+	}
+	for _, k := range altlar {
+		if k.ad == "www."+ad {
+			return &AdAlaniHatasi{Genel: fmt.Sprintf(
+				"%s ek alan adı olarak kayıtlı; bu alan adının www adı onunla çakışır", k.ad)}
+		}
+	}
 	return nil
 }
 
