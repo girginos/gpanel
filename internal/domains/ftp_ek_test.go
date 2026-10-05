@@ -75,6 +75,9 @@ func fe_kur(t *testing.T) (*sql.DB, http.Handler) {
 			r.With(middleware.MusteriScope).Put("/domains/{id}/ftp-ek/{kullanici}", h.FTPEkGuncelle)
 			r.With(middleware.MusteriScope).Put("/domains/{id}/ftp-ek/{kullanici}/password", h.FTPEkParola)
 			r.With(middleware.MusteriScope).Delete("/domains/{id}/ftp-ek/{kullanici}", h.FTPEkSil)
+			// Rota kapısı OLMADAN: işleyicinin KENDİ sahiplik kilidini (DomainSahibiMi) tek başına sınar.
+			r.Get("/domains/{id}/ftp-ek-ham", h.FTPEkListe)
+			r.Delete("/domains/{id}/ftp-ek-ham/{kullanici}", h.FTPEkSil)
 		})
 	})
 	return db, r
@@ -178,8 +181,12 @@ func TestFTPEk_MusteriAkisiVeParolaSizmaz(t *testing.T) {
 	if y = gp_istek(t, h, "PUT", m, "/domains/20/ftp-ek/c_bayi2-foto", map[string]any{"dizin": "/public_html", "etkin": true}); y.kod != 200 {
 		t.Fatalf("dizin+aç: %d %s", y.kod, y.ham)
 	}
-	if y = gp_istek(t, h, "PUT", m, "/domains/20/ftp-ek/c_bayi2-foto", map[string]any{"izin": "ro"}); y.kod != 400 {
+	if y = gp_istek(t, h, "PUT", m, "/domains/20/ftp-ek/c_bayi2-foto", map[string]any{"izin": "ro", "etkin": false}); y.kod != 400 {
 		t.Fatalf("salt-okuma henüz yok, 400 beklenir: %d %s", y.kod, y.ham)
+	}
+	_ = db.QueryRow(`SELECT status FROM ftp_accounts WHERE username='c_bayi2-foto'`).Scan(&durum)
+	if durum != "active" {
+		t.Fatalf("reddedilen izin isteği hesabı değiştirdi: %s", durum)
 	}
 	if y = gp_istek(t, h, "DELETE", m, "/domains/20/ftp-ek/c_bayi2-foto", nil); y.kod != 200 {
 		t.Fatalf("sil: %d %s", y.kod, y.ham)
@@ -317,5 +324,29 @@ func TestFTPEk_DizinKacisiVeHizSiniri(t *testing.T) {
 	}
 	if son.kod != 429 {
 		t.Fatalf("hız sınırı: %d", son.kod)
+	}
+}
+
+// Rota kapısı (MusteriScope) olmasa bile işleyici başka alan adının hesaplarına dokunmaz.
+func TestFTPEk_IsleyiciIkinciKilit(t *testing.T) {
+	db, h := fe_kur(t)
+	m20 := gp_musteri(t, db, 20, false)
+	m30 := gp_musteri(t, db, 30, false)
+	if y := gp_istek(t, h, "POST", m30, "/domains/30/ftp-ek", map[string]any{"ek": "kurban", "dizin": "public_html"}); y.kod != 201 {
+		t.Fatalf("hazırlık: %d %s", y.kod, y.ham)
+	}
+	if y := gp_istek(t, h, "GET", m20, "/domains/30/ftp-ek-ham", nil); y.kod != 404 {
+		t.Fatalf("işleyici ikinci kilidi: liste 404 beklenir, %d %s", y.kod, y.ham)
+	}
+	if y := gp_istek(t, h, "DELETE", m20, "/domains/30/ftp-ek-ham/c_kurban-kurban", nil); y.kod != 404 {
+		t.Fatalf("işleyici ikinci kilidi: sil 404 beklenir, %d", y.kod)
+	}
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM ftp_accounts WHERE username='c_kurban-kurban'`).Scan(&n)
+	if n != 1 {
+		t.Fatal("kurban hesap silindi")
+	}
+	if y := gp_istek(t, h, "GET", m30, "/domains/30/ftp-ek-ham", nil); y.kod != 200 {
+		t.Fatalf("kendi alan adı: %d", y.kod)
 	}
 }
