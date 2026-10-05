@@ -45,8 +45,21 @@ const AYAR_EN: Record<string, string> = {
   'Son yükleme': 'Last upload',
   'başarılı': 'successful',
   'hata': 'error',
+  'Google Drive': 'Google Drive',
+  'Google Drive (önce bağlanın)': 'Google Drive (connect first)',
+  'Önce Google ile bağlanın': 'Connect with Google first',
+  'Google Drive’ı seçmek için önce hesabınızı bağlayın.': 'To choose Google Drive, connect your account first.',
+  'Google ile bağlan': 'Connect with Google',
+  'Google hesabı': 'Google account',
+  'Sistem yedekleri otomatik ve şifreli olarak Google Drive’a gönderilir. Müşterilerin elle aldığı yedekler gönderilmez.': 'System backups are sent to Google Drive automatically and encrypted. Backups customers take by hand are not sent.',
+  'Google Drive hedefi kaydedildi. Yeni yedekler kendiliğinden gönderilecek.': 'Google Drive target saved. New backups will be sent automatically.',
+  'Google Drive hedefi seçilmedi': 'No Google Drive account selected',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (AYAR_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
+type UzakAyar = { aktif: boolean; hedef_id: number; klasor: string; saklama_n: number; saklama_gun: number; bant_kbps: number }
+type UzakDurum = { ayar: UzakAyar; hedefler: { id: number; ad: string; tur: string }[] }
+type HedefTur = 'sftp' | 'ftp' | 'drive'
 
 type Ayar = {
   aktif: boolean
@@ -97,19 +110,48 @@ function Salter({ acik, degisti, etiketMetni }: { acik: boolean; degisti: (v: bo
   )
 }
 
-export default function YedekGenelAyar() {
+export default function YedekGenelAyar({ onUzakDegisti, driveSayac = 0 }: { onUzakDegisti?: () => void; driveSayac?: number }) {
   useTranslation() // dil re-render aboneligi
   const [a, setA] = useState<Ayar | null>(null)
   const [kaydediyor, setKaydediyor] = useState(false)
   const [testEdiyor, setTestEdiyor] = useState(false)
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
+  // Uzak hedef seçimi: SFTP / FTP / Google Drive tek yerde. Drive seçilince şifreleme ve
+  // uzak kopya kendiliğinden açılır (sunucu anahtarı üretir); kullanıcıdan anahtar istenmez.
+  const [uzakAcik, setUzakAcik] = useState(false)
+  const [hedefTur, setHedefTur] = useState<HedefTur>('sftp')
+  const [driveId, setDriveId] = useState(0)
+  const [drives, setDrives] = useState<{ id: number; ad: string }[]>([])
+  const [uzakVar, setUzakVar] = useState(false) // uzak kopya ucu cevap verdi mi
+
+  // Google Drive kartında hesap bağlanınca/silinince seçenek listesi tazelenir (form değerlerine dokunmaz).
+  useEffect(() => {
+    if (driveSayac === 0) return
+    api.get<UzakDurum>('/admin/backups/uzak-kopya').then(r => {
+      const liste = r.data.hedefler.filter(h => h.tur === 'drive')
+      setDrives(liste)
+      setDriveId(id => (liste.some(h => h.id === id) ? id : liste[0]?.id || 0))
+    }).catch(() => { /* seçenek listesi bir sonraki yüklemede gelir */ })
+  }, [driveSayac])
 
   useEffect(() => {
     let iptal = false
-    api
-      .get<Ayar>('/admin/backups/ayar')
-      .then(r => { if (iptal) return; setA({ ...r.data, uzak_parola: '' }) })
+    Promise.all([
+      api.get<Ayar>('/admin/backups/ayar'),
+      api.get<UzakDurum>('/admin/backups/uzak-kopya').then(r => r.data).catch(() => null),
+    ])
+      .then(([r, u]) => {
+        if (iptal) return
+        setA({ ...r.data, uzak_parola: '' })
+        const driveAktif = !!u?.ayar.aktif
+        const liste = (u?.hedefler || []).filter(h => h.tur === 'drive')
+        setUzakVar(!!u)
+        setDrives(liste)
+        setDriveId(u?.ayar.hedef_id || liste[0]?.id || 0)
+        setUzakAcik(r.data.uzak_aktif || driveAktif)
+        setHedefTur(driveAktif ? 'drive' : r.data.uzak_tip === 'ftp' ? 'ftp' : 'sftp')
+      })
       .catch(e => { if (iptal) return; setHata(apiHata(e, cevir('Ayarlar alınamadı'))) })
     return () => { iptal = true }
   }, [])
@@ -122,10 +164,23 @@ export default function YedekGenelAyar() {
     if (!a) return
     setHata(null); setBasari(null); setKaydediyor(true)
     try {
-      await api.put('/admin/backups/ayar', a)
+      const drive = uzakAcik && hedefTur === 'drive'
+      if (drive && !driveId) { setHata(cevir('Google Drive hedefi seçilmedi')); return }
+      const govde = { ...a, uzak_aktif: uzakAcik && hedefTur !== 'drive', uzak_tip: hedefTur === 'drive' ? a.uzak_tip : hedefTur }
+      // Güncel uzak kopya ayarı (saklama/klasör/bant başka kartta değişmiş olabilir): yalnız aktif+hedef değişir.
+      const uzakAyarYaz = async (aktif: boolean) => {
+        const { data: u } = await api.get<UzakDurum>('/admin/backups/uzak-kopya')
+        if (aktif || u.ayar.aktif) {
+          await api.put('/admin/backups/uzak-kopya/ayar', { ...u.ayar, aktif, hedef_id: aktif ? driveId : u.ayar.hedef_id })
+        }
+      }
+      if (drive) await uzakAyarYaz(true)
+      await api.put('/admin/backups/ayar', govde)
+      if (!drive && uzakVar) await uzakAyarYaz(false)
       const { data } = await api.get<Ayar>('/admin/backups/ayar')
       setA({ ...data, uzak_parola: '' })
-      setBasari(cevir('Ayarlar kaydedildi.'))
+      setBasari(drive ? cevir('Google Drive hedefi kaydedildi. Yeni yedekler kendiliğinden gönderilecek.') : cevir('Ayarlar kaydedildi.'))
+      onUzakDegisti?.()
     } catch (e) {
       setHata(apiHata(e, cevir('Ayarlar kaydedilemedi')))
     } finally {
@@ -137,7 +192,7 @@ export default function YedekGenelAyar() {
     if (!a) return
     setHata(null); setBasari(null); setTestEdiyor(true)
     try {
-      const { data } = await api.post('/admin/backups/ayar/test', a)
+      const { data } = await api.post('/admin/backups/ayar/test', { ...a, uzak_tip: hedefTur === 'drive' ? a.uzak_tip : hedefTur })
       if (data.ok) setBasari(cevir('Bağlantı başarılı'))
       else setHata(String(data.hata || ''))
     } catch (e) {
@@ -199,24 +254,39 @@ export default function YedekGenelAyar() {
         {/* Global uzak hedef */}
         <div>
           <div className="flex items-start gap-3 mb-3">
-            <Salter acik={a.uzak_aktif} degisti={v => yaz('uzak_aktif', v)} etiketMetni={cevir('Uzak hedef (sistem geneli)')} />
+            <Salter acik={uzakAcik} degisti={setUzakAcik} etiketMetni={cevir('Uzak hedef (sistem geneli)')} />
             <div>
               <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{cevir('Uzak hedef (sistem geneli)')}</div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{cevir('Tüm domainlerin yedekleri bu hedefe yüklenir. Domain bazlı hedeflerden bağımsızdır.')}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{hedefTur === 'drive' ? cevir('Sistem yedekleri otomatik ve şifreli olarak Google Drive’a gönderilir. Müşterilerin elle aldığı yedekler gönderilmez.') : cevir('Tüm domainlerin yedekleri bu hedefe yüklenir. Domain bazlı hedeflerden bağımsızdır.')}</p>
             </div>
           </div>
 
-          {a.uzak_aktif && (
+          {uzakAcik && (
             <div className="pl-0 sm:pl-14 space-y-3">
               <div className="grid sm:grid-cols-4 gap-3">
                 <div>
                   <label className={etiket} htmlFor="uzak-tip">{cevir('Tip')}</label>
-                  <select id="uzak-tip" className={kutu} value={a.uzak_tip}
-                    onChange={e => { yaz('uzak_tip', e.target.value); yaz('uzak_port', e.target.value === 'ftp' ? 21 : 22) }}>
+                  <select id="uzak-tip" className={kutu} value={hedefTur}
+                    onChange={e => {
+                      const v = e.target.value as HedefTur
+                      setHedefTur(v)
+                      if (v !== 'drive') yaz('uzak_port', v === 'ftp' ? 21 : 22)
+                    }}>
                     <option value="sftp">SFTP</option>
                     <option value="ftp">FTP</option>
+                    {uzakVar && <option value="drive" disabled={drives.length === 0}>{drives.length === 0 ? cevir('Google Drive (önce bağlanın)') : cevir('Google Drive')}</option>}
                   </select>
                 </div>
+                {hedefTur === 'drive' && drives.length > 1 && (
+                  <div className="sm:col-span-3">
+                    <label className={etiket} htmlFor="uzak-drive">{cevir('Google hesabı')}</label>
+                    <select id="uzak-drive" className={kutu} value={driveId} onChange={e => setDriveId(Number(e.target.value))}>
+                      {drives.map(d => <option key={d.id} value={d.id}>{d.ad}</option>)}
+                    </select>
+                  </div>
+                )}
+                {hedefTur !== 'drive' && (
+                <>
                 <div className="sm:col-span-2">
                   <label className={etiket} htmlFor="uzak-host">{cevir('Sunucu')}</label>
                   <input id="uzak-host" className={kutu} value={a.uzak_host} placeholder="yedek.ornek.com"
@@ -227,7 +297,17 @@ export default function YedekGenelAyar() {
                   <input id="uzak-port" type="number" min={1} max={65535} className={kutu} value={a.uzak_port}
                     onChange={e => yaz('uzak_port', Number(e.target.value))} />
                 </div>
+                </>
+                )}
               </div>
+              {uzakVar && drives.length === 0 && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  {cevir('Google Drive’ı seçmek için önce hesabınızı bağlayın.')}{' '}
+                  <a href="#google-drive" className="font-medium underline">{cevir('Önce Google ile bağlanın')}</a>
+                </p>
+              )}
+              {hedefTur !== 'drive' && (
+              <>
               <div className="grid sm:grid-cols-3 gap-3">
                 <div>
                   <label className={etiket} htmlFor="uzak-kul">{cevir('Kullanıcı')}</label>
@@ -266,6 +346,8 @@ export default function YedekGenelAyar() {
               <Button variant="outlined" ikon={I.yenile} onClick={test} yukleniyor={testEdiyor}>
                 {testEdiyor ? cevir('Test ediliyor…') : cevir('Bağlantıyı Test Et')}
               </Button>
+              </>
+              )}
             </div>
           )}
         </div>

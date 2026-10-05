@@ -2,7 +2,7 @@ import { cevirT } from '@/lib/cevirT'
 import { ORTAK_EN } from '@/lib/cevirOrtak'
 import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
 import { Link } from 'react-router-dom'
 import { api, apiHata } from '@/lib/api'
@@ -66,6 +66,9 @@ export default function BackupYonetimiPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [basari, setBasari] = useState<string | null>(null)
   const [yedekliyor, setYedekliyor] = useState(false)
+  const [driveSayac, setDriveSayac] = useState(0)
+  const [uzakSayac, setUzakSayac] = useState(0) // Genel Yedek Ayarları hedefi değiştirince Drive kartı yenilenir
+  const yeniDrive = useCallback(() => setDriveSayac(n => n + 1), [])
   const timer = useRef<number | null>(null)
   const toast = useToast()
 
@@ -121,9 +124,9 @@ export default function BackupYonetimiPage() {
         <Kpi et={cevir("Aktif Uzak Hedef")} v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1.3A3.5 3.5 0 0117 18H7z"/></svg>} alt="S3 / SFTP" />
       </div>
 
-      <YedekGenelAyar />
-      <YedekGoogleDrive />
-      <YedekUzakKopya />
+      <YedekGenelAyar driveSayac={driveSayac} onUzakDegisti={() => setUzakSayac(n => n + 1)} />
+      <YedekUzakKopya yenile={uzakSayac} />
+      <YedekGoogleDrive onDegisti={yeniDrive} />
 
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>

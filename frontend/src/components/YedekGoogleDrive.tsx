@@ -17,8 +17,8 @@ const DRIVE_EN: Record<string, string> = {
   'Google Drive Yedek Hedefi': 'Google Drive Backup Target',
   'Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.':
     'Connects with your own Google Cloud OAuth client; it can only access files the app created (drive.file). Backups are encrypted before upload.',
-  'Hedefi burada tanımlayıp yetkilendirin; yedeklerin şifreli gönderimi aşağıdaki “Uzak kopya” kartından açılır.':
-    'Define and authorize the target here; encrypted upload of backups is turned on in the “Remote copy” card below.',
+  'Google hesabınızı burada bağlayın; ardından yukarıdaki Genel Yedek Ayarları’nda uzak hedef olarak “Google Drive”ı seçin.':
+    'Connect your Google account here, then choose “Google Drive” as the remote target in Global Backup Settings above.',
   'Yenileme jetonu 7 günde dolar': 'Refresh token expires in 7 days',
   'Google OAuth uygulamanız “Test” durumundaysa yenileme jetonu 7 gün sonra geçersiz olur ve hedefi yeniden yetkilendirmeniz gerekir. Kalıcı kullanım için OAuth onay ekranını “Üretim”e (In production) alın.':
     'If your Google OAuth app is in “Testing” status, the refresh token becomes invalid after 7 days and you must re-authorize the target. For permanent use, set the OAuth consent screen to “In production”.',
@@ -134,7 +134,7 @@ function DurumRozeti({ h }: { h: Hedef }) {
   }
 }
 
-export default function YedekGoogleDrive() {
+export default function YedekGoogleDrive({ onDegisti }: { onDegisti?: () => void }) {
   useTranslation() // dil re-render aboneligi
   const [liste, setListe] = useState<Hedef[] | null>(null)
   const [hata, setHata] = useState<string | null>(null)
@@ -154,6 +154,7 @@ export default function YedekGoogleDrive() {
     try {
       const { data } = await api.get<Hedef[]>('/admin/backups/hedefler')
       setListe(data.filter(h => h.tur === 'drive'))
+      onDegisti?.()
       try {
         const { data: o } = await api.get<{ ortak_istemci: boolean }>('/admin/backups/hedefler/ortak-istemci')
         setOrtak(!!o.ortak_istemci)
@@ -161,7 +162,7 @@ export default function YedekGoogleDrive() {
     } catch (e) {
       setHata(apiHata(e, cevir('Hedefler alınamadı')))
     }
-  }, [])
+  }, [onDegisti])
   useEffect(() => { void yukle() }, [yukle])
 
   // Yetkilendirme sorgusu: Google'ın bildirdiği aralıkla; onay/ret/süre dolunca durur.
@@ -292,7 +293,7 @@ export default function YedekGoogleDrive() {
   if (liste === null && !hata) return null
 
   return (
-    <div className="mb-5 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 overflow-hidden">
+    <div id="google-drive" className="mb-5 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 overflow-hidden scroll-mt-20">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-dark-600/60 flex items-center gap-2">
         <Ikon d={I.bulut} className="h-4 w-4" />
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{cevir('Google Drive Yedek Hedefi')}</h3>
@@ -303,7 +304,7 @@ export default function YedekGoogleDrive() {
           {kendi
             ? cevir('Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')
             : cevir('Google hesabınızla bağlanın; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')}
-          {' '}{cevir('Hedefi burada tanımlayıp yetkilendirin; yedeklerin şifreli gönderimi aşağıdaki “Uzak kopya” kartından açılır.')}
+          {' '}{cevir('Google hesabınızı burada bağlayın; ardından yukarıdaki Genel Yedek Ayarları’nda uzak hedef olarak “Google Drive”ı seçin.')}
         </p>
 
         {kendi && <UyariKutusu ton="uyari" baslik={cevir('Yenileme jetonu 7 günde dolar')} kucuk>
