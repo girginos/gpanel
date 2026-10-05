@@ -11,7 +11,8 @@ import { api, apiHata, fetchAskiKontrol } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
-import { Button, Select } from '@/components/ui'
+import { Button } from '@/components/ui'
+import AramaliSecim from '@/components/AramaliSecim'
 import { useAuth } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
@@ -70,6 +71,7 @@ const DLOGS_EN: Record<string, string> = {
   "ek alan adı": "addon domain",
   "alt alan adı": "subdomain",
   "Henüz log yok": "No logs yet",
+  "Alan adı ara…": "Search domain…",
   "İndir": "Download",
   "Log alan adları alınamadı": "Failed to load log domains",
 }
@@ -253,14 +255,16 @@ export default function DomainLogsPage() {
       {/* Dinamik alan adı seçici: ana + ek alan adları + alt alanlar */}
       {hedefler.length > 0 && !sid && (
         <div className="mb-3 max-w-md">
-          <Select
-            label={cevir("Alan adı")}
-            value={hedef}
-            onChange={e => hedefSec(e.target.value)}
-            data={hedefler.map(h => ({
-              value: h.hedef,
-              label: `${h.alan_adi} (${cevir(TUR_ETIKET[h.tur])})${h.access_var || h.error_var ? '' : ` — ${cevir("Henüz log yok")}`}`,
-              disabled: !h.access_var && !h.error_var && h.hedef !== hedef,
+          <span className="input-label mb-1.5 block">{cevir("Alan adı")}</span>
+          <AramaliSecim
+            deger={hedef}
+            onDegis={id => hedefSec(String(id))}
+            aramaYerTutucu={cevir("Alan adı ara…")}
+            secenekler={hedefler.map(h => ({
+              id: h.hedef,
+              etiket: `${h.alan_adi} (${cevir(TUR_ETIKET[h.tur])})`,
+              altEtiket: h.access_var || h.error_var ? undefined : cevir("Henüz log yok"),
+              pasif: !h.access_var && !h.error_var && h.hedef !== hedef,
             }))}
           />
         </div>

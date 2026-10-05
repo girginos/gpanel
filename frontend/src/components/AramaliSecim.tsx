@@ -22,6 +22,7 @@ export type Secenek = {
   id: number | string
   etiket: string
   altEtiket?: string // ikincil satır (ör. kullanıcı adı, plan limiti)
+  pasif?: boolean // seçilemez (soluk görünür); arama ve klavye gezinmesi atlar
 }
 
 type Props = {
@@ -183,7 +184,7 @@ export default function AramaliSecim({
   function klavye(e: TusOlayi) {
     if (e.key === 'ArrowDown') { e.preventDefault(); vurgula(Math.min(vurgu + 1, filtreli.length - 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); vurgula(Math.max(vurgu - 1, 0)) }
-    else if (e.key === 'Enter') { e.preventDefault(); if (!yukleniyor && filtreli[vurgu]) sec(filtreli[vurgu].id) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (!yukleniyor && filtreli[vurgu] && !filtreli[vurgu].pasif) sec(filtreli[vurgu].id) }
   }
 
   // Esc listeyi kapatır ve olayı DURDURUR: Modal Esc'i window'da dinler; olay oraya
@@ -250,14 +251,15 @@ export default function AramaliSecim({
               </li>
             ) : (
               filtreli.map((s, i) => (
-                <li key={s.id} id={`${listeId}-${i}`} role="option" aria-selected={s.id === deger} data-sira={i}>
+                <li key={s.id} id={`${listeId}-${i}`} role="option" aria-selected={s.id === deger} aria-disabled={s.pasif || undefined} data-sira={i}>
                   <button
                     type="button"
                     tabIndex={-1}
-                    onClick={() => sec(s.id)}
+                    onClick={() => { if (!s.pasif) sec(s.id) }}
                     onMouseEnter={() => setVurgu(i)}
-                    className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors ${
-                      i === vurgu ? 'bg-brand-50 dark:bg-brand-900/30' : ''
+                    disabled={s.pasif}
+                    className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      i === vurgu && !s.pasif ? 'bg-brand-50 dark:bg-brand-900/30' : ''
                     } ${s.id === deger ? 'text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-700 dark:text-slate-200'}`}
                   >
                     <span className="truncate w-full">{s.etiket}</span>

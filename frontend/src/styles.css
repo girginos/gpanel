@@ -123,6 +123,13 @@ html {
   text-rendering: optimizeLegibility;
 }
 html.dark { color-scheme: dark; }
+/* Yerel <select> açılır listesi: .form-input-base `bg-transparent` olduğu için seçenekler koyu temada
+   açık zeminle çiziliyordu (soluk/okunmaz). Seçeneklere KOYU zemin + açık renkli metin verilir; pasif
+   seçenek soluk ama okunur kalır. Tüm sayfalardaki <select>'leri tek yerden kapsar. */
+html.dark select option,
+html.dark select optgroup { background-color: var(--color-dark-700); color: var(--color-dark-50); }
+html.dark select option:checked { background-color: var(--color-dark-500); }
+html.dark select option:disabled { color: var(--color-dark-300); }
 /* Panel (DashboardLayout <main>) içinde kısa ve uzun sayfa arasında geçerken klasik
    kaydırma çubuğu (Windows/Linux, 15 px) gelip gitmesin: gelirse ortalı sayfa kabuğu
    7,5 px sola kayar, kabuk genişliği 15 px daralır — sayfadan sayfaya içerik "zıplar".
