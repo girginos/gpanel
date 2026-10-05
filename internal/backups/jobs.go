@@ -133,6 +133,9 @@ func birDomainYedekle(ctx context.Context, db *sql.DB, domainID int64, sk, tip, 
 	if genel := genelAyarOku(ctx, db); genel.UzakAktif {
 		pushGenelAsync(db, genel, filepath.Join(dir, dosya), dosya, yedekID)
 	}
+	// Şifreli UZAK KOPYA (kök hedef): kapalıyken hiçbir şey yapmaz; yedeği geciktirmez
+	// ve hatası yedeğe taşınmaz (bkz. uzak_baglanti.go).
+	uzakKopyaKuyrugaAl(db, yedekID)
 	return boyut, dosya, nil
 }
 

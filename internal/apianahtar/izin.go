@@ -212,6 +212,10 @@ var KimlikUclari = map[string]bool{
 	"DELETE " + p + "/tasima/oturum/{id}": true,
 	// Eklenti vekili: eklentiye X-Gosp-Rol ile kimlik geçirir (eleştiri #21).
 	"* " + p + "/eklenti/{ad}/*": true,
+	// Uzak yedek kopya şifreleme anahtarı (age): özel anahtarı üretir / etkinleştirir.
+	"POST " + p + "/admin/backups/uzak-kopya/anahtar-uret":      true,
+	"POST " + p + "/admin/backups/uzak-kopya/anahtar-onayla":    true,
+	"POST " + p + "/admin/backups/uzak-kopya/anahtar-ice-aktar": true,
 }
 
 // KimlikBenzeriIzinli: adı kimlik/parola çağrıştıran ama BİLİNÇLİ olarak anahtara

@@ -116,6 +116,11 @@ func main() {
 	// Cron çalıştırıcısı da config.Load()'dan ÖNCE: crond (kök) /etc/cron.d satırından
 	// çağırır; panel sırlarına gerek yok. Kiracı görevini kiracı kimliğinde ve kaynak
 	// diliminde (girginos-<sk>.slice) koşturur. Bkz. internal/cron/zamanlayici.go.
+	// Yedek çözme CLI'ı da config.Load()'dan ÖNCE: felaket sonrası başka makinede, panel ve
+	// DB olmadan yalnız .age dosyası + anahtar dosyasıyla çalışır. Bkz. yedek_cli.go.
+	if len(os.Args) > 1 && os.Args[1] == "yedek-coz" {
+		os.Exit(yedekCozCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == cron.CLIKomutu {
 		os.Exit(cron.CalistirCLI(os.Args[2:]))
 	}
@@ -370,6 +375,7 @@ func main() {
 	backupsH := &backups.Handlers{DB: d}
 	topluH := &toplu.Handlers{DB: d}
 	backups.StartScheduler(d)
+	backups.StartUzakKopya(d) // şifreli uzak kopya işçisi; ayar KAPALI geldiği için yedek davranışı değişmez
 	// Webhook adresleri panelin GENEL portunu kullanır (kapı modunda müşteri kapısı).
 	// Her çağrıda okunur: müşteri kapısı panelden değişince (yeniden başlatma yok) Payload
 	// URL ve yeni GitHub webhook'ları kapanmış porta işaret etmesin.
@@ -1027,6 +1033,17 @@ func main() {
 				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/yetki-sorgu", backupsH.HedefYetkiSorgu)
 				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/baglantiyi-kes", backupsH.HedefBaglantiKes)
 				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/test", backupsH.HedefTest)
+				// Şifreli uzak kopya (age): API anahtarına KAPALI (Rotalar'da yok).
+				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya", backupsH.UzakKopyaDurum)
+				r.With(middleware.AdminOnly).Put("/admin/backups/uzak-kopya/ayar", backupsH.UzakKopyaAyarYaz)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/anahtar-uret", backupsH.UzakKopyaAnahtarUret)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/anahtar-onayla", backupsH.UzakKopyaAnahtarOnayla)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/anahtar-ice-aktar", backupsH.UzakKopyaAnahtarIceAktar)
+				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/isler", backupsH.UzakKopyaIsler)
+				r.With(middleware.AdminOnly).Get("/admin/backups/uzak-kopya/saklama-onizle", backupsH.UzakKopyaSaklamaOnizle)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/simdi-gonder/{yedek_id}", backupsH.UzakKopyaSimdiGonder)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/yeniden-dene/{is_id}", backupsH.UzakKopyaYenidenDene)
+				r.With(middleware.AdminOnly).Post("/admin/backups/uzak-kopya/iptal/{is_id}", backupsH.UzakKopyaIptal)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
@@ -1396,6 +1413,10 @@ func semaDogrula(d *sql.DB) {
 		{"backup_hedefler", "ic_ag_izni"},
 		{"backup_uzak_kopyalar", "hedef_anahtar"},
 		{"backup_sifre_anahtarlari", "etkin_tekil"},
+		// 0140: uzak kopya ayarı (varsayılan KAPALI) ve iş/manifest kolonları — yoksa
+		// orkestratör ayarı okuyamaz (kapalı sayılır) ve uzak kopya uçları 500 verir.
+		{"backup_uzak_kopya_ayar", "saklama_n"},
+		{"backup_uzak_kopyalar", "sha256_duz"},
 		// 0114: müşteri adına yapılan işlemin hostingi — yoksa denetim listesi 500
 		// verir (yazım tarafı eski biçime düşerek kaydı korur).
 		{"audit_log", "adina_domain_id"},

@@ -17,8 +17,8 @@ const DRIVE_EN: Record<string, string> = {
   'Google Drive Yedek Hedefi': 'Google Drive Backup Target',
   'Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.':
     'Connects with your own Google Cloud OAuth client; it can only access files the app created (drive.file). Backups are encrypted before upload.',
-  'Bu sürümde Drive hedefi tanımlanır, yetkilendirilir ve sınanır; yedeklerin otomatik gönderimi uzak kopya kuyruğu etkinleştirilince başlar.':
-    'In this version the Drive target is defined, authorized and tested; automatic upload of backups starts when the remote copy queue is enabled.',
+  'Hedefi burada tanımlayıp yetkilendirin; yedeklerin şifreli gönderimi aşağıdaki “Uzak kopya” kartından açılır.':
+    'Define and authorize the target here; encrypted upload of backups is turned on in the “Remote copy” card below.',
   'Yenileme jetonu 7 günde dolar': 'Refresh token expires in 7 days',
   'Google OAuth uygulamanız “Test” durumundaysa yenileme jetonu 7 gün sonra geçersiz olur ve hedefi yeniden yetkilendirmeniz gerekir. Kalıcı kullanım için OAuth onay ekranını “Üretim”e (In production) alın.':
     'If your Google OAuth app is in “Testing” status, the refresh token becomes invalid after 7 days and you must re-authorize the target. For permanent use, set the OAuth consent screen to “In production”.',
@@ -303,7 +303,7 @@ export default function YedekGoogleDrive() {
           {kendi
             ? cevir('Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')
             : cevir('Google hesabınızla bağlanın; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')}
-          {' '}{cevir('Bu sürümde Drive hedefi tanımlanır, yetkilendirilir ve sınanır; yedeklerin otomatik gönderimi uzak kopya kuyruğu etkinleştirilince başlar.')}
+          {' '}{cevir('Hedefi burada tanımlayıp yetkilendirin; yedeklerin şifreli gönderimi aşağıdaki “Uzak kopya” kartından açılır.')}
         </p>
 
         {kendi && <UyariKutusu ton="uyari" baslik={cevir('Yenileme jetonu 7 günde dolar')} kucuk>

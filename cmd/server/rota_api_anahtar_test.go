@@ -167,6 +167,51 @@ func TestAnahtarUcListesiAltin(t *testing.T) {
 	}
 }
 
+// TestUzakKopyaUclariAdminOnlyVeAnahtaraKapali: şifreli uzak kopya uçları (anahtar
+// üretimi dahil) yalnız AdminOnly ile bağlanır ve hiçbir izinle API anahtarına açılamaz.
+func TestUzakKopyaUclariAdminOnlyVeAnahtaraKapali(t *testing.T) {
+	env := rotaEnvanteri(t)
+	var uclar []string
+	for d := range env {
+		if strings.Contains(d, "/admin/backups/uzak-kopya") {
+			uclar = append(uclar, d)
+		}
+	}
+	if len(uclar) != 10 {
+		t.Fatalf("uzak kopya uçları envanterde 10 olmalı (%d): %v", len(uclar), uclar)
+	}
+	var hepsi []string
+	for _, g := range apianahtar.Gruplar {
+		hepsi = append(hepsi, g.Ad+":yaz")
+	}
+	for _, d := range uclar {
+		if _, ok := apianahtar.Rotalar[d]; ok {
+			t.Errorf("uzak kopya ucu API anahtarına AÇIK: %s", d)
+		}
+		for _, rol := range []string{apianahtar.RolKok, apianahtar.RolBayi} {
+			if apianahtar.Karar(d, rol, hepsi) != apianahtar.KararUcKapali {
+				t.Errorf("%s rolü için uzak kopya ucu kapalı değil: %s", rol, d)
+			}
+		}
+	}
+	kaynak, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, satir := range strings.Split(string(kaynak), "\n") {
+		if strings.Contains(satir, `"/admin/backups/uzak-kopya`) {
+			n++
+			if !strings.Contains(satir, "middleware.AdminOnly") {
+				t.Errorf("uç AdminOnly ile bağlanmamış: %s", strings.TrimSpace(satir))
+			}
+		}
+	}
+	if n != 10 {
+		t.Errorf("main.go'da 10 uzak kopya ucu beklenirdi: %d", n)
+	}
+}
+
 // TestYedekHedefUclariAnahtaraKapali: uzak yedek hedefi uçları (Google Drive
 // OAuth kimlik bilgisi taşır/üretir) hiçbir izinle API anahtarına açılamaz:
 // izin tablosunda yoktur ve her izin verilse bile Karar "uç kapalı" der.
