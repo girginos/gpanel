@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -100,16 +101,21 @@ func ekHesapAdAlaniDenetle(ctx context.Context, q ekSorgucu, did int64, ad strin
 				return &ekCakismaHatasi{ekMsjKayitli, fmt.Sprintf("hesap #%d", sahip)}
 			}
 		}
-		for k, sahip := range ustler {
-			if sahip != did {
-				return &ekCakismaHatasi{ekMsjCapraz, fmt.Sprintf("%s alan adının alt adı; hesap #%d", k, sahip)}
+		// Önce BAŞKA hesap (çapraz; deterministik), sonra kendi hesabı.
+		for _, k := range sirali(ustler) {
+			if ustler[k] != did {
+				return &ekCakismaHatasi{ekMsjCapraz, fmt.Sprintf("%s alan adının alt adı; hesap #%d", k, ustler[k])}
 			}
+		}
+		for _, k := range sirali(altlar) {
+			if altlar[k] != did {
+				return &ekCakismaHatasi{ekMsjCapraz, fmt.Sprintf("%s alan adının üst adı; hesap #%d", k, altlar[k])}
+			}
+		}
+		for _, k := range sirali(ustler) {
 			return &ekCakismaHatasi{ekMsjKendi, k + " alan adının alt adı"}
 		}
-		for k, sahip := range altlar {
-			if sahip != did {
-				return &ekCakismaHatasi{ekMsjCapraz, fmt.Sprintf("%s alan adının üst adı; hesap #%d", k, sahip)}
-			}
+		for _, k := range sirali(altlar) {
 			return &ekCakismaHatasi{ekMsjKendi, k + " alan adının üst adı"}
 		}
 	}
@@ -127,4 +133,14 @@ func ekHesapAdAlaniDenetle(ctx context.Context, q ekSorgucu, did int64, ad strin
 		return &ekCakismaHatasi{Genel: "bu ad sunucuda alt alan adı olarak kullanımda"}
 	}
 	return rows.Err()
+}
+
+// sirali — harita anahtarları (deterministik hata metni için).
+func sirali(m map[string]int64) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

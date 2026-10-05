@@ -441,7 +441,7 @@ func TestEkOlustur_Yaris_LimitAsilmaz(t *testing.T) {
 func TestEkHesapAdAlani_Takeover(t *testing.T) {
 	db := ek_db(t)
 	// hesap 1: ektest.test (+ ek kurban-ek.org), hesap 2: ekbaska.test; aynı bayi (reseller_id=0)
-	if _, err := db.Exec(`INSERT INTO ek_alan_adlari (domain_id, alan_adi) VALUES (?, 'kurban-ek.org')`, ek_dom1); err != nil {
+	if _, err := db.Exec(`INSERT INTO ek_alan_adlari (domain_id, alan_adi) VALUES (?, 'kurban-ek.org'), (?, 'derin.ustad-ek.net')`, ek_dom1, ek_dom1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO subdomanlar (domain_id, alt_ad, tam_ad) VALUES (?, 'blog', 'blog.ektest.test')`, ek_dom1); err != nil {
@@ -459,6 +459,8 @@ func TestEkHesapAdAlani_Takeover(t *testing.T) {
 		{"başka hesabın ek alan adı birebir", "kurban-ek.org", ek_dom2, ekMsjKayitli},
 		{"başka hesabın ek alan adının alt adı", "x.kurban-ek.org", ek_dom2, ekMsjCapraz},
 		{"başka hesabın ek alan adının ÜST adı", "org-kok.kurban-ek.org", ek_dom2, ekMsjCapraz},
+		{"başka hesabın ek alanının ÜST adını açma (ad, mevcut ek alanın üst adı)", "ustad-ek.net", ek_dom2, ekMsjCapraz},
+		{"başka hesabın ana alan adının ÜST adını açma", "test", ek_dom2, ekMsjCapraz},
 		{"üst ad (mevcut ek alan alt adı)", "kurban-ek.org", ek_dom2, ekMsjKayitli},
 		{"alt alan adı olarak kullanımda", "blog." + ek_alan1, ek_dom2, ekMsjCapraz},
 		{"kendi ana adının alt adı", "yeni." + ek_alan1, ek_dom1, ekMsjKendi},
