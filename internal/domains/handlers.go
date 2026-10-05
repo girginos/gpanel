@@ -32,6 +32,7 @@ import (
 	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
+	"girginospanel/internal/subdomain"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -723,6 +724,9 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	if isDemo == 0 {
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(h.DB, id)
+		// Ek (addon) alan adları: vhost + sertifika (acme kaydı) + günlük + bölge + satır
+		// (docroot'lar ev dizinidir: userdel -r siler). Deprovision'ın nginx reload'undan ÖNCE.
+		subdomain.EkAlanlariTemizle(silCtx, h.DB, id, sk)
 		// nginx vhost + PHP pool + Linux user + per-tenant FPM servisi (Deprovision içinde)
 		if err := provisioner.Deprovision(alanAdi, sk); err != nil {
 			log.Printf("deprovision warn (%s): %v", alanAdi, err)
@@ -848,6 +852,10 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		`UPDATE domains SET php_surum=? WHERE id=?`, req.PHPSurum, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
+	}
+	// Ek alan adları hesabın PHP havuzunu kullanır: sürüm/soket değişti → vhost'ları yeniden kur.
+	if err := subdomain.EkAlanVhostlariniYenidenKur(kctx, h.DB, id); err != nil {
+		log.Printf("php sürümü sonrası ek alan vhost'ları (domain=%d): %v", id, err)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "id": id, "php_surum": req.PHPSurum, "socket": socket,

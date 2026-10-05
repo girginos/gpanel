@@ -81,19 +81,20 @@ export function KapsamKaresi({ alan, ikon }: { alan: boolean; ikon: string }) {
   )
 }
 
-const TUR_AD: Record<AlanTuru, string> = { ana: 'Ana', alt: 'Alt' }
+const TUR_AD: Record<AlanTuru, string> = { ana: 'Ana', ek: 'Ek', alt: 'Alt' }
 const TUR_ACIKLAMA: Record<AlanTuru, string> = {
   ana: 'Ana alan adı — hesabın birincil sitesi',
+  ek: 'Ek alan adı — ana hesabın ek sitesi',
   alt: 'Alt alan adı — ana alan adının altında',
 }
 
 export function TurRozeti({ tur }: { tur: AlanTuru }) {
   // Alt: nötr "soft" zemin açık temada neredeyse görünmüyor → kendi zeminini çizer
-  // (unstyled: Badge'in renk sınıflarıyla çakışmasın).
+  // (unstyled: Badge'in renk sınıflarıyla çakışmasın). Ek: bilgi tonu (ana mavi, alt gri arası).
   const alt = tur === 'alt'
   return (
     <Badge
-      color={alt ? 'neutral' : 'primary'}
+      color={alt ? 'neutral' : tur === 'ek' ? 'info' : 'primary'}
       variant="soft"
       unstyled={alt}
       title={cevir(TUR_ACIKLAMA[tur])}

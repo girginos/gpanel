@@ -19,14 +19,17 @@ export type BildirimYaniti = { bildirimler: Bildirim[]; okunmamis: number }
 
 export type EklentiKaydi = { ad: string; aktif: boolean }
 
-export type AlanTuru = 'ana' | 'alt'
+export type AlanTuru = 'ana' | 'ek' | 'alt'
 
 // Alan adları panelinin ve kapsam seçicinin ortak satırı.
 export type AlanSatiri = {
-  anahtar: string // 'ana' | 'alt-<id>'
+  anahtar: string // 'ana' | 'ek-<id>' | 'alt-<id>'
   ad: string
   tur: AlanTuru
   altId: number | null
+  ekId?: number | null // tur 'ek' iken ek alan adı kimliği
+  ekSsl?: { aktif: boolean; bitis: string } // yalnız tur 'ek'
+  ekAskida?: boolean // yalnız tur 'ek'
   php: string
   phpEol: boolean
 }
@@ -34,3 +37,22 @@ export type AlanSatiri = {
 export type UyariTonu = 'bilgi' | 'uyari' | 'tehlike'
 export type UyariEylemi = { etiket: string; ikon: string; yol: string }
 export type Uyari = { id: string; ton: UyariTonu; baslik: string; aciklama: string; eylem?: UyariEylemi }
+
+// GET /domains/{id}/ek-alan-adlari — ek (addon) alan adları + paket limiti (internal/ekalan).
+export type EkAlan = {
+  id: number
+  alan_adi: string
+  docroot: string
+  php_surum: string
+  ssl_aktif: boolean
+  ssl_bitis: string // YYYY-MM-DD ya da ''
+  durum: 'aktif' | 'askida'
+  created_at: string
+}
+export type EkAlanListesi = {
+  ekler: EkAlan[]
+  // alan_adi: paket alan adı limiti (0 = sınırsız; ana alan adı DAHİL toplam), kullanim = 1 + ekler.length
+  limit: { alan_adi: number; kullanim: number; eklenebilir: boolean; neden: string }
+  alt_limit: { limit: number; kullanim: number } // 0 = sınırsız
+  ip: string
+}

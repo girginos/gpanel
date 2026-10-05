@@ -40,7 +40,7 @@ type Ozet struct {
 	DBSayisi   Limit `json:"db_sayisi"`   // max_db plan'dan
 	FTPSayisi  Limit `json:"ftp_sayisi"`  // max_ftp plan'dan
 	EpostaSayi Limit `json:"eposta_sayi"` // max_email plan'dan
-	DomainSayi Limit `json:"domain_sayi"` // max_domain plan'dan (subdomain dahil)
+	DomainSayi Limit `json:"domain_sayi"` // max_domain plan'dan: hesapta toplam alan adı (ana + ek; alt alan adı sayılmaz)
 
 	// Inode kotası (yalnız XFS user quota AKTİF ise dolu — aksi halde 0)
 	InodeKullanim int64 `json:"inode_kullanim"`
@@ -253,7 +253,12 @@ func (h *Handlers) Goster(w http.ResponseWriter, r *http.Request) {
 
 	// Domain sayısı: bu zaten 1 — ama abonelik kapsamında subdomain'leri saymak gerek
 	// (Plesk modeli: subscription primary + 0 subdomain) — şimdilik kendisi = 1
+	// max_domain = hesapta toplam alan adı (ana + EK alan adları); alt alan adı sayılmaz.
 	o.DomainSayi.Kullanim = 1
+	var ekN int64
+	if err := h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ek_alan_adlari WHERE domain_id=?`, id).Scan(&ekN); err == nil {
+		o.DomainSayi.Kullanim += ekN
+	}
 	o.DomainSayi.Limit = maxDom
 
 	// DNS kayıt

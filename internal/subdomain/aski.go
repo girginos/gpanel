@@ -65,6 +65,11 @@ func AltAlanVhostlariniYenidenKur(ctx context.Context, db *sql.DB, domainID int6
 			hatalar = append(hatalar, fmt.Errorf("alt alan adı %s: %w", a.tamAd, err))
 		}
 	}
+	// Ek (addon) alan adı vhost'ları da aynı askıya girer: hesap askıdaysa ek vhost'ların
+	// hepsi 503 olur, askıdan alınca normale döner (üretici askıyı tek kaynaktan okur).
+	if err := EkAlanVhostlariniYenidenKur(ctx, db, domainID); err != nil {
+		hatalar = append(hatalar, err)
+	}
 	return errors.Join(hatalar...)
 }
 

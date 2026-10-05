@@ -6,7 +6,7 @@ import type { KaynakOzet, Limit } from '@/components/alanpano/tipler'
 import { I } from '@/components/Ikon'
 import { mb } from '@/components/alanpano/bicim'
 import { cevir, cevirF, cevirSayili, oran, sayi } from './dil'
-import type { AltAlan, AlanSatiri, BildirimYaniti, PhpSurum, Uyari, UyariTonu, Yedek } from './tipler'
+import type { AltAlan, AlanSatiri, EkAlan, BildirimYaniti, PhpSurum, Uyari, UyariTonu, Yedek } from './tipler'
 
 export const SSL_UYARI_GUN = 14 // bu kadar gün (ve altı) kalan sertifika uyarı verir
 export const YEDEK_ESKI_GUN = 7 // son geçerli yedek bundan eskiyse bilgi verir
@@ -62,13 +62,26 @@ export function sslDurumu(d: Pick<Domain, 'ssl' | 'ssl_bitis'>, simdi: Date): Ss
   return { tur: 'gecerli', gun }
 }
 
-// Ana alan adı + alt alan adları (alfabetik) — panelin ve kapsam seçicinin satırları.
-export function alanSatirlari(d: Domain, altlar: AltAlan[] | null, eol: Set<string>): AlanSatiri[] {
+// Ana alan adı + ek alan adları + alt alan adları (her grup alfabetik) — panelin ve kapsam seçicinin satırları.
+export function alanSatirlari(d: Domain, altlar: AltAlan[] | null, eol: Set<string>, ekler: EkAlan[] | null = null): AlanSatiri[] {
   const ana: AlanSatiri = { anahtar: 'ana', ad: d.alan_adi, tur: 'ana', altId: null, php: d.php_surum, phpEol: eol.has(d.php_surum) }
+  const ek = [...(ekler ?? [])]
+    .sort((x, y) => x.alan_adi.localeCompare(y.alan_adi))
+    .map<AlanSatiri>((e) => ({
+      anahtar: `ek-${e.id}`,
+      ad: e.alan_adi,
+      tur: 'ek',
+      altId: null,
+      ekId: e.id,
+      ekSsl: { aktif: e.ssl_aktif, bitis: e.ssl_bitis },
+      ekAskida: e.durum === 'askida',
+      php: e.php_surum,
+      phpEol: eol.has(e.php_surum),
+    }))
   const alt = [...(altlar ?? [])]
     .sort((x, y) => x.tam_ad.localeCompare(y.tam_ad))
     .map<AlanSatiri>((s) => ({ anahtar: `alt-${s.id}`, ad: s.tam_ad, tur: 'alt', altId: s.id, php: s.php_surum, phpEol: eol.has(s.php_surum) }))
-  return [ana, ...alt]
+  return [ana, ...ek, ...alt]
 }
 
 const TON_SIRA: Record<UyariTonu, number> = { tehlike: 0, uyari: 1, bilgi: 2 }

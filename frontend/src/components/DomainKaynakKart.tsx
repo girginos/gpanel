@@ -16,6 +16,7 @@ export type Ozet = KaynakOzet
 
 
 const CMP_EN: Record<string, string> = {
+  "Alan adı": "Domains",
   "Türkçe": "English",
   "Paket ve Kaynaklar": "Package and Resources",
   "Disk": "Disk",
@@ -117,7 +118,7 @@ export default function DomainKaynakKart({ domainId, kaynak }: { domainId: numbe
         {!ozet.eposta_olculmuyor && (
           <Bar etiket={cevir("E-posta Kutusu")} k={ozet.eposta_sayi.kullanim} l={ozet.eposta_sayi.limit} birim={cevir("kutu")} renk="rose" />
         )}
-        <Bar etiket="Subdomain" k={ozet.domain_sayi.kullanim} l={ozet.domain_sayi.limit} birim="domain" renk="violet" />
+        <Bar etiket={cevir("Alan adı")} k={ozet.domain_sayi.kullanim} l={ozet.domain_sayi.limit} birim="domain" renk="violet" />
       </Card>
 
       {/* Yapılandırma Özeti */}

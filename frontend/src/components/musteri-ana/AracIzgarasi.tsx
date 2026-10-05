@@ -159,7 +159,7 @@ export default function AracIzgarasi({
   const alanSec = (anahtar: string) => {
     onSec(anahtar)
     const s = satirlar.find((x) => x.anahtar === anahtar)
-    if (s) setDuyuru(cevirF('Alan adı başına araçlar artık {0} için açılır.', s.ad))
+    if (s) setDuyuru(s.tur === 'ek' ? cevirF('Ek alan adının kendi aracı yok; araçlar {0} için açılır.', ana.ad) : cevirF('Alan adı başına araçlar artık {0} için açılır.', s.ad))
   }
 
   const sozcukler = aramaSozcukleri(arama)
@@ -315,6 +315,11 @@ export default function AracIzgarasi({
         {secili.tur === 'alt' && (
           <p className="border-t border-gray-200 px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-300">
             {cevirF('Alt alan adı sayfası olmayan araçlar (ör. DNS, WAF) ana alan adında ({0}) açılır.', ana.ad)}
+          </p>
+        )}
+        {secili.tur === 'ek' && (
+          <p className="border-t border-gray-200 px-3.5 py-2 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-300">
+            {cevirF('Ek alan adının kendi araç sayfası yok; araçlar ana alan adında ({0}) açılır. Ek alan adını yönetmek için alan adları kartındaki oku kullanın.', ana.ad)}
           </p>
         )}
       </div>

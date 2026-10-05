@@ -218,6 +218,14 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 		return nil
 	}
 
+	soa := LoadSOA(ctx, db, domainID, alanAdi)
+	return zoneDosyaYaz(ctx, db, alanAdi, soa, kayitlar)
+}
+
+// zoneDosyaYaz: zone dosyasını geçici dosyaya yazar + named-checkzone ile doğrular,
+// geçerliyse canlının üzerine taşır, include'u günceller ve named'i yeniden yükler.
+// Ana alan adı (WriteZone) ve ek alan adı (WriteEkZone) bölgeleri AYNI yolu kullanır.
+func zoneDosyaYaz(ctx context.Context, db *sql.DB, alanAdi string, soa SOA, kayitlar []Kayit) error {
 	_ = os.MkdirAll(ZoneDir, 0750)
 	zonePath := filepath.Join(ZoneDir, alanAdi+".zone")
 
@@ -225,7 +233,6 @@ func WriteZone(ctx context.Context, db *sql.DB, domainID int64) error {
 	// ilerler → BIND değişikliği görür, DNSSEC yeniden-imzalama tetiklenir.
 	serial := strconv.FormatUint(uint64(nextSerial(readZoneSerial(zonePath))), 10)
 
-	soa := LoadSOA(ctx, db, domainID, alanAdi)
 	var buf bytes.Buffer
 	if err := zoneTmpl.Execute(&buf, zoneCtx{AlanAdi: alanAdi, Serial: serial, SOA: soa, Kayitlar: kayitlar}); err != nil {
 		return err
@@ -312,7 +319,19 @@ func buildZoneIncludes(ctx context.Context, db *sql.DB) (string, error) {
 		}
 		sb.WriteString(" };\n")
 	}
-	return sb.String(), rows.Err()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	// Ek (addon) alan adı bölgeleri (0160): DNSSEC yok, AXFR kilidi aynı.
+	ekler, err := ekZoneIncludeAdlari(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	for _, alanAdi := range ekler {
+		fmt.Fprintf(&sb, `zone "%s" { type master; file "%s/%s.zone"; allow-query { any; }; allow-transfer { none; }; };`+"\n",
+			alanAdi, ZoneDir, alanAdi)
+	}
+	return sb.String(), nil
 }
 
 // updateZoneIncludes: include dosyasını CHECKCONF-GATE ile atomik günceller.
