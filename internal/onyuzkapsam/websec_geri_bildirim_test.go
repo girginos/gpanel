@@ -45,9 +45,10 @@ func TestOnyuz_YoklamaTemizligi(t *testing.T) {
 func TestOnyuz_TaraniyorDurumu(t *testing.T) {
 	sayfa := oku(t, "pages/WebsiteSecurityPage.tsx")
 	wsIcerir(t, "sayfa", sayfa,
-		"bekleyenIds.has(u.domain_id) && u.durum !== 'sirada') ? 'taraniyor'",
-		"<DurumRozet u={u} bekliyor={bekleyenIds.has(u.domain_id)} />",
-		"taramaIste('/websec/rescan?domain_id=' + id, cevir(\"Tarama hatası\"), id)")
+		"bekleyenIds.has(anahtar) && u.durum !== 'sirada') ? 'taraniyor'",
+		"<DurumRozet u={u} bekliyor={bekleyenIds.has(anahtar)} />",
+		"'/websec/rescan?domain_id=' + u.domain_id",
+		"taramaIste(yol, cevir(\"Tarama hatası\"), id)")
 }
 
 // Sonuç özeti: tamamlandı toast'ı + "taranacak uygulama bulunamadı" + uygulamasız satır ipucu.

@@ -13,7 +13,7 @@ import { Button, Badge } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { TaramaButonu } from '@/components/TaramaButonu'
-import { YOKLAMA_MS, degerlendir, zamanYaz, type Bekleyen } from '@/lib/websecTarama'
+import { YOKLAMA_MS, degerlendir, satirAnahtari, zamanYaz, type Bekleyen } from '@/lib/websecTarama'
 
 /*
  * Website Security Monitor — yönetici + bayi.
@@ -48,6 +48,7 @@ type Status = {
 // Görünen her domain'in (yönetici: tümü, bayi: kendi) güvenlik durumu.
 type Uygulama = {
   domain_id: number
+  ek_alan_id?: number // >0: satır bir EK alan adınındır (alan_adi = ek alanın kendi adı)
   alan_adi: string
   app_type: string
   install_path: string
@@ -106,6 +107,8 @@ const WSEC_EN: Record<string, string> = {
   "Toplam bulgu": "Total findings",
   "Son hata:": "Last error:",
   "Domain ara…": "Search domain…",
+  "Ek": "Add-on",
+  "Ek alan adı (addon domain)": "Add-on domain",
   "uygulama yok": "no app",
   "Tekrar dene": "Retry",
   "Bu arama/filtreyle domain yok.": "No domains with this search/filter.",
@@ -294,10 +297,12 @@ export default function WebsiteSecurityPage() {
   // Tarama isteği (yönetici ve bayi aynı uç). Kuyruğa alınınca 202 {sirada: n} → bildirim;
   // 429 = bayi tarama sınırı (sunucu mesajı "N dk sonra tekrar deneyin"); 404 = domain
   // yok ya da başkasının (ikisi aynı yanıt) → liste bayat, tazelenir.
-  const taramaIste = async (yol: string, varsayilanHata: string, domainId?: number) => {
+  // anahtar: tek satır Tara'sında o satırın hedef anahtarı (satirAnahtari: ana alan adı
+  // domain_id, ek alan -ek_alan_id); toplu istekte boş.
+  const taramaIste = async (yol: string, varsayilanHata: string, anahtar?: number) => {
     // İstek öncesi damgalar: bitiş "domain son tarama damgası değişti" ile anlaşılır.
     const onceki = new Map<number, string>()
-    for (const u of envanterRef.current?.items ?? []) onceki.set(u.domain_id, u.domain_son_tarama ?? '')
+    for (const u of envanterRef.current?.items ?? []) onceki.set(satirAnahtari(u), u.domain_son_tarama ?? '')
     try {
       const r = await api.post<TaramaYanit>(yol, {})
       if (r.data?.zaten) {
@@ -320,9 +325,10 @@ export default function WebsiteSecurityPage() {
       const simdiki = envanterRef.current?.items ?? []
       const t0 = Date.now()
       const ekle = (id: number) => bekleyen.current.set(id, { onceki: onceki.get(id) ?? '', aktifGoruldu: false, t0 })
-      if (domainId) ekle(domainId)
+      if (anahtar) ekle(anahtar)
       else for (const u of simdiki) {
-        if (u.durum === 'taraniyor' || u.durum === 'sirada' || (u.domain_son_tarama ?? '') !== (onceki.get(u.domain_id) ?? '')) ekle(u.domain_id)
+        const a = satirAnahtari(u)
+        if (u.durum === 'taraniyor' || u.durum === 'sirada' || (u.domain_son_tarama ?? '') !== (onceki.get(a) ?? '')) ekle(a)
       }
       if (envanterRef.current) sonucuDegerlendir(envanterRef.current)
       bekleyenYaz()
@@ -342,9 +348,13 @@ export default function WebsiteSecurityPage() {
     try { await taramaIste('/websec/rescan', cevir("Rescan hatası")) } finally { setTaranıyor(false) }
   }
 
-  const domainTara = async (id: number) => {
+  // Satır başına ayrı Tara: ana alan adı satırı YALNIZ ana docroot'u, ek alan satırı
+  // YALNIZ o ek alanı tarar (sunucu kuyruk anahtarı farklıdır).
+  const domainTara = async (u: Uygulama) => {
+    const id = satirAnahtari(u)
+    const yol = u.ek_alan_id ? '/websec/rescan?ek_alan_id=' + u.ek_alan_id : '/websec/rescan?domain_id=' + u.domain_id
     setTarananDomain(id)
-    try { await taramaIste('/websec/rescan?domain_id=' + id, cevir("Tarama hatası"), id) } finally { setTarananDomain(null) }
+    try { await taramaIste(yol, cevir("Tarama hatası"), id) } finally { setTarananDomain(null) }
   }
 
   const listelenen = useMemo(() => {
@@ -357,7 +367,7 @@ export default function WebsiteSecurityPage() {
 
   const detayaGit = (u: Uygulama) => {
     // App'i olan domain'in detay (açık) sayfası anlamlı; app yoksa gitme.
-    if (u.app_type) nav('/website-security/domain/' + u.domain_id)
+    if (u.app_type) nav('/website-security/domain/' + u.domain_id + (u.ek_alan_id ? '?ek=' + u.ek_alan_id : ''))
   }
 
   return (
@@ -491,11 +501,22 @@ export default function WebsiteSecurityPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-dark-600">
                 {listelenen.map((u) => {
                   const tiklanabilir = !!u.app_type
+                  const anahtar = satirAnahtari(u)
                   return (
-                    <tr key={`${u.domain_id}-${u.app_type}-${u.install_path}`}
+                    <tr key={`${anahtar}-${u.app_type}-${u.install_path}`}
                       onClick={() => detayaGit(u)}
                       className={`bg-white dark:bg-dark-900 ${tiklanabilir ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-dark-800/60' : ''}`}>
-                      <td className="px-3 py-2.5 font-medium text-slate-900 dark:text-slate-100">{u.alan_adi || `#${u.domain_id}`}</td>
+                      <td className="px-3 py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="break-all">{u.alan_adi || `#${u.domain_id}`}</span>
+                          {u.ek_alan_id ? (
+                            <span title={cevir("Ek alan adı (addon domain)")}
+                              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-dark-700 dark:text-slate-300">
+                              {cevir("Ek")}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5">
                         {u.app_type
                           ? <span className={`rounded px-1.5 py-0.5 text-xs ${appRenk(u.app_type)}`}>{appAd(u.app_type)}</span>
@@ -504,8 +525,8 @@ export default function WebsiteSecurityPage() {
                       <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400">{u.app_version || '—'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{u.paket_sayisi || '—'}</td>
                       <td className="px-3 py-2.5">
-                        <DurumRozet u={u} bekliyor={bekleyenIds.has(u.domain_id)} />
-                        {u.durum === 'desteklenmiyor' && !bekleyenIds.has(u.domain_id) && (
+                        <DurumRozet u={u} bekliyor={bekleyenIds.has(anahtar)} />
+                        {u.durum === 'desteklenmiyor' && !bekleyenIds.has(anahtar) && (
                           <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-500">
                             {cevir("Bu domainde taranabilir bir uygulama bulunamadı (WordPress, Node.js, PHP Composer). Yeni bir uygulama kurduysanız yeniden tarayın.")}
                           </div>
@@ -514,11 +535,11 @@ export default function WebsiteSecurityPage() {
                       <td className="px-3 py-2.5 text-xs text-slate-500">{zamanYaz(u.son_tarama)}</td>
                       <td className="px-3 py-2.5 text-right">
                         <TaramaButonu
-                          durum={u.durum === 'taraniyor' || (bekleyenIds.has(u.domain_id) && u.durum !== 'sirada') ? 'taraniyor' : u.durum === 'sirada' ? 'sirada' : tarananDomain === u.domain_id ? 'baslatiliyor' : 'hazir'}
+                          durum={u.durum === 'taraniyor' || (bekleyenIds.has(anahtar) && u.durum !== 'sirada') ? 'taraniyor' : u.durum === 'sirada' ? 'sirada' : tarananDomain === anahtar ? 'baslatiliyor' : 'hazir'}
                           etiket={cevir("Tara")}
                           baglam={u.alan_adi || `#${u.domain_id}`}
                           acikSayisi={u.durum === 'acik' ? u.bulgu_sayisi : 0}
-                          onClick={(e) => { e.stopPropagation(); void domainTara(u.domain_id) }}
+                          onClick={(e) => { e.stopPropagation(); void domainTara(u) }}
                           // Yönetici ucu tek kilitli (tarama sürerken 409) → tarama boyunca kapalı;
                           // bayi isteği kuyruğa girer, yalnız zaten sırada/taranan satır kapalı.
                           kilitli={yonetici && !!status?.running}
