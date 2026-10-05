@@ -129,6 +129,8 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"yedek.uzak.anahtar_yenile":    {TR: "Yedek şifreleme anahtarı yenilendi", EN: "Backup encryption key renewed"},
 	"yedek.uzak.kurtarma_indir":    {TR: "Yedek kurtarma anahtarı indirildi", EN: "Backup recovery key downloaded"},
 	"yedek.uzak.toplu":             {TR: "Mevcut yedekler uzağa sıraya alındı", EN: "Existing backups queued for remote copy"},
+	"yedek.uzak.yerel_sil":         {TR: "Sunucudaki kopyayı silme ayarı değişti", EN: "Delete server copy setting changed"},
+	"yedek.uzak.yerel_temizle":     {TR: "Mevcut yedeklerin sunucudaki kopyası temizlendi", EN: "Server copies of existing backups cleaned up"},
 
 	// Taşıma
 	"tasima_baslat":     {TR: "Taşıma başlatıldı", EN: "Migration started"},
