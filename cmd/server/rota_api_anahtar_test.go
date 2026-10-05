@@ -166,3 +166,33 @@ func TestAnahtarUcListesiAltin(t *testing.T) {
 		t.Fatalf("API anahtarına AÇIK uç listesi değişti. Bilinçliyse GOSP_ALTIN_GUNCELLE=1 ile altın dosyayı güncelleyin ve diff'i inceletin.\n--- altın\n%s\n--- şimdi\n%s", want, got)
 	}
 }
+
+// TestYedekHedefUclariAnahtaraKapali: uzak yedek hedefi uçları (Google Drive
+// OAuth kimlik bilgisi taşır/üretir) hiçbir izinle API anahtarına açılamaz:
+// izin tablosunda yoktur ve her izin verilse bile Karar "uç kapalı" der.
+func TestYedekHedefUclariAnahtaraKapali(t *testing.T) {
+	env := rotaEnvanteri(t)
+	var uclar []string
+	for d := range env {
+		if strings.Contains(d, "/admin/backups/hedefler") {
+			uclar = append(uclar, d)
+		}
+	}
+	if len(uclar) < 7 {
+		t.Fatalf("yedek hedef uçları envanterde bulunamadı (%d): %v", len(uclar), uclar)
+	}
+	var hepsi []string
+	for _, g := range apianahtar.Gruplar {
+		hepsi = append(hepsi, g.Ad+":yaz")
+	}
+	for _, d := range uclar {
+		if _, ok := apianahtar.Rotalar[d]; ok {
+			t.Errorf("yedek hedef ucu API anahtarına AÇIK: %s", d)
+		}
+		for _, rol := range []string{apianahtar.RolKok, apianahtar.RolBayi} {
+			if apianahtar.Karar(d, rol, hepsi) != apianahtar.KararUcKapali {
+				t.Errorf("%s rolü için yedek hedef ucu kapalı değil: %s", rol, d)
+			}
+		}
+	}
+}

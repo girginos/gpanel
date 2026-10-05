@@ -1017,6 +1017,15 @@ func main() {
 				r.With(middleware.AdminOnly).Get("/admin/backups/ayar", backupsH.GenelAyarGet)
 				r.With(middleware.AdminOnly).Put("/admin/backups/ayar", backupsH.GenelAyarSet)
 				r.With(middleware.AdminOnly).Post("/admin/backups/ayar/test", backupsH.GenelAyarTest)
+				// Uzak yedek hedefleri (Google Drive). Sırlar şifreli; API anahtarına KAPALI
+				// (apianahtar.Rotalar'da yok → varsayılan reddet).
+				r.With(middleware.AdminOnly).Get("/admin/backups/hedefler", backupsH.HedefListe)
+				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/drive", backupsH.HedefDriveEkle)
+				r.With(middleware.AdminOnly).Delete("/admin/backups/hedefler/{id}", backupsH.HedefSil)
+				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/yetki-baslat", backupsH.HedefYetkiBaslat)
+				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/yetki-sorgu", backupsH.HedefYetkiSorgu)
+				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/baglantiyi-kes", backupsH.HedefBaglantiKes)
+				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/test", backupsH.HedefTest)
 				r.With(middleware.AdminOnly).Post("/admin/backups/jobs", backupsH.JobYedekBaslat)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs", backupsH.JobListe)
 				r.With(middleware.AdminOnly).Get("/admin/backups/jobs/{jid}", backupsH.JobDetay)
