@@ -1,8 +1,8 @@
 // Sağ sütun bilgi paneli: genel bilgi, kullanım istatistikleri, alan adları.
 // Dar sayfada (kapsayıcı < 56rem) araçların üstünde "Hesap özeti" olarak katlanır.
 // Veri: GET /domains/{id} (Domain), /domains/{id}/kaynak (KaynakOzet),
-// /domains/{id}/subdomain, /domains/{id}/backups — hepsi müşteriye açık uçlar.
-import { useId, useState } from 'react'
+// /domains/{id}/subdomain, /domains/{id}/ek-alan-adlari, /domains/{id}/backups — hepsi müşteriye açık uçlar.
+import { useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Card } from '@/components/ui'
@@ -12,11 +12,13 @@ import { tonSinifi } from '@/components/tonlar'
 import type { Domain } from '@/components/domainTipi'
 import type { KaynakOzet } from '@/components/alanpano/tipler'
 import type { Uc } from '@/components/alanpano/useUc'
-import { BaglantiDugme, KartBasligi, KopyaDugmesi, TurRozeti, YenidenDene } from './ortak'
+import { BaglantiDugme, Dugme, KartBasligi, KopyaDugmesi, TurRozeti, YenidenDene } from './ortak'
 import { cevir, cevirF, cevirSayili, oran, tarihBicim } from './dil'
-import { KULLANIM_ESIK, gecerliYedekler, kullanimSatirlari, yuzde } from './hesap'
+import { KULLANIM_ESIK, gecerliYedekler, kullanimSatirlari, sslDurumu, yuzde } from './hesap'
+import { eklemeEylemleri } from './ekleme'
+import { useDisariKapat } from './yardimci'
 import type { SslDurumu } from './hesap'
-import type { AlanSatiri, Yedek } from './tipler'
+import type { AlanSatiri, EkAlanListesi, Yedek } from './tipler'
 
 const siteAdresi = (ad: string, https: boolean) => `${https ? 'https' : 'http'}://${ad}`
 
@@ -277,14 +279,21 @@ function Kullanim({ kaynak }: { kaynak: Uc<KaynakOzet> }) {
 
 type Isaret = { ton: 'basari' | 'uyari' | 'tehlike'; ikon: string; metin: string }
 
+function sslIsareti(ssl: SslDurumu): Isaret {
+  if (ssl.tur === 'yok') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL yok') }
+  if (ssl.tur === 'doldu') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL süresi doldu') }
+  if (ssl.tur === 'bitiyor') return { ton: 'uyari', ikon: I.uyari, metin: cevirSayili('SSL {0} gün içinde bitiyor', ssl.gun ?? 0, ssl.gun ?? 0) }
+  return { ton: 'basari', ikon: I.kilit, metin: cevir('SSL geçerli') }
+}
+
 function durumIsareti(satir: AlanSatiri, ssl: SslDurumu): Isaret | null {
-  // Ana alan adı: SSL durumu. Alt alan adı: yalnız bilinen durum (desteği biten PHP) —
-  // alt alan adının SSL'i listede ölçülmüyor, olmayanı göstermeyiz.
-  if (satir.tur === 'ana') {
-    if (ssl.tur === 'yok') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL yok') }
-    if (ssl.tur === 'doldu') return { ton: 'tehlike', ikon: I.kilitAcik, metin: cevir('SSL süresi doldu') }
-    if (ssl.tur === 'bitiyor') return { ton: 'uyari', ikon: I.uyari, metin: cevirSayili('SSL {0} gün içinde bitiyor', ssl.gun ?? 0, ssl.gun ?? 0) }
-    return { ton: 'basari', ikon: I.kilit, metin: cevir('SSL geçerli') }
+  // Ana alan adı: SSL durumu. Ek alan adı: askıda ise askı, değilse kendi SSL'i (liste uçundan).
+  // Alt alan adı: yalnız bilinen durum (desteği biten PHP) — alt alan adının SSL'i listede
+  // ölçülmüyor, olmayanı göstermeyiz.
+  if (satir.tur === 'ana') return sslIsareti(ssl)
+  if (satir.tur === 'ek') {
+    if (satir.ekAskida) return { ton: 'uyari', ikon: I.uyari, metin: cevir('Askıda') }
+    if (satir.ekSsl) return sslIsareti(sslDurumu({ ssl: satir.ekSsl.aktif, ssl_bitis: satir.ekSsl.bitis }, new Date()))
   }
   if (satir.phpEol) return { ton: 'uyari', ikon: I.uyari, metin: cevirF('PHP {0} — desteği bitti', satir.php) }
   return null
@@ -307,10 +316,45 @@ function AlanDurumIsareti({ satir, ssl }: { satir: AlanSatiri; ssl: SslDurumu })
   )
 }
 
+// İki eylem de açıkken tek "Ekle" düğmesi → açılır menü (aria-haspopup/expanded, Esc ve dışarı tıklamayla kapanır).
+function EkleMenusu({ kok }: { kok: string }) {
+  const [acik, setAcik] = useState(false)
+  const kokRef = useRef<HTMLDivElement>(null)
+  const dugmeRef = useRef<HTMLButtonElement>(null)
+  const menuId = useId()
+  useDisariKapat(acik, kokRef, () => {
+    const icerde = kokRef.current?.contains(document.activeElement)
+    setAcik(false)
+    if (icerde) dugmeRef.current?.focus()
+  })
+  const oge = 'flex min-h-10 items-center gap-2 rounded-md px-2.5 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-dark-100 dark:hover:bg-dark-600'
+  return (
+    <div ref={kokRef} className="relative shrink-0">
+      <Dugme ref={dugmeRef} variant="soft" color="primary" boyut="sm" ikon={I.arti} aria-haspopup="menu" aria-expanded={acik} aria-controls={menuId} onClick={() => setAcik((v) => !v)}>
+        {cevir('Ekle')}
+        <Ikon d={I.chevronAsagi} className={`-me-0.5 ms-1 size-3.5 transition-transform ${acik ? 'rotate-180' : ''}`} />
+      </Dugme>
+      {acik && (
+        <div id={menuId} role="menu" aria-label={cevir('Ekle')} className="absolute end-0 z-20 mt-1 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-soft dark:border-dark-500 dark:bg-dark-700 dark:shadow-none">
+          <Link role="menuitem" to={`${kok}/ek-alanlar/yeni`} className={oge} onClick={() => setAcik(false)}>
+            <Ikon d={I.kure} className="size-4 shrink-0 text-primary-600 dark:text-primary-400" />
+            {cevir('Alan adı ekle')}
+          </Link>
+          <Link role="menuitem" to={`${kok}/subdomainler`} className={oge} onClick={() => setAcik(false)}>
+            <Ikon d={I.arti} className="size-4 shrink-0 text-gray-500 dark:text-dark-300" />
+            {cevir('Alt alan adı ekle')}
+          </Link>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AlanListesi({
   domainId,
   satirlar,
   altlar,
+  ekler,
   ssl,
   seciliAnahtar,
   onSec,
@@ -319,25 +363,50 @@ function AlanListesi({
   domainId: number
   satirlar: AlanSatiri[]
   altlar: Uc<unknown[]>
+  ekler: Uc<EkAlanListesi>
   ssl: SslDurumu
   seciliAnahtar: string
   onSec: (anahtar: string) => void
   className?: string
 }) {
   const kok = `/abonelikler/${domainId}`
-  const altSayisi = satirlar.length - 1
+  const ekSayisi = satirlar.filter((s) => s.tur === 'ek').length
+  const altSayisi = satirlar.filter((s) => s.tur === 'alt').length
   const https = ssl.tur === 'gecerli' || ssl.tur === 'bitiyor'
+  // Eylem görünürlüğü TEK yerden (ekleme.ts): ek alan listesi gelmeden hiçbir düğme çizilmez.
+  const el = ekler.veri
+  const { alanEkle, altEkle, bilgi } = eklemeEylemleri({
+    alanLimit: el?.limit.alan_adi ?? 0,
+    alanKullanim: el?.limit.kullanim ?? 0,
+    altLimit: el?.alt_limit.limit ?? 0,
+    altKullanim: el?.alt_limit.kullanim ?? 0,
+    yuklendi: el != null,
+  })
   return (
     <Card className={`bg-white dark:bg-dark-700 ${className}`}>
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2.5 dark:border-dark-600">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-dark-50">
+        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-800 dark:text-dark-50">
           {cevir('Alan adları')}
           <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-tiny-plus font-medium tabular-nums text-gray-600 dark:bg-dark-600 dark:text-dark-200">{satirlar.length}</span>
         </h2>
-        <BaglantiDugme to={`${kok}/subdomainler`} variant="soft" color="primary" ikon={I.arti} aria-label={cevir('Alt alan adı ekle')} title={cevir('Alt alan adı ekle')}>
-          {cevir('Ekle')}
-        </BaglantiDugme>
+        {alanEkle && altEkle ? (
+          <EkleMenusu kok={kok} />
+        ) : alanEkle ? (
+          <BaglantiDugme to={`${kok}/ek-alanlar/yeni`} variant="soft" color="primary" ikon={I.arti} className="shrink-0">
+            {cevir('Alan adı ekle')}
+          </BaglantiDugme>
+        ) : altEkle ? (
+          <BaglantiDugme to={`${kok}/subdomainler`} variant="soft" color="primary" ikon={I.arti} className="shrink-0">
+            {cevir('Alt alan adı ekle')}
+          </BaglantiDugme>
+        ) : null}
       </div>
+      {bilgi && (
+        <p className="flex items-center gap-2 border-b border-gray-100 px-4 py-2 text-xs text-gray-600 dark:border-dark-600 dark:text-dark-200">
+          <Ikon d={I.bilgi} className="size-3.5 shrink-0 text-gray-400 dark:text-dark-300" />
+          {bilgi}
+        </p>
+      )}
       <ul className="p-1.5" aria-label={cevir('Alan adları')}>
         {satirlar.map((s) => {
           const secili = s.anahtar === seciliAnahtar
@@ -366,6 +435,15 @@ function AlanListesi({
                 >
                   <Ikon d={I.chevronSag} className="size-4" />
                 </Link>
+              ) : s.tur === 'ek' && s.ekId != null ? (
+                <Link
+                  to={`${kok}/ek-alanlar/${s.ekId}`}
+                  className="grid size-10 shrink-0 place-items-center rounded-md text-gray-400 hover:bg-gray-50 hover:text-gray-700 dark:text-dark-300 dark:hover:bg-dark-600/60 dark:hover:text-dark-100"
+                  aria-label={cevirF('{0} ek alan adını yönet', s.ad)}
+                  title={cevirF('{0} ek alan adını yönet', s.ad)}
+                >
+                  <Ikon d={I.chevronSag} className="size-4" />
+                </Link>
               ) : (
                 <a
                   href={siteAdresi(s.ad, https)}
@@ -382,14 +460,19 @@ function AlanListesi({
           )
         })}
       </ul>
-      {altlar.hata && !altlar.veri ? (
+      {ekler.hata && !ekler.veri ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600 dark:border-dark-600 dark:text-dark-200">
+          <span>{cevir('Ek alan adları alınamadı.')}</span>
+          <YenidenDene uc={ekler} />
+        </div>
+      ) : altlar.hata && !altlar.veri ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-600 dark:border-dark-600 dark:text-dark-200">
           <span>{cevir('Alt alan adları alınamadı.')}</span>
           <YenidenDene uc={altlar} />
         </div>
       ) : (
         <p className="border-t border-gray-100 px-4 py-2.5 text-xs tabular-nums text-gray-500 dark:border-dark-600 dark:text-dark-300">
-          {altlar.veri ? cevirSayili('1 ana alan adı · {0} alt alan adı', altSayisi, altSayisi) : cevir('Alt alan adları yükleniyor…')}
+          {altlar.veri && ekler.veri ? cevirSayili('1 ana · {0} ek · {1} alt alan adı', altSayisi, ekSayisi, altSayisi) : cevir('Alan adları yükleniyor…')}
         </p>
       )}
     </Card>
@@ -402,6 +485,7 @@ export default function BilgiPaneli({
   kaynak,
   yedekler,
   altlar,
+  ekler,
   satirlar,
   ssl,
   seciliAnahtar,
@@ -414,6 +498,7 @@ export default function BilgiPaneli({
   kaynak: Uc<KaynakOzet>
   yedekler: Uc<Yedek[]>
   altlar: Uc<unknown[]>
+  ekler: Uc<EkAlanListesi>
   satirlar: AlanSatiri[]
   ssl: SslDurumu
   seciliAnahtar: string
@@ -457,6 +542,7 @@ export default function BilgiPaneli({
           domainId={domainId}
           satirlar={satirlar}
           altlar={altlar}
+          ekler={ekler}
           ssl={ssl}
           seciliAnahtar={seciliAnahtar}
           onSec={onSec}

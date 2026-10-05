@@ -32,7 +32,7 @@ import UyariBandi from '@/components/musteri-ana/UyariBandi'
 import { YenidenDene } from '@/components/musteri-ana/ortak'
 import { cevir, cevirF } from '@/components/musteri-ana/dil'
 import { alanSatirlari, eolSurumleri, sslDurumu, uyarilariTuret } from '@/components/musteri-ana/hesap'
-import type { AltAlan, BildirimYaniti, EklentiKaydi, PhpSurum, Yedek } from '@/components/musteri-ana/tipler'
+import type { AltAlan, BildirimYaniti, EkAlanListesi, EklentiKaydi, PhpSurum, Yedek } from '@/components/musteri-ana/tipler'
 
 // "Gizle" denen uyarı bu tarayıcıda 24 saat gizli kalır; durum değişirse (ör. SSL
 // yenilendi, yeni bildirim) maddenin kimliği değişir ve yeniden görünür.
@@ -66,6 +66,7 @@ export default function MusteriAnaSayfa() {
   const domain = useUc<Domain>(kok, cevir('Hesap bilgileri alınamadı'))
   const kaynak = useUc<KaynakOzet>(kok && `${kok}/kaynak`, cevir('Kaynak bilgisi alınamadı'))
   const altlar = useUc<AltAlan[]>(kok && `${kok}/subdomain`)
+  const ekler = useUc<EkAlanListesi>(kok && `${kok}/ek-alan-adlari`)
   const yedekler = useUc<Yedek[]>(kok && `${kok}/backups`)
   const surumler = useUc<PhpSurum[]>('/php/versions')
   const bildirim = useUc<BildirimYaniti>('/bildirimler')
@@ -100,7 +101,7 @@ export default function MusteriAnaSayfa() {
   const d = domain.veri
   const simdi = new Date()
   const eol = eolSurumleri(surumler.veri)
-  const satirlar = alanSatirlari(d, altlar.veri, eol)
+  const satirlar = alanSatirlari(d, altlar.veri, eol, ekler.veri?.ekler ?? null)
   const ssl = sslDurumu(d, simdi)
   const uyarilar = uyarilariTuret({
     domainId,
@@ -142,6 +143,7 @@ export default function MusteriAnaSayfa() {
               kaynak={kaynak}
               yedekler={yedekler}
               altlar={altlar}
+              ekler={ekler}
               satirlar={satirlar}
               ssl={ssl}
               seciliAnahtar={secili}

@@ -41,7 +41,7 @@ const OL_EN: Record<string, string> = {
   "Sorgu / saat": "Queries / hour",
   "Güncelleme / saat": "Updates / hour",
   "Uzun sorgu sınırı": "Long query limit",
-  "Alt alan adı": "Subdomains",
+  "Alan adı (ana + ek)": "Domains (primary + addon)",
   "Veritabanı": "Databases",
   "FTP hesabı": "FTP accounts",
   "Posta kutusu": "Mailboxes",
@@ -87,7 +87,7 @@ const ETIKET: Record<string, string> = {
   pm_max_children: 'PHP işçi sayısı', io_read_mbps: 'Disk okuma hızı', io_write_mbps: 'Disk yazma hızı',
   io_read_iops: 'Okuma IOPS', io_write_iops: 'Yazma IOPS', mysql_max_baglanti: 'MySQL bağlantı',
   db_max_queries_per_hour: 'Sorgu / saat', db_max_updates_per_hour: 'Güncelleme / saat',
-  db_max_query_seconds: 'Uzun sorgu sınırı', max_domain: 'Alt alan adı', max_db: 'Veritabanı',
+  db_max_query_seconds: 'Uzun sorgu sınırı', max_domain: 'Alan adı (ana + ek)', max_db: 'Veritabanı',
   max_ftp: 'FTP hesabı', max_email: 'Posta kutusu', saatlik_mail_limiti: 'Giden mail / saat (kutu başına)',
   mail_kutu_kota_mb: 'Kutu depolama',
 }
