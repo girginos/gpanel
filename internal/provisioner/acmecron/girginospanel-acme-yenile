@@ -62,8 +62,44 @@ durum() {
   done
 }
 
+onar() { # eski kayıtlarda Le_Webroot=/home/... → /var/www/acme (Go: provisioner.AcmeKayitOnar ile aynı kural)
+  local d f dir base re n=0 cnt line tmp
+  re="^Le_Webroot='(/home/[A-Za-z0-9._/@+-]+)'\$"
+  for d in $HOMES; do
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    for f in "$d"/*/*.conf; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      case "$f" in *.csr.conf) continue ;; esac
+      dir=$(dirname "$f"); base=$(basename "$f" .conf)
+      case "$(basename "$dir")" in "$base"|"${base}_ecc") ;; *) continue ;; esac
+      [[ "$base" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || continue
+      [ ! -L "$dir" ] || { log "UYARI Le_Webroot onarılamadı (dizin sembolik): $f"; continue; }
+      cnt=$(grep -c '^Le_Webroot=' "$f" 2>/dev/null || true)
+      [ "${cnt:-0}" = 0 ] && continue
+      [ "$cnt" = 1 ] || { log "UYARI Le_Webroot onarılamadı (birden çok satır): $f"; continue; }
+      line=$(grep '^Le_Webroot=' "$f" | head -1)
+      [ "$line" = "Le_Webroot='/var/www/acme'" ] && continue
+      if [[ "$line" =~ $re ]]; then
+        [ -e "$f.webroot-yedek" ] || { cp --preserve=ownership "$f" "$f.webroot-yedek" && chmod 600 "$f.webroot-yedek"; } \
+          || { log "UYARI Le_Webroot onarılamadı (yedek yazılamadı): $f"; continue; }
+        tmp="$f.onar.tmp"
+        if sed "s|^Le_Webroot=.*|Le_Webroot='/var/www/acme'|" "$f" >"$tmp" 2>/dev/null \
+           && chmod --reference="$f" "$tmp" && { chown --reference="$f" "$tmp" 2>/dev/null || true; } && mv -f "$tmp" "$f"; then
+          log "Le_Webroot onarıldı → /var/www/acme: $f"; n=$((n+1))
+        else
+          rm -f "$tmp"; log "UYARI Le_Webroot onarılamadı (yazım hatası): $f"
+        fi
+      elif [[ "$line" == */home/* ]]; then
+        log "UYARI Le_Webroot onarılamadı (bozuk/alıntısız değer): $f"
+      fi
+    done
+  done
+  return 0
+}
+
 yenile() {
   local d out rc satir hata=0 n=0
+  onar
   [ -x "$ACME" ] || { log "HATA acme.sh yok: $ACME"; return 1; }
   exec 9>"$KILIT" 2>/dev/null && { flock -n 9 || { log "başka bir yenileme çalışıyor, atlandı"; return 0; }; }
   for d in $HOMES; do
@@ -80,6 +116,7 @@ yenile() {
 
 case "${1:-yenile}" in
   durum)  durum ;;
+  onar)   onar ;;
   yenile) yenile ;;
-  *) echo "kullanım: $0 [yenile|durum]" >&2; exit 2 ;;
+  *) echo "kullanım: $0 [yenile|durum|onar]" >&2; exit 2 ;;
 esac
