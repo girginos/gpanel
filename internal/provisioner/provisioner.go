@@ -88,6 +88,7 @@ func Init(d *sql.DB) {
 	if err := AcmeCronKur(); err != nil { // acme.sh yenileme: tüm config-home'lar, tek cron.d + sarmalayıcı
 		log.Printf("acme cron kurulamadı: %v", err)
 	}
+	AcmeKayitOnar()             // eski acme kayıtlarında Le_Webroot=/home/... → /var/www/acme (challenge yalnız oradan sunulur)
 	ensureHTTPDHomeBooleans()   // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup() // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()  // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
