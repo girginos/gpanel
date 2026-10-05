@@ -168,6 +168,21 @@ type adAlaniKayit struct {
 // hatasında düz hata döner (çağıran reddetmeli — fail-closed). Yeni oluşturma
 // dışında (mevcut domaine yazma) ÇAĞRILMAZ.
 func AdAlaniDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64) error {
+	return adAlaniDenetle(ctx, db, ad, kiraci, false)
+}
+
+// AdAlaniDenetleMarka: bayinin ÖZEL PANEL ADRESİ akışı (marka.AdAlaniKanca) için AdAlaniDenetle.
+// Tek fark Kural 1b: bayinin KENDİ cp_marka_alanadi kaydı çakışma sayılmaz.
+//
+// 🔴 NEDEN: "Uygula" kaydı (bekleyen dahil) yazar; sonraki her denetim — "Tekrar dene" ve 30 sn'lik
+// DNS yoklama döngüsü — o kaydı bulup "bayi panel adresi → herkese red" derdi. Bayi KENDİ adresini hiç
+// ilerletemez, hata mesajı da "panel sunucusunun kendi adına ayrılmış" gibi yanıltıcı olurdu.
+// Başka bayinin kaydı ve hosting yolları (AdAlaniDenetle) AYNEN reddeder.
+func AdAlaniDenetleMarka(ctx context.Context, db adAlaniSorgucu, ad string, rid int64) error {
+	return adAlaniDenetle(ctx, db, ad, rid, true)
+}
+
+func adAlaniDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64, kendiMarkaAtla bool) error {
 	ad = adAlaniNormal(ad)
 	if ad == "" {
 		return &AdAlaniHatasi{Genel: "alan adı boş"}
@@ -236,7 +251,7 @@ func AdAlaniDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci in
 	// BEKLEYEN kayıtlar dahil — tek doğruluk kaynağı DB). Ad bir panel adresinin
 	// kendisi ya da altıysa herkese red (panel vhost'u/ACME ele geçirilmesin);
 	// üstüyse yalnız sahibi açabilir (bayi kendi bayi.com hostingini açar).
-	if h, err := markaAdlariDenetle(ctx, db, ad, kiraci); err != nil {
+	if h, err := markaAdlariDenetle(ctx, db, ad, kiraci, kendiMarkaAtla); err != nil {
 		return err
 	} else if h != nil {
 		return h
@@ -357,7 +372,7 @@ func AdAlaniEkle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64
 // markaAdlariDenetle: Kural 1b. Tablo yoksa (0123 koşmamış) kural atlanır —
 // alan adı açmayı bütünüyle kilitlemek orantısız olurdu; öteki sorgu hataları
 // fail-closed.
-func markaAdlariDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64) (*AdAlaniHatasi, error) {
+func markaAdlariDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kiraci int64, kendiAtla bool) (*AdAlaniHatasi, error) {
 	adaylar := append([]string{ad}, ustAdlar(ad)...)
 	yer := strings.TrimSuffix(strings.Repeat("?,", len(adaylar)), ",")
 	args := make([]any, 0, len(adaylar)+3)
@@ -375,6 +390,9 @@ func markaAdlariDenetle(ctx context.Context, db adAlaniSorgucu, ad string, kirac
 		return nil, err
 	}
 	for _, k := range kayitlar {
+		if kendiAtla && k.rid == kiraci {
+			continue // bayinin kendi özel adresi (bkz. AdAlaniDenetleMarka)
+		}
 		pa := adAlaniNormal(k.ad)
 		if ad == pa || altAdMi(ad, pa) {
 			return &AdAlaniHatasi{Genel: adAlaniMsjPanel, Ayrinti: "bayi panel adresi; sahibi: " + sahipMetni(k.rid)}, nil
