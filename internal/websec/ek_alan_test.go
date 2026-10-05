@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"girginospanel/internal/auth"
 )
 
 // ekOrtam — geçici ev dizini + tohum: domain 10 (on, bayi 7), 11 (onbir, bayi 8),
@@ -602,5 +604,35 @@ func TestGoc0180YorumKurali(t *testing.T) {
 	}
 	if strings.Contains(strings.ReplaceAll(strings.Join(kod, "\n"), ";\n", ""), ";") {
 		t.Error("ifadeler dışında noktalı virgül var")
+	}
+}
+
+// Bayi durum kartı: son tarama ve "taranıyor" YALNIZ kendi ek alanlarından gelir.
+func TestDB_EkAlanBayiDurumKartiKapsami(t *testing.T) {
+	db, _ := ekOrtam(t)
+	wsExec(t, db, `INSERT INTO cp_websec_ek_tarama (ek_alan_id, son_tarama) VALUES
+		(1, '2026-09-29 10:00:00'), (2, '2026-09-30 23:00:00')`)
+	k := kuyrukKur(t)
+	h := &Handler{DB: db}
+	durum := func(c *auth.Claims) map[string]json.RawMessage {
+		kimlikKur(t, c)
+		rr := istek(t, h.Status, "GET", "/websec/status", "")
+		var d map[string]json.RawMessage
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &d) != nil {
+			t.Fatalf("status: %d %s", rr.Code, rr.Body)
+		}
+		return d
+	}
+	d := durum(bayiJeton)
+	if string(d["last_run"]) != `"2026-09-29 10:00:00"` || string(d["running"]) != "false" {
+		t.Fatalf("bayi 7 yalnız kendi ek alanının zamanını görmeli: %v", d)
+	}
+	k.kokEkle([]int64{-2}) // başka bayinin ek alanı sırada
+	if d = durum(bayiJeton); string(d["running"]) != "false" {
+		t.Fatalf("başkasının ek alanı sıradayken bayi 7 running görmemeli: %v", d)
+	}
+	k.kokEkle([]int64{-1})
+	if d = durum(bayiJeton); string(d["running"]) != "true" {
+		t.Fatalf("kendi ek alanı sıradayken running: %v", d)
 	}
 }
