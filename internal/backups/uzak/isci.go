@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"filippo.io/age"
@@ -60,6 +61,8 @@ type Isci struct {
 	mu    sync.Mutex // eşzamanlılık 1
 	tetik chan struct{}
 
+	izl       *Izleyici    // canlı ilerleme (bellek); Izle() ile alınır
+	dbYazma   atomic.Int64 // yuklenen_b için yapılan DB yazma sayısı (test gözlemi)
 	cm        sync.Mutex
 	calisanID int64
 	iptalFn   context.CancelFunc
@@ -85,6 +88,16 @@ func (i *Isci) bekleme(d int) time.Duration {
 		d = len(adimlar)
 	}
 	return adimlar[d-1]
+}
+
+// Izle — canlı ilerleme izleyicisi (ilk çağrıda kurulur; eşzamanlı güvenli).
+func (i *Isci) Izle() *Izleyici {
+	i.cm.Lock()
+	defer i.cm.Unlock()
+	if i.izl == nil {
+		i.izl = &Izleyici{}
+	}
+	return i.izl
 }
 
 // Tetikle — yeni iş geldi: işçiyi hemen uyandırır (bloklamaz).
@@ -122,6 +135,9 @@ func (i *Isci) YarimlariSifirla(ctx context.Context) (int64, error) {
 func (i *Isci) Calistir(ctx context.Context) {
 	DusukOncelikThread()
 	i.Hazirla()
+	iz := i.Izle()
+	iz.Calisiyor(true)
+	defer iz.Calisiyor(false)
 	if n, err := i.YarimlariSifirla(ctx); err != nil {
 		log.Printf("uzak kopya: yarım işler sıfırlanamadı: %v", err)
 	} else if n > 0 {
@@ -239,7 +255,10 @@ func (i *Isci) Bir(ctx context.Context) (bool, error) {
 	i.cm.Lock()
 	i.calisanID, i.iptalFn, i.iptalIst = is.id, iptal, false
 	i.cm.Unlock()
+	iz := i.Izle()
+	iz.Baslat(is.id, is.yedekID.Int64, is.domainID, i.domainAdi(ctx, is.domainID), is.yedekDosya)
 	hata := i.isle(jctx, &is, ayar)
+	iz.Bitir()
 	iptal()
 	i.cm.Lock()
 	kullaniciIptali := i.iptalIst
@@ -329,7 +348,15 @@ func (i *Isci) basarisiz(is *isSatir, h *isHatasi) {
 }
 
 func (i *Isci) ilerlemeYaz(id int64, b int64) {
+	i.dbYazma.Add(1)
 	_, _ = i.DB.Exec(`UPDATE backup_uzak_kopyalar SET yuklenen_b=? WHERE id=?`, b, id)
+}
+
+// domainAdi — yalnız arayüz ilerlemesi için alan adı (bulunamazsa boş).
+func (i *Isci) domainAdi(ctx context.Context, id int64) string {
+	var ad string
+	_ = i.DB.QueryRowContext(ctx, `SELECT alan_adi FROM domains WHERE id=?`, id).Scan(&ad)
+	return ad
 }
 
 func rastgeleHex() string {
@@ -361,6 +388,8 @@ func (i *Isci) isle(ctx context.Context, is *isSatir, ayar Ayar) *isHatasi {
 	if err != nil || !fi.Mode().IsRegular() {
 		return &isHatasi{kalici: true, sade: "yerel yedek dosyası bulunamadı (yerel saklama süresi dolmuş olabilir)"}
 	}
+	iz := i.Izle()
+	iz.Boyut(fi.Size())
 	if err := os.MkdirAll(i.GeciciDizin, 0o700); err != nil {
 		return &isHatasi{sade: "geçici dizin oluşturulamadı", ic: err}
 	}
@@ -397,19 +426,23 @@ func (i *Isci) isle(ctx context.Context, is *isSatir, ayar Ayar) *isHatasi {
 	if err != nil {
 		return hedefHatasi("hedef açılamadı", err)
 	}
-	var son time.Time
+	iz.DogrulamaIndirir(!h.Yetenekler().Var(hedef.YetenekSunucuSha256))
+	iz.EvreGec(DurumYukleniyor, sonuc.SifreliBoyut)
+	// Akarken: izleyiciye HER bildirim (bellek), DB'ye en çok DBYazmaAraligi'nda bir.
 	sec := hedef.YukleSecenek{Boyut: sonuc.SifreliBoyut, Sha256: sonuc.SifreliSha, BantKBps: ayar.BantKBps,
 		Ilerleme: func(a int64) {
-			if time.Since(son) > 3*time.Second {
-				son = time.Now()
+			iz.Bildir(a)
+			if iz.YazmaIzni() {
 				i.ilerlemeYaz(is.id, a)
 			}
 		}}
 	if err := h.Yukle(ctx, tmp, uzakAd, sec); err != nil {
 		return hedefHatasi("yükleme", err)
 	}
+	iz.Bildir(sonuc.SifreliBoyut)
 	i.ilerlemeYaz(is.id, sonuc.SifreliBoyut)
 	// 5) uzaktan doğrula
+	iz.EvreGec(DurumDogrulaniyor, sonuc.SifreliBoyut)
 	_, _ = i.DB.ExecContext(ctx, `UPDATE backup_uzak_kopyalar SET durum='dogrulaniyor' WHERE id=?`, is.id)
 	if hh := i.dogrula(ctx, h, uzakAd, sonuc); hh != nil {
 		// bozuk/eksik uzak dosyayı bırakma (en iyi çaba; yalnız KENDİ adımızı sileriz)
@@ -464,7 +497,7 @@ func (i *Isci) sifreleDosyaya(ctx context.Context, yol, tmp string, alici age.Re
 		return SifreleSonuc{}, &isHatasi{sade: "şifreli geçici dosya oluşturulamadı", ic: err}
 	}
 	bw := bufio.NewWriterSize(dst, 256<<10)
-	sonuc, err := Sifrele(bw, hedef.IlerlemeOkuyucu(ctx, src, nil), alici)
+	sonuc, err := Sifrele(bw, hedef.IlerlemeOkuyucu(ctx, src, i.Izle().Bildir), alici)
 	if err == nil {
 		err = bw.Flush()
 	}
@@ -511,9 +544,13 @@ func (i *Isci) dogrula(ctx context.Context, h hedef.Hedef, uzakAd string, s Sifr
 	}
 	gecici := filepath.Join(i.GeciciDizin, fmt.Sprintf("uzak-dogrula-%s.tmp", rastgeleHex()))
 	defer func() { _ = os.Remove(gecici) }()
-	if err := h.Indir(ctx, uzakAd, gecici); err != nil {
+	dur := i.indirmeIzle(ctx, gecici, s.SifreliBoyut)
+	err = h.Indir(ctx, uzakAd, gecici)
+	dur()
+	if err != nil {
 		return hedefHatasi("doğrulama (geri indirme)", err)
 	}
+	i.Izle().Bildir(s.SifreliBoyut)
 	f, err := os.Open(gecici)
 	if err != nil {
 		return &isHatasi{sade: "doğrulama dosyası açılamadı", ic: err}
@@ -554,4 +591,49 @@ func (i *Isci) manifestYaz(ctx context.Context, h hedef.Hedef, mAd string, m Man
 		}
 	}
 	return &isHatasi{sade: "manifest uzakta doğrulanamadı", kat: "dogrulama"}
+}
+
+// indirmeAralik — geri indirme sırasında geçici dosya boyutunun okunma aralığı.
+const indirmeAralik = 500 * time.Millisecond
+
+// indirmeIzle — hedefin Indir'i ilerleme geri çağrısı sunmaz; hedefler AtomikYaz ile
+// "<dizin>/.<ad>.indiriliyor-*" geçici dosyasına yazar. O dosyanın büyüklüğü (gerçek
+// ölçüm) izleyiciye bildirilir. Dönen işlev izlemeyi durdurur.
+func (i *Isci) indirmeIzle(ctx context.Context, yerel string, toplam int64) func() {
+	iz := i.Izle()
+	kalip := filepath.Join(filepath.Dir(yerel), "."+filepath.Base(yerel)+".indiriliyor-*")
+	bitti := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(indirmeAralik)
+		defer t.Stop()
+		for {
+			select {
+			case <-bitti:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if n := enBuyukDosya(kalip); n > 0 {
+					if n > toplam && toplam > 0 {
+						n = toplam
+					}
+					iz.Bildir(n)
+				}
+			}
+		}
+	}()
+	return func() { close(bitti); <-done }
+}
+
+func enBuyukDosya(kalip string) int64 {
+	var en int64
+	adaylar, _ := filepath.Glob(kalip)
+	for _, a := range adaylar {
+		if fi, err := os.Stat(a); err == nil && fi.Mode().IsRegular() && fi.Size() > en {
+			en = fi.Size()
+		}
+	}
+	return en
 }

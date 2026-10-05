@@ -19,6 +19,7 @@ package backups
 //	GET  /api/v1/admin/backups/uzak-kopya/mevcutlari-gonder?n= -> önizleme (adet, boyut toplamı)
 //	POST /api/v1/admin/backups/uzak-kopya/mevcutlari-gonder    -> {n} son n kök yedeği (domain başına) sıraya al
 //	GET  /api/v1/admin/backups/uzak-kopya/yedek-durumlari?ids= -> yedek satırı rozetleri
+//	GET  /api/v1/admin/backups/uzak-kopya/ilerleme              -> canlı ilerleme + kuyruk ETA (bellek + tek özet sorgusu)
 //
 // Sade akış: ayar kaydında hedef seçilip açılınca etkin anahtar yoksa SUNUCU klasik anahtar
 // üretir (kullanıcı anahtar üretmez/onaylamaz). Kurtarma anahtarı kullanıcı isterse indirilir.
@@ -142,6 +143,28 @@ func (h *Handlers) UzakKopyaDurum(w http.ResponseWriter, r *http.Request) {
 		"ozet":             ozet,
 		"age_surum":        uzak.AgeSurum(),
 	})
+}
+
+// UzakKopyaIlerleme — GET /admin/backups/uzak-kopya/ilerleme
+// Canlı ilerleme + kuyruk ETA'sı: bellek izleyicisi + küçük özet sorgusu (ağır iş yok).
+// Hız/ETA yalnız gerçek ölçümden; yanıtta sır/anahtar/yerel yol yoktur.
+func (h *Handlers) UzakKopyaIlerleme(w http.ResponseWriter, r *http.Request) {
+	ayar, err := uzak.AyarOku(r.Context(), h.DB)
+	if err != nil {
+		uzakHataYaz(w, err)
+		return
+	}
+	var iz *uzak.Izleyici
+	if i := uzakIsci.Load(); i != nil {
+		iz = i.Izle()
+	}
+	o, err := uzak.IlerlemeOku(r.Context(), h.DB, iz, ayar.Aktif)
+	if err != nil {
+		uzakHataYaz(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, o)
 }
 
 // UzakKopyaAyarYaz — PUT /admin/backups/uzak-kopya/ayar
