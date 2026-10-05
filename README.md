@@ -311,3 +311,13 @@ girginospanel-update
 Bunu **bir kez** yapmanız yeterlidir: `girginospanel-update` her çalıştığında `assets/ops/` altındaki tüm araçları `/usr/local/bin`'e yeniden kurar, dolayısıyla kendini de güncel tutar. Bundan sonra panel içindeki **Panel Güncellemesi** butonunu da kullanabilirsiniz.
 
 > Panel içi güncelleme butonu, aracı eksikse **otomatik indirir** — yani butona basmanız da yeterlidir; yukarıdaki komut yalnızca panele hiç erişemediğiniz durumlar için.
+
+## Google Drive yedek hedefi: ortak istemci ("Google ile bağlan")
+
+Sunucu sahibi kendi Google Cloud istemcisini açmadan, tek düğmeyle ("Google ile bağlan" → cihaz kodu → google.com/device) bağlanır. Ortak OAuth istemcisi şu kaynaklardan biriyle sağlanır (öncelik sırasıyla):
+
+1. **Yayın derlemesi:** `GOSP_GDRIVE_CLIENT_ID` ve `GOSP_GDRIVE_CLIENT_SECRET` ortam değişkenleri `scripts/build-assets.sh` içinde ldflags ile ikiliye gömülür (yoksa boş geçilir, derleme kırılmaz).
+2. **Dosya (geliştirme/ops):** `/etc/girginospanel/gdrive-istemci.json` → `{"client_id": "...", "client_secret": "..."}`; sahibi panelin kullanıcısı (root), izni `0600` olmalıdır. Grup/diğer okuyabiliyorsa dosya reddedilir ve arayüzde açık hata gösterilir. Değişiklik için panel yeniden başlatmak gerekmez.
+3. Hiçbiri yoksa arayüz "Gelişmiş: kendi Google istemcimi kullan" alanlarına (Client ID/Secret) döner; eski davranış aynen çalışır.
+
+Ortak istemci kullanan hedefin satırına gizli anahtar yazılmaz (yalnızca şifreli yenileme jetonu saklanır). Ortak istemcinin `client_id` değeri değişirse mevcut hedefler "Yetkilendirme gerekli" durumuna düşer; `client_secret` değişimi jetonları etkilemez.
