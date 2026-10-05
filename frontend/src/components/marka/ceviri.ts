@@ -54,8 +54,6 @@ const EN: Record<string, string> = {
   'Roundcube webmail kök markasını kullanır (bayiye göre webmail markası v1 kapsamında değil).': 'Roundcube webmail uses the root brand (per-reseller webmail branding is not part of v1).',
   'Henüz kendi markanızı kaydetmediniz; müşterileriniz şu an sağlayıcının markasını görüyor.': 'You have not saved your own brand yet; your customers currently see the provider’s brand.',
   'Markanız sunucu yöneticisi tarafından geçici olarak kapatıldı; müşterileriniz varsayılan markayı görüyor.': 'Your brand was temporarily disabled by the server administrator; your customers see the default brand.',
-  'Müşteri giriş bağlantısı': 'Customer sign-in link',
-  'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantıdaki kısa ad tahmin edilemez; paylaşmak güvenlidir.': 'Customers arriving with this link see your brand on the sign-in page. The short code is unguessable and safe to share.',
   'Kopyala': 'Copy',
   'Kopyalandı': 'Copied',
   'Marka ayarları bu hesap için kapalı.': 'Branding is disabled for this account.',
@@ -127,9 +125,6 @@ const EN: Record<string, string> = {
   'Şimdi kontrol et': 'Check now',
   'Yeniden dene': 'Try again',
   'Sorunu giderdiyseniz Yeniden dene’ye basın; sunucu yeniden dener.': 'If you have fixed the problem, press Try again; the server will retry.',
-  'Müşteri giriş bağlantısı (özel adres)': 'Customer sign-in link (custom address)',
-  'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantı sizin özel adresinizdedir.': 'Customers arriving with this link see your brand on the sign-in page. The link uses your own custom address.',
-  'Kendi alan adınızı Özel adres sekmesinden bağlayabilirsiniz.': 'You can connect your own domain from the Custom address tab.',
   'Kontrast düşük: bu renk beyaz yazıyla okunaksız olabilir.': 'Low contrast: this colour may be hard to read with white text.',
 }
 

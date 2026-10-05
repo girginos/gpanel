@@ -8,10 +8,7 @@ import axios from 'axios'
 import Breadcrumb from '@/components/Breadcrumb'
 import { api, apiHata } from '@/lib/api'
 import { useRol, yoneticiMi } from '@/lib/rol'
-import { Button, Card } from '@/components/ui'
-import { I } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
-import { useToast } from '@/components/Toast'
 import { kaydet, oku } from '@/lib/kalici'
 import { MarkaFormu, type YonetGorunum } from '@/components/marka/MarkaFormu'
 import { BayiMarkalari } from '@/components/marka/BayiMarkalari'
@@ -25,35 +22,6 @@ type Sekme = 'marka' | 'adres' | 'bayiler'
 const SEKME_ANAHTAR = 'marka.sekme'
 const SEKME_SURE = 30 * 24 * 3600 * 1000
 const SEKMELER: readonly Sekme[] = ['marka', 'adres', 'bayiler']
-
-// Müşteri giriş bağlantısı: özel adres AKTİFse https://<özel-adres>/cp/giris (özel host markayı
-// ?m= olmadan çözer), değilse kısa kodlu bağlantı + özel adres ipucu.
-function musteriBaglantisi(veri: Pick<YonetGorunum, 'musteri_adresi' | 'anahtar' | 'ozel_adres'>, origin: string): { url: string; ozel: boolean } {
-  if (veri.ozel_adres) return { url: `https://${veri.ozel_adres}/cp/giris`, ozel: true }
-  const kok = (veri.musteri_adresi || origin).replace(/\/+$/, '')
-  return { url: `${kok}/cp/giris?m=${veri.anahtar}`, ozel: false }
-}
-
-function MusteriBaglantisi({ veri }: { veri: YonetGorunum }) {
-  const cevir = useMarkaCeviri()
-  const toast = useToast()
-  const { url: baglanti, ozel } = musteriBaglantisi(veri, window.location.origin)
-  return (
-    <Card skin="bordered" className="p-4">
-      <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir(ozel ? 'Müşteri giriş bağlantısı (özel adres)' : 'Müşteri giriş bağlantısı')}</h3>
-      <p className="mt-1 text-xs text-gray-500 dark:text-dark-300">{cevir(ozel
-        ? 'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantı sizin özel adresinizdedir.'
-        : 'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantıdaki kısa ad tahmin edilemez; paylaşmak güvenlidir.')}</p>
-      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <code className="min-w-0 flex-1 break-all rounded bg-gray-100 px-2 py-1.5 font-mono text-xs text-gray-800 dark:bg-dark-600 dark:text-dark-100">{baglanti}</code>
-        <Button boyut="sm" variant="outlined" ikon={I.kopya} onClick={() => {
-          navigator.clipboard?.writeText(baglanti).then(() => toast.basari(cevir('Kopyalandı')), () => { /* pano kapalı */ })
-        }}>{cevir('Kopyala')}</Button>
-      </div>
-      {!ozel && <p className="mt-2 text-xs text-gray-500 dark:text-dark-300">{cevir('Kendi alan adınızı Özel adres sekmesinden bağlayabilirsiniz.')}</p>}
-    </Card>
-  )
-}
 
 export default function MarkaPage() {
   const cevir = useMarkaCeviri()
@@ -127,7 +95,6 @@ export default function MarkaPage() {
               : !veri ? <p className="text-sm text-gray-500 dark:text-dark-300">{cevir('Yükleniyor…')}</p>
                 : (
                   <div className="space-y-4">
-                    {bayi && veri.kayitli && !veri.kok_kapatti && <MusteriBaglantisi veri={veri} />}
                     <MarkaFormu veri={veri} onDegisti={setVeri} />
                   </div>
                 )}
